@@ -41,6 +41,7 @@ from datetime import datetime, timezone
 from flask import Blueprint, jsonify
 
 from app.config import settings
+from app.routes.service_registration import get_dynamic_services
 
 bp = Blueprint("services", __name__)
 
@@ -337,9 +338,24 @@ def _build_manifest() -> list[dict]:
 
 @bp.get("/services")
 def get_services():
-    """Return the live SkippyTel service manifest."""
+    """
+    Return the live SkippyTel service manifest.
+
+    Merges static entries (hardcoded below) with dynamically registered
+    services from service_registration.py. Dynamic registration wins on
+    id collision — lets an external service override its own static stub
+    once it starts self-registering.
+    """
+    static   = _build_manifest()
+    dynamic  = get_dynamic_services()
+
+    # Build index of static entries; dynamic overrides on id collision.
+    merged: dict[str, dict] = {s["id"]: s for s in static}
+    for d in dynamic:
+        merged[d["id"]] = d
+
     return jsonify({
         "spec_version":  "1",
         "refreshed_at":  datetime.now(timezone.utc).isoformat(),
-        "services":      _build_manifest(),
+        "services":      list(merged.values()),
     })
