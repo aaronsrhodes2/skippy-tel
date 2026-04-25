@@ -20,7 +20,8 @@ from app.routes.bilby     import bp as bilby_bp
 from app.routes.vault     import bp as vault_bp
 from app.routes.ups       import bp as ups_bp
 from app.routes.dropship  import bp as dropship_bp
-from app.routes.services  import bp as services_bp
+from app.routes.services      import bp as services_bp
+from app.routes.service_icons import bp as service_icons_bp
 
 
 def create_app() -> Flask:
@@ -37,6 +38,7 @@ def create_app() -> Flask:
     app.register_blueprint(ups_bp)
     app.register_blueprint(dropship_bp)
     app.register_blueprint(services_bp)
+    app.register_blueprint(service_icons_bp)
     return app
 
 

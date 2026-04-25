@@ -24,9 +24,6 @@ class Settings:
     gemini_api_key:     str = os.getenv("GEMINI_API_KEY", "")
     gemini_model:       str = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 
-    # Stable Diffusion image service (host-side, reached via host.docker.internal)
-    sd_base_url: str = os.getenv("SD_BASE_URL", "http://host.docker.internal:5000")
-
     # Bilby music service — Mac Bilby (stage9_dj_suggest.py on port 7334).
     # Tailscale MagicDNS: http://skippy-mac:7334
     # Leave blank to disable the traktor source.
@@ -40,6 +37,12 @@ class Settings:
     # Filled in after Drive reorg runs and Images/ folder is confirmed.
     # Get with: python tools/dropship_migrate_drive.py --get-images-id
     google_drive_images_folder_id: str = os.getenv("GOOGLE_DRIVE_IMAGES_FOLDER_ID", "")
+
+    # Jellyfin media server — local install on port 8096.
+    # Phone clients hit this directly via Tailscale (base_url in manifest).
+    # JELLYFIN_API_KEY: obtain from Jellyfin Dashboard → API Keys after first run.
+    jellyfin_base_url: str = os.getenv("JELLYFIN_BASE_URL", "http://skippy-pc:8096")
+    jellyfin_api_key:  str = os.getenv("JELLYFIN_API_KEY", "")
 
     # System prompt for /intent/unmatched escalations.
     # SKIPPY_SYSTEM env var overrides the file (useful for quick iteration).

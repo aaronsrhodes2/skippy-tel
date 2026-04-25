@@ -26,19 +26,18 @@ import re
 from dataclasses import dataclass
 from typing import Callable, Iterator, Optional
 
-import httpx
 from flask import Blueprint, Response, request, stream_with_context
 
 from app.clients import ollama, anthropic_client, gemini, claude_bridge
 from app.config  import settings
 from app.version import envelope, error, scrub, SPEC_VERSION
 
-# ── Image sentinel ────────────────────────────────────────────────────────
-# LLMs instructed to include [IMAGE: <prompt>] anywhere in their reply when
-# a visual would be useful. We strip the tag from the text reply and fire
-# the SD service in parallel, attaching the result as image_b64.
+# ── Image sentinel (stub) ─────────────────────────────────────────────────
+# LLMs may still emit [IMAGE: <prompt>] — we strip the tag so it doesn't
+# appear in the reply text. Image generation itself is not yet deployed;
+# the sentinel is preserved in the protocol for when we stand up a
+# first-party SD service.
 _IMAGE_RE = re.compile(r'\[IMAGE:\s*(.+?)\]', re.IGNORECASE)
-_SD_TIMEOUT = 90.0
 
 
 def _extract_image_prompt(text: str) -> tuple[str, str | None]:
@@ -49,21 +48,6 @@ def _extract_image_prompt(text: str) -> tuple[str, str | None]:
     prompt = m.group(1).strip()
     clean  = _IMAGE_RE.sub("", text).strip()
     return clean, prompt
-
-
-def _fetch_image_b64(prompt: str) -> str | None:
-    """Call the local SD service. Returns base64 data URL or None on failure."""
-    try:
-        r = httpx.post(
-            f"{settings.sd_base_url}/generate",
-            json={"prompt": prompt},
-            timeout=_SD_TIMEOUT,
-        )
-        if r.is_success:
-            return r.json().get("image")
-    except Exception:
-        pass
-    return None
 
 bp = Blueprint("intent", __name__)
 
@@ -165,15 +149,11 @@ def _single_shot(text: str, tier: Optional[Tier]):
             full = (tier.prefix + reply) if tier.prefix else reply
             tier_id = tier.id
 
-        # Check for [IMAGE: prompt] sentinel — fetch image if present.
-        clean, img_prompt = _extract_image_prompt(full)
+        # Strip [IMAGE: prompt] sentinel so it doesn't appear in the reply text.
+        # Image generation is not yet deployed; sentinel is preserved in protocol
+        # for when we stand up a first-party SD service.
+        clean, _ = _extract_image_prompt(full)
         resp: dict = {"reply": clean, "speak": clean, "tier": tier_id}
-        if img_prompt:
-            b64 = _fetch_image_b64(img_prompt)
-            if b64:
-                resp["image_b64"] = b64
-                resp["image_prompt"] = img_prompt
-
         return envelope(resp)
     except ollama.OllamaUnavailable as e:
         return error(str(e), error_type="local_tier_unavailable", status=503)

@@ -45,6 +45,9 @@ services:
       # Google Drive OAuth credentials for DropShip image service.
       # Read-write so the token file can be refreshed inside the container.
       - ../music-collection/state:/drive-state:rw
+      # Persistent state: service icon cache (SD-generated PNGs), token files, etc.
+      # Delete state/icons/<id>.png to force icon regeneration.
+      - ./state:/app/state:rw
     depends_on:
       - ollama
       - whisper

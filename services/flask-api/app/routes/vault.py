@@ -60,7 +60,7 @@ def vault_bootstrap():
         "bilby_mac_url":       settings.bilby_mac_url or None,
         "features": {
             "sms":       True,
-            "image":     bool(settings.sd_base_url),
+            "image":     False,   # not yet deployed — first-party SD service pending
             "bilby":     bool(settings.bilby_mac_url or settings.bilby_drive_folder_id),
             "translate": True,
             "heybuddy":  True,

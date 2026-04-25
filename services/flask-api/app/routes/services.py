@@ -67,9 +67,7 @@ def _bilby_available() -> tuple[bool, str | None]:
 
 
 def _image_available() -> tuple[bool, str | None]:
-    if _tcp_reachable("host.docker.internal", 5000):
-        return True, "Stable Diffusion service online"
-    return False, "SD service offline (remnant-silly not running)"
+    return False, "Image generation not yet deployed — first-party SD service pending"
 
 
 def _ups_available() -> tuple[bool, str | None]:
@@ -84,6 +82,13 @@ def _dropship_available() -> tuple[bool, str | None]:
     return False, "GOOGLE_DRIVE_IMAGES_FOLDER_ID not set"
 
 
+def _jellyfin_available() -> tuple[bool, str | None]:
+    if _tcp_reachable("host.docker.internal", 8096):
+        key_status = "API key set" if settings.jellyfin_api_key else "no API key (set JELLYFIN_API_KEY)"
+        return True, f"Jellyfin online — {key_status}"
+    return False, "Jellyfin offline (not installed or not running)"
+
+
 # ── Service definitions ────────────────────────────────────────────────────────
 
 def _build_manifest() -> list[dict]:
@@ -91,6 +96,7 @@ def _build_manifest() -> list[dict]:
     image_ok,     image_detail     = _image_available()
     ups_ok,       ups_detail       = _ups_available()
     dropship_ok,  dropship_detail  = _dropship_available()
+    jellyfin_ok,  jellyfin_detail  = _jellyfin_available()
 
     return [
         {
@@ -275,6 +281,35 @@ def _build_manifest() -> list[dict]:
             ],
             "endpoints": {
                 "query": "/starmap",
+            },
+        },
+        {
+            "id":      "jellyfin",
+            "name":    "Jellyfin",
+            "tagline": "Local movie & TV server — D:\\Movies on Skippy PC",
+            "available": jellyfin_ok,
+            "status_detail": jellyfin_detail,
+            # Jellyfin runs on the PC at :8096. Phone clients on Tailscale hit it
+            # directly; emulator falls through to the proxy path.
+            "base_url": settings.jellyfin_base_url if jellyfin_ok else None,
+            "display": {
+                "mode":         "companion",
+                "hud_zone":     None,
+                "companion_app": "org.jellyfin.mobile",   # official Jellyfin Android app
+            },
+            "voice_triggers": [
+                "play a movie",
+                "open jellyfin",
+                "movie time",
+                "what's on",
+                "show movies",
+                "open movies",
+            ],
+            "endpoints": {
+                "health":  "/health",
+                "search":  "/Items?searchTerm={query}&IncludeItemTypes=Movie,Series&Recursive=true",
+                "now_playing": "/Sessions?ControllableByUserId=any",
+                "libraries": "/Library/MediaFolders",
             },
         },
         {
