@@ -48,6 +48,8 @@ services:
       # Persistent state: service icon cache (SD-generated PNGs), token files, etc.
       # Delete state/icons/<id>.png to force icon regeneration.
       - ./state:/app/state:rw
+      # Local music library (Syncthing-synced corrected_music folder, read-only)
+      - D:/Aaron/Music/corrected_music:/music:ro
     depends_on:
       - ollama
       - whisper

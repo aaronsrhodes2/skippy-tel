@@ -34,7 +34,7 @@ _now:     Optional[dict] = None
 _loaded:  bool       = False   # True once the first Drive fetch completes
 
 _AUDIO_EXTS = (".mp3", ".m4a", ".flac", ".ogg", ".wav", ".aac", ".opus", ".wma")
-_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]  # token was issued with full drive scope
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -74,6 +74,172 @@ def invalidate():
         _loaded = False
         _queue  = []
         _now    = None
+
+
+def suggest_next(
+    current_file_id: Optional[str] = None,
+    current_artist: Optional[str] = None,
+) -> Optional[dict]:
+    """Pick the next track for Bilby DJ 'column 2' mode.
+
+    Selection priority:
+      70 %  — same artist as current (keeps the vibe consistent)
+      30 %  — random from the entire library (keeps things fresh)
+    Never returns the current track itself.
+    Falls back to pure random if same-artist pool is empty.
+    """
+    import random as _random
+    _ensure_loaded()
+    with _lock:
+        pool = [t for t in _queue if t.get("file_id") != current_file_id]
+        if not pool:
+            return None
+
+        same_artist: list[dict] = []
+        if current_artist:
+            ca = current_artist.strip().lower()
+            same_artist = [
+                t for t in pool
+                if t.get("artist", "").strip().lower() == ca
+            ]
+
+        # Weighted pick: 70 % same-artist if available, else pure random.
+        if same_artist and _random.random() < 0.70:
+            chosen = _random.choice(same_artist)
+        else:
+            chosen = _random.choice(pool)
+
+        log.info(
+            "Bilby DJ suggest → %s — %s  (pool %d same-artist %d)",
+            chosen.get("artist"), chosen.get("title"),
+            len(pool), len(same_artist),
+        )
+        return dict(chosen)
+
+
+def search_track(artist: str, title: str) -> Optional[dict]:
+    """Find a specific track by artist + title fuzzy match.
+
+    Checks artist folder name AND title from filename.
+    Returns the best match or None if not found.
+    """
+    _ensure_loaded()
+    needle_artist = artist.strip().lower()
+    needle_title  = title.strip().lower()
+
+    with _lock:
+        candidates: list[tuple[int, dict]] = []
+        for t in _queue:
+            ta = t.get("artist", "").strip().lower()
+            tt = t.get("title",  "").strip().lower()
+            score = 0
+            if needle_artist and needle_artist in ta:
+                score += 2
+            if needle_title and needle_title in tt:
+                score += 2
+            # Partial word matches
+            if any(w in ta for w in needle_artist.split() if len(w) > 2):
+                score += 1
+            if any(w in tt for w in needle_title.split() if len(w) > 2):
+                score += 1
+            if score >= 2:
+                candidates.append((score, t))
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        chosen = candidates[0][1]
+        log.info("Bilby search '%s / %s' → %s — %s (score %d)",
+                 artist, title, chosen.get("artist"), chosen.get("title"), candidates[0][0])
+        return dict(chosen)
+
+
+def playlist_for_prompt(prompt: str, count: int = 10) -> list[dict]:
+    """Generate a playlist from the Drive library matching a text description.
+
+    Uses Ollama to semantically match the prompt against available artists,
+    then picks tracks from those artists. This ensures we only return tracks
+    that actually exist in the library (no hallucinated song titles).
+
+    Falls back to a random shuffle if Ollama is unreachable.
+    """
+    import random as _random
+    from app.config import settings
+
+    _ensure_loaded()
+
+    with _lock:
+        if not _queue:
+            return []
+        # Build artist list (deduplicated, sorted)
+        artists = sorted({t.get("artist", "Unknown") for t in _queue if t.get("artist")})
+
+    if not artists:
+        return []
+
+    # ── Ask Ollama which artists match the prompt ─────────────────────────
+    matched_artists: list[str] = []
+    try:
+        import requests as _req
+        artist_block = "\n".join(f"- {a}" for a in artists[:300])  # cap list size
+        system = (
+            "You are a music selector. Given a list of artists and a music description, "
+            "return ONLY the names of artists that best match the description. "
+            "Output exactly one artist name per line, no bullets, no numbers, no explanation. "
+            "Return at least 5 names if possible."
+        )
+        user_msg = (
+            f"Music description: {prompt}\n\n"
+            f"Artist list:\n{artist_block}\n\n"
+            "Which artists from this list best fit the description? "
+            "Return only artist names, one per line."
+        )
+        resp = _req.post(
+            f"{settings.ollama_base_url}/api/chat",
+            json={
+                "model":    settings.ollama_model,
+                "messages": [
+                    {"role": "system",  "content": system},
+                    {"role": "user",    "content": user_msg},
+                ],
+                "stream": False,
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        raw = resp.json().get("message", {}).get("content", "")
+        # Parse returned names — match against actual artist list (case-insensitive)
+        returned = {line.strip().lower() for line in raw.splitlines() if line.strip()}
+        artist_lower_map = {a.lower(): a for a in artists}
+        matched_artists = [
+            artist_lower_map[r]
+            for r in returned
+            if r in artist_lower_map
+        ]
+        log.info("Bilby playlist '%s': Ollama matched %d artists", prompt, len(matched_artists))
+    except Exception as exc:
+        log.warning("Bilby playlist: Ollama unreachable (%s), falling back to random", exc)
+
+    # ── Build track pool from matched artists (or full library on fallback) ──
+    with _lock:
+        if matched_artists:
+            matched_set = {a.lower() for a in matched_artists}
+            pool = [
+                t for t in _queue
+                if t.get("artist", "").lower() in matched_set
+            ]
+        else:
+            pool = list(_queue)
+
+    if not pool:
+        with _lock:
+            pool = list(_queue)
+
+    _random.shuffle(pool)
+    selected = pool[:count]
+    log.info("Bilby playlist '%s': returning %d tracks from %d candidates",
+             prompt, len(selected), len(pool))
+    return [dict(t) for t in selected]
 
 
 # ── Internal ──────────────────────────────────────────────────────────────────

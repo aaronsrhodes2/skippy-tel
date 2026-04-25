@@ -57,7 +57,7 @@ _lock = threading.Lock()
 
 
 def _load() -> dict:
-    """Return {id: registration_record} from disk. Thread-safe."""
+    """Return {id: registration_record} from disk. Caller must hold _lock."""
     if not _STATE_FILE.exists():
         return {}
     try:
