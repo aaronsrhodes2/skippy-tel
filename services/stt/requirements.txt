@@ -1,0 +1,5 @@
+fastapi>=0.115.0
+uvicorn>=0.34.0
+faster-whisper>=1.2.0
+python-multipart>=0.0.18
+pydantic-settings>=2.9.0

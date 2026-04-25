@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /d/Aaron/development/SkippyTel -type f \\\\\\( -name \"*.py\" -o -name \"*.go\" \\\\\\) -exec wc -l {} +)",
+      "Bash(xargs ls *)"
+    ]
+  }
+}

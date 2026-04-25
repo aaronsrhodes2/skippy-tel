@@ -1,0 +1,142 @@
+.PHONY: run stop logs build test pull-model health intent apks phone-check adb-connect adb-devices ups-monitor ups-status
+
+run:
+	docker compose up -d --build
+
+# Primary deploy target — rebuild and restart only flask-api (fast path).
+# Claude Code calls this after any Python code change.
+deploy-api:
+	docker compose up --build -d flask-api
+	@echo "Verifying..."
+	@sleep 3
+	@curl -s http://localhost:3003/health || echo "WARNING: health check failed"
+
+stop:
+	docker compose down
+
+logs:
+	docker compose logs -f flask-api
+
+build:
+	docker compose build
+
+test:
+	@echo "(no unit tests yet)"
+
+# Pull the default Ollama model into the running ollama container.
+# First boot only; OLLAMA_KEEP_ALIVE=-1 keeps it warm afterwards.
+pull-model:
+	docker compose exec ollama ollama pull qwen2.5:7b
+
+# Smoke tests — run after `make run`
+health:
+	curl -s http://localhost:3003/health | jq .
+
+intent:
+	curl -s -X POST http://localhost:3003/intent/unmatched \
+		-H "Content-Type: application/json" \
+		-d '{"text":"what time is it on Mars right now"}' | jq .
+
+intent-stream:
+	curl -N -X POST http://localhost:3003/intent/unmatched \
+		-H "Content-Type: application/json" \
+		-H "Accept: text/event-stream" \
+		-d '{"text":"put on your thinking cap and explain dark matter in two sentences"}'
+
+# Translate test — generate 3s of synthesized speech with espeak via ffmpeg
+# inside the whisper container, pipe back, then POST to /translate/audio.
+# Requires the stack to be running.
+translate:
+	@docker compose exec -T whisper sh -c "apt-get install -y espeak-ng >/dev/null 2>&1; \
+		espeak-ng -v fr 'Bonjour, comment allez-vous aujourd hui' --stdout > /tmp/test.wav 2>/dev/null; \
+		cat /tmp/test.wav" > /tmp/skippy-test.wav 2>/dev/null && \
+	curl -s -F "audio=@/tmp/skippy-test.wav" -F "hint_lang=fr" \
+		http://localhost:3003/translate/audio | jq .
+
+# Hey Buddy — face enrollment + identification.
+# Usage:
+#   make enroll NAME=aaron PHOTO=C:/Users/aaron/Downloads/me.jpg
+#   make identify PHOTO=C:/Users/aaron/Downloads/someone.jpg
+#   make enrolled
+enroll:
+	@if [ -z "$(NAME)" ] || [ -z "$(PHOTO)" ]; then \
+		echo "usage: make enroll NAME=<name> PHOTO=<path>"; exit 2; fi
+	docker cp "$(PHOTO)" skippytel-insightface:/tmp/enroll.jpg
+	docker compose exec -T insightface python /app/enroll.py add "$(NAME)" /tmp/enroll.jpg
+
+identify:
+	@if [ -z "$(PHOTO)" ]; then echo "usage: make identify PHOTO=<path>"; exit 2; fi
+	curl -s -F "image=@$(PHOTO)" http://localhost:3003/heybuddy/identify | jq .
+
+enrolled:
+	docker compose exec -T insightface python /app/enroll.py list
+
+# Phone recovery — copy latest debug APKs from Android builds to apks/ staging.
+# Run after `gradlew assembleDebug` in the zPhone repo.
+# Container picks up new files immediately (bind mount, no restart needed).
+ZPHONE_DIR ?= D:/Aaron/development/zPhone/apps
+apks:
+	@mkdir -p apks
+	cp "$(ZPHONE_DIR)/SkippyChat/app/build/outputs/apk/debug/app-debug.apk"  apks/skippy-chat.apk
+	cp "$(ZPHONE_DIR)/SkippyDroid/app/build/outputs/apk/debug/app-debug.apk" apks/skippy-droid.apk
+	@echo "APKs staged:"
+	@ls -lh apks/
+
+# ADB over Tailscale — reconnect to the physical S23.
+# One-time MANUAL pairing (do this once when you first set up a phone):
+#   1. On S23: Settings → Developer options → Wireless debugging → ON
+#   2. Tap "Pair device with pairing code"
+#   3. adb pair <ip>:<pairing-port>   ← enter the 6-digit code shown on screen
+#   4. Fill in PHONE_TAILSCALE_HOST in .env
+# After that, reconnecting is fully automatic:
+PHONE_HOST ?= $(shell grep '^PHONE_TAILSCALE_HOST=' .env | cut -d= -f2)
+adb-connect:
+	@if [ -z "$(PHONE_HOST)" ]; then \
+		echo "ERROR: Set PHONE_TAILSCALE_HOST in .env first"; exit 1; fi
+	adb connect $(PHONE_HOST):5555
+	@echo "Connected devices:"; adb devices
+
+adb-devices:
+	@adb devices
+
+# Smoke-test the phone recovery endpoints
+phone-check:
+	@echo "=== /vault/bootstrap ==="; curl -s http://localhost:3003/vault/bootstrap | jq .
+	@echo "=== /phone (HTML, first 5 lines) ==="; curl -s http://localhost:3003/phone | head -5
+
+# solid-gold bridge — runs on the Windows HOST, not in docker. Shells out
+# to your local `claude` CLI so SkippyTel can use your Claude Code
+# subscription instead of the metered API key.
+#
+# Set CLAUDE_PATH if `claude` isn't in PATH:
+#   make bridge CLAUDE_PATH=C:/Users/aaron/AppData/Roaming/npm/claude.cmd
+bridge:
+	cd services/claude-bridge && \
+	CLAUDE_BRIDGE_CWD="D:/Aaron/development" \
+	$(if $(CLAUDE_PATH),CLAUDE_PATH="$(CLAUDE_PATH)") \
+	python bridge.py
+
+# UPS monitor — runs on the Windows HOST (not in Docker).
+# Reads CyberPower ABMT1500 via WMI, serves /status at port 9338,
+# and pushes power-state alerts to SkippyTel.
+# Requires: pip install flask requests
+ups-monitor:
+	python services/ups-monitor/monitor.py
+
+ups-status:
+	@curl -s http://localhost:9338/status | jq . 2>/dev/null || \
+		powershell -Command "Invoke-RestMethod http://localhost:9338/status | ConvertTo-Json"
+
+bridge-health:
+	curl -s http://localhost:9337/health | jq .
+
+# Smoke tests — require `make bridge` running in another terminal
+solid-gold:
+	curl -s -X POST http://localhost:3003/intent/unmatched \
+		-H "Content-Type: application/json" \
+		-d '{"text":"solid gold list the top-level files in the SkippyTel repo"}' | jq .
+
+trust-awesomeness:
+	curl -s -X POST http://localhost:3003/intent/unmatched \
+		-H "Content-Type: application/json" \
+		-d '{"text":"trust the awesomeness echo hello from awesomeness"}' | jq .

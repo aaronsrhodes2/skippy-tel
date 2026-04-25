@@ -1,0 +1,127 @@
+# SkippyTel — PC-side AI inference for the Skippy AR system.
+#
+# Phone (SkippyDroid) hits http://skippy-pc:3003 over Tailscale. See
+# misc/SKIPPYTEL_BRIEF.md for the full endpoint contract.
+#
+# Bind doctrine (per brief): Tailscale mesh + loopback ONLY. The host
+# port mapping below relies on the PC's firewall / Tailscale ACLs to
+# keep this off the public internet. Do not publish 3003 to a public
+# interface without revisiting the Phase 2 auth model.
+
+# Anchor reused by every service so json-file logs don't grow without
+# bound. Each container keeps the last 30 MB of logs (3 × 10 MB) before
+# rotating. Tune up if /intent/unmatched SSE chatter outgrows this.
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+
+  flask-api:
+    build: ./services/flask-api
+    container_name: skippytel-flask-api
+    restart: unless-stopped
+    logging: *default-logging
+    ports:
+      - "3003:5000"          # external 3003 — paired with SkippyDroid egress (Z-Phone).
+                            # Different machines, never collide. Internal 5000 = Flask convention.
+    env_file: .env
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - WHISPER_BASE_URL=http://whisper:8000
+      - INSIGHTFACE_BASE_URL=http://insightface:8000
+      - CLAUDE_BRIDGE_URL=http://host.docker.internal:9337
+    extra_hosts:
+      # solid gold / trust the awesomeness tiers reach the host-side
+      # claude-bridge through this mapping. host-gateway resolves to the
+      # Docker host on Linux and Windows Docker Desktop alike.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # APK staging: copy built APKs here, served at /apk/<name>
+      # Update by running: make apks  (or copy manually to SkippyTel/apks/)
+      - ./apks:/apks:ro
+      # Google Drive OAuth credentials for DropShip image service.
+      # Read-write so the token file can be refreshed inside the container.
+      - ../music-collection/state:/drive-state:rw
+    depends_on:
+      - ollama
+      - whisper
+      - insightface
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; urllib.request.urlopen('http://localhost:5000/health'); sys.exit(0)\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: skippytel-ollama
+    restart: unless-stopped
+    logging: *default-logging
+    expose:
+      - "11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=-1
+      - OLLAMA_MAX_LOADED_MODELS=2
+      - OLLAMA_NUM_PARALLEL=1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  whisper:
+    build: ./services/whisper
+    container_name: skippytel-whisper
+    restart: unless-stopped
+    logging: *default-logging
+    expose:
+      - "8000"
+    environment:
+      - WHISPER_MODEL=${WHISPER_MODEL:-medium}
+      - WHISPER_DEVICE=cuda
+      - WHISPER_COMPUTE_TYPE=float16
+      - HF_HOME=/root/.cache/huggingface
+    volumes:
+      - whisper-cache:/root/.cache/huggingface   # model weights persist
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  insightface:
+    build: ./services/insightface
+    container_name: skippytel-insightface
+    restart: unless-stopped
+    logging: *default-logging
+    expose:
+      - "8000"
+    environment:
+      - INSIGHTFACE_MODEL=${INSIGHTFACE_MODEL:-buffalo_l}
+      - MATCH_THRESHOLD=${MATCH_THRESHOLD:-0.40}
+    volumes:
+      - face-db:/data                           # SQLite embeddings persist
+      - insightface-cache:/root/.insightface    # buffalo_l model cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  ollama-data:
+  whisper-cache:
+  face-db:
+  insightface-cache:

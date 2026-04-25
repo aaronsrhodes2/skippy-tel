@@ -1,0 +1,21 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.idea/
+.vscode/
+*.log
+
+# Google OAuth client secrets and tokens — never commit these
+client_secret_*.json
+drive_token.json
+drive_credentials.json
+*_token.json
+service_account*.json
+
+# Runtime state directory (tokens, credentials, cache)
+state/
+
+# APK binaries — built from zPhone repo, not stored here
+apks/*.apk
