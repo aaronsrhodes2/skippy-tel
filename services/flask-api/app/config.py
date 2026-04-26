@@ -44,6 +44,31 @@ class Settings:
     jellyfin_base_url: str = os.getenv("JELLYFIN_BASE_URL", "http://skippy-pc:8096")
     jellyfin_api_key:  str = os.getenv("JELLYFIN_API_KEY", "")
 
+    # ── Text-to-Speech (ElevenLabs) ──────────────────────────────────────────
+    # Skippy's voice. Default voice is "Clyde" (2EiwWnXFnvU5JabPnv8n) — warm
+    # American male, strong character expression, closest stock voice to the
+    # exasperated-superintelligent-AI-narrator archetype.
+    #
+    # For the authentic R.C. Brey / Skippy the Magnificent voice:
+    #   1. Rip 1–3 min of clean Brey-as-Skippy audio from the Expeditionary
+    #      Force audiobooks (if you own them — Craig Alanson / R.C. Brey).
+    #   2. Upload to ElevenLabs → Instant Voice Clone → copy the voice ID.
+    #   3. Set ELEVENLABS_VOICE_ID=<that_id> in .env.
+    #
+    # ⚠ ATTRIBUTION & LICENSE:
+    #   The Skippy the Magnificent character was created by Craig Alanson.
+    #   The audiobook narration is performed by R.C. Brey.
+    #   Any voice clone derived from Brey's narration is for PERSONAL USE ONLY.
+    #   Permission from both Craig Alanson and R.C. Brey is required before
+    #   distributing, releasing, or sharing any build that includes a cloned voice.
+    #   Strip the cloned voice and revert to a stock voice before any release.
+    #
+    # ElevenLabs model: eleven_turbo_v2_5 — lowest latency, still excellent.
+    # Streaming endpoint used so Android playback starts in <400ms.
+    elevenlabs_api_key:  str = os.getenv("ELEVENLABS_API_KEY", "")
+    elevenlabs_voice_id: str = os.getenv("ELEVENLABS_VOICE_ID", "2EiwWnXFnvU5JabPnv8n")  # Clyde
+    elevenlabs_model:    str = os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5")
+
     # System prompt for /intent/unmatched escalations.
     # SKIPPY_SYSTEM env var overrides the file (useful for quick iteration).
     skippy_system: str = os.getenv(
