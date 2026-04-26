@@ -146,3 +146,22 @@ def get_latest(limit: int = 1) -> list[dict]:
             LIMIT ?
         """, (limit,)).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_page(offset: int = 0, limit: int = 50) -> tuple[list[dict], int]:
+    """
+    Return a page of all known photos ordered by most-recent first.
+    Returns (rows, total_count).
+    Tagged images sort before untagged ones within the same date bucket.
+    """
+    with _conn() as con:
+        total = con.execute("SELECT COUNT(*) FROM photo_tags").fetchone()[0]
+        rows = con.execute("""
+            SELECT file_id, drive_name, description, drive_created, tagged_at
+            FROM photo_tags
+            ORDER BY
+                CASE WHEN description != '' THEN 0 ELSE 1 END,
+                drive_created DESC
+            LIMIT ? OFFSET ?
+        """, (limit, offset)).fetchall()
+    return [dict(r) for r in rows], total
