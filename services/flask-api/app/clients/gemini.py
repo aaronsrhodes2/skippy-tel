@@ -33,10 +33,22 @@ def _headers() -> dict:
     }
 
 
+def _fill_system(system: str | None) -> str:
+    """Replace {KEYWORD_MEMORY} placeholder with live keyword digest."""
+    raw = system or settings.skippy_system or ""
+    if "{KEYWORD_MEMORY}" not in raw:
+        return raw
+    try:
+        from app import keyword_memory as km  # noqa: PLC0415
+        return raw.replace("{KEYWORD_MEMORY}", km.context_digest())
+    except Exception:
+        return raw.replace("{KEYWORD_MEMORY}", "(keyword memory unavailable)")
+
+
 def _payload(message: str, system: str | None) -> dict:
     return {
         "systemInstruction": {
-            "parts": [{"text": system or settings.skippy_system}],
+            "parts": [{"text": _fill_system(system)}],
         },
         "contents": [
             {"role": "user", "parts": [{"text": message}]},

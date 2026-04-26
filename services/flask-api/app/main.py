@@ -29,6 +29,7 @@ from app.routes.music                import bp as music_bp
 from app.routes.telemetry            import bp as telemetry_bp, init_db as telemetry_init_db
 from app.routes.status               import bp as status_bp
 from app.routes.explain              import bp as explain_bp
+from app.routes.keywords             import bp as keywords_bp
 
 
 def create_app() -> Flask:
@@ -38,6 +39,8 @@ def create_app() -> Flask:
     from app import photo_tags as _pt
     _pt.init_db()
     telemetry_init_db()
+    from app import keyword_memory as _km
+    _km.init_db()
     from app.background.photo_scan import start_background_scanner
     start_background_scanner()
 
@@ -61,6 +64,7 @@ def create_app() -> Flask:
     app.register_blueprint(telemetry_bp)
     app.register_blueprint(status_bp)
     app.register_blueprint(explain_bp)
+    app.register_blueprint(keywords_bp)
     return app
 
 

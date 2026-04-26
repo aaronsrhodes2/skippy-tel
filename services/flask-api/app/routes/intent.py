@@ -39,6 +39,7 @@ from flask import Blueprint, Response, request, stream_with_context
 
 from app.clients import ollama, anthropic_client, gemini, claude_bridge
 from app.config  import settings
+from app import keyword_memory as km
 from app.narration import get_narration
 from app.version import envelope, error, scrub, SPEC_VERSION
 
@@ -283,6 +284,9 @@ def _single_shot(text: str, tier: Optional[Tier]):
             full = (tier.prefix + reply) if tier.prefix else reply
             tier_id = tier.id
 
+        # Parse [SKIPPY_LEARN: {...}] annotations — save to DB, strip from display text
+        full, learned = km.extract_and_learn(full)
+
         # Strip [IMAGE: prompt] sentinel so it doesn't appear in the reply text.
         # Image generation is not yet deployed; sentinel is preserved in protocol
         # for when we stand up a first-party SD service.
@@ -293,6 +297,8 @@ def _single_shot(text: str, tier: Optional[Tier]):
             "tier":      tier_id,
             "narration": get_narration(tier_id, _get_now_playing_title()),
         }
+        if learned:
+            resp["learned_keywords"] = learned
         return envelope(resp)
     except ollama.OllamaUnavailable as e:
         return error(str(e), error_type="local_tier_unavailable", status=503)
@@ -323,7 +329,13 @@ def _sse(text: str, tier: Optional[Tier]) -> Iterator[str]:
         for chunk in gen:
             full.append(chunk)
             yield evt({"type": "token", "text": chunk})
-        yield evt({"type": "done", "reply": "".join(full), "tier": tier_id})
+        complete = "".join(full)
+        # Parse [SKIPPY_LEARN:] annotations — save to DB, strip from display text
+        complete, learned = km.extract_and_learn(complete)
+        done_evt: dict = {"type": "done", "reply": complete, "tier": tier_id}
+        if learned:
+            done_evt["learned_keywords"] = learned
+        yield evt(done_evt)
     except ollama.OllamaUnavailable as e:
         yield evt({"type": "error", "error": "local_tier_unavailable",
                    "message": scrub(str(e))})

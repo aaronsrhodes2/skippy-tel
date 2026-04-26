@@ -29,11 +29,23 @@ def _post(path: str, payload: dict, *, stream: bool = False, timeout: float = 12
         raise OllamaUnavailable(f"ollama HTTP {e.response.status_code}") from e
 
 
+def _fill_system(prompt: str) -> str:
+    """Replace {KEYWORD_MEMORY} placeholder with live keyword digest."""
+    if "{KEYWORD_MEMORY}" not in prompt:
+        return prompt
+    try:
+        from app import keyword_memory as km  # noqa: PLC0415
+        return prompt.replace("{KEYWORD_MEMORY}", km.context_digest())
+    except Exception:
+        return prompt.replace("{KEYWORD_MEMORY}", "(keyword memory unavailable)")
+
+
 def _with_system(messages: list[dict], system: str | None) -> list[dict]:
     """Prepend a system message if provided and not already present."""
-    prompt = system or settings.skippy_system
-    if not prompt:
+    raw = system or settings.skippy_system
+    if not raw:
         return messages
+    prompt = _fill_system(raw)
     # Don't double-inject if the caller already included a system turn.
     if messages and messages[0].get("role") == "system":
         return messages
