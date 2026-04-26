@@ -28,6 +28,7 @@ from app.routes.service_registration import bp as service_registration_bp
 from app.routes.music                import bp as music_bp
 from app.routes.telemetry            import bp as telemetry_bp, init_db as telemetry_init_db
 from app.routes.status               import bp as status_bp
+from app.routes.explain              import bp as explain_bp
 
 
 def create_app() -> Flask:
@@ -59,6 +60,7 @@ def create_app() -> Flask:
     app.register_blueprint(music_bp)
     app.register_blueprint(telemetry_bp)
     app.register_blueprint(status_bp)
+    app.register_blueprint(explain_bp)
     return app
 
 
