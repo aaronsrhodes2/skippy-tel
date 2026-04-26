@@ -6,6 +6,7 @@ DropShip is the single source of truth for all images:
   - Google Photos migration
   - Apple Photos migration (via Mac)
   - Photos from non-music Drive folders
+  - Any photo taken on-device (uploaded here automatically)
 
 All images live in the Drive `Images/` folder. The phone never holds
 Drive credentials — SkippyTel proxies everything.
@@ -16,6 +17,8 @@ Routes:
   GET  /dropship/image/<file_id>     — stream full-res image
   GET  /dropship/thumb/<file_id>     — redirect to Drive thumbnail URL
   POST /dropship/upload              — upload an image (from SkippyChat SD save)
+  GET  /dropship/search?q=...        — semantic search via LLaVA tags (SQLite FTS)
+  GET  /dropship/latest?n=1          — most recently uploaded image(s)
 """
 
 import io
@@ -36,6 +39,7 @@ bp  = Blueprint("dropship", __name__)
 
 _drive_lock    = threading.Lock()
 _drive_service = None   # googleapiclient.discovery.Resource
+_drive_creds   = None   # google.oauth2.credentials.Credentials (for AuthorizedSession)
 
 _STATE_DIR    = Path("/drive-state")          # bind-mounted from music-collection/state/
 _CREDS_FILE   = _STATE_DIR / "drive_credentials.json"
@@ -48,7 +52,7 @@ _PAGE_SIZE_MAX     = 200
 
 def _get_drive():
     """Return a cached Drive service, refreshing credentials if needed."""
-    global _drive_service
+    global _drive_service, _drive_creds
     with _drive_lock:
         if _drive_service is not None:
             return _drive_service
@@ -66,6 +70,7 @@ def _get_drive():
                 _TOKEN_FILE.write_text(creds.to_json())
                 log.info("Drive token refreshed")
 
+            _drive_creds   = creds
             _drive_service = build("drive", "v3", credentials=creds)
             log.info("Drive service initialised")
         except Exception as exc:
@@ -163,21 +168,24 @@ def dropship_image(file_id: str):
     """Stream the full-resolution image from Drive. Phone never holds credentials."""
     try:
         svc = _get_drive()
-        # Get mime type first
         meta = svc.files().get(fileId=file_id, fields="mimeType,name").execute()
         mime = meta.get("mimeType", "image/jpeg")
 
-        request_obj = svc.files().get_media(fileId=file_id)
-        buf = io.BytesIO()
-        from googleapiclient.http import MediaIoBaseDownload
-        dl = MediaIoBaseDownload(buf, request_obj, chunksize=1024 * 256)
-        done = False
-        while not done:
-            _, done = dl.next_chunk()
-        buf.seek(0)
+        from google.auth.transport.requests import AuthorizedSession
+        session = AuthorizedSession(_drive_creds)
+        resp = session.get(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media",
+            stream=True,
+        )
+        resp.raise_for_status()
+
+        def _generate():
+            for chunk in resp.iter_content(chunk_size=256 * 1024):
+                if chunk:
+                    yield chunk
 
         return Response(
-            buf.read(),
+            stream_with_context(_generate()),
             mimetype=mime,
             headers={"Cache-Control": "public, max-age=86400"},
         )
@@ -254,11 +262,136 @@ def dropship_upload():
         meta  = {"name": name, "parents": [fid]}
         result = svc.files().create(body=meta, media_body=media, fields="id,name").execute()
 
-        log.info("DropShip upload: %s (%d bytes)", result["name"], len(img_bytes))
-        return jsonify({"id": result["id"], "name": result["name"]})
+        file_id   = result["id"]
+        file_name = result["name"]
+        log.info("DropShip upload: %s (%d bytes)", file_name, len(img_bytes))
+
+        # Kick off async LLaVA tagging so the image is searchable soon
+        _tag_async(file_id, file_name, img_bytes, mime)
+
+        return jsonify({"id": file_id, "name": file_name})
 
     except Exception as exc:
         log.error("dropship upload error: %s", exc)
+        return error(str(exc), status=503)
+
+
+def _tag_async(file_id: str, name: str, image_bytes: bytes, mime: str):
+    """Fire-and-forget: tag a newly-uploaded image in a background thread."""
+    def _work():
+        try:
+            from app.clients.photo_tagger import describe_image
+            from app import photo_tags
+            photo_tags.mark_seen(file_id, name)
+            desc = describe_image(image_bytes, mime) or ""
+            photo_tags.upsert_tag(file_id, name, desc)
+            if desc:
+                log.info("DropShip auto-tag '%s' → %s…", name, desc[:60])
+        except Exception as exc:
+            log.warning("DropShip auto-tag failed for %s: %s", file_id, exc)
+
+    threading.Thread(target=_work, name=f"tag-{file_id[:8]}", daemon=True).start()
+
+
+# ── GET /dropship/search ──────────────────────────────────────────────────────
+
+@bp.get("/dropship/search")
+def dropship_search():
+    """
+    Search tagged photos by description.
+    Query params:
+      q      — search text (required)
+      limit  — max results (default 5)
+    Returns list of {file_id, drive_name, description, thumb_url, image_url}
+    """
+    q = (request.args.get("q") or "").strip()
+    if not q:
+        return error("q is required", status=400)
+    limit = min(int(request.args.get("limit", 5)), 20)
+
+    try:
+        from app import photo_tags
+        hits = photo_tags.search(q, limit=limit)
+        base = request.host_url.rstrip("/")
+        results = [
+            {
+                "file_id":     h["file_id"],
+                "drive_name":  h["drive_name"],
+                "description": h["description"],
+                "image_url":   f"{base}/dropship/image/{h['file_id']}",
+                "thumb_url":   f"{base}/dropship/thumb/{h['file_id']}",
+                "date":        h.get("drive_created", ""),
+            }
+            for h in hits
+        ]
+        return jsonify({"results": results, "count": len(results), "query": q})
+    except Exception as exc:
+        log.error("dropship search error: %s", exc)
+        return error(str(exc), status=503)
+
+
+# ── GET /dropship/latest ──────────────────────────────────────────────────────
+
+@bp.get("/dropship/latest")
+def dropship_latest():
+    """
+    Return the most recently added image(s).
+    Query params:
+      n  — number of results (default 1, max 10)
+    Used for "show me that picture we just took".
+    """
+    n = min(int(request.args.get("n", 1)), 10)
+    try:
+        from app import photo_tags
+        hits = photo_tags.get_latest(limit=n)
+        if not hits:
+            # Fall back to Drive API if SQLite is empty
+            return _latest_from_drive(n)
+        base = request.host_url.rstrip("/")
+        results = [
+            {
+                "file_id":    h["file_id"],
+                "drive_name": h["drive_name"],
+                "description": h.get("description", ""),
+                "image_url":  f"{base}/dropship/image/{h['file_id']}",
+                "thumb_url":  f"{base}/dropship/thumb/{h['file_id']}",
+                "date":       h.get("drive_created", ""),
+            }
+            for h in hits
+        ]
+        return jsonify({"results": results, "count": len(results)})
+    except Exception as exc:
+        log.error("dropship latest error: %s", exc)
+        return error(str(exc), status=503)
+
+
+def _latest_from_drive(n: int):
+    """Fallback when SQLite has no records yet — hit Drive directly."""
+    fid = _images_folder_id()
+    if not fid:
+        return error("GOOGLE_DRIVE_IMAGES_FOLDER_ID not configured", status=503)
+    try:
+        svc = _get_drive()
+        resp = svc.files().list(
+            q=f"'{fid}' in parents and mimeType contains 'image/' and trashed = false",
+            pageSize=n,
+            orderBy="createdTime desc",
+            fields="files(id, name, createdTime)",
+        ).execute()
+        base = request.host_url.rstrip("/")
+        results = [
+            {
+                "file_id":    f["id"],
+                "drive_name": f.get("name", ""),
+                "description": "",
+                "image_url":  f"{base}/dropship/image/{f['id']}",
+                "thumb_url":  f"{base}/dropship/thumb/{f['id']}",
+                "date":       f.get("createdTime", ""),
+            }
+            for f in resp.get("files", [])
+        ]
+        return jsonify({"results": results, "count": len(results)})
+    except Exception as exc:
         return error(str(exc), status=503)
 
 

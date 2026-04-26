@@ -41,7 +41,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import quote
 
-from flask import Blueprint, redirect, request, send_file, url_for
+from flask import Blueprint, jsonify, redirect, request, send_file, url_for
 
 from app.clients import bilby_local, bilby_drive
 from app.version import envelope, error
@@ -275,6 +275,42 @@ def control():
             return envelope({"status": "stopped"})
         _session["status"] = "paused" if action == "pause" else "playing"
         return envelope(_session_response(_session))
+
+
+# ── Bilby status (for SkippyChat header glyph + SkippyDroid) ─────────────────
+
+@bp.get("/music/bilby-status")
+def bilby_status():
+    """
+    Lightweight now-playing status consumed by SkippyChat (header glyph)
+    and SkippyDroid (BilbyModule availability check).
+
+    Returns:
+      { "status":  "playing" | "paused" | "none",
+        "title":   "Song Title"  | null,
+        "artist":  "Artist Name" | null,
+        "bpm":     128.0         | null,
+        "key":     "Am"          | null  }
+
+    "none" when no session is active or session is stopped.
+    bpm/key are not yet in the session state — reserved for future LRC
+    integration; always null until NML metadata is piped through here.
+    """
+    with _lock:
+        sess = _session
+
+    if not sess or sess["status"] == "stopped":
+        return jsonify({"status": "none", "title": None, "artist": None,
+                        "bpm": None, "key": None})
+
+    np = sess.get("now_playing") or {}
+    return jsonify({
+        "status":  sess["status"],   # "playing" | "paused"
+        "title":   np.get("title"),
+        "artist":  np.get("artist"),
+        "bpm":     np.get("bpm"),    # None for now; set when NML metadata arrives
+        "key":     np.get("key"),    # None for now
+    })
 
 
 # ── Stream endpoint ───────────────────────────────────────────────────────────

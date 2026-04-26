@@ -141,10 +141,12 @@ def _build_manifest() -> list[dict]:
                 "play music",
             ],
             "endpoints": {
-                "status": "/bilby/status",
-                "next":   "/bilby/next",
-                "stop":   "/bilby/stop",
-                "stream": "/bilby/stream/<file_id>",
+                "status":    "/bilby/status",
+                "next":      "/bilby/next",
+                "stop":      "/bilby/stop",
+                "stream":    "/bilby/stream/<file_id>",
+                "ui":        "/bilby/ui",
+                "ui_public": "/bilby/ui/public",
             },
         },
         {
@@ -311,6 +313,41 @@ def _build_manifest() -> list[dict]:
                 "search":  "/Items?searchTerm={query}&IncludeItemTypes=Movie,Series&Recursive=true",
                 "now_playing": "/Sessions?ControllableByUserId=any",
                 "libraries": "/Library/MediaFolders",
+            },
+        },
+        {
+            "id":      "music",
+            "name":    "Skippy Music",
+            "tagline": "Bilby DJ · Playlists · Drive library",
+            "available": bool(settings.bilby_drive_folder_id or settings.bilby_mac_url),
+            "status_detail": (
+                "Drive library ready" if settings.bilby_drive_folder_id
+                else "Set BILBY_DRIVE_FOLDER_ID to enable"
+            ),
+            "base_url": None,
+            "display": {
+                # companion_app is intentionally None — music commands play silently
+                # via SkippyTel without stealing focus from SkippyChat. Open
+                # local.skippy.music manually from the launcher if you need the UI.
+                "mode":          "background",
+                "hud_zone":      None,
+                "companion_app": None,
+            },
+            "voice_triggers": [
+                "let bilby dj",
+                "bilby dj",
+                "play music",
+                "play a song",
+                "dj mode",
+                "shuffle music",
+            ],
+            "endpoints": {
+                "session":       "/music/session",
+                "advance":       "/music/session/advance",
+                "skip":          "/music/session/skip",
+                "control":       "/music/session/control",
+                "stream":        "/music/stream/<file_id>",
+                "bilby_status":  "/music/bilby-status",
             },
         },
         {
