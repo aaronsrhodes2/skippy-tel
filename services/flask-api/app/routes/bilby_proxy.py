@@ -3,13 +3,18 @@ SkippyTel — Mac Bilby UI proxy
 
 Forwards requests to Mac Bilby's Flask web UI (http://skippy-mac:7334).
 
-Two modes:
+Three endpoints:
   GET /bilby/ui           → full Mac Bilby UI (passthrough theme — glasses-optimised)
   GET /bilby/ui/public    → public-facing UI: passthrough theme with all content/
                             reputation tags stripped, larger artist/title text.
                             Safe to share as an audience display URL at live shows.
+  GET /bilby/karaoke      → proxy to Mac Bilby /api/karaoke.
+                            Returns {"line", "next_line", "elapsed_pct"}.
+                            Returns {"line": null, ...} silently if Mac Bilby offline —
+                            BilbyModule in SkippyDroid degrades gracefully to no lyrics.
 
-If Mac Bilby is unreachable (offline, no Tailscale) → 503 with JSON error.
+If Mac Bilby is unreachable (offline, no Tailscale) → 503 for UI routes, graceful
+null for karaoke (to avoid breaking BilbyModule's poll loop).
 Assets (CSS, JS, images) embedded in stage9_dj_suggest.py's HTML output, so a
 single HTML response is sufficient; no separate asset proxy needed.
 """
@@ -78,3 +83,37 @@ def bilby_ui_public():
     with reputation and content tags hidden, and larger artist/title text.
     """
     return _proxy_mac_bilby(params={"public": "1"})
+
+
+@bp.get("/bilby/karaoke")
+def bilby_karaoke():
+    """
+    Proxy to Mac Bilby's GET /api/karaoke.
+
+    Returns:
+      { "line": str|null, "next_line": str|null, "elapsed_pct": float }
+
+    Always returns 200 — returns null line when Mac Bilby is offline or
+    karaoke data is unavailable. BilbyModule degrades gracefully to no lyrics.
+    """
+    _EMPTY = {"line": None, "next_line": None, "elapsed_pct": 0.0}
+
+    mac_url = (settings.bilby_mac_url or "").rstrip("/")
+    if not mac_url:
+        return jsonify(_EMPTY)
+
+    try:
+        resp = requests.get(
+            f"{mac_url}/api/karaoke",
+            timeout = 1.0,   # fail fast — karaoke is enhancement only
+        )
+        if not resp.ok:
+            return jsonify(_EMPTY)
+        data = resp.json()
+        return jsonify({
+            "line":        data.get("line"),
+            "next_line":   data.get("next_line"),
+            "elapsed_pct": float(data.get("elapsed_pct", 0.0)),
+        })
+    except Exception:
+        return jsonify(_EMPTY)
