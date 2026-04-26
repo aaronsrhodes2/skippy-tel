@@ -30,14 +30,30 @@ log = logging.getLogger(__name__)
 _BASE = "https://api.elevenlabs.io/v1"
 
 # Voice settings tuned for Skippy's character:
-# - stability 0.55: slightly variable delivery (he's expressive, not monotone)
-# - similarity_boost 0.80: stay close to the voice profile
-# - style 0.40: moderate style exaggeration (enough for the snark to land)
-# - use_speaker_boost: enhances clarity for phone speaker playback
+#
+# stability 0.30 — LOW on purpose. Skippy is theatrical, sarcastic, and
+#   dramatic. High stability makes him sound like a corporate phone tree.
+#   Low stability lets the voice swing between exasperation, grandeur, and
+#   mischief the way the character actually does.
+#
+# similarity_boost 0.80 — stay close to the source recording; the clone
+#   should sound unmistakably like him, not a generic dramatic voice.
+#
+# style 0.65 — HIGH. We want the character to punch through: the arrogance,
+#   the sarcasm, the theatrical pauses. Style exaggeration is the difference
+#   between "reading" and "performing".
+#
+# use_speaker_boost — keeps the voice clean and present on phone speaker/BT.
+#
+# TTS formatting conventions (used in `speak` field of intent replies):
+#   "..."   → dramatic pause (~0.4s) — Skippy's signature beat before a reveal
+#   "—"     → sharp cut / interruption in thought
+#   ALL CAPS → shouted emphasis ("I am SKIPPY THE MAGNIFICENT")
+#   "heh heh" → always followed by something naughty; leave the pause in
 _VOICE_SETTINGS = {
-    "stability":         0.55,
+    "stability":         0.30,
     "similarity_boost":  0.80,
-    "style":             0.40,
+    "style":             0.65,
     "use_speaker_boost": True,
 }
 
