@@ -150,7 +150,31 @@ def init_db():
                 personality_note TEXT,
                 source          TEXT NOT NULL DEFAULT 'learned',
                 created_at      TEXT NOT NULL,
-                last_used       TEXT
+                last_used       TEXT,
+                uses            INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        # Migration: add `uses` column if the DB was created before this version
+        try:
+            con.execute("ALTER TABLE keywords ADD COLUMN uses INTEGER NOT NULL DEFAULT 0")
+            log.info("keyword_memory: migrated keywords table — added `uses` column")
+        except Exception:
+            pass  # Column already exists — that's fine
+
+        # Alias table: Captain nicknames + alternate trigger phrases.
+        # alias     — the spoken alternate (lowercase), e.g. "beercan"
+        # canonical — the authoritative phrase or entity name it maps to, e.g. "skippy"
+        # uses      — how many times this alias has been spoken/invoked
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS keyword_aliases (
+                alias           TEXT NOT NULL,
+                canonical       TEXT NOT NULL,
+                description     TEXT NOT NULL DEFAULT '',
+                personality_note TEXT,
+                uses            INTEGER NOT NULL DEFAULT 1,
+                created_at      TEXT NOT NULL,
+                last_used       TEXT,
+                PRIMARY KEY (alias, canonical)
             )
         """)
         con.commit()
@@ -247,11 +271,94 @@ def forget(phrase: str) -> bool:
 
 
 def mark_used(phrase: str):
-    """Record that a keyword was triggered. Used for analytics / LRU pruning."""
+    """Record that a keyword was triggered. Increments uses + updates last_used."""
     phrase = phrase.lower().strip()
     with _conn() as con:
-        con.execute("UPDATE keywords SET last_used=? WHERE phrase=?", (_now(), phrase))
+        con.execute(
+            "UPDATE keywords SET last_used=?, uses=uses+1 WHERE phrase=?",
+            (_now(), phrase)
+        )
         con.commit()
+
+
+# ── Alias / nickname API ──────────────────────────────────────────────────────
+
+def alias(alias_phrase: str, canonical: str, description: str = "",
+          personality_note: str | None = None) -> bool:
+    """
+    Record that `alias_phrase` is a nickname/alternate for `canonical`.
+
+    alias_phrase — the spoken nickname, e.g. "beercan"
+    canonical    — what it refers to, e.g. "skippy" or a keyword phrase
+    description  — human-readable label
+    personality_note — optional Skippy-voice comment
+
+    Returns True if inserted, False if the pair already existed (uses incremented).
+    """
+    alias_phrase = alias_phrase.lower().strip()
+    canonical    = canonical.lower().strip()
+    if not alias_phrase or not canonical:
+        return False
+    now = _now()
+    with _conn() as con:
+        existing = con.execute(
+            "SELECT alias FROM keyword_aliases WHERE alias=? AND canonical=?",
+            (alias_phrase, canonical)
+        ).fetchone()
+        if existing:
+            con.execute(
+                "UPDATE keyword_aliases SET uses=uses+1, last_used=? WHERE alias=? AND canonical=?",
+                (now, alias_phrase, canonical)
+            )
+            con.commit()
+            return False
+        else:
+            con.execute("""
+                INSERT INTO keyword_aliases
+                    (alias, canonical, description, personality_note, uses, created_at)
+                VALUES (?, ?, ?, ?, 1, ?)
+            """, (alias_phrase, canonical, description, personality_note, now))
+            con.commit()
+            log.info("Alias learned: %r → %r", alias_phrase, canonical)
+            return True
+
+
+def alias_used(alias_phrase: str):
+    """Record that an alias was spoken. Increments its popularity counter."""
+    alias_phrase = alias_phrase.lower().strip()
+    with _conn() as con:
+        con.execute(
+            "UPDATE keyword_aliases SET uses=uses+1, last_used=? WHERE alias=?",
+            (_now(), alias_phrase)
+        )
+        con.commit()
+
+
+def get_aliases(canonical: str | None = None) -> list[dict]:
+    """
+    Return all aliases, or just those for a specific canonical.
+    Ordered by most-used first.
+    """
+    with _conn() as con:
+        if canonical:
+            rows = con.execute(
+                "SELECT * FROM keyword_aliases WHERE canonical=? ORDER BY uses DESC",
+                (canonical.lower().strip(),)
+            ).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT * FROM keyword_aliases ORDER BY uses DESC"
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _top_alias(canonical: str, con) -> str | None:
+    """Return the most-used alias for `canonical`, or None if none exist."""
+    row = con.execute(
+        "SELECT alias, uses FROM keyword_aliases WHERE canonical=? ORDER BY uses DESC LIMIT 1",
+        (canonical.lower().strip(),)
+    ).fetchone()
+    return row["alias"] if row else None
 
 
 def context_digest(max_learned: int = 30) -> str:
@@ -259,26 +366,38 @@ def context_digest(max_learned: int = 30) -> str:
     Return a compact string summarising the keyword set for injection into
     the LLM system prompt. Hardcoded keywords are grouped by intent family;
     learned keywords listed individually (most recent first, capped at
-    max_learned).
+    max_learned). Aliases are shown inline — the most popular alias appears
+    first so the LLM naturally adopts it when the Captain uses it more.
 
     Format (plain text, no markdown — Skippy hates formatting):
       Native phone commands: cancel that (clear_all), ship it (send_now), ...
       Your learned shortcuts:
-        "code red" → ups_status — Check UPS immediately (Captain's alarm phrase)
-        ...
+        "code red" (aka "red alert" ×3) → ups_status — Check UPS immediately
+      Nicknames the Captain uses:
+        "beercan" → skippy (×7) — Captain's nickname for Skippy
     """
+    from collections import defaultdict
     with _conn() as con:
         hardcoded = con.execute(
             "SELECT phrase, intent FROM keywords WHERE source='hardcoded' ORDER BY intent, phrase"
         ).fetchall()
         learned = con.execute(
             "SELECT phrase, intent, description, personality_note FROM keywords "
-            "WHERE source != 'hardcoded' ORDER BY created_at DESC LIMIT ?",
+            "WHERE source != 'hardcoded' ORDER BY uses DESC, created_at DESC LIMIT ?",
             (max_learned,)
         ).fetchall()
+        aliases_all = con.execute(
+            "SELECT alias, canonical, description, personality_note, uses "
+            "FROM keyword_aliases ORDER BY uses DESC"
+        ).fetchall()
+        # Build canonical → top alias lookup
+        top_alias: dict[str, tuple[str, int]] = {}  # canonical → (alias, uses)
+        for a in aliases_all:
+            canon = a["canonical"]
+            if canon not in top_alias or a["uses"] > top_alias[canon][1]:
+                top_alias[canon] = (a["alias"], a["uses"])
 
     # Group hardcoded by intent for brevity
-    from collections import defaultdict
     by_intent: dict[str, list[str]] = defaultdict(list)
     for row in hardcoded:
         by_intent[row["intent"]].append(row["phrase"])
@@ -294,12 +413,34 @@ def context_digest(max_learned: int = 30) -> str:
     parts += hc_lines
 
     if learned:
-        parts.append("\nYour learned shortcuts (you taught these):")
+        parts.append("\nYour learned shortcuts (most-used first):")
         for row in learned:
             note = f" — {row['personality_note']}" if row["personality_note"] else ""
-            parts.append(f'  "{row["phrase"]}" → {row["intent"]}: {row["description"]}{note}')
+            aka = ""
+            if row["phrase"] in top_alias:
+                a_name, a_uses = top_alias[row["phrase"]]
+                aka = f' (aka "{a_name}" ×{a_uses})'
+            parts.append(
+                f'  "{row["phrase"]}"{aka} → {row["intent"]}: {row["description"]}{note}'
+            )
     else:
         parts.append("\nNo learned shortcuts yet. You can add them with [SKIPPY_LEARN: …].")
+
+    # Nicknames for entities (self, services, etc.) that aren't keyword triggers
+    entity_aliases = [a for a in aliases_all
+                      if not any(r["phrase"] == a["canonical"] for r in learned)]
+    if entity_aliases:
+        parts.append("\nNicknames the Captain uses:")
+        seen: set[str] = set()
+        for a in entity_aliases:
+            key = f"{a['alias']}→{a['canonical']}"
+            if key in seen:
+                continue
+            seen.add(key)
+            note = f" — {a['personality_note']}" if a.get("personality_note") else ""
+            parts.append(
+                f'  "{a["alias"]}" → {a["canonical"]} (×{a["uses"]}): {a["description"]}{note}'
+            )
 
     return "\n".join(parts)
 
@@ -317,6 +458,19 @@ def extract_and_learn(text: str) -> tuple[str, list[dict]]:
     Scan `text` for [SKIPPY_LEARN: {"phrase":…, "intent":…, "description":…}]
     annotations. Each match is saved to the DB and stripped from the text.
 
+    Two annotation modes:
+
+    1. Keyword shortcut (standard):
+       [SKIPPY_LEARN: {"phrase": "code red", "intent": "ups_status",
+                       "description": "Check UPS immediately",
+                       "note": "Skippy-voice comment"}]
+
+    2. Nickname / alias (use `canonical` field):
+       [SKIPPY_LEARN: {"phrase": "beercan", "intent": "nickname",
+                       "canonical": "skippy",
+                       "description": "Captain's nickname for Skippy",
+                       "note": "I find this endearing and undignified in equal measure."}]
+
     Returns (clean_text, list_of_learned_entries).
     """
     learned = []
@@ -325,15 +479,29 @@ def extract_and_learn(text: str) -> tuple[str, list[dict]]:
     for m in _LEARN_RE.finditer(text):
         try:
             data = json.loads(m.group(1))
-            phrase      = str(data.get("phrase", "")).strip()
+            phrase      = str(data.get("phrase", "")).strip().lower()
             intent      = str(data.get("intent", "learned")).strip()
             description = str(data.get("description", phrase)).strip()
             note        = data.get("note") or data.get("personality_note")
+            canonical   = (data.get("canonical") or "").strip().lower()
 
-            if phrase:
+            if not phrase:
+                continue
+
+            if canonical:
+                # This is an alias/nickname annotation — store in keyword_aliases
+                alias(phrase, canonical, description=description, personality_note=note)
+                # Also store as a keyword entry so it shows up in the phrase list
+                # with intent "alias" so the phone can use it as a trigger if desired
+                learn(phrase, "alias", f"Alias for '{canonical}': {description}",
+                      personality_note=note, source="learned")
+                learned.append({"phrase": phrase, "intent": "alias", "canonical": canonical})
+                log.info("Alias learned: %r → %r", phrase, canonical)
+            else:
                 learn(phrase, intent, description, personality_note=note, source="learned")
                 learned.append({"phrase": phrase, "intent": intent})
                 log.info("Learned keyword: %r → %s", phrase, intent)
+
         except (json.JSONDecodeError, AttributeError) as e:
             log.warning("Malformed [SKIPPY_LEARN:] annotation: %s — %s", m.group(0), e)
 

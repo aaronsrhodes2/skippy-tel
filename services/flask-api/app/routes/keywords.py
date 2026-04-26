@@ -131,6 +131,46 @@ def learn_keyword():
     }), status
 
 
+@bp.get("/keywords/aliases")
+def get_aliases():
+    """
+    All nickname/alias entries, ordered by popularity (most-used first).
+    Optional ?canonical=<name> to filter by what they point to.
+    """
+    canonical_filter = request.args.get("canonical")
+    aliases = km.get_aliases(canonical=canonical_filter)
+    return jsonify({
+        "spec_version": "1",
+        "total":   len(aliases),
+        "aliases": aliases,
+    })
+
+
+@bp.post("/keywords/alias")
+def learn_alias():
+    """
+    Manually record a nickname or alias.
+
+    Body: { "alias": str, "canonical": str, "description": str, "note"?: str }
+    Returns 201 on insert, 200 if already exists (uses incremented).
+    """
+    body = request.get_json(silent=True) or {}
+    alias_phrase = str(body.get("alias", "")).strip().lower()
+    canonical    = str(body.get("canonical", "")).strip().lower()
+    description  = str(body.get("description", "")).strip()
+    note         = body.get("note") or body.get("personality_note")
+
+    if not alias_phrase or not canonical:
+        return jsonify({"error": "alias and canonical are required"}), 400
+
+    inserted = km.alias(alias_phrase, canonical, description=description, personality_note=note)
+    return jsonify({
+        "alias":     alias_phrase,
+        "canonical": canonical,
+        "inserted":  inserted,
+    }), 201 if inserted else 200
+
+
 @bp.delete("/keywords/<path:phrase>")
 def forget_keyword(phrase: str):
     """
