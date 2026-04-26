@@ -29,32 +29,40 @@ log = logging.getLogger(__name__)
 
 _BASE = "https://api.elevenlabs.io/v1"
 
-# Voice settings tuned for Skippy's character:
+# Voice settings tuned for Skippy's character (eleven_v3):
 #
-# stability 0.30 — LOW on purpose. Skippy is theatrical, sarcastic, and
-#   dramatic. High stability makes him sound like a corporate phone tree.
-#   Low stability lets the voice swing between exasperation, grandeur, and
-#   mischief the way the character actually does.
+# stability 0.05 — matches ElevenLabs web UI "full Creative" position.
+#   v3 at low stability is theatrical and emotionally dynamic — exactly
+#   what Skippy's delivery needs. It won't clip or distort; the model is
+#   stable enough that 0.05 just means "let the character through."
 #
-# similarity_boost 0.80 — stay close to the source recording; the clone
-#   should sound unmistakably like him, not a generic dramatic voice.
+# similarity_boost 0.80 — stay close to the source voice clone. v3 still
+#   honours this; it keeps responses anchored to the recorded voice rather
+#   than drifting toward a generic dramatic narrator.
 #
-# style 0.65 — HIGH. We want the character to punch through: the arrogance,
-#   the sarcasm, the theatrical pauses. Style exaggeration is the difference
-#   between "reading" and "performing".
+# style 0.65 — high style exaggeration for character presence. Sarcasm
+#   and arrogance need somewhere to land in the prosody.
 #
-# use_speaker_boost — keeps the voice clean and present on phone speaker/BT.
+# speed 0.95 — slight slowdown (5%) gives dramatic weight and pause space.
+#   Skippy at full speed sounds rushed; 0.95 gives him room to breathe.
 #
-# TTS formatting conventions (used in `speak` field of intent replies):
-#   "..."   → dramatic pause (~0.4s) — Skippy's signature beat before a reveal
-#   "—"     → sharp cut / interruption in thought
-#   ALL CAPS → shouted emphasis ("I am SKIPPY THE MAGNIFICENT")
-#   "heh heh" → always followed by something naughty; leave the pause in
+# use_speaker_boost — omitted on v3 (has no effect; the model handles
+#   voice presence internally).
+#
+# v3 EMOTION TAGS (embed in `speak` field for precise vocal direction):
+#   [sighs]     → exasperated sigh, Skippy's default opener
+#   [chuckles]  → the "heh heh" moment, conspiratorial amusement
+#   [laughs]    → genuine delight at something clever
+#   [sarcastic] → deadpan maximum snark, right before the cutting remark
+#   [whispers]  → scheming mode, confidential revelation
+#   [excited]   → enthusiasm break-through (physics, magnificence, etc.)
+#   "..."       → dramatic pause, still works alongside tags
+#   ALL CAPS    → shouted/emphatic word
 _VOICE_SETTINGS = {
-    "stability":         0.30,
-    "similarity_boost":  0.80,
-    "style":             0.65,
-    "use_speaker_boost": True,
+    "stability":        0.05,
+    "similarity_boost": 0.80,
+    "style":            0.65,
+    "speed":            0.95,
 }
 
 
