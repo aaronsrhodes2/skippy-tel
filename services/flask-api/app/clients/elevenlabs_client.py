@@ -59,10 +59,11 @@ _BASE = "https://api.elevenlabs.io/v1"
 #   "..."       → dramatic pause, still works alongside tags
 #   ALL CAPS    → shouted/emphatic word
 _VOICE_SETTINGS = {
-    "stability":        0.05,
-    "similarity_boost": 0.80,
-    "style":            0.65,
-    "speed":            0.95,
+    "stability": 0.05,   # full Creative — only slider v3 exposes in the web UI
+    # similarity_boost, style, speed intentionally omitted so v3 uses its own
+    # internal defaults, matching what the ElevenLabs web UI produces.
+    # v3 handles expressiveness internally; injecting those params diverges
+    # the output from what you hear when you test in the browser.
 }
 
 
