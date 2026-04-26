@@ -1,4 +1,21 @@
-.PHONY: run stop logs build test pull-model health intent apks phone-check adb-connect adb-devices ups-monitor ups-status
+.PHONY: run stop logs build test pull-model health intent apks phone-check adb-connect adb-devices ups-monitor ups-status push-all
+
+# ── Two-machine sync ─────────────────────────────────────────────────────────
+# Single developer, two stations (PC + Mac).
+# Doctrine: push after every session so the other machine is always current.
+#   make push-all   → push SkippyTel, zPhone, and bilby to GitHub in one shot
+#   On the other machine, start each session with:
+#     git -C <repo> pull --rebase
+# Mac owns bilby/ (stage9_dj_suggest.py). PC owns SkippyTel/ + zPhone/.
+# Neither machine force-pushes main. That's the entire policy.
+ZPHONE_REPO   ?= D:/Aaron/development/zPhone
+BILBY_REPO    ?= D:/Aaron/development/music-collection
+push-all:
+	git push origin main
+	git -C "$(ZPHONE_REPO)" push origin main
+	git -C "$(BILBY_REPO)"  push origin main 2>/dev/null || \
+		echo "(bilby: nothing to push or not reachable)"
+	@echo "All repos pushed."
 
 run:
 	docker compose up -d --build
