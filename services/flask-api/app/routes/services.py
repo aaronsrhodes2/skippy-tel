@@ -100,21 +100,36 @@ def _build_manifest() -> list[dict]:
     jellyfin_ok,  jellyfin_detail  = _jellyfin_available()
 
     return [
+        # ── capabilities + compliance ────────────────────────────────────────
+        # capabilities: which of the 3 main Skippy views this service is in:
+        #   "chat"       — responds inline in SkippyChat (query/answer services)
+        #   "hud"        — renders as a persistent overlay in SkippyDroid HUD mode
+        #   "fullscreen" — fills the SkippyDroid viewport in FULLSCREEN mode
+        # A service can appear in multiple views.
+        #
+        # zphone_compliant: true if the service runs natively within SkippyChat /
+        # SkippyDroid with no external Android apps or browser required.
+        # false = requires a third-party app or browser launch — regarded with
+        # loathsome disdain by the other services.
+
         {
             "id":      "intent",
             "name":    "Skippy AI",
             "tagline": "Your ancient AI companion — Ollama / Claude / Gemini",
             "available": True,
             "status_detail": f"default model: {settings.ollama_model}",
-            "base_url": None,   # lives inside SkippyTel
+            "capabilities": ["chat"],
+            "zphone_compliant": True,
+            "base_url": None,
             "display": {
                 "mode":         "companion",
                 "hud_zone":     "bottomcenter",
                 "companion_app": "local.skippy.chat",
             },
-            "voice_triggers": ["*"],   # catch-all — must be last in scanner
+            "voice_triggers": ["*"],
             "endpoints": {
-                "chat":   "/intent/unmatched",
+                "chat":     "/intent/unmatched",
+                "rollback": "/intent/rollback",
             },
         },
         {
@@ -123,8 +138,8 @@ def _build_manifest() -> list[dict]:
             "tagline": "Automated DJ — Traktor decks or Drive shuffle",
             "available": bilby_ok,
             "status_detail": bilby_detail,
-            # Bilby's web UI lives on the Mac at port 7334. Phone clients that
-            # are on Tailscale can hit it directly; emulator goes through SkippyTel.
+            "capabilities": ["chat", "hud", "fullscreen"],
+            "zphone_compliant": True,
             "base_url": settings.bilby_mac_url or None,
             "display": {
                 "mode":         "overlay",
@@ -155,6 +170,8 @@ def _build_manifest() -> list[dict]:
             "tagline": "Google Drive image gallery — all your photos",
             "available": dropship_ok,
             "status_detail": dropship_detail,
+            "capabilities": ["chat"],
+            "zphone_compliant": True,
             "base_url": None,
             "display": {
                 "mode":         "companion",
@@ -180,6 +197,8 @@ def _build_manifest() -> list[dict]:
             "tagline": "Stable Diffusion on Skippy PC — inline in chat",
             "available": image_ok,
             "status_detail": image_detail,
+            "capabilities": ["chat"],
+            "zphone_compliant": True,
             "base_url": None,
             "display": {
                 "mode":         "inline",
@@ -204,6 +223,8 @@ def _build_manifest() -> list[dict]:
             "tagline": "Whisper audio + Gemini text translation",
             "available": True,
             "status_detail": None,
+            "capabilities": ["chat"],
+            "zphone_compliant": True,
             "base_url": None,
             "display": {
                 "mode":         "inline",
@@ -227,6 +248,8 @@ def _build_manifest() -> list[dict]:
             "tagline": "Power guardian — CyberPower ABMT1500",
             "available": ups_ok,
             "status_detail": ups_detail,
+            "capabilities": ["chat", "hud"],
+            "zphone_compliant": True,
             "base_url": None,
             "display": {
                 "mode":         "overlay",
@@ -248,6 +271,8 @@ def _build_manifest() -> list[dict]:
             "tagline": "Face recognition — DB stays on Skippy PC",
             "available": True,
             "status_detail": None,
+            "capabilities": ["chat"],
+            "zphone_compliant": True,
             "base_url": None,
             "display": {
                 "mode":         "inline",
@@ -270,6 +295,8 @@ def _build_manifest() -> list[dict]:
             "tagline": "Celestial bodies overhead — stub, physics service pending",
             "available": False,
             "status_detail": "physics-mcp service not yet built",
+            "capabilities": ["hud", "fullscreen"],
+            "zphone_compliant": True,
             "base_url": None,
             "display": {
                 "mode":         "overlay",
@@ -292,13 +319,13 @@ def _build_manifest() -> list[dict]:
             "tagline": "Local movie & TV server — D:\\Movies on Skippy PC",
             "available": jellyfin_ok,
             "status_detail": jellyfin_detail,
-            # Jellyfin runs on the PC at :8096. Phone clients on Tailscale hit it
-            # directly; emulator falls through to the proxy path.
+            "capabilities": ["chat", "fullscreen"],
+            "zphone_compliant": False,   # requires org.jellyfin.mobile — non-native
             "base_url": settings.jellyfin_base_url if jellyfin_ok else None,
             "display": {
                 "mode":         "companion",
                 "hud_zone":     None,
-                "companion_app": "org.jellyfin.mobile",   # official Jellyfin Android app
+                "companion_app": "org.jellyfin.mobile",
             },
             "voice_triggers": [
                 "play a movie",
@@ -309,10 +336,10 @@ def _build_manifest() -> list[dict]:
                 "open movies",
             ],
             "endpoints": {
-                "health":  "/health",
-                "search":  "/Items?searchTerm={query}&IncludeItemTypes=Movie,Series&Recursive=true",
+                "health":      "/health",
+                "search":      "/Items?searchTerm={query}&IncludeItemTypes=Movie,Series&Recursive=true",
                 "now_playing": "/Sessions?ControllableByUserId=any",
-                "libraries": "/Library/MediaFolders",
+                "libraries":   "/Library/MediaFolders",
             },
         },
         {
@@ -324,11 +351,10 @@ def _build_manifest() -> list[dict]:
                 "Drive library ready" if settings.bilby_drive_folder_id
                 else "Set BILBY_DRIVE_FOLDER_ID to enable"
             ),
+            "capabilities": ["chat"],
+            "zphone_compliant": True,
             "base_url": None,
             "display": {
-                # companion_app is intentionally None — music commands play silently
-                # via SkippyTel without stealing focus from SkippyChat. Open
-                # local.skippy.music manually from the launcher if you need the UI.
                 "mode":          "background",
                 "hud_zone":      None,
                 "companion_app": None,
@@ -342,12 +368,12 @@ def _build_manifest() -> list[dict]:
                 "shuffle music",
             ],
             "endpoints": {
-                "session":       "/music/session",
-                "advance":       "/music/session/advance",
-                "skip":          "/music/session/skip",
-                "control":       "/music/session/control",
-                "stream":        "/music/stream/<file_id>",
-                "bilby_status":  "/music/bilby-status",
+                "session":      "/music/session",
+                "advance":      "/music/session/advance",
+                "skip":         "/music/session/skip",
+                "control":      "/music/session/control",
+                "stream":       "/music/stream/<file_id>",
+                "bilby_status": "/music/bilby-status",
             },
         },
         {
@@ -356,6 +382,8 @@ def _build_manifest() -> list[dict]:
             "tagline": "Bootstrap — APK downloads, phone configuration",
             "available": True,
             "status_detail": None,
+            "capabilities": [],
+            "zphone_compliant": True,
             "base_url": None,
             "display": {
                 "mode":         "background",
