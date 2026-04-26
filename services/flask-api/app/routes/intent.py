@@ -39,6 +39,7 @@ from flask import Blueprint, Response, request, stream_with_context
 
 from app.clients import ollama, anthropic_client, gemini, claude_bridge
 from app.config  import settings
+from app.narration import get_narration
 from app.version import envelope, error, scrub, SPEC_VERSION
 
 # ── Photo search ─────────────────────────────────────────────────────────────
@@ -99,10 +100,11 @@ def _fetch_latest_photo() -> dict:
                 resp = {"reply": reply, "speak": reply, "tier": "dropship"}
                 if img_b64:
                     resp["imageBase64"] = img_b64
+                resp["narration"] = get_narration("dropship")
                 return resp
-        return {"reply": "I couldn't find any recent photos in DropShip.", "speak": "Couldn't find any recent photos.", "tier": "dropship"}
+        return {"reply": "I couldn't find any recent photos in DropShip.", "speak": "Couldn't find any recent photos.", "tier": "dropship", "narration": get_narration("dropship")}
     except Exception as exc:
-        return {"reply": f"DropShip error: {exc}", "speak": "DropShip had an error.", "tier": "dropship"}
+        return {"reply": f"DropShip error: {exc}", "speak": "DropShip had an error.", "tier": "dropship", "narration": get_narration("dropship")}
 
 
 def _fetch_photo_search(query: str) -> dict:
@@ -121,10 +123,11 @@ def _fetch_photo_search(query: str) -> dict:
                 resp = {"reply": reply, "speak": f"Found it — {name}.", "tier": "dropship"}
                 if img_b64:
                     resp["imageBase64"] = img_b64
+                resp["narration"] = get_narration("dropship")
                 return resp
-        return {"reply": f"No photos matched '{query}'.", "speak": f"No photos found for {query}.", "tier": "dropship"}
+        return {"reply": f"No photos matched '{query}'.", "speak": f"No photos found for {query}.", "tier": "dropship", "narration": get_narration("dropship")}
     except Exception as exc:
-        return {"reply": f"DropShip error: {exc}", "speak": "DropShip had an error.", "tier": "dropship"}
+        return {"reply": f"DropShip error: {exc}", "speak": "DropShip had an error.", "tier": "dropship", "narration": get_narration("dropship")}
 
 
 def _download_as_b64(url: str) -> Optional[str]:
@@ -159,6 +162,22 @@ def _extract_image_prompt(text: str) -> tuple[str, str | None]:
     return clean, prompt
 
 bp = Blueprint("intent", __name__)
+
+
+def _get_now_playing_title() -> str | None:
+    """
+    Peek at the in-memory music session to get the currently playing track title.
+    Used to cross-link Nagatha narrations with whatever Bilby is spinning.
+    Safe — returns None on any failure (no session, music route not loaded, etc.).
+    """
+    try:
+        from app.routes.music import _session  # noqa: PLC0415
+        if not _session:
+            return None
+        np = _session.get("now_playing")
+        return np.get("title") if np else None
+    except Exception:
+        return None
 
 
 @dataclass
@@ -268,7 +287,12 @@ def _single_shot(text: str, tier: Optional[Tier]):
         # Image generation is not yet deployed; sentinel is preserved in protocol
         # for when we stand up a first-party SD service.
         clean, _ = _extract_image_prompt(full)
-        resp: dict = {"reply": clean, "speak": clean, "tier": tier_id}
+        resp: dict = {
+            "reply":     clean,
+            "speak":     clean,
+            "tier":      tier_id,
+            "narration": get_narration(tier_id, _get_now_playing_title()),
+        }
         return envelope(resp)
     except ollama.OllamaUnavailable as e:
         return error(str(e), error_type="local_tier_unavailable", status=503)
