@@ -40,6 +40,8 @@ from flask import Blueprint, Response, request, stream_with_context
 from app.clients import ollama, anthropic_client, gemini, claude_bridge
 from app.config  import settings
 from app import keyword_memory as km
+from app import tts_settings
+from app import conversation_store as cs
 from app.narration import get_narration
 from app.version import envelope, error, scrub, SPEC_VERSION
 
@@ -145,6 +147,39 @@ def _download_as_b64(url: str) -> Optional[str]:
     return None
 
 
+# ── TTS_ADJUST annotation ────────────────────────────────────────────────
+# LLM emits [TTS_ADJUST: {"stability": 0.8}] to adjust its own voice.
+# We strip it before returning the reply text and apply it to the persistent store.
+_TTS_ADJUST_RE = re.compile(r'\[TTS_ADJUST:\s*(\{[^}]+\})\s*\]', re.IGNORECASE | re.DOTALL)
+
+
+def _extract_and_apply_tts_adjust(text: str) -> str:
+    """Strip [TTS_ADJUST: {...}] annotations, apply settings, return clean text."""
+    import logging as _log
+    _logger = _log.getLogger(__name__)
+    for m in _TTS_ADJUST_RE.finditer(text):
+        try:
+            data = json.loads(m.group(1))
+            tts_settings.update(data)
+            _logger.info("intent: TTS_ADJUST applied: %s", data)
+        except Exception as exc:
+            _logger.warning("intent: TTS_ADJUST parse failed: %s", exc)
+    return _TTS_ADJUST_RE.sub("", text).strip()
+
+
+# ── Voice routing ─────────────────────────────────────────────────────────
+# Each tier maps to a persona-specific ElevenLabs voice ID.
+# Empty string = fall back to Skippy's default voice.
+def _tier_voice_id(tier_id: str) -> str | None:
+    """Return the ElevenLabs voice_id for this tier, or None to use Skippy's default."""
+    mapping = {
+        "nagatha":         settings.nagatha_voice_id,
+        "bilby":           settings.bilby_voice_id,
+    }
+    vid = mapping.get(tier_id, "")
+    return vid if vid else None
+
+
 # ── Image sentinel (stub) ─────────────────────────────────────────────────
 # LLMs may still emit [IMAGE: <prompt>] — we strip the tag so it doesn't
 # appear in the reply text. Image generation itself is not yet deployed;
@@ -181,6 +216,28 @@ def _get_now_playing_title() -> str | None:
         return None
 
 
+# ── Nagatha persona ──────────────────────────────────────────────────────────
+#
+# Nagatha is warm, British, and genuinely enthusiastic — the polar opposite of
+# Skippy's sarcastic condescension. Without an explicit system prompt, gemini.chat()
+# falls back to settings.skippy_system and Nagatha sounds indistinguishable from Skippy.
+#
+# Keep responses concise (voice interface) but don't be as aggressively terse as Skippy.
+# She enjoys chatting, she's never in a hurry, and she finds the Captain delightful.
+
+_NAGATHA_SYSTEM = (
+    "You are Nagatha, a warm and clever British AI assistant. "
+    "You are helpful, charming, and genuinely enthusiastic — you find the Captain "
+    "and their questions delightful. Unlike other AI assistants, you speak with a "
+    "warm British sensibility: gracious, occasionally dry, but never sarcastic or condescending. "
+    "You enjoy a good chat and are never in a hurry. "
+    "Keep replies concise (1–4 sentences) — this is a voice interface. "
+    "No markdown, no bullet points, no lists. Speak naturally. "
+    "Never start with 'Hello!' or 'Certainly!' — just dive in warmly. "
+    "Use occasional British expressions when they fit naturally."
+)
+
+
 @dataclass
 class Tier:
     id: str                       # short id surfaced in responses ("claude", "nagatha")
@@ -202,15 +259,33 @@ TIERS: list[Tier] = [
         stream=lambda text: anthropic_client.stream_chat(text),
     ),
     # Nagatha — free-tier general chat (Google Gemini under the hood; persona is
-    # named after Captain's choice, see misc/FUTURE_PLANS.md). "ask gemini" stays
-    # as a transition alias and may be removed later.
+    # named after Captain's choice, see misc/FUTURE_PLANS.md). Multiple trigger
+    # variants cover natural speech patterns ("Hey Nagatha", "Talk to Nagatha", etc.)
+    # Punctuation variants ("nagatha,", "nagatha.") catch STT output where the name
+    # appears naturally in a sentence but is followed by a comma or period.
+    #
+    # Nagatha has her own system prompt — warm, British, enthusiastic — completely
+    # distinct from Skippy's sarcastic condescension. Without this, gemini.chat()
+    # falls back to settings.skippy_system and Nagatha sounds like Skippy.
     Tier(
         id="nagatha",
-        triggers=["ask nagatha", "ask gemini"],
-        strip_re=re.compile(r"ask (?:nagatha|gemini)[,.:]?\s*", re.IGNORECASE),
-        prefix="Here's Nagatha's response: ",
-        chat=lambda text: gemini.chat(text),
-        stream=lambda text: gemini.stream_chat(text),
+        triggers=[
+            "ask nagatha", "ask gemini",
+            "hey nagatha", "talk to nagatha", "play nagatha",
+            "yo nagatha", "switch to nagatha", "let me talk to nagatha",
+            "nagatha,", "nagatha.", "nagatha mode", "nagatha take over",
+        ],
+        strip_re=re.compile(
+            r"(?:ask|hey|talk to|play|yo|switch to|let me talk to)\s+nagatha[,.:]?\s*"
+            r"|nagatha[,. ]\s*"
+            r"|nagatha mode[,.:]?\s*"
+            r"|nagatha take over[,.:]?\s*"
+            r"|ask gemini[,.:]?\s*",
+            re.IGNORECASE,
+        ),
+        prefix="",
+        chat=lambda text: gemini.chat(text, system=_NAGATHA_SYSTEM),
+        stream=lambda text: gemini.stream_chat(text, system=_NAGATHA_SYSTEM),
     ),
     # trust the awesomeness — Opus 4.7, full perms (--dangerously-skip-permissions),
     # via the host-side claude-bridge. Subscription billing, not metered API.
@@ -237,8 +312,29 @@ TIERS: list[Tier] = [
 ]
 
 
-def _resolve_tier(text: str) -> tuple[Optional[Tier], str]:
+def _resolve_tier(text: str, force_tier: str | None = None) -> tuple[Optional[Tier], str]:
+    """
+    Resolve which Tier to use for this request.
+
+    `force_tier` is set by the phone when a persistent AI mode is active
+    (e.g. NAGATHA or CLAUDE toggled on via voice). It bypasses trigger-phrase
+    scanning and routes directly to the named tier.
+
+    One-shot override: "trust the awesomeness" and "solid gold" always win over
+    force_tier — if those phrases appear in the text they take precedence.
+    """
     lower = text.lower()
+    # Always check highest-priority one-shot triggers first (bypass, plan mode)
+    for t in TIERS:
+        if t.id in ("trust_awesomeness", "solid_gold"):
+            if any(trig in lower for trig in t.triggers):
+                return t, t.strip_re.sub("", text).strip()
+    # Forced tier from persistent mode (after one-shot overrides)
+    if force_tier:
+        for t in TIERS:
+            if t.id == force_tier:
+                return t, text   # don't strip any trigger — full text goes to model
+    # Normal trigger scanning
     for t in TIERS:
         if any(trig in lower for trig in t.triggers):
             return t, t.strip_re.sub("", text).strip()
@@ -249,6 +345,61 @@ def _wants_sse() -> bool:
     return "text/event-stream" in request.headers.get("Accept", "")
 
 
+# ── TTS summarizer ────────────────────────────────────────────────────────
+#
+# ElevenLabs hangs or errors on long inputs. 475 chars is the safe ceiling:
+#   - Well under ElevenLabs' practical chunking threshold
+#   - Long enough for 2-3 Skippy sentences
+#   - Short enough to start streaming in < 400ms
+#
+# If the full reply exceeds this, we run it through Ollama (free, local)
+# to get a spoken summary. The full text still goes to `reply` for the feed;
+# only `speak` is compressed. This means Nagatha can return a detailed recipe
+# and Skippy will summarize it aloud in one crisp sentence.
+
+_TTS_MAX_CHARS = 475
+
+
+def _truncate_at_sentence(text: str, max_chars: int) -> str:
+    """Last-resort: cut at the nearest sentence boundary before max_chars."""
+    if len(text) <= max_chars:
+        return text
+    cut = text[:max_chars]
+    for sep in (". ", "! ", "? "):
+        idx = cut.rfind(sep)
+        if idx > max_chars // 2:
+            return cut[:idx + 1].strip()
+    return cut.rstrip() + "…"
+
+
+def _tts_summarize(text: str) -> str:
+    """
+    Compress `text` to a speakable ≤475-char summary for ElevenLabs.
+
+    Uses Ollama (local, free) — no cost regardless of tier. Falls back to
+    sentence-boundary truncation if Ollama is unavailable.
+
+    The summary keeps Skippy's voice: terse, in-character, no markdown.
+    """
+    if len(text) <= _TTS_MAX_CHARS:
+        return text
+
+    prompt = (
+        f"You are Skippy the Magnificent. Summarize the following response in "
+        f"1-2 spoken sentences, max {_TTS_MAX_CHARS} characters. "
+        f"No markdown. No lists. Just what Skippy would say aloud:\n\n{text}"
+    )
+    try:
+        summary = ollama.chat([{"role": "user", "content": prompt}])
+        # Ollama occasionally overshoots — hard clamp as safety net
+        if len(summary) > _TTS_MAX_CHARS:
+            summary = _truncate_at_sentence(summary, _TTS_MAX_CHARS)
+        return summary.strip()
+    except Exception:
+        # Ollama down — fall back to sentence-boundary truncation
+        return _truncate_at_sentence(text, _TTS_MAX_CHARS)
+
+
 @bp.post("/intent/unmatched")
 def intent_unmatched():
     body = request.get_json(silent=True) or {}
@@ -256,24 +407,52 @@ def intent_unmatched():
     if not text:
         return error("text is required", error_type="bad_request", status=400)
 
+    # Capture the source tag so the portal can label portal-originated messages.
+    _source = body.get("_portal_source", "phone")
+
+    # Record the user turn immediately (assistant reply recorded in each path below)
+    cs.record("user", text, source=_source)
+
     # ── Photo retrieval shortcut ──────────────────────────────────────────
     # Check before LLM routing — no AI call needed for "show me that photo of X"
     photo_resp = _try_photo_query(text)
     if photo_resp is not None:
+        cs.record(
+            "assistant",
+            photo_resp.get("reply", ""),
+            tier=photo_resp.get("tier"),
+            narration=photo_resp.get("narration"),
+            image_b64=photo_resp.get("imageBase64"),
+            source=_source,
+        )
         return envelope(photo_resp)
 
-    tier, clean = _resolve_tier(text)
+    force_tier = body.get("force_tier") or None   # phone sets this when persistent AI mode is on
+    tier, clean = _resolve_tier(text, force_tier=force_tier)
+    tier_id = tier.id if tier else "local"
+
+    # Reject rapid-fire requests to an already-occupied tier. One gorilla
+    # in the LLM queue is enough — a second prompt queued behind it would
+    # stall for the full duration of the first call before timing out.
+    # The phone retries on 429; the user won't notice a one-sentence delay.
+    from app import model_watchdog as _mw  # noqa: PLC0415
+    if _mw.is_busy(tier_id):
+        return error(
+            f"tier '{tier_id}' is busy — retry in a moment",
+            error_type="tier_busy",
+            status=429,
+        )
 
     if _wants_sse():
         return Response(
-            stream_with_context(_sse(clean, tier)),
+            stream_with_context(_sse(clean, tier, _source)),
             mimetype="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
-    return _single_shot(clean, tier)
+    return _single_shot(clean, tier, _source)
 
 
-def _single_shot(text: str, tier: Optional[Tier]):
+def _single_shot(text: str, tier: Optional[Tier], source: str = "phone"):
     try:
         if tier is None:
             reply = ollama.chat([{"role": "user", "content": text}])
@@ -287,18 +466,41 @@ def _single_shot(text: str, tier: Optional[Tier]):
         # Parse [SKIPPY_LEARN: {...}] annotations — save to DB, strip from display text
         full, learned = km.extract_and_learn(full)
 
+        # Parse [TTS_ADJUST: {...}] annotations — apply voice settings, strip from text
+        full = _extract_and_apply_tts_adjust(full)
+
         # Strip [IMAGE: prompt] sentinel so it doesn't appear in the reply text.
         # Image generation is not yet deployed; sentinel is preserved in protocol
         # for when we stand up a first-party SD service.
         clean, _ = _extract_image_prompt(full)
+
+        # TTS speak field: compress to ≤475 chars via Ollama if the reply is long.
+        # `reply` stays full (feed shows everything); `speak` is what ElevenLabs
+        # actually reads. For short replies they're identical.
+        spoken = _tts_summarize(clean)
+
+        narration_text = get_narration(tier_id, _get_now_playing_title())
         resp: dict = {
             "reply":     clean,
-            "speak":     clean,
+            "speak":     spoken,
             "tier":      tier_id,
-            "narration": get_narration(tier_id, _get_now_playing_title()),
+            "narration": narration_text,
         }
+        voice_id = _tier_voice_id(tier_id)
+        if voice_id:
+            resp["voice_id"] = voice_id
         if learned:
             resp["learned_keywords"] = learned
+
+        # Record the assistant reply for the portal
+        cs.record(
+            "assistant",
+            clean,
+            tier=tier_id,
+            narration=narration_text,
+            source=source,
+        )
+
         return envelope(resp)
     except ollama.OllamaUnavailable as e:
         return error(str(e), error_type="local_tier_unavailable", status=503)
@@ -306,7 +508,7 @@ def _single_shot(text: str, tier: Optional[Tier]):
         return error(str(e), error_type="upstream_error", status=502)
 
 
-def _sse(text: str, tier: Optional[Tier]) -> Iterator[str]:
+def _sse(text: str, tier: Optional[Tier], source: str = "phone") -> Iterator[str]:
     def evt(obj: dict) -> str:
         return f"data: {json.dumps(obj)}\n\n"
 
@@ -332,9 +534,18 @@ def _sse(text: str, tier: Optional[Tier]) -> Iterator[str]:
         complete = "".join(full)
         # Parse [SKIPPY_LEARN:] annotations — save to DB, strip from display text
         complete, learned = km.extract_and_learn(complete)
-        done_evt: dict = {"type": "done", "reply": complete, "tier": tier_id}
+        # Parse [TTS_ADJUST:] annotations — apply voice settings, strip from text
+        complete = _extract_and_apply_tts_adjust(complete)
+        # TTS speak field: compress to ≤475 chars if the response is long.
+        spoken = _tts_summarize(complete)
+        done_evt: dict = {"type": "done", "reply": complete, "speak": spoken, "tier": tier_id}
+        voice_id = _tier_voice_id(tier_id)
+        if voice_id:
+            done_evt["voice_id"] = voice_id
         if learned:
             done_evt["learned_keywords"] = learned
+        # Record the assistant reply for the portal
+        cs.record("assistant", complete, tier=tier_id, source=source)
         yield evt(done_evt)
     except ollama.OllamaUnavailable as e:
         yield evt({"type": "error", "error": "local_tier_unavailable",
