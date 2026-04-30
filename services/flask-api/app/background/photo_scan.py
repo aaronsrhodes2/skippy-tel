@@ -25,9 +25,11 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-SCAN_INTERVAL_S = 10 * 60   # full Drive scan every 10 minutes
-TAG_DELAY_S     = 2.0        # pause between LLaVA calls
-_MAX_TAG_PER_SCAN = 20       # don't burn through all files in one scan cycle
+SCAN_INTERVAL_S        = 10 * 60   # full Drive scan every 10 minutes
+TAG_DELAY_S            = 2.0        # pause between LLaVA calls
+_MAX_TAG_PER_SCAN      = 20         # don't burn through all files in one scan cycle
+_MAX_CONSEC_FAILURES   = 3          # stop tagging this cycle after this many llava crashes
+_RETRY_BACKOFF_S       = 3 * 3600  # don't retry a file for 3 hours after a llava failure
 
 
 def _run_scanner():
@@ -50,6 +52,7 @@ def _run_scanner():
 
 def _scan_cycle(get_drive_fn, folder_id_fn, describe_fn, tags_mod):
     """One full scan: list Drive → tag new files."""
+    import time as _time
     fid = folder_id_fn()
     if not fid:
         log.debug("photo_scan: no folder ID configured, skipping")
@@ -61,9 +64,13 @@ def _scan_cycle(get_drive_fn, folder_id_fn, describe_fn, tags_mod):
         log.warning("photo_scan: Drive not available: %s", exc)
         return
 
-    tagged_ids = tags_mod.get_tagged_ids()
-    tagged_this_cycle = 0
-    page_token = None
+    # Skip files already successfully tagged OR recently attempted (within backoff window)
+    tagged_ids    = tags_mod.get_tagged_ids()
+    recent_ids    = tags_mod.get_recently_attempted_ids(_RETRY_BACKOFF_S)
+    skip_ids      = tagged_ids | recent_ids
+    tagged_this_cycle   = 0
+    consec_failures     = 0
+    page_token          = None
 
     while True:
         resp = svc.files().list(
@@ -84,8 +91,8 @@ def _scan_cycle(get_drive_fn, folder_id_fn, describe_fn, tags_mod):
             created = f.get("createdTime", "")
             mime    = f.get("mimeType", "image/jpeg")
 
-            if file_id in tagged_ids:
-                continue   # already done
+            if file_id in skip_ids:
+                continue   # already done or attempted recently
 
             if tagged_this_cycle >= _MAX_TAG_PER_SCAN:
                 log.info("photo_scan: hit per-cycle limit (%d), resuming next cycle", _MAX_TAG_PER_SCAN)
@@ -115,10 +122,22 @@ def _scan_cycle(get_drive_fn, folder_id_fn, describe_fn, tags_mod):
             if description:
                 tags_mod.upsert_tag(file_id, name, description, drive_created=created)
                 log.info("photo_scan: tagged '%s' → %s…", name, description[:60])
+                consec_failures = 0
             else:
-                # llava not available or returned nothing — leave tagged_at=0 so
-                # we retry this file on the next scan cycle
-                log.debug("photo_scan: no description for '%s' (llava unavailable?), will retry", name)
+                # llava failed — record the attempt timestamp so we back off
+                # for _RETRY_BACKOFF_S before trying this file again.
+                tags_mod.record_attempt(file_id, name, drive_created=created)
+                consec_failures += 1
+                log.warning(
+                    "photo_scan: llava returned nothing for '%s' (failure %d/%d)",
+                    name, consec_failures, _MAX_CONSEC_FAILURES,
+                )
+                if consec_failures >= _MAX_CONSEC_FAILURES:
+                    log.warning(
+                        "photo_scan: %d consecutive llava failures — aborting tagging this cycle",
+                        _MAX_CONSEC_FAILURES,
+                    )
+                    return
 
             tagged_this_cycle += 1
             time.sleep(TAG_DELAY_S)

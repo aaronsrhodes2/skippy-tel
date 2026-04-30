@@ -58,13 +58,22 @@ _BASE = "https://api.elevenlabs.io/v1"
 #   [excited]   → enthusiasm break-through (physics, magnificence, etc.)
 #   "..."       → dramatic pause, still works alongside tags
 #   ALL CAPS    → shouted/emphatic word
-_VOICE_SETTINGS = {
-    "stability": 0.05,   # full Creative — only slider v3 exposes in the web UI
-    # similarity_boost, style, speed intentionally omitted so v3 uses its own
-    # internal defaults, matching what the ElevenLabs web UI produces.
-    # v3 handles expressiveness internally; injecting those params diverges
-    # the output from what you hear when you test in the browser.
-}
+def _voice_settings() -> dict:
+    """Load current TTS settings from the persistent store.
+
+    tts_settings.py manages the JSON file at /app/state/tts_settings.json.
+    The LLM can adjust its own voice via [TTS_ADJUST: {...}] annotations;
+    the Captain can override via PATCH /tts/settings.
+
+    Only `stability` is sent to ElevenLabs v3 — v3 handles everything else
+    internally. Additional keys (speed, etc.) are clamped and stored for
+    future use but not forwarded to the API until v3 exposes them.
+    """
+    from app import tts_settings  # noqa: PLC0415 — lazy to avoid circular import
+    stored = tts_settings.load()
+    # Only stability is sent to v3; omit everything else so the model
+    # uses its own internal defaults (matching the web UI behaviour).
+    return {"stability": stored.get("stability", 0.05)}
 
 
 class ElevenLabsUnavailable(Exception):
@@ -100,7 +109,7 @@ def stream_tts(text: str, voice_id: str | None = None) -> Iterator[bytes]:
     payload = {
         "text":           text,
         "model_id":       model,
-        "voice_settings": _VOICE_SETTINGS,
+        "voice_settings": _voice_settings(),
     }
 
     try:

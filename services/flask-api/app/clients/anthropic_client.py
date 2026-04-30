@@ -33,21 +33,37 @@ def _fill_system(system: str | None) -> str:
 
 
 def chat(message: str, system: str | None = None) -> str:
-    resp = _get_client().messages.create(
-        model=settings.anthropic_model,
-        max_tokens=2048,
-        system=_fill_system(system),
-        messages=[{"role": "user", "content": message}],
-    )
-    return resp.content[0].text
+    from app import model_watchdog as mw  # noqa: PLC0415
+    mw.record("claude", message[:2000], settings.anthropic_model)
+    try:
+        resp = _get_client().messages.create(
+            model=settings.anthropic_model,
+            max_tokens=2048,
+            system=_fill_system(system),
+            messages=[{"role": "user", "content": message}],
+        )
+        result = resp.content[0].text
+        mw.clear("claude")
+        return result
+    except Exception:
+        # Don't clear on exception — keep the record so health check can assess.
+        # Connection errors vs. hangs are indistinguishable here; let the
+        # HANG_THRESHOLD distinguish them over time.
+        raise
 
 
 def stream_chat(message: str, system: str | None = None) -> Iterator[str]:
-    with _get_client().messages.stream(
-        model=settings.anthropic_model,
-        max_tokens=2048,
-        system=_fill_system(system),
-        messages=[{"role": "user", "content": message}],
-    ) as stream:
-        for text in stream.text_stream:
-            yield text
+    from app import model_watchdog as mw  # noqa: PLC0415
+    mw.record("claude", message[:2000], settings.anthropic_model)
+    try:
+        with _get_client().messages.stream(
+            model=settings.anthropic_model,
+            max_tokens=2048,
+            system=_fill_system(system),
+            messages=[{"role": "user", "content": message}],
+        ) as stream:
+            for text in stream.text_stream:
+                yield text
+        mw.clear("claude")
+    except Exception:
+        raise

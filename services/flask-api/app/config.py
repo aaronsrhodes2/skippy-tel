@@ -66,8 +66,17 @@ class Settings:
     # ElevenLabs model: eleven_turbo_v2_5 — lowest latency, still excellent.
     # Streaming endpoint used so Android playback starts in <400ms.
     elevenlabs_api_key:  str = os.getenv("ELEVENLABS_API_KEY", "")
-    elevenlabs_voice_id: str = os.getenv("ELEVENLABS_VOICE_ID", "2EiwWnXFnvU5JabPnv8n")  # Clyde
+    elevenlabs_voice_id: str = os.getenv("ELEVENLABS_VOICE_ID", "2EiwWnXFnvU5JabPnv8n")  # Clyde / Skippy
     elevenlabs_model:    str = os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5")
+
+    # Persona-specific voice IDs — each AI personality speaks in its own voice.
+    # Leave blank to fall back to Skippy's voice for that tier.
+    # Clone voices at https://elevenlabs.io → Voices → Add Voice → Instant Voice Clone
+    #
+    # Nagatha: warm, measured, intelligent — e.g. a British female voice
+    # Bilby:   upbeat, announcer energy — e.g. a DJ/hype voice
+    nagatha_voice_id: str = os.getenv("NAGATHA_VOICE_ID", "")
+    bilby_voice_id:   str = os.getenv("BILBY_VOICE_ID", "")
 
     # System prompt for /intent/unmatched escalations.
     # SKIPPY_SYSTEM env var overrides the file (useful for quick iteration).

@@ -26,12 +26,38 @@ import logging
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 from app.clients import elevenlabs_client as elabs
+from app import tts_settings
 from app.version import error
 
 log = logging.getLogger(__name__)
 bp  = Blueprint("tts", __name__)
 
 _MAX_CHARS = 500   # Skippy is terse. Long walls of text shouldn't be spoken verbatim.
+
+
+@bp.get("/tts/settings")
+def tts_settings_get():
+    """Return current TTS voice settings."""
+    return jsonify(tts_settings.load())
+
+
+@bp.patch("/tts/settings")
+def tts_settings_patch():
+    """
+    Override one or more TTS settings.
+    Body: { "stability": 0.3 }   (unknown keys silently ignored)
+    """
+    body = request.get_json(silent=True) or {}
+    if not body:
+        return error("JSON body required", status=400)
+    updated = tts_settings.update(body)
+    return jsonify(updated)
+
+
+@bp.post("/tts/settings/reset")
+def tts_settings_reset():
+    """Reset all TTS settings to factory defaults."""
+    return jsonify(tts_settings.reset())
 
 
 @bp.get("/tts/health")
