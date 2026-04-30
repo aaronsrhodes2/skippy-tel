@@ -43,6 +43,7 @@ from flask import Blueprint, redirect, request, url_for
 
 from app.clients import bilby as bilby_client
 from app.clients import bilby_drive
+from app.clients import bilby_local
 from app.config  import settings
 from app.version import envelope, error
 
@@ -179,7 +180,30 @@ def bilby_status():
                 "stale_s":       stale,
             })
 
-    # ── 3. Drive Bilby ────────────────────────────────────────────────────
+    # ── 3. Local library (corrected_music mounted at /music) ─────────────────
+    if source in ("auto", "local") and bilby_local.available():
+        if not bilby_local.ready():
+            # Background scan still running (~40s on first boot) — don't block
+            return envelope({
+                "source":        "local",
+                "traktor_alive": False,
+                "playing_deck":  None,
+                "now_playing":   None,
+                "loaded":        {"a": None, "b": None},
+                "message":       "Library scan in progress…",
+            })
+        track = bilby_local.now_playing()
+        if track:
+            return envelope({
+                "source":        "local",
+                "traktor_alive": False,
+                "playing_deck":  None,
+                "now_playing":   track,
+                "loaded":        {"a": track, "b": None},
+                "queue_size":    bilby_local.queue_size(),
+            })
+
+    # ── 4. Drive Bilby ────────────────────────────────────────────────────
     if source in ("auto", "drive"):
         folder_id = settings.bilby_drive_folder_id
         if not folder_id:
@@ -189,7 +213,7 @@ def bilby_status():
                 "playing_deck":  None,
                 "now_playing":   None,
                 "loaded":        {"a": None, "b": None},
-                "message":       "No music source — set BILBY_MAC_URL or BILBY_DRIVE_FOLDER_ID.",
+                "message":       "No music source — local /music not mounted and BILBY_DRIVE_FOLDER_ID not set.",
             })
         track = bilby_drive.now_playing()
         return envelope({
