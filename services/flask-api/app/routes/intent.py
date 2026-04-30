@@ -45,6 +45,99 @@ from app import conversation_store as cs
 from app.narration import get_narration
 from app.version import envelope, error, scrub, SPEC_VERSION
 
+# ── Music session shortcut ────────────────────────────────────────────────────
+# Intercepts music-request phrases BEFORE LLM routing so Skippy doesn't
+# hallucinate a now-playing track. Calls /music/session directly and returns
+# the real track info. Pattern matches both explicit ("play some jazz") and
+# Bilby-addressed forms ("bilby dj", "bilby play some rock").
+
+_MUSIC_INTENT_RE = re.compile(
+    r'\b(?:play|queue|put on|start playing|let[\'\s]+hear|i want to hear|turn on)\b'
+    r'.{0,60}\b(?:music|songs?|tracks?|playlist|jazz|rock|hip[\s\-]?hop|electronic|'
+    r'beats?|tunes?|vibes?|classical|country|metal|punk|folk|blues|soul|r&b|'
+    r'reggae|ambient|techno|house|drum[\s\-]?(?:and[\s\-]?)?bass|indie|pop|funk|'
+    r'disco|chill|upbeat|energetic|relaxing|workout|party|something)\b'
+    r'|\bbilby\s+(?:play|dj|start|queue|go|put)',
+    re.IGNORECASE,
+)
+_MUSIC_STRIP_RE = re.compile(
+    r'^(?:bilby\s+)?(?:play\s+(?:some|me\s+some|me\s+a?|a\s+|some\s+)?|'
+    r'queue\s+(?:up\s+)?(?:some\s+)?|put\s+on\s+(?:some\s+)?|'
+    r'start\s+playing\s+(?:some\s+)?|start\s+playing\s+|'
+    r'i\s+want\s+to\s+hear\s+(?:some\s+)?|turn\s+on\s+(?:some\s+)?)',
+    re.IGNORECASE,
+)
+_MUSIC_GENERIC_WORDS = frozenset({
+    'music', 'songs', 'song', 'tracks', 'track', 'tunes', 'tune',
+    'playlist', 'please', 'dj', 'something', 'stuff', 'anything', 'whatever',
+})
+
+
+def _try_music_intent(text: str) -> Optional[dict]:
+    """
+    If text looks like a music request, start a Bilby session and return
+    the real track info. Returns None if this isn't a music query.
+
+    Never hallucinate: either we get a real track from /music/session
+    or we return an honest "no tracks available" message.
+    """
+    import logging as _log
+    _logger = _log.getLogger(__name__)
+
+    if not _MUSIC_INTENT_RE.search(text):
+        return None
+
+    # Extract genre/mood by stripping the trigger verb phrase
+    query = _MUSIC_STRIP_RE.sub("", text.strip()).strip()
+    # Strip leading/trailing filler articles
+    query = re.sub(r'^(?:some|a|an|the|me|us|please)\s+', '', query, flags=re.IGNORECASE).strip()
+    # If only generic words remain → DJ mode (Bilby picks)
+    words = query.lower().split()
+    if not words or all(w in _MUSIC_GENERIC_WORDS for w in words):
+        query = ""
+
+    mode = "playlist" if query else "dj"
+    _logger.info("music intent: mode=%s query=%r", mode, query)
+
+    try:
+        import httpx as _httpx
+        body: dict = {"mode": mode}
+        if query:
+            body["prompt"] = query
+        r = _httpx.post("http://localhost:5000/music/session", json=body, timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            session = data.get("data", data)
+            np = session.get("now_playing") or {}
+            artist = np.get("artist", "")
+            title  = np.get("title",  "")
+            mode_label = f"playlist: {query}" if query else "DJ mode"
+            if artist and title:
+                reply = f"♫ Bilby: {mode_label} — {artist} — {title}"
+            else:
+                reply = f"♫ Bilby: {mode_label} started."
+            resp: dict = {
+                "reply":         reply,
+                "speak":         reply,
+                "tier":          "bilby",
+                "narration":     get_narration("bilby", title or None),
+                "music_session": session,
+            }
+            vid = _tier_voice_id("bilby")
+            if vid:
+                resp["voice_id"] = vid
+            return resp
+        elif r.status_code == 404:
+            reply = "♫ Bilby: no tracks available. Is the music library mounted at /music?"
+            return {"reply": reply, "speak": "Bilby couldn't find any tracks.", "tier": "bilby"}
+        else:
+            _logger.warning("music intent: /music/session returned %d", r.status_code)
+    except Exception as exc:
+        _logger.warning("music intent error: %s", exc)
+
+    return None
+
+
 # ── Photo search ─────────────────────────────────────────────────────────────
 
 # Patterns that mean "fetch an existing photo from DropShip"
@@ -426,6 +519,19 @@ def intent_unmatched():
             source=_source,
         )
         return envelope(photo_resp)
+
+    # ── Music session shortcut ────────────────────────────────────────────
+    # Check before LLM routing — "play some jazz" starts a real session
+    # instead of going to Ollama and getting a hallucinated now-playing.
+    music_resp = _try_music_intent(text)
+    if music_resp is not None:
+        cs.record(
+            "assistant",
+            music_resp.get("reply", ""),
+            tier=music_resp.get("tier"),
+            source=_source,
+        )
+        return envelope(music_resp)
 
     force_tier = body.get("force_tier") or None   # phone sets this when persistent AI mode is on
     tier, clean = _resolve_tier(text, force_tier=force_tier)
