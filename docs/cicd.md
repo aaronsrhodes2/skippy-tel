@@ -78,7 +78,7 @@ Messages, Read History).
 | `test` | `pytest portal/tests memory/tests` with the real dependencies | nothing |
 | `gate` | skips deploys until bootstrap has run | — |
 | `infra` | `terraform apply` in `infra/gcp-games` — VM shape, firewall, and the compose file + VM scripts delivered as instance metadata (applied at the VM's next boot) | bootstrap |
-| `portal` | builds `portal/Dockerfile` from the repo root, pushes to Artifact Registry, deploys `skippy-portal` to Cloud Run, smoke-tests `/healthz` | bootstrap |
+| `portal` | builds `portal/Dockerfile` from the repo root, pushes to Artifact Registry, deploys `skippy-portal` to Cloud Run, smoke-tests `/health` (not `/healthz`: Cloud Run reserves paths ending in z) | bootstrap |
 
 A failed test stops both deploys. Claude reads the job logs and fixes
 forward — you don't need to.

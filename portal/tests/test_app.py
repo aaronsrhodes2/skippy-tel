@@ -80,7 +80,7 @@ def test_signed_out_sees_login(env):
     client, _, _ = env
     assert b"Sign in with Google" in client.get("/").data
     assert client.get("/dashboard").status_code == 302
-    assert client.get("/healthz").data == b"ok"
+    assert client.get("/health").data == b"ok"
 
 
 def test_unlisted_email_is_bounced(env):

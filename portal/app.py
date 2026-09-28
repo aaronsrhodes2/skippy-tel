@@ -51,8 +51,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
             return redirect(url_for("dashboard.index"))
         return render_template("login.html")
 
-    @app.get("/healthz")
-    def healthz():
+    @app.get("/health")
+    def health():
         return "ok"
 
     # ── dashboard: everyone on the allowlist ───────────────────────────────────
