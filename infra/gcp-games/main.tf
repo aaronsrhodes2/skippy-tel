@@ -40,6 +40,7 @@ resource "google_compute_firewall" "games" {
       "34197",     # Factorio
       "7777",      # Satisfactory
       "7778",      # RuneScape: Dragonwilds
+      "8888",      # RuneScape: Dragonwilds world-settings beacon
     ]
   }
   allow {

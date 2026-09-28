@@ -7,6 +7,7 @@ this portal).
 """
 from __future__ import annotations
 
+import html
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -37,15 +38,17 @@ GAMES: dict[str, Game] = {
         "Survival crafting in Ashenfall. Crossplay: PC, Xbox, PS5, Switch 2.",
         ram_gb=8,
         connect=lambda ip, env: (
-            "Play &rarr; <b>Public</b> tab &rarr; search world "
-            f"<b>{env.get('DRAGONWILDS_WORLD_NAME') or 'Ashenfall'}</b>"
+            "Play &rarr; <b>Public</b> tab &rarr; search server "
+            f"<b>{html.escape(env.get('DRAGONWILDS_SERVER_NAME') or 'Skippy')}</b>"
         ),
         settings=(
             Setting("DRAGONWILDS_OWNER_ID", "Owner Player ID",
                     help="In-game Settings menu, bottom, copy button. Not your Xbox/Steam ID."),
             Setting("DRAGONWILDS_ADMIN_PASSWORD", "Admin password", secret=True),
-            Setting("DRAGONWILDS_SERVER_NAME", "Server name"),
-            Setting("DRAGONWILDS_WORLD_NAME", "World name", help="What players search for."),
+            Setting("DRAGONWILDS_SERVER_NAME", "Server name",
+                    help="What players search for in the Public server list."),
+            Setting("DRAGONWILDS_WORLD_NAME", "World name",
+                    help="Only used when the world is first created; renaming it later has no effect."),
             Setting("DRAGONWILDS_WORLD_PASSWORD", "World password", secret=True,
                     help="Strongly recommended: the world is listed publicly, so without one "
                          "anyone can join. Signed-in portal users see it on the dashboard."),

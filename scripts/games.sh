@@ -29,9 +29,15 @@ ram_gb() {
 die() { echo "error: $*" >&2; exit 1; }
 g() { gcloud compute "$@" --zone "$ZONE"; }
 
-envval() { # envval KEY → value from games/.env (inline "# comments" stripped)
+envval() { # envval KEY → value from games/.env (quotes removed, inline "# comments" stripped)
   [ -f "$ENV_FILE" ] || return 0
-  grep -E "^$1=" "$ENV_FILE" | tail -1 | cut -d= -f2- | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//'
+  local v; v=$(grep -E "^$1=" "$ENV_FILE" | tail -1 | cut -d= -f2-)
+  case "$v" in
+    \'*\'*) v=${v#\'}; v=${v%%\'*} ;;
+    \"*\"*) v=${v#\"}; v=${v%%\"*} ;;
+    *) v=$(printf '%s' "$v" | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//') ;;
+  esac
+  printf '%s\n' "$v"
 }
 
 require() { # require KEY "why"
@@ -74,7 +80,7 @@ join_hints() {
       valheim)      echo "  Valheim       → Join IP: $ip:2456" ;;
       factorio)     echo "  Factorio      → Multiplayer → Connect to address: $ip" ;;
       satisfactory) echo "  Satisfactory  → Server Manager → Add Server: $ip (port 7777)" ;;
-      dragonwilds)  echo "  Dragonwilds   → Public tab → search world name \"$(envval DRAGONWILDS_WORLD_NAME)\" (Xbox/PC crossplay)" ;;
+      dragonwilds)  echo "  Dragonwilds   → Public tab → search server name \"$(envval DRAGONWILDS_SERVER_NAME)\" (Xbox/PC crossplay)" ;;
     esac
   done
   echo "  First boot downloads the servers: allow ~5-10 min before joining."

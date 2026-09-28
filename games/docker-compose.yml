@@ -16,8 +16,9 @@
 # Dragonwilds 2 GB + 1 GB per player (8 GB for its max of 6).
 #
 # Ports: Satisfactory keeps its default 7777; Dragonwilds moves to 7778 so both
-# can run at once (Dragonwilds players find the server by world name in the
-# in-game browser, so the port is invisible to them).
+# can run at once (Dragonwilds players find the server by its SERVER_NAME in
+# the in-game browser, so the port is invisible to them). Dragonwilds also
+# needs its beacon on 8888/udp (Satisfactory's 8888 is tcp; no clash).
 
 x-common: &common
   restart: unless-stopped
@@ -93,8 +94,12 @@ services:
     container_name: dragonwilds
     ports:
       - "${DRAGONWILDS_PORT:-7778}:${DRAGONWILDS_PORT:-7778}/udp"
+      # World-settings beacon: the client uses it to create/edit worlds and
+      # negotiate their settings. Internal and external ports must match.
+      - "${DRAGONWILDS_BEACON_PORT:-8888}:${DRAGONWILDS_BEACON_PORT:-8888}/udp"
     environment:
       DEFAULT_PORT: ${DRAGONWILDS_PORT:-7778}
+      BEACON_PORT: ${DRAGONWILDS_BEACON_PORT:-8888}
       OWNER_ID: ${DRAGONWILDS_OWNER_ID:-}      # required; games.sh checks it
       ADMIN_PASSWORD: ${DRAGONWILDS_ADMIN_PASSWORD:-} # required; games.sh checks it
       SERVER_NAME: ${DRAGONWILDS_SERVER_NAME:-Skippy}

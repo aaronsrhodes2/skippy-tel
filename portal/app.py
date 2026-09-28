@@ -15,6 +15,7 @@ import chat
 import chat_tools
 import config
 import discord_admin
+import envfile
 import ops
 from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, SERVICES
 from gcp import GamesVm
@@ -105,13 +106,22 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
     @admin.post("/settings")
     @auth.admin_required
     def settings():
-        updates = {}
+        updates, bad = {}, []
         for game in GAMES.values():
             for s in game.settings:
                 value = request.form.get(s.key)
                 if value is None or (s.secret and value == ""):
                     continue          # secret left blank = keep the current value
-                updates[s.key] = value.strip()
+                value = value.strip()
+                problem = envfile.check(value)
+                if problem:
+                    bad.append(f"{game.name} {s.label.lower()} {problem}.")
+                    continue
+                updates[s.key] = value
+        for message in bad:
+            flash(message + " Nothing was saved.", "error")
+        if bad:
+            return redirect(url_for("admin.index"))
         if updates:
             vm.update_env(updates)
             flash("Settings saved. Restart the server to apply them.", "ok")

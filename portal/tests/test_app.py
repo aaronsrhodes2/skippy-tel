@@ -187,7 +187,19 @@ def test_join_password_shown_to_players_only_while_running(env):
     vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
     page = client.get("/dashboard").data.decode()
     assert "dragonpw" in page
-    assert "search world" in page
+    assert "search server" in page
+    assert "Skippy" in page                                    # SERVER_NAME default is what players search
+
+
+def test_settings_reject_values_compose_cant_carry(env):
+    client, vm, _ = env
+    login(client, ADMIN)
+    before = len(vm.calls)
+    resp = client.post("/admin/settings", data={"DRAGONWILDS_WORLD_PASSWORD": "it's",
+                                                "DRAGONWILDS_SERVER_NAME": "SkippyScape"},
+                       follow_redirects=True)
+    assert "single quote" in resp.data.decode()
+    assert len(vm.calls) == before                             # nothing saved, not even the valid field
 
 
 # ── Skippy's chat tools ───────────────────────────────────────────────────────

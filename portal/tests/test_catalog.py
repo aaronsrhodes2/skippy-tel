@@ -11,7 +11,7 @@ from catalog import GAMES, SERVICES, machine_for  # noqa: E402
 def test_every_game_has_a_working_connect_string():
     for game in GAMES.values():
         text = game.connect("34.1.2.3", {})
-        assert "34.1.2.3" in text or "Ashenfall" in text  # Dragonwilds omits the IP by design
+        assert "34.1.2.3" in text or "Skippy" in text    # Dragonwilds: found by server name, no IP
         assert game.ram_gb > 0
 
 

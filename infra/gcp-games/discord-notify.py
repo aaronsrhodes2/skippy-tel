@@ -50,8 +50,8 @@ GAMES = {
     "dragonwilds": (
         "RuneScape: Dragonwilds",
         "Survival crafting in Ashenfall. Crossplay: PC, Xbox, PS5 and Switch 2.",
-        lambda ip, e: (f"Play → **Public** tab → search world "
-                       f"**{e.get('DRAGONWILDS_WORLD_NAME', 'Ashenfall')}**"
+        lambda ip, e: (f"Play → **Public** tab → search server "
+                       f"**{e.get('DRAGONWILDS_SERVER_NAME') or 'Skippy'}**"
                        + ("\nWorld password: on the Skippy Portal dashboard" if e.get("DRAGONWILDS_WORLD_PASSWORD") else "")),
     ),
 }
@@ -64,7 +64,12 @@ def load_env(path: Path | None = None) -> dict:
         for line in path.read_text().splitlines():
             key, sep, val = line.partition("=")
             if sep and not key.lstrip().startswith("#"):
-                out[key.strip()] = val.split(" #")[0].strip()
+                val = val.strip()
+                if val[:1] in ("'", '"') and val.find(val[0], 1) != -1:
+                    val = val[1:val.find(val[0], 1)]     # quoted: literal (portal writes 'value')
+                else:
+                    val = val.split(" #")[0].strip()
+                out[key.strip()] = val
     return out
 
 

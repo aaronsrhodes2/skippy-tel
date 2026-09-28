@@ -15,16 +15,16 @@ def test_parse_ignores_comments_and_inline_comments():
 def test_merge_replaces_in_place_and_appends_new():
     text = "# keep me\nA=1\nB=2\n"
     out = envfile.merge(text, {"B": "22", "Z": "new"})
-    assert out == "# keep me\nA=1\nB=22\nZ=new\n"
+    assert out == "# keep me\nA=1\nB='22'\nZ='new'\n"
     assert envfile.parse(out) == {"A": "1", "B": "22", "Z": "new"}
 
 
 def test_merge_into_empty():
-    assert envfile.merge("", {"A": "1"}) == "A=1\n"
+    assert envfile.merge("", {"A": "1"}) == "A='1'\n"
 
 
 def test_merge_does_not_touch_commented_keys():
-    assert envfile.merge("# A=old\n", {"A": "new"}) == "# A=old\nA=new\n"
+    assert envfile.merge("# A=old\n", {"A": "new"}) == "# A=old\nA='new'\n"
 
 
 # ── catalog ──────────────────────────────────────────────────────────────────
@@ -192,3 +192,20 @@ def test_chat_tool_loop_is_capped():
     reply = bot.reply("sys", [{"role": "user", "content": "?"}], tools=[{}], run_tool=lambda n, a: "{}")
     assert "round in circles" in reply
     assert len(bot._client.requests) == chat.MAX_TOOL_ROUNDS
+
+
+def test_values_with_shell_and_compose_specials_round_trip():
+    tricky = {"PW": "p$ss #1 x", "EMPTY": "", "DQ": 'say "hi"'}
+    assert envfile.parse(envfile.merge("", tricky)) == tricky
+
+
+def test_parse_reads_quoted_and_legacy_unquoted_values():
+    text = "A='lit $x #y'\nB=\"dq\"\nC=plain  # note\nD=\n"
+    assert envfile.parse(text) == {"A": "lit $x #y", "B": "dq", "C": "plain", "D": ""}
+
+
+def test_merge_refuses_values_compose_cant_carry():
+    import pytest
+    for bad in ("it's", "two\nlines"):
+        with pytest.raises(ValueError):
+            envfile.merge("", {"PW": bad})
