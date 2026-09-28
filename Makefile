@@ -1,4 +1,4 @@
-.PHONY: run stop logs build test pull-model health intent apks phone-check adb-connect adb-devices ups-monitor ups-status push-all
+.PHONY: run stop logs build test pull-model health intent apks phone-check adb-connect adb-devices ups-monitor ups-status push-all memory-init memory-ingest memory-inbox memory-distill
 
 # ── Two-machine sync ─────────────────────────────────────────────────────────
 # Single developer, two stations (PC + Mac).
@@ -38,7 +38,7 @@ build:
 	docker compose build
 
 test:
-	@echo "(no unit tests yet)"
+	python -m pytest memory/tests -q
 
 # Pull the default Ollama model into the running ollama container.
 # First boot only; OLLAMA_KEEP_ALIVE=-1 keeps it warm afterwards.
@@ -157,3 +157,21 @@ trust-awesomeness:
 	curl -s -X POST http://localhost:3003/intent/unmatched \
 		-H "Content-Type: application/json" \
 		-d '{"text":"trust the awesomeness echo hello from awesomeness"}' | jq .
+
+# Skippy Memory — every AI conversation in one Drive folder. See docs/memory/README.md.
+#   make memory-inbox              import every export dropped in <MEMORY_DIR>/inbox/
+#   make memory-inbox DISTILL=1    ...and tag topics + summaries with local Ollama
+#   make memory-ingest EXPORT=C:/Users/aaron/Downloads/data-2026-09-28.zip
+MEMORY_DIR ?= G:/My Drive/Skippy Memory
+memory-init:
+	python -m memory init --out "$(MEMORY_DIR)"
+
+memory-ingest:
+	@if [ -z "$(EXPORT)" ]; then echo "usage: make memory-ingest EXPORT=<zip|folder|json>"; exit 2; fi
+	python -m memory ingest "$(EXPORT)" --out "$(MEMORY_DIR)" $(if $(DISTILL),--distill)
+
+memory-inbox:
+	python -m memory inbox --out "$(MEMORY_DIR)" $(if $(DISTILL),--distill)
+
+memory-distill:
+	python -m memory distill --out "$(MEMORY_DIR)"
