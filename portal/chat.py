@@ -5,9 +5,11 @@ state between requests, and a signed cookie is too small for a
 conversation. Only the signed-in, allowlisted user can post here, so the
 history they send is trusted as their own.
 
-Not yet connected to skippy-tel-core or its MCP servers: the portal runs on
-Cloud Run, which has no route into the home Tailscale mesh where
-skippy-tel-core lives. See docs/portal/README.md → Chat.
+Skippy can use the portal's own server controls as tools (chat_tools.py:
+status, start, stop, and restart for admins). Not yet connected to
+skippy-tel-core or its MCP servers: the portal runs on Cloud Run, which has
+no route into the home Tailscale mesh where skippy-tel-core lives. See
+docs/portal/README.md → Chat.
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ from pathlib import Path
 
 MAX_MESSAGES = 40          # history sent to the model: the last 20 exchanges
 MAX_CHARS = 8000           # per message
+MAX_TOOL_ROUNDS = 6        # model → tools → model round trips per reply
 
 _PERSONA_FALLBACK = "You are Skippy the Magnificent, the Captain's sardonic but loyal AI. Keep replies short."
 
@@ -28,15 +31,21 @@ def persona() -> str:
     return _PERSONA_FALLBACK
 
 
-def system_prompt(user_name: str) -> str:
+def system_prompt(user_name: str, is_admin: bool = False) -> str:
+    restart = " and restart it (you're talking to an admin)" if is_admin else ""
     return (
         f"{persona()}\n\n"
         "## Where you are\n"
         f"You're talking with {user_name} through the Skippy Portal's text chat. "
-        "The portal controls the Captain's game servers (Valheim, Factorio, Satisfactory, "
-        "RuneScape: Dragonwilds) but in this chat you have no tools: you can't start servers, "
-        "read email, or reach skippy-tel-core yet. If asked to do something that needs a tool, "
-        "say so plainly and point to the portal's buttons instead of pretending."
+        "The portal runs the Captain's pop-up game server (one VM that sleeps when idle) for "
+        "RuneScape: Dragonwilds, Valheim, Factorio and Satisfactory.\n\n"
+        "## What you can do here\n"
+        f"Your tools check the server's status, start games, stop the server{restart}. "
+        "Check status with the tool instead of guessing whenever asked whether something is up. "
+        "Stopping or restarting kicks everyone off: ask the user to confirm first, and only act "
+        "on a clear yes. Never reveal passwords; join passwords are on the dashboard under "
+        "\"Show join password\". You can't read email or reach skippy-tel-core and its MCP tools "
+        "from here yet; say so plainly rather than pretending."
     )
 
 
@@ -78,10 +87,36 @@ class SkippyChat:
             self._client_obj = anthropic.Anthropic()   # ANTHROPIC_API_KEY from the environment
         return self._client_obj
 
-    def reply(self, system: str, messages: list[dict]) -> str:
-        import anthropic
+    def reply(self, system: str, messages: list[dict], tools: list[dict] | None = None,
+              run_tool=None) -> str:
+        """One chat reply. With tools, runs the tool loop: the model asks for
+        tools, `run_tool(name, input) -> str` runs them, results go back,
+        until the model answers (or MAX_TOOL_ROUNDS is hit)."""
+        messages = list(messages)
+        for _ in range(MAX_TOOL_ROUNDS):
+            response = self._create(system, messages, tools)
+            if response.stop_reason == "refusal":
+                return "I can't help with that one."
+            calls = [b for b in response.content if b.type == "tool_use"]
+            if response.stop_reason != "tool_use" or not calls or run_tool is None:
+                text = "".join(b.text for b in response.content if b.type == "text").strip()
+                return text or "(no reply)"
+            messages.append({"role": "assistant", "content": response.content})
+            messages.append({"role": "user", "content": [self._run(run_tool, c) for c in calls]})
+        return "I went round in circles with the server tools. Try the dashboard buttons."
+
+    @staticmethod
+    def _run(run_tool, call) -> dict:
         try:
-            response = self._client.beta.messages.create(
+            return {"type": "tool_result", "tool_use_id": call.id, "content": run_tool(call.name, call.input)}
+        except Exception as exc:   # noqa: BLE001 — tool failures go back to the model, not the user
+            return {"type": "tool_result", "tool_use_id": call.id, "content": str(exc), "is_error": True}
+
+    def _create(self, system: str, messages: list[dict], tools: list[dict] | None):
+        import anthropic
+        extra = {"tools": tools} if tools else {}
+        try:
+            return self._client.beta.messages.create(
                 model=self.model,
                 max_tokens=16000,
                 system=system,
@@ -90,6 +125,7 @@ class SkippyChat:
                 # grounds, the API re-runs the turn on a fallback model.
                 betas=["server-side-fallback-2026-07-01"],
                 fallbacks="default",
+                **extra,
             )
         except anthropic.RateLimitError as exc:
             raise ChatError("Skippy is rate-limited right now. Try again in a minute.") from exc
@@ -99,8 +135,3 @@ class SkippyChat:
             raise ChatError(f"The Claude API returned an error ({exc.status_code}).") from exc
         except anthropic.APIConnectionError as exc:
             raise ChatError("Couldn't reach the Claude API.") from exc
-
-        if response.stop_reason == "refusal":
-            return "I can't help with that one."
-        text = "".join(block.text for block in response.content if block.type == "text").strip()
-        return text or "(no reply)"

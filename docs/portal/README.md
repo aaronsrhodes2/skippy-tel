@@ -68,6 +68,13 @@ Skippy's persona from `services/flask-api/app/skippy_persona.md`. History
 lives in the browser tab and is sent with each message; the server keeps
 nothing.
 
+**Server tools** (`portal/chat_tools.py`): Skippy can check the server's
+status, start games and stop the server; admins also get restart. Same
+rights and guardrails as the dashboard buttons (both go through
+`portal/ops.py`), and tool output never includes settings values — join
+passwords stay behind the dashboard's "Show join password". Skippy asks for
+confirmation before stopping or restarting.
+
 **Not yet connected to skippy-tel-core or your MCP tools.** Cloud Run has no
 route into the home Tailscale mesh where skippy-tel-core runs. Next step
 (tracked in the roadmap): give the portal a way in — Tailscale on the

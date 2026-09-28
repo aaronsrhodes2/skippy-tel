@@ -123,3 +123,72 @@ def test_minutes_up():
     assert s.minutes_up(now) == 3
     s.status = "TERMINATED"
     assert s.minutes_up(now) is None
+
+
+# ── SkippyChat tool loop (fake Claude client) ─────────────────────────────────
+
+class _Block:
+    def __init__(self, type, **kw):
+        self.type = type
+        self.__dict__.update(kw)
+
+
+class _Resp:
+    def __init__(self, stop_reason, *content):
+        self.stop_reason, self.content = stop_reason, list(content)
+
+
+class _FakeClient:
+    def __init__(self, responses):
+        self.responses, self.requests = list(responses), []
+        self.beta = self
+        self.messages = self
+
+    def create(self, **kw):
+        self.requests.append(kw)
+        return self.responses.pop(0)
+
+
+def _chat(responses):
+    import chat
+    bot = chat.SkippyChat("claude-opus-5")
+    bot._client_obj = _FakeClient(responses)
+    return bot
+
+
+def test_chat_tool_loop_runs_tools_and_returns_final_text():
+    bot = _chat([
+        _Resp("tool_use", _Block("text", text="Checking."),
+              _Block("tool_use", id="t1", name="server_status", input={})),
+        _Resp("end_turn", _Block("text", text="It's asleep, Captain.")),
+    ])
+    ran = []
+    reply = bot.reply("sys", [{"role": "user", "content": "up?"}], tools=[{"name": "server_status"}],
+                      run_tool=lambda name, args: ran.append(name) or '{"state": "asleep"}')
+    assert reply == "It's asleep, Captain."
+    assert ran == ["server_status"]
+    second = bot._client.requests[1]["messages"]
+    assert second[-1]["content"][0] == {"type": "tool_result", "tool_use_id": "t1",
+                                        "content": '{"state": "asleep"}'}
+
+
+def test_chat_tool_errors_go_back_to_the_model():
+    bot = _chat([
+        _Resp("tool_use", _Block("tool_use", id="t1", name="start_game", input={"games": ["x"]})),
+        _Resp("end_turn", _Block("text", text="Can't, sorry.")),
+    ])
+
+    def fail(name, args):
+        raise ValueError("needs the owner's Player ID")
+    assert bot.reply("sys", [{"role": "user", "content": "go"}], tools=[{}], run_tool=fail) == "Can't, sorry."
+    result = bot._client.requests[1]["messages"][-1]["content"][0]
+    assert result["is_error"] and "Player ID" in result["content"]
+
+
+def test_chat_tool_loop_is_capped():
+    import chat
+    loop = _Resp("tool_use", _Block("tool_use", id="t", name="server_status", input={}))
+    bot = _chat([loop] * chat.MAX_TOOL_ROUNDS)
+    reply = bot.reply("sys", [{"role": "user", "content": "?"}], tools=[{}], run_tool=lambda n, a: "{}")
+    assert "round in circles" in reply
+    assert len(bot._client.requests) == chat.MAX_TOOL_ROUNDS

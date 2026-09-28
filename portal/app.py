@@ -12,9 +12,11 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 import auth
 import chat
+import chat_tools
 import config
 import discord_admin
-from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, SERVICES, clamp_idle, missing_settings
+import ops
+from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, SERVICES
 from gcp import GamesVm
 
 
@@ -70,36 +72,19 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
     @dash.post("/games/start")
     @auth.login_required
     def games_start():
-        selected = [g for g in request.form.getlist("games") if g in GAMES]
-        status, error = vm_status()
-        if error:
-            flash(f"Couldn't reach the VM: {error}", "error")
-            return redirect(url_for("dashboard.index"))
-        problems = [p for g in selected for p in missing_settings(g, status.env)]
-        if not selected:
-            flash("Pick at least one game.", "error")
-        elif problems:
-            for p in problems:
-                flash(p + " An admin can set it on the Admin page.", "error")
-        else:
-            admin = auth.is_admin(auth.current_user()["email"])
-            idle = clamp_idle(request.form.get("idle_minutes"), admin)
-            if status.status == "RUNNING":
-                flash("The server is already running. Games can only be changed while it's asleep "
-                      "(or by an admin restart).", "error")
-            else:
-                vm.start(selected, idle_minutes=idle)
-                ready = max(GAMES[g].ready_minutes for g in selected)
-                flash(f"Starting {', '.join(GAMES[g].name for g in selected)} — usually joinable in about "
-                      f"{ready} minutes (longer right after a game update). It sleeps after {idle} "
-                      "idle minutes; anyone on the portal can wake it again.", "ok")
+        try:
+            ok, message = ops.start_games(vm, request.form.getlist("games"),
+                                          request.form.get("idle_minutes"),
+                                          auth.is_admin(auth.current_user()["email"]))
+        except Exception as exc:   # noqa: BLE001 — the VM API; show it, don't 500
+            ok, message = False, f"Couldn't reach the VM: {exc}"
+        flash(message, "ok" if ok else "error")
         return redirect(url_for("dashboard.index"))
 
     @dash.post("/games/stop")
     @auth.login_required
     def games_stop():
-        vm.stop()
-        flash("Server stopped. Worlds were saved first.", "ok")
+        flash(ops.stop_server(vm)[1], "ok")
         return redirect(url_for("dashboard.index"))
 
     app.register_blueprint(dash)
@@ -135,9 +120,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
     @admin.post("/restart")
     @auth.admin_required
     def restart():
-        status = vm.restart()
-        flash(f"Restarted ({', '.join(status.games) or 'no games'}). Server images and game "
-              "updates are pulled on boot; allow 5–10 minutes.", "ok")
+        flash(ops.restart_server(vm)[1], "ok")
         return redirect(url_for("admin.index"))
 
     @admin.post("/discord")
@@ -179,8 +162,11 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
             return jsonify(error="Say something."), 400
         user = auth.current_user()
         try:
-            text = skippy.reply(chat.system_prompt(user["name"]),
-                                chat.build_messages(body.get("history"), message))
+            admin = auth.is_admin(user["email"])
+            tools = chat_tools.ChatTools(vm, is_admin=admin)
+            text = skippy.reply(chat.system_prompt(user["name"], is_admin=admin),
+                                chat.build_messages(body.get("history"), message),
+                                tools=tools.schemas(), run_tool=tools.run)
         except chat.ChatError as exc:
             return jsonify(error=str(exc)), 502
         return jsonify(reply=text)

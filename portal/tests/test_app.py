@@ -49,8 +49,9 @@ class FakeSkippy:
     def __init__(self):
         self.seen = None
 
-    def reply(self, system, messages):
+    def reply(self, system, messages, tools=None, run_tool=None):
         self.seen = (system, messages)
+        self.tools, self.run_tool = tools, run_tool
         return "Obviously."
 
 
@@ -162,7 +163,7 @@ def test_chat_errors_are_shown_not_raised(env):
     client, _, skippy = env
     login(client, FRIEND)
 
-    def boom(system, messages):
+    def boom(system, messages, **_):
         raise chat.ChatError("Skippy is rate-limited right now.")
     skippy.reply = boom
     resp = client.post("/chat/send", json={"message": "hi"})
@@ -187,3 +188,51 @@ def test_join_password_shown_to_players_only_while_running(env):
     page = client.get("/dashboard").data.decode()
     assert "dragonpw" in page
     assert "search world" in page
+
+
+# ── Skippy's chat tools ───────────────────────────────────────────────────────
+
+def _tools_for(client, skippy, email):
+    login(client, email)
+    client.post("/chat/send", json={"message": "is it up?"})
+    return {t["name"] for t in skippy.tools}, skippy.run_tool
+
+
+def test_chat_tools_match_dashboard_rights(env):
+    client, _, skippy = env
+    names, _ = _tools_for(client, skippy, FRIEND)
+    assert names == {"server_status", "start_game", "stop_server"}
+    names, _ = _tools_for(client, skippy, ADMIN)
+    assert "restart_server" in names
+    _, run = _tools_for(client, skippy, FRIEND)
+    with pytest.raises(Exception, match="isn't available"):
+        run("restart_server", {})                       # not offered, and refused if tried anyway
+
+
+def test_chat_status_tool_never_leaks_settings(env):
+    import json
+    client, vm, skippy = env
+    vm.state.status, vm.state.games = "RUNNING", ["dragonwilds", "valheim"]
+    _, run = _tools_for(client, skippy, FRIEND)
+    out = run("server_status", {})
+    for secret in ("hunter22", "adm1n", "dragonpw", "owner1"):
+        assert secret not in out
+    status = json.loads(out)
+    assert status["state"] == "online"
+    assert set(status["games"]) == {"dragonwilds", "valheim"}
+    assert "35.1.2.3:2456" in status["games"]["valheim"]["how_to_connect"]   # HTML stripped
+    assert "<" not in status["games"]["valheim"]["how_to_connect"]
+
+
+def test_chat_start_tool_uses_dashboard_guardrails(env):
+    client, vm, skippy = env
+    _, run = _tools_for(client, skippy, FRIEND)
+    del vm.state.env["DRAGONWILDS_OWNER_ID"]
+    with pytest.raises(Exception, match="Player ID"):
+        run("start_game", {"games": ["dragonwilds"]})
+    assert not [c for c in vm.calls if c[0] == "start"]
+    vm.state.env["DRAGONWILDS_OWNER_ID"] = "owner1"
+    assert "Starting RuneScape: Dragonwilds" in run("start_game", {"games": ["dragonwilds"]})
+    assert vm.calls[-1] == ("start", ["dragonwilds"], 30)            # default idle, player-clamped
+    with pytest.raises(Exception, match="already running"):
+        run("start_game", {"games": ["valheim"]})

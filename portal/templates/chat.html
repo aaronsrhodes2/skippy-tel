@@ -6,7 +6,8 @@
   {% if not chat_enabled %}
     <p class="error">Chat isn't configured yet (no Anthropic API key) — see docs/cicd.md &rarr; Secrets.</p>
   {% endif %}
-  <p class="help">Text only. Skippy can't reach skippy-tel-core or your MCP tools from here yet.</p>
+  <p class="help">Skippy can check the game server, start games and stop it{% if is_admin %} (and restart it){% endif %}
+    &mdash; just ask. Not connected to skippy-tel-core or your MCP tools from here yet.</p>
   <div id="log"></div>
   <form id="ask">
     <textarea id="msg" rows="3" placeholder="Say something to Skippy" required></textarea>
