@@ -16,14 +16,21 @@ you own instead of rent. Last updated 2026-09-28.
 | Phase | What | Status |
 |---|---|---|
 | 2.1 | Compose for Valheim, Factorio, Satisfactory, **RuneScape: Dragonwilds** → [`games/`](../games) | ✅ built |
-| 2.2 | GCP pop-up VM: auto-sizing, idle auto-sleep, daily snapshots → [`infra/gcp-games/`](../infra/gcp-games), [`scripts/games.sh`](../scripts/games.sh) | ✅ built. **Next:** `tofu apply` in a real project |
+| 2.2 | GCP pop-up VM: auto-sizing, idle auto-sleep, daily snapshots → [`infra/gcp-games/`](../infra/gcp-games), [`scripts/games.sh`](../scripts/games.sh) | ✅ built and applied in the real `skippy-tel` GCP project |
 | 2.3 | Discord: per-game text + voice channel, pinned self-updating status post, start/sleep pings → [`scripts/discord_setup.py`](../scripts/discord_setup.py) | ✅ built. **Next:** create the bot, run setup |
 | 2.4 | First session: Dragonwilds with the work friend (PC + Xbox crossplay) | ⏳ |
 | 2.5 | Move Nitrado worlds over, then cancel Nitrado | ⏳ |
-| 2.6 | Start servers from Discord / by voice ("Skippy, spin up Valheim") | later |
+| 2.6 | EverQuest (EQEmu), already running locally — add as a fifth compose profile + migrate its DB | ⏳ open questions in the plan: which local setup, public vs. private login server |
 | — | ARK | deferred: too resource-heavy |
 
 Hosting comparison and runbook: [`docs/games/README.md`](games/README.md).
+
+## Track 2.5: Skippy Portal — one gated page for all of it
+| Phase | What | Status |
+|---|---|---|
+| P.1 | Google sign-in + email allowlist, games dashboard (status/start/stop), static services list, a link into Skippy → [`portal/`](../portal), [`docs/portal/README.md`](portal/README.md) | ✅ built. **Next:** OAuth client + first Cloud Run deploy |
+| P.2 | Custom in-portal AI chat (real MCP-client + tool-use agent host), replacing the deep-link-to-Claude tile | later, its own project |
+| P.3 | A live service registry (SkippyTel v1's `/services`, or its v2 successor) instead of a hand-edited static list | needs the portal reachable into the home mesh — Track 4 |
 
 ## Track 3: Remote play from anywhere (no Steam Link PIN)
 | Phase | What | Status |

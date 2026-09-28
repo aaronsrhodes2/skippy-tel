@@ -116,12 +116,13 @@ resource "google_compute_instance" "games" {
   }
 
   metadata = {
-    startup-script = file("${path.module}/startup.sh")
-    idle-watchdog  = file("${path.module}/idle-watchdog.sh")
-    discord-notify = file("${path.module}/discord-notify.py")
-    compose-file   = file("${path.module}/../../games/docker-compose.yml")
-    games          = "valheim"
-    idle-minutes   = "30"
+    startup-script  = file("${path.module}/startup.sh")
+    shutdown-script = file("${path.module}/shutdown.sh")
+    idle-watchdog   = file("${path.module}/idle-watchdog.sh")
+    discord-notify  = file("${path.module}/discord-notify.py")
+    compose-file    = file("${path.module}/../../games/docker-compose.yml")
+    games           = "valheim"
+    idle-minutes    = "30"
     # games-env (the secrets in games/.env) is uploaded by `games.sh env`,
     # never through OpenTofu, so passwords stay out of state files.
   }

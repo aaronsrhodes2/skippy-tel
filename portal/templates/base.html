@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Skippy Portal{% endblock %}</title>
+<style>
+  /* Palette matches ChatPalette (zPhone/apps/SkippyChat) — same names, same hex. */
+  :root {
+    --black: #000000; --white: #ffffff;
+    --green: #00ff88; --dim-green: #003322; --dim-green-hi: #006644;
+    --cyan: #00ffff; --amber: #ffaa00; --red: #ff4444; --violet: #aa44ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--black); color: var(--white);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    margin: 0; padding: 24px 16px 64px;
+  }
+  a { color: var(--cyan); }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+  h1 { color: var(--green); font-size: 1.4rem; margin: 0; }
+  .user { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; }
+  .user img { width: 28px; height: 28px; border-radius: 50%; }
+  main { max-width: 720px; margin: 0 auto; }
+  section { margin-bottom: 32px; }
+  h2 { color: var(--cyan); font-size: 1rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .card {
+    background: var(--dim-green); border: 1px solid var(--dim-green-hi);
+    border-radius: 8px; padding: 16px; margin-bottom: 12px;
+  }
+  .card h3 { margin: 0 0 4px; color: var(--white); }
+  .card p { margin: 4px 0; color: #b8ffe0; font-size: 0.9rem; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+  .dot.green { background: var(--green); } .dot.grey { background: #666; } .dot.amber { background: var(--amber); }
+  button, .btn {
+    background: var(--dim-green-hi); color: var(--white); border: 1px solid var(--green);
+    border-radius: 6px; padding: 8px 16px; font-size: 0.9rem; cursor: pointer;
+  }
+  button:hover, .btn:hover { background: var(--green); color: var(--black); }
+  .error { color: var(--red); }
+  form.inline { display: inline; }
+  label.game { display: block; margin: 6px 0; }
+</style>
+</head>
+<body>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

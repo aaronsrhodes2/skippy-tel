@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Skippy Portal{% endblock %}
+{% block content %}
+<header>
+  <h1>Skippy Portal</h1>
+  <div class="user">
+    {% if user.picture %}<img src="{{ user.picture }}" alt="">{% endif %}
+    {{ user.name }} · <a href="{{ url_for('auth.logout') }}">sign out</a>
+  </div>
+</header>
+
+<section>
+  <h2>Game servers</h2>
+  {% if error %}
+    <p class="error">Couldn't reach the VM: {{ error }}</p>
+  {% else %}
+    <p>
+      <span class="dot {{ 'green' if status.status == 'RUNNING' else ('amber' if status.status not in ('RUNNING','TERMINATED') else 'grey') }}"></span>
+      <strong>{{ status.status }}</strong>
+      {% if status.status == 'RUNNING' %}
+        &middot; {{ status.games | join(', ') or 'no games selected' }}
+        &middot; <code>{{ status.external_ip }}</code>
+        &middot; auto-sleep after {{ status.idle_minutes }} min idle
+      {% endif %}
+    </p>
+
+    {% for id, game in games.items() %}
+      <div class="card">
+        <h3>{{ game.name }}</h3>
+        <p>{{ game.description }}</p>
+        {% if status.status == 'RUNNING' and id in status.games %}
+          <p>{{ game.connect(status.external_ip, {}) | safe }}</p>
+        {% endif %}
+      </div>
+    {% endfor %}
+
+    {% if status.status == 'RUNNING' %}
+      <form class="inline" method="post" action="{{ url_for('dashboard.games_stop') }}"
+            onsubmit="return confirm('Stop the server? Worlds are saved first.');">
+        <button type="submit">Stop server</button>
+      </form>
+    {% else %}
+      <form method="post" action="{{ url_for('dashboard.games_start') }}">
+        {% for id, game in games.items() %}
+          <label class="game">
+            <input type="checkbox" name="games" value="{{ id }}" {{ 'checked' if id in status.games }}>
+            {{ game.name }}
+          </label>
+        {% endfor %}
+        <label>Auto-sleep after
+          <input type="number" name="idle_minutes" value="{{ status.idle_minutes }}" min="0" style="width:4em">
+          minutes idle (0 = never)
+        </label>
+        <button type="submit">Start selected</button>
+      </form>
+    {% endif %}
+  {% endif %}
+</section>
+
+<section>
+  <h2>Services</h2>
+  {% for svc in services %}
+    <div class="card">
+      <h3><a href="{{ svc.url }}">{{ svc.name }}</a></h3>
+      <p>{{ svc.description }}</p>
+    </div>
+  {% endfor %}
+</section>
+
+<section>
+  <h2>Skippy</h2>
+  <a class="btn" href="{{ ai_url }}" target="_blank" rel="noopener">Open Skippy in Claude</a>
+</section>
+{% endblock %}
