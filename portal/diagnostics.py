@@ -23,6 +23,23 @@ def latest_snapshot(port2: str) -> str:
     return port2[start:] if end == -1 else port2[start:end + len("=== end ===")]
 
 
+def for_game(snapshot: str, container: str) -> str:
+    """Just one game's part of a snapshot: its `docker ps` row and its log
+    section (container names match game ids — games/docker-compose.yml)."""
+    if not snapshot:
+        return ""
+    lines = snapshot.splitlines()
+    out = [ln for ln in lines[1:3] if ln.startswith("NAMES")]            # the ps header
+    out += [ln for ln in lines if ln.split()[:1] == [container]]         # its ps row
+    marker = f"--- {container}: "
+    if marker in snapshot:
+        section = snapshot.split(marker, 1)[1]
+        out.append(marker + section.split("\n--- ", 1)[0].rstrip())
+    else:
+        out.append(f"(no {container} container in the latest snapshot: not started this boot)")
+    return "\n".join(out)
+
+
 def startup_tail(port1: str, lines: int = STARTUP_LINES) -> str:
     """Startup-script lines from the console, last boot's worth."""
     picked = [ln for ln in port1.splitlines() if _STARTUP.search(ln)]
@@ -42,14 +59,17 @@ def redact(text: str, env: dict[str, str]) -> str:
     return text
 
 
-def read(vm) -> dict[str, str]:
-    """Both logs, masked. Port 2 is empty until the first snapshot lands
-    (about a minute after boot) and on VMs booted before this existed."""
+def read(vm, game: str | None = None) -> dict[str, str]:
+    """Both logs, masked; with `game`, only that game's container. Port 2 is
+    empty until the first snapshot lands (about a minute after boot) and on
+    VMs booted before this existed."""
     env = vm.status().env
     try:
         snapshot = latest_snapshot(vm.serial_output(2))
     except Exception:   # noqa: BLE001 — port 2 not written yet reads as an error
         snapshot = ""
+    if game:
+        snapshot = for_game(snapshot, game)
     return {
         "containers": redact(snapshot, env) or
         "No container snapshot yet: it appears about a minute after the server boots "

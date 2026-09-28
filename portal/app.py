@@ -7,7 +7,7 @@ Local run:  FLASK_APP=app.py flask run   (needs every var in .env.example)
 """
 from __future__ import annotations
 
-from flask import Blueprint, Flask, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, Flask, abort, flash, jsonify, redirect, render_template, request, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import auth
@@ -59,6 +59,15 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
     def health():
         return "ok"
 
+    def back(default_endpoint: str):
+        """Return to the game page a form came from (hidden `next` field), or
+        to `default_endpoint`. Only /games/<known id> is accepted, so `next`
+        can't bounce anyone off-site."""
+        target = request.form.get("next", "")
+        if target.startswith("/games/") and target[len("/games/"):] in GAMES:
+            return redirect(target)
+        return redirect(url_for(default_endpoint))
+
     # ── dashboard: everyone on the allowlist ───────────────────────────────────
     dash = Blueprint("dashboard", __name__)
 
@@ -81,13 +90,28 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
         except Exception as exc:   # noqa: BLE001 — the VM API; show it, don't 500
             ok, message = False, f"Couldn't reach the VM: {exc}"
         flash(message, "ok" if ok else "error")
-        return redirect(url_for("dashboard.index"))
+        return back("dashboard.index")
 
     @dash.post("/games/stop")
     @auth.login_required
     def games_stop():
         flash(ops.stop_server(vm)[1], "ok")
-        return redirect(url_for("dashboard.index"))
+        return back("dashboard.index")
+
+    @dash.get("/games/<gid>")
+    @auth.login_required
+    def game(gid):
+        if gid not in GAMES:
+            abort(404)
+        status, error = vm_status()
+        env = status.env if status else {}
+        banner = env.get(GAMES[gid].banner_key, "")
+        return render_template(
+            "game.html", game=GAMES[gid], t=GAMES[gid].theme, status=status, error=error,
+            links=discord_admin.links(env, gid),
+            banner=banner if banner.startswith("https://") else "",
+            bot_configured=bool(app.config["DISCORD_BOT_TOKEN"]),
+        )
 
     app.register_blueprint(dash)
 
@@ -115,6 +139,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
                     continue          # secret left blank = keep the current value
                 value = value.strip()
                 problem = envfile.check(value)
+                if not problem and s.key == game.banner_key and value and not value.startswith("https://"):
+                    problem = "must start with https://"
                 if problem:
                     bad.append(f"{game.name} {s.label.lower()} {problem}.")
                     continue
@@ -122,17 +148,17 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
         for message in bad:
             flash(message + " Nothing was saved.", "error")
         if bad:
-            return redirect(url_for("admin.index"))
+            return back("admin.index")
         if updates:
             vm.update_env(updates)
             flash("Settings saved. Restart the server to apply them.", "ok")
-        return redirect(url_for("admin.index"))
+        return back("admin.index")
 
     @admin.post("/restart")
     @auth.admin_required
     def restart():
         flash(ops.restart_server(vm)[1], "ok")
-        return redirect(url_for("admin.index"))
+        return back("admin.index")
 
     @admin.post("/discord")
     @auth.admin_required
@@ -150,16 +176,18 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
         vm.update_env(updates)
         flash("Discord channels, webhooks and pinned posts are ready. "
               "The VM picks up the webhooks on its next start.", "ok")
-        return redirect(url_for("admin.index"))
+        return back("admin.index")
 
     @admin.get("/logs")
     @auth.admin_required
     def logs():
+        gid = request.args.get("game")
+        game = GAMES.get(gid) if gid else None
         try:
-            logs, error = diagnostics.read(vm), None
+            logs, error = diagnostics.read(vm, game.id if game else None), None
         except Exception as exc:   # noqa: BLE001
             logs, error = None, str(exc)
-        return render_template("logs.html", logs=logs, error=error)
+        return render_template("logs.html", logs=logs, error=error, game=game)
 
     app.register_blueprint(admin)
 

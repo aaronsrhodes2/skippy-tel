@@ -276,3 +276,59 @@ def test_server_logs_tool_is_admin_only(env):
     assert "server_logs" in names
     out = run("server_logs", {})
     assert "Up 3 minutes" in out and "dragonpw" not in out
+
+
+# ── per-game pages ────────────────────────────────────────────────────────────
+
+def test_every_game_has_a_themed_page(env):
+    client, _, _ = env
+    login(client, FRIEND)
+    for gid, game in portal.GAMES.items():
+        page = client.get(f"/games/{gid}").data.decode()
+        assert game.name in page and game.theme.tagline.replace("'", "&#39;") in page
+        assert game.theme.accent in page
+    assert client.get("/games/nope").status_code == 404
+
+
+def test_game_page_admin_section_only_for_admins(env):
+    client, _, _ = env
+    login(client, FRIEND)
+    page = client.get("/games/dragonwilds").data.decode()
+    assert "Owner Player ID" not in page and "Restart" not in page
+    login(client, ADMIN)
+    page = client.get("/games/dragonwilds").data.decode()
+    assert "Owner Player ID" in page and "Restart &amp; update" in page
+    assert "Valheim" not in page.split("<h2>Admin</h2>")[1]      # only this game's settings
+    assert "adm1n" not in page and "hunter22" not in page         # secrets never rendered
+
+
+def test_game_page_forms_come_back_to_the_game_page(env):
+    client, vm, _ = env
+    login(client, ADMIN)
+    resp = client.post("/admin/settings", data={"DRAGONWILDS_SERVER_NAME": "SkippyScape",
+                                                 "next": "/games/dragonwilds"})
+    assert resp.headers["Location"].endswith("/games/dragonwilds")
+    assert vm.state.env["DRAGONWILDS_SERVER_NAME"] == "SkippyScape"
+    resp = client.post("/admin/restart", data={"next": "https://evil.example/"})
+    assert resp.headers["Location"].endswith("/admin")            # off-site next ignored
+
+
+def test_banner_must_be_https(env):
+    client, vm, _ = env
+    login(client, ADMIN)
+    client.post("/admin/settings", data={"DRAGONWILDS_BANNER_URL": "javascript:alert(1)"})
+    assert "DRAGONWILDS_BANNER_URL" not in vm.state.env
+    client.post("/admin/settings", data={"DRAGONWILDS_BANNER_URL": "https://img.example/d.jpg"})
+    assert 'src="https://img.example/d.jpg"' in client.get("/games/dragonwilds").data.decode()
+
+
+def test_game_logs_are_filtered_to_that_game(env):
+    client, vm, _ = env
+    vm.serial[2] = ("=== skippy-diag x ===\nNAMES\tSTATUS\tPORTS\n"
+                    "dragonwilds\tUp 2 minutes\t\nvalheim\tExited (1)\t\n"
+                    "--- dragonwilds: last 40 log lines\nsteamcmd 42%\n"
+                    "--- valheim: last 40 log lines\nvalheim noise\n=== end ===\n")
+    login(client, ADMIN)
+    page = client.get("/admin/logs?game=dragonwilds").data.decode()
+    assert "steamcmd 42%" in page and "Up 2 minutes" in page
+    assert "valheim noise" not in page and "Exited" not in page

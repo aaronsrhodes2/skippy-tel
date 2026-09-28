@@ -22,8 +22,10 @@
 
     {% for id, game in games.items() %}
       {% set on = running and id in status.games %}
-      <div class="card" id="{{ id }}">
-        <h3>{{ game.name }} {% if on %}<span class="dot green" title="running"></span>{% endif %}</h3>
+      <div class="card" id="{{ id }}" {% if game.theme %}style="border-left: 4px solid {{ game.theme.accent }}"{% endif %}>
+        <h3><a href="{{ url_for('dashboard.game', gid=id) }}" style="color:inherit">{{ game.name }}</a>
+          {% if on %}<span class="dot green" title="running"></span>{% endif %}
+          <a href="{{ url_for('dashboard.game', gid=id) }}" style="font-size:.8rem;font-weight:normal">open &rarr;</a></h3>
         <p>{{ game.description }}</p>
 
         {% if on %}

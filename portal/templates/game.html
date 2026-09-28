@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{# `t` (the game's Theme) comes from the view: a top-level {% set %} in a child
+   template isn't visible inside its blocks. #}
+{% block title %}{{ game.name }} — Skippy Portal{% endblock %}
+{% block head %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family={{ t.font | replace(' ', '+') }}:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  /* This game's theme (portal/catalog.py → Theme) over the portal's base palette. */
+  body { background: {{ t.bg }}; }
+  .game-page { --accent: {{ t.accent }}; --accent2: {{ t.accent2 }}; --card: {{ t.card }}; --text: {{ t.text }}; color: var(--text); }
+  .game-page a { color: var(--accent); }
+  .game-page h2 { color: var(--accent2); font-family: "{{ t.font }}", serif; }
+  .hero {
+    position: relative; border-radius: 12px; overflow: hidden; margin-bottom: 24px;
+    border: 1px solid var(--accent2); background: {{ t.card }};
+    background-image: {{ t.pattern }};
+    min-height: 180px; display: flex; align-items: flex-end;
+  }
+  .hero img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .55; }
+  .hero .inner { position: relative; padding: 20px; width: 100%;
+                 background: linear-gradient(0deg, rgba(0,0,0,.75), transparent); }
+  .hero h1 { font-family: "{{ t.font }}", serif; color: var(--white); font-size: 2rem; margin: 0;
+             text-shadow: 0 0 18px var(--accent); }
+  .hero .tagline { margin: 4px 0 0; color: var(--accent2); }
+  .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .8rem; margin-top: 10px;
+          border: 1px solid var(--accent); }
+  .game-page .card { background: var(--card); border-color: var(--accent2); }
+  .game-page .card p { color: var(--text); }
+  .game-page button, .game-page .btn { background: transparent; border-color: var(--accent); color: var(--white); }
+  .game-page button:hover, .game-page .btn:hover { background: var(--accent); color: var(--black); }
+  .game-page button.danger { border-color: var(--red); }
+  .game-page input[type=text], .game-page input[type=password] { border-color: var(--accent2); }
+  .game-page label.field, .game-page .help { color: var(--text); opacity: .85; }
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+  .facts div { background: var(--card); border: 1px solid var(--accent2); border-radius: 8px; padding: 10px; }
+  .facts b { display: block; font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--accent2); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="game-page">
+  {% set running = status and status.status == 'RUNNING' %}
+  {% set asleep = status and status.status == 'TERMINATED' %}
+  {% set on = running and game.id in status.games %}
+  {% set up = status.minutes_up() if status else none %}
+  {% set starting = on and up is not none and up < game.ready_minutes %}
+
+  <div class="hero">
+    {% if banner %}<img src="{{ banner }}" alt="">{% endif %}
+    <div class="inner">
+      <h1>{{ game.name }}</h1>
+      <p class="tagline">{{ t.tagline }}</p>
+      {% if error %}<span class="pill">VM unreachable</span>
+      {% elif starting %}<span class="pill">⏳ Starting — booted {{ up }} min ago</span>
+      {% elif on %}<span class="pill">🟢 Online</span>
+      {% elif running %}<span class="pill">Server busy with other games</span>
+      {% elif asleep %}<span class="pill">💤 Asleep — the world is saved</span>
+      {% else %}<span class="pill">{{ status.status | title }}</span>{% endif %}
+    </div>
+  </div>
+
+  {% if error %}<p class="error">Couldn't reach the VM: {{ error }}</p>{% endif %}
+
+  <section>
+    <h2>Play</h2>
+    <div class="card">
+      <p>{{ game.description }}</p>
+      {% if on %}
+        {% if starting %}<p>Usually joinable about {{ game.ready_minutes }} min after boot.</p>{% endif %}
+        <p>{{ game.connect(status.external_ip, status.env) | safe }}</p>
+        {% if game.join_password_key %}
+          {% set pw = status.env.get(game.join_password_key, '') %}
+          {% if pw %}<details><summary>Show join password</summary><p><code>{{ pw }}</code></p></details>
+          {% else %}<p class="help">No password set — anyone who finds it can join.</p>{% endif %}
+        {% endif %}
+        <p class="help">Sleeps after {{ status.idle_minutes }} idle minutes.</p>
+      {% elif asleep %}
+        <form method="post" action="{{ url_for('dashboard.games_start') }}" class="row">
+          <input type="hidden" name="games" value="{{ game.id }}">
+          <input type="hidden" name="idle_minutes" value="{{ status.idle_minutes }}">
+          <input type="hidden" name="next" value="{{ url_for('dashboard.game', gid=game.id) }}">
+          <button type="submit">Play {{ game.name }}</button>
+          <span class="help">ready in ~{{ game.ready_minutes }} min</span>
+        </form>
+      {% elif running %}
+        <p class="help">The server is running other games right now. It frees up when they go to sleep.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section>
+    <h2>Talk</h2>
+    <p class="links">
+      {% if links.text %}<a href="{{ links.text }}" target="_blank" rel="noopener">#{{ game.id }} on Discord</a>{% endif %}
+      {% if links.voice %}<a href="{{ links.voice }}" target="_blank" rel="noopener">🔊 voice channel</a>{% endif %}
+      {% if not links.text %}<a href="{{ discord_invite }}" target="_blank" rel="noopener">Join the Discord</a>{% endif %}
+    </p>
+  </section>
+
+  {% if game.facts %}
+  <section>
+    <h2>At a glance</h2>
+    <div class="facts">
+      {% for label, value in game.facts %}<div><b>{{ label }}</b>{{ value }}</div>{% endfor %}
+    </div>
+    {% if game.links %}
+      <p class="links" style="margin-top:12px">
+        {% for label, url in game.links %}<a href="{{ url }}" target="_blank" rel="noopener">{{ label }}</a>{% endfor %}
+      </p>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if is_admin and status %}
+  <section>
+    <h2>Admin</h2>
+    <div class="card">
+      <div class="row">
+        <form class="inline" method="post" action="{{ url_for('admin.restart') }}"
+              onsubmit="return confirm('Restart now? Players are disconnected; worlds are saved first.');">
+          <input type="hidden" name="next" value="{{ url_for('dashboard.game', gid=game.id) }}">
+          <button type="submit">Restart &amp; update</button>
+        </form>
+        {% if running %}
+        <form class="inline" method="post" action="{{ url_for('dashboard.games_stop') }}"
+              onsubmit="return confirm('Stop the server for everyone? Worlds are saved first.');">
+          <input type="hidden" name="next" value="{{ url_for('dashboard.game', gid=game.id) }}">
+          <button type="submit" class="danger">Stop server</button>
+        </form>
+        {% endif %}
+        <a class="btn" href="{{ url_for('admin.logs', game=game.id) }}">{{ game.name }} logs</a>
+        {% if bot_configured %}
+        <form class="inline" method="post" action="{{ url_for('admin.discord_setup') }}">
+          <input type="hidden" name="next" value="{{ url_for('dashboard.game', gid=game.id) }}">
+          <button type="submit">Set up / repair Discord</button>
+        </form>
+        {% endif %}
+      </div>
+      <p class="help">Restart applies saved settings and pulls the latest server and game updates.</p>
+    </div>
+
+    <form method="post" action="{{ url_for('admin.settings') }}" class="card">
+      <input type="hidden" name="next" value="{{ url_for('dashboard.game', gid=game.id) }}">
+      {% for s in game.settings %}
+        <label class="field" for="{{ s.key }}">{{ s.label }}</label>
+        {% if s.secret %}
+          <input type="password" id="{{ s.key }}" name="{{ s.key }}" autocomplete="new-password"
+                 placeholder="{{ '(set — leave blank to keep)' if status.env.get(s.key) else '(not set)' }}">
+        {% else %}
+          <input type="text" id="{{ s.key }}" name="{{ s.key }}" value="{{ status.env.get(s.key, '') }}">
+        {% endif %}
+        {% if s.help %}<p class="help">{{ s.help }}</p>{% endif %}
+      {% endfor %}
+      <p><button type="submit">Save {{ game.name }} settings</button></p>
+    </form>
+  </section>
+  {% endif %}
+
+  <p><a href="{{ url_for('dashboard.index') }}">&larr; All servers</a></p>
+</div>
+{% endblock %}

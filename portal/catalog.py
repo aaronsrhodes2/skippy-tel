@@ -8,7 +8,7 @@ this portal).
 from __future__ import annotations
 
 import html
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable
 
 
@@ -21,6 +21,20 @@ class Setting:
 
 
 @dataclass(frozen=True)
+class Theme:
+    """Look of a game's own page (templates/game.html). Colors are CSS values;
+    `font` is a Google Fonts family used for headings."""
+    accent: str               # buttons, links, highlights
+    accent2: str              # secondary glow / borders
+    bg: str                   # page background
+    card: str                 # panel background
+    text: str                 # body text on panels
+    font: str
+    pattern: str              # CSS background-image layered over the hero
+    tagline: str
+
+
+@dataclass(frozen=True)
 class Game:
     id: str
     name: str
@@ -30,6 +44,14 @@ class Game:
     settings: tuple[Setting, ...] = field(default=())
     join_password_key: str = ""          # shown to signed-in players on the dashboard
     ready_minutes: int = 5               # typical boot → joinable, for the "starting" hint
+    theme: Theme | None = None
+    facts: tuple[tuple[str, str], ...] = field(default=())   # (label, value) on the game page
+    links: tuple[tuple[str, str], ...] = field(default=())   # (label, url) official site, wiki
+
+    @property
+    def banner_key(self) -> str:
+        """games-env key for an optional banner image URL (set on the game's page)."""
+        return f"{self.id.upper()}_BANNER_URL"
 
 
 GAMES: dict[str, Game] = {
@@ -55,6 +77,15 @@ GAMES: dict[str, Game] = {
         ),
         join_password_key="DRAGONWILDS_WORLD_PASSWORD",
         ready_minutes=6,
+        theme=Theme(accent="#ff7a1a", accent2="#c9a24a", bg="#120806", card="#24110b", text="#f3dcc2",
+                    font="Cinzel",
+                    pattern="radial-gradient(ellipse at 20% 110%, rgba(255,90,20,.55), transparent 60%), "
+                            "radial-gradient(ellipse at 85% -10%, rgba(201,162,74,.35), transparent 55%)",
+                    tagline="Dragons are loose in Ashenfall. Bring friends."),
+        facts=(("Players", "up to 6"), ("Crossplay", "PC · Xbox · PS5 · Switch 2"),
+               ("Joined by", "server name in the Public list"), ("Ports", "7778/udp + beacon 8888/udp")),
+        links=(("Official site", "https://dragonwilds.runescape.com"),
+               ("Wiki", "https://dragonwilds.runescape.wiki")),
     ),
     "valheim": Game(
         "valheim", "Valheim",
@@ -70,6 +101,14 @@ GAMES: dict[str, Game] = {
         ),
         join_password_key="VALHEIM_PASSWORD",
         ready_minutes=5,
+        theme=Theme(accent="#8fd3ff", accent2="#d8c9a3", bg="#0b1016", card="#141d27", text="#dfe8ef",
+                    font="Cinzel",
+                    pattern="linear-gradient(180deg, rgba(143,211,255,.18), transparent 70%), "
+                            "repeating-linear-gradient(115deg, rgba(216,201,163,.06) 0 2px, transparent 2px 22px)",
+                    tagline="Odin's tenth world awaits. Mind the trolls."),
+        facts=(("Players", "up to 10"), ("Crossplay", "Steam · Xbox · Game Pass"),
+               ("Joined by", "IP address, port 2456")),
+        links=(("Official site", "https://www.valheimgame.com"), ("Wiki", "https://valheim.fandom.com")),
     ),
     "factorio": Game(
         "factorio", "Factorio",
@@ -77,6 +116,13 @@ GAMES: dict[str, Game] = {
         ram_gb=2,
         connect=lambda ip, env: f"Multiplayer &rarr; Connect to address &rarr; <code>{ip}</code>",
         settings=(Setting("FACTORIO_SAVE_NAME", "Save name"),),
+        theme=Theme(accent="#ff9a1f", accent2="#7fb03a", bg="#141414", card="#232323", text="#e6e0d6",
+                    font="Titillium Web",
+                    pattern="repeating-linear-gradient(45deg, rgba(255,154,31,.10) 0 14px, rgba(0,0,0,0) 14px 28px)",
+                    tagline="The factory must grow."),
+        facts=(("Players", "as many as the factory can take"), ("Joined by", "IP address"),
+               ("Port", "34197/udp")),
+        links=(("Official site", "https://factorio.com"), ("Wiki", "https://wiki.factorio.com")),
     ),
     "satisfactory": Game(
         "satisfactory", "Satisfactory",
@@ -84,8 +130,23 @@ GAMES: dict[str, Game] = {
         ram_gb=12,
         connect=lambda ip, env: f"Server Manager &rarr; Add Server &rarr; <code>{ip}</code> port <code>7777</code>",
         settings=(Setting("SATISFACTORY_MAX_PLAYERS", "Max players"),),
+        theme=Theme(accent="#fa9549", accent2="#5fb6d9", bg="#0d1216", card="#18222a", text="#e2ecf2",
+                    font="Rajdhani",
+                    pattern="radial-gradient(circle at 80% 20%, rgba(95,182,217,.35), transparent 50%), "
+                            "linear-gradient(135deg, rgba(250,149,73,.25), transparent 60%)",
+                    tagline="FICSIT reminds you: efficiency is mandatory."),
+        facts=(("Players", "4 recommended, more configurable"),
+               ("Joined by", "Server Manager, IP + port 7777")),
+        links=(("Official site", "https://www.satisfactorygame.com"),
+               ("Wiki", "https://satisfactory.wiki.gg")),
     ),
 }
+
+# Every game can have a banner image on its page; the URL is just another setting.
+GAMES = {gid: replace(g, settings=g.settings + (Setting(
+    g.banner_key, "Banner image URL",
+    help="Optional: an https:// image shown at the top of this game's page."),))
+    for gid, g in GAMES.items()}
 
 
 def missing_settings(game_id: str, env: dict[str, str]) -> list[str]:
