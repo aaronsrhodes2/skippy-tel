@@ -24,7 +24,7 @@ from memory.schema import Conversation
 
 TEMPLATES = Path(__file__).parent / "templates"
 
-_SPEAKERS = {"claude": "Claude", "chatgpt": "ChatGPT", "grok": "Grok", "gemini": "Gemini"}
+_SPEAKERS = {"claude": "Claude", "claude-code": "Claude", "chatgpt": "ChatGPT", "grok": "Grok", "gemini": "Gemini"}
 _FIELDS = ("source", "id", "title", "device", "started", "updated",
            "messages", "topics", "summary", "url")
 
@@ -120,7 +120,7 @@ class Archive:
             self.ledger = json.loads(self._ledger_path.read_text(encoding="utf-8"))
 
     def init(self) -> None:
-        for sub in ("inbox", "conversations", "topics", ".skippy"):
+        for sub in ("inbox", "claude-code", "conversations", "topics", ".skippy"):
             (self.root / sub).mkdir(parents=True, exist_ok=True)
         readme = self.root / "README.md"
         if not readme.exists():

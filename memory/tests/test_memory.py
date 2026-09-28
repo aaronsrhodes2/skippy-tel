@@ -161,3 +161,32 @@ def test_cli_inbox_end_to_end(tmp_path, capsys):
     assert "2 new, 0 updated, 0 unchanged" in printed
     assert "0 new, 0 updated, 2 unchanged" in printed
     assert (out / "index.md").exists()
+
+
+# ── Claude Code transcripts ───────────────────────────────────────────────────
+
+CLAUDE_CODE = Path(__file__).parent / "fixtures" / "claude-code"
+
+
+def test_claude_code_sessions_keep_only_the_visible_conversation():
+    [conv] = list(parsers.load(CLAUDE_CODE))
+    assert conv.source == "claude-code"
+    assert conv.id == "0a1b2c3d-session"
+    assert conv.device == "skippy-pc"                 # from the archive's <machine> folder
+    assert conv.title == "skippy-tel: Set up the Valheim server"
+    assert [(m.role, m.text) for m in conv.messages] == [
+        ("user", "Set up the Valheim server"),        # reminder stripped
+        ("assistant", "On it, Captain."),             # thinking + tool_use dropped
+        ("assistant", "Done. World saved."),          # tool_result, sidechain, meta dropped
+    ]
+
+
+def test_cli_inbox_picks_up_claude_code_history(tmp_path, capsys):
+    out = tmp_path / "archive"
+    cli.main(["init", "--out", str(out)])
+    shutil.copytree(CLAUDE_CODE, out / "claude-code", dirs_exist_ok=True)
+    cli.main(["inbox", "--out", str(out)])
+    assert "claude-code: 1 new" in capsys.readouterr().out
+    assert list((out / "conversations" / "claude-code").rglob("*.md"))
+    cli.main(["inbox", "--out", str(out)])
+    assert "claude-code: 0 new, 0 updated, 1 unchanged" in capsys.readouterr().out

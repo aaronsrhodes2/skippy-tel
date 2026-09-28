@@ -19,7 +19,7 @@ class Message:
 
 @dataclass
 class Conversation:
-    source: str                    # "claude" | "chatgpt" | "grok" | "gemini"
+    source: str                    # "claude" | "claude-code" | "chatgpt" | "grok" | "gemini"
     id: str                        # stable id from the source; dedupe key
     title: str
     started: datetime

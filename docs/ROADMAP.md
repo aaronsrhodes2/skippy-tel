@@ -25,6 +25,7 @@ Last updated 2026-09-28.
 | Skippy Portal: auth, dashboard, admin, chat | [`portal/`](../portal) |
 | CI/CD: GitHub Actions + Workload Identity Federation → Terraform + Cloud Run | [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml), [`infra/bootstrap/`](../infra/bootstrap) |
 | Remote play host setup (Sunshine + readiness script), PC side | [`docs/streaming.md`](streaming.md) |
+| Claude Code history from every machine → Skippy Memory (hourly one-way copy + parser) | [`scripts/claude-history-sync.*`](../scripts), [`memory/parsers/claude_code.py`](../memory/parsers/claude_code.py) |
 | Secrets convention (vault on Drive) | [`docs/SECRETS.md`](SECRETS.md) |
 
 ## Next
@@ -35,7 +36,8 @@ Last updated 2026-09-28.
 | Portal | Background restarts with progress; per-game container restart without a full VM reboot |
 | Games | **EverQuest (EQEmu)** as a compose profile + migrate the local DB — open: which local setup (AkkStack / community compose / raw), public vs. private login server |
 | Games | First real session: Valheim / Dragonwilds (PC + Xbox crossplay); move Nitrado worlds, cancel Nitrado |
-| Memory | First real Claude export; Grok + Gemini parsers from real exports |
+| Memory | Install the history sync on the PC and MacBook; first real Claude export; Grok + Gemini parsers from real exports |
+| Secrets | Vault → Secret Manager sync in the deploy job (needs the Captain's OK for the IAM grant; manual `secrets.sh --from-env` until then) |
 | Bills | Cancel SuperGrok after Claude voice in the car is proven |
 | Streaming | MacBook side (Moonlight, pairing, hotspot test) |
 | Later | SkippyTel v2 core ([`docs/v2/CHARTER.md`](v2/CHARTER.md)); ARK (deferred, too heavy) |

@@ -9,10 +9,10 @@ import zipfile
 from pathlib import Path
 from typing import Any, Iterator
 
-from memory.parsers import claude
+from memory.parsers import claude, claude_code
 from memory.schema import Conversation
 
-PARSERS = {p.SOURCE: p for p in (claude,)}
+PARSERS = {p.SOURCE: p for p in (claude, claude_code)}
 
 # The file inside an export that holds the conversations, per source.
 _EXPORT_FILES = ("conversations.json",)
@@ -40,13 +40,19 @@ def _load_json(path: Path) -> Any:
 def load(path: Path, source: str | None = None) -> Iterator[Conversation]:
     """Parse an export (zip, folder, or json file). Source is auto-detected
     unless given explicitly."""
+    # Claude Code transcripts are a folder tree of JSONL files, not one JSON export.
+    if source == claude_code.SOURCE or (
+            source is None and path.is_dir() and not any(
+                (path / n).exists() for n in _EXPORT_FILES) and claude_code.looks_like_path(path)):
+        return claude_code.parse_path(path)
     data = _load_json(path)
     if source:
         parser = PARSERS.get(source)
         if parser is None:
             raise ValueError(f"unknown source {source!r}; known: {', '.join(PARSERS)}")
     else:
-        parser = next((p for p in PARSERS.values() if p.looks_like(data)), None)
+        parser = next((p for p in PARSERS.values()
+                       if hasattr(p, "looks_like") and p.looks_like(data)), None)
         if parser is None:
             raise ValueError(f"{path}: unrecognised export format; pass --source")
     return parser.parse(data)

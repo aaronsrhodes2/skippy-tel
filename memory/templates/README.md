@@ -22,6 +22,7 @@ Gemini), gathered in one place so any AI can read what was said elsewhere.
 | Path | What |
 |---|---|
 | `inbox/` | Drop raw exports here (Claude zip, Grok, Google Takeout). |
+| `claude-code/<machine>/` | Raw Claude Code session logs, copied hourly from each machine. Read the Markdown under `conversations/claude-code/` instead. |
 | `conversations/<source>/<yyyy-mm>/` | One Markdown file per conversation. |
 | `topics/` | Generated: conversations grouped by topic. |
 | `index.md` | Generated: overview and recent conversations. |

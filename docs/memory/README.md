@@ -47,6 +47,36 @@ which is copied into the Drive folder as its `README.md`.
    Re-importing an export you've already imported changes nothing. A
    conversation you continued since the last export gets updated in place.
 
+## Claude Code history (every machine, automatic)
+
+Claude Code keeps each session as a file under `~/.claude/projects/` on the
+machine that ran it, so the PC can't see the Mac's sessions and vice versa.
+A small job on each machine copies that folder **one way** into
+`Skippy Memory/claude-code/<machine>/` every hour; `make memory-inbox` then
+turns every machine's sessions into the same searchable Markdown as the
+claude.ai exports, tagged with the machine they came from.
+
+One-time, per machine (Google Drive for Desktop must be running):
+
+| Machine | Command |
+|---|---|
+| Windows PC | `powershell -ExecutionPolicy Bypass -File scripts\claude-history-sync.ps1 -Install` |
+| MacBook | `bash scripts/claude-history-sync.sh --install` |
+
+`-Uninstall` / `--uninstall` removes the job. Set `SKIPPY_MEMORY_DIR` if the
+Drive folder isn't at the default (`G:\My Drive\Skippy Memory` on Windows,
+`~/Library/CloudStorage/GoogleDrive-*/My Drive/Skippy Memory` on the Mac).
+
+Why a copy and not a symlink of `~/.claude/projects` into Drive: sessions are
+appended to constantly, and Drive syncing a file mid-write produces
+"conflicted copy" duplicates. `~/.claude` also holds login credentials that
+must never sync. And `/resume` looks sessions up by the project's absolute
+path, which differs between Windows and the Mac, so a shared folder wouldn't
+make the other machine's sessions resumable anyway. What carries context
+across machines is this archive (and each repo's CLAUDE.md). Cloud sessions
+(claude.ai/code) aren't on any disk; they're already visible from every
+device at claude.ai/code.
+
 ## In the car
 
 Use Claude voice mode on the S23 with audio over the car's Bluetooth. Those

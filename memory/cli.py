@@ -2,7 +2,8 @@
 
   python -m memory init    --out "G:/My Drive/Skippy Memory"
   python -m memory ingest  <export.zip|folder|conversations.json> --out <dir> [--source claude] [--distill]
-  python -m memory inbox   --out <dir> [--distill]     ingest every export in <dir>/inbox/
+  python -m memory inbox   --out <dir> [--distill]     ingest every export in <dir>/inbox/,
+                                                       plus Claude Code history in <dir>/claude-code/
   python -m memory distill --out <dir> [--redo]        tag untagged conversations with the local LLM
   python -m memory reindex --out <dir>                 rebuild index.md and topics/
 """
@@ -80,11 +81,14 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "inbox":
         exports = sorted(p for p in (archive.root / "inbox").iterdir()
                          if p.suffix in (".zip", ".json") or p.is_dir())
+        cc = archive.root / "claude-code"     # filled by scripts/claude-history-sync.*
+        if cc.is_dir():
+            exports.append(cc)
         if not exports:
             print("inbox is empty")
         for path in exports:
             try:
-                _ingest_one(archive, path, None)
+                _ingest_one(archive, path, "claude-code" if path == cc else None)
             except ValueError as exc:
                 print(f"{path.name}: skipped ({exc})")
         _finish(archive, args)
