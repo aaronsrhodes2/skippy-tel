@@ -32,7 +32,8 @@ def persona() -> str:
 
 
 def system_prompt(user_name: str, is_admin: bool = False) -> str:
-    restart = " and restart it (you're talking to an admin)" if is_admin else ""
+    restart = (", restart it, and read its logs to diagnose problems (you're talking to an admin)"
+               if is_admin else "")
     return (
         f"{persona()}\n\n"
         "## Where you are\n"

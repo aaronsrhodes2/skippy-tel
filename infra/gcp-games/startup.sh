@@ -78,8 +78,45 @@ OnUnitActiveSec=5min
 [Install]
 WantedBy=timers.target
 UNIT
+# Diagnostics for the portal's Admin → Server logs: every 2 minutes, a
+# snapshot of the game containers goes to serial port 2 (/dev/ttyS1), which
+# the portal reads through the Compute API — no SSH, no logging agent.
+cat > /usr/local/bin/skippy-diag <<'DIAG'
+#!/bin/bash
+{
+  echo "=== skippy-diag $(date -Is) ==="
+  docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>&1
+  for c in $(docker ps -a --format '{{.Names}}' 2>/dev/null); do
+    echo "--- $c: last 40 log lines"
+    docker logs --tail 40 "$c" 2>&1 | tail -c 6000
+  done
+  echo "--- udp listeners (game ports)"
+  ss -ulnp 2>/dev/null | grep -E ':(2456|2457|7777|7778|8888|34197)\b' || echo "(none)"
+  echo "--- memory";    free -m | head -2
+  echo "--- data disk"; df -h /srv/games/data | tail -1
+  echo "=== end ==="
+} > /dev/ttyS1 2>&1
+DIAG
+chmod 755 /usr/local/bin/skippy-diag
+cat > /etc/systemd/system/skippy-diag.service <<'UNIT'
+[Unit]
+Description=Snapshot game containers to serial port 2 for the portal
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/skippy-diag
+UNIT
+cat > /etc/systemd/system/skippy-diag.timer <<'UNIT'
+[Unit]
+Description=Game container snapshot every 2 minutes
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+[Install]
+WantedBy=timers.target
+UNIT
+
 systemctl daemon-reload
-systemctl enable --now skippy-idle-watchdog.timer
+systemctl enable --now skippy-idle-watchdog.timer skippy-diag.timer
 
 # ── 5. Games ──────────────────────────────────────────────────────────────────
 GAMES=$(meta games)

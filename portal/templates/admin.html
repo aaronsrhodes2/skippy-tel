@@ -12,6 +12,7 @@
           onsubmit="return confirm('Restart now? Players are disconnected; worlds are saved first.');">
       <button type="submit">Restart &amp; update</button>
     </form>
+    <a class="button" href="{{ url_for('admin.logs') }}">Server logs</a>
     <p class="help">Restarting applies saved settings and pulls the latest server images and game
       updates (every boot does). That's also how mod/image updates are applied.</p>
   {% endif %}

@@ -209,3 +209,23 @@ def test_merge_refuses_values_compose_cant_carry():
     for bad in ("it's", "two\nlines"):
         with pytest.raises(ValueError):
             envfile.merge("", {"PW": bad})
+
+
+# ── diagnostics ───────────────────────────────────────────────────────────────
+
+def test_latest_snapshot_and_startup_tail():
+    import diagnostics
+    port2 = "=== skippy-diag a ===\nold\n=== end ===\njunk\n=== skippy-diag b ===\nnew\n"
+    assert diagnostics.latest_snapshot(port2) == "=== skippy-diag b ===\nnew\n"   # still being written
+    assert diagnostics.latest_snapshot("nothing") == ""
+    port1 = ("kernel stuff\nstartup-script: === skippy-games boot 1 ===\nstartup-script: first\n"
+             "startup-script: === skippy-games boot 2 ===\nstartup-script: pull failed\n")
+    tail = diagnostics.startup_tail(port1)
+    assert "pull failed" in tail and "first" not in tail and "kernel" not in tail
+
+
+def test_redact_masks_only_secret_settings():
+    import diagnostics
+    env = {"DRAGONWILDS_WORLD_PASSWORD": "s3cret!", "DRAGONWILDS_SERVER_NAME": "SkippyScape"}
+    out = diagnostics.redact("name=SkippyScape pw=s3cret!", env)
+    assert out == "name=SkippyScape pw=••••"

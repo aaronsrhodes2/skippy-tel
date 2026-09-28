@@ -14,6 +14,7 @@ import auth
 import chat
 import chat_tools
 import config
+import diagnostics
 import discord_admin
 import envfile
 import ops
@@ -150,6 +151,15 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
         flash("Discord channels, webhooks and pinned posts are ready. "
               "The VM picks up the webhooks on its next start.", "ok")
         return redirect(url_for("admin.index"))
+
+    @admin.get("/logs")
+    @auth.admin_required
+    def logs():
+        try:
+            logs, error = diagnostics.read(vm), None
+        except Exception as exc:   # noqa: BLE001
+            logs, error = None, str(exc)
+        return render_template("logs.html", logs=logs, error=error)
 
     app.register_blueprint(admin)
 

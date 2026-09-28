@@ -2,7 +2,7 @@
 dashboard, with the same rights (ops.py holds the rules).
 
 Everyone signed in: server_status, start_game, stop_server — as on the
-dashboard. Admins also get restart_server; for players it isn't offered at
+dashboard. Admins also get restart_server and server_logs; for players it isn't offered at
 all, so the model can't even try it.
 
 Tool output never includes settings values (passwords live in games-env):
@@ -14,6 +14,7 @@ import html
 import json
 import re
 
+import diagnostics
 import ops
 from catalog import GAMES
 
@@ -45,6 +46,13 @@ _SCHEMAS = {
                        "has explicitly confirmed in this conversation.",
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
+    "server_logs": {
+        "name": "server_logs",
+        "description": "Admin diagnostics: the latest snapshot of the game containers (status, last "
+                       "log lines, listening game ports, memory, disk) and the last boot's startup "
+                       "script output. Use it to work out why a game isn't reachable. Passwords are masked.",
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
     "restart_server": {
         "name": "restart_server",
         "description": "Restart the server: applies saved settings and pulls game/image updates. "
@@ -54,7 +62,7 @@ _SCHEMAS = {
 }
 
 _EVERYONE = ("server_status", "start_game", "stop_server")
-_ADMIN = _EVERYONE + ("restart_server",)
+_ADMIN = _EVERYONE + ("restart_server", "server_logs")
 
 
 class ToolError(Exception):
@@ -109,6 +117,10 @@ class ChatTools:
 
     def _stop_server(self, _args) -> dict:
         return {"stopped": True, "message": ops.stop_server(self.vm)[1]}
+
+    def _server_logs(self, _args) -> dict:
+        logs = diagnostics.read(self.vm)
+        return {k: v[-6000:] for k, v in logs.items()}
 
     def _restart_server(self, _args) -> dict:
         return {"restarted": True, "message": ops.restart_server(self.vm)[1]}

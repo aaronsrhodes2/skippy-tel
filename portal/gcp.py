@@ -87,6 +87,15 @@ class GamesVm:
             started_at=_parse_ts(getattr(inst, "last_start_timestamp", None)),
         )
 
+    def serial_output(self, port: int) -> str:
+        """The VM's serial port buffer: port 1 is the console (boot and
+        startup-script output), port 2 carries skippy-diag snapshots."""
+        from google.cloud import compute_v1
+        return self._client.get_serial_port_output(
+            request=compute_v1.GetSerialPortOutputInstanceRequest(
+                project=self.project, zone=self.zone, instance=self.instance, port=port),
+        ).contents or ""
+
     def _set_metadata(self, updates: dict[str, str]) -> None:
         from google.cloud import compute_v1
         inst = self._get()

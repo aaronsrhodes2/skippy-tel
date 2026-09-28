@@ -40,6 +40,13 @@ class FakeVm:
         self.calls.append(("restart",))
         return self.state
 
+    serial = {1: "boot\nstartup-script: === skippy-games boot now ===\nstartup-script: started: dragonwilds\n",
+              2: "=== skippy-diag old ===\nstale\n=== end ===\n"
+                 "=== skippy-diag new ===\ndragonwilds Up 3 minutes\npassword=dragonpw\n=== end ===\n"}
+
+    def serial_output(self, port):
+        return self.serial[port]
+
     def update_env(self, updates):
         self.calls.append(("update_env", updates))
         self.state.env.update(updates)
@@ -248,3 +255,24 @@ def test_chat_start_tool_uses_dashboard_guardrails(env):
     assert vm.calls[-1] == ("start", ["dragonwilds"], 30)            # default idle, player-clamped
     with pytest.raises(Exception, match="already running"):
         run("start_game", {"games": ["valheim"]})
+
+
+def test_admin_logs_page_shows_latest_snapshot_masked(env):
+    client, _, _ = env
+    login(client, FRIEND)
+    assert client.get("/admin/logs").status_code == 403
+    login(client, ADMIN)
+    page = client.get("/admin/logs").data.decode()
+    assert "Up 3 minutes" in page and "stale" not in page
+    assert "started: dragonwilds" in page
+    assert "dragonpw" not in page                               # secrets masked
+
+
+def test_server_logs_tool_is_admin_only(env):
+    client, _, skippy = env
+    names, _ = _tools_for(client, skippy, FRIEND)
+    assert "server_logs" not in names
+    names, run = _tools_for(client, skippy, ADMIN)
+    assert "server_logs" in names
+    out = run("server_logs", {})
+    assert "Up 3 minutes" in out and "dragonpw" not in out
