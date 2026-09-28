@@ -85,9 +85,11 @@ forward — you don't need to.
 
 ## Portal access
 
-`ALLOWED_EMAILS` (may sign in) and `ADMIN_EMAILS` (settings, restart,
-Discord) are in the workflow's `env:` block. "Let my friend in" = Claude
-adds their email and pushes.
+`ALLOWED_EMAILS` (may sign in and play) and `ADMIN_EMAILS` (settings,
+restart, Discord) are in the workflow's `env:` block. "Let my friend in" =
+Claude adds their email and pushes. The Google OAuth app must be
+**published** (bootstrap says how), or Google blocks everyone except listed
+test users before the portal's allowlist is even consulted.
 
 ## Changing game servers
 

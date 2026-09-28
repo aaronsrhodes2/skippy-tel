@@ -11,6 +11,37 @@ page. Code in [`portal/`](../../portal); deployed on every push by
 | `/chat` | allowlist | Text chat with Skippy (Claude, Skippy persona) |
 | `/admin` | admins | Game settings (world names, passwords, Dragonwilds owner ID), **Restart & update**, **Set up / repair Discord channels** |
 
+## Friends: play without the Captain online
+
+The server lives in Google's cloud on its own persistent disk. Nothing about
+it depends on your PC or on you being signed in.
+
+1. **Grant access:** tell Claude "let <email> into the portal". It adds them
+   to `ALLOWED_EMAILS` in the deploy workflow and pushes; about 3 minutes later
+   they can sign in with that Google account.
+2. **They play:** Servers page → **Play RuneScape: Dragonwilds**. The VM
+   wakes, the server updates itself and loads the saved world. The tile shows
+   "Starting — booted N min ago" until it's typically joinable (~6 min), then
+   the join steps and a **Show join password** reveal.
+3. **It cleans up after itself:** after the auto-sleep window with nobody
+   playing, worlds are saved and the VM powers off. The next friend to click
+   Play wakes it again, with the same world.
+
+Guardrails for non-admins: auto-sleep can be 15–120 minutes, never "off";
+games can only be chosen while the server is asleep (so a friend can't
+restart it out from under someone else); settings, Restart and Discord setup
+are admin-only.
+
+**Set a world password.** Dragonwilds lists the world publicly, so without a
+password anyone who searches the name can join. With one set, the portal
+becomes how the password reaches your friends: signed-in players see it on
+the tile, and the Discord post points to the portal instead of printing it.
+
+**How fast is the popup?** Roughly: VM boot ~1 min, server update check +
+world load ~3–5 min. Right after a Dragonwilds patch, the first start also
+downloads the update (a few extra minutes). The Discord channel gets a
+"starting up" ping, so people can wait there.
+
 ## How it fits together
 
 - **Auth:** Google sign-in; `ALLOWED_EMAILS` / `ADMIN_EMAILS` re-checked on

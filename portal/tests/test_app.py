@@ -18,6 +18,8 @@ class FakeVm:
         self.state = VmStatus(status=state, machine_type="e2-standard-4", external_ip="35.1.2.3",
                               games=["valheim"], idle_minutes="30",
                               env={"VALHEIM_PASSWORD": "hunter22", "DISCORD_GUILD_ID": "g1",
+                                   "DRAGONWILDS_OWNER_ID": "owner1", "DRAGONWILDS_ADMIN_PASSWORD": "adm1n",
+                                   "DRAGONWILDS_WORLD_PASSWORD": "dragonpw",
                                    "DISCORD_CHANNEL_VALHEIM": "c1", "DISCORD_VOICE_VALHEIM": "v1"})
         self.calls = []
 
@@ -111,6 +113,8 @@ def test_start_and_stop(env):
     login(client, FRIEND)
     client.post("/games/start", data={"games": ["valheim"], "idle_minutes": "45"})
     assert vm.calls[-1] == ("start", ["valheim"], 45)
+    client.post("/games/start", data={"games": ["dragonwilds"]})   # already running: refused
+    assert vm.calls[-1] == ("start", ["valheim"], 45)
     client.post("/games/stop")
     assert vm.calls[-1] == ("stop",)
 
@@ -164,3 +168,22 @@ def test_chat_errors_are_shown_not_raised(env):
     resp = client.post("/chat/send", json={"message": "hi"})
     assert resp.status_code == 502
     assert "rate-limited" in resp.get_json()["error"]
+
+
+def test_friend_one_click_play_dragonwilds_with_guardrail(env):
+    client, vm, _ = env
+    login(client, FRIEND)
+    page = client.get("/dashboard").data.decode()
+    assert "Play RuneScape: Dragonwilds" in page
+    client.post("/games/start", data={"games": ["dragonwilds"], "idle_minutes": "0"})
+    assert vm.calls[-1] == ("start", ["dragonwilds"], 15)          # "never sleep" is admin-only
+
+
+def test_join_password_shown_to_players_only_while_running(env):
+    client, vm, _ = env
+    login(client, FRIEND)
+    assert "dragonpw" not in client.get("/dashboard").data.decode()   # asleep: nothing to join
+    vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
+    page = client.get("/dashboard").data.decode()
+    assert "dragonpw" in page
+    assert "search world" in page

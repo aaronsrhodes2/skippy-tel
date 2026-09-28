@@ -14,12 +14,8 @@ import auth
 import chat
 import config
 import discord_admin
-from catalog import GAMES, SERVICES, missing_settings
+from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, SERVICES, clamp_idle, missing_settings
 from gcp import GamesVm
-
-
-def _idle(value: str | None, default: int = 30) -> int:
-    return int(value) if value and value.isdigit() else default
 
 
 def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
@@ -38,6 +34,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
     def globals_():
         user = auth.current_user()
         return {"user": user, "is_admin": bool(user) and auth.is_admin(user["email"]),
+                "idle_min": PLAYER_IDLE_MIN, "idle_max": PLAYER_IDLE_MAX,
                 "chat_enabled": app.config["CHAT_ENABLED"],
                 "discord_invite": f"https://discord.gg/{app.config['DISCORD_INVITE']}"}
 
@@ -85,9 +82,17 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
             for p in problems:
                 flash(p + " An admin can set it on the Admin page.", "error")
         else:
-            vm.start(selected, idle_minutes=_idle(request.form.get("idle_minutes")))
-            flash(f"Starting {', '.join(GAMES[g].name for g in selected)}. "
-                  "First boot after an update takes 5–10 minutes.", "ok")
+            admin = auth.is_admin(auth.current_user()["email"])
+            idle = clamp_idle(request.form.get("idle_minutes"), admin)
+            if status.status == "RUNNING":
+                flash("The server is already running. Games can only be changed while it's asleep "
+                      "(or by an admin restart).", "error")
+            else:
+                vm.start(selected, idle_minutes=idle)
+                ready = max(GAMES[g].ready_minutes for g in selected)
+                flash(f"Starting {', '.join(GAMES[g].name for g in selected)} — usually joinable in about "
+                      f"{ready} minutes (longer right after a game update). It sleeps after {idle} "
+                      "idle minutes; anyone on the portal can wake it again.", "ok")
         return redirect(url_for("dashboard.index"))
 
     @dash.post("/games/stop")

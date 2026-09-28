@@ -51,8 +51,12 @@ if ! has_version portal-google-client-id; then
   cat <<EOF
 
   The portal needs a "Sign in with Google" OAuth client. In the console:
-    1. APIs & Services -> OAuth consent screen: External; add your email as a test user
-       (or publish the app) — only emails on the portal's allowlist get in regardless.
+    1. APIs & Services -> OAuth consent screen (Google Auth Platform): User type External,
+       app name "Skippy Portal", your email for support/contact. Then Audience ->
+       PUBLISH APP. Publishing matters: in "Testing" mode Google itself blocks anyone you
+       haven't added as a test user, so friends couldn't sign in. It only asks for
+       name + email, so no Google review is needed — and the portal's own allowlist
+       still decides who actually gets in.
     2. APIs & Services -> Credentials -> Create credentials -> OAuth client ID
        -> Web application. Authorized redirect URI:
            $PORTAL_URL/auth/callback

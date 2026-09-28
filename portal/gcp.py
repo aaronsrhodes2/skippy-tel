@@ -12,6 +12,7 @@ roles/compute.admin — no key file anywhere.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 import envfile
 from catalog import machine_for
@@ -25,6 +26,22 @@ class VmStatus:
     games: list[str] = field(default_factory=list)
     idle_minutes: str = "30"
     env: dict[str, str] = field(default_factory=dict)   # parsed games-env
+    started_at: datetime | None = None                  # last boot, for the "starting" hint
+
+    def minutes_up(self, now: datetime | None = None) -> int | None:
+        if self.status != "RUNNING" or not self.started_at:
+            return None
+        now = now or datetime.now(timezone.utc)
+        return max(0, int((now - self.started_at).total_seconds() // 60))
+
+
+def _parse_ts(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _metadata_dict(instance) -> dict[str, str]:
@@ -67,6 +84,7 @@ class GamesVm:
             games=meta.get("games", "").split(),
             idle_minutes=meta.get("idle-minutes", "30"),
             env=envfile.parse(meta.get("games-env", "")),
+            started_at=_parse_ts(getattr(inst, "last_start_timestamp", None)),
         )
 
     def _set_metadata(self, updates: dict[str, str]) -> None:

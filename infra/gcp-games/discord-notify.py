@@ -35,7 +35,7 @@ GAMES = {
     "valheim": (
         "Valheim",
         "Viking survival co-op. Dedicated world: it keeps its state between sessions.",
-        lambda ip, e: f"Join Game → Add server → `{ip}:2456`\nPassword: ask in this channel",
+        lambda ip, e: f"Join Game → Add server → `{ip}:2456`\nPassword: on the Skippy Portal dashboard",
     ),
     "factorio": (
         "Factorio",
@@ -52,7 +52,7 @@ GAMES = {
         "Survival crafting in Ashenfall. Crossplay: PC, Xbox, PS5 and Switch 2.",
         lambda ip, e: (f"Play → **Public** tab → search world "
                        f"**{e.get('DRAGONWILDS_WORLD_NAME', 'Ashenfall')}**"
-                       + ("\nWorld password: ask in this channel" if e.get("DRAGONWILDS_WORLD_PASSWORD") else "")),
+                       + ("\nWorld password: on the Skippy Portal dashboard" if e.get("DRAGONWILDS_WORLD_PASSWORD") else "")),
     ),
 }
 

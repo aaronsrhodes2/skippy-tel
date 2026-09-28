@@ -1,7 +1,7 @@
 """Pure-logic tests: stdlib only, run anywhere."""
 import envfile
 import discord_admin
-from catalog import GAMES, missing_settings
+from catalog import GAMES, clamp_idle, missing_settings
 from chat import MAX_MESSAGES, build_messages
 
 
@@ -102,3 +102,24 @@ def test_build_messages_caps_length_and_starts_with_user():
 def test_build_messages_tolerates_garbage_history():
     assert build_messages("nope", "hi") == [{"role": "user", "content": "hi"}]
     assert build_messages(None, "hi") == [{"role": "user", "content": "hi"}]
+
+
+# ── player guardrails ────────────────────────────────────────────────────────
+
+def test_players_cannot_disable_auto_sleep():
+    assert clamp_idle("0", is_admin=False) == 15
+    assert clamp_idle("9999", is_admin=False) == 120
+    assert clamp_idle("45", is_admin=False) == 45
+    assert clamp_idle("junk", is_admin=False) == 30
+    assert clamp_idle("0", is_admin=True) == 0
+    assert clamp_idle("9999", is_admin=True) == 9999
+
+
+def test_minutes_up():
+    from datetime import datetime, timedelta, timezone
+    from gcp import VmStatus
+    now = datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc)
+    s = VmStatus("RUNNING", "e2", "1.2.3.4", started_at=now - timedelta(minutes=3, seconds=30))
+    assert s.minutes_up(now) == 3
+    s.status = "TERMINATED"
+    assert s.minutes_up(now) is None

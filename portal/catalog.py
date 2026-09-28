@@ -27,6 +27,8 @@ class Game:
     ram_gb: int                          # sizing input, mirrors scripts/games.sh
     connect: Callable[[str, dict], str]  # (external_ip, settings) -> HTML-safe instructions
     settings: tuple[Setting, ...] = field(default=())
+    join_password_key: str = ""          # shown to signed-in players on the dashboard
+    ready_minutes: int = 5               # typical boot → joinable, for the "starting" hint
 
 
 GAMES: dict[str, Game] = {
@@ -45,8 +47,11 @@ GAMES: dict[str, Game] = {
             Setting("DRAGONWILDS_SERVER_NAME", "Server name"),
             Setting("DRAGONWILDS_WORLD_NAME", "World name", help="What players search for."),
             Setting("DRAGONWILDS_WORLD_PASSWORD", "World password", secret=True,
-                    help="Leave empty for no password."),
+                    help="Strongly recommended: the world is listed publicly, so without one "
+                         "anyone can join. Signed-in portal users see it on the dashboard."),
         ),
+        join_password_key="DRAGONWILDS_WORLD_PASSWORD",
+        ready_minutes=6,
     ),
     "valheim": Game(
         "valheim", "Valheim",
@@ -60,6 +65,8 @@ GAMES: dict[str, Game] = {
                     help="At least 5 characters; must not contain the server name."),
             Setting("VALHEIM_PUBLIC", "List in the public server browser", help="true or false"),
         ),
+        join_password_key="VALHEIM_PASSWORD",
+        ready_minutes=5,
     ),
     "factorio": Game(
         "factorio", "Factorio",
@@ -110,6 +117,20 @@ SERVICES: list[Service] = [
     Service("jellyfin", "Jellyfin", "Movies and TV", "http://skippy-pc:8096"),
     Service("skippytel", "SkippyTel", "Phone recovery + AI inference", "http://skippy-pc:3003/phone"),
 ]
+
+
+# ── Who may choose what (guardrails for non-admin players) ──────────────────
+
+PLAYER_IDLE_MIN, PLAYER_IDLE_MAX, DEFAULT_IDLE = 15, 120, 30
+
+
+def clamp_idle(value: str | None, is_admin: bool) -> int:
+    """Auto-sleep minutes. Admins may pick anything, including 0 (never
+    sleep); players get 15–120 so nobody leaves the VM billing all week."""
+    minutes = int(value) if value and value.strip().isdigit() else DEFAULT_IDLE
+    if is_admin:
+        return minutes
+    return min(max(minutes, PLAYER_IDLE_MIN), PLAYER_IDLE_MAX)
 
 
 # ── VM sizing (mirrors scripts/games.sh's ram_gb/machine_for) ────────────────

@@ -6,25 +6,52 @@
   {% if error %}
     <p class="error">Couldn't reach the VM: {{ error }}</p>
   {% else %}
+    {% set running = status.status == 'RUNNING' %}
+    {% set asleep = status.status == 'TERMINATED' %}
+    {% set up = status.minutes_up() %}
     <p>
-      <span class="dot {{ 'green' if status.status == 'RUNNING' else ('amber' if status.status not in ('RUNNING','TERMINATED') else 'grey') }}"></span>
-      <strong>{{ 'Online' if status.status == 'RUNNING' else ('Asleep' if status.status == 'TERMINATED' else status.status|title) }}</strong>
-      {% if status.status == 'RUNNING' %}
-        &middot; {{ status.games | map('extract', games) | map(attribute='name') | join(', ') or 'no games selected' }}
-        &middot; <code>{{ status.external_ip }}</code>
-        &middot; sleeps after {{ status.idle_minutes }} min idle
+      <span class="dot {{ 'green' if running else ('grey' if asleep else 'amber') }}"></span>
+      <strong>{{ 'Online' if running else ('Asleep' if asleep else status.status|title) }}</strong>
+      {% if running %}
+        &middot; {{ status.games | map('extract', games) | map(attribute='name') | join(', ') or 'no games' }}
+        &middot; sleeps after {{ status.idle_minutes }} idle min
+      {% elif asleep %}
+        &middot; the world is saved; anyone here can wake it.
       {% endif %}
     </p>
 
     {% for id, game in games.items() %}
+      {% set on = running and id in status.games %}
       <div class="card" id="{{ id }}">
-        <h3>{{ game.name }}
-          {% if status.status == 'RUNNING' and id in status.games %}<span class="dot green" title="running"></span>{% endif %}
-        </h3>
+        <h3>{{ game.name }} {% if on %}<span class="dot green" title="running"></span>{% endif %}</h3>
         <p>{{ game.description }}</p>
-        {% if status.status == 'RUNNING' and id in status.games %}
+
+        {% if on %}
+          {% if up is not none and up < game.ready_minutes %}
+            <p><span class="dot amber"></span>Starting — booted {{ up }} min ago, usually joinable
+               ~{{ game.ready_minutes }} min after boot.</p>
+          {% endif %}
           <p>{{ game.connect(status.external_ip, status.env) | safe }}</p>
+          {% if game.join_password_key %}
+            {% set pw = status.env.get(game.join_password_key, '') %}
+            {% if pw %}
+              <details><summary>Show join password</summary><p><code>{{ pw }}</code></p></details>
+            {% else %}
+              <p class="help">No password set — anyone who finds it can join.</p>
+            {% endif %}
+          {% endif %}
+        {% elif asleep %}
+          <form method="post" action="{{ url_for('dashboard.games_start') }}">
+            <input type="hidden" name="games" value="{{ id }}">
+            <input type="hidden" name="idle_minutes" value="{{ status.idle_minutes }}">
+            <button type="submit">Play {{ game.name }}</button>
+            <span class="help">&nbsp;ready in ~{{ game.ready_minutes }} min</span>
+          </form>
+        {% elif running %}
+          <p class="help">The server is running other games right now. It frees up when they go to
+            sleep{% if is_admin %}, or restart it from Admin with this game added{% endif %}.</p>
         {% endif %}
+
         <p class="links">
           {% if links[id].text %}<a href="{{ links[id].text }}" target="_blank" rel="noopener">#{{ id }} on Discord</a>{% endif %}
           {% if links[id].voice %}<a href="{{ links[id].voice }}" target="_blank" rel="noopener">🔊 voice</a>{% endif %}
@@ -33,25 +60,30 @@
       </div>
     {% endfor %}
 
-    {% if status.status == 'RUNNING' %}
+    {% if running %}
       <form class="inline" method="post" action="{{ url_for('dashboard.games_stop') }}"
-            onsubmit="return confirm('Stop the server? Worlds are saved first.');">
+            onsubmit="return confirm('Stop the server for everyone? Worlds are saved first.');">
         <button type="submit" class="danger">Stop server</button>
       </form>
-    {% elif status.status == 'TERMINATED' %}
-      <form method="post" action="{{ url_for('dashboard.games_start') }}">
-        {% for id, game in games.items() %}
-          <label class="game">
-            <input type="checkbox" name="games" value="{{ id }}" {{ 'checked' if id in status.games }}>
-            {{ game.name }}
+    {% elif asleep %}
+      <details>
+        <summary>Start several games at once</summary>
+        <form method="post" action="{{ url_for('dashboard.games_start') }}">
+          {% for id, game in games.items() %}
+            <label class="game">
+              <input type="checkbox" name="games" value="{{ id }}" {{ 'checked' if id in status.games }}>
+              {{ game.name }}
+            </label>
+          {% endfor %}
+          <label>Sleep after
+            <input type="number" name="idle_minutes" value="{{ status.idle_minutes }}"
+                   min="{{ 0 if is_admin else idle_min }}" {% if not is_admin %}max="{{ idle_max }}"{% endif %}
+                   style="width:5em">
+            minutes idle{% if is_admin %} (0 = never){% endif %}
           </label>
-        {% endfor %}
-        <label>Sleep after
-          <input type="number" name="idle_minutes" value="{{ status.idle_minutes }}" min="0" style="width:5em">
-          minutes idle (0 = never)
-        </label>
-        <p><button type="submit">Start selected</button></p>
-      </form>
+          <p><button type="submit">Start selected</button></p>
+        </form>
+      </details>
     {% else %}
       <p>The server is changing state — refresh in a minute.</p>
     {% endif %}
