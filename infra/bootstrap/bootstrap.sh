@@ -90,8 +90,8 @@ echo "  done"
 say "Wiring GitHub Actions to this project"
 cd "$ROOT"
 WORKFLOW=.github/workflows/deploy.yml
-if grep -q "PROJECT_NUMBER" "$WORKFLOW"; then
-  sed -i "s/PROJECT_NUMBER/$NUMBER/" "$WORKFLOW"
+if grep -q "WIF_PROVIDER: projects/PROJECT_NUMBER" "$WORKFLOW"; then
+  sed -i "/WIF_PROVIDER: /s/PROJECT_NUMBER/$NUMBER/" "$WORKFLOW"
   git add "$WORKFLOW"
   git -c user.name="Skippy bootstrap" -c user.email="noreply@skippy-tel" \
     commit -q -m "Point deploy workflow at GCP project $PROJECT ($NUMBER)"

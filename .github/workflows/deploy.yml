@@ -25,7 +25,7 @@ concurrency:
 env:
   PROJECT_ID: skippy-tel
   REGION: us-west1
-  WIF_PROVIDER: projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/github
+  WIF_PROVIDER: projects/1015050363686/locations/global/workloadIdentityPools/github/providers/github
   DEPLOYER_SA: skippy-deployer@skippy-tel.iam.gserviceaccount.com
   RUNTIME_SA: skippy-agent@skippy-tel.iam.gserviceaccount.com
   IMAGE: us-west1-docker.pkg.dev/skippy-tel/skippy/portal
