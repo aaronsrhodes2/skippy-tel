@@ -1,4 +1,4 @@
-.PHONY: run stop logs build test pull-model health intent apks phone-check adb-connect adb-devices ups-monitor ups-status push-all memory-init memory-ingest memory-inbox memory-distill
+.PHONY: run stop logs build test pull-model health intent apks phone-check adb-connect adb-devices ups-monitor ups-status push-all memory-init memory-ingest memory-inbox memory-distill games-up games-down games-status games-env
 
 # ── Two-machine sync ─────────────────────────────────────────────────────────
 # Single developer, two stations (PC + Mac).
@@ -175,3 +175,18 @@ memory-inbox:
 
 memory-distill:
 	python -m memory distill --out "$(MEMORY_DIR)"
+
+# Pop-up game servers on GCP. See docs/games/README.md.
+#   make games-up GAMES="valheim dragonwilds"   (IDLE=90 for a longer auto-sleep grace)
+games-up:
+	@if [ -z "$(GAMES)" ]; then echo 'usage: make games-up GAMES="valheim dragonwilds"'; exit 2; fi
+	bash scripts/games.sh up $(GAMES) $(if $(IDLE),--idle $(IDLE))
+
+games-down:
+	bash scripts/games.sh down
+
+games-status:
+	bash scripts/games.sh status
+
+games-env:
+	bash scripts/games.sh env

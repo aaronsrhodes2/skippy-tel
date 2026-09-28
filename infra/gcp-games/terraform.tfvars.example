@@ -1,0 +1,4 @@
+# Copy to terraform.tfvars (gitignored) and fill in.
+project = "your-gcp-project-id"
+# region = "us-west1"
+# zone   = "us-west1-b"
