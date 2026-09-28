@@ -113,6 +113,7 @@ resource "google_storage_bucket_iam_member" "deployer_state" {
 # for the games VM). Deploying a service that runs as it = acting as it.
 data "google_service_account" "runtime" {
   account_id = "skippy-agent"
+  depends_on = [google_project_service.apis]
 }
 
 resource "google_service_account_iam_member" "deployer_acts_as_runtime" {

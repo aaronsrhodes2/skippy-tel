@@ -24,7 +24,18 @@ if ! command -v terraform >/dev/null; then
   sudo apt-get update -qq && sudo apt-get install -y -qq terraform
 fi
 
-# ── 2. bootstrap resources ────────────────────────────────────────────────────
+# ── 2. APIs first (enabling one takes a minute to propagate; terraform's
+#       lookups fail if they run before that) ─────────────────────────────────
+say "Enabling APIs (this can take a minute)"
+gcloud services enable artifactregistry.googleapis.com cloudresourcemanager.googleapis.com \
+  compute.googleapis.com iam.googleapis.com iamcredentials.googleapis.com run.googleapis.com \
+  secretmanager.googleapis.com serviceusage.googleapis.com storage.googleapis.com sts.googleapis.com
+for i in $(seq 1 12); do
+  gcloud iam service-accounts describe "skippy-agent@$PROJECT.iam.gserviceaccount.com" >/dev/null 2>&1 && break
+  echo "  waiting for the IAM API to come up..."; sleep 10
+done
+
+# ── 3. bootstrap resources ────────────────────────────────────────────────────
 say "Creating CI/CD resources (state bucket, registry, deployer identity, secrets)"
 cd "$ROOT/infra/bootstrap"
 terraform init -input=false >/dev/null
@@ -33,7 +44,7 @@ NUMBER=$(terraform output -raw project_number)
 PORTAL_URL=$(terraform output -raw portal_url)
 BUCKET=$(terraform output -raw state_bucket)
 
-# ── 3. secrets ────────────────────────────────────────────────────────────────
+# ── 4. secrets ────────────────────────────────────────────────────────────────
 has_version() { gcloud secrets versions list "$1" --filter="state=ENABLED" --format="value(name)" --limit=1 2>/dev/null | grep -q .; }
 put() { printf '%s' "$2" | gcloud secrets versions add "$1" --data-file=- >/dev/null; }
 ask_secret() {  # ask_secret NAME "prompt" required|optional
@@ -69,13 +80,13 @@ ask_secret portal-google-client-secret "OAuth client secret" required
 ask_secret anthropic-api-key "Anthropic API key (enables Skippy chat)" optional
 ask_secret discord-bot-token "Discord bot token (enables Discord setup from the portal)" optional
 
-# ── 4. move the game-server Terraform state into the bucket CI uses ───────────
+# ── 5. move the game-server Terraform state into the bucket CI uses ───────────
 say "Moving infra/gcp-games state to gs://$BUCKET"
 cd "$ROOT/infra/gcp-games"
 terraform init -input=false -migrate-state -force-copy -backend-config="bucket=$BUCKET" >/dev/null
 echo "  done"
 
-# ── 5. point the workflow at this project, and push = first deploy ────────────
+# ── 6. point the workflow at this project, and push = first deploy ────────────
 say "Wiring GitHub Actions to this project"
 cd "$ROOT"
 WORKFLOW=.github/workflows/deploy.yml
