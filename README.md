@@ -1,5 +1,7 @@
 # SkippyTel
 
+> **v2.0 in design:** see [`docs/v2/CHARTER.md`](docs/v2/CHARTER.md). Everything below describes v1.
+
 PC-side AI inference for the Skippy AR system. The Android phone
 ([SkippyDroid](../Skippy)) calls these endpoints over Tailscale for
 inference that can't run on-device: LLM chat, Whisper transcription,
