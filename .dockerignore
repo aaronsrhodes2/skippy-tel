@@ -1,0 +1,7 @@
+# Only what portal/Dockerfile copies goes into the build context.
+*
+!portal/
+!services/flask-api/app/skippy_persona.md
+!infra/gcp-games/discord-notify.py
+portal/.env
+**/__pycache__

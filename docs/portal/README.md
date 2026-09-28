@@ -1,86 +1,52 @@
 # Skippy Portal
 
-One page, gated to you and whoever you allow: game server status and
-start/stop, links to the other services, and a way into Skippy. Code in
-[`portal/`](../../portal).
+One page, gated to you and whoever you allow: game servers with their
+Discord channels, the other services, a text chat with Skippy, and an admin
+page. Code in [`portal/`](../../portal); deployed on every push by
+[CI/CD](../cicd.md) to Cloud Run as `skippy-portal`.
 
-**Scope of this v1** (see `docs/ROADMAP.md` for what's deferred):
-- **Auth:** Google sign-in + a hardcoded email allowlist. No accounts, no
-  passwords — remove someone by deleting their email from the list and
-  redeploying.
-- **Games:** status, connect info, start (with a game picker + auto-sleep
-  minutes) and stop for the `infra/gcp-games/` VM. Calls the Compute Engine
-  API directly (`portal/gcp.py`) — same logic as `scripts/games.sh`, as a
-  library instead of a script.
-- **Services:** a static, curated list (`portal/catalog.py`'s `SERVICES`) —
-  no live health check. The portal runs on Cloud Run, which has no route
-  into the home Tailscale mesh most services live on; edit the list by hand
-  for now.
-- **Skippy:** a button that opens Claude (a Project if you've set one up,
-  otherwise a new chat) — not a custom-built chat interface. That's a
-  bigger, separate project if you want it later.
+| Page | Who | What |
+|---|---|---|
+| `/dashboard` | allowlist | Server status, start (game picker + auto-sleep) / stop, per-game connect info, `#game` and 🔊 voice Discord links |
+| `/chat` | allowlist | Text chat with Skippy (Claude, Skippy persona) |
+| `/admin` | admins | Game settings (world names, passwords, Dragonwilds owner ID), **Restart & update**, **Set up / repair Discord channels** |
 
-## One-time setup
+## How it fits together
 
-All of this happens in **Cloud Shell**, same as the game server setup.
+- **Auth:** Google sign-in; `ALLOWED_EMAILS` / `ADMIN_EMAILS` re-checked on
+  every request ([`portal/auth.py`](../../portal/auth.py)).
+- **Games:** the portal runs as `skippy-agent` (roles/compute.admin) and
+  drives the games VM through the Compute Engine API
+  ([`portal/gcp.py`](../../portal/gcp.py)). Server **settings** live in the
+  VM's `games-env` metadata; the VM writes them to `/srv/games/.env` on each
+  boot. So: edit settings → Restart → applied. No `.env` files, no `nano`.
+- **Restart = update:** every boot re-pulls the server images, and
+  Dragonwilds/Valheim update their game files on start.
+- **Discord:** the admin button ([`portal/discord_admin.py`](../../portal/discord_admin.py))
+  creates `#game` + 🔊 voice channels, a webhook and a pinned status post per
+  game, and stores the IDs/webhooks in `games-env` — which is where the
+  dashboard's links and the VM's status posts both come from.
+- **Stops are graceful however they happen:** the VM's shutdown-script
+  saves worlds and posts to Discord for the portal's Stop button, the idle
+  watchdog, or a manual stop alike.
 
-1. **OAuth client for "Sign in with Google"** (separate from any
-   gcloud/Terraform credentials — this one only ever sees an email address):
-   - GCP Console → **APIs & Services → OAuth consent screen** → configure
-     if you haven't already (External, or Internal if this is a Workspace org)
-   - **APIs & Services → Credentials → Create Credentials → OAuth client ID**
-     → Application type **Web application**
-   - Authorized redirect URI: `https://<the Cloud Run URL from step 3>/auth/callback`
-     (you'll need to deploy once first to learn the URL, then add this and
-     redeploy — Cloud Run URLs are stable across redeploys once created)
-   - Copy the **Client ID** and **Client secret**
+## Chat
 
-2. **A session secret:**
-   ```bash
-   python3 -c "import secrets; print(secrets.token_hex(32))"
-   ```
+Direct Claude API (`claude-opus-5`, server-side refusal fallback on), with
+Skippy's persona from `services/flask-api/app/skippy_persona.md`. History
+lives in the browser tab and is sent with each message; the server keeps
+nothing.
 
-3. **Deploy:**
-   ```bash
-   cd ~/skippy-tel
-   gcloud run deploy skippy-portal \
-     --source portal \
-     --region us-west1 \
-     --service-account skippy-agent@skippy-tel.iam.gserviceaccount.com \
-     --allow-unauthenticated \
-     --set-env-vars FLASK_SECRET_KEY=<from step 2>,GOOGLE_CLIENT_ID=<from step 1>,GOOGLE_CLIENT_SECRET=<from step 1>,ALLOWED_EMAILS=aaron.s.rhodes@gmail.com,GCP_PROJECT=skippy-tel,GCP_ZONE=us-west1-b,GCP_INSTANCE=skippy-games
-   ```
-   `--allow-unauthenticated` sounds backwards, but it's correct here: it
-   means Cloud Run's own IAM layer doesn't gate the request, because the
-   app does that itself (Google sign-in + the email allowlist). Without it,
-   Cloud Run would 403 every request before Flask ever saw it.
-   It reuses the `skippy-agent` service account already granted
-   `roles/compute.admin` for the games VM — no new key, no new account.
+**Not yet connected to skippy-tel-core or your MCP tools.** Cloud Run has no
+route into the home Tailscale mesh where skippy-tel-core runs. Next step
+(tracked in the roadmap): give the portal a way in — Tailscale on the
+portal side or a tunnel from the home side — then route chat through
+skippy-tel-core's `/intent/unmatched` and expose its capabilities as tools.
 
-4. Take the printed **Service URL**, go back to step 1's OAuth client, add
-   `<that URL>/auth/callback` as an authorized redirect URI, save.
+## Known rough edges
 
-5. Open the URL, sign in, confirm the dashboard loads and shows the VM's
-   real status.
-
-To add a friend: add their email to `ALLOWED_EMAILS` (comma-separated) and
-redeploy with the same command (env vars aren't stored anywhere else, so
-resending the full list each time is normal — a small script or Secret
-Manager reference removes that annoyance later if it gets tedious).
-
-## Redeploying after a code change
-```bash
-cd ~/skippy-tel && git pull
-gcloud run deploy skippy-portal --source portal --region us-west1
-```
-(Cloud Run keeps the previous env vars/service account on a redeploy that
-doesn't pass `--set-env-vars` — no need to repeat them.)
-
-## Known rough edges (v1)
-- Changing which games run while the VM is **already on** only updates its
-  metadata — it won't reconfigure the running containers until the next
-  stop/start. Matches a limitation already in `scripts/games.sh`.
-- `portal/gcp.py`'s exact Compute Engine client attribute names (notably
-  `nat_i_p`) couldn't be verified against a live API while writing this —
-  they're correct for the pinned `google-cloud-compute` version, but if the
-  dashboard errors with an `AttributeError`, that's the first place to look.
+- Choosing different games while the VM is **running** saves the choice;
+  it applies at the next restart.
+- Restart is synchronous (stop → start can take a few minutes); the page
+  waits. Fine for one admin; a background job + progress view is the fix if
+  it gets annoying.

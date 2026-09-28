@@ -1,46 +1,41 @@
 # Skippy roadmap
 
 **North star:** one AI, one memory, one bill, and personal infrastructure
-you own instead of rent. Last updated 2026-09-28.
+you own instead of rent — changed by asking, deployed by pushing.
+Last updated 2026-09-28.
 
-## Track 1: One AI, one memory, one bill
-| Phase | What | Status |
-|---|---|---|
-| 1.1 | AI bill audit → [`docs/ai-bills.md`](ai-bills.md) | ✅ done: cancel SuperGrok ($30), stop Claude auto-recharge, drop Google AI Plus to storage-only |
-| 1.2 | Skippy Memory: Claude exports → Drive archive, local-LLM topics → [`docs/memory/`](memory/README.md) | ✅ built. **Next:** first real Claude export, "Skippy" Claude Project, Drive connector |
-| 1.3 | Tesla: Claude voice on the S23 over Bluetooth replaces Grok | ⏳ try on the next drive, then cancel SuperGrok |
-| 1.4 | Grok + Gemini (Takeout) parsers | ⏳ needs a real export of each |
-| 1.5 | Home-hosted MCP server with semantic search over the archive | later: needs Track 4 auth |
+## Tonight's victory condition
+- [ ] **CI/CD:** tell Claude a change → it pushes → GitHub Actions tests and deploys. No typed commands. → [`docs/cicd.md`](cicd.md)
+- [ ] **Portal reachable** behind Google sign-in → [`docs/portal/README.md`](portal/README.md)
+- [ ] **RuneScape: Dragonwilds tile** with status, start/stop, how to join (world-name search; PC + Xbox crossplay), and its `#dragonwilds` / 🔊 Discord links
+- [ ] **Admin page:** settings, Restart & update, Discord setup
+- [ ] **Text chat with Skippy** (Claude + persona; skippy-tel-core/MCP bridging is the next phase)
 
-## Track 2: Pop-up game servers (replace Nitrado)
-| Phase | What | Status |
-|---|---|---|
-| 2.1 | Compose for Valheim, Factorio, Satisfactory, **RuneScape: Dragonwilds** → [`games/`](../games) | ✅ built |
-| 2.2 | GCP pop-up VM: auto-sizing, idle auto-sleep, daily snapshots → [`infra/gcp-games/`](../infra/gcp-games), [`scripts/games.sh`](../scripts/games.sh) | ✅ built and applied in the real `skippy-tel` GCP project |
-| 2.3 | Discord: per-game text + voice channel, pinned self-updating status post, start/sleep pings → [`scripts/discord_setup.py`](../scripts/discord_setup.py) | ✅ built. **Next:** create the bot, run setup |
-| 2.4 | First session: Dragonwilds with the work friend (PC + Xbox crossplay) | ⏳ |
-| 2.5 | Move Nitrado worlds over, then cancel Nitrado | ⏳ |
-| 2.6 | EverQuest (EQEmu), already running locally — add as a fifth compose profile + migrate its DB | ⏳ open questions in the plan: which local setup, public vs. private login server |
-| — | ARK | deferred: too resource-heavy |
+**Built and pushed; waiting on one step from you:** the one-time bootstrap in Cloud Shell —
+`cd ~/skippy-tel && git pull && bash infra/bootstrap/bootstrap.sh`.
 
-Hosting comparison and runbook: [`docs/games/README.md`](games/README.md).
+## Done
+| What | Where |
+|---|---|
+| AI bill audit (≈$240/mo → ≈$200: cancel SuperGrok, stop Claude auto-recharge, Google AI Plus → storage) | [`docs/ai-bills.md`](ai-bills.md) |
+| Skippy Memory: AI chat exports → Markdown archive on Drive, local-LLM topics, Claude Project instructions | [`memory/`](../memory), [`docs/memory/`](memory/README.md) |
+| Game servers as compose profiles: Valheim, Factorio, Satisfactory, RuneScape: Dragonwilds | [`games/`](../games) |
+| GCP pop-up VM — **live** in project `skippy-tel`, `us-west1-b`, IP `35.233.145.176`: auto-sizing, idle auto-sleep, graceful shutdown, daily snapshots | [`infra/gcp-games/`](../infra/gcp-games) |
+| Discord per-game channels, webhooks, self-updating pinned status | [`portal/discord_admin.py`](../portal/discord_admin.py), [`infra/gcp-games/discord-notify.py`](../infra/gcp-games/discord-notify.py) |
+| Skippy Portal: auth, dashboard, admin, chat | [`portal/`](../portal) |
+| CI/CD: GitHub Actions + Workload Identity Federation → Terraform + Cloud Run | [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml), [`infra/bootstrap/`](../infra/bootstrap) |
+| Remote play host setup (Sunshine + readiness script), PC side | [`docs/streaming.md`](streaming.md) |
+| Secrets convention (vault on Drive) | [`docs/SECRETS.md`](SECRETS.md) |
 
-## Track 2.5: Skippy Portal — one gated page for all of it
-| Phase | What | Status |
-|---|---|---|
-| P.1 | Google sign-in + email allowlist, games dashboard (status/start/stop), static services list, a link into Skippy → [`portal/`](../portal), [`docs/portal/README.md`](portal/README.md) | ✅ built. **Next:** OAuth client + first Cloud Run deploy |
-| P.2 | Custom in-portal AI chat (real MCP-client + tool-use agent host), replacing the deep-link-to-Claude tile | later, its own project |
-| P.3 | A live service registry (SkippyTel v1's `/services`, or its v2 successor) instead of a hand-edited static list | needs the portal reachable into the home mesh — Track 4 |
-
-## Track 3: Remote play from anywhere (no Steam Link PIN)
-| Phase | What | Status |
-|---|---|---|
-| 3.A | PC host: Sunshine + readiness script (power, updates, auto-start) → [`docs/streaming.md`](streaming.md), [`scripts/windows/streaming-host.ps1`](../scripts/windows/streaming-host.ps1) | ✅ built. **Next:** run it on the PC |
-| 3.B | MacBook: Moonlight + Tailscale, pair via the Sunshine web UI, hotspot test, Steam Remote Play backup | later (MacBook phase) |
-| 3.C | Wake-on-LAN from away, GPU "game mode" in SkippyTel | later |
-
-## Track 4: SkippyTel v2 infrastructure (on hold)
-The charter is in [`docs/v2/CHARTER.md`](v2/CHARTER.md): home Core + small edge,
-Headscale + own DERP (the Tailscale lag fix), passkey auth, capability
-modules. Paused until "personal assistant" is defined. Track 1 is shaping
-that answer: **Skippy is the memory.**
+## Next
+| Track | Item |
+|---|---|
+| Portal | Bridge chat to **skippy-tel-core** and its MCP tools (needs a route from Cloud Run into the home mesh: Tailscale or a tunnel) |
+| Portal | Live services list (skippy-tel-core `/services`) instead of the static one — same mesh dependency |
+| Portal | Background restarts with progress; per-game container restart without a full VM reboot |
+| Games | **EverQuest (EQEmu)** as a compose profile + migrate the local DB — open: which local setup (AkkStack / community compose / raw), public vs. private login server |
+| Games | First real session: Valheim / Dragonwilds (PC + Xbox crossplay); move Nitrado worlds, cancel Nitrado |
+| Memory | First real Claude export; Grok + Gemini parsers from real exports |
+| Bills | Cancel SuperGrok after Claude voice in the car is proven |
+| Streaming | MacBook side (Moonlight, pairing, hotspot test) |
+| Later | SkippyTel v2 core ([`docs/v2/CHARTER.md`](v2/CHARTER.md)); ARK (deferred, too heavy) |

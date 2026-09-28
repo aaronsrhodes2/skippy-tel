@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Admin — Skippy Portal{% endblock %}
+{% block content %}
+<section>
+  <h2>Server</h2>
+  {% if error %}
+    <p class="error">Couldn't reach the VM: {{ error }}</p>
+  {% else %}
+    <p><strong>{{ status.status }}</strong> &middot; {{ status.machine_type }}
+       &middot; games: {{ status.games | join(', ') or 'none' }} &middot; <code>{{ status.external_ip }}</code></p>
+    <form class="inline" method="post" action="{{ url_for('admin.restart') }}"
+          onsubmit="return confirm('Restart now? Players are disconnected; worlds are saved first.');">
+      <button type="submit">Restart &amp; update</button>
+    </form>
+    <p class="help">Restarting applies saved settings and pulls the latest server images and game
+      updates (every boot does). That's also how mod/image updates are applied.</p>
+  {% endif %}
+</section>
+
+{% if status %}
+<section>
+  <h2>Settings</h2>
+  <form method="post" action="{{ url_for('admin.settings') }}">
+    {% for id, game in games.items() if game.settings %}
+      <div class="card">
+        <h3>{{ game.name }}</h3>
+        {% for s in game.settings %}
+          <label class="field" for="{{ s.key }}">{{ s.label }}</label>
+          {% if s.secret %}
+            <input type="password" id="{{ s.key }}" name="{{ s.key }}" autocomplete="new-password"
+                   placeholder="{{ '(set — leave blank to keep)' if status.env.get(s.key) else '(not set)' }}">
+          {% else %}
+            <input type="text" id="{{ s.key }}" name="{{ s.key }}" value="{{ status.env.get(s.key, '') }}">
+          {% endif %}
+          {% if s.help %}<p class="help">{{ s.help }}</p>{% endif %}
+        {% endfor %}
+      </div>
+    {% endfor %}
+    <button type="submit">Save settings</button>
+  </form>
+</section>
+
+<section>
+  <h2>Discord</h2>
+  {% for id, game in games.items() %}
+    <p>{{ game.name }}:
+      {% if links[id].text %}<a href="{{ links[id].text }}" target="_blank" rel="noopener">#{{ id }}</a>
+        {% if links[id].voice %}&middot; <a href="{{ links[id].voice }}" target="_blank" rel="noopener">🔊 voice</a>{% endif %}
+      {% else %}<span class="help">not set up</span>{% endif %}
+    </p>
+  {% endfor %}
+  {% if bot_configured %}
+    <form method="post" action="{{ url_for('admin.discord_setup') }}">
+      <button type="submit">Set up / repair Discord channels</button>
+    </form>
+    <p class="help">Creates a text + voice channel per game under "Game Servers", a webhook, and a
+      pinned status post. Safe to run again.</p>
+  {% else %}
+    <p class="help">No Discord bot token configured yet — see docs/cicd.md &rarr; Secrets.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

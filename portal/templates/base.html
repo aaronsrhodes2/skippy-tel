@@ -18,11 +18,13 @@
     margin: 0; padding: 24px 16px 64px;
   }
   a { color: var(--cyan); }
-  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 24px; }
   h1 { color: var(--green); font-size: 1.4rem; margin: 0; }
+  nav a { margin-right: 14px; text-decoration: none; }
+  nav a.here { color: var(--green); }
   .user { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; }
   .user img { width: 28px; height: 28px; border-radius: 50%; }
-  main { max-width: 720px; margin: 0 auto; }
+  main { max-width: 760px; margin: 0 auto; }
   section { margin-bottom: 32px; }
   h2 { color: var(--cyan); font-size: 1rem; text-transform: uppercase; letter-spacing: 0.05em; }
   .card {
@@ -35,16 +37,45 @@
   .dot.green { background: var(--green); } .dot.grey { background: #666; } .dot.amber { background: var(--amber); }
   button, .btn {
     background: var(--dim-green-hi); color: var(--white); border: 1px solid var(--green);
-    border-radius: 6px; padding: 8px 16px; font-size: 0.9rem; cursor: pointer;
+    border-radius: 6px; padding: 8px 16px; font-size: 0.9rem; cursor: pointer; text-decoration: none;
+    display: inline-block;
   }
   button:hover, .btn:hover { background: var(--green); color: var(--black); }
+  button.danger { border-color: var(--red); }
   .error { color: var(--red); }
+  .flash { padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; font-size: 0.9rem; }
+  .flash.ok { background: var(--dim-green); border: 1px solid var(--green); }
+  .flash.error { background: #330000; border: 1px solid var(--red); }
   form.inline { display: inline; }
   label.game { display: block; margin: 6px 0; }
+  label.field { display: block; margin: 10px 0 2px; font-size: 0.85rem; color: #b8ffe0; }
+  input[type=text], input[type=password], input[type=number], textarea {
+    background: var(--black); color: var(--white); border: 1px solid var(--dim-green-hi);
+    border-radius: 4px; padding: 6px 8px; width: 100%; font-size: 0.95rem;
+  }
+  .help { font-size: 0.8rem; color: #7fbfa0; margin: 2px 0 0; }
+  .links a { margin-right: 12px; }
 </style>
 </head>
 <body>
 <main>
+{% if user %}
+<header>
+  <h1>Skippy Portal</h1>
+  <nav>
+    <a href="{{ url_for('dashboard.index') }}" class="{{ 'here' if request.endpoint == 'dashboard.index' }}">Servers</a>
+    <a href="{{ url_for('chat.index') }}" class="{{ 'here' if request.endpoint == 'chat.index' }}">Chat</a>
+    {% if is_admin %}<a href="{{ url_for('admin.index') }}" class="{{ 'here' if request.endpoint == 'admin.index' }}">Admin</a>{% endif %}
+  </nav>
+  <div class="user">
+    {% if user.picture %}<img src="{{ user.picture }}" alt="">{% endif %}
+    {{ user.name }} &middot; <a href="{{ url_for('auth.logout') }}">sign out</a>
+  </div>
+</header>
+{% endif %}
+{% for category, message in get_flashed_messages(with_categories=true) %}
+  <div class="flash {{ category }}">{{ message }}</div>
+{% endfor %}
 {% block content %}{% endblock %}
 </main>
 </body>

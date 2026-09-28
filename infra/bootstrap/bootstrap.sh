@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# One-time CI/CD bootstrap. Run in Cloud Shell, from the repo:
+#
+#   cd ~/skippy-tel && git pull && bash infra/bootstrap/bootstrap.sh
+#
+# After this, every `git push` deploys (portal + game-server infra) through
+# GitHub Actions, and server settings/restarts happen in the portal's admin
+# page. It's safe to run again: it only asks for what's still missing.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PROJECT="${PROJECT:-skippy-tel}"
+REGION="${REGION:-us-west1}"
+gcloud config set project "$PROJECT" >/dev/null
+
+say() { printf '\n\033[1;32m== %s\033[0m\n' "$*"; }
+
+# ── 1. terraform (Cloud Shell doesn't keep it between sessions) ───────────────
+if ! command -v terraform >/dev/null; then
+  say "Installing terraform"
+  wget -qO- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor --yes -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+  echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
+    | sudo tee /etc/apt/sources.list.d/hashicorp.list >/dev/null
+  sudo apt-get update -qq && sudo apt-get install -y -qq terraform
+fi
+
+# ── 2. bootstrap resources ────────────────────────────────────────────────────
+say "Creating CI/CD resources (state bucket, registry, deployer identity, secrets)"
+cd "$ROOT/infra/bootstrap"
+terraform init -input=false >/dev/null
+terraform apply -input=false -auto-approve -var "project=$PROJECT" -var "region=$REGION"
+NUMBER=$(terraform output -raw project_number)
+PORTAL_URL=$(terraform output -raw portal_url)
+BUCKET=$(terraform output -raw state_bucket)
+
+# ── 3. secrets ────────────────────────────────────────────────────────────────
+has_version() { gcloud secrets versions list "$1" --filter="state=ENABLED" --format="value(name)" --limit=1 2>/dev/null | grep -q .; }
+put() { printf '%s' "$2" | gcloud secrets versions add "$1" --data-file=- >/dev/null; }
+ask_secret() {  # ask_secret NAME "prompt" required|optional
+  if has_version "$1"; then echo "  $1: already set"; return; fi
+  local value=""
+  read -r -s -p "  $2: " value; echo
+  if [ -z "$value" ]; then
+    [ "$3" = required ] && { echo "  $1 is required."; exit 1; }
+    value="unset"          # the portal treats this as "not configured"
+  fi
+  put "$1" "$value"
+}
+
+if ! has_version portal-google-client-id; then
+  cat <<EOF
+
+  The portal needs a "Sign in with Google" OAuth client. In the console:
+    1. APIs & Services -> OAuth consent screen: External; add your email as a test user
+       (or publish the app) — only emails on the portal's allowlist get in regardless.
+    2. APIs & Services -> Credentials -> Create credentials -> OAuth client ID
+       -> Web application. Authorized redirect URI:
+           $PORTAL_URL/auth/callback
+    3. Copy the client ID and secret, and paste them below.
+EOF
+fi
+say "Secrets (input is hidden; press Enter to skip the optional ones)"
+ask_secret portal-google-client-id "OAuth client ID" required
+ask_secret portal-google-client-secret "OAuth client secret" required
+ask_secret anthropic-api-key "Anthropic API key (enables Skippy chat)" optional
+ask_secret discord-bot-token "Discord bot token (enables Discord setup from the portal)" optional
+
+# ── 4. move the game-server Terraform state into the bucket CI uses ───────────
+say "Moving infra/gcp-games state to gs://$BUCKET"
+cd "$ROOT/infra/gcp-games"
+terraform init -input=false -migrate-state -force-copy -backend-config="bucket=$BUCKET" >/dev/null
+echo "  done"
+
+# ── 5. point the workflow at this project, and push = first deploy ────────────
+say "Wiring GitHub Actions to this project"
+cd "$ROOT"
+WORKFLOW=.github/workflows/deploy.yml
+if grep -q "PROJECT_NUMBER" "$WORKFLOW"; then
+  sed -i "s/PROJECT_NUMBER/$NUMBER/" "$WORKFLOW"
+  git add "$WORKFLOW"
+  git -c user.name="Skippy bootstrap" -c user.email="noreply@skippy-tel" \
+    commit -q -m "Point deploy workflow at GCP project $PROJECT ($NUMBER)"
+  if git push -q; then
+    echo "  pushed — the first deploy is running in GitHub Actions."
+  else
+    echo "  push failed. Tell Claude: project number is $NUMBER — it can make this edit."
+  fi
+else
+  echo "  already wired."
+fi
+
+say "Done"
+echo "  Portal: $PORTAL_URL"
+echo "  From now on: tell Claude what to change; a push deploys it."
