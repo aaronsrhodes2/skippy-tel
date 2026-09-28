@@ -45,7 +45,9 @@ It:
    (with a generated Flask session key),
 3. walks you through creating the "Sign in with Google" OAuth client and
    asks for its ID/secret, plus the optional Anthropic API key (Skippy chat)
-   and Discord bot token (Discord setup button) — input is hidden,
+   and Discord bot token (Discord setup button). Input is visible and
+   format-checked; to re-enter one later: `bash infra/bootstrap/secrets.sh google`
+   (or `anthropic` / `discord`), then ask Claude to redeploy,
 4. moves the game-server Terraform state from Cloud Shell into the bucket,
 5. writes the project number into the workflow and pushes — **that push is
    the first deploy.**

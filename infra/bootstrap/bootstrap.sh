@@ -46,17 +46,6 @@ BUCKET=$(terraform output -raw state_bucket)
 
 # ── 4. secrets ────────────────────────────────────────────────────────────────
 has_version() { gcloud secrets versions list "$1" --filter="state=ENABLED" --format="value(name)" --limit=1 2>/dev/null | grep -q .; }
-put() { printf '%s' "$2" | gcloud secrets versions add "$1" --data-file=- >/dev/null; }
-ask_secret() {  # ask_secret NAME "prompt" required|optional
-  if has_version "$1"; then echo "  $1: already set"; return; fi
-  local value=""
-  read -r -s -p "  $2: " value; echo
-  if [ -z "$value" ]; then
-    [ "$3" = required ] && { echo "  $1 is required."; exit 1; }
-    value="unset"          # the portal treats this as "not configured"
-  fi
-  put "$1" "$value"
-}
 
 if ! has_version portal-google-client-id; then
   cat <<EOF
@@ -74,11 +63,8 @@ if ! has_version portal-google-client-id; then
     3. Copy the client ID and secret, and paste them below.
 EOF
 fi
-say "Secrets (input is hidden; press Enter to skip the optional ones)"
-ask_secret portal-google-client-id "OAuth client ID" required
-ask_secret portal-google-client-secret "OAuth client secret" required
-ask_secret anthropic-api-key "Anthropic API key (enables Skippy chat)" optional
-ask_secret discord-bot-token "Discord bot token (enables Discord setup from the portal)" optional
+say "Secrets (visible input; each one is checked before it's saved)"
+PROJECT="$PROJECT" bash "$ROOT/infra/bootstrap/secrets.sh"
 
 # ── 5. move the game-server Terraform state into the bucket CI uses ───────────
 say "Moving infra/gcp-games state to gs://$BUCKET"
