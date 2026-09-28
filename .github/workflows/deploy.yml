@@ -109,3 +109,4 @@ jobs:
           URL=$(gcloud run services describe skippy-portal --region "$REGION" --format='value(status.url)')
           echo "Portal: $URL" >> "$GITHUB_STEP_SUMMARY"
           curl -fsS "$URL/health"
+          curl -fsS -o /dev/null "$URL/"   # login page renders => secrets + OAuth config loaded
