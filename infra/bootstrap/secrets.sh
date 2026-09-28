@@ -6,6 +6,8 @@
 #   bash infra/bootstrap/secrets.sh google     # re-enter the Google sign-in pair
 #   bash infra/bootstrap/secrets.sh anthropic  # re-enter the Anthropic key
 #   bash infra/bootstrap/secrets.sh discord    # re-enter the Discord bot token
+#   bash infra/bootstrap/secrets.sh --from-env ~/.env
+#                                  # copy them from your vault .env, no typing
 #
 # After changing a secret, tell Claude: the next deploy picks it up.
 set -euo pipefail
@@ -13,14 +15,45 @@ set -euo pipefail
 PROJECT="${PROJECT:-skippy-tel}"
 gcloud config set project "$PROJECT" >/dev/null 2>&1
 
-RESET="${1:-}"
-case "$RESET" in ""|google|anthropic|discord) ;; *)
-  echo "usage: $0 [google|anthropic|discord]"; exit 2 ;;
-esac
-
 has_version() { gcloud secrets versions list "$1" --filter="state=ENABLED" --format="value(name)" --limit=1 2>/dev/null | grep -q .; }
 put() { printf '%s' "$2" | gcloud secrets versions add "$1" --data-file=- >/dev/null; }
 preview() { local v="$1"; [ ${#v} -le 12 ] && echo "$v" || echo "${v:0:8}…${v: -6} (${#v} chars)"; }
+
+ID_RE='^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$'
+SECRET_RE='^GOCSPX-[A-Za-z0-9_-]+$'
+ANTHROPIC_RE='^sk-ant-[A-Za-z0-9_-]+$'
+DISCORD_RE='^[A-Za-z0-9_.-]{50,}$'
+
+# ── --from-env: vault key -> Secret Manager secret, no prompts ───────────────
+if [ "${1:-}" = --from-env ]; then
+  FILE="${2:?usage: $0 --from-env PATH_TO_.env}"
+  [ -r "$FILE" ] || { echo "Can't read $FILE"; exit 1; }
+  env_get() {  # last KEY=value wins; strips quotes, spaces, Windows line endings
+    grep -E "^[[:space:]]*(export[[:space:]]+)?$1[[:space:]]*=" "$FILE" | tail -n1 \
+      | sed -E "s/^[^=]*=//; s/\r$//; s/^[[:space:]]*['\"]?//; s/['\"]?[[:space:]]*$//"
+    true
+  }
+  saved=0
+  while read -r key secret re; do
+    v="$(env_get "$key")"
+    if [ -z "$v" ]; then echo "  $key: not in $FILE (skipped)"; continue; fi
+    if [[ ! "$v" =~ $re ]]; then echo "  $key: doesn't look right ($(preview "$v")) — NOT saved"; continue; fi
+    put "$secret" "$v"; saved=$((saved + 1))
+    echo "  $key -> $secret: saved $(preview "$v")"
+  done <<EOF
+SKIPPY_PORTAL_OAUTH_CLIENT_ID portal-google-client-id $ID_RE
+SKIPPY_PORTAL_OAUTH_CLIENT_SECRET portal-google-client-secret $SECRET_RE
+ANTHROPIC_API_KEY anthropic-api-key $ANTHROPIC_RE
+DISCORD_BOT_TOKEN discord-bot-token $DISCORD_RE
+EOF
+  echo; echo "$saved secret(s) saved. Tell Claude to redeploy."
+  exit 0
+fi
+
+RESET="${1:-}"
+case "$RESET" in ""|google|anthropic|discord) ;; *)
+  echo "usage: $0 [google|anthropic|discord | --from-env FILE]"; exit 2 ;;
+esac
 
 # ask NAME group "prompt" required|optional pattern "what it looks like"
 ask() {
@@ -55,13 +88,13 @@ if [ -z "$RESET" ] || [ "$RESET" = google ]; then
   echo "and click your 'Skippy Portal' web client to copy these."
 fi
 ask portal-google-client-id     google "OAuth Client ID" required \
-  '^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$' "123456789012-abc123….apps.googleusercontent.com"
+  "$ID_RE" "123456789012-abc123….apps.googleusercontent.com"
 ask portal-google-client-secret google "OAuth Client secret" required \
-  '^GOCSPX-[A-Za-z0-9_-]+$' "GOCSPX-…"
+  "$SECRET_RE" "GOCSPX-…"
 ask anthropic-api-key  anthropic "Anthropic API key (enables Skippy chat)" optional \
-  '^sk-ant-[A-Za-z0-9_-]+$' "sk-ant-…"
+  "$ANTHROPIC_RE" "sk-ant-…"
 ask discord-bot-token  discord   "Discord bot token (enables Discord setup from the portal)" optional \
-  '^[A-Za-z0-9_.-]{50,}$' "a long token with two dots in it"
+  "$DISCORD_RE" "a long token with two dots in it"
 
 echo
 echo "Secrets done."
