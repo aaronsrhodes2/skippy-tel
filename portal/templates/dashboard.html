@@ -13,7 +13,7 @@
       <span class="dot {{ 'green' if running else ('grey' if asleep else 'amber') }}"></span>
       <strong>{{ 'Online' if running else ('Asleep' if asleep else status.status|title) }}</strong>
       {% if running %}
-        &middot; {{ status.games | map('extract', games) | map(attribute='name') | join(', ') or 'no games' }}
+        &middot; {% for g in status.games if g in games %}{{ games[g].name }}{{ ', ' if not loop.last }}{% else %}no games{% endfor %}
         &middot; sleeps after {{ status.idle_minutes }} idle min
       {% elif asleep %}
         &middot; the world is saved; anyone here can wake it.
