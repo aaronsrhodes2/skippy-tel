@@ -16,9 +16,13 @@ page. Code in [`portal/`](../../portal); deployed on every push by
 The server lives in Google's cloud on its own persistent disk. Nothing about
 it depends on your PC or on you being signed in.
 
-1. **Grant access:** tell Claude "let <email> into the portal". It adds them
-   to `ALLOWED_EMAILS` in the deploy workflow and pushes; about 3 minutes later
-   they can sign in with that Google account.
+1. **Grant access:** Admin → **Friends** → their email + the games they may
+   see → **Add friend**, then **Invite ✉** (opens a ready-written email in your
+   own mail app). Instant, no deploy. Any Google account works, Gmail or not.
+   Friends see, start and chat about only their games, and may stop the server
+   only when every running game is theirs. Stored in the VM's `portal-friends`
+   metadata ([`portal/friends.py`](../../portal/friends.py)); `ALLOWED_EMAILS` in
+   the deploy workflow stays for core users who always see everything.
 2. **They play:** Servers page → **Play RuneScape: Dragonwilds**. The VM
    wakes, the server updates itself and loads the saved world. The tile shows
    "Starting — booted N min ago" until it's typically joinable (~6 min), then
@@ -44,7 +48,7 @@ downloads the update (a few extra minutes). The Discord channel gets a
 
 ## How it fits together
 
-- **Auth:** Google sign-in; `ALLOWED_EMAILS` / `ADMIN_EMAILS` re-checked on
+- **Auth:** Google sign-in; `ALLOWED_EMAILS` / `ADMIN_EMAILS` + the Friends list re-checked on
   every request ([`portal/auth.py`](../../portal/auth.py)).
 - **Games:** the portal runs as `skippy-agent` (roles/compute.admin) and
   drives the games VM through the Compute Engine API

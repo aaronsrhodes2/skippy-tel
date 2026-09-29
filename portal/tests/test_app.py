@@ -22,6 +22,7 @@ class FakeVm:
                                    "DRAGONWILDS_WORLD_PASSWORD": "dragonpw",
                                    "DISCORD_CHANNEL_VALHEIM": "c1", "DISCORD_VOICE_VALHEIM": "v1"})
         self.calls = []
+        self.metadata = {}
         self.serial = {
             1: "boot\nstartup-script: === skippy-games boot now ===\nstartup-script: started: dragonwilds\n",
             2: "=== skippy-diag old ===\nstale\n=== end ===\n"
@@ -47,6 +48,13 @@ class FakeVm:
 
     def serial_output(self, port):
         return self.serial[port]
+
+    def get_metadata(self, key):
+        return self.metadata.get(key, "")
+
+    def set_metadata(self, key, value):
+        self.calls.append(("set_metadata", key))
+        self.metadata[key] = value
 
     def update_env(self, updates):
         self.calls.append(("update_env", updates))
@@ -392,3 +400,96 @@ def test_invite_code_sits_with_the_join_password(env):
         join = join[:join.index("</div>")]
         assert "YTKM-EKL1" in join and "dragonpw" in join         # code + password in one block
         assert "35.1.2.3:7778" in join                            # direct ip:port for the Direct tab
+
+
+# ── friends: added on the Admin page, per-game access ─────────────────────────
+
+PAL = "pal@example.com"
+
+
+def _add_friend(client, email, games):
+    login(client, ADMIN)
+    return client.post("/admin/friends", data={"email": email, "games": games})
+
+
+def test_friend_added_on_admin_page_can_sign_in_and_sees_only_their_games(env):
+    client, vm, _ = env
+    login(client, PAL)
+    assert client.get("/dashboard").status_code == 302              # not invited yet → out
+    _add_friend(client, " Pal@Example.com ", ["dragonwilds"])
+    login(client, PAL)
+    page = client.get("/dashboard").data.decode()
+    assert "RuneScape: Dragonwilds" in page and "Valheim" not in page
+    assert client.get("/games/dragonwilds").status_code == 200
+    assert client.get("/games/valheim").status_code == 404
+    assert client.get("/games/valheim/discord").status_code == 404
+    client.post("/games/start", data={"games": ["valheim"]})
+    assert not [c for c in vm.calls if c[0] == "start"]              # can't start a hidden game
+    assert client.get("/admin").status_code == 403                   # friends aren't admins
+
+
+def test_removing_a_friend_locks_them_out_next_page_load(env):
+    client, _, _ = env
+    _add_friend(client, PAL, ["dragonwilds"])
+    login(client, PAL)
+    assert client.get("/dashboard").status_code == 200
+    login(client, ADMIN)
+    client.post("/admin/friends/remove", data={"email": PAL})
+    login(client, PAL)
+    assert client.get("/dashboard").status_code == 302
+
+
+def test_changing_a_friends_games_applies_immediately(env):
+    client, _, _ = env
+    _add_friend(client, PAL, ["dragonwilds"])
+    _add_friend(client, PAL, ["valheim"])                             # update, not duplicate
+    login(client, PAL)
+    assert client.get("/games/dragonwilds").status_code == 404
+    assert client.get("/games/valheim").status_code == 200
+
+
+def test_friend_cannot_stop_server_running_games_they_cant_see(env):
+    client, vm, _ = env
+    vm.state.status, vm.state.games = "RUNNING", ["dragonwilds", "valheim"]
+    _add_friend(client, PAL, ["dragonwilds"])
+    login(client, PAL)
+    client.post("/games/stop")
+    assert ("stop",) not in vm.calls
+    vm.state.games = ["dragonwilds"]
+    client.post("/games/stop")
+    assert ("stop",) in vm.calls
+
+
+def test_chat_tools_follow_friend_access(env):
+    import json
+    client, vm, skippy = env
+    _add_friend(client, PAL, ["dragonwilds"])
+    vm.state.status, vm.state.games = "RUNNING", ["dragonwilds", "valheim"]
+    names, run = _tools_for(client, skippy, PAL)
+    start = next(t for t in skippy.tools if t["name"] == "start_game")
+    assert start["input_schema"]["properties"]["games"]["items"]["enum"] == ["dragonwilds"]
+    status = json.loads(run("server_status", {}))
+    assert set(status["games"]) == {"dragonwilds"} and status["other_games_running"]
+    with pytest.raises(Exception, match="access"):
+        run("start_game", {"games": ["valheim"]})
+    with pytest.raises(Exception, match="can't be stopped"):
+        run("stop_server", {})
+
+
+def test_admin_friend_list_has_invite_email(env):
+    from urllib.parse import unquote
+    client, _, _ = env
+    resp = _add_friend(client, PAL, ["dragonwilds"])
+    assert resp.headers["Location"].endswith("/admin#friends")
+    page = client.get("/admin").data.decode()
+    assert PAL in page and "Invite" in page
+    mailto = unquote(page[page.index('href="mailto:') + 6:].split('"', 1)[0])
+    assert mailto.startswith("mailto:" + PAL)
+    assert "RuneScape: Dragonwilds" in mailto and "http://localhost/" in mailto
+
+
+def test_core_users_and_bad_emails_are_not_added_as_friends(env):
+    client, vm, _ = env
+    _add_friend(client, FRIEND, ["dragonwilds"])                     # already core (deploy config)
+    _add_friend(client, "not-an-email", ["dragonwilds"])
+    assert "portal-friends" not in vm.metadata

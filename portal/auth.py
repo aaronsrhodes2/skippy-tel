@@ -1,9 +1,11 @@
 """Google sign-in + email allowlists — the whole auth model.
 
-Google vouches for the email; ALLOWED_EMAILS decides who may sign in and
-ADMIN_EMAILS (a subset) who may change settings and restart servers. Both
-are re-checked on every request, so removing an email takes effect on the
-next page load, not when the session expires.
+Google vouches for the email. Who may sign in:
+  • ALLOWED_EMAILS (deploy config): core users, every game
+  • friends an admin added on the Admin page (friends.py): only their games
+ADMIN_EMAILS (a subset of the core) may change settings and manage friends.
+All of it is re-checked on every request, so removing someone or taking a
+game away takes effect on the next page load, not when the session expires.
 """
 from __future__ import annotations
 
@@ -29,12 +31,33 @@ def current_user() -> dict | None:
     return session.get("user")
 
 
-def is_allowed(email: str) -> bool:
+def _friends():
+    return current_app.extensions["friends"]
+
+
+def is_core(email: str) -> bool:
     return email.strip().lower() in current_app.config["ALLOWED_EMAILS"]
+
+
+def is_allowed(email: str) -> bool:
+    return is_core(email) or _friends().get(email) is not None
 
 
 def is_admin(email: str) -> bool:
     return email.strip().lower() in current_app.config["ADMIN_EMAILS"]
+
+
+def visible_games(email: str) -> list[str]:
+    """Game ids this person may see and play, in catalog order."""
+    from catalog import GAMES
+    if is_core(email):
+        return list(GAMES)
+    granted = (_friends().get(email) or {}).get("games", [])
+    return [g for g in GAMES if g in granted]
+
+
+def can_see(email: str, game: str) -> bool:
+    return game in visible_games(email)
 
 
 def login_required(view):

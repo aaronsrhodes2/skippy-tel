@@ -41,6 +41,46 @@
   </form>
 </section>
 
+<section id="friends">
+  <h2>Friends</h2>
+  <p class="help">Anyone with a Google account for that email can sign in (Gmail or not). Friends see
+    and can start only the games ticked for them; you can change that or remove them any time, and it
+    applies on their next page load. <b>Invite</b> opens a ready-written email from your own mail app.</p>
+
+  {% for f in friends %}
+    <form method="post" action="{{ url_for('admin.friends_save') }}" class="card">
+      <input type="hidden" name="email" value="{{ f.email }}">
+      <p><b>{{ f.email }}</b> <span class="help">added {{ f.added }} by {{ f.added_by }}</span></p>
+      {% for id, game in games.items() %}
+        <label class="game" style="display:inline-block;margin-right:14px">
+          <input type="checkbox" name="games" value="{{ id }}" {{ 'checked' if id in f.games }}> {{ game.name }}
+        </label>
+      {% endfor %}
+      <p class="row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button type="submit">Save access</button>
+        <a class="btn" href="{{ f.mailto }}">Invite ✉</a>
+        <button type="submit" class="danger" formaction="{{ url_for('admin.friends_remove') }}"
+                onclick="return confirm('Remove {{ f.email }} from the portal?');">Remove</button>
+      </p>
+    </form>
+  {% else %}
+    <p class="help">No friends added yet.</p>
+  {% endfor %}
+
+  <form method="post" action="{{ url_for('admin.friends_save') }}" class="card">
+    <label class="field" for="friend-email">Add a friend (their Google sign-in email)</label>
+    <input type="text" id="friend-email" name="email" placeholder="pal@gmail.com" autocomplete="off">
+    <p class="help">Games they can see:</p>
+    {% for id, game in games.items() %}
+      <label class="game" style="display:inline-block;margin-right:14px">
+        <input type="checkbox" name="games" value="{{ id }}" {{ 'checked' if id == 'dragonwilds' }}> {{ game.name }}
+      </label>
+    {% endfor %}
+    <p><button type="submit">Add friend</button></p>
+  </form>
+  <p class="help">Always in, with every game (deploy config): {{ core | join(', ') }}</p>
+</section>
+
 <section>
   <h2>Discord</h2>
   {% for id, game in games.items() %}

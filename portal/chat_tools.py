@@ -10,6 +10,7 @@ only status, games, timings and how to connect.
 """
 from __future__ import annotations
 
+import copy
 import html
 import json
 import re
@@ -74,12 +75,22 @@ def _plain(markup: str) -> str:
 
 
 class ChatTools:
-    def __init__(self, vm, is_admin: bool):
+    def __init__(self, vm, is_admin: bool, visible: list[str] | None = None):
         self.vm, self.is_admin = vm, is_admin
+        self.visible = list(GAMES) if visible is None else list(visible)   # games this person may see
         self.names = _ADMIN if is_admin else _EVERYONE
 
     def schemas(self) -> list[dict]:
-        return [_SCHEMAS[n] for n in self.names]
+        out = []
+        for name in self.names:
+            tool = _SCHEMAS[name]
+            if name == "start_game":
+                if not self.visible:
+                    continue                      # nothing this person may start
+                tool = copy.deepcopy(tool)        # offer only the games they have access to
+                tool["input_schema"]["properties"]["games"]["items"]["enum"] = self.visible
+            out.append(tool)
+        return out
 
     def run(self, name: str, args: dict) -> str:
         if name not in self.names:
@@ -93,7 +104,7 @@ class ChatTools:
         games = {}
         codes = diagnostics.current_join_codes(self.vm) if running else {}
         for g in s.games:
-            if g not in GAMES:
+            if g not in GAMES or g not in self.visible:
                 continue
             game = GAMES[g]
             info = {"name": game.name, "usually_joinable_after_boot_min": game.ready_minutes}
@@ -106,19 +117,26 @@ class ChatTools:
         return {
             "state": {"RUNNING": "online", "TERMINATED": "asleep"}.get(s.status, s.status.lower()),
             "games": games if running else {},
-            "last_selected_games": [] if running else [GAMES[g].name for g in s.games if g in GAMES],
+            "last_selected_games": [] if running else [GAMES[g].name for g in s.games if g in self.visible],
+            "other_games_running": running and any(g not in self.visible for g in s.games),
             "minutes_since_boot": up,
             "sleeps_after_idle_minutes": s.idle_minutes,
             "join_password": "shown to signed-in users on the portal dashboard (Show join password)",
         }
 
     def _start_game(self, args) -> dict:
-        ok, message = ops.start_games(self.vm, list(args.get("games") or []), None, self.is_admin)
+        wanted = list(args.get("games") or [])
+        if any(g not in self.visible for g in wanted):
+            raise ToolError("You don't have access to that game.")
+        ok, message = ops.start_games(self.vm, wanted, None, self.is_admin)
         if not ok:
             raise ToolError(message)
         return {"started": True, "message": message}
 
     def _stop_server(self, _args) -> dict:
+        ok, message = ops.may_stop(self.vm, self.is_admin, self.visible)
+        if not ok:
+            raise ToolError(message)
         return {"stopped": True, "message": ops.stop_server(self.vm)[1]}
 
     def _server_logs(self, _args) -> dict:

@@ -1,0 +1,95 @@
+"""Friends an admin has let into the portal, and which games each may see.
+
+Stored as JSON in the games VM's instance metadata (`portal-friends`), next
+to the server settings — no database, no deploy to add someone, and the
+portal's service account can already write it. infra/gcp-games/main.tf
+ignores the key so Terraform never wipes it.
+
+    {"pal@example.com": {"games": ["dragonwilds"], "added_by": "…", "added": "2026-09-29"}}
+
+People in ALLOWED_EMAILS (the deploy config) are "core" users: they always
+get in and see every game. Friends see only the games they were granted.
+Reads are cached for a few seconds because every request checks access;
+writes clear the cache so a removal bites on the next page load.
+"""
+from __future__ import annotations
+
+import json
+import re
+import time
+from datetime import date
+
+from catalog import GAMES
+
+KEY = "portal-friends"
+CACHE_SECONDS = 10
+_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def normalize(email: str) -> str | None:
+    email = (email or "").strip().lower()
+    return email if _EMAIL.match(email) else None
+
+
+class Friends:
+    def __init__(self, vm):
+        self.vm = vm
+        self._cache: tuple[float, dict] | None = None
+
+    def all(self) -> dict[str, dict]:
+        if self._cache and time.monotonic() - self._cache[0] < CACHE_SECONDS:
+            return self._cache[1]
+        try:
+            data = json.loads(self.vm.get_metadata(KEY) or "{}")
+        except (ValueError, TypeError):
+            data = {}
+        except Exception:   # noqa: BLE001 — VM API down: fail closed for friends (core users still get in)
+            return self._cache[1] if self._cache else {}
+        data = {e: v for e, v in data.items() if isinstance(v, dict)}
+        self._cache = (time.monotonic(), data)
+        return data
+
+    def get(self, email: str) -> dict | None:
+        return self.all().get((email or "").strip().lower())
+
+    def _save(self, data: dict) -> None:
+        self.vm.set_metadata(KEY, json.dumps(data, sort_keys=True))
+        self._cache = None
+
+    def upsert(self, email: str, games: list[str], added_by: str) -> None:
+        data = dict(self.all())
+        entry = dict(data.get(email, {"added_by": added_by, "added": date.today().isoformat()}))
+        entry["games"] = [g for g in GAMES if g in games]
+        data[email] = entry
+        self._save(data)
+
+    def remove(self, email: str) -> None:
+        data = dict(self.all())
+        if data.pop(email, None) is not None:
+            self._save(data)
+
+
+def invite_mailto(email: str, games: list[str], sender: str, portal_url: str,
+                  discord_links: dict[str, str]) -> str:
+    """A mailto: link that opens the admin's own email app with the invite
+    written: sent from their address, so it arrives like any note from them."""
+    from urllib.parse import quote
+    names = [GAMES[g].name for g in games if g in GAMES]
+    lines = [
+        "Hey!",
+        "",
+        "I've set you up on my game server portal"
+        + (f" for {', '.join(names)}." if names else "."),
+        "",
+        f"1. Go to {portal_url} and sign in with Google using this address ({email}).",
+        "   (Not a Gmail user? You can make a Google account for any email address.)",
+        "2. Open a game and press Play. The server wakes up in about 6 minutes and goes back",
+        "   to sleep by itself when nobody's playing, so start it whenever you like.",
+        "3. The game's page has everything to join: invite code, password, and address.",
+    ]
+    chats = [f"   {GAMES[g].name}: {discord_links[g]}" for g in games if discord_links.get(g)]
+    if chats:
+        lines += ["", "Chat and voice on Discord:"] + chats
+    lines += ["", "See you in there,", sender]
+    subject = "You're invited: " + (", ".join(names) if names else "my game servers")
+    return f"mailto:{quote(email)}?subject={quote(subject)}&body={quote(chr(10).join(lines))}"

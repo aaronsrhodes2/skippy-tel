@@ -140,6 +140,7 @@ resource "google_compute_instance" "games" {
       metadata["games"],
       metadata["idle-minutes"],
       metadata["games-env"],
+      metadata["portal-friends"], # the portal's friends list (portal/friends.py)
     ]
   }
 }

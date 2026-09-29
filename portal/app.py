@@ -16,6 +16,7 @@ import chat_tools
 import config
 import diagnostics
 import discord_admin
+import friends as friends_mod
 import envfile
 import ops
 from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, SERVICES
@@ -33,6 +34,14 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
 
     vm = vm or GamesVm(app.config["GCP_PROJECT"], app.config["GCP_ZONE"], app.config["GCP_INSTANCE"])
     skippy = skippy or chat.SkippyChat(app.config["CHAT_MODEL"])
+    app.extensions["friends"] = friends_mod.Friends(vm)
+
+    def me() -> str:
+        return auth.current_user()["email"]
+
+    def my_games() -> dict:
+        """The games the signed-in person may see, in catalog order."""
+        return {g: GAMES[g] for g in auth.visible_games(me())}
 
     @app.context_processor
     def globals_():
@@ -81,18 +90,20 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
     def index():
         status, error = vm_status()
         return render_template(
-            "dashboard.html", status=status, error=error, games=GAMES, services=SERVICES,
-            links={g: discord_admin.links(status.env if status else {}, g) for g in GAMES},
+            "dashboard.html", status=status, error=error, games=my_games(), services=SERVICES,
+            links={g: discord_admin.links(status.env if status else {}, g) for g in my_games()},
             codes=live_codes(status),
         )
 
     @dash.post("/games/start")
     @auth.login_required
     def games_start():
+        wanted = request.form.getlist("games")
+        if any(not auth.can_see(me(), g) for g in wanted):
+            flash("You don't have access to that game.", "error")
+            return back("dashboard.index")
         try:
-            ok, message = ops.start_games(vm, request.form.getlist("games"),
-                                          request.form.get("idle_minutes"),
-                                          auth.is_admin(auth.current_user()["email"]))
+            ok, message = ops.start_games(vm, wanted, request.form.get("idle_minutes"), auth.is_admin(me()))
         except Exception as exc:   # noqa: BLE001 — the VM API; show it, don't 500
             ok, message = False, f"Couldn't reach the VM: {exc}"
         flash(message, "ok" if ok else "error")
@@ -101,13 +112,16 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
     @dash.post("/games/stop")
     @auth.login_required
     def games_stop():
-        flash(ops.stop_server(vm)[1], "ok")
+        ok, message = ops.may_stop(vm, auth.is_admin(me()), auth.visible_games(me()))
+        if ok:
+            ok, message = ops.stop_server(vm)
+        flash(message, "ok" if ok else "error")
         return back("dashboard.index")
 
     @dash.get("/games/<gid>")
     @auth.login_required
     def game(gid):
-        if gid not in GAMES:
+        if not auth.can_see(me(), gid):
             abort(404)
         status, error = vm_status()
         env = status.env if status else {}
@@ -124,7 +138,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
     @auth.login_required
     def game_discord(gid):
         """Read-only copy of the game's Discord text channel, for its page."""
-        if gid not in GAMES:
+        if not auth.can_see(me(), gid):
             abort(404)
         token = app.config["DISCORD_BOT_TOKEN"]
         status, error = vm_status()
@@ -152,7 +166,19 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
             "admin.html", status=status, error=error, games=GAMES,
             links={g: discord_admin.links(status.env if status else {}, g) for g in GAMES},
             bot_configured=bool(app.config["DISCORD_BOT_TOKEN"]),
+            friends=friend_rows(status),
+            core=sorted(app.config["ALLOWED_EMAILS"]),
         )
+
+    def friend_rows(status) -> list[dict]:
+        env = status.env if status else {}
+        invites = {g: discord_admin.links(env, g)["invite"] or f"https://discord.gg/{app.config['DISCORD_INVITE']}"
+                   for g in GAMES}
+        sender = auth.current_user().get("name") or me()
+        return [{"email": email, **info,
+                 "mailto": friends_mod.invite_mailto(email, info.get("games", []), sender,
+                                                     request.url_root, invites)}
+                for email, info in sorted(app.extensions["friends"].all().items())]
 
     @admin.post("/settings")
     @auth.admin_required
@@ -179,6 +205,32 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
             vm.update_env(updates)
             flash("Settings saved. Restart the server to apply them.", "ok")
         return back("admin.index")
+
+    @admin.post("/friends")
+    @auth.admin_required
+    def friends_save():
+        email = friends_mod.normalize(request.form.get("email", ""))
+        if not email:
+            flash("That doesn't look like an email address.", "error")
+        elif auth.is_core(email):
+            flash(f"{email} is set in the deploy config and already sees everything.", "error")
+        else:
+            games = [g for g in request.form.getlist("games") if g in GAMES]
+            new = app.extensions["friends"].get(email) is None
+            app.extensions["friends"].upsert(email, games, added_by=me())
+            flash(f"{'Added' if new else 'Updated'} {email}"
+                  + (f": {', '.join(GAMES[g].name for g in games)}." if games else " (no games yet).")
+                  + (" Use Invite to email them." if new else ""), "ok")
+        return redirect(url_for("admin.index") + "#friends")
+
+    @admin.post("/friends/remove")
+    @auth.admin_required
+    def friends_remove():
+        email = friends_mod.normalize(request.form.get("email", ""))
+        if email:
+            app.extensions["friends"].remove(email)
+            flash(f"Removed {email}. They lose access on their next page load.", "ok")
+        return redirect(url_for("admin.index") + "#friends")
 
     @admin.post("/restart")
     @auth.admin_required
@@ -237,7 +289,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
         user = auth.current_user()
         try:
             admin = auth.is_admin(user["email"])
-            tools = chat_tools.ChatTools(vm, is_admin=admin)
+            tools = chat_tools.ChatTools(vm, is_admin=admin, visible=auth.visible_games(user["email"]))
             text = skippy.reply(chat.system_prompt(user["name"], is_admin=admin),
                                 chat.build_messages(body.get("history"), message),
                                 tools=tools.schemas(), run_tool=tools.run)

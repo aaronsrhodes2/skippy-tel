@@ -29,6 +29,17 @@ def start_games(vm, games: list[str], idle_raw: str | None, is_admin: bool) -> t
                   "idle minutes; anyone on the portal can wake it again.")
 
 
+def may_stop(vm, is_admin: bool, visible: list[str]) -> tuple[bool, str]:
+    """Stopping kicks everyone off every game on the VM, so a friend may only
+    do it when every running game is one of theirs."""
+    if is_admin:
+        return True, ""
+    others = [g for g in vm.status().games if g not in visible]
+    if others:
+        return False, "Other games you don't have access to are running on this server; it can't be stopped from your account."
+    return True, ""
+
+
 def stop_server(vm) -> tuple[bool, str]:
     vm.stop()
     return True, "Server stopped. Worlds were saved first."

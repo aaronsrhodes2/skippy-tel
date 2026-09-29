@@ -107,6 +107,12 @@ class GamesVm:
             metadata_resource=compute_v1.Metadata(items=items, fingerprint=inst.metadata.fingerprint),
         ).result()
 
+    def get_metadata(self, key: str) -> str:
+        return _metadata_dict(self._get()).get(key, "")
+
+    def set_metadata(self, key: str, value: str) -> None:
+        self._set_metadata({key: value})
+
     def update_env(self, updates: dict[str, str]) -> None:
         """Merge keys into the VM's settings. Takes effect on the next boot."""
         current = _metadata_dict(self._get()).get("games-env", "")
