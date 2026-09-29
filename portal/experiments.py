@@ -63,6 +63,22 @@ ADVERSARIAL_RUNS = (
 )
 
 
+HIDDEN_KEY = "portal-experiments"   # VM metadata: JSON list of hidden slugs (dashboard toggle)
+
+
+def hidden(vm) -> list[str]:
+    try:
+        data = json.loads(vm.get_metadata(HIDDEN_KEY) or "[]")
+        return [s for s in data if isinstance(s, str)]
+    except Exception:  # noqa: BLE001 — showing everything beats a broken showcase
+        return []
+
+
+def visible(vm) -> tuple[Experiment, ...]:
+    gone = set(hidden(vm))
+    return tuple(x for x in EXPERIMENTS if x.slug not in gone)
+
+
 def _summary(name: str) -> dict | None:
     path = ROOT / "benchmark" / name
     try:

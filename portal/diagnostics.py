@@ -55,6 +55,19 @@ def players_online(snapshot: str) -> dict[str, int]:
     return {g: int(n) for g, n in re.findall(r"^PLAYERS (\w+)=(\d+)$", snapshot, re.M)}
 
 
+def resources(snapshot: str) -> dict:
+    """Memory and world-disk use (%) from a snapshot's `free -m` / `df -h` lines."""
+    out = {}
+    mem = re.search(r"^Mem:\s+(\d+)\s+(\d+)", snapshot, re.M)
+    if mem and int(mem.group(1)):
+        out["memory_pct"] = round(100 * int(mem.group(2)) / int(mem.group(1)))
+        out["memory_total_gb"] = round(int(mem.group(1)) / 1024, 1)
+    disk = re.search(r"^\S+\s+\S+\s+\S+\s+\S+\s+(\d+)%\s+/srv/games/data", snapshot, re.M)
+    if disk:
+        out["disk_pct"] = int(disk.group(1))
+    return out
+
+
 def live(vm) -> tuple[dict[str, str], dict[str, int]]:
     """(invite codes, players online) from one fresh snapshot read."""
     try:

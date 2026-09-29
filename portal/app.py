@@ -7,6 +7,7 @@ Local run:  FLASK_APP=app.py flask run   (needs every var in .env.example)
 """
 from __future__ import annotations
 
+import json
 from functools import wraps
 
 from flask import (Blueprint, Flask, abort, flash, jsonify, redirect, render_template, request,
@@ -24,6 +25,7 @@ import experiments
 import friends as friends_mod
 import mentat_client
 import ops
+import spend
 import tasks
 from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, PORTALS, SERVICES
 from gcp import GamesVm
@@ -292,12 +294,77 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None) 
         """No login: runs only what someone who controls the VM queued."""
         return jsonify(results=tasks.run_pending(vm, {"discord-setup": run_discord_setup}))
 
+    # ── personal dashboard (admin only) ────────────────────────────────────────
+    mine = Blueprint("me", __name__, url_prefix="/me")
+
+    def discord_chatter(env: dict, limit: int = 10) -> list[dict]:
+        token = app.config["DISCORD_BOT_TOKEN"]
+        if not token:
+            return []
+        msgs = []
+        for gid in GAMES:
+            channel = env.get(f"DISCORD_CHANNEL_{gid.upper()}")
+            if not channel:
+                continue
+            try:
+                msgs += [{**m, "game": gid} for m in discord_admin.recent_messages(token, channel)[-limit:]]
+            except Exception:   # noqa: BLE001 — one quiet channel shouldn't blank the widget
+                continue
+        return sorted(msgs, key=lambda m: m.get("at", ""))[-limit:][::-1]
+
+    @mine.get("")
+    @auth.admin_required
+    def index():
+        status, error = vm_status()
+        env = status.env if status else {}
+        running = bool(status and status.status == "RUNNING")
+        snap = ""
+        if running:
+            try:
+                snap = diagnostics.latest_snapshot(vm.serial_output(2))
+            except Exception:   # noqa: BLE001
+                snap = ""
+        res = diagnostics.resources(snap) if snap else {}
+        warnings = []
+        if res.get("memory_pct", 0) > 85:
+            warnings.append(f"Memory at {res['memory_pct']}% — the next game may not fit alongside.")
+        if res.get("disk_pct", 0) > 80:
+            warnings.append(f"World disk at {res['disk_pct']}% full.")
+        try:
+            mentat_tools = len(mentat.tools()) if mentat else None
+        except mentat_client.MentatError:
+            mentat_tools = None
+        friends_list = [(email, [PORTALS[p] for p in friends_mod.portals_of(info)])
+                        for email, info in sorted(app.extensions["friends"].all().items())]
+        return render_template(
+            "me.html", status=status, error=error,
+            codes=diagnostics.join_codes(snap), players=diagnostics.players_online(snap), res=res,
+            warnings=warnings,
+            session_cost=spend.session_cost(status.machine_type, status.minutes_up()) if status else None,
+            spend=spend.estimate(status.machine_type if status else "e2-standard-4"),
+            friends=friends_list, chatter=discord_chatter(env),
+            discord_ready=bool(app.config["DISCORD_BOT_TOKEN"]),
+            experiments=experiments.EXPERIMENTS, hidden=experiments.hidden(vm), mentat_tools=mentat_tools,
+        )
+
+    @mine.post("/experiments")
+    @auth.admin_required
+    def toggle_experiment():
+        slug = request.form.get("slug", "")
+        if slug in {x.slug for x in experiments.EXPERIMENTS}:
+            gone = set(experiments.hidden(vm)) ^ {slug}
+            vm.set_metadata(experiments.HIDDEN_KEY, json.dumps(sorted(gone)))
+            flash(f"{'Hid' if slug in gone else 'Showing'} {slug} on the public Experiments page.", "ok")
+        return redirect(url_for("me.index"))
+
+    app.register_blueprint(mine)
+
     # ── experiments: public showcase (no sign-in) ──────────────────────────────
     lab = Blueprint("experiments", __name__, url_prefix="/experiments")
 
     @lab.get("")
     def index():
-        return render_template("experiments.html", experiments=experiments.EXPERIMENTS,
+        return render_template("experiments.html", experiments=experiments.visible(vm),
                                bench=experiments.benchmark())
 
     @lab.get("/mentat")

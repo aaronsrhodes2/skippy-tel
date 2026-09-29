@@ -84,6 +84,7 @@
     <a href="{{ url_for('index') }}" class="{{ 'here' if request.endpoint == 'index' }}">Home</a>
     <a href="{{ url_for('dashboard.index') }}" class="{{ 'here' if request.endpoint == 'dashboard.index' }}">Servers</a>
     {% if can_skippy %}<a href="{{ url_for('chat.index') }}" class="{{ 'here' if request.endpoint == 'chat.index' }}">Chat</a>{% endif %}
+    {% if is_admin %}<a href="{{ url_for('me.index') }}" class="{{ 'here' if request.endpoint == 'me.index' }}">Dashboard</a>{% endif %}
     {% if is_admin %}<a href="{{ url_for('admin.index') }}" class="{{ 'here' if request.endpoint == 'admin.index' }}">Admin</a>{% endif %}
   </nav>
   <div class="user">

@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Your dashboard — Skippy Portal{% endblock %}
+{% block head %}
+<style>
+  main { max-width: 1100px; }
+  .widgets { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+  .w { background: #05090b; border: 1px solid #16323a; border-radius: 12px; padding: 14px 16px; }
+  .w h3 { margin: 0 0 8px; color: var(--cyan); font-size: .95rem; text-transform: uppercase; letter-spacing: .05em; }
+  .w table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  .w td { padding: 3px 0; border-bottom: 1px solid #0e1d22; } .w td:last-child { text-align: right; }
+  .big { font-size: 1.6rem; font-weight: 700; color: #fff; }
+  .muted { color: #6f8b94; font-size: .8rem; }
+  .bar { height: 8px; background: #102026; border-radius: 4px; overflow: hidden; margin: 2px 0 8px; }
+  .bar > div { height: 100%; background: var(--green); } .bar > div.hot { background: var(--amber); }
+  .warn { color: var(--amber); } .msg { font-size: .83rem; margin: 5px 0; } .msg b { color: var(--green); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .tools-empty { border: 1px dashed #24444d; border-radius: 12px; padding: 16px; color: #6f8b94; margin-top: 14px; }
+</style>
+{% endblock %}
+{% block content %}
+<section>
+  <h2>Your dashboard</h2>
+  <div class="widgets">
+
+    <div class="w">
+      <h3>Server</h3>
+      {% if not status %}<p class="error">Couldn't reach the VM: {{ error }}</p>{% else %}
+        <p class="big">{{ 'Online' if status.status == 'RUNNING' else ('Asleep' if status.status == 'TERMINATED' else status.status|title) }}</p>
+        <p class="muted">{{ status.machine_type }} · {{ status.games | join(', ') or 'no games' }}
+          {% if status.minutes_up() is not none %} · up {{ status.minutes_up() }} min
+          (≈ ${{ session_cost }} so far){% endif %}</p>
+        {% for g, code in codes.items() %}<p>{{ g }} invite code <code class="code">{{ code }}</code>{% if players.get(g) is not none %} · {{ players[g] }} playing{% endif %}</p>{% endfor %}
+        {% if res %}
+          <div class="muted">memory {{ res.memory_pct }}% of {{ res.memory_total_gb }} GB</div>
+          <div class="bar"><div class="{{ 'hot' if res.memory_pct > 85 }}" style="width: {{ res.memory_pct }}%"></div></div>
+          {% if res.disk_pct is defined %}<div class="muted">world disk {{ res.disk_pct }}%</div>
+          <div class="bar"><div class="{{ 'hot' if res.disk_pct > 80 }}" style="width: {{ res.disk_pct }}%"></div></div>{% endif %}
+        {% endif %}
+        <div class="row">
+          <a class="btn" href="{{ url_for('dashboard.index') }}">Server room</a>
+          <a class="btn" href="{{ url_for('admin.logs') }}">Logs</a>
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="w">
+      <h3>Watcher</h3>
+      {% if warnings %}{% for w in warnings %}<p class="warn">⚠ {{ w }}</p>{% endfor %}
+      {% else %}<p>All quiet. <span class="muted">Memory, disk, crashes and blocked starts show here when
+        they need attention.</span></p>{% endif %}
+    </div>
+
+    <div class="w">
+      <h3>Spend (estimate)</h3>
+      {% set avg = spend.months.average %}{% set mx = spend.months.max %}
+      <p class="big">${{ '%.0f' % avg.total }}<span class="muted"> / month typical · ${{ '%.0f' % mx.total }} heavy</span></p>
+      <table>{% for label, cost in avg['items'] %}<tr><td>{{ label }}</td><td>${{ '%.2f' % cost }}</td></tr>{% endfor %}</table>
+      <p class="muted">Model: ~{{ avg.hours }} awake hours/month on {{ spend.machine_type }} (${{ spend.hourly }}/h).
+        Always-on would be ~${{ '%.0f' % spend.always_on_total }}. Real numbers arrive with the billing export
+        and an Anthropic Admin key.</p>
+    </div>
+
+    <div class="w">
+      <h3>Friends</h3>
+      {% if friends %}<table>{% for email, info in friends %}<tr><td>{{ email }}</td>
+        <td class="muted">{{ info | join(', ') }}</td></tr>{% endfor %}</table>
+      {% else %}<p class="muted">No friends added yet.</p>{% endif %}
+      <p><a href="{{ url_for('admin.index') }}#friends">Manage friends &rarr;</a></p>
+    </div>
+
+    <div class="w">
+      <h3>Discord, lately</h3>
+      {% for m in chatter %}<p class="msg"><b>{{ m.author }}</b> <span class="muted">#{{ m.game }}</span> {{ m.text or (m.extra | join(' · ')) }}</p>
+      {% else %}<p class="muted">Nothing recent{% if not discord_ready %} (Discord bot not configured){% endif %}.</p>{% endfor %}
+    </div>
+
+    <div class="w">
+      <h3>Experiments</h3>
+      <p class="muted">Mentat: {% if mentat_tools is not none %}<span style="color:var(--green)">live, {{ mentat_tools }} tools</span>
+        {% else %}<span class="warn">unreachable</span>{% endif %}</p>
+      {% for x in experiments %}
+        <form method="post" action="{{ url_for('me.toggle_experiment') }}" class="row" style="margin:4px 0">
+          <input type="hidden" name="slug" value="{{ x.slug }}">
+          <span style="flex:1">{{ x.title }}</span>
+          <button type="submit" style="padding:3px 10px">{{ 'Show' if x.slug in hidden else 'Hide' }}</button>
+        </form>
+      {% endfor %}
+      <p><a href="{{ url_for('experiments.index') }}">View public page &rarr;</a></p>
+    </div>
+
+    <div class="w">
+      <h3>Calendar + inbox</h3>
+      <p class="muted">Today's events and unread mail land here once the portal is bridged to skippy-tel-core
+        (they stay admin-only in tool_policy.py).</p>
+    </div>
+  </div>
+
+  <div class="tools-empty">Your tools go here. Tell Skippy what you want and it becomes a widget.</div>
+</section>
+{% endblock %}

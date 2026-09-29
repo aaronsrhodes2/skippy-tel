@@ -712,3 +712,31 @@ def test_experiments_degrade_without_bundle_or_mentat(env):
     client, _, _ = env                                              # no mentat, default (empty) bundle dir
     assert client.get("/experiments").status_code == 200
     assert client.get("/experiments/mentat/api/tools").status_code == 503
+
+
+# ── personal dashboard ────────────────────────────────────────────────────────
+
+def test_dashboard_is_admin_only_and_shows_the_widgets(env):
+    client, vm, _ = env
+    login(client, FRIEND)
+    assert client.get("/me").status_code == 403
+    vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
+    vm.serial[2] = ("=== skippy-diag t ===\nJOIN_CODE dragonwilds=AB12-CD34\n--- memory\n"
+                    "               total        used\nMem:           16002        14500\n"
+                    "--- data disk\n/dev/sda         59G  50G  9G  85% /srv/games/data\n=== end ===\n")
+    login(client, ADMIN)
+    page = client.get("/me").data.decode()
+    assert "AB12-CD34" in page and "Spend (estimate)" in page and "Friends" in page
+    assert "Memory at 91%" in page and "World disk at 85%" in page      # watcher warnings
+    assert 'class="portal me"' in client.get("/").data.decode()          # card on the front page
+
+
+def test_hiding_an_experiment_takes_it_off_the_public_page(env):
+    client, vm, _ = env
+    login(client, ADMIN)
+    client.post("/me/experiments", data={"slug": "radiance"})
+    client.get("/logout")
+    assert "Radiance" not in client.get("/experiments").data.decode()
+    login(client, ADMIN)
+    client.post("/me/experiments", data={"slug": "radiance"})           # toggle back
+    assert "Radiance" in client.get("/experiments").data.decode()
