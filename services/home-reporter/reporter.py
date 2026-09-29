@@ -12,6 +12,7 @@ import base64
 import json
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -19,7 +20,9 @@ import urllib.request
 PORTAL = os.environ.get("PORTAL_URL", "https://skippy-portal-1015050363686.us-west1.run.app").rstrip("/")
 API = os.environ.get("SKIPPY_API", "http://flask-api:5000").rstrip("/")
 MAC = os.environ.get("BILBY_MAC_URL", "http://skippy-mac:7334").rstrip("/")
+MENTAT = os.environ.get("MENTAT_URL", "").rstrip("/")         # Mentat + Qwen on skippy-pc
 INTERVAL = float(os.environ.get("REPORT_INTERVAL", "15"))
+FAST_INTERVAL = 1.5          # job polling while someone is chatting on the portal
 ART_MAX = 400_000
 
 
@@ -62,7 +65,16 @@ def gather() -> dict:
         "bilby": mac,
         "setlist": (setlist or [])[-20:],
         "up_next": (up_next or {}).get("track") if (up_next or {}).get("ok") else None,
+        "mentat_home": bool(MENTAT) and _up(f"{MENTAT}/health"),
     }
+
+
+def _up(url: str) -> bool:
+    try:
+        with urllib.request.urlopen(url, timeout=3) as r:
+            return r.status == 200
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def art_for(report: dict) -> dict | None:
@@ -83,6 +95,63 @@ COMMANDS = {
 }
 
 
+def run_job(job: dict) -> dict:
+    """A job from the portal. ask_mentat → Mentat + Qwen here at home."""
+    if job.get("kind") == "ask_mentat" and MENTAT:
+        reply = fetch(f"{MENTAT}/ask", "POST", {"question": job.get("question", "")}, timeout=100)
+        if reply and reply.get("ok"):
+            return {"result": reply["result"]}
+        return {"error": (reply or {}).get("error") or "Mentat at home didn't answer"}
+    return {"error": f"unknown job {job.get('kind')!r}"}
+
+
+class Jobs:
+    """Polls the portal for jobs: every report carries some, and while someone
+    is chatting (the portal says `fast_until`) a light poll runs every 1.5 s so
+    a physics question isn't stuck waiting for the next report."""
+
+    def __init__(self, token: str):
+        self.token, self.fast_until, self._running = token, 0.0, set()
+        self._lock = threading.Lock()
+
+    def _post(self, path: str, data: dict | None, method: str = "POST"):
+        body = json.dumps(data).encode() if data is not None else None
+        req = urllib.request.Request(f"{PORTAL}{path}", data=body, method=method, headers={
+            "Content-Type": "application/json", "Authorization": f"Bearer {self.token}"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.loads(r.read() or b"{}")
+
+    def accept(self, reply: dict) -> None:
+        self.fast_until = time.time() + float(reply.get("fast_for_s") or 0)
+        for job in reply.get("jobs") or []:
+            with self._lock:
+                if job.get("id") in self._running:
+                    continue
+                self._running.add(job.get("id"))
+            threading.Thread(target=self._run, args=(job,), daemon=True).start()
+
+    def _run(self, job: dict) -> None:
+        try:
+            outcome = run_job(job)
+            self._post(f"/home/jobs/{job['id']}", outcome)
+        except Exception as e:  # noqa: BLE001 — the portal times out and falls back
+            print(f"home-reporter: job {job.get('id')} failed: {e}", flush=True)
+        finally:
+            with self._lock:
+                self._running.discard(job.get("id"))
+
+    def poll_forever(self) -> None:
+        while True:
+            if time.time() < self.fast_until:
+                try:
+                    self.accept(self._post("/home/jobs", None, method="GET"))
+                except Exception:  # noqa: BLE001 — the next report carries jobs too
+                    pass
+                time.sleep(FAST_INTERVAL)
+            else:
+                time.sleep(1)
+
+
 def run_commands(commands: list) -> list[dict]:
     done = []
     for c in commands or []:
@@ -93,6 +162,8 @@ def run_commands(commands: list) -> list[dict]:
 
 def main() -> None:
     token = home_token()
+    jobs = Jobs(token)
+    threading.Thread(target=jobs.poll_forever, daemon=True).start()
     sent_art, results, warned = None, [], False
     while True:
         report = gather()
@@ -111,6 +182,7 @@ def main() -> None:
             if reply.get("need_art"):
                 sent_art = None
             results = run_commands(reply.get("commands"))
+            jobs.accept(reply)
             warned = False
         except urllib.error.HTTPError as e:
             if not warned:

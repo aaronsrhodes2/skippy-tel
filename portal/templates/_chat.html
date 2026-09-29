@@ -67,8 +67,9 @@
         const used = [...new Set(data.tools || [])];   // receipts: which tools did the work
         const note = document.createElement("div");
         note.className = "receipt";
-        note.textContent = used.length ? "tools: " + used.map(t => ({ask_mentat: "Mentat (physics)", now_playing: "Bilby"})[t] || t.replace(/_/g, " ")).join(", ")
-          : (data.mentat_available ? "answered from the model's own knowledge" : "answered from the model's own knowledge (Mentat offline)");
+        note.textContent = used.length ? "tools: " + used.map(t => ({ask_mentat: data.mentat_where === "home" ? "Mentat + Qwen (skippy-pc)" : "Mentat (didn't answer)",
+                           now_playing: "Bilby"})[t] || t.replace(/_/g, " ")).join(", ")
+          : (data.mentat_available ? "answered from the model's own knowledge" : "answered from the model's own knowledge (Mentat offline: skippy-pc or Qwen is down)");
         pending.append(note);
         history.push({role: "user", content: text}, {role: "assistant", content: data.reply});
         save();

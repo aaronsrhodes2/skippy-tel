@@ -308,6 +308,21 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             abort(400)
         return jsonify(home.accept(report))
 
+    @app.get("/home/jobs")
+    def home_jobs():
+        """The reporter's quick poll while someone's chatting."""
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        return jsonify(home.jobs_reply())
+
+    @app.post("/home/jobs/<job_id>")
+    def home_job_done(job_id):
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        if (request.content_length or 0) > home_mod.MAX_REPORT:
+            abort(413)
+        return jsonify(ok=home.finish(job_id, request.get_json(silent=True) or {}))
+
     # ── Bilby: what's playing (grant "bilby"; controls are admin only) ──────────
     music = Blueprint("bilby", __name__, url_prefix="/bilby")
 
@@ -502,13 +517,15 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def tools_for(user) -> chat_tools.ChatTools:
         email = user["email"]
         return chat_tools.ChatTools(vm, is_admin=auth.is_admin(email), visible=auth.visible_games(email),
-                                    mentat=mentat, who=email,
-                                    music=home.music if auth.has_portal(email, "bilby") else None)
+                                    who=email,
+                                    music=home.music if auth.has_portal(email, "bilby") else None,
+                                    home_mentat=home if home.mentat_ready() else None)
 
     @talk.get("/badges")
     @skippy_required
     def badges():
         """The chat's direct-verb badge panel for this person."""
+        home.touch_chat()
         return jsonify(tools_for(auth.current_user()).badges())
 
     @talk.get("")
@@ -526,6 +543,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         if not message:
             return jsonify(error="Say something."), 400
         user = auth.current_user()
+        home.touch_chat()
         force, rest = chat_tools.parse_verb(message)
         if force and not rest:
             rest = {"ask_mentat": "(the user chose /physics with no question: ask what to compute)"
@@ -552,10 +570,11 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         except chat.ChatError as exc:
             return jsonify(error=str(exc)), 502
         mentat_on = tools.mentat_ok
+        where = tools.mentat_where
         # One line per reply in Cloud Run's logs: who, which model, which tools (never the text).
         print(json.dumps({"event": "chat", "user": user["email"], "model": model,
-                          "tools": used, "mentat_available": mentat_on}), flush=True)
-        return jsonify(reply=text, model=badge, tools=used, mentat_available=mentat_on)
+                          "tools": used, "mentat_available": mentat_on, "mentat_where": where}), flush=True)
+        return jsonify(reply=text, model=badge, tools=used, mentat_available=mentat_on, mentat_where=where)
 
     app.register_blueprint(talk)
     return app

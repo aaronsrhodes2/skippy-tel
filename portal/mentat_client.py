@@ -1,6 +1,6 @@
 """The portal's client for Mentat (mentat/app.py): sigma-ground's physics tools
-over HTTP. Skippy's chat uses its plain-English front door (ask); the
-Experiments playground uses the individual tools.
+over HTTP, for the public Experiments playground. (Skippy's chat asks the
+Mentat + Qwen copy on skippy-pc instead, through home.py.)
 
 Mentat's tool list is fetched once and cached; everything degrades to "no
 physics tools" if Mentat is unreachable, never to a broken page or chat.
@@ -52,13 +52,6 @@ class Mentat:
         body = self._request("POST", f"/tools/{name}", args or {})
         if not body.get("ok"):
             raise MentatError(body.get("error", "Mentat call failed"))
-        return body["result"]
-
-    def ask(self, question: str) -> dict:
-        """Mentat's own interpreter: plain English in, a worked answer (or what it can do) out."""
-        body = self._request("POST", "/ask", {"question": question})
-        if not body.get("ok"):
-            raise MentatError(body.get("error", "Mentat couldn't answer"))
         return body["result"]
 
     def search(self, query: str, limit: int = 12) -> list[dict]:

@@ -97,13 +97,21 @@ Actions (the sandbox can't reach GCP or run.app directly):
 ## Home → portal bridge (home reporter)
 
 The cloud portal can't reach skippy-pc, so skippy-pc reports out:
-`services/home-reporter/reporter.py` (own compose file,
-`docker compose -f home-reporter.compose.yml up -d --build`) POSTs every
+`services/home-reporter/reporter.py` (in `docker-compose.override.yml`, which
+Compose merges automatically: a plain `docker compose up -d --build`) POSTs every
 ~15 s to `https://…run.app/home/report` with `Authorization: Bearer
 $SKIPPY_HOME_TOKEN`. It sends flask-api's `/status.json` (the old `/status`
 page as data), `/services` availability, `/music/session`, and Mac Bilby's
 `/bilby/status`, setlist and next suggestion (+ album art when the track
-changes). The reply carries queued controls (`music` skip/pause/resume/stop).
+changes). The reply carries queued controls (`music` skip/pause/resume/stop)
+and jobs; while someone chats, the reporter also polls `GET /home/jobs` every
+1.5 s and answers with `POST /home/jobs/<id>`.
+
+- Physics in Skippy's chat = `ask_mentat` → a job → `mentat-home` (same
+  override file: mentat/Dockerfile with `MENTAT_USE_LLM=1`, Qwen via
+  `ollama:11434`). No Qwen → Mentat answers 503 and Skippy says it's offline;
+  there is deliberately NO fallback to the cloud copy (keywords only), which
+  serves the public Experiments playground.
 
 - Token: dashboard → "Pair home" shows it once; the portal keeps only its
   sha256 in VM metadata `portal-home`. Put the line in the vault .env and

@@ -119,8 +119,9 @@ def system_prompt(user_name: str, is_admin: bool = False, page: str | None = Non
         "(value, units, and the key steps with their sources) in your voice. If Mentat's value is "
         "null, it couldn't model that question: pass on what it says it can do, ask the user for "
         "anything it needs, and do NOT fill the gap with your own estimate. If ask_mentat isn't "
-        "available, say Mentat is offline before answering from memory, and flag that answer as a "
-        "guess. Feel free to be smug about owning a better Wolfram."
+        "available or fails, Mentat is offline (it runs with Qwen on the Captain's PC): say so, and "
+        "don't compute physics answers yourself; offer to try again once it's back. Feel free to be "
+        "smug about owning a better Wolfram."
     )
 
 

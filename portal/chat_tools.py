@@ -8,10 +8,12 @@ all, so the model can't even try it.
 Tool output never includes settings values (passwords live in games-env):
 only status, games, timings and how to connect.
 
-Physics: when Mentat is reachable and tool_policy allows it (it's an
-"everyone" server), Skippy gets ONE physics tool, ask_mentat, which hands the
-question in plain English to Mentat's own interpreter. The model doesn't pick
-formulas or fill in Mentat's ~220 maths tools; Mentat does that itself.
+Physics: when Mentat + Qwen on skippy-pc is up (home.py; the reporter carries
+the question) and tool_policy allows it (an "everyone" server), Skippy gets ONE
+physics tool, ask_mentat, which hands the question in plain English to
+Mentat's own interpreter. The model doesn't pick formulas or fill in Mentat's
+~220 maths tools. When home or Qwen is down there is no physics tool: the
+cloud copy (keywords only) serves the public playground, not the chat.
 
 Music: people with the Bilby grant get now_playing (what Bilby reports).
 
@@ -26,7 +28,6 @@ import json
 import re
 
 import diagnostics
-import mentat_client
 import ops
 import tool_policy
 from catalog import GAMES
@@ -137,23 +138,18 @@ def parse_verb(message: str) -> tuple[str | None, str]:
 
 
 class ChatTools:
-    def __init__(self, vm, is_admin: bool, visible: list[str] | None = None, mentat=None, who: str = "",
-                 music=None):
+    def __init__(self, vm, is_admin: bool, visible: list[str] | None = None, who: str = "",
+                 music=None, home_mentat=None):
         self.vm, self.is_admin, self.who = vm, is_admin, who
         self.visible = list(GAMES) if visible is None else list(visible)   # games this person may see
         self.names = _ADMIN if is_admin else _EVERYONE
-        self.mentat = mentat if mentat and tool_policy.allowed("mentat", is_admin) else None
         self.music = music                    # callable → home.music(), only with the Bilby grant
-        self.mentat_ok = self._mentat_reachable()
-
-    def _mentat_reachable(self) -> bool:
-        if not self.mentat:
-            return False
-        try:
-            self.mentat.tools()                   # cached; a cheap "is it up?"
-            return True
-        except mentat_client.MentatError:
-            return False
+        # Physics = Mentat + Qwen on skippy-pc (via the home reporter), or nothing.
+        # No fallback to the cloud copy: without Qwen it answers from keywords
+        # alone, and the Captain wants a clear "offline" over a degraded answer.
+        self.home_mentat = home_mentat if tool_policy.allowed("mentat", is_admin) else None
+        self.mentat_where: str | None = None  # "home" once a physics answer came back
+        self.mentat_ok = bool(self.home_mentat)
 
     def available(self) -> list[str]:
         names = [n for n in self.names if n != "start_game" or self.visible]
@@ -197,9 +193,11 @@ class ChatTools:
         if not question:
             raise ToolError("ask_mentat needs the question.")
         try:
-            return self.mentat.ask(question)
-        except mentat_client.MentatError as exc:
-            raise ToolError(str(exc)) from exc
+            result = self.home_mentat.ask_mentat(question)
+        except (TimeoutError, RuntimeError) as exc:
+            raise ToolError(f"Mentat is offline: {exc}. Say so; don't answer it yourself.") from exc
+        self.mentat_where = "home"
+        return result
 
     def _now_playing(self, _args) -> dict:
         return self.music()

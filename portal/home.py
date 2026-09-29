@@ -1,7 +1,9 @@
 """What skippy-pc reports about itself: service health, UPS, models, photo
 tags, UI telemetry, and Bilby's music state. The home reporter
 (services/home-reporter) POSTs it every ~15 s; the portal can't reach home,
-so control requests ride back on the reply.
+so control requests ride back on the reply, and so do jobs (physics
+questions for Mentat + Qwen at home): each report picks them up, and while
+someone's chatting the reporter also polls /home/jobs every 1.5 s.
 
 State lives in this process (the portal runs one instance), so a fresh
 instance shows "waiting" for one report interval. Pairing: the dashboard
@@ -20,6 +22,8 @@ import time
 
 KEY = "portal-home"
 STALE_AFTER = 60          # seconds without a report → "home is silent"
+FAST_WINDOW = 300         # after chat activity, the reporter polls for jobs quickly this long
+REDELIVER_AFTER = 20      # a job handed out but not answered goes out again after this
 MAX_REPORT = 1_000_000    # bytes (album art included)
 _ACTIONS = {("music", "skip"), ("music", "pause"), ("music", "resume"), ("music", "stop")}
 
@@ -38,6 +42,8 @@ class Home:
         self._commands: list[dict] = []
         self._ids = itertools.count(1)
         self._hash_cache: tuple[float, str] | None = None
+        self._jobs: dict[str, dict] = {}
+        self.fast_until = 0.0
 
     # ── pairing ──────────────────────────────────────────────────────────
     def pair(self) -> str:
@@ -77,7 +83,60 @@ class Home:
             commands, self._commands = self._commands, []
             key = self.art_key()
             need_art = bool(key) and (not self.art or self.art.get("key") != key)
-        return {"commands": commands, "need_art": need_art}
+        return {"commands": commands, "need_art": need_art, **self.jobs_reply()}
+
+    # ── jobs: work for skippy-pc that someone is waiting on ──────────────
+    def touch_chat(self) -> None:
+        """Someone's chatting: have the reporter poll for jobs quickly for a while."""
+        self.fast_until = self.clock() + FAST_WINDOW
+
+    def jobs_reply(self) -> dict:
+        now = self.clock()
+        with self._lock:
+            self._jobs = {i: j for i, j in self._jobs.items() if now - j["created"] < 600}
+            out = []
+            for j in self._jobs.values():
+                if not j["event"].is_set() and now - j["sent"] >= REDELIVER_AFTER:
+                    j["sent"] = now
+                    out.append(j["job"])
+        return {"jobs": out, "fast_for_s": max(0, int(self.fast_until - now))}
+
+    def submit(self, kind: str, **payload) -> str:
+        job_id = secrets.token_hex(8)
+        with self._lock:
+            self._jobs[job_id] = {"job": {"id": job_id, "kind": kind, **payload}, "event": threading.Event(),
+                                  "outcome": None, "created": self.clock(), "sent": 0.0}
+        return job_id
+
+    def finish(self, job_id: str, outcome: dict) -> bool:
+        with self._lock:
+            j = self._jobs.get(job_id)
+            if not j or j["event"].is_set():
+                return False
+            j["outcome"] = outcome if isinstance(outcome, dict) else {"error": "bad outcome"}
+            j["event"].set()
+        return True
+
+    def wait(self, job_id: str, timeout: float) -> dict | None:
+        j = self._jobs.get(job_id)
+        if not j or not j["event"].wait(timeout):
+            return None
+        with self._lock:
+            self._jobs.pop(job_id, None)
+        return j["outcome"]
+
+    def mentat_ready(self) -> bool:
+        """Mentat + Qwen on skippy-pc is up and reporting."""
+        return self.online() and bool((self.report or {}).get("mentat_home"))
+
+    def ask_mentat(self, question: str, timeout: float = 75) -> dict:
+        self.touch_chat()
+        outcome = self.wait(self.submit("ask_mentat", question=question), timeout)
+        if outcome is None:
+            raise TimeoutError("Mentat at home didn't answer in time")
+        if "result" not in outcome:
+            raise RuntimeError(outcome.get("error") or "Mentat at home failed")
+        return outcome["result"]
 
     def age(self) -> int | None:
         return None if self.received_at is None else int(self.clock() - self.received_at)

@@ -8,8 +8,8 @@ builds that same server, catching it instead of running stdio, and serves:
     GET  /tools              [{name, description, input_schema, domain}]  (the public set)
     POST /tools/<name>       JSON arguments → {"ok": true, "result": {...}} | {"ok": false, "error": "..."}
     POST /ask                {"question": "..."} → Mentat's own plain-English front door
-                             (Materia's translator, keyword routes only: the qwen
-                             residual lives on skippy-pc, not here)
+                             (Materia's translator: keyword routes, plus the qwen
+                             residual when MENTAT_USE_LLM=1, i.e. the copy on skippy-pc)
 
 It's public (the Experiments playground and Skippy's chat call it), so:
   • runs as the zero-permission `skippy-mentat` service account (bootstrap)
@@ -24,6 +24,7 @@ import json
 import os
 import threading
 import time
+import urllib.request
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as CallTimeout
 
@@ -36,6 +37,18 @@ EXCLUDED = {"simulate", "request_clarification"}
 CALL_TIMEOUT_S = int(os.environ.get("MENTAT_CALL_TIMEOUT", "20"))
 RATE_PER_MIN = int(os.environ.get("MENTAT_RATE_PER_MIN", "60"))
 MAX_ARGS_BYTES = 8_000
+# The copy on skippy-pc sets these: Qwen (Ollama) helps the translator with
+# phrasings its keywords miss. The public cloud copy has no model: keywords only.
+USE_LLM = os.environ.get("MENTAT_USE_LLM", "0") == "1"
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "")
+
+
+def _point_translator_at_ollama(url: str) -> None:
+    """sigma-ground's translator hardcodes http://localhost:11434 as a default
+    argument; inside a container Ollama is another service, so swap it."""
+    from sigma_ground.materia import translator as tr
+    for fn in (tr._ollama_chat, tr._ollama_plan):
+        fn.__defaults__ = tuple(url if d == tr.OLLAMA_URL else d for d in fn.__defaults__)
 
 
 def build_server():
@@ -78,6 +91,8 @@ def domain_of(name: str) -> str:
 
 
 server = build_server()
+if USE_LLM and OLLAMA_URL:
+    _point_translator_at_ollama(OLLAMA_URL)
 TOOLS = {t.name: t for t in asyncio.run(server.list_tools()) if public(t.name)}
 _pool = ThreadPoolExecutor(max_workers=4)
 _hits: dict[str, deque] = defaultdict(deque)
@@ -98,9 +113,28 @@ def _rate_limited(ip: str) -> bool:
         return False
 
 
+class QwenUnavailable(Exception):
+    pass
+
+
+def _qwen_ready() -> bool:
+    from sigma_ground.materia import translator as tr
+    try:
+        with urllib.request.urlopen(f"{OLLAMA_URL or tr.OLLAMA_URL}/api/tags", timeout=3) as r:
+            names = [m.get("name", "") for m in json.loads(r.read()).get("models", [])]
+        return any(n.startswith(tr.OLLAMA_MODEL) for n in names)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _ask(question: str) -> dict:
     from sigma_ground.mcp.tools.simulation import simulate
-    return simulate(question, use_llm=False).to_dict()
+    if USE_LLM and not _qwen_ready():
+        # The Captain's rule: the Qwen-backed Mentat fails rather than answer without Qwen.
+        raise QwenUnavailable("Qwen (Ollama) is unreachable, so Mentat won't answer without it.")
+    result = simulate(question, use_llm=USE_LLM).to_dict()
+    result["interpreter"] = "keywords + qwen" if USE_LLM else "keywords"
+    return result
 
 
 def _call(name: str, args: dict):
@@ -138,6 +172,8 @@ def _guarded(label: str, fn, *args):
         return jsonify(ok=True, result=future.result(timeout=CALL_TIMEOUT_S))
     except CallTimeout:
         return jsonify(ok=False, error=f"{label} took longer than {CALL_TIMEOUT_S}s"), 504
+    except QwenUnavailable as exc:
+        return jsonify(ok=False, error=str(exc)), 503
     except Exception as exc:  # noqa: BLE001 — tool/validation errors go back as messages
         return jsonify(ok=False, error=str(exc)[:2000]), 400
 

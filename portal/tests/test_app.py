@@ -174,7 +174,8 @@ def test_chat_round_trip(env):
     resp = client.post("/chat/send", json={"message": "status?",
                                            "history": [{"role": "user", "content": "hi"},
                                                        {"role": "assistant", "content": "yo"}]})
-    assert resp.get_json() == {"reply": "Obviously.", "model": None, "tools": [], "mentat_available": False}
+    assert resp.get_json() == {"reply": "Obviously.", "model": None, "tools": [],
+                                "mentat_available": False, "mentat_where": None}
     system, messages = skippy.seen
     assert "Captain" in system
     assert messages[-1] == {"role": "user", "content": "status?"}
@@ -656,18 +657,66 @@ def _chat_with(mentat, email=FRIEND):
     return {t["name"] for t in skippy.tools}, skippy.run_tool
 
 
-def test_friends_get_one_physics_door_not_mentats_maths_tools():
-    import json
-    mentat = FakeMentat()
-    names, run = _chat_with(mentat)
-    assert "ask_mentat" in names and not any(n.startswith("mentat_") for n in names)
-    assert json.loads(run("ask_mentat", {"question": "how far is a mile in km?"}))["units"] == "km"
-    assert mentat.calls[-1] == ("ask", "how far is a mile in km?")      # passed through, not pre-solved
+def _home_with_mentat(client, answer):
+    """Pair skippy-pc, report Mentat + Qwen up, and run a fake reporter that
+    answers physics jobs with `answer(question)`."""
+    import threading, time
+    token = _pair(client)
+    report = {**json.loads(json.dumps(REPORT)), "mentat_home": True}
+    client.post("/home/report", json=report, headers={"Authorization": f"Bearer {token}"})
+    stop = threading.Event()
+
+    def reporter():
+        while not stop.is_set():
+            for job in client.get("/home/jobs", headers={"Authorization": f"Bearer {token}"}).get_json()["jobs"]:
+                client.post(f"/home/jobs/{job['id']}", json=answer(job["question"]),
+                            headers={"Authorization": f"Bearer {token}"})
+            time.sleep(0.01)
+    threading.Thread(target=reporter, daemon=True).start()
+    return stop
+
+
+def test_physics_goes_to_mentat_with_qwen_at_home():
+    vm, skippy = FakeVm(), FakeSkippy()
+    app = portal.create_app(dict(SETTINGS), vm=vm, skippy=skippy)
+    client = app.test_client()
+    asked = []
+    stop = _home_with_mentat(app.test_client(), lambda q: asked.append(q) or
+                             {"result": {"value": 159.6, "units": "m/s", "interpreter": "keywords + qwen"}})
+    login(client, FRIEND)
+    skippy.reply = lambda system, messages, tools=None, run_tool=None, **_: (
+        setattr(skippy, "tools", tools) or run_tool("ask_mentat", {"question": "5 cm copper ball from 10 km?"}))
+    data = client.post("/chat/send", json={"message": "/physics 5 cm copper ball from 10 km?"}).get_json()
+    stop.set()
+    assert asked == ["5 cm copper ball from 10 km?"]                     # passed through, not pre-solved
+    assert json.loads(data["reply"])["value"] == 159.6 and data["mentat_where"] == "home"
+    assert not any(t["name"].startswith("mentat_") for t in skippy.tools)  # no maths sub-tools for Haiku
+
+
+def test_no_qwen_at_home_means_no_physics_answer():
+    vm, skippy = FakeVm(), FakeSkippy()
+    app = portal.create_app(dict(SETTINGS), vm=vm, skippy=skippy)
+    client = app.test_client()
+    stop = _home_with_mentat(app.test_client(), lambda q: {"error": "Qwen (Ollama) is unreachable"})
+    login(client, FRIEND)
+    errors = []
+    def reply(system, messages, tools=None, run_tool=None, **_):
+        try:
+            run_tool("ask_mentat", {"question": "escape velocity of Earth?"})
+        except Exception as exc:
+            errors.append(str(exc))
+        return "Mentat's offline."
+    skippy.reply = reply
+    client.post("/chat/send", json={"message": "escape velocity of Earth?"})
+    stop.set()
+    assert errors and "offline" in errors[0] and "Qwen" in errors[0]
 
 
 def test_direct_verbs_force_the_tool_and_badges_list_what_you_have():
     vm, skippy = FakeVm(), FakeSkippy()
-    client = portal.create_app(dict(SETTINGS), vm=vm, skippy=skippy, mentat=FakeMentat()).test_client()
+    app = portal.create_app(dict(SETTINGS), vm=vm, skippy=skippy)
+    client = app.test_client()
+    stop = _home_with_mentat(app.test_client(), lambda q: {"result": {"value": 1}})
     login(client, FRIEND)
     client.post("/chat/send", json={"message": "/physics how fast does a 5 cm copper ball fall 10 km?"})
     assert skippy.force_tool == "ask_mentat"
@@ -679,6 +728,7 @@ def test_direct_verbs_force_the_tool_and_badges_list_what_you_have():
     client.post("/chat/send", json={"message": "is it up?"})
     assert skippy.force_tool is None
     badges = client.get("/chat/badges").get_json()
+    stop.set()
     assert [b["verb"] for b in badges["Physics"]] == ["physics"]
     assert "restart" not in [b["verb"] for b in badges["Game server"]]                    # admin-only
     assert "Music" in badges                                                             # core users have Bilby
@@ -688,8 +738,10 @@ def test_direct_verbs_force_the_tool_and_badges_list_what_you_have():
 
 
 def test_chat_works_without_mentat():
-    names, _ = _chat_with(FakeMentat(up=False))
-    assert not any(n.startswith("mentat_") for n in names) and "server_status" in names
+    names, _ = _chat_with(None)
+    assert "ask_mentat" not in names and "server_status" in names
+
+
 
 
 # ── Experiments (public) ──────────────────────────────────────────────────────
@@ -817,7 +869,7 @@ def test_home_report_needs_the_paired_token(env):
     assert token not in vm.metadata["portal-home"]                               # only the hash is kept
     assert client.post("/home/report", json=REPORT, headers={"Authorization": "Bearer nope"}).status_code == 401
     ok = client.post("/home/report", json=json.loads(json.dumps(REPORT)), headers={"Authorization": f"Bearer {token}"})
-    assert ok.status_code == 200 and ok.get_json() == {"commands": [], "need_art": True}
+    assert ok.status_code == 200 and ok.get_json() == {"commands": [], "need_art": True, "jobs": [], "fast_for_s": 0}
     page = client.get("/me").data.decode()
     assert "qwen2.5:7b" in page and "whisper" in page and "97%" in page and "Veridis Quo" in page
 
