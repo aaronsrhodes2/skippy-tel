@@ -7,6 +7,11 @@ all, so the model can't even try it.
 
 Tool output never includes settings values (passwords live in games-env):
 only status, games, timings and how to connect.
+
+Physics: when Mentat is configured and tool_policy allows it for this
+person (it's an "everyone" server), a curated set of Mentat's tools rides
+along as `mentat_<name>`, plus `mentat_search` / `mentat_call` to reach the
+rest of its ~220 tools on demand.
 """
 from __future__ import annotations
 
@@ -16,7 +21,9 @@ import json
 import re
 
 import diagnostics
+import mentat_client
 import ops
+import tool_policy
 from catalog import GAMES
 
 _TAGS = re.compile(r"<[^>]+>")
@@ -74,11 +81,43 @@ def _plain(markup: str) -> str:
     return html.unescape(_TAGS.sub("", markup))
 
 
+_MENTAT_GENERIC = [
+    {"name": "mentat_search",
+     "description": "Find Mentat physics/maths tools (the Captain's own Wolfram rival, ~220 tools: "
+                    "units, constants, symbolic maths, mechanics, relativity, cosmology, optics, "
+                    "thermodynamics, circuits, chemistry, nuclear, materials, simulations) by keywords. "
+                    "Returns names, descriptions and input schemas; then use mentat_call.",
+     "input_schema": {"type": "object", "properties": {"query": {"type": "string"}},
+                      "required": ["query"], "additionalProperties": False}},
+    {"name": "mentat_call",
+     "description": "Run any Mentat tool by name with its arguments (see mentat_search for schemas). "
+                    "Results carry a `source` and `formula`: cite them.",
+     "input_schema": {"type": "object",
+                      "properties": {"name": {"type": "string"}, "arguments": {"type": "object"}},
+                      "required": ["name"], "additionalProperties": False}},
+]
+
+
 class ChatTools:
-    def __init__(self, vm, is_admin: bool, visible: list[str] | None = None):
+    def __init__(self, vm, is_admin: bool, visible: list[str] | None = None, mentat=None):
         self.vm, self.is_admin = vm, is_admin
         self.visible = list(GAMES) if visible is None else list(visible)   # games this person may see
         self.names = _ADMIN if is_admin else _EVERYONE
+        self.mentat = mentat if mentat and tool_policy.allowed("mentat", is_admin) else None
+        self._mentat_schemas = self._load_mentat()
+
+    def _load_mentat(self) -> list[dict]:
+        """Mentat's favourites + search/call, or nothing if it's unreachable."""
+        if not self.mentat:
+            return []
+        try:
+            by_name = {t["name"]: t for t in self.mentat.tools()}
+        except mentat_client.MentatError:
+            return []
+        favs = [{"name": f"mentat_{n}", "description": by_name[n]["description"][:1000],
+                 "input_schema": by_name[n]["input_schema"]}
+                for n in mentat_client.CHAT_FAVORITES if n in by_name]
+        return favs + _MENTAT_GENERIC
 
     def schemas(self) -> list[dict]:
         out = []
@@ -90,12 +129,24 @@ class ChatTools:
                 tool = copy.deepcopy(tool)        # offer only the games they have access to
                 tool["input_schema"]["properties"]["games"]["items"]["enum"] = self.visible
             out.append(tool)
-        return out
+        return out + self._mentat_schemas
 
     def run(self, name: str, args: dict) -> str:
+        if name.startswith("mentat_") and self._mentat_schemas:
+            return json.dumps(self._run_mentat(name, args or {}), default=str)[:20_000]
         if name not in self.names:
             raise ToolError(f"{name} isn't available to you.")
         return json.dumps(getattr(self, "_" + name)(args or {}))
+
+    def _run_mentat(self, name: str, args: dict):
+        try:
+            if name == "mentat_search":
+                return self.mentat.search(str(args.get("query", "")))
+            if name == "mentat_call":
+                return self.mentat.call(str(args.get("name", "")), args.get("arguments") or {})
+            return self.mentat.call(name[len("mentat_"):], args)
+        except mentat_client.MentatError as exc:
+            raise ToolError(str(exc)) from exc
 
     def _server_status(self, _args) -> dict:
         s = self.vm.status()

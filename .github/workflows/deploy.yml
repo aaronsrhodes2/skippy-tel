@@ -77,6 +77,60 @@ jobs:
       - run: terraform init -input=false -backend-config="bucket=${PROJECT_ID}-tfstate"
       - run: terraform apply -input=false -auto-approve -var "project=${PROJECT_ID}"
 
+  mentat:
+    # sigma-ground's physics tools as a public API (mentat/). Runs as the
+    # zero-permission skippy-mentat identity from infra/bootstrap; skipped,
+    # with a notice, until bootstrap has created it.
+    needs: [test, gate]
+    if: needs.gate.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    env:
+      MENTAT_SA: skippy-mentat@skippy-tel.iam.gserviceaccount.com
+      MENTAT_IMAGE: us-west1-docker.pkg.dev/skippy-tel/skippy/mentat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - id: identity
+        run: |
+          if gcloud iam service-accounts describe "$MENTAT_SA" >/dev/null 2>&1; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Mentat's identity ($MENTAT_SA) doesn't exist yet: re-run infra/bootstrap/bootstrap.sh in Cloud Shell. Skipping Mentat."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.identity.outputs.ready == 'true'
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+      - name: Build and push
+        if: steps.identity.outputs.ready == 'true'
+        run: |
+          docker build -f mentat/Dockerfile -t "$MENTAT_IMAGE:$GITHUB_SHA" .
+          docker push "$MENTAT_IMAGE:$GITHUB_SHA"
+      - name: Deploy to Cloud Run
+        if: steps.identity.outputs.ready == 'true'
+        run: |
+          gcloud run deploy skippy-mentat \
+            --image "$MENTAT_IMAGE:$GITHUB_SHA" \
+            --region "$REGION" \
+            --service-account "$MENTAT_SA" \
+            --no-invoker-iam-check \
+            --cpu 1 --memory 1Gi \
+            --concurrency 8 \
+            --max-instances 2 \
+            --timeout 60
+      - name: Smoke test
+        if: steps.identity.outputs.ready == 'true'
+        run: |
+          URL=$(gcloud run services describe skippy-mentat --region "$REGION" --format='value(status.url)')
+          echo "Mentat: $URL" >> "$GITHUB_STEP_SUMMARY"
+          curl -fsS "$URL/health"
+          curl -fsS "$URL/tools" | python3 -c "import json,sys; n=len(json.load(sys.stdin)); print(n, 'tools'); assert n > 100"
+          curl -fsS -X POST -H 'Content-Type: application/json' \
+            -d '{"value": 1, "from_units": "mile", "to_units": "km"}' "$URL/tools/convert_units"
+
   portal:
     needs: [test, gate]
     if: needs.gate.outputs.ready == 'true'
@@ -102,7 +156,7 @@ jobs:
             --no-invoker-iam-check \
             --timeout 900 \
             --max-instances 2 \
-            --set-env-vars "^|^ALLOWED_EMAILS=${ALLOWED_EMAILS}|ADMIN_EMAILS=${ADMIN_EMAILS}|GCP_PROJECT=${PROJECT_ID}|GCP_ZONE=us-west1-b|GCP_INSTANCE=skippy-games|CHAT_MODEL=claude-haiku-4-5|DISCORD_INVITE=gPTVS7Hmj" \
+            --set-env-vars "^|^ALLOWED_EMAILS=${ALLOWED_EMAILS}|ADMIN_EMAILS=${ADMIN_EMAILS}|GCP_PROJECT=${PROJECT_ID}|GCP_ZONE=us-west1-b|GCP_INSTANCE=skippy-games|CHAT_MODEL=claude-haiku-4-5|DISCORD_INVITE=gPTVS7Hmj|MENTAT_URL=https://skippy-mentat-1015050363686.us-west1.run.app" \
             --set-secrets "FLASK_SECRET_KEY=portal-flask-secret:latest,GOOGLE_CLIENT_ID=portal-google-client-id:latest,GOOGLE_CLIENT_SECRET=portal-google-client-secret:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,DISCORD_BOT_TOKEN=discord-bot-token:latest"
       - name: Smoke test
         run: |

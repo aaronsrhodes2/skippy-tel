@@ -122,6 +122,21 @@ resource "google_service_account_iam_member" "deployer_acts_as_runtime" {
   member             = "serviceAccount:${google_service_account.deployer.email}"
 }
 
+# Mentat (sigma-ground's physics tools) is a PUBLIC service that evaluates
+# user-supplied maths (sympy), so it runs as an identity with no roles at all:
+# code that escapes a tool can't touch the game VM, secrets or anything else.
+resource "google_service_account" "mentat" {
+  account_id   = "skippy-mentat"
+  display_name = "Mentat public physics service (no permissions)"
+  depends_on   = [google_project_service.apis]
+}
+
+resource "google_service_account_iam_member" "deployer_acts_as_mentat" {
+  service_account_id = google_service_account.mentat.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.deployer.email}"
+}
+
 # ── Workload Identity Federation: GitHub → skippy-deployer ────────────────────
 
 resource "google_iam_workload_identity_pool" "github" {

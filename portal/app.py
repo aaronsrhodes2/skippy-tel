@@ -19,6 +19,7 @@ import config
 import diagnostics
 import discord_admin
 import friends as friends_mod
+import mentat_client
 import envfile
 import ops
 import tasks
@@ -26,7 +27,7 @@ from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, PORTALS, SERVICES
 from gcp import GamesVm
 
 
-def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
+def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None) -> Flask:
     app = Flask(__name__)
     app.config.update(settings if settings is not None else config.load())
     # Cloud Run terminates TLS; trust its X-Forwarded-Proto/Host so OAuth
@@ -38,6 +39,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
     vm = vm or GamesVm(app.config["GCP_PROJECT"], app.config["GCP_ZONE"], app.config["GCP_INSTANCE"])
     skippy = skippy or chat.SkippyChat(app.config["CHAT_MODEL"])
     app.extensions["friends"] = friends_mod.Friends(vm)
+    mentat = mentat or (mentat_client.Mentat(app.config["MENTAT_URL"]) if app.config.get("MENTAT_URL") else None)
+    app.extensions["mentat"] = mentat
 
     def me() -> str:
         return auth.current_user()["email"]
@@ -326,7 +329,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
         user = auth.current_user()
         try:
             admin = auth.is_admin(user["email"])
-            tools = chat_tools.ChatTools(vm, is_admin=admin, visible=auth.visible_games(user["email"]))
+            tools = chat_tools.ChatTools(vm, is_admin=admin, visible=auth.visible_games(user["email"]),
+                                         mentat=mentat)
             model, badge = chat.pick_model(message, app.config["CHAT_MODEL"], admin)
             page = str(body.get("page") or "")[:100] or None
             prompt = chat.system_prompt(user["name"], is_admin=admin, page=page,

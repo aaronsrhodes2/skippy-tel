@@ -614,3 +614,52 @@ def test_experiments_are_public(env):
     client, _, _ = env
     assert client.get("/experiments").status_code == 200              # signed out
     assert "Experiments" in client.get("/").data.decode()             # linked from sign-in
+
+
+# ── Mentat physics tools in chat ──────────────────────────────────────────────
+
+class FakeMentat:
+    def __init__(self, up=True):
+        self.up, self.calls = up, []
+
+    def tools(self):
+        import mentat_client
+        if not self.up:
+            raise mentat_client.MentatError("down")
+        return [{"name": "convert_units", "domain": "Units", "description": "Convert units.",
+                 "input_schema": {"type": "object", "properties": {"value": {"type": "number"}}}},
+                {"name": "wind_wave_analysis", "domain": "Analysis", "description": "Wind over water.",
+                 "input_schema": {"type": "object", "properties": {}}}]
+
+    def call(self, name, args):
+        self.calls.append((name, args))
+        return {"value": 1.609344, "units": "kilometer", "source": "pint UnitRegistry"}
+
+    def search(self, query, limit=12):
+        return [t for t in self.tools() if query.split()[0] in t["name"]]
+
+
+def _chat_with(mentat, email=FRIEND):
+    vm, skippy = FakeVm(), FakeSkippy()
+    app = portal.create_app(dict(SETTINGS), vm=vm, skippy=skippy, mentat=mentat)
+    client = app.test_client()
+    login(client, email)
+    client.post("/chat/send", json={"message": "how far is a mile in km?"})
+    return {t["name"] for t in skippy.tools}, skippy.run_tool
+
+
+def test_friends_get_mentat_physics_tools():
+    import json
+    mentat = FakeMentat()
+    names, run = _chat_with(mentat)
+    assert {"mentat_convert_units", "mentat_search", "mentat_call"} <= names
+    assert "mentat_wind_wave_analysis" not in names                    # not a favourite: via search/call
+    assert json.loads(run("mentat_convert_units", {"value": 1}))["units"] == "kilometer"
+    assert json.loads(run("mentat_search", {"query": "wind"}))[0]["name"] == "wind_wave_analysis"
+    run("mentat_call", {"name": "wind_wave_analysis", "arguments": {"wind_speed_m_s": 5}})
+    assert mentat.calls[-1] == ("wind_wave_analysis", {"wind_speed_m_s": 5})
+
+
+def test_chat_works_without_mentat():
+    names, _ = _chat_with(FakeMentat(up=False))
+    assert not any(n.startswith("mentat_") for n in names) and "server_status" in names

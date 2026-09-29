@@ -110,7 +110,10 @@ def system_prompt(user_name: str, is_admin: bool = False, page: str | None = Non
         "Stopping or restarting kicks everyone off: ask the user to confirm first, and only act "
         "on a clear yes. Never reveal passwords; join passwords are on the game's page under "
         "\"Show join password\". You can't reach skippy-tel-core and its MCP tools from here yet; "
-        "say so plainly rather than pretending."
+        "say so plainly rather than pretending. When your mentat_* tools are available, they're "
+        "the Captain's own physics engine (Mentat, from sigma-ground, his Wolfram Alpha rival): use "
+        "them for any number, unit or equation instead of your memory, cite the result's source, "
+        "and feel free to be smug about owning a better Wolfram."
     )
 
 

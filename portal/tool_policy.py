@@ -20,6 +20,7 @@ EVERYONE, ADMIN = "everyone", "admin"
 
 MCP_SERVERS: dict[str, str] = {
     # Features of the chat, fine for friends
+    "mentat": EVERYONE,     # sigma-ground's physics tools (the Wolfram rival), hosted as skippy-mentat
     "physics": EVERYONE,
     # The Captain's private data
     "gmail": ADMIN,
