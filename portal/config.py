@@ -44,6 +44,8 @@ def load() -> dict:
         # Who may sign in, and the subset who may change settings/restart.
         "ALLOWED_EMAILS": allowed,
         "ADMIN_EMAILS": _emails(_optional("ADMIN_EMAILS")) & allowed,
+        # Service accounts allowed to read /ops/home (scripts/remote.py home).
+        "OPS_EMAILS": _emails(os.environ.get("OPS_EMAILS", "skippy-deployer@skippy-tel.iam.gserviceaccount.com")),
 
         # The games VM.
         "GCP_PROJECT": _required("GCP_PROJECT"),

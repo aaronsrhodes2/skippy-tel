@@ -14,11 +14,11 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: "status | logs | start | stop | restart | discord-setup | tail | search | stats | restart-game"
+        description: "status | logs | start | stop | restart | discord-setup | tail | search | stats | restart-game | home"
         required: true
         default: status
         type: choice
-        options: [status, logs, start, stop, restart, discord-setup, tail, search, stats, restart-game]
+        options: [status, logs, start, stop, restart, discord-setup, tail, search, stats, restart-game, home]
       args:
         description: "logs/tail/restart-game: game id (tail: + line count); search: game id + regex; start: game ids"
         required: false
@@ -52,10 +52,23 @@ jobs:
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
+      # `home` asks the portal, which accepts only a Google ID token for the deployer.
+      - id: idtoken
+        if: inputs.command == 'home'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+          token_format: id_token
+          id_token_audience: skippy-portal-ops
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
       - name: ${{ inputs.command || 'status' }} ${{ inputs.args }}
         env:
           COMMAND: ${{ inputs.command || 'status' }}
           ARGS: ${{ inputs.args }}
+          OPS_ID_TOKEN: ${{ steps.idtoken.outputs.id_token }}
         # ARGS is split on spaces on purpose (game ids); passed via env, never
         # interpolated into the script, so it can't inject shell.
         run: |

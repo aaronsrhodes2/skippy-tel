@@ -11,6 +11,8 @@ act without anyone fetching logs or pressing buttons.
     python scripts/remote.py search <game> <regex>       # (ops_agent.py), VM must be on
     python scripts/remote.py stats
     python scripts/remote.py restart-game <game>
+    python scripts/remote.py home                        # skippy-pc as the portal sees it
+                                                         # (needs OPS_ID_TOKEN: the workflow mints it)
 
 Uses the portal's own modules (portal/gcp.py, ops.py, diagnostics.py), so it
 follows exactly the rules the portal buttons do. Every secret value (world /
@@ -123,11 +125,25 @@ def agent(vm, cmd: str, args: list[str], env: dict[str, str]) -> int:
     return 1
 
 
+PORTAL_URL = os.environ.get("PORTAL_URL", "https://skippy-portal-1015050363686.us-west1.run.app")
+
+
+def home() -> int:
+    """The portal's view of skippy-pc (reporter, Mentat + Qwen, Bilby, services)."""
+    req = urllib.request.Request(f"{PORTAL_URL}/ops/home",
+                                 headers={"Authorization": f"Bearer {os.environ['OPS_ID_TOKEN']}"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        print(json.dumps(json.loads(r.read()), indent=2))
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if not argv:
         print(__doc__)
         return 2
     cmd, args = argv[0], argv[1:]
+    if cmd == "home":                   # doesn't touch the VM
+        return home()
     vm = GamesVm(os.environ.get("GCP_PROJECT", "skippy-tel"), os.environ.get("GCP_ZONE", "us-west1-b"),
                  os.environ.get("GCP_INSTANCE", "skippy-games"))
     env = vm.status().env

@@ -118,3 +118,21 @@ def unauthorized():
 def logout():
     session.clear()
     return redirect(url_for("index"))
+
+
+OPS_AUDIENCE = "skippy-portal-ops"
+
+
+def ops_caller(header: str | None, allowed: frozenset[str]) -> str | None:
+    """The service account behind a Google-signed ID token (audience
+    OPS_AUDIENCE), if it's one of `allowed`; else None."""
+    if not header or not header.startswith("Bearer ") or not allowed:
+        return None
+    from google.auth.transport.requests import Request
+    from google.oauth2 import id_token
+    try:
+        claims = id_token.verify_oauth2_token(header[7:].strip(), Request(), audience=OPS_AUDIENCE)
+    except Exception:  # noqa: BLE001 — bad, expired or foreign token
+        return None
+    email = claims.get("email", "")
+    return email if claims.get("email_verified") and email in allowed else None

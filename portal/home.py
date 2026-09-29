@@ -185,6 +185,22 @@ class Home:
             "session": r.get("music_session"),
         }
 
+    def diagnostics(self) -> dict:
+        """For the ops workflow: is skippy-pc reporting, and is each piece up?"""
+        r = self.report or {}
+        st, bilby = r.get("status") or {}, r.get("bilby") or {}
+        with self._lock:
+            pending = sum(1 for j in self._jobs.values() if not j["event"].is_set())
+        return {"paired": self.paired(), "online": self.online(), "last_report_s": self.age(),
+                "mentat_home": bool(r.get("mentat_home")),
+                "services": {x.get("name"): x.get("ok") for x in st.get("services") or []},
+                "manifest": {x.get("id"): x.get("available") for x in r.get("services") or []},
+                "ollama_models": st.get("ollama_models"), "ups": st.get("ups"),
+                "bilby": {"source": bilby.get("source"), "online": bilby.get("online"),
+                          "message": bilby.get("message"), "playing": bool(bilby.get("now_playing"))},
+                "music_session": (r.get("music_session") or {}).get("status"),
+                "jobs_pending": pending, "fast_for_s": max(0, int(self.fast_until - self.clock()))}
+
     def status(self) -> dict:
         """The old skippy-pc /status page's content. Admin only."""
         r = self.report or {}

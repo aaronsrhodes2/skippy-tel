@@ -81,6 +81,7 @@ SETTINGS = {
     "GCP_PROJECT": "p", "GCP_ZONE": "z", "GCP_INSTANCE": "i",
     "CHAT_MODEL": "claude-haiku-4-5", "CHAT_ENABLED": True,
     "DISCORD_INVITE": "gPTVS7Hmj", "DISCORD_BOT_TOKEN": "",
+    "OPS_EMAILS": frozenset({"skippy-deployer@skippy-tel.iam.gserviceaccount.com"}),
 }
 
 
@@ -914,3 +915,20 @@ def test_chat_reply_says_which_tools_did_the_work(env):
     skippy.reply = lambda system, messages, tools=None, run_tool=None, model=None, **_: (
         run_tool("server_status", {}) and "Up.")
     assert client.post("/chat/send", json={"message": "up?"}).get_json()["tools"] == ["server_status"]
+
+
+def test_ops_home_needs_the_deployers_google_token(env, monkeypatch):
+    import auth
+    client, _, _ = env
+    assert client.get("/ops/home").status_code == 401
+    assert client.get("/ops/home", headers={"Authorization": "Bearer junk"}).status_code == 401
+    seen = {}
+    def fake_verify(token, request, audience):
+        seen["aud"] = audience
+        return {"email": "skippy-deployer@skippy-tel.iam.gserviceaccount.com", "email_verified": True}
+    monkeypatch.setattr("google.oauth2.id_token.verify_oauth2_token", fake_verify)
+    data = client.get("/ops/home", headers={"Authorization": "Bearer t"}).get_json()
+    assert seen["aud"] == auth.OPS_AUDIENCE and data["paired"] is False and data["online"] is False
+    monkeypatch.setattr("google.oauth2.id_token.verify_oauth2_token",
+                        lambda *a, **k: {"email": "someone@evil.example", "email_verified": True})
+    assert client.get("/ops/home", headers={"Authorization": "Bearer t"}).status_code == 401

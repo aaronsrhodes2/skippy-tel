@@ -308,6 +308,14 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             abort(400)
         return jsonify(home.accept(report))
 
+    @app.get("/ops/home")
+    def ops_home():
+        """Read-only home diagnostics for the ops workflow (scripts/remote.py home):
+        a Google-signed ID token for one of OPS_EMAILS (the deployer), nothing else."""
+        if not auth.ops_caller(request.headers.get("Authorization"), app.config["OPS_EMAILS"]):
+            abort(401)
+        return jsonify(home.diagnostics())
+
     @app.get("/home/jobs")
     def home_jobs():
         """The reporter's quick poll while someone's chatting."""
