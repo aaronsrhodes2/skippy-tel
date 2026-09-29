@@ -9,7 +9,7 @@ services:
     build: ./services/home-reporter
     container_name: skippytel-home-reporter
     restart: unless-stopped
-    env_file: ${SKIPPY_ENV_FILE:-G:/My Drive/vault/.env}           # same shared .env as flask-api: SKIPPY_HOME_TOKEN ("Pair home"), BILBY_MAC_URL
+    env_file: G:/My Drive/vault/.env           # same shared .env as flask-api: SKIPPY_HOME_TOKEN ("Pair home"), BILBY_MAC_URL
     environment:
       SKIPPY_API: http://flask-api:5000
       MENTAT_URL: http://mentat-home:8080
