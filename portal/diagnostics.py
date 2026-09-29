@@ -23,6 +23,30 @@ def latest_snapshot(port2: str) -> str:
     return port2[start:] if end == -1 else port2[start:end + len("=== end ===")]
 
 
+_JOIN_LINE = re.compile(r"^JOIN_CODE (\w+)=(\S+)$", re.M)
+_JOIN_LOG = re.compile(r'Setting \["JoinCode"\].*?value\[([^\]]+)\]')
+
+
+def join_codes(snapshot: str) -> dict[str, str]:
+    """Invite codes by game from a snapshot: skippy-diag's JOIN_CODE lines,
+    else (older VMs) a JoinCode line still in Dragonwilds' log tail."""
+    codes = dict(_JOIN_LINE.findall(snapshot))
+    if "dragonwilds" not in codes:
+        found = _JOIN_LOG.findall(snapshot)
+        if found:
+            codes["dragonwilds"] = found[-1]
+    return codes
+
+
+def current_join_codes(vm) -> dict[str, str]:
+    """Live invite codes (≤2 minutes old). Empty when the VM is off, the
+    snapshot isn't there yet, or the serial port can't be read."""
+    try:
+        return join_codes(latest_snapshot(vm.serial_output(2)))
+    except Exception:   # noqa: BLE001 — an invite code is a nicety; never break the page
+        return {}
+
+
 def for_game(snapshot: str, container: str) -> str:
     """Just one game's part of a snapshot: its `docker ps` row and its log
     section (container names match game ids — games/docker-compose.yml)."""

@@ -22,6 +22,11 @@ class FakeVm:
                                    "DRAGONWILDS_WORLD_PASSWORD": "dragonpw",
                                    "DISCORD_CHANNEL_VALHEIM": "c1", "DISCORD_VOICE_VALHEIM": "v1"})
         self.calls = []
+        self.serial = {
+            1: "boot\nstartup-script: === skippy-games boot now ===\nstartup-script: started: dragonwilds\n",
+            2: "=== skippy-diag old ===\nstale\n=== end ===\n"
+               "=== skippy-diag new ===\ndragonwilds Up 3 minutes\npassword=dragonpw\n=== end ===\n",
+        }
 
     def status(self):
         return self.state
@@ -39,10 +44,6 @@ class FakeVm:
     def restart(self):
         self.calls.append(("restart",))
         return self.state
-
-    serial = {1: "boot\nstartup-script: === skippy-games boot now ===\nstartup-script: started: dragonwilds\n",
-              2: "=== skippy-diag old ===\nstale\n=== end ===\n"
-                 "=== skippy-diag new ===\ndragonwilds Up 3 minutes\npassword=dragonpw\n=== end ===\n"}
 
     def serial_output(self, port):
         return self.serial[port]
@@ -332,3 +333,32 @@ def test_game_logs_are_filtered_to_that_game(env):
     page = client.get("/admin/logs?game=dragonwilds").data.decode()
     assert "steamcmd 42%" in page and "Up 2 minutes" in page
     assert "valheim noise" not in page and "Exited" not in page
+
+
+# ── Dragonwilds invite code ───────────────────────────────────────────────────
+
+def test_invite_code_shown_live_while_running(env):
+    import json
+    client, vm, skippy = env
+    vm.serial[2] = "=== skippy-diag t ===\nJOIN_CODE dragonwilds=YTKM-EKL1\n=== end ===\n"
+    login(client, FRIEND)
+    assert "YTKM-EKL1" not in client.get("/games/dragonwilds").data.decode()   # asleep: no code
+    vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
+    assert "YTKM-EKL1" in client.get("/games/dragonwilds").data.decode()
+    assert "YTKM-EKL1" in client.get("/dashboard").data.decode()
+    vm.serial[2] += "=== skippy-diag t2 ===\nJOIN_CODE dragonwilds=NEW1-CODE\n=== end ===\n"
+    page = client.get("/games/dragonwilds").data.decode()                  # after a reboot
+    assert "NEW1-CODE" in page and "YTKM-EKL1" not in page
+    _, run = _tools_for(client, skippy, FRIEND)
+    assert json.loads(run("server_status", {}))["games"]["dragonwilds"]["invite_code"] == "NEW1-CODE"
+
+
+def test_invite_code_problems_never_break_the_page(env):
+    client, vm, _ = env
+    vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
+
+    def broken(port):
+        raise RuntimeError("serial port unavailable")
+    vm.serial_output = broken
+    login(client, FRIEND)
+    assert client.get("/games/dragonwilds").status_code == 200

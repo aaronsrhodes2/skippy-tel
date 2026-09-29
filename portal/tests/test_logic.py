@@ -229,3 +229,11 @@ def test_redact_masks_only_secret_settings():
     env = {"DRAGONWILDS_WORLD_PASSWORD": "s3cret!", "DRAGONWILDS_SERVER_NAME": "SkippyScape"}
     out = diagnostics.redact("name=SkippyScape pw=s3cret!", env)
     assert out == "name=SkippyScape pw=••••"
+
+
+def test_join_codes_from_diag_line_or_log_fallback():
+    import diagnostics
+    assert diagnostics.join_codes("JOIN_CODE dragonwilds=AB12-CD34\n") == {"dragonwilds": "AB12-CD34"}
+    log = ('[..]LogNetSessionSettings: Setting ["JoinCode"] written with key[xz] value[YTKM-EKL1]\n')
+    assert diagnostics.join_codes(log) == {"dragonwilds": "YTKM-EKL1"}
+    assert diagnostics.join_codes("nothing here") == {}

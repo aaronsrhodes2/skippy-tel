@@ -34,6 +34,7 @@
                ~{{ game.ready_minutes }} min after boot.</p>
           {% endif %}
           <p>{{ game.connect(status.external_ip, status.env) | safe }}</p>
+          {% if codes.get(id) %}<p>Invite code: <code>{{ codes[id] }}</code></p>{% endif %}
           {% if game.join_password_key %}
             {% set pw = status.env.get(game.join_password_key, '') %}
             {% if pw %}

@@ -90,6 +90,11 @@ cat > /usr/local/bin/skippy-diag <<'DIAG'
     echo "--- $c: last 40 log lines"
     docker logs --tail 40 "$c" 2>&1 | tail -c 6000
   done
+  # Invite codes some games generate per session (Dragonwilds: new every boot).
+  # Pulled from the whole container log, since the line scrolls out of the tail.
+  code=$(docker logs dragonwilds 2>&1 | grep -o 'Setting \["JoinCode"\].*value\[[^]]*\]' | tail -1 \
+         | sed -E 's/.*value\[([^]]*)\]/\1/')
+  [ -n "$code" ] && echo "JOIN_CODE dragonwilds=$code"
   echo "--- udp listeners (game ports)"
   ss -ulnp 2>/dev/null | grep -E ':(2456|2457|7777|7778|8888|34197)\b' || echo "(none)"
   echo "--- memory";    free -m | head -2

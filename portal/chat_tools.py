@@ -91,6 +91,7 @@ class ChatTools:
         running = s.status == "RUNNING"
         up = s.minutes_up()
         games = {}
+        codes = diagnostics.current_join_codes(self.vm) if running else {}
         for g in s.games:
             if g not in GAMES:
                 continue
@@ -99,6 +100,8 @@ class ChatTools:
             if running:
                 info["joinable_now"] = up is None or up >= game.ready_minutes
                 info["how_to_connect"] = _plain(game.connect(s.external_ip or "?", s.env))
+                if g in codes:
+                    info["invite_code"] = codes[g]   # Worlds → Invite Code; new each boot
             games[g] = info
         return {
             "state": {"RUNNING": "online", "TERMINATED": "asleep"}.get(s.status, s.status.lower()),
