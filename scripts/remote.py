@@ -6,6 +6,7 @@ act without anyone fetching logs or pressing buttons.
     python scripts/remote.py logs [game]
     python scripts/remote.py start <game> [<game> ...]
     python scripts/remote.py stop | restart
+    python scripts/remote.py discord-setup     # runs in the portal (it holds the bot token)
 
 Uses the portal's own modules (portal/gcp.py, ops.py, diagnostics.py), so it
 follows exactly the rules the portal buttons do. Every secret value (world /
@@ -17,6 +18,9 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
+import urllib.request
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "portal"))
@@ -67,6 +71,29 @@ def status(vm) -> dict:
     }
 
 
+PORTAL_TASKS = ("discord-setup",)
+PORTAL_URL = os.environ.get("PORTAL_URL", "https://skippy-portal-1015050363686.us-west1.run.app")
+
+
+def portal_task(vm, name: str) -> int:
+    """Queue a task in VM metadata, ask the portal to run the queue, report."""
+    task_id = uuid.uuid4().hex[:12]
+    queue = json.loads(vm.get_metadata("portal-tasks") or "[]")
+    vm.set_metadata("portal-tasks", json.dumps(queue + [{"id": task_id, "task": name}]))
+    req = urllib.request.Request(f"{PORTAL_URL}/tasks/run", data=b"", method="POST")
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        results = json.loads(resp.read())["results"]
+    mine = [r for r in results if r["id"] == task_id]
+    if not mine:   # another caller ran it; read the recorded result
+        time.sleep(2)
+        mine = [r for r in json.loads(vm.get_metadata("portal-task-results") or "[]") if r["id"] == task_id]
+    if not mine:
+        print(f"{name}: no result recorded (queued as {task_id})")
+        return 1
+    print(f"{name}: {'OK' if mine[0]['ok'] else 'FAILED'} — {mine[0]['message']}")
+    return 0 if mine[0]["ok"] else 1
+
+
 def main(argv: list[str]) -> int:
     if not argv:
         print(__doc__)
@@ -94,6 +121,8 @@ def main(argv: list[str]) -> int:
         print(ops.stop_server(vm)[1])
     elif cmd == "restart":
         print(ops.restart_server(vm)[1])
+    elif cmd in PORTAL_TASKS:
+        return portal_task(vm, cmd)
     else:
         print(f"unknown command {cmd!r}\n{__doc__}")
         return 2

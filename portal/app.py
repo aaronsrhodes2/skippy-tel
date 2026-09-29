@@ -19,6 +19,7 @@ import discord_admin
 import friends as friends_mod
 import envfile
 import ops
+import tasks
 from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, SERVICES
 from gcp import GamesVm
 
@@ -238,22 +239,24 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
         flash(ops.restart_server(vm)[1], "ok")
         return back("admin.index")
 
+    def run_discord_setup() -> str:
+        """Create/repair every game's channels, invites, webhooks and pinned
+        posts. Raises with Discord's own explanation on failure."""
+        token = app.config["DISCORD_BOT_TOKEN"]
+        if not token:
+            raise RuntimeError("No Discord bot token configured — see docs/cicd.md → Secrets.")
+        updates = discord_admin.setup(token, app.config["DISCORD_INVITE"], list(GAMES), vm.status().env)
+        vm.update_env(updates)
+        return (f"Discord ready: {len(GAMES)} games' text + voice channels, invites, webhooks and pinned "
+                "posts. The VM picks up the webhooks on its next start.")
+
     @admin.post("/discord")
     @auth.admin_required
     def discord_setup():
-        token = app.config["DISCORD_BOT_TOKEN"]
-        if not token:
-            flash("No Discord bot token configured — see docs/cicd.md → Secrets.", "error")
-            return redirect(url_for("admin.index"))
-        status = vm.status()
         try:
-            updates = discord_admin.setup(token, app.config["DISCORD_INVITE"], list(GAMES), status.env)
+            flash(run_discord_setup(), "ok")
         except Exception as exc:   # noqa: BLE001
             flash(f"Discord setup failed: {exc}", "error")
-            return redirect(url_for("admin.index"))
-        vm.update_env(updates)
-        flash("Discord channels, webhooks and pinned posts are ready. "
-              "The VM picks up the webhooks on its next start.", "ok")
         return back("admin.index")
 
     @admin.get("/logs")
@@ -268,6 +271,12 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
         return render_template("logs.html", logs=logs, error=error, game=game)
 
     app.register_blueprint(admin)
+
+    # ── queued tasks from remote operators (tasks.py) ──────────────────────────
+    @app.post("/tasks/run")
+    def tasks_run():
+        """No login: runs only what someone who controls the VM queued."""
+        return jsonify(results=tasks.run_pending(vm, {"discord-setup": run_discord_setup}))
 
     # ── chat ───────────────────────────────────────────────────────────────────
     talk = Blueprint("chat", __name__, url_prefix="/chat")

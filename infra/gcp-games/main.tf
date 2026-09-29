@@ -142,6 +142,8 @@ resource "google_compute_instance" "games" {
       metadata["idle-minutes"],
       metadata["games-env"],
       metadata["portal-friends"], # the portal's friends list (portal/friends.py)
+      metadata["portal-tasks"],   # remote-operator task queue (portal/tasks.py)
+      metadata["portal-task-results"],
     ]
   }
 }

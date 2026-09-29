@@ -80,6 +80,9 @@ Actions (the sandbox can't reach GCP or run.app directly):
   (a game id for logs; game ids for start). Read the job log. Secrets are
   masked. `status` shows state, games, invite codes, missing settings.
   Don't stop/restart while people may be playing unless asked.
+  `command` = `discord-setup` creates/repairs every game's Discord channels:
+  it queues the job in VM metadata and the portal (which holds the bot token)
+  runs it via POST /tasks/run (portal/tasks.py). New portal-side jobs go there.
 - Portal: https://skippy-portal-1015050363686.us-west1.run.app — code in
   `portal/`, docs in `docs/portal/README.md` and `docs/cicd.md`.
 - Secrets live in the Captain's Drive vault `.env`; he loads them into Secret

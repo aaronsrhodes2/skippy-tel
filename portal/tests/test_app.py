@@ -506,3 +506,32 @@ def test_play_card_has_players_online_and_facts(env):
     assert "– / 6" in client.get("/games/dragonwilds").data.decode()   # count not known yet
     vm.serial[2] = "=== skippy-diag t ===\nPLAYERS dragonwilds=2\n=== end ===\n"
     assert "2 / 6" in client.get("/games/dragonwilds").data.decode()
+
+
+# ── remote-operator task queue (tasks.py) ─────────────────────────────────────
+
+def test_task_endpoint_runs_only_what_was_queued(env, monkeypatch):
+    import json
+    import discord_admin
+    client, vm, _ = env
+    assert client.post("/tasks/run").get_json() == {"results": []}   # nothing queued: nothing runs
+    client.application.config["DISCORD_BOT_TOKEN"] = "tok"
+    monkeypatch.setattr(discord_admin, "setup",
+                        lambda token, invite, games, env: {"DISCORD_GUILD_ID": "g1", "DISCORD_CHANNEL_DRAGONWILDS": "c9"})
+    vm.metadata["portal-tasks"] = json.dumps([{"id": "t1", "task": "discord-setup"},
+                                              {"id": "t2", "task": "rm-rf"}])
+    results = {r["id"]: r for r in client.post("/tasks/run").get_json()["results"]}
+    assert results["t1"]["ok"] and "Discord ready" in results["t1"]["message"]
+    assert not results["t2"]["ok"] and "unknown task" in results["t2"]["message"]
+    assert vm.state.env["DISCORD_CHANNEL_DRAGONWILDS"] == "c9"        # settings saved to the VM
+    assert json.loads(vm.metadata["portal-tasks"]) == []              # queue emptied
+    assert [r["id"] for r in json.loads(vm.metadata["portal-task-results"])] == ["t1", "t2"]
+    assert client.post("/tasks/run").get_json() == {"results": []}   # and never re-run
+
+
+def test_task_failure_is_reported_not_raised(env):
+    import json
+    client, vm, _ = env
+    vm.metadata["portal-tasks"] = json.dumps([{"id": "t1", "task": "discord-setup"}])   # no bot token
+    [result] = client.post("/tasks/run").get_json()["results"]
+    assert not result["ok"] and "bot token" in result["message"]

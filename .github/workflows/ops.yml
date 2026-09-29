@@ -14,11 +14,11 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: "status | logs | start | stop | restart"
+        description: "status | logs | start | stop | restart | discord-setup"
         required: true
         default: status
         type: choice
-        options: [status, logs, start, stop, restart]
+        options: [status, logs, start, stop, restart, discord-setup]
       args:
         description: "logs: a game id to filter to; start: game ids (space-separated)"
         required: false
