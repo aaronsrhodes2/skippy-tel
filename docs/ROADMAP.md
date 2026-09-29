@@ -31,7 +31,7 @@ Last updated 2026-09-28.
 ## Next
 | Track | Item |
 |---|---|
-| Portal | Bridge chat to **skippy-tel-core** and its MCP tools (needs a route from Cloud Run into the home mesh: Tailscale or a tunnel) |
+| Portal | Bridge chat to **skippy-tel-core** and its MCP tools (must filter tools through `portal/tool_policy.py`: friends get only `everyone` servers like physics) (needs a route from Cloud Run into the home mesh: Tailscale or a tunnel) |
 | Portal | Live services list (skippy-tel-core `/services`) instead of the static one — same mesh dependency |
 | Portal | Background restarts with progress; per-game container restart without a full VM reboot |
 | Games | **EverQuest (EQEmu)** as a compose profile + migrate the local DB — open: which local setup (AkkStack / community compose / raw), public vs. private login server |

@@ -1,0 +1,75 @@
+{# Skippy chat: the Chat page shows it full size; base.html docks it on every
+   other page. One implementation; the conversation lives in sessionStorage,
+   so it follows you from page to page within a tab. #}
+<div class="skippy-chat">
+  {% if not chat_enabled %}
+    <p class="error">Chat isn't configured yet (no Anthropic API key).</p>
+  {% endif %}
+  <p class="help">Say <i>"thinking cap"</i> for a sharper answer (Sonnet){% if is_admin %}, or
+    <i>"trust the awesomeness"</i> for the big brain (Opus){% endif %}. Otherwise it's Haiku: quick and cheap.
+    Skippy can check the game server, start games{% if is_admin %}, restart it and read its logs{% endif %} — just ask.</p>
+  <div class="log"></div>
+  <form class="ask">
+    <textarea rows="2" placeholder="Say something to Skippy" required></textarea>
+    <p><button type="submit">Send</button> <button type="button" class="clear">New chat</button></p>
+  </form>
+</div>
+<script>
+  (function (root) {
+    // History lives in this tab (sessionStorage) and is sent with each message;
+    // the server keeps nothing between requests.
+    const KEY = "skippy-chat";
+    const log = root.querySelector(".log"), form = root.querySelector(".ask");
+    const msg = form.querySelector("textarea"), sendBtn = form.querySelector("button[type=submit]");
+    let history = [];
+    try { history = JSON.parse(sessionStorage.getItem(KEY) || "[]"); } catch (e) { history = []; }
+
+    function add(role, text, extra) {
+      const div = document.createElement("div");
+      div.className = "turn " + role + (extra ? " " + extra : "");
+      div.textContent = (role === "user" ? "You: " : "Skippy: ") + text;
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+      return div;
+    }
+    function save() { try { sessionStorage.setItem(KEY, JSON.stringify(history)); } catch (e) {} }
+    history.forEach(t => add(t.role, t.content));
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const text = msg.value.trim();
+      if (!text) return;
+      add("user", text);
+      msg.value = "";
+      sendBtn.disabled = true;
+      const pending = add("assistant", "…");
+      try {
+        const res = await fetch("{{ url_for('chat.send') }}", {
+          method: "POST", headers: {"Content-Type": "application/json"},
+          // `page` lets Skippy know what you're looking at ("this game" = the one on screen).
+          body: JSON.stringify({message: text, history: history, page: location.pathname}),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        pending.textContent = "Skippy: " + data.reply;
+        if (data.model) {                       // "thinking cap" / "trust the awesomeness"
+          const tag = document.createElement("span");
+          tag.className = "tier"; tag.textContent = data.model;
+          pending.prepend(tag);
+        }
+        history.push({role: "user", content: text}, {role: "assistant", content: data.reply});
+        save();
+      } catch (err) {
+        pending.textContent = "Skippy: " + err.message;
+        pending.classList.add("failed");
+      } finally {
+        sendBtn.disabled = false;
+        msg.focus();
+      }
+    });
+    msg.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
+    });
+    root.querySelector(".clear").addEventListener("click", () => { history = []; save(); log.replaceChildren(); });
+  })(document.currentScript.previousElementSibling);
+</script>

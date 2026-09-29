@@ -558,3 +558,14 @@ def test_opus_tier_is_admin_only(env):
     assert resp.get_json()["model"] is None and skippy.model == SETTINGS["CHAT_MODEL"]
     client.post("/chat/send", json={"message": "thinking cap please"})
     assert skippy.model == "claude-sonnet-5"                            # Sonnet is for everyone
+
+
+def test_skippy_is_docked_on_every_page_but_the_chat_page(env):
+    client, _, skippy = env
+    login(client, FRIEND)
+    for url in ("/dashboard", "/games/dragonwilds"):
+        assert 'id="skippy-dock"' in client.get(url).data.decode()
+    assert 'id="skippy-dock"' not in client.get("/chat").data.decode()
+    client.post("/chat/send", json={"message": "hi", "page": "/games/dragonwilds"})
+    system, _ = skippy.seen
+    assert "/games/dragonwilds" in system and "NOT the Captain" in system   # FRIEND isn't an admin

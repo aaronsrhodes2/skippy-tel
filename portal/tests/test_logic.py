@@ -354,3 +354,24 @@ def test_fallback_params_only_for_models_that_support_them():
     opus = _chat([_Resp("end_turn", _Block("text", text="Aye."))])
     opus.reply("sys", [{"role": "user", "content": "hi"}])
     assert opus._client.requests[0]["fallbacks"] == "default"
+
+
+# ── chat privacy: friends vs. the Captain ─────────────────────────────────────
+
+def test_friends_get_the_privacy_rules_and_only_their_games():
+    import chat
+    friend = chat.system_prompt("Pal", is_admin=False, page="/games/dragonwilds",
+                                games=["RuneScape: Dragonwilds"])
+    assert "NOT the Captain" in friend and "calendar" in friend
+    assert "/games/dragonwilds" in friend and "Valheim" not in friend
+    captain = chat.system_prompt("Aaron", is_admin=True)
+    assert "NOT the Captain" not in captain
+
+
+def test_mcp_tools_default_to_private():
+    import tool_policy as tp
+    assert tp.allowed("physics", is_admin=False)
+    for private in ("gmail", "calendar", "memory", "some-new-server"):
+        assert not tp.allowed(private, is_admin=False)
+        assert tp.allowed(private, is_admin=True)
+    assert tp.allowed_servers(["physics", "gmail", "brand-new"], is_admin=False) == ["physics"]

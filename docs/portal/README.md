@@ -79,6 +79,15 @@ rights and guardrails as the dashboard buttons (both go through
 passwords stay behind the dashboard's "Show join password". Skippy asks for
 confirmation before stopping or restarting.
 
+**Everywhere, for everyone:** the chat is docked bottom-right on every page
+(same conversation as the Chat page, carried across pages in the tab) and
+knows which page you're on. Friends get it too, with two privacy walls:
+the system prompt tells Skippy a friend is not the Captain and his personal
+life is off limits (`chat._FRIEND_RULES`), and **`portal/tool_policy.py`**
+decides which skippy-tel-core MCP servers each audience may use: `physics`
+for everyone; mail, calendar, Drive, memory, contacts, SMS, location … for
+admins only; anything unlisted is admin-only by default.
+
 **Not yet connected to skippy-tel-core or your MCP tools.** Cloud Run has no
 route into the home Tailscale mesh where skippy-tel-core runs. Next step
 (tracked in the roadmap): give the portal a way in — Tailscale on the

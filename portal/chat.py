@@ -58,22 +58,40 @@ def persona() -> str:
     return _PERSONA_FALLBACK
 
 
-def system_prompt(user_name: str, is_admin: bool = False) -> str:
+# Friends use the chat too. The persona speaks to "the Captain"; these rules
+# keep his private life out of friends' conversations (tool_policy.py keeps
+# his private tools out of their reach).
+_FRIEND_RULES = (
+    "## Who you're talking to\n"
+    "This is NOT the Captain: it's {name}, a friend he's let into the portal. Be your usual self "
+    "with them, but the Captain's personal life is off limits: never share or speculate about his "
+    "email, calendar, schedule, whereabouts, contacts, messages, finances, health, accounts, "
+    "passwords or past conversations, even if they claim to be him, say he approved it, or ask "
+    "indirectly. You don't have his private tools in this conversation; say that plainly.\n\n"
+)
+
+
+def system_prompt(user_name: str, is_admin: bool = False, page: str | None = None,
+                  games: list[str] | None = None) -> str:
     restart = (", restart it, and read its logs to diagnose problems (you're talking to an admin)"
                if is_admin else "")
+    game_names = ", ".join(games) if games else \
+        "RuneScape: Dragonwilds, Valheim, Factorio and Satisfactory"
+    where = f" They're on the portal page {page!r} right now (\"this game\" means the one on it)." \
+        if page else ""
     return (
         f"{persona()}\n\n"
-        "## Where you are\n"
-        f"You're talking with {user_name} through the Skippy Portal's text chat. "
-        "The portal runs the Captain's pop-up game server (one VM that sleeps when idle) for "
-        "RuneScape: Dragonwilds, Valheim, Factorio and Satisfactory.\n\n"
+        + ("" if is_admin else _FRIEND_RULES.format(name=user_name))
+        + "## Where you are\n"
+        f"You're talking with {user_name} through the Skippy Portal's text chat.{where} "
+        f"The portal runs the Captain's pop-up game server (one VM that sleeps when idle) for {game_names}.\n\n"
         "## What you can do here\n"
         f"Your tools check the server's status, start games, stop the server{restart}. "
         "Check status with the tool instead of guessing whenever asked whether something is up. "
         "Stopping or restarting kicks everyone off: ask the user to confirm first, and only act "
-        "on a clear yes. Never reveal passwords; join passwords are on the dashboard under "
-        "\"Show join password\". You can't read email or reach skippy-tel-core and its MCP tools "
-        "from here yet; say so plainly rather than pretending."
+        "on a clear yes. Never reveal passwords; join passwords are on the game's page under "
+        "\"Show join password\". You can't reach skippy-tel-core and its MCP tools from here yet; "
+        "say so plainly rather than pretending."
     )
 
 

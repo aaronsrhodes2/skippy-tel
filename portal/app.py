@@ -300,7 +300,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
             admin = auth.is_admin(user["email"])
             tools = chat_tools.ChatTools(vm, is_admin=admin, visible=auth.visible_games(user["email"]))
             model, badge = chat.pick_model(message, app.config["CHAT_MODEL"], admin)
-            text = skippy.reply(chat.system_prompt(user["name"], is_admin=admin),
+            page = str(body.get("page") or "")[:100] or None
+            prompt = chat.system_prompt(user["name"], is_admin=admin, page=page,
+                                        games=[GAMES[g].name for g in auth.visible_games(user["email"])])
+            text = skippy.reply(prompt,
                                 chat.build_messages(body.get("history"), message),
                                 tools=tools.schemas(), run_tool=tools.run, model=model)
         except chat.ChatError as exc:

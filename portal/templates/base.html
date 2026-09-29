@@ -55,6 +55,21 @@
   }
   .help { font-size: 0.8rem; color: #7fbfa0; margin: 2px 0 0; }
   .links a { margin-right: 12px; }
+  /* Skippy chat (templates/_chat.html), full page or docked */
+  .skippy-chat .log { overflow-y: auto; max-height: 50vh; }
+  .skippy-chat .turn { margin: 8px 0; padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; font-size: .92rem; }
+  .skippy-chat .user { background: #111; border: 1px solid #333; }
+  .skippy-chat .assistant { background: var(--dim-green); border: 1px solid var(--dim-green-hi); color: #b8ffe0; }
+  .skippy-chat .failed { border-color: var(--red); color: var(--red); }
+  .skippy-chat .tier { float: right; font-size: .7rem; border: 1px solid var(--violet); color: var(--violet);
+                       border-radius: 999px; padding: 1px 8px; margin-left: 8px; }
+  #skippy-dock-btn { position: fixed; right: 18px; bottom: 18px; z-index: 50; border-radius: 999px;
+                     padding: 10px 16px; box-shadow: 0 4px 18px rgba(0,0,0,.6); }
+  #skippy-dock { position: fixed; right: 18px; bottom: 72px; z-index: 50; width: min(380px, calc(100vw - 36px));
+                 background: #050505; border: 1px solid var(--green); border-radius: 12px; padding: 12px;
+                 box-shadow: 0 8px 30px rgba(0,0,0,.7); }
+  #skippy-dock .skippy-chat .log { max-height: 45vh; }
+  #skippy-dock h3 { margin: 0 0 4px; color: var(--green); font-size: 1rem; }
   code.code { font-size: 1.15rem; letter-spacing: .08em; padding: 1px 6px; border-radius: 4px;
               background: rgba(255,255,255,.08); user-select: all; }
 </style>
@@ -81,5 +96,26 @@
 {% endfor %}
 {% block content %}{% endblock %}
 </main>
+{% if user and request.endpoint != 'chat.index' %}
+  {# Skippy on every page: same chat as the Chat page, docked bottom-right. #}
+  <button id="skippy-dock-btn" type="button" aria-expanded="false" aria-controls="skippy-dock">💬 Skippy</button>
+  <div id="skippy-dock" hidden>
+    <h3>Skippy</h3>
+    {% include "_chat.html" %}
+  </div>
+  <script>
+    (function () {
+      const btn = document.getElementById("skippy-dock-btn"), dock = document.getElementById("skippy-dock");
+      function show(open) {
+        dock.hidden = !open; btn.setAttribute("aria-expanded", open);
+        try { sessionStorage.setItem("skippy-dock-open", open ? "1" : ""); } catch (e) {}
+        if (open) dock.querySelector("textarea").focus();
+      }
+      btn.addEventListener("click", () => show(dock.hidden));
+      document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !dock.hidden) show(false); });
+      try { if (sessionStorage.getItem("skippy-dock-open")) show(true); } catch (e) {}   // stays open across pages
+    })();
+  </script>
+{% endif %}
 </body>
 </html>
