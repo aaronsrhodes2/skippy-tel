@@ -98,6 +98,10 @@ services:
       # negotiate their settings. Internal and external ports must match.
       - "${DRAGONWILDS_BEACON_PORT:-8888}:${DRAGONWILDS_BEACON_PORT:-8888}/udp"
     environment:
+      # Required by the image (it refuses to start without them); 1000 owns
+      # data/dragonwilds (infra/gcp-games/startup.sh chowns it).
+      PUID: "1000"
+      PGID: "1000"
       DEFAULT_PORT: ${DRAGONWILDS_PORT:-7778}
       BEACON_PORT: ${DRAGONWILDS_BEACON_PORT:-8888}
       OWNER_ID: ${DRAGONWILDS_OWNER_ID:-}      # required; games.sh checks it
