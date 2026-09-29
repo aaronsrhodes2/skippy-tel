@@ -7,6 +7,10 @@
 name: ops
 
 on:
+  # A push touching the ops tooling runs a read-only `status` as a self-test
+  # (and registers the workflow so workflow_dispatch works on this branch).
+  push:
+    paths: [.github/workflows/ops.yml, scripts/remote.py]
   workflow_dispatch:
     inputs:
       command:
@@ -48,9 +52,9 @@ jobs:
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
-      - name: ${{ inputs.command }} ${{ inputs.args }}
+      - name: ${{ inputs.command || 'status' }} ${{ inputs.args }}
         env:
-          COMMAND: ${{ inputs.command }}
+          COMMAND: ${{ inputs.command || 'status' }}
           ARGS: ${{ inputs.args }}
         # ARGS is split on spaces on purpose (game ids); passed via env, never
         # interpolated into the script, so it can't inject shell.
