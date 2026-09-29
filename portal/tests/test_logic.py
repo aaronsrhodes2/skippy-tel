@@ -324,3 +324,15 @@ def test_join_codes_from_diag_line_or_log_fallback():
     log = ('[..]LogNetSessionSettings: Setting ["JoinCode"] written with key[xz] value[YTKM-EKL1]\n')
     assert diagnostics.join_codes(log) == {"dragonwilds": "YTKM-EKL1"}
     assert diagnostics.join_codes("nothing here") == {}
+
+
+def test_discord_errors_say_what_went_wrong():
+    import io
+    import urllib.error
+    err = urllib.error.HTTPError("https://x", 403, "Forbidden", {},
+                                 io.BytesIO(b'{"message": "Missing Access", "code": 50001}'))
+    e = discord_admin.DiscordError.from_http(err, "GET", "/guilds/1/channels")
+    assert e.code == 403 and isinstance(e, urllib.error.HTTPError)   # callers still branch on .code
+    assert "isn't in this Discord server" in str(e)
+    bare = urllib.error.HTTPError("https://discord.com/api/webhooks/1/secret", 500, "Oops", {}, io.BytesIO(b""))
+    assert "secret" not in str(discord_admin.DiscordError.from_http(bare, "POST", bare.url))   # no webhook token in messages

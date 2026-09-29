@@ -81,9 +81,41 @@ class Discord:
             headers["Authorization"] = f"Bot {self.token}"
         data = json.dumps(payload).encode() if payload is not None else None
         req = urllib.request.Request(url, data=data, method=method, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            body = resp.read()
-            return json.loads(body) if body else {}
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                body = resp.read()
+                return json.loads(body) if body else {}
+        except urllib.error.HTTPError as err:
+            raise DiscordError.from_http(err, method, path) from err
+
+
+# Discord's JSON error codes worth translating for whoever clicked the button.
+_HINTS = {
+    50001: "the bot isn't in this Discord server (invite it) or can't see that channel",
+    50013: "the bot is missing a permission (give it Administrator, or Manage Channels/Webhooks/Messages)",
+    10004: "the Discord server wasn't found — check DISCORD_INVITE",
+    40001: "the bot token was rejected",
+}
+
+
+class DiscordError(urllib.error.HTTPError):
+    """An HTTPError (callers keep checking .code) whose message says what
+    Discord actually objected to."""
+
+    @classmethod
+    def from_http(cls, err, method, path):
+        try:
+            info = json.loads(err.read() or b"{}")
+        except ValueError:
+            info = {}
+        detail = info.get("message") or err.reason
+        hint = _HINTS.get(info.get("code"))
+        where = "webhook" if path.startswith("http") else path
+        text = f"{err.code} {detail} ({method} {where})" + (f": {hint}" if hint else "")
+        return cls(err.url, err.code, text, err.headers, None)
+
+    def __str__(self):
+        return self.msg
 
 
 def guild_from_invite(api: Discord, invite: str) -> str:
