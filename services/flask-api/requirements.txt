@@ -13,3 +13,8 @@ google-auth-oauthlib>=1.2.0
 google-api-python-client>=2.130.0
 # Service icon generation (fallback when SD is offline)
 Pillow>=10.3.0
+# Bilby public proxy — HTML sanitization (strip controls / rep tags)
+beautifulsoup4>=4.12.0
+requests>=2.31.0
+# Bilby Big Card — QR code generation (uses Pillow already above)
+qrcode>=7.4

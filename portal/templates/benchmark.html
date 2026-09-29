@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Mentat vs Wolfram Alpha vs Gemini — Experiments{% endblock %}
+{% block head %}
+<style>
+  main { max-width: 980px; }
+  .bars .row { display: grid; grid-template-columns: 260px 1fr 70px; gap: 10px; align-items: center; margin: 8px 0; }
+  .bars .track { height: 18px; background: #151020; border-radius: 6px; overflow: hidden; }
+  .bars .fill { height: 100%; border-radius: 6px; }
+  .fill.mentat { background: var(--green); } .fill.llm { background: var(--cyan); } .fill.wolfram { background: var(--amber); }
+  .bars .pct { text-align: right; font-weight: 700; }
+  table.domains { border-collapse: collapse; width: 100%; font-size: .85rem; margin-top: 10px; }
+  table.domains th, table.domains td { padding: 6px 8px; border-bottom: 1px solid #222; text-align: right; }
+  table.domains th:first-child, table.domains td:first-child { text-align: left; }
+  table.domains td.best { color: var(--green); font-weight: 700; }
+  .scroll { overflow-x: auto; }
+  @media (max-width: 600px) { .bars .row { grid-template-columns: 1fr 60px; } .bars .track { grid-column: 1 / -1; } }
+</style>
+{% endblock %}
+{% block content %}
+{% if not user %}<header><h1><a href="{{ url_for('index') }}" style="color:inherit;text-decoration:none">Skippy Portal</a></h1></header>{% endif %}
+<section>
+  <p><a href="{{ url_for('experiments.index') }}">&larr; Experiments</a></p>
+  <h2>Mentat vs Wolfram Alpha vs Gemini</h2>
+  {% if not bench.main %}
+    <p class="help">The benchmark results aren't bundled in this build.</p>
+  {% else %}
+  <p>150 physics questions across {{ bench.domains|length }} domains, each scored against ground truth.
+    <b>Mentat</b> is Aaron's own physics tool server; here a small local model (Qwen 2.5, 7B parameters,
+    running on a home GPU, free) answers by calling it. Every number below is read straight from the result
+    files committed in sigma-ground; nothing is re-scored or hand-picked.</p>
+  <div class="bars">
+    {% for r in bench.main %}
+      <div class="row"><span>{{ r.label }}</span>
+        <div class="track"><div class="fill {{ r.kind }}" style="width: {{ r.pct }}%"></div></div>
+        <span class="pct">{{ r.pct }}%</span></div>
+    {% endfor %}
+  </div>
+  <p class="help">Correct / total: {% for r in bench.main %}{{ r.label }} {{ r.correct }}/{{ r.total }}{{ '; ' if not loop.last }}{% endfor %}.
+    Wolfram Alpha ran on its free tier; "misses re-run" retried the questions it failed to answer the first time.</p>
+
+  <h3>By domain</h3>
+  <div class="scroll">
+  <table class="domains">
+    <tr><th>Domain</th>{% for r in bench.main %}<th>{{ r.label }}</th>{% endfor %}</tr>
+    {% for d in bench.domains %}
+      {% set best = bench.main | map(attribute='by_domain') | map(attribute=d) | select | map(attribute='pct') | max %}
+      <tr><td>{{ d | replace('_', ' ') }}</td>
+        {% for r in bench.main %}
+          {% set cell = r.by_domain.get(d) %}
+          <td class="{{ 'best' if cell and cell.pct == best }}">{% if cell %}{{ cell.pct | round | int }}%{% else %}–{% endif %}</td>
+        {% endfor %}</tr>
+    {% endfor %}
+  </table>
+  </div>
+
+  {% if bench.adversarial %}
+    <h3>Adversarial questions</h3>
+    <p>False premises, impossible requests and trick puzzles, where the right answer is often "that can't be
+      answered as asked".
+      {% for r in bench.adversarial %}{{ r.label }}: <b>{{ r.pct }}%</b> ({{ r.correct }}/{{ r.total }}){{ '; ' if not loop.last }}{% endfor %}.</p>
+  {% endif %}
+  <p class="help">Source: <a href="https://github.com/aaronsrhodes2/sigma-ground/tree/master/sigma_ground/mcp/benchmark">sigma_ground/mcp/benchmark</a>
+    ({% for r in bench.main + bench.adversarial %}{{ r.file }}{{ ', ' if not loop.last }}{% endfor %}).</p>
+  {% endif %}
+</section>
+{% endblock %}

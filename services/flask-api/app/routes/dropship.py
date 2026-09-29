@@ -106,54 +106,41 @@ def dropship_health():
 @bp.get("/dropship/list")
 def dropship_list():
     """
-    Paginated image list from Drive Images/ folder.
+    Paginated image list sourced from the SQLite tag store (photo_tags.db).
+
+    Images are tag-indexed, not filename-indexed. Tagged images sort first;
+    within each group ordered by drive_created descending. All URLs are
+    SkippyTel proxy endpoints — no external Drive CDN links are exposed.
 
     Query params:
-      page_token — Drive nextPageToken for subsequent pages
-      size        — results per page (default 50, max 200)
+      offset — row offset for pagination (default 0)
+      size   — results per page (default 50, max 200)
     """
-    fid = _images_folder_id()
-    if not fid:
-        return error("GOOGLE_DRIVE_IMAGES_FOLDER_ID not configured", status=503)
-
-    page_token = request.args.get("page_token") or None
-    size = min(int(request.args.get("size", _PAGE_SIZE_DEFAULT)), _PAGE_SIZE_MAX)
+    offset = max(0, int(request.args.get("offset", 0)))
+    size   = min(int(request.args.get("size", _PAGE_SIZE_DEFAULT)), _PAGE_SIZE_MAX)
 
     try:
-        svc = _get_drive()
-        resp = svc.files().list(
-            q=(
-                f"'{fid}' in parents "
-                "and mimeType contains 'image/' "
-                "and trashed = false"
-            ),
-            pageSize=size,
-            pageToken=page_token,
-            orderBy="createdTime desc",
-            fields=(
-                "nextPageToken, "
-                "files(id, name, mimeType, size, createdTime, thumbnailLink, imageMediaMetadata)"
-            ),
-        ).execute()
-
-        items = []
-        for f in resp.get("files", []):
-            meta = f.get("imageMediaMetadata", {})
-            items.append({
-                "id":         f["id"],
-                "name":       f.get("name", ""),
-                "mime":       f.get("mimeType", ""),
-                "size":       f.get("size"),
-                "date":       f.get("createdTime"),
-                "thumb_url":  f.get("thumbnailLink"),
-                "width":      meta.get("width"),
-                "height":     meta.get("height"),
-            })
-
+        from app import photo_tags
+        rows, total = photo_tags.get_page(offset=offset, limit=size)
+        base = request.host_url.rstrip("/")
+        items = [
+            {
+                "id":          r["file_id"],
+                "name":        r["drive_name"],
+                "description": r["description"],
+                "date":        r["drive_created"],
+                "tagged":      bool(r["description"]),
+                "thumb_url":   f"{base}/dropship/thumb/{r['file_id']}",
+                "image_url":   f"{base}/dropship/image/{r['file_id']}",
+            }
+            for r in rows
+        ]
         return jsonify({
-            "images":     items,
-            "next_page":  resp.get("nextPageToken"),
-            "count":      len(items),
+            "images":  items,
+            "count":   len(items),
+            "total":   total,
+            "offset":  offset,
+            "has_more": (offset + len(items)) < total,
         })
 
     except Exception as exc:
@@ -200,20 +187,38 @@ def dropship_image(file_id: str):
 @bp.get("/dropship/thumb/<file_id>")
 def dropship_thumb(file_id: str):
     """
-    Redirect to Drive's built-in thumbnail URL (no bandwidth through SkippyTel).
-    Drive generates thumbs automatically; the URL is valid for ~1 hour.
+    Proxy Drive's thumbnail through SkippyTel — no external CDN links reach the phone.
+    Drive generates 512-px thumbnails automatically; we fetch and stream the bytes.
+    Cached for 24 h (thumbnails don't change).
     """
     try:
         svc = _get_drive()
-        meta = svc.files().get(fileId=file_id, fields="thumbnailLink").execute()
-        thumb = meta.get("thumbnailLink")
-        if not thumb:
-            return error("No thumbnail available", status=404)
-        # Bump thumbnail size from Drive's default (220px) to 512px
-        thumb = thumb.replace("=s220", "=s512")
-        from flask import redirect
-        return redirect(thumb)
+        meta = svc.files().get(fileId=file_id, fields="thumbnailLink,mimeType").execute()
+        thumb_url = meta.get("thumbnailLink")
+        if not thumb_url:
+            # No Drive thumbnail yet — fall back to the full image stream
+            return dropship_image(file_id)
+        # Bump from Drive's default (s220) to s512 for gallery grids
+        thumb_url = thumb_url.replace("=s220", "=s512")
+
+        from google.auth.transport.requests import AuthorizedSession
+        session = AuthorizedSession(_drive_creds)
+        r = session.get(thumb_url, stream=True)
+        r.raise_for_status()
+        mime = r.headers.get("Content-Type", "image/jpeg").split(";")[0]
+
+        def _gen():
+            for chunk in r.iter_content(chunk_size=64 * 1024):
+                if chunk:
+                    yield chunk
+
+        return Response(
+            stream_with_context(_gen()),
+            mimetype=mime,
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
     except Exception as exc:
+        log.error("dropship thumb error %s: %s", file_id, exc)
         return error(str(exc), status=503)
 
 

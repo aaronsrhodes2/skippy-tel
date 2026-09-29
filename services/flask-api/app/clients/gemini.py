@@ -33,10 +33,22 @@ def _headers() -> dict:
     }
 
 
+def _fill_system(system: str | None) -> str:
+    """Replace {KEYWORD_MEMORY} placeholder with live keyword digest."""
+    raw = system or settings.skippy_system or ""
+    if "{KEYWORD_MEMORY}" not in raw:
+        return raw
+    try:
+        from app import keyword_memory as km  # noqa: PLC0415
+        return raw.replace("{KEYWORD_MEMORY}", km.context_digest())
+    except Exception:
+        return raw.replace("{KEYWORD_MEMORY}", "(keyword memory unavailable)")
+
+
 def _payload(message: str, system: str | None) -> dict:
     return {
         "systemInstruction": {
-            "parts": [{"text": system or settings.skippy_system}],
+            "parts": [{"text": _fill_system(system)}],
         },
         "contents": [
             {"role": "user", "parts": [{"text": message}]},
@@ -55,28 +67,41 @@ def _extract_text(response_obj: dict) -> str:
 
 
 def chat(message: str, system: str | None = None) -> str:
-    url = f"{_BASE}/{settings.gemini_model}:generateContent"
-    r = httpx.post(url, headers=_headers(),
-                   json=_payload(message, system), timeout=60.0)
-    r.raise_for_status()
-    return _extract_text(r.json())
+    from app import model_watchdog as mw  # noqa: PLC0415
+    mw.record("nagatha", message[:2000], settings.gemini_model)
+    try:
+        url = f"{_BASE}/{settings.gemini_model}:generateContent"
+        r = httpx.post(url, headers=_headers(),
+                       json=_payload(message, system), timeout=60.0)
+        r.raise_for_status()
+        result = _extract_text(r.json())
+        mw.clear("nagatha")
+        return result
+    except Exception:
+        raise
 
 
 def stream_chat(message: str, system: str | None = None) -> Iterator[str]:
-    url = f"{_BASE}/{settings.gemini_model}:streamGenerateContent?alt=sse"
-    with httpx.stream("POST", url, headers=_headers(),
-                      json=_payload(message, system), timeout=60.0) as r:
-        r.raise_for_status()
-        for line in r.iter_lines():
-            if not line or not line.startswith("data:"):
-                continue
-            payload = line[5:].strip()
-            if not payload or payload == "[DONE]":
-                continue
-            try:
-                obj = json.loads(payload)
-            except json.JSONDecodeError:
-                continue
-            text = _extract_text(obj)
-            if text:
-                yield text
+    from app import model_watchdog as mw  # noqa: PLC0415
+    mw.record("nagatha", message[:2000], settings.gemini_model)
+    try:
+        url = f"{_BASE}/{settings.gemini_model}:streamGenerateContent?alt=sse"
+        with httpx.stream("POST", url, headers=_headers(),
+                          json=_payload(message, system), timeout=60.0) as r:
+            r.raise_for_status()
+            for line in r.iter_lines():
+                if not line or not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if not payload or payload == "[DONE]":
+                    continue
+                try:
+                    obj = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+                text = _extract_text(obj)
+                if text:
+                    yield text
+        mw.clear("nagatha")
+    except Exception:
+        raise

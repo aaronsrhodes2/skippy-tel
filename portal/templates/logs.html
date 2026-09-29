@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Server logs — Skippy Portal{% endblock %}
+{% block content %}
+<section>
+  <h2>{{ game.name ~ ' logs' if game else 'Server logs' }}</h2>
+  <p class="help">Read from the VM's serial ports; passwords are masked. The container snapshot
+    refreshes every 2 minutes while the server runs.
+    <a href="{{ url_for('admin.logs', game=game.id) if game else url_for('admin.logs') }}">Reload</a>
+    {% if game %}&middot; <a href="{{ url_for('admin.logs') }}">All games</a>
+    &middot; <a href="{{ url_for('dashboard.game', gid=game.id) }}">Back to {{ game.name }}</a>
+    {% else %}&middot; <a href="{{ url_for('admin.index') }}">Back to Admin</a>{% endif %}</p>
+  {% if error %}
+    <p class="error">Couldn't read the logs: {{ error }}</p>
+  {% else %}
+    <h3>{{ game.name if game else 'Game containers' }} (latest snapshot)</h3>
+    <pre class="log">{{ logs.containers }}</pre>
+    <h3>Last boot (startup script)</h3>
+    <pre class="log">{{ logs.startup }}</pre>
+  {% endif %}
+</section>
+<style>
+  pre.log { background: #0a0a0a; border: 1px solid #333; border-radius: 8px; padding: 10px;
+            max-height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-word;
+            font-size: 12px; color: #b8ffe0; }
+</style>
+{% endblock %}

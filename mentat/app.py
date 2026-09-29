@@ -1,0 +1,235 @@
+"""Mentat over HTTP: sigma-ground's MCP physics tools as a small public JSON API.
+
+sigma-ground ships its tools as a stdio MCP server (sigma_ground/mcp/server.py
+builds a FastMCP `server` inside main() and calls server.run()). This wrapper
+builds that same server, catching it instead of running stdio, and serves:
+
+    GET  /health             "ok"
+    GET  /tools              [{name, description, input_schema, domain}]  (the public set)
+    POST /tools/<name>       JSON arguments → {"ok": true, "result": {...}} | {"ok": false, "error": "..."}
+    POST /ask                {"question": "..."} → Mentat's own plain-English front door
+                             (Materia's translator: keyword routes, plus the qwen
+                             residual when MENTAT_USE_LLM=1, i.e. the copy on skippy-pc)
+
+It's public (the Experiments playground and Skippy's chat call it), so:
+  • runs as the zero-permission `skippy-mentat` service account (bootstrap)
+  • tools that need a local LLM or keep per-session state are left out
+  • per-IP rate limit, argument size cap, per-call timeout
+No LLM is involved anywhere here: it's physics code.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import re
+import threading
+import time
+import urllib.request
+from collections import defaultdict, deque
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as CallTimeout
+
+from flask import Flask, jsonify, request
+
+# Natural-language / stateful tools: need the local Ollama translator or keep
+# state in this process (which Cloud Run may scale or recycle at any time).
+EXCLUDED_PREFIXES = ("playground_",)
+EXCLUDED = {"simulate", "request_clarification"}
+CALL_TIMEOUT_S = int(os.environ.get("MENTAT_CALL_TIMEOUT", "20"))
+RATE_PER_MIN = int(os.environ.get("MENTAT_RATE_PER_MIN", "60"))
+MAX_ARGS_BYTES = 8_000
+# The copy on skippy-pc sets these: Qwen (Ollama) helps the translator with
+# phrasings its keywords miss. The public cloud copy has no model: keywords only.
+USE_LLM = os.environ.get("MENTAT_USE_LLM", "0") == "1"
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "")
+
+
+def _point_translator_at_ollama(url: str) -> None:
+    """sigma-ground's translator hardcodes http://localhost:11434 as a default
+    argument; inside a container Ollama is another service, so swap it."""
+    from sigma_ground.materia import translator as tr
+    for fn in (tr._ollama_chat, tr._ollama_plan):
+        fn.__defaults__ = tuple(url if d == tr.OLLAMA_URL else d for d in fn.__defaults__)
+
+
+def build_server():
+    """sigma-ground's own FastMCP server, captured instead of run."""
+    import mcp.server.fastmcp as fm
+    captured = {}
+    original = fm.FastMCP.run
+    fm.FastMCP.run = lambda self, *a, **k: captured.setdefault("server", self)
+    try:
+        from sigma_ground.mcp import server as sg
+        sg.main()
+    finally:
+        fm.FastMCP.run = original
+    return captured["server"]
+
+
+def public(name: str) -> bool:
+    return name not in EXCLUDED and not name.startswith(EXCLUDED_PREFIXES)
+
+
+def domain_of(name: str) -> str:
+    """A coarse grouping for the playground's tool picker."""
+    for prefix, label in (
+        ("convert_", "Units"), ("lookup_constant", "Constants"), ("list_constants", "Constants"),
+        ("parse_quantity", "Units"), ("schwarzschild", "Relativity"), ("hawking", "Relativity"),
+        ("lorentz", "Relativity"), ("time_dilation", "Relativity"), ("isco", "Relativity"),
+        ("photon_sphere", "Relativity"), ("hubble", "Cosmology"), ("critical_density", "Cosmology"),
+        ("age_of_universe", "Cosmology"), ("orbital", "Orbital"), ("escape_velocity", "Orbital"),
+        ("projectile", "Mechanics"), ("free_fall", "Mechanics"), ("solve", "Math"),
+        ("integrate", "Math"), ("differentiate", "Math"), ("simplify", "Math"), ("factor", "Math"),
+        ("expand", "Math"), ("matrix", "Math"), ("limit", "Math"), ("series", "Math"),
+        ("snell", "Optics"), ("lens", "Optics"), ("double_slit", "Optics"), ("single_slit", "Optics"),
+        ("grating", "Optics"), ("run_simulation", "Simulation"), ("list_simulation", "Simulation"),
+    ):
+        if name.startswith(prefix):
+            return label
+    if name.endswith("_analysis"):
+        return "Analysis"
+    return "Physics"
+
+
+server = build_server()
+if USE_LLM and OLLAMA_URL:
+    _point_translator_at_ollama(OLLAMA_URL)
+TOOLS = {t.name: t for t in asyncio.run(server.list_tools()) if public(t.name)}
+_pool = ThreadPoolExecutor(max_workers=4)
+_hits: dict[str, deque] = defaultdict(deque)
+_hits_lock = threading.Lock()
+
+app = Flask(__name__)
+
+
+def _rate_limited(ip: str) -> bool:
+    now = time.monotonic()
+    with _hits_lock:
+        q = _hits[ip]
+        while q and now - q[0] > 60:
+            q.popleft()
+        if len(q) >= RATE_PER_MIN:
+            return True
+        q.append(now)
+        return False
+
+
+class QwenUnavailable(Exception):
+    pass
+
+
+def _qwen_ready() -> bool:
+    from sigma_ground.materia import translator as tr
+    try:
+        with urllib.request.urlopen(f"{OLLAMA_URL or tr.OLLAMA_URL}/api/tags", timeout=3) as r:
+            names = [m.get("name", "") for m in json.loads(r.read()).get("models", [])]
+        return any(n.startswith(tr.OLLAMA_MODEL) for n in names)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _ask(question: str) -> dict:
+    from sigma_ground.mcp.tools.simulation import simulate
+    if USE_LLM and not _qwen_ready():
+        # The Captain's rule: the Qwen-backed Mentat fails rather than answer without Qwen.
+        raise QwenUnavailable("Qwen (Ollama) is unreachable, so Mentat won't answer without it.")
+    result = simulate(question, use_llm=USE_LLM).to_dict()
+    result["interpreter"] = "keywords + qwen" if USE_LLM else "keywords"
+    return result
+
+
+def _call(name: str, args: dict):
+    content, structured = asyncio.run(server.call_tool(name, args))
+    if structured is not None:
+        return structured.get("result", structured) if set(structured) == {"result"} else structured
+    text = "".join(getattr(c, "text", "") for c in content)
+    try:
+        return json.loads(text)
+    except ValueError:
+        return {"text": text}
+
+
+@app.get("/health")
+def health():
+    return "ok"
+
+
+@app.get("/tools")
+def list_tools():
+    return jsonify([{"name": t.name, "description": (t.description or "").strip(),
+                     "input_schema": t.inputSchema, "domain": domain_of(t.name)}
+                    for t in sorted(TOOLS.values(), key=lambda t: t.name)])
+
+
+# sigma-ground's symbolic tools hand strings to sympy.sympify, which is eval()
+# underneath: a public caller could run Python here. Maths never needs dunder
+# attributes, quotes, backslashes or Python's introspection builtins, so any
+# argument containing them is refused before a tool sees it.
+_UNSAFE = re.compile(
+    r"__|['\"`\\;]|\b(lambda|import|exec|eval|open|compile|getattr|setattr|delattr|globals|locals|"
+    r"vars|breakpoint|builtins|subclasses|mro|os|sys|subprocess|input)\b", re.I)
+
+
+# Runaway maths: power towers and huge literals can pin a worker for minutes.
+_HUGE = re.compile(r"(\^|\*\*)\s*\(?\s*\d{4,}"                    # x**10000
+                   r"|(\^|\*\*)\s*\(?\s*[\d.]+\s*\)?\s*(\^|\*\*)"   # power towers: 9^9^9
+                   r"|factorial\s*\(\s*\d{4,}|\d{4,}\s*!", re.I)       # 1000!
+
+
+def unsafe_arg(value) -> str | None:
+    """The first string (anywhere in the arguments) that looks like code, else None."""
+    if isinstance(value, str):
+        return value if _UNSAFE.search(value) or _HUGE.search(value) else None
+    if isinstance(value, dict):
+        value = list(value.keys()) + list(value.values())
+    if isinstance(value, (list, tuple)):
+        for v in value:
+            bad = unsafe_arg(v)
+            if bad is not None:
+                return bad
+    return None
+
+
+def client_ip() -> str:
+    """Cloud Run's front end appends the real client address LAST; earlier
+    X-Forwarded-For entries are whatever the caller sent."""
+    hops = [h.strip() for h in (request.headers.get("X-Forwarded-For") or "").split(",") if h.strip()]
+    return hops[-1] if hops else (request.remote_addr or "?")
+
+
+def _guarded(label: str, fn, *args):
+    """Rate limit, size cap and timeout shared by every compute endpoint."""
+    ip = client_ip()
+    if _rate_limited(ip):
+        return jsonify(ok=False, error="Slow down: rate limit reached, try again in a minute."), 429
+    if (request.content_length or 0) > MAX_ARGS_BYTES:
+        return jsonify(ok=False, error="arguments too large"), 413
+    future = _pool.submit(fn, *args)
+    try:
+        return jsonify(ok=True, result=future.result(timeout=CALL_TIMEOUT_S))
+    except CallTimeout:
+        return jsonify(ok=False, error=f"{label} took longer than {CALL_TIMEOUT_S}s"), 504
+    except QwenUnavailable as exc:
+        return jsonify(ok=False, error=str(exc)), 503
+    except Exception as exc:  # noqa: BLE001 — tool/validation errors go back as messages
+        return jsonify(ok=False, error=str(exc)[:2000]), 400
+
+
+@app.post("/tools/<name>")
+def call_tool(name):
+    if name not in TOOLS:
+        return jsonify(ok=False, error=f"no public tool named {name!r}"), 404
+    args = request.get_json(silent=True) or {}
+    if not isinstance(args, dict):
+        return jsonify(ok=False, error="arguments must be a JSON object"), 400
+    if unsafe_arg(args) is not None:
+        return jsonify(ok=False, error="That input looks like code, not maths; Mentat won't evaluate it."), 400
+    return _guarded(name, _call, name, args)
+
+
+@app.post("/ask")
+def ask():
+    question = str((request.get_json(silent=True) or {}).get("question") or "").strip()
+    if not question:
+        return jsonify(ok=False, error="ask needs a question"), 400
+    return _guarded("ask", _ask, question[:2000])

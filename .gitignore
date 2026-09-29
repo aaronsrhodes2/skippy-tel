@@ -19,3 +19,15 @@ state/
 
 # APK binaries — built from zPhone repo, not stored here
 apks/*.apk
+
+# Game servers — secrets and world data
+games/.env
+games/data/
+
+# OpenTofu / Terraform
+infra/**/.terraform/
+infra/**/*.tfstate*
+infra/**/terraform.tfvars
+
+# Built into the portal image from sigma-ground (portal/Dockerfile)
+portal/experiments_static/

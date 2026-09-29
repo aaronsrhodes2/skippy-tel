@@ -1,0 +1,116 @@
+# Skippy game servers: Valheim, Factorio, Satisfactory, RuneScape: Dragonwilds.
+# (ARK deferred: too heavy.)
+#
+# Same file runs anywhere Docker runs: the GCP on-demand VM (infra/gcp-games/),
+# a Hetzner box, or the home PC. Each game is a compose *profile*, so only the
+# games you ask for start:
+#
+#   docker compose --profile valheim --profile factorio up -d
+#   docker compose --profile satisfactory up -d
+#   docker compose --profile valheim --profile factorio --profile satisfactory stop
+#
+# All world data lives under ${DATA_DIR} (default ./data); back that up and
+# you've backed up everything. Copy .env.example → .env first.
+#
+# RAM guide: Valheim ~4 GB, Factorio ~1-2 GB, Satisfactory 8-12 GB,
+# Dragonwilds 2 GB + 1 GB per player (8 GB for its max of 6).
+#
+# Ports: Satisfactory keeps its default 7777; Dragonwilds moves to 7778 so both
+# can run at once (Dragonwilds players find the server by its SERVER_NAME in
+# the in-game browser, so the port is invisible to them). Dragonwilds also
+# needs its beacon on 8888/udp (Satisfactory's 8888 is tcp; no clash).
+
+x-common: &common
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+
+  valheim:
+    <<: *common
+    profiles: [valheim]
+    image: ghcr.io/lloesche/valheim-server:latest
+    container_name: valheim
+    cap_add: [sys_nice]
+    ports:
+      - "2456-2457:2456-2457/udp"
+    environment:
+      SERVER_NAME: ${VALHEIM_SERVER_NAME:-Skippy Valheim}
+      WORLD_NAME: ${VALHEIM_WORLD_NAME:-Skippy}
+      SERVER_PASS: ${VALHEIM_PASSWORD:-}          # required; games.sh checks it
+      SERVER_PUBLIC: ${VALHEIM_PUBLIC:-false}
+      TZ: ${TZ:-America/Los_Angeles}
+      BACKUPS: "true"
+      BACKUPS_MAX_AGE: "7"
+    volumes:
+      - ${DATA_DIR:-./data}/valheim/config:/config
+      - ${DATA_DIR:-./data}/valheim/server:/opt/valheim
+    stop_grace_period: 2m          # lets the world save before the container dies
+
+  factorio:
+    <<: *common
+    profiles: [factorio]
+    image: factoriotools/factorio:stable
+    container_name: factorio
+    ports:
+      - "34197:34197/udp"
+      # RCON (27015/tcp) deliberately not published.
+    environment:
+      SAVE_NAME: ${FACTORIO_SAVE_NAME:-skippy}
+      GENERATE_NEW_SAVE: "true"    # only generates if SAVE_NAME doesn't exist yet
+      LOAD_LATEST_SAVE: "false"
+    volumes:
+      - ${DATA_DIR:-./data}/factorio:/factorio
+    stop_grace_period: 1m
+
+  satisfactory:
+    <<: *common
+    profiles: [satisfactory]
+    image: wolveix/satisfactory-server:latest
+    container_name: satisfactory
+    ports:
+      - "7777:7777/udp"
+      - "7777:7777/tcp"
+      - "8888:8888/tcp"
+    environment:
+      MAXPLAYERS: ${SATISFACTORY_MAX_PLAYERS:-4}
+      PUID: "1000"
+      PGID: "1000"
+      STEAMBETA: "false"
+    volumes:
+      - ${DATA_DIR:-./data}/satisfactory:/config
+    mem_limit: ${SATISFACTORY_MEM_LIMIT:-12g}
+    stop_grace_period: 2m
+
+  dragonwilds:
+    <<: *common
+    profiles: [dragonwilds]
+    # Community image wrapping Jagex's official server (Steam app 4019830,
+    # anonymous download). Console players (Xbox/PS5/Switch 2) can join
+    # dedicated servers since the 1.0 launch (Sept 2026).
+    image: indifferentbroccoli/runescape-dragonwilds-server-docker:latest
+    container_name: dragonwilds
+    ports:
+      - "${DRAGONWILDS_PORT:-7778}:${DRAGONWILDS_PORT:-7778}/udp"
+      # World-settings beacon: the client uses it to create/edit worlds and
+      # negotiate their settings. Internal and external ports must match.
+      - "${DRAGONWILDS_BEACON_PORT:-8888}:${DRAGONWILDS_BEACON_PORT:-8888}/udp"
+    environment:
+      # Required by the image (it refuses to start without them); 1000 owns
+      # data/dragonwilds (infra/gcp-games/startup.sh chowns it).
+      PUID: "1000"
+      PGID: "1000"
+      DEFAULT_PORT: ${DRAGONWILDS_PORT:-7778}
+      BEACON_PORT: ${DRAGONWILDS_BEACON_PORT:-8888}
+      OWNER_ID: ${DRAGONWILDS_OWNER_ID:-}      # required; games.sh checks it
+      ADMIN_PASSWORD: ${DRAGONWILDS_ADMIN_PASSWORD:-} # required; games.sh checks it
+      SERVER_NAME: ${DRAGONWILDS_SERVER_NAME:-Skippy}
+      DEFAULT_WORLD_NAME: ${DRAGONWILDS_WORLD_NAME:-Ashenfall}
+      WORLD_PASSWORD: ${DRAGONWILDS_WORLD_PASSWORD:-}
+      MAX_PLAYERS: ${DRAGONWILDS_MAX_PLAYERS:-6}
+      UPDATE_ON_START: "true"      # server version must match the game client
+    volumes:
+      - ${DATA_DIR:-./data}/dragonwilds:/home/steam/server-files
+    stop_grace_period: 1m

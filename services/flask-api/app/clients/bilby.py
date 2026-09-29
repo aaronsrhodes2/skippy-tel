@@ -2,7 +2,7 @@
 
 Mac-side Bilby is stage9_dj_suggest.py, running on port 7334 at
 `skippy-mac` (Tailscale MagicDNS). SkippyTel polls its
-/api/bilby-status endpoint and surfaces the result as a Now Playing
+/bilby/status endpoint and surfaces the result as a Now Playing
 card on the zPhone.
 
 Two modes handled by the /bilby/* route layer:
@@ -24,16 +24,31 @@ _TIMEOUT = httpx.Timeout(connect=3.0, read=4.0, write=4.0, pool=4.0)
 
 
 def now_playing() -> dict | None:
-    """Poll Mac Bilby's /api/bilby-status.
+    """Poll Mac Bilby's /bilby/status.
 
-    Returns the parsed JSON dict on success, or None on any error
-    (Mac offline, Traktor not running, timeout, etc.).
+    Returns the route layer's shape ({traktor_alive, playing_deck, loaded,
+    now_playing}) on success, or None on any error (Mac offline, Traktor not
+    running, timeout, etc.). now_playing carries the Mac's full detail
+    (bpm, key, genre, duration_s, elapsed_s, art_url…) when a deck is playing.
     """
-    url = f"{settings.bilby_mac_url}/api/bilby-status"
+    url = f"{settings.bilby_mac_url}/bilby/status"
     try:
         r = httpx.get(url, timeout=_TIMEOUT)
         if r.is_success:
-            return r.json()
+            return normalize(r.json())
     except Exception:
         pass
     return None
+
+
+def normalize(data: dict) -> dict:
+    now = data.get("now_playing")
+    deck = (now or {}).get("deck")
+    if not deck:
+        deck = "a" if data.get("playing_a") else "b" if data.get("playing_b") else None
+    return {
+        "traktor_alive": bool(data.get("online")),
+        "playing_deck": deck,
+        "loaded": {"a": data.get("deck_a"), "b": data.get("deck_b")},
+        "now_playing": now,
+    }

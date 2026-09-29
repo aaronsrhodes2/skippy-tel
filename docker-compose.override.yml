@@ -1,0 +1,35 @@
+# Home → portal bridge. Docker Compose merges this file into docker-compose.yml
+# automatically, so a plain `docker compose up -d --build` on skippy-pc runs
+# these alongside flask-api and ollama (same network: they reach each other by
+# service name). Nothing here publishes a port: everything goes OUT to the portal.
+services:
+  # Pushes status + Bilby's music to the portal every ~15 s, and fetches the
+  # portal's jobs (controls, physics questions for Mentat). See CLAUDE.md.
+  home-reporter:
+    build: ./services/home-reporter
+    container_name: skippytel-home-reporter
+    restart: unless-stopped
+    env_file: G:/My Drive/vault/.env           # same shared .env as flask-api: SKIPPY_HOME_TOKEN ("Pair home"), BILBY_MAC_URL
+    environment:
+      SKIPPY_API: http://flask-api:5000
+      MENTAT_URL: http://mentat-home:8080
+    volumes:
+      - ./state/imports:/imports:ro   # game databases to carry to the games VM (see CLAUDE.md)
+    logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
+
+  # Mentat with Qwen: sigma-ground's physics engine, its plain-English
+  # translator allowed to ask qwen2.5:7b (Ollama) for phrasings its keywords
+  # miss. Skippy's portal chat sends physics questions here while skippy-pc is up.
+  mentat-home:
+    build:
+      context: .
+      dockerfile: mentat/Dockerfile
+    container_name: skippytel-mentat
+    restart: unless-stopped
+    environment:
+      MENTAT_USE_LLM: "1"
+      OLLAMA_URL: http://ollama:11434
+      MENTAT_CALL_TIMEOUT: "90"
+      MENTAT_RATE_PER_MIN: "600"
+    command: gunicorn --bind 0.0.0.0:8080 --workers 1 --threads 4 --timeout 120 app:app
+    logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}

@@ -1,0 +1,177 @@
+# Push-to-deploy. Every push to main (work lands there through pull requests):
+#   1. test     — portal + memory test suites
+#   2. infra    — terraform apply infra/gcp-games (VM, firewall, scripts, compose file)
+#   3. portal   — build the portal image, push it, deploy to Cloud Run
+#
+# Auth is Workload Identity Federation: GitHub's OIDC token for this repo is
+# exchanged for short-lived credentials as skippy-deployer. No key exists.
+# Deploy jobs no-op until infra/bootstrap/bootstrap.sh has filled in
+# PROJECT_NUMBER below (see docs/cicd.md).
+name: deploy
+
+on:
+  push:
+    branches: [main]      # Google only accepts deploys from main (infra/bootstrap/main.tf)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write      # lets the job request a GitHub OIDC token for GCP
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: skippy-tel
+  REGION: us-west1
+  WIF_PROVIDER: projects/1015050363686/locations/global/workloadIdentityPools/github/providers/github
+  DEPLOYER_SA: skippy-deployer@skippy-tel.iam.gserviceaccount.com
+  RUNTIME_SA: skippy-agent@skippy-tel.iam.gserviceaccount.com
+  IMAGE: us-west1-docker.pkg.dev/skippy-tel/skippy/portal
+  # sigma-ground commit served by Experiments and the Mentat service (bump to update both).
+  SIGMA_GROUND_REF: a763071b4beb87129f2672624e989a39ef7a1199
+  # Who may sign in to the portal, and who is an admin. Comma-separated.
+  ALLOWED_EMAILS: aaron.s.rhodes@gmail.com
+  ADMIN_EMAILS: aaron.s.rhodes@gmail.com
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: portal/requirements.txt
+      - run: pip install -r portal/requirements.txt pytest
+      - run: python -m pytest portal/tests memory/tests -q
+
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - id: check
+        run: |
+          if [[ "$WIF_PROVIDER" == *PROJECT_NUMBER* ]]; then
+            echo "::notice::Not bootstrapped yet — run infra/bootstrap/bootstrap.sh. Skipping deploy."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  infra:
+    needs: [test, gate]
+    if: needs.gate.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/gcp-games
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform init -input=false -backend-config="bucket=${PROJECT_ID}-tfstate"
+      - run: terraform apply -input=false -auto-approve -var "project=${PROJECT_ID}"
+
+  mentat:
+    # sigma-ground's physics tools as a public API (mentat/). Runs as the
+    # zero-permission skippy-mentat identity from infra/bootstrap; skipped,
+    # with a notice, until bootstrap has created it.
+    needs: [test, gate]
+    if: needs.gate.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    env:
+      MENTAT_SA: skippy-mentat@skippy-tel.iam.gserviceaccount.com
+      MENTAT_IMAGE: us-west1-docker.pkg.dev/skippy-tel/skippy/mentat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - id: identity
+        run: |
+          if out=$(gcloud iam service-accounts describe "$MENTAT_SA" --format='value(email)' 2>&1); then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "$out"
+            echo "::notice::Can't see Mentat's identity ($MENTAT_SA): $(echo "$out" | grep -m1 -E 'ERROR|denied|not found' || echo "$out" | tail -1). If it doesn't exist, re-run infra/bootstrap/bootstrap.sh in Cloud Shell. Skipping Mentat."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.identity.outputs.ready == 'true'
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+      - name: Build and push
+        if: steps.identity.outputs.ready == 'true'
+        run: |
+          docker build -f mentat/Dockerfile --build-arg SIGMA_GROUND_REF="$SIGMA_GROUND_REF" -t "$MENTAT_IMAGE:$GITHUB_SHA" .
+          docker push "$MENTAT_IMAGE:$GITHUB_SHA"
+      - name: Deploy to Cloud Run
+        if: steps.identity.outputs.ready == 'true'
+        run: |
+          gcloud run deploy skippy-mentat \
+            --image "$MENTAT_IMAGE:$GITHUB_SHA" \
+            --region "$REGION" \
+            --service-account "$MENTAT_SA" \
+            --no-invoker-iam-check \
+            --cpu 1 --memory 1Gi \
+            --concurrency 8 \
+            --max-instances 2 \
+            --timeout 60
+      - name: Smoke test
+        if: steps.identity.outputs.ready == 'true'
+        run: |
+          URL=$(gcloud run services describe skippy-mentat --region "$REGION" --format='value(status.url)')
+          echo "Mentat: $URL" >> "$GITHUB_STEP_SUMMARY"
+          curl -fsS "$URL/health"
+          curl -fsS "$URL/tools" | python3 -c "import json,sys; n=len(json.load(sys.stdin)); print(n, 'tools'); assert n > 100"
+          curl -fsS -X POST -H 'Content-Type: application/json' \
+            -d '{"value": 1, "from_units": "mile", "to_units": "km"}' "$URL/tools/convert_units"
+          curl -fsS -X POST -H 'Content-Type: application/json' \
+            -d '{"question": "how fast does a 5 cm copper ball hit the ground from 10 km?"}' "$URL/ask" \
+            | python3 -c "import json,sys; r=json.load(sys.stdin)['result']; print(r['value'], r['units']); assert r['value']"
+
+  portal:
+    needs: [test, gate]
+    if: needs.gate.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+      - name: Build and push
+        run: |
+          docker build -f portal/Dockerfile --build-arg SIGMA_GROUND_REF="$SIGMA_GROUND_REF" -t "$IMAGE:$GITHUB_SHA" .
+          docker push "$IMAGE:$GITHUB_SHA"
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy skippy-portal \
+            --image "$IMAGE:$GITHUB_SHA" \
+            --region "$REGION" \
+            --service-account "$RUNTIME_SA" \
+            --no-invoker-iam-check \
+            --timeout 900 \
+            --max-instances 1 \
+            --memory 1Gi \
+            --set-env-vars "^|^ALLOWED_EMAILS=${ALLOWED_EMAILS}|ADMIN_EMAILS=${ADMIN_EMAILS}|GCP_PROJECT=${PROJECT_ID}|GCP_ZONE=us-west1-b|GCP_INSTANCE=skippy-games|CHAT_MODEL=claude-haiku-4-5|DISCORD_INVITE=gPTVS7Hmj|MENTAT_URL=https://skippy-mentat-1015050363686.us-west1.run.app" \
+            --set-secrets "FLASK_SECRET_KEY=portal-flask-secret:latest,GOOGLE_CLIENT_ID=portal-google-client-id:latest,GOOGLE_CLIENT_SECRET=portal-google-client-secret:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,DISCORD_BOT_TOKEN=discord-bot-token:latest"
+      - name: Smoke test
+        run: |
+          URL=$(gcloud run services describe skippy-portal --region "$REGION" --format='value(status.url)')
+          echo "Portal: $URL" >> "$GITHUB_STEP_SUMMARY"
+          curl -fsS "$URL/health"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/home/report" -H 'Content-Type: application/json' -d '{}')
+          [ "$code" = 401 ] || { echo "/home/report without a token answered $code, expected 401"; exit 1; }
+          curl -fsS -o /dev/null "$URL/"   # login page renders => secrets + OAuth config loaded
+          curl -fsS "$URL/experiments/benchmark" | grep -q "Wolfram"            # benchmark results bundled
+          curl -fsS "$URL/experiments/radiance/" | grep -q "viewer.js"          # Radiance bundled

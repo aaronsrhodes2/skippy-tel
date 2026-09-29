@@ -1,0 +1,27 @@
+{# How to join a running game: shared by the dashboard tile and the game page.
+   Needs `game`, `status`, `codes` in the context. Games that hand out a
+   per-session invite code (Game.invite_code) lead with it; the connect text
+   (search / IP) becomes the fallback. #}
+{% set code = codes.get(game.id) %}
+{% set pw = status.env.get(game.join_password_key, '') if game.join_password_key else '' %}
+<div class="join">
+  {% if game.invite_code %}
+    <p><b>Invite code</b>
+      {% if code %}<code class="code">{{ code }}</code>
+      {% else %}<span class="help">shows here a couple of minutes after the server boots</span>{% endif %}
+      <br><span class="help">In game: Worlds &rarr; <b>Invite Code</b> (the I key). A new code every boot.</span></p>
+  {% else %}
+    <p>{{ game.connect(status.external_ip, status.env) | safe }}</p>
+  {% endif %}
+  {% if game.join_password_key %}
+    {% if pw %}<details><summary>Show join password</summary><p><code class="code">{{ pw }}</code></p></details>
+    {% else %}<p class="help">No join password set — anyone who finds it can join.</p>{% endif %}
+  {% endif %}
+  {% if game.direct and status.external_ip %}
+    <p>Direct connect <code class="code">{{ game.direct(status.external_ip, status.env) }}</code>
+      <br><span class="help">In game: Worlds &rarr; <b>Direct</b> tab. Same address every session.</span></p>
+  {% endif %}
+  {% if game.invite_code %}
+    <p class="help">Or search the list: {{ game.connect(status.external_ip, status.env) | safe }}</p>
+  {% endif %}
+</div>

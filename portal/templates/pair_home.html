@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Pair home — Skippy Portal{% endblock %}
+{% block content %}
+<section>
+  <h2>Pair skippy-pc</h2>
+  <p>Put this line in your vault <code class="code">.env</code> (<code class="code">G:\My Drive\vault\.env</code>)
+    and the <code class="code">.env</code> next to SkippyTel's <code class="code">docker-compose.yml</code>.
+    It's shown <b>once</b>; the portal keeps only a fingerprint of it. Any earlier token stops working now.</p>
+  <p><code class="code" id="line" style="user-select: all; word-break: break-all">SKIPPY_HOME_TOKEN={{ token }}</code></p>
+  <p><button type="button" id="copy">Copy</button> <span id="copied" class="help"></span></p>
+  <p><a href="{{ url_for('me.index') }}">&larr; Back to your dashboard</a></p>
+</section>
+<script>
+  document.getElementById("copy").onclick = () => navigator.clipboard.writeText(document.getElementById("line").textContent)
+    .then(() => document.getElementById("copied").textContent = "Copied.")
+    .catch(() => document.getElementById("copied").textContent = "Select the line and copy it.");
+</script>
+{% endblock %}

@@ -1,5 +1,10 @@
 # SkippyTel
 
+> **Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md).** Game servers: [`docs/games/`](docs/games/README.md) · Remote play: [`docs/streaming.md`](docs/streaming.md)
+> **Now building: [Skippy Memory](docs/memory/README.md)**, one archive of every AI conversation across devices (`memory/`).
+> AI bill audit: [`docs/ai-bills.md`](docs/ai-bills.md). v2 infra charter (on hold): [`docs/v2/CHARTER.md`](docs/v2/CHARTER.md).
+> Everything below describes v1.
+
 PC-side AI inference for the Skippy AR system. The Android phone
 ([SkippyDroid](../Skippy)) calls these endpoints over Tailscale for
 inference that can't run on-device: LLM chat, Whisper transcription,

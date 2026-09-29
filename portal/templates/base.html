@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Skippy Portal{% endblock %}</title>
+<style>
+  /* Palette matches ChatPalette (zPhone/apps/SkippyChat) — same names, same hex. */
+  :root {
+    --black: #000000; --white: #ffffff;
+    --green: #00ff88; --dim-green: #003322; --dim-green-hi: #006644;
+    --cyan: #00ffff; --amber: #ffaa00; --red: #ff4444; --violet: #aa44ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--black); color: var(--white);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    margin: 0; padding: 24px 16px 64px;
+  }
+  a { color: var(--cyan); }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+  h1 { color: var(--green); font-size: 1.4rem; margin: 0; }
+  nav a { margin-right: 14px; text-decoration: none; }
+  nav a.here { color: var(--green); }
+  .user { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; }
+  .user img { width: 28px; height: 28px; border-radius: 50%; }
+  main { max-width: 760px; margin: 0 auto; }
+  section { margin-bottom: 32px; }
+  h2 { color: var(--cyan); font-size: 1rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .card {
+    background: var(--dim-green); border: 1px solid var(--dim-green-hi);
+    border-radius: 8px; padding: 16px; margin-bottom: 12px;
+  }
+  .card h3 { margin: 0 0 4px; color: var(--white); }
+  .card p { margin: 4px 0; color: #b8ffe0; font-size: 0.9rem; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+  .dot.green { background: var(--green); } .dot.grey { background: #666; } .dot.amber { background: var(--amber); }
+  button, .btn {
+    background: var(--dim-green-hi); color: var(--white); border: 1px solid var(--green);
+    border-radius: 6px; padding: 8px 16px; font-size: 0.9rem; cursor: pointer; text-decoration: none;
+    display: inline-block;
+  }
+  button:hover, .btn:hover { background: var(--green); color: var(--black); }
+  button.danger { border-color: var(--red); }
+  .error { color: var(--red); }
+  .flash { padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; font-size: 0.9rem; }
+  .flash.ok { background: var(--dim-green); border: 1px solid var(--green); }
+  .flash.error { background: #330000; border: 1px solid var(--red); }
+  form.inline { display: inline; }
+  label.game { display: block; margin: 6px 0; }
+  label.field { display: block; margin: 10px 0 2px; font-size: 0.85rem; color: #b8ffe0; }
+  input[type=text], input[type=password], input[type=number], textarea {
+    background: var(--black); color: var(--white); border: 1px solid var(--dim-green-hi);
+    border-radius: 4px; padding: 6px 8px; width: 100%; font-size: 0.95rem;
+  }
+  .help { font-size: 0.8rem; color: #7fbfa0; margin: 2px 0 0; }
+  .links a { margin-right: 12px; }
+  /* Skippy chat (templates/_chat.html), full page or docked */
+  .skippy-chat .log { overflow-y: auto; max-height: 50vh; }
+  .skippy-chat .turn { margin: 8px 0; padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; font-size: .92rem; }
+  .skippy-chat .user { background: #111; border: 1px solid #333; }
+  .skippy-chat .assistant { background: var(--dim-green); border: 1px solid var(--dim-green-hi); color: #b8ffe0; }
+  .skippy-chat .failed { border-color: var(--red); color: var(--red); }
+  .skippy-chat .verbs { margin: 6px 0; font-size: .85rem; }
+  .skippy-chat .verbs summary { cursor: pointer; color: var(--green); }
+  .skippy-chat .verb-cat { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+  .skippy-chat .verb-cat-name { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em;
+                                color: #6f8b94; min-width: 6.5em; }
+  .skippy-chat button.verb { font-size: .75rem; padding: 2px 10px; border-radius: 999px; }
+  .skippy-chat .receipt { font-size: .7rem; color: #6f8b94; margin-top: 4px; }
+  .skippy-chat .tier { float: right; font-size: .7rem; border: 1px solid var(--violet); color: var(--violet);
+                       border-radius: 999px; padding: 1px 8px; margin-left: 8px; }
+  #skippy-dock-btn { position: fixed; right: 18px; bottom: 18px; z-index: 50; border-radius: 999px;
+                     padding: 10px 16px; box-shadow: 0 4px 18px rgba(0,0,0,.6); }
+  #skippy-dock { position: fixed; right: 18px; bottom: 72px; z-index: 50; width: min(380px, calc(100vw - 36px));
+                 background: #050505; border: 1px solid var(--green); border-radius: 12px; padding: 12px;
+                 box-shadow: 0 8px 30px rgba(0,0,0,.7); }
+  #skippy-dock .skippy-chat .log { max-height: 45vh; }
+  #skippy-dock h3 { margin: 0 0 4px; color: var(--green); font-size: 1rem; }
+  code.code { font-size: 1.15rem; letter-spacing: .08em; padding: 1px 6px; border-radius: 4px;
+              background: rgba(255,255,255,.08); user-select: all; }
+</style>
+{% block head %}{% endblock %}
+</head>
+<body>
+<main>
+{% if user %}
+<header>
+  <h1><a href="{{ url_for('index') }}" style="color:inherit;text-decoration:none">Skippy Portal</a></h1>
+  <nav>
+    <a href="{{ url_for('index') }}" class="{{ 'here' if request.endpoint == 'index' }}">Home</a>
+    <a href="{{ url_for('dashboard.index') }}" class="{{ 'here' if request.endpoint == 'dashboard.index' }}">Servers</a>
+    {% if can_skippy %}<a href="{{ url_for('chat.index') }}" class="{{ 'here' if request.endpoint == 'chat.index' }}">Chat</a>{% endif %}
+    {% if is_admin %}<a href="{{ url_for('me.index') }}" class="{{ 'here' if request.endpoint == 'me.index' }}">Dashboard</a>{% endif %}
+    {% if is_admin %}<a href="{{ url_for('admin.index') }}" class="{{ 'here' if request.endpoint == 'admin.index' }}">Admin</a>{% endif %}
+  </nav>
+  <div class="user">
+    {% if user.picture %}<img src="{{ user.picture }}" alt="">{% endif %}
+    {{ user.name }} &middot; <a href="{{ url_for('auth.logout') }}">sign out</a>
+  </div>
+</header>
+{% endif %}
+{% for category, message in get_flashed_messages(with_categories=true) %}
+  <div class="flash {{ category }}">{{ message }}</div>
+{% endfor %}
+{% block content %}{% endblock %}
+</main>
+{% if can_skippy and request.endpoint != 'chat.index' %}
+  {# Skippy on every page: same chat as the Chat page, docked bottom-right. #}
+  <button id="skippy-dock-btn" type="button" aria-expanded="false" aria-controls="skippy-dock">💬 Skippy</button>
+  <div id="skippy-dock" hidden>
+    <h3>Skippy</h3>
+    {% include "_chat.html" %}
+  </div>
+  <script>
+    (function () {
+      const btn = document.getElementById("skippy-dock-btn"), dock = document.getElementById("skippy-dock");
+      function show(open) {
+        dock.hidden = !open; btn.setAttribute("aria-expanded", open);
+        try { sessionStorage.setItem("skippy-dock-open", open ? "1" : ""); } catch (e) {}
+        if (open) dock.querySelector("textarea").focus();
+      }
+      btn.addEventListener("click", () => show(dock.hidden));
+      document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !dock.hidden) show(false); });
+      try { if (sessionStorage.getItem("skippy-dock-open")) show(true); } catch (e) {}   // stays open across pages
+    })();
+  </script>
+{% endif %}
+</body>
+</html>

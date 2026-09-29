@@ -51,12 +51,16 @@ def translate_audio():
 
 @bp.post("/translate/text")
 def translate_text():
-    """Detect language of text and translate to English.
+    """Detect language of text and translate.
 
-    Fast path: pure-ASCII text with no hint is returned immediately as
-    { detected_lang: "en", english_text: <original> } without touching Gemini.
+    Default behaviour: translate to English (same as before).
+    Optional `target_lang` field: translate to any ISO-639-1 language instead.
 
-    Slow path: Gemini detects the language and produces an English translation.
+    Fast path: pure-ASCII text with no hint and target_lang == "en" (or unset)
+    is returned immediately as { detected_lang:"en", english_text:<original> }
+    without touching Gemini.
+
+    Slow path: Gemini detects the language and produces the requested translation.
     Typical latency < 1s for short utterances (single-sentence voice transcripts).
     """
     body = request.get_json(silent=True) or {}
@@ -64,29 +68,45 @@ def translate_text():
     if not text:
         return error("text is required", error_type="bad_request", status=400)
 
-    hint_lang = (body.get("hint_lang") or "").strip() or None
+    hint_lang  = (body.get("hint_lang")   or "").strip() or None
+    target_lang = (body.get("target_lang") or "en").strip() or "en"
 
-    # Fast path — pure ASCII with no hint is overwhelmingly English.
-    if not hint_lang and text.isascii():
+    # Fast path — pure ASCII with no hint and targeting English is overwhelmingly English.
+    if not hint_lang and target_lang == "en" and text.isascii():
         return envelope({"detected_lang": "en", "english_text": text})
 
     try:
-        result = _detect_and_translate(text, hint_lang)
+        result = _detect_and_translate(text, hint_lang, target_lang=target_lang)
         return envelope(result)
     except Exception as e:
         return error(str(e), error_type="upstream_error", status=502)
 
 
-def _detect_and_translate(text: str, hint_lang: str | None) -> dict:
-    """Use Gemini to detect the language and return an English translation.
+def _detect_and_translate(
+    text: str,
+    hint_lang: str | None,
+    target_lang: str = "en",
+) -> dict:
+    """Use Gemini to detect the language and translate to `target_lang`.
 
     The system prompt locks Gemini into JSON-only mode. The user prompt is
     a single compact instruction so the round-trip stays under 1s.
+
+    Always returns:
+      { detected_lang: str, english_text: str }
+    where `english_text` is actually the translated text in `target_lang`
+    (field name kept for backward compat with existing clients).
     """
-    lang_hint = f" (hint: the language is likely '{hint_lang}')" if hint_lang else ""
+    lang_hint   = f" (hint: the language is likely '{hint_lang}')" if hint_lang else ""
+    target_name = {
+        "en": "English", "es": "Spanish", "fr": "French",
+        "de": "German",  "pt": "Portuguese", "it": "Italian",
+        "ja": "Japanese","zh": "Chinese (Simplified)",
+    }.get(target_lang, target_lang.upper())
+
     prompt = (
-        f"Detect the language of the text below{lang_hint} and translate it to English. "
-        "If it is already English, return it unchanged.\n"
+        f"Detect the language of the text below{lang_hint} and translate it to {target_name}. "
+        f"If it is already {target_name}, return it unchanged.\n"
         "Respond with a single JSON object — no markdown, no explanation:\n"
         '{"detected_lang":"<ISO-639-1 code>","english_text":"<translation>"}\n\n'
         f"Text: {text}"

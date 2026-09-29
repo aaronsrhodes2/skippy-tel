@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Experiments — Aaron Rhodes{% endblock %}
+{% block head %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  main { max-width: 980px; }
+  .xp { font-family: "Space Grotesk", system-ui, sans-serif; }
+  .xp-hero { padding: 28px 24px; border-radius: 14px; border: 1px solid #3a2466; margin-bottom: 26px;
+             background: radial-gradient(circle at 85% 15%, rgba(170,68,255,.35), transparent 55%),
+                         radial-gradient(circle at 10% 100%, rgba(0,204,255,.18), transparent 50%), #07040d; }
+  .xp-hero h1 { margin: 0; font-size: 2.1rem; color: #fff; }
+  .xp-hero .by { color: #b9a3e6; margin: 4px 0 14px; }
+  .xp-hero p { color: #d8d0ea; max-width: 720px; line-height: 1.55; }
+  .stats { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+  .stat { padding: 8px 14px; border-radius: 10px; background: rgba(255,255,255,.05); border: 1px solid #2c2150; }
+  .stat b { display: block; font-size: 1.3rem; color: #fff; }
+  .stat span { font-size: .75rem; color: #a99cc8; text-transform: uppercase; letter-spacing: .05em; }
+  .xgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+  .xcard { display: flex; flex-direction: column; padding: 18px; border-radius: 12px; text-decoration: none;
+           color: #e6e1f2; border: 1px solid #2c2150; background: #0c0816; transition: transform .12s, border-color .12s; }
+  .xcard:hover { transform: translateY(-2px); border-color: var(--violet); }
+  .xcard h3 { margin: 0 0 6px; color: #fff; }
+  .xcard p { margin: 0 0 12px; font-size: .9rem; line-height: 1.5; flex: 1; }
+  .tags span { font-size: .7rem; margin-right: 6px; padding: 2px 8px; border-radius: 999px;
+               border: 1px solid #4b3a7a; color: #c9b8f0; }
+  .xcard .src { margin-top: 10px; font-size: .78rem; color: #8f86a8; }
+  .headline { margin-top: 22px; padding: 16px 18px; border-radius: 12px; border: 1px solid #1f4d3b; background: #04120c; }
+  .headline b { color: var(--green); }
+  .later { color: #8f86a8; font-size: .85rem; margin-top: 26px; }
+</style>
+{% endblock %}
+{% block content %}
+{% if not user %}<header><h1><a href="{{ url_for('index') }}" style="color:inherit;text-decoration:none">Skippy Portal</a></h1></header>{% endif %}
+<div class="xp">
+  {% if missing %}<p class="error">{{ missing }} isn't bundled in this build yet.</p>{% endif %}
+  <section class="xp-hero">
+    <h1>Experiments</h1>
+    <p class="by">Aaron Rhodes · things built after dark</p>
+    <p><b>sigma-ground</b> is a physics engine written from the ground up in Python: it resolves matter from
+      materials down to quarks, runs dynamics from falling feathers to N-body orbits, renders its own
+      simulations, and exposes all of it to AI assistants as <b>Mentat</b>, a tool server that goes
+      head to head with Wolfram Alpha. Everything below runs live.</p>
+    <div class="stats">
+      <div class="stat"><b>~158k</b><span>lines of Python</span></div>
+      <div class="stat"><b>4,670</b><span>tests</span></div>
+      <div class="stat"><b>~220</b><span>live tools</span></div>
+      <div class="stat"><b>42</b><span>recorded simulations</span></div>
+      {% if bench.main %}<div class="stat"><b>{{ bench.main[0].pct }}%</b><span>benchmark accuracy</span></div>{% endif %}
+    </div>
+  </section>
+
+  <div class="xgrid">
+    {% for x in experiments %}
+      <a class="xcard" href="{{ url_for(x.endpoint) if x.endpoint else x.source }}">
+        <h3>{{ x.title }}</h3>
+        <p>{{ x.blurb }}</p>
+        <div class="tags">{% for t in x.tags %}<span>{{ t }}</span>{% endfor %}</div>
+        <div class="src">source: {{ x.source | replace('https://', '') }}</div>
+      </a>
+    {% endfor %}
+  </div>
+
+  {% if bench.main|length >= 2 %}
+    <div class="headline">
+      On a 150-question physics benchmark, a small local model using Mentat's tools scored
+      <b>{{ bench.main[0].pct }}%</b>{% for r in bench.main[1:] %}; {{ r.label }} {{ r.pct }}%{% endfor %}.
+      <a href="{{ url_for('experiments.benchmark') }}">See the breakdown &rarr;</a>
+    </div>
+  {% endif %}
+
+  <p class="later">Coming next: a weapon-vs-armor physics game, and double-slit and N-body experiments in the browser.</p>
+</div>
+{% endblock %}

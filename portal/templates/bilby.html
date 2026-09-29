@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Bilby — Skippy Portal{% endblock %}
+{% block head %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  main { max-width: 980px; }
+  .bb { --pink: #ff44aa; --pink-dim: #3a0d24; font-family: "Rajdhani", system-ui, sans-serif; }
+  .bb h2 { color: var(--pink); letter-spacing: .12em; text-transform: uppercase; }
+  .deck-main { display: grid; grid-template-columns: 180px 1fr; gap: 18px; align-items: center;
+               padding: 18px; border-radius: 14px; border: 1px solid var(--pink-dim);
+               background: radial-gradient(circle at 90% 10%, rgba(255,68,170,.22), transparent 55%), #0b0308; }
+  @media (max-width: 600px) { .deck-main { grid-template-columns: 1fr; } }
+  .art { width: 180px; height: 180px; max-width: 100%; border-radius: 10px; object-fit: cover; background: #1a0712;
+         display: grid; place-items: center; font-size: 3rem; color: var(--pink-dim); }
+  .np-title { font-size: 1.9rem; font-weight: 700; color: #fff; line-height: 1.1; }
+  .np-artist { font-size: 1.2rem; color: #ffb3da; margin: 2px 0 10px; }
+  .tags span { font-size: .8rem; margin-right: 6px; padding: 2px 9px; border-radius: 999px; border: 1px solid #6b1d47; color: #ffb3da; }
+  .prog { height: 6px; background: #2a0a1b; border-radius: 3px; overflow: hidden; margin: 12px 0 4px; }
+  .prog > div { height: 100%; background: var(--pink); width: 0; transition: width 1s linear; }
+  .time { font-size: .85rem; color: #b07a95; font-variant-numeric: tabular-nums; }
+  .lyric { margin-top: 10px; color: #d9b8c9; font-style: italic; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 14px; }
+  .panel { padding: 14px 16px; border-radius: 12px; border: 1px solid #2a0d1d; background: #080306; min-width: 0; }
+  .panel h3 { margin: 0 0 8px; font-size: .9rem; color: var(--pink); text-transform: uppercase; letter-spacing: .08em; }
+  .deck { display: flex; gap: 8px; align-items: baseline; margin: 4px 0; }
+  .deck b { width: 1.4em; color: #b07a95; } .deck.on b { color: var(--pink); }
+  .setlist { max-height: 260px; overflow-y: auto; font-size: .9rem; }
+  .setlist div { display: flex; gap: 10px; padding: 3px 0; border-bottom: 1px solid #1a0712; }
+  .setlist .t { color: #b07a95; font-variant-numeric: tabular-nums; }
+  .ctl { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .ctl button { border-color: var(--pink); color: var(--pink); }
+  .muted { color: #8a6377; font-size: .85rem; }
+  .status-line { font-size: .85rem; color: #8a6377; margin: 0 0 12px; }
+  .status-line .dot { color: var(--pink); }
+</style>
+{% endblock %}
+{% block content %}
+<section class="bb">
+  <h2>Bilby</h2>
+  <p class="status-line" id="status"></p>
+
+  <div class="deck-main">
+    <div id="art" class="art">♪</div>
+    <div style="min-width:0">
+      <div class="np-title" id="title">—</div>
+      <div class="np-artist" id="artist"></div>
+      <div class="tags" id="tags"></div>
+      <div class="prog"><div id="bar"></div></div>
+      <div class="time" id="time"></div>
+      <div class="lyric" id="lyric"></div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h3>Decks</h3>
+      <div class="deck" id="deck-a"><b>A</b><span></span></div>
+      <div class="deck" id="deck-b"><b>B</b><span></span></div>
+      <h3 style="margin-top:12px">Bilby suggests next</h3>
+      <div id="next" class="muted">—</div>
+    </div>
+    <div class="panel">
+      <h3>Phone music session</h3>
+      <div id="session" class="muted">No session.</div>
+      {% if is_admin %}
+      <div class="ctl">
+        {% for action, label in [('pause', 'Pause'), ('resume', 'Resume'), ('skip', 'Skip'), ('stop', 'Stop')] %}
+          <form method="post" action="{{ url_for('bilby.control') }}"><input type="hidden" name="action" value="{{ action }}">
+            <button type="submit">{{ label }}</button></form>
+        {% endfor %}
+      </div>
+      <p class="muted">Controls reach skippy-pc on its next report (within ~15 s).</p>
+      {% endif %}
+    </div>
+    <div class="panel">
+      <h3>Tonight's setlist</h3>
+      <div class="setlist" id="setlist"><span class="muted">Nothing played yet.</span></div>
+    </div>
+  </div>
+</section>
+<script>
+(function () {
+  const STATE = "{{ url_for('bilby.state') }}", ART = "{{ url_for('bilby.art') }}";
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls;
+                                   if (text !== undefined) e.textContent = text; return e; };
+  const mmss = (s) => s == null ? "" : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  let elapsed = null, duration = null, artKey = null;
+
+  function render(m) {
+    const t = m.traktor || {}, np = t.now_playing, sess = m.session;
+    const phone = sess && sess.now_playing;
+    $("status").replaceChildren();
+    const dot = el("span", "dot", m.online ? "● " : "○ ");
+    $("status").append(dot, m.online
+      ? `live from home · ${({traktor: "Traktor on the Mac", pushed: "the Mac (pushed)", local: "skippy-pc's library",
+                              drive: "Google Drive"})[t.source] || "no music source"}${t.message ? " · " + t.message : ""} · updated ${m.age}s ago`
+      : (m.age == null ? "waiting for skippy-pc to report in" : `skippy-pc silent for ${Math.round(m.age / 60)} min`));
+
+    const cur = np || phone;
+    $("title").textContent = cur ? cur.title || "Untitled" : "Nothing playing";
+    $("artist").textContent = cur ? (cur.artist || "") + (np && np.deck ? ` · deck ${String(np.deck).toUpperCase()}` : phone && !np ? " · on the phone" : "") : "";
+    $("tags").replaceChildren(...(np ? [np.bpm && `${np.bpm} BPM`, np.key, np.genre].filter(Boolean) : [])
+                                         .map(x => el("span", null, x)));
+    $("lyric").textContent = np && np.lyric_summary ? np.lyric_summary : "";
+    elapsed = np ? np.elapsed_s : null; duration = np ? np.duration_s : null;
+    tick(true);
+
+    const key = m.has_art ? (np && `${np.artist}|${np.title}`) : null;
+    if (key !== artKey) {
+      artKey = key;
+      if (key) { const img = el("img", "art"); img.alt = ""; img.src = `${ART}?k=${encodeURIComponent(key)}`; $("art").replaceWith(img); img.id = "art"; }
+      else { const d = el("div", "art", "♪"); $("art").replaceWith(d); d.id = "art"; }
+    }
+
+    for (const d of ["a", "b"]) {
+      const info = t[`deck_${d}`], on = t[`playing_${d}`];
+      $(`deck-${d}`).classList.toggle("on", !!on);
+      $(`deck-${d}`).querySelector("span").textContent = info ? `${info.artist || "?"} — ${info.title || "?"}${on ? "  ▶" : ""}` : "empty";
+    }
+    const nx = m.up_next;
+    $("next").textContent = nx ? `${nx.artist || "?"} — ${nx.title || "?"}${nx.bpm ? `  (${Math.round(nx.bpm)} BPM${nx.key ? ", " + nx.key : ""})` : ""}` : "—";
+
+    if (sess && sess.status) {
+      $("session").textContent = `${sess.status}${sess.mode ? " · " + sess.mode : ""}` +
+        (phone ? ` · ${phone.artist || "?"} — ${phone.title || "?"}` : "") +
+        (sess.queue_remaining != null ? ` · ${sess.queue_remaining} queued` : "");
+    } else { $("session").textContent = "No session."; }
+
+    const rows = (m.setlist || []).slice().reverse().map(s => {
+      const r = el("div"); r.append(el("span", "t", s.played_at || ""), el("span", null, `${s.artist} — ${s.title}`)); return r; });
+    $("setlist").replaceChildren(...(rows.length ? rows : [el("span", "muted", "Nothing played yet.")]));
+  }
+
+  function tick(reset) {
+    if (!reset && elapsed != null) elapsed += 1;
+    $("bar").style.width = elapsed != null && duration ? `${Math.min(100, 100 * elapsed / duration)}%` : "0";
+    $("time").textContent = elapsed != null ? `${mmss(elapsed)}${duration ? " / " + mmss(duration) : ""}` : "";
+  }
+
+  async function poll() {
+    try { const r = await fetch(STATE, {cache: "no-store"}); if (r.ok) render(await r.json()); } catch (e) {}
+  }
+  render({{ music | tojson }});
+  setInterval(poll, 5000);
+  setInterval(() => tick(false), 1000);
+})();
+</script>
+{% endblock %}

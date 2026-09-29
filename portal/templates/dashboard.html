@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Servers — Skippy Portal{% endblock %}
+{% block content %}
+<section>
+  <h2>Game servers</h2>
+  {% if error %}
+    <p class="error">Couldn't reach the VM: {{ error }}</p>
+  {% else %}
+    {% set running = status.status == 'RUNNING' %}
+    {% set asleep = status.status == 'TERMINATED' %}
+    {% set up = status.minutes_up() %}
+    <p>
+      <span class="dot {{ 'green' if running else ('grey' if asleep else 'amber') }}"></span>
+      <strong>{{ 'Online' if running else ('Asleep' if asleep else status.status|title) }}</strong>
+      {% if running %}
+        &middot; {% for g in status.games if g in games %}{{ games[g].name }}{{ ', ' if not loop.last }}{% else %}no games{% endfor %}
+        &middot; sleeps after {{ status.idle_minutes }} idle min
+      {% elif asleep %}
+        &middot; the world is saved; anyone here can wake it.
+      {% endif %}
+    </p>
+
+    {% for id, game in games.items() %}
+      {% set on = running and id in status.games %}
+      <div class="card" id="{{ id }}" {% if game.theme %}style="border-left: 4px solid {{ game.theme.accent }}"{% endif %}>
+        <h3><a href="{{ url_for('dashboard.game', gid=id) }}" style="color:inherit">{{ game.name }}</a>
+          {% if on %}<span class="dot green" title="running"></span>{% endif %}
+          <a href="{{ url_for('dashboard.game', gid=id) }}" style="font-size:.8rem;font-weight:normal">open &rarr;</a></h3>
+        <p>{{ game.description }}</p>
+
+        {% if on %}
+          {% if up is not none and up < game.ready_minutes %}
+            <p><span class="dot amber"></span>Starting — booted {{ up }} min ago, usually joinable
+               ~{{ game.ready_minutes }} min after boot.</p>
+          {% endif %}
+          {% include "_join.html" %}
+        {% elif asleep %}
+          <form method="post" action="{{ url_for('dashboard.games_start') }}">
+            <input type="hidden" name="games" value="{{ id }}">
+            <input type="hidden" name="idle_minutes" value="{{ status.idle_minutes }}">
+            <button type="submit">Play {{ game.name }}</button>
+            <span class="help">&nbsp;ready in ~{{ game.ready_minutes }} min</span>
+          </form>
+        {% elif running %}
+          <p class="help">The server is running other games right now. It frees up when they go to
+            sleep{% if is_admin %}, or restart it from Admin with this game added{% endif %}.</p>
+        {% endif %}
+
+        <p class="links">
+          {% if links[id].text %}<a href="{{ links[id].invite or links[id].text }}" target="_blank" rel="noopener">#{{ id }} on Discord</a>{% endif %}
+          {% if links[id].voice %}<a href="{{ links[id].voice }}" target="_blank" rel="noopener">🔊 voice</a>{% endif %}
+          {% if not links[id].text %}<a href="{{ discord_invite }}" target="_blank" rel="noopener">Join the Discord</a>{% endif %}
+        </p>
+      </div>
+    {% endfor %}
+
+    {% if running %}
+      <form class="inline" method="post" action="{{ url_for('dashboard.games_stop') }}"
+            onsubmit="return confirm('Stop the server for everyone? Worlds are saved first.');">
+        <button type="submit" class="danger">Stop server</button>
+      </form>
+    {% elif asleep %}
+      <details>
+        <summary>Start several games at once</summary>
+        <form method="post" action="{{ url_for('dashboard.games_start') }}">
+          {% for id, game in games.items() %}
+            <label class="game">
+              <input type="checkbox" name="games" value="{{ id }}" {{ 'checked' if id in status.games }}>
+              {{ game.name }}
+            </label>
+          {% endfor %}
+          <label>Sleep after
+            <input type="number" name="idle_minutes" value="{{ status.idle_minutes }}"
+                   min="{{ 0 if is_admin else idle_min }}" {% if not is_admin %}max="{{ idle_max }}"{% endif %}
+                   style="width:5em">
+            minutes idle{% if is_admin %} (0 = never){% endif %}
+          </label>
+          <p><button type="submit">Start selected</button></p>
+        </form>
+      </details>
+    {% else %}
+      <p>The server is changing state — refresh in a minute.</p>
+    {% endif %}
+  {% endif %}
+</section>
+
+<section>
+  <h2>Services</h2>
+  {% for svc in services %}
+    <div class="card">
+      <h3><a href="{{ svc.url }}">{{ svc.name }}</a></h3>
+      <p>{{ svc.description }}</p>
+    </div>
+  {% endfor %}
+</section>
+{% endblock %}

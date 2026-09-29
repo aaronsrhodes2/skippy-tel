@@ -46,11 +46,12 @@ log = logging.getLogger(__name__)
 _MUSIC_ROOT = Path("/music")
 _AUDIO_EXTS = {".mp3", ".m4a", ".flac", ".ogg", ".wav", ".aac", ".opus", ".wma"}
 
-_lock:   threading.Lock = threading.Lock()
-_queue:  list[dict]     = []
-_index:  int            = 0
-_now:    Optional[dict] = None
-_loaded: bool           = False
+_lock:         threading.Lock = threading.Lock()
+_queue:        list[dict]     = []
+_index:        int            = 0
+_now:          Optional[dict] = None
+_loaded:       bool           = False
+_scan_started: bool           = False
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -60,14 +61,22 @@ def available() -> bool:
     return _MUSIC_ROOT.exists()
 
 
+def ready() -> bool:
+    """True once the background scan has finished."""
+    with _lock:
+        return _loaded and bool(_queue)
+
+
 def now_playing() -> Optional[dict]:
-    """Return the current track dict or None."""
+    """Return the current track dict, or None if still scanning."""
     with _lock:
         if _now:
             return dict(_now)
-    _ensure_loaded()
-    with _lock:
-        return dict(_now) if _now else None
+        if not _loaded:
+            # Background scan not done yet — return None rather than blocking
+            return None
+    # Loaded but _now is None (empty library)
+    return None
 
 
 def next_track() -> Optional[dict]:
@@ -319,3 +328,22 @@ def _parse_filename(filename: str) -> tuple[str, str]:
             parts = stem.split(sep, 1)
             return parts[1].strip(), parts[0].strip()
     return stem or filename, "Unknown"
+
+
+# ── Background startup scan ───────────────────────────────────────────────────
+# WSL2 bind-mounts are slow (~40s for 21k files). Start the scan in a daemon
+# thread at import time so it's ready before the first HTTP request arrives.
+# Defined down here so _ensure_loaded is already in scope.
+
+def _background_scan() -> None:
+    global _scan_started
+    if not _MUSIC_ROOT.exists():
+        return
+    with _lock:
+        if _scan_started:
+            return
+        _scan_started = True
+    _ensure_loaded()   # blocks only the background thread
+
+
+threading.Thread(target=_background_scan, daemon=True, name="bilby-local-scan").start()

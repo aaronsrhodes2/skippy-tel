@@ -15,15 +15,22 @@ The queue is refreshed when empty or explicitly invalidated. Track
 metadata is cached in memory for the process lifetime.
 
 Threading note:
-  The google-api-python-client service (httplib2 backend) is NOT thread-safe.
-  Each worker thread creates its own service via _build_svc() so parallel
-  folder listings don't corrupt shared HTTP state.
+  Credentials are loaded once and shared (with a lock for refresh).
+  Each worker calls _build_svc() which uses static_discovery=True so
+  NO network call is made to googleapis.com/discovery — the bundled
+  local schema is used instead. This prevents the thundering-herd of
+  hundreds of simultaneous discovery requests that crashed Docker Desktop.
+  max_workers is capped at 4 to limit concurrent Drive API calls.
 """
 
 import logging
 import random
 import threading
 from typing import Optional
+
+# ── Shared credential cache (load once, refresh with lock) ───────────────────
+_creds_lock  = threading.Lock()
+_shared_creds = None   # type: ignore   # google.oauth2.credentials.Credentials | None
 
 log = logging.getLogger(__name__)
 
@@ -267,20 +274,42 @@ def _ensure_loaded():
 _TOKEN_FILE = "/drive-state/drive_token.json"   # bind-mounted from music-collection/state/
 
 
-def _build_svc():
-    """Build a fresh (non-cached) Drive service for the calling thread.
+def _get_shared_creds():
+    """Return a valid shared Credentials object.
 
-    Each parallel worker calls this so every thread has its own httplib2
-    Http instance — shared services cause SSL record-layer failures.
+    Credentials are loaded from disk once and refreshed under a lock so
+    multiple threads don't race to hit oauth2.googleapis.com simultaneously.
     """
+    global _shared_creds
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
+
+    with _creds_lock:
+        if _shared_creds is None:
+            _shared_creds = Credentials.from_authorized_user_file(
+                _TOKEN_FILE, _DRIVE_SCOPES
+            )
+        if _shared_creds.expired and _shared_creds.refresh_token:
+            log.info("Bilby Drive: refreshing OAuth token")
+            _shared_creds.refresh(Request())
+    return _shared_creds
+
+
+def _build_svc():
+    """Build a Drive service for the calling thread.
+
+    Uses static_discovery=True so the bundled local API schema is used —
+    NO network call to googleapis.com/discovery. This eliminates the
+    thundering-herd of hundreds of simultaneous discovery requests.
+
+    Credentials are shared (see _get_shared_creds); each call creates a
+    new authorized HTTP transport so threads don't share connection state.
+    """
     from googleapiclient.discovery import build
 
-    creds = Credentials.from_authorized_user_file(_TOKEN_FILE, _DRIVE_SCOPES)
-    if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-    return build("drive", "v3", credentials=creds)
+    creds = _get_shared_creds()
+    # static_discovery=True: use the bundled local Drive v3 schema (no HTTP)
+    return build("drive", "v3", credentials=creds, static_discovery=True)
 
 
 def _fetch_tracks() -> list[dict]:
@@ -318,7 +347,7 @@ def _fetch_tracks() -> list[dict]:
             files, subs = _list_folder_with_svc(s, af["id"])
             return files, subs, af["name"]
 
-        with ThreadPoolExecutor(max_workers=16) as pool:
+        with ThreadPoolExecutor(max_workers=4) as pool:
             futures = {pool.submit(_list_artist, af): af for af in artist_folders}
             for fut in as_completed(futures):
                 try:
@@ -343,7 +372,7 @@ def _fetch_tracks() -> list[dict]:
             files, _ = _list_folder_with_svc(s, album_id)
             return files, artist_name
 
-        with ThreadPoolExecutor(max_workers=16) as pool:
+        with ThreadPoolExecutor(max_workers=4) as pool:
             futures2 = {
                 pool.submit(_list_album, aid, art): (aid, art)
                 for aid, art in album_folders

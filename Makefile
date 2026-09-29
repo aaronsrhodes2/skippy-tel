@@ -1,4 +1,4 @@
-.PHONY: run stop logs build test pull-model health intent apks phone-check adb-connect adb-devices ups-monitor ups-status push-all
+.PHONY: run stop logs build test pull-model health intent apks phone-check adb-connect adb-devices ups-monitor ups-status push-all memory-init memory-ingest memory-inbox memory-distill games-up games-down games-status games-env tunnel bigcard
 
 # ── Two-machine sync ─────────────────────────────────────────────────────────
 # Single developer, two stations (PC + Mac).
@@ -38,7 +38,7 @@ build:
 	docker compose build
 
 test:
-	@echo "(no unit tests yet)"
+	python -m pytest memory/tests -q
 
 # Pull the default Ollama model into the running ollama container.
 # First boot only; OLLAMA_KEEP_ALIVE=-1 keeps it warm afterwards.
@@ -144,6 +144,28 @@ ups-status:
 	@curl -s http://localhost:9338/status | jq . 2>/dev/null || \
 		powershell -Command "Invoke-RestMethod http://localhost:9338/status | ConvertTo-Json"
 
+# ── DJ Big Card — public show display ────────────────────────────────────────
+# Expose /bilby/bigcard to the internet for live shows.
+# Install cloudflared once: winget install Cloudflare.cloudflared
+#
+# Usage:
+#   make tunnel          → prints a public HTTPS URL, e.g.:
+#                          https://abc123.trycloudflare.com
+#   Crowd opens:         https://abc123.trycloudflare.com/bilby/bigcard
+#   The QR code on the BigCard already encodes that URL — project it.
+#
+# Tailscale Funnel alternative (if Tailscale installed):
+#   tailscale funnel 3003
+#   → https://skippy-pc.tail<id>.ts.net/bilby/bigcard
+tunnel:
+	@echo "=== Cloudflare Tunnel → http://localhost:3003 ==="
+	@echo "Look for 'trycloudflare.com' URL. Open <that-url>/bilby/bigcard."
+	cloudflared tunnel --url http://localhost:3003
+
+# Quick smoke-test for the Big Card (local only)
+bigcard:
+	@curl -s -o /dev/null -w "GET /bilby/bigcard → HTTP %{http_code}\n" http://localhost:3003/bilby/bigcard
+
 bridge-health:
 	curl -s http://localhost:9337/health | jq .
 
@@ -157,3 +179,36 @@ trust-awesomeness:
 	curl -s -X POST http://localhost:3003/intent/unmatched \
 		-H "Content-Type: application/json" \
 		-d '{"text":"trust the awesomeness echo hello from awesomeness"}' | jq .
+
+# Skippy Memory — every AI conversation in one Drive folder. See docs/memory/README.md.
+#   make memory-inbox              import every export dropped in <MEMORY_DIR>/inbox/
+#   make memory-inbox DISTILL=1    ...and tag topics + summaries with local Ollama
+#   make memory-ingest EXPORT=C:/Users/aaron/Downloads/data-2026-09-28.zip
+MEMORY_DIR ?= G:/My Drive/Skippy Memory
+memory-init:
+	python -m memory init --out "$(MEMORY_DIR)"
+
+memory-ingest:
+	@if [ -z "$(EXPORT)" ]; then echo "usage: make memory-ingest EXPORT=<zip|folder|json>"; exit 2; fi
+	python -m memory ingest "$(EXPORT)" --out "$(MEMORY_DIR)" $(if $(DISTILL),--distill)
+
+memory-inbox:
+	python -m memory inbox --out "$(MEMORY_DIR)" $(if $(DISTILL),--distill)
+
+memory-distill:
+	python -m memory distill --out "$(MEMORY_DIR)"
+
+# Pop-up game servers on GCP. See docs/games/README.md.
+#   make games-up GAMES="valheim dragonwilds"   (IDLE=90 for a longer auto-sleep grace)
+games-up:
+	@if [ -z "$(GAMES)" ]; then echo 'usage: make games-up GAMES="valheim dragonwilds"'; exit 2; fi
+	bash scripts/games.sh up $(GAMES) $(if $(IDLE),--idle $(IDLE))
+
+games-down:
+	bash scripts/games.sh down
+
+games-status:
+	bash scripts/games.sh status
+
+games-env:
+	bash scripts/games.sh env

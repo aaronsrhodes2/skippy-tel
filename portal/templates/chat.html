@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Chat — Skippy Portal{% endblock %}
+{% block content %}
+<section class="chat-page">
+  <h2>Skippy</h2>
+  {% include "_chat.html" %}
+</section>
+<style>.chat-page .skippy-chat .log { max-height: 65vh; }</style>
+{% endblock %}
