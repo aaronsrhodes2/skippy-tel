@@ -41,11 +41,18 @@ resource "google_compute_firewall" "games" {
       "7777",      # Satisfactory
       "7778",      # RuneScape: Dragonwilds
       "8888",      # RuneScape: Dragonwilds world-settings beacon
+      "9000",      # EverQuest world
+      "5998-5999", # EverQuest login (Titanium / RoF2+)
+      "7000-7030", # EverQuest zones
+      "7779",      # EverQuest chat (UCS; moved off 7778)
     ]
   }
   allow {
     protocol = "tcp"
-    ports    = ["7777", "8888"] # Satisfactory API + reliable messaging
+    ports = [
+      "7777", "8888",              # Satisfactory API + reliable messaging
+      "9000", "5998-5999", "7779", # EverQuest world, login, chat
+    ]
   }
   depends_on = [google_project_service.compute]
 }
@@ -117,15 +124,16 @@ resource "google_compute_instance" "games" {
   }
 
   metadata = {
-    startup-script  = file("${path.module}/startup.sh")
-    shutdown-script = file("${path.module}/shutdown.sh")
-    idle-watchdog   = file("${path.module}/idle-watchdog.sh")
-    skippy-diag     = file("${path.module}/diag.sh")
-    ops-agent       = file("${path.module}/ops_agent.py")
-    discord-notify  = file("${path.module}/discord-notify.py")
-    compose-file    = file("${path.module}/../../games/docker-compose.yml")
-    games           = "valheim"
-    idle-minutes    = "30"
+    startup-script   = file("${path.module}/startup.sh")
+    shutdown-script  = file("${path.module}/shutdown.sh")
+    idle-watchdog    = file("${path.module}/idle-watchdog.sh")
+    skippy-diag      = file("${path.module}/diag.sh")
+    everquest-script = file("${path.module}/everquest.sh")
+    ops-agent        = file("${path.module}/ops_agent.py")
+    discord-notify   = file("${path.module}/discord-notify.py")
+    compose-file     = file("${path.module}/../../games/docker-compose.yml")
+    games            = "valheim"
+    idle-minutes     = "30"
     # games-env (the secrets in games/.env) is uploaded by `games.sh env`,
     # never through OpenTofu, so passwords stay out of state files.
   }
@@ -149,6 +157,8 @@ resource "google_compute_instance" "games" {
       metadata["portal-experiments"], # hidden Experiments (dashboard toggle)
       metadata["portal-watch"],       # watcher events (blocked starts)
       metadata["portal-home"],        # home reporter's token hash (portal/home.py)
+      metadata["eq-import-token"],    # one-time EverQuest DB import (portal/imports.py)
+      metadata["eq-import-url"],
     ]
   }
 }

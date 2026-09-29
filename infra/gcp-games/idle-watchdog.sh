@@ -13,7 +13,7 @@ set -euo pipefail
 
 INTERVAL_MIN=5
 THRESHOLD=${THRESHOLD:-500}      # packets / 5 min; one connected player sends thousands
-PORTS="2456:2457,34197,7777,7778"
+PORTS="2456:2457,34197,7777,7778,9000,5998:5999,7000:7030"   # + EverQuest (world, login, zones)
 STATE=/run/skippy-games          # tmpfs: resets on every boot
 ROOT=/srv/games
 META=http://metadata.google.internal/computeMetadata/v1/instance/attributes
@@ -43,6 +43,7 @@ if [ "$idle" -ge "$IDLE_LIMIT" ]; then
   docker compose --project-directory "$ROOT" \
     --profile valheim --profile factorio --profile satisfactory --profile dragonwilds \
     stop --timeout 120 || true
+  /usr/local/bin/skippy-everquest stop || true
   /usr/local/bin/skippy-discord offline "nobody played for ${idle} min" || true
   systemctl poweroff
 fi

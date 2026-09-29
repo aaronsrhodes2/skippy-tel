@@ -13,6 +13,8 @@ services:
     environment:
       SKIPPY_API: http://flask-api:5000
       MENTAT_URL: http://mentat-home:8080
+    volumes:
+      - ./state/imports:/imports:ro   # game databases to carry to the games VM (see CLAUDE.md)
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
 
   # Mentat with Qwen: sigma-ground's physics engine, its plain-English

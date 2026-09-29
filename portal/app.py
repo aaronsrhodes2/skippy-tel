@@ -11,7 +11,7 @@ import base64
 import json
 from functools import wraps
 
-from flask import (Blueprint, Flask, abort, flash, jsonify, redirect, render_template, request,
+from flask import (Blueprint, Flask, abort, flash, jsonify, redirect, render_template, request, send_file,
                    send_from_directory, url_for)
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -25,6 +25,7 @@ import envfile
 import experiments
 import friends as friends_mod
 import home as home_mod
+import imports as imports_mod
 import mentat_client
 import ops
 import spend
@@ -34,7 +35,8 @@ from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, PORTALS, SERVICES
 from gcp import GamesVm
 
 
-def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, home=None) -> Flask:
+def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, home=None,
+               imports=None) -> Flask:
     app = Flask(__name__)
     app.config.update(settings if settings is not None else config.load())
     # Cloud Run terminates TLS; trust its X-Forwarded-Proto/Host so OAuth
@@ -50,6 +52,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     app.extensions["mentat"] = mentat
     home = home or home_mod.Home(vm)
     app.extensions["home"] = home
+    imports = imports or imports_mod.Imports(vm)
 
     def me() -> str:
         return auth.current_user()["email"]
@@ -306,7 +309,37 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         report = request.get_json(silent=True)
         if not isinstance(report, dict):
             abort(400)
-        return jsonify(home.accept(report))
+        return jsonify({**home.accept(report), "imports_wanted": imports.wanted()})
+
+    @app.put("/home/imports/<name>")
+    def home_import_chunk(name):
+        """skippy-pc uploading a game database for the VM (imports.py), in chunks."""
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        try:
+            out = imports.receive(name, request.args.get("offset", type=int, default=-1),
+                                  request.args.get("total", type=int, default=0),
+                                  request.args.get("sha256", ""), request.get_data(), request.url_root)
+        except imports_mod.ImportError_ as exc:
+            return jsonify(error=str(exc), **exc.extra), exc.status
+        return jsonify(out)
+
+    @app.get("/games/<name>/import")
+    def game_import_download(name):
+        """The games VM fetching the dump, with the one-time token from its metadata."""
+        if not imports.authorized(name, request.headers.get("Authorization")):
+            abort(401)
+        path = imports.path(name)
+        if not path:
+            abort(404)
+        return send_file(path, mimetype="application/gzip")
+
+    @app.post("/games/<name>/import/done")
+    def game_import_done(name):
+        if not imports.authorized(name, request.headers.get("Authorization")):
+            abort(401)
+        imports.done(name)
+        return jsonify(ok=True)
 
     @app.get("/ops/home")
     def ops_home():

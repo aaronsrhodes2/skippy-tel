@@ -148,6 +148,28 @@ GAMES: dict[str, Game] = {
         links=(("Official site", "https://www.satisfactorygame.com"),
                ("Wiki", "https://satisfactory.wiki.gg")),
     ),
+    "everquest": Game(
+        "everquest", "EverQuest",
+        "The Captain's Golden Era EverQuest (EQEmu): soloable with bots and mercs, XP x3, no death penalty.",
+        ram_gb=6,
+        connect=lambda ip, env: (
+            "RoF2 client: in <code>eqhost.txt</code> change the address in both the "
+            f"<code>[Registration Servers]</code> and <code>[Login Servers]</code> blocks to "
+            f"<code>\"{ip}:5999\"</code>, start <code>eqgame.exe patchme</code>, and log in: "
+            "a new name + password creates your account"
+        ),
+        ready_minutes=8,
+        direct=lambda ip, env: f"{ip}:5999",
+        theme=Theme(accent="#d4af37", accent2="#6a8cc7", bg="#0b0a12", card="#171425", text="#e8e2d0",
+                    font="Cinzel",
+                    pattern="radial-gradient(ellipse at 15% 0%, rgba(106,140,199,.35), transparent 55%), "
+                            "radial-gradient(ellipse at 90% 100%, rgba(212,175,55,.30), transparent 55%)",
+                    tagline="Norrath, the way you remember it. Minus the corpse runs."),
+        facts=(("Client", "RoF2 (Rain of Fear 2)"), ("Login server", "this server, port 5999"),
+               ("Rules", "XP x3 · AA x2 · level 65 · bots + mercs · no death penalty"),
+               ("First boot", "~15-20 min to install; later boots a few minutes")),
+        links=(("EQEmu", "https://www.eqemulator.org"), ("Bots guide", "https://docs.eqemu.io")),
+    ),
 }
 
 # Every game can have a banner image on its page; the URL is just another setting.

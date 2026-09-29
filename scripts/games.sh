@@ -16,13 +16,13 @@ INSTANCE=${GAMES_INSTANCE:-skippy-games}
 ZONE=${GAMES_ZONE:-us-west1-b}
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$HERE/games/.env"
-KNOWN="valheim factorio satisfactory dragonwilds"
+KNOWN="valheim factorio satisfactory dragonwilds everquest"
 
 # RAM each server wants (GB), used to pick the machine size.
 # (case, not an associative array: macOS still ships bash 3.2)
 ram_gb() {
   case $1 in
-    valheim) echo 4 ;; factorio) echo 2 ;; satisfactory) echo 12 ;; dragonwilds) echo 8 ;;
+    valheim) echo 4 ;; factorio) echo 2 ;; satisfactory) echo 12 ;; dragonwilds) echo 8 ;; everquest) echo 6 ;;
   esac
 }
 

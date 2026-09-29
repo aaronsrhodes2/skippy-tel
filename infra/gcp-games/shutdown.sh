@@ -16,6 +16,7 @@ logger -t skippy-shutdown "VM stopping: saving worlds"
 docker compose --project-directory "$ROOT" \
   --profile valheim --profile factorio --profile satisfactory --profile dragonwilds \
   stop --timeout 120 || true
+/usr/local/bin/skippy-everquest stop || true
 
 GAMES=$(meta games)
 if [ -n "$GAMES" ]; then

@@ -9,6 +9,7 @@ into the vault .env. The portal keeps only its hash. Standard library only.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import sys
@@ -23,6 +24,8 @@ MAC = os.environ.get("BILBY_MAC_URL", "").rstrip("/")         # Mac DJ assistant
 MENTAT = os.environ.get("MENTAT_URL", "").rstrip("/")         # Mentat + Qwen on skippy-pc
 INTERVAL = float(os.environ.get("REPORT_INTERVAL", "15"))
 FAST_INTERVAL = 1.5          # job polling while someone is chatting on the portal
+IMPORTS_DIR = os.environ.get("IMPORTS_DIR", "/imports")      # game databases to carry to the VM
+CHUNK = 8 * 1024 * 1024      # Cloud Run caps a request at 32 MB
 ART_MAX = 400_000
 
 
@@ -172,6 +175,57 @@ class Jobs:
                 time.sleep(1)
 
 
+class Uploads:
+    """The portal asks for a game's database (`imports_wanted`); if the export
+    is here (IMPORTS_DIR/<name>.sql.gz), send it in chunks, one at a time."""
+
+    def __init__(self, token: str):
+        self.token, self.busy = token, set()
+
+    def want(self, names: list) -> None:
+        for name in names or []:
+            path = os.path.join(IMPORTS_DIR, f"{name}.sql.gz")
+            if name not in self.busy and os.path.isfile(path):
+                self.busy.add(name)
+                threading.Thread(target=self._send, args=(name, path), daemon=True).start()
+
+    def _put(self, name: str, offset: int, total: int, sha: str, chunk: bytes) -> dict:
+        req = urllib.request.Request(
+            f"{PORTAL}/home/imports/{name}?offset={offset}&total={total}&sha256={sha}", data=chunk,
+            method="PUT", headers={"Content-Type": "application/octet-stream",
+                                   "Authorization": f"Bearer {self.token}"})
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                return json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            body = json.loads(e.read() or b"{}")
+            if e.code == 409:                   # portal has a different amount: resume from there
+                return body
+            raise RuntimeError(body.get("error") or f"HTTP {e.code}") from e
+
+    def _send(self, name: str, path: str) -> None:
+        try:
+            total = os.path.getsize(path)
+            h = hashlib.sha256()
+            with open(path, "rb") as f:
+                for block in iter(lambda: f.read(CHUNK), b""):
+                    h.update(block)
+            sha, offset = h.hexdigest(), 0
+            print(f"home-reporter: uploading {name} ({total // 1_000_000} MB)", flush=True)
+            with open(path, "rb") as f:
+                while offset < total:
+                    f.seek(offset)
+                    reply = self._put(name, offset, total, sha, f.read(CHUNK))
+                    offset = int(reply.get("have", 0))
+                    if reply.get("complete"):
+                        print(f"home-reporter: {name} uploaded; the VM loads it on its next start", flush=True)
+                        return
+        except Exception as e:  # noqa: BLE001 — the next report asks again
+            print(f"home-reporter: {name} upload failed: {e}", flush=True)
+        finally:
+            self.busy.discard(name)
+
+
 def run_commands(commands: list) -> list[dict]:
     done = []
     for c in commands or []:
@@ -183,6 +237,7 @@ def run_commands(commands: list) -> list[dict]:
 def main() -> None:
     token = home_token()
     jobs = Jobs(token)
+    uploads = Uploads(token)
     threading.Thread(target=jobs.poll_forever, daemon=True).start()
     sent_art, results, warned = None, [], False
     while True:
@@ -203,6 +258,7 @@ def main() -> None:
                 sent_art = None
             results = run_commands(reply.get("commands"))
             jobs.accept(reply)
+            uploads.want(reply.get("imports_wanted"))
             warned = False
         except urllib.error.HTTPError as e:
             if not warned:

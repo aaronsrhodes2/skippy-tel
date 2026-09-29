@@ -130,3 +130,19 @@ and jobs; while someone chats, the reporter also polls `GET /home/jobs` every
   SkippyTel's .env.
 - Portal side: `portal/home.py` (in-memory; the portal runs max 1 instance),
   `/bilby` sub-portal (grant "bilby"; controls admin-only), Home widget on `/me`.
+
+## EverQuest (EQEmu) on the games VM
+
+Not a profile in games/docker-compose.yml: `infra/gcp-games/everquest.sh`
+(metadata `everquest-script`) runs AkkStack (pinned commit) under
+`data/everquest/akk-stack` on the world disk. First start: AkkStack's own
+installer (~15-20 min). Ports: world 9000, login 5998-5999, zones 7000-7030/udp,
+chat 7779 (moved off 7778 for Dragonwilds). Only game ports are published.
+
+The Captain's home world (AkkStack in WSL on skippy-pc, own login server,
+account `gonif`, Golden Era rules in the DB) is carried over once:
+skippy-pc exports `SkippyTel/state/imports/everquest.sql.gz` → the home
+reporter uploads it in chunks → portal (`portal/imports.py`) holds it and puts
+a one-time token in VM metadata (`eq-import-token`/`eq-import-url`) → the
+next EverQuest start loads it, runs `world database:updates`, and reports
+done. State: metadata `portal-imports`.

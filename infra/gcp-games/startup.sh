@@ -43,7 +43,7 @@ if ! mountpoint -q "$DATA"; then
   mount "$DATA"
 fi
 # Containers that run as non-root need to own their folders.
-mkdir -p "$DATA"/{valheim,factorio,satisfactory,dragonwilds}
+mkdir -p "$DATA"/{valheim,factorio,satisfactory,dragonwilds,everquest}
 chown 845:845 "$DATA/factorio"                     # factoriotools default uid
 chown 1000:1000 "$DATA/satisfactory" "$DATA/dragonwilds"
 
@@ -141,12 +141,22 @@ if [ -z "$GAMES" ]; then
   exit 0
 fi
 PROFILES=""
-for g in $GAMES; do PROFILES="$PROFILES --profile $g"; done
+EVERQUEST=""
+for g in $GAMES; do
+  if [ "$g" = everquest ]; then EVERQUEST=1; continue; fi   # AkkStack: its own project (everquest.sh)
+  PROFILES="$PROFILES --profile $g"
+done
+meta everquest-script > /usr/local/bin/skippy-everquest && chmod 755 /usr/local/bin/skippy-everquest
 
 # Start clean: containers left over from a previous session (restart policy
 # would bring them back) are removed; world data is on bind mounts, untouched.
 compose $ALL_PROFILES down --timeout 120 || true
-compose $PROFILES pull || echo "pull failed; starting with cached images"
-compose $PROFILES up -d
+/usr/local/bin/skippy-everquest stop || true
+if [ -n "$PROFILES" ]; then
+  compose $PROFILES pull || echo "pull failed; starting with cached images"
+  compose $PROFILES up -d
+fi
+# EverQuest last: its first boot installs for ~15-20 min and shouldn't hold the others up.
+[ -n "$EVERQUEST" ] && { /usr/local/bin/skippy-everquest start || echo "everquest: start FAILED"; }
 echo "started: $GAMES"
 /usr/local/bin/skippy-discord online || true

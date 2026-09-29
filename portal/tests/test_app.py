@@ -870,7 +870,8 @@ def test_home_report_needs_the_paired_token(env):
     assert token not in vm.metadata["portal-home"]                               # only the hash is kept
     assert client.post("/home/report", json=REPORT, headers={"Authorization": "Bearer nope"}).status_code == 401
     ok = client.post("/home/report", json=json.loads(json.dumps(REPORT)), headers={"Authorization": f"Bearer {token}"})
-    assert ok.status_code == 200 and ok.get_json() == {"commands": [], "need_art": True, "jobs": [], "fast_for_s": 0}
+    assert ok.status_code == 200 and ok.get_json() == {"commands": [], "need_art": True, "jobs": [], "fast_for_s": 0,
+                                                "imports_wanted": ["everquest"]}
     page = client.get("/me").data.decode()
     assert "qwen2.5:7b" in page and "whisper" in page and "97%" in page and "Veridis Quo" in page
 
@@ -932,3 +933,43 @@ def test_ops_home_needs_the_deployers_google_token(env, monkeypatch):
     monkeypatch.setattr("google.oauth2.id_token.verify_oauth2_token",
                         lambda *a, **k: {"email": "someone@evil.example", "email_verified": True})
     assert client.get("/ops/home", headers={"Authorization": "Bearer t"}).status_code == 401
+
+
+def test_everquest_database_relays_from_home_to_the_vm(env, tmp_path, monkeypatch):
+    import gzip, hashlib, imports
+    monkeypatch.setattr(imports, "DIR", tmp_path)
+    client, vm, _ = env
+    token = _pair(client)
+    home_auth = {"Authorization": f"Bearer {token}"}
+    dump = gzip.compress(b"CREATE DATABASE peq; -- Gonif the dwarf cleric\n" * 1000)
+    sha, half = hashlib.sha256(dump).hexdigest(), len(dump) // 2
+    put = lambda off, chunk, s=sha, h=home_auth: client.put(
+        f"/home/imports/everquest?offset={off}&total={len(dump)}&sha256={s}", data=chunk, headers=h)
+
+    assert put(0, dump[:half], h={}).status_code == 401                        # skippy-pc only
+    assert put(0, dump[:half]).get_json() == {"have": half}
+    assert put(5, dump[half:]).status_code == 409                              # wrong offset: resume point
+    assert put(half, dump[half:]).get_json()["complete"] is True
+    vm_token, url = vm.metadata["eq-import-token"], vm.metadata["eq-import-url"]
+    assert url.endswith("/games/everquest/import") and len(vm_token) > 30
+
+    assert client.get("/games/everquest/import").status_code == 401            # the VM's token only
+    got = client.get("/games/everquest/import", headers={"Authorization": f"Bearer {vm_token}"})
+    assert got.status_code == 200 and got.data == dump
+    report = client.post("/home/report", json=json.loads(json.dumps(REPORT)), headers=home_auth).get_json()
+    assert report["imports_wanted"] == []                                      # has it: stop asking
+
+    assert client.post("/games/everquest/import/done",
+                       headers={"Authorization": f"Bearer {vm_token}"}).get_json() == {"ok": True}
+    assert vm.metadata["eq-import-token"] == "" and not list(tmp_path.iterdir())
+    assert json.loads(vm.metadata["portal-imports"])["everquest"]["state"] == "done"
+
+
+def test_bad_checksum_is_rejected(env, tmp_path, monkeypatch):
+    import imports
+    monkeypatch.setattr(imports, "DIR", tmp_path)
+    client, vm, _ = env
+    token = _pair(client)
+    r = client.put("/home/imports/everquest?offset=0&total=3&sha256=" + "0" * 64, data=b"abc",
+                   headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 400 and "eq-import-token" not in vm.metadata

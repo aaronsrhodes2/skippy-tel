@@ -162,6 +162,7 @@ jobs:
             --no-invoker-iam-check \
             --timeout 900 \
             --max-instances 1 \
+            --memory 1Gi \
             --set-env-vars "^|^ALLOWED_EMAILS=${ALLOWED_EMAILS}|ADMIN_EMAILS=${ADMIN_EMAILS}|GCP_PROJECT=${PROJECT_ID}|GCP_ZONE=us-west1-b|GCP_INSTANCE=skippy-games|CHAT_MODEL=claude-haiku-4-5|DISCORD_INVITE=gPTVS7Hmj|MENTAT_URL=https://skippy-mentat-1015050363686.us-west1.run.app" \
             --set-secrets "FLASK_SECRET_KEY=portal-flask-secret:latest,GOOGLE_CLIENT_ID=portal-google-client-id:latest,GOOGLE_CLIENT_SECRET=portal-google-client-secret:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,DISCORD_BOT_TOKEN=discord-bot-token:latest"
       - name: Smoke test

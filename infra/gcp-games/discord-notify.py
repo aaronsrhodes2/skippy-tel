@@ -57,6 +57,11 @@ GAMES = {
                        + f"\nOr: Public tab → search **{e.get('DRAGONWILDS_SERVER_NAME') or 'Skippy'}** "
                          "(the whole name, exact spelling and case)"),
     ),
+    "everquest": (
+        "EverQuest",
+        "Golden Era Norrath (EQEmu): bots, mercs, XP x3, no death penalty.",
+        lambda ip, e: f"RoF2 client: set both addresses in eqhost.txt to `{ip}:5999`, run `eqgame.exe patchme`",
+    ),
 }
 
 

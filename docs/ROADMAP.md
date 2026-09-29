@@ -34,7 +34,7 @@ Last updated 2026-09-28.
 | Portal | Bridge chat to **skippy-tel-core** and its MCP tools (must filter tools through `portal/tool_policy.py`: friends get only `everyone` servers like physics) (needs a route from Cloud Run into the home mesh: Tailscale or a tunnel) |
 | Portal | Live services list (skippy-tel-core `/services`) instead of the static one — same mesh dependency |
 | Portal | Background restarts with progress; per-game container restart without a full VM reboot |
-| Games | **EverQuest (EQEmu)** as a compose profile + migrate the local DB — open: which local setup (AkkStack / community compose / raw), public vs. private login server |
+| Games | **EverQuest (EQEmu)**: built 2026-09-29 (AkkStack on the VM, home DB relayed through the portal, own login server). Next: first-boot install test, import, player count for the game page |
 | Games | **In-game chat → Discord → portal** (backlogged until a real play session): a VM log watcher posts chat lines to the game's channel webhook, so they show in Discord and on the game page. Factorio logs `[CHAT]`, so it's the first candidate. **Dragonwilds: tested 2026-09-29, its server doesn't log chat** (a marker typed in game never reached the container log), so no bridge there; Valheim/Satisfactory don't without mods |
 | Games | First real session: Valheim / Dragonwilds (PC + Xbox crossplay); move Nitrado worlds, cancel Nitrado |
 | Home | **InsightFace down** on skippy-pc (face recognition behind HeyBuddy `/heybuddy/identify`; seen 2026-09-29 via `ops home`). Nothing else depends on it |
