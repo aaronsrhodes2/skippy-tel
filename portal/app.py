@@ -63,10 +63,14 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
 
     @app.get("/")
     def index():
+        """Front page: a card per sub-portal the viewer may use; sign-in otherwise."""
         user = auth.current_user()
-        if user and auth.is_allowed(user["email"]):
-            return redirect(url_for("dashboard.index"))
-        return render_template("login.html")
+        if not (user and auth.is_allowed(user["email"])):
+            return render_template("login.html")
+        status, _ = vm_status()
+        return render_template("home.html", status=status, games=my_games(),
+                               show_experiments=auth.has_portal(me(), "experiments"),
+                               has_me="me" in app.blueprints)
 
     @app.get("/health")
     def health():
@@ -282,6 +286,15 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
     def tasks_run():
         """No login: runs only what someone who controls the VM queued."""
         return jsonify(results=tasks.run_pending(vm, {"discord-setup": run_discord_setup}))
+
+    # ── experiments: public showcase (no sign-in) ──────────────────────────────
+    lab = Blueprint("experiments", __name__, url_prefix="/experiments")
+
+    @lab.get("")
+    def index():
+        return render_template("experiments.html")
+
+    app.register_blueprint(lab)
 
     # ── chat ───────────────────────────────────────────────────────────────────
     talk = Blueprint("chat", __name__, url_prefix="/chat")

@@ -4,4 +4,6 @@
 <header><h1>Skippy Portal</h1></header>
 <p>Game servers, services, and Skippy — one door.</p>
 <a class="btn" href="{{ url_for('auth.login') }}">Sign in with Google</a>
+<p style="margin-top:28px">Just looking? <a href="{{ url_for('experiments.index') }}">See the Experiments &rarr;</a>
+  (no sign-in needed)</p>
 {% endblock %}

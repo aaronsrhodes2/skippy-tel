@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Skippy Portal{% endblock %}
+{% block head %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Titillium+Web:wght@700&family=Rajdhani:wght@700&display=swap" rel="stylesheet">
+<style>
+  .portals { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+  .portal { position: relative; display: flex; flex-direction: column; justify-content: flex-end;
+            min-height: 150px; padding: 16px; border-radius: 12px; text-decoration: none; color: var(--white);
+            border: 1px solid var(--dim-green-hi); background: var(--dim-green); overflow: hidden;
+            transition: transform .12s ease, box-shadow .12s ease; }
+  .portal:hover { transform: translateY(-2px); box-shadow: 0 6px 22px rgba(0,0,0,.6); }
+  .portal h3 { margin: 0; font-size: 1.15rem; }
+  .portal p { margin: 4px 0 0; font-size: .85rem; opacity: .85; }
+  .portal .pill { position: absolute; top: 12px; right: 12px; font-size: .72rem; padding: 2px 9px;
+                  border-radius: 999px; background: rgba(0,0,0,.45); border: 1px solid currentColor; }
+  .portal.skippy { background: radial-gradient(circle at 80% 10%, rgba(0,255,136,.35), transparent 60%), #02140c;
+                   border-color: var(--green); }
+  .portal.skippy h3 { color: var(--green); }
+  .portal.experiments { background: radial-gradient(circle at 20% 90%, rgba(170,68,255,.45), transparent 60%),
+                        repeating-linear-gradient(90deg, rgba(255,255,255,.04) 0 1px, transparent 1px 18px), #0b0614;
+                        border-color: var(--violet); }
+  .portal.experiments h3 { color: #d7b6ff; }
+  .portal.me { background: radial-gradient(circle at 50% 0, rgba(0,255,255,.25), transparent 65%), #041214;
+               border-color: var(--cyan); }
+  .portal.me h3 { color: var(--cyan); }
+  .portal.servers { background: #0c0c0c; border-color: #444; }
+</style>
+{% endblock %}
+{% block content %}
+<section>
+  <div class="portals">
+    {% if is_admin and has_me %}
+      <a class="portal me" href="{{ url_for('me.index') }}">
+        <h3>Your dashboard</h3><p>Servers, spend, friends and your own tools.</p></a>
+    {% endif %}
+
+    {% for id, game in games.items() %}
+      {% set t = game.theme %}
+      {% set on = status and status.status == 'RUNNING' and id in status.games %}
+      <a class="portal" href="{{ url_for('dashboard.game', gid=id) }}"
+         style="background: {{ t.card }}; background-image: {{ t.pattern }}; border-color: {{ t.accent2 }}">
+        <span class="pill" style="color: {{ t.accent }}">
+          {% if not status %}?{% elif on %}● online{% elif status.status == 'RUNNING' %}busy{% else %}asleep{% endif %}</span>
+        <h3 style="font-family: '{{ t.font }}', serif; text-shadow: 0 0 14px {{ t.accent }}">{{ game.name }}</h3>
+        <p style="color: {{ t.text }}">{{ t.tagline }}</p>
+      </a>
+    {% endfor %}
+
+    {% if can_skippy %}
+      <a class="portal skippy" href="{{ url_for('chat.index') }}">
+        <h3>Skippy</h3><p>The Magnificent. Ask him anything; try not to bore him.</p></a>
+    {% endif %}
+
+    {% if show_experiments %}
+      <a class="portal experiments" href="{{ url_for('experiments.index') }}">
+        <h3>Experiments</h3><p>Physics engines, a Wolfram rival, and other things built after dark.</p></a>
+    {% endif %}
+
+    {% if games %}
+      <a class="portal servers" href="{{ url_for('dashboard.index') }}">
+        <h3>Server room</h3><p>Every game's status and the start/stop controls in one place.</p></a>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

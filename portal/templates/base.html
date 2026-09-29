@@ -79,8 +79,9 @@
 <main>
 {% if user %}
 <header>
-  <h1>Skippy Portal</h1>
+  <h1><a href="{{ url_for('index') }}" style="color:inherit;text-decoration:none">Skippy Portal</a></h1>
   <nav>
+    <a href="{{ url_for('index') }}" class="{{ 'here' if request.endpoint == 'index' }}">Home</a>
     <a href="{{ url_for('dashboard.index') }}" class="{{ 'here' if request.endpoint == 'dashboard.index' }}">Servers</a>
     {% if can_skippy %}<a href="{{ url_for('chat.index') }}" class="{{ 'here' if request.endpoint == 'chat.index' }}">Chat</a>{% endif %}
     {% if is_admin %}<a href="{{ url_for('admin.index') }}" class="{{ 'here' if request.endpoint == 'admin.index' }}">Admin</a>{% endif %}

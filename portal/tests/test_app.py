@@ -593,3 +593,24 @@ def test_pre_portal_friend_entries_keep_their_games_and_chat(env):
     login(client, PAL)
     assert client.get("/games/valheim").status_code == 200
     assert client.post("/chat/send", json={"message": "hi"}).status_code == 200
+
+
+# ── front page ────────────────────────────────────────────────────────────────
+
+def test_front_page_shows_cards_for_granted_portals(env):
+    client, _, _ = env
+    _add_friend(client, PAL, ["dragonwilds"])
+    login(client, PAL)
+    page = client.get("/").data.decode()
+    assert "RuneScape: Dragonwilds" in page and "Valheim" not in page
+    assert 'class="portal skippy"' not in page and 'class="portal experiments"' not in page
+    _add_friend(client, PAL, ["dragonwilds", "skippy", "experiments"])
+    login(client, PAL)
+    page = client.get("/").data.decode()
+    assert 'class="portal skippy"' in page and 'class="portal experiments"' in page
+
+
+def test_experiments_are_public(env):
+    client, _, _ = env
+    assert client.get("/experiments").status_code == 200              # signed out
+    assert "Experiments" in client.get("/").data.decode()             # linked from sign-in

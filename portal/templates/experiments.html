@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Experiments — Skippy Portal{% endblock %}
+{% block content %}
+{% if not user %}<header><h1><a href="{{ url_for('index') }}" style="color:inherit;text-decoration:none">Skippy Portal</a></h1></header>{% endif %}
+<section>
+  <h2>Experiments</h2>
+  <p>Things built after dark. First up: <b>sigma-ground</b>, a physics engine and a Wolfram&nbsp;Alpha
+    rival. The showcase lands here shortly.</p>
+</section>
+{% endblock %}

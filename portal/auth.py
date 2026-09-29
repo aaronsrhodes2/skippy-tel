@@ -106,7 +106,7 @@ def callback():
     if not info.get("email_verified", True) or not is_allowed(email):
         return redirect(url_for("auth.unauthorized"))
     session["user"] = {"email": email, "name": info.get("name", email), "picture": info.get("picture")}
-    return redirect(url_for("dashboard.index"))
+    return redirect(url_for("index"))
 
 
 @bp.route("/unauthorized")
