@@ -7,6 +7,8 @@ Local run:  FLASK_APP=app.py flask run   (needs every var in .env.example)
 """
 from __future__ import annotations
 
+from functools import wraps
+
 from flask import Blueprint, Flask, abort, flash, jsonify, redirect, render_template, request, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -20,7 +22,7 @@ import friends as friends_mod
 import envfile
 import ops
 import tasks
-from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, SERVICES
+from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, PORTALS, SERVICES
 from gcp import GamesVm
 
 
@@ -48,6 +50,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
     def globals_():
         user = auth.current_user()
         return {"user": user, "is_admin": bool(user) and auth.is_admin(user["email"]),
+                "can_skippy": bool(user) and auth.is_allowed(user["email"]) and auth.has_portal(user["email"], "skippy"),
                 "idle_min": PLAYER_IDLE_MIN, "idle_max": PLAYER_IDLE_MAX,
                 "chat_enabled": app.config["CHAT_ENABLED"],
                 "discord_invite": f"https://discord.gg/{app.config['DISCORD_INVITE']}"}
@@ -167,7 +170,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
             "admin.html", status=status, error=error, games=GAMES,
             links={g: discord_admin.links(status.env if status else {}, g) for g in GAMES},
             bot_configured=bool(app.config["DISCORD_BOT_TOKEN"]),
-            friends=friend_rows(status),
+            friends=friend_rows(status), portals=PORTALS,
             core=sorted(app.config["ALLOWED_EMAILS"]),
         )
 
@@ -176,10 +179,12 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
         invites = {g: discord_admin.links(env, g)["invite"] or f"https://discord.gg/{app.config['DISCORD_INVITE']}"
                    for g in GAMES}
         sender = auth.current_user().get("name") or me()
-        return [{"email": email, **info,
-                 "mailto": friends_mod.invite_mailto(email, info.get("games", []), sender,
-                                                     request.url_root, invites)}
-                for email, info in sorted(app.extensions["friends"].all().items())]
+        rows = []
+        for email, info in sorted(app.extensions["friends"].all().items()):
+            portals = friends_mod.portals_of(info)
+            rows.append({"email": email, **info, "portals": portals,
+                         "mailto": friends_mod.invite_mailto(email, portals, sender, request.url_root, invites)})
+        return rows
 
     @admin.post("/settings")
     @auth.admin_required
@@ -216,11 +221,11 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
         elif auth.is_core(email):
             flash(f"{email} is set in the deploy config and already sees everything.", "error")
         else:
-            games = [g for g in request.form.getlist("games") if g in GAMES]
+            portals = [p for p in request.form.getlist("portals") if p in PORTALS]
             new = app.extensions["friends"].get(email) is None
-            app.extensions["friends"].upsert(email, games, added_by=me())
+            app.extensions["friends"].upsert(email, portals, added_by=me())
             flash(f"{'Added' if new else 'Updated'} {email}"
-                  + (f": {', '.join(GAMES[g].name for g in games)}." if games else " (no games yet).")
+                  + (f": {', '.join(PORTALS[p] for p in portals)}." if portals else " (nothing granted yet).")
                   + (" Use Invite to email them." if new else ""), "ok")
         return redirect(url_for("admin.index") + "#friends")
 
@@ -281,13 +286,23 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
     # ── chat ───────────────────────────────────────────────────────────────────
     talk = Blueprint("chat", __name__, url_prefix="/chat")
 
+    def skippy_required(view):
+        """Chat needs the Skippy grant (core users always have it)."""
+        @wraps(view)
+        @auth.login_required
+        def wrapped(*args, **kwargs):
+            if not auth.has_portal(me(), "skippy"):
+                abort(403)
+            return view(*args, **kwargs)
+        return wrapped
+
     @talk.get("")
-    @auth.login_required
+    @skippy_required
     def index():
         return render_template("chat.html")
 
     @talk.post("/send")
-    @auth.login_required
+    @skippy_required
     def send():
         if not app.config["CHAT_ENABLED"]:
             return jsonify(error="Chat isn't configured (no Anthropic API key)."), 503

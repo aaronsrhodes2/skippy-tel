@@ -82,7 +82,7 @@
   <h1>Skippy Portal</h1>
   <nav>
     <a href="{{ url_for('dashboard.index') }}" class="{{ 'here' if request.endpoint == 'dashboard.index' }}">Servers</a>
-    <a href="{{ url_for('chat.index') }}" class="{{ 'here' if request.endpoint == 'chat.index' }}">Chat</a>
+    {% if can_skippy %}<a href="{{ url_for('chat.index') }}" class="{{ 'here' if request.endpoint == 'chat.index' }}">Chat</a>{% endif %}
     {% if is_admin %}<a href="{{ url_for('admin.index') }}" class="{{ 'here' if request.endpoint == 'admin.index' }}">Admin</a>{% endif %}
   </nav>
   <div class="user">
@@ -96,7 +96,7 @@
 {% endfor %}
 {% block content %}{% endblock %}
 </main>
-{% if user and request.endpoint != 'chat.index' %}
+{% if can_skippy and request.endpoint != 'chat.index' %}
   {# Skippy on every page: same chat as the Chat page, docked bottom-right. #}
   <button id="skippy-dock-btn" type="button" aria-expanded="false" aria-controls="skippy-dock">💬 Skippy</button>
   <div id="skippy-dock" hidden>

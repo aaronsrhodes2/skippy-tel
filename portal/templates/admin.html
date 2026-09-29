@@ -44,16 +44,16 @@
 <section id="friends">
   <h2>Friends</h2>
   <p class="help">Anyone with a Google account for that email can sign in (Gmail or not). Friends see
-    and can start only the games ticked for them; you can change that or remove them any time, and it
+    and can use only the portals ticked for them; you can change that or remove them any time, and it
     applies on their next page load. <b>Invite</b> opens a ready-written email from your own mail app.</p>
 
   {% for f in friends %}
     <form method="post" action="{{ url_for('admin.friends_save') }}" class="card">
       <input type="hidden" name="email" value="{{ f.email }}">
       <p><b>{{ f.email }}</b> <span class="help">added {{ f.added }} by {{ f.added_by }}</span></p>
-      {% for id, game in games.items() %}
+      {% for id, name in portals.items() %}
         <label class="game" style="display:inline-block;margin-right:14px">
-          <input type="checkbox" name="games" value="{{ id }}" {{ 'checked' if id in f.games }}> {{ game.name }}
+          <input type="checkbox" name="portals" value="{{ id }}" {{ 'checked' if id in f.portals }}> {{ name }}
         </label>
       {% endfor %}
       <p class="row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -70,10 +70,10 @@
   <form method="post" action="{{ url_for('admin.friends_save') }}" class="card">
     <label class="field" for="friend-email">Add a friend (their Google sign-in email)</label>
     <input type="text" id="friend-email" name="email" placeholder="pal@gmail.com" autocomplete="off">
-    <p class="help">Games they can see:</p>
-    {% for id, game in games.items() %}
+    <p class="help">What they get:</p>
+    {% for id, name in portals.items() %}
       <label class="game" style="display:inline-block;margin-right:14px">
-        <input type="checkbox" name="games" value="{{ id }}" {{ 'checked' if id == 'dragonwilds' }}> {{ game.name }}
+        <input type="checkbox" name="portals" value="{{ id }}" {{ 'checked' if id in ('dragonwilds', 'skippy', 'experiments') }}> {{ name }}
       </label>
     {% endfor %}
     <p><button type="submit">Add friend</button></p>

@@ -410,7 +410,7 @@ PAL = "pal@example.com"
 
 def _add_friend(client, email, games):
     login(client, ADMIN)
-    return client.post("/admin/friends", data={"email": email, "games": games})
+    return client.post("/admin/friends", data={"email": email, "portals": games})
 
 
 def test_friend_added_on_admin_page_can_sign_in_and_sees_only_their_games(env):
@@ -464,7 +464,7 @@ def test_friend_cannot_stop_server_running_games_they_cant_see(env):
 def test_chat_tools_follow_friend_access(env):
     import json
     client, vm, skippy = env
-    _add_friend(client, PAL, ["dragonwilds"])
+    _add_friend(client, PAL, ["dragonwilds", "skippy"])
     vm.state.status, vm.state.games = "RUNNING", ["dragonwilds", "valheim"]
     names, run = _tools_for(client, skippy, PAL)
     start = next(t for t in skippy.tools if t["name"] == "start_game")
@@ -569,3 +569,27 @@ def test_skippy_is_docked_on_every_page_but_the_chat_page(env):
     client.post("/chat/send", json={"message": "hi", "page": "/games/dragonwilds"})
     system, _ = skippy.seen
     assert "/games/dragonwilds" in system and "NOT the Captain" in system   # FRIEND isn't an admin
+
+
+# ── portals: Skippy is its own grant ──────────────────────────────────────────
+
+def test_skippy_is_a_grant(env):
+    client, _, _ = env
+    _add_friend(client, PAL, ["dragonwilds"])                         # no skippy
+    login(client, PAL)
+    assert 'id="skippy-dock"' not in client.get("/dashboard").data.decode()
+    assert client.get("/chat").status_code == 403
+    assert client.post("/chat/send", json={"message": "hi"}).status_code == 403
+    _add_friend(client, PAL, ["dragonwilds", "skippy"])
+    login(client, PAL)
+    assert 'id="skippy-dock"' in client.get("/dashboard").data.decode()
+    assert client.post("/chat/send", json={"message": "hi"}).status_code == 200
+
+
+def test_pre_portal_friend_entries_keep_their_games_and_chat(env):
+    import json
+    client, vm, _ = env
+    vm.metadata["portal-friends"] = json.dumps({PAL: {"games": ["valheim"], "added_by": ADMIN, "added": "2026-09-29"}})
+    login(client, PAL)
+    assert client.get("/games/valheim").status_code == 200
+    assert client.post("/chat/send", json={"message": "hi"}).status_code == 200

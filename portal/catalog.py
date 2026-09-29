@@ -157,6 +157,13 @@ GAMES = {gid: replace(g, settings=g.settings + (Setting(
     for gid, g in GAMES.items()}
 
 
+# Sub-portals a friend can be granted, in front-page order: every game, the
+# Skippy chat, and Experiments (public anyway; the grant puts it on their
+# front page). The personal dashboard is admin-only and never grantable.
+PORTALS: dict[str, str] = {**{gid: g.name for gid, g in GAMES.items()},
+                           "skippy": "Skippy (chat)", "experiments": "Experiments"}
+
+
 def missing_settings(game_id: str, env: dict[str, str]) -> list[str]:
     """What stops a game from starting, in words an admin can act on.
     Mirrors check_env() in scripts/games.sh."""

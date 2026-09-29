@@ -47,13 +47,23 @@ def is_admin(email: str) -> bool:
     return email.strip().lower() in current_app.config["ADMIN_EMAILS"]
 
 
+def visible_portals(email: str) -> list[str]:
+    """Sub-portals (games, skippy, experiments) this person may use, in order."""
+    from catalog import PORTALS
+    from friends import portals_of
+    if is_core(email):
+        return list(PORTALS)
+    return portals_of(_friends().get(email))
+
+
+def has_portal(email: str, portal: str) -> bool:
+    return portal in visible_portals(email)
+
+
 def visible_games(email: str) -> list[str]:
     """Game ids this person may see and play, in catalog order."""
     from catalog import GAMES
-    if is_core(email):
-        return list(GAMES)
-    granted = (_friends().get(email) or {}).get("games", [])
-    return [g for g in GAMES if g in granted]
+    return [p for p in visible_portals(email) if p in GAMES]
 
 
 def can_see(email: str, game: str) -> bool:

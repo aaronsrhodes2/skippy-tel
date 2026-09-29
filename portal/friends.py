@@ -5,7 +5,10 @@ to the server settings — no database, no deploy to add someone, and the
 portal's service account can already write it. infra/gcp-games/main.tf
 ignores the key so Terraform never wipes it.
 
-    {"pal@example.com": {"games": ["dragonwilds"], "added_by": "…", "added": "2026-09-29"}}
+    {"pal@example.com": {"portals": ["dragonwilds", "skippy"], "added_by": "…", "added": "2026-09-29"}}
+
+(Entries from before portals existed have "games" instead; they read as those
+games plus Skippy, which friends had implicitly then.)
 
 People in ALLOWED_EMAILS (the deploy config) are "core" users: they always
 get in and see every game. Friends see only the games they were granted.
@@ -19,7 +22,7 @@ import re
 import time
 from datetime import date
 
-from catalog import GAMES
+from catalog import GAMES, PORTALS
 
 KEY = "portal-friends"
 CACHE_SECONDS = 10
@@ -56,10 +59,11 @@ class Friends:
         self.vm.set_metadata(KEY, json.dumps(data, sort_keys=True))
         self._cache = None
 
-    def upsert(self, email: str, games: list[str], added_by: str) -> None:
+    def upsert(self, email: str, portals: list[str], added_by: str) -> None:
         data = dict(self.all())
         entry = dict(data.get(email, {"added_by": added_by, "added": date.today().isoformat()}))
-        entry["games"] = [g for g in GAMES if g in games]
+        entry.pop("games", None)
+        entry["portals"] = [p for p in PORTALS if p in portals]
         data[email] = entry
         self._save(data)
 
@@ -69,12 +73,21 @@ class Friends:
             self._save(data)
 
 
+def portals_of(entry: dict | None) -> list[str]:
+    """A friend's granted portals, reading pre-portal entries as games + Skippy."""
+    if not entry:
+        return []
+    if "portals" in entry:
+        return [p for p in PORTALS if p in entry["portals"]]
+    return [p for p in PORTALS if p in entry.get("games", [])] + ["skippy"]
+
+
 def invite_mailto(email: str, games: list[str], sender: str, portal_url: str,
                   discord_links: dict[str, str]) -> str:
     """A mailto: link that opens the admin's own email app with the invite
     written: sent from their address, so it arrives like any note from them."""
     from urllib.parse import quote
-    names = [GAMES[g].name for g in games if g in GAMES]
+    names = [PORTALS[p] for p in games if p in PORTALS]
     lines = [
         "Hey!",
         "",
