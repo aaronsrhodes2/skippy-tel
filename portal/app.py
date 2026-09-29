@@ -8,6 +8,7 @@ Local run:  FLASK_APP=app.py flask run   (needs every var in .env.example)
 from __future__ import annotations
 
 import base64
+import io
 import json
 import re
 from functools import wraps
@@ -27,6 +28,7 @@ import experiments
 import friends as friends_mod
 import home as home_mod
 import imports as imports_mod
+import media as media_mod
 import mentat_client
 import ops
 import spend
@@ -62,6 +64,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     MENTAT_PER_MIN = 10
     CHAT_PER_HOUR, SHARP_PER_HOUR = 60, 20      # any model / "thinking cap" (Sonnet)
     imports = imports or imports_mod.Imports(vm)
+    media = media_mod.Media()
 
     def me() -> str:
         return auth.current_user()["email"]
@@ -333,6 +336,22 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             return jsonify(error=str(exc), **exc.extra), exc.status
         return jsonify(out)
 
+    @app.put("/home/media/<job_id>")
+    def home_media(job_id):
+        """skippy-pc handing over a finished job's audio (media.py): only for a job the portal is waiting on."""
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        owner = home.owner_of(job_id)
+        if owner is None:
+            return jsonify(error="no such job"), 404
+        request.max_content_length = media_mod.MAX_ONE
+        try:
+            out = media.put(job_id, request.get_data(cache=False), (request.mimetype or "").lower(),
+                            owner=owner, title=request.args.get("title", ""))
+        except media_mod.MediaError as exc:
+            return jsonify(error=str(exc)), exc.status
+        return jsonify(out)
+
     @app.get("/games/<name>/import")
     def game_import_download(name):
         """The games VM fetching the dump, with the one-time token from its metadata."""
@@ -589,7 +608,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         return chat_tools.ChatTools(vm, is_admin=auth.is_admin(email), visible=auth.visible_games(email),
                                     who=email,
                                     music=home.music if auth.has_portal(email, "bilby") else None,
-                                    home_mentat=home if home.mentat_ready() else None)
+                                    home_mentat=home if home.mentat_ready() else None,
+                                    home_music=home if home.can("make_music") else None)
 
     @talk.get("/badges")
     @skippy_required
@@ -624,7 +644,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         home.touch_chat()
         force, rest = chat_tools.parse_verb(message)
         if force and not rest:
-            rest = {"ask_mentat": "(the user chose /physics with no question: ask what to compute)"
+            rest = {"ask_mentat": "(the user chose /physics with no question: ask what to compute)",
+                    "make_music": "(the user chose /music with no description: ask what kind of music to make)"
                     }.get(force, "Go ahead.")
         try:
             admin = auth.is_admin(user["email"])
@@ -640,8 +661,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 return tools.run(name, args)
 
             schemas = tools.schemas()
-            if force == "ask_mentat" and rest.startswith("(the user chose"):
-                force = None                     # nothing to ask yet: let Skippy ask for the question
+            if force in ("ask_mentat", "make_music") and rest.startswith("(the user chose"):
+                force = None                     # nothing to act on yet: let Skippy ask
             text = skippy.reply(prompt,
                                 chat.build_messages(body.get("history"), rest),
                                 tools=schemas, run_tool=run_tool, model=model, force_tool=force)
@@ -652,7 +673,20 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         # One line per reply in Cloud Run's logs: who, which model, which tools (never the text).
         print(json.dumps({"event": "chat", "user": user["email"], "model": model,
                           "tools": used, "mentat_available": mentat_on, "mentat_where": where}), flush=True)
-        return jsonify(reply=text, model=badge, tools=used, mentat_available=mentat_on, mentat_where=where)
+        return jsonify(reply=text, model=badge, tools=used, mentat_available=mentat_on, mentat_where=where,
+                       media=tools.media)
+
+    @talk.get("/media/<job_id>")
+    @skippy_required
+    def media_file(job_id):
+        """A clip skippy-pc made for this chat (media.py): its requester or an admin, no one else."""
+        item = media.get(job_id)
+        if not item or not (auth.is_admin(me()) or item["owner"] == me()):
+            abort(404)                           # not 403: don't confirm that a clip exists
+        resp = send_file(io.BytesIO(item["data"]), mimetype=item["type"], conditional=True, max_age=0)
+        resp.headers["Cache-Control"] = "private, no-store"
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        return resp
 
     app.register_blueprint(talk)
     return app

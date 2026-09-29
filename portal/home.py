@@ -25,6 +25,7 @@ STALE_AFTER = 60          # seconds without a report → "home is silent"
 FAST_WINDOW = 300         # after chat activity, the reporter polls for jobs quickly this long
 REDELIVER_AFTER = 20      # a job handed out but not answered goes out again after this
 MAX_REPORT = 1_000_000    # bytes (album art included)
+KNOWN_CAPABILITIES = ("make_music",)   # what skippy-pc may advertise; anything else it sends is ignored
 _ACTIONS = {("music", "skip"), ("music", "pause"), ("music", "resume"), ("music", "stop")}
 
 
@@ -152,11 +153,11 @@ class Home:
                     out.append(j["job"])
         return {"jobs": out, "fast_for_s": max(0, int(self.fast_until - now))}
 
-    def submit(self, kind: str, **payload) -> str:
+    def submit(self, kind: str, _owner: str = "", **payload) -> str:
         job_id = secrets.token_hex(8)
         with self._lock:
             self._jobs[job_id] = {"job": {"id": job_id, "kind": kind, **payload}, "event": threading.Event(),
-                                  "outcome": None, "created": self.clock(), "sent": 0.0}
+                                  "outcome": None, "created": self.clock(), "sent": 0.0, "owner": _owner}
         return job_id
 
     def finish(self, job_id: str, outcome: dict) -> bool:
@@ -175,6 +176,45 @@ class Home:
         with self._lock:
             self._jobs.pop(job_id, None)
         return j["outcome"]
+
+    # ── long jobs (music): start now, look in later ──────────────────────
+    def capabilities(self) -> dict[str, bool]:
+        """What skippy-pc says it can do right now, from the last report. Only known names count,
+        and only while home is reporting: a silent home offers nothing."""
+        caps = (self.report or {}).get("capabilities")
+        if not self.online() or not isinstance(caps, dict):
+            return {}
+        return {name: isinstance(caps.get(name), dict) and caps[name].get("ready") is True
+                for name in KNOWN_CAPABILITIES}
+
+    def can(self, name: str) -> bool:
+        return bool(self.capabilities().get(name))
+
+    def start(self, kind: str, owner: str = "", **payload) -> str:
+        """Queue a job for skippy-pc and return its id; `peek`/`wait_result` read it without consuming it."""
+        self.touch_chat()
+        return self.submit(kind, _owner=owner, **payload)
+
+    def peek(self, job_id: str) -> dict:
+        j = self._jobs.get(job_id)
+        if not j:
+            return {"state": "unknown"}
+        if not j["event"].is_set():
+            return {"state": "running", "age_s": int(self.clock() - j["created"])}
+        out = j["outcome"] or {}
+        if "result" in out:
+            return {"state": "done", "result": out["result"]}
+        return {"state": "error", "error": str(out.get("error") or "the job failed")[:300]}
+
+    def wait_result(self, job_id: str, timeout: float) -> dict:
+        j = self._jobs.get(job_id)
+        if j:
+            j["event"].wait(timeout)
+        return self.peek(job_id)
+
+    def owner_of(self, job_id: str) -> str | None:
+        j = self._jobs.get(job_id)
+        return j["owner"] if j else None
 
     def mentat_ready(self) -> bool:
         """Mentat + Qwen on skippy-pc is up and reporting."""
@@ -245,6 +285,7 @@ class Home:
         core = self.core()
         return {"paired": self.paired(), "online": self.online(), "last_report_s": self.age(),
                 "mentat_home": bool(r.get("mentat_home")),
+                "capabilities": self.capabilities(),
                 "core": {"verdict": core["verdict"], "problems": core["problems"]},
                 "services": {x.get("name"): x.get("ok") for x in st.get("services") or []},
                 "manifest": {x.get("id"): x.get("available") for x in r.get("services") or []},

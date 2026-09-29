@@ -46,7 +46,7 @@ jobs:
           cache: pip
           cache-dependency-path: portal/requirements.txt
       - run: pip install -r portal/requirements.txt pytest
-      - run: python -m pytest portal/tests memory/tests -q
+      - run: python -m pytest portal/tests memory/tests tools/tests services/home-reporter/tests -q
 
   gate:
     runs-on: ubuntu-latest
