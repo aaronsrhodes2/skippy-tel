@@ -44,6 +44,27 @@
     </div>
 
     <div class="w">
+      <h3>Core · skippy-tel</h3>
+      {% if core.verdict == 'unknown' %}
+        <p class="muted">No core health from home yet. It shows here once the home reporter (re)starts with the latest code.</p>
+      {% else %}
+        <p class="big">
+          {% if core.verdict == 'ok' %}<span style="color: var(--green)">Healthy</span>
+          {% elif core.verdict == 'degraded' %}<span class="warn">Degraded</span>
+          {% else %}<span style="color: var(--red)">Down</span>{% endif %}
+          <span class="muted">{% if core.api_version %}API v{{ core.api_version }} · {% endif %}{% if home.online %}last report {{ home.age }} s ago{% else %}<span class="warn">stale: home is silent</span>{% endif %}</span>
+        </p>
+        {% for p in core.problems %}<p class="warn">⚠ {{ p }}</p>{% endfor %}
+        {% if core.tiers %}<p class="muted">Tiers:
+          {% for t in core.tiers %}<span style="color: {{ 'var(--green)' if t.ok else 'var(--red)' }}">{{ '●' if t.ok else '○' }}</span> {{ t.name }}{{ ' · ' if not loop.last }}{% endfor %}</p>{% endif %}
+        <details><summary class="muted">All {{ core.services | length }} services</summary>
+          <table>{% for s in core.services %}<tr><td><span style="color: {{ 'var(--green)' if s.available else 'var(--red)' }}">{{ '●' if s.available else '○' }}</span>
+            {{ s.name }}</td><td class="muted">{{ s.detail or ('up' if s.available else 'down') }}</td></tr>{% endfor %}</table>
+        </details>
+      {% endif %}
+    </div>
+
+    <div class="w">
       <h3>Home · skippy-pc</h3>
       {% if not home.paired %}
         <p class="muted">Not paired yet. Pairing gives the home reporter its own token, so skippy-pc can
@@ -59,8 +80,6 @@
         <table>
           {% for s in st.services or [] %}<tr><td><span style="color: {{ 'var(--green)' if s.ok else 'var(--red)' }}">{{ '●' if s.ok else '○' }}</span>
             {{ s.name }}</td><td class="muted">{{ s.detail }}</td></tr>{% endfor %}
-          {% for s in home.services if s.id in ('bilby', 'ups', 'jellyfin') %}<tr><td><span style="color: {{ 'var(--green)' if s.available else 'var(--red)' }}">{{ '●' if s.available else '○' }}</span>
-            {{ s.name or s.id }}</td><td class="muted">{{ s.status_detail or ('up' if s.available else 'down') }}</td></tr>{% endfor %}
         </table>
         {% if st.ups %}{% set u = st.ups %}
           <p class="{{ '' if u.on_ac else 'warn' }}">⚡ {{ 'On AC' if u.on_ac else 'ON BATTERY' }} · {{ u.charge }}% ·

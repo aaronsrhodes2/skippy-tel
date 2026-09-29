@@ -458,8 +458,11 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 snap = ""
         res = diagnostics.resources(snap) if snap else {}
         warnings = watch.warnings(vm, snap, res)
+        core = home.core()
         if home.paired() and home.age() is not None and not home.online():
             warnings.append(f"skippy-pc has been silent for {home.age() // 60} min (power, network or the reporter).")
+        elif home.online():                     # a silent home's last report is stale; the line above says so
+            warnings += [f"Core: {p}" for p in core["problems"]]
         try:
             mentat_tools = len(mentat.tools()) if mentat else None
         except mentat_client.MentatError:
@@ -475,7 +478,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             friends=friends_list, chatter=discord_chatter(env),
             discord_ready=bool(app.config["DISCORD_BOT_TOKEN"]),
             experiments=experiments.EXPERIMENTS, hidden=experiments.hidden(vm), mentat_tools=mentat_tools,
-            home=home.status(), music=home.music(),
+            home=home.status(), music=home.music(), core=core,
         )
 
     @mine.post("/pair-home")

@@ -44,15 +44,21 @@ def _ups_snapshot() -> dict | None:
 
 
 def _ollama_status() -> dict:
-    """GET /api/tags — free local call, confirms Ollama is up and loaded."""
+    """GET /api/tags — free local call, confirms Ollama is up and loaded.
+
+    `default` is the model the default tier asks for and `default_present` says
+    whether Ollama actually has it: a daemon that's up but missing that model
+    answers every default chat with HTTP 404."""
     from app.config import settings  # noqa: PLC0415
+    default = settings.ollama_model
     try:
         r = httpx.get(f"{settings.ollama_base_url}/api/tags", timeout=2.0)
         data = r.json()
         models = [m["name"] for m in data.get("models", [])]
-        return {"available": True, "models": models}
+        present = default in models or f"{default}:latest" in models
+        return {"available": True, "models": models, "default": default, "default_present": present}
     except Exception:
-        return {"available": False, "models": []}
+        return {"available": False, "models": [], "default": default, "default_present": False}
 
 
 def _write_snapshot(payload: dict) -> None:
