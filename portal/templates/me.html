@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Your dashboard — Skippy Portal{% endblock %}
+{% block app %}dashboard{% endblock %}
 {% block head %}
 <style>
   main { max-width: 1100px; }
@@ -37,7 +38,7 @@
           <div class="bar"><div class="{{ 'hot' if res.disk_pct > 80 }}" style="width: {{ res.disk_pct }}%"></div></div>{% endif %}
         {% endif %}
         <div class="row">
-          <a class="btn" href="{{ url_for('dashboard.index') }}">Server room</a>
+          <a class="btn" href="{{ url_for('dashboard.index') }}">Games</a>
           <a class="btn" href="{{ url_for('admin.logs') }}">Logs</a>
         </div>
       {% endif %}
@@ -142,6 +143,12 @@
         </form>
       {% endfor %}
       <p><a href="{{ url_for('experiments.index') }}">View public page &rarr;</a></p>
+    </div>
+
+    <div class="w">
+      <h3>Home links</h3>
+      <p class="muted">Only reachable from your own devices on the mesh (Tailscale), so they live here, not on the friends' pages.</p>
+      {% for svc in services %}<p><a href="{{ svc.url }}">{{ svc.name }}</a> <span class="muted">{{ svc.description }}</span></p>{% endfor %}
     </div>
 
     <div class="w">

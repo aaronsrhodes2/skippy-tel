@@ -121,15 +121,21 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     # ── dashboard: everyone on the allowlist ───────────────────────────────────
     dash = Blueprint("dashboard", __name__)
 
-    @dash.get("/dashboard")
+    @dash.get("/games")
     @auth.login_required
     def index():
+        """The Games app: server state, Stop, and a card per game. (Was /dashboard, "Servers" and the
+        launcher's game tiles and "Server room" tile: one place now.)"""
         status, error = vm_status()
         return render_template(
-            "dashboard.html", status=status, error=error, games=my_games(), services=SERVICES,
+            "games.html", status=status, error=error, games=my_games(),
             links={g: discord_admin.links(status.env if status else {}, g) for g in my_games()},
             codes=live_info(status)[0],
         )
+
+    @dash.get("/dashboard")
+    def legacy_dashboard():
+        return redirect(url_for("dashboard.index"), 301)      # old bookmarks and links
 
     @dash.post("/games/start")
     @auth.login_required
@@ -497,7 +503,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             friends=friends_list, chatter=discord_chatter(env),
             discord_ready=bool(app.config["DISCORD_BOT_TOKEN"]),
             experiments=experiments.EXPERIMENTS, hidden=experiments.hidden(vm), mentat_tools=mentat_tools,
-            home=home.status(), music=home.music(), core=core,
+            home=home.status(), music=home.music(), core=core, services=SERVICES,
         )
 
     @mine.post("/pair-home")

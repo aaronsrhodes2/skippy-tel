@@ -2,6 +2,7 @@
 {# `t` (the game's Theme) comes from the view: a top-level {% set %} in a child
    template isn't visible inside its blocks. #}
 {% block title %}{{ game.name }} — Skippy Portal{% endblock %}
+{% block app %}games{% endblock %}
 {% block head %}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -201,6 +202,6 @@
   </section>
   {% endif %}
 
-  <p><a href="{{ url_for('dashboard.index') }}">&larr; All servers</a></p>
+  <p><a href="{{ url_for('dashboard.index') }}">&larr; All games</a></p>
 </div>
 {% endblock %}

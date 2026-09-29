@@ -100,7 +100,7 @@ def login(client, email):
 def test_signed_out_sees_login(env):
     client, _, _ = env
     assert b"Sign in with Google" in client.get("/").data
-    assert client.get("/dashboard").status_code == 302
+    assert client.get("/games").status_code == 302
     assert client.get("/health").data == b"ok"
 
 
@@ -110,7 +110,7 @@ def test_portal_is_all_cards_with_no_top_tabs(env):
     launcher = client.get("/").data.decode()
     assert "<nav" not in launcher and 'id="home-btn"' not in launcher          # the launcher is home: nowhere to go "back" to
     assert "sign out" in launcher                                              # the account lives on the home screen
-    for path in ("/dashboard", "/me", "/admin", "/chat", "/bilby"):            # everywhere the old tabs led is now a tile
+    for path in ("/games", "/me", "/admin", "/chat", "/bilby", "/experiments"):   # everywhere the old tabs led is now a tile
         assert f'href="{path}"' in launcher, path
     _add_friend(client, PAL, ["dragonwilds"])
     login(client, PAL)
@@ -121,25 +121,75 @@ def test_portal_is_all_cards_with_no_top_tabs(env):
 def test_every_app_page_has_a_back_button_a_home_button_and_its_own_title(env):
     client, _, _ = env
     login(client, ADMIN)
-    page = client.get("/dashboard").data.decode()
+    page = client.get("/games").data.decode()
     assert "<nav" not in page
     assert "&lsaquo; Home</a>" in page and 'id="home-btn"' in page
     assert "sign out" not in page                                              # app bars are just back + title
-    assert '<h1 class="apptitle">Servers</h1>' in page                          # title comes from the page's own <title>
+    assert '<h1 class="apptitle">Games</h1>' in page                            # title comes from the page's own <title>
     assert '<h1 class="apptitle">Admin</h1>' in client.get("/admin").data.decode()
+
+
+def test_the_launcher_has_one_tile_per_app_and_no_duplicate_paths(env):
+    import re
+    client, _, _ = env
+    login(client, ADMIN)
+    launcher = client.get("/").data.decode()
+    assert re.findall(r'class="tile" data-app="(\w+)"', launcher) == \
+        ["skippy", "games", "bilby", "experiments", "dashboard", "admin"]
+    assert launcher.count('href="/games"') == 1 and 'href="/games/' not in launcher      # games live in one app, not six tiles
+    assert "Server room" not in launcher and "<nav" not in launcher
+    _add_friend(client, PAL, ["dragonwilds"])
+    login(client, PAL)
+    assert re.findall(r'class="tile" data-app="(\w+)"', client.get("/").data.decode()) == ["games"]
+
+
+def test_the_old_dashboard_path_redirects_to_games(env):
+    client, _, _ = env
+    resp = client.get("/dashboard")
+    assert resp.status_code == 301 and resp.location.endswith("/games")
+    login(client, ADMIN)
+    assert client.get("/dashboard", follow_redirects=True).status_code == 200
+
+
+def test_mesh_only_links_are_for_the_captain_not_the_friends_pages(env):
+    client, _, _ = env
+    login(client, FRIEND)
+    assert "skippy-pc:8096" not in client.get("/games").data.decode()              # a friend can't reach the mesh
+    login(client, ADMIN)
+    assert "Home links" in client.get("/me").data.decode() and "skippy-pc:8096" in client.get("/me").data.decode()
+
+
+def test_every_page_belongs_to_an_app_with_a_colour():
+    """The design rule, enforced: pages extend the one base, say which app they are, and that app has an accent."""
+    import re
+    from pathlib import Path
+    templates = Path(__file__).resolve().parents[1] / "templates"
+    base = (templates / "base.html").read_text(encoding="utf-8")
+    colours = set(re.findall(r'\[data-app="(\w+)"\]\s*\{\s*--accent', base))
+    exempt = {"home.html", "login.html", "unauthorized.html"}         # the launcher and the signed-out pages
+    for t in sorted(templates.glob("*.html")):
+        text = t.read_text(encoding="utf-8")
+        if t.name.startswith("_") or t.name == "base.html":
+            continue
+        assert 'extends "base.html"' in text, f"{t.name} doesn't use the one base template"
+        if t.name in exempt:
+            continue
+        found = re.search(r"\{% block app %\}(\w+)\{% endblock %\}", text)
+        assert found, f"{t.name} doesn't say which app it belongs to"
+        assert found.group(1) in colours, f"{t.name}: app {found.group(1)!r} has no accent in base.html"
 
 
 def test_unlisted_email_is_bounced(env):
     client, _, _ = env
     login(client, "stranger@example.com")
-    resp = client.get("/dashboard")
+    resp = client.get("/games")
     assert resp.status_code == 302 and "/unauthorized" in resp.location
 
 
 def test_dashboard_shows_valheim_with_discord_links(env):
     client, _, _ = env
     login(client, FRIEND)
-    page = client.get("/dashboard").data.decode()
+    page = client.get("/games").data.decode()
     assert "Valheim" in page
     assert "https://discord.com/channels/g1/c1" in page
     assert "https://discord.com/channels/g1/v1" in page
@@ -222,7 +272,7 @@ def test_chat_errors_are_shown_not_raised(env):
 def test_friend_one_click_play_dragonwilds_with_guardrail(env):
     client, vm, _ = env
     login(client, FRIEND)
-    page = client.get("/dashboard").data.decode()
+    page = client.get("/games").data.decode()
     assert "Play RuneScape: Dragonwilds" in page
     client.post("/games/start", data={"games": ["dragonwilds"], "idle_minutes": "0"})
     assert vm.calls[-1] == ("start", ["dragonwilds"], 15)          # "never sleep" is admin-only
@@ -231,9 +281,9 @@ def test_friend_one_click_play_dragonwilds_with_guardrail(env):
 def test_join_password_shown_to_players_only_while_running(env):
     client, vm, _ = env
     login(client, FRIEND)
-    assert "dragonpw" not in client.get("/dashboard").data.decode()   # asleep: nothing to join
+    assert "dragonpw" not in client.get("/games").data.decode()   # asleep: nothing to join
     vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
-    page = client.get("/dashboard").data.decode()
+    page = client.get("/games").data.decode()
     assert "dragonpw" in page
     assert "Invite Code" in page                               # the reliable way in comes first...
     assert page.index("Invite Code") < page.index("Public</b> tab")   # ...the list search is the fallback
@@ -386,7 +436,7 @@ def test_invite_code_shown_live_while_running(env):
     assert "YTKM-EKL1" not in client.get("/games/dragonwilds").data.decode()   # asleep: no code
     vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
     assert "YTKM-EKL1" in client.get("/games/dragonwilds").data.decode()
-    assert "YTKM-EKL1" in client.get("/dashboard").data.decode()
+    assert "YTKM-EKL1" in client.get("/games").data.decode()
     vm.serial[2] += "=== skippy-diag t2 ===\nJOIN_CODE dragonwilds=NEW1-CODE\n=== end ===\n"
     page = client.get("/games/dragonwilds").data.decode()                  # after a reboot
     assert "NEW1-CODE" in page and "YTKM-EKL1" not in page
@@ -426,7 +476,7 @@ def test_invite_code_sits_with_the_join_password(env):
     vm.serial[2] = "=== skippy-diag t ===\nJOIN_CODE dragonwilds=YTKM-EKL1\n=== end ===\n"
     vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
     login(client, FRIEND)
-    for url in ("/games/dragonwilds", "/dashboard"):
+    for url in ("/games/dragonwilds", "/games"):
         page = client.get(url).data.decode()
         join = page[page.index('<div class="join">'):]
         join = join[:join.index("</div>")]
@@ -447,10 +497,10 @@ def _add_friend(client, email, games):
 def test_friend_added_on_admin_page_can_sign_in_and_sees_only_their_games(env):
     client, vm, _ = env
     login(client, PAL)
-    assert client.get("/dashboard").status_code == 302              # not invited yet → out
+    assert client.get("/games").status_code == 302              # not invited yet → out
     _add_friend(client, " Pal@Example.com ", ["dragonwilds"])
     login(client, PAL)
-    page = client.get("/dashboard").data.decode()
+    page = client.get("/games").data.decode()
     assert "RuneScape: Dragonwilds" in page and "Valheim" not in page
     assert client.get("/games/dragonwilds").status_code == 200
     assert client.get("/games/valheim").status_code == 404
@@ -464,11 +514,11 @@ def test_removing_a_friend_locks_them_out_next_page_load(env):
     client, _, _ = env
     _add_friend(client, PAL, ["dragonwilds"])
     login(client, PAL)
-    assert client.get("/dashboard").status_code == 200
+    assert client.get("/games").status_code == 200
     login(client, ADMIN)
     client.post("/admin/friends/remove", data={"email": PAL})
     login(client, PAL)
-    assert client.get("/dashboard").status_code == 302
+    assert client.get("/games").status_code == 302
 
 
 def test_changing_a_friends_games_applies_immediately(env):
@@ -609,12 +659,13 @@ def test_opus_tier_is_admin_only(env):
     assert skippy.model == "claude-sonnet-5"                            # Sonnet is for everyone
 
 
-def test_skippy_is_docked_on_every_page_but_the_chat_page(env):
+def test_there_is_one_chat_interface_and_it_is_the_skippy_app(env):
     client, _, skippy = env
     login(client, FRIEND)
-    for url in ("/dashboard", "/games/dragonwilds"):
-        assert 'id="skippy-dock"' in client.get(url).data.decode()
-    assert 'id="skippy-dock"' not in client.get("/chat").data.decode()
+    for url in ("/games", "/games/dragonwilds", "/experiments", "/"):
+        page = client.get(url).data.decode()
+        assert 'id="skippy-dock"' not in page and 'class="skippy-chat"' not in page, url   # no second chat UI anywhere
+    assert client.get("/chat").data.decode().count('class="skippy-chat"') == 1
     client.post("/chat/send", json={"message": "hi", "page": "/games/dragonwilds"})
     system, _ = skippy.seen
     assert "/games/dragonwilds" in system and "NOT the Captain" in system   # FRIEND isn't an admin
@@ -626,12 +677,12 @@ def test_skippy_is_a_grant(env):
     client, _, _ = env
     _add_friend(client, PAL, ["dragonwilds"])                         # no skippy
     login(client, PAL)
-    assert 'id="skippy-dock"' not in client.get("/dashboard").data.decode()
+    assert 'href="/chat"' not in client.get("/").data.decode()          # no Skippy tile without the grant
     assert client.get("/chat").status_code == 403
     assert client.post("/chat/send", json={"message": "hi"}).status_code == 403
     _add_friend(client, PAL, ["dragonwilds", "skippy"])
     login(client, PAL)
-    assert 'id="skippy-dock"' in client.get("/dashboard").data.decode()
+    assert 'href="/chat"' in client.get("/").data.decode()
     assert client.post("/chat/send", json={"message": "hi"}).status_code == 200
 
 
@@ -652,11 +703,11 @@ def test_front_page_shows_cards_for_granted_portals(env):
     login(client, PAL)
     page = client.get("/").data.decode()
     assert "RuneScape: Dragonwilds" in page and "Valheim" not in page
-    assert 'class="portal skippy"' not in page and 'class="portal experiments"' not in page
+    assert 'class="tile" data-app="skippy"' not in page and 'class="tile" data-app="experiments"' not in page
     _add_friend(client, PAL, ["dragonwilds", "skippy", "experiments"])
     login(client, PAL)
     page = client.get("/").data.decode()
-    assert 'class="portal skippy"' in page and 'class="portal experiments"' in page
+    assert 'class="tile" data-app="skippy"' in page and 'class="tile" data-app="experiments"' in page
 
 
 def test_experiments_are_public(env):
@@ -851,7 +902,7 @@ def test_dashboard_is_admin_only_and_shows_the_widgets(env):
     page = client.get("/me").data.decode()
     assert "AB12-CD34" in page and "Spend (estimate)" in page and "Friends" in page
     assert "Memory at 91%" in page and "World disk at 85%" in page      # watcher warnings
-    assert 'class="portal me"' in client.get("/").data.decode()          # card on the front page
+    assert 'class="tile" data-app="dashboard"' in client.get("/").data.decode()   # tile on the front page
 
 
 def test_watcher_flags_crashes_and_blocked_starts(env):

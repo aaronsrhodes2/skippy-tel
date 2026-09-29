@@ -5,93 +5,130 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Skippy Portal{% endblock %}</title>
 <style>
-  /* Palette matches ChatPalette (zPhone/apps/SkippyChat) — same names, same hex. */
+  /* ── The one design kit ────────────────────────────────────────────────────────
+     Every page and every demo builds on this: tokens, the app bar, tiles, cards,
+     buttons, forms. The portal is a phone: Home is a launcher of app tiles, and every
+     other page is an app (back button, title, a round Home button). Don't add another
+     stylesheet or another nav: add a tile (home.html) and use these classes.
+     Palette matches ChatPalette (zPhone/apps/SkippyChat): same names, same hex. */
   :root {
     --black: #000000; --white: #ffffff;
     --green: #00ff88; --dim-green: #003322; --dim-green-hi: #006644;
-    --cyan: #00ffff; --amber: #ffaa00; --red: #ff4444; --violet: #aa44ff;
+    --cyan: #00ffff; --amber: #ffaa00; --red: #ff4444; --violet: #aa44ff; --pink: #ff44aa; --orange: #ff8a3d;
+    --ink: #b8ffe0; --muted: #6f8b94; --panel: #05090b; --line: #16323a;
+    --radius: 12px; --radius-lg: 20px;
+    --font: -apple-system, "Segoe UI", Roboto, sans-serif; --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    --accent: var(--green);
   }
+  /* Each app's colour, in one place. A page says which app it is: <body data-app="…">. */
+  [data-app="games"]       { --accent: var(--orange); }
+  [data-app="skippy"]      { --accent: var(--green); }
+  [data-app="bilby"]       { --accent: var(--pink); }
+  [data-app="experiments"] { --accent: var(--violet); }
+  [data-app="dashboard"]   { --accent: var(--cyan); }
+  [data-app="admin"]       { --accent: var(--amber); }
+
   * { box-sizing: border-box; }
-  body {
-    background: var(--black); color: var(--white);
-    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-    margin: 0; padding: 24px 16px 64px;
-  }
+  body { background: var(--black); color: var(--white); font-family: var(--font); margin: 0; padding: 24px 16px 84px; }
   a { color: var(--cyan); }
-  /* No top tabs: the portal is a phone. Home is the launcher (a card per app); every
-     other page is an app with a back button, and a round Home button floats at the bottom. */
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+  main { max-width: 760px; margin: 0 auto; }
+  main.wide { max-width: 1100px; }
+  section { margin-bottom: 32px; }
+  h1 { color: var(--accent); font-size: 1.4rem; margin: 0; flex: 1; min-width: 0; }
+  h2 { color: var(--accent); font-size: 1rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .muted { color: var(--muted); font-size: .85rem; }
+  .help { font-size: 0.8rem; color: #7fbfa0; margin: 2px 0 0; }
+  .error { color: var(--red); }
+  .warn { color: var(--amber); }
+
+  /* App bar: the home screen shows the account; an app shows back + its own title. */
   header.appbar { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; min-height: 40px; }
-  h1 { color: var(--green); font-size: 1.4rem; margin: 0; flex: 1; min-width: 0; }
   header.appbar h1.apptitle { font-size: 1.1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   a.back { text-decoration: none; padding: 8px 12px 8px 8px; border-radius: 999px; white-space: nowrap;
            border: 1px solid var(--dim-green-hi); background: var(--dim-green); }
   #home-btn { position: fixed; left: 50%; transform: translateX(-50%); bottom: 14px; z-index: 40;
               width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-              font-size: 1.3rem; text-decoration: none; color: var(--green); background: #050505;
-              border: 1px solid var(--green); box-shadow: 0 4px 18px rgba(0,0,0,.6); }
-  #home-btn:hover { background: var(--green); color: var(--black); }
+              font-size: 1.3rem; text-decoration: none; color: var(--accent); background: #050505;
+              border: 1px solid var(--accent); box-shadow: 0 4px 18px rgba(0,0,0,.6); }
+  #home-btn:hover { background: var(--accent); color: var(--black); }
   .user { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; white-space: nowrap; }
   .user img { width: 28px; height: 28px; border-radius: 50%; }
-  main { max-width: 760px; margin: 0 auto; }
-  section { margin-bottom: 32px; }
-  h2 { color: var(--cyan); font-size: 1rem; text-transform: uppercase; letter-spacing: 0.05em; }
-  .card {
-    background: var(--dim-green); border: 1px solid var(--dim-green-hi);
-    border-radius: 8px; padding: 16px; margin-bottom: 12px;
-  }
+
+  /* Tiles: the launcher, and any grid of things to open (games, demos). Give one an
+     accent (style="--accent: …") or an app (data-app) and it colours itself. */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+  .tile { position: relative; display: flex; flex-direction: column; justify-content: flex-end; min-height: 168px;
+          padding: 14px; border-radius: var(--radius-lg); text-decoration: none; color: var(--white); overflow: hidden;
+          border: 1px solid var(--accent);
+          background: radial-gradient(circle at 80% 10%, color-mix(in srgb, var(--accent) 32%, transparent), transparent 62%), var(--panel);
+          transition: transform .12s ease, box-shadow .12s ease; }
+  .tile:hover, .tile:focus-visible { transform: translateY(-2px); box-shadow: 0 6px 22px rgba(0,0,0,.6); }
+  .tile h3 { margin: 0; font-size: 1.1rem; color: var(--accent); }
+  .tile p { margin: 4px 0 0; font-size: .8rem; opacity: .85;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .tile .icon { font-size: 2.1rem; line-height: 1; margin-bottom: auto; }
+  .tile .pill { position: absolute; top: 12px; right: 12px; }
+  .tile.featured { grid-column: span 2; min-height: 200px; }
+  .tile.featured p { -webkit-line-clamp: 3; font-size: .85rem; }
+  @media (max-width: 420px) { .tile.featured { grid-column: span 1; } }
+  .pill { font-size: .72rem; padding: 2px 9px; border-radius: 999px; background: rgba(0,0,0,.45);
+          border: 1px solid currentColor; color: var(--accent); white-space: nowrap; }
+  .chip { font-size: .78rem; padding: 4px 12px; border-radius: 999px; cursor: pointer; background: transparent;
+          border: 1px solid var(--dim-green-hi); color: var(--ink); }
+  .chip:hover { background: var(--dim-green); }
+  .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--black); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+  /* Cards: a panel of content inside an app. */
+  .card { background: var(--dim-green); border: 1px solid var(--dim-green-hi); border-radius: 8px; padding: 16px; margin-bottom: 12px; }
   .card h3 { margin: 0 0 4px; color: var(--white); }
-  .card p { margin: 4px 0; color: #b8ffe0; font-size: 0.9rem; }
+  .card p { margin: 4px 0; color: var(--ink); font-size: 0.9rem; }
   .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
   .dot.green { background: var(--green); } .dot.grey { background: #666; } .dot.amber { background: var(--amber); }
-  button, .btn {
-    background: var(--dim-green-hi); color: var(--white); border: 1px solid var(--green);
-    border-radius: 6px; padding: 8px 16px; font-size: 0.9rem; cursor: pointer; text-decoration: none;
-    display: inline-block;
-  }
+  code.code { font-size: 1.15rem; letter-spacing: .08em; padding: 1px 6px; border-radius: 4px;
+              background: rgba(255,255,255,.08); user-select: all; }
+
+  button, .btn { background: var(--dim-green-hi); color: var(--white); border: 1px solid var(--green);
+                 border-radius: 6px; padding: 8px 16px; font-size: 0.9rem; cursor: pointer; text-decoration: none;
+                 display: inline-block; font-family: inherit; }
   button:hover, .btn:hover { background: var(--green); color: var(--black); }
   button.danger { border-color: var(--red); }
-  .error { color: var(--red); }
+  button:disabled { opacity: .4; cursor: default; }
   .flash { padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; font-size: 0.9rem; }
   .flash.ok { background: var(--dim-green); border: 1px solid var(--green); }
   .flash.error { background: #330000; border: 1px solid var(--red); }
   form.inline { display: inline; }
   label.game { display: block; margin: 6px 0; }
-  label.field { display: block; margin: 10px 0 2px; font-size: 0.85rem; color: #b8ffe0; }
-  input[type=text], input[type=password], input[type=number], textarea {
+  label.field { display: block; margin: 10px 0 2px; font-size: 0.85rem; color: var(--ink); }
+  input[type=text], input[type=search], input[type=password], input[type=number], textarea, select {
     background: var(--black); color: var(--white); border: 1px solid var(--dim-green-hi);
-    border-radius: 4px; padding: 6px 8px; width: 100%; font-size: 0.95rem;
-  }
-  .help { font-size: 0.8rem; color: #7fbfa0; margin: 2px 0 0; }
+    border-radius: 6px; padding: 8px 10px; width: 100%; font-size: 0.95rem; font-family: inherit; }
+  input[type=range] { accent-color: var(--accent); width: 100%; }
+  table { border-collapse: collapse; width: 100%; font-size: .88rem; }
+  td, th { padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: left; }
   .links a { margin-right: 12px; }
-  /* Skippy chat (templates/_chat.html), full page or docked */
-  .skippy-chat .log { overflow-y: auto; max-height: 50vh; }
+
+  /* Skippy chat (templates/_chat.html): the one chat interface, in the Skippy app. */
+  .skippy-chat .log { overflow-y: auto; max-height: 60vh; }
   .skippy-chat .turn { margin: 8px 0; padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; font-size: .92rem; }
   .skippy-chat .user { background: #111; border: 1px solid #333; }
-  .skippy-chat .assistant { background: var(--dim-green); border: 1px solid var(--dim-green-hi); color: #b8ffe0; }
+  .skippy-chat .assistant { background: var(--dim-green); border: 1px solid var(--dim-green-hi); color: var(--ink); }
   .skippy-chat .failed { border-color: var(--red); color: var(--red); }
   .skippy-chat .verbs { margin: 6px 0; font-size: .85rem; }
   .skippy-chat .verbs summary { cursor: pointer; color: var(--green); }
   .skippy-chat .verb-cat { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
-  .skippy-chat .verb-cat-name { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em;
-                                color: #6f8b94; min-width: 6.5em; }
+  .skippy-chat .verb-cat-name { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); min-width: 6.5em; }
   .skippy-chat button.verb { font-size: .75rem; padding: 2px 10px; border-radius: 999px; }
-  .skippy-chat .receipt { font-size: .7rem; color: #6f8b94; margin-top: 4px; }
+  .skippy-chat .receipt { font-size: .7rem; color: var(--muted); margin-top: 4px; }
   .skippy-chat .tier { float: right; font-size: .7rem; border: 1px solid var(--violet); color: var(--violet);
                        border-radius: 999px; padding: 1px 8px; margin-left: 8px; }
-  #skippy-dock-btn { position: fixed; right: 18px; bottom: 18px; z-index: 50; border-radius: 999px;
-                     padding: 10px 16px; box-shadow: 0 4px 18px rgba(0,0,0,.6); }
-  #skippy-dock { position: fixed; right: 18px; bottom: 72px; z-index: 50; width: min(380px, calc(100vw - 36px));
-                 background: #050505; border: 1px solid var(--green); border-radius: 12px; padding: 12px;
-                 box-shadow: 0 8px 30px rgba(0,0,0,.7); }
-  #skippy-dock .skippy-chat .log { max-height: 45vh; }
-  #skippy-dock h3 { margin: 0 0 4px; color: var(--green); font-size: 1rem; }
-  code.code { font-size: 1.15rem; letter-spacing: .08em; padding: 1px 6px; border-radius: 4px;
-              background: rgba(255,255,255,.08); user-select: all; }
 </style>
 {% block head %}{% endblock %}
 </head>
-<body>
-<main>
+<body data-app="{% block app %}{% endblock %}">
+<main class="{% block mainclass %}{% endblock %}">
 {% if user %}
 {% set on_home = request.endpoint == 'index' %}
 <header class="appbar">
@@ -117,27 +154,6 @@
 </main>
 {% if user and request.endpoint != 'index' %}
   <a id="home-btn" href="{{ url_for('index') }}" aria-label="Home" title="Home">&#8962;</a>
-{% endif %}
-{% if can_skippy and request.endpoint != 'chat.index' %}
-  {# Skippy on every page: same chat as the Chat page, docked bottom-right. #}
-  <button id="skippy-dock-btn" type="button" aria-expanded="false" aria-controls="skippy-dock">💬 Skippy</button>
-  <div id="skippy-dock" hidden>
-    <h3>Skippy</h3>
-    {% include "_chat.html" %}
-  </div>
-  <script>
-    (function () {
-      const btn = document.getElementById("skippy-dock-btn"), dock = document.getElementById("skippy-dock");
-      function show(open) {
-        dock.hidden = !open; btn.setAttribute("aria-expanded", open);
-        try { sessionStorage.setItem("skippy-dock-open", open ? "1" : ""); } catch (e) {}
-        if (open) dock.querySelector("textarea").focus();
-      }
-      btn.addEventListener("click", () => show(dock.hidden));
-      document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !dock.hidden) show(false); });
-      try { if (sessionStorage.getItem("skippy-dock-open")) show(true); } catch (e) {}   // stays open across pages
-    })();
-  </script>
 {% endif %}
 </body>
 </html>
