@@ -137,7 +137,7 @@ services:
       - "8001"
     networks: [music-net]      # internal: no route to the internet (see the networks block)
     volumes:
-      - ${MODELS_ROOT:-D:/models}/huggingface/ACE-Step__Ace-Step1.5:/app/checkpoints:ro
+      - ${MODELS_ROOT:-D:/models}/huggingface/ACE-Step__Ace-Step1.5:/weights:ro
       - music-studio-cache:/app/.cache          # compiled kernels + scratch audio
     shm_size: "2gb"
     deploy:
