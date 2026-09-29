@@ -757,3 +757,75 @@ def test_hiding_an_experiment_takes_it_off_the_public_page(env):
     login(client, ADMIN)
     client.post("/me/experiments", data={"slug": "radiance"})           # toggle back
     assert "Radiance" in client.get("/experiments").data.decode()
+
+
+# ── home reporter + Bilby ─────────────────────────────────────────────────────
+
+REPORT = {
+    "status": {"services": [{"name": "ollama", "port": "11434", "ok": True, "detail": "HTTP 200"},
+                            {"name": "whisper", "port": "8000", "ok": False, "detail": "refused"}],
+               "ollama_models": ["qwen2.5:7b"], "ups": {"on_ac": True, "charge": 97, "runtime": 41, "alert": None},
+               "photo_tags": {"total": 10, "tagged": 7, "db": "ok"}, "telemetry": []},
+    "services": [{"id": "bilby", "name": "Bilby", "available": True, "status_detail": None}],
+    "music_session": {"mode": "dj", "status": "playing", "queue_remaining": 4, "source": "local",
+                      "now_playing": {"artist": "Phone Artist", "title": "Phone Song"}},
+    "bilby": {"online": True, "now_playing": {"deck": "a", "artist": "Daft Punk", "title": "Veridis Quo",
+                                              "bpm": 107.0, "key": "8A", "genre": "House", "duration_s": 345,
+                                              "elapsed_s": 60.0, "lyric_summary": None,
+                                              "art_url": "http://skippy-mac:7334/art/x.jpg"},
+              "deck_a": {"artist": "Daft Punk", "title": "Veridis Quo"}, "deck_b": None,
+              "playing_a": True, "playing_b": False},
+    "setlist": [{"artist": "Justice", "title": "Genesis", "played_at": "21:04"}],
+    "up_next": {"artist": "Air", "title": "La Femme d'Argent", "bpm": 90},
+}
+
+
+def _pair(client):
+    login(client, ADMIN)
+    page = client.post("/me/pair-home").data.decode()
+    return page.split("SKIPPY_HOME_TOKEN=")[1].split("<")[0].strip()
+
+
+def test_home_report_needs_the_paired_token(env):
+    import json
+    client, vm, _ = env
+    assert client.post("/home/report", json=REPORT).status_code == 401            # not paired
+    token = _pair(client)
+    assert token not in vm.metadata["portal-home"]                               # only the hash is kept
+    assert client.post("/home/report", json=REPORT, headers={"Authorization": "Bearer nope"}).status_code == 401
+    ok = client.post("/home/report", json=json.loads(json.dumps(REPORT)), headers={"Authorization": f"Bearer {token}"})
+    assert ok.status_code == 200 and ok.get_json() == {"commands": [], "need_art": True}
+    page = client.get("/me").data.decode()
+    assert "qwen2.5:7b" in page and "whisper" in page and "97%" in page and "Veridis Quo" in page
+
+
+def test_bilby_shows_now_playing_and_carries_controls_home(env):
+    import base64, json
+    client, _, _ = env
+    token = _pair(client)
+    auth_h = {"Authorization": f"Bearer {token}"}
+    report = json.loads(json.dumps(REPORT))
+    report["art"] = {"key": REPORT["bilby"]["now_playing"]["art_url"], "type": "image/jpeg",
+                     "b64": base64.b64encode(b"JPEGDATA").decode()}
+    assert client.post("/home/report", json=report, headers=auth_h).get_json()["need_art"] is False
+    state = client.get("/bilby/state.json").get_json()
+    assert state["traktor"]["now_playing"]["title"] == "Veridis Quo" and state["has_art"]
+    assert "art_url" not in state["traktor"]["now_playing"]                      # home hostnames stay home
+    assert client.get("/bilby/art").data == b"JPEGDATA"
+    assert "Veridis Quo" in client.get("/").data.decode()                        # front-page card
+    client.post("/bilby/control", data={"action": "skip"})
+    reply = client.post("/home/report", json=json.loads(json.dumps(REPORT)), headers=auth_h).get_json()
+    assert [(c["target"], c["action"]) for c in reply["commands"]] == [("music", "skip")]
+    assert client.post("/home/report", json=json.loads(json.dumps(REPORT)), headers=auth_h).get_json()["commands"] == []
+
+
+def test_bilby_is_a_grant_and_controls_are_admin_only(env):
+    client, _, _ = env
+    _add_friend(client, PAL, ["dragonwilds"])
+    login(client, PAL)
+    assert client.get("/bilby").status_code == 403
+    _add_friend(client, PAL, ["bilby"])
+    login(client, PAL)
+    assert client.get("/bilby").status_code == 200
+    assert client.post("/bilby/control", data={"action": "skip"}).status_code in (302, 403)
+    assert client.get("/me").status_code == 403                                  # home status stays private

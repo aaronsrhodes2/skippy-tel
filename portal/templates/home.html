@@ -25,6 +25,10 @@
   .portal.me { background: radial-gradient(circle at 50% 0, rgba(0,255,255,.25), transparent 65%), #041214;
                border-color: var(--cyan); }
   .portal.me h3 { color: var(--cyan); }
+  .portal.bilby { background: radial-gradient(circle at 85% 85%, rgba(255,68,170,.4), transparent 60%),
+                  repeating-radial-gradient(circle at 85% 85%, rgba(255,255,255,.05) 0 2px, transparent 2px 7px), #12040c;
+                  border-color: #ff44aa; }
+  .portal.bilby h3 { color: #ff7ac4; }
   .portal.servers { background: #0c0c0c; border-color: #444; }
 </style>
 {% endblock %}
@@ -51,6 +55,14 @@
     {% if can_skippy %}
       <a class="portal skippy" href="{{ url_for('chat.index') }}">
         <h3>Skippy</h3><p>The Magnificent. Ask him anything; try not to bore him.</p></a>
+    {% endif %}
+
+    {% if show_bilby %}
+      {% set np = music.traktor.now_playing or (music.session and music.session.now_playing) %}
+      <a class="portal bilby" href="{{ url_for('bilby.index') }}">
+        <span class="pill" style="color:#ff7ac4">{% if not music.online %}home offline{% elif np %}♪ playing{% else %}quiet{% endif %}</span>
+        <h3>Bilby</h3>
+        <p>{% if np %}{{ np.artist }} — {{ np.title }}{% else %}What's on the decks, live from home.{% endif %}</p></a>
     {% endif %}
 
     {% if show_experiments %}

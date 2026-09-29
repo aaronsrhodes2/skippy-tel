@@ -60,7 +60,7 @@ def bilby_status():
         if data is not None:
             deck = data.get("playing_deck")
             loaded = data.get("loaded", {})
-            now = loaded.get(deck) if deck else None
+            now = data.get("now_playing") or (loaded.get(deck) if deck else None)
             # If nothing is actively playing but something is loaded,
             # surface the most-recently-loaded deck.
             if now is None:

@@ -7,6 +7,7 @@ Local run:  FLASK_APP=app.py flask run   (needs every var in .env.example)
 """
 from __future__ import annotations
 
+import base64
 import json
 from functools import wraps
 
@@ -23,6 +24,7 @@ import discord_admin
 import envfile
 import experiments
 import friends as friends_mod
+import home as home_mod
 import mentat_client
 import ops
 import spend
@@ -32,7 +34,7 @@ from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, PORTALS, SERVICES
 from gcp import GamesVm
 
 
-def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None) -> Flask:
+def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, home=None) -> Flask:
     app = Flask(__name__)
     app.config.update(settings if settings is not None else config.load())
     # Cloud Run terminates TLS; trust its X-Forwarded-Proto/Host so OAuth
@@ -46,6 +48,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None) 
     app.extensions["friends"] = friends_mod.Friends(vm)
     mentat = mentat or (mentat_client.Mentat(app.config["MENTAT_URL"]) if app.config.get("MENTAT_URL") else None)
     app.extensions["mentat"] = mentat
+    home = home or home_mod.Home(vm)
+    app.extensions["home"] = home
 
     def me() -> str:
         return auth.current_user()["email"]
@@ -78,6 +82,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None) 
         status, _ = vm_status()
         return render_template("home.html", status=status, games=my_games(),
                                show_experiments=auth.has_portal(me(), "experiments"),
+                               show_bilby=auth.has_portal(me(), "bilby"), music=home.music(),
                                has_me="me" in app.blueprints)
 
     @app.get("/health")
@@ -290,6 +295,62 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None) 
 
     app.register_blueprint(admin)
 
+    # ── home reporter (services/home-reporter) ─────────────────────────────────
+    @app.post("/home/report")
+    def home_report():
+        """No login: the paired home reporter's bearer token is the key."""
+        if (request.content_length or 0) > home_mod.MAX_REPORT:
+            abort(413)
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        report = request.get_json(silent=True)
+        if not isinstance(report, dict):
+            abort(400)
+        return jsonify(home.accept(report))
+
+    # ── Bilby: what's playing (grant "bilby"; controls are admin only) ──────────
+    music = Blueprint("bilby", __name__, url_prefix="/bilby")
+
+    def bilby_required(view):
+        @wraps(view)
+        @auth.login_required
+        def wrapped(*args, **kwargs):
+            if not auth.has_portal(me(), "bilby"):
+                abort(403)
+            return view(*args, **kwargs)
+        return wrapped
+
+    @music.get("")
+    @bilby_required
+    def index():
+        return render_template("bilby.html", music=home.music())
+
+    @music.get("/state.json")
+    @bilby_required
+    def state():
+        return jsonify(home.music())
+
+    @music.get("/art")
+    @bilby_required
+    def art():
+        a = home.current_art()
+        if not a:
+            abort(404)
+        return app.response_class(base64.b64decode(a["b64"]), mimetype=a.get("type") or "image/jpeg",
+                                  headers={"Cache-Control": "private, max-age=3600"})
+
+    @music.post("/control")
+    @auth.admin_required
+    def control():
+        ok = home.queue("music", request.form.get("action", ""))
+        if request.accept_mimetypes.best == "application/json":
+            return jsonify(queued=ok), (200 if ok else 400)
+        flash("Sent to skippy-pc; it lands within ~15 seconds." if ok else "Unknown action.",
+              "ok" if ok else "error")
+        return redirect(url_for("bilby.index"))
+
+    app.register_blueprint(music)
+
     # ── queued tasks from remote operators (tasks.py) ──────────────────────────
     @app.post("/tasks/run")
     def tasks_run():
@@ -328,6 +389,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None) 
                 snap = ""
         res = diagnostics.resources(snap) if snap else {}
         warnings = watch.warnings(vm, snap, res)
+        if home.paired() and home.age() is not None and not home.online():
+            warnings.append(f"skippy-pc has been silent for {home.age() // 60} min (power, network or the reporter).")
         try:
             mentat_tools = len(mentat.tools()) if mentat else None
         except mentat_client.MentatError:
@@ -343,7 +406,16 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None) 
             friends=friends_list, chatter=discord_chatter(env),
             discord_ready=bool(app.config["DISCORD_BOT_TOKEN"]),
             experiments=experiments.EXPERIMENTS, hidden=experiments.hidden(vm), mentat_tools=mentat_tools,
+            home=home.status(), music=home.music(),
         )
+
+    @mine.post("/pair-home")
+    @auth.admin_required
+    def pair_home():
+        """Make the home reporter's token. Shown once; only its hash is kept."""
+        resp = app.make_response(render_template("pair_home.html", token=home.pair()))
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
 
     @mine.post("/experiments")
     @auth.admin_required

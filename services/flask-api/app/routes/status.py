@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
-from flask import Blueprint, Response
+from flask import Blueprint, Response, jsonify
 
 bp = Blueprint("status", __name__)
 
@@ -147,6 +147,34 @@ def _row(*cells) -> str:
 
 
 # ── Route ─────────────────────────────────────────────────────────────────────
+
+def snapshot() -> dict:
+    """Everything the /status page shows, as data (the home reporter sends
+    this to the cloud portal)."""
+    ollama_ok, ollama_msg = _ping(_OLLAMA_URL, "/api/tags")
+    whisper_ok, whisper_msg = _ping(_WHISPER_URL)
+    iface_ok, iface_msg = _ping(_INSIGHTFACE_URL)
+    drive_ok = _drive_ok()
+    return {
+        "services": [
+            {"name": "flask-api", "port": "3003", "ok": True, "detail": "running"},
+            {"name": "ollama", "port": "11434", "ok": ollama_ok, "detail": ollama_msg},
+            {"name": "whisper", "port": "8000", "ok": whisper_ok, "detail": whisper_msg},
+            {"name": "insightface", "port": "8000", "ok": iface_ok, "detail": iface_msg},
+            {"name": "google-drive", "port": "", "ok": drive_ok,
+             "detail": "connected" if drive_ok else "not connected"},
+        ],
+        "ollama_models": _ollama_models(),
+        "ups": _ups_status(),
+        "photo_tags": _tags_stats(),
+        "telemetry": _telem_stats(),
+    }
+
+
+@bp.get("/status.json")
+def status_json():
+    return jsonify(snapshot())
+
 
 @bp.get("/status")
 def status_page():

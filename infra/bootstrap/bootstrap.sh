@@ -12,6 +12,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PROJECT="${PROJECT:-skippy-tel}"
 REGION="${REGION:-us-west1}"
 gcloud config set project "$PROJECT" >/dev/null
+# Remember the GitHub sign-in after the first time (~/.git-credentials, readable
+# only by this Cloud Shell account), so pulls stop asking for it.
+git config --global credential.helper >/dev/null || git config --global credential.helper store
 
 say() { printf '\n\033[1;32m== %s\033[0m\n' "$*"; }
 

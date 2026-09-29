@@ -148,6 +148,7 @@ resource "google_compute_instance" "games" {
       metadata["ops-request"],        # scripts/remote.py → ops_agent.py
       metadata["portal-experiments"], # hidden Experiments (dashboard toggle)
       metadata["portal-watch"],       # watcher events (blocked starts)
+      metadata["portal-home"],        # home reporter's token hash (portal/home.py)
     ]
   }
 }

@@ -44,6 +44,43 @@
     </div>
 
     <div class="w">
+      <h3>Home · skippy-pc</h3>
+      {% if not home.paired %}
+        <p class="muted">Not paired yet. Pairing gives the home reporter its own token, so skippy-pc can
+          push its status here (outbound only; nothing at home is exposed).</p>
+        <form method="post" action="{{ url_for('me.pair_home') }}"><button type="submit">Pair home</button></form>
+      {% elif home.age is none %}
+        <p class="warn">Paired, waiting for the first report.</p>
+        <p class="muted">Reports every ~15 s once the home reporter is running.</p>
+      {% else %}
+        {% set st = home.status %}
+        <p class="big">{% if home.online %}Online{% else %}<span class="warn">Silent</span>{% endif %}
+          <span class="muted">last report {{ home.age }} s ago</span></p>
+        <table>
+          {% for s in st.services or [] %}<tr><td><span style="color: {{ 'var(--green)' if s.ok else 'var(--red)' }}">{{ '●' if s.ok else '○' }}</span>
+            {{ s.name }}</td><td class="muted">{{ s.detail }}</td></tr>{% endfor %}
+          {% for s in home.services if s.id in ('bilby', 'ups', 'jellyfin') %}<tr><td><span style="color: {{ 'var(--green)' if s.available else 'var(--red)' }}">{{ '●' if s.available else '○' }}</span>
+            {{ s.name or s.id }}</td><td class="muted">{{ s.status_detail or ('up' if s.available else 'down') }}</td></tr>{% endfor %}
+        </table>
+        {% if st.ups %}{% set u = st.ups %}
+          <p class="{{ '' if u.on_ac else 'warn' }}">⚡ {{ 'On AC' if u.on_ac else 'ON BATTERY' }} · {{ u.charge }}% ·
+            {{ u.runtime }} min runtime{% if u.alert %} · {{ u.alert }}{% endif %}</p>{% endif %}
+        <p class="muted">Models: {{ (st.ollama_models or []) | join(', ') or 'none loaded' }}</p>
+        {% if st.photo_tags and st.photo_tags.total %}{% set t = st.photo_tags %}
+          <p class="muted">Photo tags: {{ t.tagged }} / {{ t.total }} ({{ (100 * t.tagged / t.total) | round | int }}%)</p>{% endif %}
+        {% if st.telemetry %}<details><summary class="muted">Least-used UI (removal candidates)</summary>
+          <table>{% for t in st.telemetry[:8] %}<tr><td>{{ t.app }} · {{ t.element }}</td>
+            <td class="muted">{{ t.clicks }} clicks · {{ 'today' if t.days_ago == 0 else t.days_ago ~ 'd ago' }}</td></tr>{% endfor %}</table>
+        </details>{% endif %}
+        {% set np = music.traktor.now_playing or (music.session and music.session.now_playing) %}
+        <p>♪ {% if np %}{{ np.artist }} — {{ np.title }}{% else %}<span class="muted">nothing playing</span>{% endif %}
+          · <a href="{{ url_for('bilby.index') }}">Bilby &rarr;</a></p>
+        <form method="post" action="{{ url_for('me.pair_home') }}" style="margin-top:6px">
+          <button type="submit" style="padding:3px 10px" title="Makes a new token; the old one stops working">Re-pair</button></form>
+      {% endif %}
+    </div>
+
+    <div class="w">
       <h3>Watcher</h3>
       {% if warnings %}{% for w in warnings %}<p class="warn">⚠ {{ w }}</p>{% endfor %}
       {% else %}<p>All quiet. <span class="muted">Memory, disk, crashes and blocked starts show here when

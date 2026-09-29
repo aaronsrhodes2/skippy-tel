@@ -93,3 +93,20 @@ Actions (the sandbox can't reach GCP or run.app directly):
   `portal/`, docs in `docs/portal/README.md` and `docs/cicd.md`.
 - Secrets live in the Captain's Drive vault `.env`; he loads them into Secret
   Manager with `bash infra/bootstrap/secrets.sh --from-env ~/.env` in Cloud Shell.
+
+## Home → portal bridge (home reporter)
+
+The cloud portal can't reach skippy-pc, so skippy-pc reports out:
+`services/home-reporter/reporter.py` (own compose file,
+`docker compose -f home-reporter.compose.yml up -d --build`) POSTs every
+~15 s to `https://…run.app/home/report` with `Authorization: Bearer
+$SKIPPY_HOME_TOKEN`. It sends flask-api's `/status.json` (the old `/status`
+page as data), `/services` availability, `/music/session`, and Mac Bilby's
+`/bilby/status`, setlist and next suggestion (+ album art when the track
+changes). The reply carries queued controls (`music` skip/pause/resume/stop).
+
+- Token: dashboard → "Pair home" shows it once; the portal keeps only its
+  sha256 in VM metadata `portal-home`. Put the line in the vault .env and
+  SkippyTel's .env.
+- Portal side: `portal/home.py` (in-memory; the portal runs max 1 instance),
+  `/bilby` sub-portal (grant "bilby"; controls admin-only), Home widget on `/me`.

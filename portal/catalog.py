@@ -161,7 +161,8 @@ GAMES = {gid: replace(g, settings=g.settings + (Setting(
 # Skippy chat, and Experiments (public anyway; the grant puts it on their
 # front page). The personal dashboard is admin-only and never grantable.
 PORTALS: dict[str, str] = {**{gid: g.name for gid, g in GAMES.items()},
-                           "skippy": "Skippy (chat)", "experiments": "Experiments"}
+                           "skippy": "Skippy (chat)", "bilby": "Bilby (music)",
+                           "experiments": "Experiments"}
 
 
 def missing_settings(game_id: str, env: dict[str, str]) -> list[str]:
