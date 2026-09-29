@@ -19,6 +19,7 @@ from flask import (Blueprint, Flask, abort, flash, jsonify, redirect, render_tem
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import auth
+import autoconfig
 import chat
 import chat_tools
 import config
@@ -36,7 +37,7 @@ import spend
 import ratelimit
 import tasks
 import watch
-from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, PORTALS, SERVICES
+from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, PORTALS, SERVICES, missing_settings
 from gcp import GamesVm
 
 
@@ -212,6 +213,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             bot_configured=bool(app.config["DISCORD_BOT_TOKEN"]),
             friends=friend_rows(status), portals=PORTALS,
             core=sorted(app.config["ALLOWED_EMAILS"]),
+            needs={g: m for g in GAMES if status and (m := missing_settings(g, status.env))},
         )
 
     def friend_rows(status) -> list[dict]:
@@ -250,6 +252,21 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         if updates:
             vm.update_env(updates)
             flash("Settings saved. Restart the server to apply them.", "ok")
+        return back("admin.index")
+
+    @admin.post("/autoconfigure")
+    @auth.admin_required
+    def autoconfigure():
+        """Fill in every game's settings that software can fill in (autoconfig.py). Values never appear in the
+        message; a join password typed here replaces the existing ones, left blank it only fills blanks."""
+        try:
+            plan = autoconfig.plan(vm.status().env, GAMES, join_password=request.form.get("join_password") or None)
+        except autoconfig.PlanError as exc:
+            flash(str(exc), "error")
+            return back("admin.index")
+        if plan.set:
+            vm.update_env(plan.set)
+        flash(plan.summary() + (" Restart the server to apply them." if plan.set else ""), "ok")
         return back("admin.index")
 
     @admin.post("/friends")

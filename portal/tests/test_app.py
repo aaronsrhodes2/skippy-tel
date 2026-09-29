@@ -1515,3 +1515,67 @@ def test_every_experiment_has_a_known_kind_and_a_page_that_exists(env):
         assert x.kind in experiments.KINDS, x.slug
         assert x.endpoint, x.slug
     assert sum(x.featured for x in experiments.EXPERIMENTS) == 3
+
+
+# ── admin: set the games up automatically ─────────────────────────────────────
+
+def test_the_admin_can_set_every_game_up_automatically_with_one_join_password(env):
+    client, vm, _ = env
+    login(client, ADMIN)
+    resp = client.post("/admin/autoconfigure", data={"join_password": "groggy"}, follow_redirects=True)
+    page = resp.data.decode()
+    (call,) = [c for c in vm.calls if c[0] == "update_env"]
+    assert call[1]["VALHEIM_PASSWORD"] == "groggy" and call[1]["DRAGONWILDS_WORLD_PASSWORD"] == "groggy"
+    assert "Set up automatically" in page and "groggy" not in page.split("<form")[0]   # said in words; the value isn't in the message
+    assert "Restart the server to apply them" in page
+
+
+def test_setting_up_automatically_with_no_password_only_fills_blanks(env):
+    client, vm, _ = env
+    login(client, ADMIN)
+    vm.state.env.pop("VALHEIM_PASSWORD")
+    client.post("/admin/autoconfigure", data={"join_password": ""})
+    (call,) = [c for c in vm.calls if c[0] == "update_env"]
+    assert "VALHEIM_PASSWORD" in call[1] and len(call[1]["VALHEIM_PASSWORD"]) >= 5
+    assert "DRAGONWILDS_WORLD_PASSWORD" not in call[1]                                 # already set: untouched
+
+
+def test_a_bad_join_password_saves_nothing_and_says_why(env):
+    client, vm, _ = env
+    login(client, ADMIN)
+    page = client.post("/admin/autoconfigure", data={"join_password": "no"}, follow_redirects=True).data.decode()
+    assert "at least 5" in page and not [c for c in vm.calls if c[0] == "update_env"]
+
+
+def test_only_admins_can_set_the_games_up(env):
+    client, vm, _ = env
+    login(client, FRIEND)
+    assert client.post("/admin/autoconfigure", data={"join_password": "groggy"}).status_code == 403
+    assert not [c for c in vm.calls if c[0] == "update_env"]
+
+
+def test_the_admin_page_says_what_is_missing_and_offers_the_button(env):
+    client, vm, _ = env
+    login(client, ADMIN)
+    vm.state.env.pop("VALHEIM_PASSWORD")
+    page = client.get("/admin").data.decode()
+    assert "Set up automatically" in page and "Valheim needs a join password" in page
+    vm.state.env["VALHEIM_PASSWORD"] = "hunter22"
+    assert "Every game can start" in client.get("/admin").data.decode()
+
+
+def test_ops_configure_previews_by_default_and_writes_only_on_apply(env, capsys):
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+    import remote
+    _, vm, _ = env
+    vm.state.env.pop("VALHEIM_PASSWORD")
+    assert remote.configure(vm, [], dict(vm.state.env)) == 0
+    assert "PREVIEW" in capsys.readouterr().out and not [c for c in vm.calls if c[0] == "update_env"]   # nothing written
+    assert remote.configure(vm, ["apply", "groggy"], dict(vm.state.env)) == 0
+    out = capsys.readouterr().out
+    assert "APPLIED" in out and "groggy" not in out.replace("::add-mask::groggy", "")                 # keys, never values
+    (call,) = [c for c in vm.calls if c[0] == "update_env"]
+    assert call[1]["VALHEIM_PASSWORD"] == "groggy"
+    assert remote.configure(vm, ["apply", "x"], dict(vm.state.env)) == 1                              # refused, and says so
