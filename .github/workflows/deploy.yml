@@ -29,6 +29,8 @@ env:
   DEPLOYER_SA: skippy-deployer@skippy-tel.iam.gserviceaccount.com
   RUNTIME_SA: skippy-agent@skippy-tel.iam.gserviceaccount.com
   IMAGE: us-west1-docker.pkg.dev/skippy-tel/skippy/portal
+  # sigma-ground commit served by Experiments and the Mentat service (bump to update both).
+  SIGMA_GROUND_REF: a763071b4beb87129f2672624e989a39ef7a1199
   # Who may sign in to the portal, and who is an admin. Comma-separated.
   ALLOWED_EMAILS: aaron.s.rhodes@gmail.com
   ADMIN_EMAILS: aaron.s.rhodes@gmail.com
@@ -107,7 +109,7 @@ jobs:
       - name: Build and push
         if: steps.identity.outputs.ready == 'true'
         run: |
-          docker build -f mentat/Dockerfile -t "$MENTAT_IMAGE:$GITHUB_SHA" .
+          docker build -f mentat/Dockerfile --build-arg SIGMA_GROUND_REF="$SIGMA_GROUND_REF" -t "$MENTAT_IMAGE:$GITHUB_SHA" .
           docker push "$MENTAT_IMAGE:$GITHUB_SHA"
       - name: Deploy to Cloud Run
         if: steps.identity.outputs.ready == 'true'
@@ -145,7 +147,7 @@ jobs:
       - run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
       - name: Build and push
         run: |
-          docker build -f portal/Dockerfile -t "$IMAGE:$GITHUB_SHA" .
+          docker build -f portal/Dockerfile --build-arg SIGMA_GROUND_REF="$SIGMA_GROUND_REF" -t "$IMAGE:$GITHUB_SHA" .
           docker push "$IMAGE:$GITHUB_SHA"
       - name: Deploy to Cloud Run
         run: |
@@ -164,3 +166,5 @@ jobs:
           echo "Portal: $URL" >> "$GITHUB_STEP_SUMMARY"
           curl -fsS "$URL/health"
           curl -fsS -o /dev/null "$URL/"   # login page renders => secrets + OAuth config loaded
+          curl -fsS "$URL/experiments/benchmark" | grep -q "Wolfram"            # benchmark results bundled
+          curl -fsS "$URL/experiments/radiance/" | grep -q "viewer.js"          # Radiance bundled

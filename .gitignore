@@ -28,3 +28,6 @@ games/data/
 infra/**/.terraform/
 infra/**/*.tfstate*
 infra/**/terraform.tfvars
+
+# Built into the portal image from sigma-ground (portal/Dockerfile)
+portal/experiments_static/

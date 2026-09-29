@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from functools import wraps
 
-from flask import Blueprint, Flask, abort, flash, jsonify, redirect, render_template, request, url_for
+from flask import (Blueprint, Flask, abort, flash, jsonify, redirect, render_template, request,
+                   send_from_directory, url_for)
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import auth
@@ -18,9 +19,10 @@ import chat_tools
 import config
 import diagnostics
 import discord_admin
+import envfile
+import experiments
 import friends as friends_mod
 import mentat_client
-import envfile
 import ops
 import tasks
 from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, PORTALS, SERVICES
@@ -295,9 +297,57 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None) 
 
     @lab.get("")
     def index():
-        return render_template("experiments.html")
+        return render_template("experiments.html", experiments=experiments.EXPERIMENTS,
+                               bench=experiments.benchmark())
+
+    @lab.get("/mentat")
+    def mentat_page():
+        return render_template("mentat.html", available=mentat is not None)
+
+    @lab.get("/benchmark")
+    def benchmark():
+        return render_template("benchmark.html", bench=experiments.benchmark())
+
+    @lab.get("/mentat/api/tools")
+    def mentat_tools():
+        if not mentat:
+            return jsonify(error="Mentat isn't deployed yet."), 503
+        try:
+            return jsonify(mentat.tools())
+        except mentat_client.MentatError as exc:
+            return jsonify(error=str(exc)), 502
+
+    @lab.post("/mentat/api/call/<name>")
+    def mentat_call(name):
+        if not mentat:
+            return jsonify(error="Mentat isn't deployed yet."), 503
+        args = request.get_json(silent=True) or {}
+        if not isinstance(args, dict):
+            return jsonify(error="arguments must be a JSON object"), 400
+        try:
+            return jsonify(result=mentat.call(name, args))
+        except mentat_client.MentatError as exc:
+            return jsonify(error=str(exc)), 400
+
+    @lab.get("/radiance/")
+    def radiance_index():
+        page = experiments.radiance_dir() / "index.html"
+        if not page.exists():
+            return render_template("experiments.html", experiments=experiments.EXPERIMENTS,
+                                   bench=experiments.benchmark(), missing="Radiance"), 503
+        html = page.read_text(encoding="utf-8")
+        return html.replace("</body>", experiments.RADIANCE_SHOWCASE_SNIPPET + "</body>", 1)
+
+    @lab.get("/radiance/<path:path>")
+    def radiance_file(path):
+        return send_from_directory(experiments.radiance_dir(), path, max_age=3600)
 
     app.register_blueprint(lab)
+
+    @app.post("/probe")
+    def radiance_probe():
+        """Radiance's viewer reports its first frame to /probe (a dev check); accept and drop it."""
+        return "", 204
 
     # ── chat ───────────────────────────────────────────────────────────────────
     talk = Blueprint("chat", __name__, url_prefix="/chat")

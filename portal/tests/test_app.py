@@ -663,3 +663,52 @@ def test_friends_get_mentat_physics_tools():
 def test_chat_works_without_mentat():
     names, _ = _chat_with(FakeMentat(up=False))
     assert not any(n.startswith("mentat_") for n in names) and "server_status" in names
+
+
+# ── Experiments (public) ──────────────────────────────────────────────────────
+
+@pytest.fixture
+def lab(tmp_path, monkeypatch):
+    import json
+    import experiments
+    (tmp_path / "benchmark").mkdir()
+    (tmp_path / "radiance").mkdir()
+    summaries = {"sigma_ground_scored.json": (90.7, 136), "gemini_scored.json": (62.0, 93),
+                 "wolfram_merged_scored.json": (37.3, 56), "wolfram_scored.json": (20.0, 30)}
+    for name, (pct, correct) in summaries.items():
+        (tmp_path / "benchmark" / name).write_text(json.dumps({"summary": {
+            "overall_accuracy_pct": pct, "overall_correct": correct, "overall_total": 150,
+            "by_domain": {"waves_optics": {"correct": 1, "total": 2, "pct": pct}}}}))
+    (tmp_path / "radiance" / "index.html").write_text("<html><body><script src='viewer.js'></script></body></html>")
+    (tmp_path / "radiance" / "viewer.js").write_text("// viewer")
+    monkeypatch.setattr(experiments, "ROOT", tmp_path)
+    vm, skippy = FakeVm(), FakeSkippy()
+    return portal.create_app(dict(SETTINGS), vm=vm, skippy=skippy, mentat=FakeMentat()).test_client()
+
+
+def test_experiments_pages_are_public_and_show_the_benchmark(lab):
+    page = lab.get("/experiments").data.decode()
+    assert "90.7%" in page and "Mentat" in page and "Radiance" in page
+    bench = lab.get("/experiments/benchmark").data.decode()
+    assert "Wolfram Alpha (single pass)" in bench and "20.0%" in bench and "waves optics" in bench
+    assert lab.get("/experiments/mentat").status_code == 200
+
+
+def test_radiance_served_with_chat_hidden(lab):
+    page = lab.get("/experiments/radiance/").data.decode()
+    assert "viewer.js" in page and "#composer" in page             # showcase snippet injected
+    assert lab.get("/experiments/radiance/viewer.js").status_code == 200
+    assert lab.get("/experiments/radiance/../../app.py").status_code == 404
+    assert lab.post("/probe").status_code == 204
+
+
+def test_playground_proxies_mentat(lab):
+    assert lab.get("/experiments/mentat/api/tools").get_json()[0]["name"] == "convert_units"
+    resp = lab.post("/experiments/mentat/api/call/convert_units", json={"value": 1})
+    assert resp.get_json()["result"]["units"] == "kilometer"
+
+
+def test_experiments_degrade_without_bundle_or_mentat(env):
+    client, _, _ = env                                              # no mentat, default (empty) bundle dir
+    assert client.get("/experiments").status_code == 200
+    assert client.get("/experiments/mentat/api/tools").status_code == 503
