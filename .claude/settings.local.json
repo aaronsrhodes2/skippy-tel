@@ -1,8 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(find /d/Aaron/development/SkippyTel -type f \\\\\\( -name \"*.py\" -o -name \"*.go\" \\\\\\) -exec wc -l {} +)",
-      "Bash(xargs ls *)"
+      "Bash(pip install *)",
+      "Bash(chmod 600 /root/.config/gcloud/*)",
+      "Bash(python3 -c *)",
+      "Bash(git push --force origin claude/great-edison-aevrtu)"
     ]
   }
 }

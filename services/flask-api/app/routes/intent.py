@@ -268,6 +268,11 @@ def _tier_voice_id(tier_id: str) -> str | None:
     mapping = {
         "nagatha":         settings.nagatha_voice_id,
         "bilby":           settings.bilby_voice_id,
+        # "local" tier = default Ollama / Skippy response.
+        # grumpy_voice_id is returned for all local replies so the phone
+        # can use it when "grumpy mode" (ElevenLabs TTS) is enabled.
+        # Android-TTS mode ignores the voice_id entirely — no cost for non-grumpy.
+        "local":           settings.grumpy_voice_id,
     }
     vid = mapping.get(tier_id, "")
     return vid if vid else None

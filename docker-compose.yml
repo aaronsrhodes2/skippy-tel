@@ -27,7 +27,7 @@ services:
     ports:
       - "3003:5000"          # external 3003 — paired with SkippyDroid egress (Z-Phone).
                             # Different machines, never collide. Internal 5000 = Flask convention.
-    env_file: .env
+    env_file: ../.env       # Platinum Rule §10 — single dev-root vault
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
       - WHISPER_BASE_URL=http://whisper:8000

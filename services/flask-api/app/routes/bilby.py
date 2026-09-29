@@ -250,6 +250,26 @@ def bilby_next():
                 "source":    "traktor",
             })
 
+    # Local music session (covers bilby_local and any active /music/session).
+    if source in ("auto", "local"):
+        from app.routes import music as _music  # noqa: PLC0415
+        nxt = _music.skip_current_track()
+        if nxt:
+            return envelope({
+                "source":      "local",
+                "automated":   True,
+                "now_playing": nxt,
+            })
+        # No active session — try bilby_local directly (start-of-session first skip)
+        if bilby_local.available() and bilby_local.ready():
+            track = bilby_local.next_track()
+            if track:
+                return envelope({
+                    "source":      "local",
+                    "automated":   True,
+                    "now_playing": {"artist": track.get("artist"), "title": track.get("title")},
+                })
+
     if source in ("auto", "drive") and settings.bilby_drive_folder_id:
         track = bilby_drive.next_track()
         if track:

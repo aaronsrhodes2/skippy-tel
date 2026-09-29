@@ -70,13 +70,17 @@ class Settings:
     elevenlabs_model:    str = os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5")
 
     # Persona-specific voice IDs — each AI personality speaks in its own voice.
-    # Leave blank to fall back to Skippy's voice for that tier.
+    # Leave blank to fall back to Skippy's default voice for that tier.
     # Clone voices at https://elevenlabs.io → Voices → Add Voice → Instant Voice Clone
     #
-    # Nagatha: warm, measured, intelligent — e.g. a British female voice
+    # Skippy:  R.C. Brey clone — PERSONAL USE ONLY (see legal note above)
+    # Nagatha: warm, measured, British — e.g. a British female voice
     # Bilby:   upbeat, announcer energy — e.g. a DJ/hype voice
-    nagatha_voice_id: str = os.getenv("NAGATHA_VOICE_ID", "")
-    bilby_voice_id:   str = os.getenv("BILBY_VOICE_ID", "")
+    # Grumpy:  Skippy's ElevenLabs voice for non-tier (local/Ollama) responses
+    #          when "grumpy mode" (ElevenLabs TTS) is enabled on the phone
+    nagatha_voice_id: str = os.getenv("ELEVENLABS_NAGATHA_VOICE_ID", "")
+    bilby_voice_id:   str = os.getenv("ELEVENLABS_BILBY_VOICE_ID",   "")
+    grumpy_voice_id:  str = os.getenv("ELEVENLABS_GRUMPY_VOICE_ID",  "")
 
     # System prompt for /intent/unmatched escalations.
     # SKIPPY_SYSTEM env var overrides the file (useful for quick iteration).
