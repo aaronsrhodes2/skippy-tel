@@ -27,6 +27,7 @@ import mentat_client
 import ops
 import spend
 import tasks
+import watch
 from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, PORTALS, SERVICES
 from gcp import GamesVm
 
@@ -118,7 +119,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None) 
             flash("You don't have access to that game.", "error")
             return back("dashboard.index")
         try:
-            ok, message = ops.start_games(vm, wanted, request.form.get("idle_minutes"), auth.is_admin(me()))
+            ok, message = ops.start_games(vm, wanted, request.form.get("idle_minutes"), auth.is_admin(me()),
+                                          who=me())
         except Exception as exc:   # noqa: BLE001 — the VM API; show it, don't 500
             ok, message = False, f"Couldn't reach the VM: {exc}"
         flash(message, "ok" if ok else "error")
@@ -325,11 +327,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None) 
             except Exception:   # noqa: BLE001
                 snap = ""
         res = diagnostics.resources(snap) if snap else {}
-        warnings = []
-        if res.get("memory_pct", 0) > 85:
-            warnings.append(f"Memory at {res['memory_pct']}% — the next game may not fit alongside.")
-        if res.get("disk_pct", 0) > 80:
-            warnings.append(f"World disk at {res['disk_pct']}% full.")
+        warnings = watch.warnings(vm, snap, res)
         try:
             mentat_tools = len(mentat.tools()) if mentat else None
         except mentat_client.MentatError:
@@ -447,7 +445,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None) 
         try:
             admin = auth.is_admin(user["email"])
             tools = chat_tools.ChatTools(vm, is_admin=admin, visible=auth.visible_games(user["email"]),
-                                         mentat=mentat)
+                                         mentat=mentat, who=user["email"])
             model, badge = chat.pick_model(message, app.config["CHAT_MODEL"], admin)
             page = str(body.get("page") or "")[:100] or None
             prompt = chat.system_prompt(user["name"], is_admin=admin, page=page,

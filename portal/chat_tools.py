@@ -99,8 +99,8 @@ _MENTAT_GENERIC = [
 
 
 class ChatTools:
-    def __init__(self, vm, is_admin: bool, visible: list[str] | None = None, mentat=None):
-        self.vm, self.is_admin = vm, is_admin
+    def __init__(self, vm, is_admin: bool, visible: list[str] | None = None, mentat=None, who: str = ""):
+        self.vm, self.is_admin, self.who = vm, is_admin, who
         self.visible = list(GAMES) if visible is None else list(visible)   # games this person may see
         self.names = _ADMIN if is_admin else _EVERYONE
         self.mentat = mentat if mentat and tool_policy.allowed("mentat", is_admin) else None
@@ -179,7 +179,7 @@ class ChatTools:
         wanted = list(args.get("games") or [])
         if any(g not in self.visible for g in wanted):
             raise ToolError("You don't have access to that game.")
-        ok, message = ops.start_games(self.vm, wanted, None, self.is_admin)
+        ok, message = ops.start_games(self.vm, wanted, None, self.is_admin, who=self.who)
         if not ok:
             raise ToolError(message)
         return {"started": True, "message": message}

@@ -6,10 +6,11 @@ asked, and the caller decides how to show it (a flash, a tool result).
 """
 from __future__ import annotations
 
+import watch
 from catalog import GAMES, clamp_idle, missing_settings
 
 
-def start_games(vm, games: list[str], idle_raw: str | None, is_admin: bool) -> tuple[bool, str]:
+def start_games(vm, games: list[str], idle_raw: str | None, is_admin: bool, who: str = "") -> tuple[bool, str]:
     selected = [g for g in games if g in GAMES]
     if not selected:
         return False, "Pick at least one game."
@@ -19,6 +20,8 @@ def start_games(vm, games: list[str], idle_raw: str | None, is_admin: bool) -> t
     if problems:
         return False, " ".join(problems)
     if status.status == "RUNNING":
+        if set(selected) - set(status.games):
+            watch.record_blocked(vm, who, selected, list(status.games))
         return False, ("The server is already running. Games can only be changed while it's asleep "
                        "(or by an admin restart).")
     idle = clamp_idle(idle_raw, is_admin)

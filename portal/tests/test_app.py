@@ -1,5 +1,7 @@
 """Flask app tests with a fake VM and a fake Claude. Need the real Flask +
 Authlib (installed in CI); skipped where they aren't installed."""
+import json
+
 import pytest
 
 pytest.importorskip("flask")
@@ -132,7 +134,9 @@ def test_start_and_stop(env):
     client.post("/games/start", data={"games": ["valheim"], "idle_minutes": "45"})
     assert vm.calls[-1] == ("start", ["valheim"], 45)
     client.post("/games/start", data={"games": ["dragonwilds"]})   # already running: refused
-    assert vm.calls[-1] == ("start", ["valheim"], 45)
+    assert [c for c in vm.calls if c[0] == "start"] == [("start", ["valheim"], 45)]
+    blocked = json.loads(vm.metadata["portal-watch"])["blocked_starts"]  # …and the watcher noticed
+    assert [(b["who"], b["wanted"], b["running"]) for b in blocked] == [(FRIEND, ["dragonwilds"], ["valheim"])]
     client.post("/games/stop")
     assert vm.calls[-1] == ("stop",)
 
@@ -729,6 +733,19 @@ def test_dashboard_is_admin_only_and_shows_the_widgets(env):
     assert "AB12-CD34" in page and "Spend (estimate)" in page and "Friends" in page
     assert "Memory at 91%" in page and "World disk at 85%" in page      # watcher warnings
     assert 'class="portal me"' in client.get("/").data.decode()          # card on the front page
+
+
+def test_watcher_flags_crashes_and_blocked_starts(env):
+    client, vm, _ = env
+    vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
+    vm.serial[2] = "=== skippy-diag t ===\ndragonwilds  Restarting (1) 5 seconds ago\n=== end ===\n"
+    login(client, FRIEND)
+    client.post("/games/start", data={"games": ["valheim"]})
+    client.post("/games/start", data={"games": ["dragonwilds"]})       # already what's running: not a block
+    login(client, ADMIN)
+    page = client.get("/me").data.decode()
+    assert "dragonwilds is restarting" in page
+    assert "1 blocked start this week" in page and FRIEND in page
 
 
 def test_hiding_an_experiment_takes_it_off_the_public_page(env):
