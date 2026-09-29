@@ -336,3 +336,10 @@ def test_discord_errors_say_what_went_wrong():
     assert "isn't in this Discord server" in str(e)
     bare = urllib.error.HTTPError("https://discord.com/api/webhooks/1/secret", 500, "Oops", {}, io.BytesIO(b""))
     assert "secret" not in str(discord_admin.DiscordError.from_http(bare, "POST", bare.url))   # no webhook token in messages
+
+
+def test_join_code_read_from_real_serial_output_with_crlf():
+    import diagnostics
+    port2 = ("=== skippy-diag 2026-09-29T02:43 ===\r\n--- dragonwilds: last 40 log lines\r\n"
+             "[..]HeartbeatSession ok\r\nJOIN_CODE dragonwilds=RKXL-B01K\r\n\r\n=== end ===\r\n")
+    assert diagnostics.join_codes(diagnostics.latest_snapshot(port2)) == {"dragonwilds": "RKXL-B01K"}

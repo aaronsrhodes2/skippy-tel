@@ -16,6 +16,7 @@ _STARTUP = re.compile(r"startup-script|google_metadata_script_runner")
 
 
 def latest_snapshot(port2: str) -> str:
+    port2 = port2.replace("\r\n", "\n").replace("\r", "")   # serial ports end lines with CRLF
     start = port2.rfind(MARK)
     if start == -1:
         return ""
@@ -66,6 +67,7 @@ def for_game(snapshot: str, container: str) -> str:
 
 def startup_tail(port1: str, lines: int = STARTUP_LINES) -> str:
     """Startup-script lines from the console, last boot's worth."""
+    port1 = port1.replace("\r\n", "\n").replace("\r", "")
     picked = [ln for ln in port1.splitlines() if _STARTUP.search(ln)]
     boots = [i for i, ln in enumerate(picked) if "=== skippy-games boot" in ln]
     if boots:
