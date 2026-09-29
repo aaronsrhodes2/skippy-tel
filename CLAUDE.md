@@ -103,6 +103,11 @@ Actions (the sandbox can't reach GCP or run.app directly):
   runs it via POST /tasks/run (portal/tasks.py). New portal-side jobs go there.
 - Portal: https://skippy-portal-1015050363686.us-west1.run.app — code in
   `portal/`, docs in `docs/portal/README.md` and `docs/cicd.md`.
+- Portal design (the Captain's rule): **no top tabs; all cards, like a phone with
+  apps.** Home (`/`) is a launcher, one tile per app; every other page is an app
+  with a `‹ Home` back button, its own title (from its `<title>`), and a round
+  Home button. A new feature gets a tile in `portal/templates/home.html`, never
+  a nav link.
 - Secrets live in the Captain's Drive vault `.env`; he loads them into Secret
   Manager with `bash infra/bootstrap/secrets.sh --from-env ~/.env` in Cloud Shell.
 
