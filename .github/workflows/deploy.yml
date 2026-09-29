@@ -130,8 +130,6 @@ jobs:
           URL=$(gcloud run services describe skippy-mentat --region "$REGION" --format='value(status.url)')
           echo "Mentat: $URL" >> "$GITHUB_STEP_SUMMARY"
           curl -fsS "$URL/health"
-          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/home/report" -H 'Content-Type: application/json' -d '{}')
-          [ "$code" = 401 ] || { echo "/home/report without a token answered $code, expected 401"; exit 1; }
           curl -fsS "$URL/tools" | python3 -c "import json,sys; n=len(json.load(sys.stdin)); print(n, 'tools'); assert n > 100"
           curl -fsS -X POST -H 'Content-Type: application/json' \
             -d '{"value": 1, "from_units": "mile", "to_units": "km"}' "$URL/tools/convert_units"
@@ -168,6 +166,8 @@ jobs:
           URL=$(gcloud run services describe skippy-portal --region "$REGION" --format='value(status.url)')
           echo "Portal: $URL" >> "$GITHUB_STEP_SUMMARY"
           curl -fsS "$URL/health"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/home/report" -H 'Content-Type: application/json' -d '{}')
+          [ "$code" = 401 ] || { echo "/home/report without a token answered $code, expected 401"; exit 1; }
           curl -fsS -o /dev/null "$URL/"   # login page renders => secrets + OAuth config loaded
           curl -fsS "$URL/experiments/benchmark" | grep -q "Wolfram"            # benchmark results bundled
           curl -fsS "$URL/experiments/radiance/" | grep -q "viewer.js"          # Radiance bundled
