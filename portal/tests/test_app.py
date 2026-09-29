@@ -973,3 +973,32 @@ def test_bad_checksum_is_rejected(env, tmp_path, monkeypatch):
     r = client.put("/home/imports/everquest?offset=0&total=3&sha256=" + "0" * 64, data=b"abc",
                    headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 400 and "eq-import-token" not in vm.metadata
+
+
+def test_friends_chat_is_rate_limited_but_the_captain_is_not(env):
+    client, _, _ = env
+    _add_friend(client, PAL, ["skippy"])
+    login(client, PAL)
+    codes = [client.post("/chat/send", json={"message": "hi"}).status_code for _ in range(41)]
+    assert codes[:40] == [200] * 40 and codes[40] == 429
+    login(client, ADMIN)
+    assert all(client.post("/chat/send", json={"message": "hi"}).status_code == 200 for _ in range(45))
+
+
+def test_thinking_cap_has_its_own_smaller_limit(env):
+    client, _, _ = env
+    _add_friend(client, PAL, ["skippy"])
+    login(client, PAL)
+    codes = [client.post("/chat/send", json={"message": "thinking cap: why?"}).status_code for _ in range(11)]
+    assert codes[:10] == [200] * 10 and codes[10] == 429
+    assert client.post("/chat/send", json={"message": "plain question"}).status_code == 200
+
+
+def test_public_mentat_playground_is_rate_limited_per_visitor():
+    import ratelimit
+    vm, skippy = FakeVm(), FakeSkippy()
+    client = portal.create_app(dict(SETTINGS), vm=vm, skippy=skippy, mentat=FakeMentat()).test_client()
+    call = lambda ip: client.post("/experiments/mentat/api/call/convert_units", json={"value": 1},
+                                  headers={"X-Forwarded-For": f"6.6.6.6, {ip}"}).status_code
+    assert [call("1.1.1.1") for _ in range(31)][-1] == 429           # spoofed first hop doesn't help
+    assert call("2.2.2.2") == 200                                   # a different real visitor is fine

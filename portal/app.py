@@ -29,6 +29,7 @@ import imports as imports_mod
 import mentat_client
 import ops
 import spend
+import ratelimit
 import tasks
 import watch
 from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, PORTALS, SERVICES
@@ -52,6 +53,12 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     app.extensions["mentat"] = mentat
     home = home or home_mod.Home(vm)
     app.extensions["home"] = home
+    # What one caller may spend: public Mentat calls per visitor, and chat for
+    # everyone but the Captain (every message costs Anthropic money).
+    limiter = ratelimit.Limiter()
+    app.extensions["limiter"] = limiter
+    MENTAT_PER_MIN = 30
+    CHAT_PER_HOUR, SHARP_PER_HOUR = 40, 10      # any model / "thinking cap" (Sonnet)
     imports = imports or imports_mod.Imports(vm)
 
     def me() -> str:
@@ -514,6 +521,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def mentat_call(name):
         if not mentat:
             return jsonify(error="Mentat isn't deployed yet."), 503
+        if not limiter.allow("mentat:" + ratelimit.client_ip(request), MENTAT_PER_MIN, 60):
+            return jsonify(error="Slow down: that's a lot of physics for one minute. Try again shortly."), 429
         args = request.get_json(silent=True) or {}
         if not isinstance(args, dict):
             return jsonify(error="arguments must be a JSON object"), 400
@@ -584,6 +593,14 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         if not message:
             return jsonify(error="Say something."), 400
         user = auth.current_user()
+        if not auth.is_admin(user["email"]):
+            if not limiter.allow("chat:" + user["email"], CHAT_PER_HOUR, 3600):
+                return jsonify(error=f"That's {CHAT_PER_HOUR} messages this hour; Skippy needs a breather. "
+                                     "Try again in a bit."), 429
+            sharp = chat.pick_model(message, app.config["CHAT_MODEL"], False)[0] != app.config["CHAT_MODEL"]
+            if sharp and not limiter.allow("sharp:" + user["email"], SHARP_PER_HOUR, 3600):
+                return jsonify(error=f"The thinking cap is limited to {SHARP_PER_HOUR} an hour. "
+                                     "Ask without it, or try again later."), 429
         home.touch_chat()
         force, rest = chat_tools.parse_verb(message)
         if force and not rest:

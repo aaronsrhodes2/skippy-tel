@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import threading
 import time
 import urllib.request
@@ -160,9 +161,39 @@ def list_tools():
                     for t in sorted(TOOLS.values(), key=lambda t: t.name)])
 
 
+# sigma-ground's symbolic tools hand strings to sympy.sympify, which is eval()
+# underneath: a public caller could run Python here. Maths never needs dunder
+# attributes, quotes, backslashes or Python's introspection builtins, so any
+# argument containing them is refused before a tool sees it.
+_UNSAFE = re.compile(
+    r"__|['\"`\\;]|\b(lambda|import|exec|eval|open|compile|getattr|setattr|delattr|globals|locals|"
+    r"vars|breakpoint|builtins|subclasses|mro|os|sys|subprocess|input)\b", re.I)
+
+
+def unsafe_arg(value) -> str | None:
+    """The first string (anywhere in the arguments) that looks like code, else None."""
+    if isinstance(value, str):
+        return value if _UNSAFE.search(value) else None
+    if isinstance(value, dict):
+        value = list(value.keys()) + list(value.values())
+    if isinstance(value, (list, tuple)):
+        for v in value:
+            bad = unsafe_arg(v)
+            if bad is not None:
+                return bad
+    return None
+
+
+def client_ip() -> str:
+    """Cloud Run's front end appends the real client address LAST; earlier
+    X-Forwarded-For entries are whatever the caller sent."""
+    hops = [h.strip() for h in (request.headers.get("X-Forwarded-For") or "").split(",") if h.strip()]
+    return hops[-1] if hops else (request.remote_addr or "?")
+
+
 def _guarded(label: str, fn, *args):
     """Rate limit, size cap and timeout shared by every compute endpoint."""
-    ip = (request.headers.get("X-Forwarded-For") or request.remote_addr or "?").split(",")[0].strip()
+    ip = client_ip()
     if _rate_limited(ip):
         return jsonify(ok=False, error="Slow down: rate limit reached, try again in a minute."), 429
     if (request.content_length or 0) > MAX_ARGS_BYTES:
@@ -185,6 +216,8 @@ def call_tool(name):
     args = request.get_json(silent=True) or {}
     if not isinstance(args, dict):
         return jsonify(ok=False, error="arguments must be a JSON object"), 400
+    if unsafe_arg(args) is not None:
+        return jsonify(ok=False, error="That input looks like code, not maths; Mentat won't evaluate it."), 400
     return _guarded(name, _call, name, args)
 
 

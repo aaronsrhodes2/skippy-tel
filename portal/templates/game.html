@@ -118,8 +118,8 @@
       <div id="discord" class="card discord-feed"><p class="help">Loading #{{ game.id }}…</p></div>
       <p class="help">Read-only copy of the channel, refreshed every 20 seconds. To talk, join on Discord.</p>
     {% else %}
-      <p class="help">This game's Discord channels aren't set up yet{% if is_admin %} — use
-        "Set up / repair Discord" below{% endif %}.</p>
+      <p class="help">This game's Discord channels aren't set up yet{% if is_admin %} — set them up
+        on the <a href="{{ url_for('admin.index') }}">Admin page</a>{% endif %}.</p>
     {% endif %}
   </section>
   {% if links.text %}
@@ -180,12 +180,6 @@
         </form>
         {% endif %}
         <a class="btn" href="{{ url_for('admin.logs', game=game.id) }}">{{ game.name }} logs</a>
-        {% if bot_configured %}
-        <form class="inline" method="post" action="{{ url_for('admin.discord_setup') }}">
-          <input type="hidden" name="next" value="{{ url_for('dashboard.game', gid=game.id) }}">
-          <button type="submit">Set up / repair Discord</button>
-        </form>
-        {% endif %}
       </div>
       <p class="help">Restart applies saved settings and pulls the latest server and game updates.</p>
     </div>

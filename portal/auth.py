@@ -103,7 +103,7 @@ def callback():
     token = oauth.google.authorize_access_token()
     info = token.get("userinfo") or oauth.google.userinfo()
     email = (info.get("email") or "").strip().lower()
-    if not info.get("email_verified", True) or not is_allowed(email):
+    if not info.get("email_verified", False) or not is_allowed(email):   # unverified = no entry
         return redirect(url_for("auth.unauthorized"))
     session["user"] = {"email": email, "name": info.get("name", email), "picture": info.get("picture")}
     return redirect(url_for("index"))

@@ -134,6 +134,14 @@ UNIT
 systemctl daemon-reload
 systemctl enable --now skippy-idle-watchdog.timer skippy-diag.timer skippy-ops.service
 
+# Game containers are third-party images pulled fresh each boot. None needs the
+# metadata server, which holds games-env (every game's passwords and Discord
+# webhooks) and one-time import tokens, so containers can't reach it; this
+# host's own scripts still can (they don't pass through DOCKER-USER).
+iptables -C DOCKER-USER -d 169.254.169.254 -j DROP 2>/dev/null \
+  || iptables -I DOCKER-USER -d 169.254.169.254 -j DROP \
+  || echo "WARNING: couldn't fence the metadata server off from containers"
+
 # ── 5. Games ──────────────────────────────────────────────────────────────────
 GAMES=$(meta games)
 if [ -z "$GAMES" ]; then
