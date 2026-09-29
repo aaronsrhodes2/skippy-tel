@@ -66,3 +66,21 @@ Key vars:
 .env changes: restart only (no rebuild): `docker compose up -d flask-api`
 Code changes: rebuild: `docker compose up --build -d flask-api`
 ```
+
+## Cloud: portal + games VM (GCP project skippy-tel)
+
+The Captain doesn't run commands or fetch logs. Claude does, through GitHub
+Actions (the sandbox can't reach GCP or run.app directly):
+
+- **Deploy:** push to `claude/great-edison-aevrtu` (or `main`) → `deploy.yml`
+  (tests → Terraform `infra/gcp-games` → portal to Cloud Run). Redeploy without
+  a code change: `workflow_dispatch` on `deploy.yml` (e.g. after a secret changes).
+- **Operate/diagnose the games VM:** `workflow_dispatch` on `ops.yml` with
+  `command` = `status` | `logs` | `start` | `stop` | `restart` and `args`
+  (a game id for logs; game ids for start). Read the job log. Secrets are
+  masked. `status` shows state, games, invite codes, missing settings.
+  Don't stop/restart while people may be playing unless asked.
+- Portal: https://skippy-portal-1015050363686.us-west1.run.app — code in
+  `portal/`, docs in `docs/portal/README.md` and `docs/cicd.md`.
+- Secrets live in the Captain's Drive vault `.env`; he loads them into Secret
+  Manager with `bash infra/bootstrap/secrets.sh --from-env ~/.env` in Cloud Shell.

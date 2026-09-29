@@ -101,3 +101,12 @@ test users before the portal's allowlist is even consulted.
 | "Update the servers / mods" | Admin → **Restart & update** (every boot re-pulls images and game updates) |
 | "Add a game / change ports / change the compose file" | Claude edits `games/` + `infra/gcp-games/`, pushes; `infra` applies; the change lands at the VM's next boot (Restart) |
 | "Change the portal" | Claude edits `portal/`, pushes; live in ~3 minutes |
+
+
+## Remote operations (`ops` workflow)
+
+`.github/workflows/ops.yml` is a manual workflow for operating the games VM
+without the portal: `status`, `logs [game]`, `start <games>`, `stop`,
+`restart`. It runs `scripts/remote.py` (the portal's own `gcp.py` / `ops.py` /
+`diagnostics.py`) as the deployer identity, and masks every secret value in
+the job log. It exists so Claude can diagnose and act on the server itself.
