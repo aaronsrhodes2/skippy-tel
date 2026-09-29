@@ -37,6 +37,7 @@ Last updated 2026-09-28.
 | Games | **EverQuest (EQEmu)** as a compose profile + migrate the local DB — open: which local setup (AkkStack / community compose / raw), public vs. private login server |
 | Games | **In-game chat → Discord → portal** (backlogged until a real play session): a VM log watcher posts chat lines to the game's channel webhook, so they show in Discord and on the game page. Factorio logs `[CHAT]`, so it's the first candidate. **Dragonwilds: tested 2026-09-29, its server doesn't log chat** (a marker typed in game never reached the container log), so no bridge there; Valheim/Satisfactory don't without mods |
 | Games | First real session: Valheim / Dragonwilds (PC + Xbox crossplay); move Nitrado worlds, cancel Nitrado |
+| Home | **InsightFace down** on skippy-pc (face recognition behind HeyBuddy `/heybuddy/identify`; seen 2026-09-29 via `ops home`). Nothing else depends on it |
 | Memory | Install the history sync on the PC and MacBook; first real Claude export; Grok + Gemini parsers from real exports |
 | Secrets | Vault → Secret Manager sync in the deploy job (needs the Captain's OK for the IAM grant; manual `secrets.sh --from-env` until then) |
 | Bills | Cancel SuperGrok after Claude voice in the car is proven |
