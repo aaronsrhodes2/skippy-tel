@@ -195,8 +195,9 @@ def test_join_password_shown_to_players_only_while_running(env):
     vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
     page = client.get("/dashboard").data.decode()
     assert "dragonpw" in page
-    assert "search server" in page
-    assert "Skippy" in page                                    # SERVER_NAME default is what players search
+    assert "Invite Code" in page                               # the reliable way in comes first...
+    assert page.index("Invite Code") < page.index("Public</b> tab")   # ...the list search is the fallback
+    assert "search <b>Skippy</b>" in page                      # SERVER_NAME default is what players search
 
 
 def test_settings_reject_values_compose_cant_carry(env):
@@ -378,3 +379,15 @@ def test_game_page_discord_feed(env, monkeypatch):
     vm.state.env["DISCORD_INVITE_VALHEIM"] = "inv1"
     page = client.get("/games/valheim").data.decode()
     assert "https://discord.gg/inv1" in page and "Join the conversation" in page
+
+
+def test_invite_code_sits_with_the_join_password(env):
+    client, vm, _ = env
+    vm.serial[2] = "=== skippy-diag t ===\nJOIN_CODE dragonwilds=YTKM-EKL1\n=== end ===\n"
+    vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
+    login(client, FRIEND)
+    for url in ("/games/dragonwilds", "/dashboard"):
+        page = client.get(url).data.decode()
+        join = page[page.index('<div class="join">'):]
+        join = join[:join.index("</div>")]
+        assert "YTKM-EKL1" in join and "dragonpw" in join         # code + password in one block

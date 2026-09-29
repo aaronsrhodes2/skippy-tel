@@ -50,9 +50,11 @@ GAMES = {
     "dragonwilds": (
         "RuneScape: Dragonwilds",
         "Survival crafting in Ashenfall. Crossplay: PC, Xbox, PS5 and Switch 2.",
-        lambda ip, e: (f"Play → **Public** tab → search server "
-                       f"**{e.get('DRAGONWILDS_SERVER_NAME') or 'Skippy'}**"
-                       + ("\nWorld password: on the Skippy Portal dashboard" if e.get("DRAGONWILDS_WORLD_PASSWORD") else "")),
+        lambda ip, e: ("Worlds → **Invite Code** → the code on the Skippy Portal (a new one every boot)"
+                       + ("\nWorld password: next to the code on the Skippy Portal"
+                          if e.get("DRAGONWILDS_WORLD_PASSWORD") else "")
+                       + f"\nOr: Public tab → search **{e.get('DRAGONWILDS_SERVER_NAME') or 'Skippy'}** "
+                         "(exact spelling and case)"),
     ),
 }
 

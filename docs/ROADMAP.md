@@ -35,6 +35,7 @@ Last updated 2026-09-28.
 | Portal | Live services list (skippy-tel-core `/services`) instead of the static one — same mesh dependency |
 | Portal | Background restarts with progress; per-game container restart without a full VM reboot |
 | Games | **EverQuest (EQEmu)** as a compose profile + migrate the local DB — open: which local setup (AkkStack / community compose / raw), public vs. private login server |
+| Games | **In-game chat → Discord → portal** (backlogged until a real play session): a VM log watcher posts chat lines to the game's channel webhook, so they show in Discord and on the game page. Factorio logs `[CHAT]`; test whether Dragonwilds logs chat (type a marker in game, check its logs); Valheim/Satisfactory don't without mods |
 | Games | First real session: Valheim / Dragonwilds (PC + Xbox crossplay); move Nitrado worlds, cancel Nitrado |
 | Memory | Install the history sync on the PC and MacBook; first real Claude export; Grok + Gemini parsers from real exports |
 | Secrets | Vault → Secret Manager sync in the deploy job (needs the Captain's OK for the IAM grant; manual `secrets.sh --from-env` until then) |

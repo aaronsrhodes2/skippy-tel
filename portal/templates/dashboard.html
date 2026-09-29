@@ -33,16 +33,7 @@
             <p><span class="dot amber"></span>Starting — booted {{ up }} min ago, usually joinable
                ~{{ game.ready_minutes }} min after boot.</p>
           {% endif %}
-          <p>{{ game.connect(status.external_ip, status.env) | safe }}</p>
-          {% if codes.get(id) %}<p>Invite code: <code>{{ codes[id] }}</code></p>{% endif %}
-          {% if game.join_password_key %}
-            {% set pw = status.env.get(game.join_password_key, '') %}
-            {% if pw %}
-              <details><summary>Show join password</summary><p><code>{{ pw }}</code></p></details>
-            {% else %}
-              <p class="help">No password set — anyone who finds it can join.</p>
-            {% endif %}
-          {% endif %}
+          {% include "_join.html" %}
         {% elif asleep %}
           <form method="post" action="{{ url_for('dashboard.games_start') }}">
             <input type="hidden" name="games" value="{{ id }}">

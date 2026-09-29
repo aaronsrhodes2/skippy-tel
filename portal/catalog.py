@@ -44,6 +44,7 @@ class Game:
     settings: tuple[Setting, ...] = field(default=())
     join_password_key: str = ""          # shown to signed-in players on the dashboard
     ready_minutes: int = 5               # typical boot → joinable, for the "starting" hint
+    invite_code: bool = False            # hands out a per-session invite code (diagnostics.join_codes)
     theme: Theme | None = None
     facts: tuple[tuple[str, str], ...] = field(default=())   # (label, value) on the game page
     links: tuple[tuple[str, str], ...] = field(default=())   # (label, url) official site, wiki
@@ -60,30 +61,33 @@ GAMES: dict[str, Game] = {
         "Survival crafting in Ashenfall. Crossplay: PC, Xbox, PS5, Switch 2.",
         ram_gb=8,
         connect=lambda ip, env: (
-            "Play &rarr; <b>Public</b> tab &rarr; search server "
-            f"<b>{html.escape(env.get('DRAGONWILDS_SERVER_NAME') or 'Skippy')}</b>"
+            "Worlds &rarr; <b>Public</b> tab &rarr; search "
+            f"<b>{html.escape(env.get('DRAGONWILDS_SERVER_NAME') or 'Skippy')}</b> "
+            "(exact spelling and case; the list is hit and miss)"
         ),
         settings=(
             Setting("DRAGONWILDS_OWNER_ID", "Owner Player ID",
                     help="In-game Settings menu, bottom, copy button. Not your Xbox/Steam ID."),
             Setting("DRAGONWILDS_ADMIN_PASSWORD", "Admin password", secret=True),
             Setting("DRAGONWILDS_SERVER_NAME", "Server name",
-                    help="What players search for in the Public server list."),
+                    help="How the world shows in the Public list (search is exact and case-sensitive; "
+                         "the invite code on the game page is the reliable way in)."),
             Setting("DRAGONWILDS_WORLD_NAME", "World name",
                     help="Only used when the world is first created; renaming it later has no effect."),
             Setting("DRAGONWILDS_WORLD_PASSWORD", "World password", secret=True,
                     help="Strongly recommended: the world is listed publicly, so without one "
-                         "anyone can join. Signed-in portal users see it on the dashboard."),
+                         "anyone can join. Signed-in portal users see it next to the invite code."),
         ),
         join_password_key="DRAGONWILDS_WORLD_PASSWORD",
         ready_minutes=6,
+        invite_code=True,
         theme=Theme(accent="#ff7a1a", accent2="#c9a24a", bg="#120806", card="#24110b", text="#f3dcc2",
                     font="Cinzel",
                     pattern="radial-gradient(ellipse at 20% 110%, rgba(255,90,20,.55), transparent 60%), "
                             "radial-gradient(ellipse at 85% -10%, rgba(201,162,74,.35), transparent 55%)",
                     tagline="Dragons are loose in Ashenfall. Bring friends."),
         facts=(("Players", "up to 6"), ("Crossplay", "PC · Xbox · PS5 · Switch 2"),
-               ("Joined by", "server name in the Public list"), ("Ports", "7778/udp + beacon 8888/udp")),
+               ("Joined by", "invite code + world password (both on this page)"), ("Ports", "7778/udp + beacon 8888/udp")),
         links=(("Official site", "https://dragonwilds.runescape.com"),
                ("Wiki", "https://dragonwilds.runescape.wiki")),
     ),
