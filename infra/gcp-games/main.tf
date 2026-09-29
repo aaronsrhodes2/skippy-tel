@@ -145,7 +145,7 @@ resource "google_compute_instance" "games" {
       metadata["portal-friends"], # the portal's friends list (portal/friends.py)
       metadata["portal-tasks"],   # remote-operator task queue (portal/tasks.py)
       metadata["portal-task-results"],
-      metadata["ops-request"], # scripts/remote.py → ops_agent.py
+      metadata["ops-request"],        # scripts/remote.py → ops_agent.py
       metadata["portal-experiments"], # hidden Experiments (dashboard toggle)
     ]
   }
