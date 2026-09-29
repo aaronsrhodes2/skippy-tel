@@ -73,6 +73,9 @@ Key vars:
 - BILBY_MAC_URL — Mac Bilby daemon (default: http://skippy-mac:7334)
 - BILBY_DRIVE_FOLDER_ID — Drive folder for streaming (pending Drive setup)
 
+Secrets come straight from the vault: compose's `env_file` is
+`${SKIPPY_ENV_FILE:-G:/My Drive/vault/.env}` (on the Mac, set SKIPPY_ENV_FILE
+to the vault's path under Google Drive).
 .env changes: restart only (no rebuild): `docker compose up -d flask-api`
 Code changes: rebuild: `docker compose up --build -d flask-api`
 ```
