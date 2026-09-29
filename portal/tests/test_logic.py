@@ -51,13 +51,100 @@ def test_every_setting_key_is_unique():
 # ── discord links ────────────────────────────────────────────────────────────
 
 def test_links_need_guild_and_channel():
-    assert discord_admin.links({}, "valheim") == {"text": None, "voice": None}
-    env = {"DISCORD_GUILD_ID": "g1", "DISCORD_CHANNEL_VALHEIM": "c1", "DISCORD_VOICE_VALHEIM": "v1"}
+    none = {"text": None, "voice": None, "invite": None}
+    assert discord_admin.links({}, "valheim") == none
+    env = {"DISCORD_GUILD_ID": "g1", "DISCORD_CHANNEL_VALHEIM": "c1", "DISCORD_VOICE_VALHEIM": "v1",
+           "DISCORD_INVITE_VALHEIM": "abc"}
     assert discord_admin.links(env, "valheim") == {
         "text": "https://discord.com/channels/g1/c1",
         "voice": "https://discord.com/channels/g1/v1",
+        "invite": "https://discord.gg/abc",
     }
-    assert discord_admin.links(env, "factorio") == {"text": None, "voice": None}
+    assert discord_admin.links(env, "factorio") == none
+
+
+class FakeDiscord:
+    """Just enough of Discord's REST API for setup(): channels, invites,
+    webhooks, pins, messages."""
+    def __init__(self, token=None):
+        self.channels = [{"id": "old-voice", "name": "Dragonwilds", "type": 2}]   # pre-rename voice
+        self.invites, self.calls, self.n = {}, [], 0
+
+    def __call__(self, method, path, payload=None, auth=True):
+        self.calls.append((method, path))
+        self.n += 1
+        if path.endswith("/channels") and method == "GET":
+            return list(self.channels)
+        if path.endswith("/channels") and method == "POST":
+            ch = {"id": f"ch{self.n}", **payload}
+            self.channels.append(ch)
+            return ch
+        if method == "PATCH" and path.startswith("/channels/"):
+            return {"name": payload["name"]}
+        if path.endswith("/invites") and method == "POST":
+            code = f"inv{self.n}"
+            self.invites[code] = path
+            return {"code": code}
+        if path.startswith("/invites/"):
+            if path.rsplit("/", 1)[-1] in self.invites:
+                return {"guild": {"id": "g1"}}
+            import urllib.error
+            raise urllib.error.HTTPError(path, 404, "gone", {}, None)
+        if path.endswith("/webhooks") and method == "GET":
+            return []
+        if path.endswith("/webhooks"):
+            return {"id": f"h{self.n}", "token": "t"}
+        if "?wait=true" in path:
+            return {"id": f"m{self.n}"}
+        return {}
+
+
+def test_setup_makes_like_named_text_and_voice_channels_with_invites(monkeypatch):
+    fake = FakeDiscord()
+    monkeypatch.setattr(discord_admin, "Discord", lambda token: fake)
+    env = {"DISCORD_GUILD_ID": "g1", "DISCORD_VOICE_DRAGONWILDS": "old-voice"}
+    out = discord_admin.setup("tok", "gPTVS7Hmj", ["dragonwilds", "valheim"], env)
+    for game in ("dragonwilds", "valheim"):
+        key = game.upper()
+        text = next(c for c in fake.channels if c["id"] == out[f"DISCORD_CHANNEL_{key}"])
+        assert text["name"] == game and text["type"] == 0
+        assert out[f"DISCORD_INVITE_{key}"] in fake.invites
+        assert fake.invites[out[f"DISCORD_INVITE_{key}"]] == f"/channels/{text['id']}/invites"
+    assert out["DISCORD_VOICE_DRAGONWILDS"] == "old-voice"            # kept, not duplicated...
+    assert ("PATCH", "/channels/old-voice") in fake.calls              # ...renamed to "dragonwilds"
+    valheim_voice = next(c for c in fake.channels if c["id"] == out["DISCORD_VOICE_VALHEIM"])
+    assert valheim_voice["name"] == "valheim" and valheim_voice["type"] == 2
+
+    # Re-running keeps the same invites instead of minting new ones.
+    again = discord_admin.setup("tok", "gPTVS7Hmj", ["dragonwilds"], {**env, **out})
+    assert again["DISCORD_INVITE_DRAGONWILDS"] == out["DISCORD_INVITE_DRAGONWILDS"]
+
+
+def test_recent_messages_readable_and_cached(monkeypatch):
+    raw = [  # Discord returns newest first
+        {"id": "3", "content": "", "author": {"username": "Skippy", "bot": True},
+         "embeds": [{"title": "🟢 RuneScape: Dragonwilds is up"}], "timestamp": "t3"},
+        {"id": "2", "content": "hey <@42>, it's up", "author": {"username": "groggy", "global_name": "Captain"},
+         "mentions": [{"id": "42", "username": "pal"}], "timestamp": "t2"},
+        {"id": "1", "content": "", "author": {"username": "x"}, "timestamp": "t1"},   # empty: dropped
+    ]
+    calls = []
+
+    class Api:
+        def __init__(self, token):
+            pass
+
+        def __call__(self, method, path, payload=None, auth=True):
+            calls.append(path)
+            return raw
+    monkeypatch.setattr(discord_admin, "Discord", Api)
+    discord_admin._CACHE.clear()
+    msgs = discord_admin.recent_messages("tok", "c9")
+    assert [m["id"] for m in msgs] == ["2", "3"]                      # oldest first
+    assert msgs[0]["author"] == "Captain" and msgs[0]["text"] == "hey @pal, it's up"
+    assert msgs[1]["bot"] and msgs[1]["extra"] == ["🟢 RuneScape: Dragonwilds is up"]
+    discord_admin.recent_messages("tok", "c9")
+    assert len(calls) == 1                                             # served from cache
 
 
 def test_portal_and_vm_describe_the_same_games():

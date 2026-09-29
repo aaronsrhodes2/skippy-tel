@@ -56,7 +56,7 @@
         {% endif %}
 
         <p class="links">
-          {% if links[id].text %}<a href="{{ links[id].text }}" target="_blank" rel="noopener">#{{ id }} on Discord</a>{% endif %}
+          {% if links[id].text %}<a href="{{ links[id].invite or links[id].text }}" target="_blank" rel="noopener">#{{ id }} on Discord</a>{% endif %}
           {% if links[id].voice %}<a href="{{ links[id].voice }}" target="_blank" rel="noopener">🔊 voice</a>{% endif %}
           {% if not links[id].text %}<a href="{{ discord_invite }}" target="_blank" rel="noopener">Join the Discord</a>{% endif %}
         </p>

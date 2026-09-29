@@ -98,13 +98,61 @@
   </section>
 
   <section>
-    <h2>Talk</h2>
-    <p class="links">
-      {% if links.text %}<a href="{{ links.text }}" target="_blank" rel="noopener">#{{ game.id }} on Discord</a>{% endif %}
-      {% if links.voice %}<a href="{{ links.voice }}" target="_blank" rel="noopener">🔊 voice channel</a>{% endif %}
-      {% if not links.text %}<a href="{{ discord_invite }}" target="_blank" rel="noopener">Join the Discord</a>{% endif %}
-    </p>
+    <h2>#{{ game.id }} on Discord</h2>
+    <div class="row" style="margin-bottom:10px">
+      {# The invite lands newcomers in this channel; members' links open it directly. #}
+      <a class="btn" href="{{ links.invite or discord_invite }}" target="_blank" rel="noopener">
+        {{ 'Join the conversation' if links.invite else 'Join the Discord' }}</a>
+      {% if links.text %}<a href="{{ links.text }}" target="_blank" rel="noopener">open #{{ game.id }}</a>{% endif %}
+      {% if links.voice %}<a href="{{ links.voice }}" target="_blank" rel="noopener">🔊 {{ game.id }} voice</a>{% endif %}
+    </div>
+    {% if links.text %}
+      <div id="discord" class="card discord-feed"><p class="help">Loading #{{ game.id }}…</p></div>
+      <p class="help">Read-only copy of the channel, refreshed every 20 seconds. To talk, join on Discord.</p>
+    {% else %}
+      <p class="help">This game's Discord channels aren't set up yet{% if is_admin %} — use
+        "Set up / repair Discord" below{% endif %}.</p>
+    {% endif %}
   </section>
+  {% if links.text %}
+  <style>
+    .discord-feed { max-height: 360px; overflow-y: auto; }
+    .discord-feed .msg { margin: 0 0 8px; }
+    .discord-feed .who { font-weight: 700; color: var(--accent); margin-right: 6px; }
+    .discord-feed .who.bot { color: var(--accent2); }
+    .discord-feed .when { font-size: .75rem; opacity: .6; }
+    .discord-feed .body { white-space: pre-wrap; word-break: break-word; }
+    .discord-feed .extra { font-size: .85rem; opacity: .8; font-style: italic; }
+  </style>
+  <script>
+    (function () {
+      const box = document.getElementById("discord");
+      const url = "{{ url_for('dashboard.game_discord', gid=game.id) }}";
+      function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls;
+                                    if (text) e.textContent = text; return e; }
+      async function load() {
+        try {
+          const res = await fetch(url, {headers: {"Accept": "application/json"}});
+          const data = await res.json();
+          box.replaceChildren();
+          if (!res.ok) { box.appendChild(el("p", "help", data.error || "Couldn't load the channel.")); return; }
+          if (!data.messages.length) { box.appendChild(el("p", "help", "Nothing here yet — be the first to say hi.")); return; }
+          for (const m of data.messages) {
+            const p = el("div", "msg");
+            p.appendChild(el("span", "who" + (m.bot ? " bot" : ""), m.author));
+            p.appendChild(el("span", "when", new Date(m.at).toLocaleString([], {dateStyle: "short", timeStyle: "short"})));
+            if (m.text) p.appendChild(el("div", "body", m.text));
+            for (const x of m.extra) p.appendChild(el("div", "extra", x));
+            box.appendChild(p);
+          }
+          box.scrollTop = box.scrollHeight;
+        } catch (e) { /* keep the last copy on a network blip */ }
+      }
+      load();
+      setInterval(() => { if (!document.hidden) load(); }, 20000);
+    })();
+  </script>
+  {% endif %}
 
   {% if game.facts %}
   <section>

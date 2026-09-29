@@ -120,6 +120,25 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
             codes=live_codes(status),
         )
 
+    @dash.get("/games/<gid>/discord")
+    @auth.login_required
+    def game_discord(gid):
+        """Read-only copy of the game's Discord text channel, for its page."""
+        if gid not in GAMES:
+            abort(404)
+        token = app.config["DISCORD_BOT_TOKEN"]
+        status, error = vm_status()
+        channel = (status.env if status else {}).get(f"DISCORD_CHANNEL_{gid.upper()}")
+        if not token or not channel:
+            return jsonify(error="This game's Discord channel isn't set up yet."), 404
+        try:
+            return jsonify(messages=discord_admin.recent_messages(token, channel))
+        except Exception as exc:   # noqa: BLE001 — Discord down / bot lacks access: say so
+            code = getattr(exc, "code", None)
+            why = ("the bot can't read that channel (check its permissions)" if code in (401, 403)
+                   else "Discord didn't answer")
+            return jsonify(error=f"Couldn't load the channel: {why}."), 502
+
     app.register_blueprint(dash)
 
     # ── admin: settings, restart/update, Discord ───────────────────────────────

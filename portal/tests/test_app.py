@@ -362,3 +362,19 @@ def test_invite_code_problems_never_break_the_page(env):
     vm.serial_output = broken
     login(client, FRIEND)
     assert client.get("/games/dragonwilds").status_code == 200
+
+
+def test_game_page_discord_feed(env, monkeypatch):
+    import discord_admin
+    client, vm, _ = env
+    login(client, FRIEND)
+    resp = client.get("/games/valheim/discord")
+    assert resp.status_code == 404                                   # no bot token configured
+    client.application.config["DISCORD_BOT_TOKEN"] = "tok"
+    monkeypatch.setattr(discord_admin, "recent_messages",
+                        lambda token, channel: [{"id": "1", "author": "pal", "bot": False,
+                                                  "text": f"hi from {channel}", "extra": [], "at": "t"}])
+    assert client.get("/games/valheim/discord").get_json()["messages"][0]["text"] == "hi from c1"
+    vm.state.env["DISCORD_INVITE_VALHEIM"] = "inv1"
+    page = client.get("/games/valheim").data.decode()
+    assert "https://discord.gg/inv1" in page and "Join the conversation" in page

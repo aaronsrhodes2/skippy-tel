@@ -2,20 +2,31 @@
 scripts/discord_setup.py. Stdlib only.
 
 setup() makes sure the Discord server has, for each game:
-  • a text channel (#valheim …) and a voice channel (🔊 Valheim …) under "Game Servers"
+  • a text channel and a voice channel with the same name — the game id
+    (#dragonwilds + 🔊dragonwilds …) — under "Game Servers", so scripts can
+    address both by one name
+  • a permanent invite that lands people straight in the text channel
   • a webhook in the text channel (the VM posts status through it; no bot on the VM)
   • a pinned status post (description + how to connect), edited in place by the VM
 and returns the keys to merge into the VM's settings (games-env):
-  DISCORD_GUILD_ID, DISCORD_{CHANNEL,VOICE,WEBHOOK,BOARD}_<GAME>
+  DISCORD_GUILD_ID, DISCORD_{CHANNEL,VOICE,INVITE,WEBHOOK,BOARD}_<GAME>
+
+recent_messages() gives the portal a read-only copy of a game's text channel
+(a Discord account isn't a Google account, so the portal shows the channel
+and links people into Discord to talk, rather than posting for them).
 
 Needs a bot token (only here, never on the VM) invited with Manage Channels,
-Manage Webhooks, Manage Messages, View Channels, Send Messages.
+Manage Webhooks, Manage Messages, View Channels, Send Messages, Read Message
+History, Create Invite, and the bot's "Message Content Intent" switched on
+(Developer Portal → Bot) so it can read what people wrote.
 """
 from __future__ import annotations
 
 import importlib.util
 import json
 import os
+import re
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -51,7 +62,9 @@ def links(env: dict[str, str], game: str) -> dict[str, str | None]:
     def url(key):
         channel = env.get(f"{key}_{game.upper()}")
         return f"https://discord.com/channels/{guild}/{channel}" if guild and channel else None
-    return {"text": url("DISCORD_CHANNEL"), "voice": url("DISCORD_VOICE")}
+    code = env.get(f"DISCORD_INVITE_{game.upper()}")
+    return {"text": url("DISCORD_CHANNEL"), "voice": url("DISCORD_VOICE"),
+            "invite": f"https://discord.gg/{code}" if code else None}
 
 
 # ── REST ──────────────────────────────────────────────────────────────────────
@@ -78,7 +91,14 @@ def guild_from_invite(api: Discord, invite: str) -> str:
     return api("GET", f"/invites/{code}", auth=False)["guild"]["id"]
 
 
-def _ensure_channel(api, guild, channels, name, kind, parent=None, topic=None) -> dict:
+def _ensure_channel(api, guild, channels, name, kind, parent=None, topic=None, known_id=None) -> dict:
+    """The channel we made before (by stored id, renamed if its name drifted),
+    else one with this name, else a new one."""
+    for ch in channels:
+        if known_id and ch["id"] == known_id and ch["type"] == kind:
+            if ch["name"] != name:
+                ch.update(api("PATCH", f"/channels/{ch['id']}", {"name": name}))
+            return ch
     for ch in channels:
         if ch["name"].lower() == name.lower() and ch["type"] == kind:
             return ch
@@ -90,6 +110,19 @@ def _ensure_channel(api, guild, channels, name, kind, parent=None, topic=None) -
     ch = api("POST", f"/guilds/{guild}/channels", body)
     channels.append(ch)
     return ch
+
+
+def _ensure_invite(api, channel_id, code) -> str:
+    """A permanent invite into this channel (kept if it still exists)."""
+    if code:
+        try:
+            api("GET", f"/invites/{code}", auth=False)
+            return code
+        except urllib.error.HTTPError as err:
+            if err.code != 404:
+                raise
+    return api("POST", f"/channels/{channel_id}/invites",
+               {"max_age": 0, "max_uses": 0, "unique": False})["code"]
 
 
 def _ensure_webhook(api, channel_id) -> str:
@@ -125,17 +158,60 @@ def setup(token: str, invite: str, games: list[str], env: dict[str, str]) -> dic
     category = _ensure_channel(api, guild, channels, CATEGORY, CATEGORY_TYPE)
     updates = {"DISCORD_GUILD_ID": guild}
     for game in games:
-        name, description, _ = notify.GAMES[game]
-        text = _ensure_channel(api, guild, channels, game, TEXT, category["id"],
-                               topic=f"{description} Status + connection details are pinned.")
-        voice = _ensure_channel(api, guild, channels, name.split(":")[-1].strip(), VOICE, category["id"])
-        hook = _ensure_webhook(api, text["id"])
+        _, description, _ = notify.GAMES[game]
         key = game.upper()
+        # Text and voice share the game id as their name, e.g. #dragonwilds + 🔊dragonwilds.
+        text = _ensure_channel(api, guild, channels, game, TEXT, category["id"],
+                               topic=f"{description} Status + connection details are pinned.",
+                               known_id=env.get(f"DISCORD_CHANNEL_{key}"))
+        voice = _ensure_channel(api, guild, channels, game, VOICE, category["id"],
+                                known_id=env.get(f"DISCORD_VOICE_{key}"))
+        hook = _ensure_webhook(api, text["id"])
         updates |= {
             f"DISCORD_CHANNEL_{key}": text["id"],
             f"DISCORD_VOICE_{key}": voice["id"],
+            f"DISCORD_INVITE_{key}": _ensure_invite(api, text["id"], env.get(f"DISCORD_INVITE_{key}", "")),
             f"DISCORD_WEBHOOK_{key}": hook,
             f"DISCORD_BOARD_{key}": _ensure_board(api, hook, text["id"], game,
                                                   env.get(f"DISCORD_BOARD_{key}", ""), env),
         }
     return updates
+
+
+# ── read-only channel copy for the portal ─────────────────────────────────────
+
+_MENTION = re.compile(r"<@!?(\d+)>")
+_CACHE: dict[str, tuple[float, list[dict]]] = {}
+CACHE_SECONDS = 15          # every open game page polls; Discord rate-limits per channel
+
+
+def _plain_message(m: dict) -> dict | None:
+    """One Discord message → what the portal shows. Mentions become @names;
+    embeds (the VM's status posts) show their title/description."""
+    names = {u["id"]: u.get("global_name") or u["username"] for u in m.get("mentions", [])}
+    text = _MENTION.sub(lambda g: "@" + names.get(g.group(1), "someone"), m.get("content") or "")
+    extra = [e.get("title") or e.get("description") or "" for e in m.get("embeds", [])]
+    extra += [a.get("filename", "attachment") for a in m.get("attachments", [])]
+    extra = [x for x in extra if x]
+    if not text and not extra:
+        return None
+    author = m.get("author", {})
+    return {
+        "id": m["id"],
+        "author": author.get("global_name") or author.get("username") or "?",
+        "bot": bool(author.get("bot")),
+        "text": text,
+        "extra": extra,
+        "at": m.get("timestamp", ""),
+    }
+
+
+def recent_messages(token: str, channel_id: str, limit: int = 30) -> list[dict]:
+    """The channel's latest messages, oldest first, cached briefly."""
+    hit = _CACHE.get(channel_id)
+    if hit and time.monotonic() - hit[0] < CACHE_SECONDS:
+        return hit[1]
+    raw = Discord(token)("GET", f"/channels/{channel_id}/messages?limit={limit}")
+    msgs = [p for p in (_plain_message(m) for m in reversed(raw)) if p]
+    _CACHE[channel_id] = (time.monotonic(), msgs)
+    return msgs
