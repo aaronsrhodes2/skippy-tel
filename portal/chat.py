@@ -89,6 +89,17 @@ _FRIEND_RULES = (
 )
 
 
+_MUSIC = (
+    "\n\n## Music is made at home\n"
+    "When make_music is available you can compose a song or instrumental on the Captain's own GPU "
+    "(ACE-Step: free, no tokens, about a minute). Only make music when asked. Turn what they want "
+    "into a compact style description (genre, mood, instruments, tempo) and, if they gave or asked "
+    "for lyrics, structured lyrics with [verse] and [chorus] markers; no lyrics means instrumental. "
+    "The player appears under your reply when it's done, so don't paste links. If it says it's still "
+    "working, say so and offer to check with music_result. If it fails, say why plainly."
+)
+
+
 def system_prompt(user_name: str, is_admin: bool = False, page: str | None = None,
                   games: list[str] | None = None) -> str:
     restart = (", restart it, and read its logs to diagnose problems (you're talking to an admin)"
@@ -124,6 +135,7 @@ def system_prompt(user_name: str, is_admin: bool = False, page: str | None = Non
         "available or fails, Mentat is offline (it runs with Qwen on the Captain's PC): say so, and "
         "don't compute physics answers yourself; offer to try again once it's back. Feel free to be "
         "smug about owning a better Wolfram."
+        + (_MUSIC if is_admin else "")
     )
 
 

@@ -13,6 +13,8 @@ services:
     environment:
       SKIPPY_API: http://flask-api:5000
       MENTAT_URL: http://mentat-home:8080
+      MUSIC_URL: http://music-studio:8001      # ACE-Step: the portal chat's make_music
+      OLLAMA_URL: http://ollama:11434          # unloaded before a song so it gets the whole GPU
     volumes:
       - ./state/imports:/imports:ro   # game databases to carry to the games VM (see CLAUDE.md)
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}

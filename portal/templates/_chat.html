@@ -8,7 +8,7 @@
   <p class="help">Say <i>"thinking cap"</i> for a sharper answer (Sonnet){% if is_admin %}, or
     <i>"trust the awesomeness"</i> for the big brain (Opus){% endif %}. Otherwise it's Haiku: quick and cheap.
     Skippy can check the game server, start games{% if is_admin %}, restart it and read its logs{% endif %},
-    and hands physics to Mentat — just ask, or open <b>Tools</b> to aim at one (e.g. <code>/physics</code>).</p>
+    and hands physics to Mentat{% if is_admin %}, and makes music on your GPU at home{% endif %} — just ask, or open <b>Tools</b> to aim at one (e.g. <code>/physics</code>).</p>
   <div class="log"></div>
   <details class="verbs">
     <summary>Tools</summary>
@@ -68,9 +68,17 @@
         const note = document.createElement("div");
         note.className = "receipt";
         note.textContent = used.length ? "tools: " + used.map(t => ({ask_mentat: data.mentat_where === "home" ? "Mentat + Qwen (skippy-pc)" : "Mentat (didn't answer)",
-                           now_playing: "Bilby"})[t] || t.replace(/_/g, " ")).join(", ")
+                           now_playing: "Bilby", make_music: "ACE-Step on skippy-pc", music_result: "ACE-Step on skippy-pc"})[t] || t.replace(/_/g, " ")).join(", ")
           : (data.mentat_available ? "answered from the model's own knowledge" : "answered from the model's own knowledge (Mentat offline: skippy-pc or Qwen is down)");
         pending.append(note);
+        (data.media || []).forEach(m => {           // clips skippy-pc made for this reply
+          const clip = document.createElement("div"); clip.className = "clip";
+          const label = document.createElement("div"); label.className = "receipt";
+          label.textContent = "♪ " + (m.title || "clip") + (m.seconds ? " · " + m.seconds + " s" : "");
+          const audio = document.createElement("audio");
+          audio.controls = true; audio.preload = "metadata"; audio.src = m.url; audio.style.width = "100%";
+          clip.append(label, audio); pending.append(clip);
+        });
         history.push({role: "user", content: text}, {role: "assistant", content: data.reply});
         save();
       } catch (err) {
