@@ -105,13 +105,25 @@ URL=$(meta instance/attributes/eq-import-url)
 if [ -n "$TOKEN" ] && [ -n "$URL" ] && [ ! -f "$ED/.imported-${TOKEN:0:12}" ]; then
   log "fetching the home database"
   if curl -sfL -H "Authorization: Bearer $TOKEN" "$URL" -o "$ED/import.sql.gz" && gzip -t "$ED/import.sql.gz"; then
-    log "importing it (replaces this server's world)"
-    sql -e "DROP DATABASE IF EXISTS \`$MARIADB_DATABASE\`; CREATE DATABASE \`$MARIADB_DATABASE\`;"
-    gunzip -c "$ED/import.sql.gz" | sql "$MARIADB_DATABASE"
-    in_server "./bin/world database:updates && ./bin/shared_memory"   # migrate to this build
-    curl -sf -X POST -H "Authorization: Bearer $TOKEN" "$URL/done" || true
-    touch "$ED/.imported-${TOKEN:0:12}"
-    log "home database imported"
+    # Load into a scratch database first; the live world is only replaced once
+    # the whole dump went in, so a bad file can't leave an empty world.
+    STAGE="${MARIADB_DATABASE}_import"
+    sql -e "DROP DATABASE IF EXISTS \`$STAGE\`; CREATE DATABASE \`$STAGE\`;"
+    if gunzip -c "$ED/import.sql.gz" | sed -E '/^(CREATE DATABASE|USE )/d' | sql "$STAGE"; then
+      log "loaded; swapping it in (replaces this server's world)"
+      RENAMES=$(sql -N -e "SET SESSION group_concat_max_len = 1000000;
+        SELECT GROUP_CONCAT(CONCAT('\`$STAGE\`.\`', table_name, '\` TO \`$MARIADB_DATABASE\`.\`', table_name, '\`')
+          SEPARATOR ', ') FROM information_schema.tables WHERE table_schema = '$STAGE';")
+      sql -e "DROP DATABASE IF EXISTS \`$MARIADB_DATABASE\`; CREATE DATABASE \`$MARIADB_DATABASE\`;
+              RENAME TABLE $RENAMES; DROP DATABASE \`$STAGE\`;"
+      in_server "./bin/world database:updates && ./bin/shared_memory"   # migrate to this build
+      curl -sf -X POST -H "Authorization: Bearer $TOKEN" "$URL/done" || true
+      touch "$ED/.imported-${TOKEN:0:12}"
+      log "home database imported"
+    else
+      sql -e "DROP DATABASE IF EXISTS \`$STAGE\`;" || true
+      log "WARNING: the home database didn't load; keeping the current world"
+    fi
   else
     log "home database not available from the portal right now; starting with the current world"
   fi

@@ -12,6 +12,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -184,6 +185,8 @@ class Uploads:
 
     def want(self, names: list) -> None:
         for name in names or []:
+            if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9_-]{1,32}", name):
+                continue                      # a plain game id, never a path
             path = os.path.join(IMPORTS_DIR, f"{name}.sql.gz")
             if name not in self.busy and os.path.isfile(path):
                 self.busy.add(name)

@@ -52,9 +52,10 @@ jobs:
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
-      # `home` asks the portal, which accepts only a Google ID token for the deployer.
+      # `home` and `discord-setup` ask the portal, which accepts only a Google ID
+      # token for the deployer.
       - id: idtoken
-        if: inputs.command == 'home'
+        if: inputs.command == 'home' || inputs.command == 'discord-setup'
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}

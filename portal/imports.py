@@ -102,6 +102,8 @@ class Imports:
     def authorized(self, name: str, header: str | None) -> bool:
         if name not in IMPORTS or not header or not header.startswith("Bearer "):
             return False
+        if self.status(name)["state"] != "ready":     # nothing to fetch: don't ask the Compute API
+            return False
         token = self.vm.get_metadata(IMPORTS[name]["token_key"]) or ""
         return bool(token) and hmac.compare_digest(header[7:].strip(), token)
 

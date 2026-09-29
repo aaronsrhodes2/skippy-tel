@@ -170,10 +170,16 @@ _UNSAFE = re.compile(
     r"vars|breakpoint|builtins|subclasses|mro|os|sys|subprocess|input)\b", re.I)
 
 
+# Runaway maths: power towers and huge literals can pin a worker for minutes.
+_HUGE = re.compile(r"(\^|\*\*)\s*\(?\s*\d{4,}"                    # x**10000
+                   r"|(\^|\*\*)\s*\(?\s*[\d.]+\s*\)?\s*(\^|\*\*)"   # power towers: 9^9^9
+                   r"|factorial\s*\(\s*\d{4,}|\d{4,}\s*!", re.I)       # 1000!
+
+
 def unsafe_arg(value) -> str | None:
     """The first string (anywhere in the arguments) that looks like code, else None."""
     if isinstance(value, str):
-        return value if _UNSAFE.search(value) else None
+        return value if _UNSAFE.search(value) or _HUGE.search(value) else None
     if isinstance(value, dict):
         value = list(value.keys()) + list(value.values())
     if isinstance(value, (list, tuple)):

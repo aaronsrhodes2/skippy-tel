@@ -86,7 +86,8 @@ def portal_task(vm, name: str) -> int:
     task_id = uuid.uuid4().hex[:12]
     queue = json.loads(vm.get_metadata("portal-tasks") or "[]")
     vm.set_metadata("portal-tasks", json.dumps(queue + [{"id": task_id, "task": name}]))
-    req = urllib.request.Request(f"{PORTAL_URL}/tasks/run", data=b"", method="POST")
+    req = urllib.request.Request(f"{PORTAL_URL}/tasks/run", data=b"", method="POST",
+                                 headers={"Authorization": f"Bearer {os.environ.get('OPS_ID_TOKEN', '')}"})
     with urllib.request.urlopen(req, timeout=120) as resp:
         results = json.loads(resp.read())["results"]
     mine = [r for r in results if r["id"] == task_id]

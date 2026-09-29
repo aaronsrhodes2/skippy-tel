@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -66,12 +67,26 @@ ADVERSARIAL_RUNS = (
 HIDDEN_KEY = "portal-experiments"   # VM metadata: JSON list of hidden slugs (dashboard toggle)
 
 
+_CACHE: dict[int, tuple[float, list[str]]] = {}
+CACHE_SECONDS = 30      # /experiments is public: don't call the Compute API on every visit
+
+
 def hidden(vm) -> list[str]:
+    cached = _CACHE.get(id(vm))
+    if cached and time.monotonic() - cached[0] < CACHE_SECONDS:
+        return cached[1]
     try:
         data = json.loads(vm.get_metadata(HIDDEN_KEY) or "[]")
-        return [s for s in data if isinstance(s, str)]
+        out = [s for s in data if isinstance(s, str)]
     except Exception:  # noqa: BLE001 — showing everything beats a broken showcase
-        return []
+        out = []
+    _CACHE[id(vm)] = (time.monotonic(), out)
+    return out
+
+
+def forget(vm) -> None:
+    """After the dashboard toggles one, show the change right away."""
+    _CACHE.pop(id(vm), None)
 
 
 def visible(vm) -> tuple[Experiment, ...]:

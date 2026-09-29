@@ -517,30 +517,48 @@ def test_play_card_has_players_online_and_facts(env):
 
 # ── remote-operator task queue (tasks.py) ─────────────────────────────────────
 
+OPS = {"Authorization": "Bearer ops-id-token"}
+
+
+def _as_ops(monkeypatch):
+    """Pretend Google verified the ops workflow's ID token for the deployer."""
+    monkeypatch.setattr("google.oauth2.id_token.verify_oauth2_token", lambda *a, **k: {
+        "email": "skippy-deployer@skippy-tel.iam.gserviceaccount.com", "email_verified": True})
+
+
+def test_task_endpoint_is_for_the_ops_workflow_only(env):
+    client, vm, _ = env
+    vm.metadata["portal-tasks"] = json.dumps([{"id": "t1", "task": "discord-setup"}])
+    assert client.post("/tasks/run").status_code == 401
+    assert json.loads(vm.metadata["portal-tasks"])                     # nothing ran
+
+
 def test_task_endpoint_runs_only_what_was_queued(env, monkeypatch):
     import json
     import discord_admin
     client, vm, _ = env
-    assert client.post("/tasks/run").get_json() == {"results": []}   # nothing queued: nothing runs
+    _as_ops(monkeypatch)
+    assert client.post("/tasks/run", headers=OPS).get_json() == {"results": []}   # nothing queued
     client.application.config["DISCORD_BOT_TOKEN"] = "tok"
     monkeypatch.setattr(discord_admin, "setup",
                         lambda token, invite, games, env: {"DISCORD_GUILD_ID": "g1", "DISCORD_CHANNEL_DRAGONWILDS": "c9"})
     vm.metadata["portal-tasks"] = json.dumps([{"id": "t1", "task": "discord-setup"},
                                               {"id": "t2", "task": "rm-rf"}])
-    results = {r["id"]: r for r in client.post("/tasks/run").get_json()["results"]}
+    results = {r["id"]: r for r in client.post("/tasks/run", headers=OPS).get_json()["results"]}
     assert results["t1"]["ok"] and "Discord ready" in results["t1"]["message"]
     assert not results["t2"]["ok"] and "unknown task" in results["t2"]["message"]
     assert vm.state.env["DISCORD_CHANNEL_DRAGONWILDS"] == "c9"        # settings saved to the VM
     assert json.loads(vm.metadata["portal-tasks"]) == []              # queue emptied
     assert [r["id"] for r in json.loads(vm.metadata["portal-task-results"])] == ["t1", "t2"]
-    assert client.post("/tasks/run").get_json() == {"results": []}   # and never re-run
+    assert client.post("/tasks/run", headers=OPS).get_json() == {"results": []}   # and never re-run
 
 
-def test_task_failure_is_reported_not_raised(env):
+def test_task_failure_is_reported_not_raised(env, monkeypatch):
     import json
     client, vm, _ = env
+    _as_ops(monkeypatch)
     vm.metadata["portal-tasks"] = json.dumps([{"id": "t1", "task": "discord-setup"}])   # no bot token
-    [result] = client.post("/tasks/run").get_json()["results"]
+    [result] = client.post("/tasks/run", headers=OPS).get_json()["results"]
     assert not result["ok"] and "bot token" in result["message"]
 
 
@@ -979,18 +997,18 @@ def test_friends_chat_is_rate_limited_but_the_captain_is_not(env):
     client, _, _ = env
     _add_friend(client, PAL, ["skippy"])
     login(client, PAL)
-    codes = [client.post("/chat/send", json={"message": "hi"}).status_code for _ in range(41)]
-    assert codes[:40] == [200] * 40 and codes[40] == 429
+    codes = [client.post("/chat/send", json={"message": "hi"}).status_code for _ in range(61)]
+    assert codes[:60] == [200] * 60 and codes[60] == 429
     login(client, ADMIN)
-    assert all(client.post("/chat/send", json={"message": "hi"}).status_code == 200 for _ in range(45))
+    assert all(client.post("/chat/send", json={"message": "hi"}).status_code == 200 for _ in range(65))
 
 
 def test_thinking_cap_has_its_own_smaller_limit(env):
     client, _, _ = env
     _add_friend(client, PAL, ["skippy"])
     login(client, PAL)
-    codes = [client.post("/chat/send", json={"message": "thinking cap: why?"}).status_code for _ in range(11)]
-    assert codes[:10] == [200] * 10 and codes[10] == 429
+    codes = [client.post("/chat/send", json={"message": "thinking cap: why?"}).status_code for _ in range(21)]
+    assert codes[:20] == [200] * 20 and codes[20] == 429
     assert client.post("/chat/send", json={"message": "plain question"}).status_code == 200
 
 
@@ -1000,5 +1018,26 @@ def test_public_mentat_playground_is_rate_limited_per_visitor():
     client = portal.create_app(dict(SETTINGS), vm=vm, skippy=skippy, mentat=FakeMentat()).test_client()
     call = lambda ip: client.post("/experiments/mentat/api/call/convert_units", json={"value": 1},
                                   headers={"X-Forwarded-For": f"6.6.6.6, {ip}"}).status_code
-    assert [call("1.1.1.1") for _ in range(31)][-1] == 429           # spoofed first hop doesn't help
+    assert [call("1.1.1.1") for _ in range(11)][-1] == 429           # spoofed first hop doesn't help
     assert call("2.2.2.2") == 200                                   # a different real visitor is fine
+
+
+def test_radiance_only_passes_a_plain_scene_id(env):
+    client, _, _ = env
+    r = client.get("/experiments/radiance/?scene=<img src=x onerror=alert(1)>")
+    assert r.status_code == 302 and r.location.endswith("/experiments/radiance/")
+    r = client.get("/experiments/radiance/?scene=double_slit&evil=1")
+    assert r.status_code == 302 and r.location.endswith("/experiments/radiance/?scene=double_slit")
+    assert client.get("/experiments/radiance/?scene=double_slit").status_code != 302
+
+
+def test_bilby_art_is_always_served_as_an_image(env):
+    import base64
+    client, _, _ = env
+    token = _pair(client)
+    report = json.loads(json.dumps(REPORT))
+    report["art"] = {"key": REPORT["bilby"]["now_playing"]["art_url"], "type": "text/html",
+                     "b64": base64.b64encode(b"<script>alert(1)</script>").decode()}
+    client.post("/home/report", json=report, headers={"Authorization": f"Bearer {token}"})
+    r = client.get("/bilby/art")
+    assert r.mimetype == "image/jpeg" and r.headers["X-Content-Type-Options"] == "nosniff"

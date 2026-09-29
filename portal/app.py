@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from functools import wraps
 
 from flask import (Blueprint, Flask, abort, flash, jsonify, redirect, render_template, request, send_file,
@@ -57,8 +58,9 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     # everyone but the Captain (every message costs Anthropic money).
     limiter = ratelimit.Limiter()
     app.extensions["limiter"] = limiter
-    MENTAT_PER_MIN = 30
-    CHAT_PER_HOUR, SHARP_PER_HOUR = 40, 10      # any model / "thinking cap" (Sonnet)
+    # Human-scale: a person never hits these; a script hammering them does.
+    MENTAT_PER_MIN = 10
+    CHAT_PER_HOUR, SHARP_PER_HOUR = 60, 20      # any model / "thinking cap" (Sonnet)
     imports = imports or imports_mod.Imports(vm)
 
     def me() -> str:
@@ -399,8 +401,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         a = home.current_art()
         if not a:
             abort(404)
-        return app.response_class(base64.b64decode(a["b64"]), mimetype=a.get("type") or "image/jpeg",
-                                  headers={"Cache-Control": "private, max-age=3600"})
+        kind = a.get("type") if a.get("type") in ("image/jpeg", "image/png", "image/webp") else "image/jpeg"
+        return app.response_class(base64.b64decode(a["b64"]), mimetype=kind,       # never HTML
+                                  headers={"Cache-Control": "private, max-age=3600",
+                                           "X-Content-Type-Options": "nosniff"})
 
     @music.post("/control")
     @auth.admin_required
@@ -417,7 +421,9 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     # ── queued tasks from remote operators (tasks.py) ──────────────────────────
     @app.post("/tasks/run")
     def tasks_run():
-        """No login: runs only what someone who controls the VM queued."""
+        """For the ops workflow (Google ID token for the deployer): runs what it queued."""
+        if not auth.ops_caller(request.headers.get("Authorization"), app.config["OPS_EMAILS"]):
+            abort(401)
         return jsonify(results=tasks.run_pending(vm, {"discord-setup": run_discord_setup}))
 
     # ── personal dashboard (admin only) ────────────────────────────────────────
@@ -487,6 +493,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         if slug in {x.slug for x in experiments.EXPERIMENTS}:
             gone = set(experiments.hidden(vm)) ^ {slug}
             vm.set_metadata(experiments.HIDDEN_KEY, json.dumps(sorted(gone)))
+            experiments.forget(vm)
             flash(f"{'Hid' if slug in gone else 'Showing'} {slug} on the public Experiments page.", "ok")
         return redirect(url_for("me.index"))
 
@@ -533,6 +540,16 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     @lab.get("/radiance/")
     def radiance_index():
+        # Radiance's JS writes ?scene into the page as HTML on a failed load
+        # (setErr → innerHTML), and it runs on the portal's own origin: a crafted
+        # link would be script with the signed-in user's session. Only a plain
+        # scene id (the same shape its viewer accepts) and probe=1 get through.
+        args = request.args
+        scene_ok = re.fullmatch(r"[a-z0-9_]{1,80}", args.get("scene", "")) is not None
+        if any(k not in ("scene", "probe") for k in args) or ("scene" in args and not scene_ok) \
+                or args.get("probe", "1") != "1":
+            clean = {"scene": args["scene"]} if scene_ok else {}
+            return redirect(url_for("experiments.radiance_index", **clean))
         page = experiments.radiance_dir() / "index.html"
         if not page.exists():
             return render_template("experiments.html", experiments=experiments.EXPERIMENTS,
