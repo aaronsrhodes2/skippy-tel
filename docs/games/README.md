@@ -106,7 +106,7 @@ What happens:
 | Valheim | UDP 2456–2457 | Set `VALHEIM_PASSWORD` (≥5 chars). Import an old world by copying `.db`/`.fwl` into `data/valheim/config/worlds_local/`. |
 | Factorio | UDP 34197 | Set `game_password` in `data/factorio/config/server-settings.json`, then restart. |
 | Satisfactory | UDP+TCP 7777, TCP 8888 | The first player to connect claims the server and sets the admin + join passwords. Do this right away. |
-| Dragonwilds | UDP **7778** (moved off 7777 so it can run beside Satisfactory) | `DRAGONWILDS_OWNER_ID` + `DRAGONWILDS_ADMIN_PASSWORD` required. Players join with the **invite code** shown on the portal's Dragonwilds page (new every boot; the Public-tab search by server name is exact-match and unreliable) plus the world password; crossplay with Xbox/PS5/Switch 2. Up to 6 players. |
+| Dragonwilds | UDP **7778** (moved off 7777 so it can run beside Satisfactory) | `DRAGONWILDS_OWNER_ID` + `DRAGONWILDS_ADMIN_PASSWORD` required. Players join with the **invite code** shown on the portal's Dragonwilds page (new every boot), or search the server name in the Public tab (whole name, exact case: `Skippy` won't find `SkippyScape`) plus the world password; crossplay with Xbox/PS5/Switch 2. Up to 6 players. |
 
 ### Moving a Nitrado world over
 Download the save from Nitrado's file browser, `scripts/games.sh up <game>` once so the folders

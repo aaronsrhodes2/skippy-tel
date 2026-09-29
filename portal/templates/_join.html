@@ -18,6 +18,6 @@
     {% else %}<p class="help">No join password set — anyone who finds it can join.</p>{% endif %}
   {% endif %}
   {% if game.invite_code %}
-    <p class="help">No luck with the code? {{ game.connect(status.external_ip, status.env) | safe }}</p>
+    <p class="help">Or search the list: {{ game.connect(status.external_ip, status.env) | safe }}</p>
   {% endif %}
 </div>

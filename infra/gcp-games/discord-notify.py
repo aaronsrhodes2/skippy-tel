@@ -54,7 +54,7 @@ GAMES = {
                        + ("\nWorld password: next to the code on the Skippy Portal"
                           if e.get("DRAGONWILDS_WORLD_PASSWORD") else "")
                        + f"\nOr: Public tab → search **{e.get('DRAGONWILDS_SERVER_NAME') or 'Skippy'}** "
-                         "(exact spelling and case)"),
+                         "(the whole name, exact spelling and case)"),
     ),
 }
 

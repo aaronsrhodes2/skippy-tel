@@ -63,15 +63,15 @@ GAMES: dict[str, Game] = {
         connect=lambda ip, env: (
             "Worlds &rarr; <b>Public</b> tab &rarr; search "
             f"<b>{html.escape(env.get('DRAGONWILDS_SERVER_NAME') or 'Skippy')}</b> "
-            "(exact spelling and case; the list is hit and miss)"
+            "(the whole name, exact spelling and case)"
         ),
         settings=(
             Setting("DRAGONWILDS_OWNER_ID", "Owner Player ID",
                     help="In-game Settings menu, bottom, copy button. Not your Xbox/Steam ID."),
             Setting("DRAGONWILDS_ADMIN_PASSWORD", "Admin password", secret=True),
             Setting("DRAGONWILDS_SERVER_NAME", "Server name",
-                    help="How the world shows in the Public list (search is exact and case-sensitive; "
-                         "the invite code on the game page is the reliable way in)."),
+                    help="How the world shows in the Public list. Search only matches the whole name, "
+                         "exact case, so keep it easy to type."),
             Setting("DRAGONWILDS_WORLD_NAME", "World name",
                     help="Only used when the world is first created; renaming it later has no effect."),
             Setting("DRAGONWILDS_WORLD_PASSWORD", "World password", secret=True,
