@@ -104,6 +104,31 @@ def test_signed_out_sees_login(env):
     assert client.get("/health").data == b"ok"
 
 
+def test_portal_is_all_cards_with_no_top_tabs(env):
+    client, _, _ = env
+    login(client, ADMIN)
+    launcher = client.get("/").data.decode()
+    assert "<nav" not in launcher and 'id="home-btn"' not in launcher          # the launcher is home: nowhere to go "back" to
+    assert "sign out" in launcher                                              # the account lives on the home screen
+    for path in ("/dashboard", "/me", "/admin", "/chat", "/bilby"):            # everywhere the old tabs led is now a tile
+        assert f'href="{path}"' in launcher, path
+    _add_friend(client, PAL, ["dragonwilds"])
+    login(client, PAL)
+    friend = client.get("/").data.decode()
+    assert 'href="/admin"' not in friend and 'href="/me"' not in friend         # admin tiles stay admin-only
+
+
+def test_every_app_page_has_a_back_button_a_home_button_and_its_own_title(env):
+    client, _, _ = env
+    login(client, ADMIN)
+    page = client.get("/dashboard").data.decode()
+    assert "<nav" not in page
+    assert "&lsaquo; Home</a>" in page and 'id="home-btn"' in page
+    assert "sign out" not in page                                              # app bars are just back + title
+    assert '<h1 class="apptitle">Servers</h1>' in page                          # title comes from the page's own <title>
+    assert '<h1 class="apptitle">Admin</h1>' in client.get("/admin").data.decode()
+
+
 def test_unlisted_email_is_bounced(env):
     client, _, _ = env
     login(client, "stranger@example.com")

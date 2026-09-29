@@ -5,14 +5,20 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Titillium+Web:wght@700&family=Rajdhani:wght@700&display=swap" rel="stylesheet">
 <style>
-  .portals { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+  /* A phone home screen: rounded app tiles, two across on a phone. */
+  .portals { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
   .portal { position: relative; display: flex; flex-direction: column; justify-content: flex-end;
-            min-height: 150px; padding: 16px; border-radius: 12px; text-decoration: none; color: var(--white);
+            min-height: 168px; padding: 14px; border-radius: 20px; text-decoration: none; color: var(--white);
             border: 1px solid var(--dim-green-hi); background: var(--dim-green); overflow: hidden;
             transition: transform .12s ease, box-shadow .12s ease; }
   .portal:hover { transform: translateY(-2px); box-shadow: 0 6px 22px rgba(0,0,0,.6); }
-  .portal h3 { margin: 0; font-size: 1.15rem; }
-  .portal p { margin: 4px 0 0; font-size: .85rem; opacity: .85; }
+  .portal h3 { margin: 0; font-size: 1.1rem; }
+  .portal p { margin: 4px 0 0; font-size: .8rem; opacity: .85;
+              display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .portal .icon { font-size: 2.1rem; line-height: 1; margin-bottom: auto; }
+  .portal .icon.letter { width: 2.4rem; height: 2.4rem; border-radius: 12px; display: flex; align-items: center;
+                         justify-content: center; font-size: 1.4rem; font-weight: 700; background: rgba(0,0,0,.4);
+                         border: 1px solid currentColor; }
   .portal .pill { position: absolute; top: 12px; right: 12px; font-size: .72rem; padding: 2px 9px;
                   border-radius: 999px; background: rgba(0,0,0,.45); border: 1px solid currentColor; }
   .portal.skippy { background: radial-gradient(circle at 80% 10%, rgba(0,255,136,.35), transparent 60%), #02140c;
@@ -30,6 +36,9 @@
                   border-color: #ff44aa; }
   .portal.bilby h3 { color: #ff7ac4; }
   .portal.servers { background: #0c0c0c; border-color: #444; }
+  .portal.admin { background: radial-gradient(circle at 15% 15%, rgba(255,170,0,.28), transparent 60%), #120c02;
+                  border-color: var(--amber); }
+  .portal.admin h3 { color: var(--amber); }
 </style>
 {% endblock %}
 {% block content %}
@@ -37,6 +46,7 @@
   <div class="portals">
     {% if is_admin and has_me %}
       <a class="portal me" href="{{ url_for('me.index') }}">
+        <span class="icon">🛰️</span>
         <h3>Your dashboard</h3><p>Servers, spend, friends and your own tools.</p></a>
     {% endif %}
 
@@ -47,6 +57,7 @@
          style="background: {{ t.card }}; background-image: {{ t.pattern }}; border-color: {{ t.accent2 }}">
         <span class="pill" style="color: {{ t.accent }}">
           {% if not status %}?{% elif on %}● online{% elif status.status == 'RUNNING' %}busy{% else %}asleep{% endif %}</span>
+        <span class="icon letter" style="color: {{ t.accent }}; font-family: '{{ t.font }}', serif">{{ game.name[:1] }}</span>
         <h3 style="font-family: '{{ t.font }}', serif; text-shadow: 0 0 14px {{ t.accent }}">{{ game.name }}</h3>
         <p style="color: {{ t.text }}">{{ t.tagline }}</p>
       </a>
@@ -54,6 +65,7 @@
 
     {% if can_skippy %}
       <a class="portal skippy" href="{{ url_for('chat.index') }}">
+        <span class="icon">💬</span>
         <h3>Skippy</h3><p>The Magnificent. Ask him anything; try not to bore him.</p></a>
     {% endif %}
 
@@ -61,18 +73,27 @@
       {% set np = music.traktor.now_playing or (music.session and music.session.now_playing) %}
       <a class="portal bilby" href="{{ url_for('bilby.index') }}">
         <span class="pill" style="color:#ff7ac4">{% if not music.online %}home offline{% elif np %}♪ playing{% else %}quiet{% endif %}</span>
+        <span class="icon">🎧</span>
         <h3>Bilby</h3>
         <p>{% if np %}{{ np.artist }} — {{ np.title }}{% else %}What's on the decks, live from home.{% endif %}</p></a>
     {% endif %}
 
     {% if show_experiments %}
       <a class="portal experiments" href="{{ url_for('experiments.index') }}">
+        <span class="icon">🧪</span>
         <h3>Experiments</h3><p>Physics engines, a Wolfram rival, and other things built after dark.</p></a>
     {% endif %}
 
     {% if games %}
       <a class="portal servers" href="{{ url_for('dashboard.index') }}">
+        <span class="icon">🖥️</span>
         <h3>Server room</h3><p>Every game's status and the start/stop controls in one place.</p></a>
+    {% endif %}
+
+    {% if is_admin %}
+      <a class="portal admin" href="{{ url_for('admin.index') }}">
+        <span class="icon">⚙️</span>
+        <h3>Admin</h3><p>Settings, friends, Discord and restarts.</p></a>
     {% endif %}
   </div>
 </section>

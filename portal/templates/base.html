@@ -18,11 +18,19 @@
     margin: 0; padding: 24px 16px 64px;
   }
   a { color: var(--cyan); }
-  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 24px; }
-  h1 { color: var(--green); font-size: 1.4rem; margin: 0; }
-  nav a { margin-right: 14px; text-decoration: none; }
-  nav a.here { color: var(--green); }
-  .user { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; }
+  /* No top tabs: the portal is a phone. Home is the launcher (a card per app); every
+     other page is an app with a back button, and a round Home button floats at the bottom. */
+  header.appbar { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; min-height: 40px; }
+  h1 { color: var(--green); font-size: 1.4rem; margin: 0; flex: 1; min-width: 0; }
+  header.appbar h1.apptitle { font-size: 1.1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  a.back { text-decoration: none; padding: 8px 12px 8px 8px; border-radius: 999px; white-space: nowrap;
+           border: 1px solid var(--dim-green-hi); background: var(--dim-green); }
+  #home-btn { position: fixed; left: 50%; transform: translateX(-50%); bottom: 14px; z-index: 40;
+              width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+              font-size: 1.3rem; text-decoration: none; color: var(--green); background: #050505;
+              border: 1px solid var(--green); box-shadow: 0 4px 18px rgba(0,0,0,.6); }
+  #home-btn:hover { background: var(--green); color: var(--black); }
+  .user { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; white-space: nowrap; }
   .user img { width: 28px; height: 28px; border-radius: 50%; }
   main { max-width: 760px; margin: 0 auto; }
   section { margin-bottom: 32px; }
@@ -85,19 +93,21 @@
 <body>
 <main>
 {% if user %}
-<header>
-  <h1><a href="{{ url_for('index') }}" style="color:inherit;text-decoration:none">Skippy Portal</a></h1>
-  <nav>
-    <a href="{{ url_for('index') }}" class="{{ 'here' if request.endpoint == 'index' }}">Home</a>
-    <a href="{{ url_for('dashboard.index') }}" class="{{ 'here' if request.endpoint == 'dashboard.index' }}">Servers</a>
-    {% if can_skippy %}<a href="{{ url_for('chat.index') }}" class="{{ 'here' if request.endpoint == 'chat.index' }}">Chat</a>{% endif %}
-    {% if is_admin %}<a href="{{ url_for('me.index') }}" class="{{ 'here' if request.endpoint == 'me.index' }}">Dashboard</a>{% endif %}
-    {% if is_admin %}<a href="{{ url_for('admin.index') }}" class="{{ 'here' if request.endpoint == 'admin.index' }}">Admin</a>{% endif %}
-  </nav>
+{% set on_home = request.endpoint == 'index' %}
+<header class="appbar">
+  {% if on_home %}
+    <h1>Skippy Portal</h1>
+  {% else %}
+    <a class="back" href="{{ url_for('index') }}">&lsaquo; Home</a>
+    {# the app's name is its page title minus the site suffix, so no template needs a second title #}
+    <h1 class="apptitle">{{ self.title() | trim | replace(' — Skippy Portal', '') | replace(' — Experiments', '') | replace(' — Aaron Rhodes', '') }}</h1>
+  {% endif %}
+  {% if on_home %}{# the account lives on the home screen; app bars are just back + title #}
   <div class="user">
     {% if user.picture %}<img src="{{ user.picture }}" alt="">{% endif %}
     {{ user.name }} &middot; <a href="{{ url_for('auth.logout') }}">sign out</a>
   </div>
+  {% endif %}
 </header>
 {% endif %}
 {% for category, message in get_flashed_messages(with_categories=true) %}
@@ -105,6 +115,9 @@
 {% endfor %}
 {% block content %}{% endblock %}
 </main>
+{% if user and request.endpoint != 'index' %}
+  <a id="home-btn" href="{{ url_for('index') }}" aria-label="Home" title="Home">&#8962;</a>
+{% endif %}
 {% if can_skippy and request.endpoint != 'chat.index' %}
   {# Skippy on every page: same chat as the Chat page, docked bottom-right. #}
   <button id="skippy-dock-btn" type="button" aria-expanded="false" aria-controls="skippy-dock">💬 Skippy</button>
