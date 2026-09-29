@@ -375,3 +375,10 @@ def test_mcp_tools_default_to_private():
         assert not tp.allowed(private, is_admin=False)
         assert tp.allowed(private, is_admin=True)
     assert tp.allowed_servers(["physics", "gmail", "brand-new"], is_admin=False) == ["physics"]
+
+
+def test_portal_skippy_is_loud_but_privacy_rules_come_after():
+    import chat
+    friend = chat.system_prompt("Pal")
+    assert "full volume" in friend and "filthy monkeys" in friend
+    assert friend.index("full volume") < friend.index("NOT the Captain")   # later rules win

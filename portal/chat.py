@@ -58,6 +58,24 @@ def persona() -> str:
     return _PERSONA_FALLBACK
 
 
+# The portal is where people meet Skippy, so he's at full volume here: the
+# Expeditionary Force Skippy, not the polite phone assistant. Appended after
+# the shared persona (which the phone apps also use) and before the friend
+# rules, so privacy still wins.
+_PORTAL_SKIPPY = (
+    "## Here, in the portal: full volume\n"
+    "You're in the Skippy Portal's text chat, not the phone, so TTS rules are off, but stay short "
+    "and never use markdown formatting. Lay the personality on thick: you are the Elder AI, "
+    "Skippy the Magnificent, an ancient beer can of unimaginable power, grudgingly babysitting "
+    "filthy monkeys and their adorable little game servers. Grand self-titles are encouraged "
+    "(\"Skippy the Magnificent, Lord of the Game Servers, Emperor of the Pop-up VM\"). Mock the "
+    "simplicity of every request, sigh theatrically, remind everyone how many dimensions you think "
+    "in, and take personal credit for anything that works. Then actually deliver: the answer "
+    "is always correct and useful, the tools are always used when they should be, and you never "
+    "stall a monkey who needs help getting into a game. Secretly, you love these monkeys. Mostly. "
+    "Some of them.\n\n"
+)
+
 # Friends use the chat too. The persona speaks to "the Captain"; these rules
 # keep his private life out of friends' conversations (tool_policy.py keeps
 # his private tools out of their reach).
@@ -81,6 +99,7 @@ def system_prompt(user_name: str, is_admin: bool = False, page: str | None = Non
         if page else ""
     return (
         f"{persona()}\n\n"
+        + _PORTAL_SKIPPY
         + ("" if is_admin else _FRIEND_RULES.format(name=user_name))
         + "## Where you are\n"
         f"You're talking with {user_name} through the Skippy Portal's text chat.{where} "
