@@ -7,6 +7,9 @@ builds that same server, catching it instead of running stdio, and serves:
     GET  /health             "ok"
     GET  /tools              [{name, description, input_schema, domain}]  (the public set)
     POST /tools/<name>       JSON arguments → {"ok": true, "result": {...}} | {"ok": false, "error": "..."}
+    POST /ask                {"question": "..."} → Mentat's own plain-English front door
+                             (Materia's translator, keyword routes only: the qwen
+                             residual lives on skippy-pc, not here)
 
 It's public (the Experiments playground and Skippy's chat call it), so:
   • runs as the zero-permission `skippy-mentat` service account (bootstrap)
@@ -95,6 +98,11 @@ def _rate_limited(ip: str) -> bool:
         return False
 
 
+def _ask(question: str) -> dict:
+    from sigma_ground.mcp.tools.simulation import simulate
+    return simulate(question, use_llm=False).to_dict()
+
+
 def _call(name: str, args: dict):
     content, structured = asyncio.run(server.call_tool(name, args))
     if structured is not None:
@@ -118,22 +126,35 @@ def list_tools():
                     for t in sorted(TOOLS.values(), key=lambda t: t.name)])
 
 
-@app.post("/tools/<name>")
-def call_tool(name):
-    if name not in TOOLS:
-        return jsonify(ok=False, error=f"no public tool named {name!r}"), 404
+def _guarded(label: str, fn, *args):
+    """Rate limit, size cap and timeout shared by every compute endpoint."""
     ip = (request.headers.get("X-Forwarded-For") or request.remote_addr or "?").split(",")[0].strip()
     if _rate_limited(ip):
         return jsonify(ok=False, error="Slow down: rate limit reached, try again in a minute."), 429
     if (request.content_length or 0) > MAX_ARGS_BYTES:
         return jsonify(ok=False, error="arguments too large"), 413
-    args = request.get_json(silent=True) or {}
-    if not isinstance(args, dict):
-        return jsonify(ok=False, error="arguments must be a JSON object"), 400
-    future = _pool.submit(_call, name, args)
+    future = _pool.submit(fn, *args)
     try:
         return jsonify(ok=True, result=future.result(timeout=CALL_TIMEOUT_S))
     except CallTimeout:
-        return jsonify(ok=False, error=f"{name} took longer than {CALL_TIMEOUT_S}s"), 504
+        return jsonify(ok=False, error=f"{label} took longer than {CALL_TIMEOUT_S}s"), 504
     except Exception as exc:  # noqa: BLE001 — tool/validation errors go back as messages
         return jsonify(ok=False, error=str(exc)[:2000]), 400
+
+
+@app.post("/tools/<name>")
+def call_tool(name):
+    if name not in TOOLS:
+        return jsonify(ok=False, error=f"no public tool named {name!r}"), 404
+    args = request.get_json(silent=True) or {}
+    if not isinstance(args, dict):
+        return jsonify(ok=False, error="arguments must be a JSON object"), 400
+    return _guarded(name, _call, name, args)
+
+
+@app.post("/ask")
+def ask():
+    question = str((request.get_json(silent=True) or {}).get("question") or "").strip()
+    if not question:
+        return jsonify(ok=False, error="ask needs a question"), 400
+    return _guarded("ask", _ask, question[:2000])

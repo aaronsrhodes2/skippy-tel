@@ -1,5 +1,6 @@
 """The portal's client for Mentat (mentat/app.py): sigma-ground's physics tools
-over HTTP. Used by Skippy's chat (as tools) and by the Experiments playground.
+over HTTP. Skippy's chat uses its plain-English front door (ask); the
+Experiments playground uses the individual tools.
 
 Mentat's tool list is fetched once and cached; everything degrades to "no
 physics tools" if Mentat is unreachable, never to a broken page or chat.
@@ -13,15 +14,6 @@ import urllib.request
 
 CACHE_SECONDS = 600
 TIMEOUT = 25
-
-# Offered to the chat model directly (their schemas ride along on every
-# message); the other ~200 are reachable through mentat_search + mentat_call.
-CHAT_FAVORITES = (
-    "convert_units", "lookup_constant", "solve_equation", "integrate_expr",
-    "differentiate_expr", "schwarzschild_radius", "escape_velocity", "orbital_period",
-    "projectile_range", "lorentz_factor", "photon_energy_from_wavelength",
-    "element_atomic_data", "run_simulation", "list_simulation_scenarios",
-)
 
 
 class MentatError(Exception):
@@ -60,6 +52,13 @@ class Mentat:
         body = self._request("POST", f"/tools/{name}", args or {})
         if not body.get("ok"):
             raise MentatError(body.get("error", "Mentat call failed"))
+        return body["result"]
+
+    def ask(self, question: str) -> dict:
+        """Mentat's own interpreter: plain English in, a worked answer (or what it can do) out."""
+        body = self._request("POST", "/ask", {"question": question})
+        if not body.get("ok"):
+            raise MentatError(body.get("error", "Mentat couldn't answer"))
         return body["result"]
 
     def search(self, query: str, limit: int = 12) -> list[dict]:

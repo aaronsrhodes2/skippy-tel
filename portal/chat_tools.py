@@ -8,10 +8,15 @@ all, so the model can't even try it.
 Tool output never includes settings values (passwords live in games-env):
 only status, games, timings and how to connect.
 
-Physics: when Mentat is configured and tool_policy allows it for this
-person (it's an "everyone" server), a curated set of Mentat's tools rides
-along as `mentat_<name>`, plus `mentat_search` / `mentat_call` to reach the
-rest of its ~220 tools on demand.
+Physics: when Mentat is reachable and tool_policy allows it (it's an
+"everyone" server), Skippy gets ONE physics tool, ask_mentat, which hands the
+question in plain English to Mentat's own interpreter. The model doesn't pick
+formulas or fill in Mentat's ~220 maths tools; Mentat does that itself.
+
+Music: people with the Bilby grant get now_playing (what Bilby reports).
+
+Direct verbs: a message starting with "/physics", "/status", … forces that
+tool on the first step (see VERBS); the chat's badge panel inserts them.
 """
 from __future__ import annotations
 
@@ -81,43 +86,90 @@ def _plain(markup: str) -> str:
     return html.unescape(_TAGS.sub("", markup))
 
 
-_MENTAT_GENERIC = [
-    {"name": "mentat_search",
-     "description": "Find Mentat physics/maths tools (the Captain's own Wolfram rival, ~220 tools: "
-                    "units, constants, symbolic maths, mechanics, relativity, cosmology, optics, "
-                    "thermodynamics, circuits, chemistry, nuclear, materials, simulations) by keywords. "
-                    "Returns names, descriptions and input schemas; then use mentat_call.",
-     "input_schema": {"type": "object", "properties": {"query": {"type": "string"}},
-                      "required": ["query"], "additionalProperties": False}},
-    {"name": "mentat_call",
-     "description": "Run any Mentat tool by name with its arguments (see mentat_search for schemas). "
-                    "Results carry a `source` and `formula`: cite them.",
-     "input_schema": {"type": "object",
-                      "properties": {"name": {"type": "string"}, "arguments": {"type": "object"}},
-                      "required": ["name"], "additionalProperties": False}},
-]
+_ASK_MENTAT = {
+    "name": "ask_mentat",
+    "description": "The Captain's physics engine (Mentat, from sigma-ground). Pass the user's physics "
+                   "or maths question in their own words, including every number and unit they gave. "
+                   "Don't solve it, pick formulas, convert units or add assumptions: Mentat interprets "
+                   "the question itself. It returns a worked, self-checked answer (value, units, the "
+                   "steps and their sources) or, when it can't model the question, a note saying what "
+                   "it CAN do (value null).",
+    "input_schema": {"type": "object",
+                     "properties": {"question": {"type": "string",
+                                                 "description": "The user's question, verbatim."}},
+                     "required": ["question"], "additionalProperties": False},
+}
+
+_NOW_PLAYING = {
+    "name": "now_playing",
+    "description": "What's playing right now according to Bilby: the Traktor decks on the Captain's Mac "
+                   "(artist, title, BPM, key, genre, elapsed), Bilby's next suggestion, tonight's "
+                   "setlist, and the phone's music session. Says when skippy-pc isn't reporting.",
+    "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+}
+
+# Direct verbs: "/verb …" at the start of a message forces that tool first.
+# (verb, tool, badge label, category)
+VERBS = (
+    ("status", "server_status", "Server status", "Game server"),
+    ("start", "start_game", "Start a game", "Game server"),
+    ("stop", "stop_server", "Stop the server", "Game server"),
+    ("restart", "restart_server", "Restart", "Game server"),
+    ("logs", "server_logs", "Logs", "Game server"),
+    ("physics", "ask_mentat", "Physics (Mentat)", "Physics"),
+    ("playing", "now_playing", "Now playing", "Music"),
+)
+_VERB_RE = re.compile(r"^/([a-z]+)\b\s*(.*)$", re.S | re.I)
+
+
+_ALIASES = {"mentat": "physics"}
+
+
+def parse_verb(message: str) -> tuple[str | None, str]:
+    """("/physics how fast…") → ("ask_mentat", "how fast…"). Unknown verbs pass through."""
+    m = _VERB_RE.match(message.strip())
+    if m:
+        word = _ALIASES.get(m.group(1).lower(), m.group(1).lower())
+        for verb, tool, _label, _cat in VERBS:
+            if verb == word:
+                return tool, m.group(2).strip()
+    return None, message
 
 
 class ChatTools:
-    def __init__(self, vm, is_admin: bool, visible: list[str] | None = None, mentat=None, who: str = ""):
+    def __init__(self, vm, is_admin: bool, visible: list[str] | None = None, mentat=None, who: str = "",
+                 music=None):
         self.vm, self.is_admin, self.who = vm, is_admin, who
         self.visible = list(GAMES) if visible is None else list(visible)   # games this person may see
         self.names = _ADMIN if is_admin else _EVERYONE
         self.mentat = mentat if mentat and tool_policy.allowed("mentat", is_admin) else None
-        self._mentat_schemas = self._load_mentat()
+        self.music = music                    # callable → home.music(), only with the Bilby grant
+        self.mentat_ok = self._mentat_reachable()
 
-    def _load_mentat(self) -> list[dict]:
-        """Mentat's favourites + search/call, or nothing if it's unreachable."""
+    def _mentat_reachable(self) -> bool:
         if not self.mentat:
-            return []
+            return False
         try:
-            by_name = {t["name"]: t for t in self.mentat.tools()}
+            self.mentat.tools()                   # cached; a cheap "is it up?"
+            return True
         except mentat_client.MentatError:
-            return []
-        favs = [{"name": f"mentat_{n}", "description": by_name[n]["description"][:1000],
-                 "input_schema": by_name[n]["input_schema"]}
-                for n in mentat_client.CHAT_FAVORITES if n in by_name]
-        return favs + _MENTAT_GENERIC
+            return False
+
+    def available(self) -> list[str]:
+        names = [n for n in self.names if n != "start_game" or self.visible]
+        if self.mentat_ok:
+            names.append("ask_mentat")
+        if self.music:
+            names.append("now_playing")
+        return names
+
+    def badges(self) -> dict[str, list[dict]]:
+        """The chat's badge panel: {category: [{verb, label}]} for this person's tools."""
+        have, out = set(self.available()), {}
+        for verb, tool, label, cat in VERBS:
+            if tool in have:
+                out.setdefault(cat, []).append({"verb": verb, "label": label})
+        return out
 
     def schemas(self) -> list[dict]:
         out = []
@@ -129,24 +181,28 @@ class ChatTools:
                 tool = copy.deepcopy(tool)        # offer only the games they have access to
                 tool["input_schema"]["properties"]["games"]["items"]["enum"] = self.visible
             out.append(tool)
-        return out + self._mentat_schemas
+        if self.mentat_ok:
+            out.append(_ASK_MENTAT)
+        if self.music:
+            out.append(_NOW_PLAYING)
+        return out
 
     def run(self, name: str, args: dict) -> str:
-        if name.startswith("mentat_") and self._mentat_schemas:
-            return json.dumps(self._run_mentat(name, args or {}), default=str)[:20_000]
-        if name not in self.names:
+        if name not in self.available():
             raise ToolError(f"{name} isn't available to you.")
-        return json.dumps(getattr(self, "_" + name)(args or {}))
+        return json.dumps(getattr(self, "_" + name)(args or {}), default=str)[:20_000]
 
-    def _run_mentat(self, name: str, args: dict):
+    def _ask_mentat(self, args) -> dict:
+        question = str(args.get("question") or "").strip()
+        if not question:
+            raise ToolError("ask_mentat needs the question.")
         try:
-            if name == "mentat_search":
-                return self.mentat.search(str(args.get("query", "")))
-            if name == "mentat_call":
-                return self.mentat.call(str(args.get("name", "")), args.get("arguments") or {})
-            return self.mentat.call(name[len("mentat_"):], args)
+            return self.mentat.ask(question)
         except mentat_client.MentatError as exc:
             raise ToolError(str(exc)) from exc
+
+    def _now_playing(self, _args) -> dict:
+        return self.music()
 
     def _server_status(self, _args) -> dict:
         s = self.vm.status()

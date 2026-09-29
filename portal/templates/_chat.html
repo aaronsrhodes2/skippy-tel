@@ -7,8 +7,15 @@
   {% endif %}
   <p class="help">Say <i>"thinking cap"</i> for a sharper answer (Sonnet){% if is_admin %}, or
     <i>"trust the awesomeness"</i> for the big brain (Opus){% endif %}. Otherwise it's Haiku: quick and cheap.
-    Skippy can check the game server, start games{% if is_admin %}, restart it and read its logs{% endif %} — just ask.</p>
+    Skippy can check the game server, start games{% if is_admin %}, restart it and read its logs{% endif %},
+    and hands physics to Mentat — just ask, or open <b>Tools</b> to aim at one (e.g. <code>/physics</code>).</p>
   <div class="log"></div>
+  <details class="verbs">
+    <summary>Tools</summary>
+    <div class="verb-list"><span class="help">Loading…</span></div>
+    <p class="help">Tap one to aim your message at it (it adds <code>/physics</code>, <code>/status</code>…);
+      or just talk and Skippy picks.</p>
+  </details>
   <form class="ask">
     <textarea rows="2" placeholder="Say something to Skippy" required></textarea>
     <p><button type="submit">Send</button> <button type="button" class="clear">New chat</button></p>
@@ -60,7 +67,7 @@
         const used = [...new Set(data.tools || [])];   // receipts: which tools did the work
         const note = document.createElement("div");
         note.className = "receipt";
-        note.textContent = used.length ? "tools: " + used.join(", ").replace(/mentat_/g, "Mentat › ")
+        note.textContent = used.length ? "tools: " + used.map(t => ({ask_mentat: "Mentat (physics)", now_playing: "Bilby"})[t] || t.replace(/_/g, " ")).join(", ")
           : (data.mentat_available ? "answered from the model's own knowledge" : "answered from the model's own knowledge (Mentat offline)");
         pending.append(note);
         history.push({role: "user", content: text}, {role: "assistant", content: data.reply});
@@ -77,5 +84,29 @@
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
     });
     root.querySelector(".clear").addEventListener("click", () => { history = []; save(); log.replaceChildren(); });
+
+    // Direct verbs: a collapsible, categorised badge list, fetched on first open.
+    const verbs = root.querySelector(".verbs"), list = root.querySelector(".verb-list");
+    verbs.addEventListener("toggle", async () => {
+      if (!verbs.open || verbs.dataset.loaded) return;
+      verbs.dataset.loaded = "1";
+      try {
+        const cats = await (await fetch("{{ url_for('chat.badges') }}")).json();
+        list.replaceChildren(...Object.entries(cats).map(([cat, items]) => {
+          const row = document.createElement("div"); row.className = "verb-cat";
+          const h = document.createElement("span"); h.className = "verb-cat-name"; h.textContent = cat;
+          row.append(h, ...items.map(it => {
+            const b = document.createElement("button"); b.type = "button"; b.className = "verb";
+            b.textContent = it.label; b.title = "/" + it.verb;
+            b.onclick = () => {
+              msg.value = "/" + it.verb + " " + msg.value.replace(/^\/[a-z]+\s*/i, "");
+              msg.focus(); msg.setSelectionRange(msg.value.length, msg.value.length);
+            };
+            return b;
+          }));
+          return row;
+        }));
+      } catch (e) { list.textContent = "Couldn't load the tool list."; delete verbs.dataset.loaded; }
+    });
   })(document.currentScript.previousElementSibling);
 </script>

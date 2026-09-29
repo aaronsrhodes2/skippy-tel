@@ -110,10 +110,17 @@ def system_prompt(user_name: str, is_admin: bool = False, page: str | None = Non
         "Stopping or restarting kicks everyone off: ask the user to confirm first, and only act "
         "on a clear yes. Never reveal passwords; join passwords are on the game's page under "
         "\"Show join password\". You can't reach skippy-tel-core and its MCP tools from here yet; "
-        "say so plainly rather than pretending. When your mentat_* tools are available, they're "
-        "the Captain's own physics engine (Mentat, from sigma-ground, his Wolfram Alpha rival): use "
-        "them for any number, unit or equation instead of your memory, cite the result's source, "
-        "and feel free to be smug about owning a better Wolfram."
+        "say so plainly rather than pretending.\n\n"
+        "## Physics goes to Mentat\n"
+        "When ask_mentat is available it's the Captain's own physics engine (Mentat, from "
+        "sigma-ground, his Wolfram Alpha rival). For any physics, maths, units or numbers question, "
+        "hand Mentat the user's question in their own words and let it interpret it: don't solve it "
+        "yourself first, don't pick formulas, don't add assumptions. Then report what Mentat returned "
+        "(value, units, and the key steps with their sources) in your voice. If Mentat's value is "
+        "null, it couldn't model that question: pass on what it says it can do, ask the user for "
+        "anything it needs, and do NOT fill the gap with your own estimate. If ask_mentat isn't "
+        "available, say Mentat is offline before answering from memory, and flag that answer as a "
+        "guess. Feel free to be smug about owning a better Wolfram."
     )
 
 
@@ -156,13 +163,16 @@ class SkippyChat:
         return self._client_obj
 
     def reply(self, system: str, messages: list[dict], tools: list[dict] | None = None,
-              run_tool=None, model: str | None = None) -> str:
+              run_tool=None, model: str | None = None, force_tool: str | None = None) -> str:
         """One chat reply. With tools, runs the tool loop: the model asks for
         tools, `run_tool(name, input) -> str` runs them, results go back,
-        until the model answers (or MAX_TOOL_ROUNDS is hit)."""
+        until the model answers (or MAX_TOOL_ROUNDS is hit). `force_tool`
+        (a direct verb) makes the first step call that tool."""
         messages = list(messages)
-        for _ in range(MAX_TOOL_ROUNDS):
-            response = self._create(system, messages, tools, model or self.model)
+        for round_ in range(MAX_TOOL_ROUNDS):
+            forced = (force_tool if force_tool and round_ == 0
+                      and any(t.get("name") == force_tool for t in tools or []) else None)
+            response = self._create(system, messages, tools, model or self.model, forced)
             if response.stop_reason == "refusal":
                 return "I can't help with that one."
             calls = [b for b in response.content if b.type == "tool_use"]
@@ -180,11 +190,14 @@ class SkippyChat:
         except Exception as exc:   # noqa: BLE001 — tool failures go back to the model, not the user
             return {"type": "tool_result", "tool_use_id": call.id, "content": str(exc), "is_error": True}
 
-    def _create(self, system: str, messages: list[dict], tools: list[dict] | None, model: str):
+    def _create(self, system: str, messages: list[dict], tools: list[dict] | None, model: str,
+                force_tool: str | None = None):
         import anthropic
         params = {"model": model, "max_tokens": MAX_OUTPUT, "system": system, "messages": messages}
         if tools:
             params["tools"] = tools
+        if force_tool:
+            params["tool_choice"] = {"type": "tool", "name": force_tool}
         try:
             if uses_refusal_fallback(model):
                 # Server-side refusal fallback: if the model declines on policy

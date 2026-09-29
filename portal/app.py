@@ -499,6 +499,18 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             return view(*args, **kwargs)
         return wrapped
 
+    def tools_for(user) -> chat_tools.ChatTools:
+        email = user["email"]
+        return chat_tools.ChatTools(vm, is_admin=auth.is_admin(email), visible=auth.visible_games(email),
+                                    mentat=mentat, who=email,
+                                    music=home.music if auth.has_portal(email, "bilby") else None)
+
+    @talk.get("/badges")
+    @skippy_required
+    def badges():
+        """The chat's direct-verb badge panel for this person."""
+        return jsonify(tools_for(auth.current_user()).badges())
+
     @talk.get("")
     @skippy_required
     def index():
@@ -514,10 +526,13 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         if not message:
             return jsonify(error="Say something."), 400
         user = auth.current_user()
+        force, rest = chat_tools.parse_verb(message)
+        if force and not rest:
+            rest = {"ask_mentat": "(the user chose /physics with no question: ask what to compute)"
+                    }.get(force, "Go ahead.")
         try:
             admin = auth.is_admin(user["email"])
-            tools = chat_tools.ChatTools(vm, is_admin=admin, visible=auth.visible_games(user["email"]),
-                                         mentat=mentat, who=user["email"])
+            tools = tools_for(user)
             model, badge = chat.pick_model(message, app.config["CHAT_MODEL"], admin)
             page = str(body.get("page") or "")[:100] or None
             prompt = chat.system_prompt(user["name"], is_admin=admin, page=page,
@@ -529,12 +544,14 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 return tools.run(name, args)
 
             schemas = tools.schemas()
+            if force == "ask_mentat" and rest.startswith("(the user chose"):
+                force = None                     # nothing to ask yet: let Skippy ask for the question
             text = skippy.reply(prompt,
-                                chat.build_messages(body.get("history"), message),
-                                tools=schemas, run_tool=run_tool, model=model)
+                                chat.build_messages(body.get("history"), rest),
+                                tools=schemas, run_tool=run_tool, model=model, force_tool=force)
         except chat.ChatError as exc:
             return jsonify(error=str(exc)), 502
-        mentat_on = any(t["name"].startswith("mentat_") for t in schemas)
+        mentat_on = tools.mentat_ok
         # One line per reply in Cloud Run's logs: who, which model, which tools (never the text).
         print(json.dumps({"event": "chat", "user": user["email"], "model": model,
                           "tools": used, "mentat_available": mentat_on}), flush=True)

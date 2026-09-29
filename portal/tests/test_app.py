@@ -67,9 +67,9 @@ class FakeSkippy:
     def __init__(self):
         self.seen = None
 
-    def reply(self, system, messages, tools=None, run_tool=None, model=None):
+    def reply(self, system, messages, tools=None, run_tool=None, model=None, force_tool=None):
         self.seen = (system, messages)
-        self.model = model
+        self.model, self.force_tool = model, force_tool
         self.tools, self.run_tool = tools, run_tool
         return "Obviously."
 
@@ -235,7 +235,7 @@ def _tools_for(client, skippy, email):
 def test_chat_tools_match_dashboard_rights(env):
     client, _, skippy = env
     names, _ = _tools_for(client, skippy, FRIEND)
-    assert names == {"server_status", "start_game", "stop_server"}
+    assert names == {"server_status", "start_game", "stop_server", "now_playing"}   # core users have Bilby
     names, _ = _tools_for(client, skippy, ADMIN)
     assert "restart_server" in names
     _, run = _tools_for(client, skippy, FRIEND)
@@ -642,6 +642,10 @@ class FakeMentat:
     def search(self, query, limit=12):
         return [t for t in self.tools() if query.split()[0] in t["name"]]
 
+    def ask(self, question):
+        self.calls.append(("ask", question))
+        return {"value": 1.609344, "units": "km", "source": "pint UnitRegistry"}
+
 
 def _chat_with(mentat, email=FRIEND):
     vm, skippy = FakeVm(), FakeSkippy()
@@ -652,16 +656,35 @@ def _chat_with(mentat, email=FRIEND):
     return {t["name"] for t in skippy.tools}, skippy.run_tool
 
 
-def test_friends_get_mentat_physics_tools():
+def test_friends_get_one_physics_door_not_mentats_maths_tools():
     import json
     mentat = FakeMentat()
     names, run = _chat_with(mentat)
-    assert {"mentat_convert_units", "mentat_search", "mentat_call"} <= names
-    assert "mentat_wind_wave_analysis" not in names                    # not a favourite: via search/call
-    assert json.loads(run("mentat_convert_units", {"value": 1}))["units"] == "kilometer"
-    assert json.loads(run("mentat_search", {"query": "wind"}))[0]["name"] == "wind_wave_analysis"
-    run("mentat_call", {"name": "wind_wave_analysis", "arguments": {"wind_speed_m_s": 5}})
-    assert mentat.calls[-1] == ("wind_wave_analysis", {"wind_speed_m_s": 5})
+    assert "ask_mentat" in names and not any(n.startswith("mentat_") for n in names)
+    assert json.loads(run("ask_mentat", {"question": "how far is a mile in km?"}))["units"] == "km"
+    assert mentat.calls[-1] == ("ask", "how far is a mile in km?")      # passed through, not pre-solved
+
+
+def test_direct_verbs_force_the_tool_and_badges_list_what_you_have():
+    vm, skippy = FakeVm(), FakeSkippy()
+    client = portal.create_app(dict(SETTINGS), vm=vm, skippy=skippy, mentat=FakeMentat()).test_client()
+    login(client, FRIEND)
+    client.post("/chat/send", json={"message": "/physics how fast does a 5 cm copper ball fall 10 km?"})
+    assert skippy.force_tool == "ask_mentat"
+    assert skippy.seen[1][-1]["content"] == "how fast does a 5 cm copper ball fall 10 km?"   # verb stripped
+    client.post("/chat/send", json={"message": "/mentat 1 mile in km"})                  # old name still works
+    assert skippy.force_tool == "ask_mentat"
+    client.post("/chat/send", json={"message": "/status"})
+    assert skippy.force_tool == "server_status"
+    client.post("/chat/send", json={"message": "is it up?"})
+    assert skippy.force_tool is None
+    badges = client.get("/chat/badges").get_json()
+    assert [b["verb"] for b in badges["Physics"]] == ["physics"]
+    assert "restart" not in [b["verb"] for b in badges["Game server"]]                    # admin-only
+    assert "Music" in badges                                                             # core users have Bilby
+    _add_friend(client, PAL, ["dragonwilds", "skippy"])
+    login(client, PAL)
+    assert "Music" not in client.get("/chat/badges").get_json()                           # no Bilby grant
 
 
 def test_chat_works_without_mentat():
@@ -836,6 +859,6 @@ def test_chat_reply_says_which_tools_did_the_work(env):
     login(client, ADMIN)
     data = client.post("/chat/send", json={"message": "physics?"}).get_json()
     assert data["tools"] == [] and data["mentat_available"] is False   # no Mentat in tests
-    skippy.reply = lambda system, messages, tools=None, run_tool=None, model=None: (
+    skippy.reply = lambda system, messages, tools=None, run_tool=None, model=None, **_: (
         run_tool("server_status", {}) and "Up.")
     assert client.post("/chat/send", json={"message": "up?"}).get_json()["tools"] == ["server_status"]

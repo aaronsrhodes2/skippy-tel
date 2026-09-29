@@ -133,6 +133,9 @@ jobs:
           curl -fsS "$URL/tools" | python3 -c "import json,sys; n=len(json.load(sys.stdin)); print(n, 'tools'); assert n > 100"
           curl -fsS -X POST -H 'Content-Type: application/json' \
             -d '{"value": 1, "from_units": "mile", "to_units": "km"}' "$URL/tools/convert_units"
+          curl -fsS -X POST -H 'Content-Type: application/json' \
+            -d '{"question": "how fast does a 5 cm copper ball hit the ground from 10 km?"}' "$URL/ask" \
+            | python3 -c "import json,sys; r=json.load(sys.stdin)['result']; print(r['value'], r['units']); assert r['value']"
 
   portal:
     needs: [test, gate]
