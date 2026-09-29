@@ -37,6 +37,10 @@
   .facts div { background: var(--card); border: 1px solid var(--accent2); border-radius: 8px; padding: 10px; }
   .facts b { display: block; font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--accent2); }
   .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .players { margin: 14px 0 10px; }
+  .players .count { font-family: "{{ t.font }}", serif; font-size: 1.4rem; color: var(--accent); margin-left: 8px; }
+  .game-page .facts { margin-top: 6px; }
+  .game-page .facts div { background: rgba(0,0,0,.25); }
 </style>
 {% endblock %}
 {% block content %}
@@ -81,6 +85,22 @@
         </form>
       {% elif running %}
         <p class="help">The server is running other games right now. It frees up when they go to sleep.</p>
+      {% endif %}
+
+      {% if game.max_players %}
+        {% set n = players.get(game.id) if on else (0 if status else none) %}
+        <p class="players"><b>Players online</b>
+          <span class="count">{{ n if n is not none else '–' }} / {{ game.max_players }}</span></p>
+      {% endif %}
+      {% if game.facts %}
+        <div class="facts">
+          {% for label, value in game.facts %}<div><b>{{ label }}</b>{{ value }}</div>{% endfor %}
+        </div>
+      {% endif %}
+      {% if game.links %}
+        <p class="links" style="margin-top:12px">
+          {% for label, url in game.links %}<a href="{{ url }}" target="_blank" rel="noopener">{{ label }}</a>{% endfor %}
+        </p>
       {% endif %}
     </div>
   </section>
@@ -140,20 +160,6 @@
       setInterval(() => { if (!document.hidden) load(); }, 20000);
     })();
   </script>
-  {% endif %}
-
-  {% if game.facts %}
-  <section>
-    <h2>At a glance</h2>
-    <div class="facts">
-      {% for label, value in game.facts %}<div><b>{{ label }}</b>{{ value }}</div>{% endfor %}
-    </div>
-    {% if game.links %}
-      <p class="links" style="margin-top:12px">
-        {% for label, url in game.links %}<a href="{{ url }}" target="_blank" rel="noopener">{{ label }}</a>{% endfor %}
-      </p>
-    {% endif %}
-  </section>
   {% endif %}
 
   {% if is_admin and status %}

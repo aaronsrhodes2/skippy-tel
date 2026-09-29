@@ -44,6 +44,7 @@ class Game:
     settings: tuple[Setting, ...] = field(default=())
     join_password_key: str = ""          # shown to signed-in players on the dashboard
     ready_minutes: int = 5               # typical boot → joinable, for the "starting" hint
+    max_players: int = 0                 # shown as "Players online N / max" on the game page
     invite_code: bool = False            # hands out a per-session invite code (diagnostics.join_codes)
     direct: Callable[[str, dict], str] | None = None   # (ip, settings) -> "ip:port" for a Direct-connect box
     theme: Theme | None = None
@@ -88,8 +89,8 @@ GAMES: dict[str, Game] = {
                     pattern="radial-gradient(ellipse at 20% 110%, rgba(255,90,20,.55), transparent 60%), "
                             "radial-gradient(ellipse at 85% -10%, rgba(201,162,74,.35), transparent 55%)",
                     tagline="Dragons are loose in Ashenfall. Bring friends."),
-        facts=(("Players", "up to 6"), ("Crossplay", "PC · Xbox · PS5 · Switch 2"),
-               ("Joined by", "invite code + world password (both on this page)"), ("Ports", "7778/udp + beacon 8888/udp")),
+        max_players=6,
+        facts=(("Crossplay", "PC · Xbox · PS5 · Switch 2"), ("Ports", "7778/udp + beacon 8888/udp")),
         links=(("Official site", "https://dragonwilds.runescape.com"),
                ("Wiki", "https://dragonwilds.runescape.wiki")),
     ),
@@ -112,7 +113,8 @@ GAMES: dict[str, Game] = {
                     pattern="linear-gradient(180deg, rgba(143,211,255,.18), transparent 70%), "
                             "repeating-linear-gradient(115deg, rgba(216,201,163,.06) 0 2px, transparent 2px 22px)",
                     tagline="Odin's tenth world awaits. Mind the trolls."),
-        facts=(("Players", "up to 10"), ("Crossplay", "Steam · Xbox · Game Pass"),
+        max_players=10,
+        facts=(("Crossplay", "Steam · Xbox · Game Pass"),
                ("Joined by", "IP address, port 2456")),
         links=(("Official site", "https://www.valheimgame.com"), ("Wiki", "https://valheim.fandom.com")),
     ),

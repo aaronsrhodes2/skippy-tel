@@ -48,6 +48,22 @@ def current_join_codes(vm) -> dict[str, str]:
         return {}
 
 
+def players_online(snapshot: str) -> dict[str, int]:
+    """Players currently in each game, from PLAYERS lines skippy-diag writes
+    (`PLAYERS dragonwilds=2`). Games whose log format we haven't learned yet
+    simply aren't in the result, and the page shows "–"."""
+    return {g: int(n) for g, n in re.findall(r"^PLAYERS (\w+)=(\d+)$", snapshot, re.M)}
+
+
+def live(vm) -> tuple[dict[str, str], dict[str, int]]:
+    """(invite codes, players online) from one fresh snapshot read."""
+    try:
+        snap = latest_snapshot(vm.serial_output(2))
+    except Exception:   # noqa: BLE001 — niceties; never break the page
+        return {}, {}
+    return join_codes(snap), players_online(snap)
+
+
 def for_game(snapshot: str, container: str) -> str:
     """Just one game's part of a snapshot: its `docker ps` row and its log
     section (container names match game ids — games/docker-compose.yml)."""

@@ -120,6 +120,7 @@ resource "google_compute_instance" "games" {
     startup-script  = file("${path.module}/startup.sh")
     shutdown-script = file("${path.module}/shutdown.sh")
     idle-watchdog   = file("${path.module}/idle-watchdog.sh")
+    skippy-diag     = file("${path.module}/diag.sh")
     discord-notify  = file("${path.module}/discord-notify.py")
     compose-file    = file("${path.module}/../../games/docker-compose.yml")
     games           = "valheim"

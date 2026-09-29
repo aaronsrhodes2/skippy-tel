@@ -493,3 +493,16 @@ def test_core_users_and_bad_emails_are_not_added_as_friends(env):
     _add_friend(client, FRIEND, ["dragonwilds"])                     # already core (deploy config)
     _add_friend(client, "not-an-email", ["dragonwilds"])
     assert "portal-friends" not in vm.metadata
+
+
+def test_play_card_has_players_online_and_facts(env):
+    client, vm, _ = env
+    login(client, FRIEND)
+    page = client.get("/games/dragonwilds").data.decode()
+    play = page[page.index("<h2>Play</h2>"):page.index("on Discord</h2>")]
+    assert "Players online" in play and "0 / 6" in play               # asleep: nobody on
+    assert "Crossplay" in play and "At a glance" not in page          # facts merged into Play
+    vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
+    assert "– / 6" in client.get("/games/dragonwilds").data.decode()   # count not known yet
+    vm.serial[2] = "=== skippy-diag t ===\nPLAYERS dragonwilds=2\n=== end ===\n"
+    assert "2 / 6" in client.get("/games/dragonwilds").data.decode()

@@ -68,10 +68,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
     def health():
         return "ok"
 
-    def live_codes(status) -> dict[str, str]:
-        """Per-session invite codes (Dragonwilds makes a new one each boot),
-        read fresh from the VM on every page load; only while it runs."""
-        return diagnostics.current_join_codes(vm) if status and status.status == "RUNNING" else {}
+    def live_info(status) -> tuple[dict[str, str], dict[str, int]]:
+        """Per-session invite codes (Dragonwilds makes a new one each boot) and
+        players online, read fresh from the VM on every page load while it runs."""
+        return diagnostics.live(vm) if status and status.status == "RUNNING" else ({}, {})
 
     def back(default_endpoint: str):
         """Return to the game page a form came from (hidden `next` field), or
@@ -92,7 +92,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
         return render_template(
             "dashboard.html", status=status, error=error, games=my_games(), services=SERVICES,
             links={g: discord_admin.links(status.env if status else {}, g) for g in my_games()},
-            codes=live_codes(status),
+            codes=live_info(status)[0],
         )
 
     @dash.post("/games/start")
@@ -131,7 +131,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
             links=discord_admin.links(env, gid),
             banner=banner if banner.startswith("https://") else "",
             bot_configured=bool(app.config["DISCORD_BOT_TOKEN"]),
-            codes=live_codes(status),
+            **dict(zip(("codes", "players"), live_info(status))),
         )
 
     @dash.get("/games/<gid>/discord")
