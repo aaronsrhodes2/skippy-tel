@@ -109,11 +109,39 @@ resource "google_storage_bucket_iam_member" "deployer_state" {
   member = "serviceAccount:${google_service_account.deployer.email}"
 }
 
-# The portal runs as skippy-agent (created earlier, holds roles/compute.admin
-# for the games VM). Deploying a service that runs as it = acting as it.
+# The portal runs as skippy-agent (created earlier; now holds only the
+# portal_vm role below). Deploying a service that runs as it = acting as it.
 data "google_service_account" "runtime" {
   account_id = "skippy-agent"
   depends_on = [google_project_service.apis]
+}
+
+# What the portal actually does to the games VM (portal/gcp.py): read it and its
+# serial logs, write its metadata, resize, start and stop it, and wait on those
+# operations. Replaces roles/compute.admin, which also let it create, delete and
+# reconfigure anything in the project. bootstrap.sh removes compute.admin once
+# this is in place.
+resource "google_project_iam_custom_role" "portal_vm" {
+  role_id     = "skippyPortalVm"
+  title       = "Skippy portal: operate the games VM"
+  description = "Start/stop/resize the games VM, read its logs, write its metadata."
+  permissions = [
+    "compute.instances.get",
+    "compute.instances.getSerialPortOutput",
+    "compute.instances.setMetadata",
+    "compute.instances.setMachineType",
+    "compute.instances.start",
+    "compute.instances.stop",
+    "compute.machineTypes.get",
+    "compute.zoneOperations.get",
+  ]
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_project_iam_member" "runtime_operates_vm" {
+  project = var.project
+  role    = google_project_iam_custom_role.portal_vm.id
+  member  = "serviceAccount:${data.google_service_account.runtime.email}"
 }
 
 resource "google_service_account_iam_member" "deployer_acts_as_runtime" {
@@ -154,8 +182,9 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     "attribute.repository" = "assertion.repository"
     "attribute.ref"        = "assertion.ref"
   }
-  # Only workflows in this one repository can use this provider at all.
-  attribute_condition = "assertion.repository == \"${var.github_repo}\""
+  # Only workflows in this one repository, running from main, can use this
+  # provider at all: a workflow pushed on any other branch gets nothing.
+  attribute_condition = "assertion.repository == \"${var.github_repo}\" && assertion.ref == \"refs/heads/main\""
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"
   }

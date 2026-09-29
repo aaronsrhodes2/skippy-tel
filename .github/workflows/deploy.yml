@@ -1,4 +1,4 @@
-# Push-to-deploy. Every push to the working branch (or main):
+# Push-to-deploy. Every push to main (work lands there through pull requests):
 #   1. test     — portal + memory test suites
 #   2. infra    — terraform apply infra/gcp-games (VM, firewall, scripts, compose file)
 #   3. portal   — build the portal image, push it, deploy to Cloud Run
@@ -11,7 +11,7 @@ name: deploy
 
 on:
   push:
-    branches: [main, claude/great-edison-aevrtu]
+    branches: [main]      # Google only accepts deploys from main (infra/bootstrap/main.tf)
   workflow_dispatch:
 
 permissions:

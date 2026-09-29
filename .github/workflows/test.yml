@@ -1,0 +1,24 @@
+# Tests for pull requests into main (deploy.yml runs them again on merge,
+# before deploying). No cloud credentials here: Google only trusts main.
+name: test
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: portal/requirements.txt
+      - run: pip install -r portal/requirements.txt pytest
+      - run: python -m pytest portal/tests memory/tests -q
+      - run: bash -n infra/gcp-games/*.sh infra/bootstrap/*.sh scripts/games.sh

@@ -10,6 +10,7 @@ on:
   # A push touching the ops tooling runs a read-only `status` as a self-test
   # (and registers the workflow so workflow_dispatch works on this branch).
   push:
+    branches: [main]      # Google only accepts main (infra/bootstrap/main.tf)
     paths: [.github/workflows/ops.yml, scripts/remote.py]
   workflow_dispatch:
     inputs:

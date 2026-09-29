@@ -55,6 +55,16 @@ NUMBER=$(terraform output -raw project_number)
 PORTAL_URL=$(terraform output -raw portal_url)
 BUCKET=$(terraform output -raw state_bucket)
 
+# The portal's account used to hold roles/compute.admin; main.tf now gives it
+# only the games-VM role (skippyPortalVm), so drop the broad one.
+RUNTIME="serviceAccount:skippy-agent@$PROJECT.iam.gserviceaccount.com"
+if gcloud projects get-iam-policy "$PROJECT" --flatten=bindings --format='value(bindings.role)' \
+     --filter="bindings.role=roles/compute.admin AND bindings.members=$RUNTIME" | grep -q .; then
+  gcloud projects remove-iam-policy-binding "$PROJECT" --member="$RUNTIME" \
+    --role=roles/compute.admin --condition=None >/dev/null
+  echo "  portal account narrowed: compute.admin removed (it keeps only the games-VM role)"
+fi
+
 # ── 4. secrets ────────────────────────────────────────────────────────────────
 has_version() { gcloud secrets versions list "$1" --filter="state=ENABLED" --format="value(name)" --limit=1 2>/dev/null | grep -q .; }
 

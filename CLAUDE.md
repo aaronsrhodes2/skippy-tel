@@ -146,3 +146,11 @@ reporter uploads it in chunks → portal (`portal/imports.py`) holds it and puts
 a one-time token in VM metadata (`eq-import-token`/`eq-import-url`) → the
 next EverQuest start loads it, runs `world database:updates`, and reports
 done. State: metadata `portal-imports`.
+
+## Branches and deploys
+
+`main` is the truth: every deploy and ops run comes from it, and Google's
+Workload Identity only trusts GitHub tokens whose ref is `refs/heads/main`
+(infra/bootstrap/main.tf). Work happens on a branch, goes through a pull
+request (test.yml runs the tests), and deploys when it merges. skippy-pc and
+Cloud Shell track `main`.
