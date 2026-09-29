@@ -71,6 +71,19 @@ def bilby_state() -> dict | None:
             "playing_a": deck == "a", "playing_b": deck == "b"}
 
 
+def core_health() -> dict | None:
+    """flask-api's /health, trimmed to what the dashboard's Core widget shows
+    (the model list already rides in `status`). None means the core didn't answer."""
+    h = fetch(f"{API}/health")
+    if not h:
+        return None
+    models = h.get("models") or {}
+    ollama = models.get("ollama") or {}
+    return {"status": h.get("status"), "spec_version": h.get("spec_version"),
+            "bridge": h.get("bridge"), "hung_tiers": h.get("hung_tiers"), "tiers": models.get("tiers"),
+            "ollama": {k: ollama.get(k) for k in ("available", "default", "default_present")}}
+
+
 def gather() -> dict:
     status = fetch(f"{API}/status.json", timeout=10)
     services = fetch(f"{API}/services") or {}
@@ -82,6 +95,7 @@ def gather() -> dict:
     up_next = fetch(f"{MAC}/bilby/next") if mac_up else None
     return {
         "status": status,
+        "health": core_health(),
         "services": [{k: s.get(k) for k in ("id", "name", "available", "status_detail")}
                      for s in services.get("services", [])],
         "music_session": {k: session.get(k) for k in

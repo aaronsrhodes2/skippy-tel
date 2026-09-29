@@ -119,6 +119,13 @@ changes). The reply carries queued controls (`music` skip/pause/resume/stop)
 and jobs; while someone chats, the reporter also polls `GET /home/jobs` every
 1.5 s and answers with `POST /home/jobs/<id>`.
 
+- Core health: the report also carries flask-api's `/health` (`health`). The
+  portal's `home.core_check()` turns it into a verdict (`ok`/`degraded`/`down`)
+  plus plain-English problems: the **Core · skippy-tel** widget on `/me`, the
+  Watcher lines, and `core` in `ops home`. `/health`'s `models.ollama` carries
+  `default` and `default_present`, because an up Ollama missing the default
+  model still says `status: ok` while every default chat 503s.
+
 - Physics in Skippy's chat = `ask_mentat` → a job → `mentat-home` (same
   override file: mentat/Dockerfile with `MENTAT_USE_LLM=1`, Qwen via
   `ollama:11434`). No Qwen → Mentat answers 503 and Skippy says it's offline;

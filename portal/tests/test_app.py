@@ -914,6 +914,94 @@ def test_bilby_shows_now_playing_and_carries_controls_home(env):
     assert client.post("/home/report", json=json.loads(json.dumps(REPORT)), headers=auth_h).get_json()["commands"] == []
 
 
+# ── core health (skippy-tel-core) on the dashboard ────────────────────────────
+
+CORE_OK = {"status": "ok", "spec_version": "1", "bridge": True, "hung_tiers": None,
+           "tiers": {"claude": True, "nagatha": True, "elevenlabs": True},
+           "ollama": {"available": True, "default": "qwen2.5:7b", "default_present": True}}
+
+
+def _core_report(health, containers_ok=True):
+    return {"health": health,
+            "status": {"services": [{"name": "flask-api", "ok": True, "detail": "running"},
+                                    {"name": "whisper", "ok": containers_ok, "detail": "refused"}]},
+            "services": [{"id": "intent", "name": "Skippy AI", "available": True, "status_detail": "default model: qwen2.5:7b"},
+                         {"id": "image", "name": "Image Generator", "available": False, "status_detail": "not deployed"}]}
+
+
+def test_core_check_is_unknown_until_home_reports():
+    import home as home_mod
+    assert home_mod.core_check(None)["verdict"] == "unknown"
+
+
+def test_core_check_healthy_lists_tiers_and_every_service():
+    import home as home_mod
+    core = home_mod.core_check(_core_report(CORE_OK))
+    assert core["verdict"] == "ok" and core["problems"] == [] and core["api_version"] == "1"
+    assert [t["name"] for t in core["tiers"]] == ["ollama", "claude", "nagatha", "elevenlabs", "bridge"]
+    assert all(t["ok"] for t in core["tiers"])
+    assert [s["name"] for s in core["services"]] == ["Skippy AI", "Image Generator"]     # not just three of them
+    assert core["services"][1]["available"] is False and core["problems"] == []          # not-deployed isn't a fault
+
+
+def test_core_check_catches_a_default_model_ollama_doesnt_have():
+    import copy, home as home_mod
+    health = copy.deepcopy(CORE_OK)
+    health["ollama"].update(default="qwen3:8b", default_present=False)
+    core = home_mod.core_check(_core_report(health))
+    assert core["verdict"] == "degraded"                       # /health itself still says "ok"; that's the trap
+    assert any("qwen3:8b" in p and "503" in p for p in core["problems"])
+    assert next(t for t in core["tiers"] if t["name"] == "ollama")["ok"] is False
+    # an older core that doesn't report default_present isn't accused of anything
+    del health["ollama"]["default_present"]
+    assert home_mod.core_check(_core_report(health))["verdict"] == "ok"
+
+
+def test_core_check_down_when_the_core_or_ollama_is_gone():
+    import copy, home as home_mod
+    assert home_mod.core_check(_core_report(None))["verdict"] == "down"
+    no_ollama = copy.deepcopy(CORE_OK)
+    no_ollama["ollama"] = {"available": False, "default": "qwen2.5:7b", "default_present": False}
+    core = home_mod.core_check(_core_report(no_ollama))
+    assert core["verdict"] == "down" and any("Ollama isn't reachable" in p for p in core["problems"])
+
+
+def test_core_check_reports_missing_keys_and_downed_containers():
+    import copy, home as home_mod
+    health = copy.deepcopy(CORE_OK)
+    health["tiers"]["nagatha"] = False
+    health["bridge"] = False                                   # the Claude Code bridge is optional: shown, not a fault
+    core = home_mod.core_check(_core_report(health, containers_ok=False))
+    assert core["verdict"] == "degraded"
+    assert any("Nagatha" in p for p in core["problems"]) and any("whisper is down" in p for p in core["problems"])
+    assert not any("bridge" in p.lower() for p in core["problems"])
+
+
+def test_core_check_trims_whatever_the_reporter_sends():
+    import home as home_mod
+    report = _core_report(CORE_OK)
+    report["services"][0]["status_detail"] = "x" * 5000
+    report["services"][0]["name"] = "n" * 500
+    core = home_mod.core_check(report)
+    assert len(core["services"][0]["detail"]) == 120 and len(core["services"][0]["name"]) == 40
+
+
+def test_me_shows_core_health_and_the_watcher_repeats_the_problems(env):
+    import copy, json
+    client, _, _ = env
+    token = _pair(client)
+    health = copy.deepcopy(CORE_OK)
+    health["ollama"].update(default="qwen3:8b", default_present=False)
+    client.post("/home/report", json=_core_report(health), headers={"Authorization": f"Bearer {token}"})
+    page = client.get("/me").data.decode()
+    assert "Core · skippy-tel" in page and "Degraded" in page and "API v1" in page
+    assert page.count("qwen3:8b") >= 2                        # in the Core widget and again in the Watcher
+    assert "Core: Skippy" in page and "Image Generator" in page
+    _add_friend(client, PAL, ["dragonwilds"])
+    login(client, PAL)
+    assert client.get("/me").status_code == 403               # a friend never sees it
+
+
 def test_bilby_is_a_grant_and_controls_are_admin_only(env):
     client, _, _ = env
     _add_friend(client, PAL, ["dragonwilds"])
@@ -948,6 +1036,7 @@ def test_ops_home_needs_the_deployers_google_token(env, monkeypatch):
     monkeypatch.setattr("google.oauth2.id_token.verify_oauth2_token", fake_verify)
     data = client.get("/ops/home", headers={"Authorization": "Bearer t"}).get_json()
     assert seen["aud"] == auth.OPS_AUDIENCE and data["paired"] is False and data["online"] is False
+    assert data["core"] == {"verdict": "unknown", "problems": []}          # `ops home` sees the core's verdict too
     monkeypatch.setattr("google.oauth2.id_token.verify_oauth2_token",
                         lambda *a, **k: {"email": "someone@evil.example", "email_verified": True})
     assert client.get("/ops/home", headers={"Authorization": "Bearer t"}).status_code == 401

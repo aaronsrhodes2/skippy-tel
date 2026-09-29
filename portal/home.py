@@ -32,6 +32,57 @@ def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def _text(value, limit: int = 120) -> str:
+    return str(value if value is not None else "")[:limit]
+
+
+def core_check(report: dict | None) -> dict:
+    """skippy-tel-core (the flask-api at home) as the Captain needs to see it:
+    a verdict (`ok`, `degraded`, `down`, `unknown` before the first report), a
+    plain-English list of what's wrong, the tiers, and the whole service
+    manifest. Pure: it only reads what the home reporter sent, and trims it,
+    so a bad report can't put anything odd on the dashboard."""
+    if report is None:
+        return {"verdict": "unknown", "problems": [], "tiers": [], "services": [], "api_version": None}
+    health = report.get("health")
+    ollama = (health or {}).get("ollama") or {}
+    tiers_in = (health or {}).get("tiers") or {}
+    problems: list[str] = []
+    verdict = "ok"
+
+    if not health:
+        problems.append("skippy-tel-core isn't answering /health.")
+        verdict = "down"
+    else:
+        if health.get("status") != "ok":
+            hung = ", ".join(map(str, health.get("hung_tiers") or []))
+            problems.append(f"Core reports {_text(health.get('status'), 30)}" + (f" (hung: {_text(hung)})" if hung else "") + ".")
+        if ollama.get("available") is False:
+            problems.append("Ollama isn't reachable, so the default (local) tier is down.")
+            verdict = "down"
+        elif ollama.get("default_present") is False:            # `is False`: an older core doesn't say
+            problems.append(f"Skippy's default model {_text(ollama.get('default'), 60)} isn't installed in Ollama, "
+                            "so default-tier chats fail (HTTP 503).")
+        for name, label in (("claude", "Claude"), ("nagatha", "Nagatha (Gemini)"), ("elevenlabs", "ElevenLabs")):
+            if tiers_in.get(name) is False:
+                problems.append(f"{label} has no API key on skippy-pc.")
+    for c in (report.get("status") or {}).get("services") or []:
+        if c.get("ok") is False:
+            problems.append(f"{_text(c.get('name'), 40)} is down ({_text(c.get('detail'), 60)}).")
+    if problems and verdict == "ok":
+        verdict = "degraded"
+
+    tiers = [{"name": "ollama", "ok": ollama.get("available") is True and ollama.get("default_present") is not False},
+             {"name": "claude", "ok": tiers_in.get("claude") is True},
+             {"name": "nagatha", "ok": tiers_in.get("nagatha") is True},
+             {"name": "elevenlabs", "ok": tiers_in.get("elevenlabs") is True},
+             {"name": "bridge", "ok": bool((health or {}).get("bridge"))}] if health else []
+    services = [{"name": _text(s.get("name") or s.get("id"), 40), "available": bool(s.get("available")),
+                 "detail": _text(s.get("status_detail"))} for s in report.get("services") or []]
+    return {"verdict": verdict, "problems": problems, "tiers": tiers, "services": services,
+            "api_version": (health or {}).get("spec_version")}
+
+
 class Home:
     def __init__(self, vm, clock=time.time):
         self.vm, self.clock = vm, clock
@@ -191,8 +242,10 @@ class Home:
         st, bilby = r.get("status") or {}, r.get("bilby") or {}
         with self._lock:
             pending = sum(1 for j in self._jobs.values() if not j["event"].is_set())
+        core = self.core()
         return {"paired": self.paired(), "online": self.online(), "last_report_s": self.age(),
                 "mentat_home": bool(r.get("mentat_home")),
+                "core": {"verdict": core["verdict"], "problems": core["problems"]},
                 "services": {x.get("name"): x.get("ok") for x in st.get("services") or []},
                 "manifest": {x.get("id"): x.get("available") for x in r.get("services") or []},
                 "ollama_models": st.get("ollama_models"), "ups": st.get("ups"),
@@ -200,6 +253,10 @@ class Home:
                           "message": bilby.get("message"), "playing": bool(bilby.get("now_playing"))},
                 "music_session": (r.get("music_session") or {}).get("status"),
                 "jobs_pending": pending, "fast_for_s": max(0, int(self.fast_until - self.clock()))}
+
+    def core(self) -> dict:
+        """skippy-tel-core's health for the dashboard. Admin only."""
+        return core_check(self.report)
 
     def status(self) -> dict:
         """The old skippy-pc /status page's content. Admin only."""

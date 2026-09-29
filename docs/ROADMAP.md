@@ -32,7 +32,7 @@ Last updated 2026-09-28.
 | Track | Item |
 |---|---|
 | Portal | Bridge chat to **skippy-tel-core** and its MCP tools (must filter tools through `portal/tool_policy.py`: friends get only `everyone` servers like physics) (needs a route from Cloud Run into the home mesh: Tailscale or a tunnel) |
-| Portal | Live services list (skippy-tel-core `/services`) instead of the static one — same mesh dependency |
+| Portal | ~~Live services list (skippy-tel-core `/services`)~~ Done via the home reporter: the **Core · skippy-tel** widget on `/me` shows the health verdict, tiers and the whole service manifest (no mesh route needed; skippy-pc pushes out) |
 | Portal | Background restarts with progress; per-game container restart without a full VM reboot |
 | Games | **EverQuest (EQEmu)**: built 2026-09-29 (AkkStack on the VM, home DB relayed through the portal, own login server). Next: first-boot install test, import, player count for the game page |
 | Games | **In-game chat → Discord → portal** (backlogged until a real play session): a VM log watcher posts chat lines to the game's channel webhook, so they show in Discord and on the game page. Factorio logs `[CHAT]`, so it's the first candidate. **Dragonwilds: tested 2026-09-29, its server doesn't log chat** (a marker typed in game never reached the container log), so no bridge there; Valheim/Satisfactory don't without mods |
