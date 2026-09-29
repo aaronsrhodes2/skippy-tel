@@ -236,9 +236,9 @@ class _FakeClient:
         return self.responses.pop(0)
 
 
-def _chat(responses):
+def _chat(responses, model="claude-opus-5"):
     import chat
-    bot = chat.SkippyChat("claude-opus-5")
+    bot = chat.SkippyChat(model)
     bot._client_obj = _FakeClient(responses)
     return bot
 
@@ -343,3 +343,14 @@ def test_join_code_read_from_real_serial_output_with_crlf():
     port2 = ("=== skippy-diag 2026-09-29T02:43 ===\r\n--- dragonwilds: last 40 log lines\r\n"
              "[..]HeartbeatSession ok\r\nJOIN_CODE dragonwilds=RKXL-B01K\r\n\r\n=== end ===\r\n")
     assert diagnostics.join_codes(diagnostics.latest_snapshot(port2)) == {"dragonwilds": "RKXL-B01K"}
+
+
+def test_fallback_params_only_for_models_that_support_them():
+    done = _Resp("end_turn", _Block("text", text="Aye."))
+    haiku = _chat([done], model="claude-haiku-4-5")
+    assert haiku.reply("sys", [{"role": "user", "content": "hi"}]) == "Aye."
+    sent = haiku._client.requests[0]
+    assert sent["model"] == "claude-haiku-4-5" and "betas" not in sent and "fallbacks" not in sent
+    opus = _chat([_Resp("end_turn", _Block("text", text="Aye."))])
+    opus.reply("sys", [{"role": "user", "content": "hi"}])
+    assert opus._client.requests[0]["fallbacks"] == "default"

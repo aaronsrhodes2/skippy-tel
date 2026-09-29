@@ -67,7 +67,7 @@ downloads the update (a few extra minutes). The Discord channel gets a
 
 ## Chat
 
-Direct Claude API (`claude-opus-5`, server-side refusal fallback on), with
+Direct Claude API (`claude-haiku-4-5`: cheap and quick for server questions; set by `CHAT_MODEL` in the deploy workflow — Opus 5-family models also get the server-side refusal fallback), with
 Skippy's persona from `services/flask-api/app/skippy_persona.md`. History
 lives in the browser tab and is sent with each message; the server keeps
 nothing.

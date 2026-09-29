@@ -18,6 +18,16 @@ from pathlib import Path
 MAX_MESSAGES = 40          # history sent to the model: the last 20 exchanges
 MAX_CHARS = 8000           # per message
 MAX_TOOL_ROUNDS = 6        # model → tools → model round trips per reply
+MAX_OUTPUT = 4000          # chat replies are short; also caps a runaway reply's cost
+
+# Models with classifier refusals and server-side fallback (Opus 5 family and
+# up). Others, e.g. claude-haiku-4-5 (the portal's default: cheap, plenty for
+# server questions), reject the fallback parameters, so they're sent plainly.
+_FALLBACK_PREFIXES = ("claude-opus-5", "claude-fable-5", "claude-mythos-5")
+
+
+def uses_refusal_fallback(model: str) -> bool:
+    return model.startswith(_FALLBACK_PREFIXES)
 
 _PERSONA_FALLBACK = "You are Skippy the Magnificent, the Captain's sardonic but loyal AI. Keep replies short."
 
@@ -115,19 +125,16 @@ class SkippyChat:
 
     def _create(self, system: str, messages: list[dict], tools: list[dict] | None):
         import anthropic
-        extra = {"tools": tools} if tools else {}
+        params = {"model": self.model, "max_tokens": MAX_OUTPUT, "system": system, "messages": messages}
+        if tools:
+            params["tools"] = tools
         try:
-            return self._client.beta.messages.create(
-                model=self.model,
-                max_tokens=16000,
-                system=system,
-                messages=messages,
+            if uses_refusal_fallback(self.model):
                 # Server-side refusal fallback: if the model declines on policy
                 # grounds, the API re-runs the turn on a fallback model.
-                betas=["server-side-fallback-2026-07-01"],
-                fallbacks="default",
-                **extra,
-            )
+                return self._client.beta.messages.create(
+                    **params, betas=["server-side-fallback-2026-07-01"], fallbacks="default")
+            return self._client.messages.create(**params)
         except anthropic.RateLimitError as exc:
             raise ChatError("Skippy is rate-limited right now. Try again in a minute.") from exc
         except anthropic.AuthenticationError as exc:

@@ -51,7 +51,7 @@ def load() -> dict:
         "GCP_INSTANCE": _optional("GCP_INSTANCE", "skippy-games"),
 
         # Skippy chat (ANTHROPIC_API_KEY is read by the SDK itself).
-        "CHAT_MODEL": _optional("CHAT_MODEL", "claude-opus-5"),
+        "CHAT_MODEL": _optional("CHAT_MODEL", "claude-haiku-4-5"),
         "CHAT_ENABLED": bool(_optional("ANTHROPIC_API_KEY")),
 
         # Discord: the invite link shown to players, and the bot token the
