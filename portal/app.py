@@ -12,6 +12,7 @@ import io
 import json
 import re
 from functools import wraps
+from pathlib import Path
 
 from flask import (Blueprint, Flask, abort, flash, jsonify, redirect, render_template, request, send_file,
                    send_from_directory, url_for)
@@ -532,8 +533,24 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     @lab.get("")
     def index():
-        return render_template("experiments.html", experiments=experiments.visible(vm),
-                               bench=experiments.benchmark())
+        return render_template("experiments.html", bench=experiments.benchmark(),
+                               **experiments.inventory(experiments.visible(vm)))
+
+    @lab.get("/double-slit")
+    def double_slit():
+        return render_template("demo_double_slit.html")
+
+    @lab.get("/nbody")
+    def nbody():
+        return render_template("demo_nbody.html", scoreboard=experiments.NBODY_SCOREBOARD)
+
+    @lab.get("/weapon-vs-armor")
+    def weapon_vs_armor():
+        shot = Path(app.static_folder) / "demos" / "weapon_vs_armor.png"
+        return render_template("demo_weapon_vs_armor.html", screenshot=shot.exists(),
+                               weapons=experiments.WEAPON_EXAMPLES, weapon_total=experiments.WEAPON_TOTAL,
+                               armors=experiments.ARMOR_EXAMPLES, armor_total=experiments.ARMOR_TOTAL,
+                               source="https://github.com/aaronsrhodes2/sigma-ground/tree/master/games/weapon_vs_armor")
 
     @lab.get("/mentat")
     def mentat_page():
@@ -580,8 +597,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             return redirect(url_for("experiments.radiance_index", **clean))
         page = experiments.radiance_dir() / "index.html"
         if not page.exists():
-            return render_template("experiments.html", experiments=experiments.EXPERIMENTS,
-                                   bench=experiments.benchmark(), missing="Radiance"), 503
+            return render_template("experiments.html", bench=experiments.benchmark(), missing="Radiance",
+                                   **experiments.inventory(experiments.EXPERIMENTS)), 503
         html = page.read_text(encoding="utf-8")
         return html.replace("</body>", experiments.RADIANCE_SHOWCASE_SNIPPET + "</body>", 1)
 

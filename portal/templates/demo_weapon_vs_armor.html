@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Weapon vs. Armor — Experiments{% endblock %}
+{% block app %}experiments{% endblock %}
+{% block public_up %}{{ url_for('experiments.index') }}{% endblock %}
+{% block head %}
+<style>
+  .shot { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; margin: 14px 0; background: #000; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .cols .card ul { margin: 6px 0 0; padding-left: 1.1em; color: var(--ink); font-size: .88rem; line-height: 1.6; }
+  pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; overflow-x: auto;
+        font-family: var(--mono); font-size: .85rem; color: var(--ink); }
+</style>
+{% endblock %}
+{% block content %}
+<section>
+  <p><b>No hit points. No tuning knobs.</b> Pick a weapon, pick armor, pick where the fight happens, and fire: the
+    outcome comes from the materials' own thermodynamics, yield stress and bond failure, layer by layer, using the
+    same material physics as the rest of sigma-ground.</p>
+
+  {% if screenshot %}<img class="shot" src="{{ url_for('static', filename='demos/weapon_vs_armor.png') }}"
+       alt="Weapon vs. Armor: the weapon panel, a cross-section of the armor layers, and the results bar">{% endif %}
+
+  <div class="cols">
+    <div class="card"><h3>Weapons ({{ weapon_total }} presets)</h3>
+      <ul>{% for w in weapons %}<li>{{ w }}</li>{% endfor %}<li class="muted">… and {{ weapon_total - weapons|length }} more</li></ul></div>
+    <div class="card"><h3>Armor ({{ armor_total }} presets)</h3>
+      <ul>{% for a in armors %}<li>{{ a }}</li>{% endfor %}<li class="muted">… and {{ armor_total - armors|length }} more</li></ul></div>
+    <div class="card"><h3>How it hits</h3>
+      <ul><li>kinetic</li><li>laser</li><li>plasma</li><li>explosive</li><li>particle</li><li>gravitational</li></ul>
+      <p class="muted">Where: vacuum, Earth's atmosphere, Venus's atmosphere, underwater.</p></div>
+  </div>
+
+  <h2>Runs on your computer</h2>
+  <p>It's a desktop game today (pygame). A browser version isn't built yet, so this page doesn't pretend otherwise.
+    To play it, get sigma-ground and run:</p>
+<pre>git clone https://github.com/aaronsrhodes2/sigma-ground
+cd sigma-ground
+pip install pygame-ce
+python run_weapon_vs_armor.py</pre>
+  <p class="help">Source: <a href="{{ source }}">games/weapon_vs_armor</a> in the
+    <a href="https://github.com/aaronsrhodes2/sigma-ground">sigma-ground</a> repository.</p>
+</section>
+{% endblock %}

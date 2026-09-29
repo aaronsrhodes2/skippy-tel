@@ -1427,3 +1427,91 @@ def test_the_music_verb_with_nothing_after_it_asks_instead_of_forcing_an_empty_t
     assert skippy.force_tool is None and "what kind of music" in skippy.seen[1][-1]["content"]
     client.post("/chat/send", json={"message": "/music a sea shanty"})
     assert skippy.force_tool == "make_music" and skippy.seen[1][-1]["content"] == "a sea shanty"
+
+
+# ── Experiments: one inventory of every simulation and demonstration ──────────
+
+DEMO_PAGES = ("/experiments/double-slit", "/experiments/nbody", "/experiments/weapon-vs-armor",
+              "/experiments/mentat", "/experiments/benchmark")
+
+
+def test_the_inventory_highlights_the_three_demos_and_lists_everything_else(env):
+    import re
+    client, _, _ = env
+    page = client.get("/experiments").data.decode()                             # public: signed out
+    featured = re.findall(r'class="tile featured"[^>]*data-tel="demo:([\w-]+)"', page)
+    assert featured == ["nbody", "double-slit", "weapon-vs-armor"]
+    for title in ("N-Body Shootout", "Double-Slit", "Weapon vs. Armor", "Mentat", "Radiance"):
+        assert title in page, title
+    assert 'id="find"' in page and 'aria-label="Filter by kind"' in page       # search + kind filters
+    assert page.count('class="chip"') == 6                                        # All + the five kinds that exist
+    assert len(re.findall(r'<a class="tile( featured)?"', page)) == 6            # every experiment is one tile: no duplicates
+    assert "Coming next" not in page                                              # the three it promised are here now
+
+
+def test_every_demo_is_public_and_wears_the_shared_chrome(env):
+    import re
+    client, _, _ = env
+    for url in DEMO_PAGES:
+        page = client.get(url).data.decode()
+        assert "&lsaquo; Experiments</a>" in page and ">Sign in</a>" in page, url    # the same app bar, signed out
+        assert '<body data-app="experiments">' in page, url
+        assert "<header><h1>" not in page, url                                       # nobody improvises a header
+        before_bar = page.rsplit("<body data-app=", 1)[1].split('<header class="appbar">', 1)[0].split(">", 1)[1]
+        stray = re.sub(r"<[^>]+>", "", before_bar).strip()
+        assert stray == "", (url, stray)                                             # no visible text (a stray label, a URL) above it
+        assert not re.search(r'<(script|link|img)[^>]+(src|href)="https?://', page), url   # no third-party requests
+    login(client, ADMIN)
+    signed_in = client.get("/experiments/double-slit").data.decode()
+    assert 'id="home-btn"' in signed_in and "&lsaquo; Home</a>" in signed_in        # and the phone chrome when signed in
+
+
+def test_the_double_slit_demo_keeps_its_simulation_and_its_controls(env):
+    client, _, _ = env
+    page = client.get("/experiments/double-slit").data.decode()
+    for needle in ('id="scatter"', 'id="theory-overlay"', 'id="histogram"', 'id="d-sl"', 'id="btn-play"',
+                   "requestAnimationFrame", "D² + V² ≤ 1"):
+        assert needle in page, needle
+    assert "{% raw %}" not in page and "{{" not in page.split("<script>")[0].split("<main")[1].replace("{{ ", "")   # rendered, not leaked
+
+
+def test_the_nbody_page_shows_the_scoreboard_including_what_doesnt_flatter_it(env):
+    client, _, _ = env
+    page = client.get("/experiments/nbody").data.decode()
+    assert "ΔE/E = 1.5×10⁻⁶" in page and "ΔL/L = 4×10⁻¹⁵" in page and "+178° (alive!)" in page
+    assert "±23° drift (needs J2)" in page and "Missing physics" in page              # the drift is in the table on purpose
+    assert "worst is Mercury at 74%" in page
+
+
+def test_the_weapon_vs_armor_page_does_not_pretend_to_be_playable_in_the_browser(env):
+    client, _, _ = env
+    page = client.get("/experiments/weapon-vs-armor").data.decode()
+    assert "isn't built yet" in page and "python run_weapon_vs_armor.py" in page
+    assert "26 presets" in page and "16 presets" in page and "No hit points" in page
+
+
+def test_the_result_figures_are_served_as_static_files(env):
+    client, _, _ = env
+    svg = client.get("/static/demos/nbody_results.svg")
+    assert svg.status_code == 200 and svg.mimetype == "image/svg+xml" and b"Scoreboard" in svg.data
+    assert client.get("/static/demos/nbody_errors.png").status_code == 200
+
+
+def test_kinds_only_appear_as_filters_when_something_has_them(env):
+    client, vm, _ = env
+    login(client, ADMIN)
+    for slug in ("mentat", "benchmark", "radiance"):                                # hide the tool, results and recorded ones
+        client.post("/me/experiments", data={"slug": slug})
+    client.get("/logout")
+    page = client.get("/experiments").data.decode()
+    assert 'data-kind="tool"' not in page.split('id="kinds"')[1].split("</div>")[0]  # no "Tools" chip with nothing behind it
+    assert "Live in your browser" in page
+
+
+def test_every_experiment_has_a_known_kind_and_a_page_that_exists(env):
+    import experiments
+    client, _, _ = env
+    for x in experiments.EXPERIMENTS:
+        assert x.kind in experiments.KINDS, x.slug
+        assert x.endpoint, x.slug
+    assert sum(x.featured for x in experiments.EXPERIMENTS) == 3

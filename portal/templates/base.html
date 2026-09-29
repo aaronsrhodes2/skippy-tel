@@ -128,6 +128,9 @@
 {% block head %}{% endblock %}
 </head>
 <body data-app="{% block app %}{% endblock %}">
+{# public_up / public_up_label: where a public page's back button goes. They are data for the app bar below
+   (read with self.public_up()), so they sit in a branch that never prints. #}
+{% if false %}{% block public_up %}{% endblock %}{% block public_up_label %}Experiments{% endblock %}{% endif %}
 <main class="{% block mainclass %}{% endblock %}">
 {% if user %}
 {% set on_home = request.endpoint == 'index' %}
@@ -146,6 +149,16 @@
   </div>
   {% endif %}
 </header>
+{% else %}
+{# Public pages (the Experiments): a signed-out visitor gets the same app bar, with their parent as "back". #}
+{% set up = self.public_up() | trim %}
+{% if up or request.endpoint == 'experiments.index' %}
+<header class="appbar">
+  {% if up %}<a class="back" href="{{ up }}">&lsaquo; {{ self.public_up_label() | trim }}</a>{% endif %}
+  <h1 class="apptitle">{{ self.title() | trim | replace(' — Skippy Portal', '') | replace(' — Experiments', '') | replace(' — Aaron Rhodes', '') }}</h1>
+  <a href="{{ url_for('index') }}">Sign in</a>
+</header>
+{% endif %}
 {% endif %}
 {% for category, message in get_flashed_messages(with_categories=true) %}
   <div class="flash {{ category }}">{{ message }}</div>
