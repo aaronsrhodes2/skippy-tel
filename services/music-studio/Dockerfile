@@ -2,8 +2,11 @@
 #
 # Called only by the home reporter, over the compose network (no published port).
 # The weights are mounted read-only from the models archive
-# (D:\models\huggingface\ACE-Step__Ace-Step1.5 -> /checkpoints) and the container is told
-# never to fetch anything (HF_HUB_OFFLINE), so what runs is exactly what was reviewed:
+# (D:\models\huggingface\ACE-Step__Ace-Step1.5 -> /app/checkpoints: the folder its server startup
+# really looks in; ACESTEP_CHECKPOINTS_DIR is honoured by only some of its code paths). Offline is
+# ENFORCED by the network (compose puts this container on an `internal` network with no route out),
+# because HF_HUB_OFFLINE alone did not stop it: on an empty folder it downloaded its own copies,
+# with a ModelScope fallback. So what runs is exactly what was reviewed:
 #   - code: ACE-Step-1.5 pinned to one commit, dependencies from its uv.lock (--frozen)
 #   - model code: acestep-v15-turbo/{configuration,modeling}_acestep_v15*.py (read 2026-09-29:
 #     torch/transformers/einops only; no network, subprocess or eval), and a silence_latent.pt
@@ -32,7 +35,7 @@ RUN uv sync --frozen --no-dev --python python3.11
 
 ENV ACESTEP_API_HOST=0.0.0.0 \
     ACESTEP_API_PORT=8001 \
-    ACESTEP_CHECKPOINTS_DIR=/checkpoints \
+    ACESTEP_CHECKPOINTS_DIR=/app/checkpoints \
     ACESTEP_CONFIG_PATH=acestep-v15-turbo \
     ACESTEP_LM_MODEL_PATH=acestep-5Hz-lm-1.7B \
     ACESTEP_LM_BACKEND=pt \

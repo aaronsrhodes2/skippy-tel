@@ -135,8 +135,9 @@ services:
     logging: *default-logging
     expose:
       - "8001"
+    networks: [music-net]      # internal: no route to the internet (see the networks block)
     volumes:
-      - ${MODELS_ROOT:-D:/models}/huggingface/ACE-Step__Ace-Step1.5:/checkpoints:ro
+      - ${MODELS_ROOT:-D:/models}/huggingface/ACE-Step__Ace-Step1.5:/app/checkpoints:ro
       - music-studio-cache:/app/.cache          # compiled kernels + scratch audio
     shm_size: "2gb"
     deploy:
@@ -179,6 +180,12 @@ services:
       - "3001:3001"
     volumes:
       - uptime-kuma-data:/app/data
+
+# ACE-Step's server downloads any model it thinks is missing. It's on this network alone, which has
+# no route out, so it can only ever run the weights we mounted. The home reporter joins it too.
+networks:
+  music-net:
+    internal: true
 
 volumes:
   ollama-data:
