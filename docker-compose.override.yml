@@ -9,9 +9,8 @@ services:
     build: ./services/home-reporter
     container_name: skippytel-home-reporter
     restart: unless-stopped
+    env_file: ../.env           # same shared .env as flask-api: SKIPPY_HOME_TOKEN ("Pair home"), BILBY_MAC_URL
     environment:
-      SKIPPY_HOME_TOKEN: ${SKIPPY_HOME_TOKEN:-}   # .env: press "Pair home" on the portal dashboard
-      BILBY_MAC_URL: ${BILBY_MAC_URL:-http://skippy-mac:7334}
       SKIPPY_API: http://flask-api:5000
       MENTAT_URL: http://mentat-home:8080
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}

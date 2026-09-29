@@ -19,7 +19,7 @@ import urllib.request
 
 PORTAL = os.environ.get("PORTAL_URL", "https://skippy-portal-1015050363686.us-west1.run.app").rstrip("/")
 API = os.environ.get("SKIPPY_API", "http://flask-api:5000").rstrip("/")
-MAC = os.environ.get("BILBY_MAC_URL", "http://skippy-mac:7334").rstrip("/")
+MAC = os.environ.get("BILBY_MAC_URL", "").rstrip("/")         # Mac DJ assistant, if enabled
 MENTAT = os.environ.get("MENTAT_URL", "").rstrip("/")         # Mentat + Qwen on skippy-pc
 INTERVAL = float(os.environ.get("REPORT_INTERVAL", "15"))
 FAST_INTERVAL = 1.5          # job polling while someone is chatting on the portal
@@ -49,20 +49,40 @@ def fetch(url: str, method: str = "GET", data: dict | None = None, timeout: floa
         return (None, "") if raw else None
 
 
+def bilby_state() -> dict | None:
+    """Bilby as SkippyTel sees it: Mac/Traktor decks, the Mac's pushed state,
+    the local library on skippy-pc, or Drive (flask-api's /bilby/status picks),
+    reshaped to the portal's deck view."""
+    st = fetch(f"{API}/bilby/status")
+    if not st:
+        return None
+    loaded = st.get("loaded") or {}
+    now = st.get("now_playing")
+    deck = st.get("playing_deck")
+    if now and deck and "deck" not in now:
+        now = {**now, "deck": deck}
+    return {"source": st.get("source"), "online": st.get("source") not in (None, "none"),
+            "message": st.get("message"), "now_playing": now,
+            "deck_a": loaded.get("a"), "deck_b": loaded.get("b"),
+            "playing_a": deck == "a", "playing_b": deck == "b"}
+
+
 def gather() -> dict:
     status = fetch(f"{API}/status.json", timeout=10)
     services = fetch(f"{API}/services") or {}
     session = fetch(f"{API}/music/session") or {}
-    mac = fetch(f"{MAC}/bilby/status")
-    setlist = (fetch(f"{MAC}/api/setlist") or {}).get("setlist") if mac else None
-    up_next = fetch(f"{MAC}/bilby/next") if mac else None
+    bilby = bilby_state()
+    # Setlist and next suggestion only exist on the Mac's DJ assistant.
+    mac_up = bool(MAC) and bool(bilby) and bilby.get("source") == "traktor"
+    setlist = (fetch(f"{MAC}/api/setlist") or {}).get("setlist") if mac_up else None
+    up_next = fetch(f"{MAC}/bilby/next") if mac_up else None
     return {
         "status": status,
         "services": [{k: s.get(k) for k in ("id", "name", "available", "status_detail")}
                      for s in services.get("services", [])],
         "music_session": {k: session.get(k) for k in
                           ("mode", "status", "now_playing", "queue_remaining", "source")} if session else None,
-        "bilby": mac,
+        "bilby": bilby,
         "setlist": (setlist or [])[-20:],
         "up_next": (up_next or {}).get("track") if (up_next or {}).get("ok") else None,
         "mentat_home": bool(MENTAT) and _up(f"{MENTAT}/health"),

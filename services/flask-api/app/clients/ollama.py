@@ -29,46 +29,84 @@ def _post(path: str, payload: dict, *, stream: bool = False, timeout: float = 12
         raise OllamaUnavailable(f"ollama HTTP {e.response.status_code}") from e
 
 
+def _fill_system(prompt: str) -> str:
+    """Replace {KEYWORD_MEMORY} placeholder with live keyword digest."""
+    if "{KEYWORD_MEMORY}" not in prompt:
+        return prompt
+    try:
+        from app import keyword_memory as km  # noqa: PLC0415
+        return prompt.replace("{KEYWORD_MEMORY}", km.context_digest())
+    except Exception:
+        return prompt.replace("{KEYWORD_MEMORY}", "(keyword memory unavailable)")
+
+
 def _with_system(messages: list[dict], system: str | None) -> list[dict]:
     """Prepend a system message if provided and not already present."""
-    prompt = system or settings.skippy_system
-    if not prompt:
+    raw = system or settings.skippy_system
+    if not raw:
         return messages
+    prompt = _fill_system(raw)
     # Don't double-inject if the caller already included a system turn.
     if messages and messages[0].get("role") == "system":
         return messages
     return [{"role": "system", "content": prompt}] + messages
 
 
+def _user_prompt(messages: list[dict]) -> str:
+    """Extract the last user-turn text for watchdog recording."""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            return str(m.get("content", ""))[:2000]
+    return str(messages)[:2000]
+
+
 def chat(messages: list[dict], model: str | None = None,
          system: str | None = None) -> str:
-    payload = {
-        "model": model or settings.ollama_model,
-        "messages": _with_system(messages, system),
-        "stream": False,
-    }
-    r = _post("/api/chat", payload)
-    return r.json()["message"]["content"]
+    from app import model_watchdog as mw  # noqa: PLC0415
+    resolved_model = model or settings.ollama_model
+    mw.record("local", _user_prompt(messages), resolved_model)
+    try:
+        payload = {
+            "model":    resolved_model,
+            "messages": _with_system(messages, system),
+            "stream":   False,
+        }
+        r = _post("/api/chat", payload)
+        result = r.json()["message"]["content"]
+        mw.clear("local")
+        return result
+    except OllamaUnavailable:
+        mw.clear("local")   # connection refused ≠ hang; clear so health stays clean
+        raise
 
 
 def stream_chat(messages: list[dict], model: str | None = None,
                 system: str | None = None) -> Iterator[str]:
+    from app import model_watchdog as mw  # noqa: PLC0415
+    resolved_model = model or settings.ollama_model
+    mw.record("local", _user_prompt(messages), resolved_model)
     payload = {
-        "model": model or settings.ollama_model,
+        "model":    resolved_model,
         "messages": _with_system(messages, system),
-        "stream": True,
+        "stream":   True,
     }
-    with _post("/api/chat", payload, stream=True) as r:
-        try:
-            r.raise_for_status()
-        except httpx.HTTPStatusError as e:
-            raise OllamaUnavailable(f"ollama HTTP {e.response.status_code}") from e
-        for line in r.iter_lines():
-            if not line:
-                continue
-            data = json.loads(line)
-            chunk = data.get("message", {}).get("content")
-            if chunk:
-                yield chunk
-            if data.get("done"):
-                return
+    try:
+        with _post("/api/chat", payload, stream=True) as r:
+            try:
+                r.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                mw.clear("local")
+                raise OllamaUnavailable(f"ollama HTTP {e.response.status_code}") from e
+            for line in r.iter_lines():
+                if not line:
+                    continue
+                data = json.loads(line)
+                chunk = data.get("message", {}).get("content")
+                if chunk:
+                    yield chunk
+                if data.get("done"):
+                    mw.clear("local")
+                    return
+    except OllamaUnavailable:
+        mw.clear("local")
+        raise

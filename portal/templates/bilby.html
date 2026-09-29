@@ -95,12 +95,13 @@
     $("status").replaceChildren();
     const dot = el("span", "dot", m.online ? "● " : "○ ");
     $("status").append(dot, m.online
-      ? `live from home · ${t.online ? "Traktor on the Mac" : "Mac Bilby offline"} · updated ${m.age}s ago`
+      ? `live from home · ${({traktor: "Traktor on the Mac", pushed: "the Mac (pushed)", local: "skippy-pc's library",
+                              drive: "Google Drive"})[t.source] || "no music source"}${t.message ? " · " + t.message : ""} · updated ${m.age}s ago`
       : (m.age == null ? "waiting for skippy-pc to report in" : `skippy-pc silent for ${Math.round(m.age / 60)} min`));
 
     const cur = np || phone;
     $("title").textContent = cur ? cur.title || "Untitled" : "Nothing playing";
-    $("artist").textContent = cur ? (cur.artist || "") + (np ? ` · deck ${String(np.deck).toUpperCase()}` : phone ? " · on the phone" : "") : "";
+    $("artist").textContent = cur ? (cur.artist || "") + (np && np.deck ? ` · deck ${String(np.deck).toUpperCase()}` : phone && !np ? " · on the phone" : "") : "";
     $("tags").replaceChildren(...(np ? [np.bpm && `${np.bpm} BPM`, np.key, np.genre].filter(Boolean) : [])
                                          .map(x => el("span", null, x)));
     $("lyric").textContent = np && np.lyric_summary ? np.lyric_summary : "";

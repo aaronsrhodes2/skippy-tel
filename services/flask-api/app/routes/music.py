@@ -93,6 +93,12 @@ def _track_to_now_playing(track: dict) -> dict:
         "album":      track.get("album",  ""),
         "file_id":    fid,
         "stream_url": _make_stream_url(fid),
+        # Optional metadata — empty/None when the backend doesn't supply it.
+        # Phone reads these to render the inline song card; missing values
+        # render as no-art / no-tag rather than failing.
+        "art_url":    track.get("art_url") or "",
+        "bpm":        track.get("bpm"),
+        "key":        track.get("key"),
     }
 
 
@@ -143,6 +149,27 @@ def _advance_session(sess: dict) -> dict | None:
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
+
+def skip_current_track() -> dict | None:
+    """Skip active session to next track. Called by /bilby/next for local source.
+
+    Returns the new now_playing dict, or None if no session is active.
+    """
+    global _session
+    with _lock:
+        sess = _session
+    if not sess or sess["status"] == "stopped":
+        return None
+    nxt = _advance_session(sess)
+    with _lock:
+        if nxt:
+            _session["now_playing"] = nxt
+            _session["status"]      = "playing"
+        else:
+            _session["status"]      = "stopped"
+            _session["now_playing"] = None
+    return nxt
+
 
 @bp.post("/music/session")
 def start_session():
@@ -308,8 +335,9 @@ def bilby_status():
         "status":  sess["status"],   # "playing" | "paused"
         "title":   np.get("title"),
         "artist":  np.get("artist"),
-        "bpm":     np.get("bpm"),    # None for now; set when NML metadata arrives
-        "key":     np.get("key"),    # None for now
+        "bpm":     np.get("bpm"),
+        "key":     np.get("key"),
+        "art_url": np.get("art_url") or "",
     })
 
 

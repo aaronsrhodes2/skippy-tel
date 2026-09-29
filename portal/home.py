@@ -171,7 +171,9 @@ class Home:
             "online": self.online(),
             "age": self.age(),
             "traktor": {
-                "online": bool(mac),
+                "online": bool(mac) and bool((mac or {}).get("online")),
+                "source": (mac or {}).get("source"),
+                "message": (mac or {}).get("message"),
                 "now_playing": {k: v for k, v in now.items() if k != "art_url"} if now else None,
                 "deck_a": (mac or {}).get("deck_a"), "deck_b": (mac or {}).get("deck_b"),
                 "playing_a": bool((mac or {}).get("playing_a")),

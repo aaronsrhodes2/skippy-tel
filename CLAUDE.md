@@ -1,16 +1,26 @@
 # SkippyTel — Claude Code Context
 
+**First time here?** Read [PLATINUM_RULES.md](../PLATINUM_RULES.md) — this project inherits all universal rules there.
+
 PC-side AI inference server for the Skippy AR ecosystem.
 Flask app in Docker, port 3003 externally.
 
 ## After any code change
 
+See [PLATINUM_RULES §2 (Docker)](../PLATINUM_RULES.md#2--docker-universal-rule) and [§7 (Code vs Config)](../PLATINUM_RULES.md#7--code-vs-config).
+
+**Code changes (rebuild):**
 ```
-docker compose up --build -d flask-api
+docker compose stop flask-api && docker compose rm -f flask-api && docker compose up --build -d flask-api
 curl -s http://localhost:3003/health
 ```
 
-That's the full deploy cycle. ~15 seconds. No manual restart needed.
+**Config changes (restart only):**
+```
+docker compose up -d flask-api
+```
+
+Full rebuild cycle: ~15 seconds. No manual restart needed.
 
 ## Project structure
 

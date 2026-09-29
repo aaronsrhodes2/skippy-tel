@@ -27,7 +27,7 @@ services:
     ports:
       - "3003:5000"          # external 3003 — paired with SkippyDroid egress (Z-Phone).
                             # Different machines, never collide. Internal 5000 = Flask convention.
-    env_file: .env
+    env_file: ../.env       # Platinum Rule §10 — single dev-root vault
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
       - WHISPER_BASE_URL=http://whisper:8000
@@ -125,8 +125,42 @@ services:
               count: all
               capabilities: [gpu]
 
+  # ── Dozzle — real-time Docker log viewer ──────────────────────────────────
+  # Survives flask-api crashes. Shows live logs from all containers.
+  # Dashboard: http://localhost:9999
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: skippytel-dozzle
+    restart: unless-stopped
+    logging: *default-logging
+    ports:
+      - "9999:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - DOZZLE_LEVEL=info   # show INFO and above; drop to debug for raw output
+
+  # ── Uptime Kuma — model server health monitoring ───────────────────────────
+  # Polls each service independently. Shows status page + optional alerts.
+  # Dashboard: http://localhost:3001
+  # First launch: create an admin account, then add monitors for:
+  #   http://skippytel-flask-api:5000/health (via Docker network)
+  #   http://skippytel-ollama:11434          (Ollama root responds 200)
+  #   http://skippytel-whisper:8000/health
+  #   http://skippytel-insightface:8000/health
+  uptime-kuma:
+    image: louislam/uptime-kuma:latest
+    container_name: skippytel-uptime-kuma
+    restart: unless-stopped
+    logging: *default-logging
+    ports:
+      - "3001:3001"
+    volumes:
+      - uptime-kuma-data:/app/data
+
 volumes:
   ollama-data:
   whisper-cache:
   face-db:
   insightface-cache:
+  uptime-kuma-data:
