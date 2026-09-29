@@ -932,6 +932,9 @@ def _core_report(health, containers_ok=True):
 def test_core_check_is_unknown_until_home_reports():
     import home as home_mod
     assert home_mod.core_check(None)["verdict"] == "unknown"
+    # a reporter from before this feature sends no `health` at all: that's "can't tell", not "down"
+    assert home_mod.core_check({"status": {"services": []}, "services": []})["verdict"] == "unknown"
+    assert home_mod.core_check({"health": None})["verdict"] == "down"      # explicit None: the core didn't answer
 
 
 def test_core_check_healthy_lists_tiers_and_every_service():

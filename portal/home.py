@@ -42,9 +42,9 @@ def core_check(report: dict | None) -> dict:
     plain-English list of what's wrong, the tiers, and the whole service
     manifest. Pure: it only reads what the home reporter sent, and trims it,
     so a bad report can't put anything odd on the dashboard."""
-    if report is None:
+    if report is None or "health" not in report:      # no report yet, or a home reporter older than this widget
         return {"verdict": "unknown", "problems": [], "tiers": [], "services": [], "api_version": None}
-    health = report.get("health")
+    health = report.get("health")                     # present but None = the core itself didn't answer
     ollama = (health or {}).get("ollama") or {}
     tiers_in = (health or {}).get("tiers") or {}
     problems: list[str] = []
