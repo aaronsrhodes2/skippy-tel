@@ -98,10 +98,11 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
       - id: identity
         run: |
-          if gcloud iam service-accounts describe "$MENTAT_SA" >/dev/null 2>&1; then
+          if out=$(gcloud iam service-accounts describe "$MENTAT_SA" --format='value(email)' 2>&1); then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::Mentat's identity ($MENTAT_SA) doesn't exist yet: re-run infra/bootstrap/bootstrap.sh in Cloud Shell. Skipping Mentat."
+            echo "$out"
+            echo "::notice::Can't see Mentat's identity ($MENTAT_SA): $(echo "$out" | grep -m1 -E 'ERROR|denied|not found' || echo "$out" | tail -1). If it doesn't exist, re-run infra/bootstrap/bootstrap.sh in Cloud Shell. Skipping Mentat."
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.identity.outputs.ready == 'true'
