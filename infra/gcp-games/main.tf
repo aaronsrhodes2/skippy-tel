@@ -121,6 +121,7 @@ resource "google_compute_instance" "games" {
     shutdown-script = file("${path.module}/shutdown.sh")
     idle-watchdog   = file("${path.module}/idle-watchdog.sh")
     skippy-diag     = file("${path.module}/diag.sh")
+    ops-agent       = file("${path.module}/ops_agent.py")
     discord-notify  = file("${path.module}/discord-notify.py")
     compose-file    = file("${path.module}/../../games/docker-compose.yml")
     games           = "valheim"
@@ -144,6 +145,7 @@ resource "google_compute_instance" "games" {
       metadata["portal-friends"], # the portal's friends list (portal/friends.py)
       metadata["portal-tasks"],   # remote-operator task queue (portal/tasks.py)
       metadata["portal-task-results"],
+      metadata["ops-request"], # scripts/remote.py → ops_agent.py
     ]
   }
 }

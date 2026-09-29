@@ -106,8 +106,33 @@ OnUnitActiveSec=2min
 WantedBy=timers.target
 UNIT
 
+# Ops agent: answers Claude's requests (log search, stats, per-game restart)
+# sent through metadata `ops-request`, replying on serial port 3. The loop
+# fetches ops_agent.py fresh from metadata (`ops-agent`) every pass, so a
+# deploy updates it without a reboot.
+cat > /usr/local/bin/skippy-ops <<'OPS'
+#!/bin/bash
+while true; do
+  curl -sf -H "Metadata-Flavor: Google" \
+    "http://metadata.google.internal/computeMetadata/v1/instance/attributes/ops-agent" > /run/ops_agent.py \
+    && python3 /run/ops_agent.py
+  sleep 2
+done
+OPS
+chmod 755 /usr/local/bin/skippy-ops
+cat > /etc/systemd/system/skippy-ops.service <<'UNIT'
+[Unit]
+Description=Skippy ops agent (requests via metadata, replies on serial port 3)
+After=docker.service
+[Service]
+ExecStart=/usr/local/bin/skippy-ops
+Restart=always
+[Install]
+WantedBy=multi-user.target
+UNIT
+
 systemctl daemon-reload
-systemctl enable --now skippy-idle-watchdog.timer skippy-diag.timer
+systemctl enable --now skippy-idle-watchdog.timer skippy-diag.timer skippy-ops.service
 
 # ── 5. Games ──────────────────────────────────────────────────────────────────
 GAMES=$(meta games)

@@ -80,6 +80,12 @@ Actions (the sandbox can't reach GCP or run.app directly):
   (a game id for logs; game ids for start). Read the job log. Secrets are
   masked. `status` shows state, games, invite codes, missing settings.
   Don't stop/restart while people may be playing unless asked.
+  On the VM itself (ops agent, infra/gcp-games/ops_agent.py; VM must be on):
+  `tail <game> [lines]`, `search <game> <regex>` (whole container log),
+  `stats` (CPU/mem/disk/per-container), `restart-game <game>` (one container,
+  no VM reboot). Requests go via metadata `ops-request`, replies on serial 3.
+  The agent and the snapshot script (diag.sh) reload from metadata, so
+  changing them needs only a deploy.
   `command` = `discord-setup` creates/repairs every game's Discord channels:
   it queues the job in VM metadata and the portal (which holds the bot token)
   runs it via POST /tasks/run (portal/tasks.py). New portal-side jobs go there.
