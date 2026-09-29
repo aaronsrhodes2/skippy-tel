@@ -29,6 +29,23 @@ _FALLBACK_PREFIXES = ("claude-opus-5", "claude-fable-5", "claude-mythos-5")
 def uses_refusal_fallback(model: str) -> bool:
     return model.startswith(_FALLBACK_PREFIXES)
 
+
+# Per-message upgrades, same phrases as SkippyTel's tiers. Checked in order;
+# the phrase can appear anywhere in the message and applies to that message only.
+TIERS = (
+    ("trust the awesomeness", "claude-opus-5", "Opus 5", True),     # (phrase, model, label, admin only)
+    ("thinking cap", "claude-sonnet-5", "Sonnet 5", False),
+)
+
+
+def pick_model(message: str, default: str, is_admin: bool) -> tuple[str, str | None]:
+    """(model, badge label or None) for this message."""
+    text = message.lower()
+    for phrase, model, label, admin_only in TIERS:
+        if phrase in text and (is_admin or not admin_only):
+            return model, label
+    return default, None
+
 _PERSONA_FALLBACK = "You are Skippy the Magnificent, the Captain's sardonic but loyal AI. Keep replies short."
 
 
@@ -99,13 +116,13 @@ class SkippyChat:
         return self._client_obj
 
     def reply(self, system: str, messages: list[dict], tools: list[dict] | None = None,
-              run_tool=None) -> str:
+              run_tool=None, model: str | None = None) -> str:
         """One chat reply. With tools, runs the tool loop: the model asks for
         tools, `run_tool(name, input) -> str` runs them, results go back,
         until the model answers (or MAX_TOOL_ROUNDS is hit)."""
         messages = list(messages)
         for _ in range(MAX_TOOL_ROUNDS):
-            response = self._create(system, messages, tools)
+            response = self._create(system, messages, tools, model or self.model)
             if response.stop_reason == "refusal":
                 return "I can't help with that one."
             calls = [b for b in response.content if b.type == "tool_use"]
@@ -123,13 +140,13 @@ class SkippyChat:
         except Exception as exc:   # noqa: BLE001 — tool failures go back to the model, not the user
             return {"type": "tool_result", "tool_use_id": call.id, "content": str(exc), "is_error": True}
 
-    def _create(self, system: str, messages: list[dict], tools: list[dict] | None):
+    def _create(self, system: str, messages: list[dict], tools: list[dict] | None, model: str):
         import anthropic
-        params = {"model": self.model, "max_tokens": MAX_OUTPUT, "system": system, "messages": messages}
+        params = {"model": model, "max_tokens": MAX_OUTPUT, "system": system, "messages": messages}
         if tools:
             params["tools"] = tools
         try:
-            if uses_refusal_fallback(self.model):
+            if uses_refusal_fallback(model):
                 # Server-side refusal fallback: if the model declines on policy
                 # grounds, the API re-runs the turn on a fallback model.
                 return self._client.beta.messages.create(

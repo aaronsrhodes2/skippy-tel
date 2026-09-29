@@ -65,8 +65,9 @@ class FakeSkippy:
     def __init__(self):
         self.seen = None
 
-    def reply(self, system, messages, tools=None, run_tool=None):
+    def reply(self, system, messages, tools=None, run_tool=None, model=None):
         self.seen = (system, messages)
+        self.model = model
         self.tools, self.run_tool = tools, run_tool
         return "Obviously."
 
@@ -76,7 +77,7 @@ SETTINGS = {
     "GOOGLE_CLIENT_ID": "id", "GOOGLE_CLIENT_SECRET": "secret",
     "ALLOWED_EMAILS": frozenset({ADMIN, FRIEND}), "ADMIN_EMAILS": frozenset({ADMIN}),
     "GCP_PROJECT": "p", "GCP_ZONE": "z", "GCP_INSTANCE": "i",
-    "CHAT_MODEL": "claude-opus-5", "CHAT_ENABLED": True,
+    "CHAT_MODEL": "claude-haiku-4-5", "CHAT_ENABLED": True,
     "DISCORD_INVITE": "gPTVS7Hmj", "DISCORD_BOT_TOKEN": "",
 }
 
@@ -169,7 +170,7 @@ def test_chat_round_trip(env):
     resp = client.post("/chat/send", json={"message": "status?",
                                            "history": [{"role": "user", "content": "hi"},
                                                        {"role": "assistant", "content": "yo"}]})
-    assert resp.get_json() == {"reply": "Obviously."}
+    assert resp.get_json() == {"reply": "Obviously.", "model": None}
     system, messages = skippy.seen
     assert "Captain" in system
     assert messages[-1] == {"role": "user", "content": "status?"}
@@ -535,3 +536,25 @@ def test_task_failure_is_reported_not_raised(env):
     vm.metadata["portal-tasks"] = json.dumps([{"id": "t1", "task": "discord-setup"}])   # no bot token
     [result] = client.post("/tasks/run").get_json()["results"]
     assert not result["ok"] and "bot token" in result["message"]
+
+
+def test_tier_phrases_pick_the_model_for_that_message(env):
+    client, _, skippy = env
+    login(client, ADMIN)
+    assert client.post("/chat/send", json={"message": "hi"}).get_json()["model"] is None
+    assert skippy.model == SETTINGS["CHAT_MODEL"] == "claude-haiku-4-5"
+    resp = client.post("/chat/send", json={"message": "Put on your Thinking Cap: why is it lagging?"})
+    assert resp.get_json()["model"] == "Sonnet 5" and skippy.model == "claude-sonnet-5"
+    resp = client.post("/chat/send", json={"message": "trust the awesomeness and plan the base"})
+    assert resp.get_json()["model"] == "Opus 5" and skippy.model == "claude-opus-5"
+    client.post("/chat/send", json={"message": "thanks"})
+    assert skippy.model == SETTINGS["CHAT_MODEL"]                       # back to the default
+
+
+def test_opus_tier_is_admin_only(env):
+    client, _, skippy = env
+    login(client, FRIEND)
+    resp = client.post("/chat/send", json={"message": "trust the awesomeness"})
+    assert resp.get_json()["model"] is None and skippy.model == SETTINGS["CHAT_MODEL"]
+    client.post("/chat/send", json={"message": "thinking cap please"})
+    assert skippy.model == "claude-sonnet-5"                            # Sonnet is for everyone

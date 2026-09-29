@@ -6,6 +6,8 @@
   {% if not chat_enabled %}
     <p class="error">Chat isn't configured yet (no Anthropic API key) — see docs/cicd.md &rarr; Secrets.</p>
   {% endif %}
+  <p class="help">Say <i>"thinking cap"</i> for a sharper answer (Sonnet){% if is_admin %}, or
+    <i>"trust the awesomeness"</i> for the big brain (Opus){% endif %}. Otherwise it's Haiku: quick and cheap.</p>
   <p class="help">Skippy can check the game server, start games and stop it{% if is_admin %} (and restart it){% endif %}
     &mdash; just ask. Not connected to skippy-tel-core or your MCP tools from here yet.</p>
   <div id="log"></div>
@@ -19,6 +21,8 @@
   #log .user { background: #111; border: 1px solid #333; }
   #log .assistant { background: var(--dim-green); border: 1px solid var(--dim-green-hi); color: #b8ffe0; }
   #log .failed { border-color: var(--red); color: var(--red); }
+  #log .tier { float: right; font-size: .7rem; border: 1px solid var(--violet); color: var(--violet);
+               border-radius: 999px; padding: 1px 8px; margin-left: 8px; }
 </style>
 <script>
   // History lives in this tab (sessionStorage) and is sent with each message;
@@ -57,6 +61,11 @@
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || res.statusText);
       pending.textContent = "Skippy: " + data.reply;
+      if (data.model) {                       // "thinking cap" / "trust the awesomeness"
+        const tag = document.createElement("span");
+        tag.className = "tier"; tag.textContent = data.model;
+        pending.prepend(tag);
+      }
       history.push({role: "user", content: text}, {role: "assistant", content: data.reply});
       save();
     } catch (err) {

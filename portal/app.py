@@ -299,12 +299,13 @@ def create_app(settings: dict | None = None, vm=None, skippy=None) -> Flask:
         try:
             admin = auth.is_admin(user["email"])
             tools = chat_tools.ChatTools(vm, is_admin=admin, visible=auth.visible_games(user["email"]))
+            model, badge = chat.pick_model(message, app.config["CHAT_MODEL"], admin)
             text = skippy.reply(chat.system_prompt(user["name"], is_admin=admin),
                                 chat.build_messages(body.get("history"), message),
-                                tools=tools.schemas(), run_tool=tools.run)
+                                tools=tools.schemas(), run_tool=tools.run, model=model)
         except chat.ChatError as exc:
             return jsonify(error=str(exc)), 502
-        return jsonify(reply=text)
+        return jsonify(reply=text, model=badge)
 
     app.register_blueprint(talk)
     return app
