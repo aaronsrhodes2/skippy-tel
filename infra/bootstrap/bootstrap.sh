@@ -19,13 +19,21 @@ git config --global credential.helper >/dev/null || git config --global credenti
 say() { printf '\n\033[1;32m== %s\033[0m\n' "$*"; }
 
 # ── 1. terraform (Cloud Shell doesn't keep it between sessions) ───────────────
-if ! command -v terraform >/dev/null; then
+# (Cloud Shell ships a `terraform` stub that only prints install instructions,
+#  so check for the real binary, not just the name.)
+real_terraform() { terraform version 2>/dev/null | grep -q '^Terraform v'; }
+if ! real_terraform; then
   say "Installing terraform"
   wget -qO- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor --yes -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
   echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
     | sudo tee /etc/apt/sources.list.d/hashicorp.list >/dev/null
   sudo apt-get update -qq && sudo apt-get install -y -qq terraform
 fi
+hash -r
+if ! real_terraform && /usr/bin/terraform version 2>/dev/null | grep -q '^Terraform v'; then
+  export PATH="/usr/bin:$PATH"; hash -r        # the stub sits earlier on PATH; use the real one
+fi
+real_terraform || { echo "terraform didn't install; nothing was changed. Paste this output to Claude."; exit 1; }
 
 # ── 2. APIs first (enabling one takes a minute to propagate; terraform's
 #       lookups fail if they run before that) ─────────────────────────────────
