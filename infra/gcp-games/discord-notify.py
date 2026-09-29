@@ -53,6 +53,7 @@ GAMES = {
         lambda ip, e: ("Worlds → **Invite Code** → the code on the Skippy Portal (a new one every boot)"
                        + ("\nWorld password: next to the code on the Skippy Portal"
                           if e.get("DRAGONWILDS_WORLD_PASSWORD") else "")
+                       + (f"\nOr: Direct tab → `{ip}:{e.get('DRAGONWILDS_PORT') or '7778'}`" if ip else "")
                        + f"\nOr: Public tab → search **{e.get('DRAGONWILDS_SERVER_NAME') or 'Skippy'}** "
                          "(the whole name, exact spelling and case)"),
     ),

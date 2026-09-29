@@ -45,6 +45,7 @@ class Game:
     join_password_key: str = ""          # shown to signed-in players on the dashboard
     ready_minutes: int = 5               # typical boot → joinable, for the "starting" hint
     invite_code: bool = False            # hands out a per-session invite code (diagnostics.join_codes)
+    direct: Callable[[str, dict], str] | None = None   # (ip, settings) -> "ip:port" for a Direct-connect box
     theme: Theme | None = None
     facts: tuple[tuple[str, str], ...] = field(default=())   # (label, value) on the game page
     links: tuple[tuple[str, str], ...] = field(default=())   # (label, url) official site, wiki
@@ -81,6 +82,7 @@ GAMES: dict[str, Game] = {
         join_password_key="DRAGONWILDS_WORLD_PASSWORD",
         ready_minutes=6,
         invite_code=True,
+        direct=lambda ip, env: f"{ip}:{env.get('DRAGONWILDS_PORT') or '7778'}",
         theme=Theme(accent="#ff7a1a", accent2="#c9a24a", bg="#120806", card="#24110b", text="#f3dcc2",
                     font="Cinzel",
                     pattern="radial-gradient(ellipse at 20% 110%, rgba(255,90,20,.55), transparent 60%), "

@@ -391,3 +391,4 @@ def test_invite_code_sits_with_the_join_password(env):
         join = page[page.index('<div class="join">'):]
         join = join[:join.index("</div>")]
         assert "YTKM-EKL1" in join and "dragonpw" in join         # code + password in one block
+        assert "35.1.2.3:7778" in join                            # direct ip:port for the Direct tab
