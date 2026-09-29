@@ -174,7 +174,7 @@ def test_chat_round_trip(env):
     resp = client.post("/chat/send", json={"message": "status?",
                                            "history": [{"role": "user", "content": "hi"},
                                                        {"role": "assistant", "content": "yo"}]})
-    assert resp.get_json() == {"reply": "Obviously.", "model": None}
+    assert resp.get_json() == {"reply": "Obviously.", "model": None, "tools": [], "mentat_available": False}
     system, messages = skippy.seen
     assert "Captain" in system
     assert messages[-1] == {"role": "user", "content": "status?"}
@@ -829,3 +829,13 @@ def test_bilby_is_a_grant_and_controls_are_admin_only(env):
     assert client.get("/bilby").status_code == 200
     assert client.post("/bilby/control", data={"action": "skip"}).status_code in (302, 403)
     assert client.get("/me").status_code == 403                                  # home status stays private
+
+
+def test_chat_reply_says_which_tools_did_the_work(env):
+    client, _, skippy = env
+    login(client, ADMIN)
+    data = client.post("/chat/send", json={"message": "physics?"}).get_json()
+    assert data["tools"] == [] and data["mentat_available"] is False   # no Mentat in tests
+    skippy.reply = lambda system, messages, tools=None, run_tool=None, model=None: (
+        run_tool("server_status", {}) and "Up.")
+    assert client.post("/chat/send", json={"message": "up?"}).get_json()["tools"] == ["server_status"]

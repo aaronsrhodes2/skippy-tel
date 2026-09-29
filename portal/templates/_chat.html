@@ -57,6 +57,12 @@
           tag.className = "tier"; tag.textContent = data.model;
           pending.prepend(tag);
         }
+        const used = [...new Set(data.tools || [])];   // receipts: which tools did the work
+        const note = document.createElement("div");
+        note.className = "receipt";
+        note.textContent = used.length ? "tools: " + used.join(", ").replace(/mentat_/g, "Mentat › ")
+          : (data.mentat_available ? "answered from the model's own knowledge" : "answered from the model's own knowledge (Mentat offline)");
+        pending.append(note);
         history.push({role: "user", content: text}, {role: "assistant", content: data.reply});
         save();
       } catch (err) {

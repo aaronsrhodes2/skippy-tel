@@ -522,12 +522,23 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             page = str(body.get("page") or "")[:100] or None
             prompt = chat.system_prompt(user["name"], is_admin=admin, page=page,
                                         games=[GAMES[g].name for g in auth.visible_games(user["email"])])
+            used: list[str] = []
+
+            def run_tool(name, args):
+                used.append(name)
+                return tools.run(name, args)
+
+            schemas = tools.schemas()
             text = skippy.reply(prompt,
                                 chat.build_messages(body.get("history"), message),
-                                tools=tools.schemas(), run_tool=tools.run, model=model)
+                                tools=schemas, run_tool=run_tool, model=model)
         except chat.ChatError as exc:
             return jsonify(error=str(exc)), 502
-        return jsonify(reply=text, model=badge)
+        mentat_on = any(t["name"].startswith("mentat_") for t in schemas)
+        # One line per reply in Cloud Run's logs: who, which model, which tools (never the text).
+        print(json.dumps({"event": "chat", "user": user["email"], "model": model,
+                          "tools": used, "mentat_available": mentat_on}), flush=True)
+        return jsonify(reply=text, model=badge, tools=used, mentat_available=mentat_on)
 
     app.register_blueprint(talk)
     return app
