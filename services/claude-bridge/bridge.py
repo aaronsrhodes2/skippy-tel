@@ -208,11 +208,14 @@ class Handler(BaseHTTPRequestHandler):
 
     # ── the private Skippy (workshop.py) ─────────────────────────────────
     def _workshop_ok(self) -> bool:
-        """It runs Claude Code with full permissions, so it wants the home token."""
+        """Everything here runs Claude Code (the workshop and /solid-gold, in bypass mode with every permission check
+        skipped, or in plan mode reading the whole tree), so every door wants the home token, and with none
+        configured they all stay shut (Platinum section 19, condition 1). The bridge listens on 0.0.0.0 so Docker can
+        reach it: anything on the network can knock, only the token opens."""
         token = current_token()
         if not token:
-            self._json(503, {"error": "workshop_disabled",
-                             "message": "SKIPPY_HOME_TOKEN isn't configured on this PC"})
+            self._json(503, {"error": "bridge_disabled",
+                             "message": "SKIPPY_HOME_TOKEN isn't configured on this PC: the bridge stays shut"})
             return False
         header = self.headers.get("Authorization") or ""
         if not header.startswith("Bearer ") or not hmac.compare_digest(
@@ -252,6 +255,8 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, run.since(after, wait))
 
     def _handle_solid_gold(self):
+        if not self._workshop_ok():                    # before reading the body, before anything can run
+            return
         body = self._read_body()
         prompt = (body.get("text") or "").strip()
         mode   = body.get("mode") or "plan"   # 'plan' | 'bypass'

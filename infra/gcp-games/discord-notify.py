@@ -68,7 +68,8 @@ GAMES = {
     "everquest": (
         "EverQuest",
         "Golden Era Norrath (EQEmu): bots, mercs, XP x3, no death penalty.",
-        lambda ip, e: f"RoF2 client: set both addresses in eqhost.txt to `{ip}:5999`, run `eqgame.exe patchme`",
+        lambda ip, e: (f"RoF2 client: eqhost.txt = `[LoginServer]` then `Host={ip}:5999` (not the old braces format), "
+                       "run `eqgame.exe patchme`; the exact block is on the Skippy Portal"),
     ),
 }
 

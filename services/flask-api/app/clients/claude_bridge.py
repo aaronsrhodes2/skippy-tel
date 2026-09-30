@@ -20,6 +20,23 @@ class BridgeUnavailable(Exception):
     pass
 
 
+def _headers() -> dict:
+    """The bridge runs Claude Code, so it only answers a caller holding SKIPPY_HOME_TOKEN (the vault `.env` gives the
+    same value to this container and to the bridge on the host)."""
+    token = os.getenv("SKIPPY_HOME_TOKEN", "").strip()
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
+def _refused(e: "httpx.HTTPStatusError") -> BridgeUnavailable:
+    code = e.response.status_code
+    if code in (401, 503):
+        return BridgeUnavailable(
+            f"claude-bridge refused the request (HTTP {code}): SKIPPY_HOME_TOKEN must be set, and the same, "
+            "in flask-api's environment and on the PC running the bridge"
+        )
+    return BridgeUnavailable(f"claude-bridge HTTP {code}")
+
+
 def chat(text: str, mode: str = "plan") -> str:
     """One-shot. mode = 'plan' (solid gold) or 'bypass' (awesomeness)."""
     try:
@@ -28,6 +45,7 @@ def chat(text: str, mode: str = "plan") -> str:
         r = httpx.post(
             f"{BRIDGE_URL}/solid-gold",
             json={"text": text, "mode": mode, "stream": False},
+            headers=_headers(),
             timeout=600.0,
         )
         r.raise_for_status()
@@ -38,9 +56,7 @@ def chat(text: str, mode: str = "plan") -> str:
             "claude-bridge unreachable — start it with `make bridge` on the host"
         ) from e
     except httpx.HTTPStatusError as e:
-        raise BridgeUnavailable(
-            f"claude-bridge HTTP {e.response.status_code}"
-        ) from e
+        raise _refused(e) from e
 
 
 def stream_chat(text: str, mode: str = "plan") -> Iterator[str]:
@@ -49,6 +65,7 @@ def stream_chat(text: str, mode: str = "plan") -> Iterator[str]:
             "POST",
             f"{BRIDGE_URL}/solid-gold",
             json={"text": text, "mode": mode, "stream": True},
+            headers=_headers(),
             timeout=600.0,
         ) as r:
             r.raise_for_status()
@@ -69,6 +86,4 @@ def stream_chat(text: str, mode: str = "plan") -> Iterator[str]:
             "claude-bridge unreachable — start it with `make bridge` on the host"
         ) from e
     except httpx.HTTPStatusError as e:
-        raise BridgeUnavailable(
-            f"claude-bridge HTTP {e.response.status_code}"
-        ) from e
+        raise _refused(e) from e

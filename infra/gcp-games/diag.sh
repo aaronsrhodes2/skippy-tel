@@ -63,6 +63,46 @@
     "http://metadata.google.internal/computeMetadata/v1/instance/attributes/game-facts" 2>/dev/null \
     | timeout 60 python3 - 2>/dev/null || true
   # ── end game facts ──
+  # ── EverQuest (AkkStack): is anything bound to the login/world ports INSIDE the container, and what the login
+  # server logged. A client that "times out" at login could be a filtered port, a dead login server or a bad config;
+  # the host can't tell (docker-proxy accepts on the host either way). Read-only. </dev/null on every docker exec:
+  # this script arrives on bash's stdin, and a command that reads stdin would swallow the rest of it.
+  EQ=akk-stack-eqemu-server-1
+  if docker ps --format '{{.Names}}' | grep -qx "$EQ"; then
+    echo "--- everquest: sockets bound inside the server container (hex ports: 176E=5998 176F=5999 2328=9000 1B5B=7003)"
+    for proto in udp tcp; do
+      echo "$proto:"
+      docker exec "$EQ" sh -c "grep -E ':(176E|176F|2328|1B5B) ' /proc/net/$proto" </dev/null 2>&1 | awk '{print $2, "state", $4}' | head -12
+    done
+    echo "--- everquest: server processes"
+    docker exec "$EQ" sh -c 'ps -eo pid,etime,args | grep -E "loginserver|world|zone|ucs|queryserv|eqlaunch|shared_memory" | grep -v grep' </dev/null 2>&1 | cut -c1-150 | head -15
+    LOGS=/srv/games/data/everquest/akk-stack/server/logs
+    echo "--- everquest: newest server logs"
+    ls -lt --time-style=+%H:%M "$LOGS" 2>/dev/null | head -8 | cut -c1-120
+    for f in $(ls -t "$LOGS"/login*.log 2>/dev/null | head -1); do echo "--- everquest: tail of $(basename "$f")"; tail -n 25 "$f" | cut -c1-200; done
+    # Which login servers the world is configured for, and how the world itself talks about them (secrets hidden).
+    echo "--- everquest: login-related config (keys; account/password values hidden)"
+    python3 - "$LOGS/../eqemu_config.json" "$LOGS/../login.json" </dev/null 2>&1 <<'PY' | cut -c1-200 | head -30
+import json, sys
+def walk(node, path, out):
+    for key, value in node.items():
+        here = f"{path}.{key}" if path else key
+        if isinstance(value, dict):
+            walk(value, here, out)
+        elif "login" in here.lower() or here.lower().startswith("worldservers"):
+            hidden = any(w in key.lower() for w in ("pass", "account", "secret", "token"))
+            out.append(f"{here} = {'<hidden>' if hidden else value!r}")
+for name in sys.argv[1:]:
+    try:
+        rows = []
+        walk(json.load(open(name)), "", rows)
+        print(f"[{name.rsplit('/', 1)[-1]}]", *rows, sep="\n  ")
+    except Exception as exc:
+        print(f"[{name.rsplit('/', 1)[-1]}] unreadable: {exc}")
+PY
+    for f in $(ls -t "$LOGS"/world_*.log 2>/dev/null | head -1); do echo "--- everquest: login lines in $(basename "$f")"; grep -i -E "login|LS " "$f" | tail -n 12 | cut -c1-200; done
+  fi
+  # ── end everquest ──
   echo "--- udp listeners (game ports)"
   ss -ulnp 2>/dev/null | grep -E ':(2456|2457|7777|7778|8888|34197)\b' || echo "(none)"
   echo "--- memory";    free -m | head -2

@@ -150,6 +150,23 @@ for key in ("ucs", "chatserver", "mailserver"):
 if names.strip():
     long_name, short_name = names.rstrip("\n").split("\t")[:2]
     world["longname"], world["shortname"] = long_name, short_name
+# The login server. AkkStack's launcher starts it only when web-admin.launcher.runLoginserver is true, and the world
+# must register with it locally (127.0.0.1:5998). At home both were set by hand; only the database was carried over
+# here, so on the VM nothing listened on 5998/5999 and every login failed with "a connection to your server could not
+# be reached". (The home config has no server-admin credentials: the world registers unauthenticated, so none are set.)
+launcher = cfg.setdefault("web-admin", {}).setdefault("launcher", {})
+launcher["runLoginserver"] = True
+# EXACTLY ONE login server: the local one, as at home. AkkStack's fresh config lists three (loginserver1 = a public
+# server with legacy=1, loginserver2 = 127.0.0.1:5998, loginserver3 = login.projecteq.net). With two of them pointing at the
+# local login server the world connected twice, each registration destroyed the other ("a server with that name already
+# exists") about every 100 ms, and the world also tried to register itself with a public login server. Keep loginserver1
+# (its account/password untouched), make it local and non-legacy, and drop the rest.
+for key in [k for k in world if k.startswith("loginserver") and k != "loginserver1"]:
+    del world[key]
+ls = world.setdefault("loginserver1", {})
+ls["host"] = "127.0.0.1"
+ls["port"] = type(ls.get("port", "5998"))("5998")        # keep the file's own type (string or number)
+ls.pop("legacy", None)
 with open(path, "w") as f:          # in place: keeps the eqemu user's ownership
     json.dump(cfg, f, indent=4)
 PY
@@ -157,4 +174,11 @@ PY
 # ── 5. Launch world, login server, zones and chat
 in_server "./bin/spire spire:launcher stop" >/dev/null 2>&1 || true   # restart picks up config/DB
 in_server "./bin/spire spire:launcher start" || log "WARNING: launcher didn't start"
-log "online at ${IP:-?}:5999 (world ${IP:-?}:9000)"
+# Say "online" only when it is: the login server takes a few seconds, and 5999 (hex 176F) is what clients connect to.
+login_up() { dc exec -T eqemu-server sh -c "grep -qE ':176F ' /proc/net/udp" </dev/null 2>/dev/null; }
+for _ in $(seq 1 30); do login_up && break; sleep 3; done
+if login_up; then
+  log "online at ${IP:-?}:5999 (world ${IP:-?}:9000)"
+else
+  log "WARNING: started, but nothing is listening on the login port 5999: client logins will fail (see the login log in server/logs)"
+fi

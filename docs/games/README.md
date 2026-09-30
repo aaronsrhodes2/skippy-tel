@@ -179,7 +179,7 @@ Every game's page on the portal shows the same block: what to type, where, and t
 | Dragonwilds | Worlds → **Invite Code** (the I key), or the Direct tab `ip:7778`, or search the server name | Yes: new every boot |
 | Factorio | Multiplayer → Connect to address → `ip:34197` (one paste, port included) | No (Factorio has none; the address is stable) |
 | Satisfactory | Main menu → **Server Manager** → Add Server: address `ip` in the first box, port `7777` in the second (two chips on the page, one click each; confirmed in the real dialog 2026-09-30). **Not** Multiplayer → Join Game (the IP-or-Session-ID screen, for player-hosted games): on a dedicated server it fails with "Encryption Token Missing" | No. Its Session ID is for player-hosted games, and the dedicated server's log has no join code (checked on the live server, 2026-09-30) |
-| EverQuest | The `eqhost.txt` block on the page (copy it over the client's file), then `eqgame.exe patchme` | No |
+| EverQuest | The `eqhost.txt` block on the page (copy it over the client's file), then `eqgame.exe patchme`. **RoF2's format is `[LoginServer]` / `Host=ip:5999`**; the older `[Registration Servers]` braces format is Titanium's, and RoF2 silently replaces a file it can't read with its stock one (`Host=xp-smitchell:7308`, a dead developer host, which shows up as "a timeout has occurred" at login). Mark the file read-only if the game keeps restoring it | No |
 
 The join password is shown in plain text on purpose (see `CLAUDE.md`, "Join passwords").
 
