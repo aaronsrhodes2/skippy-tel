@@ -731,6 +731,44 @@ class FakeMentat:
         self.calls.append(("ask", question))
         return {"value": 1.609344, "units": "km", "source": "pint UnitRegistry"}
 
+    # Weapon vs. Armor (the real shapes come from mentat/wva.py; mentat/tests checks them against the game)
+    def wva_catalog(self):
+        import mentat_client
+        if not self.up:
+            raise mentat_client.MentatError("Mentat is unreachable (connection refused)")
+        return WVA_CATALOG
+
+    def wva_solve(self, fight):
+        import mentat_client
+        self.calls.append(("wva_solve", fight))
+        if not self.up:
+            raise mentat_client.MentatError("Mentat is unreachable (connection refused)")
+        if fight.get("environment") not in {"vacuum", "atmosphere_earth"}:
+            raise mentat_client.MentatError("environment must be one of: vacuum, atmosphere_earth", 400)
+        return {**WVA_RESULT, "inputs": fight}
+
+
+WVA_CATALOG = {"sigma_ground_ref": "a763071b4beb87129f2672624e989a39ef7a1199",
+               "types": {"kinetic": {"label": "Kinetic", "available": True, "params": []}},
+               "weapons": [{"key": "ak47", "name": "AK-47 (7.62x39mm)", "type": "kinetic",
+                            "weapon": {"type": "kinetic", "mass_kg": 0.0079, "velocity_ms": 715.0,
+                                       "radius_m": 0.0038, "material": "steel_mild"}}],
+               "armors": [{"key": "nij_iv", "name": "NIJ Level IV Plate (SAPI)",
+                           "layers": [{"material": "ceramic_alumina", "thickness_m": 0.015}]}],
+               "materials": [], "environments": [{"key": "vacuum", "label": "Vacuum (space)", "about": ""}],
+               "limits": {"layers_max": 10, "thickness_m": [0.001, 2.0], "distance_m": [1.0, 10000.0]},
+               "defaults": {"weapon": "ak47", "armor": "nij_iv", "environment": "vacuum", "distance_m": 100.0}}
+WVA_RESULT = {"verdict": "ARMOR HOLDS — first layer stopped it", "breached": False, "layers_penetrated": 0,
+              "total_layers": 1, "weapon_type": "kinetic", "environment": "atmosphere_earth",
+              "summary_lines": ["Layer 1 [ceramic_alumina 15.0mm]: Poncelet, stopped at 0.005m, T=3191K"],
+              "layers": [{"material": "ceramic_alumina", "gap": False, "thickness_m": 0.015, "penetrated": False,
+                          "damage_depth_m": 0.0045, "damage_fraction": 0.3, "energy_deposited_j": 0.0,
+                          "temperature_k": 3191.0, "notes": "Poncelet, stopped at 0.005m, T=3191K",
+                          "color": "#c85014"}],
+              "clamped": [], "sigma_ground_ref": "a763071b4beb87129f2672624e989a39ef7a1199"}
+FIGHT = {"weapon": WVA_CATALOG["weapons"][0]["weapon"], "armor_layers": WVA_CATALOG["armors"][0]["layers"],
+         "environment": "atmosphere_earth", "distance_m": 100}
+
 
 def _chat_with(mentat, email=FRIEND):
     vm, skippy = FakeVm(), FakeSkippy()
@@ -1424,7 +1462,7 @@ def test_the_inventory_highlights_the_three_demos_and_lists_everything_else(env)
     for title in ("N-Body Shootout", "Double-Slit", "Weapon vs. Armor", "Mentat", "Radiance"):
         assert title in page, title
     assert 'id="find"' in page and 'aria-label="Filter by kind"' in page       # search + kind filters
-    assert page.count('class="chip"') == 6                                        # All + the five kinds that exist
+    assert page.count('class="chip"') == 5                                        # All + the four kinds that exist
     assert len(re.findall(r'<a class="tile( featured)?"', page)) == 6            # every experiment is one tile: no duplicates
     assert "Coming next" not in page                                              # the three it promised are here now
 
@@ -1463,11 +1501,103 @@ def test_the_nbody_page_shows_the_scoreboard_including_what_doesnt_flatter_it(en
     assert "worst is Mercury at 74%" in page
 
 
-def test_the_weapon_vs_armor_page_does_not_pretend_to_be_playable_in_the_browser(env):
-    client, _, _ = env
-    page = client.get("/experiments/weapon-vs-armor").data.decode()
-    assert "isn't built yet" in page and "python run_weapon_vs_armor.py" in page
-    assert "26 presets" in page and "16 presets" in page and "No hit points" in page
+# ── Weapon vs. Armor: played in the browser, computed by sigma-ground's solver on Mentat ──
+
+def _wva(mentat=None):
+    vm, skippy = FakeVm(), FakeSkippy()
+    return portal.create_app(dict(SETTINGS), vm=vm, skippy=skippy, mentat=mentat).test_client()
+
+
+def test_weapon_vs_armor_is_playable_in_the_browser():
+    import experiments
+    page = _wva(FakeMentat()).get("/experiments/weapon-vs-armor").data.decode()
+    for needle in ('<canvas id="stage"', 'id="fire"', 'id="w-preset"', 'id="w-params"', 'id="a-preset"', 'id="layers"',
+                   'id="add-layer"', 'id="add-gap"', 'id="env"', 'id="dist"', 'id="results"', "requestAnimationFrame",
+                   'data-catalog="/experiments/weapon-vs-armor/api/catalog"',
+                   'data-solve="/experiments/weapon-vs-armor/api/solve"', 'data-available="1"', "No hit points"):
+        assert needle in page, needle
+    assert "isn't built yet" not in page and "pip install" not in page                     # a game, not a download
+    assert "{% raw %}" not in page and "{{" not in page.split("<script>")[0]                 # rendered, not leaked
+    (x,) = [e for e in experiments.EXPERIMENTS if e.slug == "weapon-vs-armor"]
+    assert x.kind == "live" and x.featured and "pygame" not in x.tags
+
+
+def test_weapon_vs_armor_numbers_only_ever_come_from_mentat():
+    """The page draws; it has no physics of its own and no numbers to fall back on."""
+    page = _wva(FakeMentat()).get("/experiments/weapon-vs-armor").data.decode()
+    script = page.split("<script>")[1]
+    for physics in ("Poncelet", "Birkhoff", "yield_stress", "Beer", "Bethe", "Math.exp(", "hit points"):
+        assert physics not in script, physics
+    assert "never makes numbers up" in script and "No result was made up" in script
+
+
+def test_the_weapon_vs_armor_api_proxies_mentat():
+    mentat = FakeMentat()
+    client = _wva(mentat)
+    catalog = client.get("/experiments/weapon-vs-armor/api/catalog").get_json()
+    assert catalog["weapons"][0]["key"] == "ak47" and catalog["limits"]["layers_max"] == 10
+    resp = client.post("/experiments/weapon-vs-armor/api/solve", json=FIGHT)
+    assert resp.status_code == 200
+    result = resp.get_json()["result"]
+    assert result["verdict"].startswith("ARMOR HOLDS") and result["layers"][0]["temperature_k"] == 3191.0
+    assert mentat.calls == [("wva_solve", FIGHT)]                                          # passed on as sent
+
+
+def test_the_weapon_vs_armor_api_refuses_bad_fights_before_or_with_mentat():
+    mentat = FakeMentat()
+    client = _wva(mentat)
+    solve = "/experiments/weapon-vs-armor/api/solve"
+    for bad in ([1, 2], "fire!", None):
+        assert client.post(solve, json=bad).status_code == 400
+    huge = {**FIGHT, "pad": "x" * 9000}
+    assert client.post(solve, json=huge).status_code == 413
+    assert mentat.calls == []                                                              # none of those reached Mentat
+    refused = client.post(solve, json={**FIGHT, "environment": "mars"})
+    assert refused.status_code == 400 and "environment must be one of" in refused.get_json()["error"]
+    assert "result" not in refused.get_json()
+
+
+def test_weapon_vs_armor_says_plainly_when_mentat_is_offline_and_never_fakes_a_result():
+    import mentat_client
+    down = _wva(FakeMentat(up=False))
+    for resp in (down.get("/experiments/weapon-vs-armor/api/catalog"),
+                 down.post("/experiments/weapon-vs-armor/api/solve", json=FIGHT)):
+        body = resp.get_json()
+        assert resp.status_code == 502 and body["offline"] is True and "result" not in body
+        assert body["error"] == "Mentat is offline right now."                           # no raw socket errors
+    missing = _wva(None)                                                                   # no Mentat deployed at all
+    page = missing.get("/experiments/weapon-vs-armor").data.decode()
+    assert 'data-available=""' in page and "Mentat isn't deployed yet." in page
+    for resp in (missing.get("/experiments/weapon-vs-armor/api/catalog"),
+                 missing.post("/experiments/weapon-vs-armor/api/solve", json=FIGHT)):
+        assert resp.status_code == 503 and resp.get_json()["offline"] is True
+
+    class OldMentat(FakeMentat):                                                           # deployed before the game existed
+        def wva_catalog(self):
+            raise mentat_client.MentatError("Mentat answered 404", 404)
+    old = _wva(OldMentat()).get("/experiments/weapon-vs-armor/api/catalog")
+    assert old.status_code == 502 and "doesn't have Weapon vs. Armor yet" in old.get_json()["error"]
+
+    class GameWontLoad(FakeMentat):                                                        # Mentat up, game broken at this commit
+        def wva_solve(self, fight):
+            raise mentat_client.MentatError("Weapon vs. Armor didn't load at this sigma-ground commit: boom", 503)
+    broken = _wva(GameWontLoad()).post("/experiments/weapon-vs-armor/api/solve", json=FIGHT)
+    assert broken.status_code == 502 and broken.get_json()["error"] == \
+        "Mentat couldn't run it: Weapon vs. Armor didn't load at this sigma-ground commit: boom."
+
+
+def test_weapon_vs_armor_is_rate_limited_per_visitor_from_the_playgrounds_budget():
+    client = _wva(FakeMentat())
+    fire = lambda ip: client.post("/experiments/weapon-vs-armor/api/solve", json=FIGHT,
+                                  headers={"X-Forwarded-For": f"6.6.6.6, {ip}"}).status_code
+    assert [fire("1.1.1.1") for _ in range(11)] == [200] * 10 + [429]                     # spoofed first hop doesn't help
+    assert fire("2.2.2.2") == 200                                                           # a different real visitor is fine
+    for _ in range(5):                                                                     # one budget for all public Mentat calls
+        client.post("/experiments/mentat/api/call/convert_units", json={"value": 1},
+                    headers={"X-Forwarded-For": "3.3.3.3"})
+    assert [fire("3.3.3.3") for _ in range(6)][-1] == 429
+    assert client.get("/experiments/weapon-vs-armor/api/catalog",                           # the catalog is cached: free
+                      headers={"X-Forwarded-For": "1.1.1.1"}).status_code == 200
 
 
 def test_the_result_figures_are_served_as_static_files(env):

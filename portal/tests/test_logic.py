@@ -494,3 +494,37 @@ def test_the_summary_names_settings_but_never_shows_a_value():
     text = p.summary()
     assert "valheim password" in text
     assert all(value not in text for value in p.set.values())
+
+
+# ── mentat_client ────────────────────────────────────────────────────────────
+
+def test_mentat_errors_say_whether_mentat_refused_or_was_offline(monkeypatch):
+    import io
+    import urllib.error
+    import mentat_client
+
+    def answer(status, body=b'{"ok": false, "error": "environment must be one of: vacuum"}'):
+        def urlopen(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, status, "x", {}, io.BytesIO(body))
+        return urlopen
+
+    m = mentat_client.Mentat("http://mentat.test")
+    for status, offline in ((400, False), (429, False), (404, True), (503, True), (504, True)):
+        monkeypatch.setattr(mentat_client.urllib.request, "urlopen", answer(status))
+        try:
+            m.wva_solve({"environment": "mars"})
+        except mentat_client.MentatError as exc:
+            assert (exc.status, exc.offline) == (status, offline)
+            assert str(exc) == "environment must be one of: vacuum"             # Mentat's own words
+        else:
+            raise AssertionError("no error")
+
+    def unreachable(req, timeout=None):
+        raise urllib.error.URLError("connection refused")
+    monkeypatch.setattr(mentat_client.urllib.request, "urlopen", unreachable)
+    try:
+        m.wva_catalog()
+    except mentat_client.MentatError as exc:
+        assert exc.status is None and exc.offline and "unreachable" in str(exc)
+    else:
+        raise AssertionError("no error")
