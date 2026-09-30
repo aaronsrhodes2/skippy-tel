@@ -131,8 +131,9 @@ _ISO_Z = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
 _HEADER_TIME = re.compile(r"^=== skippy-diag (\S+) ===", re.M)
 
 
-def snapshot_time(snapshot: str) -> str:
-    """When the snapshot was taken (the `date -Is` in its header), or ""."""
+def snapshot_stamp(snapshot: str) -> str:
+    """When the snapshot was taken, as the raw `date -Is` text from its header, or "" (snapshot_time() above gives a
+    datetime for the readiness check; this one is only shown to the admin as text)."""
     m = _HEADER_TIME.search(snapshot)
     return m.group(1) if m else ""
 
@@ -192,7 +193,7 @@ def current_facts(vm) -> tuple[dict[str, dict], str]:
         snapshot = latest_complete_snapshot(vm.serial_output(2))
     except Exception:   # noqa: BLE001 — a nicety on an admin card; never break the page
         return {}, ""
-    return game_facts(snapshot), snapshot_time(snapshot)
+    return game_facts(snapshot), snapshot_stamp(snapshot)
 
 
 def for_game(snapshot: str, container: str) -> str:

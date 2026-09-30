@@ -253,7 +253,7 @@ def snapshot(facts_text, taken="2026-09-30T07:10:00+00:00", tail="=== end ===\n"
 
 def test_facts_are_parsed_out_of_a_serial_snapshot_with_crlf_line_ends():
     snap = snapshot(fixture("facts.lab-live-bepinex.txt")).replace("\n", "\r\n")
-    facts, taken = diagnostics.game_facts(diagnostics.latest_snapshot(snap)), diagnostics.snapshot_time(diagnostics.latest_snapshot(snap))
+    facts, taken = diagnostics.game_facts(diagnostics.latest_snapshot(snap)), diagnostics.snapshot_stamp(diagnostics.latest_snapshot(snap))
     assert taken == "2026-09-30T07:10:00+00:00"
     assert facts["valheim"]["mods"] == [("BepInExPack_Valheim", "5.4.2351")]
     assert facts["factorio"]["image"] == "factoriotools/factorio:stable"
@@ -274,7 +274,7 @@ def test_the_snapshot_still_being_written_is_skipped_for_the_last_finished_one()
     done = snapshot("VERSION valheim=1.0\n", taken="2026-09-30T07:08:00+00:00")
     partial = "=== skippy-diag 2026-09-30T07:10:00+00:00 ===\nNAMES STATUS\n"          # no facts yet, no end marker
     assert "1.0" in diagnostics.latest_complete_snapshot(done + partial)
-    assert diagnostics.snapshot_time(diagnostics.latest_complete_snapshot(done + partial)) == "2026-09-30T07:08:00+00:00"
+    assert diagnostics.snapshot_stamp(diagnostics.latest_complete_snapshot(done + partial)) == "2026-09-30T07:08:00+00:00"
     assert diagnostics.latest_complete_snapshot(partial) == partial            # all there is: better than nothing
     assert diagnostics.latest_complete_snapshot("") == ""
 
@@ -511,7 +511,10 @@ def test_a_friend_never_gets_the_card_or_any_route_behind_it(env):
             assert client.get(f"/admin/games/{gid}/panel").status_code == 403, (who, gid)
         assert client.get("/admin/games/nope/panel").status_code == 403              # not even which games exist
         live = client.get("/games/valheim/live")
-        assert set(live.get_json()) == {"on", "starting", "code", "players"}          # the friends' poll carries no admin data
+        # The friends' poll carries what a player needs (is it up, is it joinable, the code, how many are on) and
+        # nothing from the admin card: no version, image, mods or update fields. (`ready` comes from the readiness log check.)
+        assert set(live.get_json()) <= {"on", "starting", "ready", "code", "players"}
+        assert not {"version", "image", "mods", "updated", "facts"} & set(live.get_json())
     new_rules = [r for r in app.url_map.iter_rules() if r.endpoint.startswith("server_admin.")]
     assert [r.rule for r in new_rules] == ["/admin/games/<gid>/panel"]               # the only new route, and it was refused above
     assert new_rules[0].methods - {"HEAD", "OPTIONS"} == {"GET"}                     # nothing that changes anything
