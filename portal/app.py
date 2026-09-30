@@ -292,6 +292,22 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             **dict(zip(("codes", "players"), live_info(status))),
         )
 
+    @dash.get("/games/<gid>/live")
+    @auth.login_required
+    def game_live(gid):
+        """What changes while a game's page stays open: is it up, still starting, and its invite code (a
+        fresh one every boot). The page polls this every 20 s and reloads itself when the state flips."""
+        if not auth.can_see(me(), gid):
+            abort(404)
+        status, _ = vm_status()
+        on = bool(status and status.status == "RUNNING" and gid in status.games)
+        up = status.minutes_up() if on else None
+        codes, players = live_info(status)
+        resp = jsonify(on=on, starting=bool(on and up is not None and up < GAMES[gid].ready_minutes),
+                       code=codes.get(gid) if on else None, players=players.get(gid) if on else None)
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
     @dash.get("/games/<gid>/discord")
     @auth.login_required
     def game_discord(gid):

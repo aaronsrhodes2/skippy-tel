@@ -1,6 +1,7 @@
 # SkippyTel — Claude Code Context
 
 **First time here?** Read [PLATINUM_RULES.md](../PLATINUM_RULES.md) — this project inherits all universal rules there.
+**Shell: bash, even on Windows** ([§20](../PLATINUM_RULES.md)). Every command in this repo's docs is bash; don't reach for PowerShell.
 
 PC-side AI inference server for the Skippy AR ecosystem.
 Flask app in Docker, port 3003 externally.
@@ -40,7 +41,7 @@ services/flask-api/app/
 │   ├── starmap.py       # GET /starmap — star map data
 │   └── health.py        # GET /health
 └── clients/
-    ├── ollama.py         # Default tier — qwen2.5:7b
+    ├── ollama.py         # Default tier — OLLAMA_MODEL (the vault sets qwen3:8b)
     ├── anthropic_client.py  # "put on your thinking cap" tier
     ├── gemini.py         # "ask nagatha" tier
     ├── claude_bridge.py  # "trust the awesomeness" + "solid gold" tiers
@@ -49,7 +50,7 @@ services/flask-api/app/
 
 ## Tier trigger phrases (in intent.py)
 
-- Default → Ollama (qwen2.5:7b)
+- Default → Ollama (OLLAMA_MODEL: qwen3:8b in the vault; config.py's fallback is still qwen2.5:7b)
 - "put on your thinking cap" → Anthropic Claude
 - "ask nagatha" / "ask gemini" → Gemini (Nagatha persona)
 - "trust the awesomeness" → Claude Code, full permissions
@@ -65,7 +66,7 @@ services/flask-api/app/
 ## Environment variables (.env)
 
 Key vars:
-- OLLAMA_MODEL — default qwen2.5:7b
+- OLLAMA_MODEL — qwen3:8b (set in the vault; the code's fallback is qwen2.5:7b)
 - ANTHROPIC_API_KEY — for Claude tier
 - GEMINI_API_KEY — for Nagatha tier
 - SD_BASE_URL — Stable Diffusion (default: http://host.docker.internal:5000)
@@ -83,7 +84,7 @@ Code changes: rebuild: `docker compose up --build -d flask-api`
 The Captain doesn't run commands or fetch logs. Claude does, through GitHub
 Actions (the sandbox can't reach GCP or run.app directly):
 
-- **Deploy:** push to `claude/great-edison-aevrtu` (or `main`) → `deploy.yml`
+- **Deploy:** push to `main` (the only branch Google trusts; see "Branches and deploys") → `deploy.yml`
   (tests → Terraform `infra/gcp-games` → portal to Cloud Run). Redeploy without
   a code change: `workflow_dispatch` on `deploy.yml` (e.g. after a secret changes).
 - **Operate/diagnose the games VM:** `workflow_dispatch` on `ops.yml` with
@@ -176,6 +177,30 @@ only, 30 MB) and plays from `GET /chat/media/<job_id>` (its requester or an admi
 - Models live in `D:\models` (`tools/models_archive.py`: verify with `python
   tools/models_archive.py verify`). Ollama models are pulled into the Docker Ollama
   (`skippytel_ollama-data`), a different store from the host Ollama's.
+
+## Join passwords: shown in plain text, on purpose (not a finding)
+
+The Captain doesn't care who logs into his game servers. What a stranger can do to him in a
+game is small and is undone from backups (next section). So a game's **join password** appears
+in plain text, on the game page, the dashboard and in the Discord copy, and the join flow
+carries **no extra friction**: no reveal click, no sign-in beyond the portal's own, no
+"copy it from the admin page".
+Don't report that as a security issue in a review or audit, and don't "fix" it.
+Still guarded: admin passwords (`*_ADMIN_PASSWORD`), API keys and tokens, the Google
+sign-in, the Admin page (secret settings stay masked), the Captain's private Skippy.
+The value itself never goes in the repo or in chat (it lives in the vault `.env`).
+
+## Game backups: flagged files, easy rollback of a bad day
+
+Each game's world lives in a few specific files; those are the **backup targets**, flagged in
+one place: `TARGETS` in `infra/gcp-games/game_backup.py`. At every boot, with the game
+containers down, `startup.sh` archives them per game to `data/backups/<game>/<UTC>-<fp>.tar.gz`
+(skipped when nothing changed since the last archive; the newest ones are kept). That archive
+is the state the session *started* from, so it's the rollback point for a bad day. The daily
+disk snapshot (3 am, 7 days) stays as the disaster copy, since the archives sit on the same disk.
+Roll back through the `ops` workflow: `backups <game>` lists, `restore-game <game> <archive>`
+puts one back (the current files are set aside, never deleted). Adding a game or a new save
+file means adding it to `TARGETS`; the tests fail if a compose game has none.
 
 ## EverQuest (EQEmu) on the games VM
 

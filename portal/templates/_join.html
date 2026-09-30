@@ -1,27 +1,37 @@
 {# How to join a running game, on the game's own page (the Games list is just cards).
-   Needs `game`, `status`, `codes` in the context. Games that hand out a
-   per-session invite code (Game.invite_code) lead with it; the connect text
-   (search / IP) becomes the fallback. #}
+   Needs `game`, `status`, `codes` in the context. Every game gets the same shape, with as little friction as we can
+   manage: the invite code where the game makes one (Game.invite_code: Dragonwilds, Valheim; refreshed from the VM on
+   every page load and by the poll in game.html), the address to type (Game.direct), where to type each (the hints),
+   and the join password right there. Click any code to copy it.
+   The join password is shown in plain text on purpose, to anyone who can open this page: the Captain doesn't mind who
+   joins his servers, and a bad day is rolled back from backups (SkippyTel/CLAUDE.md → "Join passwords"). #}
 {% set code = codes.get(game.id) %}
 {% set pw = status.env.get(game.join_password_key, '') if game.join_password_key else '' %}
+{# Valheim's join code and its IP address exclude each other (crossplay on: code only), so each is asked, not assumed. #}
+{% set invite_on = game.invite_code and (game.invite_when is none or game.invite_when(status.env)) %}
+{% set address = game.direct(status.external_ip, status.env) if game.direct and status.external_ip else '' %}
 <div class="join">
-  {% if game.invite_code %}
+  {% if invite_on %}
     <p><b>Invite code</b>
-      {% if code %}<code class="code">{{ code }}</code>
-      {% else %}<span class="help">shows here a couple of minutes after the server boots</span>{% endif %}
-      <br><span class="help">In game: Worlds &rarr; <b>Invite Code</b> (the I key). A new code every boot.</span></p>
-  {% else %}
+      <span id="join-code">{% if code %}<code class="code">{{ code }}</code>{% else %}<span class="help">shows here a minute or two after the server boots</span>{% endif %}</span>
+      <br><span class="help">{{ game.invite_hint | safe }}</span></p>
+  {% endif %}
+  {% if address %}
+    <p><b>{{ 'Or the address' if invite_on else 'Address' }}</b> <code class="code">{{ address }}</code>
+      <br><span class="help">{{ game.direct_hint | safe }}</span></p>
+  {% elif not invite_on %}
     <p>{{ game.connect(status.external_ip, status.env) | safe }}</p>
   {% endif %}
+  {% if game.snippet and status.external_ip %}
+    {% set snip = game.snippet(status.external_ip, status.env) %}
+    <p><b>{{ snip[0] }}</b> <span class="help">click to copy</span></p>
+    <pre class="copy">{{ snip[1] }}</pre>
+  {% endif %}
   {% if game.join_password_key %}
-    {% if pw %}<details><summary>Show join password</summary><p><code class="code">{{ pw }}</code></p></details>
+    {% if pw %}<p><b>Password</b> <code class="code">{{ pw }}</code></p>
     {% else %}<p class="help">No join password set — anyone who finds it can join.</p>{% endif %}
   {% endif %}
-  {% if game.direct and status.external_ip %}
-    <p>Direct connect <code class="code">{{ game.direct(status.external_ip, status.env) }}</code>
-      <br><span class="help">In game: Worlds &rarr; <b>Direct</b> tab. Same address every session.</span></p>
-  {% endif %}
-  {% if game.invite_code %}
+  {% if game.via_list %}
     <p class="help">Or search the list: {{ game.connect(status.external_ip, status.env) | safe }}</p>
   {% endif %}
 </div>

@@ -16,12 +16,13 @@ import secrets
 from dataclasses import dataclass, field
 
 import envfile
-from catalog import Game, missing_settings
+from catalog import VALHEIM_DEFAULTS, Game, missing_settings, valheim_password_problems
 
 # What games/docker-compose.yml uses when a setting is blank. Writing them changes nothing about how a
 # game runs; it makes the values visible on the pages and in status. Never applied over a set value.
 DEFAULTS = {
-    "VALHEIM_SERVER_NAME": "Skippy Valheim", "VALHEIM_WORLD_NAME": "Skippy", "VALHEIM_PUBLIC": "false",
+    "VALHEIM_SERVER_NAME": "Skippy Valheim", "VALHEIM_PUBLIC": "false",
+    **VALHEIM_DEFAULTS,       # world name, seed (= valheim_seed.py's), crossplay (= the compose default): tests keep them equal
     "FACTORIO_SAVE_NAME": "skippy",
     "SATISFACTORY_MAX_PLAYERS": "4",
     "DRAGONWILDS_SERVER_NAME": "Skippy", "DRAGONWILDS_WORLD_NAME": "Ashenfall",
@@ -77,6 +78,8 @@ def _join_problem(value: str, game: Game, env: dict[str, str]) -> str | None:
     name = env.get(f"{game.id.upper()}_SERVER_NAME") or DEFAULTS.get(f"{game.id.upper()}_SERVER_NAME", "")
     if name and (name.lower() in value.lower() or value.lower() in name.lower()):   # Valheim refuses it either way round
         return "it must not contain, or be part of, the server name"
+    if game.id == "valheim" and valheim_password_problems(value, env):
+        return "it must not appear inside the world's name or seed"
     return None
 
 

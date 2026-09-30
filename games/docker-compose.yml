@@ -41,6 +41,10 @@ services:
       WORLD_NAME: ${VALHEIM_WORLD_NAME:-Skippy}
       SERVER_PASS: ${VALHEIM_PASSWORD:-}          # required; games.sh checks it
       SERVER_PUBLIC: ${VALHEIM_PUBLIC:-false}
+      # Crossplay: a 6-digit join code (new every boot; Join Game → Add server, paste it; diag.sh reads it from the
+      # log for the portal) INSTEAD of the IP: the server stops listening on 2456, and the idle watchdog, which counts
+      # packets on 2456, can't see the players. Off until the watchdog handles that (portal/catalog.py valheim_crossplay).
+      CROSSPLAY: ${VALHEIM_CROSSPLAY:-false}
       TZ: ${TZ:-America/Los_Angeles}
       BACKUPS: "true"
       BACKUPS_MAX_AGE: "7"

@@ -46,7 +46,12 @@ class Game:
     ready_minutes: int = 5               # typical boot → joinable, for the "starting" hint
     max_players: int = 0                 # shown as "Players online N / max" on the game page
     invite_code: bool = False            # hands out a per-session invite code (diagnostics.join_codes)
+    invite_when: Callable[[dict], bool] | None = None   # (settings) -> is the invite code in play? (None: always, when invite_code)
+    invite_hint: str = ""                # HTML-safe: where to type the invite code in the game
     direct: Callable[[str, dict], str] | None = None   # (ip, settings) -> "ip:port" for a Direct-connect box
+    direct_hint: str = ""                # HTML-safe: where to type that address in the game
+    via_list: bool = False               # the game's server list finds it by name: `connect` says how (the fallback)
+    snippet: Callable[[str, dict], tuple[str, str]] | None = None   # (ip, settings) -> (label, text): a block to copy as-is
     theme: Theme | None = None
     icon: str = "🎮"                    # the game's card on the Games page (an emoji, like the launcher's tiles)
     facts: tuple[tuple[str, str], ...] = field(default=())   # (label, value) on the game page
@@ -56,6 +61,29 @@ class Game:
     def banner_key(self) -> str:
         """games-env key for an optional banner image URL (set on the game's page)."""
         return f"{self.id.upper()}_BANNER_URL"
+
+
+# What the VM uses when a Valheim setting is blank; autoconfig.DEFAULTS makes them visible, and tests keep them equal to
+# games/docker-compose.yml (crossplay) and infra/gcp-games/valheim_seed.py (the seed).
+VALHEIM_DEFAULTS = {"VALHEIM_WORLD_NAME": "Skippy", "VALHEIM_WORLD_SEED": "skippyhasyourmoney", "VALHEIM_CROSSPLAY": "false"}
+
+
+def valheim_crossplay(env: dict) -> bool:
+    """Crossplay is a trade: a 6-digit join code that works from Steam, Xbox and Game Pass, but the server then stops
+    listening on 2456, so `ip:2456` no longer works, and the idle watchdog can't see the players (it counts packets on
+    2456). Off by default until the watchdog counts them."""
+    return (env.get("VALHEIM_CROSSPLAY") or VALHEIM_DEFAULTS["VALHEIM_CROSSPLAY"]).strip().lower() in ("true", "1", "yes", "on")
+
+
+def valheim_password_problems(password: str, env: dict) -> list[str]:
+    """The game refuses a password that appears inside the world's name or seed (the seed check is skipped for `keep`:
+    then the world's own seed, which we don't know here, is what counts)."""
+    checks = [("world name", env.get("VALHEIM_WORLD_NAME") or VALHEIM_DEFAULTS["VALHEIM_WORLD_NAME"])]
+    seed = env.get("VALHEIM_WORLD_SEED") or VALHEIM_DEFAULTS["VALHEIM_WORLD_SEED"]
+    if seed.strip().lower() != "keep":
+        checks.append(("world seed", seed))
+    return [f"Valheim's password must not appear inside the {what}." for what, text in checks
+            if password and password.lower() in text.lower()]
 
 
 GAMES: dict[str, Game] = {
@@ -84,7 +112,10 @@ GAMES: dict[str, Game] = {
         join_password_key="DRAGONWILDS_WORLD_PASSWORD",
         ready_minutes=6,
         invite_code=True,
+        invite_hint="In game: Worlds &rarr; <b>Invite Code</b> (the I key). A new code every boot.",
         direct=lambda ip, env: f"{ip}:{env.get('DRAGONWILDS_PORT') or '7778'}",
+        direct_hint="In game: Worlds &rarr; <b>Direct</b> tab. Same address every session.",
+        via_list=True,
         icon="🐉",
         theme=Theme(accent="#ff7a1a", accent2="#c9a24a", bg="#120806", card="#24110b", text="#f3dcc2",
                     font="Cinzel",
@@ -100,16 +131,32 @@ GAMES: dict[str, Game] = {
         "valheim", "Valheim",
         "Viking survival co-op. Dedicated world, persists between sessions.",
         ram_gb=4,
-        connect=lambda ip, env: f"Join Game &rarr; Add server &rarr; <code>{ip}:2456</code>",
+        connect=lambda ip, env: ("Join Game &rarr; Add server &rarr; the join code (a new one every boot; the address doesn't work "
+                                 "with crossplay on)" if valheim_crossplay(env)
+                                 else f"Join Game &rarr; Add server &rarr; <code>{ip}:2456</code>"),
         settings=(
             Setting("VALHEIM_SERVER_NAME", "Server name"),
             Setting("VALHEIM_WORLD_NAME", "World name", help="Changing this starts a new world."),
+            Setting("VALHEIM_CROSSPLAY", "Crossplay join code",
+                    help="true: a 6-digit join code that works from Steam, Xbox and Game Pass, new every boot, INSTEAD of "
+                         "the IP address (the server stops listening on 2456). false (the default): the IP address, no code. "
+                         "Keep it false until the idle watchdog counts crossplay players."),
+            Setting("VALHEIM_WORLD_SEED", "World seed",
+                    help="The world is built from this text. At the next start, a world with a different seed is "
+                         "set aside (kept on the server's disk, never deleted) and a new one is generated. "
+                         "Blank means skippyhasyourmoney; type keep to leave the world alone."),
             Setting("VALHEIM_PASSWORD", "Join password", secret=True,
                     help="At least 5 characters; must not contain the server name."),
             Setting("VALHEIM_PUBLIC", "List in the public server browser", help="true or false"),
         ),
         join_password_key="VALHEIM_PASSWORD",
         ready_minutes=5,
+        invite_code=True,                                # the crossplay join code, only while VALHEIM_CROSSPLAY is on
+        invite_when=valheim_crossplay,
+        invite_hint="In game: Join Game &rarr; <b>Add server</b>, then paste the code. A new code every boot. "
+                    "(With crossplay on the server has no IP address to join.)",
+        direct=lambda ip, env: "" if valheim_crossplay(env) else f"{ip}:2456",     # "" = nothing to show
+        direct_hint="In game: Join Game &rarr; <b>Add server</b>. Same address every session.",
         icon="🪓",
         theme=Theme(accent="#8fd3ff", accent2="#d8c9a3", bg="#0b1016", card="#141d27", text="#dfe8ef",
                     font="Cinzel",
@@ -118,7 +165,7 @@ GAMES: dict[str, Game] = {
                     tagline="Odin's tenth world awaits. Mind the trolls."),
         max_players=10,
         facts=(("Crossplay", "Steam · Xbox · Game Pass"),
-               ("Joined by", "IP address, port 2456")),
+               ("Joined by", "IP address port 2456, or a join code when crossplay is on")),
         links=(("Official site", "https://www.valheimgame.com"), ("Wiki", "https://valheim.fandom.com")),
     ),
     "factorio": Game(
@@ -127,6 +174,8 @@ GAMES: dict[str, Game] = {
         ram_gb=2,
         connect=lambda ip, env: f"Multiplayer &rarr; Connect to address &rarr; <code>{ip}</code>",
         settings=(Setting("FACTORIO_SAVE_NAME", "Save name"),),
+        direct=lambda ip, env: ip,                       # Factorio has no invite codes: the address is the whole way in
+        direct_hint="In game: Multiplayer &rarr; <b>Connect to address</b>. Same address every session.",
         icon="⚙️",
         theme=Theme(accent="#ff9a1f", accent2="#7fb03a", bg="#141414", card="#232323", text="#e6e0d6",
                     font="Titillium Web",
@@ -142,6 +191,9 @@ GAMES: dict[str, Game] = {
         ram_gb=12,
         connect=lambda ip, env: f"Server Manager &rarr; Add Server &rarr; <code>{ip}</code> port <code>7777</code>",
         settings=(Setting("SATISFACTORY_MAX_PLAYERS", "Max players"),),
+        direct=lambda ip, env: ip,                       # no invite codes and no server list: address + port 7777
+        direct_hint="In game: Server Manager &rarr; <b>Add Server</b> &rarr; this address, port <code>7777</code>. "
+                    "Same address every session.",
         icon="🏭",
         theme=Theme(accent="#fa9549", accent2="#5fb6d9", bg="#0d1216", card="#18222a", text="#e2ecf2",
                     font="Rajdhani",
@@ -165,6 +217,10 @@ GAMES: dict[str, Game] = {
         ),
         ready_minutes=8,
         direct=lambda ip, env: f"{ip}:5999",
+        direct_hint="This is the login server. It goes in <code>eqhost.txt</code>, in the block below.",
+        snippet=lambda ip, env: ("eqhost.txt: replace the file's contents with this, then start "
+                                 "eqgame.exe patchme; a new name + password creates your account",
+                                 f'[Registration Servers]\n{{\n"{ip}:5999"\n}}\n[Login Servers]\n{{\n"{ip}:5999"\n}}'),
         icon="🧙",
         theme=Theme(accent="#d4af37", accent2="#6a8cc7", bg="#0b0a12", card="#171425", text="#e8e2d0",
                     font="Cinzel",
@@ -203,6 +259,8 @@ def missing_settings(game_id: str, env: dict[str, str]) -> list[str]:
             problems.append("Valheim needs a join password of at least 5 characters.")
         elif env.get("VALHEIM_SERVER_NAME") and env["VALHEIM_SERVER_NAME"] in pw:
             problems.append("Valheim's password must not contain the server name.")
+        else:
+            problems.extend(valheim_password_problems(pw, env))
     if game_id == "dragonwilds":
         if not env.get("DRAGONWILDS_OWNER_ID"):
             problems.append("Dragonwilds needs the owner's Player ID.")

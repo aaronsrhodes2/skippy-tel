@@ -35,6 +35,12 @@ def run(*argv: str, timeout: int = 60) -> str:
     return (p.stdout + p.stderr).strip()
 
 
+def run_rc(*argv: str, timeout: int = 60) -> tuple[int, str]:
+    """Like run(), but keeps the exit status: a failed command must not read as a success."""
+    p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    return p.returncode, (p.stdout + p.stderr).strip()
+
+
 def container(name: str) -> str:
     if not GAME.match(name or ""):
         raise ValueError(f"bad game name {name!r}")
@@ -83,7 +89,54 @@ def cmd_restart_game(args):
     return run("docker", "restart", "--time", "60", name, timeout=180) + f"\nrestarted {name}"
 
 
-COMMANDS = {"tail": cmd_tail, "search": cmd_search, "stats": cmd_stats, "restart-game": cmd_restart_game}
+BACKUP = "/usr/local/bin/skippy-game-backup"      # game_backup.py, fetched at boot (startup.sh)
+ARCHIVE = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
+EVERQUEST = "/usr/local/bin/skippy-everquest"
+
+
+def cmd_backups(args):
+    """What each game's rollback points are, and which files are flagged as backup targets."""
+    game = args[0] if args else ""
+    if game and not GAME.match(game):
+        raise ValueError(f"bad game name {game!r}")
+    return run("python3", BACKUP, "list", *([game] if game else []))
+
+
+def cmd_restore_game(args):
+    """Roll one game back to an archive (`backups <game>` lists them; `latest` = the newest). The archive is checked
+    first, before anything stops. Then the game is stopped, the flagged files are set aside (kept until someone
+    deletes them) and replaced, and the game is started again. A failure is an error, never a success message."""
+    if len(args) < 2:
+        raise ValueError("usage: restore-game <game> <archive name | latest>")
+    game, name = args[0], args[1]
+    if not GAME.match(game) or not ARCHIVE.match(name):
+        raise ValueError("bad game or archive name")
+    if not Path(BACKUP).exists():
+        raise RuntimeError("the backup tool isn't on this VM yet: it is installed at boot, so restart the server once")
+    rc, out = run_rc("python3", BACKUP, "check", game, name)
+    if rc:
+        raise ValueError(f"nothing was stopped or changed: {out}")
+    everquest = game == "everquest"
+    was_up = game in run("docker", "ps", "--format", "{{.Names}}").split()
+    if everquest:
+        run(EVERQUEST, "stop", timeout=170)
+    elif was_up:
+        run("docker", "stop", "--time", "90", game, timeout=180)
+    try:
+        rc, out = run_rc("python3", BACKUP, "restore", game, name, timeout=600)
+    finally:
+        if was_up and not everquest:
+            run("docker", "start", game, timeout=60)
+    if rc:
+        raise RuntimeError(f"the restore failed and the files are as they were: {out}"
+                           + (f" ({game} was started again)" if was_up and not everquest else ""))
+    if everquest:
+        return out + "\nEverQuest is stopped. `restart` (the whole server) brings it back up on the restored world."
+    return out + (f"\n{game} was started again." if was_up else f"\n{game} wasn't running; it loads this world on its next start.")
+
+
+COMMANDS = {"tail": cmd_tail, "search": cmd_search, "stats": cmd_stats, "restart-game": cmd_restart_game,
+            "backups": cmd_backups, "restore-game": cmd_restore_game}
 
 
 def reply(req_id: str, text: str) -> None:

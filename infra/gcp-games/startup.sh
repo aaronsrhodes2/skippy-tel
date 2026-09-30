@@ -160,6 +160,19 @@ meta everquest-script > /usr/local/bin/skippy-everquest && chmod 755 /usr/local/
 # would bring them back) are removed; world data is on bind mounts, untouched.
 compose $ALL_PROFILES down --timeout 120 || true
 /usr/local/bin/skippy-everquest stop || true
+# Archive each game's flagged files (TARGETS in game_backup.py) now, with everything stopped: this is the state
+# the session starts from, the point to roll back to after a bad day. Unchanged files aren't archived twice.
+# Restores are driven from the ops workflow (ops_agent.py: backups, restore-game). Can't stop the boot.
+meta game-backup > /usr/local/bin/skippy-game-backup
+python3 /usr/local/bin/skippy-game-backup backup $GAMES || echo "game backup: FAILED for at least one game; starting anyway"
+# Valheim grows its world from the seed in settings (VALHEIM_WORLD_SEED). Runs with the container removed,
+# never deletes (a world with another seed is set aside on the data disk), and can't stop the boot.
+case " $GAMES " in
+  *" valheim "*)
+    meta valheim-seed > /usr/local/bin/skippy-valheim-seed
+    python3 /usr/local/bin/skippy-valheim-seed --env "$ROOT/.env" --data "$DATA" \
+      || echo "valheim seed: FAILED; the world starts as it is" ;;
+esac
 if [ -n "$PROFILES" ]; then
   compose $PROFILES pull || echo "pull failed; starting with cached images"
   compose $PROFILES up -d

@@ -98,6 +98,8 @@ test users before the portal's allowlist is even consulted.
 | You say | What happens |
 |---|---|
 | "Change the Valheim world name / password" | Admin → Settings, then **Restart & update** — no deploy needed |
+| "Start Valheim over from a seed" | Admin → Settings → **World seed** (blank = `skippyhasyourmoney`), then **Restart & update**. At boot a world with a different seed is set aside on the disk (`replaced-worlds/`, never deleted) and a new one is generated from the seed. `keep` leaves the world alone |
+| "Roll a game back after a bad day" | `ops` workflow: `backups <game>` lists the rollback points, `restore-game <game> <archive or latest>` puts one back (the current files are set aside, not deleted) |
 | "Update the servers / mods" | Admin → **Restart & update** (every boot re-pulls images and game updates) |
 | "Add a game / change ports / change the compose file" | Claude edits `games/` + `infra/gcp-games/`, pushes; `infra` applies; the change lands at the VM's next boot (Restart) |
 | "Change the portal" | Claude edits `portal/`, pushes; live in ~3 minutes |
@@ -107,6 +109,6 @@ test users before the portal's allowlist is even consulted.
 
 `.github/workflows/ops.yml` is a manual workflow for operating the games VM
 without the portal: `status`, `logs [game]`, `start <games>`, `stop`,
-`restart`. It runs `scripts/remote.py` (the portal's own `gcp.py` / `ops.py` /
+`restart`, plus the on-VM commands (`tail`, `search`, `stats`, `restart-game`, `backups`, `restore-game`). It runs `scripts/remote.py` (the portal's own `gcp.py` / `ops.py` /
 `diagnostics.py`) as the deployer identity, and masks every secret value in
 the job log. It exists so Claude can diagnose and act on the server itself.

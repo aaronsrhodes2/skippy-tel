@@ -15,6 +15,10 @@
   code=$(docker logs dragonwilds 2>&1 | grep -o 'Setting \["JoinCode"\].*value\[[^]]*\]' | tail -1 \
          | sed -E 's/.*value\[([^]]*)\]/\1/')
   [ -n "$code" ] && echo "JOIN_CODE dragonwilds=$code"
+  # Valheim (crossplay): `Session "<name>" registered with join code 106969`. The latest one wins, and the
+  # early `has join code , now 0` line has no digits, so it can't match.
+  vcode=$(docker logs valheim 2>&1 | grep -oE 'join code [0-9]{6}' | tail -1 | grep -oE '[0-9]{6}')
+  [ -n "$vcode" ] && echo "JOIN_CODE valheim=$vcode"
   # Player join/leave lines, to learn each game's format (players-online count).
   if docker ps --format '{{.Names}}' | grep -qx dragonwilds; then
     echo "--- dragonwilds: player events"

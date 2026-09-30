@@ -293,7 +293,7 @@ class ChatTools:
                 info["joinable_now"] = up is None or up >= game.ready_minutes
                 info["how_to_connect"] = _plain(game.connect(s.external_ip or "?", s.env))
                 if g in codes:
-                    info["invite_code"] = codes[g]   # Worlds → Invite Code; new each boot
+                    info["invite_code"] = codes[g]   # what the game asks for is on its page (Game.invite_hint); new each boot
             games[g] = info
         return {
             "state": {"RUNNING": "online", "TERMINATED": "asleep"}.get(s.status, s.status.lower()),
@@ -302,7 +302,7 @@ class ChatTools:
             "other_games_running": running and any(g not in self.visible for g in s.games),
             "minutes_since_boot": up,
             "sleeps_after_idle_minutes": s.idle_minutes,
-            "join_password": "shown to signed-in users on the portal dashboard (Show join password)",
+            "join_password": "shown to signed-in users on the game's page, on the Password line beside how to join",
         }
 
     def _start_game(self, args) -> dict:

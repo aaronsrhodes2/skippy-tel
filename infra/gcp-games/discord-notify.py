@@ -39,7 +39,9 @@ GAMES = {
     "valheim": (
         "Valheim",
         "Viking survival co-op. Dedicated world: it keeps its state between sessions.",
-        lambda ip, e: f"Join Game → Add server → `{ip}:2456`\nPassword: on the Skippy Portal dashboard",
+        lambda ip, e: (("Join Game → **Add server** → the 6-digit join code on the Skippy Portal (a new one every boot)"
+                        if (e.get("VALHEIM_CROSSPLAY") or "false").strip().lower() in ("true", "1", "yes", "on")
+                        else f"Join Game → Add server → `{ip}:2456`") + "\nPassword: on the Skippy Portal's Valheim page"),
     ),
     "factorio": (
         "Factorio",

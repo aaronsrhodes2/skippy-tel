@@ -27,7 +27,8 @@ it depends on your PC or on you being signed in.
    tap the game's card → **Play RuneScape: Dragonwilds** on its page. The VM
    wakes, the server updates itself and loads the saved world. The tile shows
    "Starting — booted N min ago" until it's typically joinable (~6 min), then
-   the join steps and a **Show join password** reveal.
+   the join steps (an invite code and the address to copy, where to type them) and the join
+   password, shown in plain text on purpose (see `CLAUDE.md`, "Join passwords").
 3. **It cleans up after itself:** after the auto-sleep window with nobody
    playing, worlds are saved and the VM powers off. The next friend to click
    Play wakes it again, with the same world.
@@ -108,8 +109,9 @@ nothing.
 **Server tools** (`portal/chat_tools.py`): Skippy can check the server's
 status, start games and stop the server; admins also get restart. Same
 rights and guardrails as the dashboard buttons (both go through
-`portal/ops.py`), and tool output never includes settings values — join
-passwords stay behind the dashboard's "Show join password". Skippy asks for
+`portal/ops.py`), and tool output never includes settings values: Skippy has no
+passwords to give, and sends people to the game's page, where the join password is
+on the Password line beside how to join. Skippy asks for
 confirmation before stopping or restarting.
 
 **Everywhere, for everyone:** the chat is docked bottom-right on every page

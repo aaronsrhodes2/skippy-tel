@@ -124,6 +124,34 @@
         on the <a href="{{ url_for('admin.index') }}">Admin page</a>{% endif %}.</p>
     {% endif %}
   </section>
+  <script>
+    /* Keeps the page current while it stays open (the same read Dragonwilds' code has always used): a new
+       invite code drops in by itself, and when the server comes up, finishes starting or goes to sleep the
+       page reloads to show what to do next. */
+    (function () {
+      const url = "{{ url_for('dashboard.game_live', gid=game.id) }}";
+      const was = {on: {{ 'true' if on else 'false' }}, starting: {{ 'true' if starting else 'false' }}};
+      async function poll() {
+        if (document.hidden) return;
+        try {
+          const res = await fetch(url, {headers: {"Accept": "application/json"}, cache: "no-store"});
+          if (!res.ok) return;
+          const now = await res.json();
+          if (now.on !== was.on || now.starting !== was.starting) { location.reload(); return; }
+          const slot = document.getElementById("join-code");
+          if (slot && now.code) {
+            const shown = slot.querySelector("code");
+            if (!shown || shown.textContent !== now.code) {
+              const code = document.createElement("code");
+              code.className = "code"; code.textContent = now.code; code.title = "Click to copy";
+              slot.replaceChildren(code);
+            }
+          }
+        } catch (e) { /* a network blip: the next poll catches up */ }
+      }
+      setInterval(poll, 20000);
+    })();
+  </script>
   {% if links.text %}
   <style>
     .discord-feed { max-height: 360px; overflow-y: auto; }

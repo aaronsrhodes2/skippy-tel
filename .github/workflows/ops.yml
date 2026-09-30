@@ -15,13 +15,13 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: "status | logs | start | stop | restart | discord-setup | tail | search | stats | restart-game | home | configure"
+        description: "status | logs | start | stop | restart | discord-setup | tail | search | stats | restart-game | backups | restore-game | home | configure"
         required: true
         default: status
         type: choice
-        options: [status, logs, start, stop, restart, discord-setup, tail, search, stats, restart-game, home, configure]
+        options: [status, logs, start, stop, restart, discord-setup, tail, search, stats, restart-game, backups, restore-game, home, configure]
       args:
-        description: "logs/tail/restart-game: game id (tail: + line count); search: game id + regex; start: game ids"
+        description: "logs/tail/restart-game/backups: game id (tail: + line count); search: game id + regex; start: game ids; restore-game: game id + archive name (or latest)"
         required: false
         default: ""
 

@@ -112,7 +112,11 @@
   .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
   .dot.green { background: var(--green); } .dot.grey { background: #666; } .dot.amber { background: var(--amber); }
   code.code { font-size: 1.15rem; letter-spacing: .08em; padding: 1px 6px; border-radius: 4px;
-              background: rgba(255,255,255,.08); user-select: all; }
+              background: rgba(255,255,255,.08); user-select: all; cursor: copy; }
+  pre.copy { margin: 4px 0 10px; padding: 8px 12px; border-radius: 6px; background: rgba(255,255,255,.08);
+             font-family: var(--mono); font-size: .85rem; overflow-x: auto; cursor: copy; }
+  code.code.copied::after, pre.copy.copied::before { content: "copied"; margin-left: 8px; font-size: .7rem;
+             letter-spacing: 0; color: var(--black); background: var(--accent); border-radius: 999px; padding: 1px 7px; }
 
   button, .btn { background: var(--dim-green-hi); color: var(--white); border: 1px solid var(--green);
                  border-radius: 6px; padding: 8px 16px; font-size: 0.9rem; cursor: pointer; text-decoration: none;
@@ -190,5 +194,15 @@
 {% if user and request.endpoint != 'index' %}
   <a id="home-btn" href="{{ url_for('index') }}" aria-label="Home" title="Home">&#8962;</a>
 {% endif %}
+<script>
+  /* Click a code, address or password (code.code) or a copyable block (pre.copy) to copy it. */
+  document.addEventListener("click", function (e) {
+    const el = e.target.closest && e.target.closest("code.code, pre.copy");
+    if (!el || !navigator.clipboard) return;
+    navigator.clipboard.writeText(el.textContent.trim()).then(function () {
+      el.classList.add("copied"); setTimeout(function () { el.classList.remove("copied"); }, 1400);
+    }, function () { /* clipboard blocked: the text stays selected for a manual copy */ });
+  });
+</script>
 </body>
 </html>

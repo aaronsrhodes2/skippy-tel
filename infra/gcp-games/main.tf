@@ -130,6 +130,8 @@ resource "google_compute_instance" "games" {
     skippy-diag      = file("${path.module}/diag.sh")
     everquest-script = file("${path.module}/everquest.sh")
     ops-agent        = file("${path.module}/ops_agent.py")
+    valheim-seed     = file("${path.module}/valheim_seed.py")
+    game-backup      = file("${path.module}/game_backup.py")
     discord-notify   = file("${path.module}/discord-notify.py")
     compose-file     = file("${path.module}/../../games/docker-compose.yml")
     games            = "valheim"

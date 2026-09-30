@@ -662,6 +662,88 @@ def test_invite_code_sits_with_the_join_password(env):
     assert '<div class="join">' not in listing and "YTKM-EKL1" not in listing and "dragonpw" not in listing
 
 
+def _join_block(client, gid):
+    page = client.get(f"/games/{gid}").data.decode()
+    join = page[page.index('<div class="join">'):]
+    return join[:join.index("</div>")]
+
+
+def test_valheim_without_crossplay_gives_the_address_and_no_code(env):
+    """The default: the IP works, and there is no join code to show (the server makes one only with crossplay on)."""
+    client, vm, _ = env
+    vm.serial[2] = "=== skippy-diag t ===\nJOIN_CODE valheim=106969\n=== end ===\n"     # even a stale code line isn't shown
+    vm.state.status = "RUNNING"                                                     # the server is set to Valheim
+    login(client, FRIEND)
+    join = _join_block(client, "valheim")
+    assert "35.1.2.3:2456" in join and "hunter22" in join and "Add server" in join
+    assert "106969" not in join and "Invite code" not in join and 'id="join-code"' not in join
+    assert "Show join password" not in join and "<details" not in join                  # no click to reveal it: shown on purpose
+    assert "Or search the list" not in join                                             # Valheim has no list to search
+
+
+def test_valheim_with_crossplay_leads_with_its_join_code_and_drops_the_address_that_no_longer_works(env):
+    client, vm, _ = env
+    vm.serial[2] = "=== skippy-diag t ===\nJOIN_CODE valheim=106969\n=== end ===\n"
+    vm.state.status = "RUNNING"
+    vm.state.env["VALHEIM_CROSSPLAY"] = "true"
+    login(client, FRIEND)
+    join = _join_block(client, "valheim")
+    assert join.index("106969") < join.index("hunter22")                                # code, then password
+    assert "35.1.2.3" not in join and "2456" not in join                                # crossplay servers don't listen on 2456
+    assert "Add server" in join and "paste the code" in join
+    vm.serial[2] = "=== skippy-diag t2 ===\nJOIN_CODE valheim=222333\n=== end ===\n"    # a reboot makes a new session and code
+    assert "222333" in _join_block(client, "valheim") and "106969" not in _join_block(client, "valheim")
+    assert client.get("/games/valheim/live").get_json()["code"] == "222333"
+
+
+def test_every_game_says_what_to_type_and_where(env):
+    from catalog import GAMES  # noqa: PLC0415
+    client, vm, _ = env
+    login(client, ADMIN)
+    vm.state.status = "RUNNING"
+    for gid in GAMES:
+        vm.state.games = [gid]
+        join = _join_block(client, gid)
+        assert "35.1.2.3" in join and 'class="code"' in join and 'class="help"' in join, gid    # an address to copy, and a hint
+    vm.state.games = ["factorio"]
+    assert "Connect to address" in _join_block(client, "factorio")
+    vm.state.games = ["satisfactory"]
+    assert "Add Server" in _join_block(client, "satisfactory") and "7777" in _join_block(client, "satisfactory")
+    vm.state.games = ["everquest"]
+    import html  # noqa: PLC0415
+    page = html.unescape(client.get("/games/everquest").data.decode())                          # what the browser copies
+    assert '<pre class="copy">[Registration Servers]\n{\n"35.1.2.3:5999"\n}\n[Login Servers]\n{\n"35.1.2.3:5999"\n}</pre>' in page
+    assert "click to copy" in page and "document.addEventListener(\"click\"" in page             # the copy behaviour ships on every page
+
+
+def test_the_game_page_keeps_itself_current(env):
+    client, vm, _ = env
+    login(client, FRIEND)
+    vm.serial[2] = "=== skippy-diag t ===\nJOIN_CODE dragonwilds=YTKM-EKL1\n=== end ===\n"
+    live = client.get("/games/dragonwilds/live")
+    assert live.get_json() == {"on": False, "starting": False, "code": None, "players": None}    # asleep: nothing to show
+    assert live.headers["Cache-Control"] == "no-store"
+    vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
+    assert client.get("/games/dragonwilds/live").get_json()["code"] == "YTKM-EKL1"
+    vm.serial[2] += "=== skippy-diag t2 ===\nJOIN_CODE dragonwilds=NEW1-CODE\n=== end ===\n"
+    assert client.get("/games/dragonwilds/live").get_json()["code"] == "NEW1-CODE"              # picked up without a reload
+    page = client.get("/games/dragonwilds").data.decode()
+    assert "/games/dragonwilds/live" in page and 'id="join-code"' in page and "location.reload()" in page
+    vm.state.games = ["valheim"]                                                                # another game is up: not "on" for this one
+    assert client.get("/games/dragonwilds/live").get_json()["on"] is False
+
+
+def test_the_live_endpoint_follows_the_game_pages_access_rules(env):
+    client, vm, _ = env
+    assert client.get("/games/valheim/live").status_code == 302                     # signed out
+    _add_friend(client, PAL, ["dragonwilds"])
+    login(client, PAL)
+    assert client.get("/games/valheim/live").status_code == 404                     # no access to that game
+    assert client.get("/games/dragonwilds/live").status_code == 200
+    vm.status = lambda: (_ for _ in ()).throw(RuntimeError("compute API down"))
+    assert client.get("/games/dragonwilds/live").get_json()["on"] is False           # a VM error reads as "not up", never a 500
+
+
 # ── friends: added on the Admin page, per-game access ─────────────────────────
 
 PAL = "pal@example.com"

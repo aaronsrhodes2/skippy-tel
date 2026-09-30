@@ -103,7 +103,7 @@ What happens:
 
 | Game | Port(s) | First-run chores |
 |---|---|---|
-| Valheim | UDP 2456–2457 | Set `VALHEIM_PASSWORD` (≥5 chars). Import an old world by copying `.db`/`.fwl` into `data/valheim/config/worlds_local/`. |
+| Valheim | UDP 2456–2457 | Set `VALHEIM_PASSWORD` (≥5 chars; it may not appear inside the world name or seed). The world grows from `VALHEIM_WORLD_SEED` (default `skippyhasyourmoney`; `keep` = leave it): at boot `valheim_seed.py` writes the world's metadata file, and a world with another seed is set aside in `data/valheim/config/replaced-worlds/`, never deleted. A world put back on purpose (`restore-game`, or copied in) is left alone until the seed setting changes again. **Crossplay** (`VALHEIM_CROSSPLAY`, default `false`): `true` gives a 6-digit **join code**, new every boot, for Steam, Xbox and Game Pass (Join Game → Add server → paste it), but the server then stops listening on 2456, so `ip:2456` no longer works, and the idle watchdog can't see crossplay players yet, so leave it off until that is fixed. Import an old world by copying it into `data/valheim/config/worlds_local/`. |
 | Factorio | UDP 34197 | Set `game_password` in `data/factorio/config/server-settings.json`, then restart. |
 | Satisfactory | UDP+TCP 7777, TCP 8888 | The first player to connect claims the server and sets the admin + join passwords. Do this right away. |
 | Dragonwilds | UDP **7778** (moved off 7777 so it can run beside Satisfactory) | `DRAGONWILDS_OWNER_ID` + `DRAGONWILDS_ADMIN_PASSWORD` required. Players join with the **invite code** shown on the portal's Dragonwilds page (new every boot), or search the server name in the Public tab (whole name, exact case: `Skippy` won't find `SkippyScape`) plus the world password; crossplay with Xbox/PS5/Switch 2. Up to 6 players. |
@@ -113,8 +113,29 @@ Download the save from Nitrado's file browser, `scripts/games.sh up <game>` once
 exist, then copy the save onto the VM
 (`gcloud compute scp <file> skippy-games:/srv/games/data/<game>/... --zone us-west1-b`) and restart.
 
+### How players join, per game
+Every game's page on the portal shows the same block: what to type, where, and the join password, all click-to-copy, and it keeps itself current while open.
+
+| Game | The way in | Invite code? |
+|---|---|---|
+| Valheim | Join Game → Add server → `ip:2456`, or with crossplay on the **join code** instead (the two exclude each other) | Only with crossplay on: new every boot |
+| Dragonwilds | Worlds → **Invite Code** (the I key), or the Direct tab `ip:7778`, or search the server name | Yes: new every boot |
+| Factorio | Multiplayer → Connect to address → `ip` | No (Factorio has none; the address is stable) |
+| Satisfactory | Server Manager → Add Server → `ip`, port 7777 | No (no server list either) |
+| EverQuest | The `eqhost.txt` block on the page (copy it over the client's file), then `eqgame.exe patchme` | No |
+
+The join password is shown in plain text on purpose (see `CLAUDE.md`, "Join passwords").
+
 ### Backups
-The data disk is snapshotted daily at 3am Pacific and kept 7 days (`snapshot_retention_days`).
+**Per game (rollback of a bad day).** Each game's world files are flagged in `TARGETS` in
+`infra/gcp-games/game_backup.py`. At every boot, with the containers down, `startup.sh` archives them
+per game to `data/backups/<game>/<UTC time>-<fingerprint>.tar.gz` (unchanged files aren't archived twice;
+the newest 10 are kept, 3 for EverQuest, 6 for Satisfactory). That archive is the state the session started
+from. Through the `ops` workflow: `backups <game>` lists them, `restore-game <game> <archive|latest>` stops the
+game, sets the current files aside in `backups/<game>/_replaced/` (never deleted), puts the archive back and
+starts the game again. A new game or save file means a new `TARGETS` entry (the tests enforce it).
+
+**Whole disk (disaster).** The data disk is snapshotted daily at 3am Pacific and kept 7 days (`snapshot_retention_days`).
 To restore: `scripts/games.sh down`, then in the console go to Disks → create a disk from the snapshot, and on the VM → Edit, detach `skippy-games-data` and attach the restored disk with device name `games-data`.
 
 ## Testing at home tonight (no GCP needed)

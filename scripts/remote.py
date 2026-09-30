@@ -11,6 +11,8 @@ act without anyone fetching logs or pressing buttons.
     python scripts/remote.py search <game> <regex>       # (ops_agent.py), VM must be on
     python scripts/remote.py stats
     python scripts/remote.py restart-game <game>
+    python scripts/remote.py backups [game]              # per-game rollback points (game_backup.py TARGETS)
+    python scripts/remote.py restore-game <game> <archive|latest>   # roll one game back (files set aside, not deleted)
     python scripts/remote.py configure [apply] [join-password]   # set every game up without typing anything:
                                                          # previews; `apply` writes (autoconfig.py)
     python scripts/remote.py home                        # skippy-pc as the portal sees it
@@ -126,7 +128,7 @@ def configure(vm, args: list[str], env: dict[str, str]) -> int:
     return 0
 
 
-AGENT_COMMANDS = ("tail", "search", "stats", "restart-game")
+AGENT_COMMANDS = ("tail", "search", "stats", "restart-game", "backups", "restore-game")
 
 
 def agent(vm, cmd: str, args: list[str], env: dict[str, str]) -> int:
@@ -144,8 +146,9 @@ def agent(vm, cmd: str, args: list[str], env: dict[str, str]) -> int:
         time.sleep(3)
         out = vm.serial_output(3).replace("\r\n", "\n").replace("\r", "")
         if end in out:
-            print(scrub(out[out.index(start) + len(start):out.index(end)].strip("\n"), env))
-            return 0
+            reply = scrub(out[out.index(start) + len(start):out.index(end)].strip("\n"), env)
+            print(reply)
+            return 1 if reply.startswith("error:") else 0       # the agent reports a failure as "error: ..."
     print("No reply from the VM's ops agent within 3 minutes. It's installed at boot, so a VM "
           "booted before it existed needs one restart.")
     return 1
