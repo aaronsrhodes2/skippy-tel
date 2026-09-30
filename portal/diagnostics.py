@@ -279,14 +279,20 @@ def startup_tail(port1: str, lines: int = STARTUP_LINES) -> str:
     return "\n".join(picked[-lines:])
 
 
+# Secrets a game container makes up for itself and prints in its own log, so no setting holds them to mask by
+# value. Factorio's image generates the RCON password and shows it on the server's command line
+# (`--rcon-password <value>`), which `ops tail factorio` would otherwise print into a public-ish CI log.
+_SELF_MADE_SECRET = re.compile(r"(rcon[-_ ]?password\W{1,3})(\S+)", re.IGNORECASE)
+
+
 def redact(text: str, env: dict[str, str]) -> str:
-    """Mask every secret setting's value (passwords) wherever it appears."""
+    """Mask every secret setting's value (passwords) wherever it appears, and any RCON password a log prints."""
     for game in GAMES.values():
         for s in game.settings:
             value = env.get(s.key, "")
             if s.secret and len(value) >= 3:
                 text = text.replace(value, "••••")
-    return text
+    return _SELF_MADE_SECRET.sub(lambda m: m.group(1) + "••••", text)
 
 
 def read(vm, game: str | None = None) -> dict[str, str]:

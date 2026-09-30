@@ -318,6 +318,17 @@ def test_redact_masks_only_secret_settings():
     assert out == "name=SkippyScape pw=••••"
 
 
+def test_redact_masks_an_rcon_password_the_container_prints_itself():
+    """Factorio's image makes up its RCON password and shows it on the server's command line; no setting holds it."""
+    import diagnostics
+    line = "factorio  | /factorio/bin/x64/factorio --start-server skippy --rcon-port 27015 --rcon-password 9fA3kLq0ZxV2 --port 34197"
+    out = diagnostics.redact(line, {})
+    assert "9fA3kLq0ZxV2" not in out and "--rcon-password ••••" in out and "--port 34197" in out
+    assert "abc123" not in diagnostics.redact('rcon-password="abc123"', {})        # whatever the separator
+    assert "abc123" not in diagnostics.redact("RCON_PASSWORD=abc123", {})
+    assert diagnostics.redact("no secrets here, rcon-port 27015", {}) == "no secrets here, rcon-port 27015"
+
+
 def test_join_codes_from_diag_line_or_log_fallback():
     import diagnostics
     assert diagnostics.join_codes("JOIN_CODE dragonwilds=AB12-CD34\n") == {"dragonwilds": "AB12-CD34"}
