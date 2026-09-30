@@ -125,6 +125,29 @@ services:
               count: all
               capabilities: [gpu]
 
+  # ── Music studio — ACE-Step 1.5 (songs on the GPU) ────────────────────────
+  # Called only by the home reporter (portal chat's make_music). No published
+  # port. Weights come read-only from the models archive; nothing is fetched.
+  music-studio:
+    build: ./services/music-studio
+    container_name: skippytel-music-studio
+    restart: unless-stopped
+    logging: *default-logging
+    expose:
+      - "8001"
+    networks: [music-net]      # internal: no route to the internet (see the networks block)
+    volumes:
+      - ${MODELS_ROOT:-D:/models}/huggingface/ACE-Step__Ace-Step1.5:/weights:ro
+      - music-studio-cache:/app/.cache          # compiled kernels + scratch audio
+    shm_size: "2gb"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
   # ── Dozzle — real-time Docker log viewer ──────────────────────────────────
   # Survives flask-api crashes. Shows live logs from all containers.
   # Dashboard: http://localhost:9999
@@ -158,9 +181,16 @@ services:
     volumes:
       - uptime-kuma-data:/app/data
 
+# ACE-Step's server downloads any model it thinks is missing. It's on this network alone, which has
+# no route out, so it can only ever run the weights we mounted. The home reporter joins it too.
+networks:
+  music-net:
+    internal: true
+
 volumes:
   ollama-data:
   whisper-cache:
   face-db:
   insightface-cache:
   uptime-kuma-data:
+  music-studio-cache:

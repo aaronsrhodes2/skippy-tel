@@ -382,3 +382,115 @@ def test_portal_skippy_is_loud_but_privacy_rules_come_after():
     friend = chat.system_prompt("Pal")
     assert "full volume" in friend and "filthy monkeys" in friend
     assert friend.index("full volume") < friend.index("NOT the Captain")   # later rules win
+
+
+# ── Discord: channels the Captain made by hand ────────────────────────────────
+
+def test_a_games_discord_channels_can_be_named_something_other_than_its_id():
+    assert discord_admin.channel_name("everquest") == "foreverquest"
+    assert discord_admin.channel_name("valheim") == "valheim"
+
+
+def test_setup_adopts_the_captains_foreverquest_channels_instead_of_making_new_ones(monkeypatch):
+    class FakeDiscord:
+        created: list = []
+
+        def __init__(self, token):
+            pass
+
+        def __call__(self, method, path, body=None, auth=True):
+            if method == "GET" and path.endswith("/channels"):
+                return [{"id": "10", "name": "Game Servers", "type": 4},
+                        {"id": "111", "name": "foreverquest", "type": 0, "parent_id": "10"},
+                        {"id": "222", "name": "foreverquest", "type": 2, "parent_id": "10"}]
+            if method == "POST" and path.endswith("/channels"):
+                ch = {"id": f"new-{body['name']}-{body['type']}", **body}
+                FakeDiscord.created.append(body["name"])
+                return ch
+            raise AssertionError(f"unexpected call {method} {path}")
+
+    monkeypatch.setattr(discord_admin, "Discord", FakeDiscord)
+    monkeypatch.setattr(discord_admin, "_ensure_webhook", lambda api, cid: f"hook-{cid}")
+    monkeypatch.setattr(discord_admin, "_ensure_invite", lambda api, cid, code: f"invite-{cid}")
+    monkeypatch.setattr(discord_admin, "_ensure_board", lambda api, hook, cid, game, bid, env: f"board-{cid}")
+    out = discord_admin.setup("token", "invite", ["everquest", "valheim"], {"DISCORD_GUILD_ID": "G"})
+    assert out["DISCORD_CHANNEL_EVERQUEST"] == "111" and out["DISCORD_VOICE_EVERQUEST"] == "222"   # adopted
+    assert out["DISCORD_INVITE_EVERQUEST"] == "invite-111" and out["DISCORD_BOARD_EVERQUEST"] == "board-111"
+    assert "everquest" not in FakeDiscord.created and "foreverquest" not in FakeDiscord.created  # nothing duplicated
+    assert FakeDiscord.created == ["valheim", "valheim"]                                            # others are unchanged
+
+
+# ── automatic setup of the game servers ───────────────────────────────────────
+
+def _configured_env():
+    return {"VALHEIM_PASSWORD": "hunter22", "DRAGONWILDS_OWNER_ID": "owner1", "DRAGONWILDS_ADMIN_PASSWORD": "adm1n-real",
+            "DRAGONWILDS_WORLD_PASSWORD": "dragonpw", "DRAGONWILDS_SERVER_NAME": "SkippyScape",
+            "DRAGONWILDS_WORLD_NAME": "SkippyScape"}
+
+
+def test_autoconfig_makes_up_a_missing_join_password_and_leaves_what_is_set_alone():
+    import autoconfig
+    from catalog import GAMES, missing_settings
+    env = _configured_env()
+    del env["VALHEIM_PASSWORD"]
+    assert missing_settings("valheim", env)                                      # the one thing that blocked Valheim
+    p = autoconfig.plan(env, GAMES)
+    assert "VALHEIM_PASSWORD" in p.generated and len(p.set["VALHEIM_PASSWORD"]) >= 5
+    assert not missing_settings("valheim", {**env, **p.set})                     # and now it can start
+    for key in ("DRAGONWILDS_OWNER_ID", "DRAGONWILDS_ADMIN_PASSWORD", "DRAGONWILDS_WORLD_PASSWORD",
+                "DRAGONWILDS_SERVER_NAME", "DRAGONWILDS_WORLD_NAME"):
+        assert key not in p.set, key                                             # nothing that was filled in is touched
+
+
+def test_autoconfig_fills_the_defaults_the_vm_would_use_anyway_only_where_blank():
+    import autoconfig
+    from catalog import GAMES
+    env = {**_configured_env(), "VALHEIM_SERVER_NAME": "", "FACTORIO_SAVE_NAME": "", "SATISFACTORY_MAX_PLAYERS": "8"}
+    p = autoconfig.plan(env, GAMES)
+    assert p.set["VALHEIM_SERVER_NAME"] == "Skippy Valheim" and p.set["FACTORIO_SAVE_NAME"] == "skippy"
+    assert "SATISFACTORY_MAX_PLAYERS" not in p.set                               # someone chose 8: kept
+
+
+def test_a_join_password_the_captain_names_replaces_every_games_join_password():
+    import autoconfig
+    from catalog import GAMES
+    p = autoconfig.plan(_configured_env(), GAMES, join_password="groggy")
+    assert p.set["VALHEIM_PASSWORD"] == "groggy" and p.set["DRAGONWILDS_WORLD_PASSWORD"] == "groggy"
+    assert sorted(p.chosen) == ["DRAGONWILDS_WORLD_PASSWORD", "VALHEIM_PASSWORD"]
+    assert "DRAGONWILDS_ADMIN_PASSWORD" not in p.set                             # the admin password isn't a join password
+    again = autoconfig.plan({**_configured_env(), **p.set}, GAMES, join_password="groggy")
+    assert again.set == {} and again.chosen == []                                # idempotent
+
+
+def test_an_unusable_join_password_is_refused_without_echoing_it():
+    import autoconfig, pytest
+    from catalog import GAMES
+    with pytest.raises(autoconfig.PlanError) as short:
+        autoconfig.plan(_configured_env(), GAMES, join_password="abc")
+    assert "at least 5" in str(short.value) and "abc" not in str(short.value)
+    env = {**_configured_env(), "VALHEIM_SERVER_NAME": "Groggy Land"}
+    with pytest.raises(autoconfig.PlanError) as named:
+        autoconfig.plan(env, GAMES, join_password="groggy")
+    assert "server name" in str(named.value)
+
+
+def test_what_only_the_captain_can_supply_is_reported_not_invented():
+    import autoconfig
+    from catalog import GAMES
+    env = _configured_env()
+    del env["DRAGONWILDS_OWNER_ID"]                                              # a Player ID from inside the game
+    p = autoconfig.plan(env, GAMES)
+    assert "DRAGONWILDS_OWNER_ID" not in p.set
+    assert [n["game"] for n in p.needs_you] == ["dragonwilds"] and "Player ID" in p.needs_you[0]["problem"]
+    assert "Still needs you" in p.summary()
+
+
+def test_the_summary_names_settings_but_never_shows_a_value():
+    import autoconfig
+    from catalog import GAMES
+    env = _configured_env()
+    del env["VALHEIM_PASSWORD"]
+    p = autoconfig.plan(env, GAMES)
+    text = p.summary()
+    assert "valheim password" in text
+    assert all(value not in text for value in p.set.values())

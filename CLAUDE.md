@@ -124,6 +124,13 @@ changes). The reply carries queued controls (`music` skip/pause/resume/stop)
 and jobs; while someone chats, the reporter also polls `GET /home/jobs` every
 1.5 s and answers with `POST /home/jobs/<id>`.
 
+- Core health: the report also carries flask-api's `/health` (`health`). The
+  portal's `home.core_check()` turns it into a verdict (`ok`/`degraded`/`down`)
+  plus plain-English problems: the **Core · skippy-tel** widget on `/me`, the
+  Watcher lines, and `core` in `ops home`. `/health`'s `models.ollama` carries
+  `default` and `default_present`, because an up Ollama missing the default
+  model still says `status: ok` while every default chat 503s.
+
 - Physics in Skippy's chat = `ask_mentat` → a job → `mentat-home` (same
   override file: mentat/Dockerfile with `MENTAT_USE_LLM=1`, Qwen via
   `ollama:11434`). No Qwen → Mentat answers 503 and Skippy says it's offline;
@@ -135,6 +142,29 @@ and jobs; while someone chats, the reporter also polls `GET /home/jobs` every
   SkippyTel's .env.
 - Portal side: `portal/home.py` (in-memory; the portal runs max 1 instance),
   `/bilby` sub-portal (grant "bilby"; controls admin-only), Home widget on `/me`.
+
+## Local capabilities (skippy-pc's hardware, for the portal chat)
+
+The portal chat can use skippy-pc's own hardware, free of tokens, through the same job
+queue as `ask_mentat`. The reporter advertises what's ready (`capabilities` in each
+report: a service is ready when its `/health` answers); the portal (`home.capabilities()`)
+offers only those tools, and `tool_policy.py` decides who may use them (unlisted =
+admin-only). Long jobs: `home.start()` then `peek()`/`wait_result()`; audio comes back
+through `PUT /home/media/<job_id>` (`portal/media.py`: in memory, 30 min, audio types
+only, 30 MB) and plays from `GET /chat/media/<job_id>` (its requester or an admin).
+
+- **`make_music`** (admin only): `services/music-studio` is ACE-Step 1.5's own REST
+  server: a pinned commit, weights mounted read-only from the models archive
+  (`D:\models\huggingface\ACE-Step__Ace-Step1.5`), offline, no published port. The
+  reporter unloads Ollama's models first (`OLLAMA_KEEP_ALIVE=-1` would otherwise keep
+  them in VRAM), then release_task, poll, download, upload; one GPU job at a time. The
+  Captain's rule of thumb (why it's local): no tokens, and nothing to wait on or pay for.
+- **Adding one**: a job kind in `reporter.run_job`, a probe in `reporter.capabilities()`,
+  the name in `home.KNOWN_CAPABILITIES`, a tool in `chat_tools.py`, an audience in
+  `tool_policy.py`, and tests on both sides.
+- Models live in `D:\models` (`tools/models_archive.py`: verify with `python
+  tools/models_archive.py verify`). Ollama models are pulled into the Docker Ollama
+  (`skippytel_ollama-data`), a different store from the host Ollama's.
 
 ## EverQuest (EQEmu) on the games VM
 

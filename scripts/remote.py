@@ -11,6 +11,8 @@ act without anyone fetching logs or pressing buttons.
     python scripts/remote.py search <game> <regex>       # (ops_agent.py), VM must be on
     python scripts/remote.py stats
     python scripts/remote.py restart-game <game>
+    python scripts/remote.py configure [apply] [join-password]   # set every game up without typing anything:
+                                                         # previews; `apply` writes (autoconfig.py)
     python scripts/remote.py home                        # skippy-pc as the portal sees it
                                                          # (needs OPS_ID_TOKEN: the workflow mints it)
 
@@ -31,6 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "portal"))
 
+import autoconfig  # noqa: E402
 import diagnostics  # noqa: E402
 import ops  # noqa: E402
 from catalog import GAMES, missing_settings  # noqa: E402
@@ -101,6 +104,28 @@ def portal_task(vm, name: str) -> int:
     return 0 if mine[0]["ok"] else 1
 
 
+def configure(vm, args: list[str], env: dict[str, str]) -> int:
+    """`configure` shows what would be set; `configure apply [join-password]` writes it. Only key names are
+    ever printed, and every new secret is registered with GitHub's log masker before anything is written."""
+    apply = bool(args) and args[0] == "apply"
+    rest = args[1:] if apply else args
+    join = rest[0] if rest else None
+    if join:
+        mask_secrets({"JOIN_PASSWORD": join})
+    try:
+        plan = autoconfig.plan(env, GAMES, join_password=join)
+    except autoconfig.PlanError as exc:
+        print(exc)
+        return 1
+    mask_secrets(plan.set)
+    print(("APPLIED: " if apply else "PREVIEW (nothing written; `configure apply` writes it): ") + plan.summary())
+    print(json.dumps({"set" if apply else "would_set": sorted(plan.set)}, indent=2))
+    if apply and plan.set:
+        vm.update_env(plan.set)
+        print("Saved to the VM's settings. They apply on the next boot: restart the server (or start it) to use them.")
+    return 0
+
+
 AGENT_COMMANDS = ("tail", "search", "stats", "restart-game")
 
 
@@ -159,6 +184,8 @@ def main(argv: list[str]) -> int:
         print(scrub(logs["containers"], env))
         print("\n=== last boot (startup script) ===")
         print(scrub(logs["startup"], env))
+    elif cmd == "configure":
+        return configure(vm, args, env)
     elif cmd == "start":
         ok, message = ops.start_games(vm, args, None, is_admin=True)
         print(message)

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Server logs — Skippy Portal{% endblock %}
+{% block app %}admin{% endblock %}
 {% block content %}
 <section>
   <h2>{{ game.name ~ ' logs' if game else 'Server logs' }}</h2>

@@ -1,20 +1,20 @@
 {% extends "base.html" %}
 {% block title %}Mentat playground — Experiments{% endblock %}
+{% block app %}experiments{% endblock %}
+{% block public_up %}{{ url_for('experiments.index') }}{% endblock %}
+{% block mainclass %}wide{% endblock %}
 {% block head %}
 <style>
-  main { max-width: 1080px; }
   .pg { display: grid; grid-template-columns: 300px 1fr; gap: 18px; }
   @media (max-width: 760px) { .pg { grid-template-columns: 1fr; } }
-  .panel { background: #07090c; border: 1px solid #1d2a33; border-radius: 12px; padding: 14px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
   #search { margin-bottom: 8px; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-  .chip { font-size: .72rem; padding: 3px 9px; border-radius: 999px; border: 1px solid #2a3a46; background: none;
-          color: #9fb3c2; cursor: pointer; }
-  .chip.on { border-color: var(--cyan); color: var(--cyan); }
+  .chip.on { background: var(--accent); border-color: var(--accent); color: var(--black); }   /* the kit's .chip, selected */
   #list { max-height: 62vh; overflow-y: auto; }
   #list button { display: block; width: 100%; text-align: left; background: none; border: none; border-radius: 6px;
                  color: #d6e2ea; padding: 6px 8px; font: .85rem ui-monospace, Menlo, Consolas, monospace; cursor: pointer; }
-  #list button:hover, #list button.on { background: #10202a; color: var(--cyan); }
+  #list button:hover, #list button.on { background: var(--dim-green); color: var(--cyan); }
   #count { font-size: .75rem; color: #6d8594; margin: 0 0 6px; }
   #tool h3 { margin: 0 0 4px; font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--cyan); }
   #desc { white-space: pre-wrap; color: #b9c9d4; font-size: .9rem; margin-bottom: 12px; }
@@ -31,10 +31,7 @@
 </style>
 {% endblock %}
 {% block content %}
-{% if not user %}<header><h1><a href="{{ url_for('index') }}" style="color:inherit;text-decoration:none">Skippy Portal</a></h1></header>{% endif %}
 <section>
-  <p><a href="{{ url_for('experiments.index') }}">&larr; Experiments</a></p>
-  <h2>Mentat playground</h2>
   <p>Every tool in Aaron's physics engine, live. Each answer comes back with the formula used and where its
     numbers come from, which is the point: no unsourced numbers.
     {% if not available %}<span class="error">Mentat isn't deployed yet; check back shortly.</span>{% endif %}</p>

@@ -100,7 +100,7 @@ def login(client, email):
 def test_signed_out_sees_login(env):
     client, _, _ = env
     assert b"Sign in with Google" in client.get("/").data
-    assert client.get("/dashboard").status_code == 302
+    assert client.get("/games").status_code == 302
     assert client.get("/health").data == b"ok"
 
 
@@ -110,7 +110,7 @@ def test_portal_is_all_cards_with_no_top_tabs(env):
     launcher = client.get("/").data.decode()
     assert "<nav" not in launcher and 'id="home-btn"' not in launcher          # the launcher is home: nowhere to go "back" to
     assert "sign out" in launcher                                              # the account lives on the home screen
-    for path in ("/dashboard", "/me", "/admin", "/chat", "/bilby"):            # everywhere the old tabs led is now a tile
+    for path in ("/games", "/me", "/admin", "/chat", "/bilby", "/experiments"):   # everywhere the old tabs led is now a tile
         assert f'href="{path}"' in launcher, path
     _add_friend(client, PAL, ["dragonwilds"])
     login(client, PAL)
@@ -121,25 +121,75 @@ def test_portal_is_all_cards_with_no_top_tabs(env):
 def test_every_app_page_has_a_back_button_a_home_button_and_its_own_title(env):
     client, _, _ = env
     login(client, ADMIN)
-    page = client.get("/dashboard").data.decode()
+    page = client.get("/games").data.decode()
     assert "<nav" not in page
     assert "&lsaquo; Home</a>" in page and 'id="home-btn"' in page
     assert "sign out" not in page                                              # app bars are just back + title
-    assert '<h1 class="apptitle">Servers</h1>' in page                          # title comes from the page's own <title>
+    assert '<h1 class="apptitle">Games</h1>' in page                            # title comes from the page's own <title>
     assert '<h1 class="apptitle">Admin</h1>' in client.get("/admin").data.decode()
+
+
+def test_the_launcher_has_one_tile_per_app_and_no_duplicate_paths(env):
+    import re
+    client, _, _ = env
+    login(client, ADMIN)
+    launcher = client.get("/").data.decode()
+    assert re.findall(r'class="tile" data-app="(\w+)"', launcher) == \
+        ["skippy", "games", "bilby", "experiments", "dashboard", "admin"]
+    assert launcher.count('href="/games"') == 1 and 'href="/games/' not in launcher      # games live in one app, not six tiles
+    assert "Server room" not in launcher and "<nav" not in launcher
+    _add_friend(client, PAL, ["dragonwilds"])
+    login(client, PAL)
+    assert re.findall(r'class="tile" data-app="(\w+)"', client.get("/").data.decode()) == ["games"]
+
+
+def test_the_old_dashboard_path_redirects_to_games(env):
+    client, _, _ = env
+    resp = client.get("/dashboard")
+    assert resp.status_code == 301 and resp.location.endswith("/games")
+    login(client, ADMIN)
+    assert client.get("/dashboard", follow_redirects=True).status_code == 200
+
+
+def test_mesh_only_links_are_for_the_captain_not_the_friends_pages(env):
+    client, _, _ = env
+    login(client, FRIEND)
+    assert "skippy-pc:8096" not in client.get("/games").data.decode()              # a friend can't reach the mesh
+    login(client, ADMIN)
+    assert "Home links" in client.get("/me").data.decode() and "skippy-pc:8096" in client.get("/me").data.decode()
+
+
+def test_every_page_belongs_to_an_app_with_a_colour():
+    """The design rule, enforced: pages extend the one base, say which app they are, and that app has an accent."""
+    import re
+    from pathlib import Path
+    templates = Path(__file__).resolve().parents[1] / "templates"
+    base = (templates / "base.html").read_text(encoding="utf-8")
+    colours = set(re.findall(r'\[data-app="(\w+)"\]\s*\{\s*--accent', base))
+    exempt = {"home.html", "login.html", "unauthorized.html"}         # the launcher and the signed-out pages
+    for t in sorted(templates.glob("*.html")):
+        text = t.read_text(encoding="utf-8")
+        if t.name.startswith("_") or t.name == "base.html":
+            continue
+        assert 'extends "base.html"' in text, f"{t.name} doesn't use the one base template"
+        if t.name in exempt:
+            continue
+        found = re.search(r"\{% block app %\}(\w+)\{% endblock %\}", text)
+        assert found, f"{t.name} doesn't say which app it belongs to"
+        assert found.group(1) in colours, f"{t.name}: app {found.group(1)!r} has no accent in base.html"
 
 
 def test_unlisted_email_is_bounced(env):
     client, _, _ = env
     login(client, "stranger@example.com")
-    resp = client.get("/dashboard")
+    resp = client.get("/games")
     assert resp.status_code == 302 and "/unauthorized" in resp.location
 
 
 def test_dashboard_shows_valheim_with_discord_links(env):
     client, _, _ = env
     login(client, FRIEND)
-    page = client.get("/dashboard").data.decode()
+    page = client.get("/games").data.decode()
     assert "Valheim" in page
     assert "https://discord.com/channels/g1/c1" in page
     assert "https://discord.com/channels/g1/v1" in page
@@ -201,7 +251,7 @@ def test_chat_round_trip(env):
                                            "history": [{"role": "user", "content": "hi"},
                                                        {"role": "assistant", "content": "yo"}]})
     assert resp.get_json() == {"reply": "Obviously.", "model": None, "tools": [],
-                                "mentat_available": False, "mentat_where": None}
+                                "mentat_available": False, "mentat_where": None, "media": []}
     system, messages = skippy.seen
     assert "Captain" in system
     assert messages[-1] == {"role": "user", "content": "status?"}
@@ -222,7 +272,7 @@ def test_chat_errors_are_shown_not_raised(env):
 def test_friend_one_click_play_dragonwilds_with_guardrail(env):
     client, vm, _ = env
     login(client, FRIEND)
-    page = client.get("/dashboard").data.decode()
+    page = client.get("/games").data.decode()
     assert "Play RuneScape: Dragonwilds" in page
     client.post("/games/start", data={"games": ["dragonwilds"], "idle_minutes": "0"})
     assert vm.calls[-1] == ("start", ["dragonwilds"], 15)          # "never sleep" is admin-only
@@ -231,9 +281,9 @@ def test_friend_one_click_play_dragonwilds_with_guardrail(env):
 def test_join_password_shown_to_players_only_while_running(env):
     client, vm, _ = env
     login(client, FRIEND)
-    assert "dragonpw" not in client.get("/dashboard").data.decode()   # asleep: nothing to join
+    assert "dragonpw" not in client.get("/games").data.decode()   # asleep: nothing to join
     vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
-    page = client.get("/dashboard").data.decode()
+    page = client.get("/games").data.decode()
     assert "dragonpw" in page
     assert "Invite Code" in page                               # the reliable way in comes first...
     assert page.index("Invite Code") < page.index("Public</b> tab")   # ...the list search is the fallback
@@ -386,7 +436,7 @@ def test_invite_code_shown_live_while_running(env):
     assert "YTKM-EKL1" not in client.get("/games/dragonwilds").data.decode()   # asleep: no code
     vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
     assert "YTKM-EKL1" in client.get("/games/dragonwilds").data.decode()
-    assert "YTKM-EKL1" in client.get("/dashboard").data.decode()
+    assert "YTKM-EKL1" in client.get("/games").data.decode()
     vm.serial[2] += "=== skippy-diag t2 ===\nJOIN_CODE dragonwilds=NEW1-CODE\n=== end ===\n"
     page = client.get("/games/dragonwilds").data.decode()                  # after a reboot
     assert "NEW1-CODE" in page and "YTKM-EKL1" not in page
@@ -426,7 +476,7 @@ def test_invite_code_sits_with_the_join_password(env):
     vm.serial[2] = "=== skippy-diag t ===\nJOIN_CODE dragonwilds=YTKM-EKL1\n=== end ===\n"
     vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
     login(client, FRIEND)
-    for url in ("/games/dragonwilds", "/dashboard"):
+    for url in ("/games/dragonwilds", "/games"):
         page = client.get(url).data.decode()
         join = page[page.index('<div class="join">'):]
         join = join[:join.index("</div>")]
@@ -447,10 +497,10 @@ def _add_friend(client, email, games):
 def test_friend_added_on_admin_page_can_sign_in_and_sees_only_their_games(env):
     client, vm, _ = env
     login(client, PAL)
-    assert client.get("/dashboard").status_code == 302              # not invited yet → out
+    assert client.get("/games").status_code == 302              # not invited yet → out
     _add_friend(client, " Pal@Example.com ", ["dragonwilds"])
     login(client, PAL)
-    page = client.get("/dashboard").data.decode()
+    page = client.get("/games").data.decode()
     assert "RuneScape: Dragonwilds" in page and "Valheim" not in page
     assert client.get("/games/dragonwilds").status_code == 200
     assert client.get("/games/valheim").status_code == 404
@@ -464,11 +514,11 @@ def test_removing_a_friend_locks_them_out_next_page_load(env):
     client, _, _ = env
     _add_friend(client, PAL, ["dragonwilds"])
     login(client, PAL)
-    assert client.get("/dashboard").status_code == 200
+    assert client.get("/games").status_code == 200
     login(client, ADMIN)
     client.post("/admin/friends/remove", data={"email": PAL})
     login(client, PAL)
-    assert client.get("/dashboard").status_code == 302
+    assert client.get("/games").status_code == 302
 
 
 def test_changing_a_friends_games_applies_immediately(env):
@@ -609,12 +659,13 @@ def test_opus_tier_is_admin_only(env):
     assert skippy.model == "claude-sonnet-5"                            # Sonnet is for everyone
 
 
-def test_skippy_is_docked_on_every_page_but_the_chat_page(env):
+def test_there_is_one_chat_interface_and_it_is_the_skippy_app(env):
     client, _, skippy = env
     login(client, FRIEND)
-    for url in ("/dashboard", "/games/dragonwilds"):
-        assert 'id="skippy-dock"' in client.get(url).data.decode()
-    assert 'id="skippy-dock"' not in client.get("/chat").data.decode()
+    for url in ("/games", "/games/dragonwilds", "/experiments", "/"):
+        page = client.get(url).data.decode()
+        assert 'id="skippy-dock"' not in page and 'class="skippy-chat"' not in page, url   # no second chat UI anywhere
+    assert client.get("/chat").data.decode().count('class="skippy-chat"') == 1
     client.post("/chat/send", json={"message": "hi", "page": "/games/dragonwilds"})
     system, _ = skippy.seen
     assert "/games/dragonwilds" in system and "NOT the Captain" in system   # FRIEND isn't an admin
@@ -626,12 +677,12 @@ def test_skippy_is_a_grant(env):
     client, _, _ = env
     _add_friend(client, PAL, ["dragonwilds"])                         # no skippy
     login(client, PAL)
-    assert 'id="skippy-dock"' not in client.get("/dashboard").data.decode()
+    assert 'href="/chat"' not in client.get("/").data.decode()          # no Skippy tile without the grant
     assert client.get("/chat").status_code == 403
     assert client.post("/chat/send", json={"message": "hi"}).status_code == 403
     _add_friend(client, PAL, ["dragonwilds", "skippy"])
     login(client, PAL)
-    assert 'id="skippy-dock"' in client.get("/dashboard").data.decode()
+    assert 'href="/chat"' in client.get("/").data.decode()
     assert client.post("/chat/send", json={"message": "hi"}).status_code == 200
 
 
@@ -652,11 +703,11 @@ def test_front_page_shows_cards_for_granted_portals(env):
     login(client, PAL)
     page = client.get("/").data.decode()
     assert "RuneScape: Dragonwilds" in page and "Valheim" not in page
-    assert 'class="portal skippy"' not in page and 'class="portal experiments"' not in page
+    assert 'class="tile" data-app="skippy"' not in page and 'class="tile" data-app="experiments"' not in page
     _add_friend(client, PAL, ["dragonwilds", "skippy", "experiments"])
     login(client, PAL)
     page = client.get("/").data.decode()
-    assert 'class="portal skippy"' in page and 'class="portal experiments"' in page
+    assert 'class="tile" data-app="skippy"' in page and 'class="tile" data-app="experiments"' in page
 
 
 def test_experiments_are_public(env):
@@ -851,7 +902,7 @@ def test_dashboard_is_admin_only_and_shows_the_widgets(env):
     page = client.get("/me").data.decode()
     assert "AB12-CD34" in page and "Spend (estimate)" in page and "Friends" in page
     assert "Memory at 91%" in page and "World disk at 85%" in page      # watcher warnings
-    assert 'class="portal me"' in client.get("/").data.decode()          # card on the front page
+    assert 'class="tile" data-app="dashboard"' in client.get("/").data.decode()   # tile on the front page
 
 
 def test_watcher_flags_crashes_and_blocked_starts(env):
@@ -939,6 +990,97 @@ def test_bilby_shows_now_playing_and_carries_controls_home(env):
     assert client.post("/home/report", json=json.loads(json.dumps(REPORT)), headers=auth_h).get_json()["commands"] == []
 
 
+# ── core health (skippy-tel-core) on the dashboard ────────────────────────────
+
+CORE_OK = {"status": "ok", "spec_version": "1", "bridge": True, "hung_tiers": None,
+           "tiers": {"claude": True, "nagatha": True, "elevenlabs": True},
+           "ollama": {"available": True, "default": "qwen2.5:7b", "default_present": True}}
+
+
+def _core_report(health, containers_ok=True):
+    return {"health": health,
+            "status": {"services": [{"name": "flask-api", "ok": True, "detail": "running"},
+                                    {"name": "whisper", "ok": containers_ok, "detail": "refused"}]},
+            "services": [{"id": "intent", "name": "Skippy AI", "available": True, "status_detail": "default model: qwen2.5:7b"},
+                         {"id": "image", "name": "Image Generator", "available": False, "status_detail": "not deployed"}]}
+
+
+def test_core_check_is_unknown_until_home_reports():
+    import home as home_mod
+    assert home_mod.core_check(None)["verdict"] == "unknown"
+    # a reporter from before this feature sends no `health` at all: that's "can't tell", not "down"
+    assert home_mod.core_check({"status": {"services": []}, "services": []})["verdict"] == "unknown"
+    assert home_mod.core_check({"health": None})["verdict"] == "down"      # explicit None: the core didn't answer
+
+
+def test_core_check_healthy_lists_tiers_and_every_service():
+    import home as home_mod
+    core = home_mod.core_check(_core_report(CORE_OK))
+    assert core["verdict"] == "ok" and core["problems"] == [] and core["api_version"] == "1"
+    assert [t["name"] for t in core["tiers"]] == ["ollama", "claude", "nagatha", "elevenlabs", "bridge"]
+    assert all(t["ok"] for t in core["tiers"])
+    assert [s["name"] for s in core["services"]] == ["Skippy AI", "Image Generator"]     # not just three of them
+    assert core["services"][1]["available"] is False and core["problems"] == []          # not-deployed isn't a fault
+
+
+def test_core_check_catches_a_default_model_ollama_doesnt_have():
+    import copy, home as home_mod
+    health = copy.deepcopy(CORE_OK)
+    health["ollama"].update(default="qwen3:8b", default_present=False)
+    core = home_mod.core_check(_core_report(health))
+    assert core["verdict"] == "degraded"                       # /health itself still says "ok"; that's the trap
+    assert any("qwen3:8b" in p and "503" in p for p in core["problems"])
+    assert next(t for t in core["tiers"] if t["name"] == "ollama")["ok"] is False
+    # an older core that doesn't report default_present isn't accused of anything
+    del health["ollama"]["default_present"]
+    assert home_mod.core_check(_core_report(health))["verdict"] == "ok"
+
+
+def test_core_check_down_when_the_core_or_ollama_is_gone():
+    import copy, home as home_mod
+    assert home_mod.core_check(_core_report(None))["verdict"] == "down"
+    no_ollama = copy.deepcopy(CORE_OK)
+    no_ollama["ollama"] = {"available": False, "default": "qwen2.5:7b", "default_present": False}
+    core = home_mod.core_check(_core_report(no_ollama))
+    assert core["verdict"] == "down" and any("Ollama isn't reachable" in p for p in core["problems"])
+
+
+def test_core_check_reports_missing_keys_and_downed_containers():
+    import copy, home as home_mod
+    health = copy.deepcopy(CORE_OK)
+    health["tiers"]["nagatha"] = False
+    health["bridge"] = False                                   # the Claude Code bridge is optional: shown, not a fault
+    core = home_mod.core_check(_core_report(health, containers_ok=False))
+    assert core["verdict"] == "degraded"
+    assert any("Nagatha" in p for p in core["problems"]) and any("whisper is down" in p for p in core["problems"])
+    assert not any("bridge" in p.lower() for p in core["problems"])
+
+
+def test_core_check_trims_whatever_the_reporter_sends():
+    import home as home_mod
+    report = _core_report(CORE_OK)
+    report["services"][0]["status_detail"] = "x" * 5000
+    report["services"][0]["name"] = "n" * 500
+    core = home_mod.core_check(report)
+    assert len(core["services"][0]["detail"]) == 120 and len(core["services"][0]["name"]) == 40
+
+
+def test_me_shows_core_health_and_the_watcher_repeats_the_problems(env):
+    import copy, json
+    client, _, _ = env
+    token = _pair(client)
+    health = copy.deepcopy(CORE_OK)
+    health["ollama"].update(default="qwen3:8b", default_present=False)
+    client.post("/home/report", json=_core_report(health), headers={"Authorization": f"Bearer {token}"})
+    page = client.get("/me").data.decode()
+    assert "Core · skippy-tel" in page and "Degraded" in page and "API v1" in page
+    assert page.count("qwen3:8b") >= 2                        # in the Core widget and again in the Watcher
+    assert "Core: Skippy" in page and "Image Generator" in page
+    _add_friend(client, PAL, ["dragonwilds"])
+    login(client, PAL)
+    assert client.get("/me").status_code == 403               # a friend never sees it
+
+
 def test_bilby_is_a_grant_and_controls_are_admin_only(env):
     client, _, _ = env
     _add_friend(client, PAL, ["dragonwilds"])
@@ -973,6 +1115,7 @@ def test_ops_home_needs_the_deployers_google_token(env, monkeypatch):
     monkeypatch.setattr("google.oauth2.id_token.verify_oauth2_token", fake_verify)
     data = client.get("/ops/home", headers={"Authorization": "Bearer t"}).get_json()
     assert seen["aud"] == auth.OPS_AUDIENCE and data["paired"] is False and data["online"] is False
+    assert data["core"] == {"verdict": "unknown", "problems": []}          # `ops home` sees the core's verdict too
     monkeypatch.setattr("google.oauth2.id_token.verify_oauth2_token",
                         lambda *a, **k: {"email": "someone@evil.example", "email_verified": True})
     assert client.get("/ops/home", headers={"Authorization": "Bearer t"}).status_code == 401
@@ -1066,3 +1209,373 @@ def test_bilby_art_is_always_served_as_an_image(env):
     client.post("/home/report", json=report, headers={"Authorization": f"Bearer {token}"})
     r = client.get("/bilby/art")
     assert r.mimetype == "image/jpeg" and r.headers["X-Content-Type-Options"] == "nosniff"
+
+
+# ── local capabilities in the portal chat: music made on skippy-pc ────────────
+
+def _advertise(client, token, **caps):
+    """skippy-pc's report with its capabilities, as the home reporter sends it."""
+    body = {"status": {}, "services": [],
+            "capabilities": {name: {"ready": ready} for name, ready in caps.items()}}
+    return client.post("/home/report", json=body, headers={"Authorization": f"Bearer {token}"})
+
+
+def _reporter(app, token, handler):
+    """Play skippy-pc's home reporter: poll the portal for jobs and answer them, on a thread."""
+    import threading, time
+    stop = threading.Event()
+    client, headers = app.test_client(), {"Authorization": f"Bearer {token}"}
+
+    def loop():
+        while not stop.is_set():
+            for job in client.get("/home/jobs", headers=headers).get_json()["jobs"]:
+                handler(client, headers, job)
+            time.sleep(0.02)
+    threading.Thread(target=loop, daemon=True).start()
+    return stop
+
+
+def _music_app():
+    skippy = FakeSkippy()
+    app = portal.create_app(dict(SETTINGS), vm=FakeVm(), skippy=skippy)
+    client = app.test_client()
+    token = _pair(client)                                            # logs in as the admin
+    _advertise(client, token, make_music=True)
+    return app, client, token, skippy
+
+
+def _tool_names(skippy):
+    return [t["name"] for t in skippy.tools]
+
+
+def test_only_known_capabilities_count_and_only_while_home_is_reporting():
+    import home as home_mod
+    now = [1000.0]
+    h = home_mod.Home(vm=None, clock=lambda: now[0])
+    assert h.capabilities() == {} and h.can("make_music") is False                     # no report yet
+    h.accept({"capabilities": {"make_music": {"ready": True}, "format_c_drive": {"ready": True}}})
+    assert h.capabilities() == {"make_music": True}                                    # unknown names are ignored
+    assert h.can("make_music") and not h.can("format_c_drive")
+    h.accept({"capabilities": {"make_music": {"ready": "yes"}}})
+    assert h.can("make_music") is False                                                # only a real True counts
+    h.accept({"capabilities": "lots"})
+    assert h.capabilities() == {}                                                      # malformed: nothing
+    h.accept({"capabilities": {"make_music": {"ready": True}}})
+    now[0] += home_mod.STALE_AFTER + 1
+    assert h.capabilities() == {}                                                      # a silent home offers nothing
+
+
+def test_a_long_job_can_be_started_looked_at_and_finished_without_being_consumed():
+    import home as home_mod
+    now = [1000.0]
+    h = home_mod.Home(vm=None, clock=lambda: now[0])
+    job = h.start("make_music", owner="aaron@example.com", prompt="lofi")
+    assert h.owner_of(job) == "aaron@example.com" and h.owner_of("nope") is None
+    assert h.peek(job) == {"state": "running", "age_s": 0} and h.peek("nope") == {"state": "unknown"}
+    assert h.wait_result(job, 0)["state"] == "running"
+    assert h.finish(job, {"result": {"seconds": 30}})
+    assert h.peek(job) == h.peek(job) == {"state": "done", "result": {"seconds": 30}}   # peeking doesn't consume it
+    failed = h.start("make_music", prompt="x")
+    h.finish(failed, {"error": "GPU out of memory"})
+    assert h.peek(failed) == {"state": "error", "error": "GPU out of memory"}
+    assert h.owner_of(failed) == ""
+
+
+def test_music_is_offered_to_the_admin_only_and_only_while_home_says_it_can(env):
+    client, _, skippy = env
+    token = _pair(client)
+    for who, ready, expected in ((ADMIN, False, False), (ADMIN, True, True), (FRIEND, True, False)):
+        _advertise(client, token, make_music=ready)
+        login(client, who)
+        client.post("/chat/send", json={"message": "hi"})
+        names = _tool_names(skippy)
+        assert ("make_music" in names and "music_result" in names) is expected, (who, ready)
+
+
+def test_the_admin_prompt_knows_about_music_and_a_friends_does_not():
+    assert "Music is made at home" in chat.system_prompt("Aaron", is_admin=True)
+    assert "Music is made at home" not in chat.system_prompt("Pal", is_admin=False)
+
+
+def test_admin_makes_music_end_to_end_and_hears_it():
+    app, client, token, skippy = _music_app()
+    jobs = []
+
+    def skippy_pc(c, headers, job):
+        jobs.append(job)
+        c.put(f"/home/media/{job['id']}?title=lofi", data=b"ID3fake-mp3-bytes",
+              headers={**headers, "Content-Type": "audio/mpeg"})
+        c.post(f"/home/jobs/{job['id']}", json={"result": {"title": job["prompt"], "seconds": 30}}, headers=headers)
+
+    stop = _reporter(app, token, skippy_pc)
+    try:
+        skippy.reply = lambda system, messages, tools=None, run_tool=None, **_: (
+            run_tool("make_music", {"prompt": "  dreamy lofi beat, rain, 80 bpm  ", "lyrics": "", "duration_s": 5000}) and "Here you go.")
+        data = client.post("/chat/send", json={"message": "make me a lofi beat"}).get_json()
+    finally:
+        stop.set()
+    assert data["reply"] == "Here you go." and data["tools"] == ["make_music"]
+    assert len(jobs) == 1 and jobs[0]["kind"] == "make_music"
+    assert jobs[0]["prompt"] == "dreamy lofi beat, rain, 80 bpm" and jobs[0]["duration_s"] == 120   # trimmed, clamped
+    (clip,) = data["media"]
+    assert clip["kind"] == "audio" and clip["url"] == f"/chat/media/{jobs[0]['id']}" and clip["seconds"] == 30
+    played = client.get(clip["url"])
+    assert played.status_code == 200 and played.data == b"ID3fake-mp3-bytes" and played.mimetype == "audio/mpeg"
+    assert played.headers["X-Content-Type-Options"] == "nosniff" and "no-store" in played.headers["Cache-Control"]
+    part = client.get(clip["url"], headers={"Range": "bytes=0-2"})                 # so the player can seek
+    assert part.status_code == 206 and part.data == b"ID3"
+
+
+def test_a_clip_is_private_to_whoever_asked_for_it_and_admins(env):
+    app, client, token, skippy = _music_app()
+
+    def skippy_pc(c, headers, job):
+        c.put(f"/home/media/{job['id']}", data=b"ID3x", headers={**headers, "Content-Type": "audio/mpeg"})
+        c.post(f"/home/jobs/{job['id']}", json={"result": {"seconds": 5}}, headers=headers)
+
+    stop = _reporter(app, token, skippy_pc)
+    try:
+        skippy.reply = lambda system, messages, tools=None, run_tool=None, **_: run_tool("make_music", {"prompt": "x"}) and "ok"
+        url = client.post("/chat/send", json={"message": "music"}).get_json()["media"][0]["url"]
+    finally:
+        stop.set()
+    friend = app.test_client()
+    login(friend, FRIEND)
+    assert friend.get(url).status_code == 404                                      # not 403: it isn't confirmed to exist
+    assert app.test_client().get(url).status_code == 302                           # signed out: to the login page
+    assert client.get(url).status_code == 200
+
+
+def test_the_media_upload_is_only_for_skippy_pc_and_only_for_a_job_we_are_waiting_on():
+    app, client, token, skippy = _music_app()
+    home = app.extensions["home"]
+    job = home.start("make_music", owner=ADMIN, prompt="x")
+    auth_h = {"Authorization": f"Bearer {token}", "Content-Type": "audio/mpeg"}
+    url = f"/home/media/{job}"
+    assert client.put(url, data=b"ID3", headers={"Content-Type": "audio/mpeg"}).status_code == 401        # no token
+    assert client.put(url, data=b"ID3", headers={**auth_h, "Authorization": "Bearer nope"}).status_code == 401
+    assert client.put("/home/media/nosuchjob", data=b"ID3", headers=auth_h).status_code == 404            # nobody's waiting
+    assert client.put(url, data=b"<script>", headers={**auth_h, "Content-Type": "text/html"}).status_code == 415
+    assert client.put(url, data=b"", headers=auth_h).status_code == 400
+    assert client.put(url, data=b"ID3", headers=auth_h).status_code == 200
+
+
+def test_the_upload_size_cap_is_enforced_by_the_server(monkeypatch):
+    import media
+    monkeypatch.setattr(media, "MAX_ONE", 10)
+    app, client, token, _ = _music_app()
+    job = app.extensions["home"].start("make_music", owner=ADMIN, prompt="x")
+    resp = client.put(f"/home/media/{job}", data=b"x" * 50,
+                      headers={"Authorization": f"Bearer {token}", "Content-Type": "audio/mpeg"})
+    assert resp.status_code == 413
+
+
+def test_a_song_that_isnt_ready_says_so_and_music_result_finds_it_later(monkeypatch):
+    import chat_tools
+    monkeypatch.setattr(chat_tools, "MUSIC_WAIT_S", 0.05)                          # don't hold the chat hostage
+    app, client, token, skippy = _music_app()
+    home = app.extensions["home"]
+    seen = {}
+
+    def first(system, messages, tools=None, run_tool=None, **_):
+        seen["first"] = run_tool("make_music", {"prompt": "slow blues"})
+        return "It's cooking."
+    skippy.reply = first
+    data = client.post("/chat/send", json={"message": "a slow blues"}).get_json()
+    started = json.loads(seen["first"])
+    assert started["status"] == "running" and started["job_id"] and data["media"] == []
+    job_id = started["job_id"]
+    home.finish(job_id, {"result": {"title": "slow blues", "seconds": 42}})         # skippy-pc finishes, later
+    client.put(f"/home/media/{job_id}", data=b"ID3late",
+               headers={"Authorization": f"Bearer {token}", "Content-Type": "audio/mpeg"})
+
+    skippy.reply = lambda system, messages, tools=None, run_tool=None, **_: (
+        seen.update(second=run_tool("music_result", {"job_id": job_id})) or "Ready.")
+    data = client.post("/chat/send", json={"message": "is it done?"}).get_json()
+    assert json.loads(seen["second"])["status"] == "done"
+    assert data["media"][0]["url"] == f"/chat/media/{job_id}" and client.get(data["media"][0]["url"]).data == b"ID3late"
+
+
+def test_a_failed_song_is_reported_plainly_and_a_gone_one_is_not_a_crash():
+    import chat_tools
+    app, client, token, skippy = _music_app()
+    home = app.extensions["home"]
+    out = {}
+
+    def ask(system, messages, tools=None, run_tool=None, **_):
+        for label, args, name in (("fail", {"prompt": "x"}, "make_music"), ("gone", {"job_id": "deadbeef"}, "music_result"),
+                                  ("empty", {"prompt": "  "}, "make_music")):
+            try:
+                out[label] = run_tool(name, args)
+            except chat_tools.ToolError as exc:
+                out[label] = "ERR " + str(exc)
+        return "ok"
+    skippy.reply = ask
+    stop = _reporter(app, token, lambda c, h, job: c.post(f"/home/jobs/{job['id']}", json={"error": "GPU out of memory"}, headers=h))
+    try:
+        client.post("/chat/send", json={"message": "music"})
+    finally:
+        stop.set()
+    assert out["fail"].startswith("ERR Music failed: GPU out of memory")
+    assert out["gone"].startswith("ERR That music job is gone")
+    assert out["empty"].startswith("ERR make_music needs a style description")
+
+
+def test_the_music_verb_with_nothing_after_it_asks_instead_of_forcing_an_empty_tool_call():
+    app, client, token, skippy = _music_app()
+    client.post("/chat/send", json={"message": "/music"})
+    assert skippy.force_tool is None and "what kind of music" in skippy.seen[1][-1]["content"]
+    client.post("/chat/send", json={"message": "/music a sea shanty"})
+    assert skippy.force_tool == "make_music" and skippy.seen[1][-1]["content"] == "a sea shanty"
+
+
+# ── Experiments: one inventory of every simulation and demonstration ──────────
+
+DEMO_PAGES = ("/experiments/double-slit", "/experiments/nbody", "/experiments/weapon-vs-armor",
+              "/experiments/mentat", "/experiments/benchmark")
+
+
+def test_the_inventory_highlights_the_three_demos_and_lists_everything_else(env):
+    import re
+    client, _, _ = env
+    page = client.get("/experiments").data.decode()                             # public: signed out
+    featured = re.findall(r'class="tile featured"[^>]*data-tel="demo:([\w-]+)"', page)
+    assert featured == ["nbody", "double-slit", "weapon-vs-armor"]
+    for title in ("N-Body Shootout", "Double-Slit", "Weapon vs. Armor", "Mentat", "Radiance"):
+        assert title in page, title
+    assert 'id="find"' in page and 'aria-label="Filter by kind"' in page       # search + kind filters
+    assert page.count('class="chip"') == 6                                        # All + the five kinds that exist
+    assert len(re.findall(r'<a class="tile( featured)?"', page)) == 6            # every experiment is one tile: no duplicates
+    assert "Coming next" not in page                                              # the three it promised are here now
+
+
+def test_every_demo_is_public_and_wears_the_shared_chrome(env):
+    import re
+    client, _, _ = env
+    for url in DEMO_PAGES:
+        page = client.get(url).data.decode()
+        assert "&lsaquo; Experiments</a>" in page and ">Sign in</a>" in page, url    # the same app bar, signed out
+        assert '<body data-app="experiments">' in page, url
+        assert "<header><h1>" not in page, url                                       # nobody improvises a header
+        before_bar = page.rsplit("<body data-app=", 1)[1].split('<header class="appbar">', 1)[0].split(">", 1)[1]
+        stray = re.sub(r"<[^>]+>", "", before_bar).strip()
+        assert stray == "", (url, stray)                                             # no visible text (a stray label, a URL) above it
+        assert not re.search(r'<(script|link|img)[^>]+(src|href)="https?://', page), url   # no third-party requests
+    login(client, ADMIN)
+    signed_in = client.get("/experiments/double-slit").data.decode()
+    assert 'id="home-btn"' in signed_in and "&lsaquo; Home</a>" in signed_in        # and the phone chrome when signed in
+
+
+def test_the_double_slit_demo_keeps_its_simulation_and_its_controls(env):
+    client, _, _ = env
+    page = client.get("/experiments/double-slit").data.decode()
+    for needle in ('id="scatter"', 'id="theory-overlay"', 'id="histogram"', 'id="d-sl"', 'id="btn-play"',
+                   "requestAnimationFrame", "D² + V² ≤ 1"):
+        assert needle in page, needle
+    assert "{% raw %}" not in page and "{{" not in page.split("<script>")[0].split("<main")[1].replace("{{ ", "")   # rendered, not leaked
+
+
+def test_the_nbody_page_shows_the_scoreboard_including_what_doesnt_flatter_it(env):
+    client, _, _ = env
+    page = client.get("/experiments/nbody").data.decode()
+    assert "ΔE/E = 1.5×10⁻⁶" in page and "ΔL/L = 4×10⁻¹⁵" in page and "+178° (alive!)" in page
+    assert "±23° drift (needs J2)" in page and "Missing physics" in page              # the drift is in the table on purpose
+    assert "worst is Mercury at 74%" in page
+
+
+def test_the_weapon_vs_armor_page_does_not_pretend_to_be_playable_in_the_browser(env):
+    client, _, _ = env
+    page = client.get("/experiments/weapon-vs-armor").data.decode()
+    assert "isn't built yet" in page and "python run_weapon_vs_armor.py" in page
+    assert "26 presets" in page and "16 presets" in page and "No hit points" in page
+
+
+def test_the_result_figures_are_served_as_static_files(env):
+    client, _, _ = env
+    svg = client.get("/static/demos/nbody_results.svg")
+    assert svg.status_code == 200 and svg.mimetype == "image/svg+xml" and b"Scoreboard" in svg.data
+    assert client.get("/static/demos/nbody_errors.png").status_code == 200
+
+
+def test_kinds_only_appear_as_filters_when_something_has_them(env):
+    client, vm, _ = env
+    login(client, ADMIN)
+    for slug in ("mentat", "benchmark", "radiance"):                                # hide the tool, results and recorded ones
+        client.post("/me/experiments", data={"slug": slug})
+    client.get("/logout")
+    page = client.get("/experiments").data.decode()
+    assert 'data-kind="tool"' not in page.split('id="kinds"')[1].split("</div>")[0]  # no "Tools" chip with nothing behind it
+    assert "Live in your browser" in page
+
+
+def test_every_experiment_has_a_known_kind_and_a_page_that_exists(env):
+    import experiments
+    client, _, _ = env
+    for x in experiments.EXPERIMENTS:
+        assert x.kind in experiments.KINDS, x.slug
+        assert x.endpoint, x.slug
+    assert sum(x.featured for x in experiments.EXPERIMENTS) == 3
+
+
+# ── admin: set the games up automatically ─────────────────────────────────────
+
+def test_the_admin_can_set_every_game_up_automatically_with_one_join_password(env):
+    client, vm, _ = env
+    login(client, ADMIN)
+    resp = client.post("/admin/autoconfigure", data={"join_password": "groggy"}, follow_redirects=True)
+    page = resp.data.decode()
+    (call,) = [c for c in vm.calls if c[0] == "update_env"]
+    assert call[1]["VALHEIM_PASSWORD"] == "groggy" and call[1]["DRAGONWILDS_WORLD_PASSWORD"] == "groggy"
+    assert "Set up automatically" in page and "groggy" not in page.split("<form")[0]   # said in words; the value isn't in the message
+    assert "Restart the server to apply them" in page
+
+
+def test_setting_up_automatically_with_no_password_only_fills_blanks(env):
+    client, vm, _ = env
+    login(client, ADMIN)
+    vm.state.env.pop("VALHEIM_PASSWORD")
+    client.post("/admin/autoconfigure", data={"join_password": ""})
+    (call,) = [c for c in vm.calls if c[0] == "update_env"]
+    assert "VALHEIM_PASSWORD" in call[1] and len(call[1]["VALHEIM_PASSWORD"]) >= 5
+    assert "DRAGONWILDS_WORLD_PASSWORD" not in call[1]                                 # already set: untouched
+
+
+def test_a_bad_join_password_saves_nothing_and_says_why(env):
+    client, vm, _ = env
+    login(client, ADMIN)
+    page = client.post("/admin/autoconfigure", data={"join_password": "no"}, follow_redirects=True).data.decode()
+    assert "at least 5" in page and not [c for c in vm.calls if c[0] == "update_env"]
+
+
+def test_only_admins_can_set_the_games_up(env):
+    client, vm, _ = env
+    login(client, FRIEND)
+    assert client.post("/admin/autoconfigure", data={"join_password": "groggy"}).status_code == 403
+    assert not [c for c in vm.calls if c[0] == "update_env"]
+
+
+def test_the_admin_page_says_what_is_missing_and_offers_the_button(env):
+    client, vm, _ = env
+    login(client, ADMIN)
+    vm.state.env.pop("VALHEIM_PASSWORD")
+    page = client.get("/admin").data.decode()
+    assert "Set up automatically" in page and "Valheim needs a join password" in page
+    vm.state.env["VALHEIM_PASSWORD"] = "hunter22"
+    assert "Every game can start" in client.get("/admin").data.decode()
+
+
+def test_ops_configure_previews_by_default_and_writes_only_on_apply(env, capsys):
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+    import remote
+    _, vm, _ = env
+    vm.state.env.pop("VALHEIM_PASSWORD")
+    assert remote.configure(vm, [], dict(vm.state.env)) == 0
+    assert "PREVIEW" in capsys.readouterr().out and not [c for c in vm.calls if c[0] == "update_env"]   # nothing written
+    assert remote.configure(vm, ["apply", "groggy"], dict(vm.state.env)) == 0
+    out = capsys.readouterr().out
+    assert "APPLIED" in out and "groggy" not in out.replace("::add-mask::groggy", "")                 # keys, never values
+    (call,) = [c for c in vm.calls if c[0] == "update_env"]
+    assert call[1]["VALHEIM_PASSWORD"] == "groggy"
+    assert remote.configure(vm, ["apply", "x"], dict(vm.state.env)) == 1                              # refused, and says so

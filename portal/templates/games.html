@@ -1,5 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Servers — Skippy Portal{% endblock %}
+{% block title %}Games — Skippy Portal{% endblock %}
+{% block app %}games{% endblock %}
+{% block head %}
+{# The themed game titles use the games' own fonts; only this page and the game pages load them. #}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Titillium+Web:wght@700&family=Rajdhani:wght@700&display=swap" rel="stylesheet">
+{% endblock %}
 {% block content %}
 <section>
   <h2>Game servers</h2>
@@ -23,7 +30,7 @@
     {% for id, game in games.items() %}
       {% set on = running and id in status.games %}
       <div class="card" id="{{ id }}" {% if game.theme %}style="border-left: 4px solid {{ game.theme.accent }}"{% endif %}>
-        <h3><a href="{{ url_for('dashboard.game', gid=id) }}" style="color:inherit">{{ game.name }}</a>
+        <h3><a href="{{ url_for('dashboard.game', gid=id) }}" style="color:inherit{% if game.theme %};font-family:'{{ game.theme.font }}',serif;text-shadow:0 0 12px {{ game.theme.accent }}{% endif %}">{{ game.name }}</a>
           {% if on %}<span class="dot green" title="running"></span>{% endif %}
           <a href="{{ url_for('dashboard.game', gid=id) }}" style="font-size:.8rem;font-weight:normal">open &rarr;</a></h3>
         <p>{{ game.description }}</p>
@@ -82,15 +89,5 @@
       <p>The server is changing state — refresh in a minute.</p>
     {% endif %}
   {% endif %}
-</section>
-
-<section>
-  <h2>Services</h2>
-  {% for svc in services %}
-    <div class="card">
-      <h3><a href="{{ svc.url }}">{{ svc.name }}</a></h3>
-      <p>{{ svc.description }}</p>
-    </div>
-  {% endfor %}
 </section>
 {% endblock %}

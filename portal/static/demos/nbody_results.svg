@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 820" font-family="Courier New, monospace">
+  <rect width="700" height="820" fill="#0a0a12"/>
+
+  <!-- Title -->
+  <text x="350" y="30" fill="#00d4ff" font-size="15" text-anchor="middle" font-weight="bold">N-Body vs Keplerian — 26-Year Accuracy Benchmark</text>
+  <text x="350" y="48" fill="#666" font-size="10" text-anchor="middle">Jovian System played forward from J2000.0 | dt=600s | 1.38M steps</text>
+
+  <!-- CHART 1: Position Error vs Time -->
+  <text x="30" y="80" fill="#00d4ff" font-size="11" font-weight="bold">Position Divergence (N-Body vs Keplerian)</text>
+
+  <!-- Chart area -->
+  <rect x="60" y="90" width="600" height="180" fill="#111" stroke="#333" rx="3"/>
+
+  <!-- Y axis labels -->
+  <text x="55" y="100" fill="#666" font-size="8" text-anchor="end">2.2M km</text>
+  <text x="55" y="145" fill="#666" font-size="8" text-anchor="end">1.5M km</text>
+  <text x="55" y="190" fill="#666" font-size="8" text-anchor="end">0.7M km</text>
+  <text x="55" y="265" fill="#666" font-size="8" text-anchor="end">0 km</text>
+
+  <!-- X gridlines -->
+  <line x1="60" y1="267" x2="660" y2="267" stroke="#333" stroke-width="0.5"/>
+  <line x1="60" y1="220" x2="660" y2="220" stroke="#222" stroke-width="0.5" stroke-dasharray="2,4"/>
+  <line x1="60" y1="178" x2="660" y2="178" stroke="#222" stroke-width="0.5" stroke-dasharray="2,4"/>
+  <line x1="60" y1="135" x2="660" y2="135" stroke="#222" stroke-width="0.5" stroke-dasharray="2,4"/>
+  <line x1="60" y1="92" x2="660" y2="92" stroke="#222" stroke-width="0.5" stroke-dasharray="2,4"/>
+
+  <!-- X axis labels (years) -->
+  <text x="60" y="280" fill="#666" font-size="8" text-anchor="middle">0</text>
+  <text x="175" y="280" fill="#666" font-size="8" text-anchor="middle">5y</text>
+  <text x="290" y="280" fill="#666" font-size="8" text-anchor="middle">10y</text>
+  <text x="405" y="280" fill="#666" font-size="8" text-anchor="middle">15y</text>
+  <text x="520" y="280" fill="#666" font-size="8" text-anchor="middle">20y</text>
+  <text x="640" y="280" fill="#666" font-size="8" text-anchor="middle">26y</text>
+
+  <!-- Io: 0→216k→356k→675k→593k→844k→587k→31k→170k (oscillates!) -->
+  <!-- Scale: 2.2M km = top(92), 0 = bottom(267). Pixels per M km = 175/2.2 = 79.5 -->
+  <polyline points="60,267 83,249 106,238 175,220 290,198 405,220 520,265 640,253"
+            fill="none" stroke="#ff4444" stroke-width="2"/>
+
+  <!-- Europa: 0→75k→278k→461k→975k→1339k→754k→262k→1279k -->
+  <polyline points="60,267 83,261 106,245 175,230 290,160 405,183 520,246 640,165"
+            fill="none" stroke="#44aaff" stroke-width="2"/>
+
+  <!-- Ganymede: 0→23k→45k→70k→200k→365k→549k→712k→927k -->
+  <polyline points="60,267 83,265 106,263 175,251 290,238 405,224 520,210 640,194"
+            fill="none" stroke="#44ff44" stroke-width="2"/>
+
+  <!-- Callisto: 0→45k→91k→181k→446k→894k→1311k→1738k→2196k -->
+  <polyline points="60,267 83,263 106,260 175,253 290,196 405,162 520,129 640,92"
+            fill="none" stroke="#ffaa44" stroke-width="2"/>
+
+  <!-- Legend -->
+  <circle cx="80" cy="295" r="4" fill="#ff4444"/><text x="90" y="298" fill="#ff4444" font-size="9">Io</text>
+  <circle cx="130" cy="295" r="4" fill="#44aaff"/><text x="140" y="298" fill="#44aaff" font-size="9">Europa</text>
+  <circle cx="200" cy="295" r="4" fill="#44ff44"/><text x="210" y="298" fill="#44ff44" font-size="9">Ganymede</text>
+  <circle cx="290" cy="295" r="4" fill="#ffaa44"/><text x="300" y="298" fill="#ffaa44" font-size="9">Callisto</text>
+
+  <!-- CHART 2: Laplace Resonance -->
+  <text x="30" y="330" fill="#00d4ff" font-size="11" font-weight="bold">Laplace Resonance Angle (should stay ~180°)</text>
+
+  <rect x="60" y="340" width="600" height="130" fill="#111" stroke="#333" rx="3"/>
+
+  <!-- Reference line at 180° -->
+  <line x1="60" y1="390" x2="660" y2="390" stroke="#666" stroke-width="1" stroke-dasharray="4,4"/>
+  <text x="55" y="393" fill="#666" font-size="8" text-anchor="end">180°</text>
+  <text x="55" y="348" fill="#666" font-size="8" text-anchor="end">200°</text>
+  <text x="55" y="465" fill="#666" font-size="8" text-anchor="end">150°</text>
+
+  <!-- N-body Laplace: 170→-166(194)→-172(188)→168→166→-174(186)→166→178 -->
+  <!-- Scale: 150°=bottom(465), 200°=top(343). px per deg = 122/50 = 2.44 -->
+  <!-- 170=343+73=416, 194=343+15=358, 188=343+29=372, 168=343+78=421, 166=343+83=426, 186=343+34=377, 166=426, 178=343+54=397 -->
+  <polyline points="60,390 83,414 106,448 175,420 290,424 405,376 520,424 640,395"
+            fill="none" stroke="#00d4ff" stroke-width="2.5"/>
+
+  <!-- Keplerian Laplace: -177(183)→177(183)→179(181)→-177(183)→-178(182)→178(182)→-179(181)→-178(182) -->
+  <!-- All hover near 180-183, basically flat -->
+  <polyline points="60,390 83,387 106,387 175,383 290,385 405,385 520,387 640,385"
+            fill="none" stroke="#ff4444" stroke-width="1.5" stroke-dasharray="4,2"/>
+
+  <!-- Legend -->
+  <circle cx="80" cy="485" r="4" fill="#00d4ff"/><text x="90" y="488" fill="#00d4ff" font-size="9">N-Body (oscillates — resonance is ALIVE)</text>
+  <circle cx="400" cy="485" r="4" fill="#ff4444"/><text x="410" y="488" fill="#ff4444" font-size="9">Keplerian (flat — no interactions)</text>
+
+  <!-- SCOREBOARD -->
+  <text x="30" y="520" fill="#00d4ff" font-size="11" font-weight="bold">Scoreboard (after 26 years)</text>
+
+  <rect x="30" y="530" width="640" height="280" fill="#111" stroke="#333" rx="3"/>
+
+  <!-- Headers -->
+  <text x="50" y="555" fill="#888" font-size="10">Metric</text>
+  <text x="320" y="555" fill="#00d4ff" font-size="10">N-Body (ours)</text>
+  <text x="530" y="555" fill="#ff4444" font-size="10">Keplerian</text>
+
+  <line x1="40" y1="562" x2="660" y2="562" stroke="#333"/>
+
+  <!-- Row 1: Energy conservation -->
+  <text x="50" y="582" fill="#ccc" font-size="10">Energy conservation</text>
+  <text x="320" y="582" fill="#00ff88" font-size="10">ΔE/E = 1.5×10⁻⁶ ✓</text>
+  <text x="530" y="582" fill="#00ff88" font-size="10">Exact (analytical)</text>
+
+  <!-- Row 2: Angular momentum -->
+  <text x="50" y="605" fill="#ccc" font-size="10">Angular momentum</text>
+  <text x="320" y="605" fill="#00ff88" font-size="10">ΔL/L = 4×10⁻¹⁵ ✓</text>
+  <text x="530" y="605" fill="#00ff88" font-size="10">Exact (analytical)</text>
+
+  <!-- Row 3: Laplace resonance -->
+  <text x="50" y="628" fill="#ccc" font-size="10">Laplace resonance lock</text>
+  <text x="320" y="628" fill="#00ff88" font-size="10">+178° (alive!) ✓</text>
+  <text x="530" y="628" fill="#ff4444" font-size="10">N/A (no interactions)</text>
+
+  <!-- Row 4: Moon-moon perturbations -->
+  <text x="50" y="651" fill="#ccc" font-size="10">Moon-moon gravity</text>
+  <text x="320" y="651" fill="#00ff88" font-size="10">Yes — captured ✓</text>
+  <text x="530" y="651" fill="#ff4444" font-size="10">Ignored ✗</text>
+
+  <!-- Row 5: Orbital radii -->
+  <text x="50" y="674" fill="#ccc" font-size="10">Orbital radii stable</text>
+  <text x="320" y="674" fill="#00ff88" font-size="10">Within 2% ✓</text>
+  <text x="530" y="674" fill="#00ff88" font-size="10">Exact by definition</text>
+
+  <!-- Row 6: Phase accuracy -->
+  <text x="50" y="697" fill="#ccc" font-size="10">Phase accuracy (Io)</text>
+  <text x="320" y="697" fill="#ffcc00" font-size="10">±23° drift (needs J2)</text>
+  <text x="530" y="697" fill="#ff4444" font-size="10">Meaningless (no coupling)</text>
+
+  <!-- Row 7: Missing physics -->
+  <text x="50" y="720" fill="#ccc" font-size="10">Missing physics</text>
+  <text x="320" y="720" fill="#ffcc00" font-size="10">Jupiter J2, solar tides</text>
+  <text x="530" y="720" fill="#ff4444" font-size="10">All moon interactions</text>
+
+  <line x1="40" y1="735" x2="660" y2="735" stroke="#333"/>
+
+  <!-- Verdict -->
+  <text x="50" y="758" fill="#00ff88" font-size="11" font-weight="bold">VERDICT: N-Body captures real physics that Keplerian cannot.</text>
+  <text x="50" y="776" fill="#888" font-size="10">Next step: add Jupiter J2 oblateness to fix phase drift.</text>
+
+  <!-- Footer -->
+  <text x="350" y="808" fill="#444" font-size="8" text-anchor="middle">SSBM/MATERIA Engine — 1,377,792 timesteps — 199s wall time — all from CONSTANTS</text>
+</svg>

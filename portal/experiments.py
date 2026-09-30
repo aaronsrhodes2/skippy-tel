@@ -24,6 +24,16 @@ ROOT = Path(os.environ.get("EXPERIMENTS_DIR", Path(__file__).with_name("experime
 REPO = "https://github.com/aaronsrhodes2/sigma-ground"
 
 
+# How a demo is experienced: the inventory's filter chips and the pill on each tile.
+KINDS = {
+    "live": "Live in your browser",
+    "recorded": "Recorded simulations",
+    "results": "Results",
+    "tool": "Tools",
+    "local": "Runs on your computer",
+}
+
+
 @dataclass(frozen=True)
 class Experiment:
     slug: str
@@ -32,22 +42,45 @@ class Experiment:
     tags: tuple[str, ...]
     endpoint: str | None          # portal endpoint for the live demo, None = write-up only
     source: str                   # link to the code
+    kind: str = "live"            # a key of KINDS
+    featured: bool = False        # the big tiles at the top of the inventory
+    icon: str = "🧪"
 
 
 EXPERIMENTS = (
+    Experiment("nbody", "N-Body Shootout",
+               "Our N-body integrator against pure Keplerian orbits: 26 years of the Jovian system, 1.38 million "
+               "steps. Energy is conserved to 1.5×10⁻⁶ and angular momentum to 4×10⁻¹⁵, and the Laplace "
+               "resonance stays alive, which no Keplerian orbit can show.",
+               ("N-body", "Benchmark"), "experiments.nbody", "https://github.com/aaronsrhodes2/matter-shaper",
+               kind="results", featured=True, icon="🪐"),
+    Experiment("double-slit", "Double-Slit",
+               "Watch the Born rule build an interference pattern one particle at a time. Turn up the observer "
+               "strength D and the fringes fade: which-path information costs visibility, D² + V² ≤ 1.",
+               ("Quantum", "Simulation"), "experiments.double_slit", "https://github.com/aaronsrhodes2/matter-shaper",
+               kind="live", featured=True, icon="〰️"),
+    Experiment("weapon-vs-armor", "Weapon vs. Armor",
+               "No hit points and no tuning knobs: damage comes from thermodynamics, yield stress and bond "
+               "failure of the materials themselves, for kinetic, laser, plasma, explosive, particle and "
+               "gravitational weapons.",
+               ("Game", "Materials", "pygame"), "experiments.weapon_vs_armor", f"{REPO}/tree/master/games/weapon_vs_armor",
+               kind="local", featured=True, icon="🛡️"),
     Experiment("mentat", "Mentat — a Wolfram Alpha rival",
                "About 220 physics and maths tools with provenance on every number: units, constants, "
                "symbolic maths, mechanics, relativity, cosmology, optics, thermodynamics, circuits, "
                "chemistry, nuclear and materials. Try any of them live.",
-               ("Python", "MCP", "sympy", "scipy"), "experiments.mentat_page", f"{REPO}/tree/master/sigma_ground/mcp"),
+               ("Python", "MCP", "sympy", "scipy"), "experiments.mentat_page", f"{REPO}/tree/master/sigma_ground/mcp",
+               kind="tool", icon="🧮"),
     Experiment("benchmark", "Mentat vs Wolfram Alpha vs Gemini",
                "150 physics questions, from intro mechanics to relativity, scored against ground truth. A small local model "
                "driving Mentat's tools beats both.",
-               ("Evaluation",), "experiments.benchmark", f"{REPO}/tree/master/sigma_ground/mcp/benchmark"),
+               ("Evaluation",), "experiments.benchmark", f"{REPO}/tree/master/sigma_ground/mcp/benchmark",
+               kind="results", icon="📊"),
     Experiment("radiance", "Radiance — simulated physics, rendered",
                "sigma-ground's own WebGL2 raymarcher replaying recorded simulations: falling metals, a "
                "Mach 2 projectile, glowing iron, gear trains, a windmill, water with Fresnel reflection.",
-               ("WebGL2", "Simulation"), "experiments.radiance_index", f"{REPO}/tree/master/sigma_ground/radiance"),
+               ("WebGL2", "Simulation"), "experiments.radiance_index", f"{REPO}/tree/master/sigma_ground/radiance",
+               kind="recorded", icon="✨"),
 )
 
 # The benchmark runs worth showing, as committed in sigma-ground (no curation
@@ -62,6 +95,33 @@ ADVERSARIAL_RUNS = (
     ("Mentat", "adversarial_sigma_ground_scored.json", "mentat"),
     ("Wolfram Alpha", "adversarial_wolfram_scored.json", "wolfram"),
 )
+
+
+# The N-body shootout's scoreboard, verbatim from the recorded result (nbody_results.svg, 26-year Jovian run),
+# including the columns and rows that don't flatter it.
+NBODY_SCOREBOARD = (
+    ("Energy conservation", "ΔE/E = 1.5×10⁻⁶ ✓", "Exact (analytical)"),
+    ("Angular momentum", "ΔL/L = 4×10⁻¹⁵ ✓", "Exact (analytical)"),
+    ("Laplace resonance lock", "+178° (alive!) ✓", "N/A (no interactions)"),
+    ("Moon-moon gravity", "Yes: captured ✓", "Ignored ✗"),
+    ("Orbital radii stable", "Within 2% ✓", "Exact by definition"),
+    ("Phase accuracy (Io)", "±23° drift (needs J2)", "Meaningless (no coupling)"),
+    ("Missing physics", "Jupiter J2, solar tides", "All moon interactions"),
+)
+
+# Weapon vs. Armor: what's in the game (games/weapon_vs_armor/presets.py in sigma-ground; counts include the default).
+WEAPON_TOTAL, ARMOR_TOTAL = 26, 16
+WEAPON_EXAMPLES = ("Throwing spear", "Crossbow bolt", "Cannonball", "9 mm pistol", "AK-47", "M2 Browning",
+                   "30 mm armor-piercing", "RPG-7", "ATGM", "APFSDS sabot", "100 kW laser", "Megawatt laser",
+                   "Hypersonic railgun", "Relativistic railgun")
+ARMOR_EXAMPLES = ("Roman lorica", "Medieval plate", "WWII helmet", "NIJ IIIA vest", "NIJ IV plate", "Tank composite",
+                  "Reactive armor", "Bunker", "WWII battleship", "Aircraft fuselage", "Spacecraft hull",
+                  "Sci-fi light", "Sci-fi heavy")
+
+
+def inventory(items) -> dict:
+    """What experiments.html needs besides the items: the kinds, and which of them have anything in them."""
+    return {"experiments": items, "kinds": KINDS, "present": {x.kind for x in items}}
 
 
 HIDDEN_KEY = "portal-experiments"   # VM metadata: JSON list of hidden slugs (dashboard toggle)
@@ -128,8 +188,11 @@ def radiance_dir() -> Path:
 # with the scene library showing.
 RADIANCE_SHOWCASE_SNIPPET = """
 <style>#composer, #scroll, #mic { display:none !important; }</style>
-<div style="position:fixed;left:12px;bottom:10px;z-index:99;font:12px system-ui;color:#6a6a72">
-  Recorded sigma-ground simulations · <a href="/experiments" style="color:#00CCFF">← Experiments</a></div>
+<a href="/experiments" style="position:fixed;left:12px;top:10px;z-index:99;font:14px -apple-system,'Segoe UI',Roboto,sans-serif;
+   color:#00ffff;text-decoration:none;padding:8px 14px 8px 10px;border-radius:999px;background:#003322;border:1px solid #006644">&lsaquo; Experiments</a>
+<a href="/" aria-label="Home" title="Home" style="position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:99;width:46px;height:46px;
+   border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.3rem;text-decoration:none;color:#aa44ff;background:#050505;
+   border:1px solid #aa44ff">&#8962;</a>
 <script>
   window.addEventListener("load", () => {
     document.getElementById("open-viewer")?.click();

@@ -17,6 +17,12 @@ cloud copy (keywords only) serves the public playground, not the chat.
 
 Music: people with the Bilby grant get now_playing (what Bilby reports).
 
+Local capabilities: things skippy-pc's own hardware does, offered only while home
+advertises them (home.can) and tool_policy allows. Today make_music (ACE-Step on the
+Captain's GPU, admin only): it starts a job, waits a little, and if the song isn't ready
+says so; music_result looks in later. Finished audio rides back through media.py and
+shows in the chat as a player (self.media).
+
 Direct verbs: a message starting with "/physics", "/status", … forces that
 tool on the first step (see VERBS); the chat's badge panel inserts them.
 """
@@ -109,6 +115,31 @@ _NOW_PLAYING = {
     "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
 }
 
+_MAKE_MUSIC = {
+    "name": "make_music",
+    "description": "Compose a song or instrumental on the Captain's own GPU at home (ACE-Step): free, no "
+                   "tokens, about a minute. Give a compact style description (genre, mood, instruments, "
+                   "tempo) and, only if wanted, lyrics with [verse]/[chorus] markers; no lyrics = "
+                   "instrumental. The finished clip shows as a player under your reply. If it isn't ready "
+                   "yet the result says so: tell the user and use music_result later. Only when the user "
+                   "actually asks for music to be made.",
+    "input_schema": {"type": "object",
+                     "properties": {"prompt": {"type": "string", "description": "Style: genre, mood, instruments, tempo."},
+                                    "lyrics": {"type": "string", "description": "Optional lyrics; empty = instrumental."},
+                                    "duration_s": {"type": "integer", "minimum": 10, "maximum": 120,
+                                                   "description": "Seconds; default 45."}},
+                     "required": ["prompt"], "additionalProperties": False},
+}
+
+_MUSIC_RESULT = {
+    "name": "music_result",
+    "description": "Check on a song started earlier with make_music that wasn't ready when it returned.",
+    "input_schema": {"type": "object", "properties": {"job_id": {"type": "string"}},
+                     "required": ["job_id"], "additionalProperties": False},
+}
+
+MUSIC_WAIT_S = 100     # how long make_music holds the chat before saying "still working"
+
 # Direct verbs: "/verb …" at the start of a message forces that tool first.
 # (verb, tool, badge label, category)
 VERBS = (
@@ -119,6 +150,7 @@ VERBS = (
     ("logs", "server_logs", "Logs", "Game server"),
     ("physics", "ask_mentat", "Physics (Mentat)", "Physics"),
     ("playing", "now_playing", "Now playing", "Music"),
+    ("music", "make_music", "Make music", "Music"),
 )
 _VERB_RE = re.compile(r"^/([a-z]+)\b\s*(.*)$", re.S | re.I)
 
@@ -139,7 +171,7 @@ def parse_verb(message: str) -> tuple[str | None, str]:
 
 class ChatTools:
     def __init__(self, vm, is_admin: bool, visible: list[str] | None = None, who: str = "",
-                 music=None, home_mentat=None):
+                 music=None, home_mentat=None, home_music=None):
         self.vm, self.is_admin, self.who = vm, is_admin, who
         self.visible = list(GAMES) if visible is None else list(visible)   # games this person may see
         self.names = _ADMIN if is_admin else _EVERYONE
@@ -150,6 +182,9 @@ class ChatTools:
         self.home_mentat = home_mentat if tool_policy.allowed("mentat", is_admin) else None
         self.mentat_where: str | None = None  # "home" once a physics answer came back
         self.mentat_ok = bool(self.home_mentat)
+        # Local capabilities (home.py advertises them; tool_policy decides who may use them).
+        self.home_music = home_music if tool_policy.allowed("music_gen", is_admin) else None
+        self.media: list[dict] = []           # audio made this turn: the chat page plays it
 
     def available(self) -> list[str]:
         names = [n for n in self.names if n != "start_game" or self.visible]
@@ -157,6 +192,8 @@ class ChatTools:
             names.append("ask_mentat")
         if self.music:
             names.append("now_playing")
+        if self.home_music:
+            names += ["make_music", "music_result"]
         return names
 
     def badges(self) -> dict[str, list[dict]]:
@@ -181,6 +218,8 @@ class ChatTools:
             out.append(_ASK_MENTAT)
         if self.music:
             out.append(_NOW_PLAYING)
+        if self.home_music:
+            out += [_MAKE_MUSIC, _MUSIC_RESULT]
         return out
 
     def run(self, name: str, args: dict) -> str:
@@ -201,6 +240,43 @@ class ChatTools:
 
     def _now_playing(self, _args) -> dict:
         return self.music()
+
+    def _make_music(self, args) -> dict:
+        prompt = str(args.get("prompt") or "").strip()[:500]
+        if not prompt:
+            raise ToolError("make_music needs a style description (genre, mood, instruments).")
+        try:
+            seconds = int(args.get("duration_s") or 45)
+        except (TypeError, ValueError):
+            seconds = 45
+        job_id = self.home_music.start("make_music", owner=self.who, prompt=prompt,
+                                       lyrics=str(args.get("lyrics") or "").strip()[:3000],
+                                       duration_s=max(10, min(120, seconds)))
+        return self._music_status(job_id, MUSIC_WAIT_S)
+
+    def _music_result(self, args) -> dict:
+        job_id = str(args.get("job_id") or "")
+        owner = self.home_music.owner_of(job_id)
+        if owner is not None and owner != self.who and not self.is_admin:
+            raise ToolError("That isn't your music job.")
+        return self._music_status(job_id, 5)
+
+    def _music_status(self, job_id: str, wait: float) -> dict:
+        state = self.home_music.wait_result(job_id, wait)
+        if state["state"] == "done":
+            result = state["result"] if isinstance(state.get("result"), dict) else {}
+            if not any(m["job_id"] == job_id for m in self.media):
+                self.media.append({"kind": "audio", "job_id": job_id, "url": f"/chat/media/{job_id}",
+                                   "title": str(result.get("title") or "your track")[:80],
+                                   "seconds": result.get("seconds")})
+            return {"status": "done", "seconds": result.get("seconds"),
+                    "note": "The player appears under your reply. Don't paste a link."}
+        if state["state"] == "running":
+            return {"status": "running", "job_id": job_id, "waited_s": state.get("age_s"),
+                    "note": "Still generating on the Captain's GPU. Say so, and offer to check again with music_result."}
+        if state["state"] == "error":
+            raise ToolError(f"Music failed: {state['error']}. Say so plainly.")
+        raise ToolError("That music job is gone (it expired, or the portal restarted). Offer to make it again.")
 
     def _server_status(self, _args) -> dict:
         s = self.vm.status()

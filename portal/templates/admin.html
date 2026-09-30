@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Admin — Skippy Portal{% endblock %}
+{% block app %}admin{% endblock %}
 {% block content %}
 <section>
   <h2>Server</h2>
@@ -19,6 +20,24 @@
 </section>
 
 {% if status %}
+<section>
+  <h2>Set up automatically</h2>
+  <div class="card">
+    <p>Fills in every game setting that software can: a join password wherever a game needs one, admin passwords,
+      and the default names. It never overwrites anything that's already set.</p>
+    {% if needs %}<p class="warn">Right now: {% for g, problems in needs.items() %}{% for p in problems %}{{ p }} {% endfor %}{% endfor %}</p>
+    {% else %}<p>Every game can start: nothing is missing.</p>{% endif %}
+    <form method="post" action="{{ url_for('admin.autoconfigure') }}">
+      <label class="field" for="join_password">One join password for every game (optional)</label>
+      <input type="text" id="join_password" name="join_password" autocomplete="off"
+             placeholder="leave blank to only fill in what's missing">
+      <p class="help">Typing one replaces the join passwords of every game that has one (Valheim, Dragonwilds).
+        At least 5 characters. Applies the next time the server boots.</p>
+      <p><button type="submit">Set up automatically</button></p>
+    </form>
+  </div>
+</section>
+
 <section>
   <h2>Settings</h2>
   <form method="post" action="{{ url_for('admin.settings') }}">

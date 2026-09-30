@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 PORTAL = os.environ.get("PORTAL_URL", "https://skippy-portal-1015050363686.us-west1.run.app").rstrip("/")
@@ -28,6 +29,13 @@ FAST_INTERVAL = 1.5          # job polling while someone is chatting on the port
 IMPORTS_DIR = os.environ.get("IMPORTS_DIR", "/imports")      # game databases to carry to the VM
 CHUNK = 8 * 1024 * 1024      # Cloud Run caps a request at 32 MB
 ART_MAX = 400_000
+MUSIC = os.environ.get("MUSIC_URL", "").rstrip("/")           # music-studio on skippy-pc (ACE-Step on the GPU)
+OLLAMA = os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/")
+GPU = threading.Lock()       # one heavy GPU job at a time: a song and a chat model can't share the card
+MUSIC_TIMEOUT = 600          # seconds a song may take
+MUSIC_POLL = 2.0              # seconds between asking the studio how the song is coming
+MUSIC_MODEL = os.environ.get("MUSIC_MODEL", "acestep-v15-turbo")   # 8-step turbo model
+CLIP_MAX = 25_000_000        # the portal takes up to 30 MB; a request may be 32 MB
 
 
 def home_token() -> str:
@@ -71,6 +79,19 @@ def bilby_state() -> dict | None:
             "playing_a": deck == "a", "playing_b": deck == "b"}
 
 
+def core_health() -> dict | None:
+    """flask-api's /health, trimmed to what the dashboard's Core widget shows
+    (the model list already rides in `status`). None means the core didn't answer."""
+    h = fetch(f"{API}/health")
+    if not h:
+        return None
+    models = h.get("models") or {}
+    ollama = models.get("ollama") or {}
+    return {"status": h.get("status"), "spec_version": h.get("spec_version"),
+            "bridge": h.get("bridge"), "hung_tiers": h.get("hung_tiers"), "tiers": models.get("tiers"),
+            "ollama": {k: ollama.get(k) for k in ("available", "default", "default_present")}}
+
+
 def gather() -> dict:
     status = fetch(f"{API}/status.json", timeout=10)
     services = fetch(f"{API}/services") or {}
@@ -82,6 +103,7 @@ def gather() -> dict:
     up_next = fetch(f"{MAC}/bilby/next") if mac_up else None
     return {
         "status": status,
+        "health": core_health(),
         "services": [{k: s.get(k) for k in ("id", "name", "available", "status_detail")}
                      for s in services.get("services", [])],
         "music_session": {k: session.get(k) for k in
@@ -90,6 +112,7 @@ def gather() -> dict:
         "setlist": (setlist or [])[-20:],
         "up_next": (up_next or {}).get("track") if (up_next or {}).get("ok") else None,
         "mentat_home": bool(MENTAT) and _up(f"{MENTAT}/health"),
+        "capabilities": capabilities(),
     }
 
 
@@ -119,8 +142,89 @@ COMMANDS = {
 }
 
 
-def run_job(job: dict) -> dict:
-    """A job from the portal. ask_mentat → Mentat + Qwen here at home."""
+def capabilities() -> dict:
+    """What this PC can do for the portal's chat right now. The portal offers only what's ready."""
+    return {"make_music": {"ready": bool(MUSIC) and _up(f"{MUSIC}/health")}}
+
+
+def free_gpu() -> None:
+    """Ask Ollama to unload its models so a song gets the whole card (they reload on the next request)."""
+    for model in (fetch(f"{OLLAMA}/api/ps") or {}).get("models") or []:
+        fetch(f"{OLLAMA}/api/generate", "POST", {"model": model.get("name"), "keep_alive": 0}, timeout=30)
+
+
+def _download(url: str, limit: int) -> tuple[bytes, str]:
+    """GET a clip from the studio, refusing to read more than `limit` bytes."""
+    with urllib.request.urlopen(url, timeout=120) as r:
+        return r.read(limit + 1), r.headers.get_content_type()
+
+
+def make_music(job: dict, token: str) -> dict:
+    """ACE-Step's REST server (music-studio): release a task, poll it, fetch the mp3, and hand
+    the audio to the portal, which plays it in the chat."""
+    if not MUSIC:
+        return {"error": "music isn't set up on skippy-pc"}
+    try:
+        seconds = int(job.get("duration_s") or 45)
+    except (TypeError, ValueError):
+        seconds = 45
+    seconds = max(10, min(120, seconds))
+    prompt = str(job.get("prompt") or "")[:500]
+    ask = {"prompt": prompt, "lyrics": str(job.get("lyrics") or "").strip()[:3000] or "[Instrumental]",
+           "audio_duration": seconds, "inference_steps": 8, "batch_size": 1, "audio_format": "mp3",
+           "thinking": True, "use_random_seed": True, "model": MUSIC_MODEL}
+    with GPU:
+        free_gpu()
+        started = fetch(f"{MUSIC}/release_task", "POST", ask, timeout=30)
+        task = ((started or {}).get("data") or {}).get("task_id")
+        if not task:
+            return {"error": "the music studio didn't take the job" + ("" if started else " (no answer)")}
+        clip, deadline = None, time.time() + MUSIC_TIMEOUT
+        while time.time() < deadline:
+            time.sleep(MUSIC_POLL)
+            polled = fetch(f"{MUSIC}/query_result", "POST", {"task_id_list": [task]}, timeout=30)
+            items = (polled or {}).get("data") or []
+            item = items[0] if items and isinstance(items[0], dict) else None
+            if not item or item.get("status") == 0:
+                continue                                    # not there yet (or one missed poll)
+            try:
+                parts = json.loads(item.get("result") or "[]")
+            except ValueError:
+                parts = []
+            first = parts[0] if parts and isinstance(parts[0], dict) else {}
+            if item.get("status") == 1 and first.get("file"):
+                clip = first
+                break
+            return {"error": str(first.get("error") or "the music studio couldn't make that song")[:200]}
+        if clip is None:
+            return {"error": f"the song took longer than {MUSIC_TIMEOUT // 60} minutes"}
+        file = str(clip["file"])
+        url = MUSIC + (file if file.startswith("/v1/audio") else "/v1/audio?path=" + urllib.parse.quote(file, safe=""))
+        try:
+            audio, ctype = _download(url, CLIP_MAX)
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"couldn't fetch the song from the music studio: {e}"}
+    if len(audio) > CLIP_MAX:
+        return {"error": "the clip came out too big to send"}
+    title = prompt[:60]
+    up = urllib.request.Request(f"{PORTAL}/home/media/{job.get('id')}?title={urllib.parse.quote(title)}", data=audio,
+                                method="PUT", headers={"Content-Type": ctype, "Authorization": f"Bearer {token}"})
+    try:
+        with urllib.request.urlopen(up, timeout=120) as r:
+            r.read()
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"couldn't hand the clip to the portal: {e}"}
+    try:
+        length = round(float((clip.get("metas") or {}).get("duration") or seconds), 1)
+    except (TypeError, ValueError):
+        length = float(seconds)
+    return {"result": {"title": title, "seconds": length}}
+
+
+def run_job(job: dict, token: str = "") -> dict:
+    """A job from the portal. ask_mentat → Mentat + Qwen here at home; make_music → the music studio."""
+    if job.get("kind") == "make_music":
+        return make_music(job, token)
     if job.get("kind") == "ask_mentat" and MENTAT:
         reply = fetch(f"{MENTAT}/ask", "POST", {"question": job.get("question", "")}, timeout=100)
         if reply and reply.get("ok"):
@@ -156,7 +260,7 @@ class Jobs:
 
     def _run(self, job: dict) -> None:
         try:
-            outcome = run_job(job)
+            outcome = run_job(job, self.token)
             self._post(f"/home/jobs/{job['id']}", outcome)
         except Exception as e:  # noqa: BLE001 — the portal times out and falls back
             print(f"home-reporter: job {job.get('id')} failed: {e}", flush=True)

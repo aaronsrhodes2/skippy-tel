@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Your dashboard — Skippy Portal{% endblock %}
+{% block app %}dashboard{% endblock %}
 {% block head %}
 <style>
   main { max-width: 1100px; }
@@ -37,9 +38,30 @@
           <div class="bar"><div class="{{ 'hot' if res.disk_pct > 80 }}" style="width: {{ res.disk_pct }}%"></div></div>{% endif %}
         {% endif %}
         <div class="row">
-          <a class="btn" href="{{ url_for('dashboard.index') }}">Server room</a>
+          <a class="btn" href="{{ url_for('dashboard.index') }}">Games</a>
           <a class="btn" href="{{ url_for('admin.logs') }}">Logs</a>
         </div>
+      {% endif %}
+    </div>
+
+    <div class="w">
+      <h3>Core · skippy-tel</h3>
+      {% if core.verdict == 'unknown' %}
+        <p class="muted">No core health from home yet. It shows here once the home reporter (re)starts with the latest code.</p>
+      {% else %}
+        <p class="big">
+          {% if core.verdict == 'ok' %}<span style="color: var(--green)">Healthy</span>
+          {% elif core.verdict == 'degraded' %}<span class="warn">Degraded</span>
+          {% else %}<span style="color: var(--red)">Down</span>{% endif %}
+          <span class="muted">{% if core.api_version %}API v{{ core.api_version }} · {% endif %}{% if home.online %}last report {{ home.age }} s ago{% else %}<span class="warn">stale: home is silent</span>{% endif %}</span>
+        </p>
+        {% for p in core.problems %}<p class="warn">⚠ {{ p }}</p>{% endfor %}
+        {% if core.tiers %}<p class="muted">Tiers:
+          {% for t in core.tiers %}<span style="color: {{ 'var(--green)' if t.ok else 'var(--red)' }}">{{ '●' if t.ok else '○' }}</span> {{ t.name }}{{ ' · ' if not loop.last }}{% endfor %}</p>{% endif %}
+        <details><summary class="muted">All {{ core.services | length }} services</summary>
+          <table>{% for s in core.services %}<tr><td><span style="color: {{ 'var(--green)' if s.available else 'var(--red)' }}">{{ '●' if s.available else '○' }}</span>
+            {{ s.name }}</td><td class="muted">{{ s.detail or ('up' if s.available else 'down') }}</td></tr>{% endfor %}</table>
+        </details>
       {% endif %}
     </div>
 
@@ -59,8 +81,6 @@
         <table>
           {% for s in st.services or [] %}<tr><td><span style="color: {{ 'var(--green)' if s.ok else 'var(--red)' }}">{{ '●' if s.ok else '○' }}</span>
             {{ s.name }}</td><td class="muted">{{ s.detail }}</td></tr>{% endfor %}
-          {% for s in home.services if s.id in ('bilby', 'ups', 'jellyfin') %}<tr><td><span style="color: {{ 'var(--green)' if s.available else 'var(--red)' }}">{{ '●' if s.available else '○' }}</span>
-            {{ s.name or s.id }}</td><td class="muted">{{ s.status_detail or ('up' if s.available else 'down') }}</td></tr>{% endfor %}
         </table>
         {% if st.ups %}{% set u = st.ups %}
           <p class="{{ '' if u.on_ac else 'warn' }}">⚡ {{ 'On AC' if u.on_ac else 'ON BATTERY' }} · {{ u.charge }}% ·
@@ -123,6 +143,12 @@
         </form>
       {% endfor %}
       <p><a href="{{ url_for('experiments.index') }}">View public page &rarr;</a></p>
+    </div>
+
+    <div class="w">
+      <h3>Home links</h3>
+      <p class="muted">Only reachable from your own devices on the mesh (Tailscale), so they live here, not on the friends' pages.</p>
+      {% for svc in services %}<p><a href="{{ svc.url }}">{{ svc.name }}</a> <span class="muted">{{ svc.description }}</span></p>{% endfor %}
     </div>
 
     <div class="w">

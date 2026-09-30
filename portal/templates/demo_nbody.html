@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}N-Body Shootout — Experiments{% endblock %}
+{% block app %}experiments{% endblock %}
+{% block public_up %}{{ url_for('experiments.index') }}{% endblock %}
+{% block head %}
+<style>
+  .scoreboard td:first-child { color: var(--ink); }
+  .scoreboard .ours { color: var(--green); }
+  .scoreboard .theirs { color: var(--muted); }
+  .figure { margin: 18px 0; }
+  .figure img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; background: #0a0a12; }
+  .figure figcaption { margin-top: 6px; }
+  .verdict { border-left: 3px solid var(--accent); padding: 8px 14px; background: var(--panel); border-radius: 0 8px 8px 0; margin: 14px 0; }
+  .scroll { overflow-x: auto; }
+</style>
+{% endblock %}
+{% block content %}
+<section>
+  <p>A head-to-head. Both integrators start from the same Jovian system at J2000.0 and play it forward 26 years:
+    <b>N-body</b> (every moon pulls on every other, 600 s steps, 1.38 million of them) against <b>Keplerian</b> orbits
+    (each moon on its own ellipse, no interactions). Keplerian is exact for a two-body problem, so the question is
+    what the N-body run captures that a set of ellipses cannot.</p>
+
+  <h2>Scoreboard after 26 years</h2>
+  <div class="scroll">
+  <table class="scoreboard">
+    <tr><th>Metric</th><th>N-body (ours)</th><th>Keplerian</th></tr>
+    {% for metric, ours, theirs in scoreboard %}
+      <tr><td>{{ metric }}</td><td class="ours">{{ ours }}</td><td class="theirs">{{ theirs }}</td></tr>
+    {% endfor %}
+  </table>
+  </div>
+  <p class="verdict"><b>Verdict.</b> N-body captures real physics that Keplerian cannot. <b>Next step:</b> add Jupiter's J2
+    oblateness to fix the phase drift.</p>
+
+  <figure class="figure">
+    <a href="{{ url_for('static', filename='demos/nbody_results.svg') }}" title="Open full size"><img src="{{ url_for('static', filename='demos/nbody_results.svg') }}" alt="Position divergence between the N-body and Keplerian runs for Europa, Ganymede and Callisto over 26 years, the Laplace resonance angle, and the scoreboard"></a>
+    <figcaption class="help">Tap a figure to open it full size. Left to right: how far the N-body and Keplerian positions diverge for Europa, Ganymede and Callisto;
+      the Laplace resonance angle, which oscillates in the N-body run (the resonance is alive) and is flat in the Keplerian one.</figcaption>
+  </figure>
+
+  <h2>Accuracy against tolerance</h2>
+  <figure class="figure">
+    <a href="{{ url_for('static', filename='demos/nbody_errors.png') }}" title="Open full size"><img src="{{ url_for('static', filename='demos/nbody_errors.png') }}" alt="Bar chart of the N-body propagation position error for 26 bodies, each against its tolerance"></a>
+    <figcaption class="help">Position error per body after propagating J2015.0 back to J2000.0 (run 8335f32). Each dashed box is that
+      body's tolerance and the percentage is how much of it the error uses. Every body finishes inside its tolerance;
+      the worst is Mercury at 74%, and the Galilean moons are the hardest of the rest.</figcaption>
+  </figure>
+
+  <p class="help">These are recorded results from the <a href="https://github.com/aaronsrhodes2/sigma-ground">sigma-ground</a>
+    physics work, shown as they were produced: the drift and the missing physics are in the table on purpose.</p>
+</section>
+{% endblock %}

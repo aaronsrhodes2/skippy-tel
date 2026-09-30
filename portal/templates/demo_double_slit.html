@@ -1,0 +1,491 @@
+{% extends "base.html" %}
+{% block title %}Double-Slit — Experiments{% endblock %}
+{% block app %}experiments{% endblock %}
+{% block public_up %}{{ url_for('experiments.index') }}{% endblock %}
+{% block mainclass %}wide{% endblock %}
+{% block head %}
+<style>
+  .ds-scene { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; align-items: flex-start; }
+  .ds-scene canvas { display: block; background: #000; border: 1px solid var(--line); max-width: 100%; height: auto; }
+  .scatter-wrap { position: relative; display: inline-block; max-width: 100%; }
+  .scatter-wrap canvas { width: 100%; }
+  #theory-overlay { position: absolute; top: 0; left: 0; pointer-events: none; }
+  .stats-row { display: flex; flex-wrap: wrap; gap: 6px 22px; font-family: var(--mono); font-size: .8rem; color: var(--muted);
+               padding: 8px 0; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
+  .stat-val { color: var(--white); }
+  .ctl-row { display: grid; grid-template-columns: minmax(120px, 190px) 1fr 3.2em; gap: 10px; align-items: center;
+             font-size: .85rem; margin: 8px 0; }
+  .ctl-row .row-val { text-align: right; font-family: var(--mono); color: var(--ink); }
+  .buttons { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+  .buttons button.active { background: var(--accent); color: var(--black); }
+  .englert-row { display: flex; align-items: center; gap: 10px; font-size: .85rem; flex-wrap: wrap; }
+  .englert-bg { flex: 1; min-width: 120px; height: 10px; background: #020504; border: 1px solid var(--line); position: relative; overflow: hidden; }
+  .bar-d { position: absolute; left: 0; top: 0; height: 100%; background: var(--amber); transition: width .15s; }
+  .bar-v { position: absolute; top: 0; height: 100%; background: var(--cyan); transition: left .15s, width .15s; }
+</style>
+{% endblock %}
+{% block content %}
+<section>
+  <p>Each dot is one particle landing on the screen. The interference pattern is not in any single dot: it builds up
+    statistically, exactly as the Born rule says. Turn up the observer strength <b>D</b> and which-path information grows
+    while fringe visibility <b>V</b> falls, obeying Englert's bound <b>D² + V² ≤ 1</b>. The cyan curve is the theoretical |ψ(y)|².</p>
+
+  <div class="ds-scene">
+    <div class="scatter-wrap">
+      <canvas id="scatter"        width="260" height="660"></canvas>
+      <canvas id="theory-overlay" width="260" height="660"></canvas>
+    </div>
+    <canvas id="histogram" width="340" height="660"></canvas>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="stats-row">
+      <span>N = <span class="stat-val" id="ndisp">0</span></span>
+      <span>λ_e = <span class="stat-val" id="ldisp">—</span> nm</span>
+      <span>Δy = <span class="stat-val" id="dydisp">—</span> mm</span>
+      <span>V (local) = <span class="stat-val" id="vdisp">—</span></span>
+      <span>D = <span class="stat-val" id="ddisp">0.00</span></span>
+    </div>
+
+    <div class="ctl-row">
+      <label for="d-sl">Observer strength <b>D</b></label>
+      <input type="range" id="d-sl" min="0" max="1" step="0.01" value="0">
+      <span class="row-val" id="d-lbl">0.00</span>
+    </div>
+    <div class="ctl-row">
+      <label for="spd-sl">Speed (particles / frame)</label>
+      <input type="range" id="spd-sl" min="1" max="300" value="15">
+      <span class="row-val" id="spd-lbl">15</span>
+    </div>
+
+    <div class="buttons">
+      <button id="btn-play">▶ Play</button>
+      <button id="btn-pause">⏸ Pause</button>
+      <button id="btn-rewind">⏮ Rewind</button>
+      <button id="btn-d0">↺ D = 0</button>
+      <button id="btn-d1">↺ D = 1</button>
+    </div>
+
+    <div class="englert-row">
+      <span style="color:var(--amber)">D²</span><span>+</span><span style="color:var(--cyan)">V²</span><span>≤ 1</span>
+      <div class="englert-bg">
+        <div class="bar-d" id="bar-d" style="width:0%"></div>
+        <div class="bar-v" id="bar-v" style="left:0%;width:100%"></div>
+      </div>
+      <span id="englert-val" class="muted" style="min-width:90px;text-align:right">D²+V² = —</span>
+    </div>
+  </div>
+
+  <p class="help"><b>Moving the D slider</b> means choosing a different experimental setup and restarting: not time travel. Each
+    particle still collapses to one point; only the statistics change, and the Born rule holds throughout.
+    Constants from the cascade: ℏ = 1.0546×10⁻³⁴ J·s, c = 2.9979×10⁸ m/s, e = 1.6022×10⁻¹⁹ C, m_e = 0.5110 MeV. No magic numbers.</p>
+  <p class="help">Part of the <a href="https://github.com/aaronsrhodes2/sigma-ground">sigma-ground</a> physics work.
+    The simulation runs entirely in your browser; nothing is sent anywhere.</p>
+</section>
+<script>
+{% raw %}// ══════════════════════════════════════════════════════════════════
+//  CASCADE CONSTANTS  (mirrors local_library/constants.py exactly)
+// ══════════════════════════════════════════════════════════════════
+const HBAR           = 1.054571817e-34;   // J·s
+const C_LIGHT        = 2.99792458e8;      // m/s
+const E_CHARGE       = 1.602176634e-19;   // C
+const M_ELECTRON_MEV = 0.51099895;        // MeV
+const H_PLANCK       = 2 * Math.PI * HBAR;
+const MEV_TO_KG      = E_CHARGE * 1e6 / (C_LIGHT * C_LIGHT);
+const M_ELECTRON_KG  = M_ELECTRON_MEV * MEV_TO_KG;
+
+// ── Scene parameters (match simulate_double_slit.py) ──────────────
+const E_EV     = 1.0;
+const D_SLIT   = 100e-9;
+const A_SLIT   = 20e-9;
+const L_SCREEN = 0.10;
+const Y_HALF   = 15e-3;
+
+// ── Derived ────────────────────────────────────────────────────────
+const E_J    = E_EV * E_CHARGE;
+const LAMBDA = H_PLANCK / Math.sqrt(2 * M_ELECTRON_KG * E_J);
+const K_WAVE = 2 * Math.PI / LAMBDA;
+const DELTA_Y  = LAMBDA * L_SCREEN / D_SLIT;
+const ENV_ZERO = LAMBDA * L_SCREEN / A_SLIT;
+
+document.getElementById('ldisp').textContent  = (LAMBDA * 1e9).toFixed(4);
+document.getElementById('dydisp').textContent = (DELTA_Y * 1e3).toFixed(4);
+
+// ══════════════════════════════════════════════════════════════════
+//  SEEDED PRNG — mulberry32
+// ══════════════════════════════════════════════════════════════════
+function makePRNG(seed) {
+  return function () {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  PHYSICS
+// ══════════════════════════════════════════════════════════════════
+function intensity(y, D) {
+  const r1 = Math.sqrt(L_SCREEN * L_SCREEN + (y - D_SLIT / 2) ** 2);
+  const r2 = Math.sqrt(L_SCREEN * L_SCREEN + (y + D_SLIT / 2) ** 2);
+  const A1 = 1 / Math.sqrt(r1);
+  const A2 = 1 / Math.sqrt(r2);
+  // Difference-of-squares identity — numerically stable (avoids k×L ~ 5×10⁸)
+  const delta_r    = -2 * y * D_SLIT / (r1 + r2);
+  const delta_phase = K_WAVE * delta_r;
+  const coherence  = Math.sqrt(Math.max(0, 1 - D * D));
+  let I = (A1*A1 + A2*A2) + 2 * coherence * A1 * A2 * Math.cos(delta_phase);
+  // Single-slit sinc² envelope — Fraunhofer
+  const sinTh   = y / Math.sqrt(L_SCREEN * L_SCREEN + y * y);
+  const sArg    = Math.PI * A_SLIT * sinTh / LAMBDA;
+  const sinc2   = Math.abs(sArg) < 1e-12 ? 1.0 : (Math.sin(sArg) / sArg) ** 2;
+  return Math.max(0, I * sinc2);
+}
+
+const N_CDF = 3000;
+function buildCDF(D) {
+  const ys  = new Float64Array(N_CDF);
+  const Is  = new Float64Array(N_CDF);
+  const cdf = new Float64Array(N_CDF);
+  for (let i = 0; i < N_CDF; i++) {
+    ys[i] = -Y_HALF + (2 * Y_HALF) * i / (N_CDF - 1);
+    Is[i] = intensity(ys[i], D);
+  }
+  cdf[0] = 0;
+  for (let i = 1; i < N_CDF; i++)
+    cdf[i] = cdf[i-1] + 0.5 * (Is[i] + Is[i-1]) * (ys[i] - ys[i-1]);
+  const tot = cdf[N_CDF - 1];
+  for (let i = 0; i < N_CDF; i++) cdf[i] /= tot;
+  return { ys, Is, cdf };
+}
+
+function sample(cd, rng) {
+  const r = rng();
+  let lo = 0, hi = N_CDF - 1;
+  while (lo < hi - 1) {
+    const mid = (lo + hi) >> 1;
+    if (cd.cdf[mid] < r) lo = mid; else hi = mid;
+  }
+  const den = cd.cdf[hi] - cd.cdf[lo];
+  const t   = den < 1e-14 ? 0.5 : (r - cd.cdf[lo]) / den;
+  return cd.ys[lo] + t * (cd.ys[hi] - cd.ys[lo]);
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  CANVAS SETUP
+// ══════════════════════════════════════════════════════════════════
+const SC = document.getElementById('scatter');
+const OV = document.getElementById('theory-overlay');
+const HI = document.getElementById('histogram');
+const sc = SC.getContext('2d');
+const ov = OV.getContext('2d');
+const hi = HI.getContext('2d');
+
+const SW = SC.width, SH = SC.height;
+const HW = HI.width, HH = HI.height;
+
+function yToRow(y)  { return (0.5 - y / (2 * Y_HALF)) * (SH - 1); }
+function yToRowH(y) { return (0.5 - y / (2 * Y_HALF)) * HH; }
+
+// ══════════════════════════════════════════════════════════════════
+//  HISTOGRAM STATE
+// ══════════════════════════════════════════════════════════════════
+const N_BINS    = 220;
+let   binCounts = new Int32Array(N_BINS);
+
+function binOf(y) {
+  return Math.max(0, Math.min(N_BINS - 1,
+    Math.floor((y + Y_HALF) / (2 * Y_HALF) * N_BINS)));
+}
+function binY(i) { return -Y_HALF + (i + 0.5) * (2 * Y_HALF) / N_BINS; }
+
+// ══════════════════════════════════════════════════════════════════
+//  DRAWING
+// ══════════════════════════════════════════════════════════════════
+function clearScatter() {
+  sc.fillStyle = '#000000';
+  sc.fillRect(0, 0, SW, SH);
+  drawGuides();
+}
+
+function drawGuides() {
+  sc.globalCompositeOperation = 'source-over';
+  // Fringe-peak rows
+  for (let k = -6; k <= 6; k++) {
+    const yf = k * DELTA_Y;
+    if (Math.abs(yf) > Y_HALF) continue;
+    const row = yToRow(yf);
+    sc.strokeStyle = 'rgba(0,255,255,0.16)';
+    sc.lineWidth = 0.5;
+    sc.beginPath(); sc.moveTo(0, row); sc.lineTo(SW, row); sc.stroke();
+  }
+  // Envelope zeros
+  for (const yf of [-ENV_ZERO, ENV_ZERO]) {
+    if (Math.abs(yf) > Y_HALF) continue;
+    const row = yToRow(yf);
+    sc.strokeStyle = 'rgba(255,170,0,0.18)';
+    sc.lineWidth = 0.5;
+    sc.setLineDash([4, 4]);
+    sc.beginPath(); sc.moveTo(0, row); sc.lineTo(SW, row); sc.stroke();
+    sc.setLineDash([]);
+  }
+  // Y-axis ticks
+  sc.font = '8px Courier New';
+  for (let mm = -12; mm <= 12; mm += 4) {
+    const row = yToRow(mm * 1e-3);
+    sc.fillStyle = 'rgba(0,102,68,0.7)';
+    sc.fillRect(0, row, 16, 1);
+    sc.fillStyle = 'rgba(0,140,90,0.75)';
+    sc.fillText(`${mm}`, 1, row - 1);
+  }
+}
+
+function addParticle(y) {
+  const row = Math.round(yToRow(y));
+  const col = Math.floor(Math.random() * SW);
+  sc.globalCompositeOperation = 'lighter';
+  const g = sc.createRadialGradient(col, row, 0, col, row, 2.2);
+  g.addColorStop(0, 'rgba(184,255,224,0.50)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  sc.fillStyle = g;
+  sc.beginPath();
+  sc.arc(col, row, 2.2, 0, Math.PI * 2);
+  sc.fill();
+  sc.globalCompositeOperation = 'source-over';
+}
+
+function drawTheory(cd) {
+  ov.clearRect(0, 0, SW, SH);
+  let maxI = 0;
+  for (let i = 0; i < cd.Is.length; i++) if (cd.Is[i] > maxI) maxI = cd.Is[i];
+  if (maxI === 0) return;
+  const barW = 50; // px, NOT_PHYSICS display only
+  // Filled area
+  ov.beginPath();
+  ov.moveTo(SW, yToRow(cd.ys[0]));
+  for (let i = 0; i < cd.ys.length; i++)
+    ov.lineTo(SW - barW * cd.Is[i] / maxI, yToRow(cd.ys[i]));
+  ov.lineTo(SW, yToRow(cd.ys[cd.ys.length - 1]));
+  ov.closePath();
+  ov.fillStyle = 'rgba(0,255,255,0.06)';
+  ov.fill();
+  // Curve
+  ov.beginPath();
+  for (let i = 0; i < cd.ys.length; i++) {
+    const x = SW - barW * cd.Is[i] / maxI, y = yToRow(cd.ys[i]);
+    i === 0 ? ov.moveTo(x, y) : ov.lineTo(x, y);
+  }
+  ov.strokeStyle = 'rgba(0,255,255,0.50)';
+  ov.lineWidth = 1.1;
+  ov.stroke();
+}
+
+function drawHistogram(cd) {
+  hi.fillStyle = '#000000';
+  hi.fillRect(0, 0, HW, HH);
+
+  let maxC = 1;
+  for (let i = 0; i < N_BINS; i++) if (binCounts[i] > maxC) maxC = binCounts[i];
+
+  const barArea = HW - 90;
+
+  // Bars
+  const bh = HH / N_BINS;
+  for (let i = 0; i < N_BINS; i++) {
+    const f = binCounts[i] / maxC;
+    const bw = f * barArea;
+    const y0 = i * bh;
+    const r = Math.round(0   + f * 180);
+    const g = Math.round(40  + f * 215);
+    const b = Math.round(20  + f * 150);
+    hi.fillStyle = `rgb(${r},${g},${b})`;
+    hi.fillRect(88, y0 + 0.3, bw, Math.max(bh - 0.3, 0.4));
+  }
+
+  // Theory curve
+  let maxI = 0;
+  for (let i = 0; i < cd.Is.length; i++) if (cd.Is[i] > maxI) maxI = cd.Is[i];
+  if (maxI > 0) {
+    hi.beginPath();
+    for (let i = 0; i < cd.ys.length; i++) {
+      const x = 88 + (cd.Is[i] / maxI) * barArea;
+      const y = yToRowH(cd.ys[i]);
+      i === 0 ? hi.moveTo(x, y) : hi.lineTo(x, y);
+    }
+    hi.strokeStyle = 'rgba(0,255,255,0.65)';
+    hi.lineWidth = 1.4;
+    hi.stroke();
+  }
+
+  // Y labels
+  hi.font = '8.5px Courier New';
+  hi.textAlign = 'right';
+  for (let mm = -12; mm <= 12; mm += 4) {
+    const yp = yToRowH(mm * 1e-3);
+    hi.fillStyle = 'rgba(0,200,110,0.85)';
+    hi.fillText(`${mm}mm`, 84, yp + 3);
+    hi.strokeStyle = 'rgba(0,80,50,0.4)';
+    hi.lineWidth = 0.4;
+    hi.beginPath(); hi.moveTo(86, yp); hi.lineTo(HW, yp); hi.stroke();
+  }
+
+  // Fringe guides
+  for (let k = -6; k <= 6; k++) {
+    const yf = k * DELTA_Y;
+    if (Math.abs(yf) > Y_HALF) continue;
+    const yp = yToRowH(yf);
+    hi.strokeStyle = 'rgba(0,255,255,0.18)';
+    hi.lineWidth = 0.5;
+    hi.beginPath(); hi.moveTo(88, yp); hi.lineTo(HW, yp); hi.stroke();
+  }
+
+  // Legend
+  hi.textAlign = 'left';
+  hi.font = '8.5px Courier New';
+  hi.fillStyle = 'rgba(0,255,255,0.65)';
+  hi.fillText('── |ψ(y)|² theory', 92, 13);
+  hi.fillStyle = 'rgba(0,255,136,0.55)';
+  hi.fillText('   particle hits', 92, 24);
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  VISIBILITY MEASUREMENT (local contrast, matches Python verify)
+// ══════════════════════════════════════════════════════════════════
+function measureV() {
+  const hw = DELTA_Y * 0.2;
+  let pk = 0, vl = 0;
+  for (let i = 0; i < N_BINS; i++) {
+    const y = binY(i);
+    if (Math.abs(y) < hw)                          pk += binCounts[i];
+    if (Math.abs(Math.abs(y) - DELTA_Y/2) < hw)    vl += binCounts[i];
+  }
+  if (pk + vl === 0) return null;
+  return (pk - vl) / (pk + vl);
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════════════════════
+let D       = 0.0;
+let cd      = buildCDF(D);
+let rng     = makePRNG(42);
+let nFired  = 0;
+let playing = false;
+let animId  = null;
+const MAX_N = 30000;
+
+function reset(newD) {
+  D  = newD;
+  cd = buildCDF(D);
+  rng    = makePRNG(42);
+  nFired = 0;
+  binCounts = new Int32Array(N_BINS);
+  clearScatter();
+  drawTheory(cd);
+  drawHistogram(cd);
+  updateStats();
+}
+
+function updateStats() {
+  document.getElementById('ndisp').textContent = nFired.toLocaleString();
+  document.getElementById('ddisp').textContent = D.toFixed(2);
+  const V   = measureV();
+  const Vs  = V === null ? '—' : V.toFixed(3);
+  document.getElementById('vdisp').textContent = Vs;
+
+  const D2  = D * D;
+  const V2  = V !== null ? Math.min(1 - D2, V * V) : Math.max(0, 1 - D2);
+  document.getElementById('bar-d').style.width  = (D2 * 100).toFixed(1) + '%';
+  document.getElementById('bar-v').style.left   = (D2 * 100).toFixed(1) + '%';
+  document.getElementById('bar-v').style.width  = (V2 * 100).toFixed(1) + '%';
+  const sum = D2 + V2;
+  document.getElementById('englert-val').textContent = 'D²+V²=' + sum.toFixed(3);
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  ANIMATION
+// ══════════════════════════════════════════════════════════════════
+let frameCount = 0;
+function step() {
+  if (!playing) return;
+  const spd = parseInt(document.getElementById('spd-sl').value);
+  for (let i = 0; i < spd && nFired < MAX_N; i++) {
+    const y = sample(cd, rng);
+    addParticle(y);
+    binCounts[binOf(y)]++;
+    nFired++;
+  }
+  frameCount++;
+  if (frameCount % 4 === 0) {
+    drawHistogram(cd);
+    updateStats();
+  }
+  if (nFired >= MAX_N) {
+    playing = false;
+    drawHistogram(cd); updateStats();
+    document.getElementById('btn-play').classList.remove('active');
+    return;
+  }
+  animId = requestAnimationFrame(step);
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  CONTROLS
+// ══════════════════════════════════════════════════════════════════
+document.getElementById('d-sl').addEventListener('input', function () {
+  const newD = parseFloat(this.value);
+  document.getElementById('d-lbl').textContent = newD.toFixed(2);
+  const wasPlaying = playing;
+  playing = false; cancelAnimationFrame(animId);
+  reset(newD);
+  if (wasPlaying) { playing = true; document.getElementById('btn-play').classList.add('active'); frameCount = 0; animId = requestAnimationFrame(step); }
+});
+
+document.getElementById('spd-sl').addEventListener('input', function () {
+  document.getElementById('spd-lbl').textContent = this.value;
+});
+
+document.getElementById('btn-play').addEventListener('click', function () {
+  if (nFired >= MAX_N) reset(D);
+  playing = true; frameCount = 0;
+  this.classList.add('active');
+  document.getElementById('btn-pause').classList.remove('active');
+  animId = requestAnimationFrame(step);
+});
+
+document.getElementById('btn-pause').addEventListener('click', function () {
+  playing = false; cancelAnimationFrame(animId);
+  this.classList.add('active');
+  document.getElementById('btn-play').classList.remove('active');
+  drawHistogram(cd); updateStats();
+});
+
+document.getElementById('btn-rewind').addEventListener('click', function () {
+  playing = false; cancelAnimationFrame(animId);
+  document.getElementById('btn-play').classList.remove('active');
+  document.getElementById('btn-pause').classList.remove('active');
+  reset(D);
+});
+
+document.getElementById('btn-d0').addEventListener('click', function () {
+  playing = false; cancelAnimationFrame(animId);
+  document.getElementById('d-sl').value = '0';
+  document.getElementById('d-lbl').textContent = '0.00';
+  document.getElementById('btn-play').classList.remove('active');
+  reset(0.0);
+});
+
+document.getElementById('btn-d1').addEventListener('click', function () {
+  playing = false; cancelAnimationFrame(animId);
+  document.getElementById('d-sl').value = '1';
+  document.getElementById('d-lbl').textContent = '1.00';
+  document.getElementById('btn-play').classList.remove('active');
+  reset(1.0);
+});
+
+// ── Init ──────────────────────────────────────────────────────────
+reset(0.0);
+{% endraw %}
+</script>
+{% endblock %}

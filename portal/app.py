@@ -8,15 +8,18 @@ Local run:  FLASK_APP=app.py flask run   (needs every var in .env.example)
 from __future__ import annotations
 
 import base64
+import io
 import json
 import re
 from functools import wraps
+from pathlib import Path
 
 from flask import (Blueprint, Flask, abort, flash, jsonify, redirect, render_template, request, send_file,
                    send_from_directory, url_for)
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import auth
+import autoconfig
 import chat
 import chat_tools
 import config
@@ -27,13 +30,14 @@ import experiments
 import friends as friends_mod
 import home as home_mod
 import imports as imports_mod
+import media as media_mod
 import mentat_client
 import ops
 import spend
 import ratelimit
 import tasks
 import watch
-from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, PORTALS, SERVICES
+from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, PORTALS, SERVICES, missing_settings
 from gcp import GamesVm
 
 
@@ -62,6 +66,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     MENTAT_PER_MIN = 10
     CHAT_PER_HOUR, SHARP_PER_HOUR = 60, 20      # any model / "thinking cap" (Sonnet)
     imports = imports or imports_mod.Imports(vm)
+    media = media_mod.Media()
 
     def me() -> str:
         return auth.current_user()["email"]
@@ -118,15 +123,21 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     # ── dashboard: everyone on the allowlist ───────────────────────────────────
     dash = Blueprint("dashboard", __name__)
 
-    @dash.get("/dashboard")
+    @dash.get("/games")
     @auth.login_required
     def index():
+        """The Games app: server state, Stop, and a card per game. (Was /dashboard, "Servers" and the
+        launcher's game tiles and "Server room" tile: one place now.)"""
         status, error = vm_status()
         return render_template(
-            "dashboard.html", status=status, error=error, games=my_games(), services=SERVICES,
+            "games.html", status=status, error=error, games=my_games(),
             links={g: discord_admin.links(status.env if status else {}, g) for g in my_games()},
             codes=live_info(status)[0],
         )
+
+    @dash.get("/dashboard")
+    def legacy_dashboard():
+        return redirect(url_for("dashboard.index"), 301)      # old bookmarks and links
 
     @dash.post("/games/start")
     @auth.login_required
@@ -202,6 +213,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             bot_configured=bool(app.config["DISCORD_BOT_TOKEN"]),
             friends=friend_rows(status), portals=PORTALS,
             core=sorted(app.config["ALLOWED_EMAILS"]),
+            needs={g: m for g in GAMES if status and (m := missing_settings(g, status.env))},
         )
 
     def friend_rows(status) -> list[dict]:
@@ -240,6 +252,21 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         if updates:
             vm.update_env(updates)
             flash("Settings saved. Restart the server to apply them.", "ok")
+        return back("admin.index")
+
+    @admin.post("/autoconfigure")
+    @auth.admin_required
+    def autoconfigure():
+        """Fill in every game's settings that software can fill in (autoconfig.py). Values never appear in the
+        message; a join password typed here replaces the existing ones, left blank it only fills blanks."""
+        try:
+            plan = autoconfig.plan(vm.status().env, GAMES, join_password=request.form.get("join_password") or None)
+        except autoconfig.PlanError as exc:
+            flash(str(exc), "error")
+            return back("admin.index")
+        if plan.set:
+            vm.update_env(plan.set)
+        flash(plan.summary() + (" Restart the server to apply them." if plan.set else ""), "ok")
         return back("admin.index")
 
     @admin.post("/friends")
@@ -331,6 +358,22 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                                   request.args.get("sha256", ""), request.get_data(), request.url_root)
         except imports_mod.ImportError_ as exc:
             return jsonify(error=str(exc), **exc.extra), exc.status
+        return jsonify(out)
+
+    @app.put("/home/media/<job_id>")
+    def home_media(job_id):
+        """skippy-pc handing over a finished job's audio (media.py): only for a job the portal is waiting on."""
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        owner = home.owner_of(job_id)
+        if owner is None:
+            return jsonify(error="no such job"), 404
+        request.max_content_length = media_mod.MAX_ONE
+        try:
+            out = media.put(job_id, request.get_data(cache=False), (request.mimetype or "").lower(),
+                            owner=owner, title=request.args.get("title", ""))
+        except media_mod.MediaError as exc:
+            return jsonify(error=str(exc)), exc.status
         return jsonify(out)
 
     @app.get("/games/<name>/import")
@@ -458,8 +501,11 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 snap = ""
         res = diagnostics.resources(snap) if snap else {}
         warnings = watch.warnings(vm, snap, res)
+        core = home.core()
         if home.paired() and home.age() is not None and not home.online():
             warnings.append(f"skippy-pc has been silent for {home.age() // 60} min (power, network or the reporter).")
+        elif home.online():                     # a silent home's last report is stale; the line above says so
+            warnings += [f"Core: {p}" for p in core["problems"]]
         try:
             mentat_tools = len(mentat.tools()) if mentat else None
         except mentat_client.MentatError:
@@ -475,7 +521,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             friends=friends_list, chatter=discord_chatter(env),
             discord_ready=bool(app.config["DISCORD_BOT_TOKEN"]),
             experiments=experiments.EXPERIMENTS, hidden=experiments.hidden(vm), mentat_tools=mentat_tools,
-            home=home.status(), music=home.music(),
+            home=home.status(), music=home.music(), core=core, services=SERVICES,
         )
 
     @mine.post("/pair-home")
@@ -504,8 +550,24 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     @lab.get("")
     def index():
-        return render_template("experiments.html", experiments=experiments.visible(vm),
-                               bench=experiments.benchmark())
+        return render_template("experiments.html", bench=experiments.benchmark(),
+                               **experiments.inventory(experiments.visible(vm)))
+
+    @lab.get("/double-slit")
+    def double_slit():
+        return render_template("demo_double_slit.html")
+
+    @lab.get("/nbody")
+    def nbody():
+        return render_template("demo_nbody.html", scoreboard=experiments.NBODY_SCOREBOARD)
+
+    @lab.get("/weapon-vs-armor")
+    def weapon_vs_armor():
+        shot = Path(app.static_folder) / "demos" / "weapon_vs_armor.png"
+        return render_template("demo_weapon_vs_armor.html", screenshot=shot.exists(),
+                               weapons=experiments.WEAPON_EXAMPLES, weapon_total=experiments.WEAPON_TOTAL,
+                               armors=experiments.ARMOR_EXAMPLES, armor_total=experiments.ARMOR_TOTAL,
+                               source="https://github.com/aaronsrhodes2/sigma-ground/tree/master/games/weapon_vs_armor")
 
     @lab.get("/mentat")
     def mentat_page():
@@ -552,8 +614,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             return redirect(url_for("experiments.radiance_index", **clean))
         page = experiments.radiance_dir() / "index.html"
         if not page.exists():
-            return render_template("experiments.html", experiments=experiments.EXPERIMENTS,
-                                   bench=experiments.benchmark(), missing="Radiance"), 503
+            return render_template("experiments.html", bench=experiments.benchmark(), missing="Radiance",
+                                   **experiments.inventory(experiments.EXPERIMENTS)), 503
         html = page.read_text(encoding="utf-8")
         return html.replace("</body>", experiments.RADIANCE_SHOWCASE_SNIPPET + "</body>", 1)
 
@@ -586,7 +648,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         return chat_tools.ChatTools(vm, is_admin=auth.is_admin(email), visible=auth.visible_games(email),
                                     who=email,
                                     music=home.music if auth.has_portal(email, "bilby") else None,
-                                    home_mentat=home if home.mentat_ready() else None)
+                                    home_mentat=home if home.mentat_ready() else None,
+                                    home_music=home if home.can("make_music") else None)
 
     @talk.get("/badges")
     @skippy_required
@@ -621,7 +684,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         home.touch_chat()
         force, rest = chat_tools.parse_verb(message)
         if force and not rest:
-            rest = {"ask_mentat": "(the user chose /physics with no question: ask what to compute)"
+            rest = {"ask_mentat": "(the user chose /physics with no question: ask what to compute)",
+                    "make_music": "(the user chose /music with no description: ask what kind of music to make)"
                     }.get(force, "Go ahead.")
         try:
             admin = auth.is_admin(user["email"])
@@ -637,8 +701,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 return tools.run(name, args)
 
             schemas = tools.schemas()
-            if force == "ask_mentat" and rest.startswith("(the user chose"):
-                force = None                     # nothing to ask yet: let Skippy ask for the question
+            if force in ("ask_mentat", "make_music") and rest.startswith("(the user chose"):
+                force = None                     # nothing to act on yet: let Skippy ask
             text = skippy.reply(prompt,
                                 chat.build_messages(body.get("history"), rest),
                                 tools=schemas, run_tool=run_tool, model=model, force_tool=force)
@@ -649,7 +713,20 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         # One line per reply in Cloud Run's logs: who, which model, which tools (never the text).
         print(json.dumps({"event": "chat", "user": user["email"], "model": model,
                           "tools": used, "mentat_available": mentat_on, "mentat_where": where}), flush=True)
-        return jsonify(reply=text, model=badge, tools=used, mentat_available=mentat_on, mentat_where=where)
+        return jsonify(reply=text, model=badge, tools=used, mentat_available=mentat_on, mentat_where=where,
+                       media=tools.media)
+
+    @talk.get("/media/<job_id>")
+    @skippy_required
+    def media_file(job_id):
+        """A clip skippy-pc made for this chat (media.py): its requester or an admin, no one else."""
+        item = media.get(job_id)
+        if not item or not (auth.is_admin(me()) or item["owner"] == me()):
+            abort(404)                           # not 403: don't confirm that a clip exists
+        resp = send_file(io.BytesIO(item["data"]), mimetype=item["type"], conditional=True, max_age=0)
+        resp.headers["Cache-Control"] = "private, no-store"
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        return resp
 
     app.register_blueprint(talk)
     return app
