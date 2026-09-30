@@ -43,6 +43,9 @@ WORKSHOP_MAX_S = 3 * 3600    # a run this old is abandoned
 TELEMETRY_PULL = 200         # portal events fetched per pull (site telemetry; the portal caps it at 500)
 TELEMETRY_BATCH = 100_000    # bytes of events per POST to flask-api, which refuses a body over 128 KB
 TELEMETRY_CYCLE_S = 20       # the most one collection may take: reports must stay on schedule
+TELEMETRY_HUNT = 16          # POSTs one cycle may spend halving a batch flask-api answers 500 to, before it has stored anything
+TELEMETRY_HUNT_MORE = 120    # ... and once it has (it is up and writing, so the fault is in particular events)
+TELEMETRY_RECHECKS = 2       # times a lone event that got a 500 is sent again before it is called one flask-api will not store
 
 
 def home_token() -> str:
@@ -446,10 +449,20 @@ class SiteTelemetry:
     reporter restart, which starts again from the portal's copy) loses nothing: flask-api ignores an event it
     already has (same boot and seq). Only a 400/413/422 from flask-api (this batch itself is refused) skips it;
     a 404 (an older flask-api that doesn't have the route yet) or any 5xx is retried, so a rollout in the wrong
-    order loses nothing (the portal keeps up to 5000 events meanwhile)."""
+    order loses nothing (the portal keeps up to 5000 events meanwhile).
+
+    One exception to "a 5xx is retried for ever": flask-api answers 500 when a database write fails, and it once
+    answered 500 to a batch holding one event it could never store (a lone-surrogate string), which the reporter
+    re-sent every cycle for ever while nothing behind it was filed. So a 500 (and only a 500: 502/503/504, a 404 or
+    no answer at all mean flask-api is away, not that an event is bad) makes `_hunt` halve the batch until the events
+    flask-api refuses stand alone. A lone event is skipped only if flask-api has meanwhile STORED other events (it is
+    up and writing) and the event still gets a 500 when sent again. If flask-api 500s everything (a broken database)
+    nothing is ever skipped: the hunt is bounded, and the next cycle starts again from the same place."""
 
     def __init__(self, token: str):
         self.token, self.boot, self.after, self.warned = token, "", 0, False
+        self.last_status = 0        # HTTP status of flask-api's last answer to a POST (0: none)
+        self.poisoned = 0           # events skipped because flask-api will not store them
 
     def _pull(self) -> dict | None:
         url = f"{PORTAL}/home/telemetry?" + urllib.parse.urlencode(
@@ -468,13 +481,16 @@ class SiteTelemetry:
         return body if isinstance(body, dict) and isinstance(body.get("events"), list) else None
 
     def _store(self, events: list) -> bool | None:
-        """True: filed. None: flask-api will never take this batch (4xx). False: try again later."""
+        """True: filed. None: flask-api will never take this batch (4xx). False: try again later (`last_status` says why)."""
+        self.last_status = 0
         req = urllib.request.Request(f"{API}/telemetry/site_events", data=json.dumps({"events": events}).encode(),
                                      method="POST", headers={"Content-Type": "application/json"})
         try:
             with urllib.request.urlopen(req, timeout=15) as r:
+                self.last_status = r.status
                 return bool(json.loads(r.read() or b"{}").get("ok"))
         except urllib.error.HTTPError as e:
+            self.last_status = e.code
             if e.code in (400, 413, 422):                # this batch itself is the problem: retrying can't help
                 self._warn(f"flask-api refused a telemetry batch (HTTP {e.code}); skipping it")
                 return None
@@ -483,6 +499,73 @@ class SiteTelemetry:
         except Exception as e:  # noqa: BLE001
             self._warn(f"can't reach flask-api to store telemetry: {e}")
             return False
+
+    def _file(self, batch: list) -> tuple[bool, int]:
+        """File one batch. (True, n): every event in it is settled (n were stored) and `after` is past it. (False, n): stop
+        here and start again from `after` next cycle (n events were stored before that; flask-api ignores their re-send)."""
+        stored = self._store(batch)
+        if stored is False and self.last_status == 500:
+            return self._hunt(batch)
+        if stored is False:
+            return False, 0
+        self.after = max(self.after, batch[-1]["seq"])
+        return True, len(batch) if stored else 0             # None: refused for good, skipped
+
+    def _hunt(self, batch: list) -> tuple[bool, int]:
+        """flask-api answered 500 to `batch`. Halve it, in seq order, until the events it still refuses are alone; file
+        the rest. Then settle each lone event: skipped for good only if flask-api stored something else meanwhile (so it
+        is up and writing: the fault is in the event) and the event still gets a 500 when sent again; otherwise the
+        cycle stops there and the same events are pulled and tried again. The hunt is bounded (TELEMETRY_HUNT POSTs
+        while flask-api has stored nothing, TELEMETRY_HUNT_MORE after), so an outage costs a handful of POSTs a cycle."""
+        outcomes: list = []                                   # (events, stored) in seq order; stored False = a lone event that got a 500
+        state = {"posts": 0, "up": False}
+
+        def walk(events: list) -> bool:                       # False: stop (out of budget, or flask-api went away)
+            if len(events) == 1:
+                outcomes.append((events, False))
+                return True
+            mid = len(events) // 2
+            return part(events[:mid]) and part(events[mid:])
+
+        def part(events: list) -> bool:
+            if state["posts"] >= (TELEMETRY_HUNT_MORE if state["up"] else TELEMETRY_HUNT):
+                return False
+            state["posts"] += 1
+            stored = self._store(events)
+            if stored is not False:
+                state["up"] = state["up"] or stored is True
+                outcomes.append((events, stored))
+                return True
+            return self.last_status == 500 and walk(events)
+
+        finished, filed = walk(batch), 0
+        for events, stored in outcomes:
+            if stored is False:
+                verdict = self._recheck(events[0]) if state["up"] else "later"
+                if verdict == "later":
+                    return False, filed
+                filed += verdict == "stored"
+            else:
+                filed += len(events) if stored else 0
+            self.after = max(self.after, events[-1]["seq"])
+        return finished, filed
+
+    def _recheck(self, event: dict) -> str:
+        """'stored' (it went in this time), 'refused' (flask-api now refuses it outright: settled), 'poison' (still a 500 alone,
+        after TELEMETRY_RECHECKS more tries: skipped) or 'later' (flask-api went away: nothing is known)."""
+        for _ in range(TELEMETRY_RECHECKS):
+            stored = self._store([event])
+            if stored is True:
+                return "stored"
+            if stored is None:
+                return "refused"
+            if self.last_status != 500:
+                return "later"
+        self.poisoned += 1
+        label = lambda v: str(v)[:16].encode("ascii", "replace").decode()      # noqa: E731 — never print what may hold a lone surrogate
+        print(f"home-reporter: skipping a telemetry event flask-api will not store (boot {label(event.get('boot'))} "
+              f"seq {label(event.get('seq'))}, {label(event.get('kind'))}): it gets HTTP 500 alone while others are stored", flush=True)
+        return "poison"
 
     def _warn(self, message: str) -> None:
         if not self.warned:                      # once per outage, like the portal reports
@@ -513,11 +596,10 @@ class SiteTelemetry:
                 self.boot, self.after = str(pulled.get("boot") or ""), 0
             events = [e for e in pulled["events"] if isinstance(e, dict) and isinstance(e.get("seq"), int)]
             for batch in self.chunks(events):
-                stored = self._store(batch)
-                if stored is False:
+                settled, count = self._file(batch)
+                filed += count
+                if not settled:
                     return filed                             # nothing past this point moves: it is pulled again
-                self.after = max(self.after, batch[-1]["seq"])
-                filed += len(batch) if stored else 0         # None: refused for good, skipped
             self.warned = False
             if not events or not pulled.get("more"):
                 break

@@ -195,14 +195,27 @@ portal hooks (telemetry_web.py) ────┴─> Telemetry (in memory, ≤500
   the tools used with their arguments, redacted), `error`.
 - **Never**: IP addresses or browser details (nothing reads them), signed-out people and visitors, a tool's result, setting
   values, passwords. Polls, media and the machine endpoints (`SKIP_ENDPOINTS`) and the private Skippy (`/me/workshop/*`)
-  aren't recorded at all. A test pins every skipped name to a real endpoint, so a renamed route can't start recording.
+  aren't recorded at all. A test pins every skipped name to a real endpoint, so a renamed route can't start recording, and
+  a second test scans every template for what its scripts request by themselves (`url_for` inside a `<script>`, a `data-*`
+  URL a script reads, literal paths) and fails unless each such GET endpoint is in `SKIP_ENDPOINTS` or doesn't answer a
+  page: a new poller that returns an HTML fragment (the Server admin card's 60 s refresh was the first) must be added there.
 - **Secrets in text** are scrubbed by `telemetry.redact()` (API keys, bearer tokens, JWTs, `password: …`, `password is …`,
   `VALHEIM_PASSWORD=…`, long token-looking strings), anything under a key that sounds secret is dropped, and a code a tool
   returned that Skippy then repeats is removed from the reply. Best effort: the chat says "don't type secrets".
+  The scrubbing must stay cheap, because the portal is one process and a regex holds it for everyone: text is cut to its
+  cap (+256 characters, so a secret at the cut is still seen) BEFORE it is scanned, `redact()` never scans more than
+  `MAX_SCAN`, and no pattern may backtrack (no nested quantifiers: `test_fix_telemetry_redos.py` runs every compiled
+  pattern in the module against adversarial input at the real sizes, in a child process with a hard time limit).
+  A lone surrogate (`"\ud800"`: valid JSON, unencodable) is replaced by U+FFFD wherever it appears in what is recorded.
 - **No ack, no loss.** The portal is stateless, so it keeps the newest 5000 events in memory (`dropped` counts overflow).
   Each pull says which portal process (`boot`) and the last `seq` it has stored; the portal forgets only up to that, and
   the reporter moves on only after flask-api answered ok. flask-api stores each `(boot, seq)` once, so a retry or a
   restarted reporter can't double count. A redeploy of the portal loses what was still waiting (seconds' worth).
+  flask-api being away (no answer, 404, 502/503/504) or failing every write (500 to everything) only delays: nothing is
+  skipped. A 500 makes the reporter halve the batch (a few POSTs, bounded) to find an event flask-api will never store;
+  it skips such an event only after flask-api has stored other events meanwhile and the event still gets a 500 alone, and
+  says so in its log. flask-api itself repairs a lone surrogate and refuses a row it can't bind without failing the batch.
+  If the portal's oldest waiting event is over 15 minutes old while home keeps pulling, the widget says **stuck**, not ok.
 - **Kept 180 days** (`KEEP_DAYS`; flask-api prunes at start and hourly), in the same SQLite file as the phone UI's
   clicks (`ui_events`), in the `site_events` table. Read it with
   `curl -s localhost:3003/telemetry/site_summary?days=30` (the same summary the widget shows) or SQLite directly.

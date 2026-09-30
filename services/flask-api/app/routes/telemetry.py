@@ -248,15 +248,34 @@ def _prune_site(con: sqlite3.Connection, now: float) -> int:
     return con.execute("DELETE FROM site_events WHERE ts < ?", (now - SITE_KEEP_DAYS * 86400,)).rowcount
 
 
+_SURROGATES = re.compile(r"[\ud800-\udfff]")
+_INT64_MAX = 2 ** 63 - 1     # SQLite's INTEGER: a bigger seq can't be bound
+
+
+def _utf8(text: str) -> str:
+    """`text` that SQLite's UTF-8 bind will take. JSON can carry a lone surrogate ("\\ud800"); nothing can encode it, and
+    binding one raised for the whole batch. Each becomes U+FFFD (the rest of the event is kept)."""
+    return text if text.isascii() else _SURROGATES.sub("\N{REPLACEMENT CHARACTER}", text)
+
+
 def _site_row(e, now: float):
-    """One event from the reporter as a row, or None when it is malformed. The portal is the only producer and has
-    already redacted it; this only refuses what could not be a real event."""
+    """One event from the reporter as a row, or None when it is malformed or cannot be made into one (an event must never
+    fail the batch it arrives in: the reporter would retry the whole batch for ever). The portal is the only producer and
+    has already redacted it; this only refuses what could not be a real event."""
+    try:
+        return _site_row_unsafe(e, now)
+    except (ValueError, TypeError, OverflowError, RecursionError, MemoryError) as exc:   # e.g. a detail nested too deep for json.dumps
+        log.warning("site telemetry: an event could not be read and was refused: %r", exc)
+        return None
+
+
+def _site_row_unsafe(e, now: float):
     if not isinstance(e, dict):
         return None
     boot, seq, ts, kind, name = e.get("boot"), e.get("seq"), e.get("ts"), e.get("kind"), e.get("name")
     if not (isinstance(boot, str) and re.fullmatch(r"[0-9a-f]{1,16}", boot)):
         return None
-    if isinstance(seq, bool) or not isinstance(seq, int) or seq < 0:
+    if isinstance(seq, bool) or not isinstance(seq, int) or not 0 <= seq <= _INT64_MAX:
         return None
     if isinstance(ts, bool) or not isinstance(ts, (int, float)) or not math.isfinite(ts):
         return None
@@ -264,17 +283,43 @@ def _site_row(e, now: float):
         return None
     if kind not in SITE_KINDS or not isinstance(name, str) or not name:
         return None
-    who = str(e.get("user") or "").strip().lower()[:120]
+    who = _utf8(str(e.get("user") or "").strip().lower()[:120])
     if not who:
         return None                              # the portal only records signed-in people
     role = e.get("role") if e.get("role") in SITE_ROLES else ""
     detail = e.get("detail") if isinstance(e.get("detail"), dict) else {}
-    text = json.dumps(detail, ensure_ascii=False, separators=(",", ":"))
+    text = _utf8(json.dumps(detail, ensure_ascii=False, separators=(",", ":")))
     if len(text) > _MAX_DETAIL:
         text = json.dumps({"truncated": True})
     ok = detail.get("ok")
-    return (boot, seq, float(ts), who, role, str(e.get("sid") or "")[:16], kind, name[:120],
+    return (boot, seq, float(ts), who, role, _utf8(str(e.get("sid") or "")[:16]), kind, _utf8(name[:120]),
             (1 if ok else 0) if isinstance(ok, bool) else None, text)
+
+
+# Errors that mean THIS row can't be bound (wrong type, too big, not encodable), as opposed to the database being unavailable
+# (OperationalError: locked, full, unreadable): only the second is worth a 500, because only the second is cured by a retry.
+_ROW_ERRORS = (ValueError, OverflowError, sqlite3.InterfaceError, sqlite3.ProgrammingError, sqlite3.DataError)
+_INSERT = ("INSERT OR IGNORE INTO site_events (boot, seq, ts, who, role, sid, kind, name, ok, detail) "
+           "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+
+
+def _insert(con: sqlite3.Connection, rows: list) -> int:
+    """Insert `rows`; returns how many could not be bound. Fast path: one executemany. If a row can't be bound, what it did
+    insert stays (this is one transaction and the inserts are idempotent), and the rest go in one by one so that the bad row
+    is refused on its own instead of taking the batch with it."""
+    try:
+        con.executemany(_INSERT, rows)
+        return 0
+    except _ROW_ERRORS:
+        pass
+    refused = 0
+    for row in rows:
+        try:
+            con.execute(_INSERT, row)
+        except _ROW_ERRORS as exc:
+            log.warning("site telemetry: a row could not be stored and was refused: %r", exc)
+            refused += 1
+    return refused
 
 
 @bp.post("/telemetry/site_events")
@@ -282,7 +327,10 @@ def site_events():
     """The home reporter's batch: {"events": [{boot, seq, ts, user, role, sid, kind, name, detail}, ...]}.
     Idempotent: an event already stored (same boot and seq) is ignored, so a retry can't double count."""
     global _last_prune
-    body = request.get_json(silent=True)
+    try:
+        body = request.get_json(silent=True)
+    except RecursionError:                       # JSON nested deeper than the parser can follow: not a batch, and not our fault
+        body = None
     events = body.get("events") if isinstance(body, dict) else None
     if not isinstance(events, list):
         return error("events must be a list", status=400)
@@ -293,15 +341,13 @@ def site_events():
     try:
         with _lock, closing(_conn()) as con, con:
             before = con.total_changes
-            con.executemany(
-                "INSERT OR IGNORE INTO site_events (boot, seq, ts, who, role, sid, kind, name, ok, detail) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+            refused = _insert(con, rows)
             stored = con.total_changes - before
             if now - _last_prune > _PRUNE_EVERY:
                 _prune_site(con, now)
                 _last_prune = now
-        return jsonify({"ok": True, "stored": stored, "duplicates": len(rows) - stored,
-                        "rejected": len(events) - len(rows)})
+        return jsonify({"ok": True, "stored": stored, "duplicates": len(rows) - refused - stored,
+                        "rejected": len(events) - len(rows) + refused})
     except Exception as exc:
         log.error("site telemetry write error: %s", exc)
         return error(str(exc), status=500)
