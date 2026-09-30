@@ -38,7 +38,8 @@ data/valheim/server/dl/bepinex/ BepInEx.zip and the dates it was fetched
 **Server updates.** At every container start the image's updater runs `steamcmd +app_update 896660 validate` as an
 anonymous login and logs either `Valheim Server was updated - restarting` or `Valheim Server is already the latest
 version`. While the server runs, a cron (`UPDATE_CRON`, default `*/15 * * * *`) checks again, but only when nobody is
-connected (`UPDATE_IF_IDLE=true`), and a new build restarts the server. There is no supported setting to skip this or to
+connected (`UPDATE_IF_IDLE=true`), and a new build restarts the server (the image also restarts it daily at 05:10
+container time when idle, `RESTART_CRON`). There is no supported setting to skip this or to
 hold an older build; `PUBLIC_TEST=true` switches to the public-test branch, which is not a pin. The compose file pulls
 the image itself fresh on every boot as well (`startup.sh`: `compose pull`).
 
@@ -65,8 +66,9 @@ the same log line says `mod: none`, and the old `LogOutput.log` stays on the dis
 **Not supported / to know.** No version pin. Any BepInEx start logs `isModded: True`, even with no plugin. A plugin that
 changes gameplay must also be on every player's PC, and console players can't install mods (the general rule; whether a
 BepInEx server can be joined through crossplay was not tested: UNVERIFIED). **The image is a "Legacy container image
-mirror"** (its own label): the maintained one is `ghcr.io/community-valheim-tools/valheim-server` (same commit
-`e36cbfb`, built the same day). See the decisions list in the hand-over.
+mirror"** (its own label): the same project now publishes `ghcr.io/community-valheim-tools/valheim-server` (registry
+metadata read 2026-09-30: same commit `e36cbfb`, built the same day). Both are identical today; the legacy path may stop
+getting builds, so moving to the new one is a decision for the Captain, not made here.
 
 ## Factorio
 
