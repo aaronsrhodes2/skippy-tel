@@ -108,6 +108,12 @@ Actions (the sandbox can't reach GCP or run.app directly):
   with a `‹ Home` back button, its own title (from its `<title>`), and a round
   Home button. A new feature gets a tile in `portal/templates/home.html`, never
   a nav link.
+- Copyable things (the Captain's rule: **one click, everywhere**): anything a person is expected to
+  copy (an invite code, `ip:port`, a password, a command, a block to paste) is marked
+  `<code class="code">` / `<pre class="copy">` (or `data-copy="text"` on a button), and
+  `portal/static/copy.js` (loaded by base.html) gives it a Copy button and click-to-copy, also when it
+  is added later by script. Put a value that goes in ONE box in ONE chip (`ip:port`, not two);
+  where a dialog has two boxes, one chip per box. Skippy's chat renders `backticks` the same way.
 - Secrets live in the Captain's Drive vault `.env`; he loads them into Secret
   Manager with `bash infra/bootstrap/secrets.sh --from-env ~/.env` in Cloud Shell.
 

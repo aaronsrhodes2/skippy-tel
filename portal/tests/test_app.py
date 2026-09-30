@@ -713,7 +713,7 @@ def test_every_game_says_what_to_type_and_where(env):
     import html  # noqa: PLC0415
     page = html.unescape(client.get("/games/everquest").data.decode())                          # what the browser copies
     assert '<pre class="copy">[Registration Servers]\n{\n"35.1.2.3:5999"\n}\n[Login Servers]\n{\n"35.1.2.3:5999"\n}</pre>' in page
-    assert "click to copy" in page and "document.addEventListener(\"click\"" in page             # the copy behaviour ships on every page
+    assert "click to copy" in page and '<script src="/static/copy.js" defer></script>' in page     # the copy behaviour ships on every page
 
 
 def test_the_game_page_keeps_itself_current(env):

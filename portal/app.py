@@ -353,8 +353,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         rows = []
         for email, info in sorted(app.extensions["friends"].all().items()):
             portals = friends_mod.portals_of(info)
+            subject, body = friends_mod.invite_text(email, portals, sender, request.url_root, invites)
             rows.append({"email": email, **info, "portals": portals,
-                         "mailto": friends_mod.invite_mailto(email, portals, sender, request.url_root, invites)})
+                         "mailto": friends_mod.invite_mailto(email, portals, sender, request.url_root, invites),
+                         "invite_text": f"{subject}\n\n{body}"})
         return rows
 
     @admin.post("/settings")

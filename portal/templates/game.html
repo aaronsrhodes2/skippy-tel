@@ -144,7 +144,15 @@
             if (!shown || shown.textContent !== now.code) {
               const code = document.createElement("code");
               code.className = "code"; code.textContent = now.code; code.title = "Click to copy";
-              slot.replaceChildren(code);
+              slot.replaceChildren(code);                     // (static/copy.js gives the new chip its Copy button)
+              // The "Copy it all to share" message carries the code too: keep it in step, or it would copy a stale one.
+              const share = document.querySelector(".join button[data-copy]");
+              if (share) {
+                let text = share.getAttribute("data-copy");
+                text = /join code [^,]+/.test(text) ? text.replace(/join code [^,]+/, "join code " + now.code)
+                                                    : text.replace(/^([^:]*): /, "$1: join code " + now.code + ", ");
+                share.setAttribute("data-copy", text);
+              }
             }
           }
         } catch (e) { /* a network blip: the next poll catches up */ }

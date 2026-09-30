@@ -102,11 +102,10 @@ def portals_of(entry: dict | None) -> list[str]:
     return [p for p in PORTALS if p in entry.get("games", [])] + ["skippy"]
 
 
-def invite_mailto(email: str, games: list[str], sender: str, portal_url: str,
-                  discord_links: dict[str, str]) -> str:
-    """A mailto: link that opens the admin's own email app with the invite
-    written: sent from their address, so it arrives like any note from them."""
-    from urllib.parse import quote
+def invite_text(email: str, games: list[str], sender: str, portal_url: str,
+                discord_links: dict[str, str]) -> tuple[str, str]:
+    """(subject, body) of the invite note: for the email link below, and for a Copy button that
+    puts the same words on the clipboard to paste into Discord or a text message."""
     names = [PORTALS[p] for p in games if p in PORTALS]
     lines = [
         "Hey!",
@@ -125,4 +124,13 @@ def invite_mailto(email: str, games: list[str], sender: str, portal_url: str,
         lines += ["", "Chat and voice on Discord:"] + chats
     lines += ["", "See you in there,", sender]
     subject = "You're invited: " + (", ".join(names) if names else "my game servers")
-    return f"mailto:{quote(email)}?subject={quote(subject)}&body={quote(chr(10).join(lines))}"
+    return subject, "\n".join(lines)
+
+
+def invite_mailto(email: str, games: list[str], sender: str, portal_url: str,
+                  discord_links: dict[str, str]) -> str:
+    """A mailto: link that opens the admin's own email app with the invite
+    written: sent from their address, so it arrives like any note from them."""
+    from urllib.parse import quote
+    subject, body = invite_text(email, games, sender, portal_url, discord_links)
+    return f"mailto:{quote(email)}?subject={quote(subject)}&body={quote(body)}"

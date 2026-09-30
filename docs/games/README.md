@@ -120,7 +120,7 @@ Every game's page on the portal shows the same block: what to type, where, and t
 |---|---|---|
 | Valheim | Join Game → Add server → `ip:2456`, or with crossplay on the **join code** instead (the two exclude each other) | Only with crossplay on: new every boot |
 | Dragonwilds | Worlds → **Invite Code** (the I key), or the Direct tab `ip:7778`, or search the server name | Yes: new every boot |
-| Factorio | Multiplayer → Connect to address → `ip` | No (Factorio has none; the address is stable) |
+| Factorio | Multiplayer → Connect to address → `ip:34197` (one paste, port included) | No (Factorio has none; the address is stable) |
 | Satisfactory | Server Manager → Add Server → `ip`, port 7777 | No (no server list either) |
 | EverQuest | The `eqhost.txt` block on the page (copy it over the client's file), then `eqgame.exe patchme` | No |
 

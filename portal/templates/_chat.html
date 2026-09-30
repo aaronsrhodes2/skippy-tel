@@ -30,10 +30,22 @@
     let history = [];
     try { history = JSON.parse(sessionStorage.getItem(KEY) || "[]"); } catch (e) { history = []; }
 
+    // Text between backticks (join codes, addresses, commands) becomes a one-click copy chip; static/copy.js gives it its Copy button.
+    function fill(el, text) {
+      el.textContent = "";
+      text.split(/(`[^`\n]+`)/).forEach(part => {
+        if (part.length > 2 && part[0] === "`" && part[part.length - 1] === "`") {
+          const chip = document.createElement("code");
+          chip.className = "code"; chip.textContent = part.slice(1, -1);
+          el.appendChild(chip);
+        } else if (part) el.appendChild(document.createTextNode(part));
+      });
+    }
+
     function add(role, text, extra) {
       const div = document.createElement("div");
       div.className = "turn " + role + (extra ? " " + extra : "");
-      div.textContent = (role === "user" ? "You: " : "Skippy: ") + text;
+      fill(div, (role === "user" ? "You: " : "Skippy: ") + text);
       log.appendChild(div);
       log.scrollTop = log.scrollHeight;
       return div;
@@ -57,7 +69,7 @@
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || res.statusText);
-        pending.textContent = "Skippy: " + data.reply;
+        fill(pending, "Skippy: " + data.reply);
         const used = [...new Set(data.tools || [])];   // receipts: which tools did the work
         const note = document.createElement("div");
         note.className = "receipt";

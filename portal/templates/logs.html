@@ -14,9 +14,9 @@
     <p class="error">Couldn't read the logs: {{ error }}</p>
   {% else %}
     <h3>{{ game.name if game else 'Game containers' }} (latest snapshot)</h3>
-    <pre class="log">{{ logs.containers }}</pre>
+    <pre class="log" data-copy-button>{{ logs.containers }}</pre>
     <h3>Last boot (startup script)</h3>
-    <pre class="log">{{ logs.startup }}</pre>
+    <pre class="log" data-copy-button>{{ logs.startup }}</pre>
   {% endif %}
 </section>
 <style>

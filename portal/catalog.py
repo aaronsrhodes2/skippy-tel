@@ -50,6 +50,7 @@ class Game:
     invite_hint: str = ""                # HTML-safe: where to type the invite code in the game
     direct: Callable[[str, dict], str] | None = None   # (ip, settings) -> "ip:port" for a Direct-connect box
     direct_hint: str = ""                # HTML-safe: where to type that address in the game
+    direct_port: str = ""                # when the game's dialog has a separate Port box: the port, shown as its own copy chip
     via_list: bool = False               # the game's server list finds it by name: `connect` says how (the fallback)
     snippet: Callable[[str, dict], tuple[str, str]] | None = None   # (ip, settings) -> (label, text): a block to copy as-is
     theme: Theme | None = None
@@ -172,9 +173,9 @@ GAMES: dict[str, Game] = {
         "factorio", "Factorio",
         "Factory-building co-op. The factory must grow.",
         ram_gb=2,
-        connect=lambda ip, env: f"Multiplayer &rarr; Connect to address &rarr; <code>{ip}</code>",
+        connect=lambda ip, env: f"Multiplayer &rarr; Connect to address &rarr; <code>{ip}:34197</code>",
         settings=(Setting("FACTORIO_SAVE_NAME", "Save name"),),
-        direct=lambda ip, env: ip,                       # Factorio has no invite codes: the address is the whole way in
+        direct=lambda ip, env: f"{ip}:34197",            # no invite codes: the address is the whole way in, port included (one paste)
         direct_hint="In game: Multiplayer &rarr; <b>Connect to address</b>. Same address every session.",
         icon="⚙️",
         theme=Theme(accent="#ff9a1f", accent2="#7fb03a", bg="#141414", card="#232323", text="#e6e0d6",
@@ -189,11 +190,12 @@ GAMES: dict[str, Game] = {
         "satisfactory", "Satisfactory",
         "3D factory-building co-op on an alien planet.",
         ram_gb=12,
-        connect=lambda ip, env: f"Server Manager &rarr; Add Server &rarr; <code>{ip}</code> port <code>7777</code>",
+        connect=lambda ip, env: f"Server Manager &rarr; Add Server &rarr; address <code>{ip}</code>, port <code>7777</code>",
         settings=(Setting("SATISFACTORY_MAX_PLAYERS", "Max players"),),
-        direct=lambda ip, env: ip,                       # no invite codes and no server list: address + port 7777
-        direct_hint="In game: Server Manager &rarr; <b>Add Server</b> &rarr; this address, port <code>7777</code>. "
-                    "Same address every session.",
+        direct=lambda ip, env: ip,                       # no invite codes and no server list; its Add Server dialog has two boxes
+        direct_port="7777",                              # ...so the port gets its own copy chip beside the address
+        direct_hint="In game: Server Manager &rarr; <b>Add Server</b>: the address in the first box, the port in the "
+                    "second. Same address every session.",
         icon="🏭",
         theme=Theme(accent="#fa9549", accent2="#5fb6d9", bg="#0d1216", card="#18222a", text="#e2ecf2",
                     font="Rajdhani",

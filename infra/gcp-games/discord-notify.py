@@ -46,7 +46,7 @@ GAMES = {
     "factorio": (
         "Factorio",
         "Factory-building co-op. The factory must grow.",
-        lambda ip, e: f"Multiplayer → Connect to address → `{ip}`",
+        lambda ip, e: f"Multiplayer → Connect to address → `{ip}:34197`",
     ),
     "satisfactory": (
         "Satisfactory",
