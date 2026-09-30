@@ -156,9 +156,17 @@ if names.strip():
 # be reached". (The home config has no server-admin credentials: the world registers unauthenticated, so none are set.)
 launcher = cfg.setdefault("web-admin", {}).setdefault("launcher", {})
 launcher["runLoginserver"] = True
+# EXACTLY ONE login server: the local one, as at home. AkkStack's fresh config lists three (loginserver1 = a public
+# server with legacy=1, loginserver2 = 127.0.0.1:5998, loginserver3 = login.projecteq.net). With two of them pointing at the
+# local login server the world connected twice, each registration destroyed the other ("a server with that name already
+# exists") about every 100 ms, and the world also tried to register itself with a public login server. Keep loginserver1
+# (its account/password untouched), make it local and non-legacy, and drop the rest.
+for key in [k for k in world if k.startswith("loginserver") and k != "loginserver1"]:
+    del world[key]
 ls = world.setdefault("loginserver1", {})
 ls["host"] = "127.0.0.1"
 ls["port"] = type(ls.get("port", "5998"))("5998")        # keep the file's own type (string or number)
+ls.pop("legacy", None)
 with open(path, "w") as f:          # in place: keeps the eqemu user's ownership
     json.dump(cfg, f, indent=4)
 PY

@@ -17,9 +17,11 @@ INFRA = Path(__file__).resolve().parents[2] / "infra" / "gcp-games"
 SCRIPT = (INFRA / "everquest.sh").read_text(encoding="utf-8")
 PATCH = re.search(r"""python3 - "\$AKK/server/eqemu_config.json" "\$IP" "\$UCS_PORT" "\$NAMES" <<'PY'\n(.*?)\nPY\n""", SCRIPT, re.S).group(1)
 
-FRESH = {   # roughly what AkkStack generates: the public login server, no launcher switch for the login server
+FRESH = {   # what AkkStack's fresh config really has (read from the live VM): three login servers, the first one legacy
     "server": {"world": {"address": "old", "shortname": "x", "longname": "y",
-                         "loginserver1": {"host": "login.eqemulator.net", "port": "5998", "account": "", "password": ""}},
+                         "loginserver1": {"host": "login.eqemulator.net", "port": "5998", "account": "", "password": "", "legacy": "1"},
+                         "loginserver2": {"host": "127.0.0.1", "port": "5998", "account": "", "password": ""},
+                         "loginserver3": {"host": "login.projecteq.net", "port": "5998", "account": "", "password": ""}},
                "ucs": {"host": "old", "port": "7778"}},
     "web-admin": {"launcher": {"minZoneProcesses": 3}},
 }
@@ -32,17 +34,40 @@ def patch(tmp_path, config, ip="35.1.2.3", names="Solo EQ - Golden Era\tsoloeq\n
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_the_launcher_is_told_to_run_the_login_server_and_the_world_to_use_it(tmp_path):
+def test_the_launcher_is_told_to_run_the_login_server_and_the_world_to_use_only_it(tmp_path):
     out = patch(tmp_path, FRESH)
     assert out["web-admin"]["launcher"]["runLoginserver"] is True
-    assert out["server"]["world"]["loginserver1"]["host"] == "127.0.0.1"
-    assert out["server"]["world"]["loginserver1"]["port"] == "5998"                # the file's own type: this one is a string
+    world = out["server"]["world"]
+    assert world["loginserver1"] == {"host": "127.0.0.1", "port": "5998", "account": "", "password": ""}   # local, no legacy flag
+    assert not [k for k in world if k.startswith("loginserver") and k != "loginserver1"]                  # no public or duplicate entries
     assert out["web-admin"]["launcher"]["minZoneProcesses"] == 3                    # nothing else in the launcher block is lost
+
+
+def test_two_entries_for_the_same_login_server_are_what_made_it_flap():
+    """The live log: 'World tried to login but a server with that name already exists, destroying' about every 100 ms,
+    the world logging 'Connected to Legacy Loginserver' then 'Connected to Loginserver' alternately. Two connections to one
+    login server each replace the other. Pointing loginserver1 at localhost and stopping there (the first fix) leaves TWO
+    local entries in AkkStack's fresh file, because loginserver2 is already 127.0.0.1."""
+    def local_entries(world):
+        return [k for k, v in world.items() if k.startswith("loginserver") and v["host"] == "127.0.0.1"]
+
+    fresh_world = FRESH["server"]["world"]
+    assert local_entries(fresh_world) == ["loginserver2"]                       # the fresh file: only loginserver2 is local
+    naive = json.loads(json.dumps(FRESH))["server"]["world"]
+    naive["loginserver1"]["host"] = "127.0.0.1"
+    assert local_entries(naive) == ["loginserver1", "loginserver2"]             # the naive patch: two, the bug
+    assert not any(v["host"] == "login.projecteq.net" for v in patch_world(FRESH).values() if isinstance(v, dict) and "host" in v)
+
+
+def patch_world(config):
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        return patch(Path(d), config)["server"]["world"]
 
 
 def test_a_numeric_port_stays_numeric_and_credentials_are_never_touched(tmp_path):
     config = json.loads(json.dumps(FRESH))
-    config["server"]["world"]["loginserver1"] = {"host": "x", "port": 5999, "account": "acct", "password": "pw"}
+    config["server"]["world"]["loginserver1"] = {"host": "x", "port": 5999, "account": "acct", "password": "pw", "legacy": "1"}
     out = patch(tmp_path, config)["server"]["world"]["loginserver1"]
     assert out == {"host": "127.0.0.1", "port": 5998, "account": "acct", "password": "pw"}
 
