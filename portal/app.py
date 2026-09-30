@@ -686,7 +686,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         try:
             admin = auth.is_admin(user["email"])
             tools = tools_for(user)
-            model, badge = chat.pick_model(message, app.config["CHAT_MODEL"], admin)
+            model = app.config["CHAT_MODEL"]
             page = str(body.get("page") or "")[:100] or None
             prompt = chat.system_prompt(user["name"], is_admin=admin, page=page,
                                         games=[GAMES[g].name for g in auth.visible_games(user["email"])])
@@ -709,7 +709,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         # One line per reply in Cloud Run's logs: who, which model, which tools (never the text).
         print(json.dumps({"event": "chat", "user": user["email"], "model": model,
                           "tools": used, "mentat_available": mentat_on, "mentat_where": where}), flush=True)
-        return jsonify(reply=text, model=badge, tools=used, mentat_available=mentat_on, mentat_where=where,
+        return jsonify(reply=text, tools=used, mentat_available=mentat_on, mentat_where=where,
                        media=tools.media)
 
     @talk.get("/media/<job_id>")

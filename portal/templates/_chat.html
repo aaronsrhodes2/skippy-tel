@@ -5,8 +5,7 @@
   {% if not chat_enabled %}
     <p class="error">Chat isn't configured yet (no Anthropic API key).</p>
   {% endif %}
-  <p class="help">Skippy runs on Haiku: quick and cheap{% if is_admin %}; say <i>"trust the awesomeness"</i>
-    for the big brain (Opus){% endif %}.
+  <p class="help">Skippy runs on Haiku: quick and cheap.
     Skippy can check the game server, start games{% if is_admin %}, restart it and read its logs{% endif %},
     and hands physics to Mentat{% if is_admin %}, and makes music on your GPU at home{% endif %} — just ask, or open <b>Tools</b> to aim at one (e.g. <code>/physics</code>).</p>
   <div class="log"></div>
@@ -59,11 +58,6 @@
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || res.statusText);
         pending.textContent = "Skippy: " + data.reply;
-        if (data.model) {                       // "trust the awesomeness" (admin only)
-          const tag = document.createElement("span");
-          tag.className = "tier"; tag.textContent = data.model;
-          pending.prepend(tag);
-        }
         const used = [...new Set(data.tools || [])];   // receipts: which tools did the work
         const note = document.createElement("div");
         note.className = "receipt";

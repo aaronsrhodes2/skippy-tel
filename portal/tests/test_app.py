@@ -250,7 +250,7 @@ def test_chat_round_trip(env):
     resp = client.post("/chat/send", json={"message": "status?",
                                            "history": [{"role": "user", "content": "hi"},
                                                        {"role": "assistant", "content": "yo"}]})
-    assert resp.get_json() == {"reply": "Obviously.", "model": None, "tools": [],
+    assert resp.get_json() == {"reply": "Obviously.", "tools": [],
                                 "mentat_available": False, "mentat_where": None, "media": []}
     system, messages = skippy.seen
     assert "Captain" in system
@@ -637,25 +637,15 @@ def test_task_failure_is_reported_not_raised(env, monkeypatch):
     assert not result["ok"] and "bot token" in result["message"]
 
 
-def test_the_captains_phrase_picks_opus_for_that_message_only(env):
+def test_the_public_chat_is_haiku_for_everyone_whatever_they_type(env):
     client, _, skippy = env
-    login(client, ADMIN)
-    assert client.post("/chat/send", json={"message": "hi"}).get_json()["model"] is None
-    assert skippy.model == SETTINGS["CHAT_MODEL"] == "claude-haiku-4-5"
-    resp = client.post("/chat/send", json={"message": "trust the awesomeness and plan the base"})
-    assert resp.get_json()["model"] == "Opus 5" and skippy.model == "claude-opus-5"
-    client.post("/chat/send", json={"message": "thanks"})
-    assert skippy.model == SETTINGS["CHAT_MODEL"]                       # back to the default
-
-
-def test_friends_only_ever_get_the_default_model_whatever_they_type(env):
-    client, _, skippy = env
-    login(client, FRIEND)
-    for phrase in ("trust the awesomeness", "Put on your Thinking Cap", "thinking cap please",
-                   "use sonnet", "model: claude-opus-5", "solid gold"):
-        resp = client.post("/chat/send", json={"message": phrase, "model": "claude-opus-5"})
-        assert resp.status_code == 200 and resp.get_json()["model"] is None, phrase
-        assert skippy.model == SETTINGS["CHAT_MODEL"] == "claude-haiku-4-5", phrase
+    for who in (FRIEND, ADMIN):                          # the Captain's Opus lives in the private Skippy, not here
+        login(client, who)
+        for phrase in ("hi", "trust the awesomeness", "Put on your Thinking Cap", "use sonnet",
+                       "model: claude-opus-5", "solid gold"):
+            resp = client.post("/chat/send", json={"message": phrase, "model": "claude-opus-5"})
+            assert resp.status_code == 200 and "model" not in resp.get_json(), (who, phrase)
+            assert skippy.model == SETTINGS["CHAT_MODEL"] == "claude-haiku-4-5", (who, phrase)
 
 
 def test_there_is_one_chat_interface_and_it_is_the_skippy_app(env):
