@@ -68,7 +68,10 @@ downloads the update (a few extra minutes). The Discord channel gets a
 ## Chat
 
 Direct Claude API (`claude-haiku-4-5`: cheap and quick for server questions; set by `CHAT_MODEL` in the deploy workflow — Opus 5-family models also get the server-side refusal fallback), with
-Skippy's persona from `services/flask-api/app/skippy_persona.md`. History
+Skippy's persona from `services/flask-api/app/skippy_persona.md`. Friends always
+get that default model, whatever they type: there is no phrase that upgrades it.
+Only the Captain's "trust the awesomeness" (`chat.ADMIN_TIER`) switches one
+message to Opus. History
 lives in the browser tab and is sent with each message; the server keeps
 nothing.
 

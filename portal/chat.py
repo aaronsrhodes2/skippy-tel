@@ -30,20 +30,18 @@ def uses_refusal_fallback(model: str) -> bool:
     return model.startswith(_FALLBACK_PREFIXES)
 
 
-# Per-message upgrades, same phrases as SkippyTel's tiers. Checked in order;
-# the phrase can appear anywhere in the message and applies to that message only.
-TIERS = (
-    ("trust the awesomeness", "claude-opus-5", "Opus 5", True),     # (phrase, model, label, admin only)
-    ("thinking cap", "claude-sonnet-5", "Sonnet 5", False),
-)
+# The captain's per-message upgrade, same phrase as SkippyTel's tier: it can
+# appear anywhere in the message and applies to that message only. Everyone
+# else (friends) always gets the default model, whatever they type: there is
+# no phrase that costs the portal more.
+ADMIN_TIER = ("trust the awesomeness", "claude-opus-5", "Opus 5")      # (phrase, model, badge label)
 
 
 def pick_model(message: str, default: str, is_admin: bool) -> tuple[str, str | None]:
     """(model, badge label or None) for this message."""
-    text = message.lower()
-    for phrase, model, label, admin_only in TIERS:
-        if phrase in text and (is_admin or not admin_only):
-            return model, label
+    phrase, model, label = ADMIN_TIER
+    if is_admin and phrase in message.lower():
+        return model, label
     return default, None
 
 _PERSONA_FALLBACK = "You are Skippy the Magnificent, the Captain's sardonic but loyal AI. Keep replies short."

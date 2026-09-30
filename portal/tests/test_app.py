@@ -637,26 +637,25 @@ def test_task_failure_is_reported_not_raised(env, monkeypatch):
     assert not result["ok"] and "bot token" in result["message"]
 
 
-def test_tier_phrases_pick_the_model_for_that_message(env):
+def test_the_captains_phrase_picks_opus_for_that_message_only(env):
     client, _, skippy = env
     login(client, ADMIN)
     assert client.post("/chat/send", json={"message": "hi"}).get_json()["model"] is None
     assert skippy.model == SETTINGS["CHAT_MODEL"] == "claude-haiku-4-5"
-    resp = client.post("/chat/send", json={"message": "Put on your Thinking Cap: why is it lagging?"})
-    assert resp.get_json()["model"] == "Sonnet 5" and skippy.model == "claude-sonnet-5"
     resp = client.post("/chat/send", json={"message": "trust the awesomeness and plan the base"})
     assert resp.get_json()["model"] == "Opus 5" and skippy.model == "claude-opus-5"
     client.post("/chat/send", json={"message": "thanks"})
     assert skippy.model == SETTINGS["CHAT_MODEL"]                       # back to the default
 
 
-def test_opus_tier_is_admin_only(env):
+def test_friends_only_ever_get_the_default_model_whatever_they_type(env):
     client, _, skippy = env
     login(client, FRIEND)
-    resp = client.post("/chat/send", json={"message": "trust the awesomeness"})
-    assert resp.get_json()["model"] is None and skippy.model == SETTINGS["CHAT_MODEL"]
-    client.post("/chat/send", json={"message": "thinking cap please"})
-    assert skippy.model == "claude-sonnet-5"                            # Sonnet is for everyone
+    for phrase in ("trust the awesomeness", "Put on your Thinking Cap", "thinking cap please",
+                   "use sonnet", "model: claude-opus-5", "solid gold"):
+        resp = client.post("/chat/send", json={"message": phrase, "model": "claude-opus-5"})
+        assert resp.status_code == 200 and resp.get_json()["model"] is None, phrase
+        assert skippy.model == SETTINGS["CHAT_MODEL"] == "claude-haiku-4-5", phrase
 
 
 def test_there_is_one_chat_interface_and_it_is_the_skippy_app(env):
@@ -1169,15 +1168,6 @@ def test_friends_chat_is_rate_limited_but_the_captain_is_not(env):
     assert codes[:60] == [200] * 60 and codes[60] == 429
     login(client, ADMIN)
     assert all(client.post("/chat/send", json={"message": "hi"}).status_code == 200 for _ in range(65))
-
-
-def test_thinking_cap_has_its_own_smaller_limit(env):
-    client, _, _ = env
-    _add_friend(client, PAL, ["skippy"])
-    login(client, PAL)
-    codes = [client.post("/chat/send", json={"message": "thinking cap: why?"}).status_code for _ in range(21)]
-    assert codes[:20] == [200] * 20 and codes[20] == 429
-    assert client.post("/chat/send", json={"message": "plain question"}).status_code == 200
 
 
 def test_public_mentat_playground_is_rate_limited_per_visitor():

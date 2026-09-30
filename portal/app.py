@@ -64,7 +64,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     app.extensions["limiter"] = limiter
     # Human-scale: a person never hits these; a script hammering them does.
     MENTAT_PER_MIN = 10
-    CHAT_PER_HOUR, SHARP_PER_HOUR = 60, 20      # any model / "thinking cap" (Sonnet)
+    CHAT_PER_HOUR = 60
     imports = imports or imports_mod.Imports(vm)
     media = media_mod.Media()
 
@@ -677,10 +677,6 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             if not limiter.allow("chat:" + user["email"], CHAT_PER_HOUR, 3600):
                 return jsonify(error=f"That's {CHAT_PER_HOUR} messages this hour; Skippy needs a breather. "
                                      "Try again in a bit."), 429
-            sharp = chat.pick_model(message, app.config["CHAT_MODEL"], False)[0] != app.config["CHAT_MODEL"]
-            if sharp and not limiter.allow("sharp:" + user["email"], SHARP_PER_HOUR, 3600):
-                return jsonify(error=f"The thinking cap is limited to {SHARP_PER_HOUR} an hour. "
-                                     "Ask without it, or try again later."), 429
         home.touch_chat()
         force, rest = chat_tools.parse_verb(message)
         if force and not rest:
