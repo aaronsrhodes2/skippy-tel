@@ -25,6 +25,25 @@
     docker logs dragonwilds 2>&1 | grep -iE 'join|login|logout|left|disconnect|kick|player' \
       | grep -viE 'heartbeat|JoinCode|PlayerCapacity|PlayerPlatform' | tail -25 | cut -c1-300
   fi
+  # ── EverQuest (AkkStack): is anything bound to the login/world ports INSIDE the container, and what the login
+  # server logged. A client that "times out" at login could be a filtered port, a dead login server or a bad config;
+  # the host can't tell (docker-proxy accepts on the host either way). Read-only. </dev/null on every docker exec:
+  # this script arrives on bash's stdin, and a command that reads stdin would swallow the rest of it.
+  EQ=akk-stack-eqemu-server-1
+  if docker ps --format '{{.Names}}' | grep -qx "$EQ"; then
+    echo "--- everquest: sockets bound inside the server container (hex ports: 176E=5998 176F=5999 2328=9000 1B5B=7003)"
+    for proto in udp tcp; do
+      echo "$proto:"
+      docker exec "$EQ" sh -c "grep -E ':(176E|176F|2328|1B5B) ' /proc/net/$proto" </dev/null 2>&1 | awk '{print $2, "state", $4}' | head -12
+    done
+    echo "--- everquest: server processes"
+    docker exec "$EQ" sh -c 'ps -eo pid,etime,args | grep -E "loginserver|world|zone|ucs|queryserv|eqlaunch|shared_memory" | grep -v grep' </dev/null 2>&1 | cut -c1-150 | head -15
+    LOGS=/srv/games/data/everquest/akk-stack/server/logs
+    echo "--- everquest: newest server logs"
+    ls -lt --time-style=+%H:%M "$LOGS" 2>/dev/null | head -8 | cut -c1-120
+    for f in $(ls -t "$LOGS"/login*.log 2>/dev/null | head -1); do echo "--- everquest: tail of $(basename "$f")"; tail -n 25 "$f" | cut -c1-200; done
+  fi
+  # ── end everquest ──
   echo "--- udp listeners (game ports)"
   ss -ulnp 2>/dev/null | grep -E ':(2456|2457|7777|7778|8888|34197)\b' || echo "(none)"
   echo "--- memory";    free -m | head -2

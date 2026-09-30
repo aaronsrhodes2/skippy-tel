@@ -36,3 +36,14 @@ def test_the_accept_is_inserted_above_the_drop():
     accept = STARTUP.index('iptables -I DOCKER-USER 1 -d 169.254.169.254 -p "$proto" --dport 53')
     assert drop < accept
     assert "-I DOCKER-USER 1" in STARTUP and "-A DOCKER-USER" not in STARTUP     # an -A would land below the DROP and do nothing
+
+
+def test_the_everquest_diag_block_never_reads_stdin():
+    """diag.sh arrives on bash's stdin (curl | bash): any docker exec without </dev/null swallows the rest of the script,
+    so the snapshot would end early and lose its end marker."""
+    diag = (Path(__file__).resolve().parents[2] / "infra" / "gcp-games" / "diag.sh").read_text(encoding="utf-8")
+    block = diag[diag.index("EQ=akk-stack-eqemu-server-1"):diag.index("# ── end everquest ──")]
+    execs = [ln for ln in block.splitlines() if "docker exec" in ln]
+    assert execs and all("</dev/null" in ln for ln in execs)
+    assert "docker logs" not in block and "> /" not in block.replace("> /dev/null", "")   # read-only: no writes
+    assert diag.index("# ── end everquest ──") < diag.index('echo "=== end ==="')
