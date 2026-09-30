@@ -218,6 +218,13 @@ Not a profile in games/docker-compose.yml: `infra/gcp-games/everquest.sh`
 installer (~15-20 min). Ports: world 9000, login 5998-5999, zones 7000-7030/udp,
 chat 7779 (moved off 7778 for Dragonwilds). Only game ports are published.
 
+**The login server is switched on by config, not by the database.** Only the DB comes from home; the launcher
+starts the login server only when `web-admin.launcher.runLoginserver` is true and the world registers with it at
+`127.0.0.1:5998`, so `everquest.sh` sets both every start (a fresh VM had world + zones but nothing on 5998/5999:
+every login said "a connection to your server could not be reached"). It says "online at" only when UDP 5999 is bound
+inside the container. `ops restart-game everquest` re-runs the newest script from metadata without a reboot. RoF2's
+`eqhost.txt` is `[LoginServer]` / `Host=ip:5999`, not Titanium's `[Registration Servers]` braces.
+
 The Captain's home world (AkkStack in WSL on skippy-pc, own login server,
 account `gonif`, Golden Era rules in the DB) is carried over once:
 skippy-pc exports `SkippyTel/state/imports/everquest.sql.gz` → the home

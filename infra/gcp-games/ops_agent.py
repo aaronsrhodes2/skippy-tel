@@ -84,7 +84,23 @@ def cmd_stats(_args):
     return "\n\n".join(f"--- {title}\n{body}" for title, body in parts)
 
 
+def _restart_everquest() -> str:
+    """EverQuest is AkkStack, its own compose project, not one of our containers. Its start script is idempotent (it
+    re-applies the config, restarts the launcher and reports whether the login server is really listening), so
+    "restart" means: take the newest copy from metadata, as boot would, and run `start` again. No VM reboot."""
+    url = META.rsplit("/", 1)[0] + "/everquest-script"
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"Metadata-Flavor": "Google"}), timeout=20) as resp:
+        script = resp.read()
+    if not script.startswith(b"#!"):
+        raise RuntimeError("metadata everquest-script isn't a script; refusing to run it")
+    Path(EVERQUEST).write_bytes(script)
+    Path(EVERQUEST).chmod(0o755)
+    return run(EVERQUEST, "start", timeout=900) + "\nre-ran the EverQuest start script (config re-applied, launcher restarted)"
+
+
 def cmd_restart_game(args):
+    if args and args[0] == "everquest":
+        return _restart_everquest()
     name = container(args[0] if args else "")
     return run("docker", "restart", "--time", "60", name, timeout=180) + f"\nrestarted {name}"
 
