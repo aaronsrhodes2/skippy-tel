@@ -2,7 +2,7 @@
 
 **North star:** one AI, one memory, one bill, and personal infrastructure
 you own instead of rent — changed by asking, deployed by pushing.
-Last updated 2026-09-28.
+Last updated 2026-09-29.
 
 ## Tonight's victory condition
 - [ ] **CI/CD:** tell Claude a change → it pushes → GitHub Actions tests and deploys. No typed commands. → [`docs/cicd.md`](cicd.md)
@@ -37,9 +37,10 @@ Last updated 2026-09-28.
 | Games | **EverQuest (EQEmu)**: built 2026-09-29 (AkkStack on the VM, home DB relayed through the portal, own login server). Next: first-boot install test, import, player count for the game page |
 | Games | **In-game chat → Discord → portal** (backlogged until a real play session): a VM log watcher posts chat lines to the game's channel webhook, so they show in Discord and on the game page. Factorio logs `[CHAT]`, so it's the first candidate. **Dragonwilds: tested 2026-09-29, its server doesn't log chat** (a marker typed in game never reached the container log), so no bridge there; Valheim/Satisfactory don't without mods |
 | Games | First real session: Valheim / Dragonwilds (PC + Xbox crossplay); move Nitrado worlds, cancel Nitrado |
-| Home | **InsightFace down** on skippy-pc (face recognition behind HeyBuddy `/heybuddy/identify`; seen 2026-09-29 via `ops home`). Nothing else depends on it |
 | Memory | Install the history sync on the PC and MacBook; first real Claude export; Grok + Gemini parsers from real exports |
 | Secrets | Vault → Secret Manager sync in the deploy job (needs the Captain's OK for the IAM grant; manual `secrets.sh --from-env` until then) |
 | Bills | Cancel SuperGrok after Claude voice in the car is proven |
 | Streaming | MacBook side (Moonlight, pairing, hotspot test) |
 | Later | SkippyTel v2 core ([`docs/v2/CHARTER.md`](v2/CHARTER.md)); ARK (deferred, too heavy) |
+
+**Dropped:** face recognition (InsightFace, HeyBuddy) was dropped by the Captain's decision on 2026-09-29; do not re-add it.

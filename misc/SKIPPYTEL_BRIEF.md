@@ -14,7 +14,7 @@ the phone repo. Keep in sync manually when the zPhone copy updates.
 ## 1. What SkippyTel IS (and is NOT)
 
 **IS.**
-- An upstream AI inference service (LLM, Whisper, face recognition)
+- An upstream AI inference service (LLM, Whisper)
 - A **service control plane** — the single source of truth for what
   capabilities exist in the Skippy ecosystem, who has them, and how
   phones should surface them
@@ -56,7 +56,6 @@ the phone repo. Keep in sync manually when the zPhone copy updates.
 | `POST /translate/audio` | Multipart audio → `{detected_lang,english_text,confidence}`. Whisper + Gemini. | < 3s |
 | `POST /translate/text` | `{text,target_lang?}` → translation. | < 1s |
 | `GET /starmap?lat&lng&t_iso` | Celestial objects above horizon. Wraps `physics-mcp`. | Cacheable |
-| `POST /heybuddy/identify` | Face crop JPEG → `{match:{name,confidence}\|null}`. Face DB never leaves PC. | < 1s |
 | `GET /battery` | `{level,source,plugged,ups_state}`. Polled every 60s. | Sub-second |
 | `POST /image` | **Stub — 503 not_deployed.** Reserved for first-party SD service. | — |
 | `GET /services` | Live service manifest. See §4. | Sub-50ms probes |
@@ -171,7 +170,6 @@ DELETE /services/bilby
 | `image` | inline | null | **always false (stub)** |
 | `translate` | inline | null | always |
 | `ups` | overlay → topend | null | TCP probe :9338 |
-| `heybuddy` | inline | null | always |
 | `jellyfin` | companion → `org.jellyfin.mobile` | `http://skippy-pc:8096` | TCP probe :8096 |
 | `starmap` | overlay → viewport | null | **always false (stub)** |
 | `vault` | background | null | always |
@@ -193,12 +191,11 @@ DELETE /services/bilby
 
 ## 8. Privacy posture
 
-- **Face DB never leaves PC.**
 - **Voice audio never leaves the mesh.**
 - **Image generation** (when deployed) runs locally. No pixel reaches
   third-party APIs.
 - **Claude/Gemini** receive text intent queries only — never voice audio,
-  face crops, GPS, or image data. Ollama is always the default tier.
+  GPS, or image data. Ollama is always the default tier.
 
 ---
 

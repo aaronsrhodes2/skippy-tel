@@ -36,7 +36,6 @@ services/flask-api/app/
 │   ├── vault.py         # GET /vault/bootstrap, GET /phone, GET /apk/<app>
 │   ├── translate.py     # POST /translate/text, POST /translate/audio
 │   ├── image.py         # POST /image — Stable Diffusion proxy
-│   ├── heybuddy.py      # POST /heybuddy/identify — face recognition
 │   ├── battery.py       # POST /battery — phone battery reporting
 │   ├── starmap.py       # GET /starmap — star map data
 │   └── health.py        # GET /health

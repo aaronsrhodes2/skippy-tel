@@ -19,7 +19,6 @@ bp = Blueprint("status", __name__)
 
 _OLLAMA_URL     = "http://ollama:11434"
 _WHISPER_URL    = "http://skippytel-whisper:8000"
-_INSIGHTFACE_URL= "http://skippytel-insightface:8000"
 _UPS_URL        = "http://host.docker.internal:9338"
 _TAGS_DB        = Path("/drive-state/photo_tags.db")
 _TELEM_DB       = Path("/drive-state/ui_telemetry.db")
@@ -153,14 +152,12 @@ def snapshot() -> dict:
     this to the cloud portal)."""
     ollama_ok, ollama_msg = _ping(_OLLAMA_URL, "/api/tags")
     whisper_ok, whisper_msg = _ping(_WHISPER_URL)
-    iface_ok, iface_msg = _ping(_INSIGHTFACE_URL)
     drive_ok = _drive_ok()
     return {
         "services": [
             {"name": "flask-api", "port": "3003", "ok": True, "detail": "running"},
             {"name": "ollama", "port": "11434", "ok": ollama_ok, "detail": ollama_msg},
             {"name": "whisper", "port": "8000", "ok": whisper_ok, "detail": whisper_msg},
-            {"name": "insightface", "port": "8000", "ok": iface_ok, "detail": iface_msg},
             {"name": "google-drive", "port": "", "ok": drive_ok,
              "detail": "connected" if drive_ok else "not connected"},
         ],
@@ -185,7 +182,6 @@ def status_page():
     ollama_ok, ollama_msg = _ping(_OLLAMA_URL, "/api/tags")
     models    = _ollama_models()
     whisper_ok, whisper_msg   = _ping(_WHISPER_URL)
-    iface_ok,   iface_msg     = _ping(_INSIGHTFACE_URL)
     ups       = _ups_status()
     tags      = _tags_stats()
     telem     = _telem_stats()
@@ -196,7 +192,6 @@ def status_page():
         _row(_dot(True),  "flask-api",    "3003", '<span class="ok">running</span>'),
         _row(_dot(ollama_ok), "ollama",   "11434", ollama_msg),
         _row(_dot(whisper_ok), "whisper", "8000",  whisper_msg),
-        _row(_dot(iface_ok),  "insightface", "8000", iface_msg),
         _row(_dot(drive_ok), "google-drive", "—",
              '<span class="ok">connected</span>' if drive_ok
              else '<span class="err">not connected</span>'),

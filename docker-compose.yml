@@ -31,7 +31,6 @@ services:
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
       - WHISPER_BASE_URL=http://whisper:8000
-      - INSIGHTFACE_BASE_URL=http://insightface:8000
       - CLAUDE_BRIDGE_URL=http://host.docker.internal:9337
     extra_hosts:
       # solid gold / trust the awesomeness tiers reach the host-side
@@ -53,7 +52,6 @@ services:
     depends_on:
       - ollama
       - whisper
-      - insightface
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; urllib.request.urlopen('http://localhost:5000/health'); sys.exit(0)\" || exit 1"]
       interval: 30s
@@ -96,27 +94,6 @@ services:
       - HF_HOME=/root/.cache/huggingface
     volumes:
       - whisper-cache:/root/.cache/huggingface   # model weights persist
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
-  insightface:
-    build: ./services/insightface
-    container_name: skippytel-insightface
-    restart: unless-stopped
-    logging: *default-logging
-    expose:
-      - "8000"
-    environment:
-      - INSIGHTFACE_MODEL=${INSIGHTFACE_MODEL:-buffalo_l}
-      - MATCH_THRESHOLD=${MATCH_THRESHOLD:-0.40}
-    volumes:
-      - face-db:/data                           # SQLite embeddings persist
-      - insightface-cache:/root/.insightface    # buffalo_l model cache
     deploy:
       resources:
         reservations:
@@ -170,7 +147,6 @@ services:
   #   http://skippytel-flask-api:5000/health (via Docker network)
   #   http://skippytel-ollama:11434          (Ollama root responds 200)
   #   http://skippytel-whisper:8000/health
-  #   http://skippytel-insightface:8000/health
   uptime-kuma:
     image: louislam/uptime-kuma:latest
     container_name: skippytel-uptime-kuma
@@ -190,7 +166,5 @@ networks:
 volumes:
   ollama-data:
   whisper-cache:
-  face-db:
-  insightface-cache:
   uptime-kuma-data:
   music-studio-cache:

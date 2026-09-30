@@ -70,24 +70,6 @@ translate:
 	curl -s -F "audio=@/tmp/skippy-test.wav" -F "hint_lang=fr" \
 		http://localhost:3003/translate/audio | jq .
 
-# Hey Buddy — face enrollment + identification.
-# Usage:
-#   make enroll NAME=aaron PHOTO=C:/Users/aaron/Downloads/me.jpg
-#   make identify PHOTO=C:/Users/aaron/Downloads/someone.jpg
-#   make enrolled
-enroll:
-	@if [ -z "$(NAME)" ] || [ -z "$(PHOTO)" ]; then \
-		echo "usage: make enroll NAME=<name> PHOTO=<path>"; exit 2; fi
-	docker cp "$(PHOTO)" skippytel-insightface:/tmp/enroll.jpg
-	docker compose exec -T insightface python /app/enroll.py add "$(NAME)" /tmp/enroll.jpg
-
-identify:
-	@if [ -z "$(PHOTO)" ]; then echo "usage: make identify PHOTO=<path>"; exit 2; fi
-	curl -s -F "image=@$(PHOTO)" http://localhost:3003/heybuddy/identify | jq .
-
-enrolled:
-	docker compose exec -T insightface python /app/enroll.py list
-
 # Phone recovery — copy latest debug APKs from Android builds to apks/ staging.
 # Run after `gradlew assembleDebug` in the zPhone repo.
 # Container picks up new files immediately (bind mount, no restart needed).

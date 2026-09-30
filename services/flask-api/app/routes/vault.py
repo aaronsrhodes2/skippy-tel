@@ -63,7 +63,6 @@ def vault_bootstrap():
             "image":     False,   # not yet deployed — first-party SD service pending
             "bilby":     bool(settings.bilby_mac_url or settings.bilby_drive_folder_id),
             "translate": True,
-            "heybuddy":  True,
         },
         "apk_base_url": f"{skippy_tel_url}/apk",
         "phone_url":    f"{skippy_tel_url}/phone",

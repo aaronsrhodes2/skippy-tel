@@ -33,7 +33,6 @@ _SERVICE_META: dict[str, str] = {
     "image":     "#00FF88",
     "translate": "#FFFF44",
     "ups":       "#FF8800",
-    "heybuddy":  "#00FFDD",
     "starmap":   "#2244FF",
     "jellyfin":  "#FFAA00",
     "vault":     "#00FF44",

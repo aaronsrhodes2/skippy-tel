@@ -25,13 +25,13 @@ capabilities matter. v2 turns that pile into a coherent system.
 1. **Sovereignty ledger.** Every external dependency is listed in §7 with
    *why we rent it* and *how we'd leave*. Nothing rented is load-bearing
    without an exit plan. Default answer to "should we add a SaaS?" is no.
-2. **Local first, cloud by consent.** Inference, faces, voice, photos and
+2. **Local first, cloud by consent.** Inference, voice, photos and
    music run on hardware the Captain owns. Cloud LLM tiers stay explicit
    opt-in phrases (v1 rule kept: no silent fallback that burns tokens or
    leaks data).
 3. **Capabilities, not endpoints.** Everything Skippy can do is a
    *capability module* with a manifest (v1's `/services` idea, promoted to
-   the organising principle). The core knows nothing about music or faces;
+   the organising principle). The core knows nothing about music or photos;
    it knows how to route, authenticate, discover, and observe modules.
 4. **Reachable from anywhere, without trusting a third-party control
    plane.** Own the mesh (Headscale + our own DERP relay) and own the
@@ -74,7 +74,7 @@ flowchart LR
     K[Skippy Core<br/>gateway + registry + events]
     LLM[LLM runtime]
     V[Voice: STT / TTS]
-    PH[Photos + faces]
+    PH[Photos]
     MU[Music]
     ST[Sunshine<br/>game streaming]
     DB[(State root<br/>+ backups)]
@@ -92,7 +92,7 @@ flowchart LR
 
 | Tier | What lives there | Why there |
 |---|---|---|
-| **Core** (home) | Everything with a GPU or private data: LLMs, Whisper, TTS, faces, photos, music, Sunshine, the state root. | Owned hardware, zero marginal cost, data never leaves. |
+| **Core** (home) | Everything with a GPU or private data: LLMs, Whisper, TTS, photos, music, Sunshine, the state root. | Owned hardware, zero marginal cost, data never leaves. |
 | **Edge** (rented, tiny) | Public front door (Caddy), identity, Headscale, our DERP relay, game-server control. Always on, ~1–2 vCPU. | Needs a public IP and uptime independent of the home PC. Holds **no private data** — only routes it. |
 | **Burst** (rented, on-demand) | Dedicated game servers (Valheim, Factorio, ARK). Started by voice, auto-stopped when empty. | Friends need a stable public endpoint; paying per play-hour beats Nitrado's per-month-per-game. |
 
@@ -123,7 +123,7 @@ Core owns exactly five things:
 4. **Event bus** — server → client push that survives partitions: SSE /
    WebSocket stream with resume cursor, plus self-hosted **ntfy** for
    phone notifications (replaces "not a push channel" v1 limitation).
-5. **Resource arbiter** — the GPU is shared by LLMs, Whisper, faces,
+5. **Resource arbiter** — the GPU is shared by LLMs, Whisper,
    Stable Diffusion *and* games/streaming. Core owns "game mode": evict
    models from VRAM when Sunshine or a local game starts, reload after.
 
@@ -155,8 +155,7 @@ data: [state://photos]                     # what backup must cover
 | Speech-to-text | Whisper container; phone uses Android `SpeechRecognizer` (Google) | Streaming Whisper at Core; phone streams audio over mesh | **Google speech → owned** |
 | Text-to-speech | legacy `tts/` (Kokoro), unwired | Kokoro module, wired | — |
 | Translation | Whisper + Gemini | Whisper + local LLM | **Gemini → owned** |
-| Photos | DropShip on **Google Drive** + LLaVA tagger + SQLite FTS | **Immich** (self-hosted: CLIP search, face clustering, mobile backup app) behind a thin module | **Drive → owned** |
-| Face ID (Hey Buddy) | InsightFace container + SQLite | Merge into Immich faces, or keep InsightFace for the realtime HUD path | — |
+| Photos | DropShip on **Google Drive** + LLaVA tagger + SQLite FTS | **Immich** (self-hosted: CLIP search, mobile backup app) behind a thin module | **Drive → owned** |
 | Music / DJ | Drive + Syncthing folder + Mac Bilby | **Navidrome** (Subsonic API) over the local library; Bilby stays the DJ brain and registers as a module | **Drive → owned** |
 | Video | Jellyfin (external) | Jellyfin registered as module | — |
 | Image gen | stub / SD proxy | SD module under arbiter | — |
@@ -182,7 +181,7 @@ data: [state://photos]                     # what backup must cover
 - **Transport:** TLS everywhere (edge: public certs; mesh: Caddy internal
   CA or Tailscale-issued certs). Cleartext-inside-the-mesh ends.
 - **Edge holds no private data** — compromise of the rented VM leaks
-  routing metadata, not photos, faces, or chats.
+  routing metadata, not photos or chats.
 - **Secrets:** one `secrets/` scheme (sops + age) checked into the repo
   encrypted; no more `.env` drift between machines.
 
@@ -208,7 +207,7 @@ control plane, Google speech recognition, Gemini for translation.
 skippy-tel/
 ├── core/                 # Skippy Core — FastAPI gateway, registry, intent, events, arbiter
 ├── modules/              # one folder per capability (Dockerfile + manifest.yaml + code)
-│   ├── llm/  voice/  photos/  music/  faces/  games/  agent/  physics/  power/ ...
+│   ├── llm/  voice/  photos/  music/  games/  agent/  physics/  power/ ...
 ├── edge/                 # Caddy, Headscale, DERP, identity — compose for the edge VM
 ├── infra/                # OpenTofu: edge VM, burst game VM, firewall, DNS
 ├── contract/             # OpenAPI spec + manifest schema — the ONLY thing clients share
@@ -228,7 +227,7 @@ unmigrated `/v1` routes to the old Flask container until each is replaced.
 | **1 · Core** | FastAPI Core with registry, auth, envelope v2, event stream; `/v1/*` proxied to legacy | Nothing breaks; one front door |
 | **2 · Games** | `games` module + burst VM; Valheim & Factorio first, ARK after sizing | Cancel Nitrado |
 | **3 · Streaming** | Sunshine + Moonlight; arbiter game mode | Play PC games on the phone |
-| **4 · Data home** | Immich (photos + faces), Navidrome (music); DropShip & Drive retired | Google Drive dependency gone |
+| **4 · Data home** | Immich (photos), Navidrome (music); DropShip & Drive retired | Google Drive dependency gone |
 | **5 · Voice** | Streaming Whisper + Kokoro end to end; phone off Google speech | Voice never leaves the mesh |
 | **6 · Retire v1** | Last `/v1` route migrated; `legacy/v1` deleted; phone apps on contract v2 | One coherent system |
 

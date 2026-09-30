@@ -266,30 +266,6 @@ def _build_manifest() -> list[dict]:
             },
         },
         {
-            "id":      "heybuddy",
-            "name":    "Hey Buddy",
-            "tagline": "Face recognition — DB stays on Skippy PC",
-            "available": True,
-            "status_detail": None,
-            "capabilities": ["chat"],
-            "zphone_compliant": True,
-            "base_url": None,
-            "display": {
-                "mode":         "inline",
-                "hud_zone":     None,
-                "companion_app": None,
-                "inline_target": "chat",
-            },
-            "voice_triggers": [
-                "who is that",
-                "identify person",
-                "hey buddy",
-            ],
-            "endpoints": {
-                "identify": "/heybuddy/identify",
-            },
-        },
-        {
             "id":      "starmap",
             "name":    "StarMap",
             "tagline": "Celestial bodies overhead — stub, physics service pending",

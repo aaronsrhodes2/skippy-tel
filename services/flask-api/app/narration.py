@@ -64,10 +64,6 @@ _NARRATIONS: dict[str, list[str]] = {
         "Skippy bridges the solid gold channel. Fancy.",
         "Solid gold mode engaged. Read-only and magnificent.",
     ],
-    "heybuddy": [
-        "Skippy squints at the face in the image and checks his files.",
-        "Facial recognition engaged. Skippy knows everyone.",
-    ],
     "ups": [
         "Skippy pings the UPS. It beeps back reassuringly.",
         "Skippy checks the power situation with practiced ease.",

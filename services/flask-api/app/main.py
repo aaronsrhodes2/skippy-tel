@@ -14,7 +14,6 @@ from app.routes.intent    import bp as intent_bp
 from app.routes.battery   import bp as battery_bp
 from app.routes.starmap   import bp as starmap_bp
 from app.routes.translate import bp as translate_bp
-from app.routes.heybuddy  import bp as heybuddy_bp
 from app.routes.image     import bp as image_bp
 from app.routes.bilby         import bp as bilby_bp
 from app.routes.bilby_proxy   import bp as bilby_proxy_bp
@@ -83,7 +82,6 @@ def create_app() -> Flask:
     app.register_blueprint(battery_bp)
     app.register_blueprint(starmap_bp)
     app.register_blueprint(translate_bp)
-    app.register_blueprint(heybuddy_bp)
     app.register_blueprint(image_bp)
     app.register_blueprint(bilby_bp)
     app.register_blueprint(bilby_proxy_bp)
