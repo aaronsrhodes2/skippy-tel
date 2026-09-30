@@ -35,6 +35,7 @@ import re
 
 import diagnostics
 import ops
+import readiness
 import tool_policy
 from catalog import GAMES
 
@@ -283,14 +284,15 @@ class ChatTools:
         running = s.status == "RUNNING"
         up = s.minutes_up()
         games = {}
-        codes = diagnostics.current_join_codes(self.vm) if running else {}
+        codes, _players, ready = diagnostics.live_all(self.vm, s.started_at) if running else ({}, {}, {})
         for g in s.games:
             if g not in GAMES or g not in self.visible:
                 continue
             game = GAMES[g]
             info = {"name": game.name, "usually_joinable_after_boot_min": game.ready_minutes}
             if running:
-                info["joinable_now"] = up is None or up >= game.ready_minutes
+                # The game's own log says when it's joinable; the boot timer only when the log gives no answer.
+                info["joinable_now"] = not readiness.is_starting(g, ready.get(g), up, game.ready_minutes)
                 info["how_to_connect"] = _plain(game.connect(s.external_ip or "?", s.env))
                 if g in codes:
                     info["invite_code"] = codes[g]   # what the game asks for is on its page (Game.invite_hint); new each boot

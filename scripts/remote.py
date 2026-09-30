@@ -77,6 +77,7 @@ def status(vm) -> dict:
         "max_hours": s.max_hours,                    # the watchdog's session ceiling (0 = none)
         "minutes_up": s.minutes_up(),
         "invite_codes": codes,
+        "ready": diagnostics.current_ready(vm, s.started_at) if s.status == "RUNNING" else {},   # each game's own log: joinable?
         "missing_settings": {g: missing_settings(g, s.env) for g in GAMES if missing_settings(g, s.env)},
         # Setting values only where they aren't secret; secrets just say whether they're set.
         "settings": {k: ("(set)" if is_secret(k) and v else v) for k, v in sorted(s.env.items())},

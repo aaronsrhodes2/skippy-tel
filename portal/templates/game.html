@@ -50,7 +50,8 @@
   {% set asleep = status and status.status == 'TERMINATED' %}
   {% set on = running and game.id in status.games %}
   {% set up = status.minutes_up() if status else none %}
-  {% set starting = on and up is not none and up < game.ready_minutes %}
+  {# `starting` comes from the view: the game's own log says when it's joinable (portal/readiness.py), the boot timer
+     (game.ready_minutes) only stands in when the log gives no answer. #}
 
   <div class="hero">
     {% if banner %}<img src="{{ banner }}" alt="">{% endif %}

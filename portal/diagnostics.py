@@ -7,6 +7,7 @@ before anything is shown. Stdlib only.
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 
 from catalog import GAMES
 
@@ -55,6 +56,38 @@ def players_online(snapshot: str) -> dict[str, int]:
     return {g: int(n) for g, n in re.findall(r"^PLAYERS (\w+)=(\d+)$", snapshot, re.M)}
 
 
+# >>> readiness (portal/readiness.py explains the markers; infra/gcp-games/diag.sh writes the lines)
+_READY_LINE = re.compile(r"^READY (\w+)=([01])$", re.M)
+_SNAPSHOT_TIME = re.compile(r"^=== skippy-diag (\S+) ===", re.M)
+
+
+def snapshot_time(snapshot: str) -> datetime | None:
+    """When the snapshot was taken, from its header (`=== skippy-diag 2026-09-30T06:49:16+00:00 ===`, `date -Is`)."""
+    found = _SNAPSHOT_TIME.search(snapshot)
+    if not found:
+        return None
+    try:
+        taken = datetime.fromisoformat(found.group(1))
+    except ValueError:
+        return None
+    return taken if taken.tzinfo else taken.replace(tzinfo=timezone.utc)
+
+
+def ready_states(snapshot: str, booted_at: datetime | None = None) -> dict[str, bool]:
+    """Is each game joinable, from the `READY <game>=<0|1>` lines skippy-diag writes from the games' own logs.
+
+    A game with no line isn't in the result: the caller falls back to the boot timer. Given `booted_at` (the VM's last
+    start), a snapshot taken before it, or one whose header can't be read, describes the PREVIOUS session (the serial
+    port can keep its output across a restart, and the first snapshot of a boot lands a minute in) and counts as
+    no answer: "ready" from yesterday's boot must never show as ready now."""
+    if booted_at is not None:
+        taken = snapshot_time(snapshot)
+        if taken is None or taken < booted_at:
+            return {}
+    return {game: value == "1" for game, value in _READY_LINE.findall(snapshot)}
+# <<< readiness
+
+
 def resources(snapshot: str) -> dict:
     """Memory and world-disk use (%) from a snapshot's `free -m` / `df -h` lines."""
     out = {}
@@ -70,11 +103,23 @@ def resources(snapshot: str) -> dict:
 
 def live(vm) -> tuple[dict[str, str], dict[str, int]]:
     """(invite codes, players online) from one fresh snapshot read."""
+    codes, players, _ = live_all(vm)
+    return codes, players
+
+
+def live_all(vm, booted_at: datetime | None = None) -> tuple[dict[str, str], dict[str, int], dict[str, bool]]:
+    """(invite codes, players online, joinable per game) from one fresh snapshot read. `booted_at`: see ready_states."""
     try:
         snap = latest_snapshot(vm.serial_output(2))
     except Exception:   # noqa: BLE001 — niceties; never break the page
-        return {}, {}
-    return join_codes(snap), players_online(snap)
+        return {}, {}, {}
+    return join_codes(snap), players_online(snap), ready_states(snap, booted_at)
+
+
+def current_ready(vm, booted_at: datetime | None = None) -> dict[str, bool]:
+    """Which games are joinable right now (≤2 minutes old). Empty when the VM is off, the snapshot isn't there yet or is
+    from before this boot, or the serial port can't be read."""
+    return live_all(vm, booted_at)[2]
 
 
 def for_game(snapshot: str, container: str) -> str:
@@ -85,6 +130,7 @@ def for_game(snapshot: str, container: str) -> str:
     lines = snapshot.splitlines()
     out = [ln for ln in lines[1:3] if ln.startswith("NAMES")]            # the ps header
     out += [ln for ln in lines if ln.split()[:1] == [container]]         # its ps row
+    out += [ln for ln in lines if ln.startswith(f"READY {container}=")]  # and whether its own log says it's joinable
     marker = f"--- {container}: "
     if marker in snapshot:
         section = snapshot.split(marker, 1)[1]
