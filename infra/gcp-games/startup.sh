@@ -141,6 +141,15 @@ systemctl enable --now skippy-idle-watchdog.timer skippy-diag.timer skippy-ops.s
 iptables -C DOCKER-USER -d 169.254.169.254 -j DROP 2>/dev/null \
   || iptables -I DOCKER-USER -d 169.254.169.254 -j DROP \
   || echo "WARNING: couldn't fence the metadata server off from containers"
+# One hole in the fence: DNS. On GCE the metadata server's address is also the VM's DNS resolver, and `docker build`
+# (any container on Docker's default bridge) takes its resolver from the host, so dropping everything to that address
+# broke name lookups inside builds: EverQuest's install died in the PEQ-editor image with "DNS: transient error".
+# Only port 53 goes through (inserted above the DROP); the metadata HTTP API on port 80 stays blocked.
+for proto in udp tcp; do
+  iptables -C DOCKER-USER -d 169.254.169.254 -p "$proto" --dport 53 -j ACCEPT 2>/dev/null \
+    || iptables -I DOCKER-USER 1 -d 169.254.169.254 -p "$proto" --dport 53 -j ACCEPT \
+    || echo "WARNING: couldn't let container DNS through to the resolver ($proto)"
+done
 
 # ── 5. Games ──────────────────────────────────────────────────────────────────
 GAMES=$(meta games)
