@@ -148,6 +148,15 @@ next boot).
 | Satisfactory | UDP+TCP 7777, TCP 8888 | The first player to connect claims the server and sets the admin + join passwords. Do this right away. |
 | Dragonwilds | UDP **7778** (moved off 7777 so it can run beside Satisfactory) | `DRAGONWILDS_OWNER_ID` + `DRAGONWILDS_ADMIN_PASSWORD` required. Players join with the **invite code** shown on the portal's Dragonwilds page (new every boot), or search the server name in the Public tab (whole name, exact case: `Skippy` won't find `SkippyScape`) plus the world password; crossplay with Xbox/PS5/Switch 2. Up to 6 players. |
 
+### Mods and server versions
+Each game's page has an admin-only **Server admin** card: the installed version, how old the image is, the mods the
+server loaded, when it last updated, and the update policy the next start will follow, next to **Restart & update**.
+Every boot already re-pulls the images and the servers update their game files (Valheim, Satisfactory and Dragonwilds
+from Steam; Factorio by its image tag). Optional Admin settings add the rest: Factorio mod updates and pinning a version,
+Valheim's BepInEx mods, skipping a Steam update. Nothing changes until one is turned on. What each image really
+supports, where mods live on the data disk, and what is unsupported (there is no upload and no installer) is in
+[MODS_AND_UPDATES.md](MODS_AND_UPDATES.md).
+
 ### Moving a Nitrado world over
 Download the save from Nitrado's file browser, `scripts/games.sh up <game>` once so the folders
 exist, then copy the save onto the VM

@@ -132,6 +132,7 @@ resource "google_compute_instance" "games" {
     ops-agent        = file("${path.module}/ops_agent.py")
     valheim-seed     = file("${path.module}/valheim_seed.py")
     game-backup      = file("${path.module}/game_backup.py")
+    game-facts       = file("${path.module}/game_facts.py")     # diag.sh runs it: versions and mods for the portal's admin card
     discord-notify   = file("${path.module}/discord-notify.py")
     compose-file     = file("${path.module}/../../games/docker-compose.yml")
     games            = "valheim"

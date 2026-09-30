@@ -88,6 +88,12 @@ downloads the update (a few extra minutes). The Discord channel gets a
   boot. So: edit settings → Restart → applied. No `.env` files, no `nano`.
 - **Restart = update:** every boot re-pulls the server images, and
   Dragonwilds/Valheim update their game files on start.
+- **Server admin card (admin only):** on each game's page, in the Admin block: installed version, image age, mods, when it
+  last updated, the update policy in effect. The facts come from the VM's snapshot (`diag.sh` runs
+  [`game_facts.py`](../../infra/gcp-games/game_facts.py) every 2 minutes; [`portal/diagnostics.py`](../../portal/diagnostics.py)
+  parses it; [`portal/admin_panel.py`](../../portal/admin_panel.py) builds the card and its one refresh route,
+  `GET /admin/games/<game>/panel`, admin-only: a friend gets 403). Controls are ordinary Admin settings. Per-game details:
+  [docs/games/MODS_AND_UPDATES.md](../games/MODS_AND_UPDATES.md).
 - **Discord:** the admin button ([`portal/discord_admin.py`](../../portal/discord_admin.py))
   creates `#game` + 🔊 voice channels, a webhook and a pinned status post per
   game, and stores the IDs/webhooks in `games-env` — which is where the

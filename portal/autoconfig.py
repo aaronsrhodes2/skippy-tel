@@ -108,7 +108,7 @@ def plan(env: dict[str, str], games: dict[str, Game], join_password: str | None 
                         put(s.key, join_password, out.chosen)
                 elif current in PLACEHOLDERS:
                     put(s.key, _friendly_password(), out.generated)
-            elif s.secret and current in PLACEHOLDERS:
+            elif s.secret and not s.external and current in PLACEHOLDERS:      # (a token someone else issued can't be made up)
                 put(s.key, secrets.token_urlsafe(12), out.generated)
             elif s.key in DEFAULTS and current == "":
                 put(s.key, DEFAULTS[s.key], out.defaults)

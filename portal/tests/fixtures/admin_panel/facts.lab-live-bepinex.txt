@@ -1,0 +1,10 @@
+VERSION valheim=l-1.0.16 (Steam build 25527701)
+IMAGE valheim=ghcr.io/lloesche/valheim-server:latest 2026-09-19T19:48:18Z
+UPDATED valheim=2026-09-30T06:48:47Z
+STARTED valheim=2026-09-30T07:01:53Z
+MODS valheim=BepInExPack_Valheim@5.4.2351
+VERSION factorio=2.0.77 (build 84539)
+IMAGE factorio=factoriotools/factorio:stable 2026-09-22T14:38:42Z
+STARTED factorio=2026-09-30T07:02:41Z
+MODS factorio=base@2.0.77;elevated-rails@2.0.77;quality@2.0.77;skippy-lab-control@1.0.0;skippy-lab-mod@0.1.3;space-age@2.0.77
+MODUPDATE factorio=checked:2,downloaded:0,current:0,failed:0,skipped:2,nocreds:1

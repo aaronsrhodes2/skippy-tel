@@ -1,0 +1,39 @@
+{# The "Server admin" card: version, image age, mods, update policy. ADMIN ONLY: game.html includes this inside its
+   `is_admin and status` block and nowhere else, and the refresh route (admin_panel.py) is admin_required, so nothing
+   here reaches a friend. `server_admin_panel` is the template global admin_panel.init_app registers; it reads the
+   VM's newest snapshot, so it must only be called from here. Needs `game` and `status`. #}
+{% set panel = server_admin_panel(game, status) %}
+<div id="server-admin" class="server-admin">
+  <h3>Server admin</h3>
+  <div id="server-admin-body">{% include "_server_admin_body.html" %}</div>
+</div>
+<style>
+  .server-admin { margin-bottom: 14px; }
+  .server-admin h4 { margin: 14px 0 4px; color: var(--accent2); font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; }
+  .server-admin .facts { margin-top: 4px; }
+  .server-admin .facts div { overflow-wrap: anywhere; }      /* a long image tag wraps inside its box */
+  .server-admin table { margin: 4px 0; }
+  .server-admin td.ver { font-family: var(--mono); }
+  .server-admin ul.policy { list-style: none; margin: 4px 0; padding: 0; }
+  .server-admin ul.policy li { margin: 6px 0; font-size: .9rem; }
+  .server-admin .state { font-size: .68rem; padding: 1px 8px; margin-right: 4px; text-transform: uppercase; }
+  .server-admin .state-on, .server-admin .state-auto { color: var(--green); }
+  .server-admin .state-pinned { color: var(--amber); }
+  .server-admin .state-off, .server-admin .state-none, .server-admin .state-manual { color: var(--muted); }
+</style>
+<script>
+  /* Keeps the card current while the page stays open: the VM's snapshot is refreshed every 2 minutes. Admin only,
+     like the card; the fragment it fetches is rendered by the same partial as the card itself. */
+  (function () {
+    const body = document.getElementById("server-admin-body");
+    const url = "{{ url_for('server_admin.fragment', gid=game.id) }}";
+    async function refresh() {
+      if (document.hidden) return;
+      try {
+        const res = await fetch(url, {headers: {"Accept": "text/html"}, cache: "no-store"});
+        if (res.ok) body.innerHTML = await res.text();
+      } catch (e) { /* a network blip: the next poll catches up */ }
+    }
+    setInterval(refresh, 60000);
+  })();
+</script>
