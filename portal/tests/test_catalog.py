@@ -106,3 +106,18 @@ def test_satisfactory_tells_people_to_use_the_server_manager_not_join_game():
     assert "first player to connect claims" in game.direct_hint
     notify = (Path(__file__).resolve().parents[2] / "infra" / "gcp-games" / "discord-notify.py").read_text(encoding="utf-8")
     assert "Encryption Token Missing" in notify
+
+
+def test_everquests_eqhost_block_is_the_rof2_format_not_titanium():
+    """Reported 2026-09-30: the page gave the Titanium-era [Registration Servers]/[Login Servers] braces block; the RoF2
+    client can't read it, replaces the file with its stock one (Host=xp-smitchell:7308, a dead developer host) and login
+    shows 'a timeout has occurred'. RoF2 wants [LoginServer] / Host=ip:port."""
+    game = GAMES["everquest"]
+    label, block = game.snippet("1.2.3.4", {})
+    assert block.splitlines() == ["[LoginServer]", "Host=1.2.3.4:5999", "Host1="]
+    assert "Registration Servers" not in block and "{" not in block
+    for text in (game.connect("1.2.3.4", {}), game.direct_hint):
+        assert "xp-smitchell" in text or "[LoginServer]" in text
+    assert "RoF2" in label and "read-only" in game.direct_hint
+    notify = (Path(__file__).resolve().parents[2] / "infra" / "gcp-games" / "discord-notify.py").read_text(encoding="utf-8")
+    assert "[LoginServer]" in notify and "Registration Servers" not in notify

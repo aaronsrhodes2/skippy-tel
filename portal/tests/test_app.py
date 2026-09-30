@@ -712,7 +712,8 @@ def test_every_game_says_what_to_type_and_where(env):
     vm.state.games = ["everquest"]
     import html  # noqa: PLC0415
     page = html.unescape(client.get("/games/everquest").data.decode())                          # what the browser copies
-    assert '<pre class="copy">[Registration Servers]\n{\n"35.1.2.3:5999"\n}\n[Login Servers]\n{\n"35.1.2.3:5999"\n}</pre>' in page
+    assert '<pre class="copy">[LoginServer]\nHost=35.1.2.3:5999\nHost1=</pre>' in page             # RoF2's format (the Titanium braces one is thrown away)
+    assert "[Registration Servers]" not in page.split('<pre class="copy">')[1].split("</pre>")[0]
     assert "click to copy" in page and '<script src="/static/copy.js" defer></script>' in page     # the copy behaviour ships on every page
 
 

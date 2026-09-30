@@ -217,17 +217,19 @@ GAMES: dict[str, Game] = {
         "The Captain's Golden Era EverQuest (EQEmu): soloable with bots and mercs, XP x3, no death penalty.",
         ram_gb=6,
         connect=lambda ip, env: (
-            "RoF2 client: in <code>eqhost.txt</code> change the address in both the "
-            f"<code>[Registration Servers]</code> and <code>[Login Servers]</code> blocks to "
-            f"<code>\"{ip}:5999\"</code>, start <code>eqgame.exe patchme</code>, and log in: "
+            "RoF2 client: in <code>eqhost.txt</code> put <code>[LoginServer]</code> with "
+            f"<code>Host={ip}:5999</code> (RoF2's format; the older <code>[Registration Servers]</code> braces "
+            "format is Titanium's and RoF2 throws it away), start <code>eqgame.exe patchme</code>, and log in: "
             "a new name + password creates your account"
         ),
         ready_minutes=8,
         direct=lambda ip, env: f"{ip}:5999",
-        direct_hint="This is the login server. It goes in <code>eqhost.txt</code>, in the block below.",
-        snippet=lambda ip, env: ("eqhost.txt: replace the file's contents with this, then start "
+        direct_hint="This is the login server. It goes in <code>eqhost.txt</code>, in the block below. If the game "
+                    "puts its own <code>Host=xp-smitchell:7308</code> back, the file wasn't read (wrong format) or was "
+                    "restored: close the game, paste the block again and mark the file read-only.",
+        snippet=lambda ip, env: ("eqhost.txt (RoF2): replace the file's contents with this, then start "
                                  "eqgame.exe patchme; a new name + password creates your account",
-                                 f'[Registration Servers]\n{{\n"{ip}:5999"\n}}\n[Login Servers]\n{{\n"{ip}:5999"\n}}'),
+                                 f"[LoginServer]\nHost={ip}:5999\nHost1="),
         icon="🧙",
         theme=Theme(accent="#d4af37", accent2="#6a8cc7", bg="#0b0a12", card="#171425", text="#e8e2d0",
                     font="Cinzel",
