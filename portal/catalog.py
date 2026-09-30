@@ -50,7 +50,6 @@ class Game:
     invite_hint: str = ""                # HTML-safe: where to type the invite code in the game
     direct: Callable[[str, dict], str] | None = None   # (ip, settings) -> "ip:port" for a Direct-connect box
     direct_hint: str = ""                # HTML-safe: where to type that address in the game
-    direct_port: str = ""                # when the game's dialog has a separate Port box: the port, shown as its own copy chip
     via_list: bool = False               # the game's server list finds it by name: `connect` says how (the fallback)
     snippet: Callable[[str, dict], tuple[str, str]] | None = None   # (ip, settings) -> (label, text): a block to copy as-is
     theme: Theme | None = None
@@ -190,12 +189,12 @@ GAMES: dict[str, Game] = {
         "satisfactory", "Satisfactory",
         "3D factory-building co-op on an alien planet.",
         ram_gb=12,
-        connect=lambda ip, env: f"Server Manager &rarr; Add Server &rarr; address <code>{ip}</code>, port <code>7777</code>",
+        connect=lambda ip, env: f"Server Manager &rarr; Add Server &rarr; <code>{ip}:7777</code>",
         settings=(Setting("SATISFACTORY_MAX_PLAYERS", "Max players"),),
-        direct=lambda ip, env: ip,                       # no invite codes and no server list; its Add Server dialog has two boxes
-        direct_port="7777",                              # ...so the port gets its own copy chip beside the address
-        direct_hint="In game: Server Manager &rarr; <b>Add Server</b>: the address in the first box, the port in the "
-                    "second. Same address every session.",
+        direct=lambda ip, env: f"{ip}:7777",             # no invite codes (its Session ID is for player-hosted games) and no server list
+        direct_hint="In game: Server Manager &rarr; <b>Add Server</b> &rarr; paste it in the address box. "
+                    "Same address every session. The first player to connect claims the server and sets its "
+                    "admin password: do that right away.",
         icon="🏭",
         theme=Theme(accent="#fa9549", accent2="#5fb6d9", bg="#0d1216", card="#18222a", text="#e2ecf2",
                     font="Rajdhani",
@@ -203,7 +202,7 @@ GAMES: dict[str, Game] = {
                             "linear-gradient(135deg, rgba(250,149,73,.25), transparent 60%)",
                     tagline="FICSIT reminds you: efficiency is mandatory."),
         facts=(("Players", "4 recommended, more configurable"),
-               ("Joined by", "Server Manager, IP + port 7777")),
+               ("Joined by", "Server Manager, address ip:7777")),
         links=(("Official site", "https://www.satisfactorygame.com"),
                ("Wiki", "https://satisfactory.wiki.gg")),
     ),

@@ -51,7 +51,7 @@ GAMES = {
     "satisfactory": (
         "Satisfactory",
         "3D factory-building co-op on an alien planet.",
-        lambda ip, e: f"Server Manager → Add Server → `{ip}` port `7777`",
+        lambda ip, e: f"Server Manager → Add Server → `{ip}:7777`\nThe first player to connect claims the server: do it right away",
     ),
     "dragonwilds": (
         "RuneScape: Dragonwilds",

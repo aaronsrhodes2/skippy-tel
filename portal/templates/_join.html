@@ -18,7 +18,6 @@
   {% endif %}
   {% if address %}
     <p><b>{{ 'Or the address' if invite_on else 'Address' }}</b> <code class="code">{{ address }}</code>
-      {% if game.direct_port %}<b>Port</b> <code class="code">{{ game.direct_port }}</code>{% endif %}
       <br><span class="help">{{ game.direct_hint | safe }}</span></p>
   {% elif not invite_on %}
     <p>{{ game.connect(status.external_ip, status.env) | safe }}</p>
@@ -38,7 +37,7 @@
   {# Everything a friend needs, as one message to paste into Discord or a text: one click instead of one copy per item. #}
   {% set share = [] %}
   {% if invite_on and code %}{% set _ = share.append('join code ' ~ code) %}{% endif %}
-  {% if address %}{% set _ = share.append('address ' ~ address ~ (', port ' ~ game.direct_port if game.direct_port else '')) %}{% endif %}
+  {% if address %}{% set _ = share.append('address ' ~ address) %}{% endif %}
   {% if pw %}{% set _ = share.append('password ' ~ pw) %}{% endif %}
   {% if share %}<p><button type="button" data-copy="{{ game.name }}: {{ share | join(', ') }}">Copy it all to share</button></p>{% endif %}
 </div>

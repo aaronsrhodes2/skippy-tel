@@ -73,13 +73,23 @@ def test_a_factorio_address_is_one_paste_with_the_port_in_it(env):
     assert "Connect to address" in page
 
 
-def test_a_game_with_two_boxes_gets_a_chip_for_each_and_everything_can_be_copied_at_once(env):
+def test_an_address_and_port_are_never_two_copy_operations(env):
+    """The Captain's rule (twice, once per game): what goes in one box is one chip, `ip:port`."""
+    from catalog import GAMES  # noqa: PLC0415
     client, vm, _ = env
     login(client, ADMIN)
+    for gid, game in GAMES.items():
+        running(vm, gid)
+        vm.state.env["VALHEIM_CROSSPLAY"] = "false"
+        join = join_block(client, gid)
+        assert "<b>Port</b>" not in join, f"{gid} shows the port as a separate item"
+        address = game.direct("35.1.2.3", vm.state.env)
+        assert re.search(r"^35\.1\.2\.3:\d+$", address), f"{gid}'s address should carry its port: {address}"
+        assert f'<code class="code">{address}</code>' in join
     running(vm, "satisfactory")
     join = join_block(client, "satisfactory")
-    assert '<code class="code">35.1.2.3</code>' in join and '<b>Port</b> <code class="code">7777</code>' in join
-    assert 'data-copy="Satisfactory: address 35.1.2.3, port 7777"' in join              # one click for the whole message
+    assert '<code class="code">35.1.2.3:7777</code>' in join
+    assert 'data-copy="Satisfactory: address 35.1.2.3:7777"' in join                    # one click for the whole message
 
     vm.state.env["VALHEIM_CROSSPLAY"] = "true"
     vm.serial[2] = "=== skippy-diag t ===\nJOIN_CODE valheim=106969\n=== end ===\n"
