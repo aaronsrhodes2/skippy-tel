@@ -255,8 +255,11 @@ def _bool(value: str) -> tuple[str, str | None]:
 
 
 def _factorio_version(value: str) -> tuple[str, str | None]:
+    # ASCII digits only (a Unicode `\d` also takes Arabic-Indic and full-width digits, which are no image tag) and a
+    # sane length. Only the shape is checked: a well-formed version that has no Docker Hub tag still passes, and
+    # infra/gcp-games/startup.sh is what keeps such a tag from stopping the other games at boot.
     v = value.strip().lower()
-    if v in ("stable", "latest") or re.fullmatch(r"\d+\.\d+\.\d+", v):
+    if v in ("stable", "latest") or re.fullmatch(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,4}", v):
         return v, None
     return value, "must be stable, latest, or an exact version such as 2.0.77"
 

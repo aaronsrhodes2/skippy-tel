@@ -11,7 +11,9 @@ every boot) and run every 5 minutes by skippy-idle-watchdog.timer.
 What counts as a player (every number below was observed on real Linux, see portal/tests/test_idle_watchdog.py):
 
   1. A game's own log, where it gives an exact count: Valheim's crossplay session line, Valheim's Steam
-     "Got connection SteamID" / "Closing socket" pairs, Factorio's [JOIN] / [LEAVE].
+     "Got connection SteamID" / "Closing socket" pairs, Factorio's [JOIN] / [LEAVE]. Counted from the game's latest
+     start only (BOOT below): a restarted or crashed game writes no "left" line for the players it cut off, and
+     `docker logs` keeps the old run's lines.
   2. Packets on ASSURED conntrack flows to the game ports. The kernel sets ASSURED only when a flow was answered
      AND kept going for over 2 seconds: a player's stream, never a scanner's one-shot probe. An iptables rule with
      `-m conntrack --ctstatus ASSURED` counts them over the whole interval (a snapshot of the flow table alone
@@ -76,6 +78,7 @@ META = "http://metadata.google.internal/computeMetadata/v1/instance/attributes/"
 DISCORD = "/usr/local/bin/skippy-discord"
 EVERQUEST = "/usr/local/bin/skippy-everquest"
 TAG = "skippy-idle"                        # journald tag: journalctl -t skippy-idle
+OFFLINE_NOTE = "offline-posted"            # in STATE: Discord was told about this sleep (shutdown.sh reads it)
 
 RULE_RAW = "skippy-games"                  # counts every packet to the game ports
 RULE_ASSURED = "skippy-games-assured"      # counts the packets of ASSURED (two-way, sustained) flows only
@@ -258,22 +261,36 @@ _STEAM_OUT = re.compile(r"Closing socket (\d+)")
 _JOIN = re.compile(r"\[JOIN\]\s+(.+?)\s+joined the game")
 _LEAVE = re.compile(r"\[LEAVE\]\s+(.+?)\s+left the game")
 
+# When a game (re)starts, the players it had are gone, and a killed process writes no "left" line. `docker logs` keeps
+# the old run's lines (a `docker restart`, a crash under `restart: unless-stopped` and supervisord respawning Valheim's
+# server all keep the container), so a count is only ever a count of the players since the latest of these lines. They
+# are the boot markers of portal/readiness.py and diag.sh (portal/tests pins that they are the same).
+BOOT = {
+    "valheim": re.compile("supervisord started with pid|valheim-server INFO - Running Valheim Server"),
+    "factorio": re.compile("Factorio [0-9.]+ [(]build [0-9]+"),
+}
+
 
 def valheim_players(log: str) -> tuple[int | None, bool]:
     """(players, crossplay). A crossplay server (its log mentions a join code; a normal one never does) says how many
     players it has on its session lines, and only there: crossplay players never touch port 2456. The last such line
     is the current count. Steam connections are paired as well (`Got connection SteamID N` opens one, `Closing
-    socket N` closes it) and the larger number wins. None = a crossplay server that has not said yet."""
+    socket N` closes it) and the larger number wins. Everything is counted from the latest start of the game (a
+    restart or a crash cuts every player off without a `Closing socket`). None = a crossplay server that has not said
+    yet (also right after a restart: the join code in the log is from before it, but the count is not)."""
     connected: set[str] = set()
     said: int | None = None
     for line in log.splitlines():
-        if (m := _STEAM_IN.search(line)):
+        if BOOT["valheim"].search(line):
+            connected.clear()
+            said = None
+        elif (m := _STEAM_IN.search(line)):
             connected.add(m.group(1))
         elif (m := _STEAM_OUT.search(line)):
             connected.discard(m.group(1))
         elif (m := _CROSSPLAY.search(line)):
             said = int(m.group(1) or m.group(2))
-    crossplay = "join code" in log
+    crossplay = "join code" in log                     # a setting of the container, so the whole log may say it
     if not crossplay:
         return len(connected), False
     if said is None and not connected:
@@ -282,10 +299,13 @@ def valheim_players(log: str) -> tuple[int | None, bool]:
 
 
 def factorio_players(log: str) -> int:
-    """Names between `[JOIN] name joined the game` and `[LEAVE] name left the game`."""
+    """Names between `[JOIN] name joined the game` and `[LEAVE] name left the game`, since the latest start of Factorio
+    (a restart or a crash writes no `[LEAVE]` for the players it cut off)."""
     online: set[str] = set()
     for line in log.splitlines():
-        if (m := _JOIN.search(line)):
+        if BOOT["factorio"].search(line):
+            online.clear()
+        elif (m := _JOIN.search(line)):
             online.add(m.group(1))
         elif (m := _LEAVE.search(line)):
             online.discard(m.group(1))
@@ -526,13 +546,37 @@ def describe(s: Sample, a: Assessment, idle_min: int, cfg: Config) -> str:
             f"up {s.uptime_s / 3600:.1f} h of {limit}")
 
 
+def _stop_step(label: str, argv: list[str], timeout: float, runner) -> int:
+    """Run one step of the shutdown and say in the journal how it went: its exit status and the last lines of what it
+    printed (a failed or timed-out `docker compose stop` is the one thing to know when a world is missing its last
+    save). Returns the exit status; a failed step never stops the next one."""
+    rc, out = runner(argv, timeout=timeout)
+    tail = " | ".join(ln.strip()[:160] for ln in out.strip().splitlines()[-3:] if ln.strip())
+    log(f"{label}: exit {rc}" + (f": {tail}" if tail else ""), runner)
+    return rc
+
+
+def _note_offline_posted(reason: str, runner) -> None:
+    """Leave a note for shutdown.sh (the GCE shutdown script that runs on the poweroff below) that Discord already got
+    the "went to sleep" post, with the real reason: a second one would ping every channel again and put a bare
+    "stopped" over that reason on the pinned post."""
+    try:
+        STATE.mkdir(parents=True, exist_ok=True)
+        (STATE / OFFLINE_NOTE).write_text(reason + "\n", encoding="utf-8")
+    except OSError as exc:
+        log(f"WARNING could not leave the Discord note ({exc}): shutdown.sh may post a second time", runner)
+
+
 def stop_everything(reason: str, runner=run) -> None:
-    """Save the worlds (graceful stop), say so on Discord, power off. Each step may fail without stopping the rest."""
+    """Save the worlds (graceful stop), say so on Discord, power off. Each step may fail without stopping the rest,
+    and each says how it went in the journal (`journalctl -t skippy-idle`)."""
     profiles = [arg for p in PROFILES for arg in ("--profile", p)]
-    runner(["docker", "compose", "--project-directory", ROOT, *profiles, "stop", "--timeout", "120"], timeout=400)
-    runner([EVERQUEST, "stop"], timeout=300)
-    runner([DISCORD, "offline", reason], timeout=60)
-    runner(["systemctl", "poweroff"], timeout=60)
+    _stop_step("docker compose stop", ["docker", "compose", "--project-directory", ROOT, *profiles, "stop", "--timeout", "120"],
+               400, runner)
+    _stop_step("skippy-everquest stop", [EVERQUEST, "stop"], 300, runner)
+    if _stop_step("skippy-discord offline", [DISCORD, "offline", reason], 60, runner) == 0:
+        _note_offline_posted(reason, runner)
+    _stop_step("systemctl poweroff", ["systemctl", "poweroff"], 60, runner)
 
 
 def announce_backstop(cfg: Config, runner=run) -> None:
@@ -643,8 +687,12 @@ def report(runner=run, out=print, flows_path: str = "/proc/net/nf_conntrack", no
                     flows=flows, players=players, blind=blind)
     a = assess(sample)
     verdict = {True: "active", False: "idle", None: "unknown"}[a.active]
+    # idle_min is the clock the timer's checks keep: it only moves when a check runs, so the portal's Watcher also needs
+    # to know how long ago the last one was (or that none has run since boot) to tell a countdown from a dead timer.
+    last_check = "never" if not tick_state.last_tick else str(max(int(now - tick_state.last_tick), 0))
     out(f'WATCHDOG verdict={verdict} idle_min={tick_state.idle_min} limit={cfg.idle_limit_min} '
-        f'up_min={int(up // 60)} max_hours={cfg.max_hours:g} unknown_min={tick_state.unknown_min} reason="{a.reason}"')
+        f'up_min={int(up // 60)} max_hours={cfg.max_hours:g} unknown_min={tick_state.unknown_min} '
+        f'last_check_s={last_check} reason="{a.reason}"')
     return 0
 
 

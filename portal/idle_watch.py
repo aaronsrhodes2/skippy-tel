@@ -18,6 +18,9 @@ DEFAULT_MAX_HOURS = 8.0
 NOBODY_AFTER_MIN = 120           # up this long with nobody playing is worth a line
 UNKNOWN_AFTER_MIN = 60           # the watchdog unable to tell for this long is too
 GRACE_MIN = 60                   # past the backstop by this much means the backstop itself failed
+CHECK_INTERVAL_MIN = 5           # the watchdog's timer period (idle_watchdog.INTERVAL_MIN): its clock reaching the limit
+                                 # starts the sleep, which takes a while; one more check past it means it did not happen
+STALE_CHECK_MIN = 15             # no check for this long (three periods) means the timer is not running it
 
 _LINE = re.compile(r"^WATCHDOG (.+)$", re.M)
 _PAIR = re.compile(r'(\w+)=("[^"]*"|\S+)')
@@ -49,6 +52,31 @@ def _int(value: str | None, default: int = 0) -> int:
         return int(float(value or ""))
     except ValueError:
         return default
+
+
+def _sleep_overdue(wd: dict[str, str], idle: int) -> str | None:
+    """Should the VM have gone to sleep by now, given that nobody is playing? None: no, the watchdog is still counting
+    down (the normal state for up to `limit` minutes after the last player leaves, however long the session was).
+    Otherwise "" or a few words saying why it is overdue, for the end of the sentence.
+
+    Two ways to be overdue, both read from the report's WATCHDOG line: its idle clock ran past the limit by more than
+    a check (a sleep that began has failed), or the checks themselves are not running (`last_check_s`; the clock only
+    moves when a check does, so a dead timer leaves it at 0 for ever: the very bug this Watcher exists to catch).
+    No WATCHDOG line at all (a VM still on an older watchdog) has nothing to compare, so it stays as it was."""
+    if not wd:
+        return ""
+    last = wd.get("last_check_s")
+    if last == "never":
+        return " and the watchdog has not run a check since boot"
+    stale = _int(last, -1)
+    if stale > STALE_CHECK_MIN * 60:
+        return f" and the watchdog's last check was {stale // 60} min ago"
+    limit = _int(wd.get("limit"), idle)
+    if limit <= 0:
+        limit = idle
+    if _int(wd.get("idle_min")) >= limit + CHECK_INTERVAL_MIN:
+        return ""
+    return None
 
 
 def nobody_playing(snapshot: str, games: list[str] | None = None) -> bool | None:
@@ -83,11 +111,15 @@ def warnings(vm, snapshot: str, now: datetime | None = None) -> list[str]:
             out.append(f"The server has been on for {_hours(up)}, over its {ceiling:g}-hour limit by "
                        f"{_hours(up - ceiling * 60)}: the idle watchdog should have stopped it and hasn't. "
                        "Check the watchdog block in the logs (Admin → Logs, or `ops logs`).")
-        if up > NOBODY_AFTER_MIN and nobody_playing(snapshot, list(status.games)):
-            how = (f"auto-sleep is set to {idle} min, so it should have gone to sleep" if idle > 0
-                   else "auto-sleep is off (never sleep), so it will run until someone stops it")
-            out.append(f"On for {_hours(up)} with nobody playing: {how}.")
         wd = parse(snapshot) or {}
+        if up > NOBODY_AFTER_MIN and nobody_playing(snapshot, list(status.games)):
+            overdue = _sleep_overdue(wd, idle)
+            if idle <= 0:
+                out.append(f"On for {_hours(up)} with nobody playing: auto-sleep is off (never sleep), "
+                           "so it will run until someone stops it.")
+            elif overdue is not None:
+                out.append(f"On for {_hours(up)} with nobody playing: auto-sleep is set to {idle} min, "
+                           f"so it should have gone to sleep{overdue}.")
         unknown = _int(wd.get("unknown_min"))
         if idle > 0 and unknown >= UNKNOWN_AFTER_MIN:
             out.append(f"The idle watchdog has not been able to tell whether anyone is playing for {unknown} min "

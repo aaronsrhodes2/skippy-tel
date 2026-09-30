@@ -115,13 +115,21 @@ next boot).
   two-way flows the kernel marks ASSURED (a player's stream: a flow must be answered *and* keep going for over
   2 seconds, so a scanner's one-shot probe never qualifies); and only when neither can be read, the raw packet
   count on the game ports at a high bar (3000 per 5 minutes). Scanner and server-browser noise is ignored.
+  A log count only covers the game's latest start (a `docker restart`, a crash or Valheim's server being respawned
+  cuts every player off without a "left" line, and the container's log keeps the old run).
   Evidence that can't be read never means "nobody": the idle clock holds, and the limit below ends the session.
+  The "went to sleep" post is made once, by the watchdog, with the real reason; it leaves
+  `/run/skippy-games/offline-posted` so the VM's shutdown script (which runs on that poweroff) does not post a second,
+  bare "stopped". Every other way the VM stops has no such note and gets that one "stopped" post from the script.
+  Each step of the shutdown (`docker compose stop`, EverQuest's stop, the Discord post, `poweroff`) logs its exit
+  status and the tail of its output under `skippy-idle`.
 - **Session limit**: metadata `max-hours` (Terraform variable `max_hours`, default **8**, 0 = none) stops the VM
   that many hours after boot whatever the traffic says, with a heads-up in the game's Discord channel 15
   minutes ahead. It is off while a session's idle-minutes is 0 (the admin's "never sleep").
   To change it: edit the variable's default (or `terraform.tfvars`) and push; nothing else writes it.
 - **The portal's Watcher** (Dashboard → warnings) says so when the server has been on longer than the limit plus
-  an hour, or longer than 2 hours with nobody playing.
+  an hour, or longer than 2 hours with nobody playing *and* the watchdog's idle clock past its limit by a check (or
+  its checks not running: the report's `last_check_s`). The 30 idle minutes after a long session are not a warning.
 - **Why the first version never slept the VM** (found 2026-09-30; kept here so nobody re-learns it). It ran
   `iptables -I -t mangle PREROUTING ...`. iptables reads the word after `-I` as the *chain*, so `-t` was the
   chain and `mangle` a rule number: `Invalid rule number `mangle'`, exit status 2, and `set -e` ended the script

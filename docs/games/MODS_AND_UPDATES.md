@@ -84,6 +84,10 @@ data/factorio/factorio-current.log   rewritten on every start; the last one is f
 **Server updates.** The tag is the version. `stable` moves when Factorio releases a stable build, and the boot's
 `compose pull` picks it up (`docker manifest inspect` confirms exact tags such as `factoriotools/factorio:2.0.77`
 exist), so today's behaviour is "the newest stable at every boot". `FACTORIO_VERSION=2.0.77` holds the server there.
+The portal only checks the *shape* of the value (digits `x.y.z`, `stable` or `latest`), not that the tag exists. If
+it doesn't, `startup.sh` starts the games one at a time after the joint `compose up` fails: the other games come up,
+and the startup log (`ops logs`, Admin → Logs) says `STARTUP FAILED for: factorio` with compose's own error. It is
+never swapped for `stable`: a pin is there to keep the save and the players' clients on one version.
 The image carries the version in three places: `ENV VERSION`, the label `factorio.version`, and
 `factorio --version` (`Version: 2.0.77 (build 84539, linux64, headless)`).
 

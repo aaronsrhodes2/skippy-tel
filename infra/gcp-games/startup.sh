@@ -149,16 +149,19 @@ iptables -C DOCKER-USER -d 169.254.169.254 -j DROP 2>/dev/null \
   || echo "WARNING: couldn't fence the metadata server off from containers"
 
 # ── 5. Games ──────────────────────────────────────────────────────────────────
+# >>> games (portal/tests/test_fix_watchdog_startup.py runs everything from here to the end of the script)
 GAMES=$(meta games)
 if [ -z "$GAMES" ]; then
   echo "metadata 'games' is empty; nothing to start"
   exit 0
 fi
 PROFILES=""
+COMPOSE_GAMES=""
 EVERQUEST=""
 for g in $GAMES; do
   if [ "$g" = everquest ]; then EVERQUEST=1; continue; fi   # AkkStack: its own project (everquest.sh)
   PROFILES="$PROFILES --profile $g"
+  COMPOSE_GAMES="$COMPOSE_GAMES $g"
 done
 meta everquest-script > /usr/local/bin/skippy-everquest && chmod 755 /usr/local/bin/skippy-everquest
 
@@ -179,11 +182,32 @@ case " $GAMES " in
     python3 /usr/local/bin/skippy-valheim-seed --env "$ROOT/.env" --data "$DATA" \
       || echo "valheim seed: FAILED; the world starts as it is" ;;
 esac
+FAILED=""
 if [ -n "$PROFILES" ]; then
   compose $PROFILES pull || echo "pull failed; starting with cached images"
-  compose $PROFILES up -d
+  # One image that can't be pulled or doesn't exist (a FACTORIO_VERSION that is a well-formed typo, say) makes compose
+  # exit 1 and create NOTHING for any game in the same command. So when the one command fails, start the games one
+  # at a time: the good ones come up, and the ones that don't are named. (Never swapped for another tag: a pinned
+  # version exists to keep the world and the players' clients on it, and `stable` could upgrade a save for good.)
+  if ! compose $PROFILES up -d; then
+    echo "compose up failed for:$COMPOSE_GAMES; starting the games one at a time"
+    for g in $COMPOSE_GAMES; do
+      compose --profile "$g" up -d || FAILED="$FAILED $g"
+    done
+    if [ -n "$FAILED" ]; then
+      echo "STARTUP FAILED for:$FAILED (compose's error is above; nothing else was held back)"
+    fi
+  fi
 fi
 # EverQuest last: its first boot installs for ~15-20 min and shouldn't hold the others up.
 [ -n "$EVERQUEST" ] && { /usr/local/bin/skippy-everquest start || echo "everquest: start FAILED"; }
-echo "started: $GAMES"
-/usr/local/bin/skippy-discord online || true
+UP=""
+for g in $GAMES; do
+  case " $FAILED " in *" $g "*) ;; *) UP="$UP $g" ;; esac
+done
+if [ -n "$UP" ]; then
+  echo "started:$UP"
+  /usr/local/bin/skippy-discord online || true
+else
+  echo "no game started; not announcing anything on Discord"
+fi

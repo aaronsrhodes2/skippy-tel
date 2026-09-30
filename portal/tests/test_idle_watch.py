@@ -26,11 +26,11 @@ class Vm:
         return ""
 
 
-def snap(verdict="idle", up=180, unknown=0, reason="no player evidence", players=None):
+def snap(verdict="idle", up=180, unknown=0, reason="no player evidence", players=None, idle_min=10):
     lines = ["=== skippy-diag t ==="]
     lines += [f"PLAYERS {g}={n}" for g, n in (players or {}).items()]
     if verdict:
-        lines.append(WATCHDOG.format(verdict=verdict, idle=10, up=up, unknown=unknown, reason=reason))
+        lines.append(WATCHDOG.format(verdict=verdict, idle=idle_min, up=up, unknown=unknown, reason=reason))
     return "\n".join(lines + ["=== end ==="]) + "\n"
 
 
@@ -62,9 +62,13 @@ def test_a_session_that_never_sleeps_has_no_limit_to_overrun():
 
 
 def test_two_hours_with_nobody_playing_is_worth_a_line():
-    lines = warn(Vm(up_hours=3), snap(verdict="idle"))
+    # Only once the watchdog's own idle clock has run past its 30-minute limit by a check (35): before that it is
+    # still counting down, which is normal for up to 30 minutes after every long session (the old fixture's clock
+    # said 10 and still expected the line: the false alarm itself; see test_fix_watchdog_watcher.py).
+    lines = warn(Vm(up_hours=3), snap(verdict="idle", idle_min=35))
     assert lines == ["On for 3.0 h with nobody playing: auto-sleep is set to 30 min, so it should have gone to sleep."]
-    assert warn(Vm(up_hours=1.9), snap(verdict="idle")) == []                       # not yet
+    assert warn(Vm(up_hours=1.9), snap(verdict="idle", idle_min=35)) == []          # not yet
+    assert warn(Vm(up_hours=3), snap(verdict="idle", idle_min=10)) == []            # still counting down
 
 
 def test_never_sleep_and_nobody_playing_says_so():

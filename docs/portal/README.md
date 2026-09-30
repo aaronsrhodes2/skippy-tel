@@ -100,7 +100,8 @@ downloads the update (a few extra minutes). The Discord channel gets a
   dashboard's links and the VM's status posts both come from.
 - **Stops are graceful however they happen:** the VM's shutdown-script
   saves worlds and posts to Discord for the portal's Stop button, the idle
-  watchdog, or a manual stop alike.
+  watchdog, or a manual stop alike (the watchdog posts its own "went to sleep", with the
+  reason, and leaves a note so the script doesn't post a second one).
 
 ## Chat
 
