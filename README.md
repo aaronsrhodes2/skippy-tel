@@ -8,7 +8,7 @@
 PC-side AI inference for the Skippy AR system. The Android phone
 ([SkippyDroid](../Skippy)) calls these endpoints over Tailscale for
 inference that can't run on-device: LLM chat, Whisper transcription,
-face recognition, precise celestial ephemeris.
+precise celestial ephemeris.
 
 > **Quarantine:** SkippyTel does not import from SkippyDroid / SkippyAR /
 > SkippyGlassesMac / SkippyStarMap. The single shared artifact is
@@ -35,7 +35,6 @@ make intent-stream         # POST /intent/unmatched (SSE)
 | `GET /battery` | live | PC's own AC/battery state (psutil). |
 | `GET /starmap?lat=&lng=&t_iso=` | **501 stub** | Wired when `services/physics-mcp/` exists. |
 | `POST /translate/audio` | not yet | Whisper. Phase 2. |
-| `POST /heybuddy/identify` | live | InsightFace buffalo_l + SQLite. Brief had `/yeybuddy/`; renamed per Captain. |
 | `POST /tts/speak` | not yet | Optional. Phase 2. |
 
 ## Transport contract

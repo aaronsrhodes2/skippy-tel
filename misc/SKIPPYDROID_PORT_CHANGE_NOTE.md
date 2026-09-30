@@ -39,15 +39,6 @@ for the SkippyTel ↔ Z-Phone pair. Reserved-elsewhere numbers to avoid:
 - `47823` — SkippyView passthrough host on the phone
 - `11434` — Ollama (forced default; clients hardcode it)
 
-## Lockstep rename: `/yeybuddy/` → `/heybuddy/`
-
-The face-recognition endpoint was authored in the brief as `/yeybuddy/identify`. SkippyTel ships it as `/heybuddy/identify` — the Captain's intended name ("hey buddy" is what you say when you've forgotten someone's name and want to be sly about it).
-
-Update everywhere on the SkippyDroid side that references the old path:
-- Future `FriendRecognizerModule.kt` URL string
-- Brief copy in the SkippyDroid repo
-- Any voice intent that triggers the identify call
-
 ## Verification after the SkippyDroid-side change
 
 - Phone's RightBar SignalStack shows 4 bars when on the same Tailnet.

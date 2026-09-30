@@ -1259,7 +1259,7 @@ body {
 .candy.tr .c-r1, .candy.tr .c-r2, .candy.tr .c-r3 { color: #484848; }
 
 /* ── AR LAYER panel (top of right side) ─────────────────────────────────────
-   Future: map lines, game UI, face-tag nametags.  Blank canvas for now.    */
+   Future: map lines, game UI.  Blank canvas for now.                       */
 #panel-ar {
   width: 100%; height: 50%; flex: none;
   display: flex; flex-direction: column; overflow: hidden;
@@ -1379,7 +1379,7 @@ body {
 <!-- ── RIGHT: AR layer + Glasses simulation ─────────────────────────────── -->
 <div id="panel-right">
 
-  <!-- AR LAYER — canvas for future AR content: map lines, game UI, face tags -->
+  <!-- AR LAYER — canvas for future AR content: map lines, game UI -->
   <div id="panel-ar">
     <div class="panel-header">
       <span>AR LAYER</span>
@@ -1387,7 +1387,7 @@ body {
     </div>
     <div id="ar-body">
       <canvas id="ar-canvas"></canvas>
-      <div id="ar-idle">— AR canvas · map lines · game output · face tags —</div>
+      <div id="ar-idle">— AR canvas · map lines · game output —</div>
     </div>
   </div>
 

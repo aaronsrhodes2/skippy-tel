@@ -25,7 +25,7 @@ Cold start of `/intent/unmatched` (Ollama tier) is ~35s the first time
 after `docker compose up`. `OLLAMA_KEEP_ALIVE=-1` keeps it warm
 afterwards. To eliminate even the first cold-start: add a tiny init
 script that fires a no-op inference at each model on container ready.
-Same for Whisper (~10s) and InsightFace (~5s + 325MB download).
+Same for Whisper (~10s).
 
 ---
 
@@ -54,7 +54,7 @@ internal CA + Tailscale's cert provisioning would do it.
 - Wire `CommandDispatcher.onUnmatched` → `POST /intent/unmatched`
   (currently logs-only per brief).
 - Apply lockstep changes from `misc/SKIPPYDROID_PORT_CHANGE_NOTE.md`
-  (port 3003, cleartext config, `/yeybuddy/` → `/heybuddy/`).
+  (port 3003, cleartext config).
 - Battery panel aggregator polling each tailnet node's `/battery`.
 - Native APIs not yet hooked: ContactsContract, CalendarContract,
   HealthConnect, MediaSession, BluetoothLE, NFC, Activity Recognition.
