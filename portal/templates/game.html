@@ -60,7 +60,7 @@
       {% if error %}<span class="pill">VM unreachable</span>
       {% elif starting %}<span class="pill">⏳ Starting — booted {{ up }} min ago</span>
       {% elif on %}<span class="pill">🟢 Online</span>
-      {% elif running %}<span class="pill">Server busy with other games</span>
+      {% elif running %}<span class="pill">Another game is up</span>
       {% elif asleep %}<span class="pill">💤 Asleep — the world is saved</span>
       {% else %}<span class="pill">{{ status.status | title }}</span>{% endif %}
     </div>
@@ -76,7 +76,7 @@
         {% if starting %}<p>Usually joinable about {{ game.ready_minutes }} min after boot.</p>{% endif %}
         {% include "_join.html" %}
         <p class="help">Sleeps after {{ status.idle_minutes }} idle minutes.</p>
-      {% elif asleep %}
+      {% elif asleep and (is_admin or not status.games or game.id in status.games) %}
         <form method="post" action="{{ url_for('dashboard.games_start') }}" class="row">
           <input type="hidden" name="games" value="{{ game.id }}">
           <input type="hidden" name="idle_minutes" value="{{ status.idle_minutes }}">
@@ -84,8 +84,9 @@
           <button type="submit">Play {{ game.name }}</button>
           <span class="help">ready in ~{{ game.ready_minutes }} min</span>
         </form>
-      {% elif running %}
-        <p class="help">The server is running other games right now. It frees up when they go to sleep.</p>
+      {% elif asleep or running %}
+        <p class="help">{{ game.name }} isn't the game on the server right now. To play it, ask {{ switch_owner }}
+          to switch the server.</p>
       {% endif %}
 
       {% if game.max_players %}

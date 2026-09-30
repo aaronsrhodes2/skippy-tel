@@ -309,7 +309,7 @@ class ChatTools:
         wanted = list(args.get("games") or [])
         if any(g not in self.visible for g in wanted):
             raise ToolError("You don't have access to that game.")
-        ok, message = ops.start_games(self.vm, wanted, None, self.is_admin, who=self.who)
+        ok, message = ops.start_games(self.vm, wanted, None, self.is_admin, who=self.who, visible=self.visible)
         if not ok:
             raise ToolError(message)
         return {"started": True, "message": message}

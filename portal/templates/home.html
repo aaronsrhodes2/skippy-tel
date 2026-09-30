@@ -15,10 +15,15 @@
     {% if games %}
       {% set up = status and status.status == 'RUNNING' %}
       <a class="tile" data-app="games" href="{{ url_for('dashboard.index') }}" data-tel="tile:games">
-        <span class="pill">{% if not status %}?{% elif up %}● online{% else %}asleep{% endif %}</span>
+        <span class="pill">{% if not status %}?{% elif up %}● {{ set_games | join(' + ') or 'online' }}{% else %}asleep{% endif %}</span>
         <span class="icon">🎮</span>
         <h3>Games</h3>
-        <p>{{ games.values() | map(attribute='name') | join(' · ') }}</p></a>
+        {# Which game server is up right now; asleep, which one is set for the next wake-up. #}
+        <p>{% if not status %}Couldn't reach the server.
+           {% elif up and set_games %}{{ set_games | join(' + ') }} is up{% if hidden_up %} (and another game){% endif %}. Tap to join.
+           {% elif up %}A game server is up.
+           {% elif set_games %}Asleep. {{ set_games | join(' + ') }} is set; tap to wake it.
+           {% else %}Asleep. {{ games.values() | map(attribute='name') | join(' · ') }}{% endif %}</p></a>
     {% endif %}
 
     {% if show_bilby %}

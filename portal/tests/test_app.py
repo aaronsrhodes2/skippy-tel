@@ -269,13 +269,72 @@ def test_chat_errors_are_shown_not_raised(env):
     assert "rate-limited" in resp.get_json()["error"]
 
 
-def test_friend_one_click_play_dragonwilds_with_guardrail(env):
+def test_friend_one_click_play_the_current_game_with_guardrail(env):
     client, vm, _ = env
     login(client, FRIEND)
+    vm.state.games = ["dragonwilds"]                               # the game the Captain has set on the server
     page = client.get("/games").data.decode()
     assert "Play RuneScape: Dragonwilds" in page
     client.post("/games/start", data={"games": ["dragonwilds"], "idle_minutes": "0"})
     assert vm.calls[-1] == ("start", ["dragonwilds"], 15)          # "never sleep" is admin-only
+
+
+def test_friends_cannot_start_a_different_game_and_are_told_to_ask_aaron(env):
+    client, vm, _ = env
+    login(client, FRIEND)                                          # the server is set to Valheim, asleep
+    page = client.get("/games").data.decode()
+    assert "Play Valheim" in page and "Play RuneScape: Dragonwilds" not in page
+    assert "ask Aaron" in page and "Start several games at once" not in page
+    body = client.post("/games/start", data={"games": ["dragonwilds"]}, follow_redirects=True).data.decode()
+    assert "Valheim is the game on the server right now" in body
+    assert "To play RuneScape: Dragonwilds instead, ask Aaron to switch the server" in body
+    assert not [c for c in vm.calls if c[0] == "start"]
+    blocked = json.loads(vm.metadata["portal-watch"])["blocked_starts"]      # the Captain's watcher hears about it
+    assert [(b["who"], b["wanted"], b["running"]) for b in blocked] == [(FRIEND, ["dragonwilds"], ["valheim"])]
+    game_page = client.get("/games/dragonwilds").data.decode()
+    assert "Play RuneScape" not in game_page and "ask Aaron" in game_page
+    vm.state.status = "RUNNING"                                    # the same rule while a game is up
+    assert "ask Aaron" in client.get("/games").data.decode()
+
+
+def test_the_captain_can_start_any_game_and_several_at_once(env):
+    client, vm, _ = env
+    login(client, ADMIN)
+    page = client.get("/games").data.decode()
+    assert "Play RuneScape: Dragonwilds" in page and "Start several games at once" in page
+    client.post("/games/start", data={"games": ["dragonwilds", "valheim"], "idle_minutes": "45"})
+    assert vm.calls[-1] == ("start", ["dragonwilds", "valheim"], 45)
+
+
+def test_the_switch_message_never_names_a_game_the_friend_cant_see(env):
+    client, vm, _ = env
+    _add_friend(client, PAL, ["dragonwilds"])                      # PAL can't see Valheim, which is set
+    login(client, PAL)
+    body = client.post("/games/start", data={"games": ["dragonwilds"]}, follow_redirects=True).data.decode()
+    assert "Valheim" not in body and "ask Aaron to switch the server" in body
+    assert not [c for c in vm.calls if c[0] == "start"]
+
+
+def test_with_no_game_set_a_friend_may_pick_one(env):
+    client, vm, _ = env
+    vm.state.games = []                                            # first ever start: nothing to switch away from
+    login(client, FRIEND)
+    client.post("/games/start", data={"games": ["valheim"]})
+    assert vm.calls[-1] == ("start", ["valheim"], 30)
+
+
+def test_the_games_tile_shows_which_game_server_is_up(env):
+    client, vm, _ = env
+    login(client, FRIEND)
+    tile = client.get("/").data.decode()
+    assert "asleep" in tile and "Valheim is set; tap to wake it" in tile
+    vm.state.status = "RUNNING"
+    tile = client.get("/").data.decode()
+    assert "● Valheim" in tile and "Valheim is up" in tile
+    _add_friend(client, PAL, ["dragonwilds"])                      # a game PAL can't see is up: say so, don't name it
+    login(client, PAL)
+    tile = client.get("/").data.decode()
+    assert "Valheim" not in tile and "A game server is up." in tile
 
 
 def test_join_password_shown_to_players_only_while_running(env):
@@ -338,6 +397,7 @@ def test_chat_status_tool_never_leaks_settings(env):
 def test_chat_start_tool_uses_dashboard_guardrails(env):
     client, vm, skippy = env
     _, run = _tools_for(client, skippy, FRIEND)
+    vm.state.games = ["dragonwilds"]                                 # the game set on the server
     del vm.state.env["DRAGONWILDS_OWNER_ID"]
     with pytest.raises(Exception, match="Player ID"):
         run("start_game", {"games": ["dragonwilds"]})
@@ -345,7 +405,7 @@ def test_chat_start_tool_uses_dashboard_guardrails(env):
     vm.state.env["DRAGONWILDS_OWNER_ID"] = "owner1"
     assert "Starting RuneScape: Dragonwilds" in run("start_game", {"games": ["dragonwilds"]})
     assert vm.calls[-1] == ("start", ["dragonwilds"], 30)            # default idle, player-clamped
-    with pytest.raises(Exception, match="already running"):
+    with pytest.raises(Exception, match="ask Aaron"):                # a different game: only the Captain switches it
         run("start_game", {"games": ["valheim"]})
 
 

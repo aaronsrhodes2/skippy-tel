@@ -10,7 +10,24 @@ import watch
 from catalog import GAMES, clamp_idle, missing_settings
 
 
-def start_games(vm, games: list[str], idle_raw: str | None, is_admin: bool, who: str = "") -> tuple[bool, str]:
+SWITCH_OWNER = "Aaron"       # who changes the server's game
+
+
+def _names(ids, visible: list[str] | None) -> list[str]:
+    return [GAMES[g].name for g in ids if g in GAMES and (visible is None or g in visible)]
+
+
+def switch_message(current: list[str], wanted: list[str], visible: list[str] | None = None) -> str:
+    """Why a friend can't start a different game, and who to ask. Names only games they can see."""
+    now = " and ".join(_names(current, visible))
+    want = " and ".join(_names(wanted, visible)) or "another game"
+    lead = f"{now} is the game on the server right now." if now else "The server is set to a different game."
+    return f"{lead} To play {want} instead, ask {SWITCH_OWNER} to switch the server."
+
+
+def start_games(vm, games: list[str], idle_raw: str | None, is_admin: bool, who: str = "",
+                visible: list[str] | None = None) -> tuple[bool, str]:
+    """`visible` is the games this person may see (None: all); it keeps a hidden game's name out of messages."""
     selected = [g for g in games if g in GAMES]
     if not selected:
         return False, "Pick at least one game."
@@ -19,6 +36,11 @@ def start_games(vm, games: list[str], idle_raw: str | None, is_admin: bool, who:
                 for g in selected for p in missing_settings(g, status.env)]
     if problems:
         return False, " ".join(problems)
+    different = [g for g in selected if status.games and g not in status.games]
+    if different and not is_admin:
+        # One game at a time, and only the Captain changes it: a friend may only wake the game that's set.
+        watch.record_blocked(vm, who, selected, list(status.games))
+        return False, switch_message(list(status.games), different, visible)
     if status.status == "RUNNING":
         if set(selected) - set(status.games):
             watch.record_blocked(vm, who, selected, list(status.games))

@@ -32,9 +32,12 @@ it depends on your PC or on you being signed in.
    Play wakes it again, with the same world.
 
 Guardrails for non-admins: auto-sleep can be 15–120 minutes, never "off";
-games can only be chosen while the server is asleep (so a friend can't
-restart it out from under someone else); settings, Restart and Discord setup
-are admin-only.
+**one game at a time, and only the Captain changes it**: a friend can only
+wake the game the server is currently set to, and asking for another one
+(in the page or in Skippy's chat) says to ask Aaron to switch it (`ops.start_games`;
+the attempt shows in the dashboard's Watcher). The launcher's Games tile
+names the game that's up, or the one set for the next wake-up; settings,
+Restart, Discord setup and starting several games at once are admin-only.
 
 **Set a world password.** Dragonwilds lists the world publicly, so without a
 password anyone who searches the name can join. With one set, the portal

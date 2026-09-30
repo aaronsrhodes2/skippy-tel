@@ -80,7 +80,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         user = auth.current_user()
         return {"user": user, "is_admin": bool(user) and auth.is_admin(user["email"]),
                 "can_skippy": bool(user) and auth.is_allowed(user["email"]) and auth.has_portal(user["email"], "skippy"),
-                "idle_min": PLAYER_IDLE_MIN, "idle_max": PLAYER_IDLE_MAX,
+                "idle_min": PLAYER_IDLE_MIN, "idle_max": PLAYER_IDLE_MAX, "switch_owner": ops.SWITCH_OWNER,
                 "chat_enabled": app.config["CHAT_ENABLED"],
                 "discord_invite": f"https://discord.gg/{app.config['DISCORD_INVITE']}"}
 
@@ -97,7 +97,13 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         if not (user and auth.is_allowed(user["email"])):
             return render_template("login.html")
         status, _ = vm_status()
-        return render_template("home.html", status=status, games=my_games(),
+        shown = my_games()
+        # The Games tile names the game that's up (or set for the next wake-up), only from the games this
+        # person may see: a hidden game's name never shows.
+        set_games = [shown[g].name for g in (status.games if status else []) if g in shown]
+        return render_template("home.html", status=status, games=shown, set_games=set_games,
+                               hidden_up=bool(status and status.status == "RUNNING"
+                                              and any(g not in shown for g in status.games)),
                                show_experiments=auth.has_portal(me(), "experiments"),
                                show_bilby=auth.has_portal(me(), "bilby"), music=home.music(),
                                has_me="me" in app.blueprints)
@@ -148,7 +154,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             return back("dashboard.index")
         try:
             ok, message = ops.start_games(vm, wanted, request.form.get("idle_minutes"), auth.is_admin(me()),
-                                          who=me())
+                                          who=me(), visible=auth.visible_games(me()))
         except Exception as exc:   # noqa: BLE001 — the VM API; show it, don't 500
             ok, message = False, f"Couldn't reach the VM: {exc}"
         flash(message, "ok" if ok else "error")

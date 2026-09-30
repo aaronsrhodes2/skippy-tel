@@ -41,16 +41,17 @@
                ~{{ game.ready_minutes }} min after boot.</p>
           {% endif %}
           {% include "_join.html" %}
-        {% elif asleep %}
+        {% elif asleep and (is_admin or not status.games or id in status.games) %}
           <form method="post" action="{{ url_for('dashboard.games_start') }}">
             <input type="hidden" name="games" value="{{ id }}">
             <input type="hidden" name="idle_minutes" value="{{ status.idle_minutes }}">
             <button type="submit">Play {{ game.name }}</button>
             <span class="help">&nbsp;ready in ~{{ game.ready_minutes }} min</span>
           </form>
-        {% elif running %}
-          <p class="help">The server is running other games right now. It frees up when they go to
-            sleep{% if is_admin %}, or restart it from Admin with this game added{% endif %}.</p>
+        {% elif asleep or running %}
+          {# One game at a time, and only the Captain changes it (ops.start_games enforces the same rule). #}
+          <p class="help">{{ game.name }} isn't the game on the server right now. To play it, ask {{ switch_owner }}
+            to switch the server{% if is_admin %} (Admin: restart it with this game added){% endif %}.</p>
         {% endif %}
 
         <p class="links">
@@ -66,7 +67,7 @@
             onsubmit="return confirm('Stop the server for everyone? Worlds are saved first.');">
         <button type="submit" class="danger">Stop server</button>
       </form>
-    {% elif asleep %}
+    {% elif asleep and is_admin %}
       <details>
         <summary>Start several games at once</summary>
         <form method="post" action="{{ url_for('dashboard.games_start') }}">
@@ -85,7 +86,7 @@
           <p><button type="submit">Start selected</button></p>
         </form>
       </details>
-    {% else %}
+    {% elif not asleep %}
       <p>The server is changing state — refresh in a minute.</p>
     {% endif %}
   {% endif %}
