@@ -186,7 +186,8 @@ done. State: metadata `portal-imports`.
 
 `main` is the truth: every deploy and ops run comes from it, and Google's
 Workload Identity only trusts GitHub tokens whose ref is `refs/heads/main`
-(infra/bootstrap/main.tf). This is a solo project: **no pull requests**.
-Commit and push straight to `main` (test.yml and deploy.yml run on the push;
-deploy.yml re-runs the tests before it deploys). skippy-pc and Cloud Shell
-track `main`.
+(infra/bootstrap/main.tf). This is a solo repo (no contributors but the
+Captain and Claude), so per [PLATINUM_RULES §17](../PLATINUM_RULES.md):
+**no pull requests**. Commit and push straight to `main` (test.yml and
+deploy.yml run on the push; deploy.yml re-runs the tests before it deploys).
+skippy-pc and Cloud Shell track `main`.
