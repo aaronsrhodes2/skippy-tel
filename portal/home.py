@@ -307,6 +307,12 @@ class Home:
         """skippy-tel-core's health for the dashboard. Admin only."""
         return core_check(self.report)
 
+    def site_activity(self) -> dict | None:
+        """flask-api's summary of what people do on the portal (the reporter carries it as `site_activity`;
+        telemetry_web.activity_view trims and shows it). Admin only. None until home has sent one."""
+        value = (self.report or {}).get("site_activity")
+        return value if isinstance(value, dict) else None
+
     def status(self) -> dict:
         """The old skippy-pc /status page's content. Admin only."""
         r = self.report or {}

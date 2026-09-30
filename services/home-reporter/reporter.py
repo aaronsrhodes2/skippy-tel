@@ -40,6 +40,9 @@ BRIDGE = os.environ.get("CLAUDE_BRIDGE_URL", "").rstrip("/")   # Claude Code's b
 WORKSHOP_WAIT = 5            # seconds the bridge holds a request open waiting for news from the run
 WORKSHOP_PUSH = 100          # events per push to the portal (a request may be 1 MB)
 WORKSHOP_MAX_S = 3 * 3600    # a run this old is abandoned
+TELEMETRY_PULL = 200         # portal events fetched per pull (site telemetry; the portal caps it at 500)
+TELEMETRY_BATCH = 100_000    # bytes of events per POST to flask-api, which refuses a body over 128 KB
+TELEMETRY_CYCLE_S = 20       # the most one collection may take: reports must stay on schedule
 
 
 def home_token() -> str:
@@ -117,6 +120,8 @@ def gather() -> dict:
         "up_next": (up_next or {}).get("track") if (up_next or {}).get("ok") else None,
         "mentat_home": bool(MENTAT) and _up(f"{MENTAT}/health"),
         "capabilities": capabilities(),
+        # What people did on the portal lately (flask-api's site_events table); the Activity widget on /me shows it.
+        "site_activity": fetch(f"{API}/telemetry/site_summary"),
     }
 
 
@@ -431,6 +436,94 @@ class Uploads:
             self.busy.discard(name)
 
 
+class SiteTelemetry:
+    """Collects what signed-in people did on the portal (portal/telemetry.py) and files it in flask-api's
+    SQLite (POST /telemetry/site_events, next to the phone UI's clicks).
+
+    The portal holds the newest events in memory. Each pull says which portal process (`boot`) and the last
+    `seq` already stored; the portal forgets everything up to it, so an event is only dropped after it has
+    been filed. Progress only moves after flask-api has answered ok, so a flask-api that is down (or a
+    reporter restart, which starts again from the portal's copy) loses nothing: flask-api ignores an event it
+    already has (same boot and seq). Only a 400/413/422 from flask-api (this batch itself is refused) skips it;
+    a 404 (an older flask-api that doesn't have the route yet) or any 5xx is retried, so a rollout in the wrong
+    order loses nothing (the portal keeps up to 5000 events meanwhile)."""
+
+    def __init__(self, token: str):
+        self.token, self.boot, self.after, self.warned = token, "", 0, False
+
+    def _pull(self) -> dict | None:
+        url = f"{PORTAL}/home/telemetry?" + urllib.parse.urlencode(
+            {"boot": self.boot, "after": self.after, "limit": TELEMETRY_PULL})
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {self.token}"})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                body = json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            self._warn(f"portal said HTTP {e.code} to the telemetry pull" +
+                       (" (SKIPPY_HOME_TOKEN doesn't match; pair again on the dashboard)" if e.code == 401 else ""))
+            return None
+        except Exception as e:  # noqa: BLE001 — portal down or redeploying: the next cycle asks again
+            self._warn(f"can't pull telemetry from the portal: {e}")
+            return None
+        return body if isinstance(body, dict) and isinstance(body.get("events"), list) else None
+
+    def _store(self, events: list) -> bool | None:
+        """True: filed. None: flask-api will never take this batch (4xx). False: try again later."""
+        req = urllib.request.Request(f"{API}/telemetry/site_events", data=json.dumps({"events": events}).encode(),
+                                     method="POST", headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return bool(json.loads(r.read() or b"{}").get("ok"))
+        except urllib.error.HTTPError as e:
+            if e.code in (400, 413, 422):                # this batch itself is the problem: retrying can't help
+                self._warn(f"flask-api refused a telemetry batch (HTTP {e.code}); skipping it")
+                return None
+            self._warn(f"flask-api said HTTP {e.code} storing telemetry")     # 404 = an older flask-api without the route
+            return False
+        except Exception as e:  # noqa: BLE001
+            self._warn(f"can't reach flask-api to store telemetry: {e}")
+            return False
+
+    def _warn(self, message: str) -> None:
+        if not self.warned:                      # once per outage, like the portal reports
+            print(f"home-reporter: {message}", flush=True)
+            self.warned = True
+
+    @staticmethod
+    def chunks(events: list) -> list[list]:
+        """Split into POSTs of at most TELEMETRY_BATCH bytes (an event is at most ~15 KB, so one always fits)."""
+        out, current, size = [], [], 0
+        for e in events:
+            n = len(json.dumps(e))
+            if current and size + n > TELEMETRY_BATCH:
+                out.append(current)
+                current, size = [], 0
+            current.append(e)
+            size += n
+        return out + ([current] if current else [])
+
+    def collect(self) -> int:
+        """One cycle: pull, file, repeat while the portal has more. Returns how many events were filed."""
+        filed, deadline = 0, time.time() + TELEMETRY_CYCLE_S
+        while time.time() < deadline:
+            pulled = self._pull()
+            if pulled is None:
+                break
+            if pulled.get("boot") != self.boot:              # first pull, or the portal restarted: its counter began again
+                self.boot, self.after = str(pulled.get("boot") or ""), 0
+            events = [e for e in pulled["events"] if isinstance(e, dict) and isinstance(e.get("seq"), int)]
+            for batch in self.chunks(events):
+                stored = self._store(batch)
+                if stored is False:
+                    return filed                             # nothing past this point moves: it is pulled again
+                self.after = max(self.after, batch[-1]["seq"])
+                filed += len(batch) if stored else 0         # None: refused for good, skipped
+            self.warned = False
+            if not events or not pulled.get("more"):
+                break
+        return filed
+
+
 def run_commands(commands: list) -> list[dict]:
     done = []
     for c in commands or []:
@@ -443,6 +536,7 @@ def main() -> None:
     token = home_token()
     jobs = Jobs(token)
     uploads = Uploads(token)
+    site = SiteTelemetry(token)
     threading.Thread(target=jobs.poll_forever, daemon=True).start()
     sent_art, results, warned = None, [], False
     while True:
@@ -475,6 +569,10 @@ def main() -> None:
             if not warned:
                 print(f"home-reporter: can't reach the portal: {e}", flush=True)
                 warned = True
+        try:
+            site.collect()                  # what people did on the portal, into flask-api's SQLite
+        except Exception as e:  # noqa: BLE001 — never let this stop the reports
+            print(f"home-reporter: telemetry collection failed: {e}", flush=True)
         time.sleep(INTERVAL)
 
 

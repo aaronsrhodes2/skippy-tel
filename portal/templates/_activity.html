@@ -1,0 +1,52 @@
+{# The Activity widget on /me (admin only): what signed-in people opened and did lately, from flask-api's site_events table
+   (portal/telemetry_web.py: activity_view), and the recorder's own health. Sits beside "Home · skippy-pc", whose "Least-used UI"
+   is the phone apps' taps; the tiles nobody taps are here. #}
+<div class="w" id="activity">
+  <h3>Activity</h3>
+  {% if not activity.enabled %}
+    <p class="warn">Recording is switched off (TELEMETRY_ENABLED=false). Nothing is being kept.</p>
+  {% endif %}
+  <p class="muted">Recorder: {{ activity.waiting }} waiting · {{ activity.dropped }} dropped ·
+    {% if activity.state == 'never' %}<span class="warn">never collected: home isn't pulling yet (is the reporter running the latest code?)</span>
+    {% elif activity.state == 'stale' %}<span class="warn">last collected {{ activity.last_collected_s // 60 }} min ago</span>
+    {% elif activity.state == 'off' %}off
+    {% else %}last collected {{ activity.last_collected_s }} s ago{% endif %}
+    · <a href="{{ url_for('privacy') }}">what's recorded</a></p>
+  {% if activity.dropped %}<p class="warn">⚠ {{ activity.dropped }} events were lost because home wasn't collecting fast enough.</p>{% endif %}
+
+  {% if activity.have %}
+    <p class="big">{{ activity.window_events }}<span class="muted"> events · {{ activity.people }} {{ 'person' if activity.people == 1 else 'people' }} · last {{ activity.days }} days</span></p>
+    <p class="muted">{% if activity.oldest_days is not none %}Recording for {{ activity.oldest_days }} days; {% endif %}kept {{ activity.retention_days }}.
+      {% if activity.report_age is not none and activity.report_age > 60 %}<span class="warn">Home is silent: as of {{ activity.report_age // 60 }} min ago.</span>{% endif %}</p>
+
+    {% if activity.top_pages %}<details open><summary class="muted">Top pages</summary>
+      <table>{% for p in activity.top_pages %}<tr><td>{{ p.name }}</td><td class="muted">{{ p.views }} {{ 'view' if p.views == 1 else 'views' }} · {{ p.people }} {{ 'person' if p.people == 1 else 'people' }}</td></tr>{% endfor %}</table>
+    </details>{% endif %}
+
+    {% if activity.top_taps %}<details><summary class="muted">Top tiles tapped</summary>
+      <table>{% for t in activity.top_taps %}<tr><td>{{ t.name }}</td><td class="muted">{{ t.taps }} taps</td></tr>{% endfor %}</table>
+    </details>{% endif %}
+
+    <details open><summary class="muted">Least-used tiles (removal candidates)</summary>
+      <table>{% for t in activity.least_used %}<tr><td>{{ t.name }}</td>
+        <td class="muted">{{ t.taps }} {{ 'tap' if t.taps == 1 else 'taps' }}{% if t.last_days is not none %} · {{ 'today' if t.last_days == 0 else t.last_days ~ 'd ago' }}{% else %} · never{% endif %}</td></tr>{% endfor %}</table>
+    </details>
+
+    {% if activity.actions %}<details><summary class="muted">What people did</summary>
+      <table>{% for a in activity.actions %}<tr><td>{{ a.name }}</td><td class="muted">{{ a.count }}{% if a.failed %} · <span class="warn">{{ a.failed }} failed</span>{% endif %}</td></tr>{% endfor %}</table>
+    </details>{% endif %}
+
+    {% if activity.errors %}<details><summary class="muted warn">Errors people hit</summary>
+      <table>{% for e in activity.errors %}<tr><td>HTTP {{ e.name }}</td><td class="muted">{{ e.count }}</td></tr>{% endfor %}</table>
+    </details>{% endif %}
+  {% else %}
+    <p class="muted">No summary from home yet. It arrives with the home reporter's next report once it is running the latest code,
+      and shows here what people opened and did.</p>
+  {% endif %}
+
+  <details {{ 'open' if activity.recent }}><summary class="muted">Lately</summary>
+    {% for r in activity.recent %}<p class="msg"><b>{{ r.user.split('@')[0] }}</b> {{ r.text }} <span class="muted">{{ r.ago }}</span></p>
+    {% else %}<p class="muted">Nothing recorded yet.</p>{% endfor %}
+  </details>
+</div>
+

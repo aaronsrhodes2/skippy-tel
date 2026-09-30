@@ -4,6 +4,9 @@
 <header><h1>Skippy Portal</h1></header>
 <p>Game servers, services, and Skippy — one door.</p>
 <a class="btn" href="{{ url_for('auth.login') }}">Sign in with Google</a>
+{% if telemetry_on %}<p class="muted">Once you're signed in, the portal records which pages you open and what you do, and your chats
+  with Skippy, for {{ switch_owner }} only. <a href="{{ url_for('privacy') }}">What exactly, and how to have it deleted</a>.
+  Nothing is recorded while you're signed out.</p>{% endif %}
 <p style="margin-top:28px">Just looking? <a href="{{ url_for('experiments.index') }}">See the Experiments &rarr;</a>
   (no sign-in needed)</p>
 {% endblock %}

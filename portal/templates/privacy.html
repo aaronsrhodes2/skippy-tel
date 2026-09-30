@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Privacy — Skippy Portal{% endblock %}
+{% block app %}dashboard{% endblock %}
+{% block public_up %}{{ url_for('index') }}{% endblock %}
+{% block public_up_label %}Home{% endblock %}
+{% block head %}
+<style>
+  .card ul { margin: 6px 0; padding-left: 20px; font-size: .9rem; color: var(--ink); }
+  .card li { margin: 7px 0; }
+</style>
+{% endblock %}
+{% block content %}
+{# Public. Every list below is rendered from portal/telemetry.py (RECORDED, NOT_RECORDED, ALSO), the same lists the recorder is
+   written against, so this page can't promise something the code doesn't do. #}
+<section>
+  <h2>What this site records about you</h2>
+  {% if not enabled %}
+    <div class="flash ok">Recording is switched off right now. Nothing below is being recorded; this is what is recorded when it is on.</div>
+  {% endif %}
+  <p>This is a small site run by {{ switch_owner }} (the Captain) for himself and his friends. When you are signed in and on
+    the list, it keeps a record of how you use it, so he can see what gets used, what breaks and what to remove. That's all it's for.</p>
+
+  <div class="card">
+    <h3>What is recorded</h3>
+    <ul>{% for title, text in recorded %}<li><b>{{ title }}:</b> {{ text }}</li>{% endfor %}</ul>
+  </div>
+
+  <div class="card">
+    <h3>What is not recorded</h3>
+    <ul>{% for text in not_recorded %}<li>{{ text }}</li>{% endfor %}</ul>
+  </div>
+
+  <div class="card">
+    <h3>Who sees it</h3>
+    <p>{{ switch_owner }} only: on the Activity card of his dashboard, and in the database itself. It isn't shared,
+      sold, or used for advertising, and no one else on the site can see it, including the other friends.</p>
+  </div>
+
+  <div class="card">
+    <h3>Where it is kept, and for how long</h3>
+    <p>Events wait briefly in the portal's memory (on Google Cloud Run) until {{ switch_owner }}'s computer at home
+      (skippy-pc) next collects them, normally within a minute; then they live in a database on his own machines, not
+      with any other company. They are deleted {{ keep_days }} days after they were recorded.</p>
+  </div>
+
+  <div class="card">
+    <h3>Having it deleted</h3>
+    <p>Ask {{ switch_owner }} (on the Discord server, or however you normally reach him) and he will delete everything
+      recorded under your email address. Asking him to remove you from the site stops any further recording, since it
+      only ever covers signed-in people on the list.</p>
+  </div>
+
+  <div class="card">
+    <h3>Also worth knowing</h3>
+    <ul>{% for text in also %}<li>{{ text }}</li>{% endfor %}</ul>
+  </div>
+</section>
+{% endblock %}

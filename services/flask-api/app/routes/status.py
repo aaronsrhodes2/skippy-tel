@@ -284,6 +284,8 @@ def status_page():
         <td class="dim">Service manifest</td></tr>
     <tr><td><a href="/telemetry/ui_summary" style="color:#00ff88">/telemetry/ui_summary</a></td>
         <td class="dim">UI click audit (JSON)</td></tr>
+    <tr><td><a href="/telemetry/site_summary" style="color:#00ff88">/telemetry/site_summary</a></td>
+        <td class="dim">What people do on the portal (JSON)</td></tr>
     <tr><td><a href="/dropship/health" style="color:#00ff88">/dropship/health</a></td>
         <td class="dim">Drive connectivity</td></tr>
     <tr><td><a href="/dropship/latest" style="color:#00ff88">/dropship/latest</a></td>

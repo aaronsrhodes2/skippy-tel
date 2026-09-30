@@ -39,6 +39,7 @@ import spend
 import ratelimit
 import readiness
 import tasks
+import telemetry_web
 import watch
 import workshop as workshop_mod
 from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, PORTALS, SERVICES, missing_settings
@@ -74,6 +75,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     media = media_mod.Media()
     workshop = workshop_mod.Workshop(home)          # the Captain's private Skippy (admin only)
     app.extensions["workshop"] = workshop
+    telemetry_web.init_app(app)                     # usage recording, /privacy, the tap beacon, /home/telemetry
 
     def me() -> str:
         return auth.current_user()["email"]
@@ -734,6 +736,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             experiments=experiments.EXPERIMENTS, hidden=experiments.hidden(vm), mentat_tools=mentat_tools,
             home=home.status(), music=home.music(), core=core, services=SERVICES,
             workshop_ready=workshop.ready(), workshop_model=home.capability_note("workshop", "model"),
+            activity=telemetry_web.activity(app, home),
         )
 
     # The private Skippy. Admin only (Google login + ADMIN_EMAILS), and every call must carry a header a
@@ -985,10 +988,14 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             prompt = chat.system_prompt(user["name"], is_admin=admin, page=page,
                                         games=[GAMES[g].name for g in auth.visible_games(user["email"])])
             used: list[str] = []
+            calls: list[tuple] = []       # (tool, arguments, result) for telemetry_web.record_chat: it keeps names and arguments, never results
 
             def run_tool(name, args):
                 used.append(name)
-                return tools.run(name, args)
+                calls.append((name, args, ""))
+                out = tools.run(name, args)
+                calls[-1] = (name, args, out)
+                return out
 
             schemas = tools.schemas()
             if force in ("ask_mentat", "make_music") and rest.startswith("(the user chose"):
@@ -1003,6 +1010,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         # One line per reply in Cloud Run's logs: who, which model, which tools (never the text).
         print(json.dumps({"event": "chat", "user": user["email"], "model": model,
                           "tools": used, "mentat_available": mentat_on, "mentat_where": where}), flush=True)
+        telemetry_web.record_chat(message, text, model, calls, forced=force)
         return jsonify(reply=text, tools=used, mentat_available=mentat_on, mentat_where=where,
                        media=tools.media)
 
