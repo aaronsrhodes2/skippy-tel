@@ -189,12 +189,15 @@ GAMES: dict[str, Game] = {
         "satisfactory", "Satisfactory",
         "3D factory-building co-op on an alien planet.",
         ram_gb=12,
-        connect=lambda ip, env: f"Server Manager &rarr; Add Server &rarr; <code>{ip}:7777</code>",
+        connect=lambda ip, env: (f"Main menu &rarr; Server Manager &rarr; Add Server &rarr; <code>{ip}:7777</code> "
+                                 "(not Multiplayer &rarr; Join Game: that fails with Encryption Token Missing)"),
         settings=(Setting("SATISFACTORY_MAX_PLAYERS", "Max players"),),
         direct=lambda ip, env: f"{ip}:7777",             # no invite codes (its Session ID is for player-hosted games) and no server list
-        direct_hint="In game: Server Manager &rarr; <b>Add Server</b> &rarr; paste it in the address box. "
-                    "Same address every session. The first player to connect claims the server and sets its "
-                    "admin password: do that right away.",
+        direct_hint="In game: the main menu's <b>Server Manager</b> &rarr; <b>Add Server</b> &rarr; paste it in the "
+                    "address box. <b>Not</b> Multiplayer &rarr; Join Game: that screen (the one asking for an IP or "
+                    "Session ID) is for player-hosted games and fails on a dedicated server with &ldquo;Encryption Token "
+                    "Missing&rdquo;. The first player to connect claims the server and sets its admin password: do that "
+                    "right away. Same address every session.",
         icon="🏭",
         theme=Theme(accent="#fa9549", accent2="#5fb6d9", bg="#0d1216", card="#18222a", text="#e2ecf2",
                     font="Rajdhani",

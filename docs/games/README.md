@@ -121,7 +121,7 @@ Every game's page on the portal shows the same block: what to type, where, and t
 | Valheim | Join Game → Add server → `ip:2456`, or with crossplay on the **join code** instead (the two exclude each other) | Only with crossplay on: new every boot |
 | Dragonwilds | Worlds → **Invite Code** (the I key), or the Direct tab `ip:7778`, or search the server name | Yes: new every boot |
 | Factorio | Multiplayer → Connect to address → `ip:34197` (one paste, port included) | No (Factorio has none; the address is stable) |
-| Satisfactory | Server Manager → Add Server → `ip:7777` (one paste) | No. Its Session ID is for player-hosted games, and the dedicated server's log has no join code (checked on the live server, 2026-09-30) |
+| Satisfactory | Main menu → **Server Manager** → Add Server → `ip:7777` (one paste). **Not** Multiplayer → Join Game (the IP-or-Session-ID screen, for player-hosted games): on a dedicated server it fails with "Encryption Token Missing" | No. Its Session ID is for player-hosted games, and the dedicated server's log has no join code (checked on the live server, 2026-09-30) |
 | EverQuest | The `eqhost.txt` block on the page (copy it over the client's file), then `eqgame.exe patchme` | No |
 
 The join password is shown in plain text on purpose (see `CLAUDE.md`, "Join passwords").

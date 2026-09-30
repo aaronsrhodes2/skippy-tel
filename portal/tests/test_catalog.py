@@ -95,3 +95,14 @@ def test_nothing_still_points_at_the_join_password_reveal_that_was_removed():
     offenders = [str(p.relative_to(root)) for pattern in ("portal/*.py", "portal/templates/*.html", "docs/**/*.md", "*.md")
                  for p in root.glob(pattern) if "Show join password" in p.read_text(encoding="utf-8", errors="ignore")]
     assert offenders == []
+
+
+def test_satisfactory_tells_people_to_use_the_server_manager_not_join_game():
+    """Reported 2026-09-30: Multiplayer -> Join Game (the 'IP or Session ID' screen, for player-hosted games) fails on a
+    dedicated server with 'Encryption Token Missing'; the Server Manager handshake is the only way in."""
+    game = GAMES["satisfactory"]
+    for text in (game.direct_hint, game.connect("1.2.3.4", {})):
+        assert "Server Manager" in text and "Join Game" in text and "Encryption Token Missing" in text
+    assert "first player to connect claims" in game.direct_hint
+    notify = (Path(__file__).resolve().parents[2] / "infra" / "gcp-games" / "discord-notify.py").read_text(encoding="utf-8")
+    assert "Encryption Token Missing" in notify
