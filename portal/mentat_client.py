@@ -17,13 +17,23 @@ TIMEOUT = 25
 
 
 class MentatError(Exception):
-    pass
+    """`status` is Mentat's HTTP status when it answered, None when it couldn't be reached."""
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
+    @property
+    def offline(self) -> bool:
+        """Nothing was computed because Mentat is down, too old, or broke (not because the request was bad)."""
+        return self.status is None or self.status == 404 or self.status >= 500
 
 
 class Mentat:
     def __init__(self, url: str):
         self.url = url.rstrip("/")
         self._tools: tuple[float, list[dict]] | None = None
+        self._wva: tuple[float, dict] | None = None
 
     def _request(self, method: str, path: str, payload=None):
         data = json.dumps(payload).encode() if payload is not None else None
@@ -37,7 +47,7 @@ class Mentat:
                 body = json.loads(err.read() or b"{}")
             except ValueError:
                 body = {}
-            raise MentatError(body.get("error") or f"Mentat answered {err.code}") from err
+            raise MentatError(body.get("error") or f"Mentat answered {err.code}", err.code) from err
         except (urllib.error.URLError, TimeoutError, ValueError) as err:
             raise MentatError(f"Mentat is unreachable ({err})") from err
 
@@ -52,6 +62,22 @@ class Mentat:
         body = self._request("POST", f"/tools/{name}", args or {})
         if not body.get("ok"):
             raise MentatError(body.get("error", "Mentat call failed"))
+        return body["result"]
+
+    # Weapon vs. Armor (mentat/wva.py): sigma-ground's own game solver, on Mentat.
+    def wva_catalog(self) -> dict:
+        if self._wva and time.monotonic() - self._wva[0] < CACHE_SECONDS:
+            return self._wva[1]
+        body = self._request("GET", "/wva/catalog")
+        if not body.get("ok"):
+            raise MentatError(body.get("error", "Mentat sent no Weapon vs. Armor catalog"), 502)
+        self._wva = (time.monotonic(), body["result"])
+        return body["result"]
+
+    def wva_solve(self, fight: dict) -> dict:
+        body = self._request("POST", "/wva/solve", fight)
+        if not body.get("ok"):
+            raise MentatError(body.get("error", "Mentat didn't run the fight"), 502)
         return body["result"]
 
     def search(self, query: str, limit: int = 12) -> list[dict]:

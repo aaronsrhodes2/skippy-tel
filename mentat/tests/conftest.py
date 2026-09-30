@@ -1,0 +1,18 @@
+import importlib.util
+import os
+import sys
+from pathlib import Path
+
+# mentat/wva.py, importable as `wva` (as in the image, where it sits next to app.py). Loaded by
+# path, not by putting mentat/ on sys.path: this suite runs in one pytest process with the
+# portal's, and mentat/app.py would shadow the portal's `app` module.
+MENTAT = Path(__file__).resolve().parents[1]
+if "wva" not in sys.modules:
+    _spec = importlib.util.spec_from_file_location("wva", MENTAT / "wva.py")
+    sys.modules["wva"] = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(sys.modules["wva"])
+
+# The integration tests need a sigma-ground checkout (the image's /opt/sigma-ground):
+# point SIGMA_GROUND_DIR at one, or have it importable. Without it they skip.
+if os.environ.get("SIGMA_GROUND_DIR"):
+    sys.path.insert(0, os.environ["SIGMA_GROUND_DIR"])

@@ -46,7 +46,25 @@ jobs:
           cache: pip
           cache-dependency-path: portal/requirements.txt
       - run: pip install -r portal/requirements.txt pytest
-      - run: python -m pytest portal/tests memory/tests tools/tests services/home-reporter/tests services/claude-bridge/tests -q
+      - run: python -m pytest portal/tests memory/tests tools/tests services/home-reporter/tests services/claude-bridge/tests mentat/tests -q
+
+  mentat-test:
+    # Mentat (and Weapon vs. Armor on it) against the pinned sigma-ground, fetched and
+    # installed exactly as mentat/Dockerfile does. Catches a SIGMA_GROUND_REF bump that breaks it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: mentat/requirements.txt
+      - run: pip install -r mentat/requirements.txt pytest
+      - run: |
+          mkdir -p "$RUNNER_TEMP/sigma-ground"
+          curl -fsSL "https://github.com/aaronsrhodes2/sigma-ground/archive/${SIGMA_GROUND_REF}.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP/sigma-ground" --strip-components=1
+      - run: SIGMA_GROUND_DIR="$RUNNER_TEMP/sigma-ground" python -m pytest mentat/tests -q
 
   gate:
     runs-on: ubuntu-latest
@@ -83,7 +101,7 @@ jobs:
     # sigma-ground's physics tools as a public API (mentat/). Runs as the
     # zero-permission skippy-mentat identity from infra/bootstrap; skipped,
     # with a notice, until bootstrap has created it.
-    needs: [test, gate]
+    needs: [test, mentat-test, gate]
     if: needs.gate.outputs.ready == 'true'
     runs-on: ubuntu-latest
     env:
@@ -136,6 +154,11 @@ jobs:
           curl -fsS -X POST -H 'Content-Type: application/json' \
             -d '{"question": "how fast does a 5 cm copper ball hit the ground from 10 km?"}' "$URL/ask" \
             | python3 -c "import json,sys; r=json.load(sys.stdin)['result']; print(r['value'], r['units']); assert r['value']"
+          curl -fsS "$URL/wva/catalog" \
+            | python3 -c "import json,sys; r=json.load(sys.stdin)['result']; n=sum('weapon' in w for w in r['weapons']); print(n, 'Weapon vs. Armor presets'); assert n >= 20"
+          curl -fsS -X POST -H 'Content-Type: application/json' \
+            -d '{"weapon": {"type": "kinetic", "mass_kg": 0.0079, "velocity_ms": 715, "radius_m": 0.0038, "material": "steel_mild"}, "armor_layers": [{"material": "ceramic_alumina", "thickness_m": 0.015}], "environment": "atmosphere_earth", "distance_m": 100}' \
+            "$URL/wva/solve" | python3 -c "import json,sys; r=json.load(sys.stdin)['result']; print(r['verdict']); assert r['layers']"
 
   portal:
     needs: [test, gate]

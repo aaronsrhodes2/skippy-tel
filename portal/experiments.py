@@ -3,6 +3,8 @@
 v1 is sigma-ground (github.com/aaronsrhodes2/sigma-ground, pinned in
 .github/workflows/deploy.yml as SIGMA_GROUND_REF):
   • Mentat playground — the physics tools, live, through the skippy-mentat service
+  • Weapon vs. Armor — sigma-ground's game: its own solver runs on Mentat (mentat/wva.py),
+    the page only draws the fight
   • Radiance — sigma-ground's WebGL viewer + its recorded simulations, served as-is
   • the Mentat vs Wolfram Alpha vs Gemini benchmark, from its committed results
 
@@ -60,11 +62,11 @@ EXPERIMENTS = (
                ("Quantum", "Simulation"), "experiments.double_slit", "https://github.com/aaronsrhodes2/matter-shaper",
                kind="live", featured=True, icon="〰️"),
     Experiment("weapon-vs-armor", "Weapon vs. Armor",
-               "No hit points and no tuning knobs: damage comes from thermodynamics, yield stress and bond "
-               "failure of the materials themselves, for kinetic, laser, plasma, explosive, particle and "
-               "gravitational weapons.",
-               ("Game", "Materials", "pygame"), "experiments.weapon_vs_armor", f"{REPO}/tree/master/games/weapon_vs_armor",
-               kind="local", featured=True, icon="🛡️"),
+               "Pick a weapon, stack the armor, fire, and watch it go through, layer by layer. No hit points and "
+               "no tuning knobs: sigma-ground's own solver works it out from the materials' yield stress, heat "
+               "capacity and melting points, for kinetic, laser, plasma, explosive and particle weapons.",
+               ("Game", "Materials", "Mentat"), "experiments.weapon_vs_armor", f"{REPO}/tree/master/games/weapon_vs_armor",
+               kind="live", featured=True, icon="🛡️"),
     Experiment("mentat", "Mentat — a Wolfram Alpha rival",
                "About 220 physics and maths tools with provenance on every number: units, constants, "
                "symbolic maths, mechanics, relativity, cosmology, optics, thermodynamics, circuits, "
@@ -108,16 +110,6 @@ NBODY_SCOREBOARD = (
     ("Phase accuracy (Io)", "±23° drift (needs J2)", "Meaningless (no coupling)"),
     ("Missing physics", "Jupiter J2, solar tides", "All moon interactions"),
 )
-
-# Weapon vs. Armor: what's in the game (games/weapon_vs_armor/presets.py in sigma-ground; counts include the default).
-WEAPON_TOTAL, ARMOR_TOTAL = 26, 16
-WEAPON_EXAMPLES = ("Throwing spear", "Crossbow bolt", "Cannonball", "9 mm pistol", "AK-47", "M2 Browning",
-                   "30 mm armor-piercing", "RPG-7", "ATGM", "APFSDS sabot", "100 kW laser", "Megawatt laser",
-                   "Hypersonic railgun", "Relativistic railgun")
-ARMOR_EXAMPLES = ("Roman lorica", "Medieval plate", "WWII helmet", "NIJ IIIA vest", "NIJ IV plate", "Tank composite",
-                  "Reactive armor", "Bunker", "WWII battleship", "Aircraft fuselage", "Spacecraft hull",
-                  "Sci-fi light", "Sci-fi heavy")
-
 
 def inventory(items) -> dict:
     """What experiments.html needs besides the items: the kinds, and which of them have anything in them."""

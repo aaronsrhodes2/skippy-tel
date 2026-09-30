@@ -10,6 +10,10 @@ builds that same server, catching it instead of running stdio, and serves:
     POST /ask                {"question": "..."} → Mentat's own plain-English front door
                              (Materia's translator: keyword routes, plus the qwen
                              residual when MENTAT_USE_LLM=1, i.e. the copy on skippy-pc)
+    GET  /wva/catalog        Weapon vs. Armor: presets, materials (+ the game's temperature
+                             colours), environments, limits  (wva.py)
+    POST /wva/solve          {weapon, armor_layers, environment, distance_m} → the game's own
+                             solve(), as JSON; inputs validated and clamped first
 
 It's public (the Experiments playground and Skippy's chat call it), so:
   • runs as the zero-permission `skippy-mentat` service account (bootstrap)
@@ -30,6 +34,8 @@ from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as CallTimeout
 
 from flask import Flask, jsonify, request
+
+import wva
 
 # Natural-language / stateful tools: need the local Ollama translator or keep
 # state in this process (which Cloud Run may scale or recycle at any time).
@@ -95,6 +101,10 @@ server = build_server()
 if USE_LLM and OLLAMA_URL:
     _point_translator_at_ollama(OLLAMA_URL)
 TOOLS = {t.name: t for t in asyncio.run(server.list_tools()) if public(t.name)}
+try:
+    GAME, GAME_ERROR = wva.Game(os.environ.get("SIGMA_GROUND_REF", "")), None
+except Exception as exc:  # noqa: BLE001 — the other tools must still serve if the game can't load
+    GAME, GAME_ERROR = None, f"Weapon vs. Armor didn't load at this sigma-ground commit: {exc}"
 _pool = ThreadPoolExecutor(max_workers=4)
 _hits: dict[str, deque] = defaultdict(deque)
 _hits_lock = threading.Lock()
@@ -233,3 +243,25 @@ def ask():
     if not question:
         return jsonify(ok=False, error="ask needs a question"), 400
     return _guarded("ask", _ask, question[:2000])
+
+
+@app.get("/wva/catalog")
+def wva_catalog():
+    if GAME is None:
+        return jsonify(ok=False, error=GAME_ERROR), 503
+    return jsonify(ok=True, result=GAME.catalog)
+
+
+@app.post("/wva/solve")
+def wva_solve():
+    """One fight through sigma-ground's own Weapon vs. Armor solver. Nothing from the
+    request reaches the game until wva.clean has checked, clamped and rebuilt it."""
+    if GAME is None:
+        return jsonify(ok=False, error=GAME_ERROR), 503
+    if (request.content_length or 0) > wva.MAX_BODY_BYTES:
+        return jsonify(ok=False, error="that fight is too large to send"), 413
+    try:
+        fight, clamped = GAME.clean(request.get_json(silent=True))
+    except wva.Invalid as exc:
+        return jsonify(ok=False, error=str(exc)), 400
+    return _guarded("Weapon vs. Armor", GAME.solve, fight, clamped)

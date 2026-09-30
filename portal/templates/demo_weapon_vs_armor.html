@@ -2,42 +2,765 @@
 {% block title %}Weapon vs. Armor — Experiments{% endblock %}
 {% block app %}experiments{% endblock %}
 {% block public_up %}{{ url_for('experiments.index') }}{% endblock %}
+{% block mainclass %}wide{% endblock %}
 {% block head %}
 <style>
-  .shot { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; margin: 14px 0; background: #000; }
-  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-  .cols .card ul { margin: 6px 0 0; padding-left: 1.1em; color: var(--ink); font-size: .88rem; line-height: 1.6; }
-  pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; overflow-x: auto;
-        font-family: var(--mono); font-size: .85rem; color: var(--ink); }
+  .lede { color: var(--ink); max-width: 780px; line-height: 1.5; margin-top: 0; }
+  .status { min-height: 1.2em; }
+  .status button { margin-left: 8px; }
+  .wva { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: 18px; align-items: start; }
+  @media (max-width: 820px) { .wva { grid-template-columns: minmax(0, 1fr); } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; margin-bottom: 12px; }
+  .panel h3 { margin: 0 0 4px; font-size: 1rem; color: var(--accent); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+  .panel h3 .muted { font-weight: normal; }
+  .panel h3 button { margin-left: auto; }
+  button.link { background: none; border: none; padding: 0; color: var(--cyan); font-size: .8rem; text-decoration: underline; cursor: pointer; }
+  button.link:hover { background: none; color: var(--white); }
+  #stage { display: block; width: 100%; height: 260px; background: #000; border: 1px solid var(--line); border-radius: 8px; }
+  .params { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0 10px; }
+  .param .range { display: block; font-size: .72rem; color: var(--muted); font-family: var(--mono); margin-top: 2px; }
+  .param label.check { display: flex; gap: 8px; align-items: center; margin-top: 14px; font-size: .85rem; color: var(--ink); }
+  .layers { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 6px; }
+  .layer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; }
+  .layer .swatch { width: 14px; height: 30px; border-radius: 3px; border: 1px solid var(--muted); flex: none; }
+  .layer.gap .swatch { border-style: dashed; }
+  .layer .idx { font-family: var(--mono); color: var(--muted); font-size: .8rem; min-width: 1.4em; text-align: right; }
+  .layer .what { flex: 1 1 130px; min-width: 0; width: auto; padding: 6px 8px; }
+  .layer span.what { color: var(--ink); font-size: .9rem; }
+  .layer .thick-wrap { display: flex; align-items: center; gap: 4px; }
+  .layer input.thick { width: 6.2em; padding: 6px 8px; }
+  .layer .unit { color: var(--muted); font-size: .8rem; }
+  .layer .moves { display: flex; gap: 4px; margin-left: auto; }
+  button.icon { padding: 2px 0; min-width: 34px; min-height: 34px; font-size: .95rem; background: transparent;
+                border-color: var(--dim-green-hi); color: var(--ink); }
+  button.icon:hover:not(:disabled) { background: var(--dim-green); color: var(--white); }
+  .add { display: flex; gap: 8px; }
+  button.fire { width: 100%; padding: 14px; font-size: 1.1rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+                background: transparent; border: 2px solid var(--accent); color: var(--accent); border-radius: 10px; }
+  button.fire:hover:not(:disabled) { background: var(--accent); color: var(--black); }
+  .results { margin-top: 14px; }
+  .results h2 { margin: 0 0 4px; }
+  .results .verdict { font-size: 1.35rem; font-weight: 700; margin: 4px 0; }
+  .verdict.held { color: var(--green); } .verdict.breached { color: var(--red); }
+  .results ol { list-style: none; padding: 0; margin: 12px 0; display: grid; gap: 10px; }
+  .results li { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 0 10px; }
+  .results li .swatch { width: 12px; border-radius: 3px; border: 1px solid var(--muted); }
+  .results li .swatch.none { border-style: dashed; }
+  .results .head { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; color: var(--white); }
+  .results .nums { font-family: var(--mono); font-size: .82rem; color: var(--ink); margin-top: 2px; }
+  .results .notes { font-family: var(--mono); font-size: .75rem; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+  .tag { font-size: .72rem; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+  .tag.through { color: var(--amber); } .tag.stopped { color: var(--green); } .tag.crossed, .tag.unreached { color: var(--muted); }
+  pre.summary { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); font-size: .78rem; color: var(--ink);
+                background: #000; border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 6px 0 0; }
+  .stale { color: var(--amber); }
+  details summary { cursor: pointer; color: var(--accent); font-size: .85rem; }
 </style>
 {% endblock %}
 {% block content %}
-<section>
-  <p><b>No hit points. No tuning knobs.</b> Pick a weapon, pick armor, pick where the fight happens, and fire: the
-    outcome comes from the materials' own thermodynamics, yield stress and bond failure, layer by layer, using the
-    same material physics as the rest of sigma-ground.</p>
+<section id="wva" data-catalog="{{ url_for('experiments.wva_catalog') }}" data-solve="{{ url_for('experiments.wva_solve') }}"
+         data-available="{{ '1' if available else '' }}">
+  <p class="lede"><b>No hit points. No tuning knobs.</b> Pick a weapon, build the armor, choose where the fight happens,
+    and fire. sigma-ground's own Weapon vs. Armor solver works out what happens, layer by layer, from the materials'
+    yield stress, density, heat capacity and melting points. It runs on Mentat; this page only draws what it says.</p>
+  <p id="status" class="status help" role="status" aria-live="polite">Loading the armory from Mentat…</p>
 
-  {% if screenshot %}<img class="shot" src="{{ url_for('static', filename='demos/weapon_vs_armor.png') }}"
-       alt="Weapon vs. Armor: the weapon panel, a cross-section of the armor layers, and the results bar">{% endif %}
+  <div class="wva">
+    <div>
+      <canvas id="stage" role="img" aria-label="Cross-section of the armor: the weapon comes in from the left"></canvas>
+      <p class="help" id="stage-note">Set up the fight, then press Fire.</p>
+      <div id="results" class="results" hidden></div>
+    </div>
 
-  <div class="cols">
-    <div class="card"><h3>Weapons ({{ weapon_total }} presets)</h3>
-      <ul>{% for w in weapons %}<li>{{ w }}</li>{% endfor %}<li class="muted">… and {{ weapon_total - weapons|length }} more</li></ul></div>
-    <div class="card"><h3>Armor ({{ armor_total }} presets)</h3>
-      <ul>{% for a in armors %}<li>{{ a }}</li>{% endfor %}<li class="muted">… and {{ armor_total - armors|length }} more</li></ul></div>
-    <div class="card"><h3>How it hits</h3>
-      <ul><li>kinetic</li><li>laser</li><li>plasma</li><li>explosive</li><li>particle</li><li>gravitational</li></ul>
-      <p class="muted">Where: vacuum, Earth's atmosphere, Venus's atmosphere, underwater.</p></div>
+    <div>
+      <div class="panel">
+        <h3>Weapon <span class="muted" id="w-edited"></span></h3>
+        <label class="field" for="w-preset">Preset</label>
+        <select id="w-preset" disabled></select>
+        <p class="help" id="w-about"></p>
+        <div id="w-params" class="params"></div>
+        <p class="help" id="w-unavailable"></p>
+      </div>
+
+      <div class="panel">
+        <h3>Armor <span class="muted" id="a-count"></span></h3>
+        <label class="field" for="a-preset">Preset</label>
+        <select id="a-preset" disabled></select>
+        <ol id="layers" class="layers" aria-label="Armor layers, front to back"></ol>
+        <div class="add">
+          <button type="button" id="add-layer" disabled>+ Layer</button>
+          <button type="button" id="add-gap" disabled>+ Gap</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Where</h3>
+        <label class="field" for="env">Environment</label>
+        <select id="env" disabled></select>
+        <p class="help" id="env-about"></p>
+        <label class="field" for="dist">Range: <b id="dist-val"></b></label>
+        <input type="range" id="dist" min="0" max="1000" step="1" value="500" disabled>
+        <p class="help">Range matters for drag, beam absorption, plasma dispersal and particle stopping.
+          An explosive's standoff is part of the weapon.</p>
+      </div>
+
+      <button type="button" id="fire" class="fire" disabled>Fire</button>
+      <p id="fire-msg" class="help" role="status" aria-live="polite"></p>
+    </div>
   </div>
 
-  <h2>Runs on your computer</h2>
-  <p>It's a desktop game today (pygame). A browser version isn't built yet, so this page doesn't pretend otherwise.
-    To play it, get sigma-ground and run:</p>
-<pre>git clone https://github.com/aaronsrhodes2/sigma-ground
-cd sigma-ground
-pip install pygame-ce
-python run_weapon_vs_armor.py</pre>
-  <p class="help">Source: <a href="{{ source }}">games/weapon_vs_armor</a> in the
-    <a href="https://github.com/aaronsrhodes2/sigma-ground">sigma-ground</a> repository.</p>
+  <p class="help">Source: <a href="{{ source }}">games/weapon_vs_armor</a> in
+    <a href="https://github.com/aaronsrhodes2/sigma-ground">sigma-ground</a>. Every number on this page comes from
+    Mentat, running sigma-ground<span id="ref"></span>; nothing is estimated in your browser.</p>
 </section>
+<script>
+{% raw %}
+(function () {
+  "use strict";
+  const root = document.getElementById("wva");
+  const API = { catalog: root.dataset.catalog, solve: root.dataset.solve };
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, props, ...kids) => {
+    const e = Object.assign(document.createElement(tag), props || {});
+    for (const k of kids) if (k !== null && k !== undefined) e.append(k);
+    return e;
+  };
+
+  // Colours: the design kit's own tokens (base.html). Materials use the game's own colours.
+  const css = getComputedStyle(document.body);
+  const tok = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
+  const PAL = {
+    black: tok("--black", "#000000"), white: tok("--white", "#ffffff"), green: tok("--green", "#00ff88"),
+    cyan: tok("--cyan", "#00ffff"), amber: tok("--amber", "#ffaa00"), red: tok("--red", "#ff4444"),
+    violet: tok("--violet", "#aa44ff"), orange: tok("--orange", "#ff8a3d"), ink: tok("--ink", "#b8ffe0"),
+    muted: tok("--muted", "#6f8b94"), line: tok("--line", "#16323a"),
+  };
+  const TYPE_COLOUR = { kinetic: PAL.amber, laser: PAL.cyan, plasma: PAL.orange, explosive: PAL.red,
+                        particle: PAL.green, gravitational: PAL.violet };
+  const TYPE_ORDER = ["kinetic", "laser", "plasma", "explosive", "particle", "gravitational"];
+  const MONO = 'ui-monospace, "Cascadia Mono", Consolas, monospace';
+  const DURATION = 3600;                 // ms of slow motion for one shot
+  const A0 = 0.16, A1 = 0.86;            // approach before A0, the layers until A1, then the outcome
+  const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  let CAT = null, MAT = {};
+  let weaponKey = null, weapon = null, weaponEdited = false;
+  let armorKey = null, layers = [], armorEdited = false;
+  let env = null, distance = 100;
+  let fight = null, lastResult = null, raf = 0, lastTs = null, fallback = 0;
+
+  // ── numbers, as people read them ────────────────────────────────────────────
+  const SUP = { "-": "⁻", "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹" };
+  function sci(x, digits) {
+    const [m, e] = x.toExponential(digits === undefined ? 2 : digits).split("e");
+    return `${Number(m)}×10${e.replace("+", "").split("").map((c) => SUP[c] || c).join("")}`;
+  }
+  function num(x) {
+    if (x === null || x === undefined || !Number.isFinite(x)) return "n/a";
+    if (x === 0) return "0";
+    const a = Math.abs(x);
+    if (a >= 1e6 || a < 1e-3) return sci(x);
+    return Number(x.toPrecision(4)).toLocaleString("en-US", { maximumFractionDigits: 6 });
+  }
+  function si(x, unit) {
+    if (x === null || x === undefined || !Number.isFinite(x)) return "n/a";
+    if (x === 0) return `0 ${unit}`;
+    const a = Math.abs(x);
+    if (a >= 1e21 || a < 1e-9) return `${sci(x)} ${unit}`;
+    for (const [f, p] of [[1e18, "E"], [1e15, "P"], [1e12, "T"], [1e9, "G"], [1e6, "M"], [1e3, "k"], [1, ""],
+                          [1e-3, "m"], [1e-6, "µ"], [1e-9, "n"]]) {
+      if (a >= f) return `${Number((x / f).toPrecision(3))} ${p}${unit}`;
+    }
+    return `${sci(x)} ${unit}`;
+  }
+  const kelvin = (t) => (t === null || t === undefined ? "n/a" : t < 1e5 ? `${Math.round(t).toLocaleString("en-US")} K` : `${sci(t)} K`);
+  const length = (m) => (m === null || m === undefined ? "n/a" : m >= 1 ? `${num(m)} m` : `${num(m * 1000)} mm`);
+  const metres = (d) => (d >= 1000 ? `${num(d / 1000)} km` : `${num(d)} m`);
+  const inputValue = (x) => (Number.isFinite(x) ? String(Number(x.toPrecision(6))) : "");
+  const clamp01 = (x) => Math.max(0, Math.min(1, x));
+
+  // ── the game's temperature colours (sampled by Mentat from temperature_color) ─
+  function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+  function mix(a, b, f) {
+    const A = hexToRgb(a), B = hexToRgb(b);
+    return "#" + A.map((v, i) => Math.round(v + (B[i] - v) * f).toString(16).padStart(2, "0")).join("");
+  }
+  function heatColour(key, t) {
+    const m = MAT[key];
+    if (!m || t === null || !Number.isFinite(t)) return m ? m.color : PAL.muted;
+    if (t < 300) return m.color;
+    if (t >= m.vapor_k) return m.vapor;
+    if (t >= m.molten_k) return m.molten;
+    const h = m.heat;
+    for (let i = h.length - 1; i >= 0; i--) {
+      if (t >= h[i][0]) {
+        if (i === h.length - 1) return h[i][1];
+        return mix(h[i][1], h[i + 1][1], (t - h[i][0]) / (h[i + 1][0] - h[i][0]));
+      }
+    }
+    return h[0][1];
+  }
+
+  // ── talking to the portal ───────────────────────────────────────────────────
+  async function getJSON(url, opts) {
+    let res;
+    try { res = await fetch(url, opts); }
+    catch (e) { return { ok: false, status: 0, data: { error: "The portal couldn't be reached. Check your connection.", offline: true } }; }
+    let data;
+    try { data = await res.json(); } catch (e) { data = { error: `The portal answered ${res.status}.` }; }
+    return { ok: res.ok, status: res.status, data };
+  }
+
+  function setStatus(text, isError, retry) {
+    const s = $("status");
+    s.className = "status " + (isError ? "error" : "help");
+    s.replaceChildren(text);
+    if (retry) s.append(el("button", { type: "button", onclick: init }, "Try again"));
+  }
+  function say(text, isError) {
+    const m = $("fire-msg");
+    m.className = isError ? "error" : "help";
+    m.textContent = text;
+  }
+
+  function offline(why) {
+    setStatus(`${why} The physics runs on Mentat, not in your browser, so there is nothing to fire until it's back. `
+              + "This page never makes numbers up.", true, true);
+    for (const id of ["w-preset", "a-preset", "env", "dist", "add-layer", "add-gap", "fire"]) $(id).disabled = true;
+    $("stage-note").textContent = "";
+    draw();
+  }
+
+  async function init() {
+    if (!root.dataset.available) {
+      offline("Mentat isn't deployed yet.");
+      return;
+    }
+    setStatus("Loading the armory from Mentat…");
+    const r = await getJSON(API.catalog);
+    if (!r.ok || !r.data || !r.data.weapons) {
+      offline((r.data && r.data.error) || "Mentat is offline.");
+      return;
+    }
+    CAT = r.data;
+    MAT = Object.fromEntries(CAT.materials.map((m) => [m.key, m]));
+    $("ref").textContent = CAT.sigma_ground_ref ? ` at commit ${CAT.sigma_ground_ref.slice(0, 7)}` : "";
+    setStatus("");
+    buildWeaponSelect();
+    buildArmorSelect();
+    buildEnvironment();
+    const d = CAT.defaults;
+    pickWeapon(CAT.weapons.some((w) => w.key === d.weapon && w.weapon) ? d.weapon : CAT.weapons.find((w) => w.weapon).key);
+    pickArmor(CAT.armors.some((a) => a.key === d.armor) ? d.armor : CAT.armors[0].key);
+    for (const id of ["w-preset", "a-preset", "env", "dist", "fire"]) $(id).disabled = false;
+    draw();
+  }
+
+  // ── weapon ──────────────────────────────────────────────────────────────────
+  function buildWeaponSelect() {
+    const sel = $("w-preset");
+    sel.replaceChildren();
+    for (const t of TYPE_ORDER.concat(Object.keys(CAT.types).filter((t) => !TYPE_ORDER.includes(t)))) {
+      const T = CAT.types[t];
+      const presets = CAT.weapons.filter((w) => w.type === t);
+      if (!T || !presets.length) continue;
+      const g = el("optgroup", { label: T.label + (T.available ? "" : " (not available here)") });
+      for (const w of presets) g.append(el("option", { value: w.key, disabled: !w.weapon }, w.name));
+      sel.append(g);
+    }
+    sel.onchange = () => pickWeapon(sel.value);
+    const missing = CAT.weapons.filter((w) => !w.weapon);
+    const reasons = [...new Set(missing.map((w) => w.why))];
+    $("w-unavailable").textContent = missing.length
+      ? `Not available here: ${missing.map((w) => w.name).join("; ")}. Why: ${reasons.join(" ")}.` : "";
+  }
+
+  function pickWeapon(key) {
+    const w = CAT.weapons.find((x) => x.key === key && x.weapon);
+    if (!w) return;
+    weaponKey = key;
+    weapon = JSON.parse(JSON.stringify(w.weapon));
+    weaponEdited = false;
+    $("w-preset").value = key;
+    renderParams();
+    changed();
+  }
+
+  function markWeaponEdited() {
+    weaponEdited = true;
+    const box = $("w-edited");
+    if (!box.firstChild) {
+      box.append("your numbers · ", el("button", { type: "button", className: "link", onclick: () => pickWeapon(weaponKey) }, "reset"));
+    }
+    changed();
+  }
+
+  function renderParams() {
+    const T = CAT.types[weapon.type];
+    $("w-about").textContent = T.about;
+    $("w-edited").replaceChildren();
+    const box = $("w-params");
+    box.replaceChildren();
+    for (const p of T.params) {
+      const id = "wp-" + p.key;
+      const wrap = el("div", { className: "param" });
+      if (p.kind === "number") {
+        const f = p.show ? p.show.factor : 1, unit = p.show ? p.show.unit : p.unit;
+        const inp = el("input", { type: "number", id, step: "any", min: String(p.min * f), max: String(p.max * f),
+                                  value: inputValue(weapon[p.key] * f), inputMode: "decimal" });
+        inp.oninput = () => {
+          const v = inp.valueAsNumber;
+          weapon[p.key] = Number.isFinite(v) ? v / f : NaN;
+          markWeaponEdited();
+        };
+        wrap.append(el("label", { htmlFor: id, className: "field" }, p.label + (unit ? ` (${unit})` : "")), inp,
+                    el("span", { className: "range" }, `${num(p.min * f)} to ${num(p.max * f)}`));
+      } else if (p.kind === "choice") {
+        const sel = el("select", { id });
+        for (const c of p.choices) sel.append(el("option", { value: c }, MAT[c] ? MAT[c].label : c));
+        sel.value = weapon[p.key];
+        sel.onchange = () => { weapon[p.key] = sel.value; markWeaponEdited(); };
+        wrap.append(el("label", { htmlFor: id, className: "field" }, p.label), sel);
+      } else {
+        const box2 = el("input", { type: "checkbox", id, checked: !!weapon[p.key] });
+        box2.onchange = () => { weapon[p.key] = box2.checked; markWeaponEdited(); };
+        wrap.append(el("label", { htmlFor: id, className: "check" }, box2, p.label));
+      }
+      box.append(wrap);
+    }
+  }
+
+  // ── armor ───────────────────────────────────────────────────────────────────
+  function buildArmorSelect() {
+    const sel = $("a-preset");
+    sel.replaceChildren(...CAT.armors.map((a) => el("option", { value: a.key }, a.name)));
+    sel.onchange = () => pickArmor(sel.value);
+    $("add-layer").onclick = () => addLayer({ material: "steel_mild" in MAT ? "steel_mild" : CAT.materials[0].key, thickness_m: 0.01 });
+    $("add-gap").onclick = () => addLayer({ gap: true, thickness_m: 0.05 });
+  }
+
+  function pickArmor(key) {
+    const a = CAT.armors.find((x) => x.key === key);
+    if (!a) return;
+    armorKey = key;
+    layers = JSON.parse(JSON.stringify(a.layers));
+    armorEdited = false;
+    $("a-preset").value = key;
+    renderLayers();
+    changed();
+  }
+
+  function editedArmor() {
+    armorEdited = true;
+    changed();
+  }
+
+  function addLayer(layer) {
+    if (layers.length >= CAT.limits.layers_max) return;
+    layers.push(layer);
+    renderLayers();
+    editedArmor();
+  }
+
+  function materialSelect(layer, i) {
+    const sel = el("select", { className: "what" });
+    sel.setAttribute("aria-label", `Layer ${i + 1} material`);
+    const groups = {};
+    for (const m of CAT.materials) (groups[m.group] = groups[m.group] || []).push(m);
+    for (const [name, mats] of Object.entries(groups)) {
+      const g = el("optgroup", { label: name });
+      for (const m of mats) g.append(el("option", { value: m.key }, m.label));
+      sel.append(g);
+    }
+    sel.value = layer.material;
+    sel.onchange = () => { layer.material = sel.value; renderLayers(); editedArmor(); };
+    return sel;
+  }
+
+  function iconButton(glyph, label, onclick, disabled) {
+    const b = el("button", { type: "button", className: "icon", onclick, disabled: !!disabled, title: label }, glyph);
+    b.setAttribute("aria-label", label);
+    return b;
+  }
+
+  function renderLayers() {
+    const ol = $("layers");
+    ol.replaceChildren();
+    const lim = CAT.limits.thickness_m;
+    layers.forEach((L, i) => {
+      const sw = el("span", { className: "swatch" });
+      sw.style.background = L.gap ? "transparent" : MAT[L.material].color;
+      const th = el("input", { type: "number", className: "thick", step: "any", min: String(lim[0] * 1000),
+                               max: String(lim[1] * 1000), value: inputValue(L.thickness_m * 1000), inputMode: "decimal" });
+      th.setAttribute("aria-label", `Layer ${i + 1} thickness in millimetres`);
+      th.oninput = () => {
+        const v = th.valueAsNumber;
+        L.thickness_m = Number.isFinite(v) ? v / 1000 : NaN;
+        editedArmor();
+      };
+      const move = (d) => { const [x] = layers.splice(i, 1); layers.splice(i + d, 0, x); renderLayers(); editedArmor(); };
+      ol.append(el("li", { className: "layer" + (L.gap ? " gap" : "") },
+        sw, el("span", { className: "idx" }, String(i + 1)),
+        L.gap ? el("span", { className: "what" }, "Air gap") : materialSelect(L, i),
+        el("span", { className: "thick-wrap" }, th, el("span", { className: "unit" }, "mm")),
+        el("span", { className: "moves" },
+          iconButton("↑", `Move layer ${i + 1} out (towards the weapon)`, () => move(-1), i === 0),
+          iconButton("↓", `Move layer ${i + 1} in`, () => move(1), i === layers.length - 1),
+          iconButton("✕", `Remove layer ${i + 1}`, () => { layers.splice(i, 1); renderLayers(); editedArmor(); },
+                     layers.length <= 1))));
+    });
+    const full = layers.length >= CAT.limits.layers_max;
+    $("a-count").textContent = `${layers.length} of ${CAT.limits.layers_max} layers` + (armorEdited ? " · edited" : "");
+    $("add-layer").disabled = $("add-gap").disabled = full;
+  }
+
+  // ── where ───────────────────────────────────────────────────────────────────
+  const [DLO, DHI] = [1, 10000];
+  function distLimits() { return CAT ? CAT.limits.distance_m : [DLO, DHI]; }
+  function posToDistance(pos) {
+    const [lo, hi] = distLimits();
+    const d = Math.pow(10, Math.log10(lo) + (pos / 1000) * (Math.log10(hi) - Math.log10(lo)));
+    return Math.min(hi, Math.max(lo, Number(d.toPrecision(2))));
+  }
+  function distanceToPos(d) {
+    const [lo, hi] = distLimits();
+    return Math.round(1000 * (Math.log10(d) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo)));
+  }
+  function buildEnvironment() {
+    const sel = $("env");
+    sel.replaceChildren(...CAT.environments.map((e) => el("option", { value: e.key }, e.label)));
+    env = CAT.defaults.environment;
+    sel.value = env;
+    const about = () => { $("env-about").textContent = (CAT.environments.find((e) => e.key === env) || {}).about || ""; };
+    about();
+    sel.onchange = () => { env = sel.value; about(); changed(); };
+    distance = CAT.defaults.distance_m;
+    $("dist").value = String(distanceToPos(distance));
+    $("dist-val").textContent = metres(distance);
+    $("dist").oninput = () => { distance = posToDistance(Number($("dist").value)); $("dist-val").textContent = metres(distance); changed(); };
+  }
+
+  // Anything changed: the drawing follows the setup, and the last result is marked as the last one.
+  function changed() {
+    if (fight && !fight.done) finish();          // show the shot that was fired before anything moves
+    fight = null;
+    const note = $("results").querySelector(".stale");
+    if (lastResult && !note) {
+      $("results").prepend(el("p", { className: "stale" }, "This is the last shot. You've changed the setup since: press Fire to run it."));
+    }
+    renderLayersCountOnly();
+    draw();
+  }
+  function renderLayersCountOnly() {
+    if (!CAT) return;
+    $("a-count").textContent = `${layers.length} of ${CAT.limits.layers_max} layers` + (armorEdited ? " · edited" : "");
+  }
+
+  // ── fire ────────────────────────────────────────────────────────────────────
+  async function fire() {
+    if (!CAT || (fight && !fight.done)) return;
+    for (const p of CAT.types[weapon.type].params) {
+      if (p.kind === "number" && !Number.isFinite(weapon[p.key])) { say(`${p.label} needs a number.`, true); return; }
+    }
+    const bad = layers.findIndex((L) => !Number.isFinite(L.thickness_m));
+    if (bad >= 0) { say(`Layer ${bad + 1} needs a thickness.`, true); return; }
+    $("fire").disabled = true;
+    say("Mentat is working it out…");
+    const r = await getJSON(API.solve, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ weapon, armor_layers: layers, environment: env, distance_m: distance }),
+    });
+    $("fire").disabled = false;
+    if (!r.ok || !r.data.result) {
+      const why = (r.data && r.data.error) || "Mentat didn't answer.";
+      say(r.data && r.data.offline ? `${why} No result was made up.` : why, true);
+      return;
+    }
+    say("");
+    start(r.data.result);
+  }
+
+  function makePlan(res) {
+    const weights = res.layers.map((s) => (s.gap ? 0 : s.penetrated ? 1 : s.damage_fraction || 0) + 0.15);
+    const total = weights.reduce((a, b) => a + b, 0) || 1;
+    let acc = 0;
+    return res.layers.map((s, i) => {
+      const a = A0 + (A1 - A0) * (acc / total);
+      acc += weights[i];
+      return { a, b: A0 + (A1 - A0) * (acc / total), frac: s.gap || s.penetrated ? 1 : clamp01(s.damage_fraction || 0) };
+    });
+  }
+
+  function start(res) {
+    cancelAnimationFrame(raf);
+    clearTimeout(fallback);
+    lastResult = null;
+    $("results").hidden = true;
+    fight = { res, stack: res.inputs.armor_layers, plan: makePlan(res), t: 0, done: false };
+    draw();
+    const cv = $("stage"), box = cv.getBoundingClientRect();
+    if (box.top < 0 || box.bottom > window.innerHeight) cv.scrollIntoView({ block: "start", behavior: reduced ? "auto" : "smooth" });
+    if (reduced) { finish(); return; }
+    lastTs = null;
+    raf = requestAnimationFrame(tick);
+    fallback = setTimeout(() => { if (fight && !fight.done) finish(); }, DURATION + 2000);   // a hidden tab gets no frames
+  }
+  function tick(ts) {
+    if (!fight || fight.done) return;
+    step(lastTs === null ? 0 : ts - lastTs);
+    lastTs = ts;
+    if (fight && !fight.done) raf = requestAnimationFrame(tick);
+  }
+  // One animation step of `ms` milliseconds (also what the frame loop calls).
+  function step(ms) {
+    if (!fight || fight.done) return;
+    fight.t = Math.min(1, fight.t + ms / DURATION);
+    if (fight.t >= 1) finish(); else draw();
+  }
+  function finish() {
+    if (!fight) return;
+    cancelAnimationFrame(raf);
+    clearTimeout(fallback);
+    fight.t = 1;
+    fight.done = true;
+    draw();
+    showResults(fight.res);
+  }
+
+  // ── the cross-section ───────────────────────────────────────────────────────
+  function geometry(W, H, stack) {
+    const top = 36, bottom = 42, zone = Math.max(44, Math.round(W * 0.12)), exit = 24;
+    const avail = Math.max(40, W - zone - exit), minW = W < 520 ? 8 : 14;
+    const th = stack.map((L) => (Number.isFinite(L.thickness_m) && L.thickness_m > 0 ? L.thickness_m : 0));
+    const total = th.reduce((a, b) => a + b, 0) || 1;
+    let widths = th.map((t) => Math.max(minW, (t / total) * avail));
+    const scale = avail / widths.reduce((a, b) => a + b, 0);
+    widths = widths.map((w) => Math.max(minW, w * scale));
+    const toScale = th.every((t) => (t / total) * avail >= minW);
+    let x = zone;
+    const rects = widths.map((w) => { const r = { x, w }; x += w; return r; });
+    return { W, H, zone, rects, y0: top, y1: H - bottom, mid: (top + H - bottom) / 2, right: x, toScale };
+  }
+
+  function frontX(g, f) {
+    const t = f.t, plan = f.plan, emitter = g.zone - 10;
+    if (!plan.length) return g.rects[0].x;
+    if (t <= A0) return emitter + (g.rects[0].x - emitter) * (t / A0);
+    for (let i = 0; i < plan.length; i++) {
+      if (t <= plan[i].b) return g.rects[i].x + g.rects[i].w * plan[i].frac * clamp01((t - plan[i].a) / (plan[i].b - plan[i].a));
+    }
+    const i = plan.length - 1, end = g.rects[i].x + g.rects[i].w * plan[i].frac;
+    return f.res.breached ? end + (g.W - end) * clamp01((t - A1) / (1 - A1)) : end;
+  }
+
+  function text(ctx, s, x, y, colour, align, size, bold) {
+    ctx.font = `${bold ? "700 " : ""}${size || 11}px ${MONO}`;
+    ctx.textAlign = align || "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = colour;
+    ctx.fillText(s, x, y);
+  }
+
+  function draw() {
+    const cv = $("stage");
+    const W = cv.clientWidth || 320;
+    const H = Math.round(Math.max(220, Math.min(420, W * (W < 560 ? 0.72 : 0.42))));
+    cv.style.height = H + "px";
+    const dpr = window.devicePixelRatio || 1;
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
+      cv.width = Math.round(W * dpr);
+      cv.height = Math.round(H * dpr);
+    }
+    const ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = PAL.black;
+    ctx.fillRect(0, 0, W, H);
+    if (!CAT || !weapon) {
+      text(ctx, CAT === null && $("status").classList.contains("error") ? "Mentat is offline" : "", W / 2, H / 2, PAL.muted, "center", 13);
+      return;
+    }
+    const f = fight;
+    const stack = f ? f.stack : layers;
+    const wtype = f ? f.res.weapon_type : weapon.type;
+    const colour = TYPE_COLOUR[wtype] || PAL.white;
+    const g = geometry(W, H, stack);
+    const bh = g.y1 - g.y0, ch = Math.max(8, bh * 0.2);
+    const t = f ? f.t : 0;
+
+    // the weapon's lane
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(8, g.mid); ctx.lineTo(g.zone - 12, g.mid); ctx.stroke();
+    ctx.fillStyle = colour;
+    ctx.beginPath(); ctx.moveTo(g.zone - 6, g.mid); ctx.lineTo(g.zone - 14, g.mid - 6); ctx.lineTo(g.zone - 14, g.mid + 6); ctx.fill();
+    text(ctx, ((CAT.types[wtype] || {}).label || wtype).toUpperCase(), 8, 15, colour, "left", 11, true);
+
+    // the layers
+    stack.forEach((L, i) => {
+      const r = g.rects[i];
+      const s = f && i < f.res.layers.length ? f.res.layers[i] : null;
+      const p = s ? clamp01((t - f.plan[i].a) / (f.plan[i].b - f.plan[i].a)) : 0;
+      if (L.gap) {
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = PAL.muted;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(r.x + 0.5, g.y0 + 0.5, r.w - 1, bh - 1);
+        ctx.setLineDash([]);
+      } else {
+        let fill = MAT[L.material] ? MAT[L.material].color : PAL.muted;
+        if (s) fill = f.done && s.color ? s.color : heatColour(L.material, 300 + ((s.temperature_k || 300) - 300) * p);
+        ctx.globalAlpha = f && f.done && !s ? 0.4 : 1;                // never reached: dimmed
+        ctx.fillStyle = fill;
+        ctx.fillRect(r.x, g.y0, r.w, bh);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = PAL.muted;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(r.x + 0.5, g.y0 + 0.5, r.w - 1, bh - 1);
+        if (s && p > 0) {                                                // the channel it bored: empty, so black
+          const len = r.w * f.plan[i].frac * p;
+          ctx.fillStyle = PAL.black;
+          ctx.fillRect(r.x, g.mid - ch / 2, len, ch);
+          ctx.strokeStyle = colour;
+          ctx.beginPath();
+          ctx.moveTo(r.x, g.mid - ch / 2); ctx.lineTo(r.x + len, g.mid - ch / 2);
+          ctx.moveTo(r.x, g.mid + ch / 2); ctx.lineTo(r.x + len, g.mid + ch / 2);
+          ctx.stroke();
+        }
+      }
+      if (r.w >= 10) text(ctx, String(i + 1), r.x + r.w / 2, g.y1 + 15, PAL.muted, "center", 10);
+      if (s && f.done && !L.gap && r.w >= 46) text(ctx, kelvin(s.temperature_k), r.x + r.w / 2, g.y0 - 7, PAL.ink, "center", 10);
+      if (f && t >= f.plan[i]?.a && t < f.plan[i].a + 0.07 && !L.gap) {   // the hit on this layer's face
+        const k = (t - f.plan[i].a) / 0.07;
+        ctx.globalAlpha = 1 - k;
+        ctx.strokeStyle = colour;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(r.x, g.mid, 4 + k * Math.min(40, bh * 0.45), 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    });
+
+    // the ruler: how much armor this is
+    const matMM = stack.filter((L) => !L.gap).reduce((a, L) => a + (Number.isFinite(L.thickness_m) ? L.thickness_m : 0), 0);
+    const gapMM = stack.filter((L) => L.gap).reduce((a, L) => a + (Number.isFinite(L.thickness_m) ? L.thickness_m : 0), 0);
+    text(ctx, `${length(matMM)} of armor` + (gapMM ? ` + ${length(gapMM)} of gaps` : ""), (g.zone + Math.min(g.right, W)) / 2,
+         g.y1 + 32, PAL.muted, "center", 10);
+
+    // the weapon itself
+    if (f && !f.done) {
+      const x = frontX(g, f), from = g.zone - 10;
+      ctx.strokeStyle = colour;
+      ctx.fillStyle = colour;
+      if (wtype === "laser" || wtype === "particle" || (wtype === "explosive" && f.res.inputs.weapon.shaped_charge)) {
+        ctx.lineWidth = wtype === "laser" ? 3 : 2;
+        if (wtype === "particle") { ctx.setLineDash([3, 5]); ctx.lineDashOffset = -t * 400; }
+        ctx.beginPath(); ctx.moveTo(from, g.mid); ctx.lineTo(x, g.mid); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.beginPath(); ctx.arc(x, g.mid, 3, 0, Math.PI * 2); ctx.fill();
+      } else if (wtype === "plasma") {
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(from, g.mid); ctx.lineTo(x, g.mid); ctx.stroke();
+        ctx.beginPath(); ctx.arc(x, g.mid, Math.max(4, ch * 0.45), 0, Math.PI * 2); ctx.fill();
+      } else if (wtype === "explosive") {                                  // a blast: a pressure front, and its ring
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(x, g.y0 - 4); ctx.lineTo(x, g.y1 + 4); ctx.stroke();
+        if (t > A0) {
+          const k = clamp01((t - A0) / 0.25);
+          ctx.globalAlpha = 1 - k;
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(g.rects[0].x, g.mid, 6 + k * bh * 0.7, 0, Math.PI * 2); ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+      } else {                                                             // kinetic (and anything else): the slug
+        ctx.fillRect(x - 10, g.mid - 3, 10, 6);
+      }
+    }
+
+    // the outcome
+    if (f && t >= A1) {
+      if (f.res.breached) {
+        text(ctx, "BREACHED", W - 8, 15, PAL.red, "right", 12, true);
+      } else if (f.plan.length) {
+        const i = f.plan.length - 1, x = g.rects[i].x + g.rects[i].w * f.plan[i].frac;
+        ctx.strokeStyle = PAL.green;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(x, g.y0 - 2); ctx.lineTo(x, g.y1 + 2); ctx.stroke();
+        text(ctx, "STOPPED", W - 8, 15, PAL.green, "right", 12, true);
+      }
+    }
+    $("stage-note").textContent = f && !f.done ? "Tap the picture to skip to the result."
+      : g.toScale ? "Layers are drawn to scale." : "Layers are to scale, except very thin ones, drawn wider so you can see them.";
+  }
+
+  // ── the result, in words and numbers (all of it from Mentat) ────────────────
+  function paramLabel(res, path) {
+    const m = /^armor_layers\[(\d+)\]\.thickness_m$/.exec(path);
+    if (m) return `Layer ${m[1]} thickness`;
+    if (path === "distance_m") return "Range";
+    const key = path.replace(/^weapon\./, "");
+    const p = (CAT.types[res.weapon_type].params || []).find((x) => x.key === key);
+    return p ? p.label : path;
+  }
+  function usedValue(res, path) {
+    const m = /^armor_layers\[(\d+)\]\.thickness_m$/.exec(path);
+    if (m) return length(res.inputs.armor_layers[Number(m[1]) - 1].thickness_m);
+    if (path === "distance_m") return metres(res.inputs.distance_m);
+    const key = path.replace(/^weapon\./, "");
+    const p = CAT.types[res.weapon_type].params.find((x) => x.key === key) || {};
+    return `${num(res.inputs.weapon[key])}${p.unit ? " " + p.unit : ""}`;
+  }
+
+  function showResults(res) {
+    lastResult = res;
+    const stack = res.inputs.armor_layers;
+    const nMat = stack.filter((L) => !L.gap).length;
+    const envName = (CAT.environments.find((e) => e.key === res.environment) || {}).label || res.environment;
+    const typeName = (CAT.types[res.weapon_type] || {}).label || res.weapon_type;
+    const list = el("ol");
+    stack.forEach((L, i) => {
+      const s = i < res.layers.length ? res.layers[i] : null;
+      const name = L.gap ? "Air gap" : (MAT[L.material] ? MAT[L.material].label : L.material);
+      const sw = el("span", { className: "swatch" + (L.gap ? " none" : "") });
+      if (!L.gap) sw.style.background = s && s.color ? s.color : MAT[L.material].color;
+      let tag, nums = null, notes = null;
+      if (!s) tag = el("span", { className: "tag unreached" }, "not reached");
+      else if (L.gap) tag = el("span", { className: "tag crossed" }, "crossed");
+      else if (s.penetrated) tag = el("span", { className: "tag through" }, "went through");
+      else tag = el("span", { className: "tag stopped" }, "stopped it");
+      if (s && !L.gap) {
+        const pct = s.damage_fraction === null ? "" : ` (${Math.round(s.damage_fraction * 100)}%)`;
+        nums = el("div", { className: "nums" },
+          `damage depth ${length(s.damage_depth_m)}${pct} · energy deposited ${si(s.energy_deposited_j, "J")} · ${kelvin(s.temperature_k)}`);
+        notes = el("div", { className: "notes" }, s.notes);
+      }
+      list.append(el("li", {}, sw, el("div", {},
+        el("div", { className: "head" }, el("b", {}, `${i + 1} · ${name}`), el("span", { className: "muted" }, length(L.thickness_m)), tag),
+        nums, notes)));
+    });
+    const clamped = res.clamped && res.clamped.length
+      ? el("p", { className: "warn" }, "Mentat kept these inside the game's limits: "
+          + res.clamped.map((c) => `${paramLabel(res, c)} → ${usedValue(res, c)}`).join("; ") + ".")
+      : null;
+    const summary = el("details", {}, el("summary", {}, "The solver's own summary"),
+                       el("pre", { className: "summary" }, res.summary_lines.join("\n")));
+    const ref = res.sigma_ground_ref ? ` at commit ${res.sigma_ground_ref.slice(0, 7)}` : "";
+    $("results").replaceChildren(...[
+      el("h2", {}, "Result"),
+      el("p", { className: "verdict " + (res.breached ? "breached" : "held") }, res.verdict),
+      el("p", { className: "muted" }, `Went through ${res.layers_penetrated} of ${nMat} layers of material · ${typeName} · `
+        + `${envName}, ${metres(res.inputs.distance_m)}`),
+      clamped, list, summary,
+      el("p", { className: "help" }, `Computed by sigma-ground's Weapon vs. Armor solver${ref} on Mentat.`)].filter(Boolean));
+    $("results").hidden = false;
+  }
+
+  $("fire").onclick = fire;
+  $("stage").onclick = () => { if (fight && !fight.done) finish(); };
+  if (window.ResizeObserver) new ResizeObserver(() => draw()).observe($("stage"));
+  else window.addEventListener("resize", draw);
+  // For tests and the curious: drive the animation by hand (WVA.step(ms)) and see where it is.
+  window.WVA = { step, finish, draw, state: () => (fight ? { t: fight.t, done: fight.done } : null) };
+  init();
+})();
+{% endraw %}
+</script>
 {% endblock %}

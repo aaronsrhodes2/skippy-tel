@@ -12,7 +12,6 @@ import io
 import json
 import re
 from functools import wraps
-from pathlib import Path
 
 from flask import (Blueprint, Flask, abort, flash, jsonify, redirect, render_template, request, send_file,
                    send_from_directory, url_for)
@@ -629,13 +628,55 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def nbody():
         return render_template("demo_nbody.html", scoreboard=experiments.NBODY_SCOREBOARD)
 
+    # Weapon vs. Armor: the page draws; every number comes from sigma-ground's own game
+    # solver on Mentat (mentat/wva.py), which validates and clamps what it's sent.
+    WVA_MAX_BODY = 8_000
+
+    def wva_failed(exc: mentat_client.MentatError):
+        """Say plainly why there's no result; never make one up."""
+        if exc.status == 429:
+            return jsonify(error="Mentat is busy right now. Try again in a minute."), 429
+        if not exc.offline:                                    # Mentat refused this fight: say why
+            return jsonify(error=str(exc)), 400
+        if exc.status is None:                                 # unreachable (the raw socket error stays in the logs)
+            print(json.dumps({"event": "wva_offline", "error": str(exc)[:300]}), flush=True)
+            why = "Mentat is offline right now."
+        elif exc.status == 404:
+            why = "Mentat is up, but this version of it doesn't have Weapon vs. Armor yet."
+        else:                                                  # Mentat's own words: e.g. the game didn't load, or a timeout
+            why = f"Mentat couldn't run it: {exc}".rstrip(".") + "."
+        return jsonify(error=why, offline=True), 502
+
     @lab.get("/weapon-vs-armor")
     def weapon_vs_armor():
-        shot = Path(app.static_folder) / "demos" / "weapon_vs_armor.png"
-        return render_template("demo_weapon_vs_armor.html", screenshot=shot.exists(),
-                               weapons=experiments.WEAPON_EXAMPLES, weapon_total=experiments.WEAPON_TOTAL,
-                               armors=experiments.ARMOR_EXAMPLES, armor_total=experiments.ARMOR_TOTAL,
-                               source="https://github.com/aaronsrhodes2/sigma-ground/tree/master/games/weapon_vs_armor")
+        return render_template("demo_weapon_vs_armor.html", available=mentat is not None,
+                               source=f"{experiments.REPO}/tree/master/games/weapon_vs_armor")
+
+    @lab.get("/weapon-vs-armor/api/catalog")
+    def wva_catalog():
+        if not mentat:
+            return jsonify(error="Mentat isn't deployed yet, so there's nothing to fire.", offline=True), 503
+        try:
+            return jsonify(mentat.wva_catalog())
+        except mentat_client.MentatError as exc:
+            return wva_failed(exc)
+
+    @lab.post("/weapon-vs-armor/api/solve")
+    def wva_solve():
+        if not mentat:
+            return jsonify(error="Mentat isn't deployed yet, so there's nothing to fire.", offline=True), 503
+        # One budget per visitor for all public Mentat calls: the playground's, and these.
+        if not limiter.allow("mentat:" + ratelimit.client_ip(request), MENTAT_PER_MIN, 60):
+            return jsonify(error="Slow down: that's a lot of physics for one minute. Try again shortly."), 429
+        if (request.content_length or 0) > WVA_MAX_BODY:
+            return jsonify(error="That fight is too large to send."), 413
+        fight = request.get_json(silent=True)
+        if not isinstance(fight, dict):
+            return jsonify(error="Send the fight as a JSON object."), 400
+        try:
+            return jsonify(result=mentat.wva_solve(fight))
+        except mentat_client.MentatError as exc:
+            return wva_failed(exc)
 
     @lab.get("/mentat")
     def mentat_page():
