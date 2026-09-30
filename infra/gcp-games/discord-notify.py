@@ -51,7 +51,7 @@ GAMES = {
     "satisfactory": (
         "Satisfactory",
         "3D factory-building co-op on an alien planet.",
-        lambda ip, e: (f"Main menu → **Server Manager** → Add Server → `{ip}:7777`\n"
+        lambda ip, e: (f"Main menu → **Server Manager** → Add Server → address `{ip}`, port `7777` (two boxes)\n"
                        "Not Multiplayer → Join Game: that errors with “Encryption Token Missing”\n"
                        "The first player to connect claims the server: do it right away"),
     ),

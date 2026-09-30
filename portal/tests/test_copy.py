@@ -73,23 +73,29 @@ def test_a_factorio_address_is_one_paste_with_the_port_in_it(env):
     assert "Connect to address" in page
 
 
-def test_an_address_and_port_are_never_two_copy_operations(env):
-    """The Captain's rule (twice, once per game): what goes in one box is one chip, `ip:port`."""
+def test_one_box_one_chip(env):
+    """The Captain's rule: what goes in ONE box is one chip (`ip:port`, never two copy operations); a dialog with
+    separate Address and Port boxes gets one chip per box. Which games have two boxes is checked against the real
+    dialog, not the docs: Satisfactory's Server Manager (2026-09-30: 'it's ip and port separate')."""
     from catalog import GAMES  # noqa: PLC0415
     client, vm, _ = env
     login(client, ADMIN)
+    two_boxes = {gid for gid, game in GAMES.items() if game.direct_port}
+    assert two_boxes == {"satisfactory"}
     for gid, game in GAMES.items():
         running(vm, gid)
         vm.state.env["VALHEIM_CROSSPLAY"] = "false"
         join = join_block(client, gid)
-        assert "<b>Port</b>" not in join, f"{gid} shows the port as a separate item"
         address = game.direct("35.1.2.3", vm.state.env)
-        assert re.search(r"^35\.1\.2\.3:\d+$", address), f"{gid}'s address should carry its port: {address}"
         assert f'<code class="code">{address}</code>' in join
+        if gid in two_boxes:
+            assert address == "35.1.2.3" and f'<b>Port</b> <code class="code">{game.direct_port}</code>' in join
+        else:
+            assert re.search(r"^35\.1\.2\.3:\d+$", address), f"{gid}'s one box should get one chip with the port in it: {address}"
+            assert "<b>Port</b>" not in join, f"{gid} shows the port as a separate item"
     running(vm, "satisfactory")
     join = join_block(client, "satisfactory")
-    assert '<code class="code">35.1.2.3:7777</code>' in join
-    assert 'data-copy="Satisfactory: address 35.1.2.3:7777"' in join                    # one click for the whole message
+    assert 'data-copy="Satisfactory: address 35.1.2.3, port 7777"' in join              # one click for the whole message
 
     vm.state.env["VALHEIM_CROSSPLAY"] = "true"
     vm.serial[2] = "=== skippy-diag t ===\nJOIN_CODE valheim=106969\n=== end ===\n"

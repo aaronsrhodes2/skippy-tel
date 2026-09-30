@@ -112,8 +112,10 @@ Actions (the sandbox can't reach GCP or run.app directly):
   copy (an invite code, `ip:port`, a password, a command, a block to paste) is marked
   `<code class="code">` / `<pre class="copy">` (or `data-copy="text"` on a button), and
   `portal/static/copy.js` (loaded by base.html) gives it a Copy button and click-to-copy, also when it
-  is added later by script. One paste, one chip: an address and port that go in the same box is
-  ONE chip (`ip:port`), never two copy operations. Skippy's chat renders `backticks` the same way.
+  is added later by script. One box, one chip: an address and port that go in the SAME box are
+  ONE chip (`ip:port`), never two copy operations; a dialog with separate Address and Port boxes
+  (Satisfactory's Server Manager) gets one chip per box, side by side. Check the real dialog, not
+  the docs. Skippy's chat renders `backticks` the same way.
 - Secrets live in the Captain's Drive vault `.env`; he loads them into Secret
   Manager with `bash infra/bootstrap/secrets.sh --from-env ~/.env` in Cloud Shell.
 
