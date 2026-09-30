@@ -19,6 +19,14 @@ docker compose --project-directory "$ROOT" \
 /usr/local/bin/skippy-everquest stop || true
 
 GAMES=$(meta games)
-if [ -n "$GAMES" ]; then
+# The idle watchdog says "went to sleep: <why>" itself, before it powers the VM off (idle_watchdog.py stop_everything),
+# and leaves this note when Discord took it. Posting again would ping every game channel a second time and put a bare
+# "stopped" over that reason on the pinned post. Every other way the VM stops (the portal's Stop, `games.sh down`,
+# gcloud) leaves no note, so this is still their one post. Only a fresh note counts: not one left by a poweroff that
+# never happened.
+NOTE=/run/skippy-games/offline-posted
+if [ -n "$(find "$NOTE" -mmin -30 2>/dev/null)" ]; then
+  logger -t skippy-shutdown "Discord already told by the idle watchdog: $(head -c 200 "$NOTE")"
+elif [ -n "$GAMES" ]; then
   /usr/local/bin/skippy-discord offline "stopped" || true
 fi
