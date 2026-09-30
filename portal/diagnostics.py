@@ -77,6 +77,79 @@ def live(vm) -> tuple[dict[str, str], dict[str, int]]:
     return join_codes(snap), players_online(snap)
 
 
+# ── server admin facts: versions, image age, mods (admin panel only) ─────────────────────────────────────────
+# infra/gcp-games/game_facts.py prints these into the snapshot under a `--- game facts` header, one line per fact
+# per running game (never settings or secrets). portal/admin_panel.py shows them to admins; nothing here is for players.
+
+_FACT_LINE = re.compile(r"^(VERSION|IMAGE|UPDATED|STARTED|MODS|MODUPDATE) ([a-z0-9_-]{1,32})=(.*)$", re.M)
+_ISO_Z = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+_HEADER_TIME = re.compile(r"^=== skippy-diag (\S+) ===", re.M)
+
+
+def snapshot_time(snapshot: str) -> str:
+    """When the snapshot was taken (the `date -Is` in its header), or ""."""
+    m = _HEADER_TIME.search(snapshot)
+    return m.group(1) if m else ""
+
+
+def parse_mods(value: str) -> list[tuple[str, str]]:
+    """`name@version;name@version` -> [(name, version)]. The version is what follows the last '@'."""
+    mods = []
+    for item in value.split(";"):
+        item = item.strip()
+        if not item:
+            continue
+        name, at, version = item.rpartition("@")
+        mods.append((name.strip(), version.strip() or "?") if at and name.strip() else (item, "?"))
+    return mods
+
+
+def game_facts(snapshot: str) -> dict[str, dict]:
+    """Per game: version, image (tag) + image_built, updated, started, mods ([] = none loaded; missing key = this
+    game has no mod list to read), modupdate ({count: n}). The last line of each kind wins."""
+    facts: dict[str, dict] = {}
+    for kind, game, value in _FACT_LINE.findall(snapshot):
+        f = facts.setdefault(game, {})
+        value = value.strip()
+        if kind == "VERSION":
+            f["version"] = value[:160]
+        elif kind == "IMAGE":
+            ref, _, built = value.rpartition(" ")
+            f["image"], f["image_built"] = (ref, built) if ref and _ISO_Z.match(built) else (value, "")
+        elif kind == "UPDATED":
+            f["updated"] = value if _ISO_Z.match(value) else ""
+        elif kind == "STARTED":
+            f["started"] = value if _ISO_Z.match(value) else ""
+        elif kind == "MODS":
+            f["mods"] = parse_mods(value)
+        elif kind == "MODUPDATE":
+            pairs = (p.partition(":") for p in value.split(","))
+            f["modupdate"] = {k: (int(v) if v.isdigit() else v) for k, _, v in pairs if k and v}
+    return facts
+
+
+def latest_complete_snapshot(port2: str) -> str:
+    """The newest snapshot that reached its `=== end ===`. The one still being written (the script takes a few seconds)
+    has no facts yet, so reading it would blank the admin card for those seconds; falls back to it when it's all there is."""
+    port2 = port2.replace("\r\n", "\n").replace("\r", "")
+    starts = [m.start() for m in re.finditer(re.escape(MARK), port2)]
+    for i in range(len(starts) - 1, -1, -1):
+        end = port2.find("=== end ===", starts[i])
+        if end != -1 and (i + 1 == len(starts) or end < starts[i + 1]):
+            return port2[starts[i]:end + len("=== end ===")]
+    return latest_snapshot(port2)
+
+
+def current_facts(vm) -> tuple[dict[str, dict], str]:
+    """(facts by game, when the snapshot was taken) from the newest complete snapshot: ≤2 minutes old while the server
+    runs. Empty when the VM is off, the snapshot isn't there yet, or the serial port can't be read."""
+    try:
+        snapshot = latest_complete_snapshot(vm.serial_output(2))
+    except Exception:   # noqa: BLE001 — a nicety on an admin card; never break the page
+        return {}, ""
+    return game_facts(snapshot), snapshot_time(snapshot)
+
+
 def for_game(snapshot: str, container: str) -> str:
     """Just one game's part of a snapshot: its `docker ps` row and its log
     section (container names match game ids — games/docker-compose.yml)."""

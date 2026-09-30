@@ -19,6 +19,7 @@ from flask import (Blueprint, Flask, abort, flash, jsonify, redirect, render_tem
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import access_requests as access_mod
+import admin_panel
 import auth
 import autoconfig
 import chat
@@ -370,6 +371,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 problem = envfile.check(value)
                 if not problem and s.key == game.banner_key and value and not value.startswith("https://"):
                     problem = "must start with https://"
+                if not problem and value and s.check:          # true/false, version and list settings say what's wrong
+                    value, problem = s.check(value)
                 if problem:
                     bad.append(f"{game.name} {s.label.lower()} {problem}.")
                     continue
@@ -505,6 +508,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         return render_template("logs.html", logs=logs, error=error, game=game)
 
     app.register_blueprint(admin)
+    admin_panel.init_app(app, vm)          # the per-game Server admin card: admin-only refresh route + template global
 
     # ── home reporter (services/home-reporter) ─────────────────────────────────
     @app.post("/home/report")

@@ -196,6 +196,7 @@
   <section>
     <h2>Admin</h2>
     <div class="card">
+      {% include "_server_admin.html" %}   {# the Server admin card: admin only, like everything in this block #}
       <div class="row">
         <form class="inline" method="post" action="{{ url_for('admin.restart') }}"
               onsubmit="return confirm('Restart now? Players are disconnected; worlds are saved first.');">

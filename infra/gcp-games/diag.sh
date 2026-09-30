@@ -25,6 +25,14 @@
     docker logs dragonwilds 2>&1 | grep -iE 'join|login|logout|left|disconnect|kick|player' \
       | grep -viE 'heartbeat|JoinCode|PlayerCapacity|PlayerPlatform' | tail -25 | cut -c1-300
   fi
+  # ── game facts for the portal's admin-only Server admin card (game_facts.py, from metadata `game-facts`) ──
+  # VERSION / IMAGE / UPDATED / STARTED / MODS / MODUPDATE lines per running game, parsed by portal/diagnostics.py
+  # game_facts(). Read-only, no settings or secrets; a missing script or a failure only means no lines.
+  echo "--- game facts"
+  curl -sf -H "Metadata-Flavor: Google" \
+    "http://metadata.google.internal/computeMetadata/v1/instance/attributes/game-facts" 2>/dev/null \
+    | timeout 60 python3 - 2>/dev/null || true
+  # ── end game facts ──
   echo "--- udp listeners (game ports)"
   ss -ulnp 2>/dev/null | grep -E ':(2456|2457|7777|7778|8888|34197)\b' || echo "(none)"
   echo "--- memory";    free -m | head -2

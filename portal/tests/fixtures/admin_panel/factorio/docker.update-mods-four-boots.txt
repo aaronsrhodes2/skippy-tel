@@ -1,0 +1,43 @@
++ [[ 0 -gt 0 ]]
++ [[ true == \t\r\u\e ]]
++ //docker-update-mods.sh
+You need to provide your Factorio username to update mods.
+You need to provide your Factorio token to update mods.
+Checking for update of mod even-distribution for factorio 2.0.77 ...
+  Skipping mod version 2.1.0 because of factorio version mismatch
+  Downloading even-distribution_2.0.2.zip
+  Download failed: Code 403.
+Checking for update of mod skippy-lab-custom-mod-not-on-portal for factorio 2.0.77 ...
+  Custom mod not on https://mods.factorio.com, skipped.
++ //docker-dlc.sh
+Enable mod elevated-rails for DLC
+Enable mod quality for DLC
+Enable mod space-age for DLC
+[... omitted: the server starting and running ...]
++ [[ 0 -gt 0 ]]
++ [[ true == \t\r\u\e ]]
++ //docker-update-mods.sh
+You need to provide your Factorio username to update mods.
+You need to provide your Factorio token to update mods.
++ //docker-dlc.sh
+Enable mod elevated-rails for DLC
+[... omitted ...]
++ [[ 0 -gt 0 ]]
++ [[ true == \t\r\u\e ]]
++ //docker-update-mods.sh
+You need to provide your Factorio username to update mods.
+You need to provide your Factorio token to update mods.
+Checking for update of mod skippy-lab-mod for factorio 2.0.77 ...
+  Custom mod not on https://mods.factorio.com, skipped.
++ //docker-dlc.sh
+[... omitted ...]
++ [[ 0 -gt 0 ]]
++ [[ true == \t\r\u\e ]]
++ //docker-update-mods.sh
+You need to provide your Factorio username to update mods.
+You need to provide your Factorio token to update mods.
+Checking for update of mod skippy-lab-control for factorio 2.0.77 ...
+  Custom mod not on https://mods.factorio.com, skipped.
+Checking for update of mod skippy-lab-mod for factorio 2.0.77 ...
+  Custom mod not on https://mods.factorio.com, skipped.
++ //docker-dlc.sh

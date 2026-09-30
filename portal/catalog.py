@@ -8,6 +8,7 @@ this portal).
 from __future__ import annotations
 
 import html
+import re
 from dataclasses import dataclass, field, replace
 from typing import Callable
 
@@ -18,6 +19,8 @@ class Setting:
     label: str
     secret: bool = False      # rendered as a password field, never echoed back
     help: str = ""
+    check: Callable[[str], tuple[str, str | None]] | None = None   # (typed value) -> (value to save, what's wrong or None)
+    external: bool = False    # issued by someone else (a token): "Set up automatically" must never make one up
 
 
 @dataclass(frozen=True)
@@ -233,6 +236,75 @@ GAMES: dict[str, Game] = {
         links=(("EQEmu", "https://www.eqemulator.org"), ("Bots guide", "https://docs.eqemu.io")),
     ),
 }
+
+# ── keeping servers and mods current (docs/games/MODS_AND_UPDATES.md; the card is portal/admin_panel.py) ────────
+# Admin-only settings for the update controls the real images support. Each one is wired in games/docker-compose.yml with
+# the default below, which is what a blank value means and is exactly what the servers did before these existed:
+# nothing here changes behaviour until the Captain turns it on. tests/test_admin_panel.py keeps the two in step.
+
+def _bool(value: str) -> tuple[str, str | None]:
+    v = value.strip().lower()
+    return (v, None) if v in ("true", "false") else (value, "must be true or false")
+
+
+def _factorio_version(value: str) -> tuple[str, str | None]:
+    v = value.strip().lower()
+    if v in ("stable", "latest") or re.fullmatch(r"\d+\.\d+\.\d+", v):
+        return v, None
+    return value, "must be stable, latest, or an exact version such as 2.0.77"
+
+
+def _mod_names(value: str) -> tuple[str, str | None]:
+    names = [n.strip() for n in value.split(",") if n.strip()]
+    if all(re.fullmatch(r"[A-Za-z0-9 _.-]{1,80}", n) for n in names):
+        return ",".join(names), None
+    return value, "must be mod names separated by commas"
+
+
+UPDATE_DEFAULTS = {
+    "VALHEIM_BEPINEX": "false",
+    "FACTORIO_VERSION": "stable", "FACTORIO_UPDATE_MODS": "false", "FACTORIO_UPDATE_IGNORE": "",
+    "FACTORIO_USERNAME": "", "FACTORIO_TOKEN": "",
+    "SATISFACTORY_SKIP_UPDATE": "false",
+    "DRAGONWILDS_UPDATE_ON_START": "true",
+}
+
+UPDATE_SETTINGS: dict[str, tuple[Setting, ...]] = {
+    "valheim": (
+        Setting("VALHEIM_BEPINEX", "Mod support (BepInEx)", check=_bool,
+                help="true or false; blank means false. true: at every start the image installs BepInEx (from Thunderstore) "
+                     "and loads the plugins in data/valheim/config/bepinex/plugins on the server disk. The server then "
+                     "counts as modded, and a mod that changes gameplay must also be installed on every player's PC "
+                     "(Xbox players can't install mods). The server itself updates from Steam at every start either way."),
+    ),
+    "factorio": (
+        Setting("FACTORIO_VERSION", "Server version", check=_factorio_version,
+                help="stable (blank means stable): the newest stable release, pulled at every boot. latest: the newest "
+                     "experimental one. Or an exact version such as 2.0.77 to hold the server there: it then never "
+                     "updates until you change this."),
+        Setting("FACTORIO_UPDATE_MODS", "Update mods on start", check=_bool,
+                help="true or false; blank means false. true: at every start, each enabled mod listed in "
+                     "data/factorio/mods/mod-list.json is updated from mods.factorio.com (a listed mod that isn't "
+                     "installed yet is downloaded). Needs the Factorio username and token below."),
+        Setting("FACTORIO_USERNAME", "Factorio username",
+                help="Your factorio.com username, for mod downloads. Blank: mod downloads fail with 403."),
+        Setting("FACTORIO_TOKEN", "Factorio token", secret=True, external=True,
+                help="Your factorio.com token (factorio.com → profile), for mod downloads. Never shown again once saved."),
+        Setting("FACTORIO_UPDATE_IGNORE", "Never update these mods", check=_mod_names,
+                help="Mod names separated by commas, left at their installed version when mods update on start."),
+    ),
+    "satisfactory": (
+        Setting("SATISFACTORY_SKIP_UPDATE", "Skip the game update on start", check=_bool,
+                help="true or false; blank means false. false: the server files are updated from Steam at every start. "
+                     "true: the installed build is kept, and players on a newer game version can't join."),
+    ),
+    "dragonwilds": (
+        Setting("DRAGONWILDS_UPDATE_ON_START", "Update the game files on start", check=_bool,
+                help="true or false; blank means true. The server version has to match the game client, so leave this on."),
+    ),
+}
+
+GAMES = {gid: replace(g, settings=g.settings + UPDATE_SETTINGS.get(gid, ())) for gid, g in GAMES.items()}
 
 # Every game can have a banner image on its page; the URL is just another setting.
 GAMES = {gid: replace(g, settings=g.settings + (Setting(

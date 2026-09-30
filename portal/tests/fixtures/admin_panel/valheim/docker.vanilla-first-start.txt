@@ -1,0 +1,51 @@
+INFO - Setting uid:gid of valheim to 0:0
+INFO - Setting timezone America/Los_Angeles
+INFO - Setting up syslogd - logging to stdout
+DEBUG - [1] - Creating cron to do world backups using schedule 5 * * * *
+DEBUG - [1] - Creating cron to check for updates using schedule */15 * * * *
+DEBUG - [1] - Creating cron to restart valheim-server using schedule 10 5 * * *
+2026-09-29 23:48:06,251 INFO Included extra file "/usr/local/etc/supervisor/conf.d/syslog.conf" during parsing
+2026-09-29 23:48:06,251 INFO Set uid to user 0 succeeded
+2026-09-29 23:48:06,254 INFO RPC interface 'supervisor' initialized
+2026-09-29 23:48:06,255 INFO supervisord started with pid 26
+2026-09-29 23:48:07,257 INFO spawned: 'syslogd' with pid 27
+2026-09-29 23:48:07,259 INFO spawned: 'crond' with pid 28
+2026-09-29 23:48:07,260 INFO spawned: 'valheim-bootstrap' with pid 29
+Sep 29 23:48:07 syslogd started: BusyBox v1.36.1
+2026-09-29 23:48:07,261 INFO success: valheim-bootstrap entered RUNNING state, process has stayed up for > than 0 seconds (startsecs)
+Sep 29 23:48:07 crond[28]: crond (busybox 1.36.1) started, log level 8
+Sep 29 23:48:07 supervisord: valheim-bootstrap DEBUG - [29] - Running commit e36cbfb0ddc8ff7e8530dee378a9521fe6c28fed
+Sep 29 23:48:07 supervisord: valheim-bootstrap DEBUG - [29] - SteamCMD depot manifest cache persisted at /opt/valheim/dl/depotcache
+2026-09-29 23:48:07,347 INFO spawned: 'valheim-updater' with pid 37
+Sep 29 23:48:07 supervisord: valheim-updater DEBUG - [37] - Running Valheim Server updater as user valheim uid 0
+Sep 29 23:48:07 supervisord: valheim-updater DEBUG - [37] - Kernel: Linux 52a5da9ca37e 6.6.87.2-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Thu Jun  5 18:30:46 UTC 2025 x86_64 GNU/Linux
+Sep 29 23:48:07 supervisord: valheim-updater DEBUG - [37] - Found CPU with 3609.599 MHz
+Sep 29 23:48:07 supervisord: valheim-updater DEBUG - [37] - Memory total/free/available: 16293040/11755904/12970640
+Sep 29 23:48:07 supervisord: valheim-updater DEBUG - [37] - Storage configuration:
+Sep 29 23:48:07 supervisord: valheim-updater Filesystem      Size  Used Avail Use% Mounted on
+Sep 29 23:48:07 supervisord: valheim-updater overlay        1007G  222G  735G  24% /
+[... 1080 lines of the steamcmd download and its file listing omitted from this excerpt ...]
+Sep 29 23:48:53 supervisord: valheim-updater >f+++++++++ valheim_server_Data/StreamingAssets/SoftRef/Bundles/ff00a4b1
+Sep 29 23:48:53 supervisord: valheim-updater >f+++++++++ valheim_server_Data/StreamingAssets/SoftRef/Bundles/ff20db3b
+Sep 29 23:48:53 supervisord: valheim-updater >f+++++++++ valheim_server_Data/StreamingAssets/SoftRef/Bundles/ff4fb6f
+Sep 29 23:48:53 supervisord: valheim-updater >f+++++++++ valheim_server_Data/StreamingAssets/SoftRef/Bundles/ff8ca4ac
+Sep 29 23:48:53 supervisord: valheim-updater INFO - Valheim Server was updated - restarting
+Sep 29 23:48:53 supervisord: valheim-updater DEBUG - [37] - Writing file to restart Valheim server
+2026-09-29 23:48:53,661 INFO spawned: 'valheim-server' with pid 171
+Sep 29 23:48:53 supervisord: valheim-server INFO - Running Valheim Server
+Sep 29 23:48:53 supervisord: valheim-server DEBUG - [171] - Server config is name: Lab Admin, port: 2456/udp, world: LabWorld, public: 0, mod: none
+Sep 29 23:48:53 supervisord: valheim-server DEBUG - [171] - Waiting for server to listen on UDP query port 2457
+Sep 29 23:48:53 supervisord: valheim-server I0929 23:48:53.674669     177 main.go:76] Configuring Valheim server log filter
+[... omitted ...]
+Sep 29 23:48:59 supervisord: valheim-server 09/29/2026 23:48:59: Authentication:k_ESteamNetworkingAvailability_Waiting
+Sep 29 23:48:59 supervisord: valheim-server 09/29/2026 23:48:59: Steam game server initialized
+Sep 29 23:48:59 supervisord: valheim-server 09/29/2026 23:48:59: Valheim version: l-1.0.16 (network version 40)
+Sep 29 23:48:59 supervisord: valheim-server 09/29/2026 23:49:00: Worldgenerator version setup:2
+Sep 29 23:49:00 supervisord: valheim-server 09/29/2026 23:49:00: Console: Valheim l-1.0.16 (network version 40)
+Sep 29 23:49:00 supervisord: valheim-server 09/29/2026 23:49:00: Console: 
+Sep 29 23:49:00 supervisord: valheim-server 09/29/2026 23:49:00: Console: type "help" - for commands
+[... omitted ...]
+Sep 29 23:49:07 supervisord: valheim-server The shader Hidden/SimpleClear (UnityEngine.Shader) on effect Main Camera (UnityStandardAssets.ImageEffects.SunShafts) is not supported on this platform!
+Sep 29 23:49:07 supervisord: valheim-server The image effect Main Camera (UnityStandardAssets.ImageEffects.SunShafts) has been disabled as it's not supported on the current platform.
+Sep 29 23:49:07 supervisord: valheim-server 09/29/2026 23:49:07: Game server connected
+Sep 29 23:49:07 supervisord: valheim-server [AmplifyOcclusion] GBuffer Normals only available in Camera Deferred Shading mode. Switched to Camera source.
