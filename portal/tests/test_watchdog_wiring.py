@@ -41,6 +41,8 @@ def test_no_fixture_is_swallowed_by_gitignore():
     assert len(files) >= 5
     for f in files:
         ignored = subprocess.run(["git", "-C", str(ROOT), "check-ignore", "-q", str(f)], capture_output=True)
+        if ignored.returncode == 128:
+            pytest.skip("not a git checkout (an exported tree)")
         assert ignored.returncode == 1, f"{f.name} is matched by .gitignore"
 
 
