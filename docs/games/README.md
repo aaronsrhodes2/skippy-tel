@@ -126,6 +126,54 @@ Every game's page on the portal shows the same block: what to type, where, and t
 
 The join password is shown in plain text on purpose (see `CLAUDE.md`, "Join passwords").
 
+### Readiness: when is a game really joinable?
+A game's page and card say **Starting** until the game's *own log* says players can join, not for a fixed number of minutes
+(`ready_minutes` in `portal/catalog.py` is only the fallback). Every 2 minutes `infra/gcp-games/diag.sh` scans each game's
+whole container log and writes `READY <game>=<0|1>` into the serial snapshot (its own `--- readiness` section; `ops
+status` shows it as `ready`, `ops logs <game>` as the game's `READY` line). `portal/diagnostics.py` reads it and
+`portal/readiness.py` decides. That file holds the markers, the evidence for each and the rules; the short version:
+
+- Read the log top to bottom. A **boot** line means "starting up, forget everything above"; a **ready** line means
+  "joinable now". The last one wins. A boot resets the state because `docker restart` (`ops restart-game`), a crash, and a
+  game's own updater keep the same container, whose log still holds the old run's ready line.
+- A container that isn't running is `0`. **No line** (older VM, first snapshot not there yet, a snapshot from before this
+  boot, nothing recognisable in the log) means the page falls back to the boot timer and its "usually joinable about N min"
+  hint, exactly as before. A game that has said "not yet" for 45 minutes is also handed back to the timer, so a marker a
+  game update reworded can't keep a joinable game on "Starting".
+- A marker that was never seen in a real log is **UNVERIFIED** and may only say "ready sooner than the timer", never
+  "starting for longer".
+
+| Game | Boot line | Ready line | Status |
+|---|---|---|---|
+| Valheim | `supervisord started with pid` (container), `valheim-server INFO - Running Valheim Server` (the game process) | `Opened Steam server`; with crossplay on `Session "..." with join code N and IP ... is active` | **Verified** on real boots (fixtures): fresh world, saved world, `docker restart`, crash, crossplay on. Not `Game server connected`: it fires 21 s *before* a fresh world has loaded. |
+| Factorio | the `Factorio 2.0.x (build N, ...)` banner | `changing state from(CreatingGame) to(InGame)` | **Verified**, incl. the real VM's boot. A first boot with a new save runs Factorio twice (`--create`, then serve); each banner resets. `Missing token` is harmless: see below. |
+| Satisfactory | `LogInit: Engine Version:` | `IpNetDriver listening on port 7777` | **UNVERIFIED**: Unreal Engine's usual lines, not seen in a Satisfactory log. |
+| Dragonwilds | `LogInit: Engine Version:` | `Setting ["JoinCode"] written ... value[<code>]` | **UNVERIFIED**: the JoinCode line is real (the portal already reads the invite code from it); that it marks "joinable" and the start line are assumed. |
+| EverQuest | `=== skippy-games boot` | `everquest: online at <ip>:5999` | **UNVERIFIED**: lines the scripts really print (`startup.sh`, `everquest.sh`), read from the startup script's output with `journalctl -u google-startup-scripts.service -b`. |
+
+**Factorio's `Missing token`** (`Matching server connection failed: ... Missing token.`) is the server failing to publish
+itself on factorio.com's public list: the image's `server-settings.json` has `"public": true` and no factorio.com
+credentials. The Captain's servers are joined by address, so it doesn't matter: in every captured boot it comes *after* the
+ready line, and with `"public": false` it disappears while the same ready line still appears. (Not tested: a real Factorio
+client joining, there was none to hand.)
+
+**Verifying an UNVERIFIED game** (needs one real session of it; do it the first time the game runs):
+1. Start it and watch `gh workflow run ops.yml -f command=status` every minute or so: the `ready` field goes `false` → `true`
+   for the game (no entry: the log had no recognisable line at all, which is itself a finding).
+2. Read the whole boot: `ops tail <game> 2000` (or `search <game> <regex>` for one marker). Confirm the boot line opens the
+   log and find the ready line.
+3. Try to join with the real client the moment `ready` flips, and again a minute *before* it: the flip should sit
+   between "can't join yet" and "can". Note the seconds either way.
+4. If the marker is right: save the trimmed log as a fixture in `portal/tests/fixtures/readiness/`, pin it in
+   `portal/tests/test_readiness.py` the way Valheim's are, and set `verified=True`. If not: fix the pattern in
+   **both** `portal/readiness.py` and `infra/gcp-games/diag.sh` (`test_readiness_diag.py` fails until they match, and runs
+   diag.sh's block against every fixture), then do 4 again.
+   - EverQuest also needs: `ready` shows `false` from boot (the boot line, read from the journal) and `true` after
+     `everquest: online at`. If it never shows up, the journal doesn't carry the startup output in that form.
+   - Dragonwilds: also note whether the Direct-tab address (`ip:7778`) starts working before or after the JoinCode line.
+     The invite code and the "online" badge appear together, and the badge must not flip before players can join by
+     either route (the invite code or the direct address).
+
 ### Backups
 **Per game (rollback of a bad day).** Each game's world files are flagged in `TARGETS` in
 `infra/gcp-games/game_backup.py`. At every boot, with the containers down, `startup.sh` archives them

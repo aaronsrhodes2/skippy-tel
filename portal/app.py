@@ -36,6 +36,7 @@ import mentat_client
 import ops
 import spend
 import ratelimit
+import readiness
 import tasks
 import watch
 import workshop as workshop_mod
@@ -219,10 +220,18 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         flash(f"Request sent. {ops.SWITCH_OWNER} will see it on the dashboard.", "ok")
         return redirect(url_for("request_access", game=game))     # a reload shows the page again, it doesn't re-send
 
-    def live_info(status) -> tuple[dict[str, str], dict[str, int]]:
-        """Per-session invite codes (Dragonwilds makes a new one each boot) and
-        players online, read fresh from the VM on every page load while it runs."""
-        return diagnostics.live(vm) if status and status.status == "RUNNING" else ({}, {})
+    def live_info(status) -> tuple[dict[str, str], dict[str, int], dict[str, bool]]:
+        """Per-session invite codes (Dragonwilds makes a new one each boot), players online and which games' own logs
+        say they're joinable (portal/readiness.py), read fresh from the VM on every page load while it runs."""
+        if status and status.status == "RUNNING":
+            return diagnostics.live_all(vm, status.started_at)
+        return {}, {}, {}
+
+    def starting_now(status, gid: str, ready: dict[str, bool]) -> bool:
+        """Is `gid` up but not joinable yet? The game's own log first (`ready`: the READY lines), the boot timer only
+        as the fallback (portal/readiness.py is_starting)."""
+        on = bool(status and status.status == "RUNNING" and gid in status.games)
+        return on and readiness.is_starting(gid, ready.get(gid), status.minutes_up(), GAMES[gid].ready_minutes)
 
     def back(default_endpoint: str):
         """Return to the game page a form came from (hidden `next` field), or
@@ -284,12 +293,13 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         status, error = vm_status()
         env = status.env if status else {}
         banner = env.get(GAMES[gid].banner_key, "")
+        codes, players, ready = live_info(status)
         return render_template(
             "game.html", game=GAMES[gid], t=GAMES[gid].theme, status=status, error=error,
             links=discord_admin.links(env, gid),
             banner=banner if banner.startswith("https://") else "",
             bot_configured=bool(app.config["DISCORD_BOT_TOKEN"]),
-            **dict(zip(("codes", "players"), live_info(status))),
+            codes=codes, players=players, starting=starting_now(status, gid, ready),
         )
 
     @dash.get("/games/<gid>/live")
@@ -301,10 +311,12 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             abort(404)
         status, _ = vm_status()
         on = bool(status and status.status == "RUNNING" and gid in status.games)
-        up = status.minutes_up() if on else None
-        codes, players = live_info(status)
-        resp = jsonify(on=on, starting=bool(on and up is not None and up < GAMES[gid].ready_minutes),
+        codes, players, ready = live_info(status)
+        payload = dict(on=on, starting=starting_now(status, gid, ready),
                        code=codes.get(gid) if on else None, players=players.get(gid) if on else None)
+        if on:
+            payload["ready"] = ready.get(gid)       # the game's own log: true, false, or null (no answer: the timer decided)
+        resp = jsonify(payload)
         resp.headers["Cache-Control"] = "no-store"
         return resp
 

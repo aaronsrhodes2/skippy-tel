@@ -31,6 +31,7 @@
         {% set is_set = is_admin or not status.games or id in status.games %}
         {# The server runs one game at a time, so the one that's up gets the glowing card (.live). #}
         <a class="tile{{ ' live' if on }}" href="{{ url_for('dashboard.game', gid=id) }}" data-tel="tile:game:{{ id }}"
+           {% if on %}data-live="{{ url_for('dashboard.game_live', gid=id) }}"{% endif %}
            {% if game.theme %}style="--accent: {{ game.theme.accent }}"{% endif %}>
           <span class="pill">{% if starting %}⏳ starting{% elif on %}● online{% elif asleep and is_set %}asleep{% elif not is_set %}ask {{ switch_owner }}{% elif running %}off{% else %}{{ status.status | lower }}{% endif %}</span>
           <span class="icon">{{ game.icon }}</span>
@@ -39,6 +40,35 @@
         </a>
       {% endfor %}
     </div>
+
+    {# >>> readiness: the pills above are the boot timer's first guess. This page never reads the VM itself (see index()),
+       so a game that's up asks its own /live, the read its page polls, and the pill follows the game's own log:
+       "starting" ends when the game says it's joinable (portal/readiness.py), not after a fixed time. #}
+    {% if running %}
+    <script>
+      (function () {
+        const tiles = document.querySelectorAll("a.tile[data-live]");
+        if (!tiles.length) return;
+        const say = {starting: ["⏳ starting", "Starting up. Tap for when it's joinable."],
+                     online: ["● online", "Online now. Tap for how to join."]};
+        async function refresh(tile) {
+          try {
+            const res = await fetch(tile.dataset.live, {headers: {"Accept": "application/json"}, cache: "no-store"});
+            if (!res.ok) return;
+            const now = await res.json();
+            if (!now.on) return;
+            const [pill, line] = say[now.starting ? "starting" : "online"];
+            tile.querySelector(".pill").textContent = pill;
+            tile.querySelector("p").textContent = line;
+          } catch (e) { /* a network blip: the next poll catches up */ }
+        }
+        function poll() { if (!document.hidden) tiles.forEach(refresh); }
+        poll();
+        setInterval(poll, 20000);
+      })();
+    </script>
+    {% endif %}
+    {# <<< readiness #}
 
     {% if running %}
       <form class="inline" method="post" action="{{ url_for('dashboard.games_stop') }}"

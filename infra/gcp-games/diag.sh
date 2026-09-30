@@ -25,6 +25,30 @@
     docker logs dragonwilds 2>&1 | grep -iE 'join|login|logout|left|disconnect|kick|player' \
       | grep -viE 'heartbeat|JoinCode|PlayerCapacity|PlayerPlatform' | tail -25 | cut -c1-300
   fi
+  # >>> readiness (the patterns mirror portal/readiness.py; portal/tests/test_readiness_diag.py keeps them in sync and runs this block)
+  # `READY <game>=<0|1>`: is the game joinable, read from its own log (the WHOLE log, not the 40 lines above). 1 = its
+  # "joinable" line came after its latest "starting up" line; 0 = it is starting, or its container isn't running;
+  # no line = nothing recognisable in the log, and the portal falls back to its boot timer. Rules and the evidence for
+  # each pattern: portal/readiness.py. Patterns are POSIX ERE with no backslashes and no {n} (mawk reads them too).
+  echo "--- readiness"
+  scan_ready() {   # the log on stdin; $1 game, $2 boot pattern, $3 ready pattern
+    BOOT="$2" READY="$3" awk -v game="$1" '$0 ~ ENVIRON["BOOT"] { s = "0" } $0 ~ ENVIRON["READY"] { s = "1" }
+      END { if (s != "") print "READY " game "=" s }'
+  }
+  ready_container() {   # $1 = the game = its container's name, $2 boot pattern, $3 ready pattern
+    rs=$(docker inspect -f '{{.State.Status}}' "$1" 2>/dev/null) || return 0     # not started this boot: no line
+    if [ "$rs" = running ]; then docker logs "$1" 2>&1 | scan_ready "$1" "$2" "$3"; else echo "READY $1=0"; fi
+  }
+  ready_container valheim 'supervisord started with pid|valheim-server INFO - Running Valheim Server' 'Opened Steam server|join code [0-9]+ and IP .* is active'
+  ready_container factorio 'Factorio [0-9.]+ [(]build [0-9]+' 'changing state from[(]CreatingGame[)] to[(]InGame[)]'
+  ready_container satisfactory 'LogInit: Engine Version:' 'IpNetDriver listening on port 7777'
+  ready_container dragonwilds 'LogInit: Engine Version:' 'JoinCode.*written with key.*value.[^]]'
+  # EverQuest isn't a container of ours: everquest.sh reports its progress into the startup script's output (the journal).
+  case " $(curl -sf -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/attributes/games 2>/dev/null) " in
+    *" everquest "*) journalctl -u google-startup-scripts.service -b -o cat --no-pager 2>/dev/null \
+                       | scan_ready everquest '=== skippy-games boot' 'everquest: online at' ;;
+  esac
+  # <<< readiness
   echo "--- udp listeners (game ports)"
   ss -ulnp 2>/dev/null | grep -E ':(2456|2457|7777|7778|8888|34197)\b' || echo "(none)"
   echo "--- memory";    free -m | head -2
