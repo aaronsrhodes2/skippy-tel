@@ -40,11 +40,12 @@ def join_codes(snapshot: str) -> dict[str, str]:
     return codes
 
 
-def current_join_codes(vm) -> dict[str, str]:
+def current_join_codes(vm, booted_at: datetime | None = None) -> dict[str, str]:
     """Live invite codes (≤2 minutes old). Empty when the VM is off, the
-    snapshot isn't there yet, or the serial port can't be read."""
+    snapshot isn't there yet (or is from before this boot: see current_snapshot),
+    or the serial port can't be read."""
     try:
-        return join_codes(latest_snapshot(vm.serial_output(2)))
+        return join_codes(current_snapshot(vm.serial_output(2), booted_at))
     except Exception:   # noqa: BLE001 — an invite code is a nicety; never break the page
         return {}
 
@@ -73,6 +74,15 @@ def snapshot_time(snapshot: str) -> datetime | None:
     return taken if taken.tzinfo else taken.replace(tzinfo=timezone.utc)
 
 
+def from_this_boot(snapshot: str, booted_at: datetime | None) -> bool:
+    """Was the snapshot taken since the VM's last start? Without `booted_at` there is nothing to compare, so yes; a header
+    that can't be read can't be proven fresh (the serial port can keep the previous session's output across a restart)."""
+    if booted_at is None:
+        return True
+    taken = snapshot_time(snapshot)
+    return taken is not None and taken >= booted_at
+
+
 def ready_states(snapshot: str, booted_at: datetime | None = None) -> dict[str, bool]:
     """Is each game joinable, from the `READY <game>=<0|1>` lines skippy-diag writes from the games' own logs.
 
@@ -80,10 +90,8 @@ def ready_states(snapshot: str, booted_at: datetime | None = None) -> dict[str, 
     start), a snapshot taken before it, or one whose header can't be read, describes the PREVIOUS session (the serial
     port can keep its output across a restart, and the first snapshot of a boot lands a minute in) and counts as
     no answer: "ready" from yesterday's boot must never show as ready now."""
-    if booted_at is not None:
-        taken = snapshot_time(snapshot)
-        if taken is None or taken < booted_at:
-            return {}
+    if not from_this_boot(snapshot, booted_at):
+        return {}
     return {game: value == "1" for game, value in _READY_LINE.findall(snapshot)}
 # <<< readiness
 
@@ -108,9 +116,10 @@ def live(vm) -> tuple[dict[str, str], dict[str, int]]:
 
 
 def live_all(vm, booted_at: datetime | None = None) -> tuple[dict[str, str], dict[str, int], dict[str, bool]]:
-    """(invite codes, players online, joinable per game) from one fresh snapshot read. `booted_at`: see ready_states."""
+    """(invite codes, players online, joinable per game) from one fresh snapshot read: the newest complete snapshot of
+    this boot (`current_snapshot`), so codes and players are as fresh as READY. `booted_at`: see ready_states."""
     try:
-        snap = latest_snapshot(vm.serial_output(2))
+        snap = current_snapshot(vm.serial_output(2), booted_at)
     except Exception:   # noqa: BLE001 — niceties; never break the page
         return {}, {}, {}
     return join_codes(snap), players_online(snap), ready_states(snap, booted_at)
@@ -184,6 +193,19 @@ def latest_complete_snapshot(port2: str) -> str:
         if end != -1 and (i + 1 == len(starts) or end < starts[i + 1]):
             return port2[starts[i]:end + len("=== end ===")]
     return latest_snapshot(port2)
+
+
+def current_snapshot(port2: str, booted_at: datetime | None = None) -> str:
+    """The snapshot the live readings come from (invite codes, players, READY lines, the /me dashboard): the newest
+    COMPLETE one of this boot. The one still being written has its header and no readings yet (diag.sh streams them as it
+    goes), so reading it would blank them for those seconds and flap the page's state; it is used only when no complete
+    snapshot of this boot exists. With `booted_at`, a snapshot from before it is the previous session's and counts for
+    nothing, whatever it carries: "" when that is all there is."""
+    complete = latest_complete_snapshot(port2)
+    if from_this_boot(complete, booted_at):
+        return complete
+    writing = latest_snapshot(port2)
+    return writing if from_this_boot(writing, booted_at) else ""
 
 
 def current_facts(vm) -> tuple[dict[str, dict], str]:

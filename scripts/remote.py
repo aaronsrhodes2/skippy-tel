@@ -67,7 +67,7 @@ def scrub(text: str, env: dict[str, str]) -> str:
 
 def status(vm) -> dict:
     s = vm.status()
-    codes = diagnostics.current_join_codes(vm) if s.status == "RUNNING" else {}
+    codes = diagnostics.current_join_codes(vm, s.started_at) if s.status == "RUNNING" else {}
     return {
         "status": s.status,
         "machine_type": s.machine_type,

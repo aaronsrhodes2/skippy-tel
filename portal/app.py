@@ -706,7 +706,9 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         snap = ""
         if running:
             try:
-                snap = diagnostics.latest_snapshot(vm.serial_output(2))
+                # The newest COMPLETE snapshot of this boot: the one still being written has no readings or
+                # pressure lines yet and would blank them (and raise "watchdog not reporting" warnings) for its seconds.
+                snap = diagnostics.current_snapshot(vm.serial_output(2), status.started_at)
             except Exception:   # noqa: BLE001
                 snap = ""
         res = diagnostics.resources(snap) if snap else {}
