@@ -65,8 +65,8 @@ Claude Code with **full permissions** (`--dangerously-skip-permissions`) on the
 SkippyTel repo, driven from the Captain's portal dashboard (`workshop_engine.py`).
 These three need `Authorization: Bearer <SKIPPY_HOME_TOKEN>` (the token the home
 reporter holds; read from the environment or the vault `G:/My Drive/vault/.env`).
-With no token configured they answer 503 and stay shut. `/solid-gold` is
-still unauthenticated (see the note below).
+With no token configured they answer 503 and stay shut. `/solid-gold` takes the
+same token (see the note below).
 
 - **Model:** `claude-opus-5-5`, a constant in `workshop_engine.py`. No environment
   variable and no request field changes it.
@@ -88,10 +88,13 @@ Tests: `python -m pytest services/claude-bridge/tests` (a stand-in `claude`, no 
 
 ## Security note
 
-`/solid-gold` in `bypass` mode runs Claude with every permission check skipped and
-takes no authentication, while the bridge listens on `0.0.0.0` (so Docker can
-reach it). Anything that can reach port 9337 can use it. Keep the Windows firewall
-closed to it from other machines, or put the token on it too.
+The bridge listens on `0.0.0.0` (so Docker can reach it) and runs Claude Code, so
+**every** door except `/health` wants `Authorization: Bearer <SKIPPY_HOME_TOKEN>`,
+`/solid-gold` included (it used to take no authentication: closed 2026-09-30,
+`tests/test_solid_gold_auth.py`), and with no token configured they all stay shut (503).
+flask-api's client (`app/clients/claude_bridge.py`) sends the token from its own
+environment, which the vault `.env` fills with the same value. Anything else on the
+network can knock on port 9337 and gets 401.
 
 ## Boot persistence (deferred)
 

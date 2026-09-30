@@ -1,0 +1,117 @@
+"""/solid-gold runs Claude Code (plan = read the whole tree, bypass = every permission check skipped) and the bridge
+listens on 0.0.0.0 so Docker can reach it. It used to take no authentication (the README's own "Security note"); it now
+wants the same bearer token as the workshop, and with no token configured it stays shut (Platinum section 19, condition 1).
+
+These tests stand up the real HTTP door and prove the one thing that matters: Claude does not run without the token."""
+import importlib.util
+import json
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
+from http.server import ThreadingHTTPServer
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "claude-bridge"))
+
+import bridge  # noqa: E402
+
+
+@pytest.fixture
+def door(monkeypatch):
+    ran = []
+
+    def fake_run(prompt, mode):
+        ran.append((prompt, mode))
+        return {"output": "ran", "returncode": 0}
+
+    monkeypatch.setattr(bridge, "run_oneshot", fake_run)
+    monkeypatch.setattr(bridge, "_token_cache", (time.time() + 3600, "door-token"))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), bridge.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_port}"
+
+    def call(path, body=None, token="door-token", method="POST"):
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        req = urllib.request.Request(base + path, method=method, headers=headers,
+                                     data=json.dumps(body).encode() if body is not None else None)
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return r.status, json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read() or b"{}")
+
+    call.ran, call.base, call.monkeypatch = ran, base, monkeypatch
+    yield call
+    server.shutdown()
+
+
+@pytest.mark.parametrize("mode", ["plan", "bypass"])
+def test_claude_never_runs_without_the_token(door, mode):
+    body = {"text": "list the files", "mode": mode}
+    assert door("/solid-gold", body, token=None)[0] == 401                   # no header
+    assert door("/solid-gold", body, token="wrong")[0] == 401                # wrong token
+    assert door("/solid-gold", body, token="door-toke")[0] == 401            # a prefix of the right one
+    assert door("/solid-gold", body, token="door-token-and-more")[0] == 401
+    assert door("/solid-gold", body, token="")[0] == 401
+    assert door.ran == []                                                     # the runner was never reached, not once
+
+
+@pytest.mark.parametrize("mode", ["plan", "bypass"])
+def test_the_right_token_opens_it_in_both_modes(door, mode):
+    status, out = door("/solid-gold", {"text": "list the files", "mode": mode})
+    assert status == 200 and out["output"] == "ran"
+    assert door.ran == [("list the files", mode)]
+
+
+def test_with_no_token_configured_the_whole_bridge_stays_shut(door):
+    door.monkeypatch.setattr(bridge, "_token_cache", (time.time() + 3600, ""))
+    status, out = door("/solid-gold", {"text": "x", "mode": "bypass"})
+    assert status == 503 and out["error"] == "bridge_disabled" and door.ran == []
+    assert door("/solid-gold", {"text": "x"}, token=None)[0] == 503           # shut for everyone, header or not
+    assert door("/workshop", {"task": "t", "conv": "c", "message": "m"})[0] == 503
+
+
+def test_bad_input_is_refused_only_after_the_token_is_checked(door):
+    assert door("/solid-gold", {"text": "", "mode": "plan"})[0] == 400        # authorised, but nothing to do
+    assert door("/solid-gold", {"text": "x", "mode": "root"})[0] == 400
+    assert door("/solid-gold", {"text": "", "mode": "plan"}, token="wrong")[0] == 401   # a stranger learns nothing about the input rules
+
+
+def test_health_stays_open_for_the_liveness_ping_and_never_shows_the_token(door):
+    status, out = door("/health", token=None, method="GET")
+    assert status == 200 and out["service"] == "claude-bridge"
+    assert "door-token" not in json.dumps(out)
+
+
+def test_flask_apis_client_sends_the_token_on_every_call():
+    """The only caller of /solid-gold is flask-api's client; if it stopped sending the header the tiers would go dark."""
+    src = (ROOT / "flask-api" / "app" / "clients" / "claude_bridge.py").read_text(encoding="utf-8")
+    assert src.count("headers=_headers()") == 2                               # chat() and stream_chat()
+    assert 'os.getenv("SKIPPY_HOME_TOKEN"' in src and "Bearer" in src
+    assert "HTTP {code}" in src and "SKIPPY_HOME_TOKEN must be set" in src    # a refusal says what to fix, not just a number
+
+
+def test_the_client_and_the_real_bridge_agree(door, monkeypatch):
+    """End to end: flask-api's client against the real handler, with and without the token in its environment."""
+    pytest.importorskip("httpx")                       # flask-api's dependency; CI's portal environment doesn't have it
+    spec = importlib.util.spec_from_file_location("claude_bridge_client", ROOT / "flask-api" / "app" / "clients" / "claude_bridge.py")
+    client = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(client)
+    monkeypatch.setattr(client, "BRIDGE_URL", door.base)
+
+    monkeypatch.setenv("SKIPPY_HOME_TOKEN", "door-token")
+    assert client.chat("hello", mode="bypass") == "ran"
+    assert door.ran == [("hello", "bypass")]
+
+    monkeypatch.setenv("SKIPPY_HOME_TOKEN", "the-wrong-one")
+    with pytest.raises(client.BridgeUnavailable, match="refused the request .HTTP 401.*SKIPPY_HOME_TOKEN"):
+        client.chat("hello", mode="bypass")
+    monkeypatch.delenv("SKIPPY_HOME_TOKEN")
+    with pytest.raises(client.BridgeUnavailable, match="HTTP 401"):
+        list(client.stream_chat("hello", mode="plan"))
+    assert door.ran == [("hello", "bypass")]           # neither refused call reached Claude
