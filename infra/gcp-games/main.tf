@@ -126,7 +126,7 @@ resource "google_compute_instance" "games" {
   metadata = {
     startup-script   = file("${path.module}/startup.sh")
     shutdown-script  = file("${path.module}/shutdown.sh")
-    idle-watchdog    = file("${path.module}/idle-watchdog.sh")
+    idle-watchdog    = file("${path.module}/idle_watchdog.py")
     skippy-diag      = file("${path.module}/diag.sh")
     everquest-script = file("${path.module}/everquest.sh")
     ops-agent        = file("${path.module}/ops_agent.py")
@@ -136,6 +136,10 @@ resource "google_compute_instance" "games" {
     compose-file     = file("${path.module}/../../games/docker-compose.yml")
     games            = "valheim"
     idle-minutes     = "30"
+    # The watchdog's hard backstop (idle_watchdog.py): the VM stops this many hours after boot whatever the traffic
+    # says (0 = off; also off while idle-minutes is 0, the admin's "never sleep"). Terraform owns it: nothing in the
+    # portal or games.sh writes it, so it is deliberately NOT in ignore_changes below.
+    max-hours = tostring(var.max_hours)
     # games-env (the secrets in games/.env) is uploaded by `games.sh env`,
     # never through OpenTofu, so passwords stay out of state files.
   }

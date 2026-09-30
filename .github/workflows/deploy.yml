@@ -84,6 +84,10 @@ jobs:
     needs: [test, gate]
     if: needs.gate.outputs.ready == 'true'
     runs-on: ubuntu-latest
+    env:
+      # The monthly budget alert (infra/gcp-games/budget.tf) is created only when the repository variable
+      # BILLING_ACCOUNT is set (Settings > Secrets and variables > Actions > Variables). Unset = empty = no budget.
+      TF_VAR_billing_account: ${{ vars.BILLING_ACCOUNT }}
     defaults:
       run:
         working-directory: infra/gcp-games

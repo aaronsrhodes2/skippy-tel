@@ -161,7 +161,26 @@ def update_game(hook: str, payload: dict, candidates: list[str]) -> str:
     return call("POST", f"{hook}?wait=true", payload)["id"]
 
 
+def notice(text: str) -> int:
+    """Say `text` in the channel of every game running this session. The pinned status posts are left as they are.
+    (The idle watchdog's 15-minute heads-up before its session limit; idle_watchdog.py.)"""
+    e = load_env()
+    failed = False
+    for game in meta("attributes/games").split():
+        hook = e.get(f"DISCORD_WEBHOOK_{game.upper()}", "")
+        if game not in GAMES or not hook:
+            continue
+        try:
+            call("POST", hook, {"username": USERNAME, "content": text[:1900]})
+        except (OSError, ValueError) as err:
+            print(f"discord {game}: {err}", file=sys.stderr)
+            failed = True
+    return 1 if failed else 0
+
+
 def main(argv: list[str]) -> int:
+    if len(argv) > 1 and argv[1] == "notice":      # not a status change: `online` and `offline` are the only ones
+        return notice(" ".join(argv[2:]))
     online = (argv[1] if len(argv) > 1 else "online") == "online"
     reason = argv[2] if len(argv) > 2 else ""
     e = load_env()

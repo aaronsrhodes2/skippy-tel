@@ -91,7 +91,7 @@ sync_vm() { # push secrets + the repo's current compose file and VM scripts (app
   local infra="$HERE/infra/gcp-games"
   g instances add-metadata "$INSTANCE" --metadata-from-file \
 games-env="$ENV_FILE",compose-file="$HERE/games/docker-compose.yml",\
-startup-script="$infra/startup.sh",idle-watchdog="$infra/idle-watchdog.sh",discord-notify="$infra/discord-notify.py" >/dev/null
+startup-script="$infra/startup.sh",idle-watchdog="$infra/idle_watchdog.py",discord-notify="$infra/discord-notify.py" >/dev/null
   echo "synced games/.env, compose file and VM scripts to $INSTANCE"
 }
 

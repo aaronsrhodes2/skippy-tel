@@ -1,0 +1,4 @@
+Chain PREROUTING (policy ACCEPT 0 packets, 0 bytes)
+    pkts      bytes target     prot opt in     out     source               destination         
+    1134    39856            17   --  *      *       0.0.0.0/0            0.0.0.0/0            multiport dports 2456:2457,34197,7777,7778,9000,5998:5999,7000:7030 ctstatus ASSURED /* skippy-games-assured */
+    1200    42090            17   --  *      *       0.0.0.0/0            0.0.0.0/0            multiport dports 2456:2457,34197,7777,7778,9000,5998:5999,7000:7030 /* skippy-games */

@@ -105,10 +105,39 @@ test users before the portal's allowlist is even consulted.
 | "Change the portal" | Claude edits `portal/`, pushes; live in ~3 minutes |
 
 
+## Cost alarm (monthly budget)
+
+[`infra/gcp-games/budget.tf`](../infra/gcp-games/budget.tf) creates a billing budget on the project (default
+$30 a month, `budget_monthly_usd`) that emails at 50%, 90% and 100% of it. It exists only when a billing account
+id is supplied, so until then a push changes nothing and needs no billing permission. To switch it on:
+
+1. **The account id** (`XXXXXX-XXXXXX-XXXXXX`): console → Billing, or `gcloud billing accounts list`. The Captain
+   has to supply it; nothing in the repo knows it.
+2. **Give it to the pipeline** as the repository variable `BILLING_ACCOUNT` (GitHub → Settings → Secrets and
+   variables → Actions → Variables). `deploy.yml` passes it to Terraform as `TF_VAR_billing_account`. (Applying by
+   hand: `billing_account = "..."` in `terraform.tfvars`.) It is not a secret.
+3. **Let the deployer manage budgets on that account**: Billing → Account management → Add principal →
+   `skippy-deployer@skippy-tel.iam.gserviceaccount.com`, role **Billing Account Costs Manager**
+   (`roles/billing.costsManager`, which holds `billing.budgets.*`). It is granted on the billing account, not the
+   project, so this repo's Terraform can't do it. The role name is from Google's documentation and has not been
+   tried here: if the `infra` job fails with a permission error on `billing.budgets.create`, this step is what's
+   missing.
+4. **Push.** The `infra` job enables `billingbudgets.googleapis.com` (and `monitoring.googleapis.com` if you set
+   `budget_alert_email`) and creates the budget.
+
+Emails go to the billing account's administrators and users, which is the budget's default. `budget_alert_email`
+adds one more address through a Cloud Monitoring email channel. Untested against a live billing account: nobody
+here has one to apply it to yet, so expect to read the first `infra` log after switching it on.
+
+The portal's Watcher (Dashboard) warns separately, and sooner: when the games VM has been on for longer than the
+watchdog's `max-hours` limit plus an hour, or for over 2 hours with nobody playing (see
+[docs/games/README.md](games/README.md#auto-sleep-the-session-limit-and-how-to-see-why-a-vm-stayed-up)).
+
 ## Remote operations (`ops` workflow)
 
 `.github/workflows/ops.yml` is a manual workflow for operating the games VM
 without the portal: `status`, `logs [game]`, `start <games>`, `stop`,
 `restart`, plus the on-VM commands (`tail`, `search`, `stats`, `restart-game`, `backups`, `restore-game`). It runs `scripts/remote.py` (the portal's own `gcp.py` / `ops.py` /
 `diagnostics.py`) as the deployer identity, and masks every secret value in
-the job log. It exists so Claude can diagnose and act on the server itself.
+the job log. It exists so Claude can diagnose and act on the server itself. `logs` (no game) includes the
+idle watchdog's evidence block: why the VM does or doesn't go to sleep.

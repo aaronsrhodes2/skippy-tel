@@ -62,6 +62,12 @@ compose() { docker compose --project-directory "$ROOT" "$@"; }
 meta idle-watchdog > /usr/local/bin/skippy-idle-watchdog
 meta discord-notify > /usr/local/bin/skippy-discord
 chmod 755 /usr/local/bin/skippy-idle-watchdog /usr/local/bin/skippy-discord
+# The watchdog is idle_watchdog.py (Python, stdlib only). A metadata fetch that came back empty would leave a timer
+# that fails every 5 minutes without a word (which is what the old bash version did, from its first iptables
+# line), so say so on the console; then start its packet counters now rather than 5 minutes in.
+head -1 /usr/local/bin/skippy-idle-watchdog | grep -q python \
+  || echo "WARNING: metadata idle-watchdog is not the Python watchdog; this VM will not auto-sleep"
+python3 /usr/local/bin/skippy-idle-watchdog arm || echo "WARNING: idle watchdog could not add its iptables counters"
 cat > /etc/systemd/system/skippy-idle-watchdog.service <<'UNIT'
 [Unit]
 Description=Stop game servers and power off when nobody is playing

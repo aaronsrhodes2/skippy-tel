@@ -5,12 +5,15 @@ or that a server is in trouble. Read by the personal dashboard.
     (recorded in VM metadata `portal-watch`, last 100; Terraform ignores it)
   • crashes — a game container restarting or exited, from the latest snapshot
   • pressure — memory and world disk, from the latest snapshot
+  • the idle watchdog — the VM on longer than its session limit, or 2+ hours with nobody playing (idle_watch.py)
 """
 from __future__ import annotations
 
 import json
 import re
 from datetime import datetime, timedelta, timezone
+
+import idle_watch
 
 KEY = "portal-watch"
 KEEP = 100
@@ -69,4 +72,5 @@ def warnings(vm, snapshot: str, resources: dict) -> list[str]:
         out.append(f"{len(blocked)} blocked start{'s' if len(blocked) != 1 else ''} this week "
                    f"(someone wanted a different game while one was running: {', '.join(who)}). "
                    "If this keeps happening, it's time for concurrent servers.")
+    out += idle_watch.warnings(vm, snapshot)          # up longer than the idle watchdog should allow (idle_watch.py)
     return out

@@ -46,3 +46,27 @@ variable "snapshot_retention_days" {
   type    = number
   default = 7
 }
+
+variable "max_hours" {
+  description = "Hard ceiling on one session: the watchdog stops the VM this many hours after boot, whatever the traffic says (0 = no ceiling). Ignored while a session's idle-minutes is 0 (never sleep)."
+  type        = number
+  default     = 8
+}
+
+variable "billing_account" {
+  description = "Billing account id (XXXXXX-XXXXXX-XXXXXX) to create the monthly budget alert on. Empty = no budget (nothing is created). The deployer service account needs billing.budgets permission on the account (see docs/cicd.md)."
+  type        = string
+  default     = ""
+}
+
+variable "budget_monthly_usd" {
+  description = "Monthly amount in USD the budget alerts against (email at 50%, 90% and 100% of it)."
+  type        = number
+  default     = 30
+}
+
+variable "budget_alert_email" {
+  description = "Also email this address at each threshold (through a Cloud Monitoring email channel). Empty = only the billing account's own admins and users are emailed, which is the budget's default."
+  type        = string
+  default     = ""
+}
