@@ -189,14 +189,21 @@ def _ensure_board(api, hook, channel_id, game, board_id, env) -> str:
     return board_id
 
 
-def setup(token: str, invite: str, games: list[str], env: dict[str, str]) -> dict[str, str]:
+def setup(token: str, invite: str, games: list[str], env: dict[str, str],
+          portal_url: str | None = None) -> dict[str, str]:
     """Create/repair channels, webhooks and pinned posts. Safe to re-run.
-    Returns the settings keys to merge into games-env."""
+    Returns the settings keys to merge into games-env. `portal_url` (the address the portal is served on)
+    is what the pinned posts link to; it's kept in games-env as PORTAL_URL so the VM's own edits of the
+    posts link to the same place."""
     api = Discord(token)
     guild = env.get("DISCORD_GUILD_ID") or guild_from_invite(api, invite)
     channels = api("GET", f"/guilds/{guild}/channels")
     category = _ensure_channel(api, guild, channels, CATEGORY, CATEGORY_TYPE)
     updates = {"DISCORD_GUILD_ID": guild}
+    shown = (portal_url or "").strip().rstrip("/")
+    if shown and notify.portal_url({"PORTAL_URL": shown}) == shown:        # a plain https origin, else ignored
+        updates["PORTAL_URL"] = shown
+        env = {**env, "PORTAL_URL": shown}
     for game in games:
         _, description, _ = notify.GAMES[game]
         key = game.upper()

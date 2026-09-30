@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Request access — Skippy Portal{% endblock %}
+{% block app %}games{% endblock %}
+{% block content %}
+{# Where the Discord pins lead: "sign in with Google and tap Request access". Signed-out people see the sign-in
+   button; a signed-in person, or a verified Google account that isn't on the list, sees the form. After sending, the
+   page reloads as a plain GET (post-redirect-get), so a reload never re-sends the request. #}
+{% if not user %}<header><h1>Skippy Portal</h1></header>{% endif %}
+<section style="overflow-wrap: anywhere">
+  <h2>Request access</h2>
+
+  {% if not who %}
+    <p>The game servers are for {{ switch_owner }}'s friends.{% if game_name %} You came for <b>{{ game_name }}</b>.{% endif %}
+      Sign in with Google and you can ask to be let in: {{ switch_owner }} sees your request with the email you sign in with.</p>
+    <p><a class="btn" href="{{ url_for('auth.login') }}">Sign in with Google</a></p>
+
+  {% else %}
+    {% if have_game %}
+      <div class="card">
+        <h3>You're in</h3>
+        <p>{{ game_name }} is on your account. <a class="btn" href="{{ url_for('dashboard.game', gid=game) }}">Open {{ game_name }}</a></p>
+      </div>
+    {% elif game_name and askable %}
+      <p><b>{{ game_name }}</b> isn't on your account yet. Ask for it below.</p>
+    {% endif %}
+
+    {% if pending %}
+      <div class="card">
+        <h3>Your request is with {{ switch_owner }}</h3>
+        <p>Asked {{ pending.at[:10] }}{% if pending_names %} for {{ pending_names | join(', ') }}{% endif %}.
+          Once {{ switch_owner }} adds <b>{{ who.email }}</b>, open the link from Discord again and you're in: no second request needed.
+          Nudging in the game's <a href="{{ discord_invite }}" target="_blank" rel="noopener">Discord</a> doesn't hurt.</p>
+      </div>
+    {% endif %}
+
+    {% if askable %}
+      <form method="post" action="{{ url_for('request_access') }}" class="card">
+        <input type="hidden" name="game" value="{{ game or '' }}">
+        <p class="help" style="margin-top:0">Signed in as <b>{{ who.email }}</b>. {{ switch_owner }} adds friends by hand: the request
+          lands on the dashboard with this email.</p>
+        <fieldset style="border:0;padding:0;margin:0">
+          <legend style="color:var(--ink);margin-bottom:4px">Which game do you want to play?</legend>
+          {% for id, g in askable.items() %}
+            <label class="game"><input type="checkbox" name="games" value="{{ id }}" {{ 'checked' if id == game or (id in pending_ids) }}> {{ g.name }}</label>
+          {% endfor %}
+        </fieldset>
+        <label class="field" for="note">Who are you? (optional, so {{ switch_owner }} knows who's asking)</label>
+        <input type="text" id="note" name="note" maxlength="140" autocomplete="off" placeholder="e.g. Jo, from the Discord">
+        <p><button type="submit">{{ 'Update my request' if pending else 'Send request' }}</button></p>
+      </form>
+    {% else %}
+      <p>You already have every game. Nothing to ask for.</p>
+    {% endif %}
+    <p class="help">Not the right account? <a href="{{ url_for('auth.login', switch=1) }}">Use a different Google account</a>{% if not user %}
+      or <a href="{{ url_for('auth.logout') }}">sign out</a>{% endif %}.</p>
+  {% endif %}
+</section>
+{% endblock %}

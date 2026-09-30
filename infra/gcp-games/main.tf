@@ -151,6 +151,7 @@ resource "google_compute_instance" "games" {
       metadata["idle-minutes"],
       metadata["games-env"],
       metadata["portal-friends"], # the portal's friends list (portal/friends.py)
+      metadata["portal-requests"], # people asking for access (portal/access_requests.py), shown beside the friends
       metadata["portal-tasks"],   # remote-operator task queue (portal/tasks.py)
       metadata["portal-task-results"],
       metadata["ops-request"],        # scripts/remote.py → ops_agent.py
@@ -159,6 +160,7 @@ resource "google_compute_instance" "games" {
       metadata["portal-home"],        # home reporter's token hash (portal/home.py)
       metadata["eq-import-token"],    # one-time EverQuest DB import (portal/imports.py)
       metadata["eq-import-url"],
+      metadata["portal-imports"],     # the import's progress (portal/imports.py); missing, every apply reset it
     ]
   }
 }

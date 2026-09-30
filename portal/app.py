@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import io
+import ipaddress
 import json
 import re
 from functools import wraps
@@ -17,6 +18,7 @@ from flask import (Blueprint, Flask, abort, flash, jsonify, redirect, render_tem
                    send_from_directory, url_for)
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+import access_requests as access_mod
 import auth
 import autoconfig
 import chat
@@ -54,6 +56,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     vm = vm or GamesVm(app.config["GCP_PROJECT"], app.config["GCP_ZONE"], app.config["GCP_INSTANCE"])
     skippy = skippy or chat.SkippyChat(app.config["CHAT_MODEL"])
     app.extensions["friends"] = friends_mod.Friends(vm)
+    app.extensions["access_requests"] = access_mod.Requests(vm)      # people asking to be let in (Admin → Friends)
     mentat = mentat or (mentat_client.Mentat(app.config["MENTAT_URL"]) if app.config.get("MENTAT_URL") else None)
     app.extensions["mentat"] = mentat
     home = home or home_mod.Home(vm)
@@ -96,6 +99,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def index():
         """Front page: a card per sub-portal the viewer may use; sign-in otherwise."""
         user = auth.current_user()
+        if not user and auth.promote_visitor():   # approved since they asked: they're in, no second sign-in
+            user = auth.current_user()
+        if not user and auth.visitor():           # signed in with Google but not on the list yet: their request page
+            return redirect(url_for("request_access"))
         if not (user and auth.is_allowed(user["email"])):
             return render_template("login.html")
         status, _ = vm_status()
@@ -103,7 +110,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         # The Games tile names the game that's up (or set for the next wake-up), only from the games this
         # person may see: a hidden game's name never shows.
         set_games = [shown[g].name for g in (status.games if status else []) if g in shown]
-        return render_template("home.html", status=status, games=shown, set_games=set_games,
+        asking = len(pending_requests()) if auth.is_admin(me()) else 0   # a badge on the Admin tile
+        return render_template("home.html", status=status, games=shown, set_games=set_games, asking=asking,
                                hidden_up=bool(status and status.status == "RUNNING"
                                               and any(g not in shown for g in status.games)),
                                show_experiments=auth.has_portal(me(), "experiments"),
@@ -113,6 +121,93 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @app.get("/health")
     def health():
         return "ok"
+
+    # ── asking for access (the Discord pins say "sign in and tap Request access") ─────────────
+    # One person, one address, and everyone together: a flood of throwaway accounts can't fill the queue.
+    ACCESS_PER_HOUR, ACCESS_PER_IP_HOUR, ACCESS_ALL_PER_HOUR = 3, 6, 60
+
+    def address_key() -> str:
+        """The caller's address for rate limiting. An IPv6 address counts as its /64: one home network is handed
+        billions of them. (The address is the last X-Forwarded-For hop: right on Cloud Run's own front end.)"""
+        ip = ratelimit.client_ip(request)
+        try:
+            parsed = ipaddress.ip_address(ip)
+        except ValueError:
+            return ip
+        return str(ipaddress.ip_network(f"{ip}/64", strict=False)) if parsed.version == 6 else ip
+
+    def pending_requests() -> list[dict]:
+        """People asking for access, newest first: the Friends section, the launcher badge and the dashboard line.
+        A request that no longer needs an answer is left out (they became core, or a friend who now has every game
+        they asked for), so an approval whose cleanup failed doesn't linger."""
+        friends = app.extensions["friends"]
+        rows = []
+        for email, info in app.extensions["access_requests"].all().items():
+            wanted = [g for g in info.get("games", []) if g in GAMES]
+            entry = friends.get(email)
+            held = friends_mod.portals_of(entry)
+            if auth.is_core(email) or (entry is not None and wanted and set(wanted) <= set(held)):
+                continue
+            rows.append({"email": email, "name": info.get("name", ""), "note": info.get("note", ""), "games": wanted,
+                         "names": [GAMES[g].name for g in wanted], "is_friend": entry is not None,
+                         "held_names": [PORTALS[p] for p in held],
+                         "tick": [p for p in PORTALS if p in set(wanted) | set(held)],   # Approve ADDS to what they have
+                         "when": str(info.get("at", ""))[:16].replace("T", " ") + " UTC"})
+        return sorted(rows, key=lambda r: r["when"], reverse=True)
+
+    @app.route("/request-access", methods=["GET", "POST"])
+    def request_access():
+        """A signed-in person, or a verified Google account that isn't on the list, asks for a game. The email is
+        the one Google verified, so nobody can ask on behalf of an address they don't own."""
+        auth.promote_visitor()                    # approved since they asked: they're in, no second sign-in
+        who = auth.current_user() or auth.visitor()
+        game = request.values.get("game", "")
+        game = game if game in GAMES else None
+        game_name = GAMES[game].name if game else None
+        access = app.extensions["access_requests"]
+        if not who:                               # not signed in yet: send them through Google and back to the game
+            if game:
+                auth.remember_next(f"/games/{game}")
+            return render_template("request_access.html", who=None, game=game, game_name=game_name)
+        email = who["email"]
+        have = auth.visible_games(email) if auth.is_allowed(email) else []
+        askable = {g: GAMES[g] for g in GAMES if g not in have}
+        waiting = access.get(email) or {}
+        pending_ids = [g for g in waiting.get("games", []) if g in GAMES]
+        shown = dict(who=who, game=game, game_name=game_name, askable=askable, have=[GAMES[g].name for g in have],
+                     have_game=bool(game and game in have), pending=waiting or None, pending_ids=pending_ids,
+                     pending_names=[GAMES[g].name for g in pending_ids])
+        if request.method != "POST":              # GET (and HEAD, which must never save anything)
+            return render_template("request_access.html", **shown)
+        if not askable:                           # already has every game: nothing to queue
+            return redirect(url_for("request_access", game=game))
+        picked = request.form.getlist("games")[:20]
+        wanted = [g for g in picked if g in askable]
+        if not wanted:
+            if any(g in have for g in picked):    # approved while the form was open: they're in, say so
+                return redirect(url_for("request_access", game=game))
+            flash("Tick at least one game to ask for.", "error")
+            return render_template("request_access.html", **shown), 400
+        # Cheapest to blame first: the caller's address and the whole queue, then the person. Each allowance is only
+        # spent when the ones before it passed, so a crowded address can't burn a genuine person's own allowance.
+        if (not limiter.allow("access-ip:" + address_key(), ACCESS_PER_IP_HOUR, 3600)
+                or not limiter.allow("access:all", ACCESS_ALL_PER_HOUR, 3600)):
+            flash("A lot of requests are coming in right now, and yours wasn't saved. Try again in a little while.", "error")
+            return render_template("request_access.html", **shown), 429
+        if not limiter.allow("access:" + email, ACCESS_PER_HOUR, 3600):
+            flash(f"You've already sent a few requests this hour. Give it a while, or nudge {ops.SWITCH_OWNER} on Discord.", "error")
+            return render_template("request_access.html", **shown), 429
+        try:
+            outcome = access.submit(email, who.get("name", ""), wanted, request.form.get("note", ""))
+        except access_mod.Full:
+            flash(f"The request list is full right now, and yours wasn't saved. Nudge {ops.SWITCH_OWNER} on Discord.", "error")
+            return render_template("request_access.html", **shown), 503
+        except access_mod.Unavailable:
+            flash("Couldn't save that just now. Try again in a minute.", "error")
+            return render_template("request_access.html", **shown), 503
+        print(json.dumps({"event": "access_request", "email": email, "games": wanted, "outcome": outcome}), flush=True)
+        flash(f"Request sent. {ops.SWITCH_OWNER} will see it on the dashboard.", "ok")
+        return redirect(url_for("request_access", game=game))     # a reload shows the page again, it doesn't re-send
 
     def live_info(status) -> tuple[dict[str, str], dict[str, int]]:
         """Per-session invite codes (Dragonwilds makes a new one each boot) and
@@ -174,8 +269,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @dash.get("/games/<gid>")
     @auth.login_required
     def game(gid):
-        if not auth.can_see(me(), gid):
+        if gid not in GAMES:
             abort(404)
+        if not auth.can_see(me(), gid):           # a real game they can't see yet: offer to ask for it
+            return redirect(url_for("request_access", game=gid))
         status, error = vm_status()
         env = status.env if status else {}
         banner = env.get(GAMES[gid].banner_key, "")
@@ -219,7 +316,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             "admin.html", status=status, error=error, games=GAMES,
             links={g: discord_admin.links(status.env if status else {}, g) for g in GAMES},
             bot_configured=bool(app.config["DISCORD_BOT_TOKEN"]),
-            friends=friend_rows(status), portals=PORTALS,
+            friends=friend_rows(status), portals=PORTALS, access_requests=pending_requests(),
             core=sorted(app.config["ALLOWED_EMAILS"]),
             needs={g: m for g in GAMES if status and (m := missing_settings(g, status.env))},
         )
@@ -277,21 +374,56 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         flash(plan.summary() + (" Restart the server to apply them." if plan.set else ""), "ok")
         return back("admin.index")
 
+    def settle_request(email: str, portals: list[str]) -> list[str]:
+        """Take what was just granted off the person's waiting request (Approve, or a Save on their own card: the same
+        rule). What they asked for that is covered comes off; the request goes when nothing is left; what wasn't granted
+        stays waiting, so a request amended after the card was drawn is never silently dropped. Returns the games still
+        being asked for. A failed cleanup never undoes the grant: pending_requests() hides a request whose person
+        already holds everything they asked for."""
+        try:
+            return app.extensions["access_requests"].answer(email, portals)
+        except access_mod.Unavailable:
+            return []
+
     @admin.post("/friends")
     @auth.admin_required
     def friends_save():
         email = friends_mod.normalize(request.form.get("email", ""))
+        from_request = request.form.get("from_request") == "1"          # Approve on a request card
         if not email:
             flash("That doesn't look like an email address.", "error")
         elif auth.is_core(email):
             flash(f"{email} is set in the deploy config and already sees everything.", "error")
+            settle_request(email, list(PORTALS))                        # they hold everything: nothing left to answer
         else:
             portals = [p for p in request.form.getlist("portals") if p in PORTALS]
-            new = app.extensions["friends"].get(email) is None
-            app.extensions["friends"].upsert(email, portals, added_by=me())
-            flash(f"{'Added' if new else 'Updated'} {email}"
+            if from_request and not portals:
+                flash("Tick at least one thing to approve, or Dismiss the request.", "error")
+                return redirect(url_for("admin.index") + "#requests")
+            existing = app.extensions["friends"].get(email)
+            if from_request and existing is not None:                   # Approve only ever ADDS: a page drawn before
+                portals = [p for p in PORTALS if p in set(portals) | set(friends_mod.portals_of(existing))]   # a change can't undo it
+            try:
+                app.extensions["friends"].upsert(email, portals, added_by=me())
+            except friends_mod.Unavailable:
+                flash("Couldn't reach the VM to save that, so nothing was changed. Try again in a minute.", "error")
+                return redirect(url_for("admin.index") + "#friends")
+            left = settle_request(email, portals)
+            flash(f"{'Added' if existing is None else 'Updated'} {email}"
                   + (f": {', '.join(PORTALS[p] for p in portals)}." if portals else " (nothing granted yet).")
-                  + (" Use Invite to email them." if new else ""), "ok")
+                  + (f" Still asking for: {', '.join(GAMES[g].name for g in left if g in GAMES)}." if left else "")
+                  + (" Use Invite to email them." if existing is None else ""), "ok")
+        return redirect(url_for("admin.index") + "#friends")
+
+    @admin.post("/requests/dismiss")
+    @auth.admin_required
+    def requests_dismiss():
+        email = friends_mod.normalize(request.form.get("email", ""))
+        try:
+            if email and app.extensions["access_requests"].dismiss(email):
+                flash(f"Dismissed {email}'s request. Nothing was granted.", "ok")
+        except access_mod.Unavailable:
+            flash("Couldn't reach the VM to dismiss that. Try again in a minute.", "error")
         return redirect(url_for("admin.index") + "#friends")
 
     @admin.post("/friends/remove")
@@ -299,8 +431,11 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def friends_remove():
         email = friends_mod.normalize(request.form.get("email", ""))
         if email:
-            app.extensions["friends"].remove(email)
-            flash(f"Removed {email}. They lose access on their next page load.", "ok")
+            try:
+                app.extensions["friends"].remove(email)
+                flash(f"Removed {email}. They lose access on their next page load.", "ok")
+            except friends_mod.Unavailable:
+                flash("Couldn't reach the VM to remove that, so nothing was changed. Try again in a minute.", "error")
         return redirect(url_for("admin.index") + "#friends")
 
     @admin.post("/restart")
@@ -315,7 +450,12 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         token = app.config["DISCORD_BOT_TOKEN"]
         if not token:
             raise RuntimeError("No Discord bot token configured — see docs/cicd.md → Secrets.")
-        updates = discord_admin.setup(token, app.config["DISCORD_INVITE"], list(GAMES), vm.status().env)
+        configured = (app.config.get("PORTAL_URL") or "").strip().rstrip("/")
+        if configured and discord_admin.notify.portal_url({"PORTAL_URL": configured}) != configured:
+            raise RuntimeError("PORTAL_URL is set but isn't a plain https:// address (no path, no spaces): "
+                               "the pinned posts would ignore it. Fix it in the deploy settings.")
+        updates = discord_admin.setup(token, app.config["DISCORD_INVITE"], list(GAMES), vm.status().env,
+                                      portal_url=app.config.get("PORTAL_URL") or request.url_root)   # canonical address, else where we're served
         vm.update_env(updates)
         return (f"Discord ready: {len(GAMES)} games' text + voice channels, invites, webhooks and pinned "
                 "posts. The VM picks up the webhooks on its next start.")
@@ -527,6 +667,9 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 snap = ""
         res = diagnostics.resources(snap) if snap else {}
         warnings = watch.warnings(vm, snap, res)
+        asking = len(pending_requests())
+        if asking:
+            warnings.append(f"{asking} {'person is' if asking == 1 else 'people are'} asking for access: Admin → Friends.")
         core = home.core()
         if home.paired() and home.age() is not None and not home.online():
             warnings.append(f"skippy-pc has been silent for {home.age() // 60} min (power, network or the reporter).")

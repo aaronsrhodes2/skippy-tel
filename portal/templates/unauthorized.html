@@ -3,5 +3,5 @@
 {% block content %}
 <header><h1>Skippy Portal</h1></header>
 <p class="error">That Google account isn't on the list. Ask the Captain to add it.</p>
-<a class="btn" href="{{ url_for('auth.login') }}">Try a different account</a>
+<a class="btn" href="{{ url_for('auth.login', switch=1) }}">Try a different account</a>
 {% endblock %}

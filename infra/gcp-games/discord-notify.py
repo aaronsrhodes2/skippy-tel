@@ -19,6 +19,7 @@ the data disk. Stdlib only: runs on a stock Debian VM.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -29,6 +30,9 @@ ENV = Path("/srv/games/.env")
 STATE = Path("/srv/games/data/.discord")
 META = "http://metadata.google.internal/computeMetadata/v1/instance"
 USERNAME = "Skippy Game Servers"
+# Where the pinned post sends people. PORTAL_URL in the VM's .env overrides it (the portal's Discord setup
+# writes it from the address it is served on, so a custom domain later needs no code change).
+PORTAL_URL = "https://skippy-portal-1015050363686.us-west1.run.app"
 
 # id → (display name, description, how-to-connect(ip, env))
 GAMES = {
@@ -101,9 +105,21 @@ def call(method: str, url: str, payload: dict | None = None) -> dict:
         return json.loads(body) if body else {}
 
 
+def portal_url(e: dict) -> str:
+    """The portal's address: PORTAL_URL from the env if it's a plain https origin, else the default."""
+    url = (e.get("PORTAL_URL") or "").strip().rstrip("/")
+    found = re.fullmatch(r"https://[A-Za-z0-9.-]+(?::([0-9]{1,5}))?", url)
+    return url if found and (not found.group(1) or 1 <= int(found.group(1)) <= 65535) else PORTAL_URL
+
+
 def board(game: str, online: bool, ip: str, idle: str, reason: str, e: dict, now: int) -> dict:
     """The pinned status post for one game."""
     name, description, connect = GAMES[game]
+    # Everyone reading the channel can open the game's page; a signed-in stranger is offered a way to ask for access.
+    portal = {"name": "Skippy Portal",
+              "value": f"[Open {name} on the Skippy Portal]({portal_url(e)}/games/{game})\n"
+                       "No access yet? Open it, sign in with Google and tap **Request access**.",
+              "inline": False}
     if online:
         auto = "never" if idle == "0" else f"after {idle} min with nobody playing"
         fields = [
@@ -111,6 +127,7 @@ def board(game: str, online: bool, ip: str, idle: str, reason: str, e: dict, now
                                         "First boot after an update can take 5–10 min.", "inline": False},
             {"name": "How to connect", "value": connect(ip, e), "inline": False},
             {"name": "Auto-sleep", "value": auto, "inline": False},
+            portal,
         ]
         color = 0x00FF88                                   # ChatPalette.Green
     else:
@@ -120,6 +137,7 @@ def board(game: str, online: bool, ip: str, idle: str, reason: str, e: dict, now
             {"name": "How to connect", "value": "Ask Aaron / Skippy to start the server. "
                                                 "Connection details appear here when it's up.",
              "inline": False},
+            portal,
         ]
         color = 0x555555
     return {"username": USERNAME, "embeds": [{

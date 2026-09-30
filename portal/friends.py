@@ -29,6 +29,10 @@ CACHE_SECONDS = 10
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
+class Unavailable(RuntimeError):
+    """The VM's metadata couldn't be read or written, so the friends list was left alone."""
+
+
 def normalize(email: str) -> str | None:
     email = (email or "").strip().lower()
     return email if _EMAIL.match(email) else None
@@ -55,12 +59,28 @@ class Friends:
     def get(self, email: str) -> dict | None:
         return self.all().get((email or "").strip().lower())
 
+    def _fresh(self) -> dict:
+        """What is stored right now, for a read-modify-write. A failed read raises Unavailable: it must never look
+        like "no friends", or the save that follows would write back only the one person changed."""
+        try:
+            raw = self.vm.get_metadata(KEY)
+        except Exception as exc:   # noqa: BLE001
+            raise Unavailable("couldn't read the friends list") from exc
+        try:
+            data = json.loads(raw or "{}")
+        except (ValueError, TypeError):
+            raise Unavailable("the stored friends list is unreadable") from None      # never overwrite what we can't read
+        return {e: v for e, v in data.items() if isinstance(v, dict)} if isinstance(data, dict) else {}
+
     def _save(self, data: dict) -> None:
-        self.vm.set_metadata(KEY, json.dumps(data, sort_keys=True))
+        try:
+            self.vm.set_metadata(KEY, json.dumps(data, sort_keys=True))
+        except Exception as exc:   # noqa: BLE001
+            raise Unavailable("couldn't save the friends list") from exc
         self._cache = None
 
     def upsert(self, email: str, portals: list[str], added_by: str) -> None:
-        data = dict(self.all())
+        data = self._fresh()
         entry = dict(data.get(email, {"added_by": added_by, "added": date.today().isoformat()}))
         entry.pop("games", None)
         entry["portals"] = [p for p in PORTALS if p in portals]
@@ -68,7 +88,7 @@ class Friends:
         self._save(data)
 
     def remove(self, email: str) -> None:
-        data = dict(self.all())
+        data = self._fresh()
         if data.pop(email, None) is not None:
             self._save(data)
 

@@ -66,6 +66,31 @@
     and can use only the portals ticked for them; you can change that or remove them any time, and it
     applies on their next page load. <b>Invite</b> opens a ready-written email from your own mail app.</p>
 
+  {# People who signed in with Google and asked for access (Discord pins link to it). Approve adds them as a friend
+     with what's ticked; the email is the one Google verified. #}
+  {% if access_requests %}
+    <h3 id="requests">Asking for access ({{ access_requests | length }})</h3>
+    {% for r in access_requests %}
+      <form method="post" action="{{ url_for('admin.friends_save') }}" class="card" style="overflow-wrap:anywhere">
+        <input type="hidden" name="email" value="{{ r.email }}">
+        <input type="hidden" name="from_request" value="1">
+        <p><b>{{ r.email }}</b>{% if r.name %} <span class="help">({{ r.name }})</span>{% endif %}
+          <span class="help">asked {{ r.when }}{% if r.names %} for {{ r.names | join(', ') }}{% endif %}</span></p>
+        {% if r.is_friend %}<p class="help">Already a friend, with: {{ r.held_names | join(', ') or 'nothing yet' }}. Approve adds to that.</p>{% endif %}
+        {% if r.note %}<p class="help">&ldquo;{{ r.note }}&rdquo;</p>{% endif %}
+        {% for id, name in portals.items() %}
+          <label class="game" style="display:inline-block;margin-right:14px">
+            <input type="checkbox" name="portals" value="{{ id }}" {{ 'checked' if id in r.tick }}> {{ name }}
+          </label>
+        {% endfor %}
+        <p class="row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button type="submit">Approve</button>
+          <button type="submit" class="danger" formaction="{{ url_for('admin.requests_dismiss') }}">Dismiss</button>
+        </p>
+      </form>
+    {% endfor %}
+  {% endif %}
+
   {% for f in friends %}
     <form method="post" action="{{ url_for('admin.friends_save') }}" class="card">
       <input type="hidden" name="email" value="{{ f.email }}">
@@ -79,7 +104,8 @@
         <button type="submit">Save access</button>
         <a class="btn" href="{{ f.mailto }}">Invite ✉</a>
         <button type="submit" class="danger" formaction="{{ url_for('admin.friends_remove') }}"
-                onclick="return confirm('Remove {{ f.email }} from the portal?');">Remove</button>
+                data-email="{{ f.email }}"
+                onclick="return confirm('Remove ' + this.dataset.email + ' from the portal?');">Remove</button>
       </p>
     </form>
   {% else %}

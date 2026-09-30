@@ -563,7 +563,9 @@ def test_friend_added_on_admin_page_can_sign_in_and_sees_only_their_games(env):
     page = client.get("/games").data.decode()
     assert "RuneScape: Dragonwilds" in page and "Valheim" not in page
     assert client.get("/games/dragonwilds").status_code == 200
-    assert client.get("/games/valheim").status_code == 404
+    ask = client.get("/games/valheim")                                # a real game they can't see: offered a way to ask
+    assert ask.status_code == 302 and ask.location.endswith("/request-access?game=valheim")
+    assert client.get("/games/no-such-game").status_code == 404
     assert client.get("/games/valheim/discord").status_code == 404
     client.post("/games/start", data={"games": ["valheim"]})
     assert not [c for c in vm.calls if c[0] == "start"]              # can't start a hidden game
@@ -586,7 +588,7 @@ def test_changing_a_friends_games_applies_immediately(env):
     _add_friend(client, PAL, ["dragonwilds"])
     _add_friend(client, PAL, ["valheim"])                             # update, not duplicate
     login(client, PAL)
-    assert client.get("/games/dragonwilds").status_code == 404
+    assert client.get("/games/dragonwilds").location.endswith("/request-access?game=dragonwilds")   # taken away: ask again
     assert client.get("/games/valheim").status_code == 200
 
 
@@ -675,14 +677,19 @@ def test_task_endpoint_runs_only_what_was_queued(env, monkeypatch):
     _as_ops(monkeypatch)
     assert client.post("/tasks/run", headers=OPS).get_json() == {"results": []}   # nothing queued
     client.application.config["DISCORD_BOT_TOKEN"] = "tok"
-    monkeypatch.setattr(discord_admin, "setup",
-                        lambda token, invite, games, env: {"DISCORD_GUILD_ID": "g1", "DISCORD_CHANNEL_DRAGONWILDS": "c9"})
+    seen = {}
+
+    def fake_setup(token, invite, games, env, portal_url=None):
+        seen["portal_url"] = portal_url                                   # the pins link to where the portal is served
+        return {"DISCORD_GUILD_ID": "g1", "DISCORD_CHANNEL_DRAGONWILDS": "c9"}
+    monkeypatch.setattr(discord_admin, "setup", fake_setup)
     vm.metadata["portal-tasks"] = json.dumps([{"id": "t1", "task": "discord-setup"},
                                               {"id": "t2", "task": "rm-rf"}])
     results = {r["id"]: r for r in client.post("/tasks/run", headers=OPS).get_json()["results"]}
     assert results["t1"]["ok"] and "Discord ready" in results["t1"]["message"]
     assert not results["t2"]["ok"] and "unknown task" in results["t2"]["message"]
     assert vm.state.env["DISCORD_CHANNEL_DRAGONWILDS"] == "c9"        # settings saved to the VM
+    assert seen["portal_url"] == "http://localhost/"
     assert json.loads(vm.metadata["portal-tasks"]) == []              # queue emptied
     assert [r["id"] for r in json.loads(vm.metadata["portal-task-results"])] == ["t1", "t2"]
     assert client.post("/tasks/run", headers=OPS).get_json() == {"results": []}   # and never re-run

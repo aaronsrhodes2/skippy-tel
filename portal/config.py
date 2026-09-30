@@ -59,6 +59,7 @@ def load() -> dict:
         # Discord: the invite link shown to players, and the bot token the
         # admin page uses to create channels (optional until you want that).
         "DISCORD_INVITE": _optional("DISCORD_INVITE", "gPTVS7Hmj"),
+        "PORTAL_URL": _optional("PORTAL_URL", ""),   # the address the Discord pins link to (a custom domain, once there is one); else where the portal is reached
         "MENTAT_URL": _optional("MENTAT_URL", ""),
         "DISCORD_BOT_TOKEN": _optional("DISCORD_BOT_TOKEN"),
     }

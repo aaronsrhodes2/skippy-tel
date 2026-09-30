@@ -48,7 +48,8 @@
     {% endif %}
 
     {% if is_admin %}
-      <a class="tile" data-app="admin" href="{{ url_for('admin.index') }}" data-tel="tile:admin">
+      <a class="tile" data-app="admin" href="{{ url_for('admin.index') }}{{ '#friends' if asking }}" data-tel="tile:admin">
+        {% if asking %}<span class="pill">{{ asking }} asking</span>{% endif %}
         <span class="icon">⚙️</span>
         <h3>Admin</h3><p>Settings, friends, Discord and restarts.</p></a>
     {% endif %}

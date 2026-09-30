@@ -31,6 +31,32 @@ it depends on your PC or on you being signed in.
    playing, worlds are saved and the VM powers off. The next friend to click
    Play wakes it again, with the same world.
 
+**Asking for access.** Each game's pinned Discord post has a **Skippy Portal** field
+linking to that game's page (`/games/<id>`; the link's host is `PORTAL_URL` in the VM's
+settings, which the portal's Discord setup fills in from the address it is served on, so a
+custom domain later needs only a re-run of setup). Someone without access signs in with
+Google (a link to a game page survives the sign-in) and lands on **Request access**: pick a
+game, add a short note, send. The request is stored with the email **Google verified**
+(nobody can ask for an address they don't own; typed emails are ignored) in VM metadata
+`portal-requests` (`portal/access_requests.py`; Terraform ignores it). Until approved they are
+a "visitor" (`session["visitor"]`): they can reach the request page and nothing else. It shows
+up in **Admin → Friends** above your friends, with **Approve** (the ordinary add-friend; it
+**adds to** what an existing friend already has, and needs something ticked) and **Dismiss**,
+plus a badge on the Admin tile and a line on the dashboard. Once approved, the person opens the
+Discord link again and is in: no second sign-in or second request. Approving part of a
+request leaves the rest waiting (and says so); Approve only ever *adds* to a friend's access.
+Limits: one request per email (asking again adds games), 3 per hour per person, 6 per address
+(an IPv6 address counts as its /64), 60 overall; at most 50 waiting, and a full list turns
+*new* people away rather than evicting anyone already waiting; requests expire after 60 days.
+Name and note are one short plain line (control, invisible and blank-looking characters and
+"zalgo" combining marks removed). The friends list and the queue are read fresh and **refuse to
+write if that read failed**, so a VM API hiccup can't wipe them; failed writes are reported, never
+a raw error. One caveat: the lock is per process, so two portal revisions overlapping during a
+rollout could lose a simultaneous request (the portal normally runs one instance).
+**A custom domain later:** set `PORTAL_URL=https://your.domain` in the portal's deploy settings and
+re-run Discord setup; the pins (and the VM, via `PORTAL_URL` in its settings) then link there. The
+per-address limit reads the last `X-Forwarded-For` hop, which is right behind Cloud Run's own front end.
+
 Guardrails for non-admins: auto-sleep can be 15–120 minutes, never "off";
 **one game at a time, and only the Captain changes it**: a friend can only
 wake the game the server is currently set to, and asking for another one
