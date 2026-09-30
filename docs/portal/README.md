@@ -23,7 +23,8 @@ it depends on your PC or on you being signed in.
    only when every running game is theirs. Stored in the VM's `portal-friends`
    metadata ([`portal/friends.py`](../../portal/friends.py)); `ALLOWED_EMAILS` in
    the deploy workflow stays for core users who always see everything.
-2. **They play:** Servers page → **Play RuneScape: Dragonwilds**. The VM
+2. **They play:** Games app (a grid of cards like the launcher; the game that's up glows) →
+   tap the game's card → **Play RuneScape: Dragonwilds** on its page. The VM
    wakes, the server updates itself and loads the saved world. The tile shows
    "Starting — booted N min ago" until it's typically joinable (~6 min), then
    the join steps and a **Show join password** reveal.

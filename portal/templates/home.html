@@ -14,16 +14,19 @@
 
     {% if games %}
       {% set up = status and status.status == 'RUNNING' %}
-      <a class="tile" data-app="games" href="{{ url_for('dashboard.index') }}" data-tel="tile:games">
-        <span class="pill">{% if not status %}?{% elif up %}● {{ set_games | join(' + ') or 'online' }}{% else %}asleep{% endif %}</span>
+      {# A box with its title link stretched over it (links can't nest), so the live-game badge can be a link of its own:
+         tap the badge to go straight to that game's page, tap anywhere else for the Games app. #}
+      <div class="tile" data-app="games" data-tel="tile:games">
+        {# One badge per live game, stacked inside the tile (never wider than it); each is a link to that game's page. #}
+        <span class="pills">{% if not status %}<span class="pill">?</span>{% elif up %}{% for id, name in live_games %}<span class="pill"><a href="{{ url_for('dashboard.game', gid=id) }}" data-tel="tile:games:{{ id }}" title="Open {{ name }}">● {{ name }}</a></span>{% else %}<span class="pill">● online</span>{% endfor %}{% else %}<span class="pill">asleep</span>{% endif %}</span>
         <span class="icon">🎮</span>
-        <h3>Games</h3>
+        <h3><a class="tile-link" href="{{ url_for('dashboard.index') }}">Games</a></h3>
         {# Which game server is up right now; asleep, which one is set for the next wake-up. #}
         <p>{% if not status %}Couldn't reach the server.
            {% elif up and set_games %}{{ set_games | join(' + ') }} is up{% if hidden_up %} (and another game){% endif %}. Tap to join.
            {% elif up %}A game server is up.
            {% elif set_games %}Asleep. {{ set_games | join(' + ') }} is set; tap to wake it.
-           {% else %}Asleep. {{ games.values() | map(attribute='name') | join(' · ') }}{% endif %}</p></a>
+           {% else %}Asleep. {{ games.values() | map(attribute='name') | join(' · ') }}{% endif %}</p></div>
     {% endif %}
 
     {% if show_bilby %}

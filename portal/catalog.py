@@ -48,6 +48,7 @@ class Game:
     invite_code: bool = False            # hands out a per-session invite code (diagnostics.join_codes)
     direct: Callable[[str, dict], str] | None = None   # (ip, settings) -> "ip:port" for a Direct-connect box
     theme: Theme | None = None
+    icon: str = "🎮"                    # the game's card on the Games page (an emoji, like the launcher's tiles)
     facts: tuple[tuple[str, str], ...] = field(default=())   # (label, value) on the game page
     links: tuple[tuple[str, str], ...] = field(default=())   # (label, url) official site, wiki
 
@@ -84,6 +85,7 @@ GAMES: dict[str, Game] = {
         ready_minutes=6,
         invite_code=True,
         direct=lambda ip, env: f"{ip}:{env.get('DRAGONWILDS_PORT') or '7778'}",
+        icon="🐉",
         theme=Theme(accent="#ff7a1a", accent2="#c9a24a", bg="#120806", card="#24110b", text="#f3dcc2",
                     font="Cinzel",
                     pattern="radial-gradient(ellipse at 20% 110%, rgba(255,90,20,.55), transparent 60%), "
@@ -108,6 +110,7 @@ GAMES: dict[str, Game] = {
         ),
         join_password_key="VALHEIM_PASSWORD",
         ready_minutes=5,
+        icon="🪓",
         theme=Theme(accent="#8fd3ff", accent2="#d8c9a3", bg="#0b1016", card="#141d27", text="#dfe8ef",
                     font="Cinzel",
                     pattern="linear-gradient(180deg, rgba(143,211,255,.18), transparent 70%), "
@@ -124,6 +127,7 @@ GAMES: dict[str, Game] = {
         ram_gb=2,
         connect=lambda ip, env: f"Multiplayer &rarr; Connect to address &rarr; <code>{ip}</code>",
         settings=(Setting("FACTORIO_SAVE_NAME", "Save name"),),
+        icon="⚙️",
         theme=Theme(accent="#ff9a1f", accent2="#7fb03a", bg="#141414", card="#232323", text="#e6e0d6",
                     font="Titillium Web",
                     pattern="repeating-linear-gradient(45deg, rgba(255,154,31,.10) 0 14px, rgba(0,0,0,0) 14px 28px)",
@@ -138,6 +142,7 @@ GAMES: dict[str, Game] = {
         ram_gb=12,
         connect=lambda ip, env: f"Server Manager &rarr; Add Server &rarr; <code>{ip}</code> port <code>7777</code>",
         settings=(Setting("SATISFACTORY_MAX_PLAYERS", "Max players"),),
+        icon="🏭",
         theme=Theme(accent="#fa9549", accent2="#5fb6d9", bg="#0d1216", card="#18222a", text="#e2ecf2",
                     font="Rajdhani",
                     pattern="radial-gradient(circle at 80% 20%, rgba(95,182,217,.35), transparent 50%), "
@@ -160,6 +165,7 @@ GAMES: dict[str, Game] = {
         ),
         ready_minutes=8,
         direct=lambda ip, env: f"{ip}:5999",
+        icon="🧙",
         theme=Theme(accent="#d4af37", accent2="#6a8cc7", bg="#0b0a12", card="#171425", text="#e8e2d0",
                     font="Cinzel",
                     pattern="radial-gradient(ellipse at 15% 0%, rgba(106,140,199,.35), transparent 55%), "

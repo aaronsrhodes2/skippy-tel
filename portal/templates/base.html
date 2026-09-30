@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Skippy Portal{% endblock %}</title>
+{# The admiral beercan: the SVG for modern browsers, PNG/ICO for the rest, and iOS's home-screen icon. #}
+<link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+<link rel="icon" href="{{ url_for('static', filename='favicon-32.png') }}" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
 <style>
   /* ── The one design kit ────────────────────────────────────────────────────────
      Every page and every demo builds on this: tokens, the app bar, tiles, cards,
@@ -69,7 +73,27 @@
   .tile p { margin: 4px 0 0; font-size: .8rem; opacity: .85;
             display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .tile .icon { font-size: 2.1rem; line-height: 1; margin-bottom: auto; }
-  .tile .pill { position: absolute; top: 12px; right: 12px; }
+  .tile .pill { position: absolute; top: 12px; right: 12px; z-index: 2; }
+  /* A tile that has links of its own (the Games tile's live-game badge): the tile is a box, its title link is stretched
+     across it (so a tap anywhere opens the app), and anything with z-index 2 sits above that overlay and is its own target. */
+  .tile .tile-link { color: inherit; text-decoration: none; }
+  .tile .tile-link::after { content: ""; position: absolute; inset: 0; z-index: 1; border-radius: inherit; }   /* above the text (a <p> with opacity paints as its own layer), below the badges (z-index 2) */
+  .tile .tile-link:focus-visible { outline: none; }
+  .tile .tile-link:focus-visible::after { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .tile .pill a { position: relative; color: inherit; text-decoration: none; display: block;
+                  padding: 8px 2px; margin: -8px -2px; }        /* a bigger tap target than the small pill itself */
+  .tile .pill a:hover, .tile .pill a:focus-visible { text-decoration: underline; }
+  /* Several badges (one per live game): stacked at the top right, inside the tile, long names cut short. The row itself
+     lets clicks fall through to the tile link; only the badges catch them. */
+  .tile .pills { position: absolute; top: 12px; right: 12px; left: 12px; z-index: 2; display: flex; flex-direction: column;
+                 align-items: flex-end; gap: 6px; pointer-events: none; }
+  .tile .pills .pill { position: static; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                       pointer-events: auto; }
+  /* The game that's up (the server runs one at a time): a glowing, thicker-bordered card and a bolder badge, so it is the
+     first thing the eye finds. Border and glow only: no colour fill behind text. */
+  .tile.live { border-width: 2px; box-shadow: 0 0 0 1px var(--accent), 0 0 26px color-mix(in srgb, var(--accent) 45%, transparent); }
+  .tile.live:hover, .tile.live:focus-visible { box-shadow: 0 0 0 1px var(--accent), 0 0 32px color-mix(in srgb, var(--accent) 55%, transparent), 0 6px 22px rgba(0,0,0,.6); }
+  .tile.live .pill { border-width: 2px; font-weight: 700; }
   .tile.featured { grid-column: span 2; min-height: 200px; }
   .tile.featured p { -webkit-line-clamp: 3; font-size: .85rem; }
   @media (max-width: 420px) { .tile.featured { grid-column: span 1; } }

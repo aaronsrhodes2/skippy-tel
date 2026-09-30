@@ -189,11 +189,12 @@ def test_unlisted_email_is_bounced(env):
 def test_dashboard_shows_valheim_with_discord_links(env):
     client, _, _ = env
     login(client, FRIEND)
-    page = client.get("/games").data.decode()
+    page = client.get("/games/valheim").data.decode()               # the game's own page carries the Discord links
     assert "Valheim" in page
     assert "https://discord.com/channels/g1/c1" in page
     assert "https://discord.com/channels/g1/v1" in page
     assert "Admin" not in page            # friends don't get the admin link
+    assert "discord.com/channels" not in client.get("/games").data.decode()     # the list is just cards
 
 
 def test_start_refuses_when_settings_missing(env):
@@ -273,7 +274,7 @@ def test_friend_one_click_play_the_current_game_with_guardrail(env):
     client, vm, _ = env
     login(client, FRIEND)
     vm.state.games = ["dragonwilds"]                               # the game the Captain has set on the server
-    page = client.get("/games").data.decode()
+    page = client.get("/games/dragonwilds").data.decode()          # Play is on the game's page
     assert "Play RuneScape: Dragonwilds" in page
     client.post("/games/start", data={"games": ["dragonwilds"], "idle_minutes": "0"})
     assert vm.calls[-1] == ("start", ["dragonwilds"], 15)          # "never sleep" is admin-only
@@ -282,9 +283,10 @@ def test_friend_one_click_play_the_current_game_with_guardrail(env):
 def test_friends_cannot_start_a_different_game_and_are_told_to_ask_aaron(env):
     client, vm, _ = env
     login(client, FRIEND)                                          # the server is set to Valheim, asleep
-    page = client.get("/games").data.decode()
-    assert "Play Valheim" in page and "Play RuneScape: Dragonwilds" not in page
-    assert "ask Aaron" in page and "Start several games at once" not in page
+    assert "Play Valheim" in client.get("/games/valheim").data.decode()
+    page = client.get("/games").data.decode()                      # the list says so on the card, and offers no multi-start
+    assert 'href="/games/dragonwilds"' in page and ">ask Aaron</span>" in page
+    assert "Start several games at once" not in page and "Play " not in page
     body = client.post("/games/start", data={"games": ["dragonwilds"]}, follow_redirects=True).data.decode()
     assert "Valheim is the game on the server right now" in body
     assert "To play RuneScape: Dragonwilds instead, ask Aaron to switch the server" in body
@@ -294,14 +296,14 @@ def test_friends_cannot_start_a_different_game_and_are_told_to_ask_aaron(env):
     game_page = client.get("/games/dragonwilds").data.decode()
     assert "Play RuneScape" not in game_page and "ask Aaron" in game_page
     vm.state.status = "RUNNING"                                    # the same rule while a game is up
-    assert "ask Aaron" in client.get("/games").data.decode()
+    assert ">ask Aaron</span>" in client.get("/games").data.decode()
 
 
 def test_the_captain_can_start_any_game_and_several_at_once(env):
     client, vm, _ = env
     login(client, ADMIN)
-    page = client.get("/games").data.decode()
-    assert "Play RuneScape: Dragonwilds" in page and "Start several games at once" in page
+    assert "Start several games at once" in client.get("/games").data.decode()
+    assert "Play RuneScape: Dragonwilds" in client.get("/games/dragonwilds").data.decode()
     client.post("/games/start", data={"games": ["dragonwilds", "valheim"], "idle_minutes": "45"})
     assert vm.calls[-1] == ("start", ["dragonwilds", "valheim"], 45)
 
@@ -330,19 +332,134 @@ def test_the_games_tile_shows_which_game_server_is_up(env):
     assert "asleep" in tile and "Valheim is set; tap to wake it" in tile
     vm.state.status = "RUNNING"
     tile = client.get("/").data.decode()
-    assert "● Valheim" in tile and "Valheim is up" in tile
+    assert ">● Valheim</a>" in tile and "Valheim is up" in tile
     _add_friend(client, PAL, ["dragonwilds"])                      # a game PAL can't see is up: say so, don't name it
     login(client, PAL)
     tile = client.get("/").data.decode()
     assert "Valheim" not in tile and "A game server is up." in tile
 
 
+def _anchors(page: str):
+    """Every <a> in the page with its href, and whether it sits inside another <a> (invalid HTML)."""
+    from html.parser import HTMLParser
+
+    class Scan(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.depth, self.found, self.nested = 0, [], []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "a":
+                href = dict(attrs).get("href")
+                self.found.append(href)
+                if self.depth:
+                    self.nested.append(href)
+                self.depth += 1
+
+        def handle_endtag(self, tag):
+            if tag == "a":
+                self.depth = max(0, self.depth - 1)
+    scan = Scan()
+    scan.feed(page)
+    return scan.found, scan.nested
+
+
+def test_the_live_game_badge_links_straight_to_that_games_page(env):
+    client, vm, _ = env
+    login(client, FRIEND)
+    vm.state.status = "RUNNING"
+    page = client.get("/").data.decode()
+    links, nested = _anchors(page)
+    assert "/games/valheim" in links and "/games" in links            # the badge goes to the game; the tile still opens the app
+    assert nested == []                                               # and no link sits inside another link
+    pills = page[page.index('<span class="pills">'):page.index("</span></span>", page.index('<span class="pills">'))]
+    assert 'href="/games/valheim"' in pills and 'title="Open Valheim"' in pills and 'data-tel="tile:games:valheim"' in pills
+    assert 'class="tile-link" href="/games">Games</a>' in page        # tapping anywhere else opens the Games app
+
+
+def test_the_badge_links_every_live_game_and_never_a_hidden_or_sleeping_one(env):
+    client, vm, _ = env
+    login(client, ADMIN)
+    vm.state.status, vm.state.games = "RUNNING", ["valheim", "dragonwilds"]
+    links, nested = _anchors(client.get("/").data.decode())
+    assert {"/games/valheim", "/games/dragonwilds"} <= set(links) and nested == []
+    vm.state.status = "TERMINATED"                                    # asleep: nothing is live, so nothing to link to
+    links, _ = _anchors(client.get("/").data.decode())
+    assert "/games/valheim" not in links and "/games/dragonwilds" not in links and "/games" in links
+    vm.state.status = "RUNNING"
+    _add_friend(client, PAL, ["dragonwilds"])
+    login(client, PAL)                                                # PAL can see Dragonwilds only
+    links, _ = _anchors(client.get("/").data.decode())
+    assert "/games/dragonwilds" in links and "/games/valheim" not in links
+
+
+def test_the_games_page_is_a_grid_of_whole_card_links_like_the_launcher(env):
+    import re
+    from catalog import GAMES
+    client, _, _ = env
+    login(client, ADMIN)
+    page = client.get("/games").data.decode()
+    links, nested = _anchors(page)
+    assert nested == []
+    assert re.findall(r'<a class="tile" href="/games/(\w+)"', page) == list(GAMES)      # one whole-card link per game, in order
+    assert page.count('class="tiles"') == 1
+    for gid, game in GAMES.items():
+        assert f"/games/{gid}" in links and game.icon in page and f'style="--accent: {game.theme.accent}"' in page
+        assert game.theme.tagline.replace("'", "&#39;") in page                       # just the tagline, not the full description
+        assert game.description.replace("'", "&#39;") not in page
+    assert "fonts.googleapis.com" not in page                                          # and no third-party request on this hub
+
+
+def test_the_running_games_card_is_the_highlighted_one(env):
+    import re
+    client, vm, _ = env
+    login(client, ADMIN)
+    assert 'class="tile live"' not in client.get("/games").data.decode()               # asleep: nothing is live
+    vm.state.status, vm.state.games = "RUNNING", ["valheim"]
+    page = client.get("/games").data.decode()
+    assert re.findall(r'<a class="tile live" href="/games/(\w+)"', page) == ["valheim"]     # only the game that's up glows
+    assert page.count('class="tile"') == 4 and "Online now. Tap for how to join." in page
+    vm.state.games = ["valheim", "dragonwilds"]                                          # the Captain started two
+    page = client.get("/games").data.decode()
+    assert sorted(re.findall(r'<a class="tile live" href="/games/(\w+)"', page)) == ["dragonwilds", "valheim"]
+    _add_friend(client, PAL, ["factorio"])
+    login(client, PAL)                                                                   # a game PAL can't see is up: nothing lit
+    assert 'class="tile live"' not in client.get("/games").data.decode()
+
+
+def test_a_games_card_only_says_how_that_game_is_doing(env):
+    import re
+    client, vm, _ = env
+    login(client, FRIEND)
+    page = client.get("/games").data.decode()
+    assert re.search(r'href="/games/valheim".*?<span class="pill">asleep</span>', page, re.S)
+    vm.state.status = "RUNNING"
+    page = client.get("/games").data.decode()
+    assert re.search(r'href="/games/valheim".*?<span class="pill">● online</span>', page, re.S)
+    for secret in ("hunter22", "Invite Code", "Play Valheim", "Show join password"):
+        assert secret not in page                                                      # details are for the game's own page
+
+
+def test_the_games_page_lists_only_the_games_you_can_see_and_never_reads_the_vm_for_join_codes(env):
+    client, vm, _ = env
+    _add_friend(client, PAL, ["dragonwilds"])
+    login(client, PAL)
+    vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
+
+    def refuse(port):
+        raise AssertionError("the list page must not read the VM's serial output")
+    vm.serial_output = refuse
+    page = client.get("/games").data.decode()
+    assert 'href="/games/dragonwilds"' in page and 'href="/games/valheim"' not in page
+
+
 def test_join_password_shown_to_players_only_while_running(env):
     client, vm, _ = env
     login(client, FRIEND)
-    assert "dragonpw" not in client.get("/games").data.decode()   # asleep: nothing to join
+    assert "dragonpw" not in client.get("/games/dragonwilds").data.decode()   # asleep: nothing to join
     vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
-    page = client.get("/games").data.decode()
+    assert "dragonpw" not in client.get("/games").data.decode()    # the list of games never carries the password
+    page = client.get("/games/dragonwilds").data.decode()
     assert "dragonpw" in page
     assert "Invite Code" in page                               # the reliable way in comes first...
     assert page.index("Invite Code") < page.index("Public</b> tab")   # ...the list search is the fallback
@@ -496,8 +613,8 @@ def test_invite_code_shown_live_while_running(env):
     assert "YTKM-EKL1" not in client.get("/games/dragonwilds").data.decode()   # asleep: no code
     vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
     assert "YTKM-EKL1" in client.get("/games/dragonwilds").data.decode()
-    assert "YTKM-EKL1" in client.get("/games").data.decode()
-    vm.serial[2] += "=== skippy-diag t2 ===\nJOIN_CODE dragonwilds=NEW1-CODE\n=== end ===\n"
+    assert "YTKM-EKL1" not in client.get("/games").data.decode()     # the list doesn't show it (or read the VM for it)
+    vm.serial[2] +="=== skippy-diag t2 ===\nJOIN_CODE dragonwilds=NEW1-CODE\n=== end ===\n"
     page = client.get("/games/dragonwilds").data.decode()                  # after a reboot
     assert "NEW1-CODE" in page and "YTKM-EKL1" not in page
     _, run = _tools_for(client, skippy, FRIEND)
@@ -536,12 +653,13 @@ def test_invite_code_sits_with_the_join_password(env):
     vm.serial[2] = "=== skippy-diag t ===\nJOIN_CODE dragonwilds=YTKM-EKL1\n=== end ===\n"
     vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
     login(client, FRIEND)
-    for url in ("/games/dragonwilds", "/games"):
-        page = client.get(url).data.decode()
-        join = page[page.index('<div class="join">'):]
-        join = join[:join.index("</div>")]
-        assert "YTKM-EKL1" in join and "dragonpw" in join         # code + password in one block
-        assert "35.1.2.3:7778" in join                            # direct ip:port for the Direct tab
+    page = client.get("/games/dragonwilds").data.decode()
+    join = page[page.index('<div class="join">'):]
+    join = join[:join.index("</div>")]
+    assert "YTKM-EKL1" in join and "dragonpw" in join             # code + password in one block
+    assert "35.1.2.3:7778" in join                                # direct ip:port for the Direct tab
+    listing = client.get("/games").data.decode()
+    assert '<div class="join">' not in listing and "YTKM-EKL1" not in listing and "dragonpw" not in listing
 
 
 # ── friends: added on the Admin page, per-game access ─────────────────────────
@@ -1236,6 +1354,7 @@ def test_everquest_database_relays_from_home_to_the_vm(env, tmp_path, monkeypatc
     assert client.get("/games/everquest/import").status_code == 401            # the VM's token only
     got = client.get("/games/everquest/import", headers={"Authorization": f"Bearer {vm_token}"})
     assert got.status_code == 200 and got.data == dump
+    got.close()                                       # send_file streams from an open file: release it, or Windows can't delete it below
     report = client.post("/home/report", json=json.loads(json.dumps(REPORT)), headers=home_auth).get_json()
     assert report["imports_wanted"] == []                                      # has it: stop asking
 
@@ -1756,3 +1875,25 @@ def test_ops_configure_previews_by_default_and_writes_only_on_apply(env, capsys)
     (call,) = [c for c in vm.calls if c[0] == "update_env"]
     assert call[1]["VALHEIM_PASSWORD"] == "groggy"
     assert remote.configure(vm, ["apply", "x"], dict(vm.state.env)) == 1                              # refused, and says so
+
+
+def test_every_page_wears_the_admiral_beercan_and_the_icons_are_public(env):
+    import re
+    from pathlib import Path
+    client, _, _ = env
+    app = client.application
+    for page in (client.get("/").data.decode(), client.get("/experiments").data.decode()):        # signed out: login + a public page
+        assert 'rel="icon" href="/static/favicon.svg" type="image/svg+xml"' in page
+        assert 'href="/static/favicon-32.png"' in page and 'rel="apple-touch-icon" href="/static/apple-touch-icon.png"' in page
+    for url, kind, magic in (("/static/favicon.svg", "image/svg+xml", b"<svg"), ("/static/favicon-32.png", "image/png", b"\x89PNG"),
+                             ("/static/apple-touch-icon.png", "image/png", b"\x89PNG"),
+                             ("/favicon.ico", "image/x-icon image/vnd.microsoft.icon", b"\x00\x00\x01\x00"),   # (the name varies by OS)
+                             ("/apple-touch-icon.png", "image/png", b"\x89PNG")):
+        resp = client.get(url)                                                                    # no sign-in needed for any of them
+        assert resp.status_code == 200 and resp.mimetype in kind.split() and resp.data.lstrip()[:len(magic)] == magic, url
+        assert "max-age" in resp.headers.get("Cache-Control", "") or url.startswith("/static/"), url
+    icon = (Path(app.static_folder) / "favicon.svg").read_text(encoding="utf-8")
+    assert "<title>Skippy the Magnificent</title>" in icon and "http" not in re.sub(r'xmlns="[^"]*"', "", icon)   # self-contained: nothing fetched
+    from PIL import Image  # noqa: PLC0415
+    assert Image.open(Path(app.static_folder) / "apple-touch-icon.png").size == (180, 180)
+    assert sorted(Image.open(Path(app.static_folder) / "favicon.ico").info["sizes"]) == [(16, 16), (32, 32), (48, 48)]

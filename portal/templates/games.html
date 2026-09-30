@@ -1,13 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Games — Skippy Portal{% endblock %}
 {% block app %}games{% endblock %}
-{% block head %}
-{# The themed game titles use the games' own fonts; only this page and the game pages load them. #}
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Titillium+Web:wght@700&family=Rajdhani:wght@700&display=swap" rel="stylesheet">
-{% endblock %}
 {% block content %}
+{# The Games app: a card per game, laid out like the launcher. Each card is one big link to that game's page, which has
+   everything (Play, how to join, the password, Discord). This page only says which game is up and offers the
+   server-wide controls. #}
 <section>
   <h2>Game servers</h2>
   {% if error %}
@@ -27,48 +24,29 @@
       {% endif %}
     </p>
 
-    {% for id, game in games.items() %}
-      {% set on = running and id in status.games %}
-      <div class="card" id="{{ id }}" {% if game.theme %}style="border-left: 4px solid {{ game.theme.accent }}"{% endif %}>
-        <h3><a href="{{ url_for('dashboard.game', gid=id) }}" style="color:inherit{% if game.theme %};font-family:'{{ game.theme.font }}',serif;text-shadow:0 0 12px {{ game.theme.accent }}{% endif %}">{{ game.name }}</a>
-          {% if on %}<span class="dot green" title="running"></span>{% endif %}
-          <a href="{{ url_for('dashboard.game', gid=id) }}" style="font-size:.8rem;font-weight:normal">open &rarr;</a></h3>
-        <p>{{ game.description }}</p>
-
-        {% if on %}
-          {% if up is not none and up < game.ready_minutes %}
-            <p><span class="dot amber"></span>Starting — booted {{ up }} min ago, usually joinable
-               ~{{ game.ready_minutes }} min after boot.</p>
-          {% endif %}
-          {% include "_join.html" %}
-        {% elif asleep and (is_admin or not status.games or id in status.games) %}
-          <form method="post" action="{{ url_for('dashboard.games_start') }}">
-            <input type="hidden" name="games" value="{{ id }}">
-            <input type="hidden" name="idle_minutes" value="{{ status.idle_minutes }}">
-            <button type="submit">Play {{ game.name }}</button>
-            <span class="help">&nbsp;ready in ~{{ game.ready_minutes }} min</span>
-          </form>
-        {% elif asleep or running %}
-          {# One game at a time, and only the Captain changes it (ops.start_games enforces the same rule). #}
-          <p class="help">{{ game.name }} isn't the game on the server right now. To play it, ask {{ switch_owner }}
-            to switch the server{% if is_admin %} (Admin: restart it with this game added){% endif %}.</p>
-        {% endif %}
-
-        <p class="links">
-          {% if links[id].text %}<a href="{{ links[id].invite or links[id].text }}" target="_blank" rel="noopener">#{{ id }} on Discord</a>{% endif %}
-          {% if links[id].voice %}<a href="{{ links[id].voice }}" target="_blank" rel="noopener">🔊 voice</a>{% endif %}
-          {% if not links[id].text %}<a href="{{ discord_invite }}" target="_blank" rel="noopener">Join the Discord</a>{% endif %}
-        </p>
-      </div>
-    {% endfor %}
+    <div class="tiles">
+      {% for id, game in games.items() %}
+        {% set on = running and id in status.games %}
+        {% set starting = on and up is not none and up < game.ready_minutes %}
+        {% set is_set = is_admin or not status.games or id in status.games %}
+        {# The server runs one game at a time, so the one that's up gets the glowing card (.live). #}
+        <a class="tile{{ ' live' if on }}" href="{{ url_for('dashboard.game', gid=id) }}" data-tel="tile:game:{{ id }}"
+           {% if game.theme %}style="--accent: {{ game.theme.accent }}"{% endif %}>
+          <span class="pill">{% if starting %}⏳ starting{% elif on %}● online{% elif asleep and is_set %}asleep{% elif not is_set %}ask {{ switch_owner }}{% elif running %}off{% else %}{{ status.status | lower }}{% endif %}</span>
+          <span class="icon">{{ game.icon }}</span>
+          <h3>{{ game.name }}</h3>
+          <p>{% if starting %}Starting up. Tap for when it's joinable.{% elif on %}Online now. Tap for how to join.{% else %}{{ game.theme.tagline if game.theme else game.description }}{% endif %}</p>
+        </a>
+      {% endfor %}
+    </div>
 
     {% if running %}
       <form class="inline" method="post" action="{{ url_for('dashboard.games_stop') }}"
-            onsubmit="return confirm('Stop the server for everyone? Worlds are saved first.');">
+            onsubmit="return confirm('Stop the server for everyone? Worlds are saved first.');" style="display:block;margin-top:18px">
         <button type="submit" class="danger">Stop server</button>
       </form>
     {% elif asleep and is_admin %}
-      <details>
+      <details style="margin-top:18px">
         <summary>Start several games at once</summary>
         <form method="post" action="{{ url_for('dashboard.games_start') }}">
           {% for id, game in games.items() %}
@@ -78,10 +56,8 @@
             </label>
           {% endfor %}
           <label>Sleep after
-            <input type="number" name="idle_minutes" value="{{ status.idle_minutes }}"
-                   min="{{ 0 if is_admin else idle_min }}" {% if not is_admin %}max="{{ idle_max }}"{% endif %}
-                   style="width:5em">
-            minutes idle{% if is_admin %} (0 = never){% endif %}
+            <input type="number" name="idle_minutes" value="{{ status.idle_minutes }}" min="0" style="width:5em">
+            minutes idle (0 = never)
           </label>
           <p><button type="submit">Start selected</button></p>
         </form>

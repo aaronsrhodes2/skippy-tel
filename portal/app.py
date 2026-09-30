@@ -110,8 +110,11 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         # The Games tile names the game that's up (or set for the next wake-up), only from the games this
         # person may see: a hidden game's name never shows.
         set_games = [shown[g].name for g in (status.games if status else []) if g in shown]
+        live_games = [(g, shown[g].name) for g in status.games if g in shown] \
+            if status and status.status == "RUNNING" else []           # the badge links to each one's page
         asking = len(pending_requests()) if auth.is_admin(me()) else 0   # a badge on the Admin tile
-        return render_template("home.html", status=status, games=shown, set_games=set_games, asking=asking,
+        return render_template("home.html", status=status, games=shown, set_games=set_games, live_games=live_games,
+                               asking=asking,
                                hidden_up=bool(status and status.status == "RUNNING"
                                               and any(g not in shown for g in status.games)),
                                show_experiments=auth.has_portal(me(), "experiments"),
@@ -121,6 +124,13 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @app.get("/health")
     def health():
         return "ok"
+
+    # Browsers and phones ask for these at the root, whatever the page's <link> says; public, like /static.
+    @app.get("/favicon.ico")
+    @app.get("/apple-touch-icon.png")
+    def site_icons():
+        name = "favicon.ico" if request.path.endswith(".ico") else "apple-touch-icon.png"
+        return send_from_directory(app.static_folder, name, max_age=86400)
 
     # ── asking for access (the Discord pins say "sign in and tap Request access") ─────────────
     # One person, one address, and everyone together: a flood of throwaway accounts can't fill the queue.
@@ -232,11 +242,9 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         """The Games app: server state, Stop, and a card per game. (Was /dashboard, "Servers" and the
         launcher's game tiles and "Server room" tile: one place now.)"""
         status, error = vm_status()
-        return render_template(
-            "games.html", status=status, error=error, games=my_games(),
-            links={g: discord_admin.links(status.env if status else {}, g) for g in my_games()},
-            codes=live_info(status)[0],
-        )
+        # Cards only: the join details, passwords and Discord links live on each game's own page, so this page
+        # no longer reads the VM's serial output for invite codes on every load.
+        return render_template("games.html", status=status, error=error, games=my_games())
 
     @dash.get("/dashboard")
     def legacy_dashboard():
