@@ -10,8 +10,9 @@ no file upload and no installer here. Per game, what the image really supports i
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from functools import wraps
 
-from flask import Blueprint, abort, make_response, render_template
+from flask import Blueprint, abort, make_response, render_template, request
 
 import auth
 import diagnostics
@@ -183,7 +184,21 @@ def init_app(app, vm) -> None:
         facts, taken = diagnostics.current_facts(vm) if status and status.status == "RUNNING" else ({}, "")
         return build(game, status, facts, taken)
 
+    def poll_gets_401(view):
+        """The page's own poll (it sends `X-Requested-With: fetch`) is never redirected to sign in: `fetch` would follow
+        the redirect and hand the page the whole Sign-in document as if it were the card. It gets a plain 401 instead,
+        so the card can keep its last body and say why. A visit in the browser is redirected as before."""
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            resp = make_response(view(*args, **kwargs))
+            if request.headers.get("X-Requested-With") == "fetch" and resp.status_code in (301, 302, 303, 307, 308):
+                resp = make_response("Signed out", 401)
+                resp.headers["Cache-Control"] = "no-store"
+            return resp
+        return wrapped
+
     @bp.get("/<gid>/panel")
+    @poll_gets_401
     @auth.admin_required
     def fragment(gid):
         """The card's body as an HTML fragment, for the page's poll (the same body the page renders)."""
@@ -196,6 +211,7 @@ def init_app(app, vm) -> None:
             status = None
         resp = make_response(render_template("_server_admin_body.html", panel=panel_for(game, status), game=game))
         resp.headers["Cache-Control"] = "no-store"
+        resp.headers["X-Skippy-Fragment"] = "server-admin"       # what the poll checks: only this may replace the card
         return resp
 
     app.register_blueprint(bp)
