@@ -59,6 +59,40 @@ Stream output is NDJSON, one line per chunk:
 {"done": true, "returncode": 0}
 ```
 
+### The private Skippy: `POST /workshop`, `GET /workshop/run/<task>`, `POST /workshop/cancel/<task>`
+
+Claude Code with **full permissions** (`--dangerously-skip-permissions`) on the
+SkippyTel repo, driven from the Captain's portal dashboard (`workshop_engine.py`).
+These three need `Authorization: Bearer <SKIPPY_HOME_TOKEN>` (the token the home
+reporter holds; read from the environment or the vault `G:/My Drive/vault/.env`).
+With no token configured they answer 503 and stay shut. `/solid-gold` is
+still unauthenticated (see the note below).
+
+- **Model:** `claude-opus-5-5`, a constant in `workshop_engine.py`. No environment
+  variable and no request field changes it.
+- **Where it works:** its own clone of the repo (`WORKSHOP_REPO`, default
+  `D:\Aaron\development\SkippyTel-workshop`, cloned on first use), never the
+  Captain's checkout. It deploys skippy-pc services from `WORKSHOP_PRIMARY`.
+- **Instructions:** `workshop_prompt.md` (loaded from here, never from a request):
+  the ask → change → test → push to main → deploy → verify loop, plus what it must ask first.
+- **Sessions:** one Claude Code session per chat conversation, remembered in
+  `.skippy-workshop-sessions.json`, so follow-ups have the context of the last.
+- **Runs:** `POST /workshop {task, conv, message}` starts one (asking again with
+  the same `task` re-attaches instead of re-running); `GET /workshop/run/<task>?after=N&wait=S`
+  returns events from index N (`{t:"text"}` and `{t:"tool", name, detail}`, never
+  tool output; commands are redacted for credentials). One task at a time (409 when busy).
+- **Login:** if `claude` on this PC isn't signed in, the run fails with a plain
+  message; run `claude` in a terminal and use `/login`.
+
+Tests: `python -m pytest services/claude-bridge/tests` (a stand-in `claude`, no tokens).
+
+## Security note
+
+`/solid-gold` in `bypass` mode runs Claude with every permission check skipped and
+takes no authentication, while the bridge listens on `0.0.0.0` (so Docker can
+reach it). Anything that can reach port 9337 can use it. Keep the Windows firewall
+closed to it from other machines, or put the token on it too.
+
 ## Boot persistence (deferred)
 
 Currently launched manually with `make bridge`. To survive a reboot

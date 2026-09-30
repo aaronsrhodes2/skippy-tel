@@ -9,6 +9,11 @@ Two modes, picked by request body `mode`:
   - "plan"   → solid gold (read-only planning, default Sonnet)
   - "bypass" → trust the awesomeness (full perms, Opus 4.7)
 
+Plus the private Skippy (workshop_engine.py): POST /workshop, GET /workshop/run/<task>,
+POST /workshop/cancel/<task>. Those need `Authorization: Bearer <SKIPPY_HOME_TOKEN>`
+(the same token the home reporter holds), because they run Claude Code with
+full permissions on the repo. Without the token configured they stay shut.
+
 Stdlib-only on purpose: no pip install needed on the host.
 
 ENV:
@@ -22,14 +27,19 @@ Launch:  python bridge.py
 from __future__ import annotations
 
 import glob
+import hmac
 import json
 import os
 import shutil
 import subprocess
 import sys
 import threading
+import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
+
+import workshop_engine as workshop
 
 
 def _discover_claude() -> str:
@@ -67,6 +77,18 @@ PORT      = int(os.getenv("CLAUDE_BRIDGE_PORT", "9337"))
 CWD       = os.getenv("CLAUDE_BRIDGE_CWD", r"D:\Aaron\development")
 CLAUDE    = _discover_claude()
 AWE_MODEL = os.getenv("CLAUDE_AWESOMENESS_MODEL", "claude-opus-4-7")
+
+WORKSHOP  = workshop.Workshop([CLAUDE])
+_token_cache: tuple[float, str] = (0.0, "")
+
+
+def current_token() -> str:
+    """The workshop's bearer token, re-read every 30 s so re-pairing home doesn't need a restart here."""
+    global _token_cache
+    now = time.time()
+    if now - _token_cache[0] > 30:
+        _token_cache = (now, workshop.home_token())
+    return _token_cache[1]
 
 
 def build_cmd(prompt: str, mode: str) -> list[str]:
@@ -157,18 +179,77 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     def do_GET(self):  # noqa: N802
-        if self.path == "/health":
+        url = urlparse(self.path)
+        if url.path == "/health":
             self._json(200, {"status": "ok", "service": "claude-bridge",
                              "cwd": CWD, "claude": CLAUDE,
-                             "awe_model": AWE_MODEL})
+                             "awe_model": AWE_MODEL,
+                             "workshop": {"ready": bool(current_token()), "model": workshop.MODEL,
+                                          "busy": WORKSHOP.busy()}})
+            return
+        if url.path.startswith("/workshop/run/"):
+            self._workshop_run(url)
             return
         self._json(404, {"error": "not_found"})
 
     def do_POST(self):  # noqa: N802
-        if self.path == "/solid-gold":
+        path = urlparse(self.path).path
+        if path == "/solid-gold":
             self._handle_solid_gold()
             return
+        if path == "/workshop":
+            self._workshop_start()
+            return
+        if path.startswith("/workshop/cancel/"):
+            if self._workshop_ok():
+                self._json(200, {"ok": WORKSHOP.cancel(path.rsplit("/", 1)[1])})
+            return
         self._json(404, {"error": "not_found"})
+
+    # ── the private Skippy (workshop.py) ─────────────────────────────────
+    def _workshop_ok(self) -> bool:
+        """It runs Claude Code with full permissions, so it wants the home token."""
+        token = current_token()
+        if not token:
+            self._json(503, {"error": "workshop_disabled",
+                             "message": "SKIPPY_HOME_TOKEN isn't configured on this PC"})
+            return False
+        header = self.headers.get("Authorization") or ""
+        if not header.startswith("Bearer ") or not hmac.compare_digest(
+                header[7:].strip().encode("utf-8", "replace"), token.encode("utf-8", "replace")):
+            self._json(401, {"error": "unauthorized"})
+            return False
+        return True
+
+    def _workshop_start(self) -> None:
+        if not self._workshop_ok():
+            return
+        body = self._read_body()
+        try:
+            run = WORKSHOP.start(str(body.get("task") or ""), str(body.get("conv") or ""),
+                                 str(body.get("message") or ""))
+        except workshop.Busy as exc:
+            self._json(409, {"error": "busy", "message": str(exc)})
+        except ValueError as exc:
+            self._json(400, {"error": "bad_request", "message": str(exc)})
+        else:
+            self._json(200, {"ok": True, "task": run.task, "done": run.done})
+
+    def _workshop_run(self, url) -> None:
+        if not self._workshop_ok():
+            return
+        run = WORKSHOP.get(url.path.rsplit("/", 1)[1])
+        if run is None:
+            self._json(404, {"error": "unknown_task"})
+            return
+        query = parse_qs(url.query)
+        try:
+            after = int((query.get("after") or ["0"])[0])
+            wait = min(25.0, float((query.get("wait") or ["0"])[0]))
+        except ValueError:
+            self._json(400, {"error": "bad_request"})
+            return
+        self._json(200, run.since(after, wait))
 
     def _handle_solid_gold(self):
         body = self._read_body()
