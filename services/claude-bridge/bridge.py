@@ -73,6 +73,7 @@ def _discover_claude() -> str:
     return raw  # falls through; subprocess will FileNotFoundError with a clear msg
 
 
+MAX_DRAIN_BYTES = 1_000_000        # an unwanted request body up to this is read and dropped so the refusal arrives as a reply
 PORT      = int(os.getenv("CLAUDE_BRIDGE_PORT", "9337"))
 CWD       = os.getenv("CLAUDE_BRIDGE_CWD", r"D:\Aaron\development")
 CLAUDE    = _discover_claude()
@@ -170,7 +171,25 @@ def run_oneshot(prompt: str, mode: str) -> dict:
 class Handler(BaseHTTPRequestHandler):
     server_version = "ClaudeBridge/1"
 
+    _body_read = False
+
+    def _drain(self) -> None:
+        """Read and drop a request body nobody wanted (a refused request), before the reply goes out. Closing a socket
+        with unread data in it makes Windows reset the connection, and the client then sees WinError 10053/10054
+        instead of the 401/503 that was sent (found as a flaky test; the reporter and flask-api would have read it as
+        'the bridge is down')."""
+        if self._body_read:
+            return
+        self._body_read = True
+        try:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+        except ValueError:
+            return
+        if 0 < length <= MAX_DRAIN_BYTES:
+            self.rfile.read(length)
+
     def _read_body(self) -> dict:
+        self._body_read = True
         length = int(self.headers.get("Content-Length", "0") or "0")
         raw = self.rfile.read(length) if length else b""
         try:
@@ -305,6 +324,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
     def _json(self, status: int, body: dict):
+        self._drain()
         payload = json.dumps(body).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")

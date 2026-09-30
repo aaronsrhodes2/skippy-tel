@@ -115,3 +115,15 @@ def test_the_client_and_the_real_bridge_agree(door, monkeypatch):
     with pytest.raises(client.BridgeUnavailable, match="HTTP 401"):
         list(client.stream_chat("hello", mode="plan"))
     assert door.ran == [("hello", "bypass")]           # neither refused call reached Claude
+
+
+@pytest.mark.parametrize("path", ["/solid-gold", "/workshop", "/workshop/cancel/abc"])
+def test_a_refusal_reaches_the_client_even_with_a_big_unread_body(door, path):
+    """The refusal is sent before the body is read. Closing a socket with unread data resets the connection on Windows,
+    and the client saw WinError 10053 instead of the 401 (a flaky test; to the reporter it would have read as 'bridge
+    down'). The handler drains the body first, so every one of these must come back as a clean 401."""
+    body = {"text": "x" * 400_000, "mode": "bypass", "message": "y", "task": "aa", "conv": "c"}
+    for _ in range(15):
+        assert door(path, body, token="wrong")[0] == 401
+        assert door(path, body, token=None)[0] == 401
+    assert door.ran == []
