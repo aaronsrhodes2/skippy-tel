@@ -137,6 +137,8 @@
   table { border-collapse: collapse; width: 100%; font-size: .88rem; }
   td, th { padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: left; }
   .links a { margin-right: 12px; }
+  footer.sitefoot { max-width: 760px; margin: -8px auto 0; text-align: center; font-size: .75rem; color: var(--muted); }   /* privacy link (portal/telemetry_web.py) */
+  footer.sitefoot a { color: var(--muted); }
 
   /* Skippy chat (templates/_chat.html): the one chat interface, in the Skippy app. */
   .skippy-chat .log { overflow-y: auto; max-height: 60vh; }
@@ -191,8 +193,28 @@
 {% endfor %}
 {% block content %}{% endblock %}
 </main>
+{# Every page says where to read what the site records (portal/templates/privacy.html). #}
+<footer class="sitefoot"><a href="{{ url_for('privacy') }}">Privacy: what this site records</a></footer>
 {% if user and request.endpoint != 'index' %}
   <a id="home-btn" href="{{ url_for('index') }}" aria-label="Home" title="Home">&#8962;</a>
+{% endif %}
+{% if user and telemetry_on %}
+<script>
+  /* Usage beacon (portal/telemetry_web.py): a tap on anything marked data-tel (a tile, a demo) is reported, signed-in
+     people only. It carries the tile's id and the page it was on, nothing else. /privacy says what is kept. */
+  (function () {
+    function tap(e) {
+      var el = e.target.closest && e.target.closest("[data-tel]");
+      if (!el || !navigator.sendBeacon) return;
+      try {
+        navigator.sendBeacon("{{ url_for('telemetry_tap') }}",
+          new Blob([JSON.stringify({e: el.getAttribute("data-tel"), p: location.pathname})], {type: "application/json"}));
+      } catch (err) { /* a blocked beacon costs nothing */ }
+    }
+    document.addEventListener("click", tap, true);
+    document.addEventListener("auxclick", tap, true);
+  })();
+</script>
 {% endif %}
 <script>
   /* Click a code, address or password (code.code) or a copyable block (pre.copy) to copy it. */

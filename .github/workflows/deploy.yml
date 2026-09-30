@@ -47,6 +47,9 @@ jobs:
           cache-dependency-path: portal/requirements.txt
       - run: pip install -r portal/requirements.txt pytest pillow   # pillow: the favicon test checks the icon sizes
       - run: python -m pytest portal/tests memory/tests tools/tests services/home-reporter/tests services/claude-bridge/tests mentat/tests -q
+      # flask-api's tests get their own session (its `app` package and the portal's app.py can't share one) and its own dependencies
+      - run: pip install -r services/flask-api/requirements.txt
+      - run: python -m pytest services/flask-api/tests -q
 
   mentat-test:
     # Mentat (and Weapon vs. Armor on it) against the pinned sigma-ground, fetched and

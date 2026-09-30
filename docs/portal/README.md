@@ -164,6 +164,56 @@ browser <── poll /me/workshop/events ── portal <── POST /home/worksh
   auth, secrets or its own harness). Those rules are a prompt, not a sandbox: the
   real guards are the login, the token and the tests.
 
+## Telemetry: what the portal records, and where it goes
+
+The Captain records how signed-in people use the portal (what gets opened, tapped and asked, what breaks), so he can
+see what to keep and what to remove, and it says so: the public **`/privacy`** page, linked from every page's footer,
+the sign-in page and the Skippy chat. That page is **rendered from `RECORDED`, `NOT_RECORDED` and `ALSO` in
+`portal/telemetry.py`**, the same lists the recorder is written against, so it can't promise what the code doesn't do
+(a test swaps the lists and checks the page follows). Change what is recorded → change those lists in the same commit.
+
+```
+browser ─tap─> POST /telemetry/tap ─┐                              (signed-in people only; taps on [data-tel])
+portal hooks (telemetry_web.py) ────┴─> Telemetry (in memory, ≤5000) <─ GET /home/telemetry ── home reporter (each ~15 s)
+                                                                                   │ POST /telemetry/site_events (≤100 KB batches)
+                                                       flask-api: site_events table in ui_telemetry.db (skippy-pc)
+                                                                                   │ GET /telemetry/site_summary → report `site_activity`
+                                   /me → "Activity" widget (admin only) <──────────┘
+```
+
+- **Recorded**, for a signed-in person still on the list, each event tagged with their email, role and a random id
+  for that sign-in: `page` (a GET that returned HTML: its path, never the query string), `action` (every non-GET: the
+  endpoint, whether it worked, the field NAMES, and values only for the `SAFE_VALUES` allow-list in
+  `telemetry_web.py`: game ids, idle minutes and the like, each checked against a pattern), `ui` (a tap on anything
+  marked `data-tel`: the launcher's tiles, the Games cards, the experiments), `chat` (the message and reply, the model,
+  the tools used with their arguments, redacted), `error`.
+- **Never**: IP addresses or browser details (nothing reads them), signed-out people and visitors, a tool's result, setting
+  values, passwords. Polls, media and the machine endpoints (`SKIP_ENDPOINTS`) and the private Skippy (`/me/workshop/*`)
+  aren't recorded at all. A test pins every skipped name to a real endpoint, so a renamed route can't start recording.
+- **Secrets in text** are scrubbed by `telemetry.redact()` (API keys, bearer tokens, JWTs, `password: …`, `password is …`,
+  `VALHEIM_PASSWORD=…`, long token-looking strings), anything under a key that sounds secret is dropped, and a code a tool
+  returned that Skippy then repeats is removed from the reply. Best effort: the chat says "don't type secrets".
+- **No ack, no loss.** The portal is stateless, so it keeps the newest 5000 events in memory (`dropped` counts overflow).
+  Each pull says which portal process (`boot`) and the last `seq` it has stored; the portal forgets only up to that, and
+  the reporter moves on only after flask-api answered ok. flask-api stores each `(boot, seq)` once, so a retry or a
+  restarted reporter can't double count. A redeploy of the portal loses what was still waiting (seconds' worth).
+- **Kept 180 days** (`KEEP_DAYS`; flask-api prunes at start and hourly), in the same SQLite file as the phone UI's
+  clicks (`ui_events`), in the `site_events` table. Read it with
+  `curl -s localhost:3003/telemetry/site_summary?days=30` (the same summary the widget shows) or SQLite directly.
+- **Deleting a person's events** (the page tells people to ask): on skippy-pc,
+  `curl -s -X POST localhost:3003/telemetry/site_forget -H 'content-type: application/json' -d '{"user":"pal@example.com"}'`
+  answers how many rows it deleted. Events still waiting in the portal's memory arrive after that (they're seconds old):
+  run it again a minute later, or remove the person from Admin → Friends first, since only people on the list are recorded.
+- **Switch**: `TELEMETRY_ENABLED=false` (a deploy env var; default on) records nothing, hides the beacon and the notices,
+  and `/privacy` says it is off.
+- **Adding a tile**: put `data-tel="tile:<name>"` on it (an app tile) or `demo:<slug>`; a test checks every id the launcher,
+  Games and Experiments templates use is one the Activity widget knows (`known_taps()`), which is how the widget lists
+  tiles nobody has tapped.
+- **Order of a rollout**: skippy-pc needs flask-api (the new routes and table) and home-reporter (the collector) rebuilt
+  (the safe stop / rm / up sequence for `flask-api` and `home-reporter`); the portal deploys from `main` as usual. Until the
+  reporter is running the new code the widget says "never collected", and the portal's buffer fills to 5000 and then
+  drops the oldest. A flask-api without the routes only makes the reporter retry (it never loses a pulled event).
+
 ## Known rough edges
 
 - Choosing different games while the VM is **running** saves the choice;

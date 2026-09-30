@@ -105,6 +105,8 @@
       {% endif %}
     </div>
 
+    {% include "_activity.html" %}
+
     <div class="w">
       <h3>Watcher</h3>
       {% if warnings %}{% for w in warnings %}<p class="warn">⚠ {{ w }}</p>{% endfor %}
