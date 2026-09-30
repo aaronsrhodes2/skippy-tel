@@ -8,9 +8,17 @@ from __future__ import annotations
 
 import watch
 from catalog import GAMES, clamp_idle, missing_settings
+from gcp import CapacityError
 
 
 SWITCH_OWNER = "Aaron"       # who changes the server's game
+
+
+def capacity_message(exc: CapacityError) -> str:
+    """Google had no room for the VM in its data center (it happens after a stop, for minutes to hours)."""
+    return (f"Google has no spare capacity for the server in {exc.zone} right now, on any of the machine sizes "
+            f"the portal can use ({', '.join(exc.tried)}). Nothing is broken and nothing was lost; the games "
+            "you picked are saved. This usually clears within a few minutes: press Play again shortly.")
 
 
 def _names(ids, visible: list[str] | None) -> list[str]:
@@ -47,7 +55,10 @@ def start_games(vm, games: list[str], idle_raw: str | None, is_admin: bool, who:
         return False, ("The server is already running. Games can only be changed while it's asleep "
                        "(or by an admin restart).")
     idle = clamp_idle(idle_raw, is_admin)
-    vm.start(selected, idle_minutes=idle)
+    try:
+        vm.start(selected, idle_minutes=idle)
+    except CapacityError as exc:
+        return False, capacity_message(exc)
     ready = max(GAMES[g].ready_minutes for g in selected)
     return True, (f"Starting {', '.join(GAMES[g].name for g in selected)} — usually joinable in about "
                   f"{ready} minutes (longer right after a game update). It sleeps after {idle} "
@@ -71,6 +82,9 @@ def stop_server(vm) -> tuple[bool, str]:
 
 
 def restart_server(vm) -> tuple[bool, str]:
-    status = vm.restart()
+    try:
+        status = vm.restart()
+    except CapacityError as exc:
+        return False, capacity_message(exc)
     return True, (f"Restarted ({', '.join(status.games) or 'no games'}). Server images and game "
                   "updates are pulled on boot; allow 5–10 minutes.")

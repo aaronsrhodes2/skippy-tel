@@ -35,6 +35,38 @@ class VmStatus:
         return max(0, int((now - self.started_at).total_seconds() // 60))
 
 
+# When Google has no room for a machine type in the zone (ZONE_RESOURCE_POOL_EXHAUSTED: it happens to the E2 family
+# for minutes to hours, most often right after a VM was stopped), start() tries these in order. All of them fit
+# the same games (RAM at least what machine_for() sized for) and support live migration, which the VM's
+# on_host_maintenance = MIGRATE needs (Tau T2D doesn't, so it isn't here). The cheapest is always tried first.
+ALTERNATES = {
+    "e2-standard-2": ("n2d-standard-2", "n2-standard-2", "e2-highmem-2", "n1-standard-2"),
+    "e2-standard-4": ("n2d-standard-4", "n2-standard-4", "n1-standard-4", "e2-highmem-4"),
+    "e2-highmem-4": ("n2d-highmem-4", "n2-highmem-4"),
+    "e2-highmem-8": ("n2d-highmem-8", "n2-highmem-8"),
+}
+
+
+def machine_candidates(games: list[str]) -> list[str]:
+    """The machine types to try for `games`, cheapest first."""
+    wanted = machine_for(games)
+    return [wanted, *ALTERNATES.get(wanted, ())]
+
+
+def is_capacity_error(exc: BaseException) -> bool:
+    """Google has no room right now (as opposed to a permissions or quota problem, which retrying can't fix)."""
+    text = str(exc)
+    return "RESOURCE_POOL_EXHAUSTED" in text or "does not have enough resources" in text
+
+
+class CapacityError(RuntimeError):
+    """No machine type we're willing to use has room in the zone at the moment."""
+
+    def __init__(self, zone: str, tried: list[str]):
+        self.zone, self.tried = zone, tried
+        super().__init__(f"Google has no spare capacity in {zone} right now (tried {', '.join(tried)})")
+
+
 def _parse_ts(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -123,18 +155,27 @@ class GamesVm:
         On an already-running VM only the choice is saved (applies on restart)."""
         from google.cloud import compute_v1
         current = self.status()
-        wanted_type = machine_for(games)
-        if current.status == "TERMINATED" and current.machine_type != wanted_type:
-            self._client.set_machine_type(
-                project=self.project, zone=self.zone, instance=self.instance,
-                instances_set_machine_type_request_resource=compute_v1.InstancesSetMachineTypeRequest(
-                    machine_type=f"zones/{self.zone}/machineTypes/{wanted_type}",
-                ),
-            ).result()
         self._set_metadata({"games": " ".join(games), "idle-minutes": str(idle_minutes)})
-        if current.status != "RUNNING":
-            self._client.start(project=self.project, zone=self.zone, instance=self.instance).result()
-        return self.status()
+        if current.status == "RUNNING":
+            return self.status()
+        have, tried = current.machine_type, []
+        for wanted_type in machine_candidates(games):
+            try:
+                if current.status == "TERMINATED" and have != wanted_type:
+                    self._client.set_machine_type(
+                        project=self.project, zone=self.zone, instance=self.instance,
+                        instances_set_machine_type_request_resource=compute_v1.InstancesSetMachineTypeRequest(
+                            machine_type=f"zones/{self.zone}/machineTypes/{wanted_type}",
+                        ),
+                    ).result()
+                    have = wanted_type
+                self._client.start(project=self.project, zone=self.zone, instance=self.instance).result()
+                return self.status()
+            except Exception as exc:   # noqa: BLE001 — only "no room" moves on to the next type; anything else is real
+                if not is_capacity_error(exc):
+                    raise
+                tried.append(wanted_type)
+        raise CapacityError(self.zone, tried)
 
     def stop(self) -> VmStatus:
         """Graceful stop: the VM's shutdown-script (infra/gcp-games/shutdown.sh)
