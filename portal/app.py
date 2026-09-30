@@ -223,18 +223,20 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         flash(f"Request sent. {ops.SWITCH_OWNER} will see it on the dashboard.", "ok")
         return redirect(url_for("request_access", game=game))     # a reload shows the page again, it doesn't re-send
 
-    def live_info(status) -> tuple[dict[str, str], dict[str, int], dict[str, bool]]:
-        """Per-session invite codes (Dragonwilds makes a new one each boot), players online and which games' own logs
-        say they're joinable (portal/readiness.py), read fresh from the VM on every page load while it runs."""
+    def live_info(status) -> tuple[dict[str, str], dict[str, int], dict[str, bool], dict]:
+        """Per-session invite codes (Dragonwilds makes a new one each boot), players online, which games' own logs
+        say they're joinable (portal/readiness.py) and since when each starting game has been starting, read fresh
+        from the VM on every page load while it runs."""
         if status and status.status == "RUNNING":
             return diagnostics.live_all(vm, status.started_at)
-        return {}, {}, {}
+        return {}, {}, {}, {}
 
-    def starting_now(status, gid: str, ready: dict[str, bool]) -> bool:
-        """Is `gid` up but not joinable yet? The game's own log first (`ready`: the READY lines), the boot timer only
-        as the fallback (portal/readiness.py is_starting)."""
+    def starting_now(status, gid: str, ready: dict[str, bool], since: dict) -> bool:
+        """Is `gid` up but not joinable yet? The game's own log first (`ready`: the READY lines; `since`: when it began
+        saying "starting"), the boot timer only as the fallback (portal/readiness.py is_starting)."""
         on = bool(status and status.status == "RUNNING" and gid in status.games)
-        return on and readiness.is_starting(gid, ready.get(gid), status.minutes_up(), GAMES[gid].ready_minutes)
+        return on and readiness.is_starting(gid, ready.get(gid), status.minutes_up(), GAMES[gid].ready_minutes,
+                                            readiness.minutes_since(since.get(gid)))
 
     def back(default_endpoint: str):
         """Return to the game page a form came from (hidden `next` field), or
@@ -296,13 +298,13 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         status, error = vm_status()
         env = status.env if status else {}
         banner = env.get(GAMES[gid].banner_key, "")
-        codes, players, ready = live_info(status)
+        codes, players, ready, since = live_info(status)
         return render_template(
             "game.html", game=GAMES[gid], t=GAMES[gid].theme, status=status, error=error,
             links=discord_admin.links(env, gid),
             banner=banner if banner.startswith("https://") else "",
             bot_configured=bool(app.config["DISCORD_BOT_TOKEN"]),
-            codes=codes, players=players, starting=starting_now(status, gid, ready),
+            codes=codes, players=players, starting=starting_now(status, gid, ready, since),
         )
 
     @dash.get("/games/<gid>/live")
@@ -314,8 +316,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             abort(404)
         status, _ = vm_status()
         on = bool(status and status.status == "RUNNING" and gid in status.games)
-        codes, players, ready = live_info(status)
-        payload = dict(on=on, starting=starting_now(status, gid, ready),
+        codes, players, ready, since = live_info(status)
+        payload = dict(on=on, starting=starting_now(status, gid, ready, since),
                        code=codes.get(gid) if on else None, players=players.get(gid) if on else None)
         if on:
             payload["ready"] = ready.get(gid)       # the game's own log: true, false, or null (no answer: the timer decided)

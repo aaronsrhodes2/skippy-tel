@@ -58,8 +58,9 @@ def players_online(snapshot: str) -> dict[str, int]:
 
 
 # >>> readiness (portal/readiness.py explains the markers; infra/gcp-games/diag.sh writes the lines)
-_READY_LINE = re.compile(r"^READY (\w+)=([01])$", re.M)
+_READY_LINE = re.compile(r"^READY (\w+)=([01])(?: since=(\S*))?$", re.M)      # `since=` only on a 0, and only when its log had times
 _SNAPSHOT_TIME = re.compile(r"^=== skippy-diag (\S+) ===", re.M)
+_LOG_TIME = re.compile(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.(\d+))?(Z|[+-]\d\d:\d\d)?")
 
 
 def snapshot_time(snapshot: str) -> datetime | None:
@@ -92,7 +93,37 @@ def ready_states(snapshot: str, booted_at: datetime | None = None) -> dict[str, 
     no answer: "ready" from yesterday's boot must never show as ready now."""
     if not from_this_boot(snapshot, booted_at):
         return {}
-    return {game: value == "1" for game, value in _READY_LINE.findall(snapshot)}
+    return {game: value == "1" for game, value, _ in _READY_LINE.findall(snapshot)}
+
+
+def log_time(text: str) -> datetime | None:
+    """A `docker logs -t` time (`2026-09-30T06:49:16.123456789Z`: nanoseconds, which datetime can't hold) as an aware
+    datetime; None when it isn't one."""
+    found = _LOG_TIME.fullmatch(text or "")
+    if not found:
+        return None
+    whole, fraction, zone = found.groups()
+    try:
+        return datetime.fromisoformat(whole + (f".{fraction[:6].ljust(6, '0')}" if fraction else "")
+                                      + ("+00:00" if zone in (None, "Z") else zone))
+    except ValueError:
+        return None
+
+
+def ready_since(snapshot: str, booted_at: datetime | None = None) -> dict[str, datetime]:
+    """When each game that is starting began saying so: the `since=` on its `READY <game>=0` line (readiness.py says what
+    that time is). The portal counts its 45-minute give-up from it. A game with no such time isn't in the result (the VM's
+    uptime stands in, as before). Same freshness rule as ready_states."""
+    if not from_this_boot(snapshot, booted_at):
+        return {}
+    found: dict[str, datetime] = {}
+    for game, value, since in _READY_LINE.findall(snapshot):
+        when = log_time(since) if value == "0" else None
+        if when:
+            found[game] = when
+        else:
+            found.pop(game, None)         # the last line for a game is the answer, like ready_states
+    return found
 # <<< readiness
 
 
@@ -111,18 +142,20 @@ def resources(snapshot: str) -> dict:
 
 def live(vm) -> tuple[dict[str, str], dict[str, int]]:
     """(invite codes, players online) from one fresh snapshot read."""
-    codes, players, _ = live_all(vm)
+    codes, players, *_ = live_all(vm)
     return codes, players
 
 
-def live_all(vm, booted_at: datetime | None = None) -> tuple[dict[str, str], dict[str, int], dict[str, bool]]:
-    """(invite codes, players online, joinable per game) from one fresh snapshot read: the newest complete snapshot of
-    this boot (`current_snapshot`), so codes and players are as fresh as READY. `booted_at`: see ready_states."""
+def live_all(vm, booted_at: datetime | None = None) -> tuple[dict[str, str], dict[str, int], dict[str, bool],
+                                                            dict[str, datetime]]:
+    """(invite codes, players online, joinable per game, when each starting game began starting) from one fresh
+    snapshot read: the newest complete snapshot of this boot (`current_snapshot`), so codes and players are as fresh as
+    READY. `booted_at`: see ready_states. The last one is ready_since: readiness.is_starting counts its limit from it."""
     try:
         snap = current_snapshot(vm.serial_output(2), booted_at)
     except Exception:   # noqa: BLE001 — niceties; never break the page
-        return {}, {}, {}
-    return join_codes(snap), players_online(snap), ready_states(snap, booted_at)
+        return {}, {}, {}, {}
+    return join_codes(snap), players_online(snap), ready_states(snap, booted_at), ready_since(snap, booted_at)
 
 
 def current_ready(vm, booted_at: datetime | None = None) -> dict[str, bool]:

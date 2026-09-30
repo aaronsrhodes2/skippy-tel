@@ -189,6 +189,16 @@ status` shows it as `ready`, `ops logs <game>` as the game's `READY` line). `por
   boot, nothing recognisable in the log) means the page falls back to the boot timer and its "usually joinable about N min"
   hint, exactly as before. A game that has said "not yet" for 45 minutes is also handed back to the timer, so a marker a
   game update reworded can't keep a joinable game on "Starting".
+- **The 45 minutes are the game's own, not the VM's.** diag.sh reads each container's log with `docker logs -t` and puts
+  the time of the boot line that opened the current run of "starting" on the line:
+  `READY valheim=0 since=2026-09-30T06:49:16.123456789Z` (a second boot line inside the same run, like Valheim's
+  supervisord and then its game process, doesn't move it). The portal counts the 45 minutes from that time, so a restart
+  two hours into a session (`ops restart-game`, a crash, the game's own daily restart) is "starting" for its own first 45
+  minutes, like a boot. A `0` with no `since=` (a container that isn't running, EverQuest's journal, which has no times)
+  counts from the VM's uptime instead, the old rule.
+- The snapshot the portal reads is the newest **complete** one (the one still being written has no `READY` lines yet, and
+  reading it made the page flap); invite codes and player counts follow the same rule and the same "not from before this
+  boot" check.
 - A marker that was never seen in a real log is **UNVERIFIED** and may only say "ready sooner than the timer", never
   "starting for longer".
 
