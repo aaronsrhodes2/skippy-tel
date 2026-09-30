@@ -5,10 +5,14 @@
 {% set panel = server_admin_panel(game, status) %}
 <div id="server-admin" class="server-admin">
   <h3>Server admin</h3>
+  {# Shown by the poll below when the session is gone, above the body (the poll rewrites everything inside the body). #}
+  <p id="server-admin-note" class="help" role="status" hidden>Can't refresh this card: you may have been signed out.
+    <a href="{{ url_for('dashboard.game', gid=game.id) }}">Reload the page</a> to sign in again. What's shown may be out of date.</p>
   <div id="server-admin-body">{% include "_server_admin_body.html" %}</div>
 </div>
 <style>
   .server-admin { margin-bottom: 14px; }
+  .server-admin [hidden] { display: none; }              /* .help would otherwise show the note from the start */
   .server-admin h4 { margin: 14px 0 4px; color: var(--accent2); font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; }
   .server-admin .facts { margin-top: 4px; }
   .server-admin .facts div { overflow-wrap: anywhere; }      /* a long image tag wraps inside its box */
@@ -23,15 +27,29 @@
 </style>
 <script>
   /* Keeps the card current while the page stays open: the VM's snapshot is refreshed every 2 minutes. Admin only,
-     like the card; the fragment it fetches is rendered by the same partial as the card itself. */
+     like the card; the fragment it fetches is rendered by the same partial as the card itself.
+     Only the real fragment may replace the card. When the session is gone the route says 401 to this poll (it sends
+     X-Requested-With), and a redirect that fetch followed anyway would hand back the whole Sign-in page with a 200:
+     neither may reach the card. It keeps its last good body and says why it stopped moving. */
   (function () {
     const body = document.getElementById("server-admin-body");
+    const note = document.getElementById("server-admin-note");
     const url = "{{ url_for('server_admin.fragment', gid=game.id) }}";
+    // "fragment": the fresh card body. "signed-out": the answer says the session is gone, or is not the fragment.
+    // "hiccup": the portal or the network stumbled; nothing to conclude, the next poll catches up.
+    function verdict(res) {
+      if (res.status === 401 || res.status === 403 || res.redirected || res.type === "opaqueredirect") return "signed-out";
+      if (res.status >= 500) return "hiccup";
+      if (res.ok && res.headers.get("X-Skippy-Fragment") === "server-admin") return "fragment";
+      return "signed-out";
+    }
     async function refresh() {
       if (document.hidden) return;
       try {
-        const res = await fetch(url, {headers: {"Accept": "text/html"}, cache: "no-store"});
-        if (res.ok) body.innerHTML = await res.text();
+        const res = await fetch(url, {headers: {"Accept": "text/html", "X-Requested-With": "fetch"}, cache: "no-store"});
+        const seen = verdict(res);
+        if (seen === "fragment") { body.innerHTML = await res.text(); note.hidden = true; }
+        else if (seen === "signed-out") { note.hidden = false; }
       } catch (e) { /* a network blip: the next poll catches up */ }
     }
     setInterval(refresh, 60000);

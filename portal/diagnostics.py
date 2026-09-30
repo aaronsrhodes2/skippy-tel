@@ -40,11 +40,12 @@ def join_codes(snapshot: str) -> dict[str, str]:
     return codes
 
 
-def current_join_codes(vm) -> dict[str, str]:
+def current_join_codes(vm, booted_at: datetime | None = None) -> dict[str, str]:
     """Live invite codes (≤2 minutes old). Empty when the VM is off, the
-    snapshot isn't there yet, or the serial port can't be read."""
+    snapshot isn't there yet (or is from before this boot: see current_snapshot),
+    or the serial port can't be read."""
     try:
-        return join_codes(latest_snapshot(vm.serial_output(2)))
+        return join_codes(current_snapshot(vm.serial_output(2), booted_at))
     except Exception:   # noqa: BLE001 — an invite code is a nicety; never break the page
         return {}
 
@@ -57,8 +58,9 @@ def players_online(snapshot: str) -> dict[str, int]:
 
 
 # >>> readiness (portal/readiness.py explains the markers; infra/gcp-games/diag.sh writes the lines)
-_READY_LINE = re.compile(r"^READY (\w+)=([01])$", re.M)
+_READY_LINE = re.compile(r"^READY (\w+)=([01])(?: since=(\S*))?$", re.M)      # `since=` only on a 0, and only when its log had times
 _SNAPSHOT_TIME = re.compile(r"^=== skippy-diag (\S+) ===", re.M)
+_LOG_TIME = re.compile(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.(\d+))?(Z|[+-]\d\d:\d\d)?")
 
 
 def snapshot_time(snapshot: str) -> datetime | None:
@@ -73,6 +75,15 @@ def snapshot_time(snapshot: str) -> datetime | None:
     return taken if taken.tzinfo else taken.replace(tzinfo=timezone.utc)
 
 
+def from_this_boot(snapshot: str, booted_at: datetime | None) -> bool:
+    """Was the snapshot taken since the VM's last start? Without `booted_at` there is nothing to compare, so yes; a header
+    that can't be read can't be proven fresh (the serial port can keep the previous session's output across a restart)."""
+    if booted_at is None:
+        return True
+    taken = snapshot_time(snapshot)
+    return taken is not None and taken >= booted_at
+
+
 def ready_states(snapshot: str, booted_at: datetime | None = None) -> dict[str, bool]:
     """Is each game joinable, from the `READY <game>=<0|1>` lines skippy-diag writes from the games' own logs.
 
@@ -80,11 +91,39 @@ def ready_states(snapshot: str, booted_at: datetime | None = None) -> dict[str, 
     start), a snapshot taken before it, or one whose header can't be read, describes the PREVIOUS session (the serial
     port can keep its output across a restart, and the first snapshot of a boot lands a minute in) and counts as
     no answer: "ready" from yesterday's boot must never show as ready now."""
-    if booted_at is not None:
-        taken = snapshot_time(snapshot)
-        if taken is None or taken < booted_at:
-            return {}
-    return {game: value == "1" for game, value in _READY_LINE.findall(snapshot)}
+    if not from_this_boot(snapshot, booted_at):
+        return {}
+    return {game: value == "1" for game, value, _ in _READY_LINE.findall(snapshot)}
+
+
+def log_time(text: str) -> datetime | None:
+    """A `docker logs -t` time (`2026-09-30T06:49:16.123456789Z`: nanoseconds, which datetime can't hold) as an aware
+    datetime; None when it isn't one."""
+    found = _LOG_TIME.fullmatch(text or "")
+    if not found:
+        return None
+    whole, fraction, zone = found.groups()
+    try:
+        return datetime.fromisoformat(whole + (f".{fraction[:6].ljust(6, '0')}" if fraction else "")
+                                      + ("+00:00" if zone in (None, "Z") else zone))
+    except ValueError:
+        return None
+
+
+def ready_since(snapshot: str, booted_at: datetime | None = None) -> dict[str, datetime]:
+    """When each game that is starting began saying so: the `since=` on its `READY <game>=0` line (readiness.py says what
+    that time is). The portal counts its 45-minute give-up from it. A game with no such time isn't in the result (the VM's
+    uptime stands in, as before). Same freshness rule as ready_states."""
+    if not from_this_boot(snapshot, booted_at):
+        return {}
+    found: dict[str, datetime] = {}
+    for game, value, since in _READY_LINE.findall(snapshot):
+        when = log_time(since) if value == "0" else None
+        if when:
+            found[game] = when
+        else:
+            found.pop(game, None)         # the last line for a game is the answer, like ready_states
+    return found
 # <<< readiness
 
 
@@ -103,17 +142,20 @@ def resources(snapshot: str) -> dict:
 
 def live(vm) -> tuple[dict[str, str], dict[str, int]]:
     """(invite codes, players online) from one fresh snapshot read."""
-    codes, players, _ = live_all(vm)
+    codes, players, *_ = live_all(vm)
     return codes, players
 
 
-def live_all(vm, booted_at: datetime | None = None) -> tuple[dict[str, str], dict[str, int], dict[str, bool]]:
-    """(invite codes, players online, joinable per game) from one fresh snapshot read. `booted_at`: see ready_states."""
+def live_all(vm, booted_at: datetime | None = None) -> tuple[dict[str, str], dict[str, int], dict[str, bool],
+                                                            dict[str, datetime]]:
+    """(invite codes, players online, joinable per game, when each starting game began starting) from one fresh
+    snapshot read: the newest complete snapshot of this boot (`current_snapshot`), so codes and players are as fresh as
+    READY. `booted_at`: see ready_states. The last one is ready_since: readiness.is_starting counts its limit from it."""
     try:
-        snap = latest_snapshot(vm.serial_output(2))
+        snap = current_snapshot(vm.serial_output(2), booted_at)
     except Exception:   # noqa: BLE001 — niceties; never break the page
-        return {}, {}, {}
-    return join_codes(snap), players_online(snap), ready_states(snap, booted_at)
+        return {}, {}, {}, {}
+    return join_codes(snap), players_online(snap), ready_states(snap, booted_at), ready_since(snap, booted_at)
 
 
 def current_ready(vm, booted_at: datetime | None = None) -> dict[str, bool]:
@@ -184,6 +226,19 @@ def latest_complete_snapshot(port2: str) -> str:
         if end != -1 and (i + 1 == len(starts) or end < starts[i + 1]):
             return port2[starts[i]:end + len("=== end ===")]
     return latest_snapshot(port2)
+
+
+def current_snapshot(port2: str, booted_at: datetime | None = None) -> str:
+    """The snapshot the live readings come from (invite codes, players, READY lines, the /me dashboard): the newest
+    COMPLETE one of this boot. The one still being written has its header and no readings yet (diag.sh streams them as it
+    goes), so reading it would blank them for those seconds and flap the page's state; it is used only when no complete
+    snapshot of this boot exists. With `booted_at`, a snapshot from before it is the previous session's and counts for
+    nothing, whatever it carries: "" when that is all there is."""
+    complete = latest_complete_snapshot(port2)
+    if from_this_boot(complete, booted_at):
+        return complete
+    writing = latest_snapshot(port2)
+    return writing if from_this_boot(writing, booted_at) else ""
 
 
 def current_facts(vm) -> tuple[dict[str, dict], str]:

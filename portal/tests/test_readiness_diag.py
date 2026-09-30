@@ -83,32 +83,50 @@ def _bash_can_run_the_block() -> bool:
 needs_bash = pytest.mark.skipif(not _bash_can_run_the_block(), reason="needs bash and awk")
 
 
-def run_block(tmp_path, *, container="valheim", state="running", log="", games="", journal=""):
-    """Run diag.sh's readiness block with `docker`, `curl` and `journalctl` stubbed: only `container` exists, in `state`,
-    with `log` as its `docker logs`; `games` is the metadata's game list and `journal` the startup script's output."""
-    files = {}
-    for name, content in (("log", log), ("journal", journal)):
-        path = tmp_path / name
-        path.write_text(content, encoding="utf-8")
-        files[name] = path.as_posix()
-    script = f"""
+STAMPED = re.compile(r"^\d{4}-\d\d-\d\dT\S+ ", re.M)
+
+
+def block_script() -> str:
+    """diag.sh's readiness block behind stubs for `docker`, `curl` and `journalctl`, driven by FAKE_* variables: only
+    FAKE_CONTAINER exists, in state FAKE_STATE, with FAKE_LOG as its `docker logs -t` (each line may start with Docker's
+    time stamp; without -t the stub prints FAKE_LOG_PLAIN, the same log without the stamps, as Docker does); FAKE_GAMES
+    is the metadata's game list and FAKE_JOURNAL the startup script's output."""
+    return f"""
 docker() {{
   case "$1" in
     inspect) [ "${{!#}}" = "$FAKE_CONTAINER" ] && echo "$FAKE_STATE" || return 1 ;;
-    logs)    [ "$2" = "$FAKE_CONTAINER" ] && cat "$FAKE_LOG" ;;
+    logs)    [ "${{!#}}" = "$FAKE_CONTAINER" ] && case " $* " in *" -t "*) cat "$FAKE_LOG" ;; *) cat "$FAKE_LOG_PLAIN" ;; esac ;;
   esac
 }}
 curl() {{ echo "$FAKE_GAMES"; }}
 journalctl() {{ cat "$FAKE_JOURNAL"; }}
 {block()}
 """
-    env = {**os.environ, "FAKE_CONTAINER": container, "FAKE_STATE": state,
-           "FAKE_LOG": files["log"], "FAKE_JOURNAL": files["journal"], "FAKE_GAMES": games}
-    done = subprocess.run([shutil.which("bash"), "-c", script], env=env, capture_output=True, text=True, timeout=60)
+
+
+def write_fake_files(tmp_path, log: str, journal: str = "") -> dict:
+    files = {}
+    for name, content in (("log", log), ("log.plain", STAMPED.sub("", log)), ("journal", journal)):
+        path = tmp_path / name
+        path.write_text(content, encoding="utf-8")
+        files[name] = path
+    return files
+
+
+def run_block_stdout(tmp_path, *, container="valheim", state="running", log="", games="", journal=""):
+    """Run diag.sh's readiness block (block_script) with bash on this machine. Returns everything it printed."""
+    files = write_fake_files(tmp_path, log, journal)
+    env = {**os.environ, "FAKE_CONTAINER": container, "FAKE_STATE": state, "FAKE_LOG": files["log"].as_posix(),
+           "FAKE_LOG_PLAIN": files["log.plain"].as_posix(), "FAKE_JOURNAL": files["journal"].as_posix(), "FAKE_GAMES": games}
+    done = subprocess.run([shutil.which("bash"), "-c", block_script()], env=env, capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, done.stderr
-    lines = done.stdout.splitlines()
-    assert lines[0] == "--- readiness", lines
-    return dict(re.findall(r"^READY (\w+)=([01])$", done.stdout, re.M))
+    assert done.stdout.splitlines()[0] == "--- readiness", done.stdout
+    return done.stdout
+
+
+def run_block(tmp_path, **kwargs):
+    """`READY <game>=<0|1>` from the block, by game (a `since=` time stamp after the value is not part of the answer)."""
+    return dict(re.findall(r"^READY (\w+)=([01])(?: since=\S+)?$", run_block_stdout(tmp_path, **kwargs), re.M))
 
 
 def marker_prefixes(log: str, game: str):
@@ -229,7 +247,7 @@ def test_live_all_reads_codes_players_and_readiness_from_one_snapshot_and_never_
             assert port == 2
             return snap
 
-    assert diagnostics.live_all(Vm()) == ({"valheim": "106969"}, {"valheim": 2}, {"valheim": True})
+    assert diagnostics.live_all(Vm()) == ({"valheim": "106969"}, {"valheim": 2}, {"valheim": True}, {})   # the 4th: when each starting game began starting
     assert diagnostics.live(Vm()) == ({"valheim": "106969"}, {"valheim": 2})
     assert diagnostics.current_ready(Vm()) == {"valheim": True}
 
@@ -237,4 +255,4 @@ def test_live_all_reads_codes_players_and_readiness_from_one_snapshot_and_never_
         def serial_output(self, port):
             raise RuntimeError("serial port unavailable")
 
-    assert diagnostics.live_all(Broken()) == ({}, {}, {}) and diagnostics.current_ready(Broken()) == {}
+    assert diagnostics.live_all(Broken()) == ({}, {}, {}, {}) and diagnostics.current_ready(Broken()) == {}

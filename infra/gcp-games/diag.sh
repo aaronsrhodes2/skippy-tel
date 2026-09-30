@@ -28,16 +28,22 @@
   # >>> readiness (the patterns mirror portal/readiness.py; portal/tests/test_readiness_diag.py keeps them in sync and runs this block)
   # `READY <game>=<0|1>`: is the game joinable, read from its own log (the WHOLE log, not the 40 lines above). 1 = its
   # "joinable" line came after its latest "starting up" line; 0 = it is starting, or its container isn't running;
-  # no line = nothing recognisable in the log, and the portal falls back to its boot timer. Rules and the evidence for
-  # each pattern: portal/readiness.py. Patterns are POSIX ERE with no backslashes and no {n} (mawk reads them too).
+  # no line = nothing recognisable in the log, and the portal falls back to its boot timer. A 0 read from a log with
+  # time stamps (`docker logs -t`) also says since when: `READY valheim=0 since=2026-09-30T06:49:16.123456789Z` is the
+  # time of the boot line that opened the current run of "starting" (a boot line inside a run doesn't move it), which is
+  # what the portal's 45-minute give-up is counted from (not the VM's uptime: a restart at hour two starts its own
+  # clock). No time when the first word of that line isn't one (EverQuest's journal has none) or the container isn't
+  # running. Rules and the evidence for each pattern: portal/readiness.py. Patterns are POSIX ERE with no backslashes
+  # and no {n} (mawk reads them too).
   echo "--- readiness"
-  scan_ready() {   # the log on stdin; $1 game, $2 boot pattern, $3 ready pattern
-    BOOT="$2" READY="$3" awk -v game="$1" '$0 ~ ENVIRON["BOOT"] { s = "0" } $0 ~ ENVIRON["READY"] { s = "1" }
-      END { if (s != "") print "READY " game "=" s }'
+  stamp='^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]'
+  scan_ready() {   # the log on stdin, each line starting with its time stamp if there is one; $1 game, $2 boot pattern, $3 ready pattern
+    BOOT="$2" READY="$3" STAMP="$stamp" awk -v game="$1" '$0 ~ ENVIRON["BOOT"] { if (s != "0") t = $1; s = "0" } $0 ~ ENVIRON["READY"] { s = "1" }
+      END { if (s == "0" && t ~ ENVIRON["STAMP"]) print "READY " game "=0 since=" t; else if (s != "") print "READY " game "=" s }'
   }
   ready_container() {   # $1 = the game = its container's name, $2 boot pattern, $3 ready pattern
     rs=$(docker inspect -f '{{.State.Status}}' "$1" 2>/dev/null) || return 0     # not started this boot: no line
-    if [ "$rs" = running ]; then docker logs "$1" 2>&1 | scan_ready "$1" "$2" "$3"; else echo "READY $1=0"; fi
+    if [ "$rs" = running ]; then docker logs -t "$1" 2>&1 | scan_ready "$1" "$2" "$3"; else echo "READY $1=0"; fi
   }
   ready_container valheim 'supervisord started with pid|valheim-server INFO - Running Valheim Server' 'Opened Steam server|join code [0-9]+ and IP .* is active'
   ready_container factorio 'Factorio [0-9.]+ [(]build [0-9]+' 'changing state from[(]CreatingGame[)] to[(]InGame[)]'

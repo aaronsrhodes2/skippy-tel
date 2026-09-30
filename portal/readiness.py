@@ -23,6 +23,14 @@ How a log becomes a state (state() below, and the awk in diag.sh, do exactly thi
 
   A container that isn't running is not joinable whatever its log says; diag.sh writes `READY <game>=0` for it.
 
+  When did it start saying "starting"? diag.sh reads the log with `docker logs -t` (every line starts with Docker's own
+  time stamp) and, for a game that is STARTING, adds the time of the boot line that OPENED the current run of starting:
+  `READY valheim=0 since=2026-09-30T06:49:16.123456789Z`. (A second boot line inside the same run, like Valheim's
+  supervisord and then its game process, doesn't move it: it is one run.) starting_since() below is the reference for
+  it. The portal measures OVERDUE_MINUTES from that time, NOT from the VM's boot, so a restart two hours into a session
+  is "starting" for its own first 45 minutes just like a boot is. A line with no time (a container that isn't running,
+  a log without stamps such as EverQuest's journal) falls back to the VM's uptime, the old rule.
+
 Patterns are POSIX extended regular expressions in the dialect that grep -E, awk (mawk on the VM) and Python's `re`
 all read the same way: plain text, `[0-9]`, `.`, `*`, `+`, `|`, and bracket expressions. NO backslashes (awk and `-v`
 would eat them: write `[(]` for a literal parenthesis), NO `{n}` (mawk), no groups, no lookarounds.
@@ -36,13 +44,18 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 READY, STARTING, UNKNOWN = "ready", "starting", "unknown"
 
-# If the log still says "starting" this long after boot, the marker has stopped matching what the game prints (an
-# update reworded a line) or the game is stuck. Either way the page stops insisting and goes back to the timer, so a
-# stale marker can never leave a joinable game marked "starting" for good.
+# If the log has said "starting" this long (since the game's own latest start, see `since=` above), the marker has
+# stopped matching what the game prints (an update reworded a line) or the game is stuck. Either way the page stops
+# insisting and goes back to the timer, so a stale marker can never leave a joinable game marked "starting" for good.
 OVERDUE_MINUTES = 45
+
+# What a `docker logs -t` line starts with: the time stamp of the log line. An ERE with no backslashes, like the
+# markers; diag.sh carries a copy (test_readiness_diag.py / test_fix_readiness_since.py keep them the same).
+STAMP = "^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]"
 
 
 @dataclass(frozen=True)
@@ -194,12 +207,44 @@ def state(game: str, log: str) -> str:
     return result
 
 
-def is_starting(game: str, ready: bool | None, minutes_up: int | None, ready_minutes: int) -> bool:
+def starting_since(game: str, log: str) -> str | None:
+    """When the current run of STARTING began: the time stamp (the first word) of the boot line that opened it, for a
+    `docker logs -t` log. None when the state isn't STARTING or that word isn't a time. The reference for the awk in
+    diag.sh (which prints `since=<this>`); a boot line inside a run that is already STARTING doesn't move it."""
+    m = MARKERS.get(game)
+    if not m or not log:
+        return None
+    boot, ready, stamp = re.compile(m.boot_pattern), re.compile(m.ready_pattern), re.compile(STAMP)
+    result, since = UNKNOWN, ""
+    for line in log.splitlines():
+        if boot.search(line):
+            if result != STARTING:
+                words = line.split()
+                since = words[0] if words else ""
+            result = STARTING
+        if ready.search(line):
+            result = READY
+    return since if result == STARTING and stamp.search(since) else None
+
+
+def minutes_since(when: datetime | None, now: datetime | None = None) -> int | None:
+    """Whole minutes from `when` to now (never negative); None when `when` isn't known."""
+    if when is None:
+        return None
+    return max(0, int(((now or datetime.now(timezone.utc)) - when).total_seconds() // 60))
+
+
+def is_starting(game: str, ready: bool | None, minutes_up: int | None, ready_minutes: int,
+                starting_minutes: int | None = None) -> bool:
     """The page's "still starting?" for a game that is on: the log first, the boot timer only as the fallback.
 
     `ready` is the snapshot's READY value for the game: True (joinable), False (starting) or None (no READY line: an
     older VM, no snapshot yet, a stale one from before this boot, a log we can't read, or nothing recognisable in it).
     None is exactly the old behaviour, so the "usually joinable after N min" hint is never lost.
+
+    `starting_minutes` is how long the game's log has said "starting" (the `since=` on its READY line), and it is what
+    OVERDUE_MINUTES is measured against: a game restarted at hour two is starting for its own first 45 minutes. Without
+    it (a line with no time) the VM's uptime stands in, which is right for a boot and the best there is otherwise.
     """
     timer = minutes_up is not None and minutes_up < ready_minutes
     if ready is None:
@@ -208,6 +253,7 @@ def is_starting(game: str, ready: bool | None, minutes_up: int | None, ready_min
         return False
     if not verified(game):                 # a guessed marker may say "ready sooner", never "starting for longer"
         return timer
-    if minutes_up is not None and minutes_up >= OVERDUE_MINUTES:
+    held = starting_minutes if starting_minutes is not None else minutes_up
+    if held is not None and held >= OVERDUE_MINUTES:
         return timer                       # the marker has stopped matching, or the game is stuck: don't insist
     return True
