@@ -2,7 +2,28 @@
   "permissions": {
     "allow": [
       "Bash(git mv *)",
-      "Bash(python -m pytest *)"
+      "Bash(python -m pytest *)",
+      "Bash(gh run watch *)",
+      "mcp__Claude_Browser__read_page",
+      "mcp__Claude_Browser__read_console_messages",
+      "mcp__Claude_Browser__get_page_text",
+      "mcp__Claude_Browser__find",
+      "mcp__Claude_Browser__read_network_requests",
+      "mcp__Claude_Browser__tabs_context",
+      "mcp__ccd_pr__get_status",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push origin main)",
+      "Bash(git merge *)",
+      "Bash(git branch -d *)",
+      "Bash(docker compose stop *)",
+      "Bash(docker compose rm -f *)",
+      "Bash(docker compose up --build -d *)",
+      "Bash(docker compose up -d *)",
+      "Bash(gh workflow run ops.yml *)",
+      "Bash(gh workflow run deploy.yml *)",
+      "Bash(curl * https://skippy-portal-1015050363686.us-west1.run.app/*)",
+      "Bash(curl * http://localhost:3003/*)"
     ]
   }
 }
