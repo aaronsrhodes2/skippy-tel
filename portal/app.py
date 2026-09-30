@@ -35,6 +35,7 @@ import imports as imports_mod
 import media as media_mod
 import mentat_client
 import ops
+import player as player_mod
 import spend
 import ratelimit
 import readiness
@@ -75,6 +76,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     media = media_mod.Media()
     workshop = workshop_mod.Workshop(home)          # the Captain's private Skippy (admin only)
     app.extensions["workshop"] = workshop
+    player = player_mod.Player(home)                # the Music app's pass and Connect (admin only)
     telemetry_web.init_app(app)                     # usage recording, /privacy, the tap beacon, /home/telemetry
 
     def me() -> str:
@@ -123,6 +125,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                                               and any(g not in shown for g in status.games)),
                                show_experiments=auth.has_portal(me(), "experiments"),
                                show_bilby=auth.has_portal(me(), "bilby"), music=home.music(),
+                               music_gate=home.can("music_gate"),
                                has_me="me" in app.blueprints)
 
     @app.get("/health")
@@ -672,6 +675,52 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         return redirect(url_for("bilby.index"))
 
     app.register_blueprint(music)
+
+    # ── Music: the Captain's library on any browser (player.py; admin only) ────
+    listen = Blueprint("music", __name__, url_prefix="/music")
+
+    def device_id() -> str:
+        dev = str(request.values.get("device") or (request.get_json(silent=True) or {}).get("device") or "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{8,40}", dev):
+            abort(400)
+        return dev
+
+    @listen.get("")
+    @auth.admin_required
+    def player_page():
+        return render_template("music.html")
+
+    @listen.get("/manifest.webmanifest")
+    def player_manifest():
+        """Add to Home Screen opens straight into the player, full screen, like an app."""
+        icon = url_for("static", filename="apple-touch-icon.png")
+        return app.response_class(json.dumps({
+            "name": "Skippy Music", "short_name": "Music", "start_url": url_for("music.player_page"),
+            "scope": url_for("music.player_page"), "display": "standalone", "background_color": "#000000",
+            "theme_color": "#000000", "icons": [{"src": icon, "sizes": "180x180", "type": "image/png"}]}),
+            mimetype="application/manifest+json")
+
+    @listen.get("/gate")
+    @auth.admin_required
+    def player_gate():
+        return jsonify(player.gate())
+
+    @listen.post("/checkin")
+    @auth.admin_required
+    def player_checkin():
+        body = request.get_json(silent=True) or {}
+        state = body.get("state")
+        return jsonify(player.checkin(me(), device_id(), str(body.get("name") or ""),
+                                      state if isinstance(state, dict) else None))
+
+    @listen.post("/command")
+    @auth.admin_required
+    def player_command():
+        body = request.get_json(silent=True) or {}
+        ok = player.command(me(), device_id(), str(body.get("action") or ""))
+        return jsonify(queued=ok), (200 if ok else 409)
+
+    app.register_blueprint(listen)
 
     # ── queued tasks from remote operators (tasks.py) ──────────────────────────
     @app.post("/tasks/run")

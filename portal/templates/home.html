@@ -38,6 +38,13 @@
         <p>{% if np %}{{ np.artist }} — {{ np.title }}{% else %}What's on the decks, live from home.{% endif %}</p></a>
     {% endif %}
 
+    {% if is_admin %}
+      <a class="tile" data-app="music" href="{{ url_for('music.player_page') }}" data-tel="tile:music">
+        {% if not music_gate %}<span class="pill">library offline</span>{% endif %}
+        <span class="icon">🎵</span>
+        <h3>Music</h3><p>Your whole library on any screen: phone, Mac, PC, the car.</p></a>
+    {% endif %}
+
     {% if show_experiments %}
       <a class="tile" data-app="experiments" href="{{ url_for('experiments.index') }}" data-tel="tile:experiments">
         <span class="icon">🧪</span>

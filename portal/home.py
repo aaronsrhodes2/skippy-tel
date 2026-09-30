@@ -26,7 +26,7 @@ FAST_WINDOW = 300         # after chat activity, the reporter polls for jobs qui
 REDELIVER_AFTER = 20      # a job handed out but not answered goes out again after this
 MAX_REPORT = 1_000_000    # bytes (album art included)
 JOB_TTL = 600             # seconds a job waits for an answer before it's dropped (a job may ask for longer)
-KNOWN_CAPABILITIES = ("make_music", "workshop")   # what skippy-pc may advertise; anything else it sends is ignored
+KNOWN_CAPABILITIES = ("make_music", "workshop", "music_gate")   # what skippy-pc may advertise; anything else it sends is ignored
 _ACTIONS = {("music", "skip"), ("music", "pause"), ("music", "resume"), ("music", "stop")}
 
 

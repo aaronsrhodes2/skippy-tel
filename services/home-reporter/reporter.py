@@ -36,6 +36,8 @@ MUSIC_TIMEOUT = 600          # seconds a song may take
 MUSIC_POLL = 2.0              # seconds between asking the studio how the song is coming
 MUSIC_MODEL = os.environ.get("MUSIC_MODEL", "acestep-v15-turbo")   # 8-step turbo model
 CLIP_MAX = 25_000_000        # the portal takes up to 30 MB; a request may be 32 MB
+GATE = os.environ.get("MUSIC_GATE_URL", "").rstrip("/")        # music-gate: the Music app's library (inside)
+GATE_PUBLIC = os.environ.get("MUSIC_GATE_PUBLIC", "").rstrip("/")   # ... and where Tailscale Funnel shows it (outside)
 BRIDGE = os.environ.get("CLAUDE_BRIDGE_URL", "").rstrip("/")   # Claude Code's bridge on the host: the private Skippy
 WORKSHOP_WAIT = 5            # seconds the bridge holds a request open waiting for news from the run
 WORKSHOP_PUSH = 100          # events per push to the portal (a request may be 1 MB)
@@ -164,7 +166,8 @@ def workshop_capability() -> dict:
 
 def capabilities() -> dict:
     """What this PC can do for the portal's chat right now. The portal offers only what's ready."""
-    return {"make_music": {"ready": bool(MUSIC) and _up(f"{MUSIC}/health")}, "workshop": workshop_capability()}
+    return {"make_music": {"ready": bool(MUSIC) and _up(f"{MUSIC}/health")}, "workshop": workshop_capability(),
+            "music_gate": {"ready": bool(GATE and GATE_PUBLIC) and _up(f"{GATE}/health"), "url": GATE_PUBLIC}}
 
 
 def free_gpu() -> None:

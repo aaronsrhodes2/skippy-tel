@@ -135,7 +135,7 @@ def test_the_launcher_has_one_tile_per_app_and_no_duplicate_paths(env):
     login(client, ADMIN)
     launcher = client.get("/").data.decode()
     assert re.findall(r'class="tile" data-app="(\w+)"', launcher) == \
-        ["skippy", "games", "bilby", "experiments", "dashboard", "admin"]
+        ["skippy", "games", "bilby", "music", "experiments", "dashboard", "admin"]
     assert launcher.count('href="/games"') == 1 and 'href="/games/' not in launcher      # games live in one app, not six tiles
     assert "Server room" not in launcher and "<nav" not in launcher
     _add_friend(client, PAL, ["dragonwilds"])
@@ -1541,7 +1541,7 @@ def test_only_known_capabilities_count_and_only_while_home_is_reporting():
     h = home_mod.Home(vm=None, clock=lambda: now[0])
     assert h.capabilities() == {} and h.can("make_music") is False                     # no report yet
     h.accept({"capabilities": {"make_music": {"ready": True}, "format_c_drive": {"ready": True}}})
-    assert h.capabilities() == {"make_music": True, "workshop": False}                 # unknown names are ignored
+    assert h.capabilities() == {"make_music": True, "workshop": False, "music_gate": False}                 # unknown names are ignored
     assert h.can("make_music") and not h.can("format_c_drive")
     h.accept({"capabilities": {"make_music": {"ready": "yes"}}})
     assert h.can("make_music") is False                                                # only a real True counts

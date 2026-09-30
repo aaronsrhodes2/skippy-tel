@@ -1,8 +1,24 @@
 # Home → portal bridge. Docker Compose merges this file into docker-compose.yml
 # automatically, so a plain `docker compose up -d --build` on skippy-pc runs
 # these alongside flask-api and ollama (same network: they reach each other by
-# service name). Nothing here publishes a port: everything goes OUT to the portal.
+# service name). Nothing here publishes a port to the network: everything goes OUT to
+# the portal, except music-gate, which listens on 127.0.0.1 for Tailscale Funnel.
 services:
+  # The Music app's library: MP3/AAC files under a pass only the portal can sign
+  # (services/music-gate/gate.py). On the internet through Tailscale Funnel on
+  # the host: `tailscale funnel --bg 3005` → https://skippy-pc.<tailnet>.ts.net/
+  music-gate:
+    build: ./services/music-gate
+    container_name: skippytel-music-gate
+    restart: unless-stopped
+    env_file: G:/My Drive/vault/.env           # SKIPPY_HOME_TOKEN: the pass key is derived from it
+    ports:
+      - "127.0.0.1:3005:8080"                  # localhost only; Funnel is the one way in from outside
+    volumes:
+      - D:/Aaron/Music/corrected_music:/music:ro
+      - ./state/music-gate:/state               # tag cache: a restart doesn't re-read 21k files
+    logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
+
   # Pushes status + Bilby's music to the portal every ~15 s, and fetches the
   # portal's jobs (controls, physics questions for Mentat). See CLAUDE.md.
   home-reporter:
@@ -17,6 +33,8 @@ services:
       MUSIC_URL: http://music-studio:8001      # ACE-Step: the portal chat's make_music
       OLLAMA_URL: http://ollama:11434          # unloaded before a song so it gets the whole GPU
       CLAUDE_BRIDGE_URL: http://host.docker.internal:9337   # Claude Code's bridge on the host: the private Skippy on /me
+      MUSIC_GATE_URL: http://music-gate:8080   # the Music app's library...
+      MUSIC_GATE_PUBLIC: https://skippy-pc.tailab2cc7.ts.net   # ...and its Tailscale Funnel address (not a secret)
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

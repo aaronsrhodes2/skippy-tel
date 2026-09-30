@@ -1,0 +1,435 @@
+{% extends "base.html" %}
+{% block title %}Music — Skippy Portal{% endblock %}
+{% block app %}music{% endblock %}
+{% block head %}
+{# Add to Home Screen: opens full screen into the player, and iOS keeps the audio going with the screen locked. #}
+<link rel="manifest" href="{{ url_for('music.player_manifest') }}">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Music">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<style>
+  main { max-width: 860px; }
+  .np { position: sticky; top: 0; z-index: 30; background: var(--black); padding: 10px 0 12px; border-bottom: 1px solid #332200; }
+  .np-row { display: flex; gap: 14px; align-items: center; min-width: 0; }
+  .np-art { width: 72px; height: 72px; flex: none; border-radius: 8px; border: 1px solid #553800; object-fit: cover;
+            display: grid; place-items: center; color: #553800; font-size: 1.8rem; background: var(--black); }
+  .np-text { min-width: 0; flex: 1; }
+  .np-title { font-size: 1.15rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .np-sub { color: var(--amber); font-size: .9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .seek { display: flex; gap: 8px; align-items: center; margin-top: 8px; font-size: .8rem; color: var(--muted);
+          font-variant-numeric: tabular-nums; }
+  .ctl { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  .ctl button { border-color: var(--amber); background: var(--black); color: var(--white); min-width: 48px; min-height: 44px;
+                font-size: 1.1rem; padding: 6px 12px; }
+  .ctl button:hover { background: var(--amber); color: var(--black); }
+  .ctl button.on { background: var(--amber); color: var(--black); }
+  .ctl .grow { flex: 1; }
+  .ctl .small { font-size: .85rem; }
+  #status { margin: 0 0 10px; }
+  .banner { border: 1px solid var(--amber); border-radius: var(--radius); padding: 10px 12px; margin: 10px 0;
+            display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .banner .grow { flex: 1; min-width: 12em; }
+  .banner button { border-color: var(--amber); background: var(--black); }
+  .devices { margin: 10px 0; }
+  .dev { display: flex; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid #1a1a1a; flex-wrap: wrap; }
+  .dev .grow { flex: 1; min-width: 12em; }
+  .dev .name { color: var(--cyan); }
+  .dev button { padding: 4px 10px; background: var(--black); border-color: var(--amber); }
+  .seg { display: flex; gap: 6px; margin: 14px 0 8px; flex-wrap: wrap; }
+  .seg button { background: var(--black); border-color: #553800; border-radius: 999px; padding: 6px 14px; }
+  .seg button.on { border-color: var(--amber); color: var(--amber); }
+  #q { width: 100%; }
+  .crumb { display: flex; gap: 10px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+  .crumb h3 { margin: 0; flex: 1; min-width: 0; color: var(--amber); font-size: 1rem; }
+  .crumb button { padding: 4px 12px; background: var(--black); border-color: var(--amber); }
+  .list > div { display: flex; gap: 10px; align-items: center; padding: 9px 4px; border-bottom: 1px solid #141414; cursor: pointer; }
+  .list > div:hover { background: #0d0900; }
+  .list .main { flex: 1; min-width: 0; }
+  .list .l1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .list .l2 { color: var(--muted); font-size: .8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .list .n { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; min-width: 2.2em; text-align: right; }
+  .list .cur .l1 { color: var(--amber); }
+  .list button.add { background: var(--black); border-color: #553800; padding: 2px 10px; font-size: .9rem; }
+  .list .head { color: var(--amber); font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; cursor: default; }
+  .more { margin: 10px 0; }
+</style>
+{% endblock %}
+{% block content %}
+<section>
+  <p class="muted" id="status">Finding the library on skippy-pc…</p>
+
+  <div class="np" id="np" hidden>
+    <div class="np-row">
+      <img class="np-art" id="art" alt="" hidden><div class="np-art" id="noart">♪</div>
+      <div class="np-text">
+        <div class="np-title" id="title">Nothing playing</div>
+        <div class="np-sub" id="sub">Pick something, or let Bilby DJ.</div>
+      </div>
+    </div>
+    <div class="seek"><span id="cur">0:00</span><input type="range" id="pos" min="0" max="0" step="1" value="0"
+      aria-label="Position"><span id="dur">0:00</span></div>
+    <div class="ctl">
+      <button id="prev" aria-label="Previous">⏮</button>
+      <button id="play" aria-label="Play">▶</button>
+      <button id="next" aria-label="Next">⏭</button>
+      <span class="grow"></span>
+      <button id="shuffle" class="small" aria-pressed="false">Shuffle</button>
+      <button id="dj" class="small" aria-pressed="true" title="When the queue runs out, Bilby keeps picking">Bilby DJ</button>
+    </div>
+  </div>
+
+  <div id="resume"></div>
+  <div class="devices" id="devices"></div>
+
+  <input type="search" id="q" placeholder="Search songs, artists, albums" autocomplete="off" hidden>
+  <div class="seg" id="seg" hidden>
+    <button data-view="artists" class="on">Artists</button>
+    <button data-view="albums">Albums</button>
+    <button data-view="genres">Genres</button>
+    <button data-view="queue">Queue</button>
+    <button data-view="djstart">Bilby, play something</button>
+  </div>
+  <div class="crumb" id="crumb" hidden></div>
+  <div class="list" id="list"></div>
+  <audio id="audio" preload="auto"></audio>
+</section>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const audio = $("audio");
+  const PAGE = 300;                         // rows drawn at once; "More" draws the next lot
+  let gate = null, T = [], byPath = new Map(), artists = new Map(), albums = new Map(), genres = new Map();
+  let Q = [], qi = -1, shuffle = false, dj = true, retried = false, view = ["artists"], lastSave = 0, others = [];
+
+  // ── small helpers ────────────────────────────────────────────────────
+  const el = (tag, props = {}, ...kids) => { const e = document.createElement(tag); Object.assign(e, props);
+    for (const k of kids) if (k != null) e.append(k); return e; };
+  const fmt = s => { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+  const store = { get(k) { try { return JSON.parse(localStorage.getItem("music." + k)); } catch (e) { return null; } },
+                  set(k, v) { try { localStorage.setItem("music." + k, JSON.stringify(v)); } catch (e) {} } };
+  const status = (text, cls = "muted") => { const s = $("status"); s.textContent = text; s.className = cls; s.hidden = !text; };
+  const device = store.get("device") || (() => { const d = Array.from(crypto.getRandomValues(new Uint8Array(12)),
+    b => b.toString(16).padStart(2, "0")).join(""); store.set("device", d); return d; })();
+  const ua = navigator.userAgent;
+  const deviceName = /Tesla/.test(ua) ? "Tesla" : /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad"
+    : /Android/.test(ua) ? "Android" : /Macintosh/.test(ua) ? "Mac" : /Windows/.test(ua) ? "PC" : "Browser";
+  const url = (kind, p) => `${gate.url}/t/${gate.pass}/${kind}/${p.split("/").map(encodeURIComponent).join("/")}`;
+  const shuffled = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  const post = (path, body) => fetch(path, { method: "POST", credentials: "same-origin",
+    headers: { "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify(body) });
+
+  // ── the gate: where the library is, and a pass for it ────────────────
+  async function getGate() {
+    const r = await fetch("{{ url_for('music.player_gate') }}", { credentials: "same-origin" });
+    const g = await r.json();
+    if (!g.ok) throw new Error(g.why || "The library is out of reach.");
+    gate = g;
+  }
+  async function freshGate() { if (!gate || Date.now() / 1000 > gate.exp - 900) await getGate(); }
+
+  async function loadCatalog() {
+    for (;;) {
+      try {
+        await getGate();
+        const r = await fetch(`${gate.url}/t/${gate.pass}/catalog.json`);
+        if (r.status === 503) { status("skippy-pc is still reading the library's tags; trying again shortly…"); }
+        else if (!r.ok) throw new Error(`The music gate said ${r.status}.`);
+        else { index(await r.json()); return; }
+      } catch (e) { status(`${e.message} Trying again shortly…`, "warn"); }
+      await new Promise(res => setTimeout(res, 20000));
+    }
+  }
+
+  function index(cat) {
+    const F = cat.fields;
+    T = cat.tracks.map(row => Object.fromEntries(F.map((f, i) => [f, row[i]])));
+    T.forEach((t, i) => {
+      t.i = i; t.k = `${t.t} ${t.a} ${t.al}`.toLowerCase();
+      byPath.set(t.p, i);
+      (artists.get(t.a) || artists.set(t.a, []).get(t.a)).push(i);
+      const ak = `${t.a}\u0000${t.al || "Singles"}`;
+      (albums.get(ak) || albums.set(ak, []).get(ak)).push(i);
+      const g = (t.g || "").trim();
+      if (g) (genres.get(g) || genres.set(g, []).get(g)).push(i);
+    });
+    for (const list of albums.values()) list.sort((x, y) => (T[x].d - T[y].d) || (T[x].n - T[y].n) || T[x].t.localeCompare(T[y].t));
+    status(`${T.length.toLocaleString()} songs, ${artists.size.toLocaleString()} artists.`);
+    for (const id of ["np", "q", "seg"]) $(id).hidden = false;
+    offerResume(); render(); checkin();
+  }
+
+  // ── playing ──────────────────────────────────────────────────────────
+  async function playAt(i, from = 0, go = true) {
+    if (i < 0 || i >= Q.length) return;
+    qi = i; retried = false;
+    const t = T[Q[qi]];
+    try { await freshGate(); } catch (e) { status(e.message, "warn"); return; }
+    audio.src = url("a", t.p) + (from > 0 ? `#t=${Math.floor(from)}` : "");
+    audio.dataset.from = from;
+    showNow(t);
+    if (go) audio.play().catch(() => status("Tap ▶ to start (the browser wants a tap first).", "warn"));
+    $("resume").replaceChildren();
+    save(true);
+    if (view[0] === "queue") render();
+  }
+
+  function playList(list, start = 0) {
+    list = list.slice();
+    if (shuffle) { const first = list.splice(start, 1); list = first.concat(shuffled(list)); start = 0; }
+    Q = list; playAt(start);
+  }
+
+  function playNext(i) {                       // "+": right after the current song
+    if (qi < 0) { Q = [i]; playAt(0); return; }
+    Q.splice(qi + 1, 0, i); status(`Up next: ${T[i].t}`);
+  }
+
+  function djPick() {
+    const cur = T[Q[qi]] || T[Math.floor(Math.random() * T.length)];
+    const recent = new Set(Q.slice(-200));
+    const from = pool => { for (let k = 0; k < 25 && pool && pool.length; k++) {
+      const c = pool[Math.floor(Math.random() * pool.length)]; if (!recent.has(c)) return c; } return null; };
+    const r = Math.random();                       // mostly the same artist, then the same genre, then anything
+    const pick = (r < 0.55 ? from(artists.get(cur.a)) : null)
+      ?? (r < 0.85 && cur.g ? from(genres.get(cur.g.trim())) : null) ?? from(T.map((_, i) => i));
+    return pick ?? Math.floor(Math.random() * T.length);
+  }
+
+  function next() {
+    if (qi + 1 < Q.length) return playAt(qi + 1);
+    if (dj && T.length) { Q.push(djPick()); return playAt(qi + 1); }
+    audio.pause(); save(true);
+  }
+  function prev() { if (audio.currentTime > 3 || qi <= 0) audio.currentTime = 0; else playAt(qi - 1); }
+  function toggle() { if (qi < 0) { if (T.length) { Q = [djPick()]; playAt(0); } return; }
+    audio.paused ? audio.play().catch(() => {}) : audio.pause(); }
+
+  function showNow(t) {
+    $("title").textContent = t.t; $("sub").textContent = [t.a, t.al].filter(Boolean).join(" · ");
+    document.title = `${t.t} — ${t.a}`;
+    const art = $("art");
+    if (t.art) { art.src = url("art", t.p); art.hidden = false; $("noart").hidden = true; }
+    else { art.hidden = true; $("noart").hidden = false; }
+    art.onerror = () => { art.hidden = true; $("noart").hidden = false; };
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: t.t, artist: t.a, album: t.al || "",
+        artwork: t.art ? [{ src: url("art", t.p), sizes: "512x512" }] : [] });
+    }
+  }
+
+  // ── the audio element and the lock screen / car / media keys ─────────
+  audio.addEventListener("loadedmetadata", () => {
+    const from = +audio.dataset.from || 0;
+    if (from > 0 && Math.abs(audio.currentTime - from) > 2) audio.currentTime = from;
+    $("pos").max = Math.floor(audio.duration || 0); $("dur").textContent = fmt(audio.duration);
+  });
+  audio.addEventListener("timeupdate", () => {
+    if (!$("pos").matches(":active")) $("pos").value = Math.floor(audio.currentTime);
+    $("cur").textContent = fmt(audio.currentTime);
+    if ("mediaSession" in navigator && audio.duration && navigator.mediaSession.setPositionState) {
+      try { navigator.mediaSession.setPositionState({ duration: audio.duration, position: Math.min(audio.currentTime, audio.duration),
+        playbackRate: 1 }); } catch (e) {}
+    }
+    save(false);
+  });
+  const playing = () => { $("play").textContent = audio.paused ? "▶" : "⏸"; $("play").setAttribute("aria-label", audio.paused ? "Play" : "Pause");
+    if ("mediaSession" in navigator) navigator.mediaSession.playbackState = audio.paused ? "paused" : "playing"; };
+  audio.addEventListener("play", () => { playing(); if (T.length) status(""); save(true); });
+  audio.addEventListener("pause", () => { playing(); save(true); });
+  audio.addEventListener("ended", next);
+  audio.addEventListener("error", async () => {
+    if (qi < 0 || !audio.src) return;
+    if (!retried) {                         // most likely an expired pass: get a new one and carry on from here
+      retried = true; const at = audio.currentTime || +audio.dataset.from || 0;
+      try { gate = null; await getGate(); audio.src = url("a", T[Q[qi]].p) + (at ? `#t=${Math.floor(at)}` : "");
+        audio.dataset.from = at; audio.play().catch(() => {}); return; } catch (e) {}
+    }
+    status(`Couldn't play "${T[Q[qi]].t}"; skipping it.`, "warn"); setTimeout(next, 1500);
+  });
+  $("pos").addEventListener("change", e => { audio.currentTime = +e.target.value; });
+  $("play").onclick = toggle; $("next").onclick = next; $("prev").onclick = prev;
+  const flag = (b, on) => { b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); };
+  $("shuffle").onclick = () => { shuffle = !shuffle; flag($("shuffle"), shuffle);
+    if (shuffle && qi >= 0) Q = Q.slice(0, qi + 1).concat(shuffled(Q.slice(qi + 1))); save(true); if (view[0] === "queue") render(); };
+  $("dj").onclick = () => { dj = !dj; flag($("dj"), dj); save(true); };
+  flag($("dj"), dj);
+  if ("mediaSession" in navigator) {
+    const ms = navigator.mediaSession, on = (a, f) => { try { ms.setActionHandler(a, f); } catch (e) {} };
+    on("play", () => audio.play()); on("pause", () => audio.pause());
+    on("nexttrack", next); on("previoustrack", prev);
+    on("seekto", d => { audio.currentTime = d.seekTime; });
+    on("seekbackward", d => { audio.currentTime = Math.max(0, audio.currentTime - (d.seekOffset || 10)); });
+    on("seekforward", d => { audio.currentTime = audio.currentTime + (d.seekOffset || 10); });
+  }
+
+  // ── Connect: pick up where another device left off, or be its remote ──
+  function stateNow() {
+    if (qi < 0) return null;
+    const t = T[Q[qi]];
+    const lo = Math.max(0, qi - 200);               // the queue, trimmed around where we are
+    return { track: t.p, title: t.t, artist: t.a, pos: audio.currentTime || +audio.dataset.from || 0, playing: !audio.paused,
+             queue: Q.slice(lo, lo + 1000).map(i => T[i].p), idx: qi - lo, dj, shuffle };
+  }
+  function save(now) {
+    if (qi < 0 || (!now && Date.now() - lastSave < 10000)) return;
+    lastSave = Date.now();
+    const s = stateNow(); store.set("last", s); checkin(s);
+  }
+
+  let checking = false;
+  async function checkin(state) {
+    if (checking && !state) return;
+    checking = true;
+    try {
+      const r = await post("{{ url_for('music.player_checkin') }}", { device, name: deviceName, state: state || stateNow() });
+      if (!r.ok) return;
+      const reply = await r.json();
+      for (const a of reply.commands || []) ({ play: () => audio.play().catch(() => {}), pause: () => audio.pause(),
+        next, prev })[a]?.();
+      others = reply.devices || []; drawDevices(); offerResume();
+    } catch (e) {} finally { checking = false; }
+  }
+  setInterval(() => { if (T.length && (!document.hidden || !audio.paused)) checkin(); }, 5000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && T.length) checkin(); });
+
+  function load(s, takeOver) {
+    const list = (s.queue || []).map(p => byPath.get(p)).filter(i => i !== undefined);
+    const at = list.indexOf(byPath.get(s.track));
+    if (at < 0) { status("That song isn't in the library any more.", "warn"); return; }
+    Q = list; dj = s.dj !== false; shuffle = !!s.shuffle; flag($("dj"), dj); flag($("shuffle"), shuffle);
+    playAt(at, s.pos || 0);
+    if (takeOver) post("{{ url_for('music.player_command') }}", { device: takeOver, action: "pause" });
+  }
+
+  function offerResume() {
+    const box = $("resume");
+    if (qi >= 0 || !T.length) { box.replaceChildren(); return; }
+    const other = others.find(d => d.state && d.state.track);
+    const mine = store.get("last");
+    const s = other ? other.state : mine && mine.track ? mine : null;
+    if (!s) { box.replaceChildren(); return; }
+    const where = other ? (other.live && other.state.playing ? `playing on ${other.name}` : `from ${other.name}`) : "where you left off";
+    box.replaceChildren(el("div", { className: "banner" },
+      el("span", { className: "grow" }, `Continue `, el("b", {}, s.title || "your music"), ` ${where}, at ${fmt(s.pos)}`),
+      el("button", { onclick: () => load(s, other && other.live && other.state.playing ? other.id : null) },
+         other && other.live && other.state.playing ? "Play here" : "Continue")));
+  }
+
+  function drawDevices() {
+    const box = $("devices");
+    const live = others.filter(d => d.live);
+    box.replaceChildren(...live.map(d => {
+      const remote = a => post("{{ url_for('music.player_command') }}", { device: d.id, action: a }).then(() => setTimeout(checkin, 1500));
+      return el("div", { className: "dev" },
+        el("span", { className: "grow" }, el("span", { className: "name" }, d.name), " · ",
+           d.state.playing ? `${d.state.title} — ${d.state.artist}` : "paused"),
+        el("button", { onclick: () => remote(d.state.playing ? "pause" : "play"), title: "Play/pause on that device" },
+           d.state.playing ? "⏸" : "▶"),
+        el("button", { onclick: () => remote("next"), title: "Skip on that device" }, "⏭"),
+        el("button", { onclick: () => load(d.state, d.state.playing ? d.id : null) }, "Play here"));
+    }));
+  }
+
+  // ── browsing ─────────────────────────────────────────────────────────
+  function trackRow(i, list, at, cur) {
+    const t = T[i];
+    const row = el("div", { className: cur ? "cur" : "" },
+      el("span", { className: "n" }, t.n ? String(t.n) : ""),
+      el("span", { className: "main" }, el("div", { className: "l1" }, t.t),
+         el("div", { className: "l2" }, [t.a, t.al].filter(Boolean).join(" · "))),
+      el("span", { className: "n" }, t.s ? fmt(t.s) : ""),
+      el("button", { className: "add", title: "Play next", onclick: e => { e.stopPropagation(); playNext(i); } }, "+"));
+    row.onclick = () => view[0] === "queue" ? playAt(at) : playList(list, at);
+    return row;
+  }
+  function navRow(l1, l2, onclick) {
+    return el("div", { onclick }, el("span", { className: "main" }, el("div", { className: "l1" }, l1),
+      el("div", { className: "l2" }, l2)));
+  }
+  const head = text => el("div", { className: "head" }, text);
+  function crumb(title, actions = []) {
+    const c = $("crumb"); c.hidden = !title;
+    if (!title) return c.replaceChildren();
+    c.replaceChildren(el("button", { onclick: () => { view.pop(); render(); } }, "‹ Back"), el("h3", {}, title), ...actions);
+  }
+  const go = (...v) => { view.push(...v); render(); window.scrollTo({ top: 0 }); };
+  const setView = v => { view = [v]; for (const b of $("seg").children) b.classList.toggle("on", b.dataset.view === v); render(); };
+  const albumsOf = name => [...albums.keys()].filter(k => k.startsWith(name + "\u0000"));
+  const albumName = k => k.split("\u0000")[1];
+
+  function paged(rows, list) {
+    let shown = 0;
+    const box = $("list");
+    const more = () => { box.lastChild?.classList?.contains("more") && box.lastChild.remove();
+      box.append(...rows.slice(shown, shown + PAGE).map(f => f())); shown += PAGE;
+      if (shown < rows.length) box.append(el("button", { className: "more", onclick: more }, `More (${rows.length - shown})`)); };
+    box.replaceChildren(...(list || [])); more();
+  }
+
+  function render() {
+    const q = $("q").value.trim().toLowerCase();
+    const [v, arg] = view.length > 1 ? view[view.length - 1] : [view[0]];
+    if (q.length >= 2 && view.length === 1) return search(q);
+    crumb(null);
+    if (v === "artists") {
+      const names = [...artists.keys()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+      return paged(names.map(n => () => navRow(n, `${artists.get(n).length} songs`, () => go(["artist", n]))));
+    }
+    if (v === "albums") {
+      const keys = [...albums.keys()].sort((a, b) => albumName(a).localeCompare(albumName(b), undefined, { sensitivity: "base" }));
+      return paged(keys.map(k => () => navRow(albumName(k), k.split("\u0000")[0], () => go(["album", k]))));
+    }
+    if (v === "genres") {
+      const gs = [...genres.keys()].sort((a, b) => genres.get(b).length - genres.get(a).length);
+      return paged(gs.map(g => () => navRow(g, `${genres.get(g).length} songs`, () => go(["genre", g]))));
+    }
+    if (v === "queue") {
+      if (qi < 0) return $("list").replaceChildren(el("p", { className: "muted" }, "The queue is empty."));
+      const start = Math.max(0, qi - 5);
+      return paged(Q.slice(start).map((i, k) => () => trackRow(i, Q, start + k, start + k === qi)));
+    }
+    if (v === "djstart") { dj = true; flag($("dj"), dj); Q = [djPick()]; playAt(0); return setView("queue"); }
+    if (v === "artist") {
+      const keys = albumsOf(arg), all = keys.flatMap(k => albums.get(k));
+      crumb(arg, [el("button", { onclick: () => playList(all) }, "▶ All"),
+                  el("button", { onclick: () => { playList(shuffled(all)); } }, "Shuffle")]);
+      return paged(keys.map(k => () => navRow(albumName(k), `${albums.get(k).length} songs`, () => go(["album", k]))));
+    }
+    if (v === "album") {
+      const list = albums.get(arg) || [];
+      crumb(`${albumName(arg)} · ${arg.split("\u0000")[0]}`, [el("button", { onclick: () => playList(list) }, "▶ Play"),
+        el("button", { onclick: () => playList(shuffled(list)) }, "Shuffle")]);
+      return paged(list.map((i, k) => () => trackRow(i, list, k, qi >= 0 && Q[qi] === i)));
+    }
+    if (v === "genre") {
+      const list = genres.get(arg) || [];
+      crumb(arg, [el("button", { onclick: () => playList(shuffled(list)) }, "▶ Shuffle all")]);
+      return paged(list.map((i, k) => () => trackRow(i, list, k, qi >= 0 && Q[qi] === i)));
+    }
+  }
+
+  function search(q) {
+    crumb(null);
+    const words = q.split(/\s+/);
+    const hits = [];
+    for (const t of T) { if (words.every(w => t.k.includes(w))) { hits.push(t.i); if (hits.length >= 500) break; } }
+    const arts = [...artists.keys()].filter(a => a.toLowerCase().includes(q)).slice(0, 12);
+    const albs = [...albums.keys()].filter(k => albumName(k).toLowerCase().includes(q)).slice(0, 12);
+    const top = [];
+    if (arts.length) top.push(head("Artists"), ...arts.map(a => navRow(a, `${artists.get(a).length} songs`, () => { $("q").value = ""; go(["artist", a]); })));
+    if (albs.length) top.push(head("Albums"), ...albs.map(k => navRow(albumName(k), k.split("\u0000")[0], () => { $("q").value = ""; go(["album", k]); })));
+    top.push(head(hits.length ? `Songs${hits.length >= 500 ? " (first 500)" : ""}` : "No songs match"));
+    paged(hits.map((i, k) => () => trackRow(i, hits, k, qi >= 0 && Q[qi] === i)), top);
+  }
+
+  let typing;
+  $("q").addEventListener("input", () => { clearTimeout(typing); typing = setTimeout(render, 150); });
+  for (const b of $("seg").children) b.onclick = () => { $("q").value = ""; setView(b.dataset.view); };
+
+  loadCatalog();
+})();
+</script>
+{% endblock %}
