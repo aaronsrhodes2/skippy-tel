@@ -37,6 +37,7 @@ import spend
 import ratelimit
 import tasks
 import watch
+import workshop as workshop_mod
 from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, PORTALS, SERVICES, missing_settings
 from gcp import GamesVm
 
@@ -67,6 +68,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     CHAT_PER_HOUR = 60
     imports = imports or imports_mod.Imports(vm)
     media = media_mod.Media()
+    workshop = workshop_mod.Workshop(home)          # the Captain's private Skippy (admin only)
+    app.extensions["workshop"] = workshop
 
     def me() -> str:
         return auth.current_user()["email"]
@@ -422,6 +425,24 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             abort(413)
         return jsonify(ok=home.finish(job_id, request.get_json(silent=True) or {}))
 
+    @app.post("/home/workshop/<task>")
+    def home_workshop(task):
+        """skippy-pc reporting how a private-Skippy run is going (workshop.py). The reply says how many
+        events this portal holds (so a redeployed portal gets the earlier ones again) and whether to stop."""
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        if (request.content_length or 0) > home_mod.MAX_REPORT:
+            abort(413)
+        if not re.fullmatch(r"[a-f0-9]{8,32}", task):
+            abort(404)
+        body = request.get_json(silent=True) or {}
+        try:
+            return jsonify(workshop.push(task, str(body.get("who") or ""), str(body.get("conv") or ""),
+                                         body.get("start"), body.get("events"), str(body.get("state") or ""),
+                                         body.get("error")))
+        except ValueError:
+            abort(400)
+
     # ── Bilby: what's playing (grant "bilby"; controls are admin only) ──────────
     music = Blueprint("bilby", __name__, url_prefix="/bilby")
 
@@ -528,7 +549,48 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             discord_ready=bool(app.config["DISCORD_BOT_TOKEN"]),
             experiments=experiments.EXPERIMENTS, hidden=experiments.hidden(vm), mentat_tools=mentat_tools,
             home=home.status(), music=home.music(), core=core, services=SERVICES,
+            workshop_ready=workshop.ready(), workshop_model=home.capability_note("workshop", "model"),
         )
+
+    # The private Skippy. Admin only (Google login + ADMIN_EMAILS), and every call must carry a header a
+    # cross-site page can't add without a CORS preflight: this chat can deploy code.
+    def workshop_call(view):
+        @wraps(view)
+        @auth.admin_required
+        def wrapped(*args, **kwargs):
+            if request.headers.get("X-Workshop") != "1":
+                abort(400)
+            resp = app.make_response(view(*args, **kwargs))
+            resp.headers["Cache-Control"] = "no-store"
+            return resp
+        return wrapped
+
+    @mine.post("/workshop/send")
+    @workshop_call
+    def workshop_send():
+        body = request.get_json(silent=True) or {}
+        message = str(body.get("message") or "")
+        try:
+            task = workshop.send(me(), str(body.get("conv") or ""), message)
+        except workshop_mod.Busy as exc:
+            return jsonify(error=str(exc)), 409
+        except workshop_mod.NotReady as exc:
+            return jsonify(error=str(exc)), 503
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        print(json.dumps({"event": "workshop", "user": me(), "task": task, "chars": len(message)}), flush=True)  # never the text
+        return jsonify(task=task)
+
+    @mine.get("/workshop/events")
+    @workshop_call
+    def workshop_events():
+        return jsonify(workshop.read(me(), request.args.get("task", ""), request.args.get("after", type=int, default=0)))
+
+    @mine.post("/workshop/stop")
+    @workshop_call
+    def workshop_stop():
+        body = request.get_json(silent=True) or {}
+        return jsonify(ok=workshop.stop(me(), str(body.get("task") or "")))
 
     @mine.post("/pair-home")
     @auth.admin_required

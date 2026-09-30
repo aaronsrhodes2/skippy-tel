@@ -1,0 +1,154 @@
+{# The private Skippy: the left side of the Captain's dashboard. Claude Code (Opus, full permissions) on
+   skippy-pc, reached through the home reporter (workshop.py). Only the messages you type ever leave this
+   page; the conversation lives on skippy-pc, and this page keeps a copy of the transcript for display. #}
+<style>
+  .me-chat { display: flex; flex-direction: column; position: sticky; top: 12px; height: calc(100vh - 110px); min-height: 440px; }
+  .me-chat header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .me-chat header h3 { margin: 0; flex: 1; }
+  .me-chat .wlog { flex: 1; overflow-y: auto; margin: 8px 0; padding-right: 4px; }
+  .me-chat .turn { margin: 8px 0; padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; font-size: .9rem; overflow-wrap: anywhere; }
+  .me-chat .turn.user { background: #111; border: 1px solid #333; }
+  .me-chat .turn.assistant { background: var(--dim-green); border: 1px solid var(--dim-green-hi); color: var(--ink); }
+  .me-chat .turn.failed { border-color: var(--red); }
+  .me-chat .turn p { margin: 0 0 6px; }
+  .me-chat .act { font-size: .74rem; color: var(--muted); margin: 2px 0; font-family: ui-monospace, Consolas, monospace; }
+  .me-chat .note { font-size: .78rem; color: var(--amber); margin: 4px 0 0; }
+  .me-chat .note.bad { color: var(--red); }
+  .me-chat form { display: flex; flex-direction: column; gap: 6px; }
+  .me-chat textarea { resize: vertical; min-height: 3.2em; max-height: 30vh; }
+  .me-chat [hidden] { display: none !important; }        /* the base button style would otherwise show Stop while idle */
+  .me-chat .actions { display: flex; gap: 8px; }
+  .me-chat .actions .send { flex: 1; }
+  /* On a phone the card sits on top of the widgets and must fit above the floating Home button. */
+  @media (max-width: 900px) { .me-chat { position: static; height: auto; min-height: 380px; max-height: calc(100vh - 290px); } .me-chat .wlog { min-height: 140px; } }
+</style>
+<div class="w me-chat" id="private-skippy" data-ready="{{ 'yes' if workshop_ready else 'no' }}">
+  <header>
+    <h3>Skippy · private</h3>
+    <span class="pill" id="ps-state" style="--accent: {{ 'var(--green)' if workshop_ready else 'var(--amber)' }}">{{ workshop_model or 'Opus' }}{{ '' if workshop_ready else ' · offline' }}</span>
+  </header>
+  <p class="muted" style="margin:4px 0 0">Ask for a change: he edits, tests, pushes, deploys and checks it live.
+    Only you can see this, and it is Opus all the time.</p>
+  {% if not workshop_ready %}
+    <p class="note">skippy-pc's workshop isn't answering. On skippy-pc run <code>make bridge</code> (and make sure
+      <code>claude</code> there is signed in: <code>/login</code>) and the home reporter is up.</p>
+  {% endif %}
+  <div class="wlog" id="ps-log" aria-live="polite"></div>
+  <form id="ps-form">
+    <textarea id="ps-text" rows="2" maxlength="8000" placeholder="e.g. make the Games tile's pill orange" required></textarea>
+    <div class="actions">
+      <button type="submit" class="send" id="ps-send">Send</button>
+      <button type="button" id="ps-stop" hidden class="danger">Stop</button>
+      <button type="button" id="ps-new">New chat</button>
+    </div>
+  </form>
+</div>
+<script>
+  (function () {
+    const root = document.getElementById("private-skippy");
+    const log = root.querySelector("#ps-log"), form = root.querySelector("#ps-form");
+    const text = root.querySelector("#ps-text"), send = root.querySelector("#ps-send");
+    const stopBtn = root.querySelector("#ps-stop"), newBtn = root.querySelector("#ps-new");
+    const K = {conv: "ps-conv", log: "ps-log", task: "ps-task"};
+    const SEND = "{{ url_for('me.workshop_send') }}", EVENTS = "{{ url_for('me.workshop_events') }}",
+          STOP = "{{ url_for('me.workshop_stop') }}";
+    const H = {"Content-Type": "application/json", "X-Workshop": "1"};
+    const store = {
+      get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+      set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+      del(k) { try { localStorage.removeItem(k); } catch (e) {} },
+    };
+    const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : ("c" + Date.now().toString(16) + Math.random().toString(16).slice(2, 10)).replace(/[^A-Za-z0-9-]/g, ""));
+    let conv = store.get(K.conv) || uuid(); store.set(K.conv, conv);
+    let turns = []; try { turns = JSON.parse(store.get(K.log) || "[]"); } catch (e) { turns = []; }
+    let running = null;                            // {task, after, turn}
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    const save = () => store.set(K.log, JSON.stringify(turns.slice(-60)));
+    function el(tag, cls, txt) { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
+    const boxes = new WeakMap();                   // turn -> its bubble (kept off the turn, which is saved as JSON)
+    function draw(turn) {                          // (re)draw one turn's bubble from its data
+      let box = boxes.get(turn);
+      if (!box) { box = el("div", "turn " + turn.role); boxes.set(turn, box); log.appendChild(box); }
+      box.replaceChildren();
+      if (turn.role === "user") { box.textContent = turn.text; return; }
+      (turn.parts || []).forEach(p => {
+        if (p.t === "text") box.appendChild(el("p", null, p.text));
+        else box.appendChild(el("div", "act", "› " + p.name + (p.detail ? ": " + p.detail : "")));
+      });
+      if (turn.note) box.appendChild(el("div", "note" + (turn.bad ? " bad" : ""), turn.note));
+      box.classList.toggle("failed", !!turn.bad);
+      if (!(turn.parts || []).length && !turn.note) box.appendChild(el("div", "act", "…"));
+    }
+    const scroll = () => { log.scrollTop = log.scrollHeight; };
+    function busy(on) { send.disabled = on; stopBtn.hidden = !on; }
+    turns.forEach(draw); scroll();
+
+    async function call(url, opts) {
+      const res = await fetch(url, {credentials: "same-origin", ...opts});
+      if (res.redirected || !(res.headers.get("content-type") || "").includes("json")) throw new Error("Your sign-in expired: reload the page.");
+      return {ok: res.ok, status: res.status, data: await res.json()};
+    }
+
+    async function follow(job) {                   // poll a task until it ends, riding out portal restarts
+      running = job; busy(true); let quiet = 0;
+      while (running === job) {
+        let r;
+        try { r = await call(EVENTS + "?task=" + encodeURIComponent(job.task) + "&after=" + job.after, {headers: H}); }
+        catch (e) { r = null; }
+        if (!r || !r.ok || r.data.state === "unknown") {
+          quiet += 1;                              // the portal may be redeploying: the reporter re-sends what it lost
+          job.turn.note = quiet > 90 ? "Lost the link to skippy-pc. Send again to retry." : "Reconnecting…";
+          job.turn.bad = quiet > 90; draw(job.turn);
+          if (quiet > 90) break;
+          await sleep(2000); continue;
+        }
+        quiet = 0; delete job.turn.note; job.turn.bad = false;
+        const d = r.data;
+        (d.events || []).forEach(e => job.turn.parts.push(e));
+        job.after = d.next; store.set(K.task, JSON.stringify({task: job.task, after: job.after}));
+        if (d.state === "offline") { job.turn.note = "skippy-pc hasn't picked this up. Is the bridge running?"; }
+        if (d.state === "stalled") { job.turn.note = "The link to skippy-pc went quiet. If you just redeployed the reporter, give it a minute."; }
+        if (d.state === "done" || d.state === "error") {
+          if (d.state === "error") { job.turn.note = d.error || "It failed."; job.turn.bad = d.error !== "stopped"; }
+          draw(job.turn); save(); scroll(); store.del(K.task); break;
+        }
+        draw(job.turn); save(); scroll();
+        await sleep(1200);
+      }
+      if (running === job) running = null;
+      busy(false); text.focus();
+    }
+
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const message = text.value.trim();
+      if (!message || running) return;
+      const mine = {role: "user", text: message}; turns.push(mine); draw(mine);
+      const reply = {role: "assistant", parts: []}; turns.push(reply); draw(reply); scroll();
+      text.value = ""; busy(true);
+      let r;
+      try { r = await call(SEND, {method: "POST", headers: H, body: JSON.stringify({conv, message})}); }
+      catch (e) { r = {ok: false, data: {error: e.message}}; }
+      if (!r.ok) { reply.note = r.data.error || "That didn't go through."; reply.bad = true; draw(reply); save(); busy(false); return; }
+      save(); follow({task: r.data.task, after: 0, turn: reply});
+    });
+    text.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
+    stopBtn.addEventListener("click", async () => {
+      if (!running) return;
+      try { await call(STOP, {method: "POST", headers: H, body: JSON.stringify({task: running.task})}); } catch (e) {}
+      stopBtn.hidden = true;
+      running && (running.turn.note = "Stopping…", draw(running.turn));
+    });
+    newBtn.addEventListener("click", () => {
+      if (running && !confirm("Skippy is mid-task. Start a new chat anyway? (The task keeps going; use Stop first to end it.)")) return;
+      running = null; conv = uuid(); store.set(K.conv, conv); turns = []; save(); store.del(K.task); log.replaceChildren(); busy(false);
+    });
+
+    // A reload (or a portal deploy) mid-task: pick the task back up where this page left off.
+    const pending = store.get(K.task);
+    if (pending && turns.length && turns[turns.length - 1].role === "assistant") {
+      try { const t = JSON.parse(pending); if (t && t.task) follow({task: t.task, after: t.after || 0, turn: turns[turns.length - 1]}); } catch (e) {}
+    }
+  })();
+</script>

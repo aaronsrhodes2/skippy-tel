@@ -1,0 +1,249 @@
+"""The private Skippy on the Captain's dashboard: the task store's rules, its admin-only routes, the reporter's
+push endpoint, and the /me layout with the chat on the left."""
+import json
+
+import pytest
+
+pytest.importorskip("flask")
+pytest.importorskip("authlib")
+
+import home as home_mod  # noqa: E402
+import workshop as workshop_mod  # noqa: E402
+from test_app import ADMIN, FRIEND, FakeSkippy, FakeVm, SETTINGS, _add_friend, _pair, login  # noqa: E402
+
+import app as portal  # noqa: E402
+
+CONV = "conv-12345678"
+TEXT = {"t": "text", "text": "On it."}
+TOOL = {"t": "tool", "name": "Bash", "detail": "git push origin main"}
+
+
+class Clock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+@pytest.fixture
+def shop():
+    clock = Clock()
+    home = home_mod.Home(FakeVm(), clock=clock)
+    home.accept({"capabilities": {"workshop": {"ready": True, "model": "claude-opus-5-5"}}})
+    return workshop_mod.Workshop(home, clock=clock), home, clock
+
+
+# ── the store ─────────────────────────────────────────────────────────────────
+def test_a_message_becomes_a_long_lived_home_job_and_its_id_is_the_task_id(shop):
+    ws, home, _ = shop
+    task = ws.send(ADMIN, CONV, "  make the tile green  ")
+    [job] = home.jobs_reply()["jobs"]
+    assert job == {"id": task, "kind": "workshop", "conv": CONV, "message": "make the tile green", "who": ADMIN}
+    assert home._jobs[task]["ttl"] == workshop_mod.JOB_TTL > home_mod.JOB_TTL
+
+
+def test_it_refuses_bad_input_and_a_workshop_that_isnt_reporting(shop):
+    ws, home, clock = shop
+    for args in ((ADMIN, "x", "hi"), (ADMIN, CONV, "   "), (ADMIN, CONV, "a" * 8001)):
+        with pytest.raises(ValueError):
+            ws.send(*args)
+    clock.now += home_mod.STALE_AFTER + 1                       # home went silent: nothing to hand the job to
+    with pytest.raises(workshop_mod.NotReady):
+        ws.send(ADMIN, CONV, "hi")
+
+
+def test_one_task_at_a_time_until_it_finishes(shop):
+    ws, _, _ = shop
+    task = ws.send(ADMIN, CONV, "one")
+    with pytest.raises(workshop_mod.Busy):
+        ws.send(ADMIN, CONV, "two")
+    ws.push(task, ADMIN, CONV, 0, [TEXT], "done", None)
+    assert ws.send(ADMIN, CONV, "two")
+
+
+def test_pushed_events_are_readable_in_order_and_only_by_their_owner(shop):
+    ws, _, _ = shop
+    task = ws.send(ADMIN, CONV, "go")
+    assert ws.push(task, ADMIN, CONV, 0, [TEXT, TOOL], "running", None) == {"have": 2, "stop": False}
+    got = ws.read(ADMIN, task, 0)
+    assert got == {"state": "running", "error": None, "events": [TEXT, TOOL], "next": 2}
+    assert ws.read(ADMIN, task, 1)["events"] == [TOOL]
+    assert ws.read("someone@else.com", task, 0)["state"] == "unknown"       # not theirs: as if it didn't exist
+    assert ws.read(ADMIN, "0" * 16, 0)["state"] == "unknown"
+
+
+def test_a_push_that_overlaps_adds_only_the_new_events_and_a_gap_asks_for_more(shop):
+    ws, _, _ = shop
+    task = ws.send(ADMIN, CONV, "go")
+    ws.push(task, ADMIN, CONV, 0, [TEXT], "running", None)
+    assert ws.push(task, ADMIN, CONV, 0, [TEXT, TOOL], "running", None)["have"] == 2       # the first was already here
+    assert ws.push(task, ADMIN, CONV, 5, [TEXT], "running", None)["have"] == 2             # a gap: nothing taken, "have" says why
+    assert ws.read(ADMIN, task, 0)["next"] == 2
+
+
+def test_a_redeployed_portal_rebuilds_the_task_from_what_home_sends(shop):
+    ws, home, clock = shop
+    fresh = workshop_mod.Workshop(home, clock=clock)                        # the new instance: no record of the task
+    assert fresh.push("abcd1234ef", ADMIN, CONV, 0, [TEXT, TOOL], "running", None)["have"] == 2
+    assert fresh.read(ADMIN, "abcd1234ef", 0)["events"] == [TEXT, TOOL]      # the owner comes from home's push
+    assert fresh.read(FRIEND, "abcd1234ef", 0)["state"] == "unknown"
+
+
+def test_events_from_home_are_cleaned_before_they_can_reach_a_browser(shop):
+    ws, _, _ = shop
+    task = ws.send(ADMIN, CONV, "go")
+    ws.push(task, ADMIN, CONV, 0, [{"t": "text", "text": "x" * 9000}, {"t": "html", "text": "<b>"}, "junk",
+                                   {"t": "tool", "name": "N" * 99, "detail": "d" * 999, "secret": "s"}], "running", None)
+    events = ws.read(ADMIN, task, 0)["events"]
+    assert [e["t"] for e in events] == ["text", "tool"] and len(events[0]["text"]) == workshop_mod.MAX_TEXT
+    assert set(events[1]) == {"t", "name", "detail"} and len(events[1]["name"]) == 40 and len(events[1]["detail"]) == 200
+    with pytest.raises(ValueError):
+        ws.push(task, ADMIN, CONV, 0, [], "exploding", None)
+
+
+def test_the_states_a_watcher_sees(shop):
+    ws, home, clock = shop
+    task = ws.send(ADMIN, CONV, "go")
+    assert ws.read(ADMIN, task)["state"] == "queued"
+    clock.now += workshop_mod.OFFLINE_S + 1
+    assert ws.read(ADMIN, task)["state"] == "offline"                      # skippy-pc never picked it up
+    ws.push(task, ADMIN, CONV, 0, [TEXT], "running", None)
+    assert ws.read(ADMIN, task)["state"] == "running"
+    clock.now += workshop_mod.STALL_S + 1
+    assert ws.read(ADMIN, task)["state"] == "stalled"                      # the link went quiet mid-run
+    ws.push(task, ADMIN, CONV, 1, [], "error", "stopped")
+    assert ws.read(ADMIN, task) | {"events": None} == {"state": "error", "error": "stopped", "events": None, "next": 1}
+
+
+def test_reading_a_running_task_keeps_the_reporters_quick_poll_going(shop):
+    ws, home, clock = shop
+    task = ws.send(ADMIN, CONV, "go")
+    home.fast_until = 0
+    ws.read(ADMIN, task)
+    assert home.fast_until > clock.now
+
+
+def test_finishing_stops_the_job_being_offered_again_and_stop_reaches_home(shop):
+    ws, home, _ = shop
+    task = ws.send(ADMIN, CONV, "go")
+    assert not ws.stop("someone@else.com", task) and ws.stop(ADMIN, task)
+    assert ws.push(task, ADMIN, CONV, 0, [], "running", None)["stop"] is True
+    ws.push(task, ADMIN, CONV, 0, [], "error", "stopped")
+    assert home.jobs_reply()["jobs"] == [] and not ws.stop(ADMIN, task)
+
+
+# ── the routes ────────────────────────────────────────────────────────────────
+@pytest.fixture
+def env():
+    vm = FakeVm()
+    app = portal.create_app(dict(SETTINGS), vm=vm, skippy=FakeSkippy())
+    client = app.test_client()
+    app.extensions["home"].accept({"capabilities": {"workshop": {"ready": True, "model": "claude-opus-5-5"}}})
+    return client, app, app.extensions["home"]
+
+
+H = {"X-Workshop": "1"}
+
+
+def post(client, url, body, headers=H):
+    return client.post(url, json=body, headers=headers)
+
+
+def test_only_the_captain_can_use_the_private_skippy(env):
+    client, _, _ = env
+    assert client.post("/me/workshop/send", json={"conv": CONV, "message": "hi"}, headers=H).status_code == 302   # signed out
+    login(client, FRIEND)
+    for method, url in (("post", "/me/workshop/send"), ("get", "/me/workshop/events?task=abcd1234"), ("post", "/me/workshop/stop")):
+        assert getattr(client, method)(url, headers=H).status_code == 403
+    _add_friend(client, "pal@example.com", ["skippy"])
+    login(client, "pal@example.com")                                     # a friend with the public Skippy: still no
+    assert post(client, "/me/workshop/send", {"conv": CONV, "message": "hi"}).status_code == 403
+    assert client.get("/me").status_code == 403
+
+
+def test_a_page_on_another_site_cannot_drive_it(env):
+    client, _, home = env
+    login(client, ADMIN)
+    assert client.post("/me/workshop/send", json={"conv": CONV, "message": "hi"}).status_code == 400      # no header
+    assert client.post("/me/workshop/send", data="message=hi", content_type="text/plain", headers=H).status_code == 400
+    assert home.jobs_reply()["jobs"] == []
+
+
+def test_sending_queues_a_job_for_skippy_pc_and_never_logs_the_message(env, capsys):
+    client, _, home = env
+    login(client, ADMIN)
+    resp = post(client, "/me/workshop/send", {"conv": CONV, "message": "deploy my secret plan"})
+    task = resp.get_json()["task"]
+    assert resp.status_code == 200 and resp.headers["Cache-Control"] == "no-store"
+    assert [(j["kind"], j["conv"], j["message"], j["who"]) for j in home.jobs_reply()["jobs"]] == \
+        [("workshop", CONV, "deploy my secret plan", ADMIN)]
+    out = capsys.readouterr().out
+    assert task in out and "secret plan" not in out                      # who and how long, never what
+    assert post(client, "/me/workshop/send", {"conv": CONV, "message": "again"}).status_code == 409   # busy
+
+
+def test_send_errors_are_plain(env):
+    client, app, home = env
+    login(client, ADMIN)
+    assert post(client, "/me/workshop/send", {"conv": CONV, "message": ""}).status_code == 400
+    assert post(client, "/me/workshop/send", {"conv": "x", "message": "hi"}).status_code == 400
+    home.report = {"capabilities": {}}                                   # the bridge isn't reporting a workshop
+    resp = post(client, "/me/workshop/send", {"conv": CONV, "message": "hi"})
+    assert resp.status_code == 503 and "bridge" in resp.get_json()["error"]
+
+
+def test_home_pushes_progress_with_its_token_and_the_captain_reads_it(env):
+    client, _, _ = env
+    login(client, ADMIN)
+    task = post(client, "/me/workshop/send", {"conv": CONV, "message": "go"}).get_json()["task"]
+    token = _pair(client)
+    body = {"who": ADMIN, "conv": CONV, "start": 0, "events": [TEXT, TOOL], "state": "running", "error": None}
+    assert client.post(f"/home/workshop/{task}", json=body).status_code == 401                            # no token
+    assert client.post(f"/home/workshop/{task}", json=body, headers={"Authorization": "Bearer nope"}).status_code == 401
+    ok = client.post(f"/home/workshop/{task}", json=body, headers={"Authorization": f"Bearer {token}"})
+    assert ok.get_json() == {"have": 2, "stop": False}
+    got = client.get(f"/me/workshop/events?task={task}&after=1", headers=H).get_json()
+    assert got["state"] == "running" and got["events"] == [TOOL] and got["next"] == 2
+    bad = client.post(f"/home/workshop/{task}", json={**body, "state": "weird"}, headers={"Authorization": f"Bearer {token}"})
+    assert bad.status_code == 400
+    assert client.post("/home/workshop/not-a-task", json=body, headers={"Authorization": f"Bearer {token}"}).status_code == 404
+
+
+def test_stop_reaches_home_on_its_next_push(env):
+    client, _, _ = env
+    login(client, ADMIN)
+    task = post(client, "/me/workshop/send", {"conv": CONV, "message": "go"}).get_json()["task"]
+    token = _pair(client)
+    login(client, ADMIN)
+    assert post(client, "/me/workshop/stop", {"task": task}).get_json() == {"ok": True}
+    reply = client.post(f"/home/workshop/{task}", headers={"Authorization": f"Bearer {token}"},
+                        json={"who": ADMIN, "conv": CONV, "start": 0, "events": [], "state": "running", "error": None})
+    assert reply.get_json()["stop"] is True
+
+
+# ── the dashboard ─────────────────────────────────────────────────────────────
+def test_the_private_skippy_is_the_left_side_of_the_dashboard(env):
+    client, _, _ = env
+    login(client, ADMIN)
+    page = client.get("/me").data.decode()
+    assert page.index('id="private-skippy"') < page.index('class="widgets"')      # the chat comes first: left, or on top on a phone
+    assert 'class="me-layout"' in page and "Skippy · private" in page
+    assert "claude-opus-5-5" in page and "Opus all the time" in page
+    assert "workshop isn't answering" not in page
+
+
+def test_the_dashboard_says_plainly_when_the_workshop_is_offline(env):
+    client, _, home = env
+    home.report = {"capabilities": {}}
+    login(client, ADMIN)
+    page = client.get("/me").data.decode()
+    assert "workshop isn't answering" in page and "make bridge" in page and "/login" in page
+    assert 'id="private-skippy"' in page                                         # still there; the server refuses politely
+
+
+def test_the_public_chat_has_no_private_skippy_in_it(env):
+    client, _, _ = env
+    login(client, ADMIN)
+    chat_page = client.get("/chat").data.decode()
+    assert "private-skippy" not in chat_page and "workshop" not in chat_page.lower()

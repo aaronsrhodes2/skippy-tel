@@ -31,3 +31,6 @@ infra/**/terraform.tfvars
 
 # Built into the portal image from sigma-ground (portal/Dockerfile)
 portal/experiments_static/
+
+# Claude Code agent worktrees
+.claude/worktrees/

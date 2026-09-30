@@ -142,6 +142,18 @@ and jobs; while someone chats, the reporter also polls `GET /home/jobs` every
 - Portal side: `portal/home.py` (in-memory; the portal runs max 1 instance),
   `/bilby` sub-portal (grant "bilby"; controls admin-only), Home widget on `/me`.
 
+## Private Skippy (the Workshop: left side of `/me`)
+
+The Captain's own chat is Claude Code (Opus, hard-coded, all the time) on skippy-pc, admin
+only, focused on the ask → change → test → push → deploy → verify loop, not linked to
+skippy-tel-core's services. Portal: `portal/workshop.py` + `/me/workshop/*` (job kind
+`workshop`, capability `workshop`); reporter: `reporter.workshop()`; engine:
+`services/claude-bridge/workshop_engine.py` + `workshop_prompt.md` (its own clone
+`SkippyTel-workshop`, one Claude session per conversation). Survives a portal redeploy
+mid-task. Rules for anything like it: [PLATINUM §19](../PLATINUM_RULES.md). Full
+description and setup: `docs/portal/README.md` → Private Skippy. Needs `make bridge` on
+the host and `claude` signed in (`/login`) there.
+
 ## Local capabilities (skippy-pc's hardware, for the portal chat)
 
 The portal chat can use skippy-pc's own hardware, free of tokens, through the same job

@@ -100,6 +100,41 @@ route into the home Tailscale mesh where skippy-tel-core runs. Next step
 portal side or a tunnel from the home side — then route chat through
 skippy-tel-core's `/intent/unmatched` and expose its capabilities as tools.
 
+## Private Skippy (the left side of `/me`)
+
+The Captain's own chat: Claude Code (Opus, hard-coded in the bridge, all the time)
+running with full permissions on skippy-pc. Ask for a change and it edits its own
+clone of the repo, runs the tests, pushes to `main`, watches the deploy and health
+checks it. Only an admin can reach it (Google login plus `ADMIN_EMAILS`; every call
+also needs an `X-Workshop` header, so another site can't drive it). It is not linked
+to skippy-tel-core's services (Mentat, Bilby, mail…): that is deliberate, for now.
+
+```
+browser ── /me/workshop/send ──> portal (portal/workshop.py) ── job "workshop" ──> home reporter
+                                                                                      │ POST /workshop
+browser <── poll /me/workshop/events ── portal <── POST /home/workshop/<task> ── reporter ──> bridge
+                                                                                      │ (services/claude-bridge/workshop_engine.py)
+                                                                                    claude -p (Opus) in its own clone
+```
+
+- **A portal deploy doesn't lose the conversation.** History and progress live on
+  skippy-pc (the bridge keeps every event and one Claude session per conversation);
+  the reporter tells the portal what it has, and a redeployed portal replies "I hold N
+  events", so the reporter re-sends the rest. The page keeps its transcript in
+  `localStorage` and re-attaches to a running task after a reload or a deploy.
+- **What crosses the wire:** your messages, the agent's text, and one activity line per
+  tool call (name and command or path, credentials redacted), never tool output. The
+  portal logs who and how long, never the message.
+- **Setup on skippy-pc:** run `make bridge` (it needs `SKIPPY_HOME_TOKEN`, read from the
+  vault `.env`), make sure `claude` there is signed in (`claude`, then `/login`), and
+  rebuild the reporter (`CLAUDE_BRIDGE_URL` is in `docker-compose.override.yml`). The card
+  says plainly when the workshop isn't answering.
+- **Limits:** one task at a time; **Stop** cancels it; a task the portal hears nothing
+  about for 2 minutes shows "went quiet". The agent's rules are in
+  `services/claude-bridge/workshop_prompt.md` (it must ask before touching workflows,
+  auth, secrets or its own harness). Those rules are a prompt, not a sandbox: the
+  real guards are the login, the token and the tests.
+
 ## Known rough edges
 
 - Choosing different games while the VM is **running** saves the choice;

@@ -3,8 +3,11 @@
 {% block app %}dashboard{% endblock %}
 {% block head %}
 <style>
-  main { max-width: 1100px; }
-  .widgets { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+  main { max-width: 1500px; }
+  /* Left: your private Skippy (templates/_workshop.html). Right: the widgets. A phone gets the chat first, then the widgets. */
+  .me-layout { display: grid; grid-template-columns: minmax(340px, 4fr) 7fr; gap: 14px; align-items: start; }
+  @media (max-width: 900px) { .me-layout { grid-template-columns: 1fr; } }
+  .widgets { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
   .w { background: #05090b; border: 1px solid #16323a; border-radius: 12px; padding: 14px 16px; }
   .w h3 { margin: 0 0 8px; color: var(--cyan); font-size: .95rem; text-transform: uppercase; letter-spacing: .05em; }
   .w table { width: 100%; border-collapse: collapse; font-size: .85rem; }
@@ -21,6 +24,8 @@
 {% block content %}
 <section>
   <h2>Your dashboard</h2>
+  <div class="me-layout">
+  {% include "_workshop.html" %}
   <div class="widgets">
 
     <div class="w">
@@ -157,6 +162,7 @@
         (they stay admin-only in tool_policy.py).</p>
     </div>
   </div>
+  </div>{# .me-layout #}
 
   <div class="tools-empty">Your tools go here. Tell Skippy what you want and it becomes a widget.</div>
 </section>

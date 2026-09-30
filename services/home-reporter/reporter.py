@@ -36,6 +36,10 @@ MUSIC_TIMEOUT = 600          # seconds a song may take
 MUSIC_POLL = 2.0              # seconds between asking the studio how the song is coming
 MUSIC_MODEL = os.environ.get("MUSIC_MODEL", "acestep-v15-turbo")   # 8-step turbo model
 CLIP_MAX = 25_000_000        # the portal takes up to 30 MB; a request may be 32 MB
+BRIDGE = os.environ.get("CLAUDE_BRIDGE_URL", "").rstrip("/")   # Claude Code's bridge on the host: the private Skippy
+WORKSHOP_WAIT = 5            # seconds the bridge holds a request open waiting for news from the run
+WORKSHOP_PUSH = 100          # events per push to the portal (a request may be 1 MB)
+WORKSHOP_MAX_S = 3 * 3600    # a run this old is abandoned
 
 
 def home_token() -> str:
@@ -142,9 +146,17 @@ COMMANDS = {
 }
 
 
+def workshop_capability() -> dict:
+    """The private Skippy is ready when the bridge is up and has its token; `model` is what it will use."""
+    if not BRIDGE:
+        return {"ready": False}
+    workshop_info = (fetch(f"{BRIDGE}/health") or {}).get("workshop") or {}
+    return {"ready": workshop_info.get("ready") is True, "model": str(workshop_info.get("model") or "")[:40]}
+
+
 def capabilities() -> dict:
     """What this PC can do for the portal's chat right now. The portal offers only what's ready."""
-    return {"make_music": {"ready": bool(MUSIC) and _up(f"{MUSIC}/health")}}
+    return {"make_music": {"ready": bool(MUSIC) and _up(f"{MUSIC}/health")}, "workshop": workshop_capability()}
 
 
 def free_gpu() -> None:
@@ -221,8 +233,94 @@ def make_music(job: dict, token: str) -> dict:
     return {"result": {"title": title, "seconds": length}}
 
 
+def _bridge(method: str, path: str, body: dict | None, token: str, timeout: float = 40) -> tuple[int | None, dict]:
+    """A call to the bridge with the home token. (None, {}) means it didn't answer at all."""
+    req = urllib.request.Request(f"{BRIDGE}{path}", data=json.dumps(body).encode() if body is not None else None,
+                                 method=method, headers={"Content-Type": "application/json",
+                                                         "Authorization": f"Bearer {token}"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read() or b"{}")
+        except ValueError:
+            return e.code, {}
+    except Exception:  # noqa: BLE001 — down, refused, timed out
+        return None, {}
+
+
+def workshop(job: dict, token: str) -> dict:
+    """The private Skippy: hand the Captain's message to Claude Code on the bridge, then relay the run's events
+    to the portal until it ends. The bridge keeps every event, so a portal deploy or a reporter restart loses
+    nothing: the portal's reply says how many events it holds and this sends what it's missing."""
+    task, conv, message, who = job.get("id"), job.get("conv"), job.get("message"), job.get("who")
+
+    def report(start: int, events: list, state: str, error: str | None = None) -> dict | None:
+        req = urllib.request.Request(
+            f"{PORTAL}/home/workshop/{task}", method="POST", headers={
+                "Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+            data=json.dumps({"who": who, "conv": conv, "start": start, "events": events,
+                             "state": state, "error": error}).encode())
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return json.loads(r.read() or b"{}")
+        except Exception:  # noqa: BLE001 — the portal is down or redeploying; the bridge holds the events
+            return None
+
+    def fail(reason: str) -> dict:
+        for _ in range(3):
+            if report(0, [], "error", reason) is not None:
+                break
+            time.sleep(1)
+        return {"error": reason}
+
+    if not BRIDGE:
+        return fail("The private Skippy isn't set up on skippy-pc (CLAUDE_BRIDGE_URL).")
+    status, started = _bridge("POST", "/workshop", {"task": task, "conv": conv, "message": message}, token)
+    if status != 200:
+        return fail({409: "Skippy is still working on the last one.",
+                     401: "The bridge doesn't accept this token: is the vault's SKIPPY_HOME_TOKEN the paired one?",
+                     503: "The bridge has no SKIPPY_HOME_TOKEN configured.",
+                     None: "The bridge on skippy-pc isn't running (make bridge)."}.get(status)
+                    or started.get("message") or f"The bridge said HTTP {status}.")
+    after, silent, stopped, deadline = 0, 0, False, time.time() + WORKSHOP_MAX_S
+    while time.time() < deadline:
+        status, run = _bridge("GET", f"/workshop/run/{task}?after={after}&wait={WORKSHOP_WAIT}", None, token,
+                              timeout=WORKSHOP_WAIT + 15)
+        if status == 404:
+            return fail("The bridge lost this task (it was restarted).")
+        if status != 200:
+            silent += 1
+            if silent >= 20:
+                return fail("Lost contact with the bridge on skippy-pc.")
+            time.sleep(2)
+            continue
+        silent = 0
+        events, upto, done = run.get("events") or [], int(run.get("next") or 0), bool(run.get("done"))
+        chunk = events[:WORKSHOP_PUSH]
+        final = done and len(events) <= WORKSHOP_PUSH
+        state = ("done" if run.get("ok") else "error") if final else "running"
+        reply = report(after, chunk, state, (run.get("error") if state == "error" else None))
+        if reply is None:
+            time.sleep(2)
+            continue
+        if reply.get("stop") and not stopped:
+            stopped = _bridge("POST", f"/workshop/cancel/{task}", {}, token)[0] == 200
+        have, before = reply.get("have"), after
+        after = min(have, after + len(chunk)) if isinstance(have, int) and have >= 0 else after + len(chunk)
+        if final and after >= upto:
+            return {"result": {"state": state}}
+        if after == before and not chunk:
+            time.sleep(0.5)                     # nothing moved: don't spin
+    return fail("Gave up waiting for the run to end.")
+
+
 def run_job(job: dict, token: str = "") -> dict:
-    """A job from the portal. ask_mentat → Mentat + Qwen here at home; make_music → the music studio."""
+    """A job from the portal. ask_mentat → Mentat + Qwen here at home; make_music → the music studio;
+    workshop → the private Skippy (Claude Code on the bridge)."""
+    if job.get("kind") == "workshop":
+        return workshop(job, token)
     if job.get("kind") == "make_music":
         return make_music(job, token)
     if job.get("kind") == "ask_mentat" and MENTAT:

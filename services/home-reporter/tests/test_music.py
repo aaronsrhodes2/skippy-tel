@@ -223,11 +223,12 @@ def test_an_oversized_clip_is_not_sent(monkeypatch, home):
 
 
 def test_music_is_advertised_only_when_the_studio_answers(monkeypatch, home):
-    assert reporter.capabilities() == {"make_music": {"ready": True}}
+    music = lambda: reporter.capabilities()["make_music"]           # noqa: E731 (the workshop's entry has its own tests)
+    assert music() == {"ready": True}
     monkeypatch.setattr(reporter, "MUSIC", "http://127.0.0.1:9")
-    assert reporter.capabilities() == {"make_music": {"ready": False}}
+    assert music() == {"ready": False}
     monkeypatch.setattr(reporter, "MUSIC", "")
-    assert reporter.capabilities() == {"make_music": {"ready": False}}
+    assert music() == {"ready": False}
 
 
 def test_unknown_jobs_are_still_refused(monkeypatch):

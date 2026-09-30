@@ -25,7 +25,8 @@ STALE_AFTER = 60          # seconds without a report → "home is silent"
 FAST_WINDOW = 300         # after chat activity, the reporter polls for jobs quickly this long
 REDELIVER_AFTER = 20      # a job handed out but not answered goes out again after this
 MAX_REPORT = 1_000_000    # bytes (album art included)
-KNOWN_CAPABILITIES = ("make_music",)   # what skippy-pc may advertise; anything else it sends is ignored
+JOB_TTL = 600             # seconds a job waits for an answer before it's dropped (a job may ask for longer)
+KNOWN_CAPABILITIES = ("make_music", "workshop")   # what skippy-pc may advertise; anything else it sends is ignored
 _ACTIONS = {("music", "skip"), ("music", "pause"), ("music", "resume"), ("music", "stop")}
 
 
@@ -145,7 +146,7 @@ class Home:
     def jobs_reply(self) -> dict:
         now = self.clock()
         with self._lock:
-            self._jobs = {i: j for i, j in self._jobs.items() if now - j["created"] < 600}
+            self._jobs = {i: j for i, j in self._jobs.items() if now - j["created"] < j["ttl"]}
             out = []
             for j in self._jobs.values():
                 if not j["event"].is_set() and now - j["sent"] >= REDELIVER_AFTER:
@@ -153,11 +154,12 @@ class Home:
                     out.append(j["job"])
         return {"jobs": out, "fast_for_s": max(0, int(self.fast_until - now))}
 
-    def submit(self, kind: str, _owner: str = "", **payload) -> str:
+    def submit(self, kind: str, _owner: str = "", _ttl: int = JOB_TTL, **payload) -> str:
         job_id = secrets.token_hex(8)
         with self._lock:
             self._jobs[job_id] = {"job": {"id": job_id, "kind": kind, **payload}, "event": threading.Event(),
-                                  "outcome": None, "created": self.clock(), "sent": 0.0, "owner": _owner}
+                                  "outcome": None, "created": self.clock(), "sent": 0.0, "owner": _owner,
+                                  "ttl": _ttl}
         return job_id
 
     def finish(self, job_id: str, outcome: dict) -> bool:
@@ -190,10 +192,16 @@ class Home:
     def can(self, name: str) -> bool:
         return bool(self.capabilities().get(name))
 
-    def start(self, kind: str, owner: str = "", **payload) -> str:
+    def capability_note(self, name: str, key: str) -> str | None:
+        """A short string skippy-pc attached to a ready capability (e.g. the workshop's model), else None."""
+        info = ((self.report or {}).get("capabilities") or {}).get(name)
+        value = info.get(key) if isinstance(info, dict) and self.can(name) else None
+        return value[:40] if isinstance(value, str) else None
+
+    def start(self, kind: str, owner: str = "", ttl: int = JOB_TTL, **payload) -> str:
         """Queue a job for skippy-pc and return its id; `peek`/`wait_result` read it without consuming it."""
         self.touch_chat()
-        return self.submit(kind, _owner=owner, **payload)
+        return self.submit(kind, _owner=owner, _ttl=ttl, **payload)
 
     def peek(self, job_id: str) -> dict:
         j = self._jobs.get(job_id)
