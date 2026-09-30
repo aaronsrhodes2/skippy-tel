@@ -29,5 +29,31 @@
   ss -ulnp 2>/dev/null | grep -E ':(2456|2457|7777|7778|8888|34197)\b' || echo "(none)"
   echo "--- memory";    free -m | head -2
   echo "--- data disk"; df -h /srv/games/data | tail -1
+  # ── idle watchdog (why the VM does, or doesn't, go to sleep) ─────────────────────────────────────────────────────
+  # Read-only apart from two counting-only iptables rules (no target, no effect on traffic) that `report` adds if
+  # missing. </dev/null on everything: this script arrives on bash's stdin, and a command that reads stdin would
+  # swallow the rest of it. Nothing here prints a setting or a secret.
+  echo "--- idle watchdog: timer and service"
+  echo "timer: $(systemctl is-active skippy-idle-watchdog.timer </dev/null 2>&1)"
+  systemctl list-timers skippy-idle-watchdog.timer --no-pager </dev/null 2>&1 | head -3
+  systemctl show skippy-idle-watchdog.service -p ActiveState,Result,ExecMainStatus,ExecMainExitTimestamp --no-pager </dev/null 2>&1
+  echo "installed: $(head -1 /usr/local/bin/skippy-idle-watchdog 2>&1 | cut -c1-60) ($(wc -c < /usr/local/bin/skippy-idle-watchdog 2>/dev/null) bytes)"
+  echo "--- idle watchdog: journal, tag skippy-idle (its own log lines; empty = it never got as far as counting)"
+  journalctl -t skippy-idle -n 20 --no-pager </dev/null 2>&1 | cut -c1-300
+  echo "--- idle watchdog: journal, the service unit (its errors)"
+  journalctl -u skippy-idle-watchdog.service -n 8 --no-pager </dev/null 2>&1 | cut -c1-300
+  echo "--- idle watchdog: /run/skippy-games and the iptables counters"
+  for f in packets idle; do echo "$f=$(cat /run/skippy-games/$f 2>&1)"; done
+  iptables -w 5 -t mangle -L PREROUTING -v -x -n </dev/null 2>&1 | cut -c1-220 | head -8
+  echo "--- idle watchdog: evidence (idle_watchdog.py report, run from metadata)"
+  wd=/run/skippy-idle-report.py
+  if curl -sf -H "Metadata-Flavor: Google" \
+       "http://metadata.google.internal/computeMetadata/v1/instance/attributes/idle-watchdog" -o "$wd" \
+     && head -1 "$wd" | grep -q python; then
+    timeout 90 python3 "$wd" report </dev/null 2>&1 | tail -30 | cut -c1-300
+  else
+    echo "(metadata idle-watchdog is not the Python watchdog yet)"
+  fi
+  # ── end idle watchdog ────────────────────────────────────────────────────────────────────────────────────────────
   echo "=== end ==="
 } > /dev/ttyS1 2>&1

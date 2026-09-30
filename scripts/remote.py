@@ -74,6 +74,7 @@ def status(vm) -> dict:
         "external_ip": s.external_ip,
         "games": s.games,
         "idle_minutes": s.idle_minutes,
+        "max_hours": s.max_hours,                    # the watchdog's session ceiling (0 = none)
         "minutes_up": s.minutes_up(),
         "invite_codes": codes,
         "missing_settings": {g: missing_settings(g, s.env) for g in GAMES if missing_settings(g, s.env)},

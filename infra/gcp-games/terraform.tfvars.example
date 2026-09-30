@@ -2,3 +2,7 @@
 project = "your-gcp-project-id"
 # region = "us-west1"
 # zone   = "us-west1-b"
+# max_hours = 8                        # hard ceiling on one session, whatever the traffic says (0 = none)
+# billing_account    = "XXXXXX-XXXXXX-XXXXXX"   # turns on the monthly budget alert (budget.tf); see docs/cicd.md
+# budget_monthly_usd = 30
+# budget_alert_email = "you@example.com"        # optional extra recipient

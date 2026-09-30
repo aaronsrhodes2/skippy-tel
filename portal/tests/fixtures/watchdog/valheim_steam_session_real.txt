@@ -1,0 +1,6 @@
+Sep 29 22:43:48 supervisord: valheim-server 09/29/2026 22:43:48: Got connection SteamID 76561198000000001
+Sep 29 22:43:53 supervisord: valheim-server 09/29/2026 22:43:53: Server: New peer connected,sending global keys
+Sep 29 22:44:26 supervisord: valheim-server 09/29/2026 22:44:26: RPC_Disconnect
+Sep 29 22:44:26 supervisord: valheim-server 09/29/2026 22:44:27: Closing socket 76561198000000001
+Sep 29 22:44:27 supervisord: valheim-server 09/29/2026 22:44:27: Got status changed msg k_ESteamNetworkingConnectionState_ClosedByPeer
+Sep 29 22:44:27 supervisord: valheim-server 09/29/2026 22:44:27: Socket closed by peer Steamworks.SteamNetConnectionStatusChangedCallback_t

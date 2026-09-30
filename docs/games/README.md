@@ -10,7 +10,8 @@ themselves to sleep when nobody is, so you pay for play-hours, not months.
 | The servers (one Docker Compose profile per game) | [`games/docker-compose.yml`](../../games/docker-compose.yml) |
 | GCP VM, data disk, daily snapshots, firewall, static IP | [`infra/gcp-games/`](../../infra/gcp-games) |
 | Start / stop / status from the PC or Mac | [`scripts/games.sh`](../../scripts/games.sh) |
-| Idle watchdog (auto-sleep) | [`infra/gcp-games/idle-watchdog.sh`](../../infra/gcp-games/idle-watchdog.sh) |
+| Idle watchdog (auto-sleep + session limit) | [`infra/gcp-games/idle_watchdog.py`](../../infra/gcp-games/idle_watchdog.py), see [Auto-sleep](#auto-sleep-the-session-limit-and-how-to-see-why-a-vm-stayed-up) |
+| Monthly budget alert | [`infra/gcp-games/budget.tf`](../../infra/gcp-games/budget.tf), see [docs/cicd.md](../cicd.md#cost-alarm-monthly-budget) |
 | Discord channels + pinned status posts | [`scripts/discord_setup.py`](../../scripts/discord_setup.py), [`infra/gcp-games/discord-notify.py`](../../infra/gcp-games/discord-notify.py) |
 
 ## Hosting options
@@ -44,7 +45,10 @@ August; fix the payment method before deploying, or the VM can get suspended.
    gcloud config set project skippy-games-<...>
    gcloud billing projects link skippy-games-<...> --billing-account <ID>   # gcloud billing accounts list
    ```
-   In the console, go to **Billing → Budgets & alerts** and create a budget of $30/mo with email alerts at 50/90/100%.
+   The budget alert ($30/mo, emails at 50/90/100%) is in Terraform (`infra/gcp-games/budget.tf`) and switches on when
+   you give it the billing account id (`BILLING_ACCOUNT`; the deployer also needs `billing.budgets` permission on that
+   account, e.g. `roles/billing.costsManager`). Steps: [docs/cicd.md](../cicd.md#cost-alarm-monthly-budget). Or make
+   one by hand in the console under **Billing → Budgets & alerts**.
 
 2. **Create the infrastructure** (VM is created *stopped*)
    ```bash
@@ -93,17 +97,53 @@ What happens:
   others stay off.
 - Each game's pinned Discord post flips to 🟢 with connection details. A "starting up" message
   goes to that game's channel.
-- The watchdog checks every 5 minutes. After `--idle` minutes (default 30) with no player
-  traffic, it saves the worlds, flips the posts to ⚫, posts "went to sleep", and powers off.
-  A server nobody joins goes back to sleep 30 minutes after starting.
+- The watchdog checks every 5 minutes. After `--idle` minutes (default 30) with no players,
+  it saves the worlds, flips the posts to ⚫, posts "went to sleep", and powers off.
+  A server nobody joins goes back to sleep 30 minutes after starting. Whatever it sees, a session
+  also ends `max-hours` (default 8) after boot, with a Discord heads-up 15 minutes before.
 - The first start of each game downloads the server (5–10 min). Dragonwilds and the others
   update on every start, so the server version matches the game client.
+
+### Auto-sleep, the session limit, and how to see why a VM stayed up
+[`idle_watchdog.py`](../../infra/gcp-games/idle_watchdog.py) runs on the VM every 5 minutes (a systemd timer;
+the script is fetched from instance metadata `idle-watchdog` at every boot, so a change reaches a VM at its
+next boot).
+
+- **Nobody playing** for `idle-minutes` (default 30) in a row: save the worlds, post to Discord, power off.
+  "Playing" is, in this order: a game's own log giving an exact count (Valheim: Steam `Got connection` /
+  `Closing socket` pairs, or a crossplay server's session line; Factorio: `[JOIN]` / `[LEAVE]`); packets on
+  two-way flows the kernel marks ASSURED (a player's stream: a flow must be answered *and* keep going for over
+  2 seconds, so a scanner's one-shot probe never qualifies); and only when neither can be read, the raw packet
+  count on the game ports at a high bar (3000 per 5 minutes). Scanner and server-browser noise is ignored.
+  Evidence that can't be read never means "nobody": the idle clock holds, and the limit below ends the session.
+- **Session limit**: metadata `max-hours` (Terraform variable `max_hours`, default **8**, 0 = none) stops the VM
+  that many hours after boot whatever the traffic says, with a heads-up in the game's Discord channel 15
+  minutes ahead. It is off while a session's idle-minutes is 0 (the admin's "never sleep").
+  To change it: edit the variable's default (or `terraform.tfvars`) and push; nothing else writes it.
+- **The portal's Watcher** (Dashboard → warnings) says so when the server has been on longer than the limit plus
+  an hour, or longer than 2 hours with nobody playing.
+- **Why the first version never slept the VM** (found 2026-09-30; kept here so nobody re-learns it). It ran
+  `iptables -I -t mangle PREROUTING ...`. iptables reads the word after `-I` as the *chain*, so `-t` was the
+  chain and `mangle` a rule number: `Invalid rule number `mangle'`, exit status 2, and `set -e` ended the script
+  before its first count: every 5 minutes, for the life of the VM, with nothing in the journal under its tag.
+  Reproduced by running the original script unmodified on Debian 12 (iptables 1.8.9, nf_tables and legacy).
+  Whether scanner traffic would also have exceeded its 500-packets threshold could not be tested (a home
+  network lets nothing unsolicited in); the new logic doesn't depend on it.
+- **Seeing what it sees**: the `ops` workflow's `logs` prints an "idle watchdog" block (refreshed every 2
+  minutes, and live after a deploy: it runs the script straight from metadata, no reboot): the timer and
+  service state, the journal under `skippy-idle` and the unit's own journal (where a crashing watchdog says
+  why), `/run/skippy-games/{packets,idle}`, the iptables counters, and the report: raw and ASSURED packets since
+  the previous snapshot, the kernel's UDP flows to the game ports by state (sustained / answered once /
+  unanswered) with the number of distinct source addresses, the exact player counts (`PLAYERS game=N`), and one
+  `WATCHDOG verdict=active|idle|unknown ...` line with the reason. Reading it adds two counting-only iptables
+  rules (no target: they change no traffic), so counters run even on a VM that hasn't rebooted onto this version.
+  `journalctl -t skippy-idle` on the VM has one line per check.
 
 ### Per-game notes
 
 | Game | Port(s) | First-run chores |
 |---|---|---|
-| Valheim | UDP 2456–2457 | Set `VALHEIM_PASSWORD` (≥5 chars; it may not appear inside the world name or seed). The world grows from `VALHEIM_WORLD_SEED` (default `skippyhasyourmoney`; `keep` = leave it): at boot `valheim_seed.py` writes the world's metadata file, and a world with another seed is set aside in `data/valheim/config/replaced-worlds/`, never deleted. A world put back on purpose (`restore-game`, or copied in) is left alone until the seed setting changes again. **Crossplay** (`VALHEIM_CROSSPLAY`, default `false`): `true` gives a 6-digit **join code**, new every boot, for Steam, Xbox and Game Pass (Join Game → Add server → paste it), but the server then stops listening on 2456, so `ip:2456` no longer works, and the idle watchdog can't see crossplay players yet, so leave it off until that is fixed. Import an old world by copying it into `data/valheim/config/worlds_local/`. |
+| Valheim | UDP 2456–2457 | Set `VALHEIM_PASSWORD` (≥5 chars; it may not appear inside the world name or seed). The world grows from `VALHEIM_WORLD_SEED` (default `skippyhasyourmoney`; `keep` = leave it): at boot `valheim_seed.py` writes the world's metadata file, and a world with another seed is set aside in `data/valheim/config/replaced-worlds/`, never deleted. A world put back on purpose (`restore-game`, or copied in) is left alone until the seed setting changes again. **Crossplay** (`VALHEIM_CROSSPLAY`, default `false`): `true` gives a 6-digit **join code**, new every boot, for Steam, Xbox and Game Pass (Join Game → Add server → paste it), but the server then stops listening on 2456, so `ip:2456` no longer works, and its players never touch the ports the idle watchdog's packet counters watch (a crossplay server binds 2457 and one ephemeral port: checked). The watchdog reads such a server's own player count from its log instead, but only a server with 0 players has been seen, so leave it off until someone has played on it with the watchdog running. Import an old world by copying it into `data/valheim/config/worlds_local/`. |
 | Factorio | UDP 34197 | Set `game_password` in `data/factorio/config/server-settings.json`, then restart. |
 | Satisfactory | UDP+TCP 7777, TCP 8888 | The first player to connect claims the server and sets the admin + join passwords. Do this right away. |
 | Dragonwilds | UDP **7778** (moved off 7777 so it can run beside Satisfactory) | `DRAGONWILDS_OWNER_ID` + `DRAGONWILDS_ADMIN_PASSWORD` required. Players join with the **invite code** shown on the portal's Dragonwilds page (new every boot), or search the server name in the Public tab (whole name, exact case: `Skippy` won't find `SkippyScape`) plus the world password; crossplay with Xbox/PS5/Switch 2. Up to 6 players. |

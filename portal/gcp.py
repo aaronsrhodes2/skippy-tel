@@ -27,6 +27,7 @@ class VmStatus:
     idle_minutes: str = "30"
     env: dict[str, str] = field(default_factory=dict)   # parsed games-env
     started_at: datetime | None = None                  # last boot, for the "starting" hint
+    max_hours: str = "8"                                # metadata max-hours: the watchdog's hard ceiling (0 = none)
 
     def minutes_up(self, now: datetime | None = None) -> int | None:
         if self.status != "RUNNING" or not self.started_at:
@@ -117,6 +118,7 @@ class GamesVm:
             idle_minutes=meta.get("idle-minutes", "30"),
             env=envfile.parse(meta.get("games-env", "")),
             started_at=_parse_ts(getattr(inst, "last_start_timestamp", None)),
+            max_hours=meta.get("max-hours", "8"),
         )
 
     def serial_output(self, port: int) -> str:
