@@ -111,16 +111,16 @@ def test_the_card_keeps_its_last_good_body_and_says_so_when_the_session_is_gone(
         {"status": 403, "headers": {}, "body": "Forbidden"},                                               # 5  no longer an admin
         {"status": 200, "headers": {"Content-Type": "text/html"}, "body": SIGN_IN_PAGE},                   # 6  a page that isn't the fragment
         {"status": 200, "type": "opaqueredirect", "headers": {}, "body": ""},                              # 7  redirect: "manual"
-        {"status": 200, "headers": FRAGMENT, "body": "<p>GOOD 2</p>"},                                     # 8  signed back in elsewhere
+        {"status": 200, "redirected": True, "headers": FRAGMENT, "body": "<p>REDIRECTED</p>"},             # 8  never taken from a followed redirect
+        {"status": 200, "headers": FRAGMENT, "body": "<p>GOOD 2</p>"},                                     # 9  signed back in elsewhere
     ]
     ran = run_script(script, steps, {"server-admin-body": {"innerHTML": "<p>GOOD 0</p>"},
                                      "server-admin-note": {"hidden": True}})
     body = [s["elements"]["server-admin-body"]["innerHTML"] for s in ran["out"]]
     note_hidden = [s["elements"]["server-admin-note"]["hidden"] for s in ran["out"]]
-    assert body == ["<p>GOOD 1</p>", "<p>GOOD 1</p>", "<p>GOOD 1</p>", "<p>GOOD 1</p>", "<p>GOOD 1</p>", "<p>GOOD 1</p>",
-                    "<p>GOOD 1</p>", "<p>GOOD 1</p>", "<p>GOOD 2</p>"], "only the real fragment may replace the card"
+    assert body == ["<p>GOOD 1</p>"] * 9 + ["<p>GOOD 2</p>"], "only the real fragment may replace the card"
     # a hiccup (500, network) is not "signed out": no note. Everything that says the session is gone shows it, until a good answer.
-    assert note_hidden == [True, True, True, False, False, False, False, False, True]
+    assert note_hidden == [True, True, True, False, False, False, False, False, False, True]
     assert all(s["reloads"] == 0 for s in ran["out"]), "the card never reloads the page"
 
 
