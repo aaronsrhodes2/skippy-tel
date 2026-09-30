@@ -116,7 +116,10 @@ def test_an_event_that_blows_up_while_it_is_being_read_is_refused_alone(db, monk
 
 def test_a_body_nested_past_what_json_can_parse_is_a_400_not_a_500(db):
     client, path = db
-    body = '{"events": [{"detail": %s}]}' % ("[" * 5000 + "]" * 5000)
+    # The parser's nesting limit differs by Python version and patch (CI's 3.12 follows 5000 levels, 3.13 on Windows doesn't),
+    # so go far past any of them: the C scanner counts its own depth and raises RecursionError long before a million.
+    depth = 1_000_000
+    body = '{"events": [{"detail": %s}]}' % ("[" * depth + "]" * depth)
     res = client.post("/telemetry/site_events", data=body, content_type="application/json")
     assert res.status_code == 400 and rows(path) == []
 
