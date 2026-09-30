@@ -42,6 +42,27 @@
     echo "--- everquest: newest server logs"
     ls -lt --time-style=+%H:%M "$LOGS" 2>/dev/null | head -8 | cut -c1-120
     for f in $(ls -t "$LOGS"/login*.log 2>/dev/null | head -1); do echo "--- everquest: tail of $(basename "$f")"; tail -n 25 "$f" | cut -c1-200; done
+    # Which login servers the world is configured for, and how the world itself talks about them (secrets hidden).
+    echo "--- everquest: login-related config (keys; account/password values hidden)"
+    python3 - "$LOGS/../eqemu_config.json" "$LOGS/../login.json" </dev/null 2>&1 <<'PY' | cut -c1-200 | head -30
+import json, sys
+def walk(node, path, out):
+    for key, value in node.items():
+        here = f"{path}.{key}" if path else key
+        if isinstance(value, dict):
+            walk(value, here, out)
+        elif "login" in here.lower() or here.lower().startswith("worldservers"):
+            hidden = any(w in key.lower() for w in ("pass", "account", "secret", "token"))
+            out.append(f"{here} = {'<hidden>' if hidden else value!r}")
+for name in sys.argv[1:]:
+    try:
+        rows = []
+        walk(json.load(open(name)), "", rows)
+        print(f"[{name.rsplit('/', 1)[-1]}]", *rows, sep="\n  ")
+    except Exception as exc:
+        print(f"[{name.rsplit('/', 1)[-1]}] unreadable: {exc}")
+PY
+    for f in $(ls -t "$LOGS"/world_*.log 2>/dev/null | head -1); do echo "--- everquest: login lines in $(basename "$f")"; grep -i -E "login|LS " "$f" | tail -n 12 | cut -c1-200; done
   fi
   # ── end everquest ──
   echo "--- udp listeners (game ports)"
