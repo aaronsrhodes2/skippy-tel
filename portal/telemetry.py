@@ -76,8 +76,8 @@ class Telemetry:
         if not self.enabled:
             return None
         # who: an email (not a secret, and a long one must not be mistaken for a token), so only cut to length
-        event = {"ts": round(self.clock(), 3), "user": str(user)[:120], "role": str(role)[:12],
-                 "sid": str(sid)[:16], "kind": kind, "name": _short(name, 80), "detail": clean(detail)}
+        event = {"ts": round(self.clock(), 3), "user": _plain(user, 120), "role": _plain(role, 12),
+                 "sid": _plain(sid, 16), "kind": kind, "name": _short(name, 80), "detail": clean(detail)}
         with self._lock:
             self._seq += 1
             event["seq"], event["boot"] = self._seq, self.boot
@@ -112,6 +112,14 @@ class Telemetry:
                     "kinds": dict(kinds), "last_collected_s": None if self.collected_at is None
                     else int(self.clock() - self.collected_at)}
 
+    def oldest_waiting_s(self, now: float | None = None) -> int | None:
+        """How long the oldest event still in memory has been there, or None when nothing waits. Events leave when home
+        acknowledges them (once filed), so a large number while home keeps pulling means it is not filing them."""
+        with self._lock:
+            if not self._events:
+                return None
+            return max(0, int((self.clock() if now is None else now) - self._events[0]["ts"]))
+
 
 # ── keeping secrets and bulk out of what's stored ────────────────────────────
 
@@ -123,21 +131,32 @@ _SECRETS = [re.compile(p) for p in (
     r"(?i)bearer\s+[A-Za-z0-9._~+/=\-]{16,}",
 )]
 # "password: x", "password is x", "the valheim password is x", "password for valheim is x", "set password to x",
-# VALHEIM_PASSWORD=x, {"token": "x"}, api_key = 'a b'. The label may sit inside a NAME_LIKE_THIS (a word boundary
-# does not split a_password), which is why the label is preceded by optional dash/underscore/dot-joined parts.
+# VALHEIM_PASSWORD=x, {"token": "x"}, api_key = 'a b'. The label may sit inside a NAME_LIKE_THIS: the lookbehind lets it start
+# after a dash/underscore/dot (not after a letter or digit), and the name's parts that follow it are part of the match.
+# Nothing may precede the label in the pattern: the old `(?:[A-Za-z0-9]+[_.\-])*` prefix made every start position rescan the
+# whole chain before it (quadratic on 'a.a.a.', cubic on 'password_password_'), and it changed nothing: sub() keeps the text
+# before a match as it is. The parts after the label are possessive (no backtracking into them; the tail can't start with one
+# anyway) and at most MAX_NAME_PARTS, which bounds the work at each label to a constant: the whole scan is linear in the text.
+MAX_NAME_PARTS = 32
 _LABEL = r"(?:pass(?:word|wd|phrase|code)|pwd|pw|secret|token|api[_\-]?key|apikey|credential)s?"
 _LABELLED = re.compile(
-    r"(?i)(?<![A-Za-z0-9])((?:[A-Za-z0-9]+[_.\-])*" + _LABEL + r"(?:[_.\-][A-Za-z0-9]+)*[\"']?)"
+    r"(?i)(?<![A-Za-z0-9])(" + _LABEL + r"(?:[_.\-][A-Za-z0-9]+){0," + str(MAX_NAME_PARTS) + r"}+[\"']?)"
     r"((?:\s+(?:for|of|on|at)\s+(?:the\s+)?[\w\-]+)?\s*(?:[:=]|\bis\b|\bto\b)\s*)"
     r"(\"[^\"\n]*\"|'[^'\n]*'|\S+)")
 _LONG_TOKEN = re.compile(r"\b[A-Za-z0-9_\-]{40,}\b")
 _SENSITIVE_KEY = re.compile(r"(?i)pass|secret|token|api[_\-]?key|authorization|cookie|credential")
+_SURROGATE = re.compile(r"[\ud800-\udfff]")     # a lone surrogate: valid JSON text, but no UTF-8 encoder will take it
 LIMITS = {"message": 4000, "reply": 8000}       # the chat's own text; everything else is short
 DEFAULT_LIMIT = 300
+SCAN_SLACK = 256          # how far past its cap a string is still scanned, so a secret that straddles the cut is seen whole
+MAX_SCAN = 10_000         # the most redact() will ever scan (above every cap + slack): the work per call is bounded by this
 
 
 def redact(text: str) -> str:
-    """Best effort: scrub keys, bearer tokens, 'password: x' and long token-looking strings."""
+    """Best effort: scrub keys, bearer tokens, 'password: x' and long token-looking strings. Only the first MAX_SCAN
+    characters are looked at (and returned): the scan is the expensive part, the portal is one process, and nothing kept
+    is longer than its cap, so callers cut to their cap first (`_short`) and this is the backstop."""
+    text = text[:MAX_SCAN]
     for pattern in _SECRETS:
         text = pattern.sub("[redacted]", text)
     text = _LABELLED.sub(lambda m: f"{m.group(1)}{m.group(2)}[redacted]", text)
@@ -177,8 +196,18 @@ def secret_values(results) -> set[str]:
     return found
 
 
+def _plain(text, limit: int) -> str:
+    """`text` as a str of at most `limit` characters that any UTF-8 encoder will take: a lone surrogate (which JSON can carry,
+    as \\ud800) becomes U+FFFD. Nothing else changes."""
+    text = str(text)[:limit]
+    return text if text.isascii() else _SURROGATE.sub("\N{REPLACEMENT CHARACTER}", text)
+
+
 def _short(text, limit: int) -> str:
-    return redact(str(text))[:limit]
+    """`text` cut to `limit` and scrubbed. It is cut BEFORE it is scanned (plus SCAN_SLACK, so a secret that starts inside the cap
+    and ends past it is still recognised whole and replaced before the cut): the scan's cost depends on how much it reads, and
+    the text is whatever a signed-in person sent."""
+    return redact(_plain(text, limit + SCAN_SLACK))[:limit]
 
 
 def clean(value, key: str = "", depth: int = 0):
@@ -195,7 +224,7 @@ def clean(value, key: str = "", depth: int = 0):
     if isinstance(value, str):
         return _short(value, LIMITS.get(key, DEFAULT_LIMIT))
     if isinstance(value, dict) and depth < 5:
-        return {str(k)[:40]: clean(v, str(k), depth + 1) for k, v in list(value.items())[:30]}
+        return {_plain(k, 40): clean(v, str(k), depth + 1) for k, v in list(value.items())[:30]}
     if isinstance(value, (list, tuple, set)) and depth < 5:
         return [clean(v, key, depth + 1) for v in list(value)[:30]]
     return _short(value, DEFAULT_LIMIT)

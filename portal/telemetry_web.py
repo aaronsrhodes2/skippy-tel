@@ -31,6 +31,7 @@ log = logging.getLogger("telemetry")
 SKIP_ENDPOINTS = frozenset({
     "static", "health", "site_icons",
     "dashboard.game_live", "dashboard.game_discord",               # a game page polls these
+    "server_admin.fragment",                                        # ... and the admin card's 60 s refresh (HTML, so the mimetype rule wouldn't skip it)
     "bilby.state", "bilby.art",                                     # the Bilby page polls these
     "chat.badges", "chat.media_file",                               # the chat fetches these itself
     "me.workshop_send", "me.workshop_events", "me.workshop_stop",   # the Captain's private Skippy: not recorded at all
@@ -57,6 +58,7 @@ SAFE_VALUES = {
 _TAP = re.compile(r"[a-z0-9:_.\-]{1,60}")
 LAUNCHER_TILES = ("skippy", "games", "bilby", "experiments", "dashboard", "admin")   # templates/home.html
 TAPS_PER_MIN = 120          # one person's beacon budget
+STUCK_AFTER_S = 900         # an event this old is still unacknowledged although home keeps pulling: the widget says so (normally < 1 min)
 
 
 def _on(value) -> bool:
@@ -255,14 +257,19 @@ def activity_view(tel, summary, report_age=None, now=None) -> dict:
     health = tel.status()
     now = now if now is not None else tel.clock()
     last = health["last_collected_s"]
+    stuck = tel.oldest_waiting_s(now)
     if not health["enabled"]:
         state = "off"
     elif last is None:
         state = "never"           # nobody has pulled yet: home isn't running the collecting reporter
+    elif last >= 180:
+        state = "stale"
+    elif stuck is not None and stuck > STUCK_AFTER_S:
+        state = "stuck"           # home pulls, but what it pulled is never acknowledged: it isn't being filed (flask-api down?)
     else:
-        state = "ok" if last < 180 else "stale"
+        state = "ok"
     view = {"enabled": health["enabled"], "state": state, "waiting": health["waiting"], "dropped": health["dropped"],
-            "last_collected_s": last, "have": False, "days": 0, "window_events": 0, "people": 0, "oldest_days": None,
+            "last_collected_s": last, "stuck_s": stuck, "have": False, "days": 0, "window_events": 0, "people": 0, "oldest_days": None,
             "retention_days": tel_mod.KEEP_DAYS, "top_pages": [], "top_taps": [], "least_used": [], "actions": [],
             "errors": [], "recent": [], "report_age": report_age}
     if isinstance(summary, dict):

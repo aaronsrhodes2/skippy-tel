@@ -9,6 +9,7 @@
   <p class="muted">Recorder: {{ activity.waiting }} waiting · {{ activity.dropped }} dropped ·
     {% if activity.state == 'never' %}<span class="warn">never collected: home isn't pulling yet (is the reporter running the latest code?)</span>
     {% elif activity.state == 'stale' %}<span class="warn">last collected {{ activity.last_collected_s // 60 }} min ago</span>
+    {% elif activity.state == 'stuck' %}<span class="warn">home is pulling but not filing: the oldest waiting event is {{ activity.stuck_s // 60 }} min old (is flask-api up and storing?)</span>
     {% elif activity.state == 'off' %}off
     {% else %}last collected {{ activity.last_collected_s }} s ago{% endif %}
     · <a href="{{ url_for('privacy') }}">what's recorded</a></p>
