@@ -66,8 +66,10 @@ MAX_RUN_S = 2 * 3600.0             # a run still going after this long is stoppe
 IDLE_S = 30 * 60.0                 # ... and so is one that printed nothing for this long (a long test run is silent for minutes, not half an hour)
 WATCH_TICK_S = 0.5                 # how often the run's thread looks at the clock (and at Stop) while claude is quiet
 REAP_S = 30.0                      # how long a process that has closed its output, or been killed, gets to exit before it is killed again
+SHIP_GIT_TIMEOUT = 30              # each git call of the ship check (a fetch included): it runs as the run ends
 _CONV = re.compile(r"[A-Za-z0-9-]{8,64}")
 _TASK = re.compile(r"[a-f0-9]{8,32}")
+_SHA = re.compile(r"[0-9a-f]{40}")
 
 # Secrets that might appear in a command line the agent runs; the chat shows commands, never their output.
 _SECRETS = re.compile(
@@ -157,6 +159,7 @@ class Run:
         self.task, self.conv, self.message, self.who = task, conv, message, who
         self.project = project                 # which repo (projects.json): picks the clone, the checkout and the session
         self.clone = ""                        # that project's clone when the run started (the conversation log reads it)
+        self.before_finish = None              # (run) -> None, called once just before the run ends (the ship check)
         self.created = time.time() if created is None else created
         self.events: list[dict] = []
         self.done, self.ok, self.error = False, None, None
@@ -177,6 +180,14 @@ class Run:
         self._changed(False)
 
     def finish(self, ok: bool, error: str | None = None) -> None:
+        # The ship check (Workshop._ship_check) runs here, BEFORE the run reads as done, so its event is part of the run
+        # the relay delivers as final: an event added after "done" could arrive after the chat stopped polling.
+        hook, self.before_finish = self.before_finish, None
+        if hook is not None:
+            try:
+                hook(self)
+            except Exception:  # noqa: BLE001 — proof of a push is a bonus; it must never stop a run from ending
+                pass
         with self._cond:
             self.done, self.ok, self.error, self.finished_at = True, ok, error, time.time()
             self._cond.notify_all()
@@ -667,9 +678,9 @@ class Workshop:
                 time.sleep(0.05 * (attempt + 1))       # Windows: "Access is denied" while something holds the file for a moment
         return path
 
-    def _git(self, *args: str, cwd: str | None = None) -> subprocess.CompletedProcess:
+    def _git(self, *args: str, cwd: str | None = None, timeout: float = GIT_TIMEOUT) -> subprocess.CompletedProcess:
         return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", timeout=GIT_TIMEOUT, stdin=subprocess.DEVNULL, env=child_env())
+                              errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, env=child_env())
 
     def _prepare_repo(self, run: Run) -> bool:
         """The project's own clone, on the latest of its branch. False (with the run failed) if there's no clone to work
@@ -738,10 +749,41 @@ class Workshop:
                                 stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
                                 env=child_env(), bufsize=1, **extra)
 
+    def _head(self, clone: str) -> str | None:
+        out = self._git("rev-parse", "HEAD", cwd=clone, timeout=SHIP_GIT_TIMEOUT)
+        sha = out.stdout.strip() if out.returncode == 0 else ""
+        return sha if _SHA.fullmatch(sha) else None
+
+    def _ship_check(self, run: Run, before: str | None) -> None:
+        """Did this run push? Its clone's HEAD moved and origin's branch now contains the new HEAD: then the run says so
+        with one `ship` event the chat turns into a ship card (the deploy's progress, then proof it is live). A commit
+        that was not pushed says nothing: the agent's own words cover that. Everything here is read-only git, short
+        timeouts, and any failure just means no card."""
+        project = self.project(run.project)
+        clone = project.clone
+        after = self._head(clone)
+        if after is None or after == before:
+            return
+        self._git("fetch", "--quiet", "origin", project.branch, cwd=clone, timeout=SHIP_GIT_TIMEOUT)    # best effort
+        if self._git("merge-base", "--is-ancestor", after, f"refs/remotes/origin/{project.branch}",
+                     cwd=clone, timeout=SHIP_GIT_TIMEOUT).returncode != 0:
+            return
+        subject = self._git("log", "-1", "--format=%s", after, cwd=clone, timeout=SHIP_GIT_TIMEOUT).stdout
+        subject = " ".join(redact(subject).split())[:200]
+        workflow = next((name for name in ("deploy.yml", "deploy.yaml")
+                         if (Path(clone) / ".github" / "workflows" / name).is_file()), "")
+        run.emit({"t": "ship", "project": project.id, "repo": project.repo, "branch": project.branch, "sha": after,
+                  "subject": subject, "workflow": workflow})
+
     def _work(self, run: Run) -> None:
         try:
             if not self._prepare_repo(run):
                 return
+            try:
+                before = self._head(self.project(run.project).clone)
+            except (OSError, subprocess.SubprocessError):
+                before = None
+            run.before_finish = lambda r: self._ship_check(r, before)
             try:
                 self.write_prompt(run.project)
             except OSError as exc:                     # no rules, no run: never start the agent without them

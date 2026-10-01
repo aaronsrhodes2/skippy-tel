@@ -101,6 +101,16 @@ def test_the_reconciler_carries_each_runs_project(fakes):
     assert jobs.accepted[0]["jobs"][0]["project"] == "sigma-ground"
 
 
+def test_a_ship_event_is_carried_to_the_portal_as_it_is(fakes):
+    ship = {"t": "ship", "project": "skippytel", "repo": "aaronsrhodes2/skippy-tel", "branch": "main", "sha": "a" * 40,
+            "subject": "Make it green", "workflow": "deploy.yml"}
+    bridge = BridgeStub({T1: BridgeStub.run(events=[ev(0), ship], done=True, finished_age_s=1)})
+    portal = PortalStub()
+    fakes(bridge, portal)
+    reporter.WorkshopSync(TOKEN, SpyJobs()).sync_once()
+    assert portal.held[T1] == [ev(0), ship]
+
+
 # ── conversations ──────────────────────────────────────────────────────────
 def test_the_conversations_list_and_one_conversation_come_from_the_bridge_with_the_token(fakes):
     seen = []

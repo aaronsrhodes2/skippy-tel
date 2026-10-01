@@ -62,7 +62,30 @@ def _clean(event) -> dict | None:
         return {"t": "text", "text": event["text"][:MAX_TEXT]}
     if event.get("t") == "tool" and isinstance(event.get("name"), str):
         return {"t": "tool", "name": event["name"][:40], "detail": str(event.get("detail") or "")[:200]}
+    if event.get("t") == "ship":
+        return ship_event(event)
     return None
+
+
+_SHA = re.compile(r"[0-9a-f]{40}")
+_REPO = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}")
+_BRANCH = re.compile(r"[A-Za-z0-9._/-]{1,100}")
+MAX_SHIPS = 200                 # commits the ship card may ask about (the newest the portal has seen pushed)
+
+
+def ship_event(event) -> dict | None:
+    """The run pushed a commit (services/claude-bridge: Workshop._ship_check). Exactly this shape or nothing: every field
+    a string matching its pattern (a 40-hex sha, an owner/name repo...), the subject one line of at most 200 characters.
+    The page shows the subject as text and builds links only from the checked repo and sha."""
+    if not isinstance(event, dict) or set(event) != {"t", "project", "repo", "branch", "sha", "subject", "workflow"}:
+        return None
+    if not all(isinstance(event[k], str) for k in event):
+        return None
+    if not (_PROJECT.fullmatch(event["project"]) and _REPO.fullmatch(event["repo"]) and _BRANCH.fullmatch(event["branch"])
+            and _SHA.fullmatch(event["sha"]) and event["workflow"] in ("", "deploy.yml", "deploy.yaml")):
+        return None
+    return {"t": "ship", "project": event["project"], "repo": event["repo"], "branch": event["branch"],
+            "sha": event["sha"], "subject": " ".join(event["subject"].split())[:200], "workflow": event["workflow"]}
 
 
 def _str(value, limit: int) -> str:
@@ -116,6 +139,20 @@ class Workshop:
         # The Admin page's kill switch. In this process's memory on purpose: the agent can't reach it (its only way into
         # the portal is a push and a deploy, and pausing cancels its run first). A deploy forgets it; the card says so.
         self.paused: dict | None = None          # {"by": email, "at": epoch s} while paused
+        # The commits a run said it pushed, by (owner, sha): the ship card asks about these and nothing else, so a page
+        # (or anyone with the Captain's cookie) can't make the portal query GitHub for an arbitrary commit.
+        self._ships: dict[tuple[str, str], dict] = {}
+
+    def remember_ship(self, owner: str, ship: dict) -> None:
+        with self._lock:
+            self._ships.pop((owner, ship["sha"]), None)
+            self._ships[(owner, ship["sha"])] = ship
+            while len(self._ships) > MAX_SHIPS:
+                self._ships.pop(next(iter(self._ships)))
+
+    def ship(self, owner: str, sha: str) -> dict | None:
+        with self._lock:
+            return self._ships.get((owner, sha))
 
     def ready(self) -> bool:
         return self.home.can("workshop")
@@ -294,6 +331,10 @@ class Workshop:
         conv = _conversation(body)
         if conv is None or conv.pop("who") != owner:
             return {"state": "error", "error": "That conversation isn't yours, or skippy-pc doesn't have it."}
+        for turn in conv["turns"]:                       # a reopened conversation's ship cards may be asked about too
+            for event in turn["events"]:
+                if event["t"] == "ship":
+                    self.remember_ship(owner, event)
         return {"state": "done", "conversation": conv}
 
     def listing(self) -> dict:
@@ -342,11 +383,14 @@ class Workshop:
                                            "stop": False,
                                            "project": project if _PROJECT.fullmatch(project or "") else DEFAULT_PROJECT}
             have = len(rec["events"])
+            shipped = []
             if start <= have:
                 for event in events[have - start:]:
                     cleaned = _clean(event)
                     if cleaned and len(rec["events"]) < MAX_EVENTS:
                         rec["events"].append(cleaned)
+                        if cleaned["t"] == "ship":
+                            shipped.append(cleaned)
                 if state != "running":
                     rec["state"], rec["error"], ended = state, (str(error)[:500] if error else None), True
                 elif rec["state"] not in _FINAL:
@@ -356,6 +400,9 @@ class Workshop:
             rec["pushed_at"], rec["touched"] = now, now
             rec.pop("resync", None)               # this is the answer to anyone's "check again"
             reply = {"have": len(rec["events"]), "stop": rec["stop"]}
+            owner = rec["owner"]
+        for ship in shipped:
+            self.remember_ship(owner, ship)
         if ended:
             self.home.finish(task, {"result": {"state": state}})     # stop offering the job to the reporter
         return reply

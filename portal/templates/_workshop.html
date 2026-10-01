@@ -42,6 +42,21 @@
   .me-chat .convs .meta { display: block; font-size: .74rem; color: var(--muted); margin-top: 2px; }
   .me-chat .convs .msg { font-size: .8rem; color: var(--muted); margin: 6px 0; }
   .me-chat .convs .msg.bad { color: var(--red); }
+  /* The ship card: proof that what Skippy pushed is live (portal/ship.py). Amber while it is on its way, green only when
+     the portal serves that commit, red with the run's link when the deploy failed. */
+  .me-chat .ship { margin: 8px 0 4px; padding: 8px 10px; border: 1px solid var(--amber); border-radius: 8px; white-space: normal; }
+  .me-chat .ship.ok { border-color: var(--green); }
+  .me-chat .ship.bad { border-color: var(--red); }
+  .me-chat .ship .head { font-weight: 600; color: var(--amber); }
+  .me-chat .ship.ok .head { color: var(--green); }
+  .me-chat .ship.bad .head { color: var(--red); }
+  .me-chat .ship .subj, .me-chat .ship .note { font-size: .78rem; color: var(--muted); margin-top: 2px; }
+  .me-chat .ship .stages { display: flex; gap: 10px; flex-wrap: wrap; font-size: .78rem; margin-top: 4px; }
+  .me-chat .ship .st { color: var(--muted); }
+  .me-chat .ship .st.done { color: var(--green); }
+  .me-chat .ship .st.running, .me-chat .ship .st.queued { color: var(--amber); }
+  .me-chat .ship .st.failed { color: var(--red); }
+  .me-chat .ship .links { display: flex; gap: 12px; flex-wrap: wrap; font-size: .8rem; margin-top: 4px; }
   /* On a phone the card sits on top of the widgets and must fit above the floating Home button. */
   @media (max-width: 900px) { .me-chat { position: static; height: auto; min-height: 380px; max-height: calc(100vh - 290px); } .me-chat .wlog { min-height: 140px; } }
 </style>
@@ -152,6 +167,7 @@
       if (turn.role === "user") { box.textContent = turn.text; return; }
       (turn.parts || []).forEach(p => {
         if (p.t === "text") box.appendChild(el("p", null, p.text));
+        else if (p.t === "ship") box.appendChild(shipCard(p));
         else box.appendChild(el("div", "act", "› " + p.name + (p.detail ? ": " + p.detail : "")));
       });
       if (turn.note) box.appendChild(el("div", "note" + (turn.bad ? " bad" : ""), turn.note));
@@ -159,6 +175,53 @@
       if (!(turn.parts || []).length && !turn.note) box.appendChild(el("div", "act", "…"));
     }
     const scroll = () => { log.scrollTop = log.scrollHeight; };
+
+    // ── the ship card: Skippy pushed a commit; show it going live (portal/ship.py answers) ─────────────────────
+    // One card per commit for the life of the page (a redraw re-uses it), polled every 10 s until the answer is final.
+    const SHIP = "{{ url_for('me.workshop_ship') }}", SHIP_EVERY_MS = 10000, SHIP_GIVE_UP_MS = 40 * 60000;
+    const ships = {};                              // sha -> {card, final, started}
+    const MARK = {done: "✓", running: "…", queued: "…", waiting: "·", failed: "✗", skipped: "–"};
+    const safeLink = (u) => typeof u === "string" && (u.indexOf("https://github.com/") === 0 || u === "/admin#recovery");
+    function paintShip(s, d) {
+      const c = s.card;
+      c.className = "ship " + (d.tone === "ok" ? "ok" : d.tone === "bad" ? "bad" : "wait");
+      const links = el("div", "links");
+      [["commit", "Commit " + (d.short || "")], ["run", "Deploy run"], ["workflow", "Its deploy workflow"], ["rollback", "Roll back (Admin)"]]
+        .forEach(([k, label]) => {
+          const u = d.links && d.links[k];
+          if (!safeLink(u)) return;
+          const a = el("a", null, label); a.href = u; if (k !== "rollback") { a.target = "_blank"; a.rel = "noopener"; }
+          links.appendChild(a);
+        });
+      const stages = el("div", "stages");
+      (Array.isArray(d.stages) ? d.stages : []).forEach(st => stages.appendChild(el("span", "st " + st.state, (MARK[st.state] || "·") + " " + st.name)));
+      c.replaceChildren(el("div", "head", d.headline || "Pushed."), el("div", "subj", d.subject || ""), stages,
+                        el("div", "note", d.note || ""), links);
+    }
+    async function watchShip(sha) {
+      const s = ships[sha];
+      while (!s.final) {
+        let d = null;
+        try { const r = await call(SHIP + "?sha=" + encodeURIComponent(sha), {headers: H}); if (r.ok && r.data) d = r.data; } catch (e) {}
+        if (d) { paintShip(s, d); s.final = !!d.final; }
+        if (s.final) break;
+        if (Date.now() - s.started > SHIP_GIVE_UP_MS) {
+          paintShip(s, {tone: "wait", headline: "Stopped watching after 40 min.", note: "Reload the page to look again.", short: sha.slice(0, 7),
+                        links: {commit: d && d.links ? d.links.commit : ""}});
+          break;
+        }
+        await new Promise(res => setTimeout(res, SHIP_EVERY_MS));
+      }
+    }
+    function shipCard(p) {
+      if (!/^[0-9a-f]{40}$/.test(p.sha || "")) return el("div", "act", "› pushed");
+      if (!ships[p.sha]) {
+        ships[p.sha] = {card: el("div", "ship wait"), final: false, started: Date.now()};
+        paintShip(ships[p.sha], {headline: "Pushed " + p.sha.slice(0, 7) + ". Checking…", subject: p.subject});
+        watchShip(p.sha);
+      }
+      return ships[p.sha].card;
+    }
 
     // ── the quiet link ────────────────────────────────────────────────────────────
     // job.kind says why: "stalled" (skippy-pc stopped reporting), "offline" (it never picked the task up),
@@ -242,7 +305,7 @@
       if (r && (r.status === 401 || r.status === 403)) why = "signin";
       const d = r && r.ok && r.data && typeof r.data === "object" ? r.data : null;
       if (d && d.state !== "unknown") {            // a stalled or offline read is still a read: keep what it carries
-        if (Array.isArray(d.events)) d.events.forEach(e => { if (e && (e.t === "text" || e.t === "tool")) job.turn.parts.push(e); });
+        if (Array.isArray(d.events)) d.events.forEach(e => { if (e && (e.t === "text" || e.t === "tool" || e.t === "ship")) job.turn.parts.push(e); });
         if (typeof d.next === "number" && d.next > job.after) job.after = d.next;   // never back: a portal that was just rebuilt holds fewer events than this page has
         store.set(K.task, JSON.stringify({task: job.task, after: job.after}));
       }
@@ -385,7 +448,7 @@
       turns = [];
       (got.turns || []).forEach(t => {
         turns.push({role: "user", text: t.message});
-        const reply = {role: "assistant", parts: (t.events || []).filter(e => e && (e.t === "text" || e.t === "tool"))};
+        const reply = {role: "assistant", parts: (t.events || []).filter(e => e && (e.t === "text" || e.t === "tool" || e.t === "ship"))};
         if (t.state === "error") { reply.note = t.error || "It failed."; reply.bad = t.error !== "stopped"; }
         reply.task = t.task;
         turns.push(reply);

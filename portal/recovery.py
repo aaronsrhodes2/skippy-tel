@@ -11,7 +11,7 @@ Admin page gets a few fixed buttons. Each one is:
     memory for the card.
 
 GitHub is reached with GITHUB_ACTIONS_TOKEN, a fine-grained token for this one repo with Actions read/write and nothing
-else (it can't read code or secrets). `GitHub` below can call exactly five endpoints, checked again inside the one
+else (it can't read code or secrets). `GitHub` below can call exactly six endpoints (the sixth, read only: the private Skippy's ship card), checked again inside the one
 method that sends anything, so a bug elsewhere still can't reach another URL. Errors come back as plain sentences: never
 a raw response body, never the token.
 
@@ -130,6 +130,8 @@ class GitHub:
     ALLOWED = (
         ("GET", re.compile(rf"/repos/{re.escape(REPO)}/actions/workflows/deploy\.yml/runs\?branch=main&per_page=\d{{1,2}}")),
         ("GET", re.compile(rf"/repos/{re.escape(REPO)}/actions/runs/[1-9][0-9]{{0,19}}/jobs\?per_page=50")),
+        # The private Skippy's ship card: the deploy runs of ONE commit (read only; a 40-hex sha and nothing else).
+        ("GET", re.compile(rf"/repos/{re.escape(REPO)}/actions/workflows/deploy\.yml/runs\?head_sha=[0-9a-f]{{40}}&per_page=5")),
         ("POST", re.compile(rf"/repos/{re.escape(REPO)}/actions/workflows/rollback\.yml/dispatches")),
         ("POST", re.compile(rf"/repos/{re.escape(REPO)}/actions/runs/[1-9][0-9]{{0,19}}/rerun-failed-jobs")),
         ("POST", re.compile(rf"/repos/{re.escape(REPO)}/actions/runs/[1-9][0-9]{{0,19}}/cancel")),
@@ -182,6 +184,15 @@ class GitHub:
         jobs = (data or {}).get("jobs") if isinstance(data, dict) else None
         return [{"name": str(j.get("name") or "")[:80], "status": str(j.get("status") or "")[:20],
                  "conclusion": str(j.get("conclusion") or "")[:20]} for j in jobs or [] if isinstance(j, dict)]
+
+    def runs_for_sha(self, sha: str) -> list[dict]:
+        """The deploy runs of one commit, newest first (the ship card). Refused before any request unless `sha` is a
+        full 40-hex commit id."""
+        if not isinstance(sha, str) or not _SHA.fullmatch(sha):
+            raise GitHubError("That isn't a commit id.")
+        data = self._call("GET", f"/repos/{REPO}/actions/workflows/deploy.yml/runs?head_sha={sha}&per_page=5")
+        runs = (data or {}).get("workflow_runs") if isinstance(data, dict) else None
+        return [r for r in (_run(x) for x in runs or []) if r and r["head_sha"] == sha]
 
     def dispatch_rollback(self, revision: str = "") -> None:
         value = valid_revision(revision)

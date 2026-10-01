@@ -58,6 +58,8 @@ def _event_md(event: dict) -> str:
     if event.get("t") == "tool":
         detail = str(event.get("detail") or "")
         return f"- `{event.get('name')}`" + (f": `{detail}`" if detail else "") + "\n"
+    if event.get("t") == "ship":
+        return f"- shipped `{event.get('sha')}` to {event.get('repo')} {event.get('branch')}: {event.get('subject')}\n"
     return ""
 
 
@@ -289,7 +291,29 @@ def clean_events(events: list) -> list[dict]:
             out.append({"t": "text", "text": e["text"][:MAX_EVENT_TEXT]})
         elif e.get("t") == "tool" and isinstance(e.get("name"), str):
             out.append({"t": "tool", "name": e["name"][:40], "detail": str(e.get("detail") or "")[:200]})
+        elif ship_event(e):
+            out.append(ship_event(e))
     return out
+
+
+_SHIP_SHA = re.compile(r"[0-9a-f]{40}")
+_SHIP_REPO = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}")
+_SHIP_PROJECT = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
+_SHIP_BRANCH = re.compile(r"[A-Za-z0-9._/-]{1,100}")
+
+
+def ship_event(e) -> dict | None:
+    """A `ship` event (the run pushed this commit), exactly in its shape, or None."""
+    if not isinstance(e, dict) or e.get("t") != "ship":
+        return None
+    fields = {k: e.get(k) for k in ("project", "repo", "branch", "sha", "subject", "workflow")}
+    if not all(isinstance(v, str) for v in fields.values()):
+        return None
+    if not (_SHIP_PROJECT.fullmatch(fields["project"]) and _SHIP_REPO.fullmatch(fields["repo"])
+            and _SHIP_BRANCH.fullmatch(fields["branch"]) and _SHIP_SHA.fullmatch(fields["sha"])
+            and fields["workflow"] in ("", "deploy.yml", "deploy.yaml")):
+        return None
+    return {"t": "ship", **fields, "subject": " ".join(fields["subject"].split())[:200]}
 
 
 # ── backfill: what Claude Code still holds from before this existed ──────────

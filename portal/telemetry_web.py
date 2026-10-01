@@ -35,6 +35,7 @@ SKIP_ENDPOINTS = frozenset({
     "chat.badges", "chat.media_file",                               # the chat fetches these itself
     "me.workshop_send", "me.workshop_events", "me.workshop_stop",   # the Captain's private Skippy: not recorded at all
     "me.workshop_resync", "me.workshop_history", "me.workshop_history_result",
+    "me.workshop_ship",
     "experiments.radiance_file", "radiance_probe",
     "home_report", "home_jobs", "home_job_done", "home_media", "home_import_chunk", "home_workshop",
     "home_telemetry", "game_import_download", "game_import_done", "ops_home", "tasks_run",

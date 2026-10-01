@@ -203,6 +203,12 @@ function fakeFetch(url, opts) {
     if (resyncMode === "throw") return Promise.reject(new Error("network down"));
     return Promise.resolve(reply(200, {state: "running", error: null}));
   }
+  if (route === "ship") {                                           // the ship card's poll: answers in order, the last one repeats
+    const sha = u.searchParams.get("sha"); rec.sha = sha;
+    const list = (input.ship || {})[sha] || [{final: true, tone: "ok", headline: "?"}];
+    const n = calls.filter(c => c.route === "ship" && c.sha === sha).length - 1;
+    return Promise.resolve(reply(200, list[Math.min(n, list.length - 1)]));
+  }
   if (route === "history") {                                        // a job for skippy-pc: the list, or one conversation
     const body = JSON.parse(opts.body); rec.conv = body.conv;
     const id = "h" + (++made);
@@ -239,6 +245,14 @@ function snap() {
     convsShown: !e["ps-convs"].hidden, logHidden: e["ps-log"].hidden, convsMsg: e["ps-convs-msg"].textContent,
     convsBtn: e["ps-convs-btn"].textContent, items: e["ps-convs-list"].children.map(b => b.textContent),
     conv: storage.get("ps-conv"), storedProject: storage.get("ps-project"),
+    ships: (function find(node, out) {                              // every ship card: its class, text and links
+      if (String(node.className).indexOf("ship") === 0) {
+        const links = []; (function a(n) { if (n.tag === "a") links.push({text: n.textContent, href: n.href, target: n.target || ""}); (n.children || []).forEach(a); })(node);
+        out.push({cls: node.className, text: node.textContent, links});
+      } else (node.children || []).forEach(c => find(c, out));
+      return out;
+    })(e["ps-log"], []),
+    shipPolls: calls.filter(c => c.route === "ship").length,
   };
 }
 
@@ -278,7 +292,7 @@ def ev(n: int) -> dict:
 
 
 def drive(page: str, steps: list, tasks: dict | None = None, storage: dict | None = None, follow: str | None = None,
-          history: dict | None = None) -> dict:
+          history: dict | None = None, ship: dict | None = None) -> dict:
     """Run the card's script against the fake browser. `follow` = a task the page was already following (a reload
     mid-task), with a transcript that has its (empty) assistant turn."""
     store = dict(storage or {})
@@ -290,7 +304,7 @@ def drive(page: str, steps: list, tasks: dict | None = None, storage: dict | Non
     # (the card's "…" came back as mojibake there)
     done = subprocess.run([NODE, "-e", HARNESS], capture_output=True, timeout=120,
                           input=json.dumps({"script": script(page), "steps": steps, "tasks": tasks or {}, "storage": store,
-                                            "history": history or {}}).encode())
+                                            "history": history or {}, "ship": ship or {}}).encode())
     assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
     return json.loads(done.stdout.decode("utf-8"))
 

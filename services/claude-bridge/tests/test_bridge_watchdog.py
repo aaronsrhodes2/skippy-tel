@@ -160,7 +160,7 @@ def test_the_engines_own_git_calls_never_wait_for_a_person_either(shop, monkeypa
         assert kw["env"]["GIT_TERMINAL_PROMPT"] == "0" and kw["env"]["GCM_INTERACTIVE"] == "never"
         assert "SKIPPY_HOME_TOKEN" not in kw["env"]
         assert kw["stdin"] is engine.subprocess.DEVNULL                      # and nothing to read a password from
-        assert kw["timeout"] == engine.GIT_TIMEOUT
+        assert kw["timeout"] in (engine.GIT_TIMEOUT, engine.SHIP_GIT_TIMEOUT)    # the ship check's are shorter still
 
 
 def test_child_env_sets_the_two_variables_and_drops_the_key():

@@ -183,6 +183,14 @@ browser <── poll /me/workshop/events ── portal <── POST /home/worksh
   (`<date>_<conv>.turns.json`: his messages, Skippy's text and tool lines, how each ended) and serves it on `GET
   /workshop/conversations` and `GET /workshop/conversation/<conv>` (home token); the portal asks for them as home jobs
   (`workshop_conversations`, `workshop_conversation`) and shows only the asker's own.
+- **Proof it's live (the ship card).** When a run ends, the bridge compares its clone's HEAD with where it started and
+  whether `origin/<branch>` now contains it; if the run pushed, its last event is `{"t":"ship", project, repo, branch,
+  sha, subject, workflow}` (strictly checked by the portal's `ship_event`). The answer shows a card that polls
+  `GET /me/workshop/ship?sha=` every 10 s until final (`portal/ship.py`; only for a commit one of your own runs pushed):
+  for SkippyTel, that commit's deploy run (one new read-only call on the recovery client's allow-list: deploy runs by
+  `head_sha`) as tests → build → deploy, green only when `/version`'s commit is that sha (or a later deploy that contains it
+  is live), red with the run's link and **Roll back** (Admin page) when it failed. Other projects: the commit link and
+  "pushed (no deploy pipeline here)", or a link to their deploy workflow (the portal's token reads skippy-tel only).
 - **A portal deploy doesn't lose the conversation.** History and progress live on
   skippy-pc (the bridge keeps every event and one Claude session per conversation);
   the reporter tells the portal what it has, and a redeployed portal replies "I hold N

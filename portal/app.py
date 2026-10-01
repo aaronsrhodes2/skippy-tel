@@ -41,6 +41,7 @@ import ratelimit
 import readiness
 import recovery
 import recovery_web
+import ship as ship_mod
 import tasks
 import telemetry_web
 import watch
@@ -552,6 +553,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     app.register_blueprint(admin)
     admin_panel.init_app(app, vm)          # the per-game Server admin card: admin-only refresh route + template global
     recovery_web.init_app(app, workshop, limiter, github)   # the Admin page's recovery buttons (/admin/recovery/*)
+    ships = ship_mod.ShipWatch(github, app.extensions["recovery"]["runs"])   # the private Skippy's ship card
+    app.extensions["ships"] = ships
 
     # ── home reporter (services/home-reporter) ─────────────────────────────────
     @app.post("/home/report")
@@ -859,6 +862,16 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
         return jsonify(job=job)
+
+    @mine.get("/workshop/ship")
+    @workshop_call
+    def workshop_ship():
+        """The ship card's poll: how the commit a run pushed is doing (ship.py). Only for a commit one of the asker's runs
+        said it pushed: anything else is a 404, so this can't be used to ask GitHub about arbitrary commits."""
+        found = workshop.ship(me(), request.args.get("sha", ""))
+        if found is None:
+            return jsonify(error="unknown commit"), 404
+        return jsonify(ships.status(found, buildinfo.info()["commit"]))
 
     @mine.get("/workshop/history/result")
     @workshop_call
