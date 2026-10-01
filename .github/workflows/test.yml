@@ -16,6 +16,7 @@ jobs:
 
   shell-syntax:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - run: bash -n infra/gcp-games/*.sh infra/bootstrap/*.sh scripts/games.sh tools/*.sh

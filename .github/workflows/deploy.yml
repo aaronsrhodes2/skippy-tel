@@ -53,6 +53,7 @@ jobs:
     # it PROVES nothing Mentat is built from differs from the last successful deploy; any doubt, and any manual run, is true).
     # Nothing that must run `needs` this job except the two Mentat jobs, so a wrong "false" can never stop the portal.
     runs-on: ubuntu-latest
+    timeout-minutes: 5      # (every job has one: GitHub's default is 6 HOURS, and a hung job holds the deploy group that long)
     permissions:
       contents: read
       actions: read      # to ask which deploy run was the last green one
@@ -88,6 +89,7 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.mentat == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -98,12 +100,13 @@ jobs:
       - run: pip install -r mentat/requirements.txt pytest
       - run: |
           mkdir -p "$RUNNER_TEMP/sigma-ground"
-          curl -fsSL "https://github.com/aaronsrhodes2/sigma-ground/archive/${SIGMA_GROUND_REF}.tar.gz" \
+          curl -fsSL -m 300 "https://github.com/aaronsrhodes2/sigma-ground/archive/${SIGMA_GROUND_REF}.tar.gz" \
             | tar -xz -C "$RUNNER_TEMP/sigma-ground" --strip-components=1
       - run: SIGMA_GROUND_DIR="$RUNNER_TEMP/sigma-ground" python -m pytest mentat/tests -q
 
   gate:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       ready: ${{ steps.check.outputs.ready }}
     steps:
@@ -120,6 +123,7 @@ jobs:
     needs: [test, gate]
     if: needs.gate.outputs.ready == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15     # enough for an apply that stops and restarts the VM; a hang ends as a clear failure
     env:
       # The monthly budget alert (infra/gcp-games/budget.tf) is created only when the repository variable
       # BILLING_ACCOUNT is set (Settings > Secrets and variables > Actions > Variables). Unset = empty = no budget.
@@ -144,6 +148,7 @@ jobs:
     needs: [test, mentat-test, changes, gate]
     if: needs.gate.outputs.ready == 'true' && needs.changes.outputs.mentat == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       MENTAT_SA: skippy-mentat@skippy-tel.iam.gserviceaccount.com
       MENTAT_IMAGE: us-west1-docker.pkg.dev/skippy-tel/skippy/mentat
@@ -187,16 +192,16 @@ jobs:
         run: |
           URL=$(gcloud run services describe skippy-mentat --region "$REGION" --format='value(status.url)')
           echo "Mentat: $URL" >> "$GITHUB_STEP_SUMMARY"
-          curl -fsS "$URL/health"
-          curl -fsS "$URL/tools" | python3 -c "import json,sys; n=len(json.load(sys.stdin)); print(n, 'tools'); assert n > 100"
-          curl -fsS -X POST -H 'Content-Type: application/json' \
+          curl -fsS -m 30 "$URL/health"
+          curl -fsS -m 30 "$URL/tools" | python3 -c "import json,sys; n=len(json.load(sys.stdin)); print(n, 'tools'); assert n > 100"
+          curl -fsS -m 30 -X POST -H 'Content-Type: application/json' \
             -d '{"value": 1, "from_units": "mile", "to_units": "km"}' "$URL/tools/convert_units"
-          curl -fsS -X POST -H 'Content-Type: application/json' \
+          curl -fsS -m 60 -X POST -H 'Content-Type: application/json' \
             -d '{"question": "how fast does a 5 cm copper ball hit the ground from 10 km?"}' "$URL/ask" \
             | python3 -c "import json,sys; r=json.load(sys.stdin)['result']; print(r['value'], r['units']); assert r['value']"
-          curl -fsS "$URL/wva/catalog" \
+          curl -fsS -m 30 "$URL/wva/catalog" \
             | python3 -c "import json,sys; r=json.load(sys.stdin)['result']; n=sum('weapon' in w for w in r['weapons']); print(n, 'Weapon vs. Armor presets'); assert n >= 20"
-          curl -fsS -X POST -H 'Content-Type: application/json' \
+          curl -fsS -m 60 -X POST -H 'Content-Type: application/json' \
             -d '{"weapon": {"type": "kinetic", "mass_kg": 0.0079, "velocity_ms": 715, "radius_m": 0.0038, "material": "steel_mild"}, "armor_layers": [{"material": "ceramic_alumina", "thickness_m": 0.015}], "environment": "atmosphere_earth", "distance_m": 100}' \
             "$URL/wva/solve" | python3 -c "import json,sys; r=json.load(sys.stdin)['result']; print(r['verdict']); assert r['layers']"
 
@@ -208,6 +213,7 @@ jobs:
     needs: [gate]
     if: needs.gate.outputs.ready == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: google-github-actions/auth@v2
@@ -245,6 +251,9 @@ jobs:
     needs: [test, portal-image, gate]
     if: needs.gate.outputs.ready == 'true'
     runs-on: ubuntu-latest
+    # 20 minutes: a normal portal deploy takes 2-4. GitHub's default (6 hours) let one hung smoke test hold the deploy group
+    # for hours. The rollback step below also runs when the run is CANCELLED (by hand or from the admin page), not only failed.
+    timeout-minutes: 20
     steps:
       - uses: google-github-actions/auth@v2
         with:
@@ -314,8 +323,10 @@ jobs:
           URL=$(gcloud run services describe skippy-portal --region "$REGION" --format='value(status.url)')
           echo "Portal: $URL" >> "$GITHUB_STEP_SUMMARY"
           # (--retry: a failed smoke test now ROLLS BACK, so one transient 503 must not undo a good deploy.)
-          curl -fsS --retry 3 --retry-delay 5 "$URL/health"
-          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/home/report" -H 'Content-Type: application/json' -d '{}')
+          # (-m on EVERY curl: a revision that accepts connections but never answers would otherwise hold each try for
+          # Cloud Run's whole 900 s request timeout, about an hour with the retries.)
+          curl -fsS -m 20 --retry 3 --retry-delay 5 "$URL/health"
+          code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -X POST "$URL/home/report" -H 'Content-Type: application/json' -d '{}')
           [ "$code" = 401 ] || { echo "/home/report without a token answered $code, expected 401"; exit 1; }
           # The reconciler's door (the home reporter lists what the portal holds here): it must exist AND be locked.
           # 404 is accepted only while that route isn't in the code (the reporter-recovery change adds it); once
@@ -328,15 +339,19 @@ jobs:
           # his dashboard is broken for everyone, so fail the deploy while the previous revision can still be restored.
           code=$(curl -s -m 30 --retry 3 --retry-delay 5 -o /dev/null -w '%{http_code}' "$URL/me")
           case "$code" in 200|301|302|303|307|308) ;; *) echo "/me signed out answered $code, expected a redirect or the sign-in page"; exit 1 ;; esac
-          curl -fsS -o /dev/null "$URL/"   # login page renders => secrets + OAuth config loaded
-          curl -fsS "$URL/experiments/benchmark" | grep -q "Wolfram"            # benchmark results bundled
-          curl -fsS "$URL/experiments/radiance/" | grep -q "viewer.js"          # Radiance bundled
+          curl -fsS -m 20 -o /dev/null "$URL/"   # login page renders => secrets + OAuth config loaded
+          curl -fsS -m 20 "$URL/experiments/benchmark" | grep -q "Wolfram"            # benchmark results bundled
+          curl -fsS -m 20 "$URL/experiments/radiance/" | grep -q "viewer.js"          # Radiance bundled
       - name: Roll back to the previous revision
-        # Reached only when something above failed. A failure BEFORE the deploy step (build, push) changed nothing, so
-        # there is nothing to undo; from the deploy step on, put ALL traffic back on the revision that served before.
-        # (When the new revision never became ready, Cloud Run kept serving the old one: this just makes it explicit.)
+        # Reached only when something above failed, or the run was CANCELLED part way (a person cancelling a hung deploy,
+        # or the admin page's "Cancel the stuck deploy"): failure() is false for a cancelled job, and a cancel after the
+        # traffic step would otherwise leave the new, possibly broken revision serving everyone (audit A2).
+        # A failure BEFORE the deploy step (build, push) changed nothing, so there is nothing to undo; from the deploy step
+        # on, put ALL traffic back on the revision that served before. (When the new revision never became ready, Cloud
+        # Run kept serving the old one: this just makes it explicit.) Its own 5 minutes: it must finish inside a cancel.
         # The job still ends red on purpose: the fix is a new push, and the next deploy sends traffic forward again.
-        if: failure() && env.PREV_REVISION != '' && steps.deploy.outcome != 'skipped'
+        if: (failure() || cancelled()) && env.PREV_REVISION != '' && steps.deploy.outcome != 'skipped'
+        timeout-minutes: 5
         run: |
           URL=$(gcloud run services describe skippy-portal --region "$REGION" --format='value(status.url)' || true)
           if gcloud run services update-traffic skippy-portal --region "$REGION" --to-revisions "$PREV_REVISION=100"; then
@@ -348,7 +363,7 @@ jobs:
             exit 1
           fi
           # Prove it: the old revision may have been scaled to zero, so allow it a few seconds to wake.
-          if curl -fsS --connect-timeout 10 --retry 6 --retry-delay 5 --retry-all-errors "$URL/health"; then
+          if curl -fsS -m 20 --connect-timeout 10 --retry 6 --retry-delay 5 --retry-all-errors "$URL/health"; then
             echo "Health after rollback: ok" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "::error::Rolled back to $PREV_REVISION, but /health still does not answer: the problem is not the new revision. See docs/portal/remote-recovery.md."
