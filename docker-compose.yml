@@ -31,11 +31,9 @@ services:
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
       - WHISPER_BASE_URL=http://whisper:8000
-      - CLAUDE_BRIDGE_URL=http://host.docker.internal:9337
     extra_hosts:
-      # solid gold / trust the awesomeness tiers reach the host-side
-      # claude-bridge through this mapping. host-gateway resolves to the
-      # Docker host on Linux and Windows Docker Desktop alike.
+      # /health pings the host-side claude-bridge (the private Skippy's engine) through this mapping.
+      # host-gateway resolves to the Docker host on Linux and Windows Docker Desktop alike.
       - "host.docker.internal:host-gateway"
     volumes:
       # APK staging: copy built APKs here, served at /apk/<name>

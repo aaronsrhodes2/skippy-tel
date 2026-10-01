@@ -41,6 +41,8 @@ Last updated 2026-09-29.
 | Secrets | Vault → Secret Manager sync in the deploy job (needs the Captain's OK for the IAM grant; manual `secrets.sh --from-env` until then) |
 | Bills | Cancel SuperGrok after Claude voice in the car is proven |
 | Streaming | MacBook side (Moonlight, pairing, hotspot test) |
+| Portal | **AR glasses view in the portal** (future feature, the Captain 2026-09-30): bring the Viture glasses' HUD view (the passthrough UI zPhone's SkippyDroid draws, SUIP/SkippyView) into the browser, so it works from the Skippy Portal. zPhone itself is shelved: this is a portal feature, built to the passthrough colour doctrine (black = transparent) in the dev-root CLAUDE.md |
+| Portal | **Nagatha's Video Service**: browser video from skippy-pc's Jellyfin through a pass-guarded video gate (gate built 2026-09-30; portal app next) |
 | Later | SkippyTel v2 core ([`docs/v2/CHARTER.md`](v2/CHARTER.md)); ARK (deferred, too heavy) |
 
 **Dropped:** face recognition (InsightFace, HeyBuddy) was dropped by the Captain's decision on 2026-09-29; do not re-add it.

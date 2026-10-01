@@ -124,7 +124,6 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                                hidden_up=bool(status and status.status == "RUNNING"
                                               and any(g not in shown for g in status.games)),
                                show_experiments=auth.has_portal(me(), "experiments"),
-                               show_bilby=auth.has_portal(me(), "bilby"), music=home.music(),
                                music_gate=home.can("music_gate"),
                                has_me="me" in app.blueprints)
 
@@ -634,52 +633,18 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         except ValueError:
             abort(400)
 
-    # ── Bilby: what's playing (grant "bilby"; controls are admin only) ──────────
-    music = Blueprint("bilby", __name__, url_prefix="/bilby")
+    # ── /bilby: the old mirror of the Mac's DJ decks is gone (the Captain's call, 2026-09-30: it no longer worked).
+    #    Every old /bilby link and bookmark lands in Bilby's Audio Service instead. ───────────────────────────────
+    old_bilby = Blueprint("bilby", __name__, url_prefix="/bilby")
 
-    def bilby_required(view):
-        @wraps(view)
-        @auth.login_required
-        def wrapped(*args, **kwargs):
-            if not auth.has_portal(me(), "bilby"):
-                abort(403)
-            return view(*args, **kwargs)
-        return wrapped
+    @old_bilby.get("/", defaults={"rest": ""}, strict_slashes=False)     # /bilby and /bilby/ in one hop
+    @old_bilby.get("/<path:rest>")
+    def moved(rest):
+        return redirect(url_for("music.player_page"), code=301)
 
-    @music.get("")
-    @bilby_required
-    def index():
-        return render_template("bilby.html", music=home.music())
+    app.register_blueprint(old_bilby)
 
-    @music.get("/state.json")
-    @bilby_required
-    def state():
-        return jsonify(home.music())
-
-    @music.get("/art")
-    @bilby_required
-    def art():
-        a = home.current_art()
-        if not a:
-            abort(404)
-        kind = a.get("type") if a.get("type") in ("image/jpeg", "image/png", "image/webp") else "image/jpeg"
-        return app.response_class(base64.b64decode(a["b64"]), mimetype=kind,       # never HTML
-                                  headers={"Cache-Control": "private, max-age=3600",
-                                           "X-Content-Type-Options": "nosniff"})
-
-    @music.post("/control")
-    @auth.admin_required
-    def control():
-        ok = home.queue("music", request.form.get("action", ""))
-        if request.accept_mimetypes.best == "application/json":
-            return jsonify(queued=ok), (200 if ok else 400)
-        flash("Sent to skippy-pc; it lands within ~15 seconds." if ok else "Unknown action.",
-              "ok" if ok else "error")
-        return redirect(url_for("bilby.index"))
-
-    app.register_blueprint(music)
-
-    # ── Music: the Captain's library on any browser (player.py; admin only) ────
+    # ── Bilby's Audio Service: the Captain's library on any browser (player.py; admin only) ────
     listen = Blueprint("music", __name__, url_prefix="/music")
 
     def device_id() -> str:
@@ -698,7 +663,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         """Add to Home Screen opens straight into the player, full screen, like an app."""
         icon = url_for("static", filename="apple-touch-icon.png")
         return app.response_class(json.dumps({
-            "name": "Skippy Music", "short_name": "Music", "start_url": url_for("music.player_page"),
+            "name": "Bilby's Audio Service", "short_name": "Bilby", "start_url": url_for("music.player_page"),
             "scope": url_for("music.player_page"), "display": "standalone", "background_color": "#000000",
             "theme_color": "#000000", "icons": [{"src": icon, "sizes": "180x180", "type": "image/png"}]}),
             mimetype="application/manifest+json")

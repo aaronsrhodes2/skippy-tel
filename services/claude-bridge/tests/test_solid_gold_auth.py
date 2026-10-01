@@ -88,35 +88,6 @@ def test_health_stays_open_for_the_liveness_ping_and_never_shows_the_token(door)
     assert "door-token" not in json.dumps(out)
 
 
-def test_flask_apis_client_sends_the_token_on_every_call():
-    """The only caller of /solid-gold is flask-api's client; if it stopped sending the header the tiers would go dark."""
-    src = (ROOT / "flask-api" / "app" / "clients" / "claude_bridge.py").read_text(encoding="utf-8")
-    assert src.count("headers=_headers()") == 2                               # chat() and stream_chat()
-    assert 'os.getenv("SKIPPY_HOME_TOKEN"' in src and "Bearer" in src
-    assert "HTTP {code}" in src and "SKIPPY_HOME_TOKEN must be set" in src    # a refusal says what to fix, not just a number
-
-
-def test_the_client_and_the_real_bridge_agree(door, monkeypatch):
-    """End to end: flask-api's client against the real handler, with and without the token in its environment."""
-    pytest.importorskip("httpx")                       # flask-api's dependency; CI's portal environment doesn't have it
-    spec = importlib.util.spec_from_file_location("claude_bridge_client", ROOT / "flask-api" / "app" / "clients" / "claude_bridge.py")
-    client = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(client)
-    monkeypatch.setattr(client, "BRIDGE_URL", door.base)
-
-    monkeypatch.setenv("SKIPPY_HOME_TOKEN", "door-token")
-    assert client.chat("hello", mode="bypass") == "ran"
-    assert door.ran == [("hello", "bypass")]
-
-    monkeypatch.setenv("SKIPPY_HOME_TOKEN", "the-wrong-one")
-    with pytest.raises(client.BridgeUnavailable, match="refused the request .HTTP 401.*SKIPPY_HOME_TOKEN"):
-        client.chat("hello", mode="bypass")
-    monkeypatch.delenv("SKIPPY_HOME_TOKEN")
-    with pytest.raises(client.BridgeUnavailable, match="HTTP 401"):
-        list(client.stream_chat("hello", mode="plan"))
-    assert door.ran == [("hello", "bypass")]           # neither refused call reached Claude
-
-
 @pytest.mark.parametrize("path", ["/solid-gold", "/workshop", "/workshop/cancel/abc"])
 def test_a_refusal_reaches_the_client_even_with_a_big_unread_body(door, path):
     """The refusal is sent before the body is read. Closing a socket with unread data resets the connection on Windows,

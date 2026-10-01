@@ -224,8 +224,11 @@ jobs:
           code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/home/report" -H 'Content-Type: application/json' -d '{}')
           [ "$code" = 401 ] || { echo "/home/report without a token answered $code, expected 401"; exit 1; }
           # The reconciler's door (the home reporter lists what the portal holds here): it must exist AND be locked.
+          # 404 is accepted only while that route isn't in the code (the reporter-recovery change adds it); once
+          # portal/app.py defines it, it must answer 401.
           code=$(curl -s -m 30 --retry 3 --retry-delay 5 -o /dev/null -w '%{http_code}' "$URL/home/workshop")
-          [ "$code" = 401 ] || { echo "GET /home/workshop without a token answered $code, expected 401"; exit 1; }
+          if grep -q '"/home/workshop")' portal/app.py; then want=401; else want="401|404"; fi
+          [[ "$code" =~ ^($want)$ ]] || { echo "GET /home/workshop without a token answered $code, expected $want"; exit 1; }
           curl -fsS -m 30 --retry 3 --retry-delay 5 -o /dev/null "$URL/privacy"   # public page: renders from the telemetry lists
           # The Captain's page, signed out: a redirect to sign-in or the sign-in page. A 5xx (or a 404/401) here means
           # his dashboard is broken for everyone, so fail the deploy while the previous revision can still be restored.
