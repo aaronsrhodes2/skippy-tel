@@ -3,6 +3,7 @@ route's guards (admin only, own origin, confirm, rate limit), the private Skippy
 with and without the token. The token must never appear in a page, a flash, a log line or an error."""
 import html
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -289,8 +290,8 @@ def env():
 
 
 def admin_page(client) -> str:
-    """The Admin page as text (Jinja escapes the apostrophes in "isn't")."""
-    return html.unescape(client.get("/admin").data.decode())
+    """The Admin page as text: apostrophes unescaped, runs of whitespace (template line breaks) as one space."""
+    return " ".join(html.unescape(client.get("/admin").data.decode()).split())
 
 
 def press(client, action, confirm="yes", headers=ORIGIN, **fields):
@@ -451,7 +452,7 @@ def test_with_the_token_the_cards_show_runs_and_how_far_main_is_ahead(monkeypatc
                                             run(8, SHA[0])]))
     login(client, ADMIN)
     page = admin_page(client)
-    assert "main is 2 pushes ahead of what's live" in page
+    assert f"main is 2 pushes ahead of what's live (newest: {SHA[2][:7]}, running)." in page
     assert f"https://github.com/{REPO}/actions/runs/9" in page and SHA[1][:7] in page
     for action in ("rollback", "undo-rollback"):
         assert f"/admin/recovery/{action}" in page
@@ -468,11 +469,23 @@ def test_the_stuck_and_failed_buttons_appear_only_when_they_apply():
     _, client, _ = make_app(Transport(runs=[run(9, SHA[1], "in_progress", minutes_ago=25), run(8, SHA[0])]))
     login(client, ADMIN)
     page = admin_page(client)
-    assert "/admin/recovery/cancel-stuck" in page and "stuck" in page and "/admin/recovery/rerun-failed" not in page
+    assert "/admin/recovery/cancel-stuck" in page and "/admin/recovery/rerun-failed" not in page
+    assert re.search(rf"Deploy {SHA[1][:7]} started 2\d min ago and is still running: stuck\.", page)   # NOW is import time
     _, client, _ = make_app(Transport(runs=[run(9, SHA[1], conclusion="failure"), run(8, SHA[0])]))
     login(client, ADMIN)
     page = admin_page(client)
     assert "/admin/recovery/rerun-failed" in page and "/admin/recovery/cancel-stuck" not in page
+
+
+def test_the_page_confirm_calls_the_window_not_the_forms_own_confirm_field(env):
+    """Inside an inline handler a bare `confirm` is the form's hidden input named confirm: calling it throws, and the
+    form posted without confirm=yes (found by pressing the button in a browser)."""
+    _, client, _ = env
+    login(client, ADMIN)
+    raw = client.get("/admin").data.decode()
+    forms = raw.count('action="/admin/recovery/')
+    assert forms >= 4 and raw.count("if (!window.confirm(this.dataset.ask)) return false; this.elements.confirm.value = 'yes';") == forms
+    assert "if (!confirm(" not in raw
 
 
 def test_a_friend_never_sees_the_cards(env):

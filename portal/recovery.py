@@ -255,7 +255,8 @@ def pipeline(runs: list[dict], live_commit: str, now: datetime) -> dict:
       failed: the newest run, when it is the newest and it failed (the only run "re-run" may touch: re-running an OLDER
               failed run would deploy an old commit over a newer one)
     """
-    shown = [{**r, "word": state_word(r), "age": ago(r["created_at"], now)} for r in runs[:RUNS_SHOWN]]
+    runs = [{**r, "word": state_word(r), "age": ago(r["created_at"], now)} for r in runs]
+    shown = runs[:RUNS_SHOWN]
     newest = runs[0] if runs else None
     live_at = next((i for i, r in enumerate(runs) if r["head_sha"] == live_commit), None) \
         if live_commit and _SHA.fullmatch(live_commit) else None

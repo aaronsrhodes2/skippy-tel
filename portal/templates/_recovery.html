@@ -1,10 +1,11 @@
 {# The Admin page's recovery cards (recovery.py / recovery_web.py). Admin only: admin.html is the only page that includes
    this, and every button posts to /admin/recovery/<action>, which checks the admin, the origin, a confirm and a rate limit.
-   The page asks first (confirm()), then fills in confirm=yes; with no script the server asks on a page of its own. #}
+   The page asks first (window.confirm(): a bare confirm() inside an inline handler finds the form's own hidden `confirm`
+   input first and throws), then fills in confirm=yes; with no script the server asks on a page of its own. #}
 {% macro button(action, cls="", extra="") -%}
   <form class="inline" method="post" action="{{ url_for('recovery.act', action=action) }}"
         data-ask="{{ rc.actions[action].ask }}"
-        onsubmit="if (!confirm(this.dataset.ask)) return false; this.elements.confirm.value = 'yes';">
+        onsubmit="if (!window.confirm(this.dataset.ask)) return false; this.elements.confirm.value = 'yes';">
     <input type="hidden" name="confirm" value="">
     {{ extra }}
     <button type="submit" class="{{ cls }}">{{ rc.actions[action].label }}</button>
@@ -63,7 +64,7 @@
       {% endif %}
 
       {% if v and v.stuck %}
-        <p class="warn">Deploy {{ v.stuck.short }} has been {{ v.stuck.word }} since {{ v.stuck.age }}: stuck.</p>
+        <p class="warn">Deploy {{ v.stuck.short }} started {{ v.stuck.age }} and is still {{ v.stuck.word }}: stuck.</p>
         <p class="row">{{ button('cancel-stuck', 'danger') }}</p>
         <p class="help">Cancelling makes the deploy's own last step put back the revision it replaced (if it had switched
           traffic already). Nothing more is rolled back.</p>
@@ -76,7 +77,7 @@
 
       <form method="post" action="{{ url_for('recovery.act', action='rollback') }}"
             data-ask="{{ rc.actions['rollback'].ask }}"
-            onsubmit="if (!confirm(this.dataset.ask)) return false; this.elements.confirm.value = 'yes';">
+            onsubmit="if (!window.confirm(this.dataset.ask)) return false; this.elements.confirm.value = 'yes';">
         <input type="hidden" name="confirm" value="">
         <label class="field" for="rb-revision">Roll back to (optional)</label>
         <input type="text" id="rb-revision" name="revision" autocomplete="off" pattern="(latest|skippy-portal-[a-z0-9-]+)?"

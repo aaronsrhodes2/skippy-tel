@@ -24,6 +24,32 @@ Every portal deploy (and every rollback) restarts the portal, which forgets its 
 holds the truth and re-sends it. **Within about 30 seconds of all three links being up, the chat shows everything again**, including
 a run that finished while the portal was away.
 
+## First: the Admin page's Recovery cards (if the portal opens at all)
+
+Portal > **Admin** > **Recovery**. Three cards, admin only (a friend never sees them), every button asks "are you sure?" first,
+and each press is logged (the last 20 show at the bottom; Cloud Logging keeps `"event": "recovery"` lines).
+
+| Card | Shows | Buttons |
+|---|---|---|
+| **Live version** | the commit and Cloud Run revision serving now; "main is N pushes ahead of what's live"; "a newer deploy passed but isn't serving: a rollback is holding traffic back" | none |
+| **Deploy pipeline** | the newest deploy runs of `main`: passed / failed / running, how long ago, a link to each log | **Roll back the portal** (box blank = the previous good revision; or a revision name, or `latest`), **Undo a rollback**, **Re-run the failed jobs** (only when the newest deploy failed), **Cancel the stuck deploy** (only when the newest deploy has been running for over 20 minutes) |
+| **Private Skippy** | the current task and its state (queued, running, offline, stalled...) | **Cancel the current run**, **Clear a stuck chat record**, **Pause the private Skippy** / turn it back on |
+
+- **Cancelled a deploy? It now rolls back by itself.** The deploy's last step runs when a run is cancelled too (not only when it
+  fails), and puts back the revision it replaced if it had already switched traffic. So **Cancel the stuck deploy** only cancels;
+  if the portal is still wrong a few minutes later, press **Roll back the portal**.
+- **A rollback holds only until the next push to `main`**, which deploys normally (whatever that push contains). Fix forward.
+- **Cancel the current run** also withdraws a message that is still waiting for skippy-pc, so it is never delivered hours later.
+- **Pause** refuses new messages and cancels the current run. It lives in the portal's memory: a deploy or restart of the portal
+  turns it back on.
+- The deploy buttons need the portal's GitHub token (`GITHUB_ACTIONS_TOKEN`). Without it the Deploy pipeline card says "Not
+  configured" and shows no buttons. To set it up: on github.com, Settings > Developer settings > Fine-grained tokens > a token for
+  this repo only with **Actions: Read and write** and nothing else; add it to this repo's Actions secrets as `PORTAL_ACTIONS_TOKEN`;
+  deploy (Actions > **deploy** > Run workflow). The deploy copies it into Secret Manager and hands it to the portal.
+- **If the portal itself is broken** (the Admin page won't open), none of this is reachable: use GitHub mobile > this repo >
+  Actions > **rollback** > Run workflow, box left blank (step 3). To cancel a hung deploy there: Actions > **deploy** > the running
+  run > Cancel; it rolls itself back as above.
+
 ## 1. Read the card on `/me`
 
 The pill on **Skippy · private** and the **Home · skippy-pc** card tell you which link broke. (Wording on screen may differ a little.)
@@ -59,8 +85,10 @@ GitHub app > **Actions** > **rollback** > **Run workflow** > leave the box **bla
   revisions with the commit each came from, what it served before, what it serves now, and whether `/health` answers.
 - To go to a particular one, type its name from that list. To undo a rollback, type `latest`.
 - The next push to `main` deploys normally and sends traffic forward again.
-- A deploy that fails its own smoke test already does this by itself (the job ends red, with an error saying it was **rolled back**).
-  This workflow is for a deploy that looked fine and is not.
+- A deploy that fails its own smoke test already does this by itself (the job ends red, with an error saying it was **rolled back**),
+  and so does a deploy you **cancel** (a hung one: every deploy job now gives up by itself after at most 20 minutes, and every
+  smoke-test request after 20 seconds). This workflow is for a deploy that looked fine and is not.
+- The same buttons are on the Admin page (Recovery > Deploy pipeline) while the portal still opens.
 - It moves only the portal. It does not touch skippy-pc, the games VM or any data.
 
 To redeploy `main` unchanged (for example after a secret changed): Actions > **deploy** > Run workflow.
