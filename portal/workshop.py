@@ -5,10 +5,13 @@ Only an admin can reach it (the portal's Google login plus ADMIN_EMAILS). The
 portal can't reach skippy-pc, so a message becomes a job in the home queue; the
 home reporter carries it to the bridge, reads the run's events back and pushes
 them here (`push`), and the browser polls `read`. Nothing about the run lives
-only in this process: the reporter keeps the truth and re-sends whatever a fresh
-portal instance is missing, so a deploy of this very portal, mid-task, loses
-nothing. Events are text and short activity lines (tool name and its command or
-path), never tool output.
+only in this process: the bridge keeps the truth and the reporter re-sends
+whatever a fresh portal instance is missing, so a deploy of this very portal,
+mid-task, loses nothing. A deploy also wipes the home job queue, so the reporter
+does not wait to be asked: it compares what the bridge holds with what `listing`
+says this portal holds, every few seconds, and pushes the difference (the
+reconciler in services/home-reporter/reporter.py). Events are text and short
+activity lines (tool name and its command or path), never tool output.
 """
 from __future__ import annotations
 
@@ -19,12 +22,15 @@ import time
 MAX_MESSAGE = 8000
 MAX_EVENTS = 5000
 MAX_TEXT = 4000
+MAX_LISTED = 50            # records `listing` shows the reporter's reconciler
 KEEP_S = 6 * 3600          # how long a finished task stays readable
 JOB_TTL = 2 * 3600         # how long the home queue keeps offering an unanswered task
 OFFLINE_S = 30             # no push at all for this long: skippy-pc isn't picking it up
 STALL_S = 120              # a running task silent for this long: the link to skippy-pc broke
+WANT_S = 120               # a person's "check again" is still worth answering for this long
 _CONV = re.compile(r"[A-Za-z0-9-]{8,64}")
 _STATES = ("running", "done", "error")
+_FINAL = ("done", "error")
 
 
 class Busy(Exception):
@@ -91,17 +97,25 @@ class Workshop:
         return task
 
     def read(self, owner: str, task: str, after: int = 0) -> dict:
-        """What the browser polls: events from index `after`, and the state."""
+        """What the browser polls: events from index `after`, and the state. A task that is still going also says
+        `quiet_s`, how long since skippy-pc last pushed anything, so the page can tell "no word for 45 s" from a
+        slow task. `next` never goes below `after`: a record rebuilt by a fresh portal holds fewer events for a
+        moment, and a page that took `next` at its word would show the same events twice."""
         with self._lock:
             rec = self._tasks.get(task)
             if not rec or rec["owner"] != owner:
                 return {"state": "unknown", "events": [], "next": max(0, after), "error": None}
-            rec["touched"] = self.clock()
+            now = self.clock()
+            rec["touched"] = now
             state = self._live_state(rec)
             if state in ("queued", "running"):
                 self.home.touch_chat()            # keep the reporter's quick poll going while someone watches
             after = max(0, after)
-            return {"state": state, "error": rec["error"], "events": rec["events"][after:], "next": len(rec["events"])}
+            out = {"state": state, "error": rec["error"], "events": rec["events"][after:],
+                   "next": max(after, len(rec["events"]))}
+            if rec["state"] in ("queued", "running"):          # the raw state: "stalled" and "offline" are these, gone quiet
+                out["quiet_s"] = max(0, int(now - rec["pushed_at"]))
+            return out
 
     def stop(self, owner: str, task: str) -> bool:
         with self._lock:
@@ -122,15 +136,46 @@ class Workshop:
         seen = self.read(owner, task, 0)                 # state only: the browser keeps the events it already has
         return {"state": seen["state"], "error": seen["error"]}
 
+    def listing(self) -> dict:
+        """What this portal holds, for the reporter's reconciler (GET /home/workshop, home token): every record, newest
+        first. `state` is the live one (so "stalled" shows), `have` is how many events it holds, `final` says it ended
+        (done or error: its events are all it will ever get), `quiet_s` is the time since the last push and `want` says a
+        person pressed "check again" lately. The owner is included: the caller holds the home token, the one that
+        pushes records for any owner anyway."""
+        now = self.clock()
+        with self._lock:
+            self._prune()
+            newest_first = sorted(reversed(list(self._tasks.items())), key=lambda kv: kv[1]["created"], reverse=True)
+            tasks = [{"task": task, "state": self._live_state(rec), "have": len(rec["events"]),
+                      "final": rec["state"] in _FINAL, "owner": rec["owner"],
+                      "quiet_s": max(0, int(now - rec["pushed_at"])),
+                      "want": rec.get("resync") is not None and now - rec["resync"] <= WANT_S}
+                     for task, rec in newest_first[:MAX_LISTED]]
+        return {"tasks": tasks}
+
     def push(self, task: str, who: str, conv: str, start: int, events: list, state: str, error: str | None) -> dict:
         """From skippy-pc (the home reporter). `start` is the index of events[0] in the run's own list; if this
-        portal is missing earlier ones (it was redeployed), the reply's `have` tells the reporter to send them."""
+        portal is missing earlier ones (it was redeployed), the reply's `have` tells the reporter to send them.
+
+        Several things push the same run (the streaming relay, and the reconciler that repairs whatever the relay
+        missed), so a push is idempotent and can arrive late:
+          * a push is a heartbeat: any accepted one refreshes `pushed_at`, running or not, even with no new event;
+          * events are only ever appended at `have`, so repeating or overlapping a push adds nothing twice;
+          * a task that ended stays ended against a stale "running" (a relay that read the run a moment before
+            the reconciler delivered its end must not reopen it); a new end may still replace an old one, because
+            the bridge is the truth and the reporter's own guess ("lost contact") may have been wrong;
+          * only a push that really made the record final stops the home queue offering the job: one that left a
+            gap (`start` beyond `have`) said nothing about the end;
+          * a task nobody owns can't be created: no one could ever read it."""
         if not isinstance(events, list) or not isinstance(start, int) or start < 0 or state not in _STATES:
             raise ValueError("bad push")
         now = self.clock()
+        ended = False
         with self._lock:
             rec = self._tasks.get(task)
             if rec is None:                       # a fresh instance: rebuild the record from what home says
+                if not str(who or "").strip():
+                    raise ValueError("a task with no owner")
                 rec = self._tasks[task] = {"owner": str(who), "conv": str(conv), "events": [], "state": "running",
                                            "error": None, "created": now, "pushed_at": now, "touched": now,
                                            "stop": False}
@@ -140,10 +185,15 @@ class Workshop:
                     cleaned = _clean(event)
                     if cleaned and len(rec["events"]) < MAX_EVENTS:
                         rec["events"].append(cleaned)
-                rec["state"] = state
-                rec["error"] = (str(error)[:500] if error else None) if state != "running" else None
+                if state != "running":
+                    rec["state"], rec["error"], ended = state, (str(error)[:500] if error else None), True
+                elif rec["state"] not in _FINAL:
+                    rec["state"], rec["error"] = "running", None
+            elif state == "running" and rec["state"] == "queued":
+                rec["state"] = "running"          # a gap, but skippy-pc is on it: it is no longer waiting to be picked up
             rec["pushed_at"], rec["touched"] = now, now
+            rec.pop("resync", None)               # this is the answer to anyone's "check again"
             reply = {"have": len(rec["events"]), "stop": rec["stop"]}
-        if state != "running":
+        if ended:
             self.home.finish(task, {"result": {"state": state}})     # stop offering the job to the reporter
         return reply

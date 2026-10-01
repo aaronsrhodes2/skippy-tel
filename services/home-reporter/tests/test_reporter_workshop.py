@@ -55,6 +55,12 @@ class FakePortal:
         self.fake = Fake(self.handle)
 
     def handle(self, method, path, headers, body):
+        if method == "GET":                      # the listing (portal/workshop.py `listing`): what the portal holds of each task
+            assert path == "/home/workshop"
+            state = self.final[0] if self.final else ("running" if self.pushes else "queued")
+            return _json({"tasks": [{"task": JOB["id"], "state": state, "have": len(self.held),
+                                     "final": bool(self.final), "owner": JOB["who"], "quiet_s": 0, "want": False}]
+                          if self.pushes else []})
         assert path == f"/home/workshop/{JOB['id']}"
         push = json.loads(body)
         self.pushes.append(push)
@@ -77,6 +83,8 @@ def wired(monkeypatch):
         monkeypatch.setattr(reporter, "BRIDGE", bridge.fake.url)
         monkeypatch.setattr(reporter, "PORTAL", portal.fake.url)
         monkeypatch.setattr(reporter, "WORKSHOP_WAIT", 0)
+        monkeypatch.setattr(reporter, "START_TRIES", 1)          # a refused connection is slow on Windows: one try per start
+        monkeypatch.setattr(reporter, "WORKSHOP_MAX_S", 5)       # a relay that never sees the end of a fake run gives up, not spins
         monkeypatch.setattr(reporter.time, "sleep", lambda s: None)
         return bridge, portal
     yield make
@@ -87,7 +95,8 @@ def wired(monkeypatch):
 def test_a_run_is_started_on_the_bridge_and_its_events_reach_the_portal(wired):
     bridge, portal = wired()
     assert reporter.run_job(JOB, TOKEN) == {"result": {"state": "done"}}
-    assert bridge.started == [{"task": "abc12345", "conv": "conv-12345678", "message": "make the tile green"}]
+    assert bridge.started == [{"task": "abc12345", "conv": "conv-12345678", "message": "make the tile green",
+                               "who": "aaron@x.com", "attach": False}]
     assert portal.held == EVENTS and portal.final == ("done", None)
     assert portal.pushes[0]["who"] == "aaron@x.com" and portal.pushes[0]["conv"] == "conv-12345678"
     assert all(c["headers"].get("Authorization") == f"Bearer {TOKEN}" for c in portal.fake.calls)

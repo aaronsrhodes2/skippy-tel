@@ -42,6 +42,15 @@ BRIDGE = os.environ.get("CLAUDE_BRIDGE_URL", "").rstrip("/")   # Claude Code's b
 WORKSHOP_WAIT = 5            # seconds the bridge holds a request open waiting for news from the run
 WORKSHOP_PUSH = 100          # events per push to the portal (a request may be 1 MB)
 WORKSHOP_MAX_S = 3 * 3600    # a run this old is abandoned
+WORKSHOP_RECENT_S = 3600     # a finished run older than this is no longer carried to the portal (the bridge forgets it too)
+START_TRIES = 4              # times a run is started on a bridge that doesn't answer (it may be restarting) ...
+START_RETRY_S = 3            # ... this many seconds apart
+SYNC_INTERVAL = 10           # seconds between the reconciler's looks at the bridge and the portal
+SYNC_FAST = 2                # ... while someone is watching the chat
+CATCH_UP_STEPS = 60          # pushes one run may take in one reconciler pass (100 events each: more than the 5000 cap)
+WATCHDOG_S = 900             # no successful report for this long: this process exits and Docker starts a fresh one
+LOST_TASK = "skippy-pc lost this task (the bridge was restarted). Send your message again."
+_TASK = re.compile(r"[a-f0-9]{8,32}")
 TELEMETRY_PULL = 200         # portal events fetched per pull (site telemetry; the portal caps it at 500)
 TELEMETRY_BATCH = 100_000    # bytes of events per POST to flask-api, which refuses a body over 128 KB
 TELEMETRY_CYCLE_S = 20       # the most one collection may take: reports must stay on schedule
@@ -261,68 +270,181 @@ def _bridge(method: str, path: str, body: dict | None, token: str, timeout: floa
         return None, {}
 
 
+def _now() -> float:
+    """The clock the private Skippy's relay and reconciler read (one place, so the chaos suite can run minutes of outage in milliseconds)."""
+    return time.time()
+
+
+def _int(value) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+class _Say:
+    """Print a problem when it CHANGES, not every time it is seen again: a portal that is down for an hour is one line,
+    not 360. `clear()` (on the next success) lets the same problem be said again if it comes back."""
+
+    def __init__(self):
+        self.last = None
+
+    def __call__(self, message: str) -> None:
+        if message != self.last:
+            self.last = message
+            print(f"home-reporter: {message}", flush=True)
+
+    def clear(self) -> None:
+        self.last = None
+
+
+_push_said = _Say()
+
+
+def push_workshop(token: str, task: str, who: str, conv: str, start: int, events: list, state: str,
+                  error: str | None = None) -> dict | None:
+    """Tell the portal how a private-Skippy run is going: events[0] is index `start` of the run's own list. The reply is
+    the portal's {"have": events it holds (send from there), "stop": the Captain pressed Stop}. None means the portal
+    didn't take it (down, redeploying, refused): the bridge still holds everything, so the caller just tries again."""
+    req = urllib.request.Request(
+        f"{PORTAL}/home/workshop/{task}", method="POST", headers={
+            "Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+        data=json.dumps({"who": who, "conv": conv, "start": start, "events": events,
+                         "state": state, "error": error}).encode())
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            reply = json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        _push_said(f"the portal said HTTP {e.code} to a workshop push" +
+                   (" (SKIPPY_HOME_TOKEN doesn't match; pair again on the dashboard)" if e.code == 401 else ""))
+        return None
+    except Exception as e:  # noqa: BLE001 — the portal is down or redeploying; the bridge holds the events
+        _push_said(f"can't reach the portal to report the private Skippy: {e}")
+        return None
+    _push_said.clear()
+    return reply if isinstance(reply, dict) else None
+
+
+def portal_get(token: str, path: str, timeout: float = 15) -> tuple[dict | None, str]:
+    """GET from the portal with the home token (the same Authorization header Jobs._post sends). (None, why) when it
+    didn't answer with a JSON object."""
+    req = urllib.request.Request(f"{PORTAL}{path}", headers={"Authorization": f"Bearer {token}"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            body = json.loads(r.read() or b"null")
+    except urllib.error.HTTPError as e:
+        return None, f"HTTP {e.code}" + (" (SKIPPY_HOME_TOKEN doesn't match)" if e.code == 401 else "")
+    except Exception as e:  # noqa: BLE001
+        return None, str(e)
+    return (body, "") if isinstance(body, dict) else (None, "an odd reply")
+
+
+def portal_started(token: str, task: str) -> bool:
+    """Has the portal already seen this task running (or ended)? Then the run exists on the bridge, and delivering the job
+    again must only re-attach to it, never start it a second time (the bridge may have forgotten it; redoing the work
+    and splicing a second run's events onto the first's would be worse than saying it was lost)."""
+    listing, _ = portal_get(token, "/home/workshop")
+    for rec in (listing or {}).get("tasks") or []:
+        if isinstance(rec, dict) and rec.get("task") == task:
+            return rec.get("state") in ("running", "stalled", "done", "error")
+    return False
+
+
+class Relay:
+    """Carries ONE run's events from the bridge to the portal, a round at a time (`step`). Two things drive it: the
+    streaming thread (`workshop`, one long-poll round after another while a job is being worked) and the reconciler
+    (`WorkshopSync`, which catches the portal up when nothing is streaming). Both may push the same run at the same
+    moment: that is safe because the portal's reply to every push says how many events it holds (`have`), pushes are
+    idempotent, and a finished run can't be reopened by a late "running" (portal/workshop.py `push`)."""
+
+    def __init__(self, token: str, task: str, who: str, conv: str, after: int = 0):
+        self.token, self.task, self.who, self.conv, self.after = token, task, who, conv, after
+        self.state: str | None = None          # "done"/"error" once the portal holds the end
+        self.stopped = False
+
+    def step(self, wait: float = 0) -> str:
+        """One look at the bridge (holding up to `wait` s for news) and one push. Returns "final" (the portal now holds
+        everything and the end), "more" (moved: go again at once), "idle" (nothing new; the push was a heartbeat),
+        "lost" (the bridge doesn't know this task), "bridge" or "portal" (that side didn't answer)."""
+        status, run = _bridge("GET", f"/workshop/run/{self.task}?after={self.after}&wait={wait}", None, self.token,
+                              timeout=wait + 15)
+        if status == 404:
+            return "lost"
+        if status != 200:
+            return "bridge"
+        events, upto, done = run.get("events") or [], _int(run.get("next")), bool(run.get("done"))
+        chunk = events[:WORKSHOP_PUSH]
+        final = done and len(events) <= WORKSHOP_PUSH
+        state = ("done" if run.get("ok") else "error") if final else "running"
+        error = (run.get("error") or "The run ended without finishing.") if state == "error" else None
+        reply = push_workshop(self.token, self.task, self.who, self.conv, self.after, chunk, state, error)
+        if reply is None:
+            return "portal"
+        if reply.get("stop") and not self.stopped:
+            self.stopped = _bridge("POST", f"/workshop/cancel/{self.task}", {}, self.token)[0] == 200
+        have, before = reply.get("have"), self.after
+        self.after = min(have, self.after + len(chunk)) if isinstance(have, int) and have >= 0 else self.after + len(chunk)
+        if final and self.after >= upto:
+            self.state = state
+            return "final"
+        return "more" if self.after != before or chunk else "idle"
+
+
 def workshop(job: dict, token: str) -> dict:
     """The private Skippy: hand the Captain's message to Claude Code on the bridge, then relay the run's events
     to the portal until it ends. The bridge keeps every event, so a portal deploy or a reporter restart loses
-    nothing: the portal's reply says how many events it holds and this sends what it's missing."""
-    task, conv, message, who = job.get("id"), job.get("conv"), job.get("message"), job.get("who")
+    nothing: the portal's reply says how many events it holds and this sends what it's missing.
 
-    def report(start: int, events: list, state: str, error: str | None = None) -> dict | None:
-        req = urllib.request.Request(
-            f"{PORTAL}/home/workshop/{task}", method="POST", headers={
-                "Content-Type": "application/json", "Authorization": f"Bearer {token}"},
-            data=json.dumps({"who": who, "conv": conv, "start": start, "events": events,
-                             "state": state, "error": error}).encode())
-        try:
-            with urllib.request.urlopen(req, timeout=20) as r:
-                return json.loads(r.read() or b"{}")
-        except Exception:  # noqa: BLE001 — the portal is down or redeploying; the bridge holds the events
-            return None
+    This thread is only the fast path (one round per second or so while a run is going). It does not have to be the
+    only way the portal hears: WorkshopSync (below) compares the bridge's runs with the portal's records every few
+    seconds and repairs the difference, and adopts a run nothing is streaming by handing this function a job with
+    `attach` set, which may only join a run the bridge already has, never start one."""
+    task, conv, message = job.get("id"), job.get("conv"), job.get("message") or ""
+    who = str(job.get("who") or "")
 
     def fail(reason: str) -> dict:
         for _ in range(3):
-            if report(0, [], "error", reason) is not None:
+            if push_workshop(token, task, who, conv, 0, [], "error", reason) is not None:
                 break
             time.sleep(1)
         return {"error": reason}
 
     if not BRIDGE:
         return fail("The private Skippy isn't set up on skippy-pc (CLAUDE_BRIDGE_URL).")
-    status, started = _bridge("POST", "/workshop", {"task": task, "conv": conv, "message": message}, token)
+    attach = bool(job.get("attach")) or portal_started(token, task)
+    for attempt in range(START_TRIES):            # a bridge that is restarting answers in a few seconds
+        status, started = _bridge("POST", "/workshop", {"task": task, "conv": conv, "message": message, "who": who,
+                                                        "attach": attach}, token)
+        if status is not None or attempt == START_TRIES - 1:
+            break
+        time.sleep(START_RETRY_S)
+    if status == 404 and attach:
+        return fail(LOST_TASK)
     if status != 200:
         return fail({409: "Skippy is still working on the last one.",
                      401: "The bridge doesn't accept this token: is the vault's SKIPPY_HOME_TOKEN the paired one?",
                      503: "The bridge has no SKIPPY_HOME_TOKEN configured.",
                      None: "The bridge on skippy-pc isn't running (make bridge)."}.get(status)
                     or started.get("message") or f"The bridge said HTTP {status}.")
-    after, silent, stopped, deadline = 0, 0, False, time.time() + WORKSHOP_MAX_S
-    while time.time() < deadline:
-        status, run = _bridge("GET", f"/workshop/run/{task}?after={after}&wait={WORKSHOP_WAIT}", None, token,
-                              timeout=WORKSHOP_WAIT + 15)
-        if status == 404:
-            return fail("The bridge lost this task (it was restarted).")
-        if status != 200:
+    relay, silent, deadline = Relay(token, task, who, conv), 0, _now() + WORKSHOP_MAX_S
+    while _now() < deadline:
+        outcome = relay.step(WORKSHOP_WAIT)
+        if outcome == "final":
+            return {"result": {"state": relay.state}}
+        if outcome == "lost":
+            return fail(LOST_TASK)
+        if outcome == "bridge":
             silent += 1
             if silent >= 20:
-                return fail("Lost contact with the bridge on skippy-pc.")
+                # Say nothing to the portal: the run may be going fine and only the link is down, and an error here would
+                # stick. The reconciler re-adopts the run when the bridge answers, or ends it plainly if it came back empty.
+                return {"error": "Lost contact with the bridge on skippy-pc."}
             time.sleep(2)
             continue
         silent = 0
-        events, upto, done = run.get("events") or [], int(run.get("next") or 0), bool(run.get("done"))
-        chunk = events[:WORKSHOP_PUSH]
-        final = done and len(events) <= WORKSHOP_PUSH
-        state = ("done" if run.get("ok") else "error") if final else "running"
-        reply = report(after, chunk, state, (run.get("error") if state == "error" else None))
-        if reply is None:
+        if outcome == "portal":
             time.sleep(2)
-            continue
-        if reply.get("stop") and not stopped:
-            stopped = _bridge("POST", f"/workshop/cancel/{task}", {}, token)[0] == 200
-        have, before = reply.get("have"), after
-        after = min(have, after + len(chunk)) if isinstance(have, int) and have >= 0 else after + len(chunk)
-        if final and after >= upto:
-            return {"result": {"state": state}}
-        if after == before and not chunk:
+        elif outcome == "idle":
             time.sleep(0.5)                     # nothing moved: don't spin
     return fail("Gave up waiting for the run to end.")
 
@@ -359,13 +481,19 @@ class Jobs:
             return json.loads(r.read() or b"{}")
 
     def accept(self, reply: dict) -> None:
-        self.fast_until = time.time() + float(reply.get("fast_for_s") or 0)
+        if "fast_for_s" in reply:         # a hand-made reply (the reconciler adopting a run) must not end the quick poll
+            self.fast_until = _now() + float(reply.get("fast_for_s") or 0)
         for job in reply.get("jobs") or []:
             with self._lock:
                 if job.get("id") in self._running:
                     continue
                 self._running.add(job.get("id"))
             threading.Thread(target=self._run, args=(job,), daemon=True).start()
+
+    def is_running(self, job_id: str) -> bool:
+        """A thread here is working this job (for the private Skippy: streaming the run's events to the portal)."""
+        with self._lock:
+            return job_id in self._running
 
     def _run(self, job: dict) -> None:
         try:
@@ -379,7 +507,7 @@ class Jobs:
 
     def poll_forever(self) -> None:
         while True:
-            if time.time() < self.fast_until:
+            if _now() < self.fast_until:
                 try:
                     self.accept(self._post("/home/jobs", None, method="GET"))
                 except Exception:  # noqa: BLE001 — the next report carries jobs too
@@ -387,6 +515,138 @@ class Jobs:
                 time.sleep(FAST_INTERVAL)
             else:
                 time.sleep(1)
+
+
+class WorkshopSync:
+    """The reconciler: whatever the bridge holds of the private Skippy's runs ends up in the portal, whether or not
+    anything is streaming it and whether or not the portal's job queue still offers the job.
+
+    Why it exists: the only thing that pushed a run to the portal was the relay thread, and the only thing that started
+    one was the portal's job queue. A self-deploy kills both at once: the agent pushes (every push redeploys the Cloud
+    Run portal, wiping its task records AND its job queue) and then rebuilds this container (killing the thread). The
+    run finished fine on the bridge and nothing was left that knew to tell the portal.
+
+    Every SYNC_INTERVAL seconds (SYNC_FAST while someone is watching the chat) it compares the two sides and repairs the
+    difference. Everything it does is idempotent (the portal's `have` handshake makes a repeated push a no-op), so racing
+    the streaming relay is harmless, and it only ever looks at runs the bridge itself lists: it can't start one."""
+
+    def __init__(self, token: str, jobs: Jobs):
+        self.token, self.jobs, self._say = token, jobs, _Say()
+
+    def interval(self) -> float:
+        return SYNC_FAST if _now() < self.jobs.fast_until else SYNC_INTERVAL
+
+    def run_forever(self) -> None:
+        last = None
+        while True:
+            now = _now()
+            if last is None or now - last >= self.interval():
+                last = now
+                try:
+                    self.sync_once()
+                except Exception as e:  # noqa: BLE001 — never let this loop die: it is what brings the chat back
+                    self._say(f"workshop sync failed: {e!r}")
+            time.sleep(0.5)
+
+    def _catch_up(self, task: str, who: str, conv: str, have: int) -> str:
+        """Push what the portal is missing (from its own `have`), then the end if the run is over. A run still going gets
+        at least one push even when nothing is new: that heartbeat is what keeps the portal from calling it stalled."""
+        relay, outcome = Relay(self.token, task, who, conv, after=have), "more"
+        for _ in range(CATCH_UP_STEPS):
+            outcome = relay.step(0)
+            if outcome != "more":
+                break
+        return outcome
+
+    def sync_once(self) -> dict:
+        """One pass. Returns what it did: {"pushed": [tasks], "adopted": [tasks], "lost": [tasks]}. It does nothing at all
+        (and invents no error) unless both the bridge and the portal answered."""
+        out: dict = {"pushed": [], "adopted": [], "lost": []}
+        # The portal first, then the bridge: every record the portal holds was created by a push, which the reporter only
+        # makes after the bridge accepted the run, so a record in the first list is in the second unless the bridge
+        # really lost it. The other order could "lose" a run that started in between.
+        listing, why = portal_get(self.token, "/home/workshop")
+        if listing is None or not isinstance(listing.get("tasks"), list):
+            self._say(f"workshop sync: the portal didn't answer ({why or 'an odd reply'})")
+            return out
+        status, body = _bridge("GET", "/workshop/runs", None, self.token, timeout=15)
+        runs = body.get("runs") if status == 200 else None
+        if not isinstance(runs, list):
+            self._say("workshop sync: the bridge didn't answer " + ("(it isn't running)" if status is None else f"(HTTP {status})"))
+            return out
+        known = {r["task"]: r for r in listing["tasks"] if isinstance(r, dict) and _TASK.fullmatch(str(r.get("task") or ""))}
+        on_bridge = set()
+        for run in runs:
+            task = str(run.get("task") or "") if isinstance(run, dict) else ""
+            if not _TASK.fullmatch(task):
+                continue
+            on_bridge.add(task)
+            who, done = str(run.get("who") or ""), bool(run.get("done"))
+            if not who:
+                continue                                  # nobody could read it
+            age = run.get("finished_age_s")
+            if done and not (isinstance(age, (int, float)) and age < WORKSHOP_RECENT_S):
+                continue                                  # long over: whoever wanted it has had an hour to get it
+            rec = known.get(task)
+            if done and rec and rec.get("final") and rec.get("state") == ("done" if run.get("ok") else "error") \
+                    and _int(rec.get("have")) >= _int(run.get("events")) and not rec.get("want"):
+                continue                                  # the portal holds all of it
+            conv = str(run.get("conv") or "")
+            outcome = self._catch_up(task, who, conv, _int(rec.get("have")) if rec else 0)
+            if outcome in ("portal", "bridge"):
+                # That side stopped answering mid-pass (a deploy, a restart). Stop here: one try, not one per run (each could
+                # cost its full timeout), and leave every verdict, "lost" included, to a pass in which both sides answer.
+                # (push_workshop has already said what the portal did; the bridge's silence is said here, once.)
+                if outcome == "bridge":
+                    self._say("workshop sync: the bridge stopped answering during a pass")
+                return out
+            if outcome == "lost":
+                continue          # listed a moment ago and gone now: the next pass sees it missing and ends the portal's record
+            out["pushed"].append(task)
+            if not done and not self.jobs.is_running(task):
+                # Nothing is streaming this run: hand it to the fast path (a round every second, not every 10).
+                self.jobs.accept({"jobs": [{"id": task, "kind": "workshop", "conv": conv, "who": who,
+                                            "message": "(re-attach)", "attach": True}]})
+                out["adopted"].append(task)
+        for task, rec in known.items():
+            # A run the portal thinks is going but the bridge no longer has (it restarted without its runs, or pruned
+            # them): the chat must end, not wait. A queued task isn't one: the job queue still owns it.
+            if rec.get("final") or task in on_bridge or rec.get("state") not in ("running", "stalled") or self.jobs.is_running(task):
+                continue
+            if push_workshop(self.token, task, str(rec.get("owner") or ""), "", _int(rec.get("have")), [], "error",
+                             LOST_TASK) is None:
+                return out                                # the portal went quiet: don't wait out the same timeout for every record
+            out["lost"].append(task)
+        self._say.clear()                                 # a whole pass went through: the next failure is news again
+        return out
+
+
+class Watchdog:
+    """If the portal hasn't accepted one of this process's reports for WATCHDOG_S (a wedged connection pool, a hung thread,
+    a network that never came back), exit with a non-zero code so Docker (`restart: unless-stopped`) starts a fresh
+    process. Nothing is lost by it: the relay and the reconciler pick every run up again from the bridge."""
+
+    def __init__(self, limit: float = WATCHDOG_S, clock=time.monotonic, exit_fn=os._exit):
+        self.limit, self.clock, self.exit_fn = limit, clock, exit_fn
+        self.started = self.last_ok = clock()
+
+    def ok(self) -> None:
+        """A report reached the portal."""
+        self.last_ok = self.clock()
+
+    def check(self) -> bool:
+        now = self.clock()
+        if now - self.started > self.limit and now - self.last_ok > self.limit:
+            print(f"home-reporter: no successful report to the portal for {int(now - self.last_ok)} s; "
+                  "exiting so Docker starts a fresh process", flush=True)
+            self.exit_fn(3)
+            return True
+        return False
+
+    def run_forever(self) -> None:
+        while True:
+            time.sleep(60)
+            self.check()
 
 
 class Uploads:
@@ -622,7 +882,11 @@ def main() -> None:
     jobs = Jobs(token)
     uploads = Uploads(token)
     site = SiteTelemetry(token)
+    watchdog = Watchdog()
     threading.Thread(target=jobs.poll_forever, daemon=True).start()
+    threading.Thread(target=watchdog.run_forever, daemon=True).start()
+    if BRIDGE:                                       # the private Skippy: catch the portal up on whatever the bridge holds
+        threading.Thread(target=WorkshopSync(token, jobs).run_forever, daemon=True).start()
     sent_art, results, warned = None, [], False
     while True:
         report = gather()
@@ -636,6 +900,7 @@ def main() -> None:
         try:
             with urllib.request.urlopen(req, timeout=15) as r:
                 reply = json.loads(r.read() or b"{}")
+            watchdog.ok()
             if report.get("art"):
                 sent_art = art_key
             if reply.get("need_art"):

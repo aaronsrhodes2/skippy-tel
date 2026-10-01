@@ -158,6 +158,22 @@ browser <── poll /me/workshop/events ── portal <── POST /home/worksh
   the reporter tells the portal what it has, and a redeployed portal replies "I hold N
   events", so the reporter re-sends the rest. The page keeps its transcript in
   `localStorage` and re-attaches to a running task after a reload or a deploy.
+- **How it recovers (the reconciler).** The run itself lives on the bridge; the portal's copy is in memory and goes with
+  every deploy, and a deploy also wipes the portal's job queue. So the reporter doesn't wait to be asked: every 10 s (2 s
+  while the chat is open) `WorkshopSync` in `services/home-reporter/reporter.py` reads the bridge's runs (`GET
+  /workshop/runs`) and the portal's records (`GET /home/workshop`) and repairs any difference: a run the portal lacks or
+  holds only part of is pushed (from the portal's own `have`), a run still going gets a push every pass even with nothing new
+  (the heartbeat that keeps it from showing "stalled"), a run nothing is streaming is handed to the quick relay (`attach`,
+  which can only join a run the bridge already has, never start one), and a task the portal thinks is going but the bridge no
+  longer has ends with "skippy-pc lost this task ... Send your message again" instead of hanging. It only acts when both
+  sides answered, never invents an error, and is idempotent: the push says where its events start, the portal answers with how
+  many it holds, and a finished task can't be reopened by a late "running", so racing the streaming relay costs nothing.
+  Result: after any order of portal deploy, reporter rebuild and bridge restart, the chat catches up within about 30 s of all
+  three being up, whether or not the queue still had the job. A job the queue offers again only ever re-attaches if the portal
+  already saw the task running (so a bridge that forgot it can't redo the work), and the reporter exits by itself (Docker
+  restarts it) after 15 minutes without one successful report to the portal. If the chat still shows it went quiet, **Check
+  again** asks the reconciler to look now; Send comes back after 30 s of quiet; `GET /home/workshop` is the portal's side of it
+  (home token) and `ops home` shows what the portal sees.
 - **What crosses the wire:** your messages, the agent's text, and one activity line per
   tool call (name and command or path, credentials redacted), never tool output. The
   portal logs who and how long, never the message.
