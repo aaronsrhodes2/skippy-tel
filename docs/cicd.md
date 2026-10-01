@@ -6,14 +6,16 @@ operations (settings, restart/update, Discord setup) are buttons on the
 portal's **Admin** page, not scripts.
 
 ```
- you ──"change X"──▶ Claude ──git push──▶ GitHub Actions ─┬─ test      (portal + memory suites)
-                                                         ├─ infra     terraform apply infra/gcp-games
-                                                         └─ portal    docker build → Artifact Registry → Cloud Run
+ you ──"change X"──▶ Claude ──git push──▶ GitHub Actions ─┬─ test          2 parallel jobs, pytest -n auto ──┐
+                                                         ├─ portal-image  docker buildx → Artifact Registry ─┼─▶ portal  Cloud Run deploy,
+                                                         │                (runs WHILE the tests run)         │   smoke test (rollback on failure)
+                                                         ├─ infra         terraform apply (after test)  ◀────┘
+                                                         └─ changes ─▶ mentat-test ─▶ mentat   (only if Mentat's inputs changed)
 ```
 
-Workflow: [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml).
-Runs on pushes to `main` and `claude/great-edison-aevrtu`, or by hand from the
-Actions tab ("Run workflow").
+Workflow: [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml); the test suites are written once in
+[`run-tests.yml`](../.github/workflows/run-tests.yml), which `deploy.yml` and `test.yml` (pull requests) both call.
+Runs on pushes to `main`, or by hand from the Actions tab ("Run workflow", which always does everything).
 
 ## Why this shape
 
@@ -75,15 +77,48 @@ Messages, Read History).
 
 ## What each push does
 
-| Job | Does | Needs |
-|---|---|---|
-| `test` | `pytest portal/tests memory/tests` with the real dependencies | nothing |
-| `gate` | skips deploys until bootstrap has run | — |
-| `infra` | `terraform apply` in `infra/gcp-games` — VM shape, firewall, and the compose file + VM scripts delivered as instance metadata (applied at the VM's next boot) | bootstrap |
-| `portal` | builds `portal/Dockerfile` from the repo root, pushes to Artifact Registry, deploys `skippy-portal` to Cloud Run, smoke-tests `/health` (not `/healthz`: Cloud Run reserves paths ending in z) | bootstrap |
+| Job | Does | Needs | Runs when |
+|---|---|---|---|
+| `test` | calls `run-tests.yml`: job `suite` (portal, memory, tools, home-reporter, claude-bridge, mentat tests) and job `flask-api` (its own requirements), both `pytest -n auto --dist loadfile` | nothing | always |
+| `gate` | skips deploys until bootstrap has run | nothing | always |
+| `portal-image` | builds `portal/Dockerfile` with buildx (GitHub layer cache), pushes `portal:<sha>` with `GIT_SHA` / `BUILD_TIME` baked in. **Runs while the tests run**: an image that then fails the tests is harmless, nothing deploys it | `gate` | gate ready |
+| `portal` | notes the serving revision, deploys `skippy-portal` to Cloud Run, sends traffic to it, smoke-tests it (`/health`, not `/healthz`: Cloud Run reserves paths ending in z); on failure puts traffic back | `test`, `portal-image`, `gate` | gate ready and tests green |
+| `infra` | `terraform apply` in `infra/gcp-games`: VM shape, firewall, the compose file + VM scripts as instance metadata (applied at the VM's next boot) | `test`, `gate` | gate ready and tests green |
+| `changes` | decides whether Mentat needs work: `tools/ci_changes.py` compares the tree with the **last successful deploy**, not the push's `before` (a cancelled or red run deploys nothing, so `before` would lose its Mentat change). Any doubt answers "yes" | nothing | always |
+| `mentat-test` | Mentat's tests against the pinned sigma-ground | `changes` | Mentat changed |
+| `mentat` | builds, deploys and smoke-tests the Mentat service | `test`, `mentat-test`, `changes`, `gate` | gate ready, tests green, Mentat changed |
 
-A failed test stops both deploys. Claude reads the job logs and fixes
-forward — you don't need to.
+"Mentat changed" = a file under `mentat/`, `.github/workflows/` (the deploy flags and `SIGMA_GROUND_REF` live there) or `.dockerignore`
+differs from the last successful deploy; or the run is manual; or there is no earlier green deploy, or the comparison fails.
+**The portal never `needs` a Mentat job or `changes`**, so a wrong answer there can never hold up or skip the portal. A manual run
+("Run workflow") redeploys Mentat without touching it (e.g. after bootstrap creates its identity, which the `mentat` job skips with a
+notice until then).
+
+| Push | `test` | `portal-image` | `portal` | `infra` | `changes` / `mentat-test` / `mentat` |
+|---|---|---|---|---|---|
+| normal (portal, tools, ...) | runs | runs | after test + image | after test | `changes` runs; mentat jobs skipped |
+| docs only | runs | runs | runs | runs | mentat jobs skipped |
+| touches `mentat/**` or `.github/workflows/**` | runs | runs | runs | runs | all run |
+| manual run | runs | runs | runs | runs | all run |
+| a test fails | red | may finish | skipped | skipped | mentat skipped (needs `test`) |
+| gate not ready (bootstrap pending) | runs | skipped | skipped | skipped | mentat skipped |
+
+A failed test stops every deploy. Claude reads the job logs and fixes forward: you don't need to.
+
+### Expected timing
+
+Measured on GitHub before this change (median of 8 push deploys): **242 s** from push to deploy finished; the `test` job (102-122 s)
+and then the `portal` job (93-105 s: `setup-gcloud` 23-30 s, build + push 34-45 s, deploy 25 s) were the critical path.
+
+| Stage | Before | Expected now |
+|---|---|---|
+| tests (critical path) | 102-122 s, one serial job | about 50-70 s: pip cached, pytest on 2 workers, flask-api in a parallel job |
+| image build + push | 34-45 s after the tests, behind 23-30 s of `setup-gcloud` | inside the test window (about 40-60 s, warm cache) |
+| deploy to Cloud Run | 25 s | 25 s plus about 5 s of setup (the new revision serves when this step ends) |
+| push to live | **242 s** | about 100-130 s |
+
+Estimates, not measurements: the first run after this change builds the Docker cache cold, and pytest on a 2-vCPU runner can't be more
+than about 2x faster. `make loop-time` (see "Timing the loop") shows the real numbers.
 
 ## Rolling back the portal (from a phone)
 

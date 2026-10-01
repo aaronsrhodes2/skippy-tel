@@ -1,0 +1,8 @@
+# What CI installs ON TOP of a service's own requirements to run its tests (.github/workflows/run-tests.yml).
+# One file so setup-python's pip cache is keyed on it too (a change here refreshes the cache).
+pytest
+# Runs the suites in parallel: `-n auto --dist loadfile` (a test file stays on one worker, which protects the tests
+# that share state inside a file).
+pytest-xdist>=3.5
+pillow      # the favicon test checks the icon sizes
+pyyaml      # tools/tests parse the workflow files
