@@ -44,11 +44,32 @@ if sys.argv[1:3] == ["auth", "status"]:          # `claude auth status`: JSON, e
 
 mode = os.environ.get("FAKE_MODE", "ok")
 rec = os.environ["FAKE_RECORD"]
+prompt_file = None                                   # what --append-system-prompt-file pointed at, read at launch
+if "--append-system-prompt-file" in sys.argv:
+    try:
+        with open(sys.argv[sys.argv.index("--append-system-prompt-file") + 1], encoding="utf-8") as pf:
+            prompt_file = pf.read()
+    except (OSError, IndexError) as exc:
+        prompt_file = "ERROR: " + str(exc)
 with open(rec, "a") as f:
-    f.write(json.dumps({"argv": sys.argv[1:], "stdin": sys.stdin.read(), "env": sorted(os.environ)}) + "\n")
+    f.write(json.dumps({"argv": sys.argv[1:], "stdin": sys.stdin.read(), "env": sorted(os.environ), "cwd": os.getcwd(),
+                        "prompt_file": prompt_file,
+                        "git_env": {k: os.environ.get(k) for k in ("GIT_TERMINAL_PROMPT", "GCM_INTERACTIVE")}}) + "\n")
 
 def out(**e):
     print(json.dumps(e), flush=True)
+
+def beat_forever(path, every=0.1, lines=False):      # proof of life: a dot per beat in `path`, so a test can see it was killed
+    import time
+    n = 0
+    while n < 6000:
+        n += 1
+        if path:
+            with open(path, "a") as hb:
+                hb.write(".")
+        if lines:
+            out(type="assistant", message={"content": [{"type": "text", "text": f"tick {n}"}]})
+        time.sleep(every)
 
 resuming = "--resume" in sys.argv
 out(type="system", subtype="init", session_id="sess-1", model="claude-opus-5-5")
@@ -58,10 +79,39 @@ if mode == "auth":
     out(type="result", is_error=True, result=msg, session_id="sess-1")
 elif mode == "noresume" and resuming:
     out(type="result", is_error=True, result="No conversation found with session ID: sess-old", session_id="x")
+elif mode == "noresume-errors" and resuming:        # claude 2.1.285's real shape for a session it cannot find: no `result` at all
+    out(type="result", subtype="error_during_execution", is_error=True, num_turns=0, session_id="sess-old",
+        errors=["No conversation found with session ID: sess-old"])
+elif mode == "errors-only":                         # an error whose words are only in `errors`
+    out(type="result", subtype="error_during_execution", is_error=True, session_id="sess-1",
+        errors=["The repository is on fire", "", "also the stapler is missing"])
 elif mode == "slow":
     import time
     out(type="assistant", message={"content": [{"type": "text", "text": "starting"}]})
     time.sleep(60)
+elif mode == "hang":                                  # one line, then silence for good (a stuck command, a credential prompt)
+    out(type="assistant", message={"content": [{"type": "text", "text": "starting"}]})
+    beat_forever(os.environ.get("FAKE_HEARTBEAT"))
+elif mode == "chatty":                                # never silent, never done: only the wall clock can stop it
+    beat_forever(os.environ.get("FAKE_HEARTBEAT"), lines=True)
+elif mode == "steady":                                # quiet for stretches, but never for long: must NOT trip the idle limit
+    import time
+    out(type="assistant", message={"content": [{"type": "text", "text": "starting"}]})
+    for n in range(8):
+        time.sleep(0.3)
+        out(type="system", subtype="progress", n=n)
+    out(type="assistant", message={"content": [{"type": "text", "text": "Done."}]})
+    out(type="result", is_error=False, result="Done.", session_id="sess-1")
+elif mode == "orphan":                                # hangs, and a grandchild of its own holds the output pipe too
+    import subprocess
+    subprocess.Popen([sys.executable, "-c",
+                      "import time\n"
+                      "p = " + repr(os.environ.get("FAKE_CHILD_HEARTBEAT")) + "\n"
+                      "for _ in range(6000):\n"
+                      "    open(p, 'a').write('.')\n"
+                      "    time.sleep(0.1)\n"])
+    out(type="assistant", message={"content": [{"type": "text", "text": "starting"}]})
+    beat_forever(os.environ.get("FAKE_HEARTBEAT"))
 else:
     out(type="assistant", message={"content": [{"type": "text", "text": "Working on it."},
         {"type": "tool_use", "name": "Bash", "input": {"command": "curl -H 'Authorization: Bearer abcdef123456' http://x"}},
