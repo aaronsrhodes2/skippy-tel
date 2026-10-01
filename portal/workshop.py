@@ -41,6 +41,15 @@ class NotReady(Exception):
     """skippy-pc's bridge isn't reporting the workshop."""
 
 
+class Paused(NotReady):
+    """The Captain paused the private Skippy from the Admin page (recovery.py). A NotReady, so the chat's send route
+    answers it as it answers any other "can't take a message now": a plain sentence, 503."""
+
+
+PAUSED_MESSAGE = ("The private Skippy is paused (Admin page, Private Skippy card). Turn it back on there to send messages. "
+                  "A deploy of the portal also turns it back on.")
+
+
 def _clean(event) -> dict | None:
     """One event from home, reduced to what the chat may show; anything odd is dropped."""
     if not isinstance(event, dict):
@@ -57,6 +66,9 @@ class Workshop:
         self.home, self.clock = home, clock
         self._tasks: dict[str, dict] = {}
         self._lock = threading.Lock()
+        # The Admin page's kill switch. In this process's memory on purpose: the agent can't reach it (its only way into
+        # the portal is a push and a deploy, and pausing cancels its run first). A deploy forgets it; the card says so.
+        self.paused: dict | None = None          # {"by": email, "at": epoch s} while paused
 
     def ready(self) -> bool:
         return self.home.can("workshop")
@@ -83,6 +95,8 @@ class Workshop:
             raise ValueError(f"That's too long: keep it under {MAX_MESSAGE} characters.")
         if not _CONV.fullmatch(conv or ""):
             raise ValueError("Bad conversation id.")
+        if self.paused:
+            raise Paused(PAUSED_MESSAGE)
         if not self.ready():
             why = self.home.capability_reason("workshop")        # the bridge's own words, when it said why
             raise NotReady(f"skippy-pc's workshop isn't ready: {why}" if why else
@@ -119,13 +133,66 @@ class Workshop:
                 out["quiet_s"] = max(0, int(now - rec["pushed_at"]))
             return out
 
+    def _withdraw(self, task: str, rec: dict, why: str) -> None:
+        """Stop a task from the portal's side (call with the lock held). `stop` rides back to the bridge on the next push
+        (the reporter relays it), and the home job is finished so the queue never offers it again: a message still waiting
+        for skippy-pc (home off, the reporter down) is then never delivered, not delivered hours later beside the next one
+        (audit L06). A task skippy-pc never acknowledged ends here, since nothing else will end it; a running one ends when
+        the bridge says it stopped."""
+        rec["stop"] = True
+        self.home.finish(task, {"error": why})
+        if rec["state"] == "queued":
+            rec["state"], rec["error"] = "error", "stopped"
+            rec["touched"] = self.clock()
+
     def stop(self, owner: str, task: str) -> bool:
         with self._lock:
             rec = self._tasks.get(task)
             if not rec or rec["owner"] != owner or rec["state"] not in ("queued", "running"):
                 return False
-            rec["stop"] = True
+            self._withdraw(task, rec, "stopped")
         return True
+
+    # ── the Admin page's controls (recovery.py; admin only, like everything here) ──────────────────────
+    def current(self) -> dict | None:
+        """The newest task that hasn't ended, else the newest one: what the Private Skippy card shows."""
+        now = self.clock()
+        with self._lock:
+            if not self._tasks:
+                return None
+            ordered = sorted(self._tasks.items(), key=lambda kv: kv[1]["created"], reverse=True)
+            task, rec = next(((t, r) for t, r in ordered if r["state"] not in _FINAL), ordered[0])
+            return {"task": task, "state": self._live_state(rec), "error": rec["error"], "owner": rec["owner"],
+                    "age_s": max(0, int(now - rec["created"])), "quiet_s": max(0, int(now - rec["pushed_at"])),
+                    "stopping": rec["stop"] and rec["state"] not in _FINAL, "open": rec["state"] not in _FINAL}
+
+    def cancel_current(self) -> list[str]:
+        """Stop every task that hasn't ended (normally the one current run), for anyone. Returns their ids."""
+        with self._lock:
+            open_ = [(t, r) for t, r in self._tasks.items() if r["state"] in ("queued", "running")]
+            for task, rec in open_:
+                self._withdraw(task, rec, "cancelled from the Admin page")
+        return [t for t, _ in open_]
+
+    def clear_stuck(self) -> list[str]:
+        """End every unfinished record in the portal now, whatever skippy-pc last said: the chat stops spinning on it and
+        Send comes back. Anything still running at home is told to stop (and a late "running" from it can't reopen an
+        ended record: see push). Returns the ids cleared."""
+        with self._lock:
+            open_ = [(t, r) for t, r in self._tasks.items() if r["state"] not in _FINAL]
+            for task, rec in open_:
+                self._withdraw(task, rec, "cleared from the Admin page")
+                rec["state"], rec["error"], rec["touched"] = "error", "Cleared from the Admin page.", self.clock()
+        return [t for t, _ in open_]
+
+    def pause(self, by: str) -> list[str]:
+        """Refuse new messages and cancel the current run. Returns the ids cancelled."""
+        self.paused = {"by": by, "at": self.clock()}
+        return self.cancel_current()
+
+    def resume(self) -> bool:
+        was, self.paused = self.paused is not None, None
+        return was
 
     def resync(self, owner: str, task: str) -> dict:
         """The browser's "check again": ask skippy-pc to look at this task now. Marks it (so the home listing shows

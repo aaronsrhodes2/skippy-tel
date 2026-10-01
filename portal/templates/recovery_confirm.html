@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{# A recovery button pressed without the page's confirm (no script, or a hand-made POST): ask here, act only on Yes. #}
+{% block title %}Confirm — Skippy Portal{% endblock %}
+{% block app %}admin{% endblock %}
+{% block content %}
+<section>
+  <div class="card">
+    <h3>{{ spec.label }}</h3>
+    <p>{{ spec.ask }}</p>
+    <form method="post" action="{{ url_for('recovery.act', action=action) }}">
+      <input type="hidden" name="confirm" value="yes">
+      {% for k, val in fields.items() %}<input type="hidden" name="{{ k }}" value="{{ val }}">{% endfor %}
+      <p class="row"><button type="submit" class="danger">Yes, {{ spec.label | lower }}</button>
+        <a class="btn" href="{{ url_for('admin.index') }}#recovery">No, go back</a></p>
+    </form>
+  </div>
+</section>
+{% endblock %}

@@ -19,6 +19,9 @@
   {% endif %}
 </section>
 
+{# Outside the `status` block on purpose: recovery matters most when something is broken, the VM API included. #}
+{% include "_recovery.html" %}
+
 {% if status %}
 <section>
   <h2>Set up automatically</h2>

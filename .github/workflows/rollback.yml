@@ -80,7 +80,7 @@ jobs:
           URL=$(gcloud run services describe skippy-portal --region "$REGION" --format='value(status.url)')
           now=$(gcloud run services describe skippy-portal --region "$REGION" --format='value(status.traffic[0].revisionName)')
           # The old revision may have been scaled to zero: give it a few seconds to wake.
-          if curl -fsS --connect-timeout 10 --retry 6 --retry-delay 5 --retry-all-errors "$URL/health"; then
+          if curl -fsS -m 20 --connect-timeout 10 --retry 6 --retry-delay 5 --retry-all-errors "$URL/health"; then
             health=ok
           else
             health=FAILING

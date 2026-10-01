@@ -9,7 +9,7 @@ page. Code in [`portal/`](../../portal); deployed on every push by
 |---|---|---|
 | `/dashboard` | allowlist | Server status, start (game picker + auto-sleep) / stop, per-game connect info, `#game` and 🔊 voice Discord links |
 | `/chat` | allowlist | Text chat with Skippy (Claude, Skippy persona) |
-| `/admin` | admins | Game settings (world names, passwords, Dragonwilds owner ID), **Restart & update**, **Set up / repair Discord channels** |
+| `/admin` | admins | Game settings (world names, passwords, Dragonwilds owner ID), **Restart & update**, **Set up / repair Discord channels**, the **Recovery** cards (below) |
 | `/music` | admins | **Bilby's Audio Service**: the Captain's music collection streamed from skippy-pc to any browser (see below). `/bilby` redirects here |
 
 ## Friends: play without the Captain online
@@ -95,6 +95,19 @@ downloads the update (a few extra minutes). The Discord channel gets a
   parses it; [`portal/admin_panel.py`](../../portal/admin_panel.py) builds the card and its one refresh route,
   `GET /admin/games/<game>/panel`, admin-only: a friend gets 403). Controls are ordinary Admin settings. Per-game details:
   [docs/games/MODS_AND_UPDATES.md](../games/MODS_AND_UPDATES.md).
+- **Recovery cards (admin only, on `/admin`):** **Live version** (the serving commit and revision from `/version`, and how
+  many pushes `main` is ahead of it), **Deploy pipeline** (the newest deploy runs; Roll back, Undo a rollback, Re-run the
+  failed jobs of the newest deploy, Cancel a deploy stuck for over 20 minutes) and **Private Skippy** (cancel the current run,
+  clear a stuck record, pause). Code: [`portal/recovery.py`](../../portal/recovery.py) (the rules and the GitHub client) and
+  [`portal/recovery_web.py`](../../portal/recovery_web.py) (`POST /admin/recovery/<action>`). Every button is an admin-only
+  POST from the portal's own page (Origin, else Referer), confirmed (the page asks, then sends `confirm=yes`; without it the
+  server asks on a page of its own), rate limited per action and logged as one stdout line
+  `{"event": "recovery", "action", "by", "result", "ok"}`; the last 20 show on the card. None of it is a chat tool. The deploy
+  buttons use `GITHUB_ACTIONS_TOKEN` (fine-grained, this repo, Actions read/write only; deploy.yml copies the repo secret
+  `PORTAL_ACTIONS_TOKEN` into Secret Manager), which never enters `app.config`; the client can call five endpoints (list deploy
+  runs, one run's jobs, dispatch `rollback.yml`, re-run failed jobs, cancel a run), checked inside the one method that sends,
+  never follows a redirect, and turns errors into plain sentences. Without the token the pipeline card says "Not configured".
+  The pause lives in portal memory (a deploy clears it). What to press when: [remote-recovery.md](remote-recovery.md).
 - **Discord:** the admin button ([`portal/discord_admin.py`](../../portal/discord_admin.py))
   creates `#game` + 🔊 voice channels, a webhook and a pinned status post per
   game, and stores the IDs/webhooks in `games-env` — which is where the

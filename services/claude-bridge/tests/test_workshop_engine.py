@@ -43,6 +43,19 @@ def test_the_prompt_says_when_and_how_the_reporter_may_be_rebuilt_and_keeps_its_
     assert len(prompt) < 6000                                       # concise: it is read on every turn
 
 
+def test_the_prompt_watches_the_deploy_of_its_own_commit_and_checks_the_live_version(shop):
+    """Audit A4/L03: `gh run list --branch main --limit 1` right after a push returns the PREVIOUS run (already green) or
+    someone else's, so the agent reported 'deployed' for code that was not live. It must pick its own commit's run, bound
+    the watch, and believe only /version."""
+    portal = next(line for line in shop.prompt().splitlines() if line.strip().startswith("- portal/"))
+    assert "--branch main --limit 1" not in portal
+    assert "gh run list --workflow deploy.yml --commit $sha --limit 1" in portal and "git rev-parse HEAD" in portal
+    assert "up to a minute" in portal                               # GitHub takes a few seconds to register the push
+    assert "timeout 1800 gh run watch <id> --exit-status" in portal
+    assert "/version" in portal and "your $sha" in portal          # green is not live: the serving commit must be its own
+    assert "cancelled" in portal and "never revert" in portal
+
+
 def test_nothing_can_change_the_model(shop, monkeypatch):
     monkeypatch.setenv("CLAUDE_AWESOMENESS_MODEL", "claude-haiku-4-5")
     assert "--model" in shop.command(None) and shop.command(None)[shop.command(None).index("--model") + 1] == "claude-opus-5-5"

@@ -74,11 +74,58 @@ def test_the_deploy_step_has_an_id_so_the_rollback_can_tell_whether_it_ever_star
     assert step(PORTAL, "Deploy to Cloud Run")["id"] == "deploy"
 
 
-def test_the_rollback_runs_only_on_failure_with_a_recorded_revision_and_after_the_deploy_step_began():
-    cond = step(PORTAL, "Roll back to the previous revision")["if"]
-    assert "failure()" in cond
+def test_the_rollback_runs_on_failure_or_cancel_with_a_recorded_revision_and_after_the_deploy_step_began():
+    rollback = step(PORTAL, "Roll back to the previous revision")
+    cond = rollback["if"]
+    # A cancelled job makes failure() false: without cancelled() a deploy cancelled after the traffic step leaves the new,
+    # possibly broken revision serving everyone (audit A2). The parentheses matter: `&&` binds tighter than `||`.
+    assert cond.startswith("(failure() || cancelled()) && ")
     assert "env.PREV_REVISION != ''" in cond
     assert "steps.deploy.outcome != 'skipped'" in cond           # a failed build/push changed nothing: nothing to undo
+    assert rollback["timeout-minutes"] == 5                       # short enough to finish inside a cancel
+
+
+# What each deploy job may take at most (audit A1). GitHub's default is 6 hours, and a hung job holds the `deploy`
+# concurrency group, so every later push waits behind it.
+DEPLOY_TIMEOUTS = {"changes": 5, "mentat-test": 10, "gate": 5, "infra": 15, "mentat": 15, "portal-image": 15, "portal": 20}
+
+
+def test_every_deploy_job_has_its_timeout_and_the_reusable_test_jobs_carry_theirs():
+    jobs = DEPLOY["jobs"]
+    assert {j: b.get("timeout-minutes") for j, b in jobs.items() if "uses" not in b} == DEPLOY_TIMEOUTS
+    # `test` calls run-tests.yml, and GitHub allows no timeout-minutes on a job that `uses:` a workflow, so the
+    # called jobs must each have one.
+    assert "timeout-minutes" not in jobs["test"]
+    for name, body in load("run-tests.yml")["jobs"].items():
+        assert body.get("timeout-minutes") == 15, name
+    for name, body in load("test.yml")["jobs"].items():
+        assert "uses" in body or 0 < body.get("timeout-minutes", 0) <= 15, name
+    assert 0 < ROLLBACK["jobs"]["rollback"]["timeout-minutes"] <= 10
+
+
+def curl_calls(script: str) -> list[str]:
+    """Every curl command line in a shell block (backslash continuations joined)."""
+    return [line.strip() for line in script.replace("\\\n", " ").splitlines() if re.search(r"(^|[\s(|$])curl\s", line)]
+
+
+def test_every_curl_in_the_deploy_and_rollback_workflows_has_a_time_limit():
+    """--retry alone is not a limit: each try could wait out Cloud Run's 900 s request timeout (audit A1)."""
+    seen = 0
+    for wf, name in ((DEPLOY, "deploy.yml"), (ROLLBACK, "rollback.yml")):
+        for job, body in wf["jobs"].items():
+            for s in body.get("steps", []):
+                for call in curl_calls(s.get("run", "")):
+                    seen += 1
+                    limit = re.search(r"(?:\s-m\s+|--max-time[\s=]+)(\d+)", call)
+                    assert limit, f"{name}:{job}:{s.get('name')}: curl without -m/--max-time: {call}"
+                    assert int(limit.group(1)) <= 300, call
+    assert seen >= 15                                             # the scan really found them
+
+
+def test_the_smoke_and_rollback_curls_give_up_within_half_a_minute_each():
+    for needle in ("Smoke test", "Roll back to the previous revision"):
+        for call in curl_calls(step(PORTAL, needle)["run"]):
+            assert int(re.search(r"\s-m\s+(\d+)", call).group(1)) <= 30, call
 
 
 def test_the_rollback_moves_all_traffic_checks_health_and_is_loud():
