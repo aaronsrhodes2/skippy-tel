@@ -832,6 +832,13 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         body = request.get_json(silent=True) or {}
         return jsonify(ok=workshop.stop(me(), str(body.get("task") or "")))
 
+    @mine.post("/workshop/resync")
+    @workshop_call
+    def workshop_resync():
+        """The chat's "Check again" (also sent by itself when a run goes quiet): wake skippy-pc's reconciler."""
+        body = request.get_json(silent=True) or {}
+        return jsonify(workshop.resync(me(), str(body.get("task") or "")))
+
     @mine.post("/pair-home")
     @auth.admin_required
     def pair_home():
