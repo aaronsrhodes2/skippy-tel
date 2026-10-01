@@ -277,7 +277,7 @@ def test_a_failed_action_says_so():
 def test_the_polls_media_and_machine_endpoints_are_never_recorded():
     app, client, tel, vm = make()
     login(client, ADMIN)
-    for path in ("/games/valheim/live", "/games/valheim/discord", "/music/gate", "/chat/badges",
+    for path in ("/games/valheim/live", "/games/valheim/discord", "/chat/badges",
                  "/health", "/favicon.ico", "/static/favicon.svg", "/me/workshop/events?task=abcdef12&after=0",
                  "/chat/media/abc", "/experiments/radiance/app.js"):
         client.get(path)

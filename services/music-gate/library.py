@@ -1,4 +1,4 @@
-"""The Captain's music library, as the Music app sees it: every MP3 and AAC file under /music.
+"""The Captain's music library, as Bilby's Audio Service sees it: every MP3 and AAC file under /music.
 
 Only MP3 and AAC, on purpose (the Captain's call): every browser plays them, Safari and the Tesla included, so nothing is
 ever transcoded. FLAC, WMA, OGG, WAV and Apple Lossless (ALAC in an .m4a) are left out of the catalog.
@@ -88,7 +88,7 @@ def _title_from_name(name: str) -> str:
 
 def read_tags(path: Path) -> dict | None:
     """Title, artist, album, track, disc, genre, year, seconds and whether there is cover art. None: unreadable, or an .m4a
-    that isn't AAC (Apple Lossless), which the Music app doesn't play."""
+    that isn't AAC (Apple Lossless), which Bilby's Audio Service doesn't play."""
     import mutagen   # imported here so the tests of everything else don't need it
     try:
         f = mutagen.File(path)

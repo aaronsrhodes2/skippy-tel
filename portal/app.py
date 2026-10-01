@@ -7,7 +7,6 @@ Local run:  FLASK_APP=app.py flask run   (needs every var in .env.example)
 """
 from __future__ import annotations
 
-import base64
 import io
 import ipaddress
 import json
@@ -77,7 +76,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     media = media_mod.Media()
     workshop = workshop_mod.Workshop(home)          # the Captain's private Skippy (admin only)
     app.extensions["workshop"] = workshop
-    player = player_mod.Player(home)                # the Music app's pass and Connect (admin only)
+    player = player_mod.Player(home)                # Bilby's Audio Service: the pass and Connect (admin only)
+    app.extensions["player"] = player               # (so tests/dev_music.py can point it at a gate on this machine)
     telemetry_web.init_app(app)                     # usage recording, /privacy, the tap beacon, /home/telemetry
 
     def me() -> str:
@@ -646,27 +646,13 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         except ValueError:
             abort(400)
 
-    @app.get("/home/workshop")
-    def home_workshop_list():
-        """What this portal holds of the private Skippy's runs (workshop.py `listing`), for the home reporter's
-        reconciler: it compares this with what the bridge holds and pushes the difference, so a portal that was just
-        redeployed (empty) is refilled without anyone asking. Same home-token door as the push; never cached."""
-        if not home.authorized(request.headers.get("Authorization")):
-            abort(401)
-        resp = jsonify(workshop.listing())
-        resp.headers["Cache-Control"] = "no-store"
-        return resp
-
-    # ── /bilby: the old mirror of the Mac's DJ decks is gone (the Captain's call, 2026-09-30: it no longer worked).
-    #    Every old /bilby link and bookmark lands in Bilby's Audio Service instead. ───────────────────────────────
-    old_bilby = Blueprint("bilby", __name__, url_prefix="/bilby")
-
-    @old_bilby.get("/", defaults={"rest": ""}, strict_slashes=False)     # /bilby and /bilby/ in one hop
-    @old_bilby.get("/<path:rest>")
-    def moved(rest):
-        return redirect(url_for("music.player_page"), code=301)
-
-    app.register_blueprint(old_bilby)
+    # ── The old Bilby page (a mirror of the Mac's DJ decks) is gone: Bilby's Audio Service below is where the music is ──
+    # Its address, and every address under it (state.json, art), still lead somewhere: old bookmarks, a home-screen
+    # shortcut and the links in old Discord posts land on the player. (GET only: nothing posts there any more.)
+    @app.get("/bilby", strict_slashes=False)
+    @app.get("/bilby/<path:rest>")
+    def legacy_bilby(rest=""):
+        return redirect(url_for("music.player_page"), 301)
 
     # ── Bilby's Audio Service: the Captain's library on any browser (player.py; admin only) ────
     listen = Blueprint("music", __name__, url_prefix="/music")
@@ -684,18 +670,25 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     @listen.get("/manifest.webmanifest")
     def player_manifest():
-        """Add to Home Screen opens straight into the player, full screen, like an app."""
+        """Add to Home Screen opens straight into the player, full screen, like an app. (Public, like /static: the browser
+        fetches a manifest without the sign-in cookie.)"""
         icon = url_for("static", filename="apple-touch-icon.png")
+        start = url_for("music.player_page")
         return app.response_class(json.dumps({
-            "name": "Bilby's Audio Service", "short_name": "Bilby", "start_url": url_for("music.player_page"),
-            "scope": url_for("music.player_page"), "display": "standalone", "background_color": "#000000",
-            "theme_color": "#000000", "icons": [{"src": icon, "sizes": "180x180", "type": "image/png"}]}),
+            "id": start, "name": player_mod.NAME, "short_name": player_mod.SHORT_NAME,
+            "description": "The Captain's whole music collection, streamed from home to any browser.",
+            "start_url": start, "scope": start, "display": "standalone", "orientation": "any", "categories": ["music"],
+            "background_color": "#000000", "theme_color": "#000000",
+            "icons": [{"src": icon, "sizes": "180x180", "type": "image/png"},
+                      {"src": url_for("static", filename="favicon.svg"), "sizes": "any", "type": "image/svg+xml"}]}),
             mimetype="application/manifest+json")
 
     @listen.get("/gate")
     @auth.admin_required
     def player_gate():
-        return jsonify(player.gate())
+        resp = jsonify(player.gate())
+        resp.headers["Cache-Control"] = "no-store"          # a pass is a credential: never from a cache
+        return resp
 
     @listen.post("/checkin")
     @auth.admin_required
@@ -709,8 +702,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @auth.admin_required
     def player_command():
         body = request.get_json(silent=True) or {}
-        ok = player.command(me(), device_id(), str(body.get("action") or ""))
-        return jsonify(queued=ok), (200 if ok else 409)
+        dev = device_id()
+        ok = player.command(me(), dev, str(body.get("action") or ""))
+        # needs_tap: the other player's browser will refuse sound until someone taps it (it says so in its check-in)
+        return jsonify(queued=ok, needs_tap=ok and player.needs_tap(me(), dev)), (200 if ok else 409)
 
     app.register_blueprint(listen)
 

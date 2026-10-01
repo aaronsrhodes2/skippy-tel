@@ -1,7 +1,7 @@
 """music-gate: the only piece of skippy-pc on the public internet, and all it does is hand out the Captain's music.
 
 Tailscale Funnel carries https://skippy-pc.<tailnet>.ts.net/ to this container (published on 127.0.0.1:3005 only), so
-the Music app on the portal plays the library on any device, the Tesla included, without the device joining the tailnet.
+Bilby's Audio Service on the portal plays the library on any device, the Tesla included, without the device joining the tailnet.
 
 Nothing here works without a pass: every path but /health starts with /t/<exp>.<sig>/, a signature only the portal can
 make. The portal signs with a key derived from the home token's sha256 (the one thing both sides already hold: the

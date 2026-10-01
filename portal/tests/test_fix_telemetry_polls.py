@@ -64,6 +64,21 @@ def asked_for_by_scripts(text: str, url_map=None) -> set[str]:
     return found
 
 
+# A static script that makes network calls hides its URLs from a scan of the templates, UNLESS the page hands them over as data-*
+# attributes: then the scan can read them as long as it is given the script too. These are the allowed ones: the script, and the
+# template whose data-*-url attributes (url_for) are the portal URLs it uses. Anything else gets the failure below.
+STATIC_SCRIPTS = {"bilby-app.js": "music.html"}
+
+
+def template_text(template: Path) -> str:
+    """A template, with the static script it carries as an inline one, so the scan sees what that script reads from data-*."""
+    text = template.read_text(encoding="utf-8")
+    for js, owner in STATIC_SCRIPTS.items():
+        if template.name == owner:
+            text += "\n<script>" + (PORTAL / "static" / js).read_text(encoding="utf-8") + "</script>"
+    return text
+
+
 def make(templates=None):
     vm = FakeVm()
     vm.metadata["portal-friends"] = json.dumps({PAL: {"portals": ["valheim", "skippy"], "added_by": ADMIN}})
@@ -123,22 +138,23 @@ def test_the_game_page_itself_is_still_a_page_view_and_its_polls_are_not():
 def test_the_scan_finds_every_kind_of_poll_the_templates_use():
     """It has to see the pollers that exist today, or a green result below would mean nothing."""
     app, *_ = make()
-    found = {t.name: asked_for_by_scripts(t.read_text(encoding="utf-8"), app.url_map) for t in TEMPLATES.glob("*.html")}
+    found = {t.name: asked_for_by_scripts(template_text(t), app.url_map) for t in TEMPLATES.glob("*.html")}
     every = set().union(*found.values())
     assert "server_admin.fragment" in found["_server_admin.html"]                     # url_for inside a <script>
     assert {"dashboard.game_live", "dashboard.game_discord"} <= found["game.html"]
     assert "dashboard.game_live" in found["games.html"]                                # a data-live attribute the script reads
     assert {"experiments.wva_catalog", "experiments.wva_solve"} <= found["demo_weapon_vs_armor.html"]     # data-catalog / data-solve
-    assert {"music.player_gate", "chat.badges", "telemetry_tap"} <= every
+    assert {"chat.badges", "telemetry_tap"} <= every
+    assert {"music.player_gate", "music.player_checkin", "music.player_command"} <= found["music.html"]   # a STATIC script's data-*-url
     assert "dashboard.game" not in every and "admin.index" not in every              # a link is a page, not a poll
 
 
 def test_the_scan_reads_the_three_ways_a_page_names_what_it_polls():
     app, *_ = make()
     text = ("""<a href="{{ url_for('dashboard.games') }}">back</a><div data-live="{{ url_for('dashboard.game_live', gid='v') }}" data-x="{{ url_for('privacy') }}">
-              <script>const u = "{{ url_for('music.player_gate') }}"; fetch("/chat/badges"); x.open("GET", "/music/manifest.webmanifest");
+              <script>const u = "{{ url_for('chat.send') }}"; fetch("/chat/badges"); x.open("GET", "/games/valheim/discord");
               tile.dataset.live; setInterval(poll, 1000)</script>""")
-    assert asked_for_by_scripts(text, app.url_map) == {"music.player_gate", "chat.badges", "music.player_manifest", "dashboard.game_live"}
+    assert asked_for_by_scripts(text, app.url_map) == {"chat.send", "chat.badges", "dashboard.game_discord", "dashboard.game_live"}
     assert asked_for_by_scripts('<script>fetch("/no/such/path")</script>', app.url_map) == {"<no route for /no/such/path>"}
 
 
@@ -146,7 +162,7 @@ def test_every_endpoint_a_template_polls_is_skipped_or_is_not_a_page():
     app, client, tel = make()
     polled = set()
     for template in TEMPLATES.glob("*.html"):
-        polled |= asked_for_by_scripts(template.read_text(encoding="utf-8"), app.url_map)
+        polled |= asked_for_by_scripts(template_text(template), app.url_map)
     assert not {e for e in polled if e.startswith("<no route")}, polled
     assert len(polled) >= 10, polled                                                   # the scan is really finding them
     bad = offenders(app, client, tel, polled)
@@ -160,7 +176,7 @@ def test_the_scan_would_have_caught_the_original_defect_and_any_future_poller(mo
     app.add_url_rule("/ticker", "ticker", lambda: "<p>tick</p>")                      # a poller somebody adds next month
     polled = {"ticker"}
     for template in TEMPLATES.glob("*.html"):
-        polled |= asked_for_by_scripts(template.read_text(encoding="utf-8"), app.url_map)
+        polled |= asked_for_by_scripts(template_text(template), app.url_map)
     assert [b[0] for b in offenders(app, client, tel, polled)] == ["ticker"]           # the list as it is: only the new one
     monkeypatch.setattr(telemetry_web, "SKIP_ENDPOINTS",                                 # the list as it was: the recorder and the scan
                         frozenset(telemetry_web.SKIP_ENDPOINTS - {"server_admin.fragment"}))     # both see the gap
@@ -170,4 +186,8 @@ def test_the_scan_would_have_caught_the_original_defect_and_any_future_poller(mo
 def test_no_script_file_in_static_makes_network_calls_the_template_scan_cannot_see():
     """The scan reads templates. A static .js file that fetches/polls would hide its URLs from it: add them to the scan first."""
     for js in (PORTAL / "static").rglob("*.js"):
+        if js.name in STATIC_SCRIPTS:                      # allowed: its URLs are data-*-url attributes, which template_text() scans
+            owner = (TEMPLATES / STATIC_SCRIPTS[js.name]).read_text(encoding="utf-8")
+            assert f"filename='{js.name}'" in owner, f"{js.name} isn't loaded by {STATIC_SCRIPTS[js.name]}"
+            continue
         assert not NETWORK.search(js.read_text(encoding="utf-8")), f"{js.name} makes network calls: teach this test about its URLs"

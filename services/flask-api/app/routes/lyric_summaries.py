@@ -1,5 +1,5 @@
 """
-GET /music/lyric-summaries — one sentence per song about what it is about, for Bilby's Music Service (the music-gate
+GET /music/lyric-summaries — one sentence per song about what it is about, for Bilby's Audio Service (the music-gate
 fetches this over the compose network and serves it to the browser player; nothing else calls it).
 
 The data is Bilby's two lyrics stores, written on the Mac by a local model and synced into music-collection/state, which

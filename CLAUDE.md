@@ -160,8 +160,21 @@ and jobs; while someone chats, the reporter also polls `GET /home/jobs` every
 - Token: dashboard → "Pair home" shows it once; the portal keeps only its
   sha256 in VM metadata `portal-home`. Put the line in the vault .env and
   SkippyTel's .env.
-- Portal side: `portal/home.py` (in-memory; the portal runs max 1 instance),
-  `/bilby` sub-portal (grant "bilby"; controls admin-only), Home widget on `/me`.
+- Portal side: `portal/home.py` (in-memory; the portal runs max 1 instance), Home widget on `/me`.
+  The old `/bilby` page (a mirror of the Mac's decks, with phone-session controls) is gone: `/bilby` and everything
+  under it answer a 301 to `/music`. The "bilby" grant now only gates the chat's `now_playing` tool. What the
+  reporter still sends for it (the Mac's decks and setlist, the album art, the queued `music` commands) is read by
+  `/me`'s widget and the chat tool only.
+
+## Bilby's Audio Service (the browser music player, `/music`)
+
+The Captain's collection in any browser, admin only, a tile on the launcher: `portal/templates/music.html` +
+`portal/static/bilby-{player,app}.js` + `bilby-player.css` (portal colour variables only) + `portal/player.py` (the pass and
+Connect). The audio goes browser → Tailscale Funnel → `services/music-gate` with a pass the portal signs; it never passes
+through the portal. A browser plays sound only after a tap on that page load, so after any reload or deploy the player shows
+a "Tap to start the sound" bar once (it publishes `armed` in its Connect check-in so another device's remote can say so).
+Run it beside the REAL gate on this machine with `python portal/tests/dev_music.py`. Full description, the autoplay
+rule and the tests: `docs/portal/README.md` → Bilby's Audio Service.
 
 ## Private Skippy (the Workshop: left side of `/me`)
 

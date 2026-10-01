@@ -32,7 +32,6 @@ SKIP_ENDPOINTS = frozenset({
     "static", "health", "site_icons",
     "dashboard.game_live", "dashboard.game_discord",               # a game page polls these
     "server_admin.fragment",                                        # ... and the admin card's 60 s refresh (HTML, so the mimetype rule wouldn't skip it)
-    "music.player_gate", "music.player_checkin", "music.player_command",   # Bilby's Audio Service polls these
     "chat.badges", "chat.media_file",                               # the chat fetches these itself
     "me.workshop_send", "me.workshop_events", "me.workshop_stop",   # the Captain's private Skippy: not recorded at all
     "me.workshop_resync",
@@ -52,7 +51,6 @@ SAFE_VALUES = {
     "game": _ID,                # which game a request-access form is about
     "portals": _ID,             # which apps a friend is granted (an admin's form)
     "slug": r"[a-z0-9_-]{1,60}",  # which experiment to show or hide
-    "action": r"[a-z_]{1,20}",  # a music control: skip, pause, resume, stop
     "idle_minutes": r"\d{1,4}",  # the server's idle sleep
     "from_request": r"[01]",    # approving from a request card
 }
