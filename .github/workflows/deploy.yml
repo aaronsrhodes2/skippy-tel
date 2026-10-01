@@ -254,6 +254,31 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
         with:
           skip_install: true
+      - name: Copy the recovery buttons' GitHub token into Secret Manager
+        # The Captain keeps the token in his vault; the repo holds a copy as the Actions secret PORTAL_ACTIONS_TOKEN
+        # (GitHub forbids secret names starting with GITHUB_). This puts it in Secret Manager as `github-actions-token`
+        # (a new version only when the value changed), lets the portal's runtime account read it, and tells the deploy
+        # step to hand it to the portal. The deployer has roles/secretmanager.admin for this (granted 2026-09-30).
+        # Any failure only means the admin page's recovery buttons stay off: never a failed deploy.
+        env:
+          TOKEN: ${{ secrets.PORTAL_ACTIONS_TOKEN }}
+        run: |
+          s=github-actions-token
+          if [ -z "$TOKEN" ]; then echo "::notice::no PORTAL_ACTIONS_TOKEN repo secret: the recovery buttons stay off"; exit 0; fi
+          if ! gcloud secrets describe "$s" >/dev/null 2>&1; then
+            gcloud secrets create "$s" --replication-policy=automatic >/dev/null 2>&1 \
+              || { echo "::warning::couldn't create the $s secret (does the deployer have Secret Manager rights?): buttons stay off"; exit 0; }
+          fi
+          current=$(gcloud secrets versions access latest --secret="$s" 2>/dev/null || true)
+          if [ "$current" != "$TOKEN" ]; then
+            printf '%s' "$TOKEN" | gcloud secrets versions add "$s" --data-file=- >/dev/null \
+              || { echo "::warning::couldn't store a new version of $s: buttons stay off"; exit 0; }
+            echo "Stored a new version of \`$s\`." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          gcloud secrets add-iam-policy-binding "$s" --member="serviceAccount:$RUNTIME_SA" \
+            --role=roles/secretmanager.secretAccessor >/dev/null \
+            || { echo "::warning::couldn't let the portal read $s: buttons stay off"; exit 0; }
+          echo "EXTRA_SECRETS=,GITHUB_ACTIONS_TOKEN=$s:latest" >> "$GITHUB_ENV"
       - name: Note the revision serving now (the way back if this deploy goes wrong)
         # Recorded BEFORE the deploy, because afterwards "the previous one" can no longer be told apart from "the new one".
         # A new service has none: then there is nothing to roll back to, and a failed first deploy just stays red.
@@ -278,7 +303,7 @@ jobs:
             --max-instances 1 \
             --memory 1Gi \
             --set-env-vars "^|^ALLOWED_EMAILS=${ALLOWED_EMAILS}|ADMIN_EMAILS=${ADMIN_EMAILS}|GCP_PROJECT=${PROJECT_ID}|GCP_ZONE=us-west1-b|GCP_INSTANCE=skippy-games|CHAT_MODEL=claude-haiku-4-5|DISCORD_INVITE=gPTVS7Hmj|MENTAT_URL=https://skippy-mentat-1015050363686.us-west1.run.app" \
-            --set-secrets "FLASK_SECRET_KEY=portal-flask-secret:latest,GOOGLE_CLIENT_ID=portal-google-client-id:latest,GOOGLE_CLIENT_SECRET=portal-google-client-secret:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,DISCORD_BOT_TOKEN=discord-bot-token:latest"
+            --set-secrets "FLASK_SECRET_KEY=portal-flask-secret:latest,GOOGLE_CLIENT_ID=portal-google-client-id:latest,GOOGLE_CLIENT_SECRET=portal-google-client-secret:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,DISCORD_BOT_TOKEN=discord-bot-token:latest${EXTRA_SECRETS:-}"
       - name: Send all traffic to the new revision
         # A rollback (here, or the `rollback` workflow) PINS traffic to one named revision. Cloud Run then no longer
         # moves traffic to a newly deployed revision by itself: the next deploy would go green and serve nothing
