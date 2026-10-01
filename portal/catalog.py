@@ -35,6 +35,12 @@ class Theme:
     font: str
     pattern: str              # CSS background-image layered over the hero
     tagline: str
+    # Official art shipped with the portal (portal/static/games, provenance in docs/portal/game-art.md): `bg_image` is
+    # the page's dimmed full-page backdrop, `hero_image` the banner behind the title (an admin's <GAME>_BANNER_URL
+    # still wins), `hero_focus` is the banner's CSS object-position so the interesting part survives the crop.
+    bg_image: str = ""
+    hero_image: str = ""
+    hero_focus: str = "center"
 
 
 @dataclass(frozen=True)
@@ -125,7 +131,8 @@ GAMES: dict[str, Game] = {
                     font="Cinzel",
                     pattern="radial-gradient(ellipse at 20% 110%, rgba(255,90,20,.55), transparent 60%), "
                             "radial-gradient(ellipse at 85% -10%, rgba(201,162,74,.35), transparent 55%)",
-                    tagline="Dragons are loose in Ashenfall. Bring friends."),
+                    tagline="Dragons are loose in Ashenfall. Bring friends.",
+                    bg_image="games/dragonwilds-bg.jpg", hero_image="games/dragonwilds-hero.jpg", hero_focus="62% 50%"),
         max_players=6,
         facts=(("Crossplay", "PC · Xbox · PS5 · Switch 2"), ("Ports", "7778/udp + beacon 8888/udp")),
         links=(("Official site", "https://dragonwilds.runescape.com"),
@@ -166,7 +173,8 @@ GAMES: dict[str, Game] = {
                     font="Cinzel",
                     pattern="linear-gradient(180deg, rgba(143,211,255,.18), transparent 70%), "
                             "repeating-linear-gradient(115deg, rgba(216,201,163,.06) 0 2px, transparent 2px 22px)",
-                    tagline="Odin's tenth world awaits. Mind the trolls."),
+                    tagline="Odin's tenth world awaits. Mind the trolls.",
+                    bg_image="games/valheim-bg.jpg", hero_image="games/valheim-hero.jpg", hero_focus="50% 64%"),
         max_players=10,
         facts=(("Crossplay", "Steam · Xbox · Game Pass"),
                ("Joined by", "IP address port 2456, or a join code when crossplay is on")),
@@ -184,7 +192,8 @@ GAMES: dict[str, Game] = {
         theme=Theme(accent="#ff9a1f", accent2="#7fb03a", bg="#141414", card="#232323", text="#e6e0d6",
                     font="Titillium Web",
                     pattern="repeating-linear-gradient(45deg, rgba(255,154,31,.10) 0 14px, rgba(0,0,0,0) 14px 28px)",
-                    tagline="The factory must grow."),
+                    tagline="The factory must grow.",
+                    bg_image="games/factorio-bg.jpg", hero_image="games/factorio-hero.jpg", hero_focus="50% 40%"),
         facts=(("Players", "as many as the factory can take"), ("Joined by", "IP address"),
                ("Port", "34197/udp")),
         links=(("Official site", "https://factorio.com"), ("Wiki", "https://wiki.factorio.com")),
@@ -209,7 +218,8 @@ GAMES: dict[str, Game] = {
                     font="Rajdhani",
                     pattern="radial-gradient(circle at 80% 20%, rgba(95,182,217,.35), transparent 50%), "
                             "linear-gradient(135deg, rgba(250,149,73,.25), transparent 60%)",
-                    tagline="FICSIT reminds you: efficiency is mandatory."),
+                    tagline="FICSIT reminds you: efficiency is mandatory.",
+                    bg_image="games/satisfactory-bg.jpg", hero_image="games/satisfactory-hero.jpg", hero_focus="50% 62%"),
         facts=(("Players", "4 recommended, more configurable"),
                ("Joined by", "Server Manager: address, and port 7777")),
         links=(("Official site", "https://www.satisfactorygame.com"),
@@ -238,7 +248,8 @@ GAMES: dict[str, Game] = {
                     font="Cinzel",
                     pattern="radial-gradient(ellipse at 15% 0%, rgba(106,140,199,.35), transparent 55%), "
                             "radial-gradient(ellipse at 90% 100%, rgba(212,175,55,.30), transparent 55%)",
-                    tagline="Norrath, the way you remember it. Minus the corpse runs."),
+                    tagline="Norrath, the way you remember it. Minus the corpse runs.",
+                    bg_image="games/everquest-bg.jpg", hero_image="games/everquest-hero.jpg", hero_focus="50% 38%"),
         facts=(("Client", "RoF2 (Rain of Fear 2)"), ("Login server", "this server, port 5999"),
                ("Rules", "XP x3 · AA x2 · level 65 · bots + mercs · no death penalty"),
                ("First boot", "~15-20 min to install; later boots a few minutes")),

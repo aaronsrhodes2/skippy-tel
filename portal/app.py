@@ -300,12 +300,15 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             return redirect(url_for("request_access", game=gid))
         status, error = vm_status()
         env = status.env if status else {}
+        theme = GAMES[gid].theme
         banner = env.get(GAMES[gid].banner_key, "")
+        if not banner.startswith("https://"):                    # no admin-set banner: the art that ships with the portal
+            banner = url_for("static", filename=theme.hero_image) if theme.hero_image else ""
         codes, players, ready, since = live_info(status)
         return render_template(
-            "game.html", game=GAMES[gid], t=GAMES[gid].theme, status=status, error=error,
+            "game.html", game=GAMES[gid], t=theme, status=status, error=error,
             links=discord_admin.links(env, gid),
-            banner=banner if banner.startswith("https://") else "",
+            banner=banner, backdrop=url_for("static", filename=theme.bg_image) if theme.bg_image else "",
             bot_configured=bool(app.config["DISCORD_BOT_TOKEN"]),
             codes=codes, players=players, starting=starting_now(status, gid, ready, since),
         )
