@@ -26,6 +26,7 @@ MAC = os.environ.get("BILBY_MAC_URL", "").rstrip("/")         # Mac DJ assistant
 MENTAT = os.environ.get("MENTAT_URL", "").rstrip("/")         # Mentat + Qwen on skippy-pc
 INTERVAL = float(os.environ.get("REPORT_INTERVAL", "15"))
 FAST_INTERVAL = 1.5          # job polling while someone is chatting on the portal
+GATHER_BUDGET_S = float(os.environ.get("GATHER_BUDGET", "9"))   # the most one report waits for its probes (they run side by side)
 IMPORTS_DIR = os.environ.get("IMPORTS_DIR", "/imports")      # game databases to carry to the VM
 CHUNK = 8 * 1024 * 1024      # Cloud Run caps a request at 32 MB
 ART_MAX = 400_000
@@ -113,29 +114,102 @@ def core_health() -> dict | None:
             "ollama": {k: ollama.get(k) for k in ("available", "default", "default_present")}}
 
 
+class _Probes:
+    """The report's probes, run side by side and waited for under ONE deadline.
+
+    Why: the report is also the heartbeat. The portal calls skippy-pc silent after STALE_AFTER (60 s), drops every
+    capability and refuses Send (the private Skippy's chat included). These probes used to run one after another
+    (/status.json 10 s, five 4 s calls, three 3 s ones, a 4 s bridge look: about 45 s when flask-api or Ollama is slow, say
+    while a song generates), and the POST, the telemetry pull and the sleep came after that, so a slow flask-api made the
+    portal think the whole PC was gone. Now a probe that misses the budget is simply missing from this report (None, the way
+    a service that is down already reads; nothing stale is ever shown as live) and the report goes out on time. A probe
+    that raises degrades the same way instead of taking the process down: an odd reply from one source must not be able to
+    stop the heartbeat. Its thread is a daemon with its own (short) timeouts, so a slow one finishes by itself."""
+
+    def __init__(self, budget: float):
+        self.deadline = time.monotonic() + budget
+        self.lock = threading.Lock()
+        self.out: dict = {}
+        self.threads: dict = {}
+
+    def start(self, name: str, fn) -> None:
+        thread = threading.Thread(target=self._run, args=(name, fn), daemon=True)
+        self.threads[name] = thread
+        thread.start()
+
+    def _run(self, name: str, fn) -> None:
+        try:
+            value = fn()
+        except Exception as e:  # noqa: BLE001 — see the class docstring
+            if _probe_failures.get(name) != repr(e):
+                _probe_failures[name] = repr(e)
+                print(f"home-reporter: the {name} probe failed ({e!r}); reporting it as missing", flush=True)
+            return
+        _probe_failures.pop(name, None)
+        with self.lock:
+            self.out[name] = value
+
+    def get(self, name: str, default=None):
+        """One probe's answer, waiting for it (within the deadline); `default` when it was late or failed."""
+        thread = self.threads.get(name)
+        if thread is not None:
+            thread.join(max(0.0, self.deadline - time.monotonic()))
+        with self.lock:
+            return self.out.get(name, default)
+
+    def finish(self) -> dict:
+        """Wait for the rest (until the deadline) and return what has answered by now."""
+        for thread in list(self.threads.values()):
+            thread.join(max(0.0, self.deadline - time.monotonic()))
+        with self.lock:
+            return dict(self.out)
+
+
+_probe_failures: dict = {}          # probe name -> the last failure printed, so a persistent one is said once, not every report
+
+
+def _mac_setlist() -> list | None:
+    return (fetch(f"{MAC}/api/setlist") or {}).get("setlist")
+
+
 def gather() -> dict:
-    status = fetch(f"{API}/status.json", timeout=10)
-    services = fetch(f"{API}/services") or {}
-    session = fetch(f"{API}/music/session") or {}
-    bilby = bilby_state()
-    # Setlist and next suggestion only exist on the Mac's DJ assistant.
+    """Everything one report carries. The shape is fixed (the portal's `core_check`, `capabilities` and the widgets read
+    these keys); only how it is collected changed, see `_Probes`."""
+    probes = _Probes(GATHER_BUDGET_S)
+    probes.start("status", lambda: fetch(f"{API}/status.json", timeout=10))
+    probes.start("health", core_health)
+    probes.start("services", lambda: fetch(f"{API}/services"))
+    probes.start("session", lambda: fetch(f"{API}/music/session"))
+    probes.start("bilby", bilby_state)
+    probes.start("mentat_home", lambda: bool(MENTAT) and _up(f"{MENTAT}/health"))
+    # What people did on the portal lately (flask-api's site_events table); the Activity widget on /me shows it.
+    probes.start("site_activity", lambda: fetch(f"{API}/telemetry/site_summary"))
+    for name, probe in _capability_probes().items():
+        probes.start(f"cap_{name}", probe)
+    bilby = probes.get("bilby")
+    # Setlist and next suggestion only exist on the Mac's DJ assistant (so they wait for the look at Bilby).
     mac_up = bool(MAC) and bool(bilby) and bilby.get("source") == "traktor"
-    setlist = (fetch(f"{MAC}/api/setlist") or {}).get("setlist") if mac_up else None
-    up_next = fetch(f"{MAC}/bilby/next") if mac_up else None
+    if mac_up:
+        probes.start("setlist", _mac_setlist)
+        probes.start("up_next", lambda: fetch(f"{MAC}/bilby/next"))
+    got = probes.finish()
+    services = got.get("services") if isinstance(got.get("services"), dict) else {}
+    session = got.get("session") if isinstance(got.get("session"), dict) else {}
+    setlist = got.get("setlist") if isinstance(got.get("setlist"), list) else None
+    up_next = got.get("up_next") if isinstance(got.get("up_next"), dict) else {}
     return {
-        "status": status,
-        "health": core_health(),
+        "status": got.get("status"),
+        "health": got.get("health"),
         "services": [{k: s.get(k) for k in ("id", "name", "available", "status_detail")}
-                     for s in services.get("services", [])],
+                     for s in services.get("services", []) if isinstance(s, dict)],
         "music_session": {k: session.get(k) for k in
                           ("mode", "status", "now_playing", "queue_remaining", "source")} if session else None,
         "bilby": bilby,
         "setlist": (setlist or [])[-20:],
-        "up_next": (up_next or {}).get("track") if (up_next or {}).get("ok") else None,
-        "mentat_home": bool(MENTAT) and _up(f"{MENTAT}/health"),
-        "capabilities": capabilities(),
-        # What people did on the portal lately (flask-api's site_events table); the Activity widget on /me shows it.
-        "site_activity": fetch(f"{API}/telemetry/site_summary"),
+        "up_next": up_next.get("track") if up_next.get("ok") else None,
+        "mentat_home": bool(got.get("mentat_home")),
+        "capabilities": {name: got.get(f"cap_{name}") or _capability_down(name) for name in _capability_probes()},
+        "site_activity": got.get("site_activity"),
     }
 
 
@@ -166,17 +240,44 @@ COMMANDS = {
 
 
 def workshop_capability() -> dict:
-    """The private Skippy is ready when the bridge is up and has its token; `model` is what it will use."""
+    """The private Skippy is ready when the bridge is up and has its token and Claude's login there isn't known to be
+    expired (the bridge decides: `ready`); `model` is what it will use. When it is NOT ready, `reason` is the bridge's own
+    plain-English why ("Claude's login on skippy-pc expired: run `claude auth login` there"), or ours when the bridge
+    didn't answer at all, so the portal's card can say what to fix instead of only "isn't answering". `login` (ok /
+    expired / unknown) rides along for the portal's diagnostics; both are left out when the bridge says nothing."""
     if not BRIDGE:
         return {"ready": False}
-    workshop_info = (fetch(f"{BRIDGE}/health") or {}).get("workshop") or {}
-    return {"ready": workshop_info.get("ready") is True, "model": str(workshop_info.get("model") or "")[:40]}
+    health = fetch(f"{BRIDGE}/health")
+    info = (health.get("workshop") if isinstance(health, dict) else None) or {}
+    if not isinstance(info, dict):
+        info = {}
+    out = {"ready": info.get("ready") is True, "model": str(info.get("model") or "")[:40]}
+    if info.get("login") in ("ok", "expired", "unknown"):
+        out["login"] = info["login"]
+    reason = info.get("reason")
+    if not out["ready"]:
+        if isinstance(reason, str) and reason.strip():
+            out["reason"] = " ".join(reason.split())[:200]            # one plain line: it is shown on the card
+        elif health is None:
+            out["reason"] = "the bridge on skippy-pc isn't answering (is it running? make bridge)"
+    return out
+
+
+def _capability_probes() -> dict:
+    """One probe per capability, so `gather` can run them side by side (each waits at most ~4 s on its own service)."""
+    return {"make_music": lambda: {"ready": bool(MUSIC) and _up(f"{MUSIC}/health")},
+            "workshop": workshop_capability,
+            "music_gate": lambda: {"ready": bool(GATE and GATE_PUBLIC) and _up(f"{GATE}/health"), "url": GATE_PUBLIC}}
+
+
+def _capability_down(name: str) -> dict:
+    """What a capability reads as when its probe was late or failed: not ready (the safe answer), never the last known one."""
+    return {"ready": False, "url": GATE_PUBLIC} if name == "music_gate" else {"ready": False}
 
 
 def capabilities() -> dict:
     """What this PC can do for the portal's chat right now. The portal offers only what's ready."""
-    return {"make_music": {"ready": bool(MUSIC) and _up(f"{MUSIC}/health")}, "workshop": workshop_capability(),
-            "music_gate": {"ready": bool(GATE and GATE_PUBLIC) and _up(f"{GATE}/health"), "url": GATE_PUBLIC}}
+    return {name: probe() for name, probe in _capability_probes().items()}
 
 
 def free_gpu() -> None:
@@ -848,6 +949,15 @@ class SiteTelemetry:
             size += n
         return out + ([current] if current else [])
 
+    def run_forever(self) -> None:
+        """Its own thread (main() starts it): a cycle may take up to TELEMETRY_CYCLE_S and must never delay a report."""
+        while True:
+            try:
+                self.collect()                  # what people did on the portal, into flask-api's SQLite
+            except Exception as e:  # noqa: BLE001 — never let this stop the collecting
+                print(f"home-reporter: telemetry collection failed: {e}", flush=True)
+            time.sleep(INTERVAL)
+
     def collect(self) -> int:
         """One cycle: pull, file, repeat while the portal has more. Returns how many events were filed."""
         filed, deadline = 0, time.time() + TELEMETRY_CYCLE_S
@@ -887,9 +997,17 @@ def main() -> None:
     threading.Thread(target=watchdog.run_forever, daemon=True).start()
     if BRIDGE:                                       # the private Skippy: catch the portal up on whatever the bridge holds
         threading.Thread(target=WorkshopSync(token, jobs).run_forever, daemon=True).start()
+    # What people did on the portal goes into flask-api's SQLite on its own thread: a collection may take 20 s, and while it
+    # ran in this loop the next report (the heartbeat the portal judges "silent" by) waited behind it.
+    threading.Thread(target=site.run_forever, daemon=True).start()
     sent_art, results, warned = None, [], False
     while True:
-        report = gather()
+        began = time.monotonic()
+        try:
+            report = gather()
+        except Exception as e:  # noqa: BLE001 — gather guards each probe; this is for a bug in the assembling itself
+            print(f"home-reporter: gathering the report failed: {e!r}; sending a bare heartbeat", flush=True)
+            report = {}
         report["results"], results = results, []
         art_key = ((report.get("bilby") or {}).get("now_playing") or {}).get("art_url")
         if art_key and art_key != sent_art:
@@ -919,11 +1037,7 @@ def main() -> None:
             if not warned:
                 print(f"home-reporter: can't reach the portal: {e}", flush=True)
                 warned = True
-        try:
-            site.collect()                  # what people did on the portal, into flask-api's SQLite
-        except Exception as e:  # noqa: BLE001 — never let this stop the reports
-            print(f"home-reporter: telemetry collection failed: {e}", flush=True)
-        time.sleep(INTERVAL)
+        time.sleep(max(1.0, INTERVAL - (time.monotonic() - began)))       # a steady cadence: the work above counts against the wait
 
 
 if __name__ == "__main__":

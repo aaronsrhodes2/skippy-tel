@@ -198,6 +198,18 @@ class Home:
         value = info.get(key) if isinstance(info, dict) and self.can(name) else None
         return value[:40] if isinstance(value, str) else None
 
+    def capability_reason(self, name: str) -> str | None:
+        """Why skippy-pc says a capability is NOT ready, in its own plain words (the bridge's "Claude's login on skippy-pc
+        expired: run `claude auth login` there"), else None: nothing said, it IS ready, or home is silent (then the reason is
+        the silence, and the report that would carry it is not coming). One short line, since it is shown on a card and
+        comes from whatever holds the home token: the template escapes it."""
+        info = ((self.report or {}).get("capabilities") or {}).get(name)
+        if not self.online() or not isinstance(info, dict) or info.get("ready") is True:
+            return None
+        reason = info.get("reason")
+        reason = " ".join(reason.split())[:200] if isinstance(reason, str) else ""
+        return reason or None
+
     def start(self, kind: str, owner: str = "", ttl: int = JOB_TTL, **payload) -> str:
         """Queue a job for skippy-pc and return its id; `peek`/`wait_result` read it without consuming it."""
         self.touch_chat()

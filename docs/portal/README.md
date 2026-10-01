@@ -180,9 +180,21 @@ browser <── poll /me/workshop/events ── portal <── POST /home/worksh
 - **Setup on skippy-pc:** run `make bridge` (it needs `SKIPPY_HOME_TOKEN`, read from the
   vault `.env`), make sure `claude` there is signed in (`claude`, then `/login`), and
   rebuild the reporter (`CLAUDE_BRIDGE_URL` is in `docker-compose.override.yml`). The card
-  says plainly when the workshop isn't answering.
-- **Limits:** one task at a time; **Stop** cancels it; a task the portal hears nothing
-  about for 2 minutes shows "went quiet". The agent's rules are in
+  says plainly when the workshop isn't answering, and why when the bridge knows: the reporter passes the bridge's
+  `workshop.login` (`ok` / `expired` / `unknown`) and, when it is not ready, its `reason` ("SKIPPY_HOME_TOKEN isn't
+  configured on this PC", "Claude's login on skippy-pc expired: run `claude auth login` there", or, when the bridge doesn't
+  answer at all, that) in the report's `capabilities.workshop`; the card and Send's refusal show it.
+- **The report is the heartbeat, and a slow service can't delay it.** The portal calls skippy-pc silent after 60 s and then
+  offers nothing, the chat included. The reporter used to ask its services one after another (about 45 s worst case when
+  flask-api or Ollama is slow) and then pull telemetry before the next report, so a slow flask-api could make a healthy PC
+  look gone. Now `gather()` asks them side by side under one 9 s budget (`GATHER_BUDGET`): a probe that is late or fails is
+  missing from that report (`None`, `ready: false`, never a stale answer), the telemetry pull has its own thread, and the
+  loop sleeps the interval minus the work done, so reports keep coming about every 15 s. The report's shape is unchanged.
+- **Limits:** one task at a time; **Stop** cancels it. A task the portal hears nothing about for 2 minutes is never given
+  up on: the card says how long it has been quiet and that skippy-pc reconnects by itself (a long think or build with no
+  new event is not quiet: a run still going is pushed every pass), asks the reconciler to look (and on **Check again**),
+  gives Send back after 30 s (sending then leaves the old task behind; if the bridge is still busy it answers "still
+  working on the last one") and keeps polling, slower, for as long as the page is open. The agent's rules are in
   `services/claude-bridge/workshop_prompt.md` (it must ask before touching workflows,
   auth, secrets or its own harness). Those rules are a prompt, not a sandbox: the
   real guards are the login, the token and the tests.

@@ -159,3 +159,53 @@ def test_the_capability_says_ready_and_the_model_when_the_bridge_reports_the_wor
     assert reporter.workshop_capability()["ready"] is False
     monkeypatch.setattr(reporter, "BRIDGE", "")
     assert reporter.workshop_capability() == {"ready": False}
+
+
+# ── why the workshop is not ready: the bridge's `login` and `reason` reach the portal's card ────────────────────────
+def _bridge_saying(workshop):
+    return Fake(lambda method, path, headers, body: _json({"status": "ok", "workshop": workshop}))
+
+
+EXPIRED = "Claude's login on skippy-pc expired: run `claude auth login` there"
+NO_TOKEN = "SKIPPY_HOME_TOKEN isn't configured on this PC"
+
+
+@pytest.mark.parametrize("said, passed_on", [
+    # not ready: the bridge's own words (a `backticked` command stays: the portal makes it copyable) and its login state
+    ({"ready": False, "model": "claude-opus-5-5", "busy": False, "login": "expired", "reason": EXPIRED},
+     {"ready": False, "model": "claude-opus-5-5", "login": "expired", "reason": EXPIRED}),
+    ({"ready": False, "model": "claude-opus-5-5", "login": "unknown", "reason": NO_TOKEN},
+     {"ready": False, "model": "claude-opus-5-5", "login": "unknown", "reason": NO_TOKEN}),
+    # ready: the login rides along, and a reason (there should be none) is not forwarded: the card says nothing is wrong
+    ({"ready": True, "model": "claude-opus-5-5", "login": "ok"}, {"ready": True, "model": "claude-opus-5-5", "login": "ok"}),
+    ({"ready": True, "model": "m", "login": "ok", "reason": "left over"}, {"ready": True, "model": "m", "login": "ok"}),
+    # an older bridge says neither: exactly what it always sent
+    ({"ready": True, "model": "claude-opus-5-5"}, {"ready": True, "model": "claude-opus-5-5"}),
+    ({"ready": False, "model": "claude-opus-5-5"}, {"ready": False, "model": "claude-opus-5-5"}),
+    # odd values: an unknown login word is dropped, the reason becomes one short line, only a real True is "ready"
+    ({"ready": False, "model": "m", "login": "banana", "reason": "  two\nlines\t here  "}, {"ready": False, "model": "m", "reason": "two lines here"}),
+    ({"ready": False, "model": "m", "reason": "x" * 500}, {"ready": False, "model": "m", "reason": "x" * 200}),
+    ({"ready": "yes", "model": "m", "reason": 7}, {"ready": False, "model": "m"}),
+])
+def test_the_capability_passes_the_bridges_login_and_reason_through(monkeypatch, said, passed_on):
+    bridge = _bridge_saying(said)
+    try:
+        monkeypatch.setattr(reporter, "BRIDGE", bridge.url)
+        assert reporter.workshop_capability() == passed_on
+        assert reporter.capabilities()["workshop"] == passed_on             # and that is what the report carries
+    finally:
+        bridge.close()
+
+
+def test_a_bridge_that_does_not_answer_is_the_reason_when_it_is_the_whole_story(monkeypatch):
+    monkeypatch.setattr(reporter, "BRIDGE", "http://127.0.0.1:9")            # nothing listens there
+    got = reporter.workshop_capability()
+    assert got["ready"] is False and "isn't answering" in got["reason"] and "make bridge" in got["reason"]
+    monkeypatch.setattr(reporter, "BRIDGE", "")
+    assert reporter.workshop_capability() == {"ready": False}               # not set up at all: nothing to add
+    bridge = Fake(lambda m, p, h, b: _json([1, 2, 3]))                      # an answer that isn't what a bridge says
+    try:
+        monkeypatch.setattr(reporter, "BRIDGE", bridge.url)
+        assert reporter.workshop_capability() == {"ready": False, "model": ""}
+    finally:
+        bridge.close()

@@ -42,8 +42,14 @@
   <p class="muted" style="margin:4px 0 0">Ask for a change: he edits, tests, pushes, deploys and checks it live.
     Only you can see this, and it is Opus all the time.</p>
   {% if not workshop_ready %}
+    {% if workshop_reason %}
+      {# The bridge said why (home passes its own plain words along). A `backticked` command in it is copyable, like
+         everywhere else on the portal; autoescape covers the text, which comes from whatever holds the home token. #}
+      <p class="note">skippy-pc's workshop isn't ready: {% for part in workshop_reason.split('`') %}{% if loop.index is even %}<code class="code">{{ part }}</code>{% else %}{{ part }}{% endif %}{% endfor %}</p>
+    {% else %}
     <p class="note">skippy-pc's workshop isn't answering. On skippy-pc run <code class="code">make bridge</code> (and make sure
       <code>claude</code> there is signed in: <code class="code">/login</code>) and the home reporter is up.</p>
+    {% endif %}
   {% endif %}
   <div class="wlog" id="ps-log" aria-live="polite"></div>
   <div class="quiet" id="ps-quiet" role="status" hidden>

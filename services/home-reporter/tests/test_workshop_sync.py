@@ -486,6 +486,7 @@ def test_main_starts_the_reconciler_only_when_there_is_a_bridge_and_always_the_w
     targets, dog = _run_main_once(monkeypatch, 200, "http://127.0.0.1:9")
     names = [getattr(t, "__qualname__", "") for t in targets]
     assert "WorkshopSync.run_forever" in names and "Watchdog.run_forever" in names and "Jobs.poll_forever" in names
+    assert "SiteTelemetry.run_forever" in names                  # (test_reporter_heartbeat.py: it is off the report loop)
     targets, _ = _run_main_once(monkeypatch, 200, "")
     names = [getattr(t, "__qualname__", "") for t in targets]
     assert "WorkshopSync.run_forever" not in names and "Watchdog.run_forever" in names

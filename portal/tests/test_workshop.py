@@ -436,3 +436,67 @@ def test_the_push_route_refuses_a_task_nobody_owns_and_rebuilds_one_it_never_saw
     assert ok.status_code == 200 and ok.get_json() == {"have": 1, "stop": False}
     login(client, ADMIN)
     assert client.get(f"/me/workshop/events?task={TASK}&after=0", headers=H).get_json()["events"] == [TEXT]
+
+
+# ── why the workshop is not ready (the bridge's own words, passed on by the reporter) ──────────────────────────
+EXPIRED = "Claude's login on skippy-pc expired: run `claude auth login` there"
+
+
+def _not_ready(home, **info):
+    home.accept({"capabilities": {"workshop": {"ready": False, "model": "claude-opus-5-5", **info}}})
+
+
+def test_the_reason_a_capability_is_not_ready_is_only_ever_one_short_plain_line_and_only_when_it_is_not_ready(shop):
+    ws, home, clock = shop
+    assert home.capability_reason("workshop") is None                                # ready: nothing is wrong
+    _not_ready(home)
+    assert home.capability_reason("workshop") is None                                # not ready but nothing said (an older bridge)
+    _not_ready(home, reason="  two\nlines \t here  ")
+    assert home.capability_reason("workshop") == "two lines here"
+    _not_ready(home, reason="x" * 500)
+    assert home.capability_reason("workshop") == "x" * 200
+    _not_ready(home, reason=7)
+    assert home.capability_reason("workshop") is None
+    home.accept({"capabilities": {"workshop": {"ready": True, "reason": "stale"}}})
+    assert home.capability_reason("workshop") is None                                # ready wins over a leftover reason
+    _not_ready(home, reason=EXPIRED)
+    assert home.capability_reason("workshop") == EXPIRED and home.capability_reason("make_music") is None
+    clock.now += home_mod.STALE_AFTER + 1
+    assert home.capability_reason("workshop") is None                                # silent home: no report is coming to say why
+
+
+def test_send_refuses_with_the_reason_when_the_bridge_gave_one_and_the_old_words_when_not(shop):
+    ws, home, _ = shop
+    _not_ready(home, login="expired", reason=EXPIRED)
+    with pytest.raises(workshop_mod.NotReady) as why:
+        ws.send(ADMIN, CONV, "hi")
+    assert EXPIRED in str(why.value) and "isn't ready" in str(why.value)
+    _not_ready(home)
+    with pytest.raises(workshop_mod.NotReady) as why:
+        ws.send(ADMIN, CONV, "hi")
+    assert "isn't answering" in str(why.value) and "bridge" in str(why.value)
+
+
+def test_the_card_says_why_with_the_command_copyable_and_the_text_escaped(env):
+    client, _, home = env
+    _not_ready(home, login="expired", reason=EXPIRED)
+    login(client, ADMIN)
+    page = client.get("/me").data.decode()
+    assert "workshop isn't ready: Claude&#39;s login on skippy-pc expired: run " in page
+    assert '<code class="code">claude auth login</code> there' in page              # the backticked command is one click to copy
+    assert "make bridge" not in page.split('id="private-skippy"')[1].split("ps-log")[0]     # the generic checklist gives way to the cause
+    _not_ready(home, reason="<script>alert(1)</script> and `<b>x</b>`")
+    page = client.get("/me").data.decode()
+    assert "<script>alert(1)</script>" not in page and "&lt;script&gt;alert(1)&lt;/script&gt;" in page
+    assert '<code class="code">&lt;b&gt;x&lt;/b&gt;</code>' in page
+    _not_ready(home)                                                                 # nothing said: the old checklist
+    page = client.get("/me").data.decode()
+    assert "workshop isn't answering" in page and "make bridge" in page and "isn't ready:" not in page
+
+
+def test_the_send_route_answers_503_with_the_reason(env):
+    client, _, home = env
+    _not_ready(home, reason=EXPIRED)
+    login(client, ADMIN)
+    resp = post(client, "/me/workshop/send", {"conv": CONV, "message": "go"})
+    assert resp.status_code == 503 and EXPIRED in resp.get_json()["error"]

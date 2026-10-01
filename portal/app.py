@@ -803,6 +803,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             experiments=experiments.EXPERIMENTS, hidden=experiments.hidden(vm), mentat_tools=mentat_tools,
             home=home.status(), music=home.music(), core=core, services=SERVICES,
             workshop_ready=workshop.ready(), workshop_model=home.capability_note("workshop", "model"),
+            workshop_reason=home.capability_reason("workshop"),
             activity=telemetry_web.activity(app, home),
         )
 

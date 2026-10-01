@@ -84,7 +84,9 @@ class Workshop:
         if not _CONV.fullmatch(conv or ""):
             raise ValueError("Bad conversation id.")
         if not self.ready():
-            raise NotReady("skippy-pc's workshop isn't answering: is the bridge running, and is home reporting?")
+            why = self.home.capability_reason("workshop")        # the bridge's own words, when it said why
+            raise NotReady(f"skippy-pc's workshop isn't ready: {why}" if why else
+                           "skippy-pc's workshop isn't answering: is the bridge running, and is home reporting?")
         with self._lock:
             self._prune()
             if any(self._live_state(r) in ("queued", "running") for r in self._tasks.values()):
