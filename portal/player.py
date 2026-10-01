@@ -1,4 +1,4 @@
-"""The Music app: the Captain's library on his iPhone, Mac, PC and Tesla, like Spotify but his, in the browser.
+"""Bilby's Music Service: the Captain's library on his iPhone, Mac, PC and Tesla, like Spotify but his, in the browser.
 
 The music never passes through here. skippy-pc's music-gate (services/music-gate/gate.py) serves the files to the
 internet through Tailscale Funnel, and only for a pass this module signs: the key comes from the home token's sha256,
@@ -8,6 +8,10 @@ reporter says where the gate is and whether it answers (capability "music_gate")
 What does live here is the "Connect" part: each open player checks in every few seconds with what it is playing and
 where it is in it. Another device can pick up where that one left off, or send it play/pause/skip as a remote. That is
 in memory (the portal runs one instance); a redeploy forgets it, and the players simply check in again.
+
+A browser only makes sound after a tap on the page, and that starts over at every reload, so a player also says whether
+it is "armed" (a play() has worked since its page loaded) and whether it is waiting for a tap. A remote's Play to a player
+nobody has tapped can then say so instead of silently doing nothing.
 """
 from __future__ import annotations
 
@@ -17,13 +21,19 @@ import re
 import threading
 import time
 
-PASS_S = 8 * 3600             # a pass lasts a listening session; the player asks again before it runs out
+NAME = "Bilby's Music Service"
+SHORT_NAME = "Bilby"
+PASS_S = 8 * 3600             # a pass lasts a listening session at least; the player asks again before it runs out
+PASS_BUCKET_S = 6 * 3600      # ... and it expires on a six-hour grid, so every pass handed out inside one bucket is the SAME string:
+                              # the gate carries the pass in the URL path, so the browser's cache (covers a week, songs a day) only
+                              # helps across page loads if the URL does not change on every load
 LIVE_S = 90                   # a device that checked in this recently is listed as open
 KEEP_S = 30 * 24 * 3600       # what a device last played is offered for a month
 MAX_QUEUE = 2000
 MAX_PATH = 400
 MAX_DEVICES = 12
 ACTIONS = ("play", "pause", "next", "prev")
+REPEATS = ("off", "all", "one")
 GATE_URL = re.compile(r"https://[a-z0-9-]+(\.[a-z0-9-]+)*\.ts\.net")
 
 
@@ -40,24 +50,38 @@ def _text(value, limit: int) -> str:
     return value[:limit] if isinstance(value, str) else ""
 
 
-def _state(body: dict) -> dict:
-    """What a player says it's doing, kept to known fields of sane size."""
+def _state(body: dict, previous: dict | None = None) -> dict:
+    """What a player says it's doing, kept to known fields of sane size.
+
+    A player sends its queue only when it changed (a window of up to 600 paths is ~50 KB: too much for every few
+    seconds), so a body without `queue` keeps the one already held and just moves `idx` along it."""
     queue = body.get("queue")
-    queue = [q for q in queue[:MAX_QUEUE] if isinstance(q, str) and 0 < len(q) <= MAX_PATH] if isinstance(queue, list) else []
+    if isinstance(queue, list):
+        queue = [q for q in queue[:MAX_QUEUE] if isinstance(q, str) and 0 < len(q) <= MAX_PATH]
+    else:
+        queue = list(previous["queue"]) if previous else []
     try:
         pos = max(0.0, min(float(body.get("pos") or 0), 86400.0))
     except (TypeError, ValueError):
         pos = 0.0
     idx = body.get("idx")
-    idx = idx if isinstance(idx, int) and 0 <= idx < len(queue) else 0
+    idx = idx if isinstance(idx, int) and not isinstance(idx, bool) and 0 <= idx < len(queue) else 0
+    armed = body.get("armed")
     return {"track": _text(body.get("track"), MAX_PATH), "title": _text(body.get("title"), 200),
             "artist": _text(body.get("artist"), 200), "pos": round(pos, 1), "playing": body.get("playing") is True,
-            "queue": queue, "idx": idx, "dj": body.get("dj") is True, "shuffle": body.get("shuffle") is True}
+            "queue": queue, "idx": idx, "dj": body.get("dj") is True, "shuffle": body.get("shuffle") is True,
+            "repeat": body.get("repeat") if body.get("repeat") in REPEATS else "off",
+            # armed: None for an older page that does not say; otherwise has a play() worked since the page loaded?
+            # tap: the page is waiting for someone to tap it (a play was refused, or a saved queue came back after a reload)
+            "armed": armed if isinstance(armed, bool) else None, "tap": body.get("tap") is True}
 
 
 class Player:
-    def __init__(self, home, clock=time.time):
+    def __init__(self, home, clock=time.time, gate_url_re=None):
         self.home, self.clock = home, clock
+        # Tests and tools/dev_music.py hand in a pattern for a gate on this machine. Production never does: a gate address
+        # off the tailnet is never signed for.
+        self.gate_url_re = gate_url_re or GATE_URL
         self._lock = threading.Lock()
         self._devices: dict[str, dict[str, dict]] = {}     # user → device id → {name, state, seen, updated}
         self._commands: dict[str, dict[str, list]] = {}    # user → device id → queued actions
@@ -66,7 +90,7 @@ class Player:
     def gate_url(self) -> str | None:
         info = ((self.home.report or {}).get("capabilities") or {}).get("music_gate")
         url = info.get("url") if isinstance(info, dict) else None
-        return url.rstrip("/") if isinstance(url, str) and GATE_URL.fullmatch(url.rstrip("/")) else None
+        return url.rstrip("/") if isinstance(url, str) and self.gate_url_re.fullmatch(url.rstrip("/")) else None
 
     def gate(self) -> dict:
         """Where the library is and a pass for it, or why it can't be played right now."""
@@ -78,7 +102,7 @@ class Player:
         url = self.gate_url()
         if not url or not self.home.can("music_gate"):
             return {"ok": False, "why": "skippy-pc is up, but its music gate isn't answering."}
-        exp = int(self.clock()) + PASS_S
+        exp = (int(self.clock()) // PASS_BUCKET_S + 1) * PASS_BUCKET_S + PASS_S      # 8 to 14 hours from now: see PASS_BUCKET_S
         return {"ok": True, "url": url, "pass": sign(gate_key(stored), exp), "exp": exp}
 
     # ── Connect: devices, handoff, remote ────────────────────────────────
@@ -91,7 +115,7 @@ class Player:
             d = mine.setdefault(device, {"name": "", "state": None, "seen": 0.0, "updated": 0.0})
             d["name"], d["seen"] = _text(name, 40) or "A browser", now
             if body is not None:
-                d["state"], d["updated"] = _state(body), now
+                d["state"], d["updated"] = _state(body, d["state"]), now
             for gone in [k for k, v in mine.items() if now - v["seen"] > KEEP_S]:
                 del mine[gone]
             while len(mine) > MAX_DEVICES:
@@ -122,3 +146,10 @@ class Player:
             box = self._commands.setdefault(user, {}).setdefault(device, [])
             box[:] = (box + [action])[-5:]
         return True
+
+    def needs_tap(self, user: str, device: str) -> bool:
+        """Will a Play sent to this device be refused by its browser until someone taps it? True when the device says nothing has
+        played since its page loaded (armed is false) or that it is waiting on a tap; False when it is armed or does not say."""
+        with self._lock:
+            state = (self._devices.get(user, {}).get(device) or {}).get("state")
+        return bool(state) and (state.get("armed") is False or state.get("tap") is True)

@@ -76,7 +76,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     media = media_mod.Media()
     workshop = workshop_mod.Workshop(home)          # the Captain's private Skippy (admin only)
     app.extensions["workshop"] = workshop
-    player = player_mod.Player(home)                # the Music app's pass and Connect (admin only)
+    player = player_mod.Player(home)                # Bilby's Music Service: the pass and Connect (admin only)
+    app.extensions["player"] = player               # (so tests/dev_music.py can point it at a gate on this machine)
     telemetry_web.init_app(app)                     # usage recording, /privacy, the tap beacon, /home/telemetry
 
     def me() -> str:
@@ -676,7 +677,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     app.register_blueprint(music)
 
-    # ── Music: the Captain's library on any browser (player.py; admin only) ────
+    # ── Bilby's Music Service: the Captain's library on any browser (player.py; admin only) ────
     listen = Blueprint("music", __name__, url_prefix="/music")
 
     def device_id() -> str:
@@ -692,18 +693,25 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     @listen.get("/manifest.webmanifest")
     def player_manifest():
-        """Add to Home Screen opens straight into the player, full screen, like an app."""
+        """Add to Home Screen opens straight into the player, full screen, like an app. (Public, like /static: the browser
+        fetches a manifest without the sign-in cookie.)"""
         icon = url_for("static", filename="apple-touch-icon.png")
+        start = url_for("music.player_page")
         return app.response_class(json.dumps({
-            "name": "Skippy Music", "short_name": "Music", "start_url": url_for("music.player_page"),
-            "scope": url_for("music.player_page"), "display": "standalone", "background_color": "#000000",
-            "theme_color": "#000000", "icons": [{"src": icon, "sizes": "180x180", "type": "image/png"}]}),
+            "id": start, "name": player_mod.NAME, "short_name": player_mod.SHORT_NAME,
+            "description": "The Captain's whole music collection, streamed from home to any browser.",
+            "start_url": start, "scope": start, "display": "standalone", "orientation": "any", "categories": ["music"],
+            "background_color": "#000000", "theme_color": "#000000",
+            "icons": [{"src": icon, "sizes": "180x180", "type": "image/png"},
+                      {"src": url_for("static", filename="favicon.svg"), "sizes": "any", "type": "image/svg+xml"}]}),
             mimetype="application/manifest+json")
 
     @listen.get("/gate")
     @auth.admin_required
     def player_gate():
-        return jsonify(player.gate())
+        resp = jsonify(player.gate())
+        resp.headers["Cache-Control"] = "no-store"          # a pass is a credential: never from a cache
+        return resp
 
     @listen.post("/checkin")
     @auth.admin_required
@@ -717,8 +725,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @auth.admin_required
     def player_command():
         body = request.get_json(silent=True) or {}
-        ok = player.command(me(), device_id(), str(body.get("action") or ""))
-        return jsonify(queued=ok), (200 if ok else 409)
+        dev = device_id()
+        ok = player.command(me(), dev, str(body.get("action") or ""))
+        # needs_tap: the other player's browser will refuse sound until someone taps it (it says so in its check-in)
+        return jsonify(queued=ok, needs_tap=ok and player.needs_tap(me(), dev)), (200 if ok else 409)
 
     app.register_blueprint(listen)
 
