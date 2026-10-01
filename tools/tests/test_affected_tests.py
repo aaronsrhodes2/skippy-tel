@@ -59,6 +59,8 @@ def template(tmp_path_factory):
     write(root, "README.md", "# repo\n")
     write(root, "portal/tests/test_reads_docs.py", 'from pathlib import Path\nDOC = Path("docs") / "cicd.md"\n\ndef test_it():\n    assert DOC\n')
     write(root, "portal/tests/test_reads_startup.py", 'S = "infra/gcp-games/startup.sh"\n\ndef test_it():\n    assert S\n')
+    git(root, "config", "gc.auto", "0")                 # no background gc/maintenance racing the copies below
+    git(root, "config", "maintenance.auto", "false")
     git(root, "add", "-A")
     git(root, "commit", "-qm", "base")
     return root
@@ -67,7 +69,9 @@ def template(tmp_path_factory):
 @pytest.fixture
 def repo(template, tmp_path):
     dest = tmp_path / "repo"
-    shutil.copytree(template, dest)
+    # git may still be running background maintenance in the template (CI saw maintenance.lock vanish mid-copy):
+    # lock files are transient and never part of the repo, so they are not copied
+    shutil.copytree(template, dest, ignore=shutil.ignore_patterns("*.lock"))
     return dest
 
 
