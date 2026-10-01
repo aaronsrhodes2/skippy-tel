@@ -1,7 +1,9 @@
 # Push-to-deploy. Every push to main (work lands there through pull requests):
 #   1. test     — portal + memory test suites
 #   2. infra    — terraform apply infra/gcp-games (VM, firewall, scripts, compose file)
-#   3. portal   — build the portal image, push it, deploy to Cloud Run
+#   3. portal   — build the portal image, push it, deploy to Cloud Run, smoke-test it. If the deploy or the smoke
+#                 test fails, ALL traffic goes back to the revision that was serving (the job still ends red).
+#                 By hand, from a phone: the `rollback` workflow (rollback.yml). docs/portal/remote-recovery.md.
 #
 # Auth is Workload Identity Federation: GitHub's OIDC token for this repo is
 # exchanged for short-lived credentials as skippy-deployer. No key exists.
@@ -45,7 +47,7 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: portal/requirements.txt
-      - run: pip install -r portal/requirements.txt pytest pillow   # pillow: the favicon test checks the icon sizes
+      - run: pip install -r portal/requirements.txt pytest pillow pyyaml   # pillow: the favicon test checks the icon sizes; pyyaml: tools/tests parse the workflow files
       - run: python -m pytest portal/tests memory/tests tools/tests services/home-reporter/tests services/claude-bridge/tests mentat/tests -q
       # flask-api's tests get their own session (its `app` package and the portal's app.py can't share one) and its own dependencies
       - run: pip install -r services/flask-api/requirements.txt
@@ -183,7 +185,20 @@ jobs:
         run: |
           docker build -f portal/Dockerfile --build-arg SIGMA_GROUND_REF="$SIGMA_GROUND_REF" -t "$IMAGE:$GITHUB_SHA" .
           docker push "$IMAGE:$GITHUB_SHA"
+      - name: Note the revision serving now (the way back if this deploy goes wrong)
+        # Recorded BEFORE the deploy, because afterwards "the previous one" can no longer be told apart from "the new one".
+        # A new service has none: then there is nothing to roll back to, and a failed first deploy just stays red.
+        run: |
+          prev=$(gcloud run services describe skippy-portal --region "$REGION" \
+                   --format='value(status.traffic[0].revisionName)' 2>"$RUNNER_TEMP/prev.err" || true)
+          if [[ "$prev" =~ ^skippy-portal-[a-z0-9-]+$ ]]; then
+            echo "PREV_REVISION=$prev" >> "$GITHUB_ENV"
+            echo "Serving before this deploy: \`$prev\` (the rollback target if the deploy or its smoke test fails)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::notice::No revision is serving yet, or gcloud could not tell ('$(head -c 200 "$RUNNER_TEMP/prev.err")'): a failed deploy will NOT be rolled back."
+          fi
       - name: Deploy to Cloud Run
+        id: deploy
         run: |
           gcloud run deploy skippy-portal \
             --image "$IMAGE:$GITHUB_SHA" \
@@ -195,13 +210,50 @@ jobs:
             --memory 1Gi \
             --set-env-vars "^|^ALLOWED_EMAILS=${ALLOWED_EMAILS}|ADMIN_EMAILS=${ADMIN_EMAILS}|GCP_PROJECT=${PROJECT_ID}|GCP_ZONE=us-west1-b|GCP_INSTANCE=skippy-games|CHAT_MODEL=claude-haiku-4-5|DISCORD_INVITE=gPTVS7Hmj|MENTAT_URL=https://skippy-mentat-1015050363686.us-west1.run.app" \
             --set-secrets "FLASK_SECRET_KEY=portal-flask-secret:latest,GOOGLE_CLIENT_ID=portal-google-client-id:latest,GOOGLE_CLIENT_SECRET=portal-google-client-secret:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,DISCORD_BOT_TOKEN=discord-bot-token:latest"
+      - name: Send all traffic to the new revision
+        # A rollback (here, or the `rollback` workflow) PINS traffic to one named revision. Cloud Run then no longer
+        # moves traffic to a newly deployed revision by itself: the next deploy would go green and serve nothing
+        # new. `--to-latest` hands the routing back to "the newest revision", and is a no-op when it already is.
+        run: gcloud run services update-traffic skippy-portal --region "$REGION" --to-latest
       - name: Smoke test
         run: |
           URL=$(gcloud run services describe skippy-portal --region "$REGION" --format='value(status.url)')
           echo "Portal: $URL" >> "$GITHUB_STEP_SUMMARY"
-          curl -fsS "$URL/health"
+          # (--retry: a failed smoke test now ROLLS BACK, so one transient 503 must not undo a good deploy.)
+          curl -fsS --retry 3 --retry-delay 5 "$URL/health"
           code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/home/report" -H 'Content-Type: application/json' -d '{}')
           [ "$code" = 401 ] || { echo "/home/report without a token answered $code, expected 401"; exit 1; }
+          # The reconciler's door (the home reporter lists what the portal holds here): it must exist AND be locked.
+          code=$(curl -s -m 30 --retry 3 --retry-delay 5 -o /dev/null -w '%{http_code}' "$URL/home/workshop")
+          [ "$code" = 401 ] || { echo "GET /home/workshop without a token answered $code, expected 401"; exit 1; }
+          curl -fsS -m 30 --retry 3 --retry-delay 5 -o /dev/null "$URL/privacy"   # public page: renders from the telemetry lists
+          # The Captain's page, signed out: a redirect to sign-in or the sign-in page. A 5xx (or a 404/401) here means
+          # his dashboard is broken for everyone, so fail the deploy while the previous revision can still be restored.
+          code=$(curl -s -m 30 --retry 3 --retry-delay 5 -o /dev/null -w '%{http_code}' "$URL/me")
+          case "$code" in 200|301|302|303|307|308) ;; *) echo "/me signed out answered $code, expected a redirect or the sign-in page"; exit 1 ;; esac
           curl -fsS -o /dev/null "$URL/"   # login page renders => secrets + OAuth config loaded
           curl -fsS "$URL/experiments/benchmark" | grep -q "Wolfram"            # benchmark results bundled
           curl -fsS "$URL/experiments/radiance/" | grep -q "viewer.js"          # Radiance bundled
+      - name: Roll back to the previous revision
+        # Reached only when something above failed. A failure BEFORE the deploy step (build, push) changed nothing, so
+        # there is nothing to undo; from the deploy step on, put ALL traffic back on the revision that served before.
+        # (When the new revision never became ready, Cloud Run kept serving the old one: this just makes it explicit.)
+        # The job still ends red on purpose: the fix is a new push, and the next deploy sends traffic forward again.
+        if: failure() && env.PREV_REVISION != '' && steps.deploy.outcome != 'skipped'
+        run: |
+          URL=$(gcloud run services describe skippy-portal --region "$REGION" --format='value(status.url)' || true)
+          if gcloud run services update-traffic skippy-portal --region "$REGION" --to-revisions "$PREV_REVISION=100"; then
+            echo "::error::DEPLOY FAILED and was ROLLED BACK: the portal is serving $PREV_REVISION again (the revision from before commit ${GITHUB_SHA::7}). The new version is NOT live. This job stays red on purpose: fix forward and push again."
+            echo "### ROLLED BACK to \`$PREV_REVISION\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "The deploy of \`${GITHUB_SHA::7}\` failed, so all traffic went back to \`$PREV_REVISION\`. The portal's in-memory state restarts with it; skippy-pc's reporter re-sends what the chat needs." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::ROLLBACK FAILED: could not move traffic back to $PREV_REVISION. Run the 'rollback' workflow (Actions > rollback > Run workflow), or see docs/portal/remote-recovery.md."
+            exit 1
+          fi
+          # Prove it: the old revision may have been scaled to zero, so allow it a few seconds to wake.
+          if curl -fsS --connect-timeout 10 --retry 6 --retry-delay 5 --retry-all-errors "$URL/health"; then
+            echo "Health after rollback: ok" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::Rolled back to $PREV_REVISION, but /health still does not answer: the problem is not the new revision. See docs/portal/remote-recovery.md."
+            exit 1
+          fi

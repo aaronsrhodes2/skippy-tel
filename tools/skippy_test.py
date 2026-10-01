@@ -90,19 +90,6 @@ def post(path, body: dict) -> dict:
     return _request("POST", path, body)
 
 
-def get_html(path) -> str:
-    # Fresh connection for HTML to avoid state issues with the JSON connection
-    global _conn
-    old = _conn
-    _conn = None
-    conn = _get_conn()
-    conn.request("GET", path, headers={"Accept": "text/html"})
-    r = conn.getresponse()
-    html = r.read().decode(errors="replace")
-    _conn = old   # restore JSON connection
-    return html
-
-
 def send(text: str, source: str = "test") -> dict:
     """POST to /intent/unmatched — the main AI pipeline."""
     return post("/intent/unmatched", {"text": text, "source": source})
@@ -305,25 +292,20 @@ def test_bilby():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# E) PORTAL / MIRRORS TEST
+# E) PHONE-STATE RELAY TEST (skippy core serves data only: the old /portal page is gone)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def test_portal():
-    head("E1 — Portal HTML sanity")
+    head("E1 — HUD / chat state relay (what the phone pushes)")
     rule()
     try:
-        html = get_html("/portal")
-        check("Portal loads",                len(html) > 1000)
-        check("AR LAYER panel present",      "AR LAYER" in html)
-        check("GLASSES panel present",       'id="panel-glasses"' in html)
-        check("Candy overlay elements",      'id="cc-tl"' in html)
-        check("Glasses corners present",     'id="gc-tl"' in html)
-        check("Predator tint element",       'id="gc-predator"' in html)
-        check("Translation strip element",   'id="gc-top-strip"' in html)
-        check("Health poller JS",            "pollHealthForCandy" in html)
-        check("Candy apply JS",              "applyCandy" in html)
+        hud = get("/portal/hud-state")
+        check("HUD state has its corners",   isinstance(hud.get("corners"), dict)
+              and {"tl", "tr", "bl", "br"} <= set(hud["corners"]))
+        chat = get("/portal/chat-state")
+        check("Chat state has candy",        isinstance(chat.get("candy"), dict))
     except Exception as e:
-        check_exc("Portal HTML check", e)
+        check_exc("State relay check", e)
 
     head("E2 — Chat history accessible")
     rule()
@@ -436,7 +418,7 @@ def main():
     parser = argparse.ArgumentParser(description="Skippy ecosystem test harness")
     parser.add_argument("--health",  action="store_true", help="Health tests only")
     parser.add_argument("--tier",    action="store_true", help="Tier routing tests only")
-    parser.add_argument("--portal",  action="store_true", help="Portal mirror tests only")
+    parser.add_argument("--portal",  action="store_true", help="Phone-state relay tests only")
     parser.add_argument("--manual",  action="store_true", help="Show manual phone tests")
     parser.add_argument("--all",     action="store_true", help="Run all automated + show manual")
     args = parser.parse_args()

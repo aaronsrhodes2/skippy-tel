@@ -260,18 +260,6 @@ def test_the_summary_is_small_enough_to_ride_in_the_home_report(db):
     assert len(json.loads(body)["taps"]) == 300 and len(body) < 100_000                              # the portal takes a 1 MB report
 
 
-def test_the_status_page_links_to_the_site_summary_beside_the_ui_audit(monkeypatch):
-    from app.routes import status
-    monkeypatch.setattr(status, "_ping", lambda url, path="/health", timeout=1.5: (True, "HTTP 200"))
-    monkeypatch.setattr(status, "_ollama_models", lambda: [])
-    monkeypatch.setattr(status, "_ups_status", lambda: None)
-    monkeypatch.setattr(status, "_drive_ok", lambda: False)
-    app = Flask(__name__)
-    app.register_blueprint(status.bp)
-    page = app.test_client().get("/status").get_data(as_text=True)
-    assert 'href="/telemetry/site_summary"' in page and 'href="/telemetry/ui_summary"' in page
-
-
 # ── deleting a person's events ─────────────────────────────────────────────────────────
 
 def test_forgetting_a_person_deletes_only_their_events_whatever_the_case(db):

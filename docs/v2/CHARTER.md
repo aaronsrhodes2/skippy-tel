@@ -162,7 +162,7 @@ data: [state://photos]                     # what backup must cover
 | Star map | 501 stub | physics module (skyfield, fully offline) | — |
 | UPS / power | host script (WMI) | NUT (Network UPS Tools) module | — |
 | Telemetry | SQLite in `music-collection/state` | Core metrics + UI-event log in state root | — |
-| Phone recovery / APKs | `/vault`, `/phone`, `/apk` | Kept; served from Core via edge with auth | — |
+| Phone recovery / APKs | `/vault`, `/apk` (the HTML `/phone` page was dropped with Core's interface) | Kept; served from Core via edge with auth | — |
 | **Game servers** | Nitrado (rented, per game) | Module `games`: OpenTofu-defined burst VM, Docker per game, voice start/stop, idle auto-stop, nightly save backups | **Nitrado → owned config** |
 | **Game streaming** | none | Sunshine on the home PC, Moonlight on phone/TV/laptop over the mesh; arbiter enters game mode | none needed |
 | Mesh | Tailscale SaaS | **Headscale** + own DERP; Tailscale clients unchanged | **Tailscale SaaS → owned** |

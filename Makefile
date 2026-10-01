@@ -1,4 +1,4 @@
-.PHONY: run stop logs build test pull-model health intent apks phone-check adb-connect adb-devices ups-monitor ups-status push-all memory-init memory-ingest memory-inbox memory-distill games-up games-down games-status games-env tunnel bigcard
+.PHONY: run stop logs build test pull-model health intent apks phone-check adb-connect adb-devices ups-monitor ups-status push-all memory-init memory-ingest memory-inbox memory-distill games-up games-down games-status games-env
 
 # ── Two-machine sync ─────────────────────────────────────────────────────────
 # Single developer, two stations (PC + Mac).
@@ -98,14 +98,13 @@ adb-connect:
 adb-devices:
 	@adb devices
 
-# Smoke-test the phone recovery endpoints
+# Smoke-test the phone bootstrap endpoint (skippy core serves data only; the old /phone page is gone)
 phone-check:
 	@echo "=== /vault/bootstrap ==="; curl -s http://localhost:3003/vault/bootstrap | jq .
-	@echo "=== /phone (HTML, first 5 lines) ==="; curl -s http://localhost:3003/phone | head -5
 
-# solid-gold bridge — runs on the Windows HOST, not in docker. Shells out
-# to your local `claude` CLI so SkippyTel can use your Claude Code
-# subscription instead of the metered API key.
+# Claude bridge — runs on the Windows HOST, not in docker. Shells out to your local `claude` CLI
+# (your Claude Code subscription) as the engine of the private Skippy on the portal's /me.
+# For a bridge that restarts itself and survives a reboot: make bridge-supervised.
 #
 # Set CLAUDE_PATH if `claude` isn't in PATH:
 #   make bridge CLAUDE_PATH=C:/Users/aaron/AppData/Roaming/npm/claude.cmd
@@ -126,41 +125,21 @@ ups-status:
 	@curl -s http://localhost:9338/status | jq . 2>/dev/null || \
 		powershell -Command "Invoke-RestMethod http://localhost:9338/status | ConvertTo-Json"
 
-# ── DJ Big Card — public show display ────────────────────────────────────────
-# Expose /bilby/bigcard to the internet for live shows.
-# Install cloudflared once: winget install Cloudflare.cloudflared
-#
-# Usage:
-#   make tunnel          → prints a public HTTPS URL, e.g.:
-#                          https://abc123.trycloudflare.com
-#   Crowd opens:         https://abc123.trycloudflare.com/bilby/bigcard
-#   The QR code on the BigCard already encodes that URL — project it.
-#
-# Tailscale Funnel alternative (if Tailscale installed):
-#   tailscale funnel 3003
-#   → https://skippy-pc.tail<id>.ts.net/bilby/bigcard
-tunnel:
-	@echo "=== Cloudflare Tunnel → http://localhost:3003 ==="
-	@echo "Look for 'trycloudflare.com' URL. Open <that-url>/bilby/bigcard."
-	cloudflared tunnel --url http://localhost:3003
-
-# Quick smoke-test for the Big Card (local only)
-bigcard:
-	@curl -s -o /dev/null -w "GET /bilby/bigcard → HTTP %{http_code}\n" http://localhost:3003/bilby/bigcard
-
 bridge-health:
 	curl -s http://localhost:9337/health | jq .
 
-# Smoke tests — require `make bridge` running in another terminal
-solid-gold:
-	curl -s -X POST http://localhost:3003/intent/unmatched \
-		-H "Content-Type: application/json" \
-		-d '{"text":"solid gold list the top-level files in the SkippyTel repo"}' | jq .
+# The bridge, kept alive: restarts it whenever it exits (3 s, doubling to 60 s), restarts it if it is up but mute,
+# never runs a second copy, logs to state/bridge-supervisor.log. Same environment as `make bridge`. For it to start by
+# itself at every sign-in: `bash tools/install_bridge_startup.sh` (a dry run; --apply registers it).
+# docs/portal/remote-recovery.md
+.PHONY: bridge-supervised bridge-status
+bridge-supervised:
+	$(if $(CLAUDE_PATH),CLAUDE_PATH="$(CLAUDE_PATH)") \
+	CLAUDE_BRIDGE_CWD="D:/Aaron/development" \
+	bash tools/bridge_supervisor.sh
 
-trust-awesomeness:
-	curl -s -X POST http://localhost:3003/intent/unmatched \
-		-H "Content-Type: application/json" \
-		-d '{"text":"trust the awesomeness echo hello from awesomeness"}' | jq .
+bridge-status:
+	bash tools/bridge_supervisor.sh --status
 
 # Skippy Memory — every AI conversation in one Drive folder. See docs/memory/README.md.
 #   make memory-inbox              import every export dropped in <MEMORY_DIR>/inbox/
