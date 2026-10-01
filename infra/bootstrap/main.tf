@@ -50,8 +50,9 @@ locals {
     "portal-google-client-secret",
     "anthropic-api-key", # optional: enables Skippy chat
     "discord-bot-token", # optional: enables Discord setup from the admin page
-    "github-actions-token", # optional: the admin page's recovery buttons (rollback, re-run, cancel a stuck deploy).
-                            # A fine-grained token for this repo only, Actions read/write and nothing else.
+    # NOT here: github-actions-token (the admin page's recovery buttons). It was created with gcloud on 2026-09-30
+    # (docs/SECRETS.md) because Cloud Shell had no GitHub credential to pull this file; adding it here now would make
+    # the next apply fail with "already exists" (terraform import it first if you ever move it in).
   ]
 }
 
