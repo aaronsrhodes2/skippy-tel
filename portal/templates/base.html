@@ -144,6 +144,9 @@
   .links a { margin-right: 12px; }
   footer.sitefoot { max-width: 760px; margin: -8px auto 0; text-align: center; font-size: .75rem; color: var(--muted); }   /* privacy link (portal/telemetry_web.py) */
   footer.sitefoot a { color: var(--muted); }
+  /* The build stamp (signed-in pages): its own line under the privacy link, so it never moves anything above it, one line tall
+     before and after the script swaps UTC for local time, and long enough text wraps instead of scrolling a 375 px screen. */
+  footer.sitefoot .build { display: block; margin-top: 4px; font-family: var(--mono); font-size: .68rem; overflow-wrap: anywhere; cursor: default; }
 
   /* Skippy chat (templates/_chat.html): the one chat interface, in the Skippy app. */
   .skippy-chat .log { overflow-y: auto; max-height: 60vh; }
@@ -200,7 +203,22 @@
 {% block content %}{% endblock %}
 </main>
 {# Every page says where to read what the site records (portal/templates/privacy.html). #}
-<footer class="sitefoot"><a href="{{ url_for('privacy') }}">Privacy: what this site records</a></footer>
+{# `build` is set (context processor in app.py) only for a signed-in person on the list: the login page and the public pages never show it.
+   The hover text carries the full commit and the Cloud Run revision; the script below turns the UTC build time into the viewer's own. #}
+<footer class="sitefoot"><a href="{{ url_for('privacy') }}">Privacy: what this site records</a>
+{% if build %}<span class="build" title="{{ build_tip }}">build {{ build.short }}{% if build.built_at %} &middot; <time id="build-time" datetime="{{ build.built_at }}">{{ build_label }}</time>{% endif %}</span>{% endif %}</footer>
+{% if build and build.built_at %}
+<script>
+  /* The footer's build time in the viewer's own clock (the server only knows UTC); without script the UTC text stays. */
+  (function () {
+    var el = document.getElementById("build-time"), t = el && new Date(el.getAttribute("datetime"));
+    if (!t || isNaN(t)) return;
+    var s = t.toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
+    if (t.toDateString() !== new Date().toDateString()) s = t.toLocaleDateString([], {month: "short", day: "numeric"}) + " " + s;
+    el.textContent = s;
+  })();
+</script>
+{% endif %}
 {% if user and request.endpoint != 'index' %}
   <a id="home-btn" href="{{ url_for('index') }}" aria-label="Home" title="Home">&#8962;</a>
 {% endif %}

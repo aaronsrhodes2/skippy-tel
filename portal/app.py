@@ -22,6 +22,7 @@ import access_requests as access_mod
 import admin_panel
 import auth
 import autoconfig
+import buildinfo
 import chat
 import chat_tools
 import config
@@ -89,8 +90,12 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @app.context_processor
     def globals_():
         user = auth.current_user()
+        member = bool(user) and auth.is_allowed(user["email"])      # signed in AND still on the list: a removed friend sees the login page
+        build = buildinfo.info() if member else None               # the footer's build stamp: signed-in pages only (templates/base.html)
         return {"user": user, "is_admin": bool(user) and auth.is_admin(user["email"]),
-                "can_skippy": bool(user) and auth.is_allowed(user["email"]) and auth.has_portal(user["email"], "skippy"),
+                "build": build, "build_label": buildinfo.label(build["built_at"]) if build else "",
+                "build_tip": buildinfo.tooltip(build) if build else "",
+                "can_skippy": member and auth.has_portal(user["email"], "skippy"),
                 "idle_min": PLAYER_IDLE_MIN, "idle_max": PLAYER_IDLE_MAX, "switch_owner": ops.SWITCH_OWNER,
                 "chat_enabled": app.config["CHAT_ENABLED"],
                 "discord_invite": f"https://discord.gg/{app.config['DISCORD_INVITE']}"}
@@ -131,6 +136,14 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @app.get("/health")
     def health():
         return "ok"
+
+    @app.get("/version")
+    def version():
+        """Which build is serving: tools/loop_timer.py polls this (signed out, once a second) to learn the moment a deploy became
+        visible, so it is public, tiny, never cached (a cached answer would make the new version appear late) and holds no secret."""
+        response = jsonify(buildinfo.info())
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     # Browsers and phones ask for these at the root, whatever the page's <link> says; public, like /static.
     @app.get("/favicon.ico")

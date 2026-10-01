@@ -151,3 +151,95 @@ without the portal: `status`, `logs [game]`, `start <games>`, `stop`,
 `diagnostics.py`) as the deployer identity, and masks every secret value in
 the job log. It exists so Claude can diagnose and act on the server itself. `logs` (no game) includes the
 idle watchdog's evidence block: why the VM does or doesn't go to sleep.
+
+## Timing the loop
+
+The loop has one stopwatch: **from "prompt sent" to "the new version is visible"**. [`tools/loop_timer.py`](../tools/loop_timer.py)
+reads it off GitHub's own start/end stamps and off the portal's `/version`; a stage it has no evidence for prints
+`n/a (reason)`, never a guess. Standard library plus the `gh` CLI, so it runs from Git Bash on Windows and on Linux.
+
+```bash
+python tools/loop_timer.py --watch --since now             # start BEFORE the push: waits for the run and for /version to flip
+python tools/loop_timer.py --since "12 minutes ago"        # after the fact (the exact moment of "visible" is then unknowable)
+python tools/loop_timer.py --sha 8adcd7e --json --utc      # one commit, as JSON, in UTC
+make loop-watch SINCE=now                                  # the same through make (loop-time for after the fact; LOOP_ARGS="...")
+```
+
+Flags: `--since` (an ISO time, `N minutes ago`, `now`), `--sha`, `--watch` (Ctrl-C prints what was seen so far), `--portal URL`
+(default production), `--repo owner/name` (default from `gh repo view`), `--bridge [URL]` (see the last section), `--json`, `--utc`.
+Exit status: 0 = printed and live, 1 = the run failed or the version never showed up, 2 = couldn't run (no run, gh not signed in).
+
+### Reading the table
+
+The real deploy of 2026-09-30 (run 36805974511), read afterwards with `--since` set to a made-up prompt time, in UTC (some rows trimmed):
+
+```
+stage                                 start     end          took  note
+prompt -> push                        02:25:00  02:28:08    3m08s
+queue (runner pickup)                 02:28:08  02:28:10       2s
+gate (bootstrapped?)                  02:28:10  02:28:13       3s
+mentat tests                          02:28:10  02:28:48      38s
+tests                                 02:28:10  02:29:52    1m42s
+deploy portal                         02:29:54  02:31:30    1m36s
+  setup-gcloud@v2                     02:29:57  02:30:20      23s
+  Build and push                      02:30:20  02:30:54      34s
+  Deploy to Cloud Run                 02:30:54  02:31:19      25s  new revision serving at the end of this step
+  Smoke test                          02:31:19  02:31:26       7s  after the new revision was already serving
+visible on the portal                                              n/a (<portal>/version didn't answer ...)
+TOTAL prompt sent -> deploy step end  02:25:00  02:31:19    6m19s  visible was not observed, so this stops where ...
+critical path (from the stamps): tests 1m42s -> deploy portal (to serving) 1m25s   [push -> serving: 3m11s, ...]
+```
+
+That deploy predates `/version`, so `visible` is `n/a`. With a `--watch` that was running when the version flipped, the row has times
+(`first seen by this machine; 1s after the deploy step ended`) and `TOTAL` ends at `visible`.
+
+| Row | What the two times are |
+|---|---|
+| `prompt -> push` | `--since` (when the prompt was sent) to the run's `createdAt`, which GitHub sets the moment the push lands. `n/a` without `--since`. A manual run reads `prompt -> run created (workflow_dispatch)` |
+| `queue (runner pickup)` | the run exists, then a runner picks up its first job (2-3 s). GitHub's run-level `startedAt` equals `createdAt`, so the first job's start is the evidence |
+| one row per job | the job's own start and end. They **overlap** (parallel jobs): only the critical path adds up. Skipped jobs are one note below the table, not rows |
+| the deploy job's steps | each step's start and end, bookkeeping steps hidden. **`Deploy to Cloud Run` ends = the new revision starts serving**; the smoke test and the rollback logic run after it |
+| `visible on the portal` | from the deploy step's end to the first second this machine saw `<portal>/version` report the pushed commit (polled every second while watching). A **negative lag** means the traffic switched a moment before the CLI returned |
+| `TOTAL` | the loop start (`--since`, else the push) to `visible`; if `visible` wasn't observed it stops at the deploy step's end and says so |
+| critical path | the chain of jobs that decided when the deploy could start, inferred from the stamps (a job starts when its last dependency ends). `push -> serving` is the headline number |
+
+A `visible` that shows `n/a (already live ...)` means the new commit was already serving at the timer's first look, so when it appeared
+can't be known (start `--watch` before the push). Same-commit redeploys wait for a *new revision* of that commit instead.
+Times are UTC in the arithmetic and local in the table (`--utc` for UTC); the table is ASCII so a Windows console prints it as it is.
+
+### `/version` and the footer stamp
+
+The portal image carries `GIT_SHA` and `BUILD_TIME` (baked in at build, so a rolled-back revision reports its own build); Cloud Run sets
+`K_REVISION`. `GET /version` (public, `Cache-Control: no-store`, no secrets, [`portal/buildinfo.py`](../portal/buildinfo.py)) answers
+`{commit, short, built_at, revision, started_at}`: `dev` / empty outside the image. Signed-in pages show it as a small muted line in the
+footer, `build 8adcd7e · 12:03` (the build time in the viewer's own clock; full commit and revision on hover): that is how the Captain sees
+which build he is looking at. The login page and the public pages never show it.
+
+### What the speed-ups should do
+
+Measured before (the last eight successful push deploys, no queueing): push to deploy-finished **242 s**, median. The critical path was gate (3 s) ->
+`test` (102-122 s: pip 10-16 s, pytest 79-85 s) -> `portal` (93-105 s: setup-gcloud 23-30 s, image build + push 34-45 s, Cloud Run deploy 25 s,
+smoke). The build is not on the critical path any more once it runs next to the tests, pip comes from a cache, and pytest runs on both
+cores; the image also stops waiting for the tests. Expected, not yet measured: tests ~60-70 s, the `portal` job ~55-60 s (about 30 s if
+setup-gcloud can be skipped), so **push -> serving about 2 min** instead of 3m10s. Only `make loop-watch` on real pushes proves it: compare
+the `push -> serving` figure and the critical path in the table before and after, and keep the JSON of each run (`--json`).
+
+### The pre-push check
+
+`python tools/affected_tests.py` (also `make test-affected`) runs only the tests a change can break, so the agent's own check before a push
+takes seconds instead of the ~4 minutes the whole suite takes serially on skippy-pc. CI stays the full gate. A file inside a test folder runs
+that folder; `portal/`, `memory/`, `mentat/`, `tools/` and `services/<name>/` run their own tests (flask-api in its own session: different
+requirements); any test that *names* the file (its file name next to its folder) is added, which is how a doc, a shell script or a module a
+test loads by path reaches the tests that read it; docs nothing names run nothing. **Cross-cutting changes get the full suite (the two CI
+commands)**: any `requirements*.txt`, `conftest.py`, `.github/**`, a Dockerfile or compose file, `pytest.ini`/`pyproject.toml`,
+`portal/catalog.py`, a file nothing knows, or a base it can't find. Changed `.py` files are compiled and changed `.sh` files get `bash -n`.
+With `pytest-xdist` installed it uses `-n auto --dist loadfile` (one test file stays on one worker); without it, plain pytest. `--list`
+shows the plan, `--files a b` names the change, `--full` forces everything, `--base REF` compares with another ref.
+
+### What still has no timestamps
+
+`prompt -> push` is one row because the agent's side doesn't stamp itself yet. `--bridge` reads what the Claude bridge can tell: the run's
+age (so `bridge received`) now, and `first edit` / `git push` once the bridge's events carry a `ts` (needs `SKIPPY_HOME_TOKEN` in the shell);
+with those marks the row splits into `prompt -> bridge received -> first edit -> git push -> push`. Not measurable yet: the portal's own
+"send" moment (portal send -> bridge start), the time spent editing versus testing, and the local test run before the push. A later change
+adds those stamps; the timer already tolerates their absence.
