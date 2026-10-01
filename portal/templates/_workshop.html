@@ -1,6 +1,11 @@
 {# The private Skippy: the left side of the Captain's dashboard. Claude Code (Opus, full permissions) on
    skippy-pc, reached through the home reporter (workshop.py). Only the messages you type ever leave this
-   page; the conversation lives on skippy-pc, and this page keeps a copy of the transcript for display. #}
+   page; the conversation lives on skippy-pc, and this page keeps a copy of the transcript for display.
+
+   This card is the Captain's only way in when he is away from the PC, so it must never dead-end. Once, a redeploy
+   mid-task left it "went quiet" with Send greyed out and no way out but New chat. Now: a quiet link shows what is
+   going on and for how long, asks skippy-pc to check again by itself (and on the Check again button), brings Send
+   back after 30 s, and keeps polling for as long as the page is open. #}
 <style>
   .me-chat { display: flex; flex-direction: column; position: sticky; top: 12px; height: calc(100vh - 110px); min-height: 440px; }
   .me-chat header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -14,11 +19,18 @@
   .me-chat .act { font-size: .74rem; color: var(--muted); margin: 2px 0; font-family: ui-monospace, Consolas, monospace; }
   .me-chat .note { font-size: .78rem; color: var(--amber); margin: 4px 0 0; }
   .me-chat .note.bad { color: var(--red); }
+  /* The quiet-link strip sits under the log, not in it: it stays on screen however far the log is scrolled, and
+     its text changes at most every few seconds, so a screen reader is not read a ticking clock. */
+  .me-chat .quiet { margin: 0 0 8px; padding: 8px 10px; border: 1px solid var(--amber); border-radius: 8px; font-size: .8rem; color: var(--amber); }
+  .me-chat .quiet.bad { border-color: var(--red); color: var(--red); }
+  .me-chat .quiet .hint { margin-top: 4px; color: var(--ink); }
+  .me-chat .quiet .qbtns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .me-chat .quiet button { padding: 5px 12px; font-size: .8rem; }
   .me-chat form { display: flex; flex-direction: column; gap: 6px; }
   .me-chat textarea { resize: vertical; min-height: 3.2em; max-height: 30vh; }
   .me-chat [hidden] { display: none !important; }        /* the base button style would otherwise show Stop while idle */
-  .me-chat .actions { display: flex; gap: 8px; }
-  .me-chat .actions .send { flex: 1; }
+  .me-chat .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .me-chat .actions .send { flex: 1; min-width: 5em; }
   /* On a phone the card sits on top of the widgets and must fit above the floating Home button. */
   @media (max-width: 900px) { .me-chat { position: static; height: auto; min-height: 380px; max-height: calc(100vh - 290px); } .me-chat .wlog { min-height: 140px; } }
 </style>
@@ -34,6 +46,14 @@
       <code>claude</code> there is signed in: <code class="code">/login</code>) and the home reporter is up.</p>
   {% endif %}
   <div class="wlog" id="ps-log" aria-live="polite"></div>
+  <div class="quiet" id="ps-quiet" role="status" hidden>
+    <div id="ps-quiet-msg"></div>
+    <div class="hint" id="ps-quiet-hint" hidden>You can send a new message now; this one will be left waiting.</div>
+    <div class="qbtns">
+      <button type="button" id="ps-check">Check again</button>
+      <button type="button" id="ps-reload" hidden>Reload page</button>
+    </div>
+  </div>
   <form id="ps-form">
     <textarea id="ps-text" rows="2" maxlength="8000" placeholder="e.g. make the Games tile's pill orange" required></textarea>
     <div class="actions">
@@ -49,10 +69,22 @@
     const log = root.querySelector("#ps-log"), form = root.querySelector("#ps-form");
     const text = root.querySelector("#ps-text"), send = root.querySelector("#ps-send");
     const stopBtn = root.querySelector("#ps-stop"), newBtn = root.querySelector("#ps-new");
+    const strip = root.querySelector("#ps-quiet"), quietMsg = root.querySelector("#ps-quiet-msg");
+    const quietHint = root.querySelector("#ps-quiet-hint"), checkBtn = root.querySelector("#ps-check");
+    const reloadBtn = root.querySelector("#ps-reload");
     const K = {conv: "ps-conv", log: "ps-log", task: "ps-task"};
     const SEND = "{{ url_for('me.workshop_send') }}", EVENTS = "{{ url_for('me.workshop_events') }}",
-          STOP = "{{ url_for('me.workshop_stop') }}";
+          STOP = "{{ url_for('me.workshop_stop') }}", RESYNC = "{{ url_for('me.workshop_resync') }}";
     const H = {"Content-Type": "application/json", "X-Workshop": "1"};
+
+    // When skippy-pc goes quiet. There is no give-up: the page polls for as long as it is open, only slower.
+    const POLL_MS = 1200;                  // healthy
+    const TIMEOUT_MS = 20000;              // one request never hangs the card (a cold or redeploying portal can sit on one)
+    const LEAVE_AFTER_MS = 30000;          // quiet this long: Send comes back (and leaves the old task behind)
+    const RESYNC_EVERY_MS = 60000;         // "check again" on its own: once on going quiet, then at most this often
+    const pollDelay = (quietMs) => (quietMs < 60000 ? 2000 : quietMs < 300000 ? 5000 : 10000);
+    const BUSY = "Skippy is still working on the last one.";   // the portal's and the reporter's wording for a busy bridge
+
     const store = {
       get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
       set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
@@ -61,11 +93,12 @@
     const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : ("c" + Date.now().toString(16) + Math.random().toString(16).slice(2, 10)).replace(/[^A-Za-z0-9-]/g, ""));
     let conv = store.get(K.conv) || uuid(); store.set(K.conv, conv);
     let turns = []; try { turns = JSON.parse(store.get(K.log) || "[]"); } catch (e) { turns = []; }
-    let running = null;                            // {task, after, turn}
-    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    let running = null;                            // {task, after, turn, quietSince, kind, ...}: the task this page follows
+    let sending = false;                           // a message is on its way to the portal
 
     const save = () => store.set(K.log, JSON.stringify(turns.slice(-60)));
     function el(tag, cls, txt) { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
+    const setText = (node, t) => { if (node.textContent !== t) node.textContent = t; };   // an unchanged note is not re-announced
     const boxes = new WeakMap();                   // turn -> its bubble (kept off the turn, which is saved as JSON)
     function draw(turn) {                          // (re)draw one turn's bubble from its data
       let box = boxes.get(turn);
@@ -81,70 +114,169 @@
       if (!(turn.parts || []).length && !turn.note) box.appendChild(el("div", "act", "…"));
     }
     const scroll = () => { log.scrollTop = log.scrollHeight; };
-    function busy(on) { send.disabled = on; stopBtn.hidden = !on; }
-    turns.forEach(draw); scroll();
 
-    async function call(url, opts) {
-      const res = await fetch(url, {credentials: "same-origin", ...opts});
-      if (res.redirected || !(res.headers.get("content-type") || "").includes("json")) throw new Error("Your sign-in expired: reload the page.");
-      return {ok: res.ok, status: res.status, data: await res.json()};
+    // ── the quiet link ────────────────────────────────────────────────────────────
+    // job.kind says why: "stalled" (skippy-pc stopped reporting), "offline" (it never picked the task up),
+    // "unknown" (the portal has no record: it was probably just redeployed), "net" (this browser can't reach the
+    // portal), "signin" (the Google session ended: only a reload helps). "" is a healthy link.
+    const span = (s) => (s < 15 ? "a few seconds" : s < 60 ? (Math.floor(s / 15) * 15) + " s" : Math.floor(s / 60) + " min");
+    function quietSeconds(job) {                   // the longer of what this page saw and what the portal says
+      const mine = (Date.now() - job.quietSince) / 1000;
+      const theirs = job.srv ? job.srv.s + (Date.now() - job.srv.at) / 1000 : 0;
+      return Math.max(mine, theirs);
+    }
+    function quietMessage(job) {
+      const t = span(quietSeconds(job)), tail = " It reconnects by itself; this can take a minute after a deploy.";
+      if (job.kind === "signin") return "Your sign-in to the portal ended. Reload this page to sign in again; this chat is kept.";
+      if (job.kind === "net") return "Can't reach the portal (" + t + "): your connection, or it is redeploying. Trying again by itself.";
+      if (job.kind === "offline") return "skippy-pc hasn't picked this up for " + t + ". Is the bridge running there?" + tail;
+      return "No word from skippy-pc for " + t + "." + tail;      // stalled, or the portal lost the task
+    }
+    const quiet = (job) => !!job && job.quietSince != null;
+    const canLeave = (job) => quiet(job) && job.kind !== "signin" && Date.now() - job.quietSince >= LEAVE_AFTER_MS;
+    function ui() {                                // the card's controls, from the state alone (safe to call any time)
+      const job = running, q = quiet(job);
+      send.disabled = sending || (!!job && !canLeave(job));
+      stopBtn.hidden = !job || !!job.stopping;     // Stop stays while a task is followed (even a quiet one: skippy-pc gets it on return)
+      strip.hidden = !q;
+      if (!q) return;
+      strip.classList.toggle("bad", job.kind === "signin");
+      setText(quietMsg, quietMessage(job));
+      quietHint.hidden = !(canLeave(job));
+      reloadBtn.hidden = job.kind !== "signin";
+      checkBtn.disabled = !!job.checking;
+      setText(checkBtn, job.checking ? "Checking…" : "Check again");
+    }
+    setInterval(() => { if (running) ui(); }, 1000);    // the seconds move on, and Send comes back on time
+
+    function resync(job) {                         // ask skippy-pc to look at this task now (the portal wakes the reporter)
+      job.lastResync = Date.now();
+      call(RESYNC, {method: "POST", headers: H, body: JSON.stringify({task: job.task})}).catch(() => {});
+    }
+    function goQuiet(job, kind, srvS) {
+      const now = Date.now();
+      if (job.quietSince == null) { job.quietSince = now; if (kind !== "signin") resync(job); }
+      else if (kind !== "signin" && now - job.lastResync >= RESYNC_EVERY_MS) resync(job);
+      job.kind = kind; job.srv = srvS == null ? null : {s: srvS, at: now};
+    }
+    function leave(job) {                          // Send was pressed while the link was quiet: stop following that task
+      job.turn.note = "(left waiting)"; job.turn.bad = false; draw(job.turn); save();
+      store.del(K.task); running = null;
+      if (job.wake) job.wake();
+      return job;
+    }
+    function resume(job) {                         // the bridge is still on that task: watch it again
+      delete job.turn.note; job.turn.bad = false; draw(job.turn); save();
+      follow(job);
     }
 
-    async function follow(job) {                   // poll a task until it ends, riding out portal restarts
-      running = job; busy(true); let quiet = 0;
-      while (running === job) {
-        let r;
-        try { r = await call(EVENTS + "?task=" + encodeURIComponent(job.task) + "&after=" + job.after, {headers: H}); }
-        catch (e) { r = null; }
-        if (!r || !r.ok || r.data.state === "unknown") {
-          quiet += 1;                              // the portal may be redeploying: the reporter re-sends what it lost
-          job.turn.note = quiet > 90 ? "Lost the link to skippy-pc. Send again to retry." : "Reconnecting…";
-          job.turn.bad = quiet > 90; draw(job.turn);
-          if (quiet > 90) break;
-          await sleep(2000); continue;
-        }
-        quiet = 0; delete job.turn.note; job.turn.bad = false;
-        const d = r.data;
-        (d.events || []).forEach(e => job.turn.parts.push(e));
-        job.after = d.next; store.set(K.task, JSON.stringify({task: job.task, after: job.after}));
-        if (d.state === "offline") { job.turn.note = "skippy-pc hasn't picked this up. Is the bridge running?"; }
-        if (d.state === "stalled") { job.turn.note = "The link to skippy-pc went quiet. If you just redeployed the reporter, give it a minute."; }
-        if (d.state === "done" || d.state === "error") {
-          if (d.state === "error") { job.turn.note = d.error || "It failed."; job.turn.bad = d.error !== "stopped"; }
-          draw(job.turn); save(); scroll(); store.del(K.task); break;
-        }
-        draw(job.turn); save(); scroll();
-        await sleep(1200);
+    async function call(url, opts) {
+      const ctl = typeof AbortController === "function" ? new AbortController() : null;
+      const timer = ctl ? setTimeout(() => ctl.abort(), TIMEOUT_MS) : null;
+      try {
+        const res = await fetch(url, {credentials: "same-origin", ...(ctl ? {signal: ctl.signal} : {}), ...opts});
+        if (res.redirected) { const e = new Error("Your sign-in expired: reload the page."); e.signin = true; throw e; }
+        if (!(res.headers.get("content-type") || "").includes("json")) throw new Error("The portal didn't answer properly (HTTP " + res.status + ").");
+        return {ok: res.ok, status: res.status, data: await res.json()};
+      } finally { if (timer) clearTimeout(timer); }
+    }
+    function nap(job, ms) {                        // sleep, unless Check again (or leaving) wakes the loop sooner
+      return new Promise(resolve => {
+        if (job.poked) { job.poked = false; resolve(); return; }
+        const done = () => { clearTimeout(timer); job.wake = null; resolve(); };
+        const timer = setTimeout(done, ms);
+        job.wake = done;
+      });
+    }
+
+    async function poll(job) {                     // one look at the task: what to do next, and what the link is like
+      let r = null, why = "net";
+      try { r = await call(EVENTS + "?task=" + encodeURIComponent(job.task) + "&after=" + job.after, {headers: H}); }
+      catch (e) { why = e && e.signin ? "signin" : "net"; }
+      if (running !== job) return {stale: true};   // left, replaced or reset while the request was out
+      if (r && (r.status === 401 || r.status === 403)) why = "signin";
+      const d = r && r.ok && r.data && typeof r.data === "object" ? r.data : null;
+      if (d && d.state !== "unknown") {            // a stalled or offline read is still a read: keep what it carries
+        if (Array.isArray(d.events)) d.events.forEach(e => job.turn.parts.push(e));
+        if (typeof d.next === "number" && d.next > job.after) job.after = d.next;   // never back: a portal that was just rebuilt holds fewer events than this page has
+        store.set(K.task, JSON.stringify({task: job.task, after: job.after}));
       }
-      if (running === job) running = null;
-      busy(false); text.focus();
+      const kind = !d ? why : d.state === "unknown" ? "unknown" : (d.state === "stalled" || d.state === "offline") ? d.state : "";
+      if (kind) goQuiet(job, kind, d && typeof d.quiet_s === "number" ? d.quiet_s : null);
+      else { job.quietSince = null; job.kind = ""; job.srv = null; delete job.turn.note; job.turn.bad = false; }
+      const out = {kind, end: false, resume: null};
+      if (d && (d.state === "done" || d.state === "error")) {
+        out.end = true;
+        if (d.state === "error") { job.turn.note = d.error || "It failed."; job.turn.bad = d.error !== "stopped"; }
+        if (d.error === BUSY && job.left) out.resume = job.left;   // the bridge is still on the task this one replaced
+        store.del(K.task);
+      }
+      draw(job.turn); save(); scroll();
+      return out;
+    }
+
+    async function follow(job) {                   // poll a task until it ends, riding out portal, reporter and bridge restarts
+      running = job; job.quietSince = null; job.kind = ""; job.srv = null; job.checking = false; job.poked = false; job.lastResync = 0;
+      store.set(K.task, JSON.stringify({task: job.task, after: job.after}));   // a reload before the first answer still finds it
+      ui();
+      let out = {};
+      while (running === job) {
+        const asked = job.checking;
+        try { out = await poll(job); }
+        catch (e) { out = {kind: "net"}; goQuiet(job, "net", null); }       // a bug or an odd answer must never strand the card
+        if (out.stale || running !== job) return;  // another task owns the card now
+        if (asked) job.checking = false;
+        if (out.end) break;
+        ui();
+        await nap(job, out.kind ? pollDelay(Date.now() - job.quietSince) : POLL_MS);
+      }
+      if (running !== job) return;                 // left or reset while it napped: the card is someone else's now
+      running = null; ui(); text.focus();
+      if (out.resume) resume(out.resume);
     }
 
     form.addEventListener("submit", async (ev) => {
       ev.preventDefault();
       const message = text.value.trim();
-      if (!message || running) return;
+      if (!message || sending) return;
+      let gone = null;
+      if (running) { if (!canLeave(running)) return; gone = leave(running); }
       const mine = {role: "user", text: message}; turns.push(mine); draw(mine);
       const reply = {role: "assistant", parts: []}; turns.push(reply); draw(reply); scroll();
-      text.value = ""; busy(true);
+      text.value = ""; sending = true; ui();
       let r;
       try { r = await call(SEND, {method: "POST", headers: H, body: JSON.stringify({conv, message})}); }
       catch (e) { r = {ok: false, data: {error: e.message}}; }
-      if (!r.ok) { reply.note = r.data.error || "That didn't go through."; reply.bad = true; draw(reply); save(); busy(false); return; }
-      save(); follow({task: r.data.task, after: 0, turn: reply});
+      sending = false;
+      if (!r.ok) {
+        reply.note = (r.data && r.data.error) || "That didn't go through."; reply.bad = true; draw(reply); save(); ui();
+        if (gone && r.status === 409) resume(gone);   // the old task is still alive: don't lose sight of it
+        return;
+      }
+      save(); follow({task: r.data.task, after: 0, turn: reply, left: gone});
     });
     text.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
     stopBtn.addEventListener("click", async () => {
       if (!running) return;
       try { await call(STOP, {method: "POST", headers: H, body: JSON.stringify({task: running.task})}); } catch (e) {}
-      stopBtn.hidden = true;
-      running && (running.turn.note = "Stopping…", draw(running.turn));
+      if (running) { running.stopping = true; running.turn.note = "Stopping…"; draw(running.turn); }
+      ui();
     });
+    checkBtn.addEventListener("click", () => {     // look now: ask skippy-pc to resync AND poll the portal this instant
+      const job = running;
+      if (!job || job.checking) return;
+      job.checking = true; resync(job);
+      if (job.wake) job.wake(); else job.poked = true;   // napping: wake it; a poll is out right now: the next one starts at once
+      ui();
+    });
+    reloadBtn.addEventListener("click", () => location.reload());
     newBtn.addEventListener("click", () => {
       if (running && !confirm("Skippy is mid-task. Start a new chat anyway? (The task keeps going; use Stop first to end it.)")) return;
-      running = null; conv = uuid(); store.set(K.conv, conv); turns = []; save(); store.del(K.task); log.replaceChildren(); busy(false);
+      const job = running; running = null; if (job && job.wake) job.wake();
+      conv = uuid(); store.set(K.conv, conv); turns = []; save(); store.del(K.task); log.replaceChildren(); ui();
     });
 
+    turns.forEach(draw); scroll(); ui();
     // A reload (or a portal deploy) mid-task: pick the task back up where this page left off.
     const pending = store.get(K.task);
     if (pending && turns.length && turns[turns.length - 1].role === "assistant") {
