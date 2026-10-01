@@ -58,6 +58,8 @@ def _event_md(event: dict) -> str:
     if event.get("t") == "tool":
         detail = str(event.get("detail") or "")
         return f"- `{event.get('name')}`" + (f": `{detail}`" if detail else "") + "\n"
+    if event.get("t") == "image":
+        return f"- showed the screenshot `{str(event.get('name') or '')[:80]}`\n"
     if event.get("t") == "ship":
         return f"- shipped `{event.get('sha')}` to {event.get('repo')} {event.get('branch')}: {event.get('subject')}\n"
     return ""
@@ -293,6 +295,8 @@ def clean_events(events: list) -> list[dict]:
             out.append({"t": "tool", "name": e["name"][:40], "detail": str(e.get("detail") or "")[:200]})
         elif ship_event(e):
             out.append(ship_event(e))
+        elif e.get("t") == "image":            # the picture itself stays out of the index: a line saying it was there
+            out.append({"t": "text", "text": f"(a screenshot was shown here: {str(e.get('name') or '')[:80]})"})
     return out
 
 

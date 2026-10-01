@@ -15,6 +15,8 @@ activity lines (tool name and its command or path), never tool output.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 import threading
 import time
@@ -71,6 +73,34 @@ _SHA = re.compile(r"[0-9a-f]{40}")
 _REPO = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}")
 _BRANCH = re.compile(r"[A-Za-z0-9._/-]{1,100}")
 MAX_SHIPS = 200                 # commits the ship card may ask about (the newest the portal has seen pushed)
+
+
+MAX_IMAGE_BYTES = 400_000
+MAX_IMAGES_PER_TASK = 3
+MAX_IMAGES = 40                 # held in memory across all tasks (about 16 MB at most); the oldest go first
+_B64 = re.compile(r"[A-Za-z0-9+/]+={0,2}")
+
+
+def image_event(event) -> tuple[dict, bytes] | None:
+    """A screenshot from the bridge ({"t": "image", mime, name, b64}), or None. Exactly that shape; the bytes must decode,
+    be at most MAX_IMAGE_BYTES, and BE the type they claim by their own first bytes (PNG or JPEG only): the portal serves
+    them as that type with nosniff, so nothing else (an HTML page, a script) can ever be served from here."""
+    if not isinstance(event, dict) or set(event) != {"t", "mime", "name", "b64"} or event["t"] != "image":
+        return None
+    mime, name, b64 = event["mime"], event["name"], event["b64"]
+    if mime not in ("image/png", "image/jpeg") or not isinstance(name, str) or not isinstance(b64, str):
+        return None
+    if len(b64) > (MAX_IMAGE_BYTES * 4) // 3 + 4 or not _B64.fullmatch(b64):
+        return None
+    try:
+        data = base64.b64decode(b64, validate=True)
+    except (ValueError, binascii.Error):
+        return None
+    magic = b"\x89PNG\r\n\x1a\n" if mime == "image/png" else b"\xff\xd8\xff"
+    if not data.startswith(magic) or len(data) > MAX_IMAGE_BYTES:
+        return None
+    clean_name = re.sub(r"[^A-Za-z0-9._-]", "_", name)[:80] or "screenshot"
+    return {"t": "image", "mime": mime, "name": clean_name}, data
 
 
 def ship_event(event) -> dict | None:
@@ -143,6 +173,27 @@ class Workshop:
         # (or anyone with the Captain's cookie) can't make the portal query GitHub for an arbitrary commit.
         self._ships: dict[tuple[str, str], dict] = {}
         self.on_final = None                     # (news: dict) -> None: a run this process saw going has ended (notify.py)
+        self._images: dict[tuple[str, int], tuple[str, str, bytes]] = {}   # (task, n) -> (owner, mime, bytes)
+
+    def _keep_image(self, task: str, rec: dict, got) -> dict:
+        """Hold a checked screenshot (call with the lock held) and return the event the chat gets: {"t":"image","n":..}
+        (the page loads it from /me/workshop/image), or a plain line when it was refused or the task has its three."""
+        n = sum(1 for e in rec["events"] if e["t"] == "image")
+        if got is None or n >= MAX_IMAGES_PER_TASK:
+            return {"t": "text", "text": "(a screenshot couldn't be shown)"}
+        event, data = got
+        self._images[(task, n)] = (rec["owner"], event["mime"], data)
+        while len(self._images) > MAX_IMAGES:
+            self._images.pop(next(iter(self._images)))
+        return {**event, "n": n}
+
+    def image(self, owner: str, task: str, n: int) -> tuple[str, bytes] | None:
+        """(mime, bytes) of a screenshot in one of `owner`'s tasks, else None."""
+        with self._lock:
+            held = self._images.get((task, n))
+        if held is None or held[0] != owner:
+            return None
+        return held[1], held[2]
 
     def remember_ship(self, owner: str, ship: dict) -> None:
         with self._lock:
@@ -392,6 +443,12 @@ class Workshop:
             shipped = []
             if start <= have:
                 for event in events[have - start:]:
+                    if isinstance(event, dict) and event.get("t") == "image":
+                        if len(rec["events"]) < MAX_EVENTS:
+                            # Always one event in its place (a picture, or a line saying it couldn't be shown), so the
+                            # reporter's `have` count stays in step with the bridge's list.
+                            rec["events"].append(self._keep_image(task, rec, image_event(event)))
+                        continue
                     cleaned = _clean(event)
                     if cleaned and len(rec["events"]) < MAX_EVENTS:
                         rec["events"].append(cleaned)

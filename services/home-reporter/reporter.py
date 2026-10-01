@@ -477,6 +477,22 @@ def portal_started(token: str, task: str) -> bool:
     return False
 
 
+PUSH_BYTES = 700_000         # one push's events, as JSON: the portal refuses a request over 1 MB, and a screenshot is ~530 KB
+
+
+def push_chunk(events: list) -> list:
+    """The next events to push: at most WORKSHOP_PUSH of them and at most PUSH_BYTES of JSON, but always at least one
+    (a single event is never bigger than the bridge lets it be: text 4 KB, a screenshot 400 KB before base64)."""
+    out, size = [], 0
+    for event in events[:WORKSHOP_PUSH]:
+        n = len(json.dumps(event))
+        if out and size + n > PUSH_BYTES:
+            break
+        out.append(event)
+        size += n
+    return out
+
+
 class Relay:
     """Carries ONE run's events from the bridge to the portal, a round at a time (`step`). Two things drive it: the
     streaming thread (`workshop`, one long-poll round after another while a job is being worked) and the reconciler
@@ -501,8 +517,8 @@ class Relay:
         if status != 200:
             return "bridge"
         events, upto, done = run.get("events") or [], _int(run.get("next")), bool(run.get("done"))
-        chunk = events[:WORKSHOP_PUSH]
-        final = done and len(events) <= WORKSHOP_PUSH
+        chunk = push_chunk(events)
+        final = done and len(chunk) == len(events)
         state = ("done" if run.get("ok") else "error") if final else "running"
         error = (run.get("error") or "The run ended without finishing.") if state == "error" else None
         age = run.get("finished_age_s") if done else None

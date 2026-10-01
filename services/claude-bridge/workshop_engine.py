@@ -26,6 +26,7 @@ every argument goes through cmd.exe):
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import queue
@@ -128,6 +129,26 @@ def tool_detail(name: str, args: dict) -> str:
     return ""
 
 
+MAX_IMAGES = 3                     # screenshots one run may attach
+MAX_IMAGE_BYTES = 400_000
+_IMAGE_LINE = re.compile(r"^[ \t]*`?SKIPPY_IMAGE:[ \t]*(\S[^\n`]*?)[ \t]*`?[ \t]*$", re.M)
+
+
+def split_images(text: str) -> tuple[str, list[str]]:
+    """An assistant text block without its `SKIPPY_IMAGE: <path>` lines, and those paths (see _attach_images)."""
+    paths = [m.group(1).strip().strip("\"'") for m in _IMAGE_LINE.finditer(text)]
+    return _IMAGE_LINE.sub("", text).strip(), paths
+
+
+def image_mime(data: bytes) -> str | None:
+    """image/png or image/jpeg by the file's own first bytes (never by its name), else None."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    return None
+
+
 _BLOCK = re.compile(r"\{\{#(skippytel|other)\}\}\n?(.*?)\{\{/\1\}\}\n?", re.S)
 
 
@@ -160,6 +181,7 @@ class Run:
         self.project = project                 # which repo (projects.json): picks the clone, the checkout and the session
         self.clone = ""                        # that project's clone when the run started (the conversation log reads it)
         self.before_finish = None              # (run) -> None, called once just before the run ends (the ship check)
+        self.image_paths: list[str] = []       # SKIPPY_IMAGE lines the agent printed: screenshots to attach at the end
         self.created = time.time() if created is None else created
         self.events: list[dict] = []
         self.done, self.ok, self.error = False, None, None
@@ -778,6 +800,30 @@ class Workshop:
         run.emit({"t": "ship", "project": project.id, "repo": project.repo, "branch": project.branch, "sha": after,
                   "subject": subject, "workflow": workflow})
 
+    def _attach_images(self, run: Run) -> None:
+        """The screenshots the agent asked to show (`SKIPPY_IMAGE: <path>`), as `image` events under its answer. Only a
+        file inside this run's project clone (where tools/workshop_screenshot.py writes), at most MAX_IMAGES, each a real
+        PNG or JPEG (by its first bytes) of at most MAX_IMAGE_BYTES: anything else is skipped with a short note, so a
+        path the agent got wrong can never send some other file off this PC."""
+        clone = os.path.realpath(self.project(run.project).clone)
+        for raw in run.image_paths[:MAX_IMAGES]:
+            path = os.path.realpath(raw if os.path.isabs(raw) else os.path.join(clone, raw))
+            name = os.path.basename(path)[:80]
+            try:
+                inside = os.path.commonpath([clone, path]) == clone
+            except ValueError:                         # another drive
+                inside = False
+            data = b""
+            if inside and os.path.isfile(path) and os.path.getsize(path) <= MAX_IMAGE_BYTES:
+                with open(path, "rb") as f:
+                    data = f.read(MAX_IMAGE_BYTES + 1)
+            mime = image_mime(data)
+            if not inside or mime is None or len(data) > MAX_IMAGE_BYTES:
+                run.emit({"t": "text", "text": f"(couldn't attach the screenshot {name}: it must be a PNG or JPEG of at "
+                                                f"most {MAX_IMAGE_BYTES // 1000} KB inside my clone)"})
+                continue
+            run.emit({"t": "image", "mime": mime, "name": name, "b64": base64.b64encode(data).decode("ascii")})
+
     def _work(self, run: Run) -> None:
         try:
             if not self._prepare_repo(run):
@@ -786,7 +832,13 @@ class Workshop:
                 before = self._head(self.project(run.project).clone)
             except (OSError, subprocess.SubprocessError):
                 before = None
-            run.before_finish = lambda r: self._ship_check(r, before)
+            def at_end(r: Run) -> None:                # each on its own: a failed ship check must not lose the screenshot
+                for step in (lambda: self._ship_check(r, before), lambda: self._attach_images(r)):
+                    try:
+                        step()
+                    except Exception:  # noqa: BLE001
+                        pass
+            run.before_finish = at_end
             try:
                 self.write_prompt(run.project)
             except OSError as exc:                     # no rules, no run: never start the agent without them
@@ -893,9 +945,13 @@ class Workshop:
                 for block in (evt.get("message") or {}).get("content") or []:
                     if block.get("type") == "text" and (block.get("text") or "").strip():
                         produced = True
+                        said, shots = split_images(block["text"])
+                        run.image_paths.extend(shots)          # attached when the run ends (see _attach_images)
+                        if not said:
+                            continue
                         if pending is not None:
                             run.emit({"t": "text", "text": pending})
-                        pending = block["text"].strip()[:MAX_TEXT]
+                        pending = said[:MAX_TEXT]
                     elif block.get("type") == "tool_use":
                         produced = True
                         if pending is not None:

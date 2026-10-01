@@ -131,6 +131,15 @@ def test_how_long_ago_a_run_ended_rides_on_every_push_of_a_finished_run_only(fak
     assert "finished_age_s" not in portal.pushes[-1]                  # a run still going says nothing of the kind
 
 
+def test_a_push_stays_under_the_portals_request_limit_even_with_screenshots():
+    shot = {"t": "image", "mime": "image/png", "name": "me.png", "b64": "A" * 534_000}     # a 400 KB PNG, base64
+    texts = [{"t": "text", "text": "x" * 4000}] * 99
+    first = reporter.push_chunk(texts + [shot])
+    assert len(first) == 99 and len(json.dumps(first)) <= reporter.PUSH_BYTES                  # the picture waits ...
+    assert reporter.push_chunk([shot, shot]) == [shot]                                         # ... and goes alone
+    assert len(reporter.push_chunk([ev(n) for n in range(300)])) == reporter.WORKSHOP_PUSH
+
+
 # ── conversations ──────────────────────────────────────────────────────────
 def test_the_conversations_list_and_one_conversation_come_from_the_bridge_with_the_token(fakes):
     seen = []

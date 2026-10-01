@@ -199,6 +199,17 @@ browser <── poll /me/workshop/events ── portal <── POST /home/worksh
   ago (the reporter sends `finished_age_s` with a finished run, and a record a fresh portal rebuilds from an already
   finished run never notifies). The card's **Discord me when done** switch (default on) is kept in VM metadata
   `portal-workshop-notify`. Discord trouble is swallowed and logged once per kind.
+- **Show me the result (screenshots).** After a pushed change to `portal/templates` or `portal/static`, the prompt has
+  the agent run `python tools/workshop_screenshot.py me --out .skippy-shots/me.png` (the checkout's portal with
+  `portal/tests`' fakes, a scratch admin session signed with a random key, served on 127.0.0.1 only, shot at phone size by
+  a headless Chrome or Edge already on the PC; it installs nothing and exits 3 without one) and print
+  `SKIPPY_IMAGE: .skippy-shots/me.png` on its own line (`.skippy-shots/` is git-ignored). The bridge strips that line and,
+  as the run ends, attaches the file as `{"t":"image", mime, name, b64}` only if it is inside the project's clone, at most
+  400 KB and really a PNG or JPEG by its first bytes (3 per run). The reporter keeps each push under 700 KB of JSON. The
+  portal checks it again (`image_event`), keeps it in memory for its owner (3 per task, 40 in all), puts
+  `{"t":"image","n"}` in the chat and serves the bytes from `GET /me/workshop/image?task=&n=` as that type with
+  `nosniff` and a CSP that allows nothing; the card shows it under the answer. A portal deploy forgets them (the card says
+  so), and a reopened conversation shows a line where one was.
 - **A portal deploy doesn't lose the conversation.** History and progress live on
   skippy-pc (the bridge keeps every event and one Claude session per conversation);
   the reporter tells the portal what it has, and a redeployed portal replies "I hold N

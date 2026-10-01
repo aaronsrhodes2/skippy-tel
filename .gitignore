@@ -34,3 +34,6 @@ portal/experiments_static/
 
 # Claude Code agent worktrees
 .claude/worktrees/
+
+# The private Skippy's screenshots (tools/workshop_screenshot.py): shown in the chat, never committed
+.skippy-shots/

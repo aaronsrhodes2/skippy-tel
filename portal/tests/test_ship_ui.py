@@ -77,6 +77,18 @@ def test_a_push_the_portal_no_longer_knows_says_so_once_and_keeps_its_commit_lin
 
 
 @needs_node
+def test_a_screenshot_shows_inline_from_the_portal_and_never_from_the_event(page):
+    out = drive(page, [{"adv": 1500}, {"snap": "s"}],
+                tasks={"abcd1234": {"state": "done", "events": [{"t": "text", "text": "Here it is."},
+                                                                {"t": "image", "mime": "image/png", "name": "me.png", "n": 0},
+                                                                {"t": "image", "n": "0 onerror=alert(1)"}]}},
+                follow="abcd1234")
+    s = out["snaps"]["s"]
+    assert s["imgs"] == [{"src": "/me/workshop/image?task=abcd1234&n=0", "alt": "Screenshot of the change"}]
+    assert s["log"][-1]["text"].startswith("Here it is.")
+
+
+@needs_node
 def test_a_ship_event_with_a_bad_sha_is_just_a_line(page):
     out = drive(page, [{"adv": 1500}, {"snap": "s"}],
                 tasks={"t1": {"state": "done", "events": [{**SHIP, "sha": "nope"}]}}, follow="t1")

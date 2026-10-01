@@ -874,6 +874,23 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             return jsonify(error=str(exc)), 400
         return jsonify(job=job)
 
+    @mine.get("/workshop/image")
+    @auth.admin_required
+    def workshop_image():
+        """A screenshot the private Skippy attached (workshop.py image_event). An <img> can't send the X-Workshop header,
+        so this GET is guarded by the admin login and the owner check only: it changes nothing and serves only bytes
+        that were checked to BE a PNG or JPEG, as that type, with nosniff and a CSP that allows nothing."""
+        found = workshop.image(me(), request.args.get("task", ""), request.args.get("n", type=int, default=-1))
+        if found is None:
+            abort(404)
+        mime, data = found
+        resp = app.response_class(data, mimetype=mime)
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        resp.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+        resp.headers["Content-Disposition"] = "inline; filename=screenshot." + ("png" if mime == "image/png" else "jpg")
+        resp.headers["Cache-Control"] = "private, no-store"
+        return resp
+
     @mine.post("/workshop/notify")
     @workshop_call
     def workshop_notify():

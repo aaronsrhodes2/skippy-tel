@@ -261,6 +261,7 @@ function snap() {
       return out;
     })(e["ps-log"], []),
     shipPolls: calls.filter(c => c.route === "ship").length, notify: e["ps-notify"].checked,
+    imgs: (function walk(n, out) { if (n.tag === "img") out.push({src: n.src, alt: n.alt}); (n.children || []).forEach(c => walk(c, out)); return out; })(e["ps-log"], []),
   };
 }
 

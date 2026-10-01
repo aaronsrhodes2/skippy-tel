@@ -57,6 +57,7 @@
   .me-chat .ship .st.done { color: var(--green); }
   .me-chat .ship .st.running, .me-chat .ship .st.queued { color: var(--amber); }
   .me-chat .ship .st.failed { color: var(--red); }
+  .me-chat .shot { display: block; max-width: 100%; margin-top: 6px; border: 1px solid var(--dim-green-hi); border-radius: 6px; }
   .me-chat .ship .links { display: flex; gap: 12px; flex-wrap: wrap; font-size: .8rem; margin-top: 4px; }
   /* On a phone the card sits on top of the widgets and must fit above the floating Home button. */
   @media (max-width: 900px) { .me-chat { position: static; height: auto; min-height: 380px; max-height: calc(100vh - 290px); } .me-chat .wlog { min-height: 140px; } }
@@ -172,6 +173,7 @@
       (turn.parts || []).forEach(p => {
         if (p.t === "text") box.appendChild(el("p", null, p.text));
         else if (p.t === "ship") box.appendChild(shipCard(p));
+        else if (p.t === "image") box.appendChild(shot(p));
         else box.appendChild(el("div", "act", "› " + p.name + (p.detail ? ": " + p.detail : "")));
       });
       if (turn.note) box.appendChild(el("div", "note" + (turn.bad ? " bad" : ""), turn.note));
@@ -225,6 +227,17 @@
         }
         await new Promise(res => setTimeout(res, SHIP_EVERY_MS));
       }
+    }
+    // A screenshot Skippy attached (served by the portal from memory: it is gone after a portal deploy, so it says so).
+    const IMAGE = "{{ url_for('me.workshop_image') }}";
+    function shot(p) {
+      if (!/^[a-f0-9]{8,32}$/.test(p.task || "") || !Number.isInteger(p.n)) return el("div", "act", "› a screenshot");
+      const src = IMAGE + "?task=" + encodeURIComponent(p.task) + "&n=" + p.n;
+      const a = el("a", "shotlink"); a.href = src; a.target = "_blank"; a.rel = "noopener";
+      const img = el("img", "shot"); img.alt = "Screenshot of the change"; img.src = src;
+      img.addEventListener("error", () => a.replaceChildren(el("div", "act", "› the screenshot is gone (the portal restarted since)")));
+      a.appendChild(img);
+      return a;
     }
     function shipCard(p) {
       if (!/^[0-9a-f]{40}$/.test(p.sha || "")) return el("div", "act", "› pushed");
@@ -318,7 +331,10 @@
       if (r && (r.status === 401 || r.status === 403)) why = "signin";
       const d = r && r.ok && r.data && typeof r.data === "object" ? r.data : null;
       if (d && d.state !== "unknown") {            // a stalled or offline read is still a read: keep what it carries
-        if (Array.isArray(d.events)) d.events.forEach(e => { if (e && (e.t === "text" || e.t === "tool" || e.t === "ship")) job.turn.parts.push(e); });
+        if (Array.isArray(d.events)) d.events.forEach(e => {
+          if (e && e.t === "image" && Number.isInteger(e.n)) job.turn.parts.push({t: "image", n: e.n, task: job.task});
+          else if (e && (e.t === "text" || e.t === "tool" || e.t === "ship")) job.turn.parts.push(e);
+        });
         if (typeof d.next === "number" && d.next > job.after) job.after = d.next;   // never back: a portal that was just rebuilt holds fewer events than this page has
         store.set(K.task, JSON.stringify({task: job.task, after: job.after}));
       }
