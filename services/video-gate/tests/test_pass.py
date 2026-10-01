@@ -45,6 +45,12 @@ def test_the_pass_scheme_is_pinned_so_the_portal_can_mirror_it():
     assert gate.valid(key, "1800003600.d8383a1cefb72b136b01fb22ff9e87fb", 1800000000)
 
 
+def test_a_pass_lasts_at_most_two_days_in_plain_seconds():
+    assert gate.MAX_PASS_S == 172800                                               # (written out: not derived from the constant under test)
+    assert gate.valid(KEY, gate.sign(KEY, NOW + 172800), NOW)
+    assert not gate.valid(KEY, gate.sign(KEY, NOW + 172801), NOW)
+
+
 def test_a_music_pass_is_not_a_video_pass():
     exp = NOW + 3600
     music = music_sign(HOME_TOKEN, exp)

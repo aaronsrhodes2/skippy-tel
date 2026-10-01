@@ -48,6 +48,7 @@ DIRECT_TABLE = [
     ("aac Main profile (not LC)", MP4, [v(), a(profile="Main")], False),
     ("multichannel mp3", MP4, [v(), a(codec="mp3", channels=6, profile="")], False),
     ("10-bit h264 (BitDepth 10)", MP4, [v(depth=10, pix="yuv420p10le", profile="High 10"), a()], False),
+    ("10-bit by BitDepth alone (profile and pixel format look 8-bit)", MP4, [v(depth=10, pix="yuv420p", profile="High"), a()], False),
     ("10-bit by pixel format only", MP4, [v(depth=None, pix="yuv420p10le"), a()], False),
     ("High 10 profile", MP4, [v(profile="High 10"), a()], False),
     ("4:2:2", MP4, [v(pix="yuv422p", profile="High 4:2:2"), a()], False),
