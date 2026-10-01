@@ -10,7 +10,7 @@ Two modes, picked by request body `mode`:
   - "bypass" → trust the awesomeness (full perms, Opus 4.7)
 
 Plus the private Skippy (workshop_engine.py): POST /workshop, GET /workshop/run/<task>,
-POST /workshop/cancel/<task>. Those need `Authorization: Bearer <SKIPPY_HOME_TOKEN>`
+GET /workshop/runs, POST /workshop/cancel/<task>. Those need `Authorization: Bearer <SKIPPY_HOME_TOKEN>`
 (the same token the home reporter holds), because they run Claude Code with
 full permissions on the repo. Without the token configured they stay shut.
 
@@ -90,6 +90,20 @@ def current_token() -> str:
     if now - _token_cache[0] > 30:
         _token_cache = (now, workshop.home_token())
     return _token_cache[1]
+
+
+def workshop_health() -> dict:
+    """The /health `workshop` block: can the private Skippy take a message right now, and if not, why in words the
+    chat can show. Not ready means no token on this PC, or Claude's sign-in known to be expired (see LoginProbe: an
+    unknown login does not count against it)."""
+    token = bool(current_token())
+    login = WORKSHOP.login()
+    info = {"ready": token and login != "expired", "model": workshop.MODEL, "busy": WORKSHOP.busy(), "login": login}
+    if not token:
+        info["reason"] = "SKIPPY_HOME_TOKEN isn't configured on this PC"
+    elif login == "expired":
+        info["reason"] = "Claude's login on skippy-pc expired: run `claude auth login` there"
+    return info
 
 
 def build_cmd(prompt: str, mode: str) -> list[str]:
@@ -203,8 +217,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"status": "ok", "service": "claude-bridge",
                              "cwd": CWD, "claude": CLAUDE,
                              "awe_model": AWE_MODEL,
-                             "workshop": {"ready": bool(current_token()), "model": workshop.MODEL,
-                                          "busy": WORKSHOP.busy()}})
+                             "workshop": workshop_health()})
+            return
+        if url.path == "/workshop/runs":
+            self._workshop_runs()
             return
         if url.path.startswith("/workshop/run/"):
             self._workshop_run(url)
@@ -249,13 +265,23 @@ class Handler(BaseHTTPRequestHandler):
         body = self._read_body()
         try:
             run = WORKSHOP.start(str(body.get("task") or ""), str(body.get("conv") or ""),
-                                 str(body.get("message") or ""))
+                                 str(body.get("message") or ""), who=str(body.get("who") or ""),
+                                 attach=bool(body.get("attach")))
         except workshop.Busy as exc:
             self._json(409, {"error": "busy", "message": str(exc)})
+        except workshop.UnknownTask:
+            self._json(404, {"error": "unknown_task"})      # a re-attach never starts anything
         except ValueError as exc:
             self._json(400, {"error": "bad_request", "message": str(exc)})
         else:
             self._json(200, {"ok": True, "task": run.task, "done": run.done})
+
+    def _workshop_runs(self) -> None:
+        """Which runs this bridge holds (counts and state only, no text): the reporter compares it with the portal's
+        records every few seconds and repairs any difference."""
+        if not self._workshop_ok():
+            return
+        self._json(200, {"runs": WORKSHOP.listing()})
 
     def _workshop_run(self, url) -> None:
         if not self._workshop_ok():
@@ -332,14 +358,43 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    @staticmethod
+    def _routine_success(fmt, args) -> bool:
+        """True for the access-log line of a SUCCESSFUL (2xx) GET /health, GET /workshop/run/<task> or GET
+        /workshop/runs. The reporter long-polls a run every few seconds and probes /health constantly, so under the
+        supervisor (which appends the bridge's stderr to one log file for months) those lines would be nearly all of
+        it, burying the ones that matter. Failures (401/404/5xx) and every POST are still logged. Only the stdlib's
+        access-line shape ('"%s" %s %s': request line, status, size) is ever skipped: any other line (log_error's
+        too), or a shape that changes, falls through to being logged, so the failure mode is noise, never silence."""
+        if fmt != '"%s" %s %s' or len(args) != 3:
+            return False
+        try:
+            method, target = str(args[0]).split()[:2]
+            status = int(args[1])
+        except ValueError:
+            return False
+        path = target.split("?", 1)[0]
+        return (method == "GET" and 200 <= status < 300
+                and (path in ("/health", "/workshop/runs") or path.startswith("/workshop/run/")))
+
     def log_message(self, fmt, *args):
-        # Silence default per-request stderr noise; print our own line.
+        # Silence default per-request stderr noise; print our own line (minus the routine polls).
+        if self._routine_success(fmt, args):
+            return
         sys.stderr.write(f"[bridge] {self.address_string()} {fmt % args}\n")
 
 
 def main():
     print(f"[bridge] PORT={PORT} CWD={CWD} CLAUDE={CLAUDE} AWE={AWE_MODEL}",
           file=sys.stderr)
+    # Take back the runs saved on disk before the first request, so a restart (a crash, a reboot, the supervisor) keeps
+    # finished runs deliverable and ends the interrupted ones with an error the chat can show. Whatever is wrong with
+    # that directory, the bridge still starts: being reachable matters more than remembering.
+    try:
+        print(f"[bridge] {WORKSHOP.load()} saved run(s) restored from {WORKSHOP.state_dir}", file=sys.stderr)
+    except Exception:  # noqa: BLE001
+        print("[bridge] couldn't restore saved runs; starting without them:", file=sys.stderr)
+        traceback.print_exc()
     # Bind 0.0.0.0 so Docker Desktop's host.docker.internal can reach us.
     # On Windows + Docker Desktop, host-gateway routes container traffic to
     # the host's loopback through a special address; binding to 0.0.0.0
