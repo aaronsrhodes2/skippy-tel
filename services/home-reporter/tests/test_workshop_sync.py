@@ -156,7 +156,8 @@ def test_push_workshop_sends_the_token_and_the_run_and_returns_the_portals_reply
     assert reply == {"have": 0, "stop": False}                          # the portal has nothing: start 3 left a gap
     [call] = portal.fake.calls
     assert call["path"] == f"/home/workshop/{T1}" and call["headers"]["Authorization"] == f"Bearer {TOKEN}"
-    assert json.loads(call["body"]) == {"who": OWNER, "conv": CONV, "start": 3, "events": [ev(3), ev(4)], "state": "running", "error": None}
+    assert json.loads(call["body"]) == {"who": OWNER, "conv": CONV, "start": 3, "events": [ev(3), ev(4)], "state": "running",
+                                        "error": None, "project": ""}
 
 
 def test_push_workshop_returns_none_when_the_portal_doesnt_take_it_and_says_so_once(env, capsys, monkeypatch):
@@ -243,7 +244,7 @@ def test_a_run_still_going_is_always_pushed_even_with_nothing_new_and_handed_to_
     assert sync.sync_once() == {"pushed": [T1], "adopted": [T1], "lost": []}
     assert pushed(portal) == [(2, 0, "running", None)]       # a heartbeat: no event, but it keeps the portal from "stalled"
     assert jobs.accepted == [{"jobs": [{"id": T1, "kind": "workshop", "conv": CONV, "who": OWNER,
-                                        "message": "(re-attach)", "attach": True}]}]
+                                        "message": "(re-attach)", "attach": True, "project": ""}]}]
     jobs.running.add(T1)                                     # now a relay thread streams it
     jobs.accepted.clear()
     sync.sync_once()

@@ -13,8 +13,8 @@ import json
 import re
 from functools import wraps
 
-from flask import (Blueprint, Flask, abort, flash, jsonify, redirect, render_template, request, send_file,
-                   send_from_directory, url_for)
+from flask import (Blueprint, Flask, abort, flash, has_request_context, jsonify, redirect, render_template, request,
+                   send_file, send_from_directory, url_for)
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import access_requests as access_mod
@@ -40,7 +40,9 @@ import spend
 import ratelimit
 import readiness
 import recovery
+import notify as notify_mod
 import recovery_web
+import ship as ship_mod
 import tasks
 import telemetry_web
 import watch
@@ -552,6 +554,17 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     app.register_blueprint(admin)
     admin_panel.init_app(app, vm)          # the per-game Server admin card: admin-only refresh route + template global
     recovery_web.init_app(app, workshop, limiter, github)   # the Admin page's recovery buttons (/admin/recovery/*)
+    ships = ship_mod.ShipWatch(github, app.extensions["recovery"]["runs"])   # the private Skippy's ship card
+    app.extensions["ships"] = ships
+    # Tell the Captain on Discord when a private-Skippy run ends (notify.py: a DM to him only, one per run, switchable).
+    notifier = notify_mod.Notifier(app.config.get("DISCORD_BOT_TOKEN") or "", vm, app.config.get("PORTAL_URL") or "")
+    app.extensions["notifier"] = notifier
+
+    def run_ended(news: dict) -> None:
+        project = workshop.project(news["project"]) or {"name": news["project"]}
+        notifier.finished(news["owner"], news["task"], project["name"], news["request"], news["state"], news["error"],
+                          news["last_text"], news["finished_age_s"], portal_url=request.host_url if has_request_context() else "")
+    workshop.on_final = run_ended
 
     # ── home reporter (services/home-reporter) ─────────────────────────────────
     @app.post("/home/report")
@@ -649,7 +662,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         try:
             return jsonify(workshop.push(task, str(body.get("who") or ""), str(body.get("conv") or ""),
                                          body.get("start"), body.get("events"), str(body.get("state") or ""),
-                                         body.get("error")))
+                                         body.get("error"), str(body.get("project") or ""), body.get("finished_age_s")))
         except ValueError:
             abort(400)
 
@@ -794,7 +807,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             experiments=experiments.EXPERIMENTS, hidden=experiments.hidden(vm), mentat_tools=mentat_tools,
             home=home.status(), music=home.music(), core=core, services=SERVICES,
             workshop_ready=workshop.ready(), workshop_model=home.capability_note("workshop", "model"),
-            workshop_reason=home.capability_reason("workshop"),
+            workshop_reason=home.capability_reason("workshop"), workshop_projects=workshop.projects(),
+            workshop_notify=notifier.enabled(me()), workshop_notify_ready=notifier.configured,
             activity=telemetry_web.activity(app, home),
         )
 
@@ -817,7 +831,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         body = request.get_json(silent=True) or {}
         message = str(body.get("message") or "")
         try:
-            task = workshop.send(me(), str(body.get("conv") or ""), message)
+            task = workshop.send(me(), str(body.get("conv") or ""), message, str(body.get("project") or ""))
         except workshop_mod.Busy as exc:
             return jsonify(error=str(exc)), 409
         except workshop_mod.NotReady as exc:
@@ -844,6 +858,62 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         """The chat's "Check again" (also sent by itself when a run goes quiet): wake skippy-pc's reconciler."""
         body = request.get_json(silent=True) or {}
         return jsonify(workshop.resync(me(), str(body.get("task") or "")))
+
+    @mine.post("/workshop/history")
+    @workshop_call
+    def workshop_history():
+        """Ask skippy-pc for the Conversations list (no `conv`) or one conversation's turns (`conv`). Answers a job id at
+        once; the page polls /workshop/history/result for the answer (skippy-pc picks jobs up within a few seconds)."""
+        body = request.get_json(silent=True) or {}
+        conv = body.get("conv")
+        if not workshop.ready():
+            return jsonify(error="skippy-pc's workshop isn't answering, so the conversations can't be fetched now."), 503
+        try:
+            job = workshop.ask_history(me(), None if conv is None else str(conv))
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        return jsonify(job=job)
+
+    @mine.get("/workshop/image")
+    @auth.admin_required
+    def workshop_image():
+        """A screenshot the private Skippy attached (workshop.py image_event). An <img> can't send the X-Workshop header,
+        so this GET is guarded by the admin login and the owner check only: it changes nothing and serves only bytes
+        that were checked to BE a PNG or JPEG, as that type, with nosniff and a CSP that allows nothing."""
+        found = workshop.image(me(), request.args.get("task", ""), request.args.get("n", type=int, default=-1))
+        if found is None:
+            abort(404)
+        mime, data = found
+        resp = app.response_class(data, mimetype=mime)
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        resp.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+        resp.headers["Content-Disposition"] = "inline; filename=screenshot." + ("png" if mime == "image/png" else "jpg")
+        resp.headers["Cache-Control"] = "private, no-store"
+        return resp
+
+    @mine.post("/workshop/notify")
+    @workshop_call
+    def workshop_notify():
+        """The card's switch: a Discord DM when a run ends, on or off (default on; kept in VM metadata)."""
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body.get("on"), bool):
+            return jsonify(error="on must be true or false"), 400
+        return jsonify(on=notifier.set_enabled(me(), body["on"]), configured=notifier.configured)
+
+    @mine.get("/workshop/ship")
+    @workshop_call
+    def workshop_ship():
+        """The ship card's poll: how the commit a run pushed is doing (ship.py). Only for a commit one of the asker's runs
+        said it pushed: anything else is a 404, so this can't be used to ask GitHub about arbitrary commits."""
+        found = workshop.ship(me(), request.args.get("sha", ""))
+        if found is None:
+            return jsonify(error="unknown commit"), 404
+        return jsonify(ships.status(found, buildinfo.info()["commit"]))
+
+    @mine.get("/workshop/history/result")
+    @workshop_call
+    def workshop_history_result():
+        return jsonify(workshop.history_result(me(), request.args.get("job", "")))
 
     @mine.post("/pair-home")
     @auth.admin_required

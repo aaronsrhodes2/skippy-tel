@@ -112,6 +112,20 @@ elif mode == "orphan":                                # hangs, and a grandchild 
                       "    time.sleep(0.1)\n"])
     out(type="assistant", message={"content": [{"type": "text", "text": "starting"}]})
     beat_forever(os.environ.get("FAKE_HEARTBEAT"))
+elif mode == "say":                                    # one text block, FAKE_SAY verbatim (newlines and all)
+    out(type="assistant", message={"content": [{"type": "text", "text": os.environ.get("FAKE_SAY", "")}]})
+    out(type="result", is_error=False, result="ok", session_id="sess-1")
+elif mode in ("ship", "commit", "ship-fail"):          # commit in the clone it runs in; "ship" also pushes it
+    import subprocess
+    git = lambda *a: subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], capture_output=True)
+    git("commit", "-q", "--allow-empty", "-m", "Make the tile green  token=abc123secret\n\nbody line")
+    if mode != "commit":
+        git("push", "-q", "origin", "HEAD")
+    out(type="assistant", message={"content": [{"type": "text", "text": "Pushed."}]})
+    if mode == "ship-fail":
+        out(type="result", is_error=True, result="then it broke", session_id="sess-1")
+    else:
+        out(type="result", is_error=False, result="Pushed.", session_id="sess-1")
 else:
     out(type="assistant", message={"content": [{"type": "text", "text": "Working on it."},
         {"type": "tool_use", "name": "Bash", "input": {"command": "curl -H 'Authorization: Bearer abcdef123456' http://x"}},

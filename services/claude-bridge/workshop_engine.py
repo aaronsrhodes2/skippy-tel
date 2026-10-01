@@ -26,6 +26,7 @@ every argument goes through cmd.exe):
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import queue
@@ -38,6 +39,7 @@ import time
 from pathlib import Path
 
 import conversation_log
+import projects as projects_mod
 
 MODEL = "claude-opus-5-5"          # Opus, latest, on purpose: nothing else picks it
 REPO = os.getenv("WORKSHOP_REPO", r"D:\Aaron\development\SkippyTel-workshop")
@@ -65,8 +67,10 @@ MAX_RUN_S = 2 * 3600.0             # a run still going after this long is stoppe
 IDLE_S = 30 * 60.0                 # ... and so is one that printed nothing for this long (a long test run is silent for minutes, not half an hour)
 WATCH_TICK_S = 0.5                 # how often the run's thread looks at the clock (and at Stop) while claude is quiet
 REAP_S = 30.0                      # how long a process that has closed its output, or been killed, gets to exit before it is killed again
+SHIP_GIT_TIMEOUT = 30              # each git call of the ship check (a fetch included): it runs as the run ends
 _CONV = re.compile(r"[A-Za-z0-9-]{8,64}")
 _TASK = re.compile(r"[a-f0-9]{8,32}")
+_SHA = re.compile(r"[0-9a-f]{40}")
 
 # Secrets that might appear in a command line the agent runs; the chat shows commands, never their output.
 _SECRETS = re.compile(
@@ -125,6 +129,42 @@ def tool_detail(name: str, args: dict) -> str:
     return ""
 
 
+MAX_IMAGES = 3                     # screenshots one run may attach
+MAX_IMAGE_BYTES = 400_000
+_IMAGE_LINE = re.compile(r"^[ \t]*`?SKIPPY_IMAGE:[ \t]*(\S[^\n`]*?)[ \t]*`?[ \t]*$", re.M)
+
+
+def split_images(text: str) -> tuple[str, list[str]]:
+    """An assistant text block without its `SKIPPY_IMAGE: <path>` lines, and those paths (see _attach_images)."""
+    paths = [m.group(1).strip().strip("\"'") for m in _IMAGE_LINE.finditer(text)]
+    return _IMAGE_LINE.sub("", text).strip(), paths
+
+
+def image_mime(data: bytes) -> str | None:
+    """image/png or image/jpeg by the file's own first bytes (never by its name), else None."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    return None
+
+
+_BLOCK = re.compile(r"\{\{#(skippytel|other)\}\}\n?(.*?)\{\{/\1\}\}\n?", re.S)
+
+
+def render_prompt(template: str, project) -> str:
+    """workshop_prompt.md for one project: the {{#skippytel}}...{{/skippytel}} block only for a project with SkippyTel's
+    deploy rules, the {{#other}}...{{/other}} block only for the rest (whose own CLAUDE.md says how to test and ship),
+    and the placeholders filled in: {repo} (the agent's clone), {primary} (the Captain's checkout), {project} (its name),
+    {github} (owner/name) and {branch}. A template without blocks is used whole."""
+    kind = "skippytel" if project.deploy == "skippytel" else "other"
+    text = _BLOCK.sub(lambda m: m.group(2) if m.group(1) == kind else "", template)
+    for key, value in (("{repo}", project.clone), ("{primary}", project.primary), ("{project}", project.name),
+                       ("{github}", project.repo), ("{branch}", project.branch)):
+        text = text.replace(key, value)
+    return text
+
+
 def friendly_error(text: str) -> str:
     if text.lower().startswith("failed to authenticate"):
         return ("Claude Code on skippy-pc isn't logged in (its sign-in expired). "
@@ -135,8 +175,13 @@ def friendly_error(text: str) -> str:
 class Run:
     """One chat message being worked on: an append-only list of events, readable while it grows."""
 
-    def __init__(self, task: str, conv: str, message: str, who: str = "", created: float | None = None):
+    def __init__(self, task: str, conv: str, message: str, who: str = "", created: float | None = None,
+                 project: str = projects_mod.DEFAULT):
         self.task, self.conv, self.message, self.who = task, conv, message, who
+        self.project = project                 # which repo (projects.json): picks the clone, the checkout and the session
+        self.clone = ""                        # that project's clone when the run started (the conversation log reads it)
+        self.before_finish = None              # (run) -> None, called once just before the run ends (the ship check)
+        self.image_paths: list[str] = []       # SKIPPY_IMAGE lines the agent printed: screenshots to attach at the end
         self.created = time.time() if created is None else created
         self.events: list[dict] = []
         self.done, self.ok, self.error = False, None, None
@@ -157,6 +202,14 @@ class Run:
         self._changed(False)
 
     def finish(self, ok: bool, error: str | None = None) -> None:
+        # The ship check (Workshop._ship_check) runs here, BEFORE the run reads as done, so its event is part of the run
+        # the relay delivers as final: an event added after "done" could arrive after the chat stopped polling.
+        hook, self.before_finish = self.before_finish, None
+        if hook is not None:
+            try:
+                hook(self)
+            except Exception:  # noqa: BLE001 — proof of a push is a bonus; it must never stop a run from ending
+                pass
         with self._cond:
             self.done, self.ok, self.error, self.finished_at = True, ok, error, time.time()
             self._cond.notify_all()
@@ -173,13 +226,16 @@ class Run:
         with self._cond:
             if wait > 0:
                 self._cond.wait_for(lambda: len(self.events) > after or self.done, timeout=wait)
+            # finished_age_s: how long ago it ended, so a portal hearing of an old run (after a deploy) can tell it from
+            # one that just finished (it notifies the Captain only for the second kind: portal/notify.py)
             return {"events": self.events[after:], "next": len(self.events), "done": self.done,
-                    "ok": self.ok, "error": self.error}
+                    "ok": self.ok, "error": self.error,
+                    "finished_age_s": None if self.finished_at is None else round(max(0.0, time.time() - self.finished_at), 1)}
 
     def snapshot(self) -> dict:
         """Everything worth keeping across a bridge restart. The message text is not in it: nothing needs it again."""
         with self._cond:
-            return {"task": self.task, "conv": self.conv, "who": self.who, "created": self.created,
+            return {"task": self.task, "conv": self.conv, "who": self.who, "project": self.project, "created": self.created,
                     "finished_at": self.finished_at, "done": self.done, "ok": self.ok, "error": self.error,
                     "events": list(self.events)}
 
@@ -187,7 +243,7 @@ class Run:
         """What GET /workshop/runs says about a run: counts and state, never the message or any event's content."""
         with self._cond:
             finished = self.finished_at
-            return {"task": self.task, "conv": self.conv, "who": self.who, "events": len(self.events),
+            return {"task": self.task, "conv": self.conv, "who": self.who, "project": self.project, "events": len(self.events),
                     "done": self.done, "ok": self.ok, "error": self.error,
                     "age_s": round(max(0.0, now - self.created), 1),
                     "finished_age_s": None if finished is None else round(max(0.0, now - finished), 1)}
@@ -320,7 +376,14 @@ class Workshop:
     def __init__(self, claude_cmd: list[str], repo: str = REPO, primary: str = PRIMARY,
                  sessions: str = SESSIONS, remote: str = REMOTE, prompt_file: Path = PROMPT_FILE,
                  state_dir: str | None = None, max_run_s: float | None = None, idle_s: float | None = None,
-                 conversations: str | None = None):
+                 conversations: str | None = None, projects: dict | None = None):
+        # The projects (projects.py). Without a registry (the tests, and anything built the old way) there is one:
+        # SkippyTel, made from repo/primary/remote as they are at each run, so a test that changes shop.primary is heard.
+        # With one, SkippyTel's entry decides those three.
+        self._projects = dict(projects) if projects else None
+        if self._projects:
+            own = self._projects[projects_mod.DEFAULT]
+            repo, primary, remote = own.clone, own.primary, own.url
         self.claude_cmd, self.repo, self.primary = list(claude_cmd), repo, primary
         self.sessions_path, self.remote, self.prompt_file = sessions, remote, prompt_file
         self.max_run_s = MAX_RUN_S if max_run_s is None else float(max_run_s)      # the watchdog's two limits; tests shorten them
@@ -343,9 +406,35 @@ class Workshop:
         """"ok" | "expired" | "unknown": Claude Code's sign-in on this PC. Never blocks (see LoginProbe)."""
         return self.login_probe.status()
 
+    # ── projects ─────────────────────────────────────────────────────────
+    def project(self, pid: str | None = None) -> projects_mod.Project:
+        """A project by id (KeyError if this bridge has no such project). The default one is SkippyTel."""
+        pid = pid or projects_mod.DEFAULT
+        if self._projects is None:
+            if pid != projects_mod.DEFAULT:
+                raise KeyError(pid)
+            return projects_mod.Project(projects_mod.DEFAULT, "SkippyTel", "aaronsrhodes2/skippy-tel", "main",
+                                        self.primary, self.repo, "skippytel", self.remote)
+        return self._projects[pid]
+
+    def projects(self) -> list[dict]:
+        """Every project, as the portal may see them (no paths): SkippyTel first, then by name."""
+        ids = [projects_mod.DEFAULT] if self._projects is None else list(self._projects)
+        found = [self.project(i) for i in ids]
+        return [p.public() for p in sorted(found, key=lambda p: (p.id != projects_mod.DEFAULT, p.name.lower()))]
+
+    @staticmethod
+    def session_key(project: str, conv: str) -> str:
+        """The sessions file's key: the bare conversation id for SkippyTel (so every conversation from before projects
+        carries on), project-qualified for the rest. A Claude session belongs to the directory it ran in, so the same
+        conversation id under another project must never resume it."""
+        return conv if project == projects_mod.DEFAULT else f"{project}:{conv}"
+
     # ── runs ─────────────────────────────────────────────────────────────
-    def start(self, task: str, conv: str, message: str, who: str = "", attach: bool = False) -> Run:
-        """Begin a task, or re-attach if it's already known. One task at a time.
+    def start(self, task: str, conv: str, message: str, who: str = "", attach: bool = False,
+              project: str = "") -> Run:
+        """Begin a task, or re-attach if it's already known. One task at a time across ALL projects: the chat follows one
+        run, the Captain reviews one outcome at a time, and two runs would race on the shared sessions file.
 
         `attach` says "I only want to follow this task": an unknown one raises UnknownTask and nothing starts, so a
         relay that is re-attaching after a restart can never begin a Claude run (full permissions) by mistake, and
@@ -359,6 +448,11 @@ class Workshop:
         message = (message or "").strip()[:MAX_MESSAGE]
         if not message and not attach:
             raise ValueError("empty message")
+        project = project or projects_mod.DEFAULT
+        try:
+            chosen = self.project(project)
+        except KeyError:
+            raise ValueError("unknown project") from None    # only projects.json names a repo: never a request field
         adopted = None
         with self._lock:
             self._prune()
@@ -371,7 +465,8 @@ class Workshop:
             elif any(not r.done for r in self._runs.values()):
                 raise Busy("Skippy is still working on the last thing")
             else:
-                run = self._runs[task] = Run(task, conv, message, who)
+                run = self._runs[task] = Run(task, conv, message, who, project=project)
+                run.clone = chosen.clone
                 run.on_change = self._changed
         if known is not None:
             if adopted is not None:
@@ -403,6 +498,25 @@ class Workshop:
             runs = sorted(self._runs.values(), key=lambda r: r.created, reverse=True)[:MAX_LISTED]
         now = time.time()
         return [r.summary(now) for r in runs]
+
+    def _live(self, task: str) -> dict | None:
+        """What this bridge holds of a run, for the conversation listing (conversation_log.py): None if it holds none."""
+        run = self._runs.get(task)
+        if run is None:
+            return None
+        got = run.since(0)
+        return {"state": "running" if not got["done"] else ("done" if got["ok"] else "error"),
+                "events": got["events"], "error": got["error"]}
+
+    def conversations(self) -> list[dict]:
+        """The newest conversations, for GET /workshop/conversations (conversation_log.py keeps them)."""
+        return self.convlog.conversations(live=self._live)
+
+    def conversation(self, conv: str) -> dict | None:
+        """One conversation's turns for GET /workshop/conversation/<conv>; None if there is no such conversation."""
+        if not _CONV.fullmatch(conv or ""):
+            return None
+        return self.convlog.conversation(conv, live=self._live)
 
     def cancel(self, task: str) -> bool:
         run = self._runs.get(task)
@@ -520,8 +634,10 @@ class Workshop:
             return None
         who = data.get("who")
         created = data.get("created")
+        project = data.get("project")
         run = Run(task, conv, "", who.strip()[:MAX_WHO] if isinstance(who, str) else "",
-                  float(created) if _is_number(created) else mtime)
+                  float(created) if _is_number(created) else mtime,
+                  project if isinstance(project, str) and projects_mod._ID.fullmatch(project) else projects_mod.DEFAULT)
         run.events = [e for e in events if isinstance(e, dict)][:MAX_EVENTS]
         run.done = data.get("done") is True
         run.ok = data["ok"] if isinstance(data.get("ok"), bool) else None
@@ -549,15 +665,18 @@ class Workshop:
             pass                                   # the next message starts a fresh session; not fatal
 
     # ── the work ─────────────────────────────────────────────────────────
-    def prompt(self) -> str:
-        return self.prompt_file.read_text(encoding="utf-8").replace("{repo}", self.repo).replace("{primary}", self.primary)
+    def prompt(self, project: str | None = None) -> str:
+        return render_prompt(self.prompt_file.read_text(encoding="utf-8"), self.project(project))
 
-    def prompt_path(self) -> Path:
+    def prompt_path(self, project: str | None = None) -> Path:
         """Where the rendered prompt lives: next to the sessions file, so anything that points sessions somewhere (a
-        test's tmp dir) moves it too and nothing but the real bridge writes the real one."""
-        return Path(self.sessions_path).with_name(PROMPT_NAME)
+        test's tmp dir) moves it too and nothing but the real bridge writes the real one. One file per project (each
+        names its own clone and rules); SkippyTel keeps the original name."""
+        pid = self.project(project).id
+        name = PROMPT_NAME if pid == projects_mod.DEFAULT else PROMPT_NAME.replace(".txt", f"-{pid}.txt")
+        return Path(self.sessions_path).with_name(name)
 
-    def write_prompt(self) -> Path:
+    def write_prompt(self, project: str | None = None) -> Path:
         """Render the prompt ({repo}/{primary} filled in) into prompt_path() for `--append-system-prompt-file`, on every
         task, so an edited workshop_prompt.md takes effect on the next message without restarting anything. It is a
         file because a multi-line argument cannot go through claude.cmd (see the module docstring). Raises OSError if
@@ -566,8 +685,8 @@ class Workshop:
         for an antivirus or indexer holding it open to break). It is written in place, not through a temp file and a
         rename: one task runs at a time, so claude is never reading it during this, and a copy torn by a crash
         differs from the rendering and is simply written again."""
-        path = self.prompt_path()
-        data = self.prompt().encode("utf-8")
+        path = self.prompt_path(project)
+        data = self.prompt(project).encode("utf-8")
         try:
             if path.read_bytes() == data:
                 return path
@@ -584,24 +703,31 @@ class Workshop:
                 time.sleep(0.05 * (attempt + 1))       # Windows: "Access is denied" while something holds the file for a moment
         return path
 
-    def _git(self, *args: str, cwd: str | None = None) -> subprocess.CompletedProcess:
+    def _git(self, *args: str, cwd: str | None = None, timeout: float = GIT_TIMEOUT) -> subprocess.CompletedProcess:
         return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", timeout=GIT_TIMEOUT, stdin=subprocess.DEVNULL, env=child_env())
+                              errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, env=child_env())
 
     def _prepare_repo(self, run: Run) -> bool:
-        """Your own clone, on the latest main. False (with the run failed) if there's no clone to work in."""
+        """The project's own clone, on the latest of its branch. False (with the run failed) if there's no clone to work
+        in. A first use clones it (`git clone`, into the registry's `clone` path: never the Captain's checkout)."""
+        project = self.project(run.project)
+        clone = project.clone
         try:
-            if not (Path(self.repo) / ".git").exists():
-                run.emit({"t": "tool", "name": "git", "detail": "cloning the repo for the first time"})
-                out = self._git("clone", self.remote, self.repo)
+            if not (Path(clone) / ".git").exists():
+                if Path(clone).exists() and any(Path(clone).iterdir()):
+                    # Something else lives there: refuse rather than clone into (or over) it.
+                    run.finish(False, f"{clone} exists and isn't a git clone, so I won't work in it")
+                    return False
+                run.emit({"t": "tool", "name": "git", "detail": f"cloning {project.repo} for the first time"})
+                out = self._git("clone", project.url, clone)
                 if out.returncode != 0:
                     run.finish(False, "couldn't clone the repo: " + redact(out.stderr.strip())[:300])
                     return False
                 return True
-            if self._git("status", "--porcelain", cwd=self.repo).stdout.strip():
+            if self._git("status", "--porcelain", cwd=clone).stdout.strip():
                 run.emit({"t": "text", "text": "(my clone has uncommitted changes from an earlier task, so I'm not pulling)"})
                 return True
-            out = self._git("pull", "--ff-only", cwd=self.repo)
+            out = self._git("pull", "--ff-only", cwd=clone)
             if out.returncode != 0:
                 run.emit({"t": "text", "text": "(couldn't fast-forward my clone: " + redact(out.stderr.strip())[:200] + ")"})
         except (OSError, subprocess.SubprocessError) as exc:
@@ -609,7 +735,7 @@ class Workshop:
             return False
         return True
 
-    def command(self, session: str | None) -> list[str]:
+    def command(self, session: str | None, project: str | None = None) -> list[str]:
         """The claude command line. Every element is a single line (see the module docstring): the prompt is a FILE
         (write_prompt() makes it; _work does that before every run) and the message goes by stdin.
 
@@ -617,11 +743,14 @@ class Workshop:
         request and sends that record on every resume, whatever a later launch passes (measured here on 2.1.285: a
         resumed session ignored a changed prompt file). Left on, a conversation that began before this fix would keep
         the old one-line prompt, and an edit to workshop_prompt.md would not reach a chat already under way. Off, the
-        file is read fresh on every request, so the Captain's rules are always the current ones."""
+        file is read fresh on every request, so the Captain's rules are always the current ones.
+
+        --add-dir is the project's primary checkout (the Captain's): readable, and for SkippyTel the place a skippy-pc
+        service is deployed from. The working directory (the clone) is set by _spawn."""
         cmd = [*self.claude_cmd, "-p", "--output-format", "stream-json", "--verbose",
                "--model", MODEL, "--dangerously-skip-permissions",
-               "--append-system-prompt-file", str(self.prompt_path()), "--system-prompt-snapshot", "off",
-               "--add-dir", self.primary]
+               "--append-system-prompt-file", str(self.prompt_path(project)), "--system-prompt-snapshot", "off",
+               "--add-dir", self.project(project).primary]
         if session:
             cmd += ["--resume", session]
         return self._one_line_each(cmd)
@@ -636,31 +765,92 @@ class Workshop:
                 raise ValueError(f"an argument contains a newline ({arg[:40]!r}), which cmd.exe would cut the command line at")
         return argv
 
-    def _spawn(self, argv: list[str]) -> subprocess.Popen:
+    def _spawn(self, argv: list[str], cwd: str | None = None) -> subprocess.Popen:
         """Start claude (or whatever `argv` is) the one way this module does it: no newline in any argument, the
         clone as the working directory, a pipe each way, the child_env() environment, and on POSIX its own process
         group so the whole tree can be killed. The Windows test runs the real claude.cmd through exactly this."""
         extra = {"start_new_session": True} if sys.platform != "win32" else {}
-        return subprocess.Popen(self._one_line_each(argv), cwd=self.repo, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        return subprocess.Popen(self._one_line_each(argv), cwd=cwd or self.repo, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
                                 env=child_env(), bufsize=1, **extra)
+
+    def _head(self, clone: str) -> str | None:
+        out = self._git("rev-parse", "HEAD", cwd=clone, timeout=SHIP_GIT_TIMEOUT)
+        sha = out.stdout.strip() if out.returncode == 0 else ""
+        return sha if _SHA.fullmatch(sha) else None
+
+    def _ship_check(self, run: Run, before: str | None) -> None:
+        """Did this run push? Its clone's HEAD moved and origin's branch now contains the new HEAD: then the run says so
+        with one `ship` event the chat turns into a ship card (the deploy's progress, then proof it is live). A commit
+        that was not pushed says nothing: the agent's own words cover that. Everything here is read-only git, short
+        timeouts, and any failure just means no card."""
+        project = self.project(run.project)
+        clone = project.clone
+        after = self._head(clone)
+        if after is None or after == before:
+            return
+        self._git("fetch", "--quiet", "origin", project.branch, cwd=clone, timeout=SHIP_GIT_TIMEOUT)    # best effort
+        if self._git("merge-base", "--is-ancestor", after, f"refs/remotes/origin/{project.branch}",
+                     cwd=clone, timeout=SHIP_GIT_TIMEOUT).returncode != 0:
+            return
+        subject = self._git("log", "-1", "--format=%s", after, cwd=clone, timeout=SHIP_GIT_TIMEOUT).stdout
+        subject = " ".join(redact(subject).split())[:200]
+        workflow = next((name for name in ("deploy.yml", "deploy.yaml")
+                         if (Path(clone) / ".github" / "workflows" / name).is_file()), "")
+        run.emit({"t": "ship", "project": project.id, "repo": project.repo, "branch": project.branch, "sha": after,
+                  "subject": subject, "workflow": workflow})
+
+    def _attach_images(self, run: Run) -> None:
+        """The screenshots the agent asked to show (`SKIPPY_IMAGE: <path>`), as `image` events under its answer. Only a
+        file inside this run's project clone (where tools/workshop_screenshot.py writes), at most MAX_IMAGES, each a real
+        PNG or JPEG (by its first bytes) of at most MAX_IMAGE_BYTES: anything else is skipped with a short note, so a
+        path the agent got wrong can never send some other file off this PC."""
+        clone = os.path.realpath(self.project(run.project).clone)
+        for raw in run.image_paths[:MAX_IMAGES]:
+            path = os.path.realpath(raw if os.path.isabs(raw) else os.path.join(clone, raw))
+            name = os.path.basename(path)[:80]
+            try:
+                inside = os.path.commonpath([clone, path]) == clone
+            except ValueError:                         # another drive
+                inside = False
+            data = b""
+            if inside and os.path.isfile(path) and os.path.getsize(path) <= MAX_IMAGE_BYTES:
+                with open(path, "rb") as f:
+                    data = f.read(MAX_IMAGE_BYTES + 1)
+            mime = image_mime(data)
+            if not inside or mime is None or len(data) > MAX_IMAGE_BYTES:
+                run.emit({"t": "text", "text": f"(couldn't attach the screenshot {name}: it must be a PNG or JPEG of at "
+                                                f"most {MAX_IMAGE_BYTES // 1000} KB inside my clone)"})
+                continue
+            run.emit({"t": "image", "mime": mime, "name": name, "b64": base64.b64encode(data).decode("ascii")})
 
     def _work(self, run: Run) -> None:
         try:
             if not self._prepare_repo(run):
                 return
             try:
-                self.write_prompt()
+                before = self._head(self.project(run.project).clone)
+            except (OSError, subprocess.SubprocessError):
+                before = None
+            def at_end(r: Run) -> None:                # each on its own: a failed ship check must not lose the screenshot
+                for step in (lambda: self._ship_check(r, before), lambda: self._attach_images(r)):
+                    try:
+                        step()
+                    except Exception:  # noqa: BLE001
+                        pass
+            run.before_finish = at_end
+            try:
+                self.write_prompt(run.project)
             except OSError as exc:                     # no rules, no run: never start the agent without them
-                run.finish(False, f"couldn't write my instructions file ({self.prompt_path()}): {exc}"[:300])
+                run.finish(False, f"couldn't write my instructions file ({self.prompt_path(run.project)}): {exc}"[:300])
                 return
-            session = self._sessions().get(run.conv)
+            session = self._sessions().get(self.session_key(run.project, run.conv))
             self._attempt(run, session)
         except Exception as exc:  # noqa: BLE001 — a crash must end the run, or the chat waits forever
             run.finish(False, f"the bridge hit a snag: {exc}"[:300])
         finally:
             # How it ended, and a fresh copy of Claude Code's whole transcript (the session id is known by now).
-            self.convlog.finished(run, self._sessions().get(run.conv))
+            self.convlog.finished(run, self._sessions().get(self.session_key(run.project, run.conv)))
 
     @staticmethod
     def _feed(proc: subprocess.Popen, message: str) -> None:
@@ -711,7 +901,7 @@ class Workshop:
             run.finish(False, "stopped")
             return
         try:
-            proc = self._spawn(self.command(session))
+            proc = self._spawn(self.command(session, run.project), cwd=self.project(run.project).clone)
         except (OSError, ValueError) as exc:           # FileNotFoundError, a refused argument ...
             run.finish(False, f"can't start Claude Code: {exc}")
             return
@@ -755,9 +945,13 @@ class Workshop:
                 for block in (evt.get("message") or {}).get("content") or []:
                     if block.get("type") == "text" and (block.get("text") or "").strip():
                         produced = True
+                        said, shots = split_images(block["text"])
+                        run.image_paths.extend(shots)          # attached when the run ends (see _attach_images)
+                        if not said:
+                            continue
                         if pending is not None:
                             run.emit({"t": "text", "text": pending})
-                        pending = block["text"].strip()[:MAX_TEXT]
+                        pending = said[:MAX_TEXT]
                     elif block.get("type") == "tool_use":
                         produced = True
                         if pending is not None:
@@ -795,7 +989,7 @@ class Workshop:
         if pending is not None:
             run.emit({"t": "text", "text": pending})
         if seen_session:
-            self._remember(run.conv, seen_session)
+            self._remember(self.session_key(run.project, run.conv), seen_session)
         if proc.returncode not in (0, None):
             run.finish(False, f"Claude Code exited with code {proc.returncode}")
         else:

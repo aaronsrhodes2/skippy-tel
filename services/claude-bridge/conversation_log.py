@@ -29,6 +29,15 @@ from pathlib import Path
 ROOT = os.getenv("WORKSHOP_CONVERSATIONS", r"D:\Aaron\conversations\private-skippy")
 CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
 _SAFE = re.compile(r"[^A-Za-z0-9-]")
+INDEX_SUFFIX = ".turns.json"          # <YYYY-MM-DD>_<conv>.turns.json: the turns index (see ConversationLog._index)
+DEFAULT_PROJECT = "skippytel"
+MAX_TURNS = 200                       # turns one conversation's index keeps (the Markdown keeps everything)
+MAX_TURN_EVENTS = 400                 # events one turn keeps there (the last ones: the answer is at the end)
+MAX_MESSAGE = 8000
+MAX_EVENT_TEXT = 4000
+MAX_LISTED = 50
+MAX_CONVERSATION_BYTES = 600_000      # one conversation as the bridge sends it (the portal takes 1 MB per request)
+_CONV_ID = re.compile(r"[A-Za-z0-9-]{8,64}")
 
 
 def claude_project_dir(repo: str, projects: Path = CLAUDE_PROJECTS) -> Path:
@@ -42,11 +51,17 @@ def _stamp(t: float) -> str:
 
 
 def _event_md(event: dict) -> str:
+    if not isinstance(event, dict):
+        return ""
     if event.get("t") == "text":
         return str(event.get("text") or "").strip() + "\n"
     if event.get("t") == "tool":
         detail = str(event.get("detail") or "")
         return f"- `{event.get('name')}`" + (f": `{detail}`" if detail else "") + "\n"
+    if event.get("t") == "image":
+        return f"- showed the screenshot `{str(event.get('name') or '')[:80]}`\n"
+    if event.get("t") == "ship":
+        return f"- shipped `{event.get('sha')}` to {event.get('repo')} {event.get('branch')}: {event.get('subject')}\n"
     return ""
 
 
@@ -89,9 +104,10 @@ class ConversationLog:
         """A message arrived: write it before anything runs, so even a run that never starts is on record."""
         with self._lock:
             self._written[run.task] = 0
-            self._append(self.path(run.conv, run.created),
-                         f"\n---\n\n## The Captain, {_stamp(run.created)}\n\n{str(run.message).strip()}\n\n"
-                         f"### Skippy\n\n")
+            md = self.path(run.conv, run.created)
+            self._append(md, f"\n---\n\n## The Captain, {_stamp(run.created)}\n\n{str(run.message).strip()}\n\n"
+                             f"### Skippy\n\n")
+            self._turn_started(md, run)
 
     def progress(self, run) -> None:
         """New events since the last call (called on every event, so a crash keeps everything said so far)."""
@@ -114,12 +130,14 @@ class ConversationLog:
             ended = _stamp(run.finished_at or self.clock())
             how = "done" if run.ok else f"**ended with an error:** {run.error}"
             self._append(path, f"\n_{ended}, {how}_\n")
+            self._turn_finished(path, run)
         if session:
-            self.copy_session(path, session)
+            # Claude Code files the transcript under the directory it ran in: this run's project clone.
+            self.copy_session(path, session, getattr(run, "clone", "") or self.repo)
 
-    def copy_session(self, md_path: Path, session: str) -> Path | None:
+    def copy_session(self, md_path: Path, session: str, repo: str = "") -> Path | None:
         session = _SAFE.sub("", session)
-        src = claude_project_dir(self.repo, self.projects) / f"{session}.jsonl"
+        src = claude_project_dir(repo or self.repo, self.projects) / f"{session}.jsonl"
         dst = md_path.with_name(f"{md_path.stem}.claude-{session}.jsonl")
         try:
             if src.is_file():
@@ -129,6 +147,177 @@ class ConversationLog:
         except OSError as exc:
             self._warn(f"couldn't copy {src}: {exc}")
         return None
+
+    # ── the turns index: what the chat's Conversations list and a re-opened conversation show ──────────
+    # Why a JSON file beside the Markdown, and not the Markdown itself: the Markdown is for the Captain to read, and
+    # parsing it back would break on the first message that contains a "## " line. The bridge's run records can't serve
+    # either: they are forgotten an hour after a run ends. This file is written twice per message (when it arrives and
+    # when it ends), atomically, from the events the run already cleaned (tool lines carry a command or a path, never
+    # output), so it holds nothing the chat didn't already show.
+    @staticmethod
+    def _index(md: Path) -> Path:
+        return md.with_name(md.stem + INDEX_SUFFIX)
+
+    def _load_index(self, path: Path) -> dict | None:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if not isinstance(data, dict) or not isinstance(data.get("turns"), list) or not isinstance(data.get("conv"), str):
+            return None
+        return data
+
+    def _save_index(self, path: Path, data: dict) -> None:
+        data["turns"] = data["turns"][-MAX_TURNS:]
+        tmp = path.with_name(path.name + ".tmp")
+        for attempt in range(4):
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+                os.replace(tmp, path)          # atomic: the listing never reads half a file
+                return
+            except OSError as exc:
+                if attempt == 3:
+                    self._warn(f"couldn't write {path}: {exc}")
+                    return
+                time.sleep(0.05 * (attempt + 1))   # Windows: "Access is denied" while an indexer holds the file
+
+    def _turn_started(self, md: Path, run) -> None:
+        path = self._index(md)
+        who = str(getattr(run, "who", "") or "")
+        data = self._load_index(path) or {"conv": run.conv, "project": getattr(run, "project", "") or DEFAULT_PROJECT,
+                                          "who": who, "title": title_of(run.message), "started": run.created,
+                                          "turns": []}
+        if not data.get("who") and who:
+            data["who"] = who
+        data["last"] = run.created
+        data["turns"] = [t for t in data["turns"] if isinstance(t, dict) and t.get("task") != run.task]
+        data["turns"].append({"task": run.task, "at": run.created, "message": str(run.message).strip()[:MAX_MESSAGE],
+                              "events": [], "state": "running", "error": None})
+        self._save_index(path, data)
+
+    def _turn_finished(self, md: Path, run) -> None:
+        path = self._index(md)
+        data = self._load_index(path)
+        if data is None:
+            return
+        for turn in data["turns"]:
+            if isinstance(turn, dict) and turn.get("task") == run.task:
+                turn["events"] = clean_events(list(run.events))
+                turn["state"] = "done" if run.ok else "error"
+                turn["error"] = None if run.ok else str(run.error or "")[:500]
+                turn["ended"] = run.finished_at or self.clock()
+                data["last"] = turn["ended"]
+                break
+        else:
+            return
+        self._save_index(path, data)
+
+    def conversations(self, limit: int = MAX_LISTED, live=lambda task: None) -> list[dict]:
+        """The newest `limit` conversations (by last activity), summarised: what GET /workshop/conversations answers.
+        `live(task)` is what the bridge itself holds of a run ({"state", "events", "error"}, or None): a turn the index
+        still calls running takes the bridge's word (it may have ended a moment ago), and one the bridge no longer holds
+        (it restarted mid-run) reads as an error, never as a chat that waits forever."""
+        found = []
+        for path in self.root.glob(f"*{INDEX_SUFFIX}"):
+            data = self._load_index(path)
+            if data is None or not _CONV_ID.fullmatch(data["conv"]):
+                continue
+            turns = [t for t in data["turns"] if isinstance(t, dict)]
+            state = _turn_state(turns[-1], live) if turns else "empty"
+            found.append({"conv": data["conv"], "project": _text(data.get("project"), 40) or DEFAULT_PROJECT,
+                          "who": _text(data.get("who"), 200), "title": _text(data.get("title"), 90),
+                          "started": _num(data.get("started")), "last": _num(data.get("last")) or _num(data.get("started")),
+                          "turns": len(turns), "state": state})
+        found.sort(key=lambda c: c["last"] or 0, reverse=True)
+        return found[:limit]
+
+    def conversation(self, conv: str, live=lambda task: None, budget: int = MAX_CONVERSATION_BYTES) -> dict | None:
+        """One conversation's turns for display (GET /workshop/conversation/<conv>), newest turns kept when it is bigger
+        than `budget` bytes of JSON (a reply must fit the portal's 1 MB request limit with room to spare)."""
+        if not _CONV_ID.fullmatch(conv or ""):
+            return None
+        for path in self.root.glob(f"*_{conv}{INDEX_SUFFIX}"):
+            data = self._load_index(path)
+            if data is None or data["conv"] != conv:
+                continue
+            turns = []
+            for t in (t for t in data["turns"] if isinstance(t, dict)):
+                events, error = t.get("events") if isinstance(t.get("events"), list) else [], t.get("error")
+                held = live(str(t.get("task") or "")) if t.get("state") == "running" else None
+                if held:                                   # still on the bridge: its events are the current ones
+                    events, error = held.get("events") or [], held.get("error")
+                turns.append({"task": _text(t.get("task"), 32), "at": _num(t.get("at")),
+                              "message": _text(t.get("message"), MAX_MESSAGE), "events": clean_events(events),
+                              "state": _turn_state(t, live), "error": _text(error, 500) or None})
+            out = {"conv": conv, "project": _text(data.get("project"), 40) or DEFAULT_PROJECT,
+                   "who": _text(data.get("who"), 200), "title": _text(data.get("title"), 90), "turns": turns,
+                   "trimmed": 0}
+            while len(json.dumps(out)) > budget and len(out["turns"]) > 1:
+                out["turns"].pop(0)
+                out["trimmed"] += 1
+            return out
+        return None
+
+
+def title_of(message: str) -> str:
+    """A conversation's title: its first message on one line, cut to about 80 characters."""
+    text = " ".join(str(message or "").split())
+    return text if len(text) <= 80 else text[:79].rstrip() + "…"
+
+
+def _text(value, limit: int) -> str:
+    return str(value)[:limit] if isinstance(value, str) else ""
+
+
+def _num(value) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _turn_state(turn: dict, live) -> str:
+    state = turn.get("state")
+    if state == "running":
+        held = live(str(turn.get("task") or ""))
+        # The bridge's word when it still holds the run; none means it restarted mid-run (or forgot it): over, not waiting.
+        state = held.get("state") if isinstance(held, dict) else "error"
+    return state if state in ("running", "done", "error") else "error"
+
+
+def clean_events(events: list) -> list[dict]:
+    """The events a turn keeps: text and tool lines only, cut to size, the last MAX_TURN_EVENTS."""
+    out = []
+    for e in events[-MAX_TURN_EVENTS:]:
+        if not isinstance(e, dict):
+            continue
+        if e.get("t") == "text" and isinstance(e.get("text"), str):
+            out.append({"t": "text", "text": e["text"][:MAX_EVENT_TEXT]})
+        elif e.get("t") == "tool" and isinstance(e.get("name"), str):
+            out.append({"t": "tool", "name": e["name"][:40], "detail": str(e.get("detail") or "")[:200]})
+        elif ship_event(e):
+            out.append(ship_event(e))
+        elif e.get("t") == "image":            # the picture itself stays out of the index: a line saying it was there
+            out.append({"t": "text", "text": f"(a screenshot was shown here: {str(e.get('name') or '')[:80]})"})
+    return out
+
+
+_SHIP_SHA = re.compile(r"[0-9a-f]{40}")
+_SHIP_REPO = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}")
+_SHIP_PROJECT = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
+_SHIP_BRANCH = re.compile(r"[A-Za-z0-9._/-]{1,100}")
+
+
+def ship_event(e) -> dict | None:
+    """A `ship` event (the run pushed this commit), exactly in its shape, or None."""
+    if not isinstance(e, dict) or e.get("t") != "ship":
+        return None
+    fields = {k: e.get(k) for k in ("project", "repo", "branch", "sha", "subject", "workflow")}
+    if not all(isinstance(v, str) for v in fields.values()):
+        return None
+    if not (_SHIP_PROJECT.fullmatch(fields["project"]) and _SHIP_REPO.fullmatch(fields["repo"])
+            and _SHIP_BRANCH.fullmatch(fields["branch"]) and _SHIP_SHA.fullmatch(fields["sha"])
+            and fields["workflow"] in ("", "deploy.yml", "deploy.yaml")):
+        return None
+    return {"t": "ship", **fields, "subject": " ".join(fields["subject"].split())[:200]}
 
 
 # ── backfill: what Claude Code still holds from before this existed ──────────

@@ -13,7 +13,7 @@ import workshop_engine as engine
 from bridge_testkit import finish, make_door, make_shop, saved, wait_for
 
 BODY = {"task": "aaaaaaaa", "conv": "conv-12345678", "message": "a message that must not be written to disk"}
-FIELDS = {"task", "conv", "who", "created", "finished_at", "done", "ok", "error", "events"}
+FIELDS = {"task", "conv", "who", "project", "created", "finished_at", "done", "ok", "error", "events"}
 
 
 def write_run(shop, task, *, done, finished_ago=None, age=None, who="c@example.com", events=None, error=None, ok=None):

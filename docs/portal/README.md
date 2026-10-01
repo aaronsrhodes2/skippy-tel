@@ -167,6 +167,49 @@ browser <── poll /me/workshop/events ── portal <── POST /home/worksh
                                                                                     claude -p (Opus) in its own clone
 ```
 
+- **Every project, not just SkippyTel.** `services/claude-bridge/projects.json` (checked by `projects.py` at bridge start)
+  lists the Captain's repos: SkippyTel plus every repo directly under `D:\Aaron\development` whose origin is
+  `github.com/aaronsrhodes2/...` (zPhone left out: shelved; quarksum and toh-silly left out: older checkouts of sigma-ground
+  and remnant-silly). Each has its own working clone `D:\Aaron\development\<name>-workshop`, made by `git clone` on first
+  use and never the Captain's checkout (the registry refuses a clone that is, or is inside, any checkout), and the
+  checkout itself is only passed with `--add-dir`. The card's picker shows the open conversation's project (fixed once it has
+  a message); **New chat** asks which project the next one is for. The prompt (`workshop_prompt.md`) keeps SkippyTel's
+  deploy rules for SkippyTel only; for any other project the rule is that repo's own CLAUDE.md, else run its tests, push to
+  its branch (solo repos, Platinum 17) and say plainly what was not deployed. Still one run at a time across all projects.
+  Sessions are kept per project (SkippyTel keeps the bare conversation id, so older chats carry on).
+- **Conversations.** The **Conversations** button lists the newest 50 (title = the first message, project, how many
+  messages, when, "working now"); tap one to read it and carry on in it (a turn still running is followed live). The bridge
+  keeps a turns index beside each conversation's Markdown in `D:\Aaron\conversations\private-skippy`
+  (`<date>_<conv>.turns.json`: his messages, Skippy's text and tool lines, how each ended) and serves it on `GET
+  /workshop/conversations` and `GET /workshop/conversation/<conv>` (home token); the portal asks for them as home jobs
+  (`workshop_conversations`, `workshop_conversation`) and shows only the asker's own.
+- **Proof it's live (the ship card).** When a run ends, the bridge compares its clone's HEAD with where it started and
+  whether `origin/<branch>` now contains it; if the run pushed, its last event is `{"t":"ship", project, repo, branch,
+  sha, subject, workflow}` (strictly checked by the portal's `ship_event`). The answer shows a card that polls
+  `GET /me/workshop/ship?sha=` every 10 s until final (`portal/ship.py`; only for a commit one of your own runs pushed):
+  for SkippyTel, that commit's deploy run (one new read-only call on the recovery client's allow-list: deploy runs by
+  `head_sha`) as tests → build → deploy, green only when `/version`'s commit is that sha (or a later deploy that contains it
+  is live), red with the run's link and **Roll back** (Admin page) when it failed. Other projects: the commit link and
+  "pushed (no deploy pipeline here)", or a link to their deploy workflow (the portal's token reads skippy-tel only).
+- **Tell me when it's done (Discord).** When a run the portal saw going ends (done, failed, stopped, or done on a question
+  for you), `portal/notify.py` sends the Captain one Discord DM through the portal's bot: project, the first words of the
+  request, the outcome, and the link to `/me` (at most 200 characters; never code, the agent's text or the error; pings
+  nobody). Only the Captain: `DISCORD_CAPTAIN_ID` in the VM settings, else the owner of `DISCORD_GUILD_ID`'s server. Once
+  per run: only when a record this process held as queued/running becomes final, never for a run that ended over 10 min
+  ago (the reporter sends `finished_age_s` with a finished run, and a record a fresh portal rebuilds from an already
+  finished run never notifies). The card's **Discord me when done** switch (default on) is kept in VM metadata
+  `portal-workshop-notify`. Discord trouble is swallowed and logged once per kind.
+- **Show me the result (screenshots).** After a pushed change to `portal/templates` or `portal/static`, the prompt has
+  the agent run `python tools/workshop_screenshot.py me --out .skippy-shots/me.png` (the checkout's portal with
+  `portal/tests`' fakes, a scratch admin session signed with a random key, served on 127.0.0.1 only, shot at phone size by
+  a headless Chrome or Edge already on the PC; it installs nothing and exits 3 without one) and print
+  `SKIPPY_IMAGE: .skippy-shots/me.png` on its own line (`.skippy-shots/` is git-ignored). The bridge strips that line and,
+  as the run ends, attaches the file as `{"t":"image", mime, name, b64}` only if it is inside the project's clone, at most
+  400 KB and really a PNG or JPEG by its first bytes (3 per run). The reporter keeps each push under 700 KB of JSON. The
+  portal checks it again (`image_event`), keeps it in memory for its owner (3 per task, 40 in all), puts
+  `{"t":"image","n"}` in the chat and serves the bytes from `GET /me/workshop/image?task=&n=` as that type with
+  `nosniff` and a CSP that allows nothing; the card shows it under the answer. A portal deploy forgets them (the card says
+  so), and a reopened conversation shows a line where one was.
 - **A portal deploy doesn't lose the conversation.** History and progress live on
   skippy-pc (the bridge keeps every event and one Claude session per conversation);
   the reporter tells the portal what it has, and a redeployed portal replies "I hold N

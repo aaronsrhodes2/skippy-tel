@@ -146,7 +146,8 @@ def test_the_first_task_clones_the_repo_and_stop_works_at_any_moment(shop, tmp_p
     fresh = engine.Workshop(shop.claude_cmd, repo=str(tmp_path / "new-clone"), primary="p",
                             sessions=str(tmp_path / "s2.json"), remote=str(shop.origin))
     run = finish(fresh.start("aaaaaaaa", "conv-12345678", "hi"))
-    assert run.ok is True and run.events[0] == {"t": "tool", "name": "git", "detail": "cloning the repo for the first time"}
+    assert run.ok is True and run.events[0] == {"t": "tool", "name": "git",
+                                                "detail": "cloning aaronsrhodes2/skippy-tel for the first time"}
     assert Path(fresh.repo, ".git").exists()
 
 

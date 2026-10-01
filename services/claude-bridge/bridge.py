@@ -32,6 +32,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+import projects as projects_mod
 import workshop_engine as workshop
 
 
@@ -71,7 +72,17 @@ PORT      = int(os.getenv("CLAUDE_BRIDGE_PORT", "9337"))
 CWD       = os.getenv("CLAUDE_BRIDGE_CWD", r"D:\Aaron\development")
 CLAUDE    = _discover_claude()
 
-WORKSHOP  = workshop.Workshop([CLAUDE])
+def _registry():
+    """projects.json, checked; None (SkippyTel only, from workshop_engine's defaults) if it can't be read. A broken
+    registry must not keep the bridge, and with it the Captain's chat, from starting: he can still fix it from SkippyTel."""
+    try:
+        return projects_mod.load()
+    except (OSError, ValueError) as exc:
+        print(f"[bridge] projects.json is unusable ({exc}); only SkippyTel is offered", file=sys.stderr)
+        return None
+
+
+WORKSHOP  = workshop.Workshop([CLAUDE], projects=_registry())
 TOKEN_REREAD_S = 30.0              # how long a token that is held stays unchecked
 TOKEN_RETRY_S = 5.0                # while there is none at all (not mounted yet at logon), look again sooner
 _token_cache: tuple[float, str] = (0.0, "")      # (when it was last looked at, the last NON-EMPTY token seen)
@@ -102,7 +113,8 @@ def workshop_health() -> dict:
     unknown login does not count against it)."""
     token = bool(current_token())
     login = WORKSHOP.login()
-    info = {"ready": token and login != "expired", "model": workshop.MODEL, "busy": WORKSHOP.busy(), "login": login}
+    info = {"ready": token and login != "expired", "model": workshop.MODEL, "busy": WORKSHOP.busy(), "login": login,
+            "projects": WORKSHOP.projects()}         # ids, names and GitHub repos only (no paths): the chat's project picker
     if not token:
         info["reason"] = "SKIPPY_HOME_TOKEN isn't configured on this PC"
     elif login == "expired":
@@ -149,6 +161,12 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/workshop/runs":
             self._workshop_runs()
             return
+        if url.path == "/workshop/conversations":
+            self._workshop_conversations()
+            return
+        if url.path.startswith("/workshop/conversation/"):
+            self._workshop_conversation(url)
+            return
         if url.path.startswith("/workshop/run/"):
             self._workshop_run(url)
             return
@@ -190,7 +208,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             run = WORKSHOP.start(str(body.get("task") or ""), str(body.get("conv") or ""),
                                  str(body.get("message") or ""), who=str(body.get("who") or ""),
-                                 attach=bool(body.get("attach")))
+                                 attach=bool(body.get("attach")), project=str(body.get("project") or ""))
         except workshop.Busy as exc:
             self._json(409, {"error": "busy", "message": str(exc)})
         except workshop.UnknownTask:
@@ -207,6 +225,22 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json(200, {"runs": WORKSHOP.listing()})
 
+    def _workshop_conversations(self) -> None:
+        """The newest 50 conversations, summarised (title, project, when, turns, last state), for the chat's
+        Conversations list. Behind the same token as everything here: titles are the Captain's own words."""
+        if not self._workshop_ok():
+            return
+        self._json(200, {"conversations": WORKSHOP.conversations()})
+
+    def _workshop_conversation(self, url) -> None:
+        """One conversation's turns (his messages, Skippy's text and tool lines), for re-opening it in the chat."""
+        if not self._workshop_ok():
+            return
+        found = WORKSHOP.conversation(url.path.rsplit("/", 1)[1])
+        if found is None:
+            self._json(404, {"error": "unknown_conversation"})
+            return
+        self._json(200, found)
     def _workshop_run(self, url) -> None:
         if not self._workshop_ok():
             return
