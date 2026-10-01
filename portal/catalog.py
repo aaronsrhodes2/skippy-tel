@@ -365,7 +365,8 @@ class Service:
 # Tailscale mesh most of these live on.
 SERVICES: list[Service] = [
     Service("jellyfin", "Jellyfin", "Movies and TV", "http://skippy-pc:8096"),
-    Service("skippytel", "SkippyTel", "Phone recovery + AI inference", "http://skippy-pc:3003/phone"),
+    # (SkippyTel used to be listed here, linking to its /phone recovery page. Skippy core serves
+    # no HTML any more, so there is nothing to open: its data shows in the Core widget instead.)
 ]
 
 
