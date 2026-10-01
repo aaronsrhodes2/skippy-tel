@@ -107,7 +107,9 @@ def test_the_smoke_test_covers_the_reconciler_door_the_public_page_and_the_signe
     run = step(PORTAL, "Smoke test")["run"]
     assert re.search(r'curl -s -m 30 --retry 3 --retry-delay 5 -o /dev/null -w \'%\{http_code\}\' "\$URL/home/workshop"\)', run)
     assert run.count("--retry 3") >= 4                                                    # a flaky 503 must not trigger a rollback
-    assert re.search(r'\[ "\$code" = 401 \] \|\| \{ echo "GET /home/workshop', run)         # exists AND locked
+    # locked (401) once portal/app.py defines the route; 404 tolerated only while it doesn't exist yet
+    assert "grep -q '\"/home/workshop\")' portal/app.py" in run and 'want=401' in run
+    assert re.search(r'\[\[ "\$code" =~ \^\(\$want\)\$ \]\] \|\| \{ echo "GET /home/workshop', run)
     assert '"$URL/privacy"' in run and "curl -fsS" in run.split("/privacy")[0].splitlines()[-1]   # 200 or the step fails
     assert '"$URL/me"' in run and "200|301|302|303|307|308" in run                        # a redirect or the sign-in page, never 5xx
     # what was already checked is still checked
