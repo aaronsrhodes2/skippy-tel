@@ -1,9 +1,14 @@
-# Push-to-deploy. Every push to main (work lands there through pull requests):
-#   1. test     — portal + memory test suites
-#   2. infra    — terraform apply infra/gcp-games (VM, firewall, scripts, compose file)
-#   3. portal   — build the portal image, push it, deploy to Cloud Run, smoke-test it. If the deploy or the smoke
-#                 test fails, ALL traffic goes back to the revision that was serving (the job still ends red).
-#                 By hand, from a phone: the `rollback` workflow (rollback.yml). docs/portal/remote-recovery.md.
+# Push-to-deploy. Every push to main:
+#   test         the suites (run-tests.yml: two parallel jobs, xdist). Needed by infra, mentat and portal.
+#   portal-image builds + pushes the portal image WHILE the tests run (needs only `gate`). An image that later fails
+#                the tests is harmless: nothing deploys it.
+#   portal       needs test + portal-image: notes the serving revision, deploys to Cloud Run, smoke-tests it. If the deploy
+#                or the smoke test fails, ALL traffic goes back to the revision that was serving (the job still ends red).
+#                By hand, from a phone: the `rollback` workflow (rollback.yml). docs/portal/remote-recovery.md.
+#   infra        terraform apply infra/gcp-games (after the tests).
+#   changes + mentat-test + mentat   Mentat is tested and deployed only when something it is built from changed
+#                (tools/ci_changes.py); a manual run always does everything. The portal NEVER waits on these.
+# Pipeline, timings and the needs/if table: docs/cicd.md.
 #
 # Auth is Workload Identity Federation: GitHub's OIDC token for this repo is
 # exchanged for short-lived credentials as skippy-deployer. No key exists.
@@ -39,23 +44,49 @@ env:
 
 jobs:
   test:
+    # The suites live in run-tests.yml (shared with test.yml), as two parallel jobs: everything but flask-api, and flask-api.
+    # This job's result is "success" only when every job inside it succeeded.
+    uses: ./.github/workflows/run-tests.yml
+
+  changes:
+    # Does Mentat need testing and deploying on this run? Answers `mentat=true|false` (tools/ci_changes.py: false only when
+    # it PROVES nothing Mentat is built from differs from the last successful deploy; any doubt, and any manual run, is true).
+    # Nothing that must run `needs` this job except the two Mentat jobs, so a wrong "false" can never stop the portal.
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read      # to ask which deploy run was the last green one
+    outputs:
+      mentat: ${{ steps.decide.outputs.mentat }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: portal/requirements.txt
-      - run: pip install -r portal/requirements.txt pytest pillow pyyaml   # pillow: the favicon test checks the icon sizes; pyyaml: tools/tests parse the workflow files
-      - run: python -m pytest portal/tests memory/tests tools/tests services/home-reporter/tests services/claude-bridge/tests mentat/tests -q
-      # flask-api's tests get their own session (its `app` package and the portal's app.py can't share one) and its own dependencies
-      - run: pip install -r services/flask-api/requirements.txt
-      - run: python -m pytest services/flask-api/tests -q
+      - id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The last SUCCESSFUL deploy of main, not the push's `before`: a cancelled or red run deploys nothing, so
+          # diffing against `before` would lose a Mentat change made in one. Empty (any doubt) means "run everything".
+          base=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy.yml --branch main --status success --limit 1 \
+                   --json headSha --jq '.[0].headSha // empty' 2>/dev/null || true)
+          [[ "$base" =~ ^[0-9a-f]{40}$ ]] || base=""
+          echo "sha=$base" >> "$GITHUB_OUTPUT"
+      - id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ steps.base.outputs.sha }}
+        run: |
+          if ! out=$(python3 tools/ci_changes.py --event "$EVENT" --base "$BASE"); then
+            out="mentat=true"$'\n'"reason=tools/ci_changes.py failed: run everything"
+          fi
+          echo "$out" | tee -a "$GITHUB_OUTPUT"
+          echo "Mentat: $(echo "$out" | tr '\n' ' ')" >> "$GITHUB_STEP_SUMMARY"
 
   mentat-test:
     # Mentat (and Weapon vs. Armor on it) against the pinned sigma-ground, fetched and
     # installed exactly as mentat/Dockerfile does. Catches a SIGMA_GROUND_REF bump that breaks it.
+    # Skipped (with everything that needs it) when `changes` says nothing Mentat is built from moved.
+    needs: [changes]
+    if: needs.changes.outputs.mentat == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -110,8 +141,8 @@ jobs:
     # sigma-ground's physics tools as a public API (mentat/). Runs as the
     # zero-permission skippy-mentat identity from infra/bootstrap; skipped,
     # with a notice, until bootstrap has created it.
-    needs: [test, mentat-test, gate]
-    if: needs.gate.outputs.ready == 'true'
+    needs: [test, mentat-test, changes, gate]
+    if: needs.gate.outputs.ready == 'true' && needs.changes.outputs.mentat == 'true'
     runs-on: ubuntu-latest
     env:
       MENTAT_SA: skippy-mentat@skippy-tel.iam.gserviceaccount.com
@@ -169,8 +200,12 @@ jobs:
             -d '{"weapon": {"type": "kinetic", "mass_kg": 0.0079, "velocity_ms": 715, "radius_m": 0.0038, "material": "steel_mild"}, "armor_layers": [{"material": "ceramic_alumina", "thickness_m": 0.015}], "environment": "atmosphere_earth", "distance_m": 100}' \
             "$URL/wva/solve" | python3 -c "import json,sys; r=json.load(sys.stdin)['result']; print(r['verdict']); assert r['layers']"
 
-  portal:
-    needs: [test, gate]
+  portal-image:
+    # Built while the tests run: it needs only `gate`. Pushing an image that then fails the tests is harmless (the
+    # `portal` job, which deploys it, needs `test`). GIT_SHA / BUILD_TIME are baked in, so a rolled-back revision still
+    # reports the build it really is (GET /version). The layer cache (type=gha) makes a build that changed only portal/
+    # code skip pip install and the sigma-ground download.
+    needs: [gate]
     if: needs.gate.outputs.ready == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -179,12 +214,46 @@ jobs:
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOYER_SA }}
+      # skip_install: the runner image already carries gcloud (this job runs only `gcloud auth configure-docker`); the
+      # action still wires up the credentials. Saves the ~25 s download.
       - uses: google-github-actions/setup-gcloud@v2
+        with:
+          skip_install: true
       - run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+      - uses: docker/setup-buildx-action@v3
+      - id: now
+        run: echo "utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - name: Build and push
-        run: |
-          docker build -f portal/Dockerfile --build-arg SIGMA_GROUND_REF="$SIGMA_GROUND_REF" -t "$IMAGE:$GITHUB_SHA" .
-          docker push "$IMAGE:$GITHUB_SHA"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: portal/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          build-args: |
+            SIGMA_GROUND_REF=${{ env.SIGMA_GROUND_REF }}
+            GIT_SHA=${{ github.sha }}
+            BUILD_TIME=${{ steps.now.outputs.utc }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false      # a plain single-manifest image, as `docker build` made; no attestation index for Cloud Run to choke on
+
+  portal:
+    # Deploys what portal-image built, once the tests are green. Never waits on Mentat.
+    # EVERY step the rollback logic relies on is in THIS job: PREV_REVISION is written to $GITHUB_ENV before the deploy and
+    # read by the failure() step below, and `steps.deploy` is this job's own step.
+    needs: [test, portal-image, gate]
+    if: needs.gate.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SA }}
+      # skip_install: every command below (run services describe / deploy / update-traffic) is in the runner's gcloud.
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          skip_install: true
       - name: Note the revision serving now (the way back if this deploy goes wrong)
         # Recorded BEFORE the deploy, because afterwards "the previous one" can no longer be told apart from "the new one".
         # A new service has none: then there is nothing to roll back to, and a failed first deploy just stays red.

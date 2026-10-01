@@ -7,11 +7,8 @@ WORKDIR /app
 COPY portal/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY portal/ .
-# Shared with the rest of the repo — one source of truth, copied in at build:
-COPY services/flask-api/app/skippy_persona.md ./skippy_persona.md
-COPY infra/gcp-games/discord-notify.py ./discord_notify.py
-
+# Placed BEFORE the portal's own files: it depends only on the pinned ref, so with the layer cache (type=gha in
+# deploy.yml) it is reused on almost every build instead of being re-downloaded after each code change.
 # Experiments (portal/experiments.py): sigma-ground's Radiance viewer and its
 # committed benchmark results, at the same pinned commit as the Mentat service.
 ARG SIGMA_GROUND_REF=a763071b4beb87129f2672624e989a39ef7a1199
@@ -23,6 +20,17 @@ RUN mkdir -p /tmp/sg experiments_static/benchmark \
     && cp /tmp/sg/sigma_ground/mcp/benchmark/results/*_scored.json experiments_static/benchmark/ \
     && rm -rf /tmp/sg /tmp/sg.tar.gz
 
+COPY portal/ .
+# Shared with the rest of the repo — one source of truth, copied in at build:
+COPY services/flask-api/app/skippy_persona.md ./skippy_persona.md
+COPY infra/gcp-games/discord-notify.py ./discord_notify.py
+
 ENV PYTHONUNBUFFERED=1
+# The build's identity, for GET /version and the footer stamp. Last on purpose: these change on every build, so
+# anything placed after them is never served from the layer cache. Baked into the image (not set at deploy) so a
+# rolled-back revision reports the build it really is.
+ARG GIT_SHA=
+ARG BUILD_TIME=
+ENV GIT_SHA=$GIT_SHA BUILD_TIME=$BUILD_TIME
 # Long timeout: a restart waits for the VM to stop (worlds saved) and start.
 CMD exec gunicorn --bind "0.0.0.0:${PORT:-8080}" --workers 1 --threads 8 --timeout 900 app:app
