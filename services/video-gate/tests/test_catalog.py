@@ -201,6 +201,20 @@ def test_jellyfin_down_serves_the_last_good_catalog(fake, make_stack, clock):
     assert r.status_code == 503 and r.get_json() == {"error": "Jellyfin is not answering"}
 
 
+def test_health_asks_jellyfin_at_most_every_five_seconds_however_often_it_is_hit(stack, clock):
+    """/health needs no pass, so anyone can hammer it: it must not turn into a stream of requests to Jellyfin."""
+    for _ in range(30):
+        assert stack.web.get("/health").status_code == 200
+    assert len(stack.fake.calls("/System/Info/Public")) == 1
+    clock.advance(4.9)
+    stack.web.get("/health")
+    assert len(stack.fake.calls("/System/Info/Public")) == 1
+    clock.advance(0.2)
+    stack.web.get("/health")
+    assert len(stack.fake.calls("/System/Info/Public")) == 2
+    assert not stack.fake.calls("/System/Info/Public")[0]["authed"]                  # the probe carries no credentials
+
+
 def test_jellyfin_comes_back(fake, make_stack, clock):
     s = make_stack(fake)
     fake.go_down()
