@@ -5,9 +5,9 @@ SkippyTel's flask-api (in docker) calls it via host.docker.internal.
 That keeps the call on Aaron's Claude Code OAuth subscription instead
 of the metered API key.
 
-Two modes, picked by request body `mode`:
-  - "plan"   → solid gold (read-only planning, default Sonnet)
+POST /solid-gold takes one mode, request body `mode`:
   - "bypass" → trust the awesomeness (full perms, Opus 4.7)
+The read-only "plan" mode (the "solid gold" tier) is gone: it answers 400.
 
 Plus the private Skippy (workshop_engine.py): POST /workshop, GET /workshop/run/<task>,
 GET /workshop/runs, POST /workshop/cancel/<task>. Those need `Authorization: Bearer <SKIPPY_HOME_TOKEN>`
@@ -80,16 +80,28 @@ CLAUDE    = _discover_claude()
 AWE_MODEL = os.getenv("CLAUDE_AWESOMENESS_MODEL", "claude-opus-4-7")
 
 WORKSHOP  = workshop.Workshop([CLAUDE])
-_token_cache: tuple[float, str] = (0.0, "")
+TOKEN_REREAD_S = 30.0              # how long a token that is held stays unchecked
+TOKEN_RETRY_S = 5.0                # while there is none at all (not mounted yet at logon), look again sooner
+_token_cache: tuple[float, str] = (0.0, "")      # (when it was last looked at, the last NON-EMPTY token seen)
+_token_lock = threading.Lock()
 
 
-def current_token() -> str:
-    """The workshop's bearer token, re-read every 30 s so re-pairing home doesn't need a restart here."""
+def current_token(now: float | None = None) -> str:
+    """The workshop's bearer token, re-read every 30 s so re-pairing home doesn't need a restart here.
+
+    The cache keeps the last NON-EMPTY token and a read only replaces it with another non-empty one. The vault .env is
+    on Google Drive (G:), and Drive restarting, pausing or signing out makes the read come back empty; trusting that
+    empty answer used to flip every workshop route to 503 within 30 s, which cut a run in flight off from its relay
+    (R07). The cost of keeping it: a token deleted from the vault stays honoured until the bridge restarts, which is
+    the same trust the bridge already had a minute before the deletion."""
     global _token_cache
-    now = time.time()
-    if now - _token_cache[0] > 30:
-        _token_cache = (now, workshop.home_token())
-    return _token_cache[1]
+    now = time.time() if now is None else now
+    with _token_lock:                  # one reader at a time: two threads must not leave the older answer standing
+        looked_at, held = _token_cache
+        if now - looked_at > (TOKEN_REREAD_S if held else TOKEN_RETRY_S):
+            read = workshop.home_token()
+            _token_cache = (now, read or held)
+        return _token_cache[1]
 
 
 def workshop_health() -> dict:
@@ -106,21 +118,14 @@ def workshop_health() -> dict:
     return info
 
 
-def build_cmd(prompt: str, mode: str) -> list[str]:
-    """Construct the claude CLI invocation for the chosen mode."""
-    base = [
-        CLAUDE, "-p", prompt,
-        "--output-format", "stream-json",
-        "--verbose",
-    ]
-    if mode == "bypass":
-        # trust the awesomeness — full perms, top model
-        base += ["--dangerously-skip-permissions",
-                 "--model", AWE_MODEL]
-    else:
-        # solid gold — read-only planning mode (default model)
-        base += ["--permission-mode", "plan"]
-    return base
+def build_cmd() -> list[str]:
+    """The claude CLI invocation for "trust the awesomeness": full perms, top model.
+
+    The prompt is NOT on the command line: it goes in by stdin (see run_streaming). On Windows `claude` is claude.cmd,
+    cmd.exe cuts a command line at the first newline, and everything after it (--output-format, --model, even
+    --dangerously-skip-permissions) would be dropped: a multi-line prompt used to lose its own flags (R01)."""
+    return [CLAUDE, "-p", "--output-format", "stream-json", "--verbose",
+            "--dangerously-skip-permissions", "--model", AWE_MODEL]
 
 
 def extract_text_chunks(line: str) -> list[str]:
@@ -152,19 +157,21 @@ def extract_text_chunks(line: str) -> list[str]:
     return out
 
 
-def run_streaming(prompt: str, mode: str, write_chunk):
-    """Spawn claude, parse NDJSON stdout, push text deltas via write_chunk."""
-    cmd = build_cmd(prompt, mode)
+def run_streaming(prompt: str, write_chunk):
+    """Spawn claude, feed it the prompt on stdin, parse NDJSON stdout, push text deltas via write_chunk."""
     proc = subprocess.Popen(
-        cmd,
+        build_cmd(),
         cwd=CWD,
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,      # was a pipe nobody read: a chatty stderr would have stalled claude
         text=True,
         encoding="utf-8",
         errors="replace",
+        env=workshop.child_env(),       # no door key in the child's environment, and nothing in it waits for a person
         bufsize=1,  # line-buffered
     )
+    threading.Thread(target=workshop.Workshop._feed, args=(proc, prompt), daemon=True).start()
     try:
         assert proc.stdout is not None
         for line in proc.stdout:
@@ -175,10 +182,10 @@ def run_streaming(prompt: str, mode: str, write_chunk):
     return proc.returncode
 
 
-def run_oneshot(prompt: str, mode: str) -> dict:
+def run_oneshot(prompt: str) -> dict:
     """Synchronous: run claude, collect all text, return as one string."""
     parts: list[str] = []
-    rc = run_streaming(prompt, mode, parts.append)
+    rc = run_streaming(prompt, parts.append)
     return {"output": "".join(parts), "returncode": rc}
 
 
@@ -243,10 +250,10 @@ class Handler(BaseHTTPRequestHandler):
 
     # ── the private Skippy (workshop.py) ─────────────────────────────────
     def _workshop_ok(self) -> bool:
-        """Everything here runs Claude Code (the workshop and /solid-gold, in bypass mode with every permission check
-        skipped, or in plan mode reading the whole tree), so every door wants the home token, and with none
-        configured they all stay shut (Platinum section 19, condition 1). The bridge listens on 0.0.0.0 so Docker can
-        reach it: anything on the network can knock, only the token opens."""
+        """Everything here runs Claude Code (the workshop and /solid-gold, both with every permission check skipped), so
+        every door wants the home token, and with none configured they all stay shut (Platinum section 19,
+        condition 1). The bridge listens on 0.0.0.0 so Docker can reach it: anything on the network can knock, only
+        the token opens."""
         token = current_token()
         if not token:
             self._json(503, {"error": "bridge_disabled",
@@ -304,23 +311,28 @@ class Handler(BaseHTTPRequestHandler):
             return
         body = self._read_body()
         prompt = (body.get("text") or "").strip()
-        mode   = body.get("mode") or "plan"   # 'plan' | 'bypass'
+        mode   = body.get("mode")            # only 'bypass' (trust the awesomeness); named explicitly, never assumed
         stream = bool(body.get("stream"))
 
         if not prompt:
             self._json(400, {"error": "bad_request",
                              "message": "text is required"})
             return
-        if mode not in ("plan", "bypass"):
+        if mode == "plan":
             self._json(400, {"error": "bad_request",
-                             "message": "mode must be 'plan' or 'bypass'"})
+                             "message": "the read-only 'plan' mode (solid gold) was removed; only mode 'bypass' "
+                                        "(trust the awesomeness) is accepted"})
+            return
+        if mode != "bypass":
+            self._json(400, {"error": "bad_request",
+                             "message": "mode must be 'bypass'"})
             return
 
         try:
             if stream:
-                self._stream_text(prompt, mode)
+                self._stream_text(prompt)
             else:
-                result = run_oneshot(prompt, mode)
+                result = run_oneshot(prompt)
                 self._json(200, result)
         except FileNotFoundError as e:
             self._json(503, {"error": "claude_not_found",
@@ -330,7 +342,7 @@ class Handler(BaseHTTPRequestHandler):
             traceback.print_exc()
             self._json(502, {"error": "bridge_error", "message": str(e)})
 
-    def _stream_text(self, prompt: str, mode: str):
+    def _stream_text(self, prompt: str):
         """Stream NDJSON {"text": "..."} lines, one per assistant chunk,
         terminated by {"done": true}. Caller (flask-api client) parses."""
         self.send_response(200)
@@ -344,7 +356,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(payload.encode("utf-8"))
             self.wfile.flush()
 
-        rc = run_streaming(prompt, mode, write_chunk)
+        rc = run_streaming(prompt, write_chunk)
         done = json.dumps({"done": True, "returncode": rc}) + "\n"
         self.wfile.write(done.encode("utf-8"))
         self.wfile.flush()

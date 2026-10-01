@@ -12,13 +12,25 @@ itself keeps the finished ones deliverable and ends the interrupted ones with a 
 The model is hard-coded (MODEL): no environment variable and no request field
 can change it. The agent works in its own clone of the repo (REPO), never the
 Captain's checkout, and keeps one Claude Code session per chat conversation so
-"do the next thing" has the context of the last one. Stdlib only.
+"do the next thing" has the context of the last one.
+
+Two rules about how Claude Code is started, both learned the hard way on Windows (npm's `claude` is claude.cmd, so
+every argument goes through cmd.exe):
+  * NO argument may contain a newline. cmd.exe cuts the command line at the first one, so a multi-line prompt arrived
+    as its first line only and every argument after it (--resume, --add-dir) was silently dropped: the Captain's
+    guardrails were never in force. The prompt now goes in a file (--append-system-prompt-file) and the message goes by
+    stdin; command() and _spawn() refuse an argument with a newline outright.
+  * A run has a clock (MAX_RUN_S, IDLE_S) and its processes can never wait for a person (GIT_TERMINAL_PROMPT=0,
+    GCM_INTERACTIVE=never): nobody is at the PC to answer a credential prompt, and one hung run used to lock the chat
+    until the bridge was restarted. Stdlib only.
 """
 from __future__ import annotations
 
 import json
 import os
+import queue
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -31,6 +43,7 @@ PRIMARY = os.getenv("WORKSHOP_PRIMARY", r"D:\Aaron\development\SkippyTel")
 REMOTE = os.getenv("WORKSHOP_REMOTE", "https://github.com/aaronsrhodes2/skippy-tel.git")
 SESSIONS = os.getenv("WORKSHOP_SESSIONS", os.path.join(os.path.dirname(REPO), ".skippy-workshop-sessions.json"))
 PROMPT_FILE = Path(__file__).with_name("workshop_prompt.md")
+PROMPT_NAME = ".skippy-workshop-prompt.txt"   # the prompt as claude reads it ({repo}/{primary} filled in), next to the sessions file
 ENV_FILES = ("G:/My Drive/vault/.env",)        # where SKIPPY_HOME_TOKEN lives if the environment doesn't have it
 
 MAX_MESSAGE = 8000
@@ -46,6 +59,10 @@ RESTART_ERROR = "The bridge restarted while this was running."
 LOGIN_TTL_S = 120.0                # how long one answer from `claude auth status` is trusted
 LOGIN_TIMEOUT_S = 15.0
 GIT_TIMEOUT = 180
+MAX_RUN_S = 2 * 3600.0             # a run still going after this long is stopped (the watchdog; see Workshop._attempt)
+IDLE_S = 30 * 60.0                 # ... and so is one that printed nothing for this long (a long test run is silent for minutes, not half an hour)
+WATCH_TICK_S = 0.5                 # how often the run's thread looks at the clock (and at Stop) while claude is quiet
+REAP_S = 30.0                      # how long a process that has closed its output, or been killed, gets to exit before it is killed again
 _CONV = re.compile(r"[A-Za-z0-9-]{8,64}")
 _TASK = re.compile(r"[a-f0-9]{8,32}")
 
@@ -174,13 +191,42 @@ class Run:
                     "finished_age_s": None if finished is None else round(max(0.0, now - finished), 1)}
 
 
+def child_env(base=None) -> dict:
+    """The environment of every process this module starts (claude and git): the door's key is never in it, and nothing
+    it runs may wait for a person. Nobody is at the PC to answer a prompt, and Git Credential Manager's sign-in window
+    (credential.helper=manager) would sit there forever with the run hanging on it; with these two a missing
+    credential fails in seconds with a readable error instead."""
+    env = {k: v for k, v in (os.environ if base is None else base).items() if k != "SKIPPY_HOME_TOKEN"}
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GCM_INTERACTIVE"] = "never"
+    return env
+
+
+def _span(seconds: float) -> str:
+    """"2 hours", "30 minutes", "1 second": a duration in the words the chat shows."""
+    s = max(1, int(round(seconds)))
+    if s >= 3600 and s % 3600 == 0:
+        n, unit = s // 3600, "hour"
+    elif s >= 60:
+        n, unit = max(1, round(s / 60)), "minute"
+    else:
+        n, unit = s, "second"
+    return f"{n} {unit}{'' if n == 1 else 's'}"
+
+
 def _kill_tree(proc: subprocess.Popen) -> None:
     """claude starts shells and tools of its own; stop the lot."""
     try:
         if sys.platform == "win32":
             subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=15)
-        else:
-            proc.kill()
+            return
+        try:
+            if os.getpgid(proc.pid) == proc.pid:               # it leads its own group (see Workshop._spawn): take the group
+                os.killpg(proc.pid, signal.SIGKILL)
+                return
+        except OSError:
+            pass
+        proc.kill()
     except Exception:  # noqa: BLE001 — already gone
         pass
 
@@ -271,9 +317,11 @@ class LoginProbe:
 class Workshop:
     def __init__(self, claude_cmd: list[str], repo: str = REPO, primary: str = PRIMARY,
                  sessions: str = SESSIONS, remote: str = REMOTE, prompt_file: Path = PROMPT_FILE,
-                 state_dir: str | None = None):
+                 state_dir: str | None = None, max_run_s: float | None = None, idle_s: float | None = None):
         self.claude_cmd, self.repo, self.primary = list(claude_cmd), repo, primary
         self.sessions_path, self.remote, self.prompt_file = sessions, remote, prompt_file
+        self.max_run_s = MAX_RUN_S if max_run_s is None else float(max_run_s)      # the watchdog's two limits; tests shorten them
+        self.idle_s = IDLE_S if idle_s is None else float(idle_s)
         # Runs are saved next to the sessions file, so anything that points sessions somewhere (a test's tmp dir) moves
         # the runs with it; nothing but the real bridge ever writes to the real directory.
         self.state_dir = str(state_dir or os.path.join(os.path.dirname(sessions), STATE_DIR_NAME))
@@ -489,9 +537,41 @@ class Workshop:
     def prompt(self) -> str:
         return self.prompt_file.read_text(encoding="utf-8").replace("{repo}", self.repo).replace("{primary}", self.primary)
 
+    def prompt_path(self) -> Path:
+        """Where the rendered prompt lives: next to the sessions file, so anything that points sessions somewhere (a
+        test's tmp dir) moves it too and nothing but the real bridge writes the real one."""
+        return Path(self.sessions_path).with_name(PROMPT_NAME)
+
+    def write_prompt(self) -> Path:
+        """Render the prompt ({repo}/{primary} filled in) into prompt_path() for `--append-system-prompt-file`, on every
+        task, so an edited workshop_prompt.md takes effect on the next message without restarting anything. It is a
+        file because a multi-line argument cannot go through claude.cmd (see the module docstring). Raises OSError if
+        the file can't be made current: a run must never start without its rules (Platinum 19), and an old copy of
+        them is not 'current'. A file that already says the right thing is left alone (nothing to write, so nothing
+        for an antivirus or indexer holding it open to break). It is written in place, not through a temp file and a
+        rename: one task runs at a time, so claude is never reading it during this, and a copy torn by a crash
+        differs from the rendering and is simply written again."""
+        path = self.prompt_path()
+        data = self.prompt().encode("utf-8")
+        try:
+            if path.read_bytes() == data:
+                return path
+        except OSError:
+            pass                                       # not there yet
+        for attempt in range(4):
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+                return path
+            except OSError:
+                if attempt == 3:
+                    raise
+                time.sleep(0.05 * (attempt + 1))       # Windows: "Access is denied" while something holds the file for a moment
+        return path
+
     def _git(self, *args: str, cwd: str | None = None) -> subprocess.CompletedProcess:
         return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", timeout=GIT_TIMEOUT)
+                              errors="replace", timeout=GIT_TIMEOUT, stdin=subprocess.DEVNULL, env=child_env())
 
     def _prepare_repo(self, run: Run) -> bool:
         """Your own clone, on the latest main. False (with the run failed) if there's no clone to work in."""
@@ -515,45 +595,137 @@ class Workshop:
         return True
 
     def command(self, session: str | None) -> list[str]:
+        """The claude command line. Every element is a single line (see the module docstring): the prompt is a FILE
+        (write_prompt() makes it; _work does that before every run) and the message goes by stdin.
+
+        --system-prompt-snapshot off: by default Claude Code records the system prompt on a conversation's first
+        request and sends that record on every resume, whatever a later launch passes (measured here on 2.1.285: a
+        resumed session ignored a changed prompt file). Left on, a conversation that began before this fix would keep
+        the old one-line prompt, and an edit to workshop_prompt.md would not reach a chat already under way. Off, the
+        file is read fresh on every request, so the Captain's rules are always the current ones."""
         cmd = [*self.claude_cmd, "-p", "--output-format", "stream-json", "--verbose",
                "--model", MODEL, "--dangerously-skip-permissions",
-               "--append-system-prompt", self.prompt(), "--add-dir", self.primary]
+               "--append-system-prompt-file", str(self.prompt_path()), "--system-prompt-snapshot", "off",
+               "--add-dir", self.primary]
         if session:
             cmd += ["--resume", session]
-        return cmd
+        return self._one_line_each(cmd)
+
+    @staticmethod
+    def _one_line_each(argv: list[str]) -> list[str]:
+        """argv, or ValueError naming the culprit: a newline in an argument is cut off, along with every argument after
+        it, by cmd.exe (the R01 incident), so it must never reach a launch. Nothing today can put one there (the
+        paths come from this PC's configuration, the session id from claude's own output); this is the tripwire."""
+        for arg in argv:
+            if "\n" in arg or "\r" in arg:
+                raise ValueError(f"an argument contains a newline ({arg[:40]!r}), which cmd.exe would cut the command line at")
+        return argv
+
+    def _spawn(self, argv: list[str]) -> subprocess.Popen:
+        """Start claude (or whatever `argv` is) the one way this module does it: no newline in any argument, the
+        clone as the working directory, a pipe each way, the child_env() environment, and on POSIX its own process
+        group so the whole tree can be killed. The Windows test runs the real claude.cmd through exactly this."""
+        extra = {"start_new_session": True} if sys.platform != "win32" else {}
+        return subprocess.Popen(self._one_line_each(argv), cwd=self.repo, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
+                                env=child_env(), bufsize=1, **extra)
 
     def _work(self, run: Run) -> None:
         try:
             if not self._prepare_repo(run):
+                return
+            try:
+                self.write_prompt()
+            except OSError as exc:                     # no rules, no run: never start the agent without them
+                run.finish(False, f"couldn't write my instructions file ({self.prompt_path()}): {exc}"[:300])
                 return
             session = self._sessions().get(run.conv)
             self._attempt(run, session)
         except Exception as exc:  # noqa: BLE001 — a crash must end the run, or the chat waits forever
             run.finish(False, f"the bridge hit a snag: {exc}"[:300])
 
+    @staticmethod
+    def _feed(proc: subprocess.Popen, message: str) -> None:
+        """The message goes in by stdin (never the command line: no length limit, no cmd.exe quoting). In a thread of its
+        own, because a claude that never reads would block this write, and nothing may block the run's clock."""
+        try:
+            proc.stdin.write(message)
+            proc.stdin.close()
+        except (OSError, ValueError):
+            pass
+
+    @staticmethod
+    def _pump(proc: subprocess.Popen, lines: "queue.Queue[str | None]") -> None:
+        """Claude's output, line by line, into `lines`; None at the end. In a thread of its own so that the run's
+        thread waits on a queue with a timeout and not on a pipe that may never speak again."""
+        try:
+            for line in proc.stdout:
+                lines.put(line)
+        except (OSError, ValueError):                  # the pipe was closed under us
+            pass
+        finally:
+            lines.put(None)
+
+    def _over_limit(self, now: float, started: float, last_line: float) -> str | None:
+        """Why this run has to be stopped (in the words the chat shows), or None while it is within its limits."""
+        if now - started > self.max_run_s:
+            return (f"Claude Code was still going after {_span(self.max_run_s)}, so I stopped it. "
+                    "Send the message again, or a smaller one, to carry on.")
+        if now - last_line > self.idle_s:
+            return (f"Claude Code went quiet for {_span(self.idle_s)} (a command or a sign-in prompt may be stuck), "
+                    "so I stopped it. Send the message again to retry.")
+        return None
+
+    @staticmethod
+    def _reap(proc: subprocess.Popen) -> None:
+        """Wait for the process to be gone; one that isn't within REAP_S is killed (tree and all), then waited for again."""
+        try:
+            proc.wait(timeout=REAP_S)
+        except subprocess.TimeoutExpired:
+            _kill_tree(proc)
+            try:
+                proc.wait(timeout=REAP_S)
+            except subprocess.TimeoutExpired:
+                pass                                   # unkillable: the run still ends, the straggler is the OS's problem
+
     def _attempt(self, run: Run, session: str | None) -> None:
         if run.cancelled:
             run.finish(False, "stopped")
             return
-        env ={k: v for k, v in os.environ.items() if k != "SKIPPY_HOME_TOKEN"}   # the agent never gets the key to this door
         try:
-            proc = subprocess.Popen(self.command(session), cwd=self.repo, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                    stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
-                                    env=env, bufsize=1)
-        except FileNotFoundError as exc:
+            proc = self._spawn(self.command(session))
+        except (OSError, ValueError) as exc:           # FileNotFoundError, a refused argument ...
             run.finish(False, f"can't start Claude Code: {exc}")
             return
         run.proc = proc
         if run.cancelled:                     # Stop arrived while it was starting: cancel() found no process to kill
             _kill_tree(proc)
-        try:
-            proc.stdin.write(run.message)
-            proc.stdin.close()
-        except OSError:
-            pass
+        lines: queue.Queue = queue.Queue()
+        threading.Thread(target=self._feed, args=(proc, run.message), daemon=True).start()
+        threading.Thread(target=self._pump, args=(proc, lines), daemon=True).start()
         pending: str | None = None            # the latest text block, held back one event so an error can replace it
         seen_session, failure, produced = None, None, False
-        for line in proc.stdout:
+        # The watchdog (R06): this thread waits on the queue with a short timeout, so it can look at the clock whatever
+        # the process is doing, and at Stop even if a stray grandchild keeps the output pipe open after the kill.
+        tick = max(0.02, min(WATCH_TICK_S, self.idle_s / 4, self.max_run_s / 4))
+        started = last_line = time.monotonic()
+        timed_out: str | None = None
+        while True:
+            now = time.monotonic()
+            if run.cancelled:
+                _kill_tree(proc)
+                break
+            timed_out = self._over_limit(now, started, last_line)
+            if timed_out:
+                _kill_tree(proc)
+                break
+            try:
+                line = lines.get(timeout=tick)
+            except queue.Empty:
+                continue
+            if line is None:
+                break
+            last_line = time.monotonic()
             try:
                 evt = json.loads(line)
             except ValueError:
@@ -577,12 +749,21 @@ class Workshop:
                         run.emit({"t": "tool", "name": name, "detail": tool_detail(name, block.get("input"))})
             elif kind == "result":
                 if evt.get("is_error"):
+                    # The words are in `result`, or (claude 2.1.285 for a session it cannot find) only in `errors`.
+                    # --resume reaches claude now (R01), so that second shape is a real, reachable one.
                     failure = str(evt.get("result") or "")
-        proc.wait()
+                    if not failure and isinstance(evt.get("errors"), list):
+                        failure = "; ".join(str(e) for e in evt["errors"] if e)
+        self._reap(proc)
         if run.cancelled:
             if pending is not None:
                 run.emit({"t": "text", "text": pending})
             run.finish(False, "stopped")
+            return
+        if timed_out:                         # the watchdog ended it: nothing it was doing is trusted, so no session is kept
+            if pending is not None:
+                run.emit({"t": "text", "text": pending})
+            run.finish(False, timed_out)
             return
         if failure is not None:
             if session and re.search(r"no conversation found", failure, re.I) and not produced:

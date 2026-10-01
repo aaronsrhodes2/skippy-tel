@@ -2,9 +2,10 @@
 
 Tiny HTTP service that runs **on the Windows host** (not in docker) and
 shells out to Claude Code CLI. SkippyTel's `flask-api` container calls
-it via `host.docker.internal:9337` so the SkippyTel "solid gold" and
-"trust the awesomeness" tiers use Aaron's Claude Code subscription
+it via `host.docker.internal:9337` so the SkippyTel "trust the awesomeness"
+tier (and the private Skippy's workshop, below) use Aaron's Claude Code subscription
 (via `~/.claude/.credentials.json`) instead of the metered API key.
+(The read-only "solid gold" plan-mode tier was removed; see `POST /solid-gold`.)
 
 ## Why not in docker
 
@@ -34,7 +35,7 @@ Environment overrides (set in the same shell before launch):
 | `CLAUDE_BRIDGE_PORT` | `9337` | Port bound on 0.0.0.0 (covers loopback + host.docker.internal) |
 | `CLAUDE_BRIDGE_CWD` | `D:\Aaron\development` | Working directory `claude -p` runs in |
 | `CLAUDE_PATH` | `claude` | Full path to `claude.cmd`/`claude.exe` if not in PATH |
-| `CLAUDE_AWESOMENESS_MODEL` | `claude-opus-4-7` | Model used by `trust the awesomeness` tier |
+| `CLAUDE_AWESOMENESS_MODEL` | `claude-opus-4-7` | Model used by `trust the awesomeness` tier (`POST /solid-gold`) |
 
 ## Endpoints
 
@@ -50,14 +51,24 @@ against the chat; only a clear "not logged in" does. `ready` is false when the t
 configured or the login is `expired`, and then `workshop.reason` says why in plain words
 (for example "Claude's login on skippy-pc expired: run `claude auth login` there").
 
+The token is re-read from the environment or the vault `.env` (on Google Drive) every 30 s, and
+**the bridge keeps the last non-empty one**: a read that comes back empty (Drive restarting,
+paused, signed out, not mounted yet) never replaces it, so a Drive hiccup cannot flip
+`workshop.ready` to false or turn every route into a 503 under a run in flight. Only another
+non-empty value replaces it (re-pairing home still needs no restart). With none held at all
+(the bridge started before Drive mounted) it looks again every 5 s.
+
 ### `POST /solid-gold`
 ```json
 {
   "text":   "your prompt here",
-  "mode":   "plan" | "bypass",     // plan = solid gold, bypass = trust the awesomeness
+  "mode":   "bypass",              // the only mode: trust the awesomeness (full permissions, Opus)
   "stream": false                  // true → NDJSON, false → single JSON {output, returncode}
 }
 ```
+`mode` must be exactly `"bypass"` (never assumed: it skips every permission check). The read-only
+`"plan"` mode (the "solid gold" tier) was removed and answers `400` with a plain message, as does
+any other or missing mode. The prompt goes to `claude` on **stdin**, not on the command line.
 
 Stream output is NDJSON, one line per chunk:
 ```
@@ -82,6 +93,19 @@ same token (see the note below).
   Captain's checkout. It deploys skippy-pc services from `WORKSHOP_PRIMARY`.
 - **Instructions:** `workshop_prompt.md` (loaded from here, never from a request):
   the ask → change → test → push to main → deploy → verify loop, plus what it must ask first.
+  **It reaches Claude as a file, never as an argument.** On Windows `claude` is npm's `claude.cmd`,
+  and `cmd.exe` cuts a command line at the first newline: when the multi-line prompt was one
+  `--append-system-prompt` argument only its first line arrived and `--resume` and `--add-dir`
+  were dropped with it (so the guardrails were never in force and follow-ups never resumed). Now,
+  on every task, the prompt is rendered (`{repo}`/`{primary}` filled in) into
+  `.skippy-workshop-prompt.txt` next to the sessions file and passed as
+  `--append-system-prompt-file`; the message goes by stdin. **No argument may contain a newline:**
+  the engine refuses to launch one. If the file can't be written the run fails with a plain
+  message instead of starting without its rules. The launch also passes
+  `--system-prompt-snapshot off`: by default Claude Code records the prompt on a conversation's
+  first request and replays that record on every resume, so a chat begun under the old
+  one-line prompt (or before an edit to `workshop_prompt.md`) would keep the stale rules.
+  Needs a `claude` that has both flags (verified on 2.1.285).
 - **Sessions:** one Claude Code session per chat conversation, remembered in
   `.skippy-workshop-sessions.json`, so follow-ups have the context of the last.
 - **Runs:** `POST /workshop {task, conv, message, who?, attach?}` starts one (asking again
@@ -108,10 +132,29 @@ same token (see the note below).
   `GET /workshop/run/*` and `GET /workshop/runs`, which the reporter polls every few
   seconds and which would otherwise fill the log under a supervisor. POSTs and every
   error (4xx/5xx) are always logged.
+- **A run has a clock (the watchdog):** `MAX_RUN_S` (default 2 hours of wall clock) and `IDLE_S`
+  (default 30 minutes without a single line of output; a long test run is silent for minutes, not
+  half an hour). Either one kills the whole process tree (`taskkill /T` on Windows, the process
+  group elsewhere) and finishes the run failed with a plain message ("Claude Code went quiet for
+  30 minutes (a command or a sign-in prompt may be stuck), so I stopped it. Send the message again
+  to retry."). A run that had to be killed is not resumed. Before this, one hung run (a credential
+  prompt with nobody at the PC, a stuck command) kept the bridge Busy, every later message got
+  HTTP 409, and nothing short of restarting the bridge ended it. The limits are constants in
+  `workshop_engine.py`; Stop also works when a stray grandchild still holds the output pipe.
+- **Nothing waits for a person:** `claude` and the engine's own `git` calls run with
+  `GIT_TERMINAL_PROMPT=0` and `GCM_INTERACTIVE=never` (and git with no stdin), so a missing
+  credential fails in about a second with a readable error instead of opening a Git Credential
+  Manager window nobody will click. Neither gets `SKIPPY_HOME_TOKEN` (this door's key).
 - **Login:** if `claude` on this PC isn't signed in, the run fails with a plain
   message; run `claude` in a terminal and use `/login`.
+- **A session that can't be found:** claude 2.1.285 reports it as `{"is_error": true, "errors":
+  ["No conversation found ..."]}` with no `result`; the engine reads both shapes and starts a fresh
+  session (the old, never-delivered `--resume` meant this path used to be unreachable).
 
-Tests: `python -m pytest services/claude-bridge/tests` (a stand-in `claude`, no tokens).
+Tests: `python -m pytest services/claude-bridge/tests` (a stand-in `claude`, no tokens). Two
+Windows-only tests (skipped elsewhere, so CI never sees them) run a whole run through a `.cmd` shim
+and the real `claude.cmd --version` through the engine's own launch path with a multi-line prompt
+file; they are the ones that would have caught the newline truncation.
 
 ## Security note
 
@@ -119,6 +162,7 @@ The bridge listens on `0.0.0.0` (so Docker can reach it) and runs Claude Code, s
 **every** door except `/health` wants `Authorization: Bearer <SKIPPY_HOME_TOKEN>`,
 `/solid-gold` included (it used to take no authentication: closed 2026-09-30,
 `tests/test_solid_gold_auth.py`), and with no token configured they all stay shut (503).
+The token check comes before any input is looked at, so a stranger learns nothing about the rules.
 flask-api's client (`app/clients/claude_bridge.py`) sends the token from its own
 environment, which the vault `.env` fills with the same value. Anything else on the
 network can knock on port 9337 and gets 401.
