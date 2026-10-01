@@ -1047,7 +1047,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             prompt = chat.system_prompt(user["name"], is_admin=admin, page=page,
                                         games=[GAMES[g].name for g in auth.visible_games(user["email"])])
             used: list[str] = []
-            calls: list[tuple] = []       # (tool, arguments, result) for telemetry_web.record_chat: it keeps names and arguments, never results
+            calls: list[tuple] = []       # (tool, arguments, result): kept only if this person allowed saving (below)
 
             def run_tool(name, args):
                 used.append(name)
@@ -1069,7 +1069,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         # One line per reply in Cloud Run's logs: who, which model, which tools (never the text).
         print(json.dumps({"event": "chat", "user": user["email"], "model": model,
                           "tools": used, "mentat_available": mentat_on, "mentat_where": where}), flush=True)
-        telemetry_web.record_chat(message, text, model, calls, forced=force)
+        if body.get("save") is True:             # only when they ticked "Allow us to save your questions"; never by default
+            telemetry_web.record_chat(message, text, model, calls, forced=force)
         return jsonify(reply=text, tools=used, mentat_available=mentat_on, mentat_where=where,
                        media=tools.media)
 

@@ -205,8 +205,7 @@ def test_a_long_chat_message_does_not_freeze_the_portal():
     started = time.perf_counter()
     assert client.post("/chat/send", json={"message": message}).status_code == 200
     assert time.perf_counter() - started < 2.0
-    (ev,) = [e for e in tel.since(tel.boot, 0)["events"] if e["kind"] == "chat"]
-    assert len(ev["detail"]["message"]) <= 4000
+    assert [e for e in tel.since(tel.boot, 0)["events"] if e["kind"] == "chat"] == []   # and nothing of it is kept
 
 
 def test_the_beacons_page_field_of_the_largest_size_it_accepts_does_not_freeze_the_portal():

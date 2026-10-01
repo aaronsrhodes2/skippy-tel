@@ -37,6 +37,8 @@ import threading
 import time
 from pathlib import Path
 
+import conversation_log
+
 MODEL = "claude-opus-5-5"          # Opus, latest, on purpose: nothing else picks it
 REPO = os.getenv("WORKSHOP_REPO", r"D:\Aaron\development\SkippyTel-workshop")
 PRIMARY = os.getenv("WORKSHOP_PRIMARY", r"D:\Aaron\development\SkippyTel")
@@ -317,7 +319,8 @@ class LoginProbe:
 class Workshop:
     def __init__(self, claude_cmd: list[str], repo: str = REPO, primary: str = PRIMARY,
                  sessions: str = SESSIONS, remote: str = REMOTE, prompt_file: Path = PROMPT_FILE,
-                 state_dir: str | None = None, max_run_s: float | None = None, idle_s: float | None = None):
+                 state_dir: str | None = None, max_run_s: float | None = None, idle_s: float | None = None,
+                 conversations: str | None = None):
         self.claude_cmd, self.repo, self.primary = list(claude_cmd), repo, primary
         self.sessions_path, self.remote, self.prompt_file = sessions, remote, prompt_file
         self.max_run_s = MAX_RUN_S if max_run_s is None else float(max_run_s)      # the watchdog's two limits; tests shorten them
@@ -326,6 +329,12 @@ class Workshop:
         # the runs with it; nothing but the real bridge ever writes to the real directory.
         self.state_dir = str(state_dir or os.path.join(os.path.dirname(sessions), STATE_DIR_NAME))
         self.login_probe = LoginProbe(self.claude_cmd)
+        # Every conversation in full, in files the Captain owns (conversation_log.py). The real folder only for the real
+        # bridge: a Workshop pointed at other sessions (a test's tmp dir) keeps its conversations next to them.
+        if conversations is None:
+            conversations = (conversation_log.ROOT if os.path.abspath(sessions) == os.path.abspath(SESSIONS)
+                             else os.path.join(os.path.dirname(sessions), "conversations"))
+        self.convlog = conversation_log.ConversationLog(conversations, repo=self.repo)
         self._runs: dict[str, Run] = {}
         self._lock = threading.Lock()
         self._save_error: str | None = None
@@ -363,14 +372,20 @@ class Workshop:
                 raise Busy("Skippy is still working on the last thing")
             else:
                 run = self._runs[task] = Run(task, conv, message, who)
-                run.on_change = self._save
+                run.on_change = self._changed
         if known is not None:
             if adopted is not None:
                 self._save(adopted, True)
             return known
         self._save(run, True)                          # on disk before any work: a restart then finds it and can say so
+        self.convlog.started(run)                      # the Captain's message is on record before anything runs
         threading.Thread(target=self._work, args=(run,), daemon=True).start()
         return run
+
+    def _changed(self, run: Run, force: bool) -> None:
+        """A run's events changed: save it for a bridge restart, and add the new events to the conversation's file."""
+        self._save(run, force)
+        self.convlog.progress(run)
 
     def adopt(self, run: Run) -> None:
         """Hold a ready-made run (the loader's, and tests'): known to start(), listed, saved from here on."""
@@ -643,6 +658,9 @@ class Workshop:
             self._attempt(run, session)
         except Exception as exc:  # noqa: BLE001 — a crash must end the run, or the chat waits forever
             run.finish(False, f"the bridge hit a snag: {exc}"[:300])
+        finally:
+            # How it ended, and a fresh copy of Claude Code's whole transcript (the session id is known by now).
+            self.convlog.finished(run, self._sessions().get(run.conv))
 
     @staticmethod
     def _feed(proc: subprocess.Popen, message: str) -> None:

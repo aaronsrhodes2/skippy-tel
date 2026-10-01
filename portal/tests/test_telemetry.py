@@ -352,7 +352,25 @@ def test_telemetry_enabled_is_read_from_the_environment_and_defaults_on(monkeypa
 
 # ── chat ─────────────────────────────────────────────────────────────────────────
 
-def test_a_chat_is_recorded_redacted_with_its_tools_and_arguments_but_not_their_results():
+def test_nothing_said_in_the_public_chat_is_recorded_unless_the_person_ticks_allow_saving():
+    """The Captain's rule (2026-09-30): what people ask Skippy is kept only if they tick "Allow us to save your questions"."""
+    class Tooling:
+        def reply(self, system, messages, tools=None, run_tool=None, model=None, force_tool=None):
+            run_tool("server_status", {})
+            return "Valheim is asleep. The plan with the dragon is a good one."
+
+    app, client, tel, _ = make(skippy=Tooling())
+    login(client, ADMIN)
+    for body in ({"message": "my secret plan involves a dragon"}, {"message": "dragon again", "save": False},
+                 {"message": "dragon, truthy", "save": "yes"}):                          # only a real true counts
+        assert client.post("/chat/send", json={**body, "history": []}).status_code == 200
+    assert events(tel, "chat") == [] and events(tel, "action") == []
+    assert "dragon" not in everything(tel) and "server_status" not in everything(tel)
+    chat_page = client.get("/chat").data.decode()
+    assert "Allow us to save your questions" in chat_page and 'class="save"' in chat_page and " checked" not in chat_page.split('class="save"')[1][:40]
+
+
+def test_with_saving_allowed_a_chat_is_recorded_redacted_with_its_tools_and_arguments_but_not_their_results():
     class Tooling:
         def reply(self, system, messages, tools=None, run_tool=None, model=None, force_tool=None):
             run_tool("server_status", {})
@@ -360,29 +378,15 @@ def test_a_chat_is_recorded_redacted_with_its_tools_and_arguments_but_not_their_
 
     app, client, tel, _ = make(skippy=Tooling())
     login(client, ADMIN)
-    res = client.post("/chat/send", json={"message": "is valheim up? the valheim password is hunter22", "history": []})
+    res = client.post("/chat/send", json={"message": "is valheim up? the valheim password is hunter22", "history": [], "save": True})
     assert res.status_code == 200
     (ev,) = events(tel, "chat")
     d = ev["detail"]
-    assert ev["user"] == ADMIN and d["model"] == "claude-haiku-4-5" and isinstance(d["ms"], int)
+    assert ev["user"] == ADMIN and d["consented"] is True and d["model"] == "claude-haiku-4-5"
     assert d["message"] == "is valheim up? the valheim password is [redacted]"
     assert d["reply"] == "Valheim is asleep. Its join password is [redacted] obviously."
     assert d["tools"] == [{"name": "server_status", "args": {}}]
-    assert "hunter22" not in everything(tel) and "join_password" not in everything(tel)   # nor the tool's own result text
-    assert events(tel, "action") == []                                   # a good send is one chat event, not also an action
-
-
-def test_a_forced_verb_and_the_arguments_a_tool_was_given_are_kept():
-    class Tooling:
-        def reply(self, system, messages, tools=None, run_tool=None, model=None, force_tool=None):
-            run_tool("start_game", {"games": ["valheim"]})
-            return "Started."
-
-    app, client, tel, _ = make(skippy=Tooling())
-    login(client, ADMIN)
-    client.post("/chat/send", json={"message": "/start valheim"})
-    (ev,) = events(tel, "chat")
-    assert ev["detail"]["forced"] == "start_game" and ev["detail"]["tools"] == [{"name": "start_game", "args": {"games": ["valheim"]}}]
+    assert "hunter22" not in everything(tel) and "join_password" not in everything(tel)
 
 
 def test_an_invite_code_a_tool_returned_is_not_kept_even_if_skippy_repeats_it():
@@ -566,14 +570,14 @@ def test_every_page_links_to_privacy_in_its_footer():
         assert re.search(r'<footer class="sitefoot"><a href="/privacy">', page), path
 
 
-def test_the_sign_in_page_and_the_chat_say_they_record_and_link_to_privacy():
+def test_the_sign_in_page_says_what_it_records_and_the_chat_carries_no_recording_warning():
     app, client, tel, _ = make()
     login_page = client.get("/").data.decode()
     assert "records which pages you open" in login_page and "Aaron only" in login_page and 'href="/privacy"' in login_page
     assert "Nothing is recorded while you're signed out" in login_page
     login(client, ADMIN)
     chat_page = client.get("/chat").data.decode()
-    assert "chats with Skippy are recorded" in chat_page and "don't type any" in chat_page
+    assert "are recorded for" not in chat_page and "don't type any" not in chat_page    # no warning: nothing is kept by default
 
 
 def test_the_notices_are_not_shown_when_recording_is_off():

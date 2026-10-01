@@ -123,7 +123,7 @@ def _observe(tel, response) -> None:
             tel.record("page", path, *person, endpoint=endpoint, status=status, ms=ms)
         return                                         # a redirect, JSON or a file isn't a page
     if endpoint in CHAT_ENDPOINTS and status < 400:
-        return                                         # record_chat() has it
+        return                                         # never what was said to Skippy: the Captain's rule (2026-09-30)
     fields, values = _fields()
     tel.record("action", endpoint or path, *person, path=path, method=request.method, status=status,
                ok=status < 400, fields=fields, values=values, ms=ms)
@@ -132,9 +132,10 @@ def _observe(tel, response) -> None:
 
 
 def record_chat(message: str, reply: str, model: str, calls, forced: str | None = None):
-    """One event for a message to Skippy and its reply. `calls` is [(tool, arguments, result)]: the tool's name and
-    arguments are kept, its result never is, and any code or password in a result that Skippy then repeated is
-    scrubbed from the reply."""
+    """One event for a message to Skippy and its reply, ONLY for someone who ticked "Allow us to save your questions" on
+    the chat (the caller checks; the Captain's rule, 2026-09-30: nothing said in the chat is kept otherwise). `calls` is
+    [(tool, arguments, result)]: the tool's name and arguments are kept, its result never is, and any code or password
+    in a result that Skippy then repeated is scrubbed from the reply."""
     tel = current_app.extensions["telemetry"]
     try:
         person = who() if tel.enabled else None
@@ -144,7 +145,8 @@ def record_chat(message: str, reply: str, model: str, calls, forced: str | None 
         ms = int((time.perf_counter() - g.get("tel_t0", time.perf_counter())) * 1000)
         return tel.record("chat", "send", *person, message=message,
                           reply=tel_mod.scrub_values(reply, hidden), model=model,
-                          tools=[{"name": name, "args": args} for name, args, _ in calls], ms=ms, forced=forced)
+                          tools=[{"name": name, "args": args} for name, args, _ in calls], ms=ms, forced=forced,
+                          consented=True)
     except Exception:   # noqa: BLE001 — recording must never break the chat
         log.warning("telemetry: chat not recorded", exc_info=True)
         return None

@@ -8,8 +8,6 @@
   <p class="help">Skippy runs on Haiku: quick and cheap.
     Skippy can check the game server, start games{% if is_admin %}, restart it and read its logs{% endif %},
     and hands physics to Mentat{% if is_admin %}, and makes music on your GPU at home{% endif %} — just ask, or open <b>Tools</b> to aim at one (e.g. <code>/physics</code>).</p>
-  {% if telemetry_on %}<p class="help">Your chats with Skippy are recorded for {{ switch_owner }} (secrets are scrubbed, but don't type any).
-    <a href="{{ url_for('privacy') }}">What's recorded</a>.</p>{% endif %}
   <div class="log"></div>
   <details class="verbs">
     <summary>Tools</summary>
@@ -20,6 +18,9 @@
   <form class="ask">
     <textarea rows="2" placeholder="Say something to Skippy" required></textarea>
     <p><button type="submit">Send</button> <button type="button" class="clear">New chat</button></p>
+    {% if telemetry_on %}<label class="help save-ok"><input type="checkbox" class="save" data-tel="chat:allow-save">
+      Allow us to save your questions</label>
+      <span class="help">(off unless you tick it; <a href="{{ url_for('privacy') }}">what that means</a>)</span>{% endif %}
   </form>
 </div>
 <script>
@@ -29,6 +30,13 @@
     const KEY = "skippy-chat";
     const log = root.querySelector(".log"), form = root.querySelector(".ask");
     const msg = form.querySelector("textarea"), sendBtn = form.querySelector("button[type=submit]");
+    // "Allow us to save your questions": off by default, remembered in this browser, sent with each message.
+    // Unticked, the portal keeps nothing of what is said here.
+    const saveBox = form.querySelector("input.save"), SAVE_KEY = "skippy-chat-allow-save";
+    if (saveBox) {
+      try { saveBox.checked = localStorage.getItem(SAVE_KEY) === "yes"; } catch (e) {}
+      saveBox.addEventListener("change", () => { try { localStorage.setItem(SAVE_KEY, saveBox.checked ? "yes" : "no"); } catch (e) {} });
+    }
     let history = [];
     try { history = JSON.parse(sessionStorage.getItem(KEY) || "[]"); } catch (e) { history = []; }
 
@@ -67,7 +75,8 @@
         const res = await fetch("{{ url_for('chat.send') }}", {
           method: "POST", headers: {"Content-Type": "application/json"},
           // `page` lets Skippy know what you're looking at ("this game" = the one on screen).
-          body: JSON.stringify({message: text, history: history, page: location.pathname}),
+          body: JSON.stringify({message: text, history: history, page: location.pathname,
+                                save: !!(saveBox && saveBox.checked)}),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || res.statusText);

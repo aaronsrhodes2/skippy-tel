@@ -7,7 +7,8 @@ page can't drift from the code):
           the form fields and, for a short allow-list (telemetry_web.SAFE_VALUES), their values
           (ids and switches, never text)
   ui      a tap on something marked data-tel (a tile, a demo), sent by the page's own script
-  chat    a message to Skippy and its reply, the model, the tools used (arguments, never results)
+  chat    ONLY with the person's consent (the chat's "Allow us to save your questions" box): the message, the reply,
+          the tools used (arguments, never results)
   error   a signed-in person hit an error page
 Every event carries who did it (their Google email, their role, a random id for that sign-in) and when.
 
@@ -39,25 +40,26 @@ RECORDED = (
                       "fields, their names; and their values only for a short fixed list (which games you ticked, "
                       "an idle-minutes number, which experiment or which music control, a yes/no flag). "
                       "Never passwords, tokens or anything you typed."),
+    ("Your chats with Skippy, only if you allow it", "nothing you say to Skippy is kept unless you tick \"Allow us to save "
+                               "your questions\" under the chat (it is off until you do, and you can untick it any time). "
+                               "With it ticked: what you asked, what Skippy answered, which tools he used and with what "
+                               "arguments. Obvious secrets (API keys, tokens, 'password: …') are scrubbed first."),
     ("Taps on tiles and demos", "which tile or demo you tapped and which page it was on, so the Captain can see "
                                 "what gets used and what doesn't."),
-    ("Your chats with Skippy", "what you said, what Skippy answered, which model and tools were used and with what "
-                               "arguments, and how long it took. Obvious secrets (API keys, tokens, "
-                               "'password: …') are scrubbed first, but don't type secrets into the chat."),
     ("Errors", "when a page you opened failed."),
 )
 NOT_RECORDED = (
     "Your IP address or browser details.",
     "Anything about visitors who aren't signed in, or who signed in with Google but aren't on the list.",
-    "What a tool returned to Skippy (server logs, invite codes): only what Skippy says about it in his reply is "
-    "kept, with invite codes and passwords scrubbed.",
+    "Anything you say to Skippy in the chat, or anything he answers, unless you tick \"Allow us to save your "
+    "questions\". What a tool returned to Skippy is never kept, either way.",
     "The values of server settings, and any password.",
 )
 ALSO = (        # not part of this recording, but true, and you should know
     "Google Cloud Run, which hosts the portal, keeps its own ordinary request logs, which can include your IP "
     "address. This recording doesn't copy them.",
-    "To answer you, Skippy sends your message and the conversation so far to Anthropic (Claude). That happens "
-    "whether or not it is recorded.",
+    "To answer you, Skippy sends your message and the conversation so far to Anthropic (Claude). The portal itself "
+    "keeps none of it; the conversation lives only in your browser tab.",
     "Signing in goes through Google, which tells the portal your email address and name.",
 )
 
