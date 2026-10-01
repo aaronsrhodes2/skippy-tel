@@ -12,11 +12,17 @@ services:
     container_name: skippytel-music-gate
     restart: unless-stopped
     env_file: G:/My Drive/vault/.env           # SKIPPY_HOME_TOKEN: the pass key is derived from it
+    environment:
+      # Bilby's "what the song is about" lines, from skippy-core's flask-api over the compose network (the default; set here
+      # so it's visible). Refreshed every few hours; if flask-api is down the gate serves the copy it kept in /state.
+      LYRICS_URL: http://flask-api:5000/music/lyric-summaries
+      # LYRICS_MATCH: song (default; a line fits every file of the song) | path (only the per-file entries)
+      # ART_CACHE_MB: 600 (the thumbnail cache's limit, in /state/art-cache)
     ports:
       - "127.0.0.1:3005:8080"                  # localhost only; Funnel is the one way in from outside
     volumes:
       - D:/Aaron/Music/corrected_music:/music:ro
-      - ./state/music-gate:/state               # tag cache: a restart doesn't re-read 21k files
+      - ./state/music-gate:/state               # tag cache (a restart doesn't re-read 21k files), lyric lines, thumbnails
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
 
   # Pushes status + Bilby's music to the portal every ~15 s, and fetches the

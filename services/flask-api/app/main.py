@@ -17,7 +17,6 @@ from app.routes.translate import bp as translate_bp
 from app.routes.image     import bp as image_bp
 from app.routes.bilby         import bp as bilby_bp
 from app.routes.bilby_proxy   import bp as bilby_proxy_bp
-from app.routes.bilby_bigcard import bp as bilby_bigcard_bp
 from app.routes.vault     import bp as vault_bp
 from app.routes.ups       import bp as ups_bp
 from app.routes.dropship  import bp as dropship_bp
@@ -25,6 +24,7 @@ from app.routes.services             import bp as services_bp
 from app.routes.service_icons        import bp as service_icons_bp
 from app.routes.service_registration import bp as service_registration_bp
 from app.routes.music                import bp as music_bp
+from app.routes.lyric_summaries      import bp as lyric_summaries_bp
 from app.routes.telemetry            import bp as telemetry_bp, init_db as telemetry_init_db
 from app.routes.status               import bp as status_bp
 from app.routes.explain              import bp as explain_bp
@@ -85,7 +85,6 @@ def create_app() -> Flask:
     app.register_blueprint(image_bp)
     app.register_blueprint(bilby_bp)
     app.register_blueprint(bilby_proxy_bp)
-    app.register_blueprint(bilby_bigcard_bp)
     app.register_blueprint(vault_bp)
     app.register_blueprint(ups_bp)
     app.register_blueprint(dropship_bp)
@@ -93,6 +92,7 @@ def create_app() -> Flask:
     app.register_blueprint(service_icons_bp)
     app.register_blueprint(service_registration_bp)
     app.register_blueprint(music_bp)
+    app.register_blueprint(lyric_summaries_bp)
     app.register_blueprint(telemetry_bp)
     app.register_blueprint(status_bp)
     app.register_blueprint(explain_bp)

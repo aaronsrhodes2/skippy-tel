@@ -247,3 +247,31 @@ def test_the_public_chat_has_no_private_skippy_in_it(env):
     login(client, ADMIN)
     chat_page = client.get("/chat").data.decode()
     assert "private-skippy" not in chat_page and "workshop" not in chat_page.lower()
+
+
+def test_resync_marks_the_task_and_wakes_the_reporters_quick_poll_and_only_for_its_owner(shop):
+    ws, home, clock = shop
+    task = ws.send(ADMIN, CONV, "go")
+    ws.push(task, ADMIN, CONV, 0, [TEXT], "running", None)
+    home.fast_until = 0.0
+    assert ws.resync(ADMIN, task) == {"state": "running", "error": None}
+    assert home.fast_until > clock.now                                  # the reporter polls quickly now
+    assert ws._tasks[task]["resync"] == clock.now
+    assert ws.resync(FRIEND, task) == {"state": "unknown", "error": None}   # not yours: nothing marked
+    assert ws.resync(ADMIN, "0123456789abcdef") == {"state": "unknown", "error": None}
+    clock.now += workshop_mod.STALL_S + 1
+    assert ws.resync(ADMIN, task)["state"] == "stalled"                 # the state it reports is the live one
+
+
+def test_the_resync_route_is_admin_only_needs_the_workshop_header_and_answers_with_the_state(env):
+    client, _, home = env
+    assert client.post("/me/workshop/resync", json={"task": "abcd1234"}, headers=H).status_code == 302     # signed out
+    login(client, FRIEND)
+    assert post(client, "/me/workshop/resync", {"task": "abcd1234"}).status_code == 403                    # not the Captain
+    login(client, ADMIN)
+    assert client.post("/me/workshop/resync", json={"task": "abcd1234"}).status_code == 400                # no header
+    task = post(client, "/me/workshop/send", {"conv": CONV, "message": "go"}).get_json()["task"]
+    home.fast_until = 0.0
+    out = post(client, "/me/workshop/resync", {"task": task})
+    assert out.status_code == 200 and out.get_json() == {"state": "queued", "error": None}
+    assert home.fast_until > 0

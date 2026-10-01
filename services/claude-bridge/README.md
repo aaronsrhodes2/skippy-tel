@@ -40,8 +40,15 @@ Environment overrides (set in the same shell before launch):
 
 ### `GET /health`
 ```json
-{"status": "ok", "service": "claude-bridge", "cwd": "...", "claude": "...", "awe_model": "..."}
+{"status": "ok", "service": "claude-bridge", "cwd": "...", "claude": "...", "awe_model": "...",
+ "workshop": {"ready": true, "model": "claude-opus-5-5", "busy": false, "login": "ok"}}
 ```
+`workshop.login` is `"ok"`, `"expired"` or `"unknown"`: the bridge asks `claude auth status`
+in a background thread (15 s timeout, answer kept 120 s), so `/health` never waits on it.
+`unknown` (nothing answered yet, or a timeout / error / unreadable output) does not count
+against the chat; only a clear "not logged in" does. `ready` is false when the token isn't
+configured or the login is `expired`, and then `workshop.reason` says why in plain words
+(for example "Claude's login on skippy-pc expired: run `claude auth login` there").
 
 ### `POST /solid-gold`
 ```json
@@ -59,11 +66,11 @@ Stream output is NDJSON, one line per chunk:
 {"done": true, "returncode": 0}
 ```
 
-### The private Skippy: `POST /workshop`, `GET /workshop/run/<task>`, `POST /workshop/cancel/<task>`
+### The private Skippy: `POST /workshop`, `GET /workshop/run/<task>`, `GET /workshop/runs`, `POST /workshop/cancel/<task>`
 
 Claude Code with **full permissions** (`--dangerously-skip-permissions`) on the
 SkippyTel repo, driven from the Captain's portal dashboard (`workshop_engine.py`).
-These three need `Authorization: Bearer <SKIPPY_HOME_TOKEN>` (the token the home
+These four need `Authorization: Bearer <SKIPPY_HOME_TOKEN>` (the token the home
 reporter holds; read from the environment or the vault `G:/My Drive/vault/.env`).
 With no token configured they answer 503 and stay shut. `/solid-gold` takes the
 same token (see the note below).
@@ -77,10 +84,30 @@ same token (see the note below).
   the ask → change → test → push to main → deploy → verify loop, plus what it must ask first.
 - **Sessions:** one Claude Code session per chat conversation, remembered in
   `.skippy-workshop-sessions.json`, so follow-ups have the context of the last.
-- **Runs:** `POST /workshop {task, conv, message}` starts one (asking again with
-  the same `task` re-attaches instead of re-running); `GET /workshop/run/<task>?after=N&wait=S`
+- **Runs:** `POST /workshop {task, conv, message, who?, attach?}` starts one (asking again
+  with the same `task` re-attaches instead of re-running); `GET /workshop/run/<task>?after=N&wait=S`
   returns events from index N (`{t:"text"}` and `{t:"tool", name, detail}`, never
   tool output; commands are redacted for credentials). One task at a time (409 when busy).
+  `who` is the owner's email (at most 200 characters, else 400): the bridge only keeps it, so
+  the reporter can tell a portal that forgot a run (a deploy wipes it) whose chat it belongs to.
+  With `attach: true` an unknown task answers `404 {"error": "unknown_task"}` and **nothing
+  starts**, so a relay that is only re-attaching can never begin a Claude run; the message may
+  be empty then.
+- **Listing:** `GET /workshop/runs` returns `{"runs": [{task, conv, who, events, done, ok,
+  error, age_s, finished_age_s}]}`, newest first, at most 50: counts and state only, never the
+  message or any event's content. The reporter compares it with the portal's records every few
+  seconds and repairs any difference.
+- **Surviving a restart:** every run is also saved to `.skippy-workshop-runs/<task>.json`
+  next to the sessions file (written when it starts, at most every 5 s while it runs, always
+  when it ends; atomic; the message text is not saved). When the bridge starts it takes back
+  the runs younger than an hour. A run that was still going is closed as failed with "The
+  bridge restarted while this was running." so the chat shows an ending instead of waiting.
+  A disk that fails to write is logged once and never touches the run. Pruning an old run
+  deletes its file too.
+- **Log:** one stderr line per request, except successful (2xx) `GET /health`,
+  `GET /workshop/run/*` and `GET /workshop/runs`, which the reporter polls every few
+  seconds and which would otherwise fill the log under a supervisor. POSTs and every
+  error (4xx/5xx) are always logged.
 - **Login:** if `claude` on this PC isn't signed in, the run fails with a plain
   message; run `claude` in a terminal and use `/login`.
 

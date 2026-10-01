@@ -6,10 +6,14 @@ ever transcoded. FLAC, WMA, OGG, WAV and Apple Lossless (ALAC in an .m4a) are le
 Tags come from the files (mutagen). Reading 21k files over Docker Desktop's bind mount takes minutes, so each file's tags
 are cached by (size, mtime) in /state and only new or changed files are read again. The catalog is one gzipped JSON the
 player downloads once: the browser does browsing, search and the DJ's picks itself.
+
+The catalog's fields are listed in its own payload and only ever grow at the END, so an older player keeps working when
+one is added (it reads the names it knows).
 """
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
 import logging
 import os
@@ -21,8 +25,19 @@ from pathlib import Path
 log = logging.getLogger("music-gate")
 
 AUDIO = {".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac"}
-FIELDS = ["p", "t", "a", "al", "n", "d", "g", "s", "art"]   # path, title, artist, album, track, disc, genre, seconds, has art
-CACHE_VERSION = 1
+# path, title, artist, album, track, disc, genre, seconds, has art, year (0 unknown), file mtime (epoch s: "date added")
+FIELDS = ["p", "t", "a", "al", "n", "d", "g", "s", "art", "y", "m"]
+CACHE_VERSION = 2          # 2 added the year to each file's tags
+READABLE_VERSIONS = (1, 2)  # a v1 cache still makes a playable catalog while the scan reads the years in
+
+
+def etag_matches(header: str | None, etag: str) -> bool:
+    """Does an If-None-Match header name this ETag? It may list several, be weak (W/"x") or be '*'; a proxy may do any of it."""
+    if not header or not etag:
+        return False
+    if header.strip() == "*":
+        return True
+    return any(part.strip().removeprefix("W/") == etag for part in header.split(","))
 
 
 def _first(value) -> str:
@@ -47,6 +62,21 @@ def _number(value) -> int:
     return int(m.group(1)) if m else 0
 
 
+def _year(value) -> int:
+    """'2016', '2016-03-04', '2016-03-04T08:00:00Z' or '20160304' → 2016; no plausible year → 0 (unknown)."""
+    s = _first(value)
+    m = re.match(r"\s*(\d{4})", s) or re.search(r"(?<!\d)(\d{4})(?!\d)", s)   # 'first 4 digits', else a year inside '03/04/2016'
+    y = int(m.group(1)) if m else 0
+    return y if 1000 <= y <= 2100 else 0
+
+
+def _folder_year(album_folder: str) -> int:
+    """'Mythologie (2016)' → 2016: the library's album folders end in the year, for the files whose tags don't say."""
+    m = re.search(r"\((\d{4})\)\s*$", album_folder)
+    y = int(m.group(1)) if m else 0
+    return y if 1000 <= y <= 2100 else 0
+
+
 def _title_from_name(name: str) -> str:
     """'01 - Artist - Title.mp3' → 'Title' (the same rule as flask-api's bilby_local)."""
     stem = re.sub(r"^\d+[-_.\s]+", "", name.rsplit(".", 1)[0]).replace("_", " ").strip()
@@ -57,7 +87,7 @@ def _title_from_name(name: str) -> str:
 
 
 def read_tags(path: Path) -> dict | None:
-    """Title, artist, album, track, disc, genre, seconds and whether there is cover art. None: unreadable, or an .m4a
+    """Title, artist, album, track, disc, genre, year, seconds and whether there is cover art. None: unreadable, or an .m4a
     that isn't AAC (Apple Lossless), which the Music app doesn't play."""
     import mutagen   # imported here so the tests of everything else don't need it
     try:
@@ -73,14 +103,22 @@ def read_tags(path: Path) -> dict | None:
     if path.suffix.lower() == ".m4a":
         get = lambda k: tags.get(k)                                                    # noqa: E731
         t = {"t": _first(get("\xa9nam")), "a": _first(get("aART")) or _first(get("\xa9ART")), "al": _first(get("\xa9alb")),
-             "n": _number(get("trkn")), "d": _number(get("disk")), "g": _first(get("\xa9gen")), "art": bool(get("covr"))}
+             "n": _number(get("trkn")), "d": _number(get("disk")), "g": _first(get("\xa9gen")),
+             "art": any(len(c) for c in get("covr") or []), "y": _year(get("\xa9day"))}
     else:
         get = lambda k: tags.get(k) if hasattr(tags, "get") else None                   # noqa: E731
-        apic = tags.getall("APIC") if hasattr(tags, "getall") else []
         t = {"t": _first(get("TIT2")), "a": _first(get("TPE2")) or _first(get("TPE1")), "al": _first(get("TALB")),
-             "n": _number(get("TRCK")), "d": _number(get("TPOS")), "g": _first(get("TCON")), "art": bool(apic)}
+             "n": _number(get("TRCK")), "d": _number(get("TPOS")), "g": _first(get("TCON")), "art": bool(_pictures(tags)),
+             "y": _year(get("TDRC"))}              # recording time; mutagen has already turned a v2.3 TYER into it
     t["s"] = int(getattr(info, "length", 0) or 0)
     return t
+
+
+def _pictures(tags) -> list:
+    """An ID3 tag's pictures that hold any image data, the front cover first. (An APIC frame with no data happens: 93 of the real
+    library's 21,451 tracks have one, and it must not count as a cover.)"""
+    frames = [a for a in (tags.getall("APIC") if hasattr(tags, "getall") else []) if getattr(a, "data", b"")]
+    return sorted(frames, key=lambda a: int(a.type) != 3)       # 3 = front cover; stable, so otherwise the file's order
 
 
 def read_art(path: Path) -> tuple[bytes, str] | None:
@@ -94,12 +132,11 @@ def read_art(path: Path) -> tuple[bytes, str] | None:
     if not tags:
         return None
     if path.suffix.lower() == ".m4a":
-        covers = tags.get("covr") or []
-        if covers:
-            c = covers[0]
-            return bytes(c), "image/png" if getattr(c, "imageformat", 13) == 14 else "image/jpeg"
+        for c in tags.get("covr") or []:
+            if len(c):
+                return bytes(c), "image/png" if getattr(c, "imageformat", 13) == 14 else "image/jpeg"
         return None
-    for apic in tags.getall("APIC") if hasattr(tags, "getall") else []:
+    for apic in _pictures(tags):
         mime = apic.mime if apic.mime in ("image/jpeg", "image/png", "image/webp") else "image/jpeg"
         return bytes(apic.data), mime
     return None
@@ -108,12 +145,15 @@ def read_art(path: Path) -> tuple[bytes, str] | None:
 class Library:
     def __init__(self, root: str | Path, state: str | Path, reader=read_tags, clock=time.time):
         self.root, self.reader, self.clock = Path(root), reader, clock
-        self.cache_path = Path(state) / "tags.json"
+        self.state = Path(state)
+        self.cache_path = self.state / "tags.json"
         self._lock = threading.Lock()
         self._cache: dict[str, list] = {}          # rel path → [size, mtime, tags or None]
         self.catalog_gz = b""
         self.etag = ""
         self.count = 0
+        self.identities: tuple[tuple[str, str, str], ...] = ()   # (path, artist, title) of every catalog track: what the lyric lines are matched to
+        self.on_build: list = []                    # called with .identities whenever the catalog is rebuilt (lyrics.py hangs here)
         self.ready = False                          # a full scan has finished
         self.scanning = False
         self.scanned = 0
@@ -124,11 +164,17 @@ class Library:
     def _load_cache(self) -> None:
         try:
             data = json.loads(self.cache_path.read_text(encoding="utf-8"))
-            if data.get("v") == CACHE_VERSION and isinstance(data.get("files"), dict):
+            if data.get("v") in READABLE_VERSIONS and isinstance(data.get("files"), dict):
                 self._cache = data["files"]
         except (OSError, ValueError):
             return
-        self._build(self._cache)   # last run's catalog, playable while the new scan runs
+        self._build(self._cache)   # last run's catalog, playable while the new scan runs (a v1 one gets its years from folders)
+
+    @staticmethod
+    def _fresh(old: list | None, size: int, mtime: int) -> bool:
+        """Is a cached entry still good: same size and mtime, and tags read by a version that knew the year? (An entry that
+        failed to read, tags None, stays cached: the failure doesn't depend on the year.)"""
+        return bool(old) and old[0] == size and old[1] == mtime and (old[2] is None or "y" in old[2])
 
     def _save_cache(self) -> None:
         try:
@@ -160,7 +206,7 @@ class Library:
                     except OSError:
                         continue
                     old = self._cache.get(rel)
-                    if old and old[0] == st.st_size and old[1] == int(st.st_mtime):
+                    if self._fresh(old, st.st_size, int(st.st_mtime)):
                         seen[rel] = old
                     else:
                         seen[rel] = [st.st_size, int(st.st_mtime), self.reader(full)]
@@ -180,7 +226,7 @@ class Library:
 
     def _build(self, files: dict[str, list]) -> None:
         tracks = []
-        for rel, (_size, _mtime, tags) in sorted(files.items(), key=lambda kv: kv[0].lower()):
+        for rel, (_size, mtime, tags) in sorted(files.items(), key=lambda kv: kv[0].lower()):
             if not tags:
                 continue
             parts = rel.split("/")
@@ -190,12 +236,21 @@ class Library:
                            folder_artist or tags.get("a") or "Unknown artist",
                            folder_album or tags.get("al") or "",
                            tags.get("n") or 0, tags.get("d") or 0, tags.get("g") or "", tags.get("s") or 0,
-                           1 if tags.get("art") else 0])
+                           1 if tags.get("art") else 0,
+                           tags.get("y") or _folder_year(folder_album),   # the tag's year, else the album folder's '(2016)'
+                           int(mtime or 0)])                              # "date added": Syncthing keeps the source's mtime
         body = json.dumps({"v": 1, "fields": FIELDS, "tracks": tracks}, separators=(",", ":")).encode()
         gz = gzip.compress(body, 6, mtime=0)
         with self._lock:
             self.catalog_gz, self.count = gz, len(tracks)
-            self.etag = f'"{len(tracks)}-{hash(gz) & 0xffffffff:08x}"'
+            # A content hash, not hash(): that one is salted per process, so every restart would make each player download it again.
+            self.etag = f'"{len(tracks)}-{hashlib.sha1(gz).hexdigest()[:12]}"'
+            self.identities = tuple((t[0], t[2], t[1]) for t in tracks)
+        for listener in list(self.on_build):
+            try:
+                listener(self.identities)
+            except Exception:  # noqa: BLE001 — a listener's trouble never costs the catalog
+                log.exception("music-gate: a catalog listener failed")
 
     def run_forever(self, every_s: float = 6 * 3600) -> None:
         while True:

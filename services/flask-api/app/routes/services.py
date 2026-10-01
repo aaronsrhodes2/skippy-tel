@@ -160,8 +160,6 @@ def _build_manifest() -> list[dict]:
                 "next":      "/bilby/next",
                 "stop":      "/bilby/stop",
                 "stream":    "/bilby/stream/<file_id>",
-                "ui":        "/bilby/ui",
-                "ui_public": "/bilby/ui/public",
             },
         },
         {
@@ -369,7 +367,6 @@ def _build_manifest() -> list[dict]:
             "voice_triggers": [],
             "endpoints": {
                 "bootstrap": "/vault/bootstrap",
-                "phone":     "/phone",
             },
         },
     ]

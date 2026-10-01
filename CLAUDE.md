@@ -34,7 +34,10 @@ services/flask-api/app/
 ├── routes/
 │   ├── intent.py        # POST /intent/unmatched — main LLM routing
 │   ├── bilby.py         # GET /bilby/status, POST /bilby/next
-│   ├── vault.py         # GET /vault/bootstrap, GET /phone, GET /apk/<app>
+│   ├── bilby_proxy.py   # GET /bilby/karaoke — the lyric line as JSON (the shelved phone apps poll it)
+│   ├── vault.py         # GET /vault/bootstrap, GET /apk/<app>
+│   ├── status.py        # GET /status.json — what the home reporter sends the portal
+│   ├── portal.py        # /portal/{hud-state,chat-state,hud-frame,history,...} — the phone/glasses state relay
 │   ├── translate.py     # POST /translate/text, POST /translate/audio
 │   ├── image.py         # POST /image — Stable Diffusion proxy
 │   ├── battery.py       # POST /battery — phone battery reporting
@@ -47,6 +50,13 @@ services/flask-api/app/
     ├── claude_bridge.py  # "trust the awesomeness" + "solid gold" tiers
     ├── bilby.py          # Mac Bilby daemon client
     └── whisper.py        # Audio transcription
+```
+
+**Skippy core has no HTML interface** (the Captain's decision: the browser is the universal
+client and its UI is the cloud portal, `portal/`). flask-api serves JSON, SSE, images, audio and APK
+downloads only: the former `/status`, `/portal`, `/phone`, `/bilby/bigcard` and `/bilby/ui*` pages
+are gone, and `tests/test_no_interface.py` fails if a page comes back or a data endpoint the home
+reporter or the shelved phone apps use goes missing. A new human-facing page is a portal feature.
 
 ## Tier trigger phrases (in intent.py)
 
@@ -77,7 +87,6 @@ Secrets come straight from the vault: compose's `env_file` is
 `G:/My Drive/vault/.env`.
 .env changes: restart only (no rebuild): `docker compose up -d flask-api`
 Code changes: rebuild: `docker compose up --build -d flask-api`
-```
 
 ## Cloud: portal + games VM (GCP project skippy-tel)
 
@@ -126,7 +135,7 @@ The cloud portal can't reach skippy-pc, so skippy-pc reports out:
 Compose merges automatically: a plain `docker compose up -d --build`) POSTs every
 ~15 s to `https://…run.app/home/report` with `Authorization: Bearer
 $SKIPPY_HOME_TOKEN`. It sends flask-api's `/status.json` (the old `/status`
-page as data), `/services` availability, `/music/session`, and Mac Bilby's
+page as data; the page itself is gone), `/services` availability, `/music/session`, and Mac Bilby's
 `/bilby/status`, setlist and next suggestion (+ album art when the track
 changes). The reply carries queued controls (`music` skip/pause/resume/stop)
 and jobs; while someone chats, the reporter also polls `GET /home/jobs` every
@@ -161,7 +170,9 @@ skippy-tel-core's services. Portal: `portal/workshop.py` + `/me/workshop/*` (job
 `SkippyTel-workshop`, one Claude session per conversation). Survives a portal redeploy
 mid-task. Rules for anything like it: [PLATINUM §19](../PLATINUM_RULES.md). Full
 description and setup: `docs/portal/README.md` → Private Skippy. Needs `make bridge` on
-the host and `claude` signed in (`/login`) there.
+the host and `claude` signed in (`/login`) there. When it or the portal stops answering from
+away: [docs/portal/remote-recovery.md](docs/portal/remote-recovery.md) (the phone-first runbook,
+the `rollback` workflow, `make bridge-supervised` and `tools/install_bridge_startup.sh`).
 
 ## Local capabilities (skippy-pc's hardware, for the portal chat)
 

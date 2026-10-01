@@ -18,7 +18,7 @@ REPO_ROOT = API_ROOT.parents[1]
 
 @pytest.fixture
 def probed(monkeypatch):
-    """/status with every outside call stubbed; records each URL that gets pinged."""
+    """/status.json with every outside call stubbed; records each URL that gets pinged."""
     from app.routes import status
     urls: list[str] = []
 
@@ -40,14 +40,6 @@ def test_status_json_lists_only_services_that_exist(probed):
     body = client.get("/status.json").get_json()
     assert [s["name"] for s in body["services"]] == ["flask-api", "ollama", "whisper", "google-drive"]
     assert not any("insightface" in u for u in urls)          # and nothing pinged it either
-
-
-def test_status_page_has_no_insightface_row(probed):
-    client, urls = probed
-    page = client.get("/status")
-    assert page.status_code == 200
-    assert "insightface" not in page.get_data(as_text=True).lower()
-    assert not any("insightface" in u for u in urls)
 
 
 def test_services_manifest_has_no_hey_buddy(monkeypatch):
@@ -85,9 +77,8 @@ def test_compose_does_not_define_or_depend_on_it():
 
 
 def test_every_blueprint_main_imports_exists():
-    """main.py can't be imported here without the whole runtime (Drive, Pillow,
-    beautifulsoup...), so check the way it would break on boot: an import that
-    points at a module that isn't there."""
+    """The cheap static twin of test_no_interface.py's real boot of app.main: check the
+    way it would break on boot, an import that points at a module that isn't there."""
     tree = ast.parse((API_ROOT / "app" / "main.py").read_text(encoding="utf-8"))
     modules = [n.module for n in ast.walk(tree)
                if isinstance(n, ast.ImportFrom) and n.module and n.module.startswith(("app.routes.", "app.clients."))]
