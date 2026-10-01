@@ -2,7 +2,7 @@
 # automatically, so a plain `docker compose up -d --build` on skippy-pc runs
 # these alongside flask-api and ollama (same network: they reach each other by
 # service name). Nothing here publishes a port to the network: everything goes OUT to
-# the portal, except music-gate, which listens on 127.0.0.1 for Tailscale Funnel.
+# the portal, except music-gate and video-gate, which listen on 127.0.0.1 for Tailscale Funnel.
 services:
   # The Music app's library: MP3/AAC files under a pass only the portal can sign
   # (services/music-gate/gate.py). On the internet through Tailscale Funnel on
@@ -23,6 +23,28 @@ services:
     volumes:
       - D:/Aaron/Music/corrected_music:/music:ro
       - ./state/music-gate:/state               # tag cache (a restart doesn't re-read 21k files), lyric lines, thumbnails
+    logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
+
+  # Nagatha's Video Service: the Captain's Jellyfin (a Windows service on this host, :8096) for the browser, behind the
+  # same kind of pass (services/video-gate/gate.py, README.md). The Jellyfin API key is ADMIN level: it stays inside this
+  # container (the vault's JELLYFIN_API_KEY) and the internet only sees the gate's whitelist. Funnel only offers 443 (the
+  # music gate has it), 8443 and 10000, so this one goes out on 8443 of the same hostname:
+  #   tailscale funnel --https=8443 --bg 3006   → https://skippy-pc.<tailnet>.ts.net:8443/
+  video-gate:
+    build: ./services/video-gate
+    container_name: skippytel-video-gate
+    restart: unless-stopped
+    env_file: G:/My Drive/vault/.env           # SKIPPY_HOME_TOKEN (the pass key is derived from it) and JELLYFIN_API_KEY
+    environment:
+      JELLYFIN_URL: http://host.docker.internal:8096   # Jellyfin runs on the host, not in Docker (the default; set so it's visible)
+      # JELLYFIN_USER: the account whose library and watch state the player shows (default: the first administrator)
+      # HLS_MAX_TRANSCODES: 2 · MAX_STREAMS: 32 · IMG_CACHE_MB: 500 · CATALOG_REFRESH_S: 300
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:3006:8080"                  # localhost only; Funnel is the one way in from outside
+    volumes:
+      - ./state/video-gate:/state               # poster cache (/state/img, bounded)
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
 
   # Pushes status + Bilby's music to the portal every ~15 s, and fetches the
