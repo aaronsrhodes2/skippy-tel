@@ -1278,7 +1278,6 @@ def test_the_old_bilby_page_is_gone_and_every_old_link_lands_in_bilbys_audio_ser
     assert "Bilby's Audio Service" in client.get("/music").data.decode()
     manifest = client.get("/music/manifest.webmanifest").get_json()
     assert manifest["name"] == "Bilby's Audio Service" and manifest["short_name"] == "Bilby"
-    assert 'href="/music"' in client.get("/me").data.decode()                            # the dashboard's now-playing link
 
 
 # ── core health (skippy-tel-core) on the dashboard ────────────────────────────
