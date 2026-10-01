@@ -85,6 +85,16 @@ Messages, Read History).
 A failed test stops both deploys. Claude reads the job logs and fixes
 forward — you don't need to.
 
+## Rolling back the portal (from a phone)
+
+Before it deploys, the `portal` job notes which Cloud Run revision is serving. If the deploy or its smoke test fails (the smoke test
+also checks `/home/workshop` answers 401 without a token, `/privacy` answers 200 and `/me` signed out never answers 5xx), the job moves
+ALL traffic back to that revision and ends red with an error saying it was rolled back. A deploy that passes but is wrong in a way
+only you see is undone by hand: Actions > **rollback** > Run workflow, box blank
+([`rollback.yml`](../.github/workflows/rollback.yml): goes back one revision, lists the last 5 with their commits; `latest` undoes it).
+A rollback pins traffic to one revision, so every deploy ends by sending traffic to the newest revision again. The whole runbook,
+phone-first, including what only the PC can fix: [portal/remote-recovery.md](portal/remote-recovery.md).
+
 ## Portal access
 
 `ALLOWED_EMAILS` (may sign in and play) and `ADMIN_EMAILS` (settings,

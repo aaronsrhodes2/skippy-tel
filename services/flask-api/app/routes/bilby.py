@@ -14,7 +14,7 @@ Source priority chain (applied in order, first non-null wins):
                             folder. Auto-syncs to the pushed track title when
                             a push arrives (searches Drive for the same song).
 
-  4. "none"               — No source available. BigCard shows stoner-nap msg.
+  4. "none"               — No source available (consumers show a "nothing playing" state).
 
 Endpoints
 ─────────

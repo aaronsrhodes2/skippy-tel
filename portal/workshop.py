@@ -111,6 +111,17 @@ class Workshop:
             rec["stop"] = True
         return True
 
+    def resync(self, owner: str, task: str) -> dict:
+        """The browser's "check again": ask skippy-pc to look at this task now. Marks it (so the home listing shows
+        `want`) and starts the reporter's quick polling; the reporter's reconciler answers within seconds."""
+        with self._lock:
+            rec = self._tasks.get(task)
+            if rec is not None and rec["owner"] == owner:
+                rec["resync"] = self.clock()
+        self.home.touch_chat()
+        seen = self.read(owner, task, 0)                 # state only: the browser keeps the events it already has
+        return {"state": seen["state"], "error": seen["error"]}
+
     def push(self, task: str, who: str, conv: str, start: int, events: list, state: str, error: str | None) -> dict:
         """From skippy-pc (the home reporter). `start` is the index of events[0] in the run's own list; if this
         portal is missing earlier ones (it was redeployed), the reply's `have` tells the reporter to send them."""

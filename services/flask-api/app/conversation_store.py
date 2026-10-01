@@ -1,13 +1,14 @@
-"""conversation_store.py — persistent chat log + SSE fanout for the web portal.
+"""conversation_store.py — persistent chat log + SSE fanout (GET /portal/events).
 
 Every message that flows through /intent/unmatched (both the user turn and the
-assistant reply) is recorded here.  The portal's SSE stream fans them out to all
-connected browser tabs in real time.
+assistant reply) is recorded here.  The SSE stream (routes/portal.py) fans them
+out to every connected subscriber in real time.  (The browser page that used to
+subscribe is gone; skippy core serves data only.)
 
 Schema
 ------
 messages table keeps the last _MAX_ROWS rows.  image_b64 is stored but never
-returned in list payloads — the portal fetches /portal/image/<id> on demand.
+returned in list payloads — a client fetches /portal/image/<id> on demand.
 """
 import json
 import queue

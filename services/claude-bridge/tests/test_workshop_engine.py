@@ -1,12 +1,7 @@
 """The private Skippy's engine and its HTTP door, against a stand-in `claude` (no login, no tokens)."""
 import json
-import subprocess
 import sys
-import threading
 import time
-import urllib.error
-import urllib.request
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -15,67 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import bridge  # noqa: E402
 import workshop_engine as engine  # noqa: E402
-
-FAKE = r'''
-import json, os, sys
-mode = os.environ.get("FAKE_MODE", "ok")
-rec = os.environ["FAKE_RECORD"]
-with open(rec, "a") as f:
-    f.write(json.dumps({"argv": sys.argv[1:], "stdin": sys.stdin.read(), "env": sorted(os.environ)}) + "\n")
-
-def out(**e):
-    print(json.dumps(e), flush=True)
-
-resuming = "--resume" in sys.argv
-out(type="system", subtype="init", session_id="sess-1", model="claude-opus-5-5")
-if mode == "auth":
-    msg = "Failed to authenticate: OAuth session expired and could not be refreshed"
-    out(type="assistant", message={"content": [{"type": "text", "text": msg}]})
-    out(type="result", is_error=True, result=msg, session_id="sess-1")
-elif mode == "noresume" and resuming:
-    out(type="result", is_error=True, result="No conversation found with session ID: sess-old", session_id="x")
-elif mode == "slow":
-    import time
-    out(type="assistant", message={"content": [{"type": "text", "text": "starting"}]})
-    time.sleep(60)
-else:
-    out(type="assistant", message={"content": [{"type": "text", "text": "Working on it."},
-        {"type": "tool_use", "name": "Bash", "input": {"command": "curl -H 'Authorization: Bearer abcdef123456' http://x"}},
-        {"type": "tool_use", "name": "Edit", "input": {"file_path": "portal/templates/home.html", "new_string": "SECRET BODY"}}]})
-    out(type="user", message={"content": [{"type": "tool_result", "content": "TOOL OUTPUT MUST NOT LEAK"}]})
-    out(type="assistant", message={"content": [{"type": "text", "text": "Done."}]})
-    out(type="result", is_error=False, result="Done.", session_id="sess-1")
-'''
-
-
-@pytest.fixture
-def shop(tmp_path, monkeypatch):
-    fake = tmp_path / "fake_claude.py"
-    fake.write_text(FAKE, encoding="utf-8")
-    record = tmp_path / "record.jsonl"
-    monkeypatch.setenv("FAKE_RECORD", str(record))
-    monkeypatch.setenv("SKIPPY_HOME_TOKEN", "top-secret-token")
-    origin = tmp_path / "origin"
-    origin.mkdir()
-    for cmd in (["init", "-q"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first"]):
-        subprocess.run(["git", *cmd], cwd=origin, check=True, capture_output=True)
-    subprocess.run(["git", "clone", "-q", str(origin), str(tmp_path / "clone")], check=True, capture_output=True)
-    w = engine.Workshop([sys.executable, str(fake)], repo=str(tmp_path / "clone"), primary=str(tmp_path / "primary"),
-                        sessions=str(tmp_path / "sessions.json"), remote=str(origin))
-    w.record, w.origin = record, origin
-    return w
-
-
-def finish(run, timeout=30):
-    deadline = time.time() + timeout
-    while not run.done and time.time() < deadline:
-        run.since(0, wait=0.5)
-    assert run.done, "the run never finished"
-    return run
-
-
-def calls(shop):
-    return [json.loads(line) for line in shop.record.read_text().splitlines()]
+from bridge_testkit import calls, finish  # noqa: E402   (the fake claude, the `shop` and `door` fixtures: conftest.py)
 
 
 def test_the_model_is_hard_coded_and_the_agent_has_full_permissions(shop):
@@ -86,6 +21,17 @@ def test_the_model_is_hard_coded_and_the_agent_has_full_permissions(shop):
     prompt = cmd[cmd.index("--append-system-prompt") + 1]
     assert shop.repo in prompt and shop.primary in prompt          # it works in its own clone, deploys from the Captain's
     assert "{repo}" not in prompt and "{primary}" not in prompt
+
+
+def test_the_prompt_says_when_the_reporter_may_be_rebuilt_and_keeps_its_guardrails(shop):
+    """The reporter re-attaches to a run by itself after a restart, so rebuilding it is safe; the rule is now when."""
+    prompt = shop.prompt()
+    bullet = next(line for line in prompt.splitlines() if line.strip().startswith("- home-reporter"))
+    assert "re-attaches" in bullet and "about 30 seconds" in bullet
+    assert "only when files under services/home-reporter/ changed" in bullet
+    assert "tell the Captain first" in bullet and "very last step" in bullet
+    assert "Ask the Captain, in this chat, and wait for a clear yes before" in prompt      # the other rules are untouched
+    assert "services/claude-bridge/" in prompt.split("## Guardrails")[1]                  # still must ask before touching this harness
 
 
 def test_nothing_can_change_the_model(shop, monkeypatch):
@@ -194,27 +140,7 @@ def test_redact_hides_credentials():
     assert "ghp_" not in engine.redact("git push https://ghp_abcdefghijklmnopqrstuvwxyz0123@github.com/x")
 
 
-# ── the HTTP door ───────────────────────────────────────────────────────────
-@pytest.fixture
-def door(shop, monkeypatch):
-    monkeypatch.setattr(bridge, "WORKSHOP", shop)
-    monkeypatch.setattr(bridge, "_token_cache", (time.time() + 3600, "door-token"))
-    server = ThreadingHTTPServer(("127.0.0.1", 0), bridge.Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    base = f"http://127.0.0.1:{server.server_port}"
-
-    def call(method, path, body=None, token="door-token"):
-        req = urllib.request.Request(base + path, method=method, data=json.dumps(body).encode() if body is not None else None,
-                                     headers={"Authorization": f"Bearer {token}"} if token else {})
-        try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                return r.status, json.loads(r.read())
-        except urllib.error.HTTPError as e:
-            return e.code, json.loads(e.read() or b"{}")
-    yield call
-    server.shutdown()
-
-
+# ── the HTTP door (the `door` fixture is in conftest.py) ─────────────────────
 def test_the_workshop_door_needs_the_token(door, monkeypatch):
     body = {"task": "aaaaaaaa", "conv": "conv-12345678", "message": "hi"}
     assert door("POST", "/workshop", body, token=None)[0] == 401
