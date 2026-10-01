@@ -115,10 +115,14 @@ class FakeJellyfin:
         self.requests: list[dict] = []
         self.deleted: list[tuple[str, str]] = []
         self.userdata: list[dict] = []
+        self.userdata_status = 0              # non-zero: answer every watch-state write with this status
         self.encodings: set[str] = set()
         self.video_size = 1_000_000
         self.video_chunk_delay = 0.0
         self.stream_extra_headers: dict[str, str] = {}
+        self.stream_truncate: int | None = None   # send only this many bytes of a stream, then hang up
+        self.stream_redirect = ""                 # answer a stream with a 302 to this URL
+        self.stream_chunked = False               # send streams with Transfer-Encoding: chunked instead of a Content-Length
         self.playlist_hook = None             # fn(text, 'master'|'main') -> text: lets a test make Jellyfin send something hostile
         self.sent: dict[str, int] = {}              # bytes written per path (a disconnecting client leaves this short)
         self.aborted: dict[str, bool] = {}
@@ -267,7 +271,14 @@ class FakeJellyfin:
             return send(200, self.vtt.encode(), "text/vtt")
         m = re.fullmatch(r"/UserItems/([0-9a-f]{32})/UserData", path)
         if m and method == "POST":
-            self.userdata.append({"item": m.group(1), "user": q.get("userId"), "body": json.loads(body or b"{}")})
+            if self.userdata_status:                         # a test makes Jellyfin refuse the write
+                return send(self.userdata_status, b"")
+            row = next((i for i in self.items if i["Id"] == m.group(1)), None)
+            if row is None:
+                return send(404, b"")
+            fields = json.loads(body or b"{}")
+            self.userdata.append({"item": m.group(1), "user": q.get("userId"), "body": fields})
+            row["UserData"].update({k: v for k, v in fields.items() if k in ("PlaybackPositionTicks", "Played", "PlayCount")})
             return send(200, json.dumps({"ItemId": m.group(1)}).encode())
         with self._lock:
             rec["unexpected"] = True
@@ -304,6 +315,8 @@ class FakeJellyfin:
     def stream(self, h, send, method, item_id, q):
         if item_id not in {i["Id"] for i in self.items}:
             return send(400, b"Error processing request.", "text/plain")
+        if self.stream_redirect:                             # a Jellyfin that tries to send the gate somewhere else
+            return send(302, b"", "text/plain", {"Location": self.stream_redirect})
         size = self.video_size
         rng, start, end = h.headers.get("Range"), 0, size - 1
         code, extra = 200, {"Accept-Ranges": "bytes", "Last-Modified": "Mon, 11 Sep 2023 09:43:37 GMT"}
@@ -322,23 +335,44 @@ class FakeJellyfin:
         length = end - start + 1
         h.send_response(code)
         h.send_header("Content-Type", "video/mp4")
-        h.send_header("Content-Length", str(length))
+        if self.stream_chunked and method != "HEAD":         # no Content-Length: the end of the body is the terminating chunk
+            h.send_header("Transfer-Encoding", "chunked")
+        else:
+            h.send_header("Content-Length", str(length))
         for k, v in {**extra, **self.stream_extra_headers}.items():
             h.send_header(k, v)
         h.end_headers()
         if method == "HEAD":
             return
+        if self.stream_chunked:
+            stop_at = end if self.stream_truncate is None else min(end, start + self.stream_truncate - 1)
+            try:
+                for pos in range(start, stop_at + 1, 65536):
+                    data = body_bytes(pos, min(65536, stop_at - pos + 1))
+                    h.wfile.write(f"{len(data):x}\r\n".encode() + data + b"\r\n")
+                if stop_at < end:                            # hung up with no terminating chunk
+                    h.close_connection = True
+                    h.connection.shutdown(socket.SHUT_RDWR)
+                else:
+                    h.wfile.write(b"0\r\n\r\n")
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
+            return
         key = f"stream:{item_id}"
         self.sent[key], pos = 0, start
+        stop_at = end if self.stream_truncate is None else min(end, start + self.stream_truncate - 1)
         try:
-            while pos <= end:
-                n = min(65536, end - pos + 1)
+            while pos <= stop_at:
+                n = min(65536, stop_at - pos + 1)
                 h.wfile.write(body_bytes(pos, n))
                 h.wfile.flush()
                 self.sent[key] += n
                 pos += n
                 if self.video_chunk_delay:
                     time.sleep(self.video_chunk_delay)
+            if stop_at < end:                                # promised more than was sent, then hung up: Jellyfin dying mid-file
+                h.close_connection = True
+                h.connection.shutdown(socket.SHUT_RDWR)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             self.aborted[key] = True
 
@@ -371,6 +405,8 @@ class FakeJellyfin:
         send(200, (self.playlist_hook(text, "main") if self.playlist_hook else text).encode(), ctype)
 
     def segment(self, send, item_id, n, ext, q):
+        if item_id not in {i["Id"] for i in self.items}:
+            return send(400, b"Error processing request.", "text/plain")
         if n != "-1" and ("runtimeTicks" not in q or "actualSegmentLengthTicks" not in q):
             return send(400, b"Error processing request.", "text/plain")
         if "StartTimeTicks" in q:                        # what the real 10.11 does with a start offset

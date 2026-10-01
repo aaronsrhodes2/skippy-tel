@@ -1,11 +1,11 @@
 """READ-ONLY smoke of the video-gate against a real Jellyfin (not part of the image, not run by CI).
 
-    JELLYFIN_API_KEY=... JELLYFIN_URL=http://127.0.0.1:8096 python services/video-gate/smoke_real.py
+    JELLYFIN_API_KEY=... JELLYFIN_URL=http://127.0.0.1:8096 python services/video-gate/smoke_real.py [--no-hls]
 
 It runs the gate in-process (Flask's test client, a throwaway pass key) and checks, against the real server: the catalog
 builds, a poster, the first KB of a direct stream, a subtitle, and one short HLS probe (master, media playlist, the first
-segment: then the transcode is stopped). It never writes watch state (the progress route is not called), never changes a
-Jellyfin setting and never prints the key. The only side effect on Jellyfin is that one short transcode.
+segment: then the transcode is stopped; --no-hls skips it). It never writes watch state (the progress route is not called),
+never changes a Jellyfin setting and never prints the key. The only side effect on Jellyfin is that one short transcode.
 """
 from __future__ import annotations
 
@@ -71,6 +71,12 @@ def main() -> int:
         poster = next(i for i in items if i["hasPoster"])
         r = web.get(f"{base}/img/{poster['id']}/poster?w=300")
         print(f"poster (w=300 -> nearest 320): {r.status_code} {r.mimetype} {len(r.data)} bytes, cache-control {r.headers.get('Cache-Control')}")
+        again = web.get(f"{base}/img/{poster['id']}/poster?w=300", headers={"If-None-Match": r.headers["ETag"]})
+        print(f"same poster again with its ETag: {again.status_code}")
+        t1 = time.time()
+        grid = [web.get(f"{base}/img/{i['id']}/poster?w=160") for i in [x for x in items if x["hasPoster"]][:24]]
+        print(f"24 posters at w=160: {sorted({g.status_code for g in grid})}, {sum(len(g.data) for g in grid)} bytes, {time.time() - t1:.1f}s "
+              f"(Jellyfin scaled each once; they are on disk now)")
         coll = next((c for c in data["collections"] if c["hasPoster"]), None)
         if coll:
             r = web.get(f"{base}/img/{coll['id']}/poster?w=160")
@@ -96,6 +102,10 @@ def main() -> int:
         probe = withsub if withsub and not withsub["play"]["direct"] else other[0]
         print(f"HLS probe on {probe['title']!r} ({probe['play']['container']}/{probe['play']['vcodec']}/{probe['play']['acodec']}), "
               f"transcodes active before: {sessions.active_count()}")
+        if "--no-hls" in sys.argv:
+            print("(--no-hls: no transcode started)")
+            print("health:", json.dumps(web.get("/health").get_json()))
+            return 0
         try:
             r = web.get(f"{base}/v/{probe['id']}/hls/master.m3u8?h=720&start=60")
             master = r.get_data(as_text=True)

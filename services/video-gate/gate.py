@@ -11,7 +11,8 @@ text), so a music pass can never open this gate and a video pass can never open 
 
     GET  /health                                    {"ok", "ready", "jellyfin", "items"}   (no pass: the reporter's probe)
     GET  /t/<pass>/catalog.json                     movies/series/episodes + collections, gzipped, ETag (catalog.py)
-    GET  /t/<pass>/img/<id>/<poster|backdrop|logo|thumb>?w=160|320|640|1280   scaled by Jellyfin, cached on disk (images.py)
+    GET  /t/<pass>/img/<id>/<poster|backdrop|logo|thumb>?w=160|320|640|1280   scaled by Jellyfin, cached on disk (images.py);
+                                                    w snaps to the nearest, a non-number is a 400; a burst of uncached ones: 503 + Retry-After
     GET  /t/<pass>/v/<id>/direct                    the original file, Range, streamed; 409 {"use":"hls"} if browsers can't play it
     GET  /t/<pass>/v/<id>/hls/master.m3u8?audio=<i>&h=<px>&start=<sec>   transcoded HLS; playlists are REWRITTEN (hls.py)
     GET  /t/<pass>/v/<id>/hls/<file>?s=<session>    the variant playlist and segments that master advertised, nothing else
@@ -33,13 +34,15 @@ import os
 import re
 import threading
 import time
+import traceback
 
-from flask import Flask, Response, abort, jsonify, request, send_file
+from flask import Flask, Response, abort, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 import hls
+import images as img_cache
 from catalog import TICKS, Library, progress_outcome
-from images import DEFAULT_WIDTH, ImageCache, nearest_width
+from images import DEFAULT_WIDTH, ImageCache, pick_width
 from jellyfin import ID_RE, IMAGE_KINDS, Client, JellyfinError, shape_of
 
 log = logging.getLogger("video-gate")
@@ -74,6 +77,19 @@ def valid(key: bytes, token: str, now: float) -> bool:
     if not now <= exp <= now + MAX_PASS_S:
         return False
     return hmac.compare_digest(sign(key, exp).encode(), token.encode())
+
+
+def etag_matches(header: str | None, etag: str) -> bool:
+    """Does an If-None-Match header name this ETag? It may list several, be weak (W/"x") or be '*'; a proxy may do any of it."""
+    if not header or not etag:
+        return False
+    if header.strip() == "*":
+        return True
+    return any(part.strip().removeprefix("W/") == etag for part in header.split(","))
+
+
+class UpstreamDropped(Exception):
+    """Jellyfin stopped answering in the middle of a file we were already relaying."""
 
 
 class Throttle:
@@ -134,9 +150,12 @@ def create_app(library: Library, client: Client, key: bytes, clock=time.time, se
     app.extensions["video"] = {"library": library, "sessions": sessions, "client": client}
 
     # ---- plumbing ---------------------------------------------------------------------------------------------
-    def err(code: int, **extra) -> Response:
-        return Response(json.dumps({"error": MESSAGES.get(code, "request failed"), **extra}), status=code,
-                        mimetype="application/json", headers={"Cache-Control": "no-store"})
+    def err(code: int, retry_after: int | None = None, message: str | None = None, **extra) -> Response:
+        headers = {"Cache-Control": "no-store"}
+        if retry_after:
+            headers["Retry-After"] = str(retry_after)
+        return Response(json.dumps({"error": message or MESSAGES.get(code, "request failed"), **extra}), status=code,
+                        mimetype="application/json", headers=headers)
 
     def from_jellyfin(e: JellyfinError) -> Response:
         if e.kind == "missing":
@@ -176,7 +195,10 @@ def create_app(library: Library, client: Client, key: bytes, clock=time.time, se
 
     @app.errorhandler(Exception)
     def crash(e: Exception):
-        log.error("video-gate: %s in a handler", type(e).__name__)      # the class only: no URL, pass or key can ride along
+        # The class and where it happened, nothing else: an exception's text and the request's URL can carry a pass.
+        where = traceback.extract_tb(e.__traceback__)[-1] if e.__traceback__ else None
+        log.error("video-gate: %s in a handler (%s:%s)", type(e).__name__, os.path.basename(where.filename) if where else "?",
+                  where.lineno if where else 0)
         return err(500)
 
     def playable(item_id: str) -> dict:
@@ -204,8 +226,12 @@ def create_app(library: Library, client: Client, key: bytes, clock=time.time, se
                 for chunk in up.raw.stream(65536, decode_content=False):
                     if chunk:
                         yield chunk
-            except Exception as e:  # noqa: BLE001 — Jellyfin dropping mid-file just ends the stream
+            except Exception as e:  # noqa: BLE001 — Jellyfin dropping mid-file
                 log.warning("video-gate: upstream stream ended early (%s)", type(e).__name__)
+                # NOT a quiet end: headers (and a Content-Length, or chunked framing) are already out, so finishing normally
+                # would show the player a truncated file as a complete one. An exception makes the server cut the connection
+                # instead, which a player sees as the error it is and retries.
+                raise UpstreamDropped from None
             finally:
                 cleanup()
 
@@ -242,9 +268,9 @@ def create_app(library: Library, client: Client, key: bytes, clock=time.time, se
         library.poke()                       # at most one background refresh a minute, whoever asks
         gz, etag = library.snapshot()
         if not gz:
-            return err(503, retry=True)
-        if request.headers.get("If-None-Match", "").removeprefix("W/") == etag:
-            return Response(status=304, headers={"ETag": etag})
+            return err(503, retry_after=5, retry=True)
+        if etag_matches(request.headers.get("If-None-Match"), etag):
+            return Response(status=304, headers={"ETag": etag, "Cache-Control": "private, no-cache"})
         return Response(gz, mimetype="application/json",
                         headers={"Content-Encoding": "gzip", "ETag": etag, "Cache-Control": "private, no-cache",
                                  "Vary": "Accept-Encoding"})
@@ -256,26 +282,32 @@ def create_app(library: Library, client: Client, key: bytes, clock=time.time, se
         tag = library.tags(id).get(kind)             # unknown id, or an item without that art: not ours to ask Jellyfin about
         if not tag:
             abort(404)
-        w = request.args.get("w", "")
-        if w == "":
-            width = DEFAULT_WIDTH
-        elif re.fullmatch(r"[0-9]{1,6}", w):
-            width = nearest_width(int(w))
-        else:
-            abort(400)
-        found = images.get(id, kind, width, tag)
-        if not found:
+        width = DEFAULT_WIDTH
+        if "w" in request.args:
+            width = pick_width(request.args["w"])
+            if width is None:
+                return err(400, hint="w is a whole number of pixels: 160, 320, 640 or 1280")
+
+        def load():                                  # only called when the picture isn't on disk
             try:
-                data, mime = client.image(id, IMAGE_KINDS[kind], width)
+                return client.image(id, IMAGE_KINDS[kind], width)
             except JellyfinError as e:
-                return from_jellyfin(e)
-            found = images.put(id, kind, width, tag, data, mime)
-            if not found:                            # the disk is unusable: serve it once, uncached
-                return Response(data, mimetype=mime, headers={"Cache-Control": "private, max-age=604800"})
-        path, mime = found
-        resp = send_file(path, mimetype=mime, conditional=True, max_age=604800)
-        resp.headers["Cache-Control"] = "private, max-age=604800"
-        return resp
+                if e.kind == "missing":              # Jellyfin has no such picture (any more): a 404, remembered
+                    return None
+                raise
+
+        try:
+            found = images.get(id, kind, width, tag, load)
+        except img_cache.Busy:                       # a burst of uncached posters: ask again in a moment
+            return err(503, retry_after=1, message="busy; try again in a moment", busy=True)
+        except JellyfinError as e:
+            return from_jellyfin(e)
+        if not found:
+            abort(404)
+        etag, mime, data = found
+        resp = Response(data, mimetype=mime, headers={"Cache-Control": "private, max-age=604800"})
+        resp.set_etag(etag)
+        return resp.make_conditional(request)
 
     @app.route("/t/<token>/v/<id>/direct", methods=["GET", "HEAD"])
     def direct(token, id):
@@ -286,7 +318,7 @@ def create_app(library: Library, client: Client, key: bytes, clock=time.time, se
         m = RANGE_RE.fullmatch(rng)
         forward = rng if m and (m.group(1) or m.group(2)) else None     # one plain byte range, or none
         if not slots.acquire(blocking=False):
-            return err(429)
+            return err(429, retry_after=2)
         try:
             up = client.stream(id, forward, head=request.method == "HEAD")
         except JellyfinError as e:
@@ -309,7 +341,7 @@ def create_app(library: Library, client: Client, key: bytes, clock=time.time, se
         try:
             sess = sessions.touch(sid, id)
         except hls.Busy:
-            return err(429, retry=True)
+            return err(429, retry_after=10, retry=True)
         entry = sess.table.get(rest) if sess else None
         if not entry:
             abort(404)                               # only files an earlier playlist of this session advertised
@@ -324,7 +356,7 @@ def create_app(library: Library, client: Client, key: bytes, clock=time.time, se
                 return err(502)
             return Response(out, mimetype=hls.CONTENT_TYPES["m3u8"], headers={"Cache-Control": "no-store"})
         if not slots.acquire(blocking=False):
-            return err(429)
+            return err(429, retry_after=2)
         try:
             up = client.hls_stream(id, rest, upstream)
         except JellyfinError as e:
@@ -351,7 +383,7 @@ def create_app(library: Library, client: Client, key: bytes, clock=time.time, se
         try:
             sess = sessions.create(token, item["id"], audio, height, start)
         except hls.Busy:
-            return err(429, retry=True)
+            return err(429, retry_after=10, retry=True)
         try:
             out = hls.rewrite_master(client.hls_text(item["id"], "master.m3u8", sess.params), sess, forbidden)
         except JellyfinError as e:
@@ -386,7 +418,7 @@ def create_app(library: Library, client: Client, key: bytes, clock=time.time, se
             raise ValueError("no NaN or Infinity")
         try:
             body = json.loads(request.get_data(cache=False), parse_constant=reject)
-        except (ValueError, UnicodeDecodeError):
+        except (ValueError, UnicodeDecodeError, RecursionError):      # (1 KB of '[' is deeper than the JSON reader goes)
             return err(400)
         if not isinstance(body, dict) or not set(body) <= {"id", "pos", "played", "state"}:
             return err(400)
@@ -398,7 +430,9 @@ def create_app(library: Library, client: Client, key: bytes, clock=time.time, se
         if pos is None:
             if state != "start":
                 return err(400)
-        elif isinstance(pos, bool) or not isinstance(pos, (int, float)) or not math.isfinite(pos) or pos < 0:
+        elif isinstance(pos, bool) or not isinstance(pos, (int, float)) or pos < 0:
+            return err(400)
+        elif isinstance(pos, float) and not math.isfinite(pos):       # (math.isfinite on a 400-digit int would raise)
             return err(400)
         item = playable(body["id"])
         runtime = item["runtime"]
@@ -427,6 +461,21 @@ def create_app(library: Library, client: Client, key: bytes, clock=time.time, se
     return app
 
 
+def _setting(name: str, default: float, lo: float = 1.0) -> float:
+    """A number from the environment; a typo (or a value below `lo`) must not stop the video, so it falls back with a warning."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        value = float("nan")
+    if not value >= lo or value == float("inf"):
+        logging.warning("video-gate: %s=%r isn't a number >= %s; using %s", name, raw[:20], lo, default)
+        return default
+    return value
+
+
 def from_env() -> Flask:
     """gunicorn's entry point: Jellyfin and its key from the environment (the vault .env), the state in /state."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -436,16 +485,15 @@ def from_env() -> Flask:
     if not token:
         logging.warning("video-gate: SKIPPY_HOME_TOKEN isn't set; every pass will be refused")
     try:
-        client = Client(os.environ.get("JELLYFIN_URL", "http://host.docker.internal:8096"), api_key)
+        client = Client(os.environ.get("JELLYFIN_URL", "").strip() or "http://host.docker.internal:8096", api_key)
     except ValueError as e:
         raise RuntimeError(f"video-gate cannot start: {e}") from None     # the message never carries the key
-    library = Library(client, os.environ.get("JELLYFIN_USER", ""),
-                      refresh_s=float(os.environ.get("CATALOG_REFRESH_S", "300")))
-    sessions = hls.Sessions(client.stop_encoding, cap=int(os.environ.get("HLS_MAX_TRANSCODES", "2")),
-                            idle_s=float(os.environ.get("HLS_IDLE_S", "120")))
+    library = Library(client, os.environ.get("JELLYFIN_USER", ""), refresh_s=_setting("CATALOG_REFRESH_S", 300.0, 30.0))
+    sessions = hls.Sessions(client.stop_encoding, cap=int(_setting("HLS_MAX_TRANSCODES", 2)),
+                            idle_s=_setting("HLS_IDLE_S", 120.0, 10.0))
     images = ImageCache(os.path.join(os.environ.get("STATE_DIR", "/state"), "img"),
-                        limit=int(float(os.environ.get("IMG_CACHE_MB", "500")) * 1024 * 1024))
+                        limit=int(_setting("IMG_CACHE_MB", 500.0) * 1024 * 1024))
     threading.Thread(target=library.run_forever, daemon=True, name="catalog-refresh").start()
     threading.Thread(target=sessions.run_forever, daemon=True, name="hls-reaper").start()
     return create_app(library, client, gate_key(token) if token else b"", sessions=sessions, images=images,
-                      max_streams=int(os.environ.get("MAX_STREAMS", "32")), forbidden=(api_key,))
+                      max_streams=int(_setting("MAX_STREAMS", 32.0)), forbidden=(api_key,))

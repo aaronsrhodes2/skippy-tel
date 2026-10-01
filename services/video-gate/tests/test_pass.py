@@ -32,6 +32,19 @@ def test_pass_rules():
         assert not gate.valid(KEY, junk, NOW), junk
 
 
+def test_the_pass_scheme_is_pinned_so_the_portal_can_mirror_it():
+    """Written out with nothing but hmac and hashlib, and as a fixed vector (also in the README): the portal, which holds only the
+    token's sha256, must produce exactly this, and no edit here may change it without this test saying so."""
+    sha = hashlib.sha256(b"test-home-token").hexdigest()
+    assert sha == "d9b49845ccf7825b16d8a6026f24f283a700ec94ad6e750e0ff344db365934a0"
+    key = hmac.new(sha.encode(), b"video-gate-v1", hashlib.sha256).digest()
+    assert key.hex() == "c728978cf1bf96fdb53e19785202dde6aadee257a7f0cbe3ba05bd6fa1981ad5"
+    assert hmac.new(key, b"video:1800003600", hashlib.sha256).hexdigest()[:32] == "d8383a1cefb72b136b01fb22ff9e87fb"
+    assert gate.gate_key("test-home-token") == key
+    assert gate.sign(key, 1800003600) == "1800003600.d8383a1cefb72b136b01fb22ff9e87fb"
+    assert gate.valid(key, "1800003600.d8383a1cefb72b136b01fb22ff9e87fb", 1800000000)
+
+
 def test_a_music_pass_is_not_a_video_pass():
     exp = NOW + 3600
     music = music_sign(HOME_TOKEN, exp)
