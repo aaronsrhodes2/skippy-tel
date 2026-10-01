@@ -173,3 +173,20 @@ games-status:
 
 games-env:
 	bash scripts/games.sh env
+
+# The self-deploy loop, timed: "prompt sent" to "new deployment visible". docs/cicd.md "Timing the loop".
+#   make loop-time                          the newest deploy run, after the fact
+#   make loop-time SINCE="12 minutes ago"   ... counted from when the prompt was sent (or an ISO time)
+#   make loop-watch SINCE=now               start BEFORE the push: waits for the run and for the new version on /version
+# Extra flags: LOOP_ARGS="--sha 8adcd7e --json --utc --bridge".
+.PHONY: loop-time loop-watch test-affected
+loop-time:
+	python tools/loop_timer.py $(if $(SINCE),--since "$(SINCE)") $(LOOP_ARGS)
+
+loop-watch:
+	python tools/loop_timer.py --watch $(if $(SINCE),--since "$(SINCE)") $(LOOP_ARGS)
+
+# Only the tests the change can break (what differs from origin/main); CI still runs everything on the push.
+#   make test-affected                      run them     make test-affected AFFECTED_ARGS=--list    just show the plan
+test-affected:
+	python tools/affected_tests.py $(AFFECTED_ARGS)

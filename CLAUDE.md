@@ -96,6 +96,9 @@ Actions (the sandbox can't reach GCP or run.app directly):
 - **Deploy:** push to `main` (the only branch Google trusts; see "Branches and deploys") → `deploy.yml`
   (tests → Terraform `infra/gcp-games` → portal to Cloud Run). Redeploy without
   a code change: `workflow_dispatch` on `deploy.yml` (e.g. after a secret changes).
+  **Time it / check before pushing:** `python tools/loop_timer.py --watch --since now` (before the push; `make loop-watch`) prints
+  "prompt sent -> new version visible" stage by stage from GitHub's stamps and the portal's public `/version`;
+  `python tools/affected_tests.py` runs only the tests the change can break (the full CI commands when it can't tell). docs/cicd.md "Timing the loop".
 - **Operate/diagnose the games VM:** `workflow_dispatch` on `ops.yml` with
   `command` = `status` | `logs` | `start` | `stop` | `restart` and `args`
   (a game id for logs; game ids for start). Read the job log. Secrets are
