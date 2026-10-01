@@ -115,8 +115,8 @@ def read_tags(path: Path) -> dict | None:
 
 
 def _pictures(tags) -> list:
-    """An ID3 tag's pictures that hold any image data, the front cover first. (An APIC frame with no data is common: 1 % of the
-    real library has one, and it must not count as a cover.)"""
+    """An ID3 tag's pictures that hold any image data, the front cover first. (An APIC frame with no data happens: 93 of the real
+    library's 21,451 tracks have one, and it must not count as a cover.)"""
     frames = [a for a in (tags.getall("APIC") if hasattr(tags, "getall") else []) if getattr(a, "data", b"")]
     return sorted(frames, key=lambda a: int(a.type) != 3)       # 3 = front cover; stable, so otherwise the file's order
 

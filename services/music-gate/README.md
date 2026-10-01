@@ -29,7 +29,12 @@ the catalog and the lyrics by ETag; the browser's preflight is answered.
   days in April 2026 (12,092 from 2026-04-18, 8,304 from 2026-04-17, when the library was rebuilt on the Mac). "Recently added"
   will only be meaningful for files that arrive after that; break ties by path.
 * **Thumbnails are cached per track path**, not per album. For an album grid ask for one representative track per album (the first
-  with `art = 1`), not one per track, or the cache (600 MB, oldest evicted) holds a dozen copies of one cover.
+  with `art = 1`), not one per track, or the cache (600 MB, oldest evicted) holds a dozen copies of one cover. (Measured: all
+  13,417 covers at all four sizes would be ~1 GB, so the grid should stick to 192 and Now Playing to 384/768.)
+* **A thumbnail can answer `503` + `Retry-After: 1`** when a burst of uncached covers is already being made (at most 4 at once
+  and 8 waiting; the gate has 32 threads and a streaming track holds one). Retry the `<img>` once or twice after a second or so;
+  a cached thumbnail never gets a 503. `art = 1` in the catalog means the file really holds image data; a track with `art = 0`
+  is a 404 for `art/`.
 * `y` comes from the tag (TDRC/TYER, MP4 ©day): 19,896 of 21,451 tracks have one; a `(YYYY)` in the album folder fills in when
   the tag has none (it agrees with the tag in all but one of the files that have both).
 

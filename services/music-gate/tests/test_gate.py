@@ -304,7 +304,7 @@ def test_year_parsing(raw, year):
 
 
 def test_an_empty_picture_frame_is_not_a_cover(tmp_path):
-    """1 % of the real library (about 130 tracks) has an APIC frame with no data: it must not be offered as a cover."""
+    """93 tracks of the real library have an APIC frame with no data: it must not be offered as a cover."""
     from helpers import image_bytes, make_mp3
     from library import read_art, read_tags
     empty = make_mp3(tmp_path / "empty.mp3", cover=b"", TIT2="E")
