@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Music — Skippy Portal{% endblock %}
+{% block title %}Bilby's Audio Service — Skippy Portal{% endblock %}
 {% block app %}music{% endblock %}
 {% block head %}
 {# Add to Home Screen: opens full screen into the player, and iOS keeps the audio going with the screen locked. #}
 <link rel="manifest" href="{{ url_for('music.player_manifest') }}">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Music">
+<meta name="apple-mobile-web-app-title" content="Bilby">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <style>
   main { max-width: 860px; }

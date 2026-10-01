@@ -129,16 +129,16 @@ def test_the_scan_finds_every_kind_of_poll_the_templates_use():
     assert {"dashboard.game_live", "dashboard.game_discord"} <= found["game.html"]
     assert "dashboard.game_live" in found["games.html"]                                # a data-live attribute the script reads
     assert {"experiments.wva_catalog", "experiments.wva_solve"} <= found["demo_weapon_vs_armor.html"]     # data-catalog / data-solve
-    assert {"bilby.state", "chat.badges", "telemetry_tap"} <= every
+    assert {"music.player_gate", "chat.badges", "telemetry_tap"} <= every
     assert "dashboard.game" not in every and "admin.index" not in every              # a link is a page, not a poll
 
 
 def test_the_scan_reads_the_three_ways_a_page_names_what_it_polls():
     app, *_ = make()
     text = ("""<a href="{{ url_for('dashboard.games') }}">back</a><div data-live="{{ url_for('dashboard.game_live', gid='v') }}" data-x="{{ url_for('privacy') }}">
-              <script>const u = "{{ url_for('bilby.state') }}"; fetch("/chat/badges"); x.open("GET", "/bilby/art");
+              <script>const u = "{{ url_for('music.player_gate') }}"; fetch("/chat/badges"); x.open("GET", "/music/manifest.webmanifest");
               tile.dataset.live; setInterval(poll, 1000)</script>""")
-    assert asked_for_by_scripts(text, app.url_map) == {"bilby.state", "chat.badges", "bilby.art", "dashboard.game_live"}
+    assert asked_for_by_scripts(text, app.url_map) == {"music.player_gate", "chat.badges", "music.player_manifest", "dashboard.game_live"}
     assert asked_for_by_scripts('<script>fetch("/no/such/path")</script>', app.url_map) == {"<no route for /no/such/path>"}
 
 

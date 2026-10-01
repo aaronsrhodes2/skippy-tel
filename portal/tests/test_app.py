@@ -110,7 +110,7 @@ def test_portal_is_all_cards_with_no_top_tabs(env):
     launcher = client.get("/").data.decode()
     assert "<nav" not in launcher and 'id="home-btn"' not in launcher          # the launcher is home: nowhere to go "back" to
     assert "sign out" in launcher                                              # the account lives on the home screen
-    for path in ("/games", "/me", "/admin", "/chat", "/bilby", "/experiments"):   # everywhere the old tabs led is now a tile
+    for path in ("/games", "/me", "/admin", "/chat", "/music", "/experiments"):   # everywhere the old tabs led is now a tile
         assert f'href="{path}"' in launcher, path
     _add_friend(client, PAL, ["dragonwilds"])
     login(client, PAL)
@@ -135,7 +135,7 @@ def test_the_launcher_has_one_tile_per_app_and_no_duplicate_paths(env):
     login(client, ADMIN)
     launcher = client.get("/").data.decode()
     assert re.findall(r'class="tile" data-app="(\w+)"', launcher) == \
-        ["skippy", "games", "bilby", "music", "experiments", "dashboard", "admin"]
+        ["skippy", "games", "music", "experiments", "dashboard", "admin"]
     assert launcher.count('href="/games"') == 1 and 'href="/games/' not in launcher      # games live in one app, not six tiles
     assert "Server room" not in launcher and "<nav" not in launcher
     _add_friend(client, PAL, ["dragonwilds"])
@@ -1265,24 +1265,20 @@ def test_home_report_needs_the_paired_token(env):
     assert "qwen2.5:7b" in page and "whisper" in page and "97%" in page and "Veridis Quo" in page
 
 
-def test_bilby_shows_now_playing_and_carries_controls_home(env):
-    import base64, json
+def test_the_old_bilby_page_is_gone_and_every_old_link_lands_in_bilbys_audio_service(env):
+    """The Captain removed the Mac-DJ mirror page (2026-09-30); bookmarks and the old tile's address must still go somewhere."""
     client, _, _ = env
-    token = _pair(client)
-    auth_h = {"Authorization": f"Bearer {token}"}
-    report = json.loads(json.dumps(REPORT))
-    report["art"] = {"key": REPORT["bilby"]["now_playing"]["art_url"], "type": "image/jpeg",
-                     "b64": base64.b64encode(b"JPEGDATA").decode()}
-    assert client.post("/home/report", json=report, headers=auth_h).get_json()["need_art"] is False
-    state = client.get("/bilby/state.json").get_json()
-    assert state["traktor"]["now_playing"]["title"] == "Veridis Quo" and state["has_art"]
-    assert "art_url" not in state["traktor"]["now_playing"]                      # home hostnames stay home
-    assert client.get("/bilby/art").data == b"JPEGDATA"
-    assert "Veridis Quo" in client.get("/").data.decode()                        # front-page card
-    client.post("/bilby/control", data={"action": "skip"})
-    reply = client.post("/home/report", json=json.loads(json.dumps(REPORT)), headers=auth_h).get_json()
-    assert [(c["target"], c["action"]) for c in reply["commands"]] == [("music", "skip")]
-    assert client.post("/home/report", json=json.loads(json.dumps(REPORT)), headers=auth_h).get_json()["commands"] == []
+    for path in ("/bilby", "/bilby/", "/bilby/state.json", "/bilby/art", "/bilby/anything/else"):
+        resp = client.get(path)
+        assert resp.status_code == 301 and resp.location.endswith("/music"), path
+    assert client.post("/bilby/control", data={"action": "skip"}).status_code == 405       # the controls are gone too
+    login(client, ADMIN)
+    launcher = client.get("/").data.decode()
+    assert "Bilby's Audio Service" in launcher and 'data-app="bilby"' not in launcher
+    assert "Bilby's Audio Service" in client.get("/music").data.decode()
+    manifest = client.get("/music/manifest.webmanifest").get_json()
+    assert manifest["name"] == "Bilby's Audio Service" and manifest["short_name"] == "Bilby"
+    assert 'href="/music"' in client.get("/me").data.decode()                            # the dashboard's now-playing link
 
 
 # ── core health (skippy-tel-core) on the dashboard ────────────────────────────
@@ -1376,16 +1372,13 @@ def test_me_shows_core_health_and_the_watcher_repeats_the_problems(env):
     assert client.get("/me").status_code == 403               # a friend never sees it
 
 
-def test_bilby_is_a_grant_and_controls_are_admin_only(env):
+def test_a_friend_with_the_old_bilby_grant_is_not_let_into_the_captains_player(env):
     client, _, _ = env
-    _add_friend(client, PAL, ["dragonwilds"])
-    login(client, PAL)
-    assert client.get("/bilby").status_code == 403
     _add_friend(client, PAL, ["bilby"])
     login(client, PAL)
-    assert client.get("/bilby").status_code == 200
-    assert client.post("/bilby/control", data={"action": "skip"}).status_code in (302, 403)
-    assert client.get("/me").status_code == 403                                  # home status stays private
+    assert client.get("/bilby").status_code == 301                                      # the old address only redirects
+    assert client.get("/music").status_code == 403                                      # the audio service is the Captain's
+    assert client.get("/me").status_code == 403                                         # home status stays private
 
 
 def test_chat_reply_says_which_tools_did_the_work(env):
@@ -1484,18 +1477,6 @@ def test_radiance_only_passes_a_plain_scene_id(env):
     r = client.get("/experiments/radiance/?scene=double_slit&evil=1")
     assert r.status_code == 302 and r.location.endswith("/experiments/radiance/?scene=double_slit")
     assert client.get("/experiments/radiance/?scene=double_slit").status_code != 302
-
-
-def test_bilby_art_is_always_served_as_an_image(env):
-    import base64
-    client, _, _ = env
-    token = _pair(client)
-    report = json.loads(json.dumps(REPORT))
-    report["art"] = {"key": REPORT["bilby"]["now_playing"]["art_url"], "type": "text/html",
-                     "b64": base64.b64encode(b"<script>alert(1)</script>").decode()}
-    client.post("/home/report", json=report, headers={"Authorization": f"Bearer {token}"})
-    r = client.get("/bilby/art")
-    assert r.mimetype == "image/jpeg" and r.headers["X-Content-Type-Options"] == "nosniff"
 
 
 # ── local capabilities in the portal chat: music made on skippy-pc ────────────

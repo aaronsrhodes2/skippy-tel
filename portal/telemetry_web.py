@@ -32,9 +32,10 @@ SKIP_ENDPOINTS = frozenset({
     "static", "health", "site_icons",
     "dashboard.game_live", "dashboard.game_discord",               # a game page polls these
     "server_admin.fragment",                                        # ... and the admin card's 60 s refresh (HTML, so the mimetype rule wouldn't skip it)
-    "bilby.state", "bilby.art",                                     # the Bilby page polls these
+    "music.player_gate", "music.player_checkin", "music.player_command",   # Bilby's Audio Service polls these
     "chat.badges", "chat.media_file",                               # the chat fetches these itself
     "me.workshop_send", "me.workshop_events", "me.workshop_stop",   # the Captain's private Skippy: not recorded at all
+    "me.workshop_resync",
     "experiments.radiance_file", "radiance_probe",
     "home_report", "home_jobs", "home_job_done", "home_media", "home_import_chunk", "home_workshop",
     "home_telemetry", "game_import_download", "game_import_done", "ops_home", "tasks_run",
@@ -56,7 +57,7 @@ SAFE_VALUES = {
     "from_request": r"[01]",    # approving from a request card
 }
 _TAP = re.compile(r"[a-z0-9:_.\-]{1,60}")
-LAUNCHER_TILES = ("skippy", "games", "bilby", "music", "experiments", "dashboard", "admin")   # templates/home.html
+LAUNCHER_TILES = ("skippy", "games", "music", "experiments", "dashboard", "admin")   # templates/home.html
 TAPS_PER_MIN = 120          # one person's beacon budget
 STUCK_AFTER_S = 900         # an event this old is still unacknowledged although home keeps pulling: the widget says so (normally < 1 min)
 
