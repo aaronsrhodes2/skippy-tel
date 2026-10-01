@@ -68,6 +68,15 @@ def test_a_card_gives_up_after_40_minutes_but_keeps_the_commit_link(page):
 
 
 @needs_node
+def test_a_push_the_portal_no_longer_knows_says_so_once_and_keeps_its_commit_link(page):
+    out = drive(page, [{"adv": 1500}, {"snap": "s"}, {"adv": 60 * S}, {"snap": "t"}],
+                tasks={"t1": {"state": "done", "events": [SHIP]}}, follow="t1", ship={SHA: [{"__status": 404}]})
+    [card] = out["snaps"]["s"]["ships"]
+    assert "redeployed since" in card["text"] and card["links"][0]["href"] == COMMIT
+    assert out["snaps"]["t"]["shipPolls"] == 1                                                   # final: asked once
+
+
+@needs_node
 def test_a_ship_event_with_a_bad_sha_is_just_a_line(page):
     out = drive(page, [{"adv": 1500}, {"snap": "s"}],
                 tasks={"t1": {"state": "done", "events": [{**SHIP, "sha": "nope"}]}}, follow="t1")

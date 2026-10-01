@@ -213,7 +213,9 @@ function fakeFetch(url, opts) {
     const sha = u.searchParams.get("sha"); rec.sha = sha;
     const list = (input.ship || {})[sha] || [{final: true, tone: "ok", headline: "?"}];
     const n = calls.filter(c => c.route === "ship" && c.sha === sha).length - 1;
-    return Promise.resolve(reply(200, list[Math.min(n, list.length - 1)]));
+    const item = list[Math.min(n, list.length - 1)];
+    if (item && item.__status) return Promise.resolve(reply(item.__status, {error: "unknown commit"}));
+    return Promise.resolve(reply(200, item));
   }
   if (route === "history") {                                        // a job for skippy-pc: the list, or one conversation
     const body = JSON.parse(opts.body); rec.conv = body.conv;

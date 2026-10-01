@@ -33,10 +33,10 @@
   .me-chat .actions .send { flex: 1; min-width: 5em; }
   /* Projects and conversations: one row under the title. The picker is the open conversation's project (fixed once it
      has a message: a conversation keeps to one repo) and becomes the choice for the next one after New chat. */
-  .me-chat .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
-  .me-chat .bar select { flex: 1; min-width: 9em; }
-  .me-chat .bar .notify { font-size: .78rem; color: var(--muted); display: flex; align-items: center; gap: 4px; }
-  .me-chat .bar .hint { flex-basis: 100%; font-size: .78rem; color: var(--amber); }
+  .me-chat .ps-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; flex-shrink: 0; }   /* never squeezed by the log */
+  .me-chat .ps-bar select { flex: 1; min-width: 9em; }
+  .me-chat .ps-bar .notify { font-size: .78rem; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+  .me-chat .ps-bar .hint { flex-basis: 100%; font-size: .78rem; color: var(--amber); }
   .me-chat .convs { flex: 1; overflow-y: auto; margin: 8px 0; }
   .me-chat .convs button.item { display: block; width: 100%; text-align: left; margin: 0 0 6px; padding: 8px 10px; }
   .me-chat .convs .title { display: block; color: var(--ink); overflow-wrap: anywhere; }
@@ -78,7 +78,7 @@
       <code>claude</code> there is signed in: <code class="code">/login</code>) and the home reporter is up.</p>
     {% endif %}
   {% endif %}
-  <div class="bar">
+  <div class="ps-bar">
     <select id="ps-project" aria-label="Project">
       {% for p in workshop_projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
     </select>
@@ -202,11 +202,20 @@
       c.replaceChildren(el("div", "head", d.headline || "Pushed."), el("div", "subj", d.subject || ""), stages,
                         el("div", "note", d.note || ""), links);
     }
-    async function watchShip(sha) {
+    async function watchShip(sha, p) {
       const s = ships[sha];
       while (!s.final) {
         let d = null;
-        try { const r = await call(SHIP + "?sha=" + encodeURIComponent(sha), {headers: H}); if (r.ok && r.data) d = r.data; } catch (e) {}
+        try {
+          const r = await call(SHIP + "?sha=" + encodeURIComponent(sha), {headers: H});
+          if (r.ok && r.data) d = r.data;
+          else if (r.status === 404) {             // a portal redeployed since: it no longer knows this push. Say so, keep the link.
+            const repo = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(p.repo || "") ? p.repo : "";
+            d = {final: true, tone: "wait", headline: "Pushed " + sha.slice(0, 7) + ".", subject: p.subject,
+                 note: "The portal was redeployed since, so it can't follow this one any more.",
+                 links: repo ? {commit: "https://github.com/" + repo + "/commit/" + sha} : {}, short: sha.slice(0, 7)};
+          }
+        } catch (e) {}
         if (d) { paintShip(s, d); s.final = !!d.final; }
         if (s.final) break;
         if (Date.now() - s.started > SHIP_GIVE_UP_MS) {
@@ -222,7 +231,7 @@
       if (!ships[p.sha]) {
         ships[p.sha] = {card: el("div", "ship wait"), final: false, started: Date.now()};
         paintShip(ships[p.sha], {headline: "Pushed " + p.sha.slice(0, 7) + ". Checking…", subject: p.subject});
-        watchShip(p.sha);
+        watchShip(p.sha, p);
       }
       return ships[p.sha].card;
     }

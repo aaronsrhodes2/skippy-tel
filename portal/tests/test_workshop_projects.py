@@ -108,6 +108,9 @@ def test_the_card_offers_the_projects_and_escapes_their_names(env):
     assert "<script>alert(1)" not in page                                  # escaped in the option AND in the script's JSON
     assert re.search(r"const PROJECTS = \[.*\\u003c/script\\u003e", page)
     assert 'id="ps-convs-btn">Conversations</button>' in page
+    # The row's own class: the dashboard already styles `.bar` (8 px high, overflow hidden), which squashed the row
+    # to a sliver on a phone (found in the Browser pane at 375 px).
+    assert '<div class="ps-bar">' in page and ".me-chat .bar" not in page and 'class="bar"' not in page.split("private-skippy")[1].split("</script>")[0]
 
 
 # ── conversations ──────────────────────────────────────────────────────────
