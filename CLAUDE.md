@@ -47,7 +47,6 @@ services/flask-api/app/
     ├── ollama.py         # Default tier — OLLAMA_MODEL (the vault sets qwen3:8b)
     ├── anthropic_client.py  # "put on your thinking cap" tier
     ├── gemini.py         # "ask nagatha" tier
-    ├── claude_bridge.py  # "trust the awesomeness" + "solid gold" tiers
     ├── bilby.py          # Mac Bilby daemon client
     └── whisper.py        # Audio transcription
 ```
@@ -63,8 +62,9 @@ reporter or the shelved phone apps use goes missing. A new human-facing page is 
 - Default → Ollama (OLLAMA_MODEL: qwen3:8b in the vault; config.py's fallback is still qwen2.5:7b)
 - "put on your thinking cap" → Anthropic Claude
 - "ask nagatha" / "ask gemini" → Gemini (Nagatha persona)
-- "trust the awesomeness" → Claude Code, full permissions
-- "solid gold" → Claude Code, read-only plan mode
+
+("trust the awesomeness" and "solid gold", the two Claude Code tiers, were removed 2026-09-30 at the Captain's request:
+the private Skippy on the portal's `/me` has full access, so those verbs and flask-api's claude-bridge client are gone.)
 
 ## Adding a new route
 

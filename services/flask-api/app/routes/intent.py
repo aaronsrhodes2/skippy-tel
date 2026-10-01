@@ -37,7 +37,7 @@ from typing import Callable, Iterator, Optional
 import httpx
 from flask import Blueprint, Response, request, stream_with_context
 
-from app.clients import ollama, anthropic_client, gemini, claude_bridge
+from app.clients import ollama, anthropic_client, gemini
 from app.config  import settings
 from app import keyword_memory as km
 from app import tts_settings
@@ -385,28 +385,6 @@ TIERS: list[Tier] = [
         chat=lambda text: gemini.chat(text, system=_NAGATHA_SYSTEM),
         stream=lambda text: gemini.stream_chat(text, system=_NAGATHA_SYSTEM),
     ),
-    # trust the awesomeness — Opus 4.7, full perms (--dangerously-skip-permissions),
-    # via the host-side claude-bridge. Subscription billing, not metered API.
-    # Use sparingly — each call has full read/write/exec on the PC.
-    Tier(
-        id="trust_awesomeness",
-        triggers=["trust the awesomeness"],
-        strip_re=re.compile(r"trust the awesomeness[,.:]?\s*", re.IGNORECASE),
-        prefix="[awesomeness ☢] ",
-        chat=lambda text: claude_bridge.chat(text, mode="bypass"),
-        stream=lambda text: claude_bridge.stream_chat(text, mode="bypass"),
-    ),
-    # solid gold — read-only Claude Code planning mode (default model). Read,
-    # Glob, Grep, WebFetch, WebSearch + agent tools; no Bash/Edit/Write. Same
-    # bridge, plan permission-mode. Subscription billing, not metered API.
-    Tier(
-        id="solid_gold",
-        triggers=["solid gold"],
-        strip_re=re.compile(r"solid gold[,.:]?\s*", re.IGNORECASE),
-        prefix="[solid gold] ",
-        chat=lambda text: claude_bridge.chat(text, mode="plan"),
-        stream=lambda text: claude_bridge.stream_chat(text, mode="plan"),
-    ),
 ]
 
 
@@ -417,17 +395,9 @@ def _resolve_tier(text: str, force_tier: str | None = None) -> tuple[Optional[Ti
     `force_tier` is set by the phone when a persistent AI mode is active
     (e.g. NAGATHA or CLAUDE toggled on via voice). It bypasses trigger-phrase
     scanning and routes directly to the named tier.
-
-    One-shot override: "trust the awesomeness" and "solid gold" always win over
-    force_tier — if those phrases appear in the text they take precedence.
     """
     lower = text.lower()
-    # Always check highest-priority one-shot triggers first (bypass, plan mode)
-    for t in TIERS:
-        if t.id in ("trust_awesomeness", "solid_gold"):
-            if any(trig in lower for trig in t.triggers):
-                return t, t.strip_re.sub("", text).strip()
-    # Forced tier from persistent mode (after one-shot overrides)
+    # Forced tier from persistent mode
     if force_tier:
         for t in TIERS:
             if t.id == force_tier:

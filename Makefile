@@ -102,9 +102,9 @@ adb-devices:
 phone-check:
 	@echo "=== /vault/bootstrap ==="; curl -s http://localhost:3003/vault/bootstrap | jq .
 
-# solid-gold bridge — runs on the Windows HOST, not in docker. Shells out
-# to your local `claude` CLI so SkippyTel can use your Claude Code
-# subscription instead of the metered API key.
+# Claude bridge — runs on the Windows HOST, not in docker. Shells out to your local `claude` CLI
+# (your Claude Code subscription) as the engine of the private Skippy on the portal's /me.
+# For a bridge that restarts itself and survives a reboot: make bridge-supervised.
 #
 # Set CLAUDE_PATH if `claude` isn't in PATH:
 #   make bridge CLAUDE_PATH=C:/Users/aaron/AppData/Roaming/npm/claude.cmd
@@ -140,17 +140,6 @@ bridge-supervised:
 
 bridge-status:
 	bash tools/bridge_supervisor.sh --status
-
-# Smoke tests — require `make bridge` running in another terminal
-solid-gold:
-	curl -s -X POST http://localhost:3003/intent/unmatched \
-		-H "Content-Type: application/json" \
-		-d '{"text":"solid gold list the top-level files in the SkippyTel repo"}' | jq .
-
-trust-awesomeness:
-	curl -s -X POST http://localhost:3003/intent/unmatched \
-		-H "Content-Type: application/json" \
-		-d '{"text":"trust the awesomeness echo hello from awesomeness"}' | jq .
 
 # Skippy Memory — every AI conversation in one Drive folder. See docs/memory/README.md.
 #   make memory-inbox              import every export dropped in <MEMORY_DIR>/inbox/
