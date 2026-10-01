@@ -29,8 +29,12 @@ OFFLINE_S = 30             # no push at all for this long: skippy-pc isn't picki
 STALL_S = 120              # a running task silent for this long: the link to skippy-pc broke
 WANT_S = 120               # a person's "check again" is still worth answering for this long
 _CONV = re.compile(r"[A-Za-z0-9-]{8,64}")
+_PROJECT = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
 _STATES = ("running", "done", "error")
 _FINAL = ("done", "error")
+DEFAULT_PROJECT = "skippytel"   # every message before projects, and the one a home that doesn't list projects offers
+LIST_TTL = 120                  # how long a Conversations-list (or one-conversation) job waits for skippy-pc
+MAX_LISTED_CONVERSATIONS = 50
 
 
 class Busy(Exception):
@@ -61,6 +65,49 @@ def _clean(event) -> dict | None:
     return None
 
 
+def _str(value, limit: int) -> str:
+    return " ".join(value.split())[:limit] if isinstance(value, str) else ""
+
+
+def _when(value) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 else None
+
+
+def _conversation_summary(raw) -> dict | None:
+    """One row of the Conversations list, from skippy-pc's answer, or None if it isn't one."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("conv"), str) or not _CONV.fullmatch(raw["conv"]):
+        return None
+    project = raw.get("project") if isinstance(raw.get("project"), str) and _PROJECT.fullmatch(raw["project"]) else DEFAULT_PROJECT
+    turns = raw.get("turns")
+    return {"conv": raw["conv"], "project": project, "who": _str(raw.get("who"), 200),
+            "title": _str(raw.get("title"), 90) or "(no message)", "started": _when(raw.get("started")),
+            "last": _when(raw.get("last")) or _when(raw.get("started")),
+            "turns": turns if isinstance(turns, int) and not isinstance(turns, bool) and 0 <= turns < 100000 else 0,
+            "state": raw.get("state") if raw.get("state") in ("running", "done", "error") else "done"}
+
+
+def _conversation(raw) -> dict | None:
+    """A whole conversation from skippy-pc, reduced to what the chat shows: his messages, and Skippy's events as _clean
+    allows them."""
+    head = _conversation_summary({**raw, "turns": 0}) if isinstance(raw, dict) else None
+    if head is None or not isinstance(raw.get("turns"), list):
+        return None
+    turns = []
+    for t in raw["turns"][-200:]:
+        if not isinstance(t, dict):
+            continue
+        events = [e for e in (_clean(x) for x in (t.get("events") if isinstance(t.get("events"), list) else [])[-MAX_EVENTS:]) if e]
+        task = t.get("task") if isinstance(t.get("task"), str) and re.fullmatch(r"[a-f0-9]{8,32}", t["task"]) else None
+        turns.append({"task": task,                # lets the page follow a turn that is still running
+                      "message": t["message"][:MAX_MESSAGE] if isinstance(t.get("message"), str) else "",
+                      "events": events, "at": _when(t.get("at")),
+                      "state": t.get("state") if t.get("state") in ("running", "done", "error") else "done",
+                      "error": t["error"][:500] if isinstance(t.get("error"), str) else None})
+    trimmed = raw.get("trimmed")
+    return {"conv": head["conv"], "project": head["project"], "who": head["who"], "title": head["title"],
+            "turns": turns, "trimmed": trimmed if isinstance(trimmed, int) and trimmed > 0 else 0}
+
+
 class Workshop:
     def __init__(self, home, clock=time.time):
         self.home, self.clock = home, clock
@@ -87,7 +134,17 @@ class Workshop:
             return "stalled"
         return state
 
-    def send(self, owner: str, conv: str, message: str) -> str:
+    def projects(self) -> list[dict]:
+        """The projects the chat offers: what skippy-pc lists, else just SkippyTel (a home reporter older than projects)."""
+        return self.home.workshop_projects() or [{"id": DEFAULT_PROJECT, "name": "SkippyTel",
+                                                  "repo": "aaronsrhodes2/skippy-tel", "branch": "main"}]
+
+    def project(self, pid: str | None) -> dict | None:
+        """One offered project by id ("" = the default), or None when skippy-pc doesn't offer it."""
+        pid = pid or DEFAULT_PROJECT
+        return next((p for p in self.projects() if p["id"] == pid), None)
+
+    def send(self, owner: str, conv: str, message: str, project: str = "") -> str:
         message = (message or "").strip()
         if not message:
             raise ValueError("Say something.")
@@ -95,6 +152,10 @@ class Workshop:
             raise ValueError(f"That's too long: keep it under {MAX_MESSAGE} characters.")
         if not _CONV.fullmatch(conv or ""):
             raise ValueError("Bad conversation id.")
+        chosen = self.project(project)
+        if chosen is None:                       # only a project skippy-pc lists can be worked on: never a typed repo
+            raise ValueError("skippy-pc doesn't offer that project.")
+        project = chosen["id"]
         if self.paused:
             raise Paused(PAUSED_MESSAGE)
         if not self.ready():
@@ -106,10 +167,11 @@ class Workshop:
             if any(self._live_state(r) in ("queued", "running") for r in self._tasks.values()):
                 raise Busy("Skippy is still working on the last one.")
             # The job id is the task id everywhere: here, in the reporter and in the bridge.
-            task = self.home.start("workshop", owner, ttl=JOB_TTL, conv=conv, message=message, who=owner)
+            task = self.home.start("workshop", owner, ttl=JOB_TTL, conv=conv, message=message, who=owner, project=project)
             now = self.clock()
             self._tasks[task] = {"owner": owner, "conv": conv, "events": [], "state": "queued", "error": None,
-                                 "created": now, "pushed_at": now, "touched": now, "stop": False}
+                                 "created": now, "pushed_at": now, "touched": now, "stop": False, "project": project,
+                                 "message": message[:200]}     # its first words, for the notification (never shown to others)
         return task
 
     def read(self, owner: str, task: str, after: int = 0) -> dict:
@@ -128,7 +190,7 @@ class Workshop:
                 self.home.touch_chat()            # keep the reporter's quick poll going while someone watches
             after = max(0, after)
             out = {"state": state, "error": rec["error"], "events": rec["events"][after:],
-                   "next": max(after, len(rec["events"]))}
+                   "next": max(after, len(rec["events"])), "project": rec.get("project") or DEFAULT_PROJECT}
             if rec["state"] in ("queued", "running"):          # the raw state: "stalled" and "offline" are these, gone quiet
                 out["quiet_s"] = max(0, int(now - rec["pushed_at"]))
             return out
@@ -205,6 +267,35 @@ class Workshop:
         seen = self.read(owner, task, 0)                 # state only: the browser keeps the events it already has
         return {"state": seen["state"], "error": seen["error"]}
 
+    # ── conversations: the Captain's history, read from skippy-pc (the bridge keeps it, conversation_log.py) ──────
+    # A job each time (the portal can't reach home; a report carrying every conversation would be big for nothing), and
+    # the browser polls `history_result` for the answer. What comes back is checked and cut here, field by field, since
+    # it comes from whatever holds the home token, and only conversations the asker owns are shown.
+    def ask_history(self, owner: str, conv: str | None = None) -> str:
+        if conv is not None and not _CONV.fullmatch(conv):
+            raise ValueError("Bad conversation id.")
+        if conv is None:
+            return self.home.start("workshop_conversations", owner, ttl=LIST_TTL)
+        return self.home.start("workshop_conversation", owner, ttl=LIST_TTL, conv=conv)
+
+    def history_result(self, owner: str, job: str) -> dict:
+        """{"state": "running"|"done"|"error"|"unknown", ...}: for a finished list job `conversations`, for a finished
+        one-conversation job `conversation`."""
+        if not re.fullmatch(r"[a-f0-9]{8,32}", job or "") or self.home.owner_of(job) != owner:
+            return {"state": "unknown"}
+        seen = self.home.peek(job)
+        if seen["state"] != "done":
+            return {"state": seen["state"], "error": seen.get("error")}
+        body = seen.get("result") if isinstance(seen.get("result"), dict) else {}
+        if isinstance(body.get("conversations"), list):
+            listed = [c for c in (_conversation_summary(x) for x in body["conversations"]) if c and c["who"] == owner]
+            return {"state": "done", "conversations": [{k: v for k, v in c.items() if k != "who"}
+                                                       for c in listed[:MAX_LISTED_CONVERSATIONS]]}
+        conv = _conversation(body)
+        if conv is None or conv.pop("who") != owner:
+            return {"state": "error", "error": "That conversation isn't yours, or skippy-pc doesn't have it."}
+        return {"state": "done", "conversation": conv}
+
     def listing(self) -> dict:
         """What this portal holds, for the reporter's reconciler (GET /home/workshop, home token): every record, newest
         first. `state` is the live one (so "stalled" shows), `have` is how many events it holds, `final` says it ended
@@ -222,7 +313,8 @@ class Workshop:
                      for task, rec in newest_first[:MAX_LISTED]]
         return {"tasks": tasks}
 
-    def push(self, task: str, who: str, conv: str, start: int, events: list, state: str, error: str | None) -> dict:
+    def push(self, task: str, who: str, conv: str, start: int, events: list, state: str, error: str | None,
+             project: str = "") -> dict:
         """From skippy-pc (the home reporter). `start` is the index of events[0] in the run's own list; if this
         portal is missing earlier ones (it was redeployed), the reply's `have` tells the reporter to send them.
 
@@ -247,7 +339,8 @@ class Workshop:
                     raise ValueError("a task with no owner")
                 rec = self._tasks[task] = {"owner": str(who), "conv": str(conv), "events": [], "state": "running",
                                            "error": None, "created": now, "pushed_at": now, "touched": now,
-                                           "stop": False}
+                                           "stop": False,
+                                           "project": project if _PROJECT.fullmatch(project or "") else DEFAULT_PROJECT}
             have = len(rec["events"])
             if start <= have:
                 for event in events[have - start:]:

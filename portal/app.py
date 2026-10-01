@@ -649,7 +649,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         try:
             return jsonify(workshop.push(task, str(body.get("who") or ""), str(body.get("conv") or ""),
                                          body.get("start"), body.get("events"), str(body.get("state") or ""),
-                                         body.get("error")))
+                                         body.get("error"), str(body.get("project") or "")))
         except ValueError:
             abort(400)
 
@@ -794,7 +794,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             experiments=experiments.EXPERIMENTS, hidden=experiments.hidden(vm), mentat_tools=mentat_tools,
             home=home.status(), music=home.music(), core=core, services=SERVICES,
             workshop_ready=workshop.ready(), workshop_model=home.capability_note("workshop", "model"),
-            workshop_reason=home.capability_reason("workshop"),
+            workshop_reason=home.capability_reason("workshop"), workshop_projects=workshop.projects(),
             activity=telemetry_web.activity(app, home),
         )
 
@@ -817,7 +817,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         body = request.get_json(silent=True) or {}
         message = str(body.get("message") or "")
         try:
-            task = workshop.send(me(), str(body.get("conv") or ""), message)
+            task = workshop.send(me(), str(body.get("conv") or ""), message, str(body.get("project") or ""))
         except workshop_mod.Busy as exc:
             return jsonify(error=str(exc)), 409
         except workshop_mod.NotReady as exc:
@@ -844,6 +844,26 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         """The chat's "Check again" (also sent by itself when a run goes quiet): wake skippy-pc's reconciler."""
         body = request.get_json(silent=True) or {}
         return jsonify(workshop.resync(me(), str(body.get("task") or "")))
+
+    @mine.post("/workshop/history")
+    @workshop_call
+    def workshop_history():
+        """Ask skippy-pc for the Conversations list (no `conv`) or one conversation's turns (`conv`). Answers a job id at
+        once; the page polls /workshop/history/result for the answer (skippy-pc picks jobs up within a few seconds)."""
+        body = request.get_json(silent=True) or {}
+        conv = body.get("conv")
+        if not workshop.ready():
+            return jsonify(error="skippy-pc's workshop isn't answering, so the conversations can't be fetched now."), 503
+        try:
+            job = workshop.ask_history(me(), None if conv is None else str(conv))
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        return jsonify(job=job)
+
+    @mine.get("/workshop/history/result")
+    @workshop_call
+    def workshop_history_result():
+        return jsonify(workshop.history_result(me(), request.args.get("job", "")))
 
     @mine.post("/pair-home")
     @auth.admin_required

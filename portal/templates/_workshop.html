@@ -31,6 +31,17 @@
   .me-chat [hidden] { display: none !important; }        /* the base button style would otherwise show Stop while idle */
   .me-chat .actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .me-chat .actions .send { flex: 1; min-width: 5em; }
+  /* Projects and conversations: one row under the title. The picker is the open conversation's project (fixed once it
+     has a message: a conversation keeps to one repo) and becomes the choice for the next one after New chat. */
+  .me-chat .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  .me-chat .bar select { flex: 1; min-width: 9em; }
+  .me-chat .bar .hint { flex-basis: 100%; font-size: .78rem; color: var(--amber); }
+  .me-chat .convs { flex: 1; overflow-y: auto; margin: 8px 0; }
+  .me-chat .convs button.item { display: block; width: 100%; text-align: left; margin: 0 0 6px; padding: 8px 10px; }
+  .me-chat .convs .title { display: block; color: var(--ink); overflow-wrap: anywhere; }
+  .me-chat .convs .meta { display: block; font-size: .74rem; color: var(--muted); margin-top: 2px; }
+  .me-chat .convs .msg { font-size: .8rem; color: var(--muted); margin: 6px 0; }
+  .me-chat .convs .msg.bad { color: var(--red); }
   /* On a phone the card sits on top of the widgets and must fit above the floating Home button. */
   @media (max-width: 900px) { .me-chat { position: static; height: auto; min-height: 380px; max-height: calc(100vh - 290px); } .me-chat .wlog { min-height: 140px; } }
 </style>
@@ -51,6 +62,17 @@
       <code>claude</code> there is signed in: <code class="code">/login</code>) and the home reporter is up.</p>
     {% endif %}
   {% endif %}
+  <div class="bar">
+    <select id="ps-project" aria-label="Project">
+      {% for p in workshop_projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+    </select>
+    <button type="button" id="ps-convs-btn">Conversations</button>
+    <div class="hint" id="ps-project-hint" hidden>New chat: pick its project, then send your first message.</div>
+  </div>
+  <div class="convs" id="ps-convs" hidden>
+    <div class="msg" id="ps-convs-msg" role="status"></div>
+    <div id="ps-convs-list"></div>
+  </div>
   <div class="wlog" id="ps-log" aria-live="polite"></div>
   <div class="quiet" id="ps-quiet" role="status" hidden>
     <div id="ps-quiet-msg"></div>
@@ -78,9 +100,14 @@
     const strip = root.querySelector("#ps-quiet"), quietMsg = root.querySelector("#ps-quiet-msg");
     const quietHint = root.querySelector("#ps-quiet-hint"), checkBtn = root.querySelector("#ps-check");
     const reloadBtn = root.querySelector("#ps-reload");
-    const K = {conv: "ps-conv", log: "ps-log", task: "ps-task"};
+    const picker = root.querySelector("#ps-project"), pickHint = root.querySelector("#ps-project-hint");
+    const convsBtn = root.querySelector("#ps-convs-btn"), convsBox = root.querySelector("#ps-convs");
+    const convsMsg = root.querySelector("#ps-convs-msg"), convsList = root.querySelector("#ps-convs-list");
+    const K = {conv: "ps-conv", log: "ps-log", task: "ps-task", project: "ps-project"};
     const SEND = "{{ url_for('me.workshop_send') }}", EVENTS = "{{ url_for('me.workshop_events') }}",
-          STOP = "{{ url_for('me.workshop_stop') }}", RESYNC = "{{ url_for('me.workshop_resync') }}";
+          STOP = "{{ url_for('me.workshop_stop') }}", RESYNC = "{{ url_for('me.workshop_resync') }}",
+          HISTORY = "{{ url_for('me.workshop_history') }}", HISTORY_RESULT = "{{ url_for('me.workshop_history_result') }}";
+    const PROJECTS = {{ workshop_projects | tojson }};       // [{id, name, repo, branch}] as skippy-pc lists them
     const H = {"Content-Type": "application/json", "X-Workshop": "1"};
 
     // When skippy-pc goes quiet. There is no give-up: the page polls for as long as it is open, only slower.
@@ -99,6 +126,18 @@
     const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : ("c" + Date.now().toString(16) + Math.random().toString(16).slice(2, 10)).replace(/[^A-Za-z0-9-]/g, ""));
     let conv = store.get(K.conv) || uuid(); store.set(K.conv, conv);
     let turns = []; try { turns = JSON.parse(store.get(K.log) || "[]"); } catch (e) { turns = []; }
+    const known = (id) => PROJECTS.some(p => p.id === id);
+    const projectName = (id) => { const p = PROJECTS.find(x => x.id === id); return p ? p.name : id; };
+    // The open conversation's project (every conversation before projects was SkippyTel's).
+    let project = store.get(K.project) || "skippytel";
+    if (!known(project)) project = PROJECTS.length ? PROJECTS[0].id : "skippytel";
+    function setProject(id) { project = id; store.set(K.project, id); picker.value = id; }
+    function lockPicker() {                        // one conversation, one repo: the picker is fixed once it has a message
+      picker.disabled = turns.length > 0;
+      if (turns.length) pickHint.hidden = true;
+    }
+    setProject(project);
+    picker.addEventListener("change", () => { if (!turns.length && known(picker.value)) setProject(picker.value); else picker.value = project; });
     let running = null;                            // {task, after, turn, quietSince, kind, ...}: the task this page follows
     let sending = false;                           // a message is on its way to the portal
 
@@ -248,11 +287,12 @@
       if (!message || sending) return;
       let gone = null;
       if (running) { if (!canLeave(running)) return; gone = leave(running); }
+      showConvs(false);
       const mine = {role: "user", text: message}; turns.push(mine); draw(mine);
-      const reply = {role: "assistant", parts: []}; turns.push(reply); draw(reply); scroll();
+      const reply = {role: "assistant", parts: []}; turns.push(reply); draw(reply); scroll(); lockPicker();
       text.value = ""; sending = true; ui();
       let r;
-      try { r = await call(SEND, {method: "POST", headers: H, body: JSON.stringify({conv, message})}); }
+      try { r = await call(SEND, {method: "POST", headers: H, body: JSON.stringify({conv, message, project})}); }
       catch (e) { r = {ok: false, data: {error: e.message}}; }
       sending = false;
       if (!r.ok) {
@@ -279,13 +319,88 @@
       ui();
     });
     reloadBtn.addEventListener("click", () => location.reload());
-    newBtn.addEventListener("click", () => {
-      if (running && !confirm("Skippy is mid-task. Start a new chat anyway? (The task keeps going; use Stop first to end it.)")) return;
+    function leaveConversation() {                 // false: the Captain kept the running task in view
+      if (running && !confirm("Skippy is mid-task. Start a new chat anyway? (The task keeps going; use Stop first to end it.)")) return false;
       const job = running; running = null; if (job && job.wake) job.wake();
-      conv = uuid(); store.set(K.conv, conv); turns = []; save(); store.del(K.task); log.replaceChildren(); ui();
+      turns = []; save(); store.del(K.task); log.replaceChildren(); ui();
+      return true;
+    }
+    newBtn.addEventListener("click", () => {       // a new conversation, and the picker asks which project it is for
+      if (!leaveConversation()) return;
+      conv = uuid(); store.set(K.conv, conv); showConvs(false);
+      lockPicker(); pickHint.hidden = false; picker.focus();
     });
 
-    turns.forEach(draw); scroll(); ui();
+    // ── Conversations: the history skippy-pc keeps; tap one to read it and carry on in it ─────────────────────
+    let historyAsk = 0;                            // the newest request: an older answer that arrives late is dropped
+    function showConvs(on) {
+      convsBox.hidden = !on; log.hidden = on;
+      setText(convsBtn, on ? "Back to chat" : "Conversations");
+      if (!on) historyAsk++;
+    }
+    async function history(body) {                 // ask skippy-pc (via a job), then poll for the answer: about 1-15 s
+      const mine = ++historyAsk;
+      const r = await call(HISTORY, {method: "POST", headers: H, body: JSON.stringify(body)});
+      if (!r.ok || !r.data || !r.data.job) throw new Error((r.data && r.data.error) || "skippy-pc didn't take the request.");
+      for (let i = 0; i < 40; i++) {
+        await new Promise(res => setTimeout(res, 1000));
+        if (mine !== historyAsk) return null;
+        const g = await call(HISTORY_RESULT + "?job=" + encodeURIComponent(r.data.job), {headers: H});
+        const d = g.data || {};
+        if (d.state === "done") return d;
+        if (d.state === "error" || d.state === "unknown") throw new Error(d.error || "skippy-pc couldn't answer.");
+      }
+      throw new Error("skippy-pc didn't answer within 40 s. Is home reporting?");
+    }
+    const ago = (t) => {                           // seconds since the epoch -> "5 min ago"
+      const s = Math.max(0, Date.now() / 1000 - t);
+      return s < 90 ? "just now" : s < 5400 ? Math.round(s / 60) + " min ago" : s < 129600 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " days ago";
+    };
+    async function listConversations() {
+      showConvs(true); setText(convsMsg, "Asking skippy-pc…"); convsMsg.classList.toggle("bad", false); convsList.replaceChildren();
+      const mine = historyAsk + 1;
+      let d;
+      try { d = await history({}); } catch (e) { if (mine === historyAsk) { setText(convsMsg, e.message); convsMsg.classList.toggle("bad", true); } return; }
+      if (!d || mine !== historyAsk) return;
+      const rows = Array.isArray(d.conversations) ? d.conversations : [];
+      setText(convsMsg, rows.length ? "Tap one to read it and carry on." : "No conversations yet.");
+      rows.forEach(c => {
+        const b = el("button", "item"); b.type = "button";
+        b.appendChild(el("span", "title", c.title));
+        b.appendChild(el("span", "meta", projectName(c.project) + " · " + c.turns + (c.turns === 1 ? " message" : " messages") +
+                                          " · " + (c.last ? ago(c.last) : "") + (c.state === "running" ? " · working now" : "")));
+        b.addEventListener("click", () => { openConversation(c); });
+        convsList.appendChild(b);
+      });
+    }
+    async function openConversation(c) {
+      if (!leaveConversation()) return;
+      setText(convsMsg, "Opening “" + c.title + "”…"); convsMsg.classList.toggle("bad", false);
+      const mine = historyAsk + 1;
+      let d;
+      try { d = await history({conv: c.conv}); } catch (e) { if (mine === historyAsk) { setText(convsMsg, e.message); convsMsg.classList.toggle("bad", true); } return; }
+      if (!d || mine !== historyAsk || !d.conversation) return;
+      const got = d.conversation;
+      conv = got.conv; store.set(K.conv, conv); setProject(known(got.project) ? got.project : project);
+      turns = [];
+      (got.turns || []).forEach(t => {
+        turns.push({role: "user", text: t.message});
+        const reply = {role: "assistant", parts: (t.events || []).filter(e => e && (e.t === "text" || e.t === "tool"))};
+        if (t.state === "error") { reply.note = t.error || "It failed."; reply.bad = t.error !== "stopped"; }
+        reply.task = t.task;
+        turns.push(reply);
+      });
+      save(); log.replaceChildren(); turns.forEach(draw); lockPicker(); showConvs(false); scroll();
+      const last = got.turns && got.turns[got.turns.length - 1];
+      if (last && last.state === "running" && last.task) {       // still being worked on: follow it from the start
+        const reply = turns[turns.length - 1]; reply.parts = []; draw(reply);
+        follow({task: last.task, after: 0, turn: reply});
+      }
+      text.focus();
+    }
+    convsBtn.addEventListener("click", () => { if (convsBox.hidden) listConversations(); else showConvs(false); });
+
+    turns.forEach(draw); scroll(); lockPicker(); ui();
     // A reload (or a portal deploy) mid-task: pick the task back up where this page left off.
     const pending = store.get(K.task);
     if (pending && turns.length && turns[turns.length - 1].role === "assistant") {

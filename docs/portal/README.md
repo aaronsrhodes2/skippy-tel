@@ -167,6 +167,22 @@ browser <── poll /me/workshop/events ── portal <── POST /home/worksh
                                                                                     claude -p (Opus) in its own clone
 ```
 
+- **Every project, not just SkippyTel.** `services/claude-bridge/projects.json` (checked by `projects.py` at bridge start)
+  lists the Captain's repos: SkippyTel plus every repo directly under `D:\Aaron\development` whose origin is
+  `github.com/aaronsrhodes2/...` (zPhone left out: shelved; quarksum and toh-silly left out: older checkouts of sigma-ground
+  and remnant-silly). Each has its own working clone `D:\Aaron\development\<name>-workshop`, made by `git clone` on first
+  use and never the Captain's checkout (the registry refuses a clone that is, or is inside, any checkout), and the
+  checkout itself is only passed with `--add-dir`. The card's picker shows the open conversation's project (fixed once it has
+  a message); **New chat** asks which project the next one is for. The prompt (`workshop_prompt.md`) keeps SkippyTel's
+  deploy rules for SkippyTel only; for any other project the rule is that repo's own CLAUDE.md, else run its tests, push to
+  its branch (solo repos, Platinum 17) and say plainly what was not deployed. Still one run at a time across all projects.
+  Sessions are kept per project (SkippyTel keeps the bare conversation id, so older chats carry on).
+- **Conversations.** The **Conversations** button lists the newest 50 (title = the first message, project, how many
+  messages, when, "working now"); tap one to read it and carry on in it (a turn still running is followed live). The bridge
+  keeps a turns index beside each conversation's Markdown in `D:\Aaron\conversations\private-skippy`
+  (`<date>_<conv>.turns.json`: his messages, Skippy's text and tool lines, how each ended) and serves it on `GET
+  /workshop/conversations` and `GET /workshop/conversation/<conv>` (home token); the portal asks for them as home jobs
+  (`workshop_conversations`, `workshop_conversation`) and shows only the asker's own.
 - **A portal deploy doesn't lose the conversation.** History and progress live on
   skippy-pc (the bridge keeps every event and one Claude session per conversation);
   the reporter tells the portal what it has, and a redeployed portal replies "I hold N

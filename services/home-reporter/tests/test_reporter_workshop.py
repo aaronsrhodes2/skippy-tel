@@ -96,7 +96,7 @@ def test_a_run_is_started_on_the_bridge_and_its_events_reach_the_portal(wired):
     bridge, portal = wired()
     assert reporter.run_job(JOB, TOKEN) == {"result": {"state": "done"}}
     assert bridge.started == [{"task": "abc12345", "conv": "conv-12345678", "message": "make the tile green",
-                               "who": "aaron@x.com", "attach": False}]
+                               "who": "aaron@x.com", "attach": False, "project": ""}]   # "" = the bridge's default
     assert portal.held == EVENTS and portal.final == ("done", None)
     assert portal.pushes[0]["who"] == "aaron@x.com" and portal.pushes[0]["conv"] == "conv-12345678"
     assert all(c["headers"].get("Authorization") == f"Bearer {TOKEN}" for c in portal.fake.calls)

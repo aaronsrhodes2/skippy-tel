@@ -39,7 +39,8 @@ def test_a_message_becomes_a_long_lived_home_job_and_its_id_is_the_task_id(shop)
     ws, home, _ = shop
     task = ws.send(ADMIN, CONV, "  make the tile green  ")
     [job] = home.jobs_reply()["jobs"]
-    assert job == {"id": task, "kind": "workshop", "conv": CONV, "message": "make the tile green", "who": ADMIN}
+    assert job == {"id": task, "kind": "workshop", "conv": CONV, "message": "make the tile green", "who": ADMIN,
+                   "project": "skippytel"}
     assert home._jobs[task]["ttl"] == workshop_mod.JOB_TTL > home_mod.JOB_TTL
 
 
@@ -67,7 +68,7 @@ def test_pushed_events_are_readable_in_order_and_only_by_their_owner(shop):
     task = ws.send(ADMIN, CONV, "go")
     assert ws.push(task, ADMIN, CONV, 0, [TEXT, TOOL], "running", None) == {"have": 2, "stop": False}
     got = ws.read(ADMIN, task, 0)
-    assert got == {"state": "running", "error": None, "events": [TEXT, TOOL], "next": 2, "quiet_s": 0}
+    assert got == {"state": "running", "error": None, "events": [TEXT, TOOL], "next": 2, "quiet_s": 0, "project": "skippytel"}
     assert ws.read(ADMIN, task, 1)["events"] == [TOOL]
     assert ws.read("someone@else.com", task, 0)["state"] == "unknown"       # not theirs: as if it didn't exist
     assert ws.read(ADMIN, "0" * 16, 0)["state"] == "unknown"
@@ -113,7 +114,8 @@ def test_the_states_a_watcher_sees(shop):
     clock.now += workshop_mod.STALL_S + 1
     assert ws.read(ADMIN, task)["state"] == "stalled"                      # the link went quiet mid-run
     ws.push(task, ADMIN, CONV, 1, [], "error", "stopped")
-    assert ws.read(ADMIN, task) | {"events": None} == {"state": "error", "error": "stopped", "events": None, "next": 1}
+    assert ws.read(ADMIN, task) | {"events": None} == {"state": "error", "error": "stopped", "events": None, "next": 1,
+                                                       "project": "skippytel"}
 
 
 def test_reading_a_running_task_keeps_the_reporters_quick_poll_going(shop):

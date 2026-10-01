@@ -57,19 +57,27 @@ paused, signed out, not mounted yet) never replaces it, so a Drive hiccup cannot
 non-empty value replaces it (re-pairing home still needs no restart). With none held at all
 (the bridge started before Drive mounted) it looks again every 5 s.
 
-### The private Skippy: `POST /workshop`, `GET /workshop/run/<task>`, `GET /workshop/runs`, `POST /workshop/cancel/<task>`
+### The private Skippy: `POST /workshop`, `GET /workshop/run/<task>`, `GET /workshop/runs`, `POST /workshop/cancel/<task>`, `GET /workshop/conversations`, `GET /workshop/conversation/<conv>`
 
 Claude Code with **full permissions** (`--dangerously-skip-permissions`) on the
-SkippyTel repo, driven from the Captain's portal dashboard (`workshop_engine.py`).
-These four need `Authorization: Bearer <SKIPPY_HOME_TOKEN>` (the token the home
+Captain's repos, driven from his portal dashboard (`workshop_engine.py`).
+These need `Authorization: Bearer <SKIPPY_HOME_TOKEN>` (the token the home
 reporter holds; read from the environment or the vault `G:/My Drive/vault/.env`).
 With no token configured they answer 503 and stay shut.
 
 - **Model:** `claude-opus-5-5`, a constant in `workshop_engine.py`. No environment
   variable and no request field changes it.
-- **Where it works:** its own clone of the repo (`WORKSHOP_REPO`, default
-  `D:\Aaron\development\SkippyTel-workshop`, cloned on first use), never the
-  Captain's checkout. It deploys skippy-pc services from `WORKSHOP_PRIMARY`.
+- **Where it works:** per project (`projects.json`, checked by `projects.py`; a broken file
+  leaves SkippyTel only and says so in the log): its own clone (`clone`, e.g.
+  `D:\Aaron\development\SkippyTel-workshop`, cloned on first use, refused if that path holds
+  something else), never the Captain's checkout (`primary`, passed with `--add-dir`; SkippyTel
+  deploys skippy-pc services from it). `POST /workshop` takes `project` (an id from the registry,
+  default `skippytel`, anything else 400). `/health`'s `workshop.projects` lists `{id, name, repo,
+  branch}` (no paths) for the chat's picker. One run at a time across all projects.
+- **Conversations:** `GET /workshop/conversations` (newest 50: `conv, project, who, title,
+  started, last, turns, state`) and `GET /workshop/conversation/<conv>` (its turns: message,
+  text and tool events, state, error; oldest turns dropped past 600 KB), from the turns index
+  `conversation_log.py` keeps beside each conversation's Markdown. Same token.
 - **Instructions:** `workshop_prompt.md` (loaded from here, never from a request):
   the ask → change → test → push to main → deploy → verify loop, plus what it must ask first.
   **It reaches Claude as a file, never as an argument.** On Windows `claude` is npm's `claude.cmd`,

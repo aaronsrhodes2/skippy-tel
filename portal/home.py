@@ -16,6 +16,7 @@ import hashlib
 import hmac
 import itertools
 import json
+import re
 import secrets
 import threading
 import time
@@ -28,6 +29,9 @@ MAX_REPORT = 1_000_000    # bytes (album art included)
 JOB_TTL = 600             # seconds a job waits for an answer before it's dropped (a job may ask for longer)
 KNOWN_CAPABILITIES = ("make_music", "workshop", "music_gate")   # what skippy-pc may advertise; anything else it sends is ignored
 _ACTIONS = {("music", "skip"), ("music", "pause"), ("music", "resume"), ("music", "stop")}
+PROJECT_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")                    # the private Skippy's project ids (projects.json)
+GITHUB_REPO = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}")
+BRANCH = re.compile(r"[A-Za-z0-9._/-]{1,100}")
 
 
 def _hash(token: str) -> str:
@@ -197,6 +201,24 @@ class Home:
         info = ((self.report or {}).get("capabilities") or {}).get(name)
         value = info.get(key) if isinstance(info, dict) and self.can(name) else None
         return value[:40] if isinstance(value, str) else None
+
+    def workshop_projects(self) -> list[dict]:
+        """The private Skippy's projects as skippy-pc listed them (services/claude-bridge/projects.json, without paths):
+        [{id, name, repo, branch}], checked again here because it comes from whatever holds the home token. Empty while
+        home is silent or before a reporter that sends them."""
+        info = ((self.report or {}).get("capabilities") or {}).get("workshop")
+        raw = info.get("projects") if isinstance(info, dict) and self.online() else None
+        out, seen = [], set()
+        for p in raw if isinstance(raw, list) else []:
+            pid = p.get("id") if isinstance(p, dict) else None
+            if not isinstance(pid, str) or not PROJECT_ID.fullmatch(pid) or pid in seen:
+                continue
+            seen.add(pid)
+            repo = p.get("repo") if isinstance(p.get("repo"), str) and GITHUB_REPO.fullmatch(p["repo"]) else ""
+            branch = p.get("branch") if isinstance(p.get("branch"), str) and BRANCH.fullmatch(p["branch"]) else "main"
+            out.append({"id": pid, "name": _text(" ".join(str(p.get("name") or pid).split()), 60) or pid,
+                        "repo": repo, "branch": branch})
+        return out[:40]
 
     def capability_reason(self, name: str) -> str | None:
         """Why skippy-pc says a capability is NOT ready, in its own plain words (the bridge's "Claude's login on skippy-pc

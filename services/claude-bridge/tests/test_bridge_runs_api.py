@@ -12,7 +12,7 @@ import workshop_engine as engine
 from bridge_testkit import calls, finish, saved, wait_for
 
 BODY = {"task": "aaaaaaaa", "conv": "conv-12345678", "message": "make the home tile green"}
-LISTED = {"task", "conv", "who", "events", "done", "ok", "error", "age_s", "finished_age_s"}
+LISTED = {"task", "conv", "who", "project", "events", "done", "ok", "error", "age_s", "finished_age_s"}
 
 
 def start_slow(door, shop, monkeypatch, who=""):

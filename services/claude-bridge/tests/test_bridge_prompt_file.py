@@ -53,8 +53,9 @@ def test_the_prompt_file_sits_next_to_the_sessions_file(shop, tmp_path):
 def test_the_rendered_prompt_is_exactly_the_template_with_the_two_paths_filled_in(shop):
     path = shop.write_prompt()
     text = path.read_text(encoding="utf-8")
-    assert text == engine.PROMPT_FILE.read_text(encoding="utf-8").replace("{repo}", shop.repo).replace("{primary}", shop.primary)
+    assert text == engine.render_prompt(engine.PROMPT_FILE.read_text(encoding="utf-8"), shop.project())
     assert shop.repo in text and shop.primary in text and "{repo}" not in text and "{primary}" not in text
+    assert "{{" not in text and "}}" not in text and "{project}" not in text and "{branch}" not in text
     assert path.read_bytes() == text.encode("utf-8") and b"\r" not in path.read_bytes()   # no CRLF rewriting of the rules
 
 

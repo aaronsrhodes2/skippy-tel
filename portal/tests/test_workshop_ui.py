@@ -152,8 +152,9 @@ class El {
   requestSubmit() { return this.fire("submit"); }
 }
 const els = {};
-for (const id of ["ps-log", "ps-form", "ps-text", "ps-send", "ps-stop", "ps-new", "ps-quiet", "ps-quiet-msg", "ps-quiet-hint", "ps-check", "ps-reload"]) els[id] = new El("x");
-for (const id of ["ps-stop", "ps-quiet", "ps-quiet-hint", "ps-reload"]) els[id].hidden = true;
+for (const id of ["ps-log", "ps-form", "ps-text", "ps-send", "ps-stop", "ps-new", "ps-quiet", "ps-quiet-msg", "ps-quiet-hint", "ps-check", "ps-reload",
+                  "ps-project", "ps-project-hint", "ps-convs-btn", "ps-convs", "ps-convs-msg", "ps-convs-list"]) els[id] = new El("x");
+for (const id of ["ps-stop", "ps-quiet", "ps-quiet-hint", "ps-reload", "ps-project-hint", "ps-convs"]) els[id].hidden = true;
 const root = {querySelector(sel) { const e = els[sel.slice(1)]; if (!e) throw new Error("the script looked up " + sel + ", which the markup lacks"); return e; }};
 const document = {getElementById: (id) => { if (id !== "private-skippy") throw new Error("unexpected id " + id); return root; },
                   createElement: (tag) => new El(tag)};
@@ -169,6 +170,7 @@ class FakeAbort { constructor() { this.signal = {aborted: false, onabort: null};
 // The portal, as the page sees it: /me/workshop/{events,resync,send,stop}.
 const tasks = JSON.parse(JSON.stringify(input.tasks || {}));
 let net = "ok", resyncMode = "ok", sendNext = null, made = 0, latency = 0;
+const historyJobs = {};
 const calls = [];
 const later = (v) => (latency ? new Promise(res => fakeSetTimeout(() => res(v), latency)) : Promise.resolve(v));   // a slow portal
 const reply = (status, body, ctype, redirected) => ({
@@ -201,8 +203,20 @@ function fakeFetch(url, opts) {
     if (resyncMode === "throw") return Promise.reject(new Error("network down"));
     return Promise.resolve(reply(200, {state: "running", error: null}));
   }
+  if (route === "history") {                                        // a job for skippy-pc: the list, or one conversation
+    const body = JSON.parse(opts.body); rec.conv = body.conv;
+    const id = "h" + (++made);
+    historyJobs[id] = body.conv ? {state: "done", conversation: (input.history || {}).convs[body.conv]}
+                                : {state: "done", conversations: (input.history || {}).list || []};
+    if ((input.history || {}).fail) historyJobs[id] = {state: "error", error: input.history.fail};
+    return Promise.resolve(reply(200, {job: id}));
+  }
+  if (route === "history/result") {
+    rec.job = u.searchParams.get("job");
+    return Promise.resolve(reply(200, historyJobs[rec.job] || {state: "unknown"}));
+  }
   if (route === "send") {
-    rec.message = JSON.parse(opts.body).message;
+    rec.message = JSON.parse(opts.body).message; rec.project = JSON.parse(opts.body).project; rec.conv = JSON.parse(opts.body).conv;
     if (sendNext) { const s = sendNext; sendNext = null; return Promise.resolve(reply(s.status, s.body)); }
     const id = "new" + (++made);
     tasks[id] = {state: "queued", events: [], error: null};
@@ -221,6 +235,10 @@ function snap() {
     log: e["ps-log"].children.map(b => ({cls: b.className + (b.cls.has("failed") ? " failed" : ""), text: b.textContent})),
     task: storage.has("ps-task") ? JSON.parse(storage.get("ps-task")) : null, focused: e["ps-text"].focused,
     resyncs: calls.filter(c => c.route === "resync").length, text: e["ps-text"].value,
+    project: e["ps-project"].value, pickerLocked: e["ps-project"].disabled, pickHint: !e["ps-project-hint"].hidden,
+    convsShown: !e["ps-convs"].hidden, logHidden: e["ps-log"].hidden, convsMsg: e["ps-convs-msg"].textContent,
+    convsBtn: e["ps-convs-btn"].textContent, items: e["ps-convs-list"].children.map(b => b.textContent),
+    conv: storage.get("ps-conv"), storedProject: storage.get("ps-project"),
   };
 }
 
@@ -245,6 +263,8 @@ function snap() {
       const el = els[s.click];
       if (!el.disabled && !el.hidden) { await (s.click === "ps-send" ? els["ps-form"].requestSubmit() : el.fire("click")); await settle(); }
     }
+    else if ("pick" in s) { els["ps-project"].value = s.pick; await els["ps-project"].fire("change"); await settle(); }
+    else if ("item" in s) { await els["ps-convs-list"].children[s.item].fire("click"); await settle(); }
     else if ("snap" in s) snaps[s.snap] = snap();
     else throw new Error("unknown step " + JSON.stringify(s));
   }
@@ -257,7 +277,8 @@ def ev(n: int) -> dict:
     return {"t": "text", "text": f"step {n}"}
 
 
-def drive(page: str, steps: list, tasks: dict | None = None, storage: dict | None = None, follow: str | None = None) -> dict:
+def drive(page: str, steps: list, tasks: dict | None = None, storage: dict | None = None, follow: str | None = None,
+          history: dict | None = None) -> dict:
     """Run the card's script against the fake browser. `follow` = a task the page was already following (a reload
     mid-task), with a transcript that has its (empty) assistant turn."""
     store = dict(storage or {})
@@ -268,7 +289,8 @@ def drive(page: str, steps: list, tasks: dict | None = None, storage: dict | Non
     # bytes both ways, UTF-8 explicitly: text mode would decode node's output with the console's code page on Windows
     # (the card's "…" came back as mojibake there)
     done = subprocess.run([NODE, "-e", HARNESS], capture_output=True, timeout=120,
-                          input=json.dumps({"script": script(page), "steps": steps, "tasks": tasks or {}, "storage": store}).encode())
+                          input=json.dumps({"script": script(page), "steps": steps, "tasks": tasks or {}, "storage": store,
+                                            "history": history or {}}).encode())
     assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
     return json.loads(done.stdout.decode("utf-8"))
 

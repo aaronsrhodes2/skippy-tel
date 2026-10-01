@@ -182,8 +182,10 @@ The Captain's own chat is Claude Code (Opus, hard-coded, all the time) on skippy
 only, focused on the ask → change → test → push → deploy → verify loop, not linked to
 skippy-tel-core's services. Portal: `portal/workshop.py` + `/me/workshop/*` (job kind
 `workshop`, capability `workshop`); reporter: `reporter.workshop()`; engine:
-`services/claude-bridge/workshop_engine.py` + `workshop_prompt.md` (its own clone
-`SkippyTel-workshop`, one Claude session per conversation). Survives a portal redeploy
+`services/claude-bridge/workshop_engine.py` + `workshop_prompt.md` (one Claude session per conversation).
+Every project in `services/claude-bridge/projects.json` (SkippyTel and the Captain's other repos), each in its
+own clone `D:\Aaron\development\<name>-workshop`, never his checkout; one run at a time across all of them; a
+Conversations list to reopen and continue any conversation. Survives a portal redeploy
 mid-task. Rules for anything like it: [PLATINUM §19](../PLATINUM_RULES.md). Full
 description and setup: `docs/portal/README.md` → Private Skippy. Needs `make bridge` on
 the host and `claude` signed in (`/login`) there. When it or the portal stops answering from
