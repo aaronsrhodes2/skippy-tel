@@ -217,6 +217,10 @@ def test_a_device_says_whether_its_browser_has_made_a_sound_since_it_loaded():
     assert p.needs_tap(ADMIN, "phone1234")
     p.checkin(ADMIN, "phone1234", "iPhone", state(armed=False))                          # loaded but not started
     assert p.needs_tap(ADMIN, "phone1234")
+    p.checkin(ADMIN, "phone1234", "iPhone", state(tap=True))                             # says only that it is waiting on a tap
+    assert p.needs_tap(ADMIN, "phone1234")
+    p.checkin(ADMIN, "phone1234", "iPhone", state(armed=True, tap=True))                 # a play had worked, then the browser took the sound back
+    assert p.needs_tap(ADMIN, "phone1234")
     p.checkin(ADMIN, "phone1234", "iPhone", state(armed=True, tap=False))                # a play() worked: nothing more is needed
     assert not p.needs_tap(ADMIN, "phone1234")
     p.checkin(ADMIN, "phone1234", "iPhone", state(armed="yes", tap="yes"))               # only real booleans count
