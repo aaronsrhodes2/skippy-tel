@@ -633,6 +633,17 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         except ValueError:
             abort(400)
 
+    @app.get("/home/workshop")
+    def home_workshop_list():
+        """What this portal holds of the private Skippy's runs (workshop.py `listing`), for the home reporter's
+        reconciler: it compares this with what the bridge holds and pushes the difference, so a portal that was just
+        redeployed (empty) is refilled without anyone asking. Same home-token door as the push; never cached."""
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        resp = jsonify(workshop.listing())
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
     # ── /bilby: the old mirror of the Mac's DJ decks is gone (the Captain's call, 2026-09-30: it no longer worked).
     #    Every old /bilby link and bookmark lands in Bilby's Audio Service instead. ───────────────────────────────
     old_bilby = Blueprint("bilby", __name__, url_prefix="/bilby")
@@ -757,6 +768,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             experiments=experiments.EXPERIMENTS, hidden=experiments.hidden(vm), mentat_tools=mentat_tools,
             home=home.status(), music=home.music(), core=core, services=SERVICES,
             workshop_ready=workshop.ready(), workshop_model=home.capability_note("workshop", "model"),
+            workshop_reason=home.capability_reason("workshop"),
             activity=telemetry_web.activity(app, home),
         )
 

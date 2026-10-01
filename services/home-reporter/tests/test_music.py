@@ -20,6 +20,8 @@ class Fake:
         self.calls = []
 
         class H(BaseHTTPRequestHandler):
+            disable_nagle_algorithm = True       # headers and body are two writes: without this each call waits ~40 ms for an ACK
+
             def _do(self, method):
                 body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
                 outer.calls.append({"method": method, "path": self.path, "headers": dict(self.headers), "body": body})
