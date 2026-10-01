@@ -23,6 +23,7 @@ ID_RE='^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$'
 SECRET_RE='^GOCSPX-[A-Za-z0-9_-]+$'
 ANTHROPIC_RE='^sk-ant-[A-Za-z0-9_-]+$'
 DISCORD_RE='^[A-Za-z0-9_.-]{50,}$'
+GITHUB_PAT_RE='^github_pat_[A-Za-z0-9_]{40,}$'   # fine-grained tokens only: a classic ghp_ token can't be scoped to one repo
 
 # ── --from-env: vault key -> Secret Manager secret, no prompts ───────────────
 if [ "${1:-}" = --from-env ]; then
@@ -45,6 +46,7 @@ SKIPPY_PORTAL_OAUTH_CLIENT_ID portal-google-client-id $ID_RE
 SKIPPY_PORTAL_OAUTH_CLIENT_SECRET portal-google-client-secret $SECRET_RE
 ANTHROPIC_API_KEY anthropic-api-key $ANTHROPIC_RE
 DISCORD_BOT_TOKEN discord-bot-token $DISCORD_RE
+GITHUB_ACTIONS_TOKEN github-actions-token $GITHUB_PAT_RE
 EOF
   echo; echo "$saved secret(s) saved. Tell Claude to redeploy."
   exit 0

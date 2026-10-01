@@ -50,6 +50,8 @@ locals {
     "portal-google-client-secret",
     "anthropic-api-key", # optional: enables Skippy chat
     "discord-bot-token", # optional: enables Discord setup from the admin page
+    "github-actions-token", # optional: the admin page's recovery buttons (rollback, re-run, cancel a stuck deploy).
+                            # A fine-grained token for this repo only, Actions read/write and nothing else.
   ]
 }
 
