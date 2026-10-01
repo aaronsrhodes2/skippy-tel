@@ -1,0 +1,126 @@
+{# The Admin page's recovery cards (recovery.py / recovery_web.py). Admin only: admin.html is the only page that includes
+   this, and every button posts to /admin/recovery/<action>, which checks the admin, the origin, a confirm and a rate limit.
+   The page asks first (confirm()), then fills in confirm=yes; with no script the server asks on a page of its own. #}
+{% macro button(action, cls="", extra="") -%}
+  <form class="inline" method="post" action="{{ url_for('recovery.act', action=action) }}"
+        data-ask="{{ rc.actions[action].ask }}"
+        onsubmit="if (!confirm(this.dataset.ask)) return false; this.elements.confirm.value = 'yes';">
+    <input type="hidden" name="confirm" value="">
+    {{ extra }}
+    <button type="submit" class="{{ cls }}">{{ rc.actions[action].label }}</button>
+  </form>
+{%- endmacro %}
+{% set rc = recovery_cards() %}
+{% set b = rc.build %}
+{% set v = rc.view %}
+<section id="recovery">
+  <h2>Recovery</h2>
+
+  <div class="card" id="live-version">
+    <h3>Live version</h3>
+    {% if b.commit == 'dev' %}
+      <p>A local build: no commit stamped in (not built by the deploy pipeline).</p>
+    {% else %}
+      <p>Serving <a href="https://github.com/{{ rc.repo }}/commit/{{ b.commit }}" target="_blank" rel="noopener">{{ b.short }}</a>
+        {% if b.revision %}&middot; revision <code class="code">{{ b.revision }}</code>{% endif %}</p>
+      <p class="help">Built {{ b.built_at or 'unknown' }} &middot; this instance started {{ b.started_at }}</p>
+    {% endif %}
+    {% if v %}
+      {% if v.ahead == 0 %}
+        <p>This is the newest push on main.</p>
+      {% elif v.ahead %}
+        <p class="warn">main is {{ v.ahead }} push{{ 'es' if v.ahead != 1 }} ahead of what's live
+          (newest: {{ v.newest.short }}, {{ v.newest.word }}).</p>
+      {% elif b.commit != 'dev' %}
+        <p class="warn">What's live isn't among the last {{ rc.fetched }} deploys of main: it is far behind, or was deployed some other way.</p>
+      {% endif %}
+      {% if v.held_back %}
+        <p class="warn">A newer deploy ({{ v.green.short }}) passed but isn't serving: a rollback is holding traffic back.
+          The next push to main releases it.</p>
+      {% endif %}
+    {% elif not rc.configured %}
+      <p class="help">How far main is ahead shows here once the deploy buttons are configured (below).</p>
+    {% endif %}
+  </div>
+
+  <div class="card" id="deploy-pipeline">
+    <h3>Deploy pipeline</h3>
+    {% if not rc.configured %}
+      <p>Not configured: the portal has no <code class="code">GITHUB_ACTIONS_TOKEN</code>, so these buttons are hidden.</p>
+      <p class="help">Make a fine-grained GitHub token for this repo only (Actions: read and write, nothing else), add it to
+        the repo's Actions secrets as PORTAL_ACTIONS_TOKEN, and deploy. docs/portal/remote-recovery.md has the steps.</p>
+    {% else %}
+      {% if rc.error %}<p class="error">{{ rc.error }}</p>{% endif %}
+      {% if v and v.runs %}
+        {% for r in v.runs %}
+          <p><span class="dot {{ 'green' if r.word == 'passed' else ('amber' if r.word in ('running', 'queued', 'waiting', 'pending', 'requested') else 'grey') }}"></span>
+            <b>{{ r.short }}</b> {{ r.word }} &middot; {{ r.age }}
+            &middot; <a href="{{ r.html_url }}" target="_blank" rel="noopener">log</a>
+            {% if r.title %}<br><span class="help">{{ r.title }}</span>{% endif %}</p>
+        {% endfor %}
+      {% elif not rc.error %}
+        <p>No deploy runs of main yet.</p>
+      {% endif %}
+
+      {% if v and v.stuck %}
+        <p class="warn">Deploy {{ v.stuck.short }} has been {{ v.stuck.word }} since {{ v.stuck.age }}: stuck.</p>
+        <p class="row">{{ button('cancel-stuck', 'danger') }}</p>
+        <p class="help">Cancelling makes the deploy's own last step put back the revision it replaced (if it had switched
+          traffic already). Nothing more is rolled back.</p>
+      {% endif %}
+      {% if v and v.failed %}
+        <p class="row">{{ button('rerun-failed') }}</p>
+        <p class="help">Re-runs only the jobs that failed in deploy {{ v.failed.short }}, the newest one. A flaky test or a
+          GitHub hiccup, not a real failure? This is the button.</p>
+      {% endif %}
+
+      <form method="post" action="{{ url_for('recovery.act', action='rollback') }}"
+            data-ask="{{ rc.actions['rollback'].ask }}"
+            onsubmit="if (!confirm(this.dataset.ask)) return false; this.elements.confirm.value = 'yes';">
+        <input type="hidden" name="confirm" value="">
+        <label class="field" for="rb-revision">Roll back to (optional)</label>
+        <input type="text" id="rb-revision" name="revision" autocomplete="off" pattern="(latest|skippy-portal-[a-z0-9-]+)?"
+               placeholder="blank = the previous good revision">
+        <p class="row" style="margin-top:8px"><button type="submit" class="danger">{{ rc.actions['rollback'].label }}</button></p>
+      </form>
+      <p class="row">{{ button('undo-rollback') }}</p>
+      <p class="help">A rollback holds until the next push to main, which deploys normally and sends traffic forward again
+        (with whatever that push contains). If the portal itself is too broken to open this page: GitHub mobile &rarr; this
+        repo &rarr; Actions &rarr; rollback &rarr; Run workflow, box left blank.</p>
+    {% endif %}
+  </div>
+
+  {% set w = rc.workshop %}
+  <div class="card" id="workshop-recovery">
+    <h3>Private Skippy</h3>
+    {% if rc.paused %}
+      <p class="warn">Paused by {{ rc.paused.by }}: new messages are refused.</p>
+    {% endif %}
+    {% if w %}
+      <p>Current task <code class="code">{{ w.task }}</code>: <b>{{ w.state }}</b>{% if w.stopping %} (stop sent){% endif %}
+        &middot; started {{ (w.age_s // 60) }} min ago{% if w.open %} &middot; last word from skippy-pc {{ w.quiet_s }} s ago{% endif %}</p>
+      {% if w.error and not w.open %}<p class="help">Ended: {{ w.error }}</p>{% endif %}
+    {% else %}
+      <p>No task since this portal started.</p>
+    {% endif %}
+    {% if not rc.ready %}<p class="help">skippy-pc isn't reporting the workshop right now.</p>{% endif %}
+    <p class="row">
+      {% if w and w.open %}{{ button('workshop-cancel', 'danger') }} {{ button('workshop-clear') }}{% endif %}
+      {% if rc.paused %}{{ button('workshop-resume') }}{% else %}{{ button('workshop-pause', 'danger') }}{% endif %}
+    </p>
+    <p class="help">Cancel withdraws a message still waiting for skippy-pc (it is never delivered) and tells a running one
+      to stop. Clear ends a record the chat is stuck on. The pause lives in the portal's memory: a deploy or restart of the
+      portal turns it back on.</p>
+  </div>
+
+  {% if rc.log %}
+  <div class="card" id="recovery-log">
+    <h3>Recent recovery actions</h3>
+    {% for e in rc.log %}
+      <p class="{{ '' if e.ok else 'warn' }}"><span class="help">{{ e.when }}</span>
+        <b>{{ e.action }}</b> by {{ e.by }}: {{ e.result }}</p>
+    {% endfor %}
+    <p class="help">Kept in memory (the last 20) and in Cloud Logging as <code class="code">"event": "recovery"</code>.</p>
+  </div>
+  {% endif %}
+</section>

@@ -62,6 +62,10 @@ def load() -> dict:
         "PORTAL_URL": _optional("PORTAL_URL", ""),   # the address the Discord pins link to (a custom domain, once there is one); else where the portal is reached
         "MENTAT_URL": _optional("MENTAT_URL", ""),
         "DISCORD_BOT_TOKEN": _optional("DISCORD_BOT_TOKEN"),
+        # The Admin page's deploy buttons (recovery.py): a fine-grained token, this repo only, Actions read/write. Optional:
+        # without it the Deploy pipeline card says "not configured". create_app takes it OUT of app.config at once, so no
+        # template (Flask hands them `config`) can ever print it.
+        "GITHUB_ACTIONS_TOKEN": _optional("GITHUB_ACTIONS_TOKEN"),
 
         # Usage recording for signed-in people (telemetry.py; /privacy says what). On unless switched off.
         "TELEMETRY_ENABLED": _optional("TELEMETRY_ENABLED", "true").lower() not in ("false", "0", "no", "off"),

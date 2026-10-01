@@ -39,6 +39,8 @@ import player as player_mod
 import spend
 import ratelimit
 import readiness
+import recovery
+import recovery_web
 import tasks
 import telemetry_web
 import watch
@@ -48,9 +50,13 @@ from gcp import GamesVm
 
 
 def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, home=None,
-               imports=None) -> Flask:
+               imports=None, github=None) -> Flask:
     app = Flask(__name__)
     app.config.update(settings if settings is not None else config.load())
+    # The recovery buttons' GitHub token lives only inside the client object, never in app.config (templates see that).
+    token = app.config.pop("GITHUB_ACTIONS_TOKEN", "") or ""
+    github = github or recovery.GitHub(token)
+    del token
     # Cloud Run terminates TLS; trust its X-Forwarded-Proto/Host so OAuth
     # redirect URLs come out as https://<portal-host>/...
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
@@ -545,6 +551,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     app.register_blueprint(admin)
     admin_panel.init_app(app, vm)          # the per-game Server admin card: admin-only refresh route + template global
+    recovery_web.init_app(app, workshop, limiter, github)   # the Admin page's recovery buttons (/admin/recovery/*)
 
     # ── home reporter (services/home-reporter) ─────────────────────────────────
     @app.post("/home/report")
