@@ -35,6 +35,7 @@
      has a message: a conversation keeps to one repo) and becomes the choice for the next one after New chat. */
   .me-chat .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
   .me-chat .bar select { flex: 1; min-width: 9em; }
+  .me-chat .bar .notify { font-size: .78rem; color: var(--muted); display: flex; align-items: center; gap: 4px; }
   .me-chat .bar .hint { flex-basis: 100%; font-size: .78rem; color: var(--amber); }
   .me-chat .convs { flex: 1; overflow-y: auto; margin: 8px 0; }
   .me-chat .convs button.item { display: block; width: 100%; text-align: left; margin: 0 0 6px; padding: 8px 10px; }
@@ -82,6 +83,8 @@
       {% for p in workshop_projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
     </select>
     <button type="button" id="ps-convs-btn">Conversations</button>
+    {# A Discord DM to the Captain when a run ends (portal/notify.py). Off when the portal has no Discord bot. #}
+    <label class="notify"><input type="checkbox" id="ps-notify"{% if workshop_notify and workshop_notify_ready %} checked{% endif %}{% if not workshop_notify_ready %} disabled title="The portal has no Discord bot (DISCORD_BOT_TOKEN)"{% endif %}> Discord me when done</label>
     <div class="hint" id="ps-project-hint" hidden>New chat: pick its project, then send your first message.</div>
   </div>
   <div class="convs" id="ps-convs" hidden>
@@ -118,6 +121,7 @@
     const picker = root.querySelector("#ps-project"), pickHint = root.querySelector("#ps-project-hint");
     const convsBtn = root.querySelector("#ps-convs-btn"), convsBox = root.querySelector("#ps-convs");
     const convsMsg = root.querySelector("#ps-convs-msg"), convsList = root.querySelector("#ps-convs-list");
+    const notifyBox = root.querySelector("#ps-notify");
     const K = {conv: "ps-conv", log: "ps-log", task: "ps-task", project: "ps-project"};
     const SEND = "{{ url_for('me.workshop_send') }}", EVENTS = "{{ url_for('me.workshop_events') }}",
           STOP = "{{ url_for('me.workshop_stop') }}", RESYNC = "{{ url_for('me.workshop_resync') }}",
@@ -462,6 +466,12 @@
       text.focus();
     }
     convsBtn.addEventListener("click", () => { if (convsBox.hidden) listConversations(); else showConvs(false); });
+    notifyBox.addEventListener("change", async () => {   // the server keeps it; a failed save puts the box back
+      const want = !!notifyBox.checked;
+      let r = null;
+      try { r = await call("{{ url_for('me.workshop_notify') }}", {method: "POST", headers: H, body: JSON.stringify({on: want})}); } catch (e) {}
+      if (!r || !r.ok || !r.data || r.data.on !== want) notifyBox.checked = !want;
+    });
 
     turns.forEach(draw); scroll(); lockPicker(); ui();
     // A reload (or a portal deploy) mid-task: pick the task back up where this page left off.

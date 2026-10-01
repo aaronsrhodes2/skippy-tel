@@ -111,6 +111,26 @@ def test_a_ship_event_is_carried_to_the_portal_as_it_is(fakes):
     assert portal.held[T1] == [ev(0), ship]
 
 
+def test_how_long_ago_a_run_ended_rides_on_every_push_of_a_finished_run_only(fakes):
+    bridge = BridgeStub({T1: BridgeStub.run(events=[ev(n) for n in range(150)], done=True, finished_age_s=42.0)})
+    real = bridge.handle
+
+    def with_age(method, path, headers, body):                        # the bridge's run read says how long ago it ended
+        status, hdrs, payload = real(method, path, headers, body)
+        if path.startswith("/workshop/run/"):
+            data = json.loads(payload)
+            data["finished_age_s"] = 42.0
+            payload = json.dumps(data).encode()
+        return status, hdrs, payload
+    bridge.fake.close()
+    portal = PortalStub()
+    fakes(with_age, portal)
+    reporter.WorkshopSync(TOKEN, SpyJobs()).sync_once()
+    assert len(portal.pushes) == 2 and all(p["finished_age_s"] == 42.0 for p in portal.pushes)   # both chunks
+    assert reporter.push_workshop(TOKEN, T1, OWNER, CONV, 0, [], "running") is not None
+    assert "finished_age_s" not in portal.pushes[-1]                  # a run still going says nothing of the kind
+
+
 # ── conversations ──────────────────────────────────────────────────────────
 def test_the_conversations_list_and_one_conversation_come_from_the_bridge_with_the_token(fakes):
     seen = []

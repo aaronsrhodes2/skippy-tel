@@ -204,8 +204,11 @@ class Run:
         with self._cond:
             if wait > 0:
                 self._cond.wait_for(lambda: len(self.events) > after or self.done, timeout=wait)
+            # finished_age_s: how long ago it ended, so a portal hearing of an old run (after a deploy) can tell it from
+            # one that just finished (it notifies the Captain only for the second kind: portal/notify.py)
             return {"events": self.events[after:], "next": len(self.events), "done": self.done,
-                    "ok": self.ok, "error": self.error}
+                    "ok": self.ok, "error": self.error,
+                    "finished_age_s": None if self.finished_at is None else round(max(0.0, time.time() - self.finished_at), 1)}
 
     def snapshot(self) -> dict:
         """Everything worth keeping across a bridge restart. The message text is not in it: nothing needs it again."""

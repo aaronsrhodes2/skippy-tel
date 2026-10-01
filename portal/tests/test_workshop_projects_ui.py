@@ -62,6 +62,14 @@ def test_new_chat_asks_which_project(page):
     assert s["picked"]["project"] == "sigma-ground"
 
 
+@needs_node
+def test_the_discord_switch_saves_and_a_failed_save_puts_it_back(page):
+    out = drive(page, [{"toggle": False}, {"snap": "off"}])
+    assert [c.get("on") for c in out["calls"] if c["route"] == "notify"] == [False] and out["snaps"]["off"]["notify"] is False
+    out = drive(page, [{"toggle": False}, {"snap": "kept"}], notify_mode="fail")
+    assert out["snaps"]["kept"]["notify"] is True                         # the server didn't take it: still on
+
+
 HISTORY = {
     "list": [{"conv": "conv-sigma0001", "project": "sigma-ground", "title": "make the solver faster", "turns": 2,
               "last": NOW - 7200, "started": NOW - 9000, "state": "done"},

@@ -191,6 +191,14 @@ browser <── poll /me/workshop/events ── portal <── POST /home/worksh
   `head_sha`) as tests → build → deploy, green only when `/version`'s commit is that sha (or a later deploy that contains it
   is live), red with the run's link and **Roll back** (Admin page) when it failed. Other projects: the commit link and
   "pushed (no deploy pipeline here)", or a link to their deploy workflow (the portal's token reads skippy-tel only).
+- **Tell me when it's done (Discord).** When a run the portal saw going ends (done, failed, stopped, or done on a question
+  for you), `portal/notify.py` sends the Captain one Discord DM through the portal's bot: project, the first words of the
+  request, the outcome, and the link to `/me` (at most 200 characters; never code, the agent's text or the error; pings
+  nobody). Only the Captain: `DISCORD_CAPTAIN_ID` in the VM settings, else the owner of `DISCORD_GUILD_ID`'s server. Once
+  per run: only when a record this process held as queued/running becomes final, never for a run that ended over 10 min
+  ago (the reporter sends `finished_age_s` with a finished run, and a record a fresh portal rebuilds from an already
+  finished run never notifies). The card's **Discord me when done** switch (default on) is kept in VM metadata
+  `portal-workshop-notify`. Discord trouble is swallowed and logged once per kind.
 - **A portal deploy doesn't lose the conversation.** History and progress live on
   skippy-pc (the bridge keeps every event and one Claude session per conversation);
   the reporter tells the portal what it has, and a redeployed portal replies "I hold N

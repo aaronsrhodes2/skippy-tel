@@ -13,8 +13,8 @@ import json
 import re
 from functools import wraps
 
-from flask import (Blueprint, Flask, abort, flash, jsonify, redirect, render_template, request, send_file,
-                   send_from_directory, url_for)
+from flask import (Blueprint, Flask, abort, flash, has_request_context, jsonify, redirect, render_template, request,
+                   send_file, send_from_directory, url_for)
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import access_requests as access_mod
@@ -40,6 +40,7 @@ import spend
 import ratelimit
 import readiness
 import recovery
+import notify as notify_mod
 import recovery_web
 import ship as ship_mod
 import tasks
@@ -555,6 +556,15 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     recovery_web.init_app(app, workshop, limiter, github)   # the Admin page's recovery buttons (/admin/recovery/*)
     ships = ship_mod.ShipWatch(github, app.extensions["recovery"]["runs"])   # the private Skippy's ship card
     app.extensions["ships"] = ships
+    # Tell the Captain on Discord when a private-Skippy run ends (notify.py: a DM to him only, one per run, switchable).
+    notifier = notify_mod.Notifier(app.config.get("DISCORD_BOT_TOKEN") or "", vm, app.config.get("PORTAL_URL") or "")
+    app.extensions["notifier"] = notifier
+
+    def run_ended(news: dict) -> None:
+        project = workshop.project(news["project"]) or {"name": news["project"]}
+        notifier.finished(news["owner"], news["task"], project["name"], news["request"], news["state"], news["error"],
+                          news["last_text"], news["finished_age_s"], portal_url=request.host_url if has_request_context() else "")
+    workshop.on_final = run_ended
 
     # ── home reporter (services/home-reporter) ─────────────────────────────────
     @app.post("/home/report")
@@ -652,7 +662,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         try:
             return jsonify(workshop.push(task, str(body.get("who") or ""), str(body.get("conv") or ""),
                                          body.get("start"), body.get("events"), str(body.get("state") or ""),
-                                         body.get("error"), str(body.get("project") or "")))
+                                         body.get("error"), str(body.get("project") or ""), body.get("finished_age_s")))
         except ValueError:
             abort(400)
 
@@ -798,6 +808,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             home=home.status(), music=home.music(), core=core, services=SERVICES,
             workshop_ready=workshop.ready(), workshop_model=home.capability_note("workshop", "model"),
             workshop_reason=home.capability_reason("workshop"), workshop_projects=workshop.projects(),
+            workshop_notify=notifier.enabled(me()), workshop_notify_ready=notifier.configured,
             activity=telemetry_web.activity(app, home),
         )
 
@@ -862,6 +873,15 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
         return jsonify(job=job)
+
+    @mine.post("/workshop/notify")
+    @workshop_call
+    def workshop_notify():
+        """The card's switch: a Discord DM when a run ends, on or off (default on; kept in VM metadata)."""
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body.get("on"), bool):
+            return jsonify(error="on must be true or false"), 400
+        return jsonify(on=notifier.set_enabled(me(), body["on"]), configured=notifier.configured)
 
     @mine.get("/workshop/ship")
     @workshop_call

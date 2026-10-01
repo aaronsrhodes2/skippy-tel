@@ -186,7 +186,8 @@ skippy-tel-core's services. Portal: `portal/workshop.py` + `/me/workshop/*` (job
 Every project in `services/claude-bridge/projects.json` (SkippyTel and the Captain's other repos), each in its
 own clone `D:\Aaron\development\<name>-workshop`, never his checkout; one run at a time across all of them; a
 Conversations list to reopen and continue any conversation; a ship card per push (`portal/ship.py`: the deploy run
-for that commit, green only when `/version` serves it). Survives a portal redeploy
+for that commit, green only when `/version` serves it); a Discord DM to the Captain when a run ends (`portal/notify.py`,
+once per run, switch on the card; `DISCORD_CAPTAIN_ID` in the VM settings, else the server owner). Survives a portal redeploy
 mid-task. Rules for anything like it: [PLATINUM §19](../PLATINUM_RULES.md). Full
 description and setup: `docs/portal/README.md` → Private Skippy. Needs `make bridge` on
 the host and `claude` signed in (`/login`) there. When it or the portal stops answering from

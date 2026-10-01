@@ -89,6 +89,14 @@ def test_the_turns_index_keeps_the_ship_event_and_the_markdown_says_it(other, mo
     assert f"shipped `{ships(run)[0]['sha']}`" in md
 
 
+def test_a_run_read_says_how_long_ago_it_ended(shop):
+    run = shop.start("aaaaaaaa", "conv-12345678", "x")
+    finish(run)
+    got = run.since(0)
+    assert isinstance(got["finished_age_s"], float) and 0 <= got["finished_age_s"] < 30
+    assert engine.Run("bbbbbbbb", "conv-12345678", "y").since(0)["finished_age_s"] is None    # still going: none
+
+
 @pytest.mark.parametrize("bad", [
     {"sha": "abc"}, {"sha": "G" * 40}, {"repo": "evil"}, {"project": "Bad"}, {"workflow": "rm.yml"},
     {"subject": 7}, {"branch": "a b"},

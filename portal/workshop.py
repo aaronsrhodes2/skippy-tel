@@ -142,6 +142,7 @@ class Workshop:
         # The commits a run said it pushed, by (owner, sha): the ship card asks about these and nothing else, so a page
         # (or anyone with the Captain's cookie) can't make the portal query GitHub for an arbitrary commit.
         self._ships: dict[tuple[str, str], dict] = {}
+        self.on_final = None                     # (news: dict) -> None: a run this process saw going has ended (notify.py)
 
     def remember_ship(self, owner: str, ship: dict) -> None:
         with self._lock:
@@ -355,7 +356,7 @@ class Workshop:
         return {"tasks": tasks}
 
     def push(self, task: str, who: str, conv: str, start: int, events: list, state: str, error: str | None,
-             project: str = "") -> dict:
+             project: str = "", finished_age_s=None) -> dict:
         """From skippy-pc (the home reporter). `start` is the index of events[0] in the run's own list; if this
         portal is missing earlier ones (it was redeployed), the reply's `have` tells the reporter to send them.
 
@@ -373,8 +374,10 @@ class Workshop:
             raise ValueError("bad push")
         now = self.clock()
         ended = False
+        age = finished_age_s if isinstance(finished_age_s, (int, float)) and not isinstance(finished_age_s, bool) else None
         with self._lock:
             rec = self._tasks.get(task)
+            created = rec is None
             if rec is None:                       # a fresh instance: rebuild the record from what home says
                 if not str(who or "").strip():
                     raise ValueError("a task with no owner")
@@ -382,6 +385,9 @@ class Workshop:
                                            "error": None, "created": now, "pushed_at": now, "touched": now,
                                            "stop": False,
                                            "project": project if _PROJECT.fullmatch(project or "") else DEFAULT_PROJECT}
+            if created and age is not None:
+                rec["relearned"] = True           # a run that was already over when this portal first heard of it
+            was = rec["state"]
             have = len(rec["events"])
             shipped = []
             if start <= have:
@@ -401,8 +407,21 @@ class Workshop:
             rec.pop("resync", None)               # this is the answer to anyone's "check again"
             reply = {"have": len(rec["events"]), "stop": rec["stop"]}
             owner = rec["owner"]
+            # Tell the Captain (portal/notify.py) only when THIS process saw the run going and now sees it end: a record
+            # rebuilt from a run that was already over (a deploy, then the reporter catching up) is never news.
+            final_news = None
+            if ended and not created and was in ("queued", "running") and not rec.get("relearned"):
+                last_text = next((e["text"] for e in reversed(rec["events"]) if e["t"] == "text"), "")
+                final_news = {"owner": owner, "task": task, "project": rec.get("project") or DEFAULT_PROJECT,
+                              "request": rec.get("message") or "", "state": state, "error": rec["error"],
+                              "last_text": last_text, "finished_age_s": age}
         for ship in shipped:
             self.remember_ship(owner, ship)
+        if final_news is not None and self.on_final is not None:
+            try:
+                self.on_final(final_news)
+            except Exception:  # noqa: BLE001 — a notification must never fail the reporter's push
+                pass
         if ended:
             self.home.finish(task, {"result": {"state": state}})     # stop offering the job to the reporter
         return reply

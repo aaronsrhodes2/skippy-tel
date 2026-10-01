@@ -425,15 +425,19 @@ _push_said = _Say()
 
 
 def push_workshop(token: str, task: str, who: str, conv: str, start: int, events: list, state: str,
-                  error: str | None = None, project: str = "") -> dict | None:
+                  error: str | None = None, project: str = "", finished_age_s: float | None = None) -> dict | None:
     """Tell the portal how a private-Skippy run is going: events[0] is index `start` of the run's own list. The reply is
     the portal's {"have": events it holds (send from there), "stop": the Captain pressed Stop}. None means the portal
-    didn't take it (down, redeploying, refused): the bridge still holds everything, so the caller just tries again."""
+    didn't take it (down, redeploying, refused): the bridge still holds everything, so the caller just tries again.
+    `finished_age_s` (only for a run the bridge says is over, on every chunk) lets the portal tell a run that just ended
+    from an old one it is being caught up on, so the Captain is notified once, not again after every deploy."""
+    body = {"who": who, "conv": conv, "start": start, "events": events, "state": state, "error": error, "project": project}
+    if finished_age_s is not None:
+        body["finished_age_s"] = finished_age_s
     req = urllib.request.Request(
         f"{PORTAL}/home/workshop/{task}", method="POST", headers={
             "Content-Type": "application/json", "Authorization": f"Bearer {token}"},
-        data=json.dumps({"who": who, "conv": conv, "start": start, "events": events,
-                         "state": state, "error": error, "project": project}).encode())
+        data=json.dumps(body).encode())
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
             reply = json.loads(r.read() or b"{}")
@@ -501,7 +505,9 @@ class Relay:
         final = done and len(events) <= WORKSHOP_PUSH
         state = ("done" if run.get("ok") else "error") if final else "running"
         error = (run.get("error") or "The run ended without finishing.") if state == "error" else None
-        reply = push_workshop(self.token, self.task, self.who, self.conv, self.after, chunk, state, error, self.project)
+        age = run.get("finished_age_s") if done else None
+        reply = push_workshop(self.token, self.task, self.who, self.conv, self.after, chunk, state, error, self.project,
+                              age if isinstance(age, (int, float)) and not isinstance(age, bool) else None)
         if reply is None:
             return "portal"
         if reply.get("stop") and not self.stopped:

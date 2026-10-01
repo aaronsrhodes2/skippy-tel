@@ -153,7 +153,8 @@ class El {
 }
 const els = {};
 for (const id of ["ps-log", "ps-form", "ps-text", "ps-send", "ps-stop", "ps-new", "ps-quiet", "ps-quiet-msg", "ps-quiet-hint", "ps-check", "ps-reload",
-                  "ps-project", "ps-project-hint", "ps-convs-btn", "ps-convs", "ps-convs-msg", "ps-convs-list"]) els[id] = new El("x");
+                  "ps-project", "ps-project-hint", "ps-convs-btn", "ps-convs", "ps-convs-msg", "ps-convs-list", "ps-notify"]) els[id] = new El("x");
+els["ps-notify"].checked = true;
 for (const id of ["ps-stop", "ps-quiet", "ps-quiet-hint", "ps-reload", "ps-project-hint", "ps-convs"]) els[id].hidden = true;
 const root = {querySelector(sel) { const e = els[sel.slice(1)]; if (!e) throw new Error("the script looked up " + sel + ", which the markup lacks"); return e; }};
 const document = {getElementById: (id) => { if (id !== "private-skippy") throw new Error("unexpected id " + id); return root; },
@@ -202,6 +203,11 @@ function fakeFetch(url, opts) {
     rec.task = JSON.parse(opts.body).task;
     if (resyncMode === "throw") return Promise.reject(new Error("network down"));
     return Promise.resolve(reply(200, {state: "running", error: null}));
+  }
+  if (route === "notify") {                                         // the Discord switch: `notifyMode` "ok" or "fail"
+    rec.on = JSON.parse(opts.body).on;
+    if ((input.notifyMode || "ok") === "fail") return Promise.resolve(reply(500, {error: "no"}));
+    return Promise.resolve(reply(200, {on: rec.on, configured: true}));
   }
   if (route === "ship") {                                           // the ship card's poll: answers in order, the last one repeats
     const sha = u.searchParams.get("sha"); rec.sha = sha;
@@ -252,7 +258,7 @@ function snap() {
       } else (node.children || []).forEach(c => find(c, out));
       return out;
     })(e["ps-log"], []),
-    shipPolls: calls.filter(c => c.route === "ship").length,
+    shipPolls: calls.filter(c => c.route === "ship").length, notify: e["ps-notify"].checked,
   };
 }
 
@@ -277,6 +283,7 @@ function snap() {
       const el = els[s.click];
       if (!el.disabled && !el.hidden) { await (s.click === "ps-send" ? els["ps-form"].requestSubmit() : el.fire("click")); await settle(); }
     }
+    else if ("toggle" in s) { els["ps-notify"].checked = s.toggle; await els["ps-notify"].fire("change"); await settle(); }
     else if ("pick" in s) { els["ps-project"].value = s.pick; await els["ps-project"].fire("change"); await settle(); }
     else if ("item" in s) { await els["ps-convs-list"].children[s.item].fire("click"); await settle(); }
     else if ("snap" in s) snaps[s.snap] = snap();
@@ -292,7 +299,7 @@ def ev(n: int) -> dict:
 
 
 def drive(page: str, steps: list, tasks: dict | None = None, storage: dict | None = None, follow: str | None = None,
-          history: dict | None = None, ship: dict | None = None) -> dict:
+          history: dict | None = None, ship: dict | None = None, notify_mode: str = "ok") -> dict:
     """Run the card's script against the fake browser. `follow` = a task the page was already following (a reload
     mid-task), with a transcript that has its (empty) assistant turn."""
     store = dict(storage or {})
@@ -304,7 +311,8 @@ def drive(page: str, steps: list, tasks: dict | None = None, storage: dict | Non
     # (the card's "…" came back as mojibake there)
     done = subprocess.run([NODE, "-e", HARNESS], capture_output=True, timeout=120,
                           input=json.dumps({"script": script(page), "steps": steps, "tasks": tasks or {}, "storage": store,
-                                            "history": history or {}, "ship": ship or {}}).encode())
+                                            "history": history or {}, "ship": ship or {},
+                                            "notifyMode": notify_mode}).encode())
     assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
     return json.loads(done.stdout.decode("utf-8"))
 
