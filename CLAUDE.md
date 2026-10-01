@@ -161,7 +161,9 @@ skippy-tel-core's services. Portal: `portal/workshop.py` + `/me/workshop/*` (job
 `SkippyTel-workshop`, one Claude session per conversation). Survives a portal redeploy
 mid-task. Rules for anything like it: [PLATINUM §19](../PLATINUM_RULES.md). Full
 description and setup: `docs/portal/README.md` → Private Skippy. Needs `make bridge` on
-the host and `claude` signed in (`/login`) there.
+the host and `claude` signed in (`/login`) there. When it or the portal stops answering from
+away: [docs/portal/remote-recovery.md](docs/portal/remote-recovery.md) (the phone-first runbook,
+the `rollback` workflow, `make bridge-supervised` and `tools/install_bridge_startup.sh`).
 
 ## Local capabilities (skippy-pc's hardware, for the portal chat)
 

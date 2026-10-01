@@ -19,9 +19,9 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: portal/requirements.txt
-      - run: pip install -r portal/requirements.txt pytest pillow   # pillow: the favicon test checks the icon sizes
+      - run: pip install -r portal/requirements.txt pytest pillow pyyaml   # pillow: the favicon test checks the icon sizes; pyyaml: tools/tests parse the workflow files
       - run: python -m pytest portal/tests memory/tests tools/tests services/home-reporter/tests services/claude-bridge/tests mentat/tests -q
       # flask-api's tests get their own session (its `app` package and the portal's app.py can't share one) and its own dependencies
       - run: pip install -r services/flask-api/requirements.txt
       - run: python -m pytest services/flask-api/tests -q
-      - run: bash -n infra/gcp-games/*.sh infra/bootstrap/*.sh scripts/games.sh
+      - run: bash -n infra/gcp-games/*.sh infra/bootstrap/*.sh scripts/games.sh tools/*.sh

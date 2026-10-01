@@ -151,6 +151,19 @@ bigcard:
 bridge-health:
 	curl -s http://localhost:9337/health | jq .
 
+# The bridge, kept alive: restarts it whenever it exits (3 s, doubling to 60 s), restarts it if it is up but mute,
+# never runs a second copy, logs to state/bridge-supervisor.log. Same environment as `make bridge`. For it to start by
+# itself at every sign-in: `bash tools/install_bridge_startup.sh` (a dry run; --apply registers it).
+# docs/portal/remote-recovery.md
+.PHONY: bridge-supervised bridge-status
+bridge-supervised:
+	$(if $(CLAUDE_PATH),CLAUDE_PATH="$(CLAUDE_PATH)") \
+	CLAUDE_BRIDGE_CWD="D:/Aaron/development" \
+	bash tools/bridge_supervisor.sh
+
+bridge-status:
+	bash tools/bridge_supervisor.sh --status
+
 # Smoke tests — require `make bridge` running in another terminal
 solid-gold:
 	curl -s -X POST http://localhost:3003/intent/unmatched \
