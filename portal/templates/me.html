@@ -99,7 +99,7 @@
         </details>{% endif %}
         {% set np = music.traktor.now_playing or (music.session and music.session.now_playing) %}
         <p>♪ {% if np %}{{ np.artist }} — {{ np.title }}{% else %}<span class="muted">nothing playing</span>{% endif %}
-          · <a href="{{ url_for('bilby.index') }}">Bilby &rarr;</a></p>
+          · <a href="{{ url_for('music.player_page') }}">Bilby's Audio Service &rarr;</a></p>
         <form method="post" action="{{ url_for('me.pair_home') }}" style="margin-top:6px">
           <button type="submit" style="padding:3px 10px" title="Makes a new token; the old one stops working">Re-pair</button></form>
       {% endif %}

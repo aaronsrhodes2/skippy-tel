@@ -1,4 +1,4 @@
-/* Bilby's Music Service: the player's logic that needs no browser (portal/static/bilby-app.js is the part that does).
+/* Bilby's Audio Service: the player's logic that needs no browser (portal/static/bilby-app.js is the part that does).
 
    Everything here is a small pure function or class, so the rules that matter (what Bilby DJ picks next, how the queue
    moves, when the browser needs a tap before it will make sound, how a 21,000-track catalog is searched) can be run
@@ -104,6 +104,14 @@
   }
 
   // ── the catalog ───────────────────────────────────────────────────────────────────────────────────────────────
+  const YEAR_SUFFIX = /\s*\((1\d{3}|20\d{2})\)\s*$/;
+  /** The library's album folders end in the year ("Mythologie (2016)"), and the gate sends the folder as the album. Shown without it
+   *  (the year has its own place beside the album), but grouped by the whole folder name: "Help! (1965)" and "Help! (1987)" are two albums. */
+  function albumTitle(raw) {
+    const m = YEAR_SUFFIX.exec(raw);
+    return m && m.index > 0 ? { name: raw.slice(0, m.index), year: +m[1] } : { name: raw, year: 0 };
+  }
+
   /** Turn the gate's catalog into what the player browses. Tracks are objects with folded search keys; artists, albums
    *  and genres are index lists into lib.T, so a list of 21,000 songs costs 21,000 numbers, not 21,000 copies.
    *
@@ -124,13 +132,14 @@
       if (typeof p !== "string" || !p) continue;
       const title = String(row[at.t] == null ? "" : row[at.t]) || p.split("/").pop();
       const artist = String(row[at.a] == null ? "" : row[at.a]) || "Unknown artist";
-      const album = String(row[at.al] == null ? "" : row[at.al]);
+      const albumRaw = String(row[at.al] == null ? "" : row[at.al]);
+      const named = albumTitle(albumRaw), album = named.name;
       const genre = genreLabel(row[at.g]);
       const ft = fold(title), fa = foldOf(artist), fal = foldOf(album), fg = foldOf(genre);
       T[n] = {
-        i: n, p, t: title, a: artist, al: album, g: genre,
+        i: n, p, t: title, a: artist, al: album, alk: albumRaw, g: genre,
         n: row[at.n] | 0, d: row[at.d] | 0, s: row[at.s] | 0, art: !!row[at.art],
-        y: hasYear ? row[at.y] | 0 : 0, m: hasAdded ? row[at.m] | 0 : 0,
+        y: (hasYear ? row[at.y] | 0 : 0) || named.year, m: hasAdded ? row[at.m] | 0 : 0,
         ly: "", ft, fa, fal, fg, sq: squash(ft + fa + fal), ap: "",
       };
       n++;
@@ -144,7 +153,7 @@
       let ar = artistByName.get(t.a);
       if (!ar) { ar = { id: 0, name: t.a, key: sortKey(t.a), fk: t.fa, sq: squash(t.fa), tracks: [], albums: [] }; artistByName.set(t.a, ar); artists.push(ar); }
       ar.tracks.push(t.i);
-      const ak = t.a + "\u0000" + t.al;
+      const ak = t.a + "\u0000" + t.alk;
       let al = albumByKey.get(ak);
       if (!al) {
         const fk = (t.fal || "singles") + " " + t.fa;
@@ -262,7 +271,7 @@
   }
 
   // ── Bilby DJ ──────────────────────────────────────────────────────────────────────────────────────────────────
-  const DJ_SAME_ARTIST = 0.7;      // the real Bilby Music Service's rule (flask-api bilby_local.suggest_next)
+  const DJ_SAME_ARTIST = 0.7;      // the real Bilby's rule (flask-api bilby_local.suggest_next)
   const DJ_AVOID_LAST = 50;        // and nothing heard in the last 50 tracks, when the pool allows
 
   /** The next track for Bilby DJ, as an index into lib.T (or -1 for an empty library).

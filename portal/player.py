@@ -1,4 +1,4 @@
-"""Bilby's Music Service: the Captain's library on his iPhone, Mac, PC and Tesla, like Spotify but his, in the browser.
+"""Bilby's Audio Service: the Captain's library on his iPhone, Mac, PC and Tesla, like Spotify but his, in the browser.
 
 The music never passes through here. skippy-pc's music-gate (services/music-gate/gate.py) serves the files to the
 internet through Tailscale Funnel, and only for a pass this module signs: the key comes from the home token's sha256,
@@ -21,7 +21,7 @@ import re
 import threading
 import time
 
-NAME = "Bilby's Music Service"
+NAME = "Bilby's Audio Service"
 SHORT_NAME = "Bilby"
 PASS_S = 8 * 3600             # a pass lasts a listening session at least; the player asks again before it runs out
 PASS_BUCKET_S = 6 * 3600      # ... and it expires on a six-hour grid, so every pass handed out inside one bucket is the SAME string:

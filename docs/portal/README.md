@@ -10,6 +10,7 @@ page. Code in [`portal/`](../../portal); deployed on every push by
 | `/dashboard` | allowlist | Server status, start (game picker + auto-sleep) / stop, per-game connect info, `#game` and 🔊 voice Discord links |
 | `/chat` | allowlist | Text chat with Skippy (Claude, Skippy persona) |
 | `/admin` | admins | Game settings (world names, passwords, Dragonwilds owner ID), **Restart & update**, **Set up / repair Discord channels** |
+| `/music` | admins | **Bilby's Audio Service**: the Captain's music collection streamed from skippy-pc to any browser (see below). `/bilby` redirects here |
 
 ## Friends: play without the Captain online
 
@@ -170,6 +171,56 @@ browser <── poll /me/workshop/events ── portal <── POST /home/worksh
   `services/claude-bridge/workshop_prompt.md` (it must ask before touching workflows,
   auth, secrets or its own harness). Those rules are a prompt, not a sandbox: the
   real guards are the login, the token and the tests.
+
+## Bilby's Audio Service (the Captain's music, `/music`)
+
+The Captain's whole music collection (21k MP3/AAC files on skippy-pc) in any browser: iPhone, Mac, PC, the Tesla. Admin only, a tile
+on the launcher (it says "library offline" when skippy-pc's music gate isn't answering). The browser is the universal client (the
+Android apps are shelved), so this is the one player. It replaces the old `/bilby` page (a mirror of the Mac's DJ decks): `/bilby` and
+everything under it now answers a 301 to `/music`, so old links keep working. The `bilby` portal grant still exists and now only
+gates the chat's `now_playing` tool; `/music` itself is the Captain's alone.
+
+```
+browser ── /music (page, /music/gate pass, /music/checkin + /music/command: Connect) ──> portal  (portal/player.py)
+   │
+   └── https://skippy-pc.<tailnet>.ts.net/t/<pass>/{catalog.json,lyrics.json,a/<path>,art/<path>?w=} ──> music-gate on skippy-pc
+```
+
+The music never passes through the portal: the portal signs a pass (the key comes from the home token's sha256, the same one the gate
+derives; no new secret), the browser carries it in the URL path to the gate, which Tailscale Funnel puts on the internet. A pass is
+good for 8 to 14 hours and is the same string for everyone asking inside one six-hour window, so the browser's own cache (covers for a
+week, songs for a day) still works across page loads. The gate's address is only ever signed for when it is on the tailnet
+(`*.ts.net`); `Player(gate_url_re=...)` exists for the dev script alone.
+
+**Files:** `portal/templates/music.html` (the shell), `portal/static/bilby-player.js` (the logic that needs no browser: the catalog,
+search, the queue, Bilby DJ's pick, the autoplay state, the virtual list's arithmetic; run under Node by the tests),
+`bilby-app.js` (the browser side: audio, views, Connect, media keys), `bilby-player.css` (portal colour variables only),
+`portal/player.py` (the pass and Connect). **Bilby DJ** is on by default: when the queue runs out it picks the next track by the
+real Bilby's rule (70 % the same artist, 30 % anything; never the current track, nothing from the last 50), 30 s before the end, so
+it is queued and preloaded in time. **The lyric line** under the title is the one sentence about what the song is about
+(`lyrics.json`, from the Mac's lyric stores through flask-api and the gate); it hides when a track has none.
+
+**Why it sometimes asks for a tap.** A browser only lets a page make sound after a tap on that page, and that starts over at every
+reload (Safari and iOS are the strictest: the permission belongs to the audio element a tap started, so there the player re-sources
+ONE element). So the player never calls `play()` without a tap. When a saved queue comes back after a reload, or another device asks
+it to play, or the browser refuses, it shows a **Tap to start the sound** bar with a one-line explanation and carries on exactly where
+it was. After one tap everything works without more: the next song, previous, skip, and a remote's commands. Each device says in its
+Connect check-in whether it is `armed` (a `play()` has worked since the page loaded) or waiting for a tap, so another device's remote
+says "needs a tap first" instead of failing silently. Expect one tap after every deploy or reload; it is not an error.
+
+**Connect.** Every open player checks in every few seconds (what it plays, where, a window of its queue). Another device lists them
+under the devices button (the speaker icon, "Other devices"): **Play here** picks up the queue and place (and pauses the other), or use it as a remote (Pause, Play,
+Next). In memory on the portal (one instance); a redeploy forgets it and the players check in again. A device's listening history
+never goes to the portal: it stays in that browser, and telemetry only ever sees the tile tap.
+
+**Looking at it without skippy-pc:** `python portal/tests/dev_music.py` (needs ffmpeg and Pillow) runs the real portal app beside the
+REAL music-gate (`services/music-gate`'s own Flask app, over a generated tagged library in the temp folder; only the source of the
+lyric lines is a few lines of stand-in), then open `http://127.0.0.1:8765/dev-login`. `--fake 21000` adds 21,000 stub tracks to see
+the virtual lists at full size; `/dev/gate-down` and `/dev/home-off` show the "isn't reachable" states. Tests: `portal/tests/test_player.py`
+(routes, passes, Connect, the page's markup against the script's lookups, the colour rule), `test_player_js.py` (runs
+`portal/tests/js/*.test.js` under Node 18+ and feeds a catalog built by the real gate to the player's parser; both are skipped, not
+failed, when Node or mutagen is missing). What only a browser can show (the audio element, drag and drop, the lock screen, the
+layouts) was checked by hand, not by a test.
 
 ## Telemetry: what the portal records, and where it goes
 

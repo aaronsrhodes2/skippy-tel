@@ -1,28 +1,33 @@
-"""DEV ONLY: run Bilby's Music Service on this machine, in a real browser, without skippy-pc, Tailscale or Google sign-in.
+"""DEV ONLY: run Bilby's Audio Service on this machine, in a real browser, without skippy-pc, Tailscale or Google sign-in.
 
-    python portal/tests/dev_music.py                  # a small generated library, portal on :8765, a stand-in gate on :8766
-    python portal/tests/dev_music.py --fake 21000     # ... plus 21,000 made-up tracks in the catalog (their audio is a 404)
-    python portal/tests/dev_music.py --etag           # the stand-in gate also answers a page's conditional requests
+    python portal/tests/dev_music.py                  # a small generated library, portal on :8765, the real music-gate on :8766
+    python portal/tests/dev_music.py --fake 21000     # ... plus 21,000 made-up tracks in the catalog (their audio is an empty file)
 
 then open http://127.0.0.1:8765/dev-login (it signs the browser in as the Captain and lands on /music).
 
-What it stands in for, and what it is not:
-  * the portal is the real portal app, built the way the tests build it (FakeVm, a home that "reports" a music gate);
-    the one dev-only change is Player.gate_url_re, so the gate may be http://127.0.0.1 instead of a *.ts.net address.
-    Production never sets it, so a gate off the tailnet is still never signed for.
-  * the gate is NOT services/music-gate: it is a small stand-in that implements the contract the player is built to
-    (catalog fields y and m, lyrics.json, art ?w=). It does check the real passes with the real gate.valid(), so a bad,
-    expired or missing pass is a 403 here too.
-  * the library is generated with ffmpeg (sine tones, tagged, some with cover art), so it needs ffmpeg and Pillow, and is
-    kept in the temp folder between runs.
+What is real and what stands in:
+  * the portal is the real portal app, built the way the tests build it (FakeVm, a home that "reports" a music gate); the one
+    dev-only change is Player.gate_url_re, so the gate may be http://127.0.0.1 instead of a *.ts.net address. Production never
+    sets it, so a gate off the tailnet is still never signed for.
+  * the gate IS services/music-gate: its own Flask app (gate.create_app) over its own Library, LyricsStore and ThumbCache, on a
+    temp library and a temp state folder. Passes are the real ones (the same key from the same dev home token).
+  * the only stand-in on the gate's side is the source of the lyric summaries, which production fetches from skippy-core's
+    flask-api (GET /music/lyric-summaries): a few lines of Flask on :8767 answer the same shape.
+  * the library is generated with ffmpeg (sine tones, tagged, some with cover art), so it needs ffmpeg and Pillow, and is kept in
+    the temp folder between runs. --fake adds empty stub files whose tags come from their names (a reader handed to the real Library).
+
+Dev-only switches, to see how the player behaves when the gate goes away (the real routes, not part of the app):
+    /dev/gate-down   stop the gate's server: the player's "skippy-pc isn't reachable" state
+    /dev/gate-up     start it again
+    /dev/home-off    the home reports no music gate (the portal answers "its music gate isn't answering")
+    /dev/home-on     and back
+
 Not collected by pytest (no test_ prefix); nothing here ships.
 """
 from __future__ import annotations
 
 import argparse
-import gzip
 import hashlib
-import io
 import json
 import re
 import shutil
@@ -31,6 +36,7 @@ import sys
 import tempfile
 import threading
 import time
+import zlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -60,6 +66,9 @@ SCALE = [262, 294, 330, 392, 440, 523, 587, 659]
 LENGTHS = [18, 26, 34, 45, 22, 38]
 LYRIC = ["A song about leaving home and finding it again somewhere else.", "Love, loss and a long drive at night.",
          "An instrumental that sounds like weather.", "A confession set to a driving beat.", "Nostalgia for a summer that never quite happened."]
+FAKE_WORDS = ["love", "night", "road", "fire", "river", "dream", "blue", "stone", "light", "dark", "heart", "wild", "gold", "rain", "glass",
+              "paper", "silver", "winter"]
+STUBS = ".dev-stubs"                       # names the stub files this script made, so they can be removed again
 
 
 def need(tool: str) -> str:
@@ -124,142 +133,119 @@ def build_library(root: Path) -> None:
     print(f"dev_music: generated {n} tracks in {root}")
 
 
-def first_year(value) -> int:
-    m = re.match(r"\s*(\d{4})", str(value or ""))
-    return int(m.group(1)) if m else 0
-
-
-def make_catalog(root: Path, fake: int) -> tuple[list[str], list[list]]:
-    import mutagen
-    from library import AUDIO, read_tags
-    fields = ["p", "t", "a", "al", "n", "d", "g", "s", "art", "y", "m"]
-    rows = []
-    for path in sorted(root.rglob("*")):
-        if path.suffix.lower() not in AUDIO or path.name.startswith("."):
-            continue
-        tags = read_tags(path)
-        if not tags:
-            continue
-        rel = path.relative_to(root).as_posix()
-        parts = rel.split("/")
-        f = mutagen.File(path)
-        raw = f.tags.get("\xa9day") if path.suffix.lower() == ".m4a" else (f.tags.get("TDRC") if f.tags else None)
-        year = first_year(raw[0] if isinstance(raw, list) else raw)
-        rows.append([rel, tags["t"] or path.stem, parts[0] if len(parts) > 1 else tags["a"], parts[1] if len(parts) > 2 else tags["al"],
-                     tags["n"], tags["d"], tags["g"], tags["s"], 1 if tags["art"] else 0, year, int(path.stat().st_mtime)])
+def make_stubs(root: Path, count: int) -> None:
+    """`count` empty .mp3 stubs (their tags are made up from the name by stub_reader), after removing the last run's."""
+    listing = root / STUBS
+    if listing.exists():
+        for rel in listing.read_text(encoding="utf-8").splitlines():
+            try:
+                (root / rel).unlink()
+            except OSError:
+                pass
+        listing.unlink()
+    if not count:
+        return
     import random
     rnd = random.Random(7)
-    words = ["love", "night", "road", "fire", "river", "dream", "blue", "stone", "light", "dark", "heart", "wild", "gold", "rain", "glass", "paper", "silver", "winter"]
-    now = int(time.time())
-    for i in range(fake):
-        artist = f"{rnd.choice(words).title()} {rnd.choice(words).title()}s {rnd.randrange(1, 600)}"
-        album = f"{rnd.choice(words).title()} {rnd.choice(words).title()}"
-        title = f"{rnd.choice(words).title()} {rnd.choice(words)} {i}"
-        rows.append([f"{artist}/{album}/{i % 14 + 1:02d} - {title}.mp3", title, artist, album, i % 14 + 1, 1, rnd.choice(["Rock", "Pop", "Jazz", "Electronic", "Folk", "", "(13)"]),
-                     rnd.randrange(120, 420), 1 if i % 4 == 0 else 0, 1970 + rnd.randrange(55), now - rnd.randrange(0, 86400 * 900)])
-    return fields, rows
+    made = []
+    for i in range(count):
+        artist = f"{rnd.choice(FAKE_WORDS).title()} {rnd.choice(FAKE_WORDS).title()}s {rnd.randrange(1, 600)}"
+        album = f"{rnd.choice(FAKE_WORDS).title()} {rnd.choice(FAKE_WORDS).title()} ({1970 + rnd.randrange(55)})"
+        rel = f"{artist}/{album}/{i % 14 + 1:02d} - {rnd.choice(FAKE_WORDS).title()} {rnd.choice(FAKE_WORDS)} {i}.mp3"
+        full = root / rel
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_bytes(b"")
+        made.append(rel)
+    listing.write_text("\n".join(made), encoding="utf-8")
+    print(f"dev_music: {count} empty stub tracks added (audio for those fails on purpose; --fake 0 removes them)")
 
 
-def make_gate(root: Path, fake: int, etag: bool):
-    from flask import Flask, Response, abort, jsonify, request, send_file
-    import gate as real_gate
-    from library import AUDIO, read_art
+def stub_reader(real_read):
+    """The Library's tag reader: the real one, except for an empty stub file, whose tags are invented from its name."""
+    def read(path: Path):
+        if path.stat().st_size:
+            return real_read(path)
+        seed = zlib.crc32(path.as_posix().encode())
+        genres = ["Rock", "Pop", "Jazz", "Electronic", "Folk", "", "(13)"]
+        m = re.match(r"(\d+) - (.+)\.mp3$", path.name)
+        year = re.search(r"\((\d{4})\)\s*$", path.parent.name)
+        return {"t": m.group(2) if m else path.stem, "a": "", "al": "", "n": int(m.group(1)) if m else 0, "d": 1,
+                "g": genres[seed % len(genres)], "art": False, "y": int(year.group(1)) if year else 0, "s": 120 + seed % 300}
+    return read
 
-    key = real_gate.gate_key(TOKEN)
-    app = Flask("dev-gate")
-    fields, rows = make_catalog(root, fake)
-    body = gzip.compress(json.dumps({"v": 1, "fields": fields, "tracks": rows}, separators=(",", ":")).encode(), 6, mtime=0)
-    tag = '"' + hashlib.sha1(body).hexdigest()[:16] + '"'
-    lyr = {r[0]: LYRIC[i % len(LYRIC)] for i, r in enumerate(rows) if i % 10 < 7}
-    lyr_gz = gzip.compress(json.dumps({"v": 1, "by": lyr}, separators=(",", ":")).encode(), 6, mtime=0)
-    thumbs: dict = {}
 
-    @app.after_request
-    def cors(resp):
-        resp.headers["Access-Control-Allow-Origin"] = "*"
-        expose = "Content-Length, Content-Range, Accept-Ranges" + (", ETag" if etag else "")
-        resp.headers["Access-Control-Expose-Headers"] = expose
-        if etag:
-            resp.headers["Access-Control-Allow-Headers"] = "If-None-Match"
-        return resp
+def lyric_source(root: Path):
+    """What flask-api's GET /music/lyric-summaries answers (library-relative paths, a line for most files)."""
+    from flask import Flask, jsonify
+    from library import AUDIO
+    rels = sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.suffix.lower() in AUDIO)
+    by = {rel: LYRIC[i % len(LYRIC)] for i, rel in enumerate(rels) if i % 10 < 7}
+    app = Flask("dev-lyric-source")
 
-    def check(token):
-        if not real_gate.valid(key, token, time.time()):
-            abort(403)
-
-    @app.get("/health")
-    def health():
-        return jsonify(ok=True, ready=True, tracks=len(rows))
-
-    @app.get("/t/<token>/catalog.json")
-    def catalog(token):
-        check(token)
-        if etag and request.headers.get("If-None-Match") == tag:
-            return Response(status=304, headers={"ETag": tag})
-        return Response(body, mimetype="application/json", headers={"Content-Encoding": "gzip", "ETag": tag, "Cache-Control": "private, no-cache"})
-
-    @app.get("/t/<token>/lyrics.json")
-    def lyrics(token):
-        check(token)
-        return Response(lyr_gz, mimetype="application/json", headers={"Content-Encoding": "gzip", "Cache-Control": "private, no-cache"})
-
-    def resolve(rel):
-        full = (root / rel).resolve()
-        try:
-            full.relative_to(root.resolve())
-        except ValueError:
-            abort(404)
-        if full.suffix.lower() not in AUDIO or not full.is_file():
-            abort(404)
-        return full
-
-    @app.get("/t/<token>/a/<path:rel>")
-    def audio(token, rel):
-        check(token)
-        full = resolve(rel)
-        return send_file(full, mimetype=AUDIO[full.suffix.lower()], conditional=True, max_age=86400)
-
-    @app.get("/t/<token>/art/<path:rel>")
-    def art(token, rel):
-        check(token)
-        found = read_art(resolve(rel))
-        if not found:
-            abort(404)
-        data, mime = found
-        w = request.args.get("w", type=int)
-        if w:
-            w = min((x for x in (96, 192, 384, 768)), key=lambda x: abs(x - w))
-            from PIL import Image
-            k = (rel, w)
-            if k not in thumbs:
-                im = Image.open(io.BytesIO(data)).convert("RGB")
-                im.thumbnail((w, w))
-                out = io.BytesIO()
-                im.save(out, "JPEG", quality=80)
-                thumbs[k] = out.getvalue()
-            data, mime = thumbs[k], "image/jpeg"
-        return Response(data, mimetype=mime, headers={"Cache-Control": "private, max-age=604800"})
+    @app.get("/music/lyric-summaries")
+    def lines():
+        return jsonify(v=1, by=by, songs={})
 
     return app
 
 
+def make_gate(root: Path, state: Path, lyrics_url: str):
+    """The real music-gate over `root`: the same Flask app production runs, built the way gate.from_env builds it (minus the
+    background threads: the scan and the first lyric fetch run here, once)."""
+    import gate as real_gate
+    from art import ThumbCache
+    from library import Library, read_tags
+    from lyrics import LyricsStore
+
+    library = Library(root, state, reader=stub_reader(read_tags))
+    t0 = time.time()
+    library.scan()
+    print(f"dev_music: the gate read {library.count} tracks in {time.time() - t0:.1f} s")
+    lyrics = LyricsStore(state, lyrics_url)
+    lyrics.rebuild(library.identities)
+    library.on_build.append(lyrics.rebuild)
+    lyrics.refresh()
+    thumbs = ThumbCache(state / "art-cache")
+    return real_gate.create_app(library, real_gate.gate_key(TOKEN), lyrics=lyrics, thumbs=thumbs)
+
+
+class Server:
+    """A werkzeug server in a thread that can be stopped and started again on the same port (the gate-down switch)."""
+    def __init__(self, app, port):
+        self.app, self.port, self.srv, self.thread = app, port, None, None
+
+    def start(self):
+        from werkzeug.serving import make_server
+        if self.srv:
+            return
+        self.srv = make_server("127.0.0.1", self.port, self.app, threaded=True)
+        self.thread = threading.Thread(target=self.srv.serve_forever, daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        if self.srv:
+            self.srv.shutdown()
+            self.srv.server_close()
+            self.srv = None
+
+
 def make_portal(gate_port: int):
-    import hashlib as _h
     import app as portal
     import home as home_mod
-    import player as player_mod
     from flask import redirect, session
     from test_app import ADMIN, FakeSkippy, FakeVm, SETTINGS
 
     vm = FakeVm()
-    vm.set_metadata(home_mod.KEY, json.dumps({"token_sha256": _h.sha256(TOKEN.encode()).hexdigest()}))
+    vm.set_metadata(home_mod.KEY, json.dumps({"token_sha256": hashlib.sha256(TOKEN.encode()).hexdigest()}))
     home = home_mod.Home(vm)
     gate_url = f"http://127.0.0.1:{gate_port}"
+    caps = {"music_gate": {"ready": True, "url": gate_url}}
+    on = {"value": True}
 
     def report():
         while True:
-            home.accept({"capabilities": {"music_gate": {"ready": True, "url": gate_url}}})
-            time.sleep(10)
+            home.accept({"capabilities": caps if on["value"] else {}})
+            time.sleep(5)
 
     threading.Thread(target=report, daemon=True).start()
     time.sleep(0.2)
@@ -273,26 +259,60 @@ def make_portal(gate_port: int):
         session["user"] = {"email": ADMIN, "name": "Captain", "picture": None}
         return redirect("/music")
 
+    @app.get("/dev/home-off")
+    def home_off():
+        on["value"] = False
+        home.accept({"capabilities": {}})
+        return "home reports no music gate"
+
+    @app.get("/dev/home-on")
+    def home_on():
+        on["value"] = True
+        home.accept({"capabilities": caps})
+        return "home reports the music gate"
+
     return app
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--lib", default=str(Path(tempfile.gettempdir()) / "bilby-dev-library"))
-    ap.add_argument("--fake", type=int, default=0, help="extra made-up tracks in the catalog (their audio is a 404)")
+    ap.add_argument("--fake", type=int, default=0, help="extra empty stub tracks in the library (made-up tags; their audio fails)")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--gate-port", type=int, default=8766)
-    ap.add_argument("--etag", action="store_true", help="the stand-in gate answers conditional requests from a page")
+    ap.add_argument("--lyrics-port", type=int, default=8767)
     args = ap.parse_args()
     root = Path(args.lib)
     if not root.is_dir() or not any(root.rglob("*.mp3")):
         build_library(root)
-    from werkzeug.serving import make_server
-    gate_app = make_gate(root, args.fake, args.etag)
-    threading.Thread(target=make_server("127.0.0.1", args.gate_port, gate_app, threaded=True).serve_forever, daemon=True).start()
+    make_stubs(root, args.fake)
+    state = Path(tempfile.gettempdir()) / "bilby-dev-state"
+    shutil.rmtree(state, ignore_errors=True)                   # a clean tag cache each run: the library may have changed under it
+    state.mkdir(parents=True, exist_ok=True)
+
+    lyrics_srv = Server(lyric_source(root), args.lyrics_port)
+    lyrics_srv.start()
+    gate_srv = Server(make_gate(root, state, f"http://127.0.0.1:{args.lyrics_port}/music/lyric-summaries"), args.gate_port)
+    gate_srv.start()
     portal_app = make_portal(args.gate_port)
-    print(f"dev_music: gate on :{args.gate_port}, portal on :{args.port}; open http://127.0.0.1:{args.port}/dev-login")
-    make_server("127.0.0.1", args.port, portal_app, threaded=True).serve_forever()
+
+    @portal_app.get("/dev/gate-down")
+    def gate_down():
+        gate_srv.stop()
+        return "the gate is stopped"
+
+    @portal_app.get("/dev/gate-up")
+    def gate_up():
+        gate_srv.start()
+        return "the gate is running"
+
+    print(f"dev_music: the real music-gate on :{args.gate_port}, the portal on :{args.port}; open http://127.0.0.1:{args.port}/dev-login")
+    Server(portal_app, args.port).start()
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":

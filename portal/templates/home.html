@@ -29,20 +29,11 @@
            {% else %}Asleep. {{ games.values() | map(attribute='name') | join(' · ') }}{% endif %}</p></div>
     {% endif %}
 
-    {% if show_bilby %}
-      {% set np = music.traktor.now_playing or (music.session and music.session.now_playing) %}
-      <a class="tile" data-app="bilby" href="{{ url_for('bilby.index') }}" data-tel="tile:bilby">
-        <span class="pill">{% if not music.online %}home offline{% elif np %}♪ playing{% else %}quiet{% endif %}</span>
-        <span class="icon">🎧</span>
-        <h3>Bilby</h3>
-        <p>{% if np %}{{ np.artist }} — {{ np.title }}{% else %}What's on the decks, live from home.{% endif %}</p></a>
-    {% endif %}
-
     {% if is_admin %}
       <a class="tile" data-app="music" href="{{ url_for('music.player_page') }}" data-tel="tile:music">
         {% if not music_gate %}<span class="pill">library offline</span>{% endif %}
         <span class="icon">🎵</span>
-        <h3>Bilby's Music Service</h3><p>Your whole collection from home on any screen: phone, Mac, PC, the car.</p></a>
+        <h3>Bilby's Audio Service</h3><p>Your whole collection from home on any screen: phone, Mac, PC, the car.</p></a>
     {% endif %}
 
     {% if show_experiments %}

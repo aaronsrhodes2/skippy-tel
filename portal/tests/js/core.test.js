@@ -1,9 +1,13 @@
-// Bilby's Music Service: the player's pure logic (portal/static/bilby-player.js), run under Node's built-in test runner.
+// Bilby's Audio Service: the player's pure logic (portal/static/bilby-player.js), run under Node's built-in test runner.
 // portal/tests/test_player_js.py runs this when Node >= 18 is on the machine and skips cleanly when it is not.
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const C = require("../../static/bilby-player.js");
+// A shared CI machine is slower and noisier than a laptop: the budgets below are the spec's on a laptop and three times that in CI.
+const SLOW = process.env.CI ? 3 : 1;
 
 // ── a small catalog shaped like the gate's ───────────────────────────────────────────────────────────────────────
 const FIELDS = ["p", "t", "a", "al", "n", "d", "g", "s", "art", "y", "m"];
@@ -19,6 +23,15 @@ const rows = [
   ["Loose/Single.mp3", "", "", "", 0, 0, "", 0, 0, 0, 0],
 ];
 const catalog = { v: 1, fields: FIELDS, tracks: rows };
+
+test("the fixture's fields are the music gate's own, in the gate's order (positional: a new field only ever goes on the end)", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "..", "..", "services", "music-gate", "library.py"), "utf8");
+  const m = /^FIELDS = \[(.*)\]/m.exec(src);
+  assert.ok(m, "services/music-gate/library.py no longer has a FIELDS list the player can be checked against");
+  const gate = m[1].split(",").map(s => s.trim().replace(/"/g, ""));
+  assert.deepEqual(gate.slice(0, FIELDS.length), FIELDS);       // what the player knows is a prefix of what the gate sends
+  assert.ok(gate.length >= FIELDS.length);
+});
 const lib = () => C.parseCatalog(catalog);
 
 // ── text ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -91,6 +104,22 @@ test("parseCatalog groups artists, albums and genres and sorts album tracks by d
   assert.equal(l.hasYear, true);
   assert.equal(l.hasAdded, true);
   assert.equal(l.byPath.get("Björk/Homogenic/01 Hunter.mp3"), 4);
+});
+
+test("an album folder's trailing (year) is not part of the album's name, but two folders stay two albums", () => {
+  const r = (p, al, y) => [p, "Song " + p, "The Beatles", al, 1, 1, "Rock", 100, 0, y, 1700000000];
+  const l = C.parseCatalog({ v: 1, fields: FIELDS, tracks: [
+    r("a/1.mp3", "Help! (1965)", 0), r("a/2.mp3", "Help! (1987)", 1987), r("a/3.mp3", "(1999)", 0), r("a/4.mp3", "Live at (Home) (2001)", 2001), r("a/5.mp3", "Abbey Road", 1969),
+  ] });
+  assert.deepEqual(l.albums.map(a => a.name).sort(), ["(1999)", "Abbey Road", "Help!", "Help!", "Live at (Home)"]);   // a name that is only a year is kept
+  const years = Object.fromEntries(l.albums.map(a => [a.key.split("\u0000")[1], a.year]));
+  assert.equal(years["Help! (1965)"], 1965);                  // the year the folder names stands in for a tag that has none
+  assert.equal(years["Help! (1987)"], 1987);
+  assert.equal(l.T[0].al, "Help!");                             // what the rows and Now Playing show
+  assert.equal(l.T[0].alk, "Help! (1965)");                    // what groups it
+  assert.equal(l.albumByKey.get("The Beatles\u0000Help! (1987)").tracks.length, 1);
+  assert.equal(C.search(l, "help 1965").albums.length, 0);   // search sees the displayed name
+  assert.equal(C.search(l, "help").albums.length, 2);
 });
 
 test("a catalog from a gate that has no year or date-added still loads, and says so", () => {
@@ -180,11 +209,11 @@ test("search over 21,000 tracks stays well under the 50 ms budget", () => {
   const r2 = C.search(bigLib, "dark");
   const ms = Number(process.hrtime.bigint() - t1) / 1e6 / 2;
   assert.ok(r1.total > 0 && r2.total > 0);
-  assert.ok(ms < 50, `search took ${ms.toFixed(1)} ms`);
-  assert.ok(parseMs < 1500, `parse took ${parseMs} ms`);
+  assert.ok(ms < 50 * SLOW, `search took ${ms.toFixed(1)} ms`);
+  assert.ok(parseMs < 1500 * SLOW, `parse took ${parseMs} ms`);
   const t2 = Date.now();
   C.sortTracks(bigLib, "title");
-  assert.ok(Date.now() - t2 < 600, "sorting 21k tracks");
+  assert.ok(Date.now() - t2 < 600 * SLOW, "sorting 21k tracks");
 });
 
 // ── Bilby DJ ─────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -110,7 +110,7 @@ def test_portal_is_all_cards_with_no_top_tabs(env):
     launcher = client.get("/").data.decode()
     assert "<nav" not in launcher and 'id="home-btn"' not in launcher          # the launcher is home: nowhere to go "back" to
     assert "sign out" in launcher                                              # the account lives on the home screen
-    for path in ("/games", "/me", "/admin", "/chat", "/bilby", "/experiments"):   # everywhere the old tabs led is now a tile
+    for path in ("/games", "/me", "/admin", "/chat", "/music", "/experiments"):   # everywhere the old tabs led is now a tile
         assert f'href="{path}"' in launcher, path
     _add_friend(client, PAL, ["dragonwilds"])
     login(client, PAL)
@@ -135,7 +135,7 @@ def test_the_launcher_has_one_tile_per_app_and_no_duplicate_paths(env):
     login(client, ADMIN)
     launcher = client.get("/").data.decode()
     assert re.findall(r'class="tile" data-app="(\w+)"', launcher) == \
-        ["skippy", "games", "bilby", "music", "experiments", "dashboard", "admin"]
+        ["skippy", "games", "music", "experiments", "dashboard", "admin"]
     assert launcher.count('href="/games"') == 1 and 'href="/games/' not in launcher      # games live in one app, not six tiles
     assert "Server room" not in launcher and "<nav" not in launcher
     _add_friend(client, PAL, ["dragonwilds"])
@@ -1265,24 +1265,39 @@ def test_home_report_needs_the_paired_token(env):
     assert "qwen2.5:7b" in page and "whisper" in page and "97%" in page and "Veridis Quo" in page
 
 
-def test_bilby_shows_now_playing_and_carries_controls_home(env):
+def test_the_home_report_keeps_what_bilby_plays_and_carries_queued_controls_home(env):
+    """The old /bilby page is gone, but its data is not: /me's widget and the chat's now_playing tool read home.music(), and the
+    reporter still asks for the cover and collects queued commands. (Nothing in the portal queues a music command any more.)"""
     import base64, json
     client, _, _ = env
     token = _pair(client)
+    home = client.application.extensions["home"]
     auth_h = {"Authorization": f"Bearer {token}"}
     report = json.loads(json.dumps(REPORT))
     report["art"] = {"key": REPORT["bilby"]["now_playing"]["art_url"], "type": "image/jpeg",
                      "b64": base64.b64encode(b"JPEGDATA").decode()}
     assert client.post("/home/report", json=report, headers=auth_h).get_json()["need_art"] is False
-    state = client.get("/bilby/state.json").get_json()
+    state = home.music()
     assert state["traktor"]["now_playing"]["title"] == "Veridis Quo" and state["has_art"]
     assert "art_url" not in state["traktor"]["now_playing"]                      # home hostnames stay home
-    assert client.get("/bilby/art").data == b"JPEGDATA"
-    assert "Veridis Quo" in client.get("/").data.decode()                        # front-page card
-    client.post("/bilby/control", data={"action": "skip"})
+    assert "Veridis Quo" in client.get("/me").data.decode()                      # the dashboard's now-playing line
+    assert "Veridis Quo" not in client.get("/").data.decode()                    # and no card for it on the launcher
+    assert home.queue("music", "skip")
     reply = client.post("/home/report", json=json.loads(json.dumps(REPORT)), headers=auth_h).get_json()
     assert [(c["target"], c["action"]) for c in reply["commands"]] == [("music", "skip")]
     assert client.post("/home/report", json=json.loads(json.dumps(REPORT)), headers=auth_h).get_json()["commands"] == []
+
+
+def test_the_old_bilby_page_is_gone_and_its_addresses_lead_to_the_audio_service(env):
+    client, _, _ = env
+    for path in ("/bilby", "/bilby/", "/bilby/state.json", "/bilby/art", "/bilby/anything/else"):
+        r = client.get(path)
+        assert r.status_code == 301 and r.location.endswith("/music"), path          # signed out too: /music asks for the sign-in
+    assert client.post("/bilby/control", data={"action": "skip"}).status_code == 405   # nothing steers a phone session any more
+    login(client, ADMIN)
+    assert 'data-app="bilby"' not in client.get("/").data.decode()
+    assert client.get("/music").status_code == 200
+    assert "Bilby's Audio Service" in client.get("/").data.decode()
 
 
 # ── core health (skippy-tel-core) on the dashboard ────────────────────────────
@@ -1376,16 +1391,16 @@ def test_me_shows_core_health_and_the_watcher_repeats_the_problems(env):
     assert client.get("/me").status_code == 403               # a friend never sees it
 
 
-def test_bilby_is_a_grant_and_controls_are_admin_only(env):
+def test_the_bilby_grant_is_now_about_the_chat_tool_and_never_opens_the_player_or_home_status(env):
+    """The grant used to open the /bilby page. It still gates the chat's now_playing tool (see the Skippy tests); the player
+    is the Captain's alone, and home status stays private."""
     client, _, _ = env
-    _add_friend(client, PAL, ["dragonwilds"])
-    login(client, PAL)
-    assert client.get("/bilby").status_code == 403
     _add_friend(client, PAL, ["bilby"])
     login(client, PAL)
-    assert client.get("/bilby").status_code == 200
-    assert client.post("/bilby/control", data={"action": "skip"}).status_code in (302, 403)
-    assert client.get("/me").status_code == 403                                  # home status stays private
+    assert client.get("/music").status_code == 403
+    assert client.get("/bilby").status_code == 301                               # a redirect gives nothing away
+    assert b'data-tel="tile:music"' not in client.get("/").data and b"Audio Service" not in client.get("/").data
+    assert client.get("/me").status_code == 403
 
 
 def test_chat_reply_says_which_tools_did_the_work(env):
@@ -1486,7 +1501,9 @@ def test_radiance_only_passes_a_plain_scene_id(env):
     assert client.get("/experiments/radiance/?scene=double_slit").status_code != 302
 
 
-def test_bilby_art_is_always_served_as_an_image(env):
+def test_the_cover_the_reporter_sends_is_kept_but_nothing_serves_it_any_more(env):
+    """/bilby/art (which forced an image type so a hostile cover could never be HTML) is removed with the page. The cover is still
+    held (home.current_art) until the reporter stops sending it; if a route ever serves it again, it must force an image type."""
     import base64
     client, _, _ = env
     token = _pair(client)
@@ -1494,8 +1511,8 @@ def test_bilby_art_is_always_served_as_an_image(env):
     report["art"] = {"key": REPORT["bilby"]["now_playing"]["art_url"], "type": "text/html",
                      "b64": base64.b64encode(b"<script>alert(1)</script>").decode()}
     client.post("/home/report", json=report, headers={"Authorization": f"Bearer {token}"})
-    r = client.get("/bilby/art")
-    assert r.mimetype == "image/jpeg" and r.headers["X-Content-Type-Options"] == "nosniff"
+    assert client.application.extensions["home"].current_art() is not None
+    assert client.get("/bilby/art").status_code == 301 and client.get("/bilby/art").location.endswith("/music")
 
 
 # ── local capabilities in the portal chat: music made on skippy-pc ────────────

@@ -1,4 +1,4 @@
-/* Bilby's Music Service: the browser app (portal/templates/music.html is its shell, bilby-player.js its logic, bilby-player.css its look).
+/* Bilby's Audio Service: the browser app (portal/templates/music.html is its shell, bilby-player.js its logic, bilby-player.css its look).
 
    What happens here, in order of the file:
      the gate           the portal hands out a pass; the music gate on skippy-pc serves the library for it
@@ -31,7 +31,12 @@
   const env = C.detectEnv(navigator.userAgent, navigator.platform, navigator.maxTouchPoints);
   const coarse = window.matchMedia && matchMedia("(pointer: coarse)").matches;
   root.classList.toggle("coarse", !!coarse);
-  const TITLE = "Bilby's Music Service";
+  // Big targets (>= 48 px) for the car and for any finger on a screen this wide; a mouse in a short window keeps the normal layout.
+  const touchMq = window.matchMedia ? matchMedia("(pointer: coarse) and (min-width: 700px)") : null;
+  const syncTouch = () => root.classList.toggle("touch", env.tesla || !!(touchMq && touchMq.matches));
+  syncTouch();
+  if (touchMq && touchMq.addEventListener) touchMq.addEventListener("change", () => { syncTouch(); if (window.BilbyApp && BilbyApp.S.lib) BilbyApp.renderView(true); });
+  const TITLE = "Bilby's Audio Service";
   const SINGLES = "Singles";
 
   let device = store.get("device", "");
@@ -166,26 +171,31 @@
   }
 
   // ═══ IndexedDB: the catalog and the lyric summaries, so the next visit opens instantly ══════════════════════════
+  // A saved copy is only a shortcut: whatever goes wrong with it (blocked, private window, a delete still pending in another tab,
+  // a browser that never answers) the answer is "no saved copy" after a moment, never a library that waits forever.
   const idb = (() => {
     let dbp = null;
     const open = () => dbp || (dbp = new Promise(resolve => {
+      const giveUp = setTimeout(() => resolve(null), 2500);
       try {
         const r = indexedDB.open("bilby-music", 1);
         r.onupgradeneeded = () => r.result.createObjectStore("kv");
-        r.onsuccess = () => resolve(r.result);
-        r.onerror = r.onblocked = () => resolve(null);
-      } catch (e) { resolve(null); }
+        r.onsuccess = () => { clearTimeout(giveUp); resolve(r.result); };
+        r.onerror = r.onblocked = () => { clearTimeout(giveUp); resolve(null); };
+      } catch (e) { clearTimeout(giveUp); resolve(null); }
     }));
     const run = async (mode, fn) => {
       const db = await open();
       if (!db) return undefined;
       return new Promise(res => {
+        const giveUp = setTimeout(() => res(undefined), 8000);
+        const done = v => { clearTimeout(giveUp); res(v); };
         try {
           const tx = db.transaction("kv", mode);
           const req = fn(tx.objectStore("kv"));
-          tx.oncomplete = () => res(req && req.result !== undefined ? req.result : undefined);
-          tx.onerror = tx.onabort = () => res(undefined);
-        } catch (e) { res(undefined); }
+          tx.oncomplete = () => done(req && req.result !== undefined ? req.result : undefined);
+          tx.onerror = tx.onabort = () => done(undefined);
+        } catch (e) { done(undefined); }
       });
     };
     return { get: k => run("readonly", s => s.get(k)), put: (k, v) => run("readwrite", s => s.put(v, k)) };
@@ -393,11 +403,12 @@
     }
   }
 
-  function load(slot, tIdx, from) {
+  /** `bust`: a retry after a failure asks for the file under a new URL, so a half-downloaded copy the browser cached from the failed try is not served again. */
+  function load(slot, tIdx, from, bust) {
     const t = S.lib.T[tIdx];
     slot.t = tIdx; slot.path = t.p; slot.from = from || 0; slot.logged = false; slot.djDone = false; slot.retried = false; slot.pre = false;
     S.ourPauseAt = Date.now();                              // replacing the source stops whatever played: that pause is ours
-    slot.el.src = gateUrl("a", t.p);
+    slot.el.src = gateUrl("a", t.p, bust ? "?r=" + Date.now() : "");
   }
   function unload(slot) {
     slot.t = -1; slot.path = ""; slot.from = 0; S.ourPauseAt = Date.now();
@@ -502,7 +513,7 @@
       const at = e.currentTime || slot.from || 0, t = slot.t;
       try { await gate.ensure(true); } catch (err) { gateProblem(err); return; }
       if (slot !== act() || slot.t !== t) return;
-      load(slot, t, at); slot.retried = true;
+      load(slot, t, at, true); slot.retried = true;
       if (S.want) tryPlay(slot);
       return;
     }
@@ -536,11 +547,14 @@
     e.addEventListener("play", () => mine() && onPlayState());
     e.addEventListener("pause", () => {
       if (!mine()) return;
-      if (S.want && !e.ended && Date.now() - S.ourPauseAt > 400) {
-        // Nobody here asked for that pause. Right after our play() it is the browser taking the sound back (some resolve play()
-        // and pause it at once when the page was never tapped): ask for a tap. Later, it is the system (a call, headphones, another
+      if (S.want && !e.ended && !e.error && Date.now() - S.ourPauseAt > 400) {
+        // Nobody here asked for that pause (and the file did not just fail: the browser pauses an element whose load errored, and
+        // that is the gate's trouble, not the autoplay rule's). Right after our play() it is the browser taking the sound back (some
+        // resolve play() and pause it at once when the page was never tapped): ask for a tap, unless the browser itself says the page
+        // HAS been tapped (navigator.userActivation: then it is not that rule). Later, it is the system (a call, headphones, another
         // app): stay paused and do not fight it.
-        if (Date.now() - S.playAt < 1500) { S.armed.refused(); showTap(); } else S.want = false;
+        const tapped = !!(navigator.userActivation && navigator.userActivation.hasBeenActive);
+        if (Date.now() - S.playAt < 1500 && !tapped) { S.armed.refused(); showTap(); } else S.want = false;
       }
       onPlayState();
     });
@@ -1048,7 +1062,7 @@
   // — building a view —
   const trackRows = (idx, g, o) => idx.map((t, pos) => Object.assign({ type: "track", h: g.rowH, t, list: idx, pos }, o || {}));
   const cardRows = (albums, g, sub) => C.chunk(albums, g.cols).map(a => ({ type: "cards", h: g.cardH + g.gap, albums: a, cols: g.cols, cw: g.cw, sub }));
-  const albumOf = t => S.lib.albumByKey.get(t.a + "\u0000" + t.al);
+  const albumOf = t => S.lib.albumByKey.get(t.a + "\u0000" + t.alk);
   const sortedAlbums = mode => {
     const key = "albums:" + mode;
     S.sortCache = S.sortCache || {};
@@ -1276,7 +1290,7 @@
     list.scrollTo(have.get(l));
     if (show) {
       let b = $(".rail-bubble");
-      if (!b) { b = el("div", "rail-bubble"); $("#main").append(b); }
+      if (!b) { b = el("div", "rail-bubble"); $("#listwrap").append(b); }
       b.textContent = l;
     }
   }
@@ -1752,13 +1766,14 @@
   }
   function sendRemote(d, action) {
     post(cfg.command, { device: d.id, action }).then(r => r.json().then(j => {
-      if (j && j.queued && action === "play" && d.state && d.state.armed === false) toast(`${d.name} needs a tap before it can make sound; it will start as soon as someone taps it.`, { ms: 6000 });
+      // needs_tap is the portal's own reading of that device's latest check-in: its page has not made a sound since it loaded
+      if (j && j.queued && j.needs_tap && action !== "pause") toast(`${d.name} needs a tap before it can make sound: ${action === "play" ? "it will start" : "it will carry on"} as soon as someone taps it.`, { ms: 6000 });
       if (j && j.queued === false) toast(`${d.name} isn't answering right now.`);
-    })).catch(() => toast("Couldn't reach the portal.")).finally(() => setTimeout(checkin, 1500));
+    })).catch(() => toast("Couldn't reach the portal.")).finally(() => [1500, 4000, 7000, 10000].forEach(ms => setTimeout(checkin, ms)));   // the other player picks the command up at its next check-in, up to ~5 s on: look until the answer shows
   }
   function devicesMenu(anchor) {
     const items = [], devs = liveOthers();
-    if (!devs.length) items.push({ node: el("div", "none", "No other device has this player open right now. Open Bilby's Music Service on another device and it shows up here, and either one can hand over or remote-control the other.") });
+    if (!devs.length) items.push({ node: el("div", "none", "No other device has this player open right now. Open Bilby's Audio Service on another device and it shows up here, and either one can hand over or remote-control the other.") });
     for (const d of devs) {
       const s = d.state, box = el("div", "dev"), who = el("div", "who"), what = el("div", "what");
       who.append(el("b", "", d.name));
@@ -1795,7 +1810,7 @@
       case "m": case "M": e.preventDefault(); actions.mute(); break;
       case "s": case "S": e.preventDefault(); actions.shuffle(); break;
       case "r": case "R": e.preventDefault(); actions.repeat(); break;
-      case "/": e.preventDefault(); $("#q").focus(); $("#q").select(); break;
+      case "/": e.preventDefault(); if (e.shiftKey) openKeys(); else { $("#q").focus(); $("#q").select(); } break;     // Shift+/ is "?" on a US keyboard
       case "?": e.preventDefault(); openKeys(); break;
     }
   });
@@ -1894,5 +1909,5 @@
   setTab("np");
   loadLibrary();
   // exposed for the tests that drive the page by hand (portal/tests/dev_music.py) and for debugging in the console
-  window.BilbyApp = { S, actions, gate, slots, list, qList, toast, startTrack, tryPlay, checkin, connect, persist, get lib() { return S.lib; } };
+  window.BilbyApp = { S, actions, gate, slots, list, qList, toast, startTrack, tryPlay, renderView, checkin, connect, persist, get lib() { return S.lib; } };
 })();

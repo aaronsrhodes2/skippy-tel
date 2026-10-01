@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Bilby's Music Service — Skippy Portal{% endblock %}
+{% block title %}Bilby's Audio Service — Skippy Portal{% endblock %}
 {% block app %}music{% endblock %}
 {% block head %}
 {# Add to Home Screen: opens full screen into the player, and iOS keeps the audio going with the screen locked. #}
@@ -11,13 +11,13 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='bilby-player.css') }}">
 {% endblock %}
 {% block content %}
-{# Bilby's Music Service. The page is a shell: static/bilby-app.js builds everything from the music gate's catalog, and
+{# Bilby's Audio Service. The page is a shell: static/bilby-app.js builds everything from the music gate's catalog, and
    static/bilby-player.js holds the logic that needs no browser (search, the queue, Bilby DJ's pick, the autoplay state).
    The three URLs below are the only things the page needs from this template. #}
 <section id="bp" class="bp" data-state="boot" data-playing="0" data-sheet=""
          data-gate-url="{{ url_for('music.player_gate') }}" data-checkin-url="{{ url_for('music.player_checkin') }}"
-         data-command-url="{{ url_for('music.player_command') }}" aria-label="Bilby's Music Service">
-  <noscript><p class="warn" style="margin:12px">Bilby's Music Service needs JavaScript.</p></noscript>
+         data-command-url="{{ url_for('music.player_command') }}" aria-label="Bilby's Audio Service">
+  <noscript><p class="warn" style="margin:12px">Bilby's Audio Service needs JavaScript.</p></noscript>
 
   {# The browser only lets a page make sound after a tap on it. After a reload (or a remote Play from another device) this is
      the one tap that is needed; it carries on exactly where the music was. #}
@@ -56,10 +56,12 @@
         </div>
         <select class="sort" id="sort" aria-label="Sort by" hidden></select>
       </div>
-      <div class="bp-scroll" id="scroll" tabindex="-1">
-        <div class="vl-host" id="host" role="list"></div>
+      <div class="bp-list" id="listwrap">
+        <div class="bp-scroll" id="scroll" tabindex="-1">
+          <div class="vl-host" id="host" role="list"></div>
+        </div>
+        <div class="rail" id="rail" aria-hidden="true" hidden></div>
       </div>
-      <div class="rail" id="rail" aria-hidden="true" hidden></div>
     </div>
   </div>
 

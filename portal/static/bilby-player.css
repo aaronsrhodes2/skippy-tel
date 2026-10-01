@@ -1,4 +1,4 @@
-/* Bilby's Music Service (portal/templates/music.html + static/bilby-app.js).
+/* Bilby's Audio Service (portal/templates/music.html + static/bilby-app.js).
 
    Portal tokens only: every colour below is a variable from base.html's :root (or a mix of them), so the player is the
    same Skippy as every other app and picks up a change to the palette. The app's accent is amber (data-app="music").
@@ -7,7 +7,7 @@
      under 700 px   a chip row of views, a mini player docked at the bottom; Now Playing and the Queue are full-screen sheets
      700 - 999 px   the same, with the full transport in the bottom bar and the sheets as a drawer on the right
      1000 px up     views down the left, the library in the middle, Now Playing (with the lyric summary) and the Queue docked on the right
-     big touch      a wide-and-short screen (the car) or a coarse pointer on a wide one: every target at least 48 px
+     big touch      the car, or any coarse pointer on a screen 700 px or wider (class "touch" on .bp, set by bilby-app.js): every target at least 48 px
    Nothing animates for people who asked for reduced motion (base.html already turns transitions and animations off). */
 
 /* ── the page around the player: full bleed, the app bar kept, the Home button moved out of the way ──────────── */
@@ -97,6 +97,7 @@ body[data-app="music"] footer.sitefoot { margin: 0 auto; padding: 2px 0 4px; fon
 .bp-top .sort { flex: none; max-width: 40%; min-height: 42px; border-radius: 999px; padding: 0 12px; font-size: .85rem; }
 .bp-top .back { flex: none; }
 
+.bp-list { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }   /* the list and its A-Z rail share one box */
 .bp-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; position: relative; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; contain: strict; }
 .vl-host { position: relative; width: 100%; }
 .vrow { position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center; padding: 0 var(--pad); min-width: 0; }
@@ -253,6 +254,7 @@ body[data-app="music"] footer.sitefoot { margin: 0 auto; padding: 2px 0 4px; fon
 
 /* Now Playing */
 #panel-np { overflow-y: auto; padding: 14px var(--pad) 18px; gap: 0; align-items: stretch; }
+#panel-np > * { flex: none; }                      /* a short window scrolls the panel; it never squashes the cover into a line */
 .np-cover { width: min(100%, 340px, 46dvh); aspect-ratio: 1; margin: 6px auto 14px; border-radius: 12px; }
 .np-info { text-align: center; margin-bottom: 6px; min-width: 0; }
 .np-info h2 { margin: 0; font-size: 1.3rem; line-height: 1.2; text-transform: none; letter-spacing: 0; color: var(--white); overflow-wrap: anywhere; }
@@ -299,7 +301,7 @@ body[data-app="music"] footer.sitefoot { margin: 0 auto; padding: 2px 0 4px; fon
 
 /* ── menus, toasts, dialogs ────────────────────────────────────────────────────────────────────────────────── */
 .menu { position: fixed; z-index: 90; min-width: 210px; max-width: min(92vw, 320px); padding: 6px; border-radius: var(--radius); background: var(--panel); border: 1px solid var(--accent);
-        box-shadow: 0 10px 34px rgba(0, 0, 0, .75); }
+        box-shadow: 0 10px 34px color-mix(in srgb, var(--black) 75%, transparent); }
 .menu h4 { margin: 4px 10px 6px; font-size: .74rem; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: .02em; }
 .menu button { display: flex; width: 100%; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--white);
                font-size: .95rem; text-align: left; cursor: pointer; }
@@ -318,7 +320,7 @@ body[data-app="music"] footer.sitefoot { margin: 0 auto; padding: 2px 0 4px; fon
 .scrim { position: fixed; inset: 0; z-index: 85; background: color-mix(in srgb, var(--black) 55%, transparent); }
 
 .toasts { position: absolute; left: var(--pad); right: var(--pad); bottom: calc(var(--bar-h) + 14px); z-index: 80; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
-.toast { pointer-events: auto; display: flex; gap: 12px; align-items: center; max-width: 100%; padding: 10px 14px; border-radius: 999px; background: var(--panel); border: 1px solid var(--accent); font-size: .88rem; box-shadow: 0 6px 22px rgba(0, 0, 0, .7); }
+.toast { pointer-events: auto; display: flex; gap: 12px; align-items: center; max-width: 100%; padding: 10px 14px; border-radius: 999px; background: var(--panel); border: 1px solid var(--accent); font-size: .88rem; box-shadow: 0 6px 22px color-mix(in srgb, var(--black) 70%, transparent); }
 .toast button { min-height: 28px; padding: 0 10px; border: 0; border-radius: 999px; background: var(--accent); color: var(--black); font-weight: 700; cursor: pointer; }
 
 dialog.keys { width: min(92vw, 520px); max-height: 86vh; overflow: auto; padding: 18px 20px; border-radius: var(--radius-lg); border: 1px solid var(--accent); background: var(--panel); color: var(--white); }
@@ -334,11 +336,11 @@ dialog.keys .why { color: var(--muted); font-size: .82rem; line-height: 1.45; ma
 /* ── 700 px and up: the full transport in the bar, the sheets as a drawer on the right ──────────────────────── */
 @media (min-width: 700px) {
   .bp { --pad: 16px; --row-h: 52px; --bar-h: 84px; --card-min: 160px; height: calc(100vh - 80px); height: calc(100dvh - 80px); }
-  .bp-bar { grid-template-columns: minmax(180px, 1fr) minmax(300px, 540px) minmax(150px, 1fr); padding-top: 6px; padding-bottom: 6px; }
+  .bp-bar { grid-template-columns: minmax(180px, 1fr) minmax(300px, 540px) minmax(330px, 1fr); padding-top: 6px; padding-bottom: 6px; }
   .bp-bar .b-mid { display: flex; flex-direction: column; align-items: stretch; }
   .bp-bar .b-right { display: flex; align-items: center; justify-content: flex-end; gap: 2px; }
   .bp-bar .b-ctl-mini, .bp-bar .b-line { display: none; }
-  .bp[data-sheet="open"] .bp-side { inset: 0 0 0 auto; width: min(440px, 100%); border-left: 1px solid var(--edge); box-shadow: -12px 0 34px rgba(0, 0, 0, .6); }
+  .bp[data-sheet="open"] .bp-side { inset: 0 0 0 auto; width: min(440px, 100%); border-left: 1px solid var(--edge); box-shadow: -12px 0 34px color-mix(in srgb, var(--black) 60%, transparent); }
 }
 
 /* ── 1000 px and up: views on the left, Now Playing / Queue docked on the right ──────────────────────────────── */
@@ -366,24 +368,37 @@ dialog.keys .why { color: var(--muted); font-size: .82rem; line-height: 1.45; ma
   .bp-top { padding-top: 8px; }
 }
 
-/* ── big touch: the car, or any wide screen with a coarse pointer ─────────────────────────────────────────────── */
-@media (pointer: coarse) and (min-width: 700px), (min-width: 900px) and (max-height: 820px) {
-  .bp { --hit: 52px; --row-h: 64px; --bar-h: 104px; --card-min: 190px; font-size: 1.05rem; }
-  .bp .ib { min-width: 52px; min-height: 52px; }
-  .bp .ib.big { min-width: 64px; min-height: 64px; }
-  .bp .pill-btn { min-height: 52px; font-size: 1rem; }
-  .bp-nav a { min-height: 52px; font-size: 1.02rem; }
-  .bp-top input[type=search], .bp-top .sort { min-height: 52px; }
-  .tr .l1 { font-size: 1.05rem; } .tr .l2 { font-size: .9rem; }
-  .tr .cover, .qr .cover { width: 48px; height: 48px; }
-  .menu button { min-height: 52px; }
-  .rg { height: 40px; }
-  .rg::-webkit-slider-thumb { width: 22px; height: 22px; margin-top: -9px; }
-  .rg::-moz-range-thumb { width: 22px; height: 22px; }
-  .qr .q-btn { min-width: 48px; min-height: 48px; }
-  .rail { width: 30px; font-size: .75rem; }
-}
+/* ── big touch: the car, or any wide screen with a coarse pointer ───────────────────────────────────────────────
+   The page puts class "touch" on .bp (JS: a coarse pointer on a screen 700 px or wider, or a Tesla's browser), not a media query on
+   the height: a laptop window that happens to be short has a mouse and wants the normal layout. */
+.bp.touch { --hit: 52px; --row-h: 64px; --bar-h: 104px; --card-min: 190px; font-size: 1.05rem; }
+.bp.touch .ib { min-width: 52px; min-height: 52px; }
+.bp.touch .ib.big { min-width: 64px; min-height: 64px; }
+.bp.touch .pill-btn { min-height: 52px; font-size: 1rem; }
+.bp.touch .bp-nav a { min-height: 52px; font-size: 1.02rem; }
+.bp.touch .bp-top input[type=search], .bp.touch .bp-top .sort { min-height: 52px; }
+.bp.touch .tr .l1 { font-size: 1.05rem; } .bp.touch .tr .l2 { font-size: .9rem; }
+.bp.touch .tr .cover, .bp.touch .qr .cover { width: 48px; height: 48px; }
+.bp.touch .rg { height: 40px; }
+.bp.touch .rg::-webkit-slider-thumb { width: 22px; height: 22px; margin-top: -9px; }
+.bp.touch .rg::-moz-range-thumb { width: 22px; height: 22px; }
+.bp.touch .qr .q-btn { min-width: 48px; min-height: 48px; }
+.bp.touch .rail { width: 30px; font-size: .75rem; }
+.bp.touch .menu button { min-height: 52px; }
 @media (pointer: coarse) { .bp .rg { height: 36px; } }
+
+/* ── 700 - 999 px: not room for three columns in the bar, so the track is on top and the transport under it (after the touch rules, which set --bar-h too) ── */
+@media (min-width: 700px) and (max-width: 999px) {
+  .bp { --bar-h: 116px; }
+  .bp.touch { --bar-h: 140px; }
+  .bp-bar { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "now right" "mid mid"; }
+  .bp-bar .b-now { grid-area: now; }
+  .bp-bar .b-right { grid-area: right; }
+  .bp-bar .b-mid { grid-area: mid; }
+}
+@media (min-width: 1000px) {
+  .bp.touch .bp-bar { grid-template-columns: minmax(180px, 1fr) minmax(300px, 540px) minmax(380px, 1fr); }     /* bigger buttons in the right-hand group */
+}
 
 @media (prefers-reduced-motion: reduce) {
   .eq span { animation: none !important; transform: scaleY(.6); }

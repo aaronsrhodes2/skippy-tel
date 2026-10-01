@@ -1,7 +1,7 @@
 # music-gate
 
 The one piece of skippy-pc on the public internet, and all it does is hand out the Captain's music to the browser player
-(Bilby's Music Service, `/music` on the portal). Docker service `music-gate` in `docker-compose.override.yml`, published on
+(Bilby's Audio Service, `/music` on the portal). Docker service `music-gate` in `docker-compose.override.yml`, published on
 127.0.0.1:3005 only; Tailscale Funnel (`https://skippy-pc.<tailnet>.ts.net`) is the way in. The code's top docstring
 (`gate.py`) is the authority on routes; this page is the why.
 

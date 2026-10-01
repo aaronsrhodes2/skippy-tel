@@ -7,7 +7,6 @@ Local run:  FLASK_APP=app.py flask run   (needs every var in .env.example)
 """
 from __future__ import annotations
 
-import base64
 import io
 import ipaddress
 import json
@@ -76,7 +75,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     media = media_mod.Media()
     workshop = workshop_mod.Workshop(home)          # the Captain's private Skippy (admin only)
     app.extensions["workshop"] = workshop
-    player = player_mod.Player(home)                # Bilby's Music Service: the pass and Connect (admin only)
+    player = player_mod.Player(home)                # Bilby's Audio Service: the pass and Connect (admin only)
     app.extensions["player"] = player               # (so tests/dev_music.py can point it at a gate on this machine)
     telemetry_web.init_app(app)                     # usage recording, /privacy, the tap beacon, /home/telemetry
 
@@ -125,7 +124,6 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                                hidden_up=bool(status and status.status == "RUNNING"
                                               and any(g not in shown for g in status.games)),
                                show_experiments=auth.has_portal(me(), "experiments"),
-                               show_bilby=auth.has_portal(me(), "bilby"), music=home.music(),
                                music_gate=home.can("music_gate"),
                                has_me="me" in app.blueprints)
 
@@ -635,52 +633,15 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         except ValueError:
             abort(400)
 
-    # ── Bilby: what's playing (grant "bilby"; controls are admin only) ──────────
-    music = Blueprint("bilby", __name__, url_prefix="/bilby")
+    # ── The old Bilby page (a mirror of the Mac's DJ decks) is gone: Bilby's Audio Service below is where the music is ──
+    # Its address, and every address under it (state.json, art), still lead somewhere: old bookmarks, a home-screen
+    # shortcut and the links in old Discord posts land on the player. (GET only: nothing posts there any more.)
+    @app.get("/bilby", strict_slashes=False)
+    @app.get("/bilby/<path:rest>")
+    def legacy_bilby(rest=""):
+        return redirect(url_for("music.player_page"), 301)
 
-    def bilby_required(view):
-        @wraps(view)
-        @auth.login_required
-        def wrapped(*args, **kwargs):
-            if not auth.has_portal(me(), "bilby"):
-                abort(403)
-            return view(*args, **kwargs)
-        return wrapped
-
-    @music.get("")
-    @bilby_required
-    def index():
-        return render_template("bilby.html", music=home.music())
-
-    @music.get("/state.json")
-    @bilby_required
-    def state():
-        return jsonify(home.music())
-
-    @music.get("/art")
-    @bilby_required
-    def art():
-        a = home.current_art()
-        if not a:
-            abort(404)
-        kind = a.get("type") if a.get("type") in ("image/jpeg", "image/png", "image/webp") else "image/jpeg"
-        return app.response_class(base64.b64decode(a["b64"]), mimetype=kind,       # never HTML
-                                  headers={"Cache-Control": "private, max-age=3600",
-                                           "X-Content-Type-Options": "nosniff"})
-
-    @music.post("/control")
-    @auth.admin_required
-    def control():
-        ok = home.queue("music", request.form.get("action", ""))
-        if request.accept_mimetypes.best == "application/json":
-            return jsonify(queued=ok), (200 if ok else 400)
-        flash("Sent to skippy-pc; it lands within ~15 seconds." if ok else "Unknown action.",
-              "ok" if ok else "error")
-        return redirect(url_for("bilby.index"))
-
-    app.register_blueprint(music)
-
-    # ── Bilby's Music Service: the Captain's library on any browser (player.py; admin only) ────
+    # ── Bilby's Audio Service: the Captain's library on any browser (player.py; admin only) ────
     listen = Blueprint("music", __name__, url_prefix="/music")
 
     def device_id() -> str:
