@@ -17,7 +17,6 @@ from app.routes.translate import bp as translate_bp
 from app.routes.image     import bp as image_bp
 from app.routes.bilby         import bp as bilby_bp
 from app.routes.bilby_proxy   import bp as bilby_proxy_bp
-from app.routes.bilby_bigcard import bp as bilby_bigcard_bp
 from app.routes.vault     import bp as vault_bp
 from app.routes.ups       import bp as ups_bp
 from app.routes.dropship  import bp as dropship_bp
@@ -86,7 +85,6 @@ def create_app() -> Flask:
     app.register_blueprint(image_bp)
     app.register_blueprint(bilby_bp)
     app.register_blueprint(bilby_proxy_bp)
-    app.register_blueprint(bilby_bigcard_bp)
     app.register_blueprint(vault_bp)
     app.register_blueprint(ups_bp)
     app.register_blueprint(dropship_bp)

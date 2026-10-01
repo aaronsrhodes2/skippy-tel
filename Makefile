@@ -1,4 +1,4 @@
-.PHONY: run stop logs build test pull-model health intent apks phone-check adb-connect adb-devices ups-monitor ups-status push-all memory-init memory-ingest memory-inbox memory-distill games-up games-down games-status games-env tunnel bigcard
+.PHONY: run stop logs build test pull-model health intent apks phone-check adb-connect adb-devices ups-monitor ups-status push-all memory-init memory-ingest memory-inbox memory-distill games-up games-down games-status games-env
 
 # ── Two-machine sync ─────────────────────────────────────────────────────────
 # Single developer, two stations (PC + Mac).
@@ -98,10 +98,9 @@ adb-connect:
 adb-devices:
 	@adb devices
 
-# Smoke-test the phone recovery endpoints
+# Smoke-test the phone bootstrap endpoint (skippy core serves data only; the old /phone page is gone)
 phone-check:
 	@echo "=== /vault/bootstrap ==="; curl -s http://localhost:3003/vault/bootstrap | jq .
-	@echo "=== /phone (HTML, first 5 lines) ==="; curl -s http://localhost:3003/phone | head -5
 
 # solid-gold bridge — runs on the Windows HOST, not in docker. Shells out
 # to your local `claude` CLI so SkippyTel can use your Claude Code
@@ -125,28 +124,6 @@ ups-monitor:
 ups-status:
 	@curl -s http://localhost:9338/status | jq . 2>/dev/null || \
 		powershell -Command "Invoke-RestMethod http://localhost:9338/status | ConvertTo-Json"
-
-# ── DJ Big Card — public show display ────────────────────────────────────────
-# Expose /bilby/bigcard to the internet for live shows.
-# Install cloudflared once: winget install Cloudflare.cloudflared
-#
-# Usage:
-#   make tunnel          → prints a public HTTPS URL, e.g.:
-#                          https://abc123.trycloudflare.com
-#   Crowd opens:         https://abc123.trycloudflare.com/bilby/bigcard
-#   The QR code on the BigCard already encodes that URL — project it.
-#
-# Tailscale Funnel alternative (if Tailscale installed):
-#   tailscale funnel 3003
-#   → https://skippy-pc.tail<id>.ts.net/bilby/bigcard
-tunnel:
-	@echo "=== Cloudflare Tunnel → http://localhost:3003 ==="
-	@echo "Look for 'trycloudflare.com' URL. Open <that-url>/bilby/bigcard."
-	cloudflared tunnel --url http://localhost:3003
-
-# Quick smoke-test for the Big Card (local only)
-bigcard:
-	@curl -s -o /dev/null -w "GET /bilby/bigcard → HTTP %{http_code}\n" http://localhost:3003/bilby/bigcard
 
 bridge-health:
 	curl -s http://localhost:9337/health | jq .

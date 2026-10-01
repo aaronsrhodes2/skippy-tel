@@ -1,19 +1,19 @@
-"""GET /status — human-readable HTML dashboard for SkippyTel.
+"""GET /status.json — SkippyTel's status as data.
 
-Open in any browser: http://localhost:3003/status
-                or:  http://skippy-pc:3003/status  (Tailscale)
+Skippy core has no HTML interface any more (the Captain's decision): the old
+human-readable GET /status page is gone, and the cloud portal shows this data
+instead. The home reporter on skippy-pc POSTs this JSON to the portal every
+~15 s (its "Core" widget, the Watcher lines, `ops home`).
 
-Auto-refreshes every 30 seconds. Pure HTML — no JavaScript, no CDN.
-Shows: service health, Ollama models, photo-tag stats, UI telemetry,
-Drive connectivity, UPS status.
+Shows: service health, Ollama models, photo-tag stats, UI telemetry, Drive
+connectivity, UPS status.
 """
 import sqlite3
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
-from flask import Blueprint, Response, jsonify
+from flask import Blueprint, jsonify
 
 bp = Blueprint("status", __name__)
 
@@ -110,45 +110,10 @@ def _drive_ok() -> bool:
         return False
 
 
-# ── HTML helpers ──────────────────────────────────────────────────────────────
-
-_CSS = """
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: #000; color: #ccc; font-family: 'Courier New', monospace;
-       font-size: 13px; padding: 24px; }
-h1   { color: #ff44aa; letter-spacing: 4px; font-size: 14px;
-       text-transform: uppercase; margin-bottom: 4px; }
-.ts  { color: #444; font-size: 11px; margin-bottom: 24px; }
-h2   { color: #ff44aa; font-size: 11px; letter-spacing: 3px;
-       text-transform: uppercase; margin: 24px 0 10px; border-bottom: 1px solid #1a1a1a;
-       padding-bottom: 4px; }
-table { width: 100%; border-collapse: collapse; }
-td, th { padding: 5px 10px 5px 0; text-align: left; vertical-align: top; }
-th { color: #555; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
-tr:hover td { background: #0a0a0a; }
-.ok   { color: #00ff88; }
-.warn { color: #ffaa00; }
-.err  { color: #ff4444; }
-.dim  { color: #444; }
-.zero { color: #ff4444; font-weight: bold; }
-"""
-
-
-def _dot(ok: bool) -> str:
-    cls = "ok" if ok else "err"
-    sym = "●" if ok else "○"
-    return f'<span class="{cls}">{sym}</span>'
-
-
-def _row(*cells) -> str:
-    tds = "".join(f"<td>{c}</td>" for c in cells)
-    return f"<tr>{tds}</tr>"
-
-
 # ── Route ─────────────────────────────────────────────────────────────────────
 
 def snapshot() -> dict:
-    """Everything the /status page shows, as data (the home reporter sends
+    """Everything the status dashboard shows, as data (the home reporter sends
     this to the cloud portal)."""
     ollama_ok, ollama_msg = _ping(_OLLAMA_URL, "/api/tags")
     whisper_ok, whisper_msg = _ping(_WHISPER_URL)
@@ -171,129 +136,3 @@ def snapshot() -> dict:
 @bp.get("/status.json")
 def status_json():
     return jsonify(snapshot())
-
-
-@bp.get("/status")
-def status_page():
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-
-    # ── probe all services ────────────────────────────────────────────────
-    flask_ok  = True   # we're answering this request
-    ollama_ok, ollama_msg = _ping(_OLLAMA_URL, "/api/tags")
-    models    = _ollama_models()
-    whisper_ok, whisper_msg   = _ping(_WHISPER_URL)
-    ups       = _ups_status()
-    tags      = _tags_stats()
-    telem     = _telem_stats()
-    drive_ok  = _drive_ok()
-
-    # ── build HTML ────────────────────────────────────────────────────────
-    rows_services = "".join([
-        _row(_dot(True),  "flask-api",    "3003", '<span class="ok">running</span>'),
-        _row(_dot(ollama_ok), "ollama",   "11434", ollama_msg),
-        _row(_dot(whisper_ok), "whisper", "8000",  whisper_msg),
-        _row(_dot(drive_ok), "google-drive", "—",
-             '<span class="ok">connected</span>' if drive_ok
-             else '<span class="err">not connected</span>'),
-    ])
-
-    ups_row = ""
-    if ups:
-        ac_cls  = "ok" if ups["on_ac"] else "warn"
-        ac_text = "on AC" if ups["on_ac"] else "ON BATTERY"
-        chg     = ups["charge"] or 0
-        chg_cls = "ok" if chg > 50 else ("warn" if chg > 20 else "err")
-        ups_row = f"""
-        <h2>⚡ UPS</h2>
-        <table><tr>
-          <th>Power</th><th>Charge</th><th>Runtime</th><th>Alert</th>
-        </tr>{_row(
-            f'<span class="{ac_cls}">{ac_text}</span>',
-            f'<span class="{chg_cls}">{chg}%</span>',
-            f'{ups.get("runtime","?")} min',
-            ups.get("alert") or '<span class="dim">none</span>',
-        )}</table>"""
-
-    model_list = ", ".join(models) if models else '<span class="dim">none loaded</span>'
-
-    tagged_pct = int(100 * tags["tagged"] / tags["total"]) if tags["total"] else 0
-    tags_cls   = "ok" if tagged_pct >= 80 else ("warn" if tagged_pct >= 30 else "err")
-    tags_section = f"""
-    <h2>📷 Photo Tags</h2>
-    <table><tr><th>DB</th><th>Total</th><th>Tagged</th><th>Coverage</th></tr>
-    {_row(
-        f'<span class="{"ok" if tags["db"]=="ok" else "err"}">{tags["db"]}</span>',
-        tags["total"],
-        tags["tagged"],
-        f'<span class="{tags_cls}">{tagged_pct}%</span>',
-    )}</table>"""
-
-    if telem:
-        telem_header = _row(
-            "<th>App</th><th>Element</th><th>Clicks</th><th>Last used</th>"
-        )
-        telem_rows = "".join(
-            _row(
-                f'<span class="dim">{t["app"]}</span>',
-                t["element"],
-                f'<span class="{"zero" if t["clicks"]==0 else "ok"}">{t["clicks"]}</span>',
-                f'{t["days_ago"]}d ago' if t["days_ago"] > 0 else "today",
-            )
-            for t in telem
-        )
-        telem_section = f"""
-        <h2>👆 UI Telemetry  <span class="dim" style="font-size:10px">
-          (sorted: lowest clicks first = removal candidates)</span></h2>
-        <table>{telem_header}{telem_rows}</table>"""
-    else:
-        telem_section = """
-        <h2>👆 UI Telemetry</h2>
-        <p class="dim">No interactions recorded yet.</p>"""
-
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta http-equiv="refresh" content="30">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SkippyTel Status</title>
-  <style>{_CSS}</style>
-</head>
-<body>
-  <h1>SkippyTel</h1>
-  <p class="ts">Last updated: {now_str} &nbsp;·&nbsp; auto-refreshes every 30s</p>
-
-  <h2>🛰 Services</h2>
-  <table>
-    <tr><th></th><th>Service</th><th>Port</th><th>Status</th></tr>
-    {rows_services}
-  </table>
-
-  <h2>🤖 Ollama Models</h2>
-  <p>{model_list}</p>
-
-  {ups_row}
-  {tags_section}
-  {telem_section}
-
-  <h2>🔗 Quick Links</h2>
-  <table>
-    <tr><td><a href="/health" style="color:#00ff88">/health</a></td>
-        <td class="dim">JSON health check</td></tr>
-    <tr><td><a href="/services" style="color:#00ff88">/services</a></td>
-        <td class="dim">Service manifest</td></tr>
-    <tr><td><a href="/telemetry/ui_summary" style="color:#00ff88">/telemetry/ui_summary</a></td>
-        <td class="dim">UI click audit (JSON)</td></tr>
-    <tr><td><a href="/telemetry/site_summary" style="color:#00ff88">/telemetry/site_summary</a></td>
-        <td class="dim">What people do on the portal (JSON)</td></tr>
-    <tr><td><a href="/dropship/health" style="color:#00ff88">/dropship/health</a></td>
-        <td class="dim">Drive connectivity</td></tr>
-    <tr><td><a href="/dropship/latest" style="color:#00ff88">/dropship/latest</a></td>
-        <td class="dim">Most recent photo</td></tr>
-    <tr><td><a href="/music/session" style="color:#00ff88">/music/session</a></td>
-        <td class="dim">Current music session</td></tr>
-  </table>
-</body>
-</html>"""
-
-    return Response(html, mimetype="text/html")
