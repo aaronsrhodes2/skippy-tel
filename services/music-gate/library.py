@@ -103,16 +103,22 @@ def read_tags(path: Path) -> dict | None:
     if path.suffix.lower() == ".m4a":
         get = lambda k: tags.get(k)                                                    # noqa: E731
         t = {"t": _first(get("\xa9nam")), "a": _first(get("aART")) or _first(get("\xa9ART")), "al": _first(get("\xa9alb")),
-             "n": _number(get("trkn")), "d": _number(get("disk")), "g": _first(get("\xa9gen")), "art": bool(get("covr")),
-             "y": _year(get("\xa9day"))}
+             "n": _number(get("trkn")), "d": _number(get("disk")), "g": _first(get("\xa9gen")),
+             "art": any(len(c) for c in get("covr") or []), "y": _year(get("\xa9day"))}
     else:
         get = lambda k: tags.get(k) if hasattr(tags, "get") else None                   # noqa: E731
-        apic = tags.getall("APIC") if hasattr(tags, "getall") else []
         t = {"t": _first(get("TIT2")), "a": _first(get("TPE2")) or _first(get("TPE1")), "al": _first(get("TALB")),
-             "n": _number(get("TRCK")), "d": _number(get("TPOS")), "g": _first(get("TCON")), "art": bool(apic),
-             "y": _year(get("TDRC")) or _year(get("TYER"))}                              # v2.4 recording time, else v2.3's year
+             "n": _number(get("TRCK")), "d": _number(get("TPOS")), "g": _first(get("TCON")), "art": bool(_pictures(tags)),
+             "y": _year(get("TDRC"))}              # recording time; mutagen has already turned a v2.3 TYER into it
     t["s"] = int(getattr(info, "length", 0) or 0)
     return t
+
+
+def _pictures(tags) -> list:
+    """An ID3 tag's pictures that hold any image data, the front cover first. (An APIC frame with no data is common: 1 % of the
+    real library has one, and it must not count as a cover.)"""
+    frames = [a for a in (tags.getall("APIC") if hasattr(tags, "getall") else []) if getattr(a, "data", b"")]
+    return sorted(frames, key=lambda a: int(a.type) != 3)       # 3 = front cover; stable, so otherwise the file's order
 
 
 def read_art(path: Path) -> tuple[bytes, str] | None:
@@ -126,12 +132,11 @@ def read_art(path: Path) -> tuple[bytes, str] | None:
     if not tags:
         return None
     if path.suffix.lower() == ".m4a":
-        covers = tags.get("covr") or []
-        if covers:
-            c = covers[0]
-            return bytes(c), "image/png" if getattr(c, "imageformat", 13) == 14 else "image/jpeg"
+        for c in tags.get("covr") or []:
+            if len(c):
+                return bytes(c), "image/png" if getattr(c, "imageformat", 13) == 14 else "image/jpeg"
         return None
-    for apic in tags.getall("APIC") if hasattr(tags, "getall") else []:
+    for apic in _pictures(tags):
         mime = apic.mime if apic.mime in ("image/jpeg", "image/png", "image/webp") else "image/jpeg"
         return bytes(apic.data), mime
     return None

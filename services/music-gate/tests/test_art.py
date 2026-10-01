@@ -3,6 +3,7 @@ keyed by (path, mtime, width) and bounded."""
 import io
 import os
 import threading
+import time
 
 import pytest
 
@@ -146,6 +147,48 @@ def test_simultaneous_requests_for_one_thumbnail_make_it_once(tmp_path):
     assert len(calls) == 1 and len(results) == 12 and len({r[0] for r in results}) == 1 and all(r[1] == results[0][1] for r in results)
 
 
+def test_a_burst_of_uncached_covers_cannot_take_every_thread(tmp_path):
+    """The gate has 32 threads and a streaming track holds one: past a handful of thumbnails being made, the rest are told
+    to come back (Busy) instead of waiting on a thread."""
+    f = tmp_path / "a.mp3"
+    f.write_bytes(b"x")
+    cache = ThumbCache(tmp_path / "cache", workers=1, backlog=1)          # one making, one waiting: a third is turned away
+    release, inside, outcomes = threading.Event(), threading.Event(), []
+
+    def slow():
+        inside.set()
+        release.wait(5)
+        return image_bytes((300, 300)), "image/jpeg"
+
+    def ask(name):
+        try:
+            outcomes.append((name, cache.get(f"A/{name}.mp3", f, 96, slow) is not None))
+        except art.Busy:
+            outcomes.append((name, "busy"))
+    first = threading.Thread(target=ask, args=("one",))
+    first.start()
+    inside.wait(5)
+    second = threading.Thread(target=ask, args=("two",))
+    second.start()
+    time.sleep(0.2)                                                        # `two` is now waiting its turn
+    ask("three")
+    assert ("three", "busy") in outcomes and len(outcomes) == 1
+    release.set()
+    first.join(5)
+    second.join(5)
+    assert sorted(o for o in outcomes if o[0] != "three") == [("one", True), ("two", True)]
+    assert cache.get("A/three.mp3", f, 96, lambda: (image_bytes((300, 300)), "image/jpeg")) is not None   # a slot is free again
+
+
+def test_cached_thumbnails_never_wait_or_get_turned_away(tmp_path):
+    f = tmp_path / "a.mp3"
+    f.write_bytes(b"x")
+    cache = ThumbCache(tmp_path / "cache", workers=1, backlog=0)
+    cache.get("A/a.mp3", f, 96, lambda: (image_bytes(), "image/jpeg"))
+    for _ in range(50):
+        assert cache.get("A/a.mp3", f, 96, lambda: pytest.fail("not cached")) is not None
+
+
 def test_the_cache_is_bounded_and_the_oldest_go_first(tmp_path):
     f = tmp_path / "a.mp3"
     f.write_bytes(b"x")
@@ -269,6 +312,17 @@ def test_no_cover_or_an_unreadable_one_is_a_404_never_a_500(client, name):
             assert r.status_code == 200          # served as it is: the browser decides (an <img> shows its broken-image icon)
         else:
             assert r.status_code == 404, (name, query)
+
+
+def test_route_turns_a_burst_away_with_503_and_retry_after(lib, tmp_path, monkeypatch):
+    def busy(*a, **kw):
+        raise art.Busy
+    thumbs = ThumbCache(tmp_path / "cache")
+    monkeypatch.setattr(thumbs, "get", busy)
+    client = gate.create_app(lib, KEY, clock=lambda: NOW, thumbs=thumbs).test_client()
+    r = client.get(f"/t/{TOK}{ART}Cover.mp3?w=96")
+    assert r.status_code == 503 and r.headers["Retry-After"] == "1"
+    assert client.get(f"/t/{TOK}{ART}Cover.mp3").status_code == 200       # the original cover and the audio carry on
 
 
 def test_thumbnails_land_in_the_state_directory(client, lib):

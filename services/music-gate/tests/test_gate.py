@@ -263,6 +263,16 @@ def test_from_env_wires_the_lyrics_to_the_library_and_starts_both_refreshers(tmp
     assert app.config["THUMBS"].max_bytes == 1024 * 1024 and app.config["THUMBS"].dir == tmp_path / "state" / "art-cache"
 
 
+@pytest.mark.parametrize("value,expected_mb", [("600", 600), ("0.5", 1), ("1500", 1500), ("lots", 600), ("", 600)])
+def test_art_cache_setting_never_stops_the_music(tmp_path, monkeypatch, value, expected_mb):
+    monkeypatch.setenv("MUSIC_ROOT", str(tmp_path))
+    monkeypatch.setenv("STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("SKIPPY_HOME_TOKEN", "a-made-up-token-for-this-test")
+    monkeypatch.setenv("ART_CACHE_MB", value)
+    monkeypatch.setattr(gate.threading, "Thread", _NoThread)
+    assert gate.from_env().config["THUMBS"].max_bytes == expected_mb * 1024 * 1024
+
+
 @pytest.mark.parametrize("value,songs", [("path", False), ("PATH", False), ("song", True), ("nonsense", True), ("", True)])
 def test_lyrics_match_setting(tmp_path, monkeypatch, value, songs):
     monkeypatch.setenv("MUSIC_ROOT", str(tmp_path))
@@ -293,11 +303,45 @@ def test_year_parsing(raw, year):
     assert _year(raw) == year
 
 
+def test_an_empty_picture_frame_is_not_a_cover(tmp_path):
+    """1 % of the real library (about 130 tracks) has an APIC frame with no data: it must not be offered as a cover."""
+    from helpers import image_bytes, make_mp3
+    from library import read_art, read_tags
+    empty = make_mp3(tmp_path / "empty.mp3", cover=b"", TIT2="E")
+    assert read_tags(empty)["art"] is False and read_art(empty) is None
+    real = image_bytes((300, 300))
+    only_a_back = make_mp3(tmp_path / "back.mp3", TIT2="B", pictures=[(real, 4)])
+    assert read_tags(only_a_back)["art"] is True and read_art(only_a_back)[0] == real
+    # an empty first frame, a real one after it: the real one is the cover
+    second = make_mp3(tmp_path / "second.mp3", TIT2="S", pictures=[(b"", 0), (real, 0)])
+    assert read_tags(second)["art"] is True and read_art(second)[0] == real
+    # a front cover wins over an earlier picture of another kind
+    front = image_bytes((100, 100), color=(1, 2, 3))
+    both = make_mp3(tmp_path / "both.mp3", cover=front, TIT2="F", pictures=[(real, 4)])
+    assert read_art(both)[0] == front
+
+
+def test_an_mp4_cover_counts_only_with_data(tmp_path, monkeypatch):
+    import mutagen
+    from mutagen.mp4 import MP4Cover
+    from library import read_art, read_tags
+
+    class Mp4:
+        info = type("Info", (), {"codec": "mp4a.40.2", "length": 10})()
+
+        def __init__(self, covers):
+            self.tags = {"\xa9nam": ["Zero"], "covr": covers}
+    png = MP4Cover(b"\x89PNG-ish", imageformat=MP4Cover.FORMAT_PNG)
+    for covers, art, expected in (([], False, None), ([MP4Cover(b"")], False, None), ([MP4Cover(b""), png], True, (b"\x89PNG-ish", "image/png"))):
+        monkeypatch.setattr(mutagen, "File", lambda path, covers=covers: Mp4(covers))
+        assert read_tags(tmp_path / "x.m4a")["art"] is art and read_art(tmp_path / "x.m4a") == expected
+
+
 def test_read_tags_takes_the_year_from_id3v24_v23_and_mp4(tmp_path, monkeypatch):
     from helpers import make_mp3
     from library import read_tags
     assert read_tags(make_mp3(tmp_path / "a.mp3", TIT2="A", TDRC="2016-03-04"))["y"] == 2016      # ID3v2.4 recording time
-    assert read_tags(make_mp3(tmp_path / "b.mp3", v2_version=3, TIT2="B", TYER="1999"))["y"] == 1999  # v2.3's year frame
+    assert read_tags(make_mp3(tmp_path / "b.mp3", v2_version=3, TIT2="B", TYER="1999"))["y"] == 1999  # v2.3's year frame (mutagen upgrades it)
     assert read_tags(make_mp3(tmp_path / "c.mp3", TIT2="C"))["y"] == 0
 
     class Mp4:

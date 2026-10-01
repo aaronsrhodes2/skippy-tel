@@ -281,7 +281,10 @@ def test_the_etag_changes_only_when_the_lines_do(tmp_path):
 
 
 def test_a_url_that_isnt_http_is_refused(tmp_path):
-    store = LyricsStore(tmp_path, url="file:///etc/passwd")                 # the real fetch, which checks the scheme
+    good = tmp_path / "answer.json"
+    good.write_bytes(payload())                                             # perfectly good content, but at a file:// address
+    store = LyricsStore(tmp_path / "s", url=good.as_uri())                  # the real fetch, which checks the scheme
+    store.rebuild(TRACKS)
     assert store.refresh() is False and store.count == 0
 
 
@@ -359,14 +362,16 @@ def server():
     srv.shutdown()
 
 
-def test_the_real_fetch_handles_200_304_and_errors(tmp_path, server):
+def test_the_real_fetch_handles_200_304_and_errors(tmp_path, server, caplog):
     store = LyricsStore(tmp_path, url=server + "/lyric-summaries")
     store.rebuild(TRACKS)
     assert store.refresh() is True and store.count == 2 and store.source_etag == '"served-1"'
     assert store.refresh() is True and _Handler.seen == [None, '"served-1"']             # the second was a 304
     assert LyricsStore(tmp_path / "b", url=server + "/gone").refresh() is False         # a 503
-    assert LyricsStore(tmp_path / "c", url=server + "/big").refresh() is False          # more than any real answer
     assert LyricsStore(tmp_path / "d", url="http://127.0.0.1:9/never").refresh() is False   # nothing listening
+    caplog.clear()
+    assert LyricsStore(tmp_path / "c", url=server + "/big").refresh() is False          # more than any real answer
+    assert "too big" in caplog.text                                                     # said so, not "bad JSON"
 
 
 # ── the route ───────────────────────────────────────────────────────────────────────────────────────────────────────

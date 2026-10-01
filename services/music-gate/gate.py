@@ -32,7 +32,7 @@ from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, request, send_file
 
-from art import ThumbCache, pick_size
+from art import Busy, ThumbCache, pick_size
 from library import AUDIO, Library, etag_matches, read_art
 from lyrics import DEFAULT_URL, LEVELS, LyricsStore
 
@@ -134,7 +134,10 @@ def create_app(library: Library, key: bytes, clock=time.time, lyrics: LyricsStor
                 abort(404)
             data, mime = found
             return Response(data, mimetype=mime, headers={"Cache-Control": "private, max-age=604800"})
-        made = thumbs.get(rel, full, width, lambda: read_art(full))
+        try:
+            made = thumbs.get(rel, full, width, lambda: read_art(full))
+        except Busy:                                         # a burst of uncached covers: ask again in a moment
+            return jsonify(error="busy making thumbnails; try again"), 503, {"Retry-After": "1"}
         if not made:
             abort(404)
         etag, data = made
@@ -164,5 +167,10 @@ def from_env() -> Flask:
     threading.Thread(target=library.run_forever, daemon=True, name="library-scan").start()
     if lyrics.url:
         threading.Thread(target=lyrics.run_forever, daemon=True, name="lyrics-refresh").start()
-    thumbs = ThumbCache(Path(state) / "art-cache", int(float(os.environ.get("ART_CACHE_MB", "600")) * 1024 * 1024))
+    try:
+        cache_mb = float(os.environ.get("ART_CACHE_MB", "600"))
+    except ValueError:                                       # a typo in the env must not stop the music
+        logging.warning("music-gate: ART_CACHE_MB isn't a number; using 600")
+        cache_mb = 600.0
+    thumbs = ThumbCache(Path(state) / "art-cache", int(max(cache_mb, 1) * 1024 * 1024))
     return create_app(library, gate_key(token) if token else b"", lyrics=lyrics, thumbs=thumbs)

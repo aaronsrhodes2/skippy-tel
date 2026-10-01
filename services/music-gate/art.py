@@ -28,6 +28,10 @@ MATTE = (24, 24, 24)                 # what a transparent cover is laid on (the 
 MAX_BAD = 4096                       # covers known to be unreadable, so a grid doesn't re-open them on every scroll
 
 
+class Busy(Exception):
+    """Too many thumbnails are being made at once; the caller answers 503 and the player asks again."""
+
+
 def pick_size(raw) -> int | None:
     """?w= → the nearest allowed width (a tie goes to the bigger one); None when it isn't a sensible whole number (→ 400)."""
     text = str(raw).strip()
@@ -64,10 +68,15 @@ def render(cover: bytes, w: int) -> bytes | None:
 
 
 class ThumbCache:
-    def __init__(self, directory: str | Path, max_bytes: int = DEFAULT_MAX_BYTES, workers: int = 4, clock=time.time):
+    def __init__(self, directory: str | Path, max_bytes: int = DEFAULT_MAX_BYTES, workers: int = 4, backlog: int = 8,
+                 clock=time.time):
         self.dir, self.max_bytes, self.clock = Path(directory), int(max_bytes), clock
         self._used: int | None = None                    # bytes on disk, counted at the first write
-        self._busy = threading.BoundedSemaphore(workers)  # decoding is CPU and memory: a grid of 40 covers must not starve the audio
+        self._busy = threading.BoundedSemaphore(workers)  # decoding is CPU and memory: at most this many at once...
+        # ...and only this many requests may be making thumbnails or waiting to: the rest are told to come back (Busy), not
+        # parked on a thread. The gate has 32 threads and a track that streams holds one for its whole length, so a grid of 40
+        # covers that all missed the cache must not be able to take them all.
+        self._pending = threading.BoundedSemaphore(workers + backlog)
         self._stripes = [threading.Lock() for _ in range(32)]   # two requests for one thumbnail make it once
         self._evicting = threading.Lock()
         self._mutex = threading.Lock()
@@ -77,8 +86,9 @@ class ThumbCache:
         return hashlib.sha1(f"{rel}\0{mtime_ns}\0{w}".encode("utf-8", "surrogatepass")).hexdigest()
 
     def get(self, rel: str, full: Path, w: int, load_cover) -> tuple[str, bytes] | None:
-        """(etag, JPEG bytes) for this track's cover at width w, or None if it has none or can't be read.
-        load_cover() → (bytes, mime) | None is only called when the thumbnail doesn't exist yet."""
+        """(etag, JPEG bytes) for this track's cover at width w, or None if it has none or can't be read. Raises Busy when
+        too many thumbnails are being made already. load_cover() → (bytes, mime) | None is only called when the thumbnail
+        doesn't exist yet."""
         try:
             mtime_ns = full.stat().st_mtime_ns
         except OSError:
@@ -90,18 +100,23 @@ class ThumbCache:
             return key, hit
         if key in self._bad:
             return None
-        with self._stripes[int(key[:4], 16) % len(self._stripes)]:
-            hit = self._read(path)                       # made by whoever held the stripe before us
-            if hit is not None:
-                return key, hit
-            with self._busy:
-                found = load_cover()
-                data = render(found[0], w) if found else None
-            if data is None:
-                self._remember_bad(key)
-                return None
-            self._store(path, data)
-            return key, data
+        if not self._pending.acquire(blocking=False):
+            raise Busy
+        try:
+            with self._stripes[int(key[:4], 16) % len(self._stripes)]:
+                hit = self._read(path)                   # made by whoever held the stripe before us
+                if hit is not None:
+                    return key, hit
+                with self._busy:
+                    found = load_cover()
+                    data = render(found[0], w) if found else None
+                if data is None:
+                    self._remember_bad(key)
+                    return None
+                self._store(path, data)
+                return key, data
+        finally:
+            self._pending.release()
 
     # ── disk ─────────────────────────────────────────────────────────────
     def _read(self, path: Path) -> bytes | None:

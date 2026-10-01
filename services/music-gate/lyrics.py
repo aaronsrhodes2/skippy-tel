@@ -8,8 +8,9 @@ which track each line belongs to, because the stores and the library have drifte
 `GET /t/<pass>/lyrics.json`: `{"v": 1, "by": {"<catalog path>": "<summary>"}}`, gzipped, with an ETag.
 
 Why two stores: the per-file one was written once from the Mac's Traktor collection and covers ~77 % of the library's tracks;
-the per-song one, which the per-file one is derived from, is newer, and covers ~98 % of them, because a line is about the
-SONG: every file of "Artist, Title" (another album, a compilation, a `_3` duplicate) can show it.
+the per-song one, which the per-file one is derived from, is newer, and covers ~97 % of them, because a line is about the
+SONG: every file of "Artist, Title" (another album, a compilation, a `_3` duplicate) can show it. (Measured on the real
+stores and library, 2026-09-30: 16,476 and 20,863 of 21,451 tracks.)
 
 Matching, strictest first; a looser tier only fills tracks a stricter one left without a line:
   exact   the entry's path is a catalog path
