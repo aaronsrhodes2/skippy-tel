@@ -168,8 +168,9 @@ class FakeAbort { constructor() { this.signal = {aborted: false, onabort: null};
 
 // The portal, as the page sees it: /me/workshop/{events,resync,send,stop}.
 const tasks = JSON.parse(JSON.stringify(input.tasks || {}));
-let net = "ok", resyncMode = "ok", sendNext = null, made = 0;
+let net = "ok", resyncMode = "ok", sendNext = null, made = 0, latency = 0;
 const calls = [];
+const later = (v) => (latency ? new Promise(res => fakeSetTimeout(() => res(v), latency)) : Promise.resolve(v));   // a slow portal
 const reply = (status, body, ctype, redirected) => ({
   ok: status >= 200 && status < 300, status, redirected: !!redirected,
   headers: {get: (n) => (n.toLowerCase() === "content-type" ? (ctype || "application/json") : null)}, json: async () => body});
@@ -187,13 +188,13 @@ function fakeFetch(url, opts) {
     if (net === "html") return Promise.resolve(reply(502, "<html>bad gateway</html>", "text/html"));
     if (net === "redirect") return Promise.resolve(reply(200, "<html>sign in</html>", "text/html", true));
     if (net === "forbidden") return Promise.resolve(reply(403, {error: "no"}));
-    const t = tasks[task];
-    if (!t) return Promise.resolve(reply(200, {state: "unknown", events: [], next: after, error: null}));
-    if (t.raw !== undefined) return Promise.resolve(reply(200, t.raw));
+    const t = tasks[task];                                          // the answer is decided now and arrives `latency` later
+    if (!t) return later(reply(200, {state: "unknown", events: [], next: after, error: null}));
+    if (t.raw !== undefined) return later(reply(200, t.raw));
     const evs = t.events || [];
     const body = {state: t.state, error: t.error || null, events: evs.slice(after), next: evs.length};
     if (t.quiet_s !== undefined && t.quiet_s !== null) body.quiet_s = t.quiet_s;
-    return Promise.resolve(reply(200, body));
+    return later(reply(200, body));
   }
   if (route === "resync") {
     rec.task = JSON.parse(opts.body).task;
@@ -233,6 +234,8 @@ function snap() {
     if ("adv" in s) await advance(s.adv);
     else if ("tasks" in s) { for (const [id, patch] of Object.entries(s.tasks)) { if (patch === null) delete tasks[id]; else tasks[id] = Object.assign(tasks[id] || {events: []}, patch); } await settle(); }
     else if ("net" in s) net = s.net;
+    else if ("latency" in s) latency = s.latency;
+    else if ("breakDom" in s) El.prototype.replaceChildren = function () { throw new TypeError("this.replaceChildren is not a function"); };   // an old browser
     else if ("resyncMode" in s) resyncMode = s.resyncMode;
     else if ("sendNext" in s) sendNext = s.sendNext;
     else if ("confirm" in s) confirmAnswer = s.confirm;
@@ -311,6 +314,17 @@ def test_a_stalled_run_shows_what_is_happening_checks_again_by_itself_and_brings
     a = s["after_30s"]
     assert not a["sendDisabled"] and a["hint"] and a["stopShown"] and a["checkText"] == "Check again"
     assert "a minute after a deploy" in a["msg"]
+
+
+@needs_node
+def test_a_task_skippy_pc_never_picked_up_says_so_and_is_just_as_quiet(page):
+    out = drive(page, [{"adv": 3 * S}, {"snap": "early"}, {"adv": 30 * S}, {"snap": "later"}],
+                tasks={"t1": {"state": "offline"}}, follow="t1")
+    early, later = out["snaps"]["early"], out["snaps"]["later"]
+    assert early["strip"] and early["msg"].startswith("skippy-pc hasn't picked this up for ")
+    assert "Is the bridge running there?" in early["msg"] and "a minute after a deploy" in early["msg"]
+    assert early["sendDisabled"] and not later["sendDisabled"] and later["hint"]       # same rules: Send back after 30 s
+    assert resyncs(out)[0] < 2 * S
 
 
 @needs_node
@@ -419,6 +433,43 @@ def test_sending_while_quiet_leaves_the_old_task_and_the_server_decides(page):
     assert sent["message"] == "second"
     assert not [c for c in out["calls"] if c["route"] == "events" and c["task"] == "t1" and c["t"] > sent["t"]]   # t1 is forgotten
     assert [c for c in out["calls"] if c["route"] == "events" and c["task"] == "new1" and c["t"] >= sent["t"]]
+
+
+@needs_node
+def test_an_answer_that_arrives_after_the_page_left_that_task_is_dropped(page):
+    # a slow portal: a poll of the old task is still out when Send is pressed, and it comes back with news
+    out = drive(page, [
+        {"latency": 5 * S}, {"tasks": {"t1": {"state": "stalled"}}},
+        {"adv": 30 * S}, {"tasks": {"t1": {"events": [ev(1), ev(2), ev(3)]}}}, {"adv": 8 * S},
+        {"snap": "ready"}, {"type": "second"}, {"click": "ps-send"}, {"adv": 15 * S}, {"snap": "after"},
+    ], tasks={"t1": {"state": "running", "events": [ev(1)]}}, follow="t1")
+    s = out["snaps"]
+    assert not s["ready"]["sendDisabled"] and s["ready"]["t"] == 38 * S
+    (sent,) = [c for c in out["calls"] if c["route"] == "send"]
+    assert [c for c in out["calls"] if c["route"] == "events" and c["task"] == "t1" and c["t"] < sent["t"]][-1]["t"] > sent["t"] - 5 * S   # one was out
+    a = s["after"]
+    assert a["task"] == {"task": "new1", "after": 0}                          # the old poll's answer did not put t1 back
+    assert [b["text"] for b in a["log"]][:3] == ["go", "step 1 | (left waiting)", "second"]     # nor add its news to the old turn
+
+
+@needs_node
+def test_a_bug_inside_a_poll_is_a_quiet_link_not_a_dead_card(page):
+    # whatever the page trips over while drawing (here: a browser without replaceChildren), the loop survives it:
+    # the card says it can't get through, keeps polling, and Send comes back after 30 s
+    out = drive(page, [{"adv": 2 * S}, {"breakDom": True}, {"adv": 40 * S}, {"snap": "s"}],
+                tasks={"t1": {"state": "running", "events": [ev(1)]}}, follow="t1")
+    s = out["snaps"]["s"]
+    assert s["strip"] and s["msg"].startswith("Can't reach the portal (") and not s["sendDisabled"]
+    assert len([t for t in polls(out) if t > 10 * S]) >= 10
+
+
+@needs_node
+def test_events_that_are_not_events_are_ignored_and_an_old_transcript_without_parts_still_works(page):
+    out = drive(page, [{"adv": 3 * S}, {"snap": "s"}],
+                tasks={"t1": {"state": "running", "events": [None, 5, "x", ev(1), [], ev(2)]}}, follow="t1",
+                storage={"ps-log": json.dumps([{"role": "user", "text": "go"}, {"role": "assistant"}])})
+    s = out["snaps"]["s"]
+    assert not s["strip"] and s["log"][-1]["text"] == "step 1 | step 2"
 
 
 @needs_node

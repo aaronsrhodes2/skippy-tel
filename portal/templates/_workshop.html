@@ -197,7 +197,7 @@
       if (r && (r.status === 401 || r.status === 403)) why = "signin";
       const d = r && r.ok && r.data && typeof r.data === "object" ? r.data : null;
       if (d && d.state !== "unknown") {            // a stalled or offline read is still a read: keep what it carries
-        if (Array.isArray(d.events)) d.events.forEach(e => job.turn.parts.push(e));
+        if (Array.isArray(d.events)) d.events.forEach(e => { if (e && (e.t === "text" || e.t === "tool")) job.turn.parts.push(e); });
         if (typeof d.next === "number" && d.next > job.after) job.after = d.next;   // never back: a portal that was just rebuilt holds fewer events than this page has
         store.set(K.task, JSON.stringify({task: job.task, after: job.after}));
       }
@@ -217,13 +217,14 @@
 
     async function follow(job) {                   // poll a task until it ends, riding out portal, reporter and bridge restarts
       running = job; job.quietSince = null; job.kind = ""; job.srv = null; job.checking = false; job.poked = false; job.lastResync = 0;
+      if (!Array.isArray(job.turn.parts)) job.turn.parts = [];                 // a transcript saved by an older page
       store.set(K.task, JSON.stringify({task: job.task, after: job.after}));   // a reload before the first answer still finds it
       ui();
       let out = {};
       while (running === job) {
-        const asked = job.checking;
+        const asked = job.checking, was = job.quietSince;
         try { out = await poll(job); }
-        catch (e) { out = {kind: "net"}; goQuiet(job, "net", null); }       // a bug or an odd answer must never strand the card
+        catch (e) { out = {kind: "net"}; job.quietSince = was; goQuiet(job, "net", null); }   // a bug or an odd answer must never strand the card (and must not restart its 30 s)
         if (out.stale || running !== job) return;  // another task owns the card now
         if (asked) job.checking = false;
         if (out.end) break;
@@ -257,9 +258,11 @@
     });
     text.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
     stopBtn.addEventListener("click", async () => {
-      if (!running) return;
-      try { await call(STOP, {method: "POST", headers: H, body: JSON.stringify({task: running.task})}); } catch (e) {}
-      if (running) { running.stopping = true; running.turn.note = "Stopping…"; draw(running.turn); }
+      const job = running;
+      if (!job) return;
+      try { await call(STOP, {method: "POST", headers: H, body: JSON.stringify({task: job.task})}); } catch (e) {}
+      job.stopping = true;                         // (the card may have moved on to another task while that was out: only this job's note changes)
+      if (running === job) { job.turn.note = "Stopping…"; draw(job.turn); }
       ui();
     });
     checkBtn.addEventListener("click", () => {     // look now: ask skippy-pc to resync AND poll the portal this instant
