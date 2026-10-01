@@ -1,15 +1,10 @@
-"""solid-gold bridge — runs on the Windows host (NOT in docker).
+"""Claude bridge — runs on the Windows host (NOT in docker): the engine of the private Skippy on the portal's /me.
 
-Exposes one HTTP endpoint that shells out to Claude Code CLI on this PC.
-SkippyTel's flask-api (in docker) calls it via host.docker.internal.
-That keeps the call on Aaron's Claude Code OAuth subscription instead
-of the metered API key.
+It shells out to the Claude Code CLI on this PC (the Captain's subscription, not the metered API). The home reporter
+(in docker) reaches it via host.docker.internal. The old POST /solid-gold door (the "trust the awesomeness" and
+"solid gold" voice tiers) was removed on 2026-09-30 at the Captain's request: the private Skippy has full access.
 
-POST /solid-gold takes one mode, request body `mode`:
-  - "bypass" → trust the awesomeness (full perms, Opus 4.7)
-The read-only "plan" mode (the "solid gold" tier) is gone: it answers 400.
-
-Plus the private Skippy (workshop_engine.py): POST /workshop, GET /workshop/run/<task>,
+The private Skippy (workshop_engine.py): POST /workshop, GET /workshop/run/<task>,
 GET /workshop/runs, POST /workshop/cancel/<task>. Those need `Authorization: Bearer <SKIPPY_HOME_TOKEN>`
 (the same token the home reporter holds), because they run Claude Code with
 full permissions on the repo. Without the token configured they stay shut.
@@ -20,7 +15,6 @@ ENV:
   CLAUDE_BRIDGE_PORT      default 9337
   CLAUDE_BRIDGE_CWD       default D:\\Aaron\\development
   CLAUDE_PATH             default 'claude' (override if not in PATH)
-  CLAUDE_AWESOMENESS_MODEL default 'claude-opus-4-7'
 
 Launch:  python bridge.py
 """
@@ -31,7 +25,6 @@ import hmac
 import json
 import os
 import shutil
-import subprocess
 import sys
 import threading
 import time
@@ -77,7 +70,6 @@ MAX_DRAIN_BYTES = 1_000_000        # an unwanted request body up to this is read
 PORT      = int(os.getenv("CLAUDE_BRIDGE_PORT", "9337"))
 CWD       = os.getenv("CLAUDE_BRIDGE_CWD", r"D:\Aaron\development")
 CLAUDE    = _discover_claude()
-AWE_MODEL = os.getenv("CLAUDE_AWESOMENESS_MODEL", "claude-opus-4-7")
 
 WORKSHOP  = workshop.Workshop([CLAUDE])
 TOKEN_REREAD_S = 30.0              # how long a token that is held stays unchecked
@@ -118,77 +110,6 @@ def workshop_health() -> dict:
     return info
 
 
-def build_cmd() -> list[str]:
-    """The claude CLI invocation for "trust the awesomeness": full perms, top model.
-
-    The prompt is NOT on the command line: it goes in by stdin (see run_streaming). On Windows `claude` is claude.cmd,
-    cmd.exe cuts a command line at the first newline, and everything after it (--output-format, --model, even
-    --dangerously-skip-permissions) would be dropped: a multi-line prompt used to lose its own flags (R01)."""
-    return [CLAUDE, "-p", "--output-format", "stream-json", "--verbose",
-            "--dangerously-skip-permissions", "--model", AWE_MODEL]
-
-
-def extract_text_chunks(line: str) -> list[str]:
-    """Pull just the assistant text deltas out of a stream-json line.
-
-    Claude Code emits NDJSON events. We only forward assistant prose to
-    the phone — tool uses, system events, etc. stay invisible.
-    """
-    line = line.strip()
-    if not line:
-        return []
-    try:
-        evt = json.loads(line)
-    except json.JSONDecodeError:
-        return []
-    out: list[str] = []
-    if evt.get("type") == "assistant":
-        msg = evt.get("message") or {}
-        for block in msg.get("content", []) or []:
-            if block.get("type") == "text":
-                t = block.get("text") or ""
-                if t:
-                    out.append(t)
-    elif evt.get("type") == "result":
-        # Final synthesized text — only emit if we never saw streaming
-        # assistant blocks (some short prompts collapse to result-only).
-        # Caller can dedupe if needed; we keep it simple and skip here.
-        pass
-    return out
-
-
-def run_streaming(prompt: str, write_chunk):
-    """Spawn claude, feed it the prompt on stdin, parse NDJSON stdout, push text deltas via write_chunk."""
-    proc = subprocess.Popen(
-        build_cmd(),
-        cwd=CWD,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,      # was a pipe nobody read: a chatty stderr would have stalled claude
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=workshop.child_env(),       # no door key in the child's environment, and nothing in it waits for a person
-        bufsize=1,  # line-buffered
-    )
-    threading.Thread(target=workshop.Workshop._feed, args=(proc, prompt), daemon=True).start()
-    try:
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            for chunk in extract_text_chunks(line):
-                write_chunk(chunk)
-    finally:
-        proc.wait(timeout=5)
-    return proc.returncode
-
-
-def run_oneshot(prompt: str) -> dict:
-    """Synchronous: run claude, collect all text, return as one string."""
-    parts: list[str] = []
-    rc = run_streaming(prompt, parts.append)
-    return {"output": "".join(parts), "returncode": rc}
-
-
 class Handler(BaseHTTPRequestHandler):
     server_version = "ClaudeBridge/1"
 
@@ -223,7 +144,6 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/health":
             self._json(200, {"status": "ok", "service": "claude-bridge",
                              "cwd": CWD, "claude": CLAUDE,
-                             "awe_model": AWE_MODEL,
                              "workshop": workshop_health()})
             return
         if url.path == "/workshop/runs":
@@ -236,9 +156,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802
         path = urlparse(self.path).path
-        if path == "/solid-gold":
-            self._handle_solid_gold()
-            return
         if path == "/workshop":
             self._workshop_start()
             return
@@ -250,7 +167,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # ── the private Skippy (workshop.py) ─────────────────────────────────
     def _workshop_ok(self) -> bool:
-        """Everything here runs Claude Code (the workshop and /solid-gold, both with every permission check skipped), so
+        """Everything here runs Claude Code (with every permission check skipped), so
         every door wants the home token, and with none configured they all stay shut (Platinum section 19,
         condition 1). The bridge listens on 0.0.0.0 so Docker can reach it: anything on the network can knock, only
         the token opens."""
@@ -306,61 +223,6 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json(200, run.since(after, wait))
 
-    def _handle_solid_gold(self):
-        if not self._workshop_ok():                    # before reading the body, before anything can run
-            return
-        body = self._read_body()
-        prompt = (body.get("text") or "").strip()
-        mode   = body.get("mode")            # only 'bypass' (trust the awesomeness); named explicitly, never assumed
-        stream = bool(body.get("stream"))
-
-        if not prompt:
-            self._json(400, {"error": "bad_request",
-                             "message": "text is required"})
-            return
-        if mode == "plan":
-            self._json(400, {"error": "bad_request",
-                             "message": "the read-only 'plan' mode (solid gold) was removed; only mode 'bypass' "
-                                        "(trust the awesomeness) is accepted"})
-            return
-        if mode != "bypass":
-            self._json(400, {"error": "bad_request",
-                             "message": "mode must be 'bypass'"})
-            return
-
-        try:
-            if stream:
-                self._stream_text(prompt)
-            else:
-                result = run_oneshot(prompt)
-                self._json(200, result)
-        except FileNotFoundError as e:
-            self._json(503, {"error": "claude_not_found",
-                             "message": f"could not exec '{CLAUDE}': {e}. "
-                                        "Set CLAUDE_PATH env var to the full claude.cmd path."})
-        except Exception as e:
-            traceback.print_exc()
-            self._json(502, {"error": "bridge_error", "message": str(e)})
-
-    def _stream_text(self, prompt: str):
-        """Stream NDJSON {"text": "..."} lines, one per assistant chunk,
-        terminated by {"done": true}. Caller (flask-api client) parses."""
-        self.send_response(200)
-        self.send_header("Content-Type", "application/x-ndjson")
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("X-Accel-Buffering", "no")
-        self.end_headers()
-
-        def write_chunk(chunk: str):
-            payload = json.dumps({"text": chunk}) + "\n"
-            self.wfile.write(payload.encode("utf-8"))
-            self.wfile.flush()
-
-        rc = run_streaming(prompt, write_chunk)
-        done = json.dumps({"done": True, "returncode": rc}) + "\n"
-        self.wfile.write(done.encode("utf-8"))
-        self.wfile.flush()
-
     def _json(self, status: int, body: dict):
         self._drain()
         payload = json.dumps(body).encode("utf-8")
@@ -397,7 +259,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    print(f"[bridge] PORT={PORT} CWD={CWD} CLAUDE={CLAUDE} AWE={AWE_MODEL}",
+    print(f"[bridge] PORT={PORT} CWD={CWD} CLAUDE={CLAUDE}",
           file=sys.stderr)
     # Take back the runs saved on disk before the first request, so a restart (a crash, a reboot, the supervisor) keeps
     # finished runs deliverable and ends the interrupted ones with an error the chat can show. Whatever is wrong with

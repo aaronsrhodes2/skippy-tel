@@ -646,6 +646,17 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         except ValueError:
             abort(400)
 
+    @app.get("/home/workshop")
+    def home_workshop_list():
+        """What this portal holds of the private Skippy's runs (workshop.py `listing`), for the home reporter's
+        reconciler: it compares this with what the bridge holds and pushes the difference, so a portal that was just
+        redeployed (empty) is refilled without anyone asking. Same home-token door as the push; never cached."""
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        resp = jsonify(workshop.listing())
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
     # ── The old Bilby page (a mirror of the Mac's DJ decks) is gone: Bilby's Audio Service below is where the music is ──
     # Its address, and every address under it (state.json, art), still lead somewhere: old bookmarks, a home-screen
     # shortcut and the links in old Discord posts land on the player. (GET only: nothing posts there any more.)

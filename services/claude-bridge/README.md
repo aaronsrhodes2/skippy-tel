@@ -1,11 +1,11 @@
-# solid-gold bridge
+# Claude bridge
 
 Tiny HTTP service that runs **on the Windows host** (not in docker) and
-shells out to Claude Code CLI. SkippyTel's `flask-api` container calls
-it via `host.docker.internal:9337` so the SkippyTel "trust the awesomeness"
-tier (and the private Skippy's workshop, below) use Aaron's Claude Code subscription
-(via `~/.claude/.credentials.json`) instead of the metered API key.
-(The read-only "solid gold" plan-mode tier was removed; see `POST /solid-gold`.)
+shells out to the Claude Code CLI: the engine of the private Skippy on the portal's `/me`.
+The home reporter reaches it via `host.docker.internal:9337`, and it runs on Aaron's
+Claude Code subscription (via `~/.claude/.credentials.json`), not the metered API key.
+(The old `POST /solid-gold` door, behind the "trust the awesomeness" and "solid gold" voice
+tiers, was removed on 2026-09-30 at the Captain's request: the private Skippy has full access.)
 
 ## Why not in docker
 
@@ -35,13 +35,12 @@ Environment overrides (set in the same shell before launch):
 | `CLAUDE_BRIDGE_PORT` | `9337` | Port bound on 0.0.0.0 (covers loopback + host.docker.internal) |
 | `CLAUDE_BRIDGE_CWD` | `D:\Aaron\development` | Working directory `claude -p` runs in |
 | `CLAUDE_PATH` | `claude` | Full path to `claude.cmd`/`claude.exe` if not in PATH |
-| `CLAUDE_AWESOMENESS_MODEL` | `claude-opus-4-7` | Model used by `trust the awesomeness` tier (`POST /solid-gold`) |
 
 ## Endpoints
 
 ### `GET /health`
 ```json
-{"status": "ok", "service": "claude-bridge", "cwd": "...", "claude": "...", "awe_model": "...",
+{"status": "ok", "service": "claude-bridge", "cwd": "...", "claude": "...",
  "workshop": {"ready": true, "model": "claude-opus-5-5", "busy": false, "login": "ok"}}
 ```
 `workshop.login` is `"ok"`, `"expired"` or `"unknown"`: the bridge asks `claude auth status`
@@ -58,33 +57,13 @@ paused, signed out, not mounted yet) never replaces it, so a Drive hiccup cannot
 non-empty value replaces it (re-pairing home still needs no restart). With none held at all
 (the bridge started before Drive mounted) it looks again every 5 s.
 
-### `POST /solid-gold`
-```json
-{
-  "text":   "your prompt here",
-  "mode":   "bypass",              // the only mode: trust the awesomeness (full permissions, Opus)
-  "stream": false                  // true → NDJSON, false → single JSON {output, returncode}
-}
-```
-`mode` must be exactly `"bypass"` (never assumed: it skips every permission check). The read-only
-`"plan"` mode (the "solid gold" tier) was removed and answers `400` with a plain message, as does
-any other or missing mode. The prompt goes to `claude` on **stdin**, not on the command line.
-
-Stream output is NDJSON, one line per chunk:
-```
-{"text": "first chunk of assistant prose"}
-{"text": "second chunk"}
-{"done": true, "returncode": 0}
-```
-
 ### The private Skippy: `POST /workshop`, `GET /workshop/run/<task>`, `GET /workshop/runs`, `POST /workshop/cancel/<task>`
 
 Claude Code with **full permissions** (`--dangerously-skip-permissions`) on the
 SkippyTel repo, driven from the Captain's portal dashboard (`workshop_engine.py`).
 These four need `Authorization: Bearer <SKIPPY_HOME_TOKEN>` (the token the home
 reporter holds; read from the environment or the vault `G:/My Drive/vault/.env`).
-With no token configured they answer 503 and stay shut. `/solid-gold` takes the
-same token (see the note below).
+With no token configured they answer 503 and stay shut.
 
 - **Model:** `claude-opus-5-5`, a constant in `workshop_engine.py`. No environment
   variable and no request field changes it.
@@ -159,13 +138,11 @@ file; they are the ones that would have caught the newline truncation.
 ## Security note
 
 The bridge listens on `0.0.0.0` (so Docker can reach it) and runs Claude Code, so
-**every** door except `/health` wants `Authorization: Bearer <SKIPPY_HOME_TOKEN>`,
-`/solid-gold` included (it used to take no authentication: closed 2026-09-30,
-`tests/test_solid_gold_auth.py`), and with no token configured they all stay shut (503).
+**every** door except `/health` wants `Authorization: Bearer <SKIPPY_HOME_TOKEN>`
+(`tests/test_door_auth.py`), and with no token configured they all stay shut (503).
 The token check comes before any input is looked at, so a stranger learns nothing about the rules.
-flask-api's client (`app/clients/claude_bridge.py`) sends the token from its own
-environment, which the vault `.env` fills with the same value. Anything else on the
-network can knock on port 9337 and gets 401.
+The home reporter sends the token from its own environment, which the vault `.env` fills
+with the same value. Anything else on the network can knock on port 9337 and gets 401.
 
 ## Boot persistence (deferred)
 
