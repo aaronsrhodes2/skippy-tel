@@ -278,3 +278,10 @@ age (so `bridge received`) now, and `first edit` / `git push` once the bridge's 
 with those marks the row splits into `prompt -> bridge received -> first edit -> git push -> push`. Not measurable yet: the portal's own
 "send" moment (portal send -> bridge start), the time spent editing versus testing, and the local test run before the push. A later change
 adds those stamps; the timer already tolerates their absence.
+
+### Doom Loop dev channel (another repo's CI, no portal deploy)
+
+doom-loop's own workflow uploads each build of the game to the `skippy-tel-doomloop-dev` bucket as
+`doomloop-publisher` (Workload Identity Federation provider `doomloop`, doom-loop's `main` only); the portal reads the bucket at
+request time, so none of this runs through `deploy.yml` except the smoke test that `/doomloop/version` answers. Details:
+[docs/portal/README.md](portal/README.md#doom-loop-dev-channel-doomloop).

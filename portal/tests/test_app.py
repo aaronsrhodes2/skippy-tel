@@ -1820,13 +1820,14 @@ def test_weapon_vs_armor_is_playable_in_the_browser():
     assert not any(e.slug == "weapon-vs-armor" for e in experiments.EXPERIMENTS)
 
 
-def test_browser_games_lists_weapon_vs_armor_star_control_zero_and_orion_trail(env):
+def test_browser_games_lists_weapon_vs_armor_star_control_zero_orion_trail_and_doom_loop(env):
     import re
     client, _, _ = env
     page = client.get("/play").data.decode()                                     # public, like the experiments
     assert '<body data-app="play">' in page and '<h1 class="apptitle">Browser Games</h1>' in page
-    assert re.findall(r'data-tel="play:([\w-]+)"', page) == ["weapon-vs-armor", "star-control-zero", "orion-trail"]
+    assert re.findall(r'data-tel="play:([\w-]+)"', page) == ["weapon-vs-armor", "star-control-zero", "orion-trail", "doom-loop"]
     assert 'href="/experiments/weapon-vs-armor" data-tel="play:weapon-vs-armor"' in page
+    assert '<div class="tile" data-tel="play:doom-loop"><span class="pill">coming soon</span>' in page  # no build yet: no link
     assert "Star Control Zero: The Precursors" in page
     assert '<div class="tile" data-tel="play:star-control-zero"><span class="pill">coming soon</span>' in page  # no link to nowhere
     login(client, ADMIN)

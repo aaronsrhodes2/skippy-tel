@@ -40,6 +40,7 @@ import play
 import player as player_mod
 import spend
 import starcontrol
+import doomloop
 import ratelimit
 import readiness
 import recovery
@@ -1002,6 +1003,9 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         # Star Control Zero is a card that says "coming soon" until the image carries its web build.
         games = [dataclasses.replace(g, endpoint="starcontrol.page")
                  if g.slug == "star-control-zero" and starcontrol.bundled() else g for g in play.GAMES]
+        # Doom Loop is a card that says "coming soon" until the dev channel holds a build.
+        games = [dataclasses.replace(g, endpoint="doomloop.page")
+                 if g.slug == "doom-loop" and doomloop.bundled() else g for g in games]
         return render_template("play.html", games=games)
 
     @app.get("/play/orion-trail")
@@ -1179,6 +1183,50 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                                    max_age=31536000 if pinned else 3600)
 
     app.register_blueprint(scz)
+
+    # ── Doom Loop: the Captain's work-in-progress game, a dev channel read from GCS (doomloop.py; every signed-in person) ──
+    dl = Blueprint("doomloop", __name__, url_prefix="/doomloop")
+
+    @dl.get("/")
+    @auth.login_required
+    def page():
+        """The newest build's page with the portal's app bar and dev badge on top. The trailing slash matters: the
+        page asks for its files by relative path, so they resolve under /doomloop/."""
+        if request.args:                                   # nothing here takes a query string
+            return redirect(url_for("doomloop.page"))
+        info = doomloop.version()
+        raw = doomloop.read("index.html") if info else None
+        if raw is None:
+            return render_template("doomloop.html"), 503
+        page_html = raw.decode("utf-8", errors="replace")
+        resp = app.response_class(page_html.replace("</body>", doomloop.app_bar(info) + "</body>", 1))
+        resp.headers["Cache-Control"] = "no-cache"         # a new build shows on the next visit
+        return resp
+
+    @dl.get("/version")
+    def version():
+        """Which build the dev channel holds (public: a build id and a time, nothing private)."""
+        info = doomloop.version()
+        resp = jsonify(bundled=bool(info), **info)
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+    @dl.get("/<path:path>")
+    @auth.login_required
+    def game_file(path):
+        """The build's files, read from the bucket. A path that leaves the folder is a 404 before storage is asked.
+        Every file is revalidated (an ETag), so a new build is picked up without clearing the browser cache."""
+        if doomloop.clean_path(path) is None:
+            abort(404)
+        data = doomloop.read(path)
+        if data is None:
+            abort(404)
+        resp = app.response_class(data, mimetype=doomloop.mimetype_for(path))
+        resp.headers["Cache-Control"] = "no-cache"
+        resp.add_etag()
+        return resp.make_conditional(request)
+
+    app.register_blueprint(dl)
 
     # ── chat ───────────────────────────────────────────────────────────────────
     talk = Blueprint("chat", __name__, url_prefix="/chat")

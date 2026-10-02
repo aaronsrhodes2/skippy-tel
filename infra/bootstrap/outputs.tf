@@ -19,3 +19,17 @@ output "portal_url" {
 output "state_bucket" {
   value = google_storage_bucket.tfstate.name
 }
+
+output "doomloop_workload_identity_provider" {
+  description = "doom-loop's GitHub variable WIF_PROVIDER (its dev-deploy workflow authenticates with it)."
+  value       = google_iam_workload_identity_pool_provider.doomloop.name
+}
+
+output "doomloop_publisher_service_account" {
+  description = "doom-loop's GitHub variable WIF_SERVICE_ACCOUNT."
+  value       = google_service_account.doomloop_publisher.email
+}
+
+output "doomloop_bucket" {
+  value = google_storage_bucket.doomloop_dev.name
+}

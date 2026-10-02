@@ -13,3 +13,15 @@ variable "github_repo" {
   type        = string
   default     = "aaronsrhodes2/skippy-tel"
 }
+
+variable "doomloop_repo" {
+  description = "owner/repo whose GitHub Actions may upload Doom Loop dev builds."
+  type        = string
+  default     = "aaronsrhodes2/doom-loop"
+}
+
+variable "doomloop_bucket" {
+  description = "GCS bucket holding the newest Doom Loop dev build (portal/doomloop.py reads it; deploy.yml sets DOOMLOOP_BUCKET to the same name)."
+  type        = string
+  default     = "skippy-tel-doomloop-dev"
+}

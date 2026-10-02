@@ -33,4 +33,9 @@ GAMES = (
                 "Earth is dead. Space wants you dead too. An Oregon Trail in space: ration air, water and food, patch "
                 "the hull, and choose your way through 158 things that go wrong between Luna and a new world.",
                 "🪐", "https://github.com/aaronsrhodes2/orion-trail", endpoint="orion_trail"),
+    BrowserGame("doom-loop", "Doom Loop",
+                "A time-loop strategy game in a browser tab: steer a swarm of self-replicating probes through thirty "
+                "years of Sol, make the yearly calls at the moot, and learn how to stop The Others. Work in progress; "
+                "this card plays the newest build.",
+                "♾️", "https://github.com/aaronsrhodes2/doom-loop"),
 )

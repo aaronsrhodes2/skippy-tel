@@ -164,7 +164,7 @@ def test_a_damaged_version_file_is_not_an_error(client, tmp_path):
 def test_browser_games_links_the_game_when_it_is_bundled_for_everyone_signed_in(client):
     page = client.get("/play").data.decode()                                   # the list is public, like the experiments
     assert 'href="/starcontrol/" data-tel="play:star-control-zero"' in page
-    assert "coming soon" not in page
+    assert '<div class="tile" data-tel="play:star-control-zero"><span class="pill">coming soon</span>' not in page   # this game's card, not another's
     assert 'data-app="starcontrol"' not in client.get("/").data.decode()       # no tile of its own on the launcher
     login(client, ADMIN)
     assert 'href="/starcontrol/" data-tel="play:star-control-zero"' in client.get("/play").data.decode()

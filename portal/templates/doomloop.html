@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Doom Loop — Browser Games{% endblock %}
+{% block app %}play{% endblock %}
+{% block content %}
+{# Shown when the dev channel has no build yet (no bucket, or the game's first build hasn't landed); the game itself
+   is served from doomloop.py's storage, not from a template. #}
+<p class="error">There is no Doom Loop build yet. A new one appears here a few minutes after a push to the game's repo.</p>
+<a class="btn" href="{{ url_for('index') }}">Back to Home</a>
+{% endblock %}

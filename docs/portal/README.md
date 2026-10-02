@@ -11,6 +11,7 @@ page. Code in [`portal/`](../../portal); deployed on every push by
 | `/chat` | allowlist | Text chat with Skippy (Claude, Skippy persona) |
 | `/admin` | admins | Game settings (world names, passwords, Dragonwilds owner ID), **Restart & update**, **Set up / repair Discord channels**, the **Recovery** cards (below) |
 | `/starcontrol/` | everyone signed in | **Star Control Zero**: the Captain's fan game, played in the browser; a card in Browser Games (`/play`) (see below) |
+| `/doomloop/` | everyone signed in | **Doom Loop**: the Captain's work-in-progress game, the newest build from its repo, with a dev-build badge; a card in Browser Games (`/play`) (see "Doom Loop dev channel" below) |
 | `/music` | admins | **Bilby's Audio Service**: the Captain's music collection streamed from skippy-pc to any browser (see below). `/bilby` redirects here |
 
 ## Friends: play without the Captain online
@@ -465,3 +466,37 @@ portal hooks (telemetry_web.py) ────┴─> Telemetry (in memory, ≤500
 - Restart is synchronous (stop → start can take a few minutes); the page
   waits. Fine for one admin; a background job + progress view is the fix if
   it gets annoying.
+
+## Doom Loop dev channel (`/doomloop`)
+
+The Captain's work-in-progress game (github.com/aaronsrhodes2/doom-loop), playable in the browser at its newest build, so
+any push can be played on its intended target. Unlike Star Control Zero it is **not baked into the portal image**:
+nothing about a new build redeploys the portal.
+
+**How a build gets here:** doom-loop's CI (`.github/workflows/dev-deploy.yml` in that repo) runs the game's tests, builds
+the static site (`dist/`: `index.html`, `assets/`, and `version.json` written last) and uploads it to the folder
+`dev/` of the bucket `skippy-tel-doomloop-dev`. It authenticates as `doomloop-publisher` through Workload Identity
+Federation (no key file): a second provider (`doomloop`) in the same pool trusts only doom-loop's `main`, and
+`doomloop-publisher` can only write objects in that one bucket. It is **not** `skippy-deployer`, whose `run.admin` /
+`compute.admin` roles another repo's CI must never hold. All of it is in `infra/bootstrap/` (applied by hand in Cloud
+Shell, like the rest of bootstrap: see [docs/cicd.md](../cicd.md)).
+
+**Routes** (`doomloop` blueprint in `app.py`, helpers in `portal/doomloop.py`): `GET /doomloop/` (signed in) is the build's
+`index.html` with the portal's app bar and a "dev build <commit>" badge injected above the game; `GET /doomloop/<path>`
+(signed in) is any file of the build, read from the bucket with the portal's own service account (`skippy-agent` has
+`objectViewer` on the bucket), sent with the right content type and revalidated by ETag; a path that leaves the folder is a
+404 before storage is asked. `GET /doomloop/version` is public (build id, commit, time, branch): the deploy's smoke test
+reads it and accepts "no build yet". The build id is cached for 10 seconds, so a new build shows within seconds of its
+upload. With no bucket configured (tests, local runs) or before the first build, the page says there is no build yet and the
+card in `/play` says "coming soon".
+
+**The game's side of the contract:** the site must ask for its files by relative path (Vite `base: './'`) so they resolve
+under `/doomloop/`; no single file may exceed Cloud Run's 32 MiB response cap; saves stay in the player's browser.
+
+**Setup once** (after the code is deployed): in Cloud Shell, `git pull` and apply `infra/bootstrap` (it creates the
+bucket, the publisher and the second provider), then give doom-loop two repository variables (Settings → Secrets and
+variables → Actions → Variables): `WIF_PROVIDER` = the `doomloop_workload_identity_provider` output and
+`WIF_SERVICE_ACCOUNT` = the `doomloop_publisher_service_account` output. Neither is a secret.
+
+Tests: `portal/tests/test_doomloop.py` (who gets in, the page and its badge, file types and revalidation, no path escape,
+new builds without a redeploy, damaged or unsafe `version.json`, no-bucket behavior, the `/play` card).

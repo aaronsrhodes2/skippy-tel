@@ -318,7 +318,7 @@ jobs:
             --timeout 900 \
             --max-instances 1 \
             --memory 1Gi \
-            --set-env-vars "^|^ALLOWED_EMAILS=${ALLOWED_EMAILS}|ADMIN_EMAILS=${ADMIN_EMAILS}|GCP_PROJECT=${PROJECT_ID}|GCP_ZONE=us-west1-b|GCP_INSTANCE=skippy-games|CHAT_MODEL=claude-haiku-4-5|DISCORD_INVITE=gPTVS7Hmj|PORTAL_URL=https://makerportal.live|MENTAT_URL=https://skippy-mentat-1015050363686.us-west1.run.app" \
+            --set-env-vars "^|^ALLOWED_EMAILS=${ALLOWED_EMAILS}|ADMIN_EMAILS=${ADMIN_EMAILS}|GCP_PROJECT=${PROJECT_ID}|GCP_ZONE=us-west1-b|GCP_INSTANCE=skippy-games|CHAT_MODEL=claude-haiku-4-5|DISCORD_INVITE=gPTVS7Hmj|PORTAL_URL=https://makerportal.live|MENTAT_URL=https://skippy-mentat-1015050363686.us-west1.run.app|DOOMLOOP_BUCKET=skippy-tel-doomloop-dev" \
             --set-secrets "FLASK_SECRET_KEY=portal-flask-secret:latest,GOOGLE_CLIENT_ID=portal-google-client-id:latest,GOOGLE_CLIENT_SECRET=portal-google-client-secret:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,DISCORD_BOT_TOKEN=discord-bot-token:latest${EXTRA_SECRETS:-}"
       - name: Send all traffic to the new revision
         # A rollback (here, or the `rollback` workflow) PINS traffic to one named revision. Cloud Run then no longer
@@ -350,6 +350,9 @@ jobs:
           curl -fsS -m 20 "$URL/experiments/benchmark" | grep -q "Wolfram"            # benchmark results bundled
           curl -fsS -m 20 "$URL/experiments/radiance/" | grep -q "viewer.js"          # Radiance bundled
           curl -fsS -m 20 "$URL/starcontrol/version" | grep -Eq '"bundled": ?true'    # Star Control Zero bundled
+          # Doom Loop's dev channel: the route must answer (bundled true OR false: a build arrives from the game's repo,
+          # not from this deploy, so "no build yet" is a healthy answer).
+          curl -fsS -m 20 "$URL/doomloop/version" | grep -Eq '"bundled": ?(true|false)'
       - name: Roll back to the previous revision
         # Reached only when something above failed, or the run was CANCELLED part way (a person cancelling a hung deploy,
         # or the admin page's "Cancel the stuck deploy"): failure() is false for a cancelled job, and a cancel after the
