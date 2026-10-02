@@ -51,6 +51,9 @@ import workshop as workshop_mod
 from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, PORTALS, SERVICES, missing_settings
 from gcp import GamesVm
 
+CANONICAL_HOST = "makerportal.live"
+OTHER_HOSTS = frozenset({"www.makerportal.live", "makerportal.studio", "www.makerportal.studio"})
+
 
 def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, home=None,
                imports=None, github=None) -> Flask:
@@ -63,6 +66,17 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     # Cloud Run terminates TLS; trust its X-Forwarded-Proto/Host so OAuth
     # redirect URLs come out as https://<portal-host>/...
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
+    # The portal's own name is makerportal.live (tools/domains.py maps every host below to this service); the others send
+    # the visitor there, path and query kept, so a Google sign-in only ever comes back to one address. The run.app
+    # address is left alone: it's the fallback when DNS or a certificate misbehaves.
+    @app.before_request
+    def _canonical_host():
+        host = (request.host or "").split(":")[0].lower()
+        if host in OTHER_HOSTS:
+            qs = request.query_string.decode("latin-1")
+            return redirect(f"https://{CANONICAL_HOST}{request.path}" + (f"?{qs}" if qs else ""), 301)
+
     auth.init_app(app)
     app.register_blueprint(auth.bp)
 
