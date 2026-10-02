@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Request access — Skippy Portal{% endblock %}
+{% block title %}Request access — Maker Portal{% endblock %}
 {% block app %}games{% endblock %}
 {% block content %}
 {# Where the Discord pins lead: "sign in with Google and tap Request access". Signed-out people see the sign-in
    button; a signed-in person, or a verified Google account that isn't on the list, sees the form. After sending, the
    page reloads as a plain GET (post-redirect-get), so a reload never re-sends the request. #}
-{% if not user %}<header><h1>Skippy Portal</h1></header>{% endif %}
+{% if not user %}<header><h1>Maker Portal</h1></header>{% endif %}
 <section style="overflow-wrap: anywhere">
   <h2>Request access</h2>
 

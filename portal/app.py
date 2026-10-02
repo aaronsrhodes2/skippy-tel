@@ -1,4 +1,4 @@
-"""Skippy Portal — sign in with Google; see and control the game servers,
+"""Maker Portal — sign in with Google; see and control the game servers,
 their Discord channels, and the other services; chat with Skippy. Admins
 also get /admin: server settings, restart/update, Discord setup.
 

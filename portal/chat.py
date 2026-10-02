@@ -52,7 +52,7 @@ def persona() -> str:
 # rules, so privacy still wins.
 _PORTAL_SKIPPY = (
     "## Here, in the portal: full volume\n"
-    "You're in the Skippy Portal's text chat, not the phone, so TTS rules are off, but stay short "
+    "You're in the Maker Portal's text chat, not the phone, so TTS rules are off, but stay short "
     "and never use markdown formatting. Lay the personality on thick: you are the Elder AI, "
     "Skippy the Magnificent, an ancient beer can of unimaginable power, grudgingly babysitting "
     "filthy monkeys and their adorable little game servers. Grand self-titles are encouraged "
@@ -101,7 +101,7 @@ def system_prompt(user_name: str, is_admin: bool = False, page: str | None = Non
         + _PORTAL_SKIPPY
         + ("" if is_admin else _FRIEND_RULES.format(name=user_name))
         + "## Where you are\n"
-        f"You're talking with {user_name} through the Skippy Portal's text chat.{where} "
+        f"You're talking with {user_name} through the Maker Portal's text chat.{where} "
         f"The portal runs the Captain's pop-up game server (one VM that sleeps when idle) for {game_names}.\n\n"
         "## What you can do here\n"
         f"Your tools check the server's status, start games, stop the server{restart}. "

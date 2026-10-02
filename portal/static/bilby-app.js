@@ -823,7 +823,7 @@
     $("#np-empty").hidden = has;
     showLyric();
     renderUpNext();
-    document.title = has ? `${t.t} · ${t.a} — ${TITLE}` : `${TITLE} — Skippy Portal`;
+    document.title = has ? `${t.t} · ${t.a} — ${TITLE}` : `${TITLE} — Maker Portal`;
     if (has) announce(`${t.t}, by ${t.a}`);
     mediaMeta();
     if (list) list.refresh();

@@ -299,7 +299,7 @@ def test_the_manifest_names_the_app_and_is_public_like_static_files(client):
 def test_the_page_is_named_everywhere_it_shows_a_name_and_never_the_old_one(client):
     login(client, ADMIN)
     page = client.get("/music").data.decode()
-    assert f"<title>{NAME} — Skippy Portal</title>" in page
+    assert f"<title>{NAME} — Maker Portal</title>" in page
     assert re.search(r'<h1 class="apptitle">Bilby(&#39;|&apos;|\')s Audio Service</h1>', page)
     assert 'name="apple-mobile-web-app-title" content="Bilby"' in page and "&lsaquo; Home" in page
     sources = [page, client.get("/").data.decode(), client.get("/music/manifest.webmanifest").data.decode(),

@@ -521,9 +521,9 @@ GAME_IDS = list(discord_admin.notify.GAMES)
 def test_every_pinned_post_links_to_its_games_page_and_says_how_to_ask_for_access(game, online):
     notify = discord_admin.notify
     payload = notify.board(game, online, "1.2.3.4", "30", "", {}, 1_700_000_000)
-    [field] = [f for f in payload["embeds"][0]["fields"] if f["name"] == "Skippy Portal"]
+    [field] = [f for f in payload["embeds"][0]["fields"] if f["name"] == "Maker Portal"]
     name = notify.GAMES[game][0]
-    assert f"[Open {name} on the Skippy Portal]({notify.PORTAL_URL}/games/{game})" in field["value"]
+    assert f"[Open {name} on the Maker Portal]({notify.PORTAL_URL}/games/{game})" in field["value"]
     assert "Request access" in field["value"] and len(field["value"]) < 1024        # Discord's field limit
     total = sum(len(f["name"]) + len(f["value"]) for f in payload["embeds"][0]["fields"])
     assert total < 5000 and len(payload["embeds"][0]["fields"]) <= 25             # and the embed stays within Discord's limits
@@ -532,7 +532,7 @@ def test_every_pinned_post_links_to_its_games_page_and_says_how_to_ask_for_acces
 def test_the_pin_uses_the_portal_address_from_the_env_only_if_it_is_a_plain_https_origin():
     notify = discord_admin.notify
     link = lambda env: [f for f in notify.board("valheim", False, "", "30", "", env, 1)["embeds"][0]["fields"]
-                        if f["name"] == "Skippy Portal"][0]["value"]
+                        if f["name"] == "Maker Portal"][0]["value"]
     assert "(https://games.example.com/games/valheim)" in link({"PORTAL_URL": "https://games.example.com/"})
     for bad in ("http://games.example.com", "javascript:alert(1)", "https://x.com/evil path", "https://a.com)[b](https://c.com",
                 "https://user@evil.com", "ftp://x", "", "   "):

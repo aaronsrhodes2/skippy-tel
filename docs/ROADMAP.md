@@ -22,7 +22,7 @@ Last updated 2026-09-29.
 | Game servers as compose profiles: Valheim, Factorio, Satisfactory, RuneScape: Dragonwilds | [`games/`](../games) |
 | GCP pop-up VM — **live** in project `skippy-tel`, `us-west1-b`, IP `35.233.145.176`: auto-sizing, idle auto-sleep, graceful shutdown, daily snapshots | [`infra/gcp-games/`](../infra/gcp-games) |
 | Discord per-game channels, webhooks, self-updating pinned status | [`portal/discord_admin.py`](../portal/discord_admin.py), [`infra/gcp-games/discord-notify.py`](../infra/gcp-games/discord-notify.py) |
-| Skippy Portal: auth, dashboard, admin, chat | [`portal/`](../portal) |
+| Maker Portal: auth, dashboard, admin, chat | [`portal/`](../portal) |
 | CI/CD: GitHub Actions + Workload Identity Federation → Terraform + Cloud Run | [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml), [`infra/bootstrap/`](../infra/bootstrap) |
 | Remote play host setup (Sunshine + readiness script), PC side | [`docs/streaming.md`](streaming.md) |
 | Claude Code history from every machine → Skippy Memory (hourly one-way copy + parser) | [`scripts/claude-history-sync.*`](../scripts), [`memory/parsers/claude_code.py`](../memory/parsers/claude_code.py) |
@@ -41,7 +41,7 @@ Last updated 2026-09-29.
 | Secrets | Vault → Secret Manager sync in the deploy job (needs the Captain's OK for the IAM grant; manual `secrets.sh --from-env` until then) |
 | Bills | Cancel SuperGrok after Claude voice in the car is proven |
 | Streaming | MacBook side (Moonlight, pairing, hotspot test) |
-| Portal | **AR glasses view in the portal** (future feature, the Captain 2026-09-30): bring the Viture glasses' HUD view (the passthrough UI zPhone's SkippyDroid draws, SUIP/SkippyView) into the browser, so it works from the Skippy Portal. zPhone itself is shelved: this is a portal feature, built to the passthrough colour doctrine (black = transparent) in the dev-root CLAUDE.md |
+| Portal | **AR glasses view in the portal** (future feature, the Captain 2026-09-30): bring the Viture glasses' HUD view (the passthrough UI zPhone's SkippyDroid draws, SUIP/SkippyView) into the browser, so it works from the Maker Portal. zPhone itself is shelved: this is a portal feature, built to the passthrough colour doctrine (black = transparent) in the dev-root CLAUDE.md |
 | Portal | **Nagatha's Video Service**: browser video from skippy-pc's Jellyfin through a pass-guarded video gate (gate built 2026-09-30; portal app `/video` built 2026-10-01, not yet deployed; open: the gate's collections came back empty on 2026-10-01 after Jellyfin's item ids changed, a TV library when there is one) |
 | Later | SkippyTel v2 core ([`docs/v2/CHARTER.md`](v2/CHARTER.md)); ARK (deferred, too heavy) |
 

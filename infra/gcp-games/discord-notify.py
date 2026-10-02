@@ -39,9 +39,9 @@ GAMES = {
     "valheim": (
         "Valheim",
         "Viking survival co-op. Dedicated world: it keeps its state between sessions.",
-        lambda ip, e: (("Join Game → **Add server** → the 6-digit join code on the Skippy Portal (a new one every boot)"
+        lambda ip, e: (("Join Game → **Add server** → the 6-digit join code on the Maker Portal (a new one every boot)"
                         if (e.get("VALHEIM_CROSSPLAY") or "false").strip().lower() in ("true", "1", "yes", "on")
-                        else f"Join Game → Add server → `{ip}:2456`") + "\nPassword: on the Skippy Portal's Valheim page"),
+                        else f"Join Game → Add server → `{ip}:2456`") + "\nPassword: on the Maker Portal's Valheim page"),
     ),
     "factorio": (
         "Factorio",
@@ -58,8 +58,8 @@ GAMES = {
     "dragonwilds": (
         "RuneScape: Dragonwilds",
         "Survival crafting in Ashenfall. Crossplay: PC, Xbox, PS5 and Switch 2.",
-        lambda ip, e: ("Worlds → **Invite Code** → the code on the Skippy Portal (a new one every boot)"
-                       + ("\nWorld password: next to the code on the Skippy Portal"
+        lambda ip, e: ("Worlds → **Invite Code** → the code on the Maker Portal (a new one every boot)"
+                       + ("\nWorld password: next to the code on the Maker Portal"
                           if e.get("DRAGONWILDS_WORLD_PASSWORD") else "")
                        + (f"\nOr: Direct tab → `{ip}:{e.get('DRAGONWILDS_PORT') or '7778'}`" if ip else "")
                        + f"\nOr: Public tab → search **{e.get('DRAGONWILDS_SERVER_NAME') or 'Skippy'}** "
@@ -69,7 +69,7 @@ GAMES = {
         "EverQuest",
         "Golden Era Norrath (EQEmu): bots, mercs, XP x3, no death penalty.",
         lambda ip, e: (f"RoF2 client: eqhost.txt = `[LoginServer]` then `Host={ip}:5999` (not the old braces format), "
-                       "run `eqgame.exe patchme`; the exact block is on the Skippy Portal"),
+                       "run `eqgame.exe patchme`; the exact block is on the Maker Portal"),
     ),
 }
 
@@ -121,8 +121,8 @@ def board(game: str, online: bool, ip: str, idle: str, reason: str, e: dict, now
     """The pinned status post for one game."""
     name, description, connect = GAMES[game]
     # Everyone reading the channel can open the game's page; a signed-in stranger is offered a way to ask for access.
-    portal = {"name": "Skippy Portal",
-              "value": f"[Open {name} on the Skippy Portal]({portal_url(e)}/games/{game})\n"
+    portal = {"name": "Maker Portal",
+              "value": f"[Open {name} on the Maker Portal]({portal_url(e)}/games/{game})\n"
                        "No access yet? Open it, sign in with Google and tap **Request access**.",
               "inline": False}
     if online:

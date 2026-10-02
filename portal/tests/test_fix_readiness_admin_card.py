@@ -82,7 +82,7 @@ def env():
 
 PANEL = "/admin/games/valheim/panel"
 FRAGMENT = {"X-Skippy-Fragment": "server-admin", "Content-Type": "text/html; charset=utf-8"}
-SIGN_IN_PAGE = ("<!doctype html><html><head><title>Sign in - Skippy Portal</title><style>body{}</style></head>"
+SIGN_IN_PAGE = ("<!doctype html><html><head><title>Sign in - Maker Portal</title><style>body{}</style></head>"
                 "<body><nav>Skippy</nav><a class=\"btn\" href=\"/login\">Sign in with Google</a></body></html>")
 
 

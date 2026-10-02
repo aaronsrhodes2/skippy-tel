@@ -1,4 +1,4 @@
-# Skippy Portal
+# Maker Portal
 
 One page, gated to you and whoever you allow: game servers with their
 Discord channels, the other services, a text chat with Skippy, and an admin
@@ -34,7 +34,7 @@ it depends on your PC or on you being signed in.
    playing, worlds are saved and the VM powers off. The next friend to click
    Play wakes it again, with the same world.
 
-**Asking for access.** Each game's pinned Discord post has a **Skippy Portal** field
+**Asking for access.** Each game's pinned Discord post has a **Maker Portal** field
 linking to that game's page (`/games/<id>`; the link's host is `PORTAL_URL` in the VM's
 settings, which the portal's Discord setup fills in from the address it is served on, so a
 custom domain later needs only a re-run of setup). Someone without access signs in with

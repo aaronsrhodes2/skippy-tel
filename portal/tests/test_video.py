@@ -203,7 +203,7 @@ def test_the_manifest_names_the_app_and_is_public_like_static_files(client):
 def test_the_page_is_named_and_is_an_app_with_a_way_home(client):
     login(client, ADMIN)
     page = client.get("/video").data.decode()
-    assert f"<title>{NAME} — Skippy Portal</title>".replace("'", "&#39;") in page or f"<title>{NAME} — Skippy Portal</title>" in page
+    assert f"<title>{NAME} — Maker Portal</title>".replace("'", "&#39;") in page or f"<title>{NAME} — Maker Portal</title>" in page
     assert re.search(r'<h1 class="apptitle">Nagatha(&#39;|&apos;|\')s Video Service</h1>', page)
     assert "&lsaquo; Home" in page and 'id="home-btn"' in page and 'data-app="video"' in page
     assert 'rel="manifest"' in page and 'name="apple-mobile-web-app-title" content="Nagatha"' in page
