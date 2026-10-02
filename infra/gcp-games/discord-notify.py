@@ -31,8 +31,8 @@ STATE = Path("/srv/games/data/.discord")
 META = "http://metadata.google.internal/computeMetadata/v1/instance"
 USERNAME = "Skippy Game Servers"
 # Where the pinned post sends people. PORTAL_URL in the VM's .env overrides it (the portal's Discord setup
-# writes it from the address it is served on, so a custom domain later needs no code change).
-PORTAL_URL = "https://skippy-portal-1015050363686.us-west1.run.app"
+# writes it from PORTAL_URL, set to the portal's own domain in deploy.yml).
+PORTAL_URL = "https://makerportal.live"
 
 # id → (display name, description, how-to-connect(ip, env))
 GAMES = {

@@ -113,8 +113,11 @@ Actions (the sandbox can't reach GCP or run.app directly):
   `command` = `discord-setup` creates/repairs every game's Discord channels:
   it queues the job in VM metadata and the portal (which holds the bot token)
   runs it via POST /tasks/run (portal/tasks.py). New portal-side jobs go there.
-- Portal: https://skippy-portal-1015050363686.us-west1.run.app — code in
-  `portal/`, docs in `docs/portal/README.md` and `docs/cicd.md`.
+- Portal: **https://makerportal.live** (the Captain's domain; www. and makerportal.studio redirect to it) —
+  code in `portal/`, docs in `docs/portal/README.md` and `docs/cicd.md`. DNS is Cloud DNS in this project,
+  hooked up by `tools/domains.py` (the `domains` workflow; idempotent, says what it waits for); the registrar
+  (Squarespace) only holds the nameservers. Machines (home reporter, ops, loop timer, deploy smoke test) keep
+  the fallback https://skippy-portal-1015050363686.us-west1.run.app, which never depends on DNS or a certificate.
 - Portal design (the Captain's rule): **no top tabs; all cards, like a phone with
   apps.** Home (`/`) is a launcher, one tile per app; every other page is an app
   with a `‹ Home` back button, its own title (from its `<title>`), and a round
