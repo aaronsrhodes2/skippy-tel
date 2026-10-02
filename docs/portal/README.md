@@ -306,6 +306,52 @@ the virtual lists at full size; `/dev/gate-down` and `/dev/home-off` show the "i
 failed, when Node or mutagen is missing). What only a browser can show (the audio element, drag and drop, the lock screen, the
 layouts) was checked by hand, not by a test.
 
+## Nagatha's Video Service (the Captain's films, `/video`)
+
+The Captain's Jellyfin library on skippy-pc (285 films, 11 collections) in any browser: a phone, a laptop, a TV browser. Admin only,
+a tile on the launcher next to Bilby's (it says "library offline" when the home reporter's `video_gate` capability isn't ready). The
+sibling of Bilby's Audio Service and built the same way; the name is branding only (no Gemini).
+
+```
+browser ── /video (page) + /video/gate (a pass) ──> portal  (portal/video.py)
+   │
+   └── https://skippy-pc.<tailnet>.ts.net:8443/t/<pass>/{catalog.json, img/<id>/<kind>?w=, v/<id>/direct, v/<id>/hls/..., sub/<id>/<i>.vtt, progress}
+                                                                       ──> video-gate on skippy-pc (services/video-gate) ──> Jellyfin
+```
+
+The film never passes through the portal. The portal signs a pass from the home token's sha256 with the video gate's own label
+(`video-gate-v1`, signed text `video:<exp>`), so a music pass never opens the video gate and a video pass never opens the music gate.
+The pass lasts 8 to 14 hours on a six-hour grid (the poster URLs stay the same across page loads, so the browser cache works) and is
+only signed for an `https://*.ts.net` address with no port or Funnel's `:8443` (`Video(gate_url_re=...)` is for the dev script alone).
+The reporter calls the gate ready only when its `/health` says `ready` (a catalog exists AND Jellyfin answers), not just a 200.
+
+**How a film plays.** Direct play (the original MP4, no work for skippy-pc) when the gate's catalog says `direct` and the first audio
+track is wanted; otherwise the gate's transcoded HLS: hls.js (self-hosted: `portal/static/vendor/hls-1.6.15.min.js`, byte for byte
+the cdnjs release, its SRI and the Apache-2.0 licence beside it; loaded only when needed) or Safari's/iOS's own HLS. Choosing another
+audio language switches a direct film to HLS at the same moment (a browser can't switch a plain MP4's audio). If a browser refuses a
+"direct" file, the player falls back to HLS by itself; a 403 (a pass that ran out) fetches a new pass and carries on from the same
+second; a third simultaneous transcode (the gate's cap is 2) says so in a sentence. Subtitles are the gate's WebVTT on `<track>`
+elements (hls.js's own caption handling is off: left on, it empties every text track when it loads a manifest).
+
+**Resume and Continue Watching.** The player reports `start`, then `progress` every 10 s while playing and at once on a pause or seek,
+and `stop` on close or at the end (a `sendBeacon` when the tab closes); the gate writes it to Jellyfin, so Jellyfin's own apps agree.
+The browser also keeps its own last position (newest 200 films), used when it is newer than the catalog it loaded. Reloading on a film
+(`#watch/<id>` in the address) brings it back at that second; where the browser wants a tap first it shows **Tap to continue at …**,
+the same autoplay rule as the music player.
+
+**Files:** `portal/templates/video.html` (the shell), `portal/static/nagatha-core.js` (logic that needs no browser: the catalog,
+search, shelves, resume, which way a film plays, progress timing, keys; run under Node by the tests), `nagatha-app.js` (the wall,
+the details sheet, the player: custom accessible controls, full screen, picture in picture, Media Session, keyboard: Space/K, arrows,
+F, M, C, P, 0, Esc, `/`, `?`), `nagatha.css` (portal colour variables only; the accent is amber), `portal/video.py` (the pass).
+
+**Looking at it on skippy-pc:** `python portal/tests/dev_video.py` runs the real portal app against the REAL running video gate
+(`http://127.0.0.1:3006`) with a scratch Captain sign-in: open `http://127.0.0.1:8775/dev-login`. It reads `SKIPPY_HOME_TOKEN` into
+memory only (the gate takes only passes from that token) and never prints it. Progress it sends is real Jellyfin watch state.
+Tests: `portal/tests/test_video.py` (routes admin-only, the pass checked by the gate's OWN code in a separate process, a music pass
+refused, the URL rule, the tile and pill, the manifest, the page's markup against the script's lookups, the colour rule, hls.js's
+bytes), `test_video_js.py` (runs `portal/tests/js/video/*.test.js` under Node 18+ and feeds a catalog the real gate builds from its
+fake Jellyfin to the player's parser; skipped, not failed, without Node).
+
 ## Telemetry: what the portal records, and where it goes
 
 The Captain records how signed-in people use the portal (what gets opened, tapped and asked, what breaks), so he can

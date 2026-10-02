@@ -39,6 +39,8 @@ MUSIC_MODEL = os.environ.get("MUSIC_MODEL", "acestep-v15-turbo")   # 8-step turb
 CLIP_MAX = 25_000_000        # the portal takes up to 30 MB; a request may be 32 MB
 GATE = os.environ.get("MUSIC_GATE_URL", "").rstrip("/")        # music-gate: Bilby's Audio Service's library (inside)
 GATE_PUBLIC = os.environ.get("MUSIC_GATE_PUBLIC", "").rstrip("/")   # ... and where Tailscale Funnel shows it (outside)
+VIDEO_GATE = os.environ.get("VIDEO_GATE_URL", "").rstrip("/")         # video-gate: Nagatha's Video Service's Jellyfin (inside)
+VIDEO_GATE_PUBLIC = os.environ.get("VIDEO_GATE_PUBLIC", "").rstrip("/")   # ... and its Funnel address (outside, :8443)
 BRIDGE = os.environ.get("CLAUDE_BRIDGE_URL", "").rstrip("/")   # Claude Code's bridge on the host: the private Skippy
 WORKSHOP_WAIT = 5            # seconds the bridge holds a request open waiting for news from the run
 WORKSHOP_PUSH = 100          # events per push to the portal (a request may be 1 MB)
@@ -289,12 +291,24 @@ def _capability_probes() -> dict:
     """One probe per capability, so `gather` can run them side by side (each waits at most ~4 s on its own service)."""
     return {"make_music": lambda: {"ready": bool(MUSIC) and _up(f"{MUSIC}/health")},
             "workshop": workshop_capability,
-            "music_gate": lambda: {"ready": bool(GATE and GATE_PUBLIC) and _up(f"{GATE}/health"), "url": GATE_PUBLIC}}
+            "music_gate": lambda: {"ready": bool(GATE and GATE_PUBLIC) and _up(f"{GATE}/health"), "url": GATE_PUBLIC},
+            "video_gate": video_gate_capability}
+
+
+def video_gate_capability() -> dict:
+    """The video gate's /health always answers while the container runs (it is the liveness probe too); it is only worth a
+    tile when its own `ready` says a catalog exists AND Jellyfin answers, so that is what is read, not just a 200."""
+    health = fetch(f"{VIDEO_GATE}/health") if VIDEO_GATE and VIDEO_GATE_PUBLIC else None
+    return {"ready": isinstance(health, dict) and health.get("ready") is True, "url": VIDEO_GATE_PUBLIC}
 
 
 def _capability_down(name: str) -> dict:
     """What a capability reads as when its probe was late or failed: not ready (the safe answer), never the last known one."""
-    return {"ready": False, "url": GATE_PUBLIC} if name == "music_gate" else {"ready": False}
+    if name == "music_gate":
+        return {"ready": False, "url": GATE_PUBLIC}
+    if name == "video_gate":
+        return {"ready": False, "url": VIDEO_GATE_PUBLIC}
+    return {"ready": False}
 
 
 def capabilities() -> dict:

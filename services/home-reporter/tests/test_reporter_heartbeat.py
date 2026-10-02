@@ -23,7 +23,7 @@ SHAPE = {"status", "health", "services", "music_session", "bilby", "setlist", "u
 
 @pytest.fixture(autouse=True)
 def nothing_configured(monkeypatch):
-    for name in ("BRIDGE", "MUSIC", "MENTAT", "MAC", "GATE", "GATE_PUBLIC"):
+    for name in ("BRIDGE", "MUSIC", "MENTAT", "MAC", "GATE", "GATE_PUBLIC", "VIDEO_GATE", "VIDEO_GATE_PUBLIC"):
         monkeypatch.setattr(reporter, name, "")
     monkeypatch.setattr(reporter, "_probe_failures", {})
 
@@ -101,8 +101,10 @@ def test_a_late_capability_reads_as_not_ready_and_the_gate_keeps_its_url(monkeyp
     release = threading.Event()
     monkeypatch.setattr(reporter, "GATHER_BUDGET_S", 0.3)
     monkeypatch.setattr(reporter, "GATE_PUBLIC", "https://gate.example")
+    monkeypatch.setattr(reporter, "VIDEO_GATE_PUBLIC", "https://gate.example:8443")
     monkeypatch.setattr(reporter, "fetch", fetch_from({}))
     monkeypatch.setattr(reporter, "workshop_capability", lambda: (release.wait(10), {"ready": True, "model": "m"})[1])
+    monkeypatch.setattr(reporter, "video_gate_capability", lambda: (release.wait(10), {"ready": True, "url": "x"})[1])
     monkeypatch.setattr(reporter, "_up", lambda url: False)
     try:
         caps = reporter.gather()["capabilities"]
@@ -110,6 +112,7 @@ def test_a_late_capability_reads_as_not_ready_and_the_gate_keeps_its_url(monkeyp
         release.set()
     assert caps["workshop"] == {"ready": False}                 # not the last answer, not "ready": the safe one
     assert caps["make_music"] == {"ready": False} and caps["music_gate"] == {"ready": False, "url": "https://gate.example"}
+    assert caps["video_gate"] == {"ready": False, "url": "https://gate.example:8443"}      # late: not ready, but it keeps its address
 
 
 def test_the_macs_setlist_and_next_track_are_fetched_only_when_traktor_is_the_source(monkeypatch):

@@ -56,7 +56,7 @@ SAFE_VALUES = {
     "from_request": r"[01]",    # approving from a request card
 }
 _TAP = re.compile(r"[a-z0-9:_.\-]{1,60}")
-LAUNCHER_TILES = ("skippy", "games", "music", "experiments", "dashboard", "admin")   # templates/home.html
+LAUNCHER_TILES = ("skippy", "games", "music", "video", "experiments", "dashboard", "admin")   # templates/home.html
 TAPS_PER_MIN = 120          # one person's beacon budget
 STUCK_AFTER_S = 900         # an event this old is still unacknowledged although home keeps pulling: the widget says so (normally < 1 min)
 

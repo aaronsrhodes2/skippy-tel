@@ -67,7 +67,9 @@ def asked_for_by_scripts(text: str, url_map=None) -> set[str]:
 # A static script that makes network calls hides its URLs from a scan of the templates, UNLESS the page hands them over as data-*
 # attributes: then the scan can read them as long as it is given the script too. These are the allowed ones: the script, and the
 # template whose data-*-url attributes (url_for) are the portal URLs it uses. Anything else gets the failure below.
-STATIC_SCRIPTS = {"bilby-app.js": "music.html"}
+# (paths under static/; Nagatha's scripts and its self-hosted hls.js only talk to the video gate, whose address and pass come from
+# the page's data-gate-url route, which the scan sees)
+STATIC_SCRIPTS = {"bilby-app.js": "music.html", "nagatha-app.js": "video.html", "vendor/hls-1.6.15.min.js": "video.html"}
 
 
 def template_text(template: Path) -> str:
@@ -186,8 +188,9 @@ def test_the_scan_would_have_caught_the_original_defect_and_any_future_poller(mo
 def test_no_script_file_in_static_makes_network_calls_the_template_scan_cannot_see():
     """The scan reads templates. A static .js file that fetches/polls would hide its URLs from it: add them to the scan first."""
     for js in (PORTAL / "static").rglob("*.js"):
-        if js.name in STATIC_SCRIPTS:                      # allowed: its URLs are data-*-url attributes, which template_text() scans
-            owner = (TEMPLATES / STATIC_SCRIPTS[js.name]).read_text(encoding="utf-8")
-            assert f"filename='{js.name}'" in owner, f"{js.name} isn't loaded by {STATIC_SCRIPTS[js.name]}"
+        rel = js.relative_to(PORTAL / "static").as_posix()
+        if rel in STATIC_SCRIPTS:                          # allowed: its URLs are data-*-url attributes, which template_text() scans
+            owner = (TEMPLATES / STATIC_SCRIPTS[rel]).read_text(encoding="utf-8")
+            assert f"filename='{rel}'" in owner, f"{rel} isn't loaded by {STATIC_SCRIPTS[rel]}"
             continue
         assert not NETWORK.search(js.read_text(encoding="utf-8")), f"{js.name} makes network calls: teach this test about its URLs"

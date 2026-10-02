@@ -268,10 +268,11 @@ def test_a_pass_is_never_cached(client):
 
 def test_the_library_offline_pill_follows_the_gate(client):
     login(client, ADMIN)
-    assert "library offline" not in client.get("/").data.decode()
+    tile = lambda: client.get("/").data.decode().split('data-tel="tile:music"')[1].split("</a>")[0]   # noqa: E731 (the video tile has its own pill)
+    assert "library offline" not in tile()
     home = client.application.extensions["home"]
     home.accept({"capabilities": {}})
-    assert "library offline" in client.get("/").data.decode()
+    assert "library offline" in tile()
 
 
 def test_a_remote_play_says_whether_the_other_browser_needs_a_tap(client):

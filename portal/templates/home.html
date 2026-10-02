@@ -34,6 +34,10 @@
         {% if not music_gate %}<span class="pill">library offline</span>{% endif %}
         <span class="icon">🎵</span>
         <h3>Bilby's Audio Service</h3><p>Your whole collection from home on any screen: phone, Mac, PC, the car.</p></a>
+      <a class="tile" data-app="video" href="{{ url_for('video.video_page') }}" data-tel="tile:video">
+        {% if not video_gate %}<span class="pill">library offline</span>{% endif %}
+        <span class="icon">🎬</span>
+        <h3>Nagatha's Video Service</h3><p>Your film library from home, on a phone, a laptop or the big screen.</p></a>
     {% endif %}
 
     {% if show_experiments %}
