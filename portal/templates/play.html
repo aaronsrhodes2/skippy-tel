@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Browser Games{% endblock %}
+{% block app %}play{% endblock %}
+{% block public_up %}{{ url_for('index') }}{% endblock %}
+{% block public_up_label %}Home{% endblock %}
+{% block content %}
+{# Browser Games: a card per game that plays in a tab. The dedicated servers are the Game Servers app (/games). #}
+<section>
+  <div class="tiles">
+    {% for g in games %}
+      {% set href = url_for(g.endpoint) if g.endpoint else g.url %}
+      {% if href %}
+        <a class="tile" href="{{ href }}" data-tel="play:{{ g.slug }}">
+      {% else %}
+        <div class="tile" data-tel="play:{{ g.slug }}"><span class="pill">coming soon</span>
+      {% endif %}
+        <span class="icon">{{ g.icon }}</span>
+        <h3>{{ g.title }}</h3><p>{{ g.blurb }}</p>
+      {% if href %}</a>{% else %}</div>{% endif %}
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

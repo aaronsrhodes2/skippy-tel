@@ -29,6 +29,7 @@
   [data-app="skippy"]      { --accent: var(--green); }
   [data-app="music"]       { --accent: var(--pink); }     /* the audio player keeps Bilby's colour */
   [data-app="video"]       { --accent: var(--amber); }    /* Nagatha's Video Service: a cinema marquee */
+  [data-app="play"]        { --accent: var(--cyan); }
   [data-app="experiments"] { --accent: var(--violet); }
   [data-app="dashboard"]   { --accent: var(--cyan); }
   [data-app="admin"]       { --accent: var(--red); }
@@ -177,7 +178,7 @@
   {% else %}
     <a class="back" href="{{ url_for('index') }}">&lsaquo; Home</a>
     {# the app's name is its page title minus the site suffix, so no template needs a second title #}
-    <h1 class="apptitle">{{ self.title() | trim | replace(' — Skippy Portal', '') | replace(' — Experiments', '') | replace(' — Aaron Rhodes', '') }}</h1>
+    <h1 class="apptitle">{{ self.title() | trim | replace(' — Skippy Portal', '') | replace(' — Experiments', '') | replace(' — Browser Games', '') | replace(' — Aaron Rhodes', '') }}</h1>
   {% endif %}
   {% if on_home %}{# the account lives on the home screen; app bars are just back + title #}
   <div class="user">
@@ -192,7 +193,7 @@
 {% if up or request.endpoint == 'experiments.index' %}
 <header class="appbar">
   {% if up %}<a class="back" href="{{ up }}">&lsaquo; {{ self.public_up_label() | trim }}</a>{% endif %}
-  <h1 class="apptitle">{{ self.title() | trim | replace(' — Skippy Portal', '') | replace(' — Experiments', '') | replace(' — Aaron Rhodes', '') }}</h1>
+  <h1 class="apptitle">{{ self.title() | trim | replace(' — Skippy Portal', '') | replace(' — Experiments', '') | replace(' — Browser Games', '') | replace(' — Aaron Rhodes', '') }}</h1>
   <a href="{{ url_for('index') }}">Sign in</a>
 </header>
 {% endif %}

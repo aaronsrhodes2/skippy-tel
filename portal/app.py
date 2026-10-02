@@ -35,6 +35,7 @@ import imports as imports_mod
 import media as media_mod
 import mentat_client
 import ops
+import play
 import player as player_mod
 import spend
 import ratelimit
@@ -984,6 +985,11 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         return redirect(url_for("me.index"))
 
     app.register_blueprint(mine)
+
+    # ── browser games: played in a tab, public like the experiments (play.py) ──
+    @app.get("/play")
+    def play_index():
+        return render_template("play.html", games=play.GAMES)
 
     # ── experiments: public showcase (no sign-in) ──────────────────────────────
     lab = Blueprint("experiments", __name__, url_prefix="/experiments")

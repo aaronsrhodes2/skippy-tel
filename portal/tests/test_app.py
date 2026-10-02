@@ -110,7 +110,7 @@ def test_portal_is_all_cards_with_no_top_tabs(env):
     launcher = client.get("/").data.decode()
     assert "<nav" not in launcher and 'id="home-btn"' not in launcher          # the launcher is home: nowhere to go "back" to
     assert "sign out" in launcher                                              # the account lives on the home screen
-    for path in ("/games", "/me", "/admin", "/chat", "/music", "/experiments"):   # everywhere the old tabs led is now a tile
+    for path in ("/games", "/play", "/me", "/admin", "/chat", "/music", "/experiments"):   # everywhere the old tabs led is now a tile
         assert f'href="{path}"' in launcher, path
     _add_friend(client, PAL, ["dragonwilds"])
     login(client, PAL)
@@ -125,7 +125,7 @@ def test_every_app_page_has_a_back_button_a_home_button_and_its_own_title(env):
     assert "<nav" not in page
     assert "&lsaquo; Home</a>" in page and 'id="home-btn"' in page
     assert "sign out" not in page                                              # app bars are just back + title
-    assert '<h1 class="apptitle">Games</h1>' in page                            # title comes from the page's own <title>
+    assert '<h1 class="apptitle">Game Servers</h1>' in page                            # title comes from the page's own <title>
     assert '<h1 class="apptitle">Admin</h1>' in client.get("/admin").data.decode()
 
 
@@ -135,12 +135,12 @@ def test_the_launcher_has_one_tile_per_app_and_no_duplicate_paths(env):
     login(client, ADMIN)
     launcher = client.get("/").data.decode()
     assert re.findall(r'class="tile" data-app="(\w+)"', launcher) == \
-        ["skippy", "games", "music", "video", "experiments", "dashboard", "admin"]
+        ["skippy", "games", "play", "music", "video", "experiments", "dashboard", "admin"]
     assert launcher.count('href="/games"') == 1 and 'href="/games/' not in launcher      # games live in one app, not six tiles
     assert "Server room" not in launcher and "<nav" not in launcher
     _add_friend(client, PAL, ["dragonwilds"])
     login(client, PAL)
-    assert re.findall(r'class="tile" data-app="(\w+)"', client.get("/").data.decode()) == ["games"]
+    assert re.findall(r'class="tile" data-app="(\w+)"', client.get("/").data.decode()) == ["games", "play"]   # Browser Games is for everyone, like the experiments
 
 
 def test_the_old_dashboard_path_redirects_to_games(env):
@@ -374,7 +374,7 @@ def test_the_live_game_badge_links_straight_to_that_games_page(env):
     assert nested == []                                               # and no link sits inside another link
     pills = page[page.index('<span class="pills">'):page.index("</span></span>", page.index('<span class="pills">'))]
     assert 'href="/games/valheim"' in pills and 'title="Open Valheim"' in pills and 'data-tel="tile:games:valheim"' in pills
-    assert 'class="tile-link" href="/games">Games</a>' in page        # tapping anywhere else opens the Games app
+    assert 'class="tile-link" href="/games">Game Servers</a>' in page        # tapping anywhere else opens the Games app
 
 
 def test_the_badge_links_every_live_game_and_never_a_hidden_or_sleeping_one(env):
@@ -1736,21 +1736,21 @@ def test_the_music_verb_with_nothing_after_it_asks_instead_of_forcing_an_empty_t
 
 # ── Experiments: one inventory of every simulation and demonstration ──────────
 
-DEMO_PAGES = ("/experiments/double-slit", "/experiments/nbody", "/experiments/weapon-vs-armor",
-              "/experiments/mentat", "/experiments/benchmark")
+DEMO_PAGES = ("/experiments/double-slit", "/experiments/nbody", "/experiments/mentat", "/experiments/benchmark")
 
 
-def test_the_inventory_highlights_the_three_demos_and_lists_everything_else(env):
+def test_the_inventory_highlights_the_demos_and_lists_everything_else(env):
     import re
     client, _, _ = env
     page = client.get("/experiments").data.decode()                             # public: signed out
     featured = re.findall(r'class="tile featured"[^>]*data-tel="demo:([\w-]+)"', page)
-    assert featured == ["nbody", "double-slit", "weapon-vs-armor"]
-    for title in ("N-Body Shootout", "Double-Slit", "Weapon vs. Armor", "Mentat", "Radiance"):
+    assert featured == ["nbody", "double-slit"]
+    for title in ("N-Body Shootout", "Double-Slit", "Mentat", "Radiance"):
         assert title in page, title
+    assert "Weapon vs. Armor" not in page                                         # it moved to Browser Games
     assert 'id="find"' in page and 'aria-label="Filter by kind"' in page       # search + kind filters
     assert page.count('class="chip"') == 5                                        # All + the four kinds that exist
-    assert len(re.findall(r'<a class="tile( featured)?"', page)) == 6            # every experiment is one tile: no duplicates
+    assert len(re.findall(r'<a class="tile( featured)?"', page)) == 5            # every experiment is one tile: no duplicates
     assert "Coming next" not in page                                              # the three it promised are here now
 
 
@@ -1805,8 +1805,23 @@ def test_weapon_vs_armor_is_playable_in_the_browser():
         assert needle in page, needle
     assert "isn't built yet" not in page and "pip install" not in page                     # a game, not a download
     assert "{% raw %}" not in page and "{{" not in page.split("<script>")[0]                 # rendered, not leaked
-    (x,) = [e for e in experiments.EXPERIMENTS if e.slug == "weapon-vs-armor"]
-    assert x.kind == "live" and x.featured and "pygame" not in x.tags
+    assert '<body data-app="play">' in page and "&lsaquo; Browser Games</a>" in page   # it lives in Browser Games now
+    assert '<h1 class="apptitle">Weapon vs. Armor</h1>' in page
+    assert not any(e.slug == "weapon-vs-armor" for e in experiments.EXPERIMENTS)
+
+
+def test_browser_games_lists_weapon_vs_armor_and_star_control_zero(env):
+    import re
+    client, _, _ = env
+    page = client.get("/play").data.decode()                                     # public, like the experiments
+    assert '<body data-app="play">' in page and '<h1 class="apptitle">Browser Games</h1>' in page
+    assert re.findall(r'data-tel="play:([\w-]+)"', page) == ["weapon-vs-armor", "star-control-zero"]
+    assert 'href="/experiments/weapon-vs-armor" data-tel="play:weapon-vs-armor"' in page
+    assert "Star Control Zero: The Precursors" in page
+    assert '<div class="tile" data-tel="play:star-control-zero"><span class="pill">coming soon</span>' in page  # no link to nowhere
+    login(client, ADMIN)
+    signed_in = client.get("/play").data.decode()
+    assert "&lsaquo; Home</a>" in signed_in and 'id="home-btn"' in signed_in
 
 
 def test_weapon_vs_armor_numbers_only_ever_come_from_mentat():
@@ -1911,7 +1926,7 @@ def test_every_experiment_has_a_known_kind_and_a_page_that_exists(env):
     for x in experiments.EXPERIMENTS:
         assert x.kind in experiments.KINDS, x.slug
         assert x.endpoint, x.slug
-    assert sum(x.featured for x in experiments.EXPERIMENTS) == 3
+    assert sum(x.featured for x in experiments.EXPERIMENTS) == 2
 
 
 # ── admin: set the games up automatically ─────────────────────────────────────

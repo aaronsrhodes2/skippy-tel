@@ -1,0 +1,32 @@
+"""Browser Games: the games you play in a browser tab, nothing to install (the `/play` app).
+
+Game Servers (`/games`) are the dedicated servers on the games VM; these are pages. A game with
+no `endpoint` or `url` yet is shown as "coming soon": a card, no link to nowhere.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class BrowserGame:
+    slug: str
+    title: str
+    blurb: str
+    icon: str
+    source: str                   # the code
+    endpoint: str | None = None   # a portal page
+    url: str | None = None        # or a page hosted elsewhere
+
+
+GAMES = (
+    BrowserGame("weapon-vs-armor", "Weapon vs. Armor",
+                "Pick a weapon, stack the armor, fire, and watch it go through, layer by layer. No hit points and "
+                "no tuning knobs: sigma-ground's own solver works it out from the materials themselves.",
+                "🛡️", "https://github.com/aaronsrhodes2/sigma-ground/tree/master/games/weapon_vs_armor",
+                endpoint="experiments.weapon_vs_armor"),
+    BrowserGame("star-control-zero", "Star Control Zero: The Precursors",
+                "A fan-made prequel to Star Control II, 250,000 years earlier: fly a Precursor scout through a "
+                "frontier cluster, meet the young species, and fight Them-rift incursions in 1v1 melee.",
+                "🚀", "https://github.com/aaronsrhodes2/star-control-precursors"),
+)

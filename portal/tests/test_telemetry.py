@@ -464,14 +464,14 @@ def test_the_pages_carry_the_beacon_only_for_signed_in_people():
 def test_every_tile_id_the_templates_carry_is_one_the_dashboard_knows():
     known = set(telemetry_web.known_taps())
     seen = set()
-    for name in ("home.html", "games.html", "experiments.html"):
+    for name in ("home.html", "games.html", "play.html", "experiments.html"):
         seen |= set(re.findall(r'data-tel="([^"{]+)"', (TEMPLATES / name).read_text(encoding="utf-8")))
     launcher = {t for t in seen if t.startswith("tile:") and t.count(":") == 1}
     assert launcher == {f"tile:{t}" for t in telemetry_web.LAUNCHER_TILES}
     assert seen <= known | {"tile:games:"}                                # the live badge is `tile:games:<id>`, not a tile
     for gid in GAMES:
         assert f"tile:game:{gid}" in known
-    assert "demo:double-slit" in known and all(_ok(t) for t in known)
+    assert "demo:double-slit" in known and "play:star-control-zero" in known and all(_ok(t) for t in known)
 
 
 def _ok(tap):

@@ -4,7 +4,7 @@ v1 is sigma-ground (github.com/aaronsrhodes2/sigma-ground, pinned in
 .github/workflows/deploy.yml as SIGMA_GROUND_REF):
   • Mentat playground — the physics tools, live, through the skippy-mentat service
   • Weapon vs. Armor — sigma-ground's game: its own solver runs on Mentat (mentat/wva.py),
-    the page only draws the fight
+    the page only draws the fight (listed under Browser Games, play.py; its URL stays here)
   • Radiance — sigma-ground's WebGL viewer + its recorded simulations, served as-is
   • the Mentat vs Wolfram Alpha vs Gemini benchmark, from its committed results
 
@@ -61,12 +61,6 @@ EXPERIMENTS = (
                "strength D and the fringes fade: which-path information costs visibility, D² + V² ≤ 1.",
                ("Quantum", "Simulation"), "experiments.double_slit", "https://github.com/aaronsrhodes2/matter-shaper",
                kind="live", featured=True, icon="〰️"),
-    Experiment("weapon-vs-armor", "Weapon vs. Armor",
-               "Pick a weapon, stack the armor, fire, and watch it go through, layer by layer. No hit points and "
-               "no tuning knobs: sigma-ground's own solver works it out from the materials' yield stress, heat "
-               "capacity and melting points, for kinetic, laser, plasma, explosive and particle weapons.",
-               ("Game", "Materials", "Mentat"), "experiments.weapon_vs_armor", f"{REPO}/tree/master/games/weapon_vs_armor",
-               kind="live", featured=True, icon="🛡️"),
     Experiment("mentat", "Mentat — a Wolfram Alpha rival",
                "About 220 physics and maths tools with provenance on every number: units, constants, "
                "symbolic maths, mechanics, relativity, cosmology, optics, thermodynamics, circuits, "

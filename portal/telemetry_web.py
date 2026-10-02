@@ -23,6 +23,7 @@ from flask import abort, current_app, g, jsonify, render_template, request, sess
 import auth
 import catalog
 import experiments
+import play
 import telemetry as tel_mod
 
 log = logging.getLogger("telemetry")
@@ -56,7 +57,7 @@ SAFE_VALUES = {
     "from_request": r"[01]",    # approving from a request card
 }
 _TAP = re.compile(r"[a-z0-9:_.\-]{1,60}")
-LAUNCHER_TILES = ("skippy", "games", "music", "video", "experiments", "dashboard", "admin")   # templates/home.html
+LAUNCHER_TILES = ("skippy", "games", "play", "music", "video", "experiments", "dashboard", "admin")   # templates/home.html
 TAPS_PER_MIN = 120          # one person's beacon budget
 STUCK_AFTER_S = 900         # an event this old is still unacknowledged although home keeps pulling: the widget says so (normally < 1 min)
 
@@ -68,10 +69,10 @@ def _on(value) -> bool:
 
 
 def known_taps() -> list[str]:
-    """Every tile a person can tap, by its data-tel id: the launcher's, a card per game, a card per experiment.
+    """Every tile a person can tap, by its data-tel id: the launcher's, a card per game, a browser game, an experiment.
     The Activity widget lists the ones with the fewest taps (removal candidates); a tile nobody has tapped has none."""
     return ([f"tile:{t}" for t in LAUNCHER_TILES] + [f"tile:game:{g}" for g in catalog.GAMES]
-            + [f"demo:{x.slug}" for x in experiments.EXPERIMENTS])
+            + [f"play:{x.slug}" for x in play.GAMES] + [f"demo:{x.slug}" for x in experiments.EXPERIMENTS])
 
 
 def who():
