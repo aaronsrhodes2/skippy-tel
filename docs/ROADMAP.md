@@ -2,7 +2,7 @@
 
 **North star:** one AI, one memory, one bill, and personal infrastructure
 you own instead of rent — changed by asking, deployed by pushing.
-Last updated 2026-09-29.
+Last updated 2026-10-02.
 
 ## Tonight's victory condition
 - [ ] **CI/CD:** tell Claude a change → it pushes → GitHub Actions tests and deploys. No typed commands. → [`docs/cicd.md`](cicd.md)
@@ -41,8 +41,8 @@ Last updated 2026-09-29.
 | Secrets | Vault → Secret Manager sync in the deploy job (needs the Captain's OK for the IAM grant; manual `secrets.sh --from-env` until then) |
 | Bills | Cancel SuperGrok after Claude voice in the car is proven |
 | Streaming | MacBook side (Moonlight, pairing, hotspot test) |
-| Portal | **AR glasses view in the portal** (future feature, the Captain 2026-09-30): bring the Viture glasses' HUD view (the passthrough UI zPhone's SkippyDroid draws, SUIP/SkippyView) into the browser, so it works from the Maker Portal. zPhone itself is shelved: this is a portal feature, built to the passthrough colour doctrine (black = transparent) in the dev-root CLAUDE.md |
-| Portal | **Nagatha's Video Service**: browser video from skippy-pc's Jellyfin through a pass-guarded video gate (gate built 2026-09-30; portal app `/video` built 2026-10-01, not yet deployed; open: the gate's collections came back empty on 2026-10-01 after Jellyfin's item ids changed, a TV library when there is one) |
+| Later | **AR glasses view in the portal** (backburner, the Captain 2026-10-02): if it's picked up again, do it as a portal page (`/hud`), not an app. Findings: zPhone has no Viture-specific code (the glasses are a plain USB-C DisplayPort second screen; heading is the phone's own sensors), so a full-screen black page works mirrored or under Samsung DeX; camera only on demand (the glasses are see-through), no background services. The native app ran the phone hot and drained it. First step then: a 5-minute capability test page on a spare phone. skippy-pc can't drive the glasses through a USB hub (it needs DP Alt Mode or an HDMI/DP-to-USB-C adapter) |
+| Portal | **Nagatha's Video Service**: browser video from skippy-pc's Jellyfin through a pass-guarded video gate (gate built 2026-09-30; `/video` live since 2026-10-01; open: the gate's collections came back empty on 2026-10-01 after Jellyfin's item ids changed, a TV library when there is one) |
 | Later | SkippyTel v2 core ([`docs/v2/CHARTER.md`](v2/CHARTER.md)); ARK (deferred, too heavy) |
 
 **Dropped:** face recognition (InsightFace, HeyBuddy) was dropped by the Captain's decision on 2026-09-29; do not re-add it.
