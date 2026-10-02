@@ -198,7 +198,9 @@ class Domains:
                 continue
             self.ownership_record(domain)
             seen = public_ns(domain)
-            if not seen or not seen <= set(ns):
+            # Nothing seen = the change is mid-flight (resolvers drop the old answer before they learn the new one):
+            # try anyway, Google's verifier asks the registry itself. Only Squarespace's old servers mean "not yet".
+            if seen and not seen <= set(ns):
                 self.waiting.append(f"{domain}: the registrar still points at {sorted(seen) or 'nothing'}; "
                                     f"set its nameservers to the four above")
                 continue
