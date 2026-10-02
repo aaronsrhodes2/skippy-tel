@@ -7,6 +7,7 @@ Local run:  FLASK_APP=app.py flask run   (needs every var in .env.example)
 """
 from __future__ import annotations
 
+import dataclasses
 import io
 import ipaddress
 import json
@@ -38,6 +39,7 @@ import ops
 import play
 import player as player_mod
 import spend
+import starcontrol
 import ratelimit
 import readiness
 import recovery
@@ -989,7 +991,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     # ── browser games: played in a tab, public like the experiments (play.py) ──
     @app.get("/play")
     def play_index():
-        return render_template("play.html", games=play.GAMES)
+        # Star Control Zero is a card that says "coming soon" until the image carries its web build.
+        games = [dataclasses.replace(g, endpoint="starcontrol.page")
+                 if g.slug == "star-control-zero" and starcontrol.bundled() else g for g in play.GAMES]
+        return render_template("play.html", games=games)
 
     # ── experiments: public showcase (no sign-in) ──────────────────────────────
     lab = Blueprint("experiments", __name__, url_prefix="/experiments")
@@ -1117,6 +1122,49 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def radiance_probe():
         """Radiance's viewer reports its first frame to /probe (a dev check); accept and drop it."""
         return "", 204
+
+    # ── Star Control Zero: the Captain's game in the browser (starcontrol.py; every signed-in person) ────
+    scz = Blueprint("starcontrol", __name__, url_prefix="/starcontrol")
+
+    @scz.get("/")
+    @auth.login_required
+    def page():
+        """The game's own page with the portal's app bar on top. The trailing slash matters: the page asks
+        for its files by relative path, so they resolve under /starcontrol/."""
+        if request.args:                                   # nothing here takes a query string
+            return redirect(url_for("starcontrol.page"))
+        if not starcontrol.bundled():
+            return render_template("starcontrol.html"), 503
+        html = (starcontrol.game_dir() / "index.html").read_text(encoding="utf-8")
+        # The tab icon is the portal's own (public) one: browsers may ask for an icon without the session
+        # cookie, and the game's files are behind the sign-in.
+        html = html.replace('href="favicon.png"', f'href="{url_for("static", filename="favicon-32.png")}"', 1)
+        resp = app.response_class(html.replace("</body>", starcontrol.APP_BAR_SNIPPET + "</body>", 1))
+        resp.headers["Cache-Control"] = "no-cache"         # a new release shows on the next visit
+        return resp
+
+    @scz.get("/version")
+    def version():
+        """Which build is bundled (public: a build id and sizes, nothing private). The deploy's smoke test
+        reads it to prove the game shipped with the image."""
+        info = starcontrol.version()
+        resp = jsonify(bundled=starcontrol.bundled(), **{k: info[k] for k in
+                       ("build", "commit", "built_at", "bundle_bytes", "bundle_parts", "music_tracks", "music_bytes")
+                       if k in info})
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+    @scz.get("/<path:path>")
+    @auth.login_required
+    def game_file(path):
+        """The game's files: its page, the bundle parts and the music. send_from_directory refuses any path
+        that leaves the folder and answers Range requests, which the music streams with. The bundle parts
+        carry the build id in their query string, so they can be cached for a long time; the rest is short."""
+        pinned = "web.tar.gz.part" in path and request.args.get("v") == starcontrol.version().get("build")
+        return send_from_directory(starcontrol.game_dir(), path, mimetype=starcontrol.mimetype_for(path),
+                                   max_age=31536000 if pinned else 3600)
+
+    app.register_blueprint(scz)
 
     # ── chat ───────────────────────────────────────────────────────────────────
     talk = Blueprint("chat", __name__, url_prefix="/chat")

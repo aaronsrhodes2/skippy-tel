@@ -20,6 +20,15 @@ RUN mkdir -p /tmp/sg experiments_static/benchmark \
     && cp /tmp/sg/sigma_ground/mcp/benchmark/results/*_scored.json experiments_static/benchmark/ \
     && rm -rf /tmp/sg /tmp/sg.tar.gz
 
+# Star Control Zero (portal/starcontrol.py): the game's web build, a GitHub Release of star-control-precursors, at
+# the tag and checksum pinned in deploy.yml. Also before the portal's own files, and it copies in only the one
+# script it runs, so this half-gigabyte layer is rebuilt only when the pin (or that script) changes. One RUN:
+# download, verify, unpack and delete, so the archive is never a layer of its own.
+ARG STARCONTROL_REF=
+ARG STARCONTROL_SHA256=
+COPY portal/starcontrol_fetch.py /tmp/starcontrol_fetch.py
+RUN python /tmp/starcontrol_fetch.py "${STARCONTROL_REF}" "${STARCONTROL_SHA256}" starcontrol_static     && rm /tmp/starcontrol_fetch.py
+
 COPY portal/ .
 # Shared with the rest of the repo — one source of truth, copied in at build:
 COPY services/flask-api/app/skippy_persona.md ./skippy_persona.md

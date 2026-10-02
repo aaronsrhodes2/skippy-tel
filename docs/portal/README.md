@@ -10,6 +10,7 @@ page. Code in [`portal/`](../../portal); deployed on every push by
 | `/dashboard` | allowlist | Server status, start (game picker + auto-sleep) / stop, per-game connect info, `#game` and 🔊 voice Discord links |
 | `/chat` | allowlist | Text chat with Skippy (Claude, Skippy persona) |
 | `/admin` | admins | Game settings (world names, passwords, Dragonwilds owner ID), **Restart & update**, **Set up / repair Discord channels**, the **Recovery** cards (below) |
+| `/starcontrol/` | everyone signed in | **Star Control Zero**: the Captain's fan game, played in the browser; a card in Browser Games (`/play`) (see below) |
 | `/music` | admins | **Bilby's Audio Service**: the Captain's music collection streamed from skippy-pc to any browser (see below). `/bilby` redirects here |
 
 ## Friends: play without the Captain online
@@ -351,6 +352,48 @@ Tests: `portal/tests/test_video.py` (routes admin-only, the pass checked by the 
 refused, the URL rule, the tile and pill, the manifest, the page's markup against the script's lookups, the colour rule, hls.js's
 bytes), `test_video_js.py` (runs `portal/tests/js/video/*.test.js` under Node 18+ and feeds a catalog the real gate builds from its
 fake Jellyfin to the player's parser; skipped, not failed, without Node).
+
+## Star Control Zero (the Captain's game, `/starcontrol`)
+
+The Captain's Star Control fan-game prequel ([star-control-precursors](https://github.com/aaronsrhodes2/star-control-precursors)),
+played in the browser. Everyone who can sign in can play it: core users and every friend, whatever games they were
+granted (it is not a game server, so there is nothing to grant, wake or pay for). Its card in Browser Games (`/play`) links to it once the game is in the image, and says "coming soon" until then.
+
+**How it gets here.** The game is Python (pygame); its repo's `tools/build_web.py` compiles it to WebAssembly with pygbag and
+writes a folder of plain files, published as a GitHub Release (`scz-web.tar.gz`). `portal/Dockerfile` runs
+`portal/starcontrol_fetch.py`, which downloads the release pinned in `deploy.yml` (`STARCONTROL_REF`, with its SHA-256 in
+`STARCONTROL_SHA256`), refuses it if the hash differs, and unpacks it to `starcontrol_static/` in the image
+(`STARCONTROL_DIR` overrides the folder). That step sits before the portal's own files in the Dockerfile, so the
+half-gigabyte layer is rebuilt only when the pin changes. An empty `STARCONTROL_REF` builds a portal without the game:
+no tile, and `/starcontrol/` says it isn't bundled.
+
+| File | What |
+|---|---|
+| `index.html` | the door: on a computer it loads the game at once; on a phone or tablet it waits for a controller (or a real key press), so a device that can't play never downloads it |
+| `game.html` | the game's own page (pygbag's, patched to fetch the bundle in parts) |
+| `web.tar.gz.partNN` | the game: code, art and sound effects, about 75 MB, split into parts of 24 MB because Cloud Run caps one response at 32 MiB |
+| `assets/music/<track>/<stem>.mp3` | the music, about 460 MB, streamed a track at a time while you play; never downloaded up front |
+| `version.json` | the build id, the game commit, sizes |
+
+**Routes** (`starcontrol` blueprint in `app.py`, helpers in `portal/starcontrol.py`):
+`GET /starcontrol/` (signed in) is `index.html` with the portal's app bar injected above the game (‹ Home, the title, the round
+Home button; the page is not a template, like Radiance); `GET /starcontrol/<path>` (signed in) is any file in the folder, with
+its type sent explicitly and Range answered (the music needs it); the bundle parts are cached for a year when their `?v=` is
+this build's id, everything else for an hour. `GET /starcontrol/version` is public (a build id and sizes): the deploy's smoke
+test reads it to prove the game shipped. The WebAssembly runtime itself (Python, pygame) comes from pygbag's CDN,
+`pygame-web.github.io`, pinned to one version by the build.
+
+**Playing.** Keyboard: WASD or the arrows, Space / Enter to select, Esc to go back. Controller: any pad the browser reports
+with the standard layout. No touch controls. Saves live in that browser's own storage (`localStorage`, keys `scz-save/...`):
+they survive a reload and a new release, but they do not follow the player to another device.
+
+**Shipping a new build of the game.** In the game repo: `python tools/build_web.py --tarball`, then
+`gh release create <tag> build/scz-web.tar.gz`, then put the tag and `sha256sum build/scz-web.tar.gz` in `deploy.yml` and push.
+
+Tests: `portal/tests/test_starcontrol.py` (who gets in, the page and its app bar, each file's type and caching, Range, no
+reading outside the folder, the public version probe, the tile, a build without the game, the fetch script's checksum and
+archive checks, the Dockerfile and `deploy.yml` pins). The game itself is tested in its own repo; its scripted walks also run
+inside the browser build (`?test=<walk>` on the game's page).
 
 ## Telemetry: what the portal records, and where it goes
 

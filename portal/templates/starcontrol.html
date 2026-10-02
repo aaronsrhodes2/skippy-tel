@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Star Control Zero — Browser Games{% endblock %}
+{% block app %}play{% endblock %}
+{% block content %}
+{# Only shown when the game isn't in this build of the portal (the image is built without it in
+   tests and local runs); the game itself is served from starcontrol.py's folder, not from a template. #}
+<p class="error">Star Control Zero isn't bundled in this build yet.</p>
+<a class="btn" href="{{ url_for('index') }}">Back to Home</a>
+{% endblock %}

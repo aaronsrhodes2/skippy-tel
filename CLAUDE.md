@@ -189,6 +189,19 @@ only when the gate's `/health` says `ready`. Direct play when the catalog says `
 `portal/static/vendor/`, Safari's own on Apple). Run it against the REAL gate on this machine with `python portal/tests/dev_video.py`.
 Full description and tests: `docs/portal/README.md` → Nagatha's Video Service.
 
+## Star Control Zero (the Captain's game in the browser, `/starcontrol`)
+
+The fan game from `github.com/aaronsrhodes2/star-control-precursors`, compiled to WebAssembly (pygbag) and played in
+the browser by every signed-in person (core and friends alike; a card in the Browser Games app, `/play`; it says "coming soon" until the
+image carries the game). The portal only hands out files: `portal/starcontrol.py` + the `starcontrol` blueprint in `app.py`
+(`/starcontrol/` the page with the app bar injected, `/starcontrol/<file>` the bundle parts and the music,
+`/starcontrol/version` public, read by the deploy's smoke test). The files are NOT in this repo: `portal/Dockerfile`
+runs `portal/starcontrol_fetch.py`, which downloads the game repo's GitHub Release pinned in `deploy.yml`
+(`STARCONTROL_REF` + `STARCONTROL_SHA256`), checks the hash and unpacks it into the image. **To ship a new build of
+the game:** in the game repo run `python tools/build_web.py --tarball`, publish `build/scz-web.tar.gz` as a release,
+then change both pins here and push. Keyboard or controller only; a phone or tablet waits for a controller before it
+downloads anything. Saves stay in the player's browser. Full description: `docs/portal/README.md` → Star Control Zero.
+
 ## Private Skippy (the Workshop: left side of `/me`)
 
 The Captain's own chat is Claude Code (Opus, hard-coded, all the time) on skippy-pc, admin

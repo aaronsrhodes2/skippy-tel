@@ -38,6 +38,11 @@ env:
   IMAGE: us-west1-docker.pkg.dev/skippy-tel/skippy/portal
   # sigma-ground commit served by Experiments and the Mentat service (bump to update both).
   SIGMA_GROUND_REF: a763071b4beb87129f2672624e989a39ef7a1199
+  # Star Control Zero, played at /starcontrol: the release tag of github.com/aaronsrhodes2/star-control-precursors
+  # whose web build the portal image carries, and the SHA-256 of that release's scz-web.tar.gz (the build stops
+  # if they disagree). To ship a new build of the game: publish a release there, then change BOTH lines.
+  STARCONTROL_REF: web-2026-10-02
+  STARCONTROL_SHA256: 15866e0e94ab0069f02f8c4d0a3bb31bf4fe7a96e54337f29cadc37fe74999b3
   # Who may sign in to the portal, and who is an admin. Comma-separated.
   ALLOWED_EMAILS: aaron.s.rhodes@gmail.com
   ADMIN_EMAILS: aaron.s.rhodes@gmail.com
@@ -238,6 +243,8 @@ jobs:
           tags: ${{ env.IMAGE }}:${{ github.sha }}
           build-args: |
             SIGMA_GROUND_REF=${{ env.SIGMA_GROUND_REF }}
+            STARCONTROL_REF=${{ env.STARCONTROL_REF }}
+            STARCONTROL_SHA256=${{ env.STARCONTROL_SHA256 }}
             GIT_SHA=${{ github.sha }}
             BUILD_TIME=${{ steps.now.outputs.utc }}
           cache-from: type=gha
@@ -342,6 +349,7 @@ jobs:
           curl -fsS -m 20 -o /dev/null "$URL/"   # login page renders => secrets + OAuth config loaded
           curl -fsS -m 20 "$URL/experiments/benchmark" | grep -q "Wolfram"            # benchmark results bundled
           curl -fsS -m 20 "$URL/experiments/radiance/" | grep -q "viewer.js"          # Radiance bundled
+          curl -fsS -m 20 "$URL/starcontrol/version" | grep -Eq '"bundled": ?true'    # Star Control Zero bundled
       - name: Roll back to the previous revision
         # Reached only when something above failed, or the run was CANCELLED part way (a person cancelling a hung deploy,
         # or the admin page's "Cancel the stuck deploy"): failure() is false for a cancelled job, and a cancel after the

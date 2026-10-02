@@ -38,6 +38,7 @@ SKIP_ENDPOINTS = frozenset({
     "me.workshop_resync", "me.workshop_history", "me.workshop_history_result",
     "me.workshop_ship", "me.workshop_notify", "me.workshop_image",
     "experiments.radiance_file", "radiance_probe",
+    "starcontrol.game_file", "starcontrol.version",                 # the game's own files (its inner page is HTML)
     "home_report", "home_jobs", "home_job_done", "home_media", "home_import_chunk", "home_workshop",
     "home_telemetry", "game_import_download", "game_import_done", "ops_home", "tasks_run",
     "telemetry_tap",
