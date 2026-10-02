@@ -100,6 +100,13 @@ def init_app(app, workshop, limiter, github: recovery.GitHub, clock=None, home=N
             # Checked before the rate limit, so a typo doesn't cost the one rollback allowed per two minutes.
             return done(action, "That isn't a revision name: leave it blank, or type latest or a name like "
                                 "skippy-portal-00042-abc. Nothing was started.", False)
+        if action == "pc-restart-service" and request.form.get("service", "") not in recovery.PC_SERVICES:
+            return done(action, "Pick one of the listed services. Nothing was sent.", False)   # before the rate limit: a slip
+        if action == "pc-reset-workshop" and request.form.get("project", "") not in {p["id"] for p in workshop.projects()}:
+            return done(action, "Pick one of the listed projects. Nothing was sent.", False)   # doesn't cost the button
+        if action.startswith("pc-") and (home is None or not home.online()):
+            return done(action, "skippy-pc isn't reporting, so it can't be asked. If it stays silent it needs a look in "
+                                "person (remote-recovery.md).", False)
         if not limiter.allow(f"recovery:{action}", spec.limit, spec.window_s):
             minutes = max(1, spec.window_s // 60)
             return done(action, f"{spec.label}: already done just now. Wait {minutes} min and look at the card first.", False)

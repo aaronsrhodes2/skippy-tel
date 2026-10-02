@@ -246,3 +246,17 @@ def test_the_user_is_resolved_once_and_the_right_one(fake, make_stack):
     post(s, report(pos=900))
     assert writes(s)[-1]["user"] == fj.OTHER_ID
     assert len(fake.calls("/Users")) == 1                                         # asked at the catalog build, never again
+
+
+# ── a friend's pass (the portal signs "ro" for anyone with only the video grant) ───────────────────────────────────
+
+def test_a_friends_read_only_pass_watches_but_never_writes_the_captains_watch_state(stack):
+    from helpers import KEY
+    before = dict(stack.library.get(ALPHA))
+    ro = gate.sign(KEY, NOW + 3600, "ro")
+    assert stack.web.get(f"/t/{ro}/catalog.json").status_code == 200                # it does open the library
+    for state in ("progress", "stop"):
+        r = post(stack, report(pos=5000, state=state), tok=ro)
+        assert r.status_code == 200 and r.get_json() == {"ok": True, "relayed": False}
+    assert writes(stack) == []
+    assert {k: stack.library.get(ALPHA)[k] for k in ("played", "resume")} == {k: before[k] for k in ("played", "resume")}

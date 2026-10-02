@@ -137,9 +137,9 @@ class HostOps:
         if not self.is_supervised():
             raise Refused("The bridge isn't running under tools/bridge_supervisor.sh, so nothing would start it again. "
                           "Not restarting it.")
-        if self.workshop.busy():
+        if not self.workshop.hold("The bridge is restarting (Admin page); send that again in a few seconds."):
             raise Refused("The private Skippy is in the middle of a run; cancel it first (the card above).")
-        self.later(SELF_RESTART_DELAY_S, lambda: os._exit(0))
+        self.later(SELF_RESTART_DELAY_S, lambda: os._exit(0))       # held until then: no run can start and be cut off
         return Result(True, "The bridge restarts now; its supervisor brings it back within a few seconds.")
 
     # ── the private Skippy's clone ───────────────────────────────────────
@@ -148,8 +148,14 @@ class HostOps:
             project = self.workshop.project(project_id or None)
         except KeyError:
             raise Refused(f"skippy-pc has no project {project_id!r}.") from None
-        if self.workshop.busy():
+        if not self.workshop.hold(f"Skippy's copy of {project.name} is being reset (Admin page); send that again in a minute."):
             raise Refused("The private Skippy is in the middle of a run; cancel it first (the card above).")
+        try:
+            return self._reset(project)
+        finally:
+            self.workshop.release()
+
+    def _reset(self, project) -> Result:
         clone = project.clone
         if not os.path.isdir(os.path.join(clone, ".git")):
             return Result(True, f"{project.name} has no clone yet: the next run makes a fresh one.")

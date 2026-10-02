@@ -65,18 +65,25 @@ def gate_key(home_token: str) -> bytes:
     return hmac.new(hashed.encode(), b"video-gate-v1", hashlib.sha256).digest()
 
 
-def sign(key: bytes, exp: int) -> str:
-    return f"{exp}.{hmac.new(key, f'video:{exp}'.encode(), hashlib.sha256).hexdigest()[:32]}"
+def sign(key: bytes, exp: int, scope: str = "rw") -> str:
+    """A pass. "rw" (the Captain's) may also write Jellyfin's watch state; "ro" (a friend's: the portal signs it for anyone
+    holding only the "video" grant) watches and nothing more. The signed text differs, so neither turns into the other."""
+    text = f"video:{exp}" if scope == "rw" else f"video-ro:{exp}"
+    return f"{exp}.{hmac.new(key, text.encode(), hashlib.sha256).hexdigest()[:32]}"
 
 
-def valid(key: bytes, token: str, now: float) -> bool:
+def valid(key: bytes, token: str, now: float) -> str | None:
+    """The pass's scope ("rw" or "ro"), or None when it isn't a good pass."""
     m = TOKEN_RE.fullmatch(token or "")
     if not m or not key:
-        return False
+        return None
     exp = int(m.group(1))
     if not now <= exp <= now + MAX_PASS_S:
-        return False
-    return hmac.compare_digest(sign(key, exp).encode(), token.encode())
+        return None
+    for scope in ("rw", "ro"):
+        if hmac.compare_digest(sign(key, exp, scope).encode(), token.encode()):
+            return scope
+    return None
 
 
 def etag_matches(header: str | None, etag: str) -> bool:
@@ -172,8 +179,10 @@ def create_app(library: Library, client: Client, key: bytes, clock=time.time, se
         m = re.match(r"/t/([^/]*)(?:/|$)", path)
         if not m:
             abort(404)
-        if not valid(key, m.group(1), clock()):       # before any route logic: an unknown path under /t/ is 403 too
+        scope = valid(key, m.group(1), clock())
+        if not scope:                                   # before any route logic: an unknown path under /t/ is 403 too
             abort(403)
+        request.environ["video_gate.scope"] = scope
         return None
 
     @app.after_request
@@ -440,8 +449,8 @@ def create_app(library: Library, client: Client, key: bytes, clock=time.time, se
             return err(400)
         if state == "stop":
             sessions.stop_for(token, item["id"])     # the film is over for this viewer: free the transcoder at once
-        if state == "start" or pos is None:
-            return jsonify(ok=True, relayed=False)
+        if state == "start" or pos is None or request.environ.get("video_gate.scope") != "rw":
+            return jsonify(ok=True, relayed=False)   # a friend's pass ("ro") never moves the Captain's watch state
         if not (stop_gate if state == "stop" else progress_gate).allow(f"{item['id']}"):
             return jsonify(ok=True, throttled=True)
         resume, played = progress_outcome(pos, runtime, state, played_flag)

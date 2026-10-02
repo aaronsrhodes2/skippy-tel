@@ -51,11 +51,12 @@ def paired_home(clock, caps=None):
     return home
 
 
-def gate_says(token: str, passes: list[str], now: float, label: str = "video") -> list[bool]:
-    """Ask services/video-gate/gate.py itself (in its own process) whether it takes each pass. With label="music", the MUSIC gate."""
+def gate_says(token: str, passes: list[str], now: float, label: str = "video") -> list:
+    """Ask services/video-gate/gate.py itself (in its own process) whether it takes each pass: its scope ("rw"/"ro") or False.
+    With label="music", the MUSIC gate (True/False)."""
     where = VIDEO_GATE if label == "video" else PORTAL.parent / "services" / "music-gate"
     code = ("import json, sys; sys.path.insert(0, '.'); import gate; a = json.loads(sys.argv[1]); "
-            "print(json.dumps([gate.valid(gate.gate_key(a['token']), p, a['now']) for p in a['passes']]))")
+            "print(json.dumps([gate.valid(gate.gate_key(a['token']), p, a['now']) or False for p in a['passes']]))")
     run = subprocess.run([sys.executable, "-c", code, json.dumps({"token": token, "passes": passes, "now": now})], cwd=str(where),
                          capture_output=True, text=True, timeout=60)
     assert run.returncode == 0, run.stderr[-2000:]
@@ -70,7 +71,9 @@ def test_the_pass_opens_the_video_gate_and_only_the_video_gate():
     assert g["ok"] and g["url"] == GATE
     assert video_mod.PASS_S <= g["exp"] - clock.now <= video_mod.PASS_S + video_mod.PASS_BUCKET_S
     later = g["exp"] + 1
-    assert gate_says(TOKEN, [g["pass"]], clock.now) == [True]                      # the gate's own check, its own code
+    assert gate_says(TOKEN, [g["pass"]], clock.now) == ["rw"]                      # the gate's own check, its own code
+    friend = video_mod.Video(paired_home(clock), clock=clock).gate(read_only=True)["pass"]
+    assert gate_says(TOKEN, [friend], clock.now) == ["ro"]                         # a friend's pass: watch, never write
     assert gate_says("another-token", [g["pass"]], clock.now) == [False]
     assert gate_says(TOKEN, [g["pass"]], later) == [False]                         # and it runs out
     assert gate_says(TOKEN, [g["pass"]], clock.now, label="music") == [False]      # a video pass never opens the music gate
@@ -283,3 +286,17 @@ def test_the_app_tells_the_portal_nothing_about_what_is_watched():
     assert "data-tel" not in js and "/telemetry" not in js
     assert set(re.findall(r"fetch\(([\w.]+)", js)) <= {"cfg.gate", "C.catalogUrl", "C.progressUrl", "C.directUrl"}
     assert "credentials: \"same-origin\"" in js and js.count("credentials:") == 1     # only the portal call carries the cookie
+
+
+def test_a_friend_gets_a_read_only_pass_the_captain_a_read_write_one(client):
+    import video as video_mod
+    login(client, ADMIN)
+    rw = client.get("/video/gate").get_json()["pass"]
+    client.get("/logout")
+    _add_friend(client, "pal@example.com", ["video"])
+    login(client, "pal@example.com")
+    ro = client.get("/video/gate").get_json()["pass"]
+    assert ro != rw and ro.split(".")[0] == rw.split(".")[0]                       # same expiry, different scope
+    key = video_mod.gate_key(client.application.extensions["home"]._stored_hash())
+    exp = int(ro.split(".")[0])
+    assert ro == video_mod.sign(key, exp, "ro") and rw == video_mod.sign(key, exp, "rw")

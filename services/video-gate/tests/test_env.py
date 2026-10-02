@@ -131,3 +131,11 @@ def test_a_crash_in_a_handler_is_logged_by_class_and_place_only(stack, caplog, m
     assert r.status_code == 500 and r.get_json() == {"error": "something went wrong"}
     assert re.search(r"KeyError in a handler \(\w+\.py:\d+\)", caplog.text)
     assert stack.tok not in caplog.text and fj.KEY not in caplog.text and fj.KEY not in r.get_data(as_text=True)
+
+
+def test_a_friends_read_only_pass_is_valid_but_distinct_and_not_a_rw_pass():
+    key = gate.gate_key("the-home-token")
+    rw, ro = gate.sign(key, NOW + 60), gate.sign(key, NOW + 60, "ro")
+    assert rw != ro
+    assert gate.valid(key, rw, NOW) == "rw" and gate.valid(key, ro, NOW) == "ro"
+    assert gate.valid(key, ro[:-1] + ("0" if ro[-1] != "0" else "1"), NOW) is None

@@ -401,6 +401,20 @@ class Workshop:
         self._runs: dict[str, Run] = {}
         self._lock = threading.Lock()
         self._save_error: str | None = None
+        self._maintenance: str | None = None      # set by host_ops while it resets a clone or restarts the bridge
+
+    def hold(self, why: str) -> bool:
+        """Refuse new runs (start() raises Busy with `why`) until release(). False, and nothing held, when a run is going:
+        the check and the hold are one step under the lock, so a run can't slip in between them."""
+        with self._lock:
+            if self._maintenance or any(not r.done for r in self._runs.values()):
+                return False
+            self._maintenance = why
+            return True
+
+    def release(self) -> None:
+        with self._lock:
+            self._maintenance = None
 
     def login(self) -> str:
         """"ok" | "expired" | "unknown": Claude Code's sign-in on this PC. Never blocks (see LoginProbe)."""
@@ -462,6 +476,8 @@ class Workshop:
                     known.who, adopted = who, known
             elif attach:
                 raise UnknownTask(task)
+            elif self._maintenance:
+                raise Busy(self._maintenance)
             elif any(not r.done for r in self._runs.values()):
                 raise Busy("Skippy is still working on the last thing")
             else:

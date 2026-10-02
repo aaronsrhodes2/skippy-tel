@@ -788,7 +788,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @films.get("/gate")
     @auth.portal_required("video")
     def video_gate():
-        resp = jsonify(video.gate())
+        resp = jsonify(video.gate(read_only=not auth.is_admin(me())))   # a friend's pass can't write the watch state
         resp.headers["Cache-Control"] = "no-store"          # a pass is a credential: never from a cache
         return resp
 

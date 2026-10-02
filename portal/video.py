@@ -31,8 +31,12 @@ def gate_key(token_sha256: str) -> bytes:
     return hmac.new(token_sha256.encode(), b"video-gate-v1", hashlib.sha256).digest()
 
 
-def sign(key: bytes, exp: int) -> str:
-    return f"{exp}.{hmac.new(key, f'video:{exp}'.encode(), hashlib.sha256).hexdigest()[:32]}"
+def sign(key: bytes, exp: int, scope: str = "rw") -> str:
+    """Must match services/video-gate/gate.py sign(): "rw" for the Captain (may write Jellyfin's watch state), "ro" for a
+    friend with the "video" grant (watches only). Different signed text, so a friend's pass is a different string too
+    (and the gate's transcoder sessions, keyed by pass, are never shared with the Captain's)."""
+    text = f"video:{exp}" if scope == "rw" else f"video-ro:{exp}"
+    return f"{exp}.{hmac.new(key, text.encode(), hashlib.sha256).hexdigest()[:32]}"
 
 
 class Video:
@@ -50,7 +54,7 @@ class Video:
         url = url.rstrip("/")
         return url if self.gate_url_re.fullmatch(url) else None
 
-    def gate(self) -> dict:
+    def gate(self, read_only: bool = False) -> dict:
         """Where the library is and a pass for it, or why it can't be watched right now (one plain sentence)."""
         stored = self.home._stored_hash()
         if not stored:
@@ -61,4 +65,4 @@ class Video:
         if not url or not self.home.can("video_gate"):
             return {"ok": False, "why": "skippy-pc is up, but its video gate (or Jellyfin behind it) isn't answering."}
         exp = (int(self.clock()) // PASS_BUCKET_S + 1) * PASS_BUCKET_S + PASS_S      # 8 to 14 hours from now: see PASS_BUCKET_S
-        return {"ok": True, "url": url, "pass": sign(gate_key(stored), exp), "exp": exp}
+        return {"ok": True, "url": url, "pass": sign(gate_key(stored), exp, "ro" if read_only else "rw"), "exp": exp}

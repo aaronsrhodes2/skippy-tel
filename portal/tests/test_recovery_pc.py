@@ -107,3 +107,11 @@ def test_no_answer_in_time_says_sent(monkeypatch):
 
 
 # A friend pressing any of these is a 403: test_recovery.test_only_the_captain_can_press_them walks every ACTIONS entry.
+
+
+def test_a_slip_or_a_silent_home_doesnt_use_up_the_buttons_rate_limit(pc):
+    _, client, fake = pc
+    for _ in range(5):
+        press(client, "pc-reset-workshop", project="nope")             # the limit is 3 per 5 minutes
+    press(client, "pc-reset-workshop", project="skippytel")
+    assert fake.seen == [{"op": "reset-workshop", "arg": "skippytel"}]

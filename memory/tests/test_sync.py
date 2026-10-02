@@ -79,3 +79,13 @@ def test_listing_and_read_give_the_newest_turns_of_a_long_one(archive):
     short = sync.read(Archive(archive.root), key, max_chars=40)
     assert short["cut"] and short["text"].startswith("…(earlier turns left out)…") and short["text"].endswith("short trips.")
     assert sync.read(Archive(archive.root), "grok:nope") is None
+
+
+def test_an_id_from_an_export_cannot_steer_the_file_name(archive):
+    from datetime import datetime, timezone
+    from memory.schema import Conversation, Message
+    when = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    conv = Conversation("grok", "x/../../evil", "t", when, when, [Message("user", "hi", when)])
+    archive.write(conv)
+    rel = archive.ledger["grok:x/../../evil"]["path"]
+    assert ".." not in rel and rel.startswith("conversations/grok/2026-09/") and rel.endswith("-xevil.md")

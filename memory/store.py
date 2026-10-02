@@ -133,7 +133,8 @@ class Archive:
         tmp.replace(self._ledger_path)
 
     def _path_for(self, conv: Conversation) -> Path:
-        name = f"{conv.started:%Y-%m-%d}-{slugify(conv.title)}-{conv.id[:8]}.md"
+        # The id comes from an export (untrusted text): only letters, digits, - and _ reach the file name.
+        name = f"{conv.started:%Y-%m-%d}-{slugify(conv.title)}-{re.sub(r'[^A-Za-z0-9_-]', '', conv.id)[:8] or 'x'}.md"
         return Path("conversations") / conv.source / f"{conv.started:%Y-%m}" / name
 
     def write(self, conv: Conversation) -> str:

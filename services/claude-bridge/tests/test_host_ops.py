@@ -9,10 +9,20 @@ import projects as projects_mod
 
 class FakeWorkshop:
     def __init__(self, busy=False, clone="C:/nowhere"):
-        self._busy, self.clone = busy, clone
+        self._busy, self.clone, self.held, self.holds = busy, clone, None, []
 
     def busy(self):
         return self._busy
+
+    def hold(self, why):
+        if self._busy or self.held:
+            return False
+        self.held = why
+        self.holds.append(why)
+        return True
+
+    def release(self):
+        self.held = None
 
     def project(self, pid=None):
         pid = pid or "skippytel"
@@ -147,3 +157,22 @@ def test_supervised_reads_a_live_pid(tmp_path):
     assert host_ops.supervised(f)
     f.write_text("nonsense")
     assert not host_ops.supervised(f)
+
+
+def test_a_reset_holds_new_runs_off_while_it_works_and_lets_go_after(tmp_path):
+    (tmp_path / ".git").mkdir()
+    shop = FakeWorkshop(clone=str(tmp_path))
+    seen = []
+    r = Runner()
+    r_call = r.__call__
+    o, _ = ops(workshop=shop, runner=lambda cmd, cwd=None: (seen.append(shop.held), r_call(cmd, cwd))[1])
+    o.do("reset-workshop", "skippytel")
+    assert seen and all(h and "being reset" in h for h in seen)          # every git step ran under the hold
+    assert shop.held is None
+
+
+def test_a_bridge_restart_keeps_runs_off_until_it_exits():
+    shop = FakeWorkshop()
+    o, later = ops(workshop=shop)
+    o.do("restart-bridge")
+    assert shop.held and "restarting" in shop.held and len(later) == 1   # never released: the process ends

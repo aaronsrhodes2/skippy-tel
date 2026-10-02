@@ -18,7 +18,7 @@ PARSERS = {p.SOURCE: p for p in (claude, claude_code, grok)}
 _EXPORT_FILES = ("conversations.json",)
 
 
-_MAX_JSON = 2_000_000_000      # a JSON file inside an export bigger than this is not read
+_MAX_JSON = 500_000_000        # a JSON file inside an export bigger than this is not read (json.load holds it all in RAM)
 
 
 def _recognised(data: Any) -> bool:
