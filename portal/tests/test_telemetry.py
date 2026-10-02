@@ -570,11 +570,11 @@ def test_every_page_links_to_privacy_in_its_footer():
         assert re.search(r'<footer class="sitefoot"><a href="/privacy">', page), path
 
 
-def test_the_sign_in_page_says_what_it_records_and_the_chat_carries_no_recording_warning():
+def test_no_recording_warning_on_the_sign_in_page_or_in_the_chat():
     app, client, tel, _ = make()
     login_page = client.get("/").data.decode()
-    assert "records which pages you open" in login_page and "Aaron only" in login_page and 'href="/privacy"' in login_page
-    assert "Nothing is recorded while you're signed out" in login_page
+    assert "records which pages you open" not in login_page and "Nothing is recorded" not in login_page   # the Captain's call
+    assert 'href="/privacy"' in login_page                                                                # the footer link stays
     login(client, ADMIN)
     chat_page = client.get("/chat").data.decode()
     assert "are recorded for" not in chat_page and "don't type any" not in chat_page    # no warning: nothing is kept by default
