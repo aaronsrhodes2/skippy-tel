@@ -165,13 +165,13 @@ and jobs; while someone chats, the reporter also polls `GET /home/jobs` every
   SkippyTel's .env.
 - Portal side: `portal/home.py` (in-memory; the portal runs max 1 instance), Home widget on `/me`.
   The old `/bilby` page (a mirror of the Mac's decks, with phone-session controls) is gone: `/bilby` and everything
-  under it answer a 301 to `/music`. The "bilby" grant now only gates the chat's `now_playing` tool. What the
+  under it answer a 301 to `/music`. The old "bilby" grant reads as "audio" (friends.portals_of). Grants are one per friend-grantable tile (`catalog.PORTALS`: skippy, each game, audio, video, play, experiments); Dashboard and Admin are never grantable. What the
   reporter still sends for it (the Mac's decks and setlist, the album art, the queued `music` commands) is read by
   `/me`'s widget and the chat tool only.
 
 ## Bilby's Audio Service (the browser music player, `/music`)
 
-The Captain's collection in any browser, admin only, a tile on the launcher: `portal/templates/music.html` +
+The Captain's collection in any browser (the Captain, and friends granted "audio" in Admin > Friends), a tile on the launcher: `portal/templates/music.html` +
 `portal/static/bilby-{player,app}.js` + `bilby-player.css` (portal colour variables only) + `portal/player.py` (the pass and
 Connect). The audio goes browser → Tailscale Funnel → `services/music-gate` with a pass the portal signs; it never passes
 through the portal. A browser plays sound only after a tap on that page load, so after any reload or deploy the player shows
@@ -181,7 +181,7 @@ rule and the tests: `docs/portal/README.md` → Bilby's Audio Service.
 
 ## Nagatha's Video Service (the browser video app, `/video`)
 
-The Captain's Jellyfin films in any browser, admin only, a tile beside Bilby's: `portal/templates/video.html` +
+The Captain's Jellyfin films in any browser (the Captain, and friends granted "video"; a friend's viewing never moves his Continue Watching), a tile beside Bilby's: `portal/templates/video.html` +
 `portal/static/nagatha-{core,app}.js` + `nagatha.css` (portal colour variables only, amber accent) + `portal/video.py` (the pass, label
 `video-gate-v1`: a music pass never opens it). The film goes browser → Tailscale Funnel `:8443` → `services/video-gate` → Jellyfin; never
 through the portal. The reporter's `video_gate` capability (`VIDEO_GATE_URL`/`VIDEO_GATE_PUBLIC` in `docker-compose.override.yml`) is ready

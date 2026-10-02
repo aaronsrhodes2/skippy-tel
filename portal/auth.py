@@ -136,6 +136,20 @@ def login_required(view):
     return wrapped
 
 
+def portal_required(portal: str):
+    """For an app a friend may be granted (catalog.PORTALS: "audio", "video", ...): signed in, on the list, and holding
+    that grant (the Captain and admins hold them all). Anyone else gets 403."""
+    def decorate(view):
+        @login_required
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            if not has_portal(current_user()["email"], portal):
+                abort(403)
+            return view(*args, **kwargs)
+        return wrapped
+    return decorate
+
+
 def admin_required(view):
     @login_required
     @wraps(view)

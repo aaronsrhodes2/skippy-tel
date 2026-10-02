@@ -98,7 +98,8 @@ def portals_of(entry: dict | None) -> list[str]:
     if not entry:
         return []
     if "portals" in entry:
-        return [p for p in PORTALS if p in entry["portals"]]
+        held = set(entry["portals"]) | ({"audio"} if "bilby" in entry["portals"] else set())   # the old Bilby grant
+        return [p for p in PORTALS if p in held]
     return [p for p in PORTALS if p in entry.get("games", [])] + ["skippy"]
 
 
@@ -110,7 +111,7 @@ def invite_text(email: str, games: list[str], sender: str, portal_url: str,
     lines = [
         "Hey!",
         "",
-        "I've set you up on my game server portal"
+        "I've set you up on my portal"
         + (f" for {', '.join(names)}." if names else "."),
         "",
         f"1. Go to {portal_url} and sign in with Google using this address ({email}).",

@@ -237,10 +237,10 @@ def client():
     return app.test_client()
 
 
-def test_music_is_the_captains_alone(client):
+def test_music_needs_the_audio_grant(client):
     assert client.get("/music").status_code == 302                      # signed out: to sign-in
-    _add_friend(client, FRIEND, ["games", "skippy", "bilby", "experiments"])
-    login(client, FRIEND)
+    _add_friend(client, "pal@example.com", ["valheim", "skippy", "video", "play", "experiments"])
+    login(client, "pal@example.com")
     for r in (client.get("/music"), client.get("/music/gate"),
               client.post("/music/checkin", json={"device": "phone1234"}),
               client.post("/music/command", json={"device": "phone1234", "action": "pause"})):

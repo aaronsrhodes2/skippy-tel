@@ -9,7 +9,7 @@
   const C = window.NagathaCore;
   const root = document.getElementById("nv");
   if (!root || !C) return;
-  const cfg = { gate: root.dataset.gateUrl, hls: root.dataset.hlsSrc };
+  const cfg = { gate: root.dataset.gateUrl, hls: root.dataset.hlsSrc, progress: root.dataset.progress !== "0" };
   const $ = sel => root.querySelector(sel);
   const video = $("#video"), player = $("#player"), sheet = $("#sheet");
   const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
@@ -498,7 +498,7 @@
   }
   function report(body, retried) {
     const g = gate.info;
-    if (!body || !g) return;
+    if (!body || !g || !cfg.progress) return;      // a friend watching: kept in their own browser only (keepLocal)
     fetch(C.progressUrl(g), { method: "POST", body: JSON.stringify(body), keepalive: true,
                                 headers: { "Content-Type": "text/plain" } })     // a "simple" request: no CORS preflight per report
       .then(r => { if (r.status === 403 && !retried) gate.ensure(true).then(() => report(body, true), () => {}); }, () => {});

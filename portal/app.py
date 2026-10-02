@@ -157,6 +157,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                                hidden_up=bool(status and status.status == "RUNNING"
                                               and any(g not in shown for g in status.games)),
                                show_experiments=auth.has_portal(me(), "experiments"),
+                               show_audio=auth.has_portal(me(), "audio"), show_video=auth.has_portal(me(), "video"),
+                               show_play=auth.has_portal(me(), "play"),
                                music_gate=home.can("music_gate"), video_gate=home.can("video_gate"),
                                has_me="me" in app.blueprints)
 
@@ -705,7 +707,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def legacy_bilby(rest=""):
         return redirect(url_for("music.player_page"), 301)
 
-    # ── Bilby's Audio Service: the Captain's library on any browser (player.py; admin only) ────
+    # ── Bilby's Audio Service: the Captain's library on any browser (player.py; the Captain and friends granted "audio") ────
     listen = Blueprint("music", __name__, url_prefix="/music")
 
     def device_id() -> str:
@@ -715,7 +717,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         return dev
 
     @listen.get("")
-    @auth.admin_required
+    @auth.portal_required("audio")
     def player_page():
         return render_template("music.html")
 
@@ -735,14 +737,14 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             mimetype="application/manifest+json")
 
     @listen.get("/gate")
-    @auth.admin_required
+    @auth.portal_required("audio")
     def player_gate():
         resp = jsonify(player.gate())
         resp.headers["Cache-Control"] = "no-store"          # a pass is a credential: never from a cache
         return resp
 
     @listen.post("/checkin")
-    @auth.admin_required
+    @auth.portal_required("audio")
     def player_checkin():
         body = request.get_json(silent=True) or {}
         state = body.get("state")
@@ -750,7 +752,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                                       state if isinstance(state, dict) else None))
 
     @listen.post("/command")
-    @auth.admin_required
+    @auth.portal_required("audio")
     def player_command():
         body = request.get_json(silent=True) or {}
         dev = device_id()
@@ -760,11 +762,11 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     app.register_blueprint(listen)
 
-    # ── Nagatha's Video Service: the Captain's Jellyfin films on any browser (video.py; admin only) ────
+    # ── Nagatha's Video Service: the Captain's Jellyfin films on any browser (video.py; the Captain and friends granted "video") ────
     films = Blueprint("video", __name__, url_prefix="/video")
 
     @films.get("")
-    @auth.admin_required
+    @auth.portal_required("video")
     def video_page():
         return render_template("video.html")
 
@@ -784,7 +786,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             mimetype="application/manifest+json")
 
     @films.get("/gate")
-    @auth.admin_required
+    @auth.portal_required("video")
     def video_gate():
         resp = jsonify(video.gate())
         resp.headers["Cache-Control"] = "no-store"          # a pass is a credential: never from a cache
@@ -1183,7 +1185,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         email = user["email"]
         return chat_tools.ChatTools(vm, is_admin=auth.is_admin(email), visible=auth.visible_games(email),
                                     who=email,
-                                    music=home.music if auth.has_portal(email, "bilby") else None,
+                                    music=home.music if auth.has_portal(email, "audio") else None,
                                     home_mentat=home if home.mentat_ready() else None,
                                     home_music=home if home.can("make_music") else None)
 

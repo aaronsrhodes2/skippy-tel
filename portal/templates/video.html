@@ -16,7 +16,8 @@
    hls.js is loaded only when a film needs the converted stream and the browser has no HLS of its own (Safari and iOS do). #}
 <section id="nv" class="nv" data-state="boot" aria-label="Nagatha's Video Service"
          data-gate-url="{{ url_for('video.video_gate') }}"
-         data-hls-src="{{ url_for('static', filename='vendor/hls-1.6.15.min.js') }}">
+         data-hls-src="{{ url_for('static', filename='vendor/hls-1.6.15.min.js') }}"
+         data-progress="{{ '1' if is_admin else '0' }}">{# a friend's viewing never moves the Captain's Continue Watching #}
   <noscript><p class="warn" style="margin:12px">Nagatha's Video Service needs JavaScript.</p></noscript>
 
   <div class="notice" id="notice" role="status" hidden></div>

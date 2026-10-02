@@ -29,19 +29,25 @@
            {% else %}Asleep. {{ games.values() | map(attribute='name') | join(' · ') }}{% endif %}</p></div>
     {% endif %}
 
+    {% if show_play %}
     <a class="tile" data-app="play" href="{{ url_for('play_index') }}" data-tel="tile:play">
       <span class="icon">🕹️</span>
       <h3>Browser Games</h3><p>Play right here in a tab, nothing to install: Weapon vs. Armor, Star Control Zero.</p></a>
+    {% endif %}
 
-    {% if is_admin %}
+    {# Audio and video: the Captain's, and any friend granted them (Admin > Friends). #}
+    {% set whose = 'Your' if is_admin else "Aaron's" %}
+    {% if show_audio %}
       <a class="tile" data-app="music" href="{{ url_for('music.player_page') }}" data-tel="tile:music">
         {% if not music_gate %}<span class="pill">library offline</span>{% endif %}
         <span class="icon">🎵</span>
-        <h3>Bilby's Audio Service</h3><p>Your whole collection from home on any screen: phone, Mac, PC, the car.</p></a>
+        <h3>Bilby's Audio Service</h3><p>{{ whose }} whole collection from home on any screen: phone, Mac, PC, the car.</p></a>
+    {% endif %}
+    {% if show_video %}
       <a class="tile" data-app="video" href="{{ url_for('video.video_page') }}" data-tel="tile:video">
         {% if not video_gate %}<span class="pill">library offline</span>{% endif %}
         <span class="icon">🎬</span>
-        <h3>Nagatha's Video Service</h3><p>Your film library from home, on a phone, a laptop or the big screen.</p></a>
+        <h3>Nagatha's Video Service</h3><p>{{ whose }} film library from home, on a phone, a laptop or the big screen.</p></a>
     {% endif %}
 
     {% if show_experiments %}

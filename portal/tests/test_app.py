@@ -140,7 +140,7 @@ def test_the_launcher_has_one_tile_per_app_and_no_duplicate_paths(env):
     assert "Server room" not in launcher and "<nav" not in launcher
     _add_friend(client, PAL, ["dragonwilds"])
     login(client, PAL)
-    assert re.findall(r'class="tile" data-app="(\w+)"', client.get("/").data.decode()) == ["games", "play"]   # Browser Games is for everyone, like the experiments
+    assert re.findall(r'class="tile" data-app="(\w+)"', client.get("/").data.decode()) == ["games"]   # each tile comes with its own grant (test_grants.py)
 
 
 def test_the_old_dashboard_path_redirects_to_games(env):
@@ -1391,16 +1391,16 @@ def test_me_shows_core_health_and_the_watcher_repeats_the_problems(env):
     assert client.get("/me").status_code == 403               # a friend never sees it
 
 
-def test_the_bilby_grant_is_now_about_the_chat_tool_and_never_opens_the_player_or_home_status(env):
-    """The grant used to open the /bilby page. It still gates the chat's now_playing tool (see the Skippy tests); the player
-    is the Captain's alone, and home status stays private."""
+def test_the_audio_grant_opens_bilbys_audio_service_but_never_home_status(env):
+    """The "audio" grant (the old "bilby" one reads as it: test_grants.py) opens the player and the chat's now_playing tool.
+    Home status stays private."""
     client, _, _ = env
-    _add_friend(client, PAL, ["bilby"])
+    _add_friend(client, PAL, ["audio"])
     login(client, PAL)
-    assert client.get("/music").status_code == 403
+    assert client.get("/music").status_code == 200
     assert client.get("/bilby").status_code == 301                               # a redirect gives nothing away
-    assert b'data-tel="tile:music"' not in client.get("/").data and b"Audio Service" not in client.get("/").data
-    assert client.get("/me").status_code == 403
+    assert b'data-tel="tile:music"' in client.get("/").data
+    assert client.get("/video").status_code == 403 and client.get("/me").status_code == 403
 
 
 def test_chat_reply_says_which_tools_did_the_work(env):

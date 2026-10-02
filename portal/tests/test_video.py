@@ -152,11 +152,11 @@ def client():
     return app.test_client()
 
 
-def test_video_is_the_captains_alone(client):
+def test_video_needs_the_video_grant(client):
     assert client.get("/video").status_code == 302                       # signed out: to sign-in
     assert client.get("/video/gate").status_code in (302, 401, 403)
-    _add_friend(client, FRIEND, ["games", "skippy", "bilby", "experiments"])
-    login(client, FRIEND)
+    _add_friend(client, "pal@example.com", ["valheim", "skippy", "audio", "play", "experiments"])
+    login(client, "pal@example.com")
     assert client.get("/video").status_code == 403
     r = client.get("/video/gate")
     assert r.status_code == 403 and b"pass" not in r.data
