@@ -165,6 +165,16 @@
   .skippy-chat button.verb { font-size: .75rem; padding: 2px 10px; border-radius: 999px; }
   .skippy-chat .receipt { font-size: .7rem; color: var(--muted); margin-top: 4px; }
   .skippy-chat code.code { font-size: .95rem; }
+  /* Skippy Memory (admins only): a filterable list of saved conversations; the chosen one shows as a banner */
+  .skippy-chat .memory { margin: 6px 0; font-size: .85rem; }
+  .skippy-chat .memory summary { cursor: pointer; color: var(--green); }
+  .skippy-chat .memory input[type=search] { width: 100%; margin: 6px 0; }
+  .skippy-chat .mem-list { max-height: 40vh; overflow-y: auto; }
+  .skippy-chat .mem-row { display: block; width: 100%; text-align: left; margin: 4px 0; padding: 6px 10px; font-size: .8rem;
+                          overflow-wrap: anywhere; }
+  .skippy-chat .mem-src { font-size: .65rem; text-transform: uppercase; letter-spacing: .06em; color: var(--cyan); margin-right: 6px; }
+  .skippy-chat .continuing { border: 1px solid var(--violet); border-radius: 8px; padding: 6px 10px; margin: 6px 0; font-size: .8rem;
+                             display: flex; gap: 8px; align-items: center; justify-content: space-between; }
 </style>
 {% block head %}{% endblock %}
 </head>

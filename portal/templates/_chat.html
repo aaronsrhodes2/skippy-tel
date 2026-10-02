@@ -8,6 +8,16 @@
   <p class="help">Skippy runs on Haiku: quick and cheap.
     Skippy can check the game server, start games{% if is_admin %}, restart it and read its logs{% endif %},
     and hands physics to Mentat{% if is_admin %}, and makes music on your GPU at home{% endif %} — just ask, or open <b>Tools</b> to aim at one (e.g. <code>/physics</code>).</p>
+  {% if is_admin %}
+  <div class="continuing" hidden><span></span><button type="button" class="drop-ctx">✕</button></div>
+  <details class="memory">
+    <summary>Past conversations</summary>
+    <input type="search" placeholder="Filter by title or AI" aria-label="Filter past conversations" hidden>
+    <div class="mem-list"><span class="help">Loading from skippy-pc…</span></div>
+    <p class="help">Every saved conversation from Grok, Claude and the rest (Skippy Memory on Drive). Pick one and Skippy
+      carries on from it. New ones arrive when you drop an export in <code class="code">My Drive/Skippy Memory/inbox</code>; skippy-pc imports every 30 minutes.</p>
+  </details>
+  {% endif %}
   <div class="log"></div>
   <details class="verbs">
     <summary>Tools</summary>
@@ -39,6 +49,19 @@
     }
     let history = [];
     try { history = JSON.parse(sessionStorage.getItem(KEY) || "[]"); } catch (e) { history = []; }
+    // A saved conversation being continued (Skippy Memory; admins only): sent with each message, kept in this tab.
+    const CTX = KEY + "-ctx";
+    let context = null;
+    try { context = JSON.parse(sessionStorage.getItem(CTX) || "null"); } catch (e) { context = null; }
+    const banner = root.querySelector(".continuing");
+    function showContext() {
+      if (!banner) return;
+      banner.hidden = !context;
+      if (context) banner.querySelector("span").textContent = "Continuing: " + context.title + " (" +
+        context.source + (context.updated ? ", " + context.updated.slice(0, 10) : "") + ")" + (context.cut ? ", newest part" : "");
+    }
+    function setContext(c) { context = c; try { c ? sessionStorage.setItem(CTX, JSON.stringify(c)) : sessionStorage.removeItem(CTX); } catch (e) {} showContext(); }
+    showContext();
 
     // Text between backticks (join codes, addresses, commands) becomes a one-click copy chip; static/copy.js gives it its Copy button.
     function fill(el, text) {
@@ -76,7 +99,7 @@
           method: "POST", headers: {"Content-Type": "application/json"},
           // `page` lets Skippy know what you're looking at ("this game" = the one on screen).
           body: JSON.stringify({message: text, history: history, page: location.pathname,
-                                save: !!(saveBox && saveBox.checked)}),
+                                save: !!(saveBox && saveBox.checked), context: context}),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || res.statusText);
@@ -109,7 +132,55 @@
     msg.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
     });
-    root.querySelector(".clear").addEventListener("click", () => { history = []; save(); log.replaceChildren(); });
+    root.querySelector(".clear").addEventListener("click", () => { history = []; save(); log.replaceChildren(); setContext(null); });
+
+    // ── Past conversations (Skippy Memory): a job for skippy-pc, polled until it answers ──
+    const memory = root.querySelector(".memory");
+    async function askHome(body) {
+      const r = await fetch("{{ url_for('chat.memory_ask') if is_admin else '' }}", {method: "POST",
+        headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || r.statusText);
+      for (let i = 0; i < 40; i++) {
+        await new Promise(res => setTimeout(res, 1500));
+        const p = await (await fetch("{{ url_for('chat.memory_result') if is_admin else '' }}?job=" + d.job)).json();
+        if (p.state === "done") return p.result;
+        if (p.state === "error" || p.state === "unknown") throw new Error(p.error || "skippy-pc couldn't answer.");
+      }
+      throw new Error("skippy-pc didn't answer within a minute.");
+    }
+    if (memory) {
+      const box = memory.querySelector(".mem-list"), filter = memory.querySelector("input[type=search]");
+      let rows = [];
+      function paint() {
+        const q = filter.value.trim().toLowerCase();
+        const shown = rows.filter(r => !q || (r.title + " " + r.source + " " + r.summary).toLowerCase().includes(q)).slice(0, 100);
+        box.replaceChildren(...shown.map(r => {
+          const b = document.createElement("button"); b.type = "button"; b.className = "mem-row";
+          const src = document.createElement("span"); src.className = "mem-src"; src.textContent = r.source;
+          b.append(src, document.createTextNode(r.title + " · " + (r.updated || "").slice(0, 10) + " · " + r.messages + " msgs"));
+          b.addEventListener("click", async () => {
+            b.disabled = true; b.textContent = "Fetching " + r.title + "…";
+            try {
+              const c = await askHome({key: r.key});
+              history = []; save(); log.replaceChildren();
+              setContext({source: c.source, title: c.title, updated: c.updated, text: c.text, cut: c.cut});
+              memory.open = false; msg.focus();
+            } catch (err) { b.textContent = err.message; }
+          });
+          return b;
+        }));
+        if (!shown.length) box.textContent = rows.length ? "Nothing matches." : "No saved conversations yet.";
+      }
+      filter.addEventListener("input", paint);
+      memory.addEventListener("toggle", async () => {
+        if (!memory.open || memory.dataset.loaded) return;
+        memory.dataset.loaded = "1";
+        try { const got = await askHome(); rows = got.conversations || []; filter.hidden = false; paint(); }
+        catch (err) { box.textContent = err.message; delete memory.dataset.loaded; }
+      });
+    }
+    if (banner) banner.querySelector(".drop-ctx").addEventListener("click", () => setContext(null));
 
     // Direct verbs: a collapsible, categorised badge list, fetched on first open.
     const verbs = root.querySelector(".verbs"), list = root.querySelector(".verb-list");

@@ -33,19 +33,21 @@ which is copied into the Drive folder as its `README.md`.
    conversations inside that Project when you want them to draw on your
    history.
 
-## Routine (monthly, ~5 minutes)
+## Routine: drop exports in `inbox/`, nothing else
 
-1. **Claude:** claude.ai → Settings → Privacy → **Export data**. The zip
-   arrives by email. Save it into `Skippy Memory/inbox/`.
-2. **Others**, as their parsers land: Grok (grok.com → Settings → Data →
-   export), Google Takeout (Gemini Apps activity). Save them into `inbox/`.
-3. Run:
-   ```
-   make memory-inbox            # imports everything in inbox/, rebuilds index.md
-   make memory-inbox DISTILL=1  # also tags topics + summaries with local Ollama
-   ```
-   Re-importing an export you've already imported changes nothing. A
-   conversation you continued since the last export gets updated in place.
+skippy-pc imports by itself every 30 minutes (the Claude bridge runs `memory/sync.py`; `services/claude-bridge/memory_service.py`):
+this PC's Claude Code sessions that changed (yours and the private Skippy's), and every export in `inbox/`. An export that
+imported is moved to `inbox/imported/` (never deleted); one that failed stays, and the reason is in `.skippy/sync.json`.
+Re-importing the same account later only adds what's new; a conversation continued since is updated in place.
+
+- **Grok** (the in-car chats too, when the car's Grok is signed in to your account; as a guest they're never kept):
+  grok.com → Settings → Data Controls → export. Save the zip into `inbox/`. There is no API that reads Grok's history,
+  so this export is the only way in.
+- **Claude**: claude.ai → Settings → Privacy → Export data. Save the zip into `inbox/`.
+- By hand, any time: `make memory-inbox` (add `DISTILL=1` to tag topics with local Ollama).
+
+**Continue with Skippy:** the portal's Skippy chat (admins) has **Past conversations**: every saved conversation from every
+source, filterable. Pick one and Skippy carries on from it (the newest ~60k characters of it go with each message).
 
 ## Claude Code history (every machine, automatic)
 

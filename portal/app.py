@@ -1228,6 +1228,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             page = str(body.get("page") or "")[:100] or None
             prompt = chat.system_prompt(user["name"], is_admin=admin, page=page,
                                         games=[GAMES[g].name for g in auth.visible_games(user["email"])])
+            if admin:                     # "Continue with Skippy": a saved conversation from Skippy Memory (the Captain's own)
+                prompt += chat.continued(body.get("context"))
             used: list[str] = []
             calls: list[tuple] = []       # (tool, arguments, result): kept only if this person allowed saving (below)
 
@@ -1255,6 +1257,29 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             telemetry_web.record_chat(message, text, model, calls, forced=force)
         return jsonify(reply=text, tools=used, mentat_available=mentat_on, mentat_where=where,
                        media=tools.media)
+
+    # ── Skippy Memory: every saved AI conversation (Grok, Claude, ...), to continue here (admin only) ──
+    @talk.post("/memory")
+    @auth.admin_required
+    def memory_ask():
+        """Ask skippy-pc for the list (no `key`) or one conversation (`key`). Answers a job id at once; the chat polls
+        /chat/memory/result (skippy-pc picks jobs up within a few seconds)."""
+        if not home.online():
+            return jsonify(error="skippy-pc isn't reporting, so Skippy Memory can't be read right now."), 503
+        key = (request.get_json(silent=True) or {}).get("key")
+        if key is None:
+            return jsonify(job=home.start("memory_list", me(), ttl=120))
+        if not isinstance(key, str) or not re.fullmatch(r"[a-z-]{2,20}:[A-Za-z0-9_.-]{1,80}", key):
+            return jsonify(error="Bad conversation key."), 400
+        return jsonify(job=home.start("memory_get", me(), ttl=120, key=key))
+
+    @talk.get("/memory/result")
+    @auth.admin_required
+    def memory_result():
+        job = request.args.get("job", "")
+        if not re.fullmatch(r"[a-f0-9]{8,32}", job) or home.owner_of(job) != me():
+            return jsonify(state="unknown")
+        return jsonify(home.peek(job))
 
     @talk.get("/media/<job_id>")
     @skippy_required

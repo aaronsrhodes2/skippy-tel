@@ -5,6 +5,8 @@ It shells out to the Claude Code CLI on this PC (the Captain's subscription, not
 "solid gold" voice tiers) was removed on 2026-09-30 at the Captain's request: the private Skippy has full access.
 
 The Admin page's skippy-pc buttons (host_ops.py): POST /host/<op> {"arg": ...}, same token.
+Skippy Memory (memory_service.py): GET /memory/list, GET /memory/conversation?key=<source:id>, same token; and an
+import every 30 minutes in a background thread.
 
 The private Skippy (workshop_engine.py): POST /workshop, GET /workshop/run/<task>,
 GET /workshop/runs, POST /workshop/cancel/<task>. Those need `Authorization: Bearer <SKIPPY_HOME_TOKEN>`
@@ -35,6 +37,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import host_ops
+import memory_service
 import projects as projects_mod
 import workshop_engine as workshop
 
@@ -87,6 +90,7 @@ def _registry():
 
 WORKSHOP  = workshop.Workshop([CLAUDE], projects=_registry())
 HOST_OPS  = host_ops.HostOps(WORKSHOP)
+MEMORY    = memory_service.MemoryService()
 TOKEN_REREAD_S = 30.0              # how long a token that is held stays unchecked
 TOKEN_RETRY_S = 5.0                # while there is none at all (not mounted yet at logon), look again sooner
 _token_cache: tuple[float, str] = (0.0, "")      # (when it was last looked at, the last NON-EMPTY token seen)
@@ -173,6 +177,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if url.path.startswith("/workshop/run/"):
             self._workshop_run(url)
+            return
+        if url.path in ("/memory/list", "/memory/conversation"):
+            self._memory(url)
             return
         self._json(404, {"error": "not_found"})
 
@@ -277,6 +284,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json(200, run.since(after, wait))
 
+    def _memory(self, url) -> None:
+        """Skippy Memory (memory_service.py): the list of every saved AI conversation, or one conversation's text, for the
+        chat's "Continue with Skippy". The Captain's own words from every AI: same token as the workshop."""
+        if not self._workshop_ok():
+            return
+        if url.path == "/memory/list":
+            status, body = MEMORY.listing()
+        else:
+            status, body = MEMORY.read((parse_qs(url.query).get("key") or [""])[0])
+        self._json(status, body)
+
     def _json(self, status: int, body: dict):
         self._drain()
         payload = json.dumps(body).encode("utf-8")
@@ -323,6 +341,7 @@ def main():
     except Exception:  # noqa: BLE001
         print("[bridge] couldn't restore saved runs; starting without them:", file=sys.stderr)
         traceback.print_exc()
+    MEMORY.start()      # Skippy Memory: imports this PC's Claude Code sessions and the inbox every 30 min (memory_service.py)
     # Bind 0.0.0.0 so Docker Desktop's host.docker.internal can reach us.
     # On Windows + Docker Desktop, host-gateway routes container traffic to
     # the host's loopback through a special address; binding to 0.0.0.0

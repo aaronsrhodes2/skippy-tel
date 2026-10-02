@@ -1,6 +1,6 @@
 """Export parsers. Adding a source = one module with SOURCE, looks_like(), parse().
 
-Planned, added as the Captain exports each service: chatgpt, grok, gemini_takeout.
+Planned, added as the Captain exports each service: chatgpt, gemini_takeout.
 """
 from __future__ import annotations
 
@@ -9,30 +9,54 @@ import zipfile
 from pathlib import Path
 from typing import Any, Iterator
 
-from memory.parsers import claude, claude_code
+from memory.parsers import claude, claude_code, grok
 from memory.schema import Conversation
 
-PARSERS = {p.SOURCE: p for p in (claude, claude_code)}
+PARSERS = {p.SOURCE: p for p in (claude, claude_code, grok)}
 
 # The file inside an export that holds the conversations, per source.
 _EXPORT_FILES = ("conversations.json",)
 
 
+_MAX_JSON = 2_000_000_000      # a JSON file inside an export bigger than this is not read
+
+
+def _recognised(data: Any) -> bool:
+    return any(hasattr(p, "looks_like") and p.looks_like(data) for p in PARSERS.values())
+
+
 def _load_json(path: Path) -> Any:
+    """The conversations inside an export. Claude names its file conversations.json; Grok's has another name, so a zip
+    or folder without one is searched: the first JSON file a parser recognises."""
     if zipfile.is_zipfile(path):
         with zipfile.ZipFile(path) as zf:
-            for name in zf.namelist():
-                if Path(name).name in _EXPORT_FILES:
-                    with zf.open(name) as fh:
-                        return json.load(fh)
-        raise ValueError(f"{path}: no {' / '.join(_EXPORT_FILES)} inside the zip")
+            names = [n for n in zf.namelist() if n.lower().endswith(".json")]
+            names.sort(key=lambda n: (Path(n).name not in _EXPORT_FILES, n))
+            for name in names:
+                if zf.getinfo(name).file_size > _MAX_JSON:
+                    continue
+                with zf.open(name) as fh:
+                    try:
+                        data = json.load(fh)
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        continue
+                if Path(name).name in _EXPORT_FILES or _recognised(data):
+                    return data
+        raise ValueError(f"{path}: no conversations file a parser recognises inside the zip")
     if path.is_dir():
         for name in _EXPORT_FILES:
             if (path / name).exists():
                 path = path / name
                 break
         else:
-            raise ValueError(f"{path}: no {' / '.join(_EXPORT_FILES)} in folder")
+            for candidate in sorted(path.rglob("*.json")):
+                try:
+                    data = json.loads(candidate.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if _recognised(data):
+                    return data
+            raise ValueError(f"{path}: no conversations file a parser recognises in the folder")
     with path.open(encoding="utf-8") as fh:
         return json.load(fh)
 

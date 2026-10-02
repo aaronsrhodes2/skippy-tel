@@ -43,3 +43,25 @@ def test_a_silent_bridge_is_explained(bridge):
     _, answer = bridge
     answer["value"] = (None, {})
     assert "isn't answering" in reporter.run_job({"kind": "host_op", "op": "funnel", "arg": "status"}, "tok")["error"]
+
+
+# ── Skippy Memory jobs (the chat's "Continue with Skippy") ──────────────────────────────────────────────────────────
+
+def test_memory_list_and_get_go_to_the_bridge(bridge):
+    calls, answer = bridge
+    answer["value"] = (200, {"conversations": [], "total": 0})
+    assert reporter.run_job({"kind": "memory_list"}, "tok") == {"result": {"conversations": [], "total": 0}}
+    answer["value"] = (200, {"key": "grok:abc", "text": "hi"})
+    assert reporter.run_job({"kind": "memory_get", "key": "grok:abc"}, "tok")["result"]["text"] == "hi"
+    assert [c[1] for c in calls] == ["/memory/list", "/memory/conversation?key=grok%3Aabc"]
+
+
+def test_a_bad_memory_key_never_reaches_the_bridge(bridge):
+    calls, _ = bridge
+    assert "error" in reporter.run_job({"kind": "memory_get", "key": "../../x"}, "tok") and calls == []
+
+
+def test_a_missing_conversation_is_said_plainly(bridge):
+    _, answer = bridge
+    answer["value"] = (404, {"error": "unknown_conversation"})
+    assert "isn't in Skippy Memory" in reporter.run_job({"kind": "memory_get", "key": "grok:abc"}, "tok")["error"]

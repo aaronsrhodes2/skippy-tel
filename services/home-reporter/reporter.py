@@ -634,6 +634,30 @@ def workshop_conversations(job: dict, token: str) -> dict:
     return {"result": body}
 
 
+_MEMORY_KEY = re.compile(r"[a-z-]{2,20}:[A-Za-z0-9_.-]{1,80}")
+
+
+def memory_job(job: dict, token: str) -> dict:
+    """Skippy Memory for the chat's "Continue with Skippy": the list of saved AI conversations (memory_list) or one
+    conversation's text (memory_get, with `key`), read from the bridge, which keeps the archive (memory_service.py)."""
+    if not BRIDGE:
+        return {"error": "The bridge isn't set up on skippy-pc (CLAUDE_BRIDGE_URL)."}
+    if job.get("kind") == "memory_get":
+        key = str(job.get("key") or "")
+        if not _MEMORY_KEY.fullmatch(key):
+            return {"error": "bad conversation key"}
+        status, body = _bridge("GET", "/memory/conversation?" + urllib.parse.urlencode({"key": key}), None, token, timeout=30)
+    else:
+        status, body = _bridge("GET", "/memory/list", None, token, timeout=30)
+    if status == 200 and isinstance(body, dict):
+        return {"result": body}
+    if status is None:
+        return {"error": "The bridge on skippy-pc isn't answering."}
+    if status == 404:
+        return {"error": "That conversation isn't in Skippy Memory."}
+    return {"error": str((body or {}).get("error") or f"The bridge said HTTP {status}.")[:300]}
+
+
 HOST_OPS = ("restart-service", "restart-bridge", "reset-workshop", "funnel")
 _HOST_ARG = re.compile(r"[a-z0-9-]{0,40}")
 
@@ -668,6 +692,8 @@ def run_job(job: dict, token: str = "") -> dict:
         return make_music(job, token)
     if job.get("kind") == "host_op":
         return host_op(job, token)
+    if job.get("kind") in ("memory_list", "memory_get"):
+        return memory_job(job, token)
     if job.get("kind") == "ask_mentat" and MENTAT:
         reply = fetch(f"{MENTAT}/ask", "POST", {"question": job.get("question", "")}, timeout=100)
         if reply and reply.get("ok"):
