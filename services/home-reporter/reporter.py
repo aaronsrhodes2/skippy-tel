@@ -634,6 +634,29 @@ def workshop_conversations(job: dict, token: str) -> dict:
     return {"result": body}
 
 
+HOST_OPS = ("restart-service", "restart-bridge", "reset-workshop", "funnel")
+_HOST_ARG = re.compile(r"[a-z0-9-]{0,40}")
+
+
+def host_op(job: dict, token: str) -> dict:
+    """An Admin button for skippy-pc itself (job kind host_op): restart a service or the bridge, reset a workshop clone,
+    Funnel on/off. The bridge does it (it runs on Windows, with docker, git and tailscale; this container has none of
+    them) and checks every name against its own allow-lists; this only refuses what is plainly malformed."""
+    op, arg = str(job.get("op") or ""), str(job.get("arg") or "")
+    if op not in HOST_OPS or not _HOST_ARG.fullmatch(arg):
+        return {"error": "That isn't an operation skippy-pc does."}
+    if not BRIDGE:
+        return {"error": "The bridge isn't set up on skippy-pc (CLAUDE_BRIDGE_URL)."}
+    status, body = _bridge("POST", f"/host/{op}", {"arg": arg}, token, timeout=150)
+    if status is None:
+        return {"error": "The bridge on skippy-pc isn't answering. Its supervisor restarts it within a minute if it "
+                         "crashed; if this keeps happening, skippy-pc needs a look in person."}
+    if status in (200, 409) and isinstance(body, dict) and body.get("summary"):
+        return {"result": {"ok": bool(body.get("ok")) and status == 200, "summary": str(body["summary"])[:400],
+                           "output": str(body.get("output") or "")[:1600]}}
+    return {"error": f"The bridge said HTTP {status}."}
+
+
 def run_job(job: dict, token: str = "") -> dict:
     """A job from the portal. ask_mentat → Mentat + Qwen here at home; make_music → the music studio;
     workshop → the private Skippy (Claude Code on the bridge); workshop_conversation(s) → its conversation history."""
@@ -643,6 +666,8 @@ def run_job(job: dict, token: str = "") -> dict:
         return workshop_conversations(job, token)
     if job.get("kind") == "make_music":
         return make_music(job, token)
+    if job.get("kind") == "host_op":
+        return host_op(job, token)
     if job.get("kind") == "ask_mentat" and MENTAT:
         reply = fetch(f"{MENTAT}/ask", "POST", {"question": job.get("question", "")}, timeout=100)
         if reply and reply.get("ok"):

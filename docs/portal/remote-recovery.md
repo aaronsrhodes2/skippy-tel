@@ -26,7 +26,7 @@ a run that finished while the portal was away.
 
 ## First: the Admin page's Recovery cards (if the portal opens at all)
 
-Portal > **Admin** > **Recovery**. Three cards, admin only (a friend never sees them), every button asks "are you sure?" first,
+Portal > **Admin** > **Recovery**. Four cards, admin only (a friend never sees them), every button asks "are you sure?" first,
 and each press is logged (the last 20 show at the bottom; Cloud Logging keeps `"event": "recovery"` lines).
 
 | Card | Shows | Buttons |
@@ -34,6 +34,7 @@ and each press is logged (the last 20 show at the bottom; Cloud Logging keeps `"
 | **Live version** | the commit and Cloud Run revision serving now; "main is N pushes ahead of what's live"; "a newer deploy passed but isn't serving: a rollback is holding traffic back" | none |
 | **Deploy pipeline** | the newest deploy runs of `main`: passed / failed / running, how long ago, a link to each log | **Roll back the portal** (box blank = the previous good revision; or a revision name, or `latest`), **Undo a rollback**, **Re-run the failed jobs** (only when the newest deploy failed), **Cancel the stuck deploy** (only when the newest deploy has been running for over 20 minutes) |
 | **Private Skippy** | the current task and its state (queued, running, offline, stalled...) | **Cancel the current run**, **Clear a stuck chat record**, **Pause the private Skippy** / turn it back on |
+| **skippy-pc** | whether skippy-pc is reporting; each button's answer and the commands' own output | **Restart service** (pick one: flask-api, ollama, whisper, music-studio, music-gate, video-gate, home-reporter, mentat-home; `docker compose restart`, no rebuild), **Reset Skippy's copy** (pick a project: its workshop clone back to `origin/<branch>`, uncommitted work stashed, unpushed commits on a `rescue/<stamp>` branch), **Restart the bridge** (only under its supervisor, never mid-run), **Funnel status / on / off** (the audio :443 and video :8443 doors) |
 
 - **Cancelled a deploy? It now rolls back by itself.** The deploy's last step runs when a run is cancelled too (not only when it
   fails), and puts back the revision it replaced if it had already switched traffic. So **Cancel the stuck deploy** only cancels;
@@ -46,6 +47,10 @@ and each press is logged (the last 20 show at the bottom; Cloud Logging keeps `"
   configured" and shows no buttons. To set it up: on github.com, Settings > Developer settings > Fine-grained tokens > a token for
   this repo only with **Actions: Read and write** and nothing else; add it to this repo's Actions secrets as `PORTAL_ACTIONS_TOKEN`;
   deploy (Actions > **deploy** > Run workflow). The deploy copies it into Secret Manager and hands it to the portal.
+- **The skippy-pc card** works only while skippy-pc reports (the reporter carries the job; the bridge, on Windows itself, does
+  the work in `services/claude-bridge/host_ops.py`). It can't wake a sleeping PC, start Docker Desktop or sign Claude back in:
+  those are still section 4. A restart of the reporter answers first and restarts a moment later, so skippy-pc goes quiet for
+  about 30 s. The bridge only restarts on request when `tools/bridge_supervisor.sh` is running (it would not come back otherwise).
 - **If the portal itself is broken** (the Admin page won't open), none of this is reachable: use GitHub mobile > this repo >
   Actions > **rollback** > Run workflow, box left blank (step 3). To cancel a hung deploy there: Actions > **deploy** > the running
   run > Cancel; it rolls itself back as above.
@@ -107,7 +112,7 @@ tail -n 40 state/bridge-supervisor.log
 | Problem | Fix |
 |---|---|
 | **The bridge is not running** | `bash tools/bridge_supervisor.sh` (or `make bridge-supervised`). Leave it running; it restarts the bridge by itself. A bridge already running by hand is left alone and watched. |
-| **New bridge code** (after a `git pull` changed `services/claude-bridge/`) | It only takes effect when the bridge restarts. Under the startup task: `MSYS_NO_PATHCONV=1 schtasks.exe /End /TN SkippyBridge`, then `MSYS_NO_PATHCONV=1 schtasks.exe /Run /TN SkippyBridge`. By hand: Ctrl-C in the supervisor's window and start it again. |
+| **New bridge code** (after a `git pull` changed `services/claude-bridge/`) | It only takes effect when the bridge restarts: Admin > **skippy-pc** > **Restart the bridge**. At the PC, under the startup task: `MSYS_NO_PATHCONV=1 schtasks.exe /End /TN SkippyBridge`, then `MSYS_NO_PATHCONV=1 schtasks.exe /Run /TN SkippyBridge`. By hand: Ctrl-C in the supervisor's window and start it again. |
 | **Claude's login expired** (`login: "expired"` in the bridge's `/health`) | `claude auth login` on the PC (or open `claude` and type `/login`). The workshop is ready again within about two minutes. |
 | **The token is missing** (`reason` says SKIPPY_HOME_TOKEN) | It lives in the vault `.env`; the bridge re-reads it every 30 s. Re-pair from the portal (**Home** card > Re-pair) and put the new line in the vault `.env`. |
 | **The reporter is not running or stuck** | `docker ps --filter name=skippytel-home-reporter`, then `docker logs --tail 50 skippytel-home-reporter`. To restart it: `docker compose stop home-reporter && docker compose rm -f home-reporter && docker compose up -d home-reporter` |

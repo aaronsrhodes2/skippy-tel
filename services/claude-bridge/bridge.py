@@ -4,6 +4,8 @@ It shells out to the Claude Code CLI on this PC (the Captain's subscription, not
 (in docker) reaches it via host.docker.internal. The old POST /solid-gold door (the "trust the awesomeness" and
 "solid gold" voice tiers) was removed on 2026-09-30 at the Captain's request: the private Skippy has full access.
 
+The Admin page's skippy-pc buttons (host_ops.py): POST /host/<op> {"arg": ...}, same token.
+
 The private Skippy (workshop_engine.py): POST /workshop, GET /workshop/run/<task>,
 GET /workshop/runs, POST /workshop/cancel/<task>. Those need `Authorization: Bearer <SKIPPY_HOME_TOKEN>`
 (the same token the home reporter holds), because they run Claude Code with
@@ -32,6 +34,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+import host_ops
 import projects as projects_mod
 import workshop_engine as workshop
 
@@ -83,6 +86,7 @@ def _registry():
 
 
 WORKSHOP  = workshop.Workshop([CLAUDE], projects=_registry())
+HOST_OPS  = host_ops.HostOps(WORKSHOP)
 TOKEN_REREAD_S = 30.0              # how long a token that is held stays unchecked
 TOKEN_RETRY_S = 5.0                # while there is none at all (not mounted yet at logon), look again sooner
 _token_cache: tuple[float, str] = (0.0, "")      # (when it was last looked at, the last NON-EMPTY token seen)
@@ -181,7 +185,23 @@ class Handler(BaseHTTPRequestHandler):
             if self._workshop_ok():
                 self._json(200, {"ok": WORKSHOP.cancel(path.rsplit("/", 1)[1])})
             return
+        if path.startswith("/host/"):
+            self._host_op(path[len("/host/"):])
+            return
         self._json(404, {"error": "not_found"})
+
+    def _host_op(self, op: str) -> None:
+        """The Admin page's skippy-pc buttons (host_ops.py): restart a service or this bridge, reset a workshop clone,
+        Funnel on/off. Same token as the workshop: these change the PC."""
+        if not self._workshop_ok():
+            return
+        body = self._read_body()
+        try:
+            result = HOST_OPS.do(op, str(body.get("arg") or ""))
+        except host_ops.Refused as exc:
+            self._json(409, {"ok": False, "summary": str(exc)})
+            return
+        self._json(200, {"ok": result.ok, "summary": result.summary, "output": result.output})
 
     # ── the private Skippy (workshop.py) ─────────────────────────────────
     def _workshop_ok(self) -> bool:

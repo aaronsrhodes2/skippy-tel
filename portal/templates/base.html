@@ -133,6 +133,9 @@
   .flash { padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; font-size: 0.9rem; }
   .flash.ok { background: var(--dim-green); border: 1px solid var(--green); }
   .flash.error { background: #330000; border: 1px solid var(--red); }
+  /* a skippy-pc button's command output (recovery_web.py): plain text, kept as it came, never wider than the screen */
+  .flash.detail { border: 1px solid var(--dim-green-hi); font-family: ui-monospace, monospace; font-size: 0.75rem;
+                  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 16rem; overflow-y: auto; }
   form.inline { display: inline; }
   label.game { display: block; margin: 6px 0; }
   label.field { display: block; margin: 10px 0 2px; font-size: 0.85rem; color: var(--ink); }

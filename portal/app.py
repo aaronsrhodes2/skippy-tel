@@ -571,7 +571,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     app.register_blueprint(admin)
     admin_panel.init_app(app, vm)          # the per-game Server admin card: admin-only refresh route + template global
-    recovery_web.init_app(app, workshop, limiter, github)   # the Admin page's recovery buttons (/admin/recovery/*)
+    recovery_web.init_app(app, workshop, limiter, github, home=home)   # the Admin page's recovery buttons (/admin/recovery/*)
     ships = ship_mod.ShipWatch(github, app.extensions["recovery"]["runs"])   # the private Skippy's ship card
     app.extensions["ships"] = ships
     # Tell the Captain on Discord when a private-Skippy run ends (notify.py: a DM to him only, one per run, switchable).

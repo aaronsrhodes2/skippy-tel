@@ -16,7 +16,7 @@ import recovery
 BACK = "#recovery"
 
 
-def init_app(app, workshop, limiter, github: recovery.GitHub, clock=None) -> None:
+def init_app(app, workshop, limiter, github: recovery.GitHub, clock=None, home=None) -> None:
     log = recovery.Log()
     runs_cache = recovery.RunsCache(github)
     app.extensions["recovery"] = {"log": log, "github": github, "runs": runs_cache}
@@ -32,7 +32,10 @@ def init_app(app, workshop, limiter, github: recovery.GitHub, clock=None) -> Non
         out = {"build": build, "configured": github.configured, "error": None, "view": None,
                "workshop": workshop.current(), "paused": workshop.paused, "ready": workshop.ready(),
                "log": [{**e, "when": recovery.ago(datetime.fromtimestamp(e["at"], timezone.utc), at)} for e in log.recent()],
-               "actions": recovery.ACTIONS, "repo": recovery.REPO, "fetched": recovery.RUNS_FETCHED}
+               "actions": recovery.ACTIONS, "repo": recovery.REPO, "fetched": recovery.RUNS_FETCHED,
+               "pc_wait": recovery.PC_WAIT_S,
+               "pc": {"online": bool(home and home.online()), "services": recovery.PC_SERVICES,
+                      "projects": workshop.projects() if home else []}}
         if github.configured:
             runs, error = runs_cache.get()
             out["error"] = error
@@ -40,10 +43,42 @@ def init_app(app, workshop, limiter, github: recovery.GitHub, clock=None) -> Non
                 out["view"] = recovery.pipeline(runs, build["commit"], at)
         return out
 
-    def done(action: str, result: str, ok: bool = True):
+    def done(action: str, result: str, ok: bool = True, detail: str = ""):
         log.add(action, auth.current_user()["email"], result, ok)
         flash(result, "ok" if ok else "error")
+        if detail:
+            flash(detail, "detail")               # the commands' own words: shown as a block under the message
         return redirect(url_for("admin.index") + BACK)
+
+    def pc(action: str):
+        """A skippy-pc button: a host_op job for the home reporter, answered by the bridge. Waits PC_WAIT_S for the
+        answer; a slow one is still carried out, the card just says it was sent."""
+        if home is None or not home.online():
+            return done(action, "skippy-pc isn't reporting, so it can't be asked. If it stays silent it needs a look in "
+                                "person (remote-recovery.md).", False)
+        if action == "pc-restart-service":
+            service = request.form.get("service", "")
+            if service not in recovery.PC_SERVICES:
+                return done(action, "Pick one of the listed services. Nothing was sent.", False)
+            op, arg = "restart-service", service
+        elif action == "pc-reset-workshop":
+            project = request.form.get("project", "")
+            if project not in {p["id"] for p in workshop.projects()}:
+                return done(action, "Pick one of the listed projects. Nothing was sent.", False)
+            op, arg = "reset-workshop", project
+        elif action == "pc-restart-bridge":
+            op, arg = "restart-bridge", ""
+        else:
+            op, arg = "funnel", action.rsplit("-", 1)[1]
+        job = home.start("host_op", owner=auth.current_user()["email"], op=op, arg=arg)
+        got = home.wait_result(job, recovery.PC_WAIT_S)
+        if got["state"] == "done":
+            r = got["result"] if isinstance(got.get("result"), dict) else {}
+            return done(action, str(r.get("summary") or "Done.")[:400], bool(r.get("ok")), str(r.get("output") or "")[:1600])
+        if got["state"] == "error":
+            return done(action, got["error"], False)
+        return done(action, f"Sent to skippy-pc; no answer within {recovery.PC_WAIT_S} s. It still runs: look again in a "
+                            "minute (Funnel status, or the Core card on the dashboard).", False)
 
     @bp.post("/<action>")
     @auth.admin_required
@@ -58,7 +93,7 @@ def init_app(app, workshop, limiter, github: recovery.GitHub, clock=None) -> Non
         if request.form.get("confirm") != "yes":
             # No confirm (no script on the page, or a hand-made POST): ask on a page of our own instead of acting.
             return render_template("recovery_confirm.html", action=action, spec=spec,
-                                   fields={k: v for k, v in request.form.items() if k in ("revision",)})
+                                   fields={k: v for k, v in request.form.items() if k in ("revision", "service", "project")})
         if spec.github and not github.configured:
             return done(action, "The deploy buttons aren't configured: the portal has no GITHUB_ACTIONS_TOKEN.", False)
         if action == "rollback" and recovery.valid_revision(request.form.get("revision")) is None:
@@ -68,6 +103,8 @@ def init_app(app, workshop, limiter, github: recovery.GitHub, clock=None) -> Non
         if not limiter.allow(f"recovery:{action}", spec.limit, spec.window_s):
             minutes = max(1, spec.window_s // 60)
             return done(action, f"{spec.label}: already done just now. Wait {minutes} min and look at the card first.", False)
+        if action.startswith("pc-"):
+            return pc(action)
         try:
             result = run(action, who)
         except recovery.GitHubError as exc:

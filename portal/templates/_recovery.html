@@ -114,6 +114,43 @@
       portal turns it back on.</p>
   </div>
 
+  {% set pc = rc.pc %}
+  <div class="card" id="pc-recovery">
+    <h3>skippy-pc</h3>
+    {% if not pc.online %}
+      <p class="warn">skippy-pc isn't reporting, so these buttons can't reach it. Its own watchdogs restart what crashes; if it
+        stays silent, it needs a look in person (power, network, Docker Desktop).</p>
+    {% else %}
+      <p class="help">Each button is a job for the home reporter, done by the bridge on the PC, and answers here within
+        {{ rc.pc_wait }} s. Nothing is rebuilt and nothing is deleted.</p>
+      <form class="inline" method="post" action="{{ url_for('recovery.act', action='pc-restart-service') }}"
+            data-ask="{{ rc.actions['pc-restart-service'].ask }}"
+            onsubmit="if (!window.confirm(this.dataset.ask)) return false; this.elements.confirm.value = 'yes';">
+        <input type="hidden" name="confirm" value="">
+        <label class="field" for="pc-service">Service</label>
+        <select id="pc-service" name="service">
+          {% for s in pc.services %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+        </select>
+        <button type="submit">{{ rc.actions['pc-restart-service'].label }}</button>
+      </form>
+      <form class="inline" method="post" action="{{ url_for('recovery.act', action='pc-reset-workshop') }}"
+            data-ask="{{ rc.actions['pc-reset-workshop'].ask }}"
+            onsubmit="if (!window.confirm(this.dataset.ask)) return false; this.elements.confirm.value = 'yes';">
+        <input type="hidden" name="confirm" value="">
+        <label class="field" for="pc-project">Private Skippy's copy of</label>
+        <select id="pc-project" name="project">
+          {% for p in pc.projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+        </select>
+        <button type="submit">{{ rc.actions['pc-reset-workshop'].label }}</button>
+      </form>
+      <p class="row" style="margin-top:8px">{{ button('pc-restart-bridge') }}</p>
+      <p class="row">{{ button('pc-funnel-status') }} {{ button('pc-funnel-on') }} {{ button('pc-funnel-off', 'danger') }}</p>
+      <p class="help">Restart service: a stuck gate, Ollama holding the GPU, a reporter that went odd. Reset Skippy's copy:
+        its clone got into a mess (stash and rescue branch keep what was there). Funnel is the internet door of Bilby's
+        Audio Service (:443) and Nagatha's Video Service (:8443).</p>
+    {% endif %}
+  </div>
+
   {% if rc.log %}
   <div class="card" id="recovery-log">
     <h3>Recent recovery actions</h3>

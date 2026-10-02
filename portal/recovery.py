@@ -72,7 +72,24 @@ ACTIONS: dict[str, Action] = {
     "workshop-pause": Action("Pause the private Skippy", "Pause the private Skippy? New messages are refused and the current run "
                              "is cancelled until you turn it back on.", 10, 60, False),
     "workshop-resume": Action("Turn the private Skippy back on", "Turn the private Skippy back on?", 10, 60, False),
+    # skippy-pc itself: a job for the home reporter, carried out by the bridge (services/claude-bridge/host_ops.py).
+    "pc-restart-service": Action("Restart service", "Restart that service on skippy-pc? It's down for a few seconds "
+                                 "(Ollama and the music studio: up to a minute).", 6, 300, False),
+    "pc-restart-bridge": Action("Restart the bridge", "Restart the private Skippy's bridge on skippy-pc? Its supervisor "
+                                "starts it again within seconds. Refused while a run is going.", 2, 300, False),
+    "pc-reset-workshop": Action("Reset Skippy's copy", "Put the private Skippy's own copy of that project back to what's on "
+                                "GitHub? Uncommitted work goes into a git stash and unpushed commits onto a rescue branch: "
+                                "nothing is deleted.", 3, 300, False),
+    "pc-funnel-on": Action("Funnel on", "Open the audio and video services to the internet again (Tailscale Funnel)?",
+                           4, 300, False),
+    "pc-funnel-off": Action("Funnel off", "Take the audio and video services off the internet (Tailscale Funnel off)? "
+                            "They stop playing anywhere but at home until it's back on.", 4, 300, False),
+    "pc-funnel-status": Action("Funnel status", "Ask skippy-pc what Tailscale Funnel is serving?", 10, 60, False),
 }
+
+# The services a "Restart service" button may name; the bridge holds the same list and checks again.
+PC_SERVICES = ("flask-api", "ollama", "whisper", "music-studio", "music-gate", "video-gate", "home-reporter", "mentat-home")
+PC_WAIT_S = 45                   # how long the button waits for skippy-pc's answer before saying "sent"
 
 
 class GitHubError(Exception):
