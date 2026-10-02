@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Orion Trail — Browser Games{% endblock %}
+{% block app %}play{% endblock %}
+{% block public_up %}{{ url_for('play_index') }}{% endblock %}
+{% block public_up_label %}Browser Games{% endblock %}
+{% block mainclass %}wide{% endblock %}
+{% block head %}
+<style>
+  /* The game is one self-contained page (static/orion-trail/, vendored unmodified): framed under the app bar so its
+     full-screen CSS and keyboard controls stay its own. It wants a 1024 px wide window and a keyboard. */
+  .orion { display: block; width: 100%; height: calc(100vh - 150px); min-height: 560px; border: 1px solid var(--line);
+           border-radius: 8px; background: #000; }
+  .orion-note { margin: 6px 0 0; }
+</style>
+{% endblock %}
+{% block content %}
+<section>
+  <iframe class="orion" id="orion" src="{{ url_for('static', filename='orion-trail/orion-trail.html') }}"
+          title="Orion Trail" allow="fullscreen"></iframe>
+  <p class="help orion-note">Keyboard game: click it once, then <b>N</b> for a new voyage, <b>Space</b> to travel a day.
+    Needs a window at least 1024 px wide. Your voyage saves in this browser.
+    <a href="https://github.com/aaronsrhodes2/orion-trail" target="_blank" rel="noopener">Source</a></p>
+</section>
+<script>
+  // Keys go to the game straight away, without a first click.
+  (function (f) { f.addEventListener("load", () => { try { f.contentWindow.focus(); } catch (e) {} }); })(document.getElementById("orion"));
+</script>
+{% endblock %}

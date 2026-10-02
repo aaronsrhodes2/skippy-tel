@@ -998,6 +998,12 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                  if g.slug == "star-control-zero" and starcontrol.bundled() else g for g in play.GAMES]
         return render_template("play.html", games=games)
 
+    @app.get("/play/orion-trail")
+    def orion_trail():
+        """Orion Trail: one self-contained page (static/orion-trail/, vendored), framed under the app bar. Public, like
+        the other Browser Games pages."""
+        return render_template("orion_trail.html")
+
     # ── experiments: public showcase (no sign-in) ──────────────────────────────
     lab = Blueprint("experiments", __name__, url_prefix="/experiments")
 

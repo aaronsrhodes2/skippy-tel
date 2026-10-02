@@ -1,0 +1,1526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ORION TRAIL</title>
+<style>
+:root {
+  --bg: #050805;
+  --panel: #0a120a;
+  --green: #33ff66;
+  --green-dim: #1d8f3d;
+  --amber: #ffb000;
+  --red: #ff3333;
+  --cyan: #4cc9f0;
+  --grey: #557755;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; background: var(--bg); overflow: hidden; }
+body {
+  font-family: "IBM Plex Mono", "Menlo", "Courier New", monospace;
+  color: var(--green);
+  font-size: 14px;
+  line-height: 1.45;
+  text-shadow: 0 0 4px rgba(51,255,102,0.35);
+}
+/* CRT overlay */
+body::after {
+  content: "";
+  position: fixed; inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(0,0,0,0.16) 0px, rgba(0,0,0,0.16) 1px, transparent 1px, transparent 3px);
+  z-index: 9999;
+}
+body::before {
+  content: "";
+  position: fixed; inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%);
+  z-index: 9998;
+}
+.screen { display: none; height: 100vh; padding: 18px; flex-direction: column; overflow: hidden; }
+.screen.active { display: flex; }
+h1, h2 { font-weight: normal; letter-spacing: 2px; }
+pre { font-family: inherit; }
+.dim { color: var(--green-dim); }
+.amber { color: var(--amber); text-shadow: 0 0 4px rgba(255,176,0,0.4); }
+.red { color: var(--red); text-shadow: 0 0 4px rgba(255,51,51,0.4); }
+.cyan { color: var(--cyan); text-shadow: 0 0 4px rgba(76,201,240,0.4); }
+.panel {
+  border: 1px solid var(--green-dim);
+  background: var(--panel);
+  padding: 10px 12px;
+  position: relative;
+}
+.panel .ptitle {
+  position: absolute; top: -9px; left: 10px;
+  background: var(--bg); padding: 0 6px;
+  font-size: 11px; letter-spacing: 2px; color: var(--green-dim);
+}
+button, .btn {
+  font-family: inherit; font-size: 13px;
+  background: transparent; color: var(--green);
+  border: 1px solid var(--green-dim);
+  padding: 4px 10px; cursor: pointer;
+  text-shadow: inherit; letter-spacing: 1px;
+}
+button:hover, .btn:hover { background: rgba(51,255,102,0.12); }
+button:disabled { color: var(--grey); border-color: #2a3a2a; cursor: not-allowed; }
+input[type=text] {
+  font-family: inherit; font-size: 14px;
+  background: #071007; color: var(--green);
+  border: 1px solid var(--green-dim); padding: 3px 8px;
+  text-shadow: inherit; outline: none; width: 100%;
+}
+input[type=text]:focus { border-color: var(--green); }
+.blink { animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ---- TITLE ---- */
+#screen-title { align-items: center; justify-content: center; text-align: center; }
+#title-logo {
+  color: var(--green);
+  font-weight: 700;
+  font-size: clamp(26px, 6vw, 62px);
+  letter-spacing: clamp(2px, 1vw, 10px);
+  line-height: 1.2;
+  text-transform: uppercase;
+  text-shadow: 0 0 8px rgba(51,255,102,0.6), 0 0 22px rgba(51,255,102,0.35), 3px 3px 0 rgba(51,255,102,0.15);
+  white-space: nowrap;
+  max-width: 94vw;
+}
+#title-rule { color: var(--green-dim); letter-spacing: 4px; margin-top: 6px; font-size: 12px; overflow: hidden; white-space: nowrap; }
+#title-menu { margin-top: 30px; display: flex; flex-direction: column; gap: 10px; width: 320px; }
+#title-menu button { padding: 8px; font-size: 15px; }
+.tagline { margin-top: 18px; color: var(--green-dim); font-style: italic; }
+
+/* ---- SETUP ---- */
+#screen-setup { gap: 12px; overflow-y: auto; }
+.setup-grid { display: grid; grid-template-columns: 1fr 1.2fr; gap: 14px; flex: 1; min-height: 0; }
+.crew-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+.diff-row { display: flex; gap: 8px; margin-top: 8px; }
+.diff-row button.sel { background: rgba(51,255,102,0.18); border-color: var(--green); }
+.store-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.store-table td { padding: 3px 6px; }
+.store-table .qty { text-align: right; min-width: 52px; }
+.stepper { display: inline-flex; gap: 4px; }
+.stepper button { padding: 0 8px; }
+#store-points { font-size: 16px; }
+#quartermaster { min-height: 42px; color: var(--amber); font-style: italic; }
+
+/* ---- TRAVEL ---- */
+#screen-travel { gap: 10px; }
+#travel-header { display: flex; justify-content: space-between; align-items: baseline; }
+#travel-main { display: grid; grid-template-columns: 300px 1fr 330px; gap: 10px; flex: 1; min-height: 0; }
+.res-row { display: grid; grid-template-columns: 62px 1fr 58px; gap: 6px; align-items: center; margin: 4px 0; font-size: 13px; }
+.bar { height: 11px; border: 1px solid var(--green-dim); position: relative; background: #061006; }
+.bar > div { height: 100%; background: var(--green); box-shadow: 0 0 5px rgba(51,255,102,0.5); transition: width 0.3s; }
+.bar.warn > div { background: var(--amber); box-shadow: 0 0 5px rgba(255,176,0,0.5); }
+.bar.crit > div { background: var(--red); box-shadow: 0 0 5px rgba(255,51,51,0.5); }
+.sys-row { display: grid; grid-template-columns: 110px 1fr 82px; gap: 6px; margin: 4px 0; font-size: 13px; align-items: center; }
+.sys-blocks { letter-spacing: 1px; }
+#map-panel { display: flex; flex-direction: column; }
+#starfield { flex: 1; position: relative; overflow: hidden; min-height: 90px; }
+.star { position: absolute; color: #1d5f2d; font-size: 9px; animation: drift linear infinite; }
+@keyframes drift { from { transform: translateX(0); } to { transform: translateX(-60px); } }
+#routemap { font-size: 12px; white-space: pre; overflow-x: hidden; line-height: 1.3; padding-top: 6px; }
+#leg-info { padding-top: 4px; font-size: 13px; }
+#log-panel { height: 148px; overflow: hidden; }
+#log-lines { font-size: 12.5px; overflow: hidden; height: 118px; display:flex; flex-direction: column; justify-content: flex-end; }
+#action-bar { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; padding: 6px 2px; }
+#action-bar span { cursor: pointer; }
+#action-bar span:hover { color: #88ffaa; }
+#action-bar b { color: var(--amber); font-weight: normal; }
+
+/* ---- MODAL ---- */
+#modal-wrap {
+  display: none; position: fixed; inset: 0; z-index: 100;
+  background: rgba(3,6,3,0.82); align-items: center; justify-content: center;
+}
+#modal-wrap.active { display: flex; }
+#modal {
+  width: min(760px, 92vw); max-height: 86vh; overflow-y: auto;
+  border: 1px solid var(--green); background: var(--panel);
+  padding: 20px 24px; box-shadow: 0 0 24px rgba(51,255,102,0.18);
+}
+#modal h2 { color: var(--amber); margin-bottom: 10px; font-size: 17px; }
+#modal-art {
+  display: none; justify-content: center; margin-bottom: 12px;
+  color: var(--green-dim); font-size: 13px; line-height: 1.15;
+  white-space: pre; overflow-x: auto;
+}
+#modal-art.active { display: flex; }
+#modal-text { min-height: 60px; margin-bottom: 14px; white-space: pre-wrap; }
+.choice {
+  border: 1px solid var(--green-dim); padding: 7px 10px; margin: 6px 0; cursor: pointer;
+}
+.choice:hover { background: rgba(51,255,102,0.10); }
+.choice.disabled { color: var(--grey); border-color: #223322; cursor: not-allowed; }
+.choice.disabled:hover { background: transparent; }
+.choice .cnum { color: var(--amber); }
+.choice .detail { color: var(--green-dim); font-size: 12.5px; }
+.choice.disabled .detail, .choice.disabled .cnum { color: var(--grey); }
+.delta-list { margin: 10px 0; font-size: 13.5px; }
+#modal .contbar { margin-top: 14px; color: var(--amber); }
+
+/* ---- STATUS / DEATH / VICTORY ---- */
+#screen-status { overflow-y: auto; gap: 12px; }
+#screen-death, #screen-victory { align-items: center; justify-content: center; text-align: center; overflow-y: auto; }
+#death-art, #victory-art { font-size: 12px; line-height: 1.15; }
+.endstats { margin-top: 14px; font-size: 13.5px; }
+.small-note { position: fixed; bottom: 6px; right: 12px; font-size: 11px; color: #1d5f2d; z-index: 5; }
+@media (max-width: 1023px) {
+  #too-small { display: flex !important; }
+}
+#too-small {
+  display: none; position: fixed; inset: 0; z-index: 10000; background: var(--bg);
+  align-items: center; justify-content: center; text-align: center; padding: 30px;
+}
+</style>
+</head>
+<body>
+
+<div id="too-small"><div>
+<pre class="amber">TERMINAL TOO SMALL</pre>
+<p class="dim" style="margin-top:12px">The ISV requires a viewport of at least 1024 pixels.<br>
+Mission Control did not budget for phones. Mission Control did not budget for much.</p>
+</div></div>
+
+<!-- ============ TITLE ============ -->
+<div class="screen active" id="screen-title">
+<div id="title-logo">Orion Trail</div>
+<div id="title-rule">// . . . . . . . . . . . . . . . . . . . . . . . . //</div>
+<p class="tagline">Earth is dead. Space wants you dead too. Good luck.</p>
+<div id="title-menu">
+  <button onclick="UI.gotoSetup()">[N] NEW VOYAGE</button>
+  <button id="btn-continue" onclick="UI.continueGame()" style="display:none">[C] CONTINUE VOYAGE</button>
+  <button onclick="UI.showHelp()">[H] HOW TO PLAY</button>
+</div>
+<p class="dim" style="margin-top:26px">v1 — pre-flight software. Report bugs to a dead planet.</p>
+</div>
+
+<!-- ============ SETUP ============ -->
+<div class="screen" id="screen-setup">
+<h2 class="amber">═══ OUTFITTING DEPOT — LOW EARTH ORBIT ═══</h2>
+<div class="setup-grid">
+  <div class="panel"><span class="ptitle">SHIP &amp; CREW</span>
+    <label class="dim">VESSEL NAME</label>
+    <input type="text" id="in-ship" value="ISV Persistence" maxlength="28">
+    <label class="dim" style="display:block;margin-top:10px">CREW MANIFEST (they will be remembered)</label>
+    <div class="crew-inputs" id="crew-inputs"></div>
+    <label class="dim" style="display:block;margin-top:12px">DIFFICULTY</label>
+    <div class="diff-row" id="diff-row">
+      <button data-d="passenger">PASSENGER</button>
+      <button data-d="officer" class="sel">OFFICER</button>
+      <button data-d="captain">CAPTAIN</button>
+    </div>
+    <p class="dim" id="diff-desc" style="margin-top:8px;font-size:12.5px"></p>
+  </div>
+  <div class="panel"><span class="ptitle">SUPPLIES</span>
+    <p>REQUISITION POINTS: <span id="store-points" class="amber"></span></p>
+    <table class="store-table" id="store-table"></table>
+    <p id="quartermaster" style="margin-top:10px"></p>
+    <button style="margin-top:8px;padding:8px 22px;font-size:15px" onclick="UI.launch()">[SPACE] LAUNCH ▮</button>
+  </div>
+</div>
+</div>
+
+<!-- ============ TRAVEL ============ -->
+<div class="screen" id="screen-travel">
+<div id="travel-header">
+  <span><span id="hdr-ship" class="cyan"></span> <span class="dim">│</span> DAY <span id="hdr-day" class="amber"></span></span>
+  <span class="dim" id="hdr-mode"></span>
+</div>
+<div id="travel-main">
+  <div class="panel"><span class="ptitle">RESOURCES</span><div id="res-panel"></div></div>
+  <div class="panel" id="map-panel"><span class="ptitle">ROUTE</span>
+    <div id="starfield"></div>
+    <div id="routemap"></div>
+    <div id="leg-info"></div>
+  </div>
+  <div class="panel"><span class="ptitle">SHIP SYSTEMS</span><div id="sys-panel"></div></div>
+</div>
+<div class="panel" id="log-panel"><span class="ptitle">CAPTAIN'S LOG</span><div id="log-lines"></div></div>
+<div id="action-bar">
+  <span onclick="UI.engage()"><b>[SPACE]</b> ENGAGE</span>
+  <span onclick="UI.repairMenu()"><b>[R]</b> REPAIR</span>
+  <span onclick="UI.treat()"><b>[T]</b> TREAT CREW</span>
+  <span onclick="UI.eva()"><b>[E]</b> EVA PATCH</span>
+  <span onclick="UI.rest()"><b>[Z]</b> REST</span>
+  <span onclick="UI.cyclePace()"><b>[P]</b> PACE: <span id="ab-pace"></span></span>
+  <span onclick="UI.cycleRations()"><b>[F]</b> RATIONS: <span id="ab-rations"></span></span>
+  <span onclick="UI.showStatus()"><b>[S]</b> STATUS</span>
+</div>
+</div>
+
+<!-- ============ STATUS ============ -->
+<div class="screen" id="screen-status">
+<h2 class="amber">═══ SHIP STATUS ═══ <span class="dim" style="font-size:13px">[ESC] return</span></h2>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+  <div class="panel"><span class="ptitle">CREW ROSTER</span><div id="status-roster"></div></div>
+  <div class="panel"><span class="ptitle">GRAVEYARD</span><div id="status-graveyard"></div></div>
+</div>
+<div class="panel" style="flex:1;overflow-y:auto"><span class="ptitle">FULL LOG</span><div id="status-log" style="font-size:12.5px"></div></div>
+</div>
+
+<!-- ============ DEATH ============ -->
+<div class="screen" id="screen-death">
+<pre id="death-art" class="dim"></pre>
+<h2 class="red" id="death-title"></h2>
+<p id="death-epitaph" class="amber" style="margin-top:10px;font-style:italic"></p>
+<div class="endstats" id="death-stats"></div>
+<p style="margin-top:18px"><button onclick="UI.newVoyage()">[N] NEW VOYAGE</button></p>
+</div>
+
+<!-- ============ VICTORY ============ -->
+<div class="screen" id="screen-victory">
+<pre id="victory-art" class="cyan">
+              .::::::::::.
+          .:::'  ~~~~~~  ':::.
+        .::'   ~ ﹏﹏﹏ ~    '::.
+       .::   ﹏ NEW  HOME ﹏   ::.
+       ::.    ~~ ﹏﹏﹏ ~~     .::
+        '::.      ~~~~      .::'
+          ':::..        ..:::'
+              '::::::::::'
+</pre>
+<h2 class="amber" id="victory-title"></h2>
+<p id="victory-text" style="margin-top:10px;max-width:640px"></p>
+<div class="endstats" id="victory-stats"></div>
+<p style="margin-top:18px"><button onclick="UI.newVoyage()">[N] NEW VOYAGE</button></p>
+</div>
+
+<!-- ============ MODAL ============ -->
+<div id="modal-wrap"><div id="modal">
+  <h2 id="modal-title"></h2>
+  <pre id="modal-art"></pre>
+  <div id="modal-text"></div>
+  <div id="modal-choices"></div>
+  <div id="modal-deltas" class="delta-list"></div>
+  <div id="modal-cont" class="contbar" style="display:none">[SPACE] CONTINUE <span class="blink">▮</span></div>
+</div></div>
+
+<p class="small-note">ORION TRAIL // TERMINAL 7-G // PROPERTY OF NOBODY NOW</p>
+
+<script>window.SCENARIOS = [];</script>
+<script src="scenarios/mechanical.js"></script>
+<script src="scenarios/crew-drama.js"></script>
+<script src="scenarios/derelicts.js"></script>
+<script src="scenarios/cosmic-hazards.js"></script>
+<script src="scenarios/pirates.js"></script>
+<script src="scenarios/medical.js"></script>
+<script src="scenarios/traders.js"></script>
+<script src="scenarios/anomalies.js"></script>
+<script src="scenarios/waypoints.js"></script>
+<script src="scenarios/deep-space.js"></script>
+<script src="scenarios/caches.js"></script>
+<script src="scenarios/wildcards.js"></script>
+
+<script>
+/* ================= ENGINE (UI-agnostic; all DOM lives in the UI block below) ================= */
+
+const RES_KEYS = ['oxygen','water','food','power','fuel','parts','meds','crew'];
+const SYS_KEYS = ['morale','engines','generator','lifeSupport','sensors','hull','astrogation','weapons'];
+const SYS_LABEL = { morale:'CREW MORALE', engines:'ENGINES', generator:'PWR GENERATOR', lifeSupport:'LIFE SUPPORT',
+                    sensors:'SENSORS', hull:'HULL INTEGRITY', astrogation:'ASTROGATION', weapons:'WEAPONS' };
+const RES_LABEL = { oxygen:'OXYGEN', water:'WATER', food:'FOOD', power:'POWER', fuel:'FUEL', parts:'PARTS', meds:'MEDS', crew:'CREW' };
+const CAPS  = { oxygen:150, water:150, food:150, power:100, fuel:120, parts:30, meds:20, crew:8 };
+const START = { oxygen:70, water:70, food:70, power:80, fuel:70, parts:8, meds:6, crew:6 };
+
+const DIFFICULTY = {
+  passenger: { label:'PASSENGER', desc:'You are cargo with opinions. Generous supplies, gentle void.',
+               storePoints:160, eventChanceMult:0.8, badOutcomeShift:-0.10, burnMult:0.85, scoreBonus:0 },
+  officer:   { label:'OFFICER', desc:'The intended experience. The void is fair. The void is not kind.',
+               storePoints:130, eventChanceMult:1.0, badOutcomeShift:0.00, burnMult:1.0, scoreBonus:500 },
+  captain:   { label:'CAPTAIN', desc:'Skeleton budget, angry universe. For people who miss dying of dysentery.',
+               storePoints:100, eventChanceMult:1.2, badOutcomeShift:0.10, burnMult:1.15, scoreBonus:1200 }
+};
+const PACES = {
+  cautious:  { speed:0.7, fuel:0.5,  event:0.85, label:'CAUTIOUS' },
+  standard:  { speed:1.0, fuel:0.75, event:1.0,  label:'STANDARD' },
+  overdrive: { speed:1.4, fuel:1.2,  event:1.15, label:'OVERDRIVE' }
+};
+const RATIONS = {
+  meager:   { food:0.22, morale:-0.5, label:'MEAGER' },
+  normal:   { food:0.33, morale:0.0,  label:'NORMAL' },
+  generous: { food:0.46, morale:0.4,  label:'GENEROUS' }
+};
+const ZONE_EVENT = { inner:0.25, belt:0.35, outer:0.32, deep:0.42 };
+
+const ROUTE = [
+  { id:'earth',   name:'EARTH ORBIT' },
+  { id:'luna',    name:'LUNA STAGING YARDS',   dist:6,  zone:'inner' },
+  { id:'mars',    name:'MARS — ARCADIA RUINS', dist:9,  zone:'inner' },
+  { id:'ceres',   name:'CERES FREEPORT',       dist:11, zone:'belt'  },
+  { id:'europa',  name:'EUROPA STATION',       dist:12, zone:'outer' },
+  { id:'titan',   name:'TITAN REFINERY',       dist:12, zone:'outer' },
+  { id:'kuiper',  name:'KUIPER OUTPOST',       dist:15, zone:'outer' },
+  { id:'relay',   name:'DEEP RELAY',           dist:18, zone:'deep'  },
+  { id:'gliese',  name:'GLIESE 581g',          dist:22, zone:'deep', candidate:true, habitability:0.25 },
+  { id:'tauceti', name:'TAU CETI e',           dist:24, zone:'deep', candidate:true, habitability:0.45 },
+  { id:'kepler',  name:'KEPLER-452b',          dist:28, zone:'deep', candidate:true, habitability:1.0 }
+];
+
+const DEFAULT_CREW = ['Cmdr. Okafor','Dr. Reyes','Lt. Vasquez','Eng. Chen','Spc. Adeyemi','Nav. Petrov'];
+const SAVE_KEY = 'orionTrail.save';
+const SAVE_VERSION = 1;
+
+let S = null;            // current game state
+let RNG = Math.random;   // swappable for tests
+
+function tier(v) { return v >= 70 ? 'NOMINAL' : v >= 30 ? 'DAMAGED' : v >= 1 ? 'CRITICAL' : 'OFFLINE'; }
+function tierIdx(v) { return v >= 70 ? 0 : v >= 30 ? 1 : v >= 1 ? 2 : 3; }
+const MULT = {
+  engineSpeed:   [1, 0.75, 0.5, 0],
+  genRegen:      [1, 0.6, 0.2, 0],
+  lifeBurn:      [1, 1.4, 2.0, 3.0],
+  sensorBadShift:[0, 0.10, 0.20, 0.20],
+  hullBreach:    [0, 0.10, 0.25, 1],
+  astroDrift:    [0, 0.10, 0.25, 0.40],
+  moraleRepair:  [1, 0.7, 0.4, 0.25]
+};
+function sysMult(table, key) { return MULT[table][tierIdx(S.systems[key])]; }
+
+function newGame(opts) {
+  const diff = DIFFICULTY[opts.difficulty] || DIFFICULTY.officer;
+  S = {
+    version: SAVE_VERSION,
+    shipName: opts.shipName || 'ISV Persistence',
+    difficulty: opts.difficulty || 'officer',
+    day: 0, legIndex: 0, legProgress: 0,
+    pace: 'standard', rations: 'normal',
+    resources: Object.assign({}, START, opts.store || {}),
+    systems: { morale:100, engines:100, generator:100, lifeSupport:100, sensors:100, hull:100, astrogation:100, weapons:100 },
+    roster: (opts.roster || DEFAULT_CREW).slice(0, 6),
+    graveyard: [],
+    usedScenarios: [],
+    flags: {},
+    pendingWarning: null,
+    starvingDays: 0, dehydratedDays: 0,
+    log: [],
+    gameOver: null,   // { type:'death'|'victory', cause, marginal }
+    settledEarly: null
+  };
+  S.resources.crew = S.roster.length;
+  log(`The ${S.shipName} clears Earth orbit. Behind you: everything. Ahead: statistically, nothing.`, 'info');
+  return S;
+}
+
+function log(text, kind) {
+  S.log.push({ day: S.day, text, kind: kind || 'info' });
+  if (S.log.length > 400) S.log.shift();
+}
+
+function clampRes(k) {
+  S.resources[k] = Math.max(0, Math.min(CAPS[k], S.resources[k]));
+}
+function addRes(k, v) { S.resources[k] += v; clampRes(k); }
+function addSys(k, v) { S.systems[k] = Math.max(0, Math.min(100, S.systems[k] + v)); }
+
+function killCrew(cause, name) {
+  if (S.resources.crew <= 0) return null;
+  let idx = name ? S.roster.indexOf(name) : Math.floor(RNG() * S.roster.length);
+  if (idx < 0) idx = 0;
+  const dead = S.roster.splice(idx, 1)[0] || 'An unnamed soul';
+  S.resources.crew = S.roster.length;
+  S.graveyard.push({ name: dead, day: S.day, cause });
+  addSys('morale', -12);
+  log(`${dead} — lost to ${cause}. Day ${S.day}.`, 'bad');
+  return dead;
+}
+
+/* ---- resource burn for one day; travel=false for rest/repair days ---- */
+function burnDay(travel, restMult) {
+  const diff = DIFFICULTY[S.difficulty];
+  const mult = (restMult || 1) * diff.burnMult;
+  const crew = S.resources.crew;
+  const ls = sysMult('lifeBurn', 'lifeSupport');
+  addRes('oxygen', -crew * 0.10 * ls * mult);
+  addRes('water',  -crew * 0.15 * ls * mult);
+  addRes('food',   -crew * RATIONS[S.rations].food * mult);
+  // power: drain then regen
+  const drain = 2.0 + (travel && S.pace === 'overdrive' ? 0.5 : 0);
+  addRes('power', -drain * mult);
+  addRes('power', 2.4 * sysMult('genRegen', 'generator'));
+  if (travel) addRes('fuel', -PACES[S.pace].fuel * diff.burnMult);
+  // morale drift
+  let md = -0.2 + RATIONS[S.rations].morale;
+  if (currentZone() === 'deep') md -= 0.4;
+  if (tierIdx(S.systems.lifeSupport) >= 1) md -= 1.0;
+  addSys('morale', md);
+  if (S.pace === 'overdrive' && travel) addSys('engines', -0.8);
+}
+
+function currentLeg() { return ROUTE[S.legIndex + 1] || null; }
+function currentZone() { const l = currentLeg(); return l ? l.zone : 'deep'; }
+
+function sideEffects() {
+  const out = [];
+  // power-zero cascade
+  if (S.resources.power <= 0) {
+    addSys('lifeSupport', -5); addSys('sensors', -5);
+    out.push({ text: 'POWER RESERVES EMPTY. Life support and sensors are eating themselves.', kind: 'bad' });
+  }
+  // hull breach rolls
+  const breach = sysMult('hullBreach', 'hull');
+  if (S.systems.hull <= 0) return out; // handled by death check
+  if (breach > 0 && breach < 1 && RNG() < breach) {
+    const k = ['oxygen','water','food','parts'][Math.floor(RNG() * 4)];
+    const amt = 3 + Math.floor(RNG() * 6);
+    addRes(k, -amt);
+    out.push({ text: `Micro-breach along frame 12. ${amt} ${RES_LABEL[k]} vents into the void, which says thank you.`, kind: 'bad' });
+  }
+  // astrogation drift
+  const drift = sysMult('astroDrift', 'astrogation');
+  if (drift > 0 && RNG() < drift) {
+    addRes('fuel', -3); S.day += 1; burnDay(false);
+    out.push({ text: 'Astrogation hiccup. You spend a day and 3 fuel discovering where you already were.', kind: 'warn' });
+  }
+  // critical morale spiral
+  if (tierIdx(S.systems.morale) >= 2 && RNG() < 0.05 && S.resources.crew > 1) {
+    killCrew('despair (they opened the wrong airlock on purpose)');
+    out.push({ text: 'The pressure of the void is nothing next to the pressure inside a skull.', kind: 'bad' });
+  }
+  return out;
+}
+
+function checkDeath() {
+  const r = S.resources;
+  if (r.crew <= 0) return endGame('crew');
+  if (S.systems.hull <= 0) return endGame('decompression');
+  if (r.oxygen <= 0) {
+    killCrew('asphyxiation');
+    r.oxygen = 0;
+    if (S.resources.crew <= 0) return endGame('asphyxiation');
+    log('Not enough air to go around. The crew draws straws. Someone loses.', 'bad');
+  }
+  if (r.food <= 0) {
+    S.starvingDays++;
+    addSys('morale', -5);
+    if (S.starvingDays >= 3 && S.starvingDays % 2 === 1) {
+      killCrew('starvation');
+      if (S.resources.crew <= 0) return endGame('starvation');
+    }
+  } else S.starvingDays = 0;
+  if (r.water <= 0) {
+    S.dehydratedDays++;
+    addSys('morale', -5);
+    if (S.dehydratedDays >= 3 && S.dehydratedDays % 2 === 1) {
+      killCrew('dysentery. In space. Somehow.');
+      if (S.resources.crew <= 0) return endGame('dysentery');
+    }
+  } else S.dehydratedDays = 0;
+  return null;
+}
+
+function endGame(cause) {
+  S.gameOver = { type: 'death', cause };
+  return S.gameOver;
+}
+
+/* ---- scenario eligibility & selection ---- */
+function scenarioById(id) { return SCENARIOS.find(s => s.id === id); }
+
+function reqsMet(req) {
+  if (!req) return true;
+  if (req.systemDamaged && !req.systemDamaged.every(k => S.systems[k] < 70)) return false;
+  if (req.systemOk && !req.systemOk.every(k => S.systems[k] >= 70)) return false;
+  if (req.resourceBelow && !Object.entries(req.resourceBelow).every(([k, v]) => S.resources[k] < v)) return false;
+  if (req.resourceAbove && !Object.entries(req.resourceAbove).every(([k, v]) => S.resources[k] > v)) return false;
+  if (req.minLeg != null && S.legIndex < req.minLeg) return false;
+  if (req.maxLeg != null && S.legIndex > req.maxLeg) return false;
+  if (req.requiresFlag && !S.flags[req.requiresFlag]) return false;
+  if (req.forbidsFlag && S.flags[req.forbidsFlag]) return false;
+  return true;
+}
+
+function eligibleScenarios(zone) {
+  return SCENARIOS.filter(sc => {
+    if (sc.waypoint) return false;
+    if (sc.zones && !sc.zones.includes(zone)) return false;
+    if ((sc.once !== false) && S.usedScenarios.includes(sc.id)) return false;
+    if (!reqsMet(sc.requires)) return false;
+    return true;
+  });
+}
+
+function pickWeighted(pool) {
+  if (!pool.length) return null;
+  const moraleT = tierIdx(S.systems.morale);
+  const weightOf = sc => {
+    let w = sc.weight != null ? sc.weight : 1;
+    if (sc.category === 'crew-drama' && moraleT >= 1) w *= (moraleT >= 2 ? 4 : 2);
+    return w;
+  };
+  const total = pool.reduce((a, sc) => a + weightOf(sc), 0);
+  let roll = RNG() * total;
+  for (const sc of pool) { roll -= weightOf(sc); if (roll <= 0) return sc; }
+  return pool[pool.length - 1];
+}
+
+function rollEvent() {
+  // guaranteed pending sensor-warned event
+  if (S.pendingWarning) {
+    const sc = scenarioById(S.pendingWarning);
+    S.pendingWarning = null;
+    if (sc) return { scenario: sc };
+  }
+  const adrift = S.resources.fuel <= 0;
+  const zone = adrift ? 'adrift' : currentZone();
+  let chance = adrift ? 0.65 : ZONE_EVENT[zone] * DIFFICULTY[S.difficulty].eventChanceMult * PACES[S.pace].event;
+  if (RNG() >= chance) return {};
+  const pool = eligibleScenarios(zone);
+  const sc = pickWeighted(pool);
+  if (!sc) return {};
+  if (sc.sensorWarning && tierIdx(S.systems.sensors) === 0) {
+    S.pendingWarning = sc.id;
+    log(`SENSORS: ${sc.sensorWarning}`, 'warn');
+    return { warning: sc.sensorWarning };
+  }
+  return { scenario: sc };
+}
+
+/* ---- the day tick. Returns {scenario|survey|arrived|dead} ---- */
+function tick() {
+  if (S.gameOver) return { dead: S.gameOver };
+  S.day++;
+  // travel
+  const adrift = S.resources.fuel <= 0;
+  const speed = adrift ? 0 : PACES[S.pace].speed * sysMult('engineSpeed', 'engines');
+  S.legProgress += speed;
+  if (adrift && S.day % 3 === 1) log('Adrift. The engines are a very expensive sculpture without fuel.', 'warn');
+  else if (speed === 0 && !adrift) log('Engines offline. You are technically a habitat now.', 'warn');
+  burnDay(true);
+  const fx = sideEffects();
+  fx.forEach(f => log(f.text, f.kind));
+  const dead = checkDeath();
+  if (dead) return { dead };
+  // arrival?
+  const leg = currentLeg();
+  if (leg && S.legProgress >= leg.dist) {
+    S.legIndex++; S.legProgress = 0;
+    return arriveAt(ROUTE[S.legIndex]);
+  }
+  // event roll
+  const ev = rollEvent();
+  if (ev.scenario) return { scenario: ev.scenario };
+  return {};
+}
+
+function arriveAt(node) {
+  log(`Arrived: ${node.name}. Day ${S.day}.`, 'good');
+  if (node.candidate) return { survey: surveyPlanet(node) };
+  // dock resupply — the locals spare what they can
+  const bonus = node.id === 'titan' ? { fuel: 35, water: 5, food: 5 } : { oxygen: 6, water: 6, food: 6, power: 12, fuel: 10 };
+  Object.entries(bonus).forEach(([k, v]) => addRes(k, v));
+  log(node.id === 'titan'
+    ? 'The refinery tops off your fuel for a price you pretend not to remember agreeing to.'
+    : 'You top off what the locals will spare. It is less than you hoped. It always is.', 'info');
+  const setpiece = SCENARIOS.find(sc => sc.waypoint === node.id && !S.usedScenarios.includes(sc.id) && reqsMet(sc.requires));
+  if (setpiece) return { arrived: node, scenario: setpiece };
+  return { arrived: node };
+}
+
+/* ---- candidate planet survey ---- */
+function surveyPlanet(node) {
+  let p = node.habitability;
+  if (p < 1) {
+    if (tierIdx(S.systems.sensors) === 0) p += 0.10;
+    else if (tierIdx(S.systems.sensors) >= 2) p -= 0.10;
+    if (tierIdx(S.systems.astrogation) === 0) p += 0.10;
+    p = Math.max(0.05, Math.min(0.95, p));
+  }
+  const habitable = RNG() < p;
+  const sensorsBlind = tierIdx(S.systems.sensors) >= 2;
+  return { node, chance: p, habitable, sensorsBlind, isLast: node.id === 'kepler' };
+}
+
+function resolveSurvey(survey, settle) {
+  if (survey.habitable || (settle && survey.isLast)) {
+    S.gameOver = { type: 'victory', node: survey.node, marginal: false };
+    return S.gameOver;
+  }
+  if (settle) {
+    S.gameOver = { type: 'victory', node: survey.node, marginal: true };
+    S.settledEarly = survey.node.id;
+    return S.gameOver;
+  }
+  log(`${survey.node.name} is a corpse of a world. You burn for the next candidate.`, 'warn');
+  return null;
+}
+
+/* ---- choice resolution ---- */
+function choiceAvailable(choice) {
+  const r = choice.requires;
+  if (!r) return { ok: true };
+  if (r.systemOk) for (const k of r.systemOk) if (S.systems[k] < 70) return { ok: false, why: `requires functional ${SYS_LABEL[k]}` };
+  if (r.resources) for (const [k, v] of Object.entries(r.resources)) if (S.resources[k] < v) return { ok: false, why: `requires ${v} ${RES_LABEL[k]}` };
+  if (r.minCrew && S.resources.crew < r.minCrew) return { ok: false, why: `requires ${r.minCrew} able crew` };
+  if (r.requiresFlag && !S.flags[r.requiresFlag]) return { ok: false, why: 'not an option today' };
+  if (r.forbidsFlag && S.flags[r.forbidsFlag]) return { ok: false, why: 'that bridge is burned' };
+  return { ok: true };
+}
+
+function outcomeBadness(o) {
+  let b = 0;
+  const sum = obj => Object.values(obj || {}).reduce((a, v) => a + (v < 0 ? -v : 0), 0);
+  b += sum(o.effects) + sum(o.damage);
+  if (o.crewDeath) b += 30;
+  if (o.endGame) b += 100;
+  if (o.delayDays) b += o.delayDays * 2;
+  return b;
+}
+
+function pickOutcome(choice) {
+  let outs = choice.outcomes.map(o => ({ o, chance: o.chance }));
+  if (outs.length > 1) {
+    let shift = DIFFICULTY[S.difficulty].badOutcomeShift + MULT.sensorBadShift[tierIdx(S.systems.sensors)];
+    if (shift !== 0) {
+      const sorted = outs.slice().sort((a, b) => outcomeBadness(a.o) - outcomeBadness(b.o));
+      const best = sorted[0], worst = sorted[sorted.length - 1];
+      const delta = Math.min(Math.abs(shift), shift > 0 ? best.chance - 0.05 : worst.chance - 0.05);
+      if (delta > 0) {
+        if (shift > 0) { best.chance -= delta; worst.chance += delta; }
+        else { best.chance += delta; worst.chance -= delta; }
+      }
+    }
+  }
+  const total = outs.reduce((a, x) => a + x.chance, 0);
+  let roll = RNG() * total;
+  for (const x of outs) { roll -= x.chance; if (roll <= 0) return x.o; }
+  return outs[outs.length - 1].o;
+}
+
+/* Applies a choice. Returns { outcome, deltas:[{label, val, kind}], deaths:[names] } */
+function resolveChoice(scenario, choiceIdx) {
+  const choice = scenario.choices[choiceIdx];
+  const deltas = [];
+  const deaths = [];
+  const track = (label, v, isSys) => deltas.push({ label, val: Math.round(v), kind: v < 0 ? 'bad' : 'good', isSys });
+
+  if (scenario.once !== false) S.usedScenarios.push(scenario.id);
+  if (choice.cost) Object.entries(choice.cost).forEach(([k, v]) => { addRes(k, v); track(RES_LABEL[k], v); });
+
+  const o = pickOutcome(choice);
+  if (o.effects) Object.entries(o.effects).forEach(([k, v]) => {
+    if (k === 'crew') {
+      if (v < 0) for (let i = 0; i < -v; i++) { const d = killCrew(scenario.title.toLowerCase()); if (d) deaths.push(d); }
+      else { for (let i = 0; i < v; i++) if (S.roster.length < CAPS.crew) { S.roster.push(randomRecruit()); S.resources.crew = S.roster.length; } track('CREW', v); }
+    } else { addRes(k, v); track(RES_LABEL[k], v); }
+  });
+  if (o.damage) Object.entries(o.damage).forEach(([k, v]) => { addSys(k, v); track(SYS_LABEL[k], v, true); });
+  if (o.repair) Object.entries(o.repair).forEach(([k, v]) => { addSys(k, v); track(SYS_LABEL[k], v, true); });
+  if (o.crewDeath) { const d = killCrew(scenario.title.toLowerCase()); if (d) deaths.push(d); }
+  if (o.flag) S.flags[o.flag] = true;
+  if (o.delayDays) { for (let i = 0; i < o.delayDays; i++) { S.day++; burnDay(false); } }
+  log(`${scenario.title}: ${choice.label}`, 'info');
+  if (o.endGame) { S.gameOver = { type: 'death', cause: o.endGame }; }
+  else checkDeath();
+  return { outcome: o, deltas, deaths, dead: S.gameOver };
+}
+
+const RECRUITS = ['Spc. Ito','Tech. Moreau','Dr. Osei','Ens. Larkin','Spc. Novak','Med. Tanaka','Eng. Diaz','Nav. Kim'];
+function randomRecruit() {
+  const available = RECRUITS.filter(n => !S.roster.includes(n) && !S.graveyard.some(g => g.name === n));
+  return available[Math.floor(RNG() * available.length)] || ('Passenger #' + Math.floor(RNG() * 900 + 100));
+}
+
+/* ---- between-tick actions (each costs a day) ---- */
+function actRepair(sysKey) {
+  if (S.resources.parts < 2) return { fail: 'Not enough parts (need 2).' };
+  addRes('parts', -2);
+  const amt = Math.round(25 * sysMult('moraleRepair', 'morale'));
+  addSys(sysKey, amt);
+  S.day++; burnDay(false);
+  log(`Repair detail: ${SYS_LABEL[sysKey]} +${amt}%. Chen only swore twice.`, 'good');
+  checkDeath();
+  return { ok: true, amt };
+}
+function actTreat() {
+  if (S.resources.meds < 2) return { fail: 'Not enough meds (need 2).' };
+  addRes('meds', -2); addSys('morale', 20);
+  S.day++; burnDay(false);
+  log('The doctor makes rounds. Chemistry does what leadership could not.', 'good');
+  checkDeath();
+  return { ok: true };
+}
+function actRest() {
+  S.day++; burnDay(false, 0.8); addSys('morale', 5);
+  log('All-stop. The crew remembers what sleep is. Reviews are positive.', 'good');
+  checkDeath();
+  return { ok: true };
+}
+function actEva() {
+  if (S.resources.parts < 3) return { fail: 'Not enough parts (need 3).' };
+  addRes('parts', -3); addSys('hull', 30);
+  S.day++; burnDay(false);
+  let mishap = false;
+  if (RNG() < 0.15) { mishap = true; addSys('morale', -10); addRes('meds', -2);
+    log('EVA complete. Hull patched. One suit came back with a person-shaped bruise inside it.', 'warn');
+  } else log('EVA complete. The hull is less of a colander now.', 'good');
+  checkDeath();
+  return { ok: true, mishap };
+}
+
+/* ---- scoring / endings ---- */
+function finalScore() {
+  const resSum = ['oxygen','water','food','power','fuel'].reduce((a, k) => a + S.resources[k], 0)
+               + (S.resources.parts + S.resources.meds) * 4;
+  const sysSum = SYS_KEYS.reduce((a, k) => a + S.systems[k], 0);
+  let score = S.resources.crew * 1000 + Math.round(resSum * 2) + Math.round(sysSum) - S.day * 3
+            + DIFFICULTY[S.difficulty].scoreBonus;
+  if (S.gameOver && S.gameOver.marginal) score = Math.round(score * 0.5);
+  return Math.max(0, score);
+}
+function rank(score) {
+  if (score >= 8000) return 'COSMIC PIONEER';
+  if (score >= 6000) return 'STELLAR CAPTAIN';
+  if (score >= 4500) return 'COMPETENT SPACEFARER';
+  if (score >= 3000) return 'BARELY ADEQUATE CAPTAIN';
+  return 'STATISTICAL ANOMALY (SURVIVED ANYWAY)';
+}
+const EPITAPHS = {
+  asphyxiation: [
+    'They checked the oxygen gauge exactly one day too late.',
+    'The last breath aboard was used to say something reassuring.',
+    'Air is free, they used to say. On Earth. Where there was air.'
+  ],
+  starvation: [
+    'The last log entry is a recipe. It has no ingredients.',
+    'They rationed perfectly for a journey eleven days shorter than the one they took.',
+    'The hydroponics bay is thriving. Timing is everything.'
+  ],
+  dysentery: [
+    'You have died of dysentery. In space. Somehow. The tradition endures.',
+    'Two hundred years of progress, and the trail still wins the same way.'
+  ],
+  decompression: [
+    'The ship opened like a tin can. The void was not even hungry.',
+    'Hull integrity is a suggestion the universe declined.'
+  ],
+  crew: [
+    'The ship drifts on, perfectly maintained, perfectly empty.',
+    'All systems nominal. No one left to be comforted by that.'
+  ],
+  despair: [
+    'The void outside was survivable. The one inside was not.'
+  ],
+  generic: [
+    'Space noticed you. That was the whole problem.',
+    'They came so far. Space is mostly far, it turns out.'
+  ]
+};
+function epitaphFor(cause) {
+  for (const k of Object.keys(EPITAPHS)) if (String(cause).includes(k)) {
+    const list = EPITAPHS[k];
+    return list[Math.floor(RNG() * list.length)];
+  }
+  const g = EPITAPHS.generic;
+  return g[Math.floor(RNG() * g.length)];
+}
+
+/* ---- save / load ---- */
+function saveGame() {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) {}
+}
+function loadGame() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (data.version !== SAVE_VERSION || data.gameOver) return null;
+    S = data;
+    return S;
+  } catch (e) { return null; }
+}
+function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) {} }
+
+/* Reference store spend used by the autoplay sim — approximates a sensible player
+   allocating requisition points (bulk 1pt/5u, fuel 1pt/4u, parts/meds 3pt/1u). */
+function defaultStore(difficulty) {
+  const pts = DIFFICULTY[difficulty || 'officer'].storePoints;
+  const buy = { oxygen: 0, water: 0, food: 0, power: 0, fuel: 0, parts: 0, meds: 0 };
+  let left = pts;
+  const spend = (k, units, cost) => { if (left >= cost) { buy[k] += units; left -= cost; } };
+  // priority order mirrors what kills you: food, water, fuel, parts, meds, O2, power
+  spend('food', 40, 8); spend('water', 25, 5); spend('fuel', 24, 6);
+  spend('parts', 6, 18); spend('meds', 4, 12);
+  spend('oxygen', 25, 5); spend('power', 10, 2);
+  spend('food', 20, 4); spend('parts', 4, 12); spend('meds', 3, 9);
+  spend('fuel', 16, 4); spend('water', 15, 3); spend('oxygen', 15, 3);
+  const store = {};
+  Object.entries(buy).forEach(([k, v]) => store[k] = Math.min(CAPS[k], START[k] + v));
+  return store;
+}
+
+/* ================= AUTOPLAY / DEBUG HARNESS ================= */
+const OrionDebug = {
+  giveResources() { RES_KEYS.forEach(k => S.resources[k] = CAPS[k]); S.resources.crew = S.roster.length; },
+  damageSystem(k, amt) { addSys(k, -(amt || 50)); },
+  forceScenario(id) { const sc = scenarioById(id); if (sc && typeof UI !== 'undefined') UI.openScenario(sc); },
+  skipToLeg(n) { S.legIndex = n; S.legProgress = 0; },
+
+  policyChoice(scenario, policy) {
+    const avail = scenario.choices.map((c, i) => ({ c, i })).filter(x => choiceAvailable(x.c).ok);
+    if (!avail.length) return 0;
+    if (policy === 'random') return avail[Math.floor(RNG() * avail.length)].i;
+    // greedy-safe: maximize expected delta sum, penalize crew death risk hard
+    let best = avail[0], bestScore = -Infinity;
+    for (const x of avail) {
+      let s = 0;
+      const w = { crew: 40, meds: 3, parts: 3, oxygen: 1.2, water: 1.2, food: 1.2, fuel: 1.2, power: 1 };
+      const addObj = (obj, mult, weightSys) => Object.entries(obj || {}).forEach(([k, v]) => {
+        s += v * mult * (weightSys ? 0.8 : (w[k] || 1));
+      });
+      addObj(x.c.cost, 1);
+      for (const o of x.c.outcomes) {
+        addObj(o.effects, o.chance);
+        addObj(o.damage, o.chance, true);
+        addObj(o.repair, o.chance, true);
+        if (o.crewDeath) s -= 60 * o.chance;
+        if (o.endGame) s -= 500 * o.chance;
+        if (o.delayDays) s -= 4 * o.delayDays * o.chance;
+      }
+      if (s > bestScore) { bestScore = s; best = x; }
+    }
+    return best.i;
+  },
+
+  preTickAction(policy) {
+    if (policy !== 'greedy-safe') return;
+    // repair worst critical-path system
+    const priority = ['lifeSupport', 'hull', 'engines', 'generator', 'astrogation', 'sensors'];
+    for (const k of priority) {
+      if (S.systems[k] < 55 && S.resources.parts >= 4) { actRepair(k); return; }
+    }
+    if (S.systems.morale < 35 && S.resources.meds >= 4) { actTreat(); return; }
+    if (S.systems.morale < 25) { actRest(); return; }
+    // adapt pace/rations
+    S.rations = S.resources.food < 55 ? 'meager' : (S.systems.morale < 50 && S.resources.food > 90) ? 'generous' : 'normal';
+    S.pace = (S.systems.hull < 50 || S.systems.engines < 50) ? 'cautious'
+           : S.resources.fuel > 80 ? 'overdrive' : 'standard';
+  },
+
+  runOne(policy, difficulty) {
+    const saved = S;
+    newGame({ difficulty: difficulty || 'officer', shipName: 'SIM', store: defaultStore(difficulty) });
+    let safety = 1200;
+    let result = null;
+    while (!S.gameOver && safety-- > 0) {
+      this.preTickAction(policy);
+      if (S.gameOver) break;
+      const r = tick();
+      if (r.scenario) {
+        const idx = this.policyChoice(r.scenario, policy);
+        resolveChoice(r.scenario, idx);
+      }
+      if (r.survey) {
+        if (!r.survey.habitable) {
+          const desperate = S.resources.crew <= 2 ||
+            ['oxygen','water','food','fuel'].some(k => S.resources[k] < 20);
+          const settle = policy === 'random' ? RNG() < 0.3 : desperate;
+          resolveSurvey(r.survey, settle);
+        } else resolveSurvey(r.survey, true);
+      }
+    }
+    result = {
+      over: S.gameOver || { type: 'timeout' },
+      day: S.day, leg: S.legIndex, crew: S.resources.crew,
+      score: S.gameOver && S.gameOver.type === 'victory' ? finalScore() : 0
+    };
+    S = saved;
+    return result;
+  },
+
+  autoplay(n, policy, difficulty) {
+    n = n || 100; policy = policy || 'random';
+    const runs = [];
+    for (let i = 0; i < n; i++) runs.push(this.runOne(policy, difficulty));
+    const wins = runs.filter(r => r.over.type === 'victory');
+    const marginal = wins.filter(r => r.over.marginal);
+    const deaths = runs.filter(r => r.over.type === 'death');
+    const causes = {};
+    deaths.forEach(r => { const c = String(r.over.cause).split('(')[0].trim(); causes[c] = (causes[c] || 0) + 1; });
+    const deathDays = deaths.map(r => r.day).sort((a, b) => a - b);
+    const deathLegs = {};
+    deaths.forEach(r => { const nm = ROUTE[Math.min(r.leg + 1, ROUTE.length - 1)].name; deathLegs[nm] = (deathLegs[nm] || 0) + 1; });
+    const report = {
+      policy, difficulty: difficulty || 'officer', runs: n,
+      survivalPct: +(100 * wins.length / n).toFixed(1),
+      marginalPct: +(100 * marginal.length / n).toFixed(1),
+      medianDeathDay: deathDays.length ? deathDays[Math.floor(deathDays.length / 2)] : null,
+      deathCauses: causes,
+      deathByLegDestination: deathLegs,
+      avgWinDay: wins.length ? Math.round(wins.reduce((a, r) => a + r.day, 0) / wins.length) : null,
+      avgWinScore: wins.length ? Math.round(wins.reduce((a, r) => a + r.score, 0) / wins.length) : null,
+      timeouts: runs.filter(r => r.over.type === 'timeout').length
+    };
+    console.table ? console.log(JSON.stringify(report, null, 2)) : null;
+    return report;
+  }
+};
+window.OrionDebug = OrionDebug;
+/* ================= END ENGINE ================= */
+</script>
+
+<script>
+/* ================= UI ================= */
+const UI = (() => {
+  const $ = id => document.getElementById(id);
+  let activeScreen = 'title';
+  let modalState = null;   // {mode:'scenario'|'outcome'|'survey'|'repair'|'help', ...}
+  let typeTimer = null;
+  let setupState = { difficulty: 'officer', store: {}, points: 0 };
+
+  function show(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    $('screen-' + id).classList.add('active');
+    activeScreen = id;
+  }
+
+  /* ---------- typewriter ---------- */
+  function typeText(el, text, done) {
+    clearInterval(typeTimer);
+    el.textContent = '';
+    let i = 0;
+    typeTimer = setInterval(() => {
+      i += 2;
+      el.textContent = text.slice(0, i);
+      if (i >= text.length) { clearInterval(typeTimer); typeTimer = null; if (done) done(); }
+    }, 14);
+  }
+  function skipType(el, text) {
+    if (typeTimer) { clearInterval(typeTimer); typeTimer = null; el.textContent = text; return true; }
+    return false;
+  }
+
+  /* ---------- animated scenario art ---------- */
+  /* Plain-ASCII only (no box-drawing/unicode) so every frame renders at a
+     true 1-char-per-cell width regardless of font fallback. */
+  const ART_W = 30;
+  function padCenter(s, w) {
+    s = s.slice(0, w);
+    const total = w - s.length, left = Math.floor(total / 2);
+    return ' '.repeat(left) + s + ' '.repeat(total - left);
+  }
+  function frameBox(iconLines, caption) {
+    const top = '.' + '-'.repeat(ART_W) + '.';
+    const bot = "'" + '-'.repeat(ART_W) + "'";
+    const rows = [...iconLines, '', caption].map(l => '|' + padCenter(l, ART_W) + '|');
+    return [top, ...rows, bot].join('\n');
+  }
+  const ART_ICONS = {
+    mechanical:     { cap: 'SYSTEM FAULT',    frames: [['   [ | ]   '], ['   [ / ]   '], ['   [ - ]   '], ['   [ \\ ]   ']] },
+    'crew-drama':   { cap: 'CREW DECK',       frames: [['o/          \\o'], ['\\o          o/']] },
+    derelicts:      { cap: 'UNKNOWN CONTACT', frames: [['[o.]==[]==[.o]'], ['[.o]==[]==[o.]'], ['[..]==[]==[..]']] },
+    'cosmic-hazards': { cap: 'HAZARD ALERT',  frames: [['    /!\\    '], ['   </!\\>   '], ['  <</!\\>>  ']] },
+    pirates:        { cap: 'HOSTILE CONTACT', frames: [['   o     o   ', '     \\___/   '], ['   -     -   ', '     \\___/   ']] },
+    medical:        { cap: 'MEDBAY',          frames: [
+                        ['____/\\______________'], ['________/\\__________'],
+                        ['____________/\\______'], ['________________/\\__'] ] },
+    traders:        { cap: 'INCOMING HAIL',   frames: [['    ( $ )    '], ['    ( | )    '], ['    ( $ )    '], ['    ( | )    ']] },
+    anomalies:      { cap: 'ANOMALY DETECTED', frames: [['    ( )    '], ['   ( ( ) )   '], ['  ( ( ( ) ) )  ']] },
+    waypoints:      { cap: 'STATION ARRIVAL', frames: [
+                        ['    o    ', '   [#]   ', '         '],
+                        ['         ', '   [#] o ', '         '],
+                        ['         ', '   [#]   ', '    o    '],
+                        ['         ', ' o [#]   ', '         '] ] },
+    'deep-space':   { cap: 'DEEP SPACE',      frames: [
+                        ['  .    *      .   ', '     .      *     '],
+                        ['  *    .      *   ', '     *      .     '],
+                        ['  .    .      *   ', '     *      *     '] ] },
+    caches:         { cap: 'SALVAGE PING',    frames: [['  *  [$]     '], ['    [$]   *  '], ['   *[$]*     ']] },
+    wildcards:      { cap: 'UNKNOWN SIGNAL',  frames: [['     ?!     '], ['    ?!      '], ['      ?!    '], ['     ?!     ']] },
+    survey:         { cap: 'ORBITAL SCAN',    frames: [
+                        ['   _.-""-._   ', '  /        \\  ', ' |    o     | ', '  \\________/  '],
+                        ['   _.-""-._   ', '  /        \\  ', ' |     o    | ', '  \\________/  '],
+                        ['   _.-""-._   ', '  /        \\  ', ' |      o   | ', '  \\________/  '] ] }
+  };
+  let artTimer = null, artFrames = [], artIndex = 0;
+  function startArt(key) {
+    stopArt();
+    const def = ART_ICONS[key];
+    if (!def) return;
+    artFrames = def.frames.map(f => frameBox(f, def.cap));
+    artIndex = 0;
+    const el = $('modal-art');
+    el.textContent = artFrames[0];
+    el.classList.add('active');
+    artTimer = setInterval(() => {
+      artIndex = (artIndex + 1) % artFrames.length;
+      el.textContent = artFrames[artIndex];
+    }, 400);
+  }
+  function stopArt() {
+    if (artTimer) { clearInterval(artTimer); artTimer = null; }
+    artFrames = []; artIndex = 0;
+    const el = $('modal-art');
+    el.classList.remove('active');
+    el.textContent = '';
+  }
+
+  /* ---------- title / setup ---------- */
+  function init() {
+    $('btn-continue').style.display = localStorage.getItem(SAVE_KEY) ? 'block' : 'none';
+    buildStarfield();
+  }
+  function gotoSetup() {
+    setupState = { difficulty: 'officer', store: {}, points: DIFFICULTY.officer.storePoints };
+    const ci = $('crew-inputs'); ci.innerHTML = '';
+    DEFAULT_CREW.forEach(n => {
+      const inp = document.createElement('input');
+      inp.type = 'text'; inp.value = n; inp.maxLength = 20;
+      ci.appendChild(inp);
+    });
+    document.querySelectorAll('#diff-row button').forEach(b => {
+      b.classList.toggle('sel', b.dataset.d === 'officer');
+      b.onclick = () => {
+        setupState.difficulty = b.dataset.d;
+        setupState.points = DIFFICULTY[b.dataset.d].storePoints - spentPoints();
+        document.querySelectorAll('#diff-row button').forEach(x => x.classList.toggle('sel', x === b));
+        renderStore();
+      };
+    });
+    STORE_ITEMS.forEach(it => setupState.store[it.k] = 0);
+    renderStore();
+    show('setup');
+  }
+  const STORE_ITEMS = [
+    { k: 'oxygen', unit: 5, pts: 1, note: 'breathing, recreational' },
+    { k: 'water',  unit: 5, pts: 1, note: 'also becomes coffee' },
+    { k: 'food',   unit: 5, pts: 1, note: 'nutrient paste, "chicken"' },
+    { k: 'power',  unit: 5, pts: 1, note: 'stored lightning' },
+    { k: 'fuel',   unit: 4, pts: 1, note: 'go-juice' },
+    { k: 'parts',  unit: 1, pts: 3, note: 'duct tape with ambition' },
+    { k: 'meds',   unit: 1, pts: 3, note: 'pills, patches, prayers' }
+  ];
+  const QUARTERMASTER = [
+    'The quartermaster eyes your manifest. "Bold choices. I\'ll note them for the memorial."',
+    '"Buy more parts. Everyone says buy more parts. Nobody buys more parts."',
+    '"Meds are cheap. Funerals are free. Your call, captain."',
+    '"That much fuel and no food? Planning to eat the fuel?"',
+    '"Standard loadout. Standard casket. We keep things standard here."'
+  ];
+  function spentPoints() {
+    return STORE_ITEMS.reduce((a, it) => a + (setupState.store[it.k] / it.unit) * it.pts, 0);
+  }
+  function renderStore() {
+    const diff = DIFFICULTY[setupState.difficulty];
+    const remaining = diff.storePoints - spentPoints();
+    setupState.points = remaining;
+    $('store-points').textContent = remaining + ' / ' + diff.storePoints;
+    $('diff-desc').textContent = diff.desc;
+    const t = $('store-table');
+    t.innerHTML = '<tr class="dim"><td>ITEM</td><td>BASE</td><td>+BOUGHT</td><td>COST</td><td></td></tr>';
+    STORE_ITEMS.forEach(it => {
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${RES_LABEL[it.k]} <span class="dim" style="font-size:11px">${it.note}</span></td>
+        <td class="dim">${START[it.k]}</td>
+        <td class="qty amber">+${setupState.store[it.k]}</td>
+        <td class="dim">${it.pts}pt/${it.unit}</td>
+        <td class="stepper"><button data-k="${it.k}" data-d="-1">−</button><button data-k="${it.k}" data-d="1">+</button></td>`;
+      t.appendChild(row);
+    });
+    t.querySelectorAll('.stepper button').forEach(b => b.onclick = () => {
+      const it = STORE_ITEMS.find(x => x.k === b.dataset.k);
+      const d = +b.dataset.d;
+      if (d > 0 && (setupState.points < it.pts || START[it.k] + setupState.store[it.k] + it.unit > CAPS[it.k])) return;
+      if (d < 0 && setupState.store[it.k] <= 0) return;
+      setupState.store[it.k] += d * it.unit;
+      renderStore();
+    });
+    $('quartermaster').textContent = QUARTERMASTER[Math.min(QUARTERMASTER.length - 1, Math.floor(spentPoints() / 35))];
+  }
+  function launch() {
+    const roster = [...$('crew-inputs').querySelectorAll('input')].map(i => i.value.trim() || 'Crewman Nobody');
+    const store = {};
+    STORE_ITEMS.forEach(it => store[it.k] = START[it.k] + setupState.store[it.k]);
+    newGame({ shipName: $('in-ship').value.trim() || 'ISV Persistence', difficulty: setupState.difficulty, roster, store });
+    saveGame();
+    show('travel');
+    render();
+  }
+  function continueGame() {
+    if (loadGame()) { show('travel'); render(); }
+    else { clearSave(); init(); }
+  }
+  function newVoyage() { clearSave(); init(); show('title'); }
+
+  /* ---------- starfield ---------- */
+  function buildStarfield() {
+    const sf = $('starfield'); sf.innerHTML = '';
+    for (let i = 0; i < 60; i++) {
+      const s = document.createElement('span');
+      s.className = 'star'; s.textContent = ['·', '✦', '·', '.', '·'][i % 5];
+      s.style.left = Math.random() * 100 + '%';
+      s.style.top = Math.random() * 100 + '%';
+      s.style.animationDuration = (4 + Math.random() * 14) + 's';
+      sf.appendChild(s);
+    }
+  }
+
+  /* ---------- travel render ---------- */
+  function barClass(pct) { return pct < 0.15 ? 'crit' : pct < 0.33 ? 'warn' : ''; }
+  function render() {
+    if (!S) return;
+    $('hdr-ship').textContent = S.shipName.toUpperCase();
+    $('hdr-day').textContent = S.day;
+    $('hdr-mode').textContent = DIFFICULTY[S.difficulty].label + ' CLASS';
+    // resources
+    const rp = $('res-panel'); rp.innerHTML = '';
+    RES_KEYS.forEach(k => {
+      const v = S.resources[k], pct = v / CAPS[k];
+      const row = document.createElement('div'); row.className = 'res-row';
+      row.innerHTML = `<span>${RES_LABEL[k]}</span>
+        <div class="bar ${barClass(pct)}"><div style="width:${Math.round(pct * 100)}%"></div></div>
+        <span class="${pct < 0.15 ? 'red' : pct < 0.33 ? 'amber' : 'dim'}">${Math.floor(v)}${k === 'crew' ? '/' + S.roster.length : ''}</span>`;
+      rp.appendChild(row);
+    });
+    // systems
+    const sp = $('sys-panel'); sp.innerHTML = '';
+    SYS_KEYS.forEach(k => {
+      const v = S.systems[k], t = tier(v);
+      const blocks = '▓'.repeat(Math.round(v / 10)) + '░'.repeat(10 - Math.round(v / 10));
+      const cls = t === 'NOMINAL' ? 'dim' : t === 'DAMAGED' ? 'amber' : 'red';
+      const row = document.createElement('div'); row.className = 'sys-row';
+      row.innerHTML = `<span>${SYS_LABEL[k]}</span><span class="sys-blocks ${cls}">${blocks}</span><span class="${cls}">${t}</span>`;
+      sp.appendChild(row);
+    });
+    // route map
+    renderMap();
+    // log
+    const ll = $('log-lines'); ll.innerHTML = '';
+    S.log.slice(-7).forEach(e => {
+      const d = document.createElement('div');
+      d.className = e.kind === 'bad' ? 'red' : e.kind === 'warn' ? 'amber' : e.kind === 'good' ? '' : 'dim';
+      d.textContent = `D${e.day} ▸ ${e.text}`;
+      ll.appendChild(d);
+    });
+    $('ab-pace').textContent = PACES[S.pace].label;
+    $('ab-rations').textContent = RATIONS[S.rations].label;
+    saveGame();
+  }
+  function renderMap() {
+    const leg = currentLeg();
+    const W = 64;
+    const totalDist = ROUTE.slice(1).reduce((a, n) => a + n.dist, 0);
+    let traveled = ROUTE.slice(1, S.legIndex + 1).reduce((a, n) => a + n.dist, 0) + S.legProgress;
+    const shipPos = Math.min(W - 1, Math.round((traveled / totalDist) * W));
+    let track = '─'.repeat(W).split('');
+    let cum = 0;
+    ROUTE.forEach((n, i) => {
+      if (i > 0) cum += n.dist;
+      const p = Math.min(W - 1, Math.round((cum / totalDist) * W));
+      track[p] = i <= S.legIndex ? '●' : (n.candidate ? '◍' : '○');
+    });
+    track[shipPos] = '>';
+    $('routemap').textContent = track.join('') + '\n' +
+      ' '.repeat(Math.max(0, shipPos - 2)) + '>=>';
+    const from = ROUTE[S.legIndex].name, to = leg ? leg.name : '—';
+    const speed = S.resources.fuel <= 0 ? 0 : PACES[S.pace].speed * MULT.engineSpeed[tierIdx(S.systems.engines)];
+    const eta = leg && speed > 0 ? Math.ceil((leg.dist - S.legProgress) / speed) : '∞';
+    $('leg-info').innerHTML = `<span class="dim">LEG:</span> ${from} <span class="amber">→</span> ${to}` +
+      `&nbsp;&nbsp;<span class="dim">ETA:</span> ${eta} days` +
+      (S.resources.fuel <= 0 ? ' <span class="red">— ADRIFT</span>' : '') +
+      (leg ? ` <span class="dim">ZONE: ${leg.zone.toUpperCase()}</span>` : '');
+  }
+
+  /* ---------- game flow ---------- */
+  function engage() {
+    if (modalState || !S || S.gameOver) return;
+    const r = tick();
+    render();
+    if (r.dead) return showDeath();
+    if (r.survey) return openSurvey(r.survey);
+    if (r.scenario) return openScenario(r.scenario);
+  }
+
+  function openScenario(sc) {
+    modalState = { mode: 'scenario', sc };
+    $('modal-title').textContent = '▚ ' + sc.title.toUpperCase() + ' ▞';
+    $('modal-deltas').innerHTML = '';
+    $('modal-cont').style.display = 'none';
+    const ch = $('modal-choices'); ch.innerHTML = '';
+    $('modal-wrap').classList.add('active');
+    startArt(sc.category);
+    typeText($('modal-text'), sc.text, () => renderChoices(sc));
+    modalState.fullText = sc.text;
+  }
+  function renderChoices(sc) {
+    const ch = $('modal-choices'); ch.innerHTML = '';
+    sc.choices.forEach((c, i) => {
+      const av = choiceAvailable(c);
+      const div = document.createElement('div');
+      div.className = 'choice' + (av.ok ? '' : ' disabled');
+      const costs = c.cost ? ' <span class="amber">(' + Object.entries(c.cost).map(([k, v]) => `${v} ${RES_LABEL[k]}`).join(', ') + ')</span>' : '';
+      div.innerHTML = `<span class="cnum">[${i + 1}]</span> ${c.label}${costs}` +
+        (c.detail ? `<div class="detail">${c.detail}</div>` : '') +
+        (!av.ok ? `<div class="detail red">— ${av.why}</div>` : '');
+      if (av.ok) div.onclick = () => pick(i);
+      ch.appendChild(div);
+    });
+    modalState.choicesShown = true;
+  }
+  function pick(i) {
+    if (!modalState || modalState.mode !== 'scenario') return;
+    const sc = modalState.sc;
+    const av = choiceAvailable(sc.choices[i]);
+    if (!av.ok) return;
+    const res = resolveChoice(sc, i);
+    modalState = { mode: 'outcome', res };
+    $('modal-choices').innerHTML = '';
+    const deltaHtml = res.deltas.map(d =>
+      `<span class="${d.kind === 'bad' ? 'red' : ''}">${d.label} ${d.val > 0 ? '+' : ''}${d.val}${d.isSys ? '%' : ''}</span>`
+    ).concat(res.deaths.map(n => `<span class="red">${n}: DECEASED</span>`)).join(' &nbsp;│&nbsp; ');
+    $('modal-deltas').innerHTML = deltaHtml || '<span class="dim">No measurable change. Suspicious.</span>';
+    $('modal-cont').style.display = 'block';
+    typeText($('modal-text'), res.outcome.text || '...');
+    modalState.fullText = res.outcome.text || '...';
+    render();
+  }
+  function closeModal() {
+    $('modal-wrap').classList.remove('active');
+    stopArt();
+    const wasDead = modalState && modalState.mode === 'outcome' && modalState.res.dead;
+    const followSurvey = modalState && modalState.surveyNext;
+    modalState = null;
+    render();
+    if (wasDead) showDeath();
+    else if (followSurvey) openSurvey(followSurvey);
+  }
+
+  /* ---------- survey ---------- */
+  function openSurvey(sv) {
+    modalState = { mode: 'survey', sv };
+    const n = sv.node;
+    $('modal-title').textContent = '▚ ORBITAL SURVEY: ' + n.name + ' ▞';
+    $('modal-deltas').innerHTML = '';
+    $('modal-cont').style.display = 'none';
+    $('modal-wrap').classList.add('active');
+    startArt('survey');
+    const pctText = sv.sensorsBlind ? 'UNKNOWN (sensors degraded — you are guessing)' : Math.round(sv.chance * 100) + '%';
+    const txt = `The ${S.shipName} settles into orbit. Below: a whole world, holding its breath.\n\nPre-survey habitability estimate: ${pctText}.\n\nThe crew gathers at the viewports. Nobody speaks. The survey probes drop.`;
+    typeText($('modal-text'), txt, () => {
+      const ch = $('modal-choices'); ch.innerHTML = '';
+      const div = document.createElement('div');
+      div.className = 'choice';
+      div.innerHTML = '<span class="cnum">[1]</span> Read the probe telemetry.';
+      div.onclick = () => surveyResult();
+      ch.appendChild(div);
+      modalState.choicesShown = true;
+    });
+    modalState.fullText = '';
+  }
+  function surveyResult() {
+    const sv = modalState.sv;
+    const ch = $('modal-choices'); ch.innerHTML = '';
+    if (sv.habitable) {
+      resolveSurvey(sv, true);
+      typeText($('modal-text'), 'Green. Green across every band. Breathable air. Liquid water. Soil that will take a seed.\n\nSomeone is laughing. Someone is crying. It is possibly the same someone.');
+      $('modal-cont').style.display = 'block';
+      modalState = { mode: 'outcome', res: { dead: S.gameOver } };
+      modalState.victory = true;
+    } else {
+      typeText($('modal-text'), `The numbers come back wrong. ${sv.node.name} is a corpse with good lighting — ${sv.isLast ? 'and there is nowhere left after this.' : 'thin poison air, dead seas.'}\n\nThe crew looks to you.`, () => {
+        const opts = [];
+        opts.push({ label: `Settle anyway. Domes, filters, a hard life. But a life.`, act: () => { resolveSurvey(sv, true); showVictory(); } });
+        if (!sv.isLast) opts.push({ label: `Push on to the next candidate. The void again.`, act: () => { resolveSurvey(sv, false); closeModalPlain(); } });
+        opts.forEach((o, i) => {
+          const d = document.createElement('div'); d.className = 'choice';
+          d.innerHTML = `<span class="cnum">[${i + 1}]</span> ${o.label}`;
+          d.onclick = o.act;
+          ch.appendChild(d);
+        });
+        modalState.surveyOpts = opts;
+        modalState.choicesShown = true;
+      });
+    }
+  }
+  function closeModalPlain() { $('modal-wrap').classList.remove('active'); stopArt(); modalState = null; render(); }
+
+  /* ---------- actions ---------- */
+  function repairMenu() {
+    if (modalState || S.gameOver) return;
+    modalState = { mode: 'repair' };
+    $('modal-title').textContent = '▚ REPAIR DETAIL — costs 2 PARTS + 1 day ▞';
+    $('modal-text').textContent = 'Which system gets the duct tape with ambition? [ESC] to cancel.';
+    $('modal-deltas').innerHTML = ''; $('modal-cont').style.display = 'none';
+    const ch = $('modal-choices'); ch.innerHTML = '';
+    SYS_KEYS.forEach((k, i) => {
+      const d = document.createElement('div');
+      const can = S.resources.parts >= 2 && S.systems[k] < 100;
+      d.className = 'choice' + (can ? '' : ' disabled');
+      d.innerHTML = `<span class="cnum">[${i + 1}]</span> ${SYS_LABEL[k]} — ${Math.round(S.systems[k])}% (${tier(S.systems[k])})`;
+      if (can) d.onclick = () => { modalState = null; $('modal-wrap').classList.remove('active'); doAction(() => actRepair(k)); };
+      ch.appendChild(d);
+    });
+    modalState.repairKeys = SYS_KEYS;
+    modalState.choicesShown = true;
+    $('modal-wrap').classList.add('active');
+  }
+  function doAction(fn) {
+    const r = fn();
+    if (r.fail) log(r.fail, 'warn');
+    render();
+    if (S.gameOver) showDeath();
+  }
+  const treat = () => { if (!modalState && !S.gameOver) doAction(actTreat); };
+  const eva = () => { if (!modalState && !S.gameOver) doAction(actEva); };
+  const rest = () => { if (!modalState && !S.gameOver) doAction(actRest); };
+  function cyclePace() {
+    if (modalState || S.gameOver) return;
+    const order = ['cautious', 'standard', 'overdrive'];
+    S.pace = order[(order.indexOf(S.pace) + 1) % 3];
+    render();
+  }
+  function cycleRations() {
+    if (modalState || S.gameOver) return;
+    const order = ['meager', 'normal', 'generous'];
+    S.rations = order[(order.indexOf(S.rations) + 1) % 3];
+    render();
+  }
+
+  /* ---------- status / death / victory ---------- */
+  function showStatus() {
+    if (modalState) return;
+    $('status-roster').innerHTML = S.roster.map(n => `<div>${n} <span class="dim">— alive, allegedly well</span></div>`).join('') || '<span class="dim">nobody</span>';
+    $('status-graveyard').innerHTML = S.graveyard.map(g => `<div class="dim">✝ ${g.name} — day ${g.day}, ${g.cause}</div>`).join('') || '<span class="dim">empty. keep it that way.</span>';
+    $('status-log').innerHTML = S.log.slice().reverse().map(e =>
+      `<div class="${e.kind === 'bad' ? 'red' : e.kind === 'warn' ? 'amber' : 'dim'}">D${e.day} ▸ ${e.text}</div>`).join('');
+    show('status');
+  }
+  function tombstone(shipName, day) {
+    const W = 27;
+    const center = t => { const pad = Math.max(0, W - t.length); const l = Math.floor(pad / 2); return ' '.repeat(l) + t + ' '.repeat(pad - l); };
+    const name = shipName.toUpperCase().slice(0, W - 2);
+    return [
+      '           _' + '_'.repeat(W - 8) + '_',
+      '         /' + ' '.repeat(W - 4) + '\\',
+      '        /' + ' '.repeat(W - 2) + '\\',
+      '       |' + center('HERE DRIFTS') + '|',
+      '       |' + center('THE CREW OF THE') + '|',
+      '       |' + center(name) + '|',
+      '       |' + center('') + '|',
+      '       |' + center('DAY ' + day) + '|',
+      '       |' + center('*    *    *') + '|',
+      '   ____|' + '_'.repeat(W) + '|____'
+    ].join('\n');
+  }
+  function showDeath() {
+    $('modal-wrap').classList.remove('active'); stopArt(); modalState = null;
+    const cause = S.gameOver.cause || 'the void';
+    $('death-art').textContent = tombstone(S.shipName, S.day);
+    $('death-title').textContent = `THE ${S.shipName.toUpperCase()} — LOST, DAY ${S.day}`;
+    $('death-epitaph').textContent = '"' + epitaphFor(cause) + '"';
+    $('death-stats').innerHTML =
+      `CAUSE: <span class="red">${cause}</span><br>` +
+      `REACHED: ${ROUTE[S.legIndex].name} +${Math.floor(S.legProgress)} units<br>` +
+      `SOULS LOST: ${S.graveyard.length ? S.graveyard.map(g => g.name).join(', ') : 'all hands, unnamed by history'}<br>` +
+      `<span class="dim">The rescue that is not coming has been notified.</span>`;
+    clearSave();
+    show('death');
+  }
+  function showVictory() {
+    $('modal-wrap').classList.remove('active'); stopArt(); modalState = null;
+    const g = S.gameOver;
+    const score = finalScore();
+    $('victory-title').textContent = g.marginal
+      ? `MARGINAL COLONY ESTABLISHED — ${g.node.name}`
+      : `NEW HOME: ${g.node.name} — DAY ${S.day}`;
+    $('victory-text').textContent = g.marginal
+      ? 'It is not the world you were promised. It is domes and filters and rationed air. But children will be born here who have never heard of Earth, and to them this rock will simply be called home.'
+      : 'The landers descend through honest clouds. Wind — actual wind — moves actual trees. The first boot hits soil and the soil accepts it. Humanity, against every published projection, continues.';
+    $('victory-stats').innerHTML =
+      `VOYAGE: ${S.day} days &nbsp;│&nbsp; SURVIVORS: ${S.resources.crew} &nbsp;│&nbsp; LOST: ${S.graveyard.length}<br>` +
+      `SCORE: <span class="amber">${score}</span> &nbsp;│&nbsp; RANK: <span class="cyan">${rank(score)}</span><br>` +
+      `<span class="dim">${S.roster.join(' · ')}</span>`;
+    clearSave();
+    show('victory');
+  }
+  function showHelp() {
+    modalState = { mode: 'help' };
+    $('modal-title').textContent = '▚ HOW TO PLAY ▞';
+    $('modal-text').textContent =
+`Earth is decimated. You command the last ship out, bound for a habitable world somewhere past the Kuiper line.
+
+Each day [SPACE] advances the ship. The crew burns OXYGEN, WATER, FOOD; the ship burns POWER and FUEL. Things break. Space makes sure of it.
+
+Damaged systems have consequences: broken LIFE SUPPORT burns air faster, dead SENSORS hide what's coming, a failing HULL leaks everything, bad ASTROGATION gets you lost. Fix them with PARTS. Keep morale up or the crew fixes itself, badly.
+
+Waypoints offer resupply and trouble in equal measure. Three candidate planets wait at the end of the line. The last one will take you. Surviving to reach it is your problem.
+
+[1-4] choose · [SPACE] advance · [R]epair [T]reat [E]VA [Z] rest [P]ace [F] rations [S]tatus`;
+    $('modal-choices').innerHTML = '';
+    $('modal-deltas').innerHTML = '';
+    $('modal-cont').style.display = 'block';
+    $('modal-wrap').classList.add('active');
+  }
+
+  /* ---------- keyboard ---------- */
+  document.addEventListener('keydown', e => {
+    const k = e.key;
+    // modal handling first
+    if (modalState) {
+      if (typeTimer && modalState.fullText != null) {
+        skipType($('modal-text'), modalState.fullText);
+        if (modalState.mode === 'scenario' && !modalState.choicesShown) renderChoices(modalState.sc);
+        e.preventDefault(); return;
+      }
+      if (modalState.mode === 'scenario' && /^[1-4]$/.test(k)) { pick(+k - 1); return; }
+      if (modalState.mode === 'survey') {
+        if (k === '1' && !modalState.surveyOpts) { surveyResult(); return; }
+        if (modalState.surveyOpts && /^[1-2]$/.test(k)) { const o = modalState.surveyOpts[+k - 1]; if (o) o.act(); return; }
+      }
+      if (modalState.mode === 'repair') {
+        if (k === 'Escape') { closeModalPlain(); return; }
+        if (/^[1-8]$/.test(k)) {
+          const sk = SYS_KEYS[+k - 1];
+          if (S.resources.parts >= 2 && S.systems[sk] < 100) { closeModalPlain(); doAction(() => actRepair(sk)); }
+          return;
+        }
+      }
+      if (modalState.mode === 'outcome' || modalState.mode === 'help') {
+        if (k === ' ' || k === 'Enter') {
+          e.preventDefault();
+          if (modalState.victory) { showVictory(); return; }
+          if (modalState.mode === 'help') { closeModalPlain(); return; }
+          closeModal(); return;
+        }
+      }
+      if (k === 'Escape' && (modalState.mode === 'help' || modalState.mode === 'repair')) closeModalPlain();
+      return;
+    }
+    // screens
+    if (activeScreen === 'title') {
+      if (k === 'n' || k === 'N') gotoSetup();
+      if ((k === 'c' || k === 'C') && localStorage.getItem(SAVE_KEY)) continueGame();
+      if (k === 'h' || k === 'H') showHelp();
+      return;
+    }
+    if (activeScreen === 'setup') {
+      if (k === ' ' && document.activeElement.tagName !== 'INPUT') { e.preventDefault(); launch(); }
+      return;
+    }
+    if (activeScreen === 'travel') {
+      if (k === ' ') { e.preventDefault(); engage(); }
+      else if (k === 'r' || k === 'R') repairMenu();
+      else if (k === 't' || k === 'T') treat();
+      else if (k === 'e' || k === 'E') eva();
+      else if (k === 'z' || k === 'Z') rest();
+      else if (k === 'p' || k === 'P') cyclePace();
+      else if (k === 'f' || k === 'F') cycleRations();
+      else if (k === 's' || k === 'S') showStatus();
+      return;
+    }
+    if (activeScreen === 'status' && (k === 'Escape' || k === 's' || k === 'S')) { show('travel'); render(); }
+    if ((activeScreen === 'death' || activeScreen === 'victory') && (k === 'n' || k === 'N')) newVoyage();
+  });
+
+  window.addEventListener('DOMContentLoaded', init);
+  return { gotoSetup, continueGame, newVoyage, launch, engage, openScenario, repairMenu, treat, eva, rest,
+           cyclePace, cycleRations, showStatus, showHelp, render };
+})();
+</script>
+</body>
+</html>

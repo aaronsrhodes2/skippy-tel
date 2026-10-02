@@ -29,4 +29,8 @@ GAMES = (
                 "A fan-made prequel to Star Control II, 250,000 years earlier: fly a Precursor scout through a "
                 "frontier cluster, meet the young species, and fight Them-rift incursions in 1v1 melee.",
                 "🚀", "https://github.com/aaronsrhodes2/star-control-precursors"),
+    BrowserGame("orion-trail", "Orion Trail",
+                "Earth is dead. Space wants you dead too. An Oregon Trail in space: ration air, water and food, patch "
+                "the hull, and choose your way through 158 things that go wrong between Luna and a new world.",
+                "🪐", "https://github.com/aaronsrhodes2/orion-trail", endpoint="orion_trail"),
 )
