@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Nagatha's Video Service — Skippy Portal{% endblock %}
+{% block app %}video{% endblock %}
+{% block head %}
+{# Add to Home Screen: opens full screen straight into the film library. #}
+<link rel="manifest" href="{{ url_for('video.video_manifest') }}">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Nagatha">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<link rel="stylesheet" href="{{ url_for('static', filename='nagatha.css') }}">
+{% endblock %}
+{% block content %}
+{# Nagatha's Video Service. The page is a shell: static/nagatha-app.js builds the wall from the video gate's catalog, and
+   static/nagatha-core.js holds the logic that needs no browser (search, shelves, resume, which way a film plays, progress, keys).
+   hls.js is loaded only when a film needs the converted stream and the browser has no HLS of its own (Safari and iOS do). #}
+<section id="nv" class="nv" data-state="boot" aria-label="Nagatha's Video Service"
+         data-gate-url="{{ url_for('video.video_gate') }}"
+         data-hls-src="{{ url_for('static', filename='vendor/hls-1.6.15.min.js') }}">
+  <noscript><p class="warn" style="margin:12px">Nagatha's Video Service needs JavaScript.</p></noscript>
+
+  <div class="notice" id="notice" role="status" hidden></div>
+
+  <div class="nv-top">
+    <nav class="nv-nav" id="nav" aria-label="Library">
+      <a href="#home" data-view="home">Home</a>
+      <a href="#movies" data-view="movies">Movies</a>
+      <a href="#collections" data-view="collections">Collections</a>
+    </nav>
+    <div class="search">
+      <i data-i="search"></i>
+      <input type="search" id="q" placeholder="Search films" autocomplete="off" autocapitalize="off" spellcheck="false"
+             enterkeyhint="search" aria-label="Search films by title, year or genre" disabled>
+      <button type="button" class="ib clear" id="q-clear" data-act="clear-search" aria-label="Clear search" hidden><i data-i="close"></i></button>
+    </div>
+    <select class="sort" id="sort" aria-label="Sort films by" hidden>
+      <option value="title">A to Z</option>
+      <option value="added">Recently added</option>
+      <option value="year">Newest first</option>
+      <option value="rating">Best rated</option>
+    </select>
+  </div>
+
+  <div class="nv-scroll" id="scroll" tabindex="-1">
+    <div id="view" class="nv-view"><p class="empty" id="loading">Opening the library…</p></div>
+  </div>
+
+  {# The details sheet: a full-screen card on a phone, a centred panel on anything wider. #}
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="d-title" hidden>
+    <div class="d-card">
+      <button type="button" class="ib d-close" data-act="close-details" aria-label="Close"><i data-i="close"></i></button>
+      <div class="d-backdrop" id="d-backdrop"><img alt=""></div>
+      <div class="d-body">
+        <div class="d-poster" id="d-poster"><img alt=""></div>
+        <div class="d-main">
+          <h2 id="d-title"></h2>
+          <p class="d-facts" id="d-facts"></p>
+          <p class="d-genres" id="d-genres"></p>
+          <div class="d-actions" id="d-actions"></div>
+          <p class="d-overview" id="d-overview"></p>
+          <p class="d-tech" id="d-tech"></p>
+          <div class="d-coll" id="d-coll"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# The player: a native <video> with its own controls (keyboard and screen reader friendly), over everything. #}
+  <div class="player" id="player" role="region" aria-label="Video player" data-idle="0" hidden>
+    <video id="video" playsinline crossorigin="anonymous" preload="metadata"></video>
+    <div class="p-spin" id="p-spin" aria-hidden="true" hidden></div>
+    <div class="p-tap" id="tapbar" hidden>
+      <button type="button" class="tap-go" data-act="tap"><i data-i="play"></i><span id="tap-label">Tap to start</span></button>
+      <p class="tap-why" id="tap-why">Browsers only play sound after you tap the page. After a reload you need one tap again, and then the film carries on from where it was.</p>
+    </div>
+    <div class="p-msg" id="p-msg" role="alert" hidden></div>
+    <div class="p-top">
+      <button type="button" class="ib" data-act="close-player" aria-label="Close the film"><i data-i="back"></i></button>
+      <h2 id="p-title"></h2>
+    </div>
+    <div class="p-ctl" id="p-ctl">
+      <input type="range" id="p-seek" min="0" max="0" step="1" value="0" aria-label="Position in the film" aria-valuetext="0:00">
+      <div class="p-row">
+        <button type="button" class="ib big" id="p-play" data-act="toggle" aria-label="Play"><i data-i="play"></i></button>
+        <button type="button" class="ib" data-act="back10" aria-label="Back 10 seconds"><i data-i="back10"></i></button>
+        <button type="button" class="ib" data-act="fwd10" aria-label="Forward 10 seconds"><i data-i="fwd10"></i></button>
+        <span class="p-time" id="p-time" aria-hidden="true">0:00 / 0:00</span>
+        <span class="grow"></span>
+        <button type="button" class="ib" id="p-mute" data-act="mute" aria-label="Mute" aria-pressed="false"><i data-i="vol"></i></button>
+        <input type="range" id="p-vol" class="p-vol" min="0" max="1" step="0.05" value="1" aria-label="Volume">
+        <button type="button" class="ib" id="p-subs" data-act="subs-menu" aria-label="Subtitles" aria-haspopup="menu" hidden><i data-i="cc"></i></button>
+        <button type="button" class="ib" id="p-audio" data-act="audio-menu" aria-label="Audio track" aria-haspopup="menu" hidden><i data-i="audio"></i></button>
+        <button type="button" class="ib" id="p-pip" data-act="pip" aria-label="Picture in picture" hidden><i data-i="pip"></i></button>
+        <button type="button" class="ib" id="p-fs" data-act="fullscreen" aria-label="Full screen"><i data-i="fs"></i></button>
+      </div>
+    </div>
+    <div class="p-menu" id="p-menu" role="menu" hidden></div>
+  </div>
+
+  <div class="sr" id="live" aria-live="polite" aria-atomic="true"></div>
+
+  <dialog class="keys" id="keys" aria-labelledby="keys-h">
+    <h2 id="keys-h">Keyboard shortcuts</h2>
+    <dl>
+      <dt><kbd>Space</kbd> or <kbd>K</kbd></dt><dd>Play / pause</dd>
+      <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Back / forward 10 seconds (with <kbd>Shift</kbd>: 30)</dd>
+      <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Volume up / down</dd>
+      <dt><kbd>F</kbd></dt><dd>Full screen</dd>
+      <dt><kbd>M</kbd></dt><dd>Mute</dd>
+      <dt><kbd>C</kbd></dt><dd>Subtitles on / off</dd>
+      <dt><kbd>P</kbd></dt><dd>Picture in picture</dd>
+      <dt><kbd>0</kbd></dt><dd>Back to the start</dd>
+      <dt><kbd>Esc</kbd></dt><dd>Close the film</dd>
+      <dt><kbd>/</kbd></dt><dd>Search</dd>
+      <dt><kbd>?</kbd></dt><dd>This list</dd>
+    </dl>
+    <form method="dialog"><button type="submit" class="pill-btn">Close</button></form>
+  </dialog>
+  <button type="button" class="pill-btn keys-btn" data-act="help" aria-label="Keyboard shortcuts"><i data-i="keys"></i></button>
+</section>
+<script src="{{ url_for('static', filename='nagatha-core.js') }}"></script>
+<script src="{{ url_for('static', filename='nagatha-app.js') }}"></script>
+{% endblock %}

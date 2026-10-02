@@ -45,6 +45,7 @@ import recovery_web
 import ship as ship_mod
 import tasks
 import telemetry_web
+import video as video_mod
 import watch
 import workshop as workshop_mod
 from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, PORTALS, SERVICES, missing_settings
@@ -86,6 +87,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     app.extensions["workshop"] = workshop
     player = player_mod.Player(home)                # Bilby's Audio Service: the pass and Connect (admin only)
     app.extensions["player"] = player               # (so tests/dev_music.py can point it at a gate on this machine)
+    video = video_mod.Video(home)                   # Nagatha's Video Service: the pass for the video gate (admin only)
+    app.extensions["video"] = video                 # (so tests/dev_video.py can point it at the gate on this machine)
     telemetry_web.init_app(app)                     # usage recording, /privacy, the tap beacon, /home/telemetry
 
     def me() -> str:
@@ -137,7 +140,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                                hidden_up=bool(status and status.status == "RUNNING"
                                               and any(g not in shown for g in status.games)),
                                show_experiments=auth.has_portal(me(), "experiments"),
-                               music_gate=home.can("music_gate"),
+                               music_gate=home.can("music_gate"), video_gate=home.can("video_gate"),
                                has_me="me" in app.blueprints)
 
     @app.get("/health")
@@ -739,6 +742,38 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         return jsonify(queued=ok, needs_tap=ok and player.needs_tap(me(), dev)), (200 if ok else 409)
 
     app.register_blueprint(listen)
+
+    # ── Nagatha's Video Service: the Captain's Jellyfin films on any browser (video.py; admin only) ────
+    films = Blueprint("video", __name__, url_prefix="/video")
+
+    @films.get("")
+    @auth.admin_required
+    def video_page():
+        return render_template("video.html")
+
+    @films.get("/manifest.webmanifest")
+    def video_manifest():
+        """Add to Home Screen opens straight into the film library, full screen. (Public, like /static: the browser fetches a
+        manifest without the sign-in cookie; it names the app and nothing else.)"""
+        icon = url_for("static", filename="apple-touch-icon.png")
+        start = url_for("video.video_page")
+        return app.response_class(json.dumps({
+            "id": start, "name": video_mod.NAME, "short_name": video_mod.SHORT_NAME,
+            "description": "The Captain's film library, streamed from home to any browser.",
+            "start_url": start, "scope": start, "display": "standalone", "orientation": "any", "categories": ["entertainment"],
+            "background_color": "#000000", "theme_color": "#000000",
+            "icons": [{"src": icon, "sizes": "180x180", "type": "image/png"},
+                      {"src": url_for("static", filename="favicon.svg"), "sizes": "any", "type": "image/svg+xml"}]}),
+            mimetype="application/manifest+json")
+
+    @films.get("/gate")
+    @auth.admin_required
+    def video_gate():
+        resp = jsonify(video.gate())
+        resp.headers["Cache-Control"] = "no-store"          # a pass is a credential: never from a cache
+        return resp
+
+    app.register_blueprint(films)
 
     # ── queued tasks from remote operators (tasks.py) ──────────────────────────
     @app.post("/tasks/run")

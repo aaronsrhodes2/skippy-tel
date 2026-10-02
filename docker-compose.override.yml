@@ -63,6 +63,8 @@ services:
       CLAUDE_BRIDGE_URL: http://host.docker.internal:9337   # Claude Code's bridge on the host: the private Skippy on /me
       MUSIC_GATE_URL: http://music-gate:8080   # Bilby's Audio Service's library...
       MUSIC_GATE_PUBLIC: https://skippy-pc.tailab2cc7.ts.net   # ...and its Tailscale Funnel address (not a secret)
+      VIDEO_GATE_URL: http://video-gate:8080   # Nagatha's Video Service's library (its /health "ready")...
+      VIDEO_GATE_PUBLIC: https://skippy-pc.tailab2cc7.ts.net:8443   # ...and its Funnel address: 443 is the music gate's
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

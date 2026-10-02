@@ -176,6 +176,16 @@ a "Tap to start the sound" bar once (it publishes `armed` in its Connect check-i
 Run it beside the REAL gate on this machine with `python portal/tests/dev_music.py`. Full description, the autoplay
 rule and the tests: `docs/portal/README.md` → Bilby's Audio Service.
 
+## Nagatha's Video Service (the browser video app, `/video`)
+
+The Captain's Jellyfin films in any browser, admin only, a tile beside Bilby's: `portal/templates/video.html` +
+`portal/static/nagatha-{core,app}.js` + `nagatha.css` (portal colour variables only, amber accent) + `portal/video.py` (the pass, label
+`video-gate-v1`: a music pass never opens it). The film goes browser → Tailscale Funnel `:8443` → `services/video-gate` → Jellyfin; never
+through the portal. The reporter's `video_gate` capability (`VIDEO_GATE_URL`/`VIDEO_GATE_PUBLIC` in `docker-compose.override.yml`) is ready
+only when the gate's `/health` says `ready`. Direct play when the catalog says `direct`, else HLS (hls.js self-hosted in
+`portal/static/vendor/`, Safari's own on Apple). Run it against the REAL gate on this machine with `python portal/tests/dev_video.py`.
+Full description and tests: `docs/portal/README.md` → Nagatha's Video Service.
+
 ## Private Skippy (the Workshop: left side of `/me`)
 
 The Captain's own chat is Claude Code (Opus, hard-coded, all the time) on skippy-pc, admin
