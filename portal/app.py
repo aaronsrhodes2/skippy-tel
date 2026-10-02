@@ -534,7 +534,13 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @admin.post("/restart")
     @auth.admin_required
     def restart():
-        flash(ops.restart_server(vm)[1], "ok")
+        """From a game's page the form names the game (`game`): the VM comes back with that game only. Before, the page
+        restarted whatever list was saved, so RuneScape's button brought back every game that had run last time."""
+        game = request.form.get("game")
+        if game is not None and game not in GAMES:
+            abort(400)
+        ok, message = ops.restart_server(vm, [game] if game else None)
+        flash(message, "ok" if ok else "error")
         return back("admin.index")
 
     def run_discord_setup() -> str:

@@ -71,8 +71,7 @@
     {# <<< readiness #}
 
     {% if running %}
-      <form class="inline" method="post" action="{{ url_for('dashboard.games_stop') }}"
-            onsubmit="return confirm('Stop the server for everyone? Worlds are saved first.');" style="display:block;margin-top:18px">
+      <form class="inline" method="post" action="{{ url_for('dashboard.games_stop') }}" style="display:block;margin-top:18px">
         <button type="submit" class="danger">Stop server</button>
       </form>
     {% elif asleep and is_admin %}

@@ -640,11 +640,10 @@ def test_a_first_message_follows_to_the_end_and_a_failed_send_does_not_strand_th
 
 
 @needs_node
-def test_new_chat_still_asks_first_when_a_task_is_running_and_then_clears_everything(page):
-    steps = [{"adv": 2 * S}, {"confirm": False}, {"click": "ps-new"}, {"snap": "kept"},
-             {"confirm": True}, {"click": "ps-new"}, {"snap": "cleared"}]
+def test_new_chat_clears_everything_at_once_even_while_a_task_runs(page):
+    """No "are you sure" (the Captain's rule): the task keeps going on skippy-pc, the chat just lets go of it."""
+    steps = [{"adv": 2 * S}, {"click": "ps-new"}, {"snap": "cleared"}]
     out = drive(page, steps, tasks={"t1": {"state": "running", "events": [ev(1)]}}, follow="t1")
-    assert out["snaps"]["kept"]["log"][-1]["text"] == "step 1" and out["snaps"]["kept"]["sendDisabled"]
     c = out["snaps"]["cleared"]
     assert c["log"] == [] and c["task"] is None and not c["sendDisabled"] and not c["strip"]
 

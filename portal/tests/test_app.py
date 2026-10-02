@@ -44,8 +44,8 @@ class FakeVm:
         self.state.status = "TERMINATED"
         return self.state
 
-    def restart(self):
-        self.calls.append(("restart",))
+    def restart(self, games=None):
+        self.calls.append(("restart",) if games is None else ("restart", tuple(games)))
         return self.state
 
     def serial_output(self, port):
@@ -242,7 +242,17 @@ def test_admin_restart(env):
     client, vm, _ = env
     login(client, ADMIN)
     client.post("/admin/restart")
-    assert vm.calls[-1] == ("restart",)
+    assert vm.calls[-1] == ("restart",)                                         # the Admin page: the saved list
+
+
+def test_a_game_pages_restart_brings_back_that_game_only(env):
+    client, vm, _ = env
+    login(client, ADMIN)
+    page = client.get("/games/dragonwilds").data.decode()
+    assert '<input type="hidden" name="game" value="dragonwilds">' in page and "Update &amp; play</button>" in page
+    client.post("/admin/restart", data={"game": "dragonwilds", "next": "/games/dragonwilds"})
+    assert vm.calls[-1] == ("restart", ("dragonwilds",))
+    assert client.post("/admin/restart", data={"game": "minecraft"}).status_code == 400
 
 
 def test_chat_round_trip(env):
@@ -566,7 +576,7 @@ def test_game_page_admin_section_only_for_admins(env):
     assert "Owner Player ID" not in page and "Restart" not in page
     login(client, ADMIN)
     page = client.get("/games/dragonwilds").data.decode()
-    assert "Owner Player ID" in page and "Restart &amp; update" in page
+    assert "Owner Player ID" in page and "Update &amp; play" in page
     assert "Valheim" not in page.split("<h2>Admin</h2>")[1]      # only this game's settings
     assert "adm1n" not in page and "hunter22" not in page         # secrets never rendered
 

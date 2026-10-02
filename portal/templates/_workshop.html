@@ -411,8 +411,7 @@
       ui();
     });
     reloadBtn.addEventListener("click", () => location.reload());
-    function leaveConversation() {                 // false: the Captain kept the running task in view
-      if (running && !confirm("Skippy is mid-task. Start a new chat anyway? (The task keeps going; use Stop first to end it.)")) return false;
+    function leaveConversation() {                 // no "are you sure": the task keeps going on skippy-pc either way
       const job = running; running = null; if (job && job.wake) job.wake();
       turns = []; save(); store.del(K.task); log.replaceChildren(); ui();
       return true;

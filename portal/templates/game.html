@@ -216,21 +216,20 @@
     <div class="card">
       {% include "_server_admin.html" %}   {# the Server admin card: admin only, like everything in this block #}
       <div class="row">
-        <form class="inline" method="post" action="{{ url_for('admin.restart') }}"
-              onsubmit="return confirm('Restart now? Players are disconnected; worlds are saved first.');">
+        <form class="inline" method="post" action="{{ url_for('admin.restart') }}">
           <input type="hidden" name="next" value="{{ url_for('dashboard.game', gid=game.id) }}">
-          <button type="submit">Restart &amp; update</button>
+          <input type="hidden" name="game" value="{{ game.id }}">
+          <button type="submit">Update &amp; play</button>
         </form>
         {% if running %}
-        <form class="inline" method="post" action="{{ url_for('dashboard.games_stop') }}"
-              onsubmit="return confirm('Stop the server for everyone? Worlds are saved first.');">
+        <form class="inline" method="post" action="{{ url_for('dashboard.games_stop') }}">
           <input type="hidden" name="next" value="{{ url_for('dashboard.game', gid=game.id) }}">
           <button type="submit" class="danger">Stop server</button>
         </form>
         {% endif %}
         <a class="btn" href="{{ url_for('admin.logs', game=game.id) }}">{{ game.name }} logs</a>
       </div>
-      <p class="help">Restart applies saved settings and pulls the latest server and game updates.</p>
+      <p class="help">Update &amp; play starts (or restarts) the server with {{ game.name }} only, on its latest update with your saved settings. Every start pulls the latest version, so Play gets the update too.</p>
     </div>
 
     <form method="post" action="{{ url_for('admin.settings') }}" class="card">

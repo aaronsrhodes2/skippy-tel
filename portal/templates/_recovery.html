@@ -1,11 +1,11 @@
 {# The Admin page's recovery cards (recovery.py / recovery_web.py). Admin only: admin.html is the only page that includes
    this, and every button posts to /admin/recovery/<action>, which checks the admin, the origin, a confirm and a rate limit.
-   The page asks first (window.confirm(): a bare confirm() inside an inline handler finds the form's own hidden `confirm`
-   input first and throws), then fills in confirm=yes; with no script the server asks on a page of its own. #}
+   No pop-up (the Captain's rule: no confirm boxes): the page fills in confirm=yes itself; a POST without it (no script, or
+   a hand-made one) gets the server's own confirm page instead of acting. #}
 {% macro button(action, cls="", extra="") -%}
   <form class="inline" method="post" action="{{ url_for('recovery.act', action=action) }}"
         data-ask="{{ rc.actions[action].ask }}"
-        onsubmit="if (!window.confirm(this.dataset.ask)) return false; this.elements.confirm.value = 'yes';">
+        onsubmit="this.elements.confirm.value = 'yes';">
     <input type="hidden" name="confirm" value="">
     {{ extra }}
     <button type="submit" class="{{ cls }}">{{ rc.actions[action].label }}</button>
@@ -77,7 +77,7 @@
 
       <form method="post" action="{{ url_for('recovery.act', action='rollback') }}"
             data-ask="{{ rc.actions['rollback'].ask }}"
-            onsubmit="if (!window.confirm(this.dataset.ask)) return false; this.elements.confirm.value = 'yes';">
+            onsubmit="this.elements.confirm.value = 'yes';">
         <input type="hidden" name="confirm" value="">
         <label class="field" for="rb-revision">Roll back to (optional)</label>
         <input type="text" id="rb-revision" name="revision" autocomplete="off" pattern="(latest|skippy-portal-[a-z0-9-]+)?"
@@ -125,7 +125,7 @@
         {{ rc.pc_wait }} s. Nothing is rebuilt and nothing is deleted.</p>
       <form class="inline" method="post" action="{{ url_for('recovery.act', action='pc-restart-service') }}"
             data-ask="{{ rc.actions['pc-restart-service'].ask }}"
-            onsubmit="if (!window.confirm(this.dataset.ask)) return false; this.elements.confirm.value = 'yes';">
+            onsubmit="this.elements.confirm.value = 'yes';">
         <input type="hidden" name="confirm" value="">
         <label class="field" for="pc-service">Service</label>
         <select id="pc-service" name="service">
@@ -135,7 +135,7 @@
       </form>
       <form class="inline" method="post" action="{{ url_for('recovery.act', action='pc-reset-workshop') }}"
             data-ask="{{ rc.actions['pc-reset-workshop'].ask }}"
-            onsubmit="if (!window.confirm(this.dataset.ask)) return false; this.elements.confirm.value = 'yes';">
+            onsubmit="this.elements.confirm.value = 'yes';">
         <input type="hidden" name="confirm" value="">
         <label class="field" for="pc-project">Private Skippy's copy of</label>
         <select id="pc-project" name="project">

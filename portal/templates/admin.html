@@ -9,8 +9,7 @@
   {% else %}
     <p><strong>{{ status.status }}</strong> &middot; {{ status.machine_type }}
        &middot; games: {{ status.games | join(', ') or 'none' }} &middot; <code class="code">{{ status.external_ip }}</code></p>
-    <form class="inline" method="post" action="{{ url_for('admin.restart') }}"
-          onsubmit="return confirm('Restart now? Players are disconnected; worlds are saved first.');">
+    <form class="inline" method="post" action="{{ url_for('admin.restart') }}">
       <button type="submit">Restart &amp; update</button>
     </form>
     <a class="button" href="{{ url_for('admin.logs') }}">Server logs</a>
@@ -108,8 +107,7 @@
         <a class="btn" href="{{ f.mailto }}">Invite ✉</a>
         <button type="button" data-copy="{{ f.invite_text }}" title="The same note, on the clipboard: paste it into Discord or a text">Copy invite</button>
         <button type="submit" class="danger" formaction="{{ url_for('admin.friends_remove') }}"
-                data-email="{{ f.email }}"
-                onclick="return confirm('Remove ' + this.dataset.email + ' from the portal?');">Remove</button>
+                data-email="{{ f.email }}">Remove</button>
       </p>
     </form>
   {% else %}

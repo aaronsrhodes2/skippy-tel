@@ -31,10 +31,9 @@ def test_an_email_can_never_reach_javascript_on_the_admin_page(env):
     admin.post("/admin/friends", data={"email": HOSTILE, "portals": ["valheim"], "from_request": "1"})
     page = admin.get("/admin").data.decode()
     handlers = re.findall(r'\son(?:click|submit|change|load|error)="([^"]*)"', page)
-    assert handlers and not any("evil.example.com" in h or "alert" in h for h in handlers)      # nothing of theirs inside a handler
+    assert not any("evil.example.com" in h or "alert" in h for h in handlers)      # nothing of theirs inside a handler
     carried = [html.unescape(v) for v in re.findall(r'data-email="([^"]*)"', page)]
     assert HOSTILE in carried                                                                     # it travels as an escaped attribute
-    assert "this.dataset.email" in page
     assert "<img src=x" not in page and "<script>alert(2)" not in page
 
 

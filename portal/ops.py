@@ -81,9 +81,15 @@ def stop_server(vm) -> tuple[bool, str]:
     return True, "Server stopped. Worlds were saved first."
 
 
-def restart_server(vm) -> tuple[bool, str]:
+def restart_server(vm, games: list[str] | None = None) -> tuple[bool, str]:
+    """Restart the VM. `games` (from a game's own page: just that game) replaces the saved list; None keeps it (the
+    Admin page and the chat tool, which say which games that is)."""
+    if games is not None:
+        games = [g for g in games if g in GAMES]
+        if not games:
+            return False, "Pick a game."
     try:
-        status = vm.restart()
+        status = vm.restart(games) if games is not None else vm.restart()
     except CapacityError as exc:
         return False, capacity_message(exc)
     return True, (f"Restarted ({', '.join(status.games) or 'no games'}). Server images and game "

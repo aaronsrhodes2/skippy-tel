@@ -477,15 +477,15 @@ def test_the_stuck_and_failed_buttons_appear_only_when_they_apply():
     assert "/admin/recovery/rerun-failed" in page and "/admin/recovery/cancel-stuck" not in page
 
 
-def test_the_page_confirm_calls_the_window_not_the_forms_own_confirm_field(env):
-    """Inside an inline handler a bare `confirm` is the form's hidden input named confirm: calling it throws, and the
-    form posted without confirm=yes (found by pressing the button in a browser)."""
+def test_the_buttons_act_at_once_with_no_pop_up(env):
+    """The Captain's rule: no confirm boxes. Each form fills in confirm=yes itself; a POST without it (not from this page)
+    still gets the server's own confirm page (test_nothing_happens_without_a_confirm_the_server_asks_instead)."""
     _, client, _ = env
     login(client, ADMIN)
     raw = client.get("/admin").data.decode()
     forms = raw.count('action="/admin/recovery/')
-    assert forms >= 4 and raw.count("if (!window.confirm(this.dataset.ask)) return false; this.elements.confirm.value = 'yes';") == forms
-    assert "if (!confirm(" not in raw
+    assert forms >= 4 and raw.count("onsubmit=\"this.elements.confirm.value = 'yes';\"") == forms
+    assert "confirm(" not in raw
 
 
 def test_a_friend_never_sees_the_cards(env):
