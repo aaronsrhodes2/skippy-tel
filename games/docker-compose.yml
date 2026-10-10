@@ -139,6 +139,10 @@ services:
     # not an addon's id) is downloaded by the server at every start. 27015/tcp is RCON and deliberately not published.
     image: ceifa/garrysmod:latest
     container_name: garrysmod
+    # srcds only writes its console to stdout when it has a terminal: without one the log stops after Steam's start-up lines
+    # and portal/readiness.py never sees the server come up (seen on the first real boot, 2026-10-10).
+    tty: true
+    stdin_open: true
     ports:
       - "27015:27015/udp"
     environment:
