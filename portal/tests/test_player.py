@@ -414,7 +414,7 @@ def test_the_music_page_has_a_control_for_each_way_in_and_the_words_are_only_nam
 
 def test_the_signal_lamp_follows_the_line_and_the_library():
     js = (STATIC / "bilby-app.js").read_text(encoding="utf-8")
-    css = (STATIC / "bilby-player.css").read_text(encoding="utf-8")
+    css = (STATIC / "bridge.css").read_text(encoding="utf-8")                              # a lamp's own states are the bridge's
     body = re.search(r"function syncSignal\(\) \{(.*?)\n  \}", js, re.S).group(1)
     assert '"warn"' in body and '"off"' in body and '"on"' in body and 'dataset.signal === "lost"' in body
     assert js.count("syncSignal()") >= 5                                                  # drawn whenever the line or a notice changes
