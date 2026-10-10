@@ -204,6 +204,13 @@ jobs:
           curl -fsS -m 60 -X POST -H 'Content-Type: application/json' \
             -d '{"question": "how fast does a 5 cm copper ball hit the ground from 10 km?"}' "$URL/ask" \
             | python3 -c "import json,sys; r=json.load(sys.stdin)['result']; print(r['value'], r['units']); assert r['value']"
+          # /mcp: the remote MCP server Claude's "mentat" connector points at (initialize, then a real call)
+          curl -fsS -m 30 -X POST -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+            -d '{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "deploy-smoke", "version": "0"}}}' \
+            "$URL/mcp" | python3 -c "import json,sys; r=json.load(sys.stdin)['result']; print('mcp', r['protocolVersion']); assert 'tools' in r['capabilities']"
+          curl -fsS -m 30 -X POST -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+            -d '{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "schwarzschild_radius", "arguments": {"mass_kg": 1.989e30}}}' \
+            "$URL/mcp" | python3 -c "import json,sys; r=json.load(sys.stdin)['result']; v=json.loads(r['content'][0]['text'])['value']; print('mcp r_s', v); assert not r['isError'] and 2950 < v < 2960"
           curl -fsS -m 30 "$URL/wva/catalog" \
             | python3 -c "import json,sys; r=json.load(sys.stdin)['result']; n=sum('weapon' in w for w in r['weapons']); print(n, 'Weapon vs. Armor presets'); assert n >= 20"
           curl -fsS -m 60 -X POST -H 'Content-Type: application/json' \

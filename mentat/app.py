@@ -14,8 +14,11 @@ builds that same server, catching it instead of running stdio, and serves:
                              colours), environments, limits  (wva.py)
     POST /wva/solve          {weapon, armor_layers, environment, distance_m} → the game's own
                              solve(), as JSON; inputs validated and clamped first
+    POST /mcp                the same public tools as a remote MCP server (Streamable HTTP,
+                             stateless, JSON replies): what Claude's custom connector and
+                             any MCP client point at, instead of a local `docker exec` copy
 
-It's public (the Experiments playground and Skippy's chat call it), so:
+It's public (the Experiments playground, Skippy's chat and MCP clients call it), so:
   • runs as the zero-permission `skippy-mentat` service account (bootstrap)
   • tools that need a local LLM or keep per-session state are left out
   • per-IP rate limit, argument size cap, per-call timeout
@@ -34,6 +37,8 @@ from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as CallTimeout
 
 from flask import Flask, jsonify, request
+from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS
+from mcp.types import LATEST_PROTOCOL_VERSION
 
 import wva
 
@@ -243,6 +248,103 @@ def ask():
     if not question:
         return jsonify(ok=False, error="ask needs a question"), 400
     return _guarded("ask", _ask, question[:2000])
+
+
+# ── /mcp: the same public tools as a remote MCP server ─────────────────────────
+# MCP's Streamable HTTP transport in its simplest legal form: stateless (no session
+# id), every POST answered with plain JSON, no server-sent stream (GET is a 405). A
+# tools-only server needs nothing more, and this way the endpoint sits behind the same
+# public set and the same guards as POST /tools/<name>, with no second server process.
+MCP_TOOLS = [{"name": t.name, "description": (t.description or "").strip(), "inputSchema": t.inputSchema}
+             for t in sorted(TOOLS.values(), key=lambda t: t.name)]
+MAX_MCP_BYTES = MAX_ARGS_BYTES + 4_000     # the arguments plus the JSON-RPC envelope
+
+
+def _mcp_instructions() -> str | None:
+    """sigma-ground's own rules for the model (cite every number's source, never guess)."""
+    from sigma_ground.mcp import server as sg
+    return getattr(sg, "SYSTEM_INSTRUCTIONS", None)
+
+
+MCP_INSTRUCTIONS = _mcp_instructions()
+
+
+def _rpc_result(id_, result: dict) -> dict:
+    return {"jsonrpc": "2.0", "id": id_, "result": result}
+
+
+def _rpc_error(id_, code: int, message: str) -> dict:
+    return {"jsonrpc": "2.0", "id": id_, "error": {"code": code, "message": message}}
+
+
+def _tool_reply(text: str, is_error: bool = False) -> dict:
+    return {"content": [{"type": "text", "text": text}], "isError": is_error}
+
+
+def _mcp_call(name: str, args, ip: str) -> dict:
+    """tools/call through POST /tools/<name>'s gates. A refusal is a tool error the
+    model reads (isError), not a transport failure that ends the client's session."""
+    if not isinstance(args, dict):
+        return _tool_reply("arguments must be a JSON object", True)
+    if _rate_limited(ip):
+        return _tool_reply("Slow down: rate limit reached, try again in a minute.", True)
+    if unsafe_arg(args) is not None:
+        return _tool_reply("That input looks like code, not maths; Mentat won't evaluate it.", True)
+    future = _pool.submit(_call, name, args)
+    try:
+        return _tool_reply(json.dumps(future.result(timeout=CALL_TIMEOUT_S), default=str))
+    except CallTimeout:
+        return _tool_reply(f"{name} took longer than {CALL_TIMEOUT_S}s", True)
+    except Exception as exc:  # noqa: BLE001 — tool/validation errors go back as messages
+        return _tool_reply(str(exc)[:2000], True)
+
+
+def _mcp_handle(msg, ip: str) -> dict | None:
+    """One JSON-RPC message → its reply; None for a notification (or a client's reply)."""
+    if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0":
+        return _rpc_error(None, -32600, "not a JSON-RPC 2.0 message")
+    if "method" not in msg or "id" not in msg:
+        return None
+    method, id_, params = msg["method"], msg["id"], msg.get("params") or {}
+    if not isinstance(params, dict):
+        return _rpc_error(id_, -32602, "params must be an object")
+    if method == "initialize":
+        asked = params.get("protocolVersion")
+        return _rpc_result(id_, {
+            "protocolVersion": asked if asked in SUPPORTED_PROTOCOL_VERSIONS else LATEST_PROTOCOL_VERSION,
+            "capabilities": {"tools": {"listChanged": False}},
+            "serverInfo": {"name": "mentat", "version": (os.environ.get("SIGMA_GROUND_REF") or "dev")[:12]},
+            **({"instructions": MCP_INSTRUCTIONS} if MCP_INSTRUCTIONS else {}),
+        })
+    if method == "ping":
+        return _rpc_result(id_, {})
+    if method == "tools/list":
+        return _rpc_result(id_, {"tools": MCP_TOOLS})
+    if method == "tools/call":
+        name = params.get("name")
+        if name not in TOOLS:
+            return _rpc_error(id_, -32602, f"no public tool named {name!r}")
+        return _rpc_result(id_, _mcp_call(name, params.get("arguments") or {}, ip))
+    return _rpc_error(id_, -32601, f"method not found: {method}")
+
+
+@app.post("/mcp")
+def mcp_endpoint():
+    if (request.content_length or 0) > MAX_MCP_BYTES:
+        return jsonify(_rpc_error(None, -32600, "message too large")), 413
+    msg = request.get_json(silent=True)
+    if msg is None:
+        return jsonify(_rpc_error(None, -32700, "parse error: the body must be one JSON-RPC message")), 400
+    if isinstance(msg, list):     # JSON-RPC batches left MCP in 2025-06-18; never accepted here
+        return jsonify(_rpc_error(None, -32600, "batches aren't supported: send one message per POST")), 400
+    reply = _mcp_handle(msg, client_ip())
+    return (jsonify(reply), 200) if reply is not None else ("", 202)
+
+
+@app.route("/mcp", methods=["GET", "DELETE"])
+def mcp_no_stream():
+    """Stateless: no server-initiated stream to open (GET), no session to end (DELETE)."""
+    return "", 405, {"Allow": "POST"}
 
 
 @app.get("/wva/catalog")

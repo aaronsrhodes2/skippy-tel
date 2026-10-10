@@ -169,6 +169,12 @@ and jobs; while someone chats, the reporter also polls `GET /home/jobs` every
   there is deliberately NO fallback to the cloud copy (keywords only), which
   serves the public Experiments playground.
 
+- Mentat for Claude (Desktop, claude.ai, phone, Claude Code): the **cloud** copy's `POST /mcp`
+  (`mentat/app.py`: MCP Streamable HTTP, stateless, JSON replies; the same public tools and guards
+  as `/tools/<name>`, no Qwen, so no GPU), added once at claude.ai → Customize → Connectors →
+  custom connector `mentat` = `https://skippy-mentat-1015050363686.us-west1.run.app/mcp`.
+  Not a `docker exec` into `skippytel-mentat`: cloud sessions can't reach skippy-pc, and each
+  exec was its own server process. Smoke-tested by `deploy.yml`.
 - Token: dashboard → "Pair home" shows it once; the portal keeps only its
   sha256 in VM metadata `portal-home`. Put the line in the vault .env and
   SkippyTel's .env.
