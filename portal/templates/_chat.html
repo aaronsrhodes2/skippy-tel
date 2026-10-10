@@ -28,6 +28,8 @@
   <form class="ask">
     <textarea rows="2" placeholder="Say something to Skippy" required></textarea>
     <p><button type="submit">Send</button> <button type="button" class="clear">New chat</button></p>
+    <label class="help raw-ok"><input type="checkbox" class="raw" data-tel="chat:raw-mentat">
+      Mentat only (Haiku off): your words go to Mentat as typed and its own answer comes back unedited</label>
     {% if telemetry_on %}<label class="help save-ok"><input type="checkbox" class="save" data-tel="chat:allow-save">
       Allow us to save your questions</label>
       <span class="help">(off unless you tick it; <a href="{{ url_for('privacy') }}">what that means</a>)</span>{% endif %}
@@ -47,6 +49,16 @@
       try { saveBox.checked = localStorage.getItem(SAVE_KEY) === "yes"; } catch (e) {}
       saveBox.addEventListener("change", () => { try { localStorage.setItem(SAVE_KEY, saveBox.checked ? "yes" : "no"); } catch (e) {} });
     }
+    // "Mentat only": skip Haiku both ways, to compare with and without. Remembered in this browser; those turns are
+    // never added to the history Haiku sees, so a later message isn't coloured by them.
+    const rawBox = form.querySelector("input.raw"), RAW_KEY = "skippy-chat-raw-mentat";
+    function rawHint() { msg.placeholder = rawBox.checked ? "A physics question, straight to Mentat" : "Say something to Skippy"; }
+    try { rawBox.checked = localStorage.getItem(RAW_KEY) === "yes"; } catch (e) {}
+    rawBox.addEventListener("change", () => {
+      try { localStorage.setItem(RAW_KEY, rawBox.checked ? "yes" : "no"); } catch (e) {}
+      rawHint();
+    });
+    rawHint();
     let history = [];
     try { history = JSON.parse(sessionStorage.getItem(KEY) || "[]"); } catch (e) { history = []; }
     // A saved conversation being continued (Skippy Memory; admins only): sent with each message, kept in this tab.
@@ -78,7 +90,7 @@
     function add(role, text, extra) {
       const div = document.createElement("div");
       div.className = "turn " + role + (extra ? " " + extra : "");
-      fill(div, (role === "user" ? "You: " : "Skippy: ") + text);
+      fill(div, (role === "user" ? "You: " : extra === "raw" ? "Mentat (Haiku off): " : "Skippy: ") + text);
       log.appendChild(div);
       log.scrollTop = log.scrollHeight;
       return div;
@@ -90,26 +102,28 @@
       event.preventDefault();
       const text = msg.value.trim();
       if (!text) return;
+      const raw = rawBox.checked;
       add("user", text);
       msg.value = "";
       sendBtn.disabled = true;
-      const pending = add("assistant", "…");
+      const pending = add("assistant", "…", raw ? "raw" : "");
       try {
         const res = await fetch("{{ url_for('chat.send') }}", {
           method: "POST", headers: {"Content-Type": "application/json"},
           // `page` lets Skippy know what you're looking at ("this game" = the one on screen).
           body: JSON.stringify({message: text, history: history, page: location.pathname,
-                                save: !!(saveBox && saveBox.checked), context: context}),
+                                save: !!(saveBox && saveBox.checked), context: context, raw: raw}),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || res.statusText);
-        fill(pending, "Skippy: " + data.reply);
+        fill(pending, (raw ? "Mentat (Haiku off): " : "Skippy: ") + data.reply);
         const used = [...new Set(data.tools || [])];   // receipts: which tools did the work
         const note = document.createElement("div");
         note.className = "receipt";
         note.textContent = used.length ? "tools: " + used.map(t => ({ask_mentat: data.mentat_where === "home" ? "Mentat + Qwen (skippy-pc)" : "Mentat (didn't answer)",
                            now_playing: "Bilby", make_music: "ACE-Step on skippy-pc", music_result: "ACE-Step on skippy-pc"})[t] || t.replace(/_/g, " ")).join(", ")
           : (data.mentat_available ? "answered from the model's own knowledge" : "answered from the model's own knowledge (Mentat offline: skippy-pc or Qwen is down)");
+        if (raw) note.textContent += " · Haiku off: Mentat's answer exactly as it came back";
         pending.append(note);
         (data.media || []).forEach(m => {           // clips skippy-pc made for this reply
           const clip = document.createElement("div"); clip.className = "clip";
@@ -119,10 +133,9 @@
           audio.controls = true; audio.preload = "metadata"; audio.src = m.url; audio.style.width = "100%";
           clip.append(label, audio); pending.append(clip);
         });
-        history.push({role: "user", content: text}, {role: "assistant", content: data.reply});
-        save();
+        if (!raw) { history.push({role: "user", content: text}, {role: "assistant", content: data.reply}); save(); }
       } catch (err) {
-        pending.textContent = "Skippy: " + err.message;
+        pending.textContent = (raw ? "Mentat: " : "Skippy: ") + err.message;
         pending.classList.add("failed");
       } finally {
         sendBtn.disabled = false;

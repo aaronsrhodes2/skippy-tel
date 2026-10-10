@@ -1261,6 +1261,31 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def index():
         return render_template("chat.html")
 
+    def raw_mentat(user, message, question, save):
+        """The chat's "Mentat only" switch: the question goes to Mentat as typed and Mentat's own answer comes back as it
+        left it, with no Haiku on either side (it doesn't read the question first and doesn't put the answer in Skippy's
+        voice). It is for seeing what Haiku adds or loses. Same Mentat, same rights (the person must be allowed the physics
+        tool) and the same rate limit as a normal message; the answer is not added to the conversation history (the page
+        keeps it out), so a later message to Haiku isn't coloured by it."""
+        if not question or question.startswith("(the user chose"):
+            return jsonify(error="Type the physics question to send to Mentat."), 400
+        tools = tools_for(user)
+        try:
+            out = tools.run("ask_mentat", {"question": question})
+        except chat_tools.ToolError as exc:
+            return jsonify(error=str(exc)), 503
+        try:
+            text = json.dumps(json.loads(out), indent=2, ensure_ascii=False)
+        except ValueError:                                  # a very long answer is cut at 20 000 characters
+            text = out
+        print(json.dumps({"event": "chat", "user": user["email"], "model": "none (raw Mentat)",
+                          "tools": ["ask_mentat"], "mentat_available": True, "mentat_where": tools.mentat_where}), flush=True)
+        if save:
+            telemetry_web.record_chat(message, text, "none (raw Mentat)", [("ask_mentat", {"question": question}, out)],
+                                      forced="ask_mentat")
+        return jsonify(reply=text, tools=["ask_mentat"], mentat_available=True, mentat_where=tools.mentat_where,
+                       media=[], raw=True)
+
     @talk.post("/send")
     @skippy_required
     def send():
@@ -1281,6 +1306,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             rest = {"ask_mentat": "(the user chose /physics with no question: ask what to compute)",
                     "make_music": "(the user chose /music with no description: ask what kind of music to make)"
                     }.get(force, "Go ahead.")
+        if body.get("raw") is True:
+            return raw_mentat(user, message, rest, body.get("save") is True)
         try:
             admin = auth.is_admin(user["email"])
             tools = tools_for(user)
