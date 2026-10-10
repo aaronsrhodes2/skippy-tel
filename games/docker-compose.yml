@@ -148,7 +148,7 @@ services:
     environment:
       PUID: "1000"
       PGID: "1000"
-      NAME: ${GARRYSMOD_SERVER_NAME:-Skippy Garry's Mod}
+      NAME: ${GARRYSMOD_SERVER_NAME:-Skippy-GMod}      # one word: the image puts it on the command line unquoted, so a space cuts it short (seen live)
       GAMEMODE: ${GARRYSMOD_GAMEMODE:-sandbox}
       MAP: ${GARRYSMOD_MAP:-gm_construct}
       MAXPLAYERS: ${GARRYSMOD_MAX_PLAYERS:-16}

@@ -254,7 +254,8 @@ GAMES: dict[str, Game] = {
         ram_gb=4,
         connect=lambda ip, env: f"Press <b>~</b> for the console &rarr; <code>connect {ip}:27015</code>",
         settings=(
-            Setting("GARRYSMOD_SERVER_NAME", "Server name", help="Shown in the in-game server list and at the top of the scoreboard."),
+            Setting("GARRYSMOD_SERVER_NAME", "Server name", check=_gmod_password,
+                    help="One word: letters, digits, _ . - (a space cuts the name short, the image puts it on the command line unquoted). Shown in the in-game server list."),
             Setting("GARRYSMOD_PASSWORD", "Join password", secret=True, check=_gmod_password,
                     help="No spaces. Blank: anyone who finds the server can join."),
             Setting("GARRYSMOD_GAMEMODE", "Gamemode", check=_gmod_name,

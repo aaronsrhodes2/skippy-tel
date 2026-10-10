@@ -27,6 +27,7 @@ def test_the_game_has_its_own_glyph_a_port_and_a_way_in():
 
 @pytest.mark.parametrize("key, good, bad", [
     ("GARRYSMOD_PASSWORD", ["", "pw-1.x_y"], ["has space", "a;b", "$(x)", "it's", "x" * 65]),
+    ("GARRYSMOD_SERVER_NAME", ["Skippy-GMod"], ["Skippy GMod", "it's"]),
     ("GARRYSMOD_GAMEMODE", ["", "sandbox", "terrortown"], ["two words", "a;b", "../x"]),
     ("GARRYSMOD_MAP", ["", "gm_construct", "ttt_minecraft_b5"], ["gm construct", "a/b"]),
     ("GARRYSMOD_MAX_PLAYERS", ["", "1", "128"], ["0", "129", "many", "-1", "٣"]),

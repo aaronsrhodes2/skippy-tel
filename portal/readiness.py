@@ -167,7 +167,9 @@ MARKERS: dict[str, Markers] = {
     # A Source dedicated server (srcds). Best knowledge of its console, NOT confirmed against a real log of this image:
     # `Setting breakpad minidump AppID = 4020` is one of the first lines of every srcds start, and
     # `Connection to Steam servers successful.` comes once the server is logged on (anonymously without a GSLT) and
-    # listed, i.e. after the map has loaded. To verify: docs/games/README.md -> Readiness.
+    # listed, i.e. after the map has loaded. OBSERVED on the first real boots (2026-10-10, ops tail): both lines appear, ready ~5 min
+    # after the VM starts and `READY garrysmod=1` followed. Not yet kept as a fixture, hence still unverified.
+    # srcds only writes its console to stdout when the container has a tty (games/docker-compose.yml: tty: true).
     "garrysmod": Markers(
         boot=("Setting breakpad minidump AppID",),
         ready=("Connection to Steam servers successful",),
