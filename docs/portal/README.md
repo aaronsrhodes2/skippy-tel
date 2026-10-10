@@ -140,9 +140,18 @@ confirmation before stopping or restarting.
 **Barney Style (Haiku on or off).** A checkbox under the chat box, OFF by default and remembered in the browser. Off, the page
 sends the question straight to Mentat as typed and shows Mentat's own answer unedited; on, Haiku explains it simply as before.
 Comparing the two shows what Haiku adds or loses. No model is called when it is off; same Mentat, same physics permission and
-rate limit as a normal message (the page sends `raw: true` on `POST /chat/send`; `raw_mentat` in `portal/app.py`). The straight-to-Mentat
-turns are kept out of the history Haiku sees, so a later Barney Style message isn't coloured by them. Because everything goes to
-Mentat while it is off, server questions ("is Valheim up?") need Barney Style on. Tests: `portal/tests/test_chat_raw.py`.
+rate limit as a normal message (the page sends `raw: true` on `POST /chat/send`; `raw_mentat` in `portal/app.py`). Switching it
+on fills the box with "Give it to me Barney Style"; sending that makes Haiku read the whole chat (the straight-to-Mentat answers are
+in the history, marked as Mentat's own) and explain it in plain words using only what Mentat found, with no tools. Because
+everything goes to Mentat while it is off, server questions ("is Valheim up?") need Barney Style on.
+
+**Mentat gaps are auto-filed.** When Mentat answers with `value: null` (sigma-ground can't model the question, or recognised it
+and couldn't run it), the chat replies "failed due to incompetence" (straight to Mentat) or has Haiku say it, and the portal logs
+a bug: one line `{"event": "mentat_gap", ...}` in Cloud Run's logs and a `mentat_gap` event in the activity record skippy-pc
+collects (`log_mentat_gap` in `portal/app.py`, `mentat_gap` in `portal/chat_tools.py`). The question and Mentat's reason are kept
+only for the Captain or someone who ticked "Allow us to save your questions"; for anyone else it records that a gap happened and
+how it was read. To find them: search the logs for `mentat_gap`, then fix what sigma-ground is missing. An outage (Mentat or Qwen
+down) is not a gap. Tests: `portal/tests/test_chat_raw.py`.
 
 **Everywhere, for everyone:** the chat is docked bottom-right on every page
 (same conversation as the Chat page, carried across pages in the tab) and

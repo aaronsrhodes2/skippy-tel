@@ -1261,6 +1261,22 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def index():
         return render_template("chat.html")
 
+    def log_mentat_gap(user, question, out, how, save):
+        """A physics question Mentat could not model: auto-file it. One structured line in Cloud Run's logs
+        (`{"event": "mentat_gap", ...}`) and a `mentat_gap` event in the activity record that skippy-pc collects, so a
+        later session can fix what sigma-ground is missing. The question and Mentat's reason are kept only for the Captain
+        or someone who ticked "Allow us to save your questions"; for anyone else just that a gap happened and how."""
+        gap = chat_tools.mentat_gap(out)
+        if gap is None:
+            return None
+        keep = auth.is_admin(user["email"]) or save
+        event = {"how": how, "route": gap["route"][:60], "tag": gap["tag"][:40]}
+        if keep:
+            event.update(question=question[:300], reason=gap["reason"][:400])
+        print(json.dumps({"event": "mentat_gap", "user": user["email"], **event}), flush=True)
+        telemetry_web.record_gap(event)
+        return {"logged": True, "reason": gap["reason"][:400] if keep else None}
+
     def raw_mentat(user, message, question, save):
         """The chat's "Barney Style" switch, when it is OFF (the default): the question goes to Mentat as typed and Mentat's own answer comes back as it
         left it, with no Haiku on either side (it doesn't read the question first and doesn't put the answer in Skippy's
@@ -1274,6 +1290,12 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             out = tools.run("ask_mentat", {"question": question})
         except chat_tools.ToolError as exc:
             return jsonify(error=str(exc)), 503
+        gap = log_mentat_gap(user, question, out, "straight to Mentat", save)
+        if gap:                                             # Mentat has no physics for this: say so, and it's logged
+            print(json.dumps({"event": "chat", "user": user["email"], "model": "none (raw Mentat)", "tools": ["ask_mentat"],
+                              "mentat_available": True, "mentat_where": tools.mentat_where, "gap": True}), flush=True)
+            return jsonify(reply="failed due to incompetence", tools=["ask_mentat"], mentat_available=True,
+                           mentat_where=tools.mentat_where, media=[], raw=True, gap=gap)
         try:
             text = json.dumps(json.loads(out), indent=2, ensure_ascii=False)
         except ValueError:                                  # a very long answer is cut at 20 000 characters
@@ -1325,11 +1347,18 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 calls.append((name, args, ""))
                 out = tools.run(name, args)
                 calls[-1] = (name, args, out)
+                if name == "ask_mentat":                  # Mentat had no physics for it: file the bug
+                    log_mentat_gap(user, str(args.get("question") or ""), out, "through Haiku", body.get("save") is True)
                 return out
 
             schemas = tools.schemas()
             if force in ("ask_mentat", "make_music") and rest.startswith("(the user chose"):
                 force = None                     # nothing to act on yet: let Skippy ask
+            if chat.wants_barney(rest) and not force:
+                # "Give it to me Barney Style": explain the whole conversation (Mentat's answers included) plainly,
+                # grounded in what Mentat found. No tools: nothing new is computed or looked up.
+                prompt += chat.barney_instruction()
+                schemas = None
             text = skippy.reply(prompt,
                                 chat.build_messages(body.get("history"), rest),
                                 tools=schemas, run_tool=run_tool, model=model, force_tool=force)

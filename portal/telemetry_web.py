@@ -155,6 +155,21 @@ def record_chat(message: str, reply: str, model: str, calls, forced: str | None 
         return None
 
 
+def record_gap(detail: dict):
+    """A physics question Mentat couldn't model (an auto-filed bug for the Captain to fix in sigma-ground). Always
+    recorded: `detail` carries what the caller decided is fit to keep (the question only for the Captain or someone who
+    ticked "Allow us to save your questions")."""
+    tel = current_app.extensions["telemetry"]
+    try:
+        person = who() if tel.enabled else None
+        if not person:
+            return None
+        return tel.record("mentat_gap", "gap", *person, **detail)
+    except Exception:   # noqa: BLE001 — recording must never break the chat
+        log.warning("telemetry: gap not recorded", exc_info=True)
+        return None
+
+
 def init_app(app):
     """Wire the recorder into `app`: the hooks, /privacy, the tap beacon and the home reporter's pull."""
     tel = tel_mod.Telemetry(enabled=_on(app.config.get("TELEMETRY_ENABLED", True)))
@@ -250,6 +265,8 @@ def describe(kind: str, name: str, detail: dict) -> str:
     if kind == "chat":
         tools = ", ".join(_txt(t.get("name") if isinstance(t, dict) else t, 20) for t in (detail.get("tools") or [])[:4])
         return "asked Skippy: " + _txt(detail.get("message"), 80) + (f" [{tools}]" if tools else "")
+    if kind == "mentat_gap":
+        return "Mentat gap: " + (_txt(detail.get("question"), 80) or _txt(detail.get("route"), 40) or "a question")
     if kind == "error":
         return f"error {name} on {_txt(detail.get('path'))}"
     return name

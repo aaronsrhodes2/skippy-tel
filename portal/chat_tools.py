@@ -86,6 +86,22 @@ _EVERYONE = ("server_status", "start_game", "stop_server")
 _ADMIN = _EVERYONE + ("restart_server", "server_logs")
 
 
+def mentat_gap(out) -> dict | None:
+    """None when Mentat modelled the question. When it answered but could not (sigma-ground's `simulate` returns
+    value None with a note saying why: not a scenario it can model, or one it recognised but could not run), the gap:
+    {"reason": its note, "route": how it was read, "tag": its provenance tag}. `out` is the tool's JSON text or the dict.
+    An outage (Mentat or Qwen down) is not a gap: nothing was asked of the physics."""
+    try:
+        result = json.loads(out) if isinstance(out, str) else out
+    except ValueError:
+        return None
+    if not isinstance(result, dict) or "value" not in result or result["value"] is not None:
+        return None
+    inputs = result.get("inputs") if isinstance(result.get("inputs"), dict) else {}
+    return {"reason": str(result.get("notes") or "no reason given"), "route": str(inputs.get("route") or ""),
+            "tag": str(result.get("provenance_tag") or "")}
+
+
 class ToolError(Exception):
     """Reported back to the model as an is_error tool result."""
 

@@ -50,14 +50,19 @@
       saveBox.addEventListener("change", () => { try { localStorage.setItem(SAVE_KEY, saveBox.checked ? "yes" : "no"); } catch (e) {} });
     }
     // "Barney Style": Haiku puts it in plain words. OFF by default: the question goes straight to Mentat and its own
-    // answer comes back unedited (no model either way). Remembered in this browser. Turns sent straight to Mentat are
-    // never added to the history Haiku sees, so a later Barney Style message isn't coloured by them.
+    // answer comes back unedited (no model either way). Remembered in this browser. Turning it ON fills the box with
+    // "Give it to me Barney Style"; sending that makes Haiku read the whole chat, Mentat's own answers included (they
+    // are kept in the history, marked as Mentat's), and explain it plainly using only what Mentat found.
     const barneyBox = form.querySelector("input.barney"), BARNEY_KEY = "skippy-chat-barney-style";
+    const BARNEY_PHRASE = "Give it to me Barney Style";
     function barneyHint() { msg.placeholder = barneyBox.checked ? "Say something to Skippy" : "A physics question, straight to Mentat"; }
     try { barneyBox.checked = localStorage.getItem(BARNEY_KEY) === "yes"; } catch (e) {}
     barneyBox.addEventListener("change", () => {
       try { localStorage.setItem(BARNEY_KEY, barneyBox.checked ? "yes" : "no"); } catch (e) {}
       barneyHint();
+      // Switching it on writes the request for you: Haiku then explains the whole chat so far in plain words.
+      if (barneyBox.checked && !msg.value.trim()) { msg.value = BARNEY_PHRASE; msg.focus(); }
+      else if (!barneyBox.checked && msg.value.trim() === BARNEY_PHRASE) msg.value = "";
     });
     barneyHint();
     let history = [];
@@ -124,7 +129,8 @@
         note.textContent = used.length ? "tools: " + used.map(t => ({ask_mentat: data.mentat_where === "home" ? "Mentat + Qwen (skippy-pc)" : "Mentat (didn't answer)",
                            now_playing: "Bilby", make_music: "ACE-Step on skippy-pc", music_result: "ACE-Step on skippy-pc"})[t] || t.replace(/_/g, " ")).join(", ")
           : (data.mentat_available ? "answered from the model's own knowledge" : "answered from the model's own knowledge (Mentat offline: skippy-pc or Qwen is down)");
-        if (raw) note.textContent += " · Haiku off: Mentat's answer exactly as it came back";
+        if (data.gap) note.textContent += " · logged as a Mentat gap to fix" + (data.gap.reason ? ": " + data.gap.reason : "");
+        else if (raw) note.textContent += " · Haiku off: Mentat's answer exactly as it came back";
         pending.append(note);
         (data.media || []).forEach(m => {           // clips skippy-pc made for this reply
           const clip = document.createElement("div"); clip.className = "clip";
@@ -134,7 +140,10 @@
           audio.controls = true; audio.preload = "metadata"; audio.src = m.url; audio.style.width = "100%";
           clip.append(label, audio); pending.append(clip);
         });
-        if (!raw) { history.push({role: "user", content: text}, {role: "assistant", content: data.reply}); save(); }
+        // Mentat's own answers go in the history marked as such, so Barney Style can explain them (and only them).
+        history.push({role: "user", content: text},
+                     {role: "assistant", content: raw ? "Mentat's own answer, no Haiku:\n" + data.reply : data.reply});
+        save();
       } catch (err) {
         pending.textContent = (raw ? "Mentat: " : "Skippy: ") + err.message;
         pending.classList.add("failed");

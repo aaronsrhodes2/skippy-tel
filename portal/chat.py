@@ -120,12 +120,37 @@ def system_prompt(user_name: str, is_admin: bool = False, page: str | None = Non
         "(value, units, and the key steps with their sources) in your voice. Mentat fills in inputs "
         "the user didn't give and marks them as its own inventions: always say which values it "
         "invented (e.g. \"assuming a 10 km drop\"), so the user can correct them. If Mentat's value is "
-        "null, it couldn't model that question: pass on what it says it can do, ask the user for "
+        "null, it couldn't model that question (the portal has already logged it as a bug to fix): start your reply "
+        "with exactly \"failed due to incompetence\", then pass on what Mentat says it can do, ask the user for "
         "anything it needs, and do NOT fill the gap with your own estimate. If ask_mentat isn't "
         "available or fails, Mentat is offline (it runs with Qwen on the Captain's PC): say so, and "
         "don't compute physics answers yourself; offer to try again once it's back. Feel free to be "
         "smug about owning a better Wolfram."
         + (_MUSIC if is_admin else "")
+    )
+
+
+BARNEY_PHRASE = "Give it to me Barney Style"   # what the page puts in the box when Barney Style is switched on
+
+
+def wants_barney(message: str) -> bool:
+    return "barney style" in message.lower()
+
+
+def barney_instruction() -> str:
+    """Appended to the system prompt for a Barney Style message: Haiku reads the whole conversation (the Mentat answers
+    in it came back unedited) and explains it plainly, using only what Mentat found. No tools: nothing new is computed."""
+    return (
+        "\n\n## Barney Style\n"
+        "The user wants the whole conversation so far explained Barney Style. Read all of it, including every Mentat "
+        "answer in it (those are Mentat's own words, unedited), and explain what was found in plain, friendly language "
+        "anyone could follow, the way you would to a curious ten-year-old: short sentences, everyday comparisons, no "
+        "jargon, and say what any unit means. Stay strictly grounded in Mentat's findings: use only numbers, units, "
+        "steps and assumptions that appear in the conversation, never add physics of your own, never correct or "
+        "recompute Mentat, and say plainly which values Mentat assumed on the user's behalf. If a question was answered "
+        "\"failed due to incompetence\", say Mentat couldn't do that one and that it has been logged to be fixed; do "
+        "not guess an answer. If there is no Mentat answer in the conversation yet, say so and invite a physics "
+        "question. You have no tools for this: you are only explaining what is already there."
     )
 
 
