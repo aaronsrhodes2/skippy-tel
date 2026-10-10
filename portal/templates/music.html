@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Bilby's Audio Service — Maker Portal{% endblock %}
 {% block app %}music{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}wave{% endblock %}
 {% block head %}
 {# Add to Home Screen: opens full screen into the player, and iOS keeps the audio going with the screen locked. #}
 <link rel="manifest" href="{{ url_for('music.player_manifest') }}">
@@ -11,8 +13,10 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='bilby-player.css') }}">
 {% endblock %}
 {% block content %}
-{# Bilby's Audio Service. The page is a shell: static/bilby-app.js builds everything from the music gate's catalog, and
-   static/bilby-player.js holds the logic that needs no browser (search, the queue, Bilby DJ's pick, the autoplay state).
+{# Bilby's Audio Service on the bridge. One screen, never scrolled: Home is a deck of controls (glyphs), a list is shown a screen at a
+   time (swipe, the page keys, or drag along the bar under it), the player is a strip along the bottom and its keys under that.
+   The page is a shell: static/bilby-app.js builds everything from the music gate's catalog, and static/bilby-player.js holds the
+   logic that needs no browser (search, paging, the queue, Bilby DJ's pick, the autoplay state, the way back after a dead zone).
    The three URLs below are the only things the page needs from this template. #}
 <section id="bp" class="bp" data-state="boot" data-playing="0" data-sheet=""
          data-gate-url="{{ url_for('music.player_gate') }}" data-checkin-url="{{ url_for('music.player_checkin') }}"
@@ -22,112 +26,116 @@
   {# The browser only lets a page make sound after a tap on it. After a reload (or a remote Play from another device) this is
      the one tap that is needed; it carries on exactly where the music was. #}
   <div class="tapbar" id="tapbar" role="region" aria-label="Tap to start the sound" hidden>
-    <button type="button" class="tap-go" data-act="tap"><i data-i="play"></i><span id="tap-label">Tap to start the sound</span></button>
-    <p class="tap-why" id="tap-why">Browsers only let a page make sound after you tap it. After a reload you need one tap again, and then it carries on from where it was.</p>
+    <button type="button" class="tap-go" data-act="tap"><svg class="g" aria-hidden="true"><use href="#g-play"/></svg><span id="tap-label">Tap to start the sound</span></button>
+    <p class="sr" id="tap-why">Browsers only let a page make sound after you tap it. After a reload you need one tap again, and then it carries on from where it was.</p>
   </div>
 
   <div class="notice" id="notice" role="status" hidden></div>
 
-  <div class="bp-body">
-    <nav class="bp-nav" id="nav" aria-label="Library">
-      <a href="#home" data-view="home"><i data-i="home"></i>Home</a>
-      <a href="#artists" data-view="artists"><i data-i="artist"></i>Artists</a>
-      <a href="#albums" data-view="albums"><i data-i="album"></i>Albums</a>
-      <a href="#tracks" data-view="tracks"><i data-i="note"></i>Songs</a>
-      <a href="#genres" data-view="genres"><i data-i="tag"></i>Genres</a>
-      <a href="#added" data-view="added" id="nav-added"><i data-i="plus"></i>Recently added</a>
-      <a href="#played" data-view="played"><i data-i="clock"></i>Recently played</a>
-      <button type="button" class="pill-btn navq" data-act="queue" id="nav-queue"><i data-i="queue"></i>Queue</button>
-      <div class="nav-sep" aria-hidden="true"></div>
-      <div class="nav-extra">
-        <button type="button" class="pill-btn" data-act="djstart"><i data-i="dj"></i>Bilby, play something</button>
-        <button type="button" class="pill-btn" data-act="help"><i data-i="keys"></i>Keyboard shortcuts</button>
-      </div>
-    </nav>
-
-    <div class="bp-main" id="main">
-      <div class="bp-top">
-        <button type="button" class="ib back" id="back" data-act="back" aria-label="Back" hidden><i data-i="back"></i></button>
-        <div class="search">
-          <i data-i="search"></i>
-          <input type="search" id="q" placeholder="Search songs, artists, albums" autocomplete="off" autocapitalize="off" spellcheck="false"
-                 enterkeyhint="search" aria-label="Search songs, artists, albums and genres" disabled>
-          <button type="button" class="ib clear" id="q-clear" data-act="clear-search" aria-label="Clear search" hidden><i data-i="close"></i></button>
-        </div>
-        <select class="sort" id="sort" aria-label="Sort by" hidden></select>
-      </div>
-      <div class="bp-list" id="listwrap">
-        <div class="bp-scroll" id="scroll" tabindex="-1">
-          <div class="vl-host" id="host" role="list"></div>
-        </div>
-        <div class="rail" id="rail" aria-hidden="true" hidden></div>
-      </div>
+  <div class="bp-top" id="top">
+    <button type="button" class="key" id="back" data-act="back" aria-label="Back" title="Back" hidden><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+    <div class="search">
+      <svg class="g" aria-hidden="true"><use href="#g-search"/></svg>
+      <input type="search" id="q" placeholder="Search" autocomplete="off" autocapitalize="off" spellcheck="false"
+             enterkeyhint="search" aria-label="Search songs, artists, albums and genres" disabled>
+      <button type="button" class="clear" id="q-clear" data-act="clear-search" aria-label="Clear search" title="Clear search" hidden><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
     </div>
+    <button type="button" class="key" id="sort" data-act="sort" aria-label="Sort" title="Sort" hidden><svg class="g" aria-hidden="true"><use href="#g-sort"/></svg></button>
+    <button type="button" class="key" id="letters-key" data-act="letters" aria-label="Jump to a letter" title="Jump to a letter" hidden><svg class="g" aria-hidden="true"><use href="#g-letters"/></svg></button>
   </div>
 
-  {# Now Playing and the Queue: full-screen sheets on a phone, a drawer on a tablet, docked on the right of a wide screen. #}
-  <aside class="bp-side" id="side" aria-label="Now playing and queue">
-    <div class="s-head">
-      <div class="s-tabs" role="tablist">
-        <button type="button" role="tab" id="tab-np" aria-selected="true" aria-controls="panel-np" data-act="tab-np">Now playing</button>
-        <button type="button" role="tab" id="tab-q" aria-selected="false" aria-controls="panel-q" data-act="tab-q">Queue</button>
+  <div class="bp-stage" id="stage">
+    {# Home: a control for each way into the library, the count on it #}
+    <div class="deck" id="deck" hidden></div>
+
+    {# Any list: the screen's worth of rows, and the bar under it that shows (and scrubs) where you are in the whole list #}
+    <div class="bp-list" id="listwrap" hidden>
+      <div class="bp-page" id="scroll" tabindex="-1">
+        <div class="vl-host" id="host" role="list"></div>
       </div>
-      <button type="button" class="ib s-close" data-act="close-sheet" aria-label="Close"><i data-i="down"></i></button>
+      <div class="scrub" id="scrub" role="slider" aria-label="Page" aria-valuemin="1" aria-valuemax="1" aria-valuenow="1" tabindex="0">
+        <div class="pips" id="pips"><i></i></div>
+        <span class="pgno" id="pgno"></span>
+      </div>
+      <div class="rail-bubble" id="bubble" hidden></div>
     </div>
 
-    <div class="panel" id="panel-np" role="tabpanel" aria-labelledby="tab-np">
-      <div class="cover np-cover" id="np-cover"><i data-i="note"></i><img alt=""></div>
-      <div class="np-info">
-        <h2 id="np-title">Nothing playing</h2>
-        <div class="by" id="np-by"></div>
+    {# Now Playing and the Queue: a panel that slides over the stage #}
+    <aside class="sheet bp-side" id="side" aria-label="Now playing and queue" hidden>
+      <div class="s-head">
+        <div class="s-tabs" role="tablist">
+          <button type="button" class="key" role="tab" id="tab-np" aria-selected="true" aria-controls="panel-np" aria-label="Now playing" title="Now playing" data-act="tab-np"><svg class="g" aria-hidden="true"><use href="#g-note"/></svg></button>
+          <button type="button" class="key" role="tab" id="tab-q" aria-selected="false" aria-controls="panel-q" aria-label="Queue" title="Queue" data-act="tab-q"><svg class="g" aria-hidden="true"><use href="#g-queue"/></svg></button>
+        </div>
+        <span class="grow"></span>
+        <button type="button" class="key" data-act="close-sheet" aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-down"/></svg></button>
       </div>
-      <p class="np-lyric" id="np-lyric" hidden></p>
-      <p class="np-tags" id="np-tags"></p>
-      <div class="np-transport">
-        <div class="sk" data-slot="sk"></div>
-        <div class="tp" data-slot="tp"></div>
-        <div class="np-sub" data-slot="sub"></div>
+
+      <div class="panel" id="panel-np" role="tabpanel" aria-labelledby="tab-np">
+        <div class="cover np-cover" id="np-cover"><i data-i="note"></i><img alt=""></div>
+        <div class="np-info">
+          <h2 id="np-title">Nothing playing</h2>
+          <div class="by" id="np-by"></div>
+        </div>
+        <p class="np-lyric" id="np-lyric" hidden></p>
+        <p class="np-tags" id="np-tags"></p>
+        <div class="np-transport">
+          <div class="sk" data-slot="sk"></div>
+          <div class="np-extra" data-slot="right"></div>
+        </div>
+        <div class="np-up">
+          <ol id="np-up"></ol>
+        </div>
+        <p class="np-empty" id="np-empty"><svg class="g" aria-hidden="true"><use href="#g-headset"/></svg></p>
       </div>
-      <div class="np-up">
-        <h3 class="vhead" style="display:block"><span style="color:var(--accent);text-transform:uppercase;letter-spacing:.08em;font-size:.74rem">Up next</span></h3>
-        <ol id="np-up"></ol>
+
+      <div class="panel" id="panel-q" role="tabpanel" aria-labelledby="tab-q" hidden>
+        <div class="q-top">
+          <span class="grow" id="q-sum"></span>
+          <button type="button" class="key" data-act="clear-queue" aria-label="Clear the queue" title="Clear the queue"><svg class="g" aria-hidden="true"><use href="#g-trash"/></svg></button>
+        </div>
+        <div class="bp-list">
+          <div class="bp-page" id="q-scroll" tabindex="-1">
+            <div class="vl-host" id="q-host" role="list"></div>
+          </div>
+          <div class="scrub" id="q-scrub"><div class="pips" id="q-pips"><i></i></div><span class="pgno" id="q-pgno"></span></div>
+        </div>
       </div>
-      <p class="np-empty" id="np-empty">Pick something, or tap <b>Bilby, play something</b> and let the DJ choose.</p>
+    </aside>
+
+    {# A track's options, the sleep timer, other devices: a small panel of keys over the stage #}
+    <div class="sheet menu" id="menu" role="menu" hidden></div>
+
+    {# Jump to a letter: the whole alphabet on one screen #}
+    <div class="sheet" id="lettersheet" hidden>
+      <div class="lang-grid" id="letters"></div>
     </div>
 
-    <div class="panel" id="panel-q" role="tabpanel" aria-labelledby="tab-q" hidden>
-      <div class="q-top">
-        <span class="grow" id="q-sum">The queue is empty.</span>
-        <button type="button" class="pill-btn" data-act="dj" aria-pressed="true" title="When the queue runs out, Bilby keeps picking"><i data-i="dj"></i>Bilby DJ</button>
-        <button type="button" class="pill-btn" data-act="clear-queue"><i data-i="trash"></i>Clear</button>
-      </div>
-      <div class="bp-scroll" id="q-scroll" tabindex="-1">
-        <div class="vl-host" id="q-host" role="list"></div>
-      </div>
-    </div>
-  </aside>
+    <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  </div>
 
   <div class="bp-bar" id="bar" role="region" aria-label="Player">
     <div class="b-line" aria-hidden="true"><i id="b-prog"></i></div>
     <button type="button" class="b-now" data-act="np" aria-label="Open Now Playing">
       <span class="cover" id="b-cover"><i data-i="note"></i><img alt=""></span>
-      <span class="b-txt"><span class="b-title" id="b-title">Nothing playing</span><span class="b-sub" id="b-sub">Pick something, or let Bilby DJ</span></span>
+      <span class="b-txt"><span class="b-title" id="b-title">Nothing playing</span><span class="b-sub" id="b-sub"></span></span>
     </button>
-    <div class="b-mid">
-      <div class="tp b-tp" data-slot="tp"></div>
-      <div class="sk b-sk" data-slot="sk"></div>
-    </div>
-    <div class="b-ctl-mini">
-      <button type="button" class="ib big" data-act="play" aria-label="Play"><i data-i="play"></i></button>
-      <button type="button" class="ib" data-act="next" aria-label="Next"><i data-i="next"></i></button>
-    </div>
-    <div class="b-right" data-slot="right"></div>
+    <span class="lamp" id="signal" data-s="on" role="status" aria-label="Connected" title="Connected"></span>
+    <div class="b-tp" data-slot="tp"></div>
   </div>
 
-  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  <div class="keybar" id="keybar">
+    <button type="button" class="key" data-act="home" aria-label="Home" title="Home"><svg class="g" aria-hidden="true"><use href="#g-tools"/></svg></button>
+    <span class="grow"></span>
+    <button type="button" class="key" data-act="shuffle" aria-pressed="false" aria-label="Shuffle" title="Shuffle (S)"><i data-i="shuffle"></i></button>
+    <button type="button" class="key" data-act="repeat" aria-pressed="false" aria-label="Repeat: off" title="Repeat (R)"><i data-i="repeat"></i></button>
+    <button type="button" class="key" data-act="dj" aria-pressed="true" aria-label="Bilby DJ" title="Bilby DJ keeps the music going when the queue runs out"><i data-i="headset"></i></button>
+    <button type="button" class="key" data-act="queue" id="nav-queue" aria-label="Queue" title="Queue"><i data-i="queue"></i><span class="cnt" id="q-cnt"></span></button>
+    <span class="grow"></span>
+    <button type="button" class="key" data-act="help" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)"><i data-i="keys"></i></button>
+  </div>
+
   <div class="sr" id="live" aria-live="polite" aria-atomic="true"></div>
-  <div class="scrim" id="scrim" hidden></div>
-  <div class="menu" id="menu" role="menu" hidden></div>
 
   <dialog class="keys" id="keys" aria-labelledby="keys-h">
     <h2 id="keys-h">Keyboard shortcuts</h2>
@@ -136,6 +144,7 @@
       <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Back / forward 5 seconds</dd>
       <dt><kbd>Shift</kbd>+<kbd>←</kbd> <kbd>→</kbd></dt><dd>Previous / next song</dd>
       <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Volume up / down</dd>
+      <dt><kbd>PgUp</kbd> <kbd>PgDn</kbd></dt><dd>Previous / next page of the list</dd>
       <dt><kbd>M</kbd></dt><dd>Mute</dd>
       <dt><kbd>S</kbd></dt><dd>Shuffle</dd>
       <dt><kbd>R</kbd></dt><dd>Repeat: off, all, one</dd>
@@ -143,7 +152,7 @@
       <dt><kbd>?</kbd></dt><dd>This list</dd>
     </dl>
     <p class="why">Why it sometimes asks for a tap: a browser only lets a page make sound after you have tapped or clicked on that page. That lasts until the page reloads, so after a reload or an update it needs one tap again. Once you have tapped, the next song, previous, skip and remote controls from another device all work without more taps.</p>
-    <form method="dialog"><button type="submit" class="pill-btn">Close</button></form>
+    <form method="dialog"><button type="submit" class="key" aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></form>
   </dialog>
 
   <audio id="au0" preload="auto"></audio>

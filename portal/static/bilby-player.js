@@ -621,7 +621,35 @@
     return { paths: items.slice(lo, hi).map(it => T[it.t].p), idx: qi - lo };
   }
 
+  // ── paging: a long list shown a screen at a time (the page never scrolls) ────────────────────────────────────────────────
+  /** Cut rows of the given heights into screens `avail` px tall. A row never splits (a row taller than a screen gets one to itself),
+   *  and a row marked in `glue` (a heading) is never left alone at the bottom of a screen: it goes over with the row after it.
+   *  Returns the index of the first row of each screen. */
+  function paginate(heights, avail, glue) {
+    const starts = [0];
+    let y = 0;
+    for (let i = 0; i < heights.length; i++) {
+      const h = heights[i];
+      if (y > 0 && y + h > avail) {
+        let s = i;
+        while (glue && s > starts[starts.length - 1] + 1 && glue[s - 1]) s--;
+        starts.push(s);
+        y = 0;
+        for (let k = s; k < i; k++) y += heights[k];
+      }
+      y += h;
+    }
+    return starts;
+  }
+  /** Which screen holds row `i`, given where each screen starts. */
+  function pageOf(starts, i) {
+    let lo = 0, hi = starts.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (starts[mid] <= i) lo = mid; else hi = mid - 1; }
+    return lo;
+  }
+
   return {
+    paginate, pageOf,
     fold, squash, sortKey, letterOf, cmp,
     fmtTime, fmtLong, fmtAgo, fmtBytes, genreLabel,
     parseCatalog, attachLyrics, sortTracks, newestAlbums, search,

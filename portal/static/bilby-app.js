@@ -6,7 +6,7 @@
      the engine         one or two <audio> elements, preloading, errors, the browser's autoplay rule
      the queue + DJ     every edit goes through BilbyCore.Queue; Bilby DJ picks ahead of time
      the views          Home, Artists, Albums, Songs, Genres, Recently added/played, artist and album pages, search:
-                        all drawn with a virtual list, so 21,000 songs are ~25 DOM rows
+                        shown a screen at a time (nothing scrolls), so 21,000 songs are ~10 DOM rows
      Connect            this device tells the portal what it plays; another device can take over or be a remote
    Nothing about what is played ever goes to the portal except through Connect (the Captain's own devices), and the
    telemetry beacon (base.html) only ever sees a tile tap. */
@@ -45,40 +45,9 @@
     store.set("device", device);
   }
 
-  // ═══ icons (24x24 paths, drawn in currentColor) ═════════════════════════════════════════════════════════════════
-  const P = {
-    play: "M8 5v14l11-7z", pause: "M6 19h4V5H6v14zm8-14v14h4V5h-4z",
-    prev: "M6 6h2v12H6zm3.5 6l8.5 6V6z", next: "M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z",
-    shuffle: "M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z",
-    repeat: "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z",
-    repeat1: "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zm-4-2V9h-1l-2 1v1h1.5v4H13z",
-    vol: "M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z",
-    mute: "M16.5 12A4.5 4.5 0 0 0 14 7.97v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.8 8.8 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z",
-    queue: "M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z",
-    devices: "M17 2H7c-1.1 0-2 .9-2 2v16c0 1.1.9 1.99 2 1.99L17 22c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-5 2c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0 16c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z",
-    sleep: "M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z",
-    dj: "M12 1a9 9 0 0 0-9 9v7c0 1.66 1.34 3 3 3h3v-8H5v-2a7 7 0 0 1 14 0v2h-4v8h3c1.66 0 3-1.34 3-3v-7a9 9 0 0 0-9-9z",
-    search: "M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z",
-    close: "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z",
-    more: "M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z",
-    note: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z",
-    home: "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z",
-    artist: "M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z",
-    album: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z",
-    tag: "M17.63 5.84C17.27 5.33 16.67 5 16 5L5 5.01C3.9 5.01 3 5.9 3 7v10c0 1.1.9 1.99 2 1.99L16 19c.67 0 1.27-.33 1.63-.84L22 12l-4.37-6.16z",
-    plus: "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z",
-    clock: "M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z",
-    back: "M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z",
-    down: "M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z",
-    up: "M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z",
-    keys: "M20 5H4c-1.1 0-1.99.9-1.99 2L2 17c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-9 3h2v2h-2V8zm0 3h2v2h-2v-2zM8 8h2v2H8V8zm0 3h2v2H8v-2zm-1 2H5v-2h2v2zm0-3H5V8h2v2zm9 7H8v-2h8v2zm0-4h-2v-2h2v2zm0-3h-2V8h2v2zm3 3h-2v-2h2v2zm0-3h-2V8h2v2z",
-    trash: "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z",
-    addq: "M14 10H2v2h12v-2zm0-4H2v2h12V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM2 16h8v-2H2v2z",
-    grip: "M9 5h2v2H9zm4 0h2v2h-2zM9 9h2v2H9zm4 0h2v2h-2zm-4 4h2v2H9zm4 0h2v2h-2zm-4 4h2v2H9zm4 0h2v2h-2z",
-    check: "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z",
-    chev: "M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z",
-  };
-  const ico = n => `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="${P[n] || ""}"/></svg>`;
+  // ═══ icons: the portal's glyphs (templates/_glyphs.html), by the names this file uses ═════════════════════════════
+  const GLYPH = { close: "x", artist: "user", album: "disc", clock: "past", plus: "new", dj: "headset", sleep: "moon" };
+  const ico = n => `<svg class="g" aria-hidden="true" focusable="false"><use href="#g-${GLYPH[n] || n}"/></svg>`;
   function fillIcons(scope) { for (const i of $$("[data-i]", scope)) if (!i.firstChild) i.innerHTML = ico(i.dataset.i); }
   function setIcon(b, name) { const i = b.querySelector("[data-i]"); if (i && i.dataset.i !== name) { i.dataset.i = name; i.innerHTML = ico(name); } }
 
@@ -93,7 +62,7 @@
     loadTok: 0, resumeAt: 0, want: false, qv: 1, qSent: 0, qLo: 0, errStreak: 0, lastPersist: 0, lyrics: null,
     sleep: new C.SleepTimer(),
     armed: new C.Armed(env.webkit ? null : () => !!(navigator.userActivation && navigator.userActivation.hasBeenActive)),
-    tapWhy: "", playAt: 0, ourPauseAt: 0, route: { name: "home" }, search: "", nav: 0, view: null, scrollMemo: new Map(), showEarlier: false,
+    tapWhy: "", playAt: 0, ourPauseAt: 0, route: { name: "home" }, search: "", nav: 0, view: null, pageMemo: new Map(), showEarlier: false, letters: false,
     sheet: "", tab: "np", loading: false, seeking: false, scrollAt: 0, geo: "",
     // the signal shield: songs held in memory ahead of time, and the way back after a dead zone (on unless switched off)
     shield: prefs.shield !== false, lastTimeAt: 0, waitingAt: 0, netBadAt: 0,
@@ -120,8 +89,17 @@
     if (o.retry) { const b = el("button", "pill-btn", o.label || "Retry"); b.type = "button"; b.onclick = o.retry; kids.push(b); }
     if (o.progress) { const p = el("progress"); p.id = "notice-progress"; kids.push(p); }
     n.replaceChildren(...kids);
+    syncSignal();
   }
-  function hideNotice(key) { const n = $("#notice"); if (!key || n.dataset.key === key) { n.hidden = true; n.dataset.key = ""; } }
+  function hideNotice(key) { const n = $("#notice"); if (!key || n.dataset.key === key) { n.hidden = true; n.dataset.key = ""; syncSignal(); } }
+  /** The lamp beside the player: lit when all is well, a triangle while the line is lost (the music is waiting for it), a diamond when the library is out of reach. */
+  function syncSignal() {
+    const lamp = $("#signal"), n = $("#notice");
+    if (!lamp) return;
+    const lost = root.dataset.signal === "lost", bad = !!n && !n.hidden && n.classList.contains("bad");
+    const state = lost ? "warn" : bad ? "off" : "on", label = lost ? "No signal: the music is waiting for it to come back" : bad ? "The library is out of reach" : "Connected";
+    lamp.dataset.s = state; lamp.setAttribute("aria-label", label); lamp.title = label;
+  }
 
   // ═══ the gate: where the library is, and a pass to read it ══════════════════════════════════════════════════════
   const GATE_DOWN = "skippy-pc isn't reachable from here: Tailscale Funnel may be off, or the PC is asleep.";
@@ -290,7 +268,6 @@
       S.sortCache = null;
     }
     $("#q").disabled = false;
-    $("#nav-added").hidden = !lib.hasAdded;
     if (!old) { restoreState(); onRoute(false); startConnect(); loadLyrics(); }
     else { renderView(true); showTrack(); onQueueChanged(); }
     if (window.console && console.debug) console.debug(`bilby: ${lib.T.length} tracks indexed in ${Math.round(performance.now() - t0)} ms`);
@@ -315,7 +292,7 @@
   // ═══ cover art: thumbnails, never loaded for a row that is only flying past ═════════════════════════════════════
   const artWait = new Set();
   let artTimer = 0;
-  const flying = () => performance.now() - S.scrollAt < 140;
+  const flying = () => false;
   function setArt(img, path, px) {
     const url = path ? artUrl(path, px) : "";
     if (img._u === url) return;
@@ -335,48 +312,115 @@
     return { box, img };
   }
 
-  // ═══ the virtual list: only the rows on screen exist ════════════════════════════════════════════════════════════
-  class VList {
-    constructor(sc, host, makers, onScroll) {
-      this.sc = sc; this.host = host; this.makers = makers; this.rows = []; this.off = C.buildOffsets([]);
-      this.live = new Map(); this.pool = Object.create(null); this.raf = 0; this.over = 360;
-      sc.addEventListener("scroll", () => { S.scrollAt = performance.now(); if (onScroll) onScroll(); this.schedule(); }, { passive: true });
+  // ═══ a list shown a screen at a time ═══════════════════════════════════════════════════════════════════════════
+  // Nothing on the bridge scrolls. A long list is cut into screens (C.paginate) and only the rows of the current screen exist in the
+  // page, so 21,000 songs are about ten rows of DOM. You flip with a swipe, the wheel, PageUp/PageDown, or by dragging along the bar
+  // under the list (which shows where you are in the whole).
+  class PList {
+    constructor(panel, host, makers, o) {
+      this.panel = panel; this.host = host; this.makers = makers; this.o = o || {};
+      this.rows = []; this.starts = [0]; this.page = 0; this.live = new Map(); this.pool = Object.create(null); this.dirty = false;
+      this.thumb = this.o.pips ? this.o.pips.querySelector("i") : null;
+      let x0 = null, y0 = 0, wheelAt = 0;
+      panel.addEventListener("touchstart", e => { const t = e.touches[0]; x0 = t.clientX; y0 = t.clientY; }, { passive: true });
+      panel.addEventListener("touchend", e => {
+        if (x0 === null) return;
+        const t = e.changedTouches[0], dx = t.clientX - x0, dy = t.clientY - y0;
+        x0 = null;
+        if (Math.abs(dx) > 40 && Math.abs(dx) > 1.5 * Math.abs(dy)) this.go(this.page + (dx < 0 ? 1 : -1));
+      }, { passive: true });
+      panel.addEventListener("wheel", e => {
+        const d = e.deltaY || e.deltaX;
+        if (!d) return;
+        e.preventDefault();
+        const now = performance.now();
+        if (now - wheelAt < 180) return;
+        wheelAt = now; this.go(this.page + (d > 0 ? 1 : -1));
+      }, { passive: false });
+      if (this.o.scrub) this.wireScrub(this.o.scrub);
     }
-    schedule() { if (!this.raf) this.raf = requestAnimationFrame(() => { this.raf = 0; this.update(); }); }
-    setRows(rows) {
+    pages() { return this.starts.length; }
+    wireScrub(box) {
+      const at = e => { const r = this.o.pips.getBoundingClientRect(); return Math.floor(clamp((e.clientX - r.left) / Math.max(1, r.width), 0, 0.9999) * this.pages()); };
+      let down = false;
+      const show = on => { if (this.o.onscrub) this.o.onscrub(on, this.page); };
+      box.addEventListener("pointerdown", e => { down = true; try { box.setPointerCapture(e.pointerId); } catch (x) { /* synthetic */ } this.go(at(e)); show(true); e.preventDefault(); });
+      box.addEventListener("pointermove", e => { if (down) { this.go(at(e)); show(true); } });
+      const up = () => { down = false; show(false); };
+      box.addEventListener("pointerup", up); box.addEventListener("pointercancel", up);
+      box.addEventListener("keydown", e => {
+        const k = e.key;
+        if (k === "ArrowLeft" || k === "ArrowRight" || k === "Home" || k === "End") {
+          e.preventDefault(); e.stopPropagation();
+          this.go(k === "Home" ? 0 : k === "End" ? this.pages() - 1 : this.page + (k === "ArrowRight" ? 1 : -1));
+        }
+      });
+    }
+    /** Cut the rows into screens for the panel's height now. False when the panel has no size yet (a sheet that is not open). */
+    layout() {
+      const avail = this.panel.clientHeight;
+      if (avail <= 0) { this.dirty = true; return false; }
+      this.dirty = false;
+      this.starts = C.paginate(this.rows.map(r => r.h), avail, this.rows.map(r => !!r.glue));
+      return true;
+    }
+    setRows(rows, page) {
+      this.rows = rows;
+      if (this.layout()) this.page = clamp(page | 0, 0, this.starts.length - 1);
+      else { this.starts = [0]; this.page = 0; }
+      this.render(0);
+    }
+    go(p, force) {
+      p = clamp(p | 0, 0, this.starts.length - 1);
+      if (p === this.page && !force) return false;
+      const dir = p > this.page ? 1 : -1;
+      this.page = p; this.render(dir);
+      return true;
+    }
+    goRow(i) { this.go(C.pageOf(this.starts, i)); }
+    render(dir) {
       for (const e of this.live.values()) this.release(e);
       this.live.clear();
-      this.rows = rows; this.off = C.buildOffsets(rows.map(r => r.h));
-      this.host.style.height = this.off[rows.length] + "px";
-      this.update();
-    }
-    update() {
-      const [a, b] = C.visibleRange(this.off, this.sc.scrollTop, this.sc.clientHeight, this.over);
-      for (const [i, e] of this.live) if (i < a || i >= b) { this.live.delete(i); this.release(e); }
-      let added = false;
-      for (let i = a; i < b; i++) {
-        if (this.live.has(i)) continue;
-        const row = this.rows[i], mk = this.makers[row.type];
-        const pool = this.pool[row.type] || (this.pool[row.type] = []);
-        let e = pool.pop();
-        if (!e) { e = mk.make(); e._type = row.type; }
-        e._i = i; e.style.transform = `translateY(${this.off[i]}px)`; e.style.height = row.h + "px";
-        mk.bind(e, row, i);
-        this.live.set(i, e); added = true;
+      const a = this.starts[this.page] || 0, b = this.page + 1 < this.starts.length ? this.starts[this.page + 1] : this.rows.length;
+      if (!this.dirty) {
+        for (let i = a; i < b; i++) {
+          const row = this.rows[i], mk = this.makers[row.type];
+          const pool = this.pool[row.type] || (this.pool[row.type] = []);
+          let e = pool.pop();
+          if (!e) { e = mk.make(); e._type = row.type; }
+          e._i = i; e.style.height = row.h + "px";
+          mk.bind(e, row, i);
+          this.live.set(i, e); this.host.append(e);
+        }
       }
-      if (added) {                              // keep the DOM in row order, so Tab walks the list top to bottom
-        let ref = this.host.firstChild;
-        for (let i = a; i < b; i++) { const e = this.live.get(i); if (e === ref) ref = ref.nextSibling; else this.host.insertBefore(e, ref); }
-      }
+      this.host.classList.remove("flip-n", "flip-p");
+      if (dir) { void this.host.offsetWidth; this.host.classList.add(dir > 0 ? "flip-n" : "flip-p"); }
+      this.paint();
+      if (this.o.onpage) this.o.onpage(this.page, this.pages(), dir || 0);
     }
     release(e) { e.remove(); (this.pool[e._type] || (this.pool[e._type] = [])).push(e); }
     refresh() { for (const [i, e] of this.live) this.makers[e._type].bind(e, this.rows[i], i); }
-    scrollTo(i, center) {
-      if (i < 0 || i >= this.rows.length) return;
-      const h = this.sc.clientHeight;
-      this.sc.scrollTop = Math.max(0, this.off[i] - (center ? (h - this.rows[i].h) / 2 : 0));
-    }
     el(i) { return this.live.get(i) || null; }
+    /** The panel changed size: cut the screens again and stay on the one that holds the row that was first. */
+    resize() {
+      if (!this.rows.length && !this.dirty) return;
+      const first = this.starts[this.page] || 0;
+      if (!this.layout()) return;
+      this.page = C.pageOf(this.starts, first);
+      this.render(0);
+    }
+    paint() {
+      const n = this.pages(), pips = this.o.pips;
+      if (pips) {
+        pips.hidden = n < 2;
+        const w = pips.clientWidth, tw = Math.max(14, w / n);
+        this.thumb.style.width = tw + "px";
+        this.thumb.style.transform = `translateX(${n > 1 ? (w - tw) * this.page / (n - 1) : 0}px)`;
+      }
+      if (this.o.pgno) this.o.pgno.textContent = n > 1 ? `${(this.page + 1).toLocaleString()}/${n.toLocaleString()}` : "";
+      const sc = this.o.scrub;
+      if (sc) { sc.setAttribute("aria-valuemax", n); sc.setAttribute("aria-valuenow", this.page + 1); }
+    }
   }
 
   // ═══ the audio engine ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -555,14 +599,14 @@
   function recoverStart(slot, why) {
     if (rec.on || !S.want || slot !== act() || !slot.path) return;
     rec.on = true; rec.n = 0; rec.t = slot.t; rec.at = slot.el.currentTime || slot.from || 0; rec.since = Date.now();
-    root.dataset.signal = "lost"; mediaState();
+    root.dataset.signal = "lost"; syncSignal(); mediaState();
     if (S.dbg) console.debug("signal lost:", why);
     rec.timer = setTimeout(recoverTick, C.recoverDelay(0));
   }
   function recoverStop() {
     if (!rec.on) return;
     clearTimeout(rec.timer); rec.on = false; rec.n = 0;
-    delete root.dataset.signal; hideNotice("gate"); mediaState();
+    delete root.dataset.signal; hideNotice("gate"); syncSignal(); mediaState();
   }
   /** Try again right now (the network is back, the page is in front, a song we waited for arrived). */
   function recoverNow() { if (!rec.on) return; clearTimeout(rec.timer); recoverTick(); }
@@ -812,33 +856,30 @@
   }
 
   // ═══ what the player shows ══════════════════════════════════════════════════════════════════════════════════════
-  const els = { play: [], seek: [], cur: [], rem: [], vol: [], shuffle: [], repeat: [], dj: [], mute: [], sleep: [], devices: [] };
+  const els = { play: [], seek: [], cur: [], rem: [], vol: [], shuffle: [], repeat: [], dj: [], mute: [], sleep: [], devices: [], shield: [] };
 
   const TP = `
-    <button type="button" class="ib" data-act="shuffle" aria-pressed="false" aria-label="Shuffle" title="Shuffle (S)"><i data-i="shuffle"></i></button>
-    <button type="button" class="ib" data-act="prev" aria-label="Previous" title="Previous (Shift+Left)"><i data-i="prev"></i></button>
-    <button type="button" class="ib big" data-act="play" aria-label="Play" title="Play (Space)"><i data-i="play"></i></button>
-    <button type="button" class="ib" data-act="next" aria-label="Next" title="Next (Shift+Right)"><i data-i="next"></i></button>
-    <button type="button" class="ib" data-act="repeat" aria-pressed="false" aria-label="Repeat: off" title="Repeat (R)"><i data-i="repeat"></i></button>`;
+    <button type="button" class="key" data-act="prev" aria-label="Previous" title="Previous (Shift+Left)"><i data-i="prev"></i></button>
+    <button type="button" class="key big" data-act="play" aria-label="Play" title="Play (Space)"><i data-i="play"></i></button>
+    <button type="button" class="key" data-act="next" aria-label="Next" title="Next (Shift+Right)"><i data-i="next"></i></button>`;
   const SK = `
     <span class="t" data-bind="cur">0:00</span>
     <input type="range" class="rg" data-seek min="0" max="0" step="1" value="0" aria-label="Position" disabled>
     <span class="t" data-bind="rem">0:00</span>`;
   const RIGHT = `
-    <div class="volbox"><button type="button" class="ib" data-act="mute" aria-label="Mute" title="Mute (M)"><i data-i="vol"></i></button>
+    <div class="volbox"><button type="button" class="key" data-act="mute" aria-label="Mute" title="Mute (M)"><i data-i="vol"></i></button>
       <input type="range" class="rg vol" data-vol min="0" max="100" step="1" value="100" aria-label="Volume"></div>
-    <button type="button" class="ib" data-act="sleep" aria-label="Sleep timer" title="Sleep timer"><i data-i="sleep"></i><sup data-bind="sleep"></sup></button>
-    <button type="button" class="ib" data-act="devices" aria-label="Other devices" title="Other devices (Connect)"><i data-i="devices"></i><sup data-bind="dev"></sup></button>
-    <button type="button" class="ib" data-act="queue" aria-label="Queue" title="Queue"><i data-i="queue"></i></button>
-    <button type="button" class="ib" data-act="dj" aria-pressed="true" aria-label="Bilby DJ" title="Bilby DJ keeps the music going when the queue runs out"><i data-i="dj"></i></button>`;
+    <button type="button" class="key" data-act="sleep" aria-label="Sleep timer" title="Sleep timer"><i data-i="sleep"></i><sup data-bind="sleep"></sup></button>
+    <button type="button" class="key" data-act="devices" aria-label="Other devices" title="Other devices (Connect)"><i data-i="devices"></i><sup data-bind="dev"></sup></button>
+    <button type="button" class="key" data-act="shield" aria-pressed="true" aria-label="Signal shield" title="Signal shield: keep the next songs in memory so the music rides through a dead zone"><i data-i="shield"></i></button>`;
   function buildSlots() {
     for (const s of $$('[data-slot="tp"]')) s.innerHTML = TP;
     for (const s of $$('[data-slot="sk"]')) s.innerHTML = SK;
-    for (const s of $$('[data-slot="right"], [data-slot="sub"]')) s.innerHTML = RIGHT;
+    for (const s of $$('[data-slot="right"]')) s.innerHTML = RIGHT;
     fillIcons();
     els.play = $$('[data-act="play"]'); els.seek = $$("[data-seek]"); els.cur = $$('[data-bind="cur"]'); els.rem = $$('[data-bind="rem"]');
     els.vol = $$("[data-vol]"); els.shuffle = $$('[data-act="shuffle"]'); els.repeat = $$('[data-act="repeat"]');
-    els.dj = $$('[data-act="dj"]'); els.mute = $$('[data-act="mute"]'); els.sleep = $$('[data-bind="sleep"]'); els.devices = $$('[data-bind="dev"]');
+    els.dj = $$('[data-act="dj"]'); els.mute = $$('[data-act="mute"]'); els.sleep = $$('[data-bind="sleep"]'); els.devices = $$('[data-bind="dev"]'); els.shield = $$('[data-act="shield"]');
   }
 
   function syncPlay() {
@@ -859,6 +900,7 @@
       setIcon(b, S.repeat === "one" ? "repeat1" : "repeat");
     }
     for (const b of els.dj) b.setAttribute("aria-pressed", S.dj);
+    for (const b of els.shield) b.setAttribute("aria-pressed", S.shield);
     for (const b of els.mute) { const off = S.muted || S.vol === 0; setIcon(b, off ? "mute" : "vol"); b.setAttribute("aria-label", off ? "Unmute" : "Mute"); }
     for (const r of els.vol) { r.value = Math.round((S.muted ? 0 : S.vol) * 100); r.style.setProperty("--p", r.value + "%"); r.style.setProperty("--b", r.value + "%"); }
   }
@@ -900,7 +942,7 @@
     const t = curTrack(), has = !!t;
     root.dataset.has = has ? "1" : "0";
     $("#b-title").textContent = has ? t.t : "Nothing playing";
-    $("#b-sub").textContent = has ? [t.a, t.al].filter(Boolean).join(" · ") : "Pick something, or let Bilby DJ";
+    $("#b-sub").textContent = has ? [t.a, t.al].filter(Boolean).join(" · ") : "";
     setCover($("#b-cover"), has ? t.ap : "", 48);
     const npc = $("#np-cover");
     setCover(npc, has ? t.ap : "", Math.max(npc.clientWidth || 0, 300));
@@ -969,39 +1011,46 @@
   }
 
   // ═══ views ══════════════════════════════════════════════════════════════════════════════════════════════════════
-  const list = new VList($("#scroll"), $("#host"), {}, () => { if (rail.on) rail.hideBubble(); });
-  const qList = new VList($("#q-scroll"), $("#q-host"), {});
+  // Home is a deck of controls; everything else is a list shown a screen at a time (PList: swipe, PageUp/PageDown, or drag along the
+  // bar under it). A letter key opens the whole alphabet when a list is sorted by name.
+  const letterBubble = (show, page) => {
+    const b = $("#bubble");
+    if (!show || !rail.on) { b.hidden = true; return; }
+    b.textContent = letterForRow(list.starts[page] || 0); b.hidden = false;
+  };
+  const list = new PList($("#scroll"), $("#host"), {}, { pips: $("#pips"), pgno: $("#pgno"), scrub: $("#scrub"), onscrub: letterBubble });
+  const qList = new PList($("#q-scroll"), $("#q-host"), {}, { pips: $("#q-pips"), pgno: $("#q-pgno"), scrub: $("#q-scrub") });
   const VIEWS = ["home", "artists", "albums", "tracks", "genres", "added", "played", "artist", "album", "genre"];
-  const TITLES = { home: "Home", artists: "Artists", albums: "Albums", tracks: "Songs", genres: "Genres", added: "Recently added", played: "Recently played" };
+  const LABELS = { artists: "Artists", albums: "Albums", tracks: "Songs", genres: "Genres", added: "Recently added", played: "Recently played" };
+  const rail = { on: false, items: [] };
+  const letterForRow = row => { let l = ""; for (const r of rail.items) { if (r.i <= row) l = r.l; else break; } return l; };
 
-  function geometry() {
-    const cs = getComputedStyle(root), sc = $("#scroll");
-    const num = (n, d) => parseFloat(cs.getPropertyValue(n)) || d;
-    const pad = num("--pad", 12), gap = num("--gap", 12), min = num("--card-min", 140), rowH = num("--row-h", 56);
-    const W = sc.clientWidth || 360, rail = railOn ? 22 : 0;
-    const inner = Math.max(200, W - pad * 2 - rail);
-    const cols = clamp(Math.floor((inner + gap) / (min + gap)), 2, 8);
-    const cw = (inner - gap * (cols - 1)) / cols;
-    return { W, pad, gap, rowH, cols, cw, cardH: Math.round(cw + 62), heroH: W < 560 ? 200 : 168 };
-  }
-  let railOn = false;
+  const geometry = () => ({ rowH: innerHeight < 620 ? 50 : 56, heroH: innerHeight < 620 ? 120 : 132 });
+  const counts = (box, pairs) => {
+    box.replaceChildren();
+    pairs.forEach(([n, g]) => { box.append(`${n.toLocaleString()}`); box.insertAdjacentHTML("beforeend", ico(g)); });
+    box.querySelectorAll(".g").forEach(s => s.classList.add("mini"));
+  };
 
   // — row makers —
   const makers = list.makers;
-  const nameOf = al => al.name;
-  const trackSub = (t, o) => o.album ? [t.a, t.al].filter(Boolean).join(" · ") : t.a;
 
   makers.title = {
-    make() { const e = el("div", "vrow vtitle"); e._h = el("h2"); e._c = el("span", "count"); e.append(e._h, e._c); return e; },
-    bind(e, r) { e._h.textContent = r.text; e._c.textContent = r.count || ""; },
+    make() { const e = el("div", "vrow vtitle"); e._g = el("span", "gl"); e._c = el("span", "count"); e.append(e._g, e._c); return e; },
+    bind(e, r) { e._g.innerHTML = ico(r.glyph); e._c.textContent = r.count || ""; },
   };
   makers.head = {
-    make() { const e = el("div", "vrow vhead"); e._h = el("h3"); e._b = el("button", "link"); e._b.type = "button"; e._b.dataset.r = "link"; e.append(e._h, e._b); return e; },
-    bind(e, r) { e._h.textContent = r.text; e._b.hidden = !r.link; e._b.textContent = r.link ? r.link.label : ""; },
+    make() { const e = el("div", "vrow vhead"); e._g = el("span", "gl"); e._c = el("span", "count"); e.append(e._g, e._c); return e; },
+    bind(e, r) { e._g.innerHTML = ico(r.glyph); e._c.textContent = r.count || ""; },
   };
-  makers.msg = { make() { return el("div", "vrow vmsg"); }, bind(e, r) { e.textContent = r.text; } };
-  makers.disc = { make() { return el("div", "vrow vdisc"); }, bind(e, r) { e.textContent = r.text; } };
-  makers.stats = { make() { return el("div", "vrow vstats"); }, bind(e, r) { e.textContent = r.text; } };
+  makers.msg = {
+    make() { const e = el("div", "vrow vmsg"); e._g = el("span", "gl"); e._t = el("span"); e.append(e._g, e._t); return e; },
+    bind(e, r) { e._g.innerHTML = ico(r.glyph || "info"); e._t.textContent = r.text; },
+  };
+  makers.disc = {
+    make() { const e = el("div", "vrow vdisc"); e._g = el("span", "gl"); e._t = el("span"); e.append(e._g, e._t); return e; },
+    bind(e, r) { e._g.innerHTML = ico("album"); e._t.textContent = String(r.n); },
+  };
 
   makers.track = {
     make() {
@@ -1040,14 +1089,15 @@
       const cv = mkCover("round"), txt = el("span", "txt"), l1 = el("span", "l1"), l2 = el("span", "l2");
       txt.append(l1, l2); main.append(cv.box, txt);
       const more = el("button", "ib tr-more"); more.type = "button"; more.dataset.r = "more"; more.innerHTML = ico("more");
-      e.append(main, more); e._r = { cv, l1, l2, more }; return e;
+      e.append(main, more); e._r = { cv, l1, l2, more, main }; return e;
     },
     bind(e, r) {
       const a = r.ar, x = e._r;
       setArt(x.cv.img, a.artPath, 44);
       x.l1.textContent = a.name;
-      x.l2.textContent = `${a.albums.length} album${a.albums.length === 1 ? "" : "s"} · ${a.tracks.length.toLocaleString()} song${a.tracks.length === 1 ? "" : "s"}`;
+      counts(x.l2, [[a.albums.length, "album"], [a.tracks.length, "note"]]);
       x.more.setAttribute("aria-label", `More options for ${a.name}`);
+      x.main.setAttribute("aria-label", a.name);
     },
   };
   makers.albumrow = {
@@ -1056,15 +1106,18 @@
       const main = el("button", "nv-main"); main.type = "button"; main.dataset.r = "open";
       const cv = mkCover(""), txt = el("span", "txt"), l1 = el("span", "l1"), l2 = el("span", "l2");
       txt.append(l1, l2); main.append(cv.box, txt);
+      const go = el("button", "ib tr-more"); go.type = "button"; go.dataset.r = "go"; go.innerHTML = ico("play");
       const more = el("button", "ib tr-more"); more.type = "button"; more.dataset.r = "more"; more.innerHTML = ico("more");
-      e.append(main, more); e._r = { cv, l1, l2, more }; return e;
+      e.append(main, go, more); e._r = { cv, l1, l2, more, go, main }; return e;
     },
     bind(e, r) {
       const a = r.al, x = e._r;
       setArt(x.cv.img, a.artPath, 44);
       x.l1.textContent = a.name;
-      x.l2.textContent = [a.artist, a.year || ""].filter(Boolean).join(" · ");
+      x.l2.textContent = r.sub === "added" ? `${a.artist} · ${C.fmtAgo(a.added, Date.now() / 1000)}` : [a.artist, a.year || ""].filter(Boolean).join(" · ");
       x.more.setAttribute("aria-label", `More options for ${a.name}`);
+      x.go.setAttribute("aria-label", `Play ${a.name}`);
+      x.main.setAttribute("aria-label", `${a.name} by ${a.artist}`);
     },
   };
   makers.genre = {
@@ -1073,46 +1126,18 @@
       const main = el("button", "nv-main"); main.type = "button"; main.dataset.r = "open";
       const txt = el("span", "txt"), l1 = el("span", "l1"), l2 = el("span", "l2"), chev = el("span", "chev"); chev.innerHTML = ico("chev");
       txt.append(l1, l2); main.append(txt, chev);
-      e.append(main); e._r = { l1, l2 }; return e;
+      e.append(main); e._r = { l1, l2, main }; return e;
     },
-    bind(e, r) { e._r.l1.textContent = r.g.name; e._r.l2.textContent = `${r.g.tracks.length.toLocaleString()} songs`; },
+    bind(e, r) { e._r.l1.textContent = r.g.name; counts(e._r.l2, [[r.g.tracks.length, "note"]]); e._r.main.setAttribute("aria-label", r.g.name); },
   };
 
-  // a grid row of album cards
-  makers.cards = {
-    make() {
-      const e = el("div", "vrow cards"); e._cards = [];
-      for (let k = 0; k < 8; k++) {
-        const c = el("div", "card-a"), open = el("button", "open"); open.type = "button"; open.dataset.r = "open"; open.dataset.k = k;
-        const cv = mkCover(""), t1 = el("span", "t1"), t2 = el("span", "t2");
-        open.append(cv.box, t1, t2);
-        const go = el("button", "go"); go.type = "button"; go.dataset.r = "go"; go.dataset.k = k; go.innerHTML = ico("play");
-        c.append(open, go); e.append(c); e._cards.push({ c, cv, t1, t2, go, open });
-      }
-      return e;
-    },
-    bind(e, r) {
-      e.style.setProperty("--cols", r.cols); e.style.setProperty("--cw", r.cw + "px");
-      e._cards.forEach((x, k) => {
-        const a = r.albums[k];
-        x.c.hidden = !a;
-        if (!a) return;
-        setArt(x.cv.img, a.artPath, r.cw);
-        x.t1.textContent = a.name;
-        x.t2.textContent = r.sub === "added" ? `${a.artist} · ${C.fmtAgo(a.added, Date.now() / 1000)}` : [a.artist, a.year || ""].filter(Boolean).join(" · ");
-        x.go.setAttribute("aria-label", `Play ${a.name}`); x.open.setAttribute("aria-label", `${a.name} by ${a.artist}`);
-      });
-    },
-  };
-
-  // the header of an album, artist or genre page
+  // the header of an album, an artist or a genre: what it is, its name, and the keys that act on all of it
   makers.hero = {
     make() {
       const e = el("div", "vrow hero"), cv = mkCover("");
       const txt = el("div", "txt"), kind = el("span", "kind"), h = el("h2"), who = el("span", "who"), meta = el("span", "meta"), acts = el("div", "acts");
-      const mkb = (r, label, icon, cls) => { const b = el("button", "pill-btn " + (cls || "")); b.type = "button"; b.dataset.r = r; b.innerHTML = ico(icon); b.append(label); return b; };
-      const play = mkb("hero-play", "Play", "play", "primary"), shuf = mkb("hero-shuffle", "Shuffle", "shuffle"), add = mkb("hero-add", "Add to queue", "addq");
-      acts.append(play, shuf, add);
+      const mkb = (r, label, icon) => { const b = el("button", "key"); b.type = "button"; b.dataset.r = r; b.innerHTML = ico(icon); b.setAttribute("aria-label", label); b.title = label; return b; };
+      acts.append(mkb("hero-play", "Play", "play"), mkb("hero-shuffle", "Shuffle", "shuffle"), mkb("hero-add", "Add to queue", "addq"));
       txt.append(kind, h, who, meta, acts); e.append(cv.box, txt);
       e._r = { cv, kind, h, who, meta };
       return e;
@@ -1120,8 +1145,8 @@
     bind(e, r) {
       const x = e._r;
       x.cv.box.classList.toggle("round", r.kind === "artist");
-      setArt(x.cv.img, r.art, 124);
-      x.kind.textContent = r.kind === "album" ? "Album" : r.kind === "artist" ? "Artist" : "Genre";
+      setArt(x.cv.img, r.art, 104);
+      x.kind.innerHTML = ico(r.kind === "album" ? "album" : r.kind === "artist" ? "artist" : "tag");
       x.h.textContent = r.title;
       x.who.replaceChildren();
       if (r.kind === "album") { const b = el("button", "", r.sub); b.type = "button"; b.dataset.r = "hero-artist"; x.who.append(b); }
@@ -1129,31 +1154,9 @@
     },
   };
 
-  makers.homeacts = {
-    make() {
-      const e = el("div", "vrow homeacts");
-      const a = el("button", "pill-btn primary"); a.type = "button"; a.dataset.r = "dj"; a.innerHTML = ico("dj"); a.append("Bilby, play something");
-      const b = el("button", "pill-btn"); b.type = "button"; b.dataset.r = "shuffle-all"; b.innerHTML = ico("shuffle"); b.append("Shuffle everything");
-      e.append(a, b); return e;
-    },
-    bind() { /* static */ },
-  };
-  makers.here = {
-    make() {
-      const e = el("div", "vrow here"), box = el("div", "box"), cv = mkCover(""), txt = el("div", "txt"), b = el("button", "pill-btn primary");
-      b.type = "button"; b.dataset.r = "take"; b.innerHTML = ico("play"); b.append("Play here");
-      box.append(cv.box, txt, b); e.append(box); e._r = { cv, txt }; return e;
-    },
-    bind(e, r) {
-      const d = r.dev, s = d.state, x = e._r, i = S.lib.byPath.get(s.track);
-      setArt(x.cv.img, i !== undefined ? S.lib.T[i].ap : "", 48);
-      x.txt.replaceChildren(el("b", "", `${s.title || "Something"} — ${s.artist || ""}`), `${d.live && s.playing ? "Playing now on" : "Where you left off on"} ${d.name}, at ${C.fmtTime(s.pos)}`);
-    },
-  };
-
   // — building a view —
   const trackRows = (idx, g, o) => idx.map((t, pos) => Object.assign({ type: "track", h: g.rowH, t, list: idx, pos }, o || {}));
-  const cardRows = (albums, g, sub) => C.chunk(albums, g.cols).map(a => ({ type: "cards", h: g.cardH + g.gap, albums: a, cols: g.cols, cw: g.cw, sub }));
+  const albumRows = (albums, g, sub) => albums.map(al => ({ type: "albumrow", h: g.rowH, al, sub }));
   const albumOf = t => S.lib.albumByKey.get(t.a + "\u0000" + t.alk);
   const sortedAlbums = mode => {
     const key = "albums:" + mode;
@@ -1169,14 +1172,6 @@
     S.sortCache = S.sortCache || {};
     return S.sortCache[key] || (S.sortCache[key] = C.sortTracks(S.lib, mode));
   };
-  function recentAlbums(limit) {
-    const seen = new Set(), out = [];
-    for (let k = S.hist.length - 1; k >= 0 && out.length < limit; k--) {
-      const i = S.lib.byPath.get(S.hist[k]); if (i === undefined) continue;
-      const a = albumOf(S.lib.T[i]); if (a && !seen.has(a.id)) { seen.add(a.id); out.push(a); }
-    }
-    return out;
-  }
   function recentTracks(limit) {
     const seen = new Set(), out = [];
     for (let k = S.hist.length - 1; k >= 0 && out.length < limit; k--) {
@@ -1186,7 +1181,7 @@
   }
   const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? "" : "s"}`;
 
-  /** The A-Z rail: the first row of each letter, from the sort key of each item. */
+  /** The alphabet's jump points: the first row of each letter, from the sort key of each item. */
   function railFor(items, keyOf, rowOf) {
     const seen = new Set(), out = [];
     items.forEach((it, k) => { const l = C.letterOf(keyOf(it)); if (!seen.has(l)) { seen.add(l); out.push({ l, i: rowOf(k) }); } });
@@ -1195,15 +1190,15 @@
 
   function buildRoute(route) {
     const lib = S.lib, g = geometry(), rows = [];
-    const title = (text, count) => rows.push({ type: "title", h: 60, text, count });
-    const head = (text, link) => rows.push({ type: "head", h: 42, text, link });
+    const title = (glyph, count) => rows.push({ type: "title", h: 56, glyph, count, glue: true });
+    const head = (glyph, count) => rows.push({ type: "head", h: 40, glyph, count, glue: true });
+    const msg = (text, glyph) => rows.push({ type: "msg", h: 96, text, glyph });
     const v = { rows, key: route.name + (route.id !== undefined ? "/" + route.id : ""), rail: null, sort: null, back: false };
-    const heroH = g.heroH;
     switch (route.name) {
       case "artists": {
         const mode = S.sorts.artists;
         const A = mode === "songs" ? lib.artists.slice().sort((a, b) => b.tracks.length - a.tracks.length || a.id - b.id) : lib.artists;
-        title("Artists", plural(A.length, "artist"));
+        title("artist", A.length.toLocaleString());
         const base = rows.length;
         A.forEach(ar => rows.push({ type: "artist", h: g.rowH + 4, ar }));
         if (mode === "name") v.rail = railFor(A, a => a.key, k => base + k);
@@ -1212,10 +1207,10 @@
       }
       case "albums": {
         const mode = S.sorts.albums, A = sortedAlbums(mode);
-        title("Albums", plural(A.length, "album"));
+        title("album", A.length.toLocaleString());
         const base = rows.length;
-        rows.push(...cardRows(A, g, mode === "newest" ? "added" : ""));
-        if (mode === "title" || mode === "artist") v.rail = railFor(A, a => (mode === "title" ? a.key2 : C.sortKey(a.artist)), k => base + Math.floor(k / g.cols));
+        rows.push(...albumRows(A, g, mode === "newest" ? "added" : ""));
+        if (mode === "title" || mode === "artist") v.rail = railFor(A, a => (mode === "title" ? a.key2 : C.sortKey(a.artist)), k => base + k);
         const opts = [["title", "Title"], ["artist", "Artist"]];
         if (lib.hasYear) opts.push(["year", "Newest release"]);
         if (lib.hasAdded) opts.push(["newest", "Recently added"]);
@@ -1226,7 +1221,7 @@
         let mode = S.sorts.tracks;
         if ((mode === "newest" && !lib.hasAdded) || (mode === "year" && !lib.hasYear)) mode = "title";
         const idx = sortedTracks(mode);
-        title("Songs", plural(idx.length, "song"));
+        title("note", idx.length.toLocaleString());
         const base = rows.length, rh = g.rowH;
         for (let k = 0; k < idx.length; k++) rows.push({ type: "track", h: rh, t: idx[k], list: idx, pos: k });
         if (mode === "title" || mode === "artist" || mode === "album") {
@@ -1239,157 +1234,159 @@
         break;
       }
       case "genres": {
-        title("Genres", plural(lib.genres.length, "genre"));
-        if (!lib.genres.length) rows.push({ type: "msg", h: 90, text: "None of these songs has a genre tag." });
+        title("tag", lib.genres.length.toLocaleString());
+        if (!lib.genres.length) msg("None of these songs has a genre tag.");
         lib.genres.forEach(gn => rows.push({ type: "genre", h: g.rowH, g: gn }));
         break;
       }
       case "added": {
-        title("Recently added");
-        if (!lib.hasAdded) { rows.push({ type: "msg", h: 110, text: "The music gate hasn't said when songs were added yet. Once it is updated, the newest albums show up here." }); break; }
-        const A = sortedAlbums("newest").slice(0, 120);
-        rows.push(...cardRows(A, g, "added"));
+        title("plus", "");
+        if (!lib.hasAdded) { msg("The music gate hasn't said when songs were added yet. Once it is updated, the newest albums show up here."); break; }
+        rows.push(...albumRows(sortedAlbums("newest").slice(0, 120), g, "added"));
         break;
       }
       case "played": {
         const idx = recentTracks(150);
-        title("Recently played", idx.length ? plural(idx.length, "song") : "");
-        if (!idx.length) rows.push({ type: "msg", h: 110, text: "Nothing played on this device yet. What you play shows up here (it stays in this browser)." });
+        title("clock", idx.length ? idx.length.toLocaleString() : "");
+        if (!idx.length) msg("Nothing played on this device yet. What you play shows up here (it stays in this browser).");
         rows.push(...trackRows(idx, g));
         break;
       }
       case "artist": {
-        const ar = lib.artists[route.id];
-        if (!ar) { rows.push({ type: "msg", h: 110, text: "That artist isn't in the library any more." }); v.back = true; break; }
         v.back = true;
+        const ar = lib.artists[route.id];
+        if (!ar) { msg("That artist isn't in the library any more."); break; }
         const all = ar.albums.flatMap(a => a.tracks);
-        rows.push({ type: "hero", h: heroH, kind: "artist", title: ar.name, sub: "", meta: `${plural(ar.albums.length, "album")} · ${plural(ar.tracks.length, "song")} · ${C.fmtLong(ar.dur)}`, art: ar.artPath, list: all, obj: ar });
-        head("Albums");
-        rows.push(...cardRows(ar.albums, g, ""));
-        head(`All songs · ${ar.tracks.length.toLocaleString()}`);
+        rows.push({ type: "hero", h: g.heroH, kind: "artist", title: ar.name, sub: "", meta: `${plural(ar.albums.length, "album")} · ${plural(ar.tracks.length, "song")} · ${C.fmtLong(ar.dur)}`, art: ar.artPath, list: all, obj: ar });
+        head("album", ar.albums.length.toLocaleString());
+        rows.push(...albumRows(ar.albums, g, ""));
+        head("note", ar.tracks.length.toLocaleString());
         rows.push(...trackRows(all, g, { sub: "album" }));
         break;
       }
       case "album": {
-        const al = lib.albums[route.id];
-        if (!al) { rows.push({ type: "msg", h: 110, text: "That album isn't in the library any more." }); v.back = true; break; }
         v.back = true;
-        rows.push({ type: "hero", h: heroH, kind: "album", title: al.name, sub: al.artist, meta: [al.year || "", plural(al.tracks.length, "song"), C.fmtLong(al.dur)].filter(Boolean).join(" · "), art: al.artPath, list: al.tracks, obj: al });
+        const al = lib.albums[route.id];
+        if (!al) { msg("That album isn't in the library any more."); break; }
+        rows.push({ type: "hero", h: g.heroH, kind: "album", title: al.name, sub: al.artist, meta: [al.year || "", plural(al.tracks.length, "song"), C.fmtLong(al.dur)].filter(Boolean).join(" · "), art: al.artPath, list: al.tracks, obj: al });
         let disc = 0;
         al.tracks.forEach((t, pos) => {
           const d = lib.T[t].d;
-          if (al.discs > 1 && d !== disc) { disc = d; rows.push({ type: "disc", h: 34, text: `Disc ${d || 1}` }); }
+          if (al.discs > 1 && d !== disc) { disc = d; rows.push({ type: "disc", h: 34, n: d || 1, glue: true }); }
           rows.push({ type: "track", h: g.rowH, t, list: al.tracks, pos, num: true, owner: al.artist });
         });
         break;
       }
       case "genre": {
-        const gn = lib.genres[route.id];
-        if (!gn) { rows.push({ type: "msg", h: 110, text: "That genre isn't in the library any more." }); v.back = true; break; }
         v.back = true;
+        const gn = lib.genres[route.id];
+        if (!gn) { msg("That genre isn't in the library any more."); break; }
         const idx = gn.tracks.slice().sort((a, b) => C.cmp(lib.T[a].fa, lib.T[b].fa) || C.cmp(lib.T[a].fal, lib.T[b].fal) || (lib.T[a].d - lib.T[b].d) || (lib.T[a].n - lib.T[b].n));
-        rows.push({ type: "hero", h: heroH, kind: "genre", title: gn.name, sub: "", meta: `${plural(gn.tracks.length, "song")}`, art: "", list: idx, obj: gn });
+        rows.push({ type: "hero", h: g.heroH, kind: "genre", title: gn.name, sub: "", meta: `${plural(gn.tracks.length, "song")}`, art: "", list: idx, obj: gn });
         rows.push(...trackRows(idx, g));
         break;
       }
-      default: {                                    // home
-        v.key = "home";
-        rows.push({ type: "homeacts", h: g.W < 560 ? 136 : 84 });
-        const here = connect.others.find(d => d.state && d.state.track && d.live && d.state.playing);
-        if (here && !isPlaying()) rows.push({ type: "here", h: 84, dev: here });
-        const ra = recentAlbums(g.cols * 1);
-        if (ra.length) { head("Recently played", { label: "See all", hash: "played" }); rows.push(...cardRows(ra, g, "")); }
-        if (lib.hasAdded) { head("Recently added", { label: "See all", hash: "added" }); rows.push(...cardRows(sortedAlbums("newest").slice(0, g.cols * 2), g, "added")); }
-        head("Your library");
-        const secs = lib.T.reduce((s, t) => s + t.s, 0);
-        rows.push({ type: "stats", h: 56, text: `${plural(lib.T.length, "song")} · ${plural(lib.artists.length, "artist")} · ${plural(lib.albums.length, "album")} · ${C.fmtLong(secs)} of music, streamed from skippy-pc.` });
-      }
+      default:                                   // home: the deck, no rows
+        v.key = "home"; v.home = true;
     }
     return v;
   }
 
   function buildSearch() {
     const g = geometry(), res = C.search(S.lib, S.search, 1500), rows = [];
-    if (res.artists.length) { rows.push({ type: "head", h: 42, text: "Artists" }); res.artists.forEach(ar => rows.push({ type: "artist", h: g.rowH + 4, ar })); }
-    if (res.albums.length) { rows.push({ type: "head", h: 42, text: "Albums" }); res.albums.forEach(al => rows.push({ type: "albumrow", h: g.rowH + 4, al })); }
+    if (res.artists.length) { rows.push({ type: "head", h: 40, glyph: "artist", count: res.artists.length.toLocaleString(), glue: true }); res.artists.forEach(ar => rows.push({ type: "artist", h: g.rowH + 4, ar })); }
+    if (res.albums.length) { rows.push({ type: "head", h: 40, glyph: "album", count: res.albums.length.toLocaleString(), glue: true }); res.albums.forEach(al => rows.push({ type: "albumrow", h: g.rowH, al })); }
     if (res.tracks.length) {
-      rows.push({ type: "head", h: 42, text: res.total > res.tracks.length ? `Songs · top ${res.tracks.length.toLocaleString()} of ${res.total.toLocaleString()}` : `Songs · ${res.total.toLocaleString()}` });
+      rows.push({ type: "head", h: 40, glyph: "note", count: res.total > res.tracks.length ? `${res.tracks.length.toLocaleString()} / ${res.total.toLocaleString()}` : res.total.toLocaleString(), glue: true });
       rows.push(...trackRows(res.tracks, g));
     }
-    if (!rows.length) rows.push({ type: "msg", h: 120, text: `Nothing matches “${S.search}”. Try fewer words: search looks in titles, artists, albums and genres, ignoring accents and capitals.` });
+    if (!rows.length) rows.push({ type: "msg", h: 110, glyph: "search", text: `Nothing matches “${S.search}”. Try fewer words: search looks in titles, artists, albums and genres, ignoring accents and capitals.` });
     return { rows, key: "search", rail: null, sort: null, back: false };
   }
 
+  /** Home: a control for each way into the library, the count on it. */
+  function buildDeck() {
+    const lib = S.lib, deck = $("#deck");
+    const here = connect.others.find(d => d.state && d.state.track && d.live && d.state.playing);
+    const units = [];
+    if (here && !isPlaying()) units.push(["here", "devices", "Play here, where the other device left off", "", true]);
+    units.push(["artists", "artist", LABELS.artists, lib.artists.length.toLocaleString()], ["albums", "album", LABELS.albums, lib.albums.length.toLocaleString()],
+               ["tracks", "note", LABELS.tracks, lib.T.length.toLocaleString()], ["genres", "tag", LABELS.genres, lib.genres.length.toLocaleString()]);
+    if (lib.hasAdded) units.push(["added", "plus", LABELS.added, ""]);
+    units.push(["played", "clock", LABELS.played, ""], ["dj", "dj", "Bilby, play something", ""], ["shuffle-all", "shuffle", "Shuffle everything", ""]);
+    const n = units.length;
+    deck.style.setProperty("--rows", Math.ceil(n / 2)); deck.style.setProperty("--rows-wide", Math.ceil(n / 4)); deck.style.setProperty("--rows-side", Math.ceil(n / 5));
+    deck.replaceChildren(...units.map(([id, glyph, label, count, lit], k) => {
+      const u = el("div", "unit named" + (lit ? " lit" : "")); u.style.setProperty("--i", k);
+      if (lit) u.dataset.s = "on";
+      const hit = el("button", "hit"); hit.type = "button"; hit.dataset.u = id; hit.setAttribute("aria-label", label); hit.title = label;
+      u.append(el("i", "plate"), hit);
+      const claws = el("i", "claws"); claws.innerHTML = "<b></b><b></b><b></b>"; u.append(claws);
+      if (lit) u.append(el("span", "lamp"));
+      u.insertAdjacentHTML("beforeend", ico(glyph));
+      if (count) u.append(el("span", "name", count));
+      return u;
+    }));
+    deck.hidden = false;
+  }
+  $("#deck").addEventListener("click", ev => {
+    const b = ev.target.closest("[data-u]");
+    if (!b || !S.lib) return;
+    const u = b.dataset.u;
+    if (u === "dj") return djStart();
+    if (u === "shuffle-all") return shuffleList(sortedTracks("title"));
+    if (u === "here") { const d = connect.others.find(x => x.state && x.state.track && x.live && x.state.playing); if (d) adopt(d.state, d.id); return; }
+    go(u);
+  });
+
   function renderView(keep) {
     if (!S.lib) return;
-    const sc = $("#scroll"), prev = S.view ? S.view.key : "";
-    if (prev && !keep) S.scrollMemo.set(prev, sc.scrollTop);
-    const top = sc.scrollTop;
-    const t0 = performance.now();
+    const prev = S.view ? S.view.key : "";
+    if (prev && !keep && S.view.rows.length) S.pageMemo.set(prev, list.page);
     const v = S.search ? buildSearch() : buildRoute(S.route);
     S.view = v;
-    S.geo = geoKey();
-    setNavCurrent(); updateTop(v);
-    railOn = !!(v.rail && v.rail.length > 3 && v.rows.length > 40);
-    sc.classList.toggle("railed", railOn);
-    list.setRows(v.rows);
-    buildRail(v);
-    if (keep) sc.scrollTop = top;
-    else sc.scrollTop = S.fresh ? 0 : (S.scrollMemo.get(v.key) || 0);
+    updateTop(v);
+    $("#deck").hidden = !v.home; $("#listwrap").hidden = !!v.home;
+    if (v.home) { buildDeck(); rail.on = false; rail.items = []; $("#letters-key").hidden = true; return; }
+    const page = keep ? list.page : (S.fresh ? 0 : (S.pageMemo.get(v.key) || 0));
+    rail.items = v.rail || []; rail.on = rail.items.length > 3;
+    $("#letters-key").hidden = !rail.on;
+    list.setRows(v.rows, page);
     S.fresh = false;
-    list.update();
-    if (window.console && console.debug && v.rows.length > 1000) console.debug(`bilby: view ${v.key} built in ${Math.round(performance.now() - t0)} ms (${v.rows.length} rows)`);
   }
   let viewTimer = 0;
   const scheduleView = () => { clearTimeout(viewTimer); viewTimer = setTimeout(() => renderView(true), 250); };
-  const geoKey = () => { const g = geometry(); return `${g.cols}/${g.rowH}/${g.heroH}/${Math.round(g.cw)}`; };
 
-  function setNavCurrent() {
-    const name = S.search ? "" : (["artist"].includes(S.route.name) ? "artists" : ["album"].includes(S.route.name) ? "albums" : S.route.name === "genre" ? "genres" : S.route.name);
-    for (const a of $$("#nav a")) { if (a.dataset.view === name) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); }
-  }
   function updateTop(v) {
     $("#back").hidden = !v.back || !!S.search;
-    const sel = $("#sort");
+    const sort = $("#sort");
     if (v.sort && !S.search) {
-      sel.hidden = false; sel.dataset.id = v.sort.id;
-      sel.replaceChildren(...v.sort.options.map(([val, label]) => { const o = el("option", "", label); o.value = val; o.selected = val === v.sort.value; return o; }));
-    } else sel.hidden = true;
+      sort.hidden = false; sort.dataset.id = v.sort.id;
+      const cur = v.sort.options.find(o => o[0] === v.sort.value);
+      sort.setAttribute("aria-label", `Sort: ${cur ? cur[1] : ""}`); sort.title = `Sort: ${cur ? cur[1] : ""}`;
+    } else sort.hidden = true;
+  }
+  function cycleSort() {
+    const v = S.view;
+    if (!v || !v.sort) return;
+    const o = v.sort.options, at = Math.max(0, o.findIndex(x => x[0] === v.sort.value)), next = o[(at + 1) % o.length];
+    S.sorts[v.sort.id] = next[0]; savePrefs();
+    S.fresh = true; renderView(false);
+    toast(next[1], { ms: 1400 });
   }
 
-  // — the A-Z rail —
-  const rail = {
-    box: $("#rail"), on: false, items: [],
-    hideBubble() { const b = $(".rail-bubble"); if (b) b.remove(); this.box.classList.remove("on"); },
-  };
-  function buildRail(v) {
-    const box = rail.box;
-    rail.on = railOn; rail.items = v.rail || [];
-    box.hidden = !railOn;
-    if (!railOn) return;
+  // — the alphabet: every letter on one screen, the ones this list has are lit —
+  function openLetters() {
+    if (!rail.on) return;
     const have = new Map(rail.items.map(r => [r.l, r.i]));
-    const letters = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
-    box.replaceChildren(...letters.map(l => { const s = el("span", "", l); if (!have.has(l)) s.style.opacity = ".3"; return s; }));
+    $("#letters").replaceChildren(..."#ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map(l => {
+      const b = el("button", "lang-opt", l); b.type = "button"; b.disabled = !have.has(l); b.setAttribute("aria-label", l);
+      b.onclick = () => { closeLetters(); list.goRow(have.get(l)); };
+      return b;
+    }));
+    $("#lettersheet").hidden = false; S.letters = true;
   }
-  function railJump(clientY, show) {
-    const r = rail.box.getBoundingClientRect(), letters = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    let k = clamp(Math.floor((clientY - r.top) / r.height * letters.length), 0, letters.length - 1);
-    const have = new Map(rail.items.map(x => [x.l, x.i]));
-    let l = letters[k];
-    for (let d = 0; d < letters.length && !have.has(l); d++) { l = letters[Math.min(letters.length - 1, k + d)]; }
-    if (!have.has(l)) for (let d = 0; d < letters.length && !have.has(l); d++) { l = letters[Math.max(0, k - d)]; }
-    if (!have.has(l)) return;
-    list.scrollTo(have.get(l));
-    if (show) {
-      let b = $(".rail-bubble");
-      if (!b) { b = el("div", "rail-bubble"); $("#listwrap").append(b); }
-      b.textContent = l;
-    }
-  }
-  rail.box.addEventListener("pointerdown", e => { rail.box.setPointerCapture(e.pointerId); rail.box.classList.add("on"); railJump(e.clientY, true); e.preventDefault(); });
-  rail.box.addEventListener("pointermove", e => { if (rail.box.hasPointerCapture(e.pointerId)) railJump(e.clientY, true); });
-  const railEnd = () => rail.hideBubble();
-  rail.box.addEventListener("pointerup", railEnd); rail.box.addEventListener("pointercancel", railEnd);
+  function closeLetters() { $("#lettersheet").hidden = true; S.letters = false; }
 
   // — routing: views are #hash routes; sheets are history entries, so the back button closes them —
   function parseHash() {
@@ -1401,10 +1398,13 @@
   /** Open a view. A sheet (Now Playing, the Queue) that is open closes into it: its history entry becomes the view's, so Back
    *  goes to where the person was before the sheet, not back into it. */
   function go(hash) {
-    if (S.search) clearSearch(true);
+    const hadSearch = !!S.search;
+    if (hadSearch) clearSearch(true);
+    if (S.letters) closeLetters();
+    if (menu) closeMenu(true);
     const inSheet = !!(history.state && history.state.sheet);
     if (S.sheet) closeSheet(true);
-    if (location.hash === "#" + hash && !inSheet) return;
+    if (location.hash === "#" + hash && !inSheet) { if (hadSearch) { S.fresh = true; renderView(false); } return; }
     if (inSheet) history.replaceState({ n: ++S.nav }, "", "#" + hash);
     else history.pushState({ n: ++S.nav }, "", "#" + hash);
     onRoute(false);
@@ -1415,7 +1415,6 @@
     S.fresh = !back;
     if (S.search) clearSearch(true);
     renderView(false);
-    if (!back) $("#scroll").scrollTop = 0;
   }
   const parentHash = () => ({ artist: "artists", album: "albums", genre: "genres" })[S.route.name] || "home";
   function goBack() {
@@ -1437,11 +1436,10 @@
       const v = $("#q").value.trim();
       if (v === S.search) return;
       const was = S.search;
-      if (!was && S.view) S.scrollMemo.set(S.view.key, $("#scroll").scrollTop);
+      if (!was && S.view && S.view.rows.length) S.pageMemo.set(S.view.key, list.page);
       S.search = v;
       $("#q-clear").hidden = !$("#q").value;
       S.fresh = !!v || !was; renderView(false);
-      if (v) $("#scroll").scrollTop = 0;
     }, 90);
   }
   function clearSearch(silent) {
@@ -1453,7 +1451,7 @@
   }
 
   // — clicks on rows (one delegated listener for the whole list) —
-  function rowAction(row, b, rowEl, ev) {
+  function rowAction(row, b) {
     const r = b.dataset.r, T = S.lib.T;
     switch (row.type) {
       case "track":
@@ -1466,17 +1464,10 @@
         break;
       case "albumrow":
         if (r === "open") return go(`album/${row.al.id}`);
+        if (r === "go") return playList(row.al.tracks, 0);
         if (r === "more") return openMenu(b, row.al.name, listMenu(row.al.tracks, row.al.name));
         break;
       case "genre": if (r === "open") return go(`genre/${row.g.id}`); break;
-      case "cards": {
-        const a = row.albums[+b.dataset.k];
-        if (!a) return;
-        if (r === "open") return go(`album/${a.id}`);
-        if (r === "go") return playList(a.tracks, 0);
-        break;
-      }
-      case "head": if (r === "link" && row.link) return go(row.link.hash); break;
       case "hero": {
         const L = row.list;
         if (r === "hero-play") return playList(L, 0);
@@ -1485,11 +1476,6 @@
         if (r === "hero-artist") { const ar = S.lib.artistByName.get(row.obj.artist); if (ar) return go(`artist/${ar.id}`); }
         break;
       }
-      case "homeacts":
-        if (r === "dj") return djStart();
-        if (r === "shuffle-all") return shuffleList(sortedTracks("title"));
-        break;
-      case "here": if (r === "take") return adopt(row.dev.state, row.dev.live && row.dev.state.playing ? row.dev.id : null); break;
     }
   }
   $("#host").addEventListener("click", ev => {
@@ -1499,63 +1485,54 @@
     // After a mouse or touch click the row lets go of the keyboard focus, so Space pauses the music instead of pressing the
     // same row again. (A click made with the keyboard keeps its focus, so keyboard users never lose their place.)
     if (ev.detail > 0 && b.dataset.r !== "more") b.blur();
-    if (row) rowAction(row, b, rowEl, ev);
+    if (row) rowAction(row, b);
   });
 
-  // ═══ menus ══════════════════════════════════════════════════════════════════════════════════════════════════════
+  // ═══ menus: a panel of keys over the stage (a song's options, the sleep timer, other devices) ═══════════════════
   let menu = null;
   function closeMenu(keepFocus) {
     if (!menu) return;
-    $("#menu").hidden = true; $("#scrim").hidden = true;
+    $("#menu").hidden = true;
     const a = menu.anchor; menu = null;
     if (!keepFocus && a && a.isConnected) { try { a.focus(); } catch (e) { /* gone */ } }
   }
+  /** items: { icon, label (said by a screen reader and on hover), tag (a short number shown under the glyph), run } or { node }. */
   function openMenu(anchor, title, items, kind) {
     closeMenu(true);
-    const m = $("#menu");
+    const m = $("#menu"), grid = el("div", "mgrid"), head = el("div", "s-head");
     m.replaceChildren();
-    if (title) m.append(el("h4", "", title));
+    const h = el("h4", "grow", title || ""), x = el("button", "key"); x.type = "button"; x.dataset.act = "close-menu"; x.innerHTML = ico("down");
+    x.setAttribute("aria-label", "Close"); x.title = "Close";
+    head.append(h, x); m.append(head, grid);
     for (const it of items) {
-      if (it.sep) { m.append(el("hr")); continue; }
+      if (it.sep) continue;
       if (it.node) { m.append(it.node); continue; }
-      const b = el("button"); b.type = "button";
+      const b = el("button", "mkey"); b.type = "button";
       b.setAttribute("role", it.checked !== undefined ? "menuitemradio" : "menuitem");
       if (it.checked !== undefined) b.setAttribute("aria-checked", it.checked);
-      if (it.icon) b.insertAdjacentHTML("beforeend", ico(it.icon));
-      b.append(it.label);
+      b.setAttribute("aria-label", it.label); b.title = it.label;
+      b.insertAdjacentHTML("beforeend", ico(it.icon || "note"));
+      if (it.tag) b.append(el("span", "tag", it.tag));
       b.onclick = () => { closeMenu(true); it.run(); };
-      m.append(b);
+      grid.append(b);
     }
     m.hidden = false;
-    const narrow = innerWidth < 700;
-    $("#scrim").hidden = !narrow;
-    m.style.cssText = "";
-    if (narrow) { m.style.left = "0"; m.style.right = "0"; m.style.bottom = "0"; m.style.maxWidth = "none"; m.style.borderRadius = "16px 16px 0 0"; m.style.maxHeight = "70vh"; m.style.overflowY = "auto"; }
-    else {
-      const r = anchor.getBoundingClientRect(), mw = m.offsetWidth, mh = m.offsetHeight;
-      let x = r.right - mw, y = r.bottom + 4;
-      if (y + mh > innerHeight - 8) y = Math.max(8, r.top - mh - 4);
-      m.style.left = clamp(x, 8, innerWidth - mw - 8) + "px"; m.style.top = y + "px";
-    }
     menu = { anchor, kind: kind || "" };
-    const first = $("button", m);
+    const first = $("button.mkey", m) || $("button", m);
     if (first) first.focus();
   }
-  $("#scrim").addEventListener("click", () => closeMenu());
   document.addEventListener("pointerdown", e => { if (menu && !$("#menu").contains(e.target) && !(menu.anchor && menu.anchor.contains(e.target))) closeMenu(true); }, true);
   $("#menu").addEventListener("keydown", e => {
     const bs = $$("button", $("#menu")), i = bs.indexOf(document.activeElement);
-    if (e.key === "ArrowDown") { e.preventDefault(); bs[(i + 1) % bs.length].focus(); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); bs[(i - 1 + bs.length) % bs.length].focus(); }
+    if (e.key === "ArrowDown" || e.key === "ArrowRight") { e.preventDefault(); bs[(i + 1) % bs.length].focus(); }
+    else if (e.key === "ArrowUp" || e.key === "ArrowLeft") { e.preventDefault(); bs[(i - 1 + bs.length) % bs.length].focus(); }
     else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeMenu(); }
-    else if (e.key === "Tab") closeMenu(true);
   });
   const trackMenu = t => {
     const T = S.lib.T[t], ar = S.lib.artistByName.get(T.a), al = albumOf(T);
     const items = [
       { label: "Play next", icon: "next", run: () => queueMany([t], true, T.t) },
       { label: "Add to queue", icon: "addq", run: () => queueMany([t], false, T.t) },
-      { sep: true },
     ];
     if (ar) items.push({ label: "Go to artist", icon: "artist", run: () => go(`artist/${ar.id}`) });
     if (al) items.push({ label: "Go to album", icon: "album", run: () => go(`album/${al.id}`) });
@@ -1566,14 +1543,14 @@
     { label: "Shuffle", icon: "shuffle", run: () => shuffleList(tracks) },
     { label: "Play next", icon: "next", run: () => queueMany(tracks, true, name) },
     { label: "Add to queue", icon: "addq", run: () => queueMany(tracks, false, name) },
-  ].concat(extra && extra.length ? [{ sep: true }].concat(extra) : []);
+  ].concat(extra || []);
 
   function sleepMenu(anchor) {
     const sl = S.sleep, now = Date.now();
-    const mk = (label, kind) => ({ label, checked: sl.active && ((kind === "end" && sl.endOfTrack) || (kind !== "end" && !sl.endOfTrack && kind === sl._kind)), run: () => { sl.start(kind, Date.now()); sl._kind = kind; updateSleepUi(); startSleepTick(); toast(kind === "end" ? "Sleep timer: stops after this song" : `Sleep timer: ${kind} minutes`, { ms: 2200 }); } });
-    const items = [mk("15 minutes", 15), mk("30 minutes", 30), mk("60 minutes", 60), mk("End of this song", "end")];
-    if (sl.active) items.push({ sep: true }, { label: `Turn off (${sl.label(now)} left)`, run: () => { sl.stop(); applyVolume(); updateSleepUi(); } });
-    openMenu(anchor, "Sleep timer", items);
+    const mk = (label, kind, tag, icon) => ({ label, icon: icon || "sleep", tag, checked: sl.active && ((kind === "end" && sl.endOfTrack) || (kind !== "end" && !sl.endOfTrack && kind === sl._kind)), run: () => { sl.start(kind, Date.now()); sl._kind = kind; updateSleepUi(); startSleepTick(); toast(kind === "end" ? "Sleep timer: stops after this song" : `Sleep timer: ${kind} minutes`, { ms: 2200 }); } });
+    const items = [mk("15 minutes", 15, "15"), mk("30 minutes", 30, "30"), mk("60 minutes", 60, "60"), mk("End of this song", "end", "", "pause")];
+    if (sl.active) items.push({ label: `Turn off (${sl.label(now)} left)`, icon: "close", tag: sl.label(now).replace(" min", "m"), run: () => { sl.stop(); applyVolume(); updateSleepUi(); } });
+    openMenu(anchor, "", items);
   }
   let sleepTimer = 0;
   function startSleepTick() { clearInterval(sleepTimer); sleepTimer = setInterval(sleepTick, 1000); }
@@ -1585,13 +1562,13 @@
   }
   function updateSleepUi() {
     const sl = S.sleep, label = sl.active ? sl.label(Date.now()) : "";
-    for (const n of els.sleep) n.textContent = sl.endOfTrack ? "end" : label.replace(" min", "m");
+    for (const n of els.sleep) n.textContent = sl.endOfTrack ? "·" : label.replace(" min", "m");
     for (const b of $$('[data-act="sleep"]')) b.classList.toggle("on", sl.active);
     if (!sl.active) { clearInterval(sleepTimer); applyVolume(); }
   }
 
   // ═══ sheets: Now Playing and the Queue ══════════════════════════════════════════════════════════════════════════
-  const wide = () => matchMedia("(min-width: 1000px)").matches;
+  // A panel over the stage. The strip along the bottom (and its keys) stay in reach, so there is nothing to close to pause or skip.
   let sheetOpener = null;
   function setTab(which) {
     S.tab = which;
@@ -1600,47 +1577,57 @@
     if (which === "queue") renderQueue(true);
   }
   function inertBehind(on) {
-    for (const s of ["#tapbar", "#notice", ".bp-body", "#bar"]) { const n = $(s); if (n) { if (on) n.setAttribute("inert", ""); else n.removeAttribute("inert"); } }
+    for (const s of ["#tapbar", "#notice", "#top", "#deck", "#listwrap"]) { const n = $(s); if (n) { if (on) n.setAttribute("inert", ""); else n.removeAttribute("inert"); } }
   }
   function openSheet(which, fromPop) {
-    if (wide()) { setTab(which); return; }                 // docked: the tab is all there is to switch
     if (!S.sheet) {
-      S.sheet = which; root.dataset.sheet = "open";         // visible first, so the queue list can measure itself
+      S.sheet = which; root.dataset.sheet = "open"; $("#side").hidden = false;      // visible first, so the queue list can measure itself
       sheetOpener = document.activeElement;
       if (!fromPop) history.pushState({ n: ++S.nav, sheet: which }, "", location.href);
-      if (innerWidth < 700) inertBehind(true);
+      inertBehind(true);
     }
+    if (menu) closeMenu(true);
+    if (S.letters) closeLetters();
     setTab(which);
     const t = $(which === "np" ? "#tab-np" : "#tab-q"); if (t) t.focus();
   }
   function closeSheet(fromPop) {
     if (!S.sheet) return;
-    S.sheet = ""; root.dataset.sheet = ""; inertBehind(false);
+    S.sheet = ""; root.dataset.sheet = ""; $("#side").hidden = true; inertBehind(false);
     if (!fromPop && history.state && history.state.sheet) history.back();
     const o = sheetOpener; sheetOpener = null;
     if (o && o.isConnected) { try { o.focus(); } catch (e) { /* gone */ } }
   }
-  matchMedia("(min-width: 1000px)").addEventListener("change", () => { if (S.sheet) closeSheet(); renderView(true); });
 
   // ═══ the queue panel ════════════════════════════════════════════════════════════════════════════════════════════
   const qm = qList.makers;
   qm.qh = {
-    make() { const e = el("div", "vrow qh"); e._h = el("h3"); e._b = el("button", "pill-btn"); e._b.type = "button"; e._b.dataset.r = "earlier"; e.append(e._h, e._b); return e; },
-    bind(e, r) { e._h.textContent = r.text; e._b.hidden = !r.link; e._b.textContent = r.link || ""; },
+    make() {
+      const e = el("div", "vrow qh"); e._g = el("span", "gl"); e._c = el("span", "count"); e._s = el("span", "grow");
+      e._b = el("button", "pill-btn"); e._b.type = "button"; e._b.dataset.r = "earlier";
+      e.append(e._g, e._c, e._s, e._b); return e;
+    },
+    bind(e, r) {
+      e._g.innerHTML = ico(r.glyph); e._c.textContent = r.count || "";
+      e._b.hidden = !r.toggle; e._b.innerHTML = r.toggle ? ico(r.toggle === "hide" ? "up" : "down") : "";
+      e._b.setAttribute("aria-label", r.toggle === "hide" ? "Hide the earlier songs" : "Show the earlier songs");
+    },
   };
-  qm.qmsg = { make() { return el("div", "vrow vmsg"); }, bind(e, r) { e.textContent = r.text; } };
+  qm.qmsg = {
+    make() { const e = el("div", "vrow vmsg"); e._g = el("span", "gl"); e._t = el("span"); e.append(e._g, e._t); return e; },
+    bind(e, r) { e._g.innerHTML = ico("dj"); e._t.textContent = r.text; },
+  };
   qm.qr = {
     make() {
       const e = el("div", "vrow qr"); e.setAttribute("role", "listitem");
-      const grip = el("button", "q-grip"); grip.type = "button"; grip.dataset.r = "grip"; grip.innerHTML = ico("grip"); grip.setAttribute("aria-label", "Drag to reorder");
       const main = el("button", "q-main"); main.type = "button"; main.dataset.r = "jump";
       const cv = mkCover(""), txt = el("span", "txt"), l1 = el("span", "l1"), eq = el("span", "eq"), l1t = el("span"), l2 = el("span", "l2");
       eq.setAttribute("aria-hidden", "true"); eq.innerHTML = "<span></span><span></span><span></span>";
       l1.append(eq, l1t); txt.append(l1, l2); main.append(cv.box, txt);
       const mkb = (r, icon, label) => { const b = el("button", "ib q-btn"); b.type = "button"; b.dataset.r = r; b.innerHTML = ico(icon); b.setAttribute("aria-label", label); return b; };
       const up = mkb("up", "up", "Move up"), dn = mkb("down", "down", "Move down"), rm = mkb("remove", "close", "Remove from the queue");
-      e.append(grip, main, up, dn, rm);
-      e._r = { grip, main, cv, l1t, l2, up, dn, rm, eq };
+      e.append(main, up, dn, rm);
+      e._r = { main, cv, l1t, l2, up, dn, rm, eq };
       return e;
     },
     bind(e, r) {
@@ -1653,7 +1640,7 @@
       x.l2.replaceChildren(auto ? el("span", "auto", "Bilby's pick · ") : "", t.a);
       x.eq.style.display = isCur ? "inline-flex" : "none";
       const canMove = r.pos > Q.qi;
-      x.grip.hidden = !canMove; x.up.hidden = !canMove; x.dn.hidden = !canMove; x.rm.hidden = isCur;
+      x.up.hidden = !canMove; x.dn.hidden = !canMove; x.rm.hidden = isCur;
       x.up.disabled = r.pos <= Q.qi + 1; x.dn.disabled = r.pos >= Q.length - 1;
       x.main.setAttribute("aria-label", isCur ? `${t.t}, playing now` : `Play ${t.t} by ${t.a}`);
     },
@@ -1663,30 +1650,29 @@
     const Q = S.q, rows = [], h = geometry().rowH;
     if (!Q.cur) { rows.push({ type: "qmsg", h: 120, text: "The queue is empty. Play an album or a song, or let Bilby DJ pick." }); return rows; }
     if (Q.qi > 0) {
-      rows.push({ type: "qh", h: 40, text: `Earlier · ${Q.qi}`, link: S.showEarlier ? "Hide" : "Show" });
+      rows.push({ type: "qh", h: 40, glyph: "earlier", count: String(Q.qi), toggle: S.showEarlier ? "hide" : "show", glue: true });
       if (S.showEarlier) for (let p = 0; p < Q.qi; p++) rows.push({ type: "qr", h, pos: p });
     }
-    rows.push({ type: "qh", h: 40, text: "Now playing" });
+    rows.push({ type: "qh", h: 40, glyph: "play", glue: true });
     rows.push({ type: "qr", h, pos: Q.qi });
     const up = Q.length - Q.qi - 1;
-    rows.push({ type: "qh", h: 40, text: up ? `Next up · ${up.toLocaleString()}` : "Next up" });
+    rows.push({ type: "qh", h: 40, glyph: "next", count: up ? up.toLocaleString() : "", glue: true });
     if (!up) rows.push({ type: "qmsg", h: 90, text: S.dj ? "Nothing queued. Bilby will pick something when this song is nearly over." : "Nothing queued after this." });
     for (let p = Q.qi + 1; p < Q.length; p++) rows.push({ type: "qr", h, pos: p });
     return rows;
   }
-  function renderQueue(scroll) {
+  function renderQueue(jump) {
     if (S.tab !== "queue") { qDirty = true; return; }       // drawn when its tab is opened
     qDirty = false;
     const Q = S.q;
-    qList.setRows(queueRows());
+    qList.setRows(queueRows(), jump ? 0 : qList.page);
     const left = Q.cur ? C.fmtLong(Q.totalSeconds(S.lib.T)) : "";
-    $("#q-sum").textContent = Q.cur ? `${Q.length.toLocaleString()} in the queue${Q.length - Q.qi - 1 > 0 ? ` · ${left} to go` : ""}` : "The queue is empty.";
-    if (scroll && Q.cur) { const idx = qList.rows.findIndex(r => r.type === "qr" && r.pos === Q.qi); if (idx >= 0) qList.scrollTo(Math.max(0, idx - 1)); }
+    $("#q-sum").textContent = Q.cur ? `${Q.length.toLocaleString()}${Q.length - Q.qi - 1 > 0 ? ` · ${left}` : ""}` : "";
+    if (jump && Q.cur) { const idx = qList.rows.findIndex(r => r.type === "qr" && r.pos === Q.qi); if (idx >= 0) qList.goRow(idx); }
   }
   let qDirty = true;
 
-  const qHost = $("#q-host");
-  qHost.addEventListener("click", ev => {
+  $("#q-host").addEventListener("click", ev => {
     const b = ev.target.closest("button[data-r]"), rowEl = ev.target.closest(".vrow");
     if (!b || !rowEl) return;
     const row = qList.rows[rowEl._i];
@@ -1706,81 +1692,27 @@
     requestAnimationFrame(() => {
       const idx = qList.rows.findIndex(x => x.type === "qr" && x.pos === pos);
       if (idx < 0) return;
-      if (!qList.el(idx)) qList.scrollTo(idx, true);
-      qList.update();
+      qList.goRow(idx);
       const e = qList.el(idx), b = e && (e.querySelector(`[data-r="${r}"]:not(:disabled)`) || e.querySelector('[data-r="jump"]'));
       if (b) b.focus();
     });
   }
 
-  // drag to reorder (pointer events: mouse and touch alike); the up and down buttons do the same for keyboards
-  let drag = null;
-  qHost.addEventListener("pointerdown", e => {
-    const grip = e.target.closest(".q-grip");
-    if (!grip) return;
-    const rowEl = grip.closest(".vrow"), row = qList.rows[rowEl._i];
-    if (!row || row.type !== "qr" || row.pos <= S.q.qi) return;
-    e.preventDefault();
-    grip.setPointerCapture(e.pointerId);
-    drag = { from: row.pos, to: row.pos, rowEl, pid: e.pointerId, y: e.clientY, raf: 0, drop: el("div", "q-drop") };
-    rowEl.classList.add("dragging"); qHost.append(drag.drop);
-    dragMove(e.clientY);
-  });
-  function dragTarget(clientY) {
-    const sc = $("#q-scroll"), r = sc.getBoundingClientRect();
-    const y = clientY - r.top + sc.scrollTop;
-    let i = C.rowAt(qList.off, y);
-    const rows = qList.rows;
-    // only upcoming rows are drop targets
-    const first = rows.findIndex(x => x.type === "qr" && x.pos === S.q.qi + 1), last = rows.length - 1;
-    if (first < 0) return null;
-    i = clamp(i, first, last);
-    while (i > first && rows[i].type !== "qr") i--;
-    return rows[i].type === "qr" ? { i, pos: rows[i].pos } : null;
-  }
-  function dragMove(clientY) {
-    if (!drag) return;
-    drag.y = clientY;
-    const t = dragTarget(clientY);
-    if (!t) return;
-    drag.to = t.pos;
-    const top = drag.to > drag.from ? qList.off[t.i] + qList.rows[t.i].h : qList.off[t.i];
-    drag.drop.style.top = (top - 1) + "px";
-  }
-  function dragLoop() {
-    if (!drag) return;
-    const sc = $("#q-scroll"), r = sc.getBoundingClientRect();
-    if (drag.y < r.top + 44) sc.scrollTop -= 12; else if (drag.y > r.bottom - 44) sc.scrollTop += 12;
-    dragMove(drag.y);
-    drag.raf = requestAnimationFrame(dragLoop);
-  }
-  qHost.addEventListener("pointermove", e => { if (drag && e.pointerId === drag.pid) { dragMove(e.clientY); if (!drag.raf) drag.raf = requestAnimationFrame(dragLoop); } });
-  function dragEnd(commit) {
-    if (!drag) return;
-    cancelAnimationFrame(drag.raf);
-    drag.drop.remove(); drag.rowEl.classList.remove("dragging");
-    const d = drag; drag = null;
-    if (commit && d.to !== d.from && S.q.move(d.from, d.to)) { onQueueChanged(); toast("Moved", { ms: 1200 }); }
-  }
-  qHost.addEventListener("pointerup", e => { if (drag && e.pointerId === drag.pid) dragEnd(true); });
-  qHost.addEventListener("pointercancel", () => dragEnd(false));
-  document.addEventListener("keydown", e => { if (drag && e.key === "Escape") { e.stopPropagation(); dragEnd(false); } }, true);
-
   // ═══ when the queue or the song changes ═════════════════════════════════════════════════════════════════════════
+  const queueLeft = () => (S.q.cur ? S.q.length - S.q.qi - 1 : 0);
+  function showQueueCount() { const n = queueLeft(); $("#q-cnt").textContent = n > 0 ? (n > 999 ? "999+" : String(n)) : ""; }
   function onQueueChanged() {
     S.qv++;
     renderUpNext();
     if (list) list.refresh();
-    if (S.tab === "queue" && (S.sheet || wide())) renderQueue(false); else qDirty = true;
-    const n = S.q.cur ? S.q.length - S.q.qi - 1 : 0;
-    $("#nav-queue").lastChild.textContent = n > 0 ? `Queue · ${n > 999 ? "999+" : n}` : "Queue";
+    if (S.tab === "queue" && S.sheet) renderQueue(false); else qDirty = true;
+    showQueueCount();
     preloadNext(); prefetchSoon(); persistSoon(); publishSoon();
   }
   /** The playing song changed but the queue's contents did not: the "now playing" marker and the count move. */
   function onQueueMoved() {
-    if (S.tab === "queue" && (S.sheet || wide())) renderQueue(false); else qDirty = true;
-    const n = S.q.cur ? S.q.length - S.q.qi - 1 : 0;
-    $("#nav-queue").lastChild.textContent = n > 0 ? `Queue · ${n > 999 ? "999+" : n}` : "Queue";
+    if (S.tab === "queue" && S.sheet) renderQueue(false); else qDirty = true;
+    showQueueCount();
   }
 
   // ═══ Connect: this device tells the portal what it plays; another can take over or be its remote ═══════════════
@@ -1871,13 +1803,14 @@
       who.append(el("b", "", d.name));
       what.textContent = s.playing ? `${s.title || "Playing"} — ${s.artist || ""}` : `${s.title ? s.title + " (paused)" : "Paused"}`;
       const acts = el("div", "acts");
-      const mk = (label, run) => { const b = el("button", "", label); b.type = "button"; b.onclick = () => { closeMenu(true); run(); }; return b; };
-      acts.append(mk(s.playing ? "Pause" : "Play", () => sendRemote(d, s.playing ? "pause" : "play")), mk("Next", () => sendRemote(d, "next")), mk("Play here", () => adopt(s, s.playing ? d.id : null)));
+      const mk = (label, icon, run) => { const b = el("button", "key"); b.type = "button"; b.innerHTML = ico(icon); b.setAttribute("aria-label", label); b.title = label; b.onclick = () => { closeMenu(true); run(); }; return b; };
+      acts.append(mk(s.playing ? "Pause" : "Play", s.playing ? "pause" : "play", () => sendRemote(d, s.playing ? "pause" : "play")), mk("Next", "next", () => sendRemote(d, "next")),
+                  mk("Play here", "link", () => adopt(s, s.playing ? d.id : null)));
       box.append(who, what);
       if (s.armed === false || s.tap) box.append(el("div", "what need", "This player needs a tap first: browsers only play sound after a tap on the page. Play from here still works."));
       box.append(acts); items.push({ node: box });
     }
-    openMenu(anchor, "Other devices", items, "devices");
+    openMenu(anchor, "", items, "devices");
   }
 
   // ═══ keyboard, buttons ══════════════════════════════════════════════════════════════════════════════════════════
@@ -1886,6 +1819,7 @@
     if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
     const t = e.target;
     if (e.key === "Escape") {
+      if (S.letters) { closeLetters(); e.preventDefault(); return; }
       if (menu) { closeMenu(); e.preventDefault(); return; }
       if (S.sheet) { closeSheet(); e.preventDefault(); return; }
       if ((t === $("#q") || !typing(t)) && ($("#q").value || S.search)) { clearSearch(); e.preventDefault(); }
@@ -1899,6 +1833,7 @@
       case "ArrowRight": if (onRange) return; e.preventDefault(); if (e.shiftKey) actions.next(); else actions.seekBy(5); break;
       case "ArrowUp": if (onRange) return; e.preventDefault(); actions.volBy(0.05); break;
       case "ArrowDown": if (onRange) return; e.preventDefault(); actions.volBy(-0.05); break;
+      case "PageDown": case "PageUp": { e.preventDefault(); const L = S.sheet && S.tab === "queue" ? qList : list; L.go(L.page + (e.key === "PageDown" ? 1 : -1)); break; }
       case "m": case "M": e.preventDefault(); actions.mute(); break;
       case "s": case "S": e.preventDefault(); actions.shuffle(); break;
       case "r": case "R": e.preventDefault(); actions.repeat(); break;
@@ -1930,6 +1865,15 @@
       case "sleep": sleepMenu(b); break;
       case "devices": devicesMenu(b); break;
       case "help": openKeys(); break;
+      case "home": go("home"); break;
+      case "sort": cycleSort(); break;
+      case "letters": openLetters(); break;
+      case "close-menu": closeMenu(); break;
+      case "shield":
+        S.shield = !S.shield; savePrefs(); syncToggles();
+        if (S.shield) prefetchSoon(); else for (const [, ac] of fetching) ac.abort();
+        toast(S.shield ? "Signal shield on: the next songs are kept ready" : "Signal shield off", { ms: 1800 });
+        break;
       case "back": goBack(); break;
       case "clear-search": clearSearch(); $("#q").focus(); break;
       case "clear-queue": if (S.q.cur && S.q.length - S.q.qi - 1 > 0) { const n = S.q.length - S.q.qi - 1; S.q.clearUpcoming(); onQueueChanged(); toast(`Cleared ${n.toLocaleString()} from the queue`); } break;
@@ -1937,14 +1881,6 @@
       case "open-album": { const t = curTrack(), al = t && albumOf(t); if (al) go(`album/${al.id}`); break; }
     }
   });
-  // a link in the nav (#artists, #albums...) closes a sheet, and a view change is a real history entry
-  $("#nav").addEventListener("click", e => {
-    const a = e.target.closest("a[data-view]");
-    if (!a) return;
-    e.preventDefault();
-    go(a.dataset.view);
-  });
-
   // the position and volume sliders
   function wireRanges() {
     for (const r of els.seek) {
@@ -1964,11 +1900,6 @@
 
   $("#q").addEventListener("input", onSearchInput);
   $("#q").addEventListener("search", onSearchInput);
-  $("#sort").addEventListener("change", e => {
-    const id = e.target.dataset.id;
-    S.sorts[id] = e.target.value; savePrefs();
-    S.fresh = true; renderView(false);
-  });
 
   // the tab or window being closed, hidden or brought back
   addEventListener("pagehide", () => persist());
@@ -1987,8 +1918,8 @@
   setInterval(() => { if (S.lib && !gate.fresh() && !document.hidden) gate.ensure().catch(() => {}); }, 5 * 60 * 1000);
   if (window.ResizeObserver) {
     let rt = 0;
-    new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { if (S.lib && geoKey() !== S.geo) renderView(true); else list.update(); }, 120); }).observe($("#scroll"));
-    new ResizeObserver(() => qList.update()).observe($("#q-scroll"));      // the queue is measured only once its sheet is on screen
+    new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { if (S.lib) { list.resize(); if (S.view && S.view.home) buildDeck(); } }, 120); }).observe($("#stage"));
+    new ResizeObserver(() => qList.resize()).observe($("#q-scroll"));      // the queue is measured only once its sheet is on screen
   }
 
   // ═══ start ══════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -2002,7 +1933,8 @@
   $("#tab-np").setAttribute("aria-selected", "true");
   showTrack();
   setTab("np");
+  showQueueCount(); syncSignal();
   loadLibrary();
   // exposed for the tests that drive the page by hand (portal/tests/dev_music.py) and for debugging in the console
-  window.BilbyApp = { S, actions, gate, slots, list, qList, toast, startTrack, tryPlay, renderView, checkin, connect, persist, blobs, rec, recoverNow, get lib() { return S.lib; } };
+  window.BilbyApp = { S, actions, gate, slots, list, qList, go, rail, toast, startTrack, tryPlay, renderView, checkin, connect, persist, blobs, rec, recoverNow, get lib() { return S.lib; } };
 })();

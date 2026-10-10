@@ -3,8 +3,8 @@ home token, no new secret), only for a gate address on the tailnet, and keeps ea
 its remote, and knows when a device's browser still needs a tap before it will make sound. Admin only.
 
 The player itself (static/bilby-app.js) runs in a browser: what can be checked without one is checked here (the routes, the page's
-markup against the ids the script looks up, the stylesheet's use of the portal's tokens); its pure logic is run under Node by
-test_player_js.py when Node is installed."""
+markup against the ids the script looks up, that it is a page of the bridge: one screen, glyphs, no scrolling; the stylesheet's use of
+the portal's tokens); its pure logic is run under Node by test_player_js.py when Node is installed."""
 import hashlib
 import importlib.util
 import json
@@ -300,8 +300,8 @@ def test_the_page_is_named_everywhere_it_shows_a_name_and_never_the_old_one(clie
     login(client, ADMIN)
     page = client.get("/music").data.decode()
     assert f"<title>{NAME} — Maker Portal</title>" in page
-    assert re.search(r'<h1 class="apptitle">Bilby(&#39;|&apos;|\')s Audio Service</h1>', page)
-    assert 'name="apple-mobile-web-app-title" content="Bilby"' in page and "&lsaquo; Home" in page
+    assert 'name="apple-mobile-web-app-title" content="Bilby"' in page
+    assert 'aria-label="Back"' in page and 'aria-label="Home"' in page                      # the bridge's strip: back, the glyph, home
     sources = [page, client.get("/").data.decode(), client.get("/music/manifest.webmanifest").data.decode(),
                *(p.read_text(encoding="utf-8") for p in (STATIC / "bilby-app.js", STATIC / "bilby-player.js", STATIC / "bilby-player.css"))]
     for text in sources:
@@ -357,7 +357,67 @@ def test_the_player_uses_the_portals_colours_and_keeps_every_focus_ring():
     used = set(re.findall(r"var\((--[\w-]+)", code))
     assert used and not used - defined, used - defined
     assert "prefers-reduced-motion" in css
-    assert len(re.findall(r"outline\s*:\s*none", code)) <= 1        # only the search box (which draws its own focus border)
+    assert len(re.findall(r"outline\s*:\s*none", code)) <= 3        # the search box (draws its own focus border), the list panel and the page bar (which draws its own)
+
+
+# ── the music page is a page of the bridge ───────────────────────────────────────────────────────────────────────────
+def test_the_music_page_is_on_the_bridge_with_its_own_glyph(client):
+    login(client, ADMIN)
+    page = client.get("/music").data.decode()
+    assert '<body class="bridge"' in page and 'href="/static/bridge.css"' in page and "bridge.js" in page
+    assert '<use href="#g-wave"/>' in page                                                 # the strip's mark: the same glyph as its control on the launcher
+    assert '<h1 class="apptitle"' not in page and 'id="home-btn"' not in page                               # none of the old pages' chrome
+    glyphs = set(re.findall(r'<symbol id="g-([\w-]+)"', (PORTAL / "templates" / "_glyphs.html").read_text(encoding="utf-8")))
+    assert {"wave", "note", "disc", "tag", "queue", "search", "shuffle", "repeat", "play", "pause", "prev", "next", "vol", "mute",
+            "moon", "devices", "headset", "up", "down", "trash", "letters", "sort", "shield"} <= glyphs
+
+
+def test_every_glyph_the_player_draws_is_in_the_portals_glyph_set():
+    """The script names its glyphs ("play", "queue"...); a name nobody drew would show as an empty key on a phone."""
+    js = (STATIC / "bilby-app.js").read_text(encoding="utf-8")
+    html = (PORTAL / "templates" / "music.html").read_text(encoding="utf-8")
+    drawn = set(re.findall(r'<symbol id="g-([\w-]+)"', (PORTAL / "templates" / "_glyphs.html").read_text(encoding="utf-8")))
+    alias = dict(re.findall(r'(\w+): "(\w+)"', re.search(r"const GLYPH = \{(.*?)\}", js, re.S).group(1)))
+    named = set(re.findall(r'\bico\("(\w+)"\)', js)) | set(re.findall(r'\bicon: "(\w+)"', js)) | set(re.findall(r'\bglyph: "(\w+)"', js))
+    named |= set(re.findall(r'\b(?:title|head)\("(\w+)"', js))
+    named |= set(re.findall(r'\["[\w-]+", "(\w+)", (?:LABELS\.\w+|"[^"]* [^"]*"), ', js))               # the deck's controls
+    named |= set(re.findall(r'data-i="(\w+)"', js)) | set(re.findall(r'data-i="(\w+)"', html))
+    named |= set(re.findall(r'<use href="#g-([\w-]+)"', html))
+    assert len(named) > 25, named
+    missing = {alias.get(n, n) for n in named} - drawn
+    assert not missing, missing
+
+
+def test_the_music_page_never_scrolls_and_draws_no_gradients():
+    css = (STATIC / "bilby-player.css").read_text(encoding="utf-8")
+    js = (STATIC / "bilby-app.js").read_text(encoding="utf-8")
+    code = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    assert not re.search(r"overflow(?:-y)?\s*:\s*(?:auto|scroll)", code)                   # no scrollbar anywhere on the page
+    assert not re.search(r"(?:linear|radial|conic)-gradient", code)                       # black is see-through on the Viture glasses
+    assert "scrollTop" not in js and "VList" not in js                                    # a list is cut into screens, never scrolled
+    assert "class PList" in js and "C.paginate" in js
+
+
+def test_the_music_page_has_a_control_for_each_way_in_and_the_words_are_only_names(client):
+    login(client, ADMIN)
+    page = client.get("/music").data.decode()
+    js = (STATIC / "bilby-app.js").read_text(encoding="utf-8")
+    for need in ('id="deck"', 'id="listwrap"', 'id="scrub"', 'id="letters-key"', 'id="sort"', 'id="signal"', 'id="q-cnt"'):
+        assert need in page, need
+    for view in ("artists", "albums", "tracks", "genres", "added", "played", "dj", "shuffle-all"):
+        assert f'["{view}"' in js, view                                                    # a control on Home for each
+    assert 'class="nav' not in page and "<nav" not in page                                 # the old column of text links is gone
+    keybar = re.search(r'<div class="keybar".*?</div>', page, re.S).group(0)
+    assert "<span" in keybar and not re.search(r">\s*[A-Za-z]{3,}\s*<", re.sub(r"<kbd>.*?</kbd>", "", keybar))   # glyph keys: no words on them
+
+
+def test_the_signal_lamp_follows_the_line_and_the_library():
+    js = (STATIC / "bilby-app.js").read_text(encoding="utf-8")
+    css = (STATIC / "bilby-player.css").read_text(encoding="utf-8")
+    body = re.search(r"function syncSignal\(\) \{(.*?)\n  \}", js, re.S).group(1)
+    assert '"warn"' in body and '"off"' in body and '"on"' in body and 'dataset.signal === "lost"' in body
+    assert js.count("syncSignal()") >= 5                                                  # drawn whenever the line or a notice changes
+    assert '.lamp[data-s="warn"]' in css and '.lamp[data-s="off"]' in css                 # by shape as well as colour
 
 
 def test_the_player_never_tells_the_portal_what_is_playing_except_through_connect():

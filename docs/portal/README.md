@@ -295,12 +295,30 @@ week, songs for a day) still works across page loads. The gate's address is only
 (`*.ts.net`); `Player(gate_url_re=...)` exists for the dev script alone.
 
 **Files:** `portal/templates/music.html` (the shell), `portal/static/bilby-player.js` (the logic that needs no browser: the catalog,
-search, the queue, Bilby DJ's pick, the autoplay state, the virtual list's arithmetic; run under Node by the tests),
+search, the queue, Bilby DJ's pick, the autoplay state, paging (`paginate`/`pageOf`), the way back after a dead zone; run under Node by the tests),
 `bilby-app.js` (the browser side: audio, views, Connect, media keys), `bilby-player.css` (portal colour variables only),
 `portal/player.py` (the pass and Connect). **Bilby DJ** is on by default: when the queue runs out it picks the next track by the
 real Bilby's rule (70 % the same artist, 30 % anything; never the current track, nothing from the last 50), 30 s before the end, so
 it is queued and preloaded in time. **The lyric line** under the title is the one sentence about what the song is about
 (`lyrics.json`, from the Mac's lyric stores through flask-api and the gate); it hides when a track has none.
+
+**On the bridge.** One screen that never scrolls. Home is a deck of controls (artists, albums, songs, genres, recently added, recently
+played, Bilby DJ, shuffle everything; a count on each, and a lit one when another device is playing so you can pick it up). Any list is
+cut into screens by `BilbyCore.paginate` and drawn by `PList` in `bilby-app.js` (only the rows of the current screen exist, so 21,000
+songs are about ten rows of DOM): flip with a swipe, the wheel, PageUp/PageDown, or drag along the bar under the list, which shows where
+you are in the whole and names the letter you are over; the A-Z key opens the whole alphabet on one screen. Along the bottom: the
+player strip (cover, what is playing, previous/play/next, and a lamp for the signal) and a row of glyph keys (Home, shuffle, repeat,
+Bilby DJ, the queue with its count, keyboard help). Now Playing and the Queue are panels over the stage (the strip stays in reach);
+a song's options, the sleep timer and other devices are small panels of glyph keys. Words appear only where they are names (a song,
+an artist, a device) or an error. The lamp is lit when all is well, a triangle while the line is lost, a diamond when the library is
+out of reach.
+
+**Losing the signal (the mountains).** The playing song and the next two are held in memory (the **signal shield**, on by default;
+a shield key in Now Playing turns it off, and it stands down by itself when the browser asks to save data), so a song finishes and the
+next one starts with no network at all. If a song that was playing fails or stalls for 8 s, the player keeps the place and the wish to
+play, keeps the lock screen and the car showing "playing", and retries at 2, 4, 8, 15 and then every 30 s for as long as it takes,
+and at once when the phone says it is back online or the page comes forward. A song that never started is the file's business (skipped
+after a retry), not the line's. The price: the song that is playing downloads twice (once into memory, once for the element).
 
 **Why it sometimes asks for a tap.** A browser only lets a page make sound after a tap on that page, and that starts over at every
 reload (Safari and iOS are the strictest: the permission belongs to the audio element a tap started, so there the player re-sources
@@ -465,8 +483,8 @@ The game's official art is behind everything under a flat dim (no gradient). The
 unchanged (`/games/<id>/live`: a code drops in by itself and the page reloads when the server comes up or sleeps). Tests: `test_bridge.py` and the old
 game-page tests, rewritten for the glyph markup.
 
-**On the bridge now:** the launcher, Browser Games (`/play`), Skippy chat, Game Servers, and the Graveyard (inside Admin, which is otherwise still the old page).
-Still the old look, to move in batches: admin, music, video, experiments and the demos, the dashboard, request access, privacy.
+**On the bridge now:** the launcher, Browser Games (`/play`), Skippy chat, Game Servers, Bilby's Audio Service (`/music`), and the Graveyard (inside Admin, which is otherwise still the old page).
+Still the old look, to move in batches: admin, video, experiments and the demos, the dashboard, request access, privacy.
 
 ## Telemetry: what the portal records, and where it goes
 

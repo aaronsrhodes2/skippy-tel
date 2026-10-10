@@ -668,3 +668,32 @@ test("putting a song again replaces it (and frees the old copy) instead of count
   c.put(1, 120, "new");                                                                     // the same value again: nothing to free
   assert.deepEqual(gone, ["old"]);
 });
+
+
+// ── paging: a long list a screen at a time ──────────────────────────────────────────────────────────────────────────
+test("a list is cut into screens of whole rows, and a long list is as many screens as it needs", () => {
+  assert.deepEqual(C.paginate([], 300), [0]);
+  assert.deepEqual(C.paginate([50, 50, 50], 300), [0]);                                  // fits: one screen
+  assert.deepEqual(C.paginate([100, 100, 100, 100], 300), [0, 3]);                       // 3 rows are exactly a screen
+  assert.deepEqual(C.paginate([100, 100, 100, 1], 300), [0, 3]);                         // a row that does not fit goes on the next
+  assert.deepEqual(C.paginate([400, 100], 300), [0, 1]);                                 // too tall for a screen: alone on one
+  const n = 21000, starts = C.paginate(new Array(n).fill(56), 560);
+  assert.equal(starts.length, 2100); assert.equal(starts[1], 10); assert.equal(starts[2099], 20990);
+});
+
+test("a heading is never left alone at the bottom of a screen", () => {
+  const h = [60, 50, 50, 50, 50, 50, 50], glue = [true, false, false, false, false, false, false];
+  assert.deepEqual(C.paginate(h, 260, glue), [0, 5]);                                    // a plain cut: 60+50*4 = 260 fits five rows
+  const h2 = [50, 50, 50, 40, 50, 50], g2 = [false, false, false, true, false, false];
+  assert.deepEqual(C.paginate(h2, 200, g2), [0, 3]);                                     // the heading (row 3) would sit last: it moves with row 4
+  assert.deepEqual(C.paginate(h2, 200), [0, 4]);                                         // without the hint it stays at the bottom
+  const stacked = [50, 50, 30, 30, 50], g3 = [false, false, true, true, false];
+  assert.deepEqual(C.paginate(stacked, 160, g3), [0, 2]);                                // two headings in a row go over together
+  assert.deepEqual(C.paginate([30, 30, 30], 50, [true, true, true]), [0, 1, 2]);         // nothing but headings: still makes progress
+});
+
+test("pageOf finds the screen a row is on", () => {
+  const starts = [0, 10, 25];
+  assert.deepEqual([0, 9, 10, 24, 25, 99].map(i => C.pageOf(starts, i)), [0, 0, 1, 1, 2, 2]);
+  assert.equal(C.pageOf([0], 5), 0);
+});
