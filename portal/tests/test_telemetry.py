@@ -463,9 +463,14 @@ def test_the_pages_carry_the_beacon_only_for_signed_in_people():
 
 def test_every_tile_id_the_templates_carry_is_one_the_dashboard_knows():
     known = set(telemetry_web.known_taps())
+    import modules
     seen = set()
-    for name in ("home.html", "games.html", "play.html", "experiments.html"):
+    for name in ("games.html", "play.html", "experiments.html"):
         seen |= set(re.findall(r'data-tel="([^"{]+)"', (TEMPLATES / name).read_text(encoding="utf-8")))
+    # the launcher is built from the module registry: one tile per module, its id the tap id (templates/home.html)
+    assert 'data-tel="tile:{{ t.id }}"' in (TEMPLATES / "home.html").read_text(encoding="utf-8")
+    assert {m.id for m in modules.MODULES} == set(telemetry_web.LAUNCHER_TILES)
+    seen |= {f"tile:{m.id}" for m in modules.MODULES}
     launcher = {t for t in seen if t.startswith("tile:") and t.count(":") == 1}
     assert launcher == {f"tile:{t}" for t in telemetry_web.LAUNCHER_TILES}
     assert seen <= known | {"tile:games:"}                                # the live badge is `tile:games:<id>`, not a tile
@@ -567,7 +572,7 @@ def test_every_page_links_to_privacy_in_its_footer():
     login(client, ADMIN)
     for path in ("/", "/games", "/games/valheim", "/me", "/admin", "/chat", "/music", "/experiments", "/privacy"):
         page = client.get(path).data.decode()
-        assert re.search(r'<footer class="sitefoot"><a href="/privacy">', page), path
+        assert re.search(r'<footer class="(?:sitefoot|foot)">\s*<a [^>]*href="/privacy"', page), path     # the bridge's strip or the old footer
 
 
 def test_no_recording_warning_on_the_sign_in_page_or_in_the_chat():

@@ -152,9 +152,12 @@ def test_signed_in_pages_carry_the_stamp_with_a_utc_fallback_and_the_full_commit
     sign_in(client)
     for path in SIGNED_IN_PAGES:
         page = client.get(path).data.decode()
-        assert re.search(r'<footer class="sitefoot"><a href="/privacy">Privacy: what this site records</a>\s*<span class="build" title="', page), path
-        assert "build 8adcd7e" in page, path
-        assert '<time id="build-time" datetime="2026-09-30T19:03:12Z">2026-09-30 19:03 UTC</time>' in page, path
+        if 'class="foot"' in page:                  # a page on the bridge: the strip carries the short commit, nothing else printed
+            assert re.search(r'<footer class="foot">\s*<a [^>]*href="/privacy"[^>]*>.*?</a>\s*<span class="build" title="[^"]*">8adcd7e</span>', page, re.S), path
+        else:
+            assert re.search(r'<footer class="sitefoot"><a href="/privacy">Privacy: what this site records</a>\s*<span class="build" title="', page), path
+            assert "build 8adcd7e" in page, path
+            assert '<time id="build-time" datetime="2026-09-30T19:03:12Z">2026-09-30 19:03 UTC</time>' in page, path
         tip = re.search(r'<span class="build" title="([^"]*)"', page).group(1)
         assert SHA in tip and "skippy-portal-00042-abc" in tip, path
 

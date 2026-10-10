@@ -2,6 +2,26 @@
 {% block title %}Admin — Maker Portal{% endblock %}
 {% block app %}admin{% endblock %}
 {% block content %}
+{% include "_glyphs.html" %}
+<section id="graveyard">
+  {# The Graveyard: every module on the launcher, lit when it is there, dark when retired. A retired module leaves the launcher
+     (its page still answers at its own address; nothing is deleted); the key beside it revives it. Admin can't be retired. #}
+  <h2><svg class="g" style="width:1.3em;height:1.3em;vertical-align:-.3em" aria-hidden="true"><use href="#g-tomb"/></svg></h2>
+  <div class="row" role="list">
+    {% for m in module_rows %}
+      <form class="inline" method="post" action="{{ url_for('admin.module_switch') }}" role="listitem" data-app="{{ m.id }}">
+        <input type="hidden" name="id" value="{{ m.id }}">
+        <input type="hidden" name="action" value="{{ 'revive' if m.retired else 'retire' }}">
+        <button type="submit" {% if not m.retirable %}disabled{% endif %} aria-pressed="{{ 'false' if m.retired else 'true' }}"
+                aria-label="{{ ('Revive ' if m.retired else 'Retire ') ~ m.label }}" title="{{ ('Revive ' if m.retired else 'Retire ') ~ m.label }}"
+                style="display:inline-flex;gap:8px;align-items:center;padding:8px 12px;background:transparent;{% if m.retired %}opacity:.45;border-color:var(--muted){% else %}border-color:var(--accent);color:var(--accent){% endif %}">
+          <svg class="g" style="width:22px;height:22px" aria-hidden="true"><use href="#g-{{ m.glyph }}"/></svg>
+          <svg class="g" style="width:14px;height:14px" aria-hidden="true"><use href="#g-power"/></svg>
+        </button>
+      </form>
+    {% endfor %}
+  </div>
+</section>
 <section>
   <h2>Server</h2>
   {% if error %}

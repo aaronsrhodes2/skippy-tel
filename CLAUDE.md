@@ -119,10 +119,17 @@ Actions (the sandbox can't reach GCP or run.app directly):
   (Squarespace) only holds the nameservers. Machines (home reporter, ops, loop timer, deploy smoke test) keep
   the fallback https://skippy-portal-1015050363686.us-west1.run.app, which never depends on DNS or a certificate.
 - Portal design (the Captain's rule): **no top tabs; all cards, like a phone with
-  apps.** Home (`/`) is a launcher, one tile per app; every other page is an app
-  with a `‹ Home` back button, its own title (from its `<title>`), and a round
-  Home button. A new feature gets a tile in `portal/templates/home.html`, never
-  a nav link.
+  apps.** Home (`/`) is a launcher, one tile per app; every other page is an app. A new
+  feature is a module in `portal/modules.py` (it gets its launcher control), never a nav link.
+  **The bridge** (2026-10-10, the one interface the whole portal is moving to; `docs/portal/README.md`
+  → The bridge): a page opts in with `{% block ui %}bridge{% endblock %}` and `{% block glyph %}`;
+  it is exactly one phone screen, **never scrolls and shows no scrollbar** (long content is paged or
+  swiped, not scrolled), says things with **glyphs** from `templates/_glyphs.html` (no emoji, no
+  words where a symbol will do; words only for names people look up: a server, a code, a password),
+  and looks like a starship's controls (Maxolhx-inspired: cut corners, claws and fangs, lamps that
+  breathe, a light running along a live control). Pilot done: launcher, Browser Games, the Graveyard.
+  **Not yet on the bridge** (still the old scrolling look, to migrate in batches): chat, admin, game
+  servers, music, video, experiments, the dashboard and the rest.
 - Copyable things (the Captain's rule: **one click, everywhere**): anything a person is expected to
   copy (an invite code, `ip:port`, a password, a command, a block to paste) is marked
   `<code class="code">` / `<pre class="copy">` (or `data-copy="text"` on a button), and

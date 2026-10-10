@@ -412,6 +412,40 @@ reading outside the folder, the public version probe, the tile, a build without 
 archive checks, the Dockerfile and `deploy.yml` pins). The game itself is tested in its own repo; its scripted walks also run
 inside the browser build (`?test=<walk>` on the game's page).
 
+## The bridge (the one interface the portal is moving to)
+
+A page built on the bridge is **one phone screen**: the page is exactly the viewport (`100dvh`, `overflow: hidden`, no scroll, no
+scrollbar, no pull-to-refresh), a grid shares the height among its controls, and anything longer than a screen is paged or swiped, not
+scrolled. It looks like the manual controls of a Maxolhx starship (the cat-eyed, sabre-toothed patron race of the Expeditionary Force
+books): cut corners, three claw slashes and two fangs on every control, a lamp that breathes when the thing behind it is ready, a light
+that runs along the edge of a live control, a plate that floods with colour while a finger is on it. Black base, crisp edges, no gradients
+(black is see-through on the Viture glasses). Code: `portal/static/bridge.css` and `bridge.js`, the glyphs in `portal/templates/_glyphs.html`,
+the shell in `portal/templates/base.html`.
+
+**Language-agnostic.** Say it with a glyph. Words appear only where they are a name or syntax people look up (a game server's name, a join
+code, a password, a commit id). The words for a screen reader are on each control (`aria-label`, `title`), never on the page. Add a glyph to
+`_glyphs.html`; never an emoji, never an image. A lamp says its state by shape as well as colour: lit circle = ready or live, ring = asleep,
+diamond = down, triangle = needs attention. Skippy chat is the one place with a **language choice** (13 languages, each in its own script;
+`chat.LANGUAGES`): the choice rides each message and the system prompt tells Skippy to answer in it while leaving names, codes, passwords,
+commands and numbers untouched.
+
+**Building a bridge page.** Extend `base.html`, add `{% block ui %}bridge{% endblock %}` and `{% block glyph %}NAME{% endblock %}` (the glyph
+in the strip along the top; `{% block hud_back %}` if "back" isn't Home). For a grid of controls use `.deck` with
+`style="--rows: N; --rows-wide: N; --rows-side: N"` (rows per layout) and a `.unit` per control (see `home.html`, `play.html`); content that is
+more than a screen goes in pages the person flips, never in a scroller (a drag is blocked everywhere except `textarea`, `input`, `select` and
+anything marked `data-pan`). Tests: `portal/tests/test_bridge.py`.
+
+**Modules and the Graveyard.** Every launcher control is a module (`portal/modules.py`: id, glyph, page, a name for a screen reader). Who may use
+a module is still the grants (`auth.py`); the Captain decides whether it is on the launcher at all. **Admin → Graveyard** (the first thing on the
+page) is a key per module: lit = on the launcher, dark = retired; press to retire or revive. Retiring hides the control for everyone; the page
+still answers at its own address and nothing is deleted. Admin itself can't be retired. The list is stored in the games VM's metadata
+(`portal-modules`, ignored by Terraform), read fail-open (an unreadable list retires nothing) and written fail-closed (a read that fails or a list
+that can't be read is never overwritten). Retirement is manual for now; it does not yet use the activity record to suggest what is unused.
+
+**Pilot.** On the bridge: the launcher, Browser Games (`/play`), the Graveyard (inside Admin, which is otherwise still the old page) and the
+language choice in chat. Still the old look, to move in batches: chat's own screen, admin, game servers, music, video, experiments and the demos,
+the dashboard, request access, privacy.
+
 ## Telemetry: what the portal records, and where it goes
 
 The Captain records how signed-in people use the portal (what gets opened, tapped and asked, what breaks), so he can

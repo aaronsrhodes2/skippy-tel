@@ -251,7 +251,7 @@ def test_music_needs_the_audio_grant(client):
 def test_the_captain_gets_the_tile_the_player_and_a_pass(client):
     login(client, ADMIN)
     launcher = client.get("/").data.decode()
-    assert 'data-tel="tile:music"' in launcher and f"<h3>{NAME}</h3>" in launcher
+    assert 'data-tel="tile:music"' in launcher and f'aria-label="{NAME.replace(chr(39), "&#39;")}"' in launcher
     page = client.get("/music").data.decode()
     assert 'rel="manifest"' in page and "mediaSession" in (STATIC / "bilby-app.js").read_text(encoding="utf-8")
     g = client.get("/music/gate").get_json()
@@ -268,11 +268,11 @@ def test_a_pass_is_never_cached(client):
 
 def test_the_library_offline_pill_follows_the_gate(client):
     login(client, ADMIN)
-    tile = lambda: client.get("/").data.decode().split('data-tel="tile:music"')[1].split("</a>")[0]   # noqa: E731 (the video tile has its own pill)
-    assert "library offline" not in tile()
+    tile = lambda: client.get("/").data.decode().split('data-tel="tile:music"')[0].rsplit('<div class="unit', 1)[1]   # noqa: E731 (the unit's opening tag)
+    assert 'data-s="on"' in tile()
     home = client.application.extensions["home"]
     home.accept({"capabilities": {}})
-    assert "library offline" in tile()
+    assert 'data-s="off"' in tile()                                     # the library is offline: a dark control with a diamond lamp
 
 
 def test_a_remote_play_says_whether_the_other_browser_needs_a_tap(client):

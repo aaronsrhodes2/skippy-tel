@@ -130,6 +130,23 @@ def system_prompt(user_name: str, is_admin: bool = False, page: str | None = Non
     )
 
 
+# Skippy chat is the one place with a language choice (the rest of the portal is glyphs): each in its own script.
+LANGUAGES = {"en": "English", "es": "Español", "fr": "Français", "de": "Deutsch", "pt": "Português", "it": "Italiano",
+             "nl": "Nederlands", "ru": "Русский", "ja": "日本語", "ko": "한국어", "zh": "中文", "hi": "हिन्दी", "ar": "العربية"}
+
+
+def language_instruction(code) -> str:
+    """The system prompt's tail for a chat in another language. `code` comes from the page: anything not in LANGUAGES, and
+    English, adds nothing."""
+    if not isinstance(code, str) or code not in LANGUAGES or code == "en":
+        return ""
+    name = LANGUAGES[code]
+    return (f"\n\n## Language\nThe user chose {name} ({code}) for this chat. Write every reply in {name}, in the same voice. "
+            "Leave exactly as they are, never translated or transliterated: server and game names, join codes, addresses, "
+            "passwords, commands and anything inside backticks, and the words \"Mentat\" and \"Barney Style\". "
+            "If you are explaining a Mentat result, keep its numbers, units and symbols exactly.")
+
+
 BARNEY_PHRASE = "Give it to me Barney Style"   # what the page puts in the box when Barney Style is switched on
 
 

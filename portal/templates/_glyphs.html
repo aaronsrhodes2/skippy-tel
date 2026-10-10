@@ -1,0 +1,31 @@
+{# The portal's glyph set: one symbol per thing, so a screen can be read without a word of any language.
+   Drawn on a 24-unit grid in square-ended strokes: sharp, a little predatory, not quite how a human would draw a
+   gear or an eye. Use one with <svg class="g" aria-hidden="true"><use href="#g-NAME"/></svg>; the words for a screen
+   reader go on the link (aria-label / title), never on the page. Add a glyph here, never as an emoji or an image.
+   Only included on pages built on the bridge shell (base.html: {% block ui %}bridge{% endblock %}). #}
+<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="g-core" viewBox="0 0 24 24"><path d="M12 2l8.7 5v10L12 22l-8.7-5V7z"/><path d="M12 8v8M8 12h8"/></symbol>
+    <symbol id="g-eye" viewBox="0 0 24 24"><path d="M1.5 12C6 4.5 18 4.5 22.5 12 18 19.5 6 19.5 1.5 12Z"/><path d="M12 7.5C14 10 14 14 12 16.5 10 14 10 10 12 7.5Z"/></symbol>
+    <symbol id="g-server" viewBox="0 0 24 24"><path d="M3 4.5h18v4.5H3zM3 10h18v4.5H3zM3 15.5h18V20H3z"/><path d="M6.5 6.75h2M6.5 12.25h2M6.5 17.75h2"/><path d="M16 6.75h2.5M16 12.25h2.5"/></symbol>
+    <symbol id="g-ship" viewBox="0 0 24 24"><path d="M12 2.5L19.5 21 12 16.5 4.5 21Z"/><path d="M12 7.5v6"/></symbol>
+    <symbol id="g-wave" viewBox="0 0 24 24"><path d="M3 10v4M7 6v12M11 2.5v19M15 6.5v11M19 9.5v5M22 11.5v1"/></symbol>
+    <symbol id="g-lens" viewBox="0 0 24 24"><path d="M2.5 5.5h19v13h-19z"/><path d="M10 8.5v7l6-3.5z"/></symbol>
+    <symbol id="g-atom" viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="10" ry="3.8"/><ellipse cx="12" cy="12" rx="10" ry="3.8" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="3.8" transform="rotate(120 12 12)"/><path d="M12 11.5v1"/></symbol>
+    <symbol id="g-gauge" viewBox="0 0 24 24"><path d="M3 18a9 9 0 0 1 18 0"/><path d="M12 18l4.5-6.5"/><path d="M5 12.5l1.6 1M12 7.5v2M19 12.5l-1.6 1"/></symbol>
+    <symbol id="g-gear" viewBox="0 0 24 24"><path d="M12 2l8.7 5v10L12 22l-8.7-5V7z"/><path d="M12 8.5l3.2 1.8v3.4L12 15.5l-3.2-1.8v-3.4z"/></symbol>
+    <symbol id="g-tomb" viewBox="0 0 24 24"><path d="M5.5 21.5V10a6.5 6.5 0 0 1 13 0v11.5z"/><path d="M12 9v7M9 12h6"/></symbol>
+    <symbol id="g-shield" viewBox="0 0 24 24"><path d="M12 2.5l8.5 3v6.5c0 5-3.6 8.2-8.5 9.5-4.9-1.3-8.5-4.5-8.5-9.5V5.5z"/><path d="M12 7v10"/></symbol>
+    <symbol id="g-orbit" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.6"/><ellipse cx="12" cy="12" rx="10.5" ry="3.4" transform="rotate(-24 12 12)"/></symbol>
+    <symbol id="g-loop" viewBox="0 0 24 24"><path d="M12 12c-2.2-3.4-4.4-4.5-6.5-4.5a4.5 4.5 0 0 0 0 9c2.1 0 4.3-1.1 6.5-4.5s4.4-4.5 6.5-4.5a4.5 4.5 0 0 1 0 9c-2.1 0-4.3-1.1-6.5-4.5z"/></symbol>
+    <symbol id="g-back" viewBox="0 0 24 24"><path d="M15.5 3.5L7 12l8.5 8.5"/></symbol>
+    <symbol id="g-home" viewBox="0 0 24 24"><path d="M2.5 11.5L12 3l9.5 8.5"/><path d="M5.5 10v10.5h13V10"/><path d="M10 20.5v-5h4v5"/></symbol>
+    <symbol id="g-out" viewBox="0 0 24 24"><path d="M10 3.5H4v17h6"/><path d="M14.5 7.5L19 12l-4.5 4.5M19 12H9"/></symbol>
+    <symbol id="g-in" viewBox="0 0 24 24"><path d="M14 3.5h6v17h-6"/><path d="M9.5 7.5L5 12l4.5 4.5M5 12h10"/></symbol>
+    <symbol id="g-user" viewBox="0 0 24 24"><path d="M12 11.5a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M4 21c1.2-5.5 14.8-5.5 16 0"/></symbol>
+    <symbol id="g-power" viewBox="0 0 24 24"><path d="M12 2.5v9"/><path d="M6.5 6.2a8.2 8.2 0 1 0 11 0"/></symbol>
+    <symbol id="g-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="M2.5 12h19M12 2.5c-4.6 4.8-4.6 14.2 0 19M12 2.5c4.6 4.8 4.6 14.2 0 19"/></symbol>
+    <symbol id="g-send" viewBox="0 0 24 24"><path d="M2.5 12L21.5 3l-6 18-3.5-7.5z"/></symbol>
+    <symbol id="g-new" viewBox="0 0 24 24"><path d="M12 3.5v17M3.5 12h17"/></symbol>
+  </defs>
+</svg>

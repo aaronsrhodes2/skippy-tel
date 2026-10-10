@@ -1,74 +1,24 @@
 {% extends "base.html" %}
 {% block title %}Maker Portal{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}core{% endblock %}
 {% block content %}
-{# The launcher: one tile per app, and nothing else. Every place the old top tabs, the six game tiles
-   and the "Server room" tile led is now inside one of these apps. Add a feature = add a tile here. #}
+{# The launcher: one control per module (portal/modules.py), glyphs only, every one on this one screen. A module the Captain
+   retired in the Admin Graveyard is not here. The words for a screen reader are on each control (aria-label, title). The
+   names of the game servers that are up are real text: they are names people look up. #}
 <section>
-  <div class="tiles">
-
-    {% if can_skippy %}
-      <a class="tile" data-app="skippy" href="{{ url_for('chat.index') }}" data-tel="tile:skippy">
-        <span class="icon">💬</span>
-        <h3>Skippy</h3><p>The Magnificent. Ask him anything; try not to bore him.</p></a>
-    {% endif %}
-
-    {% if games %}
-      {% set up = status and status.status == 'RUNNING' %}
-      {# A box with its title link stretched over it (links can't nest), so the live-game badge can be a link of its own:
-         tap the badge to go straight to that game's page, tap anywhere else for the Game Servers app. #}
-      <div class="tile" data-app="games" data-tel="tile:games">
-        {# One badge per live game, stacked inside the tile (never wider than it); each is a link to that game's page. #}
-        <span class="pills">{% if not status %}<span class="pill">?</span>{% elif up %}{% for id, name in live_games %}<span class="pill"><a href="{{ url_for('dashboard.game', gid=id) }}" data-tel="tile:games:{{ id }}" title="Open {{ name }}">● {{ name }}</a></span>{% else %}<span class="pill">● online</span>{% endfor %}{% else %}<span class="pill">asleep</span>{% endif %}</span>
-        <span class="icon">🎮</span>
-        <h3><a class="tile-link" href="{{ url_for('dashboard.index') }}">Game Servers</a></h3>
-        {# Which game server is up right now; asleep, which one is set for the next wake-up. #}
-        <p>{% if not status %}Couldn't reach the server.
-           {% elif up and set_games %}{{ set_games | join(' + ') }} is up{% if hidden_up %} (and another game){% endif %}. Tap to join.
-           {% elif up %}A game server is up.
-           {% elif set_games %}Asleep. {{ set_games | join(' + ') }} is set; tap to wake it.
-           {% else %}Asleep. {{ games.values() | map(attribute='name') | join(' · ') }}{% endif %}</p></div>
-    {% endif %}
-
-    {% if show_play %}
-    <a class="tile" data-app="play" href="{{ url_for('play_index') }}" data-tel="tile:play">
-      <span class="icon">🕹️</span>
-      <h3>Browser Games</h3><p>Play right here in a tab, nothing to install: Weapon vs. Armor, Star Control Zero.</p></a>
-    {% endif %}
-
-    {# Audio and video: the Captain's, and any friend granted them (Admin > Friends). #}
-    {% set whose = 'Your' if is_admin else "Aaron's" %}
-    {% if show_audio %}
-      <a class="tile" data-app="music" href="{{ url_for('music.player_page') }}" data-tel="tile:music">
-        {% if not music_gate %}<span class="pill">library offline</span>{% endif %}
-        <span class="icon">🎵</span>
-        <h3>Bilby's Audio Service</h3><p>{{ whose }} whole collection from home on any screen: phone, Mac, PC, the car.</p></a>
-    {% endif %}
-    {% if show_video %}
-      <a class="tile" data-app="video" href="{{ url_for('video.video_page') }}" data-tel="tile:video">
-        {% if not video_gate %}<span class="pill">library offline</span>{% endif %}
-        <span class="icon">🎬</span>
-        <h3>Nagatha's Video Service</h3><p>{{ whose }} film library from home, on a phone, a laptop or the big screen.</p></a>
-    {% endif %}
-
-    {% if show_experiments %}
-      <a class="tile" data-app="experiments" href="{{ url_for('experiments.index') }}" data-tel="tile:experiments">
-        <span class="icon">🧪</span>
-        <h3>Experiments</h3><p>Simulations and demonstrations: physics engines, a Wolfram rival, things built after dark.</p></a>
-    {% endif %}
-
-    {% if is_admin and has_me %}
-      <a class="tile" data-app="dashboard" href="{{ url_for('me.index') }}" data-tel="tile:dashboard">
-        <span class="icon">🛰️</span>
-        <h3>Dashboard</h3><p>Servers, spend, friends, skippy-pc's health and your own tools.</p></a>
-    {% endif %}
-
-    {% if is_admin %}
-      <a class="tile" data-app="admin" href="{{ url_for('admin.index') }}{{ '#friends' if asking }}" data-tel="tile:admin">
-        {% if asking %}<span class="pill">{{ asking }} asking</span>{% endif %}
-        <span class="icon">⚙️</span>
-        <h3>Admin</h3><p>Settings, friends, Discord and restarts.</p></a>
-    {% endif %}
-
+  <div class="deck" style="--rows: {{ (tiles | length + 1) // 2 }}; --rows-wide: {{ (tiles | length + 3) // 4 }}; --rows-side: {{ (tiles | length + 4) // 5 }}">
+    {% for t in tiles %}
+      <div class="unit{% if t.names %} named{% endif %}" data-app="{{ t.id }}"{% if t.state %} data-s="{{ t.state }}"{% endif %} data-tel="tile:{{ t.id }}" style="--i: {{ loop.index0 }}">
+        <i class="plate"></i>
+        <a class="hit" href="{{ t.href }}" aria-label="{{ t.label }}" title="{{ t.label }}"></a>
+        <i class="claws"><b></b><b></b><b></b></i>
+        {% if t.state %}<span class="lamp"></span>{% endif %}
+        {% if t.badge %}<span class="badge" role="status">{{ t.badge }}</span>{% endif %}
+        <svg class="g" aria-hidden="true"><use href="#g-{{ t.glyph }}"/></svg>
+        {% if t.names %}<span class="names">{% for href, name in t.names %}<a href="{{ href }}" data-tel="tile:games:{{ href.rsplit('/', 1)[-1] }}" title="{{ name }}">{{ name }}</a>{% endfor %}</span>{% endif %}
+      </div>
+    {% endfor %}
   </div>
 </section>
 {% endblock %}

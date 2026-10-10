@@ -109,7 +109,7 @@ def test_portal_is_all_cards_with_no_top_tabs(env):
     login(client, ADMIN)
     launcher = client.get("/").data.decode()
     assert "<nav" not in launcher and 'id="home-btn"' not in launcher          # the launcher is home: nowhere to go "back" to
-    assert "sign out" in launcher                                              # the account lives on the home screen
+    assert 'aria-label="Sign out"' in launcher                                 # the account lives on the home screen (a glyph key)
     for path in ("/games", "/play", "/me", "/admin", "/chat", "/music", "/experiments"):   # everywhere the old tabs led is now a tile
         assert f'href="{path}"' in launcher, path
     _add_friend(client, PAL, ["dragonwilds"])
@@ -134,13 +134,13 @@ def test_the_launcher_has_one_tile_per_app_and_no_duplicate_paths(env):
     client, _, _ = env
     login(client, ADMIN)
     launcher = client.get("/").data.decode()
-    assert re.findall(r'class="tile" data-app="(\w+)"', launcher) == \
+    assert re.findall(r'class="unit(?: named)?" data-app="(\w+)"', launcher) == \
         ["skippy", "games", "play", "music", "video", "experiments", "dashboard", "admin"]
     assert launcher.count('href="/games"') == 1 and 'href="/games/' not in launcher      # games live in one app, not six tiles
     assert "Server room" not in launcher and "<nav" not in launcher
     _add_friend(client, PAL, ["dragonwilds"])
     login(client, PAL)
-    assert re.findall(r'class="tile" data-app="(\w+)"', client.get("/").data.decode()) == ["games"]   # each tile comes with its own grant (test_grants.py)
+    assert re.findall(r'class="unit(?: named)?" data-app="(\w+)"', client.get("/").data.decode()) == ["games"]   # each tile comes with its own grant (test_grants.py)
 
 
 def test_the_old_dashboard_path_redirects_to_games(env):
@@ -336,17 +336,22 @@ def test_with_no_game_set_a_friend_may_pick_one(env):
 
 
 def test_the_games_tile_shows_which_game_server_is_up(env):
+    import re
     client, vm, _ = env
     login(client, FRIEND)
-    tile = client.get("/").data.decode()
-    assert "asleep" in tile and "Valheim is set; tap to wake it" in tile
+    def games_unit(page):
+        start = re.search(r'<div class="unit(?: named)?" data-app="games"', page).start()
+        return page[start:page.index("</div>", start)]
+
+    tile = games_unit(client.get("/").data.decode())
+    assert 'data-s="idle"' in tile and "Valheim" not in tile                   # asleep: a ring lamp, no name (nothing is up)
     vm.state.status = "RUNNING"
-    tile = client.get("/").data.decode()
-    assert ">● Valheim</a>" in tile and "Valheim is up" in tile
-    _add_friend(client, PAL, ["dragonwilds"])                      # a game PAL can't see is up: say so, don't name it
+    tile = games_unit(client.get("/").data.decode())
+    assert 'data-s="on"' in tile and ">Valheim</a>" in tile                    # up: a lit lamp and the name of what is up
+    _add_friend(client, PAL, ["dragonwilds"])                      # a game PAL can't see is up: it is lit, but never named
     login(client, PAL)
-    tile = client.get("/").data.decode()
-    assert "Valheim" not in tile and "A game server is up." in tile
+    tile = games_unit(client.get("/").data.decode())
+    assert 'data-s="on"' in tile and "Valheim" not in tile
 
 
 def _anchors(page: str):
@@ -382,9 +387,9 @@ def test_the_live_game_badge_links_straight_to_that_games_page(env):
     links, nested = _anchors(page)
     assert "/games/valheim" in links and "/games" in links            # the badge goes to the game; the tile still opens the app
     assert nested == []                                               # and no link sits inside another link
-    pills = page[page.index('<span class="pills">'):page.index("</span></span>", page.index('<span class="pills">'))]
-    assert 'href="/games/valheim"' in pills and 'title="Open Valheim"' in pills and 'data-tel="tile:games:valheim"' in pills
-    assert 'class="tile-link" href="/games">Game Servers</a>' in page        # tapping anywhere else opens the Games app
+    names = page[page.index('<span class="names">'):page.index("</span>", page.index('<span class="names">'))]
+    assert 'href="/games/valheim"' in names and 'title="Valheim"' in names and 'data-tel="tile:games:valheim"' in names
+    assert 'class="hit" href="/games" aria-label="Game servers"' in page         # tapping anywhere else opens the Games app
 
 
 def test_the_badge_links_every_live_game_and_never_a_hidden_or_sleeping_one(env):
@@ -970,11 +975,11 @@ def test_front_page_shows_cards_for_granted_portals(env):
     login(client, PAL)
     page = client.get("/").data.decode()
     assert "RuneScape: Dragonwilds" in page and "Valheim" not in page
-    assert 'class="tile" data-app="skippy"' not in page and 'class="tile" data-app="experiments"' not in page
+    assert 'data-tel="tile:skippy"' not in page and 'data-tel="tile:experiments"' not in page
     _add_friend(client, PAL, ["dragonwilds", "skippy", "experiments"])
     login(client, PAL)
     page = client.get("/").data.decode()
-    assert 'class="tile" data-app="skippy"' in page and 'class="tile" data-app="experiments"' in page
+    assert 'data-tel="tile:skippy"' in page and 'data-tel="tile:experiments"' in page
 
 
 def test_experiments_are_public(env):
@@ -1207,7 +1212,7 @@ def test_dashboard_is_admin_only_and_shows_the_widgets(env):
     page = client.get("/me").data.decode()
     assert "AB12-CD34" in page and "Spend (estimate)" in page and "Friends" in page
     assert "Memory at 91%" in page and "World disk at 85%" in page      # watcher warnings
-    assert 'class="tile" data-app="dashboard"' in client.get("/").data.decode()   # tile on the front page
+    assert 'data-tel="tile:dashboard"' in client.get("/").data.decode()   # tile on the front page
 
 
 def test_watcher_flags_crashes_and_blocked_starts(env):
@@ -1307,7 +1312,7 @@ def test_the_old_bilby_page_is_gone_and_its_addresses_lead_to_the_audio_service(
     login(client, ADMIN)
     assert 'data-app="bilby"' not in client.get("/").data.decode()
     assert client.get("/music").status_code == 200
-    assert "Bilby's Audio Service" in client.get("/").data.decode()
+    assert 'data-tel="tile:music"' in client.get("/").data.decode()
 
 
 # ── core health (skippy-tel-core) on the dashboard ────────────────────────────
@@ -1824,15 +1829,16 @@ def test_browser_games_lists_weapon_vs_armor_star_control_zero_orion_trail_and_d
     import re
     client, _, _ = env
     page = client.get("/play").data.decode()                                     # public, like the experiments
-    assert '<body data-app="play">' in page and '<h1 class="apptitle">Browser Games</h1>' in page
+    assert '<body class="bridge" data-app="play">' in page and "Browser Games" not in page.split("<main")[1]   # glyphs, not a title
     assert re.findall(r'data-tel="play:([\w-]+)"', page) == ["weapon-vs-armor", "star-control-zero", "orion-trail", "doom-loop"]
-    assert 'href="/experiments/weapon-vs-armor" data-tel="play:weapon-vs-armor"' in page
-    assert '<div class="tile" data-tel="play:doom-loop"><span class="pill">coming soon</span>' in page  # no build yet: no link
-    assert "Star Control Zero: The Precursors" in page
-    assert '<div class="tile" data-tel="play:star-control-zero"><span class="pill">coming soon</span>' in page  # no link to nowhere
+    assert 'class="hit" href="/experiments/weapon-vs-armor"' in page
+    assert re.search(r'data-s="off" data-tel="play:doom-loop"', page) and 'title="Doom Loop"' in page      # no build yet: dark, no link
+    assert "Star Control Zero: The Precursors" in page                                    # a game's name is a label, so it is text
+    assert re.search(r'data-s="off" data-tel="play:star-control-zero"', page)           # no link to nowhere
+    assert 'aria-label="Sign in"' in page                                                # signed out: the way in, as a key
     login(client, ADMIN)
     signed_in = client.get("/play").data.decode()
-    assert "&lsaquo; Home</a>" in signed_in and 'id="home-btn"' in signed_in
+    assert 'aria-label="Home"' in signed_in and 'aria-label="Back"' in signed_in
 
 
 def test_weapon_vs_armor_numbers_only_ever_come_from_mentat():

@@ -48,7 +48,7 @@ def test_a_friend_reads_aarons_library_and_their_viewing_stays_out_of_continue_w
     _add_friend(client, PAL, ["audio", "video"])
     login(client, PAL)
     launcher = client.get("/").data.decode()
-    assert "Aaron&#39;s whole collection" in launcher or "Aaron's whole collection" in launcher
+    assert 'data-tel="tile:music"' in launcher and 'data-tel="tile:video"' in launcher     # both controls, granted
     assert 'data-progress="0"' in client.get("/video").data.decode()
     assert client.get("/me").status_code == 403 and client.get("/admin").status_code == 403
     client.get("/logout")

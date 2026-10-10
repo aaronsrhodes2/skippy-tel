@@ -169,7 +169,7 @@ def test_video_needs_the_video_grant(client):
 def test_the_captain_gets_the_tile_the_page_and_a_pass(client):
     login(client, ADMIN)
     launcher = client.get("/").data.decode()
-    assert 'data-tel="tile:video"' in launcher and re.search(r"<h3>Nagatha(&#39;|')s Video Service</h3>", launcher)
+    assert 'data-tel="tile:video"' in launcher and re.search(r'aria-label="Nagatha(&#39;|\')s Video Service"', launcher)
     assert client.get("/video").status_code == 200
     r = client.get("/video/gate")
     g = r.get_json()
@@ -186,10 +186,10 @@ def test_the_gate_route_says_why_in_plain_words(client):
 
 def test_the_library_offline_pill_follows_the_video_gate(client):
     login(client, ADMIN)
-    tile = lambda: client.get("/").data.decode().split('data-tel="tile:video"')[1].split("</a>")[0]   # noqa: E731
-    assert "library offline" not in tile()
+    tile = lambda: client.get("/").data.decode().split('data-tel="tile:video"')[0].rsplit('<div class="unit', 1)[1]   # noqa: E731
+    assert 'data-s="on"' in tile()
     client.application.extensions["home"].accept({"capabilities": {"video_gate": {"ready": False, "url": GATE}}})
-    assert "library offline" in tile()
+    assert 'data-s="off"' in tile()
 
 
 def test_the_manifest_names_the_app_and_is_public_like_static_files(client):

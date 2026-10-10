@@ -27,7 +27,9 @@
   </details>
   <form class="ask">
     <textarea rows="2" placeholder="Say something to Skippy" required></textarea>
-    <p><button type="submit">Send</button> <button type="button" class="clear">New chat</button></p>
+    <p><button type="submit">Send</button> <button type="button" class="clear">New chat</button>
+      <label class="lang-pick" title="Language"><span aria-hidden="true">🌐</span>
+        <select class="lang" aria-label="Language">{% for code, name in chat_languages.items() %}<option value="{{ code }}">{{ name }}</option>{% endfor %}</select></label></p>
     <label class="help barney-ok"><input type="checkbox" class="barney" data-tel="chat:barney-style">
       Barney Style: Haiku explains it simply. Off (the default): your words go straight to Mentat and its own answer comes back unedited</label>
     {% if telemetry_on %}<label class="help save-ok"><input type="checkbox" class="save" data-tel="chat:allow-save">
@@ -54,6 +56,11 @@
     // "Give it to me Barney Style"; sending that makes Haiku read the whole chat, Mentat's own answers included (they
     // are kept in the history, marked as Mentat's), and explain it plainly using only what Mentat found.
     const barneyBox = form.querySelector("input.barney"), BARNEY_KEY = "skippy-chat-barney-style";
+    // The language of Skippy's replies (the only text on the portal that has a choice): remembered in this browser, sent with each message.
+    const langSel = form.querySelector("select.lang"), LANG_KEY = "skippy-chat-lang";
+    try { langSel.value = localStorage.getItem(LANG_KEY) || (navigator.language || "en").slice(0, 2); } catch (e) {}
+    if (!langSel.value) langSel.value = "en";
+    langSel.addEventListener("change", () => { try { localStorage.setItem(LANG_KEY, langSel.value); } catch (e) {} });
     const BARNEY_PHRASE = "Give it to me Barney Style";
     function barneyHint() { msg.placeholder = barneyBox.checked ? "Say something to Skippy" : "A physics question, straight to Mentat"; }
     try { barneyBox.checked = localStorage.getItem(BARNEY_KEY) === "yes"; } catch (e) {}
@@ -118,7 +125,7 @@
           method: "POST", headers: {"Content-Type": "application/json"},
           // `page` lets Skippy know what you're looking at ("this game" = the one on screen).
           body: JSON.stringify({message: text, history: history, page: location.pathname,
-                                save: !!(saveBox && saveBox.checked), context: context, raw: raw}),
+                                save: !!(saveBox && saveBox.checked), context: context, raw: raw, lang: langSel.value}),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || res.statusText);

@@ -35,6 +35,7 @@ import home as home_mod
 import imports as imports_mod
 import media as media_mod
 import mentat_client
+import modules as modules_mod
 import ops
 import play
 import player as player_mod
@@ -87,6 +88,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     vm = vm or GamesVm(app.config["GCP_PROJECT"], app.config["GCP_ZONE"], app.config["GCP_INSTANCE"])
     skippy = skippy or chat.SkippyChat(app.config["CHAT_MODEL"])
     app.extensions["friends"] = friends_mod.Friends(vm)
+    app.extensions["modules"] = modules_mod.Modules(vm)               # the launcher's controls, and the Admin Graveyard that retires them
     app.extensions["access_requests"] = access_mod.Requests(vm)      # people asking to be let in (Admin → Friends)
     mentat = mentat or (mentat_client.Mentat(app.config["MENTAT_URL"]) if app.config.get("MENTAT_URL") else None)
     app.extensions["mentat"] = mentat
@@ -125,7 +127,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 "build": build, "build_label": buildinfo.label(build["built_at"]) if build else "",
                 "build_tip": buildinfo.tooltip(build) if build else "",
                 "can_skippy": member and auth.has_portal(user["email"], "skippy"),
-                "idle_min": PLAYER_IDLE_MIN, "idle_max": PLAYER_IDLE_MAX, "switch_owner": ops.SWITCH_OWNER,
+                "chat_languages": chat.LANGUAGES, "idle_min": PLAYER_IDLE_MIN, "idle_max": PLAYER_IDLE_MAX, "switch_owner": ops.SWITCH_OWNER,
                 "chat_enabled": app.config["CHAT_ENABLED"],
                 "discord_invite": f"https://discord.gg/{app.config['DISCORD_INVITE']}"}
 
@@ -153,15 +155,37 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         live_games = [(g, shown[g].name) for g in status.games if g in shown] \
             if status and status.status == "RUNNING" else []           # the badge links to each one's page
         asking = len(pending_requests()) if auth.is_admin(me()) else 0   # a badge on the Admin tile
-        return render_template("home.html", status=status, games=shown, set_games=set_games, live_games=live_games,
-                               asking=asking,
-                               hidden_up=bool(status and status.status == "RUNNING"
-                                              and any(g not in shown for g in status.games)),
-                               show_experiments=auth.has_portal(me(), "experiments"),
-                               show_audio=auth.has_portal(me(), "audio"), show_video=auth.has_portal(me(), "video"),
-                               show_play=auth.has_portal(me(), "play"),
-                               music_gate=home.can("music_gate"), video_gate=home.can("video_gate"),
-                               has_me="me" in app.blueprints)
+        return render_template("home.html", tiles=launcher_tiles(status, shown, live_games, asking))
+
+    def launcher_tiles(status, shown, live_games, asking) -> list[dict]:
+        """The launcher's controls, in module order: the ones this person is granted, minus what the Captain retired in the
+        Graveyard. `state` is the lamp (on = ready/live, idle = asleep, off = down) and the only status the launcher shows."""
+        retired = app.extensions["modules"].retired()
+        up = bool(status and status.status == "RUNNING")
+        who = me()
+        wanted = {"skippy": auth.has_portal(who, "skippy"), "games": bool(shown), "play": auth.has_portal(who, "play"),
+                  "music": auth.has_portal(who, "audio"), "video": auth.has_portal(who, "video"),
+                  "experiments": auth.has_portal(who, "experiments"),
+                  "dashboard": auth.is_admin(who) and "me" in app.blueprints, "admin": auth.is_admin(who)}
+        tiles = []
+        for m in modules_mod.MODULES:
+            if not wanted.get(m.id) or m.id in retired:
+                continue
+            tile = {"id": m.id, "glyph": m.glyph, "label": m.label, "href": url_for(m.endpoint),
+                    "state": None, "badge": 0, "names": []}
+            if m.id == "skippy":
+                tile["state"] = "on"
+            elif m.id == "games":      # asleep, up, or unreachable; the names of what is up are links to those games' pages
+                tile["state"] = "off" if not status else "on" if up else "idle"
+                tile["names"] = [(url_for("dashboard.game", gid=g), name) for g, name in live_games]
+            elif m.id == "music":
+                tile["state"] = "on" if home.can("music_gate") else "off"
+            elif m.id == "video":
+                tile["state"] = "on" if home.can("video_gate") else "off"
+            elif m.id == "admin" and asking:
+                tile["badge"], tile["href"] = asking, url_for("admin.index") + "#friends"
+            tiles.append(tile)
+        return tiles
 
     @app.get("/health")
     def health():
@@ -409,7 +433,25 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             friends=friend_rows(status), portals=PORTALS, access_requests=pending_requests(),
             core=sorted(app.config["ALLOWED_EMAILS"]),
             needs={g: m for g in GAMES if status and (m := missing_settings(g, status.env))},
+            module_rows=[{"id": m.id, "glyph": m.glyph, "label": m.label, "retirable": m.retirable,
+                          "retired": m.id in app.extensions["modules"].retired()} for m in modules_mod.MODULES],
         )
+
+    @admin.post("/modules")
+    @auth.admin_required
+    def module_switch():
+        """The Graveyard: retire a launcher module (its control leaves the launcher) or revive it. Nothing is deleted."""
+        module_id, action = request.form.get("id", ""), request.form.get("action", "")
+        if module_id not in modules_mod.BY_ID or action not in ("retire", "revive"):
+            abort(400)
+        store = app.extensions["modules"]
+        try:
+            (store.retire if action == "retire" else store.revive)(module_id)
+        except KeyError:
+            abort(400)                                    # a module that can't be retired (Admin)
+        except modules_mod.Unavailable as exc:
+            flash(str(exc), "error")
+        return back("admin.index")
 
     def friend_rows(status) -> list[dict]:
         env = status.env if status else {}
@@ -1354,6 +1396,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             schemas = tools.schemas()
             if force in ("ask_mentat", "make_music") and rest.startswith("(the user chose"):
                 force = None                     # nothing to act on yet: let Skippy ask
+            prompt += chat.language_instruction(body.get("lang"))
             if chat.wants_barney(rest) and not force:
                 # "Give it to me Barney Style": explain the whole conversation (Mentat's answers included) plainly,
                 # grounded in what Mentat found. No tools: nothing new is computed or looked up.

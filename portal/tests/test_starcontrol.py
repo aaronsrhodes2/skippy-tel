@@ -163,14 +163,14 @@ def test_a_damaged_version_file_is_not_an_error(client, tmp_path):
 
 def test_browser_games_links_the_game_when_it_is_bundled_for_everyone_signed_in(client):
     page = client.get("/play").data.decode()                                   # the list is public, like the experiments
-    assert 'href="/starcontrol/" data-tel="play:star-control-zero"' in page
-    assert '<div class="tile" data-tel="play:star-control-zero"><span class="pill">coming soon</span>' not in page   # this game's card, not another's
+    assert 'class="hit" href="/starcontrol/"' in page
+    assert 'data-s="off" data-tel="play:star-control-zero"' not in page                # this game's card is lit, not another's
     assert 'data-app="starcontrol"' not in client.get("/").data.decode()       # no tile of its own on the launcher
     login(client, ADMIN)
-    assert 'href="/starcontrol/" data-tel="play:star-control-zero"' in client.get("/play").data.decode()
+    assert 'class="hit" href="/starcontrol/"' in client.get("/play").data.decode()
     _add_friend(client, PAL, ["dragonwilds"])                                  # a friend granted one server game and nothing else
     login(client, PAL)
-    assert 'href="/starcontrol/" data-tel="play:star-control-zero"' in client.get("/play").data.decode()
+    assert 'class="hit" href="/starcontrol/"' in client.get("/play").data.decode()
     assert client.get("/starcontrol/").status_code == 200
 
 
@@ -180,7 +180,7 @@ def test_without_the_bundle_the_card_says_coming_soon_and_the_page_says_so(bare)
     assert bare.get("/starcontrol/version").get_json() == {"bundled": False}
     login(bare, ADMIN)
     card = bare.get("/play").data.decode()
-    assert '<div class="tile" data-tel="play:star-control-zero"><span class="pill">coming soon</span>' in card
+    assert 'data-s="off" data-tel="play:star-control-zero"' in card                 # dark, with a diamond lamp: coming soon
     assert "/starcontrol/" not in card                                         # no link to nowhere
     r = bare.get("/starcontrol/")
     assert r.status_code == 503 and b"isn't bundled in this build yet" in r.data.replace(b"&#39;", b"'")

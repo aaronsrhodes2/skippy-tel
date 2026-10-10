@@ -493,11 +493,11 @@ def test_the_captain_is_told_on_the_launcher_and_the_dashboard(env, monkeypatch)
     admin = app.test_client()
     login(admin, ADMIN)
     launcher = admin.get("/").data.decode()
-    assert "1 asking" in launcher and 'href="/admin#friends"' in launcher
+    assert '<span class="badge" role="status">1</span>' in launcher and 'href="/admin#friends"' in launcher
     assert "1 person is asking for access" in admin.get("/me").data.decode()
     friend = app.test_client()
     login(friend, FRIEND)
-    assert "asking" not in friend.get("/").data.decode()              # friends never see the queue
+    assert 'class="badge"' not in friend.get("/").data.decode()       # friends never see the queue
 
 
 def test_someone_who_loses_access_can_ask_to_get_it_back(env):

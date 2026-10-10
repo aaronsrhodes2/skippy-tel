@@ -158,6 +158,7 @@ resource "google_compute_instance" "games" {
       metadata["idle-minutes"],
       metadata["games-env"],
       metadata["portal-friends"], # the portal's friends list (portal/friends.py)
+      metadata["portal-modules"], # launcher modules the Captain retired in the Admin Graveyard (portal/modules.py)
       metadata["portal-requests"], # people asking for access (portal/access_requests.py), shown beside the friends
       metadata["portal-tasks"],   # remote-operator task queue (portal/tasks.py)
       metadata["portal-task-results"],

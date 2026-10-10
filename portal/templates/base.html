@@ -1,8 +1,16 @@
 <!doctype html>
+{# A page built on the bridge (static/bridge.css) says so: {% block ui %}bridge{% endblock %}, and names its glyph for the strip
+   along the top ({% block glyph %}) and, if "back" isn't Home, where back goes ({% block hud_back %}). The blocks sit in a
+   branch that never prints; they are data for the shell below (read with self.ui()). #}
+{% if false %}{% block ui %}{% endblock %}{% block glyph %}core{% endblock %}{% block hud_back %}{% endblock %}{% endif %}
+{% set bridge = (self.ui() | trim) == 'bridge' %}
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+{% if bridge %}<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+{% else %}<meta name="viewport" content="width=device-width, initial-scale=1">
+{% endif %}
 <title>{% block title %}Maker Portal{% endblock %}</title>
 {# The admiral beercan: the SVG for modern browsers, PNG/ICO for the rest, and iOS's home-screen icon. #}
 <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
@@ -35,6 +43,8 @@
   [data-app="admin"]       { --accent: var(--red); }
 
   * { box-sizing: border-box; }
+  /* A glyph (templates/_glyphs.html) wherever it is used, on the bridge or not: an outline in the text colour. */
+  svg.g { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: square; stroke-linejoin: miter; overflow: visible; }
   body { background: var(--black); color: var(--white); font-family: var(--font); margin: 0; padding: 24px 16px 84px; }
   a { color: var(--cyan); }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -176,13 +186,37 @@
   .skippy-chat .continuing { border: 1px solid var(--violet); border-radius: 8px; padding: 6px 10px; margin: 6px 0; font-size: .8rem;
                              display: flex; gap: 8px; align-items: center; justify-content: space-between; }
 </style>
+{% if bridge %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge.css') }}">{% endif %}
 {% block head %}{% endblock %}
 </head>
-<body data-app="{% block app %}{% endblock %}">
+<body{% if bridge %} class="bridge"{% endif %} data-app="{% block app %}{% endblock %}">
+{% if bridge %}
+{% include "_glyphs.html" %}
+{% set on_home = request.endpoint == 'index' %}
+{# The strip along the top: back, what this is (a glyph), home. On the launcher: who you are, and the way out. #}
+<header class="hud">
+  {% if on_home %}
+    <span class="who" role="img" aria-label="{{ user.name if user else '' }}" title="{{ user.name if user else '' }}">{% if user and user.picture %}<img src="{{ user.picture }}" alt="">{% else %}<svg class="g" aria-hidden="true" style="width:24px;height:24px"><use href="#g-user"/></svg>{% endif %}</span>
+  {% else %}
+    <a class="key" href="{{ (self.hud_back() | trim) or url_for('index') }}" aria-label="Back" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></a>
+  {% endif %}
+  <span class="rail"></span>
+  <svg class="g mark" aria-hidden="true"><use href="#g-{{ self.glyph() | trim }}"/></svg>
+  <span class="rail"></span>
+  {% if user and on_home %}
+    <a class="key" href="{{ url_for('auth.logout') }}" aria-label="Sign out" title="Sign out"><svg class="g" aria-hidden="true"><use href="#g-out"/></svg></a>
+  {% elif user %}
+    <a class="key" href="{{ url_for('index') }}" aria-label="Home" title="Home"><svg class="g" aria-hidden="true"><use href="#g-home"/></svg></a>
+  {% else %}
+    <a class="key" href="{{ url_for('index') }}" aria-label="Sign in" title="Sign in"><svg class="g" aria-hidden="true"><use href="#g-in"/></svg></a>
+  {% endif %}
+</header>
+{% endif %}
 {# public_up / public_up_label: where a public page's back button goes. They are data for the app bar below
    (read with self.public_up()), so they sit in a branch that never prints. #}
 {% if false %}{% block public_up %}{% endblock %}{% block public_up_label %}Experiments{% endblock %}{% endif %}
 <main class="{% block mainclass %}{% endblock %}">
+{% if not bridge %}
 {% if user %}
 {% set on_home = request.endpoint == 'index' %}
 <header class="appbar">
@@ -211,11 +245,19 @@
 </header>
 {% endif %}
 {% endif %}
+{% endif %}
 {% for category, message in get_flashed_messages(with_categories=true) %}
   <div class="flash {{ category }}">{{ message }}</div>
 {% endfor %}
 {% block content %}{% endblock %}
 </main>
+{% if bridge %}
+<footer class="foot">
+  <a class="key sm" href="{{ url_for('privacy') }}" aria-label="Privacy: what this site records" title="Privacy: what this site records"><svg class="g" aria-hidden="true"><use href="#g-shield"/></svg></a>
+  {% if build %}<span class="build" title="{{ build_tip }}">{{ build.short }}</span>{% endif %}
+</footer>
+<script src="{{ url_for('static', filename='bridge.js') }}" defer></script>
+{% else %}
 {# Every page says where to read what the site records (portal/templates/privacy.html). #}
 {# `build` is set (context processor in app.py) only for a signed-in person on the list: the login page and the public pages never show it.
    The hover text carries the full commit and the Cloud Run revision; the script below turns the UTC build time into the viewer's own. #}
@@ -233,7 +275,8 @@
   })();
 </script>
 {% endif %}
-{% if user and request.endpoint != 'index' %}
+{% endif %}
+{% if user and request.endpoint != 'index' and not bridge %}
   <a id="home-btn" href="{{ url_for('index') }}" aria-label="Home" title="Home">&#8962;</a>
 {% endif %}
 {# One-click copy for everything people are expected to copy (codes, addresses, passwords, commands, blocks): see the header of the file. #}

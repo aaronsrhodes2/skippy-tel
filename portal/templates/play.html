@@ -1,22 +1,23 @@
 {% extends "base.html" %}
 {% block title %}Browser Games{% endblock %}
 {% block app %}play{% endblock %}
-{% block public_up %}{{ url_for('index') }}{% endblock %}
-{% block public_up_label %}Home{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}ship{% endblock %}
 {% block content %}
-{# Browser Games: a card per game that plays in a tab. The dedicated servers are the Game Servers app (/games). #}
+{# Browser Games: a control per game that plays in a tab; its name is the one word on it (a name people look up). A game with no
+   page yet is dark with a diamond lamp and is not a link. The dedicated servers are the Game Servers module (/games). #}
 <section>
-  <div class="tiles">
+  <div class="deck" style="--rows: {{ (games | length + 1) // 2 }}; --rows-wide: {{ (games | length + 3) // 4 }}; --rows-side: {{ (games | length + 4) // 5 }}">
     {% for g in games %}
       {% set href = url_for(g.endpoint) if g.endpoint else g.url %}
-      {% if href %}
-        <a class="tile" href="{{ href }}" data-tel="play:{{ g.slug }}">
-      {% else %}
-        <div class="tile" data-tel="play:{{ g.slug }}"><span class="pill">coming soon</span>
-      {% endif %}
-        <span class="icon">{{ g.icon }}</span>
-        <h3>{{ g.title }}</h3><p>{{ g.blurb }}</p>
-      {% if href %}</a>{% else %}</div>{% endif %}
+      <div class="unit named" data-s="{{ 'on' if href else 'off' }}" data-tel="play:{{ g.slug }}" style="--i: {{ loop.index0 }}">
+        <i class="plate"></i>
+        {% if href %}<a class="hit" href="{{ href }}" aria-label="{{ g.title }}" title="{{ g.blurb }}"></a>{% endif %}
+        <i class="claws"><b></b><b></b><b></b></i>
+        <span class="lamp"></span>
+        <svg class="g" aria-hidden="true"><use href="#g-{{ g.glyph }}"/></svg>
+        <span class="name" title="{{ g.title }}">{{ g.title }}</span>
+      </div>
     {% endfor %}
   </div>
 </section>
