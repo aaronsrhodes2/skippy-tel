@@ -129,8 +129,9 @@ Actions (the sandbox can't reach GCP or run.app directly):
   and looks like a starship's controls (Maxolhx-inspired: cut corners, claws and fangs, lamps that
   breathe, a light running along a live control). On the bridge: launcher, Browser Games, the Graveyard, Skippy chat (paged conversation, glyph keys,
   sheets for language/tools/past chats/saving, and a living neon-spiral background:
-  `static/bridge-alive.js`). **Not yet** (old scrolling look, to migrate in batches): admin, game
-  servers, music, video, experiments, the dashboard and the rest.
+  `static/bridge-alive.js`), Game Servers (a lit control per game, and each game's page as panes you flip
+  through). **Not yet** (old scrolling look, to migrate in batches): admin, music, video, experiments, the
+  dashboard and the rest.
 - Copyable things (the Captain's rule: **one click, everywhere**): anything a person is expected to
   copy (an invite code, `ip:port`, a password, a command, a block to paste) is marked
   `<code class="code">` / `<pre class="copy">` (or `data-copy="text"` on a button), and

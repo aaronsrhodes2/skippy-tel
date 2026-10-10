@@ -182,3 +182,57 @@ canvas.alive { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0;
 .lamp.wait { display: block; margin: 30px auto; width: 16px; height: 16px; }
 .sheet .save-ok { display: block; padding: 12px; border: 1px solid var(--dim-green-hi); font-size: .9rem; color: var(--ink); }
 .sheet .save-ok input { width: 20px; height: 20px; vertical-align: -4px; margin-right: 8px; accent-color: var(--accent); }
+
+/* a lamp that is coming up (a server booting): a quick-breathing amber ring */
+[data-s="boot"] .lamp { background: transparent; box-shadow: inset 0 0 0 2px var(--amber); animation: breathe .9s ease-in-out infinite; }
+[data-s="boot"] .plate { opacity: .8; } [data-s="boot"] .plate::after { opacity: .85; animation-duration: 1.3s; }
+
+/* ── Game servers ─────────────────────────────────────────────────────────────────────────────────────────────── */
+.statusbar { flex: none; display: flex; align-items: center; gap: 10px; padding: 4px 4px 6px; font: 600 .85rem var(--mono); color: var(--ink); min-height: 28px; }
+.statusbar .lamp { width: 12px; height: 12px; flex: none; }
+.statusbar .names { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.statusbar .g { width: 16px; height: 16px; color: var(--muted); }
+.games-bridge { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.games-bridge .stage { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+.key.danger { color: var(--red); } .key.danger::before { background: var(--red); }
+.key.danger:active::after { background: var(--red); }
+.sheet .pick { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--dim-green-hi); margin: 0 0 6px; color: var(--ink); }
+.sheet .pick input { width: 20px; height: 20px; accent-color: var(--accent); }
+.sheet .idle { display: flex; align-items: center; gap: 8px; margin: 6px 0; color: var(--muted); }
+.sheet .idle input { width: 5.5em; }
+
+/* a game's own page: panes of one screen each */
+.game-bridge { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.game-bridge .pg { background: rgba(0, 0, 0, .55); }
+.pane { break-before: column; padding: 10px 12px; }
+.pane:first-child { break-before: auto; }
+.pane .gname { display: flex; align-items: center; gap: 10px; margin: 6px 0 10px; font: 700 1.25rem var(--mono); color: var(--accent); }
+.pane .gname .lamp { width: 14px; height: 14px; flex: none; }
+.pane .banner { height: 96px; margin: 0 0 8px; position: relative; overflow: hidden; border: 1px solid var(--accent);
+                clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px); }
+.pane .banner img { width: 100%; height: 100%; object-fit: cover; opacity: .6; }
+.pane .meta { display: flex; align-items: center; gap: 8px; margin: 6px 0; color: var(--muted); font: 600 .9rem var(--mono); }
+.pane .meta .g { width: 18px; height: 18px; }
+.pane .meta b { color: var(--ink); }
+.pane .go { display: flex; align-items: center; gap: 12px; margin: 10px 0; }
+.pane .go .key { width: 64px; height: 64px; } .pane .go .key .g { width: 30px; height: 30px; }
+.pane .join p { margin: 8px 0; } .pane .join .help, .pane .help { font-size: .78rem; }
+.pane .facts { display: grid; grid-template-columns: 1fr; gap: 6px; }
+.pane .facts div { padding: 8px 10px; border: 1px solid var(--dim-green-hi); background: #05090b; }
+.pane .facts b { display: block; font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); }
+.pane .links, .pane .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+.pane .links a { display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid var(--accent); text-decoration: none; color: var(--accent); }
+.pane .links .g { width: 16px; height: 16px; }
+.pane .card { margin: 8px 0; padding: 10px; background: #05090b; border: 1px solid var(--dim-green-hi); border-radius: 0; }
+.pane h3, .pane h4 { margin: 8px 0 4px; }
+.pane .discord-feed .msg { margin: 0 0 8px; break-inside: avoid-column; }
+.pane .discord-feed .who { font-weight: 700; color: var(--accent); margin-right: 6px; }
+.pane .discord-feed .who.bot { color: var(--amber); }
+.pane .discord-feed .when { font-size: .7rem; opacity: .6; }
+.pane .discord-feed .body { white-space: pre-wrap; overflow-wrap: anywhere; }
+.pane .discord-feed .extra { font-size: .8rem; opacity: .8; }
+.pane form.card label.field { margin-top: 8px; }
+.pane button, .pane .btn { border-radius: 0; background: transparent; border-color: var(--accent); }
+.pane button.danger { border-color: var(--red); }
+body.game-art::before { content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none; background: var(--art) center / cover no-repeat; }
+body.game-art::after { content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none; background: rgba(0, 0, 0, .8); }   /* a flat dim over the art: no gradient */

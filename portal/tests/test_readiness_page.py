@@ -164,13 +164,19 @@ def test_live_and_the_page_agree_on_every_case(env):
 
 # ── the game's page ───────────────────────────────────────────────────────────
 
+def _lamp(page):
+    """The game page's lamp (templates/game.html): on = up, boot = coming up, idle = asleep, off = down or another game."""
+    import re
+    return re.search(r'class="gname" data-s="(\w+)"', page).group(1)
+
+
 def test_the_page_says_online_as_soon_as_the_log_does(env):
     client, vm, _ = env
     login(client, FRIEND)
     boot(vm, "valheim", minutes_up=1)                       # the timer alone would say "starting" until minute 5
     snapshot(vm, "READY valheim=1")
     page = client.get("/games/valheim").data.decode()
-    assert "🟢 Online" in page and "Starting" not in page and "Usually joinable" not in page
+    assert _lamp(page) == "on" and "~5" not in page          # lit, and no "coming up" clock
     assert "35.1.2.3:2456" in page and "hunter22" in page   # and the way in is there
 
 
@@ -180,8 +186,7 @@ def test_the_page_keeps_saying_starting_while_the_log_does_however_late(env):
     boot(vm, "valheim", minutes_up=12)                      # the timer alone would say online
     snapshot(vm, "READY valheim=0")
     page = client.get("/games/valheim").data.decode()
-    assert "⏳ Starting — booted 12 min ago" in page and "🟢 Online" not in page
-    assert "Usually joinable about 5 min after boot." in page
+    assert _lamp(page) == "boot" and "<b>12</b> / ~5" in page      # coming up: 12 minutes in, joinable at about 5
 
 
 def test_when_the_log_gives_no_answer_the_page_is_exactly_what_it_was(env):
@@ -191,11 +196,11 @@ def test_when_the_log_gives_no_answer_the_page_is_exactly_what_it_was(env):
     boot(vm, "valheim", minutes_up=2)
     snapshot(vm)                                             # a snapshot without a readiness line
     page = client.get("/games/valheim").data.decode()
-    assert "⏳ Starting — booted 2 min ago" in page and "Usually joinable about 5 min after boot." in page
+    assert _lamp(page) == "boot" and "<b>2</b> / ~5" in page
     vm.serial[2] = ""                                        # no snapshot at all yet
-    assert "Usually joinable about 5 min after boot." in client.get("/games/valheim").data.decode()
+    assert "<b>2</b> / ~5" in client.get("/games/valheim").data.decode()
     boot(vm, "valheim", minutes_up=9)
-    assert "🟢 Online" in client.get("/games/valheim").data.decode()
+    assert _lamp(client.get("/games/valheim").data.decode()) == "on"
 
 
 # ── the Games list ────────────────────────────────────────────────────────────
@@ -208,18 +213,18 @@ def test_the_games_list_still_never_reads_the_vm_and_hands_the_pill_to_the_live_
     page = client.get("/games").data.decode()
     assert vm.serial_reads == []                                             # the page render reads no serial output
     assert page.count("data-live=") == 1 and 'data-live="/games/valheim/live"' in page   # only the game that's up polls
-    assert "a.tile[data-live]" in page and "location.reload" not in page
-    assert '<span class="pill">⏳ starting</span>' in page                   # first paint: the timer's guess, until the poll corrects it
+    assert ".unit[data-live]" in page and "location.reload" not in page
+    assert 'data-s="boot" data-tel="tile:game:valheim"' in page              # first paint: the timer's guess, until the poll corrects it
 
 
 def test_the_games_list_first_paint_is_the_timer_and_a_sleeping_server_polls_nothing(env):
     client, vm, _ = env
     login(client, FRIEND)
     boot(vm, "valheim", minutes_up=12)
-    assert '<span class="pill">● online</span>' in client.get("/games").data.decode()
+    assert 'data-s="on" data-tel="tile:game:valheim"' in client.get("/games").data.decode()
     vm.state.status = "TERMINATED"
     page = client.get("/games").data.decode()
-    assert "data-live=" not in page and "a.tile[data-live]" not in page      # nothing is up, so no poll and no script
+    assert "data-live=" not in page and ".unit[data-live]" not in page       # nothing is up, so no poll and no script
     assert vm.serial_reads == []
 
 

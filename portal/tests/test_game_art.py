@@ -59,7 +59,7 @@ def test_every_image_on_disk_has_a_provenance_entry_and_nothing_stray_ships():
 def test_the_page_shows_the_backdrop_and_the_shipped_banner(client, gid, theme):
     c, _ = client
     html = c.get(f"/games/{gid}").get_data(as_text=True)
-    assert f"/static/{theme.bg_image}" in html and "body::before" in html          # the dimmed full-page backdrop
+    assert f"/static/{theme.bg_image}" in html and 'classList.add("game-art")' in html     # the dimmed full-page backdrop (bridge.css: body.game-art)
     assert f'<img src="/static/{theme.hero_image}"' in html                          # the banner behind the title
     assert f"object-position: {theme.hero_focus}" in html
     assert c.get(f"/static/{theme.bg_image}").status_code == 200 and c.get(f"/static/{theme.hero_image}").status_code == 200

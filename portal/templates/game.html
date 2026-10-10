@@ -1,254 +1,212 @@
 {% extends "base.html" %}
-{# `t` (the game's Theme) comes from the view: a top-level {% set %} in a child
-   template isn't visible inside its blocks. #}
+{# `t` (the game's Theme) comes from the view: a top-level {% set %} in a child template isn't visible inside its blocks. #}
 {% block title %}{{ game.name }} — Maker Portal{% endblock %}
 {% block app %}games{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}{{ game.glyph }}{% endblock %}
+{% block hud_back %}{{ url_for('dashboard.index') }}{% endblock %}
 {% block head %}
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family={{ t.font | replace(' ', '+') }}:wght@400;700&display=swap" rel="stylesheet">
 <style>
-  /* This game's theme (portal/catalog.py → Theme) over the portal's base palette. */
-  body { background: {{ t.bg }}; }
-  {% if backdrop %}
-  /* The game's official art behind the whole page, dimmed so panel text and headings keep their contrast. A fixed
-     pseudo-element, not background-attachment: fixed (iOS Safari ignores that one and repaints it on every scroll). */
-  body::before {
-    content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
-    background: linear-gradient(rgba(0,0,0,.42), rgba(0,0,0,.74)), url("{{ backdrop }}") center / cover no-repeat;
-  }
-  {% endif %}
-  .game-page { --accent: {{ t.accent }}; --accent2: {{ t.accent2 }}; --card: {{ t.card }}; --text: {{ t.text }}; color: var(--text); }
-  .game-page a { color: var(--accent); }
-  .game-page h2 { color: var(--accent2); font-family: "{{ t.font }}", serif; }
-  .hero {
-    position: relative; border-radius: 12px; overflow: hidden; margin-bottom: 24px;
-    border: 1px solid var(--accent2); background: {{ t.card }};
-    background-image: {{ t.pattern }};
-    min-height: 180px; display: flex; align-items: flex-end;
-  }
-  .hero img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .55;
-              object-position: {{ t.hero_focus }}; }
-  .hero .inner { position: relative; padding: 20px; width: 100%;
-                 background: linear-gradient(0deg, rgba(0,0,0,.75), transparent); }
-  .hero h1 { font-family: "{{ t.font }}", serif; color: var(--white); font-size: 2rem; margin: 0;
-             text-shadow: 0 0 18px var(--accent); }
-  .hero .tagline { margin: 4px 0 0; color: var(--accent2); }
-  .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .8rem; margin-top: 10px;
-          border: 1px solid var(--accent); }
-  .game-page .card { background: var(--card); border-color: var(--accent2); }
-  .game-page .card p { color: var(--text); }
-  .game-page button, .game-page .btn { background: transparent; border-color: var(--accent); color: var(--white); }
-  .game-page button:hover, .game-page .btn:hover { background: var(--accent); color: var(--black); }
-  .game-page button.danger { border-color: var(--red); }
-  .game-page input[type=text], .game-page input[type=password] { border-color: var(--accent2); }
-  .game-page label.field, .game-page .help { color: var(--text); opacity: .85; }
-  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
-  .facts div { background: var(--card); border: 1px solid var(--accent2); border-radius: 8px; padding: 10px; }
-  .facts b { display: block; font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--accent2); }
-  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  .players { margin: 14px 0 10px; }
-  .players .count { font-family: "{{ t.font }}", serif; font-size: 1.4rem; color: var(--accent); margin-left: 8px; }
-  .game-page .facts { margin-top: 6px; }
-  .game-page .facts div { background: rgba(0,0,0,.25); }
+  /* This game's colour (portal/catalog.py → Theme) over the bridge, and its official art, flatly dimmed, behind everything. */
+  body { --accent: {{ t.accent }}; --accent2: {{ t.accent2 }}; {% if backdrop %}--art: url("{{ backdrop }}");{% endif %} }
 </style>
 {% endblock %}
 {% block content %}
-<div class="game-page">
-  {% set running = status and status.status == 'RUNNING' %}
-  {% set asleep = status and status.status == 'TERMINATED' %}
-  {% set on = running and game.id in status.games %}
-  {% set up = status.minutes_up() if status else none %}
-  {# `starting` comes from the view: the game's own log says when it's joinable (portal/readiness.py), the boot timer
-     (game.ready_minutes) only stands in when the log gives no answer. #}
+{% set running = status and status.status == 'RUNNING' %}
+{% set asleep = status and status.status == 'TERMINATED' %}
+{% set on = running and game.id in status.games %}
+{% set up = status.minutes_up() if status else none %}
+{# `starting` comes from the view: the game's own log says when it's joinable (portal/readiness.py), the boot timer
+   (game.ready_minutes) only stands in when the log gives no answer. #}
+{% set lamp = 'off' if error else ('boot' if starting else ('on' if on else ('off' if running else ('idle' if asleep else 'boot')))) %}
+{% if backdrop %}<script>document.body.classList.add("game-art");</script>{% endif %}
+<section class="game-bridge game-page" data-s="{{ lamp }}">
+  <div class="pg"><div class="pg-flow">
 
-  <div class="hero">
-    {% if banner %}<img src="{{ banner }}" alt="">{% endif %}
-    <div class="inner">
-      <h1>{{ game.name }}</h1>
-      <p class="tagline">{{ t.tagline }}</p>
-      {% if error %}<span class="pill">VM unreachable</span>
-      {% elif starting %}<span class="pill">⏳ Starting — booted {{ up }} min ago</span>
-      {% elif on %}<span class="pill">🟢 Online</span>
-      {% elif running %}<span class="pill">Another game is up</span>
-      {% elif asleep %}<span class="pill">💤 Asleep — the world is saved</span>
-      {% else %}<span class="pill">{{ status.status | title }}</span>{% endif %}
-    </div>
-  </div>
-
-  {% if error %}<p class="error">Couldn't reach the VM: {{ error }}</p>{% endif %}
-
-  <section>
-    <h2>Play</h2>
-    <div class="card">
-      <p>{{ game.description }}</p>
+    {# ── Play: its lamp, the one control, how to join, who is on ── #}
+    <div class="pane" data-pane="play">
+      {% if banner %}<div class="banner"><img src="{{ banner }}" alt="" style="object-position: {{ t.hero_focus }}"></div>{% endif %}
+      <div class="gname" data-s="{{ lamp }}" title="{{ t.tagline }}"><span class="lamp"></span>{{ game.name }}</div>
+      {% if error %}<p class="error">Couldn't reach the VM: {{ error }}</p>{% endif %}
+      {% if starting %}<div class="meta"><svg class="g" aria-hidden="true"><use href="#g-clock"/></svg><b>{{ up }}</b> / ~{{ game.ready_minutes }}</div>{% endif %}
       {% if on %}
-        {% if starting %}<p>Usually joinable about {{ game.ready_minutes }} min after boot.</p>{% endif %}
         {% include "_join.html" %}
-        <p class="help">Sleeps after {{ status.idle_minutes }} idle minutes.</p>
+        <div class="meta"><svg class="g" aria-hidden="true"><use href="#g-clock"/></svg><span title="Sleeps after this many idle minutes">{{ status.idle_minutes }}</span></div>
       {% elif asleep and (is_admin or not status.games or game.id in status.games) %}
-        <form method="post" action="{{ url_for('dashboard.games_start') }}" class="row">
+        <form method="post" action="{{ url_for('dashboard.games_start') }}" class="go">
           <input type="hidden" name="games" value="{{ game.id }}">
           <input type="hidden" name="idle_minutes" value="{{ status.idle_minutes }}">
           <input type="hidden" name="next" value="{{ url_for('dashboard.game', gid=game.id) }}">
-          <button type="submit">Play {{ game.name }}</button>
-          <span class="help">ready in ~{{ game.ready_minutes }} min</span>
+          <button type="submit" class="key" aria-label="Play {{ game.name }}" title="Play {{ game.name }}"><svg class="g" aria-hidden="true"><use href="#g-power"/></svg></button>
+          <span class="meta"><svg class="g" aria-hidden="true"><use href="#g-clock"/></svg>~{{ game.ready_minutes }}</span>
         </form>
       {% elif asleep or running %}
-        <p class="help">{{ game.name }} isn't the game on the server right now. To play it, ask {{ switch_owner }}
-          to switch the server.</p>
+        <div class="meta" title="{{ game.name }} isn't the game on the server right now. To play it, ask {{ switch_owner }} to switch the server."><svg class="g" aria-hidden="true"><use href="#g-user"/></svg><b>{{ switch_owner }}</b></div>
       {% endif %}
-
       {% if game.max_players %}
         {% set n = players.get(game.id) if on else (0 if status else none) %}
-        <p class="players"><b>Players online</b>
-          <span class="count">{{ n if n is not none else '–' }} / {{ game.max_players }}</span></p>
-      {% endif %}
-      {% if game.facts %}
-        <div class="facts">
-          {% for label, value in game.facts %}<div><b>{{ label }}</b>{{ value }}</div>{% endfor %}
-        </div>
-      {% endif %}
-      {% if game.links %}
-        <p class="links" style="margin-top:12px">
-          {% for label, url in game.links %}<a href="{{ url }}" target="_blank" rel="noopener">{{ label }}</a>{% endfor %}
-        </p>
+        <div class="meta"><svg class="g" aria-hidden="true"><use href="#g-user"/></svg><b>{{ n if n is not none else '–' }}</b> / {{ game.max_players }}</div>
       {% endif %}
     </div>
-  </section>
 
-  <section>
-    <h2>#{{ game.id }} on Discord</h2>
-    <div class="row" style="margin-bottom:10px">
-      {# The invite lands newcomers in this channel; members' links open it directly. #}
-      <a class="btn" href="{{ links.invite or discord_invite }}" target="_blank" rel="noopener">
-        {{ 'Join the conversation' if links.invite else 'Join the Discord' }}</a>
-      {% if links.text %}<a href="{{ links.text }}" target="_blank" rel="noopener">open #{{ game.id }}</a>{% endif %}
-      {% if links.voice %}<a href="{{ links.voice }}" target="_blank" rel="noopener">🔊 {{ game.id }} voice</a>{% endif %}
+    {# ── Facts and the game's own sites ── #}
+    {% if game.facts or game.links %}
+    <div class="pane" data-pane="info">
+      {% if game.facts %}<div class="facts">{% for label, value in game.facts %}<div><b>{{ label }}</b>{{ value }}</div>{% endfor %}</div>{% endif %}
+      {% if game.links %}<p class="links">{% for label, url in game.links %}<a href="{{ url }}" target="_blank" rel="noopener"><svg class="g" aria-hidden="true"><use href="#g-link"/></svg>{{ label }}</a>{% endfor %}</p>{% endif %}
     </div>
-    {% if links.text %}
-      <div id="discord" class="card discord-feed"><p class="help">Loading #{{ game.id }}…</p></div>
-      <p class="help">Read-only copy of the channel, refreshed every 20 seconds. To talk, join on Discord.</p>
-    {% else %}
-      <p class="help">This game's Discord channels aren't set up yet{% if is_admin %} — set them up
-        on the <a href="{{ url_for('admin.index') }}">Admin page</a>{% endif %}.</p>
     {% endif %}
-  </section>
-  <script>
-    /* Keeps the page current while it stays open (the same read Dragonwilds' code has always used): a new
-       invite code drops in by itself, and when the server comes up, finishes starting or goes to sleep the
-       page reloads to show what to do next. */
-    (function () {
-      const url = "{{ url_for('dashboard.game_live', gid=game.id) }}";
-      const was = {on: {{ 'true' if on else 'false' }}, starting: {{ 'true' if starting else 'false' }}};
-      async function poll() {
-        if (document.hidden) return;
-        try {
-          const res = await fetch(url, {headers: {"Accept": "application/json"}, cache: "no-store"});
-          if (!res.ok) return;
-          const now = await res.json();
-          if (now.on !== was.on || now.starting !== was.starting) { location.reload(); return; }
-          const slot = document.getElementById("join-code");
-          if (slot && now.code) {
-            const shown = slot.querySelector("code");
-            if (!shown || shown.textContent !== now.code) {
-              const code = document.createElement("code");
-              code.className = "code"; code.textContent = now.code; code.title = "Click to copy";
-              slot.replaceChildren(code);                     // (static/copy.js gives the new chip its Copy button)
-              // The "Copy it all to share" message carries the code too: keep it in step, or it would copy a stale one.
-              const share = document.querySelector(".join button[data-copy]");
-              if (share) {
-                let text = share.getAttribute("data-copy");
-                text = /join code [^,]+/.test(text) ? text.replace(/join code [^,]+/, "join code " + now.code)
-                                                    : text.replace(/^([^:]*): /, "$1: join code " + now.code + ", ");
-                share.setAttribute("data-copy", text);
-              }
+
+    {# ── Discord: the way in, and a read-only copy of the channel ── #}
+    <div class="pane" data-pane="talk">
+      <div class="row">
+        {# The invite lands newcomers in this channel; members' links open it directly. #}
+        <a class="btn" href="{{ links.invite or discord_invite }}" target="_blank" rel="noopener" aria-label="{{ 'Join the conversation' if links.invite else 'Join the Discord' }}" title="{{ 'Join the conversation' if links.invite else 'Join the Discord' }}"><svg class="g" style="width:20px;height:20px" aria-hidden="true"><use href="#g-talk"/></svg></a>
+        {% if links.text %}<a href="{{ links.text }}" target="_blank" rel="noopener">#{{ game.id }}</a>{% endif %}
+        {% if links.voice %}<a href="{{ links.voice }}" target="_blank" rel="noopener"><svg class="g" style="width:16px;height:16px;vertical-align:-3px" aria-hidden="true"><use href="#g-wave"/></svg> {{ game.id }}</a>{% endif %}
+      </div>
+      {% if links.text %}
+        <div id="discord" class="discord-feed"><span class="lamp wait" data-s="on" style="width:14px;height:14px"></span></div>
+      {% else %}
+        <p class="help"><span class="lamp" data-s="off" style="width:10px;height:10px"></span> Discord channels aren't set up for this game{% if is_admin %} — <a href="{{ url_for('admin.index') }}">Admin</a>{% endif %}.</p>
+      {% endif %}
+    </div>
+
+    {# ── Admin (the Captain only): the server card, its controls, this game's settings ── #}
+    {% if is_admin and status %}
+    <div class="pane" data-pane="admin">
+      <div class="card">
+        {% include "_server_admin.html" %}   {# the Server admin card: admin only, like everything in this block #}
+        <div class="row">
+          <form class="inline" method="post" action="{{ url_for('admin.restart') }}">
+            <input type="hidden" name="next" value="{{ url_for('dashboard.game', gid=game.id) }}">
+            <input type="hidden" name="game" value="{{ game.id }}">
+            <button type="submit" class="key" aria-label="Update &amp; play {{ game.name }}" title="Update &amp; play: starts (or restarts) the server with {{ game.name }} only, on its latest update with your saved settings"><svg class="g" aria-hidden="true"><use href="#g-power"/></svg></button>
+          </form>
+          {% if running %}
+          <form class="inline" method="post" action="{{ url_for('dashboard.games_stop') }}">
+            <input type="hidden" name="next" value="{{ url_for('dashboard.game', gid=game.id) }}">
+            <button type="submit" class="key danger" aria-label="Stop server" title="Stop server"><svg class="g" aria-hidden="true"><use href="#g-power"/></svg></button>
+          </form>
+          {% endif %}
+          <a class="btn" href="{{ url_for('admin.logs', game=game.id) }}">{{ game.name }} logs</a>
+        </div>
+      </div>
+      <form method="post" action="{{ url_for('admin.settings') }}" class="card">
+        <input type="hidden" name="next" value="{{ url_for('dashboard.game', gid=game.id) }}">
+        {% for s in game.settings %}
+          <label class="field" for="{{ s.key }}">{{ s.label }}</label>
+          {% if s.secret %}
+            <input type="password" id="{{ s.key }}" name="{{ s.key }}" autocomplete="new-password"
+                   placeholder="{{ '(set — leave blank to keep)' if status.env.get(s.key) else '(not set)' }}">
+          {% else %}
+            <input type="text" id="{{ s.key }}" name="{{ s.key }}" value="{{ status.env.get(s.key, '') }}">
+          {% endif %}
+          {% if s.help %}<p class="help">{{ s.help }}</p>{% endif %}
+        {% endfor %}
+        <p><button type="submit">Save {{ game.name }} settings</button></p>
+      </form>
+    </div>
+    {% endif %}
+
+  </div></div>
+  <div class="pips" aria-hidden="true"><i></i></div>
+  <div class="keybar" role="tablist">
+    <button type="button" class="key" data-go="play" aria-label="Play" title="Play"><svg class="g" aria-hidden="true"><use href="#g-{{ game.glyph }}"/></svg></button>
+    {% if game.facts or game.links %}<button type="button" class="key" data-go="info" aria-label="Facts" title="Facts"><svg class="g" aria-hidden="true"><use href="#g-info"/></svg></button>{% endif %}
+    <button type="button" class="key" data-go="talk" aria-label="Discord" title="Discord"><svg class="g" aria-hidden="true"><use href="#g-talk"/></svg></button>
+    {% if is_admin and status %}<button type="button" class="key" data-go="admin" aria-label="Admin" title="Admin"><svg class="g" aria-hidden="true"><use href="#g-gear"/></svg></button>{% endif %}
+    <span class="grow"></span>
+    <button type="button" class="key prev" aria-label="Earlier" title="Earlier"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+    <button type="button" class="key next" aria-label="Later" title="Later"><svg class="g flip" aria-hidden="true"><use href="#g-back"/></svg></button>
+  </div>
+</section>
+<script>
+  /* The panes are pages of one pager (static/bridge.js): a key goes straight to its pane and lights while you are on it. */
+  (function () {
+    const root = document.querySelector(".game-bridge"), panel = root.querySelector(".pg"), flow = root.querySelector(".pg-flow");
+    const keys = [...root.querySelectorAll("[data-go]")];
+    function startPage(name) {
+      const pane = flow.querySelector('[data-pane="' + name + '"]');
+      return pane ? Math.round((pane.getBoundingClientRect().left - flow.getBoundingClientRect().left) / panel.clientWidth) : 0;
+    }
+    function light(page) {
+      const starts = keys.map(k => startPage(k.dataset.go));
+      let current = 0; starts.forEach((s, i) => { if (page >= s) current = i; });
+      keys.forEach((k, i) => k.classList.toggle("lit", i === current));
+    }
+    const pager = Bridge.pager(panel, {pips: root.querySelector(".pips"), onchange: light});
+    keys.forEach(k => k.addEventListener("click", () => pager.go(startPage(k.dataset.go))));
+    root.querySelector(".prev").addEventListener("click", () => pager.go(pager.page() - 1));
+    root.querySelector(".next").addEventListener("click", () => pager.go(pager.page() + 1));
+    light(0);
+  })();
+</script>
+<script>
+  /* Keeps the page current while it stays open (the same read Dragonwilds' code has always used): a new
+     invite code drops in by itself, and when the server comes up, finishes starting or goes to sleep the
+     page reloads to show what to do next. */
+  (function () {
+    const url = "{{ url_for('dashboard.game_live', gid=game.id) }}";
+    const was = {on: {{ 'true' if on else 'false' }}, starting: {{ 'true' if starting else 'false' }}};
+    async function poll() {
+      if (document.hidden) return;
+      try {
+        const res = await fetch(url, {headers: {"Accept": "application/json"}, cache: "no-store"});
+        if (!res.ok) return;
+        const now = await res.json();
+        if (now.on !== was.on || now.starting !== was.starting) { location.reload(); return; }
+        const slot = document.getElementById("join-code");
+        if (slot && now.code) {
+          const shown = slot.querySelector("code");
+          if (!shown || shown.textContent !== now.code) {
+            const code = document.createElement("code");
+            code.className = "code"; code.textContent = now.code; code.title = "Click to copy";
+            slot.replaceChildren(code);                     // (static/copy.js gives the new chip its Copy button)
+            // The "Copy it all to share" message carries the code too: keep it in step, or it would copy a stale one.
+            const share = document.querySelector(".join button[data-copy]");
+            if (share) {
+              let text = share.getAttribute("data-copy");
+              text = /join code [^,]+/.test(text) ? text.replace(/join code [^,]+/, "join code " + now.code)
+                                                  : text.replace(/^([^:]*): /, "$1: join code " + now.code + ", ");
+              share.setAttribute("data-copy", text);
             }
           }
-        } catch (e) { /* a network blip: the next poll catches up */ }
-      }
-      setInterval(poll, 20000);
-    })();
-  </script>
-  {% if links.text %}
-  <style>
-    .discord-feed { max-height: 360px; overflow-y: auto; }
-    .discord-feed .msg { margin: 0 0 8px; }
-    .discord-feed .who { font-weight: 700; color: var(--accent); margin-right: 6px; }
-    .discord-feed .who.bot { color: var(--accent2); }
-    .discord-feed .when { font-size: .75rem; opacity: .6; }
-    .discord-feed .body { white-space: pre-wrap; word-break: break-word; }
-    .discord-feed .extra { font-size: .85rem; opacity: .8; font-style: italic; }
-  </style>
-  <script>
-    (function () {
-      const box = document.getElementById("discord");
-      const url = "{{ url_for('dashboard.game_discord', gid=game.id) }}";
-      function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls;
-                                    if (text) e.textContent = text; return e; }
-      async function load() {
-        try {
-          const res = await fetch(url, {headers: {"Accept": "application/json"}});
-          const data = await res.json();
-          box.replaceChildren();
-          if (!res.ok) { box.appendChild(el("p", "help", data.error || "Couldn't load the channel.")); return; }
-          if (!data.messages.length) { box.appendChild(el("p", "help", "Nothing here yet — be the first to say hi.")); return; }
-          for (const m of data.messages) {
-            const p = el("div", "msg");
-            p.appendChild(el("span", "who" + (m.bot ? " bot" : ""), m.author));
-            p.appendChild(el("span", "when", new Date(m.at).toLocaleString([], {dateStyle: "short", timeStyle: "short"})));
-            if (m.text) p.appendChild(el("div", "body", m.text));
-            for (const x of m.extra) p.appendChild(el("div", "extra", x));
-            box.appendChild(p);
-          }
-          box.scrollTop = box.scrollHeight;
-        } catch (e) { /* keep the last copy on a network blip */ }
-      }
-      load();
-      setInterval(() => { if (!document.hidden) load(); }, 20000);
-    })();
-  </script>
-  {% endif %}
-
-  {% if is_admin and status %}
-  <section>
-    <h2>Admin</h2>
-    <div class="card">
-      {% include "_server_admin.html" %}   {# the Server admin card: admin only, like everything in this block #}
-      <div class="row">
-        <form class="inline" method="post" action="{{ url_for('admin.restart') }}">
-          <input type="hidden" name="next" value="{{ url_for('dashboard.game', gid=game.id) }}">
-          <input type="hidden" name="game" value="{{ game.id }}">
-          <button type="submit">Update &amp; play</button>
-        </form>
-        {% if running %}
-        <form class="inline" method="post" action="{{ url_for('dashboard.games_stop') }}">
-          <input type="hidden" name="next" value="{{ url_for('dashboard.game', gid=game.id) }}">
-          <button type="submit" class="danger">Stop server</button>
-        </form>
-        {% endif %}
-        <a class="btn" href="{{ url_for('admin.logs', game=game.id) }}">{{ game.name }} logs</a>
-      </div>
-      <p class="help">Update &amp; play starts (or restarts) the server with {{ game.name }} only, on its latest update with your saved settings. Every start pulls the latest version, so Play gets the update too.</p>
-    </div>
-
-    <form method="post" action="{{ url_for('admin.settings') }}" class="card">
-      <input type="hidden" name="next" value="{{ url_for('dashboard.game', gid=game.id) }}">
-      {% for s in game.settings %}
-        <label class="field" for="{{ s.key }}">{{ s.label }}</label>
-        {% if s.secret %}
-          <input type="password" id="{{ s.key }}" name="{{ s.key }}" autocomplete="new-password"
-                 placeholder="{{ '(set — leave blank to keep)' if status.env.get(s.key) else '(not set)' }}">
-        {% else %}
-          <input type="text" id="{{ s.key }}" name="{{ s.key }}" value="{{ status.env.get(s.key, '') }}">
-        {% endif %}
-        {% if s.help %}<p class="help">{{ s.help }}</p>{% endif %}
-      {% endfor %}
-      <p><button type="submit">Save {{ game.name }} settings</button></p>
-    </form>
-  </section>
-  {% endif %}
-
-  <p><a href="{{ url_for('dashboard.index') }}">&larr; All games</a></p>
-</div>
+        }
+      } catch (e) { /* a network blip: the next poll catches up */ }
+    }
+    setInterval(poll, 20000);
+  })();
+</script>
+{% if links.text %}
+<script>
+  (function () {
+    const box = document.getElementById("discord");
+    const url = "{{ url_for('dashboard.game_discord', gid=game.id) }}";
+    const pager = () => document.querySelector(".game-bridge .pg")._pager;
+    function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls;
+                                  if (text) e.textContent = text; return e; }
+    async function load() {
+      try {
+        const res = await fetch(url, {headers: {"Accept": "application/json"}});
+        const data = await res.json();
+        box.replaceChildren();
+        if (!res.ok) { box.appendChild(el("p", "help", data.error || "Couldn't load the channel.")); pager().refresh(); return; }
+        if (!data.messages.length) { box.appendChild(el("p", "help", "∅")); pager().refresh(); return; }
+        for (const m of data.messages) {
+          const p = el("div", "msg");
+          p.appendChild(el("span", "who" + (m.bot ? " bot" : ""), m.author));
+          p.appendChild(el("span", "when", new Date(m.at).toLocaleString([], {dateStyle: "short", timeStyle: "short"})));
+          if (m.text) p.appendChild(el("div", "body", m.text));
+          for (const x of m.extra) p.appendChild(el("div", "extra", x));
+          box.appendChild(p);
+        }
+        pager().refresh();
+      } catch (e) { /* keep the last copy on a network blip */ }
+    }
+    load();
+    setInterval(() => { if (!document.hidden) load(); }, 20000);
+  })();
+</script>
+{% endif %}
 {% endblock %}

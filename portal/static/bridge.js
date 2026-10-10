@@ -5,7 +5,7 @@
 
    Bridge.pager: how anything longer than a screen is shown without scrolling. The content flows into COLUMNS exactly as wide as the
    panel and as tall as it is; a page is one column; you flip with a key or swipe sideways. No scrollbar exists to hate.
-       Bridge.pager(panel, {pips: railElement})  → {go(i), page(), pages(), last(), refresh()}
+       Bridge.pager(panel, {pips: railElement, onchange: function (page, pages) {}})  → {go(i), page(), pages(), last(), refresh()}
    `panel` has one child, `.pg-flow`, holding the content. Call refresh() after the content or the panel's size changes (it also
    refreshes on its own when the panel is resized). A panel marked .pg gets its pager as panel._pager.
    Nothing here talks to the network. */
@@ -21,7 +21,7 @@
 
   Bridge.pager = function (panel, opts) {
     var flow = panel.querySelector(".pg-flow"), pips = opts && opts.pips, thumb = pips && pips.querySelector("i");
-    var page = 0, pages = 1, w = 0;
+    var page = 0, pages = 1, w = 0, onchange = opts && opts.onchange;
     function paintPips() {
       if (!pips) return;
       pips.hidden = pages < 2;                                     // one page: nothing to flip, nothing to show
@@ -31,6 +31,7 @@
       page = Math.max(0, Math.min(pages - 1, i));
       flow.style.transform = "translateX(" + (-page * w) + "px)";
       paintPips();
+      if (onchange) onchange(page, pages);
     }
     function refresh() {
       w = panel.clientWidth;

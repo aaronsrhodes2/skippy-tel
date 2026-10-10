@@ -63,7 +63,8 @@ class Game:
     via_list: bool = False               # the game's server list finds it by name: `connect` says how (the fallback)
     snippet: Callable[[str, dict], tuple[str, str]] | None = None   # (ip, settings) -> (label, text): a block to copy as-is
     theme: Theme | None = None
-    icon: str = "🎮"                    # the game's card on the Games page (an emoji, like the launcher's tiles)
+    icon: str = "🎮"                    # (the old emoji card; the bridge uses `glyph`)
+    glyph: str = "console"              # the game's control on the Games page (templates/_glyphs.html)
     facts: tuple[tuple[str, str], ...] = field(default=())   # (label, value) on the game page
     links: tuple[tuple[str, str], ...] = field(default=())   # (label, url) official site, wiki
 
@@ -126,7 +127,7 @@ GAMES: dict[str, Game] = {
         direct=lambda ip, env: f"{ip}:{env.get('DRAGONWILDS_PORT') or '7778'}",
         direct_hint="In game: Worlds &rarr; <b>Direct</b> tab. Same address every session.",
         via_list=True,
-        icon="🐉",
+        icon="🐉", glyph="crest",
         theme=Theme(accent="#ff7a1a", accent2="#c9a24a", bg="#120806", card="#24110b", text="#f3dcc2",
                     font="Cinzel",
                     pattern="radial-gradient(ellipse at 20% 110%, rgba(255,90,20,.55), transparent 60%), "
@@ -168,7 +169,7 @@ GAMES: dict[str, Game] = {
                     "(With crossplay on the server has no IP address to join.)",
         direct=lambda ip, env: "" if valheim_crossplay(env) else f"{ip}:2456",     # "" = nothing to show
         direct_hint="In game: Join Game &rarr; <b>Add server</b>. Same address every session.",
-        icon="🪓",
+        icon="🪓", glyph="rune",
         theme=Theme(accent="#8fd3ff", accent2="#d8c9a3", bg="#0b1016", card="#141d27", text="#dfe8ef",
                     font="Cinzel",
                     pattern="linear-gradient(180deg, rgba(143,211,255,.18), transparent 70%), "
@@ -188,7 +189,7 @@ GAMES: dict[str, Game] = {
         settings=(Setting("FACTORIO_SAVE_NAME", "Save name"),),
         direct=lambda ip, env: f"{ip}:34197",            # no invite codes: the address is the whole way in, port included (one paste)
         direct_hint="In game: Multiplayer &rarr; <b>Connect to address</b>. Same address every session.",
-        icon="⚙️",
+        icon="⚙️", glyph="cog",
         theme=Theme(accent="#ff9a1f", accent2="#7fb03a", bg="#141414", card="#232323", text="#e6e0d6",
                     font="Titillium Web",
                     pattern="repeating-linear-gradient(45deg, rgba(255,154,31,.10) 0 14px, rgba(0,0,0,0) 14px 28px)",
@@ -213,7 +214,7 @@ GAMES: dict[str, Game] = {
                     "Session ID) is for player-hosted games and fails on a dedicated server with &ldquo;Encryption Token "
                     "Missing&rdquo;. The first player to connect claims the server and sets its admin password: do that "
                     "right away. Same address every session.",
-        icon="🏭",
+        icon="🏭", glyph="factory",
         theme=Theme(accent="#fa9549", accent2="#5fb6d9", bg="#0d1216", card="#18222a", text="#e2ecf2",
                     font="Rajdhani",
                     pattern="radial-gradient(circle at 80% 20%, rgba(95,182,217,.35), transparent 50%), "
@@ -243,7 +244,7 @@ GAMES: dict[str, Game] = {
         snippet=lambda ip, env: ("eqhost.txt (RoF2): replace the file's contents with this, then start "
                                  "eqgame.exe patchme; a new name + password creates your account",
                                  f"[LoginServer]\nHost={ip}:5999\nHost1="),
-        icon="🧙",
+        icon="🧙", glyph="wand",
         theme=Theme(accent="#d4af37", accent2="#6a8cc7", bg="#0b0a12", card="#171425", text="#e8e2d0",
                     font="Cinzel",
                     pattern="radial-gradient(ellipse at 15% 0%, rgba(106,140,199,.35), transparent 55%), "

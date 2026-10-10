@@ -123,10 +123,9 @@ def test_every_app_page_has_a_back_button_a_home_button_and_its_own_title(env):
     login(client, ADMIN)
     page = client.get("/games").data.decode()
     assert "<nav" not in page
-    assert "&lsaquo; Home</a>" in page and 'id="home-btn"' in page
-    assert "sign out" not in page                                              # app bars are just back + title
-    assert '<h1 class="apptitle">Game Servers</h1>' in page                            # title comes from the page's own <title>
-    assert '<h1 class="apptitle">Admin</h1>' in client.get("/admin").data.decode()
+    assert 'aria-label="Back"' in page and 'aria-label="Home"' in page         # a bridge page: back and home are glyph keys
+    assert 'aria-label="Sign out"' not in page                                 # the strip is just back, what this is, home
+    assert '<h1 class="apptitle">Admin</h1>' in client.get("/admin").data.decode()      # the pages not yet on the bridge keep the old bar
 
 
 def test_the_launcher_has_one_tile_per_app_and_no_duplicate_paths(env):
@@ -249,7 +248,7 @@ def test_a_game_pages_restart_brings_back_that_game_only(env):
     client, vm, _ = env
     login(client, ADMIN)
     page = client.get("/games/dragonwilds").data.decode()
-    assert '<input type="hidden" name="game" value="dragonwilds">' in page and "Update &amp; play</button>" in page
+    assert '<input type="hidden" name="game" value="dragonwilds">' in page and 'aria-label="Update &amp; play ' in page
     client.post("/admin/restart", data={"game": "dragonwilds", "next": "/games/dragonwilds"})
     assert vm.calls[-1] == ("restart", ("dragonwilds",))
     assert client.post("/admin/restart", data={"game": "minecraft"}).status_code == 400
@@ -293,10 +292,10 @@ def test_friend_one_click_play_the_current_game_with_guardrail(env):
 def test_friends_cannot_start_a_different_game_and_are_told_to_ask_aaron(env):
     client, vm, _ = env
     login(client, FRIEND)                                          # the server is set to Valheim, asleep
-    assert "Play Valheim" in client.get("/games/valheim").data.decode()
-    page = client.get("/games").data.decode()                      # the list says so on the card, and offers no multi-start
-    assert 'href="/games/dragonwilds"' in page and ">ask Aaron</span>" in page
-    assert "Start several games at once" not in page and "Play " not in page
+    assert 'aria-label="Play Valheim"' in client.get("/games/valheim").data.decode()
+    page = client.get("/games").data.decode()                      # the list says so on the control (a dark one), and offers no multi-start
+    assert 'href="/games/dragonwilds"' in page and 'data-s="off" data-tel="tile:game:dragonwilds"' in page
+    assert 'data-open="multi"' not in page and 'aria-label="Play ' not in page
     body = client.post("/games/start", data={"games": ["dragonwilds"]}, follow_redirects=True).data.decode()
     assert "Valheim is the game on the server right now" in body
     assert "To play RuneScape: Dragonwilds instead, ask Aaron to switch the server" in body
@@ -304,9 +303,9 @@ def test_friends_cannot_start_a_different_game_and_are_told_to_ask_aaron(env):
     blocked = json.loads(vm.metadata["portal-watch"])["blocked_starts"]      # the Captain's watcher hears about it
     assert [(b["who"], b["wanted"], b["running"]) for b in blocked] == [(FRIEND, ["dragonwilds"], ["valheim"])]
     game_page = client.get("/games/dragonwilds").data.decode()
-    assert "Play RuneScape" not in game_page and "ask Aaron" in game_page
+    assert 'aria-label="Play RuneScape' not in game_page and "ask Aaron" in game_page
     vm.state.status = "RUNNING"                                    # the same rule while a game is up
-    assert ">ask Aaron</span>" in client.get("/games").data.decode()
+    assert 'data-s="off" data-tel="tile:game:dragonwilds"' in client.get("/games").data.decode()
 
 
 def test_the_captain_can_start_any_game_and_several_at_once(env):
@@ -416,11 +415,12 @@ def test_the_games_page_is_a_grid_of_whole_card_links_like_the_launcher(env):
     page = client.get("/games").data.decode()
     links, nested = _anchors(page)
     assert nested == []
-    assert re.findall(r'<a class="tile" href="/games/(\w+)"', page) == list(GAMES)      # one whole-card link per game, in order
-    assert page.count('class="tiles"') == 1
+    assert re.findall(r'<div class="unit named" data-s="\w+" data-tel="tile:game:(\w+)"', page) == list(GAMES)   # one control per game, in order
+    assert page.count('class="deck"') == 1
     for gid, game in GAMES.items():
-        assert f"/games/{gid}" in links and game.icon in page and f'style="--accent: {game.theme.accent}"' in page
-        assert game.theme.tagline.replace("'", "&#39;") in page                       # just the tagline, not the full description
+        assert f"/games/{gid}" in links and f'href="#g-{game.glyph}"' in page.replace("<use ", "<use ") and f"--accent: {game.theme.accent}" in page
+        assert f'aria-label="{game.name}"' in page and f'<span class="name">{game.name}</span>' in page   # its name is the one word on it
+        assert game.theme.tagline.replace("'", "&#39;") in page                       # just the tagline (a tooltip), not the full description
         assert game.description.replace("'", "&#39;") not in page
     assert "fonts.googleapis.com" not in page                                          # and no third-party request on this hub
 
@@ -429,17 +429,18 @@ def test_the_running_games_card_is_the_highlighted_one(env):
     import re
     client, vm, _ = env
     login(client, ADMIN)
-    assert 'class="tile live"' not in client.get("/games").data.decode()               # asleep: nothing is live
+    lit = lambda page: re.findall(r'data-s="(?:on|boot)" data-tel="tile:game:(\w+)"', page)   # noqa: E731 (up, or coming up)
+    assert lit(client.get("/games").data.decode()) == []                                 # asleep: nothing is lit
     vm.state.status, vm.state.games = "RUNNING", ["valheim"]
     page = client.get("/games").data.decode()
-    assert re.findall(r'<a class="tile live" href="/games/(\w+)"', page) == ["valheim"]     # only the game that's up glows
-    assert page.count('class="tile"') == 4 and "Online now. Tap for how to join." in page
+    assert lit(page) == ["valheim"]                                                      # only the game that's up glows
+    assert len(re.findall(r'data-s="(?:idle|off)" data-tel="tile:game:', page)) == 4 and 'data-live="/games/valheim/live"' in page
     vm.state.games = ["valheim", "dragonwilds"]                                          # the Captain started two
     page = client.get("/games").data.decode()
-    assert sorted(re.findall(r'<a class="tile live" href="/games/(\w+)"', page)) == ["dragonwilds", "valheim"]
+    assert sorted(lit(page)) == ["dragonwilds", "valheim"]
     _add_friend(client, PAL, ["factorio"])
     login(client, PAL)                                                                   # a game PAL can't see is up: nothing lit
-    assert 'class="tile live"' not in client.get("/games").data.decode()
+    assert lit(client.get("/games").data.decode()) == []
 
 
 def test_a_games_card_only_says_how_that_game_is_doing(env):
@@ -447,10 +448,10 @@ def test_a_games_card_only_says_how_that_game_is_doing(env):
     client, vm, _ = env
     login(client, FRIEND)
     page = client.get("/games").data.decode()
-    assert re.search(r'href="/games/valheim".*?<span class="pill">asleep</span>', page, re.S)
+    assert 'data-s="idle" data-tel="tile:game:valheim"' in page                          # asleep: a ring lamp
     vm.state.status = "RUNNING"
     page = client.get("/games").data.decode()
-    assert re.search(r'href="/games/valheim".*?<span class="pill">● online</span>', page, re.S)
+    assert re.search(r'data-s="(?:on|boot)" data-tel="tile:game:valheim"', page)         # up: lit
     for secret in ("hunter22", "Invite Code", "Play Valheim", "Show join password"):
         assert secret not in page                                                      # details are for the game's own page
 
@@ -582,7 +583,7 @@ def test_game_page_admin_section_only_for_admins(env):
     login(client, ADMIN)
     page = client.get("/games/dragonwilds").data.decode()
     assert "Owner Player ID" in page and "Update &amp; play" in page
-    assert "Valheim" not in page.split("<h2>Admin</h2>")[1]      # only this game's settings
+    assert "Valheim" not in page.split('data-pane="admin"')[1].split('<div class="pips"')[0]      # only this game's settings
     assert "adm1n" not in page and "hunter22" not in page         # secrets never rendered
 
 
@@ -859,13 +860,13 @@ def test_play_card_has_players_online_and_facts(env):
     client, vm, _ = env
     login(client, FRIEND)
     page = client.get("/games/dragonwilds").data.decode()
-    play = page[page.index("<h2>Play</h2>"):page.index("on Discord</h2>")]
-    assert "Players online" in play and "0 / 6" in play               # asleep: nobody on
-    assert "Crossplay" in play and "At a glance" not in page          # facts merged into Play
+    play = page[page.index('data-pane="play"'):page.index('data-pane="talk"')]
+    assert "<b>0</b> / 6" in play                                      # asleep: nobody on (a person glyph, then the count)
+    assert "Crossplay" in page and "At a glance" not in page          # the facts have their own page
     vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
-    assert "– / 6" in client.get("/games/dragonwilds").data.decode()   # count not known yet
+    assert "<b>–</b> / 6" in client.get("/games/dragonwilds").data.decode()   # count not known yet
     vm.serial[2] = "=== skippy-diag t ===\nPLAYERS dragonwilds=2\n=== end ===\n"
-    assert "2 / 6" in client.get("/games/dragonwilds").data.decode()
+    assert "<b>2</b> / 6" in client.get("/games/dragonwilds").data.decode()
 
 
 # ── remote-operator task queue (tasks.py) ─────────────────────────────────────

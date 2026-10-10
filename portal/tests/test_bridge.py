@@ -111,7 +111,7 @@ def test_the_bridge_script_makes_no_network_calls():
 def test_a_page_not_on_the_bridge_is_untouched(env):
     client, _, _ = env
     login(client, ADMIN)
-    page = client.get("/games").data.decode()
+    page = client.get("/experiments").data.decode()
     assert "bridge.css" not in page and 'class="bridge"' not in page and 'class="appbar"' in page
 
 
@@ -279,3 +279,65 @@ def test_the_game_servers_have_their_own_symbol_and_skippy_is_the_can():
     assert {"console", "can"} <= drawn
     by_id = {m.id: m for m in modules.MODULES}
     assert by_id["games"].glyph == "console" and by_id["skippy"].glyph == "can"
+
+
+# ── Game Servers on the bridge ──────────────────────────────────────────────────────────────────────────────────
+
+def test_every_game_has_a_drawn_glyph_of_its_own():
+    import catalog
+    drawn = _glyphs()
+    glyphs = [g.glyph for g in catalog.GAMES.values()]
+    assert set(glyphs) <= drawn and len(set(glyphs)) == len(glyphs)               # one symbol per game, none shared
+
+
+def test_the_games_list_is_one_screen_a_control_per_game_and_the_names_are_the_only_words(env):
+    import catalog
+    client, vm, _ = env
+    login(client, FRIEND)                                                      # (the Captain's start-several sheet lists names too)
+    page = client.get("/games").data.decode()
+    assert 'class="bridge"' in page and 'class="deck"' in page
+    assert f'--rows: {(len(catalog.GAMES) + 1) // 2}' in page
+    body = page.split('<body class="bridge"', 1)[1].split(">", 1)[1]
+    body = re.sub(r'<footer class="foot">.*?</footer>', "", body, flags=re.S)
+    body = re.sub(r"<(script|style|svg)\b.*?</\1>", "", body, flags=re.S)
+    words = " ".join(re.sub(r"<[^>]*>", " ", body).split())
+    assert words == " ".join(g.name for g in catalog.GAMES.values()), words      # asleep: just the game names
+
+
+def test_the_server_wide_keys_are_glyphs_and_only_the_right_person_gets_them(env):
+    client, vm, _ = env
+    login(client, ADMIN)
+    page = client.get("/games").data.decode()
+    assert 'data-open="multi"' in page and 'aria-label="Start several games at once"' in page and 'name="idle_minutes"' in page
+    vm.state.status = "RUNNING"
+    page = client.get("/games").data.decode()
+    assert 'class="key danger"' in page and 'aria-label="Stop server"' in page and 'data-open="multi"' not in page
+    login(client, FRIEND)
+    page = client.get("/games").data.decode()
+    assert 'aria-label="Stop server"' in page                                  # a friend may stop it (the route still decides)
+
+
+def test_a_game_page_is_panes_you_flip_with_a_key_each_and_the_admin_pane_is_the_captains(env):
+    client, _, _ = env
+    login(client, FRIEND)
+    page = client.get("/games/dragonwilds").data.decode()
+    assert 'class="pg"' in page and "Bridge.pager(" in page
+    assert re.findall(r'data-go="(\w+)"', page) == ["play", "info", "talk"]      # no admin key for a friend
+    assert 'data-pane="admin"' not in page
+    login(client, ADMIN)
+    page = client.get("/games/dragonwilds").data.decode()
+    assert re.findall(r'data-go="(\w+)"', page) == ["play", "info", "talk", "admin"]
+    keys = re.findall(r'<button[^>]*class="key[^"]*"[^>]*>', page)
+    assert keys and all("aria-label=" in k for k in keys)                      # every key has its words for a screen reader
+    assert "fonts.googleapis.com" not in page                                  # no third-party font any more
+
+
+def test_the_game_page_lamp_and_the_play_key(env):
+    client, vm, _ = env
+    login(client, ADMIN)
+    page = client.get("/games/valheim").data.decode()
+    assert 'class="gname" data-s="idle"' in page and 'aria-label="Play Valheim"' in page      # asleep: a ring lamp and a power key
+    vm.state.status, vm.state.games = "RUNNING", ["valheim"]
+    page = client.get("/games/valheim").data.decode()
+    assert re.search(r'class="gname" data-s="(?:on|boot)"', page) and 'aria-label="Play Valheim"' not in page
+    assert "35.1.2.3:2456" in page                                              # the address people look up is still text

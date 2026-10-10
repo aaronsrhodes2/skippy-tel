@@ -455,8 +455,18 @@ random, regularly re-tuned paths, attach to each other or to the screen's corner
 brighten as a question goes out and an answer comes back. It draws dim behind the interface, never takes a tap, paints one still frame for anyone who
 asks for reduced motion, and uses no timers (the browser pauses it when the tab is hidden).
 
-**On the bridge now:** the launcher, Browser Games (`/play`), Skippy chat, and the Graveyard (inside Admin, which is otherwise still the old page). Still
-the old look, to move in batches: admin, game servers, music, video, experiments and the demos, the dashboard, request access, privacy.
+**Game Servers on the bridge** (`games.html`, `game.html`). The list is a control per game: its own glyph (`Game.glyph`: rune, crest, cog, factory, wand), its name
+(the one word on it, a name people look up) and a lamp (lit = up, amber ring = coming up, ring = asleep, diamond = not the game on the server right now);
+each game keeps its own colour from its theme. A power key stops the server; the Captain also gets a key that opens a sheet to start several at once. A game's
+page is **panes you flip through** (a key per pane, lit while you are on it, plus earlier/later): Play (the lamp, a power key and the time it takes, or how to
+join: the invite code, address and password stay text, they are what people look up; players as a person glyph and a count), Facts and the game's own sites,
+Discord (the way in as glyph keys and a read-only copy of the channel, paged), and the Captain's Admin (the server card, its keys, this game's settings).
+The game's official art is behind everything under a flat dim (no gradient). The third-party font the old page loaded is gone. The live polls are
+unchanged (`/games/<id>/live`: a code drops in by itself and the page reloads when the server comes up or sleeps). Tests: `test_bridge.py` and the old
+game-page tests, rewritten for the glyph markup.
+
+**On the bridge now:** the launcher, Browser Games (`/play`), Skippy chat, Game Servers, and the Graveyard (inside Admin, which is otherwise still the old page).
+Still the old look, to move in batches: admin, music, video, experiments and the demos, the dashboard, request access, privacy.
 
 ## Telemetry: what the portal records, and where it goes
 
