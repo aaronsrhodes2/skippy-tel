@@ -22,6 +22,8 @@ name, and update this table.
 | satisfactory-hero.jpg | https://a.storyblok.com/f/110098/1920x803/5e73bc28d2/press-hero-bg.jpeg (satisfactorygame.com press page hero) | 1920x803, 299 KB | Same as above. |
 | dragonwilds-bg.jpg | https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/1374490/f42c70c4dee9928dd4f9b5c0bf0cc3a615a425ac/page_bg_raw.jpg (Steam store page background) | 1438x810, 1.7 MB | Jagex's Fan Content Policy (v1.3) covers RuneScape: Dragonwilds fan sites; no wallpaper terms of its own. |
 | dragonwilds-hero.jpg | https://cdn.cloudflare.steamstatic.com/steam/apps/1374490/library_hero_2x.jpg (Steam library hero 2x) | 3840x1240, 1.0 MB | Same as above. |
+| garrysmod-bg.jpg | https://cdn.cloudflare.steamstatic.com/steam/apps/4000/page_bg_raw.jpg (Steam store page background) | 1438x810, 323 KB | Developer store art (Facepunch); no reuse licence stated. |
+| garrysmod-hero.jpg | https://cdn.cloudflare.steamstatic.com/steam/apps/4000/library_hero.jpg (Steam library hero) | 1920x620, 168 KB | Same as above. |
 | everquest-bg.jpg | https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/205710/ss_dbcad62450756a25e68e42fee02aef726e4e8cdd.1920x1080.jpg (Steam store screenshot) | 1920x1080, 551 KB | Daybreak's Terms of Service allow non-commercial fan sites to share artwork and screenshots. |
 | everquest-hero.jpg | https://cdn.cloudflare.steamstatic.com/steam/apps/205710/library_hero.jpg (Steam library hero) | 1920x620, 561 KB | Same as above. |
 

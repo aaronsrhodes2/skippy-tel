@@ -68,9 +68,10 @@ GAME_PORTS: dict[str, list[tuple[int, int]]] = {
     "factorio": [(34197, 34197)],
     "satisfactory": [(7777, 7777)],
     "dragonwilds": [(7778, 7778)],
+    "garrysmod": [(27015, 27015)],
     "everquest": [(9000, 9000), (5998, 5999), (7000, 7030)],
 }
-PROFILES = ("valheim", "factorio", "satisfactory", "dragonwilds")     # compose profiles (games/docker-compose.yml)
+PROFILES = ("valheim", "factorio", "satisfactory", "dragonwilds", "garrysmod")     # compose profiles (games/docker-compose.yml)
 
 STATE = Path(os.environ.get("SKIPPY_STATE_DIR", "/run/skippy-games"))     # tmpfs: resets on every boot
 ROOT = "/srv/games"

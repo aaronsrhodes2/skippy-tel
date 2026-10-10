@@ -8,7 +8,7 @@
 #   scripts/games.sh status                     running? which games? IP?
 #   scripts/games.sh logs dragonwilds           tail a server's log
 #
-# Games: valheim factorio satisfactory dragonwilds
+# Games: valheim factorio satisfactory dragonwilds garrysmod
 # Needs: gcloud (logged in, project set), the VM created by infra/gcp-games.
 set -euo pipefail
 
@@ -16,13 +16,13 @@ INSTANCE=${GAMES_INSTANCE:-skippy-games}
 ZONE=${GAMES_ZONE:-us-west1-b}
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$HERE/games/.env"
-KNOWN="valheim factorio satisfactory dragonwilds everquest"
+KNOWN="valheim factorio satisfactory dragonwilds garrysmod everquest"
 
 # RAM each server wants (GB), used to pick the machine size.
 # (case, not an associative array: macOS still ships bash 3.2)
 ram_gb() {
   case $1 in
-    valheim) echo 4 ;; factorio) echo 2 ;; satisfactory) echo 12 ;; dragonwilds) echo 8 ;; everquest) echo 6 ;;
+    valheim) echo 4 ;; factorio) echo 2 ;; satisfactory) echo 12 ;; dragonwilds) echo 8 ;; garrysmod) echo 4 ;; everquest) echo 6 ;;
   esac
 }
 
@@ -80,6 +80,7 @@ join_hints() {
       valheim)      echo "  Valheim       → Join IP: $ip:2456" ;;
       factorio)     echo "  Factorio      → Multiplayer → Connect to address: $ip" ;;
       satisfactory) echo "  Satisfactory  → Server Manager → Add Server: $ip (port 7777)" ;;
+      garrysmod)    echo "  Garry's Mod   → game console (~): connect $ip:27015" ;;
       dragonwilds)  echo "  Dragonwilds   → Public tab → search server name \"$(envval DRAGONWILDS_SERVER_NAME)\" (Xbox/PC crossplay)" ;;
     esac
   done
@@ -137,7 +138,7 @@ case $cmd in
   down)
     if [ "$(status_of)" = "RUNNING" ]; then
       g ssh "$INSTANCE" --command "sudo docker compose --project-directory /srv/games \
-        --profile valheim --profile factorio --profile satisfactory --profile dragonwilds stop --timeout 120; \
+        --profile valheim --profile factorio --profile satisfactory --profile dragonwilds --profile garrysmod stop --timeout 120; \
         sudo /usr/local/bin/skippy-discord offline 'stopped by the Captain'" || true
       g instances stop "$INSTANCE"
     fi

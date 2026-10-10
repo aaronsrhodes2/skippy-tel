@@ -163,6 +163,18 @@ MARKERS: dict[str, Markers] = {
         notes="UNVERIFIED: the real `Setting [\"JoinCode\"] written` line = the invite code exists; the start line is assumed.",
     ),
 
+    # ── Garry's Mod (ceifa/garrysmod) ─ UNVERIFIED ──────────────────────────────────────────────────────────────────
+    # A Source dedicated server (srcds). Best knowledge of its console, NOT confirmed against a real log of this image:
+    # `Setting breakpad minidump AppID = 4020` is one of the first lines of every srcds start, and
+    # `Connection to Steam servers successful.` comes once the server is logged on (anonymously without a GSLT) and
+    # listed, i.e. after the map has loaded. To verify: docs/games/README.md -> Readiness.
+    "garrysmod": Markers(
+        boot=("Setting breakpad minidump AppID",),
+        ready=("Connection to Steam servers successful",),
+        verified=False,
+        notes="UNVERIFIED: srcds's usual start line and its `Connection to Steam servers successful` line.",
+    ),
+
     # ── EverQuest (AkkStack, infra/gcp-games/everquest.sh) ─ UNVERIFIED ────────────────────────────────────────────
     # Not a container we can scan: the stack has no single game process whose stdout says "up". The script itself
     # reports its progress into the VM's startup-script output (`log "everquest: ..."`), which diag.sh reads with

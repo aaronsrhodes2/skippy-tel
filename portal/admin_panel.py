@@ -31,6 +31,7 @@ MOD_SUPPORT = {
     "satisfactory": {"kind": "manual", "builtin": {}},
     "dragonwilds": {"kind": "none", "builtin": {},
                     "why": "The image we run documents no mod support, so there is nothing to install or list."},
+    "garrysmod": {"kind": "manual", "builtin": {}},
     "everquest": {"kind": "none", "builtin": {},
                   "why": "The world lives in the server's database, not in mods; the client is patched by hand (eqhost.txt)."},
 }
@@ -115,6 +116,15 @@ def policy(game_id: str, env: dict, image: str = "") -> list[dict]:
         else:
             row("Server files", "pinned", "Not updated on start: the server can fall behind the game client and refuse players.")
         row("Mods", "none", MOD_SUPPORT["dragonwilds"]["why"])
+    elif game_id == "garrysmod":
+        row("Server version", "auto", f"{image or 'ceifa/garrysmod:latest'} is pulled at every boot, so the server follows the image's rebuilds "
+            "(the image's own start-up also updates the server files from Steam). There is no switch to hold a version.")
+        if (env.get("GARRYSMOD_WORKSHOP_COLLECTION") or "").strip():
+            row("Mods", "auto", f"Workshop collection {env['GARRYSMOD_WORKSHOP_COLLECTION'].strip()} is downloaded by the server at every start; "
+                "change it in this game's settings. Players download the same addons when they join.")
+        else:
+            row("Mods", "manual", "No Workshop collection is set (Settings → Workshop collection). Addons can also be put in "
+                "data/garrysmod/addons on the server disk by hand.")
     elif game_id == "everquest":
         row("Server version", "pinned", "AkkStack is pinned to one commit in infra/gcp-games/everquest.sh (AKK_REF). It changes "
             "only when that line changes and the portal is deployed; nothing updates at boot.")

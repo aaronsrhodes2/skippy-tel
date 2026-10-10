@@ -28,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 DATA = Path("/srv/games/data")
-COMPOSE_GAMES = ("valheim", "factorio", "satisfactory", "dragonwilds")     # one container each, named like the game
+COMPOSE_GAMES = ("valheim", "factorio", "satisfactory", "dragonwilds", "garrysmod")     # one container each, named like the game
 ALL_GAMES = COMPOSE_GAMES + ("everquest",)
 EQ_PREFIX, EQ_CONTAINER = "akk-stack-", "akk-stack-eqemu-server-1"          # AkkStack's own compose project
 LOG_BUDGET_S = 20                     # a runaway `docker logs` is cut off, keeping what it found so far

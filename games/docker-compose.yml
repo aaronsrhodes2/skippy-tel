@@ -1,4 +1,4 @@
-# Skippy game servers: Valheim, Factorio, Satisfactory, RuneScape: Dragonwilds.
+# Skippy game servers: Valheim, Factorio, Satisfactory, RuneScape: Dragonwilds, Garry's Mod.
 # (ARK deferred: too heavy.)
 #
 # Same file runs anywhere Docker runs: the GCP on-demand VM (infra/gcp-games/),
@@ -13,7 +13,7 @@
 # you've backed up everything. Copy .env.example → .env first.
 #
 # RAM guide: Valheim ~4 GB, Factorio ~1-2 GB, Satisfactory 8-12 GB,
-# Dragonwilds 2 GB + 1 GB per player (8 GB for its max of 6).
+# Dragonwilds 2 GB + 1 GB per player (8 GB for its max of 6), Garry's Mod ~4 GB (more with a big Workshop collection).
 #
 # Ports: Satisfactory keeps its default 7777; Dragonwilds moves to 7778 so both
 # can run at once (Dragonwilds players find the server by its SERVER_NAME in
@@ -128,4 +128,29 @@ services:
       UPDATE_ON_START: ${DRAGONWILDS_UPDATE_ON_START:-true}      # server version must match the game client
     volumes:
       - ${DATA_DIR:-./data}/dragonwilds:/home/steam/server-files
+    stop_grace_period: 1m
+
+  garrysmod:
+    <<: *common
+    profiles: [garrysmod]
+    # Community image (ceifa/garrysmod-docker) around Valve's dedicated server (Steam app 4020, anonymous download).
+    # The server is Source: players connect to 27015/udp. Its extra command-line arguments come in one variable (ARGS);
+    # it is built here from the settings that are set, so a blank setting adds nothing. A Workshop collection (the id,
+    # not an addon's id) is downloaded by the server at every start. 27015/tcp is RCON and deliberately not published.
+    image: ceifa/garrysmod:latest
+    container_name: garrysmod
+    ports:
+      - "27015:27015/udp"
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      NAME: ${GARRYSMOD_SERVER_NAME:-Skippy Garry's Mod}
+      GAMEMODE: ${GARRYSMOD_GAMEMODE:-sandbox}
+      MAP: ${GARRYSMOD_MAP:-gm_construct}
+      MAXPLAYERS: ${GARRYSMOD_MAX_PLAYERS:-16}
+      ARGS: "${GARRYSMOD_WORKSHOP_COLLECTION:+ +host_workshop_collection ${GARRYSMOD_WORKSHOP_COLLECTION}}${GARRYSMOD_PASSWORD:+ +sv_password ${GARRYSMOD_PASSWORD}}"
+    volumes:
+      - ${DATA_DIR:-./data}/garrysmod/data:/home/gmod/server/garrysmod/data
+      - ${DATA_DIR:-./data}/garrysmod/addons:/home/gmod/server/garrysmod/addons
+    mem_limit: ${GARRYSMOD_MEM_LIMIT:-6g}
     stop_grace_period: 1m

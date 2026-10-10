@@ -43,7 +43,7 @@ def count(log: str, needle: str) -> int:
 def test_every_game_the_vm_can_run_has_markers():
     compose = (ROOT / "games" / "docker-compose.yml").read_text(encoding="utf-8")
     containers = set(re.findall(r"^\s+container_name:\s*(\S+)", compose, re.M))
-    assert containers == {"valheim", "factorio", "satisfactory", "dragonwilds"}
+    assert containers == {"valheim", "factorio", "satisfactory", "dragonwilds", "garrysmod"}
     assert set(readiness.games()) == containers | {"everquest"}            # EverQuest is its own stack (everquest.sh)
     assert set(readiness.games()) == set(GAMES)                            # ...and every game the portal lists
 

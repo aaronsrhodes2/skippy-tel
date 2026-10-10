@@ -14,7 +14,7 @@ meta() { curl -sf -H "Metadata-Flavor: Google" "$META/$1" || true; }
 
 logger -t skippy-shutdown "VM stopping: saving worlds"
 docker compose --project-directory "$ROOT" \
-  --profile valheim --profile factorio --profile satisfactory --profile dragonwilds \
+  --profile valheim --profile factorio --profile satisfactory --profile dragonwilds --profile garrysmod \
   stop --timeout 120 || true
 /usr/local/bin/skippy-everquest stop || true
 

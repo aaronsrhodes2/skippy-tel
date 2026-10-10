@@ -45,6 +45,8 @@ TARGETS: dict[str, tuple[str, ...]] = {
     "satisfactory": ("satisfactory/config/saved",),
     "dragonwilds": ("dragonwilds/RSDragonwilds/Saved/SaveGames", "dragonwilds/RSDragonwilds/Saved/SaveCharacters",
                     "dragonwilds/RSDragonwilds/Saved/Config"),
+    # Garry's Mod: what the server writes (sv.db, sandbox saves, addon data) and the addons put there by hand.
+    "garrysmod": ("garrysmod/data", "garrysmod/addons"),
     # EverQuest's whole world is its database (characters, everything), plus the keys that go with it.
     "everquest": ("everquest/akk-stack/data/mariadb", "everquest/akk-stack/server/eqemu_config.json",
                   "everquest/akk-stack/.env"),

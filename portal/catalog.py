@@ -97,6 +97,28 @@ def valheim_password_problems(password: str, env: dict) -> list[str]:
             if password and password.lower() in text.lower()]
 
 
+def _gmod_password(value: str) -> tuple[str, str | None]:
+    # it goes onto srcds's command line through a shell (games/docker-compose.yml builds ARGS from it): nothing the shell reads
+    if re.fullmatch(r"[A-Za-z0-9_.-]{0,64}", value.strip()):
+        return value.strip(), None
+    return value, "letters, digits, _ . - only (no spaces or symbols), up to 64"
+
+
+def _gmod_name(value: str) -> tuple[str, str | None]:
+    v = value.strip()
+    return (v, None) if re.fullmatch(r"[A-Za-z0-9_]{0,64}", v) else (value, "letters, digits and underscores only")
+
+
+def _gmod_slots(value: str) -> tuple[str, str | None]:
+    v = value.strip()
+    return (v, None) if v == "" or (v.isascii() and v.isdigit() and 1 <= int(v) <= 128) else (value, "a number from 1 to 128")
+
+
+def _gmod_collection(value: str) -> tuple[str, str | None]:
+    v = value.strip()
+    return (v, None) if re.fullmatch(r"[0-9]{0,20}", v) else (value, "the digits from the collection's address (no link, no spaces)")
+
+
 GAMES: dict[str, Game] = {
     "dragonwilds": Game(
         "dragonwilds", "RuneScape: Dragonwilds",
@@ -225,6 +247,43 @@ GAMES: dict[str, Game] = {
                ("Joined by", "Server Manager: address, and port 7777")),
         links=(("Official site", "https://www.satisfactorygame.com"),
                ("Wiki", "https://satisfactory.wiki.gg")),
+    ),
+    "garrysmod": Game(
+        "garrysmod", "Garry's Mod",
+        "Sandbox physics and bad ideas. A dedicated Source server: Sandbox, or any gamemode, and a Workshop collection.",
+        ram_gb=4,
+        connect=lambda ip, env: f"Press <b>~</b> for the console &rarr; <code>connect {ip}:27015</code>",
+        settings=(
+            Setting("GARRYSMOD_SERVER_NAME", "Server name", help="Shown in the in-game server list and at the top of the scoreboard."),
+            Setting("GARRYSMOD_PASSWORD", "Join password", secret=True, check=_gmod_password,
+                    help="No spaces. Blank: anyone who finds the server can join."),
+            Setting("GARRYSMOD_GAMEMODE", "Gamemode", check=_gmod_name,
+                    help="sandbox (blank means sandbox), or the folder name of any installed gamemode (darkrp, terrortown...). "
+                         "A gamemode that isn't installed leaves the server unable to start."),
+            Setting("GARRYSMOD_MAP", "Starting map", check=_gmod_name,
+                    help="gm_construct (blank means gm_construct), gm_flatgrass... A map that isn't installed leaves the server unable to start."),
+            Setting("GARRYSMOD_MAX_PLAYERS", "Max players", check=_gmod_slots, help="1 to 128; blank means 16."),
+            Setting("GARRYSMOD_WORKSHOP_COLLECTION", "Workshop collection", check=_gmod_collection,
+                    help="The number from a Steam Workshop COLLECTION's address (not a single addon). The server downloads the "
+                         "whole collection at every start, and players download the same addons when they join."),
+        ),
+        join_password_key="GARRYSMOD_PASSWORD",
+        ready_minutes=6,
+        max_players=16,
+        direct=lambda ip, env: f"{ip}:27015",
+        direct_hint="In game: the console (<b>~</b>) &rarr; <code>connect</code> and this address; or Find Multiplayer Game "
+                    "&rarr; Favorites &rarr; Add Server. Same address every session. (Turn the console on in Options &rarr; "
+                    "Keyboard &rarr; Advanced if <b>~</b> does nothing.)",
+        icon="🧱", glyph="cube",
+        theme=Theme(accent="#4aa8ff", accent2="#ffb347", bg="#0a1118", card="#121d29", text="#dde8f2",
+                    font="Rajdhani",
+                    pattern="repeating-linear-gradient(0deg, rgba(74,168,255,.08) 0 1px, transparent 1px 28px), "
+                            "repeating-linear-gradient(90deg, rgba(74,168,255,.08) 0 1px, transparent 1px 28px)",
+                    tagline="Sandbox physics. Bad ideas, together.",
+                    bg_image="games/garrysmod-bg.jpg", hero_image="games/garrysmod-hero.jpg", hero_focus="50% 50%"),
+        facts=(("Players", "up to 16 (configurable)"), ("Joined by", "the console: connect ip:27015"),
+               ("Port", "27015/udp")),
+        links=(("Official site", "https://gmod.facepunch.com"), ("Wiki", "https://wiki.facepunch.com/gmod")),
     ),
     "everquest": Game(
         "everquest", "EverQuest",

@@ -26,6 +26,7 @@ DEFAULTS = {
     "FACTORIO_SAVE_NAME": "skippy",
     "SATISFACTORY_MAX_PLAYERS": "4",
     "DRAGONWILDS_SERVER_NAME": "Skippy", "DRAGONWILDS_WORLD_NAME": "Ashenfall",
+    "GARRYSMOD_SERVER_NAME": "Skippy Garry's Mod", "GARRYSMOD_GAMEMODE": "sandbox", "GARRYSMOD_MAP": "gm_construct", "GARRYSMOD_MAX_PLAYERS": "16",
 }
 PLACEHOLDERS = {"", "change-me"}
 MIN_JOIN = 5                                    # scripts/games.sh: "min 5 chars"

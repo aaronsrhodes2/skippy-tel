@@ -65,6 +65,12 @@ GAMES = {
                        + f"\nOr: Public tab → search **{e.get('DRAGONWILDS_SERVER_NAME') or 'Skippy'}** "
                          "(the whole name, exact spelling and case)"),
     ),
+    "garrysmod": (
+        "Garry's Mod",
+        "Sandbox physics and bad ideas, together.",
+        lambda ip, e: ((f"Game console (`~`) → `connect {ip}:27015`" if ip else "Game console (`~`) → `connect <ip>:27015`")
+                       + ("\nPassword: on the Maker Portal's Garry's Mod page" if e.get("GARRYSMOD_PASSWORD") else "")),
+    ),
     "everquest": (
         "EverQuest",
         "Golden Era Norrath (EQEmu): bots, mercs, XP x3, no death penalty.",

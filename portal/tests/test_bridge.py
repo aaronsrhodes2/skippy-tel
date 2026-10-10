@@ -5,6 +5,7 @@ What can be checked without a browser is checked here: the launcher's markup (a 
 drawn), the stylesheet's rules (the page is exactly the viewport and clips what overflows; no gradients), the Graveyard (who may
 retire what, what survives a failed read or write), Skippy chat's language choice, and the Terraform ignore that keeps the retired
 list from being wiped. How it looks and feels on a phone was checked by eye."""
+import html
 import json
 import re
 from pathlib import Path
@@ -301,7 +302,7 @@ def test_the_games_list_is_one_screen_a_control_per_game_and_the_names_are_the_o
     body = re.sub(r'<footer class="foot">.*?</footer>', "", body, flags=re.S)
     body = re.sub(r"<(script|style|svg)\b.*?</\1>", "", body, flags=re.S)
     words = " ".join(re.sub(r"<[^>]*>", " ", body).split())
-    assert words == " ".join(g.name for g in catalog.GAMES.values()), words      # asleep: just the game names
+    assert html.unescape(words) == " ".join(g.name for g in catalog.GAMES.values()), words      # asleep: just the game names
 
 
 def test_the_server_wide_keys_are_glyphs_and_only_the_right_person_gets_them(env):

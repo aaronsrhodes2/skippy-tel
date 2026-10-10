@@ -43,9 +43,10 @@ if ! mountpoint -q "$DATA"; then
   mount "$DATA"
 fi
 # Containers that run as non-root need to own their folders.
-mkdir -p "$DATA"/{valheim,factorio,satisfactory,dragonwilds,everquest}
+mkdir -p "$DATA"/{valheim,factorio,satisfactory,dragonwilds,everquest} "$DATA"/garrysmod/{data,addons}
 chown 845:845 "$DATA/factorio"                     # factoriotools default uid
 chown 1000:1000 "$DATA/satisfactory" "$DATA/dragonwilds"
+chown -R 1000:1000 "$DATA/garrysmod"
 
 # ── 3. Compose project ────────────────────────────────────────────────────────
 meta compose-file > "$ROOT/docker-compose.yml"
@@ -55,7 +56,7 @@ chmod 600 "$ROOT/.env"
 grep -q '^DATA_DIR=' "$ROOT/.env" && sed -i "s|^DATA_DIR=.*|DATA_DIR=$DATA|" "$ROOT/.env" \
   || echo "DATA_DIR=$DATA" >> "$ROOT/.env"
 
-ALL_PROFILES="--profile valheim --profile factorio --profile satisfactory --profile dragonwilds"
+ALL_PROFILES="--profile valheim --profile factorio --profile satisfactory --profile dragonwilds --profile garrysmod"
 compose() { docker compose --project-directory "$ROOT" "$@"; }
 
 # ── 4. Idle watchdog ──────────────────────────────────────────────────────────

@@ -49,6 +49,7 @@
   ready_container factorio 'Factorio [0-9.]+ [(]build [0-9]+' 'changing state from[(]CreatingGame[)] to[(]InGame[)]'
   ready_container satisfactory 'LogInit: Engine Version:' 'IpNetDriver listening on port 7777'
   ready_container dragonwilds 'LogInit: Engine Version:' 'JoinCode.*written with key.*value.[^]]'
+  ready_container garrysmod 'Setting breakpad minidump AppID' 'Connection to Steam servers successful'
   # EverQuest isn't a container of ours: everquest.sh reports its progress into the startup script's output (the journal).
   case " $(curl -sf -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/attributes/games 2>/dev/null) " in
     *" everquest "*) journalctl -u google-startup-scripts.service -b -o cat --no-pager 2>/dev/null \

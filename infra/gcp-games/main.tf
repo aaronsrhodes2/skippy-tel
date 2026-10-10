@@ -41,6 +41,7 @@ resource "google_compute_firewall" "games" {
       "7777",      # Satisfactory
       "7778",      # RuneScape: Dragonwilds
       "8888",      # RuneScape: Dragonwilds world-settings beacon
+      "27015",     # Garry's Mod (Source; its tcp side is RCON and stays closed)
       "9000",      # EverQuest world
       "5998-5999", # EverQuest login (Titanium / RoF2+)
       "7000-7030", # EverQuest zones

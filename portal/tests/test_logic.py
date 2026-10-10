@@ -467,7 +467,7 @@ def test_a_join_password_the_captain_names_replaces_every_games_join_password():
     from catalog import GAMES
     p = autoconfig.plan(_configured_env(), GAMES, join_password="groggy")
     assert p.set["VALHEIM_PASSWORD"] == "groggy" and p.set["DRAGONWILDS_WORLD_PASSWORD"] == "groggy"
-    assert sorted(p.chosen) == ["DRAGONWILDS_WORLD_PASSWORD", "VALHEIM_PASSWORD"]
+    assert sorted(p.chosen) == ["DRAGONWILDS_WORLD_PASSWORD", "GARRYSMOD_PASSWORD", "VALHEIM_PASSWORD"]
     assert "DRAGONWILDS_ADMIN_PASSWORD" not in p.set                             # the admin password isn't a join password
     again = autoconfig.plan({**_configured_env(), **p.set}, GAMES, join_password="groggy")
     assert again.set == {} and again.chosen == []                                # idempotent

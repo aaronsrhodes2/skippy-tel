@@ -419,7 +419,8 @@ def test_the_games_page_is_a_grid_of_whole_card_links_like_the_launcher(env):
     assert page.count('class="deck"') == 1
     for gid, game in GAMES.items():
         assert f"/games/{gid}" in links and f'href="#g-{game.glyph}"' in page.replace("<use ", "<use ") and f"--accent: {game.theme.accent}" in page
-        assert f'aria-label="{game.name}"' in page and f'<span class="name">{game.name}</span>' in page   # its name is the one word on it
+        name = game.name.replace("'", "&#39;")
+        assert f'aria-label="{name}"' in page and f'<span class="name">{name}</span>' in page   # its name is the one word on it
         assert game.theme.tagline.replace("'", "&#39;") in page                       # just the tagline (a tooltip), not the full description
         assert game.description.replace("'", "&#39;") not in page
     assert "fonts.googleapis.com" not in page                                          # and no third-party request on this hub
@@ -434,7 +435,7 @@ def test_the_running_games_card_is_the_highlighted_one(env):
     vm.state.status, vm.state.games = "RUNNING", ["valheim"]
     page = client.get("/games").data.decode()
     assert lit(page) == ["valheim"]                                                      # only the game that's up glows
-    assert len(re.findall(r'data-s="(?:idle|off)" data-tel="tile:game:', page)) == 4 and 'data-live="/games/valheim/live"' in page
+    assert len(re.findall(r'data-s="(?:idle|off)" data-tel="tile:game:', page)) == len(portal.GAMES) - 1 and 'data-live="/games/valheim/live"' in page
     vm.state.games = ["valheim", "dragonwilds"]                                          # the Captain started two
     page = client.get("/games").data.decode()
     assert sorted(lit(page)) == ["dragonwilds", "valheim"]
@@ -570,7 +571,7 @@ def test_every_game_has_a_themed_page(env):
     login(client, FRIEND)
     for gid, game in portal.GAMES.items():
         page = client.get(f"/games/{gid}").data.decode()
-        assert game.name in page and game.theme.tagline.replace("'", "&#39;") in page
+        assert game.name.replace("'", "&#39;") in page and game.theme.tagline.replace("'", "&#39;") in page
         assert game.theme.accent in page
     assert client.get("/games/nope").status_code == 404
 

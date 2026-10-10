@@ -90,7 +90,7 @@ def test_the_multiport_list_fits_what_iptables_accepts():
     spec_ = iw.port_spec()
     units = sum(2 if ":" in part else 1 for part in spec_.split(","))
     assert units <= 15                               # xt_multiport's limit: a range counts as two
-    assert spec_ == "2456:2457,5998:5999,7000:7030,7777,7778,9000,34197"
+    assert spec_ == "2456:2457,5998:5999,7000:7030,7777,7778,9000,27015,34197"
 
 
 def test_every_watched_port_is_open_in_the_firewall():
@@ -494,7 +494,7 @@ def test_an_empty_server_powers_off_after_thirty_minutes_and_saves_the_worlds_fi
     assert vm.poweroff
     stops = [c for c in vm.calls if c[:2] == ["docker", "compose"]]
     assert len(stops) == 1 and stops[0][-3:] == ["stop", "--timeout", "120"]
-    assert [c for c in stops[0] if c == "--profile"] == ["--profile"] * 4
+    assert [c for c in stops[0] if c == "--profile"] == ["--profile"] * 5
     order = [c[0] for c in vm.calls if c[0] in ("docker", iw.EVERQUEST, iw.DISCORD, "systemctl") and c[:2] != ["docker", "ps"]
              and c[:2] != ["docker", "logs"]]
     assert order[-4:] == ["docker", iw.EVERQUEST, iw.DISCORD, "systemctl"]                 # save, save, say so, power off

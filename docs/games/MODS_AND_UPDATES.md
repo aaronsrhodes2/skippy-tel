@@ -17,6 +17,7 @@ every such claim is marked **UNVERIFIED**. Unmarked claims were observed.
 | Factorio | Every boot: the image tag is pulled. Tag = version, so it can be pinned (`FACTORIO_VERSION`). | Native mods; the image can update them from mods.factorio.com (`FACTORIO_UPDATE_MODS`, needs your factorio.com username + token). | `factorio/mods/` | `factorio/factorio-current.log`, first line |
 | Satisfactory | Every start unless `SKIPUPDATE=true` (`SATISFACTORY_SKIP_UPDATE`). UNVERIFIED | Possible by hand; the image installs and updates nothing. UNVERIFIED | `satisfactory/gamefiles/FactoryGame/Mods/` UNVERIFIED | Steam manifest (UNVERIFIED path) |
 | RuneScape: Dragonwilds | Every start (`UPDATE_ON_START`, default true). UNVERIFIED | None documented. | n/a | Steam manifest (UNVERIFIED path) |
+| Garry's Mod | Every boot: the image is pulled, and its start-up updates the server files from Steam. UNVERIFIED. No switch, no pin. | A Workshop collection (`GARRYSMOD_WORKSHOP_COLLECTION`), downloaded by the server at every start; addons by hand. UNVERIFIED | `garrysmod/addons` | Not read yet (the card shows the image's age) |
 | EverQuest | Never at boot: AkkStack is pinned to one commit. | None: the world is a database. | n/a | `.git/HEAD` of the AkkStack checkout; the image tag |
 
 ## Valheim
@@ -145,6 +146,22 @@ Image `indifferentbroccoli/runescape-dragonwilds-server-docker:latest` (Steam ap
 - Version: the README says nothing about how it appears in logs. `game_facts.py` looks for `appmanifest_*.acf` under
   `data/dragonwilds` and its `steamapps`/`server-files/steamapps`, and shows `Steam build N` if it finds one.
 - Mods: none documented, no pinning. The card says so plainly.
+
+## Garry's Mod
+
+Image `ceifa/garrysmod:latest` (Valve's dedicated server, Steam app 4020), `PUID`/`PGID` 1000, only `garrysmod/data` and
+`garrysmod/addons` are kept on the data disk (`data/garrysmod/...`): the server itself lives in the image. **UNVERIFIED
+throughout**: read from the image's README, not run here.
+
+- Updates: the image is pulled at every boot; the image's own start-up is said to update the server files from Steam.
+  There is no switch to hold a version.
+- Mods: `GARRYSMOD_WORKSHOP_COLLECTION` is turned into `+host_workshop_collection <id>` on srcds's command line
+  (`games/docker-compose.yml` builds the image's `ARGS` from the settings that are set). The server downloads the whole
+  collection at every start and the players download the same addons when they join. A collection id, never a single addon's.
+  Addons can also be dropped into `data/garrysmod/addons` by hand.
+- The join password is `+sv_password` on the same command line, so it is limited to letters, digits and `_ . -`.
+- Not done: a Steam game server login token (GSLT, `GSLT` in the image) for being listed on Steam's master list. Players
+  join by address, so the server runs anonymously.
 
 ## EverQuest
 
