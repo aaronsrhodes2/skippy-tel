@@ -554,6 +554,67 @@
     return { ios, safari, webkit: ios || safari, singleElement: ios || safari, tesla: /Tesla/.test(ua), name, label };
   }
 
+  // ── losing the signal ─────────────────────────────────────────────────────────────────────────────────────�
+  // A phone in the mountains drops off the network for minutes at a time. What keeps the music going: (1) songs held in memory
+  // ahead of time, (2) never skipping or giving up when the line dies: keep the place, retry, and carry on from exactly there.
+
+  /** How long to wait before retry number n (0-based) after the connection drops: quick at first, then every 30 s, for as long as it takes. */
+  const RECOVER_DELAYS = [2000, 4000, 8000, 15000, 30000];
+  function recoverDelay(n) { return RECOVER_DELAYS[Math.min(Math.max(0, n | 0), RECOVER_DELAYS.length - 1)]; }
+
+  /** Is this failure the connection (keep trying, never skip) or this one file (skip it, as before)?
+   *  `code` is the MediaError code: 1 aborted, 2 network, 3 decode, 4 source not supported. Phones in a dead zone often still say
+   *  they are online, and Safari reports a dropped download as code 4, so a song that WAS playing and then failed is the connection;
+   *  only a song that never played at all (or one that cannot be decoded) is the file's own fault. */
+  function errorKind(o) {
+    o = o || {};
+    if (o.online === false) return "network";
+    if (o.code === 2) return "network";
+    if (o.everPlayed && o.code !== 3) return "network";
+    if (o.recentNetFail && o.code !== 3) return "network";     // something else on this page just failed to reach home: the next song is no different
+    return "file";
+  }
+
+  /** Has playback stopped moving for long enough to call it a dead line? (It said "waiting" and no time has passed since.) */
+  const STALL_MS = 8000;
+  function stalled(now, lastProgressAt, waiting) { return !!waiting && lastProgressAt > 0 && now - lastProgressAt >= STALL_MS; }
+
+  /** Which songs to hold in memory: the one playing (for a drop mid-song), then the next few. No duplicates, no "none". */
+  function prefetchOrder(cur, upcoming, depth) {
+    const out = [];
+    for (const t of [cur].concat((upcoming || []).slice(0, Math.max(0, depth | 0)))) if (t >= 0 && !out.includes(t)) out.push(t);
+    return out;
+  }
+
+  /** Songs held in memory (as blobs), least recently used first out, within a size and a count. The pinned ones (the playing song and the
+   *  next few) are never evicted while pinned. `value` is whatever the caller keeps with the bytes (its object URL); onEvict(value) frees it. */
+  class BlobCache {
+    constructor(o) {
+      o = o || {};
+      this.maxBytes = o.maxBytes || 80e6; this.maxItems = o.maxItems || 5; this.onEvict = o.onEvict || (() => {});
+      this.m = new Map(); this.bytes = 0; this.pins = new Set();
+    }
+    get size() { return this.m.size; }
+    has(k) { return this.m.has(k); }
+    get(k) { const e = this.m.get(k); if (!e) return null; this.m.delete(k); this.m.set(k, e); return e.value; }   // using it makes it recent
+    put(k, size, value) {
+      const old = this.m.get(k);
+      if (old) { this.bytes -= old.size; this.m.delete(k); if (old.value !== value) this.onEvict(old.value); }
+      this.m.set(k, { size: size | 0, value }); this.bytes += size | 0;
+      this.evict();
+    }
+    pin(keys) { this.pins = new Set(keys); this.evict(); }
+    evict() {
+      while (this.bytes > this.maxBytes || this.m.size > this.maxItems) {
+        let victim = null;
+        for (const k of this.m.keys()) if (!this.pins.has(k)) { victim = k; break; }       // oldest first
+        if (victim === null) return;                                                       // everything left is pinned
+        const e = this.m.get(victim); this.m.delete(victim); this.bytes -= e.size; this.onEvict(e.value);
+      }
+    }
+    clear() { for (const e of this.m.values()) this.onEvict(e.value); this.m.clear(); this.bytes = 0; }
+  }
+
   /** Connect state sent to the portal: the track, where we are in it, and a window of the queue (never the whole 21k). */
   function trimPaths(items, qi, T, before, after) {
     const lo = Math.max(0, qi - before), hi = Math.min(items.length, qi + after + 1);
@@ -568,5 +629,6 @@
     Queue, Armed, SleepTimer,
     buildOffsets, rowAt, visibleRange, chunk, artWidth, ART_WIDTHS,
     detectEnv, trimPaths, shuffleInPlace,
+    recoverDelay, RECOVER_DELAYS, errorKind, stalled, STALL_MS, prefetchOrder, BlobCache,
   };
 });

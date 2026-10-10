@@ -603,3 +603,68 @@ test("a device's label tells two PCs apart by browser and leaves phones and the 
   assert.equal(label(tesla), "Tesla");
   assert.equal(label(""), "Browser");
 });
+
+
+// ── losing the signal ───────────────────────────────────────────────────────────────────────────────────────────
+test("the retry back-off is quick at first, then every 30 s for as long as it takes", () => {
+  assert.deepEqual([0, 1, 2, 3, 4, 5, 50].map(C.recoverDelay), [2000, 4000, 8000, 15000, 30000, 30000, 30000]);
+  assert.equal(C.recoverDelay(-3), 2000);
+  assert.equal(C.recoverDelay(undefined), 2000);
+});
+
+test("a song that was playing and then failed is the connection; one that never played, or can't be decoded, is the file", () => {
+  assert.equal(C.errorKind({ online: false, code: 4, everPlayed: false }), "network");      // the phone says it is offline
+  assert.equal(C.errorKind({ online: true, code: 2, everPlayed: false }), "network");       // MEDIA_ERR_NETWORK
+  assert.equal(C.errorKind({ online: true, code: 4, everPlayed: true }), "network");        // Safari: a dropped download says "not supported"
+  assert.equal(C.errorKind({ online: true, code: 3, everPlayed: true }), "file");           // it played, then could not be decoded: broken file
+  assert.equal(C.errorKind({ online: true, code: 4, everPlayed: false }), "file");          // never started: skip it as before
+  assert.equal(C.errorKind({ online: true, code: 3, everPlayed: false }), "file");
+  assert.equal(C.errorKind({ online: true, code: 4, everPlayed: false, recentNetFail: true }), "network");   // the next song after the line died
+  assert.equal(C.errorKind({ online: true, code: 3, everPlayed: false, recentNetFail: true }), "file");      // but a file that cannot be decoded still is
+  assert.equal(C.errorKind(), "file");
+});
+
+test("a stall is 'waiting' with no progress for 8 seconds, never before it has started or while it is not waiting", () => {
+  const now = 100000;
+  assert.equal(C.stalled(now, now - 8000, true), true);
+  assert.equal(C.stalled(now, now - 7999, true), false);
+  assert.equal(C.stalled(now, now - 60000, false), false);                                  // not waiting: it is just paused or seeking
+  assert.equal(C.stalled(now, 0, true), false);                                             // never made progress: not a drop
+});
+
+test("what to hold in memory: the playing song, then the next few, without duplicates or 'none'", () => {
+  assert.deepEqual(C.prefetchOrder(5, [6, 7, 8, 9], 2), [5, 6, 7]);
+  assert.deepEqual(C.prefetchOrder(5, [5, 6], 2), [5, 6]);                                  // repeat-one style duplicates
+  assert.deepEqual(C.prefetchOrder(-1, [3], 2), [3]);
+  assert.deepEqual(C.prefetchOrder(5, undefined, 2), [5]);
+  assert.deepEqual(C.prefetchOrder(5, [6, 7], 0), [5]);
+});
+
+test("the memory cache drops the least recently used song first, within a count and a size, and never a pinned one", () => {
+  const gone = [];
+  const c = new C.BlobCache({ maxBytes: 100, maxItems: 3, onEvict: v => gone.push(v) });
+  c.put(1, 30, "a"); c.put(2, 30, "b"); c.put(3, 30, "c");
+  assert.equal(c.size, 3);
+  c.get(1);                                                                                 // using 1 makes it recent: 2 is now the oldest
+  c.put(4, 10, "d");
+  assert.deepEqual(gone, ["b"]); assert.equal(c.has(2), false); assert.equal(c.has(1), true);
+  c.put(5, 50, "e");                                                                        // 4 items would be fine by count but 30+30+10+50 > 100 bytes
+  assert.ok(c.bytes <= 100);
+  c.pin([1, 5]);
+  c.put(6, 60, "f");                                                                        // over budget: the unpinned go, the pinned stay
+  assert.equal(c.has(1) && c.has(5), true);
+  assert.equal(c.has(6), false);                                                            // (the new one was not pinned, so it is the one to go)
+  c.pin([1, 5, 6]); c.put(6, 60, "f2");                                                     // pinned too: nothing may be dropped, so the cache runs over rather than lose one
+  assert.equal(c.has(1) && c.has(5) && c.has(6), true);
+  c.clear();
+  assert.equal(c.size, 0); assert.equal(c.bytes, 0);
+});
+
+test("putting a song again replaces it (and frees the old copy) instead of counting it twice", () => {
+  const gone = [];
+  const c = new C.BlobCache({ maxBytes: 1000, maxItems: 5, onEvict: v => gone.push(v) });
+  c.put(1, 100, "old"); c.put(1, 120, "new");
+  assert.equal(c.size, 1); assert.equal(c.bytes, 120); assert.deepEqual(gone, ["old"]);
+  c.put(1, 120, "new");                                                                     // the same value again: nothing to free
+  assert.deepEqual(gone, ["old"]);
+});

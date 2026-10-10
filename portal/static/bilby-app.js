@@ -95,8 +95,10 @@
     armed: new C.Armed(env.webkit ? null : () => !!(navigator.userActivation && navigator.userActivation.hasBeenActive)),
     tapWhy: "", playAt: 0, ourPauseAt: 0, route: { name: "home" }, search: "", nav: 0, view: null, scrollMemo: new Map(), showEarlier: false,
     sheet: "", tab: "np", loading: false, seeking: false, scrollAt: 0, geo: "",
+    // the signal shield: songs held in memory ahead of time, and the way back after a dead zone (on unless switched off)
+    shield: prefs.shield !== false, lastTimeAt: 0, waitingAt: 0, netBadAt: 0,
   };
-  const savePrefs = () => store.set("prefs", { repeat: S.repeat, shuffle: S.shuffle, dj: S.dj, vol: S.vol, muted: S.muted, sorts: S.sorts });
+  const savePrefs = () => store.set("prefs", { repeat: S.repeat, shuffle: S.shuffle, dj: S.dj, vol: S.vol, muted: S.muted, sorts: S.sorts, shield: S.shield });
   const curTrack = () => { const c = S.q.cur; return c && S.lib ? S.lib.T[c.t] || null : null; };
 
   // ═══ messages: toast, live region, notice ═══════════════════════════════════════════════════════════════════════
@@ -133,7 +135,7 @@
         this.inflight = (async () => {
           let r;
           try { r = await fetch(cfg.gate, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } }); }
-          catch (e) { throw Object.assign(new Error("The portal isn't reachable from here."), { kind: "net" }); }
+          catch (e) { S.netBadAt = Date.now(); throw Object.assign(new Error("The portal isn't reachable from here."), { kind: "net" }); }
           const type = r.headers.get("content-type") || "";
           if (r.status === 401 || r.status === 403 || r.redirected || type.includes("text/html")) {
             throw Object.assign(new Error("You have been signed out of the portal. Reload the page to sign in again."), { kind: "auth" });
@@ -403,12 +405,53 @@
     }
   }
 
+  // ═══ the signal shield: songs in memory ahead of time, and the way back after a dead zone ════════════════════════
+  // A song held in memory plays with no network at all: the playing one (so a drop mid-song is nothing), then the next few. Fetched one
+  // at a time, after the playing song has settled, and only when this browser is not asked to save data.
+  const blobs = new C.BlobCache({ maxBytes: 90e6, maxItems: 5, onEvict: v => { try { URL.revokeObjectURL(v.url); } catch (e) { /* gone already */ } } });
+  const fetching = new Map();                                // song index -> AbortController
+  let prefetchTok = 0;
+  const saveData = () => !!(navigator.connection && navigator.connection.saveData);
+  async function fetchBlob(tIdx) {
+    if (blobs.has(tIdx) || fetching.has(tIdx) || !gate.info || !S.lib) return;
+    const t = S.lib.T[tIdx], ac = new AbortController();
+    fetching.set(tIdx, ac);
+    try {
+      const r = await fetch(gateUrl("a", t.p), { signal: ac.signal, cache: "no-store" });
+      if (!r.ok) return;
+      const b = await r.blob();
+      blobs.put(tIdx, b.size, { url: URL.createObjectURL(b) });
+      onBlobReady(tIdx);
+    } catch (e) { if (e && e.name !== "AbortError") S.netBadAt = Date.now(); /* the line dropped: the next pass tries again */ } finally { fetching.delete(tIdx); }
+  }
+  function upcomingTracks() { return S.q.upcoming().map(it => it.t); }
+  /** Hold the playing song and the next two. Restarted whenever the queue moves; an unwanted fetch in flight is cancelled. */
+  async function prefetchSoon() {
+    if (!S.shield || !S.lib || !S.q.cur || saveData() || !gate.info) return;
+    const order = C.prefetchOrder(S.q.cur.t, S.repeat === "one" ? [] : upcomingTracks(), 2);
+    blobs.pin(order);
+    for (const [k, ac] of fetching) if (!order.includes(k)) ac.abort();
+    const tok = ++prefetchTok;
+    for (const t of order) {
+      if (tok !== prefetchTok || !S.q.cur) return;                  // the queue moved on: a newer pass owns this
+      if (t === S.q.cur.t && !act().pre) continue;                  // the playing song settles first
+      await fetchBlob(t);
+    }
+  }
+  /** A song just finished downloading: if it is the one the idle element should be holding, give it to it now. */
+  function onBlobReady(tIdx) {
+    const other = idle();
+    if (!env.singleElement && S.shield && !other.path) preloadNext();
+    if (rec.on && S.q.cur && S.q.cur.t === tIdx) recoverNow();      // a song we were waiting on is here
+  }
+
   /** `bust`: a retry after a failure asks for the file under a new URL, so a half-downloaded copy the browser cached from the failed try is not served again. */
   function load(slot, tIdx, from, bust) {
     const t = S.lib.T[tIdx];
-    slot.t = tIdx; slot.path = t.p; slot.from = from || 0; slot.logged = false; slot.djDone = false; slot.retried = false; slot.pre = false;
+    slot.t = tIdx; slot.path = t.p; slot.from = from || 0; slot.logged = false; slot.djDone = false; slot.retried = false; slot.pre = false; slot.everPlayed = false;
     S.ourPauseAt = Date.now();                              // replacing the source stops whatever played: that pause is ours
-    slot.el.src = gateUrl("a", t.p, bust ? "?r=" + Date.now() : "");
+    const held = S.shield ? blobs.get(tIdx) : null;         // in memory: no network needed at all
+    slot.el.src = held ? held.url : gateUrl("a", t.p, bust ? "?r=" + Date.now() : "");
   }
   function unload(slot) {
     slot.t = -1; slot.path = ""; slot.from = 0; S.ourPauseAt = Date.now();
@@ -451,7 +494,7 @@
       preloadNext();
       return p;
     };
-    if (gate.fresh()) return go();
+    if (gate.fresh() || (S.shield && blobs.has(tIdx))) return go();
     return gate.ensure().then(() => (tok === S.loadTok ? go() : false), err => { gateProblem(err); return false; });
   }
 
@@ -493,6 +536,7 @@
     const t = q.items[np].t;
     if (other.t === t && other.path) return;
     if (!act().pre) { if (other.path) unload(other); return; }
+    if (S.shield && !saveData() && !blobs.has(t)) { if (other.path) unload(other); prefetchSoon(); return; }   // hold it in memory first: one download, not two
     load(other, t, 0);
     other.el.preload = "auto"; applyVolume();
   }
@@ -504,10 +548,56 @@
     advance(true);
   }
 
+  // ── when the line dies ──
+  // The place is kept (the song and the second), the wish to play stays, and a retry runs on a back-off, for as long as it takes. It
+  // starts again the instant the browser says the network is back or the page comes forward. A song held in memory just keeps playing.
+  const rec = { on: false, n: 0, timer: 0, t: -1, at: 0, since: 0 };
+  function recoverStart(slot, why) {
+    if (rec.on || !S.want || slot !== act() || !slot.path) return;
+    rec.on = true; rec.n = 0; rec.t = slot.t; rec.at = slot.el.currentTime || slot.from || 0; rec.since = Date.now();
+    root.dataset.signal = "lost"; mediaState();
+    if (S.dbg) console.debug("signal lost:", why);
+    rec.timer = setTimeout(recoverTick, C.recoverDelay(0));
+  }
+  function recoverStop() {
+    if (!rec.on) return;
+    clearTimeout(rec.timer); rec.on = false; rec.n = 0;
+    delete root.dataset.signal; hideNotice("gate"); mediaState();
+  }
+  /** Try again right now (the network is back, the page is in front, a song we waited for arrived). */
+  function recoverNow() { if (!rec.on) return; clearTimeout(rec.timer); recoverTick(); }
+  async function recoverTick() {
+    if (!rec.on) return;
+    clearTimeout(rec.timer);
+    const slot = act();
+    if (!S.want || !S.q.cur || S.q.cur.t !== rec.t) { recoverStop(); return; }       // the person moved on, or paused: nothing to resume
+    rec.timer = setTimeout(recoverTick, C.recoverDelay(++rec.n));                    // if this try hangs without an error, the next one still comes
+    rec.at = slot.el.currentTime > 1 ? slot.el.currentTime : rec.at;
+    if (!blobs.has(rec.t) && !gate.fresh()) { try { await gate.ensure(true); } catch (err) { return; } }      // no line yet: wait for the next try
+    if (!rec.on || slot !== act()) return;
+    load(slot, rec.t, rec.at, true);
+    applyVolume();
+    tryPlay(slot);
+  }
+  /** A song that was playing went quiet with the line: a stall (no error, just "waiting") counts too. */
+  function stallWatch() {
+    if (rec.on || !S.want) return;
+    const s = act();
+    if (!s.path || s.el.paused || !s.everPlayed) return;                     // a song that never started is the file's business, not the line's
+    if (C.stalled(Date.now(), S.lastTimeAt, S.waitingAt > S.lastTimeAt)) recoverStart(s, "stalled");
+  }
+  setInterval(stallWatch, 2000);
+
   async function onError(slot) {
     const e = slot.el;
     if (!slot.path || !e.getAttribute("src")) return;
     if (slot !== act()) { unload(slot); return; }                     // a preload that failed is forgotten; the song loads normally when its turn comes
+    if (rec.on) return;                                               // already waiting for the line: the back-off timer makes the next try
+    if (S.shield && C.errorKind({ code: e.error && e.error.code, online: navigator.onLine, everPlayed: slot.everPlayed, recentNetFail: Date.now() - S.netBadAt < 90000 }) === "network") {
+      recoverStart(slot, "error");                                    // the connection, not the file: keep the place and wait for it
+      if (rec.on && slot.everPlayed) { rec.at = Math.max(rec.at, slot.el.currentTime || 0); }
+      return;
+    }
     if (!slot.retried) {                                              // most often a pass the gate no longer takes: ask for a new one, carry on from here
       slot.retried = true;
       const at = e.currentTime || slot.from || 0, t = slot.t;
@@ -543,7 +633,7 @@
     });
     e.addEventListener("durationchange", () => mine() && syncTime());
     e.addEventListener("timeupdate", () => mine() && onTime(slot));
-    e.addEventListener("playing", () => { if (!mine()) return; slot.from = 0; busy(false); S.errStreak = 0; hideNotice("gate"); onPlayState(); });
+    e.addEventListener("playing", () => { if (!mine()) return; slot.from = 0; slot.everPlayed = true; S.lastTimeAt = Date.now(); busy(false); S.errStreak = 0; hideNotice("gate"); recoverStop(); onPlayState(); });
     e.addEventListener("play", () => mine() && onPlayState());
     e.addEventListener("pause", () => {
       if (!mine()) return;
@@ -558,7 +648,8 @@
       }
       onPlayState();
     });
-    e.addEventListener("waiting", () => mine() && busy(true));
+    e.addEventListener("waiting", () => { if (mine()) { S.waitingAt = Date.now(); busy(true); } });
+    e.addEventListener("stalled", () => { if (mine() && slot.everPlayed) S.waitingAt = Date.now(); });
     e.addEventListener("seeked", () => { if (mine()) { syncTime(); mediaPosition(); } });
     e.addEventListener("progress", () => mine() && syncBuffered());
     e.addEventListener("ended", () => mine() && onEnded());
@@ -566,10 +657,11 @@
   }
 
   function onTime(slot) {
+    S.lastTimeAt = Date.now();
     syncTime();
     const dur = curDur(), pos = slot.el.currentTime;
     if (!slot.logged && pos >= Math.min(8, (dur || 16) / 2)) { slot.logged = true; logPlay(slot.path); }
-    if (!slot.pre && (pos >= 6 || (dur && dur - pos <= 40))) { slot.pre = true; preloadNext(); }
+    if (!slot.pre && (pos >= 6 || (dur && dur - pos <= 40))) { slot.pre = true; preloadNext(); prefetchSoon(); }
     if (!slot.djDone && dur && dur - pos <= 30) { slot.djDone = true; if (djNeeded()) djPickNow(); }
     if (Date.now() - S.lastPersist > 10000) persist();
   }
@@ -868,7 +960,7 @@
       });
     } catch (e) { /* an old MediaMetadata: skip the lock-screen text */ }
   }
-  function mediaState() { if (ms) { try { ms.playbackState = !S.q.cur ? "none" : isPlaying() ? "playing" : "paused"; } catch (e) { /* ignore */ } } }
+  function mediaState() { if (ms) { try { ms.playbackState = !S.q.cur ? "none" : (isPlaying() || (rec.on && S.want)) ? "playing" : "paused"; } catch (e) { /* ignore */ } } }
   function mediaPosition() {
     if (!ms || !ms.setPositionState) return;
     const d = curDur();
@@ -1682,7 +1774,7 @@
     if (S.tab === "queue" && (S.sheet || wide())) renderQueue(false); else qDirty = true;
     const n = S.q.cur ? S.q.length - S.q.qi - 1 : 0;
     $("#nav-queue").lastChild.textContent = n > 0 ? `Queue · ${n > 999 ? "999+" : n}` : "Queue";
-    preloadNext(); persistSoon(); publishSoon();
+    preloadNext(); prefetchSoon(); persistSoon(); publishSoon();
   }
   /** The playing song changed but the queue's contents did not: the "now playing" marker and the count move. */
   function onQueueMoved() {
@@ -1888,7 +1980,10 @@
     // Someone asked this page to play while it was in the background and the browser would not (no tap yet): say so now
     if (S.want && S.q.cur && !isPlaying() && !act().el.ended && !S.armed.armed) showTap();
   });
-  addEventListener("online", () => { if (!S.lib || $("#notice").dataset.key === "gate") retryGate(); });
+  addEventListener("online", () => { if (!S.lib || $("#notice").dataset.key === "gate") retryGate(); recoverNow(); prefetchSoon(); });
+  if (navigator.connection && navigator.connection.addEventListener) navigator.connection.addEventListener("change", () => { recoverNow(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) recoverNow(); });
+  addEventListener("pageshow", () => recoverNow());
   setInterval(() => { if (S.lib && !gate.fresh() && !document.hidden) gate.ensure().catch(() => {}); }, 5 * 60 * 1000);
   if (window.ResizeObserver) {
     let rt = 0;
@@ -1909,5 +2004,5 @@
   setTab("np");
   loadLibrary();
   // exposed for the tests that drive the page by hand (portal/tests/dev_music.py) and for debugging in the console
-  window.BilbyApp = { S, actions, gate, slots, list, qList, toast, startTrack, tryPlay, renderView, checkin, connect, persist, get lib() { return S.lib; } };
+  window.BilbyApp = { S, actions, gate, slots, list, qList, toast, startTrack, tryPlay, renderView, checkin, connect, persist, blobs, rec, recoverNow, get lib() { return S.lib; } };
 })();
