@@ -555,12 +555,11 @@
   }
 
   // ── losing the signal ─────────────────────────────────────────────────────────────────────────────────────�
+  // The retry back-off, the stall rule and paging are shared with the other bridge pages: static/bridge-pure.js.
+  const B = typeof module === "object" && module.exports ? require("./bridge-pure.js") : window.BridgePure;
+  const { RECOVER_DELAYS, recoverDelay, STALL_MS, stalled, paginate, pageOf } = B;
   // A phone in the mountains drops off the network for minutes at a time. What keeps the music going: (1) songs held in memory
   // ahead of time, (2) never skipping or giving up when the line dies: keep the place, retry, and carry on from exactly there.
-
-  /** How long to wait before retry number n (0-based) after the connection drops: quick at first, then every 30 s, for as long as it takes. */
-  const RECOVER_DELAYS = [2000, 4000, 8000, 15000, 30000];
-  function recoverDelay(n) { return RECOVER_DELAYS[Math.min(Math.max(0, n | 0), RECOVER_DELAYS.length - 1)]; }
 
   /** Is this failure the connection (keep trying, never skip) or this one file (skip it, as before)?
    *  `code` is the MediaError code: 1 aborted, 2 network, 3 decode, 4 source not supported. Phones in a dead zone often still say
@@ -574,10 +573,6 @@
     if (o.recentNetFail && o.code !== 3) return "network";     // something else on this page just failed to reach home: the next song is no different
     return "file";
   }
-
-  /** Has playback stopped moving for long enough to call it a dead line? (It said "waiting" and no time has passed since.) */
-  const STALL_MS = 8000;
-  function stalled(now, lastProgressAt, waiting) { return !!waiting && lastProgressAt > 0 && now - lastProgressAt >= STALL_MS; }
 
   /** Which songs to hold in memory: the one playing (for a drop mid-song), then the next few. No duplicates, no "none". */
   function prefetchOrder(cur, upcoming, depth) {
@@ -619,33 +614,6 @@
   function trimPaths(items, qi, T, before, after) {
     const lo = Math.max(0, qi - before), hi = Math.min(items.length, qi + after + 1);
     return { paths: items.slice(lo, hi).map(it => T[it.t].p), idx: qi - lo };
-  }
-
-  // ── paging: a long list shown a screen at a time (the page never scrolls) ────────────────────────────────────────────────
-  /** Cut rows of the given heights into screens `avail` px tall. A row never splits (a row taller than a screen gets one to itself),
-   *  and a row marked in `glue` (a heading) is never left alone at the bottom of a screen: it goes over with the row after it.
-   *  Returns the index of the first row of each screen. */
-  function paginate(heights, avail, glue) {
-    const starts = [0];
-    let y = 0;
-    for (let i = 0; i < heights.length; i++) {
-      const h = heights[i];
-      if (y > 0 && y + h > avail) {
-        let s = i;
-        while (glue && s > starts[starts.length - 1] + 1 && glue[s - 1]) s--;
-        starts.push(s);
-        y = 0;
-        for (let k = s; k < i; k++) y += heights[k];
-      }
-      y += h;
-    }
-    return starts;
-  }
-  /** Which screen holds row `i`, given where each screen starts. */
-  function pageOf(starts, i) {
-    let lo = 0, hi = starts.length - 1;
-    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (starts[mid] <= i) lo = mid; else hi = mid - 1; }
-    return lo;
   }
 
   return {

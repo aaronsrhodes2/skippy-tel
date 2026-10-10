@@ -361,6 +361,21 @@ The pass lasts 8 to 14 hours on a six-hour grid (the poster URLs stay the same a
 only signed for an `https://*.ts.net` address with no port or Funnel's `:8443` (`Video(gate_url_re=...)` is for the dev script alone).
 The reporter calls the gate ready only when its `/health` says `ready` (a catalog exists AND Jellyfin answers), not just a 200.
 
+**On the bridge.** One screen that never scrolls, built from the same pieces as Bilby's page (`bridge.css`, `Bridge.PList`, the glyphs). Home
+is a deck of controls with a count on each: Continue watching (lit while something is part-way through), Recently added, Movies, Collections.
+A list is posters a screen at a time (as many across as fit, three on a phone; `NagathaCore.gridShape` and `BridgePure.paginate` do the arithmetic):
+swipe, PageUp/PageDown, or drag along the bar under it, which names the letter you are over; the A-Z key opens the whole alphabet, the sort key
+cycles A-Z / recently added / newest / best rated. A film's details are a panel over the list (poster, facts, a play key that shows where it will
+resume, a start-over key, the summary), and the film plays over everything with glyph keys. Words are film titles, summaries, subtitle and audio
+language names, and errors.
+
+**Losing the signal.** If the film's connection dies (an error with no answer from the gate, hls.js with no HTTP answer, or "waiting" with no
+progress for 8 s) the player keeps the place and the wish to play, shows a warning-triangle lamp and the spinner instead of an error box, and
+retries at 2, 4, 8, 15 and then every 30 s for as long as it takes, and at once when the phone says it is back online or the page comes forward
+(`NagathaCore.recoverDelay`/`stalled` are `BridgePure`'s, shared with the music player). A retry is quiet: it re-opens the film at the saved second
+and reports nothing to the gate. hls.js holds about 90 s ahead (240 s at most), so a short dead zone is never seen. Pause or close the film to
+stop waiting. Untested on a real phone in a real dead zone: it was checked in a browser by cutting the page's own network and watching it resume.
+
 **How a film plays.** Direct play (the original MP4, no work for skippy-pc) when the gate's catalog says `direct` and the first audio
 track is wanted; otherwise the gate's transcoded HLS: hls.js (self-hosted: `portal/static/vendor/hls-1.6.15.min.js`, byte for byte
 the cdnjs release, its SRI and the Apache-2.0 licence beside it; loaded only when needed) or Safari's/iOS's own HLS. Choosing another
@@ -483,8 +498,8 @@ The game's official art is behind everything under a flat dim (no gradient). The
 unchanged (`/games/<id>/live`: a code drops in by itself and the page reloads when the server comes up or sleeps). Tests: `test_bridge.py` and the old
 game-page tests, rewritten for the glyph markup.
 
-**On the bridge now:** the launcher, Browser Games (`/play`), Skippy chat, Game Servers, Bilby's Audio Service (`/music`), and the Graveyard (inside Admin, which is otherwise still the old page).
-Still the old look, to move in batches: admin, video, experiments and the demos, the dashboard, request access, privacy.
+**On the bridge now:** the launcher, Browser Games (`/play`), Skippy chat, Game Servers, Bilby's Audio Service (`/music`), Nagatha's Video Service (`/video`), and the Graveyard (inside Admin, which is otherwise still the old page).
+Still the old look, to move in batches: admin, experiments and the demos, the dashboard, request access, privacy.
 
 ## Telemetry: what the portal records, and where it goes
 

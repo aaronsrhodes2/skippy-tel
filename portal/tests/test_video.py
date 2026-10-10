@@ -207,8 +207,7 @@ def test_the_page_is_named_and_is_an_app_with_a_way_home(client):
     login(client, ADMIN)
     page = client.get("/video").data.decode()
     assert f"<title>{NAME} — Maker Portal</title>".replace("'", "&#39;") in page or f"<title>{NAME} — Maker Portal</title>" in page
-    assert re.search(r'<h1 class="apptitle">Nagatha(&#39;|&apos;|\')s Video Service</h1>', page)
-    assert "&lsaquo; Home" in page and 'id="home-btn"' in page and 'data-app="video"' in page
+    assert 'aria-label="Back"' in page and 'aria-label="Home"' in page and 'data-app="video"' in page      # the bridge's strip: back, the glyph, home
     assert 'rel="manifest"' in page and 'name="apple-mobile-web-app-title" content="Nagatha"' in page
 
 
@@ -221,7 +220,7 @@ def test_the_app_has_its_own_accent():
 def test_the_page_loads_its_scripts_and_styles_and_they_exist(client):
     login(client, ADMIN)
     page = client.get("/video").data.decode()
-    for asset in ("nagatha-core.js", "nagatha-app.js", "nagatha.css"):
+    for asset in ("nagatha-core.js", "nagatha-app.js", "nagatha.css", "bridge.js", "bridge-pure.js", "bridge.css"):
         assert f"/static/{asset}" in page and client.get(f"/static/{asset}").status_code == 200
     assert page.index("/static/nagatha-core.js") < page.index("/static/nagatha-app.js")
     hls_src = re.search(r'data-hls-src="([^"]+)"', page).group(1)
@@ -261,7 +260,7 @@ def test_every_control_is_a_real_button_with_a_name_and_the_help_lists_the_short
     for key in ("Space", "<kbd>F</kbd>", "<kbd>M</kbd>", "<kbd>C</kbd>", "<kbd>P</kbd>", "<kbd>Esc</kbd>", "<kbd>/</kbd>", "<kbd>?</kbd>"):
         assert key in html, key
     assert 'id="p-seek"' in html and 'aria-label="Position in the film"' in html
-    assert re.search(r'id="tapbar"[^>]*\bhidden\b', html) and "Tap to start" in html     # the autoplay rule, explained
+    assert re.search(r'id="tapbar"[^>]*\bhidden\b', html) and "tap the page" in html      # the autoplay rule, explained
     assert 'role="alert"' in html and 'aria-live="polite"' in html
     assert re.search(r"<video\b[^>]*\bplaysinline\b[^>]*\bcrossorigin=\"anonymous\"", html)   # iPhone inline; CORS for <track>s
 
@@ -300,3 +299,52 @@ def test_a_friend_gets_a_read_only_pass_the_captain_a_read_write_one(client):
     key = video_mod.gate_key(client.application.extensions["home"]._stored_hash())
     exp = int(ro.split(".")[0])
     assert ro == video_mod.sign(key, exp, "ro") and rw == video_mod.sign(key, exp, "rw")
+
+
+# ── the video page is a page of the bridge ───────────────────────────────────────────────────────────────────────────
+def test_the_video_page_is_on_the_bridge_with_its_own_glyph(client):
+    login(client, ADMIN)
+    page = client.get("/video").data.decode()
+    assert '<body class="bridge"' in page and 'href="/static/bridge.css"' in page
+    assert page.index("/static/bridge-pure.js") < page.index("/static/bridge.js") < page.index("/static/nagatha-core.js")
+    assert '<use href="#g-lens"/>' in page                                                  # the strip's mark: the same glyph as its control on the launcher
+    assert '<h1 class="apptitle"' not in page and 'id="home-btn"' not in page               # none of the old pages' chrome
+    for need in ('id="deck"', 'id="listwrap"', 'id="scrub"', 'id="letters-key"', 'id="sort"', 'id="signal"', 'id="p-signal"', 'id="toasts"'):
+        assert need in page, need
+    assert "<nav" not in page and "<select" not in page                                     # the old text links and the sort menu are gone
+
+
+def test_every_glyph_the_video_page_draws_is_in_the_portals_glyph_set():
+    html = (PORTAL / "templates" / "video.html").read_text(encoding="utf-8")
+    js = (STATIC / "nagatha-app.js").read_text(encoding="utf-8")
+    drawn = set(re.findall(r'<symbol id="g-([\w-]+)"', (PORTAL / "templates" / "_glyphs.html").read_text(encoding="utf-8")))
+    alias = dict(re.findall(r'(\w+): "(\w+)"', re.search(r"const GLYPH = \{(.*?)\}", js, re.S).group(1)))
+    named = set(re.findall(r'\bico\("(\w+)"\)', js)) | set(re.findall(r'\bkey\("(\w+)"', js)) | set(re.findall(r'\bglyph: "(\w+)"', js))
+    named |= set(re.findall(r'\b(?:title|head)\("(\w+)"', js)) | set(re.findall(r'\bmsg\([^;]*?, "(\w+)"\)', js))
+    named |= set(re.findall(r'\["\w+", "(\w+)", (?:LABELS\.\w+)', js)) | set(re.findall(r'actKey\([^;]*?, "(\w+)", (?:true|false)', js))
+    named |= set(re.findall(r'data-i="(\w+)"', html)) | set(re.findall(r'<use href="#g-([\w-]+)"', html)) | set(re.findall(r'setIcon\(\w+, [^"]*"(\w+)"', js))
+    named |= {"play", "pause", "vol", "mute", "fs", "fsx"}                                    # the player's own, switched by state
+    assert len(named) > 18, named
+    missing = {alias.get(n, n) for n in named} - drawn
+    assert not missing, missing
+
+
+def test_the_video_page_never_scrolls_and_draws_no_gradients():
+    css = (STATIC / "nagatha.css").read_text(encoding="utf-8") + (STATIC / "bridge.css").read_text(encoding="utf-8")
+    js = (STATIC / "nagatha-app.js").read_text(encoding="utf-8")
+    code = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    assert not re.search(r"overflow(?:-y)?\s*:\s*(?:auto|scroll)", code)
+    assert not re.search(r"(?:linear|radial|conic)-gradient", code)
+    assert "scrollTop" not in js and "Bridge.PList" in js and "C.chunk" in js                # posters are cut into screens, never scrolled
+
+
+def test_the_video_page_waits_out_a_dead_zone_instead_of_giving_up():
+    """A phone in the mountains drops off the network: the film keeps its place and retries, quietly, until the line is back."""
+    js = (STATIC / "nagatha-app.js").read_text(encoding="utf-8")
+    assert "function recoverStart" in js and "function recoverTick" in js and "C.recoverDelay" in js and "C.stalled" in js
+    for event in ('"online"', '"pageshow"', '"visibilitychange"'):
+        assert f"addEventListener({event}" in js, event                                      # retried the instant the line may be back
+    assert "recovering: true" in js and "if (!opts.recovering) report(" in js               # a retry is not a new viewing: nothing is reported while it waits
+    assert js.count("recoverStart(") >= 6                                                    # every way the line can die ends in the wait, not in an error box
+    css = (STATIC / "bridge.css").read_text(encoding="utf-8")
+    assert '.lamp[data-s="warn"]' in css and '.lamp[data-s="off"]' in css                   # the lamp says so by shape as well as colour

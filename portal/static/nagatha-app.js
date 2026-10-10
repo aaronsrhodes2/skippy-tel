@@ -15,32 +15,25 @@
   const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const WEBKIT = IOS || (/Safari\//.test(navigator.userAgent) && !/Chrome|Chromium|CriOS|FxiOS|Edg|OPR|Android/.test(navigator.userAgent));
 
-  // ═══ icons (inline SVG paths, so the page needs no icon font or extra request) ═══════════════════════════════════
-  const PATHS = {
-    play: "M8 5v14l11-7z", pause: "M6 19h4V5H6v14zm8-14v14h4V5h-4z", close: "M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z",
-    back: "M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z", search: "M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z",
-    back10: "M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8zm-1.1 11h-.85v-3.26l-1.01.31v-.69l1.77-.63h.09V16zm4.28-1.76c0 .32-.03.6-.1.82s-.17.42-.29.57-.28.26-.45.33-.37.1-.59.1-.41-.03-.59-.1-.33-.18-.46-.33-.23-.34-.3-.57-.11-.5-.11-.82v-.74c0-.32.03-.6.1-.82s.17-.42.29-.57.28-.26.45-.33.37-.1.59-.1.41.03.59.1.33.18.46.33.23.34.3.57.11.5.11.82v.74zm-.85-.86c0-.19-.01-.35-.04-.48s-.07-.23-.12-.31-.11-.14-.19-.17-.16-.05-.25-.05-.18.02-.25.05-.14.09-.19.17-.09.18-.12.31-.04.29-.04.48v.97c0 .19.01.35.04.48s.07.24.12.32.11.14.19.17.16.05.25.05.18-.02.25-.05.14-.09.19-.17.09-.19.11-.32.04-.29.04-.48v-.97z",
-    fwd10: "M18 13c0 3.31-2.69 6-6 6s-6-2.69-6-6 2.69-6 6-6v4l5-5-5-5v4c-4.42 0-8 3.58-8 8s3.58 8 8 8 8-3.58 8-8h-2zm-7.46 2.22c-.06.05-.12.09-.2.12s-.17.04-.27.04a.68.68 0 0 1-.47-.17c-.06-.05-.11-.12-.14-.2s-.05-.16-.05-.25h-.84c0 .22.04.4.13.57s.21.31.36.42.32.2.51.25.39.09.59.09c.25 0 .48-.03.68-.1s.38-.16.53-.29.26-.28.34-.47.12-.39.12-.62c0-.26-.06-.48-.2-.66s-.34-.31-.6-.39c.11-.05.22-.11.31-.18s.17-.15.23-.23.11-.18.14-.27.05-.19.05-.28c0-.22-.04-.42-.11-.59s-.18-.32-.32-.44-.31-.21-.51-.27-.42-.09-.66-.09c-.2 0-.39.03-.57.09s-.33.14-.46.25-.24.24-.32.39-.12.32-.12.5h.84c0-.07.01-.14.04-.2s.06-.11.11-.15.1-.08.16-.1.13-.04.2-.04c.17 0 .3.04.38.13s.13.21.13.37c0 .08-.01.15-.04.21s-.06.12-.11.16-.11.08-.18.1-.16.04-.25.04h-.48v.65h.48c.1 0 .19.01.27.03s.15.06.21.11.1.11.13.18.05.16.05.26c0 .18-.05.32-.16.42z",
-    vol: "M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z",
-    mute: "M16.5 12A4.5 4.5 0 0 0 14 7.97v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z",
-    cc: "M19 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 7H9.5v-.5h-2v3h2V13H11v1c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1zm7 0h-1.5v-.5h-2v3h2V13H18v1c0 .55-.45 1-1 1h-3c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1z",
-    audio: "M12 3v9.28a4.39 4.39 0 0 0-1.5-.28C8.01 12 6 14.01 6 16.5S8.01 21 10.5 21c2.31 0 4.2-1.75 4.45-4H15V6h4V3h-7z",
-    pip: "M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z",
-    fs: "M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z",
-    fsx: "M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z",
-    keys: "M20 5H4c-1.1 0-1.99.9-1.99 2L2 17c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-9 3h2v2h-2V8zm0 3h2v2h-2v-2zM8 8h2v2H8V8zm0 3h2v2H8v-2zm-1 2H5v-2h2v2zm0-3H5V8h2v2zm9 7H8v-2h8v2zm0-4h-2v-2h2v2zm0-3h-2V8h2v2zm3 3h-2v-2h2v2zm0-3h-2V8h2v2z",
-    film: "M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z",
-  };
-  function svg(name) {
-    const ns = "http://www.w3.org/2000/svg", s = document.createElementNS(ns, "svg"), p = document.createElementNS(ns, "path");
-    s.setAttribute("viewBox", "0 0 24 24"); s.setAttribute("aria-hidden", "true"); s.setAttribute("focusable", "false");
-    p.setAttribute("d", PATHS[name] || ""); s.appendChild(p);
-    return s;
-  }
-  function paintIcons(scope) { for (const i of (scope || root).querySelectorAll("i[data-i]")) { i.replaceChildren(svg(i.dataset.i)); } }
-  function setIcon(btn, name) { const i = btn.querySelector("i[data-i]"); if (i && i.dataset.i !== name) { i.dataset.i = name; i.replaceChildren(svg(name)); } }
+  // ═══ glyphs: the portal's set (templates/_glyphs.html), so the page needs no icon font or extra request ═══════════════
+  const GLYPH = { close: "x", film: "lens" };
+  const ico = n => `<svg class="g" aria-hidden="true" focusable="false"><use href="#g-${GLYPH[n] || n}"/></svg>`;
+  function paintIcons(scope) { for (const i of (scope || root).querySelectorAll("i[data-i]")) if (!i.firstChild) i.innerHTML = ico(i.dataset.i); }
+  function setIcon(btn, name) { const i = btn.querySelector("i[data-i]"); if (i && i.dataset.i !== name) { i.dataset.i = name; i.innerHTML = ico(name); } }
   function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
   function say(text) { const l = $("#live"); l.textContent = ""; setTimeout(() => { l.textContent = text; }, 30); }
+  function key(icon, label, cls, fn) {
+    const b = el("button", "key" + (cls ? " " + cls : ""));
+    b.type = "button"; b.innerHTML = ico(icon); b.setAttribute("aria-label", label); b.title = label;
+    if (fn) b.onclick = fn;
+    return b;
+  }
+  function toast(text, ms) {
+    const box = $("#toasts"), t = el("div", "toast", text);
+    box.append(t);
+    while (box.children.length > 2) box.firstChild.remove();
+    setTimeout(() => t.remove(), ms || 1800);
+  }
 
   // ═══ what this browser remembers (a convenience: everything works without it) ════════════════════════════════════
   const store = {
@@ -48,23 +41,33 @@
     set(k, v) { try { localStorage.setItem("nagatha:" + k, JSON.stringify(v)); } catch (e) { /* private window or full: fine */ } },
   };
   const S = {
-    lib: null, catalogAt: 0, view: "home", collection: null, q: "", sort: store.get("sort", "title"),
+    lib: null, catalogAt: 0, view: "home", collection: null, q: "", sort: C.SORTS.includes(store.get("sort", "title")) ? store.get("sort", "title") : "title",
     local: store.get("pos", {}), prefs: store.get("prefs", { vol: 1, muted: false, subs: "" }), detailsId: null,
+    pageMemo: new Map(), letters: false, fresh: false, viewKey: "", viewRows: 0, geo: "", cur: null, waitingAt: 0, lastTimeAt: 0,
     armed: new C.Armed(() => (navigator.userActivation ? navigator.userActivation.hasBeenActive : undefined)),
   };
 
-  // ═══ notices ═════════════════════════════════════════════════════════════════════════════════════════════════════
+  // ═══ notices, and the signal lamp ═══════════════════════════════════════════════════════════════════════════════════
   function showNotice(msg, opts) {
     opts = opts || {};
     const n = $("#notice");
     n.className = "notice " + (opts.kind || "");
     n.dataset.key = opts.key || "";
     const kids = [el("span", "grow", msg)];
-    if (opts.retry) { const b = el("button", "pill-btn", opts.label || "Try again"); b.type = "button"; b.onclick = opts.retry; kids.push(b); }
+    if (opts.retry) kids.push(key("retry", opts.label || "Try again", "sm", opts.retry));
     n.replaceChildren(...kids);
     n.hidden = false;
+    syncSignal();
   }
-  function hideNotice(key) { const n = $("#notice"); if (!key || n.dataset.key === key) { n.hidden = true; n.dataset.key = ""; } }
+  function hideNotice(k) { const n = $("#notice"); if (!k || n.dataset.key === k) { n.hidden = true; n.dataset.key = ""; syncSignal(); } }
+  /** The lamp: lit when all is well, a triangle while the line is lost (the film is waiting for it), a diamond when the library is out of reach. */
+  function syncSignal() {
+    const n = $("#notice"), bad = !n.hidden && n.classList.contains("bad");
+    const state = rec.on ? "warn" : bad ? "off" : "on";
+    const label = rec.on ? "No signal: the film is waiting for it to come back" : bad ? "The library is out of reach" : "Connected";
+    for (const lamp of [$("#signal"), $("#p-signal")]) { lamp.dataset.s = state; lamp.setAttribute("aria-label", label); lamp.title = label; }
+    $("#p-signal").hidden = state === "on";
+  }
 
   // ═══ the pass ════════════════════════════════════════════════════════════════════════════════════════════════════
   const gate = {
@@ -107,6 +110,7 @@
   async function loadCatalog() {
     hideNotice("gate");
     root.dataset.state = "loading";
+    setLoading("Opening the library…");
     let g;
     try { g = await gate.ensure(); } catch (e) { root.dataset.state = "error"; gateProblem(e, loadCatalog); setLoading("The library is out of reach."); return; }
     for (let attempt = 0; attempt < 4; attempt++) {
@@ -118,6 +122,7 @@
       if (!r.ok) { root.dataset.state = "error"; gateProblem({ kind: "home", message: C.playProblem(r.status) }, loadCatalog); return; }
       try { S.lib = C.parseCatalog(await r.json()); } catch (e) { gateProblem({ kind: "home", message: "The library came back in a shape this page doesn't know." }, loadCatalog); return; }
       S.catalogAt = Date.now();
+      hideNotice("load");
       root.dataset.state = "ready";
       $("#q").disabled = false;
       route();
@@ -126,114 +131,223 @@
     gateProblem(null, loadCatalog);
   }
   const wait = ms => new Promise(r => setTimeout(r, ms));
-  function setLoading(text) { const v = $("#view"); if (!S.lib) v.replaceChildren(el("p", "empty", text)); }
+  function setLoading(text) { if (!S.lib) showNotice(text, { key: "load" }); }
 
   // ═══ pictures (the gate's sizes; a burst of uncached posters can get "busy, try again", so an <img> retries) ═══════
-  function posterPx() { return innerWidth >= 1600 ? 200 : innerWidth >= 700 ? 160 : 120; }
   function picture(holder, id, kind, cssPx, label) {
     const g = gate.info;
     const img = holder.querySelector("img") || holder.appendChild(el("img"));
     img.alt = label || "";
-    img.loading = "lazy";
     img.decoding = "async";
+    holder.classList.remove("loaded", "noart");
     if (!g) return;
     const url = C.imgUrl(g, id, kind, C.imgWidth(cssPx, devicePixelRatio || 1));
     let tries = 0;
-    img.onerror = () => { if (tries++ < 3) setTimeout(() => { img.src = url; }, 1200 * tries); else holder.classList.add("noart"); };
-    img.onload = () => holder.classList.add("loaded");
+    img._u = url;
+    img.onerror = () => { if (img._u !== url) return; if (tries++ < 3) setTimeout(() => { if (img._u === url) img.src = url; }, 1200 * tries); else holder.classList.add("noart"); };
+    img.onload = () => { if (img._u === url) holder.classList.add("loaded"); };
     img.src = url;
   }
 
-  // ═══ the wall ════════════════════════════════════════════════════════════════════════════════════════════════════
-  function card(it) {
-    const b = el("button", "card");
-    b.type = "button";
-    b.dataset.id = it.id;
-    b.setAttribute("role", "listitem");
-    b.setAttribute("aria-label", `${it.title}${it.year ? ", " + it.year : ""}`);
-    const poster = el("span", "poster");
-    poster.appendChild(el("span", "ph", it.title));               // the title in the frame until (or unless) the poster arrives
-    if (it.hasPoster) picture(poster, it.id, "poster", posterPx(), "");
-    const at = C.resumePoint(it, S.local[it.id], S.catalogAt);
-    if (at && it.runtime) { const bar = el("span", "prog"); bar.style.setProperty("--p", Math.min(100, (100 * at) / it.runtime).toFixed(1) + "%"); poster.appendChild(bar); }
-    if (it.played) poster.appendChild(el("span", "seen", "Watched"));
-    b.append(poster, el("span", "c-title", it.title), el("span", "c-sub", String(it.year || "")));
-    return b;
-  }
-  function collCard(c) {
-    const b = el("button", "card coll");
-    b.type = "button";
-    b.dataset.coll = c.id;
-    b.setAttribute("role", "listitem");
-    b.setAttribute("aria-label", `${c.title}, ${c.itemIds.length} films`);
-    const poster = el("span", "poster");
-    poster.appendChild(el("span", "ph", c.title));
-    if (c.hasPoster) picture(poster, c.id, "poster", posterPx(), "");
-    b.append(poster, el("span", "c-title", c.title), el("span", "c-sub", `${c.itemIds.length} film${c.itemIds.length === 1 ? "" : "s"}`));
-    return b;
-  }
-  function shelf(title, nodes, more) {
-    const s = el("section", "shelf");
-    const h = el("h2", "", title);
-    if (more) { const a = el("a", "more", "See all"); a.href = more; h.appendChild(a); }
-    const row = el("div", "row");
-    row.setAttribute("role", "list");
-    row.setAttribute("aria-label", title);
-    row.append(...nodes);
-    s.append(h, row);
-    return s;
-  }
-  function grid(nodes, label) {
-    const g = el("div", "grid");
-    g.setAttribute("role", "list");
-    g.setAttribute("aria-label", label);
-    g.append(...nodes);
-    return g;
-  }
-  function sorted(items) {
-    const by = S.sort;
-    const out = items.slice();
-    if (by === "added") out.sort((a, b) => b.added - a.added || C.cmp(a.sort, b.sort));
-    else if (by === "year") out.sort((a, b) => b.year - a.year || C.cmp(a.sort, b.sort));
-    else if (by === "rating") out.sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1) || C.cmp(a.sort, b.sort));
-    return out;
-  }
+  // ═══ the wall: Home is a deck of controls; everything else is posters a screen at a time ═══════════════════════════
+  // Nothing scrolls. A list is cut into screens of whole rows of posters (Bridge.PList, BridgePure.paginate); you flip with a
+  // swipe, PageUp/PageDown, or by dragging along the bar under it. The alphabet key opens every letter on one screen.
+  const LABELS = { continue: "Continue watching", added: "Recently added", movies: "Movies", collections: "Collections" };
+  const VIEWS = ["home", "movies", "collections", "continue", "added"];
+  const rail = { on: false, items: [] };
+  const letterForRow = row => { let l = ""; for (const r of rail.items) { if (r.i <= row) l = r.l; else break; } return l; };
+  const list = new Bridge.PList($("#scroll"), $("#host"), {}, { pips: $("#pips"), pgno: $("#pgno"), scrub: $("#scrub"), onscrub: (on, page) => {
+    const b = $("#bubble");
+    if (!on || !rail.on) { b.hidden = true; return; }
+    b.textContent = letterForRow(list.starts[page] || 0); b.hidden = false;
+  } });
+  const shape = () => C.gridShape($("#scroll").clientWidth || innerWidth);
 
-  function renderView() {
-    const lib = S.lib;
-    if (!lib) return;
-    const v = $("#view");
-    const nodes = [];
-    $("#sort").hidden = !(S.view === "movies" || S.view === "collection") || !!S.q;
-    for (const a of $("#nav").querySelectorAll("a")) a.setAttribute("aria-current", !S.q && a.dataset.view === (S.view === "collection" ? "collections" : S.view) ? "page" : "false");
+  // — row makers —
+  const makers = list.makers;
+  makers.title = {
+    make() { const e = el("div", "vrow vtitle"); e._g = el("span", "gl"); e._t = el("span", "name"); e._c = el("span", "count"); e.append(e._g, e._t, e._c); return e; },
+    bind(e, r) { e._g.innerHTML = ico(r.glyph); e._t.textContent = r.text || ""; e._c.textContent = r.count || ""; },
+  };
+  makers.head = {
+    make() { const e = el("div", "vrow vhead"); e._g = el("span", "gl"); e._c = el("span", "count"); e.append(e._g, e._c); return e; },
+    bind(e, r) { e._g.innerHTML = ico(r.glyph); e._c.textContent = r.count || ""; },
+  };
+  makers.msg = {
+    make() { const e = el("div", "vrow vmsg"); e._g = el("span", "gl"); e._t = el("span"); e.append(e._g, e._t); return e; },
+    bind(e, r) { e._g.innerHTML = ico(r.glyph || "info"); e._t.textContent = r.text; },
+  };
+  /** A row of posters. A film or a collection: a collection has `itemIds`. */
+  makers.cards = {
+    make() {
+      const e = el("div", "vrow cards"); e._cards = [];
+      for (let k = 0; k < 8; k++) {
+        const b = el("button", "film"), poster = el("span", "poster"), ph = el("span", "ph"), title = el("span", "c-title"), sub = el("span", "c-sub");
+        b.type = "button"; b.setAttribute("role", "listitem");
+        poster.append(ph); b.append(poster, title, sub); e.append(b);
+        e._cards.push({ b, poster, ph, title, sub });
+      }
+      return e;
+    },
+    bind(e, r) {
+      e.style.setProperty("--cw", r.cw + "px");
+      e._cards.forEach((x, k) => {
+        const it = r.items[k];
+        x.b.hidden = !it;
+        if (!it) return;
+        const coll = !!it.itemIds;
+        x.b.classList.toggle("coll", coll);
+        delete x.b.dataset.id; delete x.b.dataset.coll;
+        x.b.dataset[coll ? "coll" : "id"] = it.id;
+        x.poster.className = "poster";
+        for (const n of x.poster.querySelectorAll(".prog, .seen")) n.remove();
+        x.ph.textContent = it.title;
+        x.title.textContent = it.title;
+        if (coll) {
+          x.sub.textContent = `${it.itemIds.length}`;
+          x.b.setAttribute("aria-label", `${it.title}, ${it.itemIds.length} films`);
+        } else {
+          x.sub.textContent = String(it.year || "");
+          x.b.setAttribute("aria-label", `${it.title}${it.year ? ", " + it.year : ""}${it.played ? ", watched" : ""}`);
+          const at = C.resumePoint(it, S.local[it.id], S.catalogAt);
+          if (at && it.runtime) { const bar = el("span", "prog"); bar.style.setProperty("--p", Math.min(100, (100 * at) / it.runtime).toFixed(1) + "%"); x.poster.append(bar); }
+          if (it.played) x.poster.append(el("span", "seen"));
+        }
+        if (it.hasPoster) picture(x.poster, it.id, "poster", r.cw, ""); else { const img = x.poster.querySelector("img"); if (img) img.removeAttribute("src"); }
+      });
+    },
+  };
+
+  const posterRows = entries => { const g = shape(); return C.chunk(entries, g.cols).map(items => ({ type: "cards", h: g.rowH, items, cw: g.cw })); };
+
+  function buildView() {
+    const lib = S.lib, rows = [], g = shape();
+    const v = { rows, key: S.q ? "search" : S.view === "collection" ? "collection/" + S.collection : S.view, rail: null, sort: false, back: false, home: false, geo: `${g.cols}/${Math.round(g.cw)}` };
+    const title = (glyph, count, text) => rows.push({ type: "title", h: 56, glyph, count, text, glue: true });
+    const head = (glyph, count) => rows.push({ type: "head", h: 40, glyph, count, glue: true });
+    const msg = (text, glyph) => rows.push({ type: "msg", h: 96, text, glyph });
+    const n = a => a.length.toLocaleString();
     if (S.q) {
       const found = C.search(lib, S.q);
-      nodes.push(el("h2", "vhead", found.items.length || found.collections.length
-        ? `${found.items.length} film${found.items.length === 1 ? "" : "s"} for “${S.q}”` : `Nothing in the library matches “${S.q}”.`));
-      if (found.collections.length) nodes.push(shelf("Collections", found.collections.map(collCard)));
-      if (found.items.length) nodes.push(grid(found.items.map(card), "Search results"));
-    } else if (S.view === "movies") {
-      nodes.push(el("h2", "vhead", `Movies · ${lib.movies.length}`), grid(sorted(lib.movies).map(card), "Movies"));
-    } else if (S.view === "collections") {
-      nodes.push(el("h2", "vhead", `Collections · ${lib.collections.length}`), grid(lib.collections.map(collCard), "Collections"));
-    } else if (S.view === "collection" && lib.collById.has(S.collection)) {
-      const c = lib.collById.get(S.collection);
-      const items = c.itemIds.map(id => lib.byId.get(id));
-      nodes.push(el("h2", "vhead", c.title), grid(S.sort === "title" ? items : sorted(items), c.title));     // the gate lists a collection by year
-      if (!items.length) nodes.push(el("p", "empty", "Jellyfin lists no films in this collection right now."));
-    } else {
-      const cont = C.continueWatching(lib, S.local, S.catalogAt);
-      if (cont.length) nodes.push(shelf("Continue watching", cont.slice(0, 20).map(card)));
-      const added = C.recentlyAdded(lib, 20);
-      if (added.length) nodes.push(shelf("Recently added", added.map(card), "#movies?added"));
-      if (lib.collections.length) nodes.push(shelf("Collections", lib.collections.map(collCard), "#collections"));
-      nodes.push(el("h2", "vhead", `Movies · ${lib.movies.length}`), grid(lib.movies.map(card), "Movies"));
+      if (!found.items.length && !found.collections.length) msg(`Nothing in the library matches “${S.q}”.`, "search");
+      if (found.collections.length) { head("stack", n(found.collections)); rows.push(...posterRows(found.collections)); }
+      if (found.items.length) { head("lens", n(found.items)); rows.push(...posterRows(found.items)); }
+      return v;
     }
-    if (!lib.items.length) nodes.push(el("p", "empty", "Jellyfin's library is empty."));
-    v.replaceChildren(...nodes);
+    switch (S.view) {
+      case "movies": {
+        const items = C.sortFilms(lib.movies, S.sort);
+        title("lens", n(items));
+        const base = rows.length;
+        rows.push(...posterRows(items));
+        if (S.sort === "title") v.rail = C.letterRows(items, g.cols, base);
+        v.sort = true;
+        break;
+      }
+      case "collections": {
+        title("stack", n(lib.collections));
+        const base = rows.length;
+        rows.push(...posterRows(lib.collections));
+        v.rail = C.letterRows(lib.collections, g.cols, base);
+        break;
+      }
+      case "collection": {
+        v.back = true;
+        const c = lib.collById.get(S.collection);
+        if (!c) { msg("That collection isn't in the library any more.", "stack"); break; }
+        const items = c.itemIds.map(id => lib.byId.get(id)).filter(Boolean);
+        title("stack", n(items), c.title);
+        if (!items.length) msg("Jellyfin lists no films in this collection right now.", "stack");
+        rows.push(...posterRows(S.sort === "title" ? items : C.sortFilms(items, S.sort)));
+        v.sort = true;
+        break;
+      }
+      case "continue": {
+        const items = C.continueWatching(lib, S.local, S.catalogAt);
+        title("play", n(items));
+        if (!items.length) msg("Nothing started yet. A film you stop part-way waits here.", "play");
+        rows.push(...posterRows(items));
+        break;
+      }
+      case "added": {
+        const items = C.recentlyAdded(lib, 60);
+        title("new", "");
+        if (!items.length) msg("The library hasn't said when films were added.", "new");
+        rows.push(...posterRows(items));
+        break;
+      }
+      default:
+        v.key = "home"; v.home = true;
+    }
+    if (!lib.items.length && !v.home) msg("Jellyfin's library is empty.", "lens");
+    return v;
   }
 
-  // ═══ the address: #home #movies #collections #collection/<id> #film/<id> #watch/<id> (Back closes what was opened) ══
+  /** Home: a control for each way into the library, the count on it. */
+  function buildDeck() {
+    const lib = S.lib, deck = $("#deck"), cont = C.continueWatching(lib, S.local, S.catalogAt);
+    const units = [];
+    if (cont.length) units.push(["continue", "play", LABELS.continue, String(cont.length), true]);
+    if (lib.movies.some(i => i.added > 0)) units.push(["added", "new", LABELS.added, ""]);
+    units.push(["movies", "lens", LABELS.movies, lib.movies.length.toLocaleString()]);
+    if (lib.collections.length) units.push(["collections", "stack", LABELS.collections, lib.collections.length.toLocaleString()]);
+    const count = units.length;
+    deck.style.setProperty("--rows", Math.ceil(count / 2)); deck.style.setProperty("--rows-wide", Math.ceil(count / 4)); deck.style.setProperty("--rows-side", Math.ceil(count / 5));
+    deck.replaceChildren(...units.map(([id, glyph, label, num, lit], k) => {
+      const u = el("div", "unit named"); u.style.setProperty("--i", k);
+      if (lit) u.dataset.s = "on";
+      const hit = el("button", "hit"); hit.type = "button"; hit.dataset.u = id; hit.setAttribute("aria-label", label); hit.title = label;
+      u.append(el("i", "plate"), hit);
+      const claws = el("i", "claws"); claws.innerHTML = "<b></b><b></b><b></b>"; u.append(claws);
+      if (lit) u.append(el("span", "lamp"));
+      u.insertAdjacentHTML("beforeend", ico(glyph));
+      if (num) u.append(el("span", "name", num));
+      return u;
+    }));
+    deck.hidden = false;
+  }
+  $("#deck").addEventListener("click", ev => { const b = ev.target.closest("[data-u]"); if (b && S.lib) go(b.dataset.u); });
+
+  function renderView(keep) {
+    if (!S.lib) return;
+    if (S.viewKey && !keep && S.viewRows) S.pageMemo.set(S.viewKey, list.page);
+    const v = buildView();
+    S.viewKey = v.key; S.viewRows = v.rows.length; S.geo = v.geo; S.cur = v;
+    $("#back").hidden = v.home || !!S.q;
+    const sort = $("#sort");
+    sort.hidden = !(v.sort && !S.q);
+    if (!sort.hidden) { sort.setAttribute("aria-label", `Sort: ${SORT_LABELS[S.sort]}`); sort.title = `Sort: ${SORT_LABELS[S.sort]}`; }
+    $("#deck").hidden = !v.home; $("#listwrap").hidden = v.home;
+    if (v.home) { buildDeck(); rail.on = false; rail.items = []; $("#letters-key").hidden = true; return; }
+    const page = keep ? list.page : (S.fresh ? 0 : (S.pageMemo.get(v.key) || 0));
+    rail.items = v.rail || []; rail.on = rail.items.length > 3;
+    $("#letters-key").hidden = !rail.on;
+    list.setRows(v.rows, page);
+    S.fresh = false;
+  }
+  const SORT_LABELS = { title: "A to Z", added: "Recently added", year: "Newest first", rating: "Best rated" };
+  function cycleSort() {
+    const at = C.SORTS.indexOf(S.sort);
+    S.sort = C.SORTS[(at + 1) % C.SORTS.length];
+    store.set("sort", S.sort);
+    S.fresh = true; renderView(false);
+    toast(SORT_LABELS[S.sort]);
+  }
+
+  // — the alphabet: every letter on one screen, the ones this list has are lit —
+  function openLetters() {
+    if (!rail.on) return;
+    const have = new Map(rail.items.map(r => [r.l, r.i]));
+    $("#letters").replaceChildren(..."#ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map(l => {
+      const b = el("button", "lang-opt", l); b.type = "button"; b.disabled = !have.has(l); b.setAttribute("aria-label", l);
+      b.onclick = () => { closeLetters(); list.goRow(have.get(l)); };
+      return b;
+    }));
+    $("#lettersheet").hidden = false; S.letters = true;
+  }
+  function closeLetters() { $("#lettersheet").hidden = true; S.letters = false; }
+
+  // ═══ the address: #home #movies #collections #continue #added #collection/<id> #film/<id> #watch/<id> (Back closes what was opened) ══
   let booted = false;
   function route() {
     if (!S.lib) return;
@@ -249,29 +363,34 @@
     if (P.item) closePlayer(true);
     if (kind === "film" && S.lib.byId.has(id)) {
       openDetails(S.lib.byId.get(id));
-      if (!booted) { booted = true; renderView(); }
+      if (!booted) { booted = true; renderView(false); }
       return;
     }
     closeDetails(true);
+    if (S.letters) closeLetters();
     booted = true;
+    if (S.q) clearSearch(true);
     if (kind === "collection" && S.lib.collById.has(id)) { S.view = "collection"; S.collection = id; }
-    else if (["home", "movies", "collections"].includes(kind)) S.view = kind;
+    else if (VIEWS.includes(kind)) S.view = kind;
     else S.view = "home";
-    if (kind === "movies" && query === "added") { S.sort = "added"; $("#sort").value = "added"; }
-    renderView();
-    $("#scroll").scrollTop = 0;
+    if (kind === "movies" && query === "added") { S.sort = "added"; store.set("sort", S.sort); S.fresh = true; }
+    renderView(false);
   }
   addEventListener("hashchange", route);
   /** Open something as a new history entry (so Back closes it). The entry is marked, so closing knows whether Back stays in
    *  the app: a film opened straight from a bookmark or a reload has no app entry behind it, and is replaced instead. */
   function go(hash) {
+    if (S.q) clearSearch(true);
     if (location.hash !== "#" + hash) history.pushState({ nv: 1 }, "", "#" + hash);
+    else if (S.cur && S.cur.home === false) { S.fresh = true; }
     route();
   }
   function leave(fallback) {
     if (history.state && history.state.nv) history.back();
     else { history.replaceState(null, "", "#" + fallback); route(); }
   }
+  const parentHash = () => (S.view === "collection" ? "collections" : "home");
+  function goBack() { if (history.state && history.state.nv) history.back(); else { history.replaceState(null, "", "#" + parentHash()); route(); } }
 
   // ═══ the details sheet ═══════════════════════════════════════════════════════════════════════════════════════════
   let lastFocus = null;
@@ -281,7 +400,7 @@
     $("#d-title").textContent = it.title;
     $("#d-facts").textContent = C.factsLine(it);
     $("#d-genres").textContent = it.genres.join(" · ");
-    $("#d-overview").textContent = it.overview || "No summary in Jellyfin for this one.";
+    $("#d-overview").textContent = it.overview || "";
     const bd = $("#d-backdrop"), ps = $("#d-poster");
     bd.className = "d-backdrop"; ps.className = "d-poster";
     bd.querySelector("img").removeAttribute("src"); ps.querySelector("img").removeAttribute("src");
@@ -294,9 +413,9 @@
     const kids = [];
     if (!it.play) kids.push(el("p", "warn", "Jellyfin has no video file for this one."));
     else if (at) {
-      kids.push(actBtn(`Resume from ${C.fmtTime(at)}`, "play", true, () => startFilm(it, { start: at })));
-      kids.push(actBtn("Start over", "back10", false, () => startFilm(it, { start: 0 })));
-    } else kids.push(actBtn(it.played ? "Play again" : "Play", "play", true, () => startFilm(it, { start: 0 })));
+      kids.push(actKey(`Resume from ${C.fmtTime(at)}`, "play", true, () => startFilm(it, { start: at }), C.fmtTime(at)));
+      kids.push(actKey("Start over", "retry", false, () => startFilm(it, { start: 0 })));
+    } else kids.push(actKey(it.played ? "Play again" : "Play", "play", true, () => startFilm(it, { start: 0 })));
     acts.replaceChildren(...kids);
     const tech = [];
     if (it.play) {
@@ -309,21 +428,19 @@
     $("#d-tech").textContent = tech.join(" · ");
     const coll = $("#d-coll");
     coll.replaceChildren(...it.collectionIds.filter(id => S.lib.collById.has(id)).map(id => {
-      const c = S.lib.collById.get(id), a = el("a", "chip", `Part of ${c.title}`);
-      a.href = "#collection/" + id;
+      const c = S.lib.collById.get(id), a = el("a", "chip");
+      a.innerHTML = ico("stack"); a.append(el("span", "", c.title));
+      a.href = "#collection/" + id; a.setAttribute("aria-label", `Part of ${c.title}`);
       return a;
     }));
-    paintIcons(sheet);
     sheet.hidden = false;
     document.body.classList.add("nv-locked");
-    setTimeout(() => { const first = acts.querySelector("button") || sheet.querySelector(".d-close"); first.focus(); }, 0);
+    setTimeout(() => { const first = acts.querySelector("button") || sheet.querySelector(".key"); first.focus(); }, 0);
   }
-  function actBtn(label, icon, primary, fn) {
-    const b = el("button", "pill-btn" + (primary ? " primary" : ""));
-    b.type = "button";
-    const i = el("i"); i.dataset.i = icon;
-    b.append(i, el("span", "", label));
-    b.onclick = fn;
+  /** Play, Resume, Start over: a glyph key (the time on it when it resumes). */
+  function actKey(label, icon, primary, fn, time) {
+    const b = key(icon, label, "act" + (primary ? " on" : ""), fn);
+    if (time) b.append(el("span", "t", time));
     return b;
   }
   function closeDetails(fromRoute) {
@@ -383,7 +500,11 @@
     applyVolume();
     idle.kick();
     let g;
-    try { g = await gate.ensure(); } catch (e) { spin(false); showMsg(e.kind === "auth" ? e.message : e.kind === "home" ? e.message : C.playProblem(0), () => open(it, opts)); return; }
+    try { g = await gate.ensure(); } catch (e) {
+      if (opts.recovering && e.kind === "net") return;                    // still no line: the next try is already on its way
+      if (e.kind === "net") { recoverStart("net"); return; }
+      spin(false); showMsg(e.kind === "auth" ? e.message : e.kind === "home" ? e.message : C.playProblem(0), () => open(it, opts)); return;
+    }
     if (P.item !== it) return;
     const pick = C.chooseSource(it, { audio: P.audio, env: hlsEnv(), forceHls: opts.forceHls });
     if (pick.mode === "none") { spin(false); showMsg(pick.why); return; }
@@ -396,13 +517,13 @@
       video.src = C.hlsUrl(g, it, { audio: P.audio, start: P.start });
     } else {
       let Hls;
-      try { Hls = await loadHlsJs(); } catch (e) { spin(false); showMsg("The converted stream's player (hls.js) didn't load. Reload the page to try again."); return; }
+      try { Hls = await loadHlsJs(); } catch (e) { if (opts.recovering) return; spin(false); showMsg("The converted stream's player (hls.js) didn't load. Reload the page to try again."); return; }
       if (P.item !== it) return;
       if (!Hls.isSupported()) { spin(false); showMsg("This browser can't play the converted stream."); return; }
       // The subtitles are the gate's own WebVTT files on <track> elements, not part of the stream, so hls.js's caption and
       // subtitle handling is off: left on, it empties every text track's cues when it loads a manifest (measured on Tetsuo II:
       // the track said "loaded" with 0 cues). The <track>s are added only once the manifest is in, for the same reason.
-      const hls = new Hls({ startPosition: P.start > 0 ? P.start : -1, maxBufferLength: 30, maxMaxBufferLength: 120, enableWorker: true,
+      const hls = new Hls({ startPosition: P.start > 0 ? P.start : -1, maxBufferLength: 90, maxMaxBufferLength: 240, enableWorker: true,
                             enableWebVTT: false, enableIMSC1: false, enableCEA708Captions: false, renderTextTracksNatively: true,
                             fragLoadingMaxRetry: 4, manifestLoadingMaxRetry: 1, levelLoadingMaxRetry: 2 });
       P.hls = hls;
@@ -411,7 +532,7 @@
       hls.loadSource(C.hlsUrl(g, it, { audio: P.audio, start: P.start }));
       hls.attachMedia(video);
     }
-    report(P.progress.start(it.id, P.start));
+    if (!opts.recovering) report(P.progress.start(it.id, P.start));
     if (opts.tap && !S.armed.armed) { S.armed.waiting(); showTap(true); spin(false); return; }
     tryPlay();
   }
@@ -460,7 +581,7 @@
   }
   function showTap(restore) {
     const t = $("#tapbar");
-    $("#tap-label").textContent = restore && P.start ? `Tap to continue at ${C.fmtTime(P.start)}` : "Tap to start";
+    $("#tap-label").textContent = restore && P.start ? C.fmtTime(P.start) : "";
     t.hidden = false;
     setTimeout(() => t.querySelector("button").focus(), 0);
   }
@@ -486,7 +607,8 @@
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     if (navigator.mediaSession) navigator.mediaSession.metadata = null;
     if (!fromRoute && location.hash.startsWith("#watch/")) leave("film/" + it.id);
-    renderView();                                                  // its "continue" bar and the shelf moved
+    recoverStop();
+    renderView(true);                                              // its "continue" bar and the shelf moved
     if (fromRoute && location.hash === "#film/" + it.id) return;
   }
 
@@ -510,9 +632,51 @@
     if (body && navigator.sendBeacon) navigator.sendBeacon(C.progressUrl(gate.info), JSON.stringify(body));   // text/plain: the gate takes it
   });
 
+  // ── when the line dies ──
+  // A phone in the mountains drops off the network for minutes at a time. The film keeps its place and its wish to play, and a retry runs on
+  // a back-off (2, 4, 8, 15, then every 30 s) for as long as it takes; it starts again at once when the browser says the network is back or
+  // the page comes forward. What is already buffered keeps playing in the meantime (hls.js holds about 90 s ahead). Nothing is reported to
+  // the gate while it waits. Closing the film, or pausing it, ends the wait.
+  const rec = { on: false, n: 0, timer: 0, at: 0, id: "" };
+  function recoverStart(why) {
+    if (rec.on || !P.item) return;
+    rec.on = true; rec.n = 0; rec.id = P.item.id;
+    rec.at = video.currentTime > 1 ? video.currentTime : P.start || 0;
+    spin(true); hideMsg(); syncSignal();
+    if (navigator.mediaSession) { try { navigator.mediaSession.playbackState = "playing"; } catch (e) { /* ignore */ } }
+    rec.timer = setTimeout(recoverTick, C.recoverDelay(0));
+    if (why) say("The signal is lost; the film will carry on when it is back.");
+  }
+  function recoverStop() {
+    if (!rec.on) return;
+    clearTimeout(rec.timer); rec.on = false; rec.n = 0;
+    syncSignal();
+  }
+  /** Try again right now (the network is back, the page is in front). */
+  function recoverNow() { if (rec.on) { clearTimeout(rec.timer); recoverTick(); } }
+  async function recoverTick() {
+    if (!rec.on) return;
+    clearTimeout(rec.timer);
+    if (!P.item || P.item.id !== rec.id) { recoverStop(); return; }
+    rec.timer = setTimeout(recoverTick, C.recoverDelay(++rec.n));      // if this try hangs without an error, the next one still comes
+    if (video.readyState > 0 && !video.error && video.currentTime > 1) rec.at = video.currentTime;
+    try { await gate.ensure(true); } catch (e) { return; }              // no line yet: wait for the next try
+    if (!rec.on || !P.item || P.item.id !== rec.id) return;
+    open(P.item, { start: rec.at, audio: P.audio, recovering: true, healed: 0 });
+  }
+  /** A film that was playing went quiet with the line: "waiting" and no progress for long enough. */
+  setInterval(() => {
+    if (!P.item || rec.on || video.paused || video.ended) return;
+    if (C.stalled(Date.now(), S.lastTimeAt, S.waitingAt > S.lastTimeAt)) recoverStart("stalled");
+  }, 2000);
+  addEventListener("online", recoverNow);
+  if (navigator.connection && navigator.connection.addEventListener) navigator.connection.addEventListener("change", recoverNow);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) recoverNow(); });
+  addEventListener("pageshow", recoverNow);
+
   // ── errors: say what happened in a sentence; heal what can be healed (a stale pass, a file the browser refuses) ──
   async function onVideoError() {
-    if (!P.item || !video.error || P.hls) return;                  // hls.js reports its own
+    if (!P.item || !video.error || P.hls || rec.on) return;        // hls.js reports its own; a wait for the line is already running
     const it = P.item, at = video.currentTime || P.start, mode = P.mode;
     spin(false);
     let status = -1;
@@ -521,21 +685,23 @@
     }
     if (P.item !== it) return;
     if (status === 403 || (mode !== "direct" && P.healed < 1)) {           // the pass ran out (or the HLS stream dropped): new pass, same place
-      try { await gate.ensure(true); } catch (e) { showMsg(e.message); return; }
+      try { await gate.ensure(true); } catch (e) { if (e.kind === "net") { recoverStart("net"); return; } showMsg(e.message); return; }
       if (P.healed < 2) return open(it, { start: at, audio: P.audio, healed: P.healed + 1 });
     }
     if (mode === "direct" && (status === 200 || status === 206 || status === 409) && P.healed < 2) {
       say("This browser couldn't play the file as it is; converting it on skippy-pc instead.");
       return open(it, { start: at, audio: P.audio, forceHls: true, healed: P.healed + 1 });
     }
+    if (status === 0) { recoverStart("net"); return; }                       // the line, not the film: wait for it
     showMsg(status > 0 ? C.playProblem(status, mode) : C.playProblem(0), () => open(it, { start: at, audio: P.audio }));
   }
   function onHlsError(hls, data) {
-    if (!data || !data.fatal || hls !== P.hls) return;
+    if (!data || !data.fatal || hls !== P.hls || rec.on) return;
     const it = P.item, at = video.currentTime || P.start;
     const code = data.response && data.response.code;
+    if (data.type === "networkError" && !code) { recoverStart("hls"); return; }      // no HTTP answer at all: the line
     if (code === 403 && P.healed < 2) {
-      gate.ensure(true).then(() => open(it, { start: at, audio: P.audio, healed: P.healed + 1 }), e => showMsg(e.message));
+      gate.ensure(true).then(() => open(it, { start: at, audio: P.audio, healed: P.healed + 1 }), e => { if (e.kind === "net") recoverStart("net"); else showMsg(e.message); });
       return;
     }
     if (code === 429) { spin(false); showMsg(C.playProblem(429, "hls"), () => open(it, { start: at, audio: P.audio })); return; }
@@ -548,10 +714,10 @@
 
   function showMsg(text, retry) {
     const m = $("#p-msg");
-    const kids = [el("p", "", text)];
-    if (retry) { const b = el("button", "pill-btn primary", "Try again"); b.type = "button"; b.onclick = () => { hideMsg(); retry(); }; kids.push(b); }
-    const c = el("button", "pill-btn", "Close"); c.type = "button"; c.onclick = () => closePlayer(false); kids.push(c);
-    m.replaceChildren(...kids);
+    const acts = el("div", "acts");
+    if (retry) acts.append(key("retry", "Try again", "on", () => { hideMsg(); retry(); }));
+    acts.append(key("close", "Close the film", "", () => closePlayer(false)));
+    m.replaceChildren(el("p", "", text), acts);
     m.hidden = false;
   }
   function hideMsg() { $("#p-msg").hidden = true; }
@@ -589,14 +755,15 @@
   $("#p-vol").addEventListener("input", e => { S.prefs.vol = +e.target.value; if (S.prefs.vol > 0) S.prefs.muted = false; applyVolume(); savePrefs(); });
 
   video.addEventListener("timeupdate", () => {
+    S.lastTimeAt = Date.now();
     paintTime();
     report(P.progress.tick(video.currentTime, !video.paused));
     if (Date.now() - P.lastLocal > 5000) { P.lastLocal = Date.now(); keepLocal(video.currentTime); }
     positionState();
   });
   video.addEventListener("play", () => { paintPlay(); idle.kick(); });
-  video.addEventListener("playing", () => { spin(false); hideMsg(); hideTap(); });
-  video.addEventListener("waiting", () => spin(true));
+  video.addEventListener("playing", () => { S.lastTimeAt = Date.now(); spin(false); hideMsg(); hideTap(); recoverStop(); });
+  video.addEventListener("waiting", () => { S.waitingAt = Date.now(); spin(true); });
   video.addEventListener("canplay", () => spin(false));
   video.addEventListener("pause", () => { paintPlay(); idle.kick(); if (P.item && !video.ended) { keepLocal(video.currentTime); report(P.progress.pause(video.currentTime)); } });
   video.addEventListener("seeked", () => { if (P.item && video.paused) report(P.progress.pause(video.currentTime)); });
@@ -731,7 +898,7 @@
   // ═══ actions: buttons, keys and the lock screen all end up here ═══════════════════════════════════════════════════
   function act(name, src) {
     switch (name) {
-      case "toggle": if (!P.item) return; if (video.paused) act("play"); else video.pause(); return;
+      case "toggle": if (!P.item) return; if (rec.on) { recoverStop(); spin(false); return; } if (video.paused) act("play"); else video.pause(); return;
       case "play": hideTap(); tryPlay(); return;
       case "pause": video.pause(); return;
       case "tap": hideTap(); S.armed.played(true); tryPlay(); return;
@@ -753,8 +920,12 @@
       case "close": if (!$("#p-menu").hidden) return closeMenu(); return closePlayer(false);
       case "close-player": return closePlayer(false);
       case "close-details": return closeDetails(false);
-      case "clear-search": $("#q").value = ""; S.q = ""; $("#q-clear").hidden = true; renderView(); $("#q").focus(); return;
+      case "clear-search": clearSearch(); $("#q").focus(); return;
       case "search": closeDetails(false); $("#q").focus(); $("#q").select(); return;
+      case "back": return goBack();
+      case "home": return go("home");
+      case "sort": return cycleSort();
+      case "letters": return openLetters();
       case "help": { const k = $("#keys"); if (k.open) k.close(); else if (k.showModal) k.showModal(); return; }
       default:
     }
@@ -767,7 +938,7 @@
       act(b.dataset.act, b);
       return;
     }
-    const c = e.target.closest(".card");
+    const c = e.target.closest(".film");
     if (!c) return;
     if (c.dataset.coll) go("collection/" + c.dataset.coll);
     else if (c.dataset.id) { lastFocus = c; go("film/" + c.dataset.id); }
@@ -783,6 +954,10 @@
   });
   document.addEventListener("keydown", e => {
     const t = e.target || {};
+    if (e.key === "Escape" && S.letters) { closeLetters(); e.preventDefault(); return; }
+    if ((e.key === "PageDown" || e.key === "PageUp") && !P.item && sheet.hidden && !$("#keys").open && !(t.tagName === "INPUT" || t.tagName === "TEXTAREA")) {
+      e.preventDefault(); list.go(list.page + (e.key === "PageDown" ? 1 : -1)); return;
+    }
     const a = C.keyAction({ key: e.key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, targetTag: t.tagName,
                             editable: !!t.isContentEditable, onButton: t.tagName === "BUTTON" }, !!P.item && !player.hidden);
     if (!a) { if (e.key === "Escape" && !sheet.hidden) closeDetails(false); return; }
@@ -791,27 +966,44 @@
     act(a);
   });
 
-  // ── search and sort ────────────────────────────────────────────────────────────────────────────────────────────
+  // ── search ─────────────────────────────────────────────────────────────────────────────────────────────────────
   let qTimer = 0;
+  function clearSearch(silent) {
+    clearTimeout(qTimer);
+    $("#q").value = ""; $("#q-clear").hidden = true;
+    if (!S.q) return;
+    S.q = "";
+    if (!silent) { S.fresh = false; renderView(false); }
+  }
   $("#q").addEventListener("input", e => {
     clearTimeout(qTimer);
     const v = e.target.value;
     $("#q-clear").hidden = !v;
-    qTimer = setTimeout(() => { S.q = v.trim(); renderView(); $("#scroll").scrollTop = 0; }, 60);
+    qTimer = setTimeout(() => {
+      const was = S.q;
+      if (!was && S.viewRows) S.pageMemo.set(S.viewKey, list.page);
+      S.q = v.trim();
+      S.fresh = !!S.q; renderView(false);
+    }, 60);
   });
   $("#q").addEventListener("keydown", e => { if (e.key === "Escape" && e.target.value) { e.stopPropagation(); act("clear-search"); } });
-  $("#sort").value = S.sort;
-  $("#sort").addEventListener("change", e => { S.sort = e.target.value; store.set("sort", S.sort); renderView(); });
 
   // ═══ start ═══════════════════════════════════════════════════════════════════════════════════════════════════════
-  // big touch: a coarse pointer on a wide, short screen (a car, a TV browser, a phone on its side) gets bigger targets
-  const touch = matchMedia("(pointer: coarse) and (min-width: 700px)");
-  const markTouch = () => root.classList.toggle("touch", touch.matches);
-  markTouch();
-  if (touch.addEventListener) touch.addEventListener("change", markTouch);
   if (IOS) $("#p-vol").hidden = true;                              // iOS ignores video.volume: the hardware buttons own it
   paintIcons();
   applyVolume();
   paintPlay();
+  syncSignal();
+  if (window.ResizeObserver) {
+    let rt = 0;
+    new ResizeObserver(() => {
+      clearTimeout(rt);
+      rt = setTimeout(() => {
+        if (!S.lib) return;
+        const g = shape();
+        if (S.cur && !S.cur.home && S.geo !== `${g.cols}/${Math.round(g.cw)}`) renderView(true); else list.resize();
+      }, 120);
+    }).observe($("#stage"));
+  }
   loadCatalog();
 })();

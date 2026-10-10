@@ -188,6 +188,7 @@
 </style>
 {% if bridge %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge.css') }}">
 {# in the head and not deferred: a bridge page's own script (the chat's pager) runs before the page ends and needs Bridge #}
+<script src="{{ url_for('static', filename='bridge-pure.js') }}"></script>
 <script src="{{ url_for('static', filename='bridge.js') }}"></script>{% endif %}
 {% block head %}{% endblock %}
 </head>

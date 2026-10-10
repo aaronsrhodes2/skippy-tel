@@ -356,8 +356,9 @@ def test_the_player_uses_the_portals_colours_and_keeps_every_focus_ring():
     defined |= set(re.findall(r'setProperty\("(--[\w-]+)"', (STATIC / "bilby-app.js").read_text(encoding="utf-8")))   # set by the script on an element
     used = set(re.findall(r"var\((--[\w-]+)", code))
     assert used and not used - defined, used - defined
-    assert "prefers-reduced-motion" in css
-    assert len(re.findall(r"outline\s*:\s*none", code)) <= 3        # the search box (draws its own focus border), the list panel and the page bar (which draws its own)
+    shared = (STATIC / "bridge.css").read_text(encoding="utf-8")           # the list, the top row and the page bar live in the bridge's own sheet
+    assert "prefers-reduced-motion" in shared and "prefers-reduced-motion" in (PORTAL / "templates" / "base.html").read_text(encoding="utf-8")
+    assert len(re.findall(r"outline\s*:\s*none", code + shared)) <= 4   # the form fields (focus border), the search box (draws its own focus border), the list panel and the page bar (which draws its own)
 
 
 # ── the music page is a page of the bridge ───────────────────────────────────────────────────────────────────────────
@@ -389,13 +390,13 @@ def test_every_glyph_the_player_draws_is_in_the_portals_glyph_set():
 
 
 def test_the_music_page_never_scrolls_and_draws_no_gradients():
-    css = (STATIC / "bilby-player.css").read_text(encoding="utf-8")
+    css = (STATIC / "bilby-player.css").read_text(encoding="utf-8") + (STATIC / "bridge.css").read_text(encoding="utf-8")
     js = (STATIC / "bilby-app.js").read_text(encoding="utf-8")
     code = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
     assert not re.search(r"overflow(?:-y)?\s*:\s*(?:auto|scroll)", code)                   # no scrollbar anywhere on the page
     assert not re.search(r"(?:linear|radial|conic)-gradient", code)                       # black is see-through on the Viture glasses
     assert "scrollTop" not in js and "VList" not in js                                    # a list is cut into screens, never scrolled
-    assert "class PList" in js and "C.paginate" in js
+    assert "Bridge.PList" in js and "class PList" in (STATIC / "bridge.js").read_text(encoding="utf-8")        # the list is the bridge's own
 
 
 def test_the_music_page_has_a_control_for_each_way_in_and_the_words_are_only_names(client):

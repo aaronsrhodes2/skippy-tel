@@ -132,7 +132,8 @@ Actions (the sandbox can't reach GCP or run.app directly):
   `static/bridge-alive.js`), Game Servers (a lit control per game, and each game's page as panes you flip
   through), Bilby's Audio Service (Home is a deck of glyph controls with counts; every list is shown a screen at a time with
   `PList`: swipe, PageUp/PageDown or drag the bar under it, a letter key for the alphabet; the player is a strip and a row of keys).
-  **Not yet** (old scrolling look, to migrate in batches): admin, video, experiments, the dashboard and the rest.
+  Nagatha's Video Service (a deck of controls, posters a screen at a time, the film over everything, and it waits out a dead zone instead of failing).
+  **Not yet** (old scrolling look, to migrate in batches): admin, experiments, the dashboard and the rest.
 - Copyable things (the Captain's rule: **one click, everywhere**): anything a person is expected to
   copy (an invite code, `ip:port`, a password, a command, a block to paste) is marked
   `<code class="code">` / `<pre class="copy">` (or `data-copy="text"` on a button), and

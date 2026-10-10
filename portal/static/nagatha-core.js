@@ -237,6 +237,46 @@
     return out;
   }
 
+  // ── the poster wall's arithmetic: nothing scrolls, so the wall is cut into screens of whole rows of posters ─────────
+  const B = typeof module === "object" && module.exports ? require("./bridge-pure.js") : window.BridgePure;
+  const TEXT_H = 40;                                   // the title and the year under a poster
+
+  /** How a row of posters fits `width` px: how many across (at least 2, at most `max`), how wide each is, how tall a row is. */
+  function gridShape(width, o) {
+    o = o || {};
+    const pad = o.pad == null ? 12 : o.pad, gap = o.gap == null ? 10 : o.gap, min = o.min || 96, max = o.max || 8;
+    const inner = Math.max(120, (+width || 0) - pad * 2);
+    const cols = Math.min(max, Math.max(2, Math.floor((inner + gap) / (min + gap))));
+    const cw = (inner - gap * (cols - 1)) / cols;
+    return { cols, cw, rowH: Math.round(cw * 1.5) + TEXT_H + gap };
+  }
+  function chunk(list, n) {
+    const out = [];
+    const step = Math.max(1, n | 0);
+    for (let i = 0; i < list.length; i += step) out.push(list.slice(i, i + step));
+    return out;
+  }
+  /** The letter a title files under: A-Z, or # for a digit or a symbol ("The" and punctuation are the gate's `sort` key's business). */
+  function letterOf(sortKey) {
+    const c = fold(sortKey).replace(/^[^a-z0-9]+/, "").charAt(0);
+    return /[a-z]/.test(c) ? c.toUpperCase() : "#";
+  }
+  /** The jump points of an alphabetical list laid out `cols` across: the first row of each letter. */
+  function letterRows(items, cols, firstRow) {
+    const seen = new Set(), out = [];
+    items.forEach((it, k) => { const l = letterOf(it.sort || it.title); if (!seen.has(l)) { seen.add(l); out.push({ l, i: (firstRow || 0) + Math.floor(k / cols) }); } });
+    return out;
+  }
+  /** Films in the order asked for (title is the order the catalog comes in), ties broken by title so the order is stable. */
+  function sortFilms(items, mode) {
+    const out = items.slice();
+    if (mode === "added") out.sort((a, b) => b.added - a.added || cmp(a.sort, b.sort));
+    else if (mode === "year") out.sort((a, b) => b.year - a.year || cmp(a.sort, b.sort));
+    else if (mode === "rating") out.sort((a, b) => (b.rating == null ? -1 : b.rating) - (a.rating == null ? -1 : a.rating) || cmp(a.sort, b.sort));
+    return out;
+  }
+  const SORTS = ["title", "added", "year", "rating"];
+
   // ── the keyboard ──────────────────────────────────────────────────────────────────────────────────────────────
   /** The action for a key press, or null. Typing in a field is never hijacked, and a key with Ctrl/Cmd/Alt belongs to the
    *  browser. `inPlayer` is true while a film is open: the player's keys work only then; "/" and "?" work everywhere. */
@@ -336,5 +376,7 @@
     hlsEngine, chooseSource, imgWidth, IMG_WIDTHS, catalogUrl, imgUrl, directUrl, subUrl, progressUrl, hlsUrl,
     passFresh, refreshIn, Progress, remember, keyAction, seekTo, nextSub, Armed,
     fmtTime, fmtRuntime, langName, audioLabels, subLabel, factsLine, playProblem,
+    gridShape, chunk, letterOf, letterRows, sortFilms, SORTS, TEXT_H,
+    recoverDelay: B.recoverDelay, stalled: B.stalled, paginate: B.paginate, pageOf: B.pageOf,
   };
 });

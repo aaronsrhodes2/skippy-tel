@@ -237,3 +237,47 @@ test("times, runtimes, languages and the facts line", () => {
   assert.match(C.playProblem(429, "hls"), /converting two films/);
   assert.match(C.playProblem(0), /Tailscale Funnel/);
 });
+
+
+// ── the wall is posters a screen at a time ───────────────────────────────────────────────────────────────────────────
+test("posters fit the width: at least two across, never more than eight, and the row is as tall as its posters", () => {
+  const phone = C.gridShape(375), wide = C.gridShape(1600), tiny = C.gridShape(200), tv = C.gridShape(3000);
+  assert.equal(phone.cols, 3); assert.ok(phone.cw >= 100 && phone.cw <= 125);
+  assert.equal(tiny.cols, 2); assert.equal(tv.cols, 8); assert.ok(wide.cols > phone.cols);
+  assert.equal(phone.rowH, Math.round(phone.cw * 1.5) + C.TEXT_H + 10);
+  assert.ok(phone.cols * phone.cw + (phone.cols - 1) * 10 <= 375 - 24 + 0.001);              // inside the gutters
+  assert.equal(C.gridShape(undefined).cols, 2);
+});
+
+test("chunk cuts a list into rows", () => {
+  assert.deepEqual(C.chunk([1, 2, 3, 4, 5], 3), [[1, 2, 3], [4, 5]]);
+  assert.deepEqual(C.chunk([], 3), []);
+  assert.deepEqual(C.chunk([1, 2], 0), [[1], [2]]);                                           // never an endless loop
+});
+
+test("a title files under its first letter; a digit or a symbol under #", () => {
+  assert.deepEqual(["Airplane!", "amélie", "(500) Days", "2001", "Ørnen", "…And Justice"].map(C.letterOf), ["A", "A", "#", "#", "O", "A"]);
+  assert.equal(C.letterOf(""), "#"); assert.equal(C.letterOf(undefined), "#");
+});
+
+test("the alphabet's jump points are the first row of each letter, whatever the number across", () => {
+  const items = ["alien", "amelie", "bambi", "blade", "casino", "7th heaven"].map((t, n) => film(n + 1, t));
+  assert.deepEqual(C.letterRows(items.slice(0, 5), 2, 1), [{ l: "A", i: 1 }, { l: "B", i: 2 }, { l: "C", i: 3 }]);
+  assert.deepEqual(C.letterRows(items.slice(0, 5), 3, 0), [{ l: "A", i: 0 }, { l: "B", i: 0 }, { l: "C", i: 1 }]);
+});
+
+test("films sort by added, year or rating with the title breaking ties, and title keeps the catalog's order", () => {
+  const a = film(1, "Alpha", { added: 5, year: 1999, rating: 7 }), b = film(2, "Beta", { added: 9, year: 1999, rating: null }), c = film(3, "Gamma", { added: 9, year: 2010, rating: 9 });
+  assert.deepEqual(C.sortFilms([a, b, c], "added").map(f => f.title), ["Beta", "Gamma", "Alpha"]);
+  assert.deepEqual(C.sortFilms([a, b, c], "year").map(f => f.title), ["Gamma", "Alpha", "Beta"]);
+  assert.deepEqual(C.sortFilms([a, b, c], "rating").map(f => f.title), ["Gamma", "Alpha", "Beta"]);     // no rating last
+  assert.deepEqual(C.sortFilms([c, a, b], "title").map(f => f.title), ["Gamma", "Alpha", "Beta"]);
+  assert.deepEqual(C.SORTS, ["title", "added", "year", "rating"]);
+});
+
+test("the shared bridge pieces are what the player uses to cut a wall into screens and to wait out a dead zone", () => {
+  assert.deepEqual(C.paginate([100, 100, 100, 100], 300), [0, 3]);
+  assert.equal(C.pageOf([0, 3, 9], 4), 1);
+  assert.deepEqual([0, 1, 4, 9].map(C.recoverDelay), [2000, 4000, 30000, 30000]);
+  assert.equal(C.stalled(20000, 11000, true), true); assert.equal(C.stalled(20000, 15000, true), false);
+});
