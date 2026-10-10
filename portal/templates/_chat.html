@@ -28,8 +28,8 @@
   <form class="ask">
     <textarea rows="2" placeholder="Say something to Skippy" required></textarea>
     <p><button type="submit">Send</button> <button type="button" class="clear">New chat</button></p>
-    <label class="help raw-ok"><input type="checkbox" class="raw" data-tel="chat:raw-mentat">
-      Mentat only (Haiku off): your words go to Mentat as typed and its own answer comes back unedited</label>
+    <label class="help barney-ok"><input type="checkbox" class="barney" data-tel="chat:barney-style">
+      Barney Style: Haiku explains it simply. Off (the default): your words go straight to Mentat and its own answer comes back unedited</label>
     {% if telemetry_on %}<label class="help save-ok"><input type="checkbox" class="save" data-tel="chat:allow-save">
       Allow us to save your questions</label>
       <span class="help">(off unless you tick it; <a href="{{ url_for('privacy') }}">what that means</a>)</span>{% endif %}
@@ -49,16 +49,17 @@
       try { saveBox.checked = localStorage.getItem(SAVE_KEY) === "yes"; } catch (e) {}
       saveBox.addEventListener("change", () => { try { localStorage.setItem(SAVE_KEY, saveBox.checked ? "yes" : "no"); } catch (e) {} });
     }
-    // "Mentat only": skip Haiku both ways, to compare with and without. Remembered in this browser; those turns are
-    // never added to the history Haiku sees, so a later message isn't coloured by them.
-    const rawBox = form.querySelector("input.raw"), RAW_KEY = "skippy-chat-raw-mentat";
-    function rawHint() { msg.placeholder = rawBox.checked ? "A physics question, straight to Mentat" : "Say something to Skippy"; }
-    try { rawBox.checked = localStorage.getItem(RAW_KEY) === "yes"; } catch (e) {}
-    rawBox.addEventListener("change", () => {
-      try { localStorage.setItem(RAW_KEY, rawBox.checked ? "yes" : "no"); } catch (e) {}
-      rawHint();
+    // "Barney Style": Haiku puts it in plain words. OFF by default: the question goes straight to Mentat and its own
+    // answer comes back unedited (no model either way). Remembered in this browser. Turns sent straight to Mentat are
+    // never added to the history Haiku sees, so a later Barney Style message isn't coloured by them.
+    const barneyBox = form.querySelector("input.barney"), BARNEY_KEY = "skippy-chat-barney-style";
+    function barneyHint() { msg.placeholder = barneyBox.checked ? "Say something to Skippy" : "A physics question, straight to Mentat"; }
+    try { barneyBox.checked = localStorage.getItem(BARNEY_KEY) === "yes"; } catch (e) {}
+    barneyBox.addEventListener("change", () => {
+      try { localStorage.setItem(BARNEY_KEY, barneyBox.checked ? "yes" : "no"); } catch (e) {}
+      barneyHint();
     });
-    rawHint();
+    barneyHint();
     let history = [];
     try { history = JSON.parse(sessionStorage.getItem(KEY) || "[]"); } catch (e) { history = []; }
     // A saved conversation being continued (Skippy Memory; admins only): sent with each message, kept in this tab.
@@ -102,7 +103,7 @@
       event.preventDefault();
       const text = msg.value.trim();
       if (!text) return;
-      const raw = rawBox.checked;
+      const raw = !barneyBox.checked;          // Barney Style off = straight to Mentat
       add("user", text);
       msg.value = "";
       sendBtn.disabled = true;

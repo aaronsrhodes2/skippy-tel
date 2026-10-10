@@ -137,11 +137,12 @@ passwords to give, and sends people to the game's page, where the join password 
 on the Password line beside how to join. Skippy asks for
 confirmation before stopping or restarting.
 
-**Mentat only (Haiku off).** A checkbox under the chat box (remembered in the browser) sends the question straight to Mentat
-as typed and shows Mentat's own answer unedited, so you can compare it with what Haiku makes of the same question. No model
-is called either way; same Mentat, same physics permission and rate limit as a normal message (`raw: true` on `POST /chat/send`,
-`raw_mentat` in `portal/app.py`). Those turns are kept out of the history Haiku sees, so a later message isn't coloured by them.
-Tests: `portal/tests/test_chat_raw.py`.
+**Barney Style (Haiku on or off).** A checkbox under the chat box, OFF by default and remembered in the browser. Off, the page
+sends the question straight to Mentat as typed and shows Mentat's own answer unedited; on, Haiku explains it simply as before.
+Comparing the two shows what Haiku adds or loses. No model is called when it is off; same Mentat, same physics permission and
+rate limit as a normal message (the page sends `raw: true` on `POST /chat/send`; `raw_mentat` in `portal/app.py`). The straight-to-Mentat
+turns are kept out of the history Haiku sees, so a later Barney Style message isn't coloured by them. Because everything goes to
+Mentat while it is off, server questions ("is Valheim up?") need Barney Style on. Tests: `portal/tests/test_chat_raw.py`.
 
 **Everywhere, for everyone:** the chat is docked bottom-right on every page
 (same conversation as the Chat page, carried across pages in the tab) and

@@ -1262,7 +1262,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         return render_template("chat.html")
 
     def raw_mentat(user, message, question, save):
-        """The chat's "Mentat only" switch: the question goes to Mentat as typed and Mentat's own answer comes back as it
+        """The chat's "Barney Style" switch, when it is OFF (the default): the question goes to Mentat as typed and Mentat's own answer comes back as it
         left it, with no Haiku on either side (it doesn't read the question first and doesn't put the answer in Skippy's
         voice). It is for seeing what Haiku adds or loses. Same Mentat, same rights (the person must be allowed the physics
         tool) and the same rate limit as a normal message; the answer is not added to the conversation history (the page

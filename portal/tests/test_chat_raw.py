@@ -1,4 +1,4 @@
-"""The chat's "Mentat only (Haiku off)" switch: the question goes to Mentat as typed, Mentat's own answer comes back
+"""The chat's "Barney Style" switch (off = straight to Mentat, the page then sends raw: true): the question goes to Mentat as typed, Mentat's own answer comes back
 unedited, and Haiku is never called (it would otherwise read the question first and rewrite the answer)."""
 import json
 
@@ -79,5 +79,8 @@ def test_the_chat_has_the_switch_and_keeps_raw_turns_out_of_the_history(env):
     client, _, _ = env
     login(client, ADMIN)
     page = client.get("/chat").data.decode()
-    assert 'class="raw"' in page and "Mentat only (Haiku off)" in page
+    assert 'class="barney"' in page and "Barney Style" in page
+    assert "Mentat only" not in page
+    assert 'class="barney" data-tel="chat:barney-style" checked' not in page    # off by default: straight to Mentat
+    assert "const raw = !barneyBox.checked" in page                              # unticked means raw
     assert "if (!raw) { history.push(" in page                                  # Haiku never sees a raw answer later
