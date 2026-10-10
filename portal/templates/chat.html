@@ -1,10 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Chat — Maker Portal{% endblock %}
 {% block app %}skippy{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}can{% endblock %}
 {% block content %}
+{# Skippy's page. Behind the chat, a living background: neon wireframe spirals that wander, attach to each other or to the edges and
+   let go (static/bridge-alive.js), so the space around the interface feels like a mind at work. The chat sits on top of it. #}
+<canvas class="alive" aria-hidden="true"></canvas>
 <section class="chat-page">
-  <h2>Skippy</h2>
   {% include "_chat.html" %}
 </section>
-<style>.chat-page .skippy-chat .log { max-height: 65vh; }</style>
+<script src="{{ url_for('static', filename='bridge-alive.js') }}"></script>
+<script>Bridge.alive(document.querySelector("canvas.alive"));</script>
 {% endblock %}

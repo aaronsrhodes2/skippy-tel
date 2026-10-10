@@ -84,10 +84,10 @@ def test_the_chat_has_the_switch_and_keeps_raw_turns_out_of_the_history(env):
     client, _, _ = env
     login(client, ADMIN)
     page = client.get("/chat").data.decode()
-    assert 'class="barney"' in page and "Barney Style" in page
+    assert 'class="key barney" aria-pressed="false"' in page and "Barney Style" in page      # a glyph key, unlit by default
     assert "Mentat only" not in page
-    assert 'class="barney" data-tel="chat:barney-style" checked' not in page    # off by default: straight to Mentat
-    assert "const raw = !barneyBox.checked" in page                              # unticked means raw
+    assert "const raw = !barney.on" in page                                      # not lit means straight to Mentat
+    assert "barney.on = false" not in page and 'aria-pressed="true"' not in page.split('class="key barney"')[1][:60]
     assert 'const BARNEY_PHRASE = "Give it to me Barney Style"' in page          # switching it on fills the box
     assert "Mentat's own answer, no Haiku:" in page                              # raw answers are kept for Barney Style to explain
     assert "if (!raw) { history.push(" not in page

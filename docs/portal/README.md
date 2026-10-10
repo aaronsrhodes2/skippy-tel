@@ -442,9 +442,21 @@ still answers at its own address and nothing is deleted. Admin itself can't be r
 (`portal-modules`, ignored by Terraform), read fail-open (an unreadable list retires nothing) and written fail-closed (a read that fails or a list
 that can't be read is never overwritten). Retirement is manual for now; it does not yet use the activity record to suggest what is unused.
 
-**Pilot.** On the bridge: the launcher, Browser Games (`/play`), the Graveyard (inside Admin, which is otherwise still the old page) and the
-language choice in chat. Still the old look, to move in batches: chat's own screen, admin, game servers, music, video, experiments and the demos,
-the dashboard, request access, privacy.
+**Pages, not scrolling.** `Bridge.pager` (`static/bridge.js`) shows anything longer than a screen: the content flows into CSS columns exactly as wide
+as its panel; a page is a column; you flip with the keys or swipe sideways; a thin rail shows where you are. Used by the chat's conversation, tools
+and past-conversation lists.
+
+**Skippy chat on the bridge** (`templates/chat.html`, `_chat.html`): the conversation is pages; keys (all glyphs, each with its words for a screen reader):
+new chat, Barney Style (lit = Haiku explains; dark = straight to Mentat), language, tools, past conversations (Captain), saving, earlier, later, send;
+the language, tools, past-conversation and saving panels are sheets that slide over the conversation. Who spoke is a glyph (you, the can, the atom for
+Mentat on its own); what did the work is glyphs with a lamp (lit = answered, diamond = didn't, triangle = Mentat had no physics: also auto-filed as a
+gap). The one sentence of consent for saving stays as text. **The living background** (`static/bridge-alive.js`): neon wireframe spirals wander on
+random, regularly re-tuned paths, attach to each other or to the screen's corners with a wire for a few seconds, then snap loose with sparks; they
+brighten as a question goes out and an answer comes back. It draws dim behind the interface, never takes a tap, paints one still frame for anyone who
+asks for reduced motion, and uses no timers (the browser pauses it when the tab is hidden).
+
+**On the bridge now:** the launcher, Browser Games (`/play`), Skippy chat, and the Graveyard (inside Admin, which is otherwise still the old page). Still
+the old look, to move in batches: admin, game servers, music, video, experiments and the demos, the dashboard, request access, privacy.
 
 ## Telemetry: what the portal records, and where it goes
 

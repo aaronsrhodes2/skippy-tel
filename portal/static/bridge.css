@@ -117,3 +117,68 @@ svg.g { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width:
 /* controls for a form that lives on the bridge: keys and fields, same cut corners */
 .bridge select, .bridge input[type=text], .bridge textarea { border-radius: 0; background: #05090b; border: 1px solid var(--dim-green-hi); color: var(--ink); }
 .bridge select:focus, .bridge input:focus, .bridge textarea:focus { outline: none; border-color: var(--accent); }
+
+/* ── Everything above the living background (a page with a canvas.alive) ───────────────────────────────────────────── */
+canvas.alive { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+.bridge .hud, .bridge main, .bridge .foot { position: relative; z-index: 1; }
+
+/* ── Pages instead of scrolling: Bridge.pager (static/bridge.js) ────────────────────────────────────────────────── */
+.pg { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: pan-y; }
+.pg-flow { column-fill: auto; column-gap: 0; transition: transform .28s cubic-bezier(.2,.8,.2,1); will-change: transform; }
+.pips { flex: none; height: 3px; margin: 3px 0 0; background: var(--dim-green); position: relative; overflow: hidden; }
+.pips i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--eye, #ffcc00); transition: transform .28s ease, width .28s ease; }
+.pips[hidden] { display: block; visibility: hidden; }              /* keep its height: nothing jumps when a second page appears */
+
+/* ── Skippy chat ───────────────────────────────────────────────────────────────────────────────────────────────── */
+.chat-page { flex: 1; min-height: 0; margin: 0; display: flex; flex-direction: column; }
+.chat-bridge { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.chat-bridge .stage { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+.chat-bridge .log { background: rgba(0, 0, 0, .66); }                 /* no padding on a pager panel: a page is exactly its width */
+.turn { display: flex; gap: 8px; align-items: flex-start; margin: 8px 10px 0; padding: 8px 10px; font-size: .95rem; line-height: 1.38; break-inside: avoid-column;
+        background: #05090b; border: 1px solid var(--dim-green-hi); color: var(--ink);
+        clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+.turn > .g { flex: none; width: 20px; height: 20px; margin-top: 1px; }
+.turn .tx { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.turn.user { border-color: var(--eye, #ffcc00); color: #fff; } .turn.user > .g { color: var(--eye, #ffcc00); }
+.turn.assistant > .g { color: var(--green); } .turn.raw > .g { color: var(--cyan); }
+.turn.failed { border-color: var(--red); color: var(--red); }
+.turn code.code { font-size: .92rem; }
+.rcpt { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 6px; color: var(--muted); }
+.rcpt .g { width: 15px; height: 15px; } .rcpt .g.dim { opacity: .5; } .rcpt .why { font-size: .72rem; color: var(--amber); }
+.turn > div:not(.tx) { flex-basis: 100%; }
+.rcpt .lamp { width: 8px; height: 8px; }
+.clip { margin-top: 6px; }
+.chat-bridge form.ask { flex: none; margin: 0; }
+.chat-bridge textarea { display: block; width: 100%; height: 3.4em; resize: none; padding: 8px 10px; font-size: 1rem; background: #05090b; }
+.keybar { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+.keybar .grow { flex: 1; }
+.keybar .key { flex: 0 1 44px; width: auto; min-width: 30px; height: 42px; }
+.keybar .key .g { width: 20px; height: 20px; }
+.keybar .key .g.flip { transform: scaleX(-1); }
+.keybar .key.lit::after { background: var(--accent); } .keybar .key.lit .g { color: #000; }
+.keybar .key .lamp { position: absolute; top: 5px; right: 6px; width: 7px; height: 7px; z-index: 2; }
+.keybar .key.send[data-s="on"] .g { animation: breathe 1s ease-in-out infinite; }
+.key:disabled { opacity: .35; }
+.continuing { flex: none; display: flex; align-items: center; gap: 8px; padding: 2px 8px; background: rgba(0,0,0,.66); border-left: 3px solid var(--violet); font-size: .75rem; color: var(--ink); }
+.continuing[hidden] { display: none; }
+.continuing span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* a sheet: a panel that slides over the conversation (language, tools, past conversations, saving) */
+.sheet { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; gap: 8px; padding: 10px; background: #000; border: 1px solid var(--accent);
+         animation: rise .18s ease-out; }
+.sheet[hidden] { display: none; }
+@keyframes rise { from { transform: translateY(14px); opacity: 0; } to { transform: none; opacity: 1; } }
+.lang-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); gap: 8px; align-content: stretch; }
+.lang-opt, .verb, .mem-row { color: var(--ink); background: #05090b; border: 1px solid var(--dim-green-hi); border-radius: 0; padding: 8px 6px; font-size: .95rem; cursor: pointer;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+.lang-opt[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.lang-opt:active, .verb:active, .mem-row:active { background: var(--accent); color: #000; }
+.verb { display: flex; align-items: center; gap: 8px; width: calc(100% - 4px); margin: 4px 2px 4px; font: 600 .95rem var(--mono); break-inside: avoid-column; }
+.verb .g { width: 18px; height: 18px; color: var(--accent); }
+.mem-row { display: block; width: calc(100% - 4px); margin: 4px 2px 4px; text-align: left; font-size: .82rem; break-inside: avoid-column; overflow-wrap: anywhere; }
+.mem-row[data-s="on"] { border-color: var(--accent); }
+.mem-src { font: 700 .66rem var(--mono); color: var(--cyan); margin-right: 8px; }
+.mem-filter { flex: none; }
+.lamp.wait { display: block; margin: 30px auto; width: 16px; height: 16px; }
+.sheet .save-ok { display: block; padding: 12px; border: 1px solid var(--dim-green-hi); font-size: .9rem; color: var(--ink); }
+.sheet .save-ok input { width: 20px; height: 20px; vertical-align: -4px; margin-right: 8px; accent-color: var(--accent); }

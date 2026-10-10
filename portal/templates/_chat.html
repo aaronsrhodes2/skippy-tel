@@ -1,79 +1,128 @@
-{# Skippy chat: the Chat page shows it full size; base.html docks it on every
-   other page. One implementation; the conversation lives in sessionStorage,
-   so it follows you from page to page within a tab. #}
-<div class="skippy-chat">
+{# Skippy chat on the bridge (static/bridge.css): one phone screen, never a scroll. The conversation is a stack of PAGES you flip
+   or swipe through (a column per page: Bridge.pager in static/bridge.js); the controls are glyph keys; the things that used to be
+   panels (language, tools, past conversations, saving) are sheets that slide over the conversation. The conversation lives in
+   sessionStorage, so it follows you from page to page within a tab. Words on this screen are only what people type, what
+   Skippy and Mentat say, names and syntax (/physics, a conversation's title), and the one sentence that asks for consent to save.
+   Behind it, templates/chat.html runs the living background (static/bridge-alive.js); this script pulses it as words go back and forth. #}
+<div class="skippy-chat chat-bridge">
   {% if not chat_enabled %}
-    <p class="error">Chat isn't configured yet (no Anthropic API key).</p>
+    <p class="error"><span class="lamp" style="width:10px;height:10px" data-s="off"></span> Chat isn't configured yet (no Anthropic API key).</p>
   {% endif %}
-  <p class="help">Skippy runs on Haiku: quick and cheap.
-    Skippy can check the game server, start games{% if is_admin %}, restart it and read its logs{% endif %},
-    and hands physics to Mentat{% if is_admin %}, and makes music on your GPU at home{% endif %} — just ask, or open <b>Tools</b> to aim at one (e.g. <code>/physics</code>).</p>
-  {% if is_admin %}
-  <div class="continuing" hidden><span></span><button type="button" class="drop-ctx">✕</button></div>
-  <details class="memory">
-    <summary>Past conversations</summary>
-    <input type="search" placeholder="Filter by title or AI" aria-label="Filter past conversations" hidden>
-    <div class="mem-list"><span class="help">Loading from skippy-pc…</span></div>
-    <p class="help">Every saved conversation from Grok, Claude and the rest (Skippy Memory on Drive). Pick one and Skippy
-      carries on from it. New ones arrive when you drop an export in <code class="code">My Drive/Skippy Memory/inbox</code>; skippy-pc imports every 30 minutes.</p>
-  </details>
-  {% endif %}
-  <div class="log"></div>
-  <details class="verbs">
-    <summary>Tools</summary>
-    <div class="verb-list"><span class="help">Loading…</span></div>
-    <p class="help">Tap one to aim your message at it (it adds <code>/physics</code>, <code>/status</code>…);
-      or just talk and Skippy picks.</p>
-  </details>
+  <div class="stage">
+    {% if is_admin %}
+    <div class="continuing" hidden><span></span><button type="button" class="key sm drop-ctx" aria-label="Stop continuing this conversation" title="Stop continuing this conversation"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></div>
+    {% endif %}
+    <div class="pg log" aria-live="polite"><div class="pg-flow"></div></div>
+    <div class="pips" aria-hidden="true"><i></i></div>
+
+    <div class="sheet" data-sheet="lang" hidden>
+      <div class="lang-grid"></div>
+      <select class="lang" aria-label="Language" hidden>{% for code, name in chat_languages.items() %}<option value="{{ code }}">{{ name }}</option>{% endfor %}</select>
+    </div>
+    <div class="sheet" data-sheet="tools" hidden>
+      <div class="pg"><div class="pg-flow verb-list"></div></div>
+      <div class="pips" aria-hidden="true"><i></i></div>
+    </div>
+    {% if is_admin %}
+    <div class="sheet" data-sheet="memory" hidden>
+      <input type="search" class="mem-filter" aria-label="Filter past conversations" hidden>
+      <div class="pg"><div class="pg-flow mem-list"></div></div>
+      <div class="pips" aria-hidden="true"><i></i></div>
+    </div>
+    {% endif %}
+    {% if telemetry_on %}
+    <div class="sheet" data-sheet="rec" hidden>
+      <label class="save-ok"><input type="checkbox" class="save" data-tel="chat:allow-save"> Allow us to save your questions</label>
+      <p><a class="key sm" href="{{ url_for('privacy') }}" aria-label="Privacy: what this site records" title="Privacy: what this site records"><svg class="g" aria-hidden="true"><use href="#g-shield"/></svg></a></p>
+    </div>
+    {% endif %}
+  </div>
+
   <form class="ask">
-    <textarea rows="2" placeholder="Say something to Skippy" required></textarea>
-    <p><button type="submit">Send</button> <button type="button" class="clear">New chat</button>
-      <label class="lang-pick" title="Language"><span aria-hidden="true">🌐</span>
-        <select class="lang" aria-label="Language">{% for code, name in chat_languages.items() %}<option value="{{ code }}">{{ name }}</option>{% endfor %}</select></label></p>
-    <label class="help barney-ok"><input type="checkbox" class="barney" data-tel="chat:barney-style">
-      Barney Style: Haiku explains it simply. Off (the default): your words go straight to Mentat and its own answer comes back unedited</label>
-    {% if telemetry_on %}<label class="help save-ok"><input type="checkbox" class="save" data-tel="chat:allow-save">
-      Allow us to save your questions</label>
-      <span class="help">(off unless you tick it; <a href="{{ url_for('privacy') }}">what that means</a>)</span>{% endif %}
+    <textarea rows="2" aria-label="Message" required></textarea>
+    <div class="keybar">
+      <button type="button" class="key clear" aria-label="New chat" title="New chat"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
+      <button type="button" class="key barney" aria-pressed="false" data-tel="chat:barney-style" aria-label="Barney Style: Haiku explains it simply. Off: straight to Mentat, its own answer unedited" title="Barney Style: Haiku explains it simply. Off: straight to Mentat, its own answer unedited"><svg class="g" aria-hidden="true"><use href="#g-simple"/></svg><i class="lamp"></i></button>
+      <button type="button" class="key" data-open="lang" aria-label="Language" title="Language"><svg class="g" aria-hidden="true"><use href="#g-globe"/></svg></button>
+      <button type="button" class="key" data-open="tools" aria-label="Tools" title="Tools"><svg class="g" aria-hidden="true"><use href="#g-tools"/></svg></button>
+      {% if is_admin %}<button type="button" class="key" data-open="memory" aria-label="Past conversations" title="Past conversations"><svg class="g" aria-hidden="true"><use href="#g-past"/></svg></button>{% endif %}
+      {% if telemetry_on %}<button type="button" class="key rec" data-open="rec" aria-label="Allow us to save your questions" title="Allow us to save your questions"><svg class="g" aria-hidden="true"><use href="#g-rec"/></svg><i class="lamp"></i></button>{% endif %}
+      <span class="grow"></span>
+      <button type="button" class="key prev" aria-label="Earlier" title="Earlier"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <button type="button" class="key next" aria-label="Later" title="Later"><svg class="g flip" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <button type="submit" class="key send" aria-label="Send" title="Send"><svg class="g" aria-hidden="true"><use href="#g-send"/></svg></button>
+    </div>
   </form>
 </div>
 <script>
   (function (root) {
-    // History lives in this tab (sessionStorage) and is sent with each message;
-    // the server keeps nothing between requests.
+    // History lives in this tab (sessionStorage) and is sent with each message; the server keeps nothing between requests.
     const KEY = "skippy-chat";
-    const log = root.querySelector(".log"), form = root.querySelector(".ask");
-    const msg = form.querySelector("textarea"), sendBtn = form.querySelector("button[type=submit]");
-    // "Allow us to save your questions": off by default, remembered in this browser, sent with each message.
-    // Unticked, the portal keeps nothing of what is said here.
-    const saveBox = form.querySelector("input.save"), SAVE_KEY = "skippy-chat-allow-save";
+    const alive = () => window.skippyAlive || {pulse() {}};       // the living background, if this page has one
+    const form = root.querySelector(".ask"), log = root.querySelector(".log .pg-flow");
+    const msg = form.querySelector("textarea"), sendBtn = form.querySelector("button.send");
+    const logPager = Bridge.pager(root.querySelector(".log"), {pips: root.querySelector(".stage > .pips")});
+    const sheets = {}; root.querySelectorAll(".sheet").forEach(s => { sheets[s.dataset.sheet] = s; });
+    let openSheet = null;
+    function showSheet(name) {
+      if (openSheet) sheets[openSheet].hidden = true;
+      const same = openSheet === name; openSheet = same ? null : name;
+      root.querySelectorAll("[data-open]").forEach(k => k.classList.toggle("lit", k.dataset.open === openSheet));
+      if (openSheet) { sheets[openSheet].hidden = false; sheets[openSheet].querySelectorAll(".pg").forEach(p => p._pager && p._pager.refresh()); }
+      else logPager.refresh();
+    }
+    root.querySelectorAll("[data-open]").forEach(k => k.addEventListener("click", () => {
+      if (!sheets[k.dataset.open]) return;
+      showSheet(k.dataset.open);
+      if (k.dataset.open === "tools") loadTools();
+      if (k.dataset.open === "memory") loadMemory();
+    }));
+    document.addEventListener("keydown", e => { if (e.key === "Escape" && openSheet) showSheet(openSheet); });
+
+    // "Allow us to save your questions": off by default, remembered in this browser, sent with each message. Unticked, the portal keeps nothing of what is said here.
+    const saveBox = root.querySelector("input.save"), SAVE_KEY = "skippy-chat-allow-save", recKey = root.querySelector("button.rec");
+    function recLamp() { if (recKey) recKey.dataset.s = saveBox.checked ? "on" : "idle"; }
     if (saveBox) {
       try { saveBox.checked = localStorage.getItem(SAVE_KEY) === "yes"; } catch (e) {}
-      saveBox.addEventListener("change", () => { try { localStorage.setItem(SAVE_KEY, saveBox.checked ? "yes" : "no"); } catch (e) {} });
+      saveBox.addEventListener("change", () => { try { localStorage.setItem(SAVE_KEY, saveBox.checked ? "yes" : "no"); } catch (e) {} recLamp(); });
+      recLamp();
     }
+    let history = [];
+    try { history = JSON.parse(sessionStorage.getItem(KEY) || "[]"); } catch (e) { history = []; }
+
+    // The language of Skippy's replies (the only text on the portal that has a choice): remembered in this browser, sent with each message.
+    const langSel = root.querySelector("select.lang"), LANG_KEY = "skippy-chat-lang", langGrid = root.querySelector(".lang-grid");
+    try { langSel.value = localStorage.getItem(LANG_KEY) || (navigator.language || "en").slice(0, 2); } catch (e) {}
+    if (!langSel.value) langSel.value = "en";
+    function paintLangs() {
+      langGrid.replaceChildren(...[...langSel.options].map(o => {
+        const b = document.createElement("button"); b.type = "button"; b.className = "lang-opt"; b.textContent = o.textContent; b.dataset.code = o.value;
+        b.setAttribute("aria-pressed", o.value === langSel.value ? "true" : "false");
+        b.addEventListener("click", () => { langSel.value = o.value; try { localStorage.setItem(LANG_KEY, o.value); } catch (e) {} paintLangs(); showSheet("lang"); });
+        return b;
+      }));
+    }
+    paintLangs();
+
     // "Barney Style": Haiku puts it in plain words. OFF by default: the question goes straight to Mentat and its own
     // answer comes back unedited (no model either way). Remembered in this browser. Turning it ON fills the box with
     // "Give it to me Barney Style"; sending that makes Haiku read the whole chat, Mentat's own answers included (they
     // are kept in the history, marked as Mentat's), and explain it plainly using only what Mentat found.
-    const barneyBox = form.querySelector("input.barney"), BARNEY_KEY = "skippy-chat-barney-style";
-    // The language of Skippy's replies (the only text on the portal that has a choice): remembered in this browser, sent with each message.
-    const langSel = form.querySelector("select.lang"), LANG_KEY = "skippy-chat-lang";
-    try { langSel.value = localStorage.getItem(LANG_KEY) || (navigator.language || "en").slice(0, 2); } catch (e) {}
-    if (!langSel.value) langSel.value = "en";
-    langSel.addEventListener("change", () => { try { localStorage.setItem(LANG_KEY, langSel.value); } catch (e) {} });
     const BARNEY_PHRASE = "Give it to me Barney Style";
-    function barneyHint() { msg.placeholder = barneyBox.checked ? "Say something to Skippy" : "A physics question, straight to Mentat"; }
-    try { barneyBox.checked = localStorage.getItem(BARNEY_KEY) === "yes"; } catch (e) {}
-    barneyBox.addEventListener("change", () => {
-      try { localStorage.setItem(BARNEY_KEY, barneyBox.checked ? "yes" : "no"); } catch (e) {}
-      barneyHint();
+    const barney = {key: form.querySelector("button.barney"), on: false};
+    const BARNEY_KEY = "skippy-chat-barney-style";
+    function paintBarney() { barney.key.setAttribute("aria-pressed", barney.on ? "true" : "false"); barney.key.dataset.s = barney.on ? "on" : "idle"; barney.key.classList.toggle("lit", barney.on); }
+    try { barney.on = localStorage.getItem(BARNEY_KEY) === "yes"; } catch (e) {}
+    paintBarney();
+    barney.key.addEventListener("click", () => {
+      barney.on = !barney.on;
+      try { localStorage.setItem(BARNEY_KEY, barney.on ? "yes" : "no"); } catch (e) {}
+      paintBarney();
       // Switching it on writes the request for you: Haiku then explains the whole chat so far in plain words.
-      if (barneyBox.checked && !msg.value.trim()) { msg.value = BARNEY_PHRASE; msg.focus(); }
-      else if (!barneyBox.checked && msg.value.trim() === BARNEY_PHRASE) msg.value = "";
+      if (barney.on && !msg.value.trim()) { msg.value = BARNEY_PHRASE; msg.focus(); }
+      else if (!barney.on && msg.value.trim() === BARNEY_PHRASE) msg.value = "";
     });
-    barneyHint();
-    let history = [];
-    try { history = JSON.parse(sessionStorage.getItem(KEY) || "[]"); } catch (e) { history = []; }
+
     // A saved conversation being continued (Skippy Memory; admins only): sent with each message, kept in this tab.
     const CTX = KEY + "-ctx";
     let context = null;
@@ -82,11 +131,10 @@
     function showContext() {
       if (!banner) return;
       banner.hidden = !context;
-      if (context) banner.querySelector("span").textContent = "Continuing: " + context.title + " (" +
-        context.source + (context.updated ? ", " + context.updated.slice(0, 10) : "") + ")" + (context.cut ? ", newest part" : "");
+      if (context) banner.querySelector("span").textContent = context.title + " · " + context.source + (context.updated ? " · " + context.updated.slice(0, 10) : "") + (context.cut ? " ✂" : "");
+      logPager.refresh();
     }
     function setContext(c) { context = c; try { c ? sessionStorage.setItem(CTX, JSON.stringify(c)) : sessionStorage.removeItem(CTX); } catch (e) {} showContext(); }
-    showContext();
 
     // Text between backticks (join codes, addresses, commands) becomes a one-click copy chip; static/copy.js gives it its Copy button.
     function fill(el, text) {
@@ -99,26 +147,53 @@
         } else if (part) el.appendChild(document.createTextNode(part));
       });
     }
-
+    const SVG = "http://www.w3.org/2000/svg";
+    function glyph(id, cls) {
+      const s = document.createElementNS(SVG, "svg"); s.setAttribute("class", "g" + (cls ? " " + cls : "")); s.setAttribute("aria-hidden", "true");
+      const u = document.createElementNS(SVG, "use"); u.setAttribute("href", "#g-" + id); s.appendChild(u); return s;
+    }
+    // Who said it is a glyph, not a name: you, Skippy (the can), or Mentat on its own (the atom).
     function add(role, text, extra) {
       const div = document.createElement("div");
       div.className = "turn " + role + (extra ? " " + extra : "");
-      fill(div, (role === "user" ? "You: " : extra === "raw" ? "Mentat (Haiku off): " : "Skippy: ") + text);
+      const body = document.createElement("div"); body.className = "tx";
+      div.append(glyph(role === "user" ? "user" : extra === "raw" ? "atom" : "can"), body);
+      fill(body, text);
       log.appendChild(div);
-      log.scrollTop = log.scrollHeight;
-      return div;
+      logPager.refresh(); logPager.last();
+      return body;
     }
     function save() { try { sessionStorage.setItem(KEY, JSON.stringify(history)); } catch (e) {} }
     history.forEach(t => add(t.role, t.content));
+
+    // What did the work, as glyphs: the tool, and a lamp (lit = answered, diamond = didn't, triangle = Mentat had no physics for it).
+    const TOOL_GLYPH = {ask_mentat: "atom", now_playing: "wave", make_music: "wave", music_result: "wave"};
+    function receipt(data, raw) {
+      const note = document.createElement("div"); note.className = "rcpt";
+      const used = [...new Set(data.tools || [])];
+      if (!used.length) {
+        const l = document.createElement("i"); l.className = "lamp"; l.dataset.s = data.mentat_available ? "idle" : "off";   // from its own knowledge; off = Mentat is down
+        note.append(glyph("can"), l);
+      }
+      used.forEach(t => {
+        const mentat = t === "ask_mentat", l = document.createElement("i"); l.className = "lamp";
+        l.dataset.s = mentat ? (data.gap ? "warn" : data.mentat_where === "home" ? "on" : "off") : "on";
+        note.append(glyph(TOOL_GLYPH[t] || "server"), l);
+      });
+      if (raw && !data.gap) note.append(glyph("simple", "dim"));
+      if (data.gap && data.gap.reason) { const r = document.createElement("span"); r.className = "why"; r.textContent = data.gap.reason; note.append(r); }
+      return note;
+    }
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const text = msg.value.trim();
       if (!text) return;
-      const raw = !barneyBox.checked;          // Barney Style off = straight to Mentat
+      const raw = !barney.on;                   // Barney Style off = straight to Mentat
       add("user", text);
       msg.value = "";
-      sendBtn.disabled = true;
+      sendBtn.disabled = true; sendBtn.dataset.s = "on";
+      alive().pulse(1);                         // a question goes out: the background stirs
       const pending = add("assistant", "…", raw ? "raw" : "");
       try {
         const res = await fetch("{{ url_for('chat.send') }}", {
@@ -129,43 +204,40 @@
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || res.statusText);
-        fill(pending, (raw ? "Mentat (Haiku off): " : "Skippy: ") + data.reply);
-        const used = [...new Set(data.tools || [])];   // receipts: which tools did the work
-        const note = document.createElement("div");
-        note.className = "receipt";
-        note.textContent = used.length ? "tools: " + used.map(t => ({ask_mentat: data.mentat_where === "home" ? "Mentat + Qwen (skippy-pc)" : "Mentat (didn't answer)",
-                           now_playing: "Bilby", make_music: "ACE-Step on skippy-pc", music_result: "ACE-Step on skippy-pc"})[t] || t.replace(/_/g, " ")).join(", ")
-          : (data.mentat_available ? "answered from the model's own knowledge" : "answered from the model's own knowledge (Mentat offline: skippy-pc or Qwen is down)");
-        if (data.gap) note.textContent += " · logged as a Mentat gap to fix" + (data.gap.reason ? ": " + data.gap.reason : "");
-        else if (raw) note.textContent += " · Haiku off: Mentat's answer exactly as it came back";
-        pending.append(note);
+        fill(pending, data.reply);
+        alive().pulse(data.gap ? 0.6 : 1.8);    // an answer comes back: it surges (less so for "failed due to incompetence")
+        pending.parentElement.append(receipt(data, raw));
         (data.media || []).forEach(m => {           // clips skippy-pc made for this reply
           const clip = document.createElement("div"); clip.className = "clip";
-          const label = document.createElement("div"); label.className = "receipt";
-          label.textContent = "♪ " + (m.title || "clip") + (m.seconds ? " · " + m.seconds + " s" : "");
+          const label = document.createElement("div"); label.className = "rcpt";
+          label.append(glyph("wave")); if (m.title) { const t = document.createElement("span"); t.className = "why"; t.textContent = m.title + (m.seconds ? " · " + m.seconds + "s" : ""); label.append(t); }
           const audio = document.createElement("audio");
           audio.controls = true; audio.preload = "metadata"; audio.src = m.url; audio.style.width = "100%";
-          clip.append(label, audio); pending.append(clip);
+          clip.append(label, audio); pending.parentElement.append(clip);
         });
         // Mentat's own answers go in the history marked as such, so Barney Style can explain them (and only them).
         history.push({role: "user", content: text},
                      {role: "assistant", content: raw ? "Mentat's own answer, no Haiku:\n" + data.reply : data.reply});
         save();
       } catch (err) {
-        pending.textContent = (raw ? "Mentat: " : "Skippy: ") + err.message;
-        pending.classList.add("failed");
+        pending.textContent = err.message;
+        pending.parentElement.classList.add("failed");
       } finally {
-        sendBtn.disabled = false;
+        sendBtn.disabled = false; delete sendBtn.dataset.s;
+        logPager.refresh(); logPager.last();
         msg.focus();
       }
     });
     msg.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
     });
-    root.querySelector(".clear").addEventListener("click", () => { history = []; save(); log.replaceChildren(); setContext(null); });
+    root.querySelector(".clear").addEventListener("click", () => { history = []; save(); log.replaceChildren(); setContext(null); logPager.refresh(); });
+    form.querySelector(".prev").addEventListener("click", () => logPager.go(logPager.page() - 1));
+    form.querySelector(".next").addEventListener("click", () => logPager.go(logPager.page() + 1));
+    if (banner) banner.querySelector(".drop-ctx").addEventListener("click", () => setContext(null));
+    showContext();
 
     // ── Past conversations (Skippy Memory): a job for skippy-pc, polled until it answers ──
-    const memory = root.querySelector(".memory");
     async function askHome(body) {
       const r = await fetch("{{ url_for('chat.memory_ask') if is_admin else '' }}", {method: "POST",
         headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
@@ -179,61 +251,56 @@
       }
       throw new Error("skippy-pc didn't answer within a minute.");
     }
-    if (memory) {
+    function loadMemory() {
+      const memory = sheets.memory; if (!memory || memory.dataset.loaded) return;
+      memory.dataset.loaded = "1";
       const box = memory.querySelector(".mem-list"), filter = memory.querySelector("input[type=search]");
       let rows = [];
+      const wait = document.createElement("i"); wait.className = "lamp wait"; wait.dataset.s = "on"; box.replaceChildren(wait);
       function paint() {
         const q = filter.value.trim().toLowerCase();
         const shown = rows.filter(r => !q || (r.title + " " + r.source + " " + r.summary).toLowerCase().includes(q)).slice(0, 100);
         box.replaceChildren(...shown.map(r => {
           const b = document.createElement("button"); b.type = "button"; b.className = "mem-row";
           const src = document.createElement("span"); src.className = "mem-src"; src.textContent = r.source;
-          b.append(src, document.createTextNode(r.title + " · " + (r.updated || "").slice(0, 10) + " · " + r.messages + " msgs"));
+          b.append(src, document.createTextNode(r.title + " · " + (r.updated || "").slice(0, 10) + " · " + r.messages));
           b.addEventListener("click", async () => {
-            b.disabled = true; b.textContent = "Fetching " + r.title + "…";
+            b.disabled = true; b.dataset.s = "on";
             try {
               const c = await askHome({key: r.key});
               history = []; save(); log.replaceChildren();
               setContext({source: c.source, title: c.title, updated: c.updated, text: c.text, cut: c.cut});
-              memory.open = false; msg.focus();
-            } catch (err) { b.textContent = err.message; }
+              showSheet("memory"); msg.focus();
+            } catch (err) { b.disabled = false; b.textContent = err.message; }
           });
           return b;
         }));
-        if (!shown.length) box.textContent = rows.length ? "Nothing matches." : "No saved conversations yet.";
+        if (!shown.length) box.textContent = "∅";
+        memory.querySelector(".pg")._pager.refresh();
       }
       filter.addEventListener("input", paint);
-      memory.addEventListener("toggle", async () => {
-        if (!memory.open || memory.dataset.loaded) return;
-        memory.dataset.loaded = "1";
-        try { const got = await askHome(); rows = got.conversations || []; filter.hidden = false; paint(); }
-        catch (err) { box.textContent = err.message; delete memory.dataset.loaded; }
-      });
+      askHome().then(got => { rows = got.conversations || []; filter.hidden = false; paint(); })
+        .catch(err => { box.textContent = err.message; delete memory.dataset.loaded; });
     }
-    if (banner) banner.querySelector(".drop-ctx").addEventListener("click", () => setContext(null));
 
-    // Direct verbs: a collapsible, categorised badge list, fetched on first open.
-    const verbs = root.querySelector(".verbs"), list = root.querySelector(".verb-list");
-    verbs.addEventListener("toggle", async () => {
-      if (!verbs.open || verbs.dataset.loaded) return;
-      verbs.dataset.loaded = "1";
-      try {
-        const cats = await (await fetch("{{ url_for('chat.badges') }}")).json();
-        list.replaceChildren(...Object.entries(cats).map(([cat, items]) => {
-          const row = document.createElement("div"); row.className = "verb-cat";
-          const h = document.createElement("span"); h.className = "verb-cat-name"; h.textContent = cat;
-          row.append(h, ...items.map(it => {
-            const b = document.createElement("button"); b.type = "button"; b.className = "verb";
-            b.textContent = it.label; b.title = "/" + it.verb;
-            b.onclick = () => {
-              msg.value = "/" + it.verb + " " + msg.value.replace(/^\/[a-z]+\s*/i, "");
-              msg.focus(); msg.setSelectionRange(msg.value.length, msg.value.length);
-            };
-            return b;
-          }));
-          return row;
-        }));
-      } catch (e) { list.textContent = "Couldn't load the tool list."; delete verbs.dataset.loaded; }
-    });
+    // Direct verbs: the syntax is the label (/physics), a glyph says which tool it aims at; fetched on first open.
+    const VERB_GLYPH = {physics: "atom", music: "wave"};
+    function loadTools() {
+      const tools = sheets.tools, list = tools.querySelector(".verb-list"); if (tools.dataset.loaded) return;
+      tools.dataset.loaded = "1";
+      fetch("{{ url_for('chat.badges') }}").then(r => r.json()).then(cats => {
+        list.replaceChildren(...Object.entries(cats).flatMap(([cat, items]) => items.map(it => {
+          const b = document.createElement("button"); b.type = "button"; b.className = "verb";
+          b.append(glyph(VERB_GLYPH[cat.toLowerCase()] || "server"), document.createTextNode("/" + it.verb)); b.title = it.label;
+          b.onclick = () => {
+            msg.value = "/" + it.verb + " " + msg.value.replace(/^\/[a-z]+\s*/i, "");
+            showSheet("tools"); msg.focus(); msg.setSelectionRange(msg.value.length, msg.value.length);
+          };
+          return b;
+        })));
+        tools.querySelector(".pg")._pager.refresh();
+      }).catch(() => { list.textContent = "∅"; delete tools.dataset.loaded; });
+    }
+    root.querySelectorAll(".sheet .pg").forEach(p => { Bridge.pager(p, {pips: p.parentElement.querySelector(".pips")}); });
   })(document.currentScript.previousElementSibling);
 </script>

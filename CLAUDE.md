@@ -127,8 +127,9 @@ Actions (the sandbox can't reach GCP or run.app directly):
   swiped, not scrolled), says things with **glyphs** from `templates/_glyphs.html` (no emoji, no
   words where a symbol will do; words only for names people look up: a server, a code, a password),
   and looks like a starship's controls (Maxolhx-inspired: cut corners, claws and fangs, lamps that
-  breathe, a light running along a live control). Pilot done: launcher, Browser Games, the Graveyard.
-  **Not yet on the bridge** (still the old scrolling look, to migrate in batches): chat, admin, game
+  breathe, a light running along a live control). On the bridge: launcher, Browser Games, the Graveyard, Skippy chat (paged conversation, glyph keys,
+  sheets for language/tools/past chats/saving, and a living neon-spiral background:
+  `static/bridge-alive.js`). **Not yet** (old scrolling look, to migrate in batches): admin, game
   servers, music, video, experiments, the dashboard and the rest.
 - Copyable things (the Captain's rule: **one click, everywhere**): anything a person is expected to
   copy (an invite code, `ip:port`, a password, a command, a block to paste) is marked

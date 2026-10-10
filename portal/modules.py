@@ -34,8 +34,8 @@ class Module:
 
 
 MODULES = (
-    Module("skippy", "eye", "chat.index", "Skippy chat"),
-    Module("games", "server", "dashboard.index", "Game servers"),
+    Module("skippy", "can", "chat.index", "Skippy chat"),
+    Module("games", "console", "dashboard.index", "Game servers"),
     Module("play", "ship", "play_index", "Browser games"),
     Module("music", "wave", "music.player_page", "Bilby's Audio Service"),
     Module("video", "lens", "video.video_page", "Nagatha's Video Service"),

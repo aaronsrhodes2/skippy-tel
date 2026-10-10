@@ -937,7 +937,7 @@ def test_there_is_one_chat_interface_and_it_is_the_skippy_app(env):
     for url in ("/games", "/games/dragonwilds", "/experiments", "/"):
         page = client.get(url).data.decode()
         assert 'id="skippy-dock"' not in page and 'class="skippy-chat"' not in page, url   # no second chat UI anywhere
-    assert client.get("/chat").data.decode().count('class="skippy-chat"') == 1
+    assert client.get("/chat").data.decode().count('class="skippy-chat chat-bridge"') == 1
     client.post("/chat/send", json={"message": "hi", "page": "/games/dragonwilds"})
     system, _ = skippy.seen
     assert "/games/dragonwilds" in system and "NOT the Captain" in system   # FRIEND isn't an admin
