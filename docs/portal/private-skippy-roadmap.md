@@ -20,14 +20,16 @@ conversations and unpins each when the task is done; nothing else.
 | 5 | Pictures: paste, drop or pick a screenshot (up to 4); browser to portal to reporter to bridge, saved for Claude Code to Read | done, live (`eeb7092`); untested with a real paste | 21:05 | 21:20 |
 | 6 | Pinned conversations (Active / Earlier, unpin with ×); a browser that never opened the chat opens the latest conversation | done, live; pins are per browser | 21:10 | 21:15 |
 | 7 | Stage 1, the harness: a conversation is no longer locked to one project; the model picks the folder; "new workspace" makes a private GitHub repo, a folder, a CLAUDE.md | **done** (`a7c66c3`, after the Captain's "proceed"): the prompt's one-project rule is replaced by roaming and new-workspace paragraphs; takes effect on the next run (the prompt is read fresh each run, no bridge restart). Not yet exercised by a real "start a workspace" request | 21:25 | 21:45 |
-| 8 | Lift the old rules: Mentat and memory allowed (mail and calendar stay out unless he says) | **blocked at 21:46: the classifier refused this second edit to the private Skippy's prompt (the "For now you do not use skippy-tel-core services" guardrail line); needs the Captain's own yes or edit. Wording ready: allow Mentat and memory, keep mail and calendar out** | 21:45 | |
+| 8 | Lift the old rules: Mentat and memory allowed (mail and calendar stay out unless he says) | **partly done (22:05)**: Mentat is allowed, and made mandatory for physics, by item 17's prompt rule; the old "out of scope" line is gone, so memory is neither forbidden nor invited; mail, calendar, Bilby and music stay out unless he asks in the chat | 21:45 | 22:05 |
 | 9 | Inline media: pictures Skippy makes or finds, audio clips with a small player, markdown and code rendered | queued | | |
 | 10 | Steer mid-run: type while Skippy works and he gets it at his next step | queued | | |
 | 11 | One-tap Yes / No when Skippy asks a question | queued | | |
 | 12 | Search across every conversation | queued | | |
 | 13 | A small context meter ("start fresh soon") | queued | | |
 | 14 | Pins saved on the server so they follow him across devices | queued | | |
-| 16 | /me themed deep purple on black with white text, and Skippy's living background behind the private chat in purple (`data-app="me"`, tokens in `bridge-panes.css`, test `test_me_theme.py` pins contrast) | done, pushing (21:55) | 21:50 | 21:55 |
+| 16 | /me themed deep purple on black with white text, and Skippy's living background behind the private chat in purple (`data-app="me"`, tokens in `bridge-panes.css`, test `test_me_theme.py` pins contrast) | done, live (`ec47a42`) | 21:50 | 22:00 |
+| 17 | PLATINUM 21 reinforced: all physics in the portal chat and Skippy Desktop goes to Mentat. Prompt rule in `workshop_prompt.md` (pinned by a test), the rule in PLATINUM_RULES.md names every chat surface | done in code (22:05); live after this push and the next run | 22:00 | 22:05 |
+| 18 | Skills and MCP servers from this editor into Skippy Desktop: plugins, synced skills and the claude.ai connectors are already shared (same `~/.claude`). Missing: user-scope MCP servers `mentat`, `ollama`, `flask-sd` | **blocked: the classifier refused `claude mcp add-json --scope user` (commands in the Captain's reply, or his permission rule)**. Desktop-app-only tools (Blender, computer use, Claude in Chrome, the browser pane, terminal, scheduled tasks) cannot be imported | 22:00 | |
 | 15 | Mic and Skippy's voice tried in a real browser | **done: the Captain confirmed voice-to-text and text-to-voice work (2026-10-10, 21:3x)** | | 21:3x |
 
 Decisions taken on the Captain's behalf (he said "proceed"; change any of them by saying so): the chat is exempt from the portal's
