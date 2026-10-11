@@ -211,7 +211,7 @@
     <a class="key" href="{{ (self.hud_back() | trim) or url_for('apps') }}" aria-label="Back" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></a>
   {% endif %}
   <span class="rail"></span>
-  <svg class="g mark" aria-hidden="true"><use href="#g-{{ self.glyph() | trim }}"/></svg>
+  {% if (self.glyph() | trim) == 'can' %}<img class="g mark face" src="{{ url_for('static', filename='skippy/skippy-head.png') }}" alt="Skippy" width="28" height="28" style="border-radius:50%">{% else %}<svg class="g mark" aria-hidden="true"><use href="#g-{{ self.glyph() | trim }}"/></svg>{% endif %}
   <span class="rail"></span>
   <button type="button" class="key" id="fs-key" hidden aria-label="Full screen" title="Full screen"><svg class="g" aria-hidden="true"><use href="#g-fs"/></svg></button>
   {% if user and on_apps %}

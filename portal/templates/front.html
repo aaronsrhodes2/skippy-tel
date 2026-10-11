@@ -25,6 +25,7 @@
   {% include "_chat.html" %}
   {% endif %}
 </section>
+{% include "_skippy3d.html" %}
 <script src="{{ url_for('static', filename='bridge-alive.js') }}"></script>
 <script>
   Bridge.alive(document.querySelector("canvas.alive"){% if captain %}, {colors: ["#a64dff", "#7a2cf0", "#d08cff", "#c040ff", "#5b2bd6", "#e6b3ff"]}{% endif %});

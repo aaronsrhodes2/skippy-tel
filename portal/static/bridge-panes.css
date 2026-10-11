@@ -92,3 +92,23 @@ body[data-app="me"] .adm { z-index: 1; }
 .chat-page > .mode { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .chat-page > .mode[hidden] { display: none; }
 .chat-page > .mode > .w.me-chat { flex: 1; min-height: 0; }
+
+/* Skippy in the corner (templates/_skippy3d.html, static/skippy-3d.js). Pointer events pass through except on his two small keys. */
+.skippy3d { position: fixed; right: 10px; bottom: 150px; width: 150px; height: 190px; z-index: 5; pointer-events: none; }
+.skippy3d .s3-stage { position: absolute; inset: 0; }
+.skippy3d canvas, .skippy3d .s3-still { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.skippy3d.is-3d .s3-still { display: none; }
+.skippy3d:not(.is-3d):not(.is-reduced) .s3-still { animation: s3-bob 3.2s ease-in-out infinite; }
+@keyframes s3-bob { 50% { transform: translateY(-4px) rotate(1.5deg); } }
+.skippy3d .s3-x, .skippy3d .s3-face { pointer-events: auto; position: absolute; border: 0; background: transparent; padding: 0; cursor: pointer; }
+.skippy3d .s3-x { top: -4px; right: -2px; width: 24px; height: 24px; border-radius: 50%; color: #fff; background: #000a; font-size: 1.1rem; line-height: 1; opacity: 0; transition: opacity .15s; }
+.skippy3d:hover .s3-x, .skippy3d .s3-x:focus-visible { opacity: 1; }
+.skippy3d .s3-face { display: none; right: 0; bottom: 0; width: 40px; height: 40px; border-radius: 50%; background: #0a0c18; border: 1px solid var(--dim-green, #006644); }
+.skippy3d .s3-face img { width: 100%; height: 100%; border-radius: 50%; }
+.skippy3d.is-hidden { width: 40px; height: 40px; }
+.skippy3d.is-hidden .s3-stage, .skippy3d.is-hidden .s3-x { display: none; }
+.skippy3d.is-hidden .s3-face { display: block; }
+@media (max-width: 640px) { .skippy3d { width: 96px; height: 122px; bottom: 160px; right: 4px; } }
+@media (max-height: 520px) { .skippy3d:not(.is-hidden) { display: none; } }
+
+.turn > img.g.face, .note > img.g.face { border-radius: 50%; object-fit: cover; background: #0a0c18; }

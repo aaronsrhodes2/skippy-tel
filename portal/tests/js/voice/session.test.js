@@ -26,7 +26,7 @@ function node(tag) {
 }
 const gStreams = [];
 Object.defineProperty(globalThis, "navigator", { configurable: true, value: { mediaDevices: { getUserMedia: async (c) => { const s = { c, getTracks: () => [{ stop() { s.stopped = true; } }] }; gStreams.push(s); return s; } } } });
-globalThis.MediaRecorder = FakeRec; globalThis.AudioContext = FakeCtx; globalThis.Audio = class { pause() {} play() { return Promise.resolve(); } };
+globalThis.MediaRecorder = FakeRec; globalThis.AudioContext = FakeCtx; globalThis.Audio = class { addEventListener() {} pause() {} play() { return Promise.resolve(); } };
 globalThis.document = { createElement: node };
 globalThis.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } };
 globalThis.speechSynthesis = { speak(u) { spoken.push(u.text); setTimeout(() => u.onend && u.onend(), 100); }, cancel() {} };

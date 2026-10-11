@@ -111,6 +111,9 @@
     if (ear && !canRecord) ear.hidden = true;
     let pass = null, wanted = null, session = null, playing = null, chat = false, awaiting = false, keepUntil = 0, standbyOn = false, shared = null;     // chat: a no-touch conversation is on; keepUntil: a parting message stays up till then
     const audio = new Audio();
+    const speaking_ = function (on) { try { root.dispatchEvent(new CustomEvent("skippy-speaking", { detail: on })); } catch (e) { /* no DOM events: nothing animates */ } };      // the animated Skippy (static/skippy-3d.js) talks while this plays
+    audio.addEventListener("playing", function () { if (audio.src !== SILENCE) speaking_(true); });
+    ["ended", "pause", "error", "emptied"].forEach(function (ev) { audio.addEventListener(ev, function () { speaking_(false); }); });
 
     function paint(el, s) { if (!el) return; if (s) el.dataset.s = s; else delete el.dataset.s; el.classList.toggle("lit", s === "on"); }
     function warn(el) { paint(el, "warn"); setTimeout(function () { if (el.dataset.s === "warn") paint(el, null); }, 4000); }

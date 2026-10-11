@@ -155,7 +155,9 @@
       });
     }
     const SVG = "http://www.w3.org/2000/svg";
+    const FACE = "{{ url_for('static', filename='skippy/skippy-head.png') }}";
     function glyph(id, cls) {
+      if (id === "can") { const i = document.createElement("img"); i.className = "g face" + (cls ? " " + cls : ""); i.src = FACE; i.alt = ""; i.width = i.height = 20; return i; }     // Skippy is his face now, not a can
       const s = document.createElementNS(SVG, "svg"); s.setAttribute("class", "g" + (cls ? " " + cls : "")); s.setAttribute("aria-hidden", "true");
       const u = document.createElementNS(SVG, "use"); u.setAttribute("href", "#g-" + id); s.appendChild(u); return s;
     }

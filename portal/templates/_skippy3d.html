@@ -1,0 +1,9 @@
+{# Skippy, animated, in the corner of the chat (static/skippy-3d.js). The still picture is what shows until the 3D model is ready, and
+   what stays if WebGL or the model fails or motion is reduced. three.js is pinned and loaded from jsDelivr. #}
+<div class="skippy3d" id="skippy3d" data-model="{{ url_for('static', filename='skippy/skippy.glb') }}">
+  <div class="s3-stage"><img class="s3-still" src="{{ url_for('static', filename='skippy/skippy-full.png') }}" alt="Skippy the Magnificent" width="540" height="660" decoding="async"></div>
+  <button type="button" class="s3-x" aria-label="Hide Skippy" title="Hide Skippy">&times;</button>
+  <button type="button" class="s3-face" aria-label="Show Skippy" title="Show Skippy"><img src="{{ url_for('static', filename='skippy/skippy-head.png') }}" alt="" width="256" height="256"></button>
+</div>
+<script type="importmap">{"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="module" src="{{ url_for('static', filename='skippy-3d.js') }}"></script>
