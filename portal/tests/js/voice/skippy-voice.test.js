@@ -63,3 +63,14 @@ test("saying stop alone cancels the send; stop inside a sentence does not", () =
   for (const no of ["stop the server and redeploy", "no I want it orange", "please wait for the deploy", "cancel the subscription", "go", "stopwatch"]) assert.ok(!V.STOP_RE.test(no), no);
   assert.equal(V.SEND_DELAY_MS, 4000);
 });
+
+test("the wake word: 'Skippy' anywhere near the start wakes it, and what follows is the message", () => {
+  const cases = [["Hey Skippy, turn that down", "turn that down"], ["Skippy.", ""], ["OK Skippy", ""], ["um skippy what time is it", "what time is it"],
+                 ["Hi Skippie! play some music", "play some music"], ["skippy,   lights off", "lights off"]];
+  for (const [said, rest] of cases) assert.deepEqual(V.wakeSplit(said), { woke: true, rest }, said);
+});
+
+test("room talk without the word never wakes it", () => {
+  for (const said of ["the skipping rope", "what are we having for dinner", "skip this one", "", null, "my friend Skip came by", "x ".repeat(40) + "skippy"])
+    assert.equal(V.wakeSplit(said).woke, false, String(said));                                    // (a word after the first 60 characters is not an address)
+});

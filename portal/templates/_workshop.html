@@ -16,7 +16,7 @@
   .me-chat .turn.assistant { background: var(--dim-green); border: 1px solid var(--dim-green-hi); color: var(--ink); }
   .me-chat .turn.failed { border-color: var(--red); }
   .me-chat .turn p { margin: 0 0 6px; }
-  .me-chat .turn .cp { float: right; margin: 0 0 0 8px; padding: 0 6px; min-width: 0; font-size: .7rem; opacity: .55; }
+  .me-chat .turn .cp { float: right; margin: 0 4px 2px 8px; padding: 0 6px; min-width: 0; font-size: .7rem; opacity: .55; clip-path: none; }     /* clip-path: none: the portal's button notch must not cut the label */
   .me-chat .turn .cp:hover { opacity: 1; }
   .me-chat .todo { margin: 6px 0 8px; padding: 6px 10px; border: 1px solid var(--dim-green-hi); background: #000; font-size: .85rem; }
   .me-chat .todo .th { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 3px; }
@@ -149,6 +149,7 @@
     <div class="actions">
       <input type="file" id="ps-file" accept="image/*" multiple hidden>
       <button type="button" class="key vk" id="ps-img" aria-label="Attach an image" title="Attach an image (or paste or drop one)"><svg class="g" aria-hidden="true"><use href="#g-image"/></svg></button>
+      <button type="button" class="key vk ear" id="ps-ear" aria-pressed="false" aria-label="Standby: listen for Skippy" title="Standby: listen for Skippy"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg><i class="lamp"></i></button>
       <button type="button" class="key vk mic" id="ps-mic" aria-label="Speak your message" title="Speak your message"><svg class="g" aria-hidden="true"><use href="#g-mic"/></svg><i class="lamp"></i></button>
       <button type="button" class="key vk spk" id="ps-spk" aria-pressed="false" aria-label="Read replies aloud" title="Read replies aloud"><svg class="g" aria-hidden="true"><use href="#g-vol"/></svg><i class="lamp"></i></button>
       <button type="submit" class="send" id="ps-send">Send</button>
@@ -171,7 +172,7 @@
     const convsMsg = root.querySelector("#ps-convs-msg"), convsList = root.querySelector("#ps-convs-list");
     const notifyBox = root.querySelector("#ps-notify");
     const queueBox = root.querySelector("#ps-queue"), attachBox = root.querySelector("#ps-attach"), fileIn = root.querySelector("#ps-file"), imgBtn = root.querySelector("#ps-img");
-    const voice = SkippyVoice.attach({gate: "{{ url_for('chat.voice_gate') }}", mic: root.querySelector("#ps-mic"), speaker: root.querySelector("#ps-spk"),
+    const voice = SkippyVoice.attach({gate: "{{ url_for('chat.voice_gate') }}", mic: root.querySelector("#ps-mic"), ear: root.querySelector("#ps-ear"), speaker: root.querySelector("#ps-spk"),
       box: text, status: root.querySelector("#ps-vstat"), onSend: () => form.requestSubmit()});          // hands-free: a pause ends it, a countdown sends it
     const K = {conv: "ps-conv", log: "ps-log", task: "ps-task", project: "ps-project"};
     const SEND = "{{ url_for('me.workshop_send') }}", EVENTS = "{{ url_for('me.workshop_events') }}",
@@ -262,6 +263,7 @@
         }
         return;
       }
+      addCopy(box, turn);                          // at the top, like a prompt's: at the bottom corner the turn's notch clipped it (on a tablet, half of it)
       let steps = null, sum = null, names = [], count = 0, todo = null, question = null;     // a run of tool calls folds into one line; tap it for each command in full
       (turn.parts || []).forEach(p => {
         if (p.t === "tool" && p.name === "TodoWrite") { todo = p; return; }               // his task list: shown below as a live checklist, not as a step
@@ -298,7 +300,6 @@
         box.appendChild(ask); askBox = ask;
       }
       if (turn.note) box.appendChild(el("div", "note" + (turn.bad ? " bad" : ""), turn.note));
-      addCopy(box, turn);
       box.classList.toggle("failed", !!turn.bad);
       if (turn.t0 && !turn.note && ((running && running.turn === turn) || turn.pending)) {     // still being worked on: say so, with a clock
         const w = el("div", "working"); w.appendChild(el("span", "dots", "\u2022\u2022\u2022")); w.appendChild(el("span", "w", " Working "));

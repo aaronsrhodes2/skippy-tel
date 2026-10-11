@@ -336,7 +336,7 @@ dialog.keys .key { margin: 0 0 0 auto; }
 .vmsg .g { flex: none; width: 24px; height: 24px; }
 
 /* the voice keys (static/skippy-voice.js): the key's data-s says what it is doing; the lamp in it follows */
-.key.mic .lamp, .key.spk .lamp { position: absolute; top: 5px; right: 6px; width: 7px; height: 7px; z-index: 2; background: transparent; }
+.key.mic .lamp, .key.spk .lamp, .key.ear .lamp { position: absolute; top: 5px; right: 6px; width: 7px; height: 7px; z-index: 2; background: transparent; }
 .key.mic[data-s="on"] .lamp, .key.spk[data-s="on"] .lamp { background: var(--accent); animation: breathe 1s ease-in-out infinite; }
 .key.mic[data-s="boot"] .lamp { box-shadow: inset 0 0 0 2px var(--amber); animation: breathe .9s ease-in-out infinite; }
 .key.mic[data-s="warn"] .lamp { background: var(--amber); border-radius: 0; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
@@ -358,3 +358,5 @@ dialog.keys .key { margin: 0 0 0 auto; }
 /* the full-screen key's iPhone tip: one sentence under the top strip */
 .fs-tip { flex: none; margin: 0 14px 4px; padding: 6px 10px; border: 1px solid var(--accent); font: 600 .78rem var(--mono); color: var(--ink); }
 .fs-tip[hidden] { display: none; }
+.key.ear[data-s="on"] .lamp { background: var(--accent); animation: breathe 2.4s ease-in-out infinite; }
+.key.ear[aria-pressed="true"] { color: var(--accent); }

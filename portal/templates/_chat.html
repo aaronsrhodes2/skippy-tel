@@ -44,6 +44,7 @@
     <div class="keybar">
       <button type="button" class="key clear" aria-label="New chat" title="New chat"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
       <button type="button" class="key barney" aria-pressed="false" data-tel="chat:barney-style" aria-label="Barney Style: Haiku explains it simply. Off: straight to Mentat, its own answer unedited" title="Barney Style: Haiku explains it simply. Off: straight to Mentat, its own answer unedited"><svg class="g" aria-hidden="true"><use href="#g-simple"/></svg><i class="lamp"></i></button>
+      <button type="button" class="key ear" aria-pressed="false" aria-label="Standby: listen for Skippy" title="Standby: listen for Skippy"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg><i class="lamp"></i></button>
       <button type="button" class="key mic" aria-label="Speak your message" title="Speak your message"><svg class="g" aria-hidden="true"><use href="#g-mic"/></svg><i class="lamp"></i></button>
       <button type="button" class="key spk" aria-pressed="false" aria-label="Read replies aloud" title="Read replies aloud"><svg class="g" aria-hidden="true"><use href="#g-vol"/></svg><i class="lamp"></i></button>
       <button type="button" class="key" data-open="lang" aria-label="Language" title="Language"><svg class="g" aria-hidden="true"><use href="#g-globe"/></svg></button>
@@ -65,7 +66,7 @@
     const form = root.querySelector(".ask"), log = root.querySelector(".log .pg-flow");
     const msg = form.querySelector("textarea"), sendBtn = form.querySelector("button.send");
     const logPager = Bridge.pager(root.querySelector(".log"), {pips: root.querySelector(".stage > .pips")});
-    const voice = SkippyVoice.attach({gate: "{{ url_for('chat.voice_gate') }}", mic: form.querySelector("button.mic"), speaker: form.querySelector("button.spk"),
+    const voice = SkippyVoice.attach({gate: "{{ url_for('chat.voice_gate') }}", mic: form.querySelector("button.mic"), ear: form.querySelector("button.ear"), speaker: form.querySelector("button.spk"),
       lang: () => (root.querySelector("select.lang") || {}).value || "",
       box: msg, status: form.querySelector(".vstat"), onSend: () => form.requestSubmit()});          // hands-free: a pause ends it, a countdown sends it
     const sheets = {}; root.querySelectorAll(".sheet").forEach(s => { sheets[s.dataset.sheet] = s; });

@@ -107,12 +107,14 @@ def test_both_chats_carry_the_mic_and_speaker_keys():
     for tpl in (chat, shop):
         assert "SkippyVoice.attach" in tpl and "#g-mic" in tpl and "#g-vol" in tpl and "chat.voice_gate" in tpl
         assert "voice.say(" in tpl
+        assert "#g-ear" in tpl and "ear:" in tpl and 'aria-label="Standby: listen for Skippy"' in tpl      # the standby key: only the word "Skippy" wakes it
         assert 'class="vstat"' in tpl and "box:" in tpl and "onSend:" in tpl and "form.requestSubmit()" in tpl      # hands-free: a status line, the box, and the send
     assert "skippy-voice.js" in page
     # the chats' inline scripts run as they are parsed: the client must be loaded before the pages include them
     assert page.index("skippy-voice.js") < page.index('include "_chat.html"')
     assert page.index("skippy-voice.js") < page.index('include "_workshop.html"')
-    assert 'id="g-mic"' in (PORTAL / "templates" / "_glyphs.html").read_text(encoding="utf-8")
+    glyphs = (PORTAL / "templates" / "_glyphs.html").read_text(encoding="utf-8")
+    assert 'id="g-mic"' in glyphs and 'id="g-ear"' in glyphs
 
 
 def test_the_client_uses_no_browser_vendor_speech_cloud():

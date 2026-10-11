@@ -7,6 +7,9 @@
  * finished the mic opens again by itself for your next turn, round after round. A tap while he talks is "my turn", a tap while it
  * listens or thinks ends the conversation, and so does saying "goodbye" (or going quiet for 30 s). The page calls voice.say(reply)
  * when a reply lands, and voice.resume() when none will come (an error).
+ * STANDBY (the ear key): the microphone stays open and the page hears everything said near it, but only speech is sent to the home Whisper, and
+ * it is thrown away unless it begins with "Skippy" ("Hey Skippy, ..." wakes it with the message in the same breath). Like any web page it listens
+ * only while the page is open in the foreground (iOS and Android stop microphone capture in the background): a tablet on a stand with the screen on.
  * Hearing (hands-free): each turn is a session. A level bar shows that you are heard, your words appear in the
  * message box (opts.box) while you speak (the recording so far goes to skippy-pc's Whisper every couple of seconds through the voice
  * gate), a pause ends the utterance by itself, and then a 4 s countdown runs to send it (opts.onSend). Speaking again during the
@@ -71,6 +74,14 @@
   /* Said alone during the send countdown, these mean "don't send it". */
   const STOP_RE = /^\s*(?:ok(?:ay)?[ ,]*)?(?:stop|cancel|wait|hold on|hold it|don'?t send(?: it)?|never ?mind|no|abort)\s*[.!?]*\s*$/i;
   const SEND_DELAY_MS = 4000;
+  /* Standby: the page hears every utterance (the microphone stays open, but only SPEECH is ever sent to the home Whisper, and it is thrown away
+     unless it begins with the wake word). "Hey Skippy, turn that down" wakes it and "turn that down" is the message; "Skippy." alone wakes it and
+     the next thing said is the message. */
+  const WAKE_RE = /\b(?:(?:hey|hi|ok|okay|yo)[ ,]+)?skipp(?:y|ie|ey)\b[ ,.!?:;-]*/i;
+  function wakeSplit(text) {
+    const t = String(text == null ? "" : text), m = WAKE_RE.exec(t.slice(0, 60));
+    return m ? { woke: true, rest: t.slice(m.index + m[0].length).trim() } : { woke: false, rest: "" };
+  }
   /* Said alone as a turn, these end the conversation (and send nothing). */
   const END_RE = /^\s*(?:ok(?:ay)?[ ,]*)?(?:good ?bye|bye(?: bye)?|that'?s all|that is all|stop listening|end (?:the )?conversation|we'?re done|i'?m done|talk to you later)\s*[.!?]*\s*$/i;
 
@@ -92,12 +103,13 @@
   const SUMMARIZE_OVER = 280;
 
   function attach(opts) {
-    const mic = opts.mic, speaker = opts.speaker, box = opts.box, status = opts.status, onSend = opts.onSend;
+    const mic = opts.mic, ear = opts.ear, speaker = opts.speaker, box = opts.box, status = opts.status, onSend = opts.onSend;
     const onText = opts.onText || function () {};
     const lang = opts.lang || function () { return ""; };
     const canRecord = !!(root.navigator && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && root.MediaRecorder);
     if (mic && !canRecord) mic.hidden = true;
-    let pass = null, wanted = null, session = null, playing = null, chat = false, awaiting = false, keepUntil = 0;     // chat: a no-touch conversation is on; keepUntil: a parting message stays up till then
+    if (ear && !canRecord) ear.hidden = true;
+    let pass = null, wanted = null, session = null, playing = null, chat = false, awaiting = false, keepUntil = 0, standbyOn = false, shared = null;     // chat: a no-touch conversation is on; keepUntil: a parting message stays up till then
     const audio = new Audio();
 
     function paint(el, s) { if (!el) return; if (s) el.dataset.s = s; else delete el.dataset.s; el.classList.toggle("lit", s === "on"); }
@@ -155,6 +167,7 @@
     }
 
     async function openMic() {
+      if (shared && shared.alive) return shared;                  // still open from the last turn: no new permission prompt
       // Echo cancellation and noise suppression help when music or a film is playing nearby (headphones fix it completely).
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       const Ctx = root.AudioContext || root.webkitAudioContext;
@@ -164,9 +177,12 @@
         buf = new Float32Array(an.fftSize);
         timer = setInterval(function () { an.getFloatTimeDomainData(buf); let sum = 0; for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i]; level = Math.sqrt(sum / buf.length); }, 50);
       }
-      return { stream: stream, level: function () { return level; }, blind: !an,
-               close: function () { clearInterval(timer); stream.getTracks().forEach(function (t) { t.stop(); }); if (ctx && ctx.close) ctx.close().catch(function () {}); } };
+      const obj = { stream: stream, alive: true, level: function () { return level; }, blind: !an,
+                    close: function () { obj.alive = false; if (shared === obj) shared = null; clearInterval(timer); stream.getTracks().forEach(function (t) { t.stop(); }); if (ctx && ctx.close) ctx.close().catch(function () {}); } };
+      shared = obj;
+      return obj;
     }
+    function releaseMic() { if (shared) shared.close(); }
 
     // One utterance: resolves {spoke, text}. `idleMs`: give up (spoke:false) if nobody speaks within that long; `tick(msLeft)` counts that down.
     function segment(mic_, seg) {
@@ -180,6 +196,7 @@
         const finish = function (res) { if (ended) return; ended = true; clearInterval(timer); resolve(res); };
         rec.onstop = async function () {
           if (!spoke) return finish({ spoke: false, text: "" });
+          if (seg.minSpeechMs && Date.now() - speechAt < seg.minSpeechMs) return finish({ spoke: false, text: "", short: true });      // a cough or a click: not worth sending
           try { finish({ spoke: true, text: word(await transcribe(blob(), type)) }); } catch (e) { finish({ spoke: true, text: lastInterim, failed: true }); }
         };
         seg.abort = function () { ended = true; clearInterval(timer); try { if (rec.state !== "inactive") { rec.onstop = null; rec.stop(); } } catch (e) {} resolve({ spoke: false, text: "", aborted: true }); };
@@ -195,7 +212,7 @@
           if (seg.level) seg.level(lv, spoke);
           if (spoke && ev === "end") { try { rec.stop(); } catch (e) {} return; }
           if (now - t0 >= MAX_REC_MS) { try { rec.stop(); } catch (e) {} return; }
-          if (spoke && !busy && (mic_.blind || vad.speaking) && now - speechAt >= 1200 && now - interimAt > 2200 && chunks.length > 4) {      // the words appear while you are still speaking
+          if (spoke && seg.interim && !busy && (mic_.blind || vad.speaking) && now - speechAt >= 1200 && now - interimAt > 2200 && chunks.length > 4) {      // the words appear while you are still speaking
             busy = true; interimAt = now;
             try { const t = word(await transcribe(blob(), type)); if (!ended && t) { lastInterim = t; if (seg.interim) seg.interim(t); } } catch (e) {}
             busy = false;
@@ -210,11 +227,12 @@
       try { mic_ = await openMic(); } catch (e) { warn(mic); return; }
       const ctl = session = { mic: mic_, seg: null, cancelled: false };
       const draft = box ? word(box.value) : "";
-      let message = "";
+      let message = (o && o.seed) ? o.seed : "";
       const show = function (t) { if (box) box.value = (draft ? draft + " " : "") + t; onText(t, false); };
       paint(mic, "on");
       try {
-        let first = true;
+        let first = !message;
+        if (message) { show(message); onText(message, true); }    // woken with the message in the same breath: straight to the countdown
         for (;;) {                                               // an utterance, then a count where speaking again continues it
           const seg = ctl.seg = {};
           seg.idleMs = first ? ((o && o.idleMs) || 10000) : SEND_DELAY_MS;
@@ -254,17 +272,20 @@
         if (chat) { paint(mic, "boot"); paintStatus("Thinking\u2026", 0, true); }
       } finally {
         if (session === ctl) session = null;
-        mic_.close(); if (!chat) paint(mic, null);
+        if (!chat && !standbyOn) mic_.close();                  // a conversation or standby keeps the one open microphone
+        if (!chat) paint(mic, null);
         if (!chat) setTimeout(function () { if (!session && Date.now() >= keepUntil) paintStatus(null); }, 600);
       }
     }
     function cancel() {                                           // a tap, a keystroke, the cross: stop listening, keep whatever is in the box
       const c = session;
-      if (c) { c.cancelled = true; session = null; if (c.seg && c.seg.abort) c.seg.abort(); c.mic.close(); }
+      if (c) { c.cancelled = true; session = null; if (c.seg && c.seg.abort) c.seg.abort(); if (!standbyOn) c.mic.close(); }
       paint(mic, null); paintStatus(null); chat = false; awaiting = false;
+      if (standbyOn) setTimeout(standbyLoop, 400);                // typing or a tap cancels the message, not the standby
     }
     function endChat(why) {                                       // leave the conversation (the mic is closed already, or about to be)
       chat = false; awaiting = false; paint(mic, null);
+      if (standbyOn) setTimeout(standbyLoop, 600); else releaseMic();       // back to standby, or the microphone is let go
       if (why) { keepUntil = Date.now() + 3500; paintStatus(why, 0, false); setTimeout(function () { if (!session && !chat) paintStatus(null); }, 3500); } else paintStatus(null);
       if (mic) mic.setAttribute("aria-pressed", "false");
     }
@@ -272,6 +293,45 @@
     function replied() {                                          // Skippy has answered and finished speaking: your turn, no touch needed
       if (chat && awaiting) { awaiting = false; setTimeout(listenAgain, 450); }      // (a short beat so his last word is not heard as yours)
     }
+    async function standbyLoop() {                               // listen for "Skippy": every utterance is heard, none is kept unless it starts with the word
+      if (!standbyOn || session || chat) return;
+      let mic_;
+      try { mic_ = await openMic(); } catch (e) { standbyOff('The microphone is blocked: allow it for this site, then tap the ear again'); return; }
+      const ctl = session = { mic: mic_, seg: null, cancelled: false, standby: true };
+      try {
+        while (standbyOn && !ctl.cancelled) {
+          const seg = ctl.seg = { idleMs: 0, minSpeechMs: 500 };
+          seg.level = function (lv, speaking) { paintStatus(speaking ? "Hearing you" : 'Standby: say "Skippy"', lv, true); };
+          const r = await segment(mic_, seg);
+          if (ctl.cancelled || r.aborted || !standbyOn) return;
+          if (!r.spoke || !r.text) continue;
+          const w = wakeSplit(r.text);
+          if (!w.woke) continue;                                  // not for him: gone
+          session = null;
+          chat = true; awaiting = false;
+          paintStatus("Yes?", 0, true);
+          handsFree({ idleMs: 10000, seed: w.rest });
+          return;
+        }
+      } finally { if (session === ctl) session = null; }
+    }
+    function standbyOff(why) {
+      standbyOn = false;
+      if (ear) { ear.setAttribute("aria-pressed", "false"); paint(ear, null); }
+      const c = session;
+      if (c && c.standby) { c.cancelled = true; session = null; if (c.seg && c.seg.abort) c.seg.abort(); }
+      if (!chat && !session) releaseMic();
+      if (why) { keepUntil = Date.now() + 5000; paintStatus(why, 0, false); setTimeout(function () { if (!session && !chat && !standbyOn) paintStatus(null); }, 5000); }
+      else if (!chat) paintStatus(null);
+    }
+    function standbyOnNow() {
+      try { audio.src = SILENCE; audio.play().catch(function () {}); } catch (e) {}      // unlock sound inside this tap: replies are spoken later with no touch
+      if (speaker && !wanted) setWanted(true);
+      standbyOn = true;
+      if (ear) { ear.setAttribute("aria-pressed", "true"); paint(ear, "on"); }
+      standbyLoop();
+    }
+    if (ear) ear.addEventListener("click", function () { standbyOn ? standbyOff() : standbyOnNow(); });
     function startChat() {
       chat = true; awaiting = false;
       try { audio.src = SILENCE; audio.play().catch(function () {}); } catch (e) {}      // unlock sound inside this tap: later replies play with no touch
@@ -281,6 +341,10 @@
     }
     if (mic) mic.addEventListener("click", function () {
       if (mic.dataset.s === "boot" && !chat) return;
+      if (session && session.standby) {                           // a tap during standby: "I'm talking now", no need to say the word
+        const c = session; c.cancelled = true; session = null; if (c.seg && c.seg.abort) c.seg.abort();
+        startChat(); return;
+      }
       if (session) { cancel(); return; }                          // listening: a tap ends it all
       if (playing) { stopSpeaking(); if (chat) { awaiting = false; listenAgain(); } return; }     // he is talking: a tap is "my turn"
       if (chat) { endChat("Conversation ended"); return; }        // thinking: a tap ends the conversation
@@ -345,8 +409,8 @@
         setWanted(!wanted);
       });
     }
-    return { say: say, stop: stopSpeaking, cancel: cancel, resume: replied, chatting: function () { return chat; }, enabled: function () { return !!wanted; } };
+    return { say: say, stop: stopSpeaking, cancel: cancel, resume: replied, standby: function () { return standbyOn; }, chatting: function () { return chat; }, enabled: function () { return !!wanted; } };
   }
 
-  return { attach: attach, pickMime: pickMime, speakable: speakable, plain: plain, createVad: createVad, STOP_RE: STOP_RE, END_RE: END_RE, SEND_DELAY_MS: SEND_DELAY_MS, MAX_SPEECH: MAX_SPEECH };
+  return { attach: attach, pickMime: pickMime, speakable: speakable, plain: plain, createVad: createVad, wakeSplit: wakeSplit, WAKE_RE: WAKE_RE, STOP_RE: STOP_RE, END_RE: END_RE, SEND_DELAY_MS: SEND_DELAY_MS, MAX_SPEECH: MAX_SPEECH };
 });
