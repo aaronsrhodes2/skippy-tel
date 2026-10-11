@@ -354,3 +354,7 @@ dialog.keys .key { margin: 0 0 0 auto; }
 .vstat .lvbar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .06s linear; }
 .vstat .vtxt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vstat .vx { flex: none; padding: 0 8px; min-width: 0; margin: 0; background: transparent; color: var(--ink); border: 1px solid var(--dim-green-hi); font: inherit; }
+
+/* the full-screen key's iPhone tip: one sentence under the top strip */
+.fs-tip { flex: none; margin: 0 14px 4px; padding: 6px 10px; border: 1px solid var(--accent); font: 600 .78rem var(--mono); color: var(--ink); }
+.fs-tip[hidden] { display: none; }

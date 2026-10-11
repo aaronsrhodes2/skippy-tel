@@ -163,6 +163,21 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         captain = auth.is_admin(me())
         return render_template("front.html", captain=captain, **(workshop_context() if captain else {}))
 
+    @app.get("/manifest.webmanifest")
+    def site_manifest():
+        """Add to Home Screen opens the portal with no browser bars at all (display: fullscreen, falling back to standalone). Public, like
+        /static: a browser fetches a manifest without the sign-in cookie, and it names the site and nothing else. The music and video
+        apps keep their own manifests (their pages declare them first)."""
+        return app.response_class(json.dumps({
+            "id": "/", "name": "Skippy the Magnificent", "short_name": "Skippy", "description": "Skippy the Magnificent: chat, games, music and films.",
+            "start_url": "/", "scope": "/", "display": "fullscreen", "display_override": ["fullscreen", "standalone"], "orientation": "any",
+            "background_color": "#000000", "theme_color": "#000000",
+            "icons": [{"src": url_for("static", filename="icon-192.png"), "sizes": "192x192", "type": "image/png", "purpose": "any"},
+                      {"src": url_for("static", filename="icon-512.png"), "sizes": "512x512", "type": "image/png", "purpose": "any"},
+                      {"src": url_for("static", filename="apple-touch-icon.png"), "sizes": "180x180", "type": "image/png"},
+                      {"src": url_for("static", filename="favicon.svg"), "sizes": "any", "type": "image/svg+xml"}]}),
+            mimetype="application/manifest+json")
+
     @app.get("/apps")
     @auth.login_required
     def apps():

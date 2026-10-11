@@ -192,6 +192,10 @@
 <script src="{{ url_for('static', filename='bridge-pure.js') }}"></script>
 <script src="{{ url_for('static', filename='bridge.js') }}"></script>{% endif %}
 {% block head %}{% endblock %}
+{# Full screen on phones and tablets: the site manifest (Add to Home Screen, no browser bars) unless the page brings its own (music, video); a page that does overrides this block with nothing. #}
+{% block pwa %}<link rel="manifest" href="{{ url_for('site_manifest') }}">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Skippy"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">{% endblock %}
 </head>
 <body{% if bridge %} class="bridge{% if captain %} captain{% endif %}"{% endif %} data-app="{% block app %}{% endblock %}">
 {% if bridge %}
@@ -209,6 +213,7 @@
   <span class="rail"></span>
   <svg class="g mark" aria-hidden="true"><use href="#g-{{ self.glyph() | trim }}"/></svg>
   <span class="rail"></span>
+  <button type="button" class="key" id="fs-key" hidden aria-label="Full screen" title="Full screen"><svg class="g" aria-hidden="true"><use href="#g-fs"/></svg></button>
   {% if user and on_apps %}
     <a class="key" href="{{ url_for('auth.logout') }}" aria-label="Sign out" title="Sign out"><svg class="g" aria-hidden="true"><use href="#g-out"/></svg></a>
   {% elif user and on_front %}
@@ -219,6 +224,7 @@
     <a class="key" href="{{ url_for('index') }}" aria-label="Sign in" title="Sign in"><svg class="g" aria-hidden="true"><use href="#g-in"/></svg></a>
   {% endif %}
 </header>
+<div class="fs-tip" id="fs-tip" hidden role="status"></div>
 {% endif %}
 {# public_up / public_up_label: where a public page's back button goes. They are data for the app bar below
    (read with self.public_up()), so they sit in a branch that never prints. #}
@@ -303,6 +309,34 @@
     }
     document.addEventListener("click", tap, true);
     document.addEventListener("auxclick", tap, true);
+  })();
+</script>
+{% endif %}
+{% if bridge %}
+<script>
+  (function () {                                       // the full-screen key: the Fullscreen API where the browser has it; on iPhone, how to install
+    var key = document.getElementById("fs-key"), tip = document.getElementById("fs-tip");
+    if (!key) return;
+    var el = document.documentElement, mm = window.matchMedia;
+    var installed = (mm && (mm("(display-mode: fullscreen)").matches || mm("(display-mode: standalone)").matches)) || navigator.standalone === true;
+    if (installed) return;                              // already opened from the home screen: nothing to add
+    var can = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+    var ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    var on = function () { return !!(document.fullscreenElement || document.webkitFullscreenElement); };
+    function paint() { key.querySelector("use").setAttribute("href", on() ? "#g-fsx" : "#g-fs"); var t = on() ? "Leave full screen" : "Full screen"; key.setAttribute("aria-label", t); key.title = t; }
+    if (can) {
+      key.hidden = false;
+      key.addEventListener("click", function () {
+        try {
+          if (on()) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+          else { var p = (el.requestFullscreen || el.webkitRequestFullscreen).call(el); if (p && p.catch) p.catch(function () {}); }
+        } catch (e) {}
+      });
+      document.addEventListener("fullscreenchange", paint); document.addEventListener("webkitfullscreenchange", paint); paint();
+    } else if (ios) {                                   // iPhone Safari has no Fullscreen API: Add to Home Screen is the way
+      key.hidden = false;
+      key.addEventListener("click", function () { tip.textContent = "For full screen on iPhone: tap Share, then Add to Home Screen, and open Skippy from its icon."; tip.hidden = !tip.hidden; });
+    }
   })();
 </script>
 {% endif %}

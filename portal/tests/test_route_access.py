@@ -50,7 +50,7 @@ REGISTRY = {
     # public: sign-in, the front door, static and informational pages, the public experiments (free local compute, rate limited)
     **{e: PUBLIC for e in (
         "auth.callback", "auth.login", "auth.logout", "auth.unauthorized", "health", "version", "index", "privacy", "request_access",
-        "site_icons", "legacy_bilby", "dashboard.legacy_dashboard", "music.player_manifest", "video.video_manifest",
+        "site_icons", "site_manifest", "legacy_bilby", "dashboard.legacy_dashboard", "music.player_manifest", "video.video_manifest",
         "doomloop.version", "starcontrol.version", "play_index", "orion_trail", "radiance_probe",
         "experiments.benchmark", "experiments.double_slit", "experiments.index", "experiments.mentat_call", "experiments.mentat_page",
         "experiments.mentat_tools", "experiments.nbody", "experiments.radiance_file", "experiments.radiance_index",

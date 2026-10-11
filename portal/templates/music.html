@@ -3,6 +3,7 @@
 {% block app %}music{% endblock %}
 {% block ui %}bridge{% endblock %}
 {% block glyph %}wave{% endblock %}
+{% block pwa %}{% endblock %}
 {% block head %}
 {# Add to Home Screen: opens full screen into the player, and iOS keeps the audio going with the screen locked. #}
 <link rel="manifest" href="{{ url_for('music.player_manifest') }}">

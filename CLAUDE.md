@@ -221,6 +221,11 @@ the security: every `/me/workshop/*` call checks for the Captain again and needs
 **`portal/tests/test_route_access.py` classifies every route (public, machine, beacon, member, grant, admin) and fails on any new unclassified one
 or any under-guarded one**, probing nobody, a signed-in stranger and a chat-only friend. A new route must be added to its REGISTRY.
 
+**Full screen on phones and tablets:** `/manifest.webmanifest` (public) asks for `display: fullscreen` (falling back to standalone), so Add to Home Screen opens the
+portal with no browser bars; the music and video apps keep their own manifests (their pages override `{% block pwa %}`). The top strip also has a
+full-screen key (`#fs-key`, shown only where the browser has the Fullscreen API: Android Chrome, iPad; on iPhone it shows how to Add to Home Screen).
+It hides itself when already opened from the home screen. Tests: `portal/tests/test_fullscreen.py`.
+
 ## The private Skippy's chat (on the front page, the Captain only): a transcript, not pages
 
 Unlike the phone-sized bridge pages, this chat is a plain **scrolling transcript** (a long agent run must not be cut into columns; the exemption
