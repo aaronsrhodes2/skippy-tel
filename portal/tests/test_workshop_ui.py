@@ -13,6 +13,7 @@ the page ships.
 """
 import json
 import re
+from pathlib import Path
 import shutil
 import subprocess
 
@@ -161,6 +162,7 @@ for (const id of ["ps-log", "ps-flow", "ps-pips", "ps-form", "ps-text", "ps-send
 els["ps-notify"].checked = true;
 for (const id of ["ps-stop", "ps-quiet", "ps-quiet-hint", "ps-reload", "ps-project-hint", "ps-convs"]) els[id].hidden = true;
 const Bridge = {pager: () => ({refresh() {}, last() {}, go() {}, page() { return 0; }, pages() { return 1; }})};   // the page flips are the bridge's, not under test here
+const SkippyMd = require(input.mdPath);                       // the real renderer (static/skippy-md.js), on the harness's fake DOM
 const SkippyVoice = {attach: () => ({say() {}, stop() {}, enabled: () => false})};   // the mic and speaker are static/skippy-voice.js's, tested in test_voice.py
 const root = {closest: () => null, querySelector(sel) { const e = els[sel.slice(1)]; if (!e) throw new Error("the script looked up " + sel + ", which the markup lacks"); return e; }};
 const document = {getElementById: (id) => { if (id !== "private-skippy") throw new Error("unexpected id " + id); return root; },
@@ -274,8 +276,8 @@ function snap() {
 
 (async () => {
   new Function("document", "localStorage", "crypto", "fetch", "setTimeout", "clearTimeout", "setInterval", "confirm",
-               "AbortController", "Date", "location", "Bridge", "SkippyVoice", input.script)(
-    document, localStorage, crypto, fakeFetch, fakeSetTimeout, fakeClearTimeout, fakeSetInterval, confirm, FakeAbort, FakeDate, location, Bridge, SkippyVoice);
+               "AbortController", "Date", "location", "Bridge", "SkippyVoice", "SkippyMd", input.script)(
+    document, localStorage, crypto, fakeFetch, fakeSetTimeout, fakeClearTimeout, fakeSetInterval, confirm, FakeAbort, FakeDate, location, Bridge, SkippyVoice, SkippyMd);
   await settle();
   const snaps = {};
   for (const s of input.steps) {
@@ -322,7 +324,7 @@ def drive(page: str, steps: list, tasks: dict | None = None, storage: dict | Non
     done = subprocess.run([NODE, "-e", HARNESS], capture_output=True, timeout=120,
                           input=json.dumps({"script": script(page), "steps": steps, "tasks": tasks or {}, "storage": store,
                                             "history": history or {}, "ship": ship or {},
-                                            "notifyMode": notify_mode, "fresh": fresh}).encode())
+                                            "notifyMode": notify_mode, "fresh": fresh, "mdPath": str(Path(__file__).resolve().parents[1] / "static" / "skippy-md.js")}).encode())
     assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
     return json.loads(done.stdout.decode("utf-8"))
 
