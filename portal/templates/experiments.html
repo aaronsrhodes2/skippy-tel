@@ -66,6 +66,16 @@
             <a href="{{ url_for('experiments.benchmark') }}">See the breakdown &rarr;</a>
           </div>
         {% endif %}
+        {% if is_admin and manage %}
+          <h3>Show or hide (Captain)</h3>
+          {% for x in manage %}
+            <form method="post" action="{{ url_for('me.toggle_experiment') }}" class="row" style="margin:4px 0">
+              <input type="hidden" name="slug" value="{{ x.slug }}"><input type="hidden" name="next" value="experiments">
+              <span style="flex:1">{{ x.title }}</span>
+              <button type="submit" style="padding:3px 10px">{{ 'Show' if x.slug in hidden_slugs else 'Hide' }}</button>
+            </form>
+          {% endfor %}
+        {% endif %}
       </div></div>
       <div class="pips" id="about-pips" hidden><i></i></div>
     </div>

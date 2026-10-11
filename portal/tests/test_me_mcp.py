@@ -55,8 +55,22 @@ def test_a_bad_name_is_refused_before_any_job_exists_and_a_silent_home_is_a_reas
     assert client.get("/me/mcp/result?job=../../x").get_json() == {"state": "unknown"}
 
 
-def test_the_dashboard_opens_on_mcp_and_home_and_the_pane_is_there(env):
+def test_the_dashboard_is_private_mcp_and_home_and_the_rest_is_in_the_graveyard(env):
     client, _, app = env
     login(client, ADMIN)
     page = client.get("/me").data.decode()
-    assert 'id="mcp"' in page and page.index('data-pane="mcp"') < page.index('data-pane="home"') < page.index('data-pane="server"')
+    assert 'id="mcp"' in page and 'id="home"' in page and page.index('data-pane="mcp"') < page.index('data-pane="home"')
+    for retired in ("server", "core", "activity-pane", "watcher", "spend", "people", "experiments", "links"):
+        assert f'id="{retired}"' not in page and f'data-pane="{retired}"' not in page, retired     # retired, not deleted
+    assert 'id="people"' in client.get("/me?all=1").data.decode()                                      # ?all=1 shows them again
+
+
+def test_experiments_live_on_the_main_portal_with_the_captains_show_hide_there(env):
+    client, _, app = env
+    anon = app.test_client()
+    assert "Show or hide" not in anon.get("/experiments").data.decode()                                # the public page never mentions it
+    login(client, ADMIN)
+    page = client.get("/experiments").data.decode()
+    assert "Show or hide (Captain)" in page and 'name="next" value="experiments"' in page
+    resp = client.post("/me/experiments", data={"slug": "nbody", "next": "experiments"})
+    assert resp.status_code == 302 and resp.headers["Location"].endswith("/experiments")

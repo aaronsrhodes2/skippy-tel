@@ -131,5 +131,5 @@ def test_the_dashboard_shows_it():
     vm.serial[2] = snap(verdict="active")
     client = portal.create_app(dict(SETTINGS), vm=vm, skippy=FakeSkippy()).test_client()
     login(client, ADMIN)
-    page = client.get("/me").data.decode()
+    page = client.get("/me?all=1").data.decode()
     assert "over its 8-hour limit" in page and "should have stopped it" in page

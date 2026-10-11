@@ -1088,7 +1088,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             vm.set_metadata(experiments.HIDDEN_KEY, json.dumps(sorted(gone)))
             experiments.forget(vm)
             flash(f"{'Hid' if slug in gone else 'Showing'} {slug} on the public Experiments page.", "ok")
-        return redirect(url_for("me.index"))
+        return redirect(url_for("experiments.index" if request.form.get("next") == "experiments" else "me.index"))
 
     app.register_blueprint(mine)
 
@@ -1114,7 +1114,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     @lab.get("")
     def index():
-        return render_template("experiments.html", bench=experiments.benchmark(),
+        manage = dict(manage=experiments.EXPERIMENTS, hidden_slugs=experiments.hidden(vm)) if (auth.current_user() and auth.is_admin(auth.current_user()["email"])) else {}   # the Captain's show/hide, on the public page only for him
+        return render_template("experiments.html", bench=experiments.benchmark(), **manage,
                                **experiments.inventory(experiments.visible(vm)))
 
     @lab.get("/double-slit")

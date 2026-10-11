@@ -64,7 +64,7 @@ def test_the_logs_page_is_a_bridge_page(env):
 def test_the_dashboard_is_a_bridge_page_of_widgets_and_the_private_skippy_has_moved_to_the_front_page(env):
     client, _, _ = env
     login(client, ADMIN)
-    page = client.get("/me").data.decode()
+    page = client.get("/me?all=1").data.decode()
     assert '<body class="bridge"' in page and "/static/bridge-panes.js" in page and 'href="/static/bridge-panes.css"' in page
     controls = re.findall(r'data-pane="([\w-]+)"', page)
     panes = re.findall(r'<section id="([\w-]+)" class="apane"', page)

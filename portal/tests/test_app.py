@@ -157,7 +157,7 @@ def test_mesh_only_links_are_for_the_captain_not_the_friends_pages(env):
     login(client, FRIEND)
     assert "skippy-pc:8096" not in client.get("/games").data.decode()              # a friend can't reach the mesh
     login(client, ADMIN)
-    assert "Home links" in client.get("/me").data.decode() and "skippy-pc:8096" in client.get("/me").data.decode()
+    assert "Home links" in client.get("/me?all=1").data.decode() and "skippy-pc:8096" in client.get("/me?all=1").data.decode()
 
 
 def test_every_page_belongs_to_an_app_with_a_colour():
@@ -1222,13 +1222,13 @@ def test_experiments_degrade_without_bundle_or_mentat(env):
 def test_dashboard_is_admin_only_and_shows_the_widgets(env):
     client, vm, _ = env
     login(client, FRIEND)
-    assert client.get("/me").status_code == 403
+    assert client.get("/me?all=1").status_code == 403
     vm.state.status, vm.state.games = "RUNNING", ["dragonwilds"]
     vm.serial[2] = ("=== skippy-diag t ===\nJOIN_CODE dragonwilds=AB12-CD34\n--- memory\n"
                     "               total        used\nMem:           16002        14500\n"
                     "--- data disk\n/dev/sda         59G  50G  9G  85% /srv/games/data\n=== end ===\n")
     login(client, ADMIN)
-    page = client.get("/me").data.decode()
+    page = client.get("/me?all=1").data.decode()
     assert "AB12-CD34" in page and "Spend (estimate)" in page and "Friends" in page
     assert "Memory at 91%" in page and "World disk at 85%" in page      # watcher warnings
     assert 'data-tel="tile:dashboard"' in client.get("/apps").data.decode()   # tile on the front page
@@ -1242,7 +1242,7 @@ def test_watcher_flags_crashes_and_blocked_starts(env):
     client.post("/games/start", data={"games": ["valheim"]})
     client.post("/games/start", data={"games": ["dragonwilds"]})       # already what's running: not a block
     login(client, ADMIN)
-    page = client.get("/me").data.decode()
+    page = client.get("/me?all=1").data.decode()
     assert "dragonwilds is restarting" in page
     assert "1 blocked start this week" in page and FRIEND in page
 
@@ -1295,7 +1295,7 @@ def test_home_report_needs_the_paired_token(env):
     ok = client.post("/home/report", json=json.loads(json.dumps(REPORT)), headers={"Authorization": f"Bearer {token}"})
     assert ok.status_code == 200 and ok.get_json() == {"commands": [], "need_art": True, "jobs": [], "fast_for_s": 0,
                                                 "imports_wanted": ["everquest"]}
-    page = client.get("/me").data.decode()
+    page = client.get("/me?all=1").data.decode()
     assert "qwen2.5:7b" in page and "whisper" in page and "97%" in page and "Veridis Quo" in page
 
 
@@ -1314,7 +1314,7 @@ def test_the_home_report_keeps_what_bilby_plays_and_carries_queued_controls_home
     state = home.music()
     assert state["traktor"]["now_playing"]["title"] == "Veridis Quo" and state["has_art"]
     assert "art_url" not in state["traktor"]["now_playing"]                      # home hostnames stay home
-    assert "Veridis Quo" in client.get("/me").data.decode()                      # the dashboard's now-playing line
+    assert "Veridis Quo" in client.get("/me?all=1").data.decode()                      # the dashboard's now-playing line
     assert "Veridis Quo" not in client.get("/").data.decode()                    # and no card for it on the launcher
     assert home.queue("music", "skip")
     reply = client.post("/home/report", json=json.loads(json.dumps(REPORT)), headers=auth_h).get_json()
@@ -1416,13 +1416,13 @@ def test_me_shows_core_health_and_the_watcher_repeats_the_problems(env):
     health = copy.deepcopy(CORE_OK)
     health["ollama"].update(default="qwen3:8b", default_present=False)
     client.post("/home/report", json=_core_report(health), headers={"Authorization": f"Bearer {token}"})
-    page = client.get("/me").data.decode()
+    page = client.get("/me?all=1").data.decode()
     assert "Core · skippy-tel" in page and "Degraded" in page and "API v1" in page
     assert page.count("qwen3:8b") >= 2                        # in the Core widget and again in the Watcher
     assert "Core: Skippy" in page and "Image Generator" in page
     _add_friend(client, PAL, ["dragonwilds"])
     login(client, PAL)
-    assert client.get("/me").status_code == 403               # a friend never sees it
+    assert client.get("/me?all=1").status_code == 403               # a friend never sees it
 
 
 def test_the_audio_grant_opens_bilbys_audio_service_but_never_home_status(env):
@@ -1434,7 +1434,7 @@ def test_the_audio_grant_opens_bilbys_audio_service_but_never_home_status(env):
     assert client.get("/music").status_code == 200
     assert client.get("/bilby").status_code == 301                               # a redirect gives nothing away
     assert b'data-tel="tile:music"' in client.get("/apps").data
-    assert client.get("/video").status_code == 403 and client.get("/me").status_code == 403
+    assert client.get("/video").status_code == 403 and client.get("/me?all=1").status_code == 403
 
 
 def test_chat_reply_says_which_tools_did_the_work(env):

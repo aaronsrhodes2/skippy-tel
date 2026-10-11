@@ -217,7 +217,7 @@ address). The Skippy tile opens `/chat` (needs the chat grant). `/chat` has two 
 **visitor mode** (everyone with the grant): ONLY Mentat (straight, "raw") and Barney Style (Haiku explaining what Mentat found, NO tools); a plain
 message, a slash verb or a model name never reaches Haiku or any portal tool. **Admin mode** (the Captain): the AGENT (`templates/_workshop.html`,
 Skippy Desktop: Claude Code on skippy-pc) with a key to flip to the quick general Skippy (Haiku with the portal's tools); his page wears the purple theme
-(`body.captain`). `/me` is the dashboard widgets only. Showing the agent only to him is a convenience, not the security: every `/me/workshop/*`
+(`body.captain`). `/me` is the Captain's private MCP access (list + test his servers, through the bridge) and Home integration only: the other panes are in the graveyard (`buried` in `templates/me.html`; `/me?all=1` shows them), and the Experiments show/hide moved to the Experiments page's About sheet. Showing the agent only to him is a convenience, not the security: every `/me/workshop/*`
 call checks for the Captain again and needs the `X-Workshop` header, and
 **`portal/tests/test_route_access.py` classifies every route (public, machine, beacon, member, grant, admin) and fails on any new unclassified one
 or any under-guarded one**, probing nobody, a signed-in stranger and a chat-only friend. A new route must be added to its REGISTRY.

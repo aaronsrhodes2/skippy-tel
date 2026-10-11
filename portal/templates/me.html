@@ -11,7 +11,10 @@
 {% set core_lamp = {'ok': 'on', 'degraded': 'warn', 'unknown': 'idle'}.get(core.verdict, 'off') %}
 {% set home_lamp = 'idle' if not home.paired else ('boot' if home.age is none else ('on' if home.online else 'warn')) %}
 {% set server_lamp = 'off' if not status else ('on' if status.status == 'RUNNING' else ('idle' if status.status == 'TERMINATED' else 'boot')) %}
-{% set units = [
+{# The Graveyard: panes retired from /me (the Captain: /me is private MCP access and Home integration now). Their markup and data stay; remove an id
+   from `buried` to revive one, or open /me?all=1 to see them all. Experiments moved to the main portal (/experiments, its About sheet). #}
+{% set buried = [] if request.args.get('all') else ['server', 'core', 'activity-pane', 'watcher', 'spend', 'people', 'experiments', 'links'] %}
+{% set all_units = [
   ('mcp', 'tools', 'MCP', ''),
   ('home', 'link', 'Home', home_lamp),
   ('server', 'server', 'Server', server_lamp),
@@ -23,6 +26,7 @@
   ('experiments', 'atom', 'Experiments', ''),
   ('links', 'globe', 'Links', ''),
 ] %}
+{% set units = all_units | rejectattr(0, 'in', buried) | list %}
 <canvas class="alive" aria-hidden="true"></canvas>
 <section class="adm" id="adm">
   <div class="stage" id="astage">
@@ -96,6 +100,7 @@
       <div class="pips" hidden><i></i></div>
     </section>
 
+    {% if 'server' not in buried %}
     <section id="server" class="apane" hidden>
       <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-server"/></svg><span class="title">Server</span></header>
@@ -123,7 +128,9 @@
       </div></div>
       <div class="pips" hidden><i></i></div>
     </section>
+    {% endif %}
 
+    {% if 'core' not in buried %}
     <section id="core" class="apane" hidden>
       <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-core"/></svg><span class="title">Core</span></header>
@@ -151,7 +158,9 @@
       </div></div>
       <div class="pips" hidden><i></i></div>
     </section>
+    {% endif %}
 
+    {% if 'activity-pane' not in buried %}
     <section id="activity-pane" class="apane" hidden>
       <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-eye"/></svg><span class="title">Activity</span></header>
@@ -160,7 +169,9 @@
       </div></div>
       <div class="pips" hidden><i></i></div>
     </section>
+    {% endif %}
 
+    {% if 'watcher' not in buried %}
     <section id="watcher" class="apane" hidden>
       <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-gauge"/></svg><span class="title">Watcher</span></header>
@@ -174,7 +185,9 @@
       </div></div>
       <div class="pips" hidden><i></i></div>
     </section>
+    {% endif %}
 
+    {% if 'spend' not in buried %}
     <section id="spend" class="apane" hidden>
       <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-clock"/></svg><span class="title">Spend</span></header>
@@ -191,7 +204,9 @@
       </div></div>
       <div class="pips" hidden><i></i></div>
     </section>
+    {% endif %}
 
+    {% if 'people' not in buried %}
     <section id="people" class="apane" hidden>
       <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-user"/></svg><span class="title">People</span></header>
@@ -212,7 +227,9 @@
       </div></div>
       <div class="pips" hidden><i></i></div>
     </section>
+    {% endif %}
 
+    {% if 'experiments' not in buried %}
     <section id="experiments" class="apane" hidden>
       <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-atom"/></svg><span class="title">Experiments</span></header>
@@ -233,7 +250,9 @@
       </div></div>
       <div class="pips" hidden><i></i></div>
     </section>
+    {% endif %}
 
+    {% if 'links' not in buried %}
     <section id="links" class="apane" hidden>
       <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-globe"/></svg><span class="title">Links</span></header>
@@ -254,6 +273,7 @@
       </div></div>
       <div class="pips" hidden><i></i></div>
     </section>
+    {% endif %}
   </div>
 </section>
 <script src="{{ url_for('static', filename='bridge-alive.js') }}"></script>
