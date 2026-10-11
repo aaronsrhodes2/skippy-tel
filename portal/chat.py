@@ -93,7 +93,7 @@ def system_prompt(user_name: str, is_admin: bool = False, page: str | None = Non
     restart = (", restart it, and read its logs to diagnose problems (you're talking to an admin)"
                if is_admin else "")
     game_names = ", ".join(games) if games else \
-        "RuneScape: Dragonwilds, Valheim, Factorio, Satisfactory and Garry's Mod"
+        "RuneScape: Dragonwilds, Valheim, Factorio, Satisfactory and the SkippyVerse (Garry's Mod)"
     where = f" They're on the portal page {page!r} right now (\"this game\" means the one on it)." \
         if page else ""
     return (

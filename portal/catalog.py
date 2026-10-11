@@ -267,8 +267,8 @@ GAMES: dict[str, Game] = {
                ("Wiki", "https://satisfactory.wiki.gg")),
     ),
     "garrysmod": Game(
-        "garrysmod", "Garry's Mod",
-        "Sandbox physics and bad ideas. A dedicated Source server: Sandbox, or any gamemode, and a Workshop collection.",
+        "garrysmod", "SkippyVerse",
+        "Say what you want and it appears: Skippy's holodeck, real physics and proximity voice, on a Garry's Mod (Source) server. Sandbox, or any gamemode, and a Workshop collection.",
         ram_gb=4,
         connect=lambda ip, env: f"Press <b>~</b> for the console &rarr; <code>connect {ip}:27015</code>",
         settings=(

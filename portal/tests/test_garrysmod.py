@@ -19,7 +19,7 @@ def _text(*parts) -> str:
 
 
 def test_the_game_has_its_own_glyph_a_port_and_a_way_in():
-    assert G.name == "Garry's Mod" and G.glyph == "cube" and f'id="g-cube"' in _text("portal", "templates", "_glyphs.html")
+    assert G.name == "SkippyVerse" and G.glyph == "cube" and f'id="g-cube"' in _text("portal", "templates", "_glyphs.html")
     assert "connect 203.0.113.9:27015" in G.connect("203.0.113.9", {}) and G.direct("203.0.113.9", {}) == "203.0.113.9:27015"
     assert G.join_password_key == "GARRYSMOD_PASSWORD" and SETTINGS["GARRYSMOD_PASSWORD"].secret
     assert not G.invite_code and G.max_players == 16
@@ -27,7 +27,7 @@ def test_the_game_has_its_own_glyph_a_port_and_a_way_in():
 
 @pytest.mark.parametrize("key, good, bad", [
     ("GARRYSMOD_PASSWORD", ["", "pw-1.x_y"], ["has space", "a;b", "$(x)", "it's", "x" * 65]),
-    ("GARRYSMOD_SERVER_NAME", ["Skippy-GMod"], ["Skippy GMod", "it's"]),
+    ("GARRYSMOD_SERVER_NAME", ["SkippyVerse", "Skippy-GMod"], ["Skippy GMod", "it's"]),
     ("GARRYSMOD_GAMEMODE", ["", "sandbox", "terrortown"], ["two words", "a;b", "../x"]),
     ("GARRYSMOD_MAP", ["", "gm_construct", "ttt_minecraft_b5"], ["gm construct", "a/b"]),
     ("GARRYSMOD_MAX_PLAYERS", ["", "1", "128"], ["0", "129", "many", "-1", "٣"]),
