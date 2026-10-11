@@ -154,10 +154,11 @@ class El {
 }
 const els = {};
 for (const id of ["ps-log", "ps-flow", "ps-pips", "ps-form", "ps-text", "ps-send", "ps-stop", "ps-new", "ps-quiet", "ps-quiet-msg", "ps-quiet-hint", "ps-check", "ps-reload",
-                  "ps-project", "ps-project-hint", "ps-convs-btn", "ps-convs", "ps-convs-msg", "ps-convs-list", "ps-notify"]) els[id] = new El("x");
+                  "ps-project", "ps-project-hint", "ps-convs-btn", "ps-convs", "ps-convs-msg", "ps-convs-list", "ps-notify", "ps-mic", "ps-spk"]) els[id] = new El("x");
 els["ps-notify"].checked = true;
 for (const id of ["ps-stop", "ps-quiet", "ps-quiet-hint", "ps-reload", "ps-project-hint", "ps-convs"]) els[id].hidden = true;
 const Bridge = {pager: () => ({refresh() {}, last() {}, go() {}, page() { return 0; }, pages() { return 1; }})};   // the page flips are the bridge's, not under test here
+const SkippyVoice = {attach: () => ({say() {}, stop() {}, enabled: () => false})};   // the mic and speaker are static/skippy-voice.js's, tested in test_voice.py
 const root = {closest: () => null, querySelector(sel) { const e = els[sel.slice(1)]; if (!e) throw new Error("the script looked up " + sel + ", which the markup lacks"); return e; }};
 const document = {getElementById: (id) => { if (id !== "private-skippy") throw new Error("unexpected id " + id); return root; },
                   createElement: (tag) => new El(tag)};
@@ -269,8 +270,8 @@ function snap() {
 
 (async () => {
   new Function("document", "localStorage", "crypto", "fetch", "setTimeout", "clearTimeout", "setInterval", "confirm",
-               "AbortController", "Date", "location", "Bridge", input.script)(
-    document, localStorage, crypto, fakeFetch, fakeSetTimeout, fakeClearTimeout, fakeSetInterval, confirm, FakeAbort, FakeDate, location, Bridge);
+               "AbortController", "Date", "location", "Bridge", "SkippyVoice", input.script)(
+    document, localStorage, crypto, fakeFetch, fakeSetTimeout, fakeClearTimeout, fakeSetInterval, confirm, FakeAbort, FakeDate, location, Bridge, SkippyVoice);
   await settle();
   const snaps = {};
   for (const s of input.steps) {

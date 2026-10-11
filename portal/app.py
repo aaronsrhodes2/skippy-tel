@@ -51,6 +51,7 @@ import ship as ship_mod
 import tasks
 import telemetry_web
 import video as video_mod
+import voice as voice_mod
 import watch
 import workshop as workshop_mod
 from catalog import GAMES, PLAYER_IDLE_MAX, PLAYER_IDLE_MIN, PORTALS, SERVICES, missing_settings
@@ -108,6 +109,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     player = player_mod.Player(home)                # Bilby's Audio Service: the pass and Connect (admin only)
     app.extensions["player"] = player               # (so tests/dev_music.py can point it at a gate on this machine)
     video = video_mod.Video(home)                   # Nagatha's Video Service: the pass for the video gate (admin only)
+    voice = voice_mod.Voice(home)                   # Skippy's ears and mouth: the pass for the voice gate (every chat)
+    app.extensions["voice"] = voice
     app.extensions["video"] = video                 # (so tests/dev_video.py can point it at the gate on this machine)
     telemetry_web.init_app(app)                     # usage recording, /privacy, the tap beacon, /home/telemetry
 
@@ -1297,6 +1300,15 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         """The chat's direct-verb badge panel for this person."""
         home.touch_chat()
         return jsonify(tools_for(auth.current_user()).badges())
+
+    @talk.get("/voice/gate")
+    @skippy_required
+    def voice_gate():
+        """Where the voice service is and a pass for it. Everyone who may chat can use the microphone; Skippy's own voice
+        (the cloned one, personal use only) is signed for admins alone, and everyone else hears their device's voice."""
+        resp = jsonify(voice.gate(speak=auth.is_admin(me())))
+        resp.headers["Cache-Control"] = "no-store"          # a pass is a credential: never from a cache
+        return resp
 
     @talk.get("")
     @skippy_required

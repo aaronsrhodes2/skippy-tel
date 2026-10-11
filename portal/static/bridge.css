@@ -334,3 +334,15 @@ dialog.keys .key { margin: 0 0 0 auto; }
 .vhead .g { width: 20px; height: 20px; }
 .vmsg { gap: 10px; padding: 8px 6px; color: var(--muted); font-size: .85rem; line-height: 1.35; border: 0; }
 .vmsg .g { flex: none; width: 24px; height: 24px; }
+
+/* the voice keys (static/skippy-voice.js): the key's data-s says what it is doing; the lamp in it follows */
+.key.mic .lamp, .key.spk .lamp { position: absolute; top: 5px; right: 6px; width: 7px; height: 7px; z-index: 2; background: transparent; }
+.key.mic[data-s="on"] .lamp, .key.spk[data-s="on"] .lamp { background: var(--accent); animation: breathe 1s ease-in-out infinite; }
+.key.mic[data-s="boot"] .lamp { box-shadow: inset 0 0 0 2px var(--amber); animation: breathe .9s ease-in-out infinite; }
+.key.mic[data-s="warn"] .lamp { background: var(--amber); border-radius: 0; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.key.spk[aria-pressed="true"] .lamp { background: var(--accent); }
+.key.spk[data-s="on"] .lamp { background: var(--accent); }
+/* the chat has eleven keys (voice added two): let them shrink so the row stays one line on a phone */
+.chat-bridge .keybar { flex-wrap: nowrap; gap: 3px; }
+.chat-bridge .keybar .key { min-width: 26px; }
+.chat-bridge .keybar .key .g { width: 18px; height: 18px; }

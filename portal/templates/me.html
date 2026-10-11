@@ -23,6 +23,7 @@
   ('experiments', 'atom', 'Experiments', ''),
   ('links', 'globe', 'Links', ''),
 ] %}
+<script src="{{ url_for('static', filename='skippy-voice.js') }}"></script>
 <section class="adm" id="adm">
   <div class="stage" id="astage">
     <div class="deck" id="adeck" style="--rows: {{ (units | length + 1) // 2 }}; --rows-wide: {{ (units | length + 3) // 4 }}; --rows-side: {{ (units | length + 4) // 5 }}">

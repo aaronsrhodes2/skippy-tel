@@ -7,6 +7,7 @@
 {# Skippy's page. Behind the chat, a living background: neon wireframe spirals that wander, attach to each other or to the edges and
    let go (static/bridge-alive.js), so the space around the interface feels like a mind at work. The chat sits on top of it. #}
 <canvas class="alive" aria-hidden="true"></canvas>
+<script src="{{ url_for('static', filename='skippy-voice.js') }}"></script>
 <section class="chat-page">
   {% include "_chat.html" %}
 </section>

@@ -210,6 +210,17 @@ only when the gate's `/health` says `ready`. Direct play when the catalog says `
 `portal/static/vendor/`, Safari's own on Apple). Run it against the REAL gate on this machine with `python portal/tests/dev_video.py`.
 Full description and tests: `docs/portal/README.md` → Nagatha's Video Service.
 
+## Skippy's voice (mic, voice-to-text, text-to-voice in both chats: `/chat` and the personal Skippy on `/me`)
+
+A mic key and a speaker key on each chat, on any device with a current browser: `portal/static/skippy-voice.js` (MediaRecorder, no browser
+vendor speech cloud) + `portal/voice.py` (the pass, label `voice-gate-v1`; scopes `listen` for everyone who may chat, `speak` for admins only,
+because the cloned Skippy voice is personal-use) + `/chat/voice/gate` (the pass route). The recording goes browser → Tailscale Funnel `:10000` →
+`services/voice-gate` → Whisper at home (flask-api's ElevenLabs for Skippy's voice; its key never leaves home); never through the portal.
+Non-admins (and any failure) hear replies in their device's own built-in voice. The reporter's `voice_gate` capability (`VOICE_GATE_URL`/
+`VOICE_GATE_PUBLIC`) is ready when Whisper answers behind the gate. Start it: `docker compose up --build -d voice-gate`, then
+`tailscale funnel --https=10000 --bg 3007` (the bridge's `funnel on` now does all three doors). Tests: `portal/tests/test_voice.py`,
+`services/voice-gate/tests` (run in their own pytest session).
+
 ## Star Control Zero (the Captain's game in the browser, `/starcontrol`)
 
 The fan game from `github.com/aaronsrhodes2/star-control-precursors`, compiled to WebAssembly (pygbag) and played in

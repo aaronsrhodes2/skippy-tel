@@ -1578,7 +1578,7 @@ def test_only_known_capabilities_count_and_only_while_home_is_reporting():
     assert h.capabilities() == {} and h.can("make_music") is False                     # no report yet
     h.accept({"capabilities": {"make_music": {"ready": True}, "format_c_drive": {"ready": True}}})
     assert h.capabilities() == {"make_music": True, "workshop": False, "music_gate": False,
-                                "video_gate": False}                 # unknown names are ignored
+                                "video_gate": False, "voice_gate": False}                 # unknown names are ignored
     assert h.can("make_music") and not h.can("format_c_drive")
     h.accept({"capabilities": {"make_music": {"ready": "yes"}}})
     assert h.can("make_music") is False                                                # only a real True counts

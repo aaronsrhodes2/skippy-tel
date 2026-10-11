@@ -342,6 +342,25 @@ the virtual lists at full size; `/dev/gate-down` and `/dev/home-off` show the "i
 failed, when Node or mutagen is missing). What only a browser can show (the audio element, drag and drop, the lock screen, the
 layouts) was checked by hand, not by a test.
 
+## Skippy's voice (the mic and the speaker on `/chat` and `/me`)
+
+Both Skippy chats (the portal chat, with its Mentat / Barney Style toggle, and the Captain's personal Skippy on `/me`) have two glyph keys:
+a **mic** (tap to record, tap to stop; the words land in the message box for you to read and send) and a **speaker** (reads each reply
+aloud). Neither does anything until tapped, and the choice is remembered per browser.
+
+```
+browser ── /chat/voice/gate (a pass) ──> portal  (portal/voice.py)
+   │
+   └── https://skippy-pc.<tailnet>.ts.net:10000/t/<pass>/{stt, tts} ──> voice-gate (services/voice-gate) ──> Whisper / flask-api /tts/stream
+```
+
+Voice-to-text: the browser records with MediaRecorder (webm/opus on Chrome and Firefox, mp4 on Safari) and the home Whisper transcribes it
+(translating to English, as the rest of the home stack does); no browser vendor hears it. Text-to-voice: the Captain's pass lets the gate
+speak in Skippy's cloned voice (personal use only, so any other pass is refused); everyone else, and any failure, gets the device's own
+voice, so it works everywhere. The pass has its own label and signed text (`voice-gate-v1`, `voice:<exp>` / `voice-speak:<exp>`): a music
+or video pass never opens it. Tests: `portal/tests/test_voice.py` (the pass against the gate's own code, the route, the pages' markup,
+the helpers under Node) and `services/voice-gate/tests`. A real microphone was not exercised in the dev browser (it blocks capture).
+
 ## Nagatha's Video Service (the Captain's films, `/video`)
 
 The Captain's Jellyfin library on skippy-pc (285 films, 11 collections) in any browser: a phone, a laptop, a TV browser. Admin only,

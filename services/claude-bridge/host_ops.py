@@ -12,7 +12,7 @@ first found in an allow-list:
   reset-workshop <project> the private Skippy's own clone of that project back to origin/<branch>. Nothing is thrown away:
                            uncommitted work goes into a stash, unpushed commits stay on a rescue/<stamp> branch. Refused
                            while a run is going
-  funnel on|off|status     Tailscale Funnel's two doors: 443 -> music gate (3005), 8443 -> video gate (3006)
+  funnel on|off|status     Tailscale Funnel's three doors: 443 -> music gate (3005), 8443 -> video gate (3006), 10000 -> voice gate (3007)
 
 Pure where it can be: `runner` (subprocess) and `clock` are arguments, so the tests drive it without docker or git.
 """
@@ -26,10 +26,10 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-SERVICES = ("flask-api", "ollama", "whisper", "music-studio", "music-gate", "video-gate", "home-reporter", "mentat-home")
+SERVICES = ("flask-api", "ollama", "whisper", "music-studio", "music-gate", "video-gate", "voice-gate", "home-reporter", "mentat-home")
 COMPOSE_DIR = os.getenv("SKIPPY_COMPOSE_DIR", r"D:\Aaron\development\SkippyTel")
 SUPERVISOR_PID = Path(COMPOSE_DIR) / "state" / "bridge-supervisor.pid"
-FUNNEL_DOORS = (("443", "3005"), ("8443", "3006"))     # (public https port, local port): music gate, video gate
+FUNNEL_DOORS = (("443", "3005"), ("8443", "3006"), ("10000", "3007"))     # (public https port, local port): music, video, voice gate
 OUTPUT_MAX = 1500
 TIMEOUT_S = 120
 SELF_RESTART_DELAY_S = 1.5        # long enough for the reply to leave before this process (or the reporter) goes away
@@ -204,6 +204,6 @@ class HostOps:
                 outs.append(f"$ tailscale funnel --https={public} {'--bg ' + local if what == 'on' else 'off'}\n{out}".strip())
         _, status = self.run([TAILSCALE, "funnel", "status"])
         outs.append(status)
-        word = {"on": "Funnel is on: music on :443, video on :8443.", "off": "Funnel is off: the audio and video "
+        word = {"on": "Funnel is on: music on :443, video on :8443, voice on :10000.", "off": "Funnel is off: the audio, video and voice "
                 "services can't be reached from outside until it's back on.", "status": "Funnel's current state:"}[what]
         return Result(ok, word if ok else "Funnel didn't do all of that; see the output.", _trim("\n\n".join(outs)))

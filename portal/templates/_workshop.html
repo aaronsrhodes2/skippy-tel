@@ -31,6 +31,8 @@
   .me-chat [hidden] { display: none !important; }        /* the base button style would otherwise show Stop while idle */
   .me-chat .actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .me-chat .actions .send { flex: 1; min-width: 5em; }
+  .me-chat .actions .vk { position: relative; width: 44px; height: 38px; flex: none; }
+  .me-chat .actions .vk .g { width: 20px; height: 20px; }
   /* Projects and conversations: one row under the title. The picker is the open conversation's project (fixed once it
      has a message: a conversation keeps to one repo) and becomes the choice for the next one after New chat. */
   .me-chat .ps-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; flex-shrink: 0; }   /* never squeezed by the log */
@@ -103,6 +105,8 @@
   <form id="ps-form">
     <textarea id="ps-text" rows="2" maxlength="8000" placeholder="e.g. make the Games tile's pill orange" required></textarea>
     <div class="actions">
+      <button type="button" class="key vk mic" id="ps-mic" aria-label="Speak your message" title="Speak your message"><svg class="g" aria-hidden="true"><use href="#g-mic"/></svg><i class="lamp"></i></button>
+      <button type="button" class="key vk spk" id="ps-spk" aria-pressed="false" aria-label="Read replies aloud" title="Read replies aloud"><svg class="g" aria-hidden="true"><use href="#g-vol"/></svg><i class="lamp"></i></button>
       <button type="submit" class="send" id="ps-send">Send</button>
       <button type="button" id="ps-stop" hidden class="danger">Stop</button>
       <button type="button" id="ps-new">New chat</button>
@@ -122,6 +126,8 @@
     const convsBtn = root.querySelector("#ps-convs-btn"), convsBox = root.querySelector("#ps-convs");
     const convsMsg = root.querySelector("#ps-convs-msg"), convsList = root.querySelector("#ps-convs-list");
     const notifyBox = root.querySelector("#ps-notify");
+    const voice = SkippyVoice.attach({gate: "{{ url_for('chat.voice_gate') }}", mic: root.querySelector("#ps-mic"), speaker: root.querySelector("#ps-spk"),
+      onText: t => { text.value = (text.value.trim() ? text.value.trim() + " " : "") + t; text.focus(); }});
     const K = {conv: "ps-conv", log: "ps-log", task: "ps-task", project: "ps-project"};
     const SEND = "{{ url_for('me.workshop_send') }}", EVENTS = "{{ url_for('me.workshop_events') }}",
           STOP = "{{ url_for('me.workshop_stop') }}", RESYNC = "{{ url_for('me.workshop_resync') }}",
@@ -373,6 +379,7 @@
       }
       if (running !== job) return;                 // left or reset while it napped: the card is someone else's now
       running = null; ui(); text.focus();
+      if (!job.turn.bad) voice.say((job.turn.parts || []).filter(p => p.t === "text").map(p => p.text).join(" "));   // aloud, if the speaker key is on
       if (out.resume) resume(out.resume);
     }
 
