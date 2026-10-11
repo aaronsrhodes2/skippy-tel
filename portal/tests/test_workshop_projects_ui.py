@@ -153,3 +153,55 @@ def test_a_conversation_you_are_in_is_pinned_and_listed_as_active_until_you_unpi
     items = out["snaps"]["list"]["items"]
     assert items[0] == "Active" and items[1].startswith("fix the pill") and items[1].endswith("×")      # pinned at once, with its unpin
     assert "Earlier" in items and "make the solver faster | sigma-ground · 2 messages · 2 h ago" in items   # the rest of the history below
+
+
+@needs_node
+def test_messages_sent_while_skippy_works_queue_and_go_together_when_the_task_returns(page):
+    done = {"t": "text", "text": "Done."}
+    out = drive(page, [
+        {"type": "first"}, {"click": "ps-send"},
+        {"tasks": {"new1": {"state": "running", "events": [{"t": "text", "text": "on it"}]}}}, {"adv": 2000},
+        {"type": "then this"}, {"click": "ps-send"}, {"type": "and that"}, {"click": "ps-send"}, {"snap": "queued"},
+        {"tasks": {"new1": {"state": "done", "events": [{"t": "text", "text": "on it"}, done]}}}, {"adv": 2000}, {"adv": 2000}, {"snap": "after"},
+    ])
+    q = out["snaps"]["queued"]
+    assert q["queueShown"] and q["queue"] == ["then this | ×", "and that | ×"] and q["text"] == ""         # held, shown, and the box is free
+    assert "Queue a message" in q["placeholder"]
+    s = sends(out)
+    assert [x["message"] for x in s] == ["first", "Several things queued while you worked, in order:\n1. then this\n2. and that"]
+    assert not out["snaps"]["after"]["queueShown"] and out["snaps"]["after"]["queue"] == []                       # one message took them all
+
+
+@needs_node
+def test_a_single_queued_message_goes_as_itself_and_a_stopped_run_does_not_send_the_queue(page):
+    out = drive(page, [
+        {"type": "first"}, {"click": "ps-send"},
+        {"tasks": {"new1": {"state": "running", "events": [{"t": "text", "text": "on it"}]}}}, {"adv": 2000},
+        {"type": "just one"}, {"click": "ps-send"},
+        {"tasks": {"new1": {"state": "done", "events": [{"t": "text", "text": "on it"}, {"t": "text", "text": "ok"}]}}}, {"adv": 2000}, {"adv": 2000},
+    ])
+    assert [x["message"] for x in sends(out)] == ["first", "just one"]                                              # not wrapped when alone
+    out = drive(page, [
+        {"type": "first"}, {"click": "ps-send"},
+        {"tasks": {"new1": {"state": "running", "events": [{"t": "text", "text": "on it"}]}}}, {"adv": 2000},
+        {"type": "later"}, {"click": "ps-send"},
+        {"click": "ps-stop"}, {"tasks": {"new1": {"state": "error", "error": "stopped", "events": []}}}, {"adv": 3000}, {"snap": "stopped"},
+    ])
+    assert [x["message"] for x in sends(out)] == ["first"] and out["snaps"]["stopped"]["queue"] == ["later | ×"]   # he stopped it: the queue waits for him
+
+
+LOG = [{"role": "user", "text": "fix the pill"},
+       {"role": "assistant", "parts": [{"t": "tool", "name": "Bash", "detail": "pytest -q"}, {"t": "text", "text": "Fixed the **pill**."},
+                                       {"t": "text", "text": "Deployed."}]}]
+
+
+@needs_node
+def test_a_prompt_a_reply_and_the_whole_conversation_carry_their_markdown_for_the_portals_copy_script(page):
+    import json
+    out = drive(page, [{"snap": "s"}], storage={"ps-conv": "conv-12345678", "ps-log": json.dumps(LOG)})
+    s = out["snaps"]["s"]
+    assert s["copyTurns"] == [
+        "fix the pill",                                                        # a sent prompt, as typed
+        "Fixed the **pill**.\n\nDeployed.",                                    # a reply: its words (the tool steps are not words)
+    ]
+    assert s["copyAll"] == "# SkippyTel\n\n## You\n\nfix the pill\n\n## Skippy\n\nFixed the **pill**.\n\nDeployed.\n\n_Ran 1 command_\n"

@@ -145,7 +145,7 @@ class El {
     const self = this;
     this.classList = {toggle(c, on) { if (on) self.cls.add(c); else self.cls.delete(c); }, contains: (c) => self.cls.has(c)};
   }
-  get textContent() { return this.children.length ? this.children.map(c => c.textContent).join(" | ") : this.own; }
+  get textContent() { const kids = this.children.filter(c => c.className !== "cp"); return kids.length ? kids.map(c => c.textContent).join(" | ") : this.own; }   // (the copy buttons are not text)
   set textContent(t) { this.children = []; this.own = String(t); }
   appendChild(c) { this.children.push(c); return c; }
   append(...cs) { cs.forEach(c => this.children.push(c)); }
@@ -158,7 +158,7 @@ class El {
 }
 const els = {};
 for (const id of ["ps-log", "ps-flow", "ps-pips", "ps-form", "ps-text", "ps-send", "ps-stop", "ps-new", "ps-quiet", "ps-quiet-msg", "ps-quiet-hint", "ps-check", "ps-reload",
-                  "ps-project", "ps-project-hint", "ps-convs-btn", "ps-convs", "ps-convs-msg", "ps-convs-list", "ps-notify", "ps-mic", "ps-spk", "ps-attach", "ps-file", "ps-img"]) els[id] = new El("x");
+                  "ps-project", "ps-project-hint", "ps-convs-btn", "ps-convs", "ps-convs-msg", "ps-convs-list", "ps-notify", "ps-mic", "ps-spk", "ps-attach", "ps-file", "ps-img", "ps-queue", "ps-copyall"]) els[id] = new El("x");
 els["ps-notify"].checked = true;
 for (const id of ["ps-stop", "ps-quiet", "ps-quiet-hint", "ps-reload", "ps-project-hint", "ps-convs"]) els[id].hidden = true;
 const Bridge = {pager: () => ({refresh() {}, last() {}, go() {}, page() { return 0; }, pages() { return 1; }})};   // the page flips are the bridge's, not under test here
@@ -258,6 +258,8 @@ function snap() {
     log: e["ps-flow"].children.map(b => ({cls: b.className + (b.cls.has("failed") ? " failed" : ""), text: b.textContent})),
     task: storage.has("ps-task") ? JSON.parse(storage.get("ps-task")) : null, focused: e["ps-text"].focused,
     resyncs: calls.filter(c => c.route === "resync").length, text: e["ps-text"].value,
+    copyAll: e["ps-copyall"]["attr:data-copy"], copyTurns: e["ps-flow"].children.map(b => (b.children.find(c => c.className === "cp") || {})["attr:data-copy"]),
+    queue: e["ps-queue"].children.map(c => c.textContent), queueShown: !e["ps-queue"].hidden, placeholder: e["ps-text"].placeholder,
     project: e["ps-project"].value, pickerLocked: e["ps-project"].disabled, pickHint: !e["ps-project-hint"].hidden,
     convsShown: !e["ps-convs"].hidden, logHidden: e["ps-log"].hidden, convsMsg: e["ps-convs-msg"].textContent,
     convsBtn: e["ps-convs-btn"].textContent, items: e["ps-convs-list"].children.map(b => b.textContent),
@@ -353,7 +355,7 @@ def test_a_stalled_run_shows_what_is_happening_checks_again_by_itself_and_brings
         {"adv": 10 * S}, {"snap": "t127"},
     ], tasks={"t1": {"state": "running", "events": [ev(1), ev(2)]}}, follow="t1")
     s = out["snaps"]
-    assert not s["healthy"]["strip"] and s["healthy"]["sendDisabled"] and s["healthy"]["stopShown"]
+    assert not s["healthy"]["strip"] and not s["healthy"]["sendDisabled"] and s["healthy"]["stopShown"]   # a healthy run keeps Send on: that is how a message is queued
     assert s["healthy"]["log"][-1]["text"] == "step 1 | step 2" and s["healthy"]["resyncs"] == 0
     # quiet at once, with the portal's own word on how long ("2 min" from its quiet_s of 125), Send still off
     q = s["quiet"]
@@ -450,7 +452,7 @@ def test_when_the_link_heals_the_card_goes_back_to_normal_and_the_final_answer_e
     ], tasks={"t1": {"state": "running", "events": [ev(1)]}}, follow="t1")
     s = out["snaps"]
     assert s["quiet"]["strip"] and not s["quiet"]["sendDisabled"]
-    assert not s["healed"]["strip"] and s["healed"]["sendDisabled"] and s["healed"]["stopShown"]     # busy again, nothing to check
+    assert not s["healed"]["strip"] and not s["healed"]["sendDisabled"] and s["healed"]["stopShown"]     # busy again, nothing to check
     assert s["healed"]["log"][-1]["text"] == "step 1 | step 2" and s["healed"]["task"] == {"task": "t1", "after": 2}
     d = s["done"]
     assert not d["strip"] and not d["sendDisabled"] and not d["stopShown"] and d["task"] is None   # finished: Send is back, no task to resume
@@ -484,7 +486,7 @@ def test_sending_while_quiet_leaves_the_old_task_and_the_server_decides(page):
     left = s["left"]
     assert [b["text"] for b in left["log"]][:3] == ["go", "step 1 | (left waiting)", "second"] and "Working" in left["log"][3]["text"]   # the old turn is marked; the new one waits (with its clock)
     assert left["task"] == {"task": "new1", "after": 0}                                  # the page follows the new task now
-    assert left["sendDisabled"] and left["stopShown"] and not left["strip"]
+    assert not left["sendDisabled"] and left["stopShown"] and not left["strip"]
     (sent,) = [c for c in out["calls"] if c["route"] == "send"]
     assert sent["message"] == "second"
     assert not [c for c in out["calls"] if c["route"] == "events" and c["task"] == "t1" and c["t"] > sent["t"]]   # t1 is forgotten
@@ -555,7 +557,7 @@ def test_a_busy_bridge_on_the_new_task_also_brings_the_old_one_back(page):
     ], tasks={"t1": {"state": "running", "events": [ev(1)]}}, follow="t1")
     a = out["snaps"]["after"]
     assert [b["text"] for b in a["log"]] == ["go", "step 1 | step 2", "second", BUSY]
-    assert a["task"] == {"task": "t1", "after": 2} and a["sendDisabled"] and a["stopShown"]
+    assert a["task"] == {"task": "t1", "after": 2} and not a["sendDisabled"] and a["stopShown"]
 
 
 @needs_node
@@ -613,7 +615,7 @@ def test_a_healthy_long_run_never_shows_the_strip_and_polls_steadily(page):
         steps += [{"tasks": {"t1": {"events": [ev(i) for i in range(1, n + 1)]}}}, {"adv": 60 * S}]
     out = drive(page, steps + [{"snap": "end"}], tasks={"t1": {"state": "running", "events": [ev(1)]}}, follow="t1")
     end = out["snaps"]["end"]
-    assert not end["strip"] and end["sendDisabled"] and end["stopShown"] and resyncs(out) == []
+    assert not end["strip"] and not end["sendDisabled"] and end["stopShown"] and resyncs(out) == []
     assert end["log"][-1]["text"] == " | ".join(f"step {i}" for i in range(1, 12))
     assert set(b - a for a, b in zip(polls(out), polls(out)[1:])) == {1200}
 
@@ -643,7 +645,7 @@ def test_a_first_message_follows_to_the_end_and_a_failed_send_does_not_strand_th
     s = out["snaps"]
     assert [b["text"] for b in s["refused"]["log"]] == ["first", "The bridge isn't running."]
     assert not s["refused"]["sendDisabled"] and not s["refused"]["stopShown"]        # a refusal is not a stuck card
-    assert s["sent"]["sendDisabled"] and s["sent"]["task"] == {"task": "new1", "after": 0}
+    assert not s["sent"]["sendDisabled"] and s["sent"]["task"] == {"task": "new1", "after": 0}
     assert s["running"]["log"][-1]["text"].startswith("step 1") and "Working" in s["running"]["log"][-1]["text"] and s["running"]["stopShown"]
     assert s["done"]["log"][-1]["text"] == "step 1 | All done." and not s["done"]["sendDisabled"]
 

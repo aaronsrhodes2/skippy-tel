@@ -16,6 +16,8 @@
   .me-chat .turn.assistant { background: var(--dim-green); border: 1px solid var(--dim-green-hi); color: var(--ink); }
   .me-chat .turn.failed { border-color: var(--red); }
   .me-chat .turn p { margin: 0 0 6px; }
+  .me-chat .turn .cp { float: right; margin: 0 0 0 8px; padding: 0 6px; min-width: 0; font-size: .7rem; opacity: .55; }
+  .me-chat .turn .cp:hover { opacity: 1; }
   .me-chat .md p { margin: 0 0 8px; }
   .me-chat .md h5, .me-chat .md h6 { margin: 10px 0 4px; font-size: .95rem; color: var(--accent); text-transform: none; letter-spacing: 0; }
   .me-chat .md ul, .me-chat .md ol { margin: 0 0 8px; padding-left: 22px; }
@@ -50,6 +52,10 @@
   .me-chat [hidden] { display: none !important; }        /* the base button style would otherwise show Stop while idle */
   .me-chat .actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .me-chat .actions .send { flex: 1; min-width: 5em; }
+  .me-chat .ps-queue { display: flex; flex-direction: column; gap: 4px; }
+  .me-chat .ps-queue .qrow { display: flex; gap: 6px; align-items: center; border: 1px dashed var(--dim-green-hi); padding: 4px 8px; font-size: .82rem; color: var(--muted); }
+  .me-chat .ps-queue .qrow .qt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .me-chat .ps-queue .qrow button { padding: 0 6px; min-width: 0; margin: 0; }
   .me-chat .ps-attach { display: flex; gap: 8px; flex-wrap: wrap; }
   .me-chat .ps-attach .chip { position: relative; width: 64px; height: 64px; border: 1px solid var(--dim-green-hi); border-radius: 6px; overflow: hidden; background: var(--black); }
   .me-chat .ps-attach .chip img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -107,6 +113,7 @@
       {% for p in workshop_projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
     </select>
     <button type="button" id="ps-convs-btn">Conversations</button>
+    <button type="button" id="ps-copyall" title="Copy this whole conversation as markdown">Copy chat</button>
     {# A Discord DM to the Captain when a run ends (portal/notify.py). Off when the portal has no Discord bot. #}
     <label class="notify"><input type="checkbox" id="ps-notify"{% if workshop_notify and workshop_notify_ready %} checked{% endif %}{% if not workshop_notify_ready %} disabled title="The portal has no Discord bot (DISCORD_BOT_TOKEN)"{% endif %}> Discord me when done</label>
     <div class="hint" id="ps-project-hint" hidden></div>
@@ -125,6 +132,7 @@
     </div>
   </div>
   <form id="ps-form">
+    <div class="ps-queue" id="ps-queue" hidden></div>
     <div class="ps-attach" id="ps-attach" hidden></div>
     <textarea id="ps-text" rows="2" maxlength="8000" placeholder="Message Skippy"></textarea>
     <div class="actions">
@@ -151,7 +159,7 @@
     const convsBtn = root.querySelector("#ps-convs-btn"), convsBox = root.querySelector("#ps-convs");
     const convsMsg = root.querySelector("#ps-convs-msg"), convsList = root.querySelector("#ps-convs-list");
     const notifyBox = root.querySelector("#ps-notify");
-    const attachBox = root.querySelector("#ps-attach"), fileIn = root.querySelector("#ps-file"), imgBtn = root.querySelector("#ps-img");
+    const queueBox = root.querySelector("#ps-queue"), attachBox = root.querySelector("#ps-attach"), fileIn = root.querySelector("#ps-file"), imgBtn = root.querySelector("#ps-img");
     const voice = SkippyVoice.attach({gate: "{{ url_for('chat.voice_gate') }}", mic: root.querySelector("#ps-mic"), speaker: root.querySelector("#ps-spk"),
       onText: t => { text.value = (text.value.trim() ? text.value.trim() + " " : "") + t; text.focus(); }});
     const K = {conv: "ps-conv", log: "ps-log", task: "ps-task", project: "ps-project"};
@@ -198,11 +206,33 @@
     let running = null;                            // {task, after, turn, quietSince, kind, ...}: the task this page follows
     let sending = false;                           // a message is on its way to the portal
 
-    const save = () => store.set(K.log, JSON.stringify(turns.slice(-60)));
+    const save = () => { store.set(K.log, JSON.stringify(turns.slice(-60))); if (typeof refreshCopyAll === "function") refreshCopyAll(); };
     let liveClock = null;                          // the seconds counter of the turn being worked on
     const clock = (t0) => { const s = Math.max(0, Math.floor((Date.now() - t0) / 1000)); return s >= 60 ? Math.floor(s / 60) + "m " + String(s % 60).padStart(2, "0") + "s" : s + "s"; };
     function el(tag, cls, txt) { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
     const setText = (node, t) => { if (node.textContent !== t) node.textContent = t; };   // an unchanged note is not re-announced
+    // ── copy as markdown: one prompt, one reply, or the whole conversation ──
+    const turnMd = (t) => t.role === "user" ? t.text : (t.parts || []).filter(x => x.t === "text").map(x => x.text).join("\n\n");
+    function conversationMd() {
+      const title = ((pins.find(x => x.conv === conv) || {}).title) || projectName(project);
+      const out = ["# " + title, ""];
+      turns.forEach(t => {
+        out.push(t.role === "user" ? "## You" : "## Skippy", "", turnMd(t));
+        const n = t.role === "user" ? 0 : (t.parts || []).filter(x => x.t !== "text" && x.t !== "image" && x.t !== "ship").length;
+        if (n) out.push("", "_Ran " + n + (n === 1 ? " command" : " commands") + "_");
+        out.push("");
+      });
+      return out.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
+    }
+    // The portal's one copy script (static/copy.js) copies whatever a button's data-copy says, with its own "Copied" feedback and the
+    // fallbacks for plain http; so a button only has to carry the text, kept current as the turns change.
+    function addCopy(box, turn) {
+      const b = el("button", "cp", "copy"); b.type = "button"; b.title = "Copy this as markdown";
+      b.setAttribute("data-copy", turnMd(turn));
+      box.appendChild(b);
+    }
+    const copyAll = root.querySelector("#ps-copyall");
+    const refreshCopyAll = () => copyAll.setAttribute("data-copy", conversationMd());
     const boxes = new WeakMap();                   // turn -> its bubble (kept off the turn, which is saved as JSON)
     const thumbsOf = new WeakMap();                // turn -> the pictures sent with it (data URLs: not saved, they would fill the browser's storage)
     function draw(turn) {                          // (re)draw one turn's bubble from its data
@@ -211,6 +241,7 @@
       box.replaceChildren();
       if (turn.role === "user") {
         box.textContent = turn.text;
+        addCopy(box, turn);
         if (turn.imgs) {                           // thumbnails while this page has them; just a count after a reload
           const row = el("div", "imgs"), shown = thumbsOf.get(turn) || [];
           if (shown.length) shown.forEach(u => { const im = el("img"); im.src = u; im.alt = ""; row.appendChild(im); });
@@ -234,6 +265,7 @@
         else box.appendChild(shot(p));
       });
       if (turn.note) box.appendChild(el("div", "note" + (turn.bad ? " bad" : ""), turn.note));
+      addCopy(box, turn);
       box.classList.toggle("failed", !!turn.bad);
       if (turn.t0 && !turn.note && ((running && running.turn === turn) || turn.pending)) {     // still being worked on: say so, with a clock
         const w = el("div", "working"); w.appendChild(el("span", "dots", "\u2022\u2022\u2022")); w.appendChild(el("span", "w", " Working "));
@@ -334,7 +366,8 @@
     const canLeave = (job) => quiet(job) && job.kind !== "signin" && Date.now() - job.quietSince >= LEAVE_AFTER_MS;
     function ui() {                                // the card's controls, from the state alone (safe to call any time)
       const job = running, q = quiet(job);
-      send.disabled = sending || (!!job && !canLeave(job));
+      send.disabled = sending || (!!job && !!job.kind && !canLeave(job));
+      text.placeholder = job && !job.kind ? "Queue a message: they all go together when Skippy is done" : "Message Skippy";
       stopBtn.hidden = !job || !!job.stopping;     // Stop stays while a task is followed (even a quiet one: skippy-pc gets it on return)
       strip.hidden = !q;
       if (!q) return;
@@ -438,9 +471,35 @@
       }
       if (running !== job) return;                 // left or reset while it napped: the card is someone else's now
       running = null; ui(); text.focus(); draw(job.turn); save();       // the working line goes
+      if (out.end && !job.turn.note) drainQueue();                      // the queue goes as one message, unless he stopped it or it failed
       if (!job.turn.bad) voice.say((job.turn.parts || []).filter(p => p.t === "text").map(p => p.text).join(" "));   // aloud, if the speaker key is on
       if (out.resume) resume(out.resume);
     }
+
+    // ── the queue: messages sent while Skippy works wait here, and go together, in one message, when the task returns ──
+    const QK = "ps-queue";
+    let queue = []; try { queue = JSON.parse(store.get(QK) || "[]"); if (!Array.isArray(queue)) queue = []; } catch (e) { queue = []; }
+    const saveQueue = () => store.set(QK, JSON.stringify(queue.slice(0, 20)));
+    function paintQueue() {
+      queueBox.hidden = !queue.length;
+      queueBox.replaceChildren(...queue.map((q, i) => {
+        const row = el("div", "qrow"), x = el("button", null, "\u00D7");
+        x.type = "button"; x.title = "Take this out of the queue"; x.setAttribute("aria-label", "Take this out of the queue");
+        x.addEventListener("click", () => { queue.splice(i, 1); saveQueue(); paintQueue(); });
+        row.append(el("span", "qt", q), x); return row;
+      }));
+    }
+    const gulp = (items) => items.length === 1 ? items[0] : "Several things queued while you worked, in order:\n" + items.map((t, i) => (i + 1) + ". " + t).join("\n");
+    const waiting = () => !!running && !running.kind;           // a healthy run: new messages queue instead of being refused
+    function drainQueue() {                                     // the task returned: everything queued goes as ONE message
+      if (!queue.length || sending || running) return;
+      const draft = text.value, all = queue.splice(0);
+      saveQueue(); paintQueue();
+      text.value = gulp(all);
+      form.requestSubmit();
+      text.value = draft;                                       // what he was typing meanwhile is still there
+    }
+    paintQueue();
 
     // ── pictures: paste (a screenshot from the clipboard), drop, or pick; each is shrunk to a JPEG here and goes with the message ──
     const MAX_IMAGES = 4, MAX_EDGE = 1800;
@@ -496,10 +555,12 @@
 
     form.addEventListener("submit", async (ev) => {
       ev.preventDefault();
-      const message = text.value.trim();
+      let message = text.value.trim();
       if ((!message && !attached.length) || sending) return;
+      if (waiting() && message) { queue.push(message); saveQueue(); paintQueue(); text.value = ""; return; }   // queued, not lost
       let gone = null;
       if (running) { if (!canLeave(running)) return; gone = leave(running); }
+      if (queue.length) { message = gulp([...queue.splice(0), ...(message ? [message] : [])]); saveQueue(); paintQueue(); }
       showConvs(false);
       const sent = attached.map(a => a.url); attached = []; paintAttached();
       const mine = {role: "user", text: message || "(image)"}; if (sent.length) { mine.imgs = sent.length; thumbsOf.set(mine, sent); }
@@ -537,7 +598,7 @@
     reloadBtn.addEventListener("click", () => location.reload());
     function leaveConversation() {                 // no "are you sure": the task keeps going on skippy-pc either way
       const job = running; running = null; if (job && job.wake) job.wake();
-      turns = []; save(); store.del(K.task); flow.replaceChildren(); ui();
+      turns = []; save(); store.del(K.task); flow.replaceChildren(); queue = []; saveQueue(); paintQueue(); ui();
       return true;
     }
     newBtn.addEventListener("click", () => {       // a new conversation, and the picker asks which project it is for
@@ -636,7 +697,7 @@
       if (!r || !r.ok || !r.data || r.data.on !== want) notifyBox.checked = !want;
     });
 
-    turns.forEach(draw); scroll(true); lockPicker(); ui();
+    turns.forEach(draw); scroll(true); lockPicker(); ui(); refreshCopyAll();
     // A new browser, window or device has no memory of this chat, but skippy-pc does: open the latest conversation there instead of
     // starting a blank one beside it (the chat used to look like it kept making new chats). New chat is still the explicit way to start one.
     async function resumeLatest() {
