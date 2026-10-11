@@ -1,0 +1,5 @@
+sounddevice>=0.4
+numpy>=1.26
+requests>=2.31
+anthropic>=0.40
+pytest>=8
