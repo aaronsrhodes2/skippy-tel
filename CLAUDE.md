@@ -218,7 +218,7 @@ browser that has never opened the chat opens the **latest conversation** from sk
 explicit way to start one). **Pictures** (UI-bug screenshots): paste, drop or pick up to 4; the page shrinks each to a JPEG, the portal checks
 them (`workshop.clean_images`), the job carries them to the bridge, which saves them under `.skippy-workshop-attachments/<task>/` beside the
 sessions file (swept after 14 days) and names the paths in the message so Claude Code opens them with Read. Tests:
-`portal/tests/test_workshop_attachments.py`, `services/claude-bridge/tests/test_workshop_attachments.py`, the UI harness in `test_workshop_*ui.py`.
+`portal/tests/test_workshop_attachments.py`, `services/claude-bridge/tests/test_bridge_attachments.py`, the UI harness in `test_workshop_*ui.py`.
 The bridge only picks this up on restart (refused while a run is going).
 
 ## Skippy's voice (mic, voice-to-text, text-to-voice in both chats: `/chat` and the personal Skippy on `/me`)
