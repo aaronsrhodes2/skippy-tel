@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import pathlib
 import logging
 import os
 import re
@@ -95,6 +96,78 @@ def valid(key: bytes, token: str, now: float) -> str | None:
     return None
 
 
+class Voice:
+    """What Skippy's real voice costs, and keeps it cheap: a DAILY CHARACTER BUDGET (ElevenLabs bills per character; this key cannot read
+    its own subscription, so the gate counts what it sends) and a CACHE of what was already said (the same words never cost twice).
+    Over budget, /tts answers 429 and the page speaks with the device's own free voice instead; tomorrow it is back. state_dir="" keeps
+    it all in memory (tests); `daily` 0 means no limit."""
+
+    def __init__(self, state_dir: str, daily: int, clock, cache_keep: int = 300):
+        self.dir, self.daily, self.clock, self.keep = state_dir, int(daily), clock, cache_keep
+        self._lock, self._chars, self._day, self._mem = threading.Lock(), 0, self._today(), {}
+        if state_dir:
+            pathlib.Path(state_dir, "tts-cache").mkdir(parents=True, exist_ok=True)
+            try:
+                d = json.loads(pathlib.Path(state_dir, "tts-usage.json").read_text())
+                if d.get("day") == self._day:
+                    self._chars = int(d.get("chars", 0))
+            except (OSError, ValueError):
+                pass
+
+    def _today(self) -> str:
+        return time.strftime("%Y-%m-%d", time.gmtime(self.clock()))
+
+    def _roll(self):
+        if self._today() != self._day:
+            self._day, self._chars = self._today(), 0
+
+    def left(self) -> int | None:
+        with self._lock:
+            self._roll()
+            return None if not self.daily else max(0, self.daily - self._chars)
+
+    def spend(self, n: int) -> None:
+        with self._lock:
+            self._roll()
+            self._chars += n
+            if self.dir:
+                try:
+                    pathlib.Path(self.dir, "tts-usage.json").write_text(json.dumps({"day": self._day, "chars": self._chars}))
+                except OSError:
+                    pass
+
+    def used(self) -> int:
+        with self._lock:
+            self._roll()
+            return self._chars
+
+    def _path(self, text: str) -> pathlib.Path:
+        return pathlib.Path(self.dir, "tts-cache", hashlib.sha256(text.encode()).hexdigest()[:32] + ".mp3")
+
+    def cached(self, text: str) -> bytes | None:
+        if not self.dir:
+            return self._mem.get(text)
+        try:
+            p = self._path(text)
+            data = p.read_bytes()
+            os.utime(p, None)                              # recently used stays
+            return data
+        except OSError:
+            return None
+
+    def remember(self, text: str, audio: bytes) -> None:
+        if not self.dir:
+            self._mem[text] = audio
+            return
+        try:
+            self._path(text).write_bytes(audio)
+            files = sorted(pathlib.Path(self.dir, "tts-cache").glob("*.mp3"), key=lambda f: f.stat().st_mtime)
+            for old in files[:-self.keep]:
+                old.unlink()
+        except OSError:
+            pass
+
+
 def polish(audio: bytes, chain: str, run=subprocess.run, timeout: float = 25) -> bytes:
     """The voice through ffmpeg's chain (mp3 in, mp3 out). Anything that goes wrong returns the raw audio: a plain voice beats no voice."""
     if not chain:
@@ -120,11 +193,13 @@ def spoken(text: str) -> str:
 
 
 def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slots: int = 3,
-               post=requests.post, get=requests.get, ollama_url: str = "", summary_model: str = "qwen2.5:7b", fx_chain: str = "", polisher=polish, style: str = "") -> Flask:
+               post=requests.post, get=requests.get, ollama_url: str = "", summary_model: str = "qwen2.5:7b", fx_chain: str = "", polisher=polish, style: str = "",
+               state_dir: str = "", daily_chars: int = 0) -> Flask:
     app = Flask(__name__, static_folder=None)
     app.url_map.merge_slashes = False
     app.config["MAX_CONTENT_LENGTH"] = MAX_AUDIO + 4096
     busy = threading.BoundedSemaphore(slots)          # the GPU is shared with everything else at home: a few at a time
+    voice = Voice(state_dir, daily_chars, clock)
 
     def err(code: int) -> Response:
         return Response(json.dumps({"error": MESSAGES.get(code, "request failed")}), status=code,
@@ -175,7 +250,8 @@ def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slot
     @app.get("/health")
     def health():
         w, t = probe(f"{whisper_url}/health"), probe(f"{tts_url}/tts/health")
-        return Response(json.dumps({"ok": True, "ready": w, "whisper": w, "tts": t}), mimetype="application/json",
+        return Response(json.dumps({"ok": True, "ready": w, "whisper": w, "tts": t, "voice_chars_today": voice.used(), "voice_budget": daily_chars}),
+                        mimetype="application/json",
                         headers={"Cache-Control": "no-store"})
 
     @app.post("/t/<token>/stt")
@@ -220,12 +296,19 @@ def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slot
             return err(400)
         if len(text) > MAX_TEXT:
             return err(413)
+        spoken_text = text.strip()
+        if style and not spoken_text.startswith("["):             # the delivery tag (ElevenLabs v3 audio tag), unless the text brings its own
+            spoken_text = f"{style} {spoken_text}"
+        said = voice.cached(spoken_text)
+        if said is not None:                                      # said before: free
+            return Response(said, mimetype="audio/mpeg", headers={"Cache-Control": "no-store", "X-Voice-Cache": "hit"})
+        left = voice.left()
+        if left is not None and len(spoken_text) > left:          # today's budget is spent: the page uses the device's own voice
+            return Response(json.dumps({"error": "Skippy's voice has used today's budget", "budget": True}), status=429,
+                            mimetype="application/json", headers={"Cache-Control": "no-store", "Retry-After": "3600"})
         if not busy.acquire(blocking=False):
             return err(429)
         try:
-            spoken_text = text.strip()
-            if style and not spoken_text.startswith("["):         # the delivery tag (ElevenLabs v3 audio tag), unless the text brings its own
-                spoken_text = f"{style} {spoken_text}"
             r = get(f"{tts_url}/tts/stream", params={"text": spoken_text}, timeout=60)
             if r.status_code != 200 or not r.content:
                 return err(503)
@@ -234,7 +317,9 @@ def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slot
             return err(503)
         finally:
             busy.release()
+        voice.spend(len(spoken_text))
         audio = polisher(audio, fx_chain)
+        voice.remember(spoken_text, audio)
         return Response(audio, mimetype="audio/mpeg", headers={"Cache-Control": "no-store"})
 
     @app.post("/t/<token>/summary")
@@ -278,6 +363,7 @@ def from_env() -> Flask:
                       os.environ.get("TTS_URL", "http://flask-api:5000").rstrip("/"),
                       ollama_url=os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/"),
                       summary_model=os.environ.get("SUMMARY_MODEL", "qwen2.5:7b"),
+                      state_dir=os.environ.get("STATE_DIR", "/state"), daily_chars=int(os.environ.get("VOICE_DAILY_CHARS", "4000") or 0),
                       style=os.environ.get("VOICE_STYLE", "[whispers]").strip(),                  # the Captain's pick (2026-10-11): close and soft, "in the room"
                       fx_chain="" if os.environ.get("VOICE_FX", "on").lower() == "off" else os.environ.get("VOICE_FX_CHAIN", "").strip()
                       or fx_chain_for(os.environ.get("VOICE_FX_MODEL", FX_MODEL), int(os.environ.get("VOICE_FX_PASSES", "1") or 1)))

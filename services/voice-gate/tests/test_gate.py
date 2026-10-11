@@ -143,6 +143,46 @@ def test_polish_hands_ffmpeg_the_chain_and_never_loses_the_voice():
     assert gate.polish(b"raw", "c", run=missing) == b"raw" and gate.polish(b"raw", "c", run=slow) == b"raw"
 
 
+def tts_calls(fake):
+    return [g for g in fake.gets if "/tts/stream" in g[0]]
+
+
+def test_the_same_words_are_never_paid_for_twice():
+    fake = Fake()
+    app = gate.create_app(KEY, "http://w", "http://t", clock=lambda: NOW, post=fake.post, get=fake.get, daily_chars=1000)
+    c = app.test_client()
+    first = c.post(f"/t/{speak()}/tts", json={"text": "I am Skippy."})
+    again = c.post(f"/t/{speak()}/tts", json={"text": " I am Skippy. "})
+    assert first.data == again.data == b"ID3audio" and again.headers["X-Voice-Cache"] == "hit"
+    assert len(tts_calls(fake)) == 1 and c.get("/health").get_json()["voice_chars_today"] == len("I am Skippy.")
+
+
+def test_a_spent_daily_budget_answers_429_with_a_flag_so_the_page_uses_the_device_voice_and_tomorrow_it_is_back():
+    fake = Fake()
+    now = [NOW]
+    app = gate.create_app(KEY, "http://w", "http://t", clock=lambda: now[0], post=fake.post, get=fake.get, daily_chars=30)
+    c = app.test_client()
+    sp = lambda: gate.sign(KEY, now[0] + 3600, "speak")                                                          # noqa: E731
+    assert c.post(f"/t/{sp()}/tts", json={"text": "Twenty characters ok"}).status_code == 200
+    r = c.post(f"/t/{sp()}/tts", json={"text": "This will not fit today."})
+    assert r.status_code == 429 and r.get_json()["budget"] is True and r.headers["Retry-After"]
+    assert len(tts_calls(fake)) == 1                                                                             # ElevenLabs was not called
+    assert c.post(f"/t/{sp()}/tts", json={"text": "Twenty characters ok"}).status_code == 200                   # but what was said before is still free
+    now[0] += 24 * 3600
+    assert c.post(f"/t/{sp()}/tts", json={"text": "This will not fit today."}).status_code == 200             # a new day
+
+
+def test_the_budget_survives_a_restart_and_the_cache_is_bounded(tmp_path):
+    fake = Fake()
+    mk = lambda: gate.create_app(KEY, "http://w", "http://t", clock=lambda: NOW, post=fake.post, get=fake.get, state_dir=str(tmp_path), daily_chars=100)   # noqa: E731
+    mk().test_client().post(f"/t/{speak()}/tts", json={"text": "Remember me."})
+    assert mk().test_client().get("/health").get_json()["voice_chars_today"] == len("Remember me.")
+    v = gate.Voice(str(tmp_path), 0, lambda: NOW, cache_keep=3)
+    for i in range(8):
+        v.remember(f"line {i}", b"x")
+    assert len(list((tmp_path / "tts-cache").glob("*.mp3"))) == 3
+
+
 def test_the_delivery_style_tag_goes_in_front_unless_the_text_brings_its_own():
     fake = Fake()
     app = gate.create_app(KEY, "http://w", "http://t", clock=lambda: NOW, post=fake.post, get=fake.get, style="[whispers]")
