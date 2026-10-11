@@ -147,9 +147,9 @@ Image `indifferentbroccoli/runescape-dragonwilds-server-docker:latest` (Steam ap
   `data/dragonwilds` and its `steamapps`/`server-files/steamapps`, and shows `Steam build N` if it finds one.
 - Mods: none documented, no pinning. The card says so plainly.
 
-## Garry's Mod
+## SkippyVerse
 
-Image `ceifa/garrysmod:latest` (Valve's dedicated server, Steam app 4020), `PUID`/`PGID` 1000, only `garrysmod/data` and
+The Garry's Mod server (the game's own name, kept in the table above). Image `ceifa/garrysmod:latest` (Valve's dedicated server, Steam app 4020), `PUID`/`PGID` 1000, only `garrysmod/data` and
 `garrysmod/addons` are kept on the data disk (`data/garrysmod/...`): the server itself lives in the image. **UNVERIFIED
 throughout**: read from the image's README, not run here.
 
