@@ -152,7 +152,7 @@ services:
       GAMEMODE: ${GARRYSMOD_GAMEMODE:-sandbox}
       MAP: ${GARRYSMOD_MAP:-gm_construct}
       MAXPLAYERS: ${GARRYSMOD_MAX_PLAYERS:-16}
-      ARGS: "${GARRYSMOD_WORKSHOP_COLLECTION:+ +host_workshop_collection ${GARRYSMOD_WORKSHOP_COLLECTION}}${GARRYSMOD_PASSWORD:+ +sv_password ${GARRYSMOD_PASSWORD}}"
+      ARGS: "${GARRYSMOD_WORKSHOP_COLLECTION:+ +host_workshop_collection ${GARRYSMOD_WORKSHOP_COLLECTION}}${GARRYSMOD_PASSWORD:+ +sv_password ${GARRYSMOD_PASSWORD}}${GARRYSMOD_EXTRA_ARGS:+ ${GARRYSMOD_EXTRA_ARGS}}"
     volumes:
       - ${DATA_DIR:-./data}/garrysmod/data:/home/gmod/server/garrysmod/data
       - ${DATA_DIR:-./data}/garrysmod/addons:/home/gmod/server/garrysmod/addons

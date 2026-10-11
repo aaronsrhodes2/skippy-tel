@@ -98,10 +98,39 @@ def _restart_everquest() -> str:
     return run(EVERQUEST, "start", timeout=900) + "\nre-ran the EverQuest start script (config re-applied, launcher restarted)"
 
 
+GMOD_ADDON = "/usr/local/bin/skippy-gmod-addon"      # gmod_addon.sh: fetched at boot (startup.sh) and again by every restart-game garrysmod
+
+
+def _refresh_gmod_addon() -> str:
+    """Put the newest Mentat stage addon on the Garry's Mod server's disk. Takes the newest gmod_addon.sh from metadata (as
+    _restart_everquest does, so a deploy reaches a VM that booted before it existed) and runs it. The script never fails; if
+    this does, the previous copy stays and the restart goes on."""
+    url = META.rsplit("/", 1)[0] + "/gmod-addon"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"Metadata-Flavor": "Google"}), timeout=20) as resp:
+            script = resp.read()
+        if not script.startswith(b"#!"):
+            return "gmod addon: metadata gmod-addon isn't a script; the addon is left as it is"
+        Path(GMOD_ADDON).write_bytes(script)
+        Path(GMOD_ADDON).chmod(0o755)
+        return run("bash", GMOD_ADDON, timeout=300) or "gmod addon: the script printed nothing"
+    except Exception as exc:  # noqa: BLE001 — a failed refresh must never keep the game server down
+        return f"gmod addon: refresh FAILED ({exc}); the previous copy stays"
+
+
 def cmd_restart_game(args):
     if args and args[0] == "everquest":
         return _restart_everquest()
     name = container(args[0] if args else "")
+    if name == "garrysmod":
+        # `docker restart` would not fetch our addon again (that happens before srcds starts), and swapping files under a running
+        # server would set off Lua refreshes: so stop, refresh, start. The container starts again whatever the refresh did.
+        stopped = run("docker", "stop", "--time", "60", name, timeout=180)
+        try:
+            note = _refresh_gmod_addon()
+        finally:
+            started = run("docker", "start", name, timeout=60)
+        return f"{stopped}\n{note}\n{started}\nrestarted {name}"
     return run("docker", "restart", "--time", "60", name, timeout=180) + f"\nrestarted {name}"
 
 

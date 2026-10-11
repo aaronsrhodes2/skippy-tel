@@ -32,6 +32,8 @@ def test_the_game_has_its_own_glyph_a_port_and_a_way_in():
     ("GARRYSMOD_MAP", ["", "gm_construct", "ttt_minecraft_b5"], ["gm construct", "a/b"]),
     ("GARRYSMOD_MAX_PLAYERS", ["", "1", "128"], ["0", "129", "many", "-1", "٣"]),
     ("GARRYSMOD_WORKSHOP_COLLECTION", ["", "382793424"], ["https://steamcommunity.com/x", "12 34", "abc"]),
+    ("GARRYSMOD_ADDON_REF", ["", "master", "v1.2", "feature/x", "0123456789abcdef0123456789abcdef01234567"], ["a b", "$(x)", "--upload-pack=x", "-x", "x" * 81, "a;b"]),
+    ("GARRYSMOD_EXTRA_ARGS", ["", "+holodeck_content hl2", "-tickrate 33", "+sv_downloadurl http://x.example/fastdl"], ["+a;b", "$(x)", "a\"b", "it's", "a*", "x" * 201, "+a #c"]),
 ])
 def test_what_reaches_the_command_line_is_checked_first(key, good, bad):
     check = SETTINGS[key].check
@@ -60,3 +62,10 @@ def test_the_compose_file_builds_srcds_arguments_only_from_what_is_set():
     assert args() == ""
     assert args(GARRYSMOD_PASSWORD="pw1") == "+sv_password pw1"
     assert args(GARRYSMOD_WORKSHOP_COLLECTION="123", GARRYSMOD_PASSWORD="pw1") == "+host_workshop_collection 123 +sv_password pw1"
+    assert args(GARRYSMOD_EXTRA_ARGS="-tickrate 33") == "-tickrate 33"
+    assert args(GARRYSMOD_WORKSHOP_COLLECTION="123", GARRYSMOD_PASSWORD="pw1", GARRYSMOD_EXTRA_ARGS="+a 1") == "+host_workshop_collection 123 +sv_password pw1 +a 1"
+
+
+def test_extra_srcds_arguments_come_last_and_only_when_set():
+    text = _text("games", "docker-compose.yml")
+    assert "${GARRYSMOD_PASSWORD:+ +sv_password ${GARRYSMOD_PASSWORD}}${GARRYSMOD_EXTRA_ARGS:+ ${GARRYSMOD_EXTRA_ARGS}}\"" in text

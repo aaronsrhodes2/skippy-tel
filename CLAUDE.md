@@ -107,7 +107,7 @@ Actions (the sandbox can't reach GCP or run.app directly):
   On the VM itself (ops agent, infra/gcp-games/ops_agent.py; VM must be on):
   `tail <game> [lines]`, `search <game> <regex>` (whole container log),
   `stats` (CPU/mem/disk/per-container), `restart-game <game>` (one container,
-  no VM reboot). Requests go via metadata `ops-request`, replies on serial 3.
+  no VM reboot; for `garrysmod` it is stop, refresh the Mentat stage addon from GitHub, start: `gmod_addon.sh`). Requests go via metadata `ops-request`, replies on serial 3.
   The agent and the snapshot script (diag.sh) reload from metadata, so
   changing them needs only a deploy.
   `command` = `discord-setup` creates/repairs every game's Discord channels:

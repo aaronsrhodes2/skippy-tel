@@ -192,6 +192,15 @@ case " $GAMES " in
     python3 /usr/local/bin/skippy-valheim-seed --env "$ROOT/.env" --data "$DATA" \
       || echo "valheim seed: FAILED; the world starts as it is" ;;
 esac
+# Garry's Mod: our mod (the public repo aaronsrhodes2/sigma-ground, folder stage/gmod/addon) is put into the persistent addons
+# folder, fresh from GitHub, before srcds starts (gmod_addon.sh: a shallow sparse clone). It never fails: a fetch that doesn't
+# work keeps the previous copy and the game starts anyway. `ops restart-game garrysmod` runs the same script (ops_agent.py).
+case " $GAMES " in
+  *" garrysmod "*)
+    meta gmod-addon > /usr/local/bin/skippy-gmod-addon
+    DATA="$DATA" bash /usr/local/bin/skippy-gmod-addon \
+      || echo "gmod addon: the refresh script itself failed; garrysmod starts with the addon as it was" ;;
+esac
 FAILED=""
 if [ -n "$PROFILES" ]; then
   compose $PROFILES pull || echo "pull failed; starting with cached images"

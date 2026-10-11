@@ -132,6 +132,7 @@ resource "google_compute_instance" "games" {
     everquest-script = file("${path.module}/everquest.sh")
     ops-agent        = file("${path.module}/ops_agent.py")
     valheim-seed     = file("${path.module}/valheim_seed.py")
+    gmod-addon       = file("${path.module}/gmod_addon.sh")      # the Mentat stage addon onto the Garry's Mod server at every start (startup.sh, ops restart-game)
     game-backup      = file("${path.module}/game_backup.py")
     game-facts       = file("${path.module}/game_facts.py")     # diag.sh runs it: versions and mods for the portal's admin card
     discord-notify   = file("${path.module}/discord-notify.py")

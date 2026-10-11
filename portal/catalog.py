@@ -114,6 +114,24 @@ def _gmod_slots(value: str) -> tuple[str, str | None]:
     return (v, None) if v == "" or (v.isascii() and v.isdigit() and 1 <= int(v) <= 128) else (value, "a number from 1 to 128")
 
 
+def _gmod_extra_args(value: str) -> tuple[str, str | None]:
+    # srcds's own arguments, word for word ("+holodeck_content hl2 -tickrate 33"); the image puts them on the command line unquoted
+    # (start.sh: ${ARGS}), so only characters no shell, .env or compose reads as anything else, one space between words.
+    v = " ".join(value.split())
+    if len(v) <= 200 and re.fullmatch(r"[-+A-Za-z0-9_.:/]+( [-+A-Za-z0-9_.:/]+)*|", v):
+        return v, None
+    return value, "words of letters, digits and _ . : / - (a + or - may start a word), single spaces between, up to 200 characters"
+
+
+def _gmod_addon_ref(value: str) -> tuple[str, str | None]:
+    # which version of our mod the server runs (infra/gcp-games/gmod_addon.sh reads it from .env): blank follows master, a full commit
+    # id pins that exact version, a branch or tag name follows that. Nothing else reaches git.
+    v = value.strip()
+    if re.fullmatch(r"[0-9a-f]{40}|[A-Za-z0-9][A-Za-z0-9._/-]{0,79}|", v):
+        return v, None
+    return value, "blank (follow master), a full 40-character commit id (pin that exact version), or a branch or tag name"
+
+
 def _gmod_collection(value: str) -> tuple[str, str | None]:
     v = value.strip()
     return (v, None) if re.fullmatch(r"[0-9]{0,20}", v) else (value, "the digits from the collection's address (no link, no spaces)")
@@ -264,6 +282,13 @@ GAMES: dict[str, Game] = {
             Setting("GARRYSMOD_MAP", "Starting map", check=_gmod_name,
                     help="gm_construct (blank means gm_construct), gm_flatgrass... A map that isn't installed leaves the server unable to start."),
             Setting("GARRYSMOD_MAX_PLAYERS", "Max players", check=_gmod_slots, help="1 to 128; blank means 16."),
+            Setting("GARRYSMOD_EXTRA_ARGS", "Extra server arguments", check=_gmod_extra_args,
+                    help="Anything else for srcds's command line, such as +holodeck_content hl2 or -tickrate 33. Blank adds nothing. "
+                         "Applied when the server's container is created: at the next boot."),
+            Setting("GARRYSMOD_ADDON_REF", "Mod version", check=_gmod_addon_ref,
+                    help="Which version of the Captain's mod (mentat-stage) the server runs. Blank: the newest master, fetched at every "
+                         "start (the development loop). A full 40-character commit id: exactly that version, which nobody who can push "
+                         "to the repo can change. Pin one before the server is shown to strangers."),
             Setting("GARRYSMOD_WORKSHOP_COLLECTION", "Workshop collection", check=_gmod_collection,
                     help="The number from a Steam Workshop COLLECTION's address (not a single addon). The server downloads the "
                          "whole collection at every start, and players download the same addons when they join."),

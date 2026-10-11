@@ -159,7 +159,19 @@ throughout**: read from the image's README, not run here.
   (`games/docker-compose.yml` builds the image's `ARGS` from the settings that are set). The server downloads the whole
   collection at every start and the players download the same addons when they join. A collection id, never a single addon's.
   Addons can also be dropped into `data/garrysmod/addons` by hand.
+- The Captain's own mod (`mentat-stage`, Lua only, ~0.5 MB) is not in a collection: `gmod_addon.sh` fetches it from the public
+  `aaronsrhodes2/sigma-ground` repo (`master`, folder `stage/gmod/addon`) at every boot and at every `ops restart-game garrysmod`.
+  It records the folder's git tree id in `addons/mentat-stage/.source` and touches nothing when that id is unchanged, because
+  `game_backup.py` fingerprints sizes and mtimes of `garrysmod/addons` and would otherwise archive the addon at every boot.
+  The image has no git (Debian trixie-slim: wget, tar, unzip, gosu), so the clone is made on the VM, never in the container.
+  **Which version:** the setting `GARRYSMOD_ADDON_REF` ("Mod version" in the admin panel). Blank follows `master` (the development
+  loop: push, `ops restart-game garrysmod`, test), which means whoever can push to that repo can run Lua on this server and send Lua
+  to every player who joins. A full 40-character commit id pins exactly that version (fetched by id; a branch can be moved, a commit
+  cannot), so a compromised GitHub account changes nothing here. Pin one before the server is shown to strangers; the pin lives in
+  the portal, behind the Captain's login, not in either repo.
 - The join password is `+sv_password` on the same command line, so it is limited to letters, digits and `_ . -`.
+- Any other srcds argument: `GARRYSMOD_EXTRA_ARGS` (appended to `ARGS` last). Any other variable of the image (`PRODUCTION`, `AUTOUPDATE`,
+  `GSLT`, `AUTHKEY`, `PORT`): one more line under `garrysmod.environment` in `games/docker-compose.yml`.
 - Not done: a Steam game server login token (GSLT, `GSLT` in the image) for being listed on Steam's master list. Players
   join by address, so the server runs anonymously.
 
