@@ -14,7 +14,7 @@ def test_the_chat_renders_text_parts_through_the_markdown_module_and_loads_it_fi
     me = (PORTAL / "templates" / "me.html").read_text(encoding="utf-8")
     shop = (PORTAL / "templates" / "_workshop.html").read_text(encoding="utf-8")
     assert me.index("skippy-md.js") < me.index('include "_workshop.html"')
-    assert "SkippyMd.render(p.text, document)" in shop
+    assert "SkippyMd.render(ex.text, document)" in shop and "SkippyMd.extractQuestion(p.text)" in shop
     js = (PORTAL / "static" / "skippy-md.js").read_text(encoding="utf-8")
     assert not re.search(r"\.innerHTML|insertAdjacentHTML|eval\(|document\.write", js)     # text only goes in with textContent
     assert not re.search(r"fetch\(|XMLHttpRequest|sendBeacon", js)               # no network calls

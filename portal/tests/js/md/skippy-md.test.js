@@ -59,3 +59,27 @@ test("render builds the structure the chat styles", () => {
   assert.equal(box.children[2].children.length, 2);
   assert.equal(box.children[3].children[0].own, "x");
 });
+
+test("a SKIPPY_QUESTION line becomes options and leaves the words", () => {
+  const q = M.extractQuestion('Which colour?\n\nSKIPPY_QUESTION: {"question":"Colour?","options":["Orange","Green"]}\n');
+  assert.equal(q.text, "Which colour?");
+  assert.deepEqual(q.question, { question: "Colour?", options: ["Orange", "Green"] });
+  assert.equal(M.extractQuestion("`SKIPPY_QUESTION: {\"question\":\"Q?\",\"options\":[\"a\",\"b\"]}`").question.options.length, 2);   // in backticks too
+  assert.deepEqual(M.extractQuestion("no question here"), { text: "no question here", question: null });
+});
+
+test("a malformed question never becomes buttons, and its line never shows", () => {
+  for (const bad of ['{"question":"Q?","options":["only one"]}', '{"question":"Q?","options":["a","b","c","d","e"]}',
+                     '{"question":"","options":["a","b"]}', '{"question":"Q?","options":["a",5]}', '{"question":"Q?","options":["' + "x".repeat(61) + '","b"]}', "{not json}"]) {
+    const r = M.extractQuestion("words\nSKIPPY_QUESTION: " + bad);
+    assert.equal(r.question, null, bad); assert.equal(r.text, "words", bad);
+  }
+});
+
+test("the task list arrives as lines and becomes a checklist", () => {
+  const todo = M.parseTodo("✓ read the code\n▶ write the test\n○ ship it\nnot an item\n");
+  assert.deepEqual(todo.map(t => t.state), ["done", "doing", "todo"]);
+  assert.equal(todo[1].text, "write the test");
+  assert.deepEqual(M.parseTodo(""), []);
+  assert.deepEqual(M.parseTodo(null), []);
+});

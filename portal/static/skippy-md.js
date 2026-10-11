@@ -92,5 +92,31 @@
     return box;
   }
 
-  return { parse: parse, render: render };
+  /* The "question tool": Skippy ends a reply with a line
+         SKIPPY_QUESTION: {"question": "Which one?", "options": ["A", "B", "C"]}
+     and the chat shows the options as buttons (a tap sends that answer; typing something else always works). The line is removed from
+     the words. Anything malformed stays out of the buttons: two to four options, each short, a question that is text. */
+  const QUESTION_LINE = /^[ \t]*`?SKIPPY_QUESTION:[ \t]*(\{.*\})[ \t]*`?[ \t]*$/m;
+  function extractQuestion(text) {
+    const s = String(text == null ? "" : text), m = QUESTION_LINE.exec(s);
+    if (!m) return { text: s, question: null };
+    const rest = (s.slice(0, m.index) + s.slice(m.index + m[0].length)).replace(/\n{3,}/g, "\n\n").trim();
+    let q = null;
+    try { q = JSON.parse(m[1]); } catch (e) { return { text: rest, question: null }; }
+    const opts = q && Array.isArray(q.options) ? q.options : [];
+    const ok = q && typeof q.question === "string" && q.question.length > 0 && q.question.length <= 200 &&
+      opts.length >= 2 && opts.length <= 4 && opts.every(o => typeof o === "string" && o.trim() && o.length <= 60);
+    return { text: rest, question: ok ? { question: q.question, options: opts.map(o => o.trim()) } : null };
+  }
+
+  /* Skippy's task list (its TodoWrite) arrives as the tool line's detail: one "<mark> <item>" per line, where the mark is
+     a check (done), a play arrow (doing now) or a ring (to do). Returns [{state, text}] for the chat's live checklist. */
+  function parseTodo(detail) {
+    return String(detail == null ? "" : detail).split("\n").map(line => {
+      const m = /^(✓|▶|○)\s+(.+)$/.exec(line.trim());
+      return m ? { state: m[1] === "✓" ? "done" : m[1] === "▶" ? "doing" : "todo", text: m[2] } : null;
+    }).filter(Boolean);
+  }
+
+  return { parse: parse, render: render, extractQuestion: extractQuestion, parseTodo: parseTodo };
 });

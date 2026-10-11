@@ -95,7 +95,8 @@ def _clean(event) -> dict | None:
     if event.get("t") == "text" and isinstance(event.get("text"), str):
         return {"t": "text", "text": event["text"][:MAX_TEXT]}
     if event.get("t") == "tool" and isinstance(event.get("name"), str):
-        return {"t": "tool", "name": event["name"][:40], "detail": str(event.get("detail") or "")[:200]}
+        return {"t": "tool", "name": event["name"][:40],
+                "detail": str(event.get("detail") or "")[:(1200 if event["name"] == "TodoWrite" else 200)]}      # (a checklist is long)
     if event.get("t") == "ship":
         return ship_event(event)
     return None

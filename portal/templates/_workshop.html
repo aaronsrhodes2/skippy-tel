@@ -18,6 +18,16 @@
   .me-chat .turn p { margin: 0 0 6px; }
   .me-chat .turn .cp { float: right; margin: 0 0 0 8px; padding: 0 6px; min-width: 0; font-size: .7rem; opacity: .55; }
   .me-chat .turn .cp:hover { opacity: 1; }
+  .me-chat .todo { margin: 6px 0 8px; padding: 6px 10px; border: 1px solid var(--dim-green-hi); background: #000; font-size: .85rem; }
+  .me-chat .todo .th { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 3px; }
+  .me-chat .todo .it { margin: 2px 0; }
+  .me-chat .todo .it .mk { display: inline-block; width: 1.4em; color: var(--muted); }
+  .me-chat .todo .it.done { color: var(--muted); text-decoration: line-through; }
+  .me-chat .todo .it.done .mk { color: var(--accent); text-decoration: none; }
+  .me-chat .todo .it.doing { color: #fff; }
+  .me-chat .todo .it.doing .mk { color: var(--accent); }
+  .me-chat .ask { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 2px; }
+  .me-chat .ask button.opt { margin: 0; padding: 8px 14px; }
   .me-chat .md p { margin: 0 0 8px; }
   .me-chat .md h5, .me-chat .md h6 { margin: 10px 0 4px; font-size: .95rem; color: var(--accent); text-transform: none; letter-spacing: 0; }
   .me-chat .md ul, .me-chat .md ol { margin: 0 0 8px; padding-left: 22px; }
@@ -207,7 +217,8 @@
     let sending = false;                           // a message is on its way to the portal
 
     const save = () => { store.set(K.log, JSON.stringify(turns.slice(-60))); if (typeof refreshCopyAll === "function") refreshCopyAll(); };
-    let liveClock = null;                          // the seconds counter of the turn being worked on
+    let liveClock = null, askBox = null;           // askBox: the answer buttons on screen (they go when anything is sent)
+    // (liveClock: the seconds counter of the turn being worked on)
     const clock = (t0) => { const s = Math.max(0, Math.floor((Date.now() - t0) / 1000)); return s >= 60 ? Math.floor(s / 60) + "m " + String(s % 60).padStart(2, "0") + "s" : s + "s"; };
     function el(tag, cls, txt) { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
     const setText = (node, t) => { if (node.textContent !== t) node.textContent = t; };   // an unchanged note is not re-announced
@@ -250,8 +261,9 @@
         }
         return;
       }
-      let steps = null, sum = null, names = [], count = 0;     // a run of tool calls folds into one line; tap it for each command in full
+      let steps = null, sum = null, names = [], count = 0, todo = null, question = null;     // a run of tool calls folds into one line; tap it for each command in full
       (turn.parts || []).forEach(p => {
+        if (p.t === "tool" && p.name === "TodoWrite") { todo = p; return; }               // his task list: shown below as a live checklist, not as a step
         if (p.t !== "text" && p.t !== "ship" && p.t !== "image") {
           if (!steps) { steps = el("details", "steps"); sum = el("summary"); steps.appendChild(sum); box.appendChild(steps); names = []; count = 0; }
           steps.appendChild(el("div", "act", "› " + p.name + (p.detail ? ": " + p.detail : "")));
@@ -260,10 +272,30 @@
           return;
         }
         steps = null;
-        if (p.t === "text") box.appendChild(SkippyMd.render(p.text, document));       // markdown: code, lists, links (static/skippy-md.js)
+        if (p.t === "text") {                                                          // markdown: code, lists, links (static/skippy-md.js)
+          const ex = SkippyMd.extractQuestion(p.text);
+          if (ex.text) box.appendChild(SkippyMd.render(ex.text, document));
+          if (ex.question) question = ex.question;
+        }
         else if (p.t === "ship") box.appendChild(shipCard(p));
         else box.appendChild(shot(p));
       });
+      const items = todo ? SkippyMd.parseTodo(todo.detail) : [];
+      if (items.length) {                                                              // the latest task list of this turn, with how far along it is
+        const card = el("div", "todo");
+        card.appendChild(el("div", "th", "Task list " + items.filter(i => i.state === "done").length + "/" + items.length));
+        items.forEach(i => { const row = el("div", "it " + i.state); row.appendChild(el("span", "mk", i.state === "done" ? "\u2713" : i.state === "doing" ? "\u25b6" : "\u25cb")); row.appendChild(el("span", null, i.text)); card.appendChild(row); });
+        box.appendChild(card);
+      }
+      if (question && turns[turns.length - 1] === turn && !(running && running.turn === turn) && !turn.pending) {   // asked, and not answered yet: tap to answer
+        const ask = el("div", "ask");
+        question.options.forEach(label => {
+          const b = el("button", "opt", label); b.type = "button";
+          b.addEventListener("click", () => { if (sending) return; text.value = label; form.requestSubmit(); });
+          ask.appendChild(b);
+        });
+        box.appendChild(ask); askBox = ask;
+      }
       if (turn.note) box.appendChild(el("div", "note" + (turn.bad ? " bad" : ""), turn.note));
       addCopy(box, turn);
       box.classList.toggle("failed", !!turn.bad);
@@ -562,6 +594,7 @@
       if (running) { if (!canLeave(running)) return; gone = leave(running); }
       if (queue.length) { message = gulp([...queue.splice(0), ...(message ? [message] : [])]); saveQueue(); paintQueue(); }
       showConvs(false);
+      if (askBox) askBox.hidden = true;               // asked and answered (by a tap or by typing)
       const sent = attached.map(a => a.url); attached = []; paintAttached();
       const mine = {role: "user", text: message || "(image)"}; if (sent.length) { mine.imgs = sent.length; thumbsOf.set(mine, sent); }
       turns.push(mine); draw(mine);

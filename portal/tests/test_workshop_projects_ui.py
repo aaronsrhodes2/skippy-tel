@@ -205,3 +205,43 @@ def test_a_prompt_a_reply_and_the_whole_conversation_carry_their_markdown_for_th
         "Fixed the **pill**.\n\nDeployed.",                                    # a reply: its words (the tool steps are not words)
     ]
     assert s["copyAll"] == "# SkippyTel\n\n## You\n\nfix the pill\n\n## Skippy\n\nFixed the **pill**.\n\nDeployed.\n\n_Ran 1 command_\n"
+
+
+QUESTION = 'Orange or green?\n\nSKIPPY_QUESTION: {"question":"Which?","options":["Orange","Green"]}'
+
+
+@needs_node
+def test_a_question_becomes_buttons_and_a_tap_answers_it(page):
+    import json
+    log = [{"role": "user", "text": "recolour the pill"}, {"role": "assistant", "parts": [{"t": "text", "text": QUESTION}]}]
+    out = drive(page, [{"snap": "asked"}, {"opt": 1}, {"snap": "answered"}], storage={"ps-conv": "conv-12345678", "ps-log": json.dumps(log)})
+    asked = out["snaps"]["asked"]
+    assert asked["ask"] == {"labels": ["Orange", "Green"], "hidden": False}
+    assert "SKIPPY_QUESTION" not in asked["log"][-1]["text"] and "Orange or green?" in asked["log"][-1]["text"]      # the line is not shown as words
+    assert [x["message"] for x in sends(out)] == ["Green"]                                                          # the tap sent that answer
+    assert out["snaps"]["answered"]["log"][-2]["text"] == "Green"
+
+
+@needs_node
+def test_an_old_question_or_a_broken_one_has_no_buttons(page):
+    import json
+    old = [{"role": "user", "text": "a"}, {"role": "assistant", "parts": [{"t": "text", "text": QUESTION}]},
+           {"role": "user", "text": "Green"}, {"role": "assistant", "parts": [{"t": "text", "text": "ok, green."}]}]
+    assert drive(page, [{"snap": "s"}], storage={"ps-conv": "conv-12345678", "ps-log": json.dumps(old)})["snaps"]["s"]["ask"] is None     # already answered
+    broken = [{"role": "user", "text": "a"}, {"role": "assistant", "parts": [{"t": "text", "text": 'hm\nSKIPPY_QUESTION: {"question":"Q?","options":["one"]}'}]}]
+    out = drive(page, [{"snap": "s"}], storage={"ps-conv": "conv-12345678", "ps-log": json.dumps(broken)})
+    assert out["snaps"]["s"]["ask"] is None and "SKIPPY_QUESTION" not in out["snaps"]["s"]["log"][-1]["text"]
+
+
+@needs_node
+def test_the_task_list_is_a_live_checklist_not_a_step(page):
+    import json
+    todo = "✓ read the code\n▶ write the test\n○ ship it"
+    log = [{"role": "user", "text": "do it"},
+           {"role": "assistant", "parts": [{"t": "tool", "name": "TodoWrite", "detail": "○ read the code\n○ write the test\n○ ship it"},
+                                           {"t": "tool", "name": "Bash", "detail": "pytest -q"},
+                                           {"t": "tool", "name": "TodoWrite", "detail": todo}]}]
+    out = drive(page, [{"snap": "s"}], storage={"ps-conv": "conv-12345678", "ps-log": json.dumps(log)})
+    text = out["snaps"]["s"]["log"][-1]["text"]
+    assert "Task list 1/3" in text and "write the test" in text and "ship it" in text          # the LATEST list, with its progress
+    assert "Ran 1 command" in text and "TodoWrite" not in text                                    # the list is not counted as a command

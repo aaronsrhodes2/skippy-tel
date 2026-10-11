@@ -259,6 +259,7 @@ function snap() {
     task: storage.has("ps-task") ? JSON.parse(storage.get("ps-task")) : null, focused: e["ps-text"].focused,
     resyncs: calls.filter(c => c.route === "resync").length, text: e["ps-text"].value,
     copyAll: e["ps-copyall"]["attr:data-copy"], copyTurns: e["ps-flow"].children.map(b => (b.children.find(c => c.className === "cp") || {})["attr:data-copy"]),
+    ask: (() => { const last = e["ps-flow"].children[e["ps-flow"].children.length - 1]; const a = last && last.children.find(c => c.className === "ask"); return a ? {labels: a.children.map(c => c.textContent), hidden: !!a.hidden} : null; })(),
     queue: e["ps-queue"].children.map(c => c.textContent), queueShown: !e["ps-queue"].hidden, placeholder: e["ps-text"].placeholder,
     project: e["ps-project"].value, pickerLocked: e["ps-project"].disabled, pickHint: !e["ps-project-hint"].hidden,
     convsShown: !e["ps-convs"].hidden, logHidden: e["ps-log"].hidden, convsMsg: e["ps-convs-msg"].textContent,
@@ -300,6 +301,7 @@ function snap() {
     else if ("toggle" in s) { els["ps-notify"].checked = s.toggle; await els["ps-notify"].fire("change"); await settle(); }
     else if ("pick" in s) { els["ps-project"].value = s.pick; await els["ps-project"].fire("change"); await settle(); }
     else if ("item" in s) { await els["ps-convs-list"].children[s.item].fire("click"); await settle(); }
+    else if ("opt" in s) { const last = els["ps-flow"].children[els["ps-flow"].children.length - 1]; await last.children.find(c => c.className === "ask").children[s.opt].fire("click"); await settle(); }
     else if ("snap" in s) snaps[s.snap] = snap();
     else throw new Error("unknown step " + JSON.stringify(s));
   }

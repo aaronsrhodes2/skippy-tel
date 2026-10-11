@@ -178,9 +178,17 @@ def home_token(env=os.environ, files=ENV_FILES) -> str:
     return ""
 
 
+MAX_TODO_DETAIL = 1200                       # a checklist is long where every other tool line is short (portal/workshop.py and conversation_log.py agree)
+
+
 def tool_detail(name: str, args: dict) -> str:
     """What a tool call is about, for the chat's activity line: the command or the path, never file contents."""
     args = args if isinstance(args, dict) else {}
+    if name == "TodoWrite":                        # his task list, shown in the chat as a live checklist: "<mark> <item>" per line
+        marks = {"completed": "\u2713", "in_progress": "\u25b6"}
+        rows = [marks.get(t.get("status"), "\u25cb") + " " + redact(str(t["content"]))[:80]
+                for t in (args.get("todos") or [])[:20] if isinstance(t, dict) and t.get("content")]
+        return "\n".join(rows)[:MAX_TODO_DETAIL]
     if name == "Bash":
         lines = str(args.get("command") or "").strip().splitlines()
         return redact(lines[0])[:160] if lines else ""

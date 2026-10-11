@@ -44,6 +44,12 @@ def test_the_prompt_says_when_and_how_the_reporter_may_be_rebuilt_and_keeps_its_
     assert len(prompt) < 10000                                      # concise: it is read on every turn (6000 until the roaming, new-workspace, Mentat and persona paragraphs)
 
 
+def test_the_prompt_teaches_the_question_line_and_the_task_list(shop):
+    prompt = shop.prompt()
+    assert 'SKIPPY_QUESTION: {"question":' in prompt and "two to four short options" in prompt
+    assert "TodoWrite" in prompt and "checklist" in prompt
+
+
 def test_the_prompt_is_skippied_up_and_cost_aware(shop):
     """The Captain: conversations in Skippy Desktop must be 'skippied up', more than default Claude."""
     prompt = shop.prompt()

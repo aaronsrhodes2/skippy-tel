@@ -56,7 +56,7 @@ def _event_md(event: dict) -> str:
     if event.get("t") == "text":
         return str(event.get("text") or "").strip() + "\n"
     if event.get("t") == "tool":
-        detail = str(event.get("detail") or "")
+        detail = str(event.get("detail") or "").replace("\n", " \u00a6 ")       # (a checklist is one line in the archive)
         return f"- `{event.get('name')}`" + (f": `{detail}`" if detail else "") + "\n"
     if event.get("t") == "image":
         return f"- showed the screenshot `{str(event.get('name') or '')[:80]}`\n"
@@ -292,7 +292,7 @@ def clean_events(events: list) -> list[dict]:
         if e.get("t") == "text" and isinstance(e.get("text"), str):
             out.append({"t": "text", "text": e["text"][:MAX_EVENT_TEXT]})
         elif e.get("t") == "tool" and isinstance(e.get("name"), str):
-            out.append({"t": "tool", "name": e["name"][:40], "detail": str(e.get("detail") or "")[:200]})
+            out.append({"t": "tool", "name": e["name"][:40], "detail": str(e.get("detail") or "")[:(1200 if e["name"] == "TodoWrite" else 200)]})
         elif ship_event(e):
             out.append(ship_event(e))
         elif e.get("t") == "image":            # the picture itself stays out of the index: a line saying it was there
