@@ -225,29 +225,31 @@ def test_stop_reaches_home_on_its_next_push(env):
 
 
 # ── the dashboard ─────────────────────────────────────────────────────────────
-def test_the_private_skippy_is_the_left_side_of_the_dashboard(env):
+def test_the_private_skippy_is_the_front_page_for_the_captain_and_no_longer_on_the_dashboard(env):
     client, _, _ = env
     login(client, ADMIN)
-    page = client.get("/me").data.decode()
-    assert page.index('id="private-skippy"') < page.index('id="server" class="apane"')      # the chat is the first control and pane
-    assert 'data-pane="skippy"' in page and 'id="skippy" class="apane" data-flat' in page and 'id="private-skippy"' in page
-    assert "claude-sonnet-5-5" in page
-    assert "workshop isn't answering" not in page
+    front = client.get("/").data.decode()
+    assert 'id="private-skippy"' in front and 'id="mode-agent"' in front and 'id="mode-quick"' in front      # the agent, and the key to the quick chat
+    assert "claude-sonnet-5-5" in front and "workshop isn't answering" not in front
+    assert front.index('id="mode-agent"') < front.index('id="mode-quick"')                                     # the agent is what he lands in
+    dash = client.get("/me").data.decode()
+    assert 'id="private-skippy"' not in dash and 'data-pane="skippy"' not in dash and 'id="server" class="apane"' in dash
 
 
 def test_the_dashboard_says_plainly_when_the_workshop_is_offline(env):
     client, _, home = env
     home.report = {"capabilities": {}}
     login(client, ADMIN)
-    page = client.get("/me").data.decode()
+    page = client.get("/").data.decode()
     assert "workshop isn't answering" in page and "make bridge" in page and "/login" in page
     assert 'id="private-skippy"' in page                                         # still there; the server refuses politely
 
 
 def test_the_public_chat_has_no_private_skippy_in_it(env):
     client, _, _ = env
-    login(client, ADMIN)
-    chat_page = client.get("/chat").data.decode()
+    _add_friend(client, "pal@example.com", ["skippy"])
+    login(client, "pal@example.com")                                       # a friend's front page is the public chat alone
+    chat_page = client.get("/").data.decode()
     assert "private-skippy" not in chat_page and "workshop" not in chat_page.lower()
 
 
@@ -483,16 +485,16 @@ def test_the_card_says_why_with_the_command_copyable_and_the_text_escaped(env):
     client, _, home = env
     _not_ready(home, login="expired", reason=EXPIRED)
     login(client, ADMIN)
-    page = client.get("/me").data.decode()
+    page = client.get("/").data.decode()
     assert "workshop isn't ready: Claude&#39;s login on skippy-pc expired: run " in page
     assert '<code class="code">claude auth login</code> there' in page              # the backticked command is one click to copy
     assert "make bridge" not in page.split('id="private-skippy"')[1].split("ps-log")[0]     # the generic checklist gives way to the cause
     _not_ready(home, reason="<script>alert(1)</script> and `<b>x</b>`")
-    page = client.get("/me").data.decode()
+    page = client.get("/").data.decode()
     assert "<script>alert(1)</script>" not in page and "&lt;script&gt;alert(1)&lt;/script&gt;" in page
     assert '<code class="code">&lt;b&gt;x&lt;/b&gt;</code>' in page
     _not_ready(home)                                                                 # nothing said: the old checklist
-    page = client.get("/me").data.decode()
+    page = client.get("/").data.decode()
     assert "workshop isn't answering" in page and "make bridge" in page and "isn't ready:" not in page
 
 

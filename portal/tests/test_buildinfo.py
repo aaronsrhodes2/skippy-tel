@@ -144,7 +144,7 @@ def test_a_signed_in_poll_of_version_is_not_a_page_view():
 
 # ── the footer stamp ───────────────────────────────────────────────────────────────
 
-SIGNED_IN_PAGES = ("/", "/games", "/games/valheim", "/me", "/chat", "/music", "/experiments", "/privacy", "/admin")
+SIGNED_IN_PAGES = ("/", "/games", "/games/valheim", "/me", "/apps", "/music", "/experiments", "/privacy", "/admin")
 
 
 def test_signed_in_pages_carry_the_stamp_with_a_utc_fallback_and_the_full_commit_on_hover(monkeypatch):

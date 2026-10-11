@@ -83,7 +83,7 @@ def test_raw_needs_the_same_sign_in_and_only_a_literal_true_turns_it_on(env):
 def test_the_chat_has_the_switch_and_keeps_raw_turns_out_of_the_history(env):
     client, _, _ = env
     login(client, ADMIN)
-    page = client.get("/chat").data.decode()
+    page = client.get("/").data.decode()
     assert 'class="key barney" aria-pressed="false"' in page and "Barney Style" in page      # a glyph key, unlit by default
     assert "Mentat only" not in page
     assert "const raw = !barney.on" in page                                      # not lit means straight to Mentat

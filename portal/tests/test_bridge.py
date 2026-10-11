@@ -47,7 +47,7 @@ def test_every_module_and_every_browser_game_has_a_glyph_that_is_drawn():
 def test_the_launcher_is_glyphs_with_a_lamp_and_no_sentence_on_it(env):
     client, _, _ = env
     login(client, ADMIN)
-    page = client.get("/").data.decode()
+    page = client.get("/apps").data.decode()
     body = page.split("<body class=\"bridge\"", 1)[1].split(">", 1)[1]
     assert _ids(page) == [m.id for m in modules.MODULES]                       # every module, in order
     for m in modules.MODULES:
@@ -63,17 +63,17 @@ def test_the_launcher_is_glyphs_with_a_lamp_and_no_sentence_on_it(env):
 def test_the_launcher_sizes_its_grid_to_the_number_of_controls_so_nothing_scrolls(env):
     client, _, _ = env
     login(client, ADMIN)
-    assert 'style="--rows: 4; --rows-wide: 2; --rows-side: 2"' in client.get("/").data.decode()          # 8 controls
+    assert 'style="--rows: 4; --rows-wide: 2; --rows-side: 2"' in client.get("/apps").data.decode()          # 8 controls
     _add_friend(client, PAL, ["dragonwilds"])
     login(client, PAL)
-    assert 'style="--rows: 1; --rows-wide: 1; --rows-side: 1"' in client.get("/").data.decode()          # one
+    assert 'style="--rows: 1; --rows-wide: 1; --rows-side: 1"' in client.get("/apps").data.decode()          # one
 
 
 def test_a_lamp_says_the_state_by_shape_as_well_as_colour(env):
     client, vm, _ = env
     login(client, ADMIN)
     vm.state.status = "RUNNING"
-    page = client.get("/").data.decode()
+    page = client.get("/apps").data.decode()
     assert re.search(r'data-app="games" data-s="on"', page) and re.search(r'data-app="skippy" data-s="on"', page)
     css = (STATIC / "bridge.css").read_text(encoding="utf-8")
     for state in ("on", "idle", "off", "warn"):
@@ -133,13 +133,13 @@ def test_retiring_a_module_takes_its_control_off_the_launcher_and_reviving_puts_
     login(client, ADMIN)
     assert client.post("/admin/modules", data={"id": "experiments", "action": "retire"}).status_code == 302
     assert json.loads(vm.get_metadata(modules.KEY)) == ["experiments"]
-    page = client.get("/").data.decode()
+    page = client.get("/apps").data.decode()
     assert "experiments" not in _ids(page) and "video" in _ids(page)
     assert client.get("/experiments").status_code == 200                       # nothing is deleted: the page still answers
     graveyard = client.get("/admin").data.decode()
     assert re.search(r'value="experiments">\s*<input type="hidden" name="action" value="revive">', graveyard)
     client.post("/admin/modules", data={"id": "experiments", "action": "revive"})
-    assert "experiments" in _ids(client.get("/").data.decode()) and json.loads(vm.get_metadata(modules.KEY)) == []
+    assert "experiments" in _ids(client.get("/apps").data.decode()) and json.loads(vm.get_metadata(modules.KEY)) == []
 
 
 def test_retiring_is_the_captains_alone_and_admin_and_nonsense_are_refused(env):
@@ -167,7 +167,7 @@ def test_a_failed_read_retires_nothing_and_a_failed_write_is_said_not_half_done(
     vm.get_metadata = lambda key: (_ for _ in ()).throw(RuntimeError("VM API down"))
     store._cache = None
     login(client, ADMIN)
-    assert len(_ids(client.get("/").data.decode())) == len(modules.MODULES)     # unreadable: every control stays
+    assert len(_ids(client.get("/apps").data.decode())) == len(modules.MODULES)     # unreadable: every control stays
     r = client.post("/admin/modules", data={"id": "play", "action": "retire"}, follow_redirects=True)
     assert "couldn" in r.data.decode().lower() and "read the retired modules" in r.data.decode()   # said, and nothing written
     stored = {}
@@ -210,7 +210,7 @@ def test_terraform_leaves_the_retired_list_alone():
 def test_the_chat_offers_languages_each_in_its_own_script(env):
     client, _, _ = env
     login(client, ADMIN)
-    page = client.get("/chat").data.decode()
+    page = client.get("/").data.decode()
     for code, name in chat.LANGUAGES.items():
         assert f'<option value="{code}">{name}</option>' in page
     assert {"日本語", "العربية", "हिन्दी"} <= set(chat.LANGUAGES.values())
@@ -234,8 +234,8 @@ def test_a_chosen_language_reaches_the_model_and_leaves_names_and_codes_alone(en
 def test_the_chat_is_one_screen_of_pages_and_glyph_keys_with_a_living_background(env):
     client, _, _ = env
     login(client, ADMIN)
-    page = client.get("/chat").data.decode()
-    assert 'class="bridge"' in page and '<canvas class="alive"' in page and "Bridge.alive(" in page
+    page = client.get("/").data.decode()                                           # the front page: the Captain's page also carries this public chat
+    assert 'class="bridge' in page and '<canvas class="alive"' in page and "Bridge.alive(" in page
     assert 'class="pg log"' in page and 'class="pg-flow"' in page                  # the conversation is pages, not a scroller
     for sheet in ("lang", "tools", "memory", "rec"):
         assert f'data-sheet="{sheet}"' in page, sheet
@@ -249,7 +249,7 @@ def test_the_chat_is_one_screen_of_pages_and_glyph_keys_with_a_living_background
 def test_a_friend_gets_the_chat_without_the_captains_memory_key(env):
     client, _, _ = env
     login(client, FRIEND)
-    page = client.get("/chat").data.decode()
+    page = client.get("/").data.decode()
     assert 'data-open="memory"' not in page and 'data-open="tools"' in page and 'data-open="lang"' in page
 
 
@@ -272,7 +272,7 @@ def test_the_background_attaches_and_detaches_and_never_repeats_a_path():
 def test_the_page_pulses_the_background_as_words_go_back_and_forth(env):
     client, _, _ = env
     login(client, ADMIN)
-    page = client.get("/chat").data.decode()
+    page = client.get("/").data.decode()
     assert page.count("alive().pulse(") >= 2                                       # a question goes out, an answer comes back
 
 

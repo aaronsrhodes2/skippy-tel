@@ -210,7 +210,18 @@ only when the gate's `/health` says `ready`. Direct play when the catalog says `
 `portal/static/vendor/`, Safari's own on Apple). Run it against the REAL gate on this machine with `python portal/tests/dev_video.py`.
 Full description and tests: `docs/portal/README.md` → Nagatha's Video Service.
 
-## The private Skippy's chat (`/me` → Skippy): a transcript, not pages
+## The front page is Skippy the Magnificent (`/`), and who may reach what
+
+`/` is the Skippy chat for every member with the chat grant (signed-out people still get the Google sign-in; a member without the grant is sent to
+`/apps`, the launcher that used to be the front page). Everyone gets the PUBLIC brain (`templates/_chat.html`: Haiku with the portal's own tools, or
+Mentat straight; Barney Style gives Haiku NO tools; nothing can write or run anything). The Captain, and only he, also gets the AGENT
+(`templates/_workshop.html`, Skippy Desktop: Claude Code on skippy-pc) and lands in it, with a key to flip to the quick brain; his page also wears
+the purple theme (`body.captain`). `/chat` redirects here; `/me` is the dashboard widgets only. Showing the agent only to him is a convenience, not
+the security: every `/me/workshop/*` call checks for the Captain again and needs the `X-Workshop` header, and
+**`portal/tests/test_route_access.py` classifies every route (public, machine, beacon, member, grant, admin) and fails on any new unclassified one
+or any under-guarded one**, probing nobody, a signed-in stranger and a chat-only friend. A new route must be added to its REGISTRY.
+
+## The private Skippy's chat (on the front page, the Captain only): a transcript, not pages
 
 Unlike the phone-sized bridge pages, this chat is a plain **scrolling transcript** (a long agent run must not be cut into columns; the exemption
 was Skippy's own proposal, agreed 2026-10-11). A run of tool calls folds into one line ("14 steps: Read, Bash") that opens to each command. A
@@ -221,7 +232,7 @@ sessions file (swept after 14 days) and names the paths in the message so Claude
 `portal/tests/test_workshop_attachments.py`, `services/claude-bridge/tests/test_bridge_attachments.py`, the UI harness in `test_workshop_*ui.py`.
 The bridge only picks this up on restart (refused while a run is going).
 
-## Skippy's voice (mic, voice-to-text, text-to-voice in both chats: `/chat` and the personal Skippy on `/me`)
+## Skippy's voice (mic, voice-to-text, text-to-voice in both chats, on the front page)
 
 A mic key and a speaker key on each chat, on any device with a current browser: `portal/static/skippy-voice.js` (MediaRecorder, no browser
 vendor speech cloud) + `portal/voice.py` (the pass, label `voice-gate-v1`; scopes `listen` for everyone who may chat, `speak` for admins only,

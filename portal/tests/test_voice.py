@@ -103,16 +103,15 @@ def test_the_gate_route_needs_sign_in_and_says_why_when_home_is_unpaired():
 def test_both_chats_carry_the_mic_and_speaker_keys():
     chat = (PORTAL / "templates" / "_chat.html").read_text(encoding="utf-8")
     shop = (PORTAL / "templates" / "_workshop.html").read_text(encoding="utf-8")
-    page = (PORTAL / "templates" / "chat.html").read_text(encoding="utf-8")
-    me = (PORTAL / "templates" / "me.html").read_text(encoding="utf-8")
+    page = (PORTAL / "templates" / "front.html").read_text(encoding="utf-8")
     for tpl in (chat, shop):
         assert "SkippyVoice.attach" in tpl and "#g-mic" in tpl and "#g-vol" in tpl and "chat.voice_gate" in tpl
         assert "voice.say(" in tpl
         assert 'class="vstat"' in tpl and "box:" in tpl and "onSend:" in tpl and "form.requestSubmit()" in tpl      # hands-free: a status line, the box, and the send
-    assert "skippy-voice.js" in page and "skippy-voice.js" in me
+    assert "skippy-voice.js" in page
     # the chats' inline scripts run as they are parsed: the client must be loaded before the pages include them
     assert page.index("skippy-voice.js") < page.index('include "_chat.html"')
-    assert me.index("skippy-voice.js") < me.index('include "_workshop.html"')
+    assert page.index("skippy-voice.js") < page.index('include "_workshop.html"')
     assert 'id="g-mic"' in (PORTAL / "templates" / "_glyphs.html").read_text(encoding="utf-8")
 
 

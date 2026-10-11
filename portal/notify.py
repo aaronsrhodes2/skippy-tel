@@ -2,7 +2,7 @@
 
 He works from his phone and doesn't sit watching the chat, so when a run ends (done, failed or stopped), or ends on a
 question for him, the portal's Discord bot (DISCORD_BOT_TOKEN, the one that already runs the game channels) DMs him one
-short line: the project, the first words of his request, the outcome, and the link to /me.
+short line: the project, the first words of his request, the outcome, and the link to the front page (Skippy).
 
 The rules, each one a test:
   * Only ever the Captain: DISCORD_CAPTAIN_ID from the VM settings (games-env) when set, else the owner of the Discord
@@ -63,7 +63,7 @@ def outcome_of(state: str, error: str | None, last_text: str) -> str:
 
 def message(project_name: str, request: str, outcome: str, portal_url: str) -> str:
     words = first_words(request) or "your request"
-    link = (portal_url.rstrip("/") + "/me") if portal_url else "/me"
+    link = portal_url.rstrip("/") + "/" if portal_url else "/"
     head = f"Skippy · {project_name}: “{words}” {outcome}. "
     room = MAX_CHARS - len(link)
     if len(head) > room:                         # the link always fits; the words give way

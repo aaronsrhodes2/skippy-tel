@@ -140,9 +140,17 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         except Exception as exc:   # noqa: BLE001 — show it on the page, don't crash it
             return None, str(exc)
 
+    def workshop_context() -> dict:
+        """What the agent's chat (templates/_workshop.html) needs; only ever built for the Captain."""
+        return dict(workshop_ready=workshop.ready(), workshop_model=home.capability_note("workshop", "model"),
+                    workshop_reason=home.capability_reason("workshop"), workshop_projects=workshop.projects(),
+                    workshop_notify=notifier.enabled(me()), workshop_notify_ready=notifier.configured)
+
     @app.get("/")
     def index():
-        """Front page: a card per sub-portal the viewer may use; sign-in otherwise."""
+        """The front door: Skippy the Magnificent. Signed out, Google sign-in. A member with the chat grant gets the chat: the public
+        brain (Haiku and Mentat: no tools that write or run anything) for everyone, and for the Captain alone also the agent (Claude Code on
+        skippy-pc), whose endpoints each check for the Captain again. Anyone on the list without the chat grant goes to the apps."""
         user = auth.current_user()
         if not user and auth.promote_visitor():   # approved since they asked: they're in, no second sign-in
             user = auth.current_user()
@@ -150,6 +158,15 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             return redirect(url_for("request_access"))
         if not (user and auth.is_allowed(user["email"])):
             return render_template("login.html")
+        if not auth.has_portal(me(), "skippy"):
+            return redirect(url_for("apps"))
+        captain = auth.is_admin(me())
+        return render_template("front.html", captain=captain, **(workshop_context() if captain else {}))
+
+    @app.get("/apps")
+    @auth.login_required
+    def apps():
+        """The launcher: a card per sub-portal the viewer may use (it used to be the front page)."""
         status, _ = vm_status()
         shown = my_games()
         # The Games tile names the game that's up (or set for the next wake-up), only from the games this
@@ -912,9 +929,6 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             discord_ready=bool(app.config["DISCORD_BOT_TOKEN"]),
             experiments=experiments.EXPERIMENTS, hidden=experiments.hidden(vm), mentat_tools=mentat_tools,
             home=home.status(), music=home.music(), core=core, services=SERVICES,
-            workshop_ready=workshop.ready(), workshop_model=home.capability_note("workshop", "model"),
-            workshop_reason=home.capability_reason("workshop"), workshop_projects=workshop.projects(),
-            workshop_notify=notifier.enabled(me()), workshop_notify_ready=notifier.configured,
             activity=telemetry_web.activity(app, home),
         )
 
@@ -1313,7 +1327,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @talk.get("")
     @skippy_required
     def index():
-        return render_template("chat.html")
+        return redirect(url_for("index"))          # the chat is the front page now
 
     def log_mentat_gap(user, question, out, how, save):
         """A physics question Mentat could not model: auto-file it. One structured line in Cloud Run's logs

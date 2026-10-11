@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Skippy the Magnificent — Maker Portal{% endblock %}
+{% block app %}skippy{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}can{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge-panes.css') }}">{% endblock %}
+{% block content %}
+{# The front page is Skippy the Magnificent. Everyone with the chat grant gets the PUBLIC brain (templates/_chat.html: Haiku with the portal's
+   own tools, or Mentat straight; nothing that writes or runs anything). The Captain also gets the AGENT (templates/_workshop.html: Claude Code on
+   skippy-pc, which can edit, test, push and deploy), and it is what he lands in; one key flips to the quick brain. Showing the agent only
+   to him here is a convenience: its every endpoint (/me/workshop/*) checks for the Captain again and needs the X-Workshop header, and
+   portal/tests/test_route_access.py fails if any route is left unguarded. #}
+<script src="{{ url_for('static', filename='skippy-voice.js') }}"></script>
+<script src="{{ url_for('static', filename='skippy-md.js') }}"></script>
+<canvas class="alive" aria-hidden="true"></canvas>
+<section class="chat-page" id="front">
+  {% if captain %}
+  <div class="modebar" role="group" aria-label="Which Skippy">
+    <button type="button" class="key" id="mode-agent-key" data-mode="agent" aria-pressed="true" aria-label="Skippy Desktop: the agent that can change things" title="Skippy Desktop: the agent that can change things"><svg class="g" aria-hidden="true"><use href="#g-server"/></svg></button>
+    <button type="button" class="key" id="mode-quick-key" data-mode="quick" aria-pressed="false" aria-label="Quick Skippy: the cheap chat with Mentat" title="Quick Skippy: the cheap chat with Mentat"><svg class="g" aria-hidden="true"><use href="#g-can"/></svg></button>
+  </div>
+  <div class="mode" id="mode-agent">{% include "_workshop.html" %}</div>
+  <div class="mode" id="mode-quick" hidden>{% include "_chat.html" %}</div>
+  {% else %}
+  {% include "_chat.html" %}
+  {% endif %}
+</section>
+<script src="{{ url_for('static', filename='bridge-alive.js') }}"></script>
+<script>
+  Bridge.alive(document.querySelector("canvas.alive"){% if captain %}, {colors: ["#a64dff", "#7a2cf0", "#d08cff", "#c040ff", "#5b2bd6", "#e6b3ff"]}{% endif %});
+  {% if captain %}
+  (function () {                                     // which Skippy the Captain is talking to; remembered in this browser
+    const KEY = "skippy-front-mode", agent = document.getElementById("mode-agent"), quick = document.getElementById("mode-quick");
+    function show(mode) {
+      agent.hidden = mode !== "agent"; quick.hidden = mode !== "quick";
+      document.querySelectorAll(".modebar .key").forEach(k => { const on = k.dataset.mode === mode; k.setAttribute("aria-pressed", on ? "true" : "false"); k.classList.toggle("lit", on); });
+      try { localStorage.setItem(KEY, mode); } catch (e) {}
+      window.dispatchEvent(new Event("resize"));
+    }
+    document.querySelectorAll(".modebar .key").forEach(k => k.addEventListener("click", () => show(k.dataset.mode)));
+    let mode = "agent"; try { mode = localStorage.getItem(KEY) === "quick" ? "quick" : "agent"; } catch (e) {}
+    show(mode);
+  })();
+  {% endif %}
+</script>
+{% endblock %}

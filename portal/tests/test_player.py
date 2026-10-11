@@ -250,7 +250,7 @@ def test_music_needs_the_audio_grant(client):
 
 def test_the_captain_gets_the_tile_the_player_and_a_pass(client):
     login(client, ADMIN)
-    launcher = client.get("/").data.decode()
+    launcher = client.get("/apps").data.decode()
     assert 'data-tel="tile:music"' in launcher and f'aria-label="{NAME.replace(chr(39), "&#39;")}"' in launcher
     page = client.get("/music").data.decode()
     assert 'rel="manifest"' in page and "mediaSession" in (STATIC / "bilby-app.js").read_text(encoding="utf-8")
@@ -268,7 +268,7 @@ def test_a_pass_is_never_cached(client):
 
 def test_the_library_offline_pill_follows_the_gate(client):
     login(client, ADMIN)
-    tile = lambda: client.get("/").data.decode().split('data-tel="tile:music"')[0].rsplit('<div class="unit', 1)[1]   # noqa: E731 (the unit's opening tag)
+    tile = lambda: client.get("/apps").data.decode().split('data-tel="tile:music"')[0].rsplit('<div class="unit', 1)[1]   # noqa: E731 (the unit's opening tag)
     assert 'data-s="on"' in tile()
     home = client.application.extensions["home"]
     home.accept({"capabilities": {}})

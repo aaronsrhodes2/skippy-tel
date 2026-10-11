@@ -61,19 +61,19 @@ def test_the_logs_page_is_a_bridge_page(env):
     assert "Game containers" in page and "Last boot" in page
 
 
-def test_the_dashboard_is_a_bridge_page_with_the_private_skippy_as_its_first_control(env):
+def test_the_dashboard_is_a_bridge_page_of_widgets_and_the_private_skippy_has_moved_to_the_front_page(env):
     client, _, _ = env
     login(client, ADMIN)
     page = client.get("/me").data.decode()
     assert '<body class="bridge"' in page and "/static/bridge-panes.js" in page and 'href="/static/bridge-panes.css"' in page
     controls = re.findall(r'data-pane="([\w-]+)"', page)
     panes = re.findall(r'<section id="([\w-]+)" class="apane"', page)
-    assert controls[0] == "skippy" and sorted(controls) == sorted(panes), (controls, panes)
-    assert 'id="skippy" class="apane" data-flat' in page                                 # the chat lays itself out; it is not a flipped page
-    assert page.index('id="private-skippy"') < page.index('id="server" class="apane"')
+    assert controls[0] == "server" and sorted(controls) == sorted(panes), (controls, panes)
+    assert 'id="private-skippy"' not in page and "skippy" not in controls                 # the chat is the front page now (front.html)
     for widget in ("Server", "Core · skippy-tel", "Home · skippy-pc", "Watcher", "Spend (estimate)", "Friends", "Discord, lately", "Experiments", "Home links"):
         assert f"<h3>{widget}</h3>" in page, widget                                      # every widget is still there
-    assert 'id="ps-flow"' in page and 'class="wlog pg"' not in page                     # the chat's log is a scrolling transcript, not pages
+    front = client.get("/").data.decode()
+    assert 'id="ps-flow"' in front and 'class="wlog pg"' not in front                  # the chat (the front page) is a scrolling transcript, not pages
 
 
 def test_the_experiments_inventory_is_a_public_bridge_page_of_tiles_shown_a_screen_at_a_time(env):

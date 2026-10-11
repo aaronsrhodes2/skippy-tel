@@ -108,14 +108,14 @@ def test_signed_out_sees_login(env):
 def test_portal_is_all_cards_with_no_top_tabs(env):
     client, _, _ = env
     login(client, ADMIN)
-    launcher = client.get("/").data.decode()
+    launcher = client.get("/apps").data.decode()
     assert "<nav" not in launcher and 'id="home-btn"' not in launcher          # the launcher is home: nowhere to go "back" to
     assert 'aria-label="Sign out"' in launcher                                 # the account lives on the home screen (a glyph key)
-    for path in ("/games", "/play", "/me", "/admin", "/chat", "/music", "/experiments"):   # everywhere the old tabs led is now a tile
+    for path in ("/games", "/play", "/me", "/admin", "/music", "/experiments"):   # everywhere the old tabs led is now a tile
         assert f'href="{path}"' in launcher, path
     _add_friend(client, PAL, ["dragonwilds"])
     login(client, PAL)
-    friend = client.get("/").data.decode()
+    friend = client.get("/apps").data.decode()
     assert 'href="/admin"' not in friend and 'href="/me"' not in friend         # admin tiles stay admin-only
 
 
@@ -134,14 +134,14 @@ def test_the_launcher_has_one_tile_per_app_and_no_duplicate_paths(env):
     import re
     client, _, _ = env
     login(client, ADMIN)
-    launcher = client.get("/").data.decode()
+    launcher = client.get("/apps").data.decode()
     assert re.findall(r'class="unit(?: named)?" data-app="(\w+)"', launcher) == \
         ["skippy", "games", "play", "music", "video", "experiments", "dashboard", "admin"]
     assert launcher.count('href="/games"') == 1 and 'href="/games/' not in launcher      # games live in one app, not six tiles
     assert "Server room" not in launcher and "<nav" not in launcher
     _add_friend(client, PAL, ["dragonwilds"])
     login(client, PAL)
-    assert re.findall(r'class="unit(?: named)?" data-app="(\w+)"', client.get("/").data.decode()) == ["games"]   # each tile comes with its own grant (test_grants.py)
+    assert re.findall(r'class="unit(?: named)?" data-app="(\w+)"', client.get("/apps").data.decode()) == ["games"]   # each tile comes with its own grant (test_grants.py)
 
 
 def test_the_old_dashboard_path_redirects_to_games(env):
@@ -344,14 +344,14 @@ def test_the_games_tile_shows_which_game_server_is_up(env):
         start = re.search(r'<div class="unit(?: named)?" data-app="games"', page).start()
         return page[start:page.index("</div>", start)]
 
-    tile = games_unit(client.get("/").data.decode())
+    tile = games_unit(client.get("/apps").data.decode())
     assert 'data-s="idle"' in tile and "Valheim" not in tile                   # asleep: a ring lamp, no name (nothing is up)
     vm.state.status = "RUNNING"
-    tile = games_unit(client.get("/").data.decode())
+    tile = games_unit(client.get("/apps").data.decode())
     assert 'data-s="on"' in tile and ">Valheim</a>" in tile                    # up: a lit lamp and the name of what is up
     _add_friend(client, PAL, ["dragonwilds"])                      # a game PAL can't see is up: it is lit, but never named
     login(client, PAL)
-    tile = games_unit(client.get("/").data.decode())
+    tile = games_unit(client.get("/apps").data.decode())
     assert 'data-s="on"' in tile and "Valheim" not in tile
 
 
@@ -384,7 +384,7 @@ def test_the_live_game_badge_links_straight_to_that_games_page(env):
     client, vm, _ = env
     login(client, FRIEND)
     vm.state.status = "RUNNING"
-    page = client.get("/").data.decode()
+    page = client.get("/apps").data.decode()
     links, nested = _anchors(page)
     assert "/games/valheim" in links and "/games" in links            # the badge goes to the game; the tile still opens the app
     assert nested == []                                               # and no link sits inside another link
@@ -397,15 +397,15 @@ def test_the_badge_links_every_live_game_and_never_a_hidden_or_sleeping_one(env)
     client, vm, _ = env
     login(client, ADMIN)
     vm.state.status, vm.state.games = "RUNNING", ["valheim", "dragonwilds"]
-    links, nested = _anchors(client.get("/").data.decode())
+    links, nested = _anchors(client.get("/apps").data.decode())
     assert {"/games/valheim", "/games/dragonwilds"} <= set(links) and nested == []
     vm.state.status = "TERMINATED"                                    # asleep: nothing is live, so nothing to link to
-    links, _ = _anchors(client.get("/").data.decode())
+    links, _ = _anchors(client.get("/apps").data.decode())
     assert "/games/valheim" not in links and "/games/dragonwilds" not in links and "/games" in links
     vm.state.status = "RUNNING"
     _add_friend(client, PAL, ["dragonwilds"])
     login(client, PAL)                                                # PAL can see Dragonwilds only
-    links, _ = _anchors(client.get("/").data.decode())
+    links, _ = _anchors(client.get("/apps").data.decode())
     assert "/games/dragonwilds" in links and "/games/valheim" not in links
 
 
@@ -941,7 +941,7 @@ def test_there_is_one_chat_interface_and_it_is_the_skippy_app(env):
     for url in ("/games", "/games/dragonwilds", "/experiments", "/"):
         page = client.get(url).data.decode()
         assert 'id="skippy-dock"' not in page and 'class="skippy-chat"' not in page, url   # no second chat UI anywhere
-    assert client.get("/chat").data.decode().count('class="skippy-chat chat-bridge"') == 1
+    assert client.get("/").data.decode().count('class="skippy-chat chat-bridge"') == 1
     client.post("/chat/send", json={"message": "hi", "page": "/games/dragonwilds"})
     system, _ = skippy.seen
     assert "/games/dragonwilds" in system and "NOT the Captain" in system   # FRIEND isn't an admin
@@ -953,12 +953,13 @@ def test_skippy_is_a_grant(env):
     client, _, _ = env
     _add_friend(client, PAL, ["dragonwilds"])                         # no skippy
     login(client, PAL)
-    assert 'href="/chat"' not in client.get("/").data.decode()          # no Skippy tile without the grant
-    assert client.get("/chat").status_code == 403
+    assert 'data-tel="tile:skippy"' not in client.get("/apps").data.decode()     # no Skippy tile without the grant
+    assert client.get("/").headers["Location"].endswith("/apps")           # and the front page (Skippy) sends them to the apps
     assert client.post("/chat/send", json={"message": "hi"}).status_code == 403
     _add_friend(client, PAL, ["dragonwilds", "skippy"])
     login(client, PAL)
-    assert 'href="/chat"' in client.get("/").data.decode()
+    assert 'data-tel="tile:skippy"' in client.get("/apps").data.decode()
+    assert client.get("/").status_code == 200                              # the front page is Skippy
     assert client.post("/chat/send", json={"message": "hi"}).status_code == 200
 
 
@@ -977,12 +978,12 @@ def test_front_page_shows_cards_for_granted_portals(env):
     client, _, _ = env
     _add_friend(client, PAL, ["dragonwilds"])
     login(client, PAL)
-    page = client.get("/").data.decode()
+    page = client.get("/apps").data.decode()
     assert "RuneScape: Dragonwilds" in page and "Valheim" not in page
     assert 'data-tel="tile:skippy"' not in page and 'data-tel="tile:experiments"' not in page
     _add_friend(client, PAL, ["dragonwilds", "skippy", "experiments"])
     login(client, PAL)
-    page = client.get("/").data.decode()
+    page = client.get("/apps").data.decode()
     assert 'data-tel="tile:skippy"' in page and 'data-tel="tile:experiments"' in page
 
 
@@ -1216,7 +1217,7 @@ def test_dashboard_is_admin_only_and_shows_the_widgets(env):
     page = client.get("/me").data.decode()
     assert "AB12-CD34" in page and "Spend (estimate)" in page and "Friends" in page
     assert "Memory at 91%" in page and "World disk at 85%" in page      # watcher warnings
-    assert 'data-tel="tile:dashboard"' in client.get("/").data.decode()   # tile on the front page
+    assert 'data-tel="tile:dashboard"' in client.get("/apps").data.decode()   # tile on the front page
 
 
 def test_watcher_flags_crashes_and_blocked_starts(env):
@@ -1314,9 +1315,9 @@ def test_the_old_bilby_page_is_gone_and_its_addresses_lead_to_the_audio_service(
         assert r.status_code == 301 and r.location.endswith("/music"), path          # signed out too: /music asks for the sign-in
     assert client.post("/bilby/control", data={"action": "skip"}).status_code == 405   # nothing steers a phone session any more
     login(client, ADMIN)
-    assert 'data-app="bilby"' not in client.get("/").data.decode()
+    assert 'data-app="bilby"' not in client.get("/apps").data.decode()
     assert client.get("/music").status_code == 200
-    assert 'data-tel="tile:music"' in client.get("/").data.decode()
+    assert 'data-tel="tile:music"' in client.get("/apps").data.decode()
 
 
 # ── core health (skippy-tel-core) on the dashboard ────────────────────────────
@@ -1418,7 +1419,7 @@ def test_the_audio_grant_opens_bilbys_audio_service_but_never_home_status(env):
     login(client, PAL)
     assert client.get("/music").status_code == 200
     assert client.get("/bilby").status_code == 301                               # a redirect gives nothing away
-    assert b'data-tel="tile:music"' in client.get("/").data
+    assert b'data-tel="tile:music"' in client.get("/apps").data
     assert client.get("/video").status_code == 403 and client.get("/me").status_code == 403
 
 

@@ -210,7 +210,7 @@ def test_an_approved_visitor_opening_the_portal_root_is_just_in(env, monkeypatch
     sign_in_with_google(monkeypatch, client, STRANGER)
     login(admin, ADMIN)
     admin.post("/admin/friends", data={"email": STRANGER, "portals": ["valheim"]})
-    resp = client.get("/")
+    resp = client.get("/apps")
     assert resp.status_code == 200 and "Sign in with Google" not in resp.data.decode()
     assert session_of(client)["user"]["email"] == STRANGER
 

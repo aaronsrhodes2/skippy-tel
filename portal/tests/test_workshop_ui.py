@@ -41,7 +41,7 @@ def env():
 def page(env):
     client, _ = env
     login(client, ADMIN)
-    return client.get("/me").data.decode()
+    return client.get("/").data.decode()
 
 
 def card(page: str) -> str:

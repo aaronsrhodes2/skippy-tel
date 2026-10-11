@@ -22,7 +22,7 @@ def page():
                                                                  "projects": PROJECTS}}})
     client = app.test_client()
     login(client, ADMIN)
-    return client.get("/me").data.decode()
+    return client.get("/").data.decode()
 
 
 def sends(out):

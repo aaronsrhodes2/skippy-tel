@@ -66,13 +66,13 @@ def test_friends_get_neither_the_list_nor_the_panel(env):
     login(client, FRIEND)
     assert client.post("/chat/memory", json={}).status_code == 403
     assert client.get("/chat/memory/result?job=abcdef12").status_code == 403
-    assert 'data-sheet="memory"' not in client.get("/chat").data.decode()
+    assert 'data-sheet="memory"' not in client.get("/").data.decode()
 
 
 def test_the_captain_sees_the_panel(env):
     _, client, _ = env
     login(client, ADMIN)
-    page = client.get("/chat").data.decode()
+    page = client.get("/").data.decode()
     assert 'data-sheet="memory"' in page and 'data-open="memory"' in page          # the sheet and the key that opens it
 
 

@@ -6,13 +6,12 @@
 {% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge-panes.css') }}">{% endblock %}
 {% block content %}
 {# The Captain's dashboard on the bridge: a deck with a control for each part (a lamp where something may need him), and a control opens
-   its pane. The private Skippy (templates/_workshop.html) is the first control and lays itself out as a chat; every other widget is a
+   its pane. (Skippy, the chat, is the front page now: templates/front.html.) Every widget is a
    pane of pages you flip (static/bridge-panes.js, Bridge.pager), never a scrolled page. Each widget is as it was: only the layout changed. #}
 {% set core_lamp = {'ok': 'on', 'degraded': 'warn', 'unknown': 'idle'}.get(core.verdict, 'off') %}
 {% set home_lamp = 'idle' if not home.paired else ('boot' if home.age is none else ('on' if home.online else 'warn')) %}
 {% set server_lamp = 'off' if not status else ('on' if status.status == 'RUNNING' else ('idle' if status.status == 'TERMINATED' else 'boot')) %}
 {% set units = [
-  ('skippy', 'can', 'Skippy', 'on' if workshop_ready else 'off'),
   ('server', 'server', 'Server', server_lamp),
   ('core', 'core', 'Core', core_lamp),
   ('home', 'link', 'Home', home_lamp),
@@ -23,8 +22,6 @@
   ('experiments', 'atom', 'Experiments', ''),
   ('links', 'globe', 'Links', ''),
 ] %}
-<script src="{{ url_for('static', filename='skippy-voice.js') }}"></script>
-<script src="{{ url_for('static', filename='skippy-md.js') }}"></script>
 <canvas class="alive" aria-hidden="true"></canvas>
 <section class="adm" id="adm">
   <div class="stage" id="astage">
@@ -40,12 +37,6 @@
         </div>
       {% endfor %}
     </div>
-
-    <section id="skippy" class="apane" data-flat hidden>
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
-        <svg class="g mark" aria-hidden="true"><use href="#g-can"/></svg><span class="title">Skippy</span></header>
-      {% include "_workshop.html" %}
-    </section>
 
     <section id="server" class="apane" hidden>
       <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>

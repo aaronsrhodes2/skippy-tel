@@ -102,7 +102,7 @@ def test_the_card_offers_the_projects_and_escapes_their_names(env):
     client, _, home = env
     home.accept(caps(PROJECTS + [{"id": "evil", "name": "</script><script>alert(1)</script>"}]))
     login(client, ADMIN)
-    page = client.get("/me").data.decode()
+    page = client.get("/").data.decode()
     assert '<select id="ps-project" aria-label="Project" hidden>' in page          # offered to the script; the model picks the folder, so it is not shown
     assert '<option value="sigma-ground">sigma-ground</option>' in page
     assert "<script>alert(1)" not in page                                  # escaped in the option AND in the script's JSON

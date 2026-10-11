@@ -31,13 +31,13 @@ def test_the_old_bilby_grant_reads_as_audio_and_nothing_more():
 def test_a_tile_and_its_app_come_with_the_grant_only(client, grant, tile, page):  # noqa: F811
     _add_friend(client, PAL, ["skippy"])
     login(client, PAL)
-    assert f'data-tel="{tile}"'.encode() not in client.get("/").data
+    assert f'data-tel="{tile}"'.encode() not in client.get("/apps").data
     if page:
         assert client.get(page).status_code == 403
     client.get("/logout")
     _add_friend(client, PAL, ["skippy", grant])
     login(client, PAL)
-    launcher = client.get("/").data.decode()
+    launcher = client.get("/apps").data.decode()
     assert f'data-tel="{tile}"' in launcher
     if page:
         assert client.get(page).status_code == 200
@@ -47,7 +47,7 @@ def test_a_tile_and_its_app_come_with_the_grant_only(client, grant, tile, page):
 def test_a_friend_reads_aarons_library_and_their_viewing_stays_out_of_continue_watching(client):  # noqa: F811
     _add_friend(client, PAL, ["audio", "video"])
     login(client, PAL)
-    launcher = client.get("/").data.decode()
+    launcher = client.get("/apps").data.decode()
     assert 'data-tel="tile:music"' in launcher and 'data-tel="tile:video"' in launcher     # both controls, granted
     assert 'data-progress="0"' in client.get("/video").data.decode()
     assert client.get("/me").status_code == 403 and client.get("/admin").status_code == 403

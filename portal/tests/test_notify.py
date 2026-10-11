@@ -76,7 +76,7 @@ def test_one_short_line_to_the_captain_and_nobody_else():
     assert d.calls[0]["url"].endswith(f"/guilds/{GUILD}")                       # who owns the server: the Captain
     assert open_dm["body"] == {"recipient_id": OWNER_ID}
     text = post["body"]["content"]
-    assert text == "Skippy · SkippyTel: “make the games tile everyone orange please” done. https://portal.example/me"
+    assert text == "Skippy · SkippyTel: “make the games tile everyone orange please” done. https://portal.example/"
     assert post["body"]["allowed_mentions"] == {"parse": []}                     # pings nobody, whatever the text says
     assert all(c["auth"] == f"Bot {BOT}" for c in d.calls) and BOT not in json.dumps([c["body"] for c in d.calls])
 
@@ -103,7 +103,7 @@ def test_the_outcome_is_one_word_or_the_question(state, error, last, outcome):
     d = Discord()
     notifier(transport=d).finished(ADMIN, "abcd1234", "sigma-ground", "fix it", state, error, last, 1.0)
     text = d.dms()[0]["body"]["content"]
-    assert text == f"Skippy · sigma-ground: “fix it” {outcome}. https://portal.example/me"
+    assert text == f"Skippy · sigma-ground: “fix it” {outcome}. https://portal.example/"
     assert "KeyError" not in text
 
 
@@ -114,7 +114,7 @@ def test_a_long_request_is_cut_and_the_whole_line_stays_under_200():
     n.vm.state.env["DISCORD_GUILD_ID"] = GUILD
     n.finished(ADMIN, "abcd1234", "SkippyTel", "word " * 200, "done", None, "", 1.0)
     text = d.dms()[0]["body"]["content"]
-    assert len(text) <= notify_mod.MAX_CHARS and text.endswith(long_url + "/me")
+    assert len(text) <= notify_mod.MAX_CHARS and text.endswith(long_url + "/")
     assert notify_mod.first_words("word " * 200).endswith("…") and len(notify_mod.first_words("word " * 200)) <= 61
 
 
@@ -222,7 +222,7 @@ def test_a_run_ending_through_the_reporters_push_dms_with_the_portals_link(env):
     assert client.post(f"/home/workshop/{task}", json={"who": ADMIN, "conv": CONV, "start": 1, "events": [],
                                                        "state": "done", "finished_age_s": 0.4}, headers=auth).status_code == 200
     [dm] = d.dms()
-    assert dm["body"]["content"] == "Skippy · SkippyTel: “make it green” done. http://localhost/me"
+    assert dm["body"]["content"] == "Skippy · SkippyTel: “make it green” done. http://localhost/"
 
 
 def test_the_switch_route_is_admin_only_needs_the_header_and_a_boolean(env):
@@ -234,14 +234,14 @@ def test_the_switch_route_is_admin_only_needs_the_header_and_a_boolean(env):
     assert client.post("/me/workshop/notify", json={"on": "no"}, headers=H).status_code == 400
     resp = client.post("/me/workshop/notify", json={"on": False}, headers=H)
     assert resp.get_json() == {"on": False, "configured": True}
-    assert 'id="ps-notify"> Discord me when done' in client.get("/me").data.decode()           # unchecked now
+    assert 'id="ps-notify"> Discord me when done' in client.get("/").data.decode()           # unchecked now
     client.post("/me/workshop/notify", json={"on": True}, headers=H)
-    assert 'id="ps-notify" checked>' in client.get("/me").data.decode()
+    assert 'id="ps-notify" checked>' in client.get("/").data.decode()
 
 
 def test_without_a_bot_the_switch_is_shown_disabled(env):
     app = portal.create_app(dict(SETTINGS), vm=FakeVm(), skippy=FakeSkippy())
     client = app.test_client()
     login(client, ADMIN)
-    page = client.get("/me").data.decode()
+    page = client.get("/").data.decode()
     assert 'id="ps-notify" disabled title="The portal has no Discord bot (DISCORD_BOT_TOKEN)"' in page

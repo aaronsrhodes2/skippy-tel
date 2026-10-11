@@ -366,7 +366,7 @@ def test_nothing_said_in_the_public_chat_is_recorded_unless_the_person_ticks_all
         assert client.post("/chat/send", json={**body, "history": []}).status_code == 200
     assert events(tel, "chat") == [] and events(tel, "action") == []
     assert "dragon" not in everything(tel) and "server_status" not in everything(tel)
-    chat_page = client.get("/chat").data.decode()
+    chat_page = client.get("/").data.decode()
     assert "Allow us to save your questions" in chat_page and 'class="save"' in chat_page and " checked" not in chat_page.split('class="save"')[1][:40]
 
 
@@ -570,7 +570,7 @@ def test_every_page_links_to_privacy_in_its_footer():
     assert 'href="/privacy"' in client.get("/").data.decode()              # sign-in page
     assert 'href="/privacy"' in client.get("/experiments").data.decode()   # a public page
     login(client, ADMIN)
-    for path in ("/", "/games", "/games/valheim", "/me", "/admin", "/chat", "/music", "/experiments", "/privacy"):
+    for path in ("/", "/games", "/games/valheim", "/me", "/admin", "/apps", "/music", "/experiments", "/privacy"):
         page = client.get(path).data.decode()
         assert re.search(r'<footer class="(?:sitefoot|foot)">\s*<a [^>]*href="/privacy"', page), path     # the bridge's strip or the old footer
 
@@ -581,7 +581,7 @@ def test_no_recording_warning_on_the_sign_in_page_or_in_the_chat():
     assert "records which pages you open" not in login_page and "Nothing is recorded" not in login_page   # the Captain's call
     assert 'href="/privacy"' in login_page                                                                # the footer link stays
     login(client, ADMIN)
-    chat_page = client.get("/chat").data.decode()
+    chat_page = client.get("/").data.decode()
     assert "are recorded for" not in chat_page and "don't type any" not in chat_page    # no warning: nothing is kept by default
 
 
@@ -589,7 +589,7 @@ def test_the_notices_are_not_shown_when_recording_is_off():
     app, client, tel, _ = make(enabled=False)
     assert "records which pages you open" not in client.get("/").data.decode()
     login(client, ADMIN)
-    assert "are recorded" not in client.get("/chat").data.decode()
+    assert "are recorded" not in client.get("/").data.decode()
 
 
 # ── the Activity widget ───────────────────────────────────────────────────────────
