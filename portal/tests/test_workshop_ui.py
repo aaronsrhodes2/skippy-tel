@@ -96,13 +96,14 @@ def test_the_quiet_strip_sits_between_the_log_and_the_form_not_inside_the_live_l
     assert log < quiet < form
     assert re.search(r'id="ps-quiet"[^>]*\bhidden\b', html)                       # hidden until the link goes quiet
     assert re.search(r'id="ps-stop" hidden', html) and re.search(r'id="ps-reload" hidden', html)
-    assert html[log:quiet].count("</div>") == 3                                   # the log div (its page flow inside it) and the page bar close before the strip opens
+    assert html[log:quiet].count("</div>") == 2                                   # the log div (its flow inside it) closes before the strip opens
 
 
 def test_it_keeps_the_phone_layout_and_the_existing_look(page):
     css = next(s for s in re.findall(r"<style>(.*?)</style>", page, re.S) if ".me-chat" in s)
     assert "flex-wrap: wrap" in css                                                 # the buttons wrap instead of overflowing
-    assert ".me-chat .wlog { flex: 1; min-height: 0" in css and "overflow-y: auto" not in css    # the log is pages (Bridge.pager), never a scrolled box
+    assert ".me-chat .wlog { flex: 1; min-height: 0" in css and "overflow-y: auto" in css       # the log is a plain scrolling transcript (a long turn must not be cut into columns)
+    assert "break-inside: avoid-column" not in css and "Bridge.pager(log" not in page
     used = set(re.findall(r"var\((--[\w-]+)\)", css))
     defined = set(re.findall(r"(--[\w-]+)\s*:", page))                               # base.html's palette
     assert used and used <= defined, used - defined                                  # existing variables only
@@ -146,6 +147,8 @@ class El {
   get textContent() { return this.children.length ? this.children.map(c => c.textContent).join(" | ") : this.own; }
   set textContent(t) { this.children = []; this.own = String(t); }
   appendChild(c) { this.children.push(c); return c; }
+  append(...cs) { cs.forEach(c => this.children.push(c)); }
+  setAttribute(k, v) { this["attr:" + k] = String(v); }
   replaceChildren(...cs) { this.children = cs; this.own = ""; }
   addEventListener(ev, fn) { (this.on[ev] = this.on[ev] || []).push(fn); }
   focus() { this.focused++; }
@@ -154,7 +157,7 @@ class El {
 }
 const els = {};
 for (const id of ["ps-log", "ps-flow", "ps-pips", "ps-form", "ps-text", "ps-send", "ps-stop", "ps-new", "ps-quiet", "ps-quiet-msg", "ps-quiet-hint", "ps-check", "ps-reload",
-                  "ps-project", "ps-project-hint", "ps-convs-btn", "ps-convs", "ps-convs-msg", "ps-convs-list", "ps-notify", "ps-mic", "ps-spk"]) els[id] = new El("x");
+                  "ps-project", "ps-project-hint", "ps-convs-btn", "ps-convs", "ps-convs-msg", "ps-convs-list", "ps-notify", "ps-mic", "ps-spk", "ps-attach", "ps-file", "ps-img"]) els[id] = new El("x");
 els["ps-notify"].checked = true;
 for (const id of ["ps-stop", "ps-quiet", "ps-quiet-hint", "ps-reload", "ps-project-hint", "ps-convs"]) els[id].hidden = true;
 const Bridge = {pager: () => ({refresh() {}, last() {}, go() {}, page() { return 0; }, pages() { return 1; }})};   // the page flips are the bridge's, not under test here
@@ -163,6 +166,7 @@ const root = {closest: () => null, querySelector(sel) { const e = els[sel.slice(
 const document = {getElementById: (id) => { if (id !== "private-skippy") throw new Error("unexpected id " + id); return root; },
                   createElement: (tag) => new El(tag)};
 const storage = new Map(Object.entries(input.storage || {}));
+if (!input.fresh && !storage.has("ps-conv")) storage.set("ps-conv", "test-conv");   // a browser that already knows this chat (a fresh one opens the latest conversation: tested on its own)
 const localStorage = {getItem: (k) => (storage.has(k) ? storage.get(k) : null), setItem: (k, v) => { storage.set(k, String(v)); },
                       removeItem: (k) => { storage.delete(k); }};
 const crypto = {randomUUID: () => "11111111-2222-3333-4444-555555555555"};
@@ -305,7 +309,7 @@ def ev(n: int) -> dict:
 
 
 def drive(page: str, steps: list, tasks: dict | None = None, storage: dict | None = None, follow: str | None = None,
-          history: dict | None = None, ship: dict | None = None, notify_mode: str = "ok") -> dict:
+          history: dict | None = None, ship: dict | None = None, notify_mode: str = "ok", fresh=False) -> dict:
     """Run the card's script against the fake browser. `follow` = a task the page was already following (a reload
     mid-task), with a transcript that has its (empty) assistant turn."""
     store = dict(storage or {})
@@ -318,7 +322,7 @@ def drive(page: str, steps: list, tasks: dict | None = None, storage: dict | Non
     done = subprocess.run([NODE, "-e", HARNESS], capture_output=True, timeout=120,
                           input=json.dumps({"script": script(page), "steps": steps, "tasks": tasks or {}, "storage": store,
                                             "history": history or {}, "ship": ship or {},
-                                            "notifyMode": notify_mode}).encode())
+                                            "notifyMode": notify_mode, "fresh": fresh}).encode())
     assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
     return json.loads(done.stdout.decode("utf-8"))
 
@@ -476,7 +480,7 @@ def test_sending_while_quiet_leaves_the_old_task_and_the_server_decides(page):
     assert s["too_early"]["resyncs"] == 1 and not [c for c in out["calls"] if c["route"] == "send" and c["t"] < 26 * S]
     assert not s["ready"]["sendDisabled"] and s["ready"]["hint"]
     left = s["left"]
-    assert [b["text"] for b in left["log"]] == ["go", "step 1 | (left waiting)", "second", "…"]   # the old turn is marked; the new one waits
+    assert [b["text"] for b in left["log"]][:3] == ["go", "step 1 | (left waiting)", "second"] and "Working" in left["log"][3]["text"]   # the old turn is marked; the new one waits (with its clock)
     assert left["task"] == {"task": "new1", "after": 0}                                  # the page follows the new task now
     assert left["sendDisabled"] and left["stopShown"] and not left["strip"]
     (sent,) = [c for c in out["calls"] if c["route"] == "send"]
@@ -638,7 +642,7 @@ def test_a_first_message_follows_to_the_end_and_a_failed_send_does_not_strand_th
     assert [b["text"] for b in s["refused"]["log"]] == ["first", "The bridge isn't running."]
     assert not s["refused"]["sendDisabled"] and not s["refused"]["stopShown"]        # a refusal is not a stuck card
     assert s["sent"]["sendDisabled"] and s["sent"]["task"] == {"task": "new1", "after": 0}
-    assert s["running"]["log"][-1]["text"] == "step 1" and s["running"]["stopShown"]
+    assert s["running"]["log"][-1]["text"].startswith("step 1") and "Working" in s["running"]["log"][-1]["text"] and s["running"]["stopShown"]
     assert s["done"]["log"][-1]["text"] == "step 1 | All done." and not s["done"]["sendDisabled"]
 
 

@@ -31,6 +31,38 @@ OFFLINE_S = 30             # no push at all for this long: skippy-pc isn't picki
 STALL_S = 120              # a running task silent for this long: the link to skippy-pc broke
 WANT_S = 120               # a person's "check again" is still worth answering for this long
 _CONV = re.compile(r"[A-Za-z0-9-]{8,64}")
+MAX_ATTACHED = 4                   # pictures that may go with one message (pasted screenshots, mostly)
+MAX_IMAGE_B64 = 1_200_000          # one picture, as base64 (the page shrinks each to about a megabyte)
+MAX_IMAGES_B64 = 3_200_000         # all of them together
+_DATA_URL = re.compile(r"data:image/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})")
+_MAGIC = {"jpeg": b"\xff\xd8\xff", "png": b"\x89PNG\r\n\x1a\n", "webp": b"RIFF"}
+
+
+def clean_images(raw) -> list[dict]:
+    """The pictures that came with a message, as [{"mime", "b64"}], or ValueError saying what is wrong. Nothing is trusted
+    from the page: each must be a base64 data URL of a jpeg, png or webp whose first bytes say so, within the size limits."""
+    if not raw:
+        return []
+    if not isinstance(raw, list) or len(raw) > MAX_ATTACHED:
+        raise ValueError(f"At most {MAX_ATTACHED} pictures to a message.")
+    out, total = [], 0
+    for item in raw:
+        m = _DATA_URL.fullmatch(item) if isinstance(item, str) else None
+        if not m:
+            raise ValueError("A picture wasn't a jpeg, png or webp.")
+        kind, b64 = m.group(1), m.group(2)
+        total += len(b64)
+        if len(b64) > MAX_IMAGE_B64 or total > MAX_IMAGES_B64:
+            raise ValueError("Those pictures are too big: try fewer or smaller ones.")
+        try:
+            head = base64.b64decode(b64[:16] + "=" * (-len(b64[:16]) % 4))[:8]
+            base64.b64decode(b64, validate=True)
+        except ValueError:
+            raise ValueError("A picture was damaged.") from None
+        if not head.startswith(_MAGIC[kind]):
+            raise ValueError("A picture wasn't what it said it was.")
+        out.append({"mime": "image/" + kind, "b64": b64})
+    return out
 _PROJECT = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
 _STATES = ("running", "done", "error")
 _FINAL = ("done", "error")
@@ -233,9 +265,10 @@ class Workshop:
         pid = pid or DEFAULT_PROJECT
         return next((p for p in self.projects() if p["id"] == pid), None)
 
-    def send(self, owner: str, conv: str, message: str, project: str = "") -> str:
+    def send(self, owner: str, conv: str, message: str, project: str = "", images=None) -> str:
         message = (message or "").strip()
-        if not message:
+        pictures = clean_images(images)
+        if not message and not pictures:
             raise ValueError("Say something.")
         if len(message) > MAX_MESSAGE:
             raise ValueError(f"That's too long: keep it under {MAX_MESSAGE} characters.")
@@ -256,7 +289,8 @@ class Workshop:
             if any(self._live_state(r) in ("queued", "running") for r in self._tasks.values()):
                 raise Busy("Skippy is still working on the last one.")
             # The job id is the task id everywhere: here, in the reporter and in the bridge.
-            task = self.home.start("workshop", owner, ttl=JOB_TTL, conv=conv, message=message, who=owner, project=project)
+            task = self.home.start("workshop", owner, ttl=JOB_TTL, conv=conv, message=message, who=owner, project=project,
+                                   **({"images": pictures} if pictures else {}))
             now = self.clock()
             self._tasks[task] = {"owner": owner, "conv": conv, "events": [], "state": "queued", "error": None,
                                  "created": now, "pushed_at": now, "touched": now, "stop": False, "project": project,

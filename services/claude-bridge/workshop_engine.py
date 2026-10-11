@@ -52,6 +52,66 @@ PROMPT_NAME = ".skippy-workshop-prompt.txt"   # the prompt as claude reads it ({
 ENV_FILES = ("G:/My Drive/vault/.env",)        # where SKIPPY_HOME_TOKEN lives if the environment doesn't have it
 
 MAX_MESSAGE = 8000
+# Pictures the Captain pastes into the chat (UI bug screenshots, mostly): saved here, one folder per task, and the message tells
+# Claude Code the paths so it opens them with its Read tool. Checked again here: the bridge trusts nothing it is handed.
+ATTACH_DIR = os.getenv("WORKSHOP_ATTACH", os.path.join(os.path.dirname(os.getenv("WORKSHOP_REPO", r"D:\Aaron\development\SkippyTel-workshop")), ".skippy-workshop-attachments"))
+MAX_IMAGES = 4
+MAX_IMAGE_BYTES = 3 * 1024 * 1024
+ATTACH_KEEP_S = 14 * 24 * 3600
+
+
+def _image_ext(data: bytes) -> str | None:
+    if data.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    return None
+
+
+def save_images(task: str, images, root: str | None = None) -> list[str]:
+    """Write the pictures of one message to <root>/<task>/image-N.ext and return the paths. ValueError for anything that is not a
+    picture or is too big. Old folders (ATTACH_KEEP_S) are swept as a courtesy: this is a scratch space, not an archive."""
+    root = root or ATTACH_DIR
+    if not images:
+        return []
+    if not isinstance(images, list) or len(images) > MAX_IMAGES:
+        raise ValueError("too many pictures")
+    if not _TASK.fullmatch(task or ""):
+        raise ValueError("bad task id")
+    decoded = []
+    for item in images:
+        b64 = item.get("b64") if isinstance(item, dict) else None
+        if not isinstance(b64, str):
+            raise ValueError("bad picture")
+        try:
+            data = base64.b64decode(b64, validate=True)
+        except ValueError:
+            raise ValueError("bad picture") from None
+        ext = _image_ext(data)
+        if not ext or len(data) > MAX_IMAGE_BYTES:
+            raise ValueError("bad picture")
+        decoded.append((ext, data))
+    folder = os.path.join(root, task)
+    os.makedirs(folder, exist_ok=True)
+    paths = []
+    for n, (ext, data) in enumerate(decoded, 1):
+        path = os.path.join(folder, f"image-{n}{ext}")
+        with open(path, "wb") as f:
+            f.write(data)
+        paths.append(path)
+    cutoff = time.time() - ATTACH_KEEP_S
+    try:
+        for name in os.listdir(root):
+            old = os.path.join(root, name)
+            if os.path.isdir(old) and os.path.getmtime(old) < cutoff:
+                for leaf in os.listdir(old):
+                    os.unlink(os.path.join(old, leaf))
+                os.rmdir(old)
+    except OSError:
+        pass
+    return paths
 MAX_WHO = 200                      # the owner's email, which the bridge only carries (it never decides anything by it)
 MAX_TEXT = 4000                    # one text event
 MAX_EVENTS = 5000
@@ -392,6 +452,7 @@ class Workshop:
         # Runs are saved next to the sessions file, so anything that points sessions somewhere (a test's tmp dir) moves
         # the runs with it; nothing but the real bridge ever writes to the real directory.
         self.state_dir = str(state_dir or os.path.join(os.path.dirname(sessions), STATE_DIR_NAME))
+        self.attach_dir = os.path.join(os.path.dirname(sessions), ".skippy-workshop-attachments")   # pasted pictures (save_images)
         self.login_probe = LoginProbe(self.claude_cmd)
         # Every conversation in full, in files the Captain owns (conversation_log.py). The real folder only for the real
         # bridge: a Workshop pointed at other sessions (a test's tmp dir) keeps its conversations next to them.
@@ -447,7 +508,7 @@ class Workshop:
 
     # ── runs ─────────────────────────────────────────────────────────────
     def start(self, task: str, conv: str, message: str, who: str = "", attach: bool = False,
-              project: str = "") -> Run:
+              project: str = "", images=None) -> Run:
         """Begin a task, or re-attach if it's already known. One task at a time across ALL projects: the chat follows one
         run, the Captain reviews one outcome at a time, and two runs would race on the shared sessions file.
 
@@ -461,8 +522,12 @@ class Workshop:
         if len(who) > MAX_WHO:
             raise ValueError("who is too long")        # refused, not cut: a cut email would name somebody else
         message = (message or "").strip()[:MAX_MESSAGE]
-        if not message and not attach:
+        paths = save_images(task, images, self.attach_dir) if images and not attach else []
+        if not message and not attach and not paths:
             raise ValueError("empty message")
+        if paths:                                      # Claude Code reads them with its Read tool, like any file
+            message = (message or "(no words, just the picture)") + "\n\n[The Captain attached " + str(len(paths)) + \
+                      (" picture" if len(paths) == 1 else " pictures") + ". Open each with the Read tool before answering: " + "; ".join(paths) + "]"
         project = project or projects_mod.DEFAULT
         try:
             chosen = self.project(project)

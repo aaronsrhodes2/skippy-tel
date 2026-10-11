@@ -230,8 +230,8 @@ def test_the_private_skippy_is_the_left_side_of_the_dashboard(env):
     login(client, ADMIN)
     page = client.get("/me").data.decode()
     assert page.index('id="private-skippy"') < page.index('id="server" class="apane"')      # the chat is the first control and pane
-    assert 'data-pane="skippy"' in page and 'id="skippy" class="apane" data-flat' in page and "Skippy · private" in page
-    assert "claude-sonnet-5-5" in page and "Sonnet 5.5 (medium effort) all the time" in page
+    assert 'data-pane="skippy"' in page and 'id="skippy" class="apane" data-flat' in page and 'id="private-skippy"' in page
+    assert "claude-sonnet-5-5" in page
     assert "workshop isn't answering" not in page
 
 

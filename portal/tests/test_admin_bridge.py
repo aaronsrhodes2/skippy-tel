@@ -73,8 +73,7 @@ def test_the_dashboard_is_a_bridge_page_with_the_private_skippy_as_its_first_con
     assert page.index('id="private-skippy"') < page.index('id="server" class="apane"')
     for widget in ("Server", "Core · skippy-tel", "Home · skippy-pc", "Watcher", "Spend (estimate)", "Friends", "Discord, lately", "Experiments", "Home links"):
         assert f"<h3>{widget}</h3>" in page, widget                                      # every widget is still there
-    assert 'class="pg-flow" id="ps-flow"' in page                                        # the chat's log is pages too
-    assert "overflow-y: auto" not in "".join(re.findall(r"<style>(.*?)</style>", page.split("<body", 1)[1], re.S))
+    assert 'id="ps-flow"' in page and 'class="wlog pg"' not in page                     # the chat's log is a scrolling transcript, not pages
 
 
 def test_the_experiments_inventory_is_a_public_bridge_page_of_tiles_shown_a_screen_at_a_time(env):

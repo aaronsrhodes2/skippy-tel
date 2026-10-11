@@ -210,6 +210,17 @@ only when the gate's `/health` says `ready`. Direct play when the catalog says `
 `portal/static/vendor/`, Safari's own on Apple). Run it against the REAL gate on this machine with `python portal/tests/dev_video.py`.
 Full description and tests: `docs/portal/README.md` → Nagatha's Video Service.
 
+## The private Skippy's chat (`/me` → Skippy): a transcript, not pages
+
+Unlike the phone-sized bridge pages, this chat is a plain **scrolling transcript** (a long agent run must not be cut into columns; the exemption
+was Skippy's own proposal, agreed 2026-10-11). A run of tool calls folds into one line ("14 steps: Read, Bash") that opens to each command. A
+browser that has never opened the chat opens the **latest conversation** from skippy-pc instead of starting a blank one (New chat is the
+explicit way to start one). **Pictures** (UI-bug screenshots): paste, drop or pick up to 4; the page shrinks each to a JPEG, the portal checks
+them (`workshop.clean_images`), the job carries them to the bridge, which saves them under `.skippy-workshop-attachments/<task>/` beside the
+sessions file (swept after 14 days) and names the paths in the message so Claude Code opens them with Read. Tests:
+`portal/tests/test_workshop_attachments.py`, `services/claude-bridge/tests/test_workshop_attachments.py`, the UI harness in `test_workshop_*ui.py`.
+The bridge only picks this up on restart (refused while a run is going).
+
 ## Skippy's voice (mic, voice-to-text, text-to-voice in both chats: `/chat` and the personal Skippy on `/me`)
 
 A mic key and a speaker key on each chat, on any device with a current browser: `portal/static/skippy-voice.js` (MediaRecorder, no browser

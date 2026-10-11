@@ -105,7 +105,7 @@ def test_the_conversations_list_comes_from_skippy_pc_and_opening_one_shows_its_h
     assert not o["convsShown"] and not o["logHidden"] and o["conv"] == "conv-sigma0001"
     assert o["project"] == "sigma-ground" and o["pickerLocked"]
     assert [b["text"] for b in o["log"]] == ["make the solver faster", "Twice as fast now.", "and test it",
-                                             "› Bash: pytest -q | tests failed"]
+                                             "Ran 1 command | › Bash: pytest -q | tests failed"]   # (the tool steps fold into one line)
     assert "failed" in o["log"][-1]["cls"]
     [send] = sends(out)                                        # carrying on: same conversation, same project
     assert send["conv"] == "conv-sigma0001" and send["project"] == "sigma-ground"
@@ -130,3 +130,26 @@ def test_a_list_that_fails_says_why_and_back_returns_to_the_chat(page):
     assert s["failed"]["convsShown"] and s["failed"]["convsMsg"] == "The bridge on skippy-pc isn't answering."
     assert s["failed"]["items"] == []
     assert s["back"]["convsBtn"] == "Conversations" and not s["back"]["convsShown"] and not s["back"]["logHidden"]
+
+
+@needs_node
+def test_a_browser_that_never_opened_this_chat_opens_the_latest_conversation_not_a_blank_one(page):
+    out = drive(page, [{"adv": 3000}, {"snap": "opened"}], history=HISTORY, fresh=True)
+    o = out["snaps"]["opened"]
+    assert o["conv"] == "conv-skippy001" and o["project"] == "skippytel"        # the most recent by its last activity
+    assert [b["text"] for b in o["log"]][0] == "orange games tile" and o["pickerLocked"]
+
+
+@needs_node
+def test_a_browser_that_already_has_a_chat_keeps_it_and_does_not_ask(page):
+    out = drive(page, [{"adv": 3000}, {"snap": "kept"}], history=HISTORY)
+    assert out["snaps"]["kept"]["conv"] == "test-conv" and not [c for c in out["calls"] if c["route"] == "history"]
+
+
+@needs_node
+def test_a_conversation_you_are_in_is_pinned_and_listed_as_active_until_you_unpin_it(page):
+    out = drive(page, [{"type": "fix the pill"}, {"submit": True}, {"adv": 2000}, {"click": "ps-convs-btn"}, {"adv": 1500}, {"snap": "list"}],
+                history=HISTORY)
+    items = out["snaps"]["list"]["items"]
+    assert items[0] == "Active" and items[1].startswith("fix the pill") and items[1].endswith("×")      # pinned at once, with its unpin
+    assert "Earlier" in items and "make the solver faster | sigma-ground · 2 messages · 2 h ago" in items   # the rest of the history below

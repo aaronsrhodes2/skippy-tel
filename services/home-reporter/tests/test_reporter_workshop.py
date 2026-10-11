@@ -102,6 +102,19 @@ def test_a_run_is_started_on_the_bridge_and_its_events_reach_the_portal(wired):
     assert all(c["headers"].get("Authorization") == f"Bearer {TOKEN}" for c in portal.fake.calls)
 
 
+def test_pictures_pasted_in_the_chat_ride_along_to_the_bridge_once_and_never_on_a_reattach(wired):
+    pics = [{"mime": "image/jpeg", "b64": "/9j/4AAQ"}]
+    bridge, _ = wired()
+    reporter.run_job({**JOB, "images": pics}, TOKEN)
+    assert bridge.started[0]["images"] == pics and bridge.started[0]["attach"] is False
+    bridge2, _ = wired()
+    reporter.run_job({**JOB, "images": pics, "attach": True}, TOKEN)           # a re-attach only follows a run: it takes no pictures
+    assert "images" not in bridge2.started[0]
+    bridge3, _ = wired()
+    reporter.run_job({**JOB, "images": "nope"}, TOKEN)                         # not a list: ignored, the message still goes
+    assert "images" not in bridge3.started[0]
+
+
 def test_a_failed_run_reports_its_error(wired):
     _, portal = wired(FakeBridge(ok=False, error="Claude Code on skippy-pc isn't logged in"))
     assert reporter.run_job(JOB, TOKEN) == {"result": {"state": "error"}}

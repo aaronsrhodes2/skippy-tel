@@ -235,7 +235,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             run = WORKSHOP.start(str(body.get("task") or ""), str(body.get("conv") or ""),
                                  str(body.get("message") or ""), who=str(body.get("who") or ""),
-                                 attach=bool(body.get("attach")), project=str(body.get("project") or ""))
+                                 attach=bool(body.get("attach")), project=str(body.get("project") or ""),
+                                 images=body.get("images"))
         except workshop.Busy as exc:
             self._json(409, {"error": "busy", "message": str(exc)})
         except workshop.UnknownTask:

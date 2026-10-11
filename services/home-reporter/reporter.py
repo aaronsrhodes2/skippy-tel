@@ -586,8 +586,10 @@ def workshop(job: dict, token: str) -> dict:
         return fail("The private Skippy isn't set up on skippy-pc (CLAUDE_BRIDGE_URL).")
     attach = bool(job.get("attach")) or portal_started(token, task)
     for attempt in range(START_TRIES):            # a bridge that is restarting answers in a few seconds
+        pictures = job.get("images") if isinstance(job.get("images"), list) and not attach else None
         status, started = _bridge("POST", "/workshop", {"task": task, "conv": conv, "message": message, "who": who,
-                                                        "attach": attach, "project": project}, token)
+                                                        "attach": attach, "project": project,
+                                                        **({"images": pictures} if pictures else {})}, token)
         if status is not None or attempt == START_TRIES - 1:
             break
         time.sleep(START_RETRY_S)

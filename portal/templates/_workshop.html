@@ -10,13 +10,26 @@
   .me-chat { display: flex; flex-direction: column; flex: 1; min-height: 0; margin: 0; }
   .me-chat header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .me-chat header h3 { margin: 0; flex: 1; }
-  .me-chat .wlog { flex: 1; min-height: 0; margin: 8px 0; }          /* pages (Bridge.pager), never a scrolled box */
-  .me-chat .turn { margin: 8px 6px; break-inside: avoid-column; padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; font-size: .9rem; overflow-wrap: anywhere; }
+  .me-chat .wlog { flex: 1; min-height: 0; margin: 8px 0; overflow-y: auto; overscroll-behavior: contain; }   /* a plain scrolling transcript: it is long, and a wide window must not cut it into columns */
+  .me-chat .turn { display: block; margin: 8px 6px; padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; font-size: .9rem; overflow-wrap: anywhere; }
   .me-chat .turn.user { background: #111; border: 1px solid #333; }
   .me-chat .turn.assistant { background: var(--dim-green); border: 1px solid var(--dim-green-hi); color: var(--ink); }
   .me-chat .turn.failed { border-color: var(--red); }
   .me-chat .turn p { margin: 0 0 6px; }
+  .me-chat .working { color: var(--muted); font-size: .85rem; margin-top: 4px; }
+  .me-chat .working .dots { color: var(--amber); letter-spacing: 2px; animation: breathe 1.2s ease-in-out infinite; }
+  .me-chat .row { display: flex; gap: 6px; align-items: stretch; margin: 0 6px 6px; }
+  .me-chat .row button.item { flex: 1; margin: 0; width: auto; }
+  .me-chat .row.open button.item { border-color: var(--accent); }
+  .me-chat .row button.unpin { flex: none; width: 40px; padding: 0; }
+  .me-chat .convs h4 { margin: 10px 6px 4px; font-size: .74rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
   .me-chat .act { font-size: .74rem; color: var(--muted); margin: 2px 0; font-family: ui-monospace, Consolas, monospace; }
+  .me-chat details.steps { margin: 4px 0; font-size: .74rem; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
+  .me-chat details.steps > summary { cursor: pointer; list-style: none; padding: 2px 0; }
+  .me-chat details.steps > summary::-webkit-details-marker { display: none; }
+  .me-chat details.steps > summary::before { content: "\25B8 "; }
+  .me-chat details.steps[open] > summary::before { content: "\25BE "; }
+  .me-chat details.steps .act { margin: 2px 0 2px 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .me-chat .note { font-size: .78rem; color: var(--amber); margin: 4px 0 0; }
   .me-chat .note.bad { color: var(--red); }
   /* The quiet-link strip sits under the log, not in it: it stays on screen however far the log is scrolled, and
@@ -31,6 +44,13 @@
   .me-chat [hidden] { display: none !important; }        /* the base button style would otherwise show Stop while idle */
   .me-chat .actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .me-chat .actions .send { flex: 1; min-width: 5em; }
+  .me-chat .ps-attach { display: flex; gap: 8px; flex-wrap: wrap; }
+  .me-chat .ps-attach .chip { position: relative; width: 64px; height: 64px; border: 1px solid var(--dim-green-hi); border-radius: 6px; overflow: hidden; background: var(--black); }
+  .me-chat .ps-attach .chip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .me-chat .ps-attach .chip button { position: absolute; top: 0; right: 0; padding: 0 5px; min-width: 0; line-height: 1.2; font-size: .8rem; background: var(--black); color: var(--ink); border: 0; }
+  .me-chat .imgs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .me-chat .imgs img { width: 72px; height: 72px; object-fit: cover; border: 1px solid var(--dim-green-hi); border-radius: 4px; }
+  .me-chat form.drop { outline: 1px dashed var(--accent); }
   .me-chat .actions .vk { position: relative; width: 44px; height: 38px; flex: none; }
   .me-chat .actions .vk .g { width: 20px; height: 20px; }
   /* Projects and conversations: one row under the title. The picker is the open conversation's project (fixed once it
@@ -39,8 +59,8 @@
   .me-chat .ps-bar select { flex: 1; min-width: 9em; }
   .me-chat .ps-bar .notify { font-size: .78rem; color: var(--muted); display: flex; align-items: center; gap: 4px; }
   .me-chat .ps-bar .hint { flex-basis: 100%; font-size: .78rem; color: var(--amber); }
-  .me-chat .convs { flex: 1; min-height: 0; margin: 8px 0; }
-  .me-chat .convs button.item { display: block; width: calc(100% - 12px); margin: 0 6px 6px; text-align: left; padding: 8px 10px; break-inside: avoid-column; }
+  .me-chat .convs { flex: 1; min-height: 0; margin: 8px 0; overflow-y: auto; overscroll-behavior: contain; }
+  .me-chat .convs button.item { display: block; width: calc(100% - 12px); margin: 0 6px 6px; text-align: left; padding: 8px 10px; }
   .me-chat .convs .title { display: block; color: var(--ink); overflow-wrap: anywhere; }
   .me-chat .convs .meta { display: block; font-size: .74rem; color: var(--muted); margin-top: 2px; }
   .me-chat .convs .msg { font-size: .8rem; color: var(--muted); margin: 6px 0; }
@@ -64,11 +84,8 @@
 </style>
 <div class="w me-chat" id="private-skippy" data-ready="{{ 'yes' if workshop_ready else 'no' }}">
   <header>
-    <h3>Skippy · private</h3>
     <span class="pill" id="ps-state" style="--accent: {{ 'var(--green)' if workshop_ready else 'var(--amber)' }}">{{ workshop_model or 'Sonnet 5.5' }}{{ '' if workshop_ready else ' · offline' }}</span>
   </header>
-  <p class="muted" style="margin:4px 0 0">Ask for a change: he edits, tests, pushes, deploys and checks it live.
-    Only you can see this, and it is Sonnet 5.5 (medium effort) all the time.</p>
   {% if not workshop_ready %}
     {% if workshop_reason %}
       {# The bridge said why (home passes its own plain words along). A `backticked` command in it is copyable, like
@@ -80,20 +97,19 @@
     {% endif %}
   {% endif %}
   <div class="ps-bar">
-    <select id="ps-project" aria-label="Project">
+    <select id="ps-project" aria-label="Project" hidden>
       {% for p in workshop_projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
     </select>
     <button type="button" id="ps-convs-btn">Conversations</button>
     {# A Discord DM to the Captain when a run ends (portal/notify.py). Off when the portal has no Discord bot. #}
     <label class="notify"><input type="checkbox" id="ps-notify"{% if workshop_notify and workshop_notify_ready %} checked{% endif %}{% if not workshop_notify_ready %} disabled title="The portal has no Discord bot (DISCORD_BOT_TOKEN)"{% endif %}> Discord me when done</label>
-    <div class="hint" id="ps-project-hint" hidden>New chat: pick its project, then send your first message.</div>
+    <div class="hint" id="ps-project-hint" hidden></div>
   </div>
-  <div class="convs pg" id="ps-convs" hidden><div class="pg-flow">
+  <div class="convs" id="ps-convs" hidden>
     <div class="msg" id="ps-convs-msg" role="status"></div>
     <div id="ps-convs-list"></div>
-  </div></div>
-  <div class="wlog pg" id="ps-log" aria-live="polite"><div class="pg-flow" id="ps-flow"></div></div>
-  <div class="pips" id="ps-pips" hidden><i></i></div>
+  </div>
+  <div class="wlog" id="ps-log" aria-live="polite"><div id="ps-flow"></div></div>
   <div class="quiet" id="ps-quiet" role="status" hidden>
     <div id="ps-quiet-msg"></div>
     <div class="hint" id="ps-quiet-hint" hidden>You can send a new message now; this one will be left waiting.</div>
@@ -103,8 +119,11 @@
     </div>
   </div>
   <form id="ps-form">
-    <textarea id="ps-text" rows="2" maxlength="8000" placeholder="e.g. make the Games tile's pill orange" required></textarea>
+    <div class="ps-attach" id="ps-attach" hidden></div>
+    <textarea id="ps-text" rows="2" maxlength="8000" placeholder="Message Skippy"></textarea>
     <div class="actions">
+      <input type="file" id="ps-file" accept="image/*" multiple hidden>
+      <button type="button" class="key vk" id="ps-img" aria-label="Attach an image" title="Attach an image (or paste or drop one)"><svg class="g" aria-hidden="true"><use href="#g-image"/></svg></button>
       <button type="button" class="key vk mic" id="ps-mic" aria-label="Speak your message" title="Speak your message"><svg class="g" aria-hidden="true"><use href="#g-mic"/></svg><i class="lamp"></i></button>
       <button type="button" class="key vk spk" id="ps-spk" aria-pressed="false" aria-label="Read replies aloud" title="Read replies aloud"><svg class="g" aria-hidden="true"><use href="#g-vol"/></svg><i class="lamp"></i></button>
       <button type="submit" class="send" id="ps-send">Send</button>
@@ -126,6 +145,7 @@
     const convsBtn = root.querySelector("#ps-convs-btn"), convsBox = root.querySelector("#ps-convs");
     const convsMsg = root.querySelector("#ps-convs-msg"), convsList = root.querySelector("#ps-convs-list");
     const notifyBox = root.querySelector("#ps-notify");
+    const attachBox = root.querySelector("#ps-attach"), fileIn = root.querySelector("#ps-file"), imgBtn = root.querySelector("#ps-img");
     const voice = SkippyVoice.attach({gate: "{{ url_for('chat.voice_gate') }}", mic: root.querySelector("#ps-mic"), speaker: root.querySelector("#ps-spk"),
       onText: t => { text.value = (text.value.trim() ? text.value.trim() + " " : "") + t; text.focus(); }});
     const K = {conv: "ps-conv", log: "ps-log", task: "ps-task", project: "ps-project"};
@@ -149,6 +169,12 @@
       del(k) { try { localStorage.removeItem(k); } catch (e) {} },
     };
     const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : ("c" + Date.now().toString(16) + Math.random().toString(16).slice(2, 10)).replace(/[^A-Za-z0-9-]/g, ""));
+    const PINS = "ps-pins";                        // [{conv, title, project}]: this browser's active conversations
+    let pins = []; try { pins = JSON.parse(store.get(PINS) || "[]"); if (!Array.isArray(pins)) pins = []; } catch (e) { pins = []; }
+    const savePins = () => store.set(PINS, JSON.stringify(pins.slice(0, 30)));
+    function pin(c) { pins = pins.filter(x => x.conv !== c.conv); pins.unshift({conv: c.conv, title: String(c.title || "").slice(0, 60), project: c.project}); savePins(); }
+    function unpin(id) { pins = pins.filter(x => x.conv !== id); savePins(); }
+    const fresh = !store.get(K.conv) && !store.get(K.log);       // a browser that has never opened this chat
     let conv = store.get(K.conv) || uuid(); store.set(K.conv, conv);
     let turns = []; try { turns = JSON.parse(store.get(K.log) || "[]"); } catch (e) { turns = []; }
     const known = (id) => PROJECTS.some(p => p.id === id);
@@ -167,29 +193,52 @@
     let sending = false;                           // a message is on its way to the portal
 
     const save = () => store.set(K.log, JSON.stringify(turns.slice(-60)));
+    let liveClock = null;                          // the seconds counter of the turn being worked on
+    const clock = (t0) => { const s = Math.max(0, Math.floor((Date.now() - t0) / 1000)); return s >= 60 ? Math.floor(s / 60) + "m " + String(s % 60).padStart(2, "0") + "s" : s + "s"; };
     function el(tag, cls, txt) { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
     const setText = (node, t) => { if (node.textContent !== t) node.textContent = t; };   // an unchanged note is not re-announced
     const boxes = new WeakMap();                   // turn -> its bubble (kept off the turn, which is saved as JSON)
+    const thumbsOf = new WeakMap();                // turn -> the pictures sent with it (data URLs: not saved, they would fill the browser's storage)
     function draw(turn) {                          // (re)draw one turn's bubble from its data
       let box = boxes.get(turn);
       if (!box) { box = el("div", "turn " + turn.role); boxes.set(turn, box); flow.appendChild(box); }
       box.replaceChildren();
-      if (turn.role === "user") { box.textContent = turn.text; return; }
+      if (turn.role === "user") {
+        box.textContent = turn.text;
+        if (turn.imgs) {                           // thumbnails while this page has them; just a count after a reload
+          const row = el("div", "imgs"), shown = thumbsOf.get(turn) || [];
+          if (shown.length) shown.forEach(u => { const im = el("img"); im.src = u; im.alt = ""; row.appendChild(im); });
+          else row.textContent = "\u25A3 \u00D7 " + turn.imgs;
+          box.appendChild(row);
+        }
+        return;
+      }
+      let steps = null, sum = null, names = [], count = 0;     // a run of tool calls folds into one line; tap it for each command in full
       (turn.parts || []).forEach(p => {
+        if (p.t !== "text" && p.t !== "ship" && p.t !== "image") {
+          if (!steps) { steps = el("details", "steps"); sum = el("summary"); steps.appendChild(sum); box.appendChild(steps); names = []; count = 0; }
+          steps.appendChild(el("div", "act", "› " + p.name + (p.detail ? ": " + p.detail : "")));
+          count++; if (names.indexOf(p.name) < 0) names.push(p.name);
+          sum.textContent = "Ran " + count + (count === 1 ? " command" : " commands");
+          return;
+        }
+        steps = null;
         if (p.t === "text") box.appendChild(el("p", null, p.text));
         else if (p.t === "ship") box.appendChild(shipCard(p));
-        else if (p.t === "image") box.appendChild(shot(p));
-        else box.appendChild(el("div", "act", "› " + p.name + (p.detail ? ": " + p.detail : "")));
+        else box.appendChild(shot(p));
       });
       if (turn.note) box.appendChild(el("div", "note" + (turn.bad ? " bad" : ""), turn.note));
       box.classList.toggle("failed", !!turn.bad);
-      if (!(turn.parts || []).length && !turn.note) box.appendChild(el("div", "act", "…"));
+      if (turn.t0 && !turn.note && ((running && running.turn === turn) || turn.pending)) {     // still being worked on: say so, with a clock
+        const w = el("div", "working"); w.appendChild(el("span", "dots", "\u2022\u2022\u2022")); w.appendChild(el("span", "w", " Working "));
+        liveClock = el("span", "t", clock(turn.t0)); w.appendChild(liveClock); box.appendChild(w);
+      } else if (!(turn.parts || []).length && !turn.note) box.appendChild(el("div", "act", "…"));
     }
-    // The log is pages you flip (Bridge.pager, like Skippy's chat page), and a new turn takes you to the last one.
-    const pager = Bridge.pager(log, {pips: root.querySelector("#ps-pips")}), convsPager = Bridge.pager(root.querySelector("#ps-convs"), {});
-    const scroll = () => { pager.refresh(); pager.last(); };
+    // The log is a plain scrolling transcript: a new turn takes you to the bottom (the latest words), and a conversation you are
+    // reading further up is left where it is while Skippy keeps writing.
+    const scroll = (force) => { if (force || log.scrollHeight - log.scrollTop - log.clientHeight < 160) log.scrollTop = log.scrollHeight; };
     const pane = root.closest(".apane");
-    if (pane) pane.addEventListener("pane-shown", scroll);
+    if (pane) pane.addEventListener("pane-shown", () => scroll(true));
 
     // ── the ship card: Skippy pushed a commit; show it going live (portal/ship.py answers) ─────────────────────
     // One card per commit for the life of the page (a redraw re-uses it), polled every 10 s until the answer is final.
@@ -290,7 +339,11 @@
       checkBtn.disabled = !!job.checking;
       setText(checkBtn, job.checking ? "Checking…" : "Check again");
     }
-    setInterval(() => { if (running) ui(); }, 1000);    // the seconds move on, and Send comes back on time
+    setInterval(() => {
+      if (running) ui();
+      const t0 = running && running.turn && running.turn.t0;
+      if (liveClock && t0) setText(liveClock, clock(t0));
+    }, 1000);    // the seconds move on, and Send comes back on time
 
     function resync(job) {                         // ask skippy-pc to look at this task now (the portal wakes the reporter)
       job.lastResync = Date.now();
@@ -378,25 +431,80 @@
         await nap(job, out.kind ? pollDelay(Date.now() - job.quietSince) : POLL_MS);
       }
       if (running !== job) return;                 // left or reset while it napped: the card is someone else's now
-      running = null; ui(); text.focus();
+      running = null; ui(); text.focus(); draw(job.turn); save();       // the working line goes
       if (!job.turn.bad) voice.say((job.turn.parts || []).filter(p => p.t === "text").map(p => p.text).join(" "));   // aloud, if the speaker key is on
       if (out.resume) resume(out.resume);
     }
 
+    // ── pictures: paste (a screenshot from the clipboard), drop, or pick; each is shrunk to a JPEG here and goes with the message ──
+    const MAX_IMAGES = 4, MAX_EDGE = 1800;
+    let attached = [];                             // [{url: a data URL}]
+    function paintAttached() {
+      attachBox.hidden = !attached.length;
+      attachBox.replaceChildren(...attached.map((a, i) => {
+        const chip = el("div", "chip"), im = el("img"), x = el("button", null, "\u00D7");
+        im.src = a.url; im.alt = ""; x.type = "button"; x.title = "Remove"; x.setAttribute("aria-label", "Remove this image");
+        x.addEventListener("click", () => { attached.splice(i, 1); paintAttached(); });
+        chip.append(im, x); return chip;
+      }));
+    }
+    function shrink(file) {                        // -> a JPEG data URL, at most MAX_EDGE px on a side and about a megabyte
+      return new Promise((ok, no) => {
+        const src = URL.createObjectURL(file), img = new Image();
+        img.onerror = () => { URL.revokeObjectURL(src); no(new Error("not an image")); };
+        img.onload = () => {
+          URL.revokeObjectURL(src);
+          for (const [edge, q] of [[MAX_EDGE, 0.88], [1400, 0.8], [1000, 0.7]]) {
+            const k = Math.min(1, edge / Math.max(img.naturalWidth, img.naturalHeight)), c = document.createElement("canvas");
+            c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
+            const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+            const url = c.toDataURL("image/jpeg", q);
+            if (url.length < 1100000) return ok(url);
+          }
+          no(new Error("too big"));
+        };
+        img.src = src;
+      });
+    }
+    async function addImages(files) {
+      for (const f of files) {
+        if (attached.length >= MAX_IMAGES) break;
+        try { attached.push({url: await shrink(f)}); } catch (e) {}
+      }
+      paintAttached(); text.focus();
+    }
+    text.addEventListener("paste", (e) => {
+      const files = [...((e.clipboardData && e.clipboardData.items) || [])].filter(i => i.kind === "file" && /^image\//.test(i.type)).map(i => i.getAsFile()).filter(Boolean);
+      if (files.length) { e.preventDefault(); addImages(files); }        // text pastes are left alone
+    });
+    const hasFiles = (e) => e.dataTransfer && [...(e.dataTransfer.types || [])].indexOf("Files") >= 0;
+    form.addEventListener("dragover", (e) => { if (hasFiles(e)) { e.preventDefault(); form.classList.add("drop"); } });
+    form.addEventListener("dragleave", () => form.classList.remove("drop"));
+    form.addEventListener("drop", (e) => {
+      form.classList.remove("drop");
+      const files = [...((e.dataTransfer && e.dataTransfer.files) || [])].filter(f => /^image\//.test(f.type));
+      if (files.length) { e.preventDefault(); addImages(files); }
+    });
+    imgBtn.addEventListener("click", () => fileIn.click());
+    fileIn.addEventListener("change", () => { addImages([...fileIn.files]); fileIn.value = ""; });
+
     form.addEventListener("submit", async (ev) => {
       ev.preventDefault();
       const message = text.value.trim();
-      if (!message || sending) return;
+      if ((!message && !attached.length) || sending) return;
       let gone = null;
       if (running) { if (!canLeave(running)) return; gone = leave(running); }
       showConvs(false);
-      const mine = {role: "user", text: message}; turns.push(mine); draw(mine);
-      const reply = {role: "assistant", parts: []}; turns.push(reply); draw(reply); scroll(); lockPicker();
+      const sent = attached.map(a => a.url); attached = []; paintAttached();
+      const mine = {role: "user", text: message || "(image)"}; if (sent.length) { mine.imgs = sent.length; thumbsOf.set(mine, sent); }
+      turns.push(mine); draw(mine);
+      const reply = {role: "assistant", parts: [], t0: Date.now(), pending: true}; turns.push(reply); draw(reply); scroll(true); lockPicker();
+      if (!pins.some(x => x.conv === conv)) { pin({conv, title: message || "(image)", project}); }      // a conversation you are in is pinned until you unpin it
       text.value = ""; sending = true; ui();
       let r;
-      try { r = await call(SEND, {method: "POST", headers: H, body: JSON.stringify({conv, message, project})}); }
+      try { r = await call(SEND, {method: "POST", headers: H, body: JSON.stringify({conv, message, project, images: sent})}); }
       catch (e) { r = {ok: false, data: {error: e.message}}; }
-      sending = false;
+      sending = false; reply.pending = false;
       if (!r.ok) {
         reply.note = (r.data && r.data.error) || "That didn't go through."; reply.bad = true; draw(reply); save(); ui();
         if (gone && r.status === 409) resume(gone);   // the old task is still alive: don't lose sight of it
@@ -436,7 +544,7 @@
     let historyAsk = 0;                            // the newest request: an older answer that arrives late is dropped
     function showConvs(on) {
       convsBox.hidden = !on; log.hidden = on;
-      if (on) convsPager.refresh(); else scroll();
+      if (!on) scroll(true);
       setText(convsBtn, on ? "Back to chat" : "Conversations");
       if (!on) historyAsk++;
     }
@@ -466,15 +574,27 @@
       if (!d || mine !== historyAsk) return;
       const rows = Array.isArray(d.conversations) ? d.conversations : [];
       setText(convsMsg, rows.length ? "Tap one to read it and carry on." : "No conversations yet.");
-      rows.forEach(c => {
+      const byConv = {}; rows.forEach(c => { byConv[c.conv] = c; });
+      const line = (c) => {
         const b = el("button", "item"); b.type = "button";
         b.appendChild(el("span", "title", c.title));
         b.appendChild(el("span", "meta", projectName(c.project) + " · " + c.turns + (c.turns === 1 ? " message" : " messages") +
                                           " · " + (c.last ? ago(c.last) : "") + (c.state === "running" ? " · working now" : "")));
         b.addEventListener("click", () => { openConversation(c); });
-        convsList.appendChild(b);
+        return b;
+      };
+      if (pins.length) convsList.appendChild(el("h4", null, "Active"));
+      pins.forEach(pn => {                         // the ones you are in: tap to switch, \u00D7 when the task is done
+        const c = byConv[pn.conv] || {conv: pn.conv, project: pn.project, title: pn.title, turns: 0, last: 0};
+        const row = el("div", "row" + (pn.conv === conv ? " open" : "")), x = el("button", "unpin", "\u00D7");
+        x.type = "button"; x.title = "Unpin: this task is done"; x.setAttribute("aria-label", "Unpin this conversation");
+        x.addEventListener("click", () => { unpin(pn.conv); listConversations(); });
+        const b = line(Object.assign({}, c, {title: c.title || pn.title}));
+        row.append(b, x); convsList.appendChild(row);
       });
-      convsPager.refresh();
+      const rest = rows.filter(c => !pins.some(pn => pn.conv === c.conv));
+      if (pins.length && rest.length) convsList.appendChild(el("h4", null, "Earlier"));
+      rest.forEach(c => convsList.appendChild(line(c)));
     }
     async function openConversation(c) {
       if (!leaveConversation()) return;
@@ -485,6 +605,7 @@
       if (!d || mine !== historyAsk || !d.conversation) return;
       const got = d.conversation;
       conv = got.conv; store.set(K.conv, conv); setProject(known(got.project) ? got.project : project);
+      pin({conv: got.conv, title: c.title || got.title, project: got.project});
       turns = [];
       (got.turns || []).forEach(t => {
         turns.push({role: "user", text: t.message});
@@ -493,7 +614,7 @@
         reply.task = t.task;
         turns.push(reply);
       });
-      save(); flow.replaceChildren(); turns.forEach(draw); lockPicker(); showConvs(false); scroll();
+      save(); flow.replaceChildren(); turns.forEach(draw); lockPicker(); showConvs(false); scroll(true);
       const last = got.turns && got.turns[got.turns.length - 1];
       if (last && last.state === "running" && last.task) {       // still being worked on: follow it from the start
         const reply = turns[turns.length - 1]; reply.parts = []; draw(reply);
@@ -509,7 +630,18 @@
       if (!r || !r.ok || !r.data || r.data.on !== want) notifyBox.checked = !want;
     });
 
-    turns.forEach(draw); scroll(); lockPicker(); ui();
+    turns.forEach(draw); scroll(true); lockPicker(); ui();
+    // A new browser, window or device has no memory of this chat, but skippy-pc does: open the latest conversation there instead of
+    // starting a blank one beside it (the chat used to look like it kept making new chats). New chat is still the explicit way to start one.
+    async function resumeLatest() {
+      try {
+        const d = await history({});
+        const rows = d && Array.isArray(d.conversations) ? d.conversations : [];
+        if (!rows.length || turns.length || sending || running) return;      // the Captain already started typing here: leave it
+        await openConversation(rows.slice().sort((a, b) => (b.last || 0) - (a.last || 0))[0]);
+      } catch (e) {}
+    }
+    if (fresh) resumeLatest();
     // A reload (or a portal deploy) mid-task: pick the task back up where this page left off.
     const pending = store.get(K.task);
     if (pending && turns.length && turns[turns.length - 1].role === "assistant") {

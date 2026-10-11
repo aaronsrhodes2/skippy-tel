@@ -937,14 +937,14 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         body = request.get_json(silent=True) or {}
         message = str(body.get("message") or "")
         try:
-            task = workshop.send(me(), str(body.get("conv") or ""), message, str(body.get("project") or ""))
+            task = workshop.send(me(), str(body.get("conv") or ""), message, str(body.get("project") or ""), body.get("images"))
         except workshop_mod.Busy as exc:
             return jsonify(error=str(exc)), 409
         except workshop_mod.NotReady as exc:
             return jsonify(error=str(exc)), 503
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
-        print(json.dumps({"event": "workshop", "user": me(), "task": task, "chars": len(message)}), flush=True)  # never the text
+        print(json.dumps({"event": "workshop", "user": me(), "task": task, "chars": len(message), "images": len(body.get("images") or [])}), flush=True)  # never the text
         return jsonify(task=task)
 
     @mine.get("/workshop/events")
