@@ -12,3 +12,11 @@ tailscale funnel --https=10000 --bg 3007       # the internet door (Funnel offer
 tailscale funnel --https=10000 off             # take it off again
 python -m pytest services/voice-gate/tests -q  # in its own session: every gate has a gate.py
 ```
+
+## The voice's polish (RNNoise)
+
+Skippy's cloned voice is noisy by nature (its recording was too), so `/tts` runs it through ffmpeg (`gate.fx_chain_for`): rumble out, RNNoise
+(`arnndn`) and a little warmth. The RNNoise model is one file, `bd.rnnn` from github.com/GregorR/rnnoise-models (300 KB), kept out of the repo:
+put it in `state/voice-lab/models-dl/` (compose mounts that at `/models`). Without it the gate still runs a clean-up-only chain. `VOICE_FX_PASSES=2`
+cleans harder; `VOICE_FX=off` is the raw voice. The lab that measured all this (pauses' noise floor, the "flare", harmonic-to-noise ratio) is
+`state/voice-lab/` (not in git).

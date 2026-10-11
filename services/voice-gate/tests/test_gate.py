@@ -143,9 +143,16 @@ def test_polish_hands_ffmpeg_the_chain_and_never_loses_the_voice():
     assert gate.polish(b"raw", "c", run=missing) == b"raw" and gate.polish(b"raw", "c", run=slow) == b"raw"
 
 
-def test_the_default_chain_is_the_one_that_was_measured():
-    assert "agate=threshold=0.04" in gate.FX_CHAIN and "afftdn" in gate.FX_CHAIN and "highpass=f=70" in gate.FX_CHAIN
-    assert "loudnorm" not in gate.FX_CHAIN and "acompressor" not in gate.FX_CHAIN       # they lifted the noise floor in testing: never again
+def test_the_polish_chain_uses_rnnoise_when_its_model_is_there_and_never_a_gate():
+    with_model = gate.fx_chain_for("/m/bd.rnnn", 1, exists=lambda p: True)
+    assert with_model.count("arnndn=m=/m/bd.rnnn") == 1 and with_model.startswith("highpass=f=70,") and "equalizer=f=140" in with_model
+    assert gate.fx_chain_for("/m/bd.rnnn", 2, exists=lambda p: True).count("arnndn") == 2                      # the stronger setting
+    assert gate.fx_chain_for("/m/bd.rnnn", 9, exists=lambda p: True).count("arnndn") == 2                      # never more than two passes
+    without = gate.fx_chain_for("/m/bd.rnnn", 1, exists=lambda p: False)
+    assert "arnndn" not in without and without.startswith("highpass=f=70")                                    # no model mounted: still safe
+    for chain in (with_model, without):
+        for banned in ("agate", "loudnorm", "acompressor"):                                                     # measured: each made the flare or the floor worse
+            assert banned not in chain
 
 
 def ollama_calls(fake):

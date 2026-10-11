@@ -41,12 +41,24 @@ AUDIO_TYPES = {"audio/webm": ".webm", "audio/ogg": ".ogg", "audio/mp4": ".m4a", 
 MAX_AUDIO = 4 * 1024 * 1024
 MAX_TEXT = 500
 MAX_SUMMARY_IN = 8000
-# Skippy's cloned voice carries its room: in the pauses between words the background sits near -36 dBFS (measured; clean TTS is below
-# -55), which is the "fuzz". The denoiser alone does almost nothing (it is not steady hiss), a gate on the pauses takes it to about -60
-# with the voice's own level untouched. So: rumble out, a little denoise, the gate, then a touch of low warmth and a softer top end for
-# the close, dry, "in the room" feel. Set VOICE_FX=off to hear the voice raw; VOICE_FX_CHAIN replaces the chain.
-FX_CHAIN = ("highpass=f=70,afftdn=nr=30:nf=-52:tn=1,agate=threshold=0.04:ratio=8:attack=6:release=180:knee=2.8,"
-            "equalizer=f=140:t=h:width=140:g=2.5,equalizer=f=9500:t=h:width=2000:g=-3")
+# Skippy's cloned voice is rough and noisy by nature (measured: the harmonic-to-noise ratio is about 3 dB, the same as in the recording it was
+# cloned from; clean speech is 15+), and in the pauses its background sits near -36 dBFS. A GATE on the pauses was tried first and made it
+# worse: the hiss under the voice stood out more when the gate opened (the "flare", 16 dB raw, 34 to 40 dB gated). RNNoise, a neural
+# denoiser run by ffmpeg's arnndn, cleans the voice itself, so nothing pumps: pauses -52 dBFS, flare 17 dB, hiss during speech down
+# 3 to 10 dB. The model (bd.rnnn, GregorR/rnnoise-models) is mounted at /models, not kept in the repo. Without it: only the clean-up EQ.
+# A touch of low warmth and a softer top end give the close, dry "in the room" feel. VOICE_FX=off hears the voice raw.
+FX_MODEL = "/models/bd.rnnn"
+FX_TAIL = ",equalizer=f=140:t=h:width=140:g=2.5,equalizer=f=9500:t=h:width=2000:g=-3"
+
+
+def fx_chain_for(model: str = FX_MODEL, passes: int = 1, exists=os.path.exists) -> str:
+    """The polish chain: rumble out, RNNoise (once or twice) when its model is there, then the warmth. No gate, no compressor, no
+    loudness normaliser: each of them lifted or exposed the noise in testing."""
+    if model and exists(model):
+        return "highpass=f=70," + ",".join([f"arnndn=m={model}"] * max(1, min(2, passes))) + FX_TAIL
+    return "highpass=f=70" + FX_TAIL
+
+
 SUMMARY_PROMPT = (
     "You turn a written chat reply into what a person would SAY out loud to a friend sitting next to them. Keep the key facts, "
     "numbers, names and any question that was asked, in 2 to 4 short sentences, under 60 words in all. Keep the writer's attitude "
@@ -263,4 +275,5 @@ def from_env() -> Flask:
                       os.environ.get("TTS_URL", "http://flask-api:5000").rstrip("/"),
                       ollama_url=os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/"),
                       summary_model=os.environ.get("SUMMARY_MODEL", "qwen2.5:7b"),
-                      fx_chain="" if os.environ.get("VOICE_FX", "on").lower() == "off" else os.environ.get("VOICE_FX_CHAIN", "").strip() or FX_CHAIN)
+                      fx_chain="" if os.environ.get("VOICE_FX", "on").lower() == "off" else os.environ.get("VOICE_FX_CHAIN", "").strip()
+                      or fx_chain_for(os.environ.get("VOICE_FX_MODEL", FX_MODEL), int(os.environ.get("VOICE_FX_PASSES", "1") or 1)))
