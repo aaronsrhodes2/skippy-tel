@@ -4,7 +4,7 @@
 {% block ui %}bridge{% endblock %}
 {% block glyph %}server{% endblock %}
 {% block hud_back %}{{ url_for('dashboard.game', gid=game.id) if game else url_for('admin.index') }}{% endblock %}
-{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge-panes.css') }}">{% endblock %}
 {% block content %}
 {# The logs on the bridge: pages you flip (swipe, PageUp/PageDown, the bar under them), never a scrolled box. #}
 <section class="adm" id="logs">

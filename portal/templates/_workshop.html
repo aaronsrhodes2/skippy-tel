@@ -7,11 +7,11 @@
    going on and for how long, asks skippy-pc to check again by itself (and on the Check again button), brings Send
    back after 30 s, and keeps polling for as long as the page is open. #}
 <style>
-  .me-chat { display: flex; flex-direction: column; position: sticky; top: 12px; height: calc(100vh - 110px); min-height: 440px; }
+  .me-chat { display: flex; flex-direction: column; flex: 1; min-height: 0; margin: 0; }
   .me-chat header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .me-chat header h3 { margin: 0; flex: 1; }
-  .me-chat .wlog { flex: 1; overflow-y: auto; margin: 8px 0; padding-right: 4px; }
-  .me-chat .turn { margin: 8px 0; padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; font-size: .9rem; overflow-wrap: anywhere; }
+  .me-chat .wlog { flex: 1; min-height: 0; margin: 8px 0; }          /* pages (Bridge.pager), never a scrolled box */
+  .me-chat .turn { margin: 8px 6px; break-inside: avoid-column; padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; font-size: .9rem; overflow-wrap: anywhere; }
   .me-chat .turn.user { background: #111; border: 1px solid #333; }
   .me-chat .turn.assistant { background: var(--dim-green); border: 1px solid var(--dim-green-hi); color: var(--ink); }
   .me-chat .turn.failed { border-color: var(--red); }
@@ -27,7 +27,7 @@
   .me-chat .quiet .qbtns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
   .me-chat .quiet button { padding: 5px 12px; font-size: .8rem; }
   .me-chat form { display: flex; flex-direction: column; gap: 6px; }
-  .me-chat textarea { resize: vertical; min-height: 3.2em; max-height: 30vh; }
+  .me-chat textarea { resize: none; height: 3.6em; }
   .me-chat [hidden] { display: none !important; }        /* the base button style would otherwise show Stop while idle */
   .me-chat .actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .me-chat .actions .send { flex: 1; min-width: 5em; }
@@ -37,8 +37,8 @@
   .me-chat .ps-bar select { flex: 1; min-width: 9em; }
   .me-chat .ps-bar .notify { font-size: .78rem; color: var(--muted); display: flex; align-items: center; gap: 4px; }
   .me-chat .ps-bar .hint { flex-basis: 100%; font-size: .78rem; color: var(--amber); }
-  .me-chat .convs { flex: 1; overflow-y: auto; margin: 8px 0; }
-  .me-chat .convs button.item { display: block; width: 100%; text-align: left; margin: 0 0 6px; padding: 8px 10px; }
+  .me-chat .convs { flex: 1; min-height: 0; margin: 8px 0; }
+  .me-chat .convs button.item { display: block; width: calc(100% - 12px); margin: 0 6px 6px; text-align: left; padding: 8px 10px; break-inside: avoid-column; }
   .me-chat .convs .title { display: block; color: var(--ink); overflow-wrap: anywhere; }
   .me-chat .convs .meta { display: block; font-size: .74rem; color: var(--muted); margin-top: 2px; }
   .me-chat .convs .msg { font-size: .8rem; color: var(--muted); margin: 6px 0; }
@@ -59,8 +59,6 @@
   .me-chat .ship .st.failed { color: var(--red); }
   .me-chat .shot { display: block; max-width: 100%; margin-top: 6px; border: 1px solid var(--dim-green-hi); border-radius: 6px; }
   .me-chat .ship .links { display: flex; gap: 12px; flex-wrap: wrap; font-size: .8rem; margin-top: 4px; }
-  /* On a phone the card sits on top of the widgets and must fit above the floating Home button. */
-  @media (max-width: 900px) { .me-chat { position: static; height: auto; min-height: 380px; max-height: calc(100vh - 290px); } .me-chat .wlog { min-height: 140px; } }
 </style>
 <div class="w me-chat" id="private-skippy" data-ready="{{ 'yes' if workshop_ready else 'no' }}">
   <header>
@@ -88,11 +86,12 @@
     <label class="notify"><input type="checkbox" id="ps-notify"{% if workshop_notify and workshop_notify_ready %} checked{% endif %}{% if not workshop_notify_ready %} disabled title="The portal has no Discord bot (DISCORD_BOT_TOKEN)"{% endif %}> Discord me when done</label>
     <div class="hint" id="ps-project-hint" hidden>New chat: pick its project, then send your first message.</div>
   </div>
-  <div class="convs" id="ps-convs" hidden>
+  <div class="convs pg" id="ps-convs" hidden><div class="pg-flow">
     <div class="msg" id="ps-convs-msg" role="status"></div>
     <div id="ps-convs-list"></div>
-  </div>
-  <div class="wlog" id="ps-log" aria-live="polite"></div>
+  </div></div>
+  <div class="wlog pg" id="ps-log" aria-live="polite"><div class="pg-flow" id="ps-flow"></div></div>
+  <div class="pips" id="ps-pips" hidden><i></i></div>
   <div class="quiet" id="ps-quiet" role="status" hidden>
     <div id="ps-quiet-msg"></div>
     <div class="hint" id="ps-quiet-hint" hidden>You can send a new message now; this one will be left waiting.</div>
@@ -113,7 +112,7 @@
 <script>
   (function () {
     const root = document.getElementById("private-skippy");
-    const log = root.querySelector("#ps-log"), form = root.querySelector("#ps-form");
+    const log = root.querySelector("#ps-log"), flow = root.querySelector("#ps-flow"), form = root.querySelector("#ps-form");
     const text = root.querySelector("#ps-text"), send = root.querySelector("#ps-send");
     const stopBtn = root.querySelector("#ps-stop"), newBtn = root.querySelector("#ps-new");
     const strip = root.querySelector("#ps-quiet"), quietMsg = root.querySelector("#ps-quiet-msg");
@@ -167,7 +166,7 @@
     const boxes = new WeakMap();                   // turn -> its bubble (kept off the turn, which is saved as JSON)
     function draw(turn) {                          // (re)draw one turn's bubble from its data
       let box = boxes.get(turn);
-      if (!box) { box = el("div", "turn " + turn.role); boxes.set(turn, box); log.appendChild(box); }
+      if (!box) { box = el("div", "turn " + turn.role); boxes.set(turn, box); flow.appendChild(box); }
       box.replaceChildren();
       if (turn.role === "user") { box.textContent = turn.text; return; }
       (turn.parts || []).forEach(p => {
@@ -180,7 +179,11 @@
       box.classList.toggle("failed", !!turn.bad);
       if (!(turn.parts || []).length && !turn.note) box.appendChild(el("div", "act", "…"));
     }
-    const scroll = () => { log.scrollTop = log.scrollHeight; };
+    // The log is pages you flip (Bridge.pager, like Skippy's chat page), and a new turn takes you to the last one.
+    const pager = Bridge.pager(log, {pips: root.querySelector("#ps-pips")}), convsPager = Bridge.pager(root.querySelector("#ps-convs"), {});
+    const scroll = () => { pager.refresh(); pager.last(); };
+    const pane = root.closest(".apane");
+    if (pane) pane.addEventListener("pane-shown", scroll);
 
     // ── the ship card: Skippy pushed a commit; show it going live (portal/ship.py answers) ─────────────────────
     // One card per commit for the life of the page (a redraw re-uses it), polled every 10 s until the answer is final.
@@ -413,7 +416,7 @@
     reloadBtn.addEventListener("click", () => location.reload());
     function leaveConversation() {                 // no "are you sure": the task keeps going on skippy-pc either way
       const job = running; running = null; if (job && job.wake) job.wake();
-      turns = []; save(); store.del(K.task); log.replaceChildren(); ui();
+      turns = []; save(); store.del(K.task); flow.replaceChildren(); ui();
       return true;
     }
     newBtn.addEventListener("click", () => {       // a new conversation, and the picker asks which project it is for
@@ -426,6 +429,7 @@
     let historyAsk = 0;                            // the newest request: an older answer that arrives late is dropped
     function showConvs(on) {
       convsBox.hidden = !on; log.hidden = on;
+      if (on) convsPager.refresh(); else scroll();
       setText(convsBtn, on ? "Back to chat" : "Conversations");
       if (!on) historyAsk++;
     }
@@ -463,6 +467,7 @@
         b.addEventListener("click", () => { openConversation(c); });
         convsList.appendChild(b);
       });
+      convsPager.refresh();
     }
     async function openConversation(c) {
       if (!leaveConversation()) return;
@@ -481,7 +486,7 @@
         reply.task = t.task;
         turns.push(reply);
       });
-      save(); log.replaceChildren(); turns.forEach(draw); lockPicker(); showConvs(false); scroll();
+      save(); flow.replaceChildren(); turns.forEach(draw); lockPicker(); showConvs(false); scroll();
       const last = got.turns && got.turns[got.turns.length - 1];
       if (last && last.state === "running" && last.task) {       // still being worked on: follow it from the start
         const reply = turns[turns.length - 1]; reply.parts = []; draw(reply);

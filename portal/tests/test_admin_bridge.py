@@ -19,7 +19,7 @@ def test_admin_is_a_bridge_page_with_a_control_for_each_pane(env):
     client, _, _ = env
     login(client, ADMIN)
     page = client.get("/admin").data.decode()
-    assert '<body class="bridge"' in page and 'href="/static/admin.css"' in page and "/static/admin.js" in page
+    assert '<body class="bridge"' in page and 'href="/static/bridge-panes.css"' in page and "/static/bridge-panes.js" in page
     controls = re.findall(r'data-pane="([\w-]+)"', page)
     panes = re.findall(r'<section id="([\w-]+)" class="apane"', page)
     assert controls and sorted(controls) == sorted(panes), (controls, panes)
@@ -40,8 +40,8 @@ def test_the_deck_says_what_needs_the_captain(env):
 
 
 def test_nothing_on_the_admin_pages_scrolls_or_fetches():
-    css = re.sub(r"/\*.*?\*/", "", (STATIC / "admin.css").read_text(encoding="utf-8"), flags=re.S)
-    js = (STATIC / "admin.js").read_text(encoding="utf-8")
+    css = re.sub(r"/\*.*?\*/", "", (STATIC / "bridge-panes.css").read_text(encoding="utf-8"), flags=re.S)
+    js = (STATIC / "bridge-panes.js").read_text(encoding="utf-8")
     assert not re.search(r"overflow(?:-y)?\s*:\s*(?:auto|scroll)", css) and "gradient" not in css
     assert not re.search(r"\b(?:fetch|sendBeacon|XMLHttpRequest|WebSocket)\b|setInterval\s*\(", js)
     assert "Bridge.pager" in js and "sessionStorage" in js                              # pages, and the pane survives a form post
@@ -59,3 +59,19 @@ def test_the_logs_page_is_a_bridge_page(env):
     assert '<body class="bridge"' in page and 'class="pg"' in page and "Bridge.pager" in page
     assert "pre.log {" not in page and "overflow: auto" not in page.split("</head>", 1)[1].split("<body", 1)[0] + page.split('<section class="adm"', 1)[1]   # no scrolled box
     assert "Game containers" in page and "Last boot" in page
+
+
+def test_the_dashboard_is_a_bridge_page_with_the_private_skippy_as_its_first_control(env):
+    client, _, _ = env
+    login(client, ADMIN)
+    page = client.get("/me").data.decode()
+    assert '<body class="bridge"' in page and "/static/bridge-panes.js" in page and 'href="/static/bridge-panes.css"' in page
+    controls = re.findall(r'data-pane="([\w-]+)"', page)
+    panes = re.findall(r'<section id="([\w-]+)" class="apane"', page)
+    assert controls[0] == "skippy" and sorted(controls) == sorted(panes), (controls, panes)
+    assert 'id="skippy" class="apane" data-flat' in page                                 # the chat lays itself out; it is not a flipped page
+    assert page.index('id="private-skippy"') < page.index('id="server" class="apane"')
+    for widget in ("Server", "Core · skippy-tel", "Home · skippy-pc", "Watcher", "Spend (estimate)", "Friends", "Discord, lately", "Experiments", "Home links"):
+        assert f"<h3>{widget}</h3>" in page, widget                                      # every widget is still there
+    assert 'class="pg-flow" id="ps-flow"' in page                                        # the chat's log is pages too
+    assert "overflow-y: auto" not in "".join(re.findall(r"<style>(.*?)</style>", page.split("<body", 1)[1], re.S))

@@ -503,10 +503,12 @@ count on the ones that need the Captain (the server's state, a warning when a ga
 a control opens its pane. A pane is pages you flip (`Bridge.pager`: swipe, PageUp/PageDown, the bar under it), never a scrolled page, and the
 address remembers which pane is open (`/admin#friends`), as does the tab across a form post, so a save lands you back where you were. It is the
 one bridge page that keeps its sentences, because it is where the settings, the friends and the recovery buttons are explained. Every section
-and every form is as it was; only the layout changed. `static/admin.js` only switches panes; `static/admin.css` is the panes' look. A field in
+and every form is as it was; only the layout changed. `static/bridge-panes.js` only switches panes (shared with the Dashboard); `static/bridge-panes.css` is the panes' look. A field in
 a later page flips to its page when focused (`Bridge.pager` keeps the clipped panel from scrolling). The server logs (`/admin/logs`) are pages too.
 
-**On the bridge now:** the launcher, Browser Games (`/play`), Skippy chat, Game Servers, Bilby's Audio Service (`/music`), Nagatha's Video Service (`/video`), Admin (`/admin`, with its Graveyard and the server logs).
+**The Dashboard on the bridge** (`/me`, admin only) uses the same panes as Admin (`static/bridge-panes.js`): a deck of controls, each with a lamp where something may need the Captain (the workshop ready or not, the VM, the core's verdict, whether home is reporting, any watcher warnings), and a control opens its pane. The first is the private Skippy (`_workshop.html`): a `data-flat` pane, because it lays itself out as a chat, with its log and its list of conversations as pages (`Bridge.pager`; a new turn takes you to the last page, and the pane tells the chat when it is shown with a `pane-shown` event). Every other widget (Server, Core, Home, Activity, Watcher, Spend, People, Experiments, Links) is a pane of pages, as it was. The private Skippy's script is tested in node against a fake browser (`test_workshop_ui.py`; its fake now has a `Bridge.pager` stub).
+
+**On the bridge now:** the launcher, Browser Games (`/play`), Skippy chat, Game Servers, Bilby's Audio Service (`/music`), Nagatha's Video Service (`/video`), Admin (`/admin`, with its Graveyard and the server logs), and the Dashboard (`/me`).
 Still the old look, to move in batches: experiments and the demos, the dashboard, request access, privacy.
 
 ## Telemetry: what the portal records, and where it goes

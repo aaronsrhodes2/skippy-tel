@@ -134,7 +134,8 @@ Actions (the sandbox can't reach GCP or run.app directly):
   `PList`: swipe, PageUp/PageDown or drag the bar under it, a letter key for the alphabet; the player is a strip and a row of keys).
   Nagatha's Video Service (a deck of controls, posters a screen at a time, the film over everything, and it waits out a dead zone instead of failing).
   Admin (a deck of controls, each opening a pane of pages you flip; the explanatory sentences stay there, it is the one place that explains settings) and its server logs.
-  **Not yet** (old scrolling look, to migrate in batches): experiments, the dashboard, request access, privacy.
+  The Dashboard (`/me`: a deck with the private Skippy first, which lays itself out as a paged chat, then a pane per widget).
+  **Not yet** (old scrolling look, to migrate in batches): experiments, request access, privacy.
 - Copyable things (the Captain's rule: **one click, everywhere**): anything a person is expected to
   copy (an invite code, `ip:port`, a password, a command, a block to paste) is marked
   `<code class="code">` / `<pre class="copy">` (or `data-copy="text"` on a button), and

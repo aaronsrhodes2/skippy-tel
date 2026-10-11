@@ -3,12 +3,12 @@
 {% block app %}admin{% endblock %}
 {% block ui %}bridge{% endblock %}
 {% block glyph %}gear{% endblock %}
-{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge-panes.css') }}">{% endblock %}
 {% block content %}
 {# Admin on the bridge: the control room. Home is a deck with a control for each job (a lamp or a count where something needs the
    Captain); a control opens its pane, and a pane is pages you flip (swipe, PageUp/PageDown, the bar under it), never a scrolled page.
    Everything each section had is still here, in its pane, with its own words: this is the one place where the sentences stay, because
-   this is where the settings, the friends and the recovery buttons are explained. static/admin.js only switches panes. #}
+   this is where the settings, the friends and the recovery buttons are explained. static/bridge-panes.js only switches panes. #}
 <section class="adm" id="adm">
   <div class="stage" id="astage">
     <div class="deck" id="adeck" style="--rows: {{ 4 if status else 2 }}; --rows-wide: 2; --rows-side: 2">
@@ -230,5 +230,5 @@
     {% endif %}
   </div>
 </section>
-<script src="{{ url_for('static', filename='admin.js') }}"></script>
+<script src="{{ url_for('static', filename='bridge-panes.js') }}"></script>
 {% endblock %}

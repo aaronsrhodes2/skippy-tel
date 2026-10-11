@@ -229,8 +229,8 @@ def test_the_private_skippy_is_the_left_side_of_the_dashboard(env):
     client, _, _ = env
     login(client, ADMIN)
     page = client.get("/me").data.decode()
-    assert page.index('id="private-skippy"') < page.index('class="widgets"')      # the chat comes first: left, or on top on a phone
-    assert 'class="me-layout"' in page and "Skippy · private" in page
+    assert page.index('id="private-skippy"') < page.index('id="server" class="apane"')      # the chat is the first control and pane
+    assert 'data-pane="skippy"' in page and 'id="skippy" class="apane" data-flat' in page and "Skippy · private" in page
     assert "claude-opus-5-5" in page and "Opus all the time" in page
     assert "workshop isn't answering" not in page
 

@@ -1,33 +1,53 @@
 {% extends "base.html" %}
 {% block title %}Your dashboard — Maker Portal{% endblock %}
 {% block app %}dashboard{% endblock %}
-{% block head %}
-<style>
-  main { max-width: 1500px; }
-  /* Left: your private Skippy (templates/_workshop.html). Right: the widgets. A phone gets the chat first, then the widgets. */
-  .me-layout { display: grid; grid-template-columns: minmax(340px, 4fr) 7fr; gap: 14px; align-items: start; }
-  @media (max-width: 900px) { .me-layout { grid-template-columns: 1fr; } }
-  .widgets { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
-  .w { background: #05090b; border: 1px solid #16323a; border-radius: 12px; padding: 14px 16px; }
-  .w h3 { margin: 0 0 8px; color: var(--cyan); font-size: .95rem; text-transform: uppercase; letter-spacing: .05em; }
-  .w table { width: 100%; border-collapse: collapse; font-size: .85rem; }
-  .w td { padding: 3px 0; border-bottom: 1px solid #0e1d22; } .w td:last-child { text-align: right; }
-  .big { font-size: 1.6rem; font-weight: 700; color: #fff; }
-  .muted { color: #6f8b94; font-size: .8rem; }
-  .bar { height: 8px; background: #102026; border-radius: 4px; overflow: hidden; margin: 2px 0 8px; }
-  .bar > div { height: 100%; background: var(--green); } .bar > div.hot { background: var(--amber); }
-  .warn { color: var(--amber); } .msg { font-size: .83rem; margin: 5px 0; } .msg b { color: var(--green); }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  .tools-empty { border: 1px dashed #24444d; border-radius: 12px; padding: 16px; color: #6f8b94; margin-top: 14px; }
-</style>
-{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}gauge{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge-panes.css') }}">{% endblock %}
 {% block content %}
-<section>
-  <h2>Your dashboard</h2>
-  <div class="me-layout">
-  {% include "_workshop.html" %}
-  <div class="widgets">
+{# The Captain's dashboard on the bridge: a deck with a control for each part (a lamp where something may need him), and a control opens
+   its pane. The private Skippy (templates/_workshop.html) is the first control and lays itself out as a chat; every other widget is a
+   pane of pages you flip (static/bridge-panes.js, Bridge.pager), never a scrolled page. Each widget is as it was: only the layout changed. #}
+{% set core_lamp = {'ok': 'on', 'degraded': 'warn', 'unknown': 'idle'}.get(core.verdict, 'off') %}
+{% set home_lamp = 'idle' if not home.paired else ('boot' if home.age is none else ('on' if home.online else 'warn')) %}
+{% set server_lamp = 'off' if not status else ('on' if status.status == 'RUNNING' else ('idle' if status.status == 'TERMINATED' else 'boot')) %}
+{% set units = [
+  ('skippy', 'can', 'Skippy', 'on' if workshop_ready else 'off'),
+  ('server', 'server', 'Server', server_lamp),
+  ('core', 'core', 'Core', core_lamp),
+  ('home', 'link', 'Home', home_lamp),
+  ('activity-pane', 'eye', 'Activity', ''),
+  ('watcher', 'gauge', 'Watcher', 'warn' if warnings else ''),
+  ('spend', 'clock', 'Spend', ''),
+  ('people', 'user', 'People', ''),
+  ('experiments', 'atom', 'Experiments', ''),
+  ('links', 'globe', 'Links', ''),
+] %}
+<section class="adm" id="adm">
+  <div class="stage" id="astage">
+    <div class="deck" id="adeck" style="--rows: {{ (units | length + 1) // 2 }}; --rows-wide: {{ (units | length + 3) // 4 }}; --rows-side: {{ (units | length + 4) // 5 }}">
+      {% for id, glyph, label, lamp in units %}
+        <div class="unit named" {% if lamp %}data-s="{{ lamp }}"{% endif %} style="--i: {{ loop.index0 }}">
+          <i class="plate"></i>
+          <button type="button" class="hit" data-pane="{{ id }}" aria-label="{{ label }}" title="{{ label }}"></button>
+          <i class="claws"><b></b><b></b><b></b></i>
+          {% if lamp %}<span class="lamp"></span>{% endif %}
+          <svg class="g" aria-hidden="true"><use href="#g-{{ glyph }}"/></svg>
+          <span class="name">{{ label }}</span>
+        </div>
+      {% endfor %}
+    </div>
 
+    <section id="skippy" class="apane" data-flat hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-can"/></svg><span class="title">Skippy</span></header>
+      {% include "_workshop.html" %}
+    </section>
+
+    <section id="server" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-server"/></svg><span class="title">Server</span></header>
+      <div class="pg"><div class="pg-flow">
     <div class="w">
       <h3>Server</h3>
       {% if not status %}<p class="error">Couldn't reach the VM: {{ error }}</p>{% else %}
@@ -48,7 +68,14 @@
         </div>
       {% endif %}
     </div>
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
 
+    <section id="core" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-core"/></svg><span class="title">Core</span></header>
+      <div class="pg"><div class="pg-flow">
     <div class="w">
       <h3>Core · skippy-tel</h3>
       {% if core.verdict == 'unknown' %}
@@ -69,7 +96,14 @@
         </details>
       {% endif %}
     </div>
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
 
+    <section id="home" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-link"/></svg><span class="title">Home</span></header>
+      <div class="pg"><div class="pg-flow">
     <div class="w">
       <h3>Home · skippy-pc</h3>
       {% if not home.paired %}
@@ -104,16 +138,37 @@
           <button type="submit" style="padding:3px 10px" title="Makes a new token; the old one stops working">Re-pair</button></form>
       {% endif %}
     </div>
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
 
+    <section id="activity-pane" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-eye"/></svg><span class="title">Activity</span></header>
+      <div class="pg"><div class="pg-flow">
     {% include "_activity.html" %}
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
 
+    <section id="watcher" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-gauge"/></svg><span class="title">Watcher</span></header>
+      <div class="pg"><div class="pg-flow">
     <div class="w">
       <h3>Watcher</h3>
       {% if warnings %}{% for w in warnings %}<p class="warn">⚠ {{ w }}</p>{% endfor %}
       {% else %}<p>All quiet. <span class="muted">Memory, disk, crashes and blocked starts show here when
         they need attention.</span></p>{% endif %}
     </div>
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
 
+    <section id="spend" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-clock"/></svg><span class="title">Spend</span></header>
+      <div class="pg"><div class="pg-flow">
     <div class="w">
       <h3>Spend (estimate)</h3>
       {% set avg = spend.months.average %}{% set mx = spend.months.max %}
@@ -123,7 +178,14 @@
         Always-on would be ~${{ '%.0f' % spend.always_on_total }}. Real numbers arrive with the billing export
         and an Anthropic Admin key.</p>
     </div>
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
 
+    <section id="people" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-user"/></svg><span class="title">People</span></header>
+      <div class="pg"><div class="pg-flow">
     <div class="w">
       <h3>Friends</h3>
       {% if friends %}<table>{% for email, info in friends %}<tr><td>{{ email }}</td>
@@ -137,7 +199,14 @@
       {% for m in chatter %}<p class="msg"><b>{{ m.author }}</b> <span class="muted">#{{ m.game }}</span> {{ m.text or (m.extra | join(' · ')) }}</p>
       {% else %}<p class="muted">Nothing recent{% if not discord_ready %} (Discord bot not configured){% endif %}.</p>{% endfor %}
     </div>
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
 
+    <section id="experiments" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-atom"/></svg><span class="title">Experiments</span></header>
+      <div class="pg"><div class="pg-flow">
     <div class="w">
       <h3>Experiments</h3>
       <p class="muted">Mentat: {% if mentat_tools is not none %}<span style="color:var(--green)">live, {{ mentat_tools }} tools</span>
@@ -151,7 +220,14 @@
       {% endfor %}
       <p><a href="{{ url_for('experiments.index') }}">View public page &rarr;</a></p>
     </div>
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
 
+    <section id="links" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-globe"/></svg><span class="title">Links</span></header>
+      <div class="pg"><div class="pg-flow">
     <div class="w">
       <h3>Home links</h3>
       <p class="muted">Only reachable from your own devices on the mesh (Tailscale), so they live here, not on the friends' pages.</p>
@@ -163,9 +239,12 @@
       <p class="muted">Today's events and unread mail land here once the portal is bridged to skippy-tel-core
         (they stay admin-only in tool_policy.py).</p>
     </div>
-  </div>
-  </div>{# .me-layout #}
 
-  <div class="tools-empty">Your tools go here. Tell Skippy what you want and it becomes a widget.</div>
+    <div class="tools-empty">Your tools go here. Tell Skippy what you want and it becomes a widget.</div>
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
+  </div>
 </section>
+<script src="{{ url_for('static', filename='bridge-panes.js') }}"></script>
 {% endblock %}

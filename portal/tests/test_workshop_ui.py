@@ -96,12 +96,13 @@ def test_the_quiet_strip_sits_between_the_log_and_the_form_not_inside_the_live_l
     assert log < quiet < form
     assert re.search(r'id="ps-quiet"[^>]*\bhidden\b', html)                       # hidden until the link goes quiet
     assert re.search(r'id="ps-stop" hidden', html) and re.search(r'id="ps-reload" hidden', html)
-    assert html[log:quiet].count("</div>") == 1                                   # the log div closes before the strip opens
+    assert html[log:quiet].count("</div>") == 3                                   # the log div (its page flow inside it) and the page bar close before the strip opens
 
 
 def test_it_keeps_the_phone_layout_and_the_existing_look(page):
     css = next(s for s in re.findall(r"<style>(.*?)</style>", page, re.S) if ".me-chat" in s)
-    assert "@media (max-width: 900px)" in css and "flex-wrap: wrap" in css          # the buttons wrap instead of overflowing
+    assert "flex-wrap: wrap" in css                                                 # the buttons wrap instead of overflowing
+    assert ".me-chat .wlog { flex: 1; min-height: 0" in css and "overflow-y: auto" not in css    # the log is pages (Bridge.pager), never a scrolled box
     used = set(re.findall(r"var\((--[\w-]+)\)", css))
     defined = set(re.findall(r"(--[\w-]+)\s*:", page))                               # base.html's palette
     assert used and used <= defined, used - defined                                  # existing variables only
@@ -152,11 +153,12 @@ class El {
   requestSubmit() { return this.fire("submit"); }
 }
 const els = {};
-for (const id of ["ps-log", "ps-form", "ps-text", "ps-send", "ps-stop", "ps-new", "ps-quiet", "ps-quiet-msg", "ps-quiet-hint", "ps-check", "ps-reload",
+for (const id of ["ps-log", "ps-flow", "ps-pips", "ps-form", "ps-text", "ps-send", "ps-stop", "ps-new", "ps-quiet", "ps-quiet-msg", "ps-quiet-hint", "ps-check", "ps-reload",
                   "ps-project", "ps-project-hint", "ps-convs-btn", "ps-convs", "ps-convs-msg", "ps-convs-list", "ps-notify"]) els[id] = new El("x");
 els["ps-notify"].checked = true;
 for (const id of ["ps-stop", "ps-quiet", "ps-quiet-hint", "ps-reload", "ps-project-hint", "ps-convs"]) els[id].hidden = true;
-const root = {querySelector(sel) { const e = els[sel.slice(1)]; if (!e) throw new Error("the script looked up " + sel + ", which the markup lacks"); return e; }};
+const Bridge = {pager: () => ({refresh() {}, last() {}, go() {}, page() { return 0; }, pages() { return 1; }})};   // the page flips are the bridge's, not under test here
+const root = {closest: () => null, querySelector(sel) { const e = els[sel.slice(1)]; if (!e) throw new Error("the script looked up " + sel + ", which the markup lacks"); return e; }};
 const document = {getElementById: (id) => { if (id !== "private-skippy") throw new Error("unexpected id " + id); return root; },
                   createElement: (tag) => new El(tag)};
 const storage = new Map(Object.entries(input.storage || {}));
@@ -246,7 +248,7 @@ function snap() {
     t: now - START, strip: !e["ps-quiet"].hidden, msg: e["ps-quiet-msg"].textContent, hint: !e["ps-quiet-hint"].hidden,
     reload: !e["ps-reload"].hidden, bad: e["ps-quiet"].cls.has("bad"), sendDisabled: e["ps-send"].disabled,
     stopShown: !e["ps-stop"].hidden, checkDisabled: e["ps-check"].disabled, checkText: e["ps-check"].textContent,
-    log: e["ps-log"].children.map(b => ({cls: b.className + (b.cls.has("failed") ? " failed" : ""), text: b.textContent})),
+    log: e["ps-flow"].children.map(b => ({cls: b.className + (b.cls.has("failed") ? " failed" : ""), text: b.textContent})),
     task: storage.has("ps-task") ? JSON.parse(storage.get("ps-task")) : null, focused: e["ps-text"].focused,
     resyncs: calls.filter(c => c.route === "resync").length, text: e["ps-text"].value,
     project: e["ps-project"].value, pickerLocked: e["ps-project"].disabled, pickHint: !e["ps-project-hint"].hidden,
@@ -259,16 +261,16 @@ function snap() {
         out.push({cls: node.className, text: node.textContent, links});
       } else (node.children || []).forEach(c => find(c, out));
       return out;
-    })(e["ps-log"], []),
+    })(e["ps-flow"], []),
     shipPolls: calls.filter(c => c.route === "ship").length, notify: e["ps-notify"].checked,
-    imgs: (function walk(n, out) { if (n.tag === "img") out.push({src: n.src, alt: n.alt}); (n.children || []).forEach(c => walk(c, out)); return out; })(e["ps-log"], []),
+    imgs: (function walk(n, out) { if (n.tag === "img") out.push({src: n.src, alt: n.alt}); (n.children || []).forEach(c => walk(c, out)); return out; })(e["ps-flow"], []),
   };
 }
 
 (async () => {
   new Function("document", "localStorage", "crypto", "fetch", "setTimeout", "clearTimeout", "setInterval", "confirm",
-               "AbortController", "Date", "location", input.script)(
-    document, localStorage, crypto, fakeFetch, fakeSetTimeout, fakeClearTimeout, fakeSetInterval, confirm, FakeAbort, FakeDate, location);
+               "AbortController", "Date", "location", "Bridge", input.script)(
+    document, localStorage, crypto, fakeFetch, fakeSetTimeout, fakeClearTimeout, fakeSetInterval, confirm, FakeAbort, FakeDate, location, Bridge);
   await settle();
   const snaps = {};
   for (const s of input.steps) {
