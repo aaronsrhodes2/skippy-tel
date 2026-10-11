@@ -75,3 +75,18 @@ def test_the_dashboard_is_a_bridge_page_with_the_private_skippy_as_its_first_con
         assert f"<h3>{widget}</h3>" in page, widget                                      # every widget is still there
     assert 'class="pg-flow" id="ps-flow"' in page                                        # the chat's log is pages too
     assert "overflow-y: auto" not in "".join(re.findall(r"<style>(.*?)</style>", page.split("<body", 1)[1], re.S))
+
+
+def test_the_experiments_inventory_is_a_public_bridge_page_of_tiles_shown_a_screen_at_a_time(env):
+    client, _, _ = env
+    page = client.get("/experiments").data.decode()                                      # signed out: it is public
+    assert '<body class="bridge"' in page and 'href="/static/experiments.css"' in page and "Bridge.PList" in page
+    assert 'aria-label="Sign in"' in page                                                # the strip says how to sign in
+    for need in ('id="find"', 'id="kind-key"', 'id="scrub"', 'id="about"'):
+        assert need in page, need
+    assert len(re.findall(r'<a class="tile( featured)?"', page)) == 5 and "data-tel=\"demo:nbody\"" in page    # the tiles are the page's data and its tap beacons
+    glyphs = set(re.findall(r'<symbol id="g-([\w-]+)"', (PORTAL / "templates" / "_glyphs.html").read_text(encoding="utf-8")))
+    drawn = set(re.findall(r'(?:live|recorded|results|tool|local): "(\w+)"', page)) | {"tools", "atom", "info", "search", "x"}
+    assert drawn <= glyphs, drawn - glyphs                                               # every kind has a drawn glyph
+    css = re.sub(r"/\*.*?\*/", "", (STATIC / "experiments.css").read_text(encoding="utf-8"), flags=re.S)
+    assert not re.search(r"overflow(?:-y)?\s*:\s*(?:auto|scroll)", css) and "gradient" not in css

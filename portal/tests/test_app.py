@@ -1,5 +1,6 @@
 """Flask app tests with a fake VM and a fake Claude. Need the real Flask +
 Authlib (installed in CI); skipped where they aren't installed."""
+import html
 import json
 
 import pytest
@@ -1767,7 +1768,8 @@ def test_the_inventory_highlights_the_demos_and_lists_everything_else(env):
         assert title in page, title
     assert "Weapon vs. Armor" not in page                                         # it moved to Browser Games
     assert 'id="find"' in page and 'aria-label="Filter by kind"' in page       # search + kind filters
-    assert page.count('class="chip"') == 5                                        # All + the four kinds that exist
+    assert json.loads(html.unescape(re.search(r"data-kinds='([^']*)'", page).group(1))).__len__() == 4   # the four kinds that exist (the key steps All, then these)
+    assert 'id="kind-key"' in page
     assert len(re.findall(r'<a class="tile( featured)?"', page)) == 5            # every experiment is one tile: no duplicates
     assert "Coming next" not in page                                              # the three it promised are here now
 
@@ -1930,13 +1932,15 @@ def test_the_result_figures_are_served_as_static_files(env):
 
 
 def test_kinds_only_appear_as_filters_when_something_has_them(env):
+    import re
     client, vm, _ = env
     login(client, ADMIN)
     for slug in ("mentat", "benchmark", "radiance"):                                # hide the tool, results and recorded ones
         client.post("/me/experiments", data={"slug": slug})
     client.get("/logout")
     page = client.get("/experiments").data.decode()
-    assert 'data-kind="tool"' not in page.split('id="kinds"')[1].split("</div>")[0]  # no "Tools" chip with nothing behind it
+    kinds = json.loads(html.unescape(re.search(r"data-kinds='([^']*)'", page).group(1)))
+    assert "tool" not in kinds and "live" in kinds                                  # no "Tools" kind to step to with nothing behind it
     assert "Live in your browser" in page
 
 

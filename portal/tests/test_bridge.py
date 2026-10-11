@@ -112,8 +112,8 @@ def test_the_bridge_script_makes_no_network_calls():
 def test_a_page_not_on_the_bridge_is_untouched(env):
     client, _, _ = env
     login(client, ADMIN)
-    page = client.get("/experiments").data.decode()
-    assert "bridge.css" not in page and 'class="bridge"' not in page and 'class="appbar"' in page
+    page = client.get("/privacy").data.decode()                                 # (the last pages still on the old look)
+    assert "bridge.css" not in page and 'class="bridge"' not in page
 
 
 # ── the Graveyard ──────────────────────────────────────────────────────────────────────────────────────────────

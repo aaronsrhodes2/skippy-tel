@@ -508,8 +508,8 @@ a later page flips to its page when focused (`Bridge.pager` keeps the clipped pa
 
 **The Dashboard on the bridge** (`/me`, admin only) uses the same panes as Admin (`static/bridge-panes.js`): a deck of controls, each with a lamp where something may need the Captain (the workshop ready or not, the VM, the core's verdict, whether home is reporting, any watcher warnings), and a control opens its pane. The first is the private Skippy (`_workshop.html`): a `data-flat` pane, because it lays itself out as a chat, with its log and its list of conversations as pages (`Bridge.pager`; a new turn takes you to the last page, and the pane tells the chat when it is shown with a `pane-shown` event). Every other widget (Server, Core, Home, Activity, Watcher, Spend, People, Experiments, Links) is a pane of pages, as it was. The private Skippy's script is tested in node against a fake browser (`test_workshop_ui.py`; its fake now has a `Bridge.pager` stub).
 
-**On the bridge now:** the launcher, Browser Games (`/play`), Skippy chat, Game Servers, Bilby's Audio Service (`/music`), Nagatha's Video Service (`/video`), Admin (`/admin`, with its Graveyard and the server logs), and the Dashboard (`/me`).
-Still the old look, to move in batches: experiments and the demos, the dashboard, request access, privacy.
+**On the bridge now:** the launcher, Browser Games (`/play`), Skippy chat, Game Servers, Bilby's Audio Service (`/music`), Nagatha's Video Service (`/video`), Admin (`/admin`, with its Graveyard and the server logs), the Dashboard (`/me`), and the Experiments inventory (`/experiments`, public: tiles as rows shown a screen at a time with `Bridge.PList`, a key that steps through the kinds, search, and an about panel; the tiles are rendered hidden as the page's data so a tap is still a `data-tel` tile tap).
+Still the old look, to move in batches: the demo pages themselves, request access, privacy.
 
 ## Telemetry: what the portal records, and where it goes
 

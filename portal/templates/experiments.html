@@ -1,55 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Experiments — Aaron Rhodes{% endblock %}
 {% block app %}experiments{% endblock %}
-{% block mainclass %}wide{% endblock %}
-{% block head %}
-<style>
-  .hero { padding: 26px 22px; border-radius: var(--radius-lg); border: 1px solid var(--accent); margin-bottom: 22px;
-          background: radial-gradient(circle at 85% 15%, color-mix(in srgb, var(--accent) 35%, transparent), transparent 55%), var(--panel); }
-  .hero h1 { font-size: 2rem; color: var(--white); flex: none; }
-  .hero .by { color: var(--accent); margin: 4px 0 14px; }
-  .hero p { color: var(--ink); max-width: 720px; line-height: 1.55; }
-  .stats { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
-  .stat { padding: 8px 14px; border-radius: 10px; background: rgba(255,255,255,.05); border: 1px solid var(--line); }
-  .stat b { display: block; font-size: 1.3rem; color: var(--white); }
-  .stat span { font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
-  .find { display: grid; gap: 10px; margin-bottom: 18px; }
-  .tiles.roomy { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
-  .tiles.roomy .tile p { -webkit-line-clamp: 5; }
-  .tile[hidden] { display: none; }
-  .headline { margin-top: 22px; padding: 16px 18px; border-radius: 12px; border: 1px solid #1f4d3b; background: #04120c; }
-  .headline b { color: var(--green); }
-  .empty { color: var(--muted); }
-</style>
-{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}atom{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='experiments.css') }}">{% endblock %}
 {% block content %}
-{% if missing %}<p class="error">{{ missing }} isn't bundled in this build yet.</p>{% endif %}
-<section class="hero">
-  <h1>Experiments</h1>
-  <p class="by">Aaron Rhodes · things built after dark</p>
-  <p><b>sigma-ground</b> is a physics engine written from the ground up in Python: it resolves matter from
-    materials down to quarks, runs dynamics from falling feathers to N-body orbits, renders its own
-    simulations, and exposes all of it to AI assistants as <b>Mentat</b>, a tool server that goes
-    head to head with Wolfram Alpha. Every simulation and demonstration is in one place below.</p>
-  <div class="stats">
-    <div class="stat"><b>~158k</b><span>lines of Python</span></div>
-    <div class="stat"><b>4,670</b><span>tests</span></div>
-    <div class="stat"><b>~220</b><span>live tools</span></div>
-    <div class="stat"><b>42</b><span>recorded simulations</span></div>
-    {% if bench.main %}<div class="stat"><b>{{ bench.main[0].pct }}%</b><span>benchmark accuracy</span></div>{% endif %}
-  </div>
-</section>
-
-<div class="find">
-  <input type="search" id="find" placeholder="Search {{ experiments|length }} experiments (try: quantum, orbit, game, WebGL)" aria-label="Search experiments" autocomplete="off">
-  <div class="row" id="kinds" role="group" aria-label="Filter by kind">
-    <button type="button" class="chip" data-kind="" aria-pressed="true">All</button>
-    {% for key, label in kinds.items() if key in present %}
-      <button type="button" class="chip" data-kind="{{ key }}" aria-pressed="false">{{ label }}</button>
-    {% endfor %}
-  </div>
-</div>
-
+{# The experiments on the bridge (public: a signed-out visitor sees it too). One screen, never scrolled: the inventory is tiles shown a
+   screen at a time (swipe, PageUp/PageDown, the bar under them), a search, a key that steps through the kinds, and an info panel with
+   what the experiments are. The tiles are rendered here, hidden, as the page's data (and for anyone without script): static script
+   below builds the visible rows from them, so a tap on one is still a tile tap (data-tel) for the usage beacon. #}
+{% if missing %}<p class="error" style="margin:4px 0">{{ missing }} isn't bundled in this build yet.</p>{% endif %}
 {% set featured = experiments | selectattr('featured') | list %}
 {% set others = experiments | rejectattr('featured') | list %}
 {% macro tile(x, big) %}
@@ -57,53 +17,142 @@
      data-text="{{ (x.title ~ ' ' ~ x.blurb ~ ' ' ~ (x.tags | join(' ')) ~ ' ' ~ kinds[x.kind]) | lower }}"
      href="{{ url_for(x.endpoint) if x.endpoint else x.source }}">
     <span class="pill">{{ kinds[x.kind] }}</span>
-    <span class="icon">{{ x.icon }}</span>
     <h3>{{ x.title }}</h3>
     <p>{{ x.blurb }}</p>
   </a>
 {% endmacro %}
-
-{% if featured %}
-<section>
-  <h2>Highlights</h2>
-  <div class="tiles roomy">{% for x in featured %}{{ tile(x, True) }}{% endfor %}</div>
-</section>
-{% endif %}
-<section>
-  <h2>{{ 'Everything else' if featured else 'All experiments' }}</h2>
-  <div class="tiles roomy">{% for x in others %}{{ tile(x, False) }}{% endfor %}</div>
-  <p class="empty" id="none" hidden>Nothing matches that. Clear the search or pick "All".</p>
-</section>
-
-{% if bench.main|length >= 2 %}
-  <div class="headline">
-    On a 150-question physics benchmark, a small local model using Mentat's tools scored
-    <b>{{ bench.main[0].pct }}%</b>{% for r in bench.main[1:] %}; {{ r.label }} {{ r.pct }}%{% endfor %}.
-    <a href="{{ url_for('experiments.benchmark') }}">See the breakdown &rarr;</a>
+<section class="xp bp" id="xp" data-kinds='{{ present | list | tojson }}'>
+  <div class="bp-top" id="top">
+    <div class="search">
+      <svg class="g" aria-hidden="true"><use href="#g-search"/></svg>
+      <input type="search" id="find" placeholder="Search" aria-label="Search {{ experiments|length }} experiments (try: quantum, orbit, game, WebGL)" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <button type="button" class="clear" id="find-clear" data-act="clear" aria-label="Clear search" title="Clear search" hidden><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
+    </div>
+    {# The kinds, one at a time: All, then each kind that has something in it. The glyph says which. #}
+    <div id="kinds" role="group" aria-label="Filter by kind" style="display:contents">
+      <button type="button" class="key" id="kind-key" data-act="kind" aria-label="Kind: All" title="Kind: All"><svg class="g" aria-hidden="true"><use href="#g-tools"/></svg></button>
+    </div>
+    <button type="button" class="key" data-act="about" aria-label="About these experiments" title="About"><svg class="g" aria-hidden="true"><use href="#g-info"/></svg></button>
   </div>
-{% endif %}
 
+  <div class="bp-stage" id="stage">
+    <div class="bp-list" id="listwrap">
+      <div class="bp-page" id="scroll" tabindex="-1"><div class="vl-host" id="host" role="list"></div></div>
+      <div class="scrub" id="scrub" role="slider" aria-label="Page" aria-valuemin="1" aria-valuemax="1" aria-valuenow="1" tabindex="0">
+        <div class="pips" id="pips"><i></i></div><span class="pgno" id="pgno"></span>
+      </div>
+    </div>
+
+    <div class="sheet" id="about" role="dialog" aria-modal="true" aria-labelledby="about-h" hidden>
+      <div class="s-head"><h2 id="about-h" class="grow">Experiments</h2>
+        <button type="button" class="key" data-act="about" aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></div>
+      <div class="pg" id="about-pg"><div class="pg-flow">
+        <p class="by">Aaron Rhodes · things built after dark</p>
+        <p><b>sigma-ground</b> is a physics engine written from the ground up in Python: it resolves matter from
+          materials down to quarks, runs dynamics from falling feathers to N-body orbits, renders its own
+          simulations, and exposes all of it to AI assistants as <b>Mentat</b>, a tool server that goes
+          head to head with Wolfram Alpha. Every simulation and demonstration is in one place here.</p>
+        <div class="stats">
+          <div class="stat"><b>~158k</b><span>lines of Python</span></div>
+          <div class="stat"><b>4,670</b><span>tests</span></div>
+          <div class="stat"><b>~220</b><span>live tools</span></div>
+          <div class="stat"><b>42</b><span>recorded simulations</span></div>
+          {% if bench.main %}<div class="stat"><b>{{ bench.main[0].pct }}%</b><span>benchmark accuracy</span></div>{% endif %}
+        </div>
+        {% if bench.main|length >= 2 %}
+          <div class="headline">
+            On a 150-question physics benchmark, a small local model using Mentat's tools scored
+            <b>{{ bench.main[0].pct }}%</b>{% for r in bench.main[1:] %}; {{ r.label }} {{ r.pct }}%{% endfor %}.
+            <a href="{{ url_for('experiments.benchmark') }}">See the breakdown &rarr;</a>
+          </div>
+        {% endif %}
+      </div></div>
+      <div class="pips" id="about-pips" hidden><i></i></div>
+    </div>
+  </div>
+
+  <div id="tiles" hidden>
+    {% for x in featured %}{{ tile(x, True) }}{% endfor %}
+    {% for x in others %}{{ tile(x, False) }}{% endfor %}
+  </div>
+  <p class="sr" id="none" hidden>Nothing matches that. Clear the search or pick "All".</p>
+</section>
 <script>
-  // Client-side filter: the whole inventory is on the page, so this is instant and needs no server.
   (function () {
-    const box = document.getElementById("find"), chips = document.querySelectorAll("#kinds .chip");
-    const tiles = [...document.querySelectorAll(".tiles .tile")], none = document.getElementById("none");
-    let kind = "";
-    function apply() {
-      const q = box.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-      let shown = 0;
-      tiles.forEach(t => {
-        const ok = (!kind || t.dataset.kind === kind) && q.every(w => t.dataset.text.includes(w));
-        t.hidden = !ok; if (ok) shown++;
-      });
-      none.hidden = shown > 0;
+    "use strict";
+    var root = document.getElementById("xp"), box = document.getElementById("find"), clear = document.getElementById("find-clear");
+    var kindKey = document.getElementById("kind-key"), about = document.getElementById("about");
+    var src = Array.prototype.slice.call(document.querySelectorAll("#tiles .tile"));
+    var KINDS = ["" ].concat(JSON.parse(root.dataset.kinds || "[]"));
+    var GLYPH = { "": "tools", live: "lens", recorded: "rec", results: "gauge", tool: "tools", local: "console" };
+    var kind = "", q = "";
+    var svg = function (g) { return '<svg class="g" aria-hidden="true"><use href="#g-' + g + '"/></svg>'; };
+    var el = function (tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+
+    var list = new Bridge.PList(document.getElementById("scroll"), document.getElementById("host"), {}, { pips: document.getElementById("pips"), pgno: document.getElementById("pgno"), scrub: document.getElementById("scrub") });
+    list.makers.title = {
+      make: function () { var e = el("div", "vrow vtitle"); e._g = el("span", "gl"); e._c = el("span", "count"); e.append(e._g, e._c); return e; },
+      bind: function (e, r) { e._g.innerHTML = svg(r.glyph); e._c.textContent = r.count; },
+    };
+    list.makers.msg = {
+      make: function () { var e = el("div", "vrow vmsg"); e._g = el("span", "gl"); e._t = el("span"); e.append(e._g, e._t); return e; },
+      bind: function (e, r) { e._g.innerHTML = svg("search"); e._t.textContent = r.text; },
+    };
+    // one experiment: its kind's glyph, the title, two lines of what it is. A tap is a tile tap for the usage beacon (data-tel).
+    list.makers.tile = {
+      make: function () {
+        var a = el("a", "vrow xrow"), t = el("span", "txt"), h = el("span", "l1"), p = el("span", "l2");
+        a._g = el("span", "gl"); a._h = h; a._p = p; a._lamp = el("span", "lamp");
+        t.append(h, p); a.append(a._g, t, a._lamp);
+        return a;
+      },
+      bind: function (a, r) {
+        var s = r.src;
+        a.href = s.getAttribute("href"); a.setAttribute("data-tel", s.getAttribute("data-tel")); a.setAttribute("role", "listitem");
+        var label = s.querySelector(".pill").textContent;
+        a.title = label; a.setAttribute("aria-label", s.querySelector("h3").textContent + ", " + label);
+        a._g.innerHTML = svg(GLYPH[s.dataset.kind] || "tools");
+        a._h.textContent = s.querySelector("h3").textContent; a._p.textContent = s.querySelector("p").textContent;
+        a._lamp.dataset.s = s.classList.contains("featured") ? "on" : "";
+        a.classList.toggle("featured", s.classList.contains("featured"));
+      },
+    };
+
+    function render(keepPage) {
+      var words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      var shown = src.filter(function (t) { return (!kind || t.dataset.kind === kind) && words.every(function (w) { return t.dataset.text.indexOf(w) >= 0; }); });
+      var h = Math.round(parseFloat(getComputedStyle(root).getPropertyValue("--xrow")) || 84);
+      var rows = [{ type: "title", h: 52, glyph: GLYPH[kind] || "atom", count: String(shown.length), glue: true }];
+      shown.forEach(function (s) { rows.push({ type: "tile", h: h, src: s }); });
+      if (!shown.length) rows.push({ type: "msg", h: 90, text: document.getElementById("none").textContent });
+      list.setRows(rows, keepPage ? list.page : 0);
     }
-    box.addEventListener("input", apply);
-    chips.forEach(c => c.addEventListener("click", () => {
-      kind = c.dataset.kind;
-      chips.forEach(x => x.setAttribute("aria-pressed", x === c ? "true" : "false"));
-      apply();
-    }));
+    function setKind(k) {
+      kind = k;
+      var label = k ? (document.querySelector('#tiles .tile[data-kind="' + k + '"] .pill') || {}).textContent : "All";
+      kindKey.innerHTML = svg(GLYPH[k] || "tools");
+      kindKey.setAttribute("aria-label", "Kind: " + label); kindKey.title = "Kind: " + label;
+      render(false);
+    }
+    box.addEventListener("input", function () { q = box.value; clear.hidden = !q; render(false); });
+    document.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-act]");
+      if (!b) return;
+      if (b.dataset.act === "kind") setKind(KINDS[(KINDS.indexOf(kind) + 1) % KINDS.length]);
+      else if (b.dataset.act === "clear") { box.value = ""; q = ""; clear.hidden = true; render(false); box.focus(); }
+      else if (b.dataset.act === "about") {
+        about.hidden = !about.hidden;
+        if (!about.hidden) { var pg = document.getElementById("about-pg"); (pg._pager || Bridge.pager(pg, { pips: document.getElementById("about-pips") })).refresh(); }
+      }
+    });
+    document.addEventListener("keydown", function (e) {
+      var typing = e.target.matches && e.target.matches("input, textarea");
+      if (e.key === "Escape") { if (!about.hidden) { about.hidden = true; e.preventDefault(); } else if (q) { box.value = ""; q = ""; clear.hidden = true; render(false); } }
+      else if (e.key === "/" && !typing) { e.preventDefault(); box.focus(); }
+      else if ((e.key === "PageDown" || e.key === "PageUp") && !typing && about.hidden) { e.preventDefault(); list.go(list.page + (e.key === "PageDown" ? 1 : -1)); }
+    });
+    if (window.ResizeObserver) new ResizeObserver(function () { list.resize(); }).observe(document.getElementById("stage"));
+    render(false);
   })();
 </script>
 {% endblock %}

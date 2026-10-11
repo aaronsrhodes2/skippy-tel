@@ -165,7 +165,7 @@ def test_signed_in_pages_carry_the_stamp_with_a_utc_fallback_and_the_full_commit
 def test_the_stamp_is_swapped_for_local_time_by_a_few_lines_of_inline_script(monkeypatch):
     app, client = build(monkeypatch, **STAMP)
     sign_in(client)
-    page = client.get("/experiments").data.decode()
+    page = client.get("/privacy").data.decode()
     script = re.search(r'<script>\s*/\* The footer\'s build time.*?</script>', page, re.S).group(0)
     assert 'getElementById("build-time")' in script and "toLocaleTimeString" in script
     assert script.count("\n") <= 12                                    # "a few lines"
@@ -175,7 +175,7 @@ def test_the_stamp_is_swapped_for_local_time_by_a_few_lines_of_inline_script(mon
 def test_a_local_build_says_dev_and_has_no_time_or_script(monkeypatch):
     app, client = build(monkeypatch)
     sign_in(client)
-    page = client.get("/experiments").data.decode()
+    page = client.get("/privacy").data.decode()
     assert "build dev" in page and 'id="build-time"' not in page and "toLocaleTimeString" not in page
 
 
@@ -199,7 +199,7 @@ def test_the_stamp_is_inert_markup_even_for_a_hostile_looking_environment(monkey
     """info() only passes shapes it recognises, so nothing in the environment can put markup in the footer."""
     app, client = build(monkeypatch, GIT_SHA='"><script>alert(1)</script>', BUILD_TIME="<b>", K_REVISION="<i>x</i>")
     sign_in(client)
-    page = client.get("/experiments").data.decode()
+    page = client.get("/privacy").data.decode()
     foot = page[page.index('<footer class="sitefoot"'):]                       # the stamp's own footer (the page above it may have <b> of its own)
     assert "alert(1)" not in foot and "<b>" not in foot and "<i>x" not in foot and "build dev" in foot
 
