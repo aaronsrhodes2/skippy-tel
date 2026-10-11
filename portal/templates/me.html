@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Your dashboard — Maker Portal{% endblock %}
-{% block app %}dashboard{% endblock %}
+{% block app %}me{% endblock %}
 {% block ui %}bridge{% endblock %}
 {% block glyph %}gauge{% endblock %}
 {% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge-panes.css') }}">{% endblock %}
@@ -24,6 +24,7 @@
   ('links', 'globe', 'Links', ''),
 ] %}
 <script src="{{ url_for('static', filename='skippy-voice.js') }}"></script>
+<canvas class="alive" aria-hidden="true"></canvas>
 <section class="adm" id="adm">
   <div class="stage" id="astage">
     <div class="deck" id="adeck" style="--rows: {{ (units | length + 1) // 2 }}; --rows-wide: {{ (units | length + 3) // 4 }}; --rows-side: {{ (units | length + 4) // 5 }}">
@@ -247,5 +248,7 @@
     </section>
   </div>
 </section>
+<script src="{{ url_for('static', filename='bridge-alive.js') }}"></script>
+<script>Bridge.alive(document.querySelector("canvas.alive"), {colors: ["#a64dff", "#7a2cf0", "#d08cff", "#c040ff", "#5b2bd6", "#e6b3ff"]});</script>
 <script src="{{ url_for('static', filename='bridge-panes.js') }}"></script>
 {% endblock %}

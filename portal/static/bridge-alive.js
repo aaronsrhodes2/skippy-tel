@@ -17,7 +17,8 @@
   var TAU = Math.PI * 2;
   function rnd(a, b) { return a + Math.random() * (b - a); }
 
-  Bridge.alive = function (cv) {
+  Bridge.alive = function (cv, opts) {
+    var palette = (opts && opts.colors && opts.colors.length) ? opts.colors : COLORS;
     var ctx = cv.getContext("2d"), W = 0, H = 0, dpr = 1, t = 0, last = 0, energy = 0, still = false;
     var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
     var spirals = [], links = [], sparks = [], corners = [];
@@ -31,7 +32,7 @@
     }
 
     function Spiral(i) {
-      this.col = COLORS[i % COLORS.length];
+      this.col = palette[i % palette.length];
       this.x = rnd(.15, .85) * W; this.y = rnd(.15, .85) * H; this.vx = rnd(-20, 20); this.vy = rnd(-20, 20);
       this.retune(); this.link = null; this.cool = rnd(2, 7);       // seconds before it may reach for something
     }

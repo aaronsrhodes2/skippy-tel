@@ -27,6 +27,7 @@ conversations and unpins each when the task is done; nothing else.
 | 12 | Search across every conversation | queued | | |
 | 13 | A small context meter ("start fresh soon") | queued | | |
 | 14 | Pins saved on the server so they follow him across devices | queued | | |
+| 16 | /me themed deep purple on black with white text, and Skippy's living background behind the private chat in purple (`data-app="me"`, tokens in `bridge-panes.css`, test `test_me_theme.py` pins contrast) | done, pushing (21:55) | 21:50 | 21:55 |
 | 15 | Mic and Skippy's voice tried in a real browser | **done: the Captain confirmed voice-to-text and text-to-voice work (2026-10-10, 21:3x)** | | 21:3x |
 
 Decisions taken on the Captain's behalf (he said "proceed"; change any of them by saying so): the chat is exempt from the portal's
