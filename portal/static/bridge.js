@@ -158,6 +158,15 @@
       pages = Math.max(1, Math.round(flow.scrollWidth / w));
       go(Math.min(page, pages - 1));
     }
+    // a form field in a later page: the browser scrolls the clipped panel to show it, which would leave the pages out of step. Undo that and
+    // flip to the page the field is on instead.
+    panel.addEventListener("scroll", function () { if (panel.scrollLeft) panel.scrollLeft = 0; });
+    flow.addEventListener("focusin", function (e) {
+      if (!w) return;
+      var col = Math.floor((e.target.getBoundingClientRect().left - flow.getBoundingClientRect().left + 1) / w);
+      if (col >= 0 && col < pages && col !== page) go(col);
+      if (panel.scrollLeft) panel.scrollLeft = 0;
+    });
     // swipe sideways to flip: a deliberate horizontal stroke, not a tap or a vertical drag
     var x0 = null, y0 = 0;
     panel.addEventListener("touchstart", function (e) { var t = e.touches[0]; x0 = t.clientX; y0 = t.clientY; }, { passive: true });

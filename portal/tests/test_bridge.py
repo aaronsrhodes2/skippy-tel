@@ -122,7 +122,8 @@ def test_the_graveyard_lists_every_module_and_admin_cannot_be_retired(env):
     client, _, _ = env
     login(client, ADMIN)
     page = client.get("/admin").data.decode()
-    section = page[page.index('<section id="graveyard">'):page.index("</section>", page.index('<section id="graveyard">'))]
+    start = page.index('<section id="graveyard"')
+    section = page[start:page.index("</section>", start)]
     assert len(re.findall(r'name="id" value="(\w+)"', section)) == len(modules.MODULES)
     assert re.search(r'name="id" value="admin">\s*<input type="hidden" name="action" value="retire">\s*<button type="submit" disabled', section)
 

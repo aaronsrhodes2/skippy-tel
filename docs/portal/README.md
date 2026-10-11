@@ -498,8 +498,16 @@ The game's official art is behind everything under a flat dim (no gradient). The
 unchanged (`/games/<id>/live`: a code drops in by itself and the page reloads when the server comes up or sleeps). Tests: `test_bridge.py` and the old
 game-page tests, rewritten for the glyph markup.
 
-**On the bridge now:** the launcher, Browser Games (`/play`), Skippy chat, Game Servers, Bilby's Audio Service (`/music`), Nagatha's Video Service (`/video`), and the Graveyard (inside Admin, which is otherwise still the old page).
-Still the old look, to move in batches: admin, experiments and the demos, the dashboard, request access, privacy.
+**Admin on the bridge.** `/admin` is the control room: a deck of controls (Graveyard, Server, Recovery, Set up, Settings, Friends, Discord), a lamp or a
+count on the ones that need the Captain (the server's state, a warning when a game cannot start, how many people are asking for access), and
+a control opens its pane. A pane is pages you flip (`Bridge.pager`: swipe, PageUp/PageDown, the bar under it), never a scrolled page, and the
+address remembers which pane is open (`/admin#friends`), as does the tab across a form post, so a save lands you back where you were. It is the
+one bridge page that keeps its sentences, because it is where the settings, the friends and the recovery buttons are explained. Every section
+and every form is as it was; only the layout changed. `static/admin.js` only switches panes; `static/admin.css` is the panes' look. A field in
+a later page flips to its page when focused (`Bridge.pager` keeps the clipped panel from scrolling). The server logs (`/admin/logs`) are pages too.
+
+**On the bridge now:** the launcher, Browser Games (`/play`), Skippy chat, Game Servers, Bilby's Audio Service (`/music`), Nagatha's Video Service (`/video`), Admin (`/admin`, with its Graveyard and the server logs).
+Still the old look, to move in batches: experiments and the demos, the dashboard, request access, privacy.
 
 ## Telemetry: what the portal records, and where it goes
 

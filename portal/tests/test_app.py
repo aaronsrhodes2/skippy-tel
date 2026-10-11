@@ -125,7 +125,8 @@ def test_every_app_page_has_a_back_button_a_home_button_and_its_own_title(env):
     assert "<nav" not in page
     assert 'aria-label="Back"' in page and 'aria-label="Home"' in page         # a bridge page: back and home are glyph keys
     assert 'aria-label="Sign out"' not in page                                 # the strip is just back, what this is, home
-    assert '<h1 class="apptitle">Admin</h1>' in client.get("/admin").data.decode()      # the pages not yet on the bridge keep the old bar
+    admin = client.get("/admin").data.decode()
+    assert 'aria-label="Back"' in admin and 'aria-label="Home"' in admin and '<body class="bridge"' in admin    # Admin is on the bridge too
 
 
 def test_the_launcher_has_one_tile_per_app_and_no_duplicate_paths(env):

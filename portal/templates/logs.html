@@ -1,27 +1,44 @@
 {% extends "base.html" %}
 {% block title %}Server logs — Maker Portal{% endblock %}
 {% block app %}admin{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}server{% endblock %}
+{% block hud_back %}{{ url_for('dashboard.game', gid=game.id) if game else url_for('admin.index') }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">{% endblock %}
 {% block content %}
-<section>
-  <h2>{{ game.name ~ ' logs' if game else 'Server logs' }}</h2>
-  <p class="help">Read from the VM's serial ports; passwords are masked. The container snapshot
+{# The logs on the bridge: pages you flip (swipe, PageUp/PageDown, the bar under them), never a scrolled box. #}
+<section class="adm" id="logs">
+  <header class="ahead" style="padding-top:6px">
+    <svg class="g mark" aria-hidden="true"><use href="#g-server"/></svg>
+    <h2>{{ game.name ~ ' logs' if game else 'Server logs' }}</h2>
+    <a class="key" href="{{ url_for('admin.logs', game=game.id) if game else url_for('admin.logs') }}" aria-label="Reload" title="Reload"><svg class="g" aria-hidden="true"><use href="#g-retry"/></svg></a>
+  </header>
+  <p class="help" style="margin:4px 2px">Read from the VM's serial ports; passwords are masked. The container snapshot
     refreshes every 2 minutes while the server runs.
-    <a href="{{ url_for('admin.logs', game=game.id) if game else url_for('admin.logs') }}">Reload</a>
-    {% if game %}&middot; <a href="{{ url_for('admin.logs') }}">All games</a>
+    {% if game %}<a href="{{ url_for('admin.logs') }}">All games</a>
     &middot; <a href="{{ url_for('dashboard.game', gid=game.id) }}">Back to {{ game.name }}</a>
-    {% else %}&middot; <a href="{{ url_for('admin.index') }}">Back to Admin</a>{% endif %}</p>
-  {% if error %}
-    <p class="error">Couldn't read the logs: {{ error }}</p>
-  {% else %}
-    <h3>{{ game.name if game else 'Game containers' }} (latest snapshot)</h3>
-    <pre class="log" data-copy-button>{{ logs.containers }}</pre>
-    <h3>Last boot (startup script)</h3>
-    <pre class="log" data-copy-button>{{ logs.startup }}</pre>
-  {% endif %}
+    {% else %}<a href="{{ url_for('admin.index') }}">Back to Admin</a>{% endif %}</p>
+  <div class="apane" style="flex:1;min-height:0">
+    <div class="pg" id="logpg"><div class="pg-flow">
+      {% if error %}
+        <p class="error" style="margin:10px">Couldn't read the logs: {{ error }}</p>
+      {% else %}
+        <h3 style="margin:10px 10px 4px">{{ game.name if game else 'Game containers' }} (latest snapshot)</h3>
+        <pre class="log" data-copy-button>{{ logs.containers }}</pre>
+        <h3 style="margin:10px 10px 4px">Last boot (startup script)</h3>
+        <pre class="log" data-copy-button>{{ logs.startup }}</pre>
+      {% endif %}
+    </div></div>
+    <div class="pips"><i></i></div>
+  </div>
 </section>
-<style>
-  pre.log { background: #0a0a0a; border: 1px solid #333; border-radius: 8px; padding: 10px;
-            max-height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-word;
-            font-size: 12px; color: #b8ffe0; }
-</style>
+<script>
+  (function () {
+    var panel = document.getElementById("logpg"), pager = Bridge.pager(panel, { pips: panel.parentNode.querySelector(".pips") });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "PageDown") { e.preventDefault(); pager.go(pager.page() + 1); }
+      else if (e.key === "PageUp") { e.preventDefault(); pager.go(pager.page() - 1); }
+    });
+  })();
+</script>
 {% endblock %}
