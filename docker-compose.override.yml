@@ -58,6 +58,7 @@ services:
     environment:
       WHISPER_URL: http://whisper:8000
       TTS_URL: http://flask-api:5000
+      # VOICE_FX: off = Skippy's voice raw (default on: a gate on the pauses and a close, dry polish; see services/voice-gate/gate.py FX_CHAIN)
       OLLAMA_URL: http://ollama:11434          # writes the spoken summary of a long reply (SUMMARY_MODEL, default qwen2.5:7b)
     ports:
       - "127.0.0.1:3007:8080"                  # localhost only; Funnel is the one way in from outside

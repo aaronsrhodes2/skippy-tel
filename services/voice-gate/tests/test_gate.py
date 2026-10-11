@@ -1,6 +1,7 @@
 """The voice gate: no pass, no service; a listen pass hears but cannot make Skippy speak; the other gates' passes open nothing."""
 import hashlib
 import hmac
+import subprocess
 import sys
 from pathlib import Path
 
@@ -113,6 +114,38 @@ def test_only_a_speak_pass_makes_skippy_talk(stack):
     assert c.post(f"/t/{speak()}/tts", json={"text": "x" * 501}).status_code == 413
     fake.tts = Resp(503)
     assert c.post(f"/t/{speak()}/tts", json={"text": "hi"}).status_code == 503
+
+
+def test_the_voice_goes_through_the_polish_chain_and_a_failure_returns_the_raw_voice():
+    fake = Fake()
+    seen = []
+    app = gate.create_app(KEY, "http://w", "http://t", clock=lambda: NOW, post=fake.post, get=fake.get, fx_chain="CHAIN",
+                          polisher=lambda audio, chain: seen.append((audio, chain)) or b"POLISHED")
+    r = app.test_client().post(f"/t/{speak()}/tts", json={"text": "hi"})
+    assert r.data == b"POLISHED" and seen == [(b"ID3audio", "CHAIN")]
+    plain = gate.create_app(KEY, "http://w", "http://t", clock=lambda: NOW, post=fake.post, get=fake.get)          # no chain: untouched
+    assert plain.test_client().post(f"/t/{speak()}/tts", json={"text": "hi"}).data == b"ID3audio"
+
+
+def test_polish_hands_ffmpeg_the_chain_and_never_loses_the_voice():
+    class P:
+        def __init__(self, code=0, out=b"x" * 2000): self.returncode, self.stdout = code, out
+    calls = []
+    run = lambda argv, **kw: calls.append((argv, kw)) or P()                                                        # noqa: E731
+    assert gate.polish(b"raw", "afftdn", run=run) == b"x" * 2000
+    argv, kw = calls[0]
+    assert argv[0] == "ffmpeg" and "afftdn" in argv and "pipe:0" in argv and kw["input"] == b"raw" and "shell" not in kw
+    assert gate.polish(b"raw", "", run=run) == b"raw"                                                               # no chain: nothing runs
+    assert gate.polish(b"raw", "c", run=lambda a, **k: P(1)) == b"raw"                                              # ffmpeg failed
+    assert gate.polish(b"raw", "c", run=lambda a, **k: P(0, b"tiny")) == b"raw"                                     # it produced nothing usable
+    def missing(a, **k): raise FileNotFoundError("ffmpeg")
+    def slow(a, **k): raise subprocess.TimeoutExpired("ffmpeg", 1)
+    assert gate.polish(b"raw", "c", run=missing) == b"raw" and gate.polish(b"raw", "c", run=slow) == b"raw"
+
+
+def test_the_default_chain_is_the_one_that_was_measured():
+    assert "agate=threshold=0.04" in gate.FX_CHAIN and "afftdn" in gate.FX_CHAIN and "highpass=f=70" in gate.FX_CHAIN
+    assert "loudnorm" not in gate.FX_CHAIN and "acompressor" not in gate.FX_CHAIN       # they lifted the noise floor in testing: never again
 
 
 def ollama_calls(fake):

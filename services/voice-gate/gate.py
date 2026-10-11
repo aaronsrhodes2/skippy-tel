@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import threading
 import time
 
@@ -40,6 +41,12 @@ AUDIO_TYPES = {"audio/webm": ".webm", "audio/ogg": ".ogg", "audio/mp4": ".m4a", 
 MAX_AUDIO = 4 * 1024 * 1024
 MAX_TEXT = 500
 MAX_SUMMARY_IN = 8000
+# Skippy's cloned voice carries its room: in the pauses between words the background sits near -36 dBFS (measured; clean TTS is below
+# -55), which is the "fuzz". The denoiser alone does almost nothing (it is not steady hiss), a gate on the pauses takes it to about -60
+# with the voice's own level untouched. So: rumble out, a little denoise, the gate, then a touch of low warmth and a softer top end for
+# the close, dry, "in the room" feel. Set VOICE_FX=off to hear the voice raw; VOICE_FX_CHAIN replaces the chain.
+FX_CHAIN = ("highpass=f=70,afftdn=nr=30:nf=-52:tn=1,agate=threshold=0.04:ratio=8:attack=6:release=180:knee=2.8,"
+            "equalizer=f=140:t=h:width=140:g=2.5,equalizer=f=9500:t=h:width=2000:g=-3")
 SUMMARY_PROMPT = (
     "You turn a written chat reply into what a person would SAY out loud to a friend sitting next to them. Keep the key facts, "
     "numbers, names and any question that was asked, in 2 to 4 short sentences, under 60 words in all. Keep the writer's attitude "
@@ -76,6 +83,18 @@ def valid(key: bytes, token: str, now: float) -> str | None:
     return None
 
 
+def polish(audio: bytes, chain: str, run=subprocess.run, timeout: float = 25) -> bytes:
+    """The voice through ffmpeg's chain (mp3 in, mp3 out). Anything that goes wrong returns the raw audio: a plain voice beats no voice."""
+    if not chain:
+        return audio
+    try:
+        p = run(["ffmpeg", "-v", "error", "-i", "pipe:0", "-af", chain, "-f", "mp3", "-b:a", "192k", "pipe:1"], input=audio,
+                capture_output=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return audio
+    return p.stdout if p.returncode == 0 and len(p.stdout) > 1000 else audio
+
+
 def spoken(text: str) -> str:
     """The model's answer made safe to speak: no markdown marks, one line, at most 400 characters (cut at a sentence)."""
     t = re.sub(r"```.*?```", " ", str(text or ""), flags=re.S)
@@ -89,7 +108,7 @@ def spoken(text: str) -> str:
 
 
 def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slots: int = 3,
-               post=requests.post, get=requests.get, ollama_url: str = "", summary_model: str = "qwen2.5:7b") -> Flask:
+               post=requests.post, get=requests.get, ollama_url: str = "", summary_model: str = "qwen2.5:7b", fx_chain: str = "", polisher=polish) -> Flask:
     app = Flask(__name__, static_folder=None)
     app.url_map.merge_slashes = False
     app.config["MAX_CONTENT_LENGTH"] = MAX_AUDIO + 4096
@@ -200,6 +219,7 @@ def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slot
             return err(503)
         finally:
             busy.release()
+        audio = polisher(audio, fx_chain)
         return Response(audio, mimetype="audio/mpeg", headers={"Cache-Control": "no-store"})
 
     @app.post("/t/<token>/summary")
@@ -216,7 +236,7 @@ def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slot
             return err(429)
         try:
             r = post(f"{ollama_url}/api/generate", json={"model": summary_model, "prompt": SUMMARY_PROMPT + text.strip(), "stream": False,
-                                                          "options": {"temperature": 0.3, "num_predict": 160}}, timeout=45)
+                                                          "options": {"temperature": 0.3, "num_predict": 160}, "keep_alive": "30m"}, timeout=45)
             if r.status_code != 200:
                 return err(503)
             said = r.json().get("response") if isinstance(r.json(), dict) else None
@@ -242,4 +262,5 @@ def from_env() -> Flask:
     return create_app(gate_key(token) if token else b"", os.environ.get("WHISPER_URL", "http://whisper:8000").rstrip("/"),
                       os.environ.get("TTS_URL", "http://flask-api:5000").rstrip("/"),
                       ollama_url=os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/"),
-                      summary_model=os.environ.get("SUMMARY_MODEL", "qwen2.5:7b"))
+                      summary_model=os.environ.get("SUMMARY_MODEL", "qwen2.5:7b"),
+                      fx_chain="" if os.environ.get("VOICE_FX", "on").lower() == "off" else os.environ.get("VOICE_FX_CHAIN", "").strip() or FX_CHAIN)
