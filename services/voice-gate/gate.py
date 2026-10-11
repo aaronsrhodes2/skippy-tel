@@ -45,7 +45,7 @@ MAX_SUMMARY_IN = 8000
 # cloned from; clean speech is 15+), and in the pauses its background sits near -36 dBFS. A GATE on the pauses was tried first and made it
 # worse: the hiss under the voice stood out more when the gate opened (the "flare", 16 dB raw, 34 to 40 dB gated). RNNoise, a neural
 # denoiser run by ffmpeg's arnndn, cleans the voice itself, so nothing pumps: pauses -52 dBFS, flare 17 dB, hiss during speech down
-# 3 to 10 dB. The model (bd.rnnn, GregorR/rnnoise-models) is mounted at /models, not kept in the repo. Without it: only the clean-up EQ.
+# 3 to 10 dB. (Not for [softly]: RNNoise took its quietest word endings for noise and dipped them out; [whispers] is fine.) The model (bd.rnnn, GregorR/rnnoise-models) is mounted at /models, not kept in the repo. Without it: only the clean-up EQ.
 # A touch of low warmth and a softer top end give the close, dry "in the room" feel. VOICE_FX=off hears the voice raw.
 FX_MODEL = "/models/bd.rnnn"
 FX_TAIL = ",equalizer=f=140:t=h:width=140:g=2.5,equalizer=f=9500:t=h:width=2000:g=-3"
@@ -120,7 +120,7 @@ def spoken(text: str) -> str:
 
 
 def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slots: int = 3,
-               post=requests.post, get=requests.get, ollama_url: str = "", summary_model: str = "qwen2.5:7b", fx_chain: str = "", polisher=polish) -> Flask:
+               post=requests.post, get=requests.get, ollama_url: str = "", summary_model: str = "qwen2.5:7b", fx_chain: str = "", polisher=polish, style: str = "") -> Flask:
     app = Flask(__name__, static_folder=None)
     app.url_map.merge_slashes = False
     app.config["MAX_CONTENT_LENGTH"] = MAX_AUDIO + 4096
@@ -223,7 +223,10 @@ def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slot
         if not busy.acquire(blocking=False):
             return err(429)
         try:
-            r = get(f"{tts_url}/tts/stream", params={"text": text.strip()}, timeout=60)
+            spoken_text = text.strip()
+            if style and not spoken_text.startswith("["):         # the delivery tag (ElevenLabs v3 audio tag), unless the text brings its own
+                spoken_text = f"{style} {spoken_text}"
+            r = get(f"{tts_url}/tts/stream", params={"text": spoken_text}, timeout=60)
             if r.status_code != 200 or not r.content:
                 return err(503)
             audio = r.content
@@ -275,5 +278,6 @@ def from_env() -> Flask:
                       os.environ.get("TTS_URL", "http://flask-api:5000").rstrip("/"),
                       ollama_url=os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/"),
                       summary_model=os.environ.get("SUMMARY_MODEL", "qwen2.5:7b"),
+                      style=os.environ.get("VOICE_STYLE", "[whispers]").strip(),                  # the Captain's pick (2026-10-11): close and soft, "in the room"
                       fx_chain="" if os.environ.get("VOICE_FX", "on").lower() == "off" else os.environ.get("VOICE_FX_CHAIN", "").strip()
                       or fx_chain_for(os.environ.get("VOICE_FX_MODEL", FX_MODEL), int(os.environ.get("VOICE_FX_PASSES", "1") or 1)))

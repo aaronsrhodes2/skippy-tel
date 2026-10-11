@@ -143,6 +143,16 @@ def test_polish_hands_ffmpeg_the_chain_and_never_loses_the_voice():
     assert gate.polish(b"raw", "c", run=missing) == b"raw" and gate.polish(b"raw", "c", run=slow) == b"raw"
 
 
+def test_the_delivery_style_tag_goes_in_front_unless_the_text_brings_its_own():
+    fake = Fake()
+    app = gate.create_app(KEY, "http://w", "http://t", clock=lambda: NOW, post=fake.post, get=fake.get, style="[whispers]")
+    c = app.test_client()
+    c.post(f"/t/{speak()}/tts", json={"text": " Hello there "})
+    c.post(f"/t/{speak()}/tts", json={"text": "[sarcastic] Oh, wonderful."})
+    tts_calls = [g[1]["params"]["text"] for g in fake.gets if "/tts/stream" in g[0]]
+    assert tts_calls == ["[whispers] Hello there", "[sarcastic] Oh, wonderful."]
+
+
 def test_the_polish_chain_uses_rnnoise_when_its_model_is_there_and_never_a_gate():
     with_model = gate.fx_chain_for("/m/bd.rnnn", 1, exists=lambda p: True)
     assert with_model.count("arnndn=m=/m/bd.rnnn") == 1 and with_model.startswith("highpass=f=70,") and "equalizer=f=140" in with_model
