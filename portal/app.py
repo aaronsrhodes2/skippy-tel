@@ -1049,6 +1049,28 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def workshop_history_result():
         return jsonify(workshop.history_result(me(), request.args.get("job", "")))
 
+    @mine.post("/mcp")
+    @auth.admin_required
+    def mcp_ask():
+        """The Captain's private MCP servers: the list (no `name`) or a handshake with one (`name`), both read on skippy-pc, where his
+        Claude config lives. Answers a job id at once; /me/mcp/result is polled. Only the Captain, and nothing but a name from his own list."""
+        if not home.online():
+            return jsonify(error="skippy-pc isn't reporting, so its MCP servers can't be read right now."), 503
+        name = (request.get_json(silent=True) or {}).get("name")
+        if name is None:
+            return jsonify(job=home.start("mcp_list", me(), ttl=60))
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,60}", name):
+            return jsonify(error="Bad server name."), 400
+        return jsonify(job=home.start("mcp_test", me(), ttl=90, name=name))
+
+    @mine.get("/mcp/result")
+    @auth.admin_required
+    def mcp_result():
+        job = request.args.get("job", "")
+        if not re.fullmatch(r"[a-f0-9]{8,32}", job) or home.owner_of(job) != me():
+            return jsonify(state="unknown")
+        return jsonify(home.peek(job))
+
     @mine.post("/pair-home")
     @auth.admin_required
     def pair_home():

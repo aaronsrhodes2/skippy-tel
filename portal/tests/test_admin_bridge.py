@@ -68,7 +68,7 @@ def test_the_dashboard_is_a_bridge_page_of_widgets_and_the_private_skippy_has_mo
     assert '<body class="bridge"' in page and "/static/bridge-panes.js" in page and 'href="/static/bridge-panes.css"' in page
     controls = re.findall(r'data-pane="([\w-]+)"', page)
     panes = re.findall(r'<section id="([\w-]+)" class="apane"', page)
-    assert controls[0] == "server" and sorted(controls) == sorted(panes), (controls, panes)
+    assert controls[:2] == ["mcp", "home"] and sorted(controls) == sorted(panes), (controls, panes)
     assert 'id="private-skippy"' not in page and "skippy" not in controls                 # the chat is the front page now (front.html)
     for widget in ("Server", "Core · skippy-tel", "Home · skippy-pc", "Watcher", "Spend (estimate)", "Friends", "Discord, lately", "Experiments", "Home links"):
         assert f"<h3>{widget}</h3>" in page, widget                                      # every widget is still there

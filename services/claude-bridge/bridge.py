@@ -37,6 +37,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import host_ops
+import mcp_access
 import memory_service
 import projects as projects_mod
 import workshop_engine as workshop
@@ -181,6 +182,10 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in ("/memory/list", "/memory/conversation"):
             self._memory(url)
             return
+        if url.path == "/mcp/list":
+            if self._workshop_ok():
+                self._json(200, mcp_access.listing())
+            return
         self._json(404, {"error": "not_found"})
 
     def do_POST(self):  # noqa: N802
@@ -194,6 +199,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.startswith("/host/"):
             self._host_op(path[len("/host/"):])
+            return
+        if path == "/mcp/test":
+            if self._workshop_ok():
+                status, body = mcp_access.test(str(self._read_body().get("name") or ""))
+                self._json(status, body)
             return
         self._json(404, {"error": "not_found"})
 

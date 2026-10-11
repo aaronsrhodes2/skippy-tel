@@ -671,6 +671,26 @@ def memory_job(job: dict, token: str) -> dict:
     return {"error": str((body or {}).get("error") or f"The bridge said HTTP {status}.")[:300]}
 
 
+def mcp_job(job: dict, token: str) -> dict:
+    """The Captain's private MCP servers (the /me page): the list of the servers he configured (mcp_list) or a handshake with one by name
+    (mcp_test, with `name`). The bridge reads his Claude config and starts the server, as it is the one on his PC (mcp_access.py)."""
+    if not BRIDGE:
+        return {"error": "The bridge isn't set up on skippy-pc (CLAUDE_BRIDGE_URL)."}
+    if job.get("kind") == "mcp_test":
+        name = str(job.get("name") or "")
+        if not _MCP_NAME.fullmatch(name):
+            return {"error": "bad server name"}
+        status, body = _bridge("POST", "/mcp/test", {"name": name}, token, timeout=40)
+    else:
+        status, body = _bridge("GET", "/mcp/list", None, token, timeout=15)
+    if status in (200, 404) and isinstance(body, dict) and body:
+        return {"result": body}
+    if status is None:
+        return {"error": "The bridge on skippy-pc isn't answering."}
+    return {"error": str((body or {}).get("error") or f"The bridge said HTTP {status}.")[:300]}
+
+
+_MCP_NAME = re.compile(r"[A-Za-z0-9_.:-]{1,60}")
 HOST_OPS = ("restart-service", "restart-bridge", "reset-workshop", "funnel")
 _HOST_ARG = re.compile(r"[a-z0-9-]{0,40}")
 
@@ -707,6 +727,8 @@ def run_job(job: dict, token: str = "") -> dict:
         return host_op(job, token)
     if job.get("kind") in ("memory_list", "memory_get"):
         return memory_job(job, token)
+    if job.get("kind") in ("mcp_list", "mcp_test"):
+        return mcp_job(job, token)
     if job.get("kind") == "ask_mentat" and MENTAT:
         reply = fetch(f"{MENTAT}/ask", "POST", {"question": job.get("question", "")}, timeout=100)
         if reply and reply.get("ok"):

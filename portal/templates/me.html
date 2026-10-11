@@ -12,9 +12,10 @@
 {% set home_lamp = 'idle' if not home.paired else ('boot' if home.age is none else ('on' if home.online else 'warn')) %}
 {% set server_lamp = 'off' if not status else ('on' if status.status == 'RUNNING' else ('idle' if status.status == 'TERMINATED' else 'boot')) %}
 {% set units = [
+  ('mcp', 'tools', 'MCP', ''),
+  ('home', 'link', 'Home', home_lamp),
   ('server', 'server', 'Server', server_lamp),
   ('core', 'core', 'Core', core_lamp),
-  ('home', 'link', 'Home', home_lamp),
   ('activity-pane', 'eye', 'Activity', ''),
   ('watcher', 'gauge', 'Watcher', 'warn' if warnings else ''),
   ('spend', 'clock', 'Spend', ''),
@@ -37,6 +38,63 @@
         </div>
       {% endfor %}
     </div>
+
+    <section id="mcp" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-tools"/></svg><span class="title">MCP</span></header>
+      <div class="pg"><div class="pg-flow">
+    <div class="w">
+      <h3>Private MCP servers</h3>
+      <p class="muted">The MCP servers you set up for Claude on skippy-pc (user scope). Test starts one, shakes hands and lists its tools, then stops it.
+        Nothing but its name and how it is reached is shown: never its keys or arguments.</p>
+      <p class="muted" id="mcp-state">Not loaded yet.</p>
+      <table id="mcp-list"></table>
+    </div>
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
+
+    <section id="home" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-link"/></svg><span class="title">Home</span></header>
+      <div class="pg"><div class="pg-flow">
+    <div class="w">
+      <h3>Home · skippy-pc</h3>
+      {% if not home.paired %}
+        <p class="muted">Not paired yet. Pairing gives the home reporter its own token, so skippy-pc can
+          push its status here (outbound only; nothing at home is exposed).</p>
+        <form method="post" action="{{ url_for('me.pair_home') }}"><button type="submit">Pair home</button></form>
+      {% elif home.age is none %}
+        <p class="warn">Paired, waiting for the first report.</p>
+        <p class="muted">Reports every ~15 s once the home reporter is running.</p>
+      {% else %}
+        {% set st = home.status %}
+        <p class="big">{% if home.online %}Online{% else %}<span class="warn">Silent</span>{% endif %}
+          <span class="muted">last report {{ home.age }} s ago</span></p>
+        <table>
+          {% for s in st.services or [] %}<tr><td><span style="color: {{ 'var(--green)' if s.ok else 'var(--red)' }}">{{ '●' if s.ok else '○' }}</span>
+            {{ s.name }}</td><td class="muted">{{ s.detail }}</td></tr>{% endfor %}
+        </table>
+        {% if st.ups %}{% set u = st.ups %}
+          <p class="{{ '' if u.on_ac else 'warn' }}">⚡ {{ 'On AC' if u.on_ac else 'ON BATTERY' }} · {{ u.charge }}% ·
+            {{ u.runtime }} min runtime{% if u.alert %} · {{ u.alert }}{% endif %}</p>{% endif %}
+        <p class="muted">Models: {{ (st.ollama_models or []) | join(', ') or 'none loaded' }}</p>
+        {% if st.photo_tags and st.photo_tags.total %}{% set t = st.photo_tags %}
+          <p class="muted">Photo tags: {{ t.tagged }} / {{ t.total }} ({{ (100 * t.tagged / t.total) | round | int }}%)</p>{% endif %}
+        {% if st.telemetry %}<details><summary class="muted">Least-used UI (removal candidates)</summary>
+          <table>{% for t in st.telemetry[:8] %}<tr><td>{{ t.app }} · {{ t.element }}</td>
+            <td class="muted">{{ t.clicks }} clicks · {{ 'today' if t.days_ago == 0 else t.days_ago ~ 'd ago' }}</td></tr>{% endfor %}</table>
+        </details>{% endif %}
+        {% set np = music.traktor.now_playing or (music.session and music.session.now_playing) %}
+        <p>♪ {% if np %}{{ np.artist }} — {{ np.title }}{% else %}<span class="muted">nothing playing</span>{% endif %}
+          · <a href="{{ url_for('music.player_page') }}">Bilby's Audio Service &rarr;</a></p>
+        <form method="post" action="{{ url_for('me.pair_home') }}" style="margin-top:6px">
+          <button type="submit" style="padding:3px 10px" title="Makes a new token; the old one stops working">Re-pair</button></form>
+      {% endif %}
+    </div>
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
 
     <section id="server" class="apane" hidden>
       <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
@@ -88,48 +146,6 @@
           <table>{% for s in core.services %}<tr><td><span style="color: {{ 'var(--green)' if s.available else 'var(--red)' }}">{{ '●' if s.available else '○' }}</span>
             {{ s.name }}</td><td class="muted">{{ s.detail or ('up' if s.available else 'down') }}</td></tr>{% endfor %}</table>
         </details>
-      {% endif %}
-    </div>
-      </div></div>
-      <div class="pips" hidden><i></i></div>
-    </section>
-
-    <section id="home" class="apane" hidden>
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
-        <svg class="g mark" aria-hidden="true"><use href="#g-link"/></svg><span class="title">Home</span></header>
-      <div class="pg"><div class="pg-flow">
-    <div class="w">
-      <h3>Home · skippy-pc</h3>
-      {% if not home.paired %}
-        <p class="muted">Not paired yet. Pairing gives the home reporter its own token, so skippy-pc can
-          push its status here (outbound only; nothing at home is exposed).</p>
-        <form method="post" action="{{ url_for('me.pair_home') }}"><button type="submit">Pair home</button></form>
-      {% elif home.age is none %}
-        <p class="warn">Paired, waiting for the first report.</p>
-        <p class="muted">Reports every ~15 s once the home reporter is running.</p>
-      {% else %}
-        {% set st = home.status %}
-        <p class="big">{% if home.online %}Online{% else %}<span class="warn">Silent</span>{% endif %}
-          <span class="muted">last report {{ home.age }} s ago</span></p>
-        <table>
-          {% for s in st.services or [] %}<tr><td><span style="color: {{ 'var(--green)' if s.ok else 'var(--red)' }}">{{ '●' if s.ok else '○' }}</span>
-            {{ s.name }}</td><td class="muted">{{ s.detail }}</td></tr>{% endfor %}
-        </table>
-        {% if st.ups %}{% set u = st.ups %}
-          <p class="{{ '' if u.on_ac else 'warn' }}">⚡ {{ 'On AC' if u.on_ac else 'ON BATTERY' }} · {{ u.charge }}% ·
-            {{ u.runtime }} min runtime{% if u.alert %} · {{ u.alert }}{% endif %}</p>{% endif %}
-        <p class="muted">Models: {{ (st.ollama_models or []) | join(', ') or 'none loaded' }}</p>
-        {% if st.photo_tags and st.photo_tags.total %}{% set t = st.photo_tags %}
-          <p class="muted">Photo tags: {{ t.tagged }} / {{ t.total }} ({{ (100 * t.tagged / t.total) | round | int }}%)</p>{% endif %}
-        {% if st.telemetry %}<details><summary class="muted">Least-used UI (removal candidates)</summary>
-          <table>{% for t in st.telemetry[:8] %}<tr><td>{{ t.app }} · {{ t.element }}</td>
-            <td class="muted">{{ t.clicks }} clicks · {{ 'today' if t.days_ago == 0 else t.days_ago ~ 'd ago' }}</td></tr>{% endfor %}</table>
-        </details>{% endif %}
-        {% set np = music.traktor.now_playing or (music.session and music.session.now_playing) %}
-        <p>♪ {% if np %}{{ np.artist }} — {{ np.title }}{% else %}<span class="muted">nothing playing</span>{% endif %}
-          · <a href="{{ url_for('music.player_page') }}">Bilby's Audio Service &rarr;</a></p>
-        <form method="post" action="{{ url_for('me.pair_home') }}" style="margin-top:6px">
-          <button type="submit" style="padding:3px 10px" title="Makes a new token; the old one stops working">Re-pair</button></form>
       {% endif %}
     </div>
       </div></div>
@@ -243,4 +259,51 @@
 <script src="{{ url_for('static', filename='bridge-alive.js') }}"></script>
 <script>Bridge.alive(document.querySelector("canvas.alive"), {colors: ["#a64dff", "#7a2cf0", "#d08cff", "#c040ff", "#5b2bd6", "#e6b3ff"]});</script>
 <script src="{{ url_for('static', filename='bridge-panes.js') }}"></script>
+<script>
+(function () {                                                    // the MCP pane: list on first open, Test per server (jobs on skippy-pc, polled)
+  const state = document.getElementById("mcp-state"), table = document.getElementById("mcp-list"), tile = document.querySelector("#adeck .hit");
+  if (!state || !tile) return;
+  const ASK = "{{ url_for('me.mcp_ask') }}", RESULT = "{{ url_for('me.mcp_result') }}";
+  let loaded = false;
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  async function job(body) {
+    const r = await fetch(ASK, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body), credentials: "same-origin"});
+    const j = await r.json();
+    if (!r.ok || !j.job) throw new Error(j.error || "no answer");
+    for (let i = 0; i < 60; i++) {
+      await sleep(i < 5 ? 600 : 1500);
+      const p = await (await fetch(RESULT + "?job=" + encodeURIComponent(j.job), {credentials: "same-origin"})).json();
+      if (p.state === "done") return p.result;
+      if (p.state === "error" || p.state === "unknown") throw new Error(p.error || "skippy-pc dropped the job");
+    }
+    throw new Error("skippy-pc took too long");
+  }
+  function row(s) {
+    const tr = document.createElement("tr"), a = document.createElement("td"), b = document.createElement("td"), c = document.createElement("td");
+    a.textContent = s.name; b.className = "muted"; b.textContent = s.transport + " · " + s.via;
+    const out = document.createElement("div"); out.className = "muted";
+    const btn = document.createElement("button"); btn.type = "button"; btn.textContent = "Test"; btn.style.padding = "3px 10px";
+    btn.onclick = async () => {
+      btn.disabled = true; out.className = "muted"; out.textContent = "Testing…";
+      try {
+        const r = await job({name: s.name});
+        if (r.ok) { out.className = ""; out.style.color = "var(--green)"; out.textContent = "● " + (r.server || "up") + " · " + r.ms + " ms · " + (r.tools || []).length + " tools: " + (r.tools || []).join(", "); }
+        else { out.className = "warn"; out.textContent = "○ " + (r.error || "failed"); }
+      } catch (e) { out.className = "warn"; out.textContent = "○ " + e.message; }
+      btn.disabled = false;
+    };
+    c.append(btn, out); tr.append(a, b, c); return tr;
+  }
+  async function load() {
+    state.textContent = "Asking skippy-pc…";
+    try {
+      const r = await job({});
+      table.replaceChildren(...(r.servers || []).map(row));
+      state.textContent = (r.servers || []).length ? (r.servers.length + " configured.") : "None configured (claude mcp add --scope user …).";
+      loaded = true;
+    } catch (e) { state.textContent = e.message; }
+  }
+  tile.addEventListener("click", () => { if (!loaded) load(); });
+})();
+</script>
 {% endblock %}
