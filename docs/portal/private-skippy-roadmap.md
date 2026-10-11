@@ -27,7 +27,7 @@ conversations and unpins each when the task is done; nothing else.
 | 12 | Search across every conversation | queued | | |
 | 13 | A small context meter ("start fresh soon") | queued | | |
 | 14 | Pins saved on the server so they follow him across devices | queued | | |
-| 15 | Mic tried in a real browser with a microphone (the Claude pane blocks capture) | waiting on the Captain | | |
+| 15 | Mic and Skippy's voice tried in a real browser | **done: the Captain confirmed voice-to-text and text-to-voice work (2026-10-10, 21:3x)** | | 21:3x |
 
 Decisions taken on the Captain's behalf (he said "proceed"; change any of them by saying so): the chat is exempt from the portal's
 no-scroll rule; new workspace repos are private; mail and calendar are out.
