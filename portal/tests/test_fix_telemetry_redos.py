@@ -203,7 +203,7 @@ def test_a_long_chat_message_does_not_freeze_the_portal():
     app, client, tel = make()
     message = "password_" * 444                          # 3996 characters
     started = time.perf_counter()
-    assert client.post("/chat/send", json={"message": message}).status_code == 200
+    assert client.post("/chat/send", json={"message": message}).status_code in (200, 503)   # a visitor's message is Mentat's; 503: none home in this test
     assert time.perf_counter() - started < 2.0
     assert [e for e in tel.since(tel.boot, 0)["events"] if e["kind"] == "chat"] == []   # and nothing of it is kept
 

@@ -366,7 +366,7 @@ def test_nothing_said_in_the_public_chat_is_recorded_unless_the_person_ticks_all
         assert client.post("/chat/send", json={**body, "history": []}).status_code == 200
     assert events(tel, "chat") == [] and events(tel, "action") == []
     assert "dragon" not in everything(tel) and "server_status" not in everything(tel)
-    chat_page = client.get("/").data.decode()
+    chat_page = client.get("/chat").data.decode()
     assert "Allow us to save your questions" in chat_page and 'class="save"' in chat_page and " checked" not in chat_page.split('class="save"')[1][:40]
 
 
@@ -581,7 +581,7 @@ def test_no_recording_warning_on_the_sign_in_page_or_in_the_chat():
     assert "records which pages you open" not in login_page and "Nothing is recorded" not in login_page   # the Captain's call
     assert 'href="/privacy"' in login_page                                                                # the footer link stays
     login(client, ADMIN)
-    chat_page = client.get("/").data.decode()
+    chat_page = client.get("/chat").data.decode()
     assert "are recorded for" not in chat_page and "don't type any" not in chat_page    # no warning: nothing is kept by default
 
 

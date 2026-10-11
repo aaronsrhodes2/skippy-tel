@@ -73,7 +73,7 @@ def test_raw_says_so_when_mentat_is_not_available():
 def test_raw_needs_the_same_sign_in_and_only_a_literal_true_turns_it_on(env):
     client, _, skippy = env
     assert client.post("/chat/send", json={"message": "hi", "raw": True}).status_code in (302, 401, 403)
-    login(client, FRIEND)
+    login(client, ADMIN)
     for notice in ("yes", 1, "true"):
         r = client.post("/chat/send", json={"message": "status?", "raw": notice})
         assert r.status_code == 200 and "raw" not in r.get_json()               # still the ordinary Haiku path
@@ -83,7 +83,7 @@ def test_raw_needs_the_same_sign_in_and_only_a_literal_true_turns_it_on(env):
 def test_the_chat_has_the_switch_and_keeps_raw_turns_out_of_the_history(env):
     client, _, _ = env
     login(client, ADMIN)
-    page = client.get("/").data.decode()
+    page = client.get("/chat").data.decode()
     assert 'class="key barney" aria-pressed="false"' in page and "Barney Style" in page      # a glyph key, unlit by default
     assert "Mentat only" not in page
     assert "const raw = !barney.on" in page                                      # not lit means straight to Mentat
@@ -172,7 +172,7 @@ def test_barney_style_reads_the_whole_chat_with_no_tools_and_a_grounding_instruc
 
 def test_an_ordinary_message_gets_no_barney_instruction_and_keeps_its_tools(env):
     client, _, skippy = env
-    login(client, FRIEND)
+    login(client, ADMIN)
     client.post("/chat/send", json={"message": "is the server up?"})
     system, _ = skippy.seen
     assert "## Barney Style" not in system and skippy.tools is not None

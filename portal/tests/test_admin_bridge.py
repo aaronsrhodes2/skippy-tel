@@ -72,7 +72,7 @@ def test_the_dashboard_is_a_bridge_page_of_widgets_and_the_private_skippy_has_mo
     assert 'id="private-skippy"' not in page and "skippy" not in controls                 # the chat is the front page now (front.html)
     for widget in ("Server", "Core · skippy-tel", "Home · skippy-pc", "Watcher", "Spend (estimate)", "Friends", "Discord, lately", "Experiments", "Home links"):
         assert f"<h3>{widget}</h3>" in page, widget                                      # every widget is still there
-    front = client.get("/").data.decode()
+    front = client.get("/chat").data.decode()
     assert 'id="ps-flow"' in front and 'class="wlog pg"' not in front                  # the chat (the front page) is a scrolling transcript, not pages
 
 

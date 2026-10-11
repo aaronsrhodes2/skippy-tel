@@ -169,22 +169,31 @@ def test_barney_style_gives_haiku_no_tools_at_all_and_a_friend_never_gets_admin_
     login(client, FRIEND_CHAT_ONLY)
     client.post("/chat/send", json={"message": "Give it to me Barney Style", "history": []})
     assert not fake.tools                                                          # Barney Style: no tools at all (nothing is computed or looked up)
+    fake.tools = fake.run_tool = None
+    fake.seen = None
+    client.post("/chat/send", json={"message": "is the server up?", "history": []})
+    assert fake.seen is None and fake.tools is None                                # visitor mode: a plain message is Mentat's, no model and no tools
+    client.post("/chat/send", json={"message": "/music something calm", "history": []})
+    assert fake.seen is None                                                        # and no verb reaches anything but Mentat
+    from test_app import ADMIN as CAPTAIN
+    login(client, CAPTAIN)
     client.post("/chat/send", json={"message": "is the server up?", "history": []})
     names = {t["name"] for t in (fake.tools or [])}
-    assert names and names <= ALLOWED_PUBLIC_TOOLS and not names & ADMIN_TOOLS    # a friend's normal chat: the portal's own tools, none of the Captain's
+    assert names and names <= ALLOWED_PUBLIC_TOOLS | ADMIN_TOOLS                    # only the Captain's chat is the general Skippy with the portal's tools
 
 
 def test_the_front_page_shows_a_friend_none_of_the_agent_and_nothing_that_could_reach_it(world):
     """The Captain sees Skippy Desktop on the front page; a friend's page must not even MENTION it: no markup, no script, no endpoint."""
     friend = world.test_client()
     login(friend, FRIEND_CHAT_ONLY)
-    page = friend.get("/").data.decode()
+    page = friend.get("/chat").data.decode()
     assert 'class="skippy-chat chat-bridge"' in page                                   # the public chat is there
+    assert "private-skippy" not in friend.get("/").data.decode()                       # nor does Home mention the agent
     for needle in ("private-skippy", "/me/workshop", "X-Workshop", "ps-form", "workshop_", "mode-agent", "modebar", "captain"):
         assert needle not in page, needle
     captain = world.test_client()
     login(captain, ADMIN)
-    page = captain.get("/").data.decode()
+    page = captain.get("/chat").data.decode()
     assert "private-skippy" in page and "/me/workshop/send" in page and 'class="bridge captain"' in page
 
 
@@ -193,6 +202,7 @@ def test_the_front_page_for_someone_without_the_chat_grant_is_the_apps_and_signe
     login(only_games, ADMIN)
     only_games.post("/admin/friends", data={"email": "gamer@example.com", "portals": ["valheim"]})
     login(only_games, "gamer@example.com")
-    assert only_games.get("/").headers["Location"].endswith("/apps")
+    assert only_games.get("/").status_code == 200 and b'data-tel="tile:skippy"' not in only_games.get("/").data   # Home is the launcher, with no Skippy tile
+    assert only_games.get("/chat").status_code in (302, 403)                            # and the Skippy app is closed to them
     anon = world.test_client()
     assert anon.get("/").status_code == 200 and b"Sign in" in anon.get("/").data and b"private-skippy" not in anon.get("/").data

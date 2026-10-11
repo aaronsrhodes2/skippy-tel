@@ -32,12 +32,12 @@ def test_bad_arguments_exit_2(argv):
     assert shot.main(argv) == 2
 
 
-def test_front_and_home_mean_the_front_page_which_git_bash_cannot_type(monkeypatch):
+def test_front_and_home_mean_the_chat_and_the_app_portal_which_git_bash_cannot_type(monkeypatch):
     seen = []
     monkeypatch.setattr(shot, "find_browser", lambda: "b")
     monkeypatch.setattr(shot, "shoot", lambda path, out, w, h, browser, timeout=90: seen.append(path) or 0)
     assert shot.main(["front", "--out", "x.png"]) == 0 and shot.main(["home", "--out", "x.png"]) == 0 and shot.main(["me", "--out", "x.png"]) == 0
-    assert seen == ["/", "/", "/me"]
+    assert seen == ["/chat", "/", "/me"]
 
 
 def test_no_browser_exits_3_and_installs_nothing(monkeypatch, capsys):
@@ -49,8 +49,9 @@ def test_no_browser_exits_3_and_installs_nothing(monkeypatch, capsys):
 def test_the_page_is_the_checkouts_portal_signed_in_as_the_scratch_admin():
     app = shot.make_app()
     client = app.test_client()
-    page = client.get("/")
-    assert page.status_code == 200 and b'id="private-skippy"' in page.data       # the front page for the scratch admin (the agent), no Google sign-in
+    page = client.get("/chat")
+    assert page.status_code == 200 and b'id="private-skippy"' in page.data       # the Skippy app for the scratch admin (the agent), no Google sign-in
+    assert client.get("/").status_code == 200 and b"private-skippy" not in client.get("/").data    # Home is the app portal
     assert app.config["SECRET_KEY"] != "test" and len(app.config["SECRET_KEY"]) == 64   # a fresh key, not the tests' known one
 
 
@@ -75,7 +76,7 @@ def fake_browser(tmp_path, png=PNG):
 
 def test_a_shot_is_taken_from_the_live_local_page_and_its_path_printed(tmp_path, capsys):
     out = tmp_path / "shots" / "me.png"
-    assert shot.shoot("/", out, 390, 844, fake_browser(tmp_path)) == 0
+    assert shot.shoot("/chat", out, 390, 844, fake_browser(tmp_path)) == 0
     assert out.read_bytes() == PNG and str(out.resolve()) in capsys.readouterr().out
 
 

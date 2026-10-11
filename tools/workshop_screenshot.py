@@ -4,7 +4,7 @@
 The private Skippy runs this after it pushed a change to portal/templates or portal/static, then prints
 `SKIPPY_IMAGE: <png>` so the bridge attaches the picture under its answer (he works by outcome: show him the result).
 
-    python tools/workshop_screenshot.py front --out .skippy-shots/front.png [--width 390 --height 844]      (front = the Skippy chat page, /)
+    python tools/workshop_screenshot.py front --out .skippy-shots/front.png [--width 390 --height 844]      (front = the Skippy chat page, /chat; home = the app portal, /)
     python tools/workshop_screenshot.py me --out .skippy-shots/me.png                                        (the dashboard)
 
 What it does, and why it is safe:
@@ -115,7 +115,7 @@ def main(argv=None) -> int:
     ap.add_argument("--height", type=int, default=844)
     args = ap.parse_args(argv)
     # "me" works as well as "/me": Git Bash on Windows rewrites an argument starting with / into a C:/ path
-    args.path = "/" if args.path in ("front", "home") else (args.path if args.path.startswith("/") else "/" + args.path)
+    args.path = {"front": "/chat", "chat": "/chat", "home": "/"}.get(args.path) or (args.path if args.path.startswith("/") else "/" + args.path)
     if "//" in args.path or ":" in args.path or "\\" in args.path or not args.out.lower().endswith(".png") \
             or not (200 <= args.width <= 2000 and 200 <= args.height <= 4000):
         print("give a page path like /me, an --out ending in .png, and a sane size", file=sys.stderr)

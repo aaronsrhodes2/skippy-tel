@@ -258,7 +258,7 @@ def test_a_game_pages_restart_brings_back_that_game_only(env):
 
 def test_chat_round_trip(env):
     client, _, skippy = env
-    login(client, FRIEND)
+    login(client, ADMIN)
     resp = client.post("/chat/send", json={"message": "status?",
                                            "history": [{"role": "user", "content": "hi"},
                                                        {"role": "assistant", "content": "yo"}]})
@@ -271,7 +271,7 @@ def test_chat_round_trip(env):
 
 def test_chat_errors_are_shown_not_raised(env):
     client, _, skippy = env
-    login(client, FRIEND)
+    login(client, ADMIN)
 
     def boom(system, messages, **_):
         raise chat.ChatError("Skippy is rate-limited right now.")
@@ -499,8 +499,15 @@ def test_settings_reject_values_compose_cant_carry(env):
 # ── Skippy's chat tools ───────────────────────────────────────────────────────
 
 def _tools_for(client, skippy, email):
+    """The tools the chat would hand this person's model. The Captain's chat is the general Skippy and reaches the model; a visitor's is Mentat
+    and Barney Style only (no tools reach any model), so theirs are read straight from the app's tool builder, the one the Captain's uses."""
     login(client, email)
-    client.post("/chat/send", json={"message": "is it up?"})
+    if email == ADMIN:
+        client.post("/chat/send", json={"message": "is it up?"})
+    else:
+        with client.application.test_request_context("/"):
+            tools = client.application.extensions["chat_tools_for"]({"email": email})
+        skippy.tools, skippy.run_tool = tools.schemas(), tools.run
     return {t["name"] for t in skippy.tools}, skippy.run_tool
 
 
@@ -924,15 +931,21 @@ def test_task_failure_is_reported_not_raised(env, monkeypatch):
     assert not result["ok"] and "bot token" in result["message"]
 
 
-def test_the_public_chat_is_haiku_for_everyone_whatever_they_type(env):
+def test_visitors_get_mentat_and_barney_style_only_and_the_captain_gets_haiku(env):
     client, _, skippy = env
-    for who in (FRIEND, ADMIN):                          # the Captain's Opus lives in the private Skippy, not here
-        login(client, who)
-        for phrase in ("hi", "trust the awesomeness", "Put on your Thinking Cap", "use sonnet",
-                       "model: claude-opus-5", "solid gold"):
-            resp = client.post("/chat/send", json={"message": phrase, "model": "claude-opus-5"})
-            assert resp.status_code == 200 and "model" not in resp.get_json(), (who, phrase)
-            assert skippy.model == SETTINGS["CHAT_MODEL"] == "claude-haiku-4-5", (who, phrase)
+    login(client, ADMIN)
+    for phrase in ("hi", "trust the awesomeness", "Put on your Thinking Cap", "use sonnet", "model: claude-opus-5", "solid gold"):
+        resp = client.post("/chat/send", json={"message": phrase, "model": "claude-opus-5"})        # the Captain's Opus lives in the private Skippy
+        assert resp.status_code == 200 and "model" not in resp.get_json(), phrase
+        assert skippy.model == SETTINGS["CHAT_MODEL"] == "claude-haiku-4-5", phrase
+    skippy.seen = skippy.tools = None
+    login(client, FRIEND)
+    resp = client.post("/chat/send", json={"message": "hi"})                                        # a visitor's plain message is Mentat's, never a model's
+    assert resp.status_code in (200, 503) and skippy.seen is None
+    resp = client.post("/chat/send", json={"message": "/music something calm", "raw": False})
+    assert skippy.seen is None
+    resp = client.post("/chat/send", json={"message": "Give it to me Barney Style"})                 # Barney Style: Haiku explaining, with no tools at all
+    assert resp.status_code == 200 and skippy.tools is None and skippy.force_tool is None and "Barney Style" in skippy.seen[0]
 
 
 def test_there_is_one_chat_interface_and_it_is_the_skippy_app(env):
@@ -941,8 +954,8 @@ def test_there_is_one_chat_interface_and_it_is_the_skippy_app(env):
     for url in ("/games", "/games/dragonwilds", "/experiments", "/"):
         page = client.get(url).data.decode()
         assert 'id="skippy-dock"' not in page and 'class="skippy-chat"' not in page, url   # no second chat UI anywhere
-    assert client.get("/").data.decode().count('class="skippy-chat chat-bridge"') == 1
-    client.post("/chat/send", json={"message": "hi", "page": "/games/dragonwilds"})
+    assert client.get("/chat").data.decode().count('class="skippy-chat chat-bridge"') == 1
+    client.post("/chat/send", json={"message": "Barney Style please", "page": "/games/dragonwilds"})   # a visitor reaches Haiku only this way
     system, _ = skippy.seen
     assert "/games/dragonwilds" in system and "NOT the Captain" in system   # FRIEND isn't an admin
 
@@ -954,13 +967,13 @@ def test_skippy_is_a_grant(env):
     _add_friend(client, PAL, ["dragonwilds"])                         # no skippy
     login(client, PAL)
     assert 'data-tel="tile:skippy"' not in client.get("/apps").data.decode()     # no Skippy tile without the grant
-    assert client.get("/").headers["Location"].endswith("/apps")           # and the front page (Skippy) sends them to the apps
+    assert client.get("/chat").status_code in (302, 403)                   # and the Skippy app is closed to them
     assert client.post("/chat/send", json={"message": "hi"}).status_code == 403
     _add_friend(client, PAL, ["dragonwilds", "skippy"])
     login(client, PAL)
     assert 'data-tel="tile:skippy"' in client.get("/apps").data.decode()
-    assert client.get("/").status_code == 200                              # the front page is Skippy
-    assert client.post("/chat/send", json={"message": "hi"}).status_code == 200
+    assert client.get("/chat").status_code == 200                          # the Skippy app
+    assert client.post("/chat/send", json={"message": "hi"}).status_code in (200, 503)   # a visitor's is Mentat's (503: none home in this test)
 
 
 def test_pre_portal_friend_entries_keep_their_games_and_chat(env):
@@ -969,7 +982,7 @@ def test_pre_portal_friend_entries_keep_their_games_and_chat(env):
     vm.metadata["portal-friends"] = json.dumps({PAL: {"games": ["valheim"], "added_by": ADMIN, "added": "2026-09-29"}})
     login(client, PAL)
     assert client.get("/games/valheim").status_code == 200
-    assert client.post("/chat/send", json={"message": "hi"}).status_code == 200
+    assert client.post("/chat/send", json={"message": "hi"}).status_code != 403
 
 
 # ── front page ────────────────────────────────────────────────────────────────
@@ -1058,7 +1071,7 @@ FIGHT = {"weapon": WVA_CATALOG["weapons"][0]["weapon"], "armor_layers": WVA_CATA
          "environment": "atmosphere_earth", "distance_m": 100}
 
 
-def _chat_with(mentat, email=FRIEND):
+def _chat_with(mentat, email=ADMIN):
     vm, skippy = FakeVm(), FakeSkippy()
     app = portal.create_app(dict(SETTINGS), vm=vm, skippy=skippy, mentat=mentat)
     client = app.test_client()
@@ -1093,7 +1106,7 @@ def test_physics_goes_to_mentat_with_qwen_at_home():
     asked = []
     stop = _home_with_mentat(app.test_client(), lambda q: asked.append(q) or
                              {"result": {"value": 159.6, "units": "m/s", "interpreter": "keywords + qwen"}})
-    login(client, FRIEND)
+    login(client, ADMIN)
     skippy.reply = lambda system, messages, tools=None, run_tool=None, **_: (
         setattr(skippy, "tools", tools) or run_tool("ask_mentat", {"question": "5 cm copper ball from 10 km?"}))
     data = client.post("/chat/send", json={"message": "/physics 5 cm copper ball from 10 km?"}).get_json()
@@ -1108,7 +1121,7 @@ def test_no_qwen_at_home_means_no_physics_answer():
     app = portal.create_app(dict(SETTINGS), vm=vm, skippy=skippy)
     client = app.test_client()
     stop = _home_with_mentat(app.test_client(), lambda q: {"error": "Qwen (Ollama) is unreachable"})
-    login(client, FRIEND)
+    login(client, ADMIN)
     errors = []
     def reply(system, messages, tools=None, run_tool=None, **_):
         try:
@@ -1127,7 +1140,7 @@ def test_direct_verbs_force_the_tool_and_badges_list_what_you_have():
     app = portal.create_app(dict(SETTINGS), vm=vm, skippy=skippy)
     client = app.test_client()
     stop = _home_with_mentat(app.test_client(), lambda q: {"result": {"value": 1}})
-    login(client, FRIEND)
+    login(client, ADMIN)
     client.post("/chat/send", json={"message": "/physics how fast does a 5 cm copper ball fall 10 km?"})
     assert skippy.force_tool == "ask_mentat"
     assert skippy.seen[1][-1]["content"] == "how fast does a 5 cm copper ball fall 10 km?"   # verb stripped
@@ -1137,6 +1150,7 @@ def test_direct_verbs_force_the_tool_and_badges_list_what_you_have():
     assert skippy.force_tool == "server_status"
     client.post("/chat/send", json={"message": "is it up?"})
     assert skippy.force_tool is None
+    login(client, FRIEND)
     badges = client.get("/chat/badges").get_json()
     stop.set()
     assert [b["verb"] for b in badges["Physics"]] == ["physics"]
@@ -1496,8 +1510,8 @@ def test_friends_chat_is_rate_limited_but_the_captain_is_not(env):
     client, _, _ = env
     _add_friend(client, PAL, ["skippy"])
     login(client, PAL)
-    codes = [client.post("/chat/send", json={"message": "hi"}).status_code for _ in range(61)]
-    assert codes[:60] == [200] * 60 and codes[60] == 429
+    codes = [client.post("/chat/send", json={"message": "hi"}).status_code for _ in range(61)]     # a visitor's messages are Mentat's (503: none home here)
+    assert 429 not in codes[:60] and codes[60] == 429
     login(client, ADMIN)
     assert all(client.post("/chat/send", json={"message": "hi"}).status_code == 200 for _ in range(65))
 
@@ -1612,7 +1626,11 @@ def test_music_is_offered_to_the_admin_only_and_only_while_home_says_it_can(env)
     for who, ready, expected in ((ADMIN, False, False), (ADMIN, True, True), (FRIEND, True, False)):
         _advertise(client, token, make_music=ready)
         login(client, who)
-        client.post("/chat/send", json={"message": "hi"})
+        if who == ADMIN:
+            client.post("/chat/send", json={"message": "hi"})
+        else:                                             # a visitor's chat reaches no model; ask the tool builder
+            with client.application.test_request_context("/"):
+                skippy.tools = client.application.extensions["chat_tools_for"]({"email": who}).schemas()
         names = _tool_names(skippy)
         assert ("make_music" in names and "music_result" in names) is expected, (who, ready)
 

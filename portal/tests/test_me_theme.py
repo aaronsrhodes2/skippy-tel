@@ -38,7 +38,7 @@ def test_me_is_its_own_app_with_the_living_background_in_purple():
     login(c, ADMIN)
     page = c.get("/me").data.decode()
     assert 'data-app="me"' in page and '<canvas class="alive"' in page
-    front = c.get("/").data.decode()                                                     # the Captain's front page wears the same purple
+    front = c.get("/chat").data.decode()                                                     # the Captain's front page wears the same purple
     assert 'class="bridge captain"' in front and '<canvas class="alive"' in front and "#a64dff" in front
     assert re.search(r"Bridge\.alive\(document\.querySelector\(\"canvas\.alive\"\), \{colors: \[\"#[0-9a-f]{6}\"", page)
     assert page.index("bridge-alive.js") < page.index("Bridge.alive(")             # loaded before it is called

@@ -200,15 +200,15 @@
 <body{% if bridge %} class="bridge{% if captain %} captain{% endif %}"{% endif %} data-app="{% block app %}{% endblock %}">
 {% if bridge %}
 {% include "_glyphs.html" %}
-{% set on_front = request.endpoint == 'index' %}{% set on_apps = request.endpoint == 'apps' %}{% set on_home = on_front or on_apps %}
+{% set on_front = request.endpoint == 'chat.index' %}{% set on_apps = request.endpoint in ('index', 'apps') %}{% set on_home = on_front or on_apps %}
 {# The strip along the top: back, what this is (a glyph), home. On the front page (Skippy): who you are, and the way to the apps. On the apps: the way back to Skippy, and the way out. #}
 <header class="hud">
-  {% if on_front %}
+  {% if on_apps %}
     <span class="who" role="img" aria-label="{{ user.name if user else '' }}" title="{{ user.name if user else '' }}">{% if user and user.picture %}<img src="{{ user.picture }}" alt="">{% else %}<svg class="g" aria-hidden="true" style="width:24px;height:24px"><use href="#g-user"/></svg>{% endif %}</span>
-  {% elif on_apps %}
-    <a class="key" href="{{ url_for('index') }}" aria-label="Back to Skippy" title="Back to Skippy"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></a>
+  {% elif on_front %}
+    <a class="key" href="{{ url_for('index') }}" aria-label="Home" title="Home"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></a>
   {% else %}
-    <a class="key" href="{{ (self.hud_back() | trim) or url_for('apps') }}" aria-label="Back" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></a>
+    <a class="key" href="{{ (self.hud_back() | trim) or url_for('index') }}" aria-label="Back" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></a>
   {% endif %}
   <span class="rail"></span>
   {% if (self.glyph() | trim) == 'can' %}<img class="g mark face" src="{{ url_for('static', filename='skippy/skippy-head.png') }}" alt="Skippy" width="28" height="28" style="border-radius:50%">{% else %}<svg class="g mark" aria-hidden="true"><use href="#g-{{ self.glyph() | trim }}"/></svg>{% endif %}
@@ -216,8 +216,6 @@
   <button type="button" class="key" id="fs-key" hidden aria-label="Full screen" title="Full screen"><svg class="g" aria-hidden="true"><use href="#g-fs"/></svg></button>
   {% if user and on_apps %}
     <a class="key" href="{{ url_for('auth.logout') }}" aria-label="Sign out" title="Sign out"><svg class="g" aria-hidden="true"><use href="#g-out"/></svg></a>
-  {% elif user and on_front %}
-    <a class="key" href="{{ url_for('apps') }}" aria-label="Apps" title="Apps"><svg class="g" aria-hidden="true"><use href="#g-tools"/></svg></a>
   {% elif user %}
     <a class="key" href="{{ url_for('index') }}" aria-label="Home" title="Home"><svg class="g" aria-hidden="true"><use href="#g-home"/></svg></a>
   {% else %}

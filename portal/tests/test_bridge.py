@@ -158,7 +158,7 @@ def test_a_retired_module_is_gone_for_everyone_not_just_the_captain(env):
     login(client, ADMIN)
     client.post("/admin/modules", data={"id": "skippy", "action": "retire"})
     login(client, FRIEND)
-    assert "skippy" not in _ids(client.get("/").data.decode())
+    assert "skippy" not in _ids(client.get("/chat").data.decode())
 
 
 def test_a_failed_read_retires_nothing_and_a_failed_write_is_said_not_half_done(env):
@@ -210,7 +210,7 @@ def test_terraform_leaves_the_retired_list_alone():
 def test_the_chat_offers_languages_each_in_its_own_script(env):
     client, _, _ = env
     login(client, ADMIN)
-    page = client.get("/").data.decode()
+    page = client.get("/chat").data.decode()
     for code, name in chat.LANGUAGES.items():
         assert f'<option value="{code}">{name}</option>' in page
     assert {"日本語", "العربية", "हिन्दी"} <= set(chat.LANGUAGES.values())
@@ -218,7 +218,7 @@ def test_the_chat_offers_languages_each_in_its_own_script(env):
 
 def test_a_chosen_language_reaches_the_model_and_leaves_names_and_codes_alone(env):
     client, _, skippy = env
-    login(client, FRIEND)
+    login(client, ADMIN)
     client.post("/chat/send", json={"message": "hola", "lang": "es"})
     system, _ = skippy.seen
     assert "## Language" in system and "Español" in system and "join codes" in system
@@ -234,7 +234,7 @@ def test_a_chosen_language_reaches_the_model_and_leaves_names_and_codes_alone(en
 def test_the_chat_is_one_screen_of_pages_and_glyph_keys_with_a_living_background(env):
     client, _, _ = env
     login(client, ADMIN)
-    page = client.get("/").data.decode()                                           # the front page: the Captain's page also carries this public chat
+    page = client.get("/chat").data.decode()                                           # the front page: the Captain's page also carries this public chat
     assert 'class="bridge' in page and '<canvas class="alive"' in page and "Bridge.alive(" in page
     assert 'class="pg log"' in page and 'class="pg-flow"' in page                  # the conversation is pages, not a scroller
     for sheet in ("lang", "tools", "memory", "rec"):
@@ -249,7 +249,7 @@ def test_the_chat_is_one_screen_of_pages_and_glyph_keys_with_a_living_background
 def test_a_friend_gets_the_chat_without_the_captains_memory_key(env):
     client, _, _ = env
     login(client, FRIEND)
-    page = client.get("/").data.decode()
+    page = client.get("/chat").data.decode()
     assert 'data-open="memory"' not in page and 'data-open="tools"' in page and 'data-open="lang"' in page
 
 
@@ -272,7 +272,7 @@ def test_the_background_attaches_and_detaches_and_never_repeats_a_path():
 def test_the_page_pulses_the_background_as_words_go_back_and_forth(env):
     client, _, _ = env
     login(client, ADMIN)
-    page = client.get("/").data.decode()
+    page = client.get("/chat").data.decode()
     assert page.count("alive().pulse(") >= 2                                       # a question goes out, an answer comes back
 
 

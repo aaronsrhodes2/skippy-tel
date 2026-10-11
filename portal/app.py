@@ -148,9 +148,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     @app.get("/")
     def index():
-        """The front door: Skippy the Magnificent. Signed out, Google sign-in. A member with the chat grant gets the chat: the public
-        brain (Haiku and Mentat: no tools that write or run anything) for everyone, and for the Captain alone also the agent (Claude Code on
-        skippy-pc), whose endpoints each check for the Captain again. Anyone on the list without the chat grant goes to the apps."""
+        """Home: the app portal. Signed out, Google sign-in. Signed in, the launcher: a card per sub-portal the person may use, Skippy
+        (the chat, /chat) among them. The Captain's agent lives in the Skippy app too (see chat.index)."""
         user = auth.current_user()
         if not user and auth.promote_visitor():   # approved since they asked: they're in, no second sign-in
             user = auth.current_user()
@@ -158,10 +157,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             return redirect(url_for("request_access"))
         if not (user and auth.is_allowed(user["email"])):
             return render_template("login.html")
-        if not auth.has_portal(me(), "skippy"):
-            return redirect(url_for("apps"))
-        captain = auth.is_admin(me())
-        return render_template("front.html", captain=captain, **(workshop_context() if captain else {}))
+        return launcher_page()
 
     @app.get("/manifest.webmanifest")
     def site_manifest():
@@ -181,7 +177,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @app.get("/apps")
     @auth.login_required
     def apps():
-        """The launcher: a card per sub-portal the viewer may use (it used to be the front page)."""
+        """The launcher's older address: the same page as Home (/)."""
+        return launcher_page()
+
+    def launcher_page():
         status, _ = vm_status()
         shown = my_games()
         # The Games tile names the game that's up (or set for the next wake-up), only from the games this
@@ -1323,6 +1322,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                                     home_mentat=home if home.mentat_ready() else None,
                                     home_music=home if home.can("make_music") else None)
 
+    app.extensions["chat_tools_for"] = tools_for      # for the tests: what a given person's tools are, without a model in the way
+
     @talk.get("/badges")
     @skippy_required
     def badges():
@@ -1342,7 +1343,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @talk.get("")
     @skippy_required
     def index():
-        return redirect(url_for("index"))          # the chat is the front page now
+        """The Skippy app: the public brain (Haiku and Mentat: no tools that write or run anything) for everyone with the chat grant, and for
+        the Captain alone also the agent (Claude Code on skippy-pc, templates/_workshop.html), whose endpoints each check for the Captain again."""
+        captain = auth.is_admin(me())
+        return render_template("front.html", captain=captain, **(workshop_context() if captain else {}))
 
     def log_mentat_gap(user, question, out, how, save):
         """A physics question Mentat could not model: auto-file it. One structured line in Cloud Run's logs
@@ -1411,10 +1415,14 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             rest = {"ask_mentat": "(the user chose /physics with no question: ask what to compute)",
                     "make_music": "(the user chose /music with no description: ask what kind of music to make)"
                     }.get(force, "Go ahead.")
-        if body.get("raw") is True:
+        admin = auth.is_admin(user["email"])
+        # Visitor mode: Mentat, and Barney Style (Haiku explaining what Mentat found, no tools). Nothing else is reachable, whatever the
+        # page sends: the Captain alone gets the general Skippy with the portal's tools (quick mode) and the agent.
+        if body.get("raw") is True or (not admin and not chat.wants_barney(rest)):
             return raw_mentat(user, message, rest, body.get("save") is True)
+        if not admin:
+            force = None
         try:
-            admin = auth.is_admin(user["email"])
             tools = tools_for(user)
             model = app.config["CHAT_MODEL"]
             page = str(body.get("page") or "")[:100] or None

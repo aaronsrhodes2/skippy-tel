@@ -210,16 +210,18 @@ only when the gate's `/health` says `ready`. Direct play when the catalog says `
 `portal/static/vendor/`, Safari's own on Apple). Run it against the REAL gate on this machine with `python portal/tests/dev_video.py`.
 Full description and tests: `docs/portal/README.md` → Nagatha's Video Service.
 
-## The front page is Skippy the Magnificent (`/`), and who may reach what
+## Home is the app portal (`/`); Skippy the Magnificent is the chat app (`/chat`), in two modes
 
-`/` is the Skippy chat for every member with the chat grant (signed-out people still get the Google sign-in; a member without the grant is sent to
-`/apps`, the launcher that used to be the front page). Everyone gets the PUBLIC brain (`templates/_chat.html`: Haiku with the portal's own tools, or
-Mentat straight; Barney Style gives Haiku NO tools; nothing can write or run anything). The Captain, and only he, also gets the AGENT
-(`templates/_workshop.html`, Skippy Desktop: Claude Code on skippy-pc) and lands in it, with a key to flip to the quick brain; his page also wears
-the purple theme (`body.captain`). `/chat` redirects here; `/me` is the dashboard widgets only. Showing the agent only to him is a convenience, not
-the security: every `/me/workshop/*` call checks for the Captain again and needs the `X-Workshop` header, and
+`/` is Home: signed out, the Google sign-in; signed in, the launcher (a card per sub-portal the person may use; `/apps` is the same page under its older
+address). The Skippy tile opens `/chat` (needs the chat grant). `/chat` has two modes, decided on the server, never by what the page sends:
+**visitor mode** (everyone with the grant): ONLY Mentat (straight, "raw") and Barney Style (Haiku explaining what Mentat found, NO tools); a plain
+message, a slash verb or a model name never reaches Haiku or any portal tool. **Admin mode** (the Captain): the AGENT (`templates/_workshop.html`,
+Skippy Desktop: Claude Code on skippy-pc) with a key to flip to the quick general Skippy (Haiku with the portal's tools); his page wears the purple theme
+(`body.captain`). `/me` is the dashboard widgets only. Showing the agent only to him is a convenience, not the security: every `/me/workshop/*`
+call checks for the Captain again and needs the `X-Workshop` header, and
 **`portal/tests/test_route_access.py` classifies every route (public, machine, beacon, member, grant, admin) and fails on any new unclassified one
 or any under-guarded one**, probing nobody, a signed-in stranger and a chat-only friend. A new route must be added to its REGISTRY.
+The animated 3D Skippy (`templates/_skippy3d.html`, `static/skippy-3d.js`, model in `static/skippy/`) lives in the corner of `/chat`.
 
 **Full screen on phones and tablets:** `/manifest.webmanifest` (public) asks for `display: fullscreen` (falling back to standalone), so Add to Home Screen opens the
 portal with no browser bars; the music and video apps keep their own manifests (their pages override `{% block pwa %}`). The top strip also has a
