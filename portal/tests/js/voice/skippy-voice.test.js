@@ -27,3 +27,39 @@ test("speakable never exceeds the gate's 500 characters and cuts at a sentence",
   assert.ok(out.endsWith("."));
   assert.ok(V.speakable("word ".repeat(300)).length <= V.MAX_SPEECH);
 });
+
+// A microphone, simulated: levels every 60 ms.
+function run(vad, levels) {
+  const events = []; let t = 0;
+  for (const [lv, ms] of levels) for (let i = 0; i < ms; i += 60) { t += 60; const e = vad.push(lv, t); if (e) events.push([e, t]); }
+  return events;
+}
+
+test("the silence detector hears speech begin once, and the end only after a pause", () => {
+  const ev = run(V.createVad(), [[0.004, 1000], [0.12, 1200], [0.004, 1000], [0.004, 1000]]);
+  assert.deepEqual(ev.map(e => e[0]), ["speech", "end"]);
+  assert.ok(ev[0][1] >= 1000 && ev[0][1] <= 1400);                                    // began when the voice did
+  assert.ok(ev[1][1] - 2200 >= 1300 && ev[1][1] - 2200 <= 1700, String(ev[1][1]));    // ended about 1.4 s into the pause
+});
+
+test("a short pause inside a sentence does not end it", () => {
+  const ev = run(V.createVad(), [[0.004, 800], [0.12, 1000], [0.004, 700], [0.12, 1000], [0.004, 1800]]);
+  assert.deepEqual(ev.map(e => e[0]), ["speech", "end"]);                               // one utterance, not two
+});
+
+test("nothing is heard in a quiet room, and a steady noisy room is not speech", () => {
+  assert.deepEqual(run(V.createVad(), [[0.004, 3000]]), []);
+  const noisy = run(V.createVad(), [[0.05, 2500], [0.35, 800], [0.05, 2000]]);          // fan noise, then a voice well above it
+  assert.deepEqual(noisy.map(e => e[0]), ["speech", "end"]);
+  assert.ok(noisy[0][1] >= 2500);                                                       // the fan alone never counted
+});
+
+test("a click is not speech", () => {
+  assert.deepEqual(run(V.createVad(), [[0.004, 600], [0.2, 60], [0.004, 3000]]), []);
+});
+
+test("saying stop alone cancels the send; stop inside a sentence does not", () => {
+  for (const yes of ["stop", "Stop.", "cancel", "Wait!", "hold on", "don't send", "Don't send it.", "never mind", "no", "okay stop", "abort"]) assert.ok(V.STOP_RE.test(yes), yes);
+  for (const no of ["stop the server and redeploy", "no I want it orange", "please wait for the deploy", "cancel the subscription", "go", "stopwatch"]) assert.ok(!V.STOP_RE.test(no), no);
+  assert.equal(V.SEND_DELAY_MS, 4000);
+});

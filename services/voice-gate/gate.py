@@ -8,6 +8,8 @@ internet exactly two things:
     GET  /health                     {"ok", "ready", "whisper", "tts"}                 (no pass: the reporter's probe)
     POST /t/<pass>/stt[?lang=xx]     body = one recording (webm/ogg/mp4/wav, at most 4 MB) -> {"text", "lang"}   (Whisper, at home)
     POST /t/<pass>/tts               {"text"} (at most 500 chars) -> audio/mpeg, Skippy's voice (ElevenLabs via flask-api)
+    POST /t/<pass>/summary           {"text"} (at most 8000 chars) -> {"text"}: what a person would SAY aloud about it, 2 to 4 short
+                                     sentences (the home Ollama writes it); any pass. A long reply is spoken as this, not word for word
 
 Passes work like the music and video gates', with their own label and signed text, so none of the three opens another. Two
 scopes: "listen" (anyone the portal lets chat: /stt only) and "speak" (the Captain's: /stt and /tts). The cloned Skippy voice is
@@ -37,6 +39,13 @@ AUDIO_TYPES = {"audio/webm": ".webm", "audio/ogg": ".ogg", "audio/mp4": ".m4a", 
                "audio/x-wav": ".wav", "audio/aac": ".aac", "audio/x-m4a": ".m4a"}
 MAX_AUDIO = 4 * 1024 * 1024
 MAX_TEXT = 500
+MAX_SUMMARY_IN = 8000
+SUMMARY_PROMPT = (
+    "You turn a written chat reply into what a person would SAY out loud to a friend sitting next to them. Keep the key facts, "
+    "numbers, names and any question that was asked, in 2 to 4 short sentences, under 60 words in all. Keep the writer's attitude "
+    "and first person. Say nothing that cannot be spoken: no markdown, no code, no URLs, no file paths, no symbols read out (say "
+    "'a link' or the name instead). If it lists steps, say how many and the main one. Reply with ONLY the spoken words.\n\n"
+    "THE REPLY:\n")
 MESSAGES = {400: "bad request", 403: "forbidden", 404: "not found", 405: "method not allowed", 413: "too large",
             415: "unsupported audio", 429: "too many requests", 500: "something went wrong",
             502: "the voice service sent something unusable", 503: "the voice service is not answering"}
@@ -67,8 +76,20 @@ def valid(key: bytes, token: str, now: float) -> str | None:
     return None
 
 
+def spoken(text: str) -> str:
+    """The model's answer made safe to speak: no markdown marks, one line, at most 400 characters (cut at a sentence)."""
+    t = re.sub(r"```.*?```", " ", str(text or ""), flags=re.S)
+    t = re.sub(r"https?://\S+", "", re.sub(r"[`*_#>~|]+", "", t))
+    t = re.sub(r"\s+", " ", t).strip()
+    if len(t) > 400:
+        cut = t[:400]
+        at = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+        t = cut[:at + 1] if at > 150 else cut
+    return t.strip()
+
+
 def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slots: int = 3,
-               post=requests.post, get=requests.get) -> Flask:
+               post=requests.post, get=requests.get, ollama_url: str = "", summary_model: str = "qwen2.5:7b") -> Flask:
     app = Flask(__name__, static_folder=None)
     app.url_map.merge_slashes = False
     app.config["MAX_CONTENT_LENGTH"] = MAX_AUDIO + 4096
@@ -181,6 +202,35 @@ def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slot
             busy.release()
         return Response(audio, mimetype="audio/mpeg", headers={"Cache-Control": "no-store"})
 
+    @app.post("/t/<token>/summary")
+    def summary(token):
+        body = request.get_json(silent=True)
+        text = body.get("text") if isinstance(body, dict) else None
+        if not isinstance(text, str) or not text.strip():
+            return err(400)
+        if len(text) > MAX_SUMMARY_IN:
+            return err(413)
+        if not ollama_url:
+            return err(503)
+        if not busy.acquire(blocking=False):
+            return err(429)
+        try:
+            r = post(f"{ollama_url}/api/generate", json={"model": summary_model, "prompt": SUMMARY_PROMPT + text.strip(), "stream": False,
+                                                          "options": {"temperature": 0.3, "num_predict": 160}}, timeout=45)
+            if r.status_code != 200:
+                return err(503)
+            said = r.json().get("response") if isinstance(r.json(), dict) else None
+        except requests.RequestException:
+            return err(503)
+        except ValueError:
+            return err(502)
+        finally:
+            busy.release()
+        said = spoken(said) if isinstance(said, str) else ""
+        if not said:
+            return err(502)
+        return Response(json.dumps({"text": said}), mimetype="application/json", headers={"Cache-Control": "no-store"})
+
     return app
 
 
@@ -190,4 +240,6 @@ def from_env() -> Flask:
     if not token:
         logging.warning("voice-gate: SKIPPY_HOME_TOKEN isn't set; every pass will be refused")
     return create_app(gate_key(token) if token else b"", os.environ.get("WHISPER_URL", "http://whisper:8000").rstrip("/"),
-                      os.environ.get("TTS_URL", "http://flask-api:5000").rstrip("/"))
+                      os.environ.get("TTS_URL", "http://flask-api:5000").rstrip("/"),
+                      ollama_url=os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/"),
+                      summary_model=os.environ.get("SUMMARY_MODEL", "qwen2.5:7b"))

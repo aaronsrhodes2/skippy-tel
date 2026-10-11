@@ -28,10 +28,11 @@ class Fake:
         self.posts, self.gets = [], []
         self.stt = Resp(200, {"english_text": " hello there ", "detected_lang": "en"})
         self.tts = Resp(200, content=b"ID3audio")
+        self.ollama = Resp(200, {"response": "Done: the pill is orange and the tests pass."})
 
     def post(self, url, **kw):
         self.posts.append((url, kw))
-        return self.stt
+        return self.ollama if "/api/generate" in url else self.stt
 
     def get(self, url, **kw):
         self.gets.append((url, kw))
@@ -41,7 +42,7 @@ class Fake:
 @pytest.fixture
 def stack():
     fake = Fake()
-    app = gate.create_app(KEY, "http://w", "http://t", clock=lambda: NOW, post=fake.post, get=fake.get)
+    app = gate.create_app(KEY, "http://w", "http://t", clock=lambda: NOW, post=fake.post, get=fake.get, ollama_url="http://o")
     return app.test_client(), fake
 
 
@@ -112,3 +113,47 @@ def test_only_a_speak_pass_makes_skippy_talk(stack):
     assert c.post(f"/t/{speak()}/tts", json={"text": "x" * 501}).status_code == 413
     fake.tts = Resp(503)
     assert c.post(f"/t/{speak()}/tts", json={"text": "hi"}).status_code == 503
+
+
+def ollama_calls(fake):
+    return [c for c in fake.posts if "/api/generate" in c[0]]
+
+
+def test_a_long_reply_becomes_a_few_spoken_sentences_for_any_pass(stack):
+    c, fake = stack
+    for token in (listen(), speak()):                                      # the Captain's pass and everyone else's
+        r = c.post(f"/t/{token}/summary", json={"text": "## Done\n\nI changed `portal/app.py`, ran the tests and deployed. " * 20})
+        assert r.status_code == 200 and r.get_json() == {"text": "Done: the pill is orange and the tests pass."}
+    body = ollama_calls(fake)[0][1]["json"]
+    assert body["model"] == "qwen2.5:7b" and body["stream"] is False and "ONLY the spoken words" in body["prompt"]
+    assert "THE REPLY:" in body["prompt"] and body["options"]["num_predict"] <= 200
+
+
+def test_the_summary_is_made_safe_to_speak(stack):
+    c, fake = stack
+    fake.ollama = Resp(200, {"response": "**Done.** See https://x.test/a and `code`!\n\n```py\nprint(1)\n```\nAll green."})
+    out = c.post(f"/t/{listen()}/summary", json={"text": "long"}).get_json()["text"]
+    assert out == "Done. See and code! All green." and "*" not in out and "http" not in out
+    fake.ollama = Resp(200, {"response": ("A sentence that goes on. " * 40)})
+    assert len(c.post(f"/t/{listen()}/summary", json={"text": "long"}).get_json()["text"]) <= 400
+
+
+def test_the_summary_refuses_junk_and_survives_a_dead_ollama(stack):
+    c, fake = stack
+    assert c.post(f"/t/{listen()}/summary", json={"text": ""}).status_code == 400
+    assert c.post(f"/t/{listen()}/summary", json={"nope": 1}).status_code == 400
+    assert c.post(f"/t/{listen()}/summary", json={"text": "x" * 8001}).status_code == 413
+    assert c.post("/t/nope/summary", json={"text": "hi"}).status_code == 403                         # a pass is still needed
+    assert not ollama_calls(fake)
+    fake.ollama = Resp(500)
+    assert c.post(f"/t/{listen()}/summary", json={"text": "hi"}).status_code == 503
+    fake.ollama = Resp(200, {"response": "   "})
+    assert c.post(f"/t/{listen()}/summary", json={"text": "hi"}).status_code == 502                  # nothing to say: the client falls back
+    fake.ollama = Resp(200, None)
+    assert c.post(f"/t/{listen()}/summary", json={"text": "hi"}).status_code == 502
+
+
+def test_no_ollama_configured_means_no_summary_not_a_crash():
+    fake = Fake()
+    app = gate.create_app(KEY, "http://w", "http://t", clock=lambda: NOW, post=fake.post, get=fake.get)    # no ollama_url
+    assert app.test_client().post(f"/t/{listen()}/summary", json={"text": "hi"}).status_code == 503

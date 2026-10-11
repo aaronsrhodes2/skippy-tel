@@ -346,3 +346,11 @@ dialog.keys .key { margin: 0 0 0 auto; }
 .chat-bridge .keybar { flex-wrap: nowrap; gap: 3px; }
 .chat-bridge .keybar .key { min-width: 26px; }
 .chat-bridge .keybar .key .g { width: 18px; height: 18px; }
+
+/* the hands-free voice status (static/skippy-voice.js): a level bar that moves as you speak, what it is doing, and a cross to cancel */
+.vstat { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; padding: 4px 8px; border: 1px solid var(--accent); font: 600 .78rem var(--mono); color: var(--ink); }
+.vstat[hidden] { display: none; }
+.vstat .lvbar { flex: none; width: 90px; height: 8px; background: var(--dim-green); border: 1px solid var(--dim-green-hi); overflow: hidden; }
+.vstat .lvbar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .06s linear; }
+.vstat .vtxt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vstat .vx { flex: none; padding: 0 8px; min-width: 0; margin: 0; background: transparent; color: var(--ink); border: 1px solid var(--dim-green-hi); font: inherit; }

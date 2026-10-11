@@ -142,6 +142,7 @@
     </div>
   </div>
   <form id="ps-form">
+    <div class="vstat" id="ps-vstat" hidden aria-live="polite"></div>
     <div class="ps-queue" id="ps-queue" hidden></div>
     <div class="ps-attach" id="ps-attach" hidden></div>
     <textarea id="ps-text" rows="2" maxlength="8000" placeholder="Message Skippy"></textarea>
@@ -171,7 +172,7 @@
     const notifyBox = root.querySelector("#ps-notify");
     const queueBox = root.querySelector("#ps-queue"), attachBox = root.querySelector("#ps-attach"), fileIn = root.querySelector("#ps-file"), imgBtn = root.querySelector("#ps-img");
     const voice = SkippyVoice.attach({gate: "{{ url_for('chat.voice_gate') }}", mic: root.querySelector("#ps-mic"), speaker: root.querySelector("#ps-spk"),
-      onText: t => { text.value = (text.value.trim() ? text.value.trim() + " " : "") + t; text.focus(); }});
+      box: text, status: root.querySelector("#ps-vstat"), onSend: () => form.requestSubmit()});          // hands-free: a pause ends it, a countdown sends it
     const K = {conv: "ps-conv", log: "ps-log", task: "ps-task", project: "ps-project"};
     const SEND = "{{ url_for('me.workshop_send') }}", EVENTS = "{{ url_for('me.workshop_events') }}",
           STOP = "{{ url_for('me.workshop_stop') }}", RESYNC = "{{ url_for('me.workshop_resync') }}",
@@ -504,7 +505,8 @@
       if (running !== job) return;                 // left or reset while it napped: the card is someone else's now
       running = null; ui(); text.focus(); draw(job.turn); save();       // the working line goes
       if (out.end && !job.turn.note) drainQueue();                      // the queue goes as one message, unless he stopped it or it failed
-      if (!job.turn.bad) voice.say((job.turn.parts || []).filter(p => p.t === "text").map(p => p.text).join(" "));   // aloud, if the speaker key is on
+      if (job.turn.bad) voice.resume();                                  // no answer to speak: in a spoken conversation the turn comes back to him
+      else voice.say((job.turn.parts || []).filter(p => p.t === "text").map(p => p.text).join(" "));   // aloud, if the speaker key is on
       if (out.resume) resume(out.resume);
     }
 
@@ -606,7 +608,7 @@
       catch (e) { r = {ok: false, data: {error: e.message}}; }
       sending = false; reply.pending = false;
       if (!r.ok) {
-        reply.note = (r.data && r.data.error) || "That didn't go through."; reply.bad = true; draw(reply); save(); ui();
+        reply.note = (r.data && r.data.error) || "That didn't go through."; reply.bad = true; draw(reply); save(); ui(); voice.resume();
         if (gone && r.status === 409) resume(gone);   // the old task is still alive: don't lose sight of it
         return;
       }
