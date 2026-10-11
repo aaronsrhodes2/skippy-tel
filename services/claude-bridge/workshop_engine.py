@@ -1,4 +1,4 @@
-"""The private Skippy's engine: Claude Code (Opus, full permissions) working on
+"""The private Skippy's engine: Claude Code (Sonnet 5.5, medium effort, full permissions) working on
 the SkippyTel repo for the Captain, driven from his portal dashboard.
 
 The portal can't reach this PC, so the home reporter carries each chat message
@@ -9,7 +9,7 @@ a reporter or portal restart (a deploy!) never loses or repeats work. Each run i
 saved to disk (one file per task, next to the sessions file), so a restart of the bridge
 itself keeps the finished ones deliverable and ends the interrupted ones with a plain error.
 
-The model is hard-coded (MODEL): no environment variable and no request field
+The model and its effort level are hard-coded (MODEL, EFFORT): no environment variable and no request field
 can change it. The agent works in its own clone of the repo (REPO), never the
 Captain's checkout, and keeps one Claude Code session per chat conversation so
 "do the next thing" has the context of the last one.
@@ -41,7 +41,8 @@ from pathlib import Path
 import conversation_log
 import projects as projects_mod
 
-MODEL = "claude-opus-5-5"          # Opus, latest, on purpose: nothing else picks it
+MODEL = "claude-sonnet-5-5"        # Sonnet 5.5, on purpose: nothing else picks it (was Opus until 2026-10-10)
+EFFORT = "medium"                  # and its effort level: also fixed here, never from the environment or a request
 REPO = os.getenv("WORKSHOP_REPO", r"D:\Aaron\development\SkippyTel-workshop")
 PRIMARY = os.getenv("WORKSHOP_PRIMARY", r"D:\Aaron\development\SkippyTel")
 REMOTE = os.getenv("WORKSHOP_REMOTE", "https://github.com/aaronsrhodes2/skippy-tel.git")
@@ -764,7 +765,7 @@ class Workshop:
         --add-dir is the project's primary checkout (the Captain's): readable, and for SkippyTel the place a skippy-pc
         service is deployed from. The working directory (the clone) is set by _spawn."""
         cmd = [*self.claude_cmd, "-p", "--output-format", "stream-json", "--verbose",
-               "--model", MODEL, "--dangerously-skip-permissions",
+               "--model", MODEL, "--effort", EFFORT, "--dangerously-skip-permissions",
                "--append-system-prompt-file", str(self.prompt_path(project)), "--system-prompt-snapshot", "off",
                "--add-dir", self.project(project).primary]
         if session:

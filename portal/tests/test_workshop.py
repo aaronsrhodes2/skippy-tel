@@ -30,7 +30,7 @@ class Clock:
 def shop():
     clock = Clock()
     home = home_mod.Home(FakeVm(), clock=clock)
-    home.accept({"capabilities": {"workshop": {"ready": True, "model": "claude-opus-5-5"}}})
+    home.accept({"capabilities": {"workshop": {"ready": True, "model": "claude-sonnet-5-5"}}})
     return workshop_mod.Workshop(home, clock=clock), home, clock
 
 
@@ -141,7 +141,7 @@ def env():
     vm = FakeVm()
     app = portal.create_app(dict(SETTINGS), vm=vm, skippy=FakeSkippy())
     client = app.test_client()
-    app.extensions["home"].accept({"capabilities": {"workshop": {"ready": True, "model": "claude-opus-5-5"}}})
+    app.extensions["home"].accept({"capabilities": {"workshop": {"ready": True, "model": "claude-sonnet-5-5"}}})
     return client, app, app.extensions["home"]
 
 
@@ -231,7 +231,7 @@ def test_the_private_skippy_is_the_left_side_of_the_dashboard(env):
     page = client.get("/me").data.decode()
     assert page.index('id="private-skippy"') < page.index('id="server" class="apane"')      # the chat is the first control and pane
     assert 'data-pane="skippy"' in page and 'id="skippy" class="apane" data-flat' in page and "Skippy · private" in page
-    assert "claude-opus-5-5" in page and "Opus all the time" in page
+    assert "claude-sonnet-5-5" in page and "Sonnet 5.5 (medium effort) all the time" in page
     assert "workshop isn't answering" not in page
 
 
@@ -445,7 +445,7 @@ EXPIRED = "Claude's login on skippy-pc expired: run `claude auth login` there"
 
 
 def _not_ready(home, **info):
-    home.accept({"capabilities": {"workshop": {"ready": False, "model": "claude-opus-5-5", **info}}})
+    home.accept({"capabilities": {"workshop": {"ready": False, "model": "claude-sonnet-5-5", **info}}})
 
 
 def test_the_reason_a_capability_is_not_ready_is_only_ever_one_short_plain_line_and_only_when_it_is_not_ready(shop):

@@ -18,7 +18,7 @@ NOW = 1000                                                    # the fake clock's
 @pytest.fixture
 def page():
     app = portal.create_app(dict(SETTINGS), vm=FakeVm(), skippy=FakeSkippy())
-    app.extensions["home"].accept({"capabilities": {"workshop": {"ready": True, "model": "claude-opus-5-5",
+    app.extensions["home"].accept({"capabilities": {"workshop": {"ready": True, "model": "claude-sonnet-5-5",
                                                                  "projects": PROJECTS}}})
     client = app.test_client()
     login(client, ADMIN)

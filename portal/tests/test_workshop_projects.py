@@ -22,7 +22,7 @@ H = {"X-Workshop": "1"}
 
 
 def caps(projects=PROJECTS):
-    return {"capabilities": {"workshop": {"ready": True, "model": "claude-opus-5-5", "projects": projects}}}
+    return {"capabilities": {"workshop": {"ready": True, "model": "claude-sonnet-5-5", "projects": projects}}}
 
 
 @pytest.fixture

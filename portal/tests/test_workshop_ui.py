@@ -32,7 +32,7 @@ BUSY = "Skippy is still working on the last one."
 @pytest.fixture
 def env():
     app = portal.create_app(dict(SETTINGS), vm=FakeVm(), skippy=FakeSkippy())
-    app.extensions["home"].accept({"capabilities": {"workshop": {"ready": True, "model": "claude-opus-5-5"}}})
+    app.extensions["home"].accept({"capabilities": {"workshop": {"ready": True, "model": "claude-sonnet-5-5"}}})
     return app.test_client(), app
 
 

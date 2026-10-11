@@ -61,10 +61,10 @@ The pill on **Skippy · private** and the **Home · skippy-pc** card tell you wh
 
 | You see | It means | Do |
 |---|---|---|
-| Pill `Opus`, green; Home card **Online** | everything is up | nothing; if a chat looks stuck, tap **Check again** (it asks skippy-pc right now) |
+| Pill `claude-sonnet-5-5`, green; Home card **Online** | everything is up | nothing; if a chat looks stuck, tap **Check again** (it asks skippy-pc right now) |
 | Chat note "No word from skippy-pc for N s. It reconnects by itself" | the link is quiet: a deploy, a restarted reporter or bridge, or a brief network drop | wait a minute, tap **Check again**. **Send** comes back by itself after 30 s of quiet |
 | **Send** says "Skippy is still working on the last one." | the bridge really is on your previous message | wait, or press **Stop** |
-| Pill `Opus · offline` (amber) | the portal sees skippy-pc, but the workshop is not ready: bridge down, its token missing, or Claude's login expired | step 2, then step 4 |
+| Pill `claude-sonnet-5-5 · offline` (amber) | the portal sees skippy-pc, but the workshop is not ready: bridge down, its token missing, or Claude's login expired | step 2, then step 4 |
 | Home card **Silent**, or "skippy-pc has been silent for N min" | the reporter is not reaching the portal: PC off or asleep, Docker not running, no internet | step 4 |
 | A run says "skippy-pc hasn't picked this up. Is the bridge running?" | the reporter is up but the bridge is not | step 2, then step 4 |
 | `/me` will not load, or errors | the portal itself | step 3 |

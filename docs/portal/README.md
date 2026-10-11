@@ -170,7 +170,7 @@ skippy-tel-core's `/intent/unmatched` and expose its capabilities as tools.
 
 ## Private Skippy (the left side of `/me`)
 
-The Captain's own chat: Claude Code (Opus, hard-coded in the bridge, all the time)
+The Captain's own chat: Claude Code (Sonnet 5.5 at medium effort, hard-coded in the bridge, all the time; Opus until 2026-10-10)
 running with full permissions on skippy-pc. Ask for a change and it edits its own
 clone of the repo, runs the tests, pushes to `main`, watches the deploy and health
 checks it. Only an admin can reach it (Google login plus `ADMIN_EMAILS`; every call
@@ -182,7 +182,7 @@ browser ── /me/workshop/send ──> portal (portal/workshop.py) ── job 
                                                                                       │ POST /workshop
 browser <── poll /me/workshop/events ── portal <── POST /home/workshop/<task> ── reporter ──> bridge
                                                                                       │ (services/claude-bridge/workshop_engine.py)
-                                                                                    claude -p (Opus) in its own clone
+                                                                                    claude -p (Sonnet 5.5, medium) in its own clone
 ```
 
 - **Every project, not just SkippyTel.** `services/claude-bridge/projects.json` (checked by `projects.py` at bridge start)

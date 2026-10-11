@@ -199,7 +199,7 @@ def test_health_names_the_login_and_is_ready_while_it_is_unknown_or_ok(door, sho
     settle(shop.login_probe)
     health = door("GET", "/health", token=None)[1]["workshop"]
     assert health["login"] == "ok" and health["ready"] is True and "reason" not in health
-    assert health["model"] == "claude-opus-5-5" and health["busy"] is False
+    assert health["model"] == "claude-sonnet-5-5" and health["busy"] is False
 
 
 def test_an_expired_login_makes_the_workshop_not_ready_and_says_how_to_fix_it(door, shop):

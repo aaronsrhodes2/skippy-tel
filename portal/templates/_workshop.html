@@ -1,4 +1,4 @@
-{# The private Skippy: the left side of the Captain's dashboard. Claude Code (Opus, full permissions) on
+{# The private Skippy: the left side of the Captain's dashboard. Claude Code (Sonnet 5.5, medium effort, full permissions) on
    skippy-pc, reached through the home reporter (workshop.py). Only the messages you type ever leave this
    page; the conversation lives on skippy-pc, and this page keeps a copy of the transcript for display.
 
@@ -65,10 +65,10 @@
 <div class="w me-chat" id="private-skippy" data-ready="{{ 'yes' if workshop_ready else 'no' }}">
   <header>
     <h3>Skippy · private</h3>
-    <span class="pill" id="ps-state" style="--accent: {{ 'var(--green)' if workshop_ready else 'var(--amber)' }}">{{ workshop_model or 'Opus' }}{{ '' if workshop_ready else ' · offline' }}</span>
+    <span class="pill" id="ps-state" style="--accent: {{ 'var(--green)' if workshop_ready else 'var(--amber)' }}">{{ workshop_model or 'Sonnet 5.5' }}{{ '' if workshop_ready else ' · offline' }}</span>
   </header>
   <p class="muted" style="margin:4px 0 0">Ask for a change: he edits, tests, pushes, deploys and checks it live.
-    Only you can see this, and it is Opus all the time.</p>
+    Only you can see this, and it is Sonnet 5.5 (medium effort) all the time.</p>
   {% if not workshop_ready %}
     {% if workshop_reason %}
       {# The bridge said why (home passes its own plain words along). A `backticked` command in it is copyable, like

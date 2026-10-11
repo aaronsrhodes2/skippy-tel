@@ -72,7 +72,7 @@ def beat_forever(path, every=0.1, lines=False):      # proof of life: a dot per 
         time.sleep(every)
 
 resuming = "--resume" in sys.argv
-out(type="system", subtype="init", session_id="sess-1", model="claude-opus-5-5")
+out(type="system", subtype="init", session_id="sess-1", model="claude-sonnet-5-5")
 if mode == "auth":
     msg = "Failed to authenticate: OAuth session expired and could not be refreshed"
     out(type="assistant", message={"content": [{"type": "text", "text": msg}]})

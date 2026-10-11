@@ -1,5 +1,5 @@
 """The private Skippy: the Captain's chat on his dashboard, backed by Claude Code
-(Opus, full permissions) running on skippy-pc through the bridge.
+(Sonnet 5.5, medium effort, full permissions) running on skippy-pc through the bridge.
 
 Only an admin can reach it (the portal's Google login plus ADMIN_EMAILS). The
 portal can't reach skippy-pc, so a message becomes a job in the home queue; the

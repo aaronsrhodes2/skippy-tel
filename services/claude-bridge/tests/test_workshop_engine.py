@@ -15,7 +15,8 @@ from bridge_testkit import calls, finish  # noqa: E402   (the fake claude, the `
 
 def test_the_model_is_hard_coded_and_the_agent_has_full_permissions(shop):
     cmd = shop.command(None)
-    assert engine.MODEL == "claude-opus-5-5" and cmd[cmd.index("--model") + 1] == "claude-opus-5-5"
+    assert engine.MODEL == "claude-sonnet-5-5" and cmd[cmd.index("--model") + 1] == "claude-sonnet-5-5"
+    assert engine.EFFORT == "medium" and cmd[cmd.index("--effort") + 1] == "medium"
     assert "--dangerously-skip-permissions" in cmd and "--resume" not in cmd
     assert shop.command("sess-9")[-2:] == ["--resume", "sess-9"]
     assert "--append-system-prompt" not in cmd                     # the prompt is a file now (test_bridge_prompt_file.py)
@@ -58,7 +59,7 @@ def test_the_prompt_watches_the_deploy_of_its_own_commit_and_checks_the_live_ver
 
 def test_nothing_can_change_the_model(shop, monkeypatch):
     monkeypatch.setenv("CLAUDE_AWESOMENESS_MODEL", "claude-haiku-4-5")
-    assert "--model" in shop.command(None) and shop.command(None)[shop.command(None).index("--model") + 1] == "claude-opus-5-5"
+    assert "--model" in shop.command(None) and shop.command(None)[shop.command(None).index("--model") + 1] == "claude-sonnet-5-5"
     with pytest.raises(TypeError):
         shop.start("a" * 8, "conv-12345678", "hi", model="claude-haiku-4-5")
 
@@ -205,5 +206,5 @@ def test_the_workshop_door_runs_a_task_and_serves_its_events(door):
 
 def test_health_says_the_workshop_is_ready_without_leaking_the_token(door):
     status, health = door("GET", "/health", token=None)
-    assert status == 200 and health["workshop"]["ready"] is True and health["workshop"]["model"] == "claude-opus-5-5"
+    assert status == 200 and health["workshop"]["ready"] is True and health["workshop"]["model"] == "claude-sonnet-5-5"
     assert "door-token" not in json.dumps(health)

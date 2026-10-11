@@ -236,7 +236,7 @@ downloads anything. Saves stay in the player's browser. Full description: `docs/
 
 ## Private Skippy (the Workshop: left side of `/me`)
 
-The Captain's own chat is Claude Code (Opus, hard-coded, all the time) on skippy-pc, admin
+The Captain's own chat is Claude Code (Sonnet 5.5 at medium effort, hard-coded in the bridge, all the time; it was Opus until 2026-10-10) on skippy-pc, admin
 only, focused on the ask → change → test → push → deploy → verify loop, not linked to
 skippy-tel-core's services. Portal: `portal/workshop.py` + `/me/workshop/*` (job kind
 `workshop`, capability `workshop`); reporter: `reporter.workshop()`; engine:
