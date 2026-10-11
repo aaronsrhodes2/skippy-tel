@@ -4,7 +4,8 @@
 The private Skippy runs this after it pushed a change to portal/templates or portal/static, then prints
 `SKIPPY_IMAGE: <png>` so the bridge attaches the picture under its answer (he works by outcome: show him the result).
 
-    python tools/workshop_screenshot.py /me --out .skippy-shots/me.png [--width 390 --height 844]
+    python tools/workshop_screenshot.py front --out .skippy-shots/front.png [--width 390 --height 844]      (front = the Skippy chat page, /)
+    python tools/workshop_screenshot.py me --out .skippy-shots/me.png                                        (the dashboard)
 
 What it does, and why it is safe:
   * the portal from THIS checkout, built the way the tests build it (portal/tests/test_app.py: create_app(SETTINGS,
@@ -108,13 +109,13 @@ def shoot(path: str, out: Path, width: int, height: int, browser, timeout: float
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("path", help="the portal page, e.g. /me or /games")
+    ap.add_argument("path", help="the portal page: front (the Skippy chat), me, apps, games ...")
     ap.add_argument("--out", required=True, help="where the PNG goes (e.g. .skippy-shots/me.png)")
     ap.add_argument("--width", type=int, default=390)
     ap.add_argument("--height", type=int, default=844)
     args = ap.parse_args(argv)
     # "me" works as well as "/me": Git Bash on Windows rewrites an argument starting with / into a C:/ path
-    args.path = args.path if args.path.startswith("/") else "/" + args.path
+    args.path = "/" if args.path in ("front", "home") else (args.path if args.path.startswith("/") else "/" + args.path)
     if "//" in args.path or ":" in args.path or "\\" in args.path or not args.out.lower().endswith(".png") \
             or not (200 <= args.width <= 2000 and 200 <= args.height <= 4000):
         print("give a page path like /me, an --out ending in .png, and a sane size", file=sys.stderr)
