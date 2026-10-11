@@ -508,6 +508,21 @@ a later page flips to its page when focused (`Bridge.pager` keeps the clipped pa
 
 **The Dashboard on the bridge** (`/me`, admin only) uses the same panes as Admin (`static/bridge-panes.js`): a deck of controls, each with a lamp where something may need the Captain (the workshop ready or not, the VM, the core's verdict, whether home is reporting, any watcher warnings), and a control opens its pane. The first is the private Skippy (`_workshop.html`): a `data-flat` pane, because it lays itself out as a chat, with its log and its list of conversations as pages (`Bridge.pager`; a new turn takes you to the last page, and the pane tells the chat when it is shown with a `pane-shown` event). Every other widget (Server, Core, Home, Activity, Watcher, Spend, People, Experiments, Links) is a pane of pages, as it was. The private Skippy's script is tested in node against a fake browser (`test_workshop_ui.py`; its fake now has a `Bridge.pager` stub).
 
+**The experiment demos on the bridge.** The inventory (`/experiments`) and every demo page are bridge pages, public like before. The **N-body
+shootout** (`/experiments/nbody`) is a flip-book: plates you flip through (swipe, the arrow keys, the bar under them, or the play key, which flips by
+itself), each a view of one data file, `static/demos/nbody/flipbook.json`, drawn by `static/nbody-flipbook.js` (a canvas; it calculates no physics, only
+a log scale and screen positions). The file is made from a real run of sigma-ground's rolling-window shootout: `scripts/nbody_run.py` runs it (it
+only reads sigma-ground and points the shootout's own results file at ours; it records the commit it ran), `scripts/nbody_flipbook_build.py` turns the
+raw runs into medians and quartiles across the windows plus the time-lapse frames. Re-run it whenever the integrator changes:
+`python scripts/nbody_run.py --out build/nbody_a.json --predictors pure_newton standard` (and the other predictor groups, the slow fine-step ones one
+window per process), then `python scripts/nbody_flipbook_build.py build/nbody_*.json`. The plates: what was run, the ranking of the predictors,
+before and after the 2026-10-10 fix to the 1PN signs (against the shootout's own earlier fixture), every body at five years, two time-lapses (the inner
+planets monthly, Jupiter's moons daily; the integrator's own track with DE440's yearly positions as rings), one plate per body, then the earlier
+recorded 26-year Jovian results exactly as they were, and how to read it. The **double-slit** keeps its simulation script unchanged (the two canvases take
+the stage, sliders and glyph keys drive it, the explanation is behind the info key). The **Mentat playground** is a list of tools shown a screen at a
+time, a search, a key that steps through the domains, and a panel per tool with its form and its answer (formula, source). The **benchmark** is pages.
+Radiance (sigma-ground's own WebGL viewer) and Weapon vs. Armor (in Browser Games) are separate apps and are untouched.
+
 **On the bridge now:** the launcher, Browser Games (`/play`), Skippy chat, Game Servers, Bilby's Audio Service (`/music`), Nagatha's Video Service (`/video`), Admin (`/admin`, with its Graveyard and the server logs), the Dashboard (`/me`), and the Experiments inventory (`/experiments`, public: tiles as rows shown a screen at a time with `Bridge.PList`, a key that steps through the kinds, search, and an about panel; the tiles are rendered hidden as the page's data so a tap is still a `data-tel` tile tap).
 Still the old look, to move in batches: the demo pages themselves, request access, privacy.
 

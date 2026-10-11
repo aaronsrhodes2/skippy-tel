@@ -136,7 +136,8 @@ Actions (the sandbox can't reach GCP or run.app directly):
   Admin (a deck of controls, each opening a pane of pages you flip; the explanatory sentences stay there, it is the one place that explains settings) and its server logs.
   The Dashboard (`/me`: a deck with the private Skippy first, which lays itself out as a paged chat, then a pane per widget).
   Experiments (the public inventory: tiles shown a screen at a time, a kind key, an about panel; the demos themselves are standalone pages).
-  **Not yet** (old scrolling look, to migrate in batches): request access, privacy, and the demo pages.
+  The experiment demos (the N-body shootout as a flip-book of plates from a real run of sigma-ground's shootout: `scripts/nbody_run.py`, `scripts/nbody_flipbook_build.py`; the double-slit, the Mentat playground, the benchmark).
+  **Not yet** (old scrolling look, to migrate in batches): request access, privacy (Radiance and Weapon vs. Armor are separate apps).
 - Copyable things (the Captain's rule: **one click, everywhere**): anything a person is expected to
   copy (an invite code, `ip:port`, a password, a command, a block to paste) is marked
   `<code class="code">` / `<pre class="copy">` (or `data-copy="text"` on a button), and

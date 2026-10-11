@@ -1774,21 +1774,19 @@ def test_the_inventory_highlights_the_demos_and_lists_everything_else(env):
     assert "Coming next" not in page                                              # the three it promised are here now
 
 
-def test_every_demo_is_public_and_wears_the_shared_chrome(env):
+def test_every_demo_is_public_and_is_a_bridge_page_that_goes_back_to_the_inventory(env):
     import re
     client, _, _ = env
     for url in DEMO_PAGES:
         page = client.get(url).data.decode()
-        assert "&lsaquo; Experiments</a>" in page and ">Sign in</a>" in page, url    # the same app bar, signed out
-        assert '<body data-app="experiments">' in page, url
-        assert "<header><h1>" not in page, url                                       # nobody improvises a header
-        before_bar = page.rsplit("<body data-app=", 1)[1].split('<header class="appbar">', 1)[0].split(">", 1)[1]
-        stray = re.sub(r"<[^>]+>", "", before_bar).strip()
-        assert stray == "", (url, stray)                                             # no visible text (a stray label, a URL) above it
+        assert '<body class="bridge"' in page and 'data-app="experiments"' in page, url   # the bridge shell, in the experiments' accent
+        assert 'aria-label="Back"' in page and 'href="/experiments"' in page, url         # back goes to the inventory
+        assert 'aria-label="Sign in"' in page, url                                       # signed out: the strip says how to sign in
+        assert '<header class="appbar">' not in page and 'id="home-btn"' not in page, url   # none of the old pages' chrome
         assert not re.search(r'<(script|link|img)[^>]+(src|href)="https?://', page), url   # no third-party requests
     login(client, ADMIN)
     signed_in = client.get("/experiments/double-slit").data.decode()
-    assert 'id="home-btn"' in signed_in and "&lsaquo; Home</a>" in signed_in        # and the phone chrome when signed in
+    assert 'aria-label="Home"' in signed_in and 'aria-label="Sign in"' not in signed_in   # and the way home when signed in
 
 
 def test_the_double_slit_demo_keeps_its_simulation_and_its_controls(env):

@@ -1,0 +1,32 @@
+/* The N-body flip-book (templates/nbody.html, static/nbody-flipbook.js). The bridge's own sheet draws the shell, the keys and the page bar; this
+   is the plate, its caption and the colours of the predictors. Portal tokens only; black base, no gradients. */
+.fb { --c-newton: var(--red); --c-standard: var(--amber); --c-srp: var(--violet); --c-j2: var(--cyan); --c-fine: var(--green); --c-jpl: var(--white); --c-kepler: var(--pink);
+      --mono: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.fb-stage { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; overflow: hidden; background: var(--panel); border: 1px solid var(--dim-green-hi); }
+.fb-stage canvas { flex: 1; min-height: 0; width: 100%; display: block; }
+.fb-stage canvas[hidden] { display: none; }
+.fb-stage.flip-n { animation: fb-next .2s ease-out; } .fb-stage.flip-p { animation: fb-prev .2s ease-out; }
+@keyframes fb-next { from { transform: translateX(30px); opacity: .3; } to { transform: none; opacity: 1; } }
+@keyframes fb-prev { from { transform: translateX(-30px); opacity: .3; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .fb-stage.flip-n, .fb-stage.flip-p { animation: none !important; } }
+.fb-html { flex: 1; min-height: 0; overflow: hidden; padding: 10px; font-size: .85rem; line-height: 1.45; color: var(--ink); display: flex; flex-direction: column; }
+.fb-html > div { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1; }
+.fb-html p { margin: 0; } .fb-html .dim { color: var(--muted); font-size: .78rem; }
+.fb-html h3 { margin: 4px 0 0; color: var(--accent); font: 700 .9rem var(--mono); text-transform: none; letter-spacing: 0; }
+.fb-html .verdict { padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--black); }
+.fb-html .figure { margin: 0; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.fb-html .figure a { flex: 1; min-height: 0; display: flex; }
+.fb-html .figure img { flex: 1; min-height: 0; width: 100%; object-fit: contain; background: var(--black); border: 1px solid var(--line); }
+.fb-html .figure figcaption { font-size: .74rem; color: var(--muted); line-height: 1.35; }
+.fbt { width: 100%; border-collapse: collapse; font-size: .76rem; }
+.fbt th { text-align: left; color: var(--accent); font: 700 .7rem var(--mono); text-transform: uppercase; letter-spacing: .04em; }
+.fbt td, .fbt th { padding: 4px 6px 4px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.fbt .ours { color: var(--green); } .fbt .theirs { color: var(--muted); }
+.fb-frames { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 10px; }
+.fb-frames[hidden] { display: none; }
+.fb-frames input { flex: 1; margin: 0; height: 28px; }
+.fb-frames span { font: 600 .72rem var(--mono); color: var(--muted); }
+.fb-cap { flex: none; padding: 8px 2px 0; }
+.fb-cap h2 { margin: 0; color: var(--accent); font: 700 1.05rem var(--mono); text-transform: none; letter-spacing: 0; }
+.fb-cap p { margin: 3px 0 0; font-size: .78rem; line-height: 1.4; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+@media (max-height: 640px) { .fb-cap p { -webkit-line-clamp: 2; } }

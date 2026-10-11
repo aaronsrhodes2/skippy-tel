@@ -1,53 +1,71 @@
 {% extends "base.html" %}
 {% block title %}N-Body Shootout — Experiments{% endblock %}
 {% block app %}experiments{% endblock %}
-{% block public_up %}{{ url_for('experiments.index') }}{% endblock %}
-{% block head %}
-<style>
-  .scoreboard td:first-child { color: var(--ink); }
-  .scoreboard .ours { color: var(--green); }
-  .scoreboard .theirs { color: var(--muted); }
-  .figure { margin: 18px 0; }
-  .figure img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; background: #0a0a12; }
-  .figure figcaption { margin-top: 6px; }
-  .verdict { border-left: 3px solid var(--accent); padding: 8px 14px; background: var(--panel); border-radius: 0 8px 8px 0; margin: 14px 0; }
-  .scroll { overflow-x: auto; }
-</style>
-{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}atom{% endblock %}
+{% block hud_back %}{{ url_for('experiments.index') }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='nbody.css') }}">{% endblock %}
 {% block content %}
-<section>
-  <p>A head-to-head. Both integrators start from the same Jovian system at J2000.0 and play it forward 26 years:
-    <b>N-body</b> (every moon pulls on every other, 600 s steps, 1.38 million of them) against <b>Keplerian</b> orbits
-    (each moon on its own ellipse, no interactions). Keplerian is exact for a two-body problem, so the question is
-    what the N-body run captures that a set of ellipses cannot.</p>
-
-  <h2>Scoreboard after 26 years</h2>
-  <div class="scroll">
-  <table class="scoreboard">
-    <tr><th>Metric</th><th>N-body (ours)</th><th>Keplerian</th></tr>
-    {% for metric, ours, theirs in scoreboard %}
-      <tr><td>{{ metric }}</td><td class="ours">{{ ours }}</td><td class="theirs">{{ theirs }}</td></tr>
-    {% endfor %}
-  </table>
+{# The N-body shootout as a flip-book: one plate per view of a fresh run of sigma-ground's rolling-window shootout (the data file is made by
+   scripts/nbody_run.py and scripts/nbody_flipbook_build.py), then the earlier recorded results as they were. Public, like every experiment.
+   The earlier results are rendered here, hidden, and the script shows them as two plates. #}
+<section class="fb bp" id="fb" data-flipbook-url="{{ url_for('static', filename='demos/nbody/flipbook.json') }}">
+  <div class="notice" id="notice" role="status" hidden></div>
+  <div class="fb-stage" id="stage">
+    <canvas id="plate" role="img" aria-label=""></canvas>
+    <div class="fb-html" id="html" hidden></div>
+    <div class="fb-frames" id="frames" hidden>
+      <input type="range" id="frame" min="0" max="0" step="1" value="0" aria-label="Frame">
+      <span id="frame-t" aria-hidden="true"></span>
+    </div>
   </div>
-  <p class="verdict"><b>Verdict.</b> N-body captures real physics that Keplerian cannot. <b>Next step:</b> add Jupiter's J2
-    oblateness to fix the phase drift.</p>
+  <div class="fb-cap" aria-live="polite"><h2 id="cap-t"></h2><p id="cap-p"></p></div>
+  <div class="scrub" id="scrub" role="slider" aria-label="Plate" aria-valuemin="1" aria-valuemax="1" aria-valuenow="1" tabindex="0">
+    <div class="pips" id="pips"><i></i></div><span class="pgno" id="pgno"></span>
+  </div>
+  <div class="keybar">
+    <button type="button" class="key" id="prev" aria-label="Previous plate" title="Previous plate (←)"><svg class="g" aria-hidden="true"><use href="#g-prev"/></svg></button>
+    <span class="grow"></span>
+    <button type="button" class="key" id="play" aria-pressed="false" aria-label="Flip through the plates" title="Flip through the plates (Space)"><svg class="g" aria-hidden="true"><use href="#g-play"/></svg></button>
+    <span class="grow"></span>
+    <button type="button" class="key" id="next" aria-label="Next plate" title="Next plate (→)"><svg class="g" aria-hidden="true"><use href="#g-next"/></svg></button>
+  </div>
 
-  <figure class="figure">
-    <a href="{{ url_for('static', filename='demos/nbody_results.svg') }}" title="Open full size"><img src="{{ url_for('static', filename='demos/nbody_results.svg') }}" alt="Position divergence between the N-body and Keplerian runs for Europa, Ganymede and Callisto over 26 years, the Laplace resonance angle, and the scoreboard"></a>
-    <figcaption class="help">Tap a figure to open it full size. Left to right: how far the N-body and Keplerian positions diverge for Europa, Ganymede and Callisto;
-      the Laplace resonance angle, which oscillates in the N-body run (the resonance is alive) and is flat in the Keplerian one.</figcaption>
-  </figure>
-
-  <h2>Accuracy against tolerance</h2>
-  <figure class="figure">
-    <a href="{{ url_for('static', filename='demos/nbody_errors.png') }}" title="Open full size"><img src="{{ url_for('static', filename='demos/nbody_errors.png') }}" alt="Bar chart of the N-body propagation position error for 26 bodies, each against its tolerance"></a>
-    <figcaption class="help">Position error per body after propagating J2015.0 back to J2000.0 (run 8335f32). Each dashed box is that
-      body's tolerance and the percentage is how much of it the error uses. Every body finishes inside its tolerance;
-      the worst is Mercury at 74%, and the Galilean moons are the hardest of the rest.</figcaption>
-  </figure>
-
-  <p class="help">These are recorded results from the <a href="https://github.com/aaronsrhodes2/sigma-ground">sigma-ground</a>
-    physics work, shown as they were produced: the drift and the missing physics are in the table on purpose.</p>
+  <div hidden>
+    <div id="src-earlier">
+      <p>A head-to-head from the earlier recording. Both integrators start from the same Jovian system at J2000.0 and play it forward 26 years:
+        <b>N-body</b> (every moon pulls on every other, 600 s steps, 1.38 million of them) against <b>Keplerian</b> orbits
+        (each moon on its own ellipse, no interactions). Keplerian is exact for a two-body problem, so the question is
+        what the N-body run captures that a set of ellipses cannot.</p>
+      <p class="verdict"><b>Verdict.</b> N-body captures real physics that Keplerian cannot. <b>Next step:</b> add Jupiter's J2
+        oblateness to fix the phase drift.</p>
+      <p class="dim">These are recorded results from the <a href="https://github.com/aaronsrhodes2/sigma-ground">sigma-ground</a>
+        physics work, shown as they were produced.</p>
+    </div>
+    <div id="src-score">
+      <table class="scoreboard fbt">
+        <tr><th>Metric</th><th>N-body (ours)</th><th>Keplerian</th></tr>
+        {% for metric, ours, theirs in scoreboard %}
+          <tr><td>{{ metric }}</td><td class="ours">{{ ours }}</td><td class="theirs">{{ theirs }}</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+    <div id="src-fig1">
+      <figure class="figure">
+        <a href="{{ url_for('static', filename='demos/nbody_results.svg') }}" title="Open full size"><img src="{{ url_for('static', filename='demos/nbody_results.svg') }}" alt="Position divergence between the N-body and Keplerian runs for Europa, Ganymede and Callisto over 26 years, the Laplace resonance angle, and the scoreboard"></a>
+        <figcaption>Left to right: how far the N-body and Keplerian positions diverge for Europa, Ganymede and Callisto;
+          the Laplace resonance angle, which oscillates in the N-body run (the resonance is alive) and is flat in the Keplerian one.</figcaption>
+      </figure>
+    </div>
+    <div id="src-fig2">
+      <figure class="figure">
+        <a href="{{ url_for('static', filename='demos/nbody_errors.png') }}" title="Open full size"><img src="{{ url_for('static', filename='demos/nbody_errors.png') }}" alt="Bar chart of the N-body propagation position error for 26 bodies, each against its tolerance"></a>
+        <figcaption>Position error per body after propagating J2015.0 back to J2000.0 (run 8335f32). Each dashed box is that
+          body's tolerance and the percentage is how much of it the error uses. Every body finishes inside its tolerance;
+          the worst is Mercury at 74%, and the Galilean moons are the hardest of the rest.</figcaption>
+      </figure>
+    </div>
+  </div>
 </section>
+<script src="{{ url_for('static', filename='nbody-flipbook.js') }}"></script>
 {% endblock %}

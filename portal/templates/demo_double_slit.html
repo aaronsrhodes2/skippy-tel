@@ -1,87 +1,89 @@
 {% extends "base.html" %}
 {% block title %}Double-Slit — Experiments{% endblock %}
 {% block app %}experiments{% endblock %}
-{% block public_up %}{{ url_for('experiments.index') }}{% endblock %}
-{% block mainclass %}wide{% endblock %}
-{% block head %}
-<style>
-  .ds-scene { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; align-items: flex-start; }
-  .ds-scene canvas { display: block; background: #000; border: 1px solid var(--line); max-width: 100%; height: auto; }
-  .scatter-wrap { position: relative; display: inline-block; max-width: 100%; }
-  .scatter-wrap canvas { width: 100%; }
-  #theory-overlay { position: absolute; top: 0; left: 0; pointer-events: none; }
-  .stats-row { display: flex; flex-wrap: wrap; gap: 6px 22px; font-family: var(--mono); font-size: .8rem; color: var(--muted);
-               padding: 8px 0; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
-  .stat-val { color: var(--white); }
-  .ctl-row { display: grid; grid-template-columns: minmax(120px, 190px) 1fr 3.2em; gap: 10px; align-items: center;
-             font-size: .85rem; margin: 8px 0; }
-  .ctl-row .row-val { text-align: right; font-family: var(--mono); color: var(--ink); }
-  .buttons { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
-  .buttons button.active { background: var(--accent); color: var(--black); }
-  .englert-row { display: flex; align-items: center; gap: 10px; font-size: .85rem; flex-wrap: wrap; }
-  .englert-bg { flex: 1; min-width: 120px; height: 10px; background: #020504; border: 1px solid var(--line); position: relative; overflow: hidden; }
-  .bar-d { position: absolute; left: 0; top: 0; height: 100%; background: var(--amber); transition: width .15s; }
-  .bar-v { position: absolute; top: 0; height: 100%; background: var(--cyan); transition: left .15s, width .15s; }
-</style>
-{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}atom{% endblock %}
+{% block hud_back %}{{ url_for('experiments.index') }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='experiments.css') }}">{% endblock %}
 {% block content %}
-<section>
-  <p>Each dot is one particle landing on the screen. The interference pattern is not in any single dot: it builds up
-    statistically, exactly as the Born rule says. Turn up the observer strength <b>D</b> and which-path information grows
-    while fringe visibility <b>V</b> falls, obeying Englert's bound <b>D² + V² ≤ 1</b>. The cyan curve is the theoretical |ψ(y)|².</p>
-
-  <div class="ds-scene">
-    <div class="scatter-wrap">
-      <canvas id="scatter"        width="260" height="660"></canvas>
-      <canvas id="theory-overlay" width="260" height="660"></canvas>
+{# The double-slit on the bridge: the screen where the particles land and the histogram they build take the stage (scaled to fit, never
+   scrolled), the readings sit in one row under them, two sliders and a row of keys drive it, and the explanation is a panel behind the
+   info key. The simulation script below is unchanged: it finds its canvases, sliders and keys by id. #}
+<section class="ds bp" id="ds">
+  <div class="ds-stage" id="stage">
+    <div class="ds-scene">
+      <div class="scatter-wrap">
+        <canvas id="scatter"        width="260" height="660"></canvas>
+        <canvas id="theory-overlay" width="260" height="660"></canvas>
+      </div>
+      <canvas id="histogram" width="340" height="660"></canvas>
     </div>
-    <canvas id="histogram" width="340" height="660"></canvas>
+    <div class="sheet" id="about" role="dialog" aria-modal="true" aria-labelledby="about-h" hidden>
+      <div class="s-head"><h2 id="about-h" class="grow">Double-slit</h2>
+        <button type="button" class="key" data-act="about" aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></div>
+      <div class="pg" id="about-pg"><div class="pg-flow">
+        <p>Each dot is one particle landing on the screen. The interference pattern is not in any single dot: it builds up
+          statistically, exactly as the Born rule says. Turn up the observer strength <b>D</b> and which-path information grows
+          while fringe visibility <b>V</b> falls, obeying Englert's bound <b>D² + V² ≤ 1</b>. The cyan curve is the theoretical |ψ(y)|².</p>
+        <p class="help"><b>Moving the D slider</b> means choosing a different experimental setup and restarting: not time travel. Each
+          particle still collapses to one point; only the statistics change, and the Born rule holds throughout.
+          Constants from the cascade: ℏ = 1.0546×10⁻³⁴ J·s, c = 2.9979×10⁸ m/s, e = 1.6022×10⁻¹⁹ C, m_e = 0.5110 MeV. No magic numbers.</p>
+        <p class="help">Part of the <a href="https://github.com/aaronsrhodes2/sigma-ground">sigma-ground</a> physics work.
+          The simulation runs entirely in your browser; nothing is sent anywhere.</p>
+      </div></div>
+      <div class="pips" id="about-pips" hidden><i></i></div>
+    </div>
   </div>
 
-  <div class="card" style="margin-top:14px">
-    <div class="stats-row">
-      <span>N = <span class="stat-val" id="ndisp">0</span></span>
-      <span>λ_e = <span class="stat-val" id="ldisp">—</span> nm</span>
-      <span>Δy = <span class="stat-val" id="dydisp">—</span> mm</span>
-      <span>V (local) = <span class="stat-val" id="vdisp">—</span></span>
-      <span>D = <span class="stat-val" id="ddisp">0.00</span></span>
-    </div>
-
+  <div class="stats-row">
+    <span>N = <span class="stat-val" id="ndisp">0</span></span>
+    <span>λ_e = <span class="stat-val" id="ldisp">—</span> nm</span>
+    <span>Δy = <span class="stat-val" id="dydisp">—</span> mm</span>
+    <span>V (local) = <span class="stat-val" id="vdisp">—</span></span>
+    <span>D = <span class="stat-val" id="ddisp">0.00</span></span>
+  </div>
+  <div class="ds-ctl">
     <div class="ctl-row">
       <label for="d-sl">Observer strength <b>D</b></label>
       <input type="range" id="d-sl" min="0" max="1" step="0.01" value="0">
       <span class="row-val" id="d-lbl">0.00</span>
     </div>
     <div class="ctl-row">
-      <label for="spd-sl">Speed (particles / frame)</label>
+      <label for="spd-sl">Speed</label>
       <input type="range" id="spd-sl" min="1" max="300" value="15">
       <span class="row-val" id="spd-lbl">15</span>
     </div>
-
-    <div class="buttons">
-      <button id="btn-play">▶ Play</button>
-      <button id="btn-pause">⏸ Pause</button>
-      <button id="btn-rewind">⏮ Rewind</button>
-      <button id="btn-d0">↺ D = 0</button>
-      <button id="btn-d1">↺ D = 1</button>
-    </div>
-
     <div class="englert-row">
       <span style="color:var(--amber)">D²</span><span>+</span><span style="color:var(--cyan)">V²</span><span>≤ 1</span>
       <div class="englert-bg">
         <div class="bar-d" id="bar-d" style="width:0%"></div>
         <div class="bar-v" id="bar-v" style="left:0%;width:100%"></div>
       </div>
-      <span id="englert-val" class="muted" style="min-width:90px;text-align:right">D²+V² = —</span>
+      <span id="englert-val" class="muted" style="min-width:84px;text-align:right">D²+V² = —</span>
     </div>
   </div>
-
-  <p class="help"><b>Moving the D slider</b> means choosing a different experimental setup and restarting: not time travel. Each
-    particle still collapses to one point; only the statistics change, and the Born rule holds throughout.
-    Constants from the cascade: ℏ = 1.0546×10⁻³⁴ J·s, c = 2.9979×10⁸ m/s, e = 1.6022×10⁻¹⁹ C, m_e = 0.5110 MeV. No magic numbers.</p>
-  <p class="help">Part of the <a href="https://github.com/aaronsrhodes2/sigma-ground">sigma-ground</a> physics work.
-    The simulation runs entirely in your browser; nothing is sent anywhere.</p>
+  <div class="keybar buttons">
+    <button type="button" class="key" id="btn-play" aria-label="Play" title="Play"><svg class="g" aria-hidden="true"><use href="#g-play"/></svg></button>
+    <button type="button" class="key" id="btn-pause" aria-label="Pause" title="Pause"><svg class="g" aria-hidden="true"><use href="#g-pause"/></svg></button>
+    <button type="button" class="key" id="btn-rewind" aria-label="Rewind" title="Rewind"><svg class="g" aria-hidden="true"><use href="#g-prev"/></svg></button>
+    <span class="grow"></span>
+    <button type="button" class="key act" id="btn-d0" aria-label="Reset with D = 0" title="Reset with D = 0"><svg class="g" aria-hidden="true"><use href="#g-retry"/></svg><span class="t">0</span></button>
+    <button type="button" class="key act" id="btn-d1" aria-label="Reset with D = 1" title="Reset with D = 1"><svg class="g" aria-hidden="true"><use href="#g-retry"/></svg><span class="t">1</span></button>
+    <span class="grow"></span>
+    <button type="button" class="key" data-act="about" aria-label="About this experiment" title="About"><svg class="g" aria-hidden="true"><use href="#g-info"/></svg></button>
+  </div>
 </section>
+<script>
+  (function () {      // the about panel
+    var about = document.getElementById("about");
+    document.addEventListener("click", function (e) {
+      if (!e.target.closest("[data-act=about]")) return;
+      about.hidden = !about.hidden;
+      if (!about.hidden) { var pg = document.getElementById("about-pg"); (pg._pager || Bridge.pager(pg, { pips: document.getElementById("about-pips") })).refresh(); }
+    });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !about.hidden) about.hidden = true; });
+  })();
+</script>
 <script>
 {% raw %}// ══════════════════════════════════════════════════════════════════
 //  CASCADE CONSTANTS  (mirrors local_library/constants.py exactly)

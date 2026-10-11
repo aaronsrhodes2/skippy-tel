@@ -1,26 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Mentat vs Wolfram Alpha vs Gemini — Experiments{% endblock %}
 {% block app %}experiments{% endblock %}
-{% block public_up %}{{ url_for('experiments.index') }}{% endblock %}
-{% block head %}
-<style>
-  main { max-width: 980px; }
-  .bars .row { display: grid; grid-template-columns: 260px 1fr 70px; gap: 10px; align-items: center; margin: 8px 0; }
-  .bars .track { height: 18px; background: #151020; border-radius: 6px; overflow: hidden; }
-  .bars .fill { height: 100%; border-radius: 6px; }
-  .fill.mentat { background: var(--green); } .fill.llm { background: var(--cyan); } .fill.wolfram { background: var(--amber); }
-  .bars .pct { text-align: right; font-weight: 700; }
-  table.domains { border-collapse: collapse; width: 100%; font-size: .85rem; margin-top: 10px; }
-  table.domains th, table.domains td { padding: 6px 8px; border-bottom: 1px solid #222; text-align: right; }
-  table.domains th:first-child, table.domains td:first-child { text-align: left; }
-  table.domains td.best { color: var(--green); font-weight: 700; }
-  .scroll { overflow-x: auto; }
-  @media (max-width: 600px) { .bars .row { grid-template-columns: 1fr 60px; } .bars .track { grid-column: 1 / -1; } }
-</style>
-{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}gauge{% endblock %}
+{% block hud_back %}{{ url_for('experiments.index') }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge-panes.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='experiments.css') }}">{% endblock %}
 {% block content %}
-<section>
-  <h2>Mentat vs Wolfram Alpha vs Gemini</h2>
+{# The benchmark on the bridge: pages you flip (swipe, PageUp/PageDown, the bar under them), never a scrolled page. Every number is read
+   from the result files, as before. #}
+<section class="adm" id="bench">
+  <header class="ahead" style="padding-top:6px"><svg class="g mark" aria-hidden="true"><use href="#g-gauge"/></svg><h2>Mentat vs Wolfram Alpha vs Gemini</h2></header>
+  <div class="apane" style="flex:1;min-height:0">
+    <div class="pg" id="benchpg"><div class="pg-flow">
   {% if not bench.main %}
     <p class="help">The benchmark results aren't bundled in this build.</p>
   {% else %}
@@ -39,7 +30,6 @@
     Wolfram Alpha ran on its free tier; "misses re-run" retried the questions it failed to answer the first time.</p>
 
   <h3>By domain</h3>
-  <div class="scroll">
   <table class="domains">
     <tr><th>Domain</th>{% for r in bench.main %}<th>{{ r.label }}</th>{% endfor %}</tr>
     {% for d in bench.domains %}
@@ -51,7 +41,6 @@
         {% endfor %}</tr>
     {% endfor %}
   </table>
-  </div>
 
   {% if bench.adversarial %}
     <h3>Adversarial questions</h3>
@@ -62,5 +51,17 @@
   <p class="help">Source: <a href="https://github.com/aaronsrhodes2/sigma-ground/tree/master/sigma_ground/mcp/benchmark">sigma_ground/mcp/benchmark</a>
     ({% for r in bench.main + bench.adversarial %}{{ r.file }}{{ ', ' if not loop.last }}{% endfor %}).</p>
   {% endif %}
+    </div></div>
+    <div class="pips" hidden><i></i></div>
+  </div>
 </section>
+<script>
+  (function () {
+    var panel = document.getElementById("benchpg"), pager = Bridge.pager(panel, { pips: panel.parentNode.querySelector(".pips") });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "PageDown") { e.preventDefault(); pager.go(pager.page() + 1); }
+      else if (e.key === "PageUp") { e.preventDefault(); pager.go(pager.page() - 1); }
+    });
+  })();
+</script>
 {% endblock %}
