@@ -146,8 +146,12 @@ def build(env: dict):
         sys.exit("ear: SKIPPY_HOME_TOKEN and ANTHROPIC_API_KEY must be in the vault .env (or the environment)")
     timers = Timers()
     gate = Gate(env.get("SATELLITE_GATE", "http://127.0.0.1:3007"), token)
-    hass = None
-    if env.get("HASS_URL") and env.get("HASS_TOKEN"):               # Home Assistant, when it is set up (the vault holds both)
+    hass = None                                                     # the house: what Skippy can control, through whichever backend is set up
+    from homectl import store_path                                  # noqa: PLC0415
+    from homekit import HomeKit, Store                              # noqa: PLC0415
+    if Store(store_path(env)).load()["devices"]:                    # lights and switches paired with homectl.py: HomeKit, natively
+        hass = HomeKit(Store(store_path(env)), sensitive=env.get("HASS_SENSITIVE") == "1")
+    elif env.get("HASS_URL") and env.get("HASS_TOKEN"):             # or Home Assistant, if he runs one (the vault holds both)
         from hass import Hass                                       # noqa: PLC0415
         hass = Hass(env["HASS_URL"], env["HASS_TOKEN"], sensitive=env.get("HASS_SENSITIVE") == "1")
     brain = Brain(anthropic.Anthropic(api_key=key), env.get("SATELLITE_MODEL", "claude-haiku-4-5"), timers, hass=hass)

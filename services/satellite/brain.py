@@ -8,7 +8,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-import hass as hass_mod
+import house as hass_mod                                         # the house: any backend (HomeKit, Home Assistant ...)
 
 PERSONA_FILE = Path(__file__).resolve().parents[1] / "flask-api" / "app" / "skippy_persona.md"
 FALLBACK_PERSONA = ("You are Skippy the Magnificent, the Elder AI: an ancient beer can of unimaginable power, sardonic, loyal, and secretly fond "

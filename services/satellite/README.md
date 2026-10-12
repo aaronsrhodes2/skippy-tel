@@ -12,19 +12,28 @@ small fast model in Skippy's character, and answers in Skippy's own voice (Eleve
 Settings (the vault `.env`, or the environment): `SKIPPY_HOME_TOKEN`, `ANTHROPIC_API_KEY` (required); `SATELLITE_MIC`, `SATELLITE_SPEAKER`, `SATELLITE_GAIN`,
 `SATELLITE_FLOOR`, `SATELLITE_GATE` (default the voice gate on :3007), `SATELLITE_MODEL` (default claude-haiku-4-5).
 
-## The house: Home Assistant
+## The house, natively (no Alexa, no cloud, no hub)
 
-Skippy never talks to a device. The standard home-AI pattern is **Home Assistant as the hub** (it already speaks Hue, Zigbee, Matter, Alexa devices, plugs,
-thermostats...) with the assistant calling its REST API with a long-lived access token. Set `HASS_URL` (e.g. `http://homeassistant.local:8123`) and
-`HASS_TOKEN` (Home Assistant, your profile, Security, Long-lived access tokens) in the vault and the brain gains three tools (`hass.py`):
-`home_devices`, `home_state`, `home_control`. Guard rails, all tested against a fake Home Assistant (`tests/test_sat_hass.py`):
+Skippy talks to the lights and switches itself, over the local network, with open-source libraries. His Leviton Decora Smart Wi-Fi dimmers and switches
+announce themselves as **unpaired HomeKit accessories**, so `aiohomekit` (the library Home Assistant uses) pairs with them directly with the 8-digit setup code
+printed on each device (the label on its side, and in the Leviton app). After that Skippy reads and sets On and Brightness locally; Alexa is no longer in the path.
+
+    ./.venv/Scripts/python homectl.py scan                                       # what is on the network, and what can be paired here
+    ./.venv/Scripts/python homectl.py pair <id> 123-45-678 "Living room dimmer" --area "Living room"
+    ./.venv/Scripts/python homectl.py list                                       # everything Skippy can control, with its state
+    ./.venv/Scripts/python homectl.py say "living room dimmer" on               # try the same code the voice uses
+
+The pairing keys and the names/rooms are in `state/home/home.json` (git-ignored; `SKIPPY_HOME_STATE` moves it). The setup code is used once and never stored.
+Once any device is paired the listener uses them automatically: the brain gains `home_devices`, `home_state` and `home_control`.
+
+Guard rails (`house.py`, the same for every backend; tests in `tests/test_sat_house*.py`... see `test_sat_hass.py` and `test_sat_homekit.py`):
 
 * only lights, switches, fans, covers, climate, media players, scenes, scripts, vacuums, humidifiers and input booleans can change; sensors can be read;
 * locks, alarm panels and garage doors/gates are invisible unless `HASS_SENSITIVE=1`, and then still need a spoken yes (`confirm`); an alarm panel is never driven;
 * a spoken name must match one entity (the room counts as part of the name); several matches change nothing and Skippy asks which;
-* no raw service calls or templates from the model; the token is never returned or printed.
+* no raw service calls from the model; pairing keys and tokens are never returned or printed.
 
-Later, the same Home Assistant can also be given to Claude as an MCP server (its built-in MCP Server integration) so the private MCP pane on /me lists it, and
-this listener can speak the Wyoming protocol so other rooms' satellites (Raspberry Pi, ESP32) can join.
+Other backends plug into the same `House`: Home Assistant (`hass.py`, if he ever runs one: `HASS_URL` + `HASS_TOKEN` in the vault). Later: the LG webOS TV
+(`aiowebostv`), other rooms' satellites over the Wyoming protocol.
 
 Tests: `python -m pytest tests` from this folder (its own session: other services have a `gate.py` too).
