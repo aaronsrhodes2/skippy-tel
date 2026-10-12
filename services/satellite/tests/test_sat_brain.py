@@ -81,3 +81,20 @@ def test_it_never_loops_forever_on_tools_and_never_returns_nothing():
 def test_the_only_tools_are_timers_and_say_duration_reads_naturally():
     assert {t["name"] for t in TOOLS} == {"set_timer", "cancel_timers", "list_timers"}            # no shell, no files, no deploys
     assert say_duration(1) == "1 second" and say_duration(61) == "1 minute 1 second" and say_duration(3600) == "1 hour" and say_duration(5400) == "1 hour 30 minutes"
+
+
+def test_with_home_assistant_the_house_tools_join_the_timers_and_the_prompt_stops_saying_the_house_is_unconnected():
+    from test_sat_hass import make as make_ha
+    ha, ha_fake = make_ha()
+    clock = [1000.0]
+    timers = Timers(clock=lambda: clock[0])
+    client = Client([NS(type="tool_use", id="tu_h", name="home_control", input={"name": "kitchen light", "action": "on"})], [text("Kitchen light is on.")])
+    b = Brain(client, "m", timers, persona="PERSONA", clock=lambda: clock[0], now=lambda: "Sunday 09:30", hass=ha)
+    assert b.reply("kitchen light on") == "Kitchen light is on."
+    assert ha_fake.calls == [("light/turn_on", {"entity_id": "light.kitchen"})]
+    assert {t["name"] for t in client.calls[0]["tools"]} == {"set_timer", "cancel_timers", "list_timers", "home_devices", "home_state", "home_control"}
+    system = client.calls[0]["system"]
+    assert "Home Assistant" in system and "not connected yet" not in system
+    plain, c2, *_ = make([text("ok")])
+    plain.reply("hi")
+    assert {t["name"] for t in c2.calls[0]["tools"]} == {"set_timer", "cancel_timers", "list_timers"} and "not connected yet" in c2.calls[0]["system"]

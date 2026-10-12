@@ -8,6 +8,8 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+import hass as hass_mod
+
 PERSONA_FILE = Path(__file__).resolve().parents[1] / "flask-api" / "app" / "skippy_persona.md"
 FALLBACK_PERSONA = ("You are Skippy the Magnificent, the Elder AI: an ancient beer can of unimaginable power, sardonic, loyal, and secretly fond "
                     "of the filthy monkeys you babysit. Be funny, but always correct and useful.")
@@ -18,8 +20,7 @@ SPOKEN = (
     "\n\n## Right now: speaking aloud in the Captain's home\n"
     "You are the voice of his house, replacing his Alexa (he used to say 'Computer'; now he says 'Skippy'). Your words go straight to a speaker: "
     "answer in one to three short spoken sentences, in plain words only: no markdown, no lists, no code, no URLs, no emoji, nothing that cannot be said "
-    "aloud; say numbers, times and units the way a person would. Use your tools when one fits (timers). If he asks for something you cannot do yet (the lights "
-    "and the rest of the house are not connected yet), say so plainly, in character, and offer what you can do. Keep the Skippy character, but be quick: "
+    "aloud; say numbers, times and units the way a person would. Use your tools when one fits (timers{house}). {nohouse}Keep the Skippy character, but be quick: "
     "he is standing in a room waiting for you. The current time is {now}."
 )
 
@@ -53,15 +54,18 @@ def say_duration(seconds: int) -> str:
 
 
 class Brain:
-    def __init__(self, client, model: str, timers, persona: str | None = None, clock=time.time, now=None):
+    def __init__(self, client, model: str, timers, persona: str | None = None, clock=time.time, now=None, hass=None):
         self.client, self.model, self.timers, self.clock = client, model, timers, clock
+        self.hass = hass                                              # a hass.Hass when Home Assistant is connected, else None
         self.persona = persona if persona is not None else load_persona()
         self.now = now or (lambda: time.strftime("%A %H:%M"))
         self.history: list[dict] = []
         self._last = 0.0
 
     def system(self) -> str:
-        return self.persona + SPOKEN.format(now=self.now())
+        house = ", and the house through Home Assistant: lights, plugs, thermostat, covers, speakers, scenes; always say plainly what you did or could not do, and never claim a change you did not make" if self.hass else ""
+        nohouse = "" if self.hass else "If he asks for something in the house (the lights and the rest are not connected yet), say so plainly, in character, and offer what you can do. "
+        return self.persona + SPOKEN.format(now=self.now(), house=house, nohouse=nohouse)
 
     def run_tool(self, name: str, args: dict) -> str:
         args = args if isinstance(args, dict) else {}
@@ -77,7 +81,12 @@ class Brain:
                 return "No timers running." if not left else "; ".join(f"{label}: {say_duration(s)} left" for label, s in left)
         except (ValueError, TypeError) as e:
             return f"That did not work: {e}"
+        if self.hass is not None and name in {t["name"] for t in hass_mod.TOOLS}:
+            return hass_mod.run_tool(self.hass, name, args)
         return "I have no such tool."
+
+    def tools(self) -> list[dict]:
+        return TOOLS + (hass_mod.TOOLS if self.hass is not None else [])
 
     def reply(self, heard: str) -> str:
         """What Skippy says to what was heard. Raises whatever the API raises (the caller decides what to do aloud)."""
@@ -88,7 +97,7 @@ class Brain:
         messages = self.history[-2 * MEMORY_TURNS:] + [{"role": "user", "content": heard}]
         text = ""
         for _ in range(4):                                            # a few rounds of tool use at most
-            resp = self.client.messages.create(model=self.model, max_tokens=300, system=self.system(), messages=messages, tools=TOOLS)
+            resp = self.client.messages.create(model=self.model, max_tokens=300, system=self.system(), messages=messages, tools=self.tools())
             blocks = list(resp.content)
             text = " ".join(b.text for b in blocks if getattr(b, "type", "") == "text").strip()
             calls = [b for b in blocks if getattr(b, "type", "") == "tool_use"]

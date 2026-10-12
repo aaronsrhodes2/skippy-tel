@@ -146,7 +146,11 @@ def build(env: dict):
         sys.exit("ear: SKIPPY_HOME_TOKEN and ANTHROPIC_API_KEY must be in the vault .env (or the environment)")
     timers = Timers()
     gate = Gate(env.get("SATELLITE_GATE", "http://127.0.0.1:3007"), token)
-    brain = Brain(anthropic.Anthropic(api_key=key), env.get("SATELLITE_MODEL", "claude-haiku-4-5"), timers)
+    hass = None
+    if env.get("HASS_URL") and env.get("HASS_TOKEN"):               # Home Assistant, when it is set up (the vault holds both)
+        from hass import Hass                                       # noqa: PLC0415
+        hass = Hass(env["HASS_URL"], env["HASS_TOKEN"], sensitive=env.get("HASS_SENSITIVE") == "1")
+    brain = Brain(anthropic.Anthropic(api_key=key), env.get("SATELLITE_MODEL", "claude-haiku-4-5"), timers, hass=hass)
     return gate, brain, timers
 
 
