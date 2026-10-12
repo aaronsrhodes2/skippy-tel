@@ -162,7 +162,8 @@
     size();
     for (var i = 0; i < 5; i++) spirals.push(new Spiral(i));
     window.addEventListener("resize", size);
-    var api = { pulse: function (s) { energy = Math.min(3, energy + (s || 1)); } };
+    var api = { pulse: function (s) { energy = Math.min(3, energy + (s || 1)); },
+                setColors: function (c) { palette = (c && c.length) ? c : COLORS; spirals.forEach(function (sp, i) { sp.col = palette[i % palette.length]; }); } };
     window.skippyAlive = api;
     if (reduce) { still = true; t = 3; spirals.forEach(function (s) { s.step(.016); }); frame(16); }   // one still frame
     else requestAnimationFrame(frame);

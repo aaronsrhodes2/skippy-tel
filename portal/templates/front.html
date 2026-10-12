@@ -3,7 +3,9 @@
 {% block app %}skippy{% endblock %}
 {% block ui %}bridge{% endblock %}
 {% block glyph %}can{% endblock %}
-{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge-panes.css') }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge-panes.css') }}">{% if captain %}
+<script>try { if (localStorage.getItem("skippy-front-mode") !== "quick") document.documentElement.classList.add("agent"); } catch (e) { document.documentElement.classList.add("agent"); }</script>   {# purple only in agent mode: set before paint so there is no flash #}
+{% endif %}{% endblock %}
 {% block content %}
 {# The front page is Skippy the Magnificent. Everyone with the chat grant gets the PUBLIC brain (templates/_chat.html: Haiku with the portal's
    own tools, or Mentat straight; nothing that writes or runs anything). The Captain also gets the AGENT (templates/_workshop.html: Claude Code on
@@ -28,7 +30,8 @@
 {% include "_skippy3d.html" %}
 <script src="{{ url_for('static', filename='bridge-alive.js') }}"></script>
 <script>
-  Bridge.alive(document.querySelector("canvas.alive"){% if captain %}, {colors: ["#a64dff", "#7a2cf0", "#d08cff", "#c040ff", "#5b2bd6", "#e6b3ff"]}{% endif %});
+  const PURPLES = ["#a64dff", "#7a2cf0", "#d08cff", "#c040ff", "#5b2bd6", "#e6b3ff"];
+  const alive = Bridge.alive(document.querySelector("canvas.alive"){% if captain %}, document.documentElement.classList.contains("agent") ? {colors: PURPLES} : undefined{% endif %});
   {% if captain %}
   (function () {                                     // which Skippy the Captain is talking to; remembered in this browser
     const KEY = "skippy-front-mode", agent = document.getElementById("mode-agent"), quick = document.getElementById("mode-quick");
@@ -36,6 +39,8 @@
       agent.hidden = mode !== "agent"; quick.hidden = mode !== "quick";
       document.querySelectorAll(".modebar .key").forEach(k => { const on = k.dataset.mode === mode; k.setAttribute("aria-pressed", on ? "true" : "false"); k.classList.toggle("lit", on); });
       try { localStorage.setItem(KEY, mode); } catch (e) {}
+      document.documentElement.classList.toggle("agent", mode === "agent");         // purple is how he knows he is in coding backend mode; the public chat stays green
+      alive.setColors(mode === "agent" ? PURPLES : null);
       window.dispatchEvent(new Event("resize"));
     }
     document.querySelectorAll(".modebar .key").forEach(k => k.addEventListener("click", () => show(k.dataset.mode)));
