@@ -31,6 +31,7 @@ class Module:
     endpoint: str           # url_for(...) of the page it opens
     label: str              # for a screen reader and the Graveyard; never printed on the launcher
     retirable: bool = True
+    pane: bool = False      # a pane of the Captain's /me dashboard, not a launcher tile: the Graveyard retires it, /me hides it
 
 
 MODULES = (
@@ -42,6 +43,15 @@ MODULES = (
     Module("experiments", "atom", "experiments.index", "Experiments"),
     Module("dashboard", "gauge", "me.index", "Dashboard"),
     Module("admin", "gear", "admin.index", "Admin", retirable=False),
+    # /me panes (id = "me-" + the pane's id in templates/me.html). MCP and Home are what /me is for; the rest wait here to be retired when
+    # their telemetry (pane:<id> clicks, in the Home pane's "Least-used UI") says nobody opens them.
+    Module("me-server", "server", "me.index", "Dashboard: Server", pane=True),
+    Module("me-core", "core", "me.index", "Dashboard: Core", pane=True),
+    Module("me-activity-pane", "eye", "me.index", "Dashboard: Activity", pane=True),
+    Module("me-watcher", "gauge", "me.index", "Dashboard: Watcher", pane=True),
+    Module("me-spend", "clock", "me.index", "Dashboard: Spend", pane=True),
+    Module("me-people", "user", "me.index", "Dashboard: People", pane=True),
+    Module("me-links", "globe", "me.index", "Dashboard: Links", pane=True),
 )
 BY_ID = {m.id: m for m in MODULES}
 

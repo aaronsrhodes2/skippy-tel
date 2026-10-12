@@ -935,6 +935,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                         for email, info in sorted(app.extensions["friends"].all().items())]
         return render_template(
             "me.html", status=status, error=error,
+            buried=[m.id[3:] for m in modules_mod.MODULES if m.pane and m.id in app.extensions["modules"].retired()],   # panes the Graveyard retired
             codes=diagnostics.join_codes(snap), players=diagnostics.players_online(snap), res=res,
             warnings=warnings,
             session_cost=spend.session_cost(status.machine_type, status.minutes_up()) if status else None,

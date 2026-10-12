@@ -55,14 +55,21 @@ def test_a_bad_name_is_refused_before_any_job_exists_and_a_silent_home_is_a_reas
     assert client.get("/me/mcp/result?job=../../x").get_json() == {"state": "unknown"}
 
 
-def test_the_dashboard_is_private_mcp_and_home_and_the_rest_is_in_the_graveyard(env):
-    client, _, app = env
+def test_the_dashboard_opens_on_mcp_and_home_and_the_graveyard_retires_the_other_panes(env):
+    client, vm, app = env[0], env[1], env[2]
     login(client, ADMIN)
     page = client.get("/me").data.decode()
-    assert 'id="mcp"' in page and 'id="home"' in page and page.index('data-pane="mcp"') < page.index('data-pane="home"')
-    for retired in ("server", "core", "activity-pane", "watcher", "spend", "people", "experiments", "links"):
-        assert f'id="{retired}"' not in page and f'data-pane="{retired}"' not in page, retired     # retired, not deleted
-    assert 'id="people"' in client.get("/me?all=1").data.decode()                                      # ?all=1 shows them again
+    assert page.index('data-pane="mcp"') < page.index('data-pane="home"') < page.index('data-pane="server"')
+    assert 'data-tel="pane:mcp"' in page                                                  # telemetry sees which panes get opened
+    assert 'data-pane="experiments"' not in page                                          # moved to the main portal
+    for retired in ("me-server", "me-people"):                                            # the Admin Graveyard retires a pane...
+        assert client.post("/admin/modules", data={"id": retired, "action": "retire"}).status_code in (200, 302)
+    page = client.get("/me").data.decode()
+    assert 'id="server"' not in page and 'id="people"' not in page and 'id="core"' in page and 'id="mcp"' in page
+    client.post("/admin/modules", data={"id": "me-server", "action": "revive"})            # ...and revives it
+    assert 'id="server"' in client.get("/me").data.decode()
+    assert 'data-tel="tile:me-server"' not in client.get("/").data.decode()               # a pane is never a launcher tile
+    assert "Dashboard: People" in client.get("/admin").data.decode()                      # and it is listed in the Graveyard
 
 
 def test_experiments_live_on_the_main_portal_with_the_captains_show_hide_there(env):

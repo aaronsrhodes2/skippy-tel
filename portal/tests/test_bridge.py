@@ -49,8 +49,8 @@ def test_the_launcher_is_glyphs_with_a_lamp_and_no_sentence_on_it(env):
     login(client, ADMIN)
     page = client.get("/apps").data.decode()
     body = page.split("<body class=\"bridge\"", 1)[1].split(">", 1)[1]
-    assert _ids(page) == [m.id for m in modules.MODULES]                       # every module, in order
-    for m in modules.MODULES:
+    assert _ids(page) == [m.id for m in [m for m in modules.MODULES if not m.pane]]                       # every module, in order
+    for m in [m for m in modules.MODULES if not m.pane]:
         assert f'aria-label="{m.label.replace(chr(39), "&#39;")}"' in page     # the words are for a screen reader only
     body = re.sub(r"<footer class=\"foot\">.*?</footer>", "", body, flags=re.S)      # the build id is a label people quote, not a sentence
     visible = re.sub(r"<(script|style|svg)\b.*?</\1>", "", body, flags=re.S)
@@ -124,7 +124,7 @@ def test_the_graveyard_lists_every_module_and_admin_cannot_be_retired(env):
     page = client.get("/admin").data.decode()
     start = page.index('<section id="graveyard"')
     section = page[start:page.index("</section>", start)]
-    assert len(re.findall(r'name="id" value="(\w+)"', section)) == len(modules.MODULES)
+    assert len(re.findall(r'name="id" value="([\w-]+)"', section)) == len(modules.MODULES)
     assert re.search(r'name="id" value="admin">\s*<input type="hidden" name="action" value="retire">\s*<button type="submit" disabled', section)
 
 
@@ -167,7 +167,7 @@ def test_a_failed_read_retires_nothing_and_a_failed_write_is_said_not_half_done(
     vm.get_metadata = lambda key: (_ for _ in ()).throw(RuntimeError("VM API down"))
     store._cache = None
     login(client, ADMIN)
-    assert len(_ids(client.get("/apps").data.decode())) == len(modules.MODULES)     # unreadable: every control stays
+    assert len(_ids(client.get("/apps").data.decode())) == len([m for m in modules.MODULES if not m.pane])     # unreadable: every control stays
     r = client.post("/admin/modules", data={"id": "play", "action": "retire"}, follow_redirects=True)
     assert "couldn" in r.data.decode().lower() and "read the retired modules" in r.data.decode()   # said, and nothing written
     stored = {}

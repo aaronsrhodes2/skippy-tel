@@ -209,7 +209,7 @@ def test_a_stranger_signed_in_with_google_can_ask_and_is_never_let_in(env, monke
     assert where.status_code == 302 and where.location.endswith("/request-access?game=valheim")
     assert "user" not in session_of(client) and session_of(client)["visitor"]["email"] == STRANGER
     assert client.get("/games").status_code == 302                    # asking is all a visitor can do
-    assert client.get("/admin").status_code == 302 and client.get("/me?all=1").status_code == 302
+    assert client.get("/admin").status_code == 302 and client.get("/me").status_code == 302
     page = client.get(where.location).data.decode()
     assert STRANGER in page and 'value="valheim" checked' in page
     sent = client.post("/request-access", data={"game": "valheim", "games": ["valheim", "factorio", "bogus"],
@@ -448,7 +448,7 @@ def test_a_request_that_no_longer_needs_an_answer_disappears_from_the_queue_and_
     app.extensions["friends"].upsert(PAL, ["valheim"], added_by="test")   # granted, but the cleanup never ran
     login(admin, ADMIN)
     assert "Asking for access" not in admin.get("/admin").data.decode()
-    assert "asking" not in admin.get("/").data.decode() and "asking for access" not in admin.get("/me?all=1").data.decode()
+    assert "asking" not in admin.get("/").data.decode() and "asking for access" not in admin.get("/me").data.decode()
 
 
 def test_approving_someone_who_is_already_core_clears_the_request(env):
@@ -494,7 +494,7 @@ def test_the_captain_is_told_on_the_launcher_and_the_dashboard(env, monkeypatch)
     login(admin, ADMIN)
     launcher = admin.get("/apps").data.decode()
     assert '<span class="badge" role="status">1</span>' in launcher and 'href="/admin#friends"' in launcher
-    assert "1 person is asking for access" in admin.get("/me?all=1").data.decode()
+    assert "1 person is asking for access" in admin.get("/me").data.decode()
     friend = app.test_client()
     login(friend, FRIEND)
     assert 'class="badge"' not in friend.get("/apps").data.decode()       # friends never see the queue

@@ -469,8 +469,10 @@ def test_every_tile_id_the_templates_carry_is_one_the_dashboard_knows():
         seen |= set(re.findall(r'data-tel="([^"{]+)"', (TEMPLATES / name).read_text(encoding="utf-8")))
     # the launcher is built from the module registry: one tile per module, its id the tap id (templates/home.html)
     assert 'data-tel="tile:{{ t.id }}"' in (TEMPLATES / "home.html").read_text(encoding="utf-8")
-    assert {m.id for m in modules.MODULES} == set(telemetry_web.LAUNCHER_TILES)
-    seen |= {f"tile:{m.id}" for m in modules.MODULES}
+    assert {m.id for m in modules.MODULES if not m.pane} == set(telemetry_web.LAUNCHER_TILES)
+    seen |= {f"tile:{m.id}" for m in modules.MODULES if not m.pane}
+    seen |= set(re.findall(r'data-tel="(pane:)\{\{ id \}\}"', (TEMPLATES / "me.html").read_text(encoding="utf-8")))
+    seen = {t for t in seen if t != "pane:"}
     launcher = {t for t in seen if t.startswith("tile:") and t.count(":") == 1}
     assert launcher == {f"tile:{t}" for t in telemetry_web.LAUNCHER_TILES}
     assert seen <= known | {"tile:games:"}                                # the live badge is `tile:games:<id>`, not a tile
@@ -614,7 +616,7 @@ def test_the_dashboard_shows_the_recorders_health_before_home_has_sent_anything(
     app, client, tel, _ = make()
     login(client, ADMIN)
     client.get("/games")
-    page = client.get("/me?all=1").data.decode()
+    page = client.get("/me").data.decode()
     assert "<h3>Activity</h3>" in page and "never collected" in page
     assert "No summary from home yet" in page and "/games" in page          # what the portal still holds is shown
 
@@ -627,7 +629,7 @@ def test_the_dashboard_shows_what_people_did_the_least_used_tiles_and_the_health
     tel.record("page", "/x", user="a@x.com")
     tel.since(tel.boot, 0)
     login(client, ADMIN)
-    page = client.get("/me?all=1").data.decode()
+    page = client.get("/me").data.decode()
     activity = page[page.index('id="activity"'):]
     activity = activity[:activity.index("Watcher")]
     text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", activity))
@@ -664,7 +666,7 @@ def test_a_summary_from_outside_is_data_not_markup_and_a_broken_one_cannot_break
                "recent": [{"ts": "soon", "user": None, "kind": 9, "name": {"a": 1}, "detail": "str"}, 3]}
     app.extensions["home"].accept({"status": {}, "site_activity": hostile})
     login(client, ADMIN)
-    res = client.get("/me?all=1")
+    res = client.get("/me")
     assert res.status_code == 200 and "<script>alert(1)</script>" not in res.data.decode()
     assert "&lt;script&gt;" in res.data.decode()
 
@@ -672,15 +674,15 @@ def test_a_summary_from_outside_is_data_not_markup_and_a_broken_one_cannot_break
 def test_the_activity_widget_is_for_the_captain_only():
     app, client, tel, _ = make()
     login(client, PAL)
-    assert client.get("/me?all=1").status_code == 403
+    assert client.get("/me").status_code == 403
     login(client, CORE)
-    assert client.get("/me?all=1").status_code == 403
+    assert client.get("/me").status_code == 403
 
 
 def test_the_widget_says_when_recording_is_off_or_home_has_gone_quiet():
     app, client, tel, _ = make(enabled=False)
     login(client, ADMIN)
-    assert "Recording is switched off" in client.get("/me?all=1").data.decode()
+    assert "Recording is switched off" in client.get("/me").data.decode()
     now = [10_000.0]
     tel2 = tel_mod.Telemetry(clock=lambda: now[0])
     tel2.since(tel2.boot, 0)

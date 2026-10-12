@@ -175,8 +175,8 @@ def test_the_dashboard_reads_codes_and_players_from_the_complete_snapshot_of_thi
     done = snap(up + timedelta(minutes=5), "JOIN_CODE dragonwilds=NEW-1234", "PLAYERS dragonwilds=2")
     writing = snap(up + timedelta(minutes=7), complete=False)
     vm.serial[2] = stale
-    page = client.get("/me?all=1").data.decode()
+    page = client.get("/me").data.decode()
     assert "OLD-0000" not in page                                                         # the last session's code is nobody's
     vm.serial[2] = stale + done + writing
-    page = client.get("/me?all=1").data.decode()
+    page = client.get("/me").data.decode()
     assert "NEW-1234" in page and "2 playing" in page and "OLD-0000" not in page          # not blanked by the one being written

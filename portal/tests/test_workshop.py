@@ -161,7 +161,7 @@ def test_only_the_captain_can_use_the_private_skippy(env):
     _add_friend(client, "pal@example.com", ["skippy"])
     login(client, "pal@example.com")                                     # a friend with the public Skippy: still no
     assert post(client, "/me/workshop/send", {"conv": CONV, "message": "hi"}).status_code == 403
-    assert client.get("/me?all=1").status_code == 403
+    assert client.get("/me").status_code == 403
 
 
 def test_a_page_on_another_site_cannot_drive_it(env):
@@ -232,7 +232,7 @@ def test_the_private_skippy_is_the_front_page_for_the_captain_and_no_longer_on_t
     assert 'id="private-skippy"' in front and 'id="mode-agent"' in front and 'id="mode-quick"' in front      # the agent, and the key to the quick chat
     assert "claude-sonnet-5-5" in front and "workshop isn't answering" not in front
     assert front.index('id="mode-agent"') < front.index('id="mode-quick"')                                     # the agent is what he lands in
-    dash = client.get("/me?all=1").data.decode()
+    dash = client.get("/me").data.decode()
     assert 'id="private-skippy"' not in dash and 'data-pane="skippy"' not in dash and 'id="server" class="apane"' in dash
 
 

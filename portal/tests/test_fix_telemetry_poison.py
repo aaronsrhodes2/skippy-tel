@@ -133,5 +133,5 @@ def test_the_dashboard_says_what_stuck_means():
     tel.since(tel.boot, 0)
     with client.session_transaction() as s:
         s["user"] = {"email": ADMIN, "name": "Captain", "picture": None}
-    page = client.get("/me?all=1").data.decode()
+    page = client.get("/me").data.decode()
     assert "not filing" in page and "flask-api" in page
