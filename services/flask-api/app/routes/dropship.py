@@ -17,7 +17,7 @@ Routes:
   GET  /dropship/image/<file_id>     — stream full-res image
   GET  /dropship/thumb/<file_id>     — redirect to Drive thumbnail URL
   POST /dropship/upload              — upload an image (from SkippyChat SD save)
-  GET  /dropship/search?q=...        — semantic search via LLaVA tags (SQLite FTS)
+  GET  /dropship/search?q=...        — search stored descriptions and file names (SQLite)
   GET  /dropship/latest?n=1          — most recently uploaded image(s)
 """
 
@@ -271,31 +271,16 @@ def dropship_upload():
         file_name = result["name"]
         log.info("DropShip upload: %s (%d bytes)", file_name, len(img_bytes))
 
-        # Kick off async LLaVA tagging so the image is searchable soon
-        _tag_async(file_id, file_name, img_bytes, mime)
+        # Record it in the tag store so /dropship/list and /dropship/latest show it (no description: the
+        # vision tagger that used to write one was removed 2026-10-13)
+        from app import photo_tags
+        photo_tags.mark_seen(file_id, file_name)
 
         return jsonify({"id": file_id, "name": file_name})
 
     except Exception as exc:
         log.error("dropship upload error: %s", exc)
         return error(str(exc), status=503)
-
-
-def _tag_async(file_id: str, name: str, image_bytes: bytes, mime: str):
-    """Fire-and-forget: tag a newly-uploaded image in a background thread."""
-    def _work():
-        try:
-            from app.clients.photo_tagger import describe_image
-            from app import photo_tags
-            photo_tags.mark_seen(file_id, name)
-            desc = describe_image(image_bytes, mime) or ""
-            photo_tags.upsert_tag(file_id, name, desc)
-            if desc:
-                log.info("DropShip auto-tag '%s' → %s…", name, desc[:60])
-        except Exception as exc:
-            log.warning("DropShip auto-tag failed for %s: %s", file_id, exc)
-
-    threading.Thread(target=_work, name=f"tag-{file_id[:8]}", daemon=True).start()
 
 
 # ── GET /dropship/search ──────────────────────────────────────────────────────

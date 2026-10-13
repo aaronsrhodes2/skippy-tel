@@ -155,7 +155,7 @@ data: [state://photos]                     # what backup must cover
 | Speech-to-text | Whisper container; phone uses Android `SpeechRecognizer` (Google) | Streaming Whisper at Core; phone streams audio over mesh | **Google speech → owned** |
 | Text-to-speech | legacy `tts/` (Kokoro), unwired | Kokoro module, wired | — |
 | Translation | Whisper + Gemini | Whisper + local LLM | **Gemini → owned** |
-| Photos | DropShip on **Google Drive** + LLaVA tagger + SQLite FTS | **Immich** (self-hosted: CLIP search, mobile backup app) behind a thin module | **Drive → owned** |
+| Photos | DropShip on **Google Drive** + SQLite search (parked 2026-10-13; the LLaVA tagger is removed) | **Immich** (self-hosted: CLIP search, mobile backup app) behind a thin module | **Drive → owned** |
 | Music / DJ | Drive + Syncthing folder + Mac Bilby | **Navidrome** (Subsonic API) over the local library; Bilby stays the DJ brain and registers as a module | **Drive → owned** |
 | Video | Jellyfin (external) | Jellyfin registered as module | — |
 | Image gen | stub / SD proxy | SD module under arbiter | — |

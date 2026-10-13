@@ -63,12 +63,10 @@ def core(tmp_path_factory):
     state = tmp_path_factory.mktemp("drive-state")
     from app import conversation_store, keyword_memory, photo_tags
     from app.routes import telemetry
-    import app.background.photo_scan as photo_scan
     mp.setattr(photo_tags, "_DB_PATH", state / "photo_tags.db")
     mp.setattr(conversation_store, "DB_PATH", state / "portal_chat.db")
     mp.setattr(telemetry, "_DB_PATH", state / "ui_telemetry.db")
     mp.setattr(keyword_memory, "_DB_PATH", str(state / "keyword_memory.db"))
-    mp.setattr(photo_scan, "start_background_scanner", lambda: None)      # a Drive-polling thread
     real_start = threading.Thread.start
 
     def start(self, *args, **kwargs):                                     # the 8 s Ollama warm-up

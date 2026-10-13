@@ -4,7 +4,7 @@ Schema:
     photo_tags(
         file_id      TEXT PRIMARY KEY,   -- Drive file ID
         drive_name   TEXT,               -- original filename
-        description  TEXT,               -- LLaVA description (empty = not yet tagged)
+        description  TEXT,               -- stored description (empty = none; the tagger that wrote them is gone)
         tags         TEXT,               -- reserved for future structured tags
         tagged_at    REAL,               -- unix timestamp of when tagging completed
         drive_created TEXT               -- ISO8601 createdTime from Drive API
@@ -15,7 +15,7 @@ used by drive_token.json, so it survives container restarts.
 
 Thread safety: each call opens + closes its own connection. SQLite's
 WAL mode allows concurrent readers + one writer, which is fine for
-our workload (one background scanner + occasional search queries).
+our workload (occasional uploads and search queries).
 """
 import logging
 import sqlite3
@@ -84,44 +84,6 @@ def mark_seen(file_id: str, drive_name: str, drive_created: str = "") -> None:
             INSERT OR IGNORE INTO photo_tags (file_id, drive_name, drive_created)
             VALUES (?, ?, ?)
         """, (file_id, drive_name, drive_created))
-        con.commit()
-
-
-def get_tagged_ids() -> set:
-    """Return all file_ids that have been fully tagged (non-empty description)."""
-    with _conn() as con:
-        rows = con.execute(
-            "SELECT file_id FROM photo_tags WHERE description != '' AND tagged_at > 0"
-        ).fetchall()
-    return {r["file_id"] for r in rows}
-
-
-def get_recently_attempted_ids(backoff_seconds: float = 3 * 3600) -> set:
-    """Return file_ids that were attempted (but failed) within the backoff window.
-    Prevents hammering llava with files that already caused a crash this cycle.
-    """
-    cutoff = time.time() - backoff_seconds
-    with _conn() as con:
-        rows = con.execute(
-            "SELECT file_id FROM photo_tags WHERE description = '' AND tagged_at > ?",
-            (cutoff,),
-        ).fetchall()
-    return {r["file_id"] for r in rows}
-
-
-def record_attempt(file_id: str, drive_name: str, drive_created: str = "") -> None:
-    """Mark that we tried (and failed) to tag this file right now.
-    Sets tagged_at = now with empty description so the backoff window applies.
-    """
-    with _lock, _conn() as con:
-        con.execute("""
-            INSERT INTO photo_tags (file_id, drive_name, description, tagged_at, drive_created)
-            VALUES (?, ?, '', ?, ?)
-            ON CONFLICT(file_id) DO UPDATE SET
-                drive_name    = excluded.drive_name,
-                tagged_at     = excluded.tagged_at,
-                drive_created = excluded.drive_created
-        """, (file_id, drive_name, time.time(), drive_created))
         con.commit()
 
 

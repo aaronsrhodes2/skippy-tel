@@ -73,8 +73,9 @@ def create_app() -> Flask:
     _km.init_db()
     from app import conversation_store as _cs
     _cs.init_db()
-    from app.background.photo_scan import start_background_scanner
-    start_background_scanner()
+    # DropShip is parked (the Captain, 2026-10-13: a failed project, to restart later with more planning):
+    # its Drive scanner and the LLaVA tagger it fed are gone, so nothing polls Drive or loads a vision model.
+    # The /dropship routes and the photo_tags store stay, dormant, for the restart.
     _start_ollama_warmup()
 
     app.register_blueprint(health_bp)
