@@ -20,6 +20,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import localinfo
+
 PORTAL = os.environ.get("PORTAL_URL", "https://skippy-portal-1015050363686.us-west1.run.app").rstrip("/")
 API = os.environ.get("SKIPPY_API", "http://flask-api:5000").rstrip("/")
 MAC = os.environ.get("BILBY_MAC_URL", "").rstrip("/")         # Mac DJ assistant, if enabled
@@ -44,6 +46,7 @@ VIDEO_GATE_PUBLIC = os.environ.get("VIDEO_GATE_PUBLIC", "").rstrip("/")   # ... 
 VOICE_GATE = os.environ.get("VOICE_GATE_URL", "").rstrip("/")         # voice-gate: Skippy's ears (Whisper) and mouth (inside)
 VOICE_GATE_PUBLIC = os.environ.get("VOICE_GATE_PUBLIC", "").rstrip("/")   # ... and its Funnel address (outside, :10000)
 BRIDGE = os.environ.get("CLAUDE_BRIDGE_URL", "").rstrip("/")   # Claude Code's bridge on the host: the private Skippy
+LOCAL = localinfo.LocalInfo(os.environ)                           # weather and the commute for the /me dashboard (LOCAL_INFO=off in tests: no network)
 WORKSHOP_WAIT = 5            # seconds the bridge holds a request open waiting for news from the run
 WORKSHOP_PUSH = 100          # events per push to the portal (a request may be 1 MB)
 WORKSHOP_MAX_S = 3 * 3600    # a run this old is abandoned
@@ -188,6 +191,7 @@ def gather() -> dict:
     probes.start("mentat_home", lambda: bool(MENTAT) and _up(f"{MENTAT}/health"))
     # What people did on the portal lately (flask-api's site_events table); the Activity widget on /me shows it.
     probes.start("site_activity", lambda: fetch(f"{API}/telemetry/site_summary"))
+    probes.start("local", LOCAL.snapshot)                       # weather and the commute (localinfo.py), cached inside: cheap to ask every report
     for name, probe in _capability_probes().items():
         probes.start(f"cap_{name}", probe)
     bilby = probes.get("bilby")
@@ -214,6 +218,7 @@ def gather() -> dict:
         "mentat_home": bool(got.get("mentat_home")),
         "capabilities": {name: got.get(f"cap_{name}") or _capability_down(name) for name in _capability_probes()},
         "site_activity": got.get("site_activity"),
+        "local": got.get("local"),
     }
 
 

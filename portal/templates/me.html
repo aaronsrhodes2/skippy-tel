@@ -10,12 +10,15 @@
    pane of pages you flip (static/bridge-panes.js, Bridge.pager), never a scrolled page. Each widget is as it was: only the layout changed. #}
 {% set core_lamp = {'ok': 'on', 'degraded': 'warn', 'unknown': 'idle'}.get(core.verdict, 'off') %}
 {% set home_lamp = 'idle' if not home.paired else ('boot' if home.age is none else ('on' if home.online else 'warn')) %}
+{% set local = home.local or {} %}
+{% set weather_lamp = 'warn' if (local.commute and local.commute.alert) else ('idle' if not local.weather else '') %}
 {% set server_lamp = 'off' if not status else ('on' if status.status == 'RUNNING' else ('idle' if status.status == 'TERMINATED' else 'boot')) %}
 {# `buried`: the /me panes the Captain retired in the Admin Graveyard (modules.py, ids me-<pane>), passed in by app.py. Their markup stays; reviving one
    is one tap there. Experiments moved to the main portal (/experiments, its About sheet). #}
 {% set all_units = [
   ('mcp', 'tools', 'MCP', ''),
   ('home', 'link', 'Home', home_lamp),
+  ('weather', 'globe', 'Weather and traffic', weather_lamp),
   ('server', 'server', 'Server', server_lamp),
   ('core', 'core', 'Core', core_lamp),
   ('activity-pane', 'eye', 'Activity', ''),
@@ -97,6 +100,48 @@
       </div></div>
       <div class="pips" hidden><i></i></div>
     </section>
+
+    {% if 'weather' not in buried %}
+    <section id="weather" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-globe"/></svg><span class="title">Weather and traffic</span></header>
+      <div class="pg"><div class="pg-flow">
+    {% if not local or local.disabled %}
+    <div class="w"><h3>Weather and traffic</h3>
+      <p class="muted">Nothing yet: skippy-pc's reporter sends the weather and the drive every few minutes once it is running with the new code.</p></div>
+    {% else %}
+    {% set c = local.commute %}
+    {% if c and c.alert %}<div class="w"><p class="warn"><b>{{ c.alert }}</b></p></div>{% endif %}
+    {% for key in ('home', 'work') %}{% set w = (local.weather or {}).get(key) %}{% if w %}
+    <div class="w">
+      <h3>{{ 'At home' if key == 'home' else 'At work' }}{% if w.ok %} &middot; {{ w.place }}{% endif %}</h3>
+      {% if w.ok %}
+        <p class="big">{{ w.temp_f }}&deg;F <span class="muted">{{ w.text }}, feels like {{ w.feels_f }}&deg;, wind {{ w.wind_mph }} mph</span></p>
+        <p class="muted">Today {{ w.lo_f }}&deg; to {{ w.hi_f }}&deg;{% if w.rain_chance %} &middot; {{ w.rain_chance }}% chance of rain{% endif %}</p>
+        {% for a in w.alerts %}<p class="warn">{{ a.event }}: {{ a.headline }}</p>{% endfor %}
+        <table>{% for h in w.next_hours %}<tr><td>{{ h.hour }}</td><td>{{ h.temp_f }}&deg;</td><td class="muted">{{ h.text }}{% if h.rain %} &middot; {{ h.rain }}% rain{% endif %}</td></tr>{% endfor %}</table>
+        {% if w.stale %}<p class="warn">Stale: last good reading {{ w.age_s // 60 }} min ago.</p>{% endif %}
+      {% else %}<p class="warn">{{ w.error }}</p>{% endif %}
+    </div>
+    {% endif %}{% endfor %}
+    {% if c %}
+    <div class="w">
+      <h3>The drive</h3>
+      {% for leg in c.legs %}
+        <p><span style="color: {{ 'var(--red)' if leg.delayed else 'var(--green)' }}">{{ '●' if not leg.delayed else '▲' }}</span> <b>{{ leg.name }}</b>: {{ leg.minutes }} min
+          <span class="muted">({{ leg.miles }} mi, usually {{ leg.free_flow_minutes }}{% if leg.delay_minutes %}, {{ leg.delay_minutes }} min slower{% endif %}{% if leg.route %}, via {{ leg.route }}{% endif %})</span></p>
+      {% endfor %}
+      {% if c.note %}<p class="muted">{{ c.note }}</p>{% endif %}
+      <h3 style="margin-top:8px">On your roads now (CHP)</h3>
+      {% for i in c.incidents %}<p class="{{ 'warn' if i.severity == 'major' else '' }}"><b>{{ i.kind }}</b> <span class="muted">{{ i.where }}{% if i.detail %} &middot; {{ i.detail }}{% endif %} &middot; {{ i.time }}</span></p>
+      {% else %}<p class="muted">{% if c.incidents_ok %}No incidents reported on SR 9, 17, 35, 85, 236, 237, US 101 or I-280 between home and work.{% else %}The CHP feed did not answer.{% endif %}</p>{% endfor %}
+    </div>
+    {% endif %}
+    {% endif %}
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
+    {% endif %}
 
     {% if 'server' not in buried %}
     <section id="server" class="apane" hidden>

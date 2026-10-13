@@ -175,6 +175,27 @@ class Notifier:
             self._warn(f"error_{type(exc).__name__}", str(exc))
             return False
 
+    def traffic_alert(self, owner: str, text: str) -> bool:
+        """The commute is slow or the road has a crash (localinfo.py): one Discord DM per episode, not one per report. The same switch as the task-finished DMs."""
+        with self._lock:
+            if not text:
+                self._traffic_told = ("", 0.0)                       # the road is clear again: the next delay is news
+                return False
+            told, at = getattr(self, "_traffic_told", ("", 0.0))
+            now = self.clock()
+            if text == told and now - at < 3600:
+                return False
+            if told and now - at < 1800:                             # a changing story is not a flood: at most one DM per half hour
+                return False
+            if not self.configured or not self.enabled(owner):
+                return False
+            self._traffic_told = (text, now)
+        message_text = "Traffic: " + text
+        if self.background:
+            threading.Thread(target=self._send, args=(message_text,), daemon=True).start()
+            return True
+        return self._send(message_text)
+
     def finished(self, owner: str, task: str, project_name: str, request: str, state: str, error: str | None,
                  last_text: str, finished_age_s: float | None, portal_url: str = "") -> bool:
         """A run the portal held as running has just ended. Returns whether a DM was started. `portal_url` is where the

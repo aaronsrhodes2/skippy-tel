@@ -142,6 +142,36 @@ tail -n 40 state/bridge-supervisor.log
 Your call, not set by anything here: Windows can sign in by itself after a restart (`netplwiz`), which is what makes steps 1 and 3 work
 after a power cut with nobody at the PC. It trades away the sign-in screen's protection of a machine in your own house; decide for yourself.
 
+## Start or stop the whole stack from the portal (the starter)
+
+Two situations, two answers:
+
+* **A power cut (or any reboot) must need nobody.** The PC powers itself back on (BIOS: "Restore on AC power loss" = Power On: set once, in the firmware, nothing in Windows
+  can do it), Windows signs in by itself, Docker Desktop starts when you sign in, the containers come back (`restart: unless-stopped`), and the SkippyBridge task starts the
+  bridge. Checked on this PC (2026-10-12): Docker Desktop AutoStart on, Windows auto sign-in on, SkippyBridge registered. Not checkable from Windows: the BIOS setting.
+* **You took it down on purpose, for a heavy task, and forgot to bring it back.** That is what the **starter** is for: `tools/skippy_starter.py`, an always-on program on the
+  Windows host (not in Docker, so it works when Docker is down). Like the home reporter it only makes outbound calls: every ~10 s it tells the portal how things are
+  (Docker, containers, bridge) and receives the requests waiting for it with the home token (`POST /home/starter`, `portal/starter.py`). Admin > Recovery > **Start or stop SkippyTel**:
+
+  | Button | What the starter does |
+  |---|---|
+  | **Start SkippyTel** | Docker Desktop if it is not running (then the clean restart, `start-docker-clean.ps1`, if it will not come up), `docker compose up -d`, then the bridge supervisor |
+  | **Stop SkippyTel** | the bridge (refused, touching nothing, while Skippy Desktop is in a run) and every container; Docker Desktop and the starter stay up. It says when it comes back: **tomorrow at 7 AM** (the default), **in 4 hours**, or **only when I start it** |
+  | **Restart SkippyTel** | a stop (no automatic return) and a start |
+
+  The "back on" time is kept by the starter itself in `state/starter.json`, so it holds with the portal or the internet down, and across a reboot. **Start SkippyTel** (or any successful
+  start) cancels it. If the automatic start fails it tries again ten minutes later.
+  Nothing else can be asked of it: the three names above are all it knows, no text from the portal is ever run, and it listens on no port (a loopback lock keeps a second copy from starting).
+
+  Set up once, at the PC (needs your go, it registers a scheduled task):
+  ```bash
+  bash tools/install_starter_startup.sh            # a dry run: prints the task and the exact schtasks command, changes nothing
+  bash tools/install_starter_startup.sh --apply    # registers the "SkippyStarter" task (at sign-in; restarts on failure)
+  bash tools/install_starter_startup.sh --status   # asks Windows about it (read-only)
+  ```
+  What it cannot do: wake a PC that is off, asleep or at the sign-in screen. With the setup above that is a power cut with a PC that failed to come back: look at it in person.
+  The card says "The starter isn't answering" in that case, and shows when it was last heard.
+
 ## If none of this helps
 
 Open the `ops` workflow with `command` = **status** (the games VM) and **home**, read both logs, and tell Skippy (or Claude) what

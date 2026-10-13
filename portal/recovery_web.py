@@ -14,9 +14,10 @@ import buildinfo
 import recovery
 
 BACK = "#recovery"
+STARTER_WAIT_S = 25               # how long a button waits for the starter before saying "sent, still working"
 
 
-def init_app(app, workshop, limiter, github: recovery.GitHub, clock=None, home=None) -> None:
+def init_app(app, workshop, limiter, github: recovery.GitHub, clock=None, home=None, starter=None) -> None:
     log = recovery.Log()
     runs_cache = recovery.RunsCache(github)
     app.extensions["recovery"] = {"log": log, "github": github, "runs": runs_cache}
@@ -33,7 +34,7 @@ def init_app(app, workshop, limiter, github: recovery.GitHub, clock=None, home=N
                "workshop": workshop.current(), "paused": workshop.paused, "ready": workshop.ready(),
                "log": [{**e, "when": recovery.ago(datetime.fromtimestamp(e["at"], timezone.utc), at)} for e in log.recent()],
                "actions": recovery.ACTIONS, "repo": recovery.REPO, "fetched": recovery.RUNS_FETCHED,
-               "pc_wait": recovery.PC_WAIT_S,
+               "pc_wait": recovery.PC_WAIT_S, "starter": starter.view() if starter else None,
                "pc": {"online": bool(home and home.online()), "services": recovery.PC_SERVICES,
                       "projects": workshop.projects() if home else []}}
         if github.configured:
@@ -80,6 +81,23 @@ def init_app(app, workshop, limiter, github: recovery.GitHub, clock=None, home=N
         return done(action, f"Sent to skippy-pc; no answer within {recovery.PC_WAIT_S} s. It still runs: look again in a "
                             "minute (Funnel status, or the Core card on the dashboard).", False)
 
+    def start_stop(action: str):
+        """Start, stop or restart skippy-pc's stack through the starter on the host. Waits a little for its answer; a long one (Docker Desktop
+        starting) keeps going and the card shows how it ended."""
+        op = action.split("-", 1)[1]
+        who = auth.current_user()["email"]
+        if starter is None or not starter.online():
+            return done(action, "The starter on skippy-pc isn't answering. The PC is off, asleep or at the sign-in screen, or the starter isn't "
+                                "installed (remote-recovery.md). Nothing remote can wake a PC that is off.", False)
+        try:
+            cid = starter.request(op, who, request.form.get("resume", "") if op == "stop" else "")
+        except ValueError as exc:
+            return done(action, f"Not sent: {exc}.", False)
+        got = starter.wait(cid, STARTER_WAIT_S)
+        if got is None:
+            return done(action, f"Sent to skippy-pc. It is still working (Docker can take a couple of minutes): look at the card again in a minute.", True)
+        return done(action, got["summary"] or ("Done." if got["ok"] else "It did not work."), got["ok"])
+
     @bp.post("/<action>")
     @auth.admin_required
     def act(action: str):
@@ -104,6 +122,10 @@ def init_app(app, workshop, limiter, github: recovery.GitHub, clock=None, home=N
             return done(action, "Pick one of the listed services. Nothing was sent.", False)   # before the rate limit: a slip
         if action == "pc-reset-workshop" and request.form.get("project", "") not in {p["id"] for p in workshop.projects()}:
             return done(action, "Pick one of the listed projects. Nothing was sent.", False)   # doesn't cost the button
+        if action.startswith("starter-"):
+            if not limiter.allow(f"recovery:{action}", spec.limit, spec.window_s):
+                return done(action, f"{spec.label}: already done just now. Wait a few minutes and look at the card first.", False)
+            return start_stop(action)
         if action.startswith("pc-") and (home is None or not home.online()):
             return done(action, "skippy-pc isn't reporting, so it can't be asked. If it stays silent it needs a look in "
                                 "person (remote-recovery.md).", False)

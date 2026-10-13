@@ -223,6 +223,8 @@ call checks for the Captain again and needs the `X-Workshop` header, and
 or any under-guarded one**, probing nobody, a signed-in stranger and a chat-only friend. A new route must be added to its REGISTRY.
 The animated 3D Skippy (`templates/_skippy3d.html`, `static/skippy-3d.js`, model in `static/skippy/`) lives in the corner of `/chat`.
 
+**The starter** (`tools/skippy_starter.py`, `portal/starter.py`): skippy-pc's always-on service manager on the Windows host. The portal's Admin > Recovery card asks it (outbound-polling, home token, three operations only: start, stop with a back-on time, restart) to bring the whole stack up or down, even when Docker and the bridge are down. Details: docs/portal/remote-recovery.md.
+
 **Full screen on phones and tablets:** `/manifest.webmanifest` (public) asks for `display: fullscreen` (falling back to standalone), so Add to Home Screen opens the
 portal with no browser bars; the music and video apps keep their own manifests (their pages override `{% block pwa %}`). The top strip also has a
 full-screen key (`#fs-key`, shown only where the browser has the Fullscreen API: Android Chrome, iPad; on iPhone it shows how to Add to Home Screen).

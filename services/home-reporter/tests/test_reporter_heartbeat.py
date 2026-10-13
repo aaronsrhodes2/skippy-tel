@@ -18,7 +18,7 @@ from test_music import Fake, _json
 
 TOKEN = "home-token"
 SHAPE = {"status", "health", "services", "music_session", "bilby", "setlist", "up_next", "mentat_home", "capabilities",
-         "site_activity"}                                    # what the portal reads: it must not change with how it is collected
+         "site_activity", "local"}                                    # what the portal reads: it must not change with how it is collected
 
 
 @pytest.fixture(autouse=True)

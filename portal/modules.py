@@ -51,6 +51,7 @@ MODULES = (
     Module("me-watcher", "gauge", "me.index", "Dashboard: Watcher", pane=True),
     Module("me-spend", "clock", "me.index", "Dashboard: Spend", pane=True),
     Module("me-people", "user", "me.index", "Dashboard: People", pane=True),
+    Module("me-weather", "globe", "me.index", "Dashboard: Weather and traffic", pane=True),
     Module("me-links", "globe", "me.index", "Dashboard: Links", pane=True),
 )
 BY_ID = {m.id: m for m in MODULES}

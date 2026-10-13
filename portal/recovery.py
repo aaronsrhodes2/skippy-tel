@@ -84,6 +84,12 @@ ACTIONS: dict[str, Action] = {
                            4, 300, False),
     "pc-funnel-off": Action("Funnel off", "Take the audio, video and voice services off the internet (Tailscale Funnel off)? "
                             "They stop playing anywhere but at home until it's back on.", 4, 300, False),
+    # The starter on the host (starter.py, tools/skippy_starter.py): works when Docker or the bridge is down. Needs the PC on and signed in.
+    "starter-start": Action("Start SkippyTel", "Start skippy-pc's whole stack? Docker Desktop if it isn't running, then the containers, then the "
+                            "bridge (Skippy Desktop). It can take a couple of minutes.", 3, 600, False),
+    "starter-stop": Action("Stop SkippyTel", "Stop skippy-pc's stack? The bridge (refused while a run is going) and every container stop, so the "
+                           "voice, music, video and chat services go away until you start it again. Docker Desktop and the starter stay up.", 2, 600, False),
+    "starter-restart": Action("Restart SkippyTel", "Stop and start skippy-pc's whole stack? Everything is down for a couple of minutes.", 2, 600, False),
     "pc-funnel-status": Action("Funnel status", "Ask skippy-pc what Tailscale Funnel is serving?", 10, 60, False),
 }
 

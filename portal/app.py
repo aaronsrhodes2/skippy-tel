@@ -25,6 +25,7 @@ import autoconfig
 import buildinfo
 import chat
 import chat_tools
+import starter as starter_mod
 import config
 import diagnostics
 import discord_admin
@@ -658,7 +659,9 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     app.register_blueprint(admin)
     admin_panel.init_app(app, vm)          # the per-game Server admin card: admin-only refresh route + template global
-    recovery_web.init_app(app, workshop, limiter, github, home=home)   # the Admin page's recovery buttons (/admin/recovery/*)
+    starter = starter_mod.Starter()
+    app.extensions["starter"] = starter
+    recovery_web.init_app(app, workshop, limiter, github, home=home, starter=starter)   # the Admin page's recovery buttons (/admin/recovery/*)
     ships = ship_mod.ShipWatch(github, app.extensions["recovery"]["runs"])   # the private Skippy's ship card
     app.extensions["ships"] = ships
     # Tell the Captain on Discord when a private-Skippy run ends (notify.py: a DM to him only, one per run, switchable).
@@ -682,7 +685,26 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         report = request.get_json(silent=True)
         if not isinstance(report, dict):
             abort(400)
-        return jsonify({**home.accept(report), "imports_wanted": imports.wanted()})
+        local = report.get("local") if isinstance(report.get("local"), dict) else {}
+        reply = {**home.accept(report), "imports_wanted": imports.wanted()}
+        alert = str(((local.get("commute") or {}).get("alert")) or "")[:300] if isinstance(local.get("commute"), dict) else ""
+        try:                                                      # a slow drive or a crash on his road: one DM per episode (notify.py)
+            notifier.traffic_alert(next(iter(sorted(app.config["ADMIN_EMAILS"])), ""), alert)
+        except Exception:                                         # noqa: BLE001 — never let a notification touch the report
+            pass
+        return jsonify(reply)
+
+    @app.post("/home/starter")
+    def home_starter():
+        """The starter on skippy-pc (starter.py): outbound calls with the home token. Takes its status and results, hands back the start/stop requests."""
+        if request.content_length is not None and request.content_length > 20_000:
+            abort(413)
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            abort(400)
+        return jsonify(commands=starter.poll(payload))
 
     @app.put("/home/imports/<name>")
     def home_import_chunk(name):

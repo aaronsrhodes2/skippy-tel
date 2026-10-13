@@ -351,4 +351,5 @@ class Home:
         """The old skippy-pc /status page's content. Admin only."""
         r = self.report or {}
         return {"online": self.online(), "age": self.age(), "paired": self.paired(),
-                "status": r.get("status") or {}, "services": r.get("services") or []}
+                "status": r.get("status") or {}, "services": r.get("services") or [],
+                "local": r.get("local") or {}}

@@ -114,6 +114,38 @@
       portal turns it back on.</p>
   </div>
 
+  {% set st = rc.starter %}
+  <div class="card" id="starter">
+    <h3>Start or stop SkippyTel</h3>
+    {% if st and st.online %}
+      <p>The starter on skippy-pc answered {{ st.age_s }} s ago:
+        Docker {{ 'up' if st.status.docker else 'DOWN' }},
+        {{ st.status.containers_up or 0 }} of {{ st.status.containers_total or 0 }} containers,
+        bridge {{ 'answering' if st.status.bridge else 'DOWN' }}{% if st.status.busy %} (a run is going){% endif %}
+        {% if st.status.working %}&middot; <b>{{ st.status.working }}</b>{% endif %}</p>
+      <p class="row">{{ button('starter-start') }} {{ button('starter-restart') }}</p>
+      <form class="inline" method="post" action="{{ url_for('recovery.act', action='starter-stop') }}" data-ask="{{ rc.actions['starter-stop'].ask }}"
+            onsubmit="this.elements.confirm.value = 'yes';">
+        <input type="hidden" name="confirm" value="">
+        <label class="field" for="starter-resume">Back on</label>
+        <select id="starter-resume" name="resume">
+          <option value="7am">tomorrow at 7 AM (by itself)</option>
+          <option value="4h">in 4 hours (by itself)</option>
+          <option value="manual">only when I start it</option>
+        </select>
+        <button type="submit" class="danger">{{ rc.actions['starter-stop'].label }}</button>
+      </form>
+      {% if st.status.resume_at %}<p class="warn">It is down on purpose and will start itself at {{ st.status.resume_at.replace('T', ' ') }}. Start SkippyTel now cancels that.</p>{% endif %}
+      <p class="help">A small program on skippy-pc itself, so it works when Docker or the bridge is down. It only ever does these three things.</p>
+    {% else %}
+      <p class="warn">The starter on skippy-pc isn't answering{% if st and st.age_s is not none %} (last heard {{ st.age_s // 60 }} min ago){% endif %}: the PC is off, asleep or at
+        the sign-in screen, or the starter isn't installed (<code class="code">bash tools/install_starter_startup.sh</code> at the PC). Nothing remote can wake a PC that is off.</p>
+    {% endif %}
+    {% for r in (st.recent if st else []) %}
+      <p class="{{ '' if r.ok else 'warn' }} help">{{ r.op }} {{ r.age_s // 60 }} min ago by {{ r.by }}: {{ r.summary }}</p>
+    {% endfor %}
+  </div>
+
   {% set pc = rc.pc %}
   <div class="card" id="pc-recovery">
     <h3>skippy-pc</h3>

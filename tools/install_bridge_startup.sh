@@ -22,7 +22,7 @@
 #
 # Settings (environment, for tests): SCHTASKS (default schtasks.exe), BASH_EXE, BRIDGE_TASK_USER (DOMAIN\name).
 
-TASK=SkippyBridge
+TASK=${STARTUP_TASK:-SkippyBridge}            # SkippyStarter when run through install_starter_startup.sh
 
 # ── pure pieces (the tests source this file and call them) ───────────────────
 
@@ -77,12 +77,13 @@ write_utf16() {                 # stdin -> <file> as UTF-16 with a BOM, which is
 # task_xml <bash exe> <supervisor script, forward slashes> <working directory> <user or empty>
 task_xml() {
   local bash_exe=$1 script=$2 workdir=$3 user=$4 user_xml=""
+  local desc="${STARTUP_DESC:-Keeps the solid-gold bridge (the hands of the private Skippy on skippy-pc) running: starts tools/bridge_supervisor.sh at logon. Log: state/bridge-supervisor.log. Made by tools/install_bridge_startup.sh.}"
   if [ -n "$user" ]; then user_xml="<UserId>$(xml_escape "$user")</UserId>"; fi
   cat <<EOF
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>Keeps the solid-gold bridge (the private Skippy's hands on skippy-pc) running: starts tools/bridge_supervisor.sh at logon. Log: state/bridge-supervisor.log. Made by tools/install_bridge_startup.sh.</Description>
+    <Description>$(xml_escape "$desc")</Description>
     <URI>\\$TASK</URI>
   </RegistrationInfo>
   <Triggers>
@@ -181,14 +182,14 @@ main() {
 
   local bash_exe script workdir user="${BRIDGE_TASK_USER:-}"
   bash_exe=$(find_bash_exe)
-  script="$(to_mixed "$root")/tools/bridge_supervisor.sh"
+  script="$(to_mixed "$root")/${STARTUP_SCRIPT:-tools/bridge_supervisor.sh}"
   workdir=$(to_win "$root")
   if [ -z "$user" ] && [ -n "${USERNAME:-}" ]; then user="${USERDOMAIN:+$USERDOMAIN\\}$USERNAME"; fi
 
   echo "Scheduled task $TASK: at logon of ${user:-the user who runs this}, run"
   echo "  $bash_exe -l \"$script\""
-  echo "(no time limit; restarts on failure every minute; one copy at a time; not elevated; the supervisor"
-  echo "restarts the bridge itself, and logs to $workdir\\state\\bridge-supervisor.log)"
+  local note="${STARTUP_NOTE:-the supervisor restarts the bridge itself, and logs to $workdir\\state\\bridge-supervisor.log}"
+  echo "(no time limit; restarts on failure every minute; one copy at a time; not elevated; $note)"
   echo
   echo "The task definition:"
   task_xml "$bash_exe" "$script" "$workdir" "$user" | sed 's/^/    /'
