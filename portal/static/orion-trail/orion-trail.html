@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>ORION TRAIL</title>
 <style>
 :root {
@@ -170,12 +170,56 @@ input[type=text]:focus { border-color: var(--green); }
 #death-art, #victory-art { font-size: 12px; line-height: 1.15; }
 .endstats { margin-top: 14px; font-size: 13.5px; }
 .small-note { position: fixed; bottom: 6px; right: 12px; font-size: 11px; color: #1d5f2d; z-index: 5; }
-@media (max-width: 1023px) {
+@media (max-width: 319px) {
   #too-small { display: flex !important; }
 }
 #too-small {
   display: none; position: fixed; inset: 0; z-index: 10000; background: var(--bg);
   align-items: center; justify-content: center; text-align: center; padding: 30px;
+}
+
+/* ---- TOUCH / PHONE ---- every key has a tap; below ~900 px the three travel columns stack and the screens scroll ---- */
+html { -webkit-text-size-adjust: 100%; touch-action: manipulation; }
+button, .choice, #action-bar span, #modal-cont, #modal-close { -webkit-tap-highlight-color: rgba(51,255,102,0.25); user-select: none; -webkit-user-select: none; }
+#modal-close { display: none; float: right; margin: -6px -8px 6px 8px; }
+#modal.closable #modal-close { display: inline-block; }
+#modal-cont { cursor: pointer; }
+.kh { color: var(--amber); }
+.statusbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+@media (hover: none) { .kh { display: none; } }
+@media (max-width: 900px) {
+  html, body { height: auto; min-height: 100%; overflow: auto; }
+  .screen { height: auto; min-height: 100vh; min-height: 100dvh; padding: 10px; overflow: visible; }
+  #screen-setup, #screen-status, #screen-death, #screen-victory { overflow: visible; }
+  #title-menu { width: min(320px, 88vw); }
+  #title-rule { max-width: 100%; }
+  #screen-title > * { max-width: 100%; }
+  button { min-height: 44px; font-size: 14px; padding: 8px 12px; }
+  .setup-grid { grid-template-columns: minmax(0, 1fr); flex: none; }
+  .panel { min-width: 0; }
+  .diff-row button { flex: 1 1 28%; min-width: 0; padding: 8px 4px; letter-spacing: 0; }
+  .crew-inputs { grid-template-columns: 1fr; }
+  .diff-row { flex-wrap: wrap; }
+  input[type=text] { font-size: 16px; padding: 9px 10px; }
+  .stepper button { min-width: 38px; min-height: 40px; padding: 0 6px; }
+  .store-table { font-size: 12px; }
+  .store-table td { padding: 3px 2px; }
+  .store-table .qty { min-width: 30px; }
+  #travel-main { grid-template-columns: minmax(0, 1fr); flex: none; }
+  #log-panel { height: 170px; flex: none; }
+  #log-lines { height: 140px; }
+  #routemap { overflow-x: auto; }
+  #screen-status > div[style*="grid-template-columns"] { grid-template-columns: minmax(0, 1fr) !important; }
+  #screen-status .panel[style*="flex:1"] { flex: none !important; }
+  #action-bar { position: sticky; bottom: 0; z-index: 20; background: var(--bg); display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 8px 0 calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--green-dim); }
+  #action-bar span { border: 1px solid var(--green-dim); padding: 12px 8px; text-align: center; font-size: 14px; background: var(--panel); }
+  #action-bar span:first-child { grid-column: 1 / -1; font-size: 16px; background: rgba(51,255,102,0.16); border-color: var(--green); }
+  #modal { width: 96vw; max-height: 92vh; max-height: 92dvh; padding: 14px 14px calc(14px + env(safe-area-inset-bottom)); }
+  #modal-art { font-size: 11px; }
+  .choice { padding: 13px 12px; margin: 8px 0; font-size: 14px; }
+  #modal .contbar { padding: 14px; margin-top: 12px; border: 1px solid var(--amber); text-align: center; }
+  .small-note { display: none; }
+  #death-art, #victory-art { font-size: 10px; }
 }
 </style>
 </head>
@@ -183,8 +227,8 @@ input[type=text]:focus { border-color: var(--green); }
 
 <div id="too-small"><div>
 <pre class="amber">TERMINAL TOO SMALL</pre>
-<p class="dim" style="margin-top:12px">The ISV requires a viewport of at least 1024 pixels.<br>
-Mission Control did not budget for phones. Mission Control did not budget for much.</p>
+<p class="dim" style="margin-top:12px">The ISV requires a viewport of at least 320 pixels.<br>
+Mission Control did not budget for wristwatches. Mission Control did not budget for much.</p>
 </div></div>
 
 <!-- ============ TITLE ============ -->
@@ -193,9 +237,9 @@ Mission Control did not budget for phones. Mission Control did not budget for mu
 <div id="title-rule">// . . . . . . . . . . . . . . . . . . . . . . . . //</div>
 <p class="tagline">Earth is dead. Space wants you dead too. Good luck.</p>
 <div id="title-menu">
-  <button onclick="UI.gotoSetup()">[N] NEW VOYAGE</button>
-  <button id="btn-continue" onclick="UI.continueGame()" style="display:none">[C] CONTINUE VOYAGE</button>
-  <button onclick="UI.showHelp()">[H] HOW TO PLAY</button>
+  <button onclick="UI.gotoSetup()"><span class="kh">[N]</span> NEW VOYAGE</button>
+  <button id="btn-continue" onclick="UI.continueGame()" style="display:none"><span class="kh">[C]</span> CONTINUE VOYAGE</button>
+  <button onclick="UI.showHelp()"><span class="kh">[H]</span> HOW TO PLAY</button>
 </div>
 <p class="dim" style="margin-top:26px">v1 — pre-flight software. Report bugs to a dead planet.</p>
 </div>
@@ -221,7 +265,7 @@ Mission Control did not budget for phones. Mission Control did not budget for mu
     <p>REQUISITION POINTS: <span id="store-points" class="amber"></span></p>
     <table class="store-table" id="store-table"></table>
     <p id="quartermaster" style="margin-top:10px"></p>
-    <button style="margin-top:8px;padding:8px 22px;font-size:15px" onclick="UI.launch()">[SPACE] LAUNCH ▮</button>
+    <button style="margin-top:8px;padding:8px 22px;font-size:15px" onclick="UI.launch()"><span class="kh">[SPACE]</span> LAUNCH ▮</button>
   </div>
 </div>
 </div>
@@ -243,20 +287,20 @@ Mission Control did not budget for phones. Mission Control did not budget for mu
 </div>
 <div class="panel" id="log-panel"><span class="ptitle">CAPTAIN'S LOG</span><div id="log-lines"></div></div>
 <div id="action-bar">
-  <span onclick="UI.engage()"><b>[SPACE]</b> ENGAGE</span>
-  <span onclick="UI.repairMenu()"><b>[R]</b> REPAIR</span>
-  <span onclick="UI.treat()"><b>[T]</b> TREAT CREW</span>
-  <span onclick="UI.eva()"><b>[E]</b> EVA PATCH</span>
-  <span onclick="UI.rest()"><b>[Z]</b> REST</span>
-  <span onclick="UI.cyclePace()"><b>[P]</b> PACE: <span id="ab-pace"></span></span>
-  <span onclick="UI.cycleRations()"><b>[F]</b> RATIONS: <span id="ab-rations"></span></span>
-  <span onclick="UI.showStatus()"><b>[S]</b> STATUS</span>
+  <span onclick="UI.engage()"><b class="kh">[SPACE]</b> ENGAGE</span>
+  <span onclick="UI.repairMenu()"><b class="kh">[R]</b> REPAIR</span>
+  <span onclick="UI.treat()"><b class="kh">[T]</b> TREAT CREW</span>
+  <span onclick="UI.eva()"><b class="kh">[E]</b> EVA PATCH</span>
+  <span onclick="UI.rest()"><b class="kh">[Z]</b> REST</span>
+  <span onclick="UI.cyclePace()"><b class="kh">[P]</b> PACE: <span id="ab-pace"></span></span>
+  <span onclick="UI.cycleRations()"><b class="kh">[F]</b> RATIONS: <span id="ab-rations"></span></span>
+  <span onclick="UI.showStatus()"><b class="kh">[S]</b> STATUS</span>
 </div>
 </div>
 
 <!-- ============ STATUS ============ -->
 <div class="screen" id="screen-status">
-<h2 class="amber">═══ SHIP STATUS ═══ <span class="dim" style="font-size:13px">[ESC] return</span></h2>
+<div class="statusbar"><h2 class="amber">═══ SHIP STATUS ═══ <span class="dim kh" style="font-size:13px">[ESC] return</span></h2><button onclick="UI.back()">◀ BACK</button></div>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
   <div class="panel"><span class="ptitle">CREW ROSTER</span><div id="status-roster"></div></div>
   <div class="panel"><span class="ptitle">GRAVEYARD</span><div id="status-graveyard"></div></div>
@@ -270,7 +314,7 @@ Mission Control did not budget for phones. Mission Control did not budget for mu
 <h2 class="red" id="death-title"></h2>
 <p id="death-epitaph" class="amber" style="margin-top:10px;font-style:italic"></p>
 <div class="endstats" id="death-stats"></div>
-<p style="margin-top:18px"><button onclick="UI.newVoyage()">[N] NEW VOYAGE</button></p>
+<p style="margin-top:18px"><button onclick="UI.newVoyage()"><span class="kh">[N]</span> NEW VOYAGE</button></p>
 </div>
 
 <!-- ============ VICTORY ============ -->
@@ -288,17 +332,18 @@ Mission Control did not budget for phones. Mission Control did not budget for mu
 <h2 class="amber" id="victory-title"></h2>
 <p id="victory-text" style="margin-top:10px;max-width:640px"></p>
 <div class="endstats" id="victory-stats"></div>
-<p style="margin-top:18px"><button onclick="UI.newVoyage()">[N] NEW VOYAGE</button></p>
+<p style="margin-top:18px"><button onclick="UI.newVoyage()"><span class="kh">[N]</span> NEW VOYAGE</button></p>
 </div>
 
 <!-- ============ MODAL ============ -->
 <div id="modal-wrap"><div id="modal">
+  <button id="modal-close" onclick="UI.dismiss(true)">✕ CLOSE</button>
   <h2 id="modal-title"></h2>
   <pre id="modal-art"></pre>
   <div id="modal-text"></div>
   <div id="modal-choices"></div>
   <div id="modal-deltas" class="delta-list"></div>
-  <div id="modal-cont" class="contbar" style="display:none">[SPACE] CONTINUE <span class="blink">▮</span></div>
+  <div id="modal-cont" class="contbar" style="display:none" onclick="UI.dismiss()"><span class="kh">[SPACE]</span> CONTINUE <span class="blink">▮</span></div>
 </div></div>
 
 <p class="small-note">ORION TRAIL // TERMINAL 7-G // PROPERTY OF NOBODY NOW</p>
@@ -1055,6 +1100,7 @@ const UI = (() => {
   function stopArt() {
     if (artTimer) { clearInterval(artTimer); artTimer = null; }
     artFrames = []; artIndex = 0;
+    $('modal').classList.remove('closable');
     const el = $('modal-art');
     el.classList.remove('active');
     el.textContent = '';
@@ -1346,6 +1392,7 @@ const UI = (() => {
     $('modal-title').textContent = '▚ REPAIR DETAIL — costs 2 PARTS + 1 day ▞';
     $('modal-text').textContent = 'Which system gets the duct tape with ambition? [ESC] to cancel.';
     $('modal-deltas').innerHTML = ''; $('modal-cont').style.display = 'none';
+    $('modal').classList.add('closable');
     const ch = $('modal-choices'); ch.innerHTML = '';
     SYS_KEYS.forEach((k, i) => {
       const d = document.createElement('div');
@@ -1454,6 +1501,7 @@ Waypoints offer resupply and trouble in equal measure. Three candidate planets w
     $('modal-choices').innerHTML = '';
     $('modal-deltas').innerHTML = '';
     $('modal-cont').style.display = 'block';
+    $('modal').classList.add('closable');
     $('modal-wrap').classList.add('active');
   }
 
@@ -1517,8 +1565,19 @@ Waypoints offer resupply and trouble in equal measure. Three candidate planets w
     if ((activeScreen === 'death' || activeScreen === 'victory') && (k === 'n' || k === 'N')) newVoyage();
   });
 
+  /* ---------- touch: every key press above has a tap ---------- */
+  function press(key) { document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); }
+  function dismiss(close) { press(close ? 'Escape' : ' '); }         // CONTINUE is Space (or Enter); CLOSE is Escape
+  function back() { press('Escape'); }                                // the status screen's way back
+  document.addEventListener('DOMContentLoaded', () => {
+    // a tap on the typing text shows all of it, like pressing a key during the typewriter
+    $('modal').addEventListener('click', e => {
+      if (typeTimer && modalState && modalState.fullText != null && !e.target.closest('button, .choice, #modal-cont')) press(' ');
+    });
+  });
+
   window.addEventListener('DOMContentLoaded', init);
-  return { gotoSetup, continueGame, newVoyage, launch, engage, openScenario, repairMenu, treat, eva, rest,
+  return { dismiss, back, press, gotoSetup, continueGame, newVoyage, launch, engage, openScenario, repairMenu, treat, eva, rest,
            cyclePace, cycleRations, showStatus, showHelp, render };
 })();
 </script>

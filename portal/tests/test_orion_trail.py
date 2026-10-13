@@ -38,3 +38,15 @@ def test_every_script_the_game_loads_is_vendored_and_served(client):
         assert (GAME / src).is_file(), src
         assert client.get(f"/static/orion-trail/{src}").status_code == 200
     assert "http://" not in html and "https://" not in html.replace("https://github.com", "")   # nothing from elsewhere
+
+
+def test_the_game_plays_on_a_phone_every_key_has_a_tap_and_the_page_gives_it_the_screen(client):
+    html = (GAME / "orion-trail.html").read_text(encoding="utf-8")
+    assert "max-width: 319px" in html and "at least 1024 pixels" not in html                # the wall is only for something narrower than a phone
+    assert "viewport-fit=cover" in html and "@media (max-width: 900px)" in html and "(hover: none)" in html
+    for tap in ('onclick="UI.dismiss()"', 'onclick="UI.dismiss(true)"', 'onclick="UI.back()"', "function dismiss(close)", "function back()"):   # CONTINUE, CLOSE, BACK and their keys
+        assert tap in html, tap
+    assert "typeTimer && modalState && modalState.fullText != null" in html                  # a tap on the typing text shows it all
+    login(client, ADMIN)
+    page = client.get("/play/orion-trail").data.decode()
+    assert "Needs a window at least 1024 px wide" not in page and "Works on a phone" in page and "@media (max-width: 700px)" in page
