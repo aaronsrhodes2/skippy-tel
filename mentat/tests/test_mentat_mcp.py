@@ -145,3 +145,22 @@ def test_an_ode_with_primes_is_maths_but_a_quote_elsewhere_is_still_code(client,
     assert client.post("/tools/simplify_expr", json={"expression": "x'"}).status_code == 400
     assert client.post("/tools/solve_ode", json={"equation": "y'' + __import__('os')"}).status_code == 400
     assert client.post("/tools/solve_ode", json={"equation": "y'' + open(y)"}).status_code == 400
+
+
+def test_the_tool_contract_reaches_the_rest_and_mcp_callers(client, mentat):
+    # a quantity string works, and the conversion is echoed
+    ok = client.post("/tools/kinetic_energy", json={"mass_kg": "145 g", "velocity_m_s": "90 mph"}).get_json()
+    assert ok["ok"] is True and ok["result"]["converted"]["mass_kg"] == "145 g = 0.145 kg"
+    # a caller's mistake is a 400 with the contract's structured detail, as a pydantic failure was before
+    bad = client.post("/tools/schwarzschild_radius", json={})
+    assert bad.status_code == 400
+    body = bad.get_json()
+    assert body["ok"] is False and body["detail"]["code"] == "missing_argument" and body["detail"]["param"] == "mass_kg"
+    wrong = client.post("/tools/schwarzschild_radius", json={"mass_kg": "54 km/h"})
+    assert wrong.status_code == 400 and wrong.get_json()["detail"]["code"] == "wrong_dimension"
+    # the tool's own refusal stays a 200 with value null, now with a code
+    miss = client.post("/tools/density", json={"material": "unobtainium"}).get_json()
+    assert miss["ok"] is True and miss["result"]["value"] is None and miss["result"]["error"]["code"] == "unknown_key"
+    # over MCP the same failure is a tool error the model reads
+    via_mcp = call(client, "schwarzschild_radius", {})
+    assert via_mcp["isError"] is True and json.loads(via_mcp["content"][0]["text"])["code"] == "missing_argument"

@@ -133,6 +133,19 @@ class QwenUnavailable(Exception):
     pass
 
 
+class BadArguments(Exception):
+    """The caller's arguments were unusable (sigma-ground's tool contract says which parameter and what to send instead)."""
+
+    def __init__(self, error: dict):
+        super().__init__(str(error.get("message") or error.get("code") or "bad arguments"))
+        self.error = error
+
+
+# sigma-ground's tool contract (mcp/contract.py) answers a bad call as a normal result with value null and `error`; these codes are
+# the CALLER's mistake (HTTP 400 here, as before), the others (unknown_key, declined) are the tool's own answer (HTTP 200, value null).
+_CALLER_ERRORS = {"missing_argument", "bad_type", "bad_quantity", "wrong_dimension", "out_of_range", "invalid_arguments"}
+
+
 def _qwen_ready() -> bool:
     from sigma_ground.materia import translator as tr
     try:
@@ -156,12 +169,17 @@ def _ask(question: str) -> dict:
 def _call(name: str, args: dict):
     content, structured = asyncio.run(server.call_tool(name, args))
     if structured is not None:
-        return structured.get("result", structured) if set(structured) == {"result"} else structured
-    text = "".join(getattr(c, "text", "") for c in content)
-    try:
-        return json.loads(text)
-    except ValueError:
-        return {"text": text}
+        result = structured.get("result", structured) if set(structured) == {"result"} else structured
+    else:
+        text = "".join(getattr(c, "text", "") for c in content)
+        try:
+            result = json.loads(text)
+        except ValueError:
+            result = {"text": text}
+    err = result.get("error") if isinstance(result, dict) else None
+    if isinstance(err, dict) and result.get("value") is None and err.get("code") in _CALLER_ERRORS:
+        raise BadArguments(err)
+    return result
 
 
 @app.get("/health")
@@ -241,6 +259,8 @@ def _guarded(label: str, fn, *args):
         return jsonify(ok=False, error=f"{label} took longer than {CALL_TIMEOUT_S}s"), 504
     except QwenUnavailable as exc:
         return jsonify(ok=False, error=str(exc)), 503
+    except BadArguments as exc:
+        return jsonify(ok=False, error=str(exc)[:2000], detail=exc.error), 400
     except Exception as exc:  # noqa: BLE001 — tool/validation errors go back as messages
         return jsonify(ok=False, error=str(exc)[:2000]), 400
 
@@ -310,6 +330,8 @@ def _mcp_call(name: str, args, ip: str) -> dict:
         return _tool_reply(json.dumps(future.result(timeout=CALL_TIMEOUT_S), default=str))
     except CallTimeout:
         return _tool_reply(f"{name} took longer than {CALL_TIMEOUT_S}s", True)
+    except BadArguments as exc:
+        return _tool_reply(json.dumps(exc.error), True)
     except Exception as exc:  # noqa: BLE001 — tool/validation errors go back as messages
         return _tool_reply(str(exc)[:2000], True)
 
