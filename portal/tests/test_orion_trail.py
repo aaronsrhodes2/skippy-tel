@@ -33,7 +33,8 @@ def test_the_card_links_to_the_page_and_the_page_frames_the_game(client):
 def test_every_script_the_game_loads_is_vendored_and_served(client):
     html = (GAME / "orion-trail.html").read_text(encoding="utf-8")
     scripts = re.findall(r'<script src="([^"]+)"', html)
-    assert len(scripts) == 12
+    shipped = sorted(f"scenarios/{p.name}" for p in (GAME / "scenarios").glob("*.js"))
+    assert sorted(scripts) == shipped and len(scripts) >= 19              # every scenario file shipped is loaded, none is missing (19 at 4edeb4f)
     for src in scripts:
         assert (GAME / src).is_file(), src
         assert client.get(f"/static/orion-trail/{src}").status_code == 200

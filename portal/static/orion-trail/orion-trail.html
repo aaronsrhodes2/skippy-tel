@@ -212,14 +212,53 @@ button, .choice, #action-bar span, #modal-cont, #modal-close { -webkit-tap-highl
   #screen-status > div[style*="grid-template-columns"] { grid-template-columns: minmax(0, 1fr) !important; }
   #screen-status .panel[style*="flex:1"] { flex: none !important; }
   #action-bar { position: sticky; bottom: 0; z-index: 20; background: var(--bg); display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 8px 0 calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--green-dim); }
-  #action-bar span { border: 1px solid var(--green-dim); padding: 12px 8px; text-align: center; font-size: 14px; background: var(--panel); }
-  #action-bar span:first-child { grid-column: 1 / -1; font-size: 16px; background: rgba(51,255,102,0.16); border-color: var(--green); }
+  #action-bar > span { border: 1px solid var(--green-dim); padding: 12px 8px; text-align: center; font-size: 14px; background: var(--panel); }
+  #action-bar > span:first-child { grid-column: 1 / -1; font-size: 16px; background: rgba(51,255,102,0.16); border-color: var(--green); }
   #modal { width: 96vw; max-height: 92vh; max-height: 92dvh; padding: 14px 14px calc(14px + env(safe-area-inset-bottom)); }
   #modal-art { font-size: 11px; }
   .choice { padding: 13px 12px; margin: 8px 0; font-size: 14px; }
   #modal .contbar { padding: 14px; margin-top: 12px; border: 1px solid var(--amber); text-align: center; }
   .small-note { display: none; }
   #death-art, #victory-art { font-size: 10px; }
+}
+
+.name-row { display: flex; gap: 6px; align-items: stretch; }
+.name-row input { flex: 1 1 auto; min-width: 0; }
+button.rnd { flex: 0 0 auto; padding: 4px 8px; font-size: 12px; white-space: nowrap; }
+.name-row button.rnd { min-width: 44px; }
+/* category moods: a horror modal is wrong, a bizarre one is cold, a wonder one is gold */
+#modal.horror { border-color: var(--red); box-shadow: 0 0 28px rgba(255,51,51,0.22); }
+#modal.horror h2 { color: var(--red); text-shadow: 0 0 6px rgba(255,51,51,0.6); animation: dread 4s steps(1) infinite; }
+#modal.horror #modal-art { color: #a33; }
+#modal.bizarre { border-color: var(--cyan); box-shadow: 0 0 24px rgba(76,201,240,0.2); }
+#modal.bizarre h2 { color: var(--cyan); }
+#modal.wonders { border-color: var(--amber); box-shadow: 0 0 30px rgba(255,176,0,0.28); }
+#modal.wonders h2 { color: #ffd45e; text-shadow: 0 0 8px rgba(255,200,60,0.7); }
+@keyframes dread { 0%, 92%, 96% { opacity: 1; transform: none; } 93% { opacity: 0.35; transform: translateX(2px); } 95% { opacity: 0.7; transform: translateX(-3px); } }
+@media (prefers-reduced-motion: reduce) { #modal.horror h2 { animation: none; } }
+/* tablets in portrait: resources and systems side by side under the route */
+@media (min-width: 601px) and (max-width: 900px) {
+  #travel-main { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  #map-panel { grid-column: 1 / -1; order: -1; }
+  #starfield { min-height: 70px; }
+  .setup-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  #action-bar { grid-template-columns: repeat(4, 1fr); }
+  #action-bar > span:first-child { grid-column: 1 / -1; }
+}
+/* touch screens wider than a phone (landscape tablets): same big tap targets as the phone bar */
+@media (pointer: coarse) and (min-width: 901px) {
+  #action-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 8px 0; }
+  #action-bar > span { border: 1px solid var(--green-dim); padding: 14px 8px; text-align: center; font-size: 15px; background: var(--panel); }
+  #action-bar > span:first-child { grid-column: 1 / -1; font-size: 17px; background: rgba(51,255,102,0.16); border-color: var(--green); }
+  button { min-height: 44px; }
+  .choice { padding: 12px 12px; }
+  #modal-cont { padding: 14px; border: 1px solid var(--amber); text-align: center; }
+  #log-panel { height: 128px; }
+  #log-lines { height: 98px; }
+}
+@media (max-width: 480px) {
+  #modal h2 { font-size: 14px; letter-spacing: 1px; }
+  #screen-setup h2 { font-size: 15px; letter-spacing: 1px; }
 }
 </style>
 </head>
@@ -250,9 +289,10 @@ Mission Control did not budget for wristwatches. Mission Control did not budget 
 <div class="setup-grid">
   <div class="panel"><span class="ptitle">SHIP &amp; CREW</span>
     <label class="dim">VESSEL NAME</label>
-    <input type="text" id="in-ship" value="ISV Persistence" maxlength="28">
+    <div class="name-row"><input type="text" id="in-ship" value="ISV Persistence" maxlength="28"><button type="button" class="rnd" id="rnd-ship" title="Random vessel name">&#127922; RANDOM</button></div>
     <label class="dim" style="display:block;margin-top:10px">CREW MANIFEST (they will be remembered)</label>
     <div class="crew-inputs" id="crew-inputs"></div>
+    <button type="button" class="rnd" id="rnd-crew" style="margin-top:8px;width:100%">&#127922; RANDOMIZE ALL CREW</button>
     <label class="dim" style="display:block;margin-top:12px">DIFFICULTY</label>
     <div class="diff-row" id="diff-row">
       <button data-d="passenger">PASSENGER</button>
@@ -361,6 +401,13 @@ Mission Control did not budget for wristwatches. Mission Control did not budget 
 <script src="scenarios/deep-space.js"></script>
 <script src="scenarios/caches.js"></script>
 <script src="scenarios/wildcards.js"></script>
+<script src="scenarios/personal.js"></script>
+<script src="scenarios/first-contact.js"></script>
+<script src="scenarios/ship-ai.js"></script>
+<script src="scenarios/bizarre.js"></script>
+<script src="scenarios/horror.js"></script>
+<script src="scenarios/wonders.js"></script>
+<script src="scenarios/echoes.js"></script>
 
 <script>
 /* ================= ENGINE (UI-agnostic; all DOM lives in the UI block below) ================= */
@@ -575,6 +622,10 @@ function reqsMet(req) {
   if (req.resourceAbove && !Object.entries(req.resourceAbove).every(([k, v]) => S.resources[k] > v)) return false;
   if (req.minLeg != null && S.legIndex < req.minLeg) return false;
   if (req.maxLeg != null && S.legIndex > req.maxLeg) return false;
+  if (req.minDead != null && S.graveyard.length < req.minDead) return false;
+  if (req.maxDead != null && S.graveyard.length > req.maxDead) return false;
+  if (req.minDay != null && S.day < req.minDay) return false;
+  if (req.maxDay != null && S.day > req.maxDay) return false;
   if (req.requiresFlag && !S.flags[req.requiresFlag]) return false;
   if (req.forbidsFlag && S.flags[req.forbidsFlag]) return false;
   return true;
@@ -596,6 +647,9 @@ function pickWeighted(pool) {
   const weightOf = sc => {
     let w = sc.weight != null ? sc.weight : 1;
     if (sc.category === 'crew-drama' && moraleT >= 1) w *= (moraleT >= 2 ? 4 : 2);
+    if (sc.category === 'horror') { if (moraleT >= 1) w *= 1.5; if (currentZone() === 'deep') w *= 1.3; }   // dread feeds on a shaky crew and an empty sky
+    if (sc.category === 'wonders' && moraleT >= 2) w *= 2;                                              // and the universe pities the broken
+    if (sc.category === S.lastCategory) w *= 0.35;   // variety: the same kind of trouble twice in a row is rarer
     return w;
   };
   const total = pool.reduce((a, sc) => a + weightOf(sc), 0);
@@ -618,6 +672,7 @@ function rollEvent() {
   const pool = eligibleScenarios(zone);
   const sc = pickWeighted(pool);
   if (!sc) return {};
+  S.lastCategory = sc.category;
   if (sc.sensorWarning && tierIdx(S.systems.sensors) === 0) {
     S.pendingWarning = sc.id;
     log(`SENSORS: ${sc.sensorWarning}`, 'warn');
@@ -650,7 +705,63 @@ function tick() {
   // event roll
   const ev = rollEvent();
   if (ev.scenario) return { scenario: ev.scenario };
+  if (!ev.warning && RNG() < 0.45) ambient();
   return {};
+}
+
+/* ---- quiet-day flavour: a line in the log, no mechanical effect ---- */
+const AMBIENT = {
+  any: [
+    '{crew} wins the argument about whether space has weather. Nobody remembers the other side.',
+    'Quiet day. Someone reorganizes the spare parts by color. It does not help. It is beautiful.',
+    'The air recyclers hum a note that is almost a song. {crew} hums back.',
+    '{crew} spends the shift naming the stars out the port window. Most of the names are rude.',
+    'A bolt works loose somewhere aft and rattles for six hours. Everyone knows. No one will find it.',
+    'Mess is a ceremony today: the paste is warm. {crew} calls it a banquet and is not corrected.',
+    '{crew} wins four hands of cards against {crew2} and is told, at length, what that means.',
+    'The ship ticks as it cools in the long shadow of nothing. It sounds like a house settling. Everyone pretends.',
+    'Somebody has drawn a window on the bulkhead. A good one. There is a tree outside it.',
+    'The coffee machine breaks, is mourned, and is repaired by {crew}, who is thanked like a saint.',
+    '{crew2} asks what day it is. {crew} says Thursday with total confidence. It is not Thursday. It will be, now.',
+    'Nothing happens. The ship carries you through it, gently, like a long exhale.'
+  ],
+  inner: [
+    'Earth hangs in the aft screen, a smudge the color of old ash. Nobody looks directly. Everybody looks.',
+    'A dead satellite tumbles past, its solar wings still turning toward a sun that has stopped paying.'
+  ],
+  belt: [
+    'Rocks the size of cities drift by at a polite distance. {crew} waves at one. It does not wave back.',
+    'The belt is thick with metal. The sensors chirp prices at you out of sheer habit.'
+  ],
+  outer: [
+    'The Sun is a bright star now, and then not even bright. {crew} puts a finger over it. It disappears.',
+    'It is cold outside in a way that has stopped being a number and started being a personality.'
+  ],
+  deep: [
+    'The dark is so complete the screens seem to apologize for the light they make.',
+    '{crew} tapes a photograph of a dog to the bulkhead. Within the hour there are nine more dogs.',
+    'You are farther from home than any human has ever been. The ship, to its credit, does not mention it.'
+  ],
+  lowMorale: [
+    'Nobody talks at mess. The forks are very loud.',
+    '{crew} sits at a console for an hour without touching it.',
+    'Someone has stopped saying "when we land" and started saying "if." Everyone heard it.'
+  ],
+  highMorale: [
+    'Laughter from the galley. It is possibly the first real sound the ship has made all week.',
+    '{crew} is teaching {crew2} to whistle. {crew2} is a lost cause. Everyone is happy.'
+  ]
+};
+function ambient() {
+  const pool = AMBIENT.any.slice();
+  if (AMBIENT[currentZone()]) pool.push(...AMBIENT[currentZone()], ...AMBIENT[currentZone()]);
+  if (S.systems.morale < 40) pool.push(...AMBIENT.lowMorale, ...AMBIENT.lowMorale, ...AMBIENT.lowMorale);
+  else if (S.systems.morale >= 85) pool.push(...AMBIENT.highMorale, ...AMBIENT.highMorale);
+  const line = pool[Math.floor(RNG() * pool.length)];
+  S.ctx = null;                       // ambient names are picked fresh, not tied to a scenario
+  prepareContext('ambient');
+  log(fillText(line), 'info');
+  S.ctx = null;
 }
 
 function arriveAt(node) {
@@ -674,6 +785,7 @@ function surveyPlanet(node) {
     if (tierIdx(S.systems.sensors) === 0) p += 0.10;
     else if (tierIdx(S.systems.sensors) >= 2) p -= 0.10;
     if (tierIdx(S.systems.astrogation) === 0) p += 0.10;
+    p += (S.surveyBonus || 0);
     p = Math.max(0.05, Math.min(0.95, p));
   }
   const habitable = RNG() < p;
@@ -693,6 +805,27 @@ function resolveSurvey(survey, settle) {
   }
   log(`${survey.node.name} is a corpse of a world. You burn for the next candidate.`, 'warn');
   return null;
+}
+
+/* ---- name tokens: {crew} {crew2} {dead} {ship}. One featured crew member per scenario ---- */
+function prepareContext(id) {
+  if (S.ctx && S.ctx.id === id && S.roster.includes(S.ctx.a)) return S.ctx;
+  const live = S.roster.slice();
+  const a = live.length ? live.splice(Math.floor(RNG() * live.length), 1)[0] : 'someone';
+  const b = live.length ? live[Math.floor(RNG() * live.length)] : a;
+  return (S.ctx = { id, a, b });
+}
+function scenarioUsesTokens(sc) {
+  if (sc._tok == null) sc._tok = /\{(crew2?|dead|ship)\}/.test(JSON.stringify(sc));
+  return sc._tok;
+}
+function prepareScenario(sc) { return scenarioUsesTokens(sc) ? prepareContext(sc.id) : null; }
+function fillText(t) {
+  if (!t || t.indexOf('{') < 0) return t;
+  const c = S.ctx || {};
+  const dead = S.graveyard.length ? S.graveyard[S.graveyard.length - 1].name : 'the one we lost';
+  return t.replace(/\{crew2\}/g, c.b || 'someone').replace(/\{crew\}/g, c.a || 'someone')
+          .replace(/\{dead\}/g, dead).replace(/\{ship\}/g, S.shipName);
 }
 
 /* ---- choice resolution ---- */
@@ -740,6 +873,8 @@ function pickOutcome(choice) {
 /* Applies a choice. Returns { outcome, deltas:[{label, val, kind}], deaths:[names] } */
 function resolveChoice(scenario, choiceIdx) {
   const choice = scenario.choices[choiceIdx];
+  const featured = prepareScenario(scenario);   // null unless the scenario uses name tokens
+  const fa = () => (featured && S.roster.includes(featured.a)) ? featured.a : undefined;
   const deltas = [];
   const deaths = [];
   const track = (label, v, isSys) => deltas.push({ label, val: Math.round(v), kind: v < 0 ? 'bad' : 'good', isSys });
@@ -750,16 +885,18 @@ function resolveChoice(scenario, choiceIdx) {
   const o = pickOutcome(choice);
   if (o.effects) Object.entries(o.effects).forEach(([k, v]) => {
     if (k === 'crew') {
-      if (v < 0) for (let i = 0; i < -v; i++) { const d = killCrew(scenario.title.toLowerCase()); if (d) deaths.push(d); }
+      if (v < 0) for (let i = 0; i < -v; i++) { const d = killCrew(fillText(scenario.title).toLowerCase(), fa()); if (d) deaths.push(d); }
       else { for (let i = 0; i < v; i++) if (S.roster.length < CAPS.crew) { S.roster.push(randomRecruit()); S.resources.crew = S.roster.length; } track('CREW', v); }
     } else { addRes(k, v); track(RES_LABEL[k], v); }
   });
   if (o.damage) Object.entries(o.damage).forEach(([k, v]) => { addSys(k, v); track(SYS_LABEL[k], v, true); });
   if (o.repair) Object.entries(o.repair).forEach(([k, v]) => { addSys(k, v); track(SYS_LABEL[k], v, true); });
-  if (o.crewDeath) { const d = killCrew(scenario.title.toLowerCase()); if (d) deaths.push(d); }
+  if (o.crewDeath) { const d = killCrew(fillText(scenario.title).toLowerCase(), fa()); if (d) deaths.push(d); }
+  if (o.advance) { S.legProgress += o.advance; track('DISTANCE', o.advance); }
+  if (o.surveyBonus) S.surveyBonus = Math.min(0.3, (S.surveyBonus || 0) + o.surveyBonus);
   if (o.flag) S.flags[o.flag] = true;
   if (o.delayDays) { for (let i = 0; i < o.delayDays; i++) { S.day++; burnDay(false); } }
-  log(`${scenario.title}: ${choice.label}`, 'info');
+  log(`${fillText(scenario.title)}: ${fillText(choice.label)}`, 'info');
   if (o.endGame) { S.gameOver = { type: 'death', cause: o.endGame }; }
   else checkDeath();
   return { outcome: o, deltas, deaths, dead: S.gameOver };
@@ -1022,6 +1159,7 @@ const UI = (() => {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     $('screen-' + id).classList.add('active');
     activeScreen = id;
+    window.scrollTo(0, 0);
   }
 
   /* ---------- typewriter ---------- */
@@ -1077,6 +1215,13 @@ const UI = (() => {
                         ['  .    .      *   ', '     *      *     '] ] },
     caches:         { cap: 'SALVAGE PING',    frames: [['  *  [$]     '], ['    [$]   *  '], ['   *[$]*     ']] },
     wildcards:      { cap: 'UNKNOWN SIGNAL',  frames: [['     ?!     '], ['    ?!      '], ['      ?!    '], ['     ?!     ']] },
+    personal:       { cap: 'CREW QUARTERS',   frames: [['   o  |  o   ', '  /|\\ | /|\\  '], ['   o  |  o   ', '  \\|/ | \\|/  ']] },
+    'first-contact':{ cap: 'FIRST CONTACT',   frames: [['  <o>  ....  <O>  '], ['  <o>  ::::  <O>  '], ['  <o>  ....  <O>  '], ['  <O>  ::::  <o>  ']] },
+    'ship-ai':      { cap: 'SHIP COMPUTER',   frames: [['   [ o_o ]   '], ['   [ o_- ]   '], ['   [ o_o ]   '], ['   [ -_o ]   ']] },
+    bizarre:        { cap: 'ANOMALOUS',       frames: [['   ~ ? ~   '], ['  ~~ ? ~~  '], [' ~~~ ? ~~~ '], ['  ~~ ? ~~  ']] },
+    horror:         { cap: 'DO NOT LOOK',     frames: [['  .-""-.  ', ' ( -  - ) ', "  '-..-'  "], ['  .-""-.  ', ' ( o  o ) ', "  '-..-'  "], ['  .-""-.  ', ' ( O  O ) ', "  '-..-'  "], ['  .-""-.  ', ' ( @  @ ) ', "  '-..-'  "]] },
+    wonders:        { cap: 'WONDER',          frames: [['    *    ', '  * + *  ', '    *    '], ['   .*.   ', ' * +*+ * ', '   .*.   '], ['  * . *  ', '. + * + .', '  * . *  ']] },
+    echoes:         { cap: 'AFTERSHOCK',      frames: [['   ( )   '], ['  (( ))  '], [' ((( ))) '], ['  (( ))  ']] },
     survey:         { cap: 'ORBITAL SCAN',    frames: [
                         ['   _.-""-._   ', '  /        \\  ', ' |    o     | ', '  \\________/  '],
                         ['   _.-""-._   ', '  /        \\  ', ' |     o    | ', '  \\________/  '],
@@ -1100,7 +1245,7 @@ const UI = (() => {
   function stopArt() {
     if (artTimer) { clearInterval(artTimer); artTimer = null; }
     artFrames = []; artIndex = 0;
-    $('modal').classList.remove('closable');
+    $('modal').classList.remove('closable', 'horror', 'bizarre', 'wonders');
     const el = $('modal-art');
     el.classList.remove('active');
     el.textContent = '';
@@ -1111,14 +1256,52 @@ const UI = (() => {
     $('btn-continue').style.display = localStorage.getItem(SAVE_KEY) ? 'block' : 'none';
     buildStarfield();
   }
+  /* ---------- click-only name entry: every text field has a random button ---------- */
+  const SHIP_NAMES = ['ISV Persistence','ISV Second Chance','ISV Stubborn Hope','ISV Last Orders','ISV Mostly Fine','ISV Lucky Strike',
+    'ISV Deferred Maintenance','ISV Good Enough','ISV Dust Bunny','ISV Terms & Conditions','ISV Quiet Riot','ISV Tin Optimist',
+    'ISV Nobody Asked','ISV Bad Idea','ISV Wishful Thinking','ISV Rusty Halo','ISV Small Mercy','ISV Long Shot',
+    'ISV Spite','ISV Hold My Beer','ISV Eventual','ISV Soup','ISV Brisk Denial','ISV Mildly Cursed'];
+  const CREW_RANKS = ['Cmdr.','Dr.','Lt.','Eng.','Spc.','Nav.','Tech.','Med.','Ens.','Sgt.','Cpl.','Pilot'];
+  const CREW_SURNAMES = ['Okafor','Reyes','Vasquez','Chen','Adeyemi','Petrov','Nakamura','Haddad','Lindqvist','Mbeki','Castellanos','Brennan',
+    'Volkov','Aziz','Kowalski','Fontaine','Oyelaran','Dunmore','Santoro','Ibrahim','Halvorsen','Quispe','Takahashi','Abara','Delacroix',
+    'Whitfield','Szymanski','Obuya','Marchetti','Rahman','Lindgren','Zhao','Boateng','Ferreira','Mikkelsen','Tran'];
+  const rpick = a => a[Math.floor(Math.random() * a.length)];
+  function randomCrewName(taken) {
+    for (let i = 0; i < 50; i++) {
+      const n = rpick(CREW_RANKS) + ' ' + rpick(CREW_SURNAMES);
+      if (!taken.some(t => t.split(' ').pop() === n.split(' ').pop())) return n;
+    }
+    return rpick(CREW_RANKS) + ' ' + rpick(CREW_SURNAMES);
+  }
+  function crewInputs() { return [...$('crew-inputs').querySelectorAll('input')]; }
+  function rerollCrew(only) {
+    const inputs = crewInputs();
+    const targets = only ? [only] : inputs;
+    const taken = inputs.filter(i => !targets.includes(i)).map(i => i.value.trim());
+    targets.forEach(inp => { const n = randomCrewName(taken); inp.value = n; taken.push(n); });
+  }
+  function rerollShip() {
+    const cur = $('in-ship').value.trim();
+    let n; do { n = rpick(SHIP_NAMES); } while (n === cur && SHIP_NAMES.length > 1);
+    $('in-ship').value = n;
+  }
   function gotoSetup() {
     setupState = { difficulty: 'officer', store: {}, points: DIFFICULTY.officer.storePoints };
     const ci = $('crew-inputs'); ci.innerHTML = '';
     DEFAULT_CREW.forEach(n => {
+      const row = document.createElement('div'); row.className = 'name-row';
       const inp = document.createElement('input');
       inp.type = 'text'; inp.value = n; inp.maxLength = 20;
-      ci.appendChild(inp);
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'rnd'; b.innerHTML = '&#127922;'; b.title = 'Random name';
+      b.setAttribute('aria-label', 'Random crew name');
+      b.onclick = () => rerollCrew(inp);
+      row.appendChild(inp); row.appendChild(b);
+      ci.appendChild(row);
     });
+    $('in-ship').value = 'ISV Persistence';
+    $('rnd-ship').onclick = rerollShip;
+    $('rnd-crew').onclick = () => rerollCrew();
     document.querySelectorAll('#diff-row button').forEach(b => {
       b.classList.toggle('sel', b.dataset.d === 'officer');
       b.onclick = () => {
@@ -1179,7 +1362,7 @@ const UI = (() => {
     $('quartermaster').textContent = QUARTERMASTER[Math.min(QUARTERMASTER.length - 1, Math.floor(spentPoints() / 35))];
   }
   function launch() {
-    const roster = [...$('crew-inputs').querySelectorAll('input')].map(i => i.value.trim() || 'Crewman Nobody');
+    const roster = crewInputs().map(i => i.value.trim() || 'Crewman Nobody');
     const store = {};
     STORE_ITEMS.forEach(it => store[it.k] = START[it.k] + setupState.store[it.k]);
     newGame({ shipName: $('in-ship').value.trim() || 'ISV Persistence', difficulty: setupState.difficulty, roster, store });
@@ -1284,14 +1467,17 @@ const UI = (() => {
 
   function openScenario(sc) {
     modalState = { mode: 'scenario', sc };
-    $('modal-title').textContent = '▚ ' + sc.title.toUpperCase() + ' ▞';
+    prepareScenario(sc);
+    $('modal-title').textContent = '▚ ' + fillText(sc.title).toUpperCase() + ' ▞';
     $('modal-deltas').innerHTML = '';
     $('modal-cont').style.display = 'none';
     const ch = $('modal-choices'); ch.innerHTML = '';
     $('modal-wrap').classList.add('active');
     startArt(sc.category);
-    typeText($('modal-text'), sc.text, () => renderChoices(sc));
-    modalState.fullText = sc.text;
+    ['horror', 'bizarre', 'wonders'].forEach(c => $('modal').classList.toggle(c, sc.category === c));
+    const txt = fillText(sc.text);
+    typeText($('modal-text'), txt, () => renderChoices(sc));
+    modalState.fullText = txt;
   }
   function renderChoices(sc) {
     const ch = $('modal-choices'); ch.innerHTML = '';
@@ -1300,8 +1486,8 @@ const UI = (() => {
       const div = document.createElement('div');
       div.className = 'choice' + (av.ok ? '' : ' disabled');
       const costs = c.cost ? ' <span class="amber">(' + Object.entries(c.cost).map(([k, v]) => `${v} ${RES_LABEL[k]}`).join(', ') + ')</span>' : '';
-      div.innerHTML = `<span class="cnum">[${i + 1}]</span> ${c.label}${costs}` +
-        (c.detail ? `<div class="detail">${c.detail}</div>` : '') +
+      div.innerHTML = `<span class="cnum">[${i + 1}]</span> ${fillText(c.label)}${costs}` +
+        (c.detail ? `<div class="detail">${fillText(c.detail)}</div>` : '') +
         (!av.ok ? `<div class="detail red">— ${av.why}</div>` : '');
       if (av.ok) div.onclick = () => pick(i);
       ch.appendChild(div);
@@ -1321,8 +1507,9 @@ const UI = (() => {
     ).concat(res.deaths.map(n => `<span class="red">${n}: DECEASED</span>`)).join(' &nbsp;│&nbsp; ');
     $('modal-deltas').innerHTML = deltaHtml || '<span class="dim">No measurable change. Suspicious.</span>';
     $('modal-cont').style.display = 'block';
-    typeText($('modal-text'), res.outcome.text || '...');
-    modalState.fullText = res.outcome.text || '...';
+    const otxt = fillText(res.outcome.text) || '...';
+    typeText($('modal-text'), otxt);
+    modalState.fullText = otxt;
     render();
   }
   function closeModal() {
@@ -1547,7 +1734,7 @@ Waypoints offer resupply and trouble in equal measure. Three candidate planets w
       return;
     }
     if (activeScreen === 'setup') {
-      if (k === ' ' && document.activeElement.tagName !== 'INPUT') { e.preventDefault(); launch(); }
+      if (k === ' ' && !['INPUT', 'BUTTON'].includes(document.activeElement.tagName)) { e.preventDefault(); launch(); }
       return;
     }
     if (activeScreen === 'travel') {
