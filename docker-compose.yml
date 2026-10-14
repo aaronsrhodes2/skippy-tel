@@ -92,6 +92,12 @@ services:
       - HF_HOME=/root/.cache/huggingface
     volumes:
       - whisper-cache:/root/.cache/huggingface   # model weights persist
+    healthcheck:   # up-but-broken shows as "unhealthy" (a crash loop of 177 restarts went unnoticed on 2026-10-13)
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     deploy:
       resources:
         reservations:
