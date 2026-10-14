@@ -37,7 +37,7 @@ env:
   RUNTIME_SA: skippy-agent@skippy-tel.iam.gserviceaccount.com
   IMAGE: us-west1-docker.pkg.dev/skippy-tel/skippy/portal
   # sigma-ground commit served by Experiments and the Mentat service (bump to update both).
-  SIGMA_GROUND_REF: ab2bb8a6f53c9253cd6a789598892a2dc818e3c6
+  SIGMA_GROUND_REF: e548a1719fdebfa1c54049ac5786c22453ca1d5b
   # Star Control Zero, played at /starcontrol: the release tag of github.com/aaronsrhodes2/star-control-precursors
   # whose web build the portal image carries, and the SHA-256 of that release's scz-web.tar.gz (the build stops
   # if they disagree). To ship a new build of the game: publish a release there, then change BOTH lines.

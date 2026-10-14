@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # deploy.yml) it is reused on almost every build instead of being re-downloaded after each code change.
 # Experiments (portal/experiments.py): sigma-ground's Radiance viewer and its
 # committed benchmark results, at the same pinned commit as the Mentat service.
-ARG SIGMA_GROUND_REF=ab2bb8a6f53c9253cd6a789598892a2dc818e3c6
+ARG SIGMA_GROUND_REF=e548a1719fdebfa1c54049ac5786c22453ca1d5b
 ADD https://github.com/aaronsrhodes2/sigma-ground/archive/${SIGMA_GROUND_REF}.tar.gz /tmp/sg.tar.gz
 RUN mkdir -p /tmp/sg experiments_static/benchmark \
     && tar -xzf /tmp/sg.tar.gz -C /tmp/sg --strip-components=1 \

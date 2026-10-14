@@ -136,3 +136,12 @@ def test_version_reports_the_sigma_ground_commit_and_the_tool_count(client, ment
     assert got["tools"] == len(mentat.TOOLS) and got["tools"] > 100
     monkeypatch.delenv("SIGMA_GROUND_REF")
     assert client.get("/version").get_json()["sigma_ground_ref"] == "dev"
+
+
+def test_an_ode_with_primes_is_maths_but_a_quote_elsewhere_is_still_code(client, mentat):
+    ok = client.post("/tools/solve_ode", json={"equation": "y'' + y"}).get_json()
+    assert ok["ok"] is True and "C1" in ok["result"]["value"], ok
+    # the same apostrophe in any other argument is still refused, and so is code hidden in the ODE
+    assert client.post("/tools/simplify_expr", json={"expression": "x'"}).status_code == 400
+    assert client.post("/tools/solve_ode", json={"equation": "y'' + __import__('os')"}).status_code == 400
+    assert client.post("/tools/solve_ode", json={"equation": "y'' + open(y)"}).status_code == 400

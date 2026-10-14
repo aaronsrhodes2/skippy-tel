@@ -198,6 +198,14 @@ _HUGE = re.compile(r"(\^|\*\*)\s*\(?\s*\d{4,}"                    # x**10000
                    r"|factorial\s*\(\s*\d{4,}|\d{4,}\s*!", re.I)       # 1000!
 
 
+def args_for_guard(name: str, args: dict) -> dict:
+    """What the code guard looks at. An ODE is written with primes (y'' + y); the tool turns them into Derivative(...)
+    and sigma-ground's parser (mathparse) refuses any quote that is left, so the apostrophe alone is not code here."""
+    if name == "solve_ode" and isinstance(args.get("equation"), str):
+        return {**args, "equation": args["equation"].replace("'", "")}
+    return args
+
+
 def unsafe_arg(value) -> str | None:
     """The first string (anywhere in the arguments) that looks like code, else None."""
     if isinstance(value, str):
@@ -244,7 +252,7 @@ def call_tool(name):
     args = request.get_json(silent=True) or {}
     if not isinstance(args, dict):
         return jsonify(ok=False, error="arguments must be a JSON object"), 400
-    if unsafe_arg(args) is not None:
+    if unsafe_arg(args_for_guard(name, args)) is not None:
         return jsonify(ok=False, error="That input looks like code, not maths; Mentat won't evaluate it."), 400
     return _guarded(name, _call, name, args)
 
@@ -295,7 +303,7 @@ def _mcp_call(name: str, args, ip: str) -> dict:
         return _tool_reply("arguments must be a JSON object", True)
     if _rate_limited(ip):
         return _tool_reply("Slow down: rate limit reached, try again in a minute.", True)
-    if unsafe_arg(args) is not None:
+    if unsafe_arg(args_for_guard(name, args)) is not None:
         return _tool_reply("That input looks like code, not maths; Mentat won't evaluate it.", True)
     future = _pool.submit(_call, name, args)
     try:
