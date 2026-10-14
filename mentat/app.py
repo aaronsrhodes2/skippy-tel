@@ -169,6 +169,13 @@ def health():
     return "ok"
 
 
+@app.get("/version")
+def version():
+    """Which sigma-ground commit this Mentat runs (the image's SIGMA_GROUND_REF) and how many tools it serves.
+    sigma-ground's tools/check_mentat_deploy.sh and the wa-trickle service read it."""
+    return jsonify(sigma_ground_ref=os.environ.get("SIGMA_GROUND_REF") or "dev", tools=len(TOOLS))
+
+
 @app.get("/tools")
 def list_tools():
     return jsonify([{"name": t.name, "description": (t.description or "").strip(),

@@ -127,3 +127,12 @@ def test_the_official_mcp_client_connects_lists_and_calls(mentat):
     assert len(tools) == len(mentat.TOOLS) > 100
     assert not res.isError
     assert json.loads(res.content[0].text)["value"] == pytest.approx(6.17e-8, rel=1e-2)
+
+
+def test_version_reports_the_sigma_ground_commit_and_the_tool_count(client, mentat, monkeypatch):
+    monkeypatch.setenv("SIGMA_GROUND_REF", "feedface0123")
+    got = client.get("/version").get_json()
+    assert got["sigma_ground_ref"] == "feedface0123"
+    assert got["tools"] == len(mentat.TOOLS) and got["tools"] > 100
+    monkeypatch.delenv("SIGMA_GROUND_REF")
+    assert client.get("/version").get_json()["sigma_ground_ref"] == "dev"
