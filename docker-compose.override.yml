@@ -96,6 +96,28 @@ services:
       - ./state/imports:/imports:ro   # game databases to carry to the games VM (see CLAUDE.md)
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
 
+  # wa-trickle: a slow, free Wolfram|Alpha vs Mentat comparison. One verbatim Wolfram call per queued question, ever, on a daily
+  # budget (WA_DAILY_BUDGET, default 60, inside the free tier's 2,000 a month); the same question to Mentat, again per commit.
+  # Queue, answers and the budget live in ./state/wa-trickle/trickle.sqlite. Port on localhost only (the loader and the
+  # scorer in sigma-ground's tools/wa_trickle_*.py talk to it). See services/wa-trickle/trickle.py.
+  wa-trickle:
+    build: ./services/wa-trickle
+    container_name: skippytel-wa-trickle
+    restart: unless-stopped
+    env_file: ${WA_TRICKLE_STATE:-./state/wa-trickle}/wolfram.env   # ONE line, WOLFRAM_ALPHA_APP_ID=..., copied from the vault:
+                                                                    # this service does not get the rest of the vault (services/wa-trickle/setup.sh)
+    environment:
+      MENTAT_URL: http://mentat-home:8080
+      WA_DAILY_BUDGET: "60"
+      WA_MONTHLY_CAP: "1900"
+      WA_INTERVAL_S: "900"
+    ports:
+      - "127.0.0.1:3010:8080"
+    volumes:
+      - ${WA_TRICKLE_STATE:-./state/wa-trickle}:/state    # the queue's SQLite file; set WA_TRICKLE_STATE when deploying from a worktree
+    depends_on: [mentat-home]
+    logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
+
   # Mentat with Qwen: sigma-ground's physics engine, its plain-English
   # translator allowed to ask qwen2.5:7b (Ollama) for phrasings its keywords
   # miss. Skippy's portal chat sends physics questions here while skippy-pc is up.
