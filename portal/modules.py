@@ -41,6 +41,7 @@ MODULES = (
     Module("music", "wave", "music.player_page", "Bilby's Audio Service"),
     Module("video", "lens", "video.video_page", "Nagatha's Video Service"),
     Module("experiments", "atom", "experiments.index", "Experiments"),
+    Module("tabletop", "d20", "tabletop.page", "Tabletop"),
     Module("dashboard", "gauge", "me.index", "Dashboard"),
     Module("admin", "gear", "admin.index", "Admin", retirable=False),
     # /me panes (id = "me-" + the pane's id in templates/me.html). MCP and Home are what /me is for; the rest wait here to be retired when

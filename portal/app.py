@@ -49,6 +49,7 @@ import recovery
 import notify as notify_mod
 import recovery_web
 import ship as ship_mod
+import tabletop as tabletop_mod
 import tasks
 import telemetry_web
 import video as video_mod
@@ -63,7 +64,7 @@ OTHER_HOSTS = frozenset({"www.makerportal.live", "makerportal.studio", "www.make
 
 
 def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, home=None,
-               imports=None, github=None) -> Flask:
+               imports=None, github=None, tabletop=None) -> Flask:
     app = Flask(__name__)
     app.config.update(settings if settings is not None else config.load())
     # The recovery buttons' GitHub token lives only inside the client object, never in app.config (templates see that).
@@ -200,7 +201,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         who = me()
         wanted = {"skippy": auth.has_portal(who, "skippy"), "games": bool(shown), "play": auth.has_portal(who, "play"),
                   "music": auth.has_portal(who, "audio"), "video": auth.has_portal(who, "video"),
-                  "experiments": auth.has_portal(who, "experiments"),
+                  "experiments": auth.has_portal(who, "experiments"), "tabletop": auth.has_portal(who, "tabletop"),
                   "dashboard": auth.is_admin(who) and "me" in app.blueprints, "admin": auth.is_admin(who)}
         tiles = []
         for m in modules_mod.MODULES:
@@ -898,6 +899,122 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         return resp
 
     app.register_blueprint(films)
+
+    # ── The Tabletop: shared adventure boards for the RPG table (tabletop.py; the Captain and friends granted "tabletop") ──
+    # Every write needs the X-Tabletop header: a page on another site can make a player's browser POST a form, but it
+    # can't add a header without a CORS preflight this portal never answers.
+    table = tabletop or tabletop_mod.Tabletop(tabletop_mod.store_from_env())
+    app.extensions["tabletop"] = table
+    tt = Blueprint("tabletop", __name__, url_prefix="/tabletop")
+
+    def tt_call(fn, *args):
+        if not table.ready:
+            return jsonify(error="The Tabletop has no storage yet (TABLETOP_BUCKET)."), 503
+        if request.method == "POST" and request.headers.get("X-Tabletop") != "1":
+            return jsonify(error="missing X-Tabletop"), 400
+        try:
+            return jsonify(fn(*args) or {"ok": True})
+        except tabletop_mod.NotFound:
+            return jsonify(error="That board or card is gone."), 404
+        except tabletop_mod.Refused as err:
+            return jsonify(error=str(err)), 400
+        except Exception:   # noqa: BLE001 — the bucket is missing or unreachable: say so, never a bare 500
+            app.logger.exception("tabletop: storage call failed")
+            return jsonify(error="The Tabletop can't reach its storage right now. Try again in a minute."), 503
+
+    def tt_who():
+        user = auth.current_user()
+        return user["email"], (user.get("name") or "").split(" ")[0], auth.is_admin(user["email"])
+
+    @tt.get("")
+    @auth.portal_required("tabletop")
+    def page():
+        return render_template("tabletop.html", ready=table.ready, gm=auth.is_admin(me()), me_email=me())
+
+    @tt.get("/boards")
+    @auth.portal_required("tabletop")
+    def boards():
+        return tt_call(lambda: {"boards": table.boards()})
+
+    @tt.post("/boards")
+    @auth.admin_required
+    def board_new():
+        return tt_call(lambda: {"board": table.create_board((request.get_json(silent=True) or {}).get("title"), me())})
+
+    @tt.post("/b/<bid>/rename")
+    @auth.admin_required
+    def board_rename(bid):
+        return tt_call(table.rename_board, bid, (request.get_json(silent=True) or {}).get("title"))
+
+    @tt.post("/b/<bid>/delete")
+    @auth.admin_required
+    def board_delete(bid):
+        return tt_call(table.delete_board, bid)
+
+    @tt.get("/b/<bid>")
+    @auth.portal_required("tabletop")
+    def board(bid):
+        """The whole board; with ?since=<rev>, just {"rev": n} while nothing has changed (the page polls this)."""
+        since = request.args.get("since", type=int)
+
+        def answer():
+            if since is not None and table.rev(bid) == since:
+                return {"rev": since}
+            return table.view(bid)
+        resp = tt_call(answer)
+        if not isinstance(resp, tuple):
+            resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+    @tt.post("/b/<bid>/text")
+    @auth.portal_required("tabletop")
+    def card_text(bid):
+        who, name, _ = tt_who()
+        return tt_call(lambda: {"card": table.add_text(bid, who, name, request.get_json(silent=True) or {})})
+
+    @tt.post("/b/<bid>/image")
+    @auth.portal_required("tabletop")
+    def card_image(bid):
+        who, name, _ = tt_who()
+        upload = request.files.get("img")
+        data = upload.read(tabletop_mod.MAX_IMAGE + 1) if upload else b""
+        return tt_call(lambda: {"card": table.add_image(bid, who, name, data, request.form.to_dict())})
+
+    @tt.post("/b/<bid>/c/<cid>/move")
+    @auth.portal_required("tabletop")
+    def card_move(bid, cid):
+        who, _, gm = tt_who()
+        return tt_call(lambda: {"card": table.move(bid, cid, who, gm, request.get_json(silent=True) or {})})
+
+    @tt.post("/b/<bid>/c/<cid>/edit")
+    @auth.portal_required("tabletop")
+    def card_edit(bid, cid):
+        who, _, gm = tt_who()
+        return tt_call(lambda: {"card": table.edit(bid, cid, who, gm, request.get_json(silent=True) or {})})
+
+    @tt.post("/b/<bid>/c/<cid>/delete")
+    @auth.portal_required("tabletop")
+    def card_delete(bid, cid):
+        who, _, gm = tt_who()
+        return tt_call(table.remove, bid, cid, who, gm)
+
+    @tt.get("/b/<bid>/img/<name>")
+    @auth.portal_required("tabletop")
+    def card_img(bid, name):
+        if not table.ready:
+            abort(503)
+        try:
+            found = table.image(bid, name)
+        except tabletop_mod.NotFound:
+            found = None
+        if not found:
+            abort(404)
+        resp = app.response_class(found[0], mimetype=found[1])
+        resp.headers["Cache-Control"] = "private, max-age=31536000, immutable"   # a card's picture never changes under its name
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        return resp
+
+    app.register_blueprint(tt)
 
     # ── queued tasks from remote operators (tasks.py) ──────────────────────────
     @app.post("/tasks/run")

@@ -428,7 +428,7 @@ GAMES = {gid: replace(g, settings=g.settings + (Setting(
 PORTALS: dict[str, str] = {**{gid: g.name for gid, g in GAMES.items()},
                            "skippy": "Skippy (chat)", "audio": "Bilby's Audio Service",
                            "video": "Nagatha's Video Service", "play": "Browser Games",
-                           "experiments": "Experiments"}
+                           "experiments": "Experiments", "tabletop": "Tabletop (RPG boards)"}
 # One grant per launcher tile a friend may be given (templates/home.html); Dashboard and Admin are the Captain's alone.
 # "bilby" was the old /bilby page's grant: friends.portals_of() reads it as "audio".
 

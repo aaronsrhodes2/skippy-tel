@@ -210,6 +210,16 @@ only when the gate's `/health` says `ready`. Direct play when the catalog says `
 `portal/static/vendor/`, Safari's own on Apple). Run it against the REAL gate on this machine with `python portal/tests/dev_video.py`.
 Full description and tests: `docs/portal/README.md` → Nagatha's Video Service.
 
+## The Tabletop (shared RPG boards, `/tabletop`)
+
+This is the scrapbook for the Captain's Daggerheart campaign (Heroes of Chance; the lore is in `../heroes-of-chance`).
+- **Boards:** the GM (an admin) makes them. Friends granted "tabletop" pin pictures and notes on them and drag them
+  about. A card can only be changed by its author or the GM.
+- **Storage:** the private bucket `skippy-tel-tabletop`, made by `infra/bootstrap`, so a new bucket needs a bootstrap
+  re-run in Cloud Shell. The portal reaches it through its runtime identity.
+- **Code:** `portal/tabletop.py`, `templates/tabletop.html`, `static/tabletop.{js,css}`.
+- **Full description:** `docs/portal/README.md` → The Tabletop.
+
 ## Home is the app portal (`/`); Skippy the Magnificent is the chat app (`/chat`), in two modes
 
 `/` is Home: signed out, the Google sign-in; signed in, the launcher (a card per sub-portal the person may use; `/apps` is the same page under its older

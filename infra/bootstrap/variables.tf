@@ -25,3 +25,9 @@ variable "doomloop_bucket" {
   type        = string
   default     = "skippy-tel-doomloop-dev"
 }
+
+variable "tabletop_bucket" {
+  description = "Private GCS bucket holding the portal's Tabletop boards and the pictures pinned on them (portal/tabletop.py; deploy.yml sets TABLETOP_BUCKET to the same name)."
+  type        = string
+  default     = "skippy-tel-tabletop"
+}

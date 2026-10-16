@@ -266,6 +266,35 @@ resource "google_storage_bucket_iam_member" "portal_reads_doomloop" {
   member = "serviceAccount:${data.google_service_account.runtime.email}"
 }
 
+# ── The Tabletop (the portal's shared RPG boards, /tabletop) ─────────────────
+#
+# The boards and the players' pictures live here and nowhere else (Cloud Run's disk is gone on every restart). Only the
+# portal's runtime identity can read or write it; the portal serves the pictures to people holding the "tabletop" grant.
+# Versioning keeps a deleted or overwritten file for 30 days, so a card taken down by mistake can still be fetched back.
+
+resource "google_storage_bucket" "tabletop" {
+  name                        = var.tabletop_bucket
+  location                    = var.region
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  force_destroy               = false # the campaign's scrapbook: never deleted by a terraform destroy
+  versioning { enabled = true }
+  lifecycle_rule {
+    condition {
+      days_since_noncurrent_time = 30
+      with_state                 = "ARCHIVED"
+    }
+    action { type = "Delete" }
+  }
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_storage_bucket_iam_member" "portal_uses_tabletop" {
+  bucket = google_storage_bucket.tabletop.name
+  role   = "roles/storage.objectAdmin" # read, write and delete the boards' files, in this bucket only
+  member = "serviceAccount:${data.google_service_account.runtime.email}"
+}
+
 resource "google_iam_workload_identity_pool_provider" "doomloop" {
   workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
   workload_identity_pool_provider_id = "doomloop"

@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Tabletop — Maker Portal{% endblock %}
+{% block app %}tabletop{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}d20{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='tabletop.css') }}">
+{% endblock %}
+{% block content %}
+{# The Tabletop: the adventure's shared boards (portal/tabletop.py). One screen, never scrolled: the board is a big surface you
+   drag to pan and pinch (or wheel) to zoom; everyone pins pictures and notes on it and drags their own about. The GM (the
+   Captain) makes the boards, one per episode or realm, and can change anything. static/tabletop.js draws it and polls for
+   other people's changes every few seconds. #}
+<section id="tt" class="tt bp" aria-label="Tabletop"
+         data-ready="{{ '1' if ready else '0' }}" data-gm="{{ '1' if gm else '0' }}" data-me="{{ me_email }}"
+         data-boards-url="{{ url_for('tabletop.boards') }}"
+         data-board-url="{{ url_for('tabletop.board', bid='BID') }}">{# every card's address hangs off the board's: …/BID/text, …/BID/img/<name> #}
+  <noscript><p class="warn" style="margin:12px">The Tabletop needs JavaScript.</p></noscript>
+  <div class="notice" id="tt-notice" role="status" hidden></div>
+
+  <div class="bp-top">
+    <button type="button" class="key" id="tt-boards-key" aria-label="Boards" title="Boards"><svg class="g" aria-hidden="true"><use href="#g-tools"/></svg></button>
+    <h1 class="tt-title" id="tt-title">Tabletop</h1>
+    <button type="button" class="key" id="tt-note-key" aria-label="Pin a note" title="Pin a note" disabled><svg class="g" aria-hidden="true"><use href="#g-talk"/></svg></button>
+    <button type="button" class="key" id="tt-pic-key" aria-label="Pin a picture" title="Pin a picture" disabled><svg class="g" aria-hidden="true"><use href="#g-image"/></svg></button>
+    <button type="button" class="key" id="tt-fit-key" aria-label="Show the whole board" title="Show the whole board" disabled><svg class="g" aria-hidden="true"><use href="#g-fit"/></svg></button>
+    <input type="file" id="tt-file" accept="image/*" multiple hidden>
+  </div>
+
+  <div class="tt-view" id="tt-view" tabindex="0" aria-label="The board: drag to move around, pinch or scroll to zoom">
+    <div class="tt-board" id="tt-board"></div>
+    <div class="tt-empty" id="tt-empty" hidden>
+      <svg class="g" aria-hidden="true"><use href="#g-d20"/></svg>
+      <p id="tt-empty-text"></p>
+    </div>
+    <div class="tt-drop" id="tt-drop" hidden><svg class="g" aria-hidden="true"><use href="#g-image"/></svg></div>
+  </div>
+
+  {# The boards: pick one; the GM also makes, renames and removes them #}
+  <div class="sheet" id="tt-boards" role="dialog" aria-modal="true" aria-label="Boards" hidden>
+    <div class="tt-sheet-top">
+      <svg class="g" aria-hidden="true"><use href="#g-tools"/></svg><span class="grow"></span>
+      <button type="button" class="key sm" data-close aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
+    </div>
+    <div class="tt-list" id="tt-list" role="list"></div>
+    {% if gm %}
+    <form class="tt-new" id="tt-new">
+      <input type="text" id="tt-new-title" maxlength="80" placeholder="Ep 1 — The Endless Fall" aria-label="New board's name" autocomplete="off">
+      <button type="submit" class="key" aria-label="Make a board" title="Make a board"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
+    </form>
+    {% endif %}
+  </div>
+
+  {# A card, up close: the picture large, its words; yours (or the GM's) to edit or take down #}
+  <div class="sheet" id="tt-card" role="dialog" aria-modal="true" aria-label="Card" hidden>
+    <div class="tt-sheet-top">
+      <span class="tt-by" id="tt-card-by"></span><span class="grow"></span>
+      <button type="button" class="key sm danger" id="tt-card-del" aria-label="Take it down" title="Take it down"><svg class="g" aria-hidden="true"><use href="#g-trash"/></svg></button>
+      <button type="button" class="key sm" data-close aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
+    </div>
+    <div class="tt-card-pic" id="tt-card-pic"></div>
+    <textarea id="tt-card-text" maxlength="2000" rows="4" aria-label="Words on the card"></textarea>
+    <div class="tt-inks" id="tt-inks" role="radiogroup" aria-label="Ink"></div>
+    <div class="tt-sheet-bottom">
+      <span class="grow"></span>
+      <button type="button" class="key" id="tt-card-save" aria-label="Pin it" title="Pin it"><svg class="g" aria-hidden="true"><use href="#g-send"/></svg></button>
+    </div>
+  </div>
+</section>
+<script src="{{ url_for('static', filename='tabletop.js') }}" defer></script>
+{% endblock %}

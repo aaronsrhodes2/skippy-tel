@@ -136,7 +136,7 @@ def test_the_launcher_has_one_tile_per_app_and_no_duplicate_paths(env):
     login(client, ADMIN)
     launcher = client.get("/apps").data.decode()
     assert re.findall(r'class="unit(?: named)?" data-app="(\w+)"', launcher) == \
-        ["skippy", "games", "play", "music", "video", "experiments", "dashboard", "admin"]
+        ["skippy", "games", "play", "music", "video", "experiments", "tabletop", "dashboard", "admin"]
     assert launcher.count('href="/games"') == 1 and 'href="/games/' not in launcher      # games live in one app, not six tiles
     assert "Server room" not in launcher and "<nav" not in launcher
     _add_friend(client, PAL, ["dragonwilds"])

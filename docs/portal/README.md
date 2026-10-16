@@ -422,6 +422,28 @@ refused, the URL rule, the tile and pill, the manifest, the page's markup agains
 bytes), `test_video_js.py` (runs `portal/tests/js/video/*.test.js` under Node 18+ and feeds a catalog the real gate builds from its
 fake Jellyfin to the player's parser; skipped, not failed, without Node).
 
+## The Tabletop (shared RPG boards, `/tabletop`)
+
+The adventure's scrapbook for the Captain's Daggerheart table (Heroes of Chance): boards you pan and zoom, with
+pictures and notes pinned on them. It's a launcher tile for the Captain and for friends granted **"Tabletop (RPG
+boards)"** in Admin > Friends.
+
+- **Boards:** only the GM (an admin) makes, renames and removes them, from the boards key. Make one per episode or realm.
+  The address `/tabletop#<id>` opens a given board, and the page remembers the last board you looked at.
+- **Cards:** anyone with the grant pins a note (with an ink from the passthrough palette) or a picture. To add a
+  picture, use the picture key, drop a file on the board, or paste one. Big photos are shrunk on the device to
+  2000 px JPEG before they're sent; GIFs and small PNGs go as they are. You can drag, edit and take down your own
+  cards. The GM can do that to any card. If you drag someone else's card, the board pans instead.
+- **Live:** the page polls `GET /tabletop/b/<id>?since=<rev>` every 4 s. While nothing has changed, the reply is only `{"rev": n}`.
+- **Storage:** the private GCS bucket `skippy-tel-tabletop` holds `boards.json`, `boards/<id>.json` and
+  `images/<board>/<card>.<ext>`. It's created by `infra/bootstrap` with versioning, so deleted files stay for
+  30 days. Only the portal's runtime identity can read or write it, and the portal serves the pictures back
+  behind the grant. `TABLETOP_BUCKET` is set by `deploy.yml`. Without it, the page says it isn't set up.
+- **Safety:** every write needs the `X-Tabletop: 1` header, which another site's page can't add. Pictures are
+  recognised by their first bytes, never by name. Text is drawn with `textContent`, never parsed as HTML.
+- **Code:** `portal/tabletop.py`, `templates/tabletop.html`, `static/tabletop.{js,css}`. Tests are in
+  `portal/tests/test_tabletop.py`.
+
 ## Star Control Zero (the Captain's game, `/starcontrol`)
 
 The Captain's Star Control fan-game prequel ([star-control-precursors](https://github.com/aaronsrhodes2/star-control-precursors)),

@@ -63,7 +63,7 @@ def test_the_launcher_is_glyphs_with_a_lamp_and_no_sentence_on_it(env):
 def test_the_launcher_sizes_its_grid_to_the_number_of_controls_so_nothing_scrolls(env):
     client, _, _ = env
     login(client, ADMIN)
-    assert 'style="--rows: 4; --rows-wide: 2; --rows-side: 2"' in client.get("/apps").data.decode()          # 8 controls
+    assert 'style="--rows: 5; --rows-wide: 3; --rows-side: 2"' in client.get("/apps").data.decode()          # 9 controls
     _add_friend(client, PAL, ["dragonwilds"])
     login(client, PAL)
     assert 'style="--rows: 1; --rows-wide: 1; --rows-side: 1"' in client.get("/apps").data.decode()          # one

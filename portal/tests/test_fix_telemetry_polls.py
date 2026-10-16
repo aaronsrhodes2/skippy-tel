@@ -68,8 +68,9 @@ def asked_for_by_scripts(text: str, url_map=None) -> set[str]:
 # attributes: then the scan can read them as long as it is given the script too. These are the allowed ones: the script, and the
 # template whose data-*-url attributes (url_for) are the portal URLs it uses. Anything else gets the failure below.
 # (paths under static/; Nagatha's scripts and its self-hosted hls.js only talk to the video gate, whose address and pass come from
-# the page's data-gate-url route, which the scan sees)
-STATIC_SCRIPTS = {"skippy-voice.js": "front.html", "nbody-flipbook.js": "demo_nbody.html", "bilby-app.js": "music.html", "nagatha-app.js": "video.html", "vendor/hls-1.6.15.min.js": "video.html"}
+# the page's data-gate-url route, which the scan sees; the Tabletop's poll and cards hang off its data-board-url and data-boards-url)
+STATIC_SCRIPTS = {"skippy-voice.js": "front.html", "nbody-flipbook.js": "demo_nbody.html", "bilby-app.js": "music.html", "nagatha-app.js": "video.html", "vendor/hls-1.6.15.min.js": "video.html",
+                  "tabletop.js": "tabletop.html"}
 
 
 def template_text(template: Path) -> str:
