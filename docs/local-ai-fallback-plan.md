@@ -71,6 +71,30 @@ over; the Bosgame M5 at $3,599 is the nearest fallback. Do **not** buy a 64 GB t
 ceiling can flex by $500, the Halo buys vendor support, which matters most for ROCm/BIOS issues. All of these use the same Ryzen AI
 Max+ 395, so inference speed should be near-identical; what differs is cooling, noise, ports and support (read a review of the exact unit).
 
+### Amazon listings pasted by the Captain (2026-10-16)
+
+| Listing | Config | Price | Returns | Warranty | Notes |
+|---|---|---|---|---|---|
+| **Bosgame M5** | 128 GB / 2 TB | **$3,599.00** | free | 1 yr full + 3 yr parts | 4.3 stars (635). Dual USB4, single 2.5GbE, Wi-Fi 7. |
+| GMKtec EVO-X2 | 128 GB / 2 TB | $3,649.99 | free | 1 yr limited | Same listing as the X3 (its 64 GB / 2 TB option is $2,399.99: too small). |
+| GMKtec EVO-X3 | 128 GB / 2 TB | $3,799.99 | free | 1 yr limited | 4.2 stars (115). OCuLink. The struck-through "$5,499.99 list / 31% off" is not a real reference price. |
+
+All three use the same Ryzen AI Max+ 395, so inference speed should match; the differences are price, warranty, cooling and OCuLink.
+Both listings' marketing ("70B+ LLMs with ease", "DeepSeek 70B Q8 runs comfortably") is optimistic: a 70B Q8 reads ~70 GB per token, and at
+~215 GB/s that caps near 3 tokens/s (derived, not measured). This plan does not rely on dense 70B models. The "Radeon 8090S" typo in the X3 copy
+is sloppy listing text, not evidence about the hardware.
+
+**Pick at these prices: the Bosgame M5 ($3,599, 2 TB, longest warranty, cheapest of the three)**, unless a thermal/noise review of the M5 shows
+it throttling under sustained load. Sales tax will push the total above $3,599. Cooling for the M5 has NOT been checked yet.
+
+**Burn-in inside the return window (before wiping Windows or relying on it):**
+1. Confirm the OS reports 128 GB and a 2 TB drive; note the BIOS version and the iGPU memory (UMA) setting.
+2. Check the return deadline on the order page and set a reminder two days before it.
+3. Install llama.cpp (Vulkan) and run `llama-bench` on gpt-oss-120b and Qwen3-30B-A3B in a loop for several hours.
+   Log tokens/s over time, CPU/GPU temperatures, fan noise at the desk, and whether the clocks throttle.
+4. Boot a Linux live USB and check Wi-Fi/2.5GbE, the iGPU and the SSD are all seen.
+5. Pass: speeds stay near the baseline, no throttle cliff, no crashes. Fail: return it.
+
 Budget is effectively all spent on the machine. Archive storage (below) should reuse the existing `D:\models` drive plus one more existing disk;
 a second copy on a new external drive is extra money, not in the $3,500.
 
