@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from conftest import load
+from core_testlib import load
 from fake_llm import FakeLLM
 
 shim = load("ollama-shim/shim.py", "core_ollama_shim")

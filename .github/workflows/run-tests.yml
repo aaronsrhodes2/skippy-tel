@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   suite:
-    # portal + memory + tools + home-reporter + claude-bridge + wa-trickle + mentat
+    # portal + memory + tools + home-reporter + claude-bridge + wa-trickle + mentat + core
     runs-on: ubuntu-latest
     # The caller's `test` job can't carry a timeout (GitHub allows none on a job that `uses:` a workflow), so each job
     # here does: a hung test would otherwise hold the whole deploy for GitHub's default of 6 hours.
@@ -30,7 +30,7 @@ jobs:
             portal/requirements.txt
             tools/requirements-ci.txt
       - run: pip install -r portal/requirements.txt -r tools/requirements-ci.txt
-      - run: python -m pytest portal/tests memory/tests tools/tests services/home-reporter/tests services/claude-bridge/tests services/wa-trickle/tests mentat/tests -q -n auto --dist loadfile --durations=10
+      - run: python -m pytest portal/tests memory/tests tools/tests services/home-reporter/tests services/claude-bridge/tests services/wa-trickle/tests mentat/tests core/tests -q -n auto --dist loadfile --durations=10
 
   flask-api:
     runs-on: ubuntu-latest

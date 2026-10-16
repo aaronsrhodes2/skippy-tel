@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from conftest import load
+from core_testlib import load
 
 m = load("llm/models.py", "core_llm_models")
 

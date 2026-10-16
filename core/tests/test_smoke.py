@@ -6,7 +6,7 @@ import pytest
 from flask import Flask, jsonify
 from werkzeug.serving import make_server
 
-from conftest import load
+from core_testlib import load
 from fake_llm import FakeLLM
 
 shim_mod = load("ollama-shim/shim.py", "core_ollama_shim")
