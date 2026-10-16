@@ -103,5 +103,44 @@ refresh() {
   rm -rf "$work"
 }
 
+# The admin-only gate (docs/games/proposals/gmod-admin-only.md): its own addon folder, written from THIS script (shipped in metadata,
+# not fetched from the Mentat repo), so a push to that repo can't remove or change it. Only the admin SteamID64 below may join; the
+# join password stays set in the container as a second lock. Written only when the content differs, so the file times stay put.
+admin_gate() {
+  local dir=$GAMEDIR/addons/skippy-admin-only/lua/autorun/server file tmp
+  file=$dir/sv_admin_only.lua
+  mkdir -p "$dir" || { say "can't make $dir; the admin gate is not installed"; return; }
+  tmp=$(mktemp "$dir/.gate.XXXXXX") || { say "can't make a scratch file; the admin gate is not updated"; return; }
+  cat > "$tmp" <<'LUA'
+-- Admin-only join gate (Skippy). Server-side. Written by gmod_addon.sh; edit the script, not this file.
+local ADMINS = {
+    ["76561197989151002"] = true,   -- the Captain
+}
+
+-- Refuses every join whose SteamID64 is not on the list. Returning nothing lets the normal join go on.
+-- If this file ever fails to load, the hook is not registered and the join password (set in the container) still applies.
+hook.Add("CheckPassword", "SkippyAdminOnly", function(steamid64, ip, svpass, clpass, name)
+    if ADMINS[steamid64] then return end
+    return false, "This server is admin-only."
+end)
+
+-- Anyone already connected who is not on the list is removed (checked every 15 seconds).
+timer.Create("SkippyAdminOnlyKick", 15, 0, function()
+    for _, ply in ipairs(player.GetAll()) do
+        if not ADMINS[ply:SteamID64()] then ply:Kick("This server is admin-only.") end
+    end
+end)
+LUA
+  if cmp -s "$tmp" "$file"; then rm -f "$tmp"; return; fi        # current: say nothing, touch nothing
+  chmod 644 "$tmp"
+  if mv "$tmp" "$file"; then
+    chown -R "$OWNER" "$GAMEDIR/addons/skippy-admin-only" 2>/dev/null || true
+    say "admin gate installed or updated (skippy-admin-only)"
+  else
+    rm -f "$tmp"; say "couldn't install the admin gate; the join password is the only lock"
+  fi
+}
+
+admin_gate || true
 refresh || true
 exit 0
