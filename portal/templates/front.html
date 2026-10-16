@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% block title %}Skippy the Magnificent — Maker Portal{% endblock %}
+{# Friends with the chat grant get the public chat, which is Mentat (its answers are Mentat's, Barney Style explains them); the Captain's is Skippy Chat. #}
+{% block title %}{{ "Skippy the Magnificent" if captain else "Mentat" }} — Maker Portal{% endblock %}
 {% block app %}skippy{% endblock %}
 {% block ui %}bridge{% endblock %}
 {% block glyph %}can{% endblock %}

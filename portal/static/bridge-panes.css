@@ -112,3 +112,8 @@ body[data-app="me"] .adm { z-index: 1; }
 @media (max-height: 520px) { .skippy3d:not(.is-hidden) { display: none; } }
 
 .turn > img.g.face, .note > img.g.face { border-radius: 50%; object-fit: cover; background: #0a0c18; }
+
+/* Recovery is one long page of cards in columns. A card that can't fit the rest of a column used to jump whole to the next one and leave that
+   column (a page you flip to) nearly empty: the "blank" pages. Recovery cards may break across columns; a heading stays with its card. */
+.pg-flow #recovery .card { break-inside: auto; }
+.pg-flow #recovery h3 { break-after: avoid-column; }

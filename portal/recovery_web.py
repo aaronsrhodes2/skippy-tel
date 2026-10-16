@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 
 import auth
 import buildinfo
@@ -15,6 +15,14 @@ import recovery
 
 BACK = "#recovery"
 STARTER_WAIT_S = 25               # how long a button waits for the starter before saying "sent, still working"
+# The local services a Bring-up checks beyond Docker: (skippy-pc's capability name, what people call it). Mentat is checked from its own report.
+LOCAL_SERVICES = (("workshop", "Private Skippy's bridge"), ("make_music", "music studio"), ("music_gate", "Bilby's gate"),
+                  ("video_gate", "Nagatha's gate"), ("voice_gate", "voice gate"))
+STATE_OF = {True: "ok", False: "bad", None: "wait"}   # a step is ok, bad, or still unknown (wait)
+
+
+def _state(flag) -> str:
+    return STATE_OF.get(flag if isinstance(flag, bool) else None, "wait")
 
 
 def init_app(app, workshop, limiter, github: recovery.GitHub, clock=None, home=None, starter=None) -> None:
@@ -27,10 +35,60 @@ def init_app(app, workshop, limiter, github: recovery.GitHub, clock=None, home=N
     def own_roots() -> list[str]:
         return [request.host_url, app.config.get("PORTAL_URL") or ""]
 
+    def bringup() -> dict:
+        """The Start-or-stop card: each step of bringing SkippyTel up, from the starter's own answer (Docker, the containers, the bridge),
+        skippy-tel-core's health (the model connections) and skippy-pc's last report (the local services). Admin only."""
+        view = starter.view() if starter else {"online": False, "age_s": None, "status": {}, "waiting": [], "recent": []}
+        s = view["status"] or {}
+        up, total = s.get("containers_up"), s.get("containers_total")
+        if isinstance(total, int) and total and isinstance(up, int):
+            containers = "ok" if up >= total else "wait" if up else "bad"
+        else:
+            containers = "wait"
+        core = home.core() if home else {"verdict": "unknown", "problems": [], "tiers": []}
+        tiers = {t["name"]: t["ok"] for t in core["tiers"]}
+        if core["verdict"] == "unknown":
+            models = ("wait", "no report from skippy-pc yet")
+        elif not tiers.get("ollama", False):
+            models = ("bad", " ".join(core["problems"][:2]) or "Ollama isn't answering")
+        elif all(tiers.values()):
+            models = ("ok", "Ollama, Claude, Nagatha and ElevenLabs answer")
+        else:
+            models = ("warn", " ".join(core["problems"][:2]) or "a model tier is missing")
+        if home is None or not home.online():
+            services = ("wait", "skippy-pc isn't reporting")
+        else:
+            caps = home.capabilities()
+            off = [label for name, label in LOCAL_SERVICES if not caps.get(name)] + ([] if home.mentat_ready() else ["Mentat"])
+            services = ("ok", "all ready") if not off else ("warn", "not ready: " + ", ".join(off))
+        steps = [
+            {"id": "starter", "label": "Starter on skippy-pc", "state": "ok" if view["online"] else "bad",
+             "detail": "answering" if view["online"] else "not answering: the PC is off, asleep or at the sign-in screen"},
+            {"id": "docker", "label": "Docker Desktop", "state": _state(s.get("docker")),
+             "detail": {True: "up", False: "DOWN"}.get(s.get("docker"), "unknown")},
+            {"id": "containers", "label": "Containers", "state": containers,
+             "detail": f"{up} of {total}" if containers != "wait" or isinstance(up, int) else "unknown"},
+            {"id": "bridge", "label": "Bridge (the Skippy agent)", "state": _state(s.get("bridge")),
+             "detail": {True: "answering", False: "DOWN"}.get(s.get("bridge"), "unknown")},
+            {"id": "models", "label": "Model connections", "state": models[0], "detail": models[1]},
+            {"id": "services", "label": "Local services", "state": services[0], "detail": services[1]},
+        ]
+        return {"online": view["online"], "steps": steps, "working": s.get("working") or "",
+                "busy": s.get("busy") is True, "resume_at": s.get("resume_at") or "",
+                "waiting": [w["op"] for w in view["waiting"]], "recent": view["recent"]}
+
+    @bp.get("/status.json")
+    @auth.admin_required
+    def status_json():
+        """The Start-or-stop card's live part: the card polls it while it's open, so a start shows each step as it happens."""
+        resp = jsonify(bringup())
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
     def cards() -> dict:
-        """Everything the three cards show. Only ever called from admin.html, which only an admin can render."""
+        """Everything the recovery page shows. Only ever called from admin.html, which only an admin can render."""
         build, at = buildinfo.info(), now()
-        out = {"build": build, "configured": github.configured, "error": None, "view": None,
+        out = {"build": build, "configured": github.configured, "error": None, "view": None, "bringup": bringup(),
                "workshop": workshop.current(), "paused": workshop.paused, "ready": workshop.ready(),
                "log": [{**e, "when": recovery.ago(datetime.fromtimestamp(e["at"], timezone.utc), at)} for e in log.recent()],
                "actions": recovery.ACTIONS, "repo": recovery.REPO, "fetched": recovery.RUNS_FETCHED,

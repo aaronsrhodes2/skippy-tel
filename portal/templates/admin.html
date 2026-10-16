@@ -3,7 +3,7 @@
 {% block app %}admin{% endblock %}
 {% block ui %}bridge{% endblock %}
 {% block glyph %}gear{% endblock %}
-{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge-panes.css') }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge-panes.css') }}"><script src="{{ url_for('static', filename='recovery-live.js') }}" defer></script>{% endblock %}
 {% block content %}
 {# Admin on the bridge: the control room. Home is a deck with a control for each job (a lamp or a count where something needs the
    Captain); a control opens its pane, and a pane is pages you flip (swipe, PageUp/PageDown, the bar under it), never a scrolled page.

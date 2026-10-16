@@ -426,7 +426,7 @@ GAMES = {gid: replace(g, settings=g.settings + (Setting(
 # Skippy chat, and Experiments (public anyway; the grant puts it on their
 # front page). The personal dashboard is admin-only and never grantable.
 PORTALS: dict[str, str] = {**{gid: g.name for gid, g in GAMES.items()},
-                           "skippy": "Skippy (chat)", "audio": "Bilby's Audio Service",
+                           "skippy": "Mentat (chat)", "audio": "Bilby's Audio Service",
                            "video": "Nagatha's Video Service", "play": "Browser Games",
                            "experiments": "Experiments"}
 # One grant per launcher tile a friend may be given (templates/home.html); Dashboard and Admin are the Captain's alone.
