@@ -168,6 +168,23 @@ The hard part is the voice, not the plumbing:
   ([roundup](https://pinggy.io/blog/best_open_source_self_hosted_text_to_speech_models/), [roundup](https://www.yaps.ai/blog/best-local-tts-models))
 - **Staging:** (1) make the engine pluggable, ElevenLabs still default; (2) use the local voice as the fallback when the daily character budget is
   spent, instead of the device voice; (3) blind A/B on ~20 real Skippy lines with tags, ElevenLabs vs each candidate, plus latency; (4) switch the default only if the Captain prefers it.
+- **Voice distillation pipeline (the Captain's idea, 2026-10-16): ElevenLabs as the teacher, an own single-voice model as the student.**
+  1. *Source and clean, locally (free).* Collect the reference clips; isolate speech from music/effects and denoise with local tools (options such as
+     Demucs, DeepFilterNet, Resemble Enhance, plus the RNNoise step `voice-gate` already has), so credits are not spent on cleaning. Cut into 3-15 s
+     segments, transcribe with local Whisper, spot-check the text.
+  2. *Teacher generation (spends credits, once, planned).* About 8,500 credits remain. If 1 credit is 1 character (my assumption; some models may bill half)
+     that is roughly 9-19 minutes of speech at ~15 characters/s. Keep ~1,000 in reserve for the A/B baseline. Lines must come from real Skippy
+     chat/persona text and cover **every tag** (`[sighs]`, `[chuckles]`, `[laughs]`, `[sarcastic]`, `[whispers]`, `[excited]`), ALL CAPS, "...",
+     short and long lines, and the proper nouns and physics terms Skippy actually says. Save each as audio + a manifest row
+     (`id`, `text_with_tags`, `plain_text`, `audio`, `source`, `seconds`), hold out 10% for the blind test. Sample rate and format follow the chosen student.
+  3. *Baseline.* Zero-shot candidates on the held-out lines, to learn how far fine-tuning must move the needle.
+  4. *Fine-tune on CUDA.* Train on the gaming PC (mature CUDA stack; a LoRA on a small TTS should fit in 12 GB, to be verified), then serve from wherever it measures best.
+     The student learns the tag vocabulary only from the teacher's examples, so tag coverage in step 2 matters more than total minutes.
+  5. *Evaluate blind* against ElevenLabs and the zero-shot baseline; iterate; deploy behind the pluggable engine. Optionally pre-render Skippy's signature
+     phrases with ElevenLabs while credits last and seed `voice-gate`'s cache with them.
+  Limits: the student cannot beat its teacher, and the teacher is itself a clone from a noisy source; 10-20 minutes of data is thin for a fine-tune
+  (the audiobook source holds far more, but see the personal-use note); expect a narrower emotional range than ElevenLabs v3 and occasional
+  glitches (a mispronounced name, a repeated word), which sentence-level chunking, retries and the cache soften.
 - The cloned voice stays personal-use only (see `elevenlabs_client.py`), and the `speak` scope stays admin-only, locally or not.
 
 **Development stays on the gaming PC.** Claude Code / the VS Code extension run on the PC with a `claude-local` wrapper pointed at the Halo over the
