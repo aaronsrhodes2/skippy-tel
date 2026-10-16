@@ -93,7 +93,8 @@ it throttling under sustained load. Sales tax will push the total above $3,599. 
 2. Check the return deadline on the order page and set a reminder two days before it.
 3. Install llama.cpp (Vulkan) and run `llama-bench` on gpt-oss-120b and Qwen3-30B-A3B in a loop for several hours.
    Log tokens/s over time, CPU/GPU temperatures, fan noise at the desk, and whether the clocks throttle.
-4. Boot a Linux live USB and check Wi-Fi/2.5GbE, the iGPU and the SSD are all seen.
+4. Run the burn-in from a Linux USB stick or external SSD, so the internal drive and its Windows stay untouched until you decide to keep the box.
+   Check Wi-Fi/2.5GbE, the iGPU and the SSD are all seen.
 5. Pass: speeds stay near the baseline, no throttle cliff, no crashes. Fail: return it.
 
 Budget is effectively all spent on the machine. Archive storage (below) should reuse the existing `D:\models` drive plus one more existing disk;
@@ -101,7 +102,10 @@ a second copy on a new external drive is extra money, not in the $3,500.
 
 ## Software
 
-- **OS:** Linux, headless (Fedora 43 or a current Ubuntu LTS with a recent kernel and Mesa). Community benchmarks used Fedora 43 (ROCm 7.0
+- **OS:** Linux, headless. **First choice: Ubuntu 26.04 LTS** (AMD's ROCm packages target Ubuntu LTS first, and a published faster-whisper-on-Strix-Halo
+  recipe uses Ubuntu 26.04 + ROCm 7.2.2); Fedora 43 is the alternative the LLM benchmarks used. Prefer the distro's in-kernel amdgpu driver over DKMS
+  (an earlier Phoronix test saw DKMS builds fail on a newer kernel), and check gfx1151 against AMD's ROCm compatibility page at install time.
+  The LLM path (llama.cpp on Vulkan / Mesa RADV) needs **no ROCm at all**; ROCm only matters for ComfyUI, Whisper and ACE-Step. Community benchmarks used Fedora 43 (ROCm 7.0
   nightlies and Vulkan RADV) and CachyOS (kernel 7.0, Mesa RADV). Results depend on kernel/Mesa/ROCm versions, so **record them**.
 - **Inference:** `llama.cpp` / `llama-server`, **Vulkan (RADV) first**, ROCm HIP as the alternative (HIP often wins prompt processing,
   Vulkan often wins token generation; measure both on the real box). Pin the build (commit or container image digest).
