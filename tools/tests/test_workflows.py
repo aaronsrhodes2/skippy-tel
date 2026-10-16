@@ -379,7 +379,7 @@ def test_the_two_ci_pytest_commands_are_the_ones_the_definition_of_done_names_ru
     suite = [s["run"] for s in RUN_TESTS["jobs"]["suite"]["steps"] if "pytest" in s.get("run", "")]
     flask = [s["run"] for s in RUN_TESTS["jobs"]["flask-api"]["steps"] if "pytest" in s.get("run", "")]
     assert suite == ["python -m pytest portal/tests memory/tests tools/tests services/home-reporter/tests "
-                     "services/claude-bridge/tests mentat/tests -q -n auto --dist loadfile --durations=10"]
+                     "services/claude-bridge/tests services/wa-trickle/tests mentat/tests -q -n auto --dist loadfile --durations=10"]
     assert flask == ["python -m pytest services/flask-api/tests -q -n auto --dist loadfile --durations=10"]
 
 
