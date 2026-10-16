@@ -187,6 +187,18 @@ The hard part is the voice, not the plumbing:
   Limits: the student cannot beat its teacher, and the teacher is itself a clone from a noisy source; 10-20 minutes of data is thin for a fine-tune
   (the audiobook source holds far more, but see the personal-use note); expect a narrower emotional range than ElevenLabs v3 and occasional
   glitches (a mispronounced name, a repeated word), which sentence-level chunking, retries and the cache soften.
+- **Capture kit (written 2026-10-16, tested, not yet run):** `tools/voice_capture.py` + `tools/voice_capture_lines.jsonl` (70 fresh Skippy lines in the persona's
+  voice, tagged; tests in `tools/tests/test_voice_capture.py`). It runs on skippy-pc, where the vault `.env` lives (the cloud sandbox has neither the key nor a
+  route to `api.elevenlabs.io`). Default is a dry run; spending needs `--go --max-credits N`; it resumes, stops on an empty balance, keeps the key out of the output.
+  Cost at 1 credit per character: tier 1 = 2,625 credits (37 lines, ~2.9 min of speech, every tag, caps, pauses, stingers), +tier 2 = 4,772 (61 lines, ~5.3 min),
+  +tier 3 = 5,854 (70 lines, ~6.5 min). The full Skippy set leaves ~2,600 of the 8,500 for Nagatha, Bilby and a reserve.
+  Run order: a ~300-credit trial (listen to those few files), then tier 1, listen again, then tier 2, then tier 3.
+  Check the dry-run's `voice=` against the voice id in the Oct 10-14 request log (`OhzNXjLB3k0MK59KIJXI`) and that `model=` is the v3 model production uses.
+- **Reference sample measured (not listened to), 2026-10-16:** the Captain's 171 s MP3 (48 kHz, 128 kbps, two identical channels = mono); the 0:08-1:28 segment is
+  -17.7 LUFS, LRA 3.7 LU, peak -1.9 dBFS, no clipping, bandwidth to ~16.5 kHz (the MP3's lowpass). Gaps between lines are digital silence (frame RMS floor
+  below -86 dBFS) and the signal falls 30 dB within 10-90 ms of each pause: no long reverb tail, so the "hollow room" is a short effect inside the voice, and the
+  silence suggests generated or gated audio, not a raw recording. Nine gaps of 0.5-0.8 s split the segment into about ten utterances; a ~7 s silence starts at ~1:28.
+  A faint constant dip near 0.75 kHz runs through the whole file (cause unknown). For training prefer a higher-bitrate or lossless original over this 128 kbps MP3.
 - The cloned voice stays personal-use only (see `elevenlabs_client.py`), and the `speak` scope stays admin-only, locally or not.
 
 **Development stays on the gaming PC.** Claude Code / the VS Code extension run on the PC with a `claude-local` wrapper pointed at the Halo over the
