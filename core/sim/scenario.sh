@@ -29,6 +29,13 @@ smoke_ok() {
 dump() {
   say "compose logs (tail)"
   (cd "$REPO" && docker compose -p skippycore -f core/compose.core.yml logs --tail 80 --no-color) || true
+  say "llama-swap's own log (upstream output included)"
+  curl -fsS -m 10 http://127.0.0.1:8080/logs 2>&1 | tail -80 || true
+  say "the chat slot's llama-server, started by hand for 20 s"
+  local cmd
+  cmd="$(python3 -c "import json; print(json.load(open('$CORE_STATE/llm/config.yaml'))['models']['chat']['cmd'].replace('\${PORT}', '9999'))")" || true
+  echo "$cmd"
+  (cd "$REPO" && docker compose -p skippycore -f core/compose.core.yml exec -T llm sh -c "timeout 20 $cmd" 2>&1 | tail -60) || true
 }
 push() {  # push <message>: commit the work tree's changes to origin/main
   git -C "$WORK/dev" add -A && git -C "$WORK/dev" commit -qm "$1" && git -C "$WORK/dev" push -q origin HEAD:main
@@ -69,7 +76,8 @@ smoke_ok
 deploy; expect known-bad
 
 say "3. missing full-size files are refused, the stack stays up"
-git -C "$WORK/dev" revert -q --no-edit HEAD && git -C "$WORK/dev" push -q origin HEAD:main
+git -C "$WORK/dev" revert --no-edit HEAD >/dev/null
+git -C "$WORK/dev" push -q origin HEAD:main
 deploy; expect ok
 sed -i 's/^CORE_FULL=.*/CORE_FULL=general/' "$CORE_ENV"
 deploy; expect refused
