@@ -54,6 +54,7 @@ services:
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3:8b}
     volumes:
       - ${CORE_STATE:-/var/lib/skippy-core}/flask-api:/app/state:rw
+      - ${CORE_STATE:-/var/lib/skippy-core}/drive-state:/drive-state:rw   # photo tags, Drive tokens (skippy-pc: ../music-collection/state)
       - ${MUSIC_ROOT:-/srv/music}:/music:ro
     depends_on:
       - ollama

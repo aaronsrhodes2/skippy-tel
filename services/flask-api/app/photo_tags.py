@@ -34,7 +34,16 @@ def _conn() -> sqlite3.Connection:
     _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(str(_DB_PATH), check_same_thread=False)
     con.row_factory = sqlite3.Row
-    con.execute("PRAGMA journal_mode=WAL")
+    # gunicorn boots its workers at the same moment and each runs init_db(); on a brand-new file the switch to WAL
+    # can find the other worker holding the lock ("database is locked") and the worker died. Wait it out instead.
+    for attempt in range(20):
+        try:
+            con.execute("PRAGMA journal_mode=WAL")
+            break
+        except sqlite3.OperationalError:
+            if attempt == 19:
+                raise
+            time.sleep(0.25)
     return con
 
 

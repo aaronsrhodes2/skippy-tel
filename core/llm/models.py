@@ -158,7 +158,8 @@ def render(chosen: dict, gpu_layers: int, extra_args: str = "") -> tuple[dict, d
                "--ctx-size", str(s["ctx"]), "-ngl", str(gpu_layers), "--alias", name, *ALWAYS_ARGS,
                "--parallel", str(s.get("parallel", DEFAULT_PARALLEL)), "--kv-unified", *s["args"],
                *(["--device", "none"] if gpu_layers == 0 else []), *shlex.split(extra_args)]
-        entry = {"cmd": " ".join(cmd), "aliases": list(s["aliases"])}
+        entry = {"cmd": " ".join(c if c == "${PORT}" else shlex.quote(c) for c in cmd),   # quoted: an arg may be JSON
+                 "aliases": list(s["aliases"])}
         if not s["resident"]:
             entry["ttl"] = IDLE_TTL_S
         models[name] = entry

@@ -73,6 +73,7 @@ def slots() -> list[dict]:
 
 
 USER = [{"role": "user", "content": "Say hello to the Captain in five words or fewer."}]
+CAP = {"num_predict": 256}      # generous for five words, but a rambling stand-in can't run its context out
 
 
 def check_tags():
@@ -83,7 +84,7 @@ def check_tags():
 
 
 def check_chat():
-    body = call_json("POST", f"{SHIM}/api/chat", {"model": DEFAULT, "stream": False, "messages": USER})
+    body = call_json("POST", f"{SHIM}/api/chat", {"model": DEFAULT, "stream": False, "messages": USER, "options": CAP})
     text = (body.get("message") or {}).get("content", "")
     if not text.strip() or body.get("done") is not True:
         raise Fail(f"no reply: {json.dumps(body)[:300]}")
@@ -91,7 +92,7 @@ def check_chat():
 
 
 def check_stream():
-    status, text = call("POST", f"{SHIM}/api/chat", {"model": DEFAULT, "messages": USER})
+    status, text = call("POST", f"{SHIM}/api/chat", {"model": DEFAULT, "messages": USER, "options": CAP})
     if status != 200:
         raise Fail(f"HTTP {status}: {text[:300]}")
     rows = [json.loads(line) for line in text.splitlines() if line.strip()]
