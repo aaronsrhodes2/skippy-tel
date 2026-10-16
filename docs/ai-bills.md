@@ -19,7 +19,7 @@ The **Decision** column is a recommendation. The Captain confirms every cancella
 | Service | Evidence |
 |---|---|
 | Adobe Firefly Standard | Cancellation confirmed 2026-06-19; service ended 2026-06-24. No charges since. |
-| ElevenLabs Pro ($99/mo) | Last receipt 2026-07-18 (covering Jul 18–Aug 18). No August or September receipt → looks cancelled. **Check the dashboard** to confirm the plan says Free. |
+| ElevenLabs Pro ($99/mo) | Last receipt 2026-07-18 (covering Jul 18–Aug 18). No August or September receipt → cancelled. Not on Free: the Captain confirmed on 2026-10-16 that he holds **purchased credits (about 8,500 left), not a subscription**, and the API and the Skippy clone were still answering on 2026-10-14. Those credits are a finite balance: every spoken character spends them (see `VOICE_DAILY_CHARS` in `docker-compose.override.yml`). |
 | Wolfram\|Alpha | No paid plan. **But** the free *API* key is still in use: ~2,000 calls this month, near the free limit (email 2026-09-24). Something of yours is calling it. Find that caller before it breaks or you get upsold. |
 
 ## Free tiers still attached
