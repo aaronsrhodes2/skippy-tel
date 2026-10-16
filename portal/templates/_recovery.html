@@ -17,6 +17,52 @@
 <section id="recovery">
   <h2>Recovery</h2>
 
+  {# Bring SkippyTel up or down, first: each step is checked from the starter's answer, skippy-tel-core's health and skippy-pc's report,
+     and the card polls /admin/recovery/status.json while it is open, so a start shows its progress without a reload. #}
+  {% set st = rc.starter %}
+  {% set bu = rc.bringup %}
+  <div class="card" id="starter" data-poll-url="{{ url_for('recovery.status_json') }}">
+    <h3>Start or stop SkippyTel</h3>
+    {% if st and st.online %}
+      <p class="help" id="starter-summary">The starter on skippy-pc answered {{ st.age_s }} s ago:
+        Docker {{ 'up' if st.status.docker else 'DOWN' }},
+        {{ st.status.containers_up or 0 }} of {{ st.status.containers_total or 0 }} containers,
+        bridge {{ 'answering' if st.status.bridge else 'DOWN' }}{% if st.status.busy %} (a run is going){% endif %}</p>
+    {% else %}
+      <p class="warn">The starter on skippy-pc isn't answering{% if st and st.age_s is not none %} (last heard {{ st.age_s // 60 }} min ago){% endif %}: the PC is off, asleep or at
+        the sign-in screen, or the starter isn't installed (<code class="code">bash tools/install_starter_startup.sh</code> at the PC). Nothing remote can wake a PC that is off.</p>
+    {% endif %}
+    <ol class="steps" id="steps" style="list-style:none;padding:0;margin:8px 0">
+      {% for s in bu.steps %}
+        <li data-step="{{ s.id }}" data-state="{{ s.state }}" style="margin:4px 0">
+          <span class="dot {{ {'ok': 'green', 'warn': 'amber', 'wait': 'amber', 'bad': 'red'}[s.state] }}"></span>
+          <b>{{ s.label }}</b>: <span data-detail>{{ s.detail }}</span></li>
+      {% endfor %}
+    </ol>
+    <p class="help" id="working" aria-live="polite">{% if bu.working %}Working: {{ bu.working }}{% elif bu.waiting %}Waiting for the starter to pick up: {{ bu.waiting | join(', ') }}{% endif %}</p>
+    {% if st and st.online %}
+      <p class="row">{{ button('starter-start') }} {{ button('starter-restart') }}</p>
+      <form class="inline" method="post" action="{{ url_for('recovery.act', action='starter-stop') }}" data-ask="{{ rc.actions['starter-stop'].ask }}"
+            onsubmit="this.elements.confirm.value = 'yes';">
+        <input type="hidden" name="confirm" value="">
+        <label class="field" for="starter-resume">Back on</label>
+        <select id="starter-resume" name="resume">
+          <option value="7am">tomorrow at 7 AM (by itself)</option>
+          <option value="4h">in 4 hours (by itself)</option>
+          <option value="manual">only when I start it</option>
+        </select>
+        <button type="submit" class="danger">{{ rc.actions['starter-stop'].label }}</button>
+      </form>
+      {% if st.status.resume_at %}<p class="warn">It is down on purpose and will start itself at {{ st.status.resume_at.replace('T', ' ') }}. Start SkippyTel now cancels that.</p>{% endif %}
+      <p class="help">A small program on skippy-pc itself, so it works when Docker or the bridge is down. It only ever does these three things.
+        A start can take a few minutes (Docker Desktop): the steps above fill in as they come up.</p>
+    {% endif %}
+    {% for r in (st.recent if st else []) %}
+      <p class="{{ '' if r.ok else 'warn' }} help">{{ r.op }} {{ r.age_s // 60 }} min ago by {{ r.by }}: {{ r.summary }}</p>
+    {% endfor %}
+  </div>
+
+
   <div class="card" id="live-version">
     <h3>Live version</h3>
     {% if b.commit == 'dev' %}
@@ -112,38 +158,6 @@
     <p class="help">Cancel withdraws a message still waiting for skippy-pc (it is never delivered) and tells a running one
       to stop. Clear ends a record the chat is stuck on. The pause lives in the portal's memory: a deploy or restart of the
       portal turns it back on.</p>
-  </div>
-
-  {% set st = rc.starter %}
-  <div class="card" id="starter">
-    <h3>Start or stop SkippyTel</h3>
-    {% if st and st.online %}
-      <p>The starter on skippy-pc answered {{ st.age_s }} s ago:
-        Docker {{ 'up' if st.status.docker else 'DOWN' }},
-        {{ st.status.containers_up or 0 }} of {{ st.status.containers_total or 0 }} containers,
-        bridge {{ 'answering' if st.status.bridge else 'DOWN' }}{% if st.status.busy %} (a run is going){% endif %}
-        {% if st.status.working %}&middot; <b>{{ st.status.working }}</b>{% endif %}</p>
-      <p class="row">{{ button('starter-start') }} {{ button('starter-restart') }}</p>
-      <form class="inline" method="post" action="{{ url_for('recovery.act', action='starter-stop') }}" data-ask="{{ rc.actions['starter-stop'].ask }}"
-            onsubmit="this.elements.confirm.value = 'yes';">
-        <input type="hidden" name="confirm" value="">
-        <label class="field" for="starter-resume">Back on</label>
-        <select id="starter-resume" name="resume">
-          <option value="7am">tomorrow at 7 AM (by itself)</option>
-          <option value="4h">in 4 hours (by itself)</option>
-          <option value="manual">only when I start it</option>
-        </select>
-        <button type="submit" class="danger">{{ rc.actions['starter-stop'].label }}</button>
-      </form>
-      {% if st.status.resume_at %}<p class="warn">It is down on purpose and will start itself at {{ st.status.resume_at.replace('T', ' ') }}. Start SkippyTel now cancels that.</p>{% endif %}
-      <p class="help">A small program on skippy-pc itself, so it works when Docker or the bridge is down. It only ever does these three things.</p>
-    {% else %}
-      <p class="warn">The starter on skippy-pc isn't answering{% if st and st.age_s is not none %} (last heard {{ st.age_s // 60 }} min ago){% endif %}: the PC is off, asleep or at
-        the sign-in screen, or the starter isn't installed (<code class="code">bash tools/install_starter_startup.sh</code> at the PC). Nothing remote can wake a PC that is off.</p>
-    {% endif %}
-    {% for r in (st.recent if st else []) %}
-      <p class="{{ '' if r.ok else 'warn' }} help">{{ r.op }} {{ r.age_s // 60 }} min ago by {{ r.by }}: {{ r.summary }}</p>
-    {% endfor %}
   </div>
 
   {% set pc = rc.pc %}

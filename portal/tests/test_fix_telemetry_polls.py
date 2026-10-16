@@ -69,7 +69,7 @@ def asked_for_by_scripts(text: str, url_map=None) -> set[str]:
 # template whose data-*-url attributes (url_for) are the portal URLs it uses. Anything else gets the failure below.
 # (paths under static/; Nagatha's scripts and its self-hosted hls.js only talk to the video gate, whose address and pass come from
 # the page's data-gate-url route, which the scan sees)
-STATIC_SCRIPTS = {"skippy-voice.js": "front.html", "nbody-flipbook.js": "demo_nbody.html", "bilby-app.js": "music.html", "nagatha-app.js": "video.html", "vendor/hls-1.6.15.min.js": "video.html"}
+STATIC_SCRIPTS = {"skippy-voice.js": "front.html", "nbody-flipbook.js": "demo_nbody.html", "bilby-app.js": "music.html", "nagatha-app.js": "video.html", "vendor/hls-1.6.15.min.js": "video.html", "recovery-live.js": "admin.html"}
 
 
 def template_text(template: Path) -> str:
