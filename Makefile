@@ -190,3 +190,8 @@ loop-watch:
 #   make test-affected                      run them     make test-affected AFFECTED_ARGS=--list    just show the plan
 test-affected:
 	python tools/affected_tests.py $(AFFECTED_ARGS)
+
+# SkippyCore simulator: the deployer, compose file and smoke test with stand-in models on CPU (core/README.md).
+#   make core-sim                          MODELS_ROOT=/path make core-sim
+core-sim:
+	bash core/sim/run.sh

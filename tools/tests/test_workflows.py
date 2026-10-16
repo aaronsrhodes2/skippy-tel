@@ -478,7 +478,8 @@ def test_rollback_fails_the_job_and_changes_nothing_when_there_is_no_safe_revisi
 
 def all_runs() -> list[tuple[str, str]]:
     out = []
-    for wf, name in ((DEPLOY, "deploy.yml"), (ROLLBACK, "rollback.yml"), (load("run-tests.yml"), "run-tests.yml"), (load("test.yml"), "test.yml")):
+    for wf, name in ((DEPLOY, "deploy.yml"), (ROLLBACK, "rollback.yml"), (load("run-tests.yml"), "run-tests.yml"), (load("test.yml"), "test.yml"),
+                     (load("core.yml"), "core.yml")):
         for job, body in wf["jobs"].items():
             for s in body.get("steps", []):                    # a job that `uses:` a reusable workflow has no steps here
                 if "run" in s:
