@@ -12,7 +12,8 @@ Related: `docs/v2/CHARTER.md` §10 question 1 (this answers it: option (b), a de
    *good enough* keeps Skippy and the coding loop alive on the day that happens.
 3. **Archive.** Pinned weights, pinned software and a recorded baseline of how well they work today.
 
-Non-goals: matching Sonnet 5.5 on long-context comprehension or speed (it won't), replacing the 4070 (CUDA-only pieces stay).
+Non-goals: matching Sonnet 5.5 on long-context comprehension or speed (it won't). Whether each GPU job leaves the 4070 is decided by
+measurement (see "Scope v2"), not assumed.
 
 ## What the "fake Anthropic key" idea turns into
 
@@ -121,6 +122,38 @@ a second copy on a new external drive is extra money, not in the $3,500.
 | Not recommended on this box | Dense 70B-123B (e.g. Mistral Medium 3.5, Devstral 2) | Memory bandwidth (~215 GB/s) caps dense models near 5 tok/s | measured ~4.6-5.3 tok/s for a 70B |
 
 Keep **both US-origin and Chinese-origin** weights in the archive (see the legal note in the chat that produced this plan, and below).
+
+## Scope v2 (2026-10-16): the Halo as the whole AI workshop; development stays on the gaming PC
+
+The Captain wants coding, image generation, speech in/out and music generation on the Halo too, and the gaming PC left for development and games.
+Confidence differs a lot by workload (searched 2026-10-16; community numbers are single-author tests unless stated):
+
+| Workload | Today | On the Halo | Confidence | Notes |
+|---|---|---|---|---|
+| Chat / Skippy tiers | Ollama, CUDA (4070) | llama.cpp or Ollama on the iGPU | **high** | Others measure 46-86 tok/s on MoE models. |
+| Coding fallback ("Haiku-class") | none | Qwen3-Coder-Next through Claude Code (`ANTHROPIC_BASE_URL`) | **medium** | Useful, **not equivalent**: vendor figures are Qwen3-Coder-Next 70.6% SWE-Bench Verified (SWE-Agent) and 44.3% SWE-Bench Pro; Haiku 5.5 published 64.8 on SWE-Bench Pro and no Verified score. Different scaffolds and effort levels, so not like-for-like, but the direction is "below Haiku on hard tasks". The bake-off decides. |
+| Speech to text | faster-whisper, CUDA | faster-whisper on ROCm | **medium-high** | One report: large-v3 about 9x real time. Needs a ROCm >= 6.4.3 image; ROCm 6.1 images lack gfx1151 and silently fall back to CPU. |
+| Text to speech | ElevenLabs cloud (admin), device voice (others) | unchanged | **high** | Not GPU-bound today, so nothing to move. A local clone of the Skippy voice on AMD is unverified. |
+| Image generation | Stable Diffusion on the host (4070) | ComfyUI on ROCm | **medium** | SDXL-class works; FP8 Flux-class reported at ~6 min/image on this chip; some models crash; a `--force-fp32` flag is the reported fix for NaN output on gfx1151. Diffusion is compute-bound, so the 4070 may well be faster. |
+| Music (ACE-Step 1.5) | CUDA container (4070) | unknown | **low** | No ROCm report found. The service's own notes say the model is plain PyTorch, so ROCm PyTorch might run it. Test; otherwise it stays on the 4070. |
+
+**Memory and bandwidth budget (128 GB shared).** Weights: gpt-oss-120b ~66 GB, Qwen3-Coder-Next ~46 GB, so the two big models together (112 GB)
+cannot be resident with a KV cache, the OS and a diffusion model. Keep a small resident set (the fast chat model plus Whisper) and **load big
+models on demand**; before an image or music job an arbiter unloads the big models first, which is exactly what `reporter.py` already does for
+ACE-Step. Every concurrent job also takes memory bandwidth from the LLM, so token speed drops while anything else runs. A coding agent sends large
+contexts: a 40K-token first turn at ~850-1,000 tok/s prefill is roughly 40-50 s (estimate), faster once the KV cache is warm.
+
+**Placement by measurement (added to the burn-in).** Run the same jobs on both machines: SDXL 1024x1024 at 30 steps, a 60 s ACE-Step song,
+Whisper large-v3 on 10 minutes of audio, one coding task. A workload moves to the Halo only if it lands within about 2x of the 4070's time
+and frees the PC; otherwise it stays. The reporter's capability probes already show an absent service as "not ready" instead of failing.
+
+**Development stays on the gaming PC.** Claude Code / the VS Code extension run on the PC with a `claude-local` wrapper pointed at the Halo over the
+tailnet; clones, git and the Workshop bridge stay on the PC. Only inference is remote.
+
+Sources: [AMD: ComfyUI on Ryzen AI Max+](https://rocm.blogs.amd.com/artificial-intelligence/comfyui-windows/README.html),
+[Gigazine](https://gigazine.net/gsc_news/en/20260107-amd-comfyui-rocm), [Framework forum: image gen on Linux](https://community.frame.work/t/anybody-tried-running-image-generation-e-g-stable-diffusion-xl-3-5-or-similar-on-linux/76932),
+[whisper-rocm](https://github.com/davidguttman/whisper-rocm), [Qwen3-Coder-Next](https://qwen.ai/blog?id=qwen3-coder-next),
+[Haiku 5.5 benchmarks](https://apidog.com/blog/claude-haiku-5-5-benchmarks/), [Phoronix: Strix Halo ROCm 7.0](https://www.phoronix.com/review/amd-rocm-7-strix-halo).
 
 ## Phases
 
