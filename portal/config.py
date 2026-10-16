@@ -54,6 +54,7 @@ def load() -> dict:
 
         # Skippy chat (ANTHROPIC_API_KEY is read by the SDK itself).
         "CHAT_MODEL": _optional("CHAT_MODEL", "claude-haiku-4-5"),
+        "BARNEY_MODEL": _optional("BARNEY_MODEL", "claude-haiku-4-5"),   # Barney Style (the plain-words explainer): its own model setting
         "CHAT_ENABLED": bool(_optional("ANTHROPIC_API_KEY")),
 
         # Discord: the invite link shown to players, and the bot token the

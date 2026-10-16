@@ -89,6 +89,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     vm = vm or GamesVm(app.config["GCP_PROJECT"], app.config["GCP_ZONE"], app.config["GCP_INSTANCE"])
     skippy = skippy or chat.SkippyChat(app.config["CHAT_MODEL"])
+    # Barney Style's provider (Haiku explains what Mentat found). Moving it to SkippyCore is this one line: point it at the SkippyCore client.
+    barney_chat = skippy
     app.extensions["friends"] = friends_mod.Friends(vm)
     app.extensions["modules"] = modules_mod.Modules(vm)               # the launcher's controls, and the Admin Graveyard that retires them
     app.extensions["access_requests"] = access_mod.Requests(vm)      # people asking to be let in (Admin → Friends)
@@ -1492,12 +1494,14 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             if force in ("ask_mentat", "make_music") and rest.startswith("(the user chose"):
                 force = None                     # nothing to act on yet: let Skippy ask
             prompt += chat.language_instruction(body.get("lang"))
-            if chat.wants_barney(rest) and not force:
+            barney = chat.wants_barney(rest) and not force
+            if barney:
                 # "Give it to me Barney Style": explain the whole conversation (Mentat's answers included) plainly,
                 # grounded in what Mentat found. No tools: nothing new is computed or looked up.
                 prompt += chat.barney_instruction()
                 schemas = None
-            text = skippy.reply(prompt,
+                model = app.config.get("BARNEY_MODEL") or app.config["CHAT_MODEL"]
+            text = (barney_chat if barney else skippy).reply(prompt,
                                 chat.build_messages(body.get("history"), rest),
                                 tools=schemas, run_tool=run_tool, model=model, force_tool=force)
         except chat.ChatError as exc:
