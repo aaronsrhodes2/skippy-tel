@@ -36,7 +36,7 @@ Sandbox limits found: Docker runs here, but image pulls are blocked (GHCR blobs 
 ## Left to do (in order)
 
 1. **Register the midnight job, on skippy-pc** (the Captain or the private Skippy, once this branch is on `main` or checked out there):
-   `bash tools/install_models_baseline_task.sh` (dry run), then `--apply`. Check progress with `python tools/models_baseline.py plan`; the log is `state/models-baseline.log`.
+   `bash tools/install_models_baseline_task.sh` (dry run), then `--apply`, which registers the nightly task AND starts the first download right away. Check progress with `python tools/models_baseline.py plan`; the log is `state/models-baseline.log`.
    Optional: add `HF_TOKEN=` to the vault and accept gated licences on the Hub (the run lists which ones). NGC-only NVIDIA models are not included; NVIDIA's open speech models are on HF.
 2. **Unit tests** for `core/llm/models.py` (manifest validation, `CORE_FULL` parsing, budget, check, render shape) and `tools/models_baseline.py` (order, done-marking per entry, reserve stop, gated vs failed), with a fake `snapshot_download`.
 3. **Ollama shim** `core/ollama-shim/` (Flask + httpx, like flask-api). It has to cover:

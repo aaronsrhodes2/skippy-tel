@@ -21,6 +21,7 @@
 # schtasks call below sets MSYS_NO_PATHCONV=1, and the printed commands carry it, so pasting them works too.
 #
 # Settings (environment, for tests): SCHTASKS (default schtasks.exe), BASH_EXE, BRIDGE_TASK_USER (DOMAIN\name).
+# STARTUP_RUN_NOW=1: --apply also starts the task once right away (the model download), besides its trigger.
 
 TASK=${STARTUP_TASK:-SkippyBridge}            # SkippyStarter when run through install_starter_startup.sh
 
@@ -226,6 +227,7 @@ main() {
   echo "Commands:"
   echo "  (write the task definition above, as UTF-16, to $(to_win "$xml_file"))"
   show "$schtasks" /Create /TN "$TASK" /XML "$(to_win "$xml_file")" /F
+  if [ "${STARTUP_RUN_NOW:-0}" = 1 ]; then show "$schtasks" /Run /TN "$TASK"; fi     # and start the first run straight away
   if [ "$apply" = 0 ]; then
     echo
     echo "DRY RUN: nothing was changed. Add --apply to register it."
@@ -242,6 +244,11 @@ main() {
   echo
   MSYS_NO_PATHCONV=1 "$schtasks" /Query /TN "$TASK" /FO LIST || true
   echo
+  if [ "${STARTUP_RUN_NOW:-0}" = 1 ]; then
+    MSYS_NO_PATHCONV=1 "$schtasks" /Run /TN "$TASK" || { echo "Registered, but Windows would not start it now." >&2; return 1; }
+    echo "Registered and started now; after this it runs ${STARTUP_AT:+every day at $STARTUP_AT}${STARTUP_AT:-at every sign-in}."
+    return 0
+  fi
   echo "Registered. It starts ${STARTUP_AT:+at $STARTUP_AT}${STARTUP_AT:-at your next sign-in}; to start it now: MSYS_NO_PATHCONV=1 schtasks.exe /Run /TN $TASK"
 }
 

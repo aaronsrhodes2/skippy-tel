@@ -154,3 +154,15 @@ def test_shquote_gives_a_word_bash_reads_back_unchanged(word):
 def test_shquote_leaves_plain_words_bare_so_the_printed_command_stays_readable():
     done = run_bash(["-c", f'source "{posix(SCRIPT)}"\nshquote /Create; echo; shquote SkippyBridge; echo; shquote "a b"'])
     assert done.stdout.splitlines() == ["/Create", "SkippyBridge", "'a b'"]
+
+
+def test_the_model_download_installer_also_starts_the_task_now_and_still_only_with_apply(stub):
+    """The Captain wanted the first download now, not at midnight: --apply registers AND runs it; the dry run says so."""
+    env = {k: v for k, v in stub.items() if k != "calls"}
+    done = run_bash([posix(SCRIPT.parent / "install_models_baseline_task.sh")], env=env)
+    assert done.returncode == 0, done.stderr
+    assert "/Create /TN SkippyModelsBaseline" in done.stdout and "/Run /TN SkippyModelsBaseline" in done.stdout
+    assert "DRY RUN: nothing was changed" in done.stdout
+    assert not stub["calls"].exists(), "the dry run called schtasks"
+    plain = installer(env=env)
+    assert "/Run /TN" not in plain.stdout.split("DRY RUN")[0], "the bridge task is not started by its installer"
