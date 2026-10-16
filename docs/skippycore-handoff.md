@@ -16,7 +16,7 @@ Branch: `claude/focused-sagan-12axe2` (feature branch; merging to `main` is the 
 
 The unit tests, the Ollama shim, the pull deployer, `core/compose.core.yml`, `core/smoke.py`, the simulator, `core.yml` CI and
 `core/README.md` (with the day-one runbook) are in. From the Strix Halo research (`/mnt/project-files/skippycore/proven-setups.md`
-in the project): every model launches with `-fa on --no-mmap`, `--parallel` is capped at 8, and the coder slot is Unsloth's
+in the project): every model launches with flash attention and no mmap (`-fa on --load-mode none`), `--parallel` is capped at 8, and the coder slot is Unsloth's
 post-fix `UD-Q4_K_XL`. Still open: step 1 (register the midnight job on skippy-pc), step 10, and the chat-model choice.
 `core/README.md` is the current description; the table below is the first session's record.
 

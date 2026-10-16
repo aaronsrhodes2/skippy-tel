@@ -113,7 +113,7 @@ def test_render_groups_and_names(tmp_path):
     assert config["groups"]["on-demand"]["swap"] is True and config["groups"]["on-demand"]["members"] == ["coder"]
     chat, coder = config["models"]["chat"], config["models"]["coder"]
     assert "ttl" not in chat and coder["ttl"] == m.IDLE_TTL_S
-    assert "-fa on --no-mmap" in chat["cmd"] and "-fa on --no-mmap" in coder["cmd"], "Strix Halo needs both, every slot"
+    assert "-fa on --load-mode none" in chat["cmd"] and "-fa on --load-mode none" in coder["cmd"], "Strix Halo needs both, every slot"
     assert "--parallel 4 " in chat["cmd"]
     assert "-ngl 0" in chat["cmd"] and "--device none" in chat["cmd"], "no GPU: keep a Vulkan build off every device"
     assert "--device" not in m.render(chosen, gpu_layers=999)[0]["models"]["chat"]["cmd"]

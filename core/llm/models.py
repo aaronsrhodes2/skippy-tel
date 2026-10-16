@@ -33,7 +33,9 @@ GB = 1024 ** 3
 OVERHEAD_GB = 4          # per loaded model: KV cache at the slot's ctx, compute buffers (estimate; the burn-in measures it)
 IDLE_TTL_S = 900         # an on-demand model unloads after 15 idle minutes (frees memory for image/music jobs)
 LLAMA_SERVER = "/app/llama-server"   # where the llama-swap image keeps it
-ALWAYS_ARGS = ["-fa", "on", "--no-mmap"]   # Strix Halo: both community guides run every model this way (crashes/slowdowns otherwise)
+# Strix Halo: both community guides run every model with flash attention and without mmap (crashes/slowdowns otherwise).
+# This llama.cpp build has no --no-mmap any more: "--load-mode none" is its replacement (mmap is the "auto" default).
+ALWAYS_ARGS = ["-fa", "on", "--load-mode", "none"]
 DEFAULT_PARALLEL = 4
 
 
