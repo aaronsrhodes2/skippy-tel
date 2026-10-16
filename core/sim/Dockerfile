@@ -6,6 +6,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
  && apt-get install -y --no-install-recommends docker.io docker-compose-v2 git python3 ca-certificates curl iptables tar \
  && rm -rf /var/lib/apt/lists/*
+# /var/lib/docker must not be overlay-on-overlay: run.sh mounts a volume there.
+VOLUME /var/lib/docker
 COPY entrypoint.sh scenario.sh /sim/
 RUN chmod +x /sim/*.sh
 ENTRYPOINT ["/sim/entrypoint.sh"]

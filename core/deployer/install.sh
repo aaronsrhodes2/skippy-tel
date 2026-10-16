@@ -21,7 +21,7 @@ if [[ ! -f /etc/skippy-core/core.env ]]; then
 REPO_DIR=$REPO_DIR
 GITHUB_REPO=aaronsrhodes2/skippy-tel
 GITHUB_TOKEN=
-REQUIRED_CHECK=core
+CI_WORKFLOW=core.yml
 CORE_FULL=
 MODELS_ROOT=/srv/models
 CORE_STATE=/var/lib/skippy-core

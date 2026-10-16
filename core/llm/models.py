@@ -146,7 +146,8 @@ def check(chosen: dict, root: Path, *, hash_files: bool = False) -> list[str]:
 def render(chosen: dict, gpu_layers: int, extra_args: str = "") -> tuple[dict, dict]:
     """llama-swap's config (JSON is valid YAML, so no YAML library is needed) and the shim's name table.
 
-    Resident slots sit in a persistent group that nothing unloads; on-demand slots share one swap group, so loading
+    GPU_LAYERS 0 (the simulator, CI) also passes --device none: a Vulkan build otherwise still offloads big-batch ops to
+    any device it sees, a software one included. Resident slots sit in a persistent group that nothing unloads; on-demand slots share one swap group, so loading
     one unloads the other (the 120B and the coder never sit in memory together) and they drop after IDLE_TTL_S."""
     models, resident, on_demand, names = {}, [], [], []
     for name, s in chosen.items():
@@ -154,7 +155,7 @@ def render(chosen: dict, gpu_layers: int, extra_args: str = "") -> tuple[dict, d
         cmd = [LLAMA_SERVER, "--host", "127.0.0.1", "--port", "${PORT}", "-m", f"/models/{first}",
                "--ctx-size", str(s["ctx"]), "-ngl", str(gpu_layers), "--alias", name, *ALWAYS_ARGS,
                "--parallel", str(s.get("parallel", DEFAULT_PARALLEL)), "--kv-unified", *s["args"],
-               *shlex.split(extra_args)]
+               *(["--device", "none"] if gpu_layers == 0 else []), *shlex.split(extra_args)]
         entry = {"cmd": " ".join(cmd), "aliases": list(s["aliases"])}
         if not s["resident"]:
             entry["ttl"] = IDLE_TTL_S
@@ -169,6 +170,8 @@ def render(chosen: dict, gpu_layers: int, extra_args: str = "") -> tuple[dict, d
     if on_demand:
         groups["on-demand"] = {"swap": True, "exclusive": False, "members": on_demand}
     config = {"healthCheckTimeout": 600, "logLevel": "info", "startPort": 10001, "models": models, "groups": groups}
+    if resident:                          # persistent only stops unloading; this loads chat at start, not on the first reply
+        config["hooks"] = {"on_startup": {"preload": resident}}
     return config, {"models": names}
 
 
@@ -177,7 +180,7 @@ def _download(url: str, dest: Path, size: int) -> None:
     part = dest.with_name(dest.name + ".part")
     have = part.stat().st_size if part.exists() else 0
     req = urllib.request.Request(url, headers={"Range": f"bytes={have}-"} if have else {})
-    token = os.environ.get("HF_TOKEN")
+    token = os.environ.get("HF_TOKEN") or os.environ.get("HF_ID")      # the vault calls it HF_ID; never printed
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(req, timeout=60) as r, open(part, "ab" if have and r.status == 206 else "wb") as out:
@@ -259,8 +262,10 @@ def main(argv: list[str] | None = None) -> int:
         config, shim = render(chosen, int(os.environ.get("GPU_LAYERS", "999")), os.environ.get("LLAMA_EXTRA_ARGS", ""))
         out = Path(a.out)
         out.mkdir(parents=True, exist_ok=True)
-        (out / "config.yaml").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-        (out / "shim.json").write_text(json.dumps(shim, indent=2) + "\n", encoding="utf-8")
+        for name, data in (("shim.json", shim), ("config.yaml", config)):   # llama-swap watches the file: never let it read half of one
+            tmp = out / f".{name}.tmp"
+            tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            os.replace(tmp, out / name)
         print(f"rendered {out}/config.yaml: " + ", ".join(f"{n}={s['variant']}" for n, s in chosen.items()))
     elif a.cmd == "check":
         print("ready: " + ", ".join(f"{n}={s['variant']}" for n, s in chosen.items()))

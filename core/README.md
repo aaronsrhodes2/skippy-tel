@@ -17,9 +17,9 @@ with tiny stand-in models on CPU. Onlining the real models later is a config lin
 | Ollama shim | `ollama-shim/` | Ollama's API on port 11434 in front of llama-swap, so flask-api, Mentat, the reporter, voice-gate and Bilby keep calling `OLLAMA_URL` unchanged. `keep_alive: 0` never unloads the resident chat slot. `/v1/...` passes straight through (OpenAI and Anthropic `/v1/messages`). |
 | Stack | `compose.core.yml`, `compose.gpu.yml` | `llm`, `ollama` (the shim) and `flask-api`. Paths come from the deployer's settings, not Windows drives. `compose.gpu.yml` hands `/dev/dri` to `llm` on the box only. |
 | Smoke test | `smoke.py` | Tags, chat (stream and not), JSON output, every slot including the general↔coder swap, Anthropic `/v1/messages` on coder, flask-api `/health` and a real `/intent/unmatched` reply. |
-| Pull deployer | `deployer/` | A systemd timer every 2 minutes. It fetches `main`, waits for the commit's green `core` check, deploys, runs the smoke test and rolls back to the last good commit if anything is red. Nothing listens for inbound connections. |
+| Pull deployer | `deployer/` | A systemd timer every 2 minutes. It fetches `main`, waits for the commit's `core.yml` run to go green, deploys, runs the smoke test and rolls back to the last good commit if anything is red. A red smoke test marks the commit bad; a failed build or pull is retried. Nothing listens for inbound connections. |
 | Simulator | `sim/` | Ubuntu 26.04 with its own Docker inside. It deploys the baseline, rolls back a deliberately broken commit, and refuses a `CORE_FULL` whose files are missing, checking the stack stays healthy throughout. |
-| CI | `.github/workflows/core.yml` | Runs on every push: the unit tests, the simulator when `core/`, `services/flask-api/` or the workflow changed, and the `core` check the deployer requires. |
+| CI | `.github/workflows/core.yml` | Runs on every push: the unit tests, and the simulator scenario on GitHub's `ubuntu-26.04` runner when `core/`, `services/flask-api/` or the workflow changed. The deployer requires its run to be green. |
 
 ## Run the simulator
 
@@ -61,9 +61,14 @@ Inside the return window, do the burn-in from the plan (section 3) before wiping
 4. **Docker** (`docker.io docker-compose-v2`), **git**, **python3**, **Tailscale** (`tailscale up`).
 5. **Models:** copy `D:\models` to `/srv/models` (same layout: `huggingface/<Org>__<Repo>/...`), then
    `sudo MODELS_ROOT=/srv/models python3 core/llm/models.py check --hash --full all`.
-6. **Deployer:** `sudo bash core/deployer/install.sh` (dry run), then `--apply`. Fill in `GITHUB_TOKEN` in
-   `/etc/skippy-core/core.env` (a fine-grained token with read access to this repo's contents and checks) and copy the
-   vault to `/etc/skippy-core/vault.env` (0600). The first tick deploys `main` with stand-ins.
+   Anything still missing: `models.py fetch`. Gated repos need the Hugging Face token. It lives in the vault `.env`
+   (the Captain's Google Drive vault folder) as `HF_ID`. Export it for that one command
+   (`HF_ID=... python3 core/llm/models.py fetch ...`), never into a committed file. The midnight job on skippy-pc
+   reads `HF_ID` from the vault by itself. The stand-ins and the three full models are not gated, so CI needs no token.
+6. **Deployer:** `sudo bash core/deployer/install.sh` (dry run), then `--apply`. In `/etc/skippy-core/core.env`, set
+   `GITHUB_TOKEN` to a **classic** token with **no scopes**: the repo is public, so the token only lifts the API rate
+   limit from 60 to 5,000 an hour (fine-grained tokens can't read check results). Copy the vault to
+   `/etc/skippy-core/vault.env` (0600). The first tick deploys `main` with stand-ins.
 7. Online the slots one at a time (`CORE_FULL=chat`, then `chat,general`, then `all`), checking
    `python3 core/deployer/deployer.py status` after each.
 8. Record the baseline numbers (tokens/s per model, load times, watts, temperatures) for the snapshot note.

@@ -53,7 +53,7 @@ git clone -q "$WORK/origin.git" "$REPO"
 install -m 0600 /dev/null "$WORK/vault.env"
 cat > "$CORE_ENV" <<CONF
 REPO_DIR=$REPO
-REQUIRED_CHECK=
+CI_WORKFLOW=
 CORE_GPU=0
 CORE_FULL=
 MODELS_ROOT=$MODELS_ROOT
@@ -64,6 +64,9 @@ SMOKE_WAIT=900
 CONF
 mkdir -p "$WORK/music"
 python3 "$SRC/core/llm/models.py" check --root "$MODELS_ROOT" --full ""
+say "devices llama.cpp can see (expect none here: a software Vulkan device would mean slow or crashing CPU runs)"
+image="$(sed -n 's/^ *image: *\(ghcr.io\/mostlygeek\/llama-swap[^ ]*\).*/\1/p' "$SRC/core/compose.core.yml" | head -1)"
+docker run --rm --entrypoint /app/llama-server "$image" --list-devices 2>&1 | tail -20 || true
 
 say "1. deploy the baseline"
 deploy; expect ok; [[ "$(status state)" == ok ]] || dump

@@ -67,7 +67,7 @@ def box(tmp_path):
 
     first = commit()
     git(tmp_path, "clone", "--quiet", str(origin), str(clone))
-    settings = {**dep.DEFAULTS, "REPO_DIR": str(clone), "CORE_STATE": str(tmp_path / "state"), "REQUIRED_CHECK": "core"}
+    settings = {**dep.DEFAULTS, "REPO_DIR": str(clone), "CORE_STATE": str(tmp_path / "state"), "CI_WORKFLOW": "core.yml"}
     return Fake(settings), commit, first
 
 
@@ -107,11 +107,17 @@ def test_a_red_smoke_rolls_back_and_is_never_retried(box):
     assert d.run()["state"] == "ok" and d.running == (fixed, "")
 
 
-def test_a_failed_build_rolls_back_too(box):
+def test_a_failed_build_rolls_back_but_is_retried(box):
+    """PyPI or GHCR being down is not a verdict on the commit: never mark it bad for that."""
     d, commit, first = box
     d.run()
-    commit(compose=False)
-    assert d.run()["state"] == "rolled-back" and d.running == (first, "")
+    flaky = commit(compose=False)
+    row = d.run()
+    assert row["state"] == "rolled-back" and row["will_retry"] is True and d.running == (first, "")
+    assert f"{flaky}|" not in d.state()["bad"]
+    (d.repo / "fake.json").write_text("{}")             # the network is back (the fake reads the checkout)
+    d._fake = lambda: {}
+    assert d.run()["state"] == "ok" and d.running == (flaky, "")
 
 
 def test_a_broken_manifest_is_bad_but_missing_models_are_only_refused(box):
@@ -144,11 +150,11 @@ def test_nothing_to_roll_back_to(box):
 
 def test_settings_file_then_environment(tmp_path, monkeypatch):
     f = tmp_path / "core.env"
-    f.write_text("# c\nCORE_FULL=chat\nGITHUB_TOKEN='t0k'\nREQUIRED_CHECK=\n")
+    f.write_text("# c\nCORE_FULL=chat\nGITHUB_TOKEN='t0k'\nCI_WORKFLOW=\n")
     for k in dep.DEFAULTS:
         monkeypatch.delenv(k, raising=False)
     s = dep.load_settings(str(f))
-    assert s["CORE_FULL"] == "chat" and s["GITHUB_TOKEN"] == "t0k" and s["REQUIRED_CHECK"] == "" and s["BRANCH"] == "main"
+    assert s["CORE_FULL"] == "chat" and s["GITHUB_TOKEN"] == "t0k" and s["CI_WORKFLOW"] == "" and s["BRANCH"] == "main"
     monkeypatch.setenv("CORE_FULL", "all")
     assert dep.load_settings(str(f))["CORE_FULL"] == "all"
     assert dep.norm_full(" coder,chat,") == "chat,coder" and dep.norm_full("chat,all") == "all"
@@ -177,12 +183,15 @@ def test_ci_state_reads_the_newest_check_run(box, monkeypatch):
         return R(answer)
 
     monkeypatch.setattr(dep.urllib.request, "urlopen", urlopen)
-    answer = {"check_runs": []}
-    assert real.ci_state("abc")[0] == "pending" and "check_name=core" in payloads[-1]
-    answer = {"check_runs": [{"status": "completed", "conclusion": "failure", "started_at": "1"},
-                             {"status": "completed", "conclusion": "success", "started_at": "2"}]}
-    assert real.ci_state("abc")[0] == "success"
-    answer = {"check_runs": [{"status": "in_progress", "started_at": "3"}]}
+    answer = {"workflow_runs": []}
     assert real.ci_state("abc")[0] == "pending"
-    real.s = {**real.s, "REQUIRED_CHECK": ""}
+    assert "/actions/workflows/core.yml/runs?head_sha=abc&event=push" in payloads[-1]
+    answer = {"workflow_runs": [{"status": "completed", "conclusion": "failure", "run_attempt": 1, "created_at": "1"},
+                                {"status": "completed", "conclusion": "success", "run_attempt": 2, "created_at": "1"}]}
+    assert real.ci_state("abc")[0] == "success", "a re-run that went green counts"
+    answer = {"workflow_runs": [{"status": "completed", "conclusion": "failure", "run_attempt": 1, "created_at": "2"}]}
+    assert real.ci_state("abc")[0] == "failure"
+    answer = {"workflow_runs": [{"status": "in_progress", "run_attempt": 1, "created_at": "3"}]}
+    assert real.ci_state("abc")[0] == "pending"
+    real.s = {**real.s, "CI_WORKFLOW": ""}
     assert real.ci_state("abc") == ("success", "no CI gate")

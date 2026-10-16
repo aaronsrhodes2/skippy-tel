@@ -16,7 +16,8 @@ Rules:
 - A gated repo (needs "accept the licence" on the Hub) is reported, not fatal: accept it on huggingface.co with the
   account whose HF_TOKEN is in the vault, and the next run takes it.
 - It stops before free space on MODELS_ROOT drops under reserve_free_gb.
-HF_TOKEN comes from the environment, else from the vault .env (VAULT_ENV, default G:/My Drive/vault/.env); it is never printed.
+The Hugging Face token is HF_TOKEN or HF_ID (the vault's name for it), from the environment, else from the vault .env
+(VAULT_ENV, default G:/My Drive/vault/.env); it is never printed. Only gated repos need it.
 """
 from __future__ import annotations
 
@@ -91,17 +92,24 @@ def mark_done(e: dict, root: Path) -> None:
     (folder / "SOURCE.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
 
 
+TOKEN_NAMES = ("HF_TOKEN", "HF_ID")      # the vault calls it HF_ID; huggingface_hub's own name is HF_TOKEN
+
+
 def hf_token() -> str | None:
-    if os.environ.get("HF_TOKEN"):
-        return os.environ["HF_TOKEN"]
+    for name in TOKEN_NAMES:
+        if os.environ.get(name):
+            return os.environ[name]
     vault = Path(os.environ.get("VAULT_ENV", "G:/My Drive/vault/.env"))
     try:
-        for line in vault.read_text(encoding="utf-8").splitlines():
-            if line.strip().startswith("HF_TOKEN="):
-                return line.split("=", 1)[1].strip().strip('"').strip("'") or None
+        lines = vault.read_text(encoding="utf-8").splitlines()
     except OSError:
-        pass
-    return None
+        return None
+    found = {}
+    for line in lines:
+        key, _, value = line.strip().partition("=")
+        if key in TOKEN_NAMES:
+            found[key] = value.strip().strip('"').strip("'")
+    return next((found[n] for n in TOKEN_NAMES if found.get(n)), None)
 
 
 def ordered(data: dict, group: str | None) -> list[dict]:
@@ -187,7 +195,7 @@ def run(data: dict, root: Path, group: str | None, log=print) -> dict:
         except Exception as exc:  # noqa: BLE001 — one model's trouble never stops the others
             if _gated(exc):
                 summary["gated"].append(name)
-                log(f"  gated: accept the licence at https://huggingface.co/{e.get('repo')} (and put HF_TOKEN in the vault)")
+                log(f"  gated: accept the licence at https://huggingface.co/{e.get('repo')} (and put HF_ID in the vault)")
             else:
                 summary["failed"].append({"name": name, "error": f"{type(exc).__name__}: {str(exc)[:300]}"})
                 log(f"  FAILED: {type(exc).__name__}: {str(exc)[:300]}")

@@ -100,8 +100,14 @@ def test_hf_token_from_the_vault_never_needs_the_environment(monkeypatch, tmp_pa
     vault = tmp_path / ".env"
     vault.write_text("OTHER=1\nHF_TOKEN='hf_abc'\n")
     monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HF_ID", raising=False)
     monkeypatch.setenv("VAULT_ENV", str(vault))
     assert mb.hf_token() == "hf_abc"
+    vault.write_text("HF_ID=hf_vault_id\n")                 # the Captain's vault names it HF_ID
+    assert mb.hf_token() == "hf_vault_id"
+    monkeypatch.setenv("HF_ID", "hf_env_id")
+    assert mb.hf_token() == "hf_env_id"
+    monkeypatch.delenv("HF_ID")
     monkeypatch.setenv("HF_TOKEN", "hf_env")
     assert mb.hf_token() == "hf_env"
     monkeypatch.delenv("HF_TOKEN")

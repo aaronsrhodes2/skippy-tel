@@ -1,6 +1,6 @@
 # SkippyCore's CI: the unit tests, then the simulator (core/sim: Ubuntu 26.04 with its own Docker, the real deployer,
 # compose file and smoke test, stand-in models on CPU). The box's pull deployer deploys a main commit only when this
-# workflow's `core` check is green on it (core/deployer/deployer.py, REQUIRED_CHECK=core), so it runs on EVERY push:
+# workflow's `core` check is green on it (core/deployer/deployer.py, CI_WORKFLOW=core.yml), so it runs on EVERY push:
 # a push that touches nothing SkippyCore runs (core/, services/flask-api/, this file) skips the simulator and `core`
 # still goes green.
 name: core
@@ -54,9 +54,11 @@ jobs:
       - run: python -m pytest core/tests tools/tests/test_models_baseline.py -q
 
   sim:
+    # Ubuntu 26.04 is the box's OS, and GitHub's ubuntu-26.04 runners run it natively: the scenario runs straight on the
+    # runner's Docker (core/sim/run.sh wraps the same script in a 26.04 container for any other machine).
     needs: [changes, unit]
     if: needs.changes.outputs.sim == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
@@ -66,8 +68,10 @@ jobs:
           key: core-standins-${{ hashFiles('core/models.json') }}
       - name: Fetch the stand-in models (prints each sha256 to pin in core/models.json)
         run: python3 core/llm/models.py fetch --root ~/core-models --full ""
-      - name: Run the simulator
-        run: MODELS_ROOT=~/core-models bash core/sim/run.sh
+      - name: Run the simulator scenario
+        run: |
+          docker version --format 'docker {{.Server.Version}}' && docker compose version
+          sudo env SRC="$PWD" MODELS_ROOT="$HOME/core-models" SIM_WORK=/tmp/skippycore-sim bash core/sim/scenario.sh
 
   core:
     # The check the box's deployer requires. Green when the tests passed and the simulator passed or had nothing to do.

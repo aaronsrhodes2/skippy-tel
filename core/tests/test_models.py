@@ -115,7 +115,9 @@ def test_render_groups_and_names(tmp_path):
     assert "ttl" not in chat and coder["ttl"] == m.IDLE_TTL_S
     assert "-fa on --no-mmap" in chat["cmd"] and "-fa on --no-mmap" in coder["cmd"], "Strix Halo needs both, every slot"
     assert "--parallel 4 " in chat["cmd"]
-    assert "-ngl 0" in chat["cmd"] and "--api-key k" in chat["cmd"] and "--ctx-size 2048" in chat["cmd"]
+    assert "-ngl 0" in chat["cmd"] and "--device none" in chat["cmd"], "no GPU: keep a Vulkan build off every device"
+    assert "--device" not in m.render(chosen, gpu_layers=999)[0]["models"]["chat"]["cmd"]
+    assert config["hooks"] == {"on_startup": {"preload": ["chat"]}}, "the resident slot loads at start, not on the first reply" and "--api-key k" in chat["cmd"] and "--ctx-size 2048" in chat["cmd"]
     assert "/models/huggingface/Org__Code-Big/p/a-00001-of-00002.gguf" in coder["cmd"], "a split GGUF starts at part 1"
     assert chat["aliases"] == ["qwen3:8b"]
     names = {n["name"]: n for n in shim["models"]}
