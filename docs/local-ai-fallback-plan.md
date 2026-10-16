@@ -172,7 +172,9 @@ The hard part is the voice, not the plumbing:
   1. *Source and clean, locally (free).* Collect the reference clips; isolate speech from music/effects and denoise with local tools (options such as
      Demucs, DeepFilterNet, Resemble Enhance, plus the RNNoise step `voice-gate` already has), so credits are not spent on cleaning. Cut into 3-15 s
      segments, transcribe with local Whisper, spot-check the text.
-  2. *Teacher generation (spends credits, once, planned).* About 8,500 credits remain. If 1 credit is 1 character (my assumption; some models may bill half)
+  2. *Teacher generation (spends credits, once, planned).* About 8,500 credits remain; the Captain's observed burn is ~1,700 in two weeks of
+     app-integration testing (~120 a day), so the balance is a ~10-week runway, not days. Budget ~3,000-4,000 for the capture. Tests should use a
+     stub or local engine so they stop spending credits, and `VOICE_DAILY_CHARS` (4,000 today) can drop to ~1,000 as a guard. If 1 credit is 1 character (my assumption; some models may bill half)
      that is roughly 9-19 minutes of speech at ~15 characters/s. Keep ~1,000 in reserve for the A/B baseline. Lines must come from real Skippy
      chat/persona text and cover **every tag** (`[sighs]`, `[chuckles]`, `[laughs]`, `[sarcastic]`, `[whispers]`, `[excited]`), ALL CAPS, "...",
      short and long lines, and the proper nouns and physics terms Skippy actually says. Save each as audio + a manifest row
