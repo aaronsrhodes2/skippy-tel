@@ -1,0 +1,62 @@
+{
+  "_doc": "SkippyCore's model slots. Each slot has a small STAND-IN (the simulator and CI run it) and the FULL model the Bosgame runs. Same slot, same aliases, same API: switching is CORE_FULL=<slots> in /etc/skippy-core/core.env, never a code change. Paths are relative to MODELS_ROOT and follow tools/models_archive.py's layout (huggingface/<Org>__<Repo>/<file>), so the D:\\models archive copies over as-is. sha256 null = not pinned yet: core/llm/models.py fetch prints the hash to pin. Sizes are bytes as Hugging Face lists them (2026-10-16). core/README.md.",
+  "memory_budget_gb": 110,
+  "slots": {
+    "chat": {
+      "role": "Skippy's default tier, summaries, Mentat's phrasings: always loaded",
+      "resident": true,
+      "aliases": ["qwen3:8b", "qwen2.5:7b", "skippy-chat"],
+      "standin": {
+        "repo": "Qwen/Qwen3-0.6B-GGUF",
+        "files": [{"path": "Qwen3-0.6B-Q8_0.gguf", "size": 639446688, "sha256": null}],
+        "ctx": 4096,
+        "args": ["--jinja"]
+      },
+      "full": {
+        "repo": "Qwen/Qwen3-30B-A3B-GGUF",
+        "files": [{"path": "Qwen3-30B-A3B-Q4_K_M.gguf", "size": 18556685824, "sha256": null}],
+        "ctx": 32768,
+        "args": ["--jinja"]
+      }
+    },
+    "general": {
+      "role": "the big general tier: tools, long answers. Loaded on demand; swaps with coder",
+      "resident": false,
+      "aliases": ["gpt-oss:120b", "skippy-general"],
+      "standin": {
+        "repo": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+        "files": [{"path": "qwen2.5-0.5b-instruct-q4_k_m.gguf", "size": 491400032, "sha256": null}],
+        "ctx": 4096,
+        "args": ["--jinja"]
+      },
+      "full": {
+        "repo": "ggml-org/gpt-oss-120b-GGUF",
+        "files": [{"path": "gpt-oss-120b-MXFP4.gguf", "size": 63387346208, "sha256": null}],
+        "ctx": 32768,
+        "args": ["--jinja"]
+      }
+    },
+    "coder": {
+      "role": "the coding fallback (Claude Code via ANTHROPIC_BASE_URL). Loaded on demand; swaps with general",
+      "resident": false,
+      "aliases": ["qwen3-coder-next", "skippy-coder"],
+      "standin": {
+        "repo": "Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF",
+        "files": [{"path": "qwen2.5-coder-0.5b-instruct-q4_k_m.gguf", "size": 491400064, "sha256": null}],
+        "ctx": 8192,
+        "args": ["--jinja"]
+      },
+      "full": {
+        "repo": "Qwen/Qwen3-Coder-Next-GGUF",
+        "files": [
+          {"path": "Qwen3-Coder-Next-Q4_K_M/Qwen3-Coder-Next-Q4_K_M-00001-of-00004.gguf", "size": 15524827040, "sha256": null},
+          {"path": "Qwen3-Coder-Next-Q4_K_M/Qwen3-Coder-Next-Q4_K_M-00002-of-00004.gguf", "size": 14872168352, "sha256": null},
+          {"path": "Qwen3-Coder-Next-Q4_K_M/Qwen3-Coder-Next-Q4_K_M-00003-of-00004.gguf", "size": 14503294496, "sha256": null},
+          {"path": "Qwen3-Coder-Next-Q4_K_M/Qwen3-Coder-Next-Q4_K_M-00004-of-00004.gguf", "size": 3510702144, "sha256": null}
+        ],
+        "ctx": 65536,
+        "args": ["--jinja"]
+      }
+    }
+  }
+}

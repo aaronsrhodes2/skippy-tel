@@ -1,0 +1,45 @@
+{
+  "_doc": "The baseline archive: every model SkippyCore, Skippy's voice and the fallback plan may want, downloaded once into MODELS_ROOT (D:\\models) by tools/models_baseline.py (the midnight task: tools/install_models_baseline_task.sh). Each entry is a Hugging Face repo (NVIDIA's open speech models live there too) with optional include/ignore globs, or a direct url. Order matters: 'core' downloads first, 'extended' fills the disk after it, and the run stops before free space drops under the reserve. A repo that finished is never re-downloaded (its SOURCE.json says complete), so the archive stays the baseline even when the repo changes upstream. approx_gb is what the globs select, rounded (2026-10-16 listings). Licences travel in each SOURCE.json; several are non-commercial: personal use only.",
+  "reserve_free_gb": 200,
+  "models": [
+    {"group": "core", "kind": "llm", "repo": "Qwen/Qwen3-30B-A3B-GGUF", "include": ["Qwen3-30B-A3B-Q4_K_M.gguf", "LICENSE", "README.md", "params"], "approx_gb": 19, "why": "SkippyCore chat slot (full)"},
+    {"group": "core", "kind": "llm", "repo": "ggml-org/gpt-oss-120b-GGUF", "include": ["gpt-oss-120b-MXFP4.gguf", "README.md"], "approx_gb": 64, "why": "SkippyCore general slot (full), US-origin"},
+    {"group": "core", "kind": "llm", "repo": "Qwen/Qwen3-Coder-Next-GGUF", "include": ["Qwen3-Coder-Next-Q4_K_M/*", "README.md"], "approx_gb": 49, "why": "SkippyCore coder slot (full): the coding fallback"},
+    {"group": "core", "kind": "llm", "repo": "Qwen/Qwen3-0.6B-GGUF", "include": ["Qwen3-0.6B-Q8_0.gguf", "LICENSE", "README.md"], "approx_gb": 1, "why": "stand-in for chat (simulator, CI)"},
+    {"group": "core", "kind": "llm", "repo": "Qwen/Qwen2.5-0.5B-Instruct-GGUF", "include": ["qwen2.5-0.5b-instruct-q4_k_m.gguf", "LICENSE", "README.md"], "approx_gb": 1, "why": "stand-in for general"},
+    {"group": "core", "kind": "llm", "repo": "Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF", "include": ["qwen2.5-coder-0.5b-instruct-q4_k_m.gguf", "LICENSE", "README.md"], "approx_gb": 1, "why": "stand-in for coder"},
+    {"group": "core", "kind": "llm", "repo": "Qwen/Qwen3-8B-GGUF", "include": ["Qwen3-8B-Q4_K_M.gguf", "Qwen3-8B-Q8_0.gguf", "LICENSE", "README.md", "params"], "approx_gb": 14, "why": "today's default tier (qwen3:8b) as a plain GGUF for llama.cpp"},
+    {"group": "core", "kind": "llm", "repo": "ggml-org/gpt-oss-20b-GGUF", "include": ["gpt-oss-20b-MXFP4.gguf", "README.md"], "approx_gb": 12, "why": "mid-size general model; fits the 4070 too"},
+
+    {"group": "core", "kind": "stt", "repo": "Systran/faster-whisper-medium", "approx_gb": 2, "why": "today's Whisper (skippytel-whisper)"},
+    {"group": "core", "kind": "stt", "repo": "Systran/faster-whisper-large-v3", "approx_gb": 3, "why": "best faster-whisper"},
+    {"group": "core", "kind": "stt", "repo": "deepdml/faster-whisper-large-v3-turbo-ct2", "approx_gb": 2, "why": "fast large Whisper"},
+    {"group": "core", "kind": "stt", "repo": "ggerganov/whisper.cpp", "include": ["ggml-large-v3-turbo.bin", "ggml-large-v3-turbo-q8_0.bin", "ggml-large-v3.bin", "ggml-medium.bin", "ggml-small.en.bin", "ggml-base.en.bin", "ggml-tiny.en.bin", "README.md"], "approx_gb": 8, "why": "whisper.cpp runs on Vulkan: speech to text on the Halo without ROCm"},
+    {"group": "core", "kind": "stt", "repo": "nvidia/parakeet-tdt-0.6b-v3", "approx_gb": 3, "why": "NVIDIA's fast multilingual ASR (CC-BY-4.0)"},
+    {"group": "core", "kind": "stt", "repo": "nvidia/canary-1b-v2", "approx_gb": 7, "why": "NVIDIA's ASR + translation"},
+
+    {"group": "core", "kind": "tts", "repo": "ResembleAI/chatterbox", "approx_gb": 4, "why": "own-voice candidate (MIT), emotion control"},
+    {"group": "core", "kind": "tts", "repo": "canopylabs/orpheus-3b-0.1-ft", "ignore": ["optimizer.bin", "pytorch_model_fsdp.bin", "rng_state_*", "scheduler.pt", "trainer_state.json", "training_args.bin"], "approx_gb": 15, "why": "own-voice candidate with emotion tags"},
+    {"group": "core", "kind": "tts", "repo": "Qwen/Qwen3-TTS-12Hz-1.7B-Base", "approx_gb": 5, "why": "own-voice candidate (fine-tune base)"},
+    {"group": "core", "kind": "tts", "repo": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", "approx_gb": 5, "why": "Qwen3-TTS with voice cloning"},
+    {"group": "core", "kind": "tts", "repo": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign", "approx_gb": 5, "why": "designed (original) voices for friends, Nagatha, Bilby"},
+    {"group": "core", "kind": "tts", "repo": "Qwen/Qwen3-TTS-Tokenizer-12Hz", "approx_gb": 1, "why": "Qwen3-TTS's audio tokenizer"},
+    {"group": "core", "kind": "tts", "repo": "hexgrad/Kokoro-82M", "approx_gb": 1, "why": "services/tts today (no cloning)"},
+    {"group": "core", "kind": "tts", "repo": "SWivid/F5-TTS", "approx_gb": 6, "why": "zero-shot cloning baseline (non-commercial)"},
+    {"group": "core", "kind": "tts", "repo": "coqui/XTTS-v2", "approx_gb": 2, "why": "zero-shot cloning baseline (non-commercial)"},
+    {"group": "core", "kind": "tts", "repo": "rhasspy/piper-voices", "include": ["en/en_US/**", "en/en_GB/**", "*.json", "*.md"], "approx_gb": 5, "why": "tiny CPU voices: the last-resort fallback"},
+
+    {"group": "core", "kind": "audio", "url": "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx", "dest": "tools-audio/silero-vad/silero_vad.onnx", "approx_gb": 0, "why": "voice activity detection (the satellite listener)"},
+    {"group": "core", "kind": "audio", "url": "https://github.com/GregorR/rnnoise-models/raw/master/beguiling-drafter-2018-08-30/bd.rnnn", "dest": "tools-audio/rnnoise/bd.rnnn", "approx_gb": 0, "why": "voice-gate's RNNoise model"},
+    {"group": "core", "kind": "audio", "url": "https://github.com/Rikorose/DeepFilterNet/raw/main/models/DeepFilterNet3.zip", "dest": "tools-audio/deepfilternet/DeepFilterNet3.zip", "approx_gb": 0, "why": "denoise the voice training audio"},
+
+    {"group": "core", "kind": "embed", "repo": "BAAI/bge-m3", "ignore": ["onnx/*", "imgs/*"], "approx_gb": 5, "why": "embeddings for memory/search"},
+
+    {"group": "extended", "kind": "vision", "repo": "Qwen/Qwen3-VL-8B-Instruct-GGUF", "include": ["Qwen3VL-8B-Instruct-Q8_0.gguf", "mmproj-Qwen3VL-8B-Instruct-F16.gguf", "README.md"], "approx_gb": 10, "why": "sees images (screenshots, the glasses' camera)"},
+    {"group": "extended", "kind": "image", "repo": "stabilityai/stable-diffusion-xl-base-1.0", "include": ["sd_xl_base_1.0.safetensors", "LICENSE.md", "README.md"], "approx_gb": 7, "why": "the image tier's model (ComfyUI single file)"},
+    {"group": "extended", "kind": "image", "repo": "black-forest-labs/FLUX.1-schnell", "include": ["flux1-schnell.safetensors", "ae.safetensors", "text_encoder/**", "text_encoder_2/**", "tokenizer/**", "tokenizer_2/**", "README.md", "model_index.json"], "approx_gb": 34, "why": "better images, Apache 2.0"},
+    {"group": "extended", "kind": "stt", "repo": "openai/whisper-large-v3-turbo", "ignore": ["*.bin", "*.msgpack", "*.h5"], "approx_gb": 2, "why": "original weights (to re-convert or fine-tune)"},
+    {"group": "extended", "kind": "llm", "repo": "Qwen/Qwen3-Coder-Next-GGUF", "include": ["Qwen3-Coder-Next-Q8_0/*"], "approx_gb": 85, "why": "higher-quality coder quant (if Q4 disappoints)"},
+    {"group": "extended", "kind": "llm", "repo": "Qwen/Qwen3-30B-A3B-GGUF", "include": ["Qwen3-30B-A3B-Q8_0.gguf"], "approx_gb": 33, "why": "higher-quality chat quant"}
+  ]
+}

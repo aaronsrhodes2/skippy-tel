@@ -74,6 +74,34 @@ write_utf16() {                 # stdin -> <file> as UTF-16 with a BOM, which is
   "$py" -c 'import sys; open(sys.argv[1], "w", encoding="utf-16").write(sys.stdin.read())' "$(to_win "$1")"
 }
 
+# The trigger: at logon (the default), or every day at STARTUP_AT (HH:MM, local time) when set: the midnight model download.
+trigger_xml() {
+  local user_xml=$1
+  if [ -n "${STARTUP_AT:-}" ]; then
+    printf '%s\n' "    <CalendarTrigger>" \
+      "      <StartBoundary>2026-01-01T${STARTUP_AT}:00</StartBoundary>" \
+      "      <Enabled>true</Enabled>" \
+      "      <ScheduleByDay>" \
+      "        <DaysInterval>1</DaysInterval>" \
+      "      </ScheduleByDay>" \
+      "    </CalendarTrigger>"
+  else
+    printf '%s\n' "    <LogonTrigger>" \
+      "      <Enabled>true</Enabled>" \
+      "      $user_xml" \
+      "      <Delay>PT30S</Delay>" \
+      "    </LogonTrigger>"
+  fi
+}
+
+restart_xml() {                 # restart on failure (supervisors), unless STARTUP_RESTART=0 (a nightly job just tries again tomorrow)
+  if [ "${STARTUP_RESTART:-1}" = 0 ]; then return 0; fi
+  printf '%s\n' "    <RestartOnFailure>" \
+    "      <Interval>PT1M</Interval>" \
+    "      <Count>999</Count>" \
+    "    </RestartOnFailure>"
+}
+
 # task_xml <bash exe> <supervisor script, forward slashes> <working directory> <user or empty>
 task_xml() {
   local bash_exe=$1 script=$2 workdir=$3 user=$4 user_xml=""
@@ -87,11 +115,7 @@ task_xml() {
     <URI>\\$TASK</URI>
   </RegistrationInfo>
   <Triggers>
-    <LogonTrigger>
-      <Enabled>true</Enabled>
-      $user_xml
-      <Delay>PT30S</Delay>
-    </LogonTrigger>
+$(trigger_xml "$user_xml")
   </Triggers>
   <Principals>
     <Principal id="Author">
@@ -115,13 +139,10 @@ task_xml() {
     <Enabled>true</Enabled>
     <Hidden>false</Hidden>
     <RunOnlyIfIdle>false</RunOnlyIfIdle>
-    <WakeToRun>false</WakeToRun>
+    <WakeToRun>$(if [ "${STARTUP_WAKE:-0}" = 1 ]; then echo true; else echo false; fi)</WakeToRun>
     <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
     <Priority>5</Priority>
-    <RestartOnFailure>
-      <Interval>PT1M</Interval>
-      <Count>999</Count>
-    </RestartOnFailure>
+$(restart_xml)
   </Settings>
   <Actions Context="Author">
     <Exec>
@@ -186,10 +207,18 @@ main() {
   workdir=$(to_win "$root")
   if [ -z "$user" ] && [ -n "${USERNAME:-}" ]; then user="${USERDOMAIN:+$USERDOMAIN\\}$USERNAME"; fi
 
-  echo "Scheduled task $TASK: at logon of ${user:-the user who runs this}, run"
+  if [ -n "${STARTUP_AT:-}" ]; then
+    echo "Scheduled task $TASK: every day at $STARTUP_AT, as ${user:-the user who runs this}, run"
+  else
+    echo "Scheduled task $TASK: at logon of ${user:-the user who runs this}, run"
+  fi
   echo "  $bash_exe -l \"$script\""
   local note="${STARTUP_NOTE:-the supervisor restarts the bridge itself, and logs to $workdir\\state\\bridge-supervisor.log}"
-  echo "(no time limit; restarts on failure every minute; one copy at a time; not elevated; $note)"
+  if [ "${STARTUP_RESTART:-1}" = 0 ]; then
+    echo "(no time limit; one copy at a time; not elevated; $note)"
+  else
+    echo "(no time limit; restarts on failure every minute; one copy at a time; not elevated; $note)"
+  fi
   echo
   echo "The task definition:"
   task_xml "$bash_exe" "$script" "$workdir" "$user" | sed 's/^/    /'
@@ -213,7 +242,7 @@ main() {
   echo
   MSYS_NO_PATHCONV=1 "$schtasks" /Query /TN "$TASK" /FO LIST || true
   echo
-  echo "Registered. It starts at your next sign-in; to start it now: MSYS_NO_PATHCONV=1 schtasks.exe /Run /TN $TASK"
+  echo "Registered. It starts ${STARTUP_AT:+at $STARTUP_AT}${STARTUP_AT:-at your next sign-in}; to start it now: MSYS_NO_PATHCONV=1 schtasks.exe /Run /TN $TASK"
 }
 
 # Run only when executed; sourcing (the tests) just defines the functions.
