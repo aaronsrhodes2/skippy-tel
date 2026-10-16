@@ -1,0 +1,9 @@
+# The box only: hand the iGPU to llama.cpp (Vulkan/RADV). The deployer adds this file unless CORE_GPU=0
+# (the simulator and CI, which run the same image on CPU with GPU_LAYERS=0).
+services:
+  llm:
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:                      # numeric: the image has no render group. The deployer reads them off /dev/dri.
+      - "${VIDEO_GID:-44}"
+      - "${RENDER_GID:-992}"
