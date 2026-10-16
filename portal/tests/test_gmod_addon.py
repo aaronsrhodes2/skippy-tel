@@ -241,3 +241,19 @@ def test_a_version_that_is_not_a_commit_or_branch_name_is_refused_and_the_addon_
     out = refresh(tmp_path, origin.as_uri(), GMOD_ADDON_REF="--upload-pack=touch /tmp/x")
     assert "is not a commit id or a branch name" in out and "keeping the addon as it is" in out
     assert (installed(tmp_path) / "lua" / "autorun" / "mentat_stage.lua").exists()
+
+
+# ── the admin-only gate (docs/games/proposals/gmod-admin-only.md) ─────────────
+
+@needs_git
+def test_the_admin_gate_lets_only_the_captain_in_and_is_written_once(tmp_path, origin):
+    refresh(tmp_path, origin.as_uri())
+    gate = tmp_path / "data" / "garrysmod" / "addons" / "skippy-admin-only" / "lua" / "autorun" / "server" / "sv_admin_only.lua"
+    text = gate.read_text(encoding="utf-8")
+    assert '["76561197989151002"] = true' in text and text.count("= true") == 1      # the Captain is the only admin
+    assert 'hook.Add("CheckPassword"' in text and "return false" in text
+    assert "lua/autorun/server" in gate.as_posix()
+    mtime = gate.stat().st_mtime_ns
+    refresh(tmp_path, origin.as_uri())                                             # the next boot: same content, same file times
+    assert gate.stat().st_mtime_ns == mtime
+    assert not installed(tmp_path).joinpath("lua", "autorun", "server", "sv_admin_only.lua").exists()   # the Mentat addon stays separate
