@@ -1,0 +1,145 @@
+# Home AI box: offload, fallback and archive (plan)
+
+Status: **plan, nothing bought or built yet** (written 2026-10-16). Budget ceiling: **$3,500**.
+Related: `docs/v2/CHARTER.md` §10 question 1 (this answers it: option (b), a dedicated always-on box).
+
+## Why
+
+1. **Contention.** The gaming PC (RTX 4070, 12 GB) is the dev machine, the game/stream host and the LLM host. Ollama keeps two
+   models resident (`OLLAMA_KEEP_ALIVE=-1`), so VRAM fights Sunshine, games, ACE-Step and Whisper. The reporter even has an
+   "unload Ollama before a song" step (`services/home-reporter/reporter.py`) to work around it.
+2. **Fallback.** Hosted frontier models can get dearer, slower, deprecated or policy-restricted. A local model that is
+   *good enough* keeps Skippy and the coding loop alive on the day that happens.
+3. **Archive.** Pinned weights, pinned software and a recorded baseline of how well they work today.
+
+Non-goals: matching Sonnet 5.5 on long-context comprehension or speed (it won't), replacing the 4070 (CUDA-only pieces stay).
+
+## What the "fake Anthropic key" idea turns into
+
+The idea is right; the editor is the wrong half of it. Checked 2026-10-16:
+
+- **Cursor** sends custom-endpoint requests through *its own servers*, so `localhost` never works. It needs a public HTTPS tunnel, and
+  only the chat panel honours the override: Agent, Composer, inline edit and Tab stay on Cursor's backend. The override also
+  interferes with Cursor's built-in models. Not recommended as the fallback surface.
+  ([forum](https://forum.cursor.com/t/problem-reaching-openai-error-on-a-local-model-with-overriden-base-url/3975),
+  [explainer](https://dev.to/orchidfiles/why-localhost-doesnt-work-as-openai-base-url-in-cursor-and-how-to-fix-it-589e))
+- **Claude Code can be pointed at a local server.** `llama-server` has spoken the Anthropic Messages API (`/v1/messages`, streaming,
+  tool use, token counting) natively since January 2026, so `ANTHROPIC_BASE_URL=http://halo:8080 claude --model <alias>` works with no
+  proxy. ([Hugging Face write-up](https://huggingface.co/blog/ggml-org/anthropic-messages-api-in-llamacpp),
+  [PR](https://github.com/ggml-org/llama.cpp/pull/17570)) The Workshop already runs Claude Code, so this is the natural fallback.
+- **Editor-side alternatives** that honour a local endpoint for agent work: Cline, OpenCode, Continue, Aider (point them at the box over the tailnet).
+- **k8s / Docker Swarm: skip.** They coordinate *many* nodes. One box needs `docker compose` or systemd, which is already the idiom in this repo.
+  Revisit only if a second inference node is ever added. A gateway (LiteLLM) is optional: add it only for key mapping or routing between boxes.
+- The "fake key" is just any string; set `--api-key` on the server so only holders of it on the tailnet can call it.
+
+### Which editor surface can use it (the Captain found no external-model setting in Claude Desktop)
+
+Searched 2026-10-16: the documented way to redirect Claude Code is the **`env` block in `~/.claude/settings.json`** (or a project's
+`.claude/settings.json`): `ANTHROPIC_BASE_URL`, a token in `ANTHROPIC_AUTH_TOKEN`, and a model id/alias. Third-party gateway guides describe this
+for the **CLI and the VS Code extension**; the one Claude Desktop mention found says Desktop needs its in-app developer configuration for a
+gateway, and I could not retrieve those steps. **Treat Claude Desktop as unsupported for a local model until a test proves otherwise.**
+Official reference to check first: [code.claude.com/docs/en/llm-gateway-connect](https://code.claude.com/docs/en/llm-gateway-connect.md).
+
+Practical consequences:
+- **Terminal / VS Code with the Claude Code extension:** best surface for the fallback; use `/status` to confirm the base URL in effect.
+- Setting `ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_API_KEY` globally can bypass the normal `/login`, so put the fallback in a **separate settings
+  file or shell profile** (e.g. a `claude-local` wrapper that exports the variables for one run), not in the global file the Workshop and
+  the Captain's normal sessions read. Environment variables are read at start-up, so switching needs a new session.
+- A local model loses Anthropic-hosted extras (for example the built-in web search is reported unavailable with third-party models).
+- **Cline / OpenCode / Continue / Aider** in an editor of choice are the fallbacks if Claude Code's tool loop proves too heavy for a 3B-active model.
+- Cursor: chat panel only, via a public tunnel (above). Not worth the exposure.
+
+Test to run on day one: same task in (a) `claude-local` in a terminal, (b) VS Code extension with a project `.claude/settings.json`, (c) Claude Desktop.
+Record which of the three actually reaches the Halo (`llama-server` request log) before relying on it.
+
+## Hardware (budget $3,500)
+
+All prices below are from search summaries on 2026-10-16 and **must be re-checked before buying** (the page fetches failed in the
+session; prices have been rising: the 2025 guides quoting $1,500-2,000 are obsolete, apparently because of DRAM costs).
+
+| Machine | 128 GB config | Price seen | Notes |
+|---|---|---|---|
+| GMKtec EVO-X2 | 128 GB / 1 TB | **$3,499.99** | Vendor store; a notice says another price rise is coming. 2 TB is $3,649.99. |
+| Framework Desktop (DIY) | 128 GB | $3,449 | Out of stock late September; confirm what the price includes (SSD, PSU, case). |
+| Bosgame M5 | 128 GB / 2 TB | $3,599 | Cheapest 128 GB on Amazon US per one Oct 10 listing. $99 over. |
+| Minisforum MS-S1 Max | 128 GB | $3,799-$3,879 | Over budget. |
+| **AMD Ryzen AI Halo** | 128 GB / 2 TB | **$3,999.99** | Over budget by $500. AMD-supported dev platform, Micro Center in-store. |
+| Beelink GTR9 Pro | 128 GB | $4,349 | Over budget. |
+
+**Recommendation:** under a hard $3,500 the only clean fit is the **GMKtec EVO-X2 128 GB/1 TB at $3,499.99**, and tax or shipping may push it
+over; the Bosgame M5 at $3,599 is the nearest fallback. Do **not** buy a 64 GB tier: the 120B-class models need ~66 GB plus context. If the
+ceiling can flex by $500, the Halo buys vendor support, which matters most for ROCm/BIOS issues. All of these use the same Ryzen AI
+Max+ 395, so inference speed should be near-identical; what differs is cooling, noise, ports and support (read a review of the exact unit).
+
+Budget is effectively all spent on the machine. Archive storage (below) should reuse the existing `D:\models` drive plus one more existing disk;
+a second copy on a new external drive is extra money, not in the $3,500.
+
+## Software
+
+- **OS:** Linux, headless (Fedora 43 or a current Ubuntu LTS with a recent kernel and Mesa). Community benchmarks used Fedora 43 (ROCm 7.0
+  nightlies and Vulkan RADV) and CachyOS (kernel 7.0, Mesa RADV). Results depend on kernel/Mesa/ROCm versions, so **record them**.
+- **Inference:** `llama.cpp` / `llama-server`, **Vulkan (RADV) first**, ROCm HIP as the alternative (HIP often wins prompt processing,
+  Vulkan often wins token generation; measure both on the real box). Pin the build (commit or container image digest).
+- **Model switching:** one big model resident at a time plus the small fast one; `llama-swap` (or a systemd unit per model) to change.
+  Two big models do not fit together: 66 GB + 46 GB leaves too little for the KV cache and the OS.
+- **Skippy's default tier** can stay on the Ollama API if Ollama runs well on this chip (its AMD support has been uneven); otherwise add a
+  small OpenAI-compatible client next to `clients/ollama.py`.
+- **Network:** Tailscale only. Never published to the internet. The Funnel doors stay on the gaming PC.
+- **Ops:** compose/systemd on the Halo; the home reporter reports its health to the portal like every other capability.
+
+## Models (to evaluate; benchmark figures in the blogs conflict, trust only our own bake-off)
+
+| Role | Model | Why | Evidence |
+|---|---|---|---|
+| Coding agent / Workshop fallback | **Qwen3-Coder-Next** (80B, 3B active, Apache 2.0, ~46 GB) | Most-recommended local agentic coder for 128 GB | ~42.7 tok/s measured on Strix Halo |
+| General, tools, Skippy "big" tier | **gpt-oss-120b** (~66 GB) | Strong tool calling; US-origin | ~46-53 tok/s measured |
+| Fast chat / summaries / routing | **Qwen3-30B-A3B** | Cheap and quick | ~86 tok/s measured |
+| Not recommended on this box | Dense 70B-123B (e.g. Mistral Medium 3.5, Devstral 2) | Memory bandwidth (~215 GB/s) caps dense models near 5 tok/s | measured ~4.6-5.3 tok/s for a 70B |
+
+Keep **both US-origin and Chinese-origin** weights in the archive (see the legal note in the chat that produced this plan, and below).
+
+## Phases
+
+**0. Buy.** Re-check prices and stock; pick the unit; Linux, 128 GB. (Captain's decision.)
+
+**1. Prep in the repo (before the box arrives; tests first).**
+- Per-service LLM endpoints: flask-api (`OLLAMA_BASE_URL`), Mentat (`OLLAMA_URL`), reporter (unload target) become independent settings.
+  The reporter must **not** point its unload step at the Halo, or every song would evict the Halo's models.
+- `/health` and the portal's `core_check` understand a *remote* LLM box (a Halo outage reads as `degraded`, not a mystery).
+- Tiers as config (endpoint, model, API style), so swapping hosted/local is a setting.
+
+**2. Bring-up.** OS, Mesa/ROCm, llama.cpp (Vulkan and HIP), Tailscale, download the models, verify checksums, run the smoke tests,
+**record baseline numbers** (tokens/s per model per backend, load times, idle and load wattage, temperatures).
+
+**3. Skippy cutover.** Default tier to the Halo. The 4070 box keeps Whisper/voice-gate, ACE-Step, Stable Diffusion, Sunshine and the portal bridge,
+and no LLM VRAM. The "unload Ollama before a song" workaround is retired once nothing LLM lives there.
+
+**4. Fallback coding agent.** `ANTHROPIC_BASE_URL` + model alias against the Halo's `llama-server`.
+**The Workshop's model is deliberately hard-coded** (`workshop_engine.py` `MODEL`/`EFFORT`: "no environment variable and no request
+field", and tests assert it). So this is a **separate, explicit fallback mode that the Captain turns on by hand**, never a silent failover,
+and the existing tests keep proving the default is still Sonnet 5.5. Context must be generous (>= 32K, ideally 64K+), and Claude Code's
+per-request attribution header can defeat the KV cache on local servers, so check and neutralise it.
+
+**5. Archive ("this moment in software history").**
+- Weights for every model above plus tokenizer/config files, in `D:\models` with SHA-256 manifests (`tools/models_archive.py verify`), and a second copy elsewhere.
+- Each model's licence text and model card, saved next to it.
+- The exact software: llama.cpp commit/source tarball and container image digest, Mesa/ROCm/kernel versions, the configs and unit files.
+- A dated **snapshot note**: hardware, versions, baseline numbers and the bake-off results (below).
+
+**6. Bake-off.** 30-50 real Skippy and coding prompts; local vs hosted, answers shown blind side by side, the Captain votes. It turns "is local
+good enough yet?" into a number, and it is the archive's headline result. It can live as an Experiments page.
+
+## Risks and open questions
+
+- Price and stock move weekly; verify before ordering.
+- Strix Halo software (ROCm, Mesa, kernel) is young; expect tinkering. Vulkan llama.cpp is the safest first path.
+- Agentic coding with a 3B-active model will be visibly weaker and slower than Sonnet over long runs; set expectations and use the bake-off to see where.
+- A box that is always on needs power/UPS/cooling thought (not in budget).
+- Open-weight availability is not guaranteed forever: download and verify now (see Archive).
+
+## Sources
+
+- Prices: [Wccftech Bosgame M5](https://wccftech.com/review/bosgame-m5-review-the-cheapest-128-gb-strix-halo-mini-pc/), [Tom's Hardware EVO-X2](https://www.tomshardware.com/desktops/mini-pcs/gmktec-evo-x2-ai-mini-pc-review), [Compute Market](https://www.compute-market.com/blog/strix-halo-mini-pc-local-ai-2026), [Computing for Geeks](https://computingforgeeks.com/ryzen-ai-max-395-mini-pc-comparison/), [Halo launch](https://videocardz.com/newz/amd-launches-3999-ryzen-ai-halo-pc-limited-to-one-us-retailer)
+- Speeds: [Level1Techs](https://forum.level1techs.com/t/strix-halo-llm-inference-notes/249466), [Framework forum](https://community.frame.work/t/amd-strix-halo-ryzen-ai-max-395-gpu-llm-performance-tests/72521)
+- Models: [Pinggy: what fits in 128 GB](https://pinggy.io/blog/top_5_local_llm_tools_and_models/), [Pinggy: self-hosted coding LLMs](https://pinggy.io/blog/best_open_source_self_hosted_llms_for_coding/)
+- Claude Code with local models: [Hugging Face](https://huggingface.co/blog/ggml-org/anthropic-messages-api-in-llamacpp), [KDnuggets](https://kdnuggets.com/pairing-claude-code-with-local-models)
