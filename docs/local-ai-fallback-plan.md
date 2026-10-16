@@ -160,6 +160,8 @@ The hard part is the voice, not the plumbing:
 - **Clone quality.** The reference is audiobook audio the repo itself measures as rough and noisy (HNR about 3 dB); open models are likely sensitive to that.
   Local also allows fine-tuning on more audio, which an instant clone cannot.
 - **Latency.** ElevenLabs streams in ~400 ms. Local first-audio latency and real-time factor are unknown on this hardware: measure them.
+  **Bar to beat**, from the Captain's ElevenLabs request log (66 stream calls, Oct 10-14 2026, all HTTP 200): median 0.33 s, p90 0.46 s, max 0.87 s
+  (assuming the log's latency is time to response start). The log shows the API and the clone were still answering on Oct 14.
 - **Candidates** (licences from secondary roundups, verify on each repo): Chatterbox (MIT), Orpheus 3B (Apache 2.0 per some sources, emotion tags),
   Qwen3-TTS (Apache 2.0 per one list). XTTS-v2 (non-commercial, the company closed) and F5-TTS (non-commercial weights) are acceptable for strictly
   personal use but not for anything shared. Kokoro (already in `services/tts`) does not clone voices.
