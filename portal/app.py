@@ -49,6 +49,7 @@ import recovery
 import notify as notify_mod
 import recovery_web
 import ship as ship_mod
+import skippy_chat
 import tasks
 import telemetry_web
 import video as video_mod
@@ -997,6 +998,44 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             return jsonify(error=str(exc)), 400
         print(json.dumps({"event": "workshop", "user": me(), "task": task, "chars": len(message), "images": len(body.get("images") or [])}), flush=True)  # never the text
         return jsonify(task=task)
+
+    # Skippy Chat (slice 1, portal/skippy_chat.py): the Captain's development chat. Stricter than workshop_call: the identity
+    # is the Captain's own address (skippy_chat.is_captain), not the admin list, so a second admin can never reach it. The
+    # header is the same cross-site guard the private Skippy uses.
+    def captain_call(view):
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            user = auth.current_user()
+            if not user or not skippy_chat.is_captain(user["email"]):
+                abort(403)
+            if request.headers.get("X-Workshop") != "1":
+                abort(400)
+            resp = app.make_response(view(*args, **kwargs))
+            resp.headers["Cache-Control"] = "no-store"
+            return resp
+        return wrapped
+
+    @app.get("/skippy-chat/models")
+    @captain_call
+    def skippy_chat_models():
+        return jsonify(models=skippy_chat.options(), default=skippy_chat.DEFAULT_MODEL)
+
+    @app.post("/skippy-chat/send")
+    @captain_call
+    def skippy_chat_send():
+        body = request.get_json(silent=True) or {}
+        key, why = skippy_chat.choose(body.get("model", skippy_chat.DEFAULT_MODEL))
+        if key is None:
+            return jsonify(error=why), 400                  # refused before anything reaches the bridge
+        try:
+            task = workshop.send(me(), str(body.get("conv") or ""), str(body.get("message") or ""), str(body.get("project") or ""))
+        except workshop_mod.Busy as exc:
+            return jsonify(error=str(exc)), 409
+        except workshop_mod.NotReady as exc:
+            return jsonify(error=str(exc)), 503
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+        return jsonify(task=task, model=key)
 
     @mine.get("/workshop/events")
     @workshop_call
