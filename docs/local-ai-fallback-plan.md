@@ -137,7 +137,7 @@ Confidence differs a lot by workload (searched 2026-10-16; community numbers are
 | Chat / Skippy tiers | Ollama, CUDA (4070) | llama.cpp or Ollama on the iGPU | **high** | Others measure 46-86 tok/s on MoE models. |
 | Coding fallback ("Haiku-class") | none | Qwen3-Coder-Next through Claude Code (`ANTHROPIC_BASE_URL`) | **medium** | Useful, **not equivalent**: vendor figures are Qwen3-Coder-Next 70.6% SWE-Bench Verified (SWE-Agent) and 44.3% SWE-Bench Pro; Haiku 5.5 published 64.8 on SWE-Bench Pro and no Verified score. Different scaffolds and effort levels, so not like-for-like, but the direction is "below Haiku on hard tasks". The bake-off decides. |
 | Speech to text | faster-whisper, CUDA | faster-whisper on ROCm | **medium-high** | One report: large-v3 about 9x real time. Needs a ROCm >= 6.4.3 image; ROCm 6.1 images lack gfx1151 and silently fall back to CPU. |
-| Text to speech | ElevenLabs cloud (admin), device voice (others) | unchanged | **high** | Not GPU-bound today, so nothing to move. A local clone of the Skippy voice on AMD is unverified. |
+| Text to speech | ElevenLabs cloud (admin), device voice (others) | unchanged at first; local clone is an optional, staged replacement (below) | **low for a local clone** | Not GPU-bound today. Open voice-cloning models are mostly CUDA-first, and none was benchmarked on AMD in what I found. |
 | Image generation | Stable Diffusion on the host (4070) | ComfyUI on ROCm | **medium** | SDXL-class works; FP8 Flux-class reported at ~6 min/image on this chip; some models crash; a `--force-fp32` flag is the reported fix for NaN output on gfx1151. Diffusion is compute-bound, so the 4070 may well be faster. |
 | Music (ACE-Step 1.5) | CUDA container (4070) | unknown | **low** | No ROCm report found. The service's own notes say the model is plain PyTorch, so ROCm PyTorch might run it. Test; otherwise it stays on the 4070. |
 
@@ -150,6 +150,23 @@ contexts: a 40K-token first turn at ~850-1,000 tok/s prefill is roughly 40-50 s 
 **Placement by measurement (added to the burn-in).** Run the same jobs on both machines: SDXL 1024x1024 at 30 steps, a 60 s ACE-Step song,
 Whisper large-v3 on 10 minutes of audio, one coding task. A workload moves to the Halo only if it lands within about 2x of the 4070's time
 and frees the PC; otherwise it stays. The reporter's capability probes already show an absent service as "not ready" instead of failing.
+
+**Replacing ElevenLabs for Skippy's voice (optional, staged).** The plumbing is one seam: `voice-gate` and the Android app call flask-api's `/tts`
+(`routes/tts.py`), which calls `clients/elevenlabs_client.py` and streams `audio/mpeg`. (`intent.py` and `health.py` also mention ElevenLabs; not yet read.)
+A local engine plugs in behind that route; `voice-gate`'s ffmpeg chain already takes mp3 in/out, so a WAV from a local engine only needs converting.
+The hard part is the voice, not the plumbing:
+- **Emotion tags.** The persona and `speak` field use ElevenLabs v3 tags (`[sighs]`, `[chuckles]`, `[sarcastic]`, ALL CAPS, "..."). Each local engine
+  has its own (or no) tags, so a small per-engine mapping layer is needed (translate, or strip).
+- **Clone quality.** The reference is audiobook audio the repo itself measures as rough and noisy (HNR about 3 dB); open models are likely sensitive to that.
+  Local also allows fine-tuning on more audio, which an instant clone cannot.
+- **Latency.** ElevenLabs streams in ~400 ms. Local first-audio latency and real-time factor are unknown on this hardware: measure them.
+- **Candidates** (licences from secondary roundups, verify on each repo): Chatterbox (MIT), Orpheus 3B (Apache 2.0 per some sources, emotion tags),
+  Qwen3-TTS (Apache 2.0 per one list). XTTS-v2 (non-commercial, the company closed) and F5-TTS (non-commercial weights) are acceptable for strictly
+  personal use but not for anything shared. Kokoro (already in `services/tts`) does not clone voices.
+  ([roundup](https://pinggy.io/blog/best_open_source_self_hosted_text_to_speech_models/), [roundup](https://www.yaps.ai/blog/best-local-tts-models))
+- **Staging:** (1) make the engine pluggable, ElevenLabs still default; (2) use the local voice as the fallback when the daily character budget is
+  spent, instead of the device voice; (3) blind A/B on ~20 real Skippy lines with tags, ElevenLabs vs each candidate, plus latency; (4) switch the default only if the Captain prefers it.
+- The cloned voice stays personal-use only (see `elevenlabs_client.py`), and the `speak` scope stays admin-only, locally or not.
 
 **Development stays on the gaming PC.** Claude Code / the VS Code extension run on the PC with a `claude-local` wrapper pointed at the Halo over the
 tailnet; clones, git and the Workshop bridge stay on the PC. Only inference is remote.
