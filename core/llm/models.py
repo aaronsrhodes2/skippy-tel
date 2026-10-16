@@ -33,6 +33,8 @@ GB = 1024 ** 3
 OVERHEAD_GB = 4          # per loaded model: KV cache at the slot's ctx, compute buffers (estimate; the burn-in measures it)
 IDLE_TTL_S = 900         # an on-demand model unloads after 15 idle minutes (frees memory for image/music jobs)
 LLAMA_SERVER = "/app/llama-server"   # where the llama-swap image keeps it
+ALWAYS_ARGS = ["-fa", "on", "--no-mmap"]   # Strix Halo: both community guides run every model this way (crashes/slowdowns otherwise)
+DEFAULT_PARALLEL = 4
 
 
 class ManifestError(ValueError):
@@ -58,6 +60,9 @@ def load(path: Path = MANIFEST) -> dict:
                 sha = f.get("sha256")
                 if sha is not None and (len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha)):
                     raise ManifestError(f"{name}.{variant}: {f['path']}: sha256 must be 64 lowercase hex or null")
+            par = v.get("parallel", DEFAULT_PARALLEL)
+            if not isinstance(par, int) or not 1 <= par <= int(data.get("max_parallel", 8)):
+                raise ManifestError(f"{name}.{variant}: parallel must be 1..{data.get('max_parallel', 8)}")
         for alias in [name, *slot.get("aliases", [])]:
             if alias in seen:
                 raise ManifestError(f"name {alias!r} is used by both {seen[alias]} and {name}")
@@ -92,6 +97,7 @@ def plan(data: dict, full: set[str]) -> dict:
         files = [{**f, "rel": f"{repo_dir(v['repo'])}/{f['path']}"} for f in v["files"]]
         out[name] = {
             "variant": variant, "repo": v["repo"], "files": files, "ctx": v.get("ctx", 4096), "args": v.get("args", []),
+            "parallel": v.get("parallel", DEFAULT_PARALLEL),
             "size": sum(f["size"] for f in files), "resident": bool(slot.get("resident")),
             "aliases": slot.get("aliases", []),
         }
@@ -146,7 +152,8 @@ def render(chosen: dict, gpu_layers: int, extra_args: str = "") -> tuple[dict, d
     for name, s in chosen.items():
         first = s["files"][0]["rel"]          # llama.cpp finds the other parts of a split GGUF from the first one
         cmd = [LLAMA_SERVER, "--host", "127.0.0.1", "--port", "${PORT}", "-m", f"/models/{first}",
-               "--ctx-size", str(s["ctx"]), "-ngl", str(gpu_layers), "--alias", name, *s["args"],
+               "--ctx-size", str(s["ctx"]), "-ngl", str(gpu_layers), "--alias", name, *ALWAYS_ARGS,
+               "--parallel", str(s.get("parallel", DEFAULT_PARALLEL)), "--kv-unified", *s["args"],
                *shlex.split(extra_args)]
         entry = {"cmd": " ".join(cmd), "aliases": list(s["aliases"])}
         if not s["resident"]:
@@ -154,7 +161,8 @@ def render(chosen: dict, gpu_layers: int, extra_args: str = "") -> tuple[dict, d
         models[name] = entry
         (resident if s["resident"] else on_demand).append(name)
         for n in [name, *s["aliases"]]:
-            names.append({"name": n, "slot": name, "variant": s["variant"], "repo": s["repo"], "size": s["size"]})
+            names.append({"name": n, "slot": name, "variant": s["variant"], "repo": s["repo"], "size": s["size"],
+                          "resident": s["resident"]})
     groups = {}
     if resident:
         groups["resident"] = {"swap": False, "exclusive": False, "persistent": True, "members": resident}

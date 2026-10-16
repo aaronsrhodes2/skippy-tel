@@ -1,6 +1,7 @@
 {
-  "_doc": "SkippyCore's model slots. Each slot has a small STAND-IN (the simulator and CI run it) and the FULL model the Bosgame runs. Same slot, same aliases, same API: switching is CORE_FULL=<slots> in /etc/skippy-core/core.env, never a code change. Paths are relative to MODELS_ROOT and follow tools/models_archive.py's layout (huggingface/<Org>__<Repo>/<file>), so the D:\\models archive copies over as-is. sha256 null = not pinned yet: core/llm/models.py fetch prints the hash to pin. Sizes are bytes as Hugging Face lists them (2026-10-16). core/README.md.",
+  "_doc": "SkippyCore's model slots. Each slot has a small STAND-IN (the simulator and CI run it) and the FULL model the Bosgame runs. Same slot, same aliases, same API: switching is CORE_FULL=<slots> in /etc/skippy-core/core.env, never a code change. Paths are relative to MODELS_ROOT and follow tools/models_archive.py's layout (huggingface/<Org>__<Repo>/<file>), so the D:\\models archive copies over as-is. sha256 null = not pinned yet: core/llm/models.py fetch prints the hash to pin. Sizes are bytes as Hugging Face lists them (2026-10-16). The coder's full GGUF is Unsloth's UD-Q4_K_XL, re-uploaded after llama.cpp's looping fix (the Strix Halo community's pick). parallel (per variant, default 4) is llama-server's --parallel; max_parallel caps it: stock Vulkan loses about a third of its throughput past 8. core/README.md.",
   "memory_budget_gb": 110,
+  "max_parallel": 8,
   "slots": {
     "chat": {
       "role": "Skippy's default tier, summaries, Mentat's phrasings: always loaded",
@@ -47,13 +48,8 @@
         "args": ["--jinja"]
       },
       "full": {
-        "repo": "Qwen/Qwen3-Coder-Next-GGUF",
-        "files": [
-          {"path": "Qwen3-Coder-Next-Q4_K_M/Qwen3-Coder-Next-Q4_K_M-00001-of-00004.gguf", "size": 15524827040, "sha256": null},
-          {"path": "Qwen3-Coder-Next-Q4_K_M/Qwen3-Coder-Next-Q4_K_M-00002-of-00004.gguf", "size": 14872168352, "sha256": null},
-          {"path": "Qwen3-Coder-Next-Q4_K_M/Qwen3-Coder-Next-Q4_K_M-00003-of-00004.gguf", "size": 14503294496, "sha256": null},
-          {"path": "Qwen3-Coder-Next-Q4_K_M/Qwen3-Coder-Next-Q4_K_M-00004-of-00004.gguf", "size": 3510702144, "sha256": null}
-        ],
+        "repo": "unsloth/Qwen3-Coder-Next-GGUF",
+        "files": [{"path": "Qwen3-Coder-Next-UD-Q4_K_XL.gguf", "size": 49608478720, "sha256": null}],
         "ctx": 65536,
         "args": ["--jinja"]
       }
