@@ -50,6 +50,14 @@ done
 say "Creating CI/CD resources (state bucket, registry, deployer identity, secrets)"
 cd "$ROOT/infra/bootstrap"
 terraform init -input=false >/dev/null
+# A bucket made by hand (gcloud storage buckets create ...) is adopted, not fought: without this, apply stops with a 409 "already exists".
+adopt() {   # <terraform address> <bucket name>
+  if gcloud storage buckets describe "gs://$2" >/dev/null 2>&1 && ! terraform state list 2>/dev/null | grep -qx "$1"; then
+    echo "  adopting the existing bucket gs://$2"
+    terraform import -input=false -var "project=$PROJECT" -var "region=$REGION" "$1" "$PROJECT/$2" >/dev/null
+  fi
+}
+adopt google_storage_bucket.tabletop skippy-tel-tabletop
 terraform apply -input=false -auto-approve -var "project=$PROJECT" -var "region=$REGION"
 NUMBER=$(terraform output -raw project_number)
 PORTAL_URL=$(terraform output -raw portal_url)
