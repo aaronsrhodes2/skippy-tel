@@ -422,37 +422,50 @@ refused, the URL rule, the tile and pill, the manifest, the page's markup agains
 bytes), `test_video_js.py` (runs `portal/tests/js/video/*.test.js` under Node 18+ and feeds a catalog the real gate builds from its
 fake Jellyfin to the player's parser; skipped, not failed, without Node).
 
-## The Tabletop (shared RPG boards, `/tabletop`)
+## Tabletops (campaigns, heroes and the cork board, `/tabletop`)
 
-The adventure's scrapbook for the Captain's Daggerheart table (Heroes of Chance): boards you pan and zoom, with
-pictures and notes pinned on them. It's a launcher tile for the Captain and for friends granted **"Tabletop (RPG
-boards)"** in Admin > Friends.
+The Captain's Daggerheart tables. A launcher tile for the Captain and for friends granted **"Tabletop (RPG boards)"** in
+Admin > Friends. The structure:
 
-- **Boards:** only the GM (an admin) makes, renames and removes them, from the boards key. Make one per episode or realm.
-  The address `/tabletop#<id>` opens a given board, and the page remembers the last board you looked at.
-- **Cards:** anyone with the grant pins a note (with an ink from the passthrough palette) or a picture. To add a
-  picture, use the picture key, drop a file on the board, or paste one. Big photos are shrunk on the device to
-  2000 px JPEG before they're sent; GIFs and small PNGs go as they are. You can drag, edit and take down your own
-  cards. The GM can do that to any card. If you drag someone else's card, the board pans instead.
-- **Live:** the page polls `GET /tabletop/b/<id>?since=<rev>` every 4 s. While nothing has changed, the reply is only `{"rev": n}`.
-- **Storage:** the private GCS bucket `skippy-tel-tabletop` holds `boards.json`, `boards/<id>.json` and
-  `images/<board>/<card>.<ext>`. It's created by `infra/bootstrap` with versioning, so deleted files stay for
-  30 days. Only the portal's runtime identity can read or write it, and the portal serves the pictures back
-  behind the grant. `TABLETOP_BUCKET` is set by `deploy.yml`. Without it, the page says it isn't set up.
-- **Safety:** every write needs the `X-Tabletop: 1` header, which another site's page can't add. Pictures are
-  recognised by their first bytes, never by name. Text is drawn with `textContent`, never parsed as HTML.
-- **Heroes** (the party key): one tile per hero, with the boards listed beside them as the campaign's collages. A hero has three tabs:
-  - **Sheet**: every field of the official Daggerheart sheet and its character-guide page (`tabletop.SPEC`). A change is checked
-    against SPEC, saved within a second, and logged with who made it and when.
-  - **Project**: the hero's current project, with a progress clock.
-  - **Folder**: PDFs and pictures (30 MB each) served behind the grant, opened sandboxed.
+- **Tabletops** (`/tabletop`): a card per campaign. Today there is one, **Heroes of Chance**. The GM starts a campaign from the
+  box under the cards. Each campaign keeps its own boards, heroes and Fear.
+- **A campaign's tabletop** (`/tabletop/c/<id>`): the heroes along the top, a card each (name, class, level, player, project clock);
+  below, the **cork board**: everything about the game that isn't one hero's, as cue cards and polaroids pinned to a surface you
+  drag to pan and pinch or scroll to zoom.
+- **A hero's card** opens three tabs: the **Sheet**, the current **Project** and the **Folder** (below).
+
+**The cork board.** The GM makes boards (one per episode or realm) from the boards key and can rename and remove them; the
+address `/tabletop/c/<id>#<board>` opens one, and the page remembers the last board you looked at.
+- **Cards:** anyone with the grant pins a note (a cue card, with an ink from the passthrough palette) or a picture (a polaroid with
+  a caption). Pictures come from the picture key, a drop on the board, or a paste. Big photos are shrunk on the device to 2000 px
+  JPEG first; GIFs and small PNGs go as they are. You can drag, edit and take down your own cards; the GM can do that to any card.
+  Dragging someone else's card pans the board instead.
+- **Live:** the page polls `GET /tabletop/b/<id>?since=<rev>` every 4 s. While nothing has changed, the reply is `{"rev": n, "fear": n}`.
+
+**Heroes.**
+- **Sheet:** every field of the official Daggerheart sheet and its character-guide page (`tabletop.SPEC`). A change is checked against
+  SPEC, saved within a second, and logged with who made it and when.
+- **Project:** the hero's current project, with a progress clock.
+- **Folder:** PDFs and pictures (30 MB each) the hero's player or the GM adds, served behind the grant and opened sandboxed.
 - **Who changes what:** the hero's player (set by the GM) and the GM change the sheet and add to the folder; everyone else reads.
   The print key opens `/tabletop/h/<id>/print`, every field in the official sheet's order, black on white, for players on paper.
 - **GM only:** a quick reference per hero (storytelling details, never sent to a player), the change log, who plays whom.
-- **Fear:** the GM's Fear (0–12) sits in the top bar for everyone and rides on every board poll. Only the GM changes it,
-  and it carries over to the next session.
-- **Code:** `portal/tabletop.py`, `templates/tabletop.html` and `tabletop_print.html`, `static/tabletop{,-heroes}.js` and
-  `tabletop.css`. Tests are in `portal/tests/test_tabletop.py`.
+
+**Fear.** Each campaign has the GM's Fear (0–12) in the top bar for everyone; it rides on every board poll. Only the GM changes it,
+and it carries over to the next session. Its sheet is a canvas of "Fear...", a void of stars, ghostly wireframe skulls and
+wireframe tentacles lashing and mingling: lines only (black stays see-through), running only while the sheet is open, and a still
+frame for anyone whose device asks for reduced motion.
+
+**Storage and safety.**
+- The private GCS bucket `skippy-tel-tabletop` holds `campaigns.json`, `boards.json`, `boards/<id>.json`, `images/<board>/<card>.<ext>`,
+  `heroes.json`, `heroes/<id>.json`, `heroes/<id>/files/<file>` and `fear/<campaign>.json`. It's created by `infra/bootstrap` with
+  versioning, so deleted files stay for 30 days. Only the portal's runtime identity can read or write it; the portal serves files back
+  behind the grant. `TABLETOP_BUCKET` is set by `deploy.yml`. Without the bucket, the page says it can't reach its storage.
+- Every write needs the `X-Tabletop: 1` header, which another site's page can't add. Pictures and PDFs are recognised by their first
+  bytes, never by name. Text is drawn with `textContent`, never parsed as HTML.
+
+**Code:** `portal/tabletop.py`, `templates/tabletop_campaigns.html`, `tabletop.html` and `tabletop_print.html`,
+`static/tabletop{,-heroes}.js` and `tabletop.css`. Tests: `portal/tests/test_tabletop.py`.
 
 ## Star Control Zero (the Captain's game, `/starcontrol`)
 

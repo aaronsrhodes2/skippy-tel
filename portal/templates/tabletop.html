@@ -1,37 +1,41 @@
 {% extends "base.html" %}
-{% block title %}Tabletop — Maker Portal{% endblock %}
+{% block title %}{{ title or "Tabletop" }} — Maker Portal{% endblock %}
 {% block app %}tabletop{% endblock %}
 {% block ui %}bridge{% endblock %}
 {% block glyph %}d20{% endblock %}
+{% block hud_back %}{{ url_for('tabletop.page') }}{% endblock %}
 {% block head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='tabletop.css') }}">
 {% endblock %}
 {% block content %}
-{# The Tabletop: the adventure's shared boards (portal/tabletop.py). One screen, never scrolled: the board is a big surface you
-   drag to pan and pinch (or wheel) to zoom; everyone pins pictures and notes on it and drags their own about. The GM (the
-   Captain) makes the boards, one per episode or realm, and can change anything. static/tabletop.js draws it and polls for
-   other people's changes every few seconds. #}
-<section id="tt" class="tt bp" aria-label="Tabletop"
-         data-ready="{{ '1' if ready else '0' }}" data-gm="{{ '1' if gm else '0' }}" data-me="{{ me_email }}"
-         data-boards-url="{{ url_for('tabletop.boards') }}"
+{# One campaign's tabletop (portal/tabletop.py). One screen, never scrolled: along the top, a card per hero (each opens that hero's
+   sheet, project and folder); below, the cork board: everything about the game that isn't one hero's, as cue cards and polaroids
+   pinned to a big surface you drag to pan and pinch (or wheel) to zoom. Everyone pins and drags their own; the GM (the Captain)
+   makes the boards and can change anything. static/tabletop.js draws the board and polls for other people's changes;
+   static/tabletop-heroes.js draws the heroes and the Fear. #}
+<section id="tt" class="tt bp" aria-label="{{ title or 'Tabletop' }}"
+         data-ready="{{ '1' if ready else '0' }}" data-gm="{{ '1' if gm else '0' }}" data-me="{{ me_email }}" data-campaign="{{ cid }}"
+         data-boards-url="{{ url_for('tabletop.boards', c=cid) }}"
          data-board-url="{{ url_for('tabletop.board', bid='BID') }}"
-         data-heroes-url="{{ url_for('tabletop.heroes_list') }}"
+         data-heroes-url="{{ url_for('tabletop.heroes_list', c=cid) }}"
          data-hero-url="{{ url_for('tabletop.hero', hid='HID') }}"
-         data-fear-url="{{ url_for('tabletop.fear') }}">{# every card's address hangs off the board's: …/BID/text, …/BID/img/<name> #}
+         data-fear-url="{{ url_for('tabletop.fear', c=cid) }}">{# every card's address hangs off the board's: …/BID/text, …/BID/img/<name> #}
   <noscript><p class="warn" style="margin:12px">The Tabletop needs JavaScript.</p></noscript>
   <div class="notice" id="tt-notice" role="status" hidden></div>
 
   <div class="bp-top">
     <button type="button" class="key" id="tt-boards-key" aria-label="Boards" title="Boards"><svg class="g" aria-hidden="true"><use href="#g-tools"/></svg></button>
-    <button type="button" class="key" id="tt-heroes-key" aria-label="Heroes" title="Heroes"><svg class="g" aria-hidden="true"><use href="#g-party"/></svg></button>
     <button type="button" class="tt-fear" id="tt-fear" aria-label="Fear" title="Fear: the GM's, kept from session to session">
       <svg class="g" aria-hidden="true"><use href="#g-flame"/></svg><span id="tt-fear-n">–</span></button>
-    <h1 class="tt-title" id="tt-title">Tabletop</h1>
+    <h1 class="tt-title"><span class="tt-campaign">{{ title }}</span> <span id="tt-title"></span></h1>
     <button type="button" class="key" id="tt-note-key" aria-label="Pin a note" title="Pin a note" disabled><svg class="g" aria-hidden="true"><use href="#g-talk"/></svg></button>
     <button type="button" class="key" id="tt-pic-key" aria-label="Pin a picture" title="Pin a picture" disabled><svg class="g" aria-hidden="true"><use href="#g-image"/></svg></button>
     <button type="button" class="key" id="tt-fit-key" aria-label="Show the whole board" title="Show the whole board" disabled><svg class="g" aria-hidden="true"><use href="#g-fit"/></svg></button>
     <input type="file" id="tt-file" accept="image/*" multiple hidden>
   </div>
+
+  {# The heroes: a card each, like character dossiers on the table's edge #}
+  <div class="tt-strip" id="tt-strip" role="list" aria-label="Heroes"></div>
 
   <div class="tt-view" id="tt-view" tabindex="0" aria-label="The board: drag to move around, pinch or scroll to zoom">
     <div class="tt-board" id="tt-board"></div>
@@ -73,25 +77,23 @@
     </div>
   </div>
 
-  {# The party: a control per hero; the GM also makes heroes #}
-  <div class="sheet" id="tt-party" role="dialog" aria-modal="true" aria-label="Heroes" hidden>
+  {% if gm %}
+  {# The GM adds a hero to this campaign #}
+  <div class="sheet" id="tt-newhero" role="dialog" aria-modal="true" aria-label="Add a hero" hidden>
     <div class="tt-sheet-top">
-      <svg class="g" aria-hidden="true"><use href="#g-party"/></svg><span class="tt-by">Heroes of Chance</span><span class="grow"></span>
+      <svg class="g" aria-hidden="true"><use href="#g-party"/></svg><span class="tt-by">A new hero</span><span class="grow"></span>
       <button type="button" class="key sm" data-close aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
     </div>
-    <div class="tt-party" id="tt-party-list" role="list"></div>
-    {% if gm %}
     <form class="tt-new" id="tt-hero-new">
-      <input type="text" id="tt-hero-new-name" maxlength="80" placeholder="New hero's name" aria-label="New hero's name" autocomplete="off">
-      <button type="submit" class="key" aria-label="Add a hero" title="Add a hero"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
+      <input type="text" id="tt-hero-new-name" maxlength="80" placeholder="The hero's name" aria-label="The hero's name" autocomplete="off">
+      <button type="submit" class="key" aria-label="Add the hero" title="Add the hero"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
     </form>
-    {% endif %}
   </div>
+  {% endif %}
 
   {# One hero: the sheet (every field of the official one), the current project, the folder #}
   <div class="sheet tt-hero" id="tt-hero" role="dialog" aria-modal="true" aria-labelledby="tt-hero-name" hidden>
     <div class="tt-sheet-top">
-      <button type="button" class="key sm" id="tt-hero-back" aria-label="All heroes" title="All heroes"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
       <h2 class="tt-hero-name" id="tt-hero-name"></h2>
       <span class="tt-save" id="tt-save" aria-live="polite"></span>
       <span class="grow"></span>
@@ -110,6 +112,8 @@
 
   {# The GM's Fear: twelve at most; it stays put between sessions #}
   <div class="sheet tt-fearsheet" id="tt-fearsheet" role="dialog" aria-modal="true" aria-label="Fear" hidden>
+    {# the backdrop: "Fear...", a void of stars, ghostly wireframe skulls, wireframe tentacles (static/tabletop-heroes.js) #}
+    <canvas id="tt-fear-fx" aria-hidden="true"></canvas>
     <div class="tt-sheet-top">
       <svg class="g" aria-hidden="true"><use href="#g-flame"/></svg><span class="tt-by">Fear</span><span class="grow"></span>
       <button type="button" class="key sm" data-close aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>

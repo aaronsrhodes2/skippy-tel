@@ -210,17 +210,17 @@ only when the gate's `/health` says `ready`. Direct play when the catalog says `
 `portal/static/vendor/`, Safari's own on Apple). Run it against the REAL gate on this machine with `python portal/tests/dev_video.py`.
 Full description and tests: `docs/portal/README.md` → Nagatha's Video Service.
 
-## The Tabletop (shared RPG boards, `/tabletop`)
+## Tabletops (campaigns, heroes, the cork board, `/tabletop`)
 
-This is the scrapbook for the Captain's Daggerheart campaign (Heroes of Chance; the lore is in `../heroes-of-chance`).
-- **Boards:** the GM (an admin) makes them. Friends granted "tabletop" pin pictures and notes on them and drag them
-  about. A card can only be changed by its author or the GM.
-- **Heroes:** every field of the official sheet (`tabletop.SPEC`; a field not in SPEC can't be stored), a project, a folder,
-  a print view; a GM-only quick reference per hero; the GM's Fear in the top bar, kept between sessions.
-- **Storage:** the private bucket `skippy-tel-tabletop`, made by `infra/bootstrap`, so a new bucket needs a bootstrap
-  re-run in Cloud Shell. The portal reaches it through its runtime identity.
-- **Code:** `portal/tabletop.py`, `templates/tabletop.html`, `static/tabletop.{js,css}`.
-- **Full description:** `docs/portal/README.md` → The Tabletop.
+The Captain's Daggerheart campaign (Heroes of Chance; the lore is in `../heroes-of-chance`).
+- **Structure:** Tabletops is a deck of campaign cards; a campaign opens its tabletop: a card per hero along the top, a cork board
+  of cue cards and polaroids below. Each campaign has its own boards, heroes and Fear.
+- **Heroes:** every field of the official sheet (`tabletop.SPEC`; a field not in SPEC can't be stored), a project, a folder, a print
+  view; a GM-only quick reference per hero; the GM's Fear in the top bar, kept between sessions (its sheet is an animated canvas).
+- **Storage:** the private bucket `skippy-tel-tabletop`, made by `infra/bootstrap`, so a new bucket needs a bootstrap re-run in
+  Cloud Shell. The portal reaches it through its runtime identity.
+- **Code:** `portal/tabletop.py`, `templates/tabletop*.html`, `static/tabletop{,-heroes}.{js,css}`.
+- **Full description:** `docs/portal/README.md` → Tabletops.
 
 ## Home is the app portal (`/`); Skippy the Magnificent is the chat app (`/chat`), in two modes
 

@@ -9,7 +9,7 @@
   if (!root || root.dataset.ready !== "1") return;
   const $ = (id) => document.getElementById(id);
   const GM = root.dataset.gm === "1";
-  const HEROES_URL = root.dataset.heroesUrl, FEAR_URL = root.dataset.fearUrl;
+  const HEROES_URL = root.dataset.heroesUrl, FEAR_URL = root.dataset.fearUrl, CAMPAIGN = root.dataset.campaign;
   const heroUrl = (id) => root.dataset.heroUrl.replace("HID", encodeURIComponent(id));
   const POLL_MS = 4000, SAVE_MS = 700, FEAR_MAX = 12;
   const notice = $("tt-notice");
@@ -32,7 +32,7 @@
   }
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   const glyph = (id) => `<svg class="g" aria-hidden="true"><use href="#${id}"/></svg>`;
-  function closeAll() { root.querySelectorAll(".sheet").forEach((s) => { s.hidden = true; }); stopHeroPoll(); }
+  function closeAll() { root.querySelectorAll(".sheet").forEach((s) => { s.hidden = true; }); stopHeroPoll(); stopFearFx(); }
   const get = (obj, path) => path.split(".").reduce((o, k) => (o == null ? o : o[k]), obj);
   function put(obj, path, value) {
     const keys = path.split("."), last = keys.pop();
@@ -57,65 +57,170 @@
     }
   }
   async function setFear(body) {
-    try { showFear((await call("POST", FEAR_URL, body)).fear); } catch (err) { say(err.message); }
+    try { showFear((await call("POST", FEAR_URL, { campaign: CAMPAIGN, ...body })).fear); } catch (err) { say(err.message); }
   }
   root.addEventListener("tt-fear", (e) => showFear(e.detail));
-  fearKey.addEventListener("click", () => { closeAll(); $("tt-fearsheet").hidden = false; showFear(fear || 0); });
+  fearKey.addEventListener("click", () => { closeAll(); $("tt-fearsheet").hidden = false; showFear(fear || 0); startFearFx(); });
   $("tt-fear-up").addEventListener("click", () => setFear({ delta: 1 }));
   $("tt-fear-down").addEventListener("click", () => setFear({ delta: -1 }));
   $("tt-fear-up").hidden = $("tt-fear-down").hidden = !GM;
   call("GET", FEAR_URL).then((d) => showFear(d.fear)).catch(() => {});
 
-  // ── the party ──
-  async function openParty() {
-    closeAll();
-    $("tt-party").hidden = false;
-    const list = $("tt-party-list");
-    list.replaceChildren(el("p", "tt-by", "…"));
+  // ── the Fear's backdrop: "Fear..." over a void of stars, giant ghostly wireframe skulls turning slowly, wireframe tentacles
+  // lashing and mingling. Lines only (no fills): black stays see-through on the glasses. It runs only while the sheet is open, and
+  // draws a single still frame for anyone who asked their device for less motion. ──
+  const fxCanvas = $("tt-fear-fx");
+  const STILL = !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const RED = "255,68,68", VIOLET = "129,140,248", CYAN = "0,204,255", WHITE = "255,255,255";
+  // a skull in unit space (about 0.8 wide, 1 high, centred): the outline, the eye sockets, the nose, the teeth
+  const SKULL = (() => {
+    const outline = [];
+    for (let i = 0; i <= 10; i++) { const a = Math.PI * (1.08 - 1.16 * (i / 10)); outline.push([0.4 * Math.cos(a), -0.1 - 0.4 * Math.sin(a)]); }
+    outline.push([0.34, 0.12], [0.27, 0.2], [0.22, 0.27], [0.2, 0.42], [0.1, 0.5], [-0.1, 0.5], [-0.2, 0.42], [-0.22, 0.27], [-0.27, 0.2], [-0.34, 0.12]);
+    const eye = (cx) => Array.from({ length: 8 }, (_, i) => [cx + 0.1 * Math.cos(i * Math.PI / 4 + 0.4), 0.0 + 0.11 * Math.sin(i * Math.PI / 4 + 0.4)]);
+    const teeth = [-0.14, -0.07, 0, 0.07, 0.14].map((x) => [[x, 0.37], [x, 0.47]]);
+    return { outline, eyes: [eye(-0.16), eye(0.16)], nose: [[0, 0.12], [-0.045, 0.25], [0.045, 0.25]], teeth };
+  })();
+  let fx = null;
+  function stopFearFx() {
+    if (!fx) return;
+    cancelAnimationFrame(fx.raf);
+    if (fx.watch) fx.watch.disconnect();
+    fx = null;
+  }
+  function startFearFx() {
+    if (!fxCanvas || fx) return;
+    const ctx = fxCanvas.getContext("2d");
+    const st = fx = { raf: 0, t: 0, last: 0, w: 0, h: 0, stars: [], skulls: [], tents: [], watch: null };
+    const rnd = (a, b) => a + Math.random() * (b - a);
+    function seed() {
+      const { w, h } = st;
+      st.stars = Array.from({ length: Math.round(w * h / 7000) }, () => ({ x: rnd(0, w), y: rnd(0, h), r: rnd(.4, 1.6), ph: rnd(0, 6.3), sp: rnd(.4, 1.8) }));
+      st.skulls = [{ x: .2, y: .55, k: .85, ph: 0, sp: .21, c: RED, a: .24 }, { x: .8, y: .4, k: .7, ph: 2, sp: .17, c: VIOLET, a: .22 },
+                   { x: .52, y: .85, k: .6, ph: 4, sp: .13, c: RED, a: .16 }];
+      const side = (n, x, y, ang, len, c) => Array.from({ length: n }, (_, i) => ({ x: x(i), y: y(i), ang, len, c, ph: rnd(0, 6.3), sp: rnd(.5, 1.1), amp: rnd(.5, .9), wid: rnd(10, 22) }));
+      st.tents = [...side(3, (i) => w * (.15 + .35 * i), () => h + 10, -Math.PI / 2, h * 1.05, VIOLET),
+                  ...side(2, () => -10, (i) => h * (.35 + .3 * i), -.25, w * .75, CYAN),
+                  ...side(2, () => w + 10, (i) => h * (.3 + .35 * i), Math.PI + .25, w * .75, VIOLET)];
+    }
+    function size() {
+      const r = fxCanvas.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1);
+      if (!r.width || !r.height) return;
+      fxCanvas.width = Math.round(r.width * dpr); fxCanvas.height = Math.round(r.height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      st.w = r.width; st.h = r.height; seed();
+      if (STILL) draw();
+    }
+    function line(pts, close) {
+      ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      if (close) ctx.closePath();
+      ctx.stroke();
+    }
+    function skull(s, t) {
+      const H = Math.min(st.w, st.h) * 1.05 * s.k, turn = 0.3 + 0.7 * Math.abs(Math.cos(t * s.sp + s.ph));      // turning about its own axis
+      const cx = st.w * s.x + Math.sin(t * s.sp * 1.7 + s.ph) * st.w * .03, cy = st.h * s.y + Math.cos(t * s.sp * 1.3 + s.ph) * st.h * .03;
+      const P = ([x, y]) => [cx + x * turn * H, cy + y * H];
+      ctx.strokeStyle = `rgba(${s.c},${s.a * (0.75 + 0.25 * Math.sin(t * .9 + s.ph))})`; ctx.lineWidth = 1.4;
+      const out = SKULL.outline.map(P);
+      line(out, true);
+      for (let i = 0; i < out.length; i += 2) line([out[i], P([0, 0.06])]);                 // facets: the wireframe's struts
+      SKULL.eyes.forEach((e) => { const pts = e.map(P); line(pts, true); pts.forEach((p, i) => { if (i % 2 === 0) line([p, P([e[0][0] * 0 + (e === SKULL.eyes[0] ? -.16 : .16), 0])]); }); });
+      line(SKULL.nose.map(P), true);
+      SKULL.teeth.forEach((tp) => line(tp.map(P)));
+      line([P([-.14, .42]), P([.14, .42])]);
+    }
+    function tentacle(n, t) {
+      const N = 26, seg = n.len / N, pts = [];
+      let x = n.x, y = n.y, a = n.ang;
+      const lash = Math.pow(Math.max(0, Math.sin(t * n.sp * .6 + n.ph)), 3);                // now and then, a whip
+      for (let i = 0; i <= N; i++) {
+        const s = i / N;
+        a = n.ang + n.amp * Math.sin(t * n.sp * 1.4 - s * 5 + n.ph) * (.25 + s) + lash * 1.1 * Math.sin(t * 5 - s * 7 + n.ph) * s;
+        pts.push([x, y, a, n.wid * Math.pow(1 - s, .85) + 1.5]);
+        x += Math.cos(a) * seg * (1 - .5 * s); y += Math.sin(a) * seg * (1 - .5 * s);
+      }
+      const left = pts.map(([px, py, pa, w]) => [px + Math.cos(pa + Math.PI / 2) * w, py + Math.sin(pa + Math.PI / 2) * w]);
+      const right = pts.map(([px, py, pa, w]) => [px + Math.cos(pa - Math.PI / 2) * w, py + Math.sin(pa - Math.PI / 2) * w]);
+      ctx.strokeStyle = `rgba(${n.c},.3)`; ctx.lineWidth = 1.3;
+      line(left); line(right);
+      ctx.strokeStyle = `rgba(${n.c},.16)`;
+      for (let i = 0; i <= N; i += 2) line([left[i], right[i]]);                            // the ribs: it reads as a tube, not a line
+      line(pts.map((p) => [p[0], p[1]]));
+      ctx.strokeStyle = `rgba(${n.c},.22)`;
+      for (let i = 3; i < N - 2; i += 3) { ctx.beginPath(); ctx.arc(left[i][0], left[i][1], Math.max(1.5, pts[i][3] * .22), 0, 6.3); ctx.stroke(); }   // suckers
+    }
+    function draw() {
+      const { w, h, t } = st;
+      ctx.clearRect(0, 0, w, h);
+      st.stars.forEach((s) => {
+        ctx.strokeStyle = `rgba(${WHITE},${.25 + .45 * Math.abs(Math.sin(t * s.sp + s.ph))})`; ctx.lineWidth = s.r;
+        ctx.beginPath(); ctx.moveTo(s.x - s.r, s.y); ctx.lineTo(s.x + s.r, s.y); ctx.moveTo(s.x, s.y - s.r); ctx.lineTo(s.x, s.y + s.r); ctx.stroke();
+      });
+      st.skulls.forEach((s) => skull(s, t));
+      const face = 'Consolas, "Courier New", monospace';                                      // "Fear...": outlined, never filled, as big as fits
+      ctx.font = `700 100px ${face}`;
+      const fs = Math.min(h * .5, 100 * (w * .92) / Math.max(1, ctx.measureText("Fear...").width));
+      ctx.font = `700 ${fs}px ${face}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.lineWidth = 2; ctx.strokeStyle = `rgba(${RED},${.34 + .1 * Math.sin(t * 2.3)})`;
+      ctx.strokeText("Fear...", w / 2 + Math.sin(t * 7) * .8, h * .5);
+      st.tents.forEach((n) => tentacle(n, t));
+    }
+    function frame(now) {
+      if (!fx || fx !== st) return;
+      const dt = Math.min(.05, (now - (st.last || now)) / 1000); st.last = now;
+      if (!document.hidden) { st.t += dt; draw(); }
+      st.raf = requestAnimationFrame(frame);
+    }
+    if (window.ResizeObserver) { st.watch = new ResizeObserver(size); st.watch.observe(fxCanvas); }
+    size();
+    if (STILL) draw(); else st.raf = requestAnimationFrame(frame);
+  }
+  root.addEventListener("tt-closed", stopFearFx);
+
+  // ── the heroes: a card each along the top of the tabletop, like dossiers at the table's edge ──
+  const strip = $("tt-strip");
+  let stripSig = "";
+  async function drawStrip() {
     try {
       const { heroes, fear: f } = await call("GET", HEROES_URL);
       showFear(f);
-      list.replaceChildren();
-      if (!heroes.length) list.appendChild(el("p", "tt-by", GM ? "No heroes yet. Add the first below." : "The GM hasn't added the heroes yet."));
+      const sig = JSON.stringify(heroes);
+      if (sig === stripSig) return;
+      stripSig = sig;
+      strip.replaceChildren();
       for (const h of heroes) {
-        const b = el("button", "tt-herotile"); b.type = "button"; b.setAttribute("role", "listitem");
+        const b = el("button", "tt-herocard"); b.type = "button"; b.setAttribute("role", "listitem");
+        b.innerHTML = glyph("g-folder");
         b.appendChild(el("span", "nm", h.name || "Unnamed"));
-        b.appendChild(el("span", "cl", [h.class, h.subclass].filter(Boolean).join(" · ") + (h.level ? ` · L${h.level}` : "")));
-        b.appendChild(el("span", "pl", h.player_name || h.player || "no player yet"));
+        b.appendChild(el("span", "cl", [h.class, h.level ? `L${h.level}` : ""].filter(Boolean).join(" · ")));
+        b.appendChild(el("span", "pl", h.player_name || (h.player ? h.player.split("@")[0] : "")));
         if (h.project) {
-          const p = el("span", "pj"); p.appendChild(el("span", null, h.project));
-          const clock = el("span", "clk");
+          const clock = el("span", "clk"); clock.title = h.project;
           for (let i = 0; i < h.clock_max; i++) clock.appendChild(el("i", i < h.clock ? "on" : ""));
-          p.appendChild(clock); b.appendChild(p);
+          b.appendChild(clock);
         }
-        if (h.gm_ref && h.gm_ref.length) {          // the GM sees each hero's quick reference right on the tile
-          const ul = el("ul", "qr");
-          h.gm_ref.forEach((d) => ul.appendChild(el("li", null, d)));
-          b.appendChild(ul);
-        }
+        if (h.gm_ref && h.gm_ref.length) b.title = h.gm_ref.join("\n");   // the GM's quick reference, on hover
         b.addEventListener("click", () => openHero(h.id));
-        list.appendChild(b);
+        strip.appendChild(b);
       }
-      // …and alongside them, everything else of the campaign's: the boards (collages of pictures, cast and lore cards, art)
-      const { boards } = await call("GET", root.dataset.boardsUrl);
-      if (boards.length) {
-        list.appendChild(el("h3", "tt-hub-h", "Boards"));
-        for (const b of boards) {
-          const t = el("button", "tt-herotile board"); t.type = "button"; t.setAttribute("role", "listitem");
-          t.innerHTML = glyph("g-image"); t.appendChild(el("span", "nm", b.title));
-          t.addEventListener("click", () => { closeAll(); location.hash = b.id; });
-          list.appendChild(t);
-        }
-      }
-    } catch (err) { list.replaceChildren(el("p", "tt-by", err.message)); }
+      if (GM) {
+        const add = el("button", "tt-herocard add"); add.type = "button"; add.innerHTML = glyph("g-new");
+        add.setAttribute("aria-label", "Add a hero"); add.title = "Add a hero";
+        add.addEventListener("click", () => { closeAll(); $("tt-newhero").hidden = false; $("tt-hero-new-name").focus(); });
+        strip.appendChild(add);
+      } else if (!heroes.length) strip.appendChild(el("span", "tt-by", "The GM hasn't added the heroes yet."));
+    } catch (err) { say(err.message); }
   }
-  $("tt-heroes-key").addEventListener("click", openParty);
-  $("tt-hero-back").addEventListener("click", openParty);
+  drawStrip();
+  setInterval(() => { if (!document.hidden) drawStrip(); }, 15000);
   const heroNew = $("tt-hero-new");
   if (heroNew) heroNew.addEventListener("submit", async (e) => {
     e.preventDefault();
-    try { const { id } = await call("POST", HEROES_URL, { name: $("tt-hero-new-name").value }); $("tt-hero-new-name").value = ""; openHero(id); }
-    catch (err) { say(err.message); }
+    try {
+      const { id } = await call("POST", HEROES_URL, { campaign: CAMPAIGN, name: $("tt-hero-new-name").value });
+      $("tt-hero-new-name").value = ""; await drawStrip(); openHero(id);
+    } catch (err) { say(err.message); }
   });
 
   // ── one hero ──
@@ -298,7 +403,7 @@
     del.setAttribute("aria-label", "Remove this hero"); del.title = "Remove this hero";
     del.addEventListener("click", async () => {
       if (!confirm(`Remove ${hero.sheet.name || "this hero"}, their sheet and their folder? This can't be undone.`)) return;
-      try { await call("POST", `${heroUrl(hero.id)}/delete`); openParty(); } catch (err) { say(err.message); }
+      try { await call("POST", `${heroUrl(hero.id)}/delete`); closeAll(); stripSig = ""; drawStrip(); } catch (err) { say(err.message); }
     });
     box.appendChild(del);
     if (hero.history && hero.history.length) {
@@ -430,7 +535,7 @@
     }, POLL_MS);
   }
   root.querySelectorAll("#tt-hero [data-tab]").forEach((k) => k.addEventListener("click", () => { flush(); tab = k.dataset.tab; render(); }));
-  root.addEventListener("tt-closed", () => { flush(); stopHeroPoll(); });
+  root.addEventListener("tt-closed", () => { flush(); stopHeroPoll(); setTimeout(drawStrip, 800); });
   window.addEventListener("pagehide", flush);
 
   // ── the folder: the add key, or a drop on the open folder ──

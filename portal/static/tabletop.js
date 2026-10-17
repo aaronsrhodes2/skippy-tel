@@ -74,7 +74,10 @@
   const canChange = (c) => GM || c.by === ME;
   function cardEl(c) {
     const el = document.createElement("div");
-    el.className = "tt-card" + (canChange(c) ? " mine" : "");
+    el.className = "tt-card " + (c.kind === "image" ? "polaroid" : "cue") + (canChange(c) ? " mine" : "");
+    const pin = document.createElement("i");           // the pin holding it to the cork: a colour of its own, picked from the card's id
+    pin.className = "pin pin-" + (parseInt(c.id.slice(-2), 16) % 5);
+    el.appendChild(pin);
     el.dataset.id = c.id;
     el.setAttribute("role", "button");
     el.setAttribute("aria-label", (c.kind === "image" ? "Picture" : "Note") + " from " + (c.name || "someone"));
@@ -315,7 +318,7 @@
     e.preventDefault();
     const input = $("tt-new-title");
     try {
-      const { board: b } = await call("POST", BOARDS_URL, { title: input.value });
+      const { board: b } = await call("POST", BOARDS_URL, { title: input.value, campaign: root.dataset.campaign });
       input.value = ""; await loadBoards(); closeSheets(); await open(b.id);
     } catch (err) { say(err.message); }
   });

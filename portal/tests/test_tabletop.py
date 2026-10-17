@@ -36,8 +36,17 @@ def as_(app, email):
     return c
 
 
+def campaign(app):
+    """The test's campaign (Heroes of Chance), made the first time it's asked for."""
+    if "_campaign" not in app.config:
+        resp = as_(app, ADMIN).post("/tabletop/campaigns", json={"title": "Heroes of Chance"}, headers=H)
+        assert resp.status_code == 200, resp.data
+        app.config["_campaign"] = resp.json["campaign"]["id"]
+    return app.config["_campaign"]
+
+
 def make_board(app, title="Ep 1 — The Endless Fall"):
-    resp = as_(app, ADMIN).post("/tabletop/boards", json={"title": title}, headers=H)
+    resp = as_(app, ADMIN).post("/tabletop/boards", json={"title": title, "campaign": campaign(app)}, headers=H)
     assert resp.status_code == 200, resp.data
     return resp.json["board"]["id"]
 
@@ -46,7 +55,7 @@ def test_the_gm_makes_boards_and_players_see_them_but_cannot_make_their_own(worl
     app, store = world
     bid = make_board(app)
     eric = as_(app, ERIC)
-    assert [b["title"] for b in eric.get("/tabletop/boards").json["boards"]] == ["Ep 1 — The Endless Fall"]
+    assert [b["title"] for b in eric.get(f"/tabletop/boards?c={campaign(app)}").json["boards"]] == ["Ep 1 — The Endless Fall"]
     assert eric.post("/tabletop/boards", json={"title": "mine"}, headers=H).status_code == 403
     assert eric.post(f"/tabletop/b/{bid}/delete", headers=H).status_code == 403
     assert "boards.json" in store.files and f"boards/{bid}.json" in store.files
@@ -124,9 +133,9 @@ def test_the_launcher_shows_the_tabletop_tile_only_to_those_granted_it(world):
     app, _ = world
     assert 'href="/tabletop"' in as_(app, ERIC).get("/").data.decode()
     assert 'href="/tabletop"' not in as_(app, OUTSIDER).get("/").data.decode()
-    page = as_(app, ERIC).get("/tabletop").data.decode()
+    page = as_(app, ERIC).get(f"/tabletop/c/{campaign(app)}").data.decode()
     assert 'data-gm="0"' in page and 'data-ready="1"' in page and "tt-new" not in page   # a player has no board-making form
-    assert 'data-gm="1"' in as_(app, ADMIN).get("/tabletop").data.decode()
+    assert 'data-gm="1"' in as_(app, ADMIN).get(f"/tabletop/c/{campaign(app)}").data.decode()
 
 
 def test_without_a_bucket_the_page_says_so_and_nothing_is_written(world):
@@ -143,7 +152,7 @@ def test_deleting_a_board_takes_its_pictures_with_it(world):
     as_(app, ERIC).post(f"/tabletop/b/{bid}/image", data={"img": (io.BytesIO(PNG), "a.png")}, headers=H, content_type="multipart/form-data")
     assert as_(app, ADMIN).post(f"/tabletop/b/{bid}/delete", headers=H).status_code == 200
     assert not [p for p in store.files if bid in p]
-    assert [b["id"] for b in as_(app, ERIC).get("/tabletop/boards").json["boards"]] == [keep]
+    assert [b["id"] for b in as_(app, ERIC).get(f"/tabletop/boards?c={campaign(app)}").json["boards"]] == [keep]
 
 
 def test_a_fresh_portal_reads_the_boards_back_from_the_bucket(world):
@@ -158,14 +167,15 @@ def test_a_fresh_portal_reads_the_boards_back_from_the_bucket(world):
 # ── heroes: the sheet, the folder, the Fear ──
 
 def make_hero(app, name="Resirdar", sheet=None, player=""):
-    resp = as_(app, ADMIN).post("/tabletop/heroes", json={"name": name, "sheet": sheet or {}, "player": player}, headers=H)
+    resp = as_(app, ADMIN).post("/tabletop/heroes", json={"name": name, "sheet": sheet or {}, "player": player, "campaign": campaign(app)},
+                                headers=H)
     assert resp.status_code == 200, resp.data
     return resp.json["id"]
 
 
 def test_the_gm_adds_a_hero_with_a_sheet_and_unknown_fields_are_left_out(world):
     app, _ = world
-    resp = as_(app, ADMIN).post("/tabletop/heroes", headers=H, json={"name": "Resirdar", "player": ERIC, "sheet": {
+    resp = as_(app, ADMIN).post("/tabletop/heroes", headers=H, json={"name": "Resirdar", "player": ERIC, "campaign": campaign(app), "sheet": {
         "class": "Wizard", "level": 3, "traits": {"knowledge": {"value": 3, "marked": True}}, "experiences": [{"name": "Sleepless", "bonus": 2}],
         "secret_admin": True, "hp": {"max": 99}}})
     assert resp.json["skipped"] == ["secret_admin"]
@@ -225,14 +235,15 @@ def test_the_fear_is_the_gms_kept_between_sessions_and_rides_on_every_board_poll
     app, store = world
     bid = make_board(app)
     gm, eric = as_(app, ADMIN), as_(app, ERIC)
-    assert gm.post("/tabletop/fear", json={"delta": 3}, headers=H).json["fear"] == 3
-    assert gm.post("/tabletop/fear", json={"value": 99}, headers=H).json["fear"] == 12
-    assert gm.post("/tabletop/fear", json={"delta": -5}, headers=H).json["fear"] == 7
-    assert eric.post("/tabletop/fear", json={"delta": -7}, headers=H).status_code == 403
+    cid = campaign(app)
+    assert gm.post("/tabletop/fear", json={"campaign": cid, "delta": 3}, headers=H).json["fear"] == 3
+    assert gm.post("/tabletop/fear", json={"campaign": cid, "value": 99}, headers=H).json["fear"] == 12
+    assert gm.post("/tabletop/fear", json={"campaign": cid, "delta": -5}, headers=H).json["fear"] == 7
+    assert eric.post("/tabletop/fear", json={"campaign": cid, "delta": -7}, headers=H).status_code == 403
     rev = eric.get(f"/tabletop/b/{bid}").json["rev"]
     assert eric.get(f"/tabletop/b/{bid}?since={rev}").json == {"rev": rev, "fear": 7}
     again = portal.create_app({**SETTINGS}, vm=FakeVm(), skippy=FakeSkippy(), tabletop=tabletop.Tabletop(store))
-    assert as_(again, ADMIN).get("/tabletop/fear").json["fear"] == 7                        # the next session starts where this one ended
+    assert as_(again, ADMIN).get(f"/tabletop/fear?c={cid}").json["fear"] == 7                        # the next session starts where this one ended
 
 
 def test_the_print_view_has_every_field_of_the_official_sheet(world):
@@ -250,7 +261,7 @@ def test_the_print_view_has_every_field_of_the_official_sheet(world):
 def test_the_hub_lists_heroes_with_their_projects(world):
     app, _ = world
     hid = make_hero(app, "Chickenhead", sheet={"class": "Bard", "project": {"name": "Open the letter", "clock_max": 6, "clock": 2}})
-    hero = as_(app, ERIC).get("/tabletop/heroes").json["heroes"][0]
+    hero = as_(app, ERIC).get(f"/tabletop/heroes?c={campaign(app)}").json["heroes"][0]
     assert hero["id"] == hid and hero["project"] == "Open the letter" and (hero["clock"], hero["clock_max"]) == (2, 6)
 
 
@@ -260,8 +271,38 @@ def test_the_gms_quick_reference_never_reaches_a_player(world):
     gm = as_(app, ADMIN)
     assert gm.post(f"/tabletop/h/{hid}/gm", json={"gm_ref": ["Never call him Copperbottom", "", "Misses the wagon"]}, headers=H).status_code == 200
     assert gm.get(f"/tabletop/h/{hid}").json["gm_ref"] == ["Never call him Copperbottom", "Misses the wagon"]
-    assert gm.get("/tabletop/heroes").json["heroes"][0]["gm_ref"][0] == "Never call him Copperbottom"
+    assert gm.get(f"/tabletop/heroes?c={campaign(app)}").json["heroes"][0]["gm_ref"][0] == "Never call him Copperbottom"
     eric = as_(app, ERIC)
-    for url in (f"/tabletop/h/{hid}", "/tabletop/heroes", f"/tabletop/h/{hid}/print"):
+    for url in (f"/tabletop/h/{hid}", f"/tabletop/heroes?c={campaign(app)}", f"/tabletop/h/{hid}/print"):
         assert b"Copperbottom" not in eric.get(url).data, url
     assert eric.post(f"/tabletop/h/{hid}/gm", json={"gm_ref": ["mine now"]}, headers=H).status_code == 403
+
+
+# ── campaigns: Tabletops is a deck of campaigns; each has its own boards, heroes and Fear ──
+
+def test_campaigns_keep_their_boards_heroes_and_fear_apart(world):
+    app, _ = world
+    gm = as_(app, ADMIN)
+    hoc = campaign(app)
+    other = gm.post("/tabletop/campaigns", json={"title": "One-shots"}, headers=H).json["campaign"]["id"]
+    make_board(app)
+    make_hero(app, "Chickenhead")
+    gm.post("/tabletop/fear", json={"campaign": hoc, "value": 4}, headers=H)
+    eric = as_(app, ERIC)
+    deck = {c["title"]: c for c in eric.get("/tabletop/campaigns").json["campaigns"]}
+    assert deck["Heroes of Chance"]["heroes"] == ["Chickenhead"] and deck["Heroes of Chance"]["boards"] == 1
+    assert deck["One-shots"]["heroes"] == [] and deck["One-shots"]["boards"] == 0
+    assert eric.get(f"/tabletop/heroes?c={other}").json == {"heroes": [], "fear": 0}
+    assert eric.get(f"/tabletop/boards?c={other}").json["boards"] == []
+    assert eric.post("/tabletop/campaigns", json={"title": "mine"}, headers=H).status_code == 403
+    assert gm.post("/tabletop/boards", json={"title": "x", "campaign": "nope00000000"}, headers=H).status_code == 404
+
+
+def test_the_tabletops_page_is_the_campaign_deck_and_each_campaign_has_its_own_tabletop(world):
+    app, _ = world
+    cid = campaign(app)
+    eric = as_(app, ERIC)
+    assert 'id="tc"' in eric.get("/tabletop").data.decode()
+    page = eric.get(f"/tabletop/c/{cid}").data.decode()
+    assert f'data-campaign="{cid}"' in page and "Heroes of Chance" in page and 'id="tt-strip"' in page
+    assert eric.get("/tabletop/c/abcdef123456").status_code == 404

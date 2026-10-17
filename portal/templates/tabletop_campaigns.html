@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Tabletops — Maker Portal{% endblock %}
+{% block app %}tabletop{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}d20{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='tabletop.css') }}">
+{% endblock %}
+{% block content %}
+{# Tabletops: one card per campaign (portal/tabletop.py). A campaign opens its own tabletop: the heroes' cards and the cork board. #}
+<section id="tc" class="tc bp" aria-label="Tabletops" data-ready="{{ '1' if ready else '0' }}"
+         data-campaigns-url="{{ url_for('tabletop.campaigns') }}">
+  <div class="notice" id="tc-notice" role="status" hidden></div>
+  <div class="tc-deck" id="tc-deck" role="list"></div>
+  {% if gm %}
+  <form class="tt-new" id="tc-new">
+    <input type="text" id="tc-new-title" maxlength="80" placeholder="A new campaign's name" aria-label="A new campaign's name" autocomplete="off">
+    <button type="submit" class="key" aria-label="Start a campaign" title="Start a campaign"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
+  </form>
+  {% endif %}
+</section>
+<script>
+  (function () {
+    var root = document.getElementById("tc"), deck = document.getElementById("tc-deck"), notice = document.getElementById("tc-notice");
+    var LIST = root.dataset.campaignsUrl;
+    function say(text) { notice.textContent = text; notice.hidden = false; }
+    function card(c) {
+      var a = document.createElement("a");
+      a.className = "tc-card"; a.setAttribute("role", "listitem");
+      a.href = c.url;
+      a.innerHTML = '<svg class="g" aria-hidden="true"><use href="#g-d20"/></svg>';
+      var t = document.createElement("span"); t.className = "nm"; t.textContent = c.title; a.appendChild(t);
+      if (c.blurb) { var b = document.createElement("span"); b.className = "bl"; b.textContent = c.blurb; a.appendChild(b); }
+      var h = document.createElement("span"); h.className = "hs";
+      h.textContent = c.heroes.length ? c.heroes.join(" · ") : "No heroes yet";
+      a.appendChild(h);
+      return a;
+    }
+    async function load() {
+      if (root.dataset.ready !== "1") return say("The Tabletop has no storage yet.");
+      try {
+        var resp = await fetch(LIST, { credentials: "same-origin" }), data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || "Something went wrong.");
+        deck.replaceChildren();
+        data.campaigns.forEach(function (c) { deck.appendChild(card(c)); });
+        if (!data.campaigns.length) say(document.getElementById("tc-new") ? "No campaigns yet. Name the first one below." : "No campaigns yet.");
+      } catch (err) { say(err.message); }
+    }
+    var form = document.getElementById("tc-new");
+    if (form) form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      try {
+        var resp = await fetch(LIST, { method: "POST", credentials: "same-origin",
+          headers: { "X-Tabletop": "1", "Content-Type": "application/json" },
+          body: JSON.stringify({ title: document.getElementById("tc-new-title").value }) });
+        var data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || "Something went wrong.");
+        location.href = data.campaign.url;
+      } catch (err) { say(err.message); }
+    });
+    load();
+  })();
+</script>
+{% endblock %}

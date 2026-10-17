@@ -930,17 +930,59 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @tt.get("")
     @auth.portal_required("tabletop")
     def page():
-        return render_template("tabletop.html", ready=table.ready, gm=auth.is_admin(me()), me_email=me())
+        """Tabletops: a card per campaign (Heroes of Chance, ...). Each opens that campaign's tabletop."""
+        return render_template("tabletop_campaigns.html", ready=table.ready, gm=auth.is_admin(me()))
+
+    @tt.get("/c/<cid>")
+    @auth.portal_required("tabletop")
+    def campaign_page(cid):
+        """One campaign's tabletop: its heroes' cards along the top, its cork board of cue cards and polaroids below."""
+        title = ""
+        if table.ready:
+            try:
+                title = table.campaign(cid)["title"]
+            except tabletop_mod.NotFound:
+                abort(404)
+            except Exception:   # noqa: BLE001 — storage unreachable: the page still loads and says so
+                title = ""
+        return render_template("tabletop.html", ready=table.ready, gm=auth.is_admin(me()), me_email=me(), cid=cid, title=title)
+
+    @tt.get("/campaigns")
+    @auth.portal_required("tabletop")
+    def campaigns():
+        def answer():
+            out = []
+            for c in table.campaigns():
+                out.append({**c, "heroes": [h["name"] for h in heroes.summary(c["id"])], "boards": len(table.boards(c["id"])),
+                            "url": url_for("tabletop.campaign_page", cid=c["id"])})
+            return {"campaigns": out}
+        return tt_call(answer)
+
+    @tt.post("/campaigns")
+    @auth.admin_required
+    def campaign_new():
+        body = request.get_json(silent=True) or {}
+        def make():
+            c = table.create_campaign(body.get("title"), body.get("blurb"), me())
+            return {"campaign": {**c, "url": url_for("tabletop.campaign_page", cid=c["id"])}}
+        return tt_call(make)
+
+    @tt.post("/campaigns/<cid>/edit")
+    @auth.admin_required
+    def campaign_edit(cid):
+        body = request.get_json(silent=True) or {}
+        return tt_call(lambda: {"campaign": table.edit_campaign(cid, body.get("title"), body.get("blurb"))})
 
     @tt.get("/boards")
     @auth.portal_required("tabletop")
     def boards():
-        return tt_call(lambda: {"boards": table.boards()})
+        return tt_call(lambda: {"boards": table.boards(request.args.get("c", ""))})
 
     @tt.post("/boards")
     @auth.admin_required
     def board_new():
-        return tt_call(lambda: {"board": table.create_board((request.get_json(silent=True) or {}).get("title"), me())})
+        body = request.get_json(silent=True) or {}
+        return tt_call(lambda: {"board": table.create_board(body.get("title"), me(), str(body.get("campaign") or ""))})
 
     @tt.post("/b/<bid>/rename")
     @auth.admin_required
@@ -958,10 +1000,12 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         """The whole board; with ?since=<rev>, just {"rev": n} while nothing has changed (the page polls this)."""
         since = request.args.get("since", type=int)
 
-        def answer():                                   # the GM's Fear rides along on every poll: it's on screen everywhere
-            if since is not None and table.rev(bid) == since:
-                return {"rev": since, "fear": heroes.fear()}
-            return {**table.view(bid), "fear": heroes.fear()}
+        def answer():                                   # the campaign's Fear rides along on every poll: it's on screen everywhere
+            b = table.board(bid)
+            fear_now = heroes.fear(b["campaign"]) if b.get("campaign") else 0
+            if since is not None and b["rev"] == since:
+                return {"rev": since, "fear": fear_now}
+            return {**table.view(bid), "fear": fear_now}
         resp = tt_call(answer)
         if not isinstance(resp, tuple):
             resp.headers["Cache-Control"] = "no-store"
@@ -1019,25 +1063,26 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @tt.get("/fear")
     @auth.portal_required("tabletop")
     def fear():
-        return tt_call(lambda: {"fear": heroes.fear(), "max": tabletop_mod.FEAR_MAX})
+        return tt_call(lambda: {"fear": heroes.fear(request.args.get("c", "")), "max": tabletop_mod.FEAR_MAX})
 
     @tt.post("/fear")
     @auth.admin_required
     def fear_set():
         body = request.get_json(silent=True) or {}
-        return tt_call(lambda: {"fear": heroes.set_fear(value=body.get("value"), delta=body.get("delta"))})
+        return tt_call(lambda: {"fear": heroes.set_fear(str(body.get("campaign") or ""), value=body.get("value"), delta=body.get("delta"))})
 
     @tt.get("/heroes")
     @auth.portal_required("tabletop")
     def heroes_list():
-        return tt_call(lambda: {"heroes": heroes.summary(gm=auth.is_admin(me())), "fear": heroes.fear()})
+        cid = request.args.get("c", "")
+        return tt_call(lambda: {"heroes": heroes.summary(cid, gm=auth.is_admin(me())), "fear": heroes.fear(cid)})
 
     @tt.post("/heroes")
     @auth.admin_required
     def hero_new():
         body = request.get_json(silent=True) or {}
-        return tt_call(lambda: heroes.create(me(), body.get("name"), body.get("sheet"), body.get("player", ""), body.get("player_name", ""),
-                                             body.get("gm_ref")))
+        return tt_call(lambda: heroes.create(me(), str(body.get("campaign") or ""), body.get("name"), body.get("sheet"),
+                                             body.get("player", ""), body.get("player_name", ""), body.get("gm_ref")))
 
     @tt.get("/h/<hid>")
     @auth.portal_required("tabletop")

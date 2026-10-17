@@ -7,7 +7,8 @@ adds cards, drags them about, and can edit or remove their own. The Captain can 
 Where it lives: one private GCS bucket (TABLETOP_BUCKET, made by infra/bootstrap), read and written by the portal's
 service account. Cloud Run's disk is gone on every restart, so nothing is kept anywhere else:
 
-    boards.json                 [{"id", "title", "by", "at"}, ...]   the boards, in the order they were made
+    campaigns.json              [{"id", "title", "blurb", "by", "at"}, ...]   each campaign has its own boards, heroes and Fear
+    boards.json                 [{"id", "title", "by", "at", "campaign"}, ...]   the boards, in the order they were made
     boards/<id>.json            {"id", "title", "rev", "cards": [...]}
     images/<board>/<card>.<ext> each picture card's file (served back through the portal: the bucket is never public)
 
@@ -142,6 +143,7 @@ class Tabletop:
         self._lock = threading.RLock()
         self._boards: dict[str, dict] = {}        # id -> board, once read
         self._index: list[dict] | None = None
+        self._campaigns: list[dict] | None = None
 
     @property
     def ready(self) -> bool:
@@ -152,12 +154,26 @@ class Tabletop:
         raw = self.store.get(path)
         return json.loads(raw) if raw else default
 
-    def boards(self) -> list[dict]:
+    def campaigns(self) -> list[dict]:
+        """Every campaign: {"id", "title", "blurb", "by", "at"}. A campaign holds its own boards, heroes and Fear."""
+        with self._lock:
+            if self._campaigns is None:
+                found = self._read_json("campaigns.json", [])
+                self._campaigns = [c for c in found if isinstance(c, dict) and _ID.match(str(c.get("id", "")))]
+            return [dict(c) for c in self._campaigns]
+
+    def campaign(self, cid: str) -> dict:
+        for c in self.campaigns():
+            if c["id"] == cid:
+                return c
+        raise NotFound(cid)
+
+    def boards(self, campaign: str | None = None) -> list[dict]:
         with self._lock:
             if self._index is None:
                 index = self._read_json("boards.json", [])
                 self._index = [b for b in index if isinstance(b, dict) and _ID.match(str(b.get("id", "")))]
-            return [dict(b) for b in self._index]
+            return [dict(b) for b in self._index if campaign is None or b.get("campaign") == campaign]
 
     def board(self, board_id: str) -> dict:
         if not _ID.match(board_id or ""):
@@ -176,7 +192,7 @@ class Tabletop:
     def view(self, board_id: str) -> dict:
         b = self.board(board_id)
         return {"id": b["id"], "title": b["title"], "rev": b["rev"], "cards": [dict(c) for c in b["cards"]],
-                "w": BOARD_W, "h": BOARD_H}
+                "campaign": b.get("campaign", ""), "w": BOARD_W, "h": BOARD_H}
 
     def rev(self, board_id: str) -> int:
         return self.board(board_id)["rev"]
@@ -197,11 +213,37 @@ class Tabletop:
         board["rev"] += 1
         self.store.put(f"boards/{board['id']}.json", json.dumps(board, ensure_ascii=False).encode(), "application/json")
 
-    def create_board(self, title, by: str) -> dict:
+    def _save_campaigns(self):
+        self.store.put("campaigns.json", json.dumps(self._campaigns, ensure_ascii=False).encode(), "application/json")
+
+    def create_campaign(self, title, blurb, by: str) -> dict:
         with self._lock:
+            self.campaigns()
+            c = {"id": new_id(), "title": _title(title), "blurb": str(blurb or "").strip()[:300], "by": by, "at": int(time.time())}
+            self._campaigns.append(c)
+            self._save_campaigns()
+            return dict(c)
+
+    def edit_campaign(self, cid: str, title=None, blurb=None) -> dict:
+        with self._lock:
+            self.campaign(cid)
+            found = None
+            for c in self._campaigns:
+                if c["id"] == cid:
+                    if title is not None:
+                        c["title"] = _title(title)
+                    if blurb is not None:
+                        c["blurb"] = str(blurb).strip()[:300]
+                    found = dict(c)
+            self._save_campaigns()
+            return found
+
+    def create_board(self, title, by: str, campaign: str) -> dict:
+        with self._lock:
+            self.campaign(campaign)
             self.boards()
-            board = {"id": new_id(), "title": _title(title), "by": by, "at": int(time.time())}
-            self._boards[board["id"]] = {"id": board["id"], "title": board["title"], "rev": 0, "cards": []}
+            board = {"id": new_id(), "title": _title(title), "by": by, "at": int(time.time()), "campaign": campaign}
+            self._boards[board["id"]] = {"id": board["id"], "title": board["title"], "rev": 0, "cards": [], "campaign": campaign}
             self._save(self._boards[board["id"]])
             self._index.append(board)
             self._save_index()
@@ -323,7 +365,7 @@ class Tabletop:
 #   heroes.json                       ["<id>", ...]
 #   heroes/<id>.json                  {"id", "rev", "player", "sheet": {...}, "files": [...], "history": [...]}
 #   heroes/<id>/files/<fid>.<ext>     the hero's folder: the print packet, sheet photos, portraits
-#   fear.json                         {"value": n}   the GM's Fear, carried from session to session
+#   fear/<campaign>.json              {"value": n}   the GM's Fear in that campaign, carried from session to session
 #
 # The sheet is a fixed shape (SPEC below). A change is a list of (path, value) pairs, each checked against SPEC: a path the
 # sheet doesn't have, or a value of the wrong kind, is refused, so the stored sheet can only ever hold the official fields.
@@ -480,26 +522,28 @@ class Heroes:
         self.t = table
         self._ids: list[str] | None = None
         self._heroes: dict[str, dict] = {}
-        self._fear: int | None = None
+        self._fear: dict[str, int] = {}
 
     @property
     def store(self):
         return self.t.store
 
     # ── the Fear ──
-    def fear(self) -> int:
+    def fear(self, campaign: str) -> int:
         with self.t._lock:
-            if self._fear is None:
-                self._fear = int((self.t._read_json("fear.json", {}) or {}).get("value", 0))
-            return self._fear
+            if campaign not in self._fear:
+                self.t.campaign(campaign)
+                self._fear[campaign] = int((self.t._read_json(f"fear/{campaign}.json", {}) or {}).get("value", 0))
+            return self._fear[campaign]
 
-    def set_fear(self, value=None, delta=None) -> int:
+    def set_fear(self, campaign: str, value=None, delta=None) -> int:
         with self.t._lock:
-            now = self.fear()
+            now = self.fear(campaign)
             new = now + clean(_int(-FEAR_MAX, FEAR_MAX), delta) if delta is not None else clean(_int(0, FEAR_MAX), value)
-            self._fear = max(0, min(FEAR_MAX, new))
-            self.store.put("fear.json", json.dumps({"value": self._fear, "at": int(time.time())}).encode(), "application/json")
-            return self._fear
+            self._fear[campaign] = max(0, min(FEAR_MAX, new))
+            self.store.put(f"fear/{campaign}.json", json.dumps({"value": self._fear[campaign], "at": int(time.time())}).encode(),
+                           "application/json")
+            return self._fear[campaign]
 
     # ── reading ──
     def ids(self) -> list[str]:
@@ -531,10 +575,12 @@ class Heroes:
                 self._heroes[hid] = data
             return self._heroes[hid]
 
-    def summary(self, gm: bool = False) -> list[dict]:
+    def summary(self, campaign: str, gm: bool = False) -> list[dict]:
         out = []
         for hid in self.ids():
             h = self.hero(hid)
+            if h.get("campaign") != campaign:
+                continue
             s = h["sheet"]
             row = {"id": hid, "name": s["name"], "class": s["class"], "subclass": s["subclass"], "level": s["level"],
                    "player": h.get("player", ""), "player_name": h.get("player_name", ""),
@@ -546,7 +592,8 @@ class Heroes:
 
     def view(self, hid: str, history: bool = False) -> dict:
         h = self.hero(hid)
-        out = {"id": hid, "rev": h["rev"], "player": h.get("player", ""), "player_name": h.get("player_name", ""),
+        out = {"id": hid, "rev": h["rev"], "campaign": h.get("campaign", ""), "player": h.get("player", ""),
+               "player_name": h.get("player_name", ""),
                "sheet": json.loads(json.dumps(h["sheet"])), "files": [dict(f) for f in h["files"]]}
         if history:                                   # the GM's eyes only: the change log, and the quick reference for storytelling
             out["history"] = list(h["history"][-60:])
@@ -595,11 +642,12 @@ class Heroes:
             h["gm_ref"] = self._gm_ref(lines)
             self._save(h)
 
-    def create(self, by: str, name, sheet=None, player="", player_name="", gm_ref=None) -> dict:
+    def create(self, by: str, campaign: str, name, sheet=None, player="", player_name="", gm_ref=None) -> dict:
         with self.t._lock:
+            self.t.campaign(campaign)
             self.ids()
             hid = new_id()
-            h = {"id": hid, "rev": 0, "player": self._email(player), "player_name": str(player_name or "")[:60],
+            h = {"id": hid, "rev": 0, "campaign": campaign, "player": self._email(player), "player_name": str(player_name or "")[:60],
                  "sheet": blank_sheet(), "files": [], "history": [], "gm_ref": self._gm_ref(gm_ref or [])}
             skipped = self._apply(h, by, flatten(sheet if isinstance(sheet, dict) else {}), log=False, strict=False)
             _put(h["sheet"], "name", clean(SPEC["name"], name or h["sheet"]["name"] or "New hero"))
