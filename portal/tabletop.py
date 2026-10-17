@@ -66,18 +66,28 @@ def image_kind(data: bytes) -> tuple[str, str] | None:
     return None
 
 
+class StorageMissing(RuntimeError):
+    """The bucket itself doesn't exist (infra/bootstrap hasn't made it): nothing can be read or kept, and it must not look like an empty table."""
+
+
 class GcsStore:
     """Files in one private bucket. The client is made on first use, so the portal starts without credentials (tests)."""
 
-    def __init__(self, bucket: str):
+    def __init__(self, bucket: str, client=None):
         self.bucket_name = bucket
+        self._client = client
         self._bucket = None
 
     def _b(self):
         if self._bucket is None:
-            from google.cloud import storage          # imported here: only a deployed portal needs it
-            self._bucket = storage.Client().bucket(self.bucket_name)
+            if self._client is None:
+                from google.cloud import storage          # imported here: only a deployed portal needs it
+                self._client = storage.Client()
+            self._bucket = self._client.bucket(self.bucket_name)
         return self._bucket
+
+    def _missing(self, err) -> bool:
+        return "bucket does not exist" in str(err).lower()
 
     def get(self, path: str) -> bytes | None:
         blob = self._b().blob(path)
@@ -85,11 +95,18 @@ class GcsStore:
             return blob.download_as_bytes()
         except Exception as err:   # noqa: BLE001 — google.api_core.exceptions.NotFound without importing it at module load
             if type(err).__name__ == "NotFound":
+                if self._missing(err):                  # a missing BUCKET is not a missing file: say so, don't read it as empty
+                    raise StorageMissing(f"The bucket {self.bucket_name} doesn't exist yet.") from err
                 return None
             raise
 
     def put(self, path: str, data: bytes, content_type: str) -> None:
-        self._b().blob(path).upload_from_string(data, content_type=content_type)
+        try:
+            self._b().blob(path).upload_from_string(data, content_type=content_type)
+        except Exception as err:   # noqa: BLE001
+            if type(err).__name__ == "NotFound" and self._missing(err):
+                raise StorageMissing(f"The bucket {self.bucket_name} doesn't exist yet.") from err
+            raise
 
     def delete(self, path: str) -> None:
         try:
@@ -97,6 +114,8 @@ class GcsStore:
         except Exception as err:   # noqa: BLE001
             if type(err).__name__ != "NotFound":
                 raise
+            if self._missing(err):
+                raise StorageMissing(f"The bucket {self.bucket_name} doesn't exist yet.") from err
 
 
 class MemoryStore:
@@ -144,6 +163,14 @@ class Tabletop:
         self._boards: dict[str, dict] = {}        # id -> board, once read
         self._index: list[dict] | None = None
         self._campaigns: list[dict] | None = None
+
+    def reset(self) -> None:
+        """Forget everything held in memory, so the next read comes from storage. Called when a write fails: every write changes the
+        copy in memory first, and a save that didn't happen must not leave a campaign, board or card that only this process believes in."""
+        with self._lock:
+            self._boards.clear()
+            self._index = None
+            self._campaigns = None
 
     @property
     def ready(self) -> bool:
@@ -554,6 +581,13 @@ class Heroes:
     @property
     def store(self):
         return self.t.store
+
+    def reset(self) -> None:
+        """As Tabletop.reset(): drop the copies in memory (after a failed write) so the next read comes from storage."""
+        with self.t._lock:
+            self._ids = None
+            self._heroes.clear()
+            self._fear.clear()
 
     # ── the Fear ──
     def fear(self, campaign: str) -> int:

@@ -919,7 +919,12 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             return jsonify(error="That board or card is gone."), 404
         except tabletop_mod.Refused as err:
             return jsonify(error=str(err)), 400
-        except Exception:   # noqa: BLE001 — the bucket is missing or unreachable: say so, never a bare 500
+        except tabletop_mod.StorageMissing:
+            table.reset(); heroes.reset()
+            app.logger.error("tabletop: the storage bucket doesn't exist (infra/bootstrap makes it)")
+            return jsonify(error="The Tabletop's storage bucket doesn't exist yet: the GM needs to run infra/bootstrap."), 503
+        except Exception:   # noqa: BLE001 — the bucket is unreachable: say so, never a bare 500
+            table.reset(); heroes.reset()               # the write didn't happen: don't keep a copy that says it did
             app.logger.exception("tabletop: storage call failed")
             return jsonify(error="The Tabletop can't reach its storage right now. Try again in a minute."), 503
 

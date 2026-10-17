@@ -354,3 +354,67 @@ def test_the_gm_removes_a_duplicate_campaign_but_never_one_that_still_holds_hero
     assert gm.post(f"/tabletop/campaigns/{other}/delete", headers=H).status_code == 200                         # an empty one goes
     assert [c["title"] for c in gm.get("/tabletop/campaigns").json["campaigns"]] == ["Heroes of Chance"]
     assert gm.post(f"/tabletop/campaigns/{other}/delete", headers=H).status_code == 404
+
+
+# ── a failed save must not leave a campaign (or a hero, or a card) that only this process believes in ──
+
+class FlakyStore(tabletop.MemoryStore):
+    """A store whose saves can be made to fail, like a bucket that is missing or unreachable."""
+    broken = False
+
+    def put(self, path, data, content_type):
+        if self.broken:
+            raise OSError("the bucket can't be reached")
+        super().put(path, data, content_type)
+
+
+def test_a_save_that_fails_leaves_nothing_behind_so_pressing_the_key_again_makes_one_not_two():
+    store = FlakyStore()
+    app = portal.create_app({**SETTINGS}, vm=FakeVm(), skippy=FakeSkippy(), tabletop=tabletop.Tabletop(store))
+    gm = as_(app, ADMIN)
+    store.broken = True
+    first = gm.post("/tabletop/campaigns", json={"title": "Heroes of Chance"}, headers=H)
+    assert first.status_code == 503 and "storage" in first.json["error"]
+    assert gm.get("/tabletop/campaigns").json["campaigns"] == []                         # no phantom card on the deck
+    store.broken = False
+    assert gm.post("/tabletop/campaigns", json={"title": "Heroes of Chance"}, headers=H).status_code == 200
+    assert [c["title"] for c in gm.get("/tabletop/campaigns").json["campaigns"]] == ["Heroes of Chance"]    # one, not two
+
+
+def test_a_hero_whose_save_fails_is_not_kept_in_memory_either():
+    store = FlakyStore()
+    app = portal.create_app({**SETTINGS}, vm=FakeVm(), skippy=FakeSkippy(), tabletop=tabletop.Tabletop(store))
+    gm = as_(app, ADMIN)
+    cid = gm.post("/tabletop/campaigns", json={"title": "Heroes of Chance"}, headers=H).json["campaign"]["id"]
+    store.broken = True
+    assert gm.post("/tabletop/heroes", json={"campaign": cid, "name": "Resirdar"}, headers=H).status_code == 503
+    store.broken = False
+    assert gm.get(f"/tabletop/heroes?c={cid}").json["heroes"] == []
+
+
+def test_a_missing_bucket_is_an_error_not_an_empty_table_but_a_missing_file_is_just_absent():
+    class NotFound(Exception):                                                            # google.api_core.exceptions.NotFound, by name
+        pass
+
+    class Blob:
+        def __init__(self, message):
+            self.message = message
+
+        def download_as_bytes(self):
+            raise NotFound(self.message)
+
+    class Client:
+        def __init__(self, message):
+            self.message = message
+
+        def bucket(self, name):
+            return type("B", (), {"blob": lambda _s, path: Blob(self.message)})()
+
+    gone = tabletop.GcsStore("skippy-tel-tabletop", client=Client("404 GET .../b/skippy-tel-tabletop/o/boards.json: The specified bucket does not exist."))
+    with pytest.raises(tabletop.StorageMissing):
+        gone.get("boards.json")
+    fine = tabletop.GcsStore("skippy-tel-tabletop", client=Client("404 GET .../o/boards.json: No such object: skippy-tel-tabletop/boards.json"))
+    assert fine.get("boards.json") is None
+    app = portal.create_app({**SETTINGS}, vm=FakeVm(), skippy=FakeSkippy(), tabletop=tabletop.Tabletop(gone))
+    resp = as_(app, ADMIN).get("/tabletop/campaigns")
+    assert resp.status_code == 503 and "bucket" in resp.json["error"]                     # the deck says so, instead of showing nothing
