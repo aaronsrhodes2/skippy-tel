@@ -110,15 +110,12 @@
     {% endif %}
 
   </div></div>
-  <div class="pips" aria-hidden="true"><i></i></div>
+  <div class="pips"><i></i></div>
   <div class="keybar" role="tablist">
     <button type="button" class="key" data-go="play" aria-label="Play" title="Play"><svg class="g" aria-hidden="true"><use href="#g-{{ game.glyph }}"/></svg></button>
     {% if game.facts or game.links %}<button type="button" class="key" data-go="info" aria-label="Facts" title="Facts"><svg class="g" aria-hidden="true"><use href="#g-info"/></svg></button>{% endif %}
     <button type="button" class="key" data-go="talk" aria-label="Discord" title="Discord"><svg class="g" aria-hidden="true"><use href="#g-talk"/></svg></button>
     {% if is_admin and status %}<button type="button" class="key" data-go="admin" aria-label="Admin" title="Admin"><svg class="g" aria-hidden="true"><use href="#g-gear"/></svg></button>{% endif %}
-    <span class="grow"></span>
-    <button type="button" class="key prev" aria-label="Earlier" title="Earlier"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
-    <button type="button" class="key next" aria-label="Later" title="Later"><svg class="g flip" aria-hidden="true"><use href="#g-back"/></svg></button>
   </div>
 </section>
 <script>
@@ -137,8 +134,7 @@
     }
     const pager = Bridge.pager(panel, {pips: root.querySelector(".pips"), onchange: light});
     keys.forEach(k => k.addEventListener("click", () => pager.go(startPage(k.dataset.go))));
-    root.querySelector(".prev").addEventListener("click", () => pager.go(pager.page() - 1));
-    root.querySelector(".next").addEventListener("click", () => pager.go(pager.page() + 1));
+    // earlier / later: the ‹ › keys on the bar under the panes, the wheel and the arrow keys (Bridge.pager, static/bridge.js)
     light(0);
   })();
 </script>

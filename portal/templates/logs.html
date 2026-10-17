@@ -35,10 +35,6 @@
 <script>
   (function () {
     var panel = document.getElementById("logpg"), pager = Bridge.pager(panel, { pips: panel.parentNode.querySelector(".pips") });
-    document.addEventListener("keydown", function (e) {
-      if (e.key === "PageDown") { e.preventDefault(); pager.go(pager.page() + 1); }
-      else if (e.key === "PageUp") { e.preventDefault(); pager.go(pager.page() - 1); }
-    });
   })();
 </script>
 {% endblock %}

@@ -205,7 +205,7 @@
       bar.className = "pg-bar";
       pips.parentNode.insertBefore(bar, pips);
       bar.appendChild(flip.prev); bar.appendChild(pips); bar.appendChild(flip.next);
-      pips.setAttribute("role", "slider"); pips.setAttribute("aria-label", "Page"); pips.tabIndex = 0;
+      pips.removeAttribute("aria-hidden"); pips.setAttribute("role", "slider"); pips.setAttribute("aria-label", "Page"); pips.tabIndex = 0;
       var scrubbing = false;
       function scrubTo(x) { var r = pips.getBoundingClientRect(); if (r.width) go(Math.floor((x - r.left) / r.width * pages)); }
       pips.addEventListener("pointerdown", function (e) { scrubbing = true; pips.setPointerCapture(e.pointerId); scrubTo(e.clientX); });
@@ -213,7 +213,7 @@
       pips.addEventListener("pointerup", function () { scrubbing = false; });
       pips.addEventListener("pointercancel", function () { scrubbing = false; });
       pips.addEventListener("keydown", function (e) {
-        var to = { ArrowLeft: page - 1, ArrowRight: page + 1, Home: 0, End: pages - 1 }[e.key];
+        var to = { Home: 0, End: pages - 1 }[e.key];                // ←/→ and PageUp/PageDown: the global handler below
         if (to !== undefined) { e.preventDefault(); go(to); }
       });
     }
@@ -227,7 +227,28 @@
     var api = { go: go, page: function () { return page; }, pages: function () { return pages; },
                 last: function () { go(pages - 1); }, refresh: refresh };
     panel._pager = api;
+    livePagers.push({ panel: panel, api: api });
     refresh();
     return api;
   };
+
+  // The keyboard, for every pager on every page: PageUp/PageDown and ←/→ flip the pager you can see (the one in an open sheet or
+  // dialog first), unless you are typing or something else already took the key (a page's own handler on document runs first:
+  // this listens on window, so a list that flips itself with PageDown wins). Pages need no key handling of their own.
+  var livePagers = [];
+  function shownPager() {
+    var seen = livePagers.filter(function (p) { return p.panel.isConnected && p.panel.getClientRects().length && p.api.pages() > 1; });
+    var top = seen.filter(function (p) { return p.panel.closest(".sheet, [role=dialog]"); });
+    return (top.length ? top[top.length - 1] : seen[0]) || null;
+  }
+  window.addEventListener("keydown", function (e) {
+    var step = { PageDown: 1, ArrowRight: 1, PageUp: -1, ArrowLeft: -1 }[e.key];
+    if (!step || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+    var t = e.target;
+    if (t && t.closest && t.closest("input, textarea, select, [contenteditable=''], [contenteditable=true], [data-keys-own]")) return;
+    var p = shownPager();
+    if (!p) return;
+    e.preventDefault();
+    p.api.go(p.api.page() + step);
+  });
 })();
