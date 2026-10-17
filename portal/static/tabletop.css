@@ -45,15 +45,6 @@
 .tt-sheet-top, .tt-sheet-bottom { flex: none; display: flex; align-items: center; gap: 8px; }
 .tt-sheet-top > .g { width: 22px; height: 22px; color: var(--accent); }
 .tt-by { font: 600 .85rem var(--mono); color: var(--muted); }
-.tt-list { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 6px; }
-.tt-list button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; text-align: left; color: var(--ink);
-                  background: #05090b; border: 1px solid var(--dim-green-hi); font: 600 .95rem var(--mono);
-                  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
-.tt-list button[aria-current="true"] { border-color: var(--accent); color: var(--accent); }
-.tt-list .row { display: flex; gap: 6px; align-items: center; }
-.tt-list .row > button:first-child { flex: 1; min-width: 0; }
-.tt-list .row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tt-pager { flex: none; display: flex; gap: 6px; justify-content: center; }
 .tt-new { flex: none; display: flex; gap: 6px; }
 .tt-new input { flex: 1; min-width: 0; height: 40px; padding: 0 10px; background: var(--panel); color: var(--ink); border: 1px solid var(--dim-green-hi); }
 .tt-new input:focus { border-color: var(--accent); outline: none; }
@@ -83,13 +74,6 @@
 .tt-fear-pips .pip.on { background: var(--red); }
 .tt-fear-keys { justify-content: center; gap: 24px; }
 
-.tt-party { flex: 1; min-height: 0; overflow: hidden; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; align-content: start; }
-.tt-herotile { display: flex; flex-direction: column; gap: 4px; padding: 12px; text-align: left; background: #05090b; color: var(--ink);
-               border: 1px solid var(--accent); clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
-.tt-herotile .nm { font: 700 1.1rem var(--mono); color: var(--accent); }
-.tt-herotile .cl { font-size: .85rem; }
-.tt-herotile .pl { font-size: .75rem; color: var(--muted); }
-.tt-herotile .pj { display: flex; gap: 8px; align-items: center; font-size: .78rem; color: var(--cyan); }
 .clk { display: inline-flex; gap: 2px; }
 .clk i { width: 8px; height: 8px; border: 1px solid var(--cyan); }
 .clk i.on { background: var(--cyan); }
@@ -147,23 +131,7 @@
 .tt-hero .file .fn { font-size: .78rem; overflow-wrap: anywhere; }
 .tt-hero .file .fm { font-size: .66rem; color: var(--muted); }
 .tt-hero .file .fk { display: flex; gap: 4px; }
-.tt-hub-h { grid-column: 1 / -1; margin: 8px 0 0; font: 700 .8rem var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-.tt-herotile.board { flex-direction: row; align-items: center; border-color: var(--dim-green-hi); }
-.tt-herotile.board .g { width: 22px; height: 22px; color: var(--accent); flex: none; }
 .tt-hero .qref textarea { width: 100%; box-sizing: border-box; padding: 6px; background: var(--panel); color: var(--ink); border: 1px solid var(--red); font: 15px/1.4 inherit; resize: none; }
-.tt-herotile .qr { margin: 4px 0 0; padding-left: 16px; font-size: .72rem; line-height: 1.3; color: var(--ink); }
-.tt-herotile .qr li { margin: 0 0 2px; }
-
-/* ── the campaigns deck (templates/tabletop_campaigns.html) ── */
-.tc { gap: 8px; }
-.tc-deck { flex: 1; min-height: 0; overflow: hidden; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; align-content: start; }
-.tc-card { display: flex; flex-direction: column; gap: 6px; padding: 18px; min-height: 140px; color: var(--ink); text-decoration: none; background: #05090b;
-           border: 2px solid var(--accent); clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px); }
-.tc-card:hover, .tc-card:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
-.tc-card .g { width: 34px; height: 34px; color: var(--accent); }
-.tc-card .nm { font: 700 1.4rem var(--mono); color: var(--accent); }
-.tc-card .bl { font-size: .9rem; }
-.tc-card .hs { font-size: .8rem; color: var(--muted); }
 
 /* ── the heroes along the top of a campaign's tabletop ── */
 .tt-title .tt-campaign { color: var(--ink); }
@@ -192,7 +160,3 @@
 .avwrap.sm { width: 34px; height: 34px; }
 .tt-hero .file .fk .key.on::after { background: var(--accent); } .tt-hero .file .fk .key.on .g { color: #000; }
 
-/* a campaign card's keys (the GM's): rename, and remove an empty one */
-.tc-item { position: relative; display: flex; }
-.tc-item .tc-card { flex: 1; }
-.tc-keys { position: absolute; top: 8px; right: 12px; display: flex; gap: 4px; }

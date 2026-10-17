@@ -9,7 +9,7 @@
   if (!root || root.dataset.ready !== "1") return;
   const $ = (id) => document.getElementById(id);
   const GM = root.dataset.gm === "1";
-  const HEROES_URL = root.dataset.heroesUrl, FEAR_URL = root.dataset.fearUrl, CAMPAIGN = root.dataset.campaign;
+  const HEROES_URL = root.dataset.heroesUrl, FEAR_URL = root.dataset.fearUrl;
   const heroUrl = (id) => root.dataset.heroUrl.replace("HID", encodeURIComponent(id));
   const POLL_MS = 4000, SAVE_MS = 700, FEAR_MAX = 12;
   const notice = $("tt-notice");
@@ -57,7 +57,7 @@
     }
   }
   async function setFear(body) {
-    try { showFear((await call("POST", FEAR_URL, { campaign: CAMPAIGN, ...body })).fear); } catch (err) { say(err.message); }
+    try { showFear((await call("POST", FEAR_URL, body)).fear); } catch (err) { say(err.message); }
   }
   root.addEventListener("tt-fear", (e) => showFear(e.detail));
   fearKey.addEventListener("click", () => { closeAll(); $("tt-fearsheet").hidden = false; showFear(fear || 0); startFearFx(); });
@@ -231,7 +231,7 @@
   if (heroNew) heroNew.addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
-      const { id } = await call("POST", HEROES_URL, { campaign: CAMPAIGN, name: $("tt-hero-new-name").value });
+      const { id } = await call("POST", HEROES_URL, { name: $("tt-hero-new-name").value });
       $("tt-hero-new-name").value = ""; await drawStrip(); openHero(id);
     } catch (err) { say(err.message); }
   });
@@ -504,6 +504,7 @@
     const box = $("tt-hero-avw"), face = $("tt-hero-av");   // the avatar beside the name
     if (hero.avatar) { face.src = `${heroUrl(hero.id)}/files/${hero.avatar}`; cropTo(face, hero.avatar_focus); box.hidden = false; }
     else { face.removeAttribute("src"); box.hidden = true; }
+    $("tt-hero-av-key").hidden = !canEdit;             // choosing the avatar is the player's (and the GM's)
   }
 
   // ── saving: changes wait a moment, then go as one batch ──
@@ -580,6 +581,19 @@
     tab = "folder"; await load(hero.id);
   }
   $("tt-hero-file").addEventListener("change", (e) => { upload(e.target.files); e.target.value = ""; });
+  // The avatar from a picture on this device: it goes into the folder like any file, and becomes the face on the hero's card.
+  $("tt-hero-av-key").addEventListener("click", () => $("tt-avatar-file").click());
+  $("tt-avatar-file").addEventListener("change", async (e) => {
+    const file = e.target.files[0]; e.target.value = "";
+    if (!file || !hero || !canEdit) return;
+    try {
+      say("Adding the avatar…", 0);
+      const form = new FormData(); form.append("file", file, file.name); form.append("name", file.name);
+      const { file: added } = await call("POST", `${heroUrl(hero.id)}/files`, form);
+      await call("POST", `${heroUrl(hero.id)}/avatar`, { file: added.id });
+      notice.hidden = true; stripSig = ""; await load(hero.id); drawStrip();
+    } catch (err) { say(err.message, 6000); }
+  });
   const heroSheet = $("tt-hero");
   heroSheet.addEventListener("dragover", (e) => { if (tab === "folder" && canEdit && [...e.dataTransfer.types].includes("Files")) e.preventDefault(); });
   heroSheet.addEventListener("drop", (e) => { if (tab === "folder" && canEdit) { e.preventDefault(); upload(e.dataTransfer.files); } });

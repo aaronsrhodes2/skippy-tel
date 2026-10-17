@@ -1,14 +1,13 @@
-// The Tabletop (templates/tabletop.html, portal/tabletop.py): the adventure's shared boards.
-// The board is a fixed surface (board units) drawn inside a view you drag to pan and pinch or wheel to zoom. Cards are
-// pictures and notes; yours (or every card, for the GM) can be dragged, edited and taken down. Other people's changes
-// arrive by a poll every few seconds that costs one small answer while nothing has moved.
+// The Tabletop's cork board (templates/tabletop.html, portal/tabletop.py): where everything about the game that isn't one hero's is
+// added and shown. The board is a fixed surface (board units) drawn inside a view you drag to pan and pinch or wheel to zoom.
+// Cards are pictures (polaroids) and notes (cue cards); yours (or every card, for the GM) can be dragged, edited and taken down.
+// Other people's changes arrive by a poll every few seconds that costs one small answer while nothing has moved.
 (() => {
   "use strict";
   const root = document.getElementById("tt");
   if (!root) return;
   const $ = (id) => document.getElementById(id);
-  const BOARDS_URL = root.dataset.boardsUrl;
-  const boardUrl = (id) => root.dataset.boardUrl.replace("BID", encodeURIComponent(id));
+  const BOARD = root.dataset.boardUrl;                       // …/board: the cards hang off it (…/board/text, …/board/c/<id>/move)
   const GM = root.dataset.gm === "1";
   const ME = root.dataset.me;
   const INKS = ["green", "amber", "cyan", "violet", "white", "red"];
@@ -17,7 +16,7 @@
 
   const view = $("tt-view"), boardEl = $("tt-board"), notice = $("tt-notice");
   const keys = { note: $("tt-note-key"), pic: $("tt-pic-key"), fit: $("tt-fit-key") };
-  let boards = [], board = null, cam = { x: 0, y: 0, s: 0.2 }, busy = 0, pollTimer = null, listPage = 0;
+  let board = null, cam = { x: 0, y: 0, s: 0.2 }, busy = 0, pollTimer = null;
 
   // ── talking to the portal ──
   async function call(method, url, body) {
@@ -86,7 +85,7 @@
       img.alt = c.text || "";
       img.loading = "lazy";
       img.style.aspectRatio = `1 / ${c.ratio || 0.75}`;
-      img.src = `${boardUrl(board.id)}/img/${c.img}`;
+      img.src = `${BOARD}/img/${c.img}`;
       el.appendChild(img);
       if (c.text) { const cap = document.createElement("div"); cap.className = "cap"; cap.textContent = c.text; el.appendChild(cap); }
     } else {
@@ -117,28 +116,19 @@
     }
     for (const el of have.values()) el.remove();
     $("tt-empty").hidden = board.cards.length > 0;
-    $("tt-empty-text").textContent = "Nothing pinned yet. Add a note or a picture from the keys above.";
+    $("tt-empty-text").textContent = "Nothing pinned yet. Add a note or a picture from the keys above, or drop a picture here.";
   }
   function showNoBoard(text) {
     board = null; boardEl.replaceChildren();
-    $("tt-title").textContent = "Tabletop";
     Object.values(keys).forEach((k) => { k.disabled = true; });
     $("tt-empty").hidden = false; $("tt-empty-text").textContent = text;
   }
 
   // ── loading and the poll ──
-  async function loadBoards() {
-    boards = (await call("GET", BOARDS_URL)).boards;
-    return boards;
-  }
-  async function open(id, refit = true) {
-    const data = await call("GET", boardUrl(id));
-    board = data;
-    if (data.fear !== undefined) root.dispatchEvent(new CustomEvent("tt-fear", { detail: data.fear }));
-    $("tt-title").textContent = board.title;
+  async function load(refit) {
+    board = await call("GET", BOARD);
+    if (board.fear !== undefined) root.dispatchEvent(new CustomEvent("tt-fear", { detail: board.fear }));
     Object.values(keys).forEach((k) => { k.disabled = false; });
-    remember("board", id);
-    if (location.hash !== "#" + id) history.replaceState(null, "", "#" + id);
     draw();
     if (refit) requestAnimationFrame(() => fit(false));
     schedulePoll();
@@ -150,12 +140,10 @@
   async function poll() {
     if (!board || document.hidden || busy) return schedulePoll();
     try {
-      const data = await call("GET", `${boardUrl(board.id)}?since=${board.rev}`);
+      const data = await call("GET", `${BOARD}?since=${board.rev}`);
       if (data.fear !== undefined) root.dispatchEvent(new CustomEvent("tt-fear", { detail: data.fear }));
-      if (data.cards && board && data.id === board.id) { board = data; $("tt-title").textContent = board.title; draw(); }
-    } catch (e) {
-      if (/gone/.test(e.message)) { say(e.message); await start(); return; }
-    }
+      if (data.cards && board) { board = data; draw(); }
+    } catch (e) { /* a blip: the next poll catches up */ }
     schedulePoll();
   }
   document.addEventListener("visibilitychange", () => { if (!document.hidden && board) poll(); });
@@ -222,7 +210,7 @@
     if (!commit) return;
     if (!g.moved) { openCard(g.card); return; }
     busy++;
-    call("POST", `${boardUrl(board.id)}/c/${g.card.id}/move`, { x: g.card.x, y: g.card.y, w: g.card.w, rot: g.card.rot })
+    call("POST", `${BOARD}/c/${g.card.id}/move`, { x: g.card.x, y: g.card.y, w: g.card.w, rot: g.card.rot })
       .then((d) => merge(d.card))
       .catch((err) => { say(err.message); g.card.x = g.ox; g.card.y = g.oy; draw(); })
       .finally(() => { busy--; });
@@ -260,71 +248,8 @@
   root.addEventListener("click", (e) => { if (e.target.closest("[data-close]")) closeSheets(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheets(); });
 
-  // The boards sheet: a screen of boards at a time, never a scroll.
-  function drawList() {
-    const list = $("tt-list"), per = Math.max(3, Math.floor((list.clientHeight || 300) / 50) - 1);
-    const pages = Math.max(1, Math.ceil(boards.length / per));
-    listPage = Math.min(listPage, pages - 1);
-    list.replaceChildren();
-    if (!boards.length) {
-      const p = document.createElement("p"); p.className = "tt-by";
-      p.textContent = GM ? "No boards yet. Name the first one below." : "The GM hasn't set out a board yet.";
-      list.appendChild(p);
-    }
-    for (const b of boards.slice(listPage * per, listPage * per + per)) {
-      const row = document.createElement("div"); row.className = "row"; row.setAttribute("role", "listitem");
-      const go = document.createElement("button"); go.type = "button";
-      go.setAttribute("aria-current", board && board.id === b.id ? "true" : "false");
-      go.innerHTML = '<svg class="g" aria-hidden="true"><use href="#g-d20"/></svg>';
-      const name = document.createElement("span"); name.textContent = b.title; go.appendChild(name);
-      go.addEventListener("click", () => { closeSheets(); open(b.id).catch((err) => say(err.message)); });
-      row.appendChild(go);
-      if (GM) {
-        row.appendChild(keyBtn("g-tag", "Rename", async () => {
-          const title = prompt("Board name", b.title);
-          if (!title) return;
-          try { await call("POST", `${boardUrl(b.id)}/rename`, { title }); await loadBoards(); drawList(); if (board && board.id === b.id) open(b.id, false); }
-          catch (err) { say(err.message); }
-        }));
-        row.appendChild(keyBtn("g-trash", "Remove board", async () => {
-          if (!confirm(`Remove "${b.title}" and everything pinned on it? This can't be undone.`)) return;
-          try { await call("POST", `${boardUrl(b.id)}/delete`); await loadBoards(); drawList(); if (board && board.id === b.id) start(); }
-          catch (err) { say(err.message); }
-        }, true));
-      }
-      list.appendChild(row);
-    }
-    if (pages > 1) {
-      const pager = document.createElement("div"); pager.className = "tt-pager";
-      pager.appendChild(keyBtn("g-up", "Earlier boards", () => { listPage = Math.max(0, listPage - 1); drawList(); }));
-      pager.appendChild(keyBtn("g-down", "Later boards", () => { listPage = Math.min(pages - 1, listPage + 1); drawList(); }));
-      list.appendChild(pager);
-    }
-  }
-  function keyBtn(glyph, label, fn, danger) {
-    const b = document.createElement("button"); b.type = "button"; b.className = "key sm" + (danger ? " danger" : "");
-    b.setAttribute("aria-label", label); b.title = label;
-    b.innerHTML = `<svg class="g" aria-hidden="true"><use href="#${glyph}"/></svg>`;
-    b.addEventListener("click", fn);
-    return b;
-  }
-  $("tt-boards-key").addEventListener("click", async () => {
-    openSheet("tt-boards");
-    try { await loadBoards(); } catch (err) { say(err.message); }
-    drawList();
-  });
-  const newForm = $("tt-new");
-  if (newForm) newForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const input = $("tt-new-title");
-    try {
-      const { board: b } = await call("POST", BOARDS_URL, { title: input.value, campaign: root.dataset.campaign });
-      input.value = ""; await loadBoards(); closeSheets(); await open(b.id);
-    } catch (err) { say(err.message); }
-  });
-
   // The card sheet: a new note, or any card up close.
-  let editing = null;            // {card} or {kind: "text"} for a new note
+  let editing = null;            // {card} or {ink} for a new note
   function drawInks(selected, enabled) {
     const box = $("tt-inks"); box.replaceChildren(); box.hidden = !enabled;
     for (const ink of INKS) {
@@ -341,7 +266,7 @@
     $("tt-card-by").textContent = card ? (card.name || "") : "";
     const pic = $("tt-card-pic"); pic.replaceChildren();
     if (card && card.kind === "image") {
-      const img = document.createElement("img"); img.src = `${boardUrl(board.id)}/img/${card.img}`; img.alt = card.text || "";
+      const img = document.createElement("img"); img.src = `${BOARD}/img/${card.img}`; img.alt = card.text || "";
       pic.appendChild(img);
     }
     const text = $("tt-card-text");
@@ -359,12 +284,12 @@
     const text = $("tt-card-text").value;
     try {
       if (editing.card) {
-        const d = await call("POST", `${boardUrl(board.id)}/c/${editing.card.id}/edit`, { text, ink: editing.ink });
+        const d = await call("POST", `${BOARD}/c/${editing.card.id}/edit`, { text, ink: editing.ink });
         merge(d.card);
       } else {
         const at = centre();
         remember("ink", editing.ink);
-        const d = await call("POST", `${boardUrl(board.id)}/text`, { text, ink: editing.ink, x: at.x - 180, y: at.y - 80 });
+        const d = await call("POST", `${BOARD}/text`, { text, ink: editing.ink, x: at.x - 180, y: at.y - 80 });
         merge(d.card);
       }
       closeSheets();
@@ -373,7 +298,7 @@
   $("tt-card-del").addEventListener("click", async () => {
     if (!editing.card || !confirm("Take this card off the board?")) return;
     try {
-      await call("POST", `${boardUrl(board.id)}/c/${editing.card.id}/delete`);
+      await call("POST", `${BOARD}/c/${editing.card.id}/delete`);
       board.cards = board.cards.filter((c) => c.id !== editing.card.id); board.rev = -1; draw(); closeSheets();
     } catch (err) { say(err.message); }
   });
@@ -400,7 +325,7 @@
     return { blob, ratio };
   }
   async function upload(files) {
-    if (!board) return say("Pick a board first.");
+    if (!board) return say("The board isn't ready yet.");
     const list = [...files].filter((f) => f.type.startsWith("image/"));
     if (!list.length) return;
     busy++;
@@ -413,7 +338,7 @@
         form.append("img", blob, "card");
         form.append("ratio", String(ratio));
         form.append("x", String(at.x - 260 + (n - 1) * 40)); form.append("y", String(at.y - 260 * ratio + (n - 1) * 40));
-        merge((await call("POST", `${boardUrl(board.id)}/image`, form)).card);
+        merge((await call("POST", `${BOARD}/image`, form)).card);
       }
       notice.hidden = true;
     } catch (err) { say(err.message); } finally { busy--; }
@@ -429,16 +354,11 @@
     if (files.length) upload(files);
   });
 
-  // ── start: the board in the address (#id), else the last one you looked at, else the newest ──
+  // ── start ──
   async function start() {
     if (root.dataset.ready !== "1") return showNoBoard("The Tabletop isn't set up yet: the GM needs to give it somewhere to keep pictures.");
-    try { await loadBoards(); } catch (err) { return showNoBoard(err.message); }
-    if (!boards.length) return showNoBoard(GM ? "No boards yet. Open the boards key and name the first one." : "The GM hasn't set out a board yet.");
-    const want = location.hash.slice(1) || recall("board");
-    const pick = boards.find((b) => b.id === want) || boards[boards.length - 1];
-    try { await open(pick.id); } catch (err) { showNoBoard(err.message); }
+    try { await load(true); } catch (err) { showNoBoard(err.message); }
   }
-  window.addEventListener("hashchange", () => { const id = location.hash.slice(1); if (id && (!board || board.id !== id)) open(id).catch((err) => say(err.message)); });
   applyCam();
   start();
 })();

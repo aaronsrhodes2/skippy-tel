@@ -3,31 +3,28 @@
 {% block app %}tabletop{% endblock %}
 {% block ui %}bridge{% endblock %}
 {% block glyph %}d20{% endblock %}
-{% block hud_back %}{{ url_for('tabletop.page') }}{% endblock %}
 {% block head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='tabletop.css') }}">
 {% endblock %}
 {% block content %}
-{# One campaign's tabletop (portal/tabletop.py). One screen, never scrolled: along the top, a card per hero (each opens that hero's
-   sheet, project and folder); below, the cork board: everything about the game that isn't one hero's, as cue cards and polaroids
-   pinned to a big surface you drag to pan and pinch (or wheel) to zoom. Everyone pins and drags their own; the GM (the Captain)
-   makes the boards and can change anything. static/tabletop.js draws the board and polls for other people's changes;
+{# Heroes of Chance (portal/tabletop.py). One screen, never scrolled: along the top, a card per hero (each opens that hero's sheet,
+   project and folder); below, the cork board, which is where everything else about the game is added and shown: cue cards and
+   polaroids pinned to a big surface you drag to pan and pinch (or wheel) to zoom. Everyone pins and drags their own; the GM (the
+   Captain) can change anything. static/tabletop.js draws the board and polls for other people's changes;
    static/tabletop-heroes.js draws the heroes and the Fear. #}
-<section id="tt" class="tt bp" aria-label="{{ title or 'Tabletop' }}"
-         data-ready="{{ '1' if ready else '0' }}" data-gm="{{ '1' if gm else '0' }}" data-me="{{ me_email }}" data-campaign="{{ cid }}"
-         data-boards-url="{{ url_for('tabletop.boards', c=cid) }}"
-         data-board-url="{{ url_for('tabletop.board', bid='BID') }}"
-         data-heroes-url="{{ url_for('tabletop.heroes_list', c=cid) }}"
+<section id="tt" class="tt bp" aria-label="{{ title }}"
+         data-ready="{{ '1' if ready else '0' }}" data-gm="{{ '1' if gm else '0' }}" data-me="{{ me_email }}"
+         data-board-url="{{ url_for('tabletop.board') }}"
+         data-heroes-url="{{ url_for('tabletop.heroes_list') }}"
          data-hero-url="{{ url_for('tabletop.hero', hid='HID') }}"
-         data-fear-url="{{ url_for('tabletop.fear', c=cid) }}">{# every card's address hangs off the board's: …/BID/text, …/BID/img/<name> #}
+         data-fear-url="{{ url_for('tabletop.fear') }}">{# every card's address hangs off the board's: …/board/text, …/board/img/<name> #}
   <noscript><p class="warn" style="margin:12px">The Tabletop needs JavaScript.</p></noscript>
   <div class="notice" id="tt-notice" role="status" hidden></div>
 
   <div class="bp-top">
-    <button type="button" class="key" id="tt-boards-key" aria-label="Boards" title="Boards"><svg class="g" aria-hidden="true"><use href="#g-tools"/></svg></button>
     <button type="button" class="tt-fear" id="tt-fear" aria-label="Fear" title="Fear: the GM's, kept from session to session">
       <svg class="g" aria-hidden="true"><use href="#g-flame"/></svg><span id="tt-fear-n">–</span></button>
-    <h1 class="tt-title"><span class="tt-campaign">{{ title }}</span> <span id="tt-title"></span></h1>
+    <h1 class="tt-title"><span class="tt-campaign">{{ title }}</span></h1>
     <button type="button" class="key" id="tt-note-key" aria-label="Pin a note" title="Pin a note" disabled><svg class="g" aria-hidden="true"><use href="#g-talk"/></svg></button>
     <button type="button" class="key" id="tt-pic-key" aria-label="Pin a picture" title="Pin a picture" disabled><svg class="g" aria-hidden="true"><use href="#g-image"/></svg></button>
     <button type="button" class="key" id="tt-fit-key" aria-label="Show the whole board" title="Show the whole board" disabled><svg class="g" aria-hidden="true"><use href="#g-fit"/></svg></button>
@@ -44,21 +41,6 @@
       <p id="tt-empty-text"></p>
     </div>
     <div class="tt-drop" id="tt-drop" hidden><svg class="g" aria-hidden="true"><use href="#g-image"/></svg></div>
-  </div>
-
-  {# The boards: pick one; the GM also makes, renames and removes them #}
-  <div class="sheet" id="tt-boards" role="dialog" aria-modal="true" aria-label="Boards" hidden>
-    <div class="tt-sheet-top">
-      <svg class="g" aria-hidden="true"><use href="#g-tools"/></svg><span class="grow"></span>
-      <button type="button" class="key sm" data-close aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
-    </div>
-    <div class="tt-list" id="tt-list" role="list"></div>
-    {% if gm %}
-    <form class="tt-new" id="tt-new">
-      <input type="text" id="tt-new-title" maxlength="80" placeholder="Ep 1 — The Endless Fall" aria-label="New board's name" autocomplete="off">
-      <button type="submit" class="key" aria-label="Make a board" title="Make a board"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
-    </form>
-    {% endif %}
   </div>
 
   {# A card, up close: the picture large, its words; yours (or the GM's) to edit or take down #}
@@ -78,7 +60,7 @@
   </div>
 
   {% if gm %}
-  {# The GM adds a hero to this campaign #}
+  {# The GM adds a hero #}
   <div class="sheet" id="tt-newhero" role="dialog" aria-modal="true" aria-label="Add a hero" hidden>
     <div class="tt-sheet-top">
       <svg class="g" aria-hidden="true"><use href="#g-party"/></svg><span class="tt-by">A new hero</span><span class="grow"></span>
@@ -103,12 +85,14 @@
         <button type="button" class="key sm" role="tab" data-tab="project" aria-label="Current project" title="Current project"><svg class="g" aria-hidden="true"><use href="#g-clock"/></svg></button>
         <button type="button" class="key sm" role="tab" data-tab="folder" aria-label="Folder" title="Folder"><svg class="g" aria-hidden="true"><use href="#g-folder"/></svg></button>
       </div>
+      <button type="button" class="key sm" id="tt-hero-av-key" aria-label="Choose the avatar: a picture from your device" title="Choose the avatar: a picture from your device" hidden><svg class="g" aria-hidden="true"><use href="#g-user"/></svg></button>
       <a class="key sm" id="tt-hero-print" target="_blank" rel="noopener" aria-label="Print the sheet" title="Print the sheet"><svg class="g" aria-hidden="true"><use href="#g-print"/></svg></a>
       <button type="button" class="key sm" data-close aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
     </div>
     <div class="pg tt-hero-pg" id="tt-hero-pg"><div class="pg-flow" id="tt-hero-flow"></div></div>
     <div class="pips"><i></i></div>
     <input type="file" id="tt-hero-file" accept="application/pdf,image/*" multiple hidden>
+    <input type="file" id="tt-avatar-file" accept="image/*" hidden>
   </div>
 
   {# The GM's Fear: twelve at most; it stays put between sessions #}

@@ -38,12 +38,10 @@ REGISTRY = {
     "music.player_page": G("audio"), "music.player_gate": G("audio"), "music.player_checkin": G("audio"), "music.player_command": G("audio"),
     "video.video_page": G("video"), "video.video_gate": G("video"),
     **{e: G("tabletop") for e in (
-        "tabletop.page", "tabletop.campaign_page", "tabletop.campaigns", "tabletop.boards", "tabletop.board", "tabletop.card_text", "tabletop.card_image", "tabletop.card_move",
+        "tabletop.page", "tabletop.board", "tabletop.card_text", "tabletop.card_image", "tabletop.card_move",
         "tabletop.card_edit", "tabletop.card_delete", "tabletop.card_img", "tabletop.fear", "tabletop.heroes_list", "tabletop.hero",
         "tabletop.hero_set", "tabletop.hero_file_add", "tabletop.hero_file_delete", "tabletop.hero_file", "tabletop.hero_print", "tabletop.hero_avatar")},
-    **{e: ADMIN_ONLY for e in ("tabletop.board_new", "tabletop.board_rename", "tabletop.board_delete", "tabletop.fear_set",
-                               "tabletop.campaign_new", "tabletop.campaign_edit", "tabletop.campaign_delete",
-                               "tabletop.hero_new", "tabletop.hero_player", "tabletop.hero_delete", "tabletop.hero_gm_ref")},
+    **{e: ADMIN_ONLY for e in ("tabletop.fear_set", "tabletop.hero_new", "tabletop.hero_player", "tabletop.hero_delete", "tabletop.hero_gm_ref")},
     "chat.index": G("skippy"), "chat.send": G("skippy"), "chat.badges": G("skippy"), "chat.voice_gate": G("skippy"), "chat.media_file": G("skippy"),
     # members
     **{e: MEMBER for e in (

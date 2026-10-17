@@ -422,53 +422,57 @@ refused, the URL rule, the tile and pill, the manifest, the page's markup agains
 bytes), `test_video_js.py` (runs `portal/tests/js/video/*.test.js` under Node 18+ and feeds a catalog the real gate builds from its
 fake Jellyfin to the player's parser; skipped, not failed, without Node).
 
-## Tabletops (campaigns, heroes and the cork board, `/tabletop`)
+## The Tabletop (Heroes of Chance, `/tabletop`)
 
-The Captain's Daggerheart tables. A launcher tile for the Captain and for friends granted **"Tabletop (RPG boards)"** in
-Admin > Friends. The structure:
+The Captain's Daggerheart campaign, as one page. A launcher tile for the Captain and for friends granted **"Tabletop (RPG boards)"**
+in Admin > Friends. There is no list of tabletops and no list of boards: the page is the campaign.
+- **Along the top:** a card per hero (face, name, class and level, player, project clock). The GM's **+** adds a hero.
+- **Below, the cork board:** the one surface where everything about the game that isn't one hero's is added **and** shown, as cue
+  cards (notes) and polaroids (pictures). Drag to pan, pinch or scroll to zoom, the fit key shows the whole spread.
+- **In the top bar:** the Fear (the flame), and the keys to pin a note, pin a picture, and fit the board.
 
-- **Tabletops** (`/tabletop`): a card per campaign. Today there is one, **Heroes of Chance**. The GM starts a campaign from the
-  box under the cards. Each campaign keeps its own boards, heroes and Fear.
-- **A campaign's tabletop** (`/tabletop/c/<id>`): the heroes along the top, a card each (name, class, level, player, project clock);
-  below, the **cork board**: everything about the game that isn't one hero's, as cue cards and polaroids pinned to a surface you
-  drag to pan and pinch or scroll to zoom.
-- **A hero's card** opens three tabs: the **Sheet**, the current **Project** and the **Folder** (below).
+**The cork board.**
+- **Cards:** anyone with the grant pins a note (an ink from the passthrough palette) or a picture (a polaroid with a caption), from
+  the keys, by dropping a picture on the board, or by pasting one. Big photos are shrunk on the device to 2000 px JPEG first; GIFs and
+  small PNGs go as they are. You can drag, edit and take down your own cards; the GM can do that to any card. Dragging someone else's
+  card pans the board instead. A card appears at once for the person who adds it and for everyone else within about 4 s.
+- **Live:** the page polls `GET /tabletop/board?since=<rev>` every 4 s. While nothing has changed, the reply is `{"rev": n, "fear": n}`.
 
-**The cork board.** The GM makes boards (one per episode or realm) from the boards key and can rename and remove them; the
-address `/tabletop/c/<id>#<board>` opens one, and the page remembers the last board you looked at.
-- **Cards:** anyone with the grant pins a note (a cue card, with an ink from the passthrough palette) or a picture (a polaroid with
-  a caption). Pictures come from the picture key, a drop on the board, or a paste. Big photos are shrunk on the device to 2000 px
-  JPEG first; GIFs and small PNGs go as they are. You can drag, edit and take down your own cards; the GM can do that to any card.
-  Dragging someone else's card pans the board instead.
-- **Live:** the page polls `GET /tabletop/b/<id>?since=<rev>` every 4 s. While nothing has changed, the reply is `{"rev": n, "fear": n}`.
-
-**Heroes.**
+**Heroes.** A hero's card opens three tabs:
 - **Sheet:** every field of the official Daggerheart sheet and its character-guide page (`tabletop.SPEC`). A change is checked against
   SPEC, saved within a second, and logged with who made it and when.
 - **Project:** the hero's current project, with a progress clock.
 - **Folder:** PDFs and pictures (30 MB each) the hero's player or the GM adds, served behind the grant and opened sandboxed.
-- **Avatar:** any picture in a hero's folder can be their face on their card (the person key on the picture; PDFs can't). The crop is
-  a focus point and a zoom (1 to 4), so a full-length painting can show just the face; the GM sets it with `POST /tabletop/h/<id>/avatar`
-  `{"file": id, "focus": {"x", "y", "zoom"}}`.
+- **Avatar:** the person key in the sheet's header takes a picture from the device and makes it the hero's face (it also goes into the
+  folder). The person key on any picture in the folder does the same for one already there. The crop is a focus point and a zoom (1 to
+  4), so a full-length painting can show just the face; the GM sets it with `POST /tabletop/h/<id>/avatar`
+  `{"file": id, "focus": {"x", "y", "zoom"}}`. A PDF can't be an avatar.
 - **Who changes what:** the hero's player (set by the GM) and the GM change the sheet and add to the folder; everyone else reads.
   The print key opens `/tabletop/h/<id>/print`, every field in the official sheet's order, black on white, for players on paper.
 - **GM only:** a quick reference per hero (storytelling details, never sent to a player), the change log, who plays whom.
 
-**Fear.** Each campaign has the GM's Fear (0–12) in the top bar for everyone; it rides on every board poll. Only the GM changes it,
-and it carries over to the next session. Its sheet is a canvas of "Fear...", a void of stars, ghostly wireframe skulls and
-wireframe tentacles lashing and mingling: lines only (black stays see-through), running only while the sheet is open, and a still
-frame for anyone whose device asks for reduced motion.
+**Fear.** The GM's Fear (0-12) is in the top bar for everyone and rides on every board poll. Only the GM changes it, and it carries
+over to the next session. Its sheet is a canvas of "Fear...", a void of stars, ghostly wireframe skulls and wireframe tentacles
+lashing and mingling: lines only (black stays see-through), running only while the sheet is open, and a still frame for anyone whose
+device asks for reduced motion.
 
 **Storage and safety.**
-- The private GCS bucket `skippy-tel-tabletop` holds `campaigns.json`, `boards.json`, `boards/<id>.json`, `images/<board>/<card>.<ext>`,
-  `heroes.json`, `heroes/<id>.json`, `heroes/<id>/files/<file>` and `fear/<campaign>.json`. It's created by `infra/bootstrap` with
-  versioning, so deleted files stay for 30 days. Only the portal's runtime identity can read or write it; the portal serves files back
-  behind the grant. `TABLETOP_BUCKET` is set by `deploy.yml`. Without the bucket, the page says it can't reach its storage.
+- The private GCS bucket `skippy-tel-tabletop` holds `board.json`, `images/<card>.<ext>`, `heroes.json`, `heroes/<id>.json`,
+  `heroes/<id>/files/<file>` and `fear.json`. It's created by `infra/bootstrap` with versioning, so deleted files stay for 30 days.
+  Only the portal's runtime identity can read or write it; the portal serves files back behind the grant. `TABLETOP_BUCKET` is set by
+  `deploy.yml`.
+- A missing bucket is an error the page states ("the storage bucket doesn't exist yet"), never an empty table. A failed save drops the
+  portal's in-memory copies, so nothing is shown that wasn't kept.
 - Every write needs the `X-Tabletop: 1` header, which another site's page can't add. Pictures and PDFs are recognised by their first
   bytes, never by name. Text is drawn with `textContent`, never parsed as HTML.
 
-**Code:** `portal/tabletop.py`, `templates/tabletop_campaigns.html`, `tabletop.html` and `tabletop_print.html`,
-`static/tabletop{,-heroes}.js` and `tabletop.css`. Tests: `portal/tests/test_tabletop.py`.
+**Code:** `portal/tabletop.py`, `templates/tabletop.html` and `tabletop_print.html`, `static/tabletop{,-heroes}.js` and
+`tabletop.css`. Tests: `portal/tests/test_tabletop.py`.
+
+**Ideas for players, not built yet** (researched 2026-10-16; see the Captain's notes): a session feed posted to a Discord channel by
+webhook (Fear changes, new pins, clock ticks); Discord sign-in so the portal knows who is who, and a "join the table" voice link for a
+remote player; a Discord scheduled event and reminder for each session; a Hope/Fear duality roller everyone sees; a session-recap
+thread. Not worth building: a map/fog/token VTT, a Discord Activity (for now), voice recording.
 
 ## Star Control Zero (the Captain's game, `/starcontrol`)
 

@@ -1,19 +1,19 @@
-"""The Tabletop: shared adventure boards for the Captain's tabletop RPG table (Heroes of Chance), at /tabletop.
+"""The Tabletop: the heroes and the cork board of the Captain's Daggerheart campaign, Heroes of Chance, at /tabletop.
 
-A board is a big surface people pin cards on: a picture (a map, a handout, a sketch, a photo of the table) or a few lines
-of text (a clue, a quote, a note). The Captain makes the boards (one per episode or realm); everyone granted "tabletop"
-adds cards, drags them about, and can edit or remove their own. The Captain can change anything.
+The page IS the campaign. Along the top, a card per hero (their sheet, current project and folder). Below, the cork board: one
+surface where everything about the game that isn't one hero's is added and shown, as pictures (maps, handouts, generated art,
+photos of the table) and notes (clues, quotes, cast cards). Everyone granted "tabletop" pins cards, drags them about, and
+edits or removes their own; the Captain (the GM) can change anything.
 
 Where it lives: one private GCS bucket (TABLETOP_BUCKET, made by infra/bootstrap), read and written by the portal's
 service account. Cloud Run's disk is gone on every restart, so nothing is kept anywhere else:
 
-    campaigns.json              [{"id", "title", "blurb", "by", "at"}, ...]   each campaign has its own boards, heroes and Fear
-    boards.json                 [{"id", "title", "by", "at", "campaign"}, ...]   the boards, in the order they were made
-    boards/<id>.json            {"id", "title", "rev", "cards": [...]}
-    images/<board>/<card>.<ext> each picture card's file (served back through the portal: the bucket is never public)
+    board.json                  {"rev", "cards": [...]}      the cork board
+    images/<card>.<ext>         each picture card's file (served back through the portal: the bucket is never public)
+    heroes.json, heroes/<id>.json, heroes/<id>/files/<file>, fear.json     (see Heroes below)
 
 The portal runs one instance, so a lock in this process is enough to keep two writers from losing each other's card;
-boards are kept in memory once read, so the page's poll for changes ("has rev moved?") never touches the bucket.
+the board is kept in memory once read, so the page's poll for changes ("has rev moved?") never touches the bucket.
 Without TABLETOP_BUCKET (a local run, a portal deployed before bootstrap made the bucket) the page says so and nothing
 is stored.
 """
@@ -30,10 +30,10 @@ import time
 log = logging.getLogger(__name__)
 
 BUCKET_ENV = "TABLETOP_BUCKET"
+CAMPAIGN = "Heroes of Chance"             # the one campaign this table plays
 BOARD_W, BOARD_H = 4000, 3000         # the surface, in board units; the page fits it to the screen and zooms in
 MAX_CARDS = 400
 MAX_TEXT = 2000
-MAX_TITLE = 80
 MAX_IMAGE = 12 * 1024 * 1024          # under Cloud Run's 32 MB request cap with room to spare; the page shrinks big photos first
 CARD_W = (80, 1600)                   # a card's width in board units
 _ID = re.compile(r"^[0-9a-z]{6,24}$")
@@ -149,28 +149,19 @@ def _num(value, lo, hi, default):
     return max(lo, min(hi, v))
 
 
-def _title(value) -> str:
-    title = " ".join(str(value or "").split())[:MAX_TITLE]
-    if not title:
-        raise Refused("A board needs a name.")
-    return title
-
-
 class Tabletop:
+    """The cork board: one surface, with the cards pinned to it."""
+
     def __init__(self, store):
         self.store = store
         self._lock = threading.RLock()
-        self._boards: dict[str, dict] = {}        # id -> board, once read
-        self._index: list[dict] | None = None
-        self._campaigns: list[dict] | None = None
+        self._board: dict | None = None           # {"rev", "cards"}, once read
 
     def reset(self) -> None:
-        """Forget everything held in memory, so the next read comes from storage. Called when a write fails: every write changes the
-        copy in memory first, and a save that didn't happen must not leave a campaign, board or card that only this process believes in."""
+        """Forget what is held in memory, so the next read comes from storage. Called when a write fails: every write changes the
+        copy in memory first, and a save that didn't happen must not leave a card that only this process believes in."""
         with self._lock:
-            self._boards.clear()
-            self._index = None
-            self._campaigns = None
+            self._board = None
 
     @property
     def ready(self) -> bool:
@@ -181,137 +172,34 @@ class Tabletop:
         raw = self.store.get(path)
         return json.loads(raw) if raw else default
 
-    def campaigns(self) -> list[dict]:
-        """Every campaign: {"id", "title", "blurb", "by", "at"}. A campaign holds its own boards, heroes and Fear."""
+    def board(self) -> dict:
         with self._lock:
-            if self._campaigns is None:
-                found = self._read_json("campaigns.json", [])
-                self._campaigns = [c for c in found if isinstance(c, dict) and _ID.match(str(c.get("id", "")))]
-            return [dict(c) for c in self._campaigns]
+            if self._board is None:
+                data = self._read_json("board.json", None)
+                if not isinstance(data, dict) or not isinstance(data.get("cards"), list):
+                    data = {"rev": 0, "cards": []}
+                data["rev"] = int(data.get("rev") or 0)
+                self._board = data
+            return self._board
 
-    def campaign(self, cid: str) -> dict:
-        for c in self.campaigns():
-            if c["id"] == cid:
-                return c
-        raise NotFound(cid)
+    def view(self) -> dict:
+        b = self.board()
+        return {"title": CAMPAIGN, "rev": b["rev"], "cards": [dict(c) for c in b["cards"]], "w": BOARD_W, "h": BOARD_H}
 
-    def boards(self, campaign: str | None = None) -> list[dict]:
-        with self._lock:
-            if self._index is None:
-                index = self._read_json("boards.json", [])
-                self._index = [b for b in index if isinstance(b, dict) and _ID.match(str(b.get("id", "")))]
-            return [dict(b) for b in self._index if campaign is None or b.get("campaign") == campaign]
+    def rev(self) -> int:
+        return self.board()["rev"]
 
-    def board(self, board_id: str) -> dict:
-        if not _ID.match(board_id or ""):
-            raise NotFound(board_id)
-        with self._lock:
-            if board_id not in self._boards:
-                if not any(b["id"] == board_id for b in self.boards()):
-                    raise NotFound(board_id)
-                data = self._read_json(f"boards/{board_id}.json", None)
-                if not isinstance(data, dict):
-                    title = next(b["title"] for b in self.boards() if b["id"] == board_id)
-                    data = {"id": board_id, "title": title, "rev": 0, "cards": []}
-                self._boards[board_id] = data
-            return self._boards[board_id]
-
-    def view(self, board_id: str) -> dict:
-        b = self.board(board_id)
-        return {"id": b["id"], "title": b["title"], "rev": b["rev"], "cards": [dict(c) for c in b["cards"]],
-                "campaign": b.get("campaign", ""), "w": BOARD_W, "h": BOARD_H}
-
-    def rev(self, board_id: str) -> int:
-        return self.board(board_id)["rev"]
-
-    def image(self, board_id: str, name: str) -> tuple[bytes, str] | None:
+    def image(self, name: str) -> tuple[bytes, str] | None:
         found = re.fullmatch(r"([0-9a-z]{6,24})\.(jpg|png|gif|webp)", name or "")
         if not found:
             return None
-        self.board(board_id)                      # the board must exist (and so must the grant, checked by the route)
-        data = self.store.get(f"images/{board_id}/{name}")
+        data = self.store.get(f"images/{name}")
         return (data, TYPES[found.group(2)]) if data else None
 
     # ── writing (every write: under the lock, the board's rev moves on, the file is saved before we answer) ──
-    def _save_index(self):
-        self.store.put("boards.json", json.dumps(self._index, ensure_ascii=False).encode(), "application/json")
-
     def _save(self, board: dict):
         board["rev"] += 1
-        self.store.put(f"boards/{board['id']}.json", json.dumps(board, ensure_ascii=False).encode(), "application/json")
-
-    def _save_campaigns(self):
-        self.store.put("campaigns.json", json.dumps(self._campaigns, ensure_ascii=False).encode(), "application/json")
-
-    def _free_title(self, title, but: str = "") -> str:
-        """The title, if no other campaign has it (case aside): a second 'Heroes of Chance' is a slip, not a campaign."""
-        title = _title(title)
-        if any(c["title"].lower() == title.lower() for c in self._campaigns if c["id"] != but):
-            raise Refused("There's already a campaign with that name.")
-        return title
-
-    def create_campaign(self, title, blurb, by: str) -> dict:
-        with self._lock:
-            self.campaigns()
-            c = {"id": new_id(), "title": self._free_title(title), "blurb": str(blurb or "").strip()[:300], "by": by, "at": int(time.time())}
-            self._campaigns.append(c)
-            self._save_campaigns()
-            return dict(c)
-
-    def delete_campaign(self, cid: str) -> None:
-        """Remove a campaign. The caller has checked it holds no heroes (Heroes is separate); boards are checked here."""
-        with self._lock:
-            self.campaign(cid)
-            if self.boards(cid):
-                raise Refused("This campaign still has boards. Remove them first.")
-            self._campaigns = [c for c in self._campaigns if c["id"] != cid]
-            self._save_campaigns()
-
-    def edit_campaign(self, cid: str, title=None, blurb=None) -> dict:
-        with self._lock:
-            self.campaign(cid)
-            found = None
-            for c in self._campaigns:
-                if c["id"] == cid:
-                    if title is not None:
-                        c["title"] = self._free_title(title, but=cid)
-                    if blurb is not None:
-                        c["blurb"] = str(blurb).strip()[:300]
-                    found = dict(c)
-            self._save_campaigns()
-            return found
-
-    def create_board(self, title, by: str, campaign: str) -> dict:
-        with self._lock:
-            self.campaign(campaign)
-            self.boards()
-            board = {"id": new_id(), "title": _title(title), "by": by, "at": int(time.time()), "campaign": campaign}
-            self._boards[board["id"]] = {"id": board["id"], "title": board["title"], "rev": 0, "cards": [], "campaign": campaign}
-            self._save(self._boards[board["id"]])
-            self._index.append(board)
-            self._save_index()
-            return dict(board)
-
-    def rename_board(self, board_id: str, title) -> None:
-        with self._lock:
-            board = self.board(board_id)
-            board["title"] = _title(title)
-            for b in self._index:
-                if b["id"] == board_id:
-                    b["title"] = board["title"]
-            self._save(board)
-            self._save_index()
-
-    def delete_board(self, board_id: str) -> None:
-        with self._lock:
-            board = self.board(board_id)
-            for card in board["cards"]:
-                if card.get("img"):
-                    self.store.delete(f"images/{board_id}/{card['img']}")
-            self.store.delete(f"boards/{board_id}.json")
-            self._index = [b for b in self._index if b["id"] != board_id]
-            self._boards.pop(board_id, None)
-            self._save_index()
+        self.store.put("board.json", json.dumps(board, ensure_ascii=False).encode(), "application/json")
 
     def _card(self, board: dict, card_id: str) -> dict:
         for card in board["cards"]:
@@ -333,24 +221,24 @@ class Tabletop:
 
     def _new_card(self, board: dict, who: str, name: str, body: dict) -> dict:
         if len(board["cards"]) >= MAX_CARDS:
-            raise Refused(f"This board is full ({MAX_CARDS} cards). Ask the GM for a new one.")
+            raise Refused(f"The board is full ({MAX_CARDS} cards). Take some down to make room.")
         card = {"id": new_id(), "by": who, "name": (name or who.split("@")[0])[:40], "at": int(time.time())}
         self._place(board, card, {"rot": (secrets.randbelow(9) - 4), **body})   # a slight tilt: pinned by hand
         return card
 
-    def add_text(self, board_id: str, who: str, name: str, body: dict) -> dict:
+    def add_text(self, who: str, name: str, body: dict) -> dict:
         text = str(body.get("text") or "").strip()[:MAX_TEXT]
         if not text:
             raise Refused("A note needs some words.")
         with self._lock:
-            board = self.board(board_id)
+            board = self.board()
             card = self._new_card(board, who, name, {"w": 360, **body})
             card.update(kind="text", text=text, ink=body.get("ink") if body.get("ink") in COLOURS else "green")
             board["cards"].append(card)
             self._save(board)
             return dict(card)
 
-    def add_image(self, board_id: str, who: str, name: str, data: bytes, body: dict) -> dict:
+    def add_image(self, who: str, name: str, data: bytes, body: dict) -> dict:
         if not data:
             raise Refused("No picture came through.")
         if len(data) > MAX_IMAGE:
@@ -360,27 +248,27 @@ class Tabletop:
             raise Refused("Only JPEG, PNG, GIF or WebP pictures.")
         caption = str(body.get("text") or "").strip()[:MAX_TEXT]
         with self._lock:
-            board = self.board(board_id)
+            board = self.board()
             card = self._new_card(board, who, name, {"w": 520, **body})
             card.update(kind="image", img=f"{card['id']}.{kind[0]}", text=caption,
                         ratio=_num(body.get("ratio"), 0.05, 20, 0.75))   # height / width, so the page lays it out before it loads
-            self.store.put(f"images/{board_id}/{card['img']}", data, kind[1])
+            self.store.put(f"images/{card['img']}", data, kind[1])
             board["cards"].append(card)
             self._save(board)
             return dict(card)
 
-    def move(self, board_id: str, card_id: str, who: str, admin: bool, body: dict) -> dict:
+    def move(self, card_id: str, who: str, admin: bool, body: dict) -> dict:
         with self._lock:
-            board = self.board(board_id)
+            board = self.board()
             card = self._card(board, card_id)
             self._mine(card, who, admin)
             self._place(board, card, body)
             self._save(board)
             return dict(card)
 
-    def edit(self, board_id: str, card_id: str, who: str, admin: bool, body: dict) -> dict:
+    def edit(self, card_id: str, who: str, admin: bool, body: dict) -> dict:
         with self._lock:
-            board = self.board(board_id)
+            board = self.board()
             card = self._card(board, card_id)
             self._mine(card, who, admin)
             text = str(body.get("text") or "").strip()[:MAX_TEXT]
@@ -392,13 +280,13 @@ class Tabletop:
             self._save(board)
             return dict(card)
 
-    def remove(self, board_id: str, card_id: str, who: str, admin: bool) -> None:
+    def remove(self, card_id: str, who: str, admin: bool) -> None:
         with self._lock:
-            board = self.board(board_id)
+            board = self.board()
             card = self._card(board, card_id)
             self._mine(card, who, admin)
             if card.get("img"):
-                self.store.delete(f"images/{board_id}/{card['img']}")
+                self.store.delete(f"images/{card['img']}")
             board["cards"] = [c for c in board["cards"] if c["id"] != card_id]
             self._save(board)
 
@@ -408,7 +296,7 @@ class Tabletop:
 #   heroes.json                       ["<id>", ...]
 #   heroes/<id>.json                  {"id", "rev", "player", "sheet": {...}, "files": [...], "history": [...]}
 #   heroes/<id>/files/<fid>.<ext>     the hero's folder: the print packet, sheet photos, portraits
-#   fear/<campaign>.json              {"value": n}   the GM's Fear in that campaign, carried from session to session
+#   fear.json                         {"value": n}   the GM's Fear, carried from session to session
 #
 # The sheet is a fixed shape (SPEC below). A change is a list of (path, value) pairs, each checked against SPEC: a path the
 # sheet doesn't have, or a value of the wrong kind, is refused, so the stored sheet can only ever hold the official fields.
@@ -576,7 +464,7 @@ class Heroes:
         self.t = table
         self._ids: list[str] | None = None
         self._heroes: dict[str, dict] = {}
-        self._fear: dict[str, int] = {}
+        self._fear: int | None = None
 
     @property
     def store(self):
@@ -587,24 +475,22 @@ class Heroes:
         with self.t._lock:
             self._ids = None
             self._heroes.clear()
-            self._fear.clear()
+            self._fear = None
 
     # ── the Fear ──
-    def fear(self, campaign: str) -> int:
+    def fear(self) -> int:
         with self.t._lock:
-            if campaign not in self._fear:
-                self.t.campaign(campaign)
-                self._fear[campaign] = int((self.t._read_json(f"fear/{campaign}.json", {}) or {}).get("value", 0))
-            return self._fear[campaign]
+            if self._fear is None:
+                self._fear = int((self.t._read_json("fear.json", {}) or {}).get("value", 0))
+            return self._fear
 
-    def set_fear(self, campaign: str, value=None, delta=None) -> int:
+    def set_fear(self, value=None, delta=None) -> int:
         with self.t._lock:
-            now = self.fear(campaign)
+            now = self.fear()
             new = now + clean(_int(-FEAR_MAX, FEAR_MAX), delta) if delta is not None else clean(_int(0, FEAR_MAX), value)
-            self._fear[campaign] = max(0, min(FEAR_MAX, new))
-            self.store.put(f"fear/{campaign}.json", json.dumps({"value": self._fear[campaign], "at": int(time.time())}).encode(),
-                           "application/json")
-            return self._fear[campaign]
+            self._fear = max(0, min(FEAR_MAX, new))
+            self.store.put("fear.json", json.dumps({"value": self._fear, "at": int(time.time())}).encode(), "application/json")
+            return self._fear
 
     # ── reading ──
     def ids(self) -> list[str]:
@@ -636,18 +522,10 @@ class Heroes:
                 self._heroes[hid] = data
             return self._heroes[hid]
 
-    def forget_campaign(self, campaign: str) -> None:
-        """The campaign is gone: drop its Fear (the file and the copy in memory)."""
-        with self.t._lock:
-            self._fear.pop(campaign, None)
-            self.store.delete(f"fear/{campaign}.json")
-
-    def summary(self, campaign: str, gm: bool = False) -> list[dict]:
+    def summary(self, gm: bool = False) -> list[dict]:
         out = []
         for hid in self.ids():
             h = self.hero(hid)
-            if h.get("campaign") != campaign:
-                continue
             s = h["sheet"]
             row = {"id": hid, "name": s["name"], "class": s["class"], "subclass": s["subclass"], "level": s["level"],
                    "player": h.get("player", ""), "player_name": h.get("player_name", ""),
@@ -660,7 +538,7 @@ class Heroes:
 
     def view(self, hid: str, history: bool = False) -> dict:
         h = self.hero(hid)
-        out = {"id": hid, "rev": h["rev"], "campaign": h.get("campaign", ""), "player": h.get("player", ""),
+        out = {"id": hid, "rev": h["rev"], "player": h.get("player", ""),
                "player_name": h.get("player_name", ""), "avatar": h.get("avatar", ""),
                "avatar_focus": h.get("avatar_focus") or avatar_focus(None),
                "sheet": json.loads(json.dumps(h["sheet"])), "files": [dict(f) for f in h["files"]]}
@@ -711,12 +589,11 @@ class Heroes:
             h["gm_ref"] = self._gm_ref(lines)
             self._save(h)
 
-    def create(self, by: str, campaign: str, name, sheet=None, player="", player_name="", gm_ref=None) -> dict:
+    def create(self, by: str, name, sheet=None, player="", player_name="", gm_ref=None) -> dict:
         with self.t._lock:
-            self.t.campaign(campaign)
             self.ids()
             hid = new_id()
-            h = {"id": hid, "rev": 0, "campaign": campaign, "player": self._email(player), "player_name": str(player_name or "")[:60],
+            h = {"id": hid, "rev": 0, "player": self._email(player), "player_name": str(player_name or "")[:60],
                  "sheet": blank_sheet(), "files": [], "history": [], "gm_ref": self._gm_ref(gm_ref or [])}
             skipped = self._apply(h, by, flatten(sheet if isinstance(sheet, dict) else {}), log=False, strict=False)
             _put(h["sheet"], "name", clean(SPEC["name"], name or h["sheet"]["name"] or "New hero"))

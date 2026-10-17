@@ -900,7 +900,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     app.register_blueprint(films)
 
-    # ── The Tabletop: shared adventure boards for the RPG table (tabletop.py; the Captain and friends granted "tabletop") ──
+    # ── The Tabletop: Heroes of Chance, the heroes and the cork board (tabletop.py; the Captain and friends granted "tabletop") ──
     # Every write needs the X-Tabletop header: a page on another site can make a player's browser POST a form, but it
     # can't add a header without a CORS preflight this portal never answers.
     table = tabletop or tabletop_mod.Tabletop(tabletop_mod.store_from_env())
@@ -916,7 +916,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         try:
             return jsonify(fn(*args) or {"ok": True})
         except tabletop_mod.NotFound:
-            return jsonify(error="That board or card is gone."), 404
+            return jsonify(error="That card or hero is gone."), 404
         except tabletop_mod.Refused as err:
             return jsonify(error=str(err)), 400
         except tabletop_mod.StorageMissing:
@@ -935,140 +935,64 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @tt.get("")
     @auth.portal_required("tabletop")
     def page():
-        """Tabletops: a card per campaign (Heroes of Chance, ...). Each opens that campaign's tabletop."""
-        return render_template("tabletop_campaigns.html", ready=table.ready, gm=auth.is_admin(me()))
+        """Heroes of Chance: the heroes' cards along the top, and below them the cork board where everything else about the game is
+        added and shown."""
+        return render_template("tabletop.html", ready=table.ready, gm=auth.is_admin(me()), me_email=me(), title=tabletop_mod.CAMPAIGN)
 
-    @tt.get("/c/<cid>")
+    @tt.get("/board")
     @auth.portal_required("tabletop")
-    def campaign_page(cid):
-        """One campaign's tabletop: its heroes' cards along the top, its cork board of cue cards and polaroids below."""
-        title = ""
-        if table.ready:
-            try:
-                title = table.campaign(cid)["title"]
-            except tabletop_mod.NotFound:
-                abort(404)
-            except Exception:   # noqa: BLE001 — storage unreachable: the page still loads and says so
-                title = ""
-        return render_template("tabletop.html", ready=table.ready, gm=auth.is_admin(me()), me_email=me(), cid=cid, title=title)
-
-    @tt.get("/campaigns")
-    @auth.portal_required("tabletop")
-    def campaigns():
-        def answer():
-            out = []
-            for c in table.campaigns():
-                out.append({**c, "heroes": [h["name"] for h in heroes.summary(c["id"])], "boards": len(table.boards(c["id"])),
-                            "url": url_for("tabletop.campaign_page", cid=c["id"])})
-            return {"campaigns": out}
-        return tt_call(answer)
-
-    @tt.post("/campaigns")
-    @auth.admin_required
-    def campaign_new():
-        body = request.get_json(silent=True) or {}
-        def make():
-            c = table.create_campaign(body.get("title"), body.get("blurb"), me())
-            return {"campaign": {**c, "url": url_for("tabletop.campaign_page", cid=c["id"])}}
-        return tt_call(make)
-
-    @tt.post("/campaigns/<cid>/edit")
-    @auth.admin_required
-    def campaign_edit(cid):
-        body = request.get_json(silent=True) or {}
-        return tt_call(lambda: {"campaign": table.edit_campaign(cid, body.get("title"), body.get("blurb"))})
-
-    @tt.post("/campaigns/<cid>/delete")
-    @auth.admin_required
-    def campaign_delete(cid):
-        """Remove a campaign, but only an empty one: its heroes' sheets and folders are never taken with it."""
-        def remove():
-            table.campaign(cid)
-            if heroes.summary(cid):
-                raise tabletop_mod.Refused("This campaign still has heroes. Remove them first.")
-            table.delete_campaign(cid)
-            heroes.forget_campaign(cid)
-        return tt_call(remove)
-
-    @tt.get("/boards")
-    @auth.portal_required("tabletop")
-    def boards():
-        return tt_call(lambda: {"boards": table.boards(request.args.get("c", ""))})
-
-    @tt.post("/boards")
-    @auth.admin_required
-    def board_new():
-        body = request.get_json(silent=True) or {}
-        return tt_call(lambda: {"board": table.create_board(body.get("title"), me(), str(body.get("campaign") or ""))})
-
-    @tt.post("/b/<bid>/rename")
-    @auth.admin_required
-    def board_rename(bid):
-        return tt_call(table.rename_board, bid, (request.get_json(silent=True) or {}).get("title"))
-
-    @tt.post("/b/<bid>/delete")
-    @auth.admin_required
-    def board_delete(bid):
-        return tt_call(table.delete_board, bid)
-
-    @tt.get("/b/<bid>")
-    @auth.portal_required("tabletop")
-    def board(bid):
-        """The whole board; with ?since=<rev>, just {"rev": n} while nothing has changed (the page polls this)."""
+    def board():
+        """The whole cork board; with ?since=<rev>, just {"rev": n} while nothing has changed (the page polls this)."""
         since = request.args.get("since", type=int)
 
-        def answer():                                   # the campaign's Fear rides along on every poll: it's on screen everywhere
-            b = table.board(bid)
-            fear_now = heroes.fear(b["campaign"]) if b.get("campaign") else 0
-            if since is not None and b["rev"] == since:
+        def answer():                                   # the Fear rides along on every poll: it's on screen everywhere
+            fear_now = heroes.fear()
+            if since is not None and table.rev() == since:
                 return {"rev": since, "fear": fear_now}
-            return {**table.view(bid), "fear": fear_now}
+            return {**table.view(), "fear": fear_now}
         resp = tt_call(answer)
         if not isinstance(resp, tuple):
             resp.headers["Cache-Control"] = "no-store"
         return resp
 
-    @tt.post("/b/<bid>/text")
+    @tt.post("/board/text")
     @auth.portal_required("tabletop")
-    def card_text(bid):
+    def card_text():
         who, name, _ = tt_who()
-        return tt_call(lambda: {"card": table.add_text(bid, who, name, request.get_json(silent=True) or {})})
+        return tt_call(lambda: {"card": table.add_text(who, name, request.get_json(silent=True) or {})})
 
-    @tt.post("/b/<bid>/image")
+    @tt.post("/board/image")
     @auth.portal_required("tabletop")
-    def card_image(bid):
+    def card_image():
         who, name, _ = tt_who()
         upload = request.files.get("img")
         data = upload.read(tabletop_mod.MAX_IMAGE + 1) if upload else b""
-        return tt_call(lambda: {"card": table.add_image(bid, who, name, data, request.form.to_dict())})
+        return tt_call(lambda: {"card": table.add_image(who, name, data, request.form.to_dict())})
 
-    @tt.post("/b/<bid>/c/<cid>/move")
+    @tt.post("/board/c/<cid>/move")
     @auth.portal_required("tabletop")
-    def card_move(bid, cid):
+    def card_move(cid):
         who, _, gm = tt_who()
-        return tt_call(lambda: {"card": table.move(bid, cid, who, gm, request.get_json(silent=True) or {})})
+        return tt_call(lambda: {"card": table.move(cid, who, gm, request.get_json(silent=True) or {})})
 
-    @tt.post("/b/<bid>/c/<cid>/edit")
+    @tt.post("/board/c/<cid>/edit")
     @auth.portal_required("tabletop")
-    def card_edit(bid, cid):
+    def card_edit(cid):
         who, _, gm = tt_who()
-        return tt_call(lambda: {"card": table.edit(bid, cid, who, gm, request.get_json(silent=True) or {})})
+        return tt_call(lambda: {"card": table.edit(cid, who, gm, request.get_json(silent=True) or {})})
 
-    @tt.post("/b/<bid>/c/<cid>/delete")
+    @tt.post("/board/c/<cid>/delete")
     @auth.portal_required("tabletop")
-    def card_delete(bid, cid):
+    def card_delete(cid):
         who, _, gm = tt_who()
-        return tt_call(table.remove, bid, cid, who, gm)
+        return tt_call(table.remove, cid, who, gm)
 
-    @tt.get("/b/<bid>/img/<name>")
+    @tt.get("/board/img/<name>")
     @auth.portal_required("tabletop")
-    def card_img(bid, name):
+    def card_img(name):
         if not table.ready:
             abort(503)
-        try:
-            found = table.image(bid, name)
-        except tabletop_mod.NotFound:
-            found = None
+        found = table.image(name)
         if not found:
             abort(404)
         resp = app.response_class(found[0], mimetype=found[1])
@@ -1080,25 +1004,24 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @tt.get("/fear")
     @auth.portal_required("tabletop")
     def fear():
-        return tt_call(lambda: {"fear": heroes.fear(request.args.get("c", "")), "max": tabletop_mod.FEAR_MAX})
+        return tt_call(lambda: {"fear": heroes.fear(), "max": tabletop_mod.FEAR_MAX})
 
     @tt.post("/fear")
     @auth.admin_required
     def fear_set():
         body = request.get_json(silent=True) or {}
-        return tt_call(lambda: {"fear": heroes.set_fear(str(body.get("campaign") or ""), value=body.get("value"), delta=body.get("delta"))})
+        return tt_call(lambda: {"fear": heroes.set_fear(value=body.get("value"), delta=body.get("delta"))})
 
     @tt.get("/heroes")
     @auth.portal_required("tabletop")
     def heroes_list():
-        cid = request.args.get("c", "")
-        return tt_call(lambda: {"heroes": heroes.summary(cid, gm=auth.is_admin(me())), "fear": heroes.fear(cid)})
+        return tt_call(lambda: {"heroes": heroes.summary(gm=auth.is_admin(me())), "fear": heroes.fear()})
 
     @tt.post("/heroes")
     @auth.admin_required
     def hero_new():
         body = request.get_json(silent=True) or {}
-        return tt_call(lambda: heroes.create(me(), str(body.get("campaign") or ""), body.get("name"), body.get("sheet"),
+        return tt_call(lambda: heroes.create(me(), body.get("name"), body.get("sheet"),
                                              body.get("player", ""), body.get("player_name", ""), body.get("gm_ref")))
 
     @tt.get("/h/<hid>")
