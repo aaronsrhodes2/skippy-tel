@@ -436,6 +436,15 @@ in Admin > Friends. There is no list of tabletops and no list of boards: the pag
   the keys, by dropping a picture on the board, or by pasting one. Big photos are shrunk on the device to 2000 px JPEG first; GIFs and
   small PNGs go as they are. You can drag, edit and take down your own cards; the GM can do that to any card. Dragging someone else's
   card pans the board instead. A card appears at once for the person who adds it and for everyone else within about 4 s.
+- **Notes** can have a title (a cast card: "The Remnant", then its description).
+- **Who sees a card (the GM's call, card by card):** *shown* (everyone), *fogged* (the players see a drifting fog of war where the
+  card is and nothing of what it is, until it's revealed as the game goes on) or *hidden* (a GM-only campaign note: the players can't
+  see that it exists). The GM sets it on the card's sheet (three keys), flips a card between shown and fogged with the small key on the
+  card, and chooses what the cards they add next start as with the eye key in the top bar. Revealing lifts the fog off the card for
+  everyone within about 4 s; a hidden card that's shown is pinned up. A player's own cards are always shown.
+- **This is enforced on the server, not on the screen.** A player's copy of the board has the hidden cards left out entirely, and a
+  fogged card reduced to its position (no text, title, author, picture name or shape); a fogged or hidden picture is not served to a
+  player (404); a player can't move, edit or take down a card that isn't shown. The GM's own view marks fogged and hidden cards.
 - **Live:** the page polls `GET /tabletop/board?since=<rev>` every 4 s. While nothing has changed, the reply is `{"rev": n, "fear": n}`.
 
 **Heroes.** A hero's card opens three tabs:
@@ -463,6 +472,8 @@ device asks for reduced motion.
   `deploy.yml`.
 - A missing bucket is an error the page states ("the storage bucket doesn't exist yet"), never an empty table. A failed save drops the
   portal's in-memory copies, so nothing is shown that wasn't kept.
+- The board is 6400 x 5000 units (`BOARD_W`, `BOARD_H`) so a campaign's worth of cards fits: the lore band, the glossary bands, the
+  hidden GM notes. The cards that go up at the start live in the campaign repo (`board/assets.json`, built by `board/make_assets.py`).
 - Every write needs the `X-Tabletop: 1` header, which another site's page can't add. Pictures and PDFs are recognised by their first
   bytes, never by name. Text is drawn with `textContent`, never parsed as HTML.
 

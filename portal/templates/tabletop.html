@@ -25,6 +25,7 @@
     <button type="button" class="tt-fear" id="tt-fear" aria-label="Fear" title="Fear: the GM's, kept from session to session">
       <svg class="g" aria-hidden="true"><use href="#g-flame"/></svg><span id="tt-fear-n">–</span></button>
     <h1 class="tt-title"><span class="tt-campaign">{{ title }}</span></h1>
+    {% if gm %}<button type="button" class="key" id="tt-vis-key" aria-label="New cards start shown" title="New cards start shown"><svg class="g" aria-hidden="true"><use href="#g-eye"/></svg></button>{% endif %}
     <button type="button" class="key" id="tt-note-key" aria-label="Pin a note" title="Pin a note" disabled><svg class="g" aria-hidden="true"><use href="#g-talk"/></svg></button>
     <button type="button" class="key" id="tt-pic-key" aria-label="Pin a picture" title="Pin a picture" disabled><svg class="g" aria-hidden="true"><use href="#g-image"/></svg></button>
     <button type="button" class="key" id="tt-fit-key" aria-label="Show the whole board" title="Show the whole board" disabled><svg class="g" aria-hidden="true"><use href="#g-fit"/></svg></button>
@@ -51,8 +52,16 @@
       <button type="button" class="key sm" data-close aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
     </div>
     <div class="tt-card-pic" id="tt-card-pic"></div>
+    <input type="text" id="tt-card-title" maxlength="80" placeholder="A title (optional)" aria-label="Title of the note" autocomplete="off">
     <textarea id="tt-card-text" maxlength="2000" rows="4" aria-label="Words on the card"></textarea>
     <div class="tt-inks" id="tt-inks" role="radiogroup" aria-label="Ink"></div>
+    {% if gm %}{# the GM's: who sees this card #}
+    <div class="tt-vis" id="tt-card-vis" role="radiogroup" aria-label="Who sees this card">
+      <button type="button" class="key sm" role="radio" data-vis="shown" aria-label="Shown to everyone" title="Shown to everyone"><svg class="g" aria-hidden="true"><use href="#g-eye"/></svg></button>
+      <button type="button" class="key sm" role="radio" data-vis="fog" aria-label="Fogged: the players see a fog patch and nothing of what it is" title="Fogged: the players see a fog patch and nothing of what it is"><svg class="g" aria-hidden="true"><use href="#g-fog"/></svg></button>
+      <button type="button" class="key sm" role="radio" data-vis="hidden" aria-label="Hidden: a GM-only note, the players can't see it" title="Hidden: a GM-only note, the players can't see it"><svg class="g" aria-hidden="true"><use href="#g-hide"/></svg></button>
+    </div>
+    {% endif %}
     <div class="tt-sheet-bottom">
       <span class="grow"></span>
       <button type="button" class="key" id="tt-card-save" aria-label="Pin it" title="Pin it"><svg class="g" aria-hidden="true"><use href="#g-send"/></svg></button>

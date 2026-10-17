@@ -5,6 +5,11 @@ surface where everything about the game that isn't one hero's is added and shown
 photos of the table) and notes (clues, quotes, cast cards). Everyone granted "tabletop" pins cards, drags them about, and
 edits or removes their own; the Captain (the GM) can change anything.
 
+The GM decides, card by card, who sees what: **shown** (everyone), **fog** (the players see a fog of war where the card is and
+nothing of what it is, until it's revealed as the game goes on) or **hidden** (a GM-only campaign note; the players can't see that it
+exists). That is enforced here, not on the screen: what a player isn't allowed to see is never sent to them, and its picture is
+never served to them.
+
 Where it lives: one private GCS bucket (TABLETOP_BUCKET, made by infra/bootstrap), read and written by the portal's
 service account. Cloud Run's disk is gone on every restart, so nothing is kept anywhere else:
 
@@ -31,7 +36,7 @@ log = logging.getLogger(__name__)
 
 BUCKET_ENV = "TABLETOP_BUCKET"
 CAMPAIGN = "Heroes of Chance"             # the one campaign this table plays
-BOARD_W, BOARD_H = 4000, 3000         # the surface, in board units; the page fits it to the screen and zooms in
+BOARD_W, BOARD_H = 6400, 5000         # the surface, in board units; the page fits it to the screen and zooms in
 MAX_CARDS = 400
 MAX_TEXT = 2000
 MAX_IMAGE = 12 * 1024 * 1024          # under Cloud Run's 32 MB request cap with room to spare; the page shrinks big photos first
@@ -42,6 +47,8 @@ _MAGIC = ((b"\xff\xd8\xff", "jpg", "image/jpeg"), (b"\x89PNG\r\n\x1a\n", "png", 
           (b"GIF87a", "gif", "image/gif"), (b"GIF89a", "gif", "image/gif"))
 TYPES = {"jpg": "image/jpeg", "png": "image/png", "gif": "image/gif", "webp": "image/webp"}
 COLOURS = ("green", "amber", "cyan", "violet", "white", "red")   # a text card's ink: the passthrough palette
+VIS = ("shown", "fog", "hidden")      # who sees a card: everyone; a fog patch where it is and nothing of what it is; only the GM
+MAX_TITLE = 80
 
 
 class Refused(ValueError):
@@ -182,16 +189,30 @@ class Tabletop:
                 self._board = data
             return self._board
 
-    def view(self) -> dict:
+    @staticmethod
+    def _seen(card: dict, gm: bool):
+        """What this viewer gets of a card: all of it, just where a fog patch sits, or nothing at all."""
+        vis = card.get("vis", "shown")
+        if gm or vis == "shown":
+            return dict(card)
+        if vis == "hidden":
+            return None
+        return {"id": card["id"], "vis": "fog", "x": card["x"], "y": card["y"], "w": card["w"], "rot": card.get("rot", 0), "z": card.get("z", 0)}
+
+    def view(self, gm: bool = False) -> dict:
         b = self.board()
-        return {"title": CAMPAIGN, "rev": b["rev"], "cards": [dict(c) for c in b["cards"]], "w": BOARD_W, "h": BOARD_H}
+        cards = [seen for seen in (self._seen(c, gm) for c in b["cards"]) if seen]
+        return {"title": CAMPAIGN, "rev": b["rev"], "cards": cards, "w": BOARD_W, "h": BOARD_H}
 
     def rev(self) -> int:
         return self.board()["rev"]
 
-    def image(self, name: str) -> tuple[bytes, str] | None:
+    def image(self, name: str, gm: bool = False) -> tuple[bytes, str] | None:
         found = re.fullmatch(r"([0-9a-z]{6,24})\.(jpg|png|gif|webp)", name or "")
         if not found:
+            return None
+        card = next((c for c in self.board()["cards"] if c["id"] == found.group(1) and c.get("img") == name), None)
+        if not card or not (gm or card.get("vis", "shown") == "shown"):     # a fogged or hidden picture is not served to a player
             return None
         data = self.store.get(f"images/{name}")
         return (data, TYPES[found.group(2)]) if data else None
@@ -201,16 +222,25 @@ class Tabletop:
         board["rev"] += 1
         self.store.put("board.json", json.dumps(board, ensure_ascii=False).encode(), "application/json")
 
-    def _card(self, board: dict, card_id: str) -> dict:
+    def _card(self, board: dict, card_id: str, admin: bool = False) -> dict:
         for card in board["cards"]:
             if card["id"] == card_id:
+                if not admin and card.get("vis", "shown") == "hidden":     # to a player a hidden card doesn't exist
+                    break
                 return card
         raise NotFound(card_id)
 
     @staticmethod
     def _mine(card: dict, who: str, admin: bool):
+        if not admin and card.get("vis", "shown") != "shown":
+            raise Refused("That one hasn't been revealed yet.")
         if not admin and card.get("by") != who:
             raise Refused("Only the person who added this card (or the GM) can change it.")
+
+    @staticmethod
+    def _vis_for(body: dict, admin: bool) -> str:
+        """The visibility a new card starts with: the GM's choice; a player's cards are always shown."""
+        return body.get("vis") if admin and body.get("vis") in VIS else "shown"
 
     def _place(self, board: dict, card: dict, body: dict) -> None:
         card["x"] = _num(body.get("x"), 0, BOARD_W - 40, card.get("x", BOARD_W / 2))
@@ -226,19 +256,20 @@ class Tabletop:
         self._place(board, card, {"rot": (secrets.randbelow(9) - 4), **body})   # a slight tilt: pinned by hand
         return card
 
-    def add_text(self, who: str, name: str, body: dict) -> dict:
+    def add_text(self, who: str, name: str, body: dict, admin: bool = False) -> dict:
         text = str(body.get("text") or "").strip()[:MAX_TEXT]
         if not text:
             raise Refused("A note needs some words.")
         with self._lock:
             board = self.board()
             card = self._new_card(board, who, name, {"w": 360, **body})
-            card.update(kind="text", text=text, ink=body.get("ink") if body.get("ink") in COLOURS else "green")
+            card.update(kind="text", text=text, ink=body.get("ink") if body.get("ink") in COLOURS else "green",
+                        title=" ".join(str(body.get("title") or "").split())[:MAX_TITLE], vis=self._vis_for(body, admin))
             board["cards"].append(card)
             self._save(board)
             return dict(card)
 
-    def add_image(self, who: str, name: str, data: bytes, body: dict) -> dict:
+    def add_image(self, who: str, name: str, data: bytes, body: dict, admin: bool = False) -> dict:
         if not data:
             raise Refused("No picture came through.")
         if len(data) > MAX_IMAGE:
@@ -250,7 +281,7 @@ class Tabletop:
         with self._lock:
             board = self.board()
             card = self._new_card(board, who, name, {"w": 520, **body})
-            card.update(kind="image", img=f"{card['id']}.{kind[0]}", text=caption,
+            card.update(kind="image", img=f"{card['id']}.{kind[0]}", text=caption, vis=self._vis_for(body, admin),
                         ratio=_num(body.get("ratio"), 0.05, 20, 0.75))   # height / width, so the page lays it out before it loads
             self.store.put(f"images/{card['img']}", data, kind[1])
             board["cards"].append(card)
@@ -260,7 +291,7 @@ class Tabletop:
     def move(self, card_id: str, who: str, admin: bool, body: dict) -> dict:
         with self._lock:
             board = self.board()
-            card = self._card(board, card_id)
+            card = self._card(board, card_id, admin)
             self._mine(card, who, admin)
             self._place(board, card, body)
             self._save(board)
@@ -269,21 +300,34 @@ class Tabletop:
     def edit(self, card_id: str, who: str, admin: bool, body: dict) -> dict:
         with self._lock:
             board = self.board()
-            card = self._card(board, card_id)
+            card = self._card(board, card_id, admin)
             self._mine(card, who, admin)
             text = str(body.get("text") or "").strip()[:MAX_TEXT]
             if card["kind"] == "text" and not text:
                 raise Refused("A note needs some words.")
             card["text"] = text
+            if card["kind"] == "text" and "title" in body:
+                card["title"] = " ".join(str(body.get("title") or "").split())[:MAX_TITLE]
             if body.get("ink") in COLOURS and card["kind"] == "text":
                 card["ink"] = body["ink"]
+            self._save(board)
+            return dict(card)
+
+    def set_vis(self, card_id: str, vis) -> dict:
+        """The GM shows a card, fogs it, or hides it (shown / fog / hidden)."""
+        if vis not in VIS:
+            raise Refused("A card is shown, fogged or hidden.")
+        with self._lock:
+            board = self.board()
+            card = self._card(board, card_id, True)
+            card["vis"] = vis
             self._save(board)
             return dict(card)
 
     def remove(self, card_id: str, who: str, admin: bool) -> None:
         with self._lock:
             board = self.board()
-            card = self._card(board, card_id)
+            card = self._card(board, card_id, admin)
             self._mine(card, who, admin)
             if card.get("img"):
                 self.store.delete(f"images/{card['img']}")

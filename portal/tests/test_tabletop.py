@@ -352,3 +352,91 @@ def test_a_missing_bucket_is_an_error_not_an_empty_table_but_a_missing_file_is_j
     app = portal.create_app({**SETTINGS}, vm=FakeVm(), skippy=FakeSkippy(), tabletop=tabletop.Tabletop(gone))
     resp = as_(app, ADMIN).get("/tabletop/board")
     assert resp.status_code == 503 and "bucket" in resp.json["error"]                     # the page says so, instead of showing an empty table
+
+
+# ── who sees a card: shown, fogged, or hidden (the GM decides; the server enforces it) ──
+
+def test_a_fogged_card_reaches_a_player_as_a_fog_patch_and_nothing_else_and_its_picture_is_not_served(world):
+    app, store = world
+    gm, eric = as_(app, ADMIN), as_(app, ERIC)
+    note = gm.post("/tabletop/board/text", json={"title": "The Great One", "text": "THE SECRET TEXT", "vis": "fog", "x": 300, "y": 400}, headers=H).json["card"]
+    pic = gm.post("/tabletop/board/image", data={"img": (io.BytesIO(PNG), "great-one.png"), "ratio": "0.56", "text": "SECRET CAPTION", "vis": "fog"},
+                  headers=H, content_type="multipart/form-data").json["card"]
+    assert note["vis"] == "fog" and pic["vis"] == "fog"
+    seen = eric.get("/tabletop/board").json["cards"]
+    assert {c["id"] for c in seen} == {note["id"], pic["id"]}                              # the players see that something is there
+    for c in seen:
+        assert set(c) == {"id", "vis", "x", "y", "w", "rot", "z"}, c                       # and nothing more: no text, title, picture, author, kind
+    assert (seen[0]["x"], seen[0]["y"]) == (300, 400)
+    raw = eric.get("/tabletop/board").data
+    for secret in (b"SECRET", b"Great One", b"great-one", pic["img"].encode(), b"ratio"):
+        assert secret not in raw, secret
+    assert eric.get(f"/tabletop/board/img/{pic['img']}").status_code == 404               # the picture isn't served to a player
+    assert gm.get(f"/tabletop/board/img/{pic['img']}").data == PNG                          # but it is to the GM
+    mine = gm.get("/tabletop/board").json["cards"]
+    assert {c["text"] for c in mine} == {"THE SECRET TEXT", "SECRET CAPTION"} and {c["vis"] for c in mine} == {"fog"}
+
+
+def test_a_hidden_card_does_not_exist_for_a_player_at_all(world):
+    app, _ = world
+    gm, eric = as_(app, ADMIN), as_(app, ERIC)
+    note = gm.post("/tabletop/board/text", json={"title": "The Quantum Parasite", "text": "It feeds on probability.", "vis": "hidden"}, headers=H).json["card"]
+    assert eric.get("/tabletop/board").json["cards"] == []                                  # not even a fog patch
+    assert b"Parasite" not in eric.get("/tabletop/board").data
+    base = f"/tabletop/board/c/{note['id']}"
+    for path in ("/move", "/edit", "/delete"):
+        assert eric.post(base + path, json={"x": 1, "text": "x"}, headers=H).status_code == 404, path    # to a player it isn't there
+    assert eric.post(base + "/vis", json={"vis": "shown"}, headers=H).status_code == 403
+    assert [c["id"] for c in gm.get("/tabletop/board").json["cards"]] == [note["id"]]
+
+
+def test_a_players_own_cards_are_always_shown_and_a_fogged_card_cannot_be_touched_by_a_player(world):
+    app, _ = world
+    gm, eric = as_(app, ADMIN), as_(app, ERIC)
+    mine = eric.post("/tabletop/board/text", json={"text": "my note", "vis": "hidden"}, headers=H).json["card"]
+    assert mine["vis"] == "shown"                                                           # a player can't hide a card, whatever they send
+    fogged = gm.post("/tabletop/board/text", json={"text": "not yet", "vis": "fog"}, headers=H).json["card"]
+    base = f"/tabletop/board/c/{fogged['id']}"
+    assert eric.post(base + "/move", json={"x": 5, "y": 5}, headers=H).status_code == 400
+    assert eric.post(base + "/edit", json={"text": "x"}, headers=H).status_code == 400
+    assert eric.post(base + "/delete", headers=H).status_code == 400
+    assert gm.post(base + "/move", json={"x": 5, "y": 5}, headers=H).status_code == 200      # the GM moves it, still fogged
+    assert gm.get("/tabletop/board").json["cards"][1]["vis"] == "fog"
+
+
+def test_the_gm_reveals_fogs_and_hides_a_card_as_the_game_goes_on_and_players_see_each_change(world):
+    app, _ = world
+    gm, eric = as_(app, ADMIN), as_(app, ERIC)
+    card = gm.post("/tabletop/board/text", json={"title": "The strata", "text": "Layer upon layer of technology.", "vis": "hidden"}, headers=H).json["card"]
+    url = f"/tabletop/board/c/{card['id']}/vis"
+    rev = eric.get("/tabletop/board").json["rev"]
+    assert gm.post(url, json={"vis": "fog"}, headers=H).json["card"]["vis"] == "fog"
+    changed = eric.get(f"/tabletop/board?since={rev}").json                                  # the poll notices the change
+    assert [c["vis"] for c in changed["cards"]] == ["fog"] and "text" not in changed["cards"][0]
+    rev = changed["rev"]
+    assert gm.post(url, json={"vis": "shown"}, headers=H).status_code == 200
+    revealed = eric.get(f"/tabletop/board?since={rev}").json["cards"][0]
+    assert revealed["text"] == "Layer upon layer of technology." and revealed["title"] == "The strata" and revealed["vis"] == "shown"
+    assert gm.post(url, json={"vis": "hidden"}, headers=H).status_code == 200                # and out of sight again
+    assert eric.get("/tabletop/board").json["cards"] == []
+    assert gm.post(url, json={"vis": "invisible"}, headers=H).status_code == 400
+    assert gm.post("/tabletop/board/c/abcdef123456/vis", json={"vis": "shown"}, headers=H).status_code == 404
+
+
+def test_a_revealed_picture_is_served_to_the_players(world):
+    app, _ = world
+    gm, eric = as_(app, ADMIN), as_(app, ERIC)
+    pic = gm.post("/tabletop/board/image", data={"img": (io.BytesIO(PNG), "a.png"), "vis": "hidden"}, headers=H, content_type="multipart/form-data").json["card"]
+    assert eric.get(f"/tabletop/board/img/{pic['img']}").status_code == 404
+    gm.post(f"/tabletop/board/c/{pic['id']}/vis", json={"vis": "shown"}, headers=H)
+    assert eric.get(f"/tabletop/board/img/{pic['img']}").data == PNG
+
+
+def test_a_note_can_have_a_title_and_the_title_can_be_edited(world):
+    app, _ = world
+    eric = as_(app, ERIC)
+    card = eric.post("/tabletop/board/text", json={"title": "  The   Remnant ", "text": "A glowing, spiky crystal sphere."}, headers=H).json["card"]
+    assert card["title"] == "The Remnant"
+    assert eric.post(f"/tabletop/board/c/{card['id']}/edit", json={"title": "The Remnant (CANON)", "text": "A glowing, spiky crystal sphere."},
+                     headers=H).json["card"]["title"] == "The Remnant (CANON)"
+    assert eric.post("/tabletop/board/text", json={"title": "only a title"}, headers=H).status_code == 400

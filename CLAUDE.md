@@ -216,6 +216,8 @@ The Captain's Daggerheart campaign (the lore is in `../heroes-of-chance`), as on
 top bar, and the one cork board below, where everything else about the game is added and shown. No campaign deck, no board list.
 - **Heroes:** every field of the official sheet (`tabletop.SPEC`; a field not in SPEC can't be stored), a project, a folder, an
   avatar (cropped by a focus point and zoom), a print view; a GM-only quick reference per hero; the GM's Fear, kept between sessions.
+- **The cork board:** every card is shown, fogged (a fog patch, nothing of what it is) or hidden (GM-only), per the GM; redacted
+  server-side in `Tabletop.view()` / `image()`, never just hidden on screen.
 - **Storage:** the private bucket `skippy-tel-tabletop`, made by `infra/bootstrap`, so a new bucket needs a bootstrap re-run in
   Cloud Shell. The portal reaches it through its runtime identity.
 - **Code:** `portal/tabletop.py`, `templates/tabletop*.html`, `static/tabletop{,-heroes}.{js,css}`.

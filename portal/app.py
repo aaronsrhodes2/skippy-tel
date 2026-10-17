@@ -949,7 +949,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             fear_now = heroes.fear()
             if since is not None and table.rev() == since:
                 return {"rev": since, "fear": fear_now}
-            return {**table.view(), "fear": fear_now}
+            return {**table.view(gm=auth.is_admin(me())), "fear": fear_now}      # a player's copy has fogged and hidden cards taken out
         resp = tt_call(answer)
         if not isinstance(resp, tuple):
             resp.headers["Cache-Control"] = "no-store"
@@ -958,16 +958,16 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @tt.post("/board/text")
     @auth.portal_required("tabletop")
     def card_text():
-        who, name, _ = tt_who()
-        return tt_call(lambda: {"card": table.add_text(who, name, request.get_json(silent=True) or {})})
+        who, name, gm = tt_who()
+        return tt_call(lambda: {"card": table.add_text(who, name, request.get_json(silent=True) or {}, gm)})
 
     @tt.post("/board/image")
     @auth.portal_required("tabletop")
     def card_image():
-        who, name, _ = tt_who()
+        who, name, gm = tt_who()
         upload = request.files.get("img")
         data = upload.read(tabletop_mod.MAX_IMAGE + 1) if upload else b""
-        return tt_call(lambda: {"card": table.add_image(who, name, data, request.form.to_dict())})
+        return tt_call(lambda: {"card": table.add_image(who, name, data, request.form.to_dict(), gm)})
 
     @tt.post("/board/c/<cid>/move")
     @auth.portal_required("tabletop")
@@ -981,6 +981,12 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         who, _, gm = tt_who()
         return tt_call(lambda: {"card": table.edit(cid, who, gm, request.get_json(silent=True) or {})})
 
+    @tt.post("/board/c/<cid>/vis")
+    @auth.admin_required
+    def card_vis(cid):
+        """The GM shows a card, fogs it, or hides it. Only the GM sees fogged and hidden cards' content (tabletop.py)."""
+        return tt_call(lambda: {"card": table.set_vis(cid, (request.get_json(silent=True) or {}).get("vis"))})
+
     @tt.post("/board/c/<cid>/delete")
     @auth.portal_required("tabletop")
     def card_delete(cid):
@@ -992,7 +998,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def card_img(name):
         if not table.ready:
             abort(503)
-        found = table.image(name)
+        found = table.image(name, auth.is_admin(me()))
         if not found:
             abort(404)
         resp = app.response_class(found[0], mimetype=found[1])

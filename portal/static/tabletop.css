@@ -160,3 +160,31 @@
 .avwrap.sm { width: 34px; height: 34px; }
 .tt-hero .file .fk .key.on::after { background: var(--accent); } .tt-hero .file .fk .key.on .g { color: #000; }
 
+
+/* ── who sees a card: shown, fogged, hidden ── the fog is drifting lines (no fill, no gradient) over black */
+.tt-card .ttl, .tt-card.cue .note .ttl { display: block; margin-bottom: 12px; font: 700 40px/1.2 var(--mono); text-decoration: none; }
+.tt-card.fogged { display: flex; align-items: center; justify-content: center; overflow: hidden; background: #05090b; border: 2px dashed var(--violet); cursor: default; }
+.tt-card.fogged::before, .tt-card .veil {
+  content: ""; position: absolute; inset: 0; pointer-events: none; animation: fogdrift 28s linear infinite;
+  background-size: 220px 130px; background-repeat: repeat;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='130'%3E%3Cg fill='none' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M0 25C36 5 74 45 110 25S184 5 220 25' stroke='%23818CF8' stroke-opacity='.6'/%3E%3Cpath d='M0 70C36 50 74 90 110 70S184 50 220 70' stroke='%2300CCFF' stroke-opacity='.4'/%3E%3Cpath d='M0 115C36 95 74 135 110 115S184 95 220 115' stroke='%23818CF8' stroke-opacity='.5'/%3E%3C/g%3E%3C/svg%3E"); }
+.tt-card .veil { z-index: 1; background-color: rgba(5, 9, 11, .66); }
+.tt-card .veil.lifting { animation: lift 2.8s ease-out forwards; }
+.tt-card.fogged .q { position: relative; font: 700 150px/1 var(--mono); color: var(--violet); opacity: .5; }
+@keyframes fogdrift { from { background-position: 0 0; } to { background-position: 220px 65px; } }
+@keyframes lift { 0% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-40px); } }
+.tt-card.appear { animation: pinon .8s ease-out; }
+@keyframes pinon { from { opacity: 0; } to { opacity: 1; } }
+.tt-card.gmonly.cue { border-style: dashed; }          /* a cue card is dashed when only the GM sees it; a polaroid keeps its white frame */
+.tt-card.vis-hidden { opacity: .62; }
+.tt-card .vtag, .tt-card .vkey { position: absolute; z-index: 3; display: flex; align-items: center; justify-content: center; width: 52px; height: 52px; padding: 0;
+  background: #000; border: 2px solid var(--violet); color: var(--violet); border-radius: 0; }
+.tt-card .vtag { top: -20px; right: -20px; pointer-events: none; }
+.tt-card .vkey { bottom: -22px; left: -22px; cursor: pointer; border-color: var(--accent); color: var(--accent); }
+.tt-card .vtag .g, .tt-card .vkey .g { width: 32px; height: 32px; }
+.tt-card.polaroid .vkey { bottom: -64px; }
+.tt-vis { flex: none; display: flex; gap: 8px; }
+.tt-vis [aria-checked="true"]::after { background: var(--accent); } .tt-vis [aria-checked="true"] .g { color: #000; }
+#tt-card-title { flex: none; width: 100%; box-sizing: border-box; padding: 8px; background: var(--panel); color: var(--ink); border: 1px solid var(--dim-green-hi); font: 700 1rem var(--mono); }
+#tt-card-title:focus { border-color: var(--accent); outline: none; }
+#tt-card-title[readonly] { border-color: transparent; }

@@ -16,7 +16,7 @@
 
   const view = $("tt-view"), boardEl = $("tt-board"), notice = $("tt-notice");
   const keys = { note: $("tt-note-key"), pic: $("tt-pic-key"), fit: $("tt-fit-key") };
-  let board = null, cam = { x: 0, y: 0, s: 0.2 }, busy = 0, pollTimer = null;
+  let board = null, cam = { x: 0, y: 0, s: 0.2 }, busy = 0, pollTimer = null, drawn = false;
 
   // ── talking to the portal ──
   async function call(method, url, body) {
@@ -38,6 +38,16 @@
   const remember = (k, v) => { try { localStorage.setItem("tt-" + k, v); } catch (e) { /* private window */ } };
   const recall = (k) => { try { return localStorage.getItem("tt-" + k); } catch (e) { return null; } };
 
+  // Who sees a card (portal/tabletop.py enforces it; this only draws it): shown, fogged (a fog patch where it is, nothing of what it is)
+  // or hidden (a GM-only note). The GM chooses; the players' copy of the board never contains what they may not see.
+  const VIS = ["shown", "fog", "hidden"];
+  const vis = (c) => c.vis || "shown";
+  const FOG_RATIO = 0.7;                                      // a fog patch's height / width: the same for every card, so it gives nothing away
+  const VIS_GLYPH = { shown: "g-eye", fog: "g-fog", hidden: "g-hide" };
+  const VIS_WORDS = { shown: "shown", fog: "fogged", hidden: "hidden" };
+  let visMode = GM && VIS.includes(recall("vis")) ? recall("vis") : "hidden";   // what the GM's new cards start as
+  const svg = (id) => `<svg class="g" aria-hidden="true"><use href="#${id}"/></svg>`;
+
   // ── the camera: board units → screen ──
   function applyCam() { boardEl.style.transform = `translate(${cam.x}px, ${cam.y}px) scale(${cam.s})`; }
   function clampScale(s) { return Math.min(3, Math.max(0.05, s)); }
@@ -54,7 +64,7 @@
       box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
       for (const c of cards) {
         const el = boardEl.querySelector(`[data-id="${c.id}"]`);
-        const h = el ? el.offsetHeight : c.w * (c.ratio || 0.6);
+        const h = el ? el.offsetHeight : c.w * (c.ratio || FOG_RATIO);
         box.x0 = Math.min(box.x0, c.x); box.y0 = Math.min(box.y0, c.y);
         box.x1 = Math.max(box.x1, c.x + c.w); box.y1 = Math.max(box.y1, c.y + h);
       }
@@ -71,15 +81,24 @@
 
   // ── drawing ──
   const canChange = (c) => GM || c.by === ME;
+  const fogVeil = (extra) => { const v = document.createElement("span"); v.className = "veil" + (extra ? " " + extra : ""); v.setAttribute("aria-hidden", "true"); return v; };
   function cardEl(c) {
     const el = document.createElement("div");
-    el.className = "tt-card " + (c.kind === "image" ? "polaroid" : "cue") + (canChange(c) ? " mine" : "");
+    el.dataset.id = c.id; el.dataset.vis = vis(c);
+    if (vis(c) === "fog" && !GM) {                     // a player's view of a fogged card: a fog patch, and nothing of what it is
+      el.className = "tt-card fogged";
+      el.setAttribute("aria-label", "Not revealed yet");
+      el.innerHTML = '<span class="q" aria-hidden="true">?</span>';
+      place(el, c);
+      el.style.height = Math.round(c.w * FOG_RATIO) + "px";
+      return el;
+    }
+    el.className = "tt-card " + (c.kind === "image" ? "polaroid" : "cue") + (canChange(c) ? " mine" : "") + (vis(c) !== "shown" ? " gmonly vis-" + vis(c) : "");
     const pin = document.createElement("i");           // the pin holding it to the cork: a colour of its own, picked from the card's id
     pin.className = "pin pin-" + (parseInt(c.id.slice(-2), 16) % 5);
     el.appendChild(pin);
-    el.dataset.id = c.id;
     el.setAttribute("role", "button");
-    el.setAttribute("aria-label", (c.kind === "image" ? "Picture" : "Note") + " from " + (c.name || "someone"));
+    el.setAttribute("aria-label", (c.kind === "image" ? "Picture" : "Note") + " from " + (c.name || "someone") + (vis(c) !== "shown" ? ", " + VIS_WORDS[vis(c)] : ""));
     if (c.kind === "image") {
       const img = document.createElement("img");
       img.alt = c.text || "";
@@ -91,13 +110,29 @@
     } else {
       const note = document.createElement("div");
       note.className = "note ink-" + (c.ink || "green");
-      note.textContent = c.text;
+      if (c.title) { const ttl = document.createElement("span"); ttl.className = "ttl"; ttl.textContent = c.title; note.appendChild(ttl); }
+      note.appendChild(document.createTextNode(c.text));
       el.appendChild(note);
     }
     const by = document.createElement("div"); by.className = "by"; by.textContent = c.name || "";
     el.appendChild(by);
+    if (GM) {                                          // the GM sees what the players can't, marked, and can change it with one tap
+      if (vis(c) === "fog") el.appendChild(fogVeil());
+      const tag = document.createElement("span"); tag.className = "vtag"; tag.innerHTML = svg(VIS_GLYPH[vis(c)]);
+      tag.title = VIS_WORDS[vis(c)]; el.appendChild(tag);
+      const key = document.createElement("button"); key.type = "button"; key.className = "vkey";
+      const next = vis(c) === "shown" ? "fog" : "shown";
+      key.innerHTML = svg(VIS_GLYPH[next]);
+      key.setAttribute("aria-label", next === "shown" ? "Reveal it to the players" : "Fog it");
+      key.title = next === "shown" ? "Reveal it to the players" : "Fog it";
+      key.addEventListener("click", (ev) => { ev.stopPropagation(); setVis(c.id, next); });
+      el.appendChild(key);
+    }
     place(el, c);
     return el;
+  }
+  async function setVis(id, v) {
+    try { merge((await call("POST", `${BOARD}/c/${id}/vis`, { vis: v })).card); } catch (err) { say(err.message); }
   }
   function place(el, c) {
     el.style.left = c.x + "px"; el.style.top = c.y + "px"; el.style.width = c.w + "px";
@@ -106,11 +141,16 @@
   function draw() {
     boardEl.style.width = board.w + "px"; boardEl.style.height = board.h + "px";
     const have = new Map([...boardEl.children].map((el) => [el.dataset.id, el]));
+    const firstDraw = !drawn; drawn = true;
     for (const c of board.cards) {
       const old = have.get(c.id);
-      const sig = JSON.stringify([c.text, c.ink, c.img]);
+      const sig = JSON.stringify([c.text, c.title, c.ink, c.img, c.vis, c.kind]);
       if (old && old.dataset.sig === sig) { if (!old.classList.contains("dragging")) place(old, c); have.delete(c.id); continue; }
       const el = cardEl(c); el.dataset.sig = sig;
+      if (old && old.dataset.vis === "fog" && vis(c) === "shown") {           // revealed: the fog lifts off it
+        const lift = fogVeil("lifting"); el.appendChild(lift);
+        lift.addEventListener("animationend", () => lift.remove());
+      } else if (!old && !firstDraw) el.classList.add("appear");               // pinned up since you last looked
       old ? old.replaceWith(el) : boardEl.appendChild(el);
       have.delete(c.id);
     }
@@ -160,6 +200,7 @@
   let gesture = null;             // {kind: "pan"|"pinch"|"card", ...}
   view.addEventListener("pointerdown", (e) => {
     if (e.button !== 0 && e.pointerType === "mouse") return;
+    if (e.target.closest(".vkey")) return;                  // the GM's reveal key is a button, not a handle
     view.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const cardNode = e.target.closest(".tt-card");
@@ -208,7 +249,7 @@
     const g = gesture; gesture = null;
     g.el.classList.remove("dragging");
     if (!commit) return;
-    if (!g.moved) { openCard(g.card); return; }
+    if (!g.moved) { if (g.card.vis !== "fog" || GM) openCard(g.card); return; }
     busy++;
     call("POST", `${BOARD}/c/${g.card.id}/move`, { x: g.card.x, y: g.card.y, w: g.card.w, rot: g.card.rot })
       .then((d) => merge(d.card))
@@ -261,7 +302,7 @@
   }
   function openCard(card) {
     const sheet = $("tt-card"), mine = card ? canChange(card) : true, isNote = !card || card.kind === "text";
-    editing = card ? { card, ink: card.ink || "green" } : { ink: recall("ink") || "green" };
+    editing = card ? { card, ink: card.ink || "green", vis: vis(card) } : { ink: recall("ink") || "green", vis: visMode };
     sheet.classList.toggle("note", isNote);
     $("tt-card-by").textContent = card ? (card.name || "") : "";
     const pic = $("tt-card-pic"); pic.replaceChildren();
@@ -275,21 +316,36 @@
     text.placeholder = isNote ? "A clue, a quote, a name to remember…" : (mine ? "A caption (optional)" : "");
     text.hidden = !mine && !text.value;
     drawInks(editing.ink, mine && isNote);
+    const title = $("tt-card-title");
+    title.value = card ? (card.title || "") : ""; title.readOnly = !mine; title.hidden = !isNote || (!mine && !title.value);
+    drawVisChoice();
     $("tt-card-del").hidden = !card || !mine;
     $("tt-card-save").hidden = !mine;
     openSheet("tt-card");
     if (mine && isNote) setTimeout(() => text.focus(), 50);
   }
+  function drawVisChoice() {                           // the GM's: who sees this card (an existing card changes at once; a new one starts so)
+    const box = $("tt-card-vis");
+    if (!box) return;
+    box.querySelectorAll("[data-vis]").forEach((b) => b.setAttribute("aria-checked", b.dataset.vis === editing.vis ? "true" : "false"));
+  }
+  if ($("tt-card-vis")) $("tt-card-vis").addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-vis]");
+    if (!b) return;
+    editing.vis = b.dataset.vis;
+    if (editing.card) await setVis(editing.card.id, editing.vis);
+    drawVisChoice();
+  });
   $("tt-card-save").addEventListener("click", async () => {
     const text = $("tt-card-text").value;
     try {
       if (editing.card) {
-        const d = await call("POST", `${BOARD}/c/${editing.card.id}/edit`, { text, ink: editing.ink });
+        const d = await call("POST", `${BOARD}/c/${editing.card.id}/edit`, { text, ink: editing.ink, title: $("tt-card-title").value });
         merge(d.card);
       } else {
         const at = centre();
         remember("ink", editing.ink);
-        const d = await call("POST", `${BOARD}/text`, { text, ink: editing.ink, x: at.x - 180, y: at.y - 80 });
+        const d = await call("POST", `${BOARD}/text`, { text, title: $("tt-card-title").value, ink: editing.ink, vis: editing.vis, x: at.x - 180, y: at.y - 80 });
         merge(d.card);
       }
       closeSheets();
@@ -302,6 +358,15 @@
       board.cards = board.cards.filter((c) => c.id !== editing.card.id); board.rev = -1; draw(); closeSheets();
     } catch (err) { say(err.message); }
   });
+  const visKey = $("tt-vis-key");                          // the GM's: whether the cards they add next start shown, fogged or hidden
+  function drawVisKey() {
+    if (!visKey) return;
+    visKey.innerHTML = svg(VIS_GLYPH[visMode]);
+    const words = `New cards start ${VIS_WORDS[visMode]}`;
+    visKey.setAttribute("aria-label", words); visKey.title = words;
+  }
+  if (visKey) visKey.addEventListener("click", () => { visMode = VIS[(VIS.indexOf(visMode) + 1) % VIS.length]; remember("vis", visMode); drawVisKey(); say(`New cards start ${VIS_WORDS[visMode]}.`, 1800); });
+  drawVisKey();
   keys.note.addEventListener("click", () => openCard(null));
   keys.fit.addEventListener("click", () => fit(false));
 
@@ -336,7 +401,7 @@
         const { blob, ratio } = await shrink(file);
         const at = centre(), form = new FormData();
         form.append("img", blob, "card");
-        form.append("ratio", String(ratio));
+        form.append("ratio", String(ratio)); form.append("vis", visMode);
         form.append("x", String(at.x - 260 + (n - 1) * 40)); form.append("y", String(at.y - 260 * ratio + (n - 1) * 40));
         merge((await call("POST", `${BOARD}/image`, form)).card);
       }
