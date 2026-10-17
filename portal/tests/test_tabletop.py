@@ -306,3 +306,33 @@ def test_the_tabletops_page_is_the_campaign_deck_and_each_campaign_has_its_own_t
     page = eric.get(f"/tabletop/c/{cid}").data.decode()
     assert f'data-campaign="{cid}"' in page and "Heroes of Chance" in page and 'id="tt-strip"' in page
     assert eric.get("/tabletop/c/abcdef123456").status_code == 404
+
+
+def test_a_heros_avatar_is_a_picture_from_their_folder_chosen_by_their_player_or_the_gm(world):
+    app, _ = world
+    hid = make_hero(app, "Kettleblack", player=ERIC)
+    eric, gregg = as_(app, ERIC), as_(app, GREGG)
+
+    def add(name, data):
+        return eric.post(f"/tabletop/h/{hid}/files", headers=H, content_type="multipart/form-data", data={"file": (io.BytesIO(data), name)}).json["file"]
+    pic, pdf = add("kettleblack.png", PNG), add("packet.pdf", b"%PDF-1.7\n" + b"0" * 40)
+    assert eric.get(f"/tabletop/heroes?c={campaign(app)}").json["heroes"][0]["avatar"] == ""
+    assert eric.post(f"/tabletop/h/{hid}/avatar", json={"file": pdf["id"]}, headers=H).status_code == 400       # not a PDF
+    assert eric.post(f"/tabletop/h/{hid}/avatar", json={"file": "nope00000000"}, headers=H).status_code == 404   # not in the folder
+    assert gregg.post(f"/tabletop/h/{hid}/avatar", json={"file": pic["id"]}, headers=H).status_code == 400       # not Gregg's hero
+    default = {"x": 50, "y": 30, "zoom": 1.0}
+    assert eric.post(f"/tabletop/h/{hid}/avatar", json={"file": pic["id"]}, headers=H).json == {"avatar": pic["id"], "avatar_focus": default}
+    crop = eric.post(f"/tabletop/h/{hid}/avatar", json={"file": pic["id"], "focus": {"x": 55, "y": 26, "zoom": 2.3}}, headers=H).json
+    assert crop["avatar_focus"] == {"x": 55, "y": 26, "zoom": 2.3}
+    wild = eric.post(f"/tabletop/h/{hid}/avatar", json={"file": pic["id"], "focus": {"x": 900, "y": -5, "zoom": 99}}, headers=H).json
+    assert wild["avatar_focus"] == {"x": 100, "y": 0, "zoom": 4.0}                                              # kept inside the picture
+    assert eric.post(f"/tabletop/h/{hid}/avatar", json={"file": pic["id"], "focus": {"zoom": "lots"}}, headers=H).json["avatar_focus"]["zoom"] == 1.0
+    eric.post(f"/tabletop/h/{hid}/avatar", json={"file": pic["id"], "focus": {"x": 55, "y": 26, "zoom": 2.3}}, headers=H)
+    assert gregg.get(f"/tabletop/heroes?c={campaign(app)}").json["heroes"][0]["avatar_focus"] == {"x": 55, "y": 26, "zoom": 2.3}
+    assert gregg.get(f"/tabletop/heroes?c={campaign(app)}").json["heroes"][0]["avatar"] == pic["id"]               # everyone sees the face
+    assert gregg.get(f"/tabletop/h/{hid}").json["avatar"] == pic["id"]
+    assert eric.post(f"/tabletop/h/{hid}/files/{pic['id']}/delete", headers=H).status_code == 200                  # the file goes, the avatar clears
+    assert eric.get(f"/tabletop/h/{hid}").json["avatar"] == ""
+    again = add("again.png", PNG)
+    assert as_(app, ADMIN).post(f"/tabletop/h/{hid}/avatar", json={"file": again["id"]}, headers=H).status_code == 200   # the GM can too
+    assert as_(app, ADMIN).post(f"/tabletop/h/{hid}/avatar", json={"file": ""}, headers=H).json == {"avatar": "", "avatar_focus": default}   # and clear it

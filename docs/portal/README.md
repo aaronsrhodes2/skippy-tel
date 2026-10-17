@@ -447,6 +447,9 @@ address `/tabletop/c/<id>#<board>` opens one, and the page remembers the last bo
   SPEC, saved within a second, and logged with who made it and when.
 - **Project:** the hero's current project, with a progress clock.
 - **Folder:** PDFs and pictures (30 MB each) the hero's player or the GM adds, served behind the grant and opened sandboxed.
+- **Avatar:** any picture in a hero's folder can be their face on their card (the person key on the picture; PDFs can't). The crop is
+  a focus point and a zoom (1 to 4), so a full-length painting can show just the face; the GM sets it with `POST /tabletop/h/<id>/avatar`
+  `{"file": id, "focus": {"x", "y", "zoom"}}`.
 - **Who changes what:** the hero's player (set by the GM) and the GM change the sheet and add to the folder; everyone else reads.
   The print key opens `/tabletop/h/<id>/print`, every field in the official sheet's order, black on white, for players on paper.
 - **GM only:** a quick reference per hero (storytelling details, never sent to a player), the change log, who plays whom.

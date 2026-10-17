@@ -1141,6 +1141,19 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             return {"file": heroes.add_file(hid, who, data, request.form.get("name") or (upload.filename if upload else ""))}
         return tt_call(add)
 
+    @tt.post("/h/<hid>/avatar")
+    @auth.portal_required("tabletop")
+    def hero_avatar(hid):
+        """Which picture in the hero's folder is their face on the card (the hero's player and the GM choose)."""
+        who, _, gm = tt_who()
+
+        def choose():
+            if not heroes.can_edit(hid, who, gm):
+                raise tabletop_mod.Refused("Only this hero's player (or the GM) can choose the avatar.")
+            body = request.get_json(silent=True) or {}
+            return heroes.set_avatar(hid, body.get("file"), who, body.get("focus"))
+        return tt_call(choose)
+
     @tt.post("/h/<hid>/files/<fid>/delete")
     @auth.portal_required("tabletop")
     def hero_file_delete(hid, fid):

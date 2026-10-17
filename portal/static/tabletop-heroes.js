@@ -178,6 +178,18 @@
   }
   root.addEventListener("tt-closed", stopFearFx);
 
+  // an avatar cropped to its face: the picture scaled up around the focus point (x, y in percent, zoom 1 to 4) inside a clipping box
+  function cropTo(img, f) {
+    const o = f || { x: 50, y: 30, zoom: 1 };
+    img.style.transformOrigin = `${o.x}% ${o.y}%`; img.style.transform = `scale(${o.zoom})`;
+  }
+  function avatarBox(h, src, cls) {
+    const wrap = el("span", "avwrap" + (cls ? " " + cls : "")), img = el("img");
+    img.src = src; img.alt = ""; img.loading = "lazy"; cropTo(img, h.avatar_focus);
+    wrap.appendChild(img);
+    return wrap;
+  }
+
   // ── the heroes: a card each along the top of the tabletop, like dossiers at the table's edge ──
   const strip = $("tt-strip");
   let stripSig = "";
@@ -191,7 +203,8 @@
       strip.replaceChildren();
       for (const h of heroes) {
         const b = el("button", "tt-herocard"); b.type = "button"; b.setAttribute("role", "listitem");
-        b.innerHTML = glyph("g-folder");
+        if (h.avatar) b.appendChild(avatarBox(h, `${heroUrl(h.id)}/files/${h.avatar}`, ""));   // their face; the folder glyph until one is chosen
+        else b.innerHTML = glyph("g-folder");
         b.appendChild(el("span", "nm", h.name || "Unnamed"));
         b.appendChild(el("span", "cl", [h.class, h.level ? `L${h.level}` : ""].filter(Boolean).join(" · ")));
         b.appendChild(el("span", "pl", h.player_name || (h.player ? h.player.split("@")[0] : "")));
@@ -443,6 +456,16 @@
       const keys = el("span", "fk");
       const dl = el("a", "key sm"); dl.href = url + "?dl=1"; dl.innerHTML = glyph("g-down"); dl.setAttribute("aria-label", "Download"); dl.title = "Download";
       keys.appendChild(dl);
+      if (canEdit && f.ext !== "pdf") {                // a picture can be the hero's face on their card
+        const face = el("button", "key sm" + (hero.avatar === f.id ? " on" : "")); face.type = "button"; face.innerHTML = glyph("g-user");
+        face.setAttribute("aria-pressed", hero.avatar === f.id ? "true" : "false");
+        face.setAttribute("aria-label", "Use as the avatar"); face.title = hero.avatar === f.id ? "This is the avatar (tap to clear it)" : "Use as the avatar";
+        face.addEventListener("click", async () => {
+          try { await call("POST", `${heroUrl(hero.id)}/avatar`, { file: hero.avatar === f.id ? "" : f.id }); stripSig = ""; await load(hero.id); drawStrip(); }
+          catch (err) { say(err.message); }
+        });
+        keys.appendChild(face);
+      }
       if (GM || f.by === root.dataset.me) {
         const del = el("button", "key sm danger"); del.type = "button"; del.innerHTML = glyph("g-trash");
         del.setAttribute("aria-label", "Take it out of the folder"); del.title = "Take it out of the folder";
@@ -478,6 +501,9 @@
     });
     flow.querySelectorAll("[data-track]").forEach(drawTrack);
     $("tt-hero-name").textContent = s.name || "Unnamed hero";
+    const box = $("tt-hero-avw"), face = $("tt-hero-av");   // the avatar beside the name
+    if (hero.avatar) { face.src = `${heroUrl(hero.id)}/files/${hero.avatar}`; cropTo(face, hero.avatar_focus); box.hidden = false; }
+    else { face.removeAttribute("src"); box.hidden = true; }
   }
 
   // ── saving: changes wait a moment, then go as one batch ──

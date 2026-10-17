@@ -507,6 +507,17 @@ def clean(kind, value):
     return value
 
 
+def avatar_focus(raw) -> dict:
+    """An avatar's crop: {"x", "y"} the point to centre on (percent of the picture) and {"zoom"} 1 to 4. Anything else is the default."""
+    raw = raw if isinstance(raw, dict) else {}
+    try:
+        zoom = float(raw.get("zoom", 1))
+    except (TypeError, ValueError):
+        zoom = 1.0
+    return {"x": clean(_int(0, 100), raw.get("x", 50)), "y": clean(_int(0, 100), raw.get("y", 30)),
+            "zoom": round(max(1.0, min(4.0, zoom)), 2) if zoom == zoom else 1.0}
+
+
 def flatten(obj, prefix="") -> list:
     if isinstance(obj, dict):
         return [pair for k, v in obj.items() for pair in flatten(v, f"{prefix}{k}.")]
@@ -584,7 +595,8 @@ class Heroes:
             s = h["sheet"]
             row = {"id": hid, "name": s["name"], "class": s["class"], "subclass": s["subclass"], "level": s["level"],
                    "player": h.get("player", ""), "player_name": h.get("player_name", ""),
-                   "project": s["project"]["name"], "clock": s["project"]["clock"], "clock_max": s["project"]["clock_max"]}
+                   "project": s["project"]["name"], "clock": s["project"]["clock"], "clock_max": s["project"]["clock_max"],
+                   "avatar": h.get("avatar", ""), "avatar_focus": h.get("avatar_focus") or avatar_focus(None)}
             if gm:
                 row["gm_ref"] = list(h.get("gm_ref", []))
             out.append(row)
@@ -593,7 +605,8 @@ class Heroes:
     def view(self, hid: str, history: bool = False) -> dict:
         h = self.hero(hid)
         out = {"id": hid, "rev": h["rev"], "campaign": h.get("campaign", ""), "player": h.get("player", ""),
-               "player_name": h.get("player_name", ""),
+               "player_name": h.get("player_name", ""), "avatar": h.get("avatar", ""),
+               "avatar_focus": h.get("avatar_focus") or avatar_focus(None),
                "sheet": json.loads(json.dumps(h["sheet"])), "files": [dict(f) for f in h["files"]]}
         if history:                                   # the GM's eyes only: the change log, and the quick reference for storytelling
             out["history"] = list(h["history"][-60:])
@@ -742,5 +755,26 @@ class Heroes:
                 raise Refused("Only the GM or whoever added a file can take it out.")
             self.store.delete(f"heroes/{hid}/files/{fid}.{f['ext']}")
             h["files"] = [x for x in h["files"] if x["id"] != fid]
+            if h.get("avatar") == fid:                  # the avatar's file is gone: back to the folder glyph
+                h["avatar"] = ""
             h["history"].append({"at": int(time.time()), "by": by, "path": "files", "old": f["name"], "new": None})
             self._save(h)
+
+    def set_avatar(self, hid: str, fid, by: str, focus=None) -> dict:
+        """The hero's face on their card: one of the pictures in their folder (not a PDF), or "" to clear it. `focus` is the crop:
+        the point to centre on (x, y in percent of the picture) and how far to zoom in (1 to 4); a full-length picture wants its face."""
+        fid = str(fid or "")
+        crop = avatar_focus(focus)
+        with self.t._lock:
+            h = self.hero(hid)
+            if fid:
+                f = next((f for f in h["files"] if f["id"] == fid), None)
+                if not f:
+                    raise NotFound(fid)
+                if f["ext"] == "pdf":
+                    raise Refused("An avatar has to be a picture.")
+            h["history"].append({"at": int(time.time()), "by": by, "path": "avatar", "old": h.get("avatar") or None, "new": fid or None})
+            h["avatar"] = fid
+            h["avatar_focus"] = crop
+            self._save(h)
+            return {"avatar": fid, "avatar_focus": crop}

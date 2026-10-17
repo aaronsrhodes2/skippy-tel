@@ -183,3 +183,11 @@
 .tt-fearsheet #tt-fear-fx { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .tt-fearsheet > :not(canvas) { position: relative; z-index: 1; }
 .tt-fearsheet .tt-fear-big { text-shadow: 0 0 18px #000, 0 0 6px #000; }
+
+/* the hero's avatar: on their card at the table's edge, beside their name on the sheet, and the key that picks it in the folder */
+.avwrap { display: block; flex: none; overflow: hidden; border: 1px solid var(--accent); }
+.avwrap[hidden] { display: none; }
+.avwrap img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.tt-herocard .avwrap { grid-row: span 3; width: 46px; height: 46px; }
+.avwrap.sm { width: 34px; height: 34px; }
+.tt-hero .file .fk .key.on::after { background: var(--accent); } .tt-hero .file .fk .key.on .g { color: #000; }
