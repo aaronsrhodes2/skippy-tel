@@ -469,10 +469,8 @@ device asks for reduced motion.
 **Code:** `portal/tabletop.py`, `templates/tabletop.html` and `tabletop_print.html`, `static/tabletop{,-heroes}.js` and
 `tabletop.css`. Tests: `portal/tests/test_tabletop.py`.
 
-**Ideas for players, not built yet** (researched 2026-10-16; see the Captain's notes): a session feed posted to a Discord channel by
-webhook (Fear changes, new pins, clock ticks); Discord sign-in so the portal knows who is who, and a "join the table" voice link for a
-remote player; a Discord scheduled event and reminder for each session; a Hope/Fear duality roller everyone sees; a session-recap
-thread. Not worth building: a map/fog/token VTT, a Discord Activity (for now), voice recording.
+**Ideas for players, not built yet:** see [tabletop-backlog.md](tabletop-backlog.md) (a Discord session feed, Discord sign-in and a
+"join the table" link for a remote player, scheduled events, a Hope/Fear roller, recap threads; and what not to build).
 
 ## Star Control Zero (the Captain's game, `/starcontrol`)
 
