@@ -112,3 +112,17 @@ body[data-app="me"] .adm { z-index: 1; }
 @media (max-height: 520px) { .skippy3d:not(.is-hidden) { display: none; } }
 
 .turn > img.g.face, .note > img.g.face { border-radius: 50%; object-fit: cover; background: #0a0c18; }
+
+/* Admin > Friends: compact cards, side by side when the screen is wide; each grant is a chip you tick */
+.apane .card.fr { display: inline-block; vertical-align: top; box-sizing: border-box; width: calc(100% - 20px); padding: 8px; margin-bottom: 8px; overflow-wrap: anywhere; }
+@media (min-width: 900px)  { .apane .card.fr { width: calc(50% - 26px); } }
+@media (min-width: 1500px) { .apane .card.fr { width: calc(33.33% - 25px); } }
+.apane .card.fr > p:first-of-type { margin: 0 0 6px; font-size: .85rem; }
+.apane .card.fr .help { font-size: .75rem; }
+.apane label.chip { display: inline-flex; align-items: center; gap: 4px; margin: 0 4px 4px 0; padding: 2px 8px 2px 4px; border: 1px solid var(--dim-green-hi);
+                    font-size: .78rem; color: var(--muted); cursor: pointer; user-select: none; }
+.apane label.chip input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+.apane label.chip:has(input:checked) { border-color: var(--accent); color: var(--ink); }
+.apane .fr-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 0; }
+.apane .card.fr button, .apane .card.fr a.btn { padding: 5px 10px; margin: 0; font-size: .78rem; }
+.apane .card.fr input[type=text] { font-size: 16px; padding: 6px 8px; }

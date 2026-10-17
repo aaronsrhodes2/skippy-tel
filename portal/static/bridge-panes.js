@@ -29,11 +29,11 @@
   document.addEventListener("click", function (e) { if (e.target.closest("[data-close]")) show(""); });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && cur && !e.defaultPrevented && !(e.target.matches && e.target.matches("input, textarea, select"))) { show(""); return; }
-    if (!cur || (e.target.matches && e.target.matches("input, textarea, select"))) return;
+    if (!cur || e.defaultPrevented || (e.target.matches && e.target.matches("input, textarea, select"))) return;
     var pg = pagers[cur];
     if (!pg) return;
-    if (e.key === "PageDown") { e.preventDefault(); pg.go(pg.page() + 1); }
-    else if (e.key === "PageUp") { e.preventDefault(); pg.go(pg.page() - 1); }
+    if (e.key === "PageDown" || e.key === "ArrowRight") { e.preventDefault(); pg.go(pg.page() + 1); }
+    else if (e.key === "PageUp" || e.key === "ArrowLeft") { e.preventDefault(); pg.go(pg.page() - 1); }
   });
   addEventListener("hashchange", function () { show(location.hash.slice(1), true); });
   // a form post reloads the page: remember where the Captain was, so the pane opens again (the flash message says what happened)

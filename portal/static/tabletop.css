@@ -7,9 +7,7 @@
 .tt-view.panning { cursor: grabbing; }
 .tt-view:focus-visible { border-color: var(--accent); }
 .tt-board { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform;
-            background-color: #000;
-            background-image: radial-gradient(circle, var(--dim-green) 1.6px, transparent 1.7px);
-            background-size: 100px 100px; outline: 2px solid var(--dim-green-hi); }
+            background: #000; outline: 2px solid var(--dim-green-hi); }   /* plain black: no gradients on the bridge (see-through on the glasses) */
 
 .tt-card { position: absolute; display: flex; flex-direction: column; background: #000; border: 2px solid var(--dim-green-hi);
            user-select: none; -webkit-user-select: none; touch-action: none; cursor: pointer; }

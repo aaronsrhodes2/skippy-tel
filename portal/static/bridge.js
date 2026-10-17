@@ -176,6 +176,53 @@
       x0 = null;
       if (Math.abs(dx) > 40 && Math.abs(dx) > 1.5 * Math.abs(dy)) go(page + (dx < 0 ? 1 : -1));
     }, { passive: true });
+    // a mouse and a keyboard flip too (a desktop browser has no swipe): one wheel stroke is one page, however many events it sends,
+    // and the bar under the panel is a control: click or drag along it to jump, with a ‹ › key at each end
+    var wheelSum = 0, wheelQuiet = 0;
+    panel.addEventListener("wheel", function (e) {
+      if (pages < 2 || e.ctrlKey) return;
+      var el = e.target.closest && e.target.closest("textarea, select, [data-pan]");
+      if (el && el.scrollHeight > el.clientHeight) return;         // a field that scrolls by itself keeps the wheel
+      e.preventDefault();
+      var now = Date.now();
+      if (now - wheelQuiet > 250) wheelSum = 0;                     // a pause ends a stroke
+      wheelQuiet = now;
+      if (wheelSum === null) return;                                // this stroke already flipped
+      wheelSum += Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+      if (Math.abs(wheelSum) >= 40) { go(page + (wheelSum > 0 ? 1 : -1)); wheelSum = null; }
+    }, { passive: false });
+    var flip = {};
+    if (pips && pips.parentNode) {
+      ["prev", "next"].forEach(function (dir) {
+        var k = document.createElement("button");
+        k.type = "button"; k.className = "key sm pg-key pg-" + dir; k.hidden = true;
+        k.setAttribute("aria-label", dir === "prev" ? "Previous page" : "Next page"); k.title = k.getAttribute("aria-label");
+        k.innerHTML = '<svg class="g" aria-hidden="true"><use href="#' + (dir === "prev" ? "g-back" : "g-chev") + '"/></svg>';
+        k.addEventListener("click", function () { go(page + (dir === "prev" ? -1 : 1)); });
+        flip[dir] = k;
+      });
+      var bar = document.createElement("div");
+      bar.className = "pg-bar";
+      pips.parentNode.insertBefore(bar, pips);
+      bar.appendChild(flip.prev); bar.appendChild(pips); bar.appendChild(flip.next);
+      pips.setAttribute("role", "slider"); pips.setAttribute("aria-label", "Page"); pips.tabIndex = 0;
+      var scrubbing = false;
+      function scrubTo(x) { var r = pips.getBoundingClientRect(); if (r.width) go(Math.floor((x - r.left) / r.width * pages)); }
+      pips.addEventListener("pointerdown", function (e) { scrubbing = true; pips.setPointerCapture(e.pointerId); scrubTo(e.clientX); });
+      pips.addEventListener("pointermove", function (e) { if (scrubbing) scrubTo(e.clientX); });
+      pips.addEventListener("pointerup", function () { scrubbing = false; });
+      pips.addEventListener("pointercancel", function () { scrubbing = false; });
+      pips.addEventListener("keydown", function (e) {
+        var to = { ArrowLeft: page - 1, ArrowRight: page + 1, Home: 0, End: pages - 1 }[e.key];
+        if (to !== undefined) { e.preventDefault(); go(to); }
+      });
+    }
+    var paintBar = paintPips;
+    paintPips = function () {
+      paintBar();
+      if (flip.prev) { flip.prev.hidden = flip.next.hidden = pages < 2; flip.prev.disabled = page === 0; flip.next.disabled = page >= pages - 1; }
+      if (pips) { pips.setAttribute("aria-valuemin", "1"); pips.setAttribute("aria-valuemax", String(pages)); pips.setAttribute("aria-valuenow", String(page + 1)); }
+    };
     if (window.ResizeObserver) new ResizeObserver(refresh).observe(panel);
     var api = { go: go, page: function () { return page; }, pages: function () { return pages; },
                 last: function () { go(pages - 1); }, refresh: refresh };
