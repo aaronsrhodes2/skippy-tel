@@ -191,3 +191,8 @@
 .tt-herocard .avwrap { grid-row: span 3; width: 46px; height: 46px; }
 .avwrap.sm { width: 34px; height: 34px; }
 .tt-hero .file .fk .key.on::after { background: var(--accent); } .tt-hero .file .fk .key.on .g { color: #000; }
+
+/* a campaign card's keys (the GM's): rename, and remove an empty one */
+.tc-item { position: relative; display: flex; }
+.tc-item .tc-card { flex: 1; }
+.tc-keys { position: absolute; top: 8px; right: 12px; display: flex; gap: 4px; }

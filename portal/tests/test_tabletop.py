@@ -336,3 +336,21 @@ def test_a_heros_avatar_is_a_picture_from_their_folder_chosen_by_their_player_or
     again = add("again.png", PNG)
     assert as_(app, ADMIN).post(f"/tabletop/h/{hid}/avatar", json={"file": again["id"]}, headers=H).status_code == 200   # the GM can too
     assert as_(app, ADMIN).post(f"/tabletop/h/{hid}/avatar", json={"file": ""}, headers=H).json == {"avatar": "", "avatar_focus": default}   # and clear it
+
+
+def test_the_gm_removes_a_duplicate_campaign_but_never_one_that_still_holds_heroes_or_boards(world):
+    app, _ = world
+    gm = as_(app, ADMIN)
+    hoc = campaign(app)
+    assert gm.post("/tabletop/campaigns", json={"title": "heroes of chance"}, headers=H).status_code == 400      # the same name, whatever its case
+    other = gm.post("/tabletop/campaigns", json={"title": "One-shots"}, headers=H).json["campaign"]["id"]
+    assert gm.post(f"/tabletop/campaigns/{other}/edit", json={"title": "Heroes of Chance"}, headers=H).status_code == 400   # nor by renaming
+    assert gm.post(f"/tabletop/campaigns/{other}/edit", json={"title": "Odd Jobs"}, headers=H).json["campaign"]["title"] == "Odd Jobs"
+    assert as_(app, ERIC).post(f"/tabletop/campaigns/{other}/delete", headers=H).status_code == 403            # only the GM
+    make_hero(app, "Resirdar")
+    make_board(app)
+    assert gm.post(f"/tabletop/campaigns/{hoc}/delete", headers=H).status_code == 400                           # it has a hero and a board
+    gm.post("/tabletop/fear", json={"campaign": other, "value": 5}, headers=H)
+    assert gm.post(f"/tabletop/campaigns/{other}/delete", headers=H).status_code == 200                         # an empty one goes
+    assert [c["title"] for c in gm.get("/tabletop/campaigns").json["campaigns"]] == ["Heroes of Chance"]
+    assert gm.post(f"/tabletop/campaigns/{other}/delete", headers=H).status_code == 404

@@ -973,6 +973,18 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         body = request.get_json(silent=True) or {}
         return tt_call(lambda: {"campaign": table.edit_campaign(cid, body.get("title"), body.get("blurb"))})
 
+    @tt.post("/campaigns/<cid>/delete")
+    @auth.admin_required
+    def campaign_delete(cid):
+        """Remove a campaign, but only an empty one: its heroes' sheets and folders are never taken with it."""
+        def remove():
+            table.campaign(cid)
+            if heroes.summary(cid):
+                raise tabletop_mod.Refused("This campaign still has heroes. Remove them first.")
+            table.delete_campaign(cid)
+            heroes.forget_campaign(cid)
+        return tt_call(remove)
+
     @tt.get("/boards")
     @auth.portal_required("tabletop")
     def boards():

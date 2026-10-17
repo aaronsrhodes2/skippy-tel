@@ -7,9 +7,12 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='tabletop.css') }}">
 {% endblock %}
 {% block content %}
-{# Tabletops: one card per campaign (portal/tabletop.py). A campaign opens its own tabletop: the heroes' cards and the cork board. #}
-<section id="tc" class="tc bp" aria-label="Tabletops" data-ready="{{ '1' if ready else '0' }}"
-         data-campaigns-url="{{ url_for('tabletop.campaigns') }}">
+{# Tabletops: one card per campaign (portal/tabletop.py). A campaign opens its own tabletop: the heroes' cards and the cork board.
+   The GM can rename a campaign and remove one that has no heroes or boards left (a duplicate, say). #}
+<section id="tc" class="tc bp" aria-label="Tabletops" data-ready="{{ '1' if ready else '0' }}" data-gm="{{ '1' if gm else '0' }}"
+         data-campaigns-url="{{ url_for('tabletop.campaigns') }}"
+         data-edit-url="{{ url_for('tabletop.campaign_edit', cid='CID') }}"
+         data-delete-url="{{ url_for('tabletop.campaign_delete', cid='CID') }}">
   <div class="notice" id="tc-notice" role="status" hidden></div>
   <div class="tc-deck" id="tc-deck" role="list"></div>
   {% if gm %}
@@ -22,11 +25,29 @@
 <script>
   (function () {
     var root = document.getElementById("tc"), deck = document.getElementById("tc-deck"), notice = document.getElementById("tc-notice");
-    var LIST = root.dataset.campaignsUrl;
+    var LIST = root.dataset.campaignsUrl, GM = root.dataset.gm === "1";
     function say(text) { notice.textContent = text; notice.hidden = false; }
+    function at(template, id) { return template.replace("CID", encodeURIComponent(id)); }
+    async function post(url, body) {
+      var resp = await fetch(url, { method: "POST", credentials: "same-origin", headers: { "X-Tabletop": "1", "Content-Type": "application/json" },
+                                    body: JSON.stringify(body || {}) });
+      var data = await resp.json().catch(function () { return {}; });
+      if (!resp.ok) throw new Error(data.error || "Something went wrong.");
+      return data;
+    }
+    function key(glyph, label, fn, danger) {
+      var b = document.createElement("button");
+      b.type = "button"; b.className = "key sm" + (danger ? " danger" : "");
+      b.setAttribute("aria-label", label); b.title = label;
+      b.innerHTML = '<svg class="g" aria-hidden="true"><use href="#' + glyph + '"/></svg>';
+      b.addEventListener("click", fn);
+      return b;
+    }
     function card(c) {
+      var wrap = document.createElement("div");
+      wrap.className = "tc-item"; wrap.setAttribute("role", "listitem");
       var a = document.createElement("a");
-      a.className = "tc-card"; a.setAttribute("role", "listitem");
+      a.className = "tc-card";
       a.href = c.url;
       a.innerHTML = '<svg class="g" aria-hidden="true"><use href="#g-d20"/></svg>';
       var t = document.createElement("span"); t.className = "nm"; t.textContent = c.title; a.appendChild(t);
@@ -34,7 +55,21 @@
       var h = document.createElement("span"); h.className = "hs";
       h.textContent = c.heroes.length ? c.heroes.join(" · ") : "No heroes yet";
       a.appendChild(h);
-      return a;
+      wrap.appendChild(a);
+      if (GM) {
+        var keys = document.createElement("span"); keys.className = "tc-keys";
+        keys.appendChild(key("g-tag", "Rename", async function () {
+          var name = prompt("Campaign name", c.title);
+          if (!name) return;
+          try { await post(at(root.dataset.editUrl, c.id), { title: name }); load(); } catch (err) { say(err.message); }
+        }));
+        keys.appendChild(key("g-trash", "Remove this campaign", async function () {
+          if (!confirm('Remove "' + c.title + '"? Only a campaign with no heroes or boards left can be removed.')) return;
+          try { await post(at(root.dataset.deleteUrl, c.id)); notice.hidden = true; load(); } catch (err) { say(err.message); }
+        }, true));
+        wrap.appendChild(keys);
+      }
+      return wrap;
     }
     async function load() {
       if (root.dataset.ready !== "1") return say("The Tabletop has no storage yet.");
@@ -50,11 +85,7 @@
     if (form) form.addEventListener("submit", async function (e) {
       e.preventDefault();
       try {
-        var resp = await fetch(LIST, { method: "POST", credentials: "same-origin",
-          headers: { "X-Tabletop": "1", "Content-Type": "application/json" },
-          body: JSON.stringify({ title: document.getElementById("tc-new-title").value }) });
-        var data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || "Something went wrong.");
+        var data = await post(LIST, { title: document.getElementById("tc-new-title").value });
         location.href = data.campaign.url;
       } catch (err) { say(err.message); }
     });

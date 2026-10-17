@@ -216,13 +216,29 @@ class Tabletop:
     def _save_campaigns(self):
         self.store.put("campaigns.json", json.dumps(self._campaigns, ensure_ascii=False).encode(), "application/json")
 
+    def _free_title(self, title, but: str = "") -> str:
+        """The title, if no other campaign has it (case aside): a second 'Heroes of Chance' is a slip, not a campaign."""
+        title = _title(title)
+        if any(c["title"].lower() == title.lower() for c in self._campaigns if c["id"] != but):
+            raise Refused("There's already a campaign with that name.")
+        return title
+
     def create_campaign(self, title, blurb, by: str) -> dict:
         with self._lock:
             self.campaigns()
-            c = {"id": new_id(), "title": _title(title), "blurb": str(blurb or "").strip()[:300], "by": by, "at": int(time.time())}
+            c = {"id": new_id(), "title": self._free_title(title), "blurb": str(blurb or "").strip()[:300], "by": by, "at": int(time.time())}
             self._campaigns.append(c)
             self._save_campaigns()
             return dict(c)
+
+    def delete_campaign(self, cid: str) -> None:
+        """Remove a campaign. The caller has checked it holds no heroes (Heroes is separate); boards are checked here."""
+        with self._lock:
+            self.campaign(cid)
+            if self.boards(cid):
+                raise Refused("This campaign still has boards. Remove them first.")
+            self._campaigns = [c for c in self._campaigns if c["id"] != cid]
+            self._save_campaigns()
 
     def edit_campaign(self, cid: str, title=None, blurb=None) -> dict:
         with self._lock:
@@ -231,7 +247,7 @@ class Tabletop:
             for c in self._campaigns:
                 if c["id"] == cid:
                     if title is not None:
-                        c["title"] = _title(title)
+                        c["title"] = self._free_title(title, but=cid)
                     if blurb is not None:
                         c["blurb"] = str(blurb).strip()[:300]
                     found = dict(c)
@@ -585,6 +601,12 @@ class Heroes:
                 data["sheet"] = fresh
                 self._heroes[hid] = data
             return self._heroes[hid]
+
+    def forget_campaign(self, campaign: str) -> None:
+        """The campaign is gone: drop its Fear (the file and the copy in memory)."""
+        with self.t._lock:
+            self._fear.pop(campaign, None)
+            self.store.delete(f"fear/{campaign}.json")
 
     def summary(self, campaign: str, gm: bool = False) -> list[dict]:
         out = []
