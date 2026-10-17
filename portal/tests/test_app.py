@@ -168,9 +168,10 @@ def test_every_page_belongs_to_an_app_with_a_colour():
     base = (templates / "base.html").read_text(encoding="utf-8")
     colours = set(re.findall(r'\[data-app="(\w+)"\]\s*\{\s*--accent', base))
     exempt = {"home.html", "login.html", "unauthorized.html"}         # the launcher and the signed-out pages
+    paper = {"tabletop_print.html"}                                    # made for a printer: black on white, no portal chrome
     for t in sorted(templates.glob("*.html")):
         text = t.read_text(encoding="utf-8")
-        if t.name.startswith("_") or t.name == "base.html":
+        if t.name.startswith("_") or t.name == "base.html" or t.name in paper:
             continue
         assert 'extends "base.html"' in text, f"{t.name} doesn't use the one base template"
         if t.name in exempt:

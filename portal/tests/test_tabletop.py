@@ -74,7 +74,7 @@ def test_the_poll_answers_just_the_rev_while_nothing_moved(world):
     bid = make_board(app)
     eric = as_(app, ERIC)
     rev = eric.get(f"/tabletop/b/{bid}").json["rev"]
-    assert eric.get(f"/tabletop/b/{bid}?since={rev}").json == {"rev": rev}
+    assert eric.get(f"/tabletop/b/{bid}?since={rev}").json == {"rev": rev, "fear": 0}     # the Fear rides along
     as_(app, GREGG).post(f"/tabletop/b/{bid}/text", json={"text": "hi"}, headers=H)
     changed = eric.get(f"/tabletop/b/{bid}?since={rev}").json
     assert changed["rev"] > rev and len(changed["cards"]) == 1
@@ -153,3 +153,115 @@ def test_a_fresh_portal_reads_the_boards_back_from_the_bucket(world):
     again = portal.create_app({**SETTINGS}, vm=FakeVm(), skippy=FakeSkippy(), tabletop=tabletop.Tabletop(store))
     _add_friend(again.test_client(), ERIC, ["tabletop"])
     assert as_(again, ERIC).get(f"/tabletop/b/{bid}").json["cards"][0]["text"] == "survives a restart"
+
+
+# ── heroes: the sheet, the folder, the Fear ──
+
+def make_hero(app, name="Resirdar", sheet=None, player=""):
+    resp = as_(app, ADMIN).post("/tabletop/heroes", json={"name": name, "sheet": sheet or {}, "player": player}, headers=H)
+    assert resp.status_code == 200, resp.data
+    return resp.json["id"]
+
+
+def test_the_gm_adds_a_hero_with_a_sheet_and_unknown_fields_are_left_out(world):
+    app, _ = world
+    resp = as_(app, ADMIN).post("/tabletop/heroes", headers=H, json={"name": "Resirdar", "player": ERIC, "sheet": {
+        "class": "Wizard", "level": 3, "traits": {"knowledge": {"value": 3, "marked": True}}, "experiences": [{"name": "Sleepless", "bonus": 2}],
+        "secret_admin": True, "hp": {"max": 99}}})
+    assert resp.json["skipped"] == ["secret_admin"]
+    hid = resp.json["id"]
+    view = as_(app, GREGG).get(f"/tabletop/h/{hid}").json
+    s = view["sheet"]
+    assert s["name"] == "Resirdar" and s["class"] == "Wizard" and s["traits"]["knowledge"] == {"value": 3, "marked": True}
+    assert s["hp"]["max"] == 12                                      # clamped to the sheet's 12 slots
+    assert s["experiences"][0] == {"name": "Sleepless", "bonus": 2} and len(s["experiences"]) == 5
+    assert len(s["inventory"]) == 12 and set(s["levelups"]["tier3"]) >= {"proficiency", "multiclass"}
+    assert view["can_edit"] is False and "history" not in view       # Gregg doesn't play Resirdar
+    assert as_(app, ERIC).get(f"/tabletop/h/{hid}").json["can_edit"] is True
+    assert as_(app, ERIC).post("/tabletop/heroes", json={"name": "x"}, headers=H).status_code == 403
+
+
+def test_only_the_heros_player_or_the_gm_changes_the_sheet_and_every_change_is_logged(world):
+    app, _ = world
+    hid = make_hero(app, player=ERIC)
+    ok = as_(app, ERIC).post(f"/tabletop/h/{hid}/set", headers=H, json={"ops": [
+        {"path": "hp.marked", "value": 2}, {"path": "inventory.3", "value": "a letter, never opened"}, {"path": "traits.agility.marked", "value": True}]})
+    assert ok.status_code == 200
+    assert as_(app, GREGG).post(f"/tabletop/h/{hid}/set", headers=H, json={"ops": [{"path": "hp.marked", "value": 0}]}).status_code == 400
+    assert as_(app, ERIC).post(f"/tabletop/h/{hid}/set", headers=H, json={"ops": [{"path": "inventory.12", "value": "x"}]}).status_code == 400
+    assert as_(app, ERIC).post(f"/tabletop/h/{hid}/set", headers=H, json={"ops": [{"path": "__class__", "value": "x"}]}).status_code == 400
+    assert as_(app, ERIC).post(f"/tabletop/h/{hid}/set", json={"ops": [{"path": "hope", "value": 1}]}).status_code == 400   # no header
+    gm = as_(app, ADMIN).get(f"/tabletop/h/{hid}").json
+    assert gm["sheet"]["hp"]["marked"] == 2 and gm["sheet"]["inventory"][3] == "a letter, never opened"
+    assert {(c["path"], c["old"], c["new"]) for c in gm["history"]} >= {("hp.marked", 0, 2), ("traits.agility.marked", False, True)}
+    rev = gm["rev"]
+    assert as_(app, ERIC).get(f"/tabletop/h/{hid}?since={rev}").json == {"rev": rev}
+
+
+def test_a_player_adds_documents_and_pictures_to_their_folder(world):
+    app, _ = world
+    hid = make_hero(app, player=ERIC)
+    eric = as_(app, ERIC)
+    pdf = eric.post(f"/tabletop/h/{hid}/files", headers=H, content_type="multipart/form-data",
+                    data={"file": (io.BytesIO(b"%PDF-1.7\n" + b"0" * 50), "player-packet.pdf")}).json["file"]
+    pic = eric.post(f"/tabletop/h/{hid}/files", headers=H, content_type="multipart/form-data",
+                    data={"file": (io.BytesIO(PNG), "portrait.png")}).json["file"]
+    assert pdf["ext"] == "pdf" and pic["ext"] == "png"
+    got = as_(app, GREGG).get(f"/tabletop/h/{hid}/files/{pdf['id']}?dl=1")
+    assert got.status_code == 200 and got.mimetype == "application/pdf"
+    assert 'attachment; filename="player-packet.pdf"' in got.headers["Content-Disposition"]
+    assert got.headers["Content-Security-Policy"] == "sandbox"
+    html = eric.post(f"/tabletop/h/{hid}/files", headers=H, content_type="multipart/form-data",
+                     data={"file": (io.BytesIO(b"<html><script>x</script>"), "evil.pdf")})
+    assert html.status_code == 400
+    assert as_(app, GREGG).post(f"/tabletop/h/{hid}/files", headers=H, content_type="multipart/form-data",
+                                data={"file": (io.BytesIO(PNG), "x.png")}).status_code == 400          # not Gregg's hero
+    assert as_(app, GREGG).post(f"/tabletop/h/{hid}/files/{pic['id']}/delete", headers=H).status_code == 400
+    assert eric.post(f"/tabletop/h/{hid}/files/{pic['id']}/delete", headers=H).status_code == 200
+    assert [f["name"] for f in eric.get(f"/tabletop/h/{hid}").json["files"]] == ["player-packet.pdf"]
+
+
+def test_the_fear_is_the_gms_kept_between_sessions_and_rides_on_every_board_poll(world):
+    app, store = world
+    bid = make_board(app)
+    gm, eric = as_(app, ADMIN), as_(app, ERIC)
+    assert gm.post("/tabletop/fear", json={"delta": 3}, headers=H).json["fear"] == 3
+    assert gm.post("/tabletop/fear", json={"value": 99}, headers=H).json["fear"] == 12
+    assert gm.post("/tabletop/fear", json={"delta": -5}, headers=H).json["fear"] == 7
+    assert eric.post("/tabletop/fear", json={"delta": -7}, headers=H).status_code == 403
+    rev = eric.get(f"/tabletop/b/{bid}").json["rev"]
+    assert eric.get(f"/tabletop/b/{bid}?since={rev}").json == {"rev": rev, "fear": 7}
+    again = portal.create_app({**SETTINGS}, vm=FakeVm(), skippy=FakeSkippy(), tabletop=tabletop.Tabletop(store))
+    assert as_(again, ADMIN).get("/tabletop/fear").json["fear"] == 7                        # the next session starts where this one ended
+
+
+def test_the_print_view_has_every_field_of_the_official_sheet(world):
+    app, _ = world
+    hid = make_hero(app, sheet={"class": "Bard", "weapons": {"primary": {"name": "Pistol"}}, "project": {"name": "Fix the wagon"}})
+    page = as_(app, ERIC).get(f"/tabletop/h/{hid}/print").data.decode()
+    for label in ("Evasion", "Armor", "agility", "knowledge", "Damage &amp; health", "MINOR", "SEVERE", "STRESS", "Hope", "Experience",
+                  "Handfuls", "Bags", "Chest", "Class feature", "Proficiency", "PRIMARY", "SECONDARY", "Trait &amp; range",
+                  "Damage dice &amp; type", "Active armor", "Base thresholds", "Inventory", "INVENTORY WEAPON", "Character description",
+                  "Clothes that are", "Attitude like", "Background questions", "Connections", "Tier 2", "Tier 3", "Tier 4",
+                  "Multiclass", "Pistol", "Fix the wagon"):
+        assert label in page, label
+
+
+def test_the_hub_lists_heroes_with_their_projects(world):
+    app, _ = world
+    hid = make_hero(app, "Chickenhead", sheet={"class": "Bard", "project": {"name": "Open the letter", "clock_max": 6, "clock": 2}})
+    hero = as_(app, ERIC).get("/tabletop/heroes").json["heroes"][0]
+    assert hero["id"] == hid and hero["project"] == "Open the letter" and (hero["clock"], hero["clock_max"]) == (2, 6)
+
+
+def test_the_gms_quick_reference_never_reaches_a_player(world):
+    app, _ = world
+    hid = make_hero(app, "Kettleblack", player=ERIC)
+    gm = as_(app, ADMIN)
+    assert gm.post(f"/tabletop/h/{hid}/gm", json={"gm_ref": ["Never call him Copperbottom", "", "Misses the wagon"]}, headers=H).status_code == 200
+    assert gm.get(f"/tabletop/h/{hid}").json["gm_ref"] == ["Never call him Copperbottom", "Misses the wagon"]
+    assert gm.get("/tabletop/heroes").json["heroes"][0]["gm_ref"][0] == "Never call him Copperbottom"
+    eric = as_(app, ERIC)
+    for url in (f"/tabletop/h/{hid}", "/tabletop/heroes", f"/tabletop/h/{hid}/print"):
+        assert b"Copperbottom" not in eric.get(url).data, url
+    assert eric.post(f"/tabletop/h/{hid}/gm", json={"gm_ref": ["mine now"]}, headers=H).status_code == 403

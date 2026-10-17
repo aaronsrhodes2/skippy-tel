@@ -54,3 +54,88 @@
 .tt-inks { flex: none; display: flex; gap: 8px; }
 .tt-inks button { width: 30px; height: 30px; border: 2px solid currentColor; background: #000; border-radius: 0; padding: 0; }
 .tt-inks button[aria-checked="true"] { background: currentColor; }
+
+/* ── the Fear, the party, a hero's sheet (static/tabletop-heroes.js) ── */
+.tt-fear { flex: none; display: flex; align-items: center; gap: 4px; height: 40px; padding: 0 10px; background: #000; color: var(--red);
+           border: 1px solid var(--dim-green-hi); font: 700 1.1rem var(--mono); cursor: pointer;
+           clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px); }
+.tt-fear .g { width: 20px; height: 20px; }
+.tt-fear.lit { border-color: var(--red); }
+.tt-fear.lit .g { animation: breathe 2.4s ease-in-out infinite; }
+.tt-fear-big { text-align: center; font: 700 4rem var(--mono); color: var(--red); }
+.tt-fear-big small { font-size: 1.2rem; color: var(--muted); margin-left: 6px; }
+.tt-fear-pips { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; max-width: 420px; margin: 0 auto; }
+.tt-fear-pips .pip { aspect-ratio: 1; border: 2px solid var(--red); background: #000; border-radius: 50%; padding: 0; }
+.tt-fear-pips .pip.on { background: var(--red); }
+.tt-fear-keys { justify-content: center; gap: 24px; }
+
+.tt-party { flex: 1; min-height: 0; overflow: hidden; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; align-content: start; }
+.tt-herotile { display: flex; flex-direction: column; gap: 4px; padding: 12px; text-align: left; background: #05090b; color: var(--ink);
+               border: 1px solid var(--accent); clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+.tt-herotile .nm { font: 700 1.1rem var(--mono); color: var(--accent); }
+.tt-herotile .cl { font-size: .85rem; }
+.tt-herotile .pl { font-size: .75rem; color: var(--muted); }
+.tt-herotile .pj { display: flex; gap: 8px; align-items: center; font-size: .78rem; color: var(--cyan); }
+.clk { display: inline-flex; gap: 2px; }
+.clk i { width: 8px; height: 8px; border: 1px solid var(--cyan); }
+.clk i.on { background: var(--cyan); }
+
+.tt-hero { padding: 8px; }
+.tt-hero-name { margin: 0; font: 700 1rem var(--mono); color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tt-tabs { display: flex; gap: 4px; }
+.tt-save { font: .72rem var(--mono); color: var(--muted); }
+.tt-save[data-s="saved"] { color: var(--green); } .tt-save[data-s="not saved"] { color: var(--red); }
+.tt-hero-pg { flex: 1; min-height: 0; border: 1px solid var(--dim-green-hi); }
+.tt-hero .hs { display: block; box-sizing: border-box; margin: 6px; padding: 6px 8px; border: 1px solid var(--dim-green-hi); }
+.tt-hero .hs h3, .tt-hero .hf, .tt-hero .trait, .tt-hero .exp { break-inside: avoid; }
+.tt-hero .hs h3 { break-after: avoid; }
+.tt-hero .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 2px 10px; align-items: end; }
+.tt-hero .fields > .hf-area, .tt-hero .fields > .hf-track, .tt-hero .fields > .sub, .tt-hero .fields > .slot { grid-column: 1 / -1; }
+.tt-hero .fields > .exp { grid-column: span 2; }
+.tt-hero .hs h3 { margin: 0 0 6px; font: 700 .8rem var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+.tt-hero .hs .sub { display: block; margin: 6px 0 2px; font: 700 .72rem var(--mono); color: var(--cyan); text-transform: uppercase; }
+.tt-hero .hf { display: block; margin: 0 0 6px; }
+.tt-hero .hf .lb { display: block; font-size: .7rem; color: var(--muted); margin-bottom: 1px; }
+.tt-hero .hf input[type=text], .tt-hero .hf input[type=number], .tt-hero .hf textarea, .tt-hero .trait input[type=number] {
+  width: 100%; box-sizing: border-box; padding: 4px 6px; background: var(--panel); color: var(--ink); border: 1px solid var(--dim-green-hi);
+  font: 16px/1.3 inherit; resize: none; }
+.tt-hero input:focus, .tt-hero textarea:focus { border-color: var(--accent); outline: none; }
+.tt-hero input:disabled, .tt-hero textarea:disabled { border-color: transparent; background: transparent; color: var(--ink); opacity: 1; }
+.tt-hero .hf-num input { max-width: 6em; }
+.tt-hero .inline { display: inline-flex; align-items: center; gap: 6px; margin-right: 12px; font-size: .85rem; color: var(--ink); }
+.tt-hero input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+.tt-hero .exp { display: flex; gap: 6px; }
+.tt-hero .exp .hf:first-child { flex: 1; }
+.tt-hero .exp .hf:last-child input { width: 4em; }
+.tt-hero .traits { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px; }
+.tt-hero .trait { display: grid; grid-template-columns: 1fr auto; gap: 2px 6px; align-items: center; padding: 4px; border: 1px solid var(--dim-green-hi); }
+.tt-hero .trait .tn { grid-column: 1 / -1; font: 700 .72rem var(--mono); text-transform: uppercase; color: var(--accent); }
+.tt-hero .trait .tv { grid-column: 1 / -1; font-size: .62rem; color: var(--muted); }
+.tt-hero .boxes { display: inline-flex; flex-wrap: wrap; gap: 4px; vertical-align: middle; }
+.tt-hero .boxes button { width: 22px; height: 22px; padding: 0; border: 2px solid var(--accent); background: #000; border-radius: 0; cursor: pointer; }
+.tt-hero .boxes button.on { background: var(--accent); }
+.tt-hero .boxes.round button { border-radius: 50%; }
+.tt-hero .boxes.dia button { transform: rotate(45deg) scale(.82); }
+.tt-hero .boxes button:disabled { cursor: default; }
+.tt-hero .hf-track .mx { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; }
+.tt-hero .hf-track .mx .lb { display: inline; margin: 0; }
+.tt-hero .hf-track .mx input { width: 3.6em; }
+.tt-hero .gm { border-color: var(--red); }
+.tt-hero .gm h3 { color: var(--red); }
+.tt-hero .hist { margin: 4px 0 0; padding-left: 18px; font: .68rem var(--mono); color: var(--muted); }
+.tt-hero .folder .fbar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.tt-hero .files { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.tt-hero .file { display: flex; flex-direction: column; gap: 3px; padding: 6px; border: 1px solid var(--dim-green-hi); }
+.tt-hero .file .open { display: flex; align-items: center; justify-content: center; height: 110px; overflow: hidden; color: var(--accent); background: #000; }
+.tt-hero .file .open img { width: 100%; height: 100%; object-fit: cover; }
+.tt-hero .file .open .g { width: 40px; height: 40px; }
+.tt-hero .file .pdf { font: 700 .8rem var(--mono); margin-left: 4px; }
+.tt-hero .file .fn { font-size: .78rem; overflow-wrap: anywhere; }
+.tt-hero .file .fm { font-size: .66rem; color: var(--muted); }
+.tt-hero .file .fk { display: flex; gap: 4px; }
+.tt-hub-h { grid-column: 1 / -1; margin: 8px 0 0; font: 700 .8rem var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.tt-herotile.board { flex-direction: row; align-items: center; border-color: var(--dim-green-hi); }
+.tt-herotile.board .g { width: 22px; height: 22px; color: var(--accent); flex: none; }
+.tt-hero .qref textarea { width: 100%; box-sizing: border-box; padding: 6px; background: var(--panel); color: var(--ink); border: 1px solid var(--red); font: 15px/1.4 inherit; resize: none; }
+.tt-herotile .qr { margin: 4px 0 0; padding-left: 16px; font-size: .72rem; line-height: 1.3; color: var(--ink); }
+.tt-herotile .qr li { margin: 0 0 2px; }

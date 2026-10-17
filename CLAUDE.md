@@ -215,6 +215,8 @@ Full description and tests: `docs/portal/README.md` → Nagatha's Video Service.
 This is the scrapbook for the Captain's Daggerheart campaign (Heroes of Chance; the lore is in `../heroes-of-chance`).
 - **Boards:** the GM (an admin) makes them. Friends granted "tabletop" pin pictures and notes on them and drag them
   about. A card can only be changed by its author or the GM.
+- **Heroes:** every field of the official sheet (`tabletop.SPEC`; a field not in SPEC can't be stored), a project, a folder,
+  a print view; a GM-only quick reference per hero; the GM's Fear in the top bar, kept between sessions.
 - **Storage:** the private bucket `skippy-tel-tabletop`, made by `infra/bootstrap`, so a new bucket needs a bootstrap
   re-run in Cloud Shell. The portal reaches it through its runtime identity.
 - **Code:** `portal/tabletop.py`, `templates/tabletop.html`, `static/tabletop.{js,css}`.

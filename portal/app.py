@@ -905,6 +905,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     # can't add a header without a CORS preflight this portal never answers.
     table = tabletop or tabletop_mod.Tabletop(tabletop_mod.store_from_env())
     app.extensions["tabletop"] = table
+    heroes = tabletop_mod.Heroes(table)                # the party's sheets, their folders, and the GM's Fear
     tt = Blueprint("tabletop", __name__, url_prefix="/tabletop")
 
     def tt_call(fn, *args):
@@ -957,10 +958,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         """The whole board; with ?since=<rev>, just {"rev": n} while nothing has changed (the page polls this)."""
         since = request.args.get("since", type=int)
 
-        def answer():
+        def answer():                                   # the GM's Fear rides along on every poll: it's on screen everywhere
             if since is not None and table.rev(bid) == since:
-                return {"rev": since}
-            return table.view(bid)
+                return {"rev": since, "fear": heroes.fear()}
+            return {**table.view(bid), "fear": heroes.fear()}
         resp = tt_call(answer)
         if not isinstance(resp, tuple):
             resp.headers["Cache-Control"] = "no-store"
@@ -1013,6 +1014,127 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         resp.headers["Cache-Control"] = "private, max-age=31536000, immutable"   # a card's picture never changes under its name
         resp.headers["X-Content-Type-Options"] = "nosniff"
         return resp
+
+    # ── Heroes: every field of the official sheet, editable by the hero's player and the GM; a folder each; the GM's Fear ──
+    @tt.get("/fear")
+    @auth.portal_required("tabletop")
+    def fear():
+        return tt_call(lambda: {"fear": heroes.fear(), "max": tabletop_mod.FEAR_MAX})
+
+    @tt.post("/fear")
+    @auth.admin_required
+    def fear_set():
+        body = request.get_json(silent=True) or {}
+        return tt_call(lambda: {"fear": heroes.set_fear(value=body.get("value"), delta=body.get("delta"))})
+
+    @tt.get("/heroes")
+    @auth.portal_required("tabletop")
+    def heroes_list():
+        return tt_call(lambda: {"heroes": heroes.summary(gm=auth.is_admin(me())), "fear": heroes.fear()})
+
+    @tt.post("/heroes")
+    @auth.admin_required
+    def hero_new():
+        body = request.get_json(silent=True) or {}
+        return tt_call(lambda: heroes.create(me(), body.get("name"), body.get("sheet"), body.get("player", ""), body.get("player_name", ""),
+                                             body.get("gm_ref")))
+
+    @tt.get("/h/<hid>")
+    @auth.portal_required("tabletop")
+    def hero(hid):
+        """A hero's sheet and folder; with ?since=<rev>, just {"rev": n} while nothing has changed (the open sheet polls this)."""
+        since = request.args.get("since", type=int)
+        who, _, gm = tt_who()
+
+        def answer():
+            if since is not None and heroes.hero(hid)["rev"] == since:
+                return {"rev": since}
+            return {**heroes.view(hid, history=gm), "can_edit": heroes.can_edit(hid, who, gm), "gm": gm}
+        resp = tt_call(answer)
+        if not isinstance(resp, tuple):
+            resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+    @tt.post("/h/<hid>/set")
+    @auth.portal_required("tabletop")
+    def hero_set(hid):
+        who, _, gm = tt_who()
+
+        def change():
+            if not heroes.can_edit(hid, who, gm):
+                raise tabletop_mod.Refused("Only this hero's player (or the GM) can change the sheet.")
+            return heroes.update(hid, who, (request.get_json(silent=True) or {}).get("ops"))
+        return tt_call(change)
+
+    @tt.post("/h/<hid>/player")
+    @auth.admin_required
+    def hero_player(hid):
+        body = request.get_json(silent=True) or {}
+        return tt_call(heroes.set_player, hid, body.get("player", ""), body.get("player_name", ""))
+
+    @tt.post("/h/<hid>/gm")
+    @auth.admin_required
+    def hero_gm_ref(hid):
+        """The GM's quick reference for this hero: storytelling details only the GM sees."""
+        return tt_call(heroes.set_gm_ref, hid, (request.get_json(silent=True) or {}).get("gm_ref", []))
+
+    @tt.post("/h/<hid>/delete")
+    @auth.admin_required
+    def hero_delete(hid):
+        return tt_call(heroes.remove, hid)
+
+    @tt.post("/h/<hid>/files")
+    @auth.portal_required("tabletop")
+    def hero_file_add(hid):
+        who, _, gm = tt_who()
+        upload = request.files.get("file")
+        data = upload.read(tabletop_mod.MAX_FILE + 1) if upload else b""
+
+        def add():
+            if not heroes.can_edit(hid, who, gm):
+                raise tabletop_mod.Refused("Only this hero's player (or the GM) can add to the folder.")
+            return {"file": heroes.add_file(hid, who, data, request.form.get("name") or (upload.filename if upload else ""))}
+        return tt_call(add)
+
+    @tt.post("/h/<hid>/files/<fid>/delete")
+    @auth.portal_required("tabletop")
+    def hero_file_delete(hid, fid):
+        who, _, gm = tt_who()
+        return tt_call(heroes.remove_file, hid, fid, who, gm)
+
+    @tt.get("/h/<hid>/files/<fid>")
+    @auth.portal_required("tabletop")
+    def hero_file(hid, fid):
+        if not table.ready:
+            abort(503)
+        try:
+            found = heroes.file(hid, fid)
+        except tabletop_mod.NotFound:
+            found = None
+        if not found:
+            abort(404)
+        data, ctype, meta = found
+        resp = app.response_class(data, mimetype=ctype)
+        safe = re.sub(r'[^A-Za-z0-9 ._()-]', "_", meta["name"])   # ASCII only: it goes in a header
+        if not safe.lower().endswith("." + meta["ext"]):
+            safe += "." + meta["ext"]
+        resp.headers["Content-Disposition"] = f'{"attachment" if request.args.get("dl") else "inline"}; filename="{safe}"'
+        resp.headers["Cache-Control"] = "private, max-age=31536000, immutable"
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        resp.headers["Content-Security-Policy"] = "sandbox"          # a PDF opens on its own, never as part of the portal
+        return resp
+
+    @tt.get("/h/<hid>/print")
+    @auth.portal_required("tabletop")
+    def hero_print(hid):
+        """The sheet on paper: every field in the official sheet's order and wording, for a player on pencil and paper."""
+        if not table.ready:
+            abort(503)
+        try:
+            h = heroes.view(hid)
+        except tabletop_mod.NotFound:
+            abort(404)
+        return render_template("tabletop_print.html", h=h, s=h["sheet"], traits=tabletop_mod.TRAITS)
 
     app.register_blueprint(tt)
 

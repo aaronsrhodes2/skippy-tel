@@ -1,0 +1,157 @@
+<!doctype html>
+{# A hero's sheet on paper (/tabletop/h/<id>/print): every field of the official Daggerheart character sheet and its character guide
+   page, in the same order and wording, so a player on pencil and paper can bring theirs level with the Tabletop's (or the other way
+   round). Not a bridge page: it is made to print, black on white. Boxes print filled up to what is marked. #}
+{% macro boxes(n, filled, cls="") %}<span class="boxes {{ cls }}">{% for i in range(n) %}<i class="{{ 'on' if i < filled }}"></i>{% endfor %}</span>{% endmacro %}
+{% macro line(label, value) %}<div class="ln"><b>{{ label }}</b><span>{{ value }}</span></div>{% endmacro %}
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ s.name or "Hero" }} — character sheet</title>
+<style>
+  :root { --ink: #111; --dim: #666; --rule: #999; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: #fff; color: var(--ink); font: 11px/1.35 "Segoe UI", system-ui, sans-serif; }
+  @page { size: letter; margin: 10mm; }
+  @media print { body { padding: 0; } .noprint { display: none; } .page { break-after: page; } }
+  .noprint { margin-bottom: 12px; font-size: 13px; }
+  .noprint button { font: inherit; padding: 6px 14px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: .02em; }
+  h2 { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; margin: 10px 0 4px; padding: 2px 6px; background: #222; color: #fff; }
+  .page { max-width: 7.6in; margin: 0 auto 24px; }
+  .top { display: grid; grid-template-columns: 1.3fr 1fr 1fr 64px; gap: 4px 10px; align-items: end; border-bottom: 2px solid #222; padding-bottom: 6px; }
+  .lvl { grid-row: span 3; border: 2px solid #222; text-align: center; font-size: 26px; font-weight: 700; padding: 4px 0; }
+  .lvl small { display: block; font-size: 9px; letter-spacing: .1em; }
+  .ln { display: flex; gap: 6px; border-bottom: 1px solid var(--rule); min-height: 18px; align-items: baseline; }
+  .ln b { font-size: 8.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
+  .ln span { flex: 1; white-space: pre-wrap; }
+  .row { display: flex; gap: 10px; }
+  .col { flex: 1; min-width: 0; }
+  .stat { border: 2px solid #222; text-align: center; padding: 4px 8px; min-width: 64px; }
+  .stat .v { font-size: 20px; font-weight: 700; }
+  .stat .k { font-size: 8.5px; letter-spacing: .08em; text-transform: uppercase; }
+  .traits { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .trait { border: 1.5px solid #222; text-align: center; padding: 3px; }
+  .trait .k { font-size: 8.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+  .trait .v { font-size: 18px; font-weight: 700; }
+  .trait .m { font-size: 8.5px; color: var(--dim); }
+  .boxes { display: inline-flex; gap: 2px; vertical-align: middle; }
+  .boxes i { display: inline-block; width: 12px; height: 12px; border: 1.3px solid #222; }
+  .boxes i.on { background: #222; }
+  .boxes.round i { border-radius: 50%; }
+  .boxes.dia i { transform: rotate(45deg) scale(.8); }
+  .track { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+  .track b { width: 46px; font-size: 9px; letter-spacing: .06em; }
+  .thr { display: flex; align-items: center; gap: 6px; font-size: 9px; margin: 4px 0; }
+  .thr span { border: 1.5px solid #222; padding: 2px 6px; font-weight: 700; font-size: 12px; }
+  .exp { display: flex; border-bottom: 1px solid var(--rule); min-height: 18px; }
+  .exp span:first-child { flex: 1; }
+  .exp span:last-child { width: 30px; text-align: right; font-weight: 700; }
+  .weapon { margin-bottom: 6px; }
+  .feat { white-space: pre-wrap; border: 1px solid var(--rule); padding: 4px 6px; min-height: 40px; }
+  .qa { margin-bottom: 6px; }
+  .qa .q { font-weight: 600; }
+  .qa .a { border-bottom: 1px solid var(--rule); min-height: 30px; white-space: pre-wrap; }
+  .tiers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .tier div { display: flex; gap: 6px; align-items: flex-start; margin: 2px 0; font-size: 9.5px; }
+  .tier h3 { font-size: 10px; margin: 0 0 4px; }
+  .muted { color: var(--dim); }
+</style>
+</head>
+<body>
+<p class="noprint"><button onclick="print()">Print</button> &nbsp;Every field of the official sheet, as it stands on the Tabletop right now.</p>
+
+<section class="page">
+  <div class="top">
+    <div><h1>{{ s.class or "Class" }}</h1><div class="muted">{{ s.domains }}</div></div>
+    {{ line("Name", s.name) }}{{ line("Pronouns", s.pronouns) }}
+    <div class="lvl">{{ s.level }}<small>LEVEL</small></div>
+    <div></div>{{ line("Heritage", s.heritage) }}{{ line("Subclass", s.subclass) }}
+    <div></div>{{ line("Player", h.player_name or h.player) }}<div></div>
+  </div>
+
+  <div class="row" style="margin-top:8px">
+    <div class="stat"><div class="v">{{ s.evasion }}</div><div class="k">Evasion</div></div>
+    <div class="stat"><div class="v">{{ s.armor_score }}</div><div class="k">Armor</div><div>{{ boxes(12, s.armor_slots) }}</div></div>
+    <div class="col traits">
+      {% set verbs = {"agility": "Sprint · Leap · Maneuver", "strength": "Lift · Smash · Grapple", "finesse": "Control · Hide · Tinker",
+                      "instinct": "Perceive · Sense · Navigate", "presence": "Charm · Perform · Deceive", "knowledge": "Recall · Analyze · Comprehend"} %}
+      {% for t in traits %}<div class="trait"><div class="k">{{ t }} {{ "●" if s.traits[t].marked else "○" }}</div>
+        <div class="v">{{ "%+d" % s.traits[t].value if s.traits[t].value else "0" }}</div><div class="m">{{ verbs[t] }}</div></div>{% endfor %}
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col">
+      <h2>Damage &amp; health</h2>
+      <div class="thr">MINOR · Mark 1 HP <span>{{ s.thresholds.major }}</span> MAJOR · Mark 2 HP <span>{{ s.thresholds.severe }}</span> SEVERE · Mark 3 HP</div>
+      <div class="track"><b>HP</b>{{ boxes(s.hp.max, s.hp.marked) }}</div>
+      <div class="track"><b>STRESS</b>{{ boxes(s.stress.max, s.stress.marked) }}</div>
+      <h2>Hope</h2>
+      <div class="track"><b>HOPE</b>{{ boxes(6, s.hope, "dia") }}</div>
+      <div class="feat">{{ s.hope_feature }}</div>
+      <h2>Experience</h2>
+      {% for e in s.experiences %}<div class="exp"><span>{{ e.name }}</span><span>{{ ("%+d" % e.bonus) if e.name else "" }}</span></div>{% endfor %}
+      <h2>Gold</h2>
+      <div class="track"><b>Handfuls</b>{{ boxes(10, s.gold.handfuls, "round") }}</div>
+      <div class="track"><b>Bags</b>{{ boxes(10, s.gold.bags) }}</div>
+      <div class="track"><b>Chest</b>{{ boxes(1, 1 if s.gold.chest else 0) }}</div>
+      <h2>Class feature</h2>
+      <div class="feat">{{ s.class_feature }}</div>
+    </div>
+    <div class="col">
+      <h2>Active weapons</h2>
+      <div class="track"><b>Proficiency</b>{{ boxes(6, s.proficiency, "round") }}</div>
+      {% for slot in ("primary", "secondary") %}{% set w = s.weapons[slot] %}
+      <div class="weapon"><b>{{ slot | upper }}</b>
+        {{ line("Name", w.name) }}{{ line("Trait & range", w.trait_range) }}{{ line("Damage dice & type", w.damage) }}{{ line("Feature", w.feature) }}</div>
+      {% endfor %}
+      <h2>Active armor</h2>
+      {{ line("Name", s.armor.name) }}{{ line("Base thresholds", s.armor.thresholds) }}{{ line("Base score", s.armor.score) }}{{ line("Feature", s.armor.feature) }}
+      <h2>Inventory</h2>
+      {% for item in s.inventory %}<div class="ln"><span>{{ item }}</span></div>{% endfor %}
+      {% for w in s.inv_weapons %}
+      <div class="weapon"><b>INVENTORY WEAPON</b> <span class="muted">{{ "☑" if w.slot == "primary" else "☐" }} Primary {{ "☑" if w.slot == "secondary" else "☐" }} Secondary</span>
+        {{ line("Name", w.name) }}{{ line("Trait & range", w.trait_range) }}{{ line("Damage dice & type", w.damage) }}{{ line("Feature", w.feature) }}</div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="page">
+  <h1>{{ s.class or "Class" }} — character guide</h1>
+  <h2>Starting choices</h2>
+  <div class="feat">{{ s.starting_choices }}</div>
+  <h2>Character description</h2>
+  {{ line("Clothes that are", s.description.clothes) }}{{ line("Eyes like", s.description.eyes) }}{{ line("Body that's", s.description.body) }}
+  {{ line("Skin the color of", s.description.skin) }}{{ line("Attitude like", s.description.attitude) }}
+  <div class="row">
+    <div class="col"><h2>Background questions</h2>
+      {% for qa in s.background %}<div class="qa"><div class="q">{{ qa.q }}</div><div class="a">{{ qa.a }}</div></div>{% endfor %}</div>
+    <div class="col"><h2>Connections</h2>
+      {% for qa in s.connections %}<div class="qa"><div class="q">{{ qa.q }}</div><div class="a">{{ qa.a }}</div></div>{% endfor %}</div>
+  </div>
+  <h2>Level-up choices</h2>
+  {% set opts = [("traits", 3, "Gain a +1 bonus to two unmarked character traits and mark them."), ("hp", 2, "Permanently gain one Hit Point slot."),
+                 ("stress", 2, "Permanently gain one Stress slot."), ("experiences", 1, "Permanently gain a +1 bonus to two Experiences."),
+                 ("domain_card", 1, "Choose an additional domain card of your level or lower from a domain you have access to."),
+                 ("evasion", 1, "Permanently gain a +1 bonus to your Evasion."), ("subclass", 1, "Take an upgraded subclass card. Then cross out the multiclass option for this tier."),
+                 ("proficiency", 2, "Increase your Proficiency by +1."), ("multiclass", 2, "Multiclass: choose an additional class for your character.")] %}
+  <div class="tiers">
+    {% for tier, label in (("tier2", "Tier 2: levels 2–4"), ("tier3", "Tier 3: levels 5–7"), ("tier4", "Tier 4: levels 8–10")) %}
+    <div class="tier"><h3>{{ label }}</h3>
+      {% for key, n, text in opts if key in s.levelups[tier] %}<div>{{ boxes(n, s.levelups[tier][key]) }}<span>{{ text }}</span></div>{% endfor %}
+    </div>{% endfor %}
+  </div>
+  <h2>Domain cards</h2>
+  {% for c in s.domain_cards if c %}<div class="ln"><span>{{ c }}</span></div>{% else %}<p class="muted">None listed.</p>{% endfor %}
+  <h2>Current project</h2>
+  {{ line("Project", s.project.name) }}{{ line("Goal", s.project.goal) }}
+  <div class="track"><b>Progress</b>{{ boxes(s.project.clock_max, s.project.clock) }}</div>
+  {% if s.project.notes %}<div class="feat">{{ s.project.notes }}</div>{% endif %}
+  {% if s.notes %}<h2>Notes</h2><div class="feat">{{ s.notes }}</div>{% endif %}
+  <p class="muted" style="margin-top:10px">Daggerheart © Darrington Press. Printed from the Heroes of Chance Tabletop.</p>
+</section>
+</body>
+</html>

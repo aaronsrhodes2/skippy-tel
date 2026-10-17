@@ -316,3 +316,383 @@ class Tabletop:
                 self.store.delete(f"images/{board_id}/{card['img']}")
             board["cards"] = [c for c in board["cards"] if c["id"] != card_id]
             self._save(board)
+
+
+# ── Heroes: one interactive sheet per character, every field of the official Daggerheart sheet and its character guide page ──
+#
+#   heroes.json                       ["<id>", ...]
+#   heroes/<id>.json                  {"id", "rev", "player", "sheet": {...}, "files": [...], "history": [...]}
+#   heroes/<id>/files/<fid>.<ext>     the hero's folder: the print packet, sheet photos, portraits
+#   fear.json                         {"value": n}   the GM's Fear, carried from session to session
+#
+# The sheet is a fixed shape (SPEC below). A change is a list of (path, value) pairs, each checked against SPEC: a path the
+# sheet doesn't have, or a value of the wrong kind, is refused, so the stored sheet can only ever hold the official fields.
+# Each change is logged (who, when, what it was) so a paper sheet can be brought level with the web one.
+
+TRAITS = ("agility", "strength", "finesse", "instinct", "presence", "knowledge")
+LISTS = {"experiences": 5, "inventory": 12, "inv_weapons": 2, "background": 3, "connections": 3, "domain_cards": 10}
+FEAR_MAX = 12
+MAX_FILE = 30 * 1024 * 1024
+HISTORY_KEEP = 400
+GM_REF_MAX = 8                       # the GM's quick reference: a handful of details per hero, never shown to players
+FILE_TYPES = {"pdf": "application/pdf", **TYPES}
+
+
+def _txt(n):
+    return ("str", n)
+
+
+def _int(lo, hi):
+    return ("int", lo, hi)
+
+
+BOOL = ("bool",)
+WEAPON = {"name": _txt(80), "trait_range": _txt(80), "damage": _txt(60), "feature": _txt(400)}
+TIER2 = (("traits", 3), ("hp", 2), ("stress", 2), ("experiences", 1), ("domain_card", 1), ("evasion", 1))
+TIER34 = TIER2 + (("subclass", 1), ("proficiency", 2), ("multiclass", 2))
+SPEC: dict[str, tuple] = {
+    # the top strip
+    "name": _txt(80), "pronouns": _txt(40), "heritage": _txt(100), "subclass": _txt(60), "level": _int(1, 10),
+    "class": _txt(40), "domains": _txt(60),
+    # defence
+    "evasion": _int(0, 40), "armor_score": _int(0, 12), "armor_slots": _int(0, 12),
+    **{f"traits.{t}.value": _int(-5, 10) for t in TRAITS}, **{f"traits.{t}.marked": BOOL for t in TRAITS},
+    # damage and health
+    "thresholds.major": _int(0, 99), "thresholds.severe": _int(0, 99),
+    "hp.max": _int(1, 12), "hp.marked": _int(0, 12), "stress.max": _int(1, 12), "stress.marked": _int(0, 12),
+    "hope": _int(0, 6), "hope_feature": _txt(800),
+    "experiences.#.name": _txt(80), "experiences.#.bonus": _int(-5, 10),
+    "gold.handfuls": _int(0, 10), "gold.bags": _int(0, 10), "gold.chest": BOOL,
+    "class_feature": _txt(3000),
+    # active weapons and armor
+    "proficiency": _int(0, 6),
+    **{f"weapons.primary.{k}": v for k, v in WEAPON.items()}, **{f"weapons.secondary.{k}": v for k, v in WEAPON.items()},
+    "armor.name": _txt(80), "armor.thresholds": _txt(20), "armor.score": _txt(10), "armor.feature": _txt(400),
+    "inventory.#": _txt(160),
+    **{f"inv_weapons.#.{k}": v for k, v in WEAPON.items()}, "inv_weapons.#.slot": ("pick", "", "primary", "secondary"),
+    # the character guide page
+    "description.clothes": _txt(160), "description.eyes": _txt(160), "description.body": _txt(160),
+    "description.skin": _txt(160), "description.attitude": _txt(160), "starting_choices": _txt(400),
+    "background.#.q": _txt(300), "background.#.a": _txt(1500),
+    "connections.#.q": _txt(300), "connections.#.a": _txt(1500),
+    **{f"levelups.tier2.{k}": _int(0, n) for k, n in TIER2},
+    **{f"levelups.tier{t}.{k}": _int(0, n) for t in (3, 4) for k, n in TIER34},
+    # beyond the paper: the cards in hand, the hero's downtime project, the player's own notes
+    "domain_cards.#": _txt(160),
+    "project.name": _txt(100), "project.goal": _txt(800), "project.clock_max": _int(1, 12), "project.clock": _int(0, 12),
+    "project.notes": _txt(3000),
+    "notes": _txt(6000),
+}
+
+
+def _default(kind):
+    if kind[0] == "int":
+        return max(0, kind[1])
+    return {"str": "", "bool": False, "pick": ""}[kind[0]]
+
+
+def _expand(path: str) -> list[str]:
+    head, sep, tail = path.partition(".#")
+    if not sep:
+        return [path]
+    return [f"{head}.{i}{tail}" for i in range(LISTS[head])]
+
+
+def _put(obj, path: str, value):
+    keys = path.split(".")
+    for i, k in enumerate(keys[:-1]):
+        nxt = [None] * LISTS[k] if keys[i + 1].isdigit() else {}
+        if isinstance(obj, list):
+            if obj[int(k)] is None:
+                obj[int(k)] = nxt
+            obj = obj[int(k)]
+        else:
+            obj = obj.setdefault(k, nxt)
+    if isinstance(obj, list):
+        obj[int(keys[-1])] = value
+    else:
+        obj[keys[-1]] = value
+
+
+def _get(obj, path: str):
+    for k in path.split("."):
+        obj = obj[int(k)] if isinstance(obj, list) else obj[k]
+    return obj
+
+
+def blank_sheet() -> dict:
+    sheet: dict = {}
+    for path, kind in SPEC.items():
+        for concrete in _expand(path):
+            _put(sheet, concrete, _default(kind))
+    sheet["hp"]["max"], sheet["stress"]["max"], sheet["project"]["clock_max"] = 6, 6, 4
+    return sheet
+
+
+def spec_of(path):
+    """The kind a sheet path holds, or None when the sheet has no such field (indices checked against the list's size)."""
+    if not isinstance(path, str) or len(path) > 80:
+        return None
+    parts, shape = path.split("."), []
+    for i, p in enumerate(parts):
+        if p.isdigit():
+            if i == 0 or parts[i - 1] not in LISTS or int(p) >= LISTS[parts[i - 1]]:
+                return None
+            shape.append("#")
+        else:
+            shape.append(p)
+    return SPEC.get(".".join(shape))
+
+
+def clean(kind, value):
+    """The value as the field stores it; Refused when it can't be."""
+    if kind[0] == "str":
+        if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+            raise Refused("That field takes text.")
+        return str(value)[:kind[1]]
+    if kind[0] == "int":
+        if isinstance(value, bool):
+            raise Refused("That field takes a number.")
+        try:
+            n = int(float(value))
+        except (TypeError, ValueError, OverflowError):
+            raise Refused("That field takes a number.") from None
+        return max(kind[1], min(kind[2], n))
+    if kind[0] == "bool":
+        return bool(value)
+    if value not in kind[1:]:
+        raise Refused("Not one of the choices.")
+    return value
+
+
+def flatten(obj, prefix="") -> list:
+    if isinstance(obj, dict):
+        return [pair for k, v in obj.items() for pair in flatten(v, f"{prefix}{k}.")]
+    if isinstance(obj, list):
+        return [pair for i, v in enumerate(obj) for pair in flatten(v, f"{prefix}{i}.")]
+    return [(prefix[:-1], obj)]
+
+
+class Heroes:
+    """The party's sheets, their folders, and the GM's Fear. Shares the Tabletop's store and lock."""
+
+    def __init__(self, table: Tabletop):
+        self.t = table
+        self._ids: list[str] | None = None
+        self._heroes: dict[str, dict] = {}
+        self._fear: int | None = None
+
+    @property
+    def store(self):
+        return self.t.store
+
+    # ── the Fear ──
+    def fear(self) -> int:
+        with self.t._lock:
+            if self._fear is None:
+                self._fear = int((self.t._read_json("fear.json", {}) or {}).get("value", 0))
+            return self._fear
+
+    def set_fear(self, value=None, delta=None) -> int:
+        with self.t._lock:
+            now = self.fear()
+            new = now + clean(_int(-FEAR_MAX, FEAR_MAX), delta) if delta is not None else clean(_int(0, FEAR_MAX), value)
+            self._fear = max(0, min(FEAR_MAX, new))
+            self.store.put("fear.json", json.dumps({"value": self._fear, "at": int(time.time())}).encode(), "application/json")
+            return self._fear
+
+    # ── reading ──
+    def ids(self) -> list[str]:
+        with self.t._lock:
+            if self._ids is None:
+                ids = self.t._read_json("heroes.json", [])
+                self._ids = [i for i in ids if isinstance(i, str) and _ID.match(i)]
+            return list(self._ids)
+
+    def hero(self, hid: str) -> dict:
+        if not _ID.match(hid or ""):
+            raise NotFound(hid)
+        with self.t._lock:
+            if hid not in self._heroes:
+                if hid not in self.ids():
+                    raise NotFound(hid)
+                data = self.t._read_json(f"heroes/{hid}.json", None)
+                if not isinstance(data, dict):
+                    data = {"id": hid, "rev": 0, "player": "", "player_name": "", "files": [], "history": []}
+                fresh = blank_sheet()                     # a sheet saved before a field existed gets the field, empty
+                for path, value in flatten(data.get("sheet") or {}):
+                    kind = spec_of(path)
+                    if kind:
+                        try:
+                            _put(fresh, path, clean(kind, value))
+                        except Refused:
+                            pass
+                data["sheet"] = fresh
+                self._heroes[hid] = data
+            return self._heroes[hid]
+
+    def summary(self, gm: bool = False) -> list[dict]:
+        out = []
+        for hid in self.ids():
+            h = self.hero(hid)
+            s = h["sheet"]
+            row = {"id": hid, "name": s["name"], "class": s["class"], "subclass": s["subclass"], "level": s["level"],
+                   "player": h.get("player", ""), "player_name": h.get("player_name", ""),
+                   "project": s["project"]["name"], "clock": s["project"]["clock"], "clock_max": s["project"]["clock_max"]}
+            if gm:
+                row["gm_ref"] = list(h.get("gm_ref", []))
+            out.append(row)
+        return out
+
+    def view(self, hid: str, history: bool = False) -> dict:
+        h = self.hero(hid)
+        out = {"id": hid, "rev": h["rev"], "player": h.get("player", ""), "player_name": h.get("player_name", ""),
+               "sheet": json.loads(json.dumps(h["sheet"])), "files": [dict(f) for f in h["files"]]}
+        if history:                                   # the GM's eyes only: the change log, and the quick reference for storytelling
+            out["history"] = list(h["history"][-60:])
+            out["gm_ref"] = list(h.get("gm_ref", []))
+        return out
+
+    def can_edit(self, hid: str, who: str, gm: bool) -> bool:
+        player = (self.hero(hid).get("player") or "").lower()
+        return gm or (bool(player) and (who or "").lower() == player)
+
+    def file(self, hid: str, fid: str):
+        h = self.hero(hid)
+        for f in h["files"]:
+            if f["id"] == fid:
+                data = self.store.get(f"heroes/{hid}/files/{fid}.{f['ext']}")
+                return (data, FILE_TYPES[f["ext"]], f) if data else None
+        return None
+
+    # ── writing ──
+    def _save_ids(self):
+        self.store.put("heroes.json", json.dumps(self._ids).encode(), "application/json")
+
+    def _save(self, h: dict):
+        h["rev"] += 1
+        h["history"] = h["history"][-HISTORY_KEEP:]
+        self.store.put(f"heroes/{h['id']}.json", json.dumps(h, ensure_ascii=False).encode(), "application/json")
+
+    @staticmethod
+    def _email(value) -> str:
+        email = str(value or "").strip().lower()
+        if email and not re.fullmatch(r"[^@\s]{1,64}@[^@\s]{1,190}\.[a-z]{2,}", email):
+            raise Refused("That isn't an email address.")
+        return email
+
+    @staticmethod
+    def _gm_ref(lines) -> list[str]:
+        if isinstance(lines, str):
+            lines = lines.splitlines()
+        if not isinstance(lines, list):
+            raise Refused("The quick reference is a list of details.")
+        return [str(x).strip()[:400] for x in lines if str(x).strip()][:GM_REF_MAX]
+
+    def set_gm_ref(self, hid: str, lines) -> None:
+        with self.t._lock:
+            h = self.hero(hid)
+            h["gm_ref"] = self._gm_ref(lines)
+            self._save(h)
+
+    def create(self, by: str, name, sheet=None, player="", player_name="", gm_ref=None) -> dict:
+        with self.t._lock:
+            self.ids()
+            hid = new_id()
+            h = {"id": hid, "rev": 0, "player": self._email(player), "player_name": str(player_name or "")[:60],
+                 "sheet": blank_sheet(), "files": [], "history": [], "gm_ref": self._gm_ref(gm_ref or [])}
+            skipped = self._apply(h, by, flatten(sheet if isinstance(sheet, dict) else {}), log=False, strict=False)
+            _put(h["sheet"], "name", clean(SPEC["name"], name or h["sheet"]["name"] or "New hero"))
+            h["history"].append({"at": int(time.time()), "by": by, "path": "*", "old": None, "new": "created"})
+            self._heroes[hid] = h
+            self._ids.append(hid)
+            self._save(h)
+            self._save_ids()
+            return {"id": hid, "skipped": skipped}
+
+    def remove(self, hid: str):
+        with self.t._lock:
+            h = self.hero(hid)
+            for f in h["files"]:
+                self.store.delete(f"heroes/{hid}/files/{f['id']}.{f['ext']}")
+            self.store.delete(f"heroes/{hid}.json")
+            self._ids = [i for i in self._ids if i != hid]
+            self._heroes.pop(hid, None)
+            self._save_ids()
+
+    def set_player(self, hid: str, player, player_name="") -> None:
+        with self.t._lock:
+            h = self.hero(hid)
+            h["player"] = self._email(player)
+            h["player_name"] = str(player_name or "")[:60]
+            self._save(h)
+
+    def _apply(self, h, by, ops, log=True, strict=True) -> list:
+        checked, skipped = [], []
+        for path, value in ops:
+            kind = spec_of(path)
+            if not kind:
+                if strict:
+                    raise Refused(f"The sheet has no field '{str(path)[:40]}'.")
+                skipped.append(str(path))
+                continue
+            try:
+                checked.append((path, clean(kind, value)))
+            except Refused:
+                if strict:
+                    raise
+                skipped.append(str(path))
+        now = int(time.time())
+        for path, value in checked:
+            old = _get(h["sheet"], path)
+            if old != value:
+                _put(h["sheet"], path, value)
+                if log:
+                    h["history"].append({"at": now, "by": by, "path": path, "old": old, "new": value})
+        return skipped
+
+    def update(self, hid: str, by: str, ops) -> dict:
+        if not isinstance(ops, list) or not ops or len(ops) > 400 or not all(isinstance(op, dict) for op in ops):
+            raise Refused("Nothing to change.")
+        with self.t._lock:
+            h = self.hero(hid)
+            self._apply(h, by, [(op.get("path"), op.get("value")) for op in ops])
+            self._save(h)
+            return {"rev": h["rev"]}
+
+    def add_file(self, hid: str, by: str, data: bytes, name) -> dict:
+        if not data:
+            raise Refused("No file came through.")
+        if len(data) > MAX_FILE:
+            raise Refused("That file is too big (30 MB at most).")
+        if data.startswith(b"%PDF-"):
+            ext = "pdf"
+        else:
+            kind = image_kind(data)
+            if not kind:
+                raise Refused("Only PDFs and JPEG, PNG, GIF or WebP pictures.")
+            ext = kind[0]
+        label = re.sub(r"[\x00-\x1f/\\]", "", str(name or "").strip())[:100] or f"file.{ext}"
+        with self.t._lock:
+            h = self.hero(hid)
+            if len(h["files"]) >= 60:
+                raise Refused("This folder is full (60 files).")
+            f = {"id": new_id(), "name": label, "ext": ext, "size": len(data), "by": by, "at": int(time.time())}
+            self.store.put(f"heroes/{hid}/files/{f['id']}.{ext}", data, FILE_TYPES[ext])
+            h["files"].append(f)
+            h["history"].append({"at": f["at"], "by": by, "path": "files", "old": None, "new": label})
+            self._save(h)
+            return dict(f)
+
+    def remove_file(self, hid: str, fid: str, by: str, gm: bool) -> None:
+        with self.t._lock:
+            h = self.hero(hid)
+            f = next((f for f in h["files"] if f["id"] == fid), None)
+            if not f:
+                raise NotFound(fid)
+            if not gm and f["by"] != by:
+                raise Refused("Only the GM or whoever added a file can take it out.")
+            self.store.delete(f"heroes/{hid}/files/{fid}.{f['ext']}")
+            h["files"] = [x for x in h["files"] if x["id"] != fid]
+            h["history"].append({"at": int(time.time()), "by": by, "path": "files", "old": f["name"], "new": None})
+            self._save(h)

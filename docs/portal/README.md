@@ -441,8 +441,18 @@ boards)"** in Admin > Friends.
   behind the grant. `TABLETOP_BUCKET` is set by `deploy.yml`. Without it, the page says it isn't set up.
 - **Safety:** every write needs the `X-Tabletop: 1` header, which another site's page can't add. Pictures are
   recognised by their first bytes, never by name. Text is drawn with `textContent`, never parsed as HTML.
-- **Code:** `portal/tabletop.py`, `templates/tabletop.html`, `static/tabletop.{js,css}`. Tests are in
-  `portal/tests/test_tabletop.py`.
+- **Heroes** (the party key): one tile per hero, with the boards listed beside them as the campaign's collages. A hero has three tabs:
+  - **Sheet**: every field of the official Daggerheart sheet and its character-guide page (`tabletop.SPEC`). A change is checked
+    against SPEC, saved within a second, and logged with who made it and when.
+  - **Project**: the hero's current project, with a progress clock.
+  - **Folder**: PDFs and pictures (30 MB each) served behind the grant, opened sandboxed.
+- **Who changes what:** the hero's player (set by the GM) and the GM change the sheet and add to the folder; everyone else reads.
+  The print key opens `/tabletop/h/<id>/print`, every field in the official sheet's order, black on white, for players on paper.
+- **GM only:** a quick reference per hero (storytelling details, never sent to a player), the change log, who plays whom.
+- **Fear:** the GM's Fear (0–12) sits in the top bar for everyone and rides on every board poll. Only the GM changes it,
+  and it carries over to the next session.
+- **Code:** `portal/tabletop.py`, `templates/tabletop.html` and `tabletop_print.html`, `static/tabletop{,-heroes}.js` and
+  `tabletop.css`. Tests are in `portal/tests/test_tabletop.py`.
 
 ## Star Control Zero (the Captain's game, `/starcontrol`)
 

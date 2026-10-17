@@ -14,12 +14,18 @@
 <section id="tt" class="tt bp" aria-label="Tabletop"
          data-ready="{{ '1' if ready else '0' }}" data-gm="{{ '1' if gm else '0' }}" data-me="{{ me_email }}"
          data-boards-url="{{ url_for('tabletop.boards') }}"
-         data-board-url="{{ url_for('tabletop.board', bid='BID') }}">{# every card's address hangs off the board's: …/BID/text, …/BID/img/<name> #}
+         data-board-url="{{ url_for('tabletop.board', bid='BID') }}"
+         data-heroes-url="{{ url_for('tabletop.heroes_list') }}"
+         data-hero-url="{{ url_for('tabletop.hero', hid='HID') }}"
+         data-fear-url="{{ url_for('tabletop.fear') }}">{# every card's address hangs off the board's: …/BID/text, …/BID/img/<name> #}
   <noscript><p class="warn" style="margin:12px">The Tabletop needs JavaScript.</p></noscript>
   <div class="notice" id="tt-notice" role="status" hidden></div>
 
   <div class="bp-top">
     <button type="button" class="key" id="tt-boards-key" aria-label="Boards" title="Boards"><svg class="g" aria-hidden="true"><use href="#g-tools"/></svg></button>
+    <button type="button" class="key" id="tt-heroes-key" aria-label="Heroes" title="Heroes"><svg class="g" aria-hidden="true"><use href="#g-party"/></svg></button>
+    <button type="button" class="tt-fear" id="tt-fear" aria-label="Fear" title="Fear: the GM's, kept from session to session">
+      <svg class="g" aria-hidden="true"><use href="#g-flame"/></svg><span id="tt-fear-n">–</span></button>
     <h1 class="tt-title" id="tt-title">Tabletop</h1>
     <button type="button" class="key" id="tt-note-key" aria-label="Pin a note" title="Pin a note" disabled><svg class="g" aria-hidden="true"><use href="#g-talk"/></svg></button>
     <button type="button" class="key" id="tt-pic-key" aria-label="Pin a picture" title="Pin a picture" disabled><svg class="g" aria-hidden="true"><use href="#g-image"/></svg></button>
@@ -66,6 +72,56 @@
       <button type="button" class="key" id="tt-card-save" aria-label="Pin it" title="Pin it"><svg class="g" aria-hidden="true"><use href="#g-send"/></svg></button>
     </div>
   </div>
+
+  {# The party: a control per hero; the GM also makes heroes #}
+  <div class="sheet" id="tt-party" role="dialog" aria-modal="true" aria-label="Heroes" hidden>
+    <div class="tt-sheet-top">
+      <svg class="g" aria-hidden="true"><use href="#g-party"/></svg><span class="tt-by">Heroes of Chance</span><span class="grow"></span>
+      <button type="button" class="key sm" data-close aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
+    </div>
+    <div class="tt-party" id="tt-party-list" role="list"></div>
+    {% if gm %}
+    <form class="tt-new" id="tt-hero-new">
+      <input type="text" id="tt-hero-new-name" maxlength="80" placeholder="New hero's name" aria-label="New hero's name" autocomplete="off">
+      <button type="submit" class="key" aria-label="Add a hero" title="Add a hero"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
+    </form>
+    {% endif %}
+  </div>
+
+  {# One hero: the sheet (every field of the official one), the current project, the folder #}
+  <div class="sheet tt-hero" id="tt-hero" role="dialog" aria-modal="true" aria-labelledby="tt-hero-name" hidden>
+    <div class="tt-sheet-top">
+      <button type="button" class="key sm" id="tt-hero-back" aria-label="All heroes" title="All heroes"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <h2 class="tt-hero-name" id="tt-hero-name"></h2>
+      <span class="tt-save" id="tt-save" aria-live="polite"></span>
+      <span class="grow"></span>
+      <div class="tt-tabs" role="tablist">
+        <button type="button" class="key sm" role="tab" data-tab="sheet" aria-label="Character sheet" title="Character sheet"><svg class="g" aria-hidden="true"><use href="#g-sheet"/></svg></button>
+        <button type="button" class="key sm" role="tab" data-tab="project" aria-label="Current project" title="Current project"><svg class="g" aria-hidden="true"><use href="#g-clock"/></svg></button>
+        <button type="button" class="key sm" role="tab" data-tab="folder" aria-label="Folder" title="Folder"><svg class="g" aria-hidden="true"><use href="#g-folder"/></svg></button>
+      </div>
+      <a class="key sm" id="tt-hero-print" target="_blank" rel="noopener" aria-label="Print the sheet" title="Print the sheet"><svg class="g" aria-hidden="true"><use href="#g-print"/></svg></a>
+      <button type="button" class="key sm" data-close aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
+    </div>
+    <div class="pg tt-hero-pg" id="tt-hero-pg"><div class="pg-flow" id="tt-hero-flow"></div></div>
+    <div class="pips"><i></i></div>
+    <input type="file" id="tt-hero-file" accept="application/pdf,image/*" multiple hidden>
+  </div>
+
+  {# The GM's Fear: twelve at most; it stays put between sessions #}
+  <div class="sheet tt-fearsheet" id="tt-fearsheet" role="dialog" aria-modal="true" aria-label="Fear" hidden>
+    <div class="tt-sheet-top">
+      <svg class="g" aria-hidden="true"><use href="#g-flame"/></svg><span class="tt-by">Fear</span><span class="grow"></span>
+      <button type="button" class="key sm" data-close aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
+    </div>
+    <div class="tt-fear-big"><span id="tt-fear-big">0</span><small>/ 12</small></div>
+    <div class="tt-fear-pips" id="tt-fear-pips"></div>
+    <div class="tt-sheet-bottom tt-fear-keys">
+      <button type="button" class="key" id="tt-fear-down" aria-label="Spend a Fear" title="Spend a Fear"><svg class="g" aria-hidden="true"><use href="#g-down"/></svg></button>
+      <button type="button" class="key" id="tt-fear-up" aria-label="Gain a Fear" title="Gain a Fear"><svg class="g" aria-hidden="true"><use href="#g-up"/></svg></button>
+    </div>
+  </div>
 </section>
 <script src="{{ url_for('static', filename='tabletop.js') }}" defer></script>
+<script src="{{ url_for('static', filename='tabletop-heroes.js') }}" defer></script>
 {% endblock %}

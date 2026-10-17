@@ -131,6 +131,7 @@
   async function open(id, refit = true) {
     const data = await call("GET", boardUrl(id));
     board = data;
+    if (data.fear !== undefined) root.dispatchEvent(new CustomEvent("tt-fear", { detail: data.fear }));
     $("tt-title").textContent = board.title;
     Object.values(keys).forEach((k) => { k.disabled = false; });
     remember("board", id);
@@ -147,6 +148,7 @@
     if (!board || document.hidden || busy) return schedulePoll();
     try {
       const data = await call("GET", `${boardUrl(board.id)}?since=${board.rev}`);
+      if (data.fear !== undefined) root.dispatchEvent(new CustomEvent("tt-fear", { detail: data.fear }));
       if (data.cards && board && data.id === board.id) { board = data; $("tt-title").textContent = board.title; draw(); }
     } catch (e) {
       if (/gone/.test(e.message)) { say(e.message); await start(); return; }
@@ -251,7 +253,7 @@
 
   // ── sheets ──
   function openSheet(id) { $(id).hidden = false; }
-  function closeSheets() { document.querySelectorAll("#tt .sheet").forEach((s) => { s.hidden = true; }); }
+  function closeSheets() { document.querySelectorAll("#tt .sheet").forEach((s) => { s.hidden = true; }); root.dispatchEvent(new CustomEvent("tt-closed")); }
   root.addEventListener("click", (e) => { if (e.target.closest("[data-close]")) closeSheets(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheets(); });
 
