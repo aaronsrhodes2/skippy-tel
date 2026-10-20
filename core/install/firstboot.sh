@@ -53,7 +53,7 @@ else
   # pointed at GitHub; the deployer's token (core/README.md, deployer step) is what lets later fetches through.
   do_ install -d -m 0755 "$(dirname "$REPO_DIR")"
   if [[ -f "$BUNDLE" ]]; then
-    do_ git clone --quiet "$BUNDLE" "$REPO_DIR"
+    do_ git clone --quiet -b main "$BUNDLE" "$REPO_DIR"
     do_ git -C "$REPO_DIR" remote set-url origin "$REPO_URL"
   else
     echo "no bundle at $BUNDLE: cloning from GitHub (private repo: needs credentials)"
