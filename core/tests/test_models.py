@@ -121,6 +121,9 @@ def test_render_groups_and_names(tmp_path):
     assert "--api-key k" in chat["cmd"] and "--ctx-size 2048" in chat["cmd"] and "--port ${PORT} " in chat["cmd"]
     assert "/models/huggingface/Org__Code-Big/p/a-00001-of-00002.gguf" in coder["cmd"], "a split GGUF starts at part 1"
     assert chat["aliases"] == ["qwen3:8b"]
+    assert "apiKeys" not in config, "no key asked for: an open port (the simulator)"
+    keyed = m.render(chosen, 0, api_key=True)[0]
+    assert keyed["apiKeys"] == ["${env.LLM_API_KEY}"], "llama-swap reads the key from its environment, never the file"
     import shlex
     with_json = m.render({**chosen, "chat": {**chosen["chat"], "args": ["--chat-template-kwargs", '{"enable_thinking": false}']}}, 0)[0]
     assert shlex.split(with_json["models"]["chat"]["cmd"])[-4:-2] == ["--chat-template-kwargs", '{"enable_thinking": false}']

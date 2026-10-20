@@ -1,5 +1,6 @@
 """A fake llama-swap for the shim's tests: OpenAI chat completions (stream and not), /running, unload, and a /v1
-endpoint that echoes. It records every request it gets."""
+endpoint that echoes. It records every request it gets. Set .key to make it refuse (401) any other bearer, like
+llama-swap with apiKeys."""
 import json
 import threading
 
@@ -9,8 +10,13 @@ from werkzeug.serving import make_server
 
 class FakeLLM:
     def __init__(self):
-        self.calls, self.running, self.reply, self.tool_calls = [], [], "Hello, Captain.", None
+        self.calls, self.running, self.reply, self.tool_calls, self.key = [], [], "Hello, Captain.", None, None
         app = Flask("fake_llm")
+
+        @app.before_request
+        def auth():
+            if self.key and request.headers.get("Authorization") != f"Bearer {self.key}":
+                return jsonify(error="unauthorized"), 401
 
         @app.post("/v1/chat/completions")
         def completions():

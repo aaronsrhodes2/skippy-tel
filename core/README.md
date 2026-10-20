@@ -16,7 +16,7 @@ with tiny stand-in models on CPU. Onlining the real models later is a config lin
 | LLM server | `compose.core.yml` → `llm` | llama-swap with llama.cpp's Vulkan build (pinned digest). Every model launches with `-fa on --load-mode none` (flash attention, no mmap: both Strix Halo community guides require it; `--load-mode none` is what this llama.cpp build calls `--no-mmap`) and `--parallel` at most 8. |
 | Ollama shim | `ollama-shim/` | Ollama's API on port 11434 in front of llama-swap, so flask-api, Mentat, the reporter, voice-gate and Bilby keep calling `OLLAMA_URL` unchanged. `keep_alive: 0` never unloads the resident chat slot. `/v1/...` passes straight through (OpenAI and Anthropic `/v1/messages`). |
 | Stack | `compose.core.yml`, `compose.gpu.yml` | `llm`, `ollama` (the shim) and `flask-api`. Paths come from the deployer's settings, not Windows drives. `compose.gpu.yml` hands `/dev/dri` to `llm` on the box only. |
-| Smoke test | `smoke.py` | Tags, chat (stream and not), JSON output, every slot including the general↔coder swap, Anthropic `/v1/messages` on coder, flask-api `/health` and a real `/intent/unmatched` reply. |
+| Smoke test | `smoke.py` | Tags, chat (stream and not), JSON output, every slot including the general↔coder swap, Anthropic `/v1/messages` on coder, a wrong key refused (when `LLM_API_KEY` is set), flask-api `/health` and a real `/intent/unmatched` reply. |
 | Pull deployer | `deployer/` | A systemd timer every 2 minutes. It fetches `main`, waits for the commit's `core.yml` run to go green, deploys, runs the smoke test and rolls back to the last good commit if anything is red. A red smoke test marks the commit bad; a failed build or pull is retried. Nothing listens for inbound connections. |
 | Simulator | `sim/` | Ubuntu 26.04 with its own Docker inside. It deploys the baseline, rolls back a deliberately broken commit, and refuses a `CORE_FULL` whose files are missing, checking the stack stays healthy throughout. |
 | CI | `.github/workflows/core.yml` | Runs on every push: the unit tests, and the simulator scenario on GitHub's `ubuntu-26.04` runner when `core/`, `services/flask-api/` or the workflow changed. The deployer requires its run to be green. |
@@ -74,6 +74,54 @@ Inside the return window, do the burn-in from the plan (section 3) before wiping
    `python3 core/deployer/deployer.py status` after each.
 8. Record the baseline numbers (tokens/s per model, load times, watts, temperatures) for the snapshot note.
 
+## The portal's door (the cloud reaches the LLM)
+
+The cloud portal can't reach the house, so skippy-core puts llama-swap on the internet through **Tailscale Funnel**, locked
+by a key. The portal calls it with the **Anthropic SDK** and another `base_url`:
+
+```python
+client = anthropic.Anthropic(base_url=SKIPPY_CORE_URL, api_key=SKIPPY_CORE_API_KEY)
+client.messages.stream(model="chat", max_tokens=..., tools=[...], messages=[...],
+                       extra_body={"chat_template_kwargs": {"enable_thinking": False}})
+```
+
+- **The key:** `LLM_API_KEY` in `/etc/skippy-core/core.env` (root-only). The deployer hands it to `models.py render`, which
+  writes `apiKeys: ["${env.LLM_API_KEY}"]` into llama-swap's config (the value stays in the container's environment, never
+  in the file), to the shim (it sends it upstream) and to `smoke.py` (which also checks that a wrong key gets 401). With
+  the key, every endpoint except `/health` answers 401 without it, `Authorization: Bearer` or `x-api-key` alike.
+  The vault holds the same value as `SKIPPY_CORE_API_KEY`, and `SKIPPY_CORE_URL` is `https://skippy-core.tailab2cc7.ts.net`.
+- **The Funnel:** `sudo bash core/install/funnel.sh` (dry run), `--apply`, `--check`, `--off`. `--apply` makes the key if
+  there is none, and it opens the Funnel (`:443 -> http://127.0.0.1:8080`) **only if the port already answers 401 to a
+  wrong key**, so an open port never reaches the internet. No firewall change: tailscaled proxies to localhost, and ufw
+  keeps denying everything inbound (`harden.sh --check` stays green).
+- **Check it the portal's way** (from skippy-pc, key and URL from the vault, nothing printed):
+  `python core/llm/door_check.py` (thinking off) and `--think`. It checks: no key gets 401, a plain reply, a streamed
+  reply, and a streamed tool round trip (`ask_mentat`: a `tool_use` block, then a `tool_result`, then the answer).
+
+What works on the chat slot (Qwen3-30B-A3B Q4_K_M, llama-swap v265, 2026-10-19):
+
+| | Thinking off (`enable_thinking: false`) | Thinking on (Qwen3's default) |
+|---|---|---|
+| Plain `/v1/messages` | 0.2 s for a short hello | ~6 s (a thinking block first; leave max_tokens room for it) |
+| Streaming (SSE `text_delta`) | yes | yes |
+| Tool use (`tool_use` -> `tool_result` -> answer, streamed) | yes, 0.8 s round trip | yes, ~7 s |
+
+- Anthropic's own `thinking: {"type": "disabled"}` is **ignored** by llama-server; only `chat_template_kwargs` turns
+  thinking off (or `/no_think` at the end of the user's message). With thinking on, the reply carries `thinking` blocks
+  with an empty signature: send them back unchanged in the assistant turn, or drop them.
+- The portal should use `/v1/messages`; `/v1/chat/completions` is not needed for tools.
+- **How the chat slot uses tools** (5 tries each, one `ask_mentat` tool, 2026-10-19):
+  - A physics question calls the tool **every time** (10/10 with thinking off or on, with or without "use the tool"),
+    always as a real `tool_use` block. It never wrote a tool call as text (unlike Qwen3-Coder on the coder slot).
+  - **A forced tool is not honoured**: `tool_choice: {"type": "any"}` or `{"type": "tool", "name": ...}` on
+    `/v1/messages`, and `"required"` or a named function on `/v1/chat/completions`, still give a plain answer to a
+    non-physics question (at best 2 of 5 with thinking on). The portal must not rely on forcing: when a reply needs
+    Mentat and didn't call it, the portal asks Mentat itself (brains.py already does).
+  - `tool_choice: {"type": "none"}` held with thinking off (0/5 calls) and was ignored with thinking on (5/5 called).
+- **The portal's settings:** `SKIPPY_CORE_URL` (the Funnel URL, no `/v1`) and `SKIPPY_CORE_API_KEY`, which deploy.yml
+  copies into Cloud Run from the repo secrets `PORTAL_SKIPPY_CORE_URL` and `PORTAL_SKIPPY_CORE_API_KEY`;
+  `SKIPPY_CORE_MODEL` picks another slot (default `chat`).
+
 ## Status and recovery
 
 - `python3 /opt/skippy-core/repo/core/deployer/deployer.py status`: the last run (`ok`, `waiting-ci`, `refused`,
@@ -86,6 +134,7 @@ Inside the return window, do the burn-in from the plan (section 3) before wiping
 
 - A speech-to-text slot (whisper.cpp on Vulkan, stand-in `ggml-tiny.en`) and a TTS slot behind flask-api `/tts`.
 - The reporter: skip the "unload before a song" call for the box, and carry the deployer's status to the portal.
-- An `--api-key` on the `llm` port so the gaming PC's Claude Code can use the coder slot over the tailnet.
+- The gaming PC's Claude Code on the coder slot: the key is there now (`ANTHROPIC_BASE_URL` = the Funnel URL,
+  `ANTHROPIC_API_KEY` = `SKIPPY_CORE_API_KEY`, model `coder`), not tried yet.
 - Pinning the stand-ins' and full models' `sha256` in `models.json` (CI's fetch step and `models.py fetch` print them).
 - The chat slot stays Qwen3-30B-A3B until the Captain decides on the non-thinking Instruct-2507.

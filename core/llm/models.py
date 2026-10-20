@@ -10,7 +10,9 @@ the Bosgame onlines the big ones as their downloads land and verify.
     python3 core/llm/models.py render   [--full ...] --out DIR         write DIR/config.yaml (llama-swap) + DIR/shim.json
     python3 core/llm/models.py fetch    [--full ...] [--slots chat]    download what's missing from Hugging Face, verify, print hashes
 
-MODELS_ROOT (default /srv/models) holds the files; GPU_LAYERS (default 999) is passed to llama-server as -ngl
+LLM_API_KEY, when set, makes llama-swap require it (Authorization: Bearer or x-api-key) on every inference endpoint: the
+rendered config names it as ${env.LLM_API_KEY}, so the key itself never lands in the file (compose hands it to the
+container). MODELS_ROOT (default /srv/models) holds the files; GPU_LAYERS (default 999) is passed to llama-server as -ngl
 (the simulator sets 0: no GPU there, same image, same flags otherwise). Standard library only: this runs on the
 bare Ubuntu host from the deployer, before any container exists.
 """
@@ -145,7 +147,7 @@ def check(chosen: dict, root: Path, *, hash_files: bool = False) -> list[str]:
     return problems
 
 
-def render(chosen: dict, gpu_layers: int, extra_args: str = "") -> tuple[dict, dict]:
+def render(chosen: dict, gpu_layers: int, extra_args: str = "", api_key: bool = False) -> tuple[dict, dict]:
     """llama-swap's config (JSON is valid YAML, so no YAML library is needed) and the shim's name table.
 
     GPU_LAYERS 0 (the simulator, CI) also passes --device none: a Vulkan build otherwise still offloads big-batch ops to
@@ -173,6 +175,8 @@ def render(chosen: dict, gpu_layers: int, extra_args: str = "") -> tuple[dict, d
     if on_demand:
         groups["on-demand"] = {"swap": True, "exclusive": False, "members": on_demand}
     config = {"healthCheckTimeout": 600, "logLevel": "info", "startPort": 10001, "models": models, "groups": groups}
+    if api_key:                           # the tailnet and the Funnel reach this port: no key, no answer
+        config["apiKeys"] = ["${env.LLM_API_KEY}"]
     if resident:                          # persistent only stops unloading; this loads chat at start, not on the first reply
         config["hooks"] = {"on_startup": {"preload": resident}}
     return config, {"models": names}
@@ -262,7 +266,8 @@ def main(argv: list[str] | None = None) -> int:
         if not a.out:
             print("render needs --out", file=sys.stderr)
             return 2
-        config, shim = render(chosen, int(os.environ.get("GPU_LAYERS", "999")), os.environ.get("LLAMA_EXTRA_ARGS", ""))
+        config, shim = render(chosen, int(os.environ.get("GPU_LAYERS", "999")), os.environ.get("LLAMA_EXTRA_ARGS", ""),
+                              api_key=bool(os.environ.get("LLM_API_KEY")))
         out = Path(a.out)
         out.mkdir(parents=True, exist_ok=True)
         for name, data in (("shim.json", shim), ("config.yaml", config)):   # llama-swap watches the file: never let it read half of one
