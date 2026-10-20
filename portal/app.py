@@ -168,6 +168,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             return redirect(url_for("request_access"))
         if not (user and auth.is_allowed(user["email"])):
             return render_template("login.html")
+        if auth.has_portal(user["email"], "skippy"):   # the chat is the star: everyone with the grant lands in it, the other
+            return chat_page()                         # apps one tap away in its tray (the launcher itself stays at /apps)
         return launcher_page()
 
     @app.get("/manifest.webmanifest")
@@ -188,8 +190,21 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @app.get("/apps")
     @auth.login_required
     def apps():
-        """The launcher's older address: the same page as Home (/)."""
+        """The launcher: a card per app this person may use. Home (/) is the chat for everyone with the chat grant."""
         return launcher_page()
+
+    @app.get("/apps/tiles")
+    @auth.login_required
+    def app_tiles():
+        """The chat's app tray: the launcher's tiles as data, fetched the first time the tray opens (so the chat page doesn't
+        wait on the games VM's status). The chat itself isn't in it: you're in it."""
+        status, _ = vm_status()
+        shown = my_games()
+        live_games = [(g, shown[g].name) for g in status.games if g in shown]             if status and status.status == "RUNNING" else []
+        asking = len(pending_requests()) if auth.is_admin(me()) else 0
+        tiles = [t for t in launcher_tiles(status, shown, live_games, asking) if t["id"] != "skippy"]
+        return jsonify(tiles=[{k: t[k] for k in ("id", "glyph", "label", "href", "state", "badge")} for t in tiles],
+                       all=url_for("apps"))
 
     def launcher_page():
         status, _ = vm_status()
@@ -1638,14 +1653,17 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         resp.headers["Cache-Control"] = "no-store"          # a pass is a credential: never from a cache
         return resp
 
+    def chat_page():
+        captain = auth.is_admin(me())
+        return render_template("front.html", captain=captain, chat_brains=brain_views(captain), barney_phrase=chat.BARNEY_PHRASE,
+                               **(workshop_context() if captain else {}))
+
     @talk.get("")
     @skippy_required
     def index():
         """The Skippy app: the public brain (Haiku and Mentat: no tools that write or run anything) for everyone with the chat grant, and for
         the Captain alone also the agent (Claude Code on skippy-pc, templates/_workshop.html), whose endpoints each check for the Captain again."""
-        captain = auth.is_admin(me())
-        return render_template("front.html", captain=captain, chat_brains=brain_views(captain), barney_phrase=chat.BARNEY_PHRASE,
-                               **(workshop_context() if captain else {}))
+        return chat_page()
 
     def log_mentat_gap(user, question, out, how, save):
         """A physics question Mentat could not model: auto-file it. One structured line in Cloud Run's logs

@@ -2069,3 +2069,36 @@ def test_every_page_wears_the_admiral_beercan_and_the_icons_are_public(env):
     from PIL import Image  # noqa: PLC0415
     assert Image.open(Path(app.static_folder) / "apple-touch-icon.png").size == (180, 180)
     assert sorted(Image.open(Path(app.static_folder) / "favicon.ico").info["sizes"]) == [(16, 16), (32, 32), (48, 48)]
+
+
+# ── the chat is the front page; the other apps are in its tray ────────────────────────────────────────────────
+
+def test_home_is_the_chat_for_anyone_with_the_grant_and_the_launcher_otherwise(env):
+    client, _, _ = env
+    login(client, FRIEND)
+    home = client.get("/").data.decode()
+    assert 'class="skippy-chat chat-bridge"' in home and 'data-open="apps"' in home and 'data-open="chats"' in home
+    assert 'data-tel="tile:' in client.get("/apps").data.decode()               # the launcher is still at /apps
+    _add_friend(client, PAL, ["dragonwilds"])                                   # no Skippy grant
+    login(client, PAL)
+    home = client.get("/").data.decode()
+    assert 'class="skippy-chat chat-bridge"' not in home and 'data-tel="tile:' in home   # no chat for them: the launcher is home
+
+
+def test_the_tray_lists_only_the_apps_this_person_may_use_and_never_the_chat_itself(env):
+    client, _, _ = env
+    login(client, ADMIN)
+    ids = [t["id"] for t in client.get("/apps/tiles").get_json()["tiles"]]
+    assert "admin" in ids and "skippy" not in ids
+    login(client, FRIEND)
+    d = client.get("/apps/tiles").get_json()
+    assert "admin" not in [t["id"] for t in d["tiles"]] and "skippy" not in [t["id"] for t in d["tiles"]] and d["all"] == "/apps"
+    assert set(d["tiles"][0]) <= {"id", "glyph", "label", "href", "state", "badge"} if d["tiles"] else True
+
+
+def test_your_chats_stay_in_the_browser_and_forgetting_one_asks_nothing(env):
+    client, _, _ = env
+    login(client, FRIEND)
+    page = client.get("/chat").data.decode()
+    assert 'const STORE = "skippy-chats"' in page and "localStorage.setItem(STORE" in page    # this browser only
+    assert "confirm(" not in page                                                          # no "are you sure" boxes

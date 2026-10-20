@@ -225,8 +225,9 @@ top bar, and the one cork board below, where everything else about the game is a
 
 ## Home is the app portal (`/`); Skippy the Magnificent is the chat app (`/chat`), in two modes
 
-`/` is Home: signed out, the Google sign-in; signed in, the launcher (a card per sub-portal the person may use; `/apps` is the same page under its older
-address). The Skippy tile opens `/chat` (needs the chat grant). **Which model answers is `portal/brains.py`'s call, on the server, never the page's**
+`/` is Home: signed out, the Google sign-in; signed in with the chat grant, **Skippy's chat itself** (the star, 2026-10-20); without it, the
+launcher. The launcher stays at `/apps`; inside the chat the other apps are a tray (one grid key on a phone, a slim row under the box on a wide
+screen; `/apps/tiles` feeds it) and prior chats are a sheet (kept in that browser's localStorage only, never on the portal). No side bars anywhere. **Which model answers is `portal/brains.py`'s call, on the server, never the page's**
 (2026-10-19): **guests** get Skippy Core only (the local model on skippy-core, reached through its Tailscale Funnel + `SKIPPY_CORE_API_KEY`; the same
 Anthropic SDK, another base_url) with the portal's public tools (Mentat, game status); if Core is down they get Mentat straight, never a paid model.
 **The Captain** picks in the brain sheet: Skippy Core (default), Claude Haiku/Sonnet/Opus, Gemini free/paid. Every brain calls Mentat for physics; the

@@ -26,6 +26,14 @@
       {% endfor %}</div>
     </div>
     {% endif %}
+    <div class="sheet" data-sheet="apps" hidden>
+      <div class="app-tray"></div>
+    </div>
+    <div class="sheet" data-sheet="chats" hidden>
+      <div class="chats-top"><input type="search" class="chats-filter" aria-label="Find a chat"><button type="button" class="key sm chats-new" aria-label="New chat" title="New chat"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button></div>
+      <div class="pg"><div class="pg-flow chats-list"></div></div>
+      <div class="pips" aria-hidden="true"><i></i></div>
+    </div>
     <div class="sheet" data-sheet="tools" hidden>
       <div class="pg"><div class="pg-flow verb-list"></div></div>
       <div class="pips" aria-hidden="true"><i></i></div>
@@ -51,6 +59,8 @@
     <input type="file" class="file-pick" multiple hidden accept="image/jpeg,image/png,image/webp,application/pdf,text/*,.md,.csv,.json,.py,.js,.ts,.tsx,.jsx,.html,.css,.yml,.yaml,.xml,.sh,.kt,.java,.c,.h,.cpp,.rs,.go,.sql,.toml,.ini,.log">
     <textarea rows="2" aria-label="Message" required></textarea>
     <div class="keybar">
+      <button type="button" class="key apps-key" data-open="apps" data-tel="chat:apps" aria-label="Apps" title="Apps"><svg class="g" aria-hidden="true"><use href="#g-apps"/></svg></button>
+      <button type="button" class="key" data-open="chats" data-tel="chat:chats" aria-label="Your chats" title="Your chats"><svg class="g" aria-hidden="true"><use href="#g-chats"/></svg></button>
       <button type="button" class="key clear" aria-label="New chat" title="New chat"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
       <button type="button" class="key clip" data-tel="chat:attach" aria-label="Attach pictures or files (or paste, or drop them here)" title="Attach pictures or files (or paste, or drop them here)"><svg class="g" aria-hidden="true"><use href="#g-clip"/></svg></button>
       {% if chat_brains|length > 1 %}<button type="button" class="key brain-key" data-open="brain" data-tel="chat:brain" aria-label="Which brain answers" title="Which brain answers"><svg class="g" aria-hidden="true"><use href="#g-core"/></svg></button>{% endif %}
@@ -67,6 +77,7 @@
       <button type="button" class="key next" aria-label="Later" title="Later"><svg class="g flip" aria-hidden="true"><use href="#g-back"/></svg></button>
       <button type="submit" class="key send" aria-label="Send" title="Send"><svg class="g" aria-hidden="true"><use href="#g-send"/></svg></button>
     </div>
+    <nav class="app-row" aria-label="Apps" hidden></nav>   {# a wide screen keeps the tray as a slim row under the box; a phone has the key #}
   </form>
 </div>
 <script>
@@ -94,6 +105,8 @@
       showSheet(k.dataset.open);
       if (k.dataset.open === "tools") loadTools();
       if (k.dataset.open === "memory") loadMemory();
+      if (k.dataset.open === "chats") paintChats();
+      if (k.dataset.open === "apps") loadApps();
     }));
     document.addEventListener("keydown", e => { if (e.key === "Escape" && openSheet) showSheet(openSheet); });
 
@@ -197,8 +210,30 @@
       logPager.refresh(); logPager.last();
       return body;
     }
-    function save() { try { sessionStorage.setItem(KEY, JSON.stringify(history)); } catch (e) {} }
-    history.forEach(t => add(t.role, t.content.split("\n\n[Mentat's own answer")[0]));   // the Mentat notes are for the models, not the screen
+    // Your chats: kept in THIS browser only (localStorage), never on the portal, so nothing is stored about anyone without the
+    // "Allow us to save" consent. The newest 40, each {id, title (its first question), updated, history}; the tab's open one is
+    // this tab's sessionStorage, as before.
+    const STORE = "skippy-chats", CUR = KEY + "-id", MAX_CHATS = 40;
+    const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    let chatId; try { chatId = sessionStorage.getItem(CUR); } catch (e) {}
+    if (!chatId) { chatId = newId(); try { sessionStorage.setItem(CUR, chatId); } catch (e) {} }
+    function chats() { try { return JSON.parse(localStorage.getItem(STORE) || "[]"); } catch (e) { return []; } }
+    function keepChats(list) {
+      for (const n of [MAX_CHATS, 20, 8]) { try { localStorage.setItem(STORE, JSON.stringify(list.slice(0, n))); return; } catch (e) {} }   // full: keep fewer
+    }
+    function remember() {
+      if (!history.length) return;
+      const first = history.find(t => t.role === "user");
+      const title = (first ? first.content : "chat").replace(/\s*\[attached:[^\]]*\]/, "").replace(/\s+/g, " ").trim().slice(0, 70);
+      keepChats([{id: chatId, title: title, updated: new Date().toISOString(), history: history}, ...chats().filter(c => c.id !== chatId)]);
+    }
+    function save() { try { sessionStorage.setItem(KEY, JSON.stringify(history)); } catch (e) {} remember(); }
+    function replay() { log.replaceChildren(); history.forEach(t => add(t.role, t.content.split("\n\n[Mentat's own answer")[0])); }   // the Mentat notes are for the models, not the screen
+    function startChat(id, turns) {
+      chatId = id; history = turns; try { sessionStorage.setItem(CUR, chatId); sessionStorage.setItem(KEY, JSON.stringify(history)); } catch (e) {}
+      replay(); logPager.refresh(); logPager.last();
+    }
+    replay();
 
     // What did the work, as glyphs: the tool, and a lamp (lit = answered, diamond = didn't, triangle = Mentat had no physics for it).
     const TOOL_GLYPH = {ask_mentat: "atom", now_playing: "wave", make_music: "wave", music_result: "wave"};
@@ -370,7 +405,8 @@
     msg.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
     });
-    root.querySelector(".clear").addEventListener("click", () => { history = []; save(); log.replaceChildren(); setContext(null); logPager.refresh(); });
+    function newChat() { startChat(newId(), []); setContext(null); msg.focus(); }      // the one before stays in Your chats
+    root.querySelector(".clear").addEventListener("click", newChat);
     form.querySelector(".prev").addEventListener("click", () => logPager.go(logPager.page() - 1));
     form.querySelector(".next").addEventListener("click", () => logPager.go(logPager.page() + 1));
     if (banner) banner.querySelector(".drop-ctx").addEventListener("click", () => setContext(null));
@@ -421,6 +457,65 @@
       askHome().then(got => { rows = got.conversations || []; filter.hidden = false; paint(); })
         .catch(err => { box.textContent = err.message; delete memory.dataset.loaded; });
     }
+
+    // ── Your chats (this browser's): newest first, a screen at a time; tap to reopen, the bin to forget one, the box to find one ──
+    const chatsList = root.querySelector(".chats-list"), chatsFilter = root.querySelector(".chats-filter");
+    function paintChats() {
+      const q = chatsFilter.value.trim().toLowerCase();
+      const rows = chats().filter(c => !q || c.title.toLowerCase().includes(q) ||
+                                       c.history.some(t => (t.content || "").toLowerCase().includes(q)));
+      chatsList.replaceChildren(...rows.map(c => {
+        const row = document.createElement("div"); row.className = "chat-row" + (c.id === chatId ? " lit" : "");
+        const open = document.createElement("button"); open.type = "button"; open.className = "chat-open";
+        const t = document.createElement("span"); t.className = "chat-title"; t.textContent = c.title || "chat";
+        const when = document.createElement("span"); when.className = "chat-when";
+        when.textContent = (c.updated || "").slice(0, 10) + " · " + c.history.filter(x => x.role === "user").length;
+        open.append(t, when);
+        open.addEventListener("click", () => { startChat(c.id, c.history); showSheet("chats"); });
+        const del = document.createElement("button"); del.type = "button"; del.className = "key sm"; del.title = del.ariaLabel = "Forget this chat";
+        del.append(glyph("trash"));
+        del.addEventListener("click", () => {                      // acts at once (the Captain's rule: no "are you sure" boxes)
+          keepChats(chats().filter(x => x.id !== c.id));
+          if (c.id === chatId) startChat(newId(), []);
+          paintChats();
+        });
+        row.append(open, del);
+        return row;
+      }));
+      if (!rows.length) chatsList.textContent = "∅";
+      root.querySelector('[data-sheet="chats"] .pg')._pager.refresh();
+    }
+    chatsFilter.addEventListener("input", paintChats);
+    root.querySelector(".chats-new").addEventListener("click", () => { newChat(); showSheet("chats"); });
+
+    // ── Apps: the launcher's tiles as a tray (one key on a phone; on a wide screen a slim row under the box, always there) ──
+    const tray = root.querySelector(".app-tray"), appRow = form.querySelector(".app-row");
+    let appsLoaded = null;
+    function loadApps() {
+      if (appsLoaded) return appsLoaded;
+      appsLoaded = fetch("{{ url_for('app_tiles') }}").then(r => r.json()).then(d => {
+        const tile = (t, slim) => {
+          const a = document.createElement("a"); a.href = t.href; a.className = slim ? "key app-slim" : "app-tile"; a.title = t.label;
+          a.setAttribute("aria-label", t.label); a.dataset.tel = "tray:" + t.id;
+          a.append(glyph(t.glyph));
+          if (!slim) { const l = document.createElement("span"); l.textContent = t.label; a.append(l); }
+          if (t.state) { const lamp = document.createElement("i"); lamp.className = "lamp"; lamp.dataset.s = t.state; a.append(lamp); }
+          if (t.badge) { const b = document.createElement("b"); b.className = "badge"; b.textContent = t.badge; a.append(b); }
+          return a;
+        };
+        const all = {id: "all", glyph: "apps", label: "All apps", href: d.all};
+        tray.replaceChildren(...d.tiles.map(t => tile(t, false)), tile(all, false));
+        appRow.replaceChildren(...d.tiles.map(t => tile(t, true)));
+      }).catch(() => { tray.textContent = "∅"; appsLoaded = null; });
+      return appsLoaded;
+    }
+    const wide = matchMedia("(min-width: 900px)");
+    function placeTray() {
+      appRow.hidden = !wide.matches;
+      form.querySelector(".apps-key").hidden = wide.matches;
+      if (wide.matches) loadApps().then(() => logPager.refresh());
+    }
+    wide.addEventListener("change", placeTray); placeTray();
 
     // Direct verbs: the syntax is the label (/physics), a glyph says which tool it aims at; fetched on first open.
     const VERB_GLYPH = {physics: "atom", music: "wave"};

@@ -45,7 +45,7 @@ REGISTRY = {
     "chat.index": G("skippy"), "chat.send": G("skippy"), "chat.badges": G("skippy"), "chat.voice_gate": G("skippy"), "chat.media_file": G("skippy"),
     # members
     **{e: MEMBER for e in (
-        "apps", "dashboard.game", "dashboard.game_discord", "dashboard.game_live", "dashboard.games_start", "dashboard.games_stop", "dashboard.index",
+        "apps", "app_tiles", "dashboard.game", "dashboard.game_discord", "dashboard.game_live", "dashboard.games_start", "dashboard.games_stop", "dashboard.index",
         "doomloop.page", "doomloop.game_file", "starcontrol.page", "starcontrol.game_file")},
     # skippy-pc, CI
     **{e: MACHINE for e in (
