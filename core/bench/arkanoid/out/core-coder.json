@@ -1,0 +1,13 @@
+{
+  "model": "coder",
+  "base": "http://localhost:8080",
+  "images": "describe:vision",
+  "describe_seconds": 50.8,
+  "seconds": 116.8,
+  "stop_reason": "end_turn",
+  "input_tokens": 983,
+  "output_tokens": 5072,
+  "tokens_per_second": 43.4,
+  "html_found": true,
+  "html_bytes": 19236
+}

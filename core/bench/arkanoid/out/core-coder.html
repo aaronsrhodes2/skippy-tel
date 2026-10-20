@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ANSI ARKANOID</title>
+    <style>
+        :root {
+            --bg-top-bottom: #000080; /* Dark Blue Hex Base */
+            --hex-dark: #000050;
+            --hex-light: #000066;
+            --wall-border: #808080;
+            --brick-row1: #FF0000;
+            --brick-row2: #FFFF00;
+            --brick-row3: #0000FF;
+            --brick-row4: #00FF00;
+            --paddle-gray: #808080;
+            --paddle-orange: #FF6600;
+            --paddle-border: #000000;
+            --ball-color: #00FFFF;
+            --text-outline: #FF8000;
+            --text-fill: #FFFFFF;
+        }
+
+        body {
+            background-color: #202020;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+        }
+
+        /* Arcade Cabinet Container */
+        #arcade-cabinet {
+            position: relative;
+            width: 400px;
+            height: 450px;
+            background-color: #333;
+            padding: 20px;
+            box-shadow: 0 0 50px rgba(0,0,0,0.8);
+            border-radius: 10px;
+        }
+
+        /* Header / Screen Bezel */
+        .screen-bezel {
+            background: #111;
+            padding: 15px;
+            border-radius: 10px 10px 0 0;
+            box-shadow: inset 0 0 20px #000;
+            border-top: 4px solid #555;
+            border-left: 4px solid #555;
+            border-right: 4px solid #555;
+        }
+
+        /* The Game Canvas (Simulating CRT Screen) */
+        #game-screen {
+            width: 320px;
+            height: 320px;
+            background-color: var(--bg-top-bottom);
+            position: relative;
+            overflow: hidden;
+            /* Hexagon Pattern Logic */
+            background-image: 
+                linear-gradient(30deg, var(--hex-dark) 25%, transparent 25%, transparent 75%, var(--hex-dark) 75%, var(--hex-dark)),
+                linear-gradient(150deg, var(--hex-dark) 25%, transparent 25%, transparent 75%, var(--hex-dark) 75%, var(--hex-dark)),
+                linear-gradient(30deg, var(--hex-light) 25%, transparent 25%, transparent 75%, var(--hex-light) 75%, var(--hex-light)),
+                linear-gradient(150deg, var(--hex-light) 25%, transparent 25%, transparent 75%, var(--hex-light) 75%, var(--hex-light));
+            background-size: 14px 24px; /* Approximate Hex Size */
+            background-position: 0 0, 0 12px, 7px 12px, 7px 0;
+            border: 2px solid #000;
+            box-shadow: inset 0 0 30px rgba(0,0,0,0.5);
+            image-rendering: pixelated; /* Sharp pixels */
+        }
+
+        /* UI Overlay (Score/Lives) */
+        .ui-layer {
+            position: absolute;
+            top: 10px;
+            left: 0;
+            width: 100%;
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 20px;
+            box-sizing: border-box;
+            font-weight: bold;
+            text-shadow: 1px 1px 0 #000;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        /* Game Elements */
+        .brick {
+            position: absolute;
+            width: 30px; /* 320px width / 10 bricks - 1px gap approx */
+            height: 12px;
+            border: 1px solid #000; /* 1px black gaps */
+            box-sizing: border-box;
+        }
+        /* Specific Brick Colors */
+        .brick.row-1 { background-color: var(--brick-row1); box-shadow: inset 0 0 5px rgba(0,0,0,0.3); }
+        .brick.row-2 { background-color: var(--brick-row2); box-shadow: inset 0 0 5px rgba(0,0,0,0.3); }
+        .brick.row-3 { background-color: var(--brick-row3); box-shadow: inset 0 0 5px rgba(0,0,0,0.3); }
+        .brick.row-4 { background-color: var(--brick-row4); box-shadow: inset 0 0 5px rgba(0,0,0,0.3); }
+
+        .wall-border {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background-color: var(--wall-border);
+            border-bottom: 1px solid #000;
+        }
+
+        .ball {
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            background-color: var(--ball-color);
+            border-radius: 50%;
+            box-shadow: 0 0 4px var(--ball-color);
+        }
+
+        .paddle-container {
+            position: absolute;
+            bottom: 30px; /* Space for text area */
+            left: 50%;
+            transform: translateX(-50%);
+            width: 56px;
+            height: 8px;
+        }
+
+        .paddle {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            border: 1px solid var(--paddle-border);
+            display: flex;
+        }
+
+        .paddle-left { flex: 1; background-color: var(--paddle-orange); border-right: 1px solid var(--paddle-border); }
+        .paddle-center { flex: 4; background-color: var(--paddle-gray); border-right: 1px solid var(--paddle-border); }
+        .paddle-right { flex: 1; background-color: var(--paddle-orange); }
+
+        /* The Stylized Title at the Bottom */
+        #game-title {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 30px;
+            background-color: var(--bg-top-bottom);
+            border-top: 4px solid var(--wall-border);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: var(--text-outline);
+            font-size: 28px;
+            font-weight: 900;
+            letter-spacing: 2px;
+            text-shadow: 2px 2px 0px #000;
+            overflow: hidden;
+        }
+
+        /* Custom Text Styling for "ARKANOID" */
+        .text-letter { display: inline-block; margin: 0 -1px; }
+        
+        /* Specific styling for the 'O' to be a window/lens */
+        .text-letter.o { 
+            background-color: #000; 
+            color: #fff;
+            box-shadow: inset 2px 2px 4px rgba(255,255,255,0.5);
+            padding: 2px 4px;
+            margin: 0 2px;
+            text-shadow: none;
+            position: relative;
+        }
+        
+        /* Decorative lines inside the 'O' window */
+        .text-letter.o::before {
+            content: '';
+            position: absolute;
+            top: 40%;
+            left: 10%;
+            width: 80%;
+            height: 1px;
+            background: rgba(255,255,255,0.8);
+            box-shadow: 0 6px 0 rgba(255,255,255,0.8);
+        }
+
+        /* Controls Info */
+        .controls {
+            text-align: center;
+            color: #aaa;
+            margin-top: 10px;
+            font-size: 12px;
+            font-family: sans-serif;
+        }
+
+        .game-over-modal {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9);
+            border: 2px solid white;
+            padding: 20px;
+            text-align: center;
+            color: white;
+            display: none;
+            z-index: 100;
+        }
+
+        button {
+            background: var(--paddle-orange);
+            border: 2px solid white;
+            color: black;
+            padding: 5px 10px;
+            font-family: monospace;
+            cursor: pointer;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+        button:hover { background: white; }
+
+    </style>
+</head>
+<body>
+
+<div id="arcade-cabinet">
+    <div class="screen-bezel">
+        <div id="game-screen">
+            
+            <!-- UI -->
+            <div class="ui-layer">
+                <span id="score-display">SCORE: 0000</span>
+                <span id="lives-display">LIVES: 3</span>
+            </div>
+
+            <!-- Top Wall Border -->
+            <div class="wall-border"></div>
+
+            <!-- Brick Wall (4 Rows x 10 Bricks) -->
+            <div id="bricks-container">
+                <!-- Generated via JS -->
+            </div>
+
+            <!-- Game Objects -->
+            <div id="ball" class="ball" style="left: 157px; top: 270px;"></div>
+            <div id="paddle" class="paddle-container">
+                <div class="paddle">
+                    <div class="paddle-left"></div>
+                    <div class="paddle-center"></div>
+                    <div class="paddle-right"></div>
+                </div>
+            </div>
+
+            <!-- Stylized Title -->
+            <div id="game-title">
+                <span class="text-letter" style="color:white; text-shadow: 2px 2px var(--text-outline); -webkit-text-stroke: 1px black;">A</span>
+                <span class="text-letter" style="color:white; text-shadow: 2px 2px var(--text-outline); -webkit-text-stroke: 1px black;">R</span>
+                <span class="text-letter" style="color:white; text-shadow: 2px 2px var(--text-outline); -webkit-text-stroke: 1px black;">K</span>
+                <span class="text-letter" style="color:white; text-shadow: 2px 2px var(--text-outline); -webkit-text-stroke: 1px black;">A</span>
+                <span class="text-letter o">O</span>
+                <span class="text-letter" style="color:white; text-shadow: 2px 2px var(--text-outline); -webkit-text-stroke: 1px black;">N</span>
+                <span class="text-letter" style="color:white; text-shadow: 2px 2px var(--text-outline); -webkit-text-stroke: 1px black;">I</span>
+                <span class="text-letter" style="color:white; text-shadow: 2px 2px var(--text-outline); -webkit-text-stroke: 1px black;">D</span>
+            </div>
+
+            <!-- Game Over Modal -->
+            <div id="game-over-modal" class="game-over-modal">
+                <h2 id="final-message">GAME OVER</h2>
+                <p>Final Score: <span id="final-score">0</span></p>
+                <button onclick="resetGame()">INSERT COIN (RESTART)</button>
+            </div>
+        </div>
+    </div>
+    <div class="controls">
+        CONTROLS: <b>&larr;</b> LEFT | <b>&rarr;</b> RIGHT | <b>SPACE</b> START/PAUSE
+    </div>
+</div>
+
+<script>
+    // --- Configuration ---
+    const GAME_WIDTH = 320;
+    const GAME_HEIGHT = 320;
+    const PADDLE_WIDTH = 56;
+    const BALL_SIZE = 6;
+    const BRICK_WIDTH = 30;
+    const BRICK_HEIGHT = 12;
+    const BRICK_GAP = 2; // Visual gap created by CSS border
+    const BRICK_COLS = 10;
+    
+    // Colors matching requirements
+    const COLORS = {
+        r1: '#FF0000', // Red
+        r2: '#FFFF00', // Yellow
+        r3: '#0000FF', // Blue
+        r4: '#00FF00'  // Green
+    };
+
+    // --- Game State ---
+    let gameLoop;
+    let isRunning = false;
+    let score = 0;
+    let lives = 3;
+    let bricks = [];
+    
+    let paddleX = (GAME_WIDTH - PADDLE_WIDTH) / 2;
+    let ballX = GAME_WIDTH / 2;
+    let ballY = 270;
+    let ballVelX = 2.5;
+    let ballVelY = -2.5;
+    
+    const keys = {};
+
+    // --- DOM Elements ---
+    const paddleEl = document.getElementById('paddle');
+    const ballEl = document.getElementById('ball');
+    const bricksContainer = document.getElementById('bricks-container');
+    const scoreDisplay = document.getElementById('score-display');
+    const livesDisplay = document.getElementById('lives-display');
+    const gameOverModal = document.getElementById('game-over-modal');
+    const finalMessage = document.getElementById('final-message');
+    const finalScoreSpan = document.getElementById('final-score');
+
+    // --- Initialization ---
+    function initBricks() {
+        bricksContainer.innerHTML = '';
+        bricks = [];
+        const startY = 5; // Just below the 4px wall border
+
+        // 4 Rows
+        for (let row = 0; row < 4; row++) {
+            for (let col = 0; col < BRICK_COLS; col++) {
+                const brick = document.createElement('div');
+                brick.className = `brick row-${row + 1}`;
+                
+                // Calculate X position
+                // 320 width. 10 bricks. 
+                // Math: (320 - (10 * 30) - (9 * 2)) / 2 = (320 - 300 - 18) / 2 = 1mm approx centering
+                // But let's just distribute evenly based on container logic
+                const offset = (GAME_WIDTH - (BRICK_COLS * (BRICK_WIDTH + BRICK_GAP))) / 2;
+                const x = offset + col * (BRICK_WIDTH + BRICK_GAP);
+                const y = startY + row * (BRICK_HEIGHT + BRICK_GAP);
+
+                brick.style.left = `${x}px`;
+                brick.style.top = `${y}px`;
+                
+                // Store brick data
+                bricks.push({
+                    el: brick,
+                    x: x,
+                    y: y,
+                    w: BRICK_WIDTH,
+                    h: BRICK_HEIGHT,
+                    active: true
+                });
+
+                bricksContainer.appendChild(brick);
+            }
+        }
+    }
+
+    function updatePaddle() {
+        paddleEl.style.left = `${paddleX}px`;
+    }
+
+    function updateBall() {
+        ballEl.style.left = `${ballX}px`;
+        ballEl.style.top = `${ballY}px`;
+    }
+
+    function checkCollision(rect1, rect2) {
+        return (rect1.x < rect2.x + rect2.w &&
+                rect1.x + rect1.w > rect2.x &&
+                rect1.y < rect2.y + rect2.h &&
+                rect1.y + rect1.h > rect2.y);
+    }
+
+    function gameStep() {
+        if (!isRunning) return;
+
+        // Move Paddle
+        if (keys['ArrowLeft'] && paddleX > 0) {
+            paddleX -= 4;
+        }
+        if (keys['ArrowRight'] && paddleX < GAME_WIDTH - PADDLE_WIDTH) {
+            paddleX += 4;
+        }
+        updatePaddle();
+
+        // Move Ball
+        ballX += ballVelX;
+        ballY += ballVelY;
+
+        // Wall Collisions (Left/Right)
+        if (ballX <= 0) {
+            ballX = 0;
+            ballVelX = -ballVelX;
+        }
+        if (ballX >= GAME_WIDTH - BALL_SIZE) {
+            ballX = GAME_WIDTH - BALL_SIZE;
+            ballVelX = -ballVelX;
+        }
+
+        // Top Wall Collision
+        if (ballY <= 4) { // 4px wall height
+            ballY = 4;
+            ballVelY = -ballVelY;
+        }
+
+        // Paddle Collision
+        if (ballY + BALL_SIZE >= 300 && // Bottom area where paddle sits
+            ballY + BALL_SIZE <= 308 &&
+            ballX + BALL_SIZE >= paddleX &&
+            ballX <= paddleX + PADDLE_WIDTH) {
+            
+            ballVelY = -Math.abs(ballVelY); // Force Up
+            
+            // Add "English" (spin) based on where it hit the paddle
+            let hitPoint = ballX + BALL_SIZE / 2 - (paddleX + PADDLE_WIDTH / 2);
+            ballVelX = hitPoint * 0.15; // Adjust curve
+            
+            // Clamp speed
+            if (ballVelX > 4) ballVelX = 4;
+            if (ballVelX < -4) ballVelX = -4;
+        }
+
+        // Brick Collision
+        let activeBricksCount = 0;
+        bricks.forEach(brick => {
+            if (brick.active) {
+                activeBricksCount++;
+                if (checkCollision(
+                    {x: ballX, y: ballY, w: BALL_SIZE, h: BALL_SIZE}, 
+                    {x: brick.x, y: brick.y, w: brick.w, h: brick.h}
+                )) {
+                    brick.active = false;
+                    brick.el.style.display = 'none';
+                    
+                    // Simple bounce logic: check center of ball vs center of brick
+                    const brickCenterX = brick.x + brick.w/2;
+                    const brickCenterY = brick.y + brick.h/2;
+                    const ballCenterX = ballX + BALL_SIZE/2;
+                    const ballCenterY = ballY + BALL_SIZE/2;
+
+                    // Determine overlap
+                    const overlapX = Math.abs(ballCenterX - brickCenterX);
+                    const overlapY = Math.abs(ballCenterY - brickCenterY);
+                    
+                    const xOverlap = (brick.w/2 + BALL_SIZE/2) - overlapX;
+                    const yOverlap = (brick.h/2 + BALL_SIZE/2) - overlapY;
+
+                    if (xOverlap < yOverlap) {
+                        ballVelX = -ballVelX;
+                        ballX += (ballCenterX < brickCenterX) ? -xOverlap : xOverlap;
+                    } else {
+                        ballVelY = -ballVelY;
+                        ballY += (ballCenterY < brickCenterY) ? -yOverlap : yOverlap;
+                    }
+                    
+                    score += 10;
+                    scoreDisplay.innerText = `SCORE: ${score.toString().padStart(4, '0')}`;
+                    
+                    // Ball speed up slightly every 5 bricks
+                    if (score % 50 === 0) {
+                        ballVelY *= 1.05;
+                        ballVelX *= 1.05;
+                    }
+                }
+            }
+        });
+
+        if (activeBricksCount === 0) {
+            resetLevel();
+        }
+
+        // Bottom Collision (Death)
+        if (ballY > GAME_HEIGHT) {
+            lives--;
+            livesDisplay.innerText = `LIVES: ${lives}`;
+            if (lives <= 0) {
+                gameOver();
+            } else {
+                resetBall();
+            }
+        }
+
+        updateBall();
+    }
+
+    function resetBall() {
+        ballX = paddleX + PADDLE_WIDTH / 2;
+        ballY = 270;
+        ballVelX = (Math.random() > 0.5 ? 1 : -1) * (2 + Math.random());
+        ballVelY = -3;
+        isRunning = false; // Pause until space pressed
+        document.getElementById('final-message').innerText = "PAUSED - PRESS SPACE";
+        gameOverModal.style.display = "block";
+        gameOverModal.innerHTML = `
+            <h2 style="color:yellow">READY?</h2>
+            <button onclick="resumeGame()">RESUME</button>
+        `;
+    }
+
+    function resetLevel() {
+        initBricks();
+        resetBall();
+        score += 500; // Bonus for clearing level
+        scoreDisplay.innerText = `SCORE: ${score.toString().padStart(4, '0')}`;
+    }
+
+    function gameOver() {
+        isRunning = false;
+        clearInterval(gameLoop);
+        finalMessage.innerText = "GAME OVER";
+        finalScoreSpan.innerText = score;
+        gameOverModal.style.display = "block";
+    }
+
+    function resetGame() {
+        score = 0;
+        lives = 3;
+        scoreDisplay.innerText = "SCORE: 0000";
+        livesDisplay.innerText = "LIVES: 3";
+        gameOverModal.style.display = "none";
+        
+        initBricks();
+        resetBall();
+    }
+
+    function resumeGame() {
+        gameOverModal.style.display = "none";
+        isRunning = true;
+        if (!gameLoop) {
+            gameLoop = setInterval(gameStep, 1000 / 60); // 60 FPS
+        }
+    }
+
+    // --- Input Handling ---
+    window.addEventListener('keydown', (e) => {
+        keys[e.key] = true;
+        
+        if (e.code === 'Space') {
+            if (!isRunning && gameOverModal.style.display === "none") {
+                isRunning = true;
+            } else if (gameOverModal.style.display === "block") {
+                resumeGame();
+            }
+        }
+    });
+
+    window.addEventListener('keyup', (e) => {
+        keys[e.key] = false;
+    });
+
+    // Start
+    initBricks();
+    resetBall();
+
+</script>
+
+</body>
+</html>

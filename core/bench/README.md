@@ -21,7 +21,11 @@ Prompt: *write a ansii graphics game similar to the game "arkanoid" in a single 
 |---|---|---|---|---|---|---|
 | Claude Haiku 5.5 (raw API) | 40.2 s | 9,105 | 226 | 8.8 KB | Yes: launch, break bricks, score, 3 lives, levels, pause, keys and mouse; no console errors | Loosely: its own colour rows (yellow/cyan/green/magenta), no silver row, `═` paddle |
 
-Haiku used no tools: one shot, reading the image itself.
+| skippy-core: vision describes, coder writes (`--images describe:vision`) | 50.8 s describe + 116.8 s code | 5,072 | 43 | 19.2 KB | Yes: launch, break bricks, score, lives, pause; no console errors | Closely: blue hex background, coloured rows, the paddle, an "ARKANOID" logo with an orb O (misplaced: it reads "ARKAONID") |
+
+Haiku used no tools: one shot, reading the image itself. skippy-core (Qwen3-VL-8B Q8 → Qwen3-Coder-Next UD-Q4_K_XL,
+Vulkan on the M5, no tools) took 4× as long and followed the picture better, because the vision pass spelled out every
+row, colour and element; its one visible bug (the logo's letter order) is what a look at its own screenshot catches.
 
 ## What skippy-core needs to match it
 
