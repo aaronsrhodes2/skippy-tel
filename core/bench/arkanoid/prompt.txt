@@ -1,0 +1,1 @@
+write a ansii graphics game similar to the game "arkanoid" in a single .html page

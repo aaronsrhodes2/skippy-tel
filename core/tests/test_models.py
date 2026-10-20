@@ -40,7 +40,7 @@ def _put(root, chosen, slot, data: bytes):
 def test_the_real_manifest_loads_and_its_standins_fit():
     data = m.load()
     chosen = m.plan(data, set())
-    assert set(chosen) == {"chat", "general", "coder"}
+    assert set(chosen) == {"chat", "vision", "general", "coder"}
     assert all(s["variant"] == "standin" for s in chosen.values())
     assert m.budget(data, chosen)["fits"]
     assert m.budget(data, m.plan(data, m.parse_full("all", data["slots"])))["fits"], "the full tier must fit the box"

@@ -20,6 +20,27 @@
         "args": ["--jinja"]
       }
     },
+    "vision": {
+      "role": "eyes for the text-only slots: describes images and screenshots (the coder's reference pictures, its own page). Always loaded, so it never swaps out the coder",
+      "resident": true,
+      "aliases": ["qwen3-vl", "skippy-vision"],
+      "standin": {
+        "repo": "Qwen/Qwen3-VL-2B-Instruct-GGUF",
+        "files": [{"path": "Qwen3VL-2B-Instruct-Q4_K_M.gguf", "size": 1107409952, "sha256": null},
+                  {"path": "mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf", "size": 445053216, "sha256": null}],
+        "ctx": 8192,
+        "parallel": 2,
+        "args": ["--jinja", "--mmproj", "/models/huggingface/Qwen__Qwen3-VL-2B-Instruct-GGUF/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf"]
+      },
+      "full": {
+        "repo": "Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        "files": [{"path": "Qwen3VL-8B-Instruct-Q8_0.gguf", "size": 8709519456, "sha256": null},
+                  {"path": "mmproj-Qwen3VL-8B-Instruct-F16.gguf", "size": 1159029824, "sha256": null}],
+        "ctx": 16384,
+        "parallel": 2,
+        "args": ["--jinja", "--mmproj", "/models/huggingface/Qwen__Qwen3-VL-8B-Instruct-GGUF/mmproj-Qwen3VL-8B-Instruct-F16.gguf"]
+      }
+    },
     "general": {
       "role": "the big general tier: tools, long answers. Loaded on demand; swaps with coder",
       "resident": false,
