@@ -115,7 +115,7 @@ def main(argv=None) -> int:
     ap.add_argument("--height", type=int, default=844)
     args = ap.parse_args(argv)
     # "me" works as well as "/me": Git Bash on Windows rewrites an argument starting with / into a C:/ path
-    args.path = {"front": "/chat", "chat": "/chat", "home": "/"}.get(args.path) or (args.path if args.path.startswith("/") else "/" + args.path)
+    args.path = {"front": "/", "chat": "/chat", "home": "/apps", "apps": "/apps"}.get(args.path) or (args.path if args.path.startswith("/") else "/" + args.path)
     if "//" in args.path or ":" in args.path or "\\" in args.path or not args.out.lower().endswith(".png") \
             or not (200 <= args.width <= 2000 and 200 <= args.height <= 4000):
         print("give a page path like /me, an --out ending in .png, and a sane size", file=sys.stderr)

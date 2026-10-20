@@ -37,7 +37,7 @@ def test_front_and_home_mean_the_chat_and_the_app_portal_which_git_bash_cannot_t
     monkeypatch.setattr(shot, "find_browser", lambda: "b")
     monkeypatch.setattr(shot, "shoot", lambda path, out, w, h, browser, timeout=90: seen.append(path) or 0)
     assert shot.main(["front", "--out", "x.png"]) == 0 and shot.main(["home", "--out", "x.png"]) == 0 and shot.main(["me", "--out", "x.png"]) == 0
-    assert seen == ["/chat", "/", "/me"]
+    assert seen == ["/", "/apps", "/me"]                                       # the chat is Home now; the app portal is /apps
 
 
 def test_no_browser_exits_3_and_installs_nothing(monkeypatch, capsys):
@@ -51,7 +51,8 @@ def test_the_page_is_the_checkouts_portal_signed_in_as_the_scratch_admin():
     client = app.test_client()
     page = client.get("/chat")
     assert page.status_code == 200 and b'id="private-skippy"' in page.data       # the Skippy app for the scratch admin (the agent), no Google sign-in
-    assert client.get("/").status_code == 200 and b"private-skippy" not in client.get("/").data    # Home is the app portal
+    assert b'id="private-skippy"' in client.get("/").data                       # Home is the chat (2026-10-20)
+    assert client.get("/apps").status_code == 200 and b"private-skippy" not in client.get("/apps").data   # the launcher
     assert app.config["SECRET_KEY"] != "test" and len(app.config["SECRET_KEY"]) == 64   # a fresh key, not the tests' known one
 
 
