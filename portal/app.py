@@ -21,6 +21,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 import access_requests as access_mod
 import admin_panel
 import auth
+import attachments as attachments_mod
 import autoconfig
 import brains
 import buildinfo
@@ -1711,6 +1712,22 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 "provenance_tag", "interpreter", "error")
         return {"question": question[:300], **{k: d.get(k) for k in keep}, "steps": steps[:30]}
 
+    def shape_files(files, text, brain, bot):
+        """A message's files for the brain that reads it: Claude takes them as they are; Gemini as OpenAI parts; Skippy
+        Core's chat slot is text-only, so its vision slot describes each picture first (guests can show it things too)."""
+        if brain.id == "core":
+            def describe(f):
+                try:
+                    return bot.reply("You describe pictures precisely.", [{"role": "user", "content": [
+                        {"type": "image", "source": {"type": "base64", "media_type": f.mime, "data": f.b64}},
+                        {"type": "text", "text": attachments_mod.DESCRIBE_PROMPT}]}], model="vision")
+                except chat.ChatError as exc:
+                    return f"(the vision model couldn't look at it: {exc})"
+            return attachments_mod.text_for(files, text, describe)
+        if brain.api == "openai":
+            return attachments_mod.openai_parts(files, text)
+        return attachments_mod.anthropic_blocks(files, text)
+
     @talk.post("/send")
     @skippy_required
     def send():
@@ -1746,6 +1763,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         if not brain_ready(brain):
             return jsonify(error=f"{brain.label} isn't available right now"
                                  + (": skippy-core may be offline." if brain.id == "core" else ".")), 503
+        try:
+            files = attachments_mod.clean(body.get("files"))
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
         bot = bot_override or brains.chat_for(brain)
         if not admin:
             force = None
@@ -1785,6 +1806,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 schemas, force = None, None
                 rest = rest if chat.wants_barney(rest) else chat.BARNEY_PHRASE
             convo = chat.build_messages(body.get("history"), rest)
+            if files:                     # the message's files, shaped for this brain (attachments.py)
+                convo[-1] = {"role": "user", "content": shape_files(files, rest, brain, bot)}
             text = bot.reply(prompt, convo, tools=schemas, run_tool=run_tool, model=model, force_tool=force)
             if (schemas and "ask_mentat" not in used and chat.claims_mentat(text)
                     and any(t.get("name") == "ask_mentat" for t in schemas)):

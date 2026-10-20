@@ -5,3 +5,4 @@ google-cloud-compute==1.54.0
 google-cloud-storage==2.19.0
 anthropic==1.8.0
 gunicorn==23.0.0
+pypdf==6.9.2

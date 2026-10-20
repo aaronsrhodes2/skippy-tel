@@ -173,6 +173,16 @@ canvas.alive { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0;
 .mentat-card .mc-steps { margin: 6px 0; padding-left: 1.4em; } .mentat-card .mc-steps li { margin: 2px 0; }
 .mentat-card .mc-src { font-size: .74rem; color: var(--muted); }
 .mentat-card .mc-barney { margin-top: 6px; display: inline-flex; align-items: center; gap: 6px; color: var(--amber); }
+/* files with the next message (templates/_chat.html takeFiles): a row of chips over the box, thumbnails for pictures */
+.chat-bridge .files { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.file-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 4px 3px 6px; font-size: .78rem;
+             color: var(--ink); background: #05090b; border: 1px solid var(--dim-green-hi); }
+.file-chip img { width: 28px; height: 28px; object-fit: cover; } .file-chip .g { width: 16px; height: 16px; }
+.file-chip .fn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14em; }
+.file-chip .key.sm { width: 22px; height: 22px; padding: 0; }
+.sent-files { clear: both; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.sent-files img { width: auto; height: auto; max-width: 96px; max-height: 96px; border-radius: 0; border: 1px solid var(--dim-green-hi); }
+.chat-bridge.dropping .stage { outline: 2px dashed var(--accent); outline-offset: -4px; }
 /* the Captain's brain sheet: one row per model, a lamp for whether it's reachable, $ for paid */
 .brain-list { display: flex; flex-direction: column; gap: 8px; }
 .brain-opt { display: flex; align-items: center; gap: 10px; padding: 12px 10px; font-size: 1rem; color: var(--ink); background: #05090b;

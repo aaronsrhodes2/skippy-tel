@@ -47,9 +47,12 @@
 
   <form class="ask">
     <div class="vstat" hidden aria-live="polite"></div>
+    <div class="files" hidden></div>
+    <input type="file" class="file-pick" multiple hidden accept="image/jpeg,image/png,image/webp,application/pdf,text/*,.md,.csv,.json,.py,.js,.ts,.tsx,.jsx,.html,.css,.yml,.yaml,.xml,.sh,.kt,.java,.c,.h,.cpp,.rs,.go,.sql,.toml,.ini,.log">
     <textarea rows="2" aria-label="Message" required></textarea>
     <div class="keybar">
       <button type="button" class="key clear" aria-label="New chat" title="New chat"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
+      <button type="button" class="key clip" data-tel="chat:attach" aria-label="Attach pictures or files (or paste, or drop them here)" title="Attach pictures or files (or paste, or drop them here)"><svg class="g" aria-hidden="true"><use href="#g-clip"/></svg></button>
       {% if chat_brains|length > 1 %}<button type="button" class="key brain-key" data-open="brain" data-tel="chat:brain" aria-label="Which brain answers" title="Which brain answers"><svg class="g" aria-hidden="true"><use href="#g-core"/></svg></button>{% endif %}
       <button type="button" class="key barney" data-tel="chat:barney-style" aria-label="Barney Style: Skippy Core explains the conversation in plain words" title="Barney Style: Skippy Core explains the conversation in plain words"><svg class="g" aria-hidden="true"><use href="#g-simple"/></svg></button>
       <button type="button" class="key ear" aria-pressed="false" aria-label="Standby: listen for Skippy" title="Standby: listen for Skippy"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg><i class="lamp"></i></button>
@@ -255,12 +258,67 @@
         JSON.stringify({value: c.value, units: c.units, display: c.display, assumed: c.assumed, source: c.source, notes: c.notes, steps: c.steps}).slice(0, 2500) + "]").join("");
     }
 
+    // Files with the next message: the clip key, paste, or drop anywhere on the chat. Pictures are shrunk here to a JPEG of at
+    // most 1600 px (about 1 MB at most) before they go; text, code and PDFs go as they are (the server checks every one again).
+    const MAX_FILES = 4, MAX_BYTES = 1000000, pending_files = [], filesBox = form.querySelector(".files"), picker = form.querySelector(".file-pick");
+    function readAs(file) { return new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(file); }); }
+    async function shrink(file) {
+      const url = await readAs(file);
+      const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = url; });
+      const k = Math.min(1, 1600 / Math.max(img.width, img.height));
+      const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      return c.toDataURL("image/jpeg", 0.85);
+    }
+    function paintFiles() {
+      filesBox.hidden = !pending_files.length;
+      filesBox.replaceChildren(...pending_files.map((f, i) => {
+        const chip = document.createElement("span"); chip.className = "file-chip";
+        if (f.data.startsWith("data:image/")) { const t = document.createElement("img"); t.src = f.data; t.alt = ""; chip.append(t); }
+        else chip.append(glyph("note"));
+        const n = document.createElement("span"); n.className = "fn"; n.textContent = f.name; chip.append(n);
+        const x = document.createElement("button"); x.type = "button"; x.className = "key sm"; x.title = x.ariaLabel = "Remove " + f.name;
+        x.append(glyph("x")); x.addEventListener("click", () => { pending_files.splice(i, 1); paintFiles(); });
+        chip.append(x);
+        return chip;
+      }));
+      logPager.refresh();
+    }
+    async function takeFiles(list) {
+      for (const file of [...list]) {
+        if (pending_files.length >= MAX_FILES) { flash("At most " + MAX_FILES + " files to a message."); break; }
+        try {
+          const isPic = /^image\/(jpeg|png|webp|gif|bmp)$/.test(file.type);
+          const data = isPic ? await shrink(file) : await readAs(file);
+          if (!isPic && file.size > MAX_BYTES) { flash(file.name + " is over 1 MB."); continue; }
+          pending_files.push({name: isPic ? file.name.replace(/\.\w+$/, "") + ".jpg" : file.name,
+                              data: data.replace(/^data:;base64,/, "data:text/plain;base64,")});
+        } catch (e) { flash(file.name + " couldn't be read."); }
+      }
+      paintFiles();
+    }
+    function flash(text) { const s = form.querySelector(".vstat"); s.textContent = text; s.hidden = false; setTimeout(() => { s.hidden = true; }, 4000); }
+    form.querySelector("button.clip").addEventListener("click", () => picker.click());
+    picker.addEventListener("change", () => { takeFiles(picker.files); picker.value = ""; });
+    msg.addEventListener("paste", e => { const fs = [...(e.clipboardData || {}).files || []]; if (fs.length) { e.preventDefault(); takeFiles(fs); } });
+    root.addEventListener("dragover", e => { if ([...e.dataTransfer.types].includes("Files")) { e.preventDefault(); root.classList.add("dropping"); } });
+    root.addEventListener("dragleave", e => { if (e.target === root) root.classList.remove("dropping"); });
+    root.addEventListener("drop", e => { if (e.dataTransfer.files.length) { e.preventDefault(); root.classList.remove("dropping"); takeFiles(e.dataTransfer.files); } });
+
     let busy = false;
     async function ask(text, opts) {
       opts = opts || {};
       if (!text || busy) return;
       busy = true;
-      add("user", text);
+      const files = opts.barney ? [] : pending_files.splice(0);       // they go with this message only
+      paintFiles();
+      const shown = add("user", text);
+      if (files.length) {                                             // what you sent, under your words
+        const strip = document.createElement("div"); strip.className = "sent-files";
+        files.forEach(f => { if (f.data.startsWith("data:image/")) { const t = document.createElement("img"); t.src = f.data; t.alt = f.name; strip.append(t); }
+                             else { const c = document.createElement("span"); c.className = "file-chip"; c.append(glyph("note"), document.createTextNode(f.name)); strip.append(c); } });
+        shown.parentElement.append(strip);
+      }
       sendBtn.disabled = true; sendBtn.dataset.s = "on";
       alive().pulse(1);                         // a question goes out: the background stirs
       const pending = add("assistant", "…", opts.barney ? "barney" : "");
@@ -269,7 +327,7 @@
           method: "POST", headers: {"Content-Type": "application/json"},
           // `page` lets Skippy know what you're looking at ("this game" = the one on screen).
           body: JSON.stringify({message: text, history: history, page: location.pathname, brain: BRAINS.length > 1 ? brain : undefined,
-                                barney: !!opts.barney, save: !!(saveBox && saveBox.checked), context: context, lang: langSel.value}),
+                                barney: !!opts.barney, files: files.map(f => ({name: f.name, data: f.data})), save: !!(saveBox && saveBox.checked), context: context, lang: langSel.value}),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || res.statusText);
@@ -287,12 +345,13 @@
           clip.append(label, audio); pending.parentElement.append(clip);
         });
         // Mentat's own answers go in the history marked as such, so Barney Style can explain them (and only them).
-        history.push({role: "user", content: text},
+        history.push({role: "user", content: text + (files.length ? " [attached: " + files.map(f => f.name).join(", ") + "]" : "")},
                      {role: "assistant", content: data.reply + mentatNote(data.mentat || [])});
         save();
       } catch (err) {
         pending.textContent = err.message;
         pending.parentElement.classList.add("failed");
+        if (files.length && !pending_files.length) { pending_files.push(...files); paintFiles(); }   // not lost: try again
         voice.resume();                           // no reply is coming: in a spoken conversation the turn comes back to him
       } finally {
         busy = false;

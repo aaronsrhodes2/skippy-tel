@@ -109,8 +109,7 @@ class OpenAIChat:
     def reply(self, system, messages, tools=None, run_tool=None, model=None, force_tool=None) -> str:
         from chat import ChatError, MAX_OUTPUT
         convo = [{"role": "system", "content": system}] + [
-            {"role": m["role"], "content": m["content"] if isinstance(m["content"], str) else json.dumps(m["content"])}
-            for m in messages]
+            {"role": m["role"], "content": m["content"]} for m in messages]   # a str, or OpenAI parts (attachments.openai_parts)
         fns = [{"type": "function", "function": {"name": t["name"], "description": t.get("description", ""),
                                                   "parameters": t.get("input_schema") or {"type": "object"}}}
                for t in tools or []]
