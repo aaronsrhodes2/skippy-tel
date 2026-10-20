@@ -78,3 +78,13 @@ def test_a_dead_stack_fails_the_wait(monkeypatch):
     monkeypatch.setattr(smoke, "SHIM", "http://127.0.0.1:1")
     results = smoke.run(wait=0.1)
     assert results[0]["check"] == "ready" and not results[0]["ok"] and len(results) == 1
+
+
+def test_a_keyed_llm_port_is_used_with_the_key_and_must_refuse_without_it(stack, monkeypatch):
+    llm, _ = stack
+    llm.key = "sekrit"
+    monkeypatch.setenv("LLM_API_KEY", "sekrit")
+    assert all(r["ok"] for r in smoke.run()), "every llm call carries the key; the auth check sees the 401"
+    llm.key = None                                     # the port forgot its key: the Funnel would be open to anyone
+    failed = {r["check"] for r in smoke.run() if not r["ok"]}
+    assert failed == {"auth"}

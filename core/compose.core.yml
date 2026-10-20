@@ -22,8 +22,10 @@ services:
     logging: *default-logging
     entrypoint: ["/app/llama-swap"]
     command: ["-config", "/config/config.yaml", "-listen", ":8080", "-watch-config"]
+    environment:
+      - LLM_API_KEY=${LLM_API_KEY:-}   # the rendered config says apiKeys: ${env.LLM_API_KEY} when the deployer has one
     ports:
-      - "127.0.0.1:8080:8080"     # the smoke test and the box's own tools; tailnet access comes with an --api-key
+      - "127.0.0.1:8080:8080"     # the box's own tools, and Tailscale Funnel (core/install/funnel.sh) with the key
     volumes:
       - ${MODELS_ROOT:-/srv/models}:/models:ro
       - ${CORE_STATE:-/var/lib/skippy-core}/llm:/config:ro
@@ -35,6 +37,7 @@ services:
     environment:
       - LLM_URL=http://llm:8080
       - SHIM_NAMES=/config/shim.json
+      - LLM_API_KEY=${LLM_API_KEY:-}
     ports:
       - "127.0.0.1:11434:11434"
     volumes:

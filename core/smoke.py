@@ -42,8 +42,10 @@ class Fail(Exception):
 
 def call(method: str, url: str, body: dict | None = None, *, timeout: float = TIMEOUT, headers: dict | None = None):
     data = json.dumps(body).encode() if body is not None else None
+    key = os.environ.get("LLM_API_KEY")
+    auth = {"Authorization": f"Bearer {key}"} if key and url.startswith(LLM) else {}
     req = urllib.request.Request(url, data=data, method=method,
-                                 headers={"Content-Type": "application/json", **(headers or {})})
+                                 headers={"Content-Type": "application/json", **auth, **(headers or {})})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, r.read().decode("utf-8", "replace")
@@ -143,6 +145,17 @@ def check_messages():
     return "ok"
 
 
+def check_auth():
+    """With LLM_API_KEY set, the llm port must refuse a request without it (the Funnel puts this port on the internet)."""
+    if not os.environ.get("LLM_API_KEY"):
+        return "no key: open port (tailnet-only boxes, the simulator)"
+    status, _ = call("POST", f"{LLM}/v1/chat/completions", {"model": "chat", "messages": USER, "max_tokens": 1},
+                     headers={"Authorization": "Bearer wrong"})
+    if status != 401:
+        raise Fail(f"a wrong key got HTTP {status}, expected 401")
+    return "401 without the key"
+
+
 def check_health():
     body = call_json("GET", f"{API}/health", timeout=30)
     ollama = (body.get("models") or {}).get("ollama") or {}
@@ -159,7 +172,7 @@ def check_intent():
 
 
 CHECKS = [("tags", check_tags), ("chat", check_chat), ("stream", check_stream), ("json", check_json),
-          ("slots", check_slots), ("messages", check_messages), ("health", check_health), ("intent", check_intent)]
+          ("slots", check_slots), ("messages", check_messages), ("auth", check_auth), ("health", check_health), ("intent", check_intent)]
 
 
 def wait_ready(seconds: float) -> None:

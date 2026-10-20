@@ -160,6 +160,15 @@ def test_settings_file_then_environment(tmp_path, monkeypatch):
     assert dep.norm_full(" coder,chat,") == "chat,coder" and dep.norm_full("chat,all") == "all"
 
 
+def test_the_llm_key_reaches_render_compose_and_smoke(tmp_path, monkeypatch):
+    f = tmp_path / "core.env"
+    f.write_text("LLM_API_KEY=sk-core-abc\nCORE_GPU=0\n")
+    for k in dep.DEFAULTS:
+        monkeypatch.delenv(k, raising=False)
+    d = dep.Deployer(dep.load_settings(str(f)), log=lambda m: None)
+    assert d.env("")["LLM_API_KEY"] == "sk-core-abc", "every child (models.py render, compose, smoke.py) needs it"
+
+
 def test_ci_state_reads_the_newest_check_run(box, monkeypatch):
     d, _, _ = box
     real = dep.Deployer(d.s, log=lambda m: None)
