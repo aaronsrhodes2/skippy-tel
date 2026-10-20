@@ -13,6 +13,7 @@ docs/portal/README.md → Chat.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 MAX_MESSAGES = 40          # history sent to the model: the last 20 exchanges
@@ -30,9 +31,8 @@ def uses_refusal_fallback(model: str) -> bool:
     return model.startswith(_FALLBACK_PREFIXES)
 
 
-# There is no model picker: this chat always uses CHAT_MODEL (Haiku), for
-# everyone, whatever they type. The Captain's Opus lives in the private
-# Skippy on his dashboard (workshop.py), which is a different chat.
+# Which model answers is brains.py's call: Skippy Core for everyone, and for the Captain alone a picker
+# (Skippy Core, Claude, Gemini). Barney Style always runs on Skippy Core.
 
 _PERSONA_FALLBACK = "You are Skippy the Magnificent, the Captain's sardonic but loyal AI. Keep replies short."
 
@@ -52,8 +52,8 @@ def persona() -> str:
 # rules, so privacy still wins.
 _PORTAL_SKIPPY = (
     "## Here, in the portal: full volume\n"
-    "You're in the Maker Portal's text chat, not the phone, so TTS rules are off, but stay short "
-    "and never use markdown formatting. Lay the personality on thick: you are the Elder AI, "
+    "You're in the Maker Portal's text chat, not the phone, so TTS rules are off and [IMAGE: ...] sentinels do nothing "
+    "here. Stay short; plain Markdown (bold, lists, `code`) is fine, the page renders it. Lay the personality on thick: you are the Elder AI, "
     "Skippy the Magnificent, an ancient beer can of unimaginable power, grudgingly babysitting "
     "filthy monkeys and their adorable little game servers. Grand self-titles are encouraged "
     "(\"Skippy the Magnificent, Lord of the Game Servers, Emperor of the Pop-up VM\"). Mock the "
@@ -113,11 +113,16 @@ def system_prompt(user_name: str, is_admin: bool = False, page: str | None = Non
         "like `106969` or `35.1.2.3:34197`: the page turns those into one-click copy chips. You can't reach skippy-tel-core and its MCP tools from here yet; "
         "say so plainly rather than pretending.\n\n"
         "## Physics goes to Mentat\n"
+        "Use a tool by CALLING it, never by writing its name or a call in your reply; and never say Mentat computed, found "
+        "or cites anything unless ask_mentat actually returned it in this conversation (a fake Mentat answer is thrown away). "
         "When ask_mentat is available it's the Captain's own physics engine (Mentat, from "
         "sigma-ground, his Wolfram Alpha rival). For any physics, maths, units or numbers question, "
         "hand Mentat the user's question in their own words and let it interpret it: don't solve it "
-        "yourself first, don't pick formulas, don't add assumptions. Then report what Mentat returned "
-        "(value, units, and the key steps with their sources) in your voice. Mentat fills in inputs "
+        "yourself first, don't pick formulas, don't add assumptions. Then answer the way a physics answer "
+        "should be given, in your voice: say up front that Mentat computed it, give the result with its units first, "
+        "then the proof (the key steps, each with its value, units and the source Mentat cites) and the references "
+        "(Mentat's sources). Never round away or change Mentat's numbers. The page shows Mentat's full answer as a card "
+        "under your reply and offers Barney Style itself, so don't offer it. Mentat fills in inputs "
         "the user didn't give and marks them as its own inventions: always say which values it "
         "invented (e.g. \"assuming a 10 km drop\"), so the user can correct them. If Mentat's value is "
         "null, it couldn't model that question (the portal has already logged it as a bug to fix): start your reply "
@@ -145,6 +150,25 @@ def language_instruction(code) -> str:
             "Leave exactly as they are, never translated or transliterated: server and game names, join codes, addresses, "
             "passwords, commands and anything inside backticks, and the words \"Mentat\" and \"Barney Style\". "
             "If you are explaining a Mentat result, keep its numbers, units and symbols exactly.")
+
+
+_MENTAT_CLAIM = ("mentat computed", "mentat says", "mentat cites", "mentat found", "mentat returned", "mentat's answer",
+                 "according to mentat", "[ask_mentat", "ask_mentat(", "<tool_call", "mentat calculated")
+
+
+_IMAGE_SENTINEL = re.compile(r"\s*\[IMAGE:[^\]\n]*\]\s*", re.I)
+
+
+def strip_sentinels(text: str) -> str:
+    """The shared persona's [IMAGE: ...] sentinel asks the phone apps to draw a picture; the portal can't (yet), so it goes."""
+    return _IMAGE_SENTINEL.sub("\n", text or "").strip() or (text or "")
+
+
+def claims_mentat(text: str) -> bool:
+    """Does a reply present itself as Mentat's work (or write a tool call out as text)? Used to catch a brain that never
+    called Mentat but says it did: that answer is thrown away (app.py, /chat/send)."""
+    low = (text or "").lower()
+    return any(p in low for p in _MENTAT_CLAIM)
 
 
 BARNEY_PHRASE = "Give it to me Barney Style"   # what the page puts in the box when Barney Style is switched on
@@ -216,15 +240,24 @@ class ChatError(Exception):
 
 
 class SkippyChat:
-    def __init__(self, model: str):
+    """Claude, or anything that speaks Anthropic's Messages API: Skippy Core's llama-swap is the same SDK with its own
+    base_url and key (brains.py)."""
+
+    def __init__(self, model: str, api_key: str | None = None, base_url: str | None = None, label: str = "the Claude API"):
         self.model = model
+        self.api_key, self.base_url, self.label = api_key, base_url, label
         self._client_obj = None
 
     @property
     def _client(self):
         if self._client_obj is None:
             import anthropic
-            self._client_obj = anthropic.Anthropic()   # ANTHROPIC_API_KEY from the environment
+            kw = {}
+            if self.api_key:
+                kw["api_key"] = self.api_key           # else ANTHROPIC_API_KEY from the environment
+            if self.base_url:
+                kw["base_url"] = self.base_url
+            self._client_obj = anthropic.Anthropic(**kw)
         return self._client_obj
 
     def reply(self, system: str, messages: list[dict], tools: list[dict] | None = None,
@@ -271,10 +304,10 @@ class SkippyChat:
                     **params, betas=["server-side-fallback-2026-07-01"], fallbacks="default")
             return self._client.messages.create(**params)
         except anthropic.RateLimitError as exc:
-            raise ChatError("Skippy is rate-limited right now. Try again in a minute.") from exc
+            raise ChatError(f"{self.label} is rate-limited right now. Try again in a minute.") from exc
         except anthropic.AuthenticationError as exc:
-            raise ChatError("The portal's Anthropic API key is missing or invalid.") from exc
+            raise ChatError(f"The portal's key for {self.label} is missing or invalid.") from exc
         except anthropic.APIStatusError as exc:
-            raise ChatError(f"The Claude API returned an error ({exc.status_code}).") from exc
+            raise ChatError(f"{self.label} returned an error ({exc.status_code}).") from exc
         except anthropic.APIConnectionError as exc:
-            raise ChatError("Couldn't reach the Claude API.") from exc
+            raise ChatError(f"Couldn't reach {self.label}: it may be offline.") from exc

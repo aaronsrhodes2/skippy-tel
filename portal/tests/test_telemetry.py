@@ -382,7 +382,7 @@ def test_with_saving_allowed_a_chat_is_recorded_redacted_with_its_tools_and_argu
     assert res.status_code == 200
     (ev,) = events(tel, "chat")
     d = ev["detail"]
-    assert ev["user"] == ADMIN and d["consented"] is True and d["model"] == "claude-haiku-4-5"
+    assert ev["user"] == ADMIN and d["consented"] is True and d["model"] == "chat"   # Skippy Core, the default brain
     assert d["message"] == "is valheim up? the valheim password is [redacted]"
     assert d["reply"] == "Valheim is asleep. Its join password is [redacted] obviously."
     assert d["tools"] == [{"name": "server_status", "args": {}}]

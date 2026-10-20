@@ -19,6 +19,13 @@
       <div class="lang-grid"></div>
       <select class="lang" aria-label="Language" hidden>{% for code, name in chat_languages.items() %}<option value="{{ code }}">{{ name }}</option>{% endfor %}</select>
     </div>
+    {% if chat_brains|length > 1 %}
+    <div class="sheet" data-sheet="brain" hidden>
+      <div class="brain-list">{% for b in chat_brains %}
+        <button type="button" class="brain-opt" data-brain="{{ b.id }}" aria-pressed="false"{% if not b.ready %} disabled{% endif %}><svg class="g" aria-hidden="true"><use href="#g-{{ b.glyph }}"/></svg>{{ b.label }}{% if b.paid %} <span class="paid" title="paid">$</span>{% endif %}<i class="lamp" data-s="{{ 'on' if b.ready else 'off' }}"></i></button>
+      {% endfor %}</div>
+    </div>
+    {% endif %}
     <div class="sheet" data-sheet="tools" hidden>
       <div class="pg"><div class="pg-flow verb-list"></div></div>
       <div class="pips" aria-hidden="true"><i></i></div>
@@ -43,7 +50,8 @@
     <textarea rows="2" aria-label="Message" required></textarea>
     <div class="keybar">
       <button type="button" class="key clear" aria-label="New chat" title="New chat"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
-      <button type="button" class="key barney" aria-pressed="false" data-tel="chat:barney-style" aria-label="Barney Style: Haiku explains it simply. Off: straight to Mentat, its own answer unedited" title="Barney Style: Haiku explains it simply. Off: straight to Mentat, its own answer unedited"><svg class="g" aria-hidden="true"><use href="#g-simple"/></svg><i class="lamp"></i></button>
+      {% if chat_brains|length > 1 %}<button type="button" class="key brain-key" data-open="brain" data-tel="chat:brain" aria-label="Which brain answers" title="Which brain answers"><svg class="g" aria-hidden="true"><use href="#g-core"/></svg></button>{% endif %}
+      <button type="button" class="key barney" data-tel="chat:barney-style" aria-label="Barney Style: Skippy Core explains the conversation in plain words" title="Barney Style: Skippy Core explains the conversation in plain words"><svg class="g" aria-hidden="true"><use href="#g-simple"/></svg></button>
       <button type="button" class="key ear" aria-pressed="false" aria-label="Standby: listen for Skippy" title="Standby: listen for Skippy"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg><i class="lamp"></i></button>
       <button type="button" class="key mic" aria-label="Speak your message" title="Speak your message"><svg class="g" aria-hidden="true"><use href="#g-mic"/></svg><i class="lamp"></i></button>
       <button type="button" class="key spk" aria-pressed="false" aria-label="Read replies aloud" title="Read replies aloud"><svg class="g" aria-hidden="true"><use href="#g-vol"/></svg><i class="lamp"></i></button>
@@ -111,24 +119,28 @@
     }
     paintLangs();
 
-    // "Barney Style": Haiku puts it in plain words. OFF by default: the question goes straight to Mentat and its own
-    // answer comes back unedited (no model either way). Remembered in this browser. Turning it ON fills the box with
-    // "Give it to me Barney Style"; sending that makes Haiku read the whole chat, Mentat's own answers included (they
-    // are kept in the history, marked as Mentat's), and explain it plainly using only what Mentat found.
-    const BARNEY_PHRASE = "Give it to me Barney Style";
-    const barney = {key: form.querySelector("button.barney"), on: false};
-    const BARNEY_KEY = "skippy-chat-barney-style";
-    function paintBarney() { barney.key.setAttribute("aria-pressed", barney.on ? "true" : "false"); barney.key.dataset.s = barney.on ? "on" : "idle"; barney.key.classList.toggle("lit", barney.on); }
-    try { barney.on = localStorage.getItem(BARNEY_KEY) === "yes"; } catch (e) {}
-    paintBarney();
-    barney.key.addEventListener("click", () => {
-      barney.on = !barney.on;
-      try { localStorage.setItem(BARNEY_KEY, barney.on ? "yes" : "no"); } catch (e) {}
-      paintBarney();
-      // Switching it on writes the request for you: Haiku then explains the whole chat so far in plain words.
-      if (barney.on && !msg.value.trim()) { msg.value = BARNEY_PHRASE; msg.focus(); }
-      else if (!barney.on && msg.value.trim() === BARNEY_PHRASE) msg.value = "";
-    });
+    // Which brain answers. Guests have one (Skippy Core) and no key; the Captain picks from the brain sheet, remembered in this
+    // browser. The server decides in the end (portal/brains.py): a guest's choice is never sent, and a stale one is refused.
+    const BRAINS = {{ chat_brains|tojson }}, BRAIN_KEY = "skippy-chat-brain", brainKey = form.querySelector("button.brain-key");
+    let brain = (BRAINS.find(x => x.ready) || BRAINS[0] || {id: "core"}).id;     // the first one that's reachable now
+    try { const b = localStorage.getItem(BRAIN_KEY); if (BRAINS.some(x => x.id === b && x.ready)) brain = b; } catch (e) {}
+    function paintBrain() {
+      if (!brainKey) return;
+      const b = BRAINS.find(x => x.id === brain) || BRAINS[0];
+      brainKey.querySelector("use").setAttribute("href", "#g-" + b.glyph);
+      brainKey.title = brainKey.ariaLabel = "Brain: " + b.label;
+      root.querySelectorAll(".brain-opt").forEach(o => { const on = o.dataset.brain === brain; o.setAttribute("aria-pressed", on ? "true" : "false"); o.classList.toggle("lit", on); });
+    }
+    root.querySelectorAll(".brain-opt").forEach(o => o.addEventListener("click", () => {
+      brain = o.dataset.brain; try { localStorage.setItem(BRAIN_KEY, brain); } catch (e) {}
+      paintBrain(); showSheet("brain");
+    }));
+    paintBrain();
+
+    // Barney Style: one press, and Skippy Core explains the whole conversation so far in plain words, using only what Mentat
+    // found (Mentat's answers are kept in the history, marked as its own). The ⚛ card under a Mentat answer offers it too.
+    const BARNEY_PHRASE = {{ barney_phrase|tojson }};
+    form.querySelector("button.barney").addEventListener("click", () => ask(BARNEY_PHRASE, {barney: true}));
 
     // A saved conversation being continued (Skippy Memory; admins only): sent with each message, kept in this tab.
     const CTX = KEY + "-ctx";
@@ -162,18 +174,23 @@
       const u = document.createElementNS(SVG, "use"); u.setAttribute("href", "#g-" + id); s.appendChild(u); return s;
     }
     // Who said it is a glyph, not a name: you, Skippy (the can), or Mentat on its own (the atom).
+    // Skippy's turns are Markdown (static/skippy-md.js: built from DOM nodes, never innerHTML); yours stay as you typed them.
+    function show(el, text, md) {
+      if (md && window.SkippyMd && text !== "…") { el.replaceChildren(SkippyMd.render(text, document)); el.classList.add("rich"); }
+      else fill(el, text);
+    }
     function add(role, text, extra) {
       const div = document.createElement("div");
       div.className = "turn " + role + (extra ? " " + extra : "");
       const body = document.createElement("div"); body.className = "tx";
       div.append(glyph(role === "user" ? "user" : extra === "raw" ? "atom" : "can"), body);
-      fill(body, text);
+      show(body, text, role === "assistant" && extra !== "raw");
       log.appendChild(div);
       logPager.refresh(); logPager.last();
       return body;
     }
     function save() { try { sessionStorage.setItem(KEY, JSON.stringify(history)); } catch (e) {} }
-    history.forEach(t => add(t.role, t.content));
+    history.forEach(t => add(t.role, t.content.split("\n\n[Mentat's own answer")[0]));   // the Mentat notes are for the models, not the screen
 
     // What did the work, as glyphs: the tool, and a lamp (lit = answered, diamond = didn't, triangle = Mentat had no physics for it).
     const TOOL_GLYPH = {ask_mentat: "atom", now_playing: "wave", make_music: "wave", music_result: "wave"};
@@ -194,29 +211,73 @@
       return note;
     }
 
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const text = msg.value.trim();
-      if (!text) return;
-      const raw = !barney.on;                   // Barney Style off = straight to Mentat
+    // Mentat's answer as a card under the reply: collapsed, the result with its units; opened, the proof (each step with
+    // its value, units and source), what Mentat assumed, its sources and notes, then "Barney Style?".
+    function mentatCard(c) {
+      const card = document.createElement("details"); card.className = "mentat-card";
+      const head = document.createElement("summary");
+      const value = c.display || (c.value === null || c.value === undefined ? "∅" : String(c.value) + (c.units ? " " + c.units : ""));
+      const v = document.createElement("span"); v.className = "mc-value"; v.textContent = value;
+      head.append(glyph("atom"), v);
+      if (c.provenance_tag) { const t = document.createElement("span"); t.className = "mc-tag"; t.textContent = c.provenance_tag; head.append(t); }
+      card.append(head);
+      const body = document.createElement("div"); body.className = "mc-body";
+      const line = (label, text) => { if (!text) return; const p = document.createElement("p"); const b = document.createElement("b"); b.textContent = label; p.append(b, document.createTextNode(" " + text)); body.append(p); };
+      line("?", c.question);
+      line("≡", typeof c.interpreted_as === "string" ? c.interpreted_as : c.interpreted_as ? JSON.stringify(c.interpreted_as) : "");
+      line("ƒ", c.formula);
+      if ((c.steps || []).length) {
+        const ol = document.createElement("ol"); ol.className = "mc-steps";
+        c.steps.forEach(s => {
+          const li = document.createElement("li");
+          li.textContent = (s.label || "step") + ": " + (s.value || "") + (s.units ? " " + s.units : "") + (s.formula ? "  [" + s.formula + "]" : "");
+          if (s.source) { const src = document.createElement("code"); src.className = "mc-src"; src.textContent = s.source; li.append(" ", src); }
+          ol.append(li);
+        });
+        body.append(ol);
+      }
+      line("≈", c.assumed ? (typeof c.assumed === "string" ? c.assumed : JSON.stringify(c.assumed)) : "");
+      line("±", c.uncertainty ? String(c.uncertainty) : "");
+      line("§", c.source);
+      line("✎", c.notes);
+      const bs = document.createElement("button"); bs.type = "button"; bs.className = "key sm mc-barney";
+      bs.append(glyph("simple"), document.createTextNode(" Barney Style?"));
+      bs.title = "Skippy Core puts this in plain words";
+      bs.addEventListener("click", () => ask(BARNEY_PHRASE, {barney: true}));
+      body.append(bs);
+      card.append(body);
+      card.addEventListener("toggle", () => logPager.refresh());
+      return card;
+    }
+    // What goes into the history for a Mentat answer, so a later Barney Style (or any brain) sees Mentat's own numbers.
+    function mentatNote(cards) {
+      return cards.map(c => "\n\n[Mentat's own answer to " + JSON.stringify(c.question) + ": " +
+        JSON.stringify({value: c.value, units: c.units, display: c.display, assumed: c.assumed, source: c.source, notes: c.notes, steps: c.steps}).slice(0, 2500) + "]").join("");
+    }
+
+    let busy = false;
+    async function ask(text, opts) {
+      opts = opts || {};
+      if (!text || busy) return;
+      busy = true;
       add("user", text);
-      msg.value = "";
       sendBtn.disabled = true; sendBtn.dataset.s = "on";
       alive().pulse(1);                         // a question goes out: the background stirs
-      const pending = add("assistant", "…", raw ? "raw" : "");
+      const pending = add("assistant", "…", opts.barney ? "barney" : "");
       try {
         const res = await fetch("{{ url_for('chat.send') }}", {
           method: "POST", headers: {"Content-Type": "application/json"},
           // `page` lets Skippy know what you're looking at ("this game" = the one on screen).
-          body: JSON.stringify({message: text, history: history, page: location.pathname,
-                                save: !!(saveBox && saveBox.checked), context: context, raw: raw, lang: langSel.value}),
+          body: JSON.stringify({message: text, history: history, page: location.pathname, brain: BRAINS.length > 1 ? brain : undefined,
+                                barney: !!opts.barney, save: !!(saveBox && saveBox.checked), context: context, lang: langSel.value}),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || res.statusText);
-        fill(pending, data.reply);
+        show(pending, data.reply, true);
         voice.say(data.reply);
         alive().pulse(data.gap ? 0.6 : 1.8);    // an answer comes back: it surges (less so for "failed due to incompetence")
-        pending.parentElement.append(receipt(data, raw));
+        pending.parentElement.append(receipt(data, false));
+        (data.mentat || []).forEach(c => pending.parentElement.append(mentatCard(c)));
         (data.media || []).forEach(m => {           // clips skippy-pc made for this reply
           const clip = document.createElement("div"); clip.className = "clip";
           const label = document.createElement("div"); label.className = "rcpt";
@@ -227,17 +288,25 @@
         });
         // Mentat's own answers go in the history marked as such, so Barney Style can explain them (and only them).
         history.push({role: "user", content: text},
-                     {role: "assistant", content: raw ? "Mentat's own answer, no Haiku:\n" + data.reply : data.reply});
+                     {role: "assistant", content: data.reply + mentatNote(data.mentat || [])});
         save();
       } catch (err) {
         pending.textContent = err.message;
         pending.parentElement.classList.add("failed");
         voice.resume();                           // no reply is coming: in a spoken conversation the turn comes back to him
       } finally {
+        busy = false;
         sendBtn.disabled = false; delete sendBtn.dataset.s;
         logPager.refresh(); logPager.last();
         msg.focus();
       }
+    }
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const text = msg.value.trim();
+      if (!text) return;
+      msg.value = "";
+      ask(text);
     });
     msg.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }

@@ -22,6 +22,7 @@ import access_requests as access_mod
 import admin_panel
 import auth
 import autoconfig
+import brains
 import buildinfo
 import chat
 import chat_tools
@@ -89,7 +90,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     app.register_blueprint(auth.bp)
 
     vm = vm or GamesVm(app.config["GCP_PROJECT"], app.config["GCP_ZONE"], app.config["GCP_INSTANCE"])
-    skippy = skippy or chat.SkippyChat(app.config["CHAT_MODEL"])
+    bot_override = skippy        # tests hand in one fake chat for every brain; live, brains.chat_for builds one per message
     app.extensions["friends"] = friends_mod.Friends(vm)
     app.extensions["modules"] = modules_mod.Modules(vm)               # the launcher's controls, and the Admin Graveyard that retires them
     app.extensions["access_requests"] = access_mod.Requests(vm)      # people asking to be let in (Admin → Friends)
@@ -119,6 +120,13 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def me() -> str:
         return auth.current_user()["email"]
 
+    def brain_ready(b) -> bool:
+        return bot_override is not None or b.ready()
+
+    def brain_views(is_admin: bool) -> list[dict]:
+        """The chat's picker: only the Captain gets one; a guest's list is just Skippy Core (the page shows no key for it)."""
+        return [{**b.view(), "ready": brain_ready(b)} for b in brains.choices(is_admin)]
+
     def my_games() -> dict:
         """The games the signed-in person may see, in catalog order."""
         return {g: GAMES[g] for g in auth.visible_games(me())}
@@ -133,7 +141,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 "build_tip": buildinfo.tooltip(build) if build else "",
                 "can_skippy": member and auth.has_portal(user["email"], "skippy"),
                 "chat_languages": chat.LANGUAGES, "idle_min": PLAYER_IDLE_MIN, "idle_max": PLAYER_IDLE_MAX, "switch_owner": ops.SWITCH_OWNER,
-                "chat_enabled": app.config["CHAT_ENABLED"],
+                "chat_enabled": bool(user) and any(brain_ready(b) for b in brains.choices(auth.is_admin(user["email"]))),
                 "discord_invite": f"https://discord.gg/{app.config['DISCORD_INVITE']}"}
 
     def vm_status():
@@ -1635,7 +1643,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         """The Skippy app: the public brain (Haiku and Mentat: no tools that write or run anything) for everyone with the chat grant, and for
         the Captain alone also the agent (Claude Code on skippy-pc, templates/_workshop.html), whose endpoints each check for the Captain again."""
         captain = auth.is_admin(me())
-        return render_template("front.html", captain=captain, **(workshop_context() if captain else {}))
+        return render_template("front.html", captain=captain, chat_brains=brain_views(captain), barney_phrase=chat.BARNEY_PHRASE,
+                               **(workshop_context() if captain else {}))
 
     def log_mentat_gap(user, question, out, how, save):
         """A physics question Mentat could not model: auto-file it. One structured line in Cloud Run's logs
@@ -1684,17 +1693,34 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         return jsonify(reply=text, tools=["ask_mentat"], mentat_available=True, mentat_where=tools.mentat_where,
                        media=[], raw=True)
 
+    def mentat_card(question: str, out: str) -> dict | None:
+        """What the page's ⚛ card shows for one Mentat answer: the result, and the proof (steps with sources) as Mentat
+        gave it. Mentat's own JSON, trimmed to the fields a reader needs; None when the tool answered with an error."""
+        try:
+            d = json.loads(out)
+        except ValueError:
+            return None
+        if not isinstance(d, dict):
+            return None
+        steps = []
+        for link in ((d.get("inputs") or {}).get("chain") or [])[:6] if isinstance(d.get("inputs"), dict) else []:
+            for s in (link.get("steps") or [])[:12] + ([link["result"]] if isinstance(link.get("result"), dict) else []):
+                if isinstance(s, dict):
+                    steps.append({k: str(s.get(k) or "")[:160] for k in ("label", "value", "units", "formula", "source")})
+        keep = ("value", "units", "display", "formula", "interpreted_as", "assumed", "notes", "source", "uncertainty",
+                "provenance_tag", "interpreter", "error")
+        return {"question": question[:300], **{k: d.get(k) for k in keep}, "steps": steps[:30]}
+
     @talk.post("/send")
     @skippy_required
     def send():
-        if not app.config["CHAT_ENABLED"]:
-            return jsonify(error="Chat isn't configured (no Anthropic API key)."), 503
         body = request.get_json(silent=True) or {}
         message = (body.get("message") or "").strip()
         if not message:
             return jsonify(error="Say something."), 400
         user = auth.current_user()
-        if not auth.is_admin(user["email"]):
+        admin = auth.is_admin(user["email"])
+        if not admin:
             if not limiter.allow("chat:" + user["email"], CHAT_PER_HOUR, 3600):
                 return jsonify(error=f"That's {CHAT_PER_HOUR} messages this hour; Skippy needs a breather. "
                                      "Try again in a bit."), 429
@@ -1704,16 +1730,28 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             rest = {"ask_mentat": "(the user chose /physics with no question: ask what to compute)",
                     "make_music": "(the user chose /music with no description: ask what kind of music to make)"
                     }.get(force, "Go ahead.")
-        admin = auth.is_admin(user["email"])
-        # Visitor mode: Mentat, and Barney Style (Haiku explaining what Mentat found, no tools). Nothing else is reachable, whatever the
-        # page sends: the Captain alone gets the general Skippy with the portal's tools (quick mode) and the agent.
-        if body.get("raw") is True or (not admin and not chat.wants_barney(rest)):
+        if body.get("raw") is True:                       # Mentat straight, no model either side (kept for anyone who asks for it)
             return raw_mentat(user, message, rest, body.get("save") is True)
+        # Which brain: the server decides. Guests always get Skippy Core; the Captain gets his pick. Barney Style (the
+        # page's key, or the phrase) always runs on Skippy Core with no tools, whoever asks.
+        barney = body.get("barney") is True or chat.wants_barney(rest)
+        try:
+            brain = brains.BRAINS[brains.BARNEY] if barney else brains.pick(body.get("brain"), admin)
+        except PermissionError as exc:
+            return jsonify(error=str(exc)), 403
+        if not brain_ready(brain) and not admin and not barney:
+            # A guest's only brain is down (or not set up yet): they get Mentat straight, as before Skippy Core existed,
+            # never a paid model in its place.
+            return raw_mentat(user, message, rest, body.get("save") is True)
+        if not brain_ready(brain):
+            return jsonify(error=f"{brain.label} isn't available right now"
+                                 + (": skippy-core may be offline." if brain.id == "core" else ".")), 503
+        bot = bot_override or brains.chat_for(brain)
         if not admin:
             force = None
         try:
             tools = tools_for(user)
-            model = app.config["CHAT_MODEL"]
+            model = brains.model_of(brain)
             page = str(body.get("page") or "")[:100] or None
             prompt = chat.system_prompt(user["name"], is_admin=admin, page=page,
                                         games=[GAMES[g].name for g in auth.visible_games(user["email"])])
@@ -1721,6 +1759,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 prompt += chat.continued(body.get("context"))
             used: list[str] = []
             calls: list[tuple] = []       # (tool, arguments, result): kept only if this person allowed saving (below)
+            cards: list[dict] = []        # every Mentat answer in this reply, for the page's ⚛ card
 
             def run_tool(name, args):
                 used.append(name)
@@ -1728,32 +1767,55 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 out = tools.run(name, args)
                 calls[-1] = (name, args, out)
                 if name == "ask_mentat":                  # Mentat had no physics for it: file the bug
-                    log_mentat_gap(user, str(args.get("question") or ""), out, "through Haiku", body.get("save") is True)
+                    q = str(args.get("question") or "")
+                    log_mentat_gap(user, q, out, f"through {brain.label}", body.get("save") is True)
+                    card = mentat_card(q, out)
+                    if card:
+                        cards.append(card)
                 return out
 
             schemas = tools.schemas()
             if force in ("ask_mentat", "make_music") and rest.startswith("(the user chose"):
                 force = None                     # nothing to act on yet: let Skippy ask
             prompt += chat.language_instruction(body.get("lang"))
-            if chat.wants_barney(rest) and not force:
-                # "Give it to me Barney Style": explain the whole conversation (Mentat's answers included) plainly,
+            if barney:
+                # Barney Style: Skippy Core explains the whole conversation (Mentat's answers included) plainly,
                 # grounded in what Mentat found. No tools: nothing new is computed or looked up.
                 prompt += chat.barney_instruction()
-                schemas = None
-            text = skippy.reply(prompt,
-                                chat.build_messages(body.get("history"), rest),
-                                tools=schemas, run_tool=run_tool, model=model, force_tool=force)
+                schemas, force = None, None
+                rest = rest if chat.wants_barney(rest) else chat.BARNEY_PHRASE
+            convo = chat.build_messages(body.get("history"), rest)
+            text = bot.reply(prompt, convo, tools=schemas, run_tool=run_tool, model=model, force_tool=force)
+            if (schemas and "ask_mentat" not in used and chat.claims_mentat(text)
+                    and any(t.get("name") == "ask_mentat" for t in schemas)):
+                # The brain SAID Mentat answered but never called it (a local model writing the tool call as text, then
+                # inventing the result and its sources). That answer is thrown away: the turn runs again with Mentat
+                # forced, so every number shown comes from Mentat itself.
+                print(json.dumps({"event": "mentat_claim_without_call", "brain": brain.id, "model": model}), flush=True)
+                text = bot.reply(prompt, convo, tools=schemas, run_tool=run_tool, model=model, force_tool="ask_mentat")
+                if "ask_mentat" not in used:
+                    # Not every brain honours a forced tool (llama-swap ignores tool_choice): then the portal asks Mentat
+                    # itself, with the person's own words, and the brain only explains the answer it is handed (no tools).
+                    try:
+                        out = run_tool("ask_mentat", {"question": rest})
+                    except chat_tools.ToolError as exc:
+                        out = json.dumps({"error": str(exc)})
+                    handed = convo[:-1] + [{"role": "user", "content": (
+                        f"{rest}\n\n[Mentat was asked this question and answered (its own JSON, unedited): {out[:6000]}]\n"
+                        "Answer from Mentat's result only, as the physics section of your instructions says.")}]
+                    text = bot.reply(prompt, handed, tools=None, run_tool=None, model=model)
         except chat.ChatError as exc:
             return jsonify(error=str(exc)), 502
+        text = chat.strip_sentinels(text)
         mentat_on = tools.mentat_ok
         where = tools.mentat_where
-        # One line per reply in Cloud Run's logs: who, which model, which tools (never the text).
-        print(json.dumps({"event": "chat", "user": user["email"], "model": model,
+        # One line per reply in Cloud Run's logs: who, which brain, which tools (never the text).
+        print(json.dumps({"event": "chat", "user": user["email"], "brain": brain.id, "model": model,
                           "tools": used, "mentat_available": mentat_on, "mentat_where": where}), flush=True)
         if body.get("save") is True:             # only when they ticked "Allow us to save your questions"; never by default
             telemetry_web.record_chat(message, text, model, calls, forced=force)
         return jsonify(reply=text, tools=used, mentat_available=mentat_on, mentat_where=where,
-                       media=tools.media)
+                       media=tools.media, brain=brain.id, mentat=cards, barney=barney)
 
     # ── Skippy Memory: every saved AI conversation (Grok, Claude, ...), to continue here (admin only) ──
     @talk.post("/memory")

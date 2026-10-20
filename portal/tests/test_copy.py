@@ -150,6 +150,8 @@ def test_logs_are_copied_whole_with_a_button_but_stay_selectable(env):
 def test_chat_turns_backticked_text_into_chips_and_asks_skippy_to_use_them():
     page = (Path(__file__).resolve().parents[1] / "templates" / "_chat.html").read_text(encoding="utf-8")
     assert "function fill(el, text)" in page and 'chip.className = "code"' in page
-    assert "fill(pending," in page and "fill(body," in page                              # both the history and the replies go through it
+    assert "show(pending," in page and "show(body," in page and "else fill(el, text)" in page   # history and replies: fill(), or Markdown
+    md = (Path(__file__).resolve().parents[1] / "static" / "skippy-md.js").read_text(encoding="utf-8")
+    assert '"code"' in md and "copy chip" in md                                             # whose `code` is the same copy chip
     prompt = chat.system_prompt("Pal")
     assert "backticks" in prompt and "`106969`" in prompt and "one-click copy" in prompt

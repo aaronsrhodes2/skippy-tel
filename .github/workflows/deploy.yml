@@ -302,6 +302,32 @@ jobs:
             --role=roles/secretmanager.secretAccessor >/dev/null \
             || { echo "::warning::couldn't let the portal read $s: buttons stay off"; exit 0; }
           echo "EXTRA_SECRETS=,GITHUB_ACTIONS_TOKEN=$s:latest" >> "$GITHUB_ENV"
+      - name: Copy the chat brains' keys into Secret Manager (Skippy Core, Gemini)
+        # Same pattern as above, one per brain (portal/brains.py): a repo secret PORTAL_<NAME> → Secret Manager <secret> →
+        # the portal's env <NAME>. A missing one only means that brain isn't offered: never a failed deploy.
+        env:
+          SKIPPY_CORE_URL: ${{ secrets.PORTAL_SKIPPY_CORE_URL }}
+          SKIPPY_CORE_API_KEY: ${{ secrets.PORTAL_SKIPPY_CORE_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.PORTAL_GEMINI_API_KEY }}
+          GEMINI_FREE_API_KEY: ${{ secrets.PORTAL_GEMINI_FREE_API_KEY }}
+        run: |
+          add=""
+          for pair in SKIPPY_CORE_URL:skippy-core-url SKIPPY_CORE_API_KEY:skippy-core-api-key \
+                      GEMINI_API_KEY:gemini-api-key GEMINI_FREE_API_KEY:gemini-free-api-key; do
+            name=${pair%%:*}; s=${pair#*:}; value=${!name}
+            if [ -z "$value" ]; then echo "::notice::no PORTAL_$name repo secret: that brain isn't offered"; continue; fi
+            gcloud secrets describe "$s" >/dev/null 2>&1 || gcloud secrets create "$s" --replication-policy=automatic >/dev/null 2>&1 \
+              || { echo "::warning::couldn't create $s"; continue; }
+            current=$(gcloud secrets versions access latest --secret="$s" 2>/dev/null || true)
+            if [ "$current" != "$value" ]; then
+              printf '%s' "$value" | gcloud secrets versions add "$s" --data-file=- >/dev/null || { echo "::warning::couldn't store $s"; continue; }
+              echo "Stored a new version of \`$s\`." >> "$GITHUB_STEP_SUMMARY"
+            fi
+            gcloud secrets add-iam-policy-binding "$s" --member="serviceAccount:$RUNTIME_SA" \
+              --role=roles/secretmanager.secretAccessor >/dev/null || { echo "::warning::couldn't let the portal read $s"; continue; }
+            add="$add,$name=$s:latest"
+          done
+          echo "EXTRA_SECRETS=${EXTRA_SECRETS:-}$add" >> "$GITHUB_ENV"
       - name: Note the revision serving now (the way back if this deploy goes wrong)
         # Recorded BEFORE the deploy, because afterwards "the previous one" can no longer be told apart from "the new one".
         # A new service has none: then there is nothing to roll back to, and a failed first deploy just stays red.

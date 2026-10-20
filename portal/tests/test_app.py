@@ -263,8 +263,8 @@ def test_chat_round_trip(env):
     resp = client.post("/chat/send", json={"message": "status?",
                                            "history": [{"role": "user", "content": "hi"},
                                                        {"role": "assistant", "content": "yo"}]})
-    assert resp.get_json() == {"reply": "Obviously.", "tools": [],
-                                "mentat_available": False, "mentat_where": None, "media": []}
+    assert resp.get_json() == {"reply": "Obviously.", "tools": [], "mentat_available": False, "mentat_where": None,
+                               "media": [], "brain": "core", "mentat": [], "barney": False}
     system, messages = skippy.seen
     assert "Captain" in system
     assert messages[-1] == {"role": "user", "content": "status?"}
@@ -932,21 +932,35 @@ def test_task_failure_is_reported_not_raised(env, monkeypatch):
     assert not result["ok"] and "bot token" in result["message"]
 
 
-def test_visitors_get_mentat_and_barney_style_only_and_the_captain_gets_haiku(env):
+def test_guests_get_skippy_core_the_captain_picks_and_barney_style_is_always_skippy_core(env):
     client, _, skippy = env
     login(client, ADMIN)
     for phrase in ("hi", "trust the awesomeness", "Put on your Thinking Cap", "use sonnet", "model: claude-opus-5", "solid gold"):
-        resp = client.post("/chat/send", json={"message": phrase, "model": "claude-opus-5"})        # the Captain's Opus lives in the private Skippy
-        assert resp.status_code == 200 and "model" not in resp.get_json(), phrase
-        assert skippy.model == SETTINGS["CHAT_MODEL"] == "claude-haiku-4-5", phrase
-    skippy.seen = skippy.tools = None
+        resp = client.post("/chat/send", json={"message": phrase, "model": "claude-opus-5"})        # words and a "model" field pick nothing
+        assert resp.status_code == 200 and resp.get_json()["brain"] == "core" and skippy.model == "chat", phrase
+    for brain, model in (("haiku", "claude-haiku-5-5"), ("sonnet", "claude-sonnet-5-5"), ("opus", "claude-opus-5-5"), ("core", "chat")):
+        resp = client.post("/chat/send", json={"message": "hi", "brain": brain})                    # the Captain's picker
+        assert resp.status_code == 200 and resp.get_json()["brain"] == brain and skippy.model == model, brain
+    assert client.post("/chat/send", json={"message": "hi", "brain": "gpt-9"}).status_code == 403
+    resp = client.post("/chat/send", json={"message": "explain", "brain": "opus", "barney": True})  # Barney Style is Skippy Core, even for him
+    assert resp.get_json()["brain"] == "core" and skippy.model == "chat" and skippy.tools is None and "Barney Style" in skippy.seen[0]
     login(client, FRIEND)
-    resp = client.post("/chat/send", json={"message": "hi"})                                        # a visitor's plain message is Mentat's, never a model's
-    assert resp.status_code in (200, 503) and skippy.seen is None
-    resp = client.post("/chat/send", json={"message": "/music something calm", "raw": False})
-    assert skippy.seen is None
-    resp = client.post("/chat/send", json={"message": "Give it to me Barney Style"})                 # Barney Style: Haiku explaining, with no tools at all
+    resp = client.post("/chat/send", json={"message": "hi"})                                        # a guest's brain: Skippy Core
+    assert resp.status_code == 200 and resp.get_json()["brain"] == "core" and skippy.model == "chat"
+    for brain in ("haiku", "sonnet", "opus", "gemini", "gemini-free"):
+        assert client.post("/chat/send", json={"message": "hi", "brain": brain}).status_code == 403, brain   # paid models: the Captain only
+    resp = client.post("/chat/send", json={"message": "Give it to me Barney Style"})                 # Barney Style: no tools at all
     assert resp.status_code == 200 and skippy.tools is None and skippy.force_tool is None and "Barney Style" in skippy.seen[0]
+
+
+def test_only_the_captain_sees_the_brain_picker(env):
+    client, _, _ = env
+    login(client, ADMIN)
+    page = client.get("/chat").data.decode()
+    assert 'data-sheet="brain"' in page and 'data-brain="opus"' in page and 'data-brain="gemini-free"' in page
+    login(client, FRIEND)
+    page = client.get("/chat").data.decode()
+    assert 'data-sheet="brain"' not in page and 'data-brain=' not in page and "claude-opus" not in page
 
 
 def test_there_is_one_chat_interface_and_it_is_the_skippy_app(env):

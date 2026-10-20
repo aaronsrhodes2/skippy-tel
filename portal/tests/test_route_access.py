@@ -168,18 +168,22 @@ def test_the_public_chats_tools_are_only_the_portals_own_and_never_a_shell_a_fil
         assert not re.search(r"exec|shell|bash|write|edit|deploy|push|commit|run_|file", name), name
 
 
-def test_barney_style_gives_haiku_no_tools_at_all_and_a_friend_never_gets_admin_tools(world):
+def test_barney_style_gives_skippy_core_no_tools_and_a_friend_gets_only_the_public_tools_on_skippy_core(world):
     fake = world.fake_skippy
     client = world.test_client()
     login(client, FRIEND_CHAT_ONLY)
     client.post("/chat/send", json={"message": "Give it to me Barney Style", "history": []})
-    assert not fake.tools                                                          # Barney Style: no tools at all (nothing is computed or looked up)
+    assert not fake.tools and fake.model == "chat"                                 # Barney Style: Skippy Core, no tools at all
     fake.tools = fake.run_tool = None
     fake.seen = None
-    client.post("/chat/send", json={"message": "is the server up?", "history": []})
-    assert fake.seen is None and fake.tools is None                                # visitor mode: a plain message is Mentat's, no model and no tools
+    r = client.post("/chat/send", json={"message": "is the server up?", "history": []})
+    names = {t["name"] for t in (fake.tools or [])}
+    assert r.get_json()["brain"] == "core" and fake.model == "chat"                 # a guest's brain is Skippy Core
+    assert names <= ALLOWED_PUBLIC_TOOLS and not names & ADMIN_TOOLS                # and only the portal's public tools
+    for asked in ("opus", "sonnet", "haiku", "gemini", "gemini-free", "nonsense"):
+        assert client.post("/chat/send", json={"message": "hi", "brain": asked}).status_code == 403, asked   # never a paid (or any other) brain
     client.post("/chat/send", json={"message": "/music something calm", "history": []})
-    assert fake.seen is None                                                        # and no verb reaches anything but Mentat
+    assert not {t["name"] for t in (fake.tools or [])} & ADMIN_TOOLS and fake.force_tool is None   # a verb forces nothing for a guest
     from test_app import ADMIN as CAPTAIN
     login(client, CAPTAIN)
     client.post("/chat/send", json={"message": "is the server up?", "history": []})

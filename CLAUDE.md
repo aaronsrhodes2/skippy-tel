@@ -226,11 +226,14 @@ top bar, and the one cork board below, where everything else about the game is a
 ## Home is the app portal (`/`); Skippy the Magnificent is the chat app (`/chat`), in two modes
 
 `/` is Home: signed out, the Google sign-in; signed in, the launcher (a card per sub-portal the person may use; `/apps` is the same page under its older
-address). The Skippy tile opens `/chat` (needs the chat grant). `/chat` has two modes, decided on the server, never by what the page sends:
-**visitor mode** (everyone with the grant): ONLY Mentat (straight, "raw") and Barney Style (Haiku explaining what Mentat found, NO tools); a plain
-message, a slash verb or a model name never reaches Haiku or any portal tool. **Admin mode** (the Captain): the AGENT (`templates/_workshop.html`,
-Skippy Desktop: Claude Code on skippy-pc) with a key to flip to the quick general Skippy (Haiku with the portal's tools); his page wears the purple theme
-(`body.captain`). `/me` is the Captain's private MCP access (list + test his servers, through the bridge) and Home integration only: the other panes are Graveyard entries (`modules.py`, ids `me-<pane>`): the Captain retires one in the Admin Graveyard when its telemetry (`pane:<id>` taps, the Home pane's "Least-used UI") says nobody opens it, and revives it there. The Experiments show/hide moved to the Experiments page's About sheet. Showing the agent only to him is a convenience, not the security: every `/me/workshop/*`
+address). The Skippy tile opens `/chat` (needs the chat grant). **Which model answers is `portal/brains.py`'s call, on the server, never the page's**
+(2026-10-19): **guests** get Skippy Core only (the local model on skippy-core, reached through its Tailscale Funnel + `SKIPPY_CORE_API_KEY`; the same
+Anthropic SDK, another base_url) with the portal's public tools (Mentat, game status); if Core is down they get Mentat straight, never a paid model.
+**The Captain** picks in the brain sheet: Skippy Core (default), Claude Haiku/Sonnet/Opus, Gemini free/paid. Every brain calls Mentat for physics; the
+reply carries the ⚛ card (Mentat's result and proof) with **Barney Style?**, which always runs on Skippy Core with no tools. A reply that claims Mentat
+without calling it is thrown away and Mentat is forced (or asked by the portal itself). Dev: `portal/tests/dev_chat.py` (real Core over SSH, real Mentat).
+The Captain also has the AGENT (`templates/_workshop.html`, Skippy Desktop: Claude Code on skippy-pc) with a key to flip to the quick chat; his page
+wears the purple theme (`body.captain`). `/me` is the Captain's private MCP access (list + test his servers, through the bridge) and Home integration only: the other panes are Graveyard entries (`modules.py`, ids `me-<pane>`): the Captain retires one in the Admin Graveyard when its telemetry (`pane:<id>` taps, the Home pane's "Least-used UI") says nobody opens it, and revives it there. The Experiments show/hide moved to the Experiments page's About sheet. Showing the agent only to him is a convenience, not the security: every `/me/workshop/*`
 call checks for the Captain again and needs the `X-Workshop` header, and
 **`portal/tests/test_route_access.py` classifies every route (public, machine, beacon, member, grant, admin) and fails on any new unclassified one
 or any under-guarded one**, probing nobody, a signed-in stranger and a chat-only friend. A new route must be added to its REGISTRY.

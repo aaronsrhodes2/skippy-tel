@@ -80,17 +80,15 @@ def test_raw_needs_the_same_sign_in_and_only_a_literal_true_turns_it_on(env):
     assert skippy.seen is not None
 
 
-def test_the_chat_has_the_switch_and_keeps_raw_turns_out_of_the_history(env):
+def test_the_chat_has_a_barney_key_that_asks_and_keeps_mentats_answers_in_the_history(env):
     client, _, _ = env
     login(client, ADMIN)
     page = client.get("/chat").data.decode()
-    assert 'class="key barney" aria-pressed="false"' in page and "Barney Style" in page      # a glyph key, unlit by default
-    assert "Mentat only" not in page
-    assert "const raw = !barney.on" in page                                      # not lit means straight to Mentat
-    assert "barney.on = false" not in page and 'aria-pressed="true"' not in page.split('class="key barney"')[1][:60]
-    assert 'const BARNEY_PHRASE = "Give it to me Barney Style"' in page          # switching it on fills the box
-    assert "Mentat's own answer, no Haiku:" in page                              # raw answers are kept for Barney Style to explain
-    assert "if (!raw) { history.push(" not in page
+    assert 'class="key barney"' in page and "Barney Style" in page               # a glyph key: one press asks
+    assert 'const BARNEY_PHRASE = "Give it to me Barney Style"' in page
+    assert "ask(BARNEY_PHRASE, {barney: true})" in page                         # the key, and the ⚛ card's "Barney Style?"
+    assert "Mentat's own answer to" in page                                     # Mentat's answers go into the history for Barney Style
+    assert "raw: raw" not in page                                               # nothing sends a message straight to Mentat by default
 
 
 # ── a physics gap is logged and answered "failed due to incompetence" ──────────────────────────────────────────
@@ -136,7 +134,7 @@ def test_a_modelled_answer_or_an_outage_is_not_a_gap(capsys):
     assert chat_tools.mentat_gap({"value": None, "notes": "x"})["reason"] == "x"
 
 
-def test_a_gap_through_haiku_is_logged_too_and_haiku_is_told_to_say_it(capsys):
+def test_a_gap_through_a_brain_is_logged_too_and_the_brain_is_told_to_say_it(capsys):
     skippy = FakeSkippy()
     skippy._normal = True
     client, _, stop = _setup(GAP, skippy)
@@ -146,7 +144,7 @@ def test_a_gap_through_haiku_is_logged_too_and_haiku_is_told_to_say_it(capsys):
     client.post("/chat/send", json={"message": "bend a steel bar"})
     stop.set()
     [gap] = _events(capsys, "mentat_gap")
-    assert gap["how"] == "through Haiku" and gap["question"] == "bend a steel bar"
+    assert gap["how"] == "through Skippy Core" and gap["question"] == "bend a steel bar"     # the Captain's default brain
     import chat
     assert "failed due to incompetence" in chat.system_prompt("Pat", is_admin=False)
 
@@ -176,3 +174,68 @@ def test_an_ordinary_message_gets_no_barney_instruction_and_keeps_its_tools(env)
     client.post("/chat/send", json={"message": "is the server up?"})
     system, _ = skippy.seen
     assert "## Barney Style" not in system and skippy.tools is not None
+
+
+# ── a brain that SAYS Mentat answered but never called it ───────────────────────────────────────────────────────
+
+def test_a_reply_claiming_mentat_without_calling_it_is_thrown_away_and_mentat_is_forced(capsys):
+    skippy = FakeSkippy()
+    skippy._normal = True
+    client, asked, stop = _setup(ANSWER, skippy)
+    login(client, ADMIN)
+    rounds = []
+
+    def reply(system, messages, tools=None, run_tool=None, force_tool=None, **_):
+        rounds.append(force_tool)
+        if force_tool == "ask_mentat":                     # forced: the tool really runs
+            run_tool("ask_mentat", {"question": "light in diamond"})
+            return "Mentat computed 159.6 m/s."
+        return "[ask_mentat: light in diamond] Mentat computed it: 124,100 km/s. Mentat cites: CRC Handbook."   # invented
+    skippy.reply = reply
+    d = client.post("/chat/send", json={"message": "How fast does light travel through diamond?"}).get_json()
+    stop.set()
+    assert rounds == [None, "ask_mentat"] and asked == ["light in diamond"]
+    assert "CRC" not in d["reply"] and d["tools"] == ["ask_mentat"] and d["mentat"][0]["value"] == 159.6
+    assert _events(capsys, "mentat_claim_without_call")
+
+
+def test_claims_mentat_spots_the_usual_phrasings_and_not_ordinary_mentions():
+    import chat
+    for text in ("Mentat computed it", "[ask_mentat: x]", "According to Mentat, 5 m/s", "<tool_call>{...}"):
+        assert chat.claims_mentat(text), text
+    for text in ("Mentat is offline right now.", "Ask me a physics question and I'll ask Mentat.", ""):
+        assert not chat.claims_mentat(text), text
+
+
+def test_when_a_brain_ignores_the_forced_tool_the_portal_asks_mentat_itself_and_the_brain_only_explains(capsys):
+    skippy = FakeSkippy()
+    skippy._normal = True
+    client, asked, stop = _setup(ANSWER, skippy)
+    login(client, ADMIN)
+    seen = []
+
+    def reply(system, messages, tools=None, run_tool=None, force_tool=None, **_):
+        seen.append((force_tool, tools is not None, messages[-1]["content"]))
+        if tools is None:                                  # handed Mentat's answer: explains it
+            return "Mentat computed 159.6 m/s."
+        return "Mentat computed it: 42 m/s. Mentat cites: a book."   # never calls the tool, forced or not
+    skippy.reply = reply
+    d = client.post("/chat/send", json={"message": "how fast is the ball?"}).get_json()
+    stop.set()
+    assert asked == ["how fast is the ball?"]                           # the portal asked Mentat, in the person's words
+    assert [s[0] for s in seen] == [None, "ask_mentat", None] and seen[2][1] is False and "159.6" in seen[2][2]
+    assert d["reply"] == "Mentat computed 159.6 m/s." and d["mentat"][0]["value"] == 159.6 and "42" not in d["reply"]
+
+
+def test_a_guest_whose_skippy_core_is_down_gets_mentat_straight_never_a_paid_model(monkeypatch):
+    import brains
+    for v in ("SKIPPY_CORE_URL", "SKIPPY_CORE_API_KEY"):
+        monkeypatch.delenv(v, raising=False)
+    app = portal.create_app(dict(SETTINGS), vm=FakeVm())     # no injected fake: brains are only as ready as their keys
+    client, asked = app.test_client(), []
+    stop = _home_with_mentat(app.test_client(), lambda q: asked.append(q) or {"result": ANSWER})
+    login(client, FRIEND)
+    d = client.post("/chat/send", json={"message": "escape velocity of Mars?"}).get_json()
+    stop.set()
+    assert not brains.BRAINS["core"].ready()
+    assert d["raw"] is True and json.loads(d["reply"]) == ANSWER and asked == ["escape velocity of Mars?"]
