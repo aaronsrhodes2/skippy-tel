@@ -110,6 +110,17 @@ What works on the chat slot (Qwen3-30B-A3B Q4_K_M, llama-swap v265, 2026-10-19):
   thinking off (or `/no_think` at the end of the user's message). With thinking on, the reply carries `thinking` blocks
   with an empty signature: send them back unchanged in the assistant turn, or drop them.
 - The portal should use `/v1/messages`; `/v1/chat/completions` is not needed for tools.
+- **How the chat slot uses tools** (5 tries each, one `ask_mentat` tool, 2026-10-19):
+  - A physics question calls the tool **every time** (10/10 with thinking off or on, with or without "use the tool"),
+    always as a real `tool_use` block. It never wrote a tool call as text (unlike Qwen3-Coder on the coder slot).
+  - **A forced tool is not honoured**: `tool_choice: {"type": "any"}` or `{"type": "tool", "name": ...}` on
+    `/v1/messages`, and `"required"` or a named function on `/v1/chat/completions`, still give a plain answer to a
+    non-physics question (at best 2 of 5 with thinking on). The portal must not rely on forcing: when a reply needs
+    Mentat and didn't call it, the portal asks Mentat itself (brains.py already does).
+  - `tool_choice: {"type": "none"}` held with thinking off (0/5 calls) and was ignored with thinking on (5/5 called).
+- **The portal's settings:** `SKIPPY_CORE_URL` (the Funnel URL, no `/v1`) and `SKIPPY_CORE_API_KEY`, which deploy.yml
+  copies into Cloud Run from the repo secrets `PORTAL_SKIPPY_CORE_URL` and `PORTAL_SKIPPY_CORE_API_KEY`;
+  `SKIPPY_CORE_MODEL` picks another slot (default `chat`).
 
 ## Status and recovery
 
