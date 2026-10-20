@@ -71,7 +71,9 @@
     return blocks;
   }
 
-  function render(text, doc) {
+  // opts.block(b): a hook for a block the caller shows its own way (Skippy chat turns a long or html/svg/markdown fence into a
+  // collapsible artifact, static/skippy-artifacts.js); it returns an element, or nothing for the usual rendering.
+  function render(text, doc, opts) {
     doc = doc || document;
     const el = (tag, cls, txt) => { const e = doc.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
     const fill = (parent, nodes) => nodes.forEach(n => {
@@ -83,6 +85,8 @@
     });
     const box = el("div", "md");
     parse(text).forEach(b => {
+      const own = opts && opts.block && opts.block(b);
+      if (own) { box.appendChild(own); return; }
       if (b.t === "p") { const p = el("p"); fill(p, b.inl); box.appendChild(p); }
       else if (b.t === "h") { const h = el("h" + (b.n + 3), "mdh"); fill(h, b.inl); box.appendChild(h); }
       else if (b.t === "code") { const pre = el("pre", "codeblock"); pre.appendChild(el("code", null, b.text)); if (b.lang) pre.title = b.lang; box.appendChild(pre); }

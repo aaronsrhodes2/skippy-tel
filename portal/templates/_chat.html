@@ -178,8 +178,13 @@
     }
     // Who said it is a glyph, not a name: you, Skippy (the can), or Mentat on its own (the atom).
     // Skippy's turns are Markdown (static/skippy-md.js: built from DOM nodes, never innerHTML); yours stay as you typed them.
+    // What a reply produces (a plan, a document, long code, a playable html page, an svg) becomes a collapsible artifact card
+    // (static/skippy-artifacts.js); short code and prose stay in the words.
+    if (window.SkippyArtifacts) SkippyArtifacts.configure({glyph: id => glyph(id), md: t => SkippyMd.render(t, document),
+      pager: (pg, pips) => Bridge.pager(pg, {pips: pips}), modelViewer: "{{ url_for('static', filename='vendor/model-viewer-4.0.0.min.js') }}"});
+    const artifact = b => { const s = window.SkippyArtifacts && SkippyArtifacts.fromBlock(b); return s ? SkippyArtifacts.card(s, {onToggle: () => logPager.refresh()}) : null; };
     function show(el, text, md) {
-      if (md && window.SkippyMd && text !== "…") { el.replaceChildren(SkippyMd.render(text, document)); el.classList.add("rich"); }
+      if (md && window.SkippyMd && text !== "…") { el.replaceChildren(SkippyMd.render(text, document, {block: artifact})); el.classList.add("rich"); }
       else fill(el, text);
     }
     function add(role, text, extra) {
@@ -336,13 +341,8 @@
         alive().pulse(data.gap ? 0.6 : 1.8);    // an answer comes back: it surges (less so for "failed due to incompetence")
         pending.parentElement.append(receipt(data, false));
         (data.mentat || []).forEach(c => pending.parentElement.append(mentatCard(c)));
-        (data.media || []).forEach(m => {           // clips skippy-pc made for this reply
-          const clip = document.createElement("div"); clip.className = "clip";
-          const label = document.createElement("div"); label.className = "rcpt";
-          label.append(glyph("wave")); if (m.title) { const t = document.createElement("span"); t.className = "why"; t.textContent = m.title + (m.seconds ? " · " + m.seconds + "s" : ""); label.append(t); }
-          const audio = document.createElement("audio");
-          audio.controls = true; audio.preload = "metadata"; audio.src = m.url; audio.style.width = "100%";
-          clip.append(label, audio); pending.parentElement.append(clip);
+        (data.media || []).forEach(m => {           // what skippy-pc made for this reply (a song today): an artifact, opened
+          pending.parentElement.append(window.SkippyArtifacts ? SkippyArtifacts.card(SkippyArtifacts.fromMedia(m), {onToggle: () => logPager.refresh()}) : document.createTextNode(""));
         });
         // Mentat's own answers go in the history marked as such, so Barney Style can explain them (and only them).
         history.push({role: "user", content: text + (files.length ? " [attached: " + files.map(f => f.name).join(", ") + "]" : "")},

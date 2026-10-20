@@ -78,7 +78,12 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=8776)
     args = ap.parse_args()
     os.environ["SKIPPY_CORE_URL"] = args.core
-    os.environ.setdefault("SKIPPY_CORE_API_KEY", "dev")     # llama-swap has no key yet; the SDK wants one
+    if not os.environ.get("SKIPPY_CORE_API_KEY"):             # llama-swap's key: from the vault into this process only, never printed
+        vault = Path("G:/My Drive/vault/.env")
+        for line in vault.read_text(encoding="utf-8").splitlines() if vault.is_file() else []:
+            if line.startswith("SKIPPY_CORE_API_KEY="):
+                os.environ["SKIPPY_CORE_API_KEY"] = line.split("=", 1)[1].strip().strip("\"'")
+        os.environ.setdefault("SKIPPY_CORE_API_KEY", "dev")
     for k in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GEMINI_FREE_API_KEY"):
         os.environ.pop(k, None)
     from werkzeug.serving import make_server

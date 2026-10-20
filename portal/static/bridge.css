@@ -173,6 +173,31 @@ canvas.alive { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0;
 .mentat-card .mc-steps { margin: 6px 0; padding-left: 1.4em; } .mentat-card .mc-steps li { margin: 2px 0; }
 .mentat-card .mc-src { font-size: .74rem; color: var(--muted); }
 .mentat-card .mc-barney { margin-top: 6px; display: inline-flex; align-items: center; gap: 6px; color: var(--amber); }
+/* artifacts (static/skippy-artifacts.js): one line collapsed; opened in place on a wide screen, as a full-screen sheet on a phone */
+.artifact { clear: both; margin: 8px 0; border: 1px solid var(--accent); background: #02080a; }
+.artifact > summary { display: flex; align-items: center; gap: 8px; padding: 7px 9px; cursor: pointer; list-style: none; color: var(--accent); }
+.artifact > summary::-webkit-details-marker { display: none; }
+.artifact > summary .g { width: 18px; height: 18px; flex: none; }
+.artifact .art-title { color: #fff; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.artifact .art-size { margin-left: auto; flex: none; font-size: .72rem; color: var(--muted); }
+.artifact .art-body { padding: 0 8px 8px; white-space: normal; }
+.art-keys { display: flex; gap: 6px; justify-content: flex-end; margin: 0 0 6px; }
+.art-keys .key.sm { width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.art-frame { display: block; width: 100%; height: 70vh; min-height: 320px; border: 1px solid var(--dim-green-hi); background: #000; }
+.art-img { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; background: #111; }
+.art-media { display: block; width: 100%; max-height: 70vh; }
+.art-model { display: block; width: 100%; height: 60vh; background: #05090b; --poster-color: transparent; }
+.art-code { margin: 0; padding: 8px; font: .8rem/1.4 var(--mono, monospace); color: var(--ink); background: #05090b;
+            border: 1px solid var(--dim-green-hi); white-space: pre-wrap; overflow-wrap: anywhere; }
+.art-sheet { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; gap: 6px; padding: 8px; background: #000; }
+.art-sheet .art-head { display: flex; align-items: center; gap: 8px; color: var(--accent); }
+.art-sheet .art-head .g { width: 20px; height: 20px; } .art-sheet .art-head .art-title { flex: 1; color: #fff; font-weight: 600;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.art-sheet .art-keys { margin: 0; }
+.art-sheet .art-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.art-sheet .art-body > .pg { flex: 1; min-height: 0; }
+.art-sheet .art-frame, .art-sheet .art-model { flex: 1; height: auto; min-height: 0; }
+.art-sheet .art-img, .art-sheet .art-media { max-height: none; flex: 1; min-height: 0; object-fit: contain; }
 /* files with the next message (templates/_chat.html takeFiles): a row of chips over the box, thumbnails for pictures */
 .chat-bridge .files { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
 .file-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 4px 3px 6px; font-size: .78rem;
