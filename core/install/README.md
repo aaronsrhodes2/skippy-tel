@@ -65,3 +65,49 @@ and runs `core/llm/models.py check`. Missing models are expected at this point. 
 Re-running it is safe.
 
 From then on the box is reachable as `ssh aaron@skippy-core` over the tailnet, and the rest can be done remotely.
+
+## Hand it to skippy-pc (once, from skippy-pc)
+
+The Captain never types keys or codes after this; skippy-pc (Claude, the box's admin) does the rest over SSH.
+
+- skippy-pc's key: `cat ~/.ssh/id_ed25519.pub | ssh aaron@skippy-core 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'` (the one password prompt), then on the box
+  `echo 'aaron ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/90-aaron && sudo chmod 440 /etc/sudoers.d/90-aaron && sudo visudo -c`.
+- Secrets go from the vault straight into root-only files, never through a terminal or chat:
+  `tr -d '\r' < "/g/My Drive/vault/.env" | ssh aaron@skippy-core 'sudo install -m 0600 /dev/stdin /etc/skippy-core/vault.env'`.
+  The deployer's `GITHUB_TOKEN` in `/etc/skippy-core/core.env` is the vault's `GITHUB_DEPLOYER_TOKEN` (the repo is private:
+  it needs Contents and Actions read; it is also what lets `git fetch` through).
+- Ubuntu's installer gives `/` only 100 GB of the disk: `sudo lvextend -r -l +100%FREE /dev/ubuntu-vg/ubuntu-lv` (grows, erases nothing).
+
+## Headless and remote-only (`harden.sh`)
+
+```bash
+sudo bash harden.sh
+```
+
+```bash
+sudo bash harden.sh --apply
+```
+
+```bash
+sudo bash harden.sh --check
+```
+
+It makes the box recover by itself and keeps two ways in:
+
+- **Recovers by itself:** boots to text; the AMD chip watchdog (`sp5100_tco`, which Ubuntu deny-lists, so a small
+  service loads it) reboots a box that stops for 60 s; a kernel panic reboots after 10 s; a failed boot doesn't wait
+  at a menu; fsck repairs instead of asking; Wake-on-LAN on `eno1`; security updates install by themselves and a
+  reboot they need happens at 04:30 Pacific.
+- **Two doors:** SSH over the tailnet and from the home LAN (192.168.0.0/24), keys only, `aaron` only. Tailscale
+  updates itself. The firewall denies everything else coming in; enabling it arms a 5-minute dead-man switch that
+  turns it off again unless both doors were checked and the timer stopped.
+- **Lean:** VM tools, modem manager, iSCSI, multipath, fan networking, cloud-init, apport and snapd are removed
+  (their dependencies are marked kept first, so autoremove can't take SSH or Docker with them). Disk health
+  (`smartd`) and sensors are added.
+
+`--check` is read-only and exits 1 when any piece is missing: the health checks run it.
+
+Things a script can't do, and need the Captain once:
+- **Tailscale key expiry:** in the Tailscale admin console → Machines → skippy-core → ⋯ → *Disable key expiry*.
+  Otherwise the box drops off the tailnet when its login expires (the LAN door still works).
+- **BIOS:** *Restore on AC Power Loss = Power On*, so a power cut doesn't leave it off. Only a visit (or a KVM) changes it.

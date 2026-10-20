@@ -66,9 +66,10 @@ Inside the return window, do the burn-in from the plan (section 3) before wiping
    (`HF_ID=... python3 core/llm/models.py fetch ...`), never into a committed file. The midnight job on skippy-pc
    reads `HF_ID` from the vault by itself. The stand-ins and the three full models are not gated, so CI needs no token.
 6. **Deployer:** `sudo bash core/deployer/install.sh` (dry run), then `--apply`. In `/etc/skippy-core/core.env`, set
-   `GITHUB_TOKEN` to a **classic** token with **no scopes**: the repo is public, so the token only lifts the API rate
-   limit from 60 to 5,000 an hour (fine-grained tokens can't read check results). Copy the vault to
-   `/etc/skippy-core/vault.env` (0600). The first tick deploys `main` with stand-ins.
+   `GITHUB_TOKEN` to the vault's `GITHUB_DEPLOYER_TOKEN`: the repo is **private**, so the token is what lets the
+   box read Actions runs and `git fetch` at all (fine-grained, this repo only: Contents and Actions read). Copy the
+   vault to `/etc/skippy-core/vault.env` (0600). `core/install/README.md` shows how both go over SSH without
+   anyone typing them. The first tick deploys `main` with stand-ins.
 7. Online the slots one at a time (`CORE_FULL=chat`, then `chat,general`, then `all`), checking
    `python3 core/deployer/deployer.py status` after each.
 8. Record the baseline numbers (tokens/s per model, load times, watts, temperatures) for the snapshot note.
