@@ -119,7 +119,7 @@
     {% endif %}
   {% endif %}
   <div class="ps-bar">
-    <select id="ps-project" aria-label="Project" hidden>
+    <select id="ps-project" aria-label="Folder" title="Which project or folder the agent works in (fixed once a conversation has a message)">
       {% for p in workshop_projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
     </select>
     <select id="ps-brain" aria-label="Brain" title="Who thinks: Claude (paid), or Skippy Core's coder (local, free). Fixed once a conversation has a message.">
@@ -763,5 +763,27 @@
     if (pending && turns.length && turns[turns.length - 1].role === "assistant") {
       try { const t = JSON.parse(pending); if (t && t.task) follow({task: t.task, after: t.after || 0, turn: turns[turns.length - 1]}); } catch (e) {}
     }
+
+    // ── the handle the one chat drives this with (templates/_chat.html: the agent is two of its brains) ──
+    // Everything above is unchanged; the chat's composer, keys and chats sheet call these instead of this card's own.
+    if (typeof window !== "undefined") window.SkippyAgent = {
+      projects: PROJECTS, brains: BRAINS,
+      project: () => project, brain: () => brain, locked: () => turns.length > 0, busy: () => !!running || sending,
+      setProject(id) { if (!turns.length && known(id)) setProject(id); return project; },
+      setBrain(id) { if (!turns.length && BRAINS.some(b => b.id === id && b.ready)) setBrain(id); return brain; },
+      send(message, images) {                       // pictures as data URLs (the chat shrinks them already)
+        attached = (images || []).slice(0, MAX_IMAGES).map(u => ({url: u})); paintAttached();
+        text.value = message || ""; form.requestSubmit();
+      },
+      stop() { stopBtn.click(); },
+      newChat() { newBtn.click(); },
+      async conversations() {                       // skippy-pc's list, for the chat's sheet: [{conv, title, project, turns, last, state}]
+        const d = await history({});
+        return d && Array.isArray(d.conversations) ? d.conversations : [];
+      },
+      open(c) { return openConversation(c); },
+      conv: () => conv,
+    };
+    if (typeof window !== "undefined" && typeof Event === "function") window.dispatchEvent(new Event("skippy-agent-ready"));   // (the UI tests run this without a window)
   })();
 </script>

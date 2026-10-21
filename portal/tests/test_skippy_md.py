@@ -13,7 +13,8 @@ PORTAL = Path(__file__).resolve().parents[1]
 def test_the_chat_renders_text_parts_through_the_markdown_module_and_loads_it_first():
     front = (PORTAL / "templates" / "front.html").read_text(encoding="utf-8")
     shop = (PORTAL / "templates" / "_workshop.html").read_text(encoding="utf-8")
-    assert front.index("skippy-md.js") < front.index('include "_workshop.html"')
+    assert front.index("skippy-md.js") < front.index('include "_chat.html"')          # the agent is inside the chat (_chat.html includes it)
+    assert 'include "_workshop.html"' in (PORTAL / "templates" / "_chat.html").read_text(encoding="utf-8")
     assert "SkippyMd.render(ex.text, document)" in shop and "SkippyMd.extractQuestion(p.text)" in shop
     js = (PORTAL / "static" / "skippy-md.js").read_text(encoding="utf-8")
     assert not re.search(r"\.innerHTML|insertAdjacentHTML|eval\(|document\.write", js)     # text only goes in with textContent

@@ -31,6 +31,7 @@ import json
 import os
 import queue
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -847,12 +848,54 @@ class Workshop:
         self._core_probe = (url, now, ok)
         return ok
 
+    # What a Core run's own config folder gets from the Captain's Claude Code (~/.claude): his skills and plugins and the
+    # settings that switch them on, so both brains work the same way for him. NEVER his login: .credentials.json, any
+    # *.json holding tokens, history and sessions stay out (the folder exists precisely so his login can't win over the key).
+    SHARED_DIRS = ("skills", "plugins", "agents", "commands")
+    SHARED_SETTINGS = ("enabledPlugins", "extraKnownMarketplaces", "hooks", "effortLevel", "skipWorkflowUsageWarning")
+
+    def _share_claude_setup(self, config: str) -> None:
+        home = os.getenv("WORKSHOP_CLAUDE_HOME") or os.path.join(os.path.expanduser("~"), ".claude")
+        if not os.path.isdir(home):
+            return
+
+        def copy_if_newer(src, dst, *, follow_symlinks=True):
+            try:
+                if os.path.getmtime(dst) >= os.path.getmtime(src) and os.path.getsize(dst) == os.path.getsize(src):
+                    return dst
+            except OSError:
+                pass
+            return shutil.copy2(src, dst, follow_symlinks=follow_symlinks)
+
+        for name in self.SHARED_DIRS:
+            src = os.path.join(home, name)
+            if os.path.isdir(src):
+                try:
+                    shutil.copytree(src, os.path.join(config, name), dirs_exist_ok=True, copy_function=copy_if_newer,
+                                    ignore=shutil.ignore_patterns(".credentials*", "*.token", "auth*.json"))
+                except (OSError, shutil.Error):
+                    pass                                   # a locked file now is copied next time; never fail a run over it
+        try:
+            mine = json.loads(Path(home, "settings.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            mine = {}
+        settings = {k: mine[k] for k in self.SHARED_SETTINGS if k in mine}
+        # llama.cpp's prompt cache: Claude Code's attribution header changes every request and makes llama-server re-read
+        # the whole prompt each turn (reported: 24K tokens, 55 s a turn). Only settings.json's env turns it off.
+        settings["env"] = {**(mine.get("env") or {}), "CLAUDE_CODE_ATTRIBUTION_HEADER": "0"}
+        try:
+            Path(config, "settings.json").write_text(json.dumps(settings, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+
     def core_env(self) -> dict:
-        """child_env() for a run on Skippy Core: its own config folder (no subscription login to win over the key), the key
-        sent both ways (x-api-key and Bearer), the coding slot for every model Claude Code asks for, no side traffic."""
+        """child_env() for a run on Skippy Core: its own config folder (no subscription login to win over the key) with the
+        Captain's skills and plugins shared in, the key sent both ways (x-api-key and Bearer), the coding slot for every
+        model Claude Code asks for, no side traffic."""
         url, key = self._core_settings()
         config = os.path.join(os.path.dirname(self.sessions_path), ".skippy-workshop-core-claude")
         os.makedirs(config, exist_ok=True)
+        self._share_claude_setup(config)
         env = child_env()
         env.update(ANTHROPIC_BASE_URL=url, ANTHROPIC_API_KEY=key, ANTHROPIC_AUTH_TOKEN=key, CLAUDE_CONFIG_DIR=config,
                    ANTHROPIC_SMALL_FAST_MODEL=CORE_MODEL, ANTHROPIC_DEFAULT_HAIKU_MODEL=CORE_MODEL,

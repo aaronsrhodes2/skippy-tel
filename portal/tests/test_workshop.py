@@ -229,9 +229,10 @@ def test_the_private_skippy_is_the_front_page_for_the_captain_and_no_longer_on_t
     client, _, _ = env
     login(client, ADMIN)
     front = client.get("/chat").data.decode()
-    assert 'id="private-skippy"' in front and 'id="mode-agent"' in front and 'id="mode-quick"' in front      # the agent, and the key to the quick chat
+    assert 'id="private-skippy"' in front and 'class="agent-view"' in front                                    # one chat: the agent inside it
+    assert 'data-brain="agent-claude"' in front and "modebar" not in front and 'id="mode-agent"' not in front  # picked as a brain, no top switch
     assert "claude-sonnet-5-5" in front and "workshop isn't answering" not in front
-    assert front.index('id="mode-agent"') < front.index('id="mode-quick"')                                     # the agent is what he lands in
+    assert front.index('class="skippy-chat chat-bridge"') < front.index('id="private-skippy"')                  # inside the one chat
     dash = client.get("/me").data.decode()
     assert 'id="private-skippy"' not in dash and 'data-pane="skippy"' not in dash and 'id="server" class="apane"' in dash
 

@@ -136,3 +136,25 @@ def test_an_in_place_prompt_says_to_work_right_in_the_folder_and_never_discard_h
     assert text.startswith("## This conversation works IN PLACE") and "My Game" in text
     assert "git status" in text and "git reset --hard" in text and "{repo}" not in text
     assert not shopf.prompt().startswith("## This conversation works IN PLACE")      # a clone project's prompt is unchanged
+
+
+def test_a_core_run_gets_the_captains_skills_and_plugins_but_never_his_login(shop, shopf, tmp_path, monkeypatch):
+    import json as _json
+    home = tmp_path / "dot-claude"
+    (home / "skills" / "docker-redeploy").mkdir(parents=True)
+    (home / "skills" / "docker-redeploy" / "SKILL.md").write_text("redeploy safely", encoding="utf-8")
+    (home / "plugins").mkdir()
+    (home / "plugins" / "installed.json").write_text("{}", encoding="utf-8")
+    (home / ".credentials.json").write_text('{"token": "SECRET"}', encoding="utf-8")
+    (home / "settings.json").write_text(_json.dumps({"enabledPlugins": {"a@b": True}, "theme": "dark", "env": {"X": "1"}}), encoding="utf-8")
+    monkeypatch.setenv("WORKSHOP_CLAUDE_HOME", str(home))
+    monkeypatch.setenv("SKIPPY_CORE_URL", "https://core.example")
+    monkeypatch.setenv("SKIPPY_CORE_API_KEY", "k")
+    env = shopf.core_env()
+    config = Path(env["CLAUDE_CONFIG_DIR"])
+    assert (config / "skills" / "docker-redeploy" / "SKILL.md").read_text(encoding="utf-8") == "redeploy safely"
+    assert (config / "plugins" / "installed.json").is_file()
+    assert not (config / ".credentials.json").exists() and "SECRET" not in "".join(p.read_text(errors="ignore") for p in config.rglob("*") if p.is_file())
+    settings = _json.loads((config / "settings.json").read_text(encoding="utf-8"))
+    assert settings["enabledPlugins"] == {"a@b": True} and "theme" not in settings
+    assert settings["env"] == {"X": "1", "CLAUDE_CODE_ATTRIBUTION_HEADER": "0"}          # his env, plus the prompt-cache fix

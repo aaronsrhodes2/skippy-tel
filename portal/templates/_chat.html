@@ -13,6 +13,11 @@
     <div class="continuing" hidden><span></span><button type="button" class="key sm drop-ctx" aria-label="Stop continuing this conversation" title="Stop continuing this conversation"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></div>
     {% endif %}
     <div class="pg log" aria-live="polite"><div class="pg-flow"></div></div>
+    {% if captain and workshop_brains is defined %}
+    {# The Captain's agent, in the same stage: shown instead of the log while an agent brain is picked. Its own composer is hidden; this
+       chat's composer, keys and sheets drive it through window.SkippyAgent. It keeps its scrolling transcript (long runs, agreed). #}
+    <div class="agent-view" hidden>{% include "_workshop.html" %}</div>
+    {% endif %}
     <div class="pips" aria-hidden="true"><i></i></div>
 
     <div class="sheet" data-sheet="lang" hidden>
@@ -23,7 +28,10 @@
     <div class="sheet" data-sheet="brain" hidden>
       <div class="brain-list">{% for b in chat_brains %}
         <button type="button" class="brain-opt" data-brain="{{ b.id }}" aria-pressed="false"{% if not b.ready %} disabled{% endif %}><svg class="g" aria-hidden="true"><use href="#g-{{ b.glyph }}"/></svg>{{ b.label }}{% if b.paid %} <span class="paid" title="paid">$</span>{% endif %}<i class="lamp" data-s="{{ 'on' if b.ready else 'off' }}"></i></button>
-      {% endfor %}</div>
+      {% endfor %}{% if captain and workshop_brains is defined %}{% for b in workshop_brains %}
+        {# the agent: Claude Code on skippy-pc in a folder (templates/_workshop.html below), not a portal model #}
+        <button type="button" class="brain-opt agent-opt" data-brain="agent-{{ b.id }}" data-agent="{{ b.id }}" aria-pressed="false"{% if not (b.ready and workshop_ready) %} disabled{% endif %}><svg class="g" aria-hidden="true"><use href="#g-console"/></svg>Agent · {{ b.label }}{% if b.id == 'claude' %} <span class="paid" title="paid">$</span>{% endif %}<i class="lamp" data-s="{{ 'on' if (b.ready and workshop_ready) else 'off' }}"></i></button>
+      {% endfor %}{% endif %}</div>
     </div>
     {% endif %}
     <div class="sheet" data-sheet="apps" hidden>
@@ -75,6 +83,7 @@
       <span class="grow"></span>
       <button type="button" class="key prev" aria-label="Earlier" title="Earlier"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
       <button type="button" class="key next" aria-label="Later" title="Later"><svg class="g flip" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <button type="button" class="key stopk" hidden aria-label="Stop the agent" title="Stop the agent"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg><i class="lamp" data-s="on"></i></button>
       <button type="submit" class="key send" aria-label="Send" title="Send"><svg class="g" aria-hidden="true"><use href="#g-send"/></svg></button>
     </div>
     <nav class="app-row" aria-label="Apps" hidden></nav>   {# a wide screen keeps the tray as a slim row under the box; a phone has the key #}
@@ -83,7 +92,8 @@
 <script>
   (function (root) {
     // History lives in this tab (sessionStorage) and is sent with each message; the server keeps nothing between requests.
-    const KEY = "skippy-chat";
+    const OWNER = {{ (chat_owner or "")|tojson }};                // whose chats these are (a one-way id of the signed-in person)
+    const KEY = "skippy-chat:" + OWNER;
     const alive = () => window.skippyAlive || {pulse() {}};       // the living background, if this page has one
     const form = root.querySelector(".ask"), log = root.querySelector(".log .pg-flow");
     const msg = form.querySelector("textarea"), sendBtn = form.querySelector("button.send");
@@ -147,9 +157,28 @@
       brainKey.title = brainKey.ariaLabel = "Brain: " + b.label;
       root.querySelectorAll(".brain-opt").forEach(o => { const on = o.dataset.brain === brain; o.setAttribute("aria-pressed", on ? "true" : "false"); o.classList.toggle("lit", on); });
     }
+    // The agent (the Captain only): two more brains, "agent-claude" and "agent-core". Picking one shows the agent's transcript in
+    // this stage instead of the chat's log; the composer, New chat, Stop and the chats sheet then drive it (window.SkippyAgent).
+    const agentView = root.querySelector(".agent-view"), agentOpts = [...root.querySelectorAll(".agent-opt")];
+    const isAgent = (id) => typeof id === "string" && id.indexOf("agent-") === 0;
+    agentOpts.forEach(o => BRAINS.push({id: o.dataset.brain, label: o.textContent.trim(), glyph: "console", ready: !o.disabled, agent: true}));
+    try { const b = localStorage.getItem(BRAIN_KEY); if (isAgent(b) && BRAINS.some(x => x.id === b && x.ready)) brain = b; } catch (e) {}
+    function applyMode() {
+      const agent = isAgent(brain) && !!agentView;
+      if (agentView) agentView.hidden = !agent;
+      root.querySelector(".stage > .log").hidden = agent;
+      const pips = root.querySelector(".stage > .pg-bar") || root.querySelector(".stage > .pips"); if (pips) pips.hidden = agent;
+      root.classList.toggle("agent-mode", agent);
+      if (window.skippyTheme) window.skippyTheme(agent);
+      if (agent && window.SkippyAgent) {
+        const want = brain.slice(6);
+        if (window.SkippyAgent.setBrain(want) !== want) flash("This conversation already runs on the other agent brain: New chat to switch.");
+      }
+      paintStop(); logPager.refresh();
+    }
     root.querySelectorAll(".brain-opt").forEach(o => o.addEventListener("click", () => {
       brain = o.dataset.brain; try { localStorage.setItem(BRAIN_KEY, brain); } catch (e) {}
-      paintBrain(); showSheet("brain");
+      paintBrain(); showSheet("brain"); applyMode();
     }));
     paintBrain();
 
@@ -213,7 +242,7 @@
     // Your chats: kept in THIS browser only (localStorage), never on the portal, so nothing is stored about anyone without the
     // "Allow us to save" consent. The newest 40, each {id, title (its first question), updated, history}; the tab's open one is
     // this tab's sessionStorage, as before.
-    const STORE = "skippy-chats", CUR = KEY + "-id", MAX_CHATS = 40;
+    const STORE = "skippy-chats:" + OWNER, CUR = KEY + "-id", MAX_CHATS = 40;
     const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     let chatId; try { chatId = sessionStorage.getItem(CUR); } catch (e) {}
     if (!chatId) { chatId = newId(); try { sessionStorage.setItem(CUR, chatId); } catch (e) {} }
@@ -345,9 +374,24 @@
     root.addEventListener("dragleave", e => { if (e.target === root) root.classList.remove("dropping"); });
     root.addEventListener("drop", e => { if (e.dataTransfer.files.length) { e.preventDefault(); root.classList.remove("dropping"); takeFiles(e.dataTransfer.files); } });
 
+    // The agent's half of the composer: what is typed (and any pictures) goes to Claude Code on skippy-pc, into its transcript.
+    const stopKey = form.querySelector("button.stopk");
+    const agentOn = () => isAgent(brain) && !!agentView && !!window.SkippyAgent;
+    function paintStop() { if (stopKey) stopKey.hidden = !(agentOn() && window.SkippyAgent.busy()); }
+    if (stopKey) { stopKey.addEventListener("click", () => window.SkippyAgent && window.SkippyAgent.stop()); setInterval(paintStop, 1000); }
+    function askAgent(text) {
+      const files = pending_files.splice(0); paintFiles();
+      const pics = files.filter(f => f.data.startsWith("data:image/")).map(f => f.data);
+      if (files.length > pics.length) flash("The agent takes pictures here; put other files in its folder.");
+      if (!text && !pics.length) return;
+      window.SkippyAgent.send(text, pics);
+      alive().pulse(1); paintStop();
+    }
+
     let busy = false;
     async function ask(text, opts) {
       opts = opts || {};
+      if (agentOn() && !opts.barney) return askAgent(text);
       if (!text || busy) return;
       busy = true;
       const files = opts.barney ? [] : pending_files.splice(0);       // they go with this message only
@@ -405,7 +449,10 @@
     msg.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
     });
-    function newChat() { startChat(newId(), []); setContext(null); msg.focus(); }      // the one before stays in Your chats
+    function newChat() {                                                                // the one before stays in Your chats
+      if (agentOn()) { window.SkippyAgent.newChat(); applyMode(); msg.focus(); return; }   // a new agent conversation (same folder and brain to start)
+      startChat(newId(), []); setContext(null); msg.focus();
+    }
     root.querySelector(".clear").addEventListener("click", newChat);
     form.querySelector(".prev").addEventListener("click", () => logPager.go(logPager.page() - 1));
     form.querySelector(".next").addEventListener("click", () => logPager.go(logPager.page() + 1));
@@ -483,7 +530,35 @@
         return row;
       }));
       if (!rows.length) chatsList.textContent = "∅";
+      if (agentView && window.SkippyAgent) paintAgentChats(q);
       root.querySelector('[data-sheet="chats"] .pg')._pager.refresh();
+    }
+    // The agent's conversations (skippy-pc keeps them), in the same sheet under a console glyph: tap one to carry on in it.
+    let agentRows = null;
+    function paintAgentChats(q) {
+      const head = document.createElement("div"); head.className = "chats-head"; head.append(glyph("console"));
+      chatsList.append(head);
+      if (agentRows === null) {
+        const wait = document.createElement("i"); wait.className = "lamp wait"; wait.dataset.s = "on"; head.append(wait);
+        window.SkippyAgent.conversations().then(rows => { agentRows = rows; paintChats(); })
+          .catch(err => { agentRows = []; head.append(document.createTextNode(" " + err.message)); });
+        return;
+      }
+      const name = (pid) => (window.SkippyAgent.projects.find(p => p.id === pid) || {name: pid}).name;
+      agentRows.filter(c => !q || (c.title || "").toLowerCase().includes(q)).forEach(c => {
+        const row = document.createElement("div"); row.className = "chat-row" + (agentOn() && c.conv === window.SkippyAgent.conv() ? " lit" : "");
+        const open = document.createElement("button"); open.type = "button"; open.className = "chat-open";
+        const t = document.createElement("span"); t.className = "chat-title"; t.textContent = c.title || "conversation";
+        const when = document.createElement("span"); when.className = "chat-when";
+        when.textContent = name(c.project) + " · " + (c.turns || 0) + (c.state === "running" ? " · working" : "");
+        open.append(glyph("console"), t, when);
+        open.addEventListener("click", () => {
+          if (!agentOn()) { brain = BRAINS.find(b => b.agent && b.ready) ? BRAINS.find(b => b.agent && b.ready).id : brain; try { localStorage.setItem(BRAIN_KEY, brain); } catch (e) {} paintBrain(); applyMode(); }
+          window.SkippyAgent.open(c); showSheet("chats");
+        });
+        row.append(open);
+        chatsList.append(row);
+      });
     }
     chatsFilter.addEventListener("input", paintChats);
     root.querySelector(".chats-new").addEventListener("click", () => { newChat(); showSheet("chats"); });
@@ -536,5 +611,6 @@
       }).catch(() => { list.textContent = "∅"; delete tools.dataset.loaded; });
     }
     root.querySelectorAll(".sheet .pg").forEach(p => { Bridge.pager(p, {pips: p.parentElement.querySelector(".pips")}); });
+    applyMode();                                  // the brain this browser last picked (the agent, for the Captain, if he left it there)
   })(document.currentScript.previousElementSibling);
 </script>

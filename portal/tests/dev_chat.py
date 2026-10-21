@@ -60,7 +60,12 @@ def make_portal():
 
     def reporter():                       # a home that reports Mentat up and answers its jobs with the real Mentat
         while True:
-            got = client.post("/home/report", json={**json.loads(json.dumps(REPORT)), "mentat_home": True}, headers=auth)
+            caps = {"workshop": {"ready": True, "model": "claude-sonnet-5-5",          # an agent that's up (its jobs aren't served here)
+                                 "projects": [{"id": "skippytel", "name": "SkippyTel", "repo": "aaronsrhodes2/skippy-tel", "branch": "main"},
+                                              {"id": "f-tomb-of-horrors", "name": "Tomb of Horrors · folder", "repo": "", "branch": ""}],
+                                 "brains": [{"id": "claude", "label": "Claude Sonnet", "ready": True},
+                                            {"id": "core", "label": "Skippy Core coder", "ready": True}]}}
+            got = client.post("/home/report", json={**json.loads(json.dumps(REPORT)), "mentat_home": True, "capabilities": caps}, headers=auth)
             jobs = ((got.get_json() or {}).get("jobs") or []) + client.get("/home/jobs", headers=auth).get_json()["jobs"]
             for job in jobs:                  # a job comes back in the report's reply, or from the fast poll
                 if job.get("kind") == "ask_mentat":

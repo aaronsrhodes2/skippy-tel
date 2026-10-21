@@ -8,6 +8,7 @@ Local run:  FLASK_APP=app.py flask run   (needs every var in .env.example)
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import io
 import ipaddress
 import json
@@ -1668,7 +1669,11 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     def chat_page():
         captain = auth.is_admin(me())
+        # Each person's chats are kept in their browser under their own key: a one-way id of the signed-in address (never the
+        # address itself), so two people on one device (the Captain and a guest) never see each other's chats.
+        owner = hashlib.sha256(me().strip().lower().encode()).hexdigest()[:16]
         return render_template("front.html", captain=captain, chat_brains=brain_views(captain), barney_phrase=chat.BARNEY_PHRASE,
+                               chat_owner=owner,
                                **(workshop_context() if captain else {}))
 
     @talk.get("")

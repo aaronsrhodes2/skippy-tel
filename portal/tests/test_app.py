@@ -2,6 +2,7 @@
 Authlib (installed in CI); skipped where they aren't installed."""
 import html
 import json
+import re
 
 import pytest
 
@@ -2100,5 +2101,9 @@ def test_your_chats_stay_in_the_browser_and_forgetting_one_asks_nothing(env):
     client, _, _ = env
     login(client, FRIEND)
     page = client.get("/chat").data.decode()
-    assert 'const STORE = "skippy-chats"' in page and "localStorage.setItem(STORE" in page    # this browser only
+    assert 'const STORE = "skippy-chats:" + OWNER' in page and "localStorage.setItem(STORE" in page    # this browser only, per person
+    owner = re.search(r'const OWNER = "([0-9a-f]{16})"', page)
+    assert owner and FRIEND not in page.split("const OWNER")[1][:200]                    # a one-way id, never the address
+    login(client, ADMIN)
+    assert re.search(r'const OWNER = "([0-9a-f]{16})"', client.get("/chat").data.decode()).group(1) != owner.group(1)   # his own key
     assert "confirm(" not in page                                                          # no "are you sure" boxes

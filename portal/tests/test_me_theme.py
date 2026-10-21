@@ -71,8 +71,8 @@ def test_the_public_chat_stays_green_even_for_the_captain_purple_is_the_coding_b
     c = app.test_client()
     login(c, ADMIN)
     front = c.get("/chat").data.decode()
-    assert 'classList.add("agent")' in front and 'localStorage.getItem("skippy-front-mode") !== "quick"' in front       # agent mode (the default) is purple before paint
-    assert 'classList.toggle("agent", mode === "agent")' in front and "alive.setColors(mode === \"agent\" ? PURPLES : null)" in front   # quick mode goes green
+    assert 'classList.add("agent")' in front and 'localStorage.getItem("skippy-chat-brain")' in front and '.indexOf("agent-") === 0' in front   # an agent brain is purple before paint
+    assert 'classList.toggle("agent", !!agent)' in front and "alive.setColors(agent ? PURPLES : null)" in front and "window.skippyTheme(agent)" in front   # any other brain goes green
     friend_page = c.get("/me").data.decode()
     assert 'data-app="me"' in friend_page                                                   # /me stays purple by its own app theme
     assert "setColors" in (STATIC / "bridge-alive.js").read_text(encoding="utf-8")

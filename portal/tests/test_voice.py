@@ -112,7 +112,7 @@ def test_both_chats_carry_the_mic_and_speaker_keys():
     assert "skippy-voice.js" in page
     # the chats' inline scripts run as they are parsed: the client must be loaded before the pages include them
     assert page.index("skippy-voice.js") < page.index('include "_chat.html"')
-    assert page.index("skippy-voice.js") < page.index('include "_workshop.html"')
+    assert 'include "_workshop.html"' in chat                                            # the agent lives inside the chat now
     glyphs = (PORTAL / "templates" / "_glyphs.html").read_text(encoding="utf-8")
     assert 'id="g-mic"' in glyphs and 'id="g-ear"' in glyphs
 
