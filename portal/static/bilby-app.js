@@ -39,7 +39,12 @@
   const TITLE = "Bilby's Audio Service";
   const SINGLES = "Singles";
 
-  let device = store.get("device", "");
+  // A speaker window on skippy-pc (tools/room_players.py) opens /music?room=<key>: one fixed Connect device pinned to one audio output.
+  let ROOMS = {};
+  try { ROOMS = JSON.parse(root.dataset.rooms || "{}") || {}; } catch (e) { /* no rooms: an ordinary player */ }
+  const roomKey = (new URLSearchParams(location.search).get("room") || "").toLowerCase();
+  const room = Object.prototype.hasOwnProperty.call(ROOMS, roomKey) ? Object.assign({ key: roomKey }, ROOMS[roomKey]) : null;
+  let device = room ? "room-" + room.key : store.get("device", "");
   if (!/^[A-Za-z0-9_-]{8,40}$/.test(device || "")) {
     device = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, "0")).join("");
     store.set("device", device);
@@ -1628,7 +1633,7 @@
     if (st) delete st._lo;
     try {
       const r = await fetch(cfg.checkin, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", Accept: "application/json" },
-                                           body: JSON.stringify({ device, name: env.label, state: st }) });
+                                           body: JSON.stringify({ device, name: room ? room.name : env.label, room: room ? room.key : "", state: st }) });
       if (!r.ok) return;
       const reply = await r.json();
       if (st && st.queue) { S.qSent = qv; S.qLo = lo; }
@@ -1642,7 +1647,7 @@
   function startConnect() {
     clearInterval(connect.timer);
     connect.timer = setInterval(() => {
-      const gap = isPlaying() ? 4500 : document.hidden ? 30000 : 9500;
+      const gap = room ? 1500 : isPlaying() ? 4500 : document.hidden ? 30000 : 9500;     // a speaker window is never looked at, and waits for commands
       if (Date.now() - connect.last >= gap) checkin();
     }, 1500);
     checkin();
@@ -1654,13 +1659,18 @@
     else if (cmd === "pause") actions.pause();
     else if (cmd === "next") actions.next();
     else if (cmd === "prev") actions.prev();
+    else if (/^take:/.test(cmd)) {      // "pick up what that device is playing": how a phone sends the music to a speaker window
+      const from = connect.others.find(d => d.id === cmd.slice(5));
+      if (from && from.state && from.state.track) adopt(from.state, null);
+    }
   }
   const liveOthers = () => connect.others.filter(d => d.live && d.state && d.state.track);
   function connectChanged() {
     const devs = liveOthers(), n = devs.length;
     for (const s of els.devices) s.textContent = n ? String(n) : "";
+    const roomSig = connect.others.filter(d => d.room && d.live).map(d => d.id).join(",");
     // redraw an open Devices menu (and Home's "playing elsewhere" card) only when what they show has changed
-    const sig = devs.map(d => [d.id, d.state.playing, d.state.title, d.state.armed, d.state.tap].join("|")).join(";");
+    const sig = devs.map(d => [d.id, d.state.playing, d.state.title, d.state.armed, d.state.tap].join("|")).join(";") + "#" + roomSig;
     if (sig === connect.sig) return;
     connect.sig = sig;
     if (menu && menu.kind === "devices") devicesMenu(menu.anchor);
@@ -1687,9 +1697,32 @@
       if (j && j.queued === false) toast(`${d.name} isn't answering right now.`);
     })).catch(() => toast("Couldn't reach the portal.")).finally(() => [1500, 4000, 7000, 10000].forEach(ms => setTimeout(checkin, ms)));   // the other player picks the command up at its next check-in, up to ~5 s on: look until the answer shows
   }
+  /** Send the music to the speakers on skippy-pc. The source is this device if it is playing, else the speaker that is, else
+   *  this device's own place. Each target picks the source's queue up (a "take" command); the source stops unless it is a target. */
+  async function playOn(targets) {
+    const rooms = connect.others.filter(d => d.room && d.live);
+    const playingRoom = rooms.filter(d => d.state.playing && d.state.track).sort((a, b) => a.age - b.age)[0];
+    const src = isPlaying() || !playingRoom ? null : playingRoom;
+    if (!src && !curTrack()) { toast("Start a song first, then choose where it plays."); return; }
+    const srcId = src ? src.id : device;
+    if (!src) await checkin();          // the portal needs this device's latest queue and place before the speakers ask for them
+    const to = targets.filter(d => d.id !== srcId);
+    for (const t of to) post(cfg.command, { device: t.id, action: "take:" + srcId }).then(r => { if (!r.ok) toast(`${t.name} isn't answering right now.`); }).catch(() => toast("Couldn't reach the portal."));
+    if (!targets.some(d => d.id === srcId)) { if (src) post(cfg.command, { device: src.id, action: "pause" }).catch(() => {}); else actions.pause(); }
+    [1500, 4000, 7000].forEach(ms => setTimeout(checkin, ms));
+    toast("Playing on " + targets.map(d => d.name).join(" and ") + ".");
+  }
   function devicesMenu(anchor) {
-    const items = [], devs = liveOthers();
-    if (!devs.length) items.push({ node: el("div", "none", "No other device has this player open right now. Open Bilby's Audio Service on another device and it shows up here, and either one can hand over or remote-control the other.") });
+    const items = [], devs = liveOthers(), rooms = connect.others.filter(d => d.room && d.live);
+    if (rooms.length && !room) {
+      const box = el("div", "dev"), who = el("div", "who"), acts = el("div", "acts");
+      who.append(el("b", "", "Play on"));
+      const pick = (label, targets) => { const b = el("button", "key wide", label); b.type = "button"; b.onclick = () => { closeMenu(true); playOn(targets); }; return b; };
+      for (const r of rooms) acts.append(pick(r.name, [r]));
+      if (rooms.length > 1) acts.append(pick("Both", rooms));
+      box.append(who, acts); items.push({ node: box });
+    }
+    if (!devs.length && !items.length) items.push({ node: el("div", "none", "No other device has this player open right now. Open Bilby's Audio Service on another device and it shows up here, and either one can hand over or remote-control the other.") });
     for (const d of devs) {
       const s = d.state, box = el("div", "dev"), who = el("div", "who"), what = el("div", "what");
       who.append(el("b", "", d.name));
@@ -1703,6 +1736,35 @@
       box.append(acts); items.push({ node: box });
     }
     openMenu(anchor, "", items, "devices");
+  }
+
+  // ═══ a speaker window: pin the audio to this room's output ═══════════════════════════════════════════════════════
+  // Chrome only shows an output's name once the page has had microphone permission (tools/room_players.py grants it), then
+  // `setSinkId` on both audio elements sends the sound there. A Bluetooth speaker can come and go, so look again when the
+  // devices change and every 20 s while it hasn't been found.
+  const sink = { id: "", label: "" };
+  async function pinOutput() {
+    if (!room || !navigator.mediaDevices) return;
+    try {
+      const named = async () => (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audiooutput" && d.label);
+      let outs = await named();
+      if (!outs.length) {
+        try { (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach(t => t.stop()); } catch (e) { /* no microphone: names stay hidden */ }
+        outs = await named();
+      }
+      const want = new RegExp(room.match, "i");
+      const found = outs.find(d => d.deviceId !== "default" && d.deviceId !== "communications" && want.test(d.label));
+      if (!found) { sink.id = ""; showNotice(`${room.name}: no audio output here matches "${room.match}" (${outs.map(d => d.label).join("; ") || "no names visible"}). Looking again.`, { kind: "warn", key: "sink" }); return; }
+      if (found.deviceId !== sink.id) for (const s of slots) await s.el.setSinkId(found.deviceId);
+      sink.id = found.deviceId; sink.label = found.label;
+      hideNotice("sink");
+    } catch (e) { sink.id = ""; showNotice(`${room.name}: couldn't pin the audio output (${(e && e.message) || e}).`, { kind: "warn", key: "sink" }); }
+  }
+  if (room) {
+    document.title = room.name;
+    pinOutput();
+    setInterval(() => { if (!sink.id) pinOutput(); }, 20000);
+    if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) navigator.mediaDevices.addEventListener("devicechange", () => { sink.id = ""; pinOutput(); });
   }
 
   // ═══ keyboard, buttons ══════════════════════════════════════════════════════════════════════════════════════════
@@ -1807,7 +1869,7 @@
   if (navigator.connection && navigator.connection.addEventListener) navigator.connection.addEventListener("change", () => { recoverNow(); });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) recoverNow(); });
   addEventListener("pageshow", () => recoverNow());
-  setInterval(() => { if (S.lib && !gate.fresh() && !document.hidden) gate.ensure().catch(() => {}); }, 5 * 60 * 1000);
+  setInterval(() => { if (S.lib && !gate.fresh() && (room || !document.hidden)) gate.ensure().catch(() => {}); }, 5 * 60 * 1000);
   if (window.ResizeObserver) {
     let rt = 0;
     new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { if (S.lib) { list.resize(); if (S.view && S.view.home) buildDeck(); } }, 120); }).observe($("#stage"));
@@ -1828,5 +1890,5 @@
   showQueueCount(); syncSignal();
   loadLibrary();
   // exposed for the tests that drive the page by hand (portal/tests/dev_music.py) and for debugging in the console
-  window.BilbyApp = { S, actions, gate, slots, list, qList, go, rail, toast, startTrack, tryPlay, renderView, checkin, connect, persist, blobs, rec, recoverNow, get lib() { return S.lib; } };
+  window.BilbyApp = { S, actions, gate, slots, list, qList, go, rail, toast, startTrack, tryPlay, renderView, checkin, connect, sink, room, persist, blobs, rec, recoverNow, get lib() { return S.lib; } };
 })();

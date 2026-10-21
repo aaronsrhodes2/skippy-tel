@@ -853,7 +853,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @listen.get("")
     @auth.portal_required("audio")
     def player_page():
-        return render_template("music.html")
+        return render_template("music.html", rooms=player_mod.ROOMS)
 
     @listen.get("/manifest.webmanifest")
     def player_manifest():
@@ -883,7 +883,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         body = request.get_json(silent=True) or {}
         state = body.get("state")
         return jsonify(player.checkin(me(), device_id(), str(body.get("name") or ""),
-                                      state if isinstance(state, dict) else None))
+                                      state if isinstance(state, dict) else None, room=str(body.get("room") or "")))
 
     @listen.post("/command")
     @auth.portal_required("audio")

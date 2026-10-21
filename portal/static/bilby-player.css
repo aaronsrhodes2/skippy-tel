@@ -145,6 +145,7 @@
 .menu .dev .what.need { color: var(--amber); white-space: normal; }
 .menu .dev .acts { display: flex; gap: 8px; }
 .menu .dev .acts .key { width: 52px; height: 40px; }
+.menu .dev .acts .key.wide { width: auto; padding: 0 12px; font-size: .85rem; }
 
 
 

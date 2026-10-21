@@ -428,3 +428,54 @@ def test_the_player_never_tells_the_portal_what_is_playing_except_through_connec
     assert "sendBeacon" not in js and "/telemetry" not in js and "data-tel" not in js
     posts = re.findall(r"(?:fetch|post)\((cfg\.\w+|url)", js)
     assert set(posts) <= {"cfg.checkin", "cfg.command", "cfg.gate", "url"}, posts
+
+
+# ── the speakers on skippy-pc: two browser windows, each pinned to one audio output ─────────────────────────────────────
+
+def test_a_speaker_window_is_listed_even_while_idle_and_an_ordinary_device_is_not():
+    clock = Clock()
+    p = player_mod.Player(paired_home(clock), clock=clock)
+    p.checkin(ADMIN, "room-downstairs", "Downstairs (HDMI)", None, room="downstairs")
+    p.checkin(ADMIN, "idle-laptop1", "Laptop", None)                    # nothing played yet: nothing to offer
+    [dev] = p.checkin(ADMIN, "phone1234", "iPhone", None)["devices"]
+    assert dev["id"] == "room-downstairs" and dev["room"] == "downstairs" and dev["live"] and not dev["state"]["track"]
+
+
+def test_only_a_known_room_counts_as_one():
+    clock = Clock()
+    p = player_mod.Player(paired_home(clock), clock=clock)
+    p.checkin(ADMIN, "room-garage1", "Garage", None, room="garage")
+    assert p.checkin(ADMIN, "phone1234", "iPhone", None)["devices"] == []
+    assert set(player_mod.ROOMS) == {"downstairs", "upstairs"}
+    for r in player_mod.ROOMS.values():
+        re.compile(r["match"])                                          # the browser compiles it as a RegExp too
+
+
+def test_a_phone_can_ask_a_speaker_to_pick_up_its_music_once():
+    clock = Clock()
+    p = player_mod.Player(paired_home(clock), clock=clock)
+    p.checkin(ADMIN, "room-upstairs", "Upstairs (Bluetooth)", None, room="upstairs")
+    assert p.command(ADMIN, "room-upstairs", "take:phone1234")
+    assert not p.command(ADMIN, "room-upstairs", "take:bad id!") and not p.command(ADMIN, "room-upstairs", "take:")
+    assert not p.command(ADMIN, "room-upstairs", "take:phone1234; rm")
+    assert p.checkin(ADMIN, "room-upstairs", "Upstairs (Bluetooth)", None, room="upstairs")["commands"] == ["take:phone1234"]
+    assert p.checkin(ADMIN, "room-upstairs", "Upstairs (Bluetooth)", None, room="upstairs")["commands"] == []
+
+
+def test_the_checkin_route_carries_the_room_and_the_page_hands_the_rooms_to_the_script(client):
+    login(client, ADMIN)
+    assert client.post("/music/checkin", json={"device": "room-downstairs", "name": "x", "room": "downstairs"}).status_code == 200
+    reply = client.post("/music/checkin", json={"device": "phone1234", "name": "iPhone"}).get_json()
+    assert [d["id"] for d in reply["devices"]] == ["room-downstairs"]
+    assert client.post("/music/command", json={"device": "room-downstairs", "action": "take:phone1234"}).get_json()["queued"] is True
+    page = client.get("/music").data.decode()
+    m = re.search(r"data-rooms='([^']*)'", page)
+    assert m and set(json.loads(m.group(1).replace("&#34;", '"'))) == {"downstairs", "upstairs"}
+
+
+def test_the_script_pins_a_room_to_its_output_and_sends_music_there():
+    js = (STATIC / "bilby-app.js").read_text(encoding="utf-8")
+    assert 'new URLSearchParams(location.search).get("room")' in js and '"room-" + room.key' in js
+    assert "setSinkId" in js and "audiooutput" in js and "devicechange" in js
+    assert '"take:" + srcId' in js and "/^take:/" in js
+    assert re.search(r'"Both"', js) and "Play on" in js

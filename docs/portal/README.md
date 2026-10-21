@@ -333,6 +333,15 @@ under the devices button (the speaker icon, "Other devices"): **Play here** pick
 Next). In memory on the portal (one instance); a redeploy forgets it and the players check in again. A device's listening history
 never goes to the portal: it stays in that browser, and telemetry only ever sees the tile tap.
 
+**The speakers on skippy-pc (Play on Downstairs / Upstairs / Both).** Two stereos hang off skippy-pc: downstairs on HDMI (`EPSON PJ (NVIDIA High Definition Audio)`),
+upstairs on Bluetooth (`Speakers (Enclave Audio)`). Each is a browser window on skippy-pc, started by `python tools/room_players.py` (Chrome app windows on
+`/music?room=downstairs|upstairs`, one shared profile: sign in once as the Captain; flags let it make sound untouched and keep running hidden). A room window is a
+fixed Connect device (`room-<key>`) that `setSinkId`s both its audio elements to the output whose name matches `ROOMS[key].match` in `portal/player.py` (looked up
+again every 20 s and on `devicechange`, so a Bluetooth speaker that wakes later is found), checks in every 1.5 s, and is listed even while idle. In the devices panel
+of any other player a **Play on** row has a key per live room and **Both**: each chosen room is sent a `take:<source>` command and picks up the source's queue and place
+(the source is this device if it is playing, else the room that is); the source pauses unless it is also a target. The two rooms start within about a second or two of
+each other, not sample-locked: fine for two floors. A renamed speaker is a change to its pattern in `ROOMS`. Tests: `test_player.py`, `tools/tests/test_room_players.py`.
+
 **Looking at it without skippy-pc:** `python portal/tests/dev_music.py` (needs ffmpeg and Pillow) runs the real portal app beside the
 REAL music-gate (`services/music-gate`'s own Flask app, over a generated tagged library in the temp folder; only the source of the
 lyric lines is a few lines of stand-in), then open `http://127.0.0.1:8765/dev-login`. `--fake 21000` adds 21,000 stub tracks to see

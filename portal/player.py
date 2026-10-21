@@ -33,6 +33,14 @@ MAX_QUEUE = 2000
 MAX_PATH = 400
 MAX_DEVICES = 12
 ACTIONS = ("play", "pause", "next", "prev")
+# The speakers on skippy-pc. Each is a browser window there (tools/room_players.py) pinned to one audio output, a Connect device
+# with a fixed id that is listed even while idle. `match` is tested against the output's name as Chrome reports it (Windows'
+# own name for the endpoint), so a renamed or replaced speaker is a change to its pattern here.
+ROOMS = {
+    "downstairs": {"name": "Downstairs (HDMI)", "match": "EPSON|NVIDIA|HDMI"},
+    "upstairs": {"name": "Upstairs (Bluetooth)", "match": "Enclave"},
+}
+TAKE = re.compile(r"take:[A-Za-z0-9_-]{8,40}")      # "pick up what that device is playing": a room's push, since a page can only pull
 REPEATS = ("off", "all", "one")
 GATE_URL = re.compile(r"https://[a-z0-9-]+(\.[a-z0-9-]+)*\.ts\.net")
 
@@ -106,14 +114,15 @@ class Player:
         return {"ok": True, "url": url, "pass": sign(gate_key(stored), exp), "exp": exp}
 
     # ── Connect: devices, handoff, remote ────────────────────────────────
-    def checkin(self, user: str, device: str, name: str, body: dict | None) -> dict:
+    def checkin(self, user: str, device: str, name: str, body: dict | None, room: str = "") -> dict:
         """A player saying what it's doing (body) or just looking (None). Returns the actions waiting for it and every
-        device's latest, newest first."""
+        device's latest, newest first. `room` is set by the speaker windows on skippy-pc (one of ROOMS)."""
         now = self.clock()
         with self._lock:
             mine = self._devices.setdefault(user, {})
-            d = mine.setdefault(device, {"name": "", "state": None, "seen": 0.0, "updated": 0.0})
+            d = mine.setdefault(device, {"name": "", "state": None, "seen": 0.0, "updated": 0.0, "room": ""})
             d["name"], d["seen"] = _text(name, 40) or "A browser", now
+            d["room"] = room if room in ROOMS else ""
             if body is not None:
                 d["state"], d["updated"] = _state(body, d["state"]), now
             for gone in [k for k, v in mine.items() if now - v["seen"] > KEEP_S]:
@@ -126,18 +135,19 @@ class Player:
     def _list(self, user: str, me: str, now: float) -> list[dict]:
         out = []
         for dev_id, d in self._devices.get(user, {}).items():
-            if dev_id == me or not d["state"] or not d["state"]["track"]:
-                continue
-            state = dict(d["state"])
+            if dev_id == me or (not d.get("room") and (not d["state"] or not d["state"]["track"])):
+                continue                    # a speaker window is listed even when idle: it is somewhere to send the music
+            state = dict(d["state"] or _state({}))
             live = now - d["seen"] < LIVE_S
             if state["playing"] and live:      # where it is now, not where it was at its last check-in
                 state["pos"] = round(state["pos"] + (now - d["updated"]), 1)
             state["playing"] = state["playing"] and live
-            out.append({"id": dev_id, "name": d["name"], "live": live, "age": int(now - d["updated"]), "state": state})
+            out.append({"id": dev_id, "name": d["name"], "live": live, "age": int(now - d["updated"]), "state": state,
+                        "room": d.get("room") or ""})
         return sorted(out, key=lambda x: x["age"])
 
     def command(self, user: str, device: str, action: str) -> bool:
-        if action not in ACTIONS:
+        if action not in ACTIONS and not TAKE.fullmatch(action):
             return False
         with self._lock:
             d = self._devices.get(user, {}).get(device)
