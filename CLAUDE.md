@@ -290,7 +290,11 @@ skippy-tel-core's services. Portal: `portal/workshop.py` + `/me/workshop/*` (job
 `workshop`, capability `workshop`); reporter: `reporter.workshop()`; engine:
 `services/claude-bridge/workshop_engine.py` + `workshop_prompt.md` (one Claude session per conversation).
 Every project in `services/claude-bridge/projects.json` (SkippyTel and the Captain's other repos), each in its
-own clone `D:\Aaron\development\<name>-workshop`, never his checkout; one run at a time across all of them; a
+own clone `D:\Aaron\development\<name>-workshop`, never his checkout; **or any folder directly under
+`D:\Aaron\development` opened IN PLACE** (ids `f-<slug>`, "· folder" in the picker, the Captain's choice 2026-10-20: the
+agent works right in it, git is the undo, its prompt opens with "never discard his uncommitted work"); **a brain per
+conversation**: Claude (Sonnet) or Skippy Core's coder (Claude Code with its own `CLAUDE_CONFIG_DIR` pointed at skippy-core's
+llama-swap via SKIPPY_CORE_URL/KEY; offered only when the box answers); one run at a time across all of them; a
 Conversations list to reopen and continue any conversation; a ship card per push (`portal/ship.py`: the deploy run
 for that commit, green only when `/version` serves it); a Discord DM to the Captain when a run ends (`portal/notify.py`,
 once per run, switch on the card; `DISCORD_CAPTAIN_ID` in the VM settings, else the server owner); a screenshot of a

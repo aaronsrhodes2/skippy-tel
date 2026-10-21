@@ -261,12 +261,16 @@ class Workshop:
         return self.home.workshop_projects() or [{"id": DEFAULT_PROJECT, "name": "SkippyTel",
                                                   "repo": "aaronsrhodes2/skippy-tel", "branch": "main"}]
 
+    def brains(self) -> list[dict]:
+        """Who the agent can think with: what skippy-pc lists, else Claude alone (a home reporter older than brains)."""
+        return self.home.workshop_brains() or [{"id": "claude", "label": "Claude Sonnet", "ready": True}]
+
     def project(self, pid: str | None) -> dict | None:
         """One offered project by id ("" = the default), or None when skippy-pc doesn't offer it."""
         pid = pid or DEFAULT_PROJECT
         return next((p for p in self.projects() if p["id"] == pid), None)
 
-    def send(self, owner: str, conv: str, message: str, project: str = "", images=None) -> str:
+    def send(self, owner: str, conv: str, message: str, project: str = "", images=None, brain: str = "claude") -> str:
         message = (message or "").strip()
         pictures = clean_images(images)
         if not message and not pictures:
@@ -279,6 +283,12 @@ class Workshop:
         if chosen is None:                       # only a project skippy-pc lists can be worked on: never a typed repo
             raise ValueError("skippy-pc doesn't offer that project.")
         project = chosen["id"]
+        offered = next((b for b in self.brains() if b["id"] == (brain or "claude")), None)
+        if offered is None:                      # only a brain skippy-pc lists: never a typed model
+            raise ValueError("skippy-pc doesn't offer that brain.")
+        if not offered["ready"]:
+            raise NotReady(f"{offered['label']} isn't reachable from skippy-pc right now.")
+        brain = offered["id"]
         if self.paused:
             raise Paused(PAUSED_MESSAGE)
         if not self.ready():
@@ -290,11 +300,11 @@ class Workshop:
             if any(self._live_state(r) in ("queued", "running") for r in self._tasks.values()):
                 raise Busy("Skippy is still working on the last one.")
             # The job id is the task id everywhere: here, in the reporter and in the bridge.
-            task = self.home.start("workshop", owner, ttl=JOB_TTL, conv=conv, message=message, who=owner, project=project,
+            task = self.home.start("workshop", owner, ttl=JOB_TTL, conv=conv, message=message, who=owner, project=project, brain=brain,
                                    **({"images": pictures} if pictures else {}))
             now = self.clock()
             self._tasks[task] = {"owner": owner, "conv": conv, "events": [], "state": "queued", "error": None,
-                                 "created": now, "pushed_at": now, "touched": now, "stop": False, "project": project,
+                                 "created": now, "pushed_at": now, "touched": now, "stop": False, "project": project, "brain": brain,
                                  "message": message[:200]}     # its first words, for the notification (never shown to others)
         return task
 

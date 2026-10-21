@@ -158,7 +158,7 @@ class El {
 }
 const els = {};
 for (const id of ["ps-log", "ps-flow", "ps-pips", "ps-form", "ps-text", "ps-send", "ps-stop", "ps-new", "ps-quiet", "ps-quiet-msg", "ps-quiet-hint", "ps-check", "ps-reload",
-                  "ps-project", "ps-project-hint", "ps-convs-btn", "ps-convs", "ps-convs-msg", "ps-convs-list", "ps-notify", "ps-mic", "ps-spk", "ps-attach", "ps-file", "ps-img", "ps-queue", "ps-copyall", "ps-vstat", "ps-ear"]) els[id] = new El("x");
+                  "ps-project", "ps-brain", "ps-project-hint", "ps-convs-btn", "ps-convs", "ps-convs-msg", "ps-convs-list", "ps-notify", "ps-mic", "ps-spk", "ps-attach", "ps-file", "ps-img", "ps-queue", "ps-copyall", "ps-vstat", "ps-ear"]) els[id] = new El("x");
 els["ps-notify"].checked = true;
 for (const id of ["ps-stop", "ps-quiet", "ps-quiet-hint", "ps-reload", "ps-project-hint", "ps-convs"]) els[id].hidden = true;
 const Bridge = {pager: () => ({refresh() {}, last() {}, go() {}, page() { return 0; }, pages() { return 1; }})};   // the page flips are the bridge's, not under test here

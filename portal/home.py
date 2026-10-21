@@ -220,6 +220,15 @@ class Home:
                         "repo": repo, "branch": branch})
         return out[:40]
 
+    def workshop_brains(self) -> list[dict]:
+        """The brains skippy-pc's Workshop can think with: [{id, label, ready}], "claude" and "core" only (checked again here).
+        Empty while home is silent or before a reporter that sends them."""
+        info = ((self.report or {}).get("capabilities") or {}).get("workshop")
+        raw = info.get("brains") if isinstance(info, dict) and self.online() else None
+        return [{"id": b["id"], "label": _text(" ".join(str(b.get("label") or b["id"]).split()), 40) or b["id"],
+                 "ready": b.get("ready") is True}
+                for b in (raw if isinstance(raw, list) else []) if isinstance(b, dict) and b.get("id") in ("claude", "core")][:2]
+
     def capability_reason(self, name: str) -> str | None:
         """Why skippy-pc says a capability is NOT ready, in its own plain words (the bridge's "Claude's login on skippy-pc
         expired: run `claude auth login` there"), else None: nothing said, it IS ready, or home is silent (then the reason is

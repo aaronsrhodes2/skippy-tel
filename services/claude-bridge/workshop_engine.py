@@ -43,6 +43,14 @@ import projects as projects_mod
 
 MODEL = "claude-sonnet-5-5"        # Sonnet 5.5, on purpose: nothing else picks it (was Opus until 2026-10-10)
 EFFORT = "medium"                  # and its effort level: also fixed here, never from the environment or a request
+# The other brain (2026-10-20): Claude Code itself, pointed at Skippy Core (skippy-core's llama-swap, "coder" slot) through its
+# Claude-compatible API. A run picks "claude" or "core"; nothing else. Core runs get their OWN Claude Code config folder:
+# with this PC's subscription login in the shared one, Claude Code sends that login and never the key (measured: a
+# 108-character Bearer token, 401 from llama-swap). Claude sessions live in a config folder, so a conversation keeps one brain.
+BRAINS = ("claude", "core")
+CORE_MODEL = "coder"               # core/models.json's coding slot
+CORE_CONTEXT = "65536"             # that slot's --ctx-size, so Claude Code compacts in time (it doesn't know "coder")
+VAULT_ENV = os.getenv("SKIPPY_VAULT_ENV", "G:/My Drive/vault/.env")
 REPO = os.getenv("WORKSHOP_REPO", r"D:\Aaron\development\SkippyTel-workshop")
 PRIMARY = os.getenv("WORKSHOP_PRIMARY", r"D:\Aaron\development\SkippyTel")
 REMOTE = os.getenv("WORKSHOP_REMOTE", "https://github.com/aaronsrhodes2/skippy-tel.git")
@@ -221,6 +229,18 @@ def image_mime(data: bytes) -> str | None:
 _BLOCK = re.compile(r"\{\{#(skippytel|other)\}\}\n?(.*?)\{\{/\1\}\}\n?", re.S)
 
 
+# A folder opened in place (projects.folders): the Captain chose to work right in his own folder, so the clone rules below
+# don't apply to this conversation. This goes FIRST so it wins over them.
+INPLACE_NOTE = (
+    "## This conversation works IN PLACE (the Captain's choice)\n"
+    "The Captain picked his own folder, {repo}, and wants you to work right in it: there is no separate clone this time. "
+    "Wherever the rules below say \"your clone\" or \"never edit the Captain's own checkout\", for this conversation both mean "
+    "this folder, and editing it is what he asked for. Because it is HIS working copy: run `git status` before you change "
+    "anything and mention any uncommitted work you find; never discard or overwrite his work in progress (no "
+    "`git reset --hard`, `git checkout -- <file>`, `git clean`, or stashing it without asking); commit only what you changed. "
+    "If the folder isn't a git repo, say so before changing files, since there is then no undo.\n\n")
+
+
 def render_prompt(template: str, project) -> str:
     """workshop_prompt.md for one project: the {{#skippytel}}...{{/skippytel}} block only for a project with SkippyTel's
     deploy rules, the {{#other}}...{{/other}} block only for the rest (whose own CLAUDE.md says how to test and ship),
@@ -228,6 +248,8 @@ def render_prompt(template: str, project) -> str:
     {github} (owner/name) and {branch}. A template without blocks is used whole."""
     kind = "skippytel" if project.deploy == "skippytel" else "other"
     text = _BLOCK.sub(lambda m: m.group(2) if m.group(1) == kind else "", template)
+    if getattr(project, "inplace", False):
+        text = INPLACE_NOTE + text
     for key, value in (("{repo}", project.clone), ("{primary}", project.primary), ("{project}", project.name),
                        ("{github}", project.repo), ("{branch}", project.branch)):
         text = text.replace(key, value)
@@ -245,8 +267,9 @@ class Run:
     """One chat message being worked on: an append-only list of events, readable while it grows."""
 
     def __init__(self, task: str, conv: str, message: str, who: str = "", created: float | None = None,
-                 project: str = projects_mod.DEFAULT):
+                 project: str = projects_mod.DEFAULT, brain: str = "claude"):
         self.task, self.conv, self.message, self.who = task, conv, message, who
+        self.brain = brain if brain in BRAINS else "claude"   # who does the thinking: Claude (Sonnet) or Skippy Core's coder
         self.project = project                 # which repo (projects.json): picks the clone, the checkout and the session
         self.clone = ""                        # that project's clone when the run started (the conversation log reads it)
         self.before_finish = None              # (run) -> None, called once just before the run ends (the ship check)
@@ -304,7 +327,8 @@ class Run:
     def snapshot(self) -> dict:
         """Everything worth keeping across a bridge restart. The message text is not in it: nothing needs it again."""
         with self._cond:
-            return {"task": self.task, "conv": self.conv, "who": self.who, "project": self.project, "created": self.created,
+            return {"task": self.task, "conv": self.conv, "who": self.who, "project": self.project, "brain": self.brain,
+                    "created": self.created,
                     "finished_at": self.finished_at, "done": self.done, "ok": self.ok, "error": self.error,
                     "events": list(self.events)}
 
@@ -312,7 +336,8 @@ class Run:
         """What GET /workshop/runs says about a run: counts and state, never the message or any event's content."""
         with self._cond:
             finished = self.finished_at
-            return {"task": self.task, "conv": self.conv, "who": self.who, "project": self.project, "events": len(self.events),
+            return {"task": self.task, "conv": self.conv, "who": self.who, "project": self.project, "brain": self.brain,
+                    "events": len(self.events),
                     "done": self.done, "ok": self.ok, "error": self.error,
                     "age_s": round(max(0.0, now - self.created), 1),
                     "finished_age_s": None if finished is None else round(max(0.0, now - finished), 1)}
@@ -445,7 +470,7 @@ class Workshop:
     def __init__(self, claude_cmd: list[str], repo: str = REPO, primary: str = PRIMARY,
                  sessions: str = SESSIONS, remote: str = REMOTE, prompt_file: Path = PROMPT_FILE,
                  state_dir: str | None = None, max_run_s: float | None = None, idle_s: float | None = None,
-                 conversations: str | None = None, projects: dict | None = None):
+                 conversations: str | None = None, projects: dict | None = None, dev_root: str | None = None):
         # The projects (projects.py). Without a registry (the tests, and anything built the old way) there is one:
         # SkippyTel, made from repo/primary/remote as they are at each run, so a test that changes shop.primary is heard.
         # With one, SkippyTel's entry decides those three.
@@ -454,6 +479,9 @@ class Workshop:
             own = self._projects[projects_mod.DEFAULT]
             repo, primary, remote = own.clone, own.primary, own.url
         self.claude_cmd, self.repo, self.primary = list(claude_cmd), repo, primary
+        # In-place folders (projects.folders): the direct children of the development root. Only when one is given (the
+        # real bridge passes SkippyTel's parent): a Workshop built without it (the tests, anything else) offers no folders.
+        self.dev_root = dev_root
         self.sessions_path, self.remote, self.prompt_file = sessions, remote, prompt_file
         self.max_run_s = MAX_RUN_S if max_run_s is None else float(max_run_s)      # the watchdog's two limits; tests shorten them
         self.idle_s = IDLE_S if idle_s is None else float(idle_s)
@@ -494,6 +522,8 @@ class Workshop:
     def project(self, pid: str | None = None) -> projects_mod.Project:
         """A project by id (KeyError if this bridge has no such project). The default one is SkippyTel."""
         pid = pid or projects_mod.DEFAULT
+        if pid.startswith(projects_mod.FOLDER_PREFIX):
+            return self._folder(pid)
         if self._projects is None:
             if pid != projects_mod.DEFAULT:
                 raise KeyError(pid)
@@ -505,18 +535,35 @@ class Workshop:
         """Every project, as the portal may see them (no paths): SkippyTel first, then by name."""
         ids = [projects_mod.DEFAULT] if self._projects is None else list(self._projects)
         found = [self.project(i) for i in ids]
-        return [p.public() for p in sorted(found, key=lambda p: (p.id != projects_mod.DEFAULT, p.name.lower()))]
+        listed = [p.public() for p in sorted(found, key=lambda p: (p.id != projects_mod.DEFAULT, p.name.lower()))]
+        room = projects_mod.MAX_PROJECTS - len(listed)
+        found_folders = projects_mod.folders(self.dev_root).values() if self.dev_root else []
+        folders = [{**f.public(), "name": f.name + " \u00b7 folder"} for f in found_folders]
+        return listed + folders[:max(0, room)]
+
+    def _folder(self, pid: str) -> projects_mod.Project:
+        """A folder opened in place (KeyError if there's none by that id now). A folder that is a registered project's own
+        checkout borrows that project's repo, branch and deploy rules, so in-place SkippyTel still knows how to ship."""
+        if not self.dev_root:
+            raise KeyError(pid)
+        folder = projects_mod.folders(self.dev_root)[pid]
+        for known in (self._projects or {}).values():
+            if projects_mod._norm(known.primary) == projects_mod._norm(folder.primary):
+                return projects_mod.Project(folder.id, folder.name, known.repo, known.branch, folder.primary, folder.primary,
+                                            known.deploy, known.remote, True)
+        return folder
 
     @staticmethod
-    def session_key(project: str, conv: str) -> str:
+    def session_key(project: str, conv: str, brain: str = "claude") -> str:
         """The sessions file's key: the bare conversation id for SkippyTel (so every conversation from before projects
         carries on), project-qualified for the rest. A Claude session belongs to the directory it ran in, so the same
         conversation id under another project must never resume it."""
-        return conv if project == projects_mod.DEFAULT else f"{project}:{conv}"
+        key = conv if project == projects_mod.DEFAULT else f"{project}:{conv}"
+        return key if brain == "claude" else f"{key}@{brain}"       # another brain's sessions live in another config folder
 
     # ── runs ─────────────────────────────────────────────────────────────
     def start(self, task: str, conv: str, message: str, who: str = "", attach: bool = False,
-              project: str = "", images=None) -> Run:
+              project: str = "", images=None, brain: str = "claude") -> Run:
         """Begin a task, or re-attach if it's already known. One task at a time across ALL projects: the chat follows one
         run, the Captain reviews one outcome at a time, and two runs would race on the shared sessions file.
 
@@ -540,7 +587,12 @@ class Workshop:
         try:
             chosen = self.project(project)
         except KeyError:
-            raise ValueError("unknown project") from None    # only projects.json names a repo: never a request field
+            raise ValueError("unknown project") from None    # only projects.json, or a folder under the root, is a target
+        brain = brain or "claude"
+        if brain not in BRAINS:
+            raise ValueError("unknown brain")
+        if brain == "core" and not attach and not self.core_ready():
+            raise ValueError("Skippy Core isn't reachable from skippy-pc yet (no SKIPPY_CORE_URL and key)")
         adopted = None
         with self._lock:
             self._prune()
@@ -555,7 +607,7 @@ class Workshop:
             elif any(not r.done for r in self._runs.values()):
                 raise Busy("Skippy is still working on the last thing")
             else:
-                run = self._runs[task] = Run(task, conv, message, who, project=project)
+                run = self._runs[task] = Run(task, conv, message, who, project=project, brain=brain)
                 run.clone = chosen.clone
                 run.on_change = self._changed
         if known is not None:
@@ -727,7 +779,8 @@ class Workshop:
         project = data.get("project")
         run = Run(task, conv, "", who.strip()[:MAX_WHO] if isinstance(who, str) else "",
                   float(created) if _is_number(created) else mtime,
-                  project if isinstance(project, str) and projects_mod._ID.fullmatch(project) else projects_mod.DEFAULT)
+                  project if isinstance(project, str) and projects_mod._ID.fullmatch(project) else projects_mod.DEFAULT,
+                  data.get("brain") if data.get("brain") in BRAINS else "claude")
         run.events = [e for e in events if isinstance(e, dict)][:MAX_EVENTS]
         run.done = data.get("done") is True
         run.ok = data["ok"] if isinstance(data.get("ok"), bool) else None
@@ -753,6 +806,59 @@ class Workshop:
             tmp.replace(path)
         except OSError:
             pass                                   # the next message starts a fresh session; not fatal
+
+    # ── Skippy Core as the brain ─────────────────────────────────────────
+    def _core_settings(self) -> tuple[str, str]:
+        """skippy-core's URL and key: from the environment, else the vault .env (read here, never logged or returned)."""
+        url = os.getenv("WORKSHOP_CORE_URL") or os.getenv("SKIPPY_CORE_URL", "")
+        key = os.getenv("SKIPPY_CORE_API_KEY", "")
+        if not (url and key):
+            try:
+                for line in Path(VAULT_ENV).read_text(encoding="utf-8").splitlines():
+                    name, _, value = line.partition("=")
+                    value = value.strip().strip(chr(34) + chr(39))
+                    if name.strip() == "SKIPPY_CORE_URL" and not url:
+                        url = value
+                    elif name.strip() == "SKIPPY_CORE_API_KEY" and not key:
+                        key = value
+            except OSError:
+                pass
+        return url.rstrip("/"), key
+
+    CORE_PROBE_TTL_S = 60
+
+    def core_ready(self) -> bool:
+        """Configured AND answering: GET {url}/v1/models with the key, at most once a minute (the reporter asks every 15 s).
+        A URL that's set but unreachable (the Funnel not open yet, skippy-core down) is not ready: the picker says so."""
+        url, key = self._core_settings()
+        if not (url and key):
+            return False
+        now = time.time()
+        cached = getattr(self, "_core_probe", None)
+        if cached and cached[0] == url and now - cached[1] < self.CORE_PROBE_TTL_S:
+            return cached[2]
+        import urllib.request
+        try:
+            req = urllib.request.Request(url + "/v1/models", headers={"x-api-key": key, "Authorization": "Bearer " + key})
+            with urllib.request.urlopen(req, timeout=4) as r:
+                ok = r.status == 200
+        except Exception:  # noqa: BLE001 — any failure is "not reachable"
+            ok = False
+        self._core_probe = (url, now, ok)
+        return ok
+
+    def core_env(self) -> dict:
+        """child_env() for a run on Skippy Core: its own config folder (no subscription login to win over the key), the key
+        sent both ways (x-api-key and Bearer), the coding slot for every model Claude Code asks for, no side traffic."""
+        url, key = self._core_settings()
+        config = os.path.join(os.path.dirname(self.sessions_path), ".skippy-workshop-core-claude")
+        os.makedirs(config, exist_ok=True)
+        env = child_env()
+        env.update(ANTHROPIC_BASE_URL=url, ANTHROPIC_API_KEY=key, ANTHROPIC_AUTH_TOKEN=key, CLAUDE_CONFIG_DIR=config,
+                   ANTHROPIC_SMALL_FAST_MODEL=CORE_MODEL, ANTHROPIC_DEFAULT_HAIKU_MODEL=CORE_MODEL,
+                   ANTHROPIC_DEFAULT_SONNET_MODEL=CORE_MODEL, ANTHROPIC_DEFAULT_OPUS_MODEL=CORE_MODEL,
+                   CLAUDE_CODE_MAX_CONTEXT_TOKENS=CORE_CONTEXT, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_TELEMETRY="1")
+        return env
 
     # ── the work ─────────────────────────────────────────────────────────
     def prompt(self, project: str | None = None) -> str:
@@ -802,6 +908,11 @@ class Workshop:
         in. A first use clones it (`git clone`, into the registry's `clone` path: never the Captain's checkout)."""
         project = self.project(run.project)
         clone = project.clone
+        if project.inplace:                            # the Captain's own folder: nothing to clone or pull, just be there
+            if not Path(clone).is_dir():
+                run.finish(False, f"{project.name} isn't a folder on skippy-pc any more")
+                return False
+            return True
         try:
             if not (Path(clone) / ".git").exists():
                 if Path(clone).exists() and any(Path(clone).iterdir()):
@@ -825,7 +936,7 @@ class Workshop:
             return False
         return True
 
-    def command(self, session: str | None, project: str | None = None) -> list[str]:
+    def command(self, session: str | None, project: str | None = None, brain: str = "claude") -> list[str]:
         """The claude command line. Every element is a single line (see the module docstring): the prompt is a FILE
         (write_prompt() makes it; _work does that before every run) and the message goes by stdin.
 
@@ -837,8 +948,9 @@ class Workshop:
 
         --add-dir is the project's primary checkout (the Captain's): readable, and for SkippyTel the place a skippy-pc
         service is deployed from. The working directory (the clone) is set by _spawn."""
+        thinking = ["--model", MODEL, "--effort", EFFORT] if brain == "claude" else ["--model", CORE_MODEL]
         cmd = [*self.claude_cmd, "-p", "--output-format", "stream-json", "--verbose",
-               "--model", MODEL, "--effort", EFFORT, "--dangerously-skip-permissions",
+               *thinking, "--dangerously-skip-permissions",
                "--append-system-prompt-file", str(self.prompt_path(project)), "--system-prompt-snapshot", "off",
                "--add-dir", self.project(project).primary]
         if session:
@@ -855,14 +967,14 @@ class Workshop:
                 raise ValueError(f"an argument contains a newline ({arg[:40]!r}), which cmd.exe would cut the command line at")
         return argv
 
-    def _spawn(self, argv: list[str], cwd: str | None = None) -> subprocess.Popen:
+    def _spawn(self, argv: list[str], cwd: str | None = None, env: dict | None = None) -> subprocess.Popen:
         """Start claude (or whatever `argv` is) the one way this module does it: no newline in any argument, the
         clone as the working directory, a pipe each way, the child_env() environment, and on POSIX its own process
         group so the whole tree can be killed. The Windows test runs the real claude.cmd through exactly this."""
         extra = {"start_new_session": True} if sys.platform != "win32" else {}
         return subprocess.Popen(self._one_line_each(argv), cwd=cwd or self.repo, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
-                                env=child_env(), bufsize=1, **extra)
+                                env=env or child_env(), bufsize=1, **extra)
 
     def _head(self, clone: str) -> str | None:
         out = self._git("rev-parse", "HEAD", cwd=clone, timeout=SHIP_GIT_TIMEOUT)
@@ -876,6 +988,8 @@ class Workshop:
         timeouts, and any failure just means no card."""
         project = self.project(run.project)
         clone = project.clone
+        if not project.repo or not project.branch:     # a folder that isn't a registered repo: no deploy to follow
+            return
         after = self._head(clone)
         if after is None or after == before:
             return
@@ -934,13 +1048,13 @@ class Workshop:
             except OSError as exc:                     # no rules, no run: never start the agent without them
                 run.finish(False, f"couldn't write my instructions file ({self.prompt_path(run.project)}): {exc}"[:300])
                 return
-            session = self._sessions().get(self.session_key(run.project, run.conv))
+            session = self._sessions().get(self.session_key(run.project, run.conv, run.brain))
             self._attempt(run, session)
         except Exception as exc:  # noqa: BLE001 — a crash must end the run, or the chat waits forever
             run.finish(False, f"the bridge hit a snag: {exc}"[:300])
         finally:
             # How it ended, and a fresh copy of Claude Code's whole transcript (the session id is known by now).
-            self.convlog.finished(run, self._sessions().get(self.session_key(run.project, run.conv)))
+            self.convlog.finished(run, self._sessions().get(self.session_key(run.project, run.conv, run.brain)))
 
     @staticmethod
     def _feed(proc: subprocess.Popen, message: str) -> None:
@@ -991,7 +1105,8 @@ class Workshop:
             run.finish(False, "stopped")
             return
         try:
-            proc = self._spawn(self.command(session, run.project), cwd=self.project(run.project).clone)
+            proc = self._spawn(self.command(session, run.project, run.brain), cwd=self.project(run.project).clone,
+                               env=self.core_env() if run.brain == "core" else None)
         except (OSError, ValueError) as exc:           # FileNotFoundError, a refused argument ...
             run.finish(False, f"can't start Claude Code: {exc}")
             return
@@ -1079,7 +1194,7 @@ class Workshop:
         if pending is not None:
             run.emit({"t": "text", "text": pending})
         if seen_session:
-            self._remember(self.session_key(run.project, run.conv), seen_session)
+            self._remember(self.session_key(run.project, run.conv, run.brain), seen_session)
         if proc.returncode not in (0, None):
             run.finish(False, f"Claude Code exited with code {proc.returncode}")
         else:

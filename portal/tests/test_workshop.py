@@ -40,7 +40,7 @@ def test_a_message_becomes_a_long_lived_home_job_and_its_id_is_the_task_id(shop)
     task = ws.send(ADMIN, CONV, "  make the tile green  ")
     [job] = home.jobs_reply()["jobs"]
     assert job == {"id": task, "kind": "workshop", "conv": CONV, "message": "make the tile green", "who": ADMIN,
-                   "project": "skippytel"}
+                   "project": "skippytel", "brain": "claude"}
     assert home._jobs[task]["ttl"] == workshop_mod.JOB_TTL > home_mod.JOB_TTL
 
 
@@ -504,3 +504,15 @@ def test_the_send_route_answers_503_with_the_reason(env):
     login(client, ADMIN)
     resp = post(client, "/me/workshop/send", {"conv": CONV, "message": "go"})
     assert resp.status_code == 503 and EXPIRED in resp.get_json()["error"]
+
+
+# ── the brain: Claude, or Skippy Core's coder (2026-10-20) ─────────────────────────────────────────────────────────
+
+def test_only_a_brain_skippy_pc_offers_and_can_reach_is_accepted():
+    from types import SimpleNamespace
+    offered = [{"id": "claude", "label": "Claude Sonnet", "ready": True}, {"id": "core", "label": "Skippy Core coder", "ready": False}]
+    w = workshop_mod.Workshop.__new__(workshop_mod.Workshop)
+    w.home = SimpleNamespace(workshop_brains=lambda: offered)
+    assert [b["id"] for b in w.brains()] == ["claude", "core"]
+    w.home = SimpleNamespace(workshop_brains=lambda: [])
+    assert w.brains() == [{"id": "claude", "label": "Claude Sonnet", "ready": True}]     # an older home: Claude only

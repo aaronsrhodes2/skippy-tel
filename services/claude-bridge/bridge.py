@@ -89,7 +89,8 @@ def _registry():
         return None
 
 
-WORKSHOP  = workshop.Workshop([CLAUDE], projects=_registry())
+WORKSHOP  = workshop.Workshop([CLAUDE], projects=_registry(),   # folders under the development root open in place
+                              dev_root=os.getenv("WORKSHOP_DEV_ROOT") or os.path.dirname(os.path.normpath(workshop.PRIMARY)))
 HOST_OPS  = host_ops.HostOps(WORKSHOP)
 MEMORY    = memory_service.MemoryService()
 TOKEN_REREAD_S = 30.0              # how long a token that is held stays unchecked
@@ -123,7 +124,9 @@ def workshop_health() -> dict:
     token = bool(current_token())
     login = WORKSHOP.login()
     info = {"ready": token and login != "expired", "model": workshop.MODEL, "busy": WORKSHOP.busy(), "login": login,
-            "projects": WORKSHOP.projects()}         # ids, names and GitHub repos only (no paths): the chat's project picker
+            "projects": WORKSHOP.projects(),         # ids, names and GitHub repos only (no paths): the chat's project picker
+            "brains": [{"id": "claude", "label": "Claude Sonnet", "ready": token and login != "expired"},
+                       {"id": "core", "label": "Skippy Core coder", "ready": token and WORKSHOP.core_ready()}]}
     if not token:
         info["reason"] = "SKIPPY_HOME_TOKEN isn't configured on this PC"
     elif login == "expired":
@@ -246,7 +249,7 @@ class Handler(BaseHTTPRequestHandler):
             run = WORKSHOP.start(str(body.get("task") or ""), str(body.get("conv") or ""),
                                  str(body.get("message") or ""), who=str(body.get("who") or ""),
                                  attach=bool(body.get("attach")), project=str(body.get("project") or ""),
-                                 images=body.get("images"))
+                                 images=body.get("images"), brain=str(body.get("brain") or "claude"))
         except workshop.Busy as exc:
             self._json(409, {"error": "busy", "message": str(exc)})
         except workshop.UnknownTask:

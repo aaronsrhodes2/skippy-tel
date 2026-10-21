@@ -155,6 +155,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         """What the agent's chat (templates/_workshop.html) needs; only ever built for the Captain."""
         return dict(workshop_ready=workshop.ready(), workshop_model=home.capability_note("workshop", "model"),
                     workshop_reason=home.capability_reason("workshop"), workshop_projects=workshop.projects(),
+                    workshop_brains=workshop.brains(),
                     workshop_notify=notifier.enabled(me()), workshop_notify_ready=notifier.configured)
 
     @app.get("/")
@@ -1255,7 +1256,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         body = request.get_json(silent=True) or {}
         message = str(body.get("message") or "")
         try:
-            task = workshop.send(me(), str(body.get("conv") or ""), message, str(body.get("project") or ""), body.get("images"))
+            task = workshop.send(me(), str(body.get("conv") or ""), message, str(body.get("project") or ""), body.get("images"),
+                                 brain=str(body.get("brain") or "claude"))
         except workshop_mod.Busy as exc:
             return jsonify(error=str(exc)), 409
         except workshop_mod.NotReady as exc:

@@ -40,6 +40,7 @@ class Project:
     clone: str              # the agent's own working copy
     deploy: str = ""        # "skippytel" = the SkippyTel deploy rules in the prompt; "" = the repo's own CLAUDE.md
     remote: str = ""        # where the clone comes from; "" = https://github.com/<repo>.git
+    inplace: bool = False   # a FOLDER the Captain picked: the agent works right in it (clone == primary), git is the undo
 
     @property
     def url(self) -> str:
@@ -118,3 +119,35 @@ def parse(data) -> dict[str, Project]:
 
 def load(path: Path = FILE) -> dict[str, Project]:
     return parse(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+# ── folders: "pick a local folder and code in it" (the Captain's choice, 2026-10-20) ─────────────────────────────────
+# Any folder directly under the development root can be opened IN PLACE: the agent's working directory is the folder
+# itself, not a clone, so it edits the Captain's own files (git is the undo). That is a different promise from the
+# registry above, so folders never go through check() and never mix with it: their ids are "f-<slug>", they are found
+# fresh on every call (a new folder appears without a restart), and only a direct child of the root can be one.
+FOLDER_PREFIX = "f-"
+_SKIP_FOLDER = re.compile(r"^[._]|-workshop$")
+
+
+def _slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:37]
+
+
+def folders(root: str | Path) -> dict[str, Project]:
+    """The folders directly under `root` that may be opened in place, by id. Hidden ones, `_...` and the registry's
+    `-workshop` clones are left out; a slug two folders share goes to the first (by name)."""
+    out: dict[str, Project] = {}
+    try:
+        children = sorted((c for c in Path(root).iterdir() if c.is_dir()), key=lambda c: c.name.lower())
+    except OSError:
+        return out
+    for child in children:
+        slug = _slug(child.name)
+        if not slug or _SKIP_FOLDER.search(child.name) or "\n" in child.name or "\r" in child.name:
+            continue
+        fid = FOLDER_PREFIX + slug
+        if fid not in out:
+            path = str(child).replace("\\", "/")
+            out[fid] = Project(fid, child.name[:60], "", "", path, path, "", "", True)
+    return out

@@ -285,6 +285,11 @@ def workshop_capability() -> dict:
     projects = workshop_projects(info.get("projects"))
     if projects:
         out["projects"] = projects                                    # the chat's project picker (ids and names only)
+    brains = [{"id": b["id"], "label": " ".join(str(b.get("label") or b["id"]).split())[:40], "ready": b.get("ready") is True}
+              for b in (info.get("brains") if isinstance(info.get("brains"), list) else [])
+              if isinstance(b, dict) and b.get("id") in ("claude", "core")]
+    if brains:
+        out["brains"] = brains                                        # the chat's brain key: Claude, or Skippy Core's coder
     reason = info.get("reason")
     if not out["ready"]:
         if isinstance(reason, str) and reason.strip():
@@ -579,6 +584,7 @@ def workshop(job: dict, token: str) -> dict:
     who = str(job.get("who") or "")
     project = str(job.get("project") or "")
     project = project if _PROJECT_ID.fullmatch(project) else ""     # "" = the bridge's default (SkippyTel)
+    brain = job.get("brain") if job.get("brain") in ("claude", "core") else "claude"   # who thinks: Claude, or Skippy Core's coder
 
     def fail(reason: str) -> dict:
         for _ in range(3):
@@ -593,7 +599,7 @@ def workshop(job: dict, token: str) -> dict:
     for attempt in range(START_TRIES):            # a bridge that is restarting answers in a few seconds
         pictures = job.get("images") if isinstance(job.get("images"), list) and not attach else None
         status, started = _bridge("POST", "/workshop", {"task": task, "conv": conv, "message": message, "who": who,
-                                                        "attach": attach, "project": project,
+                                                        "attach": attach, "project": project, "brain": brain,
                                                         **({"images": pictures} if pictures else {})}, token)
         if status is not None or attempt == START_TRIES - 1:
             break

@@ -122,6 +122,9 @@
     <select id="ps-project" aria-label="Project" hidden>
       {% for p in workshop_projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
     </select>
+    <select id="ps-brain" aria-label="Brain" title="Who thinks: Claude (paid), or Skippy Core's coder (local, free). Fixed once a conversation has a message.">
+      {% for b in workshop_brains %}<option value="{{ b.id }}"{% if not b.ready %} disabled{% endif %}>{{ b.label }}{% if not b.ready %} (offline){% endif %}</option>{% endfor %}
+    </select>
     <button type="button" id="ps-convs-btn">Conversations</button>
     <button type="button" id="ps-copyall" title="Copy this whole conversation as markdown">Copy chat</button>
     {# A Discord DM to the Captain when a run ends (portal/notify.py). Off when the portal has no Discord bot. #}
@@ -211,10 +214,20 @@
     function setProject(id) { project = id; store.set(K.project, id); picker.value = id; }
     function lockPicker() {                        // one conversation, one repo: the picker is fixed once it has a message
       picker.disabled = turns.length > 0;
+      brainPick.disabled = turns.length > 0;       // the brain too (see BRAINS below)
       if (turns.length) pickHint.hidden = true;
     }
     setProject(project);
     picker.addEventListener("change", () => { if (!turns.length && known(picker.value)) setProject(picker.value); else picker.value = project; });
+    // Who thinks: Claude, or Skippy Core's coder. Like the project, fixed once the conversation has a message (each brain's
+    // Claude Code sessions live in its own config folder on skippy-pc, so switching mid-conversation would lose the thread).
+    const BRAINS = {{ workshop_brains | tojson }}, brainPick = root.querySelector("#ps-brain");
+    let brain = store.get("ps-brain") || "claude";
+    if (!BRAINS.some(b => b.id === brain && b.ready)) brain = (BRAINS.find(b => b.ready) || {id: "claude"}).id;
+    function setBrain(id) { brain = id; store.set("ps-brain", id); brainPick.value = id; }
+    setBrain(brain);
+    brainPick.addEventListener("change", () => { if (!turns.length && BRAINS.some(b => b.id === brainPick.value && b.ready)) setBrain(brainPick.value); else brainPick.value = brain; });
+    brainPick.disabled = turns.length > 0;
     let running = null;                            // {task, after, turn, quietSince, kind, ...}: the task this page follows
     let sending = false;                           // a message is on its way to the portal
 
@@ -605,7 +618,7 @@
       if (!pins.some(x => x.conv === conv)) { pin({conv, title: message || "(image)", project}); }      // a conversation you are in is pinned until you unpin it
       text.value = ""; sending = true; ui();
       let r;
-      try { r = await call(SEND, {method: "POST", headers: H, body: JSON.stringify({conv, message, project, images: sent})}); }
+      try { r = await call(SEND, {method: "POST", headers: H, body: JSON.stringify({conv, message, project, brain, images: sent})}); }
       catch (e) { r = {ok: false, data: {error: e.message}}; }
       sending = false; reply.pending = false;
       if (!r.ok) {
