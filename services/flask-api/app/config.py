@@ -53,7 +53,9 @@ class Settings:
     #   1. Rip 1–3 min of clean Brey-as-Skippy audio from the Expeditionary
     #      Force audiobooks (if you own them — Craig Alanson / R.C. Brey).
     #   2. Upload to ElevenLabs → Instant Voice Clone → copy the voice ID.
-    #   3. Set ELEVENLABS_VOICE_ID=<that_id> in .env.
+    #   3. Set ELEVENLABS_SKIPPY_VOICE_ID=<that_id> in the vault .env (the name the vault uses, like its
+    #      NAGATHA/BILBY/GRUMPY siblings; the older ELEVENLABS_VOICE_ID still works). Until 2026-10-21 only the
+    #      older name was read, so Skippy spoke with the stock Clyde voice below while the clone sat unused.
     #
     # ⚠ ATTRIBUTION & LICENSE:
     #   The Skippy the Magnificent character was created by Craig Alanson.
@@ -66,7 +68,8 @@ class Settings:
     # ElevenLabs model: eleven_turbo_v2_5 — lowest latency, still excellent.
     # Streaming endpoint used so Android playback starts in <400ms.
     elevenlabs_api_key:  str = os.getenv("ELEVENLABS_API_KEY", "")
-    elevenlabs_voice_id: str = os.getenv("ELEVENLABS_VOICE_ID", "2EiwWnXFnvU5JabPnv8n")  # Clyde / Skippy
+    elevenlabs_voice_id: str = (os.getenv("ELEVENLABS_SKIPPY_VOICE_ID") or os.getenv("ELEVENLABS_VOICE_ID")
+                                or "2EiwWnXFnvU5JabPnv8n")   # the Skippy clone; Clyde (stock) only when neither is set
     elevenlabs_model:    str = os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5")
 
     # Persona-specific voice IDs — each AI personality speaks in its own voice.

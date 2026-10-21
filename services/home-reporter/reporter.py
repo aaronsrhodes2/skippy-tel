@@ -33,6 +33,8 @@ IMPORTS_DIR = os.environ.get("IMPORTS_DIR", "/imports")      # game databases to
 CHUNK = 8 * 1024 * 1024      # Cloud Run caps a request at 32 MB
 ART_MAX = 400_000
 MUSIC = os.environ.get("MUSIC_URL", "").rstrip("/")           # music-studio on skippy-pc (ACE-Step on the GPU)
+IMAGES = os.environ.get("IMAGE_URL", "").rstrip("/")          # image-studio on skippy-pc (SDXL on the GPU)
+IMAGE_TIMEOUT = 900         # seconds a picture may take (the first after a restart loads 6.9 GB of weights)
 OLLAMA = os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/")
 GPU = threading.Lock()       # one heavy GPU job at a time: a song and a chat model can't share the card
 MUSIC_TIMEOUT = 600          # seconds a song may take
@@ -302,6 +304,7 @@ def workshop_capability() -> dict:
 def _capability_probes() -> dict:
     """One probe per capability, so `gather` can run them side by side (each waits at most ~4 s on its own service)."""
     return {"make_music": lambda: {"ready": bool(MUSIC) and _up(f"{MUSIC}/health")},
+            "make_image": lambda: {"ready": bool(IMAGES) and (fetch(f"{IMAGES}/health") or {}).get("ready") is True},
             "workshop": workshop_capability,
             "music_gate": lambda: {"ready": bool(GATE and GATE_PUBLIC) and _up(f"{GATE}/health"), "url": GATE_PUBLIC},
             "video_gate": video_gate_capability,
@@ -409,6 +412,44 @@ def make_music(job: dict, token: str) -> dict:
     except (TypeError, ValueError):
         length = float(seconds)
     return {"result": {"title": title, "seconds": length}}
+
+
+def make_image(job: dict, token: str) -> dict:
+    """SDXL in image-studio: Ollama is unloaded first (the card is 16 GB and Qwen sits in 6 of it), the PNG is rendered and
+    handed to the portal like a song (PUT /home/media/<job>), which shows it as an image card in the chat."""
+    if not IMAGES:
+        return {"error": "pictures aren't set up on skippy-pc"}
+    prompt = str(job.get("prompt") or "").strip()[:900]
+    if not prompt:
+        return {"error": "a picture needs a description"}
+    ask = {"prompt": prompt, "negative": str(job.get("negative") or "")[:500] or None,
+           "width": job.get("width") or 1024, "height": job.get("height") or 1024}
+    with GPU:
+        free_gpu()
+        req = urllib.request.Request(f"{IMAGES}/generate", data=json.dumps(ask).encode(), method="POST",
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=IMAGE_TIMEOUT) as r:
+                png = r.read(CLIP_MAX + 1)
+        except urllib.error.HTTPError as e:
+            try:
+                why = json.loads(e.read() or b"{}").get("error")
+            except ValueError:
+                why = None
+            return {"error": str(why or f"the image studio said {e.code}")[:200]}
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"the image studio didn't answer: {e}"[:200]}
+    if len(png) > CLIP_MAX or not png.startswith(b"\x89PNG"):
+        return {"error": "the picture didn't come back as a PNG"}
+    title = prompt[:60]
+    up = urllib.request.Request(f"{PORTAL}/home/media/{job.get('id')}?title={urllib.parse.quote(title)}", data=png,
+                                method="PUT", headers={"Content-Type": "image/png", "Authorization": f"Bearer {token}"})
+    try:
+        with urllib.request.urlopen(up, timeout=120) as r:
+            r.read()
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"couldn't hand the picture to the portal: {e}"[:200]}
+    return {"result": {"title": title, "bytes": len(png)}}
 
 
 def _bridge(method: str, path: str, body: dict | None, token: str, timeout: float = 40) -> tuple[int | None, dict]:
@@ -734,6 +775,8 @@ def run_job(job: dict, token: str = "") -> dict:
         return workshop_conversations(job, token)
     if job.get("kind") == "make_music":
         return make_music(job, token)
+    if job.get("kind") == "make_image":
+        return make_image(job, token)
     if job.get("kind") == "host_op":
         return host_op(job, token)
     if job.get("kind") in ("memory_list", "memory_get"):

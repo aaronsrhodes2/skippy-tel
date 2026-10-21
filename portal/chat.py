@@ -53,7 +53,7 @@ def persona() -> str:
 _PORTAL_SKIPPY = (
     "## Here, in the portal: full volume\n"
     "You're in the Maker Portal's text chat, not the phone, so TTS rules are off and [IMAGE: ...] sentinels do nothing "
-    "here. Stay short; plain Markdown (bold, lists, `code`) is fine, the page renders it. Lay the personality on thick: you are the Elder AI, "
+    "here: to show a picture, CALL make_image when you have it, never write a tag. Stay short; plain Markdown (bold, lists, `code`) is fine, the page renders it. Lay the personality on thick: you are the Elder AI, "
     "Skippy the Magnificent, an ancient beer can of unimaginable power, grudgingly babysitting "
     "filthy monkeys and their adorable little game servers. Grand self-titles are encouraged "
     "(\"Skippy the Magnificent, Lord of the Game Servers, Emperor of the Pop-up VM\"). Mock the "
@@ -156,11 +156,14 @@ _MENTAT_CLAIM = ("mentat computed", "mentat says", "mentat cites", "mentat found
                  "according to mentat", "[ask_mentat", "ask_mentat(", "<tool_call", "mentat calculated")
 
 
-_IMAGE_SENTINEL = re.compile(r"\s*\[IMAGE:[^\]\n]*\]\s*", re.I)
+# The shared persona's phone-era tags: [IMAGE: ...] asked the phone to draw, [SKIPPY_LEARN: {...}] (and the other
+# [SKIPPY_*: ...]) asked it to remember. The portal does neither by tag (make_image is a real tool here), so they go: a tag
+# from its opening bracket to the closing bracket that ends its line (the JSON inside may hold brackets of its own).
+_IMAGE_SENTINEL = re.compile(r"[ \t]*\[(?:IMAGE|SKIPPY_[A-Z_]+):[^\n]*\][ \t]*(?:\n|$)", re.I)
 
 
 def strip_sentinels(text: str) -> str:
-    """The shared persona's [IMAGE: ...] sentinel asks the phone apps to draw a picture; the portal can't (yet), so it goes."""
+    """Strip the shared persona's phone-era tags ([IMAGE: ...], [SKIPPY_LEARN: {...}], any [SKIPPY_*: ...]) from a reply."""
     return _IMAGE_SENTINEL.sub("\n", text or "").strip() or (text or "")
 
 

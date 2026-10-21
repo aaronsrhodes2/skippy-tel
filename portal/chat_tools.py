@@ -157,6 +157,28 @@ _MUSIC_RESULT = {
 
 MUSIC_WAIT_S = 100     # how long make_music holds the chat before saying "still working"
 
+_MAKE_IMAGE = {
+    "name": "make_image",
+    "description": "Make a picture: free, no tokens. Give a vivid, specific description (subject, setting, style, lighting, "
+                   "composition). The picture shows as an image card under your reply; don't paste links or write [IMAGE: ...]. "
+                   "If it isn't ready yet the result says so: tell the user and use image_result later. Only when the user "
+                   "asks for a picture.",
+    "input_schema": {"type": "object",
+                     "properties": {"prompt": {"type": "string", "description": "What to draw, in detail."},
+                                    "orientation": {"type": "string", "enum": ["square", "landscape", "portrait"]}},
+                     "required": ["prompt"], "additionalProperties": False},
+}
+
+_IMAGE_RESULT = {
+    "name": "image_result",
+    "description": "Check on a picture started earlier with make_image that wasn't ready when it returned.",
+    "input_schema": {"type": "object", "properties": {"job_id": {"type": "string"}},
+                     "required": ["job_id"], "additionalProperties": False},
+}
+
+IMAGE_WAIT_S = 110     # how long make_image holds the chat before saying "still working"
+_SIZES = {"square": (1024, 1024), "landscape": (1216, 832), "portrait": (832, 1216)}
+
 # Direct verbs: "/verb …" at the start of a message forces that tool first.
 # (verb, tool, badge label, category)
 VERBS = (
@@ -168,6 +190,7 @@ VERBS = (
     ("physics", "ask_mentat", "Physics (Mentat)", "Physics"),
     ("playing", "now_playing", "Now playing", "Music"),
     ("music", "make_music", "Make music", "Music"),
+    ("image", "make_image", "Make a picture", "Pictures"),
 )
 _VERB_RE = re.compile(r"^/([a-z]+)\b\s*(.*)$", re.S | re.I)
 
@@ -188,7 +211,7 @@ def parse_verb(message: str) -> tuple[str | None, str]:
 
 class ChatTools:
     def __init__(self, vm, is_admin: bool, visible: list[str] | None = None, who: str = "",
-                 music=None, home_mentat=None, home_music=None):
+                 music=None, home_mentat=None, home_music=None, home_image=None, gemini_image=None):
         self.vm, self.is_admin, self.who = vm, is_admin, who
         self.visible = list(GAMES) if visible is None else list(visible)   # games this person may see
         self.names = _ADMIN if is_admin else _EVERYONE
@@ -201,6 +224,11 @@ class ChatTools:
         self.mentat_ok = bool(self.home_mentat)
         # Local capabilities (home.py advertises them; tool_policy decides who may use them).
         self.home_music = home_music if tool_policy.allowed("music_gen", is_admin) else None
+        self.home_image = home_image if tool_policy.allowed("image_gen", is_admin) else None
+        # Gemini first (usually the best picture), the local studio when it refuses: gemini_image(prompt, w, h) -> the
+        # media item for the picture, or image_gen.Refused. Offered when either half is there.
+        self.gemini_image = gemini_image if tool_policy.allowed("image_gen", is_admin) else None
+        self.image_ok = bool(self.home_image or self.gemini_image)
         self.media: list[dict] = []           # audio made this turn: the chat page plays it
 
     def available(self) -> list[str]:
@@ -211,6 +239,8 @@ class ChatTools:
             names.append("now_playing")
         if self.home_music:
             names += ["make_music", "music_result"]
+        if self.image_ok:
+            names += ["make_image", "image_result"]
         return names
 
     def badges(self) -> dict[str, list[dict]]:
@@ -237,6 +267,8 @@ class ChatTools:
             out.append(_NOW_PLAYING)
         if self.home_music:
             out += [_MAKE_MUSIC, _MUSIC_RESULT]
+        if self.image_ok:
+            out += [_MAKE_IMAGE, _IMAGE_RESULT]
         return out
 
     def run(self, name: str, args: dict) -> str:
@@ -294,6 +326,54 @@ class ChatTools:
         if state["state"] == "error":
             raise ToolError(f"Music failed: {state['error']}. Say so plainly.")
         raise ToolError("That music job is gone (it expired, or the portal restarted). Offer to make it again.")
+
+    def _make_image(self, args) -> dict:
+        prompt = str(args.get("prompt") or "").strip()[:900]
+        if not prompt:
+            raise ToolError("make_image needs a description of the picture.")
+        width, height = _SIZES.get(str(args.get("orientation") or "square"), _SIZES["square"])
+        refused = None
+        if self.gemini_image:
+            import image_gen
+            try:
+                item = self.gemini_image(prompt, width, height)
+                self.media.append(item)
+                return {"status": "done", "by": "Gemini",
+                        "note": "The picture appears under your reply. Don't paste a link or write [IMAGE: ...]."}
+            except image_gen.Refused as exc:
+                refused = str(exc)
+        if not self.home_image:
+            raise ToolError(f"{refused or 'Gemini is unavailable'}, and skippy-pc's image studio isn't reachable. Say so plainly.")
+        job_id = self.home_image.start("make_image", owner=self.who, prompt=prompt, width=width, height=height)
+        out = self._image_status(job_id, IMAGE_WAIT_S)
+        if refused:
+            out["gemini"] = f"{refused}; drawn on the Captain's GPU instead (SDXL)"
+        return out
+
+    def _image_result(self, args) -> dict:
+        job_id = str(args.get("job_id") or "")
+        if not self.home_image:
+            raise ToolError("There's no picture still being drawn at home.")
+        owner = self.home_image.owner_of(job_id)
+        if owner is not None and owner != self.who and not self.is_admin:
+            raise ToolError("That isn't your picture.")
+        return self._image_status(job_id, 5)
+
+    def _image_status(self, job_id: str, wait: float) -> dict:
+        state = self.home_image.wait_result(job_id, wait)
+        if state["state"] == "done":
+            result = state["result"] if isinstance(state.get("result"), dict) else {}
+            if not any(m["job_id"] == job_id for m in self.media):
+                self.media.append({"kind": "image", "job_id": job_id, "url": f"/chat/media/{job_id}",
+                                   "title": str(result.get("title") or "your picture")[:80], "by": "SDXL"})
+            return {"status": "done", "by": "SDXL on the Captain's GPU",
+                    "note": "The picture appears under your reply. Don't paste a link or write [IMAGE: ...]."}
+        if state["state"] == "running":
+            return {"status": "running", "job_id": job_id, "waited_s": state.get("age_s"),
+                    "note": "Still drawing. Say so, and offer to check again with image_result."}
+        if state["state"] == "error":
+            raise ToolError(f"The picture failed: {state['error']}. Say so plainly.")
+        raise ToolError("That picture job is gone (it expired, or the portal restarted). Offer to make it again.")
 
     def _server_status(self, _args) -> dict:
         s = self.vm.status()

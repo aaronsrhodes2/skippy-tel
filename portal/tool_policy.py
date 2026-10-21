@@ -24,6 +24,7 @@ MCP_SERVERS: dict[str, str] = {
     "physics": EVERYONE,
     # The Captain's hardware: skippy-pc's GPU makes the music, so it's his alone
     "music_gen": ADMIN,
+    "image_gen": ADMIN,         # make_image: Gemini or this PC's GPU (the Captain only, to start)
     # The Captain's private data
     "gmail": ADMIN,
     "calendar": ADMIN,

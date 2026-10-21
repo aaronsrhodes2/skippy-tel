@@ -11,7 +11,7 @@ from __future__ import annotations
 import threading
 import time
 
-TYPES = {"audio/mpeg", "audio/ogg", "audio/wav", "audio/x-wav"}
+TYPES = {"audio/mpeg", "audio/ogg", "audio/wav", "audio/x-wav", "image/png", "image/jpeg"}   # songs and pictures
 MAX_ONE = 30_000_000        # Cloud Run caps a request at 32 MB
 MAX_ALL = 120_000_000       # of the portal's 1 GiB
 TTL = 1800                  # seconds a clip stays playable

@@ -11,6 +11,7 @@ import dataclasses
 import io
 import ipaddress
 import json
+import secrets
 import re
 from functools import wraps
 
@@ -22,6 +23,7 @@ import access_requests as access_mod
 import admin_panel
 import auth
 import attachments as attachments_mod
+import image_gen
 import autoconfig
 import brains
 import buildinfo
@@ -1635,7 +1637,16 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                                     who=email,
                                     music=home.music if auth.has_portal(email, "audio") else None,
                                     home_mentat=home if home.mentat_ready() else None,
-                                    home_music=home if home.can("make_music") else None)
+                                    home_music=home if home.can("make_music") else None,
+                                    home_image=home if home.can("make_image") else None,
+                                    gemini_image=(lambda p, w, h: gemini_picture(email, p, w, h)) if image_gen.ready() else None)
+
+    def gemini_picture(owner, prompt, width, height) -> dict:
+        """make_image's first try: Gemini draws it in the cloud; the bytes go through the same media hand-off as a song."""
+        data, mime = image_gen.generate(prompt, width, height)
+        key = "g" + secrets.token_hex(12)
+        media.put(key, data, mime, owner, title=prompt[:60])
+        return {"kind": "image", "job_id": key, "url": f"/chat/media/{key}", "title": prompt[:80], "by": "Gemini"}
 
     app.extensions["chat_tools_for"] = tools_for      # for the tests: what a given person's tools are, without a model in the way
 

@@ -12,8 +12,8 @@ def test_a_clip_round_trips_with_its_owner_and_title():
     assert m.get("nope") is None
 
 
-@pytest.mark.parametrize("ctype", ["text/html", "application/octet-stream", "image/png", ""])
-def test_only_audio_types_are_held(ctype):
+@pytest.mark.parametrize("ctype", ["text/html", "application/octet-stream", "image/svg+xml", "image/gif", ""])
+def test_only_audio_and_png_jpeg_pictures_are_held(ctype):
     with pytest.raises(media.MediaError) as err:
         media.Media().put("j", b"data", ctype, "a")
     assert err.value.status == 415
