@@ -40,6 +40,10 @@ ROOMS = {
     "downstairs": {"name": "Downstairs (HDMI)", "match": "EPSON|NVIDIA|HDMI"},
     "upstairs": {"name": "Upstairs (Bluetooth)", "match": "Enclave"},
 }
+# The room boxes (services/satellite/rooms: a Waveshare ESP32-S3 86 box per room), checked in by skippy-pc's hub through the home-token route
+# /home/music/checkin, never by a browser: a box is "box-<room>", its Connect device "skippyroom-<room>". Listed like a speaker window.
+BOX_ROOM = re.compile(r"box-[a-z0-9-]{1,20}")
+BOX_DEVICE = re.compile(r"skippyroom-[a-z0-9-]{1,20}")
 TAKE = re.compile(r"take:[A-Za-z0-9_-]{8,40}")      # "pick up what that device is playing": a room's push, since a page can only pull
 REPEATS = ("off", "all", "one")
 GATE_URL = re.compile(r"https://[a-z0-9-]+(\.[a-z0-9-]+)*\.ts\.net")
@@ -114,15 +118,16 @@ class Player:
         return {"ok": True, "url": url, "pass": sign(gate_key(stored), exp), "exp": exp}
 
     # ── Connect: devices, handoff, remote ────────────────────────────────
-    def checkin(self, user: str, device: str, name: str, body: dict | None, room: str = "") -> dict:
+    def checkin(self, user: str, device: str, name: str, body: dict | None, room: str = "", box: bool = False) -> dict:
         """A player saying what it's doing (body) or just looking (None). Returns the actions waiting for it and every
-        device's latest, newest first. `room` is set by the speaker windows on skippy-pc (one of ROOMS)."""
+        device's latest, newest first. `room` is set by the speaker windows on skippy-pc (one of ROOMS), or by the hub for a
+        room box (`box`: only the home-token route says so, and then only a BOX_ROOM)."""
         now = self.clock()
         with self._lock:
             mine = self._devices.setdefault(user, {})
             d = mine.setdefault(device, {"name": "", "state": None, "seen": 0.0, "updated": 0.0, "room": ""})
             d["name"], d["seen"] = _text(name, 40) or "A browser", now
-            d["room"] = room if room in ROOMS else ""
+            d["room"] = room if room in ROOMS or (box and BOX_ROOM.fullmatch(room or "")) else ""
             if body is not None:
                 d["state"], d["updated"] = _state(body, d["state"]), now
             for gone in [k for k, v in mine.items() if now - v["seen"] > KEEP_S]:

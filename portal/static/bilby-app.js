@@ -1719,7 +1719,7 @@
       who.append(el("b", "", "Play on"));
       const pick = (label, targets) => { const b = el("button", "key wide", label); b.type = "button"; b.onclick = () => { closeMenu(true); playOn(targets); }; return b; };
       for (const r of rooms) acts.append(pick(r.name, [r]));
-      if (rooms.length > 1) acts.append(pick("Both", rooms));
+      if (rooms.length > 1) acts.append(pick(rooms.length === 2 ? "Both" : "All", rooms));
       box.append(who, acts); items.push({ node: box });
     }
     if (!devs.length && !items.length) items.push({ node: el("div", "none", "No other device has this player open right now. Open Bilby's Audio Service on another device and it shows up here, and either one can hand over or remote-control the other.") });

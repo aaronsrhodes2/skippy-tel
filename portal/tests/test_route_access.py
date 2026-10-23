@@ -50,7 +50,7 @@ REGISTRY = {
         "doomloop.page", "doomloop.game_file", "starcontrol.page", "starcontrol.game_file")},
     # skippy-pc, CI
     **{e: MACHINE for e in (
-        "game_import_done", "game_import_download", "home_import_chunk", "home_job_done", "home_jobs", "home_media", "home_report", "home_starter",
+        "game_import_done", "game_import_download", "home_import_chunk", "home_job_done", "home_jobs", "home_media", "home_music_checkin", "home_report", "home_starter",
         "home_telemetry", "home_workshop", "home_workshop_list", "ops_home", "tasks_run")},
     "telemetry_tap": BEACON,
     # public: sign-in, the front door, static and informational pages, the public experiments (free local compute, rate limited)

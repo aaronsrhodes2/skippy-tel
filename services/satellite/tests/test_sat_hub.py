@@ -125,16 +125,16 @@ def run(test, forever=False):
         made = {}
         log = []
 
-        def make_room(name, send):
-            room = Room(name, send, made["gate"], made["brain"], made["timers"], spotter=made.get("spotter"),
-                        decode=lambda mp3: (pcm(0.1, 100, 22050), 22050), local_voice=made.get("local_voice"),
-                        log=log.append, sleep=lambda s: asyncio.sleep(0))
+        def make_room(name, link):
+            room = Room(name, link, made["gate"], made["brain"], made["timers"], spotter=made.get("spotter"),
+                        local_voice=made.get("local_voice"), log=log.append)
             made["room"] = room
             return room
 
         made.update(gate=FakeGate(), brain=FakeBrain(), timers=Timers(clock=lambda: made.get("now", 0)))
-        hub = Hub([("kitchen", "127.0.0.1", box.port)], make_room, log=log.append, retry_s=(0.01,))
-        task = asyncio.ensure_future(hub.keep("kitchen", "127.0.0.1", box.port, forever=forever))
+        hub = Hub([("kitchen", "wyoming", "127.0.0.1", box.port)], make_room, log=log.append, retry_s=(0.01,),
+                  decode=lambda mp3: (pcm(0.1, 100, 22050), 22050), sleep=lambda s: asyncio.sleep(0))
+        task = asyncio.ensure_future(hub.keep("kitchen", "wyoming", "127.0.0.1", box.port, forever=forever))
         try:
             await test(box, made, hub, log, start=lambda: _handshake(box))
         finally:
@@ -164,10 +164,13 @@ def test_the_hub_dials_the_box_asks_who_it_is_then_runs_it():
     run(body)
 
 
-def test_rooms_are_name_equals_host_with_the_wyoming_port_by_default():
-    assert parse_rooms("kitchen=192.168.1.40, bedroom=pi-bed.local:10701") == [("kitchen", "192.168.1.40", 10700), ("bedroom", "pi-bed.local", 10701)]
+def test_rooms_are_name_equals_host_wyoming_by_default_or_an_esphome_box():
+    assert parse_rooms("kitchen=192.168.1.40, bedroom=pi-bed.local:10701") == [("kitchen", "wyoming", "192.168.1.40", 10700),
+                                                                                 ("bedroom", "wyoming", "pi-bed.local", 10701)]
+    assert parse_rooms("den=esphome://skippy-den.local, hall=esphome://10.0.0.9:6054") == [("den", "esphome", "skippy-den.local", 6053),
+                                                                                          ("hall", "esphome", "10.0.0.9", 6054)]
     assert parse_rooms("") == []
-    for bad in ("kitchen", "=1.2.3.4", "kitchen=", "kitchen=pi:port", "a=1.1.1.1,a=2.2.2.2"):
+    for bad in ("kitchen", "=1.2.3.4", "kitchen=", "kitchen=pi:port", "a=1.1.1.1,a=2.2.2.2", "my room=1.2.3.4", "x=esphome://"):
         with pytest.raises(ValueError):
             parse_rooms(bad)
 

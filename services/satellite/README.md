@@ -20,17 +20,25 @@ Settings (the vault `.env`, or the environment): `SKIPPY_HOME_TOKEN`, `ANTHROPIC
 `wakeword/README.md`: record him (`wakectl.py record`), train on the GPU (`bash wakeword/train.sh`), test and pick the threshold (`wakectl.py test`).
 With a model, room talk is never sent anywhere: only what follows "Skippy" reaches Whisper.
 
-## Every room: the Wyoming hub
+## Every room: the hub
 
-    SATELLITE_ROOMS="kitchen=192.168.1.40,bedroom=192.168.1.41:10700" ./.venv/Scripts/python hub.py
+    ./.venv/Scripts/python hub.py                                          # every room in SATELLITE_ROOMS
     ./.venv/Scripts/python hub.py --say kitchen "Dinner is ready, monkeys."
 
-skippy-pc does all the hearing, thinking and talking; a room needs only a box with a microphone and a speaker running a
-[Wyoming](https://github.com/OHF-Voice/wyoming) satellite (e.g. `wyoming-satellite` on a Raspberry Pi). The hub dials each box (as Home Assistant
-would), sends `run-satellite`, and handles both kinds: a box that woke on "Skippy" itself (its own `wyoming-openwakeword` with our model) sends the
-command; a box that streams everything is listened to with the same model here, and gets Alexa's follow-up window. Each room has its own short memory
-and its own timers (announced where they were set); the house (lights, plugs) is shared. A box that drops is dialled again. Tests: `tests/test_sat_hub.py`
-(a fake box over a real socket, speaking the real protocol through the `wyoming` package).
+skippy-pc does all the hearing, thinking and talking; a room needs only a box with a microphone and a speaker. Two kinds, in `SATELLITE_ROOMS`:
+
+* `kitchen=esphome://skippy-kitchen.local`: **the room boxes** (Waveshare ESP32-S3 86 boxes flashed with `rooms/skippy-room.yaml`; everything about
+  them, flashing included, is in `rooms/README.md`). The hub is the box's Home Assistant (`esphome_link.py`, aioesphomeapi); Skippy's voice and
+  Bilby's music go to it as URLs from the hub's media server (`media.py`, port 10800), and each box is a Bilby Connect speaker (`music.py`).
+* `den=192.168.1.41[:10700]`: **a Wyoming satellite** (`wyoming-satellite` on a Raspberry Pi), either waking on "Skippy" itself (its own
+  `wyoming-openwakeword` with our model) or streaming everything for the hub to hear its name.
+
+The hub dials each box (as Home Assistant would) and dials it again if it drops. Each room has its own short memory and its own timers
+(announced where they were set); the house (lights, plugs) is shared. A `Room` (hub.py) never knows which kind of box it has: that is its link
+(`WyomingLink`, `EsphomeLink`). Settings: `SATELLITE_ESPHOME_KEY` (the boxes' API key), `SATELLITE_ROOM_NAMES` (`kitchen=Kitchen (Skippy),...`:
+their names in Bilby), `SATELLITE_MEDIA_PORT` (10800), `SATELLITE_MEDIA_HOST` (this PC's address as the boxes see it; found by itself),
+`SATELLITE_MUSIC_GATE` (`http://127.0.0.1:3005`), `PORTAL_URL`. Tests: `tests/test_sat_hub.py` (a fake Wyoming box over a real socket, the real
+protocol through the `wyoming` package) and `tests/test_sat_esphome.py` (a fake ESPHome box, Home Assistant's event order).
 
 ## The house, natively (no Alexa, no cloud, no hub)
 

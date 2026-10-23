@@ -747,6 +747,24 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             abort(400)
         return jsonify(commands=starter.poll(payload))
 
+    @app.post("/home/music/checkin")
+    def home_music_checkin():
+        """skippy-pc's hub checking a room box in as one of the Captain's Bilby Connect devices (services/satellite/music.py): listed under
+        "Play on" in every player, and handed the same play/pause/next/prev/take commands a speaker window gets."""
+        if (request.content_length or 0) > 1_000_000:            # a whole queue (player.MAX_QUEUE paths) rides along when it changes
+            abort(413)
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        body = request.get_json(silent=True) or {}
+        dev, room = str(body.get("device") or ""), str(body.get("room") or "")
+        if not player_mod.BOX_DEVICE.fullmatch(dev) or room != "box-" + dev[len("skippyroom-"):]:
+            abort(400)
+        state = body.get("state")
+        captain = next(iter(sorted(app.config["ADMIN_EMAILS"])), "")
+        if not captain:
+            abort(404)
+        return jsonify(player.checkin(captain, dev, str(body.get("name") or ""), state if isinstance(state, dict) else None, room=room, box=True))
+
     @app.put("/home/imports/<name>")
     def home_import_chunk(name):
         """skippy-pc uploading a game database for the VM (imports.py), in chunks."""
