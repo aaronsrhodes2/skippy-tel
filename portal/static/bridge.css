@@ -252,6 +252,14 @@ canvas.alive { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0;
 .file-chip .key.sm { width: 22px; height: 22px; padding: 0; }
 .sent-files { clear: both; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .sent-files img { width: auto; height: auto; max-width: 96px; max-height: 96px; border-radius: 0; border: 1px solid var(--dim-green-hi); }
+/* the camera's viewfinder (static/skippy-camera.js): over the transcript, the picture as large as it fits, keys under it */
+.camview { position: absolute; inset: 0; z-index: 7; display: flex; flex-direction: column; gap: 8px; padding: 8px; background: #000; border: 1px solid var(--accent); }
+.camview video { flex: 1; min-height: 0; width: 100%; object-fit: contain; background: #000; cursor: crosshair; }
+.camview video.mirror { transform: scaleX(-1); }
+.camview .cam-note { margin: 0; font-size: .8rem; color: var(--amber); }
+.camview .cam-note[hidden] { display: none; }
+.camview .cam-keys { flex: none; display: flex; justify-content: center; align-items: center; gap: 24px; }
+.camview .cam-snap { width: 64px; height: 64px; } .camview .cam-snap .g { width: 30px; height: 30px; }
 .chat-bridge.dropping .stage { outline: 2px dashed var(--accent); outline-offset: -4px; }
 /* the Captain's brain sheet: one row per model, a lamp for whether it's reachable, $ for paid */
 .brain-list { display: flex; flex-direction: column; gap: 8px; }

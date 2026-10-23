@@ -14,6 +14,7 @@
    every endpoint (/me/workshop/*) checks for the Captain again and needs the X-Workshop header, and portal/tests/test_route_access.py
    fails if any route is left unguarded. #}
 <script src="{{ url_for('static', filename='skippy-voice.js') }}"></script>
+{% if captain %}<script src="{{ url_for('static', filename='skippy-camera.js') }}"></script>{% endif %}
 <script src="{{ url_for('static', filename='skippy-md.js') }}"></script>
 <script src="{{ url_for('static', filename='skippy-artifacts.js') }}"></script>
 <canvas class="alive" aria-hidden="true"></canvas>

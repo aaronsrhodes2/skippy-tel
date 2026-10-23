@@ -273,6 +273,10 @@ them (`workshop.clean_images`), the job carries them to the bridge, which saves 
 sessions file (swept after 14 days) and names the paths in the message so Claude Code opens them with Read. Tests:
 `portal/tests/test_workshop_attachments.py`, `services/claude-bridge/tests/test_bridge_attachments.py`, the UI harness in `test_workshop_*ui.py`.
 The bridge only picks this up on restart (refused while a run is going).
+**The camera key** (the Captain only, `static/skippy-camera.js`, a key in the chat's composer): one tap opens a viewfinder (back camera, a
+flip key for the front one), a second takes the frame at the camera's full resolution and stops the camera at once; the photo is shrunk only
+as far as the picture limit needs and goes exactly like a pasted picture. On iPad one app holds the camera at a time: busy, the key says so.
+Tests: `portal/tests/test_chat_camera.py`, `portal/tests/js/camera`.
 
 ## Skippy's voice (mic, voice-to-text, text-to-voice in both chats, on the front page)
 
