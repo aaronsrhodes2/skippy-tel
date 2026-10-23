@@ -52,7 +52,8 @@ def test_leaving_the_lane_or_changing_files_outside_is_refused(lane, cmd):
 
 def test_the_hook_refuses_with_exit_2_and_says_why(tmp_path):
     hook = Path(lg.__file__)
-    event = {"tool_name": "Write", "tool_input": {"file_path": str(tmp_path.parent / "other" / "x.py")}, "cwd": str(tmp_path)}
+    outside = "C:/outside-the-lane/x.py" if sys.platform == "win32" else "/srv/outside-the-lane/x.py"   # (not a temp folder: those are allowed)
+    event = {"tool_name": "Write", "tool_input": {"file_path": outside}, "cwd": str(tmp_path)}
     run = subprocess.run([sys.executable, str(hook)], input=json.dumps(event), capture_output=True, text=True,
                          env={"CLAUDE_PROJECT_DIR": str(tmp_path), "PATH": ""})
     assert run.returncode == 2 and "lane rule" in run.stderr
