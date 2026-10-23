@@ -63,6 +63,33 @@ def play_mp3(mp3: bytes, device=None) -> None:
     _play(np.frombuffer(p.stdout, dtype=np.float32), 24000, device)
 
 
+def mp3_to_pcm16(mp3: bytes, rate: int = 22050) -> tuple[bytes, int]:
+    """Skippy's voice as raw 16-bit mono PCM, for a room satellite (the hub sends it over Wyoming; the satellite only plays PCM)."""
+    p = subprocess.run(["ffmpeg", "-v", "error", "-i", "pipe:0", "-f", "s16le", "-ac", "1", "-ar", str(rate), "pipe:1"], input=mp3, capture_output=True, timeout=30)
+    if p.returncode != 0 or not p.stdout:
+        raise RuntimeError("could not decode the voice")
+    return p.stdout, rate
+
+
+def local_voice_pcm16(text: str) -> tuple[bytes, int]:
+    """The fallback voice for a room satellite: Windows' built-in speech, rendered to a WAV file instead of this machine's speaker."""
+    import tempfile                                                 # noqa: PLC0415
+    import wave                                                     # noqa: PLC0415
+    from pathlib import Path                                        # noqa: PLC0415
+    safe = text.replace("'", "''")[:400]
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "say.wav"
+        subprocess.run(["powershell.exe", "-NoProfile", "-Command",
+                        "Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+                        f"$s.SetOutputToWaveFile('{out}'); $s.Speak('{safe}'); $s.Dispose()"], timeout=60, capture_output=True)
+        if not out.is_file():
+            raise RuntimeError("the machine's own voice did not answer")
+        with wave.open(str(out), "rb") as w:
+            if w.getsampwidth() != 2 or w.getnchannels() != 1:
+                raise RuntimeError("unexpected local voice format")
+            return w.readframes(w.getnframes()), w.getframerate()
+
+
 def chime(kind: str = "wake", device=None) -> None:
     """A short two-note chime made on the spot (no sound files): rising when he is heard, falling when it stops listening."""
     import numpy as np                                              # noqa: PLC0415
