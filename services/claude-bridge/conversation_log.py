@@ -26,6 +26,8 @@ import threading
 import time
 from pathlib import Path
 
+import chat_names
+
 ROOT = os.getenv("WORKSHOP_CONVERSATIONS", r"D:\Aaron\conversations\private-skippy")
 CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
 _SAFE = re.compile(r"[^A-Za-z0-9-]")
@@ -66,8 +68,11 @@ def _event_md(event: dict) -> str:
 
 
 class ConversationLog:
-    def __init__(self, root: str = ROOT, repo: str = "", projects: Path = CLAUDE_PROJECTS, clock=time.time):
+    def __init__(self, root: str = ROOT, repo: str = "", projects: Path = CLAUDE_PROJECTS, clock=time.time, namer=None):
         self.root, self.repo, self.projects, self.clock = Path(root), repo, projects, clock
+        # namer(first message) -> "noun-verb-adjective-noun" (chat_names.py via Skippy Core); asked once per conversation, on a
+        # thread, so a slow or absent Core never holds up a run. Until it answers the name is chat_names.fallback().
+        self.namer = namer
         self._lock = threading.Lock()
         self._written: dict[str, int] = {}       # task -> events already written for it
         self._warned = False
@@ -107,7 +112,25 @@ class ConversationLog:
             md = self.path(run.conv, run.created)
             self._append(md, f"\n---\n\n## The Captain, {_stamp(run.created)}\n\n{str(run.message).strip()}\n\n"
                              f"### Skippy\n\n")
-            self._turn_started(md, run)
+            new = self._turn_started(md, run)
+        if new and self.namer:
+            threading.Thread(target=self._name, args=(md, str(run.message)), daemon=True).start()
+
+    def _name(self, md: Path, message: str) -> None:
+        """Name a new conversation (chat_names.py): the name replaces the fallback the index started with."""
+        try:
+            name = self.namer(message)
+        except Exception as exc:  # noqa: BLE001 — the fallback name stays
+            self._warn(f"couldn't name a conversation: {exc}")
+            return
+        if not chat_names.valid(name):
+            return
+        with self._lock:
+            path = self._index(md)
+            data = self._load_index(path)
+            if data is not None:
+                data["title"] = name
+                self._save_index(path, data)
 
     def progress(self, run) -> None:
         """New events since the last call (called on every event, so a crash keeps everything said so far)."""
@@ -182,12 +205,14 @@ class ConversationLog:
                     return
                 time.sleep(0.05 * (attempt + 1))   # Windows: "Access is denied" while an indexer holds the file
 
-    def _turn_started(self, md: Path, run) -> None:
+    def _turn_started(self, md: Path, run) -> bool:
+        """Record a turn's start in the index; True when this is the conversation's first turn (a new index)."""
         path = self._index(md)
         who = str(getattr(run, "who", "") or "")
-        data = self._load_index(path) or {"conv": run.conv, "project": getattr(run, "project", "") or DEFAULT_PROJECT,
-                                          "who": who, "title": title_of(run.message), "started": run.created,
-                                          "turns": []}
+        data = self._load_index(path)
+        new = data is None
+        data = data or {"conv": run.conv, "project": getattr(run, "project", "") or DEFAULT_PROJECT,
+                        "who": who, "title": chat_names.fallback(run.message), "started": run.created, "turns": []}
         if not data.get("who") and who:
             data["who"] = who
         data["last"] = run.created
@@ -195,6 +220,7 @@ class ConversationLog:
         data["turns"].append({"task": run.task, "at": run.created, "message": str(run.message).strip()[:MAX_MESSAGE],
                               "events": [], "state": "running", "error": None})
         self._save_index(path, data)
+        return new
 
     def _turn_finished(self, md: Path, run) -> None:
         path = self._index(md)
@@ -258,12 +284,6 @@ class ConversationLog:
                 out["trimmed"] += 1
             return out
         return None
-
-
-def title_of(message: str) -> str:
-    """A conversation's title: its first message on one line, cut to about 80 characters."""
-    text = " ".join(str(message or "").split())
-    return text if len(text) <= 80 else text[:79].rstrip() + "…"
 
 
 def _text(value, limit: int) -> str:

@@ -412,6 +412,26 @@ class Workshop:
             return self.home.start("workshop_conversations", owner, ttl=LIST_TTL)
         return self.home.start("workshop_conversation", owner, ttl=LIST_TTL, conv=conv)
 
+    # ── New folder: D:/Aaron/development/<name>, its git repo and the private GitHub repo (services/claude-bridge/new_folder.py) ──
+    def new_folder(self, owner: str, name: str) -> str:
+        name = str(name or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _-]{1,59}", name):
+            raise ValueError("A folder name is letters, digits, spaces or hyphens (2 to 60).")
+        return self.home.start("workshop_new_folder", owner, ttl=200, name=name)
+
+    def new_folder_result(self, owner: str, job: str) -> dict:
+        """{"state", "folder": {id, name, repo, remote, why}} once done; only the fields the picker needs, checked."""
+        if not re.fullmatch(r"[a-f0-9]{8,32}", job or "") or self.home.owner_of(job) != owner:
+            return {"state": "unknown"}
+        seen = self.home.peek(job)
+        if seen["state"] != "done":
+            return {"state": seen["state"], "error": seen.get("error")}
+        body = seen.get("result") if isinstance(seen.get("result"), dict) else {}
+        folder = {k: str(body.get(k) or "")[:300] for k in ("id", "name", "repo", "remote", "why")}
+        if not _PROJECT.fullmatch(folder["id"]) or folder["remote"] not in ("created", "pending"):
+            return {"state": "error", "error": "skippy-pc's answer didn't look like a new folder."}
+        return {"state": "done", "folder": folder}
+
     def history_result(self, owner: str, job: str) -> dict:
         """{"state": "running"|"done"|"error"|"unknown", ...}: for a finished list job `conversations`, for a finished
         one-conversation job `conversation`."""

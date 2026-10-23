@@ -23,6 +23,9 @@ def no_real_claude_login_probe(monkeypatch):
     module-level Workshop), so by default the probe finds out nothing ("unknown"). The login tests give a probe their
     own runner, or put the real function back deliberately."""
     monkeypatch.setattr(engine, "run_auth_status", lambda claude_cmd, timeout: None)
+    # Nor the real Skippy Core: a conversation's name is asked of it on a thread (chat_names.py). Here it is never there, so
+    # every name is the fallback (the naming tests give the log a namer of their own).
+    monkeypatch.setattr(engine.Workshop, "ask_core", lambda self, system, text: (_ for _ in ()).throw(RuntimeError("no Core in tests")))
 
 
 @pytest.fixture

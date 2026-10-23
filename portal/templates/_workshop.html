@@ -121,6 +121,7 @@
   <div class="ps-bar">
     <select id="ps-project" aria-label="Folder" title="Which project or folder the agent works in (fixed once a conversation has a message)">
       {% for p in workshop_projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+      <option value="__new__">＋ New folder</option>
     </select>
     <select id="ps-brain" aria-label="Brain" title="Who thinks: Claude (paid), or Skippy Core's coder (local, free). Fixed once a conversation has a message.">
       {% for b in workshop_brains %}<option value="{{ b.id }}"{% if not b.ready %} disabled{% endif %}>{{ b.label }}{% if not b.ready %} (offline){% endif %}</option>{% endfor %}
@@ -130,6 +131,12 @@
     {# A Discord DM to the Captain when a run ends (portal/notify.py). Off when the portal has no Discord bot. #}
     <label class="notify"><input type="checkbox" id="ps-notify"{% if workshop_notify and workshop_notify_ready %} checked{% endif %}{% if not workshop_notify_ready %} disabled title="The portal has no Discord bot (DISCORD_BOT_TOKEN)"{% endif %}> Discord me when done</label>
     <div class="hint" id="ps-project-hint" hidden></div>
+    {# New folder: D:\Aaron\development\<name>, a git repo, and the private GitHub repo aaronsrhodes2/<name> (made on skippy-pc) #}
+    <form class="newfolder" id="ps-newfolder" hidden>
+      <input type="text" id="ps-newfolder-name" aria-label="New folder name" placeholder="new-project-name" maxlength="40" autocomplete="off" spellcheck="false">
+      <button type="submit" id="ps-newfolder-go">Make it</button>
+      <span class="msg" id="ps-newfolder-msg" role="status"></span>
+    </form>
   </div>
   <div class="convs" id="ps-convs" hidden>
     <div class="msg" id="ps-convs-msg" role="status"></div>
@@ -218,7 +225,39 @@
       if (turns.length) pickHint.hidden = true;
     }
     setProject(project);
-    picker.addEventListener("change", () => { if (!turns.length && known(picker.value)) setProject(picker.value); else picker.value = project; });
+    const nf = root.querySelector("#ps-newfolder"), nfName = root.querySelector("#ps-newfolder-name"), nfMsg = root.querySelector("#ps-newfolder-msg");
+    picker.addEventListener("change", () => {
+      if (picker.value === "__new__" && !turns.length) { picker.value = project; if (nf) { nf.hidden = false; nfMsg.textContent = ""; nfName.focus(); } return; }
+      if (!turns.length && known(picker.value)) setProject(picker.value); else picker.value = project;
+    });
+    // New folder: skippy-pc makes the folder, its git repo and the GitHub repo (or marks GitHub as owed), then this
+    // conversation works in it. A job on skippy-pc, polled like the conversations list.
+    if (nf) nf.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = nfName.value.trim();
+      if (!name) return;
+      nfMsg.textContent = "Making it on skippy-pc…"; root.querySelector("#ps-newfolder-go").disabled = true;
+      try {
+        const r = await call("{{ url_for('me.workshop_new_folder') }}", {method: "POST", headers: H, body: JSON.stringify({name: name})});
+        if (!r.ok) throw new Error(r.data.error || "That didn't go through.");
+        let got = null;
+        for (let i = 0; i < 90 && !got; i++) {
+          await new Promise(res => setTimeout(res, 2000));
+          const q = await call("{{ url_for('me.workshop_new_folder_result') }}?job=" + encodeURIComponent(r.data.job), {headers: H});
+          if (q.data.state === "done") got = q.data.folder;
+          else if (q.data.state === "error" || q.data.state === "unknown") throw new Error(q.data.error || "skippy-pc couldn't make it.");
+        }
+        if (!got) throw new Error("skippy-pc is taking too long: look for the folder in a minute.");
+        PROJECTS.push({id: got.id, name: got.name + " · folder"});
+        const opt = document.createElement("option"); opt.value = got.id; opt.textContent = got.name + " · folder";
+        picker.insertBefore(opt, picker.querySelector('option[value="__new__"]'));
+        setProject(got.id);
+        nfMsg.textContent = got.remote === "created" ? "Made, and on GitHub as " + got.repo + "."
+          : "Made. GitHub is owed (" + (got.why || "not reachable") + "): it is tried again when you start here.";
+        nfName.value = "";
+      } catch (err) { nfMsg.textContent = err.message; }
+      finally { root.querySelector("#ps-newfolder-go").disabled = false; }
+    });
     // Who thinks: Claude, or Skippy Core's coder. Like the project, fixed once the conversation has a message (each brain's
     // Claude Code sessions live in its own config folder on skippy-pc, so switching mid-conversation would lose the thread).
     const BRAINS = {{ workshop_brains | tojson }}, brainPick = root.querySelector("#ps-brain");

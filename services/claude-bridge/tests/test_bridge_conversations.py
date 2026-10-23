@@ -27,7 +27,7 @@ def test_a_conversation_is_listed_with_its_title_project_turns_and_state(shop):
     [conv] = shop.conversations()
     assert set(conv) == SUMMARY
     assert conv["conv"] == "conv-12345678" and conv["project"] == "skippytel" and conv["who"] == "captain@example.com"
-    assert conv["title"].startswith("make the games tile orange") and len(conv["title"]) <= 80 and conv["title"].endswith("…")
+    assert conv["title"] == "games-tile-orange-orange"            # named, not its first words (no Skippy Core here: the fallback)
     assert conv["turns"] == 2 and conv["state"] == "done" and conv["last"] >= conv["started"]
     assert Path(shop.convlog.root).parent == Path(shop.sessions_path).parent        # a tmp dir: never the real folder
 
@@ -53,7 +53,7 @@ def test_the_newest_fifty_newest_first(tmp_path):
         log._written.pop(run.task, None)
         log._turn_finished(log.path(run.conv, run.created), run)
     listed = log.conversations()
-    assert len(listed) == 50 and listed[0]["title"] == "message 54" and listed[-1]["title"] == "message 5"
+    assert len(listed) == 50 and listed[0]["conv"] == "conv-00000054" and listed[-1]["conv"] == "conv-00000005"
 
 
 def test_a_turn_left_running_by_a_bridge_that_restarted_reads_as_ended(tmp_path):
@@ -133,3 +133,32 @@ def test_the_conversation_doors_answer_with_the_listing_and_the_turns(door, shop
     status, body = door("GET", "/workshop/conversation/conv-12345678")
     assert status == 200 and body["turns"][0]["message"] == "hi"
     assert door("GET", "/workshop/conversation/..%2F..%2Fsecrets")[0] == 404
+
+
+def test_a_new_conversation_is_named_by_skippy_core_once_on_a_thread(tmp_path):
+    import time as _t
+    asked = []
+
+    def namer(message):
+        asked.append(message)
+        return "voice-needs-simpler-modes"
+    log = cl.ConversationLog(str(tmp_path / "out"), namer=namer)
+    first = FakeRun("aaaaaaaa", message="the voice keys are a mess")
+    log.started(first)
+    for _ in range(100):
+        if log.conversations() and log.conversations()[0]["title"] == "voice-needs-simpler-modes":
+            break
+        _t.sleep(0.01)
+    assert log.conversations()[0]["title"] == "voice-needs-simpler-modes"
+    log.started(FakeRun("bbbbbbbb", message="and another thing", created=1_800_000_100.0))
+    _t.sleep(0.05)
+    assert asked == ["the voice keys are a mess"] and log.conversations()[0]["title"] == "voice-needs-simpler-modes"
+
+
+def test_a_namer_that_fails_or_rambles_leaves_the_fallback(tmp_path):
+    import time as _t
+    for namer in (lambda m: 1 / 0, lambda m: "Sure! Here is a name for it"):
+        log = cl.ConversationLog(str(tmp_path / str(id(namer))), namer=namer)
+        log.started(FakeRun("aaaaaaaa", message="fix the flaky recovery test"))
+        _t.sleep(0.05)
+        assert log.conversations()[0]["title"] == "fix-flaky-recovery-test"

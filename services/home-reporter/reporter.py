@@ -30,6 +30,7 @@ INTERVAL = float(os.environ.get("REPORT_INTERVAL", "15"))
 FAST_INTERVAL = 1.5          # job polling while someone is chatting on the portal
 GATHER_BUDGET_S = float(os.environ.get("GATHER_BUDGET", "9"))   # the most one report waits for its probes (they run side by side)
 IMPORTS_DIR = os.environ.get("IMPORTS_DIR", "/imports")      # game databases to carry to the VM
+INSIGHTS_FILE = os.environ.get("INSIGHTS_FILE", "/insights/chat-insights.jsonl")   # what guests' expired chats taught (portal/chat_history.py)
 CHUNK = 8 * 1024 * 1024      # Cloud Run caps a request at 32 MB
 ART_MAX = 400_000
 MUSIC = os.environ.get("MUSIC_URL", "").rstrip("/")           # music-studio on skippy-pc (ACE-Step on the GPU)
@@ -699,6 +700,41 @@ def workshop_conversations(job: dict, token: str) -> dict:
     return {"result": body}
 
 
+def workshop_new_folder(job: dict, token: str) -> dict:
+    """New folder (job kind workshop_new_folder): the bridge makes D:/Aaron/development/<name>, its git repo and the
+    private GitHub repo (services/claude-bridge/new_folder.py) and answers the folder's id for the picker."""
+    if not BRIDGE:
+        return {"error": "The private Skippy isn't set up on skippy-pc (CLAUDE_BRIDGE_URL)."}
+    name = str(job.get("name") or "")[:60]
+    status, body = _bridge("POST", "/workshop/folders", {"name": name}, token, timeout=150)
+    if status == 409 and isinstance(body, dict):
+        return {"error": str(body.get("message") or "That name can't be used.")[:300]}
+    if status != 200 or not isinstance(body, dict):
+        return {"error": "The bridge on skippy-pc isn't answering." if status is None else f"The bridge said HTTP {status}."}
+    return {"result": {k: str(body.get(k) or "")[:300] for k in ("id", "name", "repo", "remote", "why")}}
+
+
+def keep_insights(items, path: str = INSIGHTS_FILE) -> list[str]:
+    """Write down the insights the portal handed home (one JSON line each, in state/insights/chat-insights.jsonl on skippy-pc,
+    where the agent can read them) and answer the keys to acknowledge, so the portal stops sending them. Nothing is
+    acknowledged if it couldn't be written: the portal sends it again next time."""
+    if not isinstance(items, list) or not items:
+        return []
+    keys, lines = [], []
+    for item in items[:50]:
+        if isinstance(item, dict) and isinstance(item.get("at"), str) and isinstance(item.get("chat"), str):
+            lines.append(json.dumps(item, ensure_ascii=False))
+            keys.append(item["at"] + "|" + item["chat"])
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("".join(line + "\n" for line in lines))
+    except OSError as exc:
+        print(f"home-reporter: couldn't keep the chat insights: {exc}", flush=True)
+        return []
+    return keys
+
+
 _MEMORY_KEY = re.compile(r"[a-z-]{2,20}:[A-Za-z0-9_.-]{1,80}")
 
 
@@ -773,6 +809,8 @@ def run_job(job: dict, token: str = "") -> dict:
         return workshop(job, token)
     if job.get("kind") in ("workshop_conversations", "workshop_conversation"):
         return workshop_conversations(job, token)
+    if job.get("kind") == "workshop_new_folder":
+        return workshop_new_folder(job, token)
     if job.get("kind") == "make_music":
         return make_music(job, token)
     if job.get("kind") == "make_image":
@@ -1228,7 +1266,7 @@ def main() -> None:
     # What people did on the portal goes into flask-api's SQLite on its own thread: a collection may take 20 s, and while it
     # ran in this loop the next report (the heartbeat the portal judges "silent" by) waited behind it.
     threading.Thread(target=site.run_forever, daemon=True).start()
-    sent_art, results, warned = None, [], False
+    sent_art, results, warned, insights_ack = None, [], False, []
     while True:
         began = time.monotonic()
         try:
@@ -1237,6 +1275,8 @@ def main() -> None:
             print(f"home-reporter: gathering the report failed: {e!r}; sending a bare heartbeat", flush=True)
             report = {}
         report["results"], results = results, []
+        if insights_ack:
+            report["insights_ack"], insights_ack = insights_ack, []
         art_key = ((report.get("bilby") or {}).get("now_playing") or {}).get("art_url")
         if art_key and art_key != sent_art:
             report["art"] = art_for(report)
@@ -1252,6 +1292,7 @@ def main() -> None:
             if reply.get("need_art"):
                 sent_art = None
             results = run_commands(reply.get("commands"))
+            insights_ack = keep_insights(reply.get("insights"))
             jobs.accept(reply)
             uploads.want(reply.get("imports_wanted"))
             warned = False

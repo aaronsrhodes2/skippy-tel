@@ -35,7 +35,7 @@ SKIP_ENDPOINTS = frozenset({
     "server_admin.fragment",                                        # ... and the admin card's 60 s refresh (HTML, so the mimetype rule wouldn't skip it)
     "chat.badges", "chat.media_file",                               # the chat fetches these itself
     "me.workshop_send", "me.workshop_events", "me.workshop_stop",   # the Captain's private Skippy: not recorded at all
-    "me.workshop_resync", "me.workshop_history", "me.workshop_history_result",
+    "me.workshop_resync", "me.workshop_history", "me.workshop_history_result", "me.workshop_new_folder", "me.workshop_new_folder_result",
     "me.workshop_ship", "me.workshop_notify", "me.workshop_image",
     "experiments.radiance_file", "radiance_probe",
     "starcontrol.game_file", "starcontrol.version",                 # the game's own files (its inner page is HTML)

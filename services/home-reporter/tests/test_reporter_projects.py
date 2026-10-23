@@ -175,3 +175,32 @@ def test_a_bridge_that_is_down_or_unset_is_said_plainly(monkeypatch):
     monkeypatch.setattr(reporter, "BRIDGE", "http://127.0.0.1:9")               # nothing listens there
     assert reporter.run_job({"id": "j", "kind": "workshop_conversations"}, TOKEN) == {
         "error": "The bridge on skippy-pc isn't answering."}
+
+
+def test_new_folder_asks_the_bridge_and_hands_back_only_the_folders_facts(monkeypatch):
+    seen = []
+
+    def bridge(method, path, body, token, timeout=40):
+        seen.append((method, path, body))
+        if body["name"] == "taken":
+            return 409, {"error": "refused", "message": "D:/Aaron/development/taken already exists"}
+        return 200, {"id": "f-star-lanes", "name": "star-lanes", "repo": "aaronsrhodes2/star-lanes", "remote": "created",
+                     "why": "", "path": "D:/secret/path"}
+    monkeypatch.setattr(reporter, "BRIDGE", "http://bridge")
+    monkeypatch.setattr(reporter, "_bridge", bridge)
+    got = reporter.run_job({"kind": "workshop_new_folder", "name": "Star Lanes"}, TOKEN)
+    assert seen[0] == ("POST", "/workshop/folders", {"name": "Star Lanes"})
+    assert got == {"result": {"id": "f-star-lanes", "name": "star-lanes", "repo": "aaronsrhodes2/star-lanes", "remote": "created", "why": ""}}
+    assert "already exists" in reporter.workshop_new_folder({"name": "taken"}, TOKEN)["error"]
+
+
+def test_insights_from_the_portal_are_written_down_and_acknowledged(tmp_path):
+    path = tmp_path / "insights" / "chat-insights.jsonl"
+    items = [{"at": "2026-10-23T10:00:00Z", "chat": "barn-gets-red-picture", "bugs": ["the picture never came"]}, {"bad": 1}]
+    assert reporter.keep_insights(items, str(path)) == ["2026-10-23T10:00:00Z|barn-gets-red-picture"]
+    (line,) = path.read_text(encoding="utf-8").splitlines()
+    assert json.loads(line)["bugs"] == ["the picture never came"]
+    assert reporter.keep_insights([], str(path)) == [] and reporter.keep_insights(None, str(path)) == []
+    blocked = tmp_path / "file-not-dir"
+    blocked.write_text("x")
+    assert reporter.keep_insights(items, str(blocked / "x.jsonl")) == []          # not written: not acknowledged

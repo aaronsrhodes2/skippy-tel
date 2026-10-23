@@ -8,12 +8,13 @@ Local run:  FLASK_APP=app.py flask run   (needs every var in .env.example)
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import io
 import ipaddress
 import json
 import secrets
 import re
+import threading
+import time
 from functools import wraps
 
 from flask import (Blueprint, Flask, abort, flash, has_request_context, jsonify, redirect, render_template, request,
@@ -24,7 +25,6 @@ import access_requests as access_mod
 import admin_panel
 import auth
 import attachments as attachments_mod
-import image_gen
 import autoconfig
 import brains
 import buildinfo
@@ -55,6 +55,8 @@ import notify as notify_mod
 import recovery_web
 import ship as ship_mod
 import tabletop as tabletop_mod
+import chat_history
+import chat_names
 import tasks
 import telemetry_web
 import video as video_mod
@@ -69,7 +71,7 @@ OTHER_HOSTS = frozenset({"www.makerportal.live", "makerportal.studio", "www.make
 
 
 def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, home=None,
-               imports=None, github=None, tabletop=None) -> Flask:
+               imports=None, github=None, tabletop=None, history=None) -> Flask:
     app = Flask(__name__)
     app.config.update(settings if settings is not None else config.load())
     # The recovery buttons' GitHub token lives only inside the client object, never in app.config (templates see that).
@@ -109,6 +111,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     # Human-scale: a person never hits these; a script hammering them does.
     MENTAT_PER_MIN = 10
     CHAT_PER_HOUR = 60
+    IMAGES_PER_DAY = 10          # pictures a guest may make (the Captain: no limit); the home GPU draws each one
     imports = imports or imports_mod.Imports(vm)
     media = media_mod.Media()
     workshop = workshop_mod.Workshop(home)          # the Captain's private Skippy (admin only)
@@ -127,9 +130,12 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def brain_ready(b) -> bool:
         return bot_override is not None or b.ready()
 
-    def brain_views(is_admin: bool) -> list[dict]:
-        """The chat's picker: only the Captain gets one; a guest's list is just Skippy Core (the page shows no key for it)."""
-        return [{**b.view(), "ready": brain_ready(b)} for b in brains.choices(is_admin)]
+    def mode_views(is_admin: bool) -> list[dict]:
+        """The chat's mode key (brains.MODES): Public for everyone; Private and Auto for the Captain, each ready only when
+        skippy-pc's agent is and offers that brain. A guest's list is just Public (the page shows no key for it)."""
+        agent = {b["id"]: b["ready"] for b in workshop.brains()} if is_admin and workshop.ready() else {}
+        return [{**m, "ready": brain_ready(brains.CORE) if m["agent"] is None else bool(agent.get(m["agent"]))}
+                for m in brains.modes(is_admin)]
 
     def my_games() -> dict:
         """The games the signed-in person may see, in catalog order."""
@@ -145,7 +151,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 "build_tip": buildinfo.tooltip(build) if build else "",
                 "can_skippy": member and auth.has_portal(user["email"], "skippy"),
                 "chat_languages": chat.LANGUAGES, "idle_min": PLAYER_IDLE_MIN, "idle_max": PLAYER_IDLE_MAX, "switch_owner": ops.SWITCH_OWNER,
-                "chat_enabled": bool(user) and any(brain_ready(b) for b in brains.choices(auth.is_admin(user["email"]))),
+                "chat_enabled": bool(user) and brain_ready(brains.CORE),
                 "discord_invite": f"https://discord.gg/{app.config['DISCORD_INVITE']}"}
 
     def vm_status():
@@ -716,6 +722,12 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             abort(400)
         local = report.get("local") if isinstance(report.get("local"), dict) else {}
         reply = {**home.accept(report), "imports_wanted": imports.wanted()}
+        sweep = app.extensions.get("chat_sweep")
+        if sweep:                                                 # guests' expired chats: analysed, then deleted (chat_history.py)
+            sweep[0]()
+            insights = sweep[1](report.get("insights_ack"))
+            if insights:
+                reply["insights"] = insights
         alert = str(((local.get("commute") or {}).get("alert")) or "")[:300] if isinstance(local.get("commute"), dict) else ""
         try:                                                      # a slow drive or a crash on his road: one DM per episode (notify.py)
             notifier.traffic_alert(next(iter(sorted(app.config["ADMIN_EMAILS"])), ""), alert)
@@ -1339,6 +1351,23 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             return jsonify(error="unknown commit"), 404
         return jsonify(ships.status(found, buildinfo.info()["commit"]))
 
+    @mine.post("/workshop/folder")
+    @workshop_call
+    def workshop_new_folder():
+        """New folder: skippy-pc makes D:/Aaron/development/<name>, its git repo and the private GitHub repo. A job id at
+        once; the page polls /workshop/folder/result."""
+        if not workshop.ready():
+            return jsonify(error="skippy-pc's workshop isn't answering, so no folder can be made now."), 503
+        try:
+            return jsonify(job=workshop.new_folder(me(), str((request.get_json(silent=True) or {}).get("name") or "")))
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+
+    @mine.get("/workshop/folder/result")
+    @workshop_call
+    def workshop_new_folder_result():
+        return jsonify(workshop.new_folder_result(me(), request.args.get("job", "")))
+
     @mine.get("/workshop/history/result")
     @workshop_call
     def workshop_history_result():
@@ -1640,14 +1669,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                                     home_mentat=home if home.mentat_ready() else None,
                                     home_music=home if home.can("make_music") else None,
                                     home_image=home if home.can("make_image") else None,
-                                    gemini_image=(lambda p, w, h: gemini_picture(email, p, w, h)) if image_gen.ready() else None)
-
-    def gemini_picture(owner, prompt, width, height) -> dict:
-        """make_image's first try: Gemini draws it in the cloud; the bytes go through the same media hand-off as a song."""
-        data, mime = image_gen.generate(prompt, width, height)
-        key = "g" + secrets.token_hex(12)
-        media.put(key, data, mime, owner, title=prompt[:60])
-        return {"kind": "image", "job_id": key, "url": f"/chat/media/{key}", "title": prompt[:80], "by": "Gemini"}
+                                    image_allow=(lambda: True) if auth.is_admin(email) else
+                                                (lambda: limiter.allow("image:" + email, IMAGES_PER_DAY, 86400)))
 
     app.extensions["chat_tools_for"] = tools_for      # for the tests: what a given person's tools are, without a model in the way
 
@@ -1671,8 +1694,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         captain = auth.is_admin(me())
         # Each person's chats are kept in their browser under their own key: a one-way id of the signed-in address (never the
         # address itself), so two people on one device (the Captain and a guest) never see each other's chats.
-        owner = hashlib.sha256(me().strip().lower().encode()).hexdigest()[:16]
-        return render_template("front.html", captain=captain, chat_brains=brain_views(captain), barney_phrase=chat.BARNEY_PHRASE,
+        owner = chat_history.owner_id(me())
+        return render_template("front.html", captain=captain, chat_modes=mode_views(captain), barney_phrase=chat.BARNEY_PHRASE,
                                chat_owner=owner,
                                **(workshop_context() if captain else {}))
 
@@ -1749,20 +1772,16 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         return {"question": question[:300], **{k: d.get(k) for k in keep}, "steps": steps[:30]}
 
     def shape_files(files, text, brain, bot):
-        """A message's files for the brain that reads it: Claude takes them as they are; Gemini as OpenAI parts; Skippy
-        Core's chat slot is text-only, so its vision slot describes each picture first (guests can show it things too)."""
-        if brain.id == "core":
-            def describe(f):
-                try:
-                    return bot.reply("You describe pictures precisely.", [{"role": "user", "content": [
-                        {"type": "image", "source": {"type": "base64", "media_type": f.mime, "data": f.b64}},
-                        {"type": "text", "text": attachments_mod.DESCRIBE_PROMPT}]}], model="vision")
-                except chat.ChatError as exc:
-                    return f"(the vision model couldn't look at it: {exc})"
-            return attachments_mod.text_for(files, text, describe)
-        if brain.api == "openai":
-            return attachments_mod.openai_parts(files, text)
-        return attachments_mod.anthropic_blocks(files, text)
+        """A message's files for Skippy Core: its chat slot is text-only, so its vision slot describes each picture first
+        (guests can show it things too), and a PDF or text file goes in as its text."""
+        def describe(f):
+            try:
+                return bot.reply("You describe pictures precisely.", [{"role": "user", "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": f.mime, "data": f.b64}},
+                    {"type": "text", "text": attachments_mod.DESCRIBE_PROMPT}]}], model="vision")
+            except chat.ChatError as exc:
+                return f"(the vision model couldn't look at it: {exc})"
+        return attachments_mod.text_for(files, text, describe)
 
     @talk.post("/send")
     @skippy_required
@@ -1789,7 +1808,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         # page's key, or the phrase) always runs on Skippy Core with no tools, whoever asks.
         barney = body.get("barney") is True or chat.wants_barney(rest)
         try:
-            brain = brains.BRAINS[brains.BARNEY] if barney else brains.pick(body.get("brain"), admin)
+            brain = brains.BRAINS[brains.BARNEY] if barney else brains.pick(body.get("mode") or body.get("brain"), admin)
         except PermissionError as exc:
             return jsonify(error=str(exc)), 403
         if not brain_ready(brain) and not admin and not barney:
@@ -1863,6 +1882,18 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                         f"{rest}\n\n[Mentat was asked this question and answered (its own JSON, unedited): {out[:6000]}]\n"
                         "Answer from Mentat's result only, as the physics section of your instructions says.")}]
                     text = bot.reply(prompt, handed, tools=None, run_tool=None, model=model)
+            if (schemas and "make_image" not in used and any(t.get("name") == "make_image" for t in schemas)
+                    and (chat.image_tag(text) or chat.wants_picture(rest))):
+                # A picture was asked for (or the brain wrote [IMAGE: ...] as text) and make_image was never called: Skippy
+                # Core does that, and nothing came back (2026-10-23). The portal draws it itself, from the tag's
+                # description or the person's own words, and the picture appears under the reply as usual.
+                print(json.dumps({"event": "image_without_call", "brain": brain.id, "model": model}), flush=True)
+                try:
+                    out = json.loads(run_tool("make_image", {"prompt": chat.image_tag(text) or rest}))
+                    if out.get("status") == "running":
+                        text += "\n\nStill drawing it: ask me to check on the picture in a minute."
+                except chat_tools.ToolError as exc:
+                    text += f"\n\n(No picture: {exc})".replace(" Say so plainly.", "").replace(" Say so, and that it resets tomorrow.", " It resets tomorrow.")
         except chat.ChatError as exc:
             return jsonify(error=str(exc)), 502
         text = chat.strip_sentinels(text)
@@ -1898,6 +1929,80 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         if not re.fullmatch(r"[a-f0-9]{8,32}", job) or home.owner_of(job) != me():
             return jsonify(state="unknown")
         return jsonify(home.peek(job))
+
+    # ── Your chats, on the portal for 30 days (chat_history.py): only ever the signed-in person's own file ──
+    def ask_core(system: str, text: str) -> str:
+        """One quick question to Skippy Core with no tools (a chat's name): raises when Core isn't there."""
+        if not brain_ready(brains.CORE):
+            raise RuntimeError("Skippy Core isn't configured")
+        bot = bot_override or brains.chat_for(brains.CORE)
+        return bot.reply(system, [{"role": "user", "content": text}], model=brains.model_of(brains.CORE))
+
+    chats_kept = history if history is not None else chat_history.from_env()
+    if chats_kept.namer is None:
+        chats_kept.namer = lambda message: chat_names.name(message, ask_core)
+    chats_kept.forever = lambda email: str(email).strip().lower() in app.config["ADMIN_EMAILS"]   # the Captain's: forever; a guest's: 30 days
+    app.extensions["chat_history"] = chats_kept
+
+    # Expiry (chat_history.sweep): about once an hour, nudged by the home reporter's check-ins, Skippy Core analyses up to ten
+    # expired guest chats before they are deleted; each insight is kept in the bucket and handed home to skippy-pc in the
+    # report's reply (state/insights there) until the reporter says it has written it down.
+    sweep_state = {"last": 0.0, "running": False, "outbox": []}
+
+    def record_insight(owner, chat, insight):
+        item = chats_kept.record_insight(owner, chat, insight)
+        print(json.dumps({"event": "chat_insight", **{k: item[k] for k in ("chat", "turns")},
+                          **{k: len(item[k]) for k in ("right", "wrong", "bugs", "improvements")}}), flush=True)
+        sweep_state["outbox"] = (sweep_state["outbox"] + [item])[-200:]
+
+    def sweep_now():
+        try:
+            keep = {chat_history.owner_id(e) for e in app.config["ADMIN_EMAILS"]}
+            chats_kept.sweep(chat_history.analyse_with(ask_core), record_insight, keep_owners=keep)
+        except Exception as exc:  # noqa: BLE001 — Core away, the bucket missing: try again next hour
+            print(json.dumps({"event": "chat_sweep_paused", "why": str(exc)[:200]}), flush=True)
+        finally:
+            sweep_state["running"] = False
+
+    def maybe_sweep():
+        if sweep_state["running"] or time.time() - sweep_state["last"] < 3600 or not brain_ready(brains.CORE):
+            return
+        sweep_state.update(last=time.time(), running=True)
+        threading.Thread(target=sweep_now, daemon=True).start()
+
+    def insights_for_home(acked) -> list:
+        """What the reply carries home: insights the reporter hasn't confirmed yet (it sends their "at"+"chat" back)."""
+        done = {str(a) for a in acked} if isinstance(acked, list) else set()
+        sweep_state["outbox"] = [i for i in sweep_state["outbox"] if i["at"] + "|" + i["chat"] not in done]
+        return sweep_state["outbox"][:20]
+    app.extensions["chat_sweep"] = (maybe_sweep, insights_for_home, sweep_state)
+
+    def history_call(fn):
+        try:
+            return jsonify(fn())
+        except chat_history.Refused as exc:
+            return jsonify(error=str(exc)), 400
+        except tabletop_mod.StorageMissing:
+            return jsonify(error="The portal can't keep chats right now; they stay in this browser."), 503
+
+    @talk.get("/history")
+    @skippy_required
+    def history_list():
+        resp = history_call(lambda: {"chats": chats_kept.chats(me()), "keep_days": chat_history.KEEP_DAYS})
+        resp = resp if isinstance(resp, tuple) else (resp, 200)
+        resp[0].headers["Cache-Control"] = "private, no-store"
+        return resp
+
+    @talk.put("/history/<chat_id>")
+    @skippy_required
+    def history_save(chat_id):
+        body = request.get_json(silent=True) or {}
+        return history_call(lambda: chats_kept.save(me(), chat_id, body.get("title"), body.get("history")))
+
+    @talk.delete("/history/<chat_id>")
+    @skippy_required
+    def history_forget(chat_id):
+        return history_call(lambda: chats_kept.forget(me(), chat_id) or {"ok": True})
 
     @talk.get("/media/<job_id>")
     @skippy_required

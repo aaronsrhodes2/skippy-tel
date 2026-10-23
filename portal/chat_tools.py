@@ -211,7 +211,7 @@ def parse_verb(message: str) -> tuple[str | None, str]:
 
 class ChatTools:
     def __init__(self, vm, is_admin: bool, visible: list[str] | None = None, who: str = "",
-                 music=None, home_mentat=None, home_music=None, home_image=None, gemini_image=None):
+                 music=None, home_mentat=None, home_music=None, home_image=None, image_allow=None):
         self.vm, self.is_admin, self.who = vm, is_admin, who
         self.visible = list(GAMES) if visible is None else list(visible)   # games this person may see
         self.names = _ADMIN if is_admin else _EVERYONE
@@ -225,10 +225,9 @@ class ChatTools:
         # Local capabilities (home.py advertises them; tool_policy decides who may use them).
         self.home_music = home_music if tool_policy.allowed("music_gen", is_admin) else None
         self.home_image = home_image if tool_policy.allowed("image_gen", is_admin) else None
-        # Gemini first (usually the best picture), the local studio when it refuses: gemini_image(prompt, w, h) -> the
-        # media item for the picture, or image_gen.Refused. Offered when either half is there.
-        self.gemini_image = gemini_image if tool_policy.allowed("image_gen", is_admin) else None
-        self.image_ok = bool(self.home_image or self.gemini_image)
+        # image_allow() spends one of a guest's pictures for the day (the Captain's never runs out); None = no limit.
+        self.image_allow = image_allow
+        self.image_ok = bool(self.home_image)
         self.media: list[dict] = []           # audio made this turn: the chat page plays it
 
     def available(self) -> list[str]:
@@ -332,23 +331,10 @@ class ChatTools:
         if not prompt:
             raise ToolError("make_image needs a description of the picture.")
         width, height = _SIZES.get(str(args.get("orientation") or "square"), _SIZES["square"])
-        refused = None
-        if self.gemini_image:
-            import image_gen
-            try:
-                item = self.gemini_image(prompt, width, height)
-                self.media.append(item)
-                return {"status": "done", "by": "Gemini",
-                        "note": "The picture appears under your reply. Don't paste a link or write [IMAGE: ...]."}
-            except image_gen.Refused as exc:
-                refused = str(exc)
-        if not self.home_image:
-            raise ToolError(f"{refused or 'Gemini is unavailable'}, and skippy-pc's image studio isn't reachable. Say so plainly.")
+        if self.image_allow and not self.image_allow():
+            raise ToolError("That's today's pictures used up (10 a day). Say so, and that it resets tomorrow.")
         job_id = self.home_image.start("make_image", owner=self.who, prompt=prompt, width=width, height=height)
-        out = self._image_status(job_id, IMAGE_WAIT_S)
-        if refused:
-            out["gemini"] = f"{refused}; drawn on the Captain's GPU instead (SDXL)"
-        return out
+        return self._image_status(job_id, IMAGE_WAIT_S)
 
     def _image_result(self, args) -> dict:
         job_id = str(args.get("job_id") or "")

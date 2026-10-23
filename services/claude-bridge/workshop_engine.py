@@ -34,12 +34,15 @@ import re
 import shutil
 import signal
 import subprocess
+import tempfile
 import sys
 import threading
 import time
 from pathlib import Path
 
+import chat_names
 import conversation_log
+import new_folder
 import projects as projects_mod
 
 MODEL = "claude-sonnet-5-5"        # Sonnet 5.5, on purpose: nothing else picks it (was Opus until 2026-10-10)
@@ -496,7 +499,7 @@ class Workshop:
         if conversations is None:
             conversations = (conversation_log.ROOT if os.path.abspath(sessions) == os.path.abspath(SESSIONS)
                              else os.path.join(os.path.dirname(sessions), "conversations"))
-        self.convlog = conversation_log.ConversationLog(conversations, repo=self.repo)
+        self.convlog = conversation_log.ConversationLog(conversations, repo=self.repo, namer=self.name_chat)
         self._runs: dict[str, Run] = {}
         self._lock = threading.Lock()
         self._save_error: str | None = None
@@ -541,6 +544,21 @@ class Workshop:
         found_folders = projects_mod.folders(self.dev_root).values() if self.dev_root else []
         folders = [{**f.public(), "name": f.name + " \u00b7 folder"} for f in found_folders]
         return listed + folders[:max(0, room)]
+
+    def new_folder(self, name: str) -> dict:
+        """New folder (new_folder.py): D:/Aaron/development/<name>, its git repo and the private GitHub repo. Raises
+        ValueError for a bad or taken name; answers the folder's id for the picker and how the GitHub side went."""
+        if not self.dev_root:
+            raise ValueError("This bridge has no development root to make folders in.")
+        made = new_folder.create(self.dev_root, name, env=child_env())
+        target = projects_mod._norm(made["path"])
+        fid = next((f.id for f in projects_mod.folders(self.dev_root).values() if projects_mod._norm(f.primary) == target), "")
+        return {"id": fid, "name": made["name"], "repo": made["repo"], "remote": made["remote"], "why": made["why"]}
+
+    def _settle_remote(self, project: projects_mod.Project) -> None:
+        """A folder whose GitHub repository is still owed (new_folder.MARKER): try again, on a thread, as a conversation starts."""
+        if project.inplace and new_folder.pending(project.clone):
+            threading.Thread(target=lambda: new_folder.retry(project.clone, env=child_env()), daemon=True).start()
 
     def _folder(self, pid: str) -> projects_mod.Project:
         """A folder opened in place (KeyError if there's none by that id now). A folder that is a registered project's own
@@ -589,6 +607,8 @@ class Workshop:
             chosen = self.project(project)
         except KeyError:
             raise ValueError("unknown project") from None    # only projects.json, or a folder under the root, is a target
+        if not attach:
+            self._settle_remote(chosen)
         brain = brain or "claude"
         if brain not in BRAINS:
             raise ValueError("unknown brain")
@@ -828,6 +848,25 @@ class Workshop:
 
     CORE_PROBE_TTL_S = 60
 
+    def ask_core(self, system: str, text: str) -> str:
+        """One quick question to Skippy Core's chat slot (no tools): a conversation's name. Raises when Core isn't there."""
+        import urllib.request
+        url, key = self._core_settings()
+        if not (url and key):
+            raise RuntimeError("Skippy Core isn't configured")
+        body = json.dumps({"model": "chat", "max_tokens": 400, "system": system,
+                           "messages": [{"role": "user", "content": text}]}).encode()
+        req = urllib.request.Request(url + "/v1/messages", data=body, method="POST",
+                                     headers={"x-api-key": key, "Authorization": "Bearer " + key,
+                                              "anthropic-version": "2023-06-01", "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            got = json.loads(r.read().decode("utf-8", "replace"))
+        return " ".join(b.get("text", "") for b in got.get("content", []) if isinstance(b, dict) and b.get("type") == "text")
+
+    def name_chat(self, message: str) -> str:
+        """A conversation's name, noun-verb-adjective-noun (chat_names.py), from Skippy Core; the fallback without it."""
+        return chat_names.name(message, self.ask_core)
+
     def core_ready(self) -> bool:
         """Configured AND answering: GET {url}/v1/models with the key, at most once a minute (the reporter asks every 15 s).
         A URL that's set but unreachable (the Funnel not open yet, skippy-core down) is not ready: the picker says so."""
@@ -995,10 +1034,29 @@ class Workshop:
         cmd = [*self.claude_cmd, "-p", "--output-format", "stream-json", "--verbose",
                *thinking, "--dangerously-skip-permissions",
                "--append-system-prompt-file", str(self.prompt_path(project)), "--system-prompt-snapshot", "off",
-               "--add-dir", self.project(project).primary]
+               "--add-dir", self.project(project).primary, "--settings", self.lane_settings()]
         if session:
             cmd += ["--resume", session]
         return self._one_line_each(cmd)
+
+    def lane_settings(self) -> str:
+        """The settings file every run gets with --settings: the lane guard (lane_guard.py) as a PreToolUse hook, so a run
+        changes files only in its own conversation's folder (the Captain's rule, 2026-10-23). Written next to the runs."""
+        hook = f'"{sys.executable}" "{Path(__file__).resolve().with_name("lane_guard.py")}"'
+        want = {"hooks": {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+                                          "hooks": [{"type": "command", "command": hook, "timeout": 10}]}]}}
+        text = json.dumps(want, indent=1)
+        problem = None
+        for folder in (Path(self.state_dir), Path(tempfile.gettempdir()) / "skippy-workshop"):   # the temp folder if the state one fails
+            path = folder / "lane-settings.json"
+            try:
+                if not path.is_file() or path.read_text(encoding="utf-8") != text:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(text, encoding="utf-8")
+                return str(path)
+            except OSError as exc:
+                problem = exc
+        raise ValueError(f"can't write the lane settings ({problem}): no run starts without the guard")
 
     @staticmethod
     def _one_line_each(argv: list[str]) -> list[str]:
@@ -1148,8 +1206,11 @@ class Workshop:
             run.finish(False, "stopped")
             return
         try:
-            proc = self._spawn(self.command(session, run.project, run.brain), cwd=self.project(run.project).clone,
-                               env=self.core_env() if run.brain == "core" else None)
+            project = self.project(run.project)
+            env = self.core_env() if run.brain == "core" else child_env()
+            # the lane guard's one exception: SkippyTel's primary checkout, where a skippy-pc service is pulled and deployed
+            env["SKIPPY_LANE_DEPLOY"] = project.primary if project.deploy == "skippytel" and not project.inplace else ""
+            proc = self._spawn(self.command(session, run.project, run.brain), cwd=project.clone, env=env)
         except (OSError, ValueError) as exc:           # FileNotFoundError, a refused argument ...
             run.finish(False, f"can't start Claude Code: {exc}")
             return

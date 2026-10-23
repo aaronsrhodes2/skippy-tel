@@ -83,7 +83,7 @@
     return m ? { woke: true, rest: t.slice(m.index + m[0].length).trim() } : { woke: false, rest: "" };
   }
   /* Said alone as a turn, these end the conversation (and send nothing). */
-  const END_RE = /^\s*(?:ok(?:ay)?[ ,]*)?(?:good ?bye|bye(?: bye)?|that'?s all|that is all|stop listening|end (?:the )?conversation|we'?re done|i'?m done|talk to you later)\s*[.!?]*\s*$/i;
+  const END_RE = /^\s*(?:ok(?:ay)?[ ,]*)?(?:good ?bye|bye(?: bye)?|that'?s all|that is all|stop listening|end (?:the )?conversation|we'?re done|i'?m done|talk to you later|thanks|thank you(?: very much)?|thanks a lot|cheers|go to sleep|good ?night)(?:[ ,]+skipp(?:y|ie|ey))?\s*[.!?]*\s*$/i;
 
   /* What can be said aloud at all: no code blocks, code chips, links or markdown marks. */
   function plain(text) {
@@ -103,13 +103,21 @@
   const SUMMARIZE_OVER = 280;
 
   function attach(opts) {
-    const mic = opts.mic, ear = opts.ear, speaker = opts.speaker, box = opts.box, status = opts.status, onSend = opts.onSend;
+    // TWO MODES (opts.key, the Captain's design 2026-10-23): one key instead of the mic, ear and speaker keys.
+    //   Typing    nothing is spoken; once the microphone is allowed it listens for "Skippy" (nothing else is kept), which switches to
+    //   Hands-off the no-touch conversation, replies spoken, round after round; silence doesn't end it, a sleep word ("thanks",
+    //             "thank you", "goodbye", "go to sleep", "that's all") or a tap puts it back to Typing.
+    // The microphone is never asked for on load: if the browser already allows it (Permissions API), Typing listens at once; if not,
+    // the key's first tap asks.
+    const twoMode = !!opts.key;
+    const mic = twoMode ? opts.key : opts.mic, ear = twoMode ? null : opts.ear, speaker = twoMode ? null : opts.speaker;
+    const box = opts.box, status = opts.status, onSend = opts.onSend;
     const onText = opts.onText || function () {};
     const lang = opts.lang || function () { return ""; };
     const canRecord = !!(root.navigator && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && root.MediaRecorder);
     if (mic && !canRecord) mic.hidden = true;
     if (ear && !canRecord) ear.hidden = true;
-    let pass = null, wanted = null, session = null, playing = null, chat = false, awaiting = false, keepUntil = 0, standbyOn = false, shared = null;     // chat: a no-touch conversation is on; keepUntil: a parting message stays up till then
+    let pass = null, wanted = null, session = null, playing = null, chat = false, awaiting = false, keepUntil = 0, standbyOn = false, shared = null, micAllowed = false;     // chat: a no-touch conversation is on; keepUntil: a parting message stays up till then
     const audio = new Audio();
     const speaking_ = function (on) { try { root.dispatchEvent(new CustomEvent("skippy-speaking", { detail: on })); } catch (e) { /* no DOM events: nothing animates */ } };      // the animated Skippy (static/skippy-3d.js) talks while this plays
     audio.addEventListener("playing", function () { if (audio.src !== SILENCE) speaking_(true); });
@@ -180,7 +188,9 @@
         buf = new Float32Array(an.fftSize);
         timer = setInterval(function () { an.getFloatTimeDomainData(buf); let sum = 0; for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i]; level = Math.sqrt(sum / buf.length); }, 50);
       }
+      if (ctx && ctx.state === "suspended" && ctx.resume) ctx.resume().catch(function () {});      // allowed once the page has been touched
       const obj = { stream: stream, alive: true, level: function () { return level; }, blind: !an,
+                    resume: function () { if (ctx && ctx.state === "suspended" && ctx.resume) ctx.resume().catch(function () {}); },
                     close: function () { obj.alive = false; if (shared === obj) shared = null; clearInterval(timer); stream.getTracks().forEach(function (t) { t.stop(); }); if (ctx && ctx.close) ctx.close().catch(function () {}); } };
       shared = obj;
       return obj;
@@ -227,7 +237,14 @@
     async function handsFree(o) {
       stopSpeaking();
       let mic_;
-      try { mic_ = await openMic(); } catch (e) { warn(mic); return; }
+      try { mic_ = await openMic(); } catch (e) {
+        if (twoMode) {                                           // blocked: back to Typing, and say how to allow it
+          chat = false; standbyOn = false; micAllowed = false; paintKey();
+          keepUntil = Date.now() + 6000; paintStatus("The microphone is blocked: allow it for this site in the browser's settings", 0, false);
+          setTimeout(function () { if (!session && !chat) paintStatus(null); }, 6000);
+        }
+        warn(mic); return;
+      }
       const ctl = session = { mic: mic_, seg: null, cancelled: false };
       const draft = box ? word(box.value) : "";
       let message = (o && o.seed) ? o.seed : "";
@@ -250,13 +267,14 @@
           if (ctl.cancelled || r.aborted) return;
           if (!r.spoke) {                                        // nobody spoke for the whole wait
             if (first) {                                         // nobody spoke at all
+              if (chat && twoMode) { session = null; setTimeout(listenAgain, 50); return; }      // Hands-off stays until a sleep word
               if (chat) { endChat("I'm not hearing you: tap the mic to talk again"); return; }
               paintStatus("I didn't hear anything", 0, false); setTimeout(function () { if (!session) paintStatus(null); }, 2500); warn(mic); return;
             }
             break;                                               // the count ran out: send
           }
           paintStatus("Understanding\u2026", 0, true); paint(mic, "boot");
-          if (chat && END_RE.test(r.text)) { endChat("Conversation ended"); return; }               // "goodbye": no touch needed to leave either
+          if (chat && END_RE.test(r.text)) { endChat(twoMode ? "Back to typing" : "Conversation ended"); return; }               // "goodbye": no touch needed to leave either
           if (!first && STOP_RE.test(r.text)) {
             if (chat) {                                          // in a conversation "stop" throws the message away and listens again: just say it again
               if (box) box.value = draft; onText("", false);
@@ -291,6 +309,7 @@
       if (standbyOn) setTimeout(standbyLoop, 600); else releaseMic();       // back to standby, or the microphone is let go
       if (why) { keepUntil = Date.now() + 3500; paintStatus(why, 0, false); setTimeout(function () { if (!session && !chat) paintStatus(null); }, 3500); } else paintStatus(null);
       if (mic) mic.setAttribute("aria-pressed", "false");
+      if (twoMode) { stopSpeaking(); paintKey(); }
     }
     function listenAgain() { if (chat && !session) handsFree({ idleMs: 30000 }); }
     function replied() {                                          // Skippy has answered and finished speaking: your turn, no touch needed
@@ -304,7 +323,8 @@
       try {
         while (standbyOn && !ctl.cancelled) {
           const seg = ctl.seg = { idleMs: 0, minSpeechMs: 500 };
-          seg.level = function (lv, speaking) { paintStatus(speaking ? "Hearing you" : 'Standby: say "Skippy"', lv, true); };
+          seg.level = twoMode ? function () {} :                  // Typing: no status strip, the key's lamp says it is listening
+            function (lv, speaking) { paintStatus(speaking ? "Hearing you" : 'Standby: say "Skippy"', lv, true); };
           const r = await segment(mic_, seg);
           if (ctl.cancelled || r.aborted || !standbyOn) return;
           if (!r.spoke || !r.text) continue;
@@ -312,6 +332,7 @@
           if (!w.woke) continue;                                  // not for him: gone
           session = null;
           chat = true; awaiting = false;
+          if (twoMode) paintKey();
           paintStatus("Yes?", 0, true);
           handsFree({ idleMs: 10000, seed: w.rest });
           return;
@@ -335,6 +356,52 @@
       standbyLoop();
     }
     if (ear) ear.addEventListener("click", function () { standbyOn ? standbyOff() : standbyOnNow(); });
+
+    // ── the two-mode key ──
+    function paintKey() {
+      if (!twoMode || !mic) return;
+      const hands = chat;
+      mic.setAttribute("aria-pressed", hands ? "true" : "false");
+      const use = mic.querySelector && mic.querySelector("use"); if (use) use.setAttribute("href", hands ? "#g-mic" : "#g-ear");
+      mic.title = mic.ariaLabel = hands ? 'Hands-off: say "thanks" (or tap) to go back to typing'
+        : micAllowed ? 'Typing: say "Skippy" (or tap) for hands-off' : "Typing: tap to talk (the browser asks for the microphone once)";
+      if (!session || !session.standby || hands) paint(mic, hands ? "on" : micAllowed ? "idle" : null);
+      else paint(mic, "idle");
+      mic.classList.toggle("lit", hands);
+    }
+    // Sound and the level meter need one touch of the page after it loads (browsers' autoplay rule): any tap or key does it, so a
+    // wake word after he has typed or tapped anything is answered aloud with no extra step.
+    function unlock() {
+      try { if (!playing) { audio.src = SILENCE; audio.play().catch(function () {}); } } catch (e) {}
+      if (shared && shared.resume) shared.resume();
+    }
+    if (twoMode && root.document && document.addEventListener) ["pointerdown", "keydown"].forEach(function (ev) { document.addEventListener(ev, unlock, { capture: true, passive: true }); });
+    function typingListen() {                                     // Typing mode's wake-word listening, once the browser allows the mic
+      micAllowed = true; standbyOn = true; paintKey();
+      if (!chat) standbyLoop();
+    }
+    if (twoMode && mic) {
+      if (!canRecord) mic.hidden = true;
+      paintKey();
+      try {                                                       // ask the browser, never the person: no prompt on load
+        navigator.permissions.query({ name: "microphone" }).then(function (p) {
+          if (p.state === "granted") typingListen();
+          p.onchange = function () { if (p.state === "granted" && !micAllowed) typingListen(); };
+        }).catch(function () {});
+      } catch (e) { /* no Permissions API (older Safari): the key's first tap asks */ }
+      mic.addEventListener("click", function () {
+        unlock();
+        if (chat) {                                               // Hands-off → Typing (a tap while he talks only stops him)
+          if (playing) { stopSpeaking(); awaiting = false; listenAgain(); return; }
+          const c = session; if (c && !c.standby) { c.cancelled = true; session = null; if (c.seg && c.seg.abort) c.seg.abort(); }
+          endChat("Back to typing"); return;
+        }
+        const c = session; if (c && c.standby) { c.cancelled = true; session = null; if (c.seg && c.seg.abort) c.seg.abort(); }
+        chat = true; awaiting = false; paintKey();
+        standbyOn = true; micAllowed = true;                       // after this tap the browser has been asked: Typing listens too
+        handsFree({ idleMs: 30000 });
+      });
+    }
     function startChat() {
       chat = true; awaiting = false;
       try { audio.src = SILENCE; audio.play().catch(function () {}); } catch (e) {}      // unlock sound inside this tap: later replies play with no touch
@@ -342,7 +409,7 @@
       if (mic) mic.setAttribute("aria-pressed", "true");
       handsFree({ idleMs: 10000 });
     }
-    if (mic) mic.addEventListener("click", function () {
+    if (mic && !twoMode) mic.addEventListener("click", function () {
       if (mic.dataset.s === "boot" && !chat) return;
       if (session && session.standby) {                           // a tap during standby: "I'm talking now", no need to say the word
         const c = session; c.cancelled = true; session = null; if (c.seg && c.seg.abort) c.seg.abort();
@@ -353,7 +420,15 @@
       if (chat) { endChat("Conversation ended"); return; }        // thinking: a tap ends the conversation
       startChat();
     });
-    if (box) box.addEventListener("input", function () { if (session) cancel(); });          // typing means "I'll take it from here"
+    if (box) box.addEventListener("input", function () {          // typing means "I'll take it from here"
+      if (twoMode && chat) {                                      // Hands-off stays on: this turn is typed, the reply is still spoken
+        const c = session; if (c && !c.standby) { c.cancelled = true; session = null; if (c.seg && c.seg.abort) c.seg.abort(); }
+        paintStatus(null); awaiting = true;
+        if (!box.value.trim()) { awaiting = false; listenAgain(); }      // he cleared it: back to listening
+        return;
+      }
+      if (session && !(twoMode && session.standby)) cancel();
+    });
 
     // ── speaking ──
     function stopSpeaking() {
@@ -371,7 +446,7 @@
     async function say(text) {
       let finished = false;
       const done = function () { if (finished) return; finished = true; if (chat) paintStatus(null); replied(); };
-      if (!wanted) { done(); return; }
+      if (!(twoMode ? chat : wanted)) { done(); return; }         // two modes: only Hands-off speaks
       const full = plain(text);
       if (!full) { done(); return; }
       stopSpeaking();

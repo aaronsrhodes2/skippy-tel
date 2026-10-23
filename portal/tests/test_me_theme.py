@@ -40,7 +40,7 @@ def test_me_is_its_own_app_with_the_living_background_in_purple():
     assert 'data-app="me"' in page and '<canvas class="alive"' in page
     front = c.get("/chat").data.decode()                                                     # the Captain's front page wears the same purple, but only in agent mode
     assert 'class="bridge captain"' in front and '<canvas class="alive"' in front and "#a64dff" in front
-    assert re.search(r'Bridge\.alive\(document\.querySelector\("canvas\.alive"\), document\.documentElement\.classList\.contains\("agent"\)', front)
+    assert re.search(r'Bridge\.alive\(document\.querySelector\("canvas\.alive"\), THEMES\[startTheme\]', front)
     assert page.index("bridge-alive.js") < page.index("Bridge.alive(")             # loaded before it is called
 
 
@@ -62,17 +62,20 @@ def test_only_me_is_themed_and_the_default_background_keeps_its_neon():
     assert 'var COLORS = ["#00ff88"' in js and "opts.colors" in js                  # Skippy's own page still gets the neon
 
 
-def test_the_public_chat_stays_green_even_for_the_captain_purple_is_the_coding_backend_mode():
+def test_public_is_green_private_purple_auto_orange_and_private_is_the_captains_default():
     css = (STATIC / "bridge-panes.css").read_text(encoding="utf-8")
     theme = css.split("/me: deep gonzo purple")[1].split("the front page: which Skippy")[0]
-    assert re.search(r"(?<!html\.agent )body\.captain", theme) is None                  # no purple rule for body.captain on its own
-    assert theme.count("html.agent body.captain") >= 6
+    assert re.search(r"(?<!html\.agent )(?<!html\.auto )body\.captain", theme) is None   # no rule for body.captain on its own
+    assert theme.count("html.agent body.captain") >= 6 and theme.count("html.auto body.captain") >= 6
+    assert "#d97757" in theme                                                            # Auto is Claude orange
     app = portal.create_app(SETTINGS, vm=FakeVm(), skippy=FakeSkippy())
     c = app.test_client()
     login(c, ADMIN)
     front = c.get("/chat").data.decode()
-    assert 'classList.add("agent")' in front and 'localStorage.getItem("skippy-chat-brain")' in front and '.indexOf("agent-") === 0' in front   # an agent brain is purple before paint
-    assert 'classList.toggle("agent", !!agent)' in front and "alive.setColors(agent ? PURPLES : null)" in front and "window.skippyTheme(agent)" in front   # any other brain goes green
+    assert 'localStorage.getItem("skippy-chat-mode") || "private"' in front                 # his default is Private (purple), before paint
+    assert 'classList.add("agent")' in front and 'classList.add("auto")' in front
+    assert 'classList.toggle("agent", theme === "purple")' in front and 'classList.toggle("auto", theme === "orange")' in front
+    assert 'byMode("private") || byMode("auto")' in front                                   # Private first, Auto only as the fallback
     friend_page = c.get("/me").data.decode()
     assert 'data-app="me"' in friend_page                                                   # /me stays purple by its own app theme
     assert "setColors" in (STATIC / "bridge-alive.js").read_text(encoding="utf-8")

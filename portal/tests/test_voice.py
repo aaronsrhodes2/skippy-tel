@@ -100,15 +100,17 @@ def test_the_gate_route_needs_sign_in_and_says_why_when_home_is_unpaired():
     assert r.status_code == 200 and r.headers["Cache-Control"] == "no-store" and r.get_json()["ok"] is False
 
 
-def test_both_chats_carry_the_mic_and_speaker_keys():
+def test_the_chat_has_one_voice_key_and_the_agent_keeps_its_own():
     chat = (PORTAL / "templates" / "_chat.html").read_text(encoding="utf-8")
     shop = (PORTAL / "templates" / "_workshop.html").read_text(encoding="utf-8")
     page = (PORTAL / "templates" / "front.html").read_text(encoding="utf-8")
-    for tpl in (chat, shop):
-        assert "SkippyVoice.attach" in tpl and "#g-mic" in tpl and "#g-vol" in tpl and "chat.voice_gate" in tpl
-        assert "voice.say(" in tpl
-        assert "#g-ear" in tpl and "ear:" in tpl and 'aria-label="Standby: listen for Skippy"' in tpl      # the standby key: only the word "Skippy" wakes it
-        assert 'class="vstat"' in tpl and "box:" in tpl and "onSend:" in tpl and "form.requestSubmit()" in tpl      # hands-free: a status line, the box, and the send
+    # the chat: one key, two modes (Typing listens only for "Skippy"; Hands-off listens and speaks until "thanks")
+    assert 'class="key voice"' in chat and 'key: form.querySelector("button.voice")' in chat and "#g-ear" in chat
+    assert 'class="key ear"' not in chat and 'class="key mic"' not in chat and 'class="key spk"' not in chat
+    assert "SkippyVoice.attach" in chat and "chat.voice_gate" in chat and "voice.say(" in chat
+    assert 'class="vstat"' in chat and "box:" in chat and "onSend:" in chat and "form.requestSubmit()" in chat
+    # the agent's own composer (hidden inside the chat) keeps its three keys
+    assert "SkippyVoice.attach" in shop and "#g-mic" in shop and "#g-vol" in shop and "ear:" in shop and "voice.say(" in shop
     assert "skippy-voice.js" in page
     # the chats' inline scripts run as they are parsed: the client must be loaded before the pages include them
     assert page.index("skippy-voice.js") < page.index('include "_chat.html"')

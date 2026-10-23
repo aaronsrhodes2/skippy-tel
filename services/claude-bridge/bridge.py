@@ -196,6 +196,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/workshop":
             self._workshop_start()
             return
+        if path == "/workshop/folders":                         # New folder: the folder, its git repo, its GitHub repo
+            if self._workshop_ok():
+                try:
+                    self._json(200, WORKSHOP.new_folder(str(self._read_body().get("name") or "")))
+                except ValueError as exc:
+                    self._json(409, {"error": "refused", "message": str(exc)})
+            return
         if path.startswith("/workshop/cancel/"):
             if self._workshop_ok():
                 self._json(200, {"ok": WORKSHOP.cancel(path.rsplit("/", 1)[1])})

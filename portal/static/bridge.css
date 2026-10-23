@@ -182,6 +182,10 @@ canvas.alive { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0;
 .chat-bridge .agent-view #ps-form, .chat-bridge .agent-view #ps-brain, .chat-bridge .agent-view #ps-convs-btn,
 .chat-bridge .agent-view .me-chat > header, .chat-bridge .agent-view #ps-convs { display: none !important; }
 .chat-bridge .agent-view .ps-bar { margin-top: 0; }
+.chat-bridge .agent-view .newfolder { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0; }
+.chat-bridge .agent-view .newfolder[hidden] { display: none; }
+.chat-bridge .agent-view .newfolder input { flex: 1 1 10em; min-width: 0; }
+.chat-bridge .agent-view .newfolder .msg { flex-basis: 100%; color: var(--muted); font-size: .85em; }
 .chat-bridge .agent-view #ps-project { flex: 0 1 auto; max-width: 60%; font-size: .85rem; padding: 4px 8px; }
 .chat-bridge .chats-head { display: flex; align-items: center; gap: 6px; margin: 10px 0 6px; color: var(--accent); }
 .chat-bridge .chats-head .g { width: 16px; height: 16px; }

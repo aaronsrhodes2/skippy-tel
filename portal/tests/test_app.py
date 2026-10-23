@@ -933,35 +933,38 @@ def test_task_failure_is_reported_not_raised(env, monkeypatch):
     assert not result["ok"] and "bot token" in result["message"]
 
 
-def test_guests_get_skippy_core_the_captain_picks_and_barney_style_is_always_skippy_core(env):
+def test_chat_send_is_skippy_core_for_everyone_and_barney_style_too(env):
     client, _, skippy = env
     login(client, ADMIN)
     for phrase in ("hi", "trust the awesomeness", "Put on your Thinking Cap", "use sonnet", "model: claude-opus-5", "solid gold"):
         resp = client.post("/chat/send", json={"message": phrase, "model": "claude-opus-5"})        # words and a "model" field pick nothing
         assert resp.status_code == 200 and resp.get_json()["brain"] == "core" and skippy.model == "chat", phrase
-    for brain, model in (("haiku", "claude-haiku-5-5"), ("sonnet", "claude-sonnet-5-5"), ("opus", "claude-opus-5-5"), ("core", "chat")):
-        resp = client.post("/chat/send", json={"message": "hi", "brain": brain})                    # the Captain's picker
-        assert resp.status_code == 200 and resp.get_json()["brain"] == brain and skippy.model == model, brain
-    assert client.post("/chat/send", json={"message": "hi", "brain": "gpt-9"}).status_code == 403
-    resp = client.post("/chat/send", json={"message": "explain", "brain": "opus", "barney": True})  # Barney Style is Skippy Core, even for him
+    for mode in ("public", "core"):
+        assert client.post("/chat/send", json={"message": "hi", "mode": mode}).get_json()["brain"] == "core"
+    for asked in ({"brain": "opus"}, {"brain": "gpt-9"}, {"mode": "private"}, {"mode": "auto"}):
+        assert client.post("/chat/send", json={"message": "hi", **asked}).status_code == 403, asked   # Private/Auto are the agent's
+    resp = client.post("/chat/send", json={"message": "explain", "barney": True})                    # Barney Style is Skippy Core
     assert resp.get_json()["brain"] == "core" and skippy.model == "chat" and skippy.tools is None and "Barney Style" in skippy.seen[0]
     login(client, FRIEND)
-    resp = client.post("/chat/send", json={"message": "hi"})                                        # a guest's brain: Skippy Core
+    resp = client.post("/chat/send", json={"message": "hi"})                                        # a guest: Skippy Core
     assert resp.status_code == 200 and resp.get_json()["brain"] == "core" and skippy.model == "chat"
-    for brain in ("haiku", "sonnet", "opus", "gemini", "gemini-free"):
-        assert client.post("/chat/send", json={"message": "hi", "brain": brain}).status_code == 403, brain   # paid models: the Captain only
+    for brain in ("haiku", "sonnet", "opus", "gemini", "gemini-free", "private", "auto"):
+        assert client.post("/chat/send", json={"message": "hi", "brain": brain}).status_code == 403, brain
     resp = client.post("/chat/send", json={"message": "Give it to me Barney Style"})                 # Barney Style: no tools at all
     assert resp.status_code == 200 and skippy.tools is None and skippy.force_tool is None and "Barney Style" in skippy.seen[0]
 
 
-def test_only_the_captain_sees_the_brain_picker(env):
+def test_only_the_captain_sees_the_mode_key(env):
     client, _, _ = env
     login(client, ADMIN)
     page = client.get("/chat").data.decode()
-    assert 'data-sheet="brain"' in page and 'data-brain="opus"' in page and 'data-brain="gemini-free"' in page
+    assert 'data-sheet="brain"' in page
+    for mode in ("public", "private", "auto"):
+        assert f'data-mode="{mode}"' in page, mode
+    assert 'data-brain="opus"' not in page and "gemini" not in page.lower().replace("g-gemini", "")
     login(client, FRIEND)
     page = client.get("/chat").data.decode()
-    assert 'data-sheet="brain"' not in page and 'data-brain=' not in page and "claude-opus" not in page
+    assert 'data-sheet="brain"' not in page and 'data-mode=' not in page and "claude-opus" not in page
 
 
 def test_there_is_one_chat_interface_and_it_is_the_skippy_app(env):
@@ -2107,3 +2110,22 @@ def test_your_chats_stay_in_the_browser_and_forgetting_one_asks_nothing(env):
     login(client, ADMIN)
     assert re.search(r'const OWNER = "([0-9a-f]{16})"', client.get("/chat").data.decode()).group(1) != owner.group(1)   # his own key
     assert "confirm(" not in page                                                          # no "are you sure" boxes
+
+
+def test_a_picture_asked_for_but_never_drawn_is_drawn_by_the_portal(monkeypatch):
+    """Skippy Core writes [IMAGE: ...] or just describes a picture instead of calling make_image (2026-10-23: nothing came
+    back): the portal starts the job itself, with the tag's description, and says it's still drawing."""
+    import chat_tools as ct
+    monkeypatch.setattr(ct, "IMAGE_WAIT_S", 0.05)
+    skippy = FakeSkippy()
+    skippy.reply = lambda *a, **k: (setattr(skippy, "tools", k.get("tools")) or "Behold.\n[IMAGE: a red barn at dusk]")
+    app = portal.create_app(dict(SETTINGS), vm=FakeVm(), skippy=skippy)
+    client = app.test_client()
+    token = _pair(client)
+    _advertise(client, token, make_image=True)
+    r = client.post("/chat/send", json={"message": "draw me a barn"}).get_json()
+    assert r["tools"] == ["make_image"] and "[IMAGE" not in r["reply"] and "Still drawing" in r["reply"]
+    jobs = client.get("/home/jobs", headers={"Authorization": f"Bearer {token}"}).get_json()["jobs"]
+    assert [(j["kind"], j["prompt"]) for j in jobs] == [("make_image", "a red barn at dusk")]
+    skippy.reply = lambda *a, **k: "The speed of light is fast."
+    assert client.post("/chat/send", json={"message": "how fast is light?"}).get_json()["tools"] == []   # no ask, no picture

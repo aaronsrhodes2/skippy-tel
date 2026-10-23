@@ -85,6 +85,20 @@ pre.log { margin: 0 10px 10px; white-space: pre-wrap; word-break: break-word; fo
 :is(body[data-app="me"], html.agent body.captain) .me-chat textarea::placeholder { color: #b9a2f2; }
 :is(body[data-app="me"], html.agent body.captain) a { color: #d6b3ff; }
 body[data-app="me"] .adm { z-index: 1; }
+/* Auto mode (the Captain's fallback: the agent thinking with Claude): Claude orange on black, the same layout as the purple. */
+html.auto body.captain {
+  --accent: #d97757;
+  --green: #d97757; --cyan: #f0a383; --violet: #c2603f; --pink: #f4b59b; --orange: #d97757;
+  --dim-green: #2a1208; --dim-green-hi: #a4512f; --line: #4a2414; --panel: #120804;
+  --ink: #ffffff; --muted: #f2cdbd;
+  background: #000; color: #fff;
+}
+html.auto body.captain :is(select, input[type=text], input[type=search], input[type=password], textarea, .lang-opt, .verb, .mem-row) { background: #0f0603; border-color: var(--dim-green-hi); color: #fff; }
+html.auto body.captain .me-chat .turn.user { background: #0b0b0b; border: 1px solid #c2603f; color: #fff; }
+html.auto body.captain .me-chat .turn.assistant { background: #2a1208; border: 1px solid var(--dim-green-hi); color: #fff; }
+html.auto body.captain .me-chat .turn.assistant p { color: #fff; }
+html.auto body.captain .me-chat textarea::placeholder { color: #f0a383; }
+html.auto body.captain a { color: #f4b59b; }
 
 /* the front page: which Skippy (the Captain's mode keys), and the chat filling the screen */
 .modebar { flex: none; display: flex; gap: 6px; justify-content: center; margin: 2px 0 4px; }

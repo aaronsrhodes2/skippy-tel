@@ -174,6 +174,25 @@ def claims_mentat(text: str) -> bool:
     return any(p in low for p in _MENTAT_CLAIM)
 
 
+_PICTURE_ASK = re.compile(
+    r"\b(draw|paint|sketch|illustrate|render|generate|make|create|design|show me|give me|picture of|image of)\b[^.?!\n]{0,60}?"
+    r"\b(picture|image|drawing|painting|illustration|portrait|photo|artwork|art|sketch|logo|wallpaper|poster|icon)s?\b"
+    r"|^\s*(draw|paint|sketch|illustrate)\b", re.I)
+_IMAGE_TAG = re.compile(r"\[IMAGE:\s*([^\]\n]+)\]", re.I)
+
+
+def wants_picture(message: str) -> bool:
+    """Did the person ask for a picture to be made? Used when a brain answers without calling make_image (a local model
+    writing [IMAGE: ...] as text, or just describing one): the portal then draws it itself (app.py, /chat/send)."""
+    return bool(_PICTURE_ASK.search(message or ""))
+
+
+def image_tag(text: str) -> str:
+    """The description in a reply's phone-era [IMAGE: ...] tag, if it wrote one (a better prompt than the ask itself)."""
+    m = _IMAGE_TAG.search(text or "")
+    return m.group(1).strip() if m else ""
+
+
 BARNEY_PHRASE = "Give it to me Barney Style"   # what the page puts in the box when Barney Style is switched on
 
 

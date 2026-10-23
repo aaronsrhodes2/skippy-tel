@@ -8,7 +8,7 @@ then open http://127.0.0.1:8776/dev-login (the Captain) or http://127.0.0.1:8776
 
 What is real and what stands in:
   * Skippy Core is skippy-core's llama-swap (the Anthropic SDK with base_url = the tunnel), the same code path the portal
-    uses through the funnel. Claude and Gemini show in the Captain's picker but stay off here: no keys are read.
+    uses through the funnel. Private and Auto (the Captain's mode key) drive the real bridge when it is running.
   * physics jobs are answered by the running skippytel-mentat container on skippy-pc (docker exec), so the ⚛ card shows a
     real Mentat answer. The home is a test Home that reports Mentat up; the games VM is the tests' FakeVm.
 Not collected by pytest (no test_ prefix); nothing here ships.

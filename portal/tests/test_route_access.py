@@ -32,7 +32,7 @@ REGISTRY = {
         "admin.autoconfigure", "admin.discord_setup", "admin.friends_remove", "admin.friends_save", "admin.index", "admin.logs",
         "admin.module_switch", "admin.requests_dismiss", "admin.restart", "admin.settings", "recovery.act", "server_admin.fragment",
         "me.index", "me.mcp_ask", "me.mcp_result", "me.pair_home", "me.toggle_experiment", "me.workshop_events", "me.workshop_history", "me.workshop_history_result",
-        "me.workshop_image", "me.workshop_notify", "me.workshop_resync", "me.workshop_send", "me.workshop_ship", "me.workshop_stop",
+        "me.workshop_image", "me.workshop_new_folder", "me.workshop_new_folder_result", "me.workshop_notify", "me.workshop_resync", "me.workshop_send", "me.workshop_ship", "me.workshop_stop",
         "chat.memory_ask", "chat.memory_result")},
     # granted apps
     "music.player_page": G("audio"), "music.player_gate": G("audio"), "music.player_checkin": G("audio"), "music.player_command": G("audio"),
@@ -43,6 +43,7 @@ REGISTRY = {
         "tabletop.hero_set", "tabletop.hero_file_add", "tabletop.hero_file_delete", "tabletop.hero_file", "tabletop.hero_print", "tabletop.hero_avatar")},
     **{e: ADMIN_ONLY for e in ("tabletop.fear_set", "tabletop.card_vis", "tabletop.hero_new", "tabletop.hero_player", "tabletop.hero_delete", "tabletop.hero_gm_ref")},
     "chat.index": G("skippy"), "chat.send": G("skippy"), "chat.badges": G("skippy"), "chat.voice_gate": G("skippy"), "chat.media_file": G("skippy"),
+    "chat.history_list": G("skippy"), "chat.history_save": G("skippy"), "chat.history_forget": G("skippy"),
     # members
     **{e: MEMBER for e in (
         "apps", "app_tiles", "dashboard.game", "dashboard.game_discord", "dashboard.game_live", "dashboard.games_start", "dashboard.games_stop", "dashboard.index",

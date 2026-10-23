@@ -61,7 +61,7 @@ reporter or the shelved phone apps use goes missing. A new human-facing page is 
 
 - Default → Ollama (OLLAMA_MODEL: qwen3:8b in the vault; config.py's fallback is still qwen2.5:7b)
 - "put on your thinking cap" → Anthropic Claude
-- "ask nagatha" / "ask gemini" → Gemini (Nagatha persona)
+- "ask nagatha" / "ask gemini" → Gemini (Nagatha persona; flask-api only: the portal chat dropped Gemini 2026-10-23)
 
 ("trust the awesomeness" and "solid gold", the two Claude Code tiers, were removed 2026-09-30 at the Captain's request:
 the private Skippy on the portal's `/me` has full access, so those verbs and flask-api's claude-bridge client are gone.)
@@ -230,14 +230,24 @@ launcher. The launcher stays at `/apps`; inside the chat the other apps are a tr
 screen; `/apps/tiles` feeds it) and prior chats are a sheet (kept in that browser's localStorage only, never on the portal). No side bars anywhere. **Which model answers is `portal/brains.py`'s call, on the server, never the page's**
 (2026-10-19): **guests** get Skippy Core only (the local model on skippy-core, reached through its Tailscale Funnel + `SKIPPY_CORE_API_KEY`; the same
 Anthropic SDK, another base_url) with the portal's public tools (Mentat, game status); if Core is down they get Mentat straight, never a paid model.
-**The Captain** picks in the brain sheet: Skippy Core (default), Claude Haiku/Sonnet/Opus, Gemini free/paid. Every brain calls Mentat for physics; the
-reply carries the ⚛ card (Mentat's result and proof) with **Barney Style?**, which always runs on Skippy Core with no tools. A reply that claims Mentat
-without calling it is thrown away and Mentat is forced (or asked by the portal itself). Dev: `portal/tests/dev_chat.py` (real Core over SSH, real Mentat).
-**One chat** (2026-10-21): the Captain's AGENT (`templates/_workshop.html`, Claude Code on skippy-pc) lives INSIDE it as two more brains in
-his brain sheet, "Agent · Claude" and "Agent · Skippy Core coder": picking one shows the agent's transcript in the chat's stage with a folder
-chip, and the chat's composer, New chat, Stop and chats sheet drive it through `window.SkippyAgent` (the agent's engine is unchanged). No top
-switch. Purple while an agent brain is picked (`html.agent`), green otherwise. Chats are kept per person (a one-way id of the address keys
-the browser's storage). A Core-brain agent run gets the Captain's skills and plugins (never his login) and the llama.cpp prompt-cache fix. `/me` is the Captain's private MCP access (list + test his servers, through the bridge) and Home integration only: the other panes are Graveyard entries (`modules.py`, ids `me-<pane>`): the Captain retires one in the Admin Graveyard when its telemetry (`pane:<id>` taps, the Home pane's "Least-used UI") says nobody opens it, and revives it there. The Experiments show/hide moved to the Experiments page's About sheet. Showing the agent only to him is a convenience, not the security: every `/me/workshop/*`
+**Three modes** (2026-10-23, `brains.MODES`; the mode key, the Captain only): **Public** (green) is this chat on Skippy Core, the only
+mode guests have and the only one `/chat/send` answers; **Private** (purple, `html.agent`, his DEFAULT, where he wants to do all his work) is the
+AGENT (`templates/_workshop.html`, Claude Code on skippy-pc) thinking with Skippy Core's coder, local models only; **Auto** (Claude orange
+`#d97757`, `html.auto`) is the same agent thinking with Claude: the failure fallback, not a peer. Gemini and the paid quick-chat brains are
+gone. Picking Private or Auto shows the agent's transcript in the chat's stage with a folder chip; the chat's composer, New chat, Stop and
+chats sheet drive it through `window.SkippyAgent`. Every brain calls Mentat for physics; the reply carries the ⚛ card (Mentat's result and
+proof) with **Barney Style?**, which always runs on Skippy Core with no tools. A reply that claims Mentat without calling it is thrown away
+and Mentat is forced (or asked by the portal itself); a picture asked for (or written as `[IMAGE: ...]`) but never drawn is drawn by the
+portal itself. Pictures are skippy-pc's image studio, for everyone (guests 10 a day). Dev: `portal/tests/dev_chat.py` (real Core over SSH, real Mentat).
+**Chats are kept on the portal** (`portal/chat_history.py`, one private file per person in the Tabletop bucket, keyed by a one-way id of the address;
+the browser keeps a copy): a guest's 30 days, the Captain's forever. A guest's expired chat is first ANALYSED by Skippy Core (right, wrong,
+bugs, improvements; about hourly, nudged by the home report) and only then deleted; the insight goes to `chat-insights/<YYYY-MM>.json` in the
+bucket and home to `state/insights/chat-insights.jsonl` on skippy-pc. **Every chat is named noun-verb-adjective-noun** (`chat_names.py`, one file
+in `portal/` and `services/claude-bridge/`, kept identical by a test): Skippy Core compresses the first prompt, the first content words without it.
+**The agent's lane** (`services/claude-bridge/lane_guard.py`, a PreToolUse hook on every run): it reads anywhere, but changes files only in its
+conversation's folder (SkippyTel's primary checkout only for pull/deploy). **New folder** in the folder picker makes `D:\Aaron\development\<name>`,
+a git repo and the private GitHub repo `aaronsrhodes2/<name>` (`new_folder.py`; a `.skippy-remote-pending` marker when GitHub fails, retried when a
+conversation starts there). A Core-brain agent run gets the Captain's skills and plugins (never his login) and the llama.cpp prompt-cache fix. `/me` is the Captain's private MCP access (list + test his servers, through the bridge) and Home integration only: the other panes are Graveyard entries (`modules.py`, ids `me-<pane>`): the Captain retires one in the Admin Graveyard when its telemetry (`pane:<id>` taps, the Home pane's "Least-used UI") says nobody opens it, and revives it there. The Experiments show/hide moved to the Experiments page's About sheet. Showing the agent only to him is a convenience, not the security: every `/me/workshop/*`
 call checks for the Captain again and needs the `X-Workshop` header, and
 **`portal/tests/test_route_access.py` classifies every route (public, machine, beacon, member, grant, admin) and fails on any new unclassified one
 or any under-guarded one**, probing nobody, a signed-in stranger and a chat-only friend. A new route must be added to its REGISTRY.
@@ -263,7 +273,9 @@ The bridge only picks this up on restart (refused while a run is going).
 
 ## Skippy's voice (mic, voice-to-text, text-to-voice in both chats, on the front page)
 
-A mic key and a speaker key on each chat, on any device with a current browser: `portal/static/skippy-voice.js` (MediaRecorder, no browser
+**Two modes, one voice key** (2026-10-23): **Typing** speaks nothing and, once the browser already allows the mic (the Permissions API,
+never a prompt on load), listens only for "Skippy"; saying it (or a tap) switches to **Hands-off**, which listens and speaks round after
+round, silence included, until a sleep word ("thanks", "thank you", "goodbye", "go to sleep", "that's all") or a tap. On any device with a current browser: `portal/static/skippy-voice.js` (MediaRecorder, no browser
 vendor speech cloud) + `portal/voice.py` (the pass, label `voice-gate-v1`; scopes `listen` for everyone who may chat, `speak` for admins only,
 because the cloned Skippy voice is personal-use) + `/chat/voice/gate` (the pass route). The recording goes browser → Tailscale Funnel `:10000` →
 `services/voice-gate` → Whisper at home (flask-api's ElevenLabs for Skippy's voice; its key never leaves home); never through the portal.

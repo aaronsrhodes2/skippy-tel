@@ -125,6 +125,17 @@ class GcsStore:
                 raise StorageMissing(f"The bucket {self.bucket_name} doesn't exist yet.") from err
 
 
+    def list(self, prefix: str) -> list[str]:
+        """The names of the files under `prefix` (Skippy's chat history uses it to find expired chats)."""
+        try:
+            self._b()
+            return [blob.name for blob in self._client.list_blobs(self.bucket_name, prefix=prefix)]
+        except Exception as err:   # noqa: BLE001
+            if type(err).__name__ == "NotFound" and self._missing(err):
+                raise StorageMissing(f"The bucket {self.bucket_name} doesn't exist yet.") from err
+            raise
+
+
 class MemoryStore:
     """The same three calls in memory: tests, and tests/dev_tabletop-style local runs."""
 
@@ -139,6 +150,9 @@ class MemoryStore:
 
     def delete(self, path):
         self.files.pop(path, None)
+
+    def list(self, prefix):
+        return [p for p in self.files if p.startswith(prefix)]
 
 
 def store_from_env():

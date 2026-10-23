@@ -4,12 +4,13 @@
 {% block ui %}bridge{% endblock %}
 {% block glyph %}can{% endblock %}
 {% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge-panes.css') }}">{% if captain %}
-<script>try { if ((localStorage.getItem("skippy-chat-brain") || "").indexOf("agent-") === 0) document.documentElement.classList.add("agent"); } catch (e) {}</script>   {# purple only while an agent brain is picked: set before paint so there is no flash #}
+<script>try { const m = localStorage.getItem("skippy-chat-mode") || "private"; if (m === "private") document.documentElement.classList.add("agent"); else if (m === "auto") document.documentElement.classList.add("auto"); } catch (e) {}</script>   {# the mode's colour before paint, so there is no flash: Private purple (his default), Auto orange, Public green #}
 {% endif %}{% endblock %}
 {% block content %}
-{# The front page is Skippy the Magnificent: ONE chat (templates/_chat.html). Everyone gets the brains portal/brains.py allows them; the
-   Captain's brain sheet also holds the AGENT (Claude Code on skippy-pc, templates/_workshop.html, embedded in the chat's stage and driven
-   through window.SkippyAgent) as "Agent · Claude" and "Agent · Skippy Core coder". Showing the agent only to him is a convenience: its
+{# The front page is Skippy the Magnificent: ONE chat (templates/_chat.html) in three modes (portal/brains.py). Everyone has Public
+   (Skippy Core, green); the Captain's mode key adds Private (his default: the AGENT, Claude Code on skippy-pc, thinking with Skippy
+   Core's coder, purple) and Auto (the fallback: the same agent with Claude, orange). The agent is templates/_workshop.html, embedded
+   in the chat's stage and driven through window.SkippyAgent. Showing the agent only to him is a convenience: its
    every endpoint (/me/workshop/*) checks for the Captain again and needs the X-Workshop header, and portal/tests/test_route_access.py
    fails if any route is left unguarded. #}
 <script src="{{ url_for('static', filename='skippy-voice.js') }}"></script>
@@ -23,11 +24,15 @@
 <script src="{{ url_for('static', filename='bridge-alive.js') }}"></script>
 <script>
   const PURPLES = ["#a64dff", "#7a2cf0", "#d08cff", "#c040ff", "#5b2bd6", "#e6b3ff"];
-  const alive = Bridge.alive(document.querySelector("canvas.alive"){% if captain %}, document.documentElement.classList.contains("agent") ? {colors: PURPLES} : undefined{% endif %});
-  // The chat calls this when the Captain picks a brain: purple is how he knows he is talking to the agent that can change things.
-  window.skippyTheme = function (agent) {
-    document.documentElement.classList.toggle("agent", !!agent);
-    alive.setColors(agent ? PURPLES : null);
+  const ORANGES = ["#d97757", "#c2603f", "#f0a383", "#e8895f", "#a4512f", "#f4b59b"];
+  const THEMES = {purple: PURPLES, orange: ORANGES};
+  const startTheme = document.documentElement.classList.contains("agent") ? "purple" : document.documentElement.classList.contains("auto") ? "orange" : "green";
+  const alive = Bridge.alive(document.querySelector("canvas.alive"){% if captain %}, THEMES[startTheme] ? {colors: THEMES[startTheme]} : undefined{% endif %});
+  // The chat calls this when the Captain picks a mode: the colour is how he knows who answers (green Public, purple Private, orange Auto).
+  window.skippyTheme = function (theme) {
+    document.documentElement.classList.toggle("agent", theme === "purple");
+    document.documentElement.classList.toggle("auto", theme === "orange");
+    alive.setColors(THEMES[theme] || null);
   };
 </script>
 {% endblock %}

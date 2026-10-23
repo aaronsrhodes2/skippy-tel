@@ -89,15 +89,15 @@ def test_a_guest_can_show_skippy_core_a_picture_through_the_vision_slot():
     assert cmodel == "chat" and isinstance(ccontent, str) and "a red brick wall" in ccontent and ccontent.endswith("what is this?")
 
 
-def test_claude_gets_the_files_as_blocks_and_a_bad_file_is_a_400():
+def test_skippy_core_gets_the_files_as_blocks_and_a_bad_file_is_a_400():
     skippy = FakeSkippy()
     client = portal.create_app(dict(SETTINGS), vm=FakeVm(), skippy=skippy).test_client()
     login(client, ADMIN)
-    r = client.post("/chat/send", json={"message": "read this", "brain": "sonnet",
+    r = client.post("/chat/send", json={"message": "read this",
                                         "files": [{"name": "doc.pdf", "data": url("application/pdf", tiny_pdf())}]})
     assert r.status_code == 200
     content = skippy.seen[1][-1]["content"]
-    assert content[0]["type"] == "document" and content[-1] == {"type": "text", "text": "read this"}
+    assert isinstance(content, str) and content.rstrip().endswith("read this")         # Skippy Core reads the PDF as text
     r = client.post("/chat/send", json={"message": "x", "files": [{"name": "x.exe", "data": url("application/x-msdownload", b"MZ")}]})
     assert r.status_code == 400 and "pictures, PDFs and text" in r.get_json()["error"]
     assert json.dumps(r.get_json()).count("MZ") == 0

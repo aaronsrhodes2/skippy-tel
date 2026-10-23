@@ -286,6 +286,25 @@ resource "google_storage_bucket" "tabletop" {
     }
     action { type = "Delete" }
   }
+  # Skippy's chats (portal/chat_history.py, chat-history/<one-way id>.json): a guest's expire after 30 days and the portal's
+  # hourly sweep analyses each one before deleting it. This is only the backstop, far behind that: a file no one has written
+  # for 60 days goes (each save writes a new object, so age is "since the last save"), and with it its old versions. The
+  # Captain's file is written whenever he chats, so in practice it stays.
+  lifecycle_rule {
+    condition {
+      age            = 60
+      matches_prefix = ["chat-history/"]
+    }
+    action { type = "Delete" }
+  }
+  lifecycle_rule {
+    condition {
+      days_since_noncurrent_time = 1
+      with_state                 = "ARCHIVED"
+      matches_prefix             = ["chat-history/"]
+    }
+    action { type = "Delete" }
+  }
   depends_on = [google_project_service.apis]
 }
 

@@ -24,14 +24,13 @@
       <div class="lang-grid"></div>
       <select class="lang" aria-label="Language" hidden>{% for code, name in chat_languages.items() %}<option value="{{ code }}">{{ name }}</option>{% endfor %}</select>
     </div>
-    {% if chat_brains|length > 1 %}
+    {% if chat_modes|length > 1 %}
+    {# The Captain's three modes (portal/brains.py MODES): Public = this chat on Skippy Core; Private (his default) and Auto (the
+       fallback) = the agent below, thinking with Skippy Core's coder or with Claude. #}
     <div class="sheet" data-sheet="brain" hidden>
-      <div class="brain-list">{% for b in chat_brains %}
-        <button type="button" class="brain-opt" data-brain="{{ b.id }}" aria-pressed="false"{% if not b.ready %} disabled{% endif %}><svg class="g" aria-hidden="true"><use href="#g-{{ b.glyph }}"/></svg>{{ b.label }}{% if b.paid %} <span class="paid" title="paid">$</span>{% endif %}<i class="lamp" data-s="{{ 'on' if b.ready else 'off' }}"></i></button>
-      {% endfor %}{% if captain and workshop_brains is defined %}{% for b in workshop_brains %}
-        {# the agent: Claude Code on skippy-pc in a folder (templates/_workshop.html below), not a portal model #}
-        <button type="button" class="brain-opt agent-opt" data-brain="agent-{{ b.id }}" data-agent="{{ b.id }}" aria-pressed="false"{% if not (b.ready and workshop_ready) %} disabled{% endif %}><svg class="g" aria-hidden="true"><use href="#g-console"/></svg>Agent · {{ b.label }}{% if b.id == 'claude' %} <span class="paid" title="paid">$</span>{% endif %}<i class="lamp" data-s="{{ 'on' if (b.ready and workshop_ready) else 'off' }}"></i></button>
-      {% endfor %}{% endif %}</div>
+      <div class="brain-list">{% for m in chat_modes %}
+        <button type="button" class="brain-opt mode-{{ m.theme }}" data-brain="{{ 'agent-' ~ m.agent if m.agent else 'core' }}" data-mode="{{ m.id }}" aria-pressed="false"{% if not m.ready %} disabled{% endif %}><svg class="g" aria-hidden="true"><use href="#g-{{ m.glyph }}"/></svg>{{ m.label }}{% if m.agent == 'claude' %} <span class="paid" title="paid">$</span>{% endif %}<i class="lamp" data-s="{{ 'on' if m.ready else 'off' }}"></i></button>
+      {% endfor %}</div>
     </div>
     {% endif %}
     <div class="sheet" data-sheet="apps" hidden>
@@ -71,11 +70,10 @@
       <button type="button" class="key" data-open="chats" data-tel="chat:chats" aria-label="Your chats" title="Your chats"><svg class="g" aria-hidden="true"><use href="#g-chats"/></svg></button>
       <button type="button" class="key clear" aria-label="New chat" title="New chat"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
       <button type="button" class="key clip" data-tel="chat:attach" aria-label="Attach pictures or files (or paste, or drop them here)" title="Attach pictures or files (or paste, or drop them here)"><svg class="g" aria-hidden="true"><use href="#g-clip"/></svg></button>
-      {% if chat_brains|length > 1 %}<button type="button" class="key brain-key" data-open="brain" data-tel="chat:brain" aria-label="Which brain answers" title="Which brain answers"><svg class="g" aria-hidden="true"><use href="#g-core"/></svg></button>{% endif %}
+      {% if chat_modes|length > 1 %}<button type="button" class="key brain-key" data-open="brain" data-tel="chat:mode" aria-label="Mode" title="Mode"><svg class="g" aria-hidden="true"><use href="#g-core"/></svg></button>{% endif %}
       <button type="button" class="key barney" data-tel="chat:barney-style" aria-label="Barney Style: Skippy Core explains the conversation in plain words" title="Barney Style: Skippy Core explains the conversation in plain words"><svg class="g" aria-hidden="true"><use href="#g-simple"/></svg></button>
-      <button type="button" class="key ear" aria-pressed="false" aria-label="Standby: listen for Skippy" title="Standby: listen for Skippy"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg><i class="lamp"></i></button>
-      <button type="button" class="key mic" aria-label="Speak your message" title="Speak your message"><svg class="g" aria-hidden="true"><use href="#g-mic"/></svg><i class="lamp"></i></button>
-      <button type="button" class="key spk" aria-pressed="false" aria-label="Read replies aloud" title="Read replies aloud"><svg class="g" aria-hidden="true"><use href="#g-vol"/></svg><i class="lamp"></i></button>
+      {# the voice key (static/skippy-voice.js two modes): Typing listens only for "Skippy"; Hands-off listens and speaks until "thanks" #}
+      <button type="button" class="key voice" aria-pressed="false" aria-label="Typing: tap to talk" title="Typing: tap to talk"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg><i class="lamp"></i></button>
       <button type="button" class="key" data-open="lang" aria-label="Language" title="Language"><svg class="g" aria-hidden="true"><use href="#g-globe"/></svg></button>
       <button type="button" class="key" data-open="tools" aria-label="Tools" title="Tools"><svg class="g" aria-hidden="true"><use href="#g-tools"/></svg></button>
       {% if is_admin %}<button type="button" class="key" data-open="memory" aria-label="Past conversations" title="Past conversations"><svg class="g" aria-hidden="true"><use href="#g-past"/></svg></button>{% endif %}
@@ -98,7 +96,7 @@
     const form = root.querySelector(".ask"), log = root.querySelector(".log .pg-flow");
     const msg = form.querySelector("textarea"), sendBtn = form.querySelector("button.send");
     const logPager = Bridge.pager(root.querySelector(".log"), {pips: root.querySelector(".stage > .pips")});
-    const voice = SkippyVoice.attach({gate: "{{ url_for('chat.voice_gate') }}", mic: form.querySelector("button.mic"), ear: form.querySelector("button.ear"), speaker: form.querySelector("button.spk"),
+    const voice = SkippyVoice.attach({gate: "{{ url_for('chat.voice_gate') }}", key: form.querySelector("button.voice"),
       lang: () => (root.querySelector("select.lang") || {}).value || "",
       box: msg, status: form.querySelector(".vstat"), onSend: () => form.requestSubmit()});          // hands-free: a pause ends it, a countdown sends it
     const sheets = {}; root.querySelectorAll(".sheet").forEach(s => { sheets[s.dataset.sheet] = s; });
@@ -145,11 +143,14 @@
     }
     paintLangs();
 
-    // Which brain answers. Guests have one (Skippy Core) and no key; the Captain picks from the brain sheet, remembered in this
-    // browser. The server decides in the end (portal/brains.py): a guest's choice is never sent, and a stale one is refused.
-    const BRAINS = {{ chat_brains|tojson }}, BRAIN_KEY = "skippy-chat-brain", brainKey = form.querySelector("button.brain-key");
-    let brain = (BRAINS.find(x => x.ready) || BRAINS[0] || {id: "core"}).id;     // the first one that's reachable now
-    try { const b = localStorage.getItem(BRAIN_KEY); if (BRAINS.some(x => x.id === b && x.ready)) brain = b; } catch (e) {}
+    // The mode (portal/brains.py MODES). Guests have one (Public, Skippy Core) and no key; the Captain picks from the mode sheet,
+    // remembered in this browser: Private by default, Auto only as the fallback when Private can't run. Internally a mode is the
+    // brain it drives: "core" (this chat), "agent-core" (Private), "agent-claude" (Auto). The server decides in the end.
+    const BRAINS = {{ chat_modes|tojson }}.map(m => Object.assign({}, m, {mode: m.id, id: m.agent ? "agent-" + m.agent : "core"}));
+    const BRAIN_KEY = "skippy-chat-mode", brainKey = form.querySelector("button.brain-key");
+    const byMode = (id) => BRAINS.find(x => x.mode === id && x.ready);
+    let brain = (byMode("private") || byMode("auto") || BRAINS.find(x => x.ready) || BRAINS[0] || {id: "core"}).id;
+    try { const m = byMode(localStorage.getItem(BRAIN_KEY)); if (m) brain = m.id; } catch (e) {}
     function paintBrain() {
       if (!brainKey) return;
       const b = BRAINS.find(x => x.id === brain) || BRAINS[0];
@@ -159,17 +160,15 @@
     }
     // The agent (the Captain only): two more brains, "agent-claude" and "agent-core". Picking one shows the agent's transcript in
     // this stage instead of the chat's log; the composer, New chat, Stop and the chats sheet then drive it (window.SkippyAgent).
-    const agentView = root.querySelector(".agent-view"), agentOpts = [...root.querySelectorAll(".agent-opt")];
+    const agentView = root.querySelector(".agent-view");
     const isAgent = (id) => typeof id === "string" && id.indexOf("agent-") === 0;
-    agentOpts.forEach(o => BRAINS.push({id: o.dataset.brain, label: o.textContent.trim(), glyph: "console", ready: !o.disabled, agent: true}));
-    try { const b = localStorage.getItem(BRAIN_KEY); if (isAgent(b) && BRAINS.some(x => x.id === b && x.ready)) brain = b; } catch (e) {}
     function applyMode() {
       const agent = isAgent(brain) && !!agentView;
       if (agentView) agentView.hidden = !agent;
       root.querySelector(".stage > .log").hidden = agent;
       const pips = root.querySelector(".stage > .pg-bar") || root.querySelector(".stage > .pips"); if (pips) pips.hidden = agent;
       root.classList.toggle("agent-mode", agent);
-      if (window.skippyTheme) window.skippyTheme(agent);
+      if (window.skippyTheme) window.skippyTheme((BRAINS.find(x => x.id === brain) || {}).theme || "green");
       if (agent && window.SkippyAgent) {
         const want = brain.slice(6);
         if (window.SkippyAgent.setBrain(want) !== want) flash("This conversation already runs on the other agent brain: New chat to switch.");
@@ -177,7 +176,7 @@
       paintStop(); logPager.refresh();
     }
     root.querySelectorAll(".brain-opt").forEach(o => o.addEventListener("click", () => {
-      brain = o.dataset.brain; try { localStorage.setItem(BRAIN_KEY, brain); } catch (e) {}
+      brain = o.dataset.brain; try { localStorage.setItem(BRAIN_KEY, o.dataset.mode); } catch (e) {}
       paintBrain(); showSheet("brain"); applyMode();
     }));
     paintBrain();
@@ -239,9 +238,9 @@
       logPager.refresh(); logPager.last();
       return body;
     }
-    // Your chats: kept in THIS browser only (localStorage), never on the portal, so nothing is stored about anyone without the
-    // "Allow us to save" consent. The newest 40, each {id, title (its first question), updated, history}; the tab's open one is
-    // this tab's sessionStorage, as before.
+    // Your chats: on the portal for 30 days (portal/chat_history.py: your own file, keyed by who is signed in, never by the page),
+    // and a copy in this browser (localStorage) so they open at once and survive the portal being unable to keep them. The newest
+    // 40, each {id, title (its first question), updated, history}; the tab's open one is this tab's sessionStorage, as before.
     const STORE = "skippy-chats:" + OWNER, CUR = KEY + "-id", MAX_CHATS = 40;
     const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     let chatId; try { chatId = sessionStorage.getItem(CUR); } catch (e) {}
@@ -250,12 +249,39 @@
     function keepChats(list) {
       for (const n of [MAX_CHATS, 20, 8]) { try { localStorage.setItem(STORE, JSON.stringify(list.slice(0, n))); return; } catch (e) {} }   // full: keep fewer
     }
+    const HIST = "{{ url_for('chat.history_list') }}";
+    const NAMED = /^[a-z]+(?:-[a-z]+){3}$/;               // a chat's name (portal/chat_names.py): noun-verb-adjective-noun
+    function upload(c) {                                   // keep one chat on the portal; a failure only means it stays here
+      return fetch(HIST + "/" + encodeURIComponent(c.id), {method: "PUT", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({title: c.title, history: c.history})}).then(r => r.ok ? r.json() : null).then(d => {
+          if (!d || !NAMED.test(d.title || "")) return;    // Skippy Core named it: the list shows the name from now on
+          keepChats(chats().map(x => x.id === c.id ? Object.assign({}, x, {title: d.title}) : x));
+          if (openSheet === "chats") paintChats();
+        }).catch(() => {});
+    }
+    function forgetOnPortal(id) { fetch(HIST + "/" + encodeURIComponent(id), {method: "DELETE"}).catch(() => {}); }
+    let pushTimer = null;
     function remember() {
       if (!history.length) return;
       const first = history.find(t => t.role === "user");
       const title = (first ? first.content : "chat").replace(/\s*\[attached:[^\]]*\]/, "").replace(/\s+/g, " ").trim().slice(0, 70);
-      keepChats([{id: chatId, title: title, updated: new Date().toISOString(), history: history}, ...chats().filter(c => c.id !== chatId)]);
+      const had = chats().find(x => x.id === chatId);
+      const c = {id: chatId, title: had && NAMED.test(had.title || "") ? had.title : title, updated: new Date().toISOString(), history: history};
+      keepChats([c, ...chats().filter(x => x.id !== chatId)]);
+      clearTimeout(pushTimer); pushTimer = setTimeout(() => upload(c), 800);
     }
+    // On load: the portal's list and this browser's are merged (the newer copy of a chat wins); a chat only this browser has
+    // (made before the portal kept chats, or while it couldn't) goes up once. Older than 30 days: the portal has dropped it.
+    fetch(HIST, {cache: "no-store"}).then(r => r.ok ? r.json() : null).then(d => {
+      if (!d || !Array.isArray(d.chats)) return;
+      const cut = Date.now() - (d.keep_days || 30) * 864e5, mine = {};
+      chats().forEach(c => { if (Date.parse(c.updated) > cut) mine[c.id] = c; });
+      d.chats.forEach(c => { if (!mine[c.id] || mine[c.id].updated < c.updated) mine[c.id] = c; });
+      const all = Object.values(mine).sort((a, b) => (b.updated || "").localeCompare(a.updated || ""));
+      keepChats(all);
+      all.filter(c => !d.chats.some(x => x.id === c.id)).slice(0, MAX_CHATS).forEach(upload);
+      if (openSheet === "chats") paintChats();
+    }).catch(() => {});
     function save() { try { sessionStorage.setItem(KEY, JSON.stringify(history)); } catch (e) {} remember(); }
     function replay() { log.replaceChildren(); history.forEach(t => add(t.role, t.content.split("\n\n[Mentat's own answer")[0])); }   // the Mentat notes are for the models, not the screen
     function startChat(id, turns) {
@@ -522,7 +548,7 @@
         const del = document.createElement("button"); del.type = "button"; del.className = "key sm"; del.title = del.ariaLabel = "Forget this chat";
         del.append(glyph("trash"));
         del.addEventListener("click", () => {                      // acts at once (the Captain's rule: no "are you sure" boxes)
-          keepChats(chats().filter(x => x.id !== c.id));
+          keepChats(chats().filter(x => x.id !== c.id)); forgetOnPortal(c.id);
           if (c.id === chatId) startChat(newId(), []);
           paintChats();
         });
@@ -553,7 +579,8 @@
         when.textContent = name(c.project) + " · " + (c.turns || 0) + (c.state === "running" ? " · working" : "");
         open.append(glyph("console"), t, when);
         open.addEventListener("click", () => {
-          if (!agentOn()) { brain = BRAINS.find(b => b.agent && b.ready) ? BRAINS.find(b => b.agent && b.ready).id : brain; try { localStorage.setItem(BRAIN_KEY, brain); } catch (e) {} paintBrain(); applyMode(); }
+          const m = BRAINS.find(x => x.agent === (c.brain || "core") && x.ready) || BRAINS.find(x => x.agent && x.ready);   // its own mode: Private, or Auto for a Claude run
+          if (m && m.id !== brain) { brain = m.id; try { localStorage.setItem(BRAIN_KEY, m.mode); } catch (e) {} paintBrain(); applyMode(); }
           window.SkippyAgent.open(c); showSheet("chats");
         });
         row.append(open);
