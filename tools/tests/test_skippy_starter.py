@@ -204,7 +204,12 @@ def test_no_internet_keeps_the_results_for_the_next_try_and_never_raises():
     assert w.posts[-1][0]["results"][0]["id"] == "dddd4444"
 
 
-def test_the_token_comes_from_the_environment_or_the_vault_and_a_second_copy_does_not_start(tmp_path):
+def test_the_token_comes_from_the_environment_or_the_vault_and_a_second_copy_does_not_start(tmp_path, monkeypatch):
+    import socket
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))                        # a free port: the real starter may be running on this PC, holding its own
+    monkeypatch.setattr(ss, "LOCK_PORT", probe.getsockname()[1])
+    probe.close()
     vault = tmp_path / ".env"
     vault.write_text("OTHER=1\nSKIPPY_HOME_TOKEN='abc123'\n")
     assert ss.load_token({"SKIPPY_HOME_TOKEN": "fromenv"}, ()) == "fromenv"
@@ -315,7 +320,7 @@ def test_skippy_core_is_repaired_over_ssh_with_its_one_fixed_command():
     s, w = make()
     ok, text = s.do("heal", arg="core")
     (ssh,) = [c for c in w.cmds if c[0] == "ssh"]
-    assert ok and "repaired" in text and ssh[-1] == "repair" and ssh[-2].endswith("/core/deployer/deployer.py") and "sudo" in ssh
+    assert ok and "repaired" in text and ssh[-1] == "repair" and ssh[-2] == "/opt/skippy-core/doctor/deployer.py" and "sudo" in ssh
     assert "BatchMode=yes" in ssh and ss.CORE_SSH in ssh
     w.core_says = '{"state": "repair-failed", "detail": "smoke: chat: no reply"}'
     assert s.do("heal", arg="core") == (False, "Skippy Core: smoke: chat: no reply")

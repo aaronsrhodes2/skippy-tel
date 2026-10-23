@@ -6,6 +6,6 @@ After=docker.service
 [Service]
 Type=oneshot
 Environment=CORE_ENV=/etc/skippy-core/core.env
-ExecStart=/usr/bin/python3 /opt/skippy-core/repo/core/deployer/deployer.py doctor
+ExecStart=/usr/bin/python3 /opt/skippy-core/doctor/deployer.py doctor
 # A repair recreates the stack and smoke-tests it (a big model loads): give it time, but never forever.
 TimeoutStartSec=1h

@@ -37,6 +37,9 @@ fi
 [[ -f /etc/skippy-core/vault.env ]] || do_ install -m 0600 /dev/null /etc/skippy-core/vault.env
 do_ install -m 0644 "$REPO_DIR/core/deployer/skippy-core-deployer.service" /etc/systemd/system/
 do_ install -m 0644 "$REPO_DIR/core/deployer/skippy-core-deployer.timer" /etc/systemd/system/
+# the doctor runs its own copy of the deployer, so it works whatever the checkout holds (a box set up by hand)
+do_ install -d -m 0755 /opt/skippy-core/doctor
+do_ install -m 0755 "$REPO_DIR/core/deployer/deployer.py" /opt/skippy-core/doctor/deployer.py
 do_ install -m 0644 "$REPO_DIR/core/deployer/skippy-core-doctor.service" /etc/systemd/system/
 do_ install -m 0644 "$REPO_DIR/core/deployer/skippy-core-doctor.timer" /etc/systemd/system/
 do_ systemctl daemon-reload
