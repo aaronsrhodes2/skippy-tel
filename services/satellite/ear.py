@@ -1,6 +1,7 @@
 """Skippy's ear: the always-on voice of the house, on skippy-pc, replacing the Alexa that answers to "Computer".
 
-    microphone -> voice activity -> each utterance to Whisper (the voice gate) -> only speech that starts with "Skippy" counts
+    microphone -> the "Skippy" spotter (wakeword.py: a small model trained on his name; without one, each utterance to Whisper and only speech
+    that starts with "Skippy" counts) -> the command to Whisper (the voice gate)
     -> the quick Skippy brain (Anthropic + timers) -> Skippy's voice (the gate: ElevenLabs, RNNoise polish, a daily budget) -> the speaker
 
 Nothing is recorded or kept: an utterance lives in memory until it has been transcribed, and only the words after "Skippy" are ever logged.
@@ -31,8 +32,9 @@ IDLE, LISTENING, FOLLOWUP = "idle", "listening", "followup"
 
 class Ear:
     def __init__(self, gate, brain, timers, play, chime, local_voice, flush=lambda: None, log=print, floor: float = 0.012,
-                 min_speech_ms: int = 600, listen_ms: int = 8000, followup_ms: int = 6000, summarize_over: int = 280):
+                 min_speech_ms: int = 600, listen_ms: int = 8000, followup_ms: int = 6000, summarize_over: int = 280, spotter=None):
         self.gate, self.brain, self.timers, self.play, self.chime, self.local_voice, self.flush, self.log = gate, brain, timers, play, chime, local_voice, flush, log
+        self.spotter = spotter                                      # wakeword.Spotter: hears "Skippy" itself; None = Whisper hears it
         self.vad = Vad(floor_min=floor)
         self.min_speech_ms, self.listen_ms, self.followup_ms, self.summarize_over = min_speech_ms, listen_ms, followup_ms, summarize_over
         self.mode, self.deadline, self._arm = IDLE, 0.0, 0
@@ -42,6 +44,12 @@ class Ear:
     # ── the stream of microphone blocks ──
     def feed(self, t: float, samples) -> None:
         self.pre.append(samples)
+        if self.mode == IDLE and self.spotter is not None and self.spotter.feed(samples):
+            self.log("woke")
+            self.chime("wake")
+            self.mode, self.deadline = LISTENING, t + self.listen_ms
+            if self.buf is None:
+                self.buf = list(self.pre)[:-1]                      # "Skippy, lights off" in one breath: keep the whole sentence (this block is added below)
         ev = self.vad.push(rms(samples), t)
         if self.buf is not None and ev != "speech":
             self.buf.append(samples)
@@ -49,7 +57,9 @@ class Ear:
             self.buf = list(self.pre)
         elif ev == "end" and self.buf is not None:
             utterance, self.buf = self.buf, None
-            if len(utterance) * BLOCK_MS - self.vad.end_silence_ms >= self.min_speech_ms:      # a cough or a click is not worth sending
+            if self.mode == IDLE and self.spotter is not None:
+                pass                                                # room talk, and the spotter did not hear its name: gone, never sent
+            elif len(utterance) * BLOCK_MS - self.vad.end_silence_ms >= self.min_speech_ms:      # a cough or a click is not worth sending
                 self._utterance(t, [x for block in utterance for x in block])
         self._tick(t)
 
@@ -120,6 +130,8 @@ class Ear:
             self.log(f"(voice unavailable: {e}: using the machine's own voice)")
             self.local_voice(said)
         self.flush()                                                # never answer our own voice
+        if self.spotter is not None:
+            self.spotter.reset()                                    # nor wake on our own name in it
 
 
 # ── the program ──
@@ -146,16 +158,34 @@ def build(env: dict):
         sys.exit("ear: SKIPPY_HOME_TOKEN and ANTHROPIC_API_KEY must be in the vault .env (or the environment)")
     timers = Timers()
     gate = Gate(env.get("SATELLITE_GATE", "http://127.0.0.1:3007"), token)
-    hass = None                                                     # the house: what Skippy can control, through whichever backend is set up
+    brain = Brain(anthropic.Anthropic(api_key=key), env.get("SATELLITE_MODEL", "claude-haiku-4-5"), timers, hass=build_house(env))
+    return gate, brain, timers
+
+
+def build_house(env: dict):
+    """The house: what Skippy can control, through whichever backend is set up (None when nothing is). hub.py shares it across rooms."""
     from homectl import store_path                                  # noqa: PLC0415
     from homekit import HomeKit, Store                              # noqa: PLC0415
     if Store(store_path(env)).load()["devices"]:                    # lights and switches paired with homectl.py: HomeKit, natively
-        hass = HomeKit(Store(store_path(env)), sensitive=env.get("HASS_SENSITIVE") == "1")
-    elif env.get("HASS_URL") and env.get("HASS_TOKEN"):             # or Home Assistant, if he runs one (the vault holds both)
+        kit = HomeKit(Store(store_path(env)), sensitive=env.get("HASS_SENSITIVE") == "1")
+        kit.states()                                                # learn what is there now, so keep-warm knows what to ping
+        kit.keep_warm(float(env.get("HOMEKIT_KEEP_WARM", "30")))
+        return kit
+    if env.get("HASS_URL") and env.get("HASS_TOKEN"):               # or Home Assistant, if he runs one (the vault holds both)
         from hass import Hass                                       # noqa: PLC0415
-        hass = Hass(env["HASS_URL"], env["HASS_TOKEN"], sensitive=env.get("HASS_SENSITIVE") == "1")
-    brain = Brain(anthropic.Anthropic(api_key=key), env.get("SATELLITE_MODEL", "claude-haiku-4-5"), timers, hass=hass)
-    return gate, brain, timers
+        return Hass(env["HASS_URL"], env["HASS_TOKEN"], sensitive=env.get("HASS_SENSITIVE") == "1")
+    return None
+
+
+def build_spotter(env: dict, log=print):
+    """The trained "Skippy" model when there is one (wakeword/README.md), else None: then Whisper hears the wake word, as before."""
+    from wakeword import Spotter, default_model                     # noqa: PLC0415
+    path = default_model(env)
+    if not path.is_file():
+        log(f"wake word: no model at {path}; Whisper hears the wake word (see wakeword/README.md)")
+        return None
+    log(f"wake word: {path.name}")
+    return Spotter.load(path, threshold=float(env.get("SATELLITE_WAKE_THRESHOLD", "0.5")))
 
 
 def _device(value):
@@ -190,9 +220,11 @@ def main(argv=None) -> int:
         ear = Ear(gate, brain, timers, play, chime, audio.speak_local)
         ear._handle(0, args.text)
         return 0
+    log = lambda m: print(time.strftime("%H:%M:%S"), m, flush=True)    # noqa: E731
+    spotter = build_spotter(env, log)
     with audio.Mic(mic_dev, float(env.get("SATELLITE_GAIN", "1"))) as mic:
         ear = Ear(gate, brain, timers, play, chime, audio.speak_local, flush=mic.flush, floor=float(env.get("SATELLITE_FLOOR", "0.012")),
-                  log=lambda m: print(time.strftime("%H:%M:%S"), m, flush=True))
+                  log=log, spotter=spotter)
         print(time.strftime("%H:%M:%S"), 'listening: say "Skippy" ...', flush=True)
         for t, samples in mic.blocks():
             ear.feed(t, samples)

@@ -1,0 +1,521 @@
+# Skippy's room box: the Waveshare ESP32-S3 Smart 86 Box (ESP32-S3-Touch-LCD-4B). A DUMB terminal: it hears, it plays, it shows a light.
+# Everything that thinks lives on skippy-pc (services/satellite/hub.py): the wake word, Whisper, the brain, Skippy's voice, the house, the music.
+#
+#   bash rooms/flash.sh kitchen "Kitchen"        (first time over USB-C; after that over Wi-Fi)
+#
+# What the box does by itself, only because doing it here is faster than asking skippy-pc:
+#   * streams the microphone (16 kHz, cleaned by its own noise suppression and auto gain) to the hub whenever the hub is connected;
+#   * plays whatever URL the hub hands it (Skippy's voice as an announcement over the music, Bilby's tracks as media), ducking the music
+#     under the voice itself, with no round trip;
+#   * the volume keys change the volume at once;
+#   * the ring shows what is happening the moment it happens (listening, thinking, speaking, music).
+# A tap on the screen is reported to the hub as "Skippy" (the hub decides what it means).
+#
+# Hardware facts (I2S pins, codecs, expander, the ST7701S init) are from Matthieu Boulord's MIT-licensed config for this board:
+# github.com/MatthieuBoulord/ESP32-S3-Touch-LCD-4B-ESPHome-Home-Assistant-Voice-Satellite (smart86.yaml). The mics and the speaker share one
+# I2S bus, so `full_duplex` (ESPHome 2026.11; flash.sh pins the dev commit until it ships) is what lets it hear "Skippy, pause" over the music.
+# The voice assistant needs a 16 kHz microphone and duplex needs the speaker at the same rate: music is 16 kHz mono, which is about what
+# this small speaker can reproduce anyway.
+
+substitutions:
+  name: skippy-room
+  room: "Room"
+
+esphome:
+  name: ${name}
+  friendly_name: Skippy ${room}
+  min_version: 2026.11.0-dev
+  on_boot:
+    - priority: 200
+      then:
+        - lambda: |-
+            // The ST7701S panel is initialised by bit-banging its SPI through the TCA9554 expander (CS=EXIO0, MOSI=EXIO1, CLK=EXIO2)
+            id(lcd_spi_clk)->setup();
+            id(lcd_spi_mosi)->setup();
+            id(lcd_spi_cs)->setup();
+            id(lcd_spi_cs)->digital_write(true);
+            auto spi_write = [](bool is_data, uint8_t byte) {
+              id(lcd_spi_cs)->digital_write(false);
+              id(lcd_spi_mosi)->digital_write(is_data);
+              id(lcd_spi_clk)->digital_write(true);
+              id(lcd_spi_clk)->digital_write(false);
+              for (int i = 7; i >= 0; i--) {
+                id(lcd_spi_mosi)->digital_write((byte >> i) & 1);
+                id(lcd_spi_clk)->digital_write(true);
+                id(lcd_spi_clk)->digital_write(false);
+              }
+              id(lcd_spi_cs)->digital_write(true);
+            };
+            auto cmd = [&](uint8_t c) { spi_write(false, c); };
+            auto dat = [&](uint8_t d) { spi_write(true, d); };
+            cmd(0x11); delay(120);
+            cmd(0xFF); dat(0x77); dat(0x01); dat(0x00); dat(0x00); dat(0x10);
+            cmd(0xC0); dat(0x3B); dat(0x00);
+            cmd(0xC1); dat(0x0D); dat(0x02);
+            cmd(0xC2); dat(0x21); dat(0x08);
+            cmd(0xCD); dat(0x08);
+            cmd(0xB0); dat(0x00); dat(0x11); dat(0x18); dat(0x0E); dat(0x11); dat(0x06); dat(0x07); dat(0x08); dat(0x07); dat(0x22); dat(0x04); dat(0x12); dat(0x0F); dat(0xAA); dat(0x31); dat(0x18);
+            cmd(0xB1); dat(0x00); dat(0x11); dat(0x19); dat(0x0E); dat(0x12); dat(0x07); dat(0x08); dat(0x08); dat(0x08); dat(0x22); dat(0x04); dat(0x11); dat(0x11); dat(0xA9); dat(0x32); dat(0x18);
+            cmd(0xFF); dat(0x77); dat(0x01); dat(0x00); dat(0x00); dat(0x11);
+            cmd(0xB0); dat(0x60);
+            cmd(0xB1); dat(0x30);
+            cmd(0xB2); dat(0x87);
+            cmd(0xB3); dat(0x80);
+            cmd(0xB5); dat(0x49);
+            cmd(0xB7); dat(0x85);
+            cmd(0xB8); dat(0x21);
+            cmd(0xC1); dat(0x78);
+            cmd(0xC2); dat(0x78); delay(20);
+            cmd(0xE0); dat(0x00); dat(0x1B); dat(0x02);
+            cmd(0xE1); dat(0x08); dat(0xA0); dat(0x00); dat(0x00); dat(0x07); dat(0xA0); dat(0x00); dat(0x00); dat(0x00); dat(0x44); dat(0x44);
+            cmd(0xE2); dat(0x11); dat(0x11); dat(0x44); dat(0x44); dat(0xED); dat(0xA0); dat(0x00); dat(0x00); dat(0xEC); dat(0xA0); dat(0x00); dat(0x00);
+            cmd(0xE3); dat(0x00); dat(0x00); dat(0x11); dat(0x11);
+            cmd(0xE4); dat(0x44); dat(0x44);
+            cmd(0xE5); dat(0x0A); dat(0xE9); dat(0xD8); dat(0xA0); dat(0x0C); dat(0xEB); dat(0xD8); dat(0xA0); dat(0x0E); dat(0xED); dat(0xD8); dat(0xA0); dat(0x10); dat(0xEF); dat(0xD8); dat(0xA0);
+            cmd(0xE6); dat(0x00); dat(0x00); dat(0x11); dat(0x11);
+            cmd(0xE7); dat(0x44); dat(0x44);
+            cmd(0xE8); dat(0x09); dat(0xE8); dat(0xD8); dat(0xA0); dat(0x0B); dat(0xEA); dat(0xD8); dat(0xA0); dat(0x0D); dat(0xEC); dat(0xD8); dat(0xA0); dat(0x0F); dat(0xEE); dat(0xD8); dat(0xA0);
+            cmd(0xEB); dat(0x02); dat(0x00); dat(0xE4); dat(0xE4); dat(0x88); dat(0x00); dat(0x40);
+            cmd(0xEC); dat(0x3C); dat(0x00);
+            cmd(0xED); dat(0xAB); dat(0x89); dat(0x76); dat(0x54); dat(0x02); dat(0xFF); dat(0xFF); dat(0xFF); dat(0xFF); dat(0xFF); dat(0xFF); dat(0x20); dat(0x45); dat(0x67); dat(0x98); dat(0xBA);
+            cmd(0xFF); dat(0x77); dat(0x01); dat(0x00); dat(0x00); dat(0x00);
+            cmd(0x36); dat(0x00);
+            cmd(0x3A); dat(0x66);
+            cmd(0x21); delay(120);
+            cmd(0x29);
+        - light.turn_on:
+            id: backlight
+            brightness: 70%
+    - priority: -200
+      then:
+        - output.turn_on: speaker_amp
+        - script.execute:
+            id: face
+            state: idle
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 16MB
+  cpu_frequency: 240MHz
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+      CONFIG_SPIRAM_RODATA: "y"
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+
+api:
+  encryption:
+    key: !secret skippy_room_api_key      # the same key in the vault .env as SATELLITE_ESPHOME_KEY: the hub is the only client
+
+ota:
+  - platform: esphome
+    password: !secret skippy_room_ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none                   # a voice terminal must never doze (the Theater Fan lesson)
+  ap:
+    ssid: Skippy ${room} setup
+    password: !secret skippy_room_ota_password
+
+captive_portal:
+
+# ── the buses ──────────────────────────────────────────────────────────────────────────────────────────────
+i2c:
+  - id: bus_a
+    sda: GPIO47
+    scl: GPIO48
+    frequency: 100kHz
+
+pca9554:
+  - id: expander
+    i2c_id: bus_a
+    address: 0x20
+
+i2s_audio:
+  - id: i2s_bus
+    i2s_lrclk_pin: GPIO7
+    i2s_bclk_pin: GPIO16
+    i2s_mclk_pin: GPIO5
+    full_duplex: true
+
+audio_dac:
+  - platform: es8311
+    id: es8311_dac
+    i2c_id: bus_a
+    address: 0x18
+    bits_per_sample: 16bit
+    sample_rate: 16000
+    use_mclk: true
+
+audio_adc:
+  - platform: es7210
+    id: es7210_adc
+    i2c_id: bus_a
+    address: 0x40
+    bits_per_sample: 16bit
+    sample_rate: 16000
+    mic_gain: 33db
+
+output:
+  - platform: gpio
+    id: speaker_amp
+    pin:
+      pca9554: expander
+      number: 3
+      mode:
+        output: true
+  - platform: ledc
+    id: backlight_pwm
+    pin: GPIO4
+    frequency: 5000Hz
+    inverted: true
+
+# ── ears and mouth ─────────────────────────────────────────────────────────────────────────────────────────
+microphone:
+  - platform: i2s_audio
+    id: mic
+    i2s_audio_id: i2s_bus
+    i2s_din_pin: GPIO15
+    adc_type: external
+    pdm: false
+    channel: left
+    sample_rate: 16000
+    bits_per_sample: 16bit
+
+speaker:
+  - platform: i2s_audio
+    id: i2s_speaker
+    i2s_audio_id: i2s_bus
+    i2s_dout_pin: GPIO6
+    dac_type: external
+    audio_dac: es8311_dac
+    channel: mono
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    buffer_duration: 100ms
+  - platform: mixer
+    id: room_mixer
+    output_speaker: i2s_speaker
+    num_channels: 1
+    source_speakers:
+      - id: voice_in
+        timeout: never
+      - id: music_in
+        timeout: never
+  - platform: resampler
+    id: voice_resampler
+    output_speaker: voice_in
+  - platform: resampler
+    id: music_resampler
+    output_speaker: music_in
+
+media_player:
+  - platform: speaker
+    id: player
+    name: Speaker
+    volume_initial: 0.6
+    announcement_pipeline:                # Skippy's voice and announcements: over the music, which ducks under it
+      speaker: voice_resampler
+      format: FLAC
+      num_channels: 1
+      sample_rate: 16000
+    media_pipeline:                       # Bilby's tracks
+      speaker: music_resampler
+      format: FLAC
+      num_channels: 1
+      sample_rate: 16000
+    on_announcement:
+      - mixer_speaker.apply_ducking:
+          id: music_in
+          decibel_reduction: 20
+          duration: 0.2s
+    on_state:
+      - if:
+          condition:
+            not:
+              media_player.is_announcing: player
+          then:
+            - mixer_speaker.apply_ducking:
+                id: music_in
+                decibel_reduction: 0
+                duration: 1.0s
+    on_play:
+      - script.execute:
+          id: face
+          state: music
+    on_idle:
+      - script.execute:
+          id: face
+          state: idle
+
+voice_assistant:
+  id: va
+  microphone: mic
+  media_player: player
+  use_wake_word: true                     # the hub hears "Skippy" (its trained model): the box just streams while the hub is connected
+  noise_suppression_level: 2
+  auto_gain: 31dBFS
+  volume_multiplier: 2.0
+  on_client_connected:
+    - if:
+        condition:
+          switch.is_on: mic_on
+        then:
+          - voice_assistant.start_continuous:
+  on_client_disconnected:
+    - voice_assistant.stop:
+    - script.execute:
+        id: face
+        state: offline
+  on_wake_word_detected:
+    - script.execute:
+        id: face
+        state: listening
+  on_listening:
+    - script.execute:
+        id: face
+        state: listening
+  on_stt_vad_end:
+    - script.execute:
+        id: face
+        state: thinking
+  on_tts_start:
+    - script.execute:
+        id: face
+        state: speaking
+  on_end:
+    - script.execute:
+        id: face
+        state: idle
+  on_error:
+    - script.execute:
+        id: face
+        state: idle
+
+switch:
+  - platform: template
+    id: mic_on
+    name: Microphone
+    icon: mdi:microphone
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - voice_assistant.start_continuous:
+    on_turn_off:
+      - voice_assistant.stop:
+      - script.execute:
+          id: face
+          state: muted
+
+# What the hub wants shown under the ring: now playing, or what Skippy just said. The hub writes it; the box only displays it.
+text:
+  - platform: template
+    id: subtitle
+    name: Subtitle
+    mode: text
+    max_length: 120
+    optimistic: true
+    on_value:
+      - lvgl.label.update:
+          id: subtitle_label
+          text: !lambda return x;
+
+binary_sensor:
+  - platform: template                    # a tap on the screen: the hub treats it as "Skippy"
+    id: tapped
+    name: Tap
+  - platform: gpio
+    id: key_down
+    pin:
+      number: GPIO0
+      mode: INPUT_PULLUP
+      inverted: true
+    filters:
+      - delayed_on: 20ms
+    on_press:
+      - media_player.volume_down: player
+  - platform: gpio
+    id: key_up
+    pin:
+      pca9554: expander
+      number: 4
+      mode:
+        input: true
+      inverted: true
+    filters:
+      - delayed_on: 20ms
+    on_press:
+      - media_player.volume_up: player
+
+# ── the face: one ring that breathes, coloured by what is happening ───────────────────────────────────────
+globals:
+  - id: face_rgb
+    type: uint32_t
+    initial_value: '0x1e3a5f'
+  - id: breath
+    type: int
+    initial_value: '0'
+  - id: last_activity
+    type: uint32_t
+    initial_value: '0'
+
+script:
+  - id: face
+    mode: restart
+    parameters:
+      state: string
+    then:
+      - lambda: |-
+          // idle: deep blue, barely breathing; listening: cyan; thinking: amber; speaking: Skippy purple; music: green; muted: red; offline: grey
+          uint32_t c = 0x1e3a5f;
+          if (state == "listening") c = 0x22d3ee;
+          else if (state == "thinking") c = 0xf59e0b;
+          else if (state == "speaking") c = 0xa855f7;
+          else if (state == "music") c = 0x22c55e;
+          else if (state == "muted") c = 0xef4444;
+          else if (state == "offline") c = 0x475569;
+          id(face_rgb) = c;
+          lv_obj_set_style_border_color(id(ring), lv_color_hex(c), LV_PART_MAIN);
+          if (state != "idle" && state != "offline") id(last_activity) = millis();
+      - if:
+          condition:
+            lambda: 'return state != "idle" && state != "offline";'
+          then:
+            - light.turn_on:
+                id: backlight
+                brightness: 70%
+
+interval:
+  - interval: 60ms                        # the lamp breathes: slow when idle, quicker when something is happening
+    then:
+      - lambda: |-
+          bool busy = id(face_rgb) != 0x1e3a5f && id(face_rgb) != 0x475569;
+          id(breath) = (id(breath) + (busy ? 6 : 2)) % 360;
+          float s = (sinf(id(breath) * 3.14159f / 180.0f) + 1.0f) / 2.0f;
+          lv_obj_set_style_border_opa(id(ring), (lv_opa_t)(busy ? 120 + 135 * s : 60 + 80 * s), LV_PART_MAIN);
+  - interval: 15s                         # the screen dims when nothing has happened for two minutes
+    then:
+      - if:
+          condition:
+            lambda: 'return millis() - id(last_activity) > 120000 && !id(player).is_playing();'
+          then:
+            - light.turn_on:
+                id: backlight
+                brightness: 8%
+
+light:
+  - platform: monochromatic
+    id: backlight
+    name: Backlight
+    output: backlight_pwm
+    restore_mode: ALWAYS_ON
+    default_transition_length: 600ms
+
+display:
+  - platform: mipi_rgb
+    id: lcd
+    model: CUSTOM
+    cs_pin:
+      pca9554: expander
+      number: 0
+      id: lcd_spi_cs
+    data_rate: 1MHz
+    data_pins:
+      blue: [40, 41, 42, 2, 1]
+      green: [21, 8, 18, 45, 38, 39]
+      red: [10, 11, 12, 13, 14]
+    de_pin: GPIO17
+    hsync_pin: GPIO46
+    vsync_pin: GPIO3
+    pclk_pin: GPIO9
+    pclk_frequency: 16MHz
+    pclk_inverted: false
+    pixel_mode: 16bit
+    dimensions:
+      width: 480
+      height: 480
+    hsync_pulse_width: 10
+    hsync_back_porch: 10
+    hsync_front_porch: 20
+    vsync_pulse_width: 10
+    vsync_back_porch: 10
+    vsync_front_porch: 10
+    invert_colors: false
+    init_sequence:
+      - [0x11]
+      - [0x29]
+
+spi:
+  - id: display_spi
+    interface: software
+    clk_pin:
+      pca9554: expander
+      number: 2
+      id: lcd_spi_clk
+    mosi_pin:
+      pca9554: expander
+      number: 1
+      id: lcd_spi_mosi
+
+touchscreen:
+  - platform: gt911
+    id: touch
+    i2c_id: bus_a
+    display: lcd
+    address: 0x14
+    update_interval: 20ms
+    on_touch:
+      - lambda: 'id(last_activity) = millis();'
+      - light.turn_on:
+          id: backlight
+          brightness: 70%
+      - binary_sensor.template.publish:
+          id: tapped
+          state: true
+    on_release:
+      - binary_sensor.template.publish:
+          id: tapped
+          state: false
+
+lvgl:
+  displays:
+    - lcd
+  touchscreens:
+    - touch
+  buffer_size: 25%
+  pages:
+    - id: home
+      bg_color: 0x000000
+      widgets:
+        - obj:
+            id: ring
+            align: CENTER
+            y: -30
+            width: 320
+            height: 320
+            radius: 160
+            bg_opa: TRANSP
+            border_width: 18
+            border_color: 0x1e3a5f
+            border_opa: 50%
+            scrollable: false
+        - label:
+            id: subtitle_label
+            align: BOTTOM_MID
+            y: -28
+            width: 440
+            text: ""
+            text_font: montserrat_20
+            text_color: 0xcbd5e1
+            text_align: CENTER
+            long_mode: DOT

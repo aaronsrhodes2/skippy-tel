@@ -23,6 +23,8 @@ from house import House, HomeError
 LIGHTBULB, SWITCH, OUTLET = 0x43, 0x49, 0x47               # HomeKit service types (the first 8 hex digits of the UUID)
 ON, BRIGHTNESS = 0x25, 0x08                                 # characteristic types
 ASK_SECONDS = 12.0
+RETRY_SECONDS = 0.8                                         # a Wi-Fi plug that dozed off usually answers the second time (the "tell Alexa twice" problem)
+WARM_SECONDS = 30                                           # keep-warm: a cheap read of every switch this often, so its Wi-Fi never dozes off
 
 
 def _short(uuid) -> int:
@@ -83,6 +85,8 @@ class HomeKit(House):
         self._pairings: dict[str, object] = {}
         self._cache: tuple[float, list[dict]] | None = None
         self._index: dict[str, tuple[str, int, dict]] = {}        # entity_id -> (device id, aid, {"on": iid, "brightness": iid})
+        self.last: dict = {}                                      # the latest control: {"entity_id", "attempts", "ms"} (homectl.py prove reads it)
+        self._warm = None
 
     # ── the controller ──────────────────────────────────────────────────────────
     @staticmethod
@@ -233,7 +237,51 @@ class HomeKit(House):
         else:
             raise HomeError("I cannot do that to it.")
 
+        want_on = writes[0][2]
+        started = self.clock()
+
         async def go():
-            pairing = await self._pairing(device_id)
-            await pairing.put_characteristics(writes)
-        self._loop.run(go())
+            """Write, then read it back: a switch that did not change is asked again on a fresh connection, once, so he never has to repeat himself."""
+            for attempt in (1, 2):
+                try:
+                    pairing = await self._pairing(device_id)
+                    await pairing.put_characteristics(writes)
+                    got = await pairing.get_characteristics([(aid, iids["on"])])
+                    if bool((got.get((aid, iids["on"])) or {}).get("value")) == want_on:
+                        return attempt
+                except Exception:                               # noqa: BLE001 — asleep, reconnecting, refused: the second try decides
+                    if attempt == 2:
+                        raise
+                await self._forget(device_id)
+                await asyncio.sleep(RETRY_SECONDS)
+            raise HomeError("I told it twice and it did not change. It may be unplugged or off the Wi-Fi.")
+        attempts = self._loop.run(go())
+        self.last = {"entity_id": eid, "attempts": attempts, "ms": round((self.clock() - started) * 1000)}
+
+    async def _forget(self, device_id: str) -> None:
+        pairing = self._pairings.pop(device_id, None)
+        close = getattr(pairing, "close", None)
+        if close:
+            try:
+                await close()
+            except Exception:                                   # noqa: BLE001 — it was already broken; that is why we are here
+                pass
+
+    # ── keep-warm ───────────────────────────────────────────────────────────────
+    def keep_warm(self, every: float = WARM_SECONDS) -> None:
+        """Read every paired switch's On every `every` seconds, in the background. A Wi-Fi plug that hears from us often keeps its radio awake and
+        its connection open, so the first command after a quiet hour lands at once. Started by ear.py and hub.py (HOMEKIT_KEEP_WARM=0 turns it off)."""
+        if self._warm is None and every > 0:
+            self._warm = asyncio.run_coroutine_threadsafe(self._warm_loop(every), self._loop.loop)
+
+    async def _warm_loop(self, every: float) -> None:
+        while True:
+            await asyncio.sleep(every)
+            for device_id in list(self.store.load()["devices"]):
+                try:
+                    pairing = await self._pairing(device_id)
+                    wanted = [(dev_aid, iids["on"]) for dev, dev_aid, iids in self._index.values() if dev == device_id]
+                    if wanted:
+                        await asyncio.wait_for(pairing.get_characteristics(wanted), ASK_SECONDS)
+                except Exception:                               # noqa: BLE001 — asleep or away: the next command retries anyway
+                    await self._forget(device_id)

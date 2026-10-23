@@ -20,7 +20,7 @@ SPOKEN = (
     "\n\n## Right now: speaking aloud in the Captain's home\n"
     "You are the voice of his house, replacing his Alexa (he used to say 'Computer'; now he says 'Skippy'). Your words go straight to a speaker: "
     "answer in one to three short spoken sentences, in plain words only: no markdown, no lists, no code, no URLs, no emoji, nothing that cannot be said "
-    "aloud; say numbers, times and units the way a person would. Use your tools when one fits (timers{house}). {nohouse}Keep the Skippy character, but be quick: "
+    "aloud; say numbers, times and units the way a person would. Use your tools when one fits (timers{house}{music}). {nohouse}Keep the Skippy character, but be quick: "
     "he is standing in a room waiting for you. The current time is {now}."
 )
 
@@ -54,9 +54,10 @@ def say_duration(seconds: int) -> str:
 
 
 class Brain:
-    def __init__(self, client, model: str, timers, persona: str | None = None, clock=time.time, now=None, hass=None):
+    def __init__(self, client, model: str, timers, persona: str | None = None, clock=time.time, now=None, hass=None, extra=None):
         self.client, self.model, self.timers, self.clock = client, model, timers, clock
         self.hass = hass                                              # a hass.Hass when Home Assistant is connected, else None
+        self.extra_tools, self.run_extra = extra if extra else ([], None)   # more tools from where the brain lives (hub.py: the room's music)
         self.persona = persona if persona is not None else load_persona()
         self.now = now or (lambda: time.strftime("%A %H:%M"))
         self.history: list[dict] = []
@@ -65,7 +66,8 @@ class Brain:
     def system(self) -> str:
         house = ", and the house through Home Assistant: lights, plugs, thermostat, covers, speakers, scenes; always say plainly what you did or could not do, and never claim a change you did not make" if self.hass else ""
         nohouse = "" if self.hass else "If he asks for something in the house (the lights and the rest are not connected yet), say so plainly, in character, and offer what you can do. "
-        return self.persona + SPOKEN.format(now=self.now(), house=house, nohouse=nohouse)
+        music = ", and the music in this room from his own library" if any(t["name"] == "play_music" for t in self.extra_tools) else ""
+        return self.persona + SPOKEN.format(now=self.now(), house=house, nohouse=nohouse, music=music)
 
     def run_tool(self, name: str, args: dict) -> str:
         args = args if isinstance(args, dict) else {}
@@ -83,10 +85,12 @@ class Brain:
             return f"That did not work: {e}"
         if self.hass is not None and name in {t["name"] for t in hass_mod.TOOLS}:
             return hass_mod.run_tool(self.hass, name, args)
+        if self.run_extra is not None and name in {t["name"] for t in self.extra_tools}:
+            return self.run_extra(name, args)
         return "I have no such tool."
 
     def tools(self) -> list[dict]:
-        return TOOLS + (hass_mod.TOOLS if self.hass is not None else [])
+        return TOOLS + (hass_mod.TOOLS if self.hass is not None else []) + list(self.extra_tools)
 
     def reply(self, heard: str) -> str:
         """What Skippy says to what was heard. Raises whatever the API raises (the caller decides what to do aloud)."""

@@ -203,6 +203,17 @@ a "Tap to start the sound" bar once (it publishes `armed` in its Connect check-i
 Run it beside the REAL gate on this machine with `python portal/tests/dev_music.py`. Full description, the autoplay
 rule and the tests: `docs/portal/README.md` → Bilby's Audio Service.
 
+## Skippy at home: every room (`services/satellite`, the Alexa replacement)
+
+skippy-pc hears, thinks and talks for every room; the rooms are dumb boxes. `hub.py` dials each one in `SATELLITE_ROOMS` and runs one `Room` per box
+(its own memory and timers; the house is shared): **Waveshare ESP32-S3 86 boxes** (`esphome://`, firmware `rooms/skippy-room.yaml`, flashed with
+`rooms/flash.sh`; the hub is their Home Assistant through aioesphomeapi, `esphome_link.py`) or **Wyoming satellites** (a Pi). The wake word is a
+trained openWakeWord "Skippy" (`wakeword.py`; the GPU kit in `wakeword/`, "Skipper" a negative because it is the Captain's own name); room talk
+never leaves the hub. Skippy's voice and Bilby's tracks reach a box as URLs from the hub's media server (`media.py`, LAN port 10800: tracks from
+the local music gate, transcoded to 16 kHz FLAC). Each box is a **Bilby Connect speaker**: the hub checks it in with `POST /home/music/checkin`
+(home token, as the Captain; `player.BOX_ROOM`), so every player lists it under "Play on". Lights and plugs: HomeKit natively (`homekit.py`, every
+write read back and retried once, keep-warm; `homectl.py prove` times a device). Details: `services/satellite/README.md`, `rooms/README.md`.
+
 ## Nagatha's Video Service (the browser video app, `/video`)
 
 The Captain's Jellyfin films in any browser (the Captain, and friends granted "video"; a friend's viewing never moves his Continue Watching), a tile beside Bilby's: `portal/templates/video.html` +
