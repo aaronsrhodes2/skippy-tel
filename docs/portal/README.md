@@ -370,6 +370,13 @@ voice, so it works everywhere. The pass has its own label and signed text (`voic
 or video pass never opens it. Tests: `portal/tests/test_voice.py` (the pass against the gate's own code, the route, the pages' markup,
 the helpers under Node) and `services/voice-gate/tests`. A real microphone was not exercised in the dev browser (it blocks capture).
 
+**The ear comes back after a reopen** (`EAR_KEY` in localStorage, set once the microphone has answered, cleared when it is blocked or the
+agent's ear key is turned off). On load: mic allowed → it listens for "Skippy" at once; if the phone keeps sound asleep until a touch
+(iOS starts every AudioContext suspended), the status strip says "Tap anywhere to wake the ear" and any tap wakes it, no question asked.
+Not allowed (Safari's per-site "Ask", or no Permissions API) → the same strip, and the first tap asks once; on an iPhone/iPad the strip then
+names the setting that stops the asking (aA › Website Settings › Microphone › Allow). A Home Screen launch is its own web app with its own
+storage and no aA menu, so that setting can't be made there. Tests: `portal/tests/js/voice/ear-reopen.test.js`.
+
 ## Nagatha's Video Service (the Captain's films, `/video`)
 
 The Captain's Jellyfin library on skippy-pc (285 films, 11 collections) in any browser: a phone, a laptop, a TV browser. Admin only,

@@ -28,6 +28,15 @@
   "use strict";
   const MIMES = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4", "audio/aac"];
   const MAX_SPEECH = 500, MAX_REC_MS = 60000, SPEAK_KEY = "skippy-voice-speak";
+  // The ear (standby / Typing's wake-word listening) was on: reopening the page brings it back (EAR_KEY), and while it waits for the one
+  // tap a phone needs before it processes sound, the status strip says so (WAKE_TEXT).
+  const EAR_KEY = "skippy-voice-ear", WAKE_TEXT = "Tap anywhere to wake the ear";
+  // iPhone and iPad (an iPad says it is a Mac, but a Mac has no touch screen): Safari asks for the microphone on every visit unless this is set.
+  const SAFARI_HINT = "So Safari stops asking: aA \u203A Website Settings \u203A Microphone \u203A Allow";
+  function isIOS(nav) {
+    nav = nav || {};
+    return /iPad|iPhone|iPod/.test(nav.userAgent || "") || (nav.platform === "MacIntel" && (nav.maxTouchPoints || 0) > 1);
+  }
   // The silent clip that unlocks audio playback inside a tap (phones refuse sound that no tap started).
   const SILENCE = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
 
@@ -117,7 +126,12 @@
     const canRecord = !!(root.navigator && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && root.MediaRecorder);
     if (mic && !canRecord) mic.hidden = true;
     if (ear && !canRecord) ear.hidden = true;
-    let pass = null, wanted = null, session = null, playing = null, chat = false, awaiting = false, keepUntil = 0, standbyOn = false, shared = null, micAllowed = false;     // chat: a no-touch conversation is on; keepUntil: a parting message stays up till then
+    let pass = null, wanted = null, session = null, playing = null, chat = false, awaiting = false, keepUntil = 0, standbyOn = false, shared = null, micAllowed = false;
+    // wakeWait: "resume" the ear is open but the phone keeps sound asleep until a tap; "ask" the ear was on last time and the browser
+    // can't say it may still listen (the tap asks, once). hintDue: that ask happens on an iPhone/iPad, so name the setting that sticks.
+    let wakeWait = null, hintDue = false;
+    const remembered = function () { try { return localStorage.getItem(EAR_KEY) === "yes"; } catch (e) { return false; } };
+    const remember = function (on) { try { localStorage.setItem(EAR_KEY, on ? "yes" : "no"); } catch (e) {} };     // chat: a no-touch conversation is on; keepUntil: a parting message stays up till then
     const audio = new Audio();
     const speaking_ = function (on) { try { root.dispatchEvent(new CustomEvent("skippy-speaking", { detail: on })); } catch (e) { /* no DOM events: nothing animates */ } };      // the animated Skippy (static/skippy-3d.js) talks while this plays
     audio.addEventListener("playing", function () { if (audio.src !== SILENCE) speaking_(true); });
@@ -164,6 +178,8 @@
     const word = function (t) { return String(t || "").replace(/\s+/g, " ").trim(); };
     function paintStatus(text, level, cancellable) {
       if (!status) return;
+      if (text == null && wakeWait) { text = WAKE_TEXT; level = 0; cancellable = false; }      // the wake strip stays until the tap
+      if (status._built && typeof status.contains === "function" && !status.contains(status._built.label)) status._built = null;   // someone wrote over the strip
       status.hidden = text == null;
       if (text == null) { status.replaceChildren(); return; }
       if (!status._built) {
@@ -189,7 +205,9 @@
         timer = setInterval(function () { an.getFloatTimeDomainData(buf); let sum = 0; for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i]; level = Math.sqrt(sum / buf.length); }, 50);
       }
       if (ctx && ctx.state === "suspended" && ctx.resume) ctx.resume().catch(function () {});      // allowed once the page has been touched
+      if (ctx) ctx.onstatechange = function () { if (ctx.state === "running" && wakeWait === "resume") wake(null); };
       const obj = { stream: stream, alive: true, level: function () { return level; }, blind: !an,
+                    asleep: function () { return !!(ctx && ctx.state === "suspended"); },
                     resume: function () { if (ctx && ctx.state === "suspended" && ctx.resume) ctx.resume().catch(function () {}); },
                     close: function () { obj.alive = false; if (shared === obj) shared = null; clearInterval(timer); stream.getTracks().forEach(function (t) { t.stop(); }); if (ctx && ctx.close) ctx.close().catch(function () {}); } };
       shared = obj;
@@ -239,12 +257,13 @@
       let mic_;
       try { mic_ = await openMic(); } catch (e) {
         if (twoMode) {                                           // blocked: back to Typing, and say how to allow it
-          chat = false; standbyOn = false; micAllowed = false; paintKey();
+          chat = false; standbyOn = false; micAllowed = false; remember(false); paintKey();
           keepUntil = Date.now() + 6000; paintStatus("The microphone is blocked: allow it for this site in the browser's settings", 0, false);
           setTimeout(function () { if (!session && !chat) paintStatus(null); }, 6000);
         }
         warn(mic); return;
       }
+      if (twoMode) remember(true);                               // the mic answered: next time the page opens, the ear comes back
       const ctl = session = { mic: mic_, seg: null, cancelled: false };
       const draft = box ? word(box.value) : "";
       let message = (o && o.seed) ? o.seed : "";
@@ -318,8 +337,14 @@
     async function standbyLoop() {                               // listen for "Skippy": every utterance is heard, none is kept unless it starts with the word
       if (!standbyOn || session || chat) return;
       let mic_;
-      try { mic_ = await openMic(); } catch (e) { standbyOff('The microphone is blocked: allow it for this site, then tap the ear again'); return; }
+      try { mic_ = await openMic(); } catch (e) { standbyOff(isIOS(root.navigator) ? "The microphone is blocked. " + SAFARI_HINT : "The microphone is blocked: allow it for this site, then tap the ear again"); return; }
       const ctl = session = { mic: mic_, seg: null, cancelled: false, standby: true };
+      remember(true);
+      if (hintDue) {                                              // Safari just asked: say which setting makes it stop asking
+        hintDue = false; keepUntil = Date.now() + 9000; paintStatus(SAFARI_HINT, 0, false);
+        setTimeout(function () { if ((!session || session.standby) && !chat && Date.now() >= keepUntil) paintStatus(null); }, 9000);
+      }
+      setTimeout(function () { if (session === ctl && mic_.asleep()) wake("resume"); }, 400);       // iOS: the microphone is open, but no sound is processed until a tap
       try {
         while (standbyOn && !ctl.cancelled) {
           const seg = ctl.seg = { idleMs: 0, minSpeechMs: 500 };
@@ -340,7 +365,7 @@
       } finally { if (session === ctl) session = null; }
     }
     function standbyOff(why) {
-      standbyOn = false;
+      standbyOn = false; remember(false); wakeWait = null;
       if (ear) { ear.setAttribute("aria-pressed", "false"); paint(ear, null); }
       const c = session;
       if (c && c.standby) { c.cancelled = true; session = null; if (c.seg && c.seg.abort) c.seg.abort(); }
@@ -356,6 +381,41 @@
       standbyLoop();
     }
     if (ear) ear.addEventListener("click", function () { standbyOn ? standbyOff() : standbyOnNow(); });
+
+    // ── the ear comes back after the page is reopened ──
+    function wake(kind) {                                         // show (or, with null, clear) the "tap anywhere" strip
+      wakeWait = kind;
+      if (kind) paintStatus(WAKE_TEXT, 0, false);
+      else if ((!session || session.standby) && !chat && Date.now() >= keepUntil) paintStatus(null);
+    }
+    function rearm() {                                            // listen for "Skippy" again, as before the page was closed
+      if (twoMode) typingListen();
+      else if (ear && !standbyOn) { standbyOn = true; ear.setAttribute("aria-pressed", "true"); paint(ear, "on"); standbyLoop(); }
+    }
+    function wakeTap(e) {                                         // any tap: wakes the sound, or (once) asks for the microphone
+      if (!wakeWait) return;
+      if (wakeWait === "resume") { if (shared && shared.resume) shared.resume(); return; }      // cleared by the context's statechange
+      const t = e && e.target, k = t && t.closest ? t.closest("button") : null;
+      wake(null);
+      if (k && (k === mic || k === ear)) return;                  // the key's own tap does what the key does
+      rearm();
+    }
+    if ((mic || ear) && root.document && document.addEventListener) ["pointerdown", "touchend", "click", "keydown"].forEach(function (ev) { document.addEventListener(ev, wakeTap, { capture: true, passive: true }); });
+    function ifRemembered() {                                     // on load: the ear was on when the page was last open
+      if (!(twoMode ? mic : ear) || !canRecord || !remembered()) return;
+      const unsure = function () { hintDue = isIOS(root.navigator); wake("ask"); };
+      try {
+        navigator.permissions.query({ name: "microphone" }).then(function (p) {
+          if (p.state === "granted") { if (!twoMode) rearm(); return; }      // (two modes re-arm from their own query)
+          if (p.state === "denied") {
+            keepUntil = Date.now() + 8000;
+            paintStatus(isIOS(root.navigator) ? "The microphone is blocked. " + SAFARI_HINT : "The microphone is blocked: allow it for this site in the browser's settings", 0, false);
+            setTimeout(function () { if (!session && !chat) paintStatus(null); }, 8000); return;
+          }
+          unsure();                                               // "prompt": the tap asks once
+        }).catch(unsure);
+      } catch (e) { unsure(); }                                   // no Permissions API: after the first tap (no question if the site is allowed)
+    }
 
     // ── the two-mode key ──
     function paintKey() {
@@ -378,6 +438,7 @@
     if (twoMode && root.document && document.addEventListener) ["pointerdown", "keydown"].forEach(function (ev) { document.addEventListener(ev, unlock, { capture: true, passive: true }); });
     function typingListen() {                                     // Typing mode's wake-word listening, once the browser allows the mic
       micAllowed = true; standbyOn = true; paintKey();
+      if (wakeWait === "ask") wake(null);
       if (!chat) standbyLoop();
     }
     if (twoMode && mic) {
@@ -388,7 +449,7 @@
           if (p.state === "granted") typingListen();
           p.onchange = function () { if (p.state === "granted" && !micAllowed) typingListen(); };
         }).catch(function () {});
-      } catch (e) { /* no Permissions API (older Safari): the key's first tap asks */ }
+      } catch (e) { /* no Permissions API (older Safari): the key's first tap asks, or ifRemembered's first tap anywhere */ }
       mic.addEventListener("click", function () {
         unlock();
         if (chat) {                                               // Hands-off → Typing (a tap while he talks only stops him)
@@ -487,8 +548,9 @@
         setWanted(!wanted);
       });
     }
+    ifRemembered();
     return { say: say, stop: stopSpeaking, cancel: cancel, resume: replied, standby: function () { return standbyOn; }, chatting: function () { return chat; }, enabled: function () { return !!wanted; } };
   }
 
-  return { attach: attach, pickMime: pickMime, speakable: speakable, plain: plain, createVad: createVad, wakeSplit: wakeSplit, WAKE_RE: WAKE_RE, STOP_RE: STOP_RE, END_RE: END_RE, SEND_DELAY_MS: SEND_DELAY_MS, MAX_SPEECH: MAX_SPEECH };
+  return { attach: attach, pickMime: pickMime, speakable: speakable, plain: plain, createVad: createVad, wakeSplit: wakeSplit, isIOS: isIOS, EAR_KEY: EAR_KEY, WAKE_TEXT: WAKE_TEXT, SAFARI_HINT: SAFARI_HINT, WAKE_RE: WAKE_RE, STOP_RE: STOP_RE, END_RE: END_RE, SEND_DELAY_MS: SEND_DELAY_MS, MAX_SPEECH: MAX_SPEECH };
 });
