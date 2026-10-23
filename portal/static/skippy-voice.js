@@ -33,9 +33,15 @@
   const EAR_KEY = "skippy-voice-ear", WAKE_TEXT = "Tap anywhere to wake the ear";
   // iPhone and iPad (an iPad says it is a Mac, but a Mac has no touch screen): Safari asks for the microphone on every visit unless this is set.
   const SAFARI_HINT = "So Safari stops asking: aA \u203A Website Settings \u203A Microphone \u203A Allow";
+  // Only a Safari tab keeps that setting: Chrome, Firefox and Edge on iOS (WebKit underneath) and a Home Screen launch have nowhere to set it.
+  const OPEN_IN_SAFARI = "For a mic that stays allowed, open the portal in a Safari tab";
   function isIOS(nav) {
     nav = nav || {};
     return /iPad|iPhone|iPod/.test(nav.userAgent || "") || (nav.platform === "MacIntel" && (nav.maxTouchPoints || 0) > 1);
+  }
+  function iosHint(nav) {                                       // what makes the asking stop, on this iPhone/iPad ("" elsewhere)
+    if (!isIOS(nav)) return "";
+    return (/CriOS|FxiOS|EdgiOS|OPiOS|GSA\//.test(nav.userAgent || "") || nav.standalone) ? OPEN_IN_SAFARI : SAFARI_HINT;
   }
   // The silent clip that unlocks audio playback inside a tap (phones refuse sound that no tap started).
   const SILENCE = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
@@ -337,11 +343,11 @@
     async function standbyLoop() {                               // listen for "Skippy": every utterance is heard, none is kept unless it starts with the word
       if (!standbyOn || session || chat) return;
       let mic_;
-      try { mic_ = await openMic(); } catch (e) { standbyOff(isIOS(root.navigator) ? "The microphone is blocked. " + SAFARI_HINT : "The microphone is blocked: allow it for this site, then tap the ear again"); return; }
+      try { mic_ = await openMic(); } catch (e) { standbyOff(iosHint(root.navigator) ? "The microphone is blocked. " + iosHint(root.navigator) : "The microphone is blocked: allow it for this site, then tap the ear again"); return; }
       const ctl = session = { mic: mic_, seg: null, cancelled: false, standby: true };
       remember(true);
       if (hintDue) {                                              // Safari just asked: say which setting makes it stop asking
-        hintDue = false; keepUntil = Date.now() + 9000; paintStatus(SAFARI_HINT, 0, false);
+        hintDue = false; keepUntil = Date.now() + 9000; paintStatus(iosHint(root.navigator), 0, false);
         setTimeout(function () { if ((!session || session.standby) && !chat && Date.now() >= keepUntil) paintStatus(null); }, 9000);
       }
       setTimeout(function () { if (session === ctl && mic_.asleep()) wake("resume"); }, 400);       // iOS: the microphone is open, but no sound is processed until a tap
@@ -403,13 +409,13 @@
     if ((mic || ear) && root.document && document.addEventListener) ["pointerdown", "touchend", "click", "keydown"].forEach(function (ev) { document.addEventListener(ev, wakeTap, { capture: true, passive: true }); });
     function ifRemembered() {                                     // on load: the ear was on when the page was last open
       if (!(twoMode ? mic : ear) || !canRecord || !remembered()) return;
-      const unsure = function () { hintDue = isIOS(root.navigator); wake("ask"); };
+      const unsure = function () { hintDue = !!iosHint(root.navigator); wake("ask"); };
       try {
         navigator.permissions.query({ name: "microphone" }).then(function (p) {
           if (p.state === "granted") { if (!twoMode) rearm(); return; }      // (two modes re-arm from their own query)
           if (p.state === "denied") {
             keepUntil = Date.now() + 8000;
-            paintStatus(isIOS(root.navigator) ? "The microphone is blocked. " + SAFARI_HINT : "The microphone is blocked: allow it for this site in the browser's settings", 0, false);
+            paintStatus(iosHint(root.navigator) ? "The microphone is blocked. " + iosHint(root.navigator) : "The microphone is blocked: allow it for this site in the browser's settings", 0, false);
             setTimeout(function () { if (!session && !chat) paintStatus(null); }, 8000); return;
           }
           unsure();                                               // "prompt": the tap asks once
@@ -552,5 +558,5 @@
     return { say: say, stop: stopSpeaking, cancel: cancel, resume: replied, standby: function () { return standbyOn; }, chatting: function () { return chat; }, enabled: function () { return !!wanted; } };
   }
 
-  return { attach: attach, pickMime: pickMime, speakable: speakable, plain: plain, createVad: createVad, wakeSplit: wakeSplit, isIOS: isIOS, EAR_KEY: EAR_KEY, WAKE_TEXT: WAKE_TEXT, SAFARI_HINT: SAFARI_HINT, WAKE_RE: WAKE_RE, STOP_RE: STOP_RE, END_RE: END_RE, SEND_DELAY_MS: SEND_DELAY_MS, MAX_SPEECH: MAX_SPEECH };
+  return { attach: attach, pickMime: pickMime, speakable: speakable, plain: plain, createVad: createVad, wakeSplit: wakeSplit, isIOS: isIOS, iosHint: iosHint, OPEN_IN_SAFARI: OPEN_IN_SAFARI, EAR_KEY: EAR_KEY, WAKE_TEXT: WAKE_TEXT, SAFARI_HINT: SAFARI_HINT, WAKE_RE: WAKE_RE, STOP_RE: STOP_RE, END_RE: END_RE, SEND_DELAY_MS: SEND_DELAY_MS, MAX_SPEECH: MAX_SPEECH };
 });

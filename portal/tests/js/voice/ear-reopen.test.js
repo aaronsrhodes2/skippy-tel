@@ -52,14 +52,15 @@ async function flush() { for (let i = 0; i < 12; i++) await Promise.resolve(); }
 async function advance(t, ms) { for (let x = 0; x < ms; x += 50) { t.mock.timers.tick(50); await flush(); } }
 function tap(target) { gesture = true; for (const ev of ["pointerdown", "touchend", "click"]) docOn.filter(h => h.ev === ev).forEach(h => h.fn({ target: target || node("div") })); gesture = false; }
 
-// perm: "granted" | "prompt" | "denied" | "none" (no Permissions API); ear: true remembers the ear was on; ipad: an iPad's Safari
+// perm: "granted" | "prompt" | "denied" | "none" (no Permissions API); ear: true remembers the ear was on; ipad: an iPad's Safari (or "chrome")
 function setup(t, o) {
   t.mock.timers.reset();
   t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"], now: 1000000 });
   level.v = 0.004; recorders = []; say = []; ctxs = []; gStreams.length = 0; docOn = []; blocked = !!o.blocked;
   ctxStart = o.asleep ? "suspended" : "running";
   store = o.ear ? { [V.EAR_KEY]: "yes" } : {};
-  nav.userAgent = o.ipad ? "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15" : "Node";
+  nav.userAgent = o.ipad === "chrome" ? "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 CriOS/130.0 Mobile/15E148 Safari/604.1"
+    : o.ipad ? "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15" : "Node";
   nav.platform = o.ipad ? "MacIntel" : "Linux"; nav.maxTouchPoints = o.ipad ? 5 : 0;
   if (o.perm === "none") delete nav.permissions;
   else nav.permissions = { query: async () => ({ state: o.perm }) };
@@ -104,6 +105,13 @@ test("reopened on an iPad where Safari still asks: nothing on load, the first ta
   assert.equal(s.label(), null);
 });
 
+test("Chrome on the iPad: the hint says to open the portal in Safari, the only browser there that remembers", async (t) => {
+  const s = setup(t, { perm: "prompt", ear: true, ipad: "chrome" });
+  await advance(t, 500);
+  tap(); await advance(t, 600);
+  assert.ok(listening()); assert.equal(s.label(), V.OPEN_IN_SAFARI);
+});
+
 test("no Permissions API: the remembered ear comes back after the first tap", async (t) => {
   const s = setup(t, { perm: "none", ear: true });
   await advance(t, 500);
@@ -144,6 +152,14 @@ test("the agent's ear key (standby): remembered on, re-armed on reopen; turned o
   assert.equal(s.voice.standby(), true); assert.ok(listening()); assert.equal(s.ear.attrs["aria-pressed"], "true");
   s.ear._on.click(); await advance(t, 200);
   assert.equal(s.voice.standby(), false); assert.equal(store[V.EAR_KEY], "no");
+});
+
+test("iosHint: Safari gets the setting; Chrome, Firefox, Edge on iOS and a Home Screen launch get 'open it in Safari'; elsewhere nothing", () => {
+  const ipad = "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15";
+  assert.equal(V.iosHint({ userAgent: ipad + " Version/18.0 Mobile/15E148 Safari/604.1" }), V.SAFARI_HINT);
+  for (const b of ["CriOS/130.0", "FxiOS/131.0", "EdgiOS/130.0"]) assert.equal(V.iosHint({ userAgent: ipad + " " + b + " Mobile/15E148 Safari/604.1" }), V.OPEN_IN_SAFARI);
+  assert.equal(V.iosHint({ userAgent: ipad + " Mobile/15E148", standalone: true }), V.OPEN_IN_SAFARI);
+  assert.equal(V.iosHint({ userAgent: "Mozilla/5.0 (Windows NT 10.0) Chrome/130.0" }), "");
 });
 
 test("isIOS: iPhone and iPad (which says it is a Mac with a touch screen), never a real Mac", () => {

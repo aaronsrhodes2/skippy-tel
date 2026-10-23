@@ -374,8 +374,8 @@ the helpers under Node) and `services/voice-gate/tests`. A real microphone was n
 agent's ear key is turned off). On load: mic allowed → it listens for "Skippy" at once; if the phone keeps sound asleep until a touch
 (iOS starts every AudioContext suspended), the status strip says "Tap anywhere to wake the ear" and any tap wakes it, no question asked.
 Not allowed (Safari's per-site "Ask", or no Permissions API) → the same strip, and the first tap asks once; on an iPhone/iPad the strip then
-names the setting that stops the asking (aA › Website Settings › Microphone › Allow). A Home Screen launch is its own web app with its own
-storage and no aA menu, so that setting can't be made there. Tests: `portal/tests/js/voice/ear-reopen.test.js`.
+names the setting that stops the asking (aA › Website Settings › Microphone › Allow). Only a Safari tab has that setting: Chrome, Firefox
+and Edge on iOS, and a Home Screen launch (its own web app with its own storage and no aA menu), are told to open the portal in a Safari tab. Tests: `portal/tests/js/voice/ear-reopen.test.js`.
 
 ## Nagatha's Video Service (the Captain's films, `/video`)
 
