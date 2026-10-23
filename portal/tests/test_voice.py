@@ -142,3 +142,39 @@ def test_the_voice_clients_helpers_pass_their_node_tests():
     run = subprocess.run([_node(), "--test", *sorted(str(p) for p in d.glob("*.test.js"))], capture_output=True, text=True,
                          encoding="utf-8", errors="replace", timeout=300, cwd=str(d))
     assert run.returncode == 0, run.stdout[-3000:] + run.stderr[-1500:]
+
+
+def test_who_gets_which_voice_is_the_portals_call_and_only_the_captain_gets_a_clone():
+    for mode in (None, "", "public", "private", "auto", "AUTO", "elevenlabs", "skippy"):
+        assert voice_mod.voice_for(False, mode) == "stock", mode                 # a guest is stock, whatever the page says
+    assert voice_mod.voice_for(True, "auto") == "elevenlabs" and voice_mod.voice_for(True, " Auto ") == "elevenlabs"
+    assert voice_mod.voice_for(True, "private") == "skippy" and voice_mod.voice_for(True, None) == "skippy"
+    assert voice_mod.voice_for(True, "public") == "stock"
+    assert voice_mod.voice_for(True, "nonsense") == "skippy"                       # only the word "auto" reaches the cloud voice
+
+
+def test_each_voice_pass_opens_the_gate_as_that_voice_and_the_older_passes_are_unchanged():
+    pytest.importorskip("requests")
+    clock = Clock()
+    v = voice_mod.Voice(paired_home(clock), clock=clock)
+    passes = {name: v.gate(voice=name) for name in voice_mod.VOICES}
+    for name, g in passes.items():
+        assert g["ok"] and g["speak"] is True and g["voice"] == name and g["url"] == GATE
+    assert gate_says(TOKEN, [g["pass"] for g in passes.values()], clock.now) == list(voice_mod.VOICES)
+    assert v.gate()["voice"] is None and v.gate(speak=True)["voice"] == "elevenlabs"
+    assert gate_says(TOKEN, [v.gate()["pass"], v.gate(speak=True)["pass"]], clock.now) == ["listen", "speak"]
+    with pytest.raises(ValueError):
+        v.gate(voice="kaelen")
+
+
+def test_the_gate_takes_a_stock_pass_for_stock_only():
+    """End to end through the gate's own code: a guest's pass speaks stock and is refused the clones."""
+    pytest.importorskip("requests")
+    clock = Clock()
+    g = voice_mod.Voice(paired_home(clock), clock=clock).gate(voice=voice_mod.voice_for(False, "auto"))
+    code = ("import json, sys; sys.path.insert(0, '.'); import gate; a = json.loads(sys.argv[1]); s = gate.valid(gate.gate_key(a['token']), a['p'], a['now']); "
+            "print(json.dumps([gate.allowed(s, w) for w in (None, 'stock', 'skippy', 'elevenlabs')]))")
+    run = subprocess.run([sys.executable, "-c", code, json.dumps({"token": TOKEN, "p": g["pass"], "now": clock.now})],
+                         cwd=str(VOICE_GATE), capture_output=True, text=True, timeout=60)
+    assert run.returncode == 0, run.stderr[-2000:]
+    assert json.loads(run.stdout) == ["stock", "stock", None, None]

@@ -2,7 +2,10 @@
 
 Skippy's ears and mouth for the portal's chats, the same kind of door as `music-gate` and `video-gate`: the portal signs short-lived passes
 (`portal/voice.py`), this container shows the internet two routes (`POST /t/<pass>/stt`, `POST /t/<pass>/tts`) and `/health`. The code's top
-docstring (`gate.py`) is the authority on routes and scopes; the cloned voice is the Captain's alone (the `speak` scope).
+docstring (`gate.py`) is the authority on routes and scopes. A pass names its voice (`stock`, `skippy`, `elevenlabs`): the portal signs
+`stock` for everyone who may chat and the two Skippy voices for the Captain alone (`portal/voice.py` `voice_for`). `stock` and `skippy` are
+rendered at home by `services/tts-studio` (Kokoro-82M, F5-TTS) and streamed through a sentence at a time; `elevenlabs` is flask-api's,
+with the daily budget and the polish below.
 
 ```bash
 cd /d/Aaron/development/SkippyTel

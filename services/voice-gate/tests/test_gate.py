@@ -247,3 +247,139 @@ def test_no_ollama_configured_means_no_summary_not_a_crash():
     fake = Fake()
     app = gate.create_app(KEY, "http://w", "http://t", clock=lambda: NOW, post=fake.post, get=fake.get)    # no ollama_url
     assert app.test_client().post(f"/t/{listen()}/summary", json={"text": "hi"}).status_code == 503
+
+
+# --- the voice a pass names: stock (Kokoro) for everyone, skippy (F5, local) and elevenlabs for the Captain ---------------------------
+
+class Stream(Resp):
+    def __init__(self, status=200, parts=(b"mp3-one", b"mp3-two"), broken=False):
+        super().__init__(status)
+        self.parts, self.broken, self.closed = list(parts), broken, False
+
+    def iter_content(self, chunk_size=None):
+        for p in self.parts:
+            yield p
+        if self.broken:
+            raise gate.requests.ConnectionError("cut")
+
+    def close(self):
+        self.closed = True
+
+
+class Studio(Fake):
+    def __init__(self):
+        super().__init__()
+        self.speak = Stream()
+        self.health = Resp(200, {"ready": True, "voices": {"stock": True, "skippy": True}})
+
+    def post(self, url, **kw):
+        if url.endswith("/speak"):
+            self.posts.append((url, kw))
+            return self.speak
+        return super().post(url, **kw)
+
+    def get(self, url, **kw):
+        if url == "http://studio/health":
+            self.gets.append((url, kw))
+            return self.health
+        return super().get(url, **kw)
+
+
+@pytest.fixture
+def studio():
+    fake = Studio()
+    app = gate.create_app(KEY, "http://w", "http://t", clock=lambda: NOW, post=fake.post, get=fake.get, studio_url="http://studio")
+    return app.test_client(), fake
+
+
+def voice_pass(v):
+    return gate.sign(KEY, NOW + 3600, v)
+
+
+def say(c, token, body):
+    """A /tts call read to the end and closed, as gunicorn does: a streamed reply gives its slot back on close."""
+    r = c.post(f"/t/{token}/tts", json=body)
+    r.get_data()
+    r.close()
+    return r
+
+
+def speaks(fake):
+    return [kw["json"] for url, kw in fake.posts if url.endswith("/speak")]
+
+
+def test_each_voice_pass_is_its_own_scope_and_the_older_passes_keep_their_meaning():
+    passes = {v: voice_pass(v) for v in gate.VOICES}
+    assert len(set(passes.values()) | {listen(), speak()}) == 5
+    assert {v: gate.valid(KEY, p, NOW) for v, p in passes.items()} == {v: v for v in gate.VOICES}
+    assert gate.voice_of("listen") is None and gate.voice_of("speak") == "elevenlabs" and gate.voice_of("skippy") == "skippy"
+    sha = hashlib.sha256(b"test-home-token").hexdigest()
+    key = hmac.new(sha.encode(), b"voice-gate-v1", hashlib.sha256).digest()
+    want = hmac.new(key, f"voice-tts-skippy:{NOW + 60}".encode(), hashlib.sha256).hexdigest()[:32]
+    assert gate.sign(key, NOW + 60, "skippy") == f"{NOW + 60}.{want}"            # pinned: portal/voice.py mirrors it
+
+
+def test_a_stock_pass_speaks_in_the_stock_voice_and_never_in_a_cloned_one(studio):
+    c, fake = studio
+    r = say(c, voice_pass('stock'), {"text": " Hello there. "})
+    assert r.status_code == 200 and r.data == b"mp3-onemp3-two" and r.headers["X-Voice"] == "stock"
+    assert speaks(fake) == [{"text": "Hello there.", "voice": "stock"}]
+    for wanted in ("skippy", "elevenlabs"):
+        assert say(c, voice_pass('stock'), {"text": "hi", "voice": wanted}).status_code == 403
+    assert say(c, listen(), {"text": "hi", "voice": "stock"}).status_code == 403     # a listen pass still only hears
+    assert say(c, voice_pass('stock'), {"text": "hi", "voice": "kaelen"}).status_code == 400
+    assert len(speaks(fake)) == 1 and not tts_calls(fake)
+
+
+def test_the_captains_skippy_pass_is_the_local_clone_and_may_drop_to_stock_but_not_up_to_elevenlabs(studio):
+    c, fake = studio
+    assert say(c, voice_pass('skippy'), {"text": "I am Skippy."}).headers["X-Voice"] == "skippy"
+    assert say(c, voice_pass('skippy'), {"text": "I am Skippy.", "voice": "stock"}).headers["X-Voice"] == "stock"
+    assert say(c, voice_pass('skippy'), {"text": "hi", "voice": "elevenlabs"}).status_code == 403
+    assert [s["voice"] for s in speaks(fake)] == ["skippy", "stock"] and not tts_calls(fake)
+
+
+def test_an_elevenlabs_pass_is_the_cloud_voice_with_its_tag_budget_and_polish_and_the_old_speak_pass_is_the_same(studio):
+    c, fake = studio
+    r = say(c, voice_pass('elevenlabs'), {"text": "Auto mode."})
+    assert r.status_code == 200 and r.headers["X-Voice"] == "elevenlabs" and tts_calls(fake)[-1][1]["params"] == {"text": "Auto mode."}
+    assert say(c, speak(), {"text": "Old pass."}).headers["X-Voice"] == "elevenlabs"
+    assert say(c, speak(), {"text": "hi", "voice": "skippy"}).status_code == 403     # an Auto pass is not a Private one
+    assert not speaks(fake)
+
+
+def test_local_voices_cost_no_budget_are_cached_and_a_broken_render_is_not_kept():
+    fake = Studio()
+    app = gate.create_app(KEY, "http://w", "http://t", clock=lambda: NOW, post=fake.post, get=fake.get, studio_url="http://studio",
+                          daily_chars=5)
+    c = app.test_client()
+    assert say(c, voice_pass('skippy'), {"text": "Far more than five characters."}).status_code == 200
+    again = say(c, voice_pass('skippy'), {"text": "Far more than five characters."})
+    assert again.headers.get("X-Voice-Cache") == "hit" and again.data == b"mp3-onemp3-two" and len(speaks(fake)) == 1
+    assert say(c, voice_pass('stock'), {"text": "Far more than five characters."}).headers.get("X-Voice-Cache") is None
+    assert c.get("/health").get_json()["voice_chars_today"] == 0
+    fake.speak = Stream(broken=True)
+    say(c, voice_pass('skippy'), {"text": "Cut off."}).get_data()
+    fake.speak = Stream()
+    assert say(c, voice_pass('skippy'), {"text": "Cut off."}).headers.get("X-Voice-Cache") is None
+
+
+def test_a_dead_or_busy_studio_is_a_503_or_429_and_every_slot_comes_back(studio):
+    c, fake = studio
+    fake.speak = Stream(503)
+    assert say(c, voice_pass('stock'), {"text": "hi"}).status_code == 503 and fake.speak.closed
+    fake.speak = Stream()
+    for i in range(5):                                         # 3 slots: a leak would turn the fourth into a 429
+        assert say(c, voice_pass('stock'), {"text": f"line {i}"}).status_code == 200
+    no_studio = gate.create_app(KEY, "http://w", "http://t", clock=lambda: NOW, post=fake.post, get=fake.get).test_client()
+    assert say(no_studio, voice_pass('stock'), {"text": "hi"}).status_code == 503
+
+
+def test_health_says_which_voices_can_speak(studio):
+    c, fake = studio
+    assert c.get("/health").get_json()["voices"] == {"stock": True, "skippy": True, "elevenlabs": True}
+    fake.health = Resp(200, {"voices": {"stock": True, "skippy": False}})
+    fake.tts = Resp(503)
+    assert c.get("/health").get_json()["voices"] == {"stock": True, "skippy": False, "elevenlabs": True}  # flask-api probe is /tts/health
+    fake.health = Resp(500)
+    assert c.get("/health").get_json()["voices"]["stock"] is False

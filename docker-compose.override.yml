@@ -63,6 +63,8 @@ services:
       VOICE_FX_PASSES: 1                       # 2 = clean harder (RNNoise twice); VOICE_FX=off = Skippy's voice raw
       # VOICE_FX: off = Skippy's voice raw (default on: a gate on the pauses and a close, dry polish; see services/voice-gate/gate.py FX_CHAIN)
       OLLAMA_URL: http://ollama:11434          # writes the spoken summary of a long reply (SUMMARY_MODEL, default qwen2.5:7b)
+      TTS_STUDIO_URL: http://tts-studio:8003   # the local voices (stock = Kokoro, skippy = F5 clone); which one is the pass's call
+    networks: [default, tts-net]               # tts-net: the only way to reach the offline tts-studio
     volumes:
       - ./state/voice-gate:/state                # today's character count and the cache of what was already said
       - ./state/voice-lab/models-dl:/models:ro    # bd.rnnn, the RNNoise model (GregorR/rnnoise-models; not in the repo): see services/voice-gate/README.md
@@ -158,6 +160,38 @@ services:
               count: all
               capabilities: [gpu]
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
+
+  # tts-studio: Skippy chat's local voices on this PC's GPU (services/tts-studio/app.py), reached only by voice-gate. stock = Kokoro-82M
+  # (everyone), skippy = F5-TTS zero-shot from the Captain's reference cut (personal use: the Captain only; the pass decides). The
+  # weights are D:/models' own copies, read-only; the reference cut (ref.wav + ref.txt, not in git) lives in state/tts-studio/ref.
+  # Internal network only: no route out, no published port. Each model loads on demand and unloads after IDLE_UNLOAD_S.
+  tts-studio:
+    build: ./services/tts-studio
+    container_name: skippytel-tts-studio
+    restart: unless-stopped
+    networks: [tts-net]
+    expose:
+      - "8003"
+    environment:
+      STOCK_VOICE: bm_george                   # Kokoro's voices/<name>.pt; the first letter is its accent (a = American, b = British)
+      IDLE_UNLOAD_S: "600"
+    volumes:
+      - ${MODELS_ROOT:-D:/models}/huggingface/hexgrad__Kokoro-82M:/w/kokoro:ro
+      - ${MODELS_ROOT:-D:/models}/huggingface/SWivid__F5-TTS:/w/f5:ro
+      - ${TTS_REF_DIR:-./state/tts-studio/ref}:/ref:ro   # set TTS_REF_DIR when deploying from a worktree
+    shm_size: "1gb"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
+
+networks:
+  tts-net:
+    internal: true
 
 volumes:
   image-studio-cache:
