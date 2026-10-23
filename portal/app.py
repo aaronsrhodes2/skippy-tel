@@ -169,7 +169,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         return dict(workshop_ready=workshop.ready(), workshop_model=home.capability_note("workshop", "model"),
                     workshop_reason=home.capability_reason("workshop"), workshop_projects=workshop.projects(),
                     workshop_brains=workshop.brains(),
-                    workshop_notify=notifier.enabled(me()), workshop_notify_ready=notifier.configured)
+                    workshop_notify_ready=notifier.configured)
 
     @app.get("/")
     def index():
