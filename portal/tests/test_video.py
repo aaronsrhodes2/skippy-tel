@@ -333,6 +333,7 @@ def test_the_video_page_never_scrolls_and_draws_no_gradients():
     css = (STATIC / "nagatha.css").read_text(encoding="utf-8") + (STATIC / "bridge.css").read_text(encoding="utf-8")
     js = (STATIC / "nagatha-app.js").read_text(encoding="utf-8")
     code = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    code = re.sub(r"\.chat-bridge [^{}]*\{[^}]*\}", "", code)                              # (Skippy's chat, not on this page: its transcript scrolls)
     assert not re.search(r"overflow(?:-y)?\s*:\s*(?:auto|scroll)", code)
     assert not re.search(r"(?:linear|radial|conic)-gradient", code)
     assert "scrollTop" not in js and "Bridge.PList" in js and "C.chunk" in js                # posters are cut into screens, never scrolled

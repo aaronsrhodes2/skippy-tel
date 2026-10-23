@@ -141,7 +141,15 @@ canvas.alive { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0;
 .chat-page { flex: 1; min-height: 0; margin: 0; display: flex; flex-direction: column; }
 .chat-bridge { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
 .chat-bridge .stage { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
-.chat-bridge .log { background: rgba(0, 0, 0, .66); }                 /* no padding on a pager panel: a page is exactly its width */
+/* the transcript SCROLLS (the Captain's rule, 2026-10-23: long text is the one place a scrollbar belongs) */
+.chat-bridge .log { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 10px;
+                    background: rgba(0, 0, 0, .66); scrollbar-width: thin; scrollbar-color: var(--dim-green-hi) transparent; }
+.chat-bridge .log[hidden] { display: none; }
+.chat-bridge .jump { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 6; background: #000; border-color: var(--accent); color: var(--accent); }
+.chat-bridge .jump[hidden] { display: none; }
+.chat-bridge .jump .badge { position: absolute; top: -7px; right: -7px; min-width: 16px; padding: 0 4px; font-size: .68rem; line-height: 16px;
+                            text-align: center; color: #000; background: var(--accent); }
+.chat-bridge .jump .badge:empty { display: none; }
 /* a block, not flex: a reply longer than a page splits across the pager's columns, and Chrome gives a flex item 0 width in
    every fragment (the letters stack one per line). The glyph floats at the start instead. */
 .turn { display: flow-root; -webkit-box-decoration-break: clone; box-decoration-break: clone;   /* each page's piece of a long turn keeps its own padding: no near-empty last page */
@@ -254,7 +262,7 @@ canvas.alive { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0;
 .brain-opt[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 .brain-opt:disabled { opacity: .45; cursor: not-allowed; }
 .chat-bridge form.ask { flex: none; margin: 0; }
-.chat-bridge textarea { display: block; width: 100%; height: 3.4em; resize: none; padding: 8px 10px; font-size: 1rem; background: #05090b; }
+.chat-bridge textarea { display: block; width: 100%; min-height: 2.6em; height: 2.6em; resize: none; overflow-y: auto; padding: 8px 10px; font-size: 1rem; background: #05090b; }
 .keybar { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
 .keybar .grow { flex: 1; }
 .keybar .key[hidden] { display: none; }                          /* a key's own display rule must not undo [hidden] (Stop, the apps key) */
@@ -467,3 +475,30 @@ dialog.keys .key { margin: 0 0 0 auto; }
 .fs-tip[hidden] { display: none; }
 .key.ear[data-s="on"] .lamp { background: var(--accent); animation: breathe 2.4s ease-in-out infinite; }
 .key.ear[aria-pressed="true"] { color: var(--accent); }
+
+/* each turn's keys (copy; and on the last exchange Edit, Retry and the versions ‹ n/m ›): quiet until you point at the turn */
+.turn > .acts { clear: both; display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin: 4px -4px -4px 0; min-height: 26px; }
+.turn > .acts .key.sm { width: 26px; height: 26px; opacity: .45; border-color: transparent; background: transparent; }
+.turn:hover > .acts .key.sm, .turn:focus-within > .acts .key.sm, .turn > .acts .key.sm:focus-visible { opacity: 1; }
+@media (hover: none) { .turn > .acts .key.sm { opacity: .8; } }
+.turn > .acts .key.sm[data-s="on"] { color: #000; background: var(--accent); opacity: 1; }
+.turn > .acts .alts { display: inline-flex; align-items: center; gap: 2px; font-size: .75rem; color: var(--muted); }
+.turn > .acts .flip .g { transform: scaleX(-1); }
+.turn pre.codeblock { position: relative; }
+/* editing your last message: a strip above the box says so; Esc or the cross leaves it */
+.chat-bridge .editing { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font-size: .78rem; color: var(--eye, #ffcc00); }
+.chat-bridge .editing[hidden] { display: none; }
+.chat-bridge .editing span { flex: 1; }
+.file-chip.pasted { border-style: dashed; }
+/* Your chats: the filter row (the Captain), day headings, and each row's star, rename and bin */
+.chat-bridge .chats-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.chat-bridge .chats-kinds button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; font-size: .8rem; color: var(--muted);
+                                   background: #05090b; border: 1px solid var(--dim-green-hi); cursor: pointer; }
+.chat-bridge .chats-kinds button[aria-pressed="true"] { color: #000; background: var(--accent); border-color: var(--accent); }
+.chat-bridge .chats-kinds .g { width: 14px; height: 14px; }
+.chat-bridge .chats-head { font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; break-after: avoid-column; }
+.chat-row > .key.sm { align-self: center; flex: none; }
+.chat-row .key.star .g { opacity: .55; } .chat-row .key.star.on .g { opacity: 1; fill: currentColor; color: var(--eye, #ffcc00); }
+.chat-open:has(> .g) { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: center; }
+.chat-open > .g { width: 15px; height: 15px; color: var(--muted); grid-row: span 2; }
+.chat-rename { width: 100%; font-size: .92rem; padding: 2px 4px; background: #000; color: #fff; border: 1px solid var(--accent); }

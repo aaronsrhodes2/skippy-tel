@@ -143,3 +143,22 @@ def test_no_bucket_says_so_and_the_page_keeps_its_own_copy():
     login(client, FRIEND)
     r = client.get("/chat/history")
     assert r.status_code == 503 and "browser" in r.get_json()["error"]
+
+
+def test_rename_and_star_keep_and_dont_count_as_using_the_chat(kept):
+    client, h, _ = kept
+    login(client, FRIEND)
+    client.put("/chat/history/abc123", json={"title": "x", "history": TURNS})
+    before = h.chats(FRIEND)[0]["updated"]
+    r = client.patch("/chat/history/abc123", json={"title": "  My  reactor notes ", "star": True}).get_json()
+    assert r == {"id": "abc123", "title": "My reactor notes", "star": True}
+    client.put("/chat/history/abc123", json={"title": "the page's first words", "history": TURNS + TURNS})
+    (c,) = h.chats(FRIEND)
+    assert c["title"] == "My reactor notes" and c["star"] is True                      # a rename and a star survive later saves
+    assert client.patch("/chat/history/abc123", json={"star": False}).get_json()["star"] is False
+    assert h.chats(FRIEND)[0].get("star") is None and h.chats(FRIEND)[0]["updated"] >= before
+    assert client.patch("/chat/history/abc123", json={"title": "   "}).status_code == 400
+    assert client.patch("/chat/history/abc123", json={"star": "yes"}).status_code == 400
+    assert client.patch("/chat/history/zzz999", json={"star": True}).status_code == 400
+    login(client, ADMIN)
+    assert client.patch("/chat/history/abc123", json={"star": True}).status_code == 400        # someone else's chat: no such chat

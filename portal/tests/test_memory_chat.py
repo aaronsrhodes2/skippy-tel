@@ -73,7 +73,7 @@ def test_the_captain_sees_the_panel(env):
     _, client, _ = env
     login(client, ADMIN)
     page = client.get("/chat").data.decode()
-    assert 'data-sheet="memory"' in page and 'data-open="memory"' in page          # the sheet and the key that opens it
+    assert 'data-kind="archive"' in page and 'data-open="memory"' not in page      # Skippy Memory is the Archive filter in Your chats
 
 
 def test_silent_home_says_so(env, monkeypatch):

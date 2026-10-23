@@ -127,9 +127,9 @@
       {% for b in workshop_brains %}<option value="{{ b.id }}"{% if not b.ready %} disabled{% endif %}>{{ b.label }}{% if not b.ready %} (offline){% endif %}</option>{% endfor %}
     </select>
     <button type="button" id="ps-convs-btn">Conversations</button>
-    <button type="button" id="ps-copyall" title="Copy this whole conversation as markdown">Copy chat</button>
+    <button type="button" id="ps-copyall" data-tel="chat:copy"{% if 'copy' in (chat_buried or []) %} hidden{% endif %} title="Copy this whole conversation as markdown">Copy chat</button>
     {# A Discord DM to the Captain when a run ends (portal/notify.py). Off when the portal has no Discord bot. #}
-    <label class="notify"><input type="checkbox" id="ps-notify"{% if workshop_notify and workshop_notify_ready %} checked{% endif %}{% if not workshop_notify_ready %} disabled title="The portal has no Discord bot (DISCORD_BOT_TOKEN)"{% endif %}> Discord me when done</label>
+    <label class="notify"{% if 'notify' in (chat_buried or []) %} hidden{% endif %}><input type="checkbox" id="ps-notify" data-tel="chat:notify"{% if workshop_notify and workshop_notify_ready %} checked{% endif %}{% if not workshop_notify_ready %} disabled title="The portal has no Discord bot (DISCORD_BOT_TOKEN)"{% endif %}> Discord me when done</label>
     <div class="hint" id="ps-project-hint" hidden></div>
     {# New folder: D:\Aaron\development\<name>, a git repo, and the private GitHub repo aaronsrhodes2/<name> (made on skippy-pc) #}
     <form class="newfolder" id="ps-newfolder" hidden>

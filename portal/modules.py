@@ -54,7 +54,16 @@ MODULES = (
     Module("me-people", "user", "me.index", "Dashboard: People", pane=True),
     Module("me-weather", "globe", "me.index", "Dashboard: Weather and traffic", pane=True),
     Module("me-links", "globe", "me.index", "Dashboard: Links", pane=True),
+    # Skippy's chat keys (id = "key-" + the key's name; their taps are chat:<name>, in "Least-used UI"). Send, the mode, the voice
+    # and Your chats are the chat itself and are never listed; these can be retired when nobody presses them, and revived here.
+    Module("key-apps", "apps", "chat.index", "Chat key: Apps", pane=True),
+    Module("key-new", "new", "chat.index", "Chat key: New chat", pane=True),
+    Module("key-attach", "clip", "chat.index", "Chat key: Attach", pane=True),
+    Module("key-tools", "tools", "chat.index", "Chat key: Tools", pane=True),
+    Module("key-copy", "sheet", "chat.index", "Chat key: Copy chat (agent)", pane=True),
+    Module("key-notify", "chats", "chat.index", "Chat key: Discord me when done (agent)", pane=True),
 )
+CHAT_KEYS = tuple(m.id[4:] for m in MODULES if m.id.startswith("key-"))
 BY_ID = {m.id: m for m in MODULES}
 
 

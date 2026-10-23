@@ -89,7 +89,7 @@
       if (own) { box.appendChild(own); return; }
       if (b.t === "p") { const p = el("p"); fill(p, b.inl); box.appendChild(p); }
       else if (b.t === "h") { const h = el("h" + (b.n + 3), "mdh"); fill(h, b.inl); box.appendChild(h); }
-      else if (b.t === "code") { const pre = el("pre", "codeblock"); pre.appendChild(el("code", null, b.text)); if (b.lang) pre.title = b.lang; box.appendChild(pre); }
+      else if (b.t === "code") { const pre = el("pre", "codeblock"); if (pre.setAttribute) pre.setAttribute("data-copy-button", ""); pre.appendChild(el("code", null, b.text)); if (b.lang) pre.title = b.lang; box.appendChild(pre); }
       else if (b.t === "quote") { const q = el("blockquote"); fill(q, b.inl); box.appendChild(q); }
       else { const list = el(b.t); b.items.forEach(it => { const li = el("li"); fill(li, it); list.appendChild(li); }); box.appendChild(list); }
     });

@@ -135,15 +135,39 @@ class History:
         path, forever = self._path(email), self.forever(email)
         with self._lock:
             had = next((c for c in self._load(path) if c.get("id") == chat_id), None)
-        if had and chat_names.valid(had.get("title", "")):
-            name = had["title"]                                  # named once: the page's title (its first words) never replaces it
+        if had and (had.get("named") or chat_names.valid(had.get("title", ""))):
+            name = had["title"]                                  # named once (or renamed): the page's title never replaces it
         else:                                                    # outside the lock: Skippy Core takes a second or two
             first = next((t["content"] for t in turns if t["role"] == "user"), str(title or ""))
             name = (self.namer or chat_names.fallback)(first)
-        chat = {"id": chat_id, "title": name, "updated": _now().strftime("%Y-%m-%dT%H:%M:%SZ"), "history": turns}
+        chat = {"id": chat_id, "title": name, "updated": _now().strftime("%Y-%m-%dT%H:%M:%SZ"), "history": turns,
+                "named": True, **({"star": True} if had and had.get("star") else {})}
         with self._lock:
             self._store(path, [chat] + [c for c in self._load(path) if c.get("id") != chat_id], forever)
         return {"id": chat_id, "updated": chat["updated"], "title": name}
+
+    def update(self, email: str, chat_id: str, title=None, star=None) -> dict:
+        """Rename a chat (any words, 1 to 70 characters) or star it (starred chats sit at the top of the list). Neither counts
+        as using the chat: its `updated` (and so its 30 days) is left alone."""
+        path = self._path(email)
+        with self._lock:
+            chats = self._load(path)
+            chat = next((c for c in chats if c.get("id") == chat_id), None)
+            if chat is None:
+                raise Refused("There's no such chat.")
+            if title is not None:
+                title = re.sub(r"\s+", " ", str(title)).strip()[:70]
+                if not title:
+                    raise Refused("A chat's name can't be empty.")
+                chat["title"], chat["named"] = title, True
+            if star is not None:
+                if not isinstance(star, bool):
+                    raise Refused("Starred is true or false.")
+                chat.pop("star", None)
+                if star:
+                    chat["star"] = True
+            self._store(path, chats, self.forever(email))
+        return {"id": chat_id, "title": chat["title"], "star": bool(chat.get("star"))}
 
     def forget(self, email: str, chat_id: str) -> None:
         """The person's own bin: gone at once (a chat they delete themselves is not analysed)."""

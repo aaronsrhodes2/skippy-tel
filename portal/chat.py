@@ -140,16 +140,13 @@ LANGUAGES = {"en": "English", "es": "Español", "fr": "Français", "de": "Deutsc
              "nl": "Nederlands", "ru": "Русский", "ja": "日本語", "ko": "한국어", "zh": "中文", "hi": "हिन्दी", "ar": "العربية"}
 
 
-def language_instruction(code) -> str:
-    """The system prompt's tail for a chat in another language. `code` comes from the page: anything not in LANGUAGES, and
-    English, adds nothing."""
-    if not isinstance(code, str) or code not in LANGUAGES or code == "en":
-        return ""
-    name = LANGUAGES[code]
-    return (f"\n\n## Language\nThe user chose {name} ({code}) for this chat. Write every reply in {name}, in the same voice. "
-            "Leave exactly as they are, never translated or transliterated: server and game names, join codes, addresses, "
-            "passwords, commands and anything inside backticks, and the words \"Mentat\" and \"Barney Style\". "
-            "If you are explaining a Mentat result, keep its numbers, units and symbols exactly.")
+def language_instruction(code=None) -> str:
+    """The system prompt's tail about language. There is no picker any more (the Captain's call, 2026-10-23): Skippy answers in
+    the language the person writes in, or the one they ask for. `code` is ignored (an old page may still send one)."""
+    return ("\n\n## Language\nAnswer in the language the person writes in. If they ask for another language, use that one "
+            "from then on. Leave exactly as they are, never translated or transliterated: server and game names, join codes, "
+            "addresses, passwords, commands and anything inside backticks, and the word \"Mentat\". If you are explaining a "
+            "Mentat result, keep its numbers, units and symbols exactly.")
 
 
 _MENTAT_CLAIM = ("mentat computed", "mentat says", "mentat cites", "mentat found", "mentat returned", "mentat's answer",

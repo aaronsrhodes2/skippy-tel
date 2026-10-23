@@ -23,6 +23,7 @@ from flask import abort, current_app, g, jsonify, render_template, request, sess
 import auth
 import catalog
 import experiments
+import modules
 import play
 import telemetry as tel_mod
 
@@ -74,7 +75,8 @@ def known_taps() -> list[str]:
     """Every tile a person can tap, by its data-tel id: the launcher's, a card per game, a browser game, an experiment.
     The Activity widget lists the ones with the fewest taps (removal candidates); a tile nobody has tapped has none."""
     return ([f"tile:{t}" for t in LAUNCHER_TILES] + [f"tile:game:{g}" for g in catalog.GAMES]
-            + [f"pane:{p}" for p in ME_PANES] + [f"play:{x.slug}" for x in play.GAMES] + [f"demo:{x.slug}" for x in experiments.EXPERIMENTS])
+            + [f"pane:{p}" for p in ME_PANES] + [f"play:{x.slug}" for x in play.GAMES] + [f"demo:{x.slug}" for x in experiments.EXPERIMENTS]
+            + [f"chat:{k}" for k in modules.CHAT_KEYS])           # Skippy's chat keys the Graveyard can retire (modules.py, key-<name>)
 
 
 def who():

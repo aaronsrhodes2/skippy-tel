@@ -80,14 +80,12 @@ def test_raw_needs_the_same_sign_in_and_only_a_literal_true_turns_it_on(env):
     assert skippy.seen is not None
 
 
-def test_the_chat_has_a_barney_key_that_asks_and_keeps_mentats_answers_in_the_history(env):
+def test_barney_style_has_no_key_now_and_mentats_answers_stay_in_the_history(env):
     client, _, _ = env
     login(client, ADMIN)
     page = client.get("/chat").data.decode()
-    assert 'class="key barney"' in page and "Barney Style" in page               # a glyph key: one press asks
-    assert 'const BARNEY_PHRASE = "Give it to me Barney Style"' in page
-    assert "ask(BARNEY_PHRASE, {barney: true})" in page                         # the key, and the ⚛ card's "Barney Style?"
-    assert "Mentat's own answer to" in page                                     # Mentat's answers go into the history for Barney Style
+    assert 'class="key barney"' not in page and "mc-barney" not in page             # removed 2026-10-23: Skippy Core explains plainly itself
+    assert "Mentat's own answer to" in page                                     # Mentat's answers still go into the history
     assert "raw: raw" not in page                                               # nothing sends a message straight to Mentat by default
 
 

@@ -366,8 +366,10 @@ def test_nothing_said_in_the_public_chat_is_recorded_unless_the_person_ticks_all
         assert client.post("/chat/send", json={**body, "history": []}).status_code == 200
     assert events(tel, "chat") == [] and events(tel, "action") == []
     assert "dragon" not in everything(tel) and "server_status" not in everything(tel)
+    privacy = client.get("/privacy").data.decode()                                         # the switch lives on the privacy page now
+    assert "Allow us to save your questions" in privacy and 'id="allow-save"' in privacy and " checked" not in privacy.split('id="allow-save"')[1][:40]
     chat_page = client.get("/chat").data.decode()
-    assert "Allow us to save your questions" in chat_page and 'class="save"' in chat_page and " checked" not in chat_page.split('class="save"')[1][:40]
+    assert 'class="save"' not in chat_page and 'localStorage.getItem("skippy-chat-allow-save") === "yes"' in chat_page   # off unless switched on
 
 
 def test_with_saving_allowed_a_chat_is_recorded_redacted_with_its_tools_and_arguments_but_not_their_results():

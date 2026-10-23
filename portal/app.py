@@ -1240,7 +1240,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                         for email, info in sorted(app.extensions["friends"].all().items())]
         return render_template(
             "me.html", status=status, error=error,
-            buried=[m.id[3:] for m in modules_mod.MODULES if m.pane and m.id in app.extensions["modules"].retired()],   # panes the Graveyard retired
+            buried=[m.id[3:] for m in modules_mod.MODULES if m.id.startswith("me-") and m.id in app.extensions["modules"].retired()],   # panes the Graveyard retired
             codes=diagnostics.join_codes(snap), players=diagnostics.players_online(snap), res=res,
             warnings=warnings,
             session_cost=spend.session_cost(status.machine_type, status.minutes_up()) if status else None,
@@ -1695,7 +1695,9 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         # Each person's chats are kept in their browser under their own key: a one-way id of the signed-in address (never the
         # address itself), so two people on one device (the Captain and a guest) never see each other's chats.
         owner = chat_history.owner_id(me())
-        return render_template("front.html", captain=captain, chat_modes=mode_views(captain), barney_phrase=chat.BARNEY_PHRASE,
+        retired = app.extensions["modules"].retired()
+        return render_template("front.html", captain=captain, chat_modes=mode_views(captain),
+                               chat_buried=[k for k in modules_mod.CHAT_KEYS if "key-" + k in retired],   # keys the Graveyard retired
                                chat_owner=owner,
                                **(workshop_context() if captain else {}))
 
@@ -1853,7 +1855,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             schemas = tools.schemas()
             if force in ("ask_mentat", "make_music") and rest.startswith("(the user chose"):
                 force = None                     # nothing to act on yet: let Skippy ask
-            prompt += chat.language_instruction(body.get("lang"))
+            prompt += chat.language_instruction()
             if barney:
                 # Barney Style: Skippy Core explains the whole conversation (Mentat's answers included) plainly,
                 # grounded in what Mentat found. No tools: nothing new is computed or looked up.
@@ -1998,6 +2000,12 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def history_save(chat_id):
         body = request.get_json(silent=True) or {}
         return history_call(lambda: chats_kept.save(me(), chat_id, body.get("title"), body.get("history")))
+
+    @talk.patch("/history/<chat_id>")
+    @skippy_required
+    def history_update(chat_id):
+        body = request.get_json(silent=True) or {}
+        return history_call(lambda: chats_kept.update(me(), chat_id, body.get("title"), body.get("star")))
 
     @talk.delete("/history/<chat_id>")
     @skippy_required

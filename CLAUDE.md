@@ -127,8 +127,11 @@ Actions (the sandbox can't reach GCP or run.app directly):
   swiped, not scrolled), says things with **glyphs** from `templates/_glyphs.html` (no emoji, no
   words where a symbol will do; words only for names people look up: a server, a code, a password),
   and looks like a starship's controls (Maxolhx-inspired: cut corners, claws and fangs, lamps that
-  breathe, a light running along a live control). On the bridge: launcher, Browser Games, the Graveyard, Skippy chat (paged conversation, glyph keys,
-  sheets for language/tools/past chats/saving, and a living neon-spiral background:
+  breathe, a light running along a live control). On the bridge: launcher, Browser Games, the Graveyard, Skippy chat (a SCROLLING transcript, the one sanctioned
+  exception: it follows new words, a jump key brings you back, every turn and code block copies, Edit/↑ and Retry keep versions
+  behind ‹ n/m ›, a long paste becomes a chip, Stop aborts; glyph keys, each retirable in the Graveyard (`modules.py` key-<name>);
+  sheets for apps, tools and Your chats (starred, then by day, search, rename, star, delete; for the Captain also the agent's
+  conversations and the Skippy Memory archive); no language, Barney or save keys any more; a living neon-spiral background:
   `static/bridge-alive.js`), Game Servers (a lit control per game, and each game's page as panes you flip
   through), Bilby's Audio Service (Home is a deck of glyph controls with counts; every list is shown a screen at a time with
   `PList`: swipe, PageUp/PageDown or drag the bar under it, a letter key for the alphabet; the player is a strip and a row of keys).

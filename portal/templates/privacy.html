@@ -46,10 +46,27 @@
   <div class="card">
     <h3>Your chats with Skippy</h3>
     <p>Your conversations with Skippy are kept on the portal for 30 days so you can reopen them on any device, in a private
-      file only you (signed in) can open; a chat you haven't touched in 30 days is deleted. A copy also sits in your browser.
-      The bin in the chats list deletes one from both at once. This is separate from the events above, and from
-      "Allow us to save your questions".</p>
+      file only you (signed in) can open. A copy also sits in your browser. The bin in the chats list deletes one from both at once.
+      Before a chat you haven't touched in 30 days is deleted, Skippy's own model (running on {{ switch_owner }}'s machines, not
+      another company's) reads it once to note what went well, what went wrong and anything broken, with no names or addresses
+      kept; then the chat is gone. This is separate from the events above.</p>
   </div>
+
+  {% if enabled %}
+  <div class="card">
+    <h3>Allow us to save your questions</h3>
+    <p>Off unless you switch it on. When it's on, the activity record above also keeps what you ask Skippy and what it
+      answered, so {{ switch_owner }} can see where Skippy goes wrong. This browser remembers your choice.</p>
+    <label class="save-ok"><input type="checkbox" id="allow-save" data-tel="privacy:allow-save"> Allow us to save your questions</label>
+    <script>
+      (function () {
+        const box = document.getElementById("allow-save"), KEY = "skippy-chat-allow-save";
+        try { box.checked = localStorage.getItem(KEY) === "yes"; } catch (e) {}
+        box.addEventListener("change", () => { try { localStorage.setItem(KEY, box.checked ? "yes" : "no"); } catch (e) {} });
+      })();
+    </script>
+  </div>
+  {% endif %}
 
   <div class="card">
     <h3>Having it deleted</h3>

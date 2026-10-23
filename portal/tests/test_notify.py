@@ -234,9 +234,9 @@ def test_the_switch_route_is_admin_only_needs_the_header_and_a_boolean(env):
     assert client.post("/me/workshop/notify", json={"on": "no"}, headers=H).status_code == 400
     resp = client.post("/me/workshop/notify", json={"on": False}, headers=H)
     assert resp.get_json() == {"on": False, "configured": True}
-    assert 'id="ps-notify"> Discord me when done' in client.get("/chat").data.decode()           # unchecked now
+    assert 'id="ps-notify" data-tel="chat:notify"> Discord me when done' in client.get("/chat").data.decode()   # unchecked now
     client.post("/me/workshop/notify", json={"on": True}, headers=H)
-    assert 'id="ps-notify" checked>' in client.get("/chat").data.decode()
+    assert 'id="ps-notify" data-tel="chat:notify" checked>' in client.get("/chat").data.decode()
 
 
 def test_without_a_bot_the_switch_is_shown_disabled(env):
@@ -244,4 +244,4 @@ def test_without_a_bot_the_switch_is_shown_disabled(env):
     client = app.test_client()
     login(client, ADMIN)
     page = client.get("/chat").data.decode()
-    assert 'id="ps-notify" disabled title="The portal has no Discord bot (DISCORD_BOT_TOKEN)"' in page
+    assert 'id="ps-notify" data-tel="chat:notify" disabled title="The portal has no Discord bot (DISCORD_BOT_TOKEN)"' in page

@@ -393,6 +393,7 @@ def test_the_music_page_never_scrolls_and_draws_no_gradients():
     css = (STATIC / "bilby-player.css").read_text(encoding="utf-8") + (STATIC / "bridge.css").read_text(encoding="utf-8")
     js = (STATIC / "bilby-app.js").read_text(encoding="utf-8")
     code = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    code = re.sub(r"\.chat-bridge [^{}]*\{[^}]*\}", "", code)                              # (Skippy's chat, not on this page: its transcript scrolls)
     assert not re.search(r"overflow(?:-y)?\s*:\s*(?:auto|scroll)", code)                   # no scrollbar anywhere on the page
     assert not re.search(r"(?:linear|radial|conic)-gradient", code)                       # black is see-through on the Viture glasses
     assert "scrollTop" not in js and "VList" not in js                                    # a list is cut into screens, never scrolled
