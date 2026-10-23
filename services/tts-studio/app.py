@@ -1,27 +1,32 @@
 """tts-studio: Skippy chat's local voices on skippy-pc's GPU, for voice-gate (the browser's way in: Funnel :10000 -> voice-gate -> here).
 
-    GET  /health    {"ready", "voices": {"stock": bool, "skippy": bool}, "loaded": [...]}   ready = the weights (and the reference) are there
+    GET  /health    {"ready", "voices": {"stock": bool, "skippy": bool}, "loaded": [...], "vram_reserved_gib"}   a voice is true once
+                    its files are there; a RESIDENT voice only once it is loaded and warm (so voice-gate falls back while it loads)
     POST /speak     {"text", "voice": "stock"|"skippy"} -> audio/mpeg, streamed a sentence at a time (MP3 frames, so the
                     browser can start on the first sentence while the rest renders)
 
 Two voices, and which one a person gets is voice-gate's call (the portal's pass), never this service's:
   stock   Kokoro-82M (Apache-2.0), a stock voice (STOCK_VOICE, default bm_george). Everyone who may chat.
-  skippy  F5-TTS v1 Base, zero-shot from the Captain's reference cut (/ref/ref.wav + ref.txt; the voice bake-off's pick,
-          docs/voice-bakeoff.md). CC BY-NC and a clone of a real narrator: personal use, the Captain only.
+  skippy  F5-TTS v1 Base at 16 flow steps, zero-shot from /ref/ref.wav + ref.txt: the 9 s print of the Captain's ElevenLabs Skippy
+          voice he chose (docs/voice-bakeoff.md: about 0.6 s a line, RTF 0.10, 0.93 like ElevenLabs). CC BY-NC: personal use, the
+          Captain only. Numbers are spelled out first (spoken_numbers.py): most of F5's word errors were numbers.
 
 The weights are D:/models' own copies, mounted read-only; the container sits on an internal network (no route out, no published
-port), HF_HUB_OFFLINE. Each model loads on its first line and unloads after IDLE_UNLOAD_S idle seconds, so Ollama gets the card back.
-One line at a time (a lock): the GPU is shared with everything else at home.
+port), HF_HUB_OFFLINE. RESIDENT voices (default: both) load once at startup, warm up and stay; then the process tops its CUDA memory
+up to VOICE_VRAM_GB and keeps it (torch's caching allocator never hands a cached block back), so a picture or song job can't take the
+voice's room: the Captain's rule, voice keeps reserved GPU on skippy-pc. A voice not in RESIDENT loads on its first line and unloads
+after IDLE_UNLOAD_S idle seconds (0 = never). One line at a time (a lock): it is one GPU.
 """
 from __future__ import annotations
 
 import os
 import re
-import subprocess
 import threading
 import time
 
 from flask import Flask, Response, jsonify, request
+
+from spoken_numbers import say_numbers
 
 KOKORO = os.environ.get("KOKORO_DIR", "/w/kokoro")
 F5_DIR = os.environ.get("F5_DIR", "/w/f5/F5TTS_v1_Base")
@@ -29,7 +34,10 @@ VOCOS = os.environ.get("VOCOS_DIR", "/vocos")
 REF = os.environ.get("REF_DIR", "/ref")
 STOCK_VOICE = os.environ.get("STOCK_VOICE", "bm_george")
 IDLE_UNLOAD_S = int(os.environ.get("IDLE_UNLOAD_S", "600"))
-F5_NFE = int(os.environ.get("F5_NFE", "32"))
+F5_NFE = int(os.environ.get("F5_NFE", "16"))
+RESIDENT = [v for v in os.environ.get("RESIDENT", "stock,skippy").replace(" ", "").split(",") if v]
+VRAM_GB = float(os.environ.get("VOICE_VRAM_GB", "3"))
+LOCK_WAIT_S = float(os.environ.get("LOCK_WAIT_S", "10"))
 MAX_TEXT = 1000
 SR = 24000
 
@@ -37,22 +45,20 @@ app = Flask(__name__)
 _lock = threading.Lock()
 _models: dict = {}
 _last_used = 0.0
+_warm: set = set()                                     # resident voices loaded and warm
+_status = {"vram_reserved_gib": None, "errors": {}}
 
-ONES = "zero one two three four five six seven eight nine".split()
+
+def clean(text: str) -> str:
+    """What either voice is handed: no ElevenLabs audio tags ([whispers]: a local voice would read them out), no markdown marks."""
+    return re.sub(r"\s+", " ", re.sub(r"[`*_#>~|]+", "", re.sub(r"\[[^\]]{1,40}\]", " ", text))).strip()
 
 
-def say_numbers(text: str) -> str:
-    """Numbers as words, for F5 (it reads digits badly: most of its word errors in the bake-off were numbers). Kokoro's G2P does its own."""
-    from num2words import num2words
-
-    def decimal(m):
-        whole, frac = m.group(1).replace(",", ""), m.group(2)
-        return f"{num2words(int(whole))} point {' '.join(ONES[int(d)] for d in frac)}"
-
-    t = re.sub(r"(\d+)\s*%", r"\1 percent", text)
-    t = re.sub(r"(\d[\d,]*)\.(\d+)", decimal, t)
-    t = re.sub(r"\d{1,3}(?:,\d{3})+|\d+", lambda m: num2words(int(m.group(0).replace(",", ""))), t)
-    return t
+def for_f5(text: str) -> str:
+    """F5 reads characters, not meaning: numbers in words (spoken_numbers.py), and a closing stop (it trails off without one).
+    Kokoro's own G2P reads numbers itself."""
+    t = say_numbers(text)
+    return t + "." if t and t[-1] not in ".!?…;:" else t
 
 
 def chunks(text: str, rest_max: int = 260) -> list[str]:
@@ -67,10 +73,16 @@ def chunks(text: str, rest_max: int = 260) -> list[str]:
     return out
 
 
-def ready() -> dict:
+def files() -> dict:
     return {"stock": os.path.isfile(f"{KOKORO}/kokoro-v1_0.pth") and os.path.isfile(f"{KOKORO}/voices/{STOCK_VOICE}.pt"),
             "skippy": all(os.path.isfile(p) for p in (f"{F5_DIR}/model_1250000.safetensors", f"{F5_DIR}/vocab.txt",
                                                        f"{REF}/ref.wav", f"{REF}/ref.txt", f"{VOCOS}/config.yaml"))}
+
+
+def ready() -> dict:
+    """A voice that can speak now: its files are there and, if it is resident, it is loaded and warm (a cold F5 load takes over a
+    minute, which voice-gate would rather spend on ElevenLabs)."""
+    return {v: ok and (v not in RESIDENT or v in _warm) for v, ok in files().items()}
 
 
 class Stock:
@@ -95,8 +107,8 @@ class Skippy:
 
     def say(self, text: str):
         import numpy as np
-        wav, sr, _ = self.m.infer(ref_file=f"{REF}/ref.wav", ref_text=self.ref_text, gen_text=say_numbers(text), nfe_step=F5_NFE,
-                                  remove_silence=False, show_info=lambda *a: None, progress=None)
+        wav, sr, _ = self.m.infer(ref_file=f"{REF}/ref.wav", ref_text=self.ref_text, gen_text=for_f5(text), nfe_step=F5_NFE,
+                                  remove_silence=False, show_info=lambda *a: None)
         assert sr == SR, sr
         return np.asarray(wav, dtype="float32")
 
@@ -113,39 +125,78 @@ def _model(voice: str):
 
 
 def mp3(wav) -> bytes:
-    """Raw MP3 frames (no ID3 tag, no Xing header), so the chunks of one line concatenate into one playable stream."""
+    """MP3 frames (libsndfile's LAME, in-process: spawning ffmpeg per chunk stalled for seconds whenever the disk was busy), with no
+    ID3 tag, so the chunks of one line concatenate into one playable stream. Constant ~96 kb/s."""
+    import io
+
     import numpy as np
+    import soundfile as sf
     peak = float(np.abs(wav).max()) if len(wav) else 0.0
     if peak > 1.0:
         wav = wav / peak
-    p = subprocess.run(["ffmpeg", "-v", "error", "-f", "f32le", "-ar", str(SR), "-ac", "1", "-i", "pipe:0", "-f", "mp3", "-b:a", "96k",
-                        "-id3v2_version", "0", "-write_xing", "0", "pipe:1"], input=wav.astype("<f4").tobytes(), capture_output=True, timeout=30)
-    if p.returncode != 0:
-        raise RuntimeError(p.stderr.decode(errors="replace")[-300:])
-    return p.stdout
+    out = io.BytesIO()
+    sf.write(out, wav, SR, format="MP3", subtype="MPEG_LAYER_III", bitrate_mode="CONSTANT", compression_level=0.4)
+    return out.getvalue()
 
 
 def _unload_when_idle():
-    while True:
+    while IDLE_UNLOAD_S > 0:
         time.sleep(30)
         with _lock:
-            if _models and time.time() - _last_used > IDLE_UNLOAD_S:
-                import torch
-                _models.clear()
-                torch.cuda.empty_cache()
-                print("[tts-studio] unloaded after idle", flush=True)
+            idle = [v for v in _models if v not in RESIDENT]
+            if idle and time.time() - _last_used > IDLE_UNLOAD_S:
+                for v in idle:
+                    del _models[v]
+                print(f"[tts-studio] unloaded {idle} after idle", flush=True)       # no empty_cache: the reserve stays held
+
+
+WARMUP = "Fine. I'll warm up, since apparently that is my job now."
+
+
+def reserve(gb: float) -> float:
+    """Top this process's CUDA memory up to gb and keep it cached: the voice's headroom. Returns what is held, in GiB."""
+    import torch
+    want = int(gb * 2**30) - torch.cuda.memory_reserved()
+    if want > 0:
+        try:
+            block = torch.empty(want, dtype=torch.uint8, device="cuda")
+            del block                                   # back to torch's cache, not to the driver
+        except RuntimeError as exc:                     # the card is already full: run with what there is
+            print(f"[tts-studio] could not reserve {want / 2**30:.1f} GB of VRAM: {type(exc).__name__}", flush=True)
+    return round(torch.cuda.memory_reserved() / 2**30, 2)
+
+
+def preload():
+    """Load and warm every resident voice once, then hold the VRAM reserve. In the background: /health says not ready meanwhile."""
+    for v in RESIDENT:
+        if v not in VOICES or not files().get(v):
+            continue
+        with _lock:
+            try:
+                started = time.time()
+                _model(v).say(WARMUP)
+                _warm.add(v)
+                print(f"[tts-studio] {v} resident and warm in {time.time() - started:.1f}s", flush=True)
+            except Exception as exc:  # noqa: BLE001  voice-gate falls back; the log and /health say why
+                _status["errors"][v] = f"{type(exc).__name__}: {exc}"[:300]
+                print(f"[tts-studio] {v} failed to preload: {_status['errors'][v]}", flush=True)
+    if _warm and VRAM_GB > 0:
+        with _lock:
+            _status["vram_reserved_gib"] = reserve(VRAM_GB)
+        print(f"[tts-studio] holding {_status['vram_reserved_gib']} GiB of VRAM", flush=True)
 
 
 @app.get("/health")
 def health():
     r = ready()
-    return jsonify(ready=any(r.values()), voices=r, loaded=sorted(_models), stock_voice=STOCK_VOICE)
+    return jsonify(ready=any(r.values()), voices=r, loaded=sorted(_models), resident=RESIDENT, stock_voice=STOCK_VOICE, f5_nfe=F5_NFE,
+                   vram_reserved_gib=_status["vram_reserved_gib"], errors=_status["errors"])
 
 
 @app.post("/speak")
 def speak():
     body = request.get_json(silent=True) or {}
-    text, voice = str(body.get("text") or "").strip(), body.get("voice")
+    text, voice = clean(str(body.get("text") or "")), body.get("voice")
     if voice not in VOICES:
         return jsonify(error="voice must be stock or skippy"), 400
     if not text:
@@ -153,8 +204,8 @@ def speak():
     if len(text) > MAX_TEXT:
         return jsonify(error="too long"), 413
     if not ready()[voice]:
-        return jsonify(error=f"the {voice} voice's files are missing"), 503
-    if not _lock.acquire(timeout=60):
+        return jsonify(error=f"the {voice} voice isn't ready (files missing, or still loading)"), 503
+    if not _lock.acquire(timeout=LOCK_WAIT_S):           # busy past that: voice-gate would rather fall back than keep him waiting
         return jsonify(error="busy"), 429
     try:
         model = _model(voice)                       # load before the response starts, so a failed load is a 503, not a cut stream
@@ -185,7 +236,7 @@ def speak():
     return resp
 
 
-threading.Thread(target=_unload_when_idle, daemon=True).start()
-
 if __name__ == "__main__":
+    threading.Thread(target=_unload_when_idle, daemon=True).start()
+    threading.Thread(target=preload, daemon=True, name="preload").start()
     app.run(host="0.0.0.0", port=8003, threaded=True)

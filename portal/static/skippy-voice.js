@@ -146,11 +146,14 @@
     function paint(el, s) { if (!el) return; if (s) el.dataset.s = s; else delete el.dataset.s; el.classList.toggle("lit", s === "on"); }
     function warn(el) { paint(el, "warn"); setTimeout(function () { if (el.dataset.s === "warn") paint(el, null); }, 4000); }
 
+    // The pass names the voice it speaks in, and the portal picks that voice from the chat mode (opts.mode()), so a new mode is a new pass.
     async function gate() {
-      if (pass && pass.exp * 1000 - Date.now() > 300000) return pass;
-      const r = await fetch(opts.gate, { cache: "no-store", credentials: "same-origin" });
+      const mode = opts.mode ? (opts.mode() || "") : "";
+      if (pass && pass.mode_ === mode && pass.exp * 1000 - Date.now() > 300000) return pass;
+      const r = await fetch(opts.gate + (mode ? "?mode=" + encodeURIComponent(mode) : ""), { cache: "no-store", credentials: "same-origin" });
       const d = await r.json();
       if (!r.ok || !d.ok) throw new Error(d.why || "voice is out of reach");
+      d.mode_ = mode;
       pass = d;
       return d;
     }
@@ -530,10 +533,14 @@
         try {
           const r = await fetch(base(g) + "/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: t }) });
           if (!r.ok) throw new Error("no voice");
-          const url = URL.createObjectURL(await r.blob());
+          const blob = await r.blob();
+          if (!blob.size) throw new Error("no voice");
+          const url = URL.createObjectURL(blob);
           if (playing !== token) { URL.revokeObjectURL(url); return; }
           audio.src = url;
-          audio.onended = audio.onerror = function () { URL.revokeObjectURL(url); if (playing === token) { playing = null; paint(speaker, "idle"); done(); } };
+          audio.onended = function () { URL.revokeObjectURL(url); if (playing === token) { playing = null; paint(speaker, "idle"); done(); } };
+          // audio that won't play is never silence: the device's own voice says it instead (the Captain's rule for every voice, guests too)
+          audio.onerror = function () { URL.revokeObjectURL(url); if (playing === token) { playing = null; builtin(t, done); } };
           await audio.play();
           return;
         } catch (e) { if (playing !== token) return; playing = null; }

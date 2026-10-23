@@ -4,7 +4,7 @@
 
 It runs itself inside the skippytel-voice-gate container (docker exec), which holds the home token, signs a pass for each voice with
 the gate's own sign(), and POSTs to the gate on 127.0.0.1:8080 exactly as a browser does through Funnel (minus the Funnel hop).
-First audio = the first bytes of the streamed reply; total = the last byte; audio = ffprobe's duration of what came back;
+First audio = the first bytes of the streamed reply; total = the last byte; audio = the decoded length of what came back;
 RTF = total / audio (below 1 is faster than real time). The first line of each voice includes the model's load (it loads on
 demand, unless it is already loaded) and is reported apart. Each line's cached copy is removed first, so every line is a fresh
 render. Writes state/tts-bench/<UTC>.json via the container's /state.
@@ -40,7 +40,7 @@ def inside(voices):
             if cached.exists():
                 cached.unlink()                                       # a fresh render every time, never the cache
             t0 = time.perf_counter()
-            r = requests.post(f"http://127.0.0.1:8080/t/{token}/tts", json={"text": line}, stream=True, timeout=180)
+            r = requests.post(f"http://127.0.0.1:8080/t/{token}/tts", json={"text": line}, stream=True, timeout=900)
             first, data = None, b""
             for piece in r.iter_content(chunk_size=None):
                 if first is None:
@@ -50,9 +50,9 @@ def inside(voices):
             if r.status_code != 200 or r.headers.get("X-Voice-Cache") == "hit":
                 runs.append({"i": i, "status": r.status_code, "cached": r.headers.get("X-Voice-Cache") == "hit"})
                 continue
-            p = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", "-i", "pipe:0"],
-                               input=data, capture_output=True)
-            audio = float(p.stdout.strip() or 0)
+            p = subprocess.run(["ffmpeg", "-v", "error", "-i", "pipe:0", "-f", "s16le", "-ac", "1", "-ar", "24000", "pipe:1"],
+                               input=data, capture_output=True)            # decoded and counted: a raw MP3 stream has no duration header
+            audio = len(p.stdout) / 48000
             runs.append({"i": i, "chars": len(line), "first_audio_s": round(first, 3), "total_s": round(total, 3),
                          "audio_s": round(audio, 2), "rtf": round(total / audio, 3) if audio else None, "voice": r.headers.get("X-Voice")})
             print(v, json.dumps(runs[-1]), flush=True)

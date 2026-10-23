@@ -1721,9 +1721,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @talk.get("/voice/gate")
     @skippy_required
     def voice_gate():
-        """Where the voice service is and a pass for it. Everyone who may chat can use the microphone; Skippy's own voice
-        (the cloned one, personal use only) is signed for admins alone, and everyone else hears their device's voice."""
-        resp = jsonify(voice.gate(speak=auth.is_admin(me())))
+        """Where the voice service is and a pass for it, in the voice this person gets in this chat mode (voice_mod.voice_for: the
+        server's call; ?mode= is only a hint). Guests: the stock voice made at home. The Captain: the local Skippy clone (Private),
+        ElevenLabs (Auto), stock (Public). The cloned voices are personal use only, so nobody else is ever signed one."""
+        resp = jsonify(voice.gate(voice=voice_mod.voice_for(auth.is_admin(me()), request.args.get("mode"))))
         resp.headers["Cache-Control"] = "no-store"          # a pass is a credential: never from a cache
         return resp
 

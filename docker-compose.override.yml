@@ -164,7 +164,9 @@ services:
   # tts-studio: Skippy chat's local voices on this PC's GPU (services/tts-studio/app.py), reached only by voice-gate. stock = Kokoro-82M
   # (everyone), skippy = F5-TTS zero-shot from the Captain's reference cut (personal use: the Captain only; the pass decides). The
   # weights are D:/models' own copies, read-only; the reference cut (ref.wav + ref.txt, not in git) lives in state/tts-studio/ref.
-  # Internal network only: no route out, no published port. Each model loads on demand and unloads after IDLE_UNLOAD_S.
+  # Internal network only: no route out, no published port. Both voices are RESIDENT: loaded once at start, warm, never unloaded,
+  # and the process then holds VOICE_VRAM_GB of the card (the Captain's rule: voice keeps reserved GPU on skippy-pc; pictures go to
+  # skippy-core). The reference is the 9 s print of his ElevenLabs Skippy voice (state/voice-bakeoff/ref-el, his pick, 2026-10-23).
   tts-studio:
     build: ./services/tts-studio
     container_name: skippytel-tts-studio
@@ -174,7 +176,10 @@ services:
       - "8003"
     environment:
       STOCK_VOICE: bm_george                   # Kokoro's voices/<name>.pt; the first letter is its accent (a = American, b = British)
-      IDLE_UNLOAD_S: "600"
+      RESIDENT: stock,skippy                   # loaded at start and kept; a voice left out loads on its first line
+      IDLE_UNLOAD_S: "0"                       # only for voices not RESIDENT; 0 = never unload
+      F5_NFE: "16"                             # F5's flow steps: 16 = about 0.6 s a line at 4 % word errors (the bake-off; 32 is 3x slower)
+      VOICE_VRAM_GB: "3"                       # held by this process after the warm-up (both models need ~2.5 GB at peak)
     volumes:
       - ${MODELS_ROOT:-D:/models}/huggingface/hexgrad__Kokoro-82M:/w/kokoro:ro
       - ${MODELS_ROOT:-D:/models}/huggingface/SWivid__F5-TTS:/w/f5:ro

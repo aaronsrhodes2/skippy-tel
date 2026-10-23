@@ -344,13 +344,17 @@ def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slot
         if len(text) > MAX_TEXT:
             return err(413)
         if which in LOCAL_VOICES:
-            return local(which, text.strip())
+            out = local(which, text.strip())
+            if out.status_code < 400 or which != "skippy":
+                return out
+            # The local Skippy couldn't (tts-studio down, loading or busy): his cloud Skippy speaks instead, with its budget. Only
+            # for a skippy pass, which is the Captain's; a stock voice never falls back to a cloned one.
         spoken_text = text.strip()
         if style and not spoken_text.startswith("["):             # the delivery tag (ElevenLabs v3 audio tag), unless the text brings its own
             spoken_text = f"{style} {spoken_text}"
         said = voice.cached(spoken_text)
         if said is not None:                                      # said before: free
-            return Response(said, mimetype="audio/mpeg", headers={"Cache-Control": "no-store", "X-Voice-Cache": "hit"})
+            return Response(said, mimetype="audio/mpeg", headers={"Cache-Control": "no-store", "X-Voice-Cache": "hit", "X-Voice": "elevenlabs"})
         left = voice.left()
         if left is not None and len(spoken_text) > left:          # today's budget is spent: the page uses the device's own voice
             return Response(json.dumps({"error": "Skippy's voice has used today's budget", "budget": True}), status=429,
@@ -383,7 +387,7 @@ def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slot
         if not busy.acquire(blocking=False):
             return err(429)
         try:
-            r = post(f"{studio_url}/speak", json={"text": text, "voice": which}, stream=True, timeout=(5, 120))
+            r = post(f"{studio_url}/speak", json={"text": text, "voice": which}, stream=True, timeout=(5, 240))   # a cold load on a busy disk took 190 s
         except requests.RequestException:
             busy.release()
             return err(503)

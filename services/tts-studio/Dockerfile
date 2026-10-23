@@ -9,13 +9,15 @@ ENV DEBIAN_FRONTEND=noninteractive PIP_NO_CACHE_DIR=1 HF_HUB_OFFLINE=1 TRANSFORM
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libsndfile1 sox git build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install f5-tts==1.1.22 kokoro==0.9.4 misaki==0.9.4 transformers==5.20.2 num2words==0.5.14 flask==3.1.3 soundfile \
+# Resolved 2026-10-23 (the image's /pip-freeze.txt has all): torch 2.6.0+cu124, transformers 5.20.2, misaki 0.9.4, spacy 3.8.16,
+# soundfile 0.14.0 (libsndfile 1.2.2: its MP3 writer encodes the chunks).
+RUN pip install f5-tts==1.1.22 kokoro==0.9.4 flask==3.1.3 soundfile \
     && python -m spacy download en_core_web_sm && pip freeze > /pip-freeze.txt
 RUN HF_HUB_OFFLINE=0 python -c "from huggingface_hub import snapshot_download as s; \
     s('charactr/vocos-mel-24khz', revision='0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21', local_dir='/vocos')"
 
 WORKDIR /studio
-COPY app.py /studio/app.py
+COPY app.py spoken_numbers.py /studio/
 ENV PYTHONUNBUFFERED=1 HF_HOME=/tmp/hf
 EXPOSE 8003
 ENTRYPOINT ["python", "/studio/app.py"]

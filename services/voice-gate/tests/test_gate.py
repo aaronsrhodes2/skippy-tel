@@ -383,3 +383,19 @@ def test_health_says_which_voices_can_speak(studio):
     assert c.get("/health").get_json()["voices"] == {"stock": True, "skippy": False, "elevenlabs": True}  # flask-api probe is /tts/health
     fake.health = Resp(500)
     assert c.get("/health").get_json()["voices"]["stock"] is False
+
+
+def test_when_the_local_skippy_cannot_speak_his_cloud_skippy_does_but_a_stock_voice_never_falls_to_a_clone():
+    fake = Studio()
+    app = gate.create_app(KEY, "http://w", "http://t", clock=lambda: NOW, post=fake.post, get=fake.get, studio_url="http://studio",
+                          style="[whispers]", daily_chars=1000)
+    c = app.test_client()
+    fake.speak = Stream(503)                                   # tts-studio loading, missing files or busy
+    r = say(c, voice_pass('skippy'), {"text": "Hello there"})
+    assert r.status_code == 200 and r.headers["X-Voice"] == "elevenlabs" and r.data == b"ID3audio"
+    assert tts_calls(fake)[-1][1]["params"] == {"text": "[whispers] Hello there"}            # the cloud voice's own tag and budget
+    assert c.get("/health").get_json()["voice_chars_today"] == len("[whispers] Hello there")
+    assert say(c, voice_pass('stock'), {"text": "Hello there"}).status_code == 503 and len(tts_calls(fake)) == 1
+    assert say(c, voice_pass('skippy'), {"text": "Hi", "voice": "stock"}).status_code == 503 and len(tts_calls(fake)) == 1
+    no_studio = gate.create_app(KEY, "http://w", "http://t", clock=lambda: NOW, post=fake.post, get=fake.get).test_client()
+    assert say(no_studio, voice_pass('skippy'), {"text": "Still me"}).headers["X-Voice"] == "elevenlabs"

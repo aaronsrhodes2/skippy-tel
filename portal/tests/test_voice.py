@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -178,3 +179,32 @@ def test_the_gate_takes_a_stock_pass_for_stock_only():
                          cwd=str(VOICE_GATE), capture_output=True, text=True, timeout=60)
     assert run.returncode == 0, run.stderr[-2000:]
     assert json.loads(run.stdout) == ["stock", "stock", None, None]
+
+
+def test_the_gate_route_signs_the_captain_the_voice_of_his_chat_mode():
+    vm = FakeVm()
+    app = portal.create_app(SETTINGS, vm=vm, skippy=FakeSkippy())
+    vm.set_metadata(home_mod.KEY, json.dumps({"token_sha256": hashlib.sha256(TOKEN.encode()).hexdigest()}))
+    app.extensions["home"].accept({"capabilities": {"voice_gate": {"ready": True, "url": GATE}}})
+    c = app.test_client()
+    login(c, ADMIN)
+    got = {m: c.get("/chat/voice/gate" + (f"?mode={m}" if m else "")).get_json() for m in ("", "private", "auto", "public", "nonsense")}
+    assert {m: g["voice"] for m, g in got.items()} == {"": "skippy", "private": "skippy", "auto": "elevenlabs", "public": "stock",
+                                                       "nonsense": "skippy"}
+    assert all(g["ok"] and g["speak"] for g in got.values())
+    assert gate_says(TOKEN, [got["private"]["pass"], got["auto"]["pass"]], time.time()) == ["skippy", "elevenlabs"]
+
+
+def test_the_chat_tells_the_voice_client_its_mode():
+    chat = (PORTAL / "templates" / "_chat.html").read_text(encoding="utf-8")
+    js = (STATIC / "skippy-voice.js").read_text(encoding="utf-8")
+    assert "mode: () =>" in chat and '"?mode=" + encodeURIComponent(mode)' in js and "pass.mode_ === mode" in js
+
+
+def test_a_reply_is_never_silent_any_voice_failure_falls_back_to_the_device_voice():
+    """The Captain's rule (2026-10-23): guests get the cheap local voice, or the device's own, but always a live one."""
+    js = (STATIC / "skippy-voice.js").read_text(encoding="utf-8")
+    say = js[js.index("async function say("):js.index("function setWanted(")]
+    assert "if (!r.ok) throw" in say and "if (!blob.size) throw" in say                       # a refused or empty reply
+    assert "audio.onerror = function () { URL.revokeObjectURL(url); if (playing === token) { playing = null; builtin(t, done); } };" in say
+    assert "builtin(t, done);" in say.split("catch (e)")[-1]                                       # any other failure
