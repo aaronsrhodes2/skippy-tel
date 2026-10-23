@@ -110,6 +110,40 @@ What the numbers hide:
 **Follow-ups (not done here):** flask-api speaks the wrong ElevenLabs voice (`ELEVENLABS_VOICE_ID` unset, see above); serving
 Qwen3-TTS with CUDA graphs; a local-TTS engine behind voice-gate.
 
+## Re-run, 3 lines (2026-10-23, after the voice id fix)
+
+flask-api now reads `ELEVENLABS_SKIPPY_VOICE_ID` first, so the chat plays `w7zF…`. Checked against ElevenLabs before comparing:
+it is **"Arrogant Asshole", category `generated`** (Voice Design), **not a clone** of any recording. It is the same voice the
+first run already had as "ElevenLabs · Skippy voice (vault)", so that run's ElevenLabs Skippy column stood; only the "what the chat
+plays" column was the wrong voice. Lines 1 to 3 of `lines.json`, same reference, same images (rebuilt so `N_LINES`/`OUT` work).
+ElevenLabs through flask-api's own client; the local engines with `--memory=4g` per container (see the crash below).
+Page: `state/voice-bakeoff/rerun3/skippy-voice-rerun.html` (`tools/voice_bakeoff/rerun_page.py`), sent to the Captain.
+
+| engine | first audio | total | audio | RTF | RTF, first run | VRAM (model) | whole card in use (peak) | GPU busy (max) |
+|---|---|---|---|---|---|---|---|---|
+| ElevenLabs (the chat's voice now) | 0.81 s | 2.04 s | 7.1 s | 0.29 (cloud) | – | – | – | – |
+| F5-TTS v1 | 2.30 s | 2.30 s | 4.7 s | 0.49 | 0.41 | 2.0 GB | 15.6 GB | 87 % |
+| XTTS-v2 | **0.72 s** | 9.36 s | 12.1 s | 0.77 | 0.91 | 3.1 GB | 10.9 GB | 88 % |
+| Chatterbox | 13.15 s | 13.15 s | 6.7 s | 1.97 | 1.70 | 3.8 GB | 12.1 GB | 100 % |
+| Qwen3-TTS 1.7B (x-vector) | 74.84 s | 74.84 s | 7.1 s | 10.47 | 4.57 | 4.3 GB | 15.4 GB | 100 % |
+
+"RTF, first run" = the same three lines in the 2026-10-20 run, with only Ollama's model on the card. This time the card was shared:
+`skippytel-image-studio` / `image-studio-next` (the faster-pictures session) held SDXL and were generating during the F5,
+Chatterbox and Qwen3 runs, so those three are slower than on a quiet card; Qwen3 is hurt most (its line 3 took 126 s). Whisper heard
+every line, except that F5 dropped "The tests" and garbled "1,284", and Chatterbox dropped "Done.". The conclusion does not change:
+F5 is the local pick at about 2 s a line; nothing local matches ElevenLabs' 0.8 s to first audio except XTTS, which rambles.
+
+**What a shared card does to skippy-pc as a speech box:** the TTS model must not be one of several big GPU jobs. Ollama, SDXL
+and a TTS model don't fit together in 16 GB without spilling, and a picture job at 100 % GPU doubles F5's time per line and
+more than doubles Qwen3's. A speech box needs its few GB reserved (or the picture studio parked while the chat speaks).
+
+**Docker Desktop crashed during this re-run** (2026-10-23 ~13:19): while the XTTS container was loading, with image-studio holding
+SDXL, the engine went away (`error waiting for container: unexpected EOF`; the npipe vanished) and came back about a minute later
+with the whole stack. The likely cause is the Docker VM's 7.75 GB of RAM running out (the XTTS checkpoint is 1.9 GB and loads on the
+CPU first), not proven. Afterwards flask-api answered nothing for several minutes: both gunicorn workers sat in `p9_client_rpc` on
+`/music/…` (a startup scan of the music library through the Windows bind mount, slow on a cold cache), and it recovered by itself.
+The remaining runs used `--memory=4g`, so an out-of-memory kill would take the bench container, not the engine.
+
 ## Reproduce
 
 ```bash
