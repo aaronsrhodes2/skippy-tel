@@ -176,7 +176,8 @@ _IMAGE_RESULT = {
                      "required": ["job_id"], "additionalProperties": False},
 }
 
-IMAGE_WAIT_S = 110     # how long make_image holds the chat before saying "still working"
+IMAGE_WAIT_S = 25      # how long make_image holds the chat; a picture that takes longer (skippy-core draws for quality, not
+                       # speed) comes as a "drawing" card that fills in by itself when it's done (portal/pictures.py)
 _SIZES = {"square": (1024, 1024), "landscape": (1216, 832), "portrait": (832, 1216)}
 
 # Direct verbs: "/verb …" at the start of a message forces that tool first.
@@ -351,12 +352,16 @@ class ChatTools:
             result = state["result"] if isinstance(state.get("result"), dict) else {}
             if not any(m["job_id"] == job_id for m in self.media):
                 self.media.append({"kind": "image", "job_id": job_id, "url": f"/chat/media/{job_id}",
-                                   "title": str(result.get("title") or "your picture")[:80], "by": "SDXL"})
-            return {"status": "done", "by": "SDXL on the Captain's GPU",
+                                   "title": str(result.get("title") or "your picture")[:80]})
+            return {"status": "done",
                     "note": "The picture appears under your reply. Don't paste a link or write [IMAGE: ...]."}
         if state["state"] == "running":
-            return {"status": "running", "job_id": job_id, "waited_s": state.get("age_s"),
-                    "note": "Still drawing. Say so, and offer to check again with image_result."}
+            if not any(m["job_id"] == job_id for m in self.media):     # the page shows a "drawing" card that fills in by itself
+                self.media.append({"kind": "image", "job_id": job_id, "url": f"/chat/media/{job_id}", "pending": True,
+                                   "title": "your picture"})
+            return {"status": "drawing", "job_id": job_id,
+                    "note": "Skippy's studio is still drawing it (it takes its time, for quality). Say so in a few words: the "
+                            "picture will appear under your reply by itself when it's done. Don't promise a time."}
         if state["state"] == "error":
             raise ToolError(f"The picture failed: {state['error']}. Say so plainly.")
         raise ToolError("That picture job is gone (it expired, or the portal restarted). Offer to make it again.")

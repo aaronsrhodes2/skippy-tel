@@ -56,6 +56,7 @@ import recovery_web
 import ship as ship_mod
 import tabletop as tabletop_mod
 import chat_history
+import pictures as pictures_mod
 import chat_names
 import tasks
 import telemetry_web
@@ -71,7 +72,7 @@ OTHER_HOSTS = frozenset({"www.makerportal.live", "makerportal.studio", "www.make
 
 
 def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, home=None,
-               imports=None, github=None, tabletop=None, history=None) -> Flask:
+               imports=None, github=None, tabletop=None, history=None, pictures=None) -> Flask:
     app = Flask(__name__)
     app.config.update(settings if settings is not None else config.load())
     # The recovery buttons' GitHub token lives only inside the client object, never in app.config (templates see that).
@@ -114,6 +115,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     IMAGES_PER_DAY = 10          # pictures a guest may make (the Captain: no limit); the home GPU draws each one
     imports = imports or imports_mod.Imports(vm)
     media = media_mod.Media()
+    # pictures Skippy draws, kept in the bucket until collected (pictures.py); the Captain's are kept like his chats, forever
+    pics = pictures if pictures is not None else pictures_mod.from_env(forever=lambda e: str(e).strip().lower() in app.config["ADMIN_EMAILS"])
     workshop = workshop_mod.Workshop(home)          # the Captain's private Skippy (admin only)
     app.extensions["workshop"] = workshop
     player = player_mod.Player(home)                # Bilby's Audio Service: the pass and Connect (admin only)
@@ -766,9 +769,23 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         if not home.authorized(request.headers.get("Authorization")):
             abort(401)
         owner = home.owner_of(job_id)
+        request.max_content_length = media_mod.MAX_ONE
+        ctype = (request.mimetype or "").lower()
+        if ctype in pictures_mod.TYPES:                     # a picture: kept in the bucket, so it outlives the portal (pictures.py)
+            data = request.get_data(cache=False)
+            try:
+                kept = pics.keep(job_id, data, ctype, request.args.get("title", ""))
+            except Exception as exc:  # noqa: BLE001 — no bucket: it can still be served from memory below
+                kept = False
+                print(json.dumps({"event": "picture_not_kept", "why": str(exc)[:200]}), flush=True)
+            if owner is None:
+                return (jsonify(ok=True, kept=True), 200) if kept else (jsonify(error="no such job"), 404)
+            try:
+                return jsonify(media.put(job_id, data, ctype, owner=owner, title=request.args.get("title", "")))
+            except media_mod.MediaError as exc:
+                return jsonify(error=str(exc)), exc.status
         if owner is None:
             return jsonify(error="no such job"), 404
-        request.max_content_length = media_mod.MAX_ONE
         try:
             out = media.put(job_id, request.get_data(cache=False), (request.mimetype or "").lower(),
                             owner=owner, title=request.args.get("title", ""))
@@ -1661,6 +1678,26 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             return view(*args, **kwargs)
         return wrapped
 
+    class PictureJobs:
+        """make_image's view of the job queue: a picture job may take hours (skippy-core draws for quality), so it gets a long
+        life and is written down in the bucket (pictures.py), which outlives the portal and the request that asked for it."""
+        def __init__(self, email):
+            self.email = email
+
+        def start(self, kind, owner="", **payload):
+            job = home.start(kind, owner, ttl=pictures_mod.JOB_TTL, **payload)
+            try:
+                pics.expect(job, self.email, payload.get("prompt", ""))
+            except Exception as exc:  # noqa: BLE001 — no bucket: the picture still comes, it just won't outlive a restart
+                print(json.dumps({"event": "picture_not_written_down", "why": str(exc)[:200]}), flush=True)
+            return job
+
+        def owner_of(self, job):
+            return home.owner_of(job)
+
+        def wait_result(self, job, wait):
+            return home.wait_result(job, wait)
+
     def tools_for(user) -> chat_tools.ChatTools:
         email = user["email"]
         return chat_tools.ChatTools(vm, is_admin=auth.is_admin(email), visible=auth.visible_games(email),
@@ -1668,7 +1705,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                                     music=home.music if auth.has_portal(email, "audio") else None,
                                     home_mentat=home if home.mentat_ready() else None,
                                     home_music=home if home.can("make_music") else None,
-                                    home_image=home if home.can("make_image") else None,
+                                    home_image=PictureJobs(email) if home.can("make_image") else None,
                                     image_allow=(lambda: True) if auth.is_admin(email) else
                                                 (lambda: limiter.allow("image:" + email, IMAGES_PER_DAY, 86400)))
 
@@ -1891,9 +1928,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 # description or the person's own words, and the picture appears under the reply as usual.
                 print(json.dumps({"event": "image_without_call", "brain": brain.id, "model": model}), flush=True)
                 try:
-                    out = json.loads(run_tool("make_image", {"prompt": chat.image_tag(text) or rest}))
-                    if out.get("status") == "running":
-                        text += "\n\nStill drawing it: ask me to check on the picture in a minute."
+                    run_tool("make_image", {"prompt": chat.image_tag(text) or rest})   # done or drawing: the card shows it
                 except chat_tools.ToolError as exc:
                     text += f"\n\n(No picture: {exc})".replace(" Say so plainly.", "").replace(" Say so, and that it resets tomorrow.", " It resets tomorrow.")
         except chat.ChatError as exc:
@@ -2012,13 +2047,29 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def history_forget(chat_id):
         return history_call(lambda: chats_kept.forget(me(), chat_id) or {"ok": True})
 
+    @talk.get("/media/<job_id>/state")
+    @skippy_required
+    def media_state(job_id):
+        """A picture's state for the chat's "drawing" card: done, drawing, or unknown (gone, given up on, or not yours)."""
+        item = media.get(job_id)
+        if item and (auth.is_admin(me()) or item["owner"] == me()):
+            state = "done"
+        else:
+            state = pics.state(job_id, me(), auth.is_admin(me()))
+        resp = jsonify(state=state)
+        resp.headers["Cache-Control"] = "private, no-store"
+        return resp
+
     @talk.get("/media/<job_id>")
     @skippy_required
     def media_file(job_id):
         """A clip skippy-pc made for this chat (media.py): its requester or an admin, no one else."""
         item = media.get(job_id)
         if not item or not (auth.is_admin(me()) or item["owner"] == me()):
-            abort(404)                           # not 403: don't confirm that a clip exists
+            kept = pics.get(job_id, me(), auth.is_admin(me()))      # a picture kept in the bucket (pictures.py)
+            if not kept:
+                abort(404)                           # not 403: don't confirm that a clip exists
+            item = {"data": kept[0], "type": kept[1]}
         resp = send_file(io.BytesIO(item["data"]), mimetype=item["type"], conditional=True, max_age=0)
         resp.headers["Cache-Control"] = "private, no-store"
         resp.headers["X-Content-Type-Options"] = "nosniff"

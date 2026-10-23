@@ -2124,7 +2124,8 @@ def test_a_picture_asked_for_but_never_drawn_is_drawn_by_the_portal(monkeypatch)
     token = _pair(client)
     _advertise(client, token, make_image=True)
     r = client.post("/chat/send", json={"message": "draw me a barn"}).get_json()
-    assert r["tools"] == ["make_image"] and "[IMAGE" not in r["reply"] and "Still drawing" in r["reply"]
+    assert r["tools"] == ["make_image"] and "[IMAGE" not in r["reply"]
+    assert [(m["kind"], m.get("pending")) for m in r["media"]] == [("image", True)]       # a "drawing" card that fills in by itself
     jobs = client.get("/home/jobs", headers={"Authorization": f"Bearer {token}"}).get_json()["jobs"]
     assert [(j["kind"], j["prompt"]) for j in jobs] == [("make_image", "a red barn at dusk")]
     skippy.reply = lambda *a, **k: "The speed of light is fast."

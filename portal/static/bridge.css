@@ -502,3 +502,8 @@ dialog.keys .key { margin: 0 0 0 auto; }
 .chat-open:has(> .g) { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: center; }
 .chat-open > .g { width: 15px; height: 15px; color: var(--muted); grid-row: span 2; }
 .chat-rename { width: 100%; font-size: .92rem; padding: 2px 4px; background: #000; color: #fff; border: 1px solid var(--accent); }
+/* a picture Skippy is still drawing (skippy-core takes its time, for quality): the card fills in by itself */
+.picture-wait { clear: both; display: flex; align-items: center; gap: 8px; margin: 8px 0; padding: 8px 10px; font-size: .85rem;
+                color: var(--muted); border: 1px dashed var(--accent); background: #02080a; }
+.picture-wait .g { width: 18px; height: 18px; color: var(--accent); }
+.picture-wait .lamp { width: 8px; height: 8px; margin-left: auto; }

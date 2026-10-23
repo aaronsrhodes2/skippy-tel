@@ -305,6 +305,22 @@ resource "google_storage_bucket" "tabletop" {
     }
     action { type = "Delete" }
   }
+  # Pictures Skippy drew (portal/pictures.py): a guest's go after 60 days, like their chats' backstop; the Captain's
+  # (chat-pictures/keep/) stay. A pending job's note is gone two days on (the portal gives up on a job after 6 hours).
+  lifecycle_rule {
+    condition {
+      age            = 60
+      matches_prefix = ["chat-pictures/guest/"]
+    }
+    action { type = "Delete" }
+  }
+  lifecycle_rule {
+    condition {
+      age            = 2
+      matches_prefix = ["chat-pictures/pending/"]
+    }
+    action { type = "Delete" }
+  }
   depends_on = [google_project_service.apis]
 }
 

@@ -317,7 +317,16 @@
       if (openSheet === "chats") paintChats();
     }).catch(() => {});
     function save() { try { sessionStorage.setItem(KEY, JSON.stringify(history)); } catch (e) {} remember(); }
-    function replay() { log.replaceChildren(); history.forEach(t => add(t.role, t.content.split("\n\n[Mentat's own answer")[0])); unseen = 0; logPager.last(); paintTail(); }   // the Mentat notes are for the models, not the screen
+    const PIC = /\n*\[picture:([A-Za-z0-9_-]{6,64})\]/g;    // a picture Skippy drew for that reply (portal/pictures.py keeps it)
+    function replay() {
+      log.replaceChildren();
+      history.forEach(t => {
+        const jobs = t.role === "assistant" ? [...t.content.matchAll(PIC)].map(m => m[1]) : [];
+        const body = add(t.role, t.content.split("\n\n[Mentat's own answer")[0].replace(PIC, ""));   // the notes are for the models
+        jobs.forEach(j => body.parentElement.insertBefore(pictureCard({job_id: j, url: "{{ url_for('chat.media_file', job_id='JOB') }}".replace("JOB", j)}), body.parentElement.querySelector(".acts")));
+      });
+      unseen = 0; logPager.last(); paintTail();
+    }
     function startChat(id, turns) {
       chatId = id; history = turns; alts = []; alt = 0; saveAlts(); endEdit();
       try { sessionStorage.setItem(CUR, chatId); sessionStorage.setItem(KEY, JSON.stringify(history)); } catch (e) {}
@@ -376,6 +385,33 @@
       card.addEventListener("toggle", () => logPager.refresh());
       return card;
     }
+    // A picture Skippy is drawing (or drew): skippy-core draws for quality, so it may take minutes or hours. The card asks the
+    // portal now and then and turns into the picture when it's done, even after a reload or another day (the job and the picture
+    // are kept in the bucket: portal/pictures.py). Gone or given up on, it says so in one line.
+    const MEDIA_STATE = "{{ url_for('chat.media_state', job_id='JOB') }}";
+    function pictureCard(m) {
+      const box = document.createElement("div"); box.className = "picture-wait";
+      const done = () => { if (window.SkippyArtifacts) box.replaceWith(SkippyArtifacts.card(SkippyArtifacts.fromMedia({kind: "image", url: m.url, title: m.title || "your picture"}), {onToggle: () => logPager.refresh()})); logPager.refresh(); };
+      const lamp = document.createElement("i"); lamp.className = "lamp"; lamp.dataset.s = "on";
+      const words = document.createElement("span"); words.textContent = "Drawing…";
+      box.append(glyph("image"), words, lamp);
+      let tries = 0;
+      async function look() {
+        if (!box.isConnected && tries) return;                     // the chat moved on: stop looking
+        tries++;
+        try {
+          const r = await fetch(MEDIA_STATE.replace("JOB", encodeURIComponent(m.job_id)), {cache: "no-store"});
+          const d = r.ok ? await r.json() : {state: "unknown"};
+          if (d.state === "done") return done();
+          if (d.state === "unknown") { lamp.dataset.s = "off"; words.textContent = "That picture is gone (it was given up on, or it expired)."; return; }
+        } catch (e) { /* offline for a moment: keep waiting */ }
+        setTimeout(look, tries < 6 ? 10000 : 30000);
+      }
+      if (m.pending) setTimeout(look, 10000); else look();
+      return box;
+    }
+    const pictureNote = (media) => (media || []).filter(m => m.kind === "image").map(m => "\n\n[picture:" + m.job_id + "]").join("");
+
     // What goes into the history for a Mentat answer, so any later turn sees Mentat's own numbers.
     function mentatNote(cards) {
       return cards.map(c => "\n\n[Mentat's own answer to " + JSON.stringify(c.question) + ": " +
@@ -515,11 +551,12 @@
         const acts = pending.parentElement.querySelector(".acts");
         pending.parentElement.insertBefore(receipt(data, false), acts);
         (data.mentat || []).forEach(c => pending.parentElement.insertBefore(mentatCard(c), acts));
-        (data.media || []).forEach(m => {           // what skippy-pc made for this reply (a song, a picture): an artifact, opened
-          if (window.SkippyArtifacts) pending.parentElement.insertBefore(SkippyArtifacts.card(SkippyArtifacts.fromMedia(m), {onToggle: () => logPager.refresh()}), acts);
+        (data.media || []).forEach(m => {           // what was made for this reply (a song, a picture): an artifact, opened
+          if (m.kind === "image") pending.parentElement.insertBefore(pictureCard(m), acts);      // done now, or drawing: the card waits
+          else if (window.SkippyArtifacts) pending.parentElement.insertBefore(SkippyArtifacts.card(SkippyArtifacts.fromMedia(m), {onToggle: () => logPager.refresh()}), acts);
         });
         const said = text + (files.length ? " [attached: " + files.map(f => f.name).join(", ") + "]" : "");
-        const answer = data.reply + mentatNote(data.mentat || []);
+        const answer = data.reply + pictureNote(data.media) + mentatNote(data.mentat || []);
         history = before.concat({role: "user", content: said}, {role: "assistant", content: answer});
         if (opts.replace) { alts.push({user: said, assistant: answer}); alt = alts.length - 1; }
         saveAlts(); save(); ping();

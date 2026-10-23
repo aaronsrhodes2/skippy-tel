@@ -241,7 +241,7 @@ gone. Picking Private or Auto shows the agent's transcript in the chat's stage w
 chats sheet drive it through `window.SkippyAgent`. Every brain calls Mentat for physics; the reply carries the ⚛ card (Mentat's result and
 proof) with **Barney Style?**, which always runs on Skippy Core with no tools. A reply that claims Mentat without calling it is thrown away
 and Mentat is forced (or asked by the portal itself); a picture asked for (or written as `[IMAGE: ...]`) but never drawn is drawn by the
-portal itself. Pictures are skippy-pc's image studio, for everyone (guests 10 a day). Dev: `portal/tests/dev_chat.py` (real Core over SSH, real Mentat).
+portal itself. Pictures (`make_image`, for everyone, guests 10 a day) move to skippy-core (quality over speed); the chat waits as long as it takes: a "drawing" card fills in by itself, even after a reload or a redeploy, because each picture job and picture is kept in the bucket (`portal/pictures.py`, `chat-pictures/`). Dev: `portal/tests/dev_chat.py` (real Core over SSH, real Mentat).
 **Chats are kept on the portal** (`portal/chat_history.py`, one private file per person in the Tabletop bucket, keyed by a one-way id of the address;
 the browser keeps a copy): a guest's 30 days, the Captain's forever. A guest's expired chat is first ANALYSED by Skippy Core (right, wrong,
 bugs, improvements; about hourly, nudged by the home report) and only then deleted; the insight goes to `chat-insights/<YYYY-MM>.json` in the
