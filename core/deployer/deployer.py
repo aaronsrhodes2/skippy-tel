@@ -25,6 +25,10 @@ LLM_API_KEY (llama-swap's key: the render, the shim and the smoke test all use i
     deployer.py run        one pass (what the timer runs)
     deployer.py status     print status.json
     deployer.py forget     clear the bad list (after fixing whatever made a key fail, without a new commit)
+    deployer.py repair     put the last good deploy back as new: render, every container RECREATED (a hung one too), smoke test.
+                           What the portal's "Put everything back" asks for, through skippy-pc's starter over SSH
+    deployer.py doctor     one look (skippy-core-doctor.timer, every 3 minutes): does llama-swap write a few words in time? Two
+                           failures in a row restart it; still failing after two restarts in an hour, a repair
 Standard library only.
 """
 from __future__ import annotations
@@ -192,11 +196,11 @@ class Deployer:
             args += ["--out", str(Path(self.s["CORE_STATE"]) / "llm")]
         return self.sh(args, full=full, timeout=600, check=False)
 
-    def compose_up(self, full: str) -> None:
+    def compose_up(self, full: str, recreate: bool = False) -> None:
         for sub in ("flask-api", "drive-state"):
             (Path(self.s["CORE_STATE"]) / sub).mkdir(parents=True, exist_ok=True)
         self.sh(["docker", "compose", "-p", "skippycore", *self.compose_files(), "up", "-d", "--build", "--remove-orphans",
-                 "--wait", "--wait-timeout", "900"],
+                 *(["--force-recreate"] if recreate else []), "--wait", "--wait-timeout", "900"],
                 full=full, timeout=3600)
 
     def smoke(self, full: str) -> list[dict]:
@@ -262,6 +266,76 @@ class Deployer:
         self.mark_good(commit, full)
         return self.status("ok", commit=commit, full=full, detail="deployed", smoke=results)
 
+    # ── repair: the last good deploy, recreated (the portal's one Recovery operation) ──
+    def repair(self) -> dict:
+        good = self.state()["last_good"]
+        full = good["full"] if good else norm_full(self.s["CORE_FULL"])
+        try:
+            if good:
+                self.checkout(good["commit"])
+                r = self.models("render", full)
+                if r.returncode != 0:
+                    raise StepFailed("render", (r.stderr or r.stdout).strip()[-500:], bad=False)
+                self.compose_up(full, recreate=True)
+            else:
+                # No deploy of record (the stack was set up by hand): restart what runs, exactly as it is configured. Rendering
+                # from whatever the checkout holds could put an older model set back.
+                self.sh(["docker", "compose", "-p", "skippycore", *self.compose_files(), "restart"], full=full, timeout=1800)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            return self.status("repair-failed", stage="compose", detail=(getattr(e, "stderr", "") or str(e))[-300:])
+        except StepFailed as e:
+            return self.status("repair-failed", stage=e.stage, detail=e.detail)
+        results = self.smoke(full)
+        failed = [x for x in results if not x.get("ok")]
+        if failed:
+            return self.status("repair-failed", stage="smoke", detail="; ".join(f"{x['check']}: {x.get('detail', '')}"[:200] for x in failed))
+        return self.status("ok", commit=good["commit"] if good else None, full=full, detail="repaired", smoke=results)
+
+    # ── the doctor: a real reply from llama-swap, every few minutes ──
+    def llm_answers(self, timeout: float = 180) -> tuple[bool, str]:
+        """(ok, why): llama-swap's chat slot writes a few words within `timeout` (it may be busy with a long reply: it waits its turn)."""
+        key = self.s["LLM_API_KEY"]
+        body = json.dumps({"model": "chat", "max_tokens": 8, "messages": [{"role": "user", "content": "Say OK. /no_think"}]}).encode()
+        req = urllib.request.Request("http://127.0.0.1:8080/v1/messages", data=body, method="POST",
+                                     headers={"Content-Type": "application/json", "anthropic-version": "2023-06-01",
+                                              **({"x-api-key": key, "Authorization": "Bearer " + key} if key else {})})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                got = json.loads(r.read() or b"{}")
+        except (OSError, ValueError) as e:
+            return False, f"no answer: {type(e).__name__}"
+        wrote = any(isinstance(b, dict) and (b.get("text") or b.get("thinking")) for b in got.get("content") or [])
+        return wrote, "" if wrote else "it answered with nothing"
+
+    def doctor(self, answers=None, now=None) -> dict:
+        now = time.time() if now is None else now
+        d = self._read("doctor.json", {"fails": 0, "restarts": [], "repairs": []})
+        ok, why = (answers or self.llm_answers)()
+        if ok:
+            d["fails"] = 0
+            self._write("doctor.json", d)
+            return {"ok": True}
+        d["fails"] = d.get("fails", 0) + 1
+        d["restarts"] = [t for t in d.get("restarts", []) if now - t < 3600]
+        d["repairs"] = [t for t in d.get("repairs", []) if now - t < 3600]
+        did = "watching"
+        if d["fails"] >= 2:
+            if len(d["restarts"]) < 2:
+                self.sh(["docker", "compose", "-p", "skippycore", *self.compose_files(), "restart", "llm"], full="", timeout=600, check=False)
+                d["restarts"].append(now)
+                did = "restarted llama-swap"
+            elif not d["repairs"]:
+                d["repairs"].append(now)
+                self._write("doctor.json", d)
+                row = self.repair()
+                did = f"repaired: {row['state']}"
+            else:
+                did = "still failing after two restarts and a repair this hour: waiting for the next hour"
+        d["last"] = {"at": now, "why": why, "did": did}
+        self._write("doctor.json", d)
+        self.log(f"doctor: llama-swap {why}; {did}")
+        return {"ok": False, "why": why, "did": did}
+
     def rollback(self, commit: str, full: str, err: StepFailed) -> dict:
         good = self.state()["last_good"]
         failed = {"commit": commit, "full": full, "stage": err.stage, "detail": err.detail,
@@ -289,7 +363,7 @@ def main(argv: list[str] | None = None) -> int:
         d._write("state.json", st)
         print("bad list cleared")
         return 0
-    if cmd != "run":
+    if cmd not in ("run", "repair", "doctor"):
         print(__doc__)
         return 2
     d.dir.mkdir(parents=True, exist_ok=True)
@@ -297,9 +371,13 @@ def main(argv: list[str] | None = None) -> int:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            print("another run is going", flush=True)
+            print("a deploy or repair is going: it ends with a smoke test of its own", flush=True)
             return 0
-        row = d.run()
+        if cmd == "doctor":
+            return 0 if d.doctor()["ok"] else 1
+        row = d.repair() if cmd == "repair" else d.run()
+    if cmd == "repair":
+        print(json.dumps({k: row.get(k) for k in ("state", "detail", "stage", "commit")}), flush=True)
     return 0 if row["state"] in ("ok", "waiting-ci", "known-bad", "refused") else 1
 
 

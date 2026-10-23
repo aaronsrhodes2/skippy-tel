@@ -140,3 +140,15 @@ html.auto body.captain a { color: #f4b59b; }
 .apane .fr-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 0; }
 .apane .card.fr button, .apane .card.fr a.btn { padding: 5px 10px; margin: 0; font-size: .78rem; }
 .apane .card.fr input[type=text] { font-size: 16px; padding: 6px 8px; }
+
+/* Recovery: one button, one checklist (templates/_recovery.html, recovery_web.py, doctor.py) */
+.recovery-one .repair-all { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 14px; font-size: 1.05rem;
+                            color: #000; background: var(--accent); border: 1px solid var(--accent); cursor: pointer; }
+.recovery-one .repair-all .g { width: 20px; height: 20px; }
+.recovery-one .checklist { list-style: none; margin: 10px 0; padding: 0; }
+.recovery-one .checklist li { display: grid; grid-template-columns: 12px auto 1fr; align-items: center; gap: 8px; padding: 5px 0;
+                              border-bottom: 1px solid var(--dim-green); font-size: .88rem; }
+.recovery-one .checklist .lamp { width: 9px; height: 9px; }
+.recovery-one .checklist .why { color: var(--muted); font-size: .8rem; text-align: right; overflow-wrap: anywhere; }
+.recovery-one .checklist li[data-ok="no"] .why { color: var(--amber); }
+.recovery-one .doctor-log { margin: 4px 0; padding-left: 18px; font-size: .8rem; color: var(--muted); }

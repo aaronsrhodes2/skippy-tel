@@ -175,6 +175,16 @@ class Notifier:
             self._warn(f"error_{type(exc).__name__}", str(exc))
             return False
 
+    def alert(self, text: str) -> bool:
+        """Something the Captain must know, from the doctor (doctor.py: a service still failing after its tries, skippy-pc unreachable).
+        The doctor already sends each one at most once an hour; this only needs Discord to be set up."""
+        if not self.configured:
+            return False
+        if self.background:
+            threading.Thread(target=self._send, args=(text,), daemon=True).start()
+            return True
+        return self._send(text)
+
     def traffic_alert(self, owner: str, text: str) -> bool:
         """The commute is slow or the road has a crash (localinfo.py): one Discord DM per episode, not one per report. The same switch as the task-finished DMs."""
         with self._lock:

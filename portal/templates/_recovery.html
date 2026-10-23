@@ -1,196 +1,56 @@
-{# The Admin page's recovery cards (recovery.py / recovery_web.py). Admin only: admin.html is the only page that includes
-   this, and every button posts to /admin/recovery/<action>, which checks the admin, the origin, a confirm and a rate limit.
-   No pop-up (the Captain's rule: no confirm boxes): the page fills in confirm=yes itself; a POST without it (no script, or
-   a hand-made one) gets the server's own confirm page instead of acting. #}
-{% macro button(action, cls="", extra="") -%}
-  <form class="inline" method="post" action="{{ url_for('recovery.act', action=action) }}"
-        data-ask="{{ rc.actions[action].ask }}"
-        onsubmit="this.elements.confirm.value = 'yes';">
-    <input type="hidden" name="confirm" value="">
-    {{ extra }}
-    <button type="submit" class="{{ cls }}">{{ rc.actions[action].label }}</button>
+{# Recovery is ONE operation (recovery_web.py, doctor.py): "Put everything back". Admin only: admin.html is the only page that includes this.
+   The doctor keeps everything at its baseline by itself; the checklist shows every part (green or red, and why) and what the doctor did
+   lately; the button puts it all back at once and acts at once (the Captain's rule: no confirm boxes). The card refreshes itself from
+   /admin/recovery/state while the Recovery pane is open. #}
+{% set rs = recovery_state() %}
+<div id="recovery" class="recovery-one">
+  <form method="post" action="{{ url_for('recovery.repair') }}">
+    <button type="submit" class="repair-all" data-tel="recovery:repair"><svg class="g" aria-hidden="true"><use href="#g-loop"/></svg> Put everything back</button>
   </form>
-{%- endmacro %}
-{% set rc = recovery_cards() %}
-{% set b = rc.build %}
-{% set v = rc.view %}
-<section id="recovery">
-  <h2>Recovery</h2>
+  <p class="help">Everything back to its known good state: the portal redeployed if it's behind or broken, skippy-pc's Docker and every
+    service up and answering, the private Skippy's bridge restarted (never mid-run), Skippy Core repaired. Code is never reverted.</p>
+  {% if rs.maintenance %}<p class="warn">The stack was stopped on purpose: the doctor waits until it's back on.</p>{% endif %}
 
-  <div class="card" id="live-version">
-    <h3>Live version</h3>
-    {% if b.commit == 'dev' %}
-      <p>A local build: no commit stamped in (not built by the deploy pipeline).</p>
-    {% else %}
-      <p>Serving <a href="https://github.com/{{ rc.repo }}/commit/{{ b.commit }}" target="_blank" rel="noopener">{{ b.short }}</a>
-        {% if b.revision %}&middot; revision <code class="code">{{ b.revision }}</code>{% endif %}</p>
-      <p class="help">Built {{ b.built_at or 'unknown' }} &middot; this instance started {{ b.started_at }}</p>
-    {% endif %}
-    {% if v %}
-      {% if v.ahead == 0 %}
-        <p>This is the newest push on main.</p>
-      {% elif v.ahead %}
-        <p class="warn">main is {{ v.ahead }} push{{ 'es' if v.ahead != 1 }} ahead of what's live
-          (newest: {{ v.newest.short }}, {{ v.newest.word }}).</p>
-      {% elif b.commit != 'dev' %}
-        <p class="warn">What's live isn't among the last {{ rc.fetched }} deploys of main: it is far behind, or was deployed some other way.</p>
-      {% endif %}
-      {% if v.held_back %}
-        <p class="warn">A newer deploy ({{ v.green.short }}) passed but isn't serving: a rollback is holding traffic back.
-          The next push to main releases it.</p>
-      {% endif %}
-    {% elif not rc.configured %}
-      <p class="help">How far main is ahead shows here once the deploy buttons are configured (below).</p>
-    {% endif %}
-  </div>
-
-  <div class="card" id="deploy-pipeline">
-    <h3>Deploy pipeline</h3>
-    {% if not rc.configured %}
-      <p>Not configured: the portal has no <code class="code">GITHUB_ACTIONS_TOKEN</code>, so these buttons are hidden.</p>
-      <p class="help">Make a fine-grained GitHub token for this repo only (Actions: read and write, nothing else), add it to
-        the repo's Actions secrets as PORTAL_ACTIONS_TOKEN, and deploy. docs/portal/remote-recovery.md has the steps.</p>
-    {% else %}
-      {% if rc.error %}<p class="error">{{ rc.error }}</p>{% endif %}
-      {% if v and v.runs %}
-        {% for r in v.runs %}
-          <p><span class="dot {{ 'green' if r.word == 'passed' else ('amber' if r.word in ('running', 'queued', 'waiting', 'pending', 'requested') else 'grey') }}"></span>
-            <b>{{ r.short }}</b> {{ r.word }} &middot; {{ r.age }}
-            &middot; <a href="{{ r.html_url }}" target="_blank" rel="noopener">log</a>
-            {% if r.title %}<br><span class="help">{{ r.title }}</span>{% endif %}</p>
-        {% endfor %}
-      {% elif not rc.error %}
-        <p>No deploy runs of main yet.</p>
-      {% endif %}
-
-      {% if v and v.stuck %}
-        <p class="warn">Deploy {{ v.stuck.short }} started {{ v.stuck.age }} and is still {{ v.stuck.word }}: stuck.</p>
-        <p class="row">{{ button('cancel-stuck', 'danger') }}</p>
-        <p class="help">Cancelling makes the deploy's own last step put back the revision it replaced (if it had switched
-          traffic already). Nothing more is rolled back.</p>
-      {% endif %}
-      {% if v and v.failed %}
-        <p class="row">{{ button('rerun-failed') }}</p>
-        <p class="help">Re-runs only the jobs that failed in deploy {{ v.failed.short }}, the newest one. A flaky test or a
-          GitHub hiccup, not a real failure? This is the button.</p>
-      {% endif %}
-
-      <form method="post" action="{{ url_for('recovery.act', action='rollback') }}"
-            data-ask="{{ rc.actions['rollback'].ask }}"
-            onsubmit="this.elements.confirm.value = 'yes';">
-        <input type="hidden" name="confirm" value="">
-        <label class="field" for="rb-revision">Roll back to (optional)</label>
-        <input type="text" id="rb-revision" name="revision" autocomplete="off" pattern="(latest|skippy-portal-[a-z0-9-]+)?"
-               placeholder="blank = the previous good revision">
-        <p class="row" style="margin-top:8px"><button type="submit" class="danger">{{ rc.actions['rollback'].label }}</button></p>
-      </form>
-      <p class="row">{{ button('undo-rollback') }}</p>
-      <p class="help">A rollback holds until the next push to main, which deploys normally and sends traffic forward again
-        (with whatever that push contains). If the portal itself is too broken to open this page: GitHub mobile &rarr; this
-        repo &rarr; Actions &rarr; rollback &rarr; Run workflow, box left blank.</p>
-    {% endif %}
-  </div>
-
-  {% set w = rc.workshop %}
-  <div class="card" id="workshop-recovery">
-    <h3>Private Skippy</h3>
-    {% if rc.paused %}
-      <p class="warn">Paused by {{ rc.paused.by }}: new messages are refused.</p>
-    {% endif %}
-    {% if w %}
-      <p>Current task <code class="code">{{ w.task }}</code>: <b>{{ w.state }}</b>{% if w.stopping %} (stop sent){% endif %}
-        &middot; started {{ (w.age_s // 60) }} min ago{% if w.open %} &middot; last word from skippy-pc {{ w.quiet_s }} s ago{% endif %}</p>
-      {% if w.error and not w.open %}<p class="help">Ended: {{ w.error }}</p>{% endif %}
-    {% else %}
-      <p>No task since this portal started.</p>
-    {% endif %}
-    {% if not rc.ready %}<p class="help">skippy-pc isn't reporting the workshop right now.</p>{% endif %}
-    <p class="row">
-      {% if w and w.open %}{{ button('workshop-cancel', 'danger') }} {{ button('workshop-clear') }}{% endif %}
-      {% if rc.paused %}{{ button('workshop-resume') }}{% else %}{{ button('workshop-pause', 'danger') }}{% endif %}
-    </p>
-    <p class="help">Cancel withdraws a message still waiting for skippy-pc (it is never delivered) and tells a running one
-      to stop. Clear ends a record the chat is stuck on. The pause lives in the portal's memory: a deploy or restart of the
-      portal turns it back on.</p>
-  </div>
-
-  {% set st = rc.starter %}
-  <div class="card" id="starter">
-    <h3>Start or stop SkippyTel</h3>
-    {% if st and st.online %}
-      <p>The starter on skippy-pc answered {{ st.age_s }} s ago:
-        Docker {{ 'up' if st.status.docker else 'DOWN' }},
-        {{ st.status.containers_up or 0 }} of {{ st.status.containers_total or 0 }} containers,
-        bridge {{ 'answering' if st.status.bridge else 'DOWN' }}{% if st.status.busy %} (a run is going){% endif %}
-        {% if st.status.working %}&middot; <b>{{ st.status.working }}</b>{% endif %}</p>
-      <p class="row">{{ button('starter-start') }} {{ button('starter-restart') }}</p>
-      <form class="inline" method="post" action="{{ url_for('recovery.act', action='starter-stop') }}" data-ask="{{ rc.actions['starter-stop'].ask }}"
-            onsubmit="this.elements.confirm.value = 'yes';">
-        <input type="hidden" name="confirm" value="">
-        <label class="field" for="starter-resume">Back on</label>
-        <select id="starter-resume" name="resume">
-          <option value="7am">tomorrow at 7 AM (by itself)</option>
-          <option value="4h">in 4 hours (by itself)</option>
-          <option value="manual">only when I start it</option>
-        </select>
-        <button type="submit" class="danger">{{ rc.actions['starter-stop'].label }}</button>
-      </form>
-      {% if st.status.resume_at %}<p class="warn">It is down on purpose and will start itself at {{ st.status.resume_at.replace('T', ' ') }}. Start SkippyTel now cancels that.</p>{% endif %}
-      <p class="help">A small program on skippy-pc itself, so it works when Docker or the bridge is down. It only ever does these three things.</p>
-    {% else %}
-      <p class="warn">The starter on skippy-pc isn't answering{% if st and st.age_s is not none %} (last heard {{ st.age_s // 60 }} min ago){% endif %}: the PC is off, asleep or at
-        the sign-in screen, or the starter isn't installed (<code class="code">bash tools/install_starter_startup.sh</code> at the PC). Nothing remote can wake a PC that is off.</p>
-    {% endif %}
-    {% for r in (st.recent if st else []) %}
-      <p class="{{ '' if r.ok else 'warn' }} help">{{ r.op }} {{ r.age_s // 60 }} min ago by {{ r.by }}: {{ r.summary }}</p>
+  <ul class="checklist" aria-live="polite">
+    {% for r in rs.rows %}
+    <li data-ok="{{ 'yes' if r.ok else 'no' }}"><i class="lamp" data-s="{{ 'on' if r.ok else 'off' }}"></i>
+      <span class="what">{{ r.label }}{% if r.short %} <code class="code">{{ r.short }}</code>{% endif %}</span>
+      <span class="why">{{ r.why }}</span></li>
     {% endfor %}
-  </div>
+  </ul>
 
-  {% set pc = rc.pc %}
-  <div class="card" id="pc-recovery">
-    <h3>skippy-pc</h3>
-    {% if not pc.online %}
-      <p class="warn">skippy-pc isn't reporting, so these buttons can't reach it. Its own watchdogs restart what crashes; if it
-        stays silent, it needs a look in person (power, network, Docker Desktop).</p>
-    {% else %}
-      <p class="help">Each button is a job for the home reporter, done by the bridge on the PC, and answers here within
-        {{ rc.pc_wait }} s. Nothing is rebuilt and nothing is deleted.</p>
-      <form class="inline" method="post" action="{{ url_for('recovery.act', action='pc-restart-service') }}"
-            data-ask="{{ rc.actions['pc-restart-service'].ask }}"
-            onsubmit="this.elements.confirm.value = 'yes';">
-        <input type="hidden" name="confirm" value="">
-        <label class="field" for="pc-service">Service</label>
-        <select id="pc-service" name="service">
-          {% for s in pc.services %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
-        </select>
-        <button type="submit">{{ rc.actions['pc-restart-service'].label }}</button>
-      </form>
-      <form class="inline" method="post" action="{{ url_for('recovery.act', action='pc-reset-workshop') }}"
-            data-ask="{{ rc.actions['pc-reset-workshop'].ask }}"
-            onsubmit="this.elements.confirm.value = 'yes';">
-        <input type="hidden" name="confirm" value="">
-        <label class="field" for="pc-project">Private Skippy's copy of</label>
-        <select id="pc-project" name="project">
-          {% for p in pc.projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
-        </select>
-        <button type="submit">{{ rc.actions['pc-reset-workshop'].label }}</button>
-      </form>
-      <p class="row" style="margin-top:8px">{{ button('pc-restart-bridge') }}</p>
-      <p class="row">{{ button('pc-funnel-status') }} {{ button('pc-funnel-on') }} {{ button('pc-funnel-off', 'danger') }}</p>
-      <p class="help">Restart service: a stuck gate, Ollama holding the GPU, a reporter that went odd. Reset Skippy's copy:
-        its clone got into a mess (stash and rescue branch keep what was there). Funnel is the internet door of Bilby's
-        Audio Service (:443) and Nagatha's Video Service (:8443).</p>
-    {% endif %}
-  </div>
-
-  {% if rc.log %}
-  <div class="card" id="recovery-log">
-    <h3>Recent recovery actions</h3>
-    {% for e in rc.log %}
-      <p class="{{ '' if e.ok else 'warn' }}"><span class="help">{{ e.when }}</span>
-        <b>{{ e.action }}</b> by {{ e.by }}: {{ e.result }}</p>
-    {% endfor %}
-    <p class="help">Kept in memory (the last 20) and in Cloud Logging as <code class="code">"event": "recovery"</code>.</p>
-  </div>
+  {% if rs.repair %}
+  <p class="repair-state">{% if not rs.repair.done %}<i class="lamp" data-s="on"></i> Putting skippy-pc and Skippy Core back…{% elif rs.repair.ok %}Put back: {{ rs.repair.summary }}{% else %}<span class="warn">It didn't all come back: {{ rs.repair.summary }}</span>{% endif %}</p>
   {% endif %}
-</section>
+
+  {% if rs.actions %}
+  <h3>What the doctor did lately</h3>
+  <ul class="doctor-log">
+    {% for a in rs.actions %}<li>{{ (a.ago_s // 60) }} min ago: {{ a.what }}{% if a.why %} ({{ a.why }}){% endif %}{% if a.by != 'doctor' %} · {{ a.by }}{% endif %}</li>{% endfor %}
+  </ul>
+  {% endif %}
+</div>
+<script>
+  (function () {
+    // While the Recovery pane is open, the checklist follows what the doctor sees (every 10 s); nothing is fetched while it is closed.
+    const box = document.getElementById("recovery"), list = box.querySelector(".checklist"), pane = box.closest(".apane");
+    async function refresh() {
+      if (pane && pane.hidden) return;
+      try {
+        const r = await fetch("{{ url_for('recovery.state_json') }}", {cache: "no-store"});
+        if (!r.ok) return;
+        const s = await r.json();
+        list.replaceChildren(...s.rows.map(row => {
+          const li = document.createElement("li"); li.dataset.ok = row.ok ? "yes" : "no";
+          const lamp = document.createElement("i"); lamp.className = "lamp"; lamp.dataset.s = row.ok ? "on" : "off";
+          const what = document.createElement("span"); what.className = "what"; what.textContent = row.label + (row.short ? " " + row.short : "");
+          const why = document.createElement("span"); why.className = "why"; why.textContent = row.why || "";
+          li.append(lamp, what, why); return li;
+        }));
+        const rep = box.querySelector(".repair-state");
+        if (rep && s.repair) rep.textContent = !s.repair.done ? "Putting skippy-pc and Skippy Core back…" : (s.repair.ok ? "Put back: " : "It didn't all come back: ") + (s.repair.summary || "");
+      } catch (e) { /* the portal blinked: the next look tries again */ }
+    }
+    setInterval(refresh, 10000);
+  })();
+</script>

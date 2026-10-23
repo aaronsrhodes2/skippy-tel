@@ -1,4 +1,5 @@
-"""The starter on skippy-pc: it does three things, in the right order, refuses everything else, never touches a running Skippy, and keeps polling while Docker starts."""
+"""The starter on skippy-pc: start, stop, restart, heal one thing and repair everything, in the right order; it refuses everything else, never touches a
+running Skippy, stops processes by PID only, heals a hung Docker by itself, and keeps polling while Docker starts."""
 import sys
 import tempfile
 import urllib.error
@@ -18,6 +19,7 @@ class World:
     def __init__(self, docker=True, containers=("running",) * 3, bridge=False, busy=False, docker_wakes=True):
         self.docker, self.states, self.bridge_up, self.busy, self.docker_wakes = docker, list(containers), bridge, busy, docker_wakes
         self.cmds, self.spawned, self.posts, self.portal_down = [], [], [], False
+        self.building, self.core_says = "", '{"state": "ok", "detail": "repaired"}' 
         self.pending_commands = []
         self.t = [0.0]
 
@@ -36,9 +38,21 @@ class World:
         if cmd[0] == "powershell.exe" and "-File" in cmd:                          # the clean restart
             self.docker = self.docker_wakes
             return 0, ""
-        if cmd[0] == "powershell.exe":                                              # kill the bridge
-            self.bridge_up = False
+        if cmd[0] == "powershell.exe":                                              # who is building? (read only)
+            return 0, self.building
+        if cmd[0] == "netstat":
+            listening = "  TCP    0.0.0.0:9337           0.0.0.0:0              LISTENING       4242\n" if self.bridge_up else ""
+            return 0, listening + "  TCP    0.0.0.0:3003           0.0.0.0:0              LISTENING       999"
+        if cmd[0] == "taskkill":
+            if cmd[2] == "4242":
+                self.bridge_up = False
             return 0, ""
+        if cmd[:4] == ["docker", "compose", "config", "--services"]:
+            return 0, "flask-api\nvoice-gate\nollama"
+        if cmd[0] == "ssh":
+            return 0, "12:00 deploying\n" + self.core_says
+        if cmd[0] == "git":
+            return 0, "main" if "rev-parse" in cmd else ""
         return 0, ""
 
     def spawn(self, cmd, env=None, log=""):
@@ -267,3 +281,67 @@ def test_the_portal_s_resume_choice_reaches_the_stop_and_a_junk_one_becomes_the_
     w2.pending_commands = [{"id": "ffff6666", "op": "stop", "resume": "rm -rf"}]
     s2.poll_once(threaded=False)
     assert s2.resume_at == datetime(2026, 10, 13, 7, 0)
+
+
+# ── heal one thing, repair everything, and Docker by itself ──
+def test_heal_recreates_one_compose_service_the_safe_way_and_refuses_names_it_does_not_know():
+    s, w = make()
+    ok, text = s.do("heal", arg="voice-gate")
+    assert ok and text == "voice-gate recreated."
+    compose = [c[2:] for c in w.cmds if c[:2] == ["docker", "compose"] and c[2] in ("stop", "rm", "up")]
+    assert compose == [["stop", "voice-gate"], ["rm", "-f", "voice-gate"], ["up", "-d", "--build", "voice-gate"]]
+    for bad in ("nginx", "voice-gate; rm -rf /", "../x", ""):
+        assert s.do("heal", arg=bad)[0] is False, bad
+
+
+def test_heal_leaves_a_service_alone_while_someone_is_building():
+    s, w = make()
+    w.building = "docker  compose up -d --build tts-studio"
+    ok, text = s.do("heal", arg="voice-gate")
+    assert not ok and "building" in text and not any(c[:3] == ["docker", "compose", "rm"] for c in w.cmds)
+
+
+def test_the_bridge_is_restarted_by_its_pid_never_mid_run_and_never_by_name():
+    s, w = make(bridge=True)
+    ok, text = s.do("heal", arg="bridge")
+    assert ok and ["taskkill", "/PID", "4242", "/T", "/F"] in w.cmds and w.bridge_up
+    assert not any("Stop-Process" in " ".join(c) or "-match" in " ".join(c) for c in w.cmds)
+    s2, w2 = make(bridge=True, busy=True)
+    ok, text = s2.do("heal", arg="bridge")
+    assert not ok and "middle of a run" in text and not any(c[0] == "taskkill" for c in w2.cmds)
+
+
+def test_skippy_core_is_repaired_over_ssh_with_its_one_fixed_command():
+    s, w = make()
+    ok, text = s.do("heal", arg="core")
+    (ssh,) = [c for c in w.cmds if c[0] == "ssh"]
+    assert ok and "repaired" in text and ssh[-1] == "repair" and ssh[-2].endswith("/core/deployer/deployer.py") and "sudo" in ssh
+    assert "BatchMode=yes" in ssh and ss.CORE_SSH in ssh
+    w.core_says = '{"state": "repair-failed", "detail": "smoke: chat: no reply"}'
+    assert s.do("heal", arg="core") == (False, "Skippy Core: smoke: chat: no reply")
+
+
+def test_repair_puts_everything_back_in_order_and_never_discards_local_work():
+    s, w = make(docker=False, bridge=True)
+    ok, text = s.do("repair", arg="ollama,nonsense")
+    assert ok, text
+    order = [" ".join(c[:6]) for c in w.cmds if c[0] in ("git", "ssh", "taskkill") or c[:3] in (["docker", "compose", "up"], ["docker", "compose", "rm"])]
+    git = [c for c in w.cmds if c[0] == "git"]
+    assert any("merge" in c and "--ff-only" in c for c in git) and not any(x in c for c in git for x in ("reset", "checkout", "stash", "clean"))
+    rebuild = order.index("docker compose up -d --build --remove-orphans")         # (Docker's clean restart brings the stack up first)
+    assert order.index(next(o for o in order if o.startswith("git"))) < rebuild
+    assert ["docker", "compose", "rm", "-f", "ollama"] in w.cmds and not any("nonsense" in c for c in w.cmds)
+    assert order[-1].startswith("ssh") and "Docker restarted clean" in text and "main pulled." in text
+
+
+def test_a_hung_docker_gets_the_clean_restart_by_itself_after_two_minutes_but_not_when_stopped_on_purpose():
+    s, w = make(docker=False)
+    assert s.watch_docker() is False                                     # first sight: it starts counting
+    w.t[0] += ss.DOCKER_DOWN_HEAL_S - 1
+    assert s.watch_docker() is False
+    w.t[0] += 2
+    assert s.watch_docker() is True and w.docker and s.results[-1]["summary"].startswith("By itself: Docker restarted clean")
+    s2, w2 = make(docker=False)
+    s2._save_resume(NOW[0])                                              # stopped on purpose, back at 7: hands off
+    w2.t[0] += 10 * ss.DOCKER_DOWN_HEAL_S
+    assert s2.watch_docker() is False and s2.watch_docker() is False and not w2.docker

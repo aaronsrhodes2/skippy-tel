@@ -35,11 +35,18 @@ class Fake(dep.Deployer):
             rc = 1                                           # the big general model's files aren't there
         return subprocess.CompletedProcess([], rc, "", "missing /srv/models/x" if rc else "")
 
-    def compose_up(self, full):
+    def compose_up(self, full, recreate=False):
         if not self._fake().get("compose", True):
             raise subprocess.CalledProcessError(1, "compose", "", "build failed")
         self.running = (git(self.repo, "rev-parse", "HEAD"), full)
         self.deployed.append(self.running)
+        self.recreated = recreate
+
+    def sh(self, cmd, *, full="", timeout=1800, check=True):
+        if cmd[0] != "docker":                               # git is real here; docker is the one thing faked
+            return super().sh(cmd, full=full, timeout=timeout, check=check)
+        self.ran = getattr(self, "ran", []) + [cmd]
+        return subprocess.CompletedProcess(cmd, 0, "", "")
 
     def smoke(self, full):
         ok = self._fake().get("smoke", True)
@@ -204,3 +211,42 @@ def test_ci_state_reads_the_newest_check_run(box, monkeypatch):
     assert real.ci_state("abc")[0] == "pending"
     real.s = {**real.s, "CI_WORKFLOW": ""}
     assert real.ci_state("abc") == ("success", "no CI gate")
+
+
+# ── repair and the doctor (the portal's one Recovery operation; skippy-core-doctor.timer) ──
+def test_repair_recreates_the_last_good_deploy_and_smoke_tests_it(box):
+    d, commit, first = box
+    d.run()
+    commit(smoke=False)                                       # a newer commit that would go red: repair stays on the last good one
+    row = d.repair()
+    assert row["state"] == "ok" and row["detail"] == "repaired" and d.running == (first, "") and d.recreated is True
+
+
+def test_a_repair_that_still_fails_its_smoke_says_so(box):
+    d, commit, first = box
+    (d.repo / "fake.json").write_text(json.dumps({"smoke": False}))
+    row = d.repair()
+    assert row["state"] == "repair-failed" and row["stage"] == "smoke"
+
+
+def test_the_doctor_restarts_llama_swap_after_two_failures_twice_an_hour_then_repairs_once(box):
+    d, commit, first = box
+    d.run()
+    t = [1_000_000.0]
+    look = lambda ok: d.doctor(answers=lambda: (ok, "" if ok else "no answer: TimeoutError"), now=t[0])   # noqa: E731
+    assert look(True) == {"ok": True}
+    assert look(False)["did"] == "watching"                  # one failure: a blip
+    assert look(False)["did"] == "restarted llama-swap" and d.ran[-1][-2:] == ["restart", "llm"]
+    assert look(False)["did"] == "restarted llama-swap"
+    assert look(False)["did"].startswith("repaired: ok") and d.recreated is True
+    assert look(False)["did"].startswith("still failing")     # and then it waits for the next hour
+    assert look(True) == {"ok": True}
+    t[0] += 3601
+    look(False)
+    assert look(False)["did"] == "restarted llama-swap"       # a new hour: it starts again
+
+
+def test_with_no_deploy_of_record_a_repair_only_restarts_what_runs(box):
+    d, commit, first = box                                    # never deployed: the stack was set up by hand
+    row = d.repair()
+    assert row["state"] == "ok" and d.deployed == [] and d.ran[-1][-1] == "restart"   # nothing rendered, nothing rebuilt

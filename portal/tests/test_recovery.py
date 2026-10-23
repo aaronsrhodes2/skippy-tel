@@ -1,6 +1,6 @@
-"""The Admin page's recovery buttons (recovery.py, recovery_web.py): the GitHub client's allow-list, the pure views, every
-route's guards (admin only, own origin, confirm, rate limit), the private Skippy's cancel / clear / pause, and the cards
-with and without the token. The token must never appear in a page, a flash, a log line or an error."""
+"""Recovery (recovery.py, recovery_web.py, doctor.py): the GitHub client's allow-list, the pure views, the private Skippy's cancel / clear /
+pause, and the ONE operation, "Put everything back": its guards (admin only, own origin, rate limit, no confirm box), what it does on the
+portal's side, and the checklist. The token must never appear in a page, a flash, a log line or an error."""
 import html
 import json
 import re
@@ -84,7 +84,7 @@ def test_each_call_goes_to_its_one_endpoint_with_the_token_only_in_the_header():
 
 def test_no_other_url_is_ever_called_even_from_inside_the_client():
     gh, t = client_with()
-    for method, path in (("GET", f"/repos/{REPO}/contents/portal/app.py"), ("POST", f"/repos/{REPO}/actions/workflows/deploy.yml/dispatches"),
+    for method, path in (("GET", f"/repos/{REPO}/contents/portal/app.py"), ("POST", f"/repos/{REPO}/actions/workflows/core.yml/dispatches"),
                          ("PUT", f"/repos/{REPO}/actions/workflows/deploy.yml/disable"), ("DELETE", f"/repos/{REPO}/actions/runs/9"),
                          ("GET", "/repos/someone/else/actions/workflows/deploy.yml/runs?branch=main&per_page=20"),
                          ("POST", f"/repos/{REPO}/actions/runs/9/cancel/../../secrets"),
@@ -294,210 +294,88 @@ def admin_page(client) -> str:
     return " ".join(html.unescape(client.get("/admin").data.decode()).split())
 
 
-def press(client, action, confirm="yes", headers=ORIGIN, **fields):
-    return client.post(f"/admin/recovery/{action}", data={"confirm": confirm, **fields}, headers=headers)
+def press(client, headers=ORIGIN):
+    return client.post("/admin/recovery/repair", data={}, headers=headers)
 
 
-def test_only_the_captain_can_press_them(env):
-    _, client, t = env
-    assert press(client, "rollback").status_code == 302                        # signed out: to sign-in
+def test_only_the_captain_can_press_it_and_only_from_the_portals_page(env, capsys):
+    app, client, t = env
+    assert press(client).status_code in (302, 401, 403) and not [c for c in t.calls if c["method"] == "POST"]   # signed out
     login(client, FRIEND)
-    for action in recovery.ACTIONS:
-        assert press(client, action).status_code == 403, action
-    _add_friend(client, "pal@example.com", ["skippy", "dragonwilds", "experiments"])
-    login(client, "pal@example.com")
-    assert press(client, "workshop-pause").status_code == 403
-    assert t.calls == []
-
-
-def test_a_post_from_anywhere_else_is_refused(env, capsys):
-    _, client, t = env
+    assert press(client).status_code == 403
+    assert client.get("/admin/recovery/state").status_code == 403
     login(client, ADMIN)
-    assert press(client, "rollback", headers={}).status_code == 403                                 # no Origin, no Referer
-    assert press(client, "rollback", headers={"Origin": "https://evil.example"}).status_code == 403
-    assert press(client, "rollback", headers={"Referer": "https://evil.example/admin"}).status_code == 403
-    assert t.calls == []
-    assert '"result": "refused: the request didn\'t come from the portal\'s own page"' in capsys.readouterr().out
-    assert press(client, "rollback", headers={"Referer": "http://localhost/admin"}).status_code == 302   # Referer fallback
-
-
-def test_nothing_happens_without_a_confirm_the_server_asks_instead(env):
-    _, client, t = env
-    login(client, ADMIN)
-    page = press(client, "rollback", confirm="", revision="latest")
-    html = page.data.decode()
-    assert page.status_code == 200 and "Roll the portal back?" in html and 'name="confirm" value="yes"' in html
-    assert 'name="revision" value="latest"' in html                       # the answer carries the same input forward
-    assert t.calls == []
-
-
-def test_an_unknown_action_is_a_404(env):
-    _, client, t = env
-    login(client, ADMIN)
-    assert press(client, "deploy").status_code == 404 and press(client, "disable-workflows").status_code == 404
-    assert t.calls == []
-
-
-def test_rollback_dispatches_with_a_checked_input_and_is_rate_limited(env, capsys):
-    _, client, t = env
-    login(client, ADMIN)
-    assert press(client, "rollback", revision="skippy-portal-1; rm -rf /").status_code == 302
-    assert t.calls == []                                                   # refused before GitHub was asked
-    press(client, "rollback", revision="")
-    assert [c["body"] for c in t.calls] == [{"ref": "main", "inputs": {"revision": ""}}]
-    press(client, "rollback", revision="")                                 # again within 2 minutes: refused
-    assert len(t.calls) == 1
-    out = capsys.readouterr().out
-    lines = [json.loads(line) for line in out.splitlines() if '"event": "recovery"' in line]
-    assert [(e["action"], e["ok"]) for e in lines] == [("rollback", False), ("rollback", True), ("rollback", False)]
-    assert all(e["by"] == ADMIN for e in lines) and "already done just now" in lines[-1]["result"]
-    page = admin_page(client)
-    assert "Rollback started" in page and "Recent recovery actions" in page
-
-
-def test_undo_sends_latest(env):
-    _, client, t = env
-    login(client, ADMIN)
-    press(client, "undo-rollback")
-    assert t.calls[-1]["body"] == {"ref": "main", "inputs": {"revision": "latest"}}
-
-
-def test_re_run_targets_the_newest_run_and_only_when_it_failed():
-    _, client, t = make_app(Transport(runs=[run(9, SHA[1], conclusion="failure"), run(8, SHA[0])]))
-    login(client, ADMIN)
-    press(client, "rerun-failed")
-    assert t.calls[-1]["url"].endswith("/actions/runs/9/rerun-failed-jobs")
-    _, client, t = make_app(Transport(runs=[run(9, SHA[1]), run(8, SHA[0], conclusion="failure")]))
-    login(client, ADMIN)
-    press(client, "rerun-failed")
-    assert all(c["method"] == "GET" for c in t.calls)                     # looked, didn't touch the older failure
-    assert "nothing to re-run" in admin_page(client)
-
-
-def test_cancel_stuck_cancels_only_a_run_older_than_twenty_minutes_and_dispatches_no_rollback(monkeypatch):
-    real_now = datetime.now(timezone.utc)
-    stuck = {**run(9, SHA[1], "in_progress"), "created_at": (real_now - timedelta(minutes=25)).strftime("%Y-%m-%dT%H:%M:%SZ")}
-    _, client, t = make_app(Transport(runs=[stuck]))
-    login(client, ADMIN)
-    press(client, "cancel-stuck")
-    posts = [c for c in t.calls if c["method"] == "POST"]
-    assert [c["url"].rsplit("/actions/", 1)[1] for c in posts] == ["runs/9/cancel"]   # its own rollback step does the rest (A2)
-    fresh = {**stuck, "created_at": (real_now - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")}
-    _, client, t = make_app(Transport(runs=[fresh]))
-    login(client, ADMIN)
-    press(client, "cancel-stuck")
+    assert press(client, headers={"Origin": "https://evil.example"}).status_code == 403
+    assert "didn't come from the portal's own page" in capsys.readouterr().out          # logged
     assert not [c for c in t.calls if c["method"] == "POST"]
 
 
-def test_a_github_failure_is_a_plain_flash_and_the_token_never_shows_anywhere(capsys):
-    app, client, t = make_app(Transport(status=401))
+def test_it_acts_at_once_redeploys_a_failed_portal_clears_stuck_records_and_says_skippy_pc_is_unreachable(env):
+    app, client, t = env
     login(client, ADMIN)
-    press(client, "rollback")
+    resp = press(client)
+    assert resp.status_code == 302 and resp.headers["Location"].endswith("#recovery")       # no confirm page: it acted
+    posts = [c for c in t.calls if c["method"] == "POST"]
+    assert [c["url"].split("/actions/")[1] for c in posts] == ["workflows/deploy.yml/dispatches"] and posts[0]["body"] == {"ref": "main"}
     page = admin_page(client)
-    assert "refused the portal's token" in page
-    out = capsys.readouterr().out
-    assert TOKEN not in page and TOKEN not in out and "Bad credentials" not in page
-    assert "GITHUB_ACTIONS_TOKEN" not in app.config                        # templates are handed app.config
-
-
-def test_the_token_from_settings_goes_into_the_client_and_out_of_the_config():
-    app = portal.create_app({**SETTINGS, "GITHUB_ACTIONS_TOKEN": TOKEN}, vm=FakeVm(), skippy=FakeSkippy())
-    assert "GITHUB_ACTIONS_TOKEN" not in app.config and app.extensions["recovery"]["github"].configured
-    assert not portal.create_app(dict(SETTINGS), vm=FakeVm(), skippy=FakeSkippy()).extensions["recovery"]["github"].configured
-
-
-def test_workshop_buttons_pause_cancel_and_clear_through_the_routes(env):
-    app, client, _ = env
-    login(client, ADMIN)
-    h = {"X-Workshop": "1"}
-    task = client.post("/me/workshop/send", json={"conv": CONV, "message": "go"}, headers=h).get_json()["task"]
-    home = app.extensions["home"]
-    press(client, "workshop-cancel")
-    assert home.jobs_reply()["jobs"] == []
-    assert client.get(f"/me/workshop/events?task={task}", headers=h).get_json()["state"] == "error"
-    press(client, "workshop-pause")
-    refused = client.post("/me/workshop/send", json={"conv": CONV, "message": "again"}, headers=h)
-    assert refused.status_code == 503 and "paused" in refused.get_json()["error"]
-    assert "Paused by" in admin_page(client)
-    press(client, "workshop-resume")
-    task2 = client.post("/me/workshop/send", json={"conv": CONV, "message": "again"}, headers=h).get_json()["task"]
-    press(client, "workshop-clear")
-    assert client.get(f"/me/workshop/events?task={task2}", headers=h).get_json()["error"] == "Cleared from the Admin page."
-
-
-def test_the_workshop_buttons_work_without_the_token(capsys):
-    _, client, t = make_app(token="")
-    login(client, ADMIN)
-    assert press(client, "workshop-pause").status_code == 302 and "paused" in admin_page(client)
-    assert press(client, "rollback").status_code == 302
-    assert t.calls == [] and "aren't configured" in admin_page(client)
-
-
-# ── the cards ──────────────────────────────────────────────────────────────────────────────────────
-def test_without_the_token_the_pipeline_card_says_so_and_has_no_buttons():
-    _, client, t = make_app(token="")
-    login(client, ADMIN)
-    page = admin_page(client)
-    assert 'id="live-version"' in page and 'id="deploy-pipeline"' in page and 'id="workshop-recovery"' in page
-    assert "Not configured" in page
-    for action in ("rollback", "undo-rollback", "rerun-failed", "cancel-stuck"):
-        assert f"/admin/recovery/{action}" not in page, action
-    assert "/admin/recovery/workshop-pause" in page                       # Phase 1 needs no token
-    assert t.calls == []
-
-
-def test_with_the_token_the_cards_show_runs_and_how_far_main_is_ahead(monkeypatch):
-    monkeypatch.setenv("GIT_SHA", SHA[0])
-    _, client, t = make_app(Transport(runs=[run(10, SHA[2], "in_progress", minutes_ago=1), run(9, SHA[1], conclusion="failure"),
-                                            run(8, SHA[0])]))
-    login(client, ADMIN)
-    page = admin_page(client)
-    assert f"main is 2 pushes ahead of what's live (newest: {SHA[2][:7]}, running)." in page
-    assert f"https://github.com/{REPO}/actions/runs/9" in page and SHA[1][:7] in page
-    for action in ("rollback", "undo-rollback"):
-        assert f"/admin/recovery/{action}" in page
-    assert "/admin/recovery/rerun-failed" not in page                     # the newest run is running, not failed
-    assert "/admin/recovery/cancel-stuck" not in page                     # and only a minute old
-    assert "undone by" in page or "next push to main" in page             # audit A3, said plainly
-    assert "GitHub mobile" in page
+    assert "redeploying main (the newest deploy" in page and "starter isn't answering" in page
     assert TOKEN not in page
-    client.get("/admin")
-    assert sum(c["method"] == "GET" for c in t.calls) == 1               # the run list is cached between page loads
+    assert press(client).status_code == 302 and press(client).status_code == 302
+    assert "Already putting everything back" in admin_page(client)                          # twice in five minutes, then it waits
 
 
-def test_the_stuck_and_failed_buttons_appear_only_when_they_apply():
-    _, client, _ = make_app(Transport(runs=[run(9, SHA[1], "in_progress", minutes_ago=25), run(8, SHA[0])]))
+def test_a_healthy_portal_is_not_redeployed_and_a_running_deploy_is_left_alone():
+    app, client, t = make_app(Transport(runs=[run(9, SHA[0])]))
     login(client, ADMIN)
+    press(client)
+    assert not [c for c in t.calls if c["method"] == "POST"]
+    app2, client2, t2 = make_app(Transport(runs=[run(10, SHA[2], status="in_progress"), run(9, SHA[0])]))
+    login(client2, ADMIN)
+    press(client2)
+    assert not [c for c in t2.calls if c["method"] == "POST"]
+
+
+def test_with_the_starter_answering_the_button_asks_it_to_put_skippy_pc_back_with_what_is_failing(env):
+    app, client, t = env
+    starter, doctor = app.extensions["starter"], app.extensions["doctor"]
+    starter.poll({"status": {"docker": True, "containers_up": 9, "containers_total": 10, "bridge": True}})
+    doctor.observe_home({"ollama": {"ok": False, "ms": 5000, "why": "no answer in time"}, "whisper": {"ok": True, "ms": 12, "why": ""}})
+    login(client, ADMIN)
+    press(client)
+    (cmd,) = starter.poll({"status": {"docker": True}})
+    assert cmd["op"] == "repair" and cmd["arg"] == "ollama"
+    state = client.get("/admin/recovery/state").get_json()
+    assert state["repair"]["done"] is False
+    starter.poll({"results": [{"id": cmd["id"], "ok": True, "summary": "Docker up; 10 of 10 containers; ollama recreated."}]})
+    state = client.get("/admin/recovery/state").get_json()
+    assert state["repair"] == {**state["repair"], "done": True, "ok": True, "summary": "Docker up; 10 of 10 containers; ollama recreated."}
+
+
+def test_the_checklist_shows_every_part_and_why_and_a_friend_never_sees_it(env):
+    app, client, t = env
+    app.extensions["doctor"].observe_home({"voice-gate": {"ok": False, "ms": 30, "why": "Whisper isn't answering behind it"}})
+    login(client, ADMIN)
+    rows = {r["name"]: r for r in client.get("/admin/recovery/state").get_json()["rows"]}
+    assert rows["portal"]["ok"] is False and "failed" in rows["portal"]["why"]
+    assert rows["starter"]["ok"] is False and rows["voice-gate"]["why"] == "Whisper isn't answering behind it"
+    assert {"portal", "starter", "home-reporter", "voice-gate", "workshop"} <= set(rows)
     page = admin_page(client)
-    assert "/admin/recovery/cancel-stuck" in page and "/admin/recovery/rerun-failed" not in page
-    assert re.search(rf"Deploy {SHA[1][:7]} started 2\d min ago and is still running: stuck\.", page)   # NOW is import time
-    _, client, _ = make_app(Transport(runs=[run(9, SHA[1], conclusion="failure"), run(8, SHA[0])]))
-    login(client, ADMIN)
-    page = admin_page(client)
-    assert "/admin/recovery/rerun-failed" in page and "/admin/recovery/cancel-stuck" not in page
-
-
-def test_the_buttons_act_at_once_with_no_pop_up(env):
-    """The Captain's rule: no confirm boxes. Each form fills in confirm=yes itself; a POST without it (not from this page)
-    still gets the server's own confirm page (test_nothing_happens_without_a_confirm_the_server_asks_instead)."""
-    _, client, _ = env
-    login(client, ADMIN)
-    raw = client.get("/admin").data.decode()
-    forms = raw.count('action="/admin/recovery/')
-    assert forms >= 4 and raw.count("onsubmit=\"this.elements.confirm.value = 'yes';\"") == forms
-    assert "confirm(" not in raw
-
-
-def test_a_friend_never_sees_the_cards(env):
-    _, client, t = env
-    _add_friend(client, "pal@example.com", ["skippy"])
-    login(client, "pal@example.com")
-    assert client.get("/admin").status_code == 403
-    assert "/admin/recovery" not in client.get("/").data.decode()
-    assert t.calls == []
+    assert "Put everything back" in page and 'action="/admin/recovery/repair"' in page and "Whisper isn't answering behind it" in page
+    for gone in ("Roll back the portal", "Restart service", "Start SkippyTel", "Cancel the current run", "are you sure"):
+        assert gone not in page, gone
+    login(client, FRIEND)
+    assert "Put everything back" not in client.get("/").data.decode()
 
 
 def test_recovery_is_never_a_chat_tool():
     import chat_tools
-    import inspect
-    assert "recovery" not in inspect.getsource(chat_tools).lower()
+    names = {t["name"] for t in chat_tools.ChatTools(FakeVm(), is_admin=True).schemas()}
+    assert not {n for n in names if "recover" in n or "repair" in n or "rollback" in n}
+
+
+def test_the_one_dispatch_it_may_send_besides_rollback_is_a_deploy_of_main():
+    gh, t = client_with()
+    gh.dispatch_deploy()
+    (call,) = t.calls
+    assert call["method"] == "POST" and call["url"].endswith(f"/repos/{REPO}/actions/workflows/deploy.yml/dispatches")
+    assert call["body"] == {"ref": "main"}

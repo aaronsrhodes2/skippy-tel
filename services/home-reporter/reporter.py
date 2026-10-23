@@ -20,6 +20,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import doctor_checks
 import localinfo
 
 PORTAL = os.environ.get("PORTAL_URL", "https://skippy-portal-1015050363686.us-west1.run.app").rstrip("/")
@@ -197,6 +198,8 @@ def gather() -> dict:
     probes.start("local", LOCAL.snapshot)                       # weather and the commute (localinfo.py), cached inside: cheap to ask every report
     for name, probe in _capability_probes().items():
         probes.start(f"cap_{name}", probe)
+    for name, (url, ok) in doctor_checks.checks().items():       # the doctor's tests (doctor_checks.py): does each service do its job?
+        probes.start(f"doc_{name}", lambda name=name, url=url, ok=ok: doctor_checks.run_one(name, url, ok))
     bilby = probes.get("bilby")
     # Setlist and next suggestion only exist on the Mac's DJ assistant (so they wait for the look at Bilby).
     mac_up = bool(MAC) and bool(bilby) and bilby.get("source") == "traktor"
@@ -222,6 +225,9 @@ def gather() -> dict:
         "capabilities": {name: got.get(f"cap_{name}") or _capability_down(name) for name in _capability_probes()},
         "site_activity": got.get("site_activity"),
         "local": got.get("local"),
+        # each test's answer; one that missed the report's deadline is a failure ("no answer in time"), never the last known one
+        "doctor": {name: got.get(f"doc_{name}") or {"ok": False, "ms": int(GATHER_BUDGET_S * 1000), "why": "no answer in time"}
+                   for name in doctor_checks.checks()},
     }
 
 
@@ -811,6 +817,8 @@ def run_job(job: dict, token: str = "") -> dict:
         return workshop_conversations(job, token)
     if job.get("kind") == "workshop_new_folder":
         return workshop_new_folder(job, token)
+    if job.get("kind") == "doctor_deep":                      # a repair's last step: the tests that do real GPU work (doctor_checks.deep)
+        return {"result": doctor_checks.deep()}
     if job.get("kind") == "make_music":
         return make_music(job, token)
     if job.get("kind") == "make_image":

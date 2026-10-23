@@ -1,5 +1,5 @@
-"""The starter link: the portal can ask skippy-pc's always-on manager to start or stop the stack, only the Captain can, only three things can be asked, and a PC that
-is not there says so instead of pretending."""
+"""The starter link: the portal asks skippy-pc's always-on manager (tools/skippy_starter.py) to start, stop, heal one thing or put everything
+back; only what is in its lists can be asked, and a PC that is not there says so instead of pretending."""
 import threading
 import time
 
@@ -38,14 +38,16 @@ def test_the_state_machine_queues_redelivers_and_records_results():
     assert s.online() is False                                                       # silent for too long: not there
 
 
-def test_only_the_three_operations_can_be_queued_and_the_queue_is_small():
+def test_only_its_operations_can_be_queued_and_the_queue_is_small():
     s = Starter()
     for bad in ("format", "", "START", "start; rm", None):
         with pytest.raises(ValueError):
             s.request(bad, ADMIN)
-    for op in starter_mod.OPS:
+    for op in ("start", "stop", "restart"):
         s.request(op, ADMIN)
     assert sorted(w["op"] for w in s.view()["waiting"]) == ["restart", "start", "stop"] and len(s.poll({})) == 3
+    with pytest.raises(ValueError):
+        s.request("heal", ADMIN, arg="voice-gate")                                  # the queue is small: three at a time
 
 
 def test_what_the_starter_reports_is_cleaned_and_a_result_for_nothing_we_asked_is_ignored():
@@ -78,73 +80,6 @@ def test_the_machine_route_wants_the_home_token_and_a_json_object(world):
     assert got.status_code == 200 and got.get_json() == {"commands": []} and starter.online()
 
 
-def press(client, action, **form):
-    return client.post(f"/admin/recovery/{action}", data={"confirm": "yes", **form}, headers={"Origin": "http://localhost"}, follow_redirects=False)
-
-
-def test_the_buttons_are_the_captains_and_say_so_when_the_pc_is_not_answering(world):
-    app, client, starter = world
-    assert press(client, "starter-start").status_code in (302, 401, 403)             # not signed in
-    login(client, FRIEND)
-    assert press(client, "starter-start").status_code in (302, 401, 403)
-    login(client, ADMIN)
-    page = client.get("/admin").data.decode()
-    assert "Start or stop SkippyTel" in page and "isn&#39;t answering" in page or "isn't answering" in page
-    assert "Start SkippyTel" not in page.split("Start or stop SkippyTel")[1].split('id="pc-recovery"')[0]              # no buttons for a PC that is not there
-    resp = press(client, "starter-start")
-    assert resp.status_code == 302
-    flashed = client.get("/admin").data.decode()
-    assert "starter on skippy-pc isn" in flashed and "Nothing remote can wake" in flashed
-    assert starter.view()["waiting"] == []                                                                       # nothing was queued for a PC that is not there
-
-
-def test_with_the_starter_answering_a_press_queues_the_op_and_the_answer_comes_back_to_the_card(world):
-    app, client, starter = world
-    login(client, ADMIN)
-    h = {"Authorization": f"Bearer {token(app)}"}
-    starter.poll({"status": {"docker": True, "containers_up": 2, "containers_total": 10, "bridge": False, "busy": False}})
-    page = client.get("/admin").data.decode()
-    assert "Docker up" in page and "2 of 10 containers" in page and "bridge DOWN" in page
-    for label in ("Start SkippyTel", "Restart SkippyTel", "Stop SkippyTel"):
-        assert label in page
-
-    def pc():                                                                       # the starter on the PC: gets the request, does it, answers
-        for _ in range(600):                                                         # up to ~30 s: a loaded machine can be slow to get the press in
-            cmds = client.application.test_client().post("/home/starter", json={}, headers=h).get_json()["commands"]
-            if cmds:
-                time.sleep(0.05)
-                client.application.test_client().post("/home/starter", json={"results": [{"id": cmds[0]["id"], "ok": True, "summary": "Docker up; 10 of 10 containers; bridge answering."}]}, headers=h)
-                return
-            time.sleep(0.05)
-    t = threading.Thread(target=pc)
-    t.start()
-    resp = press(client, "starter-start")
-    t.join()
-    assert resp.status_code == 302
-    assert "10 of 10 containers; bridge answering" in client.get("/admin").data.decode()
-
-
-def test_a_slow_start_says_it_is_still_working_and_the_press_asks_for_a_confirm_page_without_one(world, monkeypatch):
-    app, client, starter = world
-    login(client, ADMIN)
-    starter.poll({})
-    import recovery_web
-    monkeypatch.setattr(recovery_web, "STARTER_WAIT_S", 0.05)
-    page = client.post("/admin/recovery/starter-stop", data={}, headers={"Origin": "http://localhost"})              # no confirm: the server asks on a page of its own
-    assert page.status_code == 200 and b"Stop SkippyTel" in page.data and starter.view()["waiting"] == []
-    press(client, "starter-restart")
-    assert [w["op"] for w in starter.view()["waiting"]] == ["restart"]
-    assert "still working" in client.get("/admin").data.decode()
-
-
-def test_a_post_from_another_site_is_refused(world):
-    app, client, starter = world
-    login(client, ADMIN)
-    starter.poll({})
-    resp = client.post("/admin/recovery/starter-stop", data={"confirm": "yes"}, headers={"Origin": "https://evil.example"})
-    assert resp.status_code == 403 and starter.view()["waiting"] == []
-
-
 def test_a_stop_carries_how_it_comes_back_and_only_the_three_ways_are_allowed():
     s = Starter()
     cid = s.request("stop", ADMIN)                                                  # no choice: the default is tomorrow at 7 AM
@@ -159,15 +94,23 @@ def test_a_stop_carries_how_it_comes_back_and_only_the_three_ways_are_allowed():
     assert s3.poll({}) == [{"id": cid3, "op": "start"}]
 
 
-def test_the_status_shows_the_planned_resume_and_the_stop_form_offers_the_three_choices(world):
-    app, client, starter = world
-    login(client, ADMIN)
-    starter.poll({"status": {"docker": True, "containers_up": 0, "containers_total": 10, "bridge": False, "resume_at": "2026-10-13T07:00"}})
-    page = client.get("/admin").data.decode()
-    assert "will start itself at 2026-10-13 07:00" in page and "Start SkippyTel now cancels that" in page
-    for option in ('value="7am"', 'value="4h"', 'value="manual"'):
-        assert option in page
-    press(client, "starter-stop", resume="4h")
-    assert starter.view()["waiting"][0]["op"] == "stop" and starter.poll({})[0]["resume"] == "4h"
-    resp = press(client, "starter-stop", resume="whenever")
-    assert resp.status_code == 302 and "Not sent" in client.get("/admin").data.decode()
+def test_heal_names_one_thing_from_its_list_and_repair_lists_what_is_failing():
+    s = Starter()
+    cid = s.request("heal", "doctor", arg="voice-gate")
+    assert s.request("heal", "doctor", arg="voice-gate") == cid                       # the same heal is not queued twice
+    other = s.request("heal", "doctor", arg="bridge")
+    assert other != cid
+    for bad in ("", "voice-gate; rm -rf /", "nginx", "VOICE-GATE"):
+        with pytest.raises(ValueError):
+            Starter().request("heal", "doctor", arg=bad)
+    s2 = Starter()
+    rid = s2.request("repair", ADMIN, arg="ollama,whisper")
+    assert s2.poll({}) == [{"id": rid, "op": "repair", "arg": "ollama,whisper"}]
+    with pytest.raises(ValueError):
+        Starter().request("repair", ADMIN, arg="ollama,evil")
+    assert Starter().request("start", ADMIN, arg="ignored") and Starter().poll({}) == []
+    s3 = Starter()
+    c3 = s3.request("start", ADMIN, arg="ignored")
+    assert s3.poll({}) == [{"id": c3, "op": "start"}]                                 # only heal and repair carry an arg
+    s3.poll({"results": [{"id": c3, "ok": True, "summary": "Up."}]})
+    assert s3.result(c3)["summary"] == "Up." and s3.result("nope") is None

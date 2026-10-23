@@ -26,7 +26,7 @@ def test_admin_is_a_bridge_page_with_a_control_for_each_pane(env):
     assert {"graveyard", "server", "recovery-pane", "setup", "settings", "friends", "discord"} == set(panes)
     for pane in panes:                                                                    # each pane has its way back, its page flow and its bar
         part = page.split(f'<section id="{pane}" class="apane"', 1)[1]
-        part = part.split('<section id="', 1)[0] if pane != "recovery-pane" else part.split('<section id="setup"', 1)[0].split('<script', 1)[0]
+        part = part.split('<section id="', 1)[0] if pane != "recovery-pane" else part.split('<section id="setup"', 1)[0]   # (its card refreshes itself: a script inside)
         assert "data-close" in part and 'class="pg-flow"' in part and 'class="pips"' in part, pane
     assert 'name="portals"' in page and "Restart &amp; update" in page and "Save settings" in page    # the sentences and forms are all still here
 

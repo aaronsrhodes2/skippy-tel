@@ -145,13 +145,13 @@ def test_a_new_conversation_is_named_by_skippy_core_once_on_a_thread(tmp_path):
     log = cl.ConversationLog(str(tmp_path / "out"), namer=namer)
     first = FakeRun("aaaaaaaa", message="the voice keys are a mess")
     log.started(first)
-    for _ in range(100):
+    for _ in range(500):                                      # (the namer runs on a thread: up to 5 s under a busy test run)
         if log.conversations() and log.conversations()[0]["title"] == "voice-needs-simpler-modes":
             break
         _t.sleep(0.01)
     assert log.conversations()[0]["title"] == "voice-needs-simpler-modes"
     log.started(FakeRun("bbbbbbbb", message="and another thing", created=1_800_000_100.0))
-    _t.sleep(0.05)
+    _t.sleep(0.2)
     assert asked == ["the voice keys are a mess"] and log.conversations()[0]["title"] == "voice-needs-simpler-modes"
 
 

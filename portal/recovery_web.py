@@ -1,23 +1,31 @@
-"""The recovery buttons wired into the portal (recovery.py holds the rules): the admin-only POST routes under
-/admin/recovery, and the `recovery_cards()` template global the Admin page renders its three cards from.
+"""Recovery is ONE operation (the Captain's design, 2026-10-23): "Put everything back". The doctor (doctor.py) keeps everything at its
+known good baseline by itself; this button does all of it at once, for when something is wrong now. It does not revert code: undoing a
+change is the private Skippy's job, from a chat that works.
 
-app.py makes one init_app() call. Nothing here is reachable by a friend, from a chat tool, or without a confirm.
+The button (POST /admin/recovery/repair): admin only, from the portal's own page (Origin/Referer), at most twice in five minutes, logged,
+and it acts at once (the Captain's rule: no confirm boxes). What it does:
+  * the portal's own part, here: the private Skippy's stuck chat records cleared and a pause lifted; a redeploy of main (the deploy
+    workflow, tests first) when the newest deploy failed, or main is ahead of what's live and nothing is deploying
+  * skippy-pc and Skippy Core: doctor.repair(), carried out by the starter on the Windows host (tools/skippy_starter.py)
+
+The card (templates/_recovery.html) is one checklist (every part, green or red, and why) with the doctor's last actions under it;
+GET /admin/recovery/state is the same, as JSON, for the card to refresh itself while it is open.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, flash, jsonify, redirect, request, url_for
 
 import auth
 import buildinfo
 import recovery
 
 BACK = "#recovery"
-STARTER_WAIT_S = 25               # how long a button waits for the starter before saying "sent, still working"
+REPAIR_LIMIT, REPAIR_WINDOW_S = 2, 300
 
 
-def init_app(app, workshop, limiter, github: recovery.GitHub, clock=None, home=None, starter=None) -> None:
+def init_app(app, workshop, limiter, github: recovery.GitHub, clock=None, home=None, starter=None, doctor=None) -> None:
     log = recovery.Log()
     runs_cache = recovery.RunsCache(github)
     app.extensions["recovery"] = {"log": log, "github": github, "runs": runs_cache}
@@ -27,166 +35,83 @@ def init_app(app, workshop, limiter, github: recovery.GitHub, clock=None, home=N
     def own_roots() -> list[str]:
         return [request.host_url, app.config.get("PORTAL_URL") or ""]
 
-    def cards() -> dict:
-        """Everything the three cards show. Only ever called from admin.html, which only an admin can render."""
-        build, at = buildinfo.info(), now()
-        out = {"build": build, "configured": github.configured, "error": None, "view": None,
-               "workshop": workshop.current(), "paused": workshop.paused, "ready": workshop.ready(),
-               "log": [{**e, "when": recovery.ago(datetime.fromtimestamp(e["at"], timezone.utc), at)} for e in log.recent()],
-               "actions": recovery.ACTIONS, "repo": recovery.REPO, "fetched": recovery.RUNS_FETCHED,
-               "pc_wait": recovery.PC_WAIT_S, "starter": starter.view() if starter else None,
-               "pc": {"online": bool(home and home.online()), "services": recovery.PC_SERVICES,
-                      "projects": workshop.projects() if home else []}}
-        if github.configured:
-            runs, error = runs_cache.get()
-            out["error"] = error
-            if runs is not None:
-                out["view"] = recovery.pipeline(runs, build["commit"], at)
-        return out
+    def portal_row() -> dict:
+        """The portal's own line in the checklist: what it serves, and whether main is ahead or the last deploy failed."""
+        build = buildinfo.info()
+        row = {"name": "portal", "label": "Portal", "ok": True, "why": "", "short": build["short"], "revision": build.get("revision")}
+        if not github.configured:
+            row["why"] = "the deploy pipeline isn't visible (no GITHUB_ACTIONS_TOKEN)"
+            return row
+        runs, error = runs_cache.get()
+        if runs is None:
+            row["why"] = error or "GitHub didn't answer"
+            return row
+        view = recovery.pipeline(runs, build["commit"], now())
+        newest = runs[0] if runs else None
+        if newest and newest["status"] == "completed" and newest["conclusion"] == "failure":
+            row.update(ok=False, why=f"the newest deploy ({newest['short']}) failed")
+        elif view.get("stuck"):
+            row.update(ok=False, why=f"a deploy has been running for over 20 minutes ({view['stuck']['short']})")
+        elif view.get("ahead"):
+            busy = bool(newest and newest["status"] != "completed")
+            row.update(ok=busy, why=f"main is {view['ahead']} push{'es' if view['ahead'] != 1 else ''} ahead" + (": deploying now" if busy else ""))
+        return row
 
-    def done(action: str, result: str, ok: bool = True, detail: str = ""):
-        log.add(action, auth.current_user()["email"], result, ok)
-        flash(result, "ok" if ok else "error")
-        if detail:
-            flash(detail, "detail")               # the commands' own words: shown as a block under the message
-        return redirect(url_for("admin.index") + BACK)
+    def state() -> dict:
+        view = doctor.view() if doctor else {"rows": [], "ok": True, "actions": [], "maintenance": False, "repair": None}
+        rows = [portal_row()] + view["rows"]
+        workshop_row = {"name": "workshop", "label": "Private Skippy", "ok": not workshop.paused and workshop.ready(),
+                        "why": "paused" if workshop.paused else ("" if workshop.ready() else "not ready on skippy-pc")}
+        rows.append(workshop_row)
+        at = now()
+        return {"rows": rows, "ok": all(r["ok"] for r in rows), "actions": view["actions"], "maintenance": view["maintenance"],
+                "repair": view["repair"],
+                "log": [{**e, "when": recovery.ago(datetime.fromtimestamp(e["at"], timezone.utc), at)} for e in log.recent()[:5]]}
 
-    def pc(action: str):
-        """A skippy-pc button: a host_op job for the home reporter, answered by the bridge. Waits PC_WAIT_S for the
-        answer; a slow one is still carried out, the card just says it was sent."""
-        if home is None or not home.online():
-            return done(action, "skippy-pc isn't reporting, so it can't be asked. If it stays silent it needs a look in "
-                                "person (remote-recovery.md).", False)
-        if action == "pc-restart-service":
-            service = request.form.get("service", "")
-            if service not in recovery.PC_SERVICES:
-                return done(action, "Pick one of the listed services. Nothing was sent.", False)
-            op, arg = "restart-service", service
-        elif action == "pc-reset-workshop":
-            project = request.form.get("project", "")
-            if project not in {p["id"] for p in workshop.projects()}:
-                return done(action, "Pick one of the listed projects. Nothing was sent.", False)
-            op, arg = "reset-workshop", project
-        elif action == "pc-restart-bridge":
-            op, arg = "restart-bridge", ""
-        else:
-            op, arg = "funnel", action.rsplit("-", 1)[1]
-        job = home.start("host_op", owner=auth.current_user()["email"], op=op, arg=arg)
-        got = home.wait_result(job, recovery.PC_WAIT_S)
-        if got["state"] == "done":
-            r = got["result"] if isinstance(got.get("result"), dict) else {}
-            return done(action, str(r.get("summary") or "Done.")[:400], bool(r.get("ok")), str(r.get("output") or "")[:1600])
-        if got["state"] == "error":
-            return done(action, got["error"], False)
-        return done(action, f"Sent to skippy-pc; no answer within {recovery.PC_WAIT_S} s. It still runs: look again in a "
-                            "minute (Funnel status, or the Core card on the dashboard).", False)
-
-    def start_stop(action: str):
-        """Start, stop or restart skippy-pc's stack through the starter on the host. Waits a little for its answer; a long one (Docker Desktop
-        starting) keeps going and the card shows how it ended."""
-        op = action.split("-", 1)[1]
-        who = auth.current_user()["email"]
-        if starter is None or not starter.online():
-            return done(action, "The starter on skippy-pc isn't answering. The PC is off, asleep or at the sign-in screen, or the starter isn't "
-                                "installed (remote-recovery.md). Nothing remote can wake a PC that is off.", False)
-        try:
-            cid = starter.request(op, who, request.form.get("resume", "") if op == "stop" else "")
-        except ValueError as exc:
-            return done(action, f"Not sent: {exc}.", False)
-        got = starter.wait(cid, STARTER_WAIT_S)
-        if got is None:
-            return done(action, f"Sent to skippy-pc. It is still working (Docker can take a couple of minutes): look at the card again in a minute.", True)
-        return done(action, got["summary"] or ("Done." if got["ok"] else "It did not work."), got["ok"])
-
-    @bp.post("/<action>")
+    @bp.post("/repair")
     @auth.admin_required
-    def act(action: str):
-        spec = recovery.ACTIONS.get(action)
-        if spec is None:
-            abort(404)
+    def repair():
         who = auth.current_user()["email"]
         if not recovery.same_origin(request.headers.get("Origin"), request.headers.get("Referer"), own_roots()):
-            log.add(action, who, "refused: the request didn't come from the portal's own page", False)
+            log.add("repair", who, "refused: the request didn't come from the portal's own page", False)
             abort(403)
-        if request.form.get("confirm") != "yes":
-            # No confirm (no script on the page, or a hand-made POST): ask on a page of our own instead of acting.
-            return render_template("recovery_confirm.html", action=action, spec=spec,
-                                   fields={k: v for k, v in request.form.items() if k in ("revision", "service", "project")})
-        if spec.github and not github.configured:
-            return done(action, "The deploy buttons aren't configured: the portal has no GITHUB_ACTIONS_TOKEN.", False)
-        if action == "rollback" and recovery.valid_revision(request.form.get("revision")) is None:
-            # Checked before the rate limit, so a typo doesn't cost the one rollback allowed per two minutes.
-            return done(action, "That isn't a revision name: leave it blank, or type latest or a name like "
-                                "skippy-portal-00042-abc. Nothing was started.", False)
-        if action == "pc-restart-service" and request.form.get("service", "") not in recovery.PC_SERVICES:
-            return done(action, "Pick one of the listed services. Nothing was sent.", False)   # before the rate limit: a slip
-        if action == "pc-reset-workshop" and request.form.get("project", "") not in {p["id"] for p in workshop.projects()}:
-            return done(action, "Pick one of the listed projects. Nothing was sent.", False)   # doesn't cost the button
-        if action.startswith("starter-"):
-            if not limiter.allow(f"recovery:{action}", spec.limit, spec.window_s):
-                return done(action, f"{spec.label}: already done just now. Wait a few minutes and look at the card first.", False)
-            return start_stop(action)
-        if action.startswith("pc-") and (home is None or not home.online()):
-            return done(action, "skippy-pc isn't reporting, so it can't be asked. If it stays silent it needs a look in "
-                                "person (remote-recovery.md).", False)
-        if not limiter.allow(f"recovery:{action}", spec.limit, spec.window_s):
-            minutes = max(1, spec.window_s // 60)
-            return done(action, f"{spec.label}: already done just now. Wait {minutes} min and look at the card first.", False)
-        if action.startswith("pc-"):
-            return pc(action)
-        try:
-            result = run(action, who)
-        except recovery.GitHubError as exc:
-            return done(action, f"{spec.label} failed: {exc}", False)
-        runs_cache.forget()                       # the card's next look asks GitHub again
-        return done(action, result)
+        if not limiter.allow("recovery:repair", REPAIR_LIMIT, REPAIR_WINDOW_S):
+            flash("Already putting everything back: the checklist shows how it's going.", "error")
+            return redirect(url_for("admin.index") + BACK)
+        said = []
+        # the portal's own part
+        cleared = workshop.clear_stuck()
+        if cleared:
+            said.append(f"cleared {len(cleared)} stuck chat record(s)")
+        if workshop.paused:
+            workshop.resume()
+            said.append("the private Skippy is back on")
+        row = portal_row()
+        if github.configured and not row["ok"] and "deploying now" not in row["why"]:
+            try:
+                github.dispatch_deploy()
+                runs_cache.forget()
+                said.append("redeploying main (" + row["why"] + ")")
+            except recovery.GitHubError as exc:
+                said.append(f"couldn't redeploy: {exc}")
+        # skippy-pc and Skippy Core
+        if doctor and starter and starter.online():
+            doctor.repair(who)
+            said.append("skippy-pc and Skippy Core are being put back (the checklist follows it)")
+        else:
+            said.append("skippy-pc's starter isn't answering, so skippy-pc and Skippy Core can't be reached: the PC is off, asleep, at "
+                        "the sign-in screen, or the starter isn't installed")
+        text = "Putting everything back: " + "; ".join(said) + "."
+        log.add("repair", who, text, True)
+        flash(text, "ok")
+        return redirect(url_for("admin.index") + BACK)
 
-    def newest_run() -> dict | None:
-        runs = github.deploy_runs()
-        return runs[0] if runs else None
-
-    def run(action: str, who: str) -> str:
-        """The action itself. The target (which run, which input) is decided HERE, from GitHub's current answer, never
-        taken from the page: a page drawn ten minutes ago must not cancel or re-run a run that has since changed."""
-        if action == "rollback":
-            revision = recovery.valid_revision(request.form.get("revision")) or ""     # checked in act(); the client checks again
-            github.dispatch_rollback(revision)
-            target = f"to {revision}" if revision else "one revision back"
-            return (f"Rollback started ({target}). The portal restarts in about a minute; reload then. "
-                    "The next push to main deploys normally and undoes it.")
-        if action == "undo-rollback":
-            github.dispatch_rollback("latest")
-            return "Undo started: traffic goes back to the newest revision in about a minute."
-        if action == "rerun-failed":
-            newest = newest_run()
-            if not newest or newest["status"] != "completed" or newest["conclusion"] != "failure":
-                raise recovery.GitHubError("The newest deploy didn't fail, so there's nothing to re-run "
-                                           "(re-running an older one could put old code live).")
-            github.rerun_failed(newest["id"])
-            return f"Re-running the failed jobs of deploy {newest['short']}. Watch the card."
-        if action == "cancel-stuck":
-            newest = newest_run()
-            stuck = recovery.pipeline([newest] if newest else [], "", now())["stuck"]
-            if not stuck:
-                raise recovery.GitHubError("The newest deploy isn't stuck (running for over 20 minutes), so nothing was cancelled.")
-            github.cancel(stuck["id"])
-            # No rollback dispatch on top: since the A2 fix, a cancelled deploy's own last step moves traffic back to the
-            # revision it replaced. rollback.yml left blank would step back one revision MORE (or, when the deploy never
-            # reached Cloud Run, roll back a good revision). The Roll back button stays for when it is still wrong.
-            return (f"Cancelled deploy {stuck['short']}. If it had already switched traffic, its own rollback step puts the "
-                    "previous revision back within a few minutes. Still wrong after that? Use Roll back.")
-        if action == "workshop-cancel":
-            ids = workshop.cancel_current()
-            return f"Cancelled {len(ids)} run(s); skippy-pc is told to stop." if ids else "Nothing was running."
-        if action == "workshop-clear":
-            ids = workshop.clear_stuck()
-            return f"Cleared {len(ids)} chat record(s)." if ids else "No stuck record to clear."
-        if action == "workshop-pause":
-            ids = workshop.pause(who)
-            return "Private Skippy paused" + (f"; cancelled {len(ids)} run(s)." if ids else ".")
-        if action == "workshop-resume":
-            return "Private Skippy is back on." if workshop.resume() else "It wasn't paused."
-        abort(404)                                # an ACTIONS entry with no code: never silently "succeed"
+    @bp.get("/state")
+    @auth.admin_required
+    def state_json():
+        resp = jsonify(state())
+        resp.headers["Cache-Control"] = "private, no-store"
+        return resp
 
     app.register_blueprint(bp)
-    app.jinja_env.globals["recovery_cards"] = cards
+    app.jinja_env.globals["recovery_state"] = state

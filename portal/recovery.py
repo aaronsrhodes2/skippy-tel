@@ -156,6 +156,8 @@ class GitHub:
         # The private Skippy's ship card: the deploy runs of ONE commit (read only; a 40-hex sha and nothing else).
         ("GET", re.compile(rf"/repos/{re.escape(REPO)}/actions/workflows/deploy\.yml/runs\?head_sha=[0-9a-f]{{40}}&per_page=5")),
         ("POST", re.compile(rf"/repos/{re.escape(REPO)}/actions/workflows/rollback\.yml/dispatches")),
+        # the one Recovery button: redeploy main when the portal is behind it or its last deploy failed (doctor.py, recovery_web.py)
+        ("POST", re.compile(rf"/repos/{re.escape(REPO)}/actions/workflows/deploy\.yml/dispatches")),
         ("POST", re.compile(rf"/repos/{re.escape(REPO)}/actions/runs/[1-9][0-9]{{0,19}}/rerun-failed-jobs")),
         ("POST", re.compile(rf"/repos/{re.escape(REPO)}/actions/runs/[1-9][0-9]{{0,19}}/cancel")),
     )
@@ -223,6 +225,10 @@ class GitHub:
             raise GitHubError("That isn't a revision name: leave it blank, type latest, or a name like skippy-portal-00042-abc.")
         self._call("POST", f"/repos/{REPO}/actions/workflows/rollback.yml/dispatches",
                    {"ref": "main", "inputs": {"revision": value}})
+
+    def dispatch_deploy(self) -> None:
+        """Deploy main again (the workflow's own tests run first, as on every push)."""
+        self._call("POST", f"/repos/{REPO}/actions/workflows/deploy.yml/dispatches", {"ref": "main"})
 
     def rerun_failed(self, run_id: int | str) -> None:
         self._call("POST", f"/repos/{REPO}/actions/runs/{_run_id(run_id)}/rerun-failed-jobs")

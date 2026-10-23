@@ -3,13 +3,19 @@
 
 Runs on the Windows HOST (not in Docker: it has to work when Docker is down), started at sign-in by the SkippyStarter scheduled task
 (tools/install_starter_startup.sh) and kept alive by tools/starter_run.sh. It makes OUTBOUND calls only, like the home reporter: every ~10 s it posts how things are to
-the portal (POST /home/starter, the home token from the vault) and gets back the requests waiting for it. It does exactly three things, with no arguments:
+the portal (POST /home/starter, the home token from the vault) and gets back the requests waiting for it. What it does:
 
   start    Docker Desktop if it is not running (and the documented clean restart if it will not come up), then `docker compose up -d`, then the bridge
   stop     the bridge (refused while a run is going: nothing is touched), then `docker compose stop`; Docker Desktop and this program stay up
   restart  stop, then start
+  heal X   the doctor's (portal/doctor.py) way of putting ONE thing back: a compose service recreated (stop, rm, up --build; left alone
+           while someone is building at that moment), the bridge restarted (never mid-run), Docker restarted clean, or Skippy Core
+           repaired over SSH (`deployer.py repair` on the box)
+  repair   the one Recovery button: everything back to baseline (repair() says what that is)
 
-Nothing else can be asked of it: an operation that is not in OPS is refused, and no text from the portal is ever run. It listens on no port except a loopback lock
+It also heals Docker by itself: hung or down for over two minutes (and not stopped on purpose), it gets the clean restart even with the
+portal out of reach. Nothing else can be asked of it: an operation not in OPS, or a name not in its lists, is refused, and no text from the
+portal is ever run. Processes are stopped by PID only (the one listening on the bridge's port, the supervisor's own pid file). It listens on no port except a loopback lock
 so a second copy cannot run. The portal side is portal/starter.py; docs/portal/remote-recovery.md says what it cannot do (wake a PC that is off).
 """
 from __future__ import annotations
@@ -27,7 +33,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-OPS = ("start", "stop", "restart")
+OPS = ("start", "stop", "restart", "heal", "repair")
+HEAL_SPECIAL = ("bridge", "docker", "core")             # the rest a heal may name: a service in `docker compose config --services`
+CORE_SSH = os.environ.get("SKIPPY_CORE_SSH", "aaron@skippy-core")
+CORE_REPAIR = ["sudo", "-n", "/usr/bin/python3", "/opt/skippy-core/repo/core/deployer/deployer.py", "repair"]
+DOCKER_DOWN_HEAL_S = 120
+BRIDGE_PORT = 9337
 RESUMES = ("7am", "4h", "manual")
 POLL_S = 10
 PORTAL = os.environ.get("PORTAL_URL", "https://skippy-portal-1015050363686.us-west1.run.app").rstrip("/")
@@ -38,8 +49,8 @@ BRIDGE_CWD = os.environ.get("CLAUDE_BRIDGE_CWD", "D:/Aaron/development")
 DOCKER_WAIT_S, DOCKER_CLEAN_WAIT_S, BRIDGE_WAIT_S = 150, 120, 40
 LOCK_PORT = 9339
 VAULTS = ("D:/Aaron/development/.env", "G:/My Drive/vault/.env")
-KILL_BRIDGE_PS = ("Get-CimInstance Win32_Process | Where-Object { ($_.CommandLine -match 'bridge_supervisor\\.sh' -or $_.CommandLine -match 'claude-bridge.{0,3}bridge\\.py') "
-                  "-and $_.CommandLine -notmatch 'Get-CimInstance' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }")
+BUILDING_PS = ("Get-CimInstance Win32_Process -Filter \"Name='docker.exe' or Name='docker-compose.exe'\" | "
+               "ForEach-Object { $_.CommandLine }")      # read-only: is anyone building right now? (a session's own rebuild)
 
 
 def load_token(env=os.environ, vaults=VAULTS) -> str:
@@ -195,8 +206,9 @@ class Starter:
         if b and (b.get("workshop") or {}).get("busy"):
             return False, "Skippy Desktop is in the middle of a run. Nothing was stopped: cancel the run first (Admin, recovery)."
         self.working = "stopping the bridge"
-        if b is not None:
-            self.run(["powershell.exe", "-NoProfile", "-Command", KILL_BRIDGE_PS], 30)
+        for pid in (self.supervisor_pid(), self.bridge_pid()):          # the supervisor first, so it doesn't start the bridge again
+            if pid:
+                self.kill(pid)
         self.working = "stopping the containers"
         rc, out = self.run(["docker", "compose", "stop"], 180, cwd=str(self.root)) if self.docker_up() else (0, "")
         if rc != 0:
@@ -206,6 +218,135 @@ class Starter:
         back = f" It starts itself again at {when.strftime('%a %I:%M %p').replace(' 0', ' ')}." if when else " It stays down until you start it."
         return True, "Stopped: the bridge and every container. Docker Desktop and the starter are still up." + back
 
+    # ── by PID only (never by name: a name filter once hit another session's servers) ──
+    def bridge_pid(self) -> int | None:
+        """The process listening on the bridge's port, from `netstat -ano`."""
+        rc, out = self.run(["netstat", "-ano", "-p", "TCP"], 15)
+        for line in out.splitlines() if rc == 0 else []:
+            parts = line.split()
+            if len(parts) >= 5 and parts[1].endswith(f":{BRIDGE_PORT}") and parts[3] == "LISTENING" and parts[4].isdigit():
+                return int(parts[4])
+        return None
+
+    def supervisor_pid(self) -> int | None:
+        try:
+            pid = int((self.root / "state" / "bridge-supervisor.pid").read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            return None
+        rc, out = self.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"], 15)
+        return pid if rc == 0 and f'"{pid}"' in out else None
+
+    def kill(self, pid: int) -> None:
+        self.run(["taskkill", "/PID", str(pid), "/T", "/F"], 30)
+
+    def services(self) -> list[str]:
+        rc, out = self.run(["docker", "compose", "config", "--services"], 60, cwd=str(self.root))
+        return out.split() if rc == 0 else []
+
+    def someone_building(self) -> bool:
+        rc, out = self.run(["powershell.exe", "-NoProfile", "-Command", BUILDING_PS], 30)
+        return rc == 0 and any(("--build" in line or " build" in line) for line in out.splitlines())
+
+    # ── healing one thing (the doctor), and putting everything back (the button) ──
+    def restart_docker(self) -> tuple[bool, str]:
+        self.working = "restarting Docker clean"
+        self.run(["powershell.exe", "-NoProfile", "-File", CLEAN_PS1], 120)
+        self.spawn([DOCKER_EXE])
+        if not self._wait(self.docker_up, DOCKER_WAIT_S + DOCKER_CLEAN_WAIT_S):
+            return False, "Docker Desktop would not come back, even after the clean restart: the PC needs a look in person."
+        rc, out = self.run(["docker", "compose", "up", "-d"], 600, cwd=str(self.root))
+        up, total = self.containers()
+        return rc == 0, f"Docker restarted clean; {up} of {total} containers up."
+
+    def restart_bridge(self) -> tuple[bool, str]:
+        b = self.bridge()
+        if b and (b.get("workshop") or {}).get("busy"):
+            return False, "The bridge is in the middle of a run: left alone."
+        self.working = "restarting the bridge"
+        pid = self.bridge_pid()
+        if pid:
+            self.kill(pid)
+        if self.supervisor_pid() and self._wait(lambda: self.bridge() is not None, BRIDGE_WAIT_S):
+            return True, "Bridge restarted (its supervisor brought it back)."
+        env = {**os.environ, "CLAUDE_BRIDGE_CWD": BRIDGE_CWD}
+        self.spawn([os.environ.get("BASH_EXE", "bash"), "-l", str(self.root / "tools" / "bridge_supervisor.sh")], env=env, log=str(self.root / "state" / "starter-bridge.log"))
+        if self._wait(lambda: self.bridge() is not None, BRIDGE_WAIT_S):
+            return True, "Bridge started again, with its supervisor."
+        return False, "The bridge did not come back (look at state/bridge-supervisor.log)."
+
+    def recreate(self, service: str) -> tuple[bool, str]:
+        self.working = f"recreating {service}"
+        for cmd, t in ((["docker", "compose", "stop", service], 180), (["docker", "compose", "rm", "-f", service], 60),
+                       (["docker", "compose", "up", "-d", "--build", service], 1200)):
+            rc, out = self.run(cmd, t, cwd=str(self.root))
+            if rc != 0:
+                return False, f"{service}: `{' '.join(cmd[:3])}` failed: {out[-160:]}"
+        return True, f"{service} recreated."
+
+    def repair_core(self) -> tuple[bool, str]:
+        self.working = "repairing Skippy Core"
+        rc, out = self.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", CORE_SSH, *CORE_REPAIR], 3600)
+        last = (out.strip().splitlines() or [""])[-1]
+        try:
+            row = json.loads(last)
+        except ValueError:
+            row = {}
+        if rc == 0 and row.get("state") == "ok":
+            return True, "Skippy Core repaired (recreated and smoke-tested)."
+        if "a deploy or repair is going" in out:
+            return True, "Skippy Core is already deploying or repairing itself (it ends with its own smoke test)."
+        return False, "Skippy Core: " + (row.get("detail") or row.get("state") or out[-160:] or f"ssh said {rc}")
+
+    def heal(self, name: str) -> tuple[bool, str]:
+        if name == "docker":
+            return self.restart_docker()
+        if not self.docker_up() and name not in ("core",):
+            return False, "Docker isn't answering: that comes first (heal docker)."
+        if name == "bridge":
+            return self.restart_bridge()
+        if name == "core":
+            return self.repair_core()
+        if name not in self.services():
+            return False, "I do not do that."
+        if self.someone_building():
+            return False, f"Someone is building on this PC right now: {name} is left alone until they finish."
+        return self.recreate(name)
+
+    def repair(self, failing: str = "") -> tuple[bool, str]:
+        """Everything back to baseline: Docker answering (restarted clean if hung), main pulled into this checkout when that is a
+        fast-forward (never discarding anything), every container up from it, the failing ones recreated, the bridge restarted when it
+        isn't mid-run, Skippy Core repaired. Code is never reverted."""
+        said, ok = [], True
+        if not self.docker_up():
+            good, text = self.restart_docker()
+            said.append(text)
+            if not good:
+                return False, " ".join(said)
+        self.working = "pulling main"
+        if self.run(["git", "-C", str(self.root), "fetch", "--quiet", "origin", "main"], 120)[0] == 0:
+            branch = self.run(["git", "-C", str(self.root), "rev-parse", "--abbrev-ref", "HEAD"], 15)[1].strip()
+            if branch == "main":
+                rc, out = self.run(["git", "-C", str(self.root), "merge", "--ff-only", "--quiet", "origin/main"], 120)
+                said.append("main pulled." if rc == 0 else "main not pulled (local changes in the way: left exactly as they are).")
+            else:
+                said.append(f"the checkout is on {branch}, not main: left as it is.")
+        self.working = "bringing every container up"
+        rc, out = self.run(["docker", "compose", "up", "-d", "--build", "--remove-orphans"], 1800, cwd=str(self.root))
+        up, total = self.containers()
+        said.append(f"{up} of {total} containers up.")
+        ok = ok and rc == 0
+        known = set(self.services())
+        for name in [n for n in failing.split(",") if n in known]:
+            good, text = self.recreate(name)
+            said.append(text)
+            ok = ok and good
+        good, text = self.restart_bridge()
+        said.append(text)
+        ok = ok and (good or "middle of a run" in text)
+        good, text = self.repair_core()
+        said.append(text)
+        return ok and good, " ".join(said)
+
     def restart(self) -> tuple[bool, str]:
         ok, text = self.stop("manual")
         if not ok:
@@ -213,11 +354,19 @@ class Starter:
         ok2, text2 = self.start()
         return ok2, "Restarted. " + text2 if ok2 else text2
 
-    def do(self, op: str, resume: str = "7am") -> tuple[bool, str]:
+    def do(self, op: str, resume: str = "7am", arg: str = "") -> tuple[bool, str]:
         """Only an operation in OPS runs. Never raises."""
         if op not in OPS or (op == "stop" and resume not in RESUMES):
             return False, "I do not do that."
+        if op == "heal" and not (arg in HEAL_SPECIAL or arg.replace("-", "").isalnum()):
+            return False, "I do not do that."
+        if op == "repair" and arg and not all(a.replace("-", "").isalnum() for a in arg.split(",")):
+            return False, "I do not do that."
         try:
+            if op == "heal":
+                return self.heal(arg)
+            if op == "repair":
+                return self.repair(arg)
             return self.stop(resume) if op == "stop" else {"start": self.start, "restart": self.restart}[op]()
         except Exception as e:                                         # noqa: BLE001 — a failure is a result, not a crash
             return False, f"It went wrong ({type(e).__name__})."
@@ -225,8 +374,8 @@ class Starter:
             self.working = ""
 
     # ── talking to the portal ──────────────────────────────────────────────────
-    def _work(self, cid: str, op: str, resume: str = "7am") -> None:
-        ok, summary = self.do(op, resume)
+    def _work(self, cid: str, op: str, resume: str = "7am", arg: str = "") -> None:
+        ok, summary = self.do(op, resume, arg)
         with self._lock:
             self.results.append({"id": cid, "ok": ok, "summary": summary})
         self.say(f"{op}: {'ok' if ok else 'FAILED'}: {summary}")
@@ -246,6 +395,7 @@ class Starter:
         for c in commands:
             cid, op = (c.get("id"), c.get("op")) if isinstance(c, dict) else (None, None)
             resume = c.get("resume") if isinstance(c, dict) and c.get("resume") in RESUMES else "7am"
+            arg = c.get("arg") if isinstance(c, dict) and isinstance(c.get("arg"), str) else ""
             if not isinstance(cid, str) or cid in self.handled:
                 continue
             self.handled[cid] = self.clock()
@@ -259,17 +409,44 @@ class Starter:
                 continue
             self.working = op
             if threaded:
-                threading.Thread(target=self._work, args=(cid, op, resume), daemon=True).start()
+                threading.Thread(target=self._work, args=(cid, op, resume, arg[:300]), daemon=True).start()
             else:
-                self._work(cid, op, resume)
+                self._work(cid, op, resume, arg[:300])
         for old in [k for k, t in self.handled.items() if self.clock() - t > 3600]:
             self.handled.pop(old, None)
         return commands
+
+    def watch_docker(self) -> bool:
+        """Docker hung or down for over two minutes, and not stopped on purpose: the clean restart, by itself (it works with the portal out
+        of reach). Returns whether it acted."""
+        if self.working or self.resume_at is not None:
+            self.docker_down_since = None
+            return False
+        if self.docker_up():
+            self.docker_down_since = None
+            return False
+        since = getattr(self, "docker_down_since", None)
+        if since is None:
+            self.docker_down_since = self.clock()
+            return False
+        if self.clock() - since < DOCKER_DOWN_HEAL_S:
+            return False
+        self.working = "heal docker"
+        try:
+            ok, summary = self.restart_docker()
+        finally:
+            self.working = ""
+        self.docker_down_since = None
+        with self._lock:
+            self.results.append({"id": "auto-docker" + self.now().strftime("%H%M"), "ok": ok, "summary": "By itself: " + summary})
+        self.say(f"docker watch: {'ok' if ok else 'FAILED'}: {summary}")
+        return True
 
     def forever(self) -> None:
         while True:
             try:
                 self.check_resume()
+                self.watch_docker()
             except Exception as e:                                                  # noqa: BLE001 — the loop must never die
                 self.say(f"auto-start crashed ({type(e).__name__})")
             self.poll_once()

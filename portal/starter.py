@@ -18,7 +18,9 @@ import secrets
 import threading
 import time
 
-OPS = ("start", "stop", "restart")
+OPS = ("start", "stop", "restart", "heal", "repair")        # heal and repair: the doctor (doctor.py) and the one Recovery button
+HEAL_NAMES = ("flask-api", "ollama", "whisper", "music-studio", "image-studio", "mentat-home", "music-gate", "video-gate",
+              "voice-gate", "tts-studio", "home-reporter", "bridge", "docker", "core")
 RESUMES = ("7am", "4h", "manual")        # a stop can say when the stack comes back by itself: 7 AM (the default), in 4 hours, or only when asked
 ONLINE_S = 45                    # the starter polls every ~10 s; this long without a call and it is not there
 REDELIVER_S = 30                 # a request not answered by then is handed over again (the starter ignores one it already has)
@@ -41,10 +43,17 @@ class Starter:
     def online(self) -> bool:
         return self.seen_at is not None and self.clock() - self.seen_at <= ONLINE_S
 
-    def request(self, op: str, by: str, resume: str = "") -> str:
-        """Queue one of OPS and return its id. The same op already waiting is not queued twice. A stop may carry `resume` (one of RESUMES)."""
+    def request(self, op: str, by: str, resume: str = "", arg: str = "") -> str:
+        """Queue one of OPS and return its id. The same op (and arg) already waiting is not queued twice. A stop may carry `resume` (one of
+        RESUMES); a heal names one of HEAL_NAMES; a repair may list the services failing now (comma-separated HEAL_NAMES)."""
         if op not in OPS:
             raise ValueError("not an operation")
+        if op == "heal" and arg not in HEAL_NAMES:
+            raise ValueError("not something the doctor heals")
+        if op == "repair" and arg and not all(a in HEAL_NAMES for a in arg.split(",")):
+            raise ValueError("not something the doctor heals")
+        if op not in ("heal", "repair"):
+            arg = ""
         if op == "stop":
             resume = resume or "7am"
             if resume not in RESUMES:
@@ -53,12 +62,12 @@ class Starter:
             resume = ""
         with self._lock:
             for c in self._pending.values():
-                if c["op"] == op:
+                if c["op"] == op and c.get("arg", "") == arg:
                     return c["id"]
             if len(self._pending) >= MAX_PENDING:
                 raise ValueError("too many requests are already waiting")
             cid = secrets.token_hex(4)
-            self._pending[cid] = {"id": cid, "op": op, "by": by, "at": self.clock(), "sent": 0.0, "resume": resume}
+            self._pending[cid] = {"id": cid, "op": op, "by": by, "at": self.clock(), "sent": 0.0, "resume": resume, "arg": arg}
             self._events[cid] = threading.Event()
             return cid
 
@@ -66,6 +75,10 @@ class Starter:
         ev = self._events.get(cid)
         if ev is not None:
             ev.wait(timeout)
+        return self._done.get(cid)
+
+    def result(self, cid: str) -> dict | None:
+        """A finished request's {ok, summary, ...}, or None while it is still waiting or working."""
         return self._done.get(cid)
 
     def withdraw(self, cid: str) -> None:
@@ -113,5 +126,6 @@ class Starter:
             for c in self._pending.values():
                 if now - c["sent"] >= REDELIVER_S:
                     c["sent"] = now
-                    out.append({"id": c["id"], "op": c["op"], **({"resume": c["resume"]} if c.get("resume") else {})})
+                    out.append({"id": c["id"], "op": c["op"], **({"resume": c["resume"]} if c.get("resume") else {}),
+                                **({"arg": c["arg"]} if c.get("arg") else {})})
             return out

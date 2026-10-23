@@ -24,36 +24,37 @@ Every portal deploy (and every rollback) restarts the portal, which forgets its 
 holds the truth and re-sends it. **Within about 30 seconds of all three links being up, the chat shows everything again**, including
 a run that finished while the portal was away.
 
-## First: the Admin page's Recovery cards (if the portal opens at all)
+## First: Admin > Recovery > **Put everything back**
 
-Portal > **Admin** > **Recovery**. Four cards, admin only (a friend never sees them), every button asks "are you sure?" first,
-and each press is logged (the last 20 show at the bottom; Cloud Logging keeps `"event": "recovery"` lines).
+Recovery is one operation (2026-10-23). Portal > **Admin** > **Recovery** shows one checklist: every part, green or red, and why
+(the portal itself, skippy-pc's starter, Docker, the home reporter, each service on skippy-pc, the private Skippy's bridge, Skippy
+Core), with what the doctor did lately. Under it, one button: **Put everything back**. It acts at once (no confirm box), at most
+twice in five minutes, and is logged. It does all of this:
 
-| Card | Shows | Buttons |
-|---|---|---|
-| **Live version** | the commit and Cloud Run revision serving now; "main is N pushes ahead of what's live"; "a newer deploy passed but isn't serving: a rollback is holding traffic back" | none |
-| **Deploy pipeline** | the newest deploy runs of `main`: passed / failed / running, how long ago, a link to each log | **Roll back the portal** (box blank = the previous good revision; or a revision name, or `latest`), **Undo a rollback**, **Re-run the failed jobs** (only when the newest deploy failed), **Cancel the stuck deploy** (only when the newest deploy has been running for over 20 minutes) |
-| **Private Skippy** | the current task and its state (queued, running, offline, stalled...) | **Cancel the current run**, **Clear a stuck chat record**, **Pause the private Skippy** / turn it back on |
-| **skippy-pc** | whether skippy-pc is reporting; each button's answer and the commands' own output | **Restart service** (pick one: flask-api, ollama, whisper, music-studio, music-gate, video-gate, home-reporter, mentat-home; `docker compose restart`, no rebuild), **Reset Skippy's copy** (pick a project: its workshop clone back to `origin/<branch>`, uncommitted work stashed, unpushed commits on a `rescue/<stamp>` branch), **Restart the bridge** (only under its supervisor, never mid-run), **Funnel status / on / off** (the audio :443 and video :8443 doors) |
+| Part | What it does |
+|---|---|
+| The portal | redeploys main (the deploy workflow, tests first) when the newest deploy failed, a deploy is stuck, or main is ahead and nothing is deploying |
+| The private Skippy | clears stuck chat records, lifts a pause |
+| skippy-pc (through the starter) | Docker answering (restarted clean if hung); main pulled into the checkout when that is a fast-forward (local changes are never touched); every container up from it (`up -d --build --remove-orphans`); whatever is failing recreated (stop, rm, up --build); the bridge restarted when it isn't mid-run |
+| Skippy Core (over SSH, from the starter) | `deployer.py repair` on the box: the last good deploy, every container recreated, smoke-tested |
 
-- **Cancelled a deploy? It now rolls back by itself.** The deploy's last step runs when a run is cancelled too (not only when it
-  fails), and puts back the revision it replaced if it had already switched traffic. So **Cancel the stuck deploy** only cancels;
-  if the portal is still wrong a few minutes later, press **Roll back the portal**.
-- **A rollback holds only until the next push to `main`**, which deploys normally (whatever that push contains). Fix forward.
-- **Cancel the current run** also withdraws a message that is still waiting for skippy-pc, so it is never delivered hours later.
-- **Pause** refuses new messages and cancels the current run. It lives in the portal's memory: a deploy or restart of the portal
-  turns it back on.
-- The deploy buttons need the portal's GitHub token (`GITHUB_ACTIONS_TOKEN`). Without it the Deploy pipeline card says "Not
-  configured" and shows no buttons. To set it up: on github.com, Settings > Developer settings > Fine-grained tokens > a token for
-  this repo only with **Actions: Read and write** and nothing else; add it to this repo's Actions secrets as `PORTAL_ACTIONS_TOKEN`;
-  deploy (Actions > **deploy** > Run workflow). The deploy copies it into Secret Manager and hands it to the portal.
-- **The skippy-pc card** works only while skippy-pc reports (the reporter carries the job; the bridge, on Windows itself, does
-  the work in `services/claude-bridge/host_ops.py`). It can't wake a sleeping PC, start Docker Desktop or sign Claude back in:
-  those are still section 4. A restart of the reporter answers first and restarts a moment later, so skippy-pc goes quiet for
-  about 30 s. The bridge only restarts on request when `tools/bridge_supervisor.sh` is running (it would not come back otherwise).
-- **If the portal itself is broken** (the Admin page won't open), none of this is reachable: use GitHub mobile > this repo >
-  Actions > **rollback** > Run workflow, box left blank (step 3). To cancel a hung deploy there: Actions > **deploy** > the running
-  run > Cancel; it rolls itself back as above.
+It never reverts code: undoing a change is the private Skippy's job, from a chat that works.
+
+**The doctor keeps it that way by itself** (`portal/doctor.py`, the brain, on Cloud Run where it can't go down):
+- skippy-pc's tests run with every home report (`services/home-reporter/doctor_checks.py`): each service must answer, in time, with
+  the right thing, so a service that is up but hung counts as down. Skippy Core gets a real five-token reply every five minutes.
+- A test failing for five minutes in a row gets healed (that one thing recreated, the bridge restarted, Docker restarted clean,
+  or Core repaired), at most three times an hour per thing; then it DMs the Captain on Discord and waits for the next hour.
+- It never heals while the stack was stopped on purpose (the starter's "back on at" time), never the bridge mid-run, and the
+  starter leaves a service alone while someone is building on the PC (a session's own rebuild).
+- skippy-pc and its starter both silent for 10 minutes: a DM (the PC is off, asleep, at sign-in, or without internet).
+- On its own, with the portal out of reach: the starter gives a Docker that is hung or down for two minutes the clean restart,
+  and skippy-core's doctor (`skippy-core-doctor.timer`, every 3 minutes) restarts llama-swap after two failed replies and repairs
+  the stack when restarts don't help.
+
+**Needs, once:** the starter installed on skippy-pc (`bash tools/install_starter_startup.sh --apply`), able to `ssh aaron@skippy-core`
+with its key, and the doctor's timer on skippy-core (`sudo bash core/deployer/install.sh --apply` on the box). The old cards (roll
+back, re-run, cancel, restart service, reset a copy, Funnel, start/stop) are gone; `rollback` is still a GitHub workflow (step 3).
 
 ## 1. Read the card on `/me`
 

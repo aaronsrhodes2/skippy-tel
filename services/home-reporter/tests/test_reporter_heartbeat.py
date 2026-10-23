@@ -18,7 +18,7 @@ from test_music import Fake, _json
 
 TOKEN = "home-token"
 SHAPE = {"status", "health", "services", "music_session", "bilby", "setlist", "up_next", "mentat_home", "capabilities",
-         "site_activity", "local"}                                    # what the portal reads: it must not change with how it is collected
+         "site_activity", "local", "doctor"}                          # what the portal reads: it must not change with how it is collected
 
 
 @pytest.fixture(autouse=True)
@@ -26,6 +26,7 @@ def nothing_configured(monkeypatch):
     for name in ("BRIDGE", "MUSIC", "MENTAT", "MAC", "GATE", "GATE_PUBLIC", "VIDEO_GATE", "VIDEO_GATE_PUBLIC"):
         monkeypatch.setattr(reporter, name, "")
     monkeypatch.setattr(reporter, "_probe_failures", {})
+    monkeypatch.setattr(reporter.doctor_checks, "checks", lambda: {})    # the doctor's tests have their own (test_doctor_checks.py)
 
 
 def healthy_health():

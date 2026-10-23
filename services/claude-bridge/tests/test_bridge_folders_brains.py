@@ -77,6 +77,10 @@ def test_a_core_run_uses_the_coder_its_own_config_folder_and_the_key(shop, shopf
     for name in ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CONFIG_DIR",
                  "CLAUDE_CODE_MAX_CONTEXT_TOKENS"):
         assert name in call["env"], name
+    # the coder slot's real window (Qwen3.6: 131072) and a modest reply reserve: told 65536, Claude Code's ~30k fixed prompt made it
+    # compact after every turn until it gave up ("Autocompact is thrashing", 2026-10-23)
+    env = shopf.core_env()
+    assert int(env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"]) >= 131072 and int(env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"]) <= 16000
     assert "SKIPPY_HOME_TOKEN" not in call["env"]
 
 

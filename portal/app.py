@@ -31,6 +31,7 @@ import buildinfo
 import chat
 import chat_tools
 import starter as starter_mod
+import doctor as doctor_mod
 import config
 import diagnostics
 import discord_admin
@@ -699,7 +700,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     admin_panel.init_app(app, vm)          # the per-game Server admin card: admin-only refresh route + template global
     starter = starter_mod.Starter()
     app.extensions["starter"] = starter
-    recovery_web.init_app(app, workshop, limiter, github, home=home, starter=starter)   # the Admin page's recovery buttons (/admin/recovery/*)
+    # The doctor (doctor.py): keeps skippy-pc and Skippy Core at their baseline by itself, through the starter; DMs the Captain when it can't.
+    doctor = doctor_mod.Doctor(home, starter, notify=lambda text: notifier.alert(text))
+    app.extensions["doctor"] = doctor
+    recovery_web.init_app(app, workshop, limiter, github, home=home, starter=starter, doctor=doctor)   # Recovery: one button (/admin/recovery/repair)
     ships = ship_mod.ShipWatch(github, app.extensions["recovery"]["runs"])   # the private Skippy's ship card
     app.extensions["ships"] = ships
     # Tell the Captain on Discord when a private-Skippy run ends (notify.py: a DM to him only, one per run, switchable).
@@ -725,6 +729,15 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             abort(400)
         local = report.get("local") if isinstance(report.get("local"), dict) else {}
         reply = {**home.accept(report), "imports_wanted": imports.wanted()}
+        doctor.observe_home(report.get("doctor"))                 # skippy-pc's tests (services/home-reporter/doctor_checks.py)
+        if brains.CORE.ready() and doctor.core_due():             # and Skippy Core's, from here, on a thread (doctor.core_test)
+            def test_core():
+                try:
+                    doctor.observe_core(*doctor_mod.core_test(brains.CORE.base_url(), brains.CORE.key(), brains.model_of(brains.CORE)))
+                finally:
+                    doctor.core_done()
+            threading.Thread(target=test_core, daemon=True).start()
+        doctor.tick()
         sweep = app.extensions.get("chat_sweep")
         if sweep:                                                 # guests' expired chats: analysed, then deleted (chat_history.py)
             sweep[0]()
@@ -748,7 +761,9 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             abort(400)
-        return jsonify(commands=starter.poll(payload))
+        commands = starter.poll(payload)
+        doctor.tick()                                             # (a heal it decides now goes out with the next call)
+        return jsonify(commands=commands)
 
     @app.put("/home/imports/<name>")
     def home_import_chunk(name):

@@ -37,6 +37,9 @@ fi
 [[ -f /etc/skippy-core/vault.env ]] || do_ install -m 0600 /dev/null /etc/skippy-core/vault.env
 do_ install -m 0644 "$REPO_DIR/core/deployer/skippy-core-deployer.service" /etc/systemd/system/
 do_ install -m 0644 "$REPO_DIR/core/deployer/skippy-core-deployer.timer" /etc/systemd/system/
+do_ install -m 0644 "$REPO_DIR/core/deployer/skippy-core-doctor.service" /etc/systemd/system/
+do_ install -m 0644 "$REPO_DIR/core/deployer/skippy-core-doctor.timer" /etc/systemd/system/
 do_ systemctl daemon-reload
 do_ systemctl enable --now skippy-core-deployer.timer
+do_ systemctl enable --now skippy-core-doctor.timer
 (( APPLY )) || echo "dry run: nothing changed. Re-run with --apply."

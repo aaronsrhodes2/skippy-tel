@@ -53,7 +53,11 @@ EFFORT = "medium"                  # and its effort level: also fixed here, neve
 # 108-character Bearer token, 401 from llama-swap). Claude sessions live in a config folder, so a conversation keeps one brain.
 BRAINS = ("claude", "core")
 CORE_MODEL = "coder"               # core/models.json's coding slot
-CORE_CONTEXT = "65536"             # that slot's --ctx-size, so Claude Code compacts in time (it doesn't know "coder")
+# That slot's --ctx-size (Qwen3.6-35B-A3B since 2026-10-23: 131072), so Claude Code compacts in time (it doesn't know "coder").
+# Told too little, it thrashes: its own fixed prompt is ~30k tokens, and at 65536 (minus its reply reserve) it compacted after every
+# turn until it gave up ("Autocompact is thrashing", the Captain's iPad, 2026-10-23). WORKSHOP_CORE_CONTEXT overrides it.
+CORE_CONTEXT = os.getenv("WORKSHOP_CORE_CONTEXT", "131072")
+CORE_MAX_OUTPUT = "16000"          # its reply reserve on Core: a local model's replies are short, and the reserve comes out of the window
 VAULT_ENV = os.getenv("SKIPPY_VAULT_ENV", "G:/My Drive/vault/.env")
 REPO = os.getenv("WORKSHOP_REPO", r"D:\Aaron\development\SkippyTel-workshop")
 PRIMARY = os.getenv("WORKSHOP_PRIMARY", r"D:\Aaron\development\SkippyTel")
@@ -939,7 +943,8 @@ class Workshop:
         env.update(ANTHROPIC_BASE_URL=url, ANTHROPIC_API_KEY=key, ANTHROPIC_AUTH_TOKEN=key, CLAUDE_CONFIG_DIR=config,
                    ANTHROPIC_SMALL_FAST_MODEL=CORE_MODEL, ANTHROPIC_DEFAULT_HAIKU_MODEL=CORE_MODEL,
                    ANTHROPIC_DEFAULT_SONNET_MODEL=CORE_MODEL, ANTHROPIC_DEFAULT_OPUS_MODEL=CORE_MODEL,
-                   CLAUDE_CODE_MAX_CONTEXT_TOKENS=CORE_CONTEXT, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_TELEMETRY="1")
+                   CLAUDE_CODE_MAX_CONTEXT_TOKENS=CORE_CONTEXT, CLAUDE_CODE_MAX_OUTPUT_TOKENS=CORE_MAX_OUTPUT,
+                   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_TELEMETRY="1")
         return env
 
     # ── the work ─────────────────────────────────────────────────────────

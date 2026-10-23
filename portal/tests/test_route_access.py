@@ -30,7 +30,7 @@ REGISTRY = {
     # the Captain only
     **{e: ADMIN_ONLY for e in (
         "admin.autoconfigure", "admin.discord_setup", "admin.friends_remove", "admin.friends_save", "admin.index", "admin.logs",
-        "admin.module_switch", "admin.requests_dismiss", "admin.restart", "admin.settings", "recovery.act", "server_admin.fragment",
+        "admin.module_switch", "admin.requests_dismiss", "admin.restart", "admin.settings", "recovery.repair", "recovery.state_json", "server_admin.fragment",
         "me.index", "me.mcp_ask", "me.mcp_result", "me.pair_home", "me.toggle_experiment", "me.workshop_events", "me.workshop_history", "me.workshop_history_result",
         "me.workshop_image", "me.workshop_new_folder", "me.workshop_new_folder_result", "me.workshop_notify", "me.workshop_resync", "me.workshop_send", "me.workshop_ship", "me.workshop_stop",
         "chat.memory_ask", "chat.memory_result")},
