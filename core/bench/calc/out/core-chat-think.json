@@ -1,0 +1,16 @@
+{
+  "model": "chat",
+  "base": "https://skippy-core.tailab2cc7.ts.net",
+  "images": "send",
+  "describe_seconds": 0.0,
+  "seconds": 295.0,
+  "stop_reason": "end_turn",
+  "input_tokens": 185,
+  "output_tokens": 18586,
+  "tokens_per_second": 63.0,
+  "thinking_chars": 82299,
+  "answer_found": true,
+  "answer_bytes": 3712,
+  "grade": "30/40",
+  "timings": null
+}

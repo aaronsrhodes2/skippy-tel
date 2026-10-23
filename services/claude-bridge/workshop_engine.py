@@ -50,7 +50,7 @@ EFFORT = "medium"                  # and its effort level: also fixed here, neve
 # 108-character Bearer token, 401 from llama-swap). Claude sessions live in a config folder, so a conversation keeps one brain.
 BRAINS = ("claude", "core")
 CORE_MODEL = "coder"               # core/models.json's coding slot
-CORE_CONTEXT = "65536"             # that slot's --ctx-size, so Claude Code compacts in time (it doesn't know "coder")
+CORE_CONTEXT = "131072"            # that slot's --ctx-size, so Claude Code compacts in time (it doesn't know "coder")
 VAULT_ENV = os.getenv("SKIPPY_VAULT_ENV", "G:/My Drive/vault/.env")
 REPO = os.getenv("WORKSHOP_REPO", r"D:\Aaron\development\SkippyTel-workshop")
 PRIMARY = os.getenv("WORKSHOP_PRIMARY", r"D:\Aaron\development\SkippyTel")

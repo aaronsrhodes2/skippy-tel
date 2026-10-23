@@ -1,0 +1,252 @@
+import re
+from typing import List, Union
+
+class Token:
+    def __init__(self, type_: str, value: Union[float, str] = None):
+        self.type = type_
+        self.value = value
+
+    def __repr__(self):
+        return f"Token({self.type}, {self.value})"
+
+def tokenize(expr: str) -> List[Token]:
+    tokens = []
+    i = 0
+    n = len(expr)
+    
+    while i < n:
+        # Skip whitespace
+        if expr[i].isspace():
+            i += 1
+            continue
+        
+        # Check for number
+        if expr[i].isdigit() or (expr[i] == '.' and i+1 < n and expr[i+1].isdigit()):
+            # Parse number (can be like 3, 0.5, .5, 2.)
+            start = i
+            has_dot = False
+            while i < n and (expr[i].isdigit() or (expr[i] == '.' and not has_dot)):
+                if expr[i] == '.':
+                    has_dot = True
+                i += 1
+            
+            num_str = expr[start:i]
+            try:
+                num = float(num_str)
+                # Check if it's an integer representation (though we'll store as float)
+                tokens.append(Token("NUMBER", num))
+            except ValueError:
+                raise ValueError(f"Invalid number: {num_str}")
+            continue
+        
+        # Check for operators and parentheses
+        if expr[i] in '+-*/%':
+            # Check for ** operator
+            if expr[i] == '*' and i+1 < n and expr[i+1] == '*':
+                tokens.append(Token("POWER", "**"))
+                i += 2
+                continue
+            
+            # Check for unary minus/plus by context
+            # It's unary if:
+            # 1. At start of expression
+            # 2. After an operator or opening parenthesis
+            # 3. After ** (power operator) - since power is right-associative and unary binds tight on left
+            if expr[i] in '+-' and (not tokens or tokens[-1].type in ('OP', 'LPAREN', 'POWER')):
+                # Determine if it's unary + or -
+                sign = 1 if expr[i] == '+' else -1
+                
+                # If next token is a number, handle it directly to avoid unary in token stream
+                if i+1 < n and (expr[i+1].isdigit() or (expr[i+1] == '.' and i+2 < n and expr[i+2].isdigit())):
+                    j = i + 1
+                    has_dot = False
+                    while j < n and (expr[j].isdigit() or (expr[j] == '.' and not has_dot)):
+                        if expr[j] == '.':
+                            has_dot = True
+                        j += 1
+                    num_str = expr[i+1:j]
+                    try:
+                        num = float(num_str) * sign
+                        tokens.append(Token("NUMBER", num))
+                        i = j
+                    except ValueError:
+                        raise ValueError(f"Invalid number: {num_str}")
+                    continue
+                else:
+                    # It's truly a unary operator (will be handled in parsing)
+                    tokens.append(Token("UNARY", expr[i]))
+                    i += 1
+                    continue
+            
+            # Binary operator
+            tokens.append(Token("OP", expr[i]))
+            i += 1
+            continue
+        
+        if expr[i] == '(':
+            tokens.append(Token("LPAREN", "("))
+            i += 1
+            continue
+        
+        if expr[i] == ')':
+            tokens.append(Token("RPAREN", ")"))
+            i += 1
+            continue
+        
+        # Unknown character
+        raise ValueError(f"Unknown character: '{expr[i]}'")
+    
+    return tokens
+
+def parse(tokens: List[Token]) -> List[Union[Token, list]]:
+    """Convert token list to a simple expression tree using recursive descent.
+    
+    Grammar (in order of precedence, highest to lowest):
+    expr         := term (('+' | '-') term)*
+    term         := power (('*' | '/' | '%') power)*
+    power        := unary ('**' power)?  # right-associative
+    unary        := ('+' | '-') unary | primary
+    primary      := NUMBER | LPAREN expr RPAREN
+    """
+    
+    # We'll use a recursive descent parser with look-ahead
+    pos = 0
+    
+    def peek():
+        return tokens[pos] if pos < len(tokens) else None
+    
+    def consume():
+        nonlocal pos
+        token = tokens[pos]
+        pos += 1
+        return token
+    
+    def match(*types):
+        return pos < len(tokens) and tokens[pos].type in types
+    
+    def parse_expr():
+        node = parse_term()
+        
+        while match("OP") and tokens[pos].value in ('+', '-'):
+            op = consume()
+            right = parse_term()
+            node = ['binop', op.value, node, right]
+        
+        return node
+    
+    def parse_term():
+        node = parse_power()
+        
+        while match("OP") and tokens[pos].value in ('*', '/', '%'):
+            op = consume()
+            right = parse_power()
+            node = ['binop', op.value, node, right]
+        
+        return node
+    
+    def parse_power():
+        node = parse_unary()
+        
+        # Right-associative: parse ** and then recursively parse the right side as power
+        if match("OP") and tokens[pos].value == '**':
+            consume()
+            right = parse_power()  # Right-associative: parse the right side as power
+            node = ['binop', '**', node, right]
+        
+        return node
+    
+    def parse_unary():
+        if match("UNARY") and tokens[pos].value in ('+', '-'):
+            op = consume()
+            operand = parse_unary()  # Recursive for multiple unary (e.g., --5)
+            return ['unary', op.value, operand]
+        
+        return parse_primary()
+    
+    def parse_primary():
+        if match("NUMBER"):
+            token = consume()
+            return ['number', token.value]
+        
+        if match("LPAREN"):
+            consume()  # consume '('
+            node = parse_expr()
+            if not match("RPAREN"):
+                raise ValueError("Unbalanced parentheses")
+            consume()  # consume ')'
+            return node
+        
+        raise ValueError("Expected number or '('")
+    
+    if not tokens:
+        raise ValueError("Empty expression")
+    
+    result = parse_expr()
+    
+    if pos < len(tokens):
+        raise ValueError(f"Unexpected token: {tokens[pos]}")
+    
+    return result
+
+def eval_tree(tree: List) -> float:
+    """Evaluate the expression tree."""
+    if tree[0] == 'number':
+        return tree[1]
+    
+    if tree[0] == 'unary':
+        op, operand = tree[1], tree[2]
+        val = eval_tree(operand)
+        if op == '+':
+            return +val
+        elif op == '-':
+            return -val
+    
+    if tree[0] == 'binop':
+        op, left, right = tree[1], tree[2], tree[3]
+        left_val = eval_tree(left)
+        right_val = eval_tree(right)
+        
+        if op == '+':
+            return left_val + right_val
+        elif op == '-':
+            return left_val - right_val
+        elif op == '*':
+            return left_val * right_val
+        elif op == '/':
+            if right_val == 0:
+                raise ZeroDivisionError("Division by zero")
+            return left_val / right_val
+        elif op == '%':
+            if right_val == 0:
+                raise ZeroDivisionError("Modulo by zero")
+            return left_val % right_val
+        elif op == '**':
+            return left_val ** right_val
+    
+    raise ValueError(f"Invalid expression tree: {tree}")
+
+def evaluate(expr: str) -> float:
+    """Evaluate an arithmetic expression string without using eval, exec, compile or ast.
+    
+    Args:
+        expr: String containing arithmetic expression
+        
+    Returns:
+        Result as float
+        
+    Raises:
+        ValueError: For malformed expressions or invalid syntax
+        ZeroDivisionError: For division or modulo by zero
+    """
+    # Handle empty input
+    if not expr or not expr.strip():
+        raise ValueError("Empty expression")
+    
+    # Tokenize
+    tokens = tokenize(expr)
+    
+    # Parse
+    tree = parse(tokens)
+    
+    # Evaluate
+    return eval_tree(tree)

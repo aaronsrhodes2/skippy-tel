@@ -1,0 +1,210 @@
+def evaluate(expr: str) -> float:
+    """
+    Evaluate an arithmetic expression string without using eval, exec, compile, or ast.
+    
+    Supports: integers, decimals, +, -, *, /, %, **, unary +/-, parentheses.
+    Precedence and associativity follow Python's rules.
+    """
+    
+    # Token types
+    NUMBER = 'NUMBER'
+    PLUS = 'PLUS'
+    MINUS = 'MINUS'
+    STAR = 'STAR'
+    SLASH = 'SLASH'
+    PERCENT = 'PERCENT'
+    POW = 'POW'
+    LPAREN = 'LPAREN'
+    RPAREN = 'RPAREN'
+    EOF = 'EOF'
+    
+    class Token:
+        def __init__(self, type_, value):
+            self.type = type_
+            self.value = value
+        def __repr__(self):
+            return f'Token({self.type}, {self.value!r})'
+    
+    # Tokenizer
+    def tokenize(s: str) -> list:
+        tokens = []
+        i = 0
+        n = len(s)
+        while i < n:
+            c = s[i]
+            if c.isspace():
+                i += 1
+                continue
+            if c.isdigit() or c == '.':
+                # Parse number
+                start = i
+                has_dot = False
+                while i < n and (s[i].isdigit() or s[i] == '.'):
+                    if s[i] == '.':
+                        if has_dot:
+                            raise ValueError("Invalid number format")
+                        has_dot = True
+                    i += 1
+                num_str = s[start:i]
+                if num_str == '.':
+                    raise ValueError("Invalid number format")
+                if has_dot:
+                    tokens.append(Token(NUMBER, float(num_str)))
+                else:
+                    tokens.append(Token(NUMBER, int(num_str)))
+                continue
+            if c == '+':
+                tokens.append(Token(PLUS, '+'))
+            elif c == '-':
+                tokens.append(Token(MINUS, '-'))
+            elif c == '*':
+                tokens.append(Token(STAR, '*'))
+            elif c == '/':
+                tokens.append(Token(SLASH, '/'))
+            elif c == '%':
+                tokens.append(Token(PERCENT, '%'))
+            elif c == '**':
+                # Check for **
+                if i + 1 < n and s[i+1] == '*':
+                    tokens.append(Token(POW, '**'))
+                    i += 2
+                    continue
+                else:
+                    raise ValueError("Unknown character: " + c)
+            elif c == '(':
+                tokens.append(Token(LPAREN, '('))
+            elif c == ')':
+                tokens.append(Token(RPAREN, ')'))
+            else:
+                raise ValueError("Unknown character: " + c)
+            i += 1
+        tokens.append(Token(EOF, None))
+        return tokens
+    
+    # Parser: recursive descent parser with proper precedence
+    # Precedence (low to high):
+    #   expr: + -
+    #   term: * / %
+    #   power: **
+    #   unary: + -
+    #   atom: NUMBER, (expr)
+    
+    class Parser:
+        def __init__(self, tokens):
+            self.tokens = tokens
+            self.pos = 0
+        
+        def peek(self):
+            return self.tokens[self.pos]
+        
+        def consume(self, expected_type=None):
+            tok = self.tokens[self.pos]
+            if expected_type and tok.type != expected_type:
+                raise ValueError(f"Expected {expected_type}, got {tok.type}")
+            self.pos += 1
+            return tok
+        
+        def parse(self):
+            result = self.parse_expr()
+            if self.peek().type != EOF:
+                raise ValueError("Unexpected token after expression")
+            return result
+        
+        def parse_expr(self):
+            # expr = term (('+' | '-') term)*
+            result = self.parse_term()
+            while self.peek().type in (PLUS, MINUS):
+                op = self.consume().type
+                right = self.parse_term()
+                if op == PLUS:
+                    result = result + right
+                else:
+                    result = result - right
+            return result
+        
+        def parse_term(self):
+            # term = power (('*' | '/' | '%') power)*
+            result = self.parse_power()
+            while self.peek().type in (STAR, SLASH, PERCENT):
+                op = self.consume().type
+                right = self.parse_power()
+                if op == STAR:
+                    result = result * right
+                elif op == SLASH:
+                    if right == 0:
+                        raise ZeroDivisionError("division by zero")
+                    result = result / right
+                else:  # PERCENT
+                    if right == 0:
+                        raise ZeroDivisionError("modulo by zero")
+                    result = result % right
+            return result
+        
+        def parse_power(self):
+            # power = unary ('**' power)?  -- right associative
+            # But note: -2**2 == -4, so unary minus has lower precedence than **
+            # Actually in Python: -2**2 = -(2**2) = -4
+            # So power binds tighter than unary minus.
+            # Our grammar: power = unary ('**' power)?
+            # This means unary is parsed first, then if there's **, we parse the right side as power (which can be unary again)
+            # But wait: 2**-1 should be 0.5. So -1 is unary minus applied to 1.
+            # So: parse_power calls parse_unary, then if ** follows, parse the right side as power (recursive).
+            
+            base = self.parse_unary()
+            if self.peek().type == POW:
+                self.consume()
+                # Right associative: parse the exponent as a full power expression
+                exponent = self.parse_power()
+                result = base ** exponent
+                return result
+            return base
+        
+        def parse_unary(self):
+            # unary = ('+' | '-') unary | power
+            if self.peek().type == PLUS:
+                self.consume()
+                return +self.parse_unary()
+            elif self.peek().type == MINUS:
+                self.consume()
+                return -self.parse_unary()
+            else:
+                return self.parse_atom()
+        
+        def parse_atom(self):
+            tok = self.peek()
+            if tok.type == NUMBER:
+                self.consume()
+                return tok.value
+            elif tok.type == LPAREN:
+                self.consume()
+                result = self.parse_expr()
+                if self.peek().type != RPAREN:
+                    raise ValueError("Unbalanced parentheses: missing closing ')'")
+                self.consume()
+                return result
+            else:
+                raise ValueError(f"Unexpected token: {tok}")
+    
+    # Handle empty input
+    if not expr or not expr.strip():
+        raise ValueError("Empty expression")
+    
+    try:
+        tokens = tokenize(expr)
+    except ValueError:
+        raise
+    
+    # Check for unbalanced parentheses at token level
+    paren_count = 0
+    for tok in tokens:
+        if tok.type == LPAREN:
+            paren_count += 1
+        elif tok.type == RPAREN:
+            paren_count -= 1
+        if paren_count < 0:
+            raise ValueError("Unbalanced parentheses")
+    if paren_count != 0:
+        raise ValueError("Unbalanced parentheses")
+    
+    parser = Parser(tokens)
+    return parser.parse()

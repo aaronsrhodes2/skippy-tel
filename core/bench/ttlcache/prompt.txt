@@ -1,0 +1,10 @@
+Write a Python module that defines `class TTLCache`, an in-memory cache with a size limit and expiry.
+
+- `TTLCache(capacity: int, ttl: float, clock=time.monotonic)`: capacity >= 1 and ttl > 0, else ValueError. `clock()` returns the current time in seconds; tests pass a fake one.
+- `put(key, value)`: stores or replaces the value and restarts that key's expiry. When a new key would exceed capacity, first drop every expired entry, then if still full evict the least recently used one.
+- `get(key, default=None)`: the value if present and not expired (an entry expires when clock() - stored_at >= ttl), else default. A successful get marks the key as most recently used; an expired entry found by get is removed.
+- `__len__`: the number of entries that have not expired. `__contains__(key)`: True for a live entry, without changing recency.
+- `pop(key, default=None)`: removes and returns a live entry's value, else default.
+- Every operation is O(1) amortised except the expired-entry sweep in put and __len__.
+
+Reply with the whole module in one ```python block.

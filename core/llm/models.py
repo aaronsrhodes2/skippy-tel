@@ -10,6 +10,9 @@ the Bosgame onlines the big ones as their downloads land and verify.
     python3 core/llm/models.py render   [--full ...] --out DIR         write DIR/config.yaml (llama-swap) + DIR/shim.json
     python3 core/llm/models.py fetch    [--full ...] [--slots chat]    download what's missing from Hugging Face, verify, print hashes
 
+Every command also takes --bench a,b (or BENCH=a,b): models.json "candidates" served beside the slots under their own
+names, on demand (they swap with the coder), so a new model is benched on the box before it takes a slot.
+
 LLM_API_KEY, when set, makes llama-swap require it (Authorization: Bearer or x-api-key) on every inference endpoint: the
 rendered config names it as ${env.LLM_API_KEY}, so the key itself never lands in the file (compose hands it to the
 container). MODELS_ROOT (default /srv/models) holds the files; GPU_LAYERS (default 999) is passed to llama-server as -ngl
@@ -53,25 +56,38 @@ def load(path: Path = MANIFEST) -> dict:
     seen: dict[str, str] = {}
     for name, slot in slots.items():
         for variant in ("standin", "full"):
-            v = slot.get(variant) or {}
-            if not v.get("repo") or not v.get("files"):
-                raise ManifestError(f"{name}.{variant}: repo and files are required")
-            for f in v["files"]:
-                if not f.get("path") or not isinstance(f.get("size"), int) or f["size"] <= 0:
-                    raise ManifestError(f"{name}.{variant}: every file needs a path and a positive size")
-                if ".." in Path(f["path"]).parts or Path(f["path"]).is_absolute():
-                    raise ManifestError(f"{name}.{variant}: {f['path']} must stay under the repo folder")
-                sha = f.get("sha256")
-                if sha is not None and (len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha)):
-                    raise ManifestError(f"{name}.{variant}: {f['path']}: sha256 must be 64 lowercase hex or null")
-            par = v.get("parallel", DEFAULT_PARALLEL)
-            if not isinstance(par, int) or not 1 <= par <= int(data.get("max_parallel", 8)):
-                raise ManifestError(f"{name}.{variant}: parallel must be 1..{data.get('max_parallel', 8)}")
+            _check_variant(f"{name}.{variant}", slot.get(variant) or {}, data)
         for alias in [name, *slot.get("aliases", [])]:
             if alias in seen:
                 raise ManifestError(f"name {alias!r} is used by both {seen[alias]} and {name}")
             seen[alias] = name
+    for name, c in (data.get("candidates") or {}).items():
+        if name.startswith("_"):
+            continue
+        _check_variant(f"candidates.{name}", c, data)
+        unknown = set(c.get("for") or []) - set(slots)
+        if not c.get("for") or unknown:
+            raise ManifestError(f"candidates.{name}: 'for' must name existing slots")
+        if name in seen:
+            raise ManifestError(f"name {name!r} is used by both {seen[name]} and candidates.{name}")
+        seen[name] = f"candidates.{name}"
     return data
+
+
+def _check_variant(where: str, v: dict, data: dict) -> None:
+    if not v.get("repo") or not v.get("files"):
+        raise ManifestError(f"{where}: repo and files are required")
+    for f in v["files"]:
+        if not f.get("path") or not isinstance(f.get("size"), int) or f["size"] <= 0:
+            raise ManifestError(f"{where}: every file needs a path and a positive size")
+        if ".." in Path(f["path"]).parts or Path(f["path"]).is_absolute():
+            raise ManifestError(f"{where}: {f['path']} must stay under the repo folder")
+        sha = f.get("sha256")
+        if sha is not None and (len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha)):
+            raise ManifestError(f"{where}: {f['path']}: sha256 must be 64 lowercase hex or null")
+    par = v.get("parallel", DEFAULT_PARALLEL)
+    if not isinstance(par, int) or not 1 <= par <= int(data.get("max_parallel", 8)):
+        raise ManifestError(f"{where}: parallel must be 1..{data.get('max_parallel', 8)}")
 
 
 def parse_full(value: str | None, slots: dict) -> set[str]:
@@ -97,15 +113,26 @@ def plan(data: dict, full: set[str]) -> dict:
     out = {}
     for name, slot in data["slots"].items():
         variant = "full" if name in full else "standin"
-        v = slot[variant]
-        files = [{**f, "rel": f"{repo_dir(v['repo'])}/{f['path']}"} for f in v["files"]]
-        out[name] = {
-            "variant": variant, "repo": v["repo"], "files": files, "ctx": v.get("ctx", 4096), "args": v.get("args", []),
-            "parallel": v.get("parallel", DEFAULT_PARALLEL),
-            "size": sum(f["size"] for f in files), "resident": bool(slot.get("resident")),
-            "aliases": slot.get("aliases", []),
-        }
+        out[name] = _entry(slot[variant], variant, bool(slot.get("resident")), slot.get("aliases", []))
     return out
+
+
+def _entry(v: dict, variant: str, resident: bool, aliases: list[str]) -> dict:
+    files = [{**f, "rel": f"{repo_dir(v['repo'])}/{f['path']}"} for f in v["files"]]
+    return {"variant": variant, "repo": v["repo"], "files": files, "ctx": v.get("ctx", 4096), "args": v.get("args", []),
+            "parallel": v.get("parallel", DEFAULT_PARALLEL), "size": sum(f["size"] for f in files),
+            "resident": resident, "aliases": aliases}
+
+
+def bench(data: dict, value: str | None) -> dict:
+    """BENCH: candidates (models.json "candidates") served beside the slots under their own names, on demand, in the
+    swap group, so loading one unloads the on-demand slot. For trying a model before it takes a slot; a comma list."""
+    names = [n.strip() for n in (value or "").split(",") if n.strip()]
+    cands = data.get("candidates") or {}
+    unknown = [n for n in names if n not in cands or n.startswith("_")]
+    if unknown:
+        raise ManifestError(f"BENCH names unknown candidate(s): {', '.join(unknown)}")
+    return {n: _entry(cands[n], "candidate", False, []) for n in names}
 
 
 def budget(data: dict, chosen: dict) -> dict:
@@ -236,11 +263,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--manifest", default=str(MANIFEST))
     ap.add_argument("--out", help="render: directory for config.yaml and shim.json")
     ap.add_argument("--hash", action="store_true", help="check: also verify pinned sha256 (reads every byte)")
-    ap.add_argument("--slots", default="", help="fetch: only these slots")
+    ap.add_argument("--slots", default="", help="fetch: only these slots (or bench candidates)")
+    ap.add_argument("--bench", default=os.environ.get("BENCH", ""), help="candidates to serve beside the slots (default: $BENCH)")
     a = ap.parse_args(argv)
     try:
         data = load(Path(a.manifest))
-        chosen = plan(data, parse_full(a.full, data["slots"]))
+        chosen = {**plan(data, parse_full(a.full, data["slots"])), **bench(data, a.bench)}
     except (ManifestError, OSError, json.JSONDecodeError) as e:
         print(f"manifest: {e}", file=sys.stderr)
         return 2

@@ -1,0 +1,10 @@
+RAISED '2**3**2': ValueError('Unexpected token: Token(POWER, **)')
+RAISED '-2**2': ValueError('Unexpected token: Token(POWER, **)')
+RAISED '2**-1': ValueError('Unexpected token: Token(POWER, **)')
+RAISED '--3': ValueError("Expected number or '('")
+RAISED '+-+4': ValueError("Expected number or '('")
+RAISED '2 ** 3 * 2': ValueError('Unexpected token: Token(POWER, **)')
+RAISED '2*3**2': ValueError('Unexpected token: Token(POWER, **)')
+RAISED '-3**-2': ValueError('Unexpected token: Token(POWER, **)')
+RAISED '(2+3)**2%7': ValueError('Unexpected token: Token(POWER, **)')
+31/40

@@ -12,7 +12,7 @@ with tiny stand-in models on CPU. Onlining the real models later is a config lin
 
 | Piece | File | What it does |
 |---|---|---|
-| Model slots | `models.json`, `llm/models.py` | Three slots: **chat** (always loaded), **general** and **coder** (loaded on demand, they swap). Each has a stand-in and the full model. `CORE_FULL` picks which slots run full-size. `models.py` checks the files, checks the memory budget and renders llama-swap's config plus the shim's name table. |
+| Model slots | `models.json`, `llm/models.py` | Four slots: **chat** and **vision** (always loaded), **general** and **coder** (loaded on demand, they swap). Each has a stand-in and the full model. `CORE_FULL` picks which slots run full-size. `models.py` checks the files, checks the memory budget and renders llama-swap's config plus the shim's name table. `--bench a,b` (or `BENCH=`) also serves models.json's **candidates** under their own names, on demand, to try a model before it takes a slot. |
 | LLM server | `compose.core.yml` → `llm` | llama-swap with llama.cpp's Vulkan build (pinned digest). Every model launches with `-fa on --load-mode none` (flash attention, no mmap: both Strix Halo community guides require it; `--load-mode none` is what this llama.cpp build calls `--no-mmap`) and `--parallel` at most 8. |
 | Ollama shim | `ollama-shim/` | Ollama's API on port 11434 in front of llama-swap, so flask-api, Mentat, the reporter, voice-gate and Bilby keep calling `OLLAMA_URL` unchanged. `keep_alive: 0` never unloads the resident chat slot. `/v1/...` passes straight through (OpenAI and Anthropic `/v1/messages`). |
 | Stack | `compose.core.yml`, `compose.gpu.yml` | `llm`, `ollama` (the shim) and `flask-api`. Paths come from the deployer's settings, not Windows drives. `compose.gpu.yml` hands `/dev/dri` to `llm` on the box only. |
@@ -98,7 +98,11 @@ client.messages.stream(model="chat", max_tokens=..., tools=[...], messages=[...]
   `python core/llm/door_check.py` (thinking off) and `--think`. It checks: no key gets 401, a plain reply, a streamed
   reply, and a streamed tool round trip (`ask_mentat`: a `tool_use` block, then a `tool_result`, then the answer).
 
-What works on the chat slot (Qwen3-30B-A3B Q4_K_M, llama-swap v265, 2026-10-19):
+**Since 2026-10-23 chat and coder run Qwen3.6-35B-A3B** (`core/bench/README.md` has the bench): the chat slot (UD-Q4_K_XL)
+starts with **thinking off by default** (`--chat-template-kwargs {"enable_thinking": false}` on the server), so a reply is
+~0.4-1 s and the portal needs to send nothing; a request that wants thinking sends `enable_thinking: true` and gets it
+(10-20 s). Tool use on Qwen3.6, 2026-10-23: a physics question called the tool 5/5 and other questions 0/5, thinking off
+or on, never as text. The table and notes below were measured on the previous chat model (Qwen3-30B-A3B Q4_K_M, llama-swap v265, 2026-10-19):
 
 | | Thinking off (`enable_thinking: false`) | Thinking on (Qwen3's default) |
 |---|---|---|
@@ -137,4 +141,5 @@ What works on the chat slot (Qwen3-30B-A3B Q4_K_M, llama-swap v265, 2026-10-19):
 - The gaming PC's Claude Code on the coder slot: the key is there now (`ANTHROPIC_BASE_URL` = the Funnel URL,
   `ANTHROPIC_API_KEY` = `SKIPPY_CORE_API_KEY`, model `coder`), not tried yet.
 - Pinning the stand-ins' and full models' `sha256` in `models.json` (CI's fetch step and `models.py fetch` print them).
-- The chat slot stays Qwen3-30B-A3B until the Captain decides on the non-thinking Instruct-2507.
+- Qwen3.6's own vision (its `mmproj-F16.gguf` is on the box) could replace the vision slot, but llama.cpp's MTP doesn't
+  run with `--mmproj`, so only the chat slot could carry it. Not tried.

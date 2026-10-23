@@ -1,0 +1,4 @@
+WRONG '-2**2': 4.0 != -4
+RAISED '.5+2.': ValueError("invalid literal for int() with base 10: '.5'")
+WRONG '-3**-2': 0.1111111111111111 != -0.1111111111111111
+37/40
