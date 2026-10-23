@@ -89,6 +89,35 @@ def test_preload_warms_the_resident_voices_and_a_failure_is_reported_not_raised(
     monkeypatch.setattr(studio, "_warm", set())
     monkeypatch.setattr(studio, "_status", {"vram_reserved_gib": None, "errors": {}})
     monkeypatch.setattr(studio, "reserve", lambda gb: gb)
-    studio.preload()
+    monkeypatch.setattr(studio, "room_for", lambda v: True)
+    assert studio.preload() is False                                          # stock is still missing: keep_resident tries again
     assert studio._warm == {"skippy"} and said == [studio.WARMUP] and "no cuda" in studio._status["errors"]["stock"]
     assert studio._status["vram_reserved_gib"] == studio.VRAM_GB and not studio._lock.locked()
+
+
+def test_a_voice_loads_only_when_the_card_has_room_and_is_tried_again_later(monkeypatch):
+    """A model loading onto a full card spills into Docker's VM and freezes it: no room, no load (the gate falls back meanwhile)."""
+    loads = []
+
+    class Voice:
+        def __init__(self):
+            loads.append(1)
+
+        def say(self, text):
+            pass
+
+    free = [2.0]
+    monkeypatch.setattr(studio, "files", lambda: {"stock": True, "skippy": True})
+    monkeypatch.setattr(studio, "VOICES", {"stock": Voice, "skippy": Voice})
+    monkeypatch.setattr(studio, "RESIDENT", ["skippy"])
+    monkeypatch.setattr(studio, "_models", {})
+    monkeypatch.setattr(studio, "_warm", set())
+    monkeypatch.setattr(studio, "_status", {"vram_reserved_gib": None, "errors": {}})
+    monkeypatch.setattr(studio, "free_gib", lambda: free[0])
+    monkeypatch.setattr(studio, "reserve", lambda gb: gb)
+    assert studio.preload() is False and not loads and "VRAM" in studio._status["errors"]["skippy"]      # 2 GiB free < 2.5 + 1.5
+    c = studio.app.test_client()
+    assert c.post("/speak", json={"text": "hi", "voice": "stock"}).status_code == 503                    # 2 < 1 + 1.5: no on-demand load
+    assert c.post("/speak", json={"text": "hi", "voice": "skippy"}).status_code == 503 and not loads
+    free[0] = 8.0
+    assert studio.preload() is True and loads == [1] and "skippy" not in studio._status["errors"]

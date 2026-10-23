@@ -35,9 +35,12 @@ REF = os.environ.get("REF_DIR", "/ref")
 STOCK_VOICE = os.environ.get("STOCK_VOICE", "bm_george")
 IDLE_UNLOAD_S = int(os.environ.get("IDLE_UNLOAD_S", "600"))
 F5_NFE = int(os.environ.get("F5_NFE", "16"))
-RESIDENT = [v for v in os.environ.get("RESIDENT", "stock,skippy").replace(" ", "").split(",") if v]
+RESIDENT = [v for v in os.environ.get("RESIDENT", "skippy,stock").replace(" ", "").split(",") if v]
 VRAM_GB = float(os.environ.get("VOICE_VRAM_GB", "3"))
 LOCK_WAIT_S = float(os.environ.get("LOCK_WAIT_S", "10"))
+NEED_GB = {"stock": 1.0, "skippy": 2.5}                # what a voice takes on the card at its peak (measured: Kokoro < 1, F5 2.0)
+MARGIN_GB = float(os.environ.get("VRAM_MARGIN_GB", "1.5"))   # free card left over after any load or reserve
+RETRY_S = float(os.environ.get("RESIDENT_RETRY_S", "120"))
 MAX_TEXT = 1000
 SR = 24000
 
@@ -153,10 +156,27 @@ def _unload_when_idle():
 WARMUP = "Fine. I'll warm up, since apparently that is my job now."
 
 
-def reserve(gb: float) -> float:
-    """Top this process's CUDA memory up to gb and keep it cached: the voice's headroom. Returns what is held, in GiB."""
+def free_gib() -> float:
+    """The card's free memory right now, all processes counted (nvidia-smi's view)."""
     import torch
-    want = int(gb * 2**30) - torch.cuda.memory_reserved()
+    return torch.cuda.mem_get_info()[0] / 2**30
+
+
+def room_for(voice: str) -> bool:
+    """Loading only when the card has the room, with MARGIN_GB to spare: when the card overflows, WSL spills GPU memory into Docker's
+    8 GB VM and the whole VM freezes (three Docker Desktop crashes on 2026-10-23, each while a model loaded onto a full card)."""
+    free = free_gib()
+    if free >= NEED_GB.get(voice, 2.0) + MARGIN_GB:
+        return True
+    print(f"[tts-studio] not loading {voice}: {free:.1f} GiB free, it needs {NEED_GB.get(voice, 2.0)} + {MARGIN_GB} to spare", flush=True)
+    return False
+
+
+def reserve(gb: float) -> float:
+    """Top this process's CUDA memory up to gb and keep it cached: the voice's headroom, never past MARGIN_GB of free card.
+    Returns what is held, in GiB."""
+    import torch
+    want = min(int(gb * 2**30) - torch.cuda.memory_reserved(), int((free_gib() - MARGIN_GB) * 2**30))
     if want > 0:
         try:
             block = torch.empty(want, dtype=torch.uint8, device="cuda")
@@ -166,16 +186,21 @@ def reserve(gb: float) -> float:
     return round(torch.cuda.memory_reserved() / 2**30, 2)
 
 
-def preload():
-    """Load and warm every resident voice once, then hold the VRAM reserve. In the background: /health says not ready meanwhile."""
+def preload() -> bool:
+    """Load and warm each resident voice not yet warm, in RESIDENT order, each only if the card has room; then hold the VRAM reserve.
+    True when every resident voice is warm. In the background: /health says not ready meanwhile, and voice-gate falls back."""
     for v in RESIDENT:
-        if v not in VOICES or not files().get(v):
+        if v in _warm or v not in VOICES or not files().get(v):
             continue
         with _lock:
             try:
+                if v not in _models and not room_for(v):
+                    _status["errors"][v] = "not enough free VRAM yet; retrying"
+                    continue
                 started = time.time()
                 _model(v).say(WARMUP)
                 _warm.add(v)
+                _status["errors"].pop(v, None)
                 print(f"[tts-studio] {v} resident and warm in {time.time() - started:.1f}s", flush=True)
             except Exception as exc:  # noqa: BLE001  voice-gate falls back; the log and /health say why
                 _status["errors"][v] = f"{type(exc).__name__}: {exc}"[:300]
@@ -184,6 +209,13 @@ def preload():
         with _lock:
             _status["vram_reserved_gib"] = reserve(VRAM_GB)
         print(f"[tts-studio] holding {_status['vram_reserved_gib']} GiB of VRAM", flush=True)
+    return all(v in _warm for v in RESIDENT if v in VOICES and files().get(v))
+
+
+def keep_resident():
+    """preload() until every resident voice is warm: a voice skipped for want of room is tried again when the card frees up."""
+    while not preload():
+        time.sleep(RETRY_S)
 
 
 @app.get("/health")
@@ -208,6 +240,9 @@ def speak():
     if not _lock.acquire(timeout=LOCK_WAIT_S):           # busy past that: voice-gate would rather fall back than keep him waiting
         return jsonify(error="busy"), 429
     try:
+        if voice not in _models and not room_for(voice):
+            _lock.release()
+            return jsonify(error=f"no room on the card for the {voice} voice right now"), 503
         model = _model(voice)                       # load before the response starts, so a failed load is a 503, not a cut stream
     except Exception as exc:  # noqa: BLE001
         _lock.release()
@@ -238,5 +273,5 @@ def speak():
 
 if __name__ == "__main__":
     threading.Thread(target=_unload_when_idle, daemon=True).start()
-    threading.Thread(target=preload, daemon=True, name="preload").start()
+    threading.Thread(target=keep_resident, daemon=True, name="preload").start()
     app.run(host="0.0.0.0", port=8003, threaded=True)

@@ -176,7 +176,9 @@ services:
       - "8003"
     environment:
       STOCK_VOICE: bm_george                   # Kokoro's voices/<name>.pt; the first letter is its accent (a = American, b = British)
-      RESIDENT: stock,skippy                   # loaded at start and kept; a voice left out loads on its first line
+      RESIDENT: skippy,stock                   # loaded at start (in this order) and kept; a voice left out loads on its first line
+      VRAM_MARGIN_GB: "1.5"                    # a load or the reserve happens only with this much of the card left free; else it waits
+                                               # and retries (a full card spills into Docker's 8 GB VM and freezes it)
       IDLE_UNLOAD_S: "0"                       # only for voices not RESIDENT; 0 = never unload
       F5_NFE: "16"                             # F5's flow steps: 16 = about 0.6 s a line at 4 % word errors (the bake-off; 32 is 3x slower)
       VOICE_VRAM_GB: "3"                       # held by this process after the warm-up (both models need ~2.5 GB at peak)
@@ -185,6 +187,7 @@ services:
       - ${MODELS_ROOT:-D:/models}/huggingface/SWivid__F5-TTS:/w/f5:ro
       - ${TTS_REF_DIR:-./state/tts-studio/ref}:/ref:ro   # set TTS_REF_DIR when deploying from a worktree
     shm_size: "1gb"
+    mem_limit: 5g                              # both models load through RAM first (~3 GB peak): a runaway is this container's kill, not the VM's
     deploy:
       resources:
         reservations:
