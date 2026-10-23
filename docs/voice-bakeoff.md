@@ -159,3 +159,47 @@ MSYS_NO_PATHCONV=1 docker run --rm --network none -v D:/Aaron/development/Skippy
 python tools/voice_bakeoff/wer.py              # needs skippytel-whisper on 127.0.0.1:8000
 python tools/voice_bakeoff/build_page.py       # -> state/voice-bakeoff/skippy-voice-bakeoff.html (personal-use audio: not in git)
 ```
+
+## Cloned from the ElevenLabs print, with settings (2026-10-23)
+
+The Captain listened to the re-run ("ElevenLabs perfect; F5 not bad at all, normal gait and accent; XTTS slow-motion; Chatterbox
+fast but lost the accent; Qwen3 good but unacceptable time") and decided the local engines clone **ElevenLabs' Skippy voice**, not
+the narrator recording. His reasoning, for the record: "we are not training a model, we are just getting a voice print that we
+created from our own prompting", "and it is not a service we are providing to anyone for profit". (The §12 note above is why it is
+written down.) The print: `state/voice-bakeoff/ref-el/ref.wav`, 9.25 s, take 2 of three renders of a fixed line through flask-api
+(`w7zF…`, `eleven_v4`), cut at the second sentence; transcript in `ref.txt`, checked word for word with Whisper.
+
+Three settings per engine, 3 lines (`SWEEP` in `bench.py`: one model load, one pass per setting), every take run through the chat's
+own polish chain (`polish_noise.py` = voice-gate's `fx_chain_for`). Qwen3 left out (too slow). `elref_report.py` builds the table
+and `state/voice-bakeoff/elref/skippy-voice-elref.html`.
+
+| engine | setting | first audio | total | RTF | word errors | like ElevenLabs | pause noise raw → polished |
+|---|---|---|---|---|---|---|---|
+| ElevenLabs | the chat's voice | 0.81 s | 2.04 s | cloud | 0 % | 1.00 | −86 → −94 dB |
+| **F5-TTS** | **nfe16** (16 steps) | **0.59 s** | **0.59 s** | **0.10** | 4 % | 0.93 | −79 → −84 dB |
+| F5-TTS | cfg3 | 1.18 s | 1.18 s | 0.20 | 6 % | 0.92 | −83 → −83 dB |
+| F5-TTS | default (32 steps) | 3.57 s\* | 3.57 s | 0.60 | 8 % | 0.92 | −83 → −83 dB |
+| XTTS-v2 | default | **0.45 s** | 3.39 s | 0.51 | 0 % | 0.90 | −54 → −58 dB |
+| XTTS-v2 | speed 1.2 | 0.43 s | 4.15 s | 0.60 | 0 % | 0.91 | −62 → −63 dB |
+| XTTS-v2 | speed 1.2, temp 0.5 | 0.43 s | 2.90 s | 0.54 | 2 % | 0.88 | −55 → −57 dB |
+| Chatterbox | default | 6.08 s | 6.08 s | 0.84 | 0 % | 0.93 | −92 → −93 dB |
+| Chatterbox | exag 0.7, cfg 0.3 | 5.87 s | 5.87 s | 0.85 | 7 % | 0.93 | −82 → −84 dB |
+| Chatterbox | exag 0.4, cfg 0.8 | 5.88 s | 5.88 s | 0.84 | 8 % | 0.93 | −77 → −81 dB |
+
+\* one slow first line (7.8 s) while the picture studio had the GPU; its other two took 1.2 and 1.7 s.
+"Like ElevenLabs" = Resemblyzer cosine against the 10 ElevenLabs lines plus the print (`sim_dirs.py`); "pause noise" = 10th-percentile
+20 ms frame level, dBFS, lower is cleaner.
+
+What changed with the print:
+- **The background noise came from the reference.** Cloned from the clean ElevenLabs print, F5 and Chatterbox are as quiet in the
+  pauses as ElevenLabs itself (−80 to −93 dBFS, against −51 to −66 from the narrator recording). XTTS stays noisy (−54 to −63).
+- **XTTS's slow motion was the reference too:** its lines are now normal length, and its first streamed audio (0.4 s) beats ElevenLabs.
+- **F5 at 16 flow steps** speaks a whole line in about 0.6 s, sooner than ElevenLabs' first byte, at 4 % word errors and 0.93.
+  That makes it the pick: it needs no streaming to feel instant for one-sentence-at-a-time summaries.
+
+**Two Docker Desktop crashes, both while XTTS loaded on a nearly full card** (13:19 and 14:32; image-studio held SDXL, card at 15+ GB).
+The `--memory=4g` cap didn't prevent the second, so it isn't RAM; the likely trigger is GPU memory oversubscription under WSL. XTTS
+loaded cleanly both times the card had room. Each crash took the home stack down for a minute, plus a few minutes of flask-api's
+cold `/music` scan. **The Captain's decision (2026-10-23):** image generation moves to skippy-core ("quality over speed"; it can
+finish late and show up in the chat later); voice keeps reserved GPU on skippy-pc ("we do care about speed and quality").
+Forwarded to the faster-pictures session, which owns image-studio.

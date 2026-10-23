@@ -18,7 +18,9 @@ import torch
 
 VB = "/vb"
 REF_WAV = os.environ.get("REF_WAV", f"{VB}/ref/ref.wav")   # qwen3 runs with ref_pad.wav: see docs/voice-bakeoff.md
-REF_TXT = open(f"{VB}/ref/ref.txt", encoding="utf-8").read().strip()
+REF_TXT = open(os.environ.get("REF_TXT", f"{VB}/ref/ref.txt"), encoding="utf-8").read().strip()
+E = lambda k, d: float(os.environ.get(k, d))   # per-engine settings for the sweeps (docs/voice-bakeoff.md); defaults = the library's
+SETTINGS = {k: v for k, v in os.environ.items() if k.split("_")[0] in ("CB", "F5", "XTTS", "QWEN") or k in ("REF_WAV", "REF_TXT")}
 LINES = json.load(open("/bench/lines.json", encoding="utf-8"))[: int(os.environ.get("N_LINES", "99"))]
 WARMUP = "Fine. I'll warm up, since apparently that is my job now."
 
@@ -46,10 +48,14 @@ class Chatterbox:
     def __init__(self):
         from chatterbox.tts import ChatterboxTTS
         self.m = ChatterboxTTS.from_local("/w", "cuda")
-        self.m.prepare_conditionals(REF_WAV, exaggeration=0.5)
+        self.configure()
+
+    def configure(self):
+        self.exag, self.cfg, self.temp = E("CB_EXAG", 0.5), E("CB_CFG", 0.5), E("CB_TEMP", 0.8)
+        self.m.prepare_conditionals(REF_WAV, exaggeration=self.exag)
 
     def say(self, text):
-        wav = self.m.generate(text, exaggeration=0.5, cfg_weight=0.5)
+        wav = self.m.generate(text, exaggeration=self.exag, cfg_weight=self.cfg, temperature=self.temp)
         return wav.squeeze(0).cpu().numpy().astype(np.float32), self.m.sr, None
 
 
@@ -62,7 +68,8 @@ class F5:
                        vocab_file="/w/F5TTS_v1_Base/vocab.txt", vocoder_local_path="/vocos", device="cuda")
 
     def say(self, text):
-        wav, sr, _ = self.m.infer(ref_file=REF_WAV, ref_text=REF_TXT, gen_text=text, remove_silence=False, show_info=lambda *a: None)
+        wav, sr, _ = self.m.infer(ref_file=REF_WAV, ref_text=REF_TXT, gen_text=text, remove_silence=False, show_info=lambda *a: None,
+                                  nfe_step=int(E("F5_NFE", 32)), speed=E("F5_SPEED", 1.0), cfg_strength=E("F5_CFG", 2.0))
         return np.asarray(wav, dtype=np.float32), sr, None
 
 
@@ -89,7 +96,8 @@ class XTTS:
     def say(self, text):
         t0 = time.perf_counter()
         first, chunks = None, []
-        for c in self.m.inference_stream(text, "en", self.lat, self.spk, enable_text_splitting=True):
+        for c in self.m.inference_stream(text, "en", self.lat, self.spk, enable_text_splitting=True, speed=E("XTTS_SPEED", 1.0),
+                                          temperature=E("XTTS_TEMP", 0.75), top_p=E("XTTS_TOPP", 0.85)):
             if first is None:
                 sync()
                 first = time.perf_counter() - t0
@@ -104,15 +112,8 @@ def gib(b):
     return round(b / 2**30, 2)
 
 
-def main(key):
-    out = f"{VB}/out/{os.environ.get('OUT', key)}"
+def run_lines(model, out):
     os.makedirs(out, exist_ok=True)
-    torch.cuda.reset_peak_memory_stats()
-    t0 = time.perf_counter()
-    model = MODELS[key]()
-    sync()
-    load_s = time.perf_counter() - t0
-    vram_load = (gib(torch.cuda.max_memory_allocated()), gib(torch.cuda.max_memory_reserved()))
     model.say(WARMUP)
     sync()
     runs = []
@@ -128,12 +129,37 @@ def main(key):
         runs.append({"i": i, "wall_s": round(wall, 3), "audio_s": round(secs, 3), "rtf": round(wall / secs, 3),
                      "ttfa_s": round(first if first is not None else wall, 3), "streamed": first is not None})
         print(json.dumps(runs[-1]), flush=True)
-    res = {"model": model.name, "key": key, "gpu": torch.cuda.get_device_name(0), "torch": torch.__version__,
-           "load_s": round(load_s, 1), "vram_after_load_gib": {"allocated": vram_load[0], "reserved": vram_load[1]},
-           "vram_peak_gib": {"allocated": gib(torch.cuda.max_memory_allocated()), "reserved": gib(torch.cuda.max_memory_reserved())},
-           "runs": runs}
-    json.dump(res, open(f"{out}/timing.json", "w"), indent=1)
-    print(json.dumps({k: v for k, v in res.items() if k != "runs"}))
+    return runs
+
+
+def main(key):
+    """One model load, then one pass over LINES per settings set. SWEEP='{"tag": {"F5_NFE": 16}, ...}' writes out/<OUT>/<tag>/;
+    without SWEEP it is one pass with the environment's settings, written to out/<OUT> as before."""
+    out = f"{VB}/out/{os.environ.get('OUT', key)}"
+    sweep = json.loads(os.environ["SWEEP"]) if os.environ.get("SWEEP") else None
+    torch.cuda.reset_peak_memory_stats()
+    t0 = time.perf_counter()
+    model = MODELS[key]()
+    sync()
+    load_s = time.perf_counter() - t0
+    vram_load = (gib(torch.cuda.max_memory_allocated()), gib(torch.cuda.max_memory_reserved()))
+    for tag, knobs in (sweep or {"": {}}).items():
+        for k in [k for k in os.environ if k.split("_")[0] in ("CB", "F5", "XTTS") and k not in knobs and sweep]:
+            del os.environ[k]                                   # each sweep entry starts from the library defaults
+        os.environ.update({k: str(v) for k, v in knobs.items()})
+        if hasattr(model, "configure"):
+            model.configure()
+        torch.cuda.reset_peak_memory_stats()
+        d = f"{out}/{tag}" if tag else out
+        print(f"== {tag or 'single'} {knobs}", flush=True)
+        runs = run_lines(model, d)
+        res = {"model": model.name, "key": key, "tag": tag, "settings": {**SETTINGS, **{k: str(v) for k, v in knobs.items()}},
+               "gpu": torch.cuda.get_device_name(0), "torch": torch.__version__, "load_s": round(load_s, 1),
+               "vram_after_load_gib": {"allocated": vram_load[0], "reserved": vram_load[1]},
+               "vram_peak_gib": {"allocated": gib(torch.cuda.max_memory_allocated()), "reserved": gib(torch.cuda.max_memory_reserved())},
+               "runs": runs}
+        json.dump(res, open(f"{d}/timing.json", "w"), indent=1)
+        print(json.dumps({k: v for k, v in res.items() if k != "runs"}), flush=True)
 
 
 if __name__ == "__main__":

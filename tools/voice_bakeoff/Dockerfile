@@ -15,6 +15,6 @@ ARG VOCOS=0
 RUN if [ "$VOCOS" = "1" ]; then HF_HUB_OFFLINE=0 python -c "from huggingface_hub import snapshot_download as s; \
     s('charactr/vocos-mel-24khz', revision='0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21', local_dir='/vocos')"; fi
 
-COPY bench.py lines.json build_page.py similarity.py /bench/
+COPY bench.py lines.json build_page.py similarity.py sim_dirs.py /bench/
 WORKDIR /bench
 ENTRYPOINT ["python", "/bench/bench.py"]
