@@ -35,6 +35,10 @@ class Vad:
         self._win_t = 0.0
         self._calib = math.inf
 
+    def restart(self) -> None:
+        """Forget a half-heard utterance (after Skippy spoke, or a new turn began) but keep what it learned about the room's quiet."""
+        self.speaking, self._begun, self._above, self._quiet_since, self._last_t = False, False, 0.0, None, None
+
     def bar(self) -> float:
         return max(self.floor_min * 2.2, self.quiet * self.ratio)
 

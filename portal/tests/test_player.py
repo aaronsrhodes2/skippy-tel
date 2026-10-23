@@ -480,3 +480,37 @@ def test_the_script_pins_a_room_to_its_output_and_sends_music_there():
     assert "setSinkId" in js and "audiooutput" in js and "devicechange" in js
     assert '"take:" + srcId' in js and "/^take:/" in js
     assert re.search(r'"Both"', js) and "Play on" in js
+
+
+# ── the room boxes: skippy-pc's hub checks each in as a speaker (services/satellite/music.py) ──────────────────────────────────────────
+
+def test_a_room_box_is_listed_like_a_speaker_but_a_browser_cannot_claim_to_be_one():
+    clock = Clock()
+    p = player_mod.Player(paired_home(clock), clock=clock)
+    p.checkin(ADMIN, "skippyroom-kitchen", "Kitchen", None, room="box-kitchen", box=True)
+    p.checkin(ADMIN, "sneaky1234", "Laptop", None, room="box-den")               # a page saying "box-" is not a box
+    [dev] = p.checkin(ADMIN, "phone1234", "iPhone", None)["devices"]
+    assert dev["id"] == "skippyroom-kitchen" and dev["room"] == "box-kitchen" and dev["live"]
+    p.checkin(ADMIN, "skippyroom-x", "X", None, room="box-not a room!", box=True)
+    assert not any(d["id"] == "skippyroom-x" for d in p.checkin(ADMIN, "phone1234", "iPhone", None)["devices"])
+
+
+def test_the_hub_checks_a_box_in_with_the_home_token_and_gets_a_phones_take(client):
+    body = {"device": "skippyroom-kitchen", "name": "Kitchen (Skippy)", "room": "box-kitchen", "state": {"track": "", "playing": False}}
+    assert client.post("/home/music/checkin", json=body).status_code == 401
+    assert client.post("/home/music/checkin", json=body, headers={"Authorization": "Bearer wrong"}).status_code == 401
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    for bad in ({**body, "device": "phone1234"}, {**body, "room": "box-den"}, {**body, "room": "downstairs"}, {**body, "device": "skippyroom-"}):
+        assert client.post("/home/music/checkin", json=bad, headers=auth).status_code == 400
+    assert client.post("/home/music/checkin", json=body, headers=auth).get_json()["commands"] == []
+    login(client, ADMIN)                                                   # the Captain's phone sees it under "Play on" and sends the music there
+    reply = client.post("/music/checkin", json={"device": "phone1234", "name": "iPhone"}).get_json()
+    assert [(d["id"], d["room"]) for d in reply["devices"]] == [("skippyroom-kitchen", "box-kitchen")]
+    assert client.post("/music/command", json={"device": "skippyroom-kitchen", "action": "take:phone1234"}).get_json()["queued"] is True
+    reply = client.post("/home/music/checkin", json=body, headers=auth).get_json()
+    assert reply["commands"] == ["take:phone1234"]
+
+
+def test_with_more_than_two_speakers_the_play_on_menu_offers_all_of_them():
+    js = (STATIC / "bilby-app.js").read_text(encoding="utf-8")
+    assert 'rooms.length === 2 ? "Both" : "All"' in js

@@ -6,6 +6,7 @@
     ./.venv/Scripts/python homectl.py label <id> --name "..." --area "..."
     ./.venv/Scripts/python homectl.py unpair <id>
     ./.venv/Scripts/python homectl.py say "kitchen light" on                try a control (the same code the voice uses)
+    ./.venv/Scripts/python homectl.py prove "theater fan" --rounds 5        switch it on and off, timing each and counting second tries
 
 The setup code is the 8 digits on the device (a Leviton dimmer: the label on its side and in the Leviton app). It is used once, never stored; what is
 stored is the pairing key, in state/home/home.json (git-ignored). Set SKIPPY_HOME_STATE to keep it elsewhere.
@@ -15,6 +16,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 
 from homekit import HomeKit, Store
@@ -27,7 +29,43 @@ def store_path(env=os.environ) -> Path:
     return Path(env.get("SKIPPY_HOME_STATE") or ROOT / "state" / "home") / "home.json"
 
 
-def main(argv=None, hk: HomeKit | None = None, out=print) -> int:
+def prove(hk: HomeKit, name: str, rounds: int, gap: float, out=print, sleep=time.sleep) -> int:
+    """The proof that it beats Alexa: on, off, `rounds` times, each read back from the device itself. Leaves it as it found it."""
+    import house                                                    # noqa: PLC0415
+    one, close = hk.find(name)
+    if one is None:
+        out(f"I cannot find {name!r}." + (" Did you mean: " + ", ".join(hk._label(s) for s in close) + "?" if close else " Is it paired? (homectl.py list)"))
+        return 1
+    eid, label = one["entity_id"], hk._label(one)
+    was = one["state"]
+    times, seconds, failures = [], 0, 0
+    for i in range(rounds):
+        for action in ("on", "off"):
+            try:
+                hk.last = {}
+                said = hk.control(eid, action)
+                if not hk.last:
+                    raise house.HomeError(said)
+                times.append(hk.last["ms"])
+                seconds += hk.last["attempts"] == 2
+                out(f"{i + 1}  {action:<3}  {hk.last['ms']:>5} ms" + ("  (needed a second try)" if hk.last["attempts"] == 2 else ""))
+            except house.HomeError as e:
+                failures += 1
+                out(f"{i + 1}  {action:<3}  FAILED: {e}")
+            sleep(gap)
+    if was in ("on", "off"):
+        try:
+            hk.control(eid, was)
+        except house.HomeError:
+            pass
+    if times:
+        times.sort()
+        out(f"{label}: {len(times)}/{len(times) + failures} worked, median {times[len(times) // 2]} ms, slowest {times[-1]} ms, "
+            f"{seconds} needed a second try (done by Skippy, not you).")
+    return 0 if not failures else 1
+
+
+def main(argv=None, hk: HomeKit | None = None, out=print, sleep=time.sleep) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("scan")
@@ -36,6 +74,7 @@ def main(argv=None, hk: HomeKit | None = None, out=print) -> int:
     p = sub.add_parser("label"); p.add_argument("id"); p.add_argument("--name", default=""); p.add_argument("--area", default="")
     p = sub.add_parser("unpair"); p.add_argument("id")
     p = sub.add_parser("say"); p.add_argument("name"); p.add_argument("action"); p.add_argument("value", nargs="?")
+    p = sub.add_parser("prove"); p.add_argument("name"); p.add_argument("--rounds", type=int, default=5); p.add_argument("--gap", type=float, default=3.0)
     args = ap.parse_args(argv)
     hk = hk or HomeKit(Store(store_path()))
     try:
@@ -58,6 +97,8 @@ def main(argv=None, hk: HomeKit | None = None, out=print) -> int:
             out("Forgotten here (the device itself still thinks it is paired: reset it, or remove it in its own app, to pair it elsewhere).")
         elif args.cmd == "say":
             out(hk.control(args.name, args.action, args.value))
+        elif args.cmd == "prove":
+            return prove(hk, args.name, args.rounds, args.gap, out, sleep)
     except HomeError as e:
         out(str(e))
         return 1
