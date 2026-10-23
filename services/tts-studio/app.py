@@ -58,9 +58,9 @@ def clean(text: str) -> str:
 
 
 def for_f5(text: str) -> str:
-    """F5 reads characters, not meaning: numbers in words (spoken_numbers.py), and a closing stop (it trails off without one).
-    Kokoro's own G2P reads numbers itself."""
-    t = say_numbers(text)
+    """F5 reads characters, not meaning: numbers in words (spoken_numbers.py), no hyphens (it paused at one: "forty-four" came out
+    as "forty, four"), and a closing stop (it trails off without one)."""
+    t = re.sub(r"(?<=[A-Za-z])-(?=[A-Za-z])", " ", say_numbers(text))
     return t + "." if t and t[-1] not in ".!?…;:" else t
 
 
@@ -89,6 +89,8 @@ def ready() -> dict:
 
 
 class Stock:
+    """Kokoro reads plain numbers itself, but not units ("km/s" came out as "km slash S"), so it gets the numbers pass too."""
+
     def __init__(self):
         from kokoro import KModel, KPipeline
         model = KModel(repo_id="hexgrad/Kokoro-82M", config=f"{KOKORO}/config.json", model=f"{KOKORO}/kokoro-v1_0.pth").to("cuda").eval()
@@ -97,7 +99,7 @@ class Stock:
 
     def say(self, text: str):
         import numpy as np
-        parts = [r.audio.cpu().numpy() for r in self.pipe(text, voice=self.voice, speed=1.0) if r.audio is not None]
+        parts = [r.audio.cpu().numpy() for r in self.pipe(say_numbers(text), voice=self.voice, speed=1.0) if r.audio is not None]
         return np.concatenate(parts).astype("float32") if parts else np.zeros(0, "float32")
 
 

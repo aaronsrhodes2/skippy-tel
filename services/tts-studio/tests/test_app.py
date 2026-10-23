@@ -38,6 +38,7 @@ def test_tags_and_markdown_never_reach_a_voice_and_f5_gets_a_closing_stop():
     assert studio.clean("[whispers] Hello **there**  `x`") == "Hello there x"
     assert studio.clean("[sarcastic]") == ""
     assert studio.for_f5("Hello there 2 times") == "Hello there two times." and studio.for_f5("Done!") == "Done!"
+    assert studio.for_f5("At 44% of 21 hard-earned coins") == "At forty four percent of twenty one hard earned coins."      # no hyphen pauses
 
 
 def test_the_first_chunk_is_one_sentence_and_the_rest_are_packed():
