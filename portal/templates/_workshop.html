@@ -569,8 +569,11 @@
       if (running !== job) return;                 // left or reset while it napped: the card is someone else's now
       running = null; ui(); text.focus(); draw(job.turn); save();       // the working line goes
       if (out.end && !job.turn.note) drainQueue();                      // the queue goes as one message, unless he stopped it or it failed
-      if (job.turn.bad) voice.resume();                                  // no answer to speak: in a spoken conversation the turn comes back to him
-      else voice.say((job.turn.parts || []).filter(p => p.t === "text").map(p => p.text).join(" "));   // aloud, if the speaker key is on
+      const said = job.turn.bad ? null : (job.turn.parts || []).filter(p => p.t === "text").map(p => p.text).join(" ");
+      const hand = typeof window !== "undefined" && window.SkippyAgent && window.SkippyAgent.onReply;
+      if (hand) hand(said);                                              // inside the one chat: its voice speaks it (always in Hands-off)
+      else if (said == null) voice.resume();                             // no answer to speak: in a spoken conversation the turn comes back to him
+      else voice.say(said);                                              // this card alone: aloud, if its speaker key is on
       if (out.resume) resume(out.resume);
     }
 
