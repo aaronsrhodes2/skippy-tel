@@ -1598,6 +1598,7 @@ def _music_app():
     client = app.test_client()
     token = _pair(client)                                            # logs in as the admin
     _advertise(client, token, make_music=True)
+    app.extensions["home"].hold = None                               # (songs are patient jobs: test_patient.py; here, the music flow itself)
     return app, client, token, skippy
 
 
@@ -1629,7 +1630,7 @@ def test_a_long_job_can_be_started_looked_at_and_finished_without_being_consumed
     h = home_mod.Home(vm=None, clock=lambda: now[0])
     job = h.start("make_music", owner="aaron@example.com", prompt="lofi")
     assert h.owner_of(job) == "aaron@example.com" and h.owner_of("nope") is None
-    assert h.peek(job) == {"state": "running", "age_s": 0} and h.peek("nope") == {"state": "unknown"}
+    assert h.peek(job) == {"state": "running", "age_s": 0, "handed_out": False} and h.peek("nope") == {"state": "unknown"}
     assert h.wait_result(job, 0)["state"] == "running"
     assert h.finish(job, {"result": {"seconds": 30}})
     assert h.peek(job) == h.peek(job) == {"state": "done", "result": {"seconds": 30}}   # peeking doesn't consume it
@@ -1745,7 +1746,7 @@ def test_a_song_that_isnt_ready_says_so_and_music_result_finds_it_later(monkeypa
     skippy.reply = first
     data = client.post("/chat/send", json={"message": "a slow blues"}).get_json()
     started = json.loads(seen["first"])
-    assert started["status"] == "running" and started["job_id"] and data["media"] == []
+    assert started["status"] == "queued" and started["job_id"] and [m["pending"] for m in data["media"]] == [True]
     job_id = started["job_id"]
     home.finish(job_id, {"result": {"title": "slow blues", "seconds": 42}})         # skippy-pc finishes, later
     client.put(f"/home/media/{job_id}", data=b"ID3late",
@@ -2123,6 +2124,7 @@ def test_a_picture_asked_for_but_never_drawn_is_drawn_by_the_portal(monkeypatch)
     client = app.test_client()
     token = _pair(client)
     _advertise(client, token, make_image=True)
+    app.extensions["home"].hold = None                               # (pictures are patient jobs: test_patient.py)
     r = client.post("/chat/send", json={"message": "draw me a barn"}).get_json()
     assert r["tools"] == ["make_image"] and "[IMAGE" not in r["reply"]
     assert [(m["kind"], m.get("pending")) for m in r["media"]] == [("image", True)]       # a "drawing" card that fills in by itself

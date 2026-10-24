@@ -178,7 +178,7 @@ def test_garbage_commands_are_answered_and_nothing_runs():
     s, w = make()
     w.pending_commands = [{"id": "aaaa1111", "op": "rm -rf /"}, {"id": "bbbb2222"}, "nope", {"op": "start"}, {"id": 5, "op": "start"}]
     s.poll_once(threaded=False)
-    assert w.cmds == [c for c in w.cmds if c[0] == "docker" and c[1] == "ps"]                   # only the status looks, no operation
+    assert w.cmds == [c for c in w.cmds if (c[0] == "docker" and c[1] == "ps") or c[0] == "nvidia-smi"]   # only the status looks, no operation
     s.poll_once(threaded=False)
     assert {r["id"]: r["summary"] for r in w.posts[1][0]["results"]} == {"aaaa1111": "I do not do that.", "bbbb2222": "I do not do that."}
 
@@ -350,3 +350,20 @@ def test_a_hung_docker_gets_the_clean_restart_by_itself_after_two_minutes_but_no
     s2._save_resume(NOW[0])                                              # stopped on purpose, back at 7: hands off
     w2.t[0] += 10 * ss.DOCKER_DOWN_HEAL_S
     assert s2.watch_docker() is False and s2.watch_docker() is False and not w2.docker
+
+
+def test_the_status_carries_skippy_pcs_gpu_for_the_patient_queue_and_nothing_when_there_is_no_nvidia_smi():
+    s, w = make()
+    real = w.run
+
+    def run(cmd, timeout=120, cwd=None, env=None):
+        if cmd[0] == "nvidia-smi":
+            return 0, "16376, 12780, 86"
+        return real(cmd, timeout, cwd, env)
+    w.run = run
+    s.run = run
+    st = s.status()
+    assert st["gpu_free_pct"] == 22 and st["gpu_util_pct"] == 86
+    w.run = lambda cmd, timeout=120, cwd=None, env=None: (127, "not found") if cmd[0] == "nvidia-smi" else real(cmd, timeout, cwd, env)
+    s.run = w.run
+    assert "gpu_free_pct" not in s.status()

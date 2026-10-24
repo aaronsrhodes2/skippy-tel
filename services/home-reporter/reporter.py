@@ -36,6 +36,7 @@ CHUNK = 8 * 1024 * 1024      # Cloud Run caps a request at 32 MB
 ART_MAX = 400_000
 MUSIC = os.environ.get("MUSIC_URL", "").rstrip("/")           # music-studio on skippy-pc (ACE-Step on the GPU)
 IMAGES = os.environ.get("IMAGE_URL", "").rstrip("/")          # image-studio on skippy-pc (SDXL on the GPU)
+IMAGE_BOX = os.environ.get("IMAGE_BOX", "pc")                   # which machine that studio runs on: "pc", or "core" once it moves there
 IMAGE_TIMEOUT = 900         # seconds a picture may take (the first after a restart loads 6.9 GB of weights)
 OLLAMA = os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/")
 GPU = threading.Lock()       # one heavy GPU job at a time: a song and a chat model can't share the card
@@ -311,11 +312,24 @@ def workshop_capability() -> dict:
 def _capability_probes() -> dict:
     """One probe per capability, so `gather` can run them side by side (each waits at most ~4 s on its own service)."""
     return {"make_music": lambda: {"ready": bool(MUSIC) and _up(f"{MUSIC}/health")},
-            "make_image": lambda: {"ready": bool(IMAGES) and (fetch(f"{IMAGES}/health") or {}).get("ready") is True},
+            "make_image": image_capability,
             "workshop": workshop_capability,
             "music_gate": lambda: {"ready": bool(GATE and GATE_PUBLIC) and _up(f"{GATE}/health"), "url": GATE_PUBLIC},
             "video_gate": video_gate_capability,
             "voice_gate": voice_gate_capability}
+
+
+def image_capability() -> dict:
+    """The picture studio: ready, which machine it runs on (the portal's patient queue waits for THAT machine to be quiet), and the GPU
+    figures its /health gives (skippy-core's studio: gpu_free_pct, gpu_util_pct, gpu_free_gib), so the portal starts a picture only when
+    there is room for it."""
+    health = (fetch(f"{IMAGES}/health") or {}) if IMAGES else {}
+    out = {"ready": bool(IMAGES) and health.get("ready") is True, "box": IMAGE_BOX}
+    for key in ("gpu_free_pct", "gpu_util_pct", "gpu_free_gib"):
+        value = health.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            out[key] = round(float(value), 1)
+    return out
 
 
 def video_gate_capability() -> dict:

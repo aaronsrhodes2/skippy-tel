@@ -101,6 +101,7 @@ class Home:
         self._hash_cache: tuple[float, str] | None = None
         self._jobs: dict[str, dict] = {}
         self.fast_until = 0.0
+        self.hold = None                 # hold(job, all_jobs) -> True keeps a job back (the patient queue, app.py)
 
     # ── pairing ──────────────────────────────────────────────────────────
     def pair(self) -> str:
@@ -152,14 +153,16 @@ class Home:
         with self._lock:
             self._jobs = {i: j for i, j in self._jobs.items() if now - j["created"] < j["ttl"]}
             out = []
-            for j in self._jobs.values():
+            for j in sorted(self._jobs.values(), key=lambda x: x["created"]):
                 if not j["event"].is_set() and now - j["sent"] >= REDELIVER_AFTER:
+                    if self.hold is not None and self.hold(j, self._jobs.values()):
+                        continue                           # a patient job: its machine isn't quiet yet (portal/patient.py)
                     j["sent"] = now
                     out.append(j["job"])
         return {"jobs": out, "fast_for_s": max(0, int(self.fast_until - now))}
 
-    def submit(self, kind: str, _owner: str = "", _ttl: int = JOB_TTL, **payload) -> str:
-        job_id = secrets.token_hex(8)
+    def submit(self, kind: str, _owner: str = "", _ttl: int = JOB_TTL, _id: str | None = None, **payload) -> str:
+        job_id = _id or secrets.token_hex(8)                  # (_id: a patient job put back in line after a restart keeps its id)
         with self._lock:
             self._jobs[job_id] = {"job": {"id": job_id, "kind": kind, **payload}, "event": threading.Event(),
                                   "outcome": None, "created": self.clock(), "sent": 0.0, "owner": _owner,
@@ -246,12 +249,15 @@ class Home:
         self.touch_chat()
         return self.submit(kind, _owner=owner, _ttl=ttl, **payload)
 
+    def has(self, job_id: str) -> bool:
+        return job_id in self._jobs
+
     def peek(self, job_id: str) -> dict:
         j = self._jobs.get(job_id)
         if not j:
             return {"state": "unknown"}
         if not j["event"].is_set():
-            return {"state": "running", "age_s": int(self.clock() - j["created"])}
+            return {"state": "running", "age_s": int(self.clock() - j["created"]), "handed_out": j["sent"] > 0}
         out = j["outcome"] or {}
         if "result" in out:
             return {"state": "done", "result": out["result"]}

@@ -145,14 +145,16 @@ def test_a_new_conversation_is_named_by_skippy_core_once_on_a_thread(tmp_path):
     log = cl.ConversationLog(str(tmp_path / "out"), namer=namer)
     first = FakeRun("aaaaaaaa", message="the voice keys are a mess")
     log.started(first)
-    for _ in range(500):                                      # (the namer runs on a thread: up to 5 s under a busy test run)
-        if log.conversations() and log.conversations()[0]["title"] == "voice-needs-simpler-modes":
-            break
-        _t.sleep(0.01)
-    assert log.conversations()[0]["title"] == "voice-needs-simpler-modes"
+    def named():                                              # (the namer runs on a thread: give it up to 10 s on a busy test run)
+        for _ in range(1000):
+            if log.conversations() and log.conversations()[0]["title"] == "voice-needs-simpler-modes":
+                return True
+            _t.sleep(0.01)
+        return False
+    assert named()
     log.started(FakeRun("bbbbbbbb", message="and another thing", created=1_800_000_100.0))
-    _t.sleep(0.2)
-    assert asked == ["the voice keys are a mess"] and log.conversations()[0]["title"] == "voice-needs-simpler-modes"
+    _t.sleep(0.3)
+    assert asked == ["the voice keys are a mess"] and named()                # asked once, and the name stays
 
 
 def test_a_namer_that_fails_or_rambles_leaves_the_fallback(tmp_path):

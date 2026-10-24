@@ -26,7 +26,8 @@ ONLINE_S = 45                    # the starter polls every ~10 s; this long with
 REDELIVER_S = 30                 # a request not answered by then is handed over again (the starter ignores one it already has)
 KEEP_RESULTS = 20
 MAX_PENDING = 3
-STATUS_KEYS = {"docker": bool, "containers_up": int, "containers_total": int, "bridge": bool, "busy": bool, "supervisor": bool, "working": str, "resume_at": str}
+STATUS_KEYS = {"docker": bool, "containers_up": int, "containers_total": int, "bridge": bool, "busy": bool, "supervisor": bool, "working": str, "resume_at": str,
+               "gpu_free_pct": int, "gpu_util_pct": int}            # skippy-pc's card (nvidia-smi): when a patient job may start (patient.py)
 
 
 class Starter:

@@ -195,7 +195,7 @@ _MUSIC_RESULT = {
                      "required": ["job_id"], "additionalProperties": False},
 }
 
-MUSIC_WAIT_S = 100     # how long make_music holds the chat before saying "still working"
+MUSIC_WAIT_S = 3       # songs are patient jobs (portal/patient.py): made when skippy-pc is quiet, so the chat never waits for one
 
 _MAKE_IMAGE = {
     "name": "make_image",
@@ -216,8 +216,8 @@ _IMAGE_RESULT = {
                      "required": ["job_id"], "additionalProperties": False},
 }
 
-IMAGE_WAIT_S = 25      # how long make_image holds the chat; a picture that takes longer (skippy-core draws for quality, not
-                       # speed) comes as a "drawing" card that fills in by itself when it's done (portal/pictures.py)
+IMAGE_WAIT_S = 3       # pictures are patient jobs too (portal/patient.py): made when their machine is quiet, for quality; the chat
+                       # shows a card that says where the picture is in line and fills in by itself when it's done
 _SIZES = {"square": (1024, 1024), "landscape": (1216, 832), "portrait": (832, 1216)}
 
 # Direct verbs: "/verb …" at the start of a message forces that tool first.
@@ -368,8 +368,12 @@ class ChatTools:
             return {"status": "done", "seconds": result.get("seconds"),
                     "note": "The player appears under your reply. Don't paste a link."}
         if state["state"] == "running":
-            return {"status": "running", "job_id": job_id, "waited_s": state.get("age_s"),
-                    "note": "Still generating on the Captain's GPU. Say so, and offer to check again with music_result."}
+            if not any(m["job_id"] == job_id for m in self.media):     # the page shows a waiting card that fills in by itself
+                self.media.append({"kind": "audio", "job_id": job_id, "url": f"/chat/media/{job_id}", "pending": True,
+                                   "title": "your song"})
+            return {"status": "queued", "job_id": job_id,
+                    "note": "Queued: songs are made when skippy-pc is quiet, so it may take a while. Say so in a few words: the player "
+                            "will appear under your reply by itself when it's ready. Don't promise a time."}
         if state["state"] == "error":
             raise ToolError(f"Music failed: {state['error']}. Say so plainly.")
         raise ToolError("That music job is gone (it expired, or the portal restarted). Offer to make it again.")
@@ -406,9 +410,9 @@ class ChatTools:
             if not any(m["job_id"] == job_id for m in self.media):     # the page shows a "drawing" card that fills in by itself
                 self.media.append({"kind": "image", "job_id": job_id, "url": f"/chat/media/{job_id}", "pending": True,
                                    "title": "your picture"})
-            return {"status": "drawing", "job_id": job_id,
-                    "note": "Skippy's studio is still drawing it (it takes its time, for quality). Say so in a few words: the "
-                            "picture will appear under your reply by itself when it's done. Don't promise a time."}
+            return {"status": "queued", "job_id": job_id,
+                    "note": "Queued: pictures are drawn when their machine is quiet, for quality, so it may take a while. Say so in "
+                            "a few words: the picture will appear under your reply by itself when it's done. Don't promise a time."}
         if state["state"] == "error":
             raise ToolError(f"The picture failed: {state['error']}. Say so plainly.")
         raise ToolError("That picture job is gone (it expired, or the portal restarted). Offer to make it again.")

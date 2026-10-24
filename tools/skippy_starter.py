@@ -144,12 +144,24 @@ class Starter:
         except (OSError, ValueError, urllib.error.URLError):
             return None
 
+    def gpu(self) -> dict:
+        """skippy-pc's card, from nvidia-smi: how much of its memory is free and how busy it is (the portal starts a patient job, a
+        picture or a song, only when it is mostly free: portal/patient.py). Empty when there is no nvidia-smi or it doesn't answer."""
+        rc, out = self.run(["nvidia-smi", "--query-gpu=memory.total,memory.used,utilization.gpu", "--format=csv,noheader,nounits"], 15)
+        try:
+            total, used, util = (float(x) for x in out.splitlines()[0].split(","))
+        except (ValueError, IndexError):
+            return {}
+        if rc != 0 or total <= 0:
+            return {}
+        return {"gpu_free_pct": int(round(100 * (total - used) / total)), "gpu_util_pct": int(round(util))}
+
     def status(self) -> dict:
         up, total = self.containers() if self.docker_up() else (0, 0)
         b = self.bridge()
         return {"docker": total > 0 or self.docker_up(), "containers_up": up, "containers_total": total, "bridge": b is not None,
                 "busy": bool(b and (b.get("workshop") or {}).get("busy")), "supervisor": b is not None, "working": self.working,
-                "resume_at": self.resume_at.isoformat(timespec="minutes") if self.resume_at else ""}
+                "resume_at": self.resume_at.isoformat(timespec="minutes") if self.resume_at else "", **self.gpu()}
 
     # ── doing ──────────────────────────────────────────────────────────────────
     def _spawn(self, cmd: list[str], env: dict | None = None, log: str = "") -> None:

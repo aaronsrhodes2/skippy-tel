@@ -57,7 +57,7 @@ import recovery_web
 import ship as ship_mod
 import tabletop as tabletop_mod
 import chat_history
-import pictures as pictures_mod
+import patient as patient_mod
 import chat_names
 import tasks
 import telemetry_web
@@ -116,8 +116,64 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     IMAGES_PER_DAY = 10          # pictures a guest may make (the Captain: no limit); the home GPU draws each one
     imports = imports or imports_mod.Imports(vm)
     media = media_mod.Media()
-    # pictures Skippy draws, kept in the bucket until collected (pictures.py); the Captain's are kept like his chats, forever
-    pics = pictures if pictures is not None else pictures_mod.from_env(forever=lambda e: str(e).strip().lower() in app.config["ADMIN_EMAILS"])
+    # the patient queue (patient.py): pictures and songs, made when their machine is quiet, kept in the bucket until collected; the
+    # Captain's are kept like his chats, forever
+    pics = pictures if pictures is not None else patient_mod.from_env(forever=lambda e: str(e).strip().lower() in app.config["ADMIN_EMAILS"])
+
+    def box_for(kind: str) -> str:
+        """Which machine makes it: songs on skippy-pc; pictures where the reporter says its studio is (skippy-core, or skippy-pc)."""
+        if kind == "make_image":
+            return "core" if (home.capability_note("make_image", "box") or "pc") == "core" else "pc"
+        return "pc"
+
+    def gpu_for(box: str) -> dict | None:
+        """The GPU's free memory and load where the portal can see it: skippy-pc's card, from the starter's nvidia-smi; skippy-core's,
+        from its picture studio's /health, as the reporter passes it up with the make_image capability."""
+        if box == "core":
+            info = ((home.report or {}).get("capabilities") or {}).get("make_image") if home.online() else None
+            if not isinstance(info, dict) or info.get("box") != "core":
+                return None
+            num = lambda k: info.get(k) if isinstance(info.get(k), (int, float)) and not isinstance(info.get(k), bool) else None  # noqa: E731
+            gpu = {"free_pct": num("gpu_free_pct"), "util_pct": num("gpu_util_pct"), "free_gib": num("gpu_free_gib")}
+            return gpu if any(v is not None for v in gpu.values()) else None
+        if box != "pc" or not starter.online():
+            return None
+        st = starter.status or {}
+        if "gpu_free_pct" not in st:
+            return None
+        return {"free_pct": st.get("gpu_free_pct"), "util_pct": st.get("gpu_util_pct")}
+
+    def patient_hold(j, jobs) -> bool:
+        """home.py asks before handing a job out: True keeps a patient job back until its machine is quiet and its GPU free, one at
+        a time per machine, oldest first."""
+        job = j["job"]
+        if job.get("kind") not in patient_mod.KINDS:
+            return False
+        box = job.get("box") or box_for(job["kind"])
+        for other in jobs:                                    # one per machine at a time, and the oldest goes first
+            o = other["job"]
+            if other is j or o.get("kind") not in patient_mod.KINDS or (o.get("box") or box_for(o["kind"])) != box or other["event"].is_set():
+                continue
+            if other["sent"] > 0 or other["created"] < j["created"]:
+                return True
+        return not pics.ready(box, gpu_for(box))[0]
+    home.hold = patient_hold
+    requeue = {"at": 0.0}
+
+    def requeue_patient() -> None:
+        """After a restart the queue in memory is empty: put every job still owed (written down in the bucket) back in line, with
+        its own id, so its card keeps working. At most once a minute (it lists the bucket)."""
+        import time as _time
+        if _time.time() - requeue["at"] < 60:
+            return
+        requeue["at"] = _time.time()
+        try:
+            for job_id, meta in pics.waiting().items():
+                if not home.has(job_id) and isinstance(meta.get("job"), dict):
+                    home.submit(meta["kind"], _owner="", _ttl=patient_mod.JOB_TTL, _id=job_id,
+                                **{k: v for k, v in meta["job"].items() if k not in ("id", "kind")})
+        except Exception as exc:  # noqa: BLE001 — no bucket: nothing to put back
+            print(json.dumps({"event": "patient_requeue_failed", "why": str(exc)[:200]}), flush=True)
     workshop = workshop_mod.Workshop(home)          # the Captain's private Skippy (admin only)
     app.extensions["workshop"] = workshop
     player = player_mod.Player(home)                # Bilby's Audio Service: the pass and Connect (admin only)
@@ -730,6 +786,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         local = report.get("local") if isinstance(report.get("local"), dict) else {}
         reply = {**home.accept(report), "imports_wanted": imports.wanted()}
         doctor.observe_home(report.get("doctor"))                 # skippy-pc's tests (services/home-reporter/doctor_checks.py)
+        requeue_patient()                                         # patient jobs owed from before a restart: back in line
         if brains.CORE.ready() and doctor.core_due():             # and Skippy Core's, from here, on a thread (doctor.core_test)
             def test_core():
                 try:
@@ -804,13 +861,16 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         owner = home.owner_of(job_id)
         request.max_content_length = media_mod.MAX_ONE
         ctype = (request.mimetype or "").lower()
-        if ctype in pictures_mod.TYPES:                     # a picture: kept in the bucket, so it outlives the portal (pictures.py)
+        if ctype in patient_mod.TYPES:                      # a picture or a song: kept in the bucket, so it outlives the portal (patient.py)
             data = request.get_data(cache=False)
             try:
                 kept = pics.keep(job_id, data, ctype, request.args.get("title", ""))
             except Exception as exc:  # noqa: BLE001 — no bucket: it can still be served from memory below
-                kept = False
-                print(json.dumps({"event": "picture_not_kept", "why": str(exc)[:200]}), flush=True)
+                kept = None
+                print(json.dumps({"event": "patient_not_kept", "why": str(exc)[:200]}), flush=True)
+            if kept and kept.get("keep"):                     # the Captain's: a Discord DM says it's ready
+                what = "picture" if kept.get("type", "").startswith("image/") else "song"
+                notifier.alert(f"Your {what} is ready in Skippy's chat: {kept.get('title') or 'untitled'}.")
             if owner is None:
                 return (jsonify(ok=True, kept=True), 200) if kept else (jsonify(error="no such job"), 404)
             try:
@@ -1321,6 +1381,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         body = request.get_json(silent=True) or {}
         message = str(body.get("message") or "")
         try:
+            if str(body.get("brain") or "claude") == "core":
+                pics.touch("core")                          # the agent thinking on Skippy Core: patient jobs there wait
             task = workshop.send(me(), str(body.get("conv") or ""), message, str(body.get("project") or ""), body.get("images"),
                                  brain=str(body.get("brain") or "claude"))
         except workshop_mod.Busy as exc:
@@ -1711,18 +1773,19 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             return view(*args, **kwargs)
         return wrapped
 
-    class PictureJobs:
-        """make_image's view of the job queue: a picture job may take hours (skippy-core draws for quality), so it gets a long
-        life and is written down in the bucket (pictures.py), which outlives the portal and the request that asked for it."""
+    class PatientJobs:
+        """make_image's and make_music's view of the job queue (patient.py): the job waits until its machine is quiet, may take
+        hours, and is written down in the bucket, which outlives the portal and the request that asked for it."""
         def __init__(self, email):
             self.email = email
 
         def start(self, kind, owner="", **payload):
-            job = home.start(kind, owner, ttl=pictures_mod.JOB_TTL, **payload)
+            box = box_for(kind)
+            job = home.start(kind, owner, ttl=patient_mod.JOB_TTL, box=box, **payload)
             try:
-                pics.expect(job, self.email, payload.get("prompt", ""))
-            except Exception as exc:  # noqa: BLE001 — no bucket: the picture still comes, it just won't outlive a restart
-                print(json.dumps({"event": "picture_not_written_down", "why": str(exc)[:200]}), flush=True)
+                pics.expect(job, self.email, kind, box, payload)
+            except Exception as exc:  # noqa: BLE001 — no bucket: it still comes, it just won't outlive a restart
+                print(json.dumps({"event": "patient_not_written_down", "why": str(exc)[:200]}), flush=True)
             return job
 
         def owner_of(self, job):
@@ -1737,8 +1800,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                                     who=email, trace=trace,
                                     music=home.music if auth.has_portal(email, "audio") else None,
                                     home_mentat=home if home.mentat_ready() else None,
-                                    home_music=home if home.can("make_music") else None,
-                                    home_image=PictureJobs(email) if home.can("make_image") else None,
+                                    home_music=PatientJobs(email) if home.can("make_music") else None,
+                                    home_image=PatientJobs(email) if home.can("make_image") else None,
                                     image_allow=(lambda: True) if auth.is_admin(email) else
                                                 (lambda: limiter.allow("image:" + email, IMAGES_PER_DAY, 86400)))
 
@@ -1757,6 +1820,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         """Where the voice service is and a pass for it, in the voice this person gets in this chat mode (voice_mod.voice_for: the
         server's call; ?mode= is only a hint). Guests: the stock voice made at home. The Captain: the local Skippy clone (Private),
         ElevenLabs (Auto), stock (Public). The cloned voices are personal use only, so nobody else is ever signed one."""
+        pics.touch("pc")                                     # voice is skippy-pc's card at work: patient jobs wait (patient.py)
         resp = jsonify(voice.gate(voice=voice_mod.voice_for(auth.is_admin(me()), request.args.get("mode"))))
         resp.headers["Cache-Control"] = "no-store"          # a pass is a credential: never from a cache
         return resp
@@ -1878,6 +1942,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 return jsonify(error=f"That's {CHAT_PER_HOUR} messages this hour; Skippy needs a breather. "
                                      "Try again in a bit."), 429
         home.touch_chat()
+        pics.touch("core", "pc")                              # Core answers, Mentat thinks on skippy-pc: patient jobs wait (patient.py)
         trace = "chat-" + secrets.token_hex(8)        # this turn's id, kept with Mentat's research record of it
         # The person agreed to Mentat's suggested inputs: the page sends back the follow-up Mentat made, and the portal
         # asks Mentat with exactly those values (no brain retyping numbers). Anything but a plain yes ignores it.
@@ -2111,11 +2176,23 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def media_state(job_id):
         """A picture's state for the chat's "drawing" card: done, drawing, or unknown (gone, given up on, or not yours)."""
         item = media.get(job_id)
+        extra = {}
         if item and (auth.is_admin(me()) or item["owner"] == me()):
             state = "done"
         else:
             state = pics.state(job_id, me(), auth.is_admin(me()))
-        resp = jsonify(state=state)
+            if state == "waiting":                            # in line, or being made: say which, and why it waits
+                seen = home.peek(job_id)
+                if seen.get("handed_out"):
+                    state = "working"
+                elif seen["state"] == "error":
+                    state, extra = "failed", {"why": seen.get("error")}
+                else:
+                    meta = pics.pending(job_id) or {}
+                    box = meta.get("box") or "pc"
+                    state = "queued"
+                    extra = {"why": pics.ready(box, gpu_for(box))[1] or "next in line", "box": box}
+        resp = jsonify(state=state, **extra)
         resp.headers["Cache-Control"] = "private, no-store"
         return resp
 

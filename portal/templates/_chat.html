@@ -320,13 +320,13 @@
       if (openSheet === "chats") paintChats();
     }).catch(() => {});
     function save() { try { sessionStorage.setItem(KEY, JSON.stringify(history)); } catch (e) {} remember(); }
-    const PIC = /\n*\[picture:([A-Za-z0-9_-]{6,64})\]/g;    // a picture Skippy drew for that reply (portal/pictures.py keeps it)
+    const PIC = /\n*\[(picture|song):([A-Za-z0-9_-]{6,64})\]/g;    // a picture or song made for that reply (portal/patient.py keeps it)
     function replay() {
       log.replaceChildren();
       history.forEach(t => {
-        const jobs = t.role === "assistant" ? [...t.content.matchAll(PIC)].map(m => m[1]) : [];
+        const jobs = t.role === "assistant" ? [...t.content.matchAll(PIC)].map(m => ({kind: m[1] === "song" ? "audio" : "image", job_id: m[2]})) : [];
         const body = add(t.role, t.content.split("\n\n[Mentat's own answer")[0].replace(PIC, ""));   // the notes are for the models
-        jobs.forEach(j => body.parentElement.insertBefore(pictureCard({job_id: j, url: "{{ url_for('chat.media_file', job_id='JOB') }}".replace("JOB", j)}), body.parentElement.querySelector(".acts")));
+        jobs.forEach(j => body.parentElement.insertBefore(waitCard({...j, url: "{{ url_for('chat.media_file', job_id='JOB') }}".replace("JOB", j.job_id)}), body.parentElement.querySelector(".acts")));
       });
       unseen = 0; logPager.last(); paintTail();
     }
@@ -416,12 +416,15 @@
     // portal now and then and turns into the picture when it's done, even after a reload or another day (the job and the picture
     // are kept in the bucket: portal/pictures.py). Gone or given up on, it says so in one line.
     const MEDIA_STATE = "{{ url_for('chat.media_state', job_id='JOB') }}";
-    function pictureCard(m) {
+    // Pictures and songs are PATIENT jobs (portal/patient.py): made when their machine is quiet and its GPU mostly free, so the card says
+    // where the job is (in line and why, or being made) and turns into the picture or the player when it's done, even after a reload.
+    function waitCard(m) {
+      const song = m.kind === "audio", what = song ? "song" : "picture";
       const box = document.createElement("div"); box.className = "picture-wait";
-      const done = () => { if (window.SkippyArtifacts) box.replaceWith(SkippyArtifacts.card(SkippyArtifacts.fromMedia({kind: "image", url: m.url, title: m.title || "your picture"}), {onToggle: () => logPager.refresh()})); logPager.refresh(); };
-      const lamp = document.createElement("i"); lamp.className = "lamp"; lamp.dataset.s = "on";
-      const words = document.createElement("span"); words.textContent = "Drawing…";
-      box.append(glyph("image"), words, lamp);
+      const done = () => { if (window.SkippyArtifacts) box.replaceWith(SkippyArtifacts.card(SkippyArtifacts.fromMedia({kind: m.kind || "image", url: m.url, title: m.title || "your " + what}), {onToggle: () => logPager.refresh()})); logPager.refresh(); };
+      const lamp = document.createElement("i"); lamp.className = "lamp"; lamp.dataset.s = "idle";
+      const words = document.createElement("span"); words.textContent = "In line…";
+      box.append(glyph(song ? "wave" : "image"), words, lamp);
       let tries = 0;
       async function look() {
         if (!box.isConnected && tries) return;                     // the chat moved on: stop looking
@@ -430,14 +433,18 @@
           const r = await fetch(MEDIA_STATE.replace("JOB", encodeURIComponent(m.job_id)), {cache: "no-store"});
           const d = r.ok ? await r.json() : {state: "unknown"};
           if (d.state === "done") return done();
-          if (d.state === "unknown") { lamp.dataset.s = "off"; words.textContent = "That picture is gone (it was given up on, or it expired)."; return; }
+          if (d.state === "unknown") { lamp.dataset.s = "off"; words.textContent = "That " + what + " is gone (it was given up on, or it expired)."; return; }
+          if (d.state === "failed") { lamp.dataset.s = "warn"; words.textContent = "That " + what + " failed: " + (d.why || "no reason given") + "."; return; }
+          if (d.state === "working") { lamp.dataset.s = "on"; words.textContent = song ? "Composing…" : "Drawing…"; }
+          else { lamp.dataset.s = "idle"; words.textContent = "In line: " + (d.why || "next up") + "."; }
         } catch (e) { /* offline for a moment: keep waiting */ }
         setTimeout(look, tries < 6 ? 10000 : 30000);
       }
-      if (m.pending) setTimeout(look, 10000); else look();
+      if (m.pending) setTimeout(look, 3000); else look();
       return box;
     }
-    const pictureNote = (media) => (media || []).filter(m => m.kind === "image").map(m => "\n\n[picture:" + m.job_id + "]").join("");
+    const pictureNote = (media) => (media || []).filter(m => m.kind === "image" || m.kind === "audio")
+      .map(m => "\n\n[" + (m.kind === "audio" ? "song" : "picture") + ":" + m.job_id + "]").join("");
 
     // What goes into the history for a Mentat answer, so any later turn sees Mentat's own numbers.
     function mentatNote(cards) {
@@ -599,7 +606,7 @@
         const follow = (data.mentat || []).map(c => c.suggestion && c.suggestion.follow_up).filter(Boolean).pop();
         mentatFollow = follow ? {chat: chatId, follow: follow} : null;   // a reply with no suggestion ends the last one
         (data.media || []).forEach(m => {           // what was made for this reply (a song, a picture): an artifact, opened
-          if (m.kind === "image") pending.parentElement.insertBefore(pictureCard(m), acts);      // done now, or drawing: the card waits
+          if (m.kind === "image" || m.kind === "audio") pending.parentElement.insertBefore(waitCard(m), acts);   // in line, being made or done: the card waits
           else if (window.SkippyArtifacts) pending.parentElement.insertBefore(SkippyArtifacts.card(SkippyArtifacts.fromMedia(m), {onToggle: () => logPager.refresh()}), acts);
         });
         const said = text + (files.length ? " [attached: " + files.map(f => f.name).join(", ") + "]" : "");
