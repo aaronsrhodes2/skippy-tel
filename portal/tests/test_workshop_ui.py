@@ -163,7 +163,8 @@ els["ps-notify"].checked = true;
 for (const id of ["ps-stop", "ps-quiet", "ps-quiet-hint", "ps-reload", "ps-project-hint", "ps-convs"]) els[id].hidden = true;
 const Bridge = {pager: () => ({refresh() {}, last() {}, go() {}, page() { return 0; }, pages() { return 1; }})};   // the page flips are the bridge's, not under test here
 const SkippyMd = require(input.mdPath);                       // the real renderer (static/skippy-md.js), on the harness's fake DOM
-const SkippyVoice = {attach: () => ({say() {}, stop() {}, resume() {}, cancel() {}, chatting: () => false, enabled: () => false})};   // the mic and speaker are static/skippy-voice.js's, tested in test_voice.py
+const voiceLog = [];                                            // what was handed to a voice: ["card", text] / ["card-resume"] / ["chat", text|null]
+const SkippyVoice = {attach: () => ({say(t) { voiceLog.push(["card", t]); }, stop() {}, resume() { voiceLog.push(["card-resume"]); }, cancel() {}, chatting: () => false, enabled: () => false})};   // the mic and speaker are static/skippy-voice.js's, tested in test_voice.py
 const root = {closest: () => null, querySelector(sel) { const e = els[sel.slice(1)]; if (!e) throw new Error("the script looked up " + sel + ", which the markup lacks"); return e; }};
 const document = {getElementById: (id) => { if (id !== "private-skippy") throw new Error("unexpected id " + id); return root; },
                   createElement: (tag) => new El(tag)};
@@ -278,6 +279,7 @@ function snap() {
 }
 
 (async () => {
+  if (input.withWindow) globalThis.window = {dispatchEvent() {}};     // inside the one chat (templates/_chat.html): window.SkippyAgent exists
   new Function("document", "localStorage", "crypto", "fetch", "setTimeout", "clearTimeout", "setInterval", "confirm",
                "AbortController", "Date", "location", "Bridge", "SkippyVoice", "SkippyMd", input.script)(
     document, localStorage, crypto, fakeFetch, fakeSetTimeout, fakeClearTimeout, fakeSetInterval, confirm, FakeAbort, FakeDate, location, Bridge, SkippyVoice, SkippyMd);
@@ -302,10 +304,11 @@ function snap() {
     else if ("pick" in s) { els["ps-project"].value = s.pick; await els["ps-project"].fire("change"); await settle(); }
     else if ("item" in s) { await els["ps-convs-list"].children[s.item].fire("click"); await settle(); }
     else if ("opt" in s) { const last = els["ps-flow"].children[els["ps-flow"].children.length - 1]; await last.children.find(c => c.className === "ask").children[s.opt].fire("click"); await settle(); }
+    else if ("hearAgent" in s) window.SkippyAgent.onReply = (t) => voiceLog.push(["chat", t]);      // what _chat.html does: its voice takes the reply
     else if ("snap" in s) snaps[s.snap] = snap();
     else throw new Error("unknown step " + JSON.stringify(s));
   }
-  console.log(JSON.stringify({snaps, calls, reloads, tasks, final: snap()}));
+  console.log(JSON.stringify({snaps, calls, reloads, tasks, voice: voiceLog, final: snap()}));
 })().catch((e) => { console.error(e); process.exit(1); });
 """
 
@@ -315,7 +318,7 @@ def ev(n: int) -> dict:
 
 
 def drive(page: str, steps: list, tasks: dict | None = None, storage: dict | None = None, follow: str | None = None,
-          history: dict | None = None, ship: dict | None = None, notify_mode: str = "ok", fresh=False) -> dict:
+          history: dict | None = None, ship: dict | None = None, notify_mode: str = "ok", fresh=False, with_window=False) -> dict:
     """Run the card's script against the fake browser. `follow` = a task the page was already following (a reload
     mid-task), with a transcript that has its (empty) assistant turn."""
     store = dict(storage or {})
@@ -328,7 +331,7 @@ def drive(page: str, steps: list, tasks: dict | None = None, storage: dict | Non
     done = subprocess.run([NODE, "-e", HARNESS], capture_output=True, timeout=120,
                           input=json.dumps({"script": script(page), "steps": steps, "tasks": tasks or {}, "storage": store,
                                             "history": history or {}, "ship": ship or {},
-                                            "notifyMode": notify_mode, "fresh": fresh, "mdPath": str(Path(__file__).resolve().parents[1] / "static" / "skippy-md.js")}).encode())
+                                            "notifyMode": notify_mode, "fresh": fresh, "withWindow": with_window, "mdPath": str(Path(__file__).resolve().parents[1] / "static" / "skippy-md.js")}).encode())
     assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
     return json.loads(done.stdout.decode("utf-8"))
 
@@ -666,3 +669,22 @@ def test_the_task_is_remembered_before_the_first_answer_so_a_reload_still_finds_
     # the send goes through, but every poll fails: a reload now must still find the task to resume
     out = drive(page, [{"net": "throw"}, {"type": "go"}, {"click": "ps-send"}, {"adv": 3 * S}, {"snap": "s"}])
     assert out["snaps"]["s"]["task"] == {"task": "new1", "after": 0}
+
+
+@needs_node
+def test_inside_the_one_chat_the_agents_reply_goes_to_the_chats_voice_not_the_cards(page):
+    """The Captain, in Hands-off with the agent, heard nothing: the reply went to this card's own (hidden) speaker key. Inside
+    the one chat the finished reply is handed to window.SkippyAgent.onReply, so the chat's voice says it (always in Hands-off,
+    summarised when long: skippy-voice.js); a failed turn hands over null, which gives him the turn back."""
+    final = {"t": "text", "text": "Deployed, and the tests pass."}
+    out = drive(page, [{"hearAgent": True}, {"tasks": {"t1": {"state": "done", "events": [ev(1), final]}}}, {"adv": 3 * S}],
+                tasks={"t1": {"state": "running", "events": [ev(1)]}}, follow="t1", with_window=True)
+    assert out["voice"] == [["chat", "step 1 Deployed, and the tests pass."]]
+
+
+@needs_node
+def test_on_its_own_the_card_still_speaks_with_its_own_voice(page):
+    final = {"t": "text", "text": "Done."}
+    out = drive(page, [{"tasks": {"t1": {"state": "done", "events": [ev(1), final]}}}, {"adv": 3 * S}],
+                tasks={"t1": {"state": "running", "events": [ev(1)]}}, follow="t1")
+    assert out["voice"] == [["card", "step 1 Done."]]

@@ -208,3 +208,13 @@ def test_a_reply_is_never_silent_any_voice_failure_falls_back_to_the_device_voic
     assert "if (!r.ok) throw" in say and "if (!blob.size) throw" in say                       # a refused or empty reply
     assert "audio.onerror = function () { URL.revokeObjectURL(url); if (playing === token) { playing = null; builtin(t, done); } };" in say
     assert "builtin(t, done);" in say.split("catch (e)")[-1]                                       # any other failure
+
+
+def test_the_one_chat_takes_the_agents_reply_into_its_own_voice():
+    """In Private and Auto the reply arrives in the embedded agent card (templates/_workshop.html); the chat must hand it to
+    ITS voice (two modes: Hands-off always speaks, summarised when long), or a Hands-off conversation with the agent is
+    silent. test_workshop_ui.py pins the card's side of the handshake."""
+    from pathlib import Path
+    chat = (Path(__file__).resolve().parents[1] / "templates" / "_chat.html").read_text(encoding="utf-8")
+    assert "window.SkippyAgent.onReply = (t) => { if (t == null) voice.resume(); else voice.say(t); }" in chat
+    assert 'addEventListener("skippy-agent-ready", hearAgent)' in chat
