@@ -250,3 +250,24 @@ def test_with_no_deploy_of_record_a_repair_only_restarts_what_runs(box):
     d, commit, first = box                                    # never deployed: the stack was set up by hand
     row = d.repair()
     assert row["state"] == "ok" and d.deployed == [] and d.ran[-1][-1] == "restart"   # nothing rendered, nothing rebuilt
+
+
+def test_matter_joins_the_stack_only_when_core_env_says_so(tmp_path, monkeypatch):
+    for k in dep.DEFAULTS:
+        monkeypatch.delenv(k, raising=False)
+    f = tmp_path / "core.env"
+    f.write_text("CORE_GPU=0\n")
+    assert "core/compose.matter.yml" not in dep.Deployer(dep.load_settings(str(f)), log=lambda m: None).compose_files()
+    f.write_text('CORE_GPU=1\nCORE_MATTER=1\nMATTER_ARGS="--primary-interface eno1 --bluetooth-adapter 0"\n')
+    d = dep.Deployer(dep.load_settings(str(f)), log=lambda m: None)
+    assert d.compose_files() == ["-f", "core/compose.core.yml", "-f", "core/compose.gpu.yml", "-f", "core/compose.matter.yml"]
+    assert d.env("")["MATTER_ARGS"] == "--primary-interface eno1 --bluetooth-adapter 0" and d.env("")["CORE_MATTER"] == "1"
+
+
+def test_the_matter_compose_file_is_pinned_on_the_host_network_and_keeps_its_fabric():
+    from pathlib import Path
+    text = (Path(dep.__file__).resolve().parents[1] / "compose.matter.yml").read_text(encoding="utf-8")
+    assert "python-matter-server:8.1.0@sha256:" in text                         # pinned by digest, like llm
+    assert "network_mode: host" in text and "/run/dbus:/run/dbus:ro" in text
+    assert "${CORE_STATE:-/var/lib/skippy-core}/matter:/data" in text and "${MATTER_ARGS:-}" in text
+    assert "ports:" not in text                                                  # host network: the firewall decides (install/matter.sh)

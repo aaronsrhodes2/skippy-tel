@@ -212,7 +212,9 @@ trained openWakeWord "Skippy" (`wakeword.py`; the GPU kit in `wakeword/`, "Skipp
 never leaves the hub. Skippy's voice and Bilby's tracks reach a box as URLs from the hub's media server (`media.py`, LAN port 10800: tracks from
 the local music gate, transcoded to 16 kHz FLAC). Each box is a **Bilby Connect speaker**: the hub checks it in with `POST /home/music/checkin`
 (home token, as the Captain; `player.BOX_ROOM`), so every player lists it under "Play on". Lights and plugs: HomeKit natively (`homekit.py`, every
-write read back and retried once, keep-warm; `homectl.py prove` times a device). Details: `services/satellite/README.md`, `rooms/README.md`.
+write read back and retried once, keep-warm; `homectl.py prove` times a device) and **Matter** through skippy-core's controller (2026-10-24:
+python-matter-server, `core/compose.matter.yml`, set up by `core/install/matter.sh`: IPv6 required, the API on the tailnet only; the hub's backend is
+`matter.py`, `MATTER_URL`; the Nest goes this way). All backends are one house (`house.Combined`). Details: `services/satellite/README.md`, `rooms/README.md`, `core/README.md` → Matter.
 
 ## Nagatha's Video Service (the browser video app, `/video`)
 

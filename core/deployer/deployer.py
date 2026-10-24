@@ -19,7 +19,8 @@ A systemd timer runs `deployer.py run` every 2 minutes (skippy-core-deployer.{se
 Every run writes ${CORE_STATE}/deployer/status.json (what the home reporter will carry to the portal) and state.json
 (last good key, bad keys). Settings: /etc/skippy-core/core.env (KEY=VALUE; the process environment overrides it):
 REPO_DIR, REMOTE, BRANCH, GITHUB_REPO, GITHUB_TOKEN, CI_WORKFLOW ("" = no CI gate: the simulator), CORE_FULL,
-CORE_STATE, MODELS_ROOT, CORE_GPU (0 = no /dev/dri: the simulator), CORE_VAULT_ENV, MUSIC_ROOT, SMOKE_WAIT,
+CORE_STATE, MODELS_ROOT, CORE_GPU (0 = no /dev/dri: the simulator), CORE_MATTER (1 = the house's Matter controller too:
+core/compose.matter.yml, set up by core/install/matter.sh, which also writes MATTER_ARGS), CORE_VAULT_ENV, MUSIC_ROOT, SMOKE_WAIT,
 LLM_API_KEY (llama-swap's key: the render, the shim and the smoke test all use it; "" = an open llm port).
 
     deployer.py run        one pass (what the timer runs)
@@ -48,7 +49,7 @@ DEFAULTS = {
     "GITHUB_REPO": "aaronsrhodes2/skippy-tel", "GITHUB_TOKEN": "", "CI_WORKFLOW": "core.yml",
     "CORE_FULL": "", "CORE_STATE": "/var/lib/skippy-core", "MODELS_ROOT": "/srv/models", "CORE_GPU": "1",
     "CORE_VAULT_ENV": "/etc/skippy-core/vault.env", "MUSIC_ROOT": "/srv/music", "SMOKE_WAIT": "900",
-    "OLLAMA_MODEL": "qwen3:8b", "LLM_API_KEY": "",
+    "OLLAMA_MODEL": "qwen3:8b", "LLM_API_KEY": "", "CORE_MATTER": "0", "MATTER_ARGS": "",
 }
 KEEP_BAD = 50
 
@@ -133,7 +134,7 @@ class Deployer:
         e = dict(os.environ)
         gpu = self.s["CORE_GPU"] != "0"
         e.update({k: self.s[k] for k in ("MODELS_ROOT", "CORE_STATE", "CORE_VAULT_ENV", "MUSIC_ROOT", "OLLAMA_MODEL",
-                                         "LLM_API_KEY")})
+                                         "LLM_API_KEY", "CORE_MATTER", "MATTER_ARGS")})
         e["CORE_FULL"] = full
         e.setdefault("GPU_LAYERS", "999" if gpu else "0")
         if gpu:
@@ -188,6 +189,8 @@ class Deployer:
         files = ["-f", "core/compose.core.yml"]
         if self.s["CORE_GPU"] != "0":
             files += ["-f", "core/compose.gpu.yml"]
+        if self.s["CORE_MATTER"] == "1":
+            files += ["-f", "core/compose.matter.yml"]
         return files
 
     def models(self, cmd: str, full: str) -> subprocess.CompletedProcess:

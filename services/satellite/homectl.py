@@ -8,6 +8,18 @@
     ./.venv/Scripts/python homectl.py say "kitchen light" on                try a control (the same code the voice uses)
     ./.venv/Scripts/python homectl.py prove "theater fan" --rounds 5        switch it on and off, timing each and counting second tries
 
+Matter (through skippy-core's controller, MATTER_URL in the vault; core/compose.matter.yml):
+    ./.venv/Scripts/python homectl.py matter-info                           is the controller there, ready for Wi-Fi and Bluetooth setup
+    ./.venv/Scripts/python homectl.py matter-pair 34970112332 "Theater Fan" --area "Theater"
+                                                                            a NEW device: its 11-digit code (or MT:... from the QR code),
+                                                                            set up over Bluetooth with the vault's ROOM_WIFI_SSID/PASSWORD
+    ./.venv/Scripts/python homectl.py matter-pair 12345678901 "Thermostat" --network
+                                                                            a device already on the network: the Nest, shared from the
+                                                                            Google Home app (Settings > Linked Matter apps > Link apps)
+    ./.venv/Scripts/python homectl.py matter-label <node> --name "..." --area "..."
+    ./.venv/Scripts/python homectl.py matter-forget <node>
+`list`, `say` and `prove` cover HomeKit and Matter together.
+
 The setup code is the 8 digits on the device (a Leviton dimmer: the label on its side and in the Leviton app). It is used once, never stored; what is
 stored is the pairing key, in state/home/home.json (git-ignored). Set SKIPPY_HOME_STATE to keep it elsewhere.
 """
@@ -20,13 +32,22 @@ import time
 from pathlib import Path
 
 from homekit import HomeKit, Store
-from house import HomeError
+from house import Combined, HomeError
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def store_path(env=os.environ) -> Path:
     return Path(env.get("SKIPPY_HOME_STATE") or ROOT / "state" / "home") / "home.json"
+
+
+def matter_path(env=os.environ) -> Path:
+    return Path(env.get("SKIPPY_HOME_STATE") or ROOT / "state" / "home") / "matter.json"
+
+
+def _env() -> dict:
+    from ear import load_env                                        # noqa: PLC0415 — the vault .env, like the listener
+    return load_env()
 
 
 def prove(hk: HomeKit, name: str, rounds: int, gap: float, out=print, sleep=time.sleep) -> int:
@@ -65,7 +86,7 @@ def prove(hk: HomeKit, name: str, rounds: int, gap: float, out=print, sleep=time
     return 0 if not failures else 1
 
 
-def main(argv=None, hk: HomeKit | None = None, out=print, sleep=time.sleep) -> int:
+def main(argv=None, hk: HomeKit | None = None, out=print, sleep=time.sleep, mt=None, env: dict | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("scan")
@@ -75,8 +96,26 @@ def main(argv=None, hk: HomeKit | None = None, out=print, sleep=time.sleep) -> i
     p = sub.add_parser("unpair"); p.add_argument("id")
     p = sub.add_parser("say"); p.add_argument("name"); p.add_argument("action"); p.add_argument("value", nargs="?")
     p = sub.add_parser("prove"); p.add_argument("name"); p.add_argument("--rounds", type=int, default=5); p.add_argument("--gap", type=float, default=3.0)
+    sub.add_parser("matter-info")
+    p = sub.add_parser("matter-pair"); p.add_argument("code"); p.add_argument("name"); p.add_argument("--area", default=""); p.add_argument("--network", action="store_true")
+    p = sub.add_parser("matter-label"); p.add_argument("node", type=int); p.add_argument("--name", default=""); p.add_argument("--area", default="")
+    p = sub.add_parser("matter-forget"); p.add_argument("node", type=int)
     args = ap.parse_args(argv)
-    hk = hk or HomeKit(Store(store_path()))
+    env = env if env is not None else _env()
+    hk = hk or HomeKit(Store(store_path(env)))
+
+    def matter():
+        nonlocal mt
+        if mt is None:
+            if not env.get("MATTER_URL"):
+                raise HomeError("MATTER_URL isn't set: put MATTER_URL=ws://skippy-core:5580/ws in the vault .env "
+                                "(skippy-core runs the controller once core/install/matter.sh --apply has run there).")
+            from matter import Matter, Names                        # noqa: PLC0415
+            mt = Matter(env["MATTER_URL"], Names(matter_path(env)))
+        return mt
+
+    def house():
+        return Combined([hk, matter()]) if (mt is not None or env.get("MATTER_URL")) else hk
     try:
         if args.cmd == "scan":
             paired = set(hk.store.load()["devices"])
@@ -86,8 +125,10 @@ def main(argv=None, hk: HomeKit | None = None, out=print, sleep=time.sleep) -> i
         elif args.cmd == "pair":
             out(hk.pair(args.id.lower(), args.code, args.name, args.area))
         elif args.cmd == "list":
-            areas = hk.areas()
-            for s in hk.states(fresh=True):
+            h = house()
+            rows = h.states(fresh=True)
+            areas = h.areas()
+            for s in rows:
                 out(f'{s["entity_id"]:<34} {s["state"]:<5} {areas.get(s["entity_id"], "")}')
         elif args.cmd == "label":
             hk.label(args.id.lower(), args.name, args.area)
@@ -96,9 +137,30 @@ def main(argv=None, hk: HomeKit | None = None, out=print, sleep=time.sleep) -> i
             hk.unpair(args.id.lower())
             out("Forgotten here (the device itself still thinks it is paired: reset it, or remove it in its own app, to pair it elsewhere).")
         elif args.cmd == "say":
-            out(hk.control(args.name, args.action, args.value))
+            out(house().control(args.name, args.action, args.value))
         elif args.cmd == "prove":
-            return prove(hk, args.name, args.rounds, args.gap, out, sleep)
+            return prove(house(), args.name, args.rounds, args.gap, out, sleep)
+        elif args.cmd == "matter-info":
+            info = matter().info()
+            out(f"Matter controller: fabric {info.get('fabric_id')}, SDK {info.get('sdk_version')}")
+            out(f"  Bluetooth (for brand-new devices): {'ready' if info.get('bluetooth_enabled') else 'NOT available'}")
+            out(f"  Wi-Fi details for new devices: {'set' if info.get('wifi_credentials_set') else 'not set (matter-pair sets them)'}")
+        elif args.cmd == "matter-pair":
+            m = matter()
+            if not args.network:
+                ssid, password = env.get("ROOM_WIFI_SSID", ""), env.get("ROOM_WIFI_PASSWORD", "")
+                if not (ssid and password):
+                    raise HomeError("A new device needs the Wi-Fi it should join: put ROOM_WIFI_SSID and ROOM_WIFI_PASSWORD "
+                                    "(a 2.4 GHz network) in the vault .env. (A device already on the network: add --network.)")
+                m.set_wifi(ssid, password)
+            out("Pairing (a new device over Bluetooth takes a minute or two; keep it close to skippy-core) ...")
+            out(m.pair(args.code, args.name, args.area, network_only=args.network))
+        elif args.cmd == "matter-label":
+            matter().label(args.node, args.name, args.area)
+            out("Done.")
+        elif args.cmd == "matter-forget":
+            matter().forget(args.node)
+            out("Removed from skippy-core's Matter fabric.")
     except HomeError as e:
         out(str(e))
         return 1

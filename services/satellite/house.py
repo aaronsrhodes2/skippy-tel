@@ -176,7 +176,8 @@ class House:
         if action == "set_brightness" and domain == "light" and number is not None:
             return "turn_on", {"brightness_pct": max(1, min(100, int(number)))}
         if action == "set_temperature" and domain == "climate" and number is not None:
-            return "set_temperature", {"temperature": max(5, min(35, number))}
+            # in the thermostat's own unit (a Nest in Fahrenheit hears 70, not 21): the backend checks the range in that unit
+            return ("set_temperature", {"temperature": number}) if 5 <= number <= 95 else (None, {})
         if action == "set_volume" and domain == "media_player" and number is not None:
             return "volume_set", {"volume_level": max(0, min(100, number)) / 100}
         if domain == "cover" and action in ("open", "close", "stop"):
@@ -188,6 +189,52 @@ class House:
         if domain == "lock" and self.sensitive:
             return {"lock": "lock", "unlock": "unlock"}.get(action), {}
         return None, {}
+
+
+class Combined(House):
+    """Several backends as one house (HomeKit's lights and plugs, Matter's thermostat ...): one set of names, one set of guard rails.
+    Each entity is driven by the backend that reported it; one backend that is down never hides the others' things."""
+
+    def __init__(self, parts: list[House], sensitive: bool = False):
+        self.parts, self.sensitive = list(parts), sensitive
+        self._owner: dict[str, House] = {}
+
+    def states(self, fresh: bool = False) -> list[dict]:
+        out, owner = [], {}
+        for part in self.parts:
+            try:
+                rows = part.states(fresh)
+            except HomeError:
+                continue
+            for row in rows:
+                if row.get("entity_id") not in owner:      # the same name twice: the first backend keeps it
+                    owner[row["entity_id"]] = part
+                    out.append(row)
+        self._owner = owner
+        return out
+
+    def areas(self) -> dict[str, str]:
+        merged: dict[str, str] = {}
+        for part in self.parts:
+            try:
+                merged.update({k: v for k, v in part.areas().items() if k not in merged})
+            except HomeError:
+                pass
+        return merged
+
+    def invalidate(self) -> None:
+        for part in self.parts:
+            part.invalidate()
+
+    def _service(self, domain: str, service: str, data: dict) -> None:
+        part = self._owner.get(data["entity_id"])
+        if part is None:
+            self.states(fresh=True)
+            part = self._owner.get(data["entity_id"])
+        if part is None:
+            raise HomeError("I do not know that one any more.")
+        part._service(domain, service, data)
+        self.last = getattr(part, "last", {})                # homectl.py prove reads it, whichever backend did the work
 
 
 TOOLS = [
