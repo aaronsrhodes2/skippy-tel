@@ -232,3 +232,10 @@ def test_health_says_the_workshop_is_ready_without_leaking_the_token(door):
     status, health = door("GET", "/health", token=None)
     assert status == 200 and health["workshop"]["ready"] is True and health["workshop"]["model"] == "claude-sonnet-5-5"
     assert "door-token" not in json.dumps(health)
+
+
+def test_a_picture_request_has_its_own_rule_the_local_model_cant_miss(shop):
+    """2026-10-24 re-run: buried in a paragraph about models, Skippy Core's coder never used it and went hunting for an image
+    service instead. Its own guardrail line, naming the ask in the Captain's words."""
+    rule = next(line for line in shop.prompt().splitlines() if "SKIPPY_PICTURE:" in line)
+    assert rule.startswith("- Asked for a picture") and "no image tool" in rule

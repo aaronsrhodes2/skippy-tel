@@ -16,7 +16,9 @@ body.bridge {
 }
 .bridge main { flex: 1; min-height: 0; max-width: none; width: 100%; margin: 0; padding: 4px 12px 6px; display: flex; flex-direction: column; }
 .bridge main > section { flex: 1; min-height: 0; margin: 0; display: flex; flex-direction: column; }
-.bridge code, .bridge input, .bridge textarea { user-select: text; -webkit-user-select: text; }
+/* Words people read are selectable: code, the boxes, and every chat message (the Skippy chat's .tx, the agent transcript's
+   .me-chat .turn). The Captain couldn't copy a line out of the middle of a reply (2026-10-21, re-run 2026-10-24). */
+.bridge code, .bridge input, .bridge textarea, .bridge .turn .tx, .bridge .me-chat .turn { user-select: text; -webkit-user-select: text; }
 
 /* ── The strip along the top: back, what this is, home ───────────────────────────────────────────────────────────── */
 .hud { flex: none; display: flex; align-items: center; gap: 10px; height: 52px; padding: 6px 12px 2px; }

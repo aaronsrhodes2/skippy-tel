@@ -155,3 +155,12 @@ def test_chat_turns_backticked_text_into_chips_and_asks_skippy_to_use_them():
     assert '"code"' in md and "copy chip" in md                                             # whose `code` is the same copy chip
     prompt = chat.system_prompt("Pal")
     assert "backticks" in prompt and "`106969`" in prompt and "one-click copy" in prompt
+
+
+def test_every_chat_message_is_selectable_on_the_bridge():
+    """The bridge turns text selection off for its controls; the words of a chat must stay selectable, in the Skippy chat (.tx)
+    and the agent's transcript (.me-chat .turn), or a line can't be copied out of the middle of a reply."""
+    from pathlib import Path
+    css = (Path(__file__).resolve().parents[1] / "static" / "bridge.css").read_text(encoding="utf-8")
+    rule = next(line for line in css.splitlines() if "user-select: text" in line and ".bridge code" in line)
+    assert ".bridge .turn .tx" in rule and ".bridge .me-chat .turn" in rule
