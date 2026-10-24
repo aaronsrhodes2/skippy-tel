@@ -69,6 +69,7 @@ def test_every_run_gets_the_lane_guard_and_skippytel_its_deploy_checkout(shop):
     (call,) = calls(shop)
     argv = call["argv"]
     settings = json.loads(Path(argv[argv.index("--settings") + 1]).read_text(encoding="utf-8"))
-    (rule,) = settings["hooks"]["PreToolUse"]
+    rule, see = settings["hooks"]["PreToolUse"]
     assert rule["matcher"] == "Edit|Write|MultiEdit|NotebookEdit|Bash" and "lane_guard.py" in rule["hooks"][0]["command"]
+    assert see["matcher"] == "Read" and "eyes.py" in see["hooks"][0]["command"]      # a Core run's pictures (test_eyes.py)
     assert "SKIPPY_LANE_DEPLOY" in call["env"]
