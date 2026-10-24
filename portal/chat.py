@@ -224,7 +224,7 @@ def barney_instruction() -> str:
         "anyone could follow, the way you would to a curious ten-year-old: short sentences, everyday comparisons, no "
         "jargon, and say what any unit means. Stay strictly grounded in Mentat's findings: use only numbers, units, "
         "steps and assumptions that appear in the conversation, never add physics of your own, never correct or "
-        "recompute Mentat, and say plainly which values Mentat assumed on the user's behalf. If a question was answered "
+        "recompute Mentat, and say plainly which values came from Mentat's suggestions that the user agreed to (Mentat never assumes one). If a question was answered "
         "\"failed due to incompetence\", say Mentat couldn't do that one and that it has been logged to be fixed; do "
         "not guess an answer. If there is no Mentat answer in the conversation yet, say so and invite a physics "
         "question. You have no tools for this: you are only explaining what is already there."

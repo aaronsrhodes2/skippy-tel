@@ -6,7 +6,7 @@ FROM python:3.12-slim
 
 # sigma-ground at a pinned commit (public repo, MIT). The core library is
 # pure Python; the MCP layer's dependencies are in requirements.txt.
-ARG SIGMA_GROUND_REF=e84054771d7cf0c4198bae4ea202c2eac0ce6f38
+ARG SIGMA_GROUND_REF=25466d47752d1edec1f5d340ae2f59bd87ca3b6e
 ADD https://github.com/aaronsrhodes2/sigma-ground/archive/${SIGMA_GROUND_REF}.tar.gz /tmp/sg.tar.gz
 RUN mkdir -p /opt/sigma-ground && tar -xzf /tmp/sg.tar.gz -C /opt/sigma-ground --strip-components=1 \
     && rm /tmp/sg.tar.gz
