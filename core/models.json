@@ -60,8 +60,8 @@
       }
     },
     "coder": {
-      "role": "the coding agent (Claude Code via ANTHROPIC_BASE_URL: the Workshop's Core brain). Loaded on demand; swaps with general. One request at a time (MTP)",
-      "resident": false,
+      "role": "the coding agent (Claude Code via ANTHROPIC_BASE_URL: the Workshop's Core brain). RESIDENT (2026-10-24, the Captain's call): an agent turn never waits for a 38 GB load, and its prompt cache (--cache-ram, in host RAM) survives between turns. One request at a time (MTP); Claude Code's background calls go to chat. With it resident, general's full model (gpt-oss-120b) doesn't fit beside it: the planner refuses it",
+      "resident": true,
       "aliases": ["qwen3-coder-next", "skippy-coder"],
       "standin": {
         "repo": "Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF",
@@ -74,7 +74,7 @@
         "files": [{"path": "Qwen3.6-35B-A3B-Q8_0.gguf", "size": 37801097504, "sha256": "c1283d8b80c3e38b2735ddbc9766d3b3126f44d6c484be419d4e101d09a76131"}],
         "ctx": 131072,
         "parallel": 1,
-        "args": ["--jinja", "--temp", "0.6", "--top-p", "0.95", "--top-k", "20", "--min-p", "0", "--spec-type", "draft-mtp", "--spec-draft-n-max", "2"]
+        "args": ["--jinja", "--temp", "0.6", "--top-p", "0.95", "--top-k", "20", "--min-p", "0", "--spec-type", "draft-mtp", "--spec-draft-n-max", "2", "--cache-ram", "16384"]
       }
     }
   },

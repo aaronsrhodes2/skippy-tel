@@ -43,7 +43,11 @@ def test_the_real_manifest_loads_and_its_standins_fit():
     assert set(chosen) == {"chat", "vision", "general", "coder"}
     assert all(s["variant"] == "standin" for s in chosen.values())
     assert m.budget(data, chosen)["fits"]
-    assert m.budget(data, m.plan(data, m.parse_full("all", data["slots"])))["fits"], "the full tier must fit the box"
+    assert m.budget(data, m.plan(data, m.parse_full("chat,coder,vision", data["slots"])))["fits"], "the box's full tier must fit"
+    # The coder is resident (the Captain, 2026-10-24): gpt-oss-120b can't load beside it, so onlining it is refused, never a swap
+    # that would pull the agent's model out from under a run.
+    assert data["slots"]["coder"]["resident"] is True
+    assert not m.budget(data, m.plan(data, m.parse_full("all", data["slots"])))["fits"]
     assert "qwen3:8b" in data["slots"]["chat"]["aliases"], "today's default model name must reach the chat slot"
 
 
