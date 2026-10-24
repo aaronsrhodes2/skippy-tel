@@ -54,3 +54,56 @@ def test_old_picture_folders_are_swept(shop, tmp_path):
     os.utime(old, (long_ago, long_ago))
     finish(shop.start("ffffffff", "conv-12345678", "new one", images=[pic(PNG)]))
     assert not os.path.exists(old) and os.path.isdir(os.path.join(shop.attach_dir, "ffffffff"))
+
+
+# ── a Core-brain run: its coder is text-only, so Skippy Core's vision slot looks at the pictures first ──────────────────────
+
+def _core(monkeypatch):
+    monkeypatch.setenv("SKIPPY_CORE_URL", "https://core.example/")
+    monkeypatch.setenv("SKIPPY_CORE_API_KEY", "sk-core-test")
+    monkeypatch.setattr(engine.Workshop, "core_ready", lambda self: True)
+
+
+def test_a_core_run_gets_the_vision_models_description_and_is_told_not_to_open_the_picture(shop, monkeypatch):
+    _core(monkeypatch)
+    seen = []
+
+    def describe(self, path, post=None):
+        seen.append(path)
+        return "A white smart plug label. Text: 'Model: XYZ-123', 'FCC ID: 2AB12-PLUG'."
+    monkeypatch.setattr(engine.Workshop, "describe_picture", describe)
+    run = finish(shop.start("dddddddd", "conv-12345678", "read the back of the plug", images=[pic(JPG)], brain="core"))
+    assert seen == [os.path.join(shop.attach_dir, "dddddddd", "image-1.jpg")]
+    assert run.message.startswith("read the back of the plug\n\n[The Captain attached 1 picture. You can't see pictures")
+    assert "Model: XYZ-123" in run.message and "Do NOT open the picture files with the Read tool" in run.message
+    assert "Open each with the Read tool" not in run.message
+
+
+def test_when_the_vision_model_fails_the_run_still_goes_and_says_why(shop, monkeypatch):
+    _core(monkeypatch)
+
+    def broken(self, path, post=None):
+        raise RuntimeError("vision slot is loading")
+    monkeypatch.setattr(engine.Workshop, "describe_picture", broken)
+    run = finish(shop.start("eeeeeeee", "conv-12345678", "", images=[pic(PNG)], brain="core"))
+    assert "couldn't look at it: RuntimeError: vision slot is loading" in run.message and run.done
+
+
+def test_describe_picture_asks_the_vision_slot_with_the_image_and_the_key(shop, monkeypatch, tmp_path):
+    import json
+    _core(monkeypatch)
+    f = tmp_path / "image-1.jpg"
+    f.write_bytes(JPG)
+    asked = []
+
+    def post(req):
+        asked.append(req)
+        return {"content": [{"type": "text", "text": "Label text: 'Model: XYZ-123'"}]}
+    assert shop.describe_picture(str(f), post=post) == "Label text: 'Model: XYZ-123'"
+    (req,) = asked
+    body = json.loads(req.data)
+    assert req.full_url == "https://core.example/v1/messages" and req.get_header("X-api-key") == "sk-core-test"
+    assert body["model"] == "vision"
+    image = body["messages"][0]["content"][0]
+    assert image["type"] == "image" and image["source"]["media_type"] == "image/jpeg" and base64.b64decode(image["source"]["data"]) == JPG
+    assert "copied exactly as printed" in body["messages"][0]["content"][1]["text"]
