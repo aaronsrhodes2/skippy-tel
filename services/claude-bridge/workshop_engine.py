@@ -55,6 +55,9 @@ EFFORT = "medium"                  # and its effort level: also fixed here, neve
 # 108-character Bearer token, 401 from llama-swap). Claude sessions live in a config folder, so a conversation keeps one brain.
 BRAINS = ("claude", "core")
 CORE_MODEL = "coder"               # core/models.json's coding slot
+# Claude Code's background calls (titles, quick checks) go to the always-loaded chat slot: on the coder (--parallel 1) they took
+# its only slot and threw away its cached prompt, so the next turn re-read all ~30K tokens (the community's Strix Halo notes).
+CORE_FAST_MODEL = "skippy-chat"
 # That slot's --ctx-size (Qwen3.6-35B-A3B since 2026-10-23: 131072), so Claude Code compacts in time (it doesn't know "coder").
 # Told too little, it thrashes: its own fixed prompt is ~30k tokens, and at 65536 (minus its reply reserve) it compacted after every
 # turn until it gave up ("Autocompact is thrashing", the Captain's iPad, 2026-10-23). WORKSHOP_CORE_CONTEXT overrides it.
@@ -69,7 +72,7 @@ PROMPT_FILE = Path(__file__).with_name("workshop_prompt.md")
 PROMPT_NAME = ".skippy-workshop-prompt.txt"   # the prompt as claude reads it ({repo}/{primary} filled in), next to the sessions file
 ENV_FILES = ("G:/My Drive/vault/.env",)        # where SKIPPY_HOME_TOKEN lives if the environment doesn't have it
 
-MAX_MESSAGE = 8000
+MAX_MESSAGE = 120_000          # ~30K tokens: a pasted log or file fits; the same in the portal, the bridge and the log
 # Pictures the Captain pastes into the chat (UI bug screenshots, mostly): saved here, one folder per task, and the message tells
 # Claude Code the paths so it opens them with its Read tool. Checked again here: the bridge trusts nothing it is handed.
 ATTACH_DIR = os.getenv("WORKSHOP_ATTACH", os.path.join(os.path.dirname(os.getenv("WORKSHOP_REPO", r"D:\Aaron\development\SkippyTel-workshop")), ".skippy-workshop-attachments"))
@@ -976,15 +979,15 @@ class Workshop:
 
     def core_env(self) -> dict:
         """child_env() for a run on Skippy Core: its own config folder (no subscription login to win over the key) with the
-        Captain's skills and plugins shared in, the key sent both ways (x-api-key and Bearer), the coding slot for every
-        model Claude Code asks for, no side traffic."""
+        Captain's skills and plugins shared in, the key sent both ways (x-api-key and Bearer), the coding slot for its
+        work and the chat slot for its background calls, no side traffic."""
         url, key = self._core_settings()
         config = os.path.join(os.path.dirname(self.sessions_path), ".skippy-workshop-core-claude")
         os.makedirs(config, exist_ok=True)
         self._share_claude_setup(config)
         env = child_env()
         env.update(ANTHROPIC_BASE_URL=url, ANTHROPIC_API_KEY=key, ANTHROPIC_AUTH_TOKEN=key, CLAUDE_CONFIG_DIR=config,
-                   ANTHROPIC_SMALL_FAST_MODEL=CORE_MODEL, ANTHROPIC_DEFAULT_HAIKU_MODEL=CORE_MODEL,
+                   ANTHROPIC_SMALL_FAST_MODEL=CORE_FAST_MODEL, ANTHROPIC_DEFAULT_HAIKU_MODEL=CORE_FAST_MODEL,
                    ANTHROPIC_DEFAULT_SONNET_MODEL=CORE_MODEL, ANTHROPIC_DEFAULT_OPUS_MODEL=CORE_MODEL,
                    CLAUDE_CODE_MAX_CONTEXT_TOKENS=CORE_CONTEXT, CLAUDE_CODE_MAX_OUTPUT_TOKENS=CORE_MAX_OUTPUT,
                    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_TELEMETRY="1",

@@ -277,7 +277,12 @@ class Home:
         """Mentat + Qwen on skippy-pc is up and reporting."""
         return self.online() and bool((self.report or {}).get("mentat_home"))
 
-    def ask_mentat(self, question: str, timeout: float = 75, given: dict | None = None, trace: str = "") -> dict:
+    # The wait nests OUTSIDE the work: Mentat's own call limit on skippy-pc (MENTAT_CALL_TIMEOUT 90 s, docker-compose.override.yml)
+    # plus the reporter picking the job up (1.5 s while someone chats, 15 s otherwise) and a margin. At 75 s a slow answer (Qwen
+    # reloading after a picture freed the card) came back after the chat had already said Mentat was offline.
+    MENTAT_WAIT_S = 110
+
+    def ask_mentat(self, question: str, timeout: float = MENTAT_WAIT_S, given: dict | None = None, trace: str = "") -> dict:
         """`given`: values the person agreed to after Mentat suggested them. `trace`: this chat turn's id, kept in
         Mentat's research record."""
         self.touch_chat()

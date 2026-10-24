@@ -34,6 +34,7 @@ IMPORTS_DIR = os.environ.get("IMPORTS_DIR", "/imports")      # game databases to
 INSIGHTS_FILE = os.environ.get("INSIGHTS_FILE", "/insights/chat-insights.jsonl")   # what guests' expired chats taught (portal/chat_history.py)
 CHUNK = 8 * 1024 * 1024      # Cloud Run caps a request at 32 MB
 ART_MAX = 400_000
+JSON_MAX = 4_000_000            # a JSON reply cut short would not parse and would read as "didn't answer"
 MUSIC = os.environ.get("MUSIC_URL", "").rstrip("/")           # music-studio on skippy-pc (ACE-Step on the GPU)
 IMAGES = os.environ.get("IMAGE_URL", "").rstrip("/")          # image-studio on skippy-pc (SDXL on the GPU)
 IMAGE_BOX = os.environ.get("IMAGE_BOX", "pc")                   # which machine that studio runs on: "pc", or "core" once it moves there
@@ -87,7 +88,7 @@ def fetch(url: str, method: str = "GET", data: dict | None = None, timeout: floa
                                  headers={**({"Content-Type": "application/json"} if body else {}), **(headers or {})})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            payload = r.read(ART_MAX + 1)
+            payload = r.read((ART_MAX if raw else JSON_MAX) + 1)   # art is capped small; a JSON answer (Mentat, status) may be bigger
             if raw:
                 return payload if len(payload) <= ART_MAX else None, r.headers.get("Content-Type", "")
             return json.loads(payload or b"null")
@@ -188,7 +189,7 @@ def gather() -> dict:
     """Everything one report carries. The shape is fixed (the portal's `core_check`, `capabilities` and the widgets read
     these keys); only how it is collected changed, see `_Probes`."""
     probes = _Probes(GATHER_BUDGET_S)
-    probes.start("status", lambda: fetch(f"{API}/status.json", timeout=10))
+    probes.start("status", lambda: fetch(f"{API}/status.json", timeout=8))     # inside the 9 s gather budget: slow, not missing
     probes.start("health", core_health)
     probes.start("services", lambda: fetch(f"{API}/services"))
     probes.start("session", lambda: fetch(f"{API}/music/session"))
@@ -535,8 +536,8 @@ def push_workshop(token: str, task: str, who: str, conv: str, start: int, events
         f"{PORTAL}/home/workshop/{task}", method="POST", headers={
             "Content-Type": "application/json", "Authorization": f"Bearer {token}"},
         data=json.dumps(body).encode())
-    try:
-        with urllib.request.urlopen(req, timeout=20) as r:
+    try:                                           # 20 s, plus time for the bytes at a slow home upload (~200 KB/s): a 12 MB picture
+        with urllib.request.urlopen(req, timeout=20 + len(req.data) / 200_000) as r:
             reply = json.loads(r.read() or b"{}")
     except urllib.error.HTTPError as e:
         _push_said(f"the portal said HTTP {e.code} to a workshop push" +

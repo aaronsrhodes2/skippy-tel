@@ -46,7 +46,7 @@ def test_a_message_becomes_a_long_lived_home_job_and_its_id_is_the_task_id(shop)
 
 def test_it_refuses_bad_input_and_a_workshop_that_isnt_reporting(shop):
     ws, home, clock = shop
-    for args in ((ADMIN, "x", "hi"), (ADMIN, CONV, "   "), (ADMIN, CONV, "a" * 8001)):
+    for args in ((ADMIN, "x", "hi"), (ADMIN, CONV, "   "), (ADMIN, CONV, "a" * (workshop_mod.MAX_MESSAGE + 1))):
         with pytest.raises(ValueError):
             ws.send(*args)
     clock.now += home_mod.STALE_AFTER + 1                       # home went silent: nothing to hand the job to

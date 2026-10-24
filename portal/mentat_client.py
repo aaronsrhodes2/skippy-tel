@@ -13,7 +13,7 @@ import urllib.error
 import urllib.request
 
 CACHE_SECONDS = 600
-TIMEOUT = 25
+TIMEOUT = 45                 # over the cloud Mentat's own 20 s call limit plus a Cloud Run cold start
 
 
 class MentatError(Exception):

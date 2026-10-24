@@ -41,5 +41,7 @@ ENV PYTHONUNBUFFERED=1
 ARG GIT_SHA=
 ARG BUILD_TIME=
 ENV GIT_SHA=$GIT_SHA BUILD_TIME=$BUILD_TIME
-# Long timeout: a restart waits for the VM to stop (worlds saved) and start.
-CMD exec gunicorn --bind "0.0.0.0:${PORT:-8080}" --workers 1 --threads 8 --timeout 900 app:app
+# Long timeout: a restart waits for the VM to stop (worlds saved) and start. 32 threads, the same as Cloud Run's --concurrency
+# (deploy.yml): chat turns hold a thread for minutes (model rounds, Mentat waits), and with 8 the reporter's reports and pushes
+# queued behind them until the portal thought home had gone silent.
+CMD exec gunicorn --bind "0.0.0.0:${PORT:-8080}" --workers 1 --threads 32 --timeout 900 app:app

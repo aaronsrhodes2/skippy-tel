@@ -632,7 +632,11 @@
     async function addImages(files) {
       for (const f of files) {
         if (attached.length >= MAX_IMAGES) break;
-        try { attached.push({url: await shrink(f)}); } catch (e) {}
+        try {
+          const url = await shrink(f);
+          if (attached.reduce((n, a) => n + a.url.length, url.length) > 3100000) break;   // the portal's total for one message (workshop.MAX_IMAGES_B64)
+          attached.push({url});
+        } catch (e) {}
       }
       paintAttached(); text.focus();
     }

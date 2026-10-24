@@ -464,13 +464,21 @@
     const LONG_PASTE = 2000, LONG_LINES = 40;
     let pasted = 0;
     function readAs(file) { return new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(file); }); }
-    async function shrink(file) {
+    // What the server takes, as base64 characters (the smaller of its two limits: portal/tests/test_limit_chains.py), so a set of
+    // phone photos is shrunk to fit here instead of refused there.
+    const FILE_B64 = 1100000, FILES_B64 = 3100000, AGENT_TEXT = 120000;
+    const used = () => pending_files.reduce((n, f) => n + f.data.length, 0);
+    async function shrink(file, budget) {          // -> a JPEG data URL of at most `budget` characters, as big as that allows
       const url = await readAs(file);
       const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = url; });
-      const k = Math.min(1, 1600 / Math.max(img.width, img.height));
-      const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
-      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-      return c.toDataURL("image/jpeg", 0.85);
+      for (const [edge, q] of [[1600, 0.85], [1600, 0.72], [1300, 0.7], [1000, 0.65], [800, 0.6]]) {
+        const k = Math.min(1, edge / Math.max(img.width, img.height));
+        const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        const out = c.toDataURL("image/jpeg", q);
+        if (out.length <= budget) return out;
+      }
+      throw new Error("too big");
     }
     const textData = (t) => "data:text/plain;base64," + btoa(unescape(encodeURIComponent(t)));
     const dataText = (d) => decodeURIComponent(escape(atob(d.split(",")[1] || "")));
@@ -492,8 +500,10 @@
         if (pending_files.length >= MAX_FILES) { flash("At most " + MAX_FILES + " files to a message."); break; }
         try {
           const isPic = /^image\/(jpeg|png|webp|gif|bmp)$/.test(file.type);
-          const data = isPic ? await shrink(file) : await readAs(file);
-          if (!isPic && file.size > MAX_BYTES) { flash(file.name + " is over 1 MB."); continue; }
+          const room = Math.min(FILE_B64, FILES_B64 - used());
+          if (room < 50000) { flash("That's all the room one message has: send these first."); break; }
+          const data = isPic ? await shrink(file, room) : await readAs(file);
+          if (!isPic && (file.size > MAX_BYTES || data.length > room)) { flash(file.name + " is too big to send (about 800 KB at most)."); continue; }
           pending_files.push({name: isPic ? file.name.replace(/\.\w+$/, "") + ".jpg" : file.name,
                               data: data.replace(/^data:;base64,/, "data:text/plain;base64,")});
         } catch (e) { flash(file.name + " couldn't be read."); }
@@ -523,6 +533,7 @@
       const lines = t ? t.split("\n").length : 0;
       if (t && (t.length > LONG_PASTE || lines > LONG_LINES) && pending_files.length < MAX_FILES) {
         e.preventDefault();
+        if (textData(t).length > Math.min(FILE_B64, FILES_B64 - used())) { flash("That paste is too long to send (about 800 KB at most)."); return; }
         pending_files.push({name: "pasted-" + (++pasted) + ".txt", data: textData(t), pasted: true, lines: lines});
         paintFiles();
       }
@@ -545,6 +556,8 @@
       setInterval(paintStop, 1000);
     }
     function askAgent(text) {
+      const long = text.length + pending_files.filter(f => f.data.startsWith("data:text/")).reduce((n, f) => n + dataText(f.data).length + f.name.length + 10, 0);
+      if (long > AGENT_TEXT) { flash("Too long for the agent (" + Math.round(long / 1000) + "K characters, " + AGENT_TEXT / 1000 + "K at most): put the file in its folder and name it."); msg.value = text; grow(); return false; }
       const files = pending_files.splice(0); paintFiles();
       const pics = files.filter(f => f.data.startsWith("data:image/")).map(f => f.data);
       const texts = files.filter(f => f.data.startsWith("data:text/"));

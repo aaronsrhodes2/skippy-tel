@@ -24,7 +24,8 @@ import tabletop
 KEEP_DAYS = 30
 MAX_CHATS = 40                  # a guest's newest 40, as the page's own list
 MAX_CHATS_FOREVER = 1000        # the Captain's: kept forever, so only a sanity cap
-MAX_CHAT_BYTES = 256 * 1024     # one chat's history, as JSON
+MAX_CHAT_BYTES = 256 * 1024     # one chat's history, as JSON (a guest's)
+MAX_CHAT_BYTES_FOREVER = 2 * 1024 * 1024    # the Captain's: his long working chats must keep saving
 MAX_FILE_BYTES = 2 * 1024 * 1024
 MAX_FILE_BYTES_FOREVER = 24 * 1024 * 1024
 PREFIX = "chat-history/"
@@ -130,9 +131,9 @@ class History:
                  if isinstance(t, dict) and t.get("role") in ("user", "assistant") and isinstance(t.get("content"), str)]
         if not turns:
             raise Refused("A chat needs at least one turn.")
-        if len(json.dumps(turns)) > MAX_CHAT_BYTES:
-            raise Refused("That chat is too long to keep on the portal (it stays in this browser).")
         path, forever = self._path(email), self.forever(email)
+        if len(json.dumps(turns)) > (MAX_CHAT_BYTES_FOREVER if forever else MAX_CHAT_BYTES):
+            raise Refused("That chat is too long to keep on the portal (it stays in this browser).")
         with self._lock:
             had = next((c for c in self._load(path) if c.get("id") == chat_id), None)
         if had and (had.get("named") or chat_names.valid(had.get("title", ""))):

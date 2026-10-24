@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}
-MAX_BYTES = 8 * 1024 * 1024
+MAX_BYTES = 12 * 1024 * 1024        # as big as a picture the agent may show (workshop_engine.MAX_SHOT_BYTES)
 PROMPT = ("Describe this picture precisely for someone who can't see it and needs every detail: what it is, the layout from top "
           "to bottom, and ALL text in it copied exactly as printed (every word, number, code, symbol and logo; say which you can't "
           "read rather than guess), then colours, counts and anything unusual. No opinions.")

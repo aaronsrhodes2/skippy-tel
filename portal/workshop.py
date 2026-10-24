@@ -21,7 +21,7 @@ import re
 import threading
 import time
 
-MAX_MESSAGE = 8000
+MAX_MESSAGE = 120_000          # ~30K tokens: a pasted log or file fits; the same in the portal, the bridge and the log
 MAX_EVENTS = 5000
 MAX_TEXT = 4000
 MAX_LISTED = 50            # records `listing` shows the reporter's reconciler
