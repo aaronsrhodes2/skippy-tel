@@ -333,6 +333,7 @@
           if (ex.question) question = ex.question;
         }
         else if (p.t === "ship") box.appendChild(shipCard(p));
+        else if (p.t === "picture") box.appendChild(pictureCard(p));
         else box.appendChild(shot(p));
       });
       const items = todo ? SkippyMd.parseTodo(todo.detail) : [];
@@ -420,6 +421,16 @@
       img.addEventListener("error", () => a.replaceChildren(el("div", "act", "› the screenshot is gone (the portal restarted since)")));
       a.appendChild(img);
       return a;
+    }
+    // A picture Skippy asked to have MADE (a SKIPPY_PICTURE line): a patient job (portal/patient.py) whose id the bridge chose, shown
+    // with the chat's own waiting card (_chat.html's waitCard), which turns into the picture when it is drawn, even days later.
+    function pictureCard(p) {
+      if (!/^[0-9a-f]{16}$/.test(p.id || "")) return el("div", "act", "› a picture");
+      const holder = el("div", "act", "› a picture: " + (p.prompt || "").slice(0, 120));
+      const swap = () => { if (window.SkippyWaitCard) holder.replaceWith(SkippyWaitCard({kind: "image", job_id: p.id, pending: true, title: p.prompt})); };
+      if (window.SkippyWaitCard) return SkippyWaitCard({kind: "image", job_id: p.id, pending: true, title: p.prompt});
+      setTimeout(swap, 0);                         // (this script runs before the chat's: a replay at load waits for it)
+      return holder;
     }
     function shipCard(p) {
       if (!/^[0-9a-f]{40}$/.test(p.sha || "")) return el("div", "act", "› pushed");
@@ -520,7 +531,7 @@
       if (d && d.state !== "unknown") {            // a stalled or offline read is still a read: keep what it carries
         if (Array.isArray(d.events)) d.events.forEach(e => {
           if (e && e.t === "image" && Number.isInteger(e.n)) job.turn.parts.push({t: "image", n: e.n, task: job.task});
-          else if (e && (e.t === "text" || e.t === "tool" || e.t === "ship")) job.turn.parts.push(e);
+          else if (e && (e.t === "text" || e.t === "tool" || e.t === "ship" || e.t === "picture")) job.turn.parts.push(e);
         });
         if (typeof d.next === "number" && d.next > job.after) job.after = d.next;   // never back: a portal that was just rebuilt holds fewer events than this page has
         store.set(K.task, JSON.stringify({task: job.task, after: job.after}));
@@ -764,7 +775,7 @@
       turns = [];
       (got.turns || []).forEach(t => {
         turns.push({role: "user", text: t.message});
-        const reply = {role: "assistant", parts: (t.events || []).filter(e => e && (e.t === "text" || e.t === "tool" || e.t === "ship"))};
+        const reply = {role: "assistant", parts: (t.events || []).filter(e => e && (e.t === "text" || e.t === "tool" || e.t === "ship" || e.t === "picture"))};
         if (t.state === "error") { reply.note = t.error || "It failed."; reply.bad = t.error !== "stopped"; }
         reply.task = t.task;
         turns.push(reply);

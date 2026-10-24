@@ -31,6 +31,7 @@ import json
 import os
 import queue
 import re
+import secrets
 import shutil
 import signal
 import subprocess
@@ -215,9 +216,24 @@ def tool_detail(name: str, args: dict) -> str:
     return ""
 
 
-MAX_IMAGES = 3                     # screenshots one run may attach
-MAX_IMAGE_BYTES = 400_000
+MAX_SHOTS = 3                      # pictures one run may attach (SKIPPY_IMAGE lines)
+# A picture the agent shows: up to 12 MB (a 4K screenshot, a full-size picture). It was 400 KB, which the event pipe needed, not the
+# Captain; and it was named MAX_IMAGE_BYTES too, which silently capped the pictures HE attaches (above, 3 MB) at 400 KB as well.
+MAX_SHOT_BYTES = 12 * 1024 * 1024
 _IMAGE_LINE = re.compile(r"^[ \t]*`?SKIPPY_IMAGE:[ \t]*(\S[^\n`]*?)[ \t]*`?[ \t]*$", re.M)
+
+
+# A picture the agent wants MADE (not a file it has): `SKIPPY_PICTURE: <a detailed description>` in its reply. The bridge gives it
+# an id and the portal makes it a patient job (portal/patient.py) for the Captain, drawn when its machine is quiet; the chat shows a
+# card that fills in. The agent never runs the image studio by hand (2026-10-24: it did, and the run died trying to show the file).
+MAX_PICTURES = 2
+_PICTURE_LINE = re.compile(r"^[ \t]*`?SKIPPY_PICTURE:[ \t]*(\S[^\n`]*?)[ \t]*`?[ \t]*$", re.M)
+
+
+def split_pictures(text: str) -> tuple[str, list[str]]:
+    """An assistant text block without its `SKIPPY_PICTURE: <description>` lines, and those descriptions."""
+    prompts = [m.group(1).strip()[:900] for m in _PICTURE_LINE.finditer(text)]
+    return _PICTURE_LINE.sub("", text).strip(), [p for p in prompts if p]
 
 
 def split_images(text: str) -> tuple[str, list[str]]:
@@ -283,6 +299,7 @@ class Run:
         self.clone = ""                        # that project's clone when the run started (the conversation log reads it)
         self.before_finish = None              # (run) -> None, called once just before the run ends (the ship check)
         self.image_paths: list[str] = []       # SKIPPY_IMAGE lines the agent printed: screenshots to attach at the end
+        self.picture_prompts: list[str] = []   # SKIPPY_PICTURE lines: pictures to have made (patient jobs, see _attach_images)
         self.pictures: list[str] = []          # a Core-brain run's attached pictures, described by the vision slot before it starts
         self.created = time.time() if created is None else created
         self.events: list[dict] = []
@@ -1141,11 +1158,11 @@ class Workshop:
 
     def _attach_images(self, run: Run) -> None:
         """The screenshots the agent asked to show (`SKIPPY_IMAGE: <path>`), as `image` events under its answer. Only a
-        file inside this run's project clone (where tools/workshop_screenshot.py writes), at most MAX_IMAGES, each a real
-        PNG or JPEG (by its first bytes) of at most MAX_IMAGE_BYTES: anything else is skipped with a short note, so a
+        file inside this run's project clone (where tools/workshop_screenshot.py writes), at most MAX_SHOTS, each a real
+        PNG or JPEG (by its first bytes) of at most MAX_SHOT_BYTES: anything else is skipped with a short note, so a
         path the agent got wrong can never send some other file off this PC."""
         clone = os.path.realpath(self.project(run.project).clone)
-        for raw in run.image_paths[:MAX_IMAGES]:
+        for raw in run.image_paths[:MAX_SHOTS]:
             path = os.path.realpath(raw if os.path.isabs(raw) else os.path.join(clone, raw))
             name = os.path.basename(path)[:80]
             try:
@@ -1153,15 +1170,17 @@ class Workshop:
             except ValueError:                         # another drive
                 inside = False
             data = b""
-            if inside and os.path.isfile(path) and os.path.getsize(path) <= MAX_IMAGE_BYTES:
+            if inside and os.path.isfile(path) and os.path.getsize(path) <= MAX_SHOT_BYTES:
                 with open(path, "rb") as f:
-                    data = f.read(MAX_IMAGE_BYTES + 1)
+                    data = f.read(MAX_SHOT_BYTES + 1)
             mime = image_mime(data)
-            if not inside or mime is None or len(data) > MAX_IMAGE_BYTES:
-                run.emit({"t": "text", "text": f"(couldn't attach the screenshot {name}: it must be a PNG or JPEG of at "
-                                                f"most {MAX_IMAGE_BYTES // 1000} KB inside my clone)"})
+            if not inside or mime is None or len(data) > MAX_SHOT_BYTES:
+                run.emit({"t": "text", "text": f"(couldn't attach the picture {name}: it must be a PNG or JPEG of at "
+                                                f"most {MAX_SHOT_BYTES // (1024 * 1024)} MB inside my clone)"})
                 continue
             run.emit({"t": "image", "mime": mime, "name": name, "b64": base64.b64encode(data).decode("ascii")})
+        for prompt in run.picture_prompts[:MAX_PICTURES]:      # pictures to make: the portal queues each (its id is the job's)
+            run.emit({"t": "picture", "id": secrets.token_hex(8), "prompt": prompt})
 
     def _work(self, run: Run) -> None:
         try:
@@ -1292,6 +1311,8 @@ class Workshop:
                         produced = True
                         said, shots = split_images(block["text"])
                         run.image_paths.extend(shots)          # attached when the run ends (see _attach_images)
+                        said, wanted = split_pictures(said)
+                        run.picture_prompts.extend(wanted)     # asked for when the run ends (see _attach_images)
                         if not said:
                             continue
                         if pending is not None:

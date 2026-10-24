@@ -579,7 +579,8 @@ PUSH_BYTES = 700_000         # one push's events, as JSON: the portal refuses a 
 
 def push_chunk(events: list) -> list:
     """The next events to push: at most WORKSHOP_PUSH of them and at most PUSH_BYTES of JSON, but always at least one
-    (a single event is never bigger than the bridge lets it be: text 4 KB, a screenshot 400 KB before base64)."""
+    (a single event is never bigger than the bridge lets it be: text 4 KB, a picture 12 MB before base64; the portal takes
+    a push of up to 20 MB, so one picture always fits on its own)."""
     out, size = [], 0
     for event in events[:WORKSHOP_PUSH]:
         n = len(json.dumps(event))

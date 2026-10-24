@@ -12,6 +12,7 @@ import app as portal  # noqa: E402
 import chat_tools  # noqa: E402
 import patient as pm  # noqa: E402
 import tabletop  # noqa: E402
+from test_workshop import CONV  # noqa: E402
 from test_app import ADMIN, FRIEND, SETTINGS, FakeSkippy, FakeVm, _advertise, _pair, login  # noqa: E402
 
 PNG = bytes([0x89]) + b"PNG" + bytes([13, 10, 26, 10]) + bytes(32)
@@ -199,3 +200,35 @@ def test_a_picture_for_skippy_core_waits_for_the_core_studios_own_figures(world)
     caps["make_image"]["gpu_free_gib"] = 64.0
     reply = send().get_json()                                       # (the report's own reply is how the reporter gets its jobs)
     assert [j["box"] for j in reply["jobs"] if j["kind"] in pm.KINDS] == ["core"]
+
+
+# ── a picture the AGENT asked for (a SKIPPY_PICTURE line: the bridge sends {"t": "picture", "id", "prompt"}) ──
+def test_an_agent_picture_becomes_a_patient_job_with_the_bridges_id_once_and_its_card_finds_it(world):
+    pic = {"t": "picture", "id": "0123456789abcdef", "prompt": "a grey tabby cat asleep on a windowsill"}
+    push = lambda after: world["client"].post("/home/workshop/abcd1234", headers=world["H"], json={    # noqa: E731
+        "who": ADMIN, "conv": CONV, "start": after, "events": [pic], "state": "running"})
+    assert push(0).status_code == 200
+    push(0)                                                          # pushed again (a retry): still one job
+    assert [e["t"] for e in world["app"].extensions["workshop"].read(ADMIN, "abcd1234")["events"]] == ["picture"]
+    quiet(world)
+    (job,) = handed(world)
+    assert job["id"] == pic["id"] and job["kind"] == "make_image" and job["prompt"] == pic["prompt"] and "_id" not in job
+    assert world["pats"].pending(pic["id"])["job"].get("_id") is None
+    login(world["client"], ADMIN)
+    assert world["client"].get(f"/chat/media/{pic['id']}/state").get_json()["state"] == "working"
+    world["client"].put(f"/home/media/{pic['id']}?title=cat", data=PNG, headers={**world["H"], "Content-Type": "image/png"})
+    assert world["client"].get(f"/chat/media/{pic['id']}").data == PNG
+
+
+@pytest.mark.parametrize("bad", [{"id": "nothex!!nothex!!"}, {"id": "abc"}, {"prompt": "  "}, {"prompt": 7}])
+def test_a_malformed_picture_event_is_dropped(bad):
+    import workshop as workshop_mod
+    assert workshop_mod._clean({"t": "picture", "id": "0123456789abcdef", "prompt": "a cat", **bad}) is None
+
+
+def test_the_agents_transcript_shows_its_pictures_with_the_chats_waiting_card():
+    from pathlib import Path
+    folder = Path(portal.__file__).parent / "templates"
+    assert "window.SkippyWaitCard = waitCard" in (folder / "_chat.html").read_text(encoding="utf-8")
+    page = (folder / "_workshop.html").read_text(encoding="utf-8")
+    assert 'p.t === "picture"' in page and page.count('e.t === "picture"') == 2 and "SkippyWaitCard(" in page

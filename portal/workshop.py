@@ -99,6 +99,9 @@ def _clean(event) -> dict | None:
                 "detail": str(event.get("detail") or "")[:(1200 if event["name"] == "TodoWrite" else 200)]}      # (a checklist is long)
     if event.get("t") == "ship":
         return ship_event(event)
+    if (event.get("t") == "picture" and isinstance(event.get("id"), str) and re.fullmatch(r"[0-9a-f]{16}", event["id"])
+            and isinstance(event.get("prompt"), str) and event["prompt"].strip()):
+        return {"t": "picture", "id": event["id"], "prompt": " ".join(event["prompt"].split())[:900]}   # a picture to make (patient.py)
     return None
 
 
@@ -108,9 +111,11 @@ _BRANCH = re.compile(r"[A-Za-z0-9._/-]{1,100}")
 MAX_SHIPS = 200                 # commits the ship card may ask about (the newest the portal has seen pushed)
 
 
-MAX_IMAGE_BYTES = 400_000
+MAX_IMAGE_BYTES = 12 * 1024 * 1024   # a picture the agent shows (was 400 KB: the event pipe's need, not the Captain's)
 MAX_IMAGES_PER_TASK = 3
-MAX_IMAGES = 40                 # held in memory across all tasks (about 16 MB at most); the oldest go first
+MAX_IMAGES = 40                 # held in memory across all tasks...
+IMAGES_BUDGET = 150_000_000     # ...and at most this many bytes of them; the oldest go first
+MAX_PUSH = 20 * 1024 * 1024     # one push from home (POST /home/workshop/<task>): room for one full-size picture as base64
 _B64 = re.compile(r"[A-Za-z0-9+/]+={0,2}")
 
 
@@ -206,6 +211,7 @@ class Workshop:
         # (or anyone with the Captain's cookie) can't make the portal query GitHub for an arbitrary commit.
         self._ships: dict[tuple[str, str], dict] = {}
         self.on_final = None                     # (news: dict) -> None: a run this process saw going has ended (notify.py)
+        self.on_picture = None                   # (owner, id, prompt) -> None: the agent asked for a picture (patient.py, app.py)
         self._images: dict[tuple[str, int], tuple[str, str, bytes]] = {}   # (task, n) -> (owner, mime, bytes)
 
     def _keep_image(self, task: str, rec: dict, got) -> dict:
@@ -216,7 +222,7 @@ class Workshop:
             return {"t": "text", "text": "(a screenshot couldn't be shown)"}
         event, data = got
         self._images[(task, n)] = (rec["owner"], event["mime"], data)
-        while len(self._images) > MAX_IMAGES:
+        while len(self._images) > MAX_IMAGES or (len(self._images) > 1 and sum(len(v[2]) for v in self._images.values()) > IMAGES_BUDGET):
             self._images.pop(next(iter(self._images)))
         return {**event, "n": n}
 
@@ -505,7 +511,7 @@ class Workshop:
                 rec["relearned"] = True           # a run that was already over when this portal first heard of it
             was = rec["state"]
             have = len(rec["events"])
-            shipped = []
+            shipped, pictures = [], []
             if start <= have:
                 for event in events[have - start:]:
                     if isinstance(event, dict) and event.get("t") == "image":
@@ -519,6 +525,8 @@ class Workshop:
                         rec["events"].append(cleaned)
                         if cleaned["t"] == "ship":
                             shipped.append(cleaned)
+                        if cleaned["t"] == "picture" and self.on_picture:
+                            pictures.append((rec["owner"], cleaned["id"], cleaned["prompt"]))
                 if state != "running":
                     rec["state"], rec["error"], ended = state, (str(error)[:500] if error else None), True
                 elif rec["state"] not in _FINAL:
@@ -539,6 +547,11 @@ class Workshop:
                               "last_text": last_text, "finished_age_s": age}
         for ship in shipped:
             self.remember_ship(owner, ship)
+        for who, picture_id, prompt in pictures:                    # outside the lock: it writes to the bucket
+            try:
+                self.on_picture(who, picture_id, prompt)
+            except Exception:  # noqa: BLE001 — a picture that can't be queued must never fail the reporter's push
+                pass
         if final_news is not None and self.on_final is not None:
             try:
                 self.on_final(final_news)

@@ -932,7 +932,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         events this portal holds (so a redeployed portal gets the earlier ones again) and whether to stop."""
         if not home.authorized(request.headers.get("Authorization")):
             abort(401)
-        if (request.content_length or 0) > home_mod.MAX_REPORT:
+        if (request.content_length or 0) > workshop_mod.MAX_PUSH:       # (a full-size picture rides along as base64)
             abort(413)
         if not re.fullmatch(r"[a-f0-9]{8,32}", task):
             abort(404)
@@ -1793,6 +1793,14 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
         def wait_result(self, job, wait):
             return home.wait_result(job, wait)
+
+    def agent_picture(owner: str, picture_id: str, prompt: str) -> None:
+        """The private Skippy wrote `SKIPPY_PICTURE: ...` (services/claude-bridge): a patient picture job for the Captain under the id
+        the bridge gave it, so his chat's card (and a reopened conversation) finds it. Once: a push that repeats it changes nothing."""
+        if not home.can("make_image") or home.has(picture_id) or pics.state(picture_id, owner, True) != "unknown":
+            return
+        PatientJobs(owner).start("make_image", owner, prompt=prompt, width=1024, height=1024, _id=picture_id)
+    workshop.on_picture = agent_picture
 
     def tools_for(user, trace: str = "") -> chat_tools.ChatTools:
         email = user["email"]

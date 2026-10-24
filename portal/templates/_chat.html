@@ -443,6 +443,7 @@
       if (m.pending) setTimeout(look, 3000); else look();
       return box;
     }
+    window.SkippyWaitCard = waitCard;             // (the same card shows a picture the agent asked for)
     const pictureNote = (media) => (media || []).filter(m => m.kind === "image" || m.kind === "audio")
       .map(m => "\n\n[" + (m.kind === "audio" ? "song" : "picture") + ":" + m.job_id + "]").join("");
 

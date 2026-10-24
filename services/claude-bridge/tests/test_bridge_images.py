@@ -47,14 +47,14 @@ def test_an_absolute_path_and_a_jpeg_work_too(shop, monkeypatch):
 @pytest.mark.parametrize("make, line", [
     (lambda clone, tmp: (tmp / "outside.png").write_bytes(PNG), "SKIPPY_IMAGE: ../outside.png"),       # outside the clone
     (lambda clone, tmp: (clone / "notes.png").write_bytes(b"secret text, not a picture"), "SKIPPY_IMAGE: notes.png"),
-    (lambda clone, tmp: (clone / "big.png").write_bytes(PNG + b"\x00" * engine.MAX_IMAGE_BYTES), "SKIPPY_IMAGE: big.png"),
+    (lambda clone, tmp: (clone / "big.png").write_bytes(PNG + b"\x00" * engine.MAX_SHOT_BYTES), "SKIPPY_IMAGE: big.png"),
     (lambda clone, tmp: None, "SKIPPY_IMAGE: missing.png"),
 ])
 def test_anything_else_is_refused_with_a_note_and_nothing_is_sent(shop, monkeypatch, tmp_path, make, line):
     make(Path(shop.repo), tmp_path)
     run = run_saying(shop, monkeypatch, "Done.\n" + line)
     assert images(run) == []
-    assert texts(run)[0] == "Done." and "couldn't attach the screenshot" in texts(run)[1]
+    assert texts(run)[0] == "Done." and "couldn't attach the picture" in texts(run)[1]
     assert "secret text" not in str(run.events)
 
 
@@ -70,3 +70,23 @@ def test_split_images_only_takes_whole_lines():
     assert paths == ["real.png"] and said == "see SKIPPY_IMAGE: inline.png here\n\nend"
     assert engine.image_mime(PNG) == "image/png" and engine.image_mime(JPEG) == "image/jpeg"
     assert engine.image_mime(b"<html>") is None and engine.image_mime(b"") is None
+
+
+def test_a_big_picture_up_to_12_mb_is_attached(shop, monkeypatch):
+    (Path(shop.repo) / "cat.png").write_bytes(PNG + b"\x00" * 2_000_000)          # the cat that was refused at 400 KB
+    run = run_saying(shop, monkeypatch, "Here.\nSKIPPY_IMAGE: cat.png")
+    assert [i["name"] for i in images(run)] == ["cat.png"]
+
+
+def test_a_picture_to_make_becomes_an_event_with_its_own_id_and_its_line_is_not_shown(shop, monkeypatch):
+    run = run_saying(shop, monkeypatch, "Queued it.\nSKIPPY_PICTURE: a grey tabby cat asleep on a windowsill, soft light\n")
+    [pic] = [e for e in run.events if e.get("t") == "picture"]
+    assert pic["prompt"] == "a grey tabby cat asleep on a windowsill, soft light" and len(pic["id"]) == 16
+    assert texts(run) == ["Queued it."]
+
+
+def test_split_pictures_takes_whole_lines_and_at_most_two_are_asked_for(shop, monkeypatch):
+    said, prompts = engine.split_pictures("say SKIPPY_PICTURE: inline\n`SKIPPY_PICTURE: a fox`\nend")
+    assert prompts == ["a fox"] and said == "say SKIPPY_PICTURE: inline\n\nend"
+    run = run_saying(shop, monkeypatch, "\n".join(f"SKIPPY_PICTURE: cat {i}" for i in range(4)))
+    assert [e["prompt"] for e in run.events if e.get("t") == "picture"] == ["cat 0", "cat 1"]

@@ -30,7 +30,7 @@ import threading
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-MAX_BYTES = 400_000                      # what the bridge will attach
+MAX_BYTES = 12 * 1024 * 1024             # what the bridge will attach (services/claude-bridge: MAX_SHOT_BYTES)
 BROWSERS = (r"C:\Program Files\Google\Chrome\Application\chrome.exe",
             r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
             r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",

@@ -40,6 +40,7 @@ class Patient:
         self.forever = forever or (lambda email: False)
         self.clock = clock
         self.last_active: dict[str, float] = {}       # machine ("pc", "core") -> when someone last used it (this portal's memory)
+        self.started = clock()                        # until someone uses a machine, its quiet counts from the portal's start
 
     @staticmethod
     def _ok(job: str) -> bool:
@@ -62,9 +63,7 @@ class Patient:
 
     def quiet_for(self, box: str) -> float:
         """Seconds since someone last used `box`. A portal that just started knows nothing yet: it counts from its own start."""
-        if box not in self.last_active:
-            self.last_active[box] = self.clock()
-        return self.clock() - self.last_active[box]
+        return self.clock() - self.last_active.get(box, self.started)
 
     def ready(self, box: str, gpu: dict | None = None) -> tuple[bool, str]:
         """(may a patient job start on `box` now?, why not). `gpu`: {"free_pct", "util_pct", "free_gib"} where the portal can see it."""
@@ -88,7 +87,8 @@ class Patient:
             return
         meta = {"owner": chat_history.owner_id(email), "keep": bool(self.forever(email)), "kind": kind, "box": box,
                 "prompt": str(payload.get("prompt") or "")[:300],
-                "job": {k: v for k, v in payload.items() if isinstance(v, (str, int, float, bool))}, "at": int(self.clock())}
+                "job": {k: v for k, v in payload.items() if isinstance(v, (str, int, float, bool)) and not k.startswith("_")},
+                "at": int(self.clock())}
         self.store.put(PREFIX + "pending/" + job + ".json", json.dumps(meta).encode(), "application/json")
 
     def pending(self, job: str) -> dict | None:
