@@ -64,7 +64,8 @@ class Brain:
         self._last = 0.0
 
     def system(self) -> str:
-        house = ", and the house through Home Assistant: lights, plugs, thermostat, covers, speakers, scenes; always say plainly what you did or could not do, and never claim a change you did not make" if self.hass else ""
+        house = (", and the house: lights, plugs, the thermostat (in the unit it shows), covers, speakers, scenes; always say plainly what you did "
+                 "or could not do, and never claim a change you did not make") if self.hass else ""
         nohouse = "" if self.hass else "If he asks for something in the house (the lights and the rest are not connected yet), say so plainly, in character, and offer what you can do. "
         music = ", and the music in this room from his own library" if any(t["name"] == "play_music" for t in self.extra_tools) else ""
         return self.persona + SPOKEN.format(now=self.now(), house=house, nohouse=nohouse, music=music)

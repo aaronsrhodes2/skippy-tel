@@ -126,6 +126,23 @@ or on, never as text. The table and notes below were measured on the previous ch
   copies into Cloud Run from the repo secrets `PORTAL_SKIPPY_CORE_URL` and `PORTAL_SKIPPY_CORE_API_KEY`;
   `SKIPPY_CORE_MODEL` picks another slot (default `chat`).
 
+## Matter: the house's controller (2026-10-24)
+
+SkippyCore runs the house's **Matter controller**: python-matter-server (the open-source one Home Assistant uses), pinned by digest in
+`compose.matter.yml`. Matter is local and open: no account, no cloud, no fee. A device is paired once with its setup code, and from
+then on skippy-pc's hub (`services/satellite/matter.py`) controls it over the controller's WebSocket API. The Nest thermostat, the
+Amazon Basics Matter plug and most new smart-home gear speak it. Why here and not on skippy-pc: Matter needs IPv6 link-local and mDNS
+on the home LAN, which Docker on Windows doesn't give a container; SkippyCore is a Linux box on the LAN, with Bluetooth.
+
+- **Switch it on (once):** `sudo bash core/install/matter.sh` (dry run), then `--apply`. It refuses if IPv6 is off (the controller
+  can't start without it), installs **bluez** (a brand-new device gets the Wi-Fi details over Bluetooth), adds the ufw rules (the LAN's
+  mDNS and device traffic in; the API, port **5580, on the tailnet only**: it has no password of its own, so it is never on the LAN or the
+  Funnel), sets `CORE_MATTER=1` and `MATTER_ARGS` in `core.env`, and runs a repair so it starts now. `--check` says whether all of it is
+  live. From then on the deployer runs it with the stack, and `smoke.py` checks its `/info`.
+- **The fabric** lives in `${CORE_STATE}/matter`: its keys and every paired device. Lose it and everything has to be paired again.
+- **On skippy-pc:** `MATTER_URL=ws://skippy-core:5580/ws` in the vault `.env`; then `homectl.py matter-info`, `matter-pair`, `list`,
+  `say`, `prove` (`services/satellite/README.md`).
+
 ## Status and recovery
 
 - `python3 /opt/skippy-core/repo/core/deployer/deployer.py status`: the last run (`ok`, `waiting-ci`, `refused`,

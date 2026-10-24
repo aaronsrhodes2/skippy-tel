@@ -1,0 +1,28 @@
+# Matter on SkippyCore (2026-10-24, the Captain's call: the Nest wants it, and Matter is the open standard most new smart-home gear
+# speaks). python-matter-server is the open-source Matter controller Home Assistant uses; here it is the house's controller, and
+# skippy-pc's hub (services/satellite/matter.py) talks to it over its WebSocket API. No cloud, no account, no fee.
+#
+# Deployed with the rest of the stack when /etc/skippy-core/core.env says CORE_MATTER=1 (core/install/matter.sh sets it up: the
+# firewall rules Matter needs, Bluetooth for setting up brand-new devices, MATTER_ARGS). The simulator and CI leave it out.
+#
+#   network_mode: host   Matter finds and reaches devices over IPv6 link-local and mDNS on the home LAN: a bridged Docker network
+#                        cannot see them. The API (port 5580) is reachable only where ufw allows it: the tailnet (matter.sh).
+#   /run/dbus            Bluetooth (bluetoothd on the host) hands a brand-new device the Wi-Fi details during setup.
+#   ${CORE_STATE}/matter the fabric: its keys and every paired device. Losing it means pairing everything again: it is backed up
+#                        with the rest of CORE_STATE.
+services:
+  matter:
+    image: ghcr.io/home-assistant-libs/python-matter-server:8.1.0@sha256:170aa093ce91c76cde4cc390918307590f0f5558fcec93f913af3cb019e6562a
+    restart: unless-stopped
+    network_mode: host
+    security_opt:
+      - apparmor:unconfined
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    volumes:
+      - ${CORE_STATE:-/var/lib/skippy-core}/matter:/data
+      - /run/dbus:/run/dbus:ro
+    command: --storage-path /data --paa-root-cert-dir /data/credentials ${MATTER_ARGS:-}

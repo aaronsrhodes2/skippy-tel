@@ -12,7 +12,7 @@ the voice gate). First home: skippy-pc (`ear.py`); every other room through the 
 
 Settings (the vault `.env`, or the environment): `SKIPPY_HOME_TOKEN`, `ANTHROPIC_API_KEY` (required); `SATELLITE_MIC`, `SATELLITE_SPEAKER`, `SATELLITE_GAIN`,
 `SATELLITE_FLOOR`, `SATELLITE_GATE` (default the voice gate on :3007), `SATELLITE_MODEL` (default claude-haiku-4-5); `SATELLITE_WAKE_MODEL` (default
-`state/wakeword/skippy.onnx`), `SATELLITE_WAKE_THRESHOLD` (default 0.5; `wakectl.py test` picks it); `SATELLITE_ROOMS` (the hub); `HOMEKIT_KEEP_WARM`
+`state/wakeword/skippy.onnx`), `SATELLITE_WAKE_THRESHOLD` (default 0.5; `wakectl.py test` picks it); `SATELLITE_ROOMS` (the hub); `MATTER_URL` (skippy-core's Matter controller); `HOMEKIT_KEEP_WARM`
 (seconds between keep-warm pings, default 30; 0 turns it off).
 
 ## The wake word
@@ -59,6 +59,21 @@ twice) is asked again on a fresh connection, once, and Skippy says so plainly if
 its radio stays awake. The proof, on the real plug (it switches it, then leaves it as it was):
 
     ./.venv/Scripts/python homectl.py prove "theater fan" --rounds 5          # each on/off timed, second tries counted
+
+**Matter** (the open standard: the Nest, the Amazon Basics Matter plug, most new gear) goes through skippy-core's controller
+(`core/compose.matter.yml`; set up there with `core/install/matter.sh`). Put `MATTER_URL=ws://skippy-core:5580/ws` in the vault, then:
+
+    ./.venv/Scripts/python homectl.py matter-info                                       # is the controller there, Bluetooth ready
+    ./.venv/Scripts/python homectl.py matter-pair 34970112332 "Theater Fan" --area "Theater"   # a NEW device: its 11-digit code, set
+                                                                                         # up over Bluetooth with ROOM_WIFI_SSID/PASSWORD
+    ./.venv/Scripts/python homectl.py matter-pair <code> "Thermostat" --network          # the Nest: Google Home app > Settings >
+                                                                                         # Linked Matter apps & services > Link apps
+    ./.venv/Scripts/python homectl.py list                                              # HomeKit and Matter together
+
+`matter.py` turns each node into lights, switches and a thermostat (spoken to in the unit the thermostat shows: a Nest in Fahrenheit
+hears 70). Every on/off is read back from the device and tried once more if it didn't change, as with HomeKit. HomeKit, Matter and Home
+Assistant together are one house (`house.Combined`): one set of names, one set of guard rails, and one backend that is down never hides
+another's things. Tests: `tests/test_sat_matter.py`, against a fake controller speaking python-matter-server's real message format.
 
 Guard rails (`house.py`, the same for every backend; tests in `tests/test_sat_house*.py`... see `test_sat_hass.py` and `test_sat_homekit.py`):
 

@@ -88,3 +88,24 @@ def test_a_keyed_llm_port_is_used_with_the_key_and_must_refuse_without_it(stack,
     llm.key = None                                     # the port forgot its key: the Funnel would be open to anyone
     failed = {r["check"] for r in smoke.run() if not r["ok"]}
     assert failed == {"auth"}
+
+
+def test_the_matter_controller_is_checked_only_where_it_runs(stack, monkeypatch):
+    matter = Flask("fake_matter")
+    info = {"fabric_id": 1, "sdk_version": "2025.7", "wifi_credentials_set": False, "bluetooth_enabled": True}
+
+    @matter.get("/info")
+    def matter_info():
+        return jsonify(info)
+    server, url = _serve(matter)
+    monkeypatch.setattr(smoke, "MATTER", url)
+    try:
+        monkeypatch.delenv("CORE_MATTER", raising=False)
+        assert "matter" not in {r["check"] for r in smoke.run()}                 # the simulator and CI: no Matter
+        monkeypatch.setenv("CORE_MATTER", "1")
+        (r,) = [r for r in smoke.run() if r["check"] == "matter"]
+        assert r["ok"] and "bluetooth on" in r["detail"]
+        info["fabric_id"] = 0                                                    # a controller without its fabric: red
+        assert not [r for r in smoke.run() if r["check"] == "matter"][0]["ok"]
+    finally:
+        server.shutdown()

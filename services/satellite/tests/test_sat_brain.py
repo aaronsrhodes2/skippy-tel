@@ -94,7 +94,7 @@ def test_with_home_assistant_the_house_tools_join_the_timers_and_the_prompt_stop
     assert ha_fake.calls == [("light/turn_on", {"entity_id": "light.kitchen"})]
     assert {t["name"] for t in client.calls[0]["tools"]} == {"set_timer", "cancel_timers", "list_timers", "home_devices", "home_state", "home_control"}
     system = client.calls[0]["system"]
-    assert "Home Assistant" in system and "not connected yet" not in system
+    assert "the thermostat (in the unit it shows)" in system and "not connected yet" not in system
     plain, c2, *_ = make([text("ok")])
     plain.reply("hi")
     assert {t["name"] for t in c2.calls[0]["tools"]} == {"set_timer", "cancel_timers", "list_timers"} and "not connected yet" in c2.calls[0]["system"]

@@ -163,18 +163,27 @@ def build(env: dict):
 
 
 def build_house(env: dict):
-    """The house: what Skippy can control, through whichever backend is set up (None when nothing is). hub.py shares it across rooms."""
-    from homectl import store_path                                  # noqa: PLC0415
+    """The house: what Skippy can control, through every backend that is set up (None when none is). hub.py shares it across rooms.
+    HomeKit (paired with homectl.py), Matter (skippy-core's controller: MATTER_URL) and Home Assistant (HASS_URL + HASS_TOKEN)."""
+    from homectl import matter_path, store_path                     # noqa: PLC0415
     from homekit import HomeKit, Store                              # noqa: PLC0415
+    from house import Combined                                      # noqa: PLC0415
+    sensitive = env.get("HASS_SENSITIVE") == "1"
+    parts = []
     if Store(store_path(env)).load()["devices"]:                    # lights and switches paired with homectl.py: HomeKit, natively
-        kit = HomeKit(Store(store_path(env)), sensitive=env.get("HASS_SENSITIVE") == "1")
+        kit = HomeKit(Store(store_path(env)), sensitive=sensitive)
         kit.states()                                                # learn what is there now, so keep-warm knows what to ping
         kit.keep_warm(float(env.get("HOMEKIT_KEEP_WARM", "30")))
-        return kit
+        parts.append(kit)
+    if env.get("MATTER_URL"):                                       # Matter, through skippy-core's controller (core/compose.matter.yml)
+        from matter import Matter, Names                            # noqa: PLC0415
+        parts.append(Matter(env["MATTER_URL"], Names(matter_path(env)), sensitive=sensitive))
     if env.get("HASS_URL") and env.get("HASS_TOKEN"):               # or Home Assistant, if he runs one (the vault holds both)
         from hass import Hass                                       # noqa: PLC0415
-        return Hass(env["HASS_URL"], env["HASS_TOKEN"], sensitive=env.get("HASS_SENSITIVE") == "1")
-    return None
+        parts.append(Hass(env["HASS_URL"], env["HASS_TOKEN"], sensitive=sensitive))
+    if not parts:
+        return None
+    return parts[0] if len(parts) == 1 else Combined(parts, sensitive=sensitive)
 
 
 def build_spotter(env: dict, log=print):
