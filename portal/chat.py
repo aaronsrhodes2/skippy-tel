@@ -122,9 +122,13 @@ def system_prompt(user_name: str, is_admin: bool = False, page: str | None = Non
         "should be given, in your voice: say up front that Mentat computed it, give the result with its units first, "
         "then the proof (the key steps, each with its value, units and the source Mentat cites) and the references "
         "(Mentat's sources). Never round away or change Mentat's numbers. The page shows Mentat's full answer as a card "
-        "under your reply and offers Barney Style itself, so don't offer it. Mentat fills in inputs "
-        "the user didn't give and marks them as its own inventions: always say which values it "
-        "invented (e.g. \"assuming a 10 km drop\"), so the user can correct them. If Mentat's value is "
+        "under your reply and offers Barney Style itself, so don't offer it. Mentat never fills in an input the "
+        "user didn't give: when one is missing it computes nothing and returns a clarification that suggests a value "
+        "for each (value null, with a sentence like \"I'd assume 30 m/s for the launch speed. Use that?\"). Then pass "
+        "that suggestion on in your voice, with every suggested value, its units and why, ask whether to use them, and "
+        "give NO number yet. Only when the user agrees (yes, sure, ok, go ahead) call ask_mentat again with the "
+        "clarification's follow_up: the same question and its given values, copied exactly; if they give other values, "
+        "ask Mentat again with their words instead. A clarification is not a failure. If Mentat's value is "
         "null, it couldn't model that question (the portal has already logged it as a bug to fix): start your reply "
         "with exactly \"failed due to incompetence\", then pass on what Mentat says it can do, ask the user for "
         "anything it needs, and do NOT fill the gap with your own estimate. If ask_mentat isn't "
@@ -191,6 +195,19 @@ def image_tag(text: str) -> str:
 
 
 BARNEY_PHRASE = "Give it to me Barney Style"   # what the page puts in the box when Barney Style is switched on
+
+# A plain yes to Mentat's suggested inputs ("yes", "sure", "ok go ahead", "yes please, use those"). Anything with a
+# number or any other word ("yes but 40 m/s") is not: then Mentat is asked again in the person's own words.
+_YES_WORDS = {"yes", "yeah", "yea", "yep", "yup", "y", "sure", "ok", "okay", "k", "fine", "alright", "good", "ahead",
+              "aye", "affirmative", "absolutely", "definitely", "certainly"}
+_YES_FILLER = {"go", "do", "it", "please", "thanks", "thank", "you", "use", "that", "those", "them", "sounds", "fine", "sir",
+               "skippy", "mentat", "captain", "all", "right", "works", "for", "me", "the", "defaults", "default", "is", "are"}
+
+
+def is_yes(message: str) -> bool:
+    words = re.findall(r"[a-z]+|\d", (message or "").lower())
+    return (0 < len(words) <= 10 and any(w in _YES_WORDS for w in words)
+            and all(w in _YES_WORDS or w in _YES_FILLER for w in words))
 
 
 def wants_barney(message: str) -> bool:

@@ -97,9 +97,41 @@ def mentat_gap(out) -> dict | None:
         return None
     if not isinstance(result, dict) or "value" not in result or result["value"] is not None:
         return None
+    if mentat_suggestion(result):            # Mentat asked for an input (it suggests, never fills in): not a gap
+        return None
     inputs = result.get("inputs") if isinstance(result.get("inputs"), dict) else {}
     return {"reason": str(result.get("notes") or "no reason given"), "route": str(inputs.get("route") or ""),
             "tag": str(result.get("provenance_tag") or "")}
+
+
+def mentat_suggestion(out) -> dict | None:
+    """Mentat's clarification when the question left an input out: {needs, suggested: {name: {value, units, why,
+    label}}, sentence, follow_up: {question, given}}. Mentat never fills an input in by itself (the Captain, 2026-10-23):
+    it suggests, and only a "yes" sends the follow-up, which computes. None for an answer, a gap or an error."""
+    try:
+        result = json.loads(out) if isinstance(out, str) else out
+    except ValueError:
+        return None
+    clar = result.get("clarification") if isinstance(result, dict) else None
+    if not isinstance(clar, dict) or not isinstance(clar.get("follow_up"), dict):
+        return None
+    return clar
+
+
+def clean_follow_up(follow) -> dict | None:
+    """The follow-up the page sends back with a "yes": {question, given} as Mentat made it, size-capped, plain values."""
+    if not isinstance(follow, dict):
+        return None
+    question = str(follow.get("question") or "").strip()[:2000]
+    given = follow.get("given")
+    if not question or not isinstance(given, dict) or not given or len(given) > 40:
+        return None
+    clean = {}
+    for k, v in given.items():
+        if not isinstance(k, str) or len(k) > 60 or isinstance(v, bool) or not isinstance(v, (int, float, str)):
+            return None
+        clean[k] = v if not isinstance(v, str) else v[:120]
+    return {"question": question, "given": clean}
 
 
 class ToolError(Exception):
@@ -116,11 +148,19 @@ _ASK_MENTAT = {
                    "or maths question in their own words, including every number and unit they gave. "
                    "Don't solve it, pick formulas, convert units or add assumptions: Mentat interprets "
                    "the question itself. It returns a worked, self-checked answer (value, units, the "
-                   "steps and their sources) or, when it can't model the question, a note saying what "
-                   "it CAN do (value null).",
+                   "steps and their sources); or, when the question leaves out an input, a clarification "
+                   "(value null) that SUGGESTS a value for each one and computes nothing; or, when it "
+                   "can't model the question, a note saying what it CAN do (value null). Mentat never "
+                   "fills an input in by itself. Only after the user agrees to a suggestion, call this "
+                   "again with the clarification's follow_up: its question, and its given values exactly.",
     "input_schema": {"type": "object",
                      "properties": {"question": {"type": "string",
-                                                 "description": "The user's question, verbatim."}},
+                                                 "description": "The user's question, verbatim."},
+                                    "given": {"type": "object",
+                                              "description": "Only after the user said yes to Mentat's "
+                                                             "suggestion: the clarification's follow_up.given, "
+                                                             "copied exactly. Never invent values here.",
+                                              "additionalProperties": {"type": ["number", "string"]}}},
                      "required": ["question"], "additionalProperties": False},
 }
 
@@ -212,8 +252,9 @@ def parse_verb(message: str) -> tuple[str | None, str]:
 
 class ChatTools:
     def __init__(self, vm, is_admin: bool, visible: list[str] | None = None, who: str = "",
-                 music=None, home_mentat=None, home_music=None, home_image=None, image_allow=None):
+                 music=None, home_mentat=None, home_music=None, home_image=None, image_allow=None, trace: str = ""):
         self.vm, self.is_admin, self.who = vm, is_admin, who
+        self.trace = trace                    # this chat turn's id: Mentat keeps it with the research record
         self.visible = list(GAMES) if visible is None else list(visible)   # games this person may see
         self.names = _ADMIN if is_admin else _EVERYONE
         self.music = music                    # callable → home.music(), only with the Bilby grant
@@ -280,8 +321,14 @@ class ChatTools:
         question = str(args.get("question") or "").strip()
         if not question:
             raise ToolError("ask_mentat needs the question.")
+        given = args.get("given") if isinstance(args.get("given"), dict) else None
+        if given:
+            follow = clean_follow_up({"question": question, "given": given})
+            if follow is None:
+                raise ToolError("given must be the clarification's follow_up.given, copied exactly.")
+            given = follow["given"]
         try:
-            result = self.home_mentat.ask_mentat(question)
+            result = self.home_mentat.ask_mentat(question, given=given, trace=self.trace)
         except (TimeoutError, RuntimeError) as exc:
             raise ToolError(f"Mentat is offline: {exc}. Say so; don't answer it yourself.") from exc
         self.mentat_where = "home"

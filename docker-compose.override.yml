@@ -136,6 +136,10 @@ services:
       OLLAMA_URL: http://ollama:11434
       MENTAT_CALL_TIMEOUT: "90"
       MENTAT_RATE_PER_MIN: "600"
+      MENTAT_INSTANCE: home
+      MENTAT_RESEARCH_DIR: /research   # everything Mentat outputs, forever (mentat/research.py): research data
+    volumes:
+      - ./state/mentat-research:/research   # <YYYY-MM>.jsonl, appended; survives rebuilds
     command: gunicorn --bind 0.0.0.0:8080 --workers 1 --threads 4 --timeout 120 app:app
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
 

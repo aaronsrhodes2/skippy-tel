@@ -168,6 +168,25 @@ resource "google_service_account_iam_member" "deployer_acts_as_mentat" {
   member             = "serviceAccount:${google_service_account.deployer.email}"
 }
 
+# ── Mentat's research data (the Captain, 2026-10-23: "log everything mentat outputs, it's our research data") ──
+#
+# The public Mentat writes every request and its whole answer here as batches of JSON lines (mentat/research.py). It may only
+# CREATE objects: nothing it wrote can be overwritten or deleted by it, and nothing here is ever deleted by a lifecycle rule.
+resource "google_storage_bucket" "mentat_research" {
+  name                        = var.mentat_research_bucket
+  location                    = var.region
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  force_destroy               = false # research data: never deleted by a terraform destroy
+  depends_on                  = [google_project_service.apis]
+}
+
+resource "google_storage_bucket_iam_member" "mentat_writes_research" {
+  bucket = google_storage_bucket.mentat_research.name
+  role   = "roles/storage.objectCreator" # create only: no read, overwrite or delete
+  member = "serviceAccount:${google_service_account.mentat.email}"
+}
+
 # ── Workload Identity Federation: GitHub → skippy-deployer ────────────────────
 
 resource "google_iam_workload_identity_pool" "github" {

@@ -6,7 +6,7 @@ FROM python:3.12-slim
 
 # sigma-ground at a pinned commit (public repo, MIT). The core library is
 # pure Python; the MCP layer's dependencies are in requirements.txt.
-ARG SIGMA_GROUND_REF=5ff8d6bc94103dbc7d20815c5ca227047e0654da
+ARG SIGMA_GROUND_REF=e84054771d7cf0c4198bae4ea202c2eac0ce6f38
 ADD https://github.com/aaronsrhodes2/sigma-ground/archive/${SIGMA_GROUND_REF}.tar.gz /tmp/sg.tar.gz
 RUN mkdir -p /opt/sigma-ground && tar -xzf /tmp/sg.tar.gz -C /opt/sigma-ground --strip-components=1 \
     && rm /tmp/sg.tar.gz
@@ -14,7 +14,7 @@ RUN mkdir -p /opt/sigma-ground && tar -xzf /tmp/sg.tar.gz -C /opt/sigma-ground -
 WORKDIR /app
 COPY mentat/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY mentat/app.py mentat/wva.py ./
+COPY mentat/app.py mentat/wva.py mentat/research.py ./
 
 ENV PYTHONPATH=/opt/sigma-ground PYTHONUNBUFFERED=1 SIGMA_GROUND_REF=${SIGMA_GROUND_REF}
 # Runs as a non-root user with nothing writable but /tmp.

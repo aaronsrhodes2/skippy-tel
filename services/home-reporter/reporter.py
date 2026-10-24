@@ -80,10 +80,10 @@ def home_token() -> str:
 
 
 def fetch(url: str, method: str = "GET", data: dict | None = None, timeout: float = 4.0,
-          raw: bool = False):
+          raw: bool = False, headers: dict | None = None):
     body = json.dumps(data).encode() if data is not None else None
     req = urllib.request.Request(url, data=body, method=method,
-                                 headers={"Content-Type": "application/json"} if body else {})
+                                 headers={**({"Content-Type": "application/json"} if body else {}), **(headers or {})})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             payload = r.read(ART_MAX + 1)
@@ -830,7 +830,14 @@ def run_job(job: dict, token: str = "") -> dict:
     if job.get("kind") in ("mcp_list", "mcp_test"):
         return mcp_job(job, token)
     if job.get("kind") == "ask_mentat" and MENTAT:
-        reply = fetch(f"{MENTAT}/ask", "POST", {"question": job.get("question", "")}, timeout=100)
+        # `given`: the values the person said yes to (Mentat suggested them; it never fills them in itself).
+        # The trace id ties Mentat's research record (mentat/research.py) to this chat turn.
+        body = {"question": job.get("question", "")}
+        if isinstance(job.get("given"), dict) and job["given"]:
+            body["given"] = job["given"]
+        reply = fetch(f"{MENTAT}/ask", "POST", body, timeout=100,
+                      headers={"X-Skippy-Trace": str(job.get("trace") or job.get("id") or "")[:200],
+                               "X-Skippy-Caller": "portal-chat"})
         if reply and reply.get("ok"):
             return {"result": reply["result"]}
         return {"error": (reply or {}).get("error") or "Mentat at home didn't answer"}

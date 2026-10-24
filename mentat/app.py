@@ -7,9 +7,13 @@ builds that same server, catching it instead of running stdio, and serves:
     GET  /health             "ok"
     GET  /tools              [{name, description, input_schema, domain}]  (the public set)
     POST /tools/<name>       JSON arguments → {"ok": true, "result": {...}} | {"ok": false, "error": "..."}
-    POST /ask                {"question": "..."} → Mentat's own plain-English front door
+    POST /ask                {"question": "...", "given": {...}?} → Mentat's own plain-English front door
                              (Materia's translator: keyword routes, plus the qwen
-                             residual when MENTAT_USE_LLM=1, i.e. the copy on skippy-pc)
+                             residual when MENTAT_USE_LLM=1, i.e. the copy on skippy-pc).
+                             An input the question leaves out is never filled in: the
+                             result is a `clarification` (value null) suggesting a value
+                             for each, whose `follow_up` ({question, given}) is what to
+                             POST back once the person says yes.
     GET  /wva/catalog        Weapon vs. Armor: presets, materials (+ the game's temperature
                              colours), environments, limits  (wva.py)
     POST /wva/solve          {weapon, armor_layers, environment, distance_m} → the game's own
@@ -23,6 +27,10 @@ It's public (the Experiments playground, Skippy's chat and MCP clients call it),
   • tools that need a local LLM or keep per-session state are left out
   • per-IP rate limit, argument size cap, per-call timeout
 No LLM is involved anywhere here: it's physics code.
+
+Every request to a compute endpoint is kept in full as research data (research.py:
+the question or arguments, what Mentat understood, its whole answer, timings, the
+caller and the X-Skippy-Trace header), forever, off the request path.
 """
 from __future__ import annotations
 
@@ -40,6 +48,7 @@ from flask import Flask, jsonify, request
 from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS
 from mcp.types import LATEST_PROTOCOL_VERSION
 
+import research
 import wva
 
 # Natural-language / stateful tools: need the local Ollama translator or keep
@@ -49,6 +58,7 @@ EXCLUDED = {"simulate", "request_clarification"}
 CALL_TIMEOUT_S = int(os.environ.get("MENTAT_CALL_TIMEOUT", "20"))
 RATE_PER_MIN = int(os.environ.get("MENTAT_RATE_PER_MIN", "60"))
 MAX_ARGS_BYTES = 8_000
+MAX_GIVEN = 40                                  # inputs in one /ask "given"
 # The copy on skippy-pc sets these: Qwen (Ollama) helps the translator with
 # phrasings its keywords miss. The public cloud copy has no model: keywords only.
 USE_LLM = os.environ.get("MENTAT_USE_LLM", "0") == "1"
@@ -156,12 +166,12 @@ def _qwen_ready() -> bool:
         return False
 
 
-def _ask(question: str) -> dict:
+def _ask(question: str, given: dict | None = None) -> dict:
     from sigma_ground.mcp.tools.simulation import simulate
     if USE_LLM and not _qwen_ready():
         # The Captain's rule: the Qwen-backed Mentat fails rather than answer without Qwen.
         raise QwenUnavailable("Qwen (Ollama) is unreachable, so Mentat won't answer without it.")
-    result = simulate(question, use_llm=USE_LLM).to_dict()
+    result = simulate(question, use_llm=USE_LLM, given=given or None).to_dict()
     result["interpreter"] = "keywords + qwen" if USE_LLM else "keywords"
     return result
 
@@ -245,44 +255,96 @@ def client_ip() -> str:
     return hops[-1] if hops else (request.remote_addr or "?")
 
 
-def _guarded(label: str, fn, *args):
-    """Rate limit, size cap and timeout shared by every compute endpoint."""
+def keep(endpoint: str, tool, req, reply: dict, status: int, started: float, **extra) -> None:
+    """Put one request, in full, in the research log (research.py). Never raises, never waits."""
+    try:
+        research.LOG.record({
+            "trace": (request.headers.get("X-Skippy-Trace") or "")[:200] or None,
+            "endpoint": endpoint, "tool": tool,
+            "caller": {"ip": client_ip(), "user_agent": (request.headers.get("User-Agent") or "")[:300] or None,
+                       "via": (request.headers.get("X-Skippy-Caller") or "")[:100] or None},
+            "request": req, "status": status, "ok": bool(reply.get("ok")) if isinstance(reply, dict) else False,
+            "response": reply, "ms": round((time.monotonic() - started) * 1000, 1), **extra})
+    except Exception:  # noqa: BLE001 — research logging must never break an answer
+        pass
+
+
+def _guarded(label: str, fn, *args, endpoint: str = "", tool=None, req=None, started=None):
+    """Rate limit, size cap and timeout shared by every compute endpoint; the reply is kept for research."""
+    started = started if started is not None else time.monotonic()
+    reply, status = _guarded_reply(label, fn, *args)
+    extra = {}
+    if endpoint == "/ask" and isinstance(reply.get("result"), dict):
+        extra = {"interpreter": reply["result"].get("interpreter"), "understood": research.understood(reply["result"])}
+    keep(endpoint or label, tool, req, reply, status, started, **extra)
+    return jsonify(reply), status
+
+
+def _guarded_reply(label: str, fn, *args) -> tuple[dict, int]:
     ip = client_ip()
     if _rate_limited(ip):
-        return jsonify(ok=False, error="Slow down: rate limit reached, try again in a minute."), 429
+        return {"ok": False, "error": "Slow down: rate limit reached, try again in a minute."}, 429
     if (request.content_length or 0) > MAX_ARGS_BYTES:
-        return jsonify(ok=False, error="arguments too large"), 413
+        return {"ok": False, "error": "arguments too large"}, 413
     future = _pool.submit(fn, *args)
     try:
-        return jsonify(ok=True, result=future.result(timeout=CALL_TIMEOUT_S))
+        return {"ok": True, "result": future.result(timeout=CALL_TIMEOUT_S)}, 200
     except CallTimeout:
-        return jsonify(ok=False, error=f"{label} took longer than {CALL_TIMEOUT_S}s"), 504
+        return {"ok": False, "error": f"{label} took longer than {CALL_TIMEOUT_S}s"}, 504
     except QwenUnavailable as exc:
-        return jsonify(ok=False, error=str(exc)), 503
+        return {"ok": False, "error": str(exc)}, 503
     except BadArguments as exc:
-        return jsonify(ok=False, error=str(exc)[:2000], detail=exc.error), 400
+        return {"ok": False, "error": str(exc)[:2000], "detail": exc.error}, 400
     except Exception as exc:  # noqa: BLE001 — tool/validation errors go back as messages
-        return jsonify(ok=False, error=str(exc)[:2000]), 400
+        return {"ok": False, "error": str(exc)[:2000]}, 400
+
+
+def refused(endpoint: str, tool, req, error: str, status: int, started: float):
+    """A request turned away before any physics ran: answered, and kept for research like any other."""
+    reply = {"ok": False, "error": error}
+    keep(endpoint, tool, req, reply, status, started)
+    return jsonify(reply), status
 
 
 @app.post("/tools/<name>")
 def call_tool(name):
+    started, endpoint = time.monotonic(), f"/tools/{name}"
+    args = request.get_json(silent=True)
+    args = {} if args is None else args
     if name not in TOOLS:
-        return jsonify(ok=False, error=f"no public tool named {name!r}"), 404
-    args = request.get_json(silent=True) or {}
+        return refused(endpoint, name, args, f"no public tool named {name!r}", 404, started)
     if not isinstance(args, dict):
-        return jsonify(ok=False, error="arguments must be a JSON object"), 400
+        return refused(endpoint, name, args, "arguments must be a JSON object", 400, started)
     if unsafe_arg(args_for_guard(name, args)) is not None:
-        return jsonify(ok=False, error="That input looks like code, not maths; Mentat won't evaluate it."), 400
-    return _guarded(name, _call, name, args)
+        return refused(endpoint, name, args, "That input looks like code, not maths; Mentat won't evaluate it.", 400, started)
+    return _guarded(name, _call, name, args, endpoint=endpoint, tool=name, req=args, started=started)
+
+
+def _valid_given(given) -> bool:
+    return given is None or (isinstance(given, dict) and len(given) <= MAX_GIVEN and all(
+        isinstance(k, str) and isinstance(v, (str, int, float)) and not isinstance(v, bool) for k, v in given.items()))
 
 
 @app.post("/ask")
 def ask():
-    question = str((request.get_json(silent=True) or {}).get("question") or "").strip()
+    started = time.monotonic()
+    body = request.get_json(silent=True) or {}
+    body = body if isinstance(body, dict) else {}
+    question = str(body.get("question") or "").strip()
+    given = body.get("given")
+    req = {"question": question[:2000], "given": given}
     if not question:
-        return jsonify(ok=False, error="ask needs a question"), 400
-    return _guarded("ask", _ask, question[:2000])
+        return refused("/ask", None, req, "ask needs a question", 400, started)
+    if not _valid_given(given):
+        return refused("/ask", None, req, "given must be an object of input name to number or quantity text "
+                                          "(the clarification's follow_up.given, as Mentat sent it)", 400, started)
+    return _guarded("ask", _ask, question[:2000], given, endpoint="/ask", req=req, started=started)
+
+
+@app.get("/research")
+def research_status():
+    """Is the research log writing, and where (no records here: they are read where they're kept)."""
+    return jsonify(research.LOG.status())
 
 
 # ── /mcp: the same public tools as a remote MCP server ─────────────────────────
@@ -317,8 +379,15 @@ def _tool_reply(text: str, is_error: bool = False) -> dict:
 
 
 def _mcp_call(name: str, args, ip: str) -> dict:
-    """tools/call through POST /tools/<name>'s gates. A refusal is a tool error the
-    model reads (isError), not a transport failure that ends the client's session."""
+    """tools/call through POST /tools/<name>'s gates, kept for research like them. A refusal is a tool
+    error the model reads (isError), not a transport failure that ends the client's session."""
+    started = time.monotonic()
+    reply = _mcp_call_reply(name, args, ip)
+    keep("/mcp", name, args, {"ok": not reply["isError"], "mcp": reply}, 200, started)
+    return reply
+
+
+def _mcp_call_reply(name: str, args, ip: str) -> dict:
     if not isinstance(args, dict):
         return _tool_reply("arguments must be a JSON object", True)
     if _rate_limited(ip):
@@ -399,8 +468,9 @@ def wva_solve():
         return jsonify(ok=False, error=GAME_ERROR), 503
     if (request.content_length or 0) > wva.MAX_BODY_BYTES:
         return jsonify(ok=False, error="that fight is too large to send"), 413
+    started, raw = time.monotonic(), request.get_json(silent=True)
     try:
-        fight, clamped = GAME.clean(request.get_json(silent=True))
+        fight, clamped = GAME.clean(raw)
     except wva.Invalid as exc:
-        return jsonify(ok=False, error=str(exc)), 400
-    return _guarded("Weapon vs. Armor", GAME.solve, fight, clamped)
+        return refused("/wva/solve", None, raw, str(exc), 400, started)
+    return _guarded("Weapon vs. Armor", GAME.solve, fight, clamped, endpoint="/wva/solve", req=raw, started=started)

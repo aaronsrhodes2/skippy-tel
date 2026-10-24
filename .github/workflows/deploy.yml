@@ -37,7 +37,7 @@ env:
   RUNTIME_SA: skippy-agent@skippy-tel.iam.gserviceaccount.com
   IMAGE: us-west1-docker.pkg.dev/skippy-tel/skippy/portal
   # sigma-ground commit served by Experiments and the Mentat service (bump to update both).
-  SIGMA_GROUND_REF: 5ff8d6bc94103dbc7d20815c5ca227047e0654da
+  SIGMA_GROUND_REF: e84054771d7cf0c4198bae4ea202c2eac0ce6f38
   # Star Control Zero, played at /starcontrol: the release tag of github.com/aaronsrhodes2/star-control-precursors
   # whose web build the portal image carries, and the SHA-256 of that release's scz-web.tar.gz (the build stops
   # if they disagree). To ship a new build of the game: publish a release there, then change BOTH lines.
@@ -191,7 +191,8 @@ jobs:
             --cpu 1 --memory 1Gi \
             --concurrency 8 \
             --max-instances 2 \
-            --timeout 60
+            --timeout 60 \
+            --set-env-vars "MENTAT_INSTANCE=cloud,MENTAT_RESEARCH_BUCKET=skippy-tel-mentat-research"
       - name: Smoke test
         if: steps.identity.outputs.ready == 'true'
         run: |
@@ -201,9 +202,14 @@ jobs:
           curl -fsS -m 30 "$URL/tools" | python3 -c "import json,sys; n=len(json.load(sys.stdin)); print(n, 'tools'); assert n > 100"
           curl -fsS -m 30 -X POST -H 'Content-Type: application/json' \
             -d '{"value": 1, "from_units": "mile", "to_units": "km"}' "$URL/tools/convert_units"
-          curl -fsS -m 60 -X POST -H 'Content-Type: application/json' \
-            -d '{"question": "how fast does a 5 cm copper ball hit the ground from 10 km?"}' "$URL/ask" \
-            | python3 -c "import json,sys; r=json.load(sys.stdin)['result']; print(r['value'], r['units']); assert r['value']"
+          # The question's own speed, converted (100 mph = 44.704 m/s, about 204 m), and a missing input SUGGESTED, never filled in
+          curl -fsS -m 60 -X POST -H 'Content-Type: application/json' -H 'X-Skippy-Caller: deploy-smoke' \
+            -d '{"question": "If I throw a baseball at 45 degrees at 100 miles per hour, how far will it travel before it touches the ground on a flat surface?"}' "$URL/ask" \
+            | python3 -c "import json,sys; r=json.load(sys.stdin)['result']; print(r['value'], r['units']); assert 203 < r['value'] < 205"
+          curl -fsS -m 60 -X POST -H 'Content-Type: application/json' -H 'X-Skippy-Caller: deploy-smoke' \
+            -d '{"question": "range of a projectile launched at 45 degrees"}' "$URL/ask" \
+            | python3 -c "import json,sys; r=json.load(sys.stdin)['result']; c=r['clarification']; print(c['sentence']); assert r['value'] is None and c['needs'] == ['speed_m_s']"
+          curl -fsS -m 30 "$URL/research"
           # /mcp: the remote MCP server Claude's "mentat" connector points at (initialize, then a real call)
           curl -fsS -m 30 -X POST -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
             -d '{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "deploy-smoke", "version": "0"}}}' \

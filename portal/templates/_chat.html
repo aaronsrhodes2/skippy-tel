@@ -356,8 +356,32 @@
     }
 
     // Mentat's answer as a card under the reply: collapsed, the result with its units; opened, the proof (each step with
-    // its value, units and source), what Mentat assumed, its sources and notes.
+    // its value, units and source), what Mentat assumed, its sources and notes. When the question left an input out,
+    // Mentat computed nothing and SUGGESTS values instead (it never fills one in): the card shows the suggestion, open,
+    // with no number, and a plain "yes" as the next message sends Mentat's own follow-up with exactly those values.
+    let mentatFollow = null;                  // {chat, follow}: the newest suggestion in this chat, for the next "yes"
+    function suggestionCard(c) {
+      const card = document.createElement("details"); card.className = "mentat-card mc-suggest"; card.open = true;
+      const head = document.createElement("summary");
+      const v = document.createElement("span"); v.className = "mc-value"; v.textContent = "?";
+      const t = document.createElement("span"); t.className = "mc-tag"; t.textContent = "SUGGESTED";
+      head.append(glyph("atom"), v, t);
+      const body = document.createElement("div"); body.className = "mc-body";
+      const q = document.createElement("p"); const qb = document.createElement("b"); qb.textContent = "?"; q.append(qb, document.createTextNode(" " + (c.question || ""))); body.append(q);
+      const ul = document.createElement("ul"); ul.className = "mc-steps";
+      Object.entries(c.suggestion.suggested || {}).forEach(([name, s]) => {
+        const li = document.createElement("li");
+        li.textContent = (s.label || name) + ": " + s.value + (s.units ? " " + s.units : "") + (s.why ? "  (" + s.why + ")" : "");
+        ul.append(li);
+      });
+      body.append(ul);
+      const say = document.createElement("p"); say.textContent = c.suggestion.sentence || ""; body.append(say);
+      card.append(head, body);
+      card.addEventListener("toggle", () => logPager.refresh());
+      return card;
+    }
     function mentatCard(c) {
+      if (c.suggestion) return suggestionCard(c);
       const card = document.createElement("details"); card.className = "mentat-card";
       const head = document.createElement("summary");
       const value = c.display || (c.value === null || c.value === undefined ? "∅" : String(c.value) + (c.units ? " " + c.units : ""));
@@ -417,7 +441,10 @@
 
     // What goes into the history for a Mentat answer, so any later turn sees Mentat's own numbers.
     function mentatNote(cards) {
-      return cards.map(c => "\n\n[Mentat's own answer to " + JSON.stringify(c.question) + ": " +
+      return cards.map(c => c.suggestion
+        ? "\n\n[Mentat computed nothing for " + JSON.stringify(c.question) + ": the question left inputs out, and it suggested " +
+          JSON.stringify({sentence: c.suggestion.sentence, follow_up: c.suggestion.follow_up}).slice(0, 2500) + "]"
+        : "\n\n[Mentat's own answer to " + JSON.stringify(c.question) + ": " +
         JSON.stringify({value: c.value, units: c.units, display: c.display, assumed: c.assumed, source: c.source, notes: c.notes, steps: c.steps}).slice(0, 2500) + "]").join("");
     }
 
@@ -557,7 +584,9 @@
           method: "POST", headers: {"Content-Type": "application/json"}, signal: inflight.signal,
           // `page` lets Skippy know what you're looking at ("this game" = the one on screen).
           body: JSON.stringify({message: text, history: before, page: location.pathname, brain: BRAINS.length > 1 ? brain : undefined,
-                                files: files.map(f => ({name: f.name, data: f.data})), save: allowSave(), context: context}),
+                                files: files.map(f => ({name: f.name, data: f.data})), save: allowSave(), context: context,
+                                // the suggestion this may be a yes to (the server uses it only for a plain yes)
+                                mentat_follow_up: mentatFollow && mentatFollow.chat === chatId ? mentatFollow.follow : undefined}),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || res.statusText);
@@ -567,6 +596,8 @@
         const acts = pending.parentElement.querySelector(".acts");
         pending.parentElement.insertBefore(receipt(data, false), acts);
         (data.mentat || []).forEach(c => pending.parentElement.insertBefore(mentatCard(c), acts));
+        const follow = (data.mentat || []).map(c => c.suggestion && c.suggestion.follow_up).filter(Boolean).pop();
+        mentatFollow = follow ? {chat: chatId, follow: follow} : null;   // a reply with no suggestion ends the last one
         (data.media || []).forEach(m => {           // what was made for this reply (a song, a picture): an artifact, opened
           if (m.kind === "image") pending.parentElement.insertBefore(pictureCard(m), acts);      // done now, or drawing: the card waits
           else if (window.SkippyArtifacts) pending.parentElement.insertBefore(SkippyArtifacts.card(SkippyArtifacts.fromMedia(m), {onToggle: () => logPager.refresh()}), acts);

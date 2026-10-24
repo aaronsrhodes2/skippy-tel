@@ -26,6 +26,12 @@ variable "doomloop_bucket" {
   default     = "skippy-tel-doomloop-dev"
 }
 
+variable "mentat_research_bucket" {
+  description = "Private GCS bucket keeping every request to the public Mentat and its whole answer, forever (mentat/research.py; deploy.yml sets MENTAT_RESEARCH_BUCKET to the same name)."
+  type        = string
+  default     = "skippy-tel-mentat-research"
+}
+
 variable "tabletop_bucket" {
   description = "Private GCS bucket holding the portal's Tabletop boards and the pictures pinned on them (portal/tabletop.py; deploy.yml sets TABLETOP_BUCKET to the same name)."
   type        = string

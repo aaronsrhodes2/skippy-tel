@@ -271,9 +271,12 @@ class Home:
         """Mentat + Qwen on skippy-pc is up and reporting."""
         return self.online() and bool((self.report or {}).get("mentat_home"))
 
-    def ask_mentat(self, question: str, timeout: float = 75) -> dict:
+    def ask_mentat(self, question: str, timeout: float = 75, given: dict | None = None, trace: str = "") -> dict:
+        """`given`: values the person agreed to after Mentat suggested them. `trace`: this chat turn's id, kept in
+        Mentat's research record."""
         self.touch_chat()
-        outcome = self.wait(self.submit("ask_mentat", question=question), timeout)
+        extra = {"given": given} if given else {}
+        outcome = self.wait(self.submit("ask_mentat", question=question, trace=trace, **extra), timeout)
         if outcome is None:
             raise TimeoutError("Mentat at home didn't answer in time")
         if "result" not in outcome:

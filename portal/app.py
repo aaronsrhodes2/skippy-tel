@@ -1731,10 +1731,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         def wait_result(self, job, wait):
             return home.wait_result(job, wait)
 
-    def tools_for(user) -> chat_tools.ChatTools:
+    def tools_for(user, trace: str = "") -> chat_tools.ChatTools:
         email = user["email"]
         return chat_tools.ChatTools(vm, is_admin=auth.is_admin(email), visible=auth.visible_games(email),
-                                    who=email,
+                                    who=email, trace=trace,
                                     music=home.music if auth.has_portal(email, "audio") else None,
                                     home_mentat=home if home.mentat_ready() else None,
                                     home_music=home if home.can("make_music") else None,
@@ -1795,7 +1795,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         telemetry_web.record_gap(event)
         return {"logged": True, "reason": gap["reason"][:400] if keep else None}
 
-    def raw_mentat(user, message, question, save):
+    def raw_mentat(user, message, question, save, follow=None, trace=""):
         """The chat's "Barney Style" switch, when it is OFF (the default): the question goes to Mentat as typed and Mentat's own answer comes back as it
         left it, with no Haiku on either side (it doesn't read the question first and doesn't put the answer in Skippy's
         voice). It is for seeing what Haiku adds or loses. Same Mentat, same rights (the person must be allowed the physics
@@ -1803,9 +1803,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         keeps it out), so a later message to Haiku isn't coloured by it."""
         if not question or question.startswith("(the user chose"):
             return jsonify(error="Type the physics question to send to Mentat."), 400
-        tools = tools_for(user)
+        tools = tools_for(user, trace)
+        args = follow if follow else {"question": question}       # a yes to Mentat's suggestion: its follow-up, as it made it
         try:
-            out = tools.run("ask_mentat", {"question": question})
+            out = tools.run("ask_mentat", args)
         except chat_tools.ToolError as exc:
             return jsonify(error=str(exc)), 503
         gap = log_mentat_gap(user, question, out, "straight to Mentat", save)
@@ -1821,10 +1822,11 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         print(json.dumps({"event": "chat", "user": user["email"], "model": "none (raw Mentat)",
                           "tools": ["ask_mentat"], "mentat_available": True, "mentat_where": tools.mentat_where}), flush=True)
         if save:
-            telemetry_web.record_chat(message, text, "none (raw Mentat)", [("ask_mentat", {"question": question}, out)],
+            telemetry_web.record_chat(message, text, "none (raw Mentat)", [("ask_mentat", args, out)],
                                       forced="ask_mentat")
+        card = mentat_card(args["question"], out)
         return jsonify(reply=text, tools=["ask_mentat"], mentat_available=True, mentat_where=tools.mentat_where,
-                       media=[], raw=True)
+                       media=[], raw=True, mentat=[card] if card else [])
 
     def mentat_card(question: str, out: str) -> dict | None:
         """What the page's ⚛ card shows for one Mentat answer: the result, and the proof (steps with sources) as Mentat
@@ -1842,7 +1844,13 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                     steps.append({k: str(s.get(k) or "")[:160] for k in ("label", "value", "units", "formula", "source")})
         keep = ("value", "units", "display", "formula", "interpreted_as", "assumed", "notes", "source", "uncertainty",
                 "provenance_tag", "interpreter", "error")
-        return {"question": question[:300], **{k: d.get(k) for k in keep}, "steps": steps[:30]}
+        card = {"question": question[:300], **{k: d.get(k) for k in keep}, "steps": steps[:30]}
+        clar = chat_tools.mentat_suggestion(d)
+        if clar:     # a suggestion, not an answer: the card shows what Mentat would assume, and the page keeps the follow-up
+            card["suggestion"] = {"sentence": str(clar.get("sentence") or "")[:600],
+                                  "suggested": clar.get("suggested") or {},
+                                  "follow_up": chat_tools.clean_follow_up(clar.get("follow_up"))}
+        return card
 
     def shape_files(files, text, brain, bot):
         """A message's files for Skippy Core: its chat slot is text-only, so its vision slot describes each picture first
@@ -1870,13 +1878,17 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 return jsonify(error=f"That's {CHAT_PER_HOUR} messages this hour; Skippy needs a breather. "
                                      "Try again in a bit."), 429
         home.touch_chat()
+        trace = "chat-" + secrets.token_hex(8)        # this turn's id, kept with Mentat's research record of it
+        # The person agreed to Mentat's suggested inputs: the page sends back the follow-up Mentat made, and the portal
+        # asks Mentat with exactly those values (no brain retyping numbers). Anything but a plain yes ignores it.
+        follow = chat_tools.clean_follow_up(body.get("mentat_follow_up")) if chat.is_yes(message) else None
         force, rest = chat_tools.parse_verb(message)
         if force and not rest:
             rest = {"ask_mentat": "(the user chose /physics with no question: ask what to compute)",
                     "make_music": "(the user chose /music with no description: ask what kind of music to make)"
                     }.get(force, "Go ahead.")
         if body.get("raw") is True:                       # Mentat straight, no model either side (kept for anyone who asks for it)
-            return raw_mentat(user, message, rest, body.get("save") is True)
+            return raw_mentat(user, message, rest, body.get("save") is True, follow, trace)
         # Which brain: the server decides. Guests always get Skippy Core; the Captain gets his pick. Barney Style (the
         # page's key, or the phrase) always runs on Skippy Core with no tools, whoever asks.
         barney = body.get("barney") is True or chat.wants_barney(rest)
@@ -1887,7 +1899,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         if not brain_ready(brain) and not admin and not barney:
             # A guest's only brain is down (or not set up yet): they get Mentat straight, as before Skippy Core existed,
             # never a paid model in its place.
-            return raw_mentat(user, message, rest, body.get("save") is True)
+            return raw_mentat(user, message, rest, body.get("save") is True, follow, trace)
         if not brain_ready(brain):
             return jsonify(error=f"{brain.label} isn't available right now"
                                  + (": skippy-core may be offline." if brain.id == "core" else ".")), 503
@@ -1899,7 +1911,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         if not admin:
             force = None
         try:
-            tools = tools_for(user)
+            tools = tools_for(user, trace)
             model = brains.model_of(brain)
             page = str(body.get("page") or "")[:100] or None
             prompt = chat.system_prompt(user["name"], is_admin=admin, page=page,
@@ -1936,7 +1948,20 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             convo = chat.build_messages(body.get("history"), rest)
             if files:                     # the message's files, shaped for this brain (attachments.py)
                 convo[-1] = {"role": "user", "content": shape_files(files, rest, brain, bot)}
-            text = bot.reply(prompt, convo, tools=schemas, run_tool=run_tool, model=model, force_tool=force)
+            if follow and schemas and any(t.get("name") == "ask_mentat" for t in schemas):
+                # A yes to Mentat's suggestion: the portal asks Mentat with the agreed values itself, and the brain only
+                # explains the answer it is handed (no tools), as when a brain ignores a forced tool below.
+                try:
+                    out = run_tool("ask_mentat", follow)
+                except chat_tools.ToolError as exc:
+                    out = json.dumps({"error": str(exc)})
+                convo[-1] = {"role": "user", "content": (
+                    f"{rest}\n\n[The user agreed to the inputs Mentat suggested, so Mentat was asked again with them "
+                    f"({json.dumps(follow['given'])}) and answered (its own JSON, unedited): {out[:6000]}]\n"
+                    "Answer from Mentat's result only, as the physics section of your instructions says.")}
+                text = bot.reply(prompt, convo, tools=None, run_tool=None, model=model)
+            else:
+                text = bot.reply(prompt, convo, tools=schemas, run_tool=run_tool, model=model, force_tool=force)
             if (schemas and "ask_mentat" not in used and chat.claims_mentat(text)
                     and any(t.get("name") == "ask_mentat" for t in schemas)):
                 # The brain SAID Mentat answered but never called it (a local model writing the tool call as text, then
