@@ -25,8 +25,9 @@ PREFIX = "chat-pictures/"           # (the name it had when it held pictures onl
 JOB_TTL = 24 * 3600                 # how long a job may wait and work before the portal gives up on it
 QUIET_S = 300                       # a machine is quiet after this long without a chat, voice or agent run on it
 FREE_PCT = 60                       # ...and its GPU (where the portal can see it) has at least this much memory free: skippy-pc's card
-FREE_GIB = {"core": 60}             # skippy-core's memory is shared with the LLMs (~37 GB resident), so there it's GB, not a share:
-                                    # enough for the picture model to load (Qwen-Image ~58 GB, from the pictures session, 2026-10-23)
+FREE_GIB = {"core": 35}             # skippy-core's memory is shared with the LLMs (chat, vision and the coder resident: ~46 GB left), so
+                                    # there it's GB, not a share: enough for the picture studio to load (Qwen-Image-2512 Q8 + its Q8 text
+                                    # encoder + VAE ~30 GB, held only while drawing: the pictures session, 2026-10-24)
 BUSY_PCT = 20                       # ...and is busier than this at most
 KINDS = {"make_image": "image", "make_music": "audio"}
 TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",

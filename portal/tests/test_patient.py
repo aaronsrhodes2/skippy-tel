@@ -183,21 +183,21 @@ def test_skippy_core_counts_free_gigabytes_not_a_share_because_its_memory_is_sha
     p = pm.Patient(clock=clock)
     p.quiet_for("core")
     clock.t += pm.QUIET_S + 1
-    assert p.ready("core", {"free_pct": 42, "util_pct": 3, "free_gib": 52.0}) == (False, "waiting for memory to free up (52 GB free, 60 needed)")
-    assert p.ready("core", {"free_pct": 48, "util_pct": 3, "free_gib": 61.5}) == (True, "")           # 48% free is plenty there
+    assert p.ready("core", {"free_pct": 28, "util_pct": 3, "free_gib": 30.0}) == (False, "waiting for memory to free up (30 GB free, 35 needed)")
+    assert p.ready("core", {"free_pct": 38, "util_pct": 3, "free_gib": 46.0}) == (True, "")           # 38% free is plenty there
     assert p.ready("core", {"free_pct": 55, "util_pct": 70, "free_gib": 70.0}) == (False, "waiting for the GPU to settle (70% busy)")
 
 
 def test_a_picture_for_skippy_core_waits_for_the_core_studios_own_figures(world):
-    caps = {"make_image": {"ready": True, "box": "core", "gpu_free_pct": 40, "gpu_util_pct": 2, "gpu_free_gib": 50.0}}
+    caps = {"make_image": {"ready": True, "box": "core", "gpu_free_pct": 25, "gpu_util_pct": 2, "gpu_free_gib": 30.0}}
     send = lambda: world["client"].post("/home/report", json={"status": {}, "capabilities": caps}, headers=world["H"])   # noqa: E731
     send()
     item = ask(world, "make_image", {"prompt": "a nebula"})["media"][0]
     world["clock"].t += pm.QUIET_S + 1
     send()
     assert handed(world) == []
-    assert world["client"].get(f"/chat/media/{item['job_id']}/state").get_json()["why"] == "waiting for memory to free up (50 GB free, 60 needed)"
-    caps["make_image"]["gpu_free_gib"] = 64.0
+    assert world["client"].get(f"/chat/media/{item['job_id']}/state").get_json()["why"] == "waiting for memory to free up (30 GB free, 35 needed)"
+    caps["make_image"]["gpu_free_gib"] = 46.0                     # the box with its three LLMs resident
     reply = send().get_json()                                       # (the report's own reply is how the reporter gets its jobs)
     assert [j["box"] for j in reply["jobs"] if j["kind"] in pm.KINDS] == ["core"]
 
