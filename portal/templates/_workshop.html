@@ -198,6 +198,7 @@
     const RESYNC_EVERY_MS = 60000;         // "check again" on its own: once on going quiet, then at most this often
     const pollDelay = (quietMs) => (quietMs < 60000 ? 2000 : quietMs < 300000 ? 5000 : 10000);
     const BUSY = "Skippy is still working on the last one.";   // the portal's and the reporter's wording for a busy bridge
+    const WAIT_NOTE = "In line: Skippy is finishing another run first.";   // workshop.WAIT_NOTE
 
     const store = {
       get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
@@ -539,6 +540,7 @@
       const kind = !d ? why : d.state === "unknown" ? "unknown" : (d.state === "stalled" || d.state === "offline") ? d.state : "";
       if (kind) goQuiet(job, kind, d && typeof d.quiet_s === "number" ? d.quiet_s : null);
       else { job.quietSince = null; job.kind = ""; job.srv = null; delete job.turn.note; job.turn.bad = false; }
+      if (d && d.state === "waiting") job.turn.note = WAIT_NOTE;     // sent while another run goes: it waits its turn (portal/workshop.py)
       const out = {kind, end: false, resume: null};
       if (d && (d.state === "done" || d.state === "error")) {
         out.end = true;

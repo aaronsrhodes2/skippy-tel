@@ -31,7 +31,10 @@ class FakeBridge:
             return _json({"error": "unauthorized"}, 401)
         if path == "/workshop":
             self.started.append(json.loads(body))
-            return _json({"ok": True} if self.start_status == 200 else {"message": "busy"}, self.start_status)
+            status = self.start_status
+            if isinstance(status, list):              # a sequence of answers, one per start, the last one repeated
+                status = status.pop(0) if len(status) > 1 else status[0]
+            return _json({"ok": True} if status == 200 else {"message": "busy"}, status)
         m = re.match(r"/workshop/run/(\w+)\?after=(\d+)", path)
         if m:
             after = int(m.group(2))
@@ -149,8 +152,15 @@ def test_stop_from_the_portal_cancels_the_run(wired):
     assert bridge.cancelled == ["abc12345"]
 
 
-def test_a_busy_bridge_and_a_missing_bridge_say_so(wired, monkeypatch):
+def test_a_busy_bridge_makes_the_message_wait_not_fail(wired):
+    bridge, portal = wired(FakeBridge(start_status=[409, 409, 200]))       # on another run for a while, then free
+    assert reporter.run_job(JOB, TOKEN) == {"result": {"state": "done"}} and len(bridge.started) == 3
+    assert portal.pushes[0]["state"] == "running" and portal.final[0] == "done"     # a heartbeat while it waited, then the run
+
+
+def test_a_bridge_busy_for_the_whole_run_limit_and_a_missing_bridge_say_so(wired, monkeypatch):
     _, portal = wired(FakeBridge(start_status=409))
+    monkeypatch.setattr(reporter, "WORKSHOP_MAX_S", 0.2)
     assert "still working" in reporter.run_job(JOB, TOKEN)["error"] and portal.final[0] == "error"
     monkeypatch.setattr(reporter, "BRIDGE", "http://127.0.0.1:9")            # nothing listens there
     out = reporter.run_job(JOB, TOKEN)

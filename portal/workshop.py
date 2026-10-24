@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import binascii
 import re
+import secrets
 import threading
 import time
 
@@ -28,6 +29,8 @@ MAX_LISTED = 50            # records `listing` shows the reporter's reconciler
 KEEP_S = 6 * 3600          # how long a finished task stays readable
 JOB_TTL = 2 * 3600         # how long the home queue keeps offering an unanswered task
 OFFLINE_S = 30             # no push at all for this long: skippy-pc isn't picking it up
+BRIEF_SILENCE_S = 300      # home silent no longer than this (a reporter restart, a portal deploy): a message waits for it
+WAIT_NOTE = "In line: Skippy is finishing another run first."
 STALL_S = 120              # a running task silent for this long: the link to skippy-pc broke
 WANT_S = 120               # a person's "check again" is still worth answering for this long
 _CONV = re.compile(r"[A-Za-z0-9-]{8,64}")
@@ -202,6 +205,7 @@ def _conversation(raw) -> dict | None:
 class Workshop:
     def __init__(self, home, clock=time.time):
         self.home, self.clock = home, clock
+        self.started = clock()                   # (a portal that just started hasn't heard from home yet)
         self._tasks: dict[str, dict] = {}
         self._lock = threading.Lock()
         # The Admin page's kill switch. In this process's memory on purpose: the agent can't reach it (its only way into
@@ -289,30 +293,58 @@ class Workshop:
         if chosen is None:                       # only a project skippy-pc lists can be worked on: never a typed repo
             raise ValueError("skippy-pc doesn't offer that project.")
         project = chosen["id"]
-        offered = next((b for b in self.brains() if b["id"] == (brain or "claude")), None)
-        if offered is None:                      # only a brain skippy-pc lists: never a typed model
-            raise ValueError("skippy-pc doesn't offer that brain.")
-        if not offered["ready"]:
-            raise NotReady(f"{offered['label']} isn't reachable from skippy-pc right now.")
-        brain = offered["id"]
+        brain = brain or "claude"
         if self.paused:
             raise Paused(PAUSED_MESSAGE)
-        if not self.ready():
-            why = self.home.capability_reason("workshop")        # the bridge's own words, when it said why
-            raise NotReady(f"skippy-pc's workshop isn't ready: {why}" if why else
-                           "skippy-pc's workshop isn't answering: is the bridge running, and is home reporting?")
+        if self.briefly_silent():
+            # Home went quiet a moment ago (the reporter or the bridge restarting, this portal just deployed): what it offers
+            # isn't known right now, so a known brain is taken on trust and the message waits for home to come back. The
+            # bridge checks the brain again; refusing here only made the Captain send it twice (2026-10-24).
+            if brain not in ("claude", "core"):
+                raise ValueError("skippy-pc doesn't offer that brain.")
+        else:
+            offered = next((b for b in self.brains() if b["id"] == brain), None)
+            if offered is None:                      # only a brain skippy-pc lists: never a typed model
+                raise ValueError("skippy-pc doesn't offer that brain.")
+            if not offered["ready"]:
+                raise NotReady(f"{offered['label']} isn't reachable from skippy-pc right now.")
+            if not self.ready():
+                why = self.home.capability_reason("workshop")        # the bridge's own words, when it said why
+                raise NotReady(f"skippy-pc's workshop isn't ready: {why}" if why else
+                               "skippy-pc's workshop isn't answering: is the bridge running, and is home reporting?")
+        job = {"conv": conv, "message": message, "who": owner, "project": project, "brain": brain,
+               **({"images": pictures} if pictures else {})}
         with self._lock:
             self._prune()
-            if any(self._live_state(r) in ("queued", "running") for r in self._tasks.values()):
-                raise Busy("Skippy is still working on the last one.")
-            # The job id is the task id everywhere: here, in the reporter and in the bridge.
-            task = self.home.start("workshop", owner, ttl=JOB_TTL, conv=conv, message=message, who=owner, project=project, brain=brain,
-                                   **({"images": pictures} if pictures else {}))
+            # One run at a time on skippy-pc: a message sent while another runs (another conversation, another device, the
+            # voice) waits in line here and goes when that one ends, instead of being refused. The job id is the task id
+            # everywhere: here, in the reporter and in the bridge.
+            task = secrets.token_hex(8)
             now = self.clock()
-            self._tasks[task] = {"owner": owner, "conv": conv, "events": [], "state": "queued", "error": None,
+            self._tasks[task] = {"owner": owner, "conv": conv, "events": [], "state": "waiting", "error": None,
                                  "created": now, "pushed_at": now, "touched": now, "stop": False, "project": project, "brain": brain,
-                                 "message": message[:200]}     # its first words, for the notification (never shown to others)
+                                 "message": message[:200], "job": job}   # its first words, for the notification (never shown to others)
+            self._advance()
         return task
+
+    def briefly_silent(self) -> bool:
+        """Home isn't reporting, but only for a moment: a restart or a deploy, not a skippy-pc that is off."""
+        if self.home.online():
+            return False
+        age = self.home.age()
+        return age < BRIEF_SILENCE_S if age is not None else self.clock() - self.started < BRIEF_SILENCE_S
+
+    def _advance(self) -> None:
+        """(lock held) When nothing is queued or running, hand the oldest message in line to skippy-pc."""
+        if any(r["state"] in ("queued", "running") for r in self._tasks.values()):
+            return
+        line = sorted(((t, r) for t, r in self._tasks.items() if r["state"] == "waiting"), key=lambda tr: tr[1]["created"])
+        if not line:
+            return
+        task, rec = line[0]
+        self.home.start("workshop", rec["owner"], ttl=JOB_TTL, _id=task, **rec.pop("job"))
+        now = self.clock()
+        rec["state"], rec["created"], rec["pushed_at"] = "queued", now, now
 
     def read(self, owner: str, task: str, after: int = 0) -> dict:
         """What the browser polls: events from index `after`, and the state. A task that is still going also says
@@ -325,8 +357,9 @@ class Workshop:
                 return {"state": "unknown", "events": [], "next": max(0, after), "error": None}
             now = self.clock()
             rec["touched"] = now
+            self._advance()                       # (a run that ended, or a deploy that lost it: the next in line goes)
             state = self._live_state(rec)
-            if state in ("queued", "running"):
+            if state in ("queued", "running", "waiting"):
                 self.home.touch_chat()            # keep the reporter's quick poll going while someone watches
             after = max(0, after)
             out = {"state": state, "error": rec["error"], "events": rec["events"][after:],
@@ -343,16 +376,22 @@ class Workshop:
         the bridge says it stopped."""
         rec["stop"] = True
         self.home.finish(task, {"error": why})
-        if rec["state"] == "queued":
+        rec.pop("job", None)                      # a message still in line never goes
+        if rec["state"] in ("queued", "waiting"):
             rec["state"], rec["error"] = "error", "stopped"
             rec["touched"] = self.clock()
 
     def stop(self, owner: str, task: str) -> bool:
         with self._lock:
             rec = self._tasks.get(task)
-            if not rec or rec["owner"] != owner or rec["state"] not in ("queued", "running"):
+            if not rec or rec["owner"] != owner or rec["state"] not in ("queued", "running", "waiting"):
                 return False
-            self._withdraw(task, rec, "stopped")
+            if rec["state"] == "waiting":         # still in line: it just leaves it
+                rec["state"], rec["error"], rec["touched"] = "error", "stopped", self.clock()
+                rec.pop("job", None)
+            else:
+                self._withdraw(task, rec, "stopped")
+            self._advance()
         return True
 
     # ── the Admin page's controls (recovery.py; admin only, like everything here) ──────────────────────
@@ -371,7 +410,7 @@ class Workshop:
     def cancel_current(self) -> list[str]:
         """Stop every task that hasn't ended (normally the one current run), for anyone. Returns their ids."""
         with self._lock:
-            open_ = [(t, r) for t, r in self._tasks.items() if r["state"] in ("queued", "running")]
+            open_ = [(t, r) for t, r in self._tasks.items() if r["state"] in ("queued", "running", "waiting")]
             for task, rec in open_:
                 self._withdraw(task, rec, "cancelled from the Admin page")
         return [t for t, _ in open_]
@@ -535,6 +574,8 @@ class Workshop:
                 rec["state"] = "running"          # a gap, but skippy-pc is on it: it is no longer waiting to be picked up
             rec["pushed_at"], rec["touched"] = now, now
             rec.pop("resync", None)               # this is the answer to anyone's "check again"
+            if ended:
+                self._advance()                   # the next message in line goes now
             reply = {"have": len(rec["events"]), "stop": rec["stop"]}
             owner = rec["owner"]
             # Tell the Captain (portal/notify.py) only when THIS process saw the run going and now sees it end: a record

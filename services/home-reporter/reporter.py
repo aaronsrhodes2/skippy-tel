@@ -59,6 +59,7 @@ WORKSHOP_MAX_S = 3 * 3600    # a run this old is abandoned
 WORKSHOP_RECENT_S = 3600     # a finished run older than this is no longer carried to the portal (the bridge forgets it too)
 START_TRIES = 4              # times a run is started on a bridge that doesn't answer (it may be restarting) ...
 START_RETRY_S = 3            # ... this many seconds apart
+BUSY_RETRY_S = 5             # the bridge is on another run: ask again this often (a message never fails for that)
 SYNC_INTERVAL = 10           # seconds between the reconciler's looks at the bridge and the portal
 SYNC_FAST = 2                # ... while someone is watching the chat
 CATCH_UP_STEPS = 60          # pushes one run may take in one reconciler pass (100 events each: more than the 5000 cap)
@@ -660,14 +661,25 @@ def workshop(job: dict, token: str) -> dict:
     if not BRIDGE:
         return fail("The private Skippy isn't set up on skippy-pc (CLAUDE_BRIDGE_URL).")
     attach = bool(job.get("attach")) or portal_started(token, task)
-    for attempt in range(START_TRIES):            # a bridge that is restarting answers in a few seconds
-        pictures = job.get("images") if isinstance(job.get("images"), list) and not attach else None
-        status, started = _bridge("POST", "/workshop", {"task": task, "conv": conv, "message": message, "who": who,
-                                                        "attach": attach, "project": project, "brain": brain,
-                                                        **({"images": pictures} if pictures else {})}, token)
-        if status is not None or attempt == START_TRIES - 1:
-            break
-        time.sleep(START_RETRY_S)
+
+    def start():
+        for attempt in range(START_TRIES):        # a bridge that is restarting answers in a few seconds
+            pictures = job.get("images") if isinstance(job.get("images"), list) and not attach else None
+            got = _bridge("POST", "/workshop", {"task": task, "conv": conv, "message": message, "who": who,
+                                                "attach": attach, "project": project, "brain": brain,
+                                                **({"images": pictures} if pictures else {})}, token)
+            if got[0] is not None or attempt == START_TRIES - 1:
+                return got
+            time.sleep(START_RETRY_S)
+
+    status, started = start()
+    # The bridge is on another run (one the portal didn't know of: begun before a deploy, or from another portal): this
+    # message waits for it instead of failing, with a heartbeat so the chat shows it as going, not lost (2026-10-24).
+    busy_until = _now() + WORKSHOP_MAX_S
+    while status == 409 and _now() < busy_until:
+        push_workshop(token, task, who, conv, 0, [], "running", None, project)
+        time.sleep(BUSY_RETRY_S)
+        status, started = start()
     if status == 404 and attach:
         return fail(LOST_TASK)
     if status != 200:

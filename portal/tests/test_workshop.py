@@ -49,18 +49,37 @@ def test_it_refuses_bad_input_and_a_workshop_that_isnt_reporting(shop):
     for args in ((ADMIN, "x", "hi"), (ADMIN, CONV, "   "), (ADMIN, CONV, "a" * (workshop_mod.MAX_MESSAGE + 1))):
         with pytest.raises(ValueError):
             ws.send(*args)
-    clock.now += home_mod.STALE_AFTER + 1                       # home went silent: nothing to hand the job to
+    clock.now += home_mod.STALE_AFTER + 1                       # home went silent a moment ago (a restart, a deploy): it waits
+    waits = ws.send(ADMIN, CONV, "hi")
+    assert ws.read(ADMIN, waits)["state"] == "queued" and [j["id"] for j in home.jobs_reply()["jobs"]] == [waits]
+    ws.stop(ADMIN, waits)
+    clock.now += workshop_mod.BRIEF_SILENCE_S                   # silent for minutes: skippy-pc is off, so it says so
     with pytest.raises(workshop_mod.NotReady):
         ws.send(ADMIN, CONV, "hi")
+    with pytest.raises(ValueError):                             # even then, only a brain the bridge could have
+        ws.send(ADMIN, CONV, "hi", brain="gpt-9")
 
 
-def test_one_task_at_a_time_until_it_finishes(shop):
-    ws, _, _ = shop
+def test_a_portal_that_just_started_takes_a_message_before_home_has_reported():
+    clock = Clock()
+    home = home_mod.Home(FakeVm(), clock=clock)                 # no report yet: the brain list is unknown, not "Claude only"
+    ws = workshop_mod.Workshop(home, clock=clock)
+    task = ws.send(ADMIN, CONV, "hi", brain="core")
+    assert [(j["id"], j["brain"]) for j in home.jobs_reply()["jobs"]] == [(task, "core")]
+
+
+def test_one_task_at_a_time_and_the_rest_wait_in_line(shop):
+    ws, home, _ = shop
     task = ws.send(ADMIN, CONV, "one")
-    with pytest.raises(workshop_mod.Busy):
-        ws.send(ADMIN, CONV, "two")
-    ws.push(task, ADMIN, CONV, 0, [TEXT], "done", None)
-    assert ws.send(ADMIN, CONV, "two")
+    second = ws.send(ADMIN, "other-conv-123", "two")            # another conversation (or the voice) while one runs: in line
+    third = ws.send(ADMIN, CONV, "three")
+    assert ws.read(ADMIN, second)["state"] == "waiting" and [j["id"] for j in home.jobs_reply()["jobs"]] == [task]
+    ws.push(task, ADMIN, CONV, 0, [TEXT], "done", None)         # the run ends: the oldest in line goes, alone
+    assert ws.read(ADMIN, second)["state"] == "queued" and ws.read(ADMIN, third)["state"] == "waiting"
+    assert [j["message"] for j in home.jobs_reply()["jobs"]] == ["two"]
+    assert ws.stop(ADMIN, third) and ws.read(ADMIN, third) == {**ws.read(ADMIN, third), "state": "error", "error": "stopped"}
+    ws.push(second, ADMIN, "other-conv-123", 0, [TEXT], "done", None)
+    assert home.jobs_reply()["jobs"] == []                      # the stopped one never goes
 
 
 def test_pushed_events_are_readable_in_order_and_only_by_their_owner(shop):
@@ -182,7 +201,8 @@ def test_sending_queues_a_job_for_skippy_pc_and_never_logs_the_message(env, caps
         [("workshop", CONV, "deploy my secret plan", ADMIN)]
     out = capsys.readouterr().out
     assert task in out and "secret plan" not in out                      # who and how long, never what
-    assert post(client, "/me/workshop/send", {"conv": CONV, "message": "again"}).status_code == 409   # busy
+    again = post(client, "/me/workshop/send", {"conv": CONV, "message": "again"})
+    assert again.status_code == 200 and again.get_json()["task"] != task                  # busy: it waits in line, never refused
 
 
 def test_send_errors_are_plain(env):
