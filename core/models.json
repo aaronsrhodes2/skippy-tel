@@ -1,5 +1,5 @@
 {
-  "_doc": "SkippyCore's model slots. Each slot has a small STAND-IN (the simulator and CI run it) and the FULL model the Bosgame runs. Same slot, same aliases, same API: switching is CORE_FULL=<slots> in /etc/skippy-core/core.env, never a code change. Paths are relative to MODELS_ROOT and follow tools/models_archive.py's layout (huggingface/<Org>__<Repo>/<file>), so the D:\\models archive copies over as-is. sha256 null = not pinned yet: core/llm/models.py fetch prints the hash to pin. Sizes are bytes as Hugging Face lists them (2026-10-16). The coder's full GGUF is Unsloth's UD-Q4_K_XL, re-uploaded after llama.cpp's looping fix (the Strix Halo community's pick). parallel (per variant, default 4) is llama-server's --parallel; max_parallel caps it: stock Vulkan loses about a third of its throughput past 8. The chat stand-in runs with thinking off (enable_thinking false: Qwen3-0.6B otherwise spends its answer thinking) and a 16K context: Skippy's persona prompt alone is about 3.5K tokens. core/README.md.",
+  "_doc": "SkippyCore's model slots. Each slot has a small STAND-IN (the simulator and CI run it) and the FULL model the Bosgame runs. Same slot, same aliases, same API: switching is CORE_FULL=<slots> in /etc/skippy-core/core.env, never a code change. Paths are relative to MODELS_ROOT and follow tools/models_archive.py's layout (huggingface/<Org>__<Repo>/<file>), so the D:\\models archive copies over as-is. sha256 null = not pinned yet: core/llm/models.py fetch prints the hash to pin. Sizes are bytes as Hugging Face lists them (2026-10-16; Qwen3.6 2026-10-23). Since 2026-10-23 chat and coder both run Qwen3.6-35B-A3B (the Strix Halo community's pick, won core/bench): chat as Unsloth's UD-Q4_K_XL with thinking OFF by default (a request turns it on with chat_template_kwargs enable_thinking true), coder as Unsloth's MTP Q8_0 with multi-token prediction (--spec-type draft-mtp: ~1.4x the tokens/s, but llama.cpp allows it only with --parallel 1) and thinking on. The models they replaced stay on disk as candidates. parallel (per variant, default 4) is llama-server's --parallel; max_parallel caps it: stock Vulkan loses about a third of its throughput past 8. The chat stand-in runs with thinking off (enable_thinking false: Qwen3-0.6B otherwise spends its answer thinking) and a 16K context: Skippy's persona prompt alone is about 3.5K tokens. core/README.md.",
   "memory_budget_gb": 110,
   "max_parallel": 8,
   "slots": {
@@ -14,10 +14,11 @@
         "args": ["--jinja", "--chat-template-kwargs", "{\"enable_thinking\": false}"]
       },
       "full": {
-        "repo": "Qwen/Qwen3-30B-A3B-GGUF",
-        "files": [{"path": "Qwen3-30B-A3B-Q4_K_M.gguf", "size": 18556685824, "sha256": null}],
-        "ctx": 32768,
-        "args": ["--jinja"]
+        "repo": "unsloth/Qwen3.6-35B-A3B-GGUF",
+        "files": [{"path": "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf", "size": 22360456160, "sha256": "707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450"}],
+        "ctx": 65536,
+        "args": ["--jinja", "--temp", "0.7", "--top-p", "0.8", "--top-k", "20", "--min-p", "0", "--presence-penalty", "1.5",
+                 "--chat-template-kwargs", "{\"enable_thinking\": false}"]
       }
     },
     "vision": {
@@ -59,7 +60,7 @@
       }
     },
     "coder": {
-      "role": "the coding fallback (Claude Code via ANTHROPIC_BASE_URL). Loaded on demand; swaps with general",
+      "role": "the coding agent (Claude Code via ANTHROPIC_BASE_URL: the Workshop's Core brain). Loaded on demand; swaps with general. One request at a time (MTP)",
       "resident": false,
       "aliases": ["qwen3-coder-next", "skippy-coder"],
       "standin": {
@@ -69,10 +70,11 @@
         "args": ["--jinja"]
       },
       "full": {
-        "repo": "unsloth/Qwen3-Coder-Next-GGUF",
-        "files": [{"path": "Qwen3-Coder-Next-UD-Q4_K_XL.gguf", "size": 49608478720, "sha256": null}],
-        "ctx": 65536,
-        "args": ["--jinja"]
+        "repo": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+        "files": [{"path": "Qwen3.6-35B-A3B-Q8_0.gguf", "size": 37801097504, "sha256": "c1283d8b80c3e38b2735ddbc9766d3b3126f44d6c484be419d4e101d09a76131"}],
+        "ctx": 131072,
+        "parallel": 1,
+        "args": ["--jinja", "--temp", "0.6", "--top-p", "0.95", "--top-k", "20", "--min-p", "0", "--spec-type", "draft-mtp", "--spec-draft-n-max", "2"]
       }
     }
   },
@@ -99,6 +101,30 @@
       "job": "songs for the chat's make_music tool",
       "service": "music-studio (ACE-Step 1.5), driven by the home reporter, one GPU job at a time",
       "weights": ["huggingface/ACE-Step__Ace-Step1.5"]
+    }
+  },
+  "candidates": {
+    "_doc": "Models on trial for a slot, or retired from one (\"for\"), served beside the slots under their own names with models.py --bench <name> (or BENCH=<name>): on demand, in the coder's swap group. A winner moves into its slot's full; the loser stays here, with its files on disk. Results: core/bench/README.md.",
+    "qwen3.6-q8": {
+      "for": ["chat", "coder"],
+      "repo": "unsloth/Qwen3.6-35B-A3B-GGUF",
+      "files": [{"path": "Qwen3.6-35B-A3B-Q8_0.gguf", "size": 36903140320, "sha256": "d1a395809f65a43a13ad119eb4e7acdef1ac6d68120f39902c8ab96e72794a59"}],
+      "ctx": 131072,
+      "args": ["--jinja", "--temp", "0.6", "--top-p", "0.95", "--top-k", "20", "--min-p", "0"]
+    },
+    "qwen3-30b-a3b": {
+      "for": ["chat"],
+      "repo": "Qwen/Qwen3-30B-A3B-GGUF",
+      "files": [{"path": "Qwen3-30B-A3B-Q4_K_M.gguf", "size": 18556685824, "sha256": null}],
+      "ctx": 32768,
+      "args": ["--jinja"]
+    },
+    "qwen3-coder-next-q4": {
+      "for": ["coder"],
+      "repo": "unsloth/Qwen3-Coder-Next-GGUF",
+      "files": [{"path": "Qwen3-Coder-Next-UD-Q4_K_XL.gguf", "size": 49608478720, "sha256": null}],
+      "ctx": 65536,
+      "args": ["--jinja"]
     }
   }
 }

@@ -1,0 +1,200 @@
+```python
+def evaluate(expr: str) -> float:
+    """
+    Evaluate an arithmetic expression string without using eval, exec, compile, or ast.
+    
+    Supports: integers, decimals, +, -, *, /, %, **, unary +/-, parentheses.
+    Precedence and associativity follow Python's rules.
+    """
+    if not expr or not expr.strip():
+        raise ValueError("Empty expression")
+    
+    # Tokenize
+    tokens = _tokenize(expr)
+    if not tokens:
+        raise ValueError("Empty expression after tokenization")
+    
+    # Parse and evaluate
+    pos = [0]  # Use list to allow mutation in nested functions
+    result = _parse_expression(tokens, pos)
+    
+    if pos[0] < len(tokens):
+        raise ValueError(f"Unexpected token: {tokens[pos[0]]}")
+    
+    return result
+
+
+def _tokenize(expr: str):
+    """Tokenize the expression into numbers, operators, and parentheses."""
+    tokens = []
+    i = 0
+    n = len(expr)
+    
+    while i < n:
+        c = expr[i]
+        
+        # Skip whitespace
+        if c.isspace():
+            i += 1
+            continue
+        
+        # Check for two-character operators first
+        if i + 1 < n:
+            two_char = expr[i:i+2]
+            if two_char == '**':
+                tokens.append(('OP', '**'))
+                i += 2
+                continue
+        
+        # Single character operators and parentheses
+        if c in '+-*/%':
+            tokens.append(('OP', c))
+            i += 1
+            continue
+        elif c == '(':
+            tokens.append(('LPAREN', '('))
+            i += 1
+            continue
+        elif c == ')':
+            tokens.append(('RPAREN', ')'))
+            i += 1
+            continue
+        elif c.isdigit() or c == '.':
+            # Parse a number
+            j = i
+            has_dot = False
+            while j < n and (expr[j].isdigit() or expr[j] == '.'):
+                if expr[j] == '.':
+                    if has_dot:
+                        raise ValueError(f"Invalid number: multiple dots")
+                    has_dot = True
+                j += 1
+            
+            num_str = expr[i:j]
+            if num_str == '.':
+                raise ValueError(f"Invalid number: just a dot")
+            
+            try:
+                if has_dot:
+                    num = float(num_str)
+                else:
+                    num = int(num_str)
+            except ValueError:
+                raise ValueError(f"Invalid number: {num_str}")
+            
+            tokens.append(('NUM', num))
+            i = j
+            continue
+        else:
+            raise ValueError(f"Unknown character: '{c}'")
+    
+    return tokens
+
+
+def _parse_expression(tokens, pos):
+    """
+    Parse expression with lowest precedence: addition and subtraction.
+    """
+    left = _parse_term(tokens, pos)
+    
+    while pos[0] < len(tokens) and tokens[pos[0]][0] == 'OP' and tokens[pos[0]][1] in ('+', '-'):
+        op = tokens[pos[0]][1]
+        pos[0] += 1
+        right = _parse_term(tokens, pos)
+        if op == '+':
+            left = left + right
+        else:
+            left = left - right
+    
+    return left
+
+
+def _parse_term(tokens, pos):
+    """
+    Parse terms with multiplication, division, modulo.
+    """
+    left = _parse_power(tokens, pos)
+    
+    while pos[0] < len(tokens) and tokens[pos[0]][0] == 'OP' and tokens[pos[0]][1] in ('*', '/', '%'):
+        op = tokens[pos[0]][1]
+        pos[0] += 1
+        right = _parse_power(tokens, pos)
+        if op == '*':
+            left = left * right
+        elif op == '/':
+            if right == 0:
+                raise ZeroDivisionError("division by zero")
+            left = left / right
+        elif op == '%':
+            if right == 0:
+                raise ZeroDivisionError("modulo by zero")
+            left = left % right
+    
+    return left
+
+
+def _parse_power(tokens, pos):
+    """
+    Parse power expressions. Right-associative.
+    Note: ** binds tighter than unary minus on its left.
+    So -2**2 should be -(2**2) = -4.
+    This means unary minus is handled at a higher level (in _parse_unary).
+    """
+    base = _parse_unary(tokens, pos)
+    
+    # Right-associative: if we see **, parse the right side recursively
+    if pos[0] < len(tokens) and tokens[pos[0]][0] == 'OP' and tokens[pos[0]][1] == '**':
+        pos[0] += 1
+        # For right-associativity, we recursively call _parse_power for the exponent
+        # But we need to be careful: the exponent should be parsed as a power expression too
+        exponent = _parse_power(tokens, pos)
+        # Use pow to handle large numbers and floating point correctly
+        base = base ** exponent
+    
+    return base
+
+
+def _parse_unary(tokens, pos):
+    """
+    Parse unary + and -.
+    Unary minus has lower precedence than **, so -2**2 = -(2**2).
+    """
+    if pos[0] < len(tokens) and tokens[pos[0]][0] == 'OP' and tokens[pos[0]][1] in ('+', '-'):
+        op = tokens[pos[0]][1]
+        pos[0] += 1
+        operand = _parse_unary(tokens, pos)  # Recursive to handle multiple unary operators like --5
+        if op == '-':
+            return -operand
+        else:
+            return operand
+    
+    return _parse_primary(tokens, pos)
+
+
+def _parse_primary(tokens, pos):
+    """
+    Parse primary expressions: numbers and parenthesized expressions.
+    """
+    if pos[0] >= len(tokens):
+        raise ValueError("Unexpected end of expression")
+    
+    token_type, token_val = tokens[pos[0]]
+    
+    if token_type == 'NUM':
+        pos[0] += 1
+        return float(token_val)
+    elif token_type == 'LPAREN':
+        pos[0] += 1
+        result = _parse_expression(tokens, pos)
+        if pos[0] >= len(tokens) or tokens[pos[0]][0] != 'RPAREN':
+            raise ValueError("Unbalanced parentheses: missing closing ')'")
+        pos[0] += 1
+        return result
+    elif token_type == 'OP':
+        # A binary operator here is an error (dangling operator or two operators in a row)
+        raise ValueError(f"Unexpected operator: {token_val}")
+    elif token_type == 'RPAREN':
+        raise ValueError("Unbalanced parentheses: extra ')'")
+    else:
+        raise ValueError(f"Unknown token: {token_type}")
+```

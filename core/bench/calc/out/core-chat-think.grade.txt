@@ -1,0 +1,11 @@
+RAISED '1+2*3': ValueError('Extra tokens after expression')
+RAISED '(1+2)*3': ValueError('Unbalanced parentheses')
+WRONG '-2**2': 4.0 != -4
+RAISED '.5+2.': ValueError('Extra tokens after expression')
+RAISED '  3   *(  4 +5 )': ValueError('Unbalanced parentheses')
+WRONG '-3**-2': 0.1111111111111111 != -0.1111111111111111
+RAISED '(2+3)**2%7': ValueError('Unbalanced parentheses')
+RAISED '0.1+0.2': ValueError('Extra tokens after expression')
+RAISED '6/-(1+2)': ValueError('Unbalanced parentheses')
+WRONG ERROR '1/(2-2)': ValueError('Unbalanced parentheses')
+30/40

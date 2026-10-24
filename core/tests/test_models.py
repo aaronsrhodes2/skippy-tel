@@ -160,3 +160,22 @@ def test_home_lists_skippy_pcs_voices_and_the_slot_tool_ignores_it():
     assert set(data["home"]["voice"]["voices"]) == set(re.findall(r'"(\w+)"', voices[1]))
     assert "voice-gate" in data["home"]["voice"]["service"] and "tts-studio" in data["home"]["voice"]["service"]
     assert set(m.plan(m.load(repo / "core" / "models.json"), set())) == set(data["slots"])
+
+
+def test_bench_candidates_serve_beside_the_slots_on_demand(tmp_path):
+    cand = {"try": {"for": ["chat", "coder"], "repo": "Org/New-Model",
+                    "files": [{"path": "new.gguf", "size": 2 * 1024 ** 3, "sha256": None}], "ctx": 8192}}
+    data = m.load(_manifest(tmp_path, candidates={"_doc": "notes", **cand}))
+    chosen = {**m.plan(data, set()), **m.bench(data, "try")}
+    assert chosen["try"]["variant"] == "candidate" and chosen["try"]["resident"] is False
+    assert chosen["try"]["files"][0]["rel"] == "huggingface/Org__New-Model/new.gguf"
+    config, _ = m.render(chosen, gpu_layers=0)
+    assert config["groups"]["on-demand"]["members"] == ["coder", "try"], "a candidate swaps with the coder"
+    assert "--alias try" in config["models"]["try"]["cmd"] and config["models"]["try"]["ttl"] == m.IDLE_TTL_S
+    assert m.bench(data, "") == {}
+    with pytest.raises(m.ManifestError):
+        m.bench(data, "nope")
+    with pytest.raises(m.ManifestError):
+        m.load(_manifest(tmp_path, candidates={"bad": {**cand["try"], "for": ["nope"]}}))
+    with pytest.raises(m.ManifestError):
+        m.load(_manifest(tmp_path, candidates={"chat": cand["try"]}))
