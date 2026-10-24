@@ -282,6 +282,7 @@ class Run:
         self.clone = ""                        # that project's clone when the run started (the conversation log reads it)
         self.before_finish = None              # (run) -> None, called once just before the run ends (the ship check)
         self.image_paths: list[str] = []       # SKIPPY_IMAGE lines the agent printed: screenshots to attach at the end
+        self.pictures: list[str] = []          # a Core-brain run's attached pictures, described by the vision slot before it starts
         self.created = time.time() if created is None else created
         self.events: list[dict] = []
         self.done, self.ok, self.error = False, None, None
@@ -603,9 +604,11 @@ class Workshop:
         paths = save_images(task, images, self.attach_dir) if images and not attach else []
         if not message and not attach and not paths:
             raise ValueError("empty message")
-        if paths:                                      # Claude Code reads them with its Read tool, like any file
+        if paths and brain != "core":                  # Claude Code reads them with its Read tool, like any file
             message = (message or "(no words, just the picture)") + "\n\n[The Captain attached " + str(len(paths)) + \
                       (" picture" if len(paths) == 1 else " pictures") + ". Open each with the Read tool before answering: " + "; ".join(paths) + "]"
+        elif paths:                                    # Skippy Core's coder is text-only: its vision slot looks first (_describe_pictures)
+            message = message or "(no words, just the picture)"
         project = project or projects_mod.DEFAULT
         try:
             chosen = self.project(project)
@@ -634,6 +637,7 @@ class Workshop:
             else:
                 run = self._runs[task] = Run(task, conv, message, who, project=project, brain=brain)
                 run.clone = chosen.clone
+                run.pictures = paths if brain == "core" else []
                 run.on_change = self._changed
         if known is not None:
             if adopted is not None:
@@ -866,6 +870,51 @@ class Workshop:
         with urllib.request.urlopen(req, timeout=30) as r:
             got = json.loads(r.read().decode("utf-8", "replace"))
         return " ".join(b.get("text", "") for b in got.get("content", []) if isinstance(b, dict) and b.get("type") == "text")
+
+    DESCRIBE_PROMPT = ("Describe this picture precisely for someone who can't see it and needs every detail: what it is, the layout "
+                       "from top to bottom, and ALL text in it copied exactly as printed (every word, number, code, symbol and logo; "
+                       "say which you can't read rather than guess), then colours, counts and anything unusual. No opinions.")
+
+    def describe_picture(self, path: str, post=None) -> str:
+        """What Skippy Core's vision slot (Qwen3-VL, with its mmproj) sees in one picture, text copied out word for word. The coder
+        slot is text-only: handed a picture it fails the whole run with "image type not supported", so it gets this instead."""
+        import urllib.request
+        url, key = self._core_settings()
+        if not (url and key):
+            raise RuntimeError("Skippy Core isn't configured")
+        data = Path(path).read_bytes()
+        mime = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}.get(Path(path).suffix.lower(), "image/jpeg")
+        body = json.dumps({"model": "vision", "max_tokens": 1500, "system": "You describe pictures precisely.",
+                           "messages": [{"role": "user", "content": [
+                               {"type": "image", "source": {"type": "base64", "media_type": mime, "data": base64.b64encode(data).decode()}},
+                               {"type": "text", "text": self.DESCRIBE_PROMPT}]}]}).encode()
+        req = urllib.request.Request(url + "/v1/messages", data=body, method="POST",
+                                     headers={"x-api-key": key, "Authorization": "Bearer " + key,
+                                              "anthropic-version": "2023-06-01", "Content-Type": "application/json"})
+        if post is not None:
+            got = post(req)
+        else:
+            with urllib.request.urlopen(req, timeout=180) as r:
+                got = json.loads(r.read().decode("utf-8", "replace"))
+        text = " ".join(b.get("text", "") for b in got.get("content", []) if isinstance(b, dict) and b.get("type") == "text").strip()
+        if not text:
+            raise RuntimeError("the vision model said nothing")
+        return text
+
+    def _describe_pictures(self, message: str, paths: list[str]) -> str:
+        """The message for a Core-brain run with pictures: each one described by the vision slot, and the coder told not to open them."""
+        parts = []
+        for n, path in enumerate(paths, 1):
+            try:
+                seen = self.describe_picture(path)
+            except Exception as exc:                   # noqa: BLE001 — say so in the message; never fail the run over it
+                seen = f"(Skippy Core's vision model couldn't look at it: {type(exc).__name__}: {exc})"
+            parts.append(f"Picture {n} ({path}):\n{seen}")
+        many = len(paths) != 1
+        return (message + "\n\n[The Captain attached " + str(len(paths)) + (" pictures" if many else " picture") + ". You can't see "
+                "pictures, so Skippy Core's vision model looked for you; what it saw, with the text copied out, is below. Do NOT open "
+                "the picture files with the Read tool (that fails this whole run). If what you need isn't in the description, say "
+                "what to look for and the Captain will send a closer photo.]\n\n" + "\n\n".join(parts))
 
     def name_chat(self, message: str) -> str:
         """A conversation's name, noun-verb-adjective-noun (chat_names.py), from Skippy Core; the fallback without it."""
@@ -1210,6 +1259,8 @@ class Workshop:
         if run.cancelled:
             run.finish(False, "stopped")
             return
+        if run.pictures:                               # once per run, before the first attempt (a retry reuses the words)
+            run.message, run.pictures = self._describe_pictures(run.message, run.pictures), []
         try:
             project = self.project(run.project)
             env = self.core_env() if run.brain == "core" else child_env()
