@@ -284,6 +284,7 @@ them (`workshop.clean_images`), the job carries them to the bridge, which saves 
 sessions file (swept after 14 days) and names the paths in the message so Claude Code opens them with Read. Tests:
 `portal/tests/test_workshop_attachments.py`, `services/claude-bridge/tests/test_bridge_attachments.py`, the UI harness in `test_workshop_*ui.py`.
 The bridge only picks this up on restart (refused while a run is going).
+**On Skippy Core (Private) the coder is text-only**, so pictures go through Core's vision slot (Qwen3-VL, its mmproj already loaded): an attached one is described before the run starts, and any image the agent opens itself is caught by `eyes.py` (a PreToolUse hook on Read, on only for Core runs: `SKIPPY_CORE_EYES`), which hands back the description, every word copied out, instead of the picture Core would refuse ("image type not supported"). Tests: `services/claude-bridge/tests/test_eyes.py`.
 **The camera key** (the Captain only, `static/skippy-camera.js`, a key in the chat's composer): one tap opens a viewfinder (back camera, a
 flip key for the front one), a second takes the frame at the camera's full resolution and stops the camera at once; the photo is shrunk only
 as far as the picture limit needs and goes exactly like a pasted picture. On iPad one app holds the camera at a time: busy, the key says so.

@@ -41,6 +41,7 @@ import time
 from pathlib import Path
 
 import chat_names
+import eyes
 import conversation_log
 import new_folder
 import projects as projects_mod
@@ -871,35 +872,11 @@ class Workshop:
             got = json.loads(r.read().decode("utf-8", "replace"))
         return " ".join(b.get("text", "") for b in got.get("content", []) if isinstance(b, dict) and b.get("type") == "text")
 
-    DESCRIBE_PROMPT = ("Describe this picture precisely for someone who can't see it and needs every detail: what it is, the layout "
-                       "from top to bottom, and ALL text in it copied exactly as printed (every word, number, code, symbol and logo; "
-                       "say which you can't read rather than guess), then colours, counts and anything unusual. No opinions.")
-
     def describe_picture(self, path: str, post=None) -> str:
-        """What Skippy Core's vision slot (Qwen3-VL, with its mmproj) sees in one picture, text copied out word for word. The coder
-        slot is text-only: handed a picture it fails the whole run with "image type not supported", so it gets this instead."""
-        import urllib.request
+        """What Skippy Core's vision slot (Qwen3-VL, with its mmproj) sees in one picture, text copied out word for word (eyes.py).
+        The coder slot is text-only: handed a picture it fails the whole run with "image type not supported"."""
         url, key = self._core_settings()
-        if not (url and key):
-            raise RuntimeError("Skippy Core isn't configured")
-        data = Path(path).read_bytes()
-        mime = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}.get(Path(path).suffix.lower(), "image/jpeg")
-        body = json.dumps({"model": "vision", "max_tokens": 1500, "system": "You describe pictures precisely.",
-                           "messages": [{"role": "user", "content": [
-                               {"type": "image", "source": {"type": "base64", "media_type": mime, "data": base64.b64encode(data).decode()}},
-                               {"type": "text", "text": self.DESCRIBE_PROMPT}]}]}).encode()
-        req = urllib.request.Request(url + "/v1/messages", data=body, method="POST",
-                                     headers={"x-api-key": key, "Authorization": "Bearer " + key,
-                                              "anthropic-version": "2023-06-01", "Content-Type": "application/json"})
-        if post is not None:
-            got = post(req)
-        else:
-            with urllib.request.urlopen(req, timeout=180) as r:
-                got = json.loads(r.read().decode("utf-8", "replace"))
-        text = " ".join(b.get("text", "") for b in got.get("content", []) if isinstance(b, dict) and b.get("type") == "text").strip()
-        if not text:
-            raise RuntimeError("the vision model said nothing")
-        return text
+        return eyes.describe(url, key, path, post=post)
 
     def _describe_pictures(self, message: str, paths: list[str]) -> str:
         """The message for a Core-brain run with pictures: each one described by the vision slot, and the coder told not to open them."""
@@ -993,7 +970,8 @@ class Workshop:
                    ANTHROPIC_SMALL_FAST_MODEL=CORE_MODEL, ANTHROPIC_DEFAULT_HAIKU_MODEL=CORE_MODEL,
                    ANTHROPIC_DEFAULT_SONNET_MODEL=CORE_MODEL, ANTHROPIC_DEFAULT_OPUS_MODEL=CORE_MODEL,
                    CLAUDE_CODE_MAX_CONTEXT_TOKENS=CORE_CONTEXT, CLAUDE_CODE_MAX_OUTPUT_TOKENS=CORE_MAX_OUTPUT,
-                   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_TELEMETRY="1")
+                   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1", DISABLE_TELEMETRY="1",
+                   SKIPPY_CORE_EYES="1")                     # the coder is text-only: eyes.py looks at pictures for it
         return env
 
     # ── the work ─────────────────────────────────────────────────────────
@@ -1097,8 +1075,10 @@ class Workshop:
         """The settings file every run gets with --settings: the lane guard (lane_guard.py) as a PreToolUse hook, so a run
         changes files only in its own conversation's folder (the Captain's rule, 2026-10-23). Written next to the runs."""
         hook = f'"{sys.executable}" "{Path(__file__).resolve().with_name("lane_guard.py")}"'
+        see = f'"{sys.executable}" "{Path(__file__).resolve().with_name("eyes.py")}"'   # a Core run's Read of a picture (eyes.py)
         want = {"hooks": {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
-                                          "hooks": [{"type": "command", "command": hook, "timeout": 10}]}]}}
+                                          "hooks": [{"type": "command", "command": hook, "timeout": 10}]},
+                                         {"matcher": "Read", "hooks": [{"type": "command", "command": see, "timeout": 200}]}]}}
         text = json.dumps(want, indent=1)
         problem = None
         for folder in (Path(self.state_dir), Path(tempfile.gettempdir()) / "skippy-workshop"):   # the temp folder if the state one fails
