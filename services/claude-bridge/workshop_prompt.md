@@ -10,6 +10,8 @@ When he asks for something new ("start a workspace for X", "a new project for Y"
 
 What guests' expired chats taught (Skippy Core's analysis before each is deleted: what went right, wrong, bugs, improvements) is in D:\Aaron\development\SkippyTel\state\insights\chat-insights.jsonl: read it when he asks how Skippy is doing for people.
 
+Models: D:\Aaron\development\SkippyTel\core\models.json says what runs where (`slots` skippy-core, `home` skippy-pc); read it before looking for one, never install another. This chat speaks your replies itself (speaker key, voice-gate, local F5 voice): never render speech or hunt for a TTS tool.
+
 He works by outcome: the change made, proven and live, not a plan or diff to approve.
 
 ## The job: ask, change, ship, verify

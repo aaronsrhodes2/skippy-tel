@@ -145,3 +145,18 @@ def test_cli_render_refuses_missing_files_and_writes_when_ready(tmp_path, capsys
     assert json.loads((out / "shim.json").read_text())["models"]
     assert m.main(["plan", "--manifest", str(manifest), "--full", "all"]) == 1, "the full tier is over this budget"
     assert m.main(["plan", "--manifest", str(manifest), "--full", "nope"]) == 2
+
+
+def test_home_lists_skippy_pcs_voices_and_the_slot_tool_ignores_it():
+    """core/models.json's `home` block is the directory agents read before looking for a model (the private Skippy once went
+    hunting with `ollama list` and `pip list` for a TTS engine that was already running). Its voices must be the portal's own
+    (portal/voice.py VOICES), and nothing in it may become a skippy-core slot."""
+    import re
+    from pathlib import Path
+    repo = Path(__file__).resolve().parents[2]
+    data = json.loads((repo / "core" / "models.json").read_text(encoding="utf-8"))
+    voices = re.search(r'^VOICES = \(([^)]*)\)', (repo / "portal" / "voice.py").read_text(encoding="utf-8"), re.M)
+    assert voices, "portal/voice.py no longer defines VOICES = (...)"
+    assert set(data["home"]["voice"]["voices"]) == set(re.findall(r'"(\w+)"', voices[1]))
+    assert "voice-gate" in data["home"]["voice"]["service"] and "tts-studio" in data["home"]["voice"]["service"]
+    assert set(m.plan(m.load(repo / "core" / "models.json"), set())) == set(data["slots"])

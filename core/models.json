@@ -75,5 +75,30 @@
         "args": ["--jinja"]
       }
     }
+  },
+  "home": {
+    "_doc": "skippy-pc's own models: what runs on the PC's NVIDIA card, not in skippy-core's llama-swap slots above. Read this before looking for a model anywhere (Ollama, pip, the disk): if the job is listed here, use the service named and never install another. Only `slots` drive skippy-core (core/llm/models.py reads nothing else); this block is a directory for agents and people.",
+    "voice": {
+      "job": "text to speech: Skippy chat's spoken replies",
+      "service": "tts-studio (services/tts-studio), reached only through voice-gate (services/voice-gate) on tts-net; the portal's pass says which voice",
+      "voices": {
+        "skippy": "F5-TTS v1 Base at 16 flow steps, zero-shot from the Captain's ElevenLabs Skippy print: the Captain in Private mode (his default). Resident.",
+        "stock": "Kokoro-82M, bm_george: everyone else who may chat (Public). Resident.",
+        "elevenlabs": "the cloud Skippy voice via flask-api: the Captain in Auto mode only, and the fallback while tts-studio is down or busy"
+      },
+      "how_a_chat_speaks": "the page does it: with the chat's speaker key (or Hands-off) on, skippy-voice.js sends each finished reply to voice-gate /tts. No model and no tool call is involved; an agent never renders speech itself.",
+      "health": "voice-gate /health inside skippytel-voice-gate (port 8080): voices.skippy, voices.stock, voices.elevenlabs",
+      "weights": ["huggingface/SWivid__F5-TTS", "huggingface/hexgrad__Kokoro-82M"],
+      "docs": "services/tts-studio/README.md, docs/voice-bakeoff.md"
+    },
+    "hearing": {
+      "job": "speech to text: the chats' mic",
+      "service": "whisper (faster-whisper, WHISPER_MODEL, default medium, CUDA) behind voice-gate /stt"
+    },
+    "music": {
+      "job": "songs for the chat's make_music tool",
+      "service": "music-studio (ACE-Step 1.5), driven by the home reporter, one GPU job at a time",
+      "weights": ["huggingface/ACE-Step__Ace-Step1.5"]
+    }
   }
 }
