@@ -85,6 +85,8 @@ services:
     logging: *default-logging
     expose:
       - "8000"
+    ports:
+      - "127.0.0.1:8000:8000"                  # localhost only: reachable from the PC, not the network
     environment:
       - WHISPER_MODEL=${WHISPER_MODEL:-medium}
       - WHISPER_DEVICE=cuda
