@@ -216,4 +216,18 @@ MINEBENCH_RUNS = (
                 "the track, and the wheels are thin rings. It looked at each pass through the vision model, which called the scene "
                 "recognisable and missed the floating cars: describing a picture is not checking it. Next: an objective floating-parts "
                 "check in the runtime, and pointed questions for the look."},
+    {"id": "haiku-direct", "title": "Choo-choo train, Claude Haiku in one call (the benchmark's own way)",
+     "model": "Claude Haiku 5.5 through Anthropic's API: one call with MineBench's prompt, no tools, no second try",
+     "prompt": "a choo-choo train", "comparable": True, "blocks": 21048, "minutes": 2, "size": "144 x 40 x 42",
+     "verdict": "Compact and coherent: a black locomotive with a curling smoke plume, a gold bell and a cab, a tender, two red "
+                "passenger cars with windows and a yellow stripe, a platform with a canopy, trees. Everything sits on the track (3 "
+                "tiny floating pieces). Fewer blocks than purple Skippy's v1, but the best composition: every part where it belongs."},
+    {"id": "haiku-agent", "title": "Choo-choo train, Claude Haiku as the agent (purple Skippy's v1 setup)",
+     "model": "Claude Haiku 5.5 in purple Skippy's place: the same Claude Code agent, instructions, folder, runtime and one-line "
+              "request as v1, context capped at 138K. About $1.15 of API use",
+     "prompt": "a choo-choo train", "comparable": True, "blocks": 61071, "minutes": 4, "size": "217 x 52 x 66",
+     "verdict": "The fullest scene: a locomotive with cab, dome, bell, cowcatcher and a big smoke plume, a coal tender, coaches with "
+                "rows of windows and a caboose with a cupola, all on the track, a raised platform, a brick-and-wood station house, a "
+                "pond and trees. The coaches run together into one long body. Like-for-like with purple Skippy's v1 (only the model "
+                "differs), it is clearly better, and three times faster."},
 )
