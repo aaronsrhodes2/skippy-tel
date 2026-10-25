@@ -99,14 +99,15 @@ End to end: see "Verified" below.
 - **diarize**, the 47 s three-speaker clip: 3 speakers, 6 turns, every speaker right and every line right, in **18.2 s** (11.8 s finding
   who spoke when on the CPU, 4 s of whisper for six turns).
 
-- **search_memory**, "what did we decide about the steam link asking for a PIN?": the right conversation (the 2026-10-01 Steam Link
-  session) comes back first. Through the reporter's `run_job` the search finished in the service but the reporter had stopped waiting:
-  **484 s** against a 480 s limit, with another pop-up's GPU benchmark running on the card at the same time. Nearly all of it was
-  loading the two models onto the card: inside the Docker VM, host-to-card copies ran at ~20 MB/s while the card was shared
-  (1.1 GB of raw tensors in 55 s; reading the file itself takes 8 s). On the quiet card in the benchmark above (host Python), the same
-  load is under a minute and a search is 2-3 s once loaded. **Still to verify: one search on a quiet card through the reporter.**
-  If per-search loading stays slow in Docker, the choices are keeping the two models resident (2.4 GB of the card, as the voices
-  hold 3 GB), or moving them to skippy-core.
+- **search_memory**, "what did we decide about the steam link asking for a PIN?", through the reporter's `run_job` (GPU lock, Ollama
+  unloaded) on a card with no other GPU job: the right answer first (the 2026-10-01 Steam Link session's turn that found the Sunshine +
+  Moonlight fix, relevance 0.91), in **309.5 s**. Nearly all of that is putting the two models on the card: the refresh (which loads
+  the embedder) 255 s for 43 new passages, the reranker 47 s; the vector search and reranking themselves take about a second.
+  Inside the Docker VM, host-to-card copies ran at ~20 MB/s (1.1 GB of raw tensors in 55 s; reading the file itself takes 8 s),
+  against under a minute for the same load in host Python. An earlier run, with another pop-up's benchmark on the card, took 484 s.
+  **So a search works but takes ~5 minutes, nearly all of it model loading.** The fix is one of: keep the two models resident on the
+  card (2.4 GB, as the voices hold 3 GB; a search would then take seconds), give the Docker VM more memory (the slow copies came with
+  a VM short of RAM), or move them to skippy-core. That is the Captain's call; until then `est_seconds` is 120 (the reporter waits 8 min).
 
 ## Run it
 
