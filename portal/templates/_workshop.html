@@ -418,6 +418,15 @@
     function shot(p) {
       if (!/^[a-f0-9]{8,32}$/.test(p.task || "") || !Number.isInteger(p.n)) return el("div", "act", "› a screenshot");
       const src = IMAGE + "?task=" + encodeURIComponent(p.task) + "&n=" + p.n;
+      // Not a picture: a 3D model to rotate, a player, or a download, open in place in the reply (SKIPPY_MODEL / AUDIO / VIDEO / FILE).
+      // Everything is made on skippy-pc and shown here: the browser keeps nothing (the Captain, 2026-10-25).
+      const kind = p.mime === "model/gltf-binary" ? "model" : /^video\//.test(p.mime || "") ? "video"
+                 : p.mime === "audio/midi" || p.mime === "application/zip" ? "file" : /^audio\//.test(p.mime || "") ? "audio" : "";
+      if (kind && window.SkippyArtifacts) {
+        const titles = {model: "3D model", video: "Video", audio: "Sound", file: p.mime === "audio/midi" ? "MIDI file" : "Zip"};
+        const spec = SkippyArtifacts.fromMedia({kind: kind, url: src, title: titles[kind]}); spec.open = true;
+        return SkippyArtifacts.card(spec);
+      }
       const a = el("a", "shotlink"); a.href = src; a.target = "_blank"; a.rel = "noopener";
       const img = el("img", "shot"); img.alt = "Screenshot of the change"; img.src = src;
       img.addEventListener("error", () => a.replaceChildren(el("div", "act", "› the screenshot is gone (the portal restarted since)")));
@@ -534,7 +543,7 @@
       const d = r && r.ok && r.data && typeof r.data === "object" ? r.data : null;
       if (d && d.state !== "unknown") {            // a stalled or offline read is still a read: keep what it carries
         if (Array.isArray(d.events)) d.events.forEach(e => {
-          if (e && e.t === "image" && Number.isInteger(e.n)) job.turn.parts.push({t: "image", n: e.n, task: job.task});
+          if (e && e.t === "image" && Number.isInteger(e.n)) job.turn.parts.push({t: "image", n: e.n, task: job.task, mime: e.mime});
           else if (e && (e.t === "text" || e.t === "tool" || e.t === "ship" || e.t === "picture" || e.t === "popup")) job.turn.parts.push(e);
         });
         if (typeof d.next === "number" && d.next > job.after) job.after = d.next;   // never back: a portal that was just rebuilt holds fewer events than this page has

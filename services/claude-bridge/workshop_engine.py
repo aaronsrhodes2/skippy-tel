@@ -229,7 +229,11 @@ MAX_SHOTS = 3                      # pictures one run may attach (SKIPPY_IMAGE l
 # A picture the agent shows: up to 12 MB (a 4K screenshot, a full-size picture). It was 400 KB, which the event pipe needed, not the
 # Captain; and it was named MAX_IMAGE_BYTES too, which silently capped the pictures HE attaches (above, 3 MB) at 400 KB as well.
 MAX_SHOT_BYTES = 12 * 1024 * 1024
-_IMAGE_LINE = re.compile(r"^[ \t]*`?SKIPPY_IMAGE:[ \t]*(\S[^\n`]*?)[ \t]*`?[ \t]*$", re.M)
+# `SKIPPY_MODEL: <file.glb>` is the same, for a 3D model (a voxel build from tools/voxel/render.py --glb): the chat shows it inline
+# as a model to rotate (2026-10-25: the Captain wants 3D in the chat itself, not a file he can't reach from a browser).
+# SKIPPY_AUDIO / SKIPPY_VIDEO / SKIPPY_FILE the same for sound, video and a file to save (MIDI, a zip of stems): one rule for every
+# result, nothing ever left as a path on skippy-pc.
+_IMAGE_LINE = re.compile(r"^[ \t]*`?SKIPPY_(?:IMAGE|MODEL|AUDIO|VIDEO|FILE):[ \t]*(\S[^\n`]*?)[ \t]*`?[ \t]*$", re.M)
 
 
 # A picture the agent wants MADE (not a file it has): `SKIPPY_PICTURE: <a detailed description>` in its reply. The bridge gives it
@@ -286,7 +290,25 @@ def split_images(text: str) -> tuple[str, list[str]]:
 
 
 def image_mime(data: bytes) -> str | None:
-    """image/png or image/jpeg by the file's own first bytes (never by its name), else None."""
+    """What the agent may show in the chat, by the file's own first bytes (never by its name), else None: a picture, a 3D model
+    (binary glTF 2), sound (mp3, wav, ogg, flac), video (mp4), or a file to save (MIDI, zip). The same rules as the portal's
+    workshop.sniff (a test keeps them equal): the browser is only a window, everything is made here and shown there."""
+    if data[:4] == b"glTF" and data[4:8] == b"\x02\x00\x00\x00":
+        return "model/gltf-binary"                     # a binary glTF, version 2
+    if data[:3] == b"ID3" or (len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0):
+        return "audio/mpeg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return "audio/wav"
+    if data[:4] == b"OggS":
+        return "audio/ogg"
+    if data[:4] == b"fLaC":
+        return "audio/flac"
+    if data[4:8] == b"ftyp":
+        return "video/mp4"
+    if data[:4] == b"MThd":
+        return "audio/midi"
+    if data[:4] == b"PK\x03\x04":
+        return "application/zip"
     if data[:8] == b"\x89PNG\r\n\x1a\n":
         return "image/png"
     if data[:3] == b"\xff\xd8\xff":
@@ -1256,7 +1278,7 @@ class Workshop:
                     data = f.read(MAX_SHOT_BYTES + 1)
             mime = image_mime(data)
             if not inside or mime is None or len(data) > MAX_SHOT_BYTES:
-                run.emit({"t": "text", "text": f"(couldn't attach the picture {name}: it must be a PNG or JPEG of at "
+                run.emit({"t": "text", "text": f"(couldn't attach the picture {name}: it must be a PNG, JPEG or .glb of at "
                                                 f"most {MAX_SHOT_BYTES // (1024 * 1024)} MB inside my clone)"})
                 continue
             run.emit({"t": "image", "mime": mime, "name": name, "b64": base64.b64encode(data).decode("ascii")})

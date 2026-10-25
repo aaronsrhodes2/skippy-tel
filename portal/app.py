@@ -1506,7 +1506,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         resp = app.response_class(data, mimetype=mime)
         resp.headers["X-Content-Type-Options"] = "nosniff"
         resp.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
-        resp.headers["Content-Disposition"] = "inline; filename=screenshot." + ("png" if mime == "image/png" else "jpg")
+        ext = {"image/png": "png", "image/jpeg": "jpg", "model/gltf-binary": "glb", "audio/mpeg": "mp3", "audio/wav": "wav",
+               "audio/ogg": "ogg", "audio/flac": "flac", "video/mp4": "mp4", "audio/midi": "mid", "application/zip": "zip"}.get(mime, "bin")
+        how = "attachment" if mime in workshop_mod.SAVE_ONLY else "inline"     # MIDI and zips are saved; the rest shows in the chat
+        resp.headers["Content-Disposition"] = f"{how}; filename=skippy-{request.args.get('n', type=int, default=0)}.{ext}"
         resp.headers["Cache-Control"] = "private, no-store"
         return resp
 

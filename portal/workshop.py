@@ -146,6 +146,39 @@ MAX_PUSH = 20 * 1024 * 1024     # one push from home (POST /home/workshop/<task>
 _B64 = re.compile(r"[A-Za-z0-9+/]+={0,2}")
 
 
+# What the agent may show, by its own first bytes: a picture, a 3D model (binary glTF 2, from tools/voxel/render.py --glb), sound,
+# video, or a file to save. The chat shows each inline (an image, a model to rotate, a player) or as a one-tap download: the browser
+# is only a window, everything is made on skippy-pc (the Captain, 2026-10-25). Served as exactly that type with nosniff: never
+# anything a browser would run. The bridge's workshop_engine.image_mime has the same rules (a test keeps them equal).
+def sniff(data: bytes) -> str | None:
+    if data[:4] == b"glTF" and data[4:8] == b"\x02\x00\x00\x00":
+        return "model/gltf-binary"
+    if data[:3] == b"ID3" or (len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0):
+        return "audio/mpeg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return "audio/wav"
+    if data[:4] == b"OggS":
+        return "audio/ogg"
+    if data[:4] == b"fLaC":
+        return "audio/flac"
+    if data[4:8] == b"ftyp":
+        return "video/mp4"
+    if data[:4] == b"MThd":
+        return "audio/midi"
+    if data[:4] == b"PK\x03\x04":
+        return "application/zip"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    return None
+
+
+MAGICS = ("image/png", "image/jpeg", "model/gltf-binary", "audio/mpeg", "audio/wav", "audio/ogg", "audio/flac", "video/mp4",
+          "audio/midi", "application/zip")
+SAVE_ONLY = ("audio/midi", "application/zip")            # nothing a browser plays: a download card
+
+
 def image_event(event) -> tuple[dict, bytes] | None:
     """A screenshot from the bridge ({"t": "image", mime, name, b64}), or None. Exactly that shape; the bytes must decode,
     be at most MAX_IMAGE_BYTES, and BE the type they claim by their own first bytes (PNG or JPEG only): the portal serves
@@ -153,7 +186,7 @@ def image_event(event) -> tuple[dict, bytes] | None:
     if not isinstance(event, dict) or set(event) != {"t", "mime", "name", "b64"} or event["t"] != "image":
         return None
     mime, name, b64 = event["mime"], event["name"], event["b64"]
-    if mime not in ("image/png", "image/jpeg") or not isinstance(name, str) or not isinstance(b64, str):
+    if mime not in MAGICS or not isinstance(name, str) or not isinstance(b64, str):
         return None
     if len(b64) > (MAX_IMAGE_BYTES * 4) // 3 + 4 or not _B64.fullmatch(b64):
         return None
@@ -161,8 +194,7 @@ def image_event(event) -> tuple[dict, bytes] | None:
         data = base64.b64decode(b64, validate=True)
     except (ValueError, binascii.Error):
         return None
-    magic = b"\x89PNG\r\n\x1a\n" if mime == "image/png" else b"\xff\xd8\xff"
-    if not data.startswith(magic) or len(data) > MAX_IMAGE_BYTES:
+    if sniff(data) != mime or len(data) > MAX_IMAGE_BYTES:
         return None
     clean_name = re.sub(r"[^A-Za-z0-9._-]", "_", name)[:80] or "screenshot"
     return {"t": "image", "mime": mime, "name": clean_name}, data

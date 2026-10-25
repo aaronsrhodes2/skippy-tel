@@ -78,7 +78,58 @@ def test_it_is_served_as_its_type_with_nosniff_and_only_to_its_owner(env):
     assert resp.status_code == 200 and resp.data == PNG and resp.mimetype == "image/png"
     assert resp.headers["X-Content-Type-Options"] == "nosniff"
     assert resp.headers["Content-Security-Policy"] == "default-src 'none'; sandbox"
-    assert resp.headers["Content-Disposition"] == "inline; filename=screenshot.png"
+    assert resp.headers["Content-Disposition"] == "inline; filename=skippy-0.png"
     assert client.get("/me/workshop/image?task=abcd1234&n=1").mimetype == "image/jpeg"
     for bad in ("task=abcd1234&n=2", "task=nope&n=0", "task=abcd1234&n=x", "task=abcd1234"):
         assert client.get(f"/me/workshop/image?{bad}").status_code == 404
+
+
+def test_a_3d_model_is_accepted_by_its_own_bytes_and_served_as_a_model():
+    glb = b"glTF\x02\x00\x00\x00" + b"\x00" * 100
+    event, data = workshop_mod.image_event(img(glb, "model/gltf-binary", "train.glb"))
+    assert event["mime"] == "model/gltf-binary" and data == glb
+    assert workshop_mod.image_event(img(PNG, "model/gltf-binary", "fake.glb")) is None        # a PNG claiming to be a model
+    app = portal.create_app(dict(SETTINGS), vm=FakeVm(), skippy=FakeSkippy())
+    app.extensions["workshop"].push("abcd1234", ADMIN, CONV, 0, [img(glb, "model/gltf-binary", "train.glb")], "done", None)
+    client = app.test_client()
+    login(client, ADMIN)
+    got = client.get("/me/workshop/image?task=abcd1234&n=0")
+    assert got.mimetype == "model/gltf-binary" and got.headers["Content-Disposition"] == "inline; filename=skippy-0.glb" and got.data == glb
+
+
+def test_the_agents_transcript_draws_a_model_with_the_chats_3d_card():
+    from pathlib import Path
+    page = (Path(portal.__file__).parent / "templates" / "_workshop.html").read_text(encoding="utf-8")
+    assert 'p.mime === "model/gltf-binary"' in page and "SkippyArtifacts.card(spec)" in page and "mime: e.mime" in page
+
+
+
+@pytest.mark.parametrize("data, mime, how", [
+    (b"ID3" + b"\x00" * 60, "audio/mpeg", "inline"), (b"RIFF\x00\x00\x00\x00WAVEfmt " + b"\x00" * 40, "audio/wav", "inline"),
+    (b"OggS" + b"\x00" * 60, "audio/ogg", "inline"), (b"fLaC" + b"\x00" * 60, "audio/flac", "inline"),
+    (b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 60, "video/mp4", "inline"),
+    (b"MThd\x00\x00\x00\x06" + b"\x00" * 40, "audio/midi", "attachment"), (b"PK\x03\x04" + b"\x00" * 60, "application/zip", "attachment"),
+])
+def test_sound_video_and_files_come_back_into_the_chat_never_as_a_path(data, mime, how):
+    """The browser is only a window (the Captain, 2026-10-25): what the agent makes on skippy-pc is played or saved from the chat."""
+    assert workshop_mod.image_event(img(data, mime, "x"))[0]["mime"] == mime
+    assert workshop_mod.image_event(img(data, "image/png", "x")) is None              # claiming another type: refused
+    app = portal.create_app(dict(SETTINGS), vm=FakeVm(), skippy=FakeSkippy())
+    app.extensions["workshop"].push("abcd1234", ADMIN, CONV, 0, [img(data, mime, "x")], "done", None)
+    client = app.test_client()
+    login(client, ADMIN)
+    got = client.get("/me/workshop/image?task=abcd1234&n=0")
+    assert got.mimetype == mime and got.headers["Content-Disposition"].startswith(how) and got.headers["X-Content-Type-Options"] == "nosniff"
+
+
+def test_the_bridge_and_the_portal_sniff_the_same_way():
+    """The bridge decides what may be sent, the portal what may be served: one rule, or something made is lost on the way."""
+    import ast
+    from pathlib import Path
+    src = (Path(portal.__file__).parents[1] / "services" / "claude-bridge" / "workshop_engine.py").read_text(encoding="utf-8")
+    fn = next(n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef) and n.name == "image_mime")
+    space: dict = {}
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "image_mime", "exec"), space)   # just that function, without the bridge's imports
+    samples = [b"glTF\x02\x00\x00\x00", b"ID3\x04", b"\xff\xfb\x90", b"RIFF\x00\x00\x00\x00WAVE", b"OggS", b"fLaC",
+               b"\x00\x00\x00\x18ftypisom", b"MThd", b"PK\x03\x04", PNG, JPEG, b"<html>", b"glTF\x01\x00\x00\x00"]
+    assert [space["image_mime"](s) for s in samples] == [workshop_mod.sniff(s) for s in samples]
