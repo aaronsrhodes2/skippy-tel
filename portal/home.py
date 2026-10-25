@@ -249,6 +249,12 @@ class Home:
         self.touch_chat()
         return self.submit(kind, _owner=owner, _ttl=ttl, **payload)
 
+    def patient_jobs(self) -> dict:
+        """(a copy) The queued jobs the patient queue holds back or hands out: id -> {"job", "sent", "created", ...}."""
+        with self._lock:
+            return {i: dict(j) for i, j in self._jobs.items() if j["job"].get("kind") in ("make_image", "make_music")
+                    and not j["event"].is_set()}
+
     def has(self, job_id: str) -> bool:
         return job_id in self._jobs
 

@@ -232,3 +232,14 @@ def test_the_agents_transcript_shows_its_pictures_with_the_chats_waiting_card():
     assert "window.SkippyWaitCard = waitCard" in (folder / "_chat.html").read_text(encoding="utf-8")
     page = (folder / "_workshop.html").read_text(encoding="utf-8")
     assert 'p.t === "picture"' in page and page.count('e.t === "picture"') == 2 and "SkippyWaitCard(" in page
+
+
+def test_the_queue_says_where_each_job_is_to_whoever_holds_the_home_token(world):
+    item = ask(world, "make_image", {"prompt": "a dog"})["media"][0]
+    c = world["client"]
+    assert c.get("/home/patient").status_code == 401
+    (row,) = c.get("/home/patient", headers=world["H"]).get_json()["jobs"]
+    assert row["id"] == item["job_id"] and row["kind"] == "make_image" and "quiet for 5 minutes" in row["where"]
+    quiet(world)
+    handed(world)
+    assert c.get("/home/patient", headers=world["H"]).get_json()["jobs"][0]["where"] == "handed out"

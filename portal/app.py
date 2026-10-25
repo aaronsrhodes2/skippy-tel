@@ -955,6 +955,33 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         resp.headers["Cache-Control"] = "no-store"
         return resp
 
+    @app.get("/home/patient")
+    def home_patient():
+        """The picture and song queue as the portal sees it (patient.py): every job still owed, where it is (in line and why,
+        handed out, or missing from this process's queue) and how old. For whoever holds the home token (skippy-pc, the
+        sessions working on it): a job that sat for half an hour without a word is how the 2026-10-24 dog was found."""
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        now, out = time.time(), []
+        live = home.patient_jobs()
+        for job_id, meta in pics.waiting().items():
+            j = live.get(job_id)
+            box = meta.get("box") or "pc"
+            if j is None:
+                where = "not in the queue (put back on the next report)"
+            elif j["sent"]:
+                where = "handed out"
+            else:
+                ok, why = pics.ready(box, gpu_for(box))
+                where = "next up" if ok else why
+                if ok and patient_hold(j, live.values()):
+                    where = "behind an older job on " + box
+            out.append({"id": job_id, "kind": meta.get("kind"), "box": box, "age_s": int(now - (meta.get("at") or now)),
+                        "where": where})
+        resp = jsonify(jobs=sorted(out, key=lambda r: -r["age_s"]))
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
     # ── The old Bilby page (a mirror of the Mac's DJ decks) is gone: Bilby's Audio Service below is where the music is ──
     # Its address, and every address under it (state.json, art), still lead somewhere: old bookmarks, a home-screen
     # shortcut and the links in old Discord posts land on the player. (GET only: nothing posts there any more.)
@@ -1800,6 +1827,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         if not home.can("make_image") or home.has(picture_id) or pics.state(picture_id, owner, True) != "unknown":
             return
         PatientJobs(owner).start("make_image", owner, prompt=prompt, width=1024, height=1024, _id=picture_id)
+        print(json.dumps({"event": "agent_picture_queued", "job": picture_id}), flush=True)
     workshop.on_picture = agent_picture
 
     def tools_for(user, trace: str = "") -> chat_tools.ChatTools:

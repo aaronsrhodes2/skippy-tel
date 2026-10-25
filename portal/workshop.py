@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 import re
 import secrets
 import threading
@@ -591,8 +592,8 @@ class Workshop:
         for who, picture_id, prompt in pictures:                    # outside the lock: it writes to the bucket
             try:
                 self.on_picture(who, picture_id, prompt)
-            except Exception:  # noqa: BLE001 — a picture that can't be queued must never fail the reporter's push
-                pass
+            except Exception as exc:  # noqa: BLE001 — a picture that can't be queued must never fail the reporter's push
+                print(json.dumps({"event": "agent_picture_failed", "job": picture_id, "why": str(exc)[:300]}), flush=True)
         if final_news is not None and self.on_final is not None:
             try:
                 self.on_final(final_news)
