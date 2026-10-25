@@ -276,6 +276,16 @@ def test_matter_joins_the_stack_only_when_core_env_says_so(tmp_path, monkeypatch
     assert d.env("")["MATTER_ARGS"] == "--primary-interface eno1 --bluetooth-adapter 0" and d.env("")["CORE_MATTER"] == "1"
 
 
+def test_the_3d_popups_join_the_stack_only_when_core_env_says_so(tmp_path, monkeypatch):
+    for k in dep.DEFAULTS:
+        monkeypatch.delenv(k, raising=False)
+    f = tmp_path / "core.env"
+    f.write_text("CORE_GPU=1\n")
+    assert "core/popups-3d/compose.yml" not in dep.Deployer(dep.load_settings(str(f)), log=lambda m: None).compose_files()
+    f.write_text("CORE_GPU=1\nCORE_POPUPS3D=1\n")
+    assert dep.Deployer(dep.load_settings(str(f)), log=lambda m: None).compose_files()[-2:] == ["-f", "core/popups-3d/compose.yml"]
+
+
 def test_the_matter_compose_file_is_pinned_on_the_host_network_and_keeps_its_fabric():
     from pathlib import Path
     text = (Path(dep.__file__).resolve().parents[1] / "compose.matter.yml").read_text(encoding="utf-8")

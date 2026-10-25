@@ -20,7 +20,8 @@ Every run writes ${CORE_STATE}/deployer/status.json (what the home reporter will
 (last good key, bad keys). Settings: /etc/skippy-core/core.env (KEY=VALUE; the process environment overrides it):
 REPO_DIR, REMOTE, BRANCH, GITHUB_REPO, GITHUB_TOKEN, CI_WORKFLOW ("" = no CI gate: the simulator), CORE_FULL,
 CORE_STATE, MODELS_ROOT, CORE_GPU (0 = no /dev/dri: the simulator), CORE_MATTER (1 = the house's Matter controller too:
-core/compose.matter.yml, set up by core/install/matter.sh, which also writes MATTER_ARGS), CORE_VAULT_ENV, MUSIC_ROOT, SMOKE_WAIT,
+core/compose.matter.yml, set up by core/install/matter.sh, which also writes MATTER_ARGS), CORE_POPUPS3D (1 = the quality 3D
+and video pop-ups too: core/popups-3d/compose.yml, a ~20 GB ROCm image, so never in the simulator or CI), CORE_VAULT_ENV, MUSIC_ROOT, SMOKE_WAIT,
 LLM_API_KEY (llama-swap's key: the render, the shim and the smoke test all use it; "" = an open llm port).
 
     deployer.py run        one pass (what the timer runs)
@@ -50,6 +51,7 @@ DEFAULTS = {
     "CORE_FULL": "", "CORE_STATE": "/var/lib/skippy-core", "MODELS_ROOT": "/srv/models", "CORE_GPU": "1",
     "CORE_VAULT_ENV": "/etc/skippy-core/vault.env", "MUSIC_ROOT": "/srv/music", "SMOKE_WAIT": "900",
     "OLLAMA_MODEL": "qwen3:8b", "LLM_API_KEY": "", "CORE_MATTER": "0", "MATTER_ARGS": "",
+    "CORE_POPUPS3D": "0",
 }
 KEEP_BAD = 50
 
@@ -191,6 +193,8 @@ class Deployer:
             files += ["-f", "core/compose.gpu.yml"]
         if self.s["CORE_MATTER"] == "1":
             files += ["-f", "core/compose.matter.yml"]
+        if self.s["CORE_POPUPS3D"] == "1":
+            files += ["-f", "core/popups-3d/compose.yml"]
         return files
 
     def models(self, cmd: str, full: str) -> subprocess.CompletedProcess:
