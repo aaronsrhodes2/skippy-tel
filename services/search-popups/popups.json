@@ -1,0 +1,53 @@
+{
+  "_doc": "The search-speech pop-ups (docs/popups.md; benchmarks and choices: docs/search-speech-popups.md). Containers: compose.yml in this folder.",
+  "popups": [
+    {
+      "name": "search_memory",
+      "family": "search-speech",
+      "box": "pc",
+      "tier": "quick",
+      "url_env": "SEARCH_MEMORY_URL",
+      "url": "http://skippy-popup-search:47430",
+      "endpoint": "/run",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string", "description": "The question, in the Captain's own words: what was said, decided, built or asked about."},
+          "k": {"type": "integer", "description": "How many passages to bring back, 1-20 (default 6)."},
+          "sources": {"type": "array", "items": {"type": "string", "enum": ["agent", "memory", "mentat"]},
+                      "description": "Only these: agent (the private Skippy's conversations), memory (the Skippy Memory archive of every AI chat), mentat (Mentat's research log). Leave out for all three."}
+        },
+        "required": ["query"],
+        "additionalProperties": false
+      },
+      "outputs": ["text/plain", "application/json"],
+      "est_seconds": 30,
+      "vram_gb": 3,
+      "audience": "admin",
+      "description": "Searches the Captain's own past by meaning, not keywords: his conversations with the private Skippy, the Skippy Memory archive of his chats with every AI, and Mentat's research log. Returns the best matching passages, each with its source file, date and place in the conversation. Use it when he asks what he said, decided or worked on before ('what did we decide about...', 'when did I ask about...'). Runs entirely on skippy-pc."
+    },
+    {
+      "name": "diarize",
+      "family": "search-speech",
+      "box": "pc",
+      "tier": "quick",
+      "url_env": "DIARIZE_URL",
+      "url": "http://skippy-popup-diarize:47431",
+      "endpoint": "/run",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "format": {"type": "string", "enum": ["text", "json"], "description": "text (default): a readable transcript; json: every turn with its times."}
+        },
+        "additionalProperties": false
+      },
+      "media_in": ["audio/*"],
+      "media_required": true,
+      "outputs": ["text/plain", "application/json"],
+      "est_seconds": 60,
+      "vram_gb": 0,
+      "audience": "admin",
+      "description": "Turns an attached recording with several people talking (a meeting, a game session, a call) into a transcript labelled by speaker: who spoke when, then what each said (Speaker 1, Speaker 2, ... with times). Non-English speech comes back translated to English. Needs an audio attachment."
+    }
+  ]
+}
