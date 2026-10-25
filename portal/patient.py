@@ -24,7 +24,8 @@ import tabletop
 PREFIX = "chat-pictures/"           # (the name it had when it held pictures only; songs live here too)
 JOB_TTL = 24 * 3600                 # how long a job may wait and work before the portal gives up on it
 QUIET_S = 300                       # a machine is quiet after this long without a chat, voice or agent run on it
-FREE_PCT = 60                       # ...and its GPU (where the portal can see it) has at least this much memory free: skippy-pc's card
+FREE_PCT = 30                       # skippy-pc: the card is at least this free (the reporter unloads Ollama's model, ~40% of it, just
+                                    # before it draws, so 30% now is ~70% then. It was 60, which the resident voices + Ollama never left)
 FREE_GIB = {"core": 35}             # skippy-core's memory is shared with the LLMs (chat, vision and the coder resident: ~46 GB left), so
                                     # there it's GB, not a share: enough for the picture studio to load (Qwen-Image-2512 Q8 + its Q8 text
                                     # encoder + VAE ~30 GB, held only while drawing: the pictures session, 2026-10-24)
