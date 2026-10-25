@@ -60,6 +60,11 @@ reporter or the shelved phone apps use goes missing. A new human-facing page is 
 ## Tier trigger phrases (in intent.py)
 
 - Default → Ollama (OLLAMA_MODEL: qwen3:8b in the vault; config.py's fallback is still qwen2.5:7b)
+
+**There is no Ollama on skippy-pc any more** (2026-10-25): every `OLLAMA_URL`/`OLLAMA_BASE_URL` is `http://skippy-core:11434`,
+skippy-core's Ollama shim (`core/ollama-shim`, tailnet only through `tailscale serve --http=11434`), which answers every old name
+(qwen3:8b, qwen2.5:7b) with Core's resident chat model. skippy-pc's graphics card is left to the pop-ups, whisper and the studios.
+Uptime Kuma is gone too: the doctor (`portal/doctor.py` + the reporter's `doctor_checks.py`) watches every service.
 - "put on your thinking cap" → Anthropic Claude
 - "ask nagatha" / "ask gemini" → Gemini (Nagatha persona; flask-api only: the portal chat dropped Gemini 2026-10-23)
 
@@ -173,7 +178,7 @@ and jobs; while someone chats, the reporter also polls `GET /home/jobs` every
 
 - Physics in Skippy's chat = `ask_mentat` → a job → `mentat-home` (same
   override file: mentat/Dockerfile with `MENTAT_USE_LLM=1`, Qwen via
-  `ollama:11434`). No Qwen → Mentat answers 503 and Skippy says it's offline;
+  `skippy-core:11434`). No Qwen → Mentat answers 503 and Skippy says it's offline;
   there is deliberately NO fallback to the cloud copy (keywords only), which
   serves the public Experiments playground.
 

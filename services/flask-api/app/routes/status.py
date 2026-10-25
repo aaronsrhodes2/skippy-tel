@@ -8,6 +8,7 @@ instead. The home reporter on skippy-pc POSTs this JSON to the portal every
 Shows: service health, Ollama models, photo-tag stats, UI telemetry, Drive
 connectivity, UPS status.
 """
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -17,7 +18,7 @@ from flask import Blueprint, jsonify
 
 bp = Blueprint("status", __name__)
 
-_OLLAMA_URL     = "http://ollama:11434"
+_OLLAMA_URL     = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")   # skippy-core's Ollama shim on skippy-pc
 _WHISPER_URL    = "http://skippytel-whisper:8000"
 _UPS_URL        = "http://host.docker.internal:9338"
 _TAGS_DB        = Path("/drive-state/photo_tags.db")
