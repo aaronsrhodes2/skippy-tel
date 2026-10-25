@@ -7,7 +7,7 @@ language models (chat, coder and vision, ~75 GB) keep their memory between jobs.
 | Pop-up | What it makes | Model | Seconds (measured) | Peak GiB | Licence |
 |---|---|---|---|---|---|
 | `image_to_3d` | a picture of one object -> a textured `.glb` | Hunyuan3D-2: shape 2.0-turbo + FlashVDM, Paint 2.0-turbo | ~60-140 s | 16.1 | Tencent Hunyuan 3D 2.0 Community |
-| `text_to_3d` | a description -> a textured `.glb` | a picture from the core image-studio (Qwen-Image, 20 steps), then `image_to_3d` | see below | ~30 (the picture; the two never overlap) | Apache 2.0 + the above |
+| `text_to_3d` | a description -> a textured `.glb` | a picture from the core image-studio (Qwen-Image, 20 steps), then `image_to_3d` | ~500 s | ~30 (the picture; the two never overlap) | Apache 2.0 + the above |
 | `make_video` | a description (+ a first frame) -> 1-4 s of `.mp4`, no sound | Wan 2.2 TI2V-5B, fp16, through stable-diffusion.cpp's Vulkan build | ~19 min for 2 s, ~31 min for 3 s, ~45 min for 4 s | 20 | Apache 2.0 |
 
 All three are `admin` (the Captain), `box: core`, `tier: quality`, so the portal's patient queue starts one only after skippy-core has
@@ -20,7 +20,8 @@ been quiet for 5 minutes with 35 GB free and the GPU under 20% busy, and only on
   minis. Works best on one whole object on a plain background: the background remover kept a few clutter blocks that touched the
   object. 40,000 faces, ~3 MB.
 - **`text_to_3d`: ship it as a chain**, not a model of its own: the quality picture studio draws the object on a plain white
-  background in a product-shot style, then `image_to_3d` makes it. Costs nothing extra on disk.
+  background in a product-shot style, then `image_to_3d` makes it. Costs nothing extra on disk. The test dwarf miniature (about 8
+  minutes) came out as a painted mini on its base, ready for the tabletop.
 - **`make_video`: ship it, slow.** The test clip (a fox trotting through snow) has real motion and a coherent scene. It runs about
   10 minutes per second of clip at 1280x704, so it is capped at 4 s. Wan's own Chinese negative prompt is used: in English a
   "subtitles" smudge appeared at the bottom of the frame.
@@ -77,7 +78,10 @@ Peak GiB is GTT (the iGPU's share of the 128 GB) above where it was when the job
 
 So 3 s is ~31 min and 4 s ~45 min with the GPU decode; 5 s would pass an hour.
 
-**text_to_3d**: TEXT_TO_3D_RESULT
+**text_to_3d** (through `reporter.popup_job`): "a dwarf warrior tabletop miniature holding a double-bladed axe, painted, bronze helmet,
+braided red beard". The picture (Qwen-Image, 1024 px, 20 steps) 414 s, then image_to_3d 85 s (background 9 s, shape 42 s, paint 28 s):
+**500 s** in all, a 3.9 MB `.glb`, peak 16.1 GiB for the 3D part. The model is a painted mini on its round base, helmet, braided red
+beard and axe all there; the axe has one blade, not two.
 
 ## Licences (personal use)
 
@@ -109,6 +113,11 @@ So 3 s is ~31 min and 4 s ~45 min with the GPU decode; 5 s would pass an hour.
   (the simulator and CI never build the 11 GB image). Weights in `/srv/models/huggingface/`: `tencent__Hunyuan3D-2` (paint turbo,
   delight, 2.0-turbo shape and VAE), `tencent__Hunyuan3D-2mini`, `Comfy-Org__Wan_2.2_ComfyUI_Repackaged` (TI2V-5B fp16, its VAE),
   `city96__umt5-xxl-encoder-gguf` (Q8_0), and `/srv/models/u2net/models/bria-rmbg.onnx`.
+- **As of 2026-10-24** it was started by hand under the stack's compose project (`docker compose -p skippycore -f core/compose.core.yml
+  -f core/compose.gpu.yml -f core/popups-3d/compose.yml up -d --build --no-deps popups-3d`, `VIDEO_GID`/`RENDER_GID` from
+  `/dev/dri`), because the box's pull timer isn't installed and the doctor's own copy of the deployer
+  (`/opt/skippy-core/doctor/deployer.py`) predates `CORE_POPUPS3D`. Its repairs (restart only, while there is no deploy of record)
+  leave the container alone; a full deploy by that old copy would remove it as an orphan. Updating that copy to main's fixes it.
 - **Health:** `curl -s http://skippy-core:7348/health` from skippy-pc: `ready`, `busy`, each pop-up's `ready` and `peak_gib`, the
   GPU figures. `ready` is image_to_3d and make_video having their models; text_to_3d without the picture studio answers in words.
 - **Logs:** `docker logs skippycore-popups-3d-1` (one line per job: seconds per stage, faces, peak).
