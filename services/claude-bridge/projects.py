@@ -12,6 +12,7 @@ from it, which its prompt spells out). Stdlib only.
 from __future__ import annotations
 
 import json
+import os
 import ntpath
 import posixpath
 import re
@@ -22,6 +23,7 @@ FILE = Path(__file__).with_name("projects.json")
 DEFAULT = "skippytel"                      # the project of a run or conversation that names none (everything before projects)
 MAX_PROJECTS = 40
 _ID = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
+GIT_HOME = os.getenv("SKIPPY_GIT_HOME", "D:/trunk/git")            # the house's bare repositories (docs/no-github.md)
 _REPO = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}")
 _BRANCH = re.compile(r"[A-Za-z0-9._/-]{1,100}")
 
@@ -39,12 +41,12 @@ class Project:
     primary: str            # the Captain's checkout: read-only to the agent except for SkippyTel's service deploys
     clone: str              # the agent's own working copy
     deploy: str = ""        # "skippytel" = the SkippyTel deploy rules in the prompt; "" = the repo's own CLAUDE.md
-    remote: str = ""        # where the clone comes from; "" = https://github.com/<repo>.git
+    remote: str = ""        # where the clone comes from; "" = its home, GIT_HOME/<name>.git (docs/no-github.md)
     inplace: bool = False   # a FOLDER the Captain picked: the agent works right in it (clone == primary), git is the undo
 
     @property
     def url(self) -> str:
-        return self.remote or f"https://github.com/{self.repo}.git"
+        return self.remote or f"{GIT_HOME}/{self.repo.rsplit('/', 1)[-1]}.git"
 
     def public(self) -> dict:
         """What the bridge tells the portal (via /health): no paths, nothing about this PC."""

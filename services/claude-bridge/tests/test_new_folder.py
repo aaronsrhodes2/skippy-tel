@@ -1,24 +1,11 @@
-"""New folder (new_folder.py): the folder, a git repo with a first commit, and the private GitHub repo; when GitHub fails, a
-marker says it is owed and a retry settles it. gh is a fake here: no test ever reaches GitHub."""
-import json
+"""New folder (new_folder.py): the folder, a git repo with a first commit, and its home, a bare repo in the git home (D:\trunk\git
+on skippy-pc; a temporary folder here). When the home can't be made, a marker says it is owed and a retry settles it. Nothing
+here, or in new_folder.py, talks to GitHub."""
 import subprocess
-import sys
 
 import pytest
 
 import new_folder as nf
-
-FAKE_GH = r"""
-import json, os, sys
-log = os.environ["FAKE_GH_LOG"]
-with open(log, "a", encoding="utf-8") as f:
-    f.write(json.dumps(sys.argv[1:]) + "\n")
-mode = os.environ.get("FAKE_GH_MODE", "ok")
-if mode == "fail":
-    print("HTTP 502: GitHub is down", file=sys.stderr); sys.exit(1)
-if mode == "exists":
-    print("GraphQL: Name already exists on this account", file=sys.stderr); sys.exit(1)
-"""
 
 
 @pytest.fixture(autouse=True)
@@ -33,71 +20,64 @@ def test_a_name_is_cleaned_into_a_slug():
 
 
 @pytest.fixture
-def gh(tmp_path, monkeypatch):
-    script = tmp_path / "fake_gh.py"
-    script.write_text(FAKE_GH, encoding="utf-8")
-    log = tmp_path / "gh.log"
-    monkeypatch.setenv("FAKE_GH_LOG", str(log))
-    return [sys.executable, str(script)], log
+def home(tmp_path):
+    return tmp_path / "git-home"
 
 
 def git(*args, cwd):
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True).stdout.strip()
 
 
-def test_it_makes_the_folder_a_repo_with_a_first_commit_and_the_private_github_repo(tmp_path, gh):
-    cmd, log = gh
-    made = nf.create(str(tmp_path), "Star Lanes", gh=cmd)
+def test_it_makes_the_folder_a_repo_with_a_first_commit_and_its_bare_home(tmp_path, home):
+    root = tmp_path / "dev"
+    root.mkdir()
+    made = nf.create(str(root), "Star Lanes", git_home=str(home))
     assert made["name"] == "star-lanes" and made["remote"] == "created" and made["repo"] == "aaronsrhodes2/star-lanes"
-    path = tmp_path / "star-lanes"
+    path = root / "star-lanes"
     assert (path / "CLAUDE.md").is_file() and git("log", "--oneline", cwd=path).endswith("Start star-lanes")
     assert git("branch", "--show-current", cwd=path) == "main"
-    (call,) = [json.loads(l) for l in log.read_text().splitlines()]
-    assert call[:3] == ["repo", "create", "aaronsrhodes2/star-lanes"] and "--private" in call and "--push" in call
+    assert git("remote", "get-url", "origin", cwd=path) == (home / "star-lanes.git").as_posix()
+    assert git("log", "--oneline", "main", cwd=home / "star-lanes.git").endswith("Start star-lanes")     # pushed home
+    assert "github" not in (path / "CLAUDE.md").read_text().lower().replace("never to github", "")
     assert not nf.pending(path)
 
 
 @pytest.mark.parametrize("bad", ["", "x", "!!!", "a" * 41, "9lives"])
-def test_bad_names_are_refused(tmp_path, gh, bad):
+def test_bad_names_are_refused(tmp_path, home, bad):
     with pytest.raises(nf.Refused):
-        nf.create(str(tmp_path), bad, gh=gh[0])
-    assert list(tmp_path.iterdir()) == [tmp_path / "fake_gh.py"]
+        nf.create(str(tmp_path), bad, git_home=str(home))
+    assert list(tmp_path.iterdir()) == []
 
 
-def test_a_taken_name_is_refused_and_nothing_is_touched(tmp_path, gh):
+def test_a_taken_name_is_refused_and_nothing_is_touched(tmp_path, home):
     (tmp_path / "taken").mkdir()
     (tmp_path / "taken" / "keep.txt").write_text("mine")
     with pytest.raises(nf.Refused, match="already exists"):
-        nf.create(str(tmp_path), "taken", gh=gh[0])
+        nf.create(str(tmp_path), "taken", git_home=str(home))
     assert (tmp_path / "taken" / "keep.txt").read_text() == "mine"
 
 
-def test_when_github_fails_the_folder_is_kept_and_marked_then_a_retry_settles_it(tmp_path, gh, monkeypatch):
-    cmd, log = gh
-    monkeypatch.setenv("FAKE_GH_MODE", "fail")
-    made = nf.create(str(tmp_path), "offline-thing", gh=cmd)
-    path = tmp_path / "offline-thing"
-    assert made["remote"] == "pending" and "502" in made["why"] and nf.pending(path)
+def test_when_the_home_is_away_the_folder_is_kept_and_marked_then_a_retry_settles_it(tmp_path, home):
+    root = tmp_path / "dev"
+    root.mkdir()
+    blocked = tmp_path / "not-a-folder"
+    blocked.write_text("a file where the git home should be")
+    made = nf.create(str(root), "offline-thing", git_home=str(blocked))
+    path = root / "offline-thing"
+    assert made["remote"] == "pending" and made["why"] and nf.pending(path)
     assert ".skippy-remote-pending" in (path / ".git" / "info" / "exclude").read_text()     # never committed
-    assert nf.retry(path, gh=cmd)["remote"] == "pending"
-    monkeypatch.setenv("FAKE_GH_MODE", "ok")
-    assert nf.retry(path, gh=cmd) == {"remote": "created", "why": ""} and not nf.pending(path)
-    assert nf.retry(path, gh=cmd) is None                                                     # nothing owed any more
+    assert nf.retry(path, git_home=str(blocked))["remote"] == "pending"
+    assert nf.retry(path, git_home=str(home)) == {"remote": "created", "why": ""} and not nf.pending(path)
+    assert nf.retry(path, git_home=str(home)) is None                                         # nothing owed any more
 
 
-def test_without_gh_it_is_marked_pending(tmp_path, monkeypatch):
-    monkeypatch.setattr(nf.shutil, "which", lambda name: None)
-    made = nf.create(str(tmp_path), "no-cli-here")
-    assert made["remote"] == "pending" and "gh" in made["why"]
-
-
-def test_the_bridge_answers_the_new_folders_id_for_the_picker(shop, tmp_path, gh, monkeypatch):
+def test_the_bridge_answers_the_new_folders_id_for_the_picker(shop, tmp_path, home, monkeypatch):
     import workshop_engine as engine
     root = tmp_path / "dev"
     root.mkdir()
+    monkeypatch.setattr(nf, "GIT_HOME", str(home))
     w = engine.Workshop(shop.claude_cmd, sessions=str(tmp_path / "s.json"), dev_root=str(root))
-    monkeypatch.setattr(nf.shutil, "which", lambda name: None)
     got = w.new_folder("Moon Base")
-    assert got["id"] == "f-moon-base" and got["remote"] == "pending" and any(p["id"] == "f-moon-base" for p in w.projects())
+    assert got["id"] == "f-moon-base" and got["remote"] == "created" and any(p["id"] == "f-moon-base" for p in w.projects())
     with pytest.raises(ValueError):
         w.new_folder("moon-base")
