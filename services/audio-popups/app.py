@@ -629,4 +629,4 @@ def native(name: str):
 threading.Thread(target=_unload_when_idle, daemon=True).start()
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "8004")), threaded=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "47440")), threaded=True)

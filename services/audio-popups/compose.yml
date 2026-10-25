@@ -9,7 +9,7 @@ services:
     container_name: skippy-popup-audio
     restart: unless-stopped
     networks: [skippytel]
-    expose: ["8004"]
+    expose: ["47440"]
     environment:
       IDLE_UNLOAD_S: "300"                 # the card goes back to the voices and Ollama five minutes after the last job
     volumes:

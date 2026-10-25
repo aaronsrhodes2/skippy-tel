@@ -1,6 +1,7 @@
 """audio-popups without a GPU: the musical arithmetic (bars to seconds, keys and tempo in the prompt), the audio plumbing that
 needs only numpy, what /health says about missing weights, and every route's refusals. The models themselves are timed by
 bench.py against the real service (docs/audio-popups.md)."""
+import importlib.util
 import io
 import sys
 import wave
@@ -10,8 +11,11 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("flask")
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import app as popups  # noqa: E402
+# Loaded under its own name: CI runs this in one session with the portal's tests, whose `app` is another module.
+_spec = importlib.util.spec_from_file_location("audio_popups_app", Path(__file__).resolve().parents[1] / "app.py")
+popups = importlib.util.module_from_spec(_spec)
+sys.modules["audio_popups_app"] = popups
+_spec.loader.exec_module(popups)
 
 
 @pytest.fixture

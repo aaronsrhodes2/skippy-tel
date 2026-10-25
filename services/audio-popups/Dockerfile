@@ -16,5 +16,5 @@ RUN pip install -r /studio/requirements.txt && pip install --no-deps basic-pitch
 
 WORKDIR /studio
 COPY app.py /studio/app.py
-EXPOSE 8004
+EXPOSE 47440
 ENTRYPOINT ["python", "/studio/app.py"]

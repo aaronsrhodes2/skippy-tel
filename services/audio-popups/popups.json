@@ -1,0 +1,134 @@
+{
+  "_doc": "The audio pop-ups (docs/popups.md; benchmarks, licences and verdicts: docs/audio-popups.md). One container, services/audio-popups (compose.yml in this folder), one endpoint per model. Full songs are NOT here: they stay with make_music (ACE-Step).",
+  "popups": [
+    {
+      "name": "sfx_quick",
+      "family": "audio",
+      "box": "pc",
+      "tier": "quick",
+      "url_env": "SFX_QUICK_URL",
+      "url": "http://skippy-popup-audio:47440",
+      "endpoint": "/run/sfx_quick",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "prompt": {"type": "string", "description": "The sound, in producer's words: 'punchy 808 kick, one shot, long sub tail', 'white noise riser, 3 seconds'."},
+          "seconds": {"type": "number", "description": "Length, 0.5 to 11 (default 3)."},
+          "seed": {"type": "integer", "description": "Repeat an earlier result exactly; leave out for a new one."}
+        },
+        "required": ["prompt"],
+        "additionalProperties": false
+      },
+      "outputs": ["audio/wav"],
+      "est_seconds": 15,
+      "vram_gb": 3,
+      "audience": "admin",
+      "description": "Makes one short sound effect or drum hit for the Captain's electronic music in seconds (Stable Audio Open Small): kicks, snares, hats, risers, impacts, glitches, foley. 0.5 to 11 seconds, a 44.1 kHz stereo WAV he can drop into his DAW. Use for single hits and FX; for tempo-locked loops use sfx_loop; for whole songs use make_music."
+    },
+    {
+      "name": "sfx_loop",
+      "family": "audio",
+      "box": "pc",
+      "tier": "quality",
+      "url_env": "SFX_LOOP_URL",
+      "url": "http://skippy-popup-audio:47440",
+      "endpoint": "/run/sfx_loop",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "prompt": {"type": "string", "description": "The loop or one-shot: 'tech-house hi-hat loop, shuffled', 'deep house chord stab loop, warm Rhodes', 'evolving ambient pad'."},
+          "bpm": {"type": "number", "description": "Tempo, 40-250. With bars, the loop is cut to exactly that many bars so it sits on the DAW's grid."},
+          "bars": {"type": "number", "description": "How many 4/4 bars (1-64; the longest it makes is 47 seconds)."},
+          "key": {"type": "string", "description": "Musical key, e.g. 'A minor', 'F#m', 'Bb major'."},
+          "seconds": {"type": "number", "description": "Length when not given as bpm + bars: 1 to 47 (default 8)."},
+          "loop": {"type": "boolean", "description": "Cut sample-exact with no fade (default true when bpm and bars are given)."},
+          "seed": {"type": "integer", "description": "Repeat an earlier result exactly; leave out for a new one."}
+        },
+        "required": ["prompt"],
+        "additionalProperties": false
+      },
+      "outputs": ["audio/wav"],
+      "est_seconds": 60,
+      "vram_gb": 5,
+      "audience": "admin",
+      "description": "Makes a tempo- and key-aware loop or longer one-shot for the Captain's tracks (Stable Audio Open 1.0): drum loops, hat loops, basslines, chord stabs, arps, pads, textures, up to 47 seconds. Give bpm and bars and it is cut to exactly that length so it loops on the DAW's grid; give a key for tonal parts. Returns a 44.1 kHz stereo WAV. Not for whole songs (make_music) or single quick hits (sfx_quick)."
+    },
+    {
+      "name": "melody_variations",
+      "family": "audio",
+      "box": "pc",
+      "tier": "quality",
+      "url_env": "MELODY_VARIATIONS_URL",
+      "url": "http://skippy-popup-audio:47440",
+      "endpoint": "/run/melody_variations",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "prompt": {"type": "string", "description": "The style to take the melody into: 'melodic techno, 124 BPM, analog lead, driving bass'."},
+          "seconds": {"type": "number", "description": "Length of the result, 4 to 30 (default 12)."},
+          "seed": {"type": "integer", "description": "Repeat an earlier result exactly; leave out for a new one."}
+        },
+        "required": ["prompt"],
+        "additionalProperties": false
+      },
+      "media_in": ["audio/*"],
+      "media_required": true,
+      "outputs": ["audio/wav"],
+      "est_seconds": 60,
+      "vram_gb": 6,
+      "audience": "admin",
+      "description": "Takes a clip the Captain attached (a hummed or played melody, a riff, a loop) and re-imagines it in the style he describes, keeping its melody and harmony (MusicGen stereo-melody; the first 30 seconds of the clip count). Up to 30 seconds of 32 kHz stereo WAV. Good for trying a hook in another genre or arrangement. Sketching only: its licence is non-commercial."
+    },
+    {
+      "name": "stems",
+      "family": "audio",
+      "box": "pc",
+      "tier": "quality",
+      "url_env": "STEMS_URL",
+      "url": "http://skippy-popup-audio:47440",
+      "endpoint": "/run/stems",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "stem": {"type": "string", "enum": ["drums", "bass", "vocals", "other", "instrumental"],
+                   "description": "Just this one, as an mp3 to play in the chat (instrumental = everything but the vocals). Leave out for all four in a zip."},
+          "quality": {"type": "string", "enum": ["best", "fast"], "description": "best (default, htdemucs_ft) or fast (about 4x quicker, a little more bleed)."}
+        },
+        "additionalProperties": false
+      },
+      "media_in": ["audio/*"],
+      "media_required": true,
+      "outputs": ["application/zip", "audio/mpeg"],
+      "est_seconds": 60,
+      "vram_gb": 3,
+      "audience": "admin",
+      "description": "Splits an attached track into drums, bass, vocals and other (Demucs v4) for remixing, sampling or study: a zip of four 320 kbps mp3s, or one stem (or the instrumental) to play in the chat. A second stem of the same clip comes back at once."
+    },
+    {
+      "name": "audio_to_midi",
+      "family": "audio",
+      "box": "pc",
+      "tier": "quick",
+      "url_env": "AUDIO_TO_MIDI_URL",
+      "url": "http://skippy-popup-audio:47440",
+      "endpoint": "/run/audio_to_midi",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "bpm": {"type": "number", "description": "The clip's tempo (default 120), so the notes land on the DAW's grid."},
+          "onset": {"type": "number", "description": "Note-start sensitivity 0.05-0.95 (default 0.5; lower catches more notes)."},
+          "frame": {"type": "number", "description": "Note-hold sensitivity 0.05-0.95 (default 0.3)."},
+          "min_note_ms": {"type": "number", "description": "Shortest note kept, in ms (default 128)."}
+        },
+        "additionalProperties": false
+      },
+      "media_in": ["audio/*"],
+      "media_required": true,
+      "outputs": ["audio/midi"],
+      "est_seconds": 10,
+      "vram_gb": 0,
+      "audience": "admin",
+      "description": "Turns an attached clip (a melody, bassline, chords, a sung or played idea, or a stem from the stems tool) into a MIDI file the Captain drags into his DAW (Spotify Basic Pitch; polyphonic, with pitch bends). Works best on one instrument at a time. Runs on the CPU in seconds."
+    }
+  ]
+}

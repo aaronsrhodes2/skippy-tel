@@ -30,7 +30,7 @@ jobs:
             portal/requirements.txt
             tools/requirements-ci.txt
       - run: pip install -r portal/requirements.txt -r tools/requirements-ci.txt
-      - run: python -m pytest portal/tests memory/tests tools/tests services/home-reporter/tests services/claude-bridge/tests services/wa-trickle/tests mentat/tests core/tests -q -n auto --dist loadfile --durations=10
+      - run: python -m pytest portal/tests memory/tests tools/tests services/home-reporter/tests services/claude-bridge/tests services/wa-trickle/tests services/audio-popups/tests mentat/tests core/tests -q -n auto --dist loadfile --durations=10
 
   flask-api:
     runs-on: ubuntu-latest
