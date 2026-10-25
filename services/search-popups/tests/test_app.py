@@ -54,6 +54,8 @@ def svc(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "ROOTS", {n: tmp_path / n for n in ("agent", "memory", "mentat")})
     monkeypatch.setattr(app, "BRIDGE", "")
     monkeypatch.setattr(app, "_index", index_mod.Index(tmp_path / "s.db", "bge"))
+    monkeypatch.setattr(app, "MODELS", app.Models())
+    monkeypatch.setattr(app, "_cuda", lambda: False)                 # never the real card of whatever machine runs the tests
     return fake
 
 
@@ -125,3 +127,40 @@ def test_not_ready_without_weights(svc, monkeypatch, tmp_path):
 def test_the_question_is_never_logged(svc, capsys):
     app.search("my secret question about the lighthouse", 1)
     assert "secret" not in capsys.readouterr().out
+
+
+def test_resident_models_are_kept_between_searches(svc, monkeypatch):
+    card = {"free": 10.0}
+    monkeypatch.setattr(app, "_cuda", lambda: True)
+    monkeypatch.setattr(app, "free_gib", lambda: card["free"])
+    app.MODELS.load_resident(sleep=lambda s: None)
+    assert app.MODELS.loaded() and app.MODELS.state == "resident" and app.health()["loaded"] is True
+    app.search("the lighthouse door trap", 2)
+    app.search("the rogue and the wire", 2)
+    assert svc.closed == []                                           # resident: nothing unloaded after a search
+    assert app.search("anything", 1)["timing"]["resident"] is True
+
+
+def test_resident_load_waits_for_room_and_asks_ollama_once(svc, monkeypatch):
+    card = {"free": 1.0}
+    asked = []
+    monkeypatch.setattr(app, "_cuda", lambda: True)
+    monkeypatch.setattr(app, "free_gib", lambda: card["free"])
+    monkeypatch.setattr(app, "ollama_unload", lambda: asked.append(1))
+    app.MODELS.load_resident(sleep=lambda s: None, tries=4)
+    assert not app.MODELS.loaded() and "waiting for room" in app.MODELS.state and asked == [1]
+    assert app.MODELS.embedder()[1] is True                           # meanwhile a search borrows (on the CPU: no room on the card)
+    card["free"] = 9.0
+    app.MODELS.load_resident(sleep=lambda s: None)
+    assert app.MODELS.loaded()
+
+
+def test_no_card_means_no_residents(svc):
+    app.MODELS.load_resident(sleep=lambda s: None)
+    assert not app.MODELS.loaded() and "CPU" in app.MODELS.state
+
+
+def test_free_memory_comes_from_nvidia_smi(monkeypatch):
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout="6123\n"))
+    assert round(app.free_gib(), 2) == 5.98

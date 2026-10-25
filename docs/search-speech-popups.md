@@ -5,7 +5,7 @@ skippy-pc. Code, entries and containers: `services/search-popups/` (`popups.json
 
 | pop-up | what it does | models | where it runs |
 |---|---|---|---|
-| `search_memory` | a question in, the passages of the Captain's own text that answer it out, each with its source | BAAI **bge-m3** (embedder) + **bge-reranker-v2-m3** (reranker), MIT, fp16 | skippy-pc's card, loaded per search, under the reporter's GPU lock (Ollama unloaded first) |
+| `search_memory` | a question in, the passages of the Captain's own text that answer it out, each with its source | BAAI **bge-m3** (embedder) + **bge-reranker-v2-m3** (reranker), MIT, fp16 | skippy-pc's card, **resident** (~2.4 GB, loaded at start when there's room) |
 | `diarize` | an attached recording back as a speaker-labelled transcript | pyannote **segmentation-3.0** (MIT) + **WeSpeaker ResNet34** (VoxCeleb), via sherpa-onnx; then the **existing whisper** | skippy-pc's CPU; whisper is the container voice-gate already uses |
 
 ## search_memory
@@ -26,7 +26,16 @@ reply, tool calls named but their output left out), cut into windows of 1,500 ch
 front. Each search starts with a refresh: a file whose mtime and size are unchanged isn't read; a changed file has only its new passages
 embedded (a passage's key is a hash of its place and text). Then bge-m3 finds the 30 nearest passages, bge-reranker-v2-m3 reorders them,
 and the best `k` (default 6) come back as text (or JSON with `format: json`): title, source, date, place in the conversation, relevance,
-an excerpt. The question is never logged. Between searches the service holds no GPU memory.
+an excerpt. The question is never logged.
+
+**Resident** (the Captain's choice, 2026-10-24, after a search through Docker took ~5 minutes of model loading): both models stay on the
+card, ~2.4 GB, like the voices' 3 GB. They load at the container's start, one at a time, each only when the card has 1.3 GB for it plus
+1.5 GB to spare (`VRAM_MARGIN_GB`, as tts-studio keeps), because a full card spills into Docker's 8 GB VM and freezes it. If Ollama is
+holding the room, the service asks it once to unload (the reporter's `free_gpu` does the same before a picture); Ollama reloads on its
+next chat and fits around them. Until both are in, `/health` says why (`models`) and a search borrows what it needs (the card if there's
+room, else the CPU) and lets go after. `vram_gb` is 0: a search takes no GPU lock and doesn't unload Ollama. `SEARCH_RESIDENT=0` puts it
+back to loading per search. What it costs: Ollama's qwen3:8b has 2.4 GB less of the card (it already ran 19 % on the CPU), and the patient
+queue, which waits for 30 % of skippy-pc's card to be free before any picture or pop-up, finds that 2.4 GB less often.
 
 ### Benchmark (2026-10-24, skippy-pc, the real corpus: 4,510 passages, ~5 MB)
 
@@ -51,7 +60,8 @@ index: ~2.5 hours); bge on the CPU is in the table below. On the card both bge
 models together need ~2.4 GB; the card has that only with Ollama out (Ollama's qwen3:8b alone doesn't fit: it runs 19 % on the CPU), which
 is exactly what a pop-up with `vram_gb > 0` gets from the reporter. skippy-core would also do (llama.cpp serves embedding and reranking
 models), but it would need its own llama-swap slots and the text would cross the tailnet for every refresh; the card is enough, so it stays
-on skippy-pc. **Fits beside the resident voices + Ollama? No, not beside Ollama; yes once the reporter has unloaded it (~3 GB headroom left).**
+on skippy-pc. **Fits beside the resident voices + Ollama? Not with all of Ollama's model on the card too (it doesn't fit even alone);
+the search models go first and Ollama keeps what is left, with more of it on the CPU.**
 
 | bge-m3 + bge-reranker-v2-m3, 8 CPU threads (host, fp32) | GPU (fp16) |
 |---|---|
@@ -107,7 +117,12 @@ End to end: see "Verified" below.
   against under a minute for the same load in host Python. An earlier run, with another pop-up's benchmark on the card, took 484 s.
   **So a search works but takes ~5 minutes, nearly all of it model loading.** The fix is one of: keep the two models resident on the
   card (2.4 GB, as the voices hold 3 GB; a search would then take seconds), give the Docker VM more memory (the slow copies came with
-  a VM short of RAM), or move them to skippy-core. That is the Captain's call; until then `est_seconds` is 120 (the reporter waits 8 min).
+  a VM short of RAM), or move them to skippy-core. **The Captain chose resident** (above). Resident, through the reporter: the models are on the card 57-76 s after the container
+  starts, then a search takes **7-18 s** ("fixing the names of my film files" found the Movies session first in 17.7 s). The vector
+  search and the reranking are under a second together; the rest is the refresh re-reading the transcripts of sessions that are still
+  being written, so it is shorter when nobody else is working.
+  One more thing learned on the way: under WSL, torch's `mem_get_info` told a fresh process 14.7 GB free when the card had 6.0 GB, so
+  the room check reads `nvidia-smi` (the container has it, and it sees the whole card). tts-studio's own margin check uses torch's figure.
 
 ## Run it
 
