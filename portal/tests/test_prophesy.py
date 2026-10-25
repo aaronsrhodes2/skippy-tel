@@ -1,10 +1,10 @@
-"""Shifting Prophesy (/shifting-prophesy): two AI models build the same game; the portal shows both builds and every turn.
+"""Shifting Prophesy (/shifting-prophesy): purple Skippy's shake-down cruise; the portal shows both builds and every turn.
 
-Each arm's CI uploads its build to a folder of one GCS bucket and the referee's CI uploads the turn record to another; the
-portal reads them at request time (prophesy.py, on doomloop.py's storage). What can be checked here without a bucket: who
-gets in, that a build is framed under the app bar with its query string intact and never edited, that each file goes out
-with the right type, that nothing outside a folder can be read, that the board shows the record and checks its shape on the
-way in, and that a portal with nothing in the bucket says so instead of breaking."""
+The referee's runner on skippy-pc uploads each build and the turn record through the home-token route into the portal's own
+bucket (prophesy/<folder>/...); the portal reads them at request time (prophesy.py). What can be checked here without a
+bucket: who gets in, that only the home token can upload, that a build is framed under the app bar with its query string
+intact and never edited, that each file goes out with the right type, that nothing outside a folder can be read or written,
+that the board shows the record and checks its shape on the way in, and that a portal with no bucket says so."""
 import json
 
 import pytest
@@ -13,7 +13,7 @@ pytest.importorskip("flask")
 pytest.importorskip("authlib")
 
 import prophesy  # noqa: E402
-from test_app import ADMIN, FRIEND, PAL, FakeSkippy, FakeVm, SETTINGS, _add_friend, login  # noqa: E402
+from test_app import ADMIN, FRIEND, PAL, FakeSkippy, FakeVm, SETTINGS, _add_friend, _pair, login  # noqa: E402
 
 import app as portal  # noqa: E402
 
@@ -54,6 +54,35 @@ class FakeStore:
         return self.files.get(path)
 
 
+class Bucket:
+    """The portal's bucket as prophesy.py uses it (get, put, delete, list on prophesy/<folder>/<path>), over one FakeStore
+    per folder, so each test can look at a folder's files directly."""
+
+    def __init__(self, stores):
+        self.stores = stores
+
+    def _split(self, key):
+        assert key.startswith(prophesy.PREFIX), key
+        folder, _, path = key[len(prophesy.PREFIX):].partition("/")
+        return folder, path
+
+    def get(self, key):
+        folder, path = self._split(key)
+        return self.stores[folder].read(path) if folder in self.stores else None
+
+    def put(self, key, data, content_type):
+        folder, path = self._split(key)
+        self.stores.setdefault(folder, FakeStore({})).files[path] = bytes(data)
+
+    def delete(self, key):
+        folder, path = self._split(key)
+        self.stores[folder].files.pop(path, None)
+
+    def list(self, prefix):
+        folder = prefix[len(prophesy.PREFIX):].rstrip("/")
+        return [f"{prophesy.PREFIX}{folder}/{p}" for p in self.stores.get(folder, FakeStore({})).files]
+
+
 @pytest.fixture(autouse=True)
 def _fresh_cache():
     prophesy.reset_cache()
@@ -70,7 +99,8 @@ def stores(monkeypatch):
                                                    _turn(2)]),
                             "001/haiku/shots/Prophesy-start.png": PNG, "001/haiku/reply.md": b"Built the generator.\n"}),
     }
-    monkeypatch.setattr(prophesy, "get_store", lambda folder: s.get(folder))
+    shim = Bucket(s)
+    monkeypatch.setattr(prophesy, "bucket", lambda: shim)
     return s
 
 
@@ -204,7 +234,7 @@ def test_a_damaged_index_means_no_turns_not_an_error(stores, client):
 
 
 def test_a_portal_with_no_bucket_shows_an_empty_board(monkeypatch):
-    monkeypatch.delenv(prophesy.BUCKET_ENV, raising=False)
+    monkeypatch.delenv(prophesy.tabletop.BUCKET_ENV, raising=False)
     c = _client()
     login(c, FRIEND)
     page = c.get("/shifting-prophesy/").data.decode()
@@ -223,3 +253,62 @@ def test_totals_count_only_fully_scored_turns_and_ties_win_nothing():
 def test_the_browser_games_card_links_to_the_board(client):
     login(client, FRIEND)
     assert 'href="/shifting-prophesy/"' in client.get("/play").data.decode()
+
+
+# ── the runner's uploads (skippy-pc, the home token) ───────────────────────────
+
+def _token(client):
+    tok = _pair(client)
+    client.get("/auth/logout")
+    return {"Authorization": f"Bearer {tok}"}
+
+
+def test_only_the_home_token_can_upload(client, stores):
+    for headers in ({}, {"Authorization": "Bearer nope"}):
+        assert client.put("/home/prophesy/haiku/index.html", data=b"x", headers=headers).status_code == 401
+        assert client.post("/home/prophesy/haiku/finish", json={"keep": []}, headers=headers).status_code == 401
+    login(client, ADMIN)                                                           # not even the Captain's cookie
+    assert client.put("/home/prophesy/haiku/index.html", data=b"x").status_code == 401
+    assert stores["haiku"].files["index.html"] == GAME_HTML
+
+
+def test_a_new_build_replaces_the_old_one_and_shows_without_a_redeploy(client, stores):
+    auth = _token(client)
+    assert client.put("/home/prophesy/haiku/index.html", data=b"<html>new</html>", headers=auth).status_code == 200
+    assert client.put("/home/prophesy/haiku/version.json", data=_version("eeee555ffff666"), headers=auth).status_code == 200
+    r = client.post("/home/prophesy/haiku/finish", json={"keep": ["index.html", "version.json"]}, headers=auth)
+    assert r.get_json() == {"ok": True, "deleted": 1}                               # the old build's src/main.js
+    assert set(stores["haiku"].files) == {"index.html", "version.json"}
+    assert client.get("/shifting-prophesy/haiku/version").get_json()["commit"] == "eeee555ffff666"
+
+
+def test_the_record_grows_and_a_new_turn_shows_on_the_board(client, stores):
+    auth = _token(client)
+    assert client.put("/home/prophesy/turns/003/purple/reply.md", data=b"Fixed it.\n", headers=auth).status_code == 200
+    assert client.put("/home/prophesy/turns/index.json", data=_index([_turn(3)]), headers=auth).status_code == 200
+    assert client.post("/home/prophesy/turns/finish", json={"keep": []}, headers=auth).status_code == 404   # the record is never pruned
+    assert "001/haiku/reply.md" in stores["turns"].files
+    login(client, FRIEND)
+    assert "Turn 3" in client.get("/shifting-prophesy/").data.decode()
+
+
+@pytest.mark.parametrize("url", ["/home/prophesy/opus/index.html", "/home/prophesy/haiku/a//b.js", "/home/prophesy/haiku/a\\b.js",
+                                 "/home/prophesy/haiku/%2e%2e/purple/index.html", "/home/prophesy/haiku/./x.js"])
+def test_uploads_stay_inside_the_experiments_folders(client, stores, url):
+    auth = _token(client)
+    assert client.put(url, data=b"x", headers=auth).status_code in (308, 404)
+    assert not [f for s in stores.values() for f in s.files if ".." in f or f.startswith("/") or "//" in f or "\\" in f]
+
+
+def test_an_upload_too_big_is_refused(client, stores, monkeypatch):
+    auth = _token(client)
+    monkeypatch.setattr(prophesy, "MAX_FILE", 10)
+    assert client.put("/home/prophesy/haiku/big.bin", data=b"x" * 11, headers=auth).status_code == 413
+    assert "big.bin" not in stores["haiku"].files
+
+
+def test_no_bucket_means_503_not_a_lost_upload(client, monkeypatch):
+    auth = _token(client)
+    monkeypatch.setattr(prophesy, "bucket", lambda: None)
+    r = client.put("/home/prophesy/haiku/index.html", data=b"x", headers=auth)
+    assert r.status_code == 503 and "TABLETOP_BUCKET" in r.get_json()["error"]

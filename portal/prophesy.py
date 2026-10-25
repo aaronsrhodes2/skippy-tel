@@ -2,17 +2,17 @@
 on Skippy Core, builds a whole browser game one prompt at a time; Claude Haiku gets the same prompts with every tool, as the
 reference. Where purple falls short is what it needs next.
 
-The cruise lives in three repos: each model's build (aaronsrhodes2/shifting-prophesy-purple, -haiku) and the referee's
-record of every turn (aaronsrhodes2/shifting-prophesy-referee, which also runs the turns on skippy-pc). Each repo's CI
-uploads into its own folder of one GCS bucket (PROPHESY_BUCKET): haiku/ and purple/ hold the newest build of each game,
-turns/ holds the record. The portal reads them at request time, as the Doom Loop dev channel does (doomloop.py: the storage,
-path and file-type rules are its own), so a push shows up with no portal redeploy. Nothing here talks to an LLM.
+The cruise's code is local to skippy-pc (Platinum §23: local git, no GitHub): each model's build and the referee, which runs
+the turns. After each turn the referee's runner uploads each build and the turn's record through the home-token route
+(PUT /home/prophesy/<folder>/<path>) into the portal's own bucket (the Tabletop's, TABLETOP_BUCKET), under prophesy/. The
+portal reads them at request time with Doom Loop's path and file-type rules (doomloop.py), so a turn shows up with no
+portal redeploy. Nothing here talks to an LLM.
 
-    haiku/, purple/   index.html, version.json (written last, like Doom Loop's), and whatever the build loads
-    turns/            index.json (one row per turn, written last) and turns/<NNN>/: turn.json, report.md, reply.md and
-                      actions.txt per arm, and <arm>/shots/*.png
+    prophesy/haiku/, prophesy/purple/   index.html, version.json (uploaded last), and whatever the build loads
+    prophesy/turns/                     index.json (one row per turn, uploaded last) and <NNN>/: turn.json, report.md,
+                                        reply.md and actions.txt per arm, and <arm>/shots/*.png
 
-Every page and file is for signed-in people; each build's /version is public (the referee's runner reads it).
+Every page and file is for signed-in people; each build's /version is public (the runner checks it after an upload).
 """
 from __future__ import annotations
 
@@ -23,18 +23,19 @@ import re
 import time
 
 import doomloop
+import tabletop
 from doomloop import VERSION_FIELDS, clean_path
 
 log = logging.getLogger(__name__)
 
-BUCKET_ENV = "PROPHESY_BUCKET"
+PREFIX = "prophesy/"         # the cruise's corner of the portal's bucket
 ARMS = {                     # purple first: it is the ship under test
-    "purple": {"label": "Purple Skippy", "detail": "the workshop's Private brain: Skippy Core's coder (Qwen3.6-35B-A3B), local and free",
-               "repo": "https://github.com/aaronsrhodes2/shifting-prophesy-purple"},
-    "haiku": {"label": "Haiku 5.5", "detail": "the reference: claude-haiku-5-5 in Claude Code with every tool",
-              "repo": "https://github.com/aaronsrhodes2/shifting-prophesy-haiku"},
+    "purple": {"label": "Purple Skippy", "detail": "the workshop's Private brain: Skippy Core's coder (Qwen3.6-35B-A3B), local and free"},
+    "haiku": {"label": "Haiku 5.5", "detail": "the reference: claude-haiku-5-5 in Claude Code with every tool"},
 }
 RECORD = "turns"
+FOLDERS = (*ARMS, RECORD)
+MAX_FILE = 25 * 1024 * 1024  # one uploaded file, under Cloud Run's 32 MiB request cap
 VERSION_TTL = 10.0           # seconds a build's version.json is trusted before its folder is asked again
 INDEX_TTL = 10.0             # and the record's index.json
 _SAFE_ID = re.compile(r"^[0-9A-Za-z._-]{1,64}$")
@@ -42,20 +43,58 @@ _TURN_ID = re.compile(r"^\d{3}$")
 TEXT_TYPES = {".md": "text/plain; charset=utf-8", ".txt": "text/plain; charset=utf-8"}
 
 
-def get_store(folder: str):
-    """One folder of the experiment's bucket (an arm's build or the record), or None when no bucket is configured."""
-    bucket = os.environ.get(BUCKET_ENV, "").strip()
-    if not bucket or folder not in (*ARMS, RECORD):
-        return None
-    return doomloop.GcsStore(bucket, folder + "/")
+def bucket():
+    """The portal's own private bucket (tabletop.GcsStore: get, put, delete, list), or None when none is configured."""
+    return tabletop.store_from_env()
+
+
+def _key(folder: str, path: str) -> str:
+    return f"{PREFIX}{folder}/{path}"
 
 
 def read(folder: str, path: str) -> bytes | None:
+    """A file of one folder, or None (no such file, a path that leaves the folder, no bucket: logged, not raised)."""
     safe = clean_path(path)
-    store = get_store(folder)
-    if safe is None or store is None:
+    store = bucket()
+    if safe is None or store is None or folder not in FOLDERS:
         return None
-    return store.read(safe)
+    try:
+        return store.get(_key(folder, safe))
+    except Exception as exc:  # noqa: BLE001 — a bucket hiccup is "no file", never a broken page
+        log.warning("prophesy: could not read %s/%s: %s", folder, safe, exc)
+        return None
+
+
+def put(folder: str, path: str, data: bytes) -> None:
+    """Keep one uploaded file (the runner's upload route). ValueError for a folder or path that isn't allowed;
+    tabletop.StorageMissing when there is no bucket to keep it in."""
+    safe = clean_path(path)
+    if folder not in FOLDERS or safe is None:
+        raise ValueError("not a file this experiment keeps")
+    store = bucket()
+    if store is None:
+        raise tabletop.StorageMissing("no bucket is configured (TABLETOP_BUCKET)")
+    store.put(_key(folder, safe), data, mimetype_for(safe))
+    reset_cache()
+
+
+def finish(folder: str, keep) -> int:
+    """After a build's upload: delete the previous build's files that aren't in this one. Builds only (the record grows).
+    Returns how many were deleted."""
+    if folder not in ARMS:
+        raise ValueError("only a build's folder is replaced")
+    wanted = {p for p in keep if isinstance(p, str) and clean_path(p)}
+    store = bucket()
+    if store is None:
+        raise tabletop.StorageMissing("no bucket is configured (TABLETOP_BUCKET)")
+    root = f"{PREFIX}{folder}/"
+    gone = 0
+    for name in store.list(root):
+        if name[len(root):] not in wanted:
+            store.delete(name)
+            gone += 1
+    reset_cache()
+    return gone
 
 
 def mimetype_for(path: str) -> str:

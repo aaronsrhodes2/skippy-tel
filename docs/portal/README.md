@@ -731,21 +731,20 @@ new builds without a redeploy, damaged or unsafe `version.json`, no-bucket behav
 
 Purple Skippy's shake-down cruise: the private Skippy on its Private brain (Skippy Core's coder), running as itself in the
 workshop, builds a whole top-down adventure game from a written spec, one prompt from the Captain at a time, in
-`D:\Aaron\development\shifting-prophesy-purple` (repo `shifting-prophesy-purple`, opened in place as
-`f-shifting-prophesy-purple`). Its turns go through `tools/retest_failures.py` in one conversation,
-`shifting-prophesy-purple`, which the Captain follows live in the chat. Claude Haiku 5.5 gets the same prompts with every
-Claude Code tool, as the reference (`shifting-prophesy-haiku`). Where purple falls short is what it needs next. The referee
-repo (`shifting-prophesy-referee`, checked out at `D:\Aaron\development\shifting-prophesy\referee`) runs the turns on
-skippy-pc, grades both builds against the spec on hidden seeds, screenshots them, and keeps the record. Its README is the
-cruise's manual; this section is only the portal's side.
+`D:\Aaron\development\shifting-prophesy-purple` (opened in place as `f-shifting-prophesy-purple`). Its turns go through
+`tools/retest_failures.py`, a new conversation per turn, which the Captain follows live in the chat. Claude Haiku 5.5 gets the
+same prompts with every Claude Code tool, as the reference. Where purple falls short is what it needs next. The referee
+(`D:\Aaron\development\shifting-prophesy\referee`) runs the turns on skippy-pc, grades both builds against the spec on hidden
+seeds, screenshots them, and keeps the record. All three are local git repositories with no remote (Platinum §23). The
+referee's README is the cruise's manual; this section is only the portal's side.
 
-**How things get here:** the same as Doom Loop's dev channel, with one bucket (`skippy-tel-shifting-prophesy-dev`) and three
-folders: each build's `dev-deploy` workflow uploads its site to `haiku/` or `purple/` (`version.json` last), and the referee's
-`publish` workflow uploads the record to `turns/` (`index.json` last; the hidden seeds and the full transcripts never leave
-skippy-pc and the private repo). They authenticate as `prophesy-publisher`, which can only write objects in that bucket,
-through a provider (`prophesy`) that trusts only those three repos' `main`. All of it is in `infra/bootstrap/`.
+**How things get here:** after each turn the referee's runner uploads each build (`prophesy/haiku/`, `prophesy/purple/`,
+`version.json` last, then `finish` drops the previous build's leftovers) and the turn's record (`prophesy/turns/`,
+`index.json` last) into the portal's own bucket (`TABLETOP_BUCKET`), through `PUT /home/prophesy/<folder>/<path>` and
+`POST /home/prophesy/<folder>/finish` with the home token, like the reporter's other machine routes. No GitHub, no CI and no
+extra cloud identity are involved. The hidden seeds and full transcripts never leave skippy-pc.
 
-**Routes** (`prophesy` blueprint in `app.py`, helpers in `portal/prophesy.py`, storage and path rules from `doomloop.py`):
+**Routes** (`prophesy` blueprint in `app.py`, helpers in `portal/prophesy.py`, path and file-type rules from `doomloop.py`):
 `GET /shifting-prophesy/` (signed in) is the board: each arm's live build and running score, then every turn newest first with
 the prompt, each arm's numbers (outcome, time, cost, peak context, commits, deploy, referee pass rates), its screenshots and
 the Captain's score. `GET /shifting-prophesy/<arm>/` (signed in) frames that arm's build under the app bar, with the query
@@ -754,7 +753,7 @@ string passed through (the spec's `?seed=...&screen=x,y` URLs); the build's own 
 `GET /shifting-prophesy/<arm>/version` is public: the referee's runner and the deploy's smoke test read it. The record's
 `index.json` is checked on the way in (turn ids, screenshot paths inside their own turn and arm, numbers as numbers).
 
-**Setup once:** apply `infra/bootstrap` in Cloud Shell, then on skippy-pc run `bash setup/after-bootstrap.sh` in the referee
-checkout (it gives the three repos `WIF_PROVIDER` / `WIF_SERVICE_ACCOUNT` and re-runs their workflows).
+**Setup:** none beyond a paired home token (which skippy-pc already has).
 
-Tests: `portal/tests/test_prophesy.py`.
+Tests: `portal/tests/test_prophesy.py` (including: only the home token uploads, uploads stay inside the cruise's folders, a new
+build replaces the old one, the record only grows, an oversize file is refused, no bucket is a 503).

@@ -33,17 +33,3 @@ output "doomloop_publisher_service_account" {
 output "doomloop_bucket" {
   value = google_storage_bucket.doomloop_dev.name
 }
-
-output "prophesy_workload_identity_provider" {
-  description = "The three Shifting Prophesy repos' GitHub variable WIF_PROVIDER (shifting-prophesy-referee's setup/after-bootstrap.sh sets it)."
-  value       = google_iam_workload_identity_pool_provider.prophesy.name
-}
-
-output "prophesy_publisher_service_account" {
-  description = "Their GitHub variable WIF_SERVICE_ACCOUNT."
-  value       = google_service_account.prophesy_publisher.email
-}
-
-output "prophesy_bucket" {
-  value = google_storage_bucket.prophesy.name
-}

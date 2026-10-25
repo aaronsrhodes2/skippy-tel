@@ -355,7 +355,7 @@ jobs:
             --max-instances 1 \
             --concurrency 32 \
             --memory 1Gi \
-            --set-env-vars "^|^ALLOWED_EMAILS=${ALLOWED_EMAILS}|ADMIN_EMAILS=${ADMIN_EMAILS}|GCP_PROJECT=${PROJECT_ID}|GCP_ZONE=us-west1-b|GCP_INSTANCE=skippy-games|CHAT_MODEL=claude-haiku-4-5|DISCORD_INVITE=gPTVS7Hmj|PORTAL_URL=https://makerportal.live|MENTAT_URL=https://skippy-mentat-1015050363686.us-west1.run.app|DOOMLOOP_BUCKET=skippy-tel-doomloop-dev|PROPHESY_BUCKET=skippy-tel-shifting-prophesy-dev|TABLETOP_BUCKET=skippy-tel-tabletop" \
+            --set-env-vars "^|^ALLOWED_EMAILS=${ALLOWED_EMAILS}|ADMIN_EMAILS=${ADMIN_EMAILS}|GCP_PROJECT=${PROJECT_ID}|GCP_ZONE=us-west1-b|GCP_INSTANCE=skippy-games|CHAT_MODEL=claude-haiku-4-5|DISCORD_INVITE=gPTVS7Hmj|PORTAL_URL=https://makerportal.live|MENTAT_URL=https://skippy-mentat-1015050363686.us-west1.run.app|DOOMLOOP_BUCKET=skippy-tel-doomloop-dev|TABLETOP_BUCKET=skippy-tel-tabletop" \
             --set-secrets "FLASK_SECRET_KEY=portal-flask-secret:latest,GOOGLE_CLIENT_ID=portal-google-client-id:latest,GOOGLE_CLIENT_SECRET=portal-google-client-secret:latest,ANTHROPIC_API_KEY=anthropic-api-key:latest,DISCORD_BOT_TOKEN=discord-bot-token:latest${EXTRA_SECRETS:-}"
       - name: Send all traffic to the new revision
         # A rollback (here, or the `rollback` workflow) PINS traffic to one named revision. Cloud Run then no longer
@@ -390,7 +390,7 @@ jobs:
           # Doom Loop's dev channel: the route must answer (bundled true OR false: a build arrives from the game's repo,
           # not from this deploy, so "no build yet" is a healthy answer).
           curl -fsS -m 20 "$URL/doomloop/version" | grep -E '"bundled": ?(true|false)' >/dev/null
-          # Shifting Prophesy: the same, for each model's build (it arrives from that build's repo).
+          # Shifting Prophesy: the same, for each model's build (the referee's runner uploads it after each turn).
           curl -fsS -m 20 "$URL/shifting-prophesy/haiku/version" | grep -E '"bundled": ?(true|false)' >/dev/null
       - name: Roll back to the previous revision
         # Reached only when something above failed, or the run was CANCELLED part way (a person cancelling a hung deploy,

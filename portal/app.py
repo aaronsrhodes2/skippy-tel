@@ -1902,6 +1902,37 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     app.register_blueprint(sp)
 
+    @app.put("/home/prophesy/<folder>/<path:path>")
+    def home_prophesy_put(folder, path):
+        """skippy-pc (the cruise's referee) uploading one file of a build or of the turn record (prophesy.py). The code is
+        local to skippy-pc (Platinum §23), so this, not a CI, is how a turn reaches the board."""
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        request.max_content_length = prophesy.MAX_FILE
+        try:
+            prophesy.put(folder, path, request.get_data(cache=False))
+        except ValueError:
+            abort(404)
+        except prophesy.tabletop.StorageMissing as exc:
+            return jsonify(error=str(exc)), 503
+        return jsonify(ok=True)
+
+    @app.post("/home/prophesy/<folder>/finish")
+    def home_prophesy_finish(folder):
+        """After a build's files are up: drop the previous build's leftovers ({"keep": [paths]})."""
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        keep = (request.get_json(silent=True) or {}).get("keep")
+        if not isinstance(keep, list):
+            abort(400)
+        try:
+            gone = prophesy.finish(folder, keep)
+        except ValueError:
+            abort(404)
+        except prophesy.tabletop.StorageMissing as exc:
+            return jsonify(error=str(exc)), 503
+        return jsonify(ok=True, deleted=gone)
+
     # ── chat ───────────────────────────────────────────────────────────────────
     talk = Blueprint("chat", __name__, url_prefix="/chat")
 
