@@ -11,8 +11,8 @@ between pictures; the box's language models keep theirs. One picture at a time.
 The gpu_* figures are what the portal's patient queue (portal/patient.py) reads before it hands out a picture: free GPU
 memory (GTT, which is how this iGPU gets its share of the 128 GB) and how busy the GPU is (llama-swap mid-reply shows here).
 
-Reached by skippy-pc's home reporter over the tailnet only: the container uses host networking and listens on PORT, and
-the box's ufw lets that port in on tailscale0 from skippy-pc alone (core/install/image-studio.sh).
+Reached by skippy-pc's home reporter over the tailnet: the container uses host networking on PORT. ufw keeps the LAN out
+(default deny); Tailscale's own rules let the tailnet in, so ALLOW_FROM narrows that to skippy-pc (and the box itself).
 """
 from __future__ import annotations
 
@@ -35,11 +35,18 @@ PORT = int(os.environ.get("PORT", "7347"))
 STEPS = int(os.environ.get("STEPS", "40"))          # ~20 s a step at 1024 px on this iGPU (with CFG), so ~13 min a picture
 CFG = float(os.environ.get("CFG", "4.0"))
 TIMEOUT_S = int(os.environ.get("TIMEOUT_S", "7200"))
+ALLOW_FROM = {a.strip() for a in os.environ.get("ALLOW_FROM", "").split(",") if a.strip()}   # empty: anyone who can reach the port
 MAX_SIDE, MIN_SIDE = 1664, 512
 DEFAULT_NEGATIVE = "blurry, low quality, distorted, deformed, extra limbs, watermark, signature"
 
 app = Flask(__name__)
 _lock = threading.Lock()
+
+
+@app.before_request
+def _only_known_callers():
+    if ALLOW_FROM and request.remote_addr not in ALLOW_FROM:
+        return jsonify(error="not for you"), 403
 
 
 def _sysfs(name: str) -> int | None:

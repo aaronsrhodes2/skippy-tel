@@ -67,6 +67,13 @@ def test_generate_runs_sd_cli_with_the_quality_settings_and_returns_the_png(stud
     assert val("--backend") == "vae=cpu"                                 # the GPU decode faulted once (ring reset)
 
 
+def test_only_the_allowed_callers_get_an_answer(studio, monkeypatch):
+    app, client, _ = studio
+    monkeypatch.setattr(app, "ALLOW_FROM", {"100.122.71.14"})
+    assert client.get("/health").status_code == 403                    # (the test client calls from 127.0.0.1)
+    assert client.get("/health", environ_base={"REMOTE_ADDR": "100.122.71.14"}).status_code == 200
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="the fake sd-cli is a shebang script")
 def test_failures_come_back_in_words(studio):
     app, client, tmp = studio
