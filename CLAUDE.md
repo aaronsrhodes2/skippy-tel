@@ -349,6 +349,13 @@ the host and `claude` signed in (`/login`) there. When it or the portal stops an
 away: [docs/portal/remote-recovery.md](docs/portal/remote-recovery.md) (the phone-first runbook,
 the `rollback` workflow, `make bridge-supervised` and `tools/install_bridge_startup.sh`).
 
+## The data trunk (skippy-pc's D: on skippy-core)
+
+skippy-pc's 14 TB D: is storage and development; skippy-core's 2 TB is for running models. Two Windows shares on skippy-pc, mounted on
+skippy-core over the LAN with systemd automount (always reconnecting, never blocking boot): `D:	runk` → `/mnt/pc/trunk` (read and write,
+both directions) and `D:\datasets` → `/mnt/pc/datasets` (read only). ~115 MB/s read, ~77 MB/s write. Login: the Windows account
+`skippy-core` (`SKIPPY_CORE_PWD` in the vault). Mentat's JPL data is a local copy at `/srv/datasets/jpl`. Details: docs/data-trunk.md.
+
 ## Local capabilities (skippy-pc's hardware, for the portal chat)
 
 The portal chat can use skippy-pc's own hardware, free of tokens, through the same job
