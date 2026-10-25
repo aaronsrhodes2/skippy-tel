@@ -216,6 +216,15 @@ MINEBENCH_RUNS = (
                 "the track, and the wheels are thin rings. It looked at each pass through the vision model, which called the scene "
                 "recognisable and missed the floating cars: describing a picture is not checking it. Next: an objective floating-parts "
                 "check in the runtime, and pointed questions for the look."},
+    {"id": "v3", "title": "Choo-choo train, coached and told to fix its floating parts",
+     "model": "Purple Skippy: Claude Code on Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8), local and free",
+     "prompt": "BUILD_REQUEST_V3: v2's specification, start from the v2 build, and the runtime's floating-parts report must reach zero "
+               "(smoke excepted) with pointed questions answered before stopping",
+     "request": "experiments/minebench/v3/request.txt", "comparable": False, "blocks": 67079, "minutes": 42, "size": "206 x 66 x 169",
+     "verdict": "A negative result, kept as one. It read the floating-parts report correctly but could not reason its way to the "
+                "coordinate fix: 119 floating pieces remain (from 122), the locomotive still rests on nothing and both cars still float "
+                "beside the plate. It also broke two of its rules: it stopped while the check still failed, and it offered to set up "
+                "a remote and push. Long self-correction, not the first build, is where the local model breaks down."},
     {"id": "haiku-direct", "title": "Choo-choo train, Claude Haiku in one call (the benchmark's own way)",
      "model": "Claude Haiku 5.5 through Anthropic's API: one call with MineBench's prompt, no tools, no second try",
      "prompt": "a choo-choo train", "comparable": True, "blocks": 21048, "minutes": 2, "size": "144 x 40 x 42",
