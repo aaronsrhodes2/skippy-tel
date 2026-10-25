@@ -192,8 +192,8 @@ def test_the_trained_router_is_a_small_resident_slot_with_its_own_names_and_pinn
     assert router["resident"] is True and set(router["aliases"]) == {"mentat-router", "mentat-router-v31-4b"}
     full = router["full"]
     assert full["repo"] == "aaronsrhodes2/mentat-router-v31-4b"
-    assert full["files"] == [{"path": "mentat-router-v31-4b-Q4_K_M.gguf", "size": 2085924864,
-                              "sha256": "6f82c950ce558e6eb84ca092d9da7abb92d918806fbc84da206e83096e2bf905"}]
+    assert full["files"] == [{"path": "mentat-router-v31-4b-Q4_K_M.gguf", "size": 2497280832,
+                              "sha256": "c929e636f2b1c937de10122b52872a7226f3c839aa29182ce5e21e3d4ece2507"}]   # Ollama's blob; the WSL Q4_K_M (2.09 GB) was truncated
     assert "--temp" in full["args"] and full["args"][full["args"].index("--temp") + 1] == "0"      # it was trained and scored at temperature 0
     assert all(a not in data["slots"]["chat"]["aliases"] for a in router["aliases"])
     chosen = m.plan(data, m.parse_full("chat,coder,vision,router", data["slots"]))
