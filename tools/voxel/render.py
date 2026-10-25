@@ -24,7 +24,7 @@ MAX_GLB = 12 * 1024 * 1024            # what the agent may show in the chat (the
 
 
 def render(build: dict, out: Path, title: str, html_out: Path | None = None, size=(900, 640), timeout_s: float = 120,
-           glb_out: Path | None = None) -> dict:
+           glb_out: Path | None = None, zoom: float = 1.9) -> dict:
     from playwright.sync_api import sync_playwright
     from PIL import Image, ImageDraw
     html = make_html(build, title, "")
@@ -54,7 +54,7 @@ def render(build: dict, out: Path, title: str, html_out: Path | None = None, siz
                 glb_note = {"glb": None, "why": f"the model is {len(data) // 1048576} MB, over the chat's 12 MB: show the picture only"}
         page.add_style_tag(content="#hud,#stats{display:none}")
         for az, el, _ in VIEWS:
-            page.evaluate(f"window.__view({az}, {el})")
+            page.evaluate(f"window.__view({az}, {el}, {zoom})")
             page.wait_for_timeout(150)
             shots.append(Image.open(io.BytesIO(page.screenshot())))
         browser.close()
@@ -76,10 +76,11 @@ def main(argv=None) -> int:
     ap.add_argument("out")
     ap.add_argument("title", nargs="?", default="voxel build")
     ap.add_argument("--html")
+    ap.add_argument("--zoom", type=float, default=1.9, help="camera distance in build sizes (smaller is closer)")
     ap.add_argument("--glb", help="also write the build as a 3D model (binary glTF) for the chat's inline viewer")
     a = ap.parse_args(argv)
     got = render(json.loads(Path(a.build).read_text(encoding="utf-8")), Path(a.out), a.title, Path(a.html) if a.html else None,
-                 glb_out=Path(a.glb) if a.glb else None)
+                 glb_out=Path(a.glb) if a.glb else None, zoom=a.zoom)
     print(json.dumps(got))
     return 0
 

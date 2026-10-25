@@ -68,7 +68,7 @@ addEventListener("resize", fit); fit();
 document.getElementById("stats").textContent = `${world.size.toLocaleString()} blocks (${n.toLocaleString()} visible) · ${hi[0]-lo[0]+1}×${hi[1]-lo[1]+1}×${hi[2]-lo[2]+1} · built in ${Math.round(performance.now()-t0)} ms · drag to orbit, scroll to zoom`;
 renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
 // render.py: aim the camera (azimuth and elevation in degrees) and say when the build is drawn
-window.__view = (az, el) => { const r = size * 1.9, a = az * Math.PI / 180, e = el * Math.PI / 180;
+window.__view = (az, el, k) => { const r = size * (k || 1.9), a = az * Math.PI / 180, e = el * Math.PI / 180;
   camera.position.set(mid.x + r * Math.cos(e) * Math.sin(a), mid.y + r * Math.sin(e), mid.z + r * Math.cos(e) * Math.cos(a));
   controls.update(); renderer.render(scene, camera); };
 window.__stats = { blocks: world.size, visible: n, size: [hi[0]-lo[0]+1, hi[1]-lo[1]+1, hi[2]-lo[2]+1] };

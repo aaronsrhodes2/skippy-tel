@@ -133,3 +133,17 @@ def test_the_bridge_and_the_portal_sniff_the_same_way():
     samples = [b"glTF\x02\x00\x00\x00", b"ID3\x04", b"\xff\xfb\x90", b"RIFF\x00\x00\x00\x00WAVE", b"OggS", b"fLaC",
                b"\x00\x00\x00\x18ftypisom", b"MThd", b"PK\x03\x04", PNG, JPEG, b"<html>", b"glTF\x01\x00\x00\x00"]
     assert [space["image_mime"](s) for s in samples] == [workshop_mod.sniff(s) for s in samples]
+
+
+def test_a_screenshot_in_the_agents_chat_opens_the_annotator_and_comes_back_as_a_change_request():
+    """Tap a screenshot, mark it up, and the copy plus a legend (colour, shape, exact pixels) go into the message (2026-10-25)."""
+    from pathlib import Path
+    root = Path(portal.__file__).parent
+    page = (root / "templates" / "_workshop.html").read_text(encoding="utf-8")
+    chat = (root / "templates" / "_chat.html").read_text(encoding="utf-8")
+    front = (root / "templates" / "front.html").read_text(encoding="utf-8")
+    js = (root / "static" / "skippy-annotate.js").read_text(encoding="utf-8")
+    assert "SkippyAnnotate.open(" in page and "name: e.name" in page and "window.SkippyCompose" in chat
+    line = next(i for i, l in enumerate(front.splitlines()) if "skippy-annotate.js" in l)
+    assert "{% if captain %}" in front.splitlines()[line - 1] and "{% endif %}" in front.splitlines()[line]      # the Captain's chat only
+    assert all(c in js for c in ("#FF4444", "#FFAA00", "#00FF88", "#00CCFF"))                       # the house palette

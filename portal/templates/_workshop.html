@@ -431,6 +431,17 @@
       const img = el("img", "shot"); img.alt = "Screenshot of the change"; img.src = src;
       img.addEventListener("error", () => a.replaceChildren(el("div", "act", "› the screenshot is gone (the portal restarted since)")));
       a.appendChild(img);
+      if (typeof window !== "undefined" && window.SkippyAnnotate) {   // tap: mark it up, send it back as a change request (static/skippy-annotate.js)
+        a.title = "Mark it up and send it back";
+        a.addEventListener("click", ev => {
+          ev.preventDefault();
+          SkippyAnnotate.open({src: src, name: p.name || "", onSend: (url, legend, fileName) => {
+            if (window.SkippyCompose && window.SkippyCompose.attach(fileName, url, legend)) return;   // the one chat's composer
+            if (attached.length < MAX_IMAGES) { attached.push({url}); paintAttached(); }              // this card's own
+            text.value = legend + (text.value ? "\n" + text.value : "\n"); text.focus();
+          }});
+        });
+      }
       return a;
     }
     // A picture Skippy asked to have MADE (a SKIPPY_PICTURE line): a patient job (portal/patient.py) whose id the bridge chose, shown
@@ -543,7 +554,7 @@
       const d = r && r.ok && r.data && typeof r.data === "object" ? r.data : null;
       if (d && d.state !== "unknown") {            // a stalled or offline read is still a read: keep what it carries
         if (Array.isArray(d.events)) d.events.forEach(e => {
-          if (e && e.t === "image" && Number.isInteger(e.n)) job.turn.parts.push({t: "image", n: e.n, task: job.task, mime: e.mime});
+          if (e && e.t === "image" && Number.isInteger(e.n)) job.turn.parts.push({t: "image", n: e.n, task: job.task, mime: e.mime, name: e.name});
           else if (e && (e.t === "text" || e.t === "tool" || e.t === "ship" || e.t === "picture" || e.t === "popup")) job.turn.parts.push(e);
         });
         if (typeof d.next === "number" && d.next > job.after) job.after = d.next;   // never back: a portal that was just rebuilt holds fewer events than this page has

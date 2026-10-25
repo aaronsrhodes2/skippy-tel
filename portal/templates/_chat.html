@@ -518,6 +518,17 @@
       paintFiles();
     }
     function flash(text) { const s = form.querySelector(".vstat"); s.textContent = text; s.hidden = false; setTimeout(() => { s.hidden = true; }, 4000); }
+    // A marked-up picture coming back from the annotator (static/skippy-annotate.js): the copy goes with the next message, the legend
+    // into the box above what he types, so the change request is the picture AND the words.
+    window.SkippyCompose = {
+      attach(name, dataUrl, legend) {
+        if (pending_files.length >= MAX_FILES) { flash("At most " + MAX_FILES + " files to a message."); return false; }
+        pending_files.push({name: name, data: dataUrl}); paintFiles();
+        if (legend) { msg.value = legend + (msg.value ? "\n" + msg.value : "\n"); grow(); }
+        msg.focus(); msg.setSelectionRange(msg.value.length, msg.value.length);
+        return true;
+      },
+    };
     form.querySelector("button.clip").addEventListener("click", () => picker.click());
     {% if captain %}{# The camera key (the Captain only): a photo of a screen goes with the message exactly like a pasted picture, kept
        as large as the agent's limit allows (workshop.MAX_IMAGE_B64 each, MAX_IMAGES_B64 together) so the text on it stays readable. #}
