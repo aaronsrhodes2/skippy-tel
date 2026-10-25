@@ -47,7 +47,8 @@ REGISTRY = {
     # members
     **{e: MEMBER for e in (
         "apps", "app_tiles", "dashboard.game", "dashboard.game_discord", "dashboard.game_live", "dashboard.games_start", "dashboard.games_stop", "dashboard.index",
-        "doomloop.page", "doomloop.game_file", "starcontrol.page", "starcontrol.game_file")},
+        "doomloop.page", "doomloop.game_file", "starcontrol.page", "starcontrol.game_file",
+        "prophesy.board", "prophesy.record_file", "prophesy.game", "prophesy.game_file")},
     # skippy-pc, CI
     **{e: MACHINE for e in (
         "game_import_done", "game_import_download", "home_import_chunk", "home_job_done", "home_jobs", "home_media", "home_music_checkin", "home_report", "home_starter",
@@ -57,7 +58,7 @@ REGISTRY = {
     **{e: PUBLIC for e in (
         "auth.callback", "auth.login", "auth.logout", "auth.unauthorized", "health", "version", "index", "privacy", "request_access",
         "site_icons", "site_manifest", "legacy_bilby", "dashboard.legacy_dashboard", "music.player_manifest", "video.video_manifest",
-        "doomloop.version", "starcontrol.version", "play_index", "orion_trail", "radiance_probe",
+        "doomloop.version", "prophesy.arm_version", "starcontrol.version", "play_index", "orion_trail", "radiance_probe",
         "experiments.benchmark", "experiments.minebench", "experiments.double_slit", "experiments.index", "experiments.mentat_call", "experiments.mentat_page",
         "experiments.mentat_tools", "experiments.nbody", "experiments.radiance_file", "experiments.radiance_index",
         "experiments.weapon_vs_armor", "experiments.wva_catalog", "experiments.wva_solve")},

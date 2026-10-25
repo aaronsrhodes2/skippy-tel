@@ -12,6 +12,7 @@ page. Code in [`portal/`](../../portal); deployed on every push by
 | `/admin` | admins | Game settings (world names, passwords, Dragonwilds owner ID), **Restart & update**, **Set up / repair Discord channels**, the **Recovery** cards (below) |
 | `/starcontrol/` | everyone signed in | **Star Control Zero**: the Captain's fan game, played in the browser; a card in Browser Games (`/play`) (see below) |
 | `/doomloop/` | everyone signed in | **Doom Loop**: the Captain's work-in-progress game, the newest build from its repo, with a dev-build badge; a card in Browser Games (`/play`) (see "Doom Loop dev channel" below) |
+| `/shifting-prophesy/` | everyone signed in | **Shifting Prophesy**: two AI models build the same game; both live builds and every turn, scored; a card in Browser Games (see "Shifting Prophesy" below) |
 | `/music` | admins | **Bilby's Audio Service**: the Captain's music collection streamed from skippy-pc to any browser (see below). `/bilby` redirects here |
 
 ## Friends: play without the Captain online
@@ -725,3 +726,31 @@ variables → Actions → Variables): `WIF_PROVIDER` = the `doomloop_workload_id
 
 Tests: `portal/tests/test_doomloop.py` (who gets in, the page and its badge, file types and revalidation, no path escape,
 new builds without a redeploy, damaged or unsafe `version.json`, no-bucket behavior, the `/play` card).
+
+## Shifting Prophesy (`/shifting-prophesy`)
+
+An experiment: two AI models (Haiku 5.5, and purple Skippy on Skippy Core's coder) build the same top-down adventure game from
+the same spec, one prompt from the Captain at a time, each in its own repo (`shifting-prophesy-haiku`, `-purple`). The
+referee repo (`shifting-prophesy-referee`, checked out at `D:\Aaron\development\shifting-prophesy\referee`) runs the turns on
+skippy-pc, grades both builds against the spec on hidden seeds, screenshots them, and keeps the record. Its README is the
+experiment's manual; this section is only the portal's side.
+
+**How things get here:** the same as Doom Loop's dev channel, with one bucket (`skippy-tel-shifting-prophesy-dev`) and three
+folders: each build's `dev-deploy` workflow uploads its site to `haiku/` or `purple/` (`version.json` last), and the referee's
+`publish` workflow uploads the record to `turns/` (`index.json` last; the hidden seeds and the full transcripts never leave
+skippy-pc and the private repo). They authenticate as `prophesy-publisher`, which can only write objects in that bucket,
+through a provider (`prophesy`) that trusts only those three repos' `main`. All of it is in `infra/bootstrap/`.
+
+**Routes** (`prophesy` blueprint in `app.py`, helpers in `portal/prophesy.py`, storage and path rules from `doomloop.py`):
+`GET /shifting-prophesy/` (signed in) is the board: each arm's live build and running score, then every turn newest first with
+the prompt, each arm's numbers (outcome, time, cost, peak context, commits, deploy, referee pass rates), its screenshots and
+the Captain's score. `GET /shifting-prophesy/<arm>/` (signed in) frames that arm's build under the app bar, with the query
+string passed through (the spec's `?seed=...&screen=x,y` URLs); the build's own page is never edited. `GET
+/shifting-prophesy/<arm>/<path>` and `/shifting-prophesy/turns/<path>` (signed in) are files from the bucket, as Doom Loop's.
+`GET /shifting-prophesy/<arm>/version` is public: the referee's runner and the deploy's smoke test read it. The record's
+`index.json` is checked on the way in (turn ids, screenshot paths inside their own turn and arm, numbers as numbers).
+
+**Setup once:** apply `infra/bootstrap` in Cloud Shell, then on skippy-pc run `bash setup/after-bootstrap.sh` in the referee
+checkout (it gives the three repos `WIF_PROVIDER` / `WIF_SERVICE_ACCOUNT` and re-runs their workflows).
+
+Tests: `portal/tests/test_prophesy.py`.

@@ -49,6 +49,7 @@ import player as player_mod
 import spend
 import starcontrol
 import doomloop
+import prophesy
 import ratelimit
 import readiness
 import recovery
@@ -1832,6 +1833,74 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         return resp.make_conditional(request)
 
     app.register_blueprint(dl)
+
+    # ── Shifting Prophesy: two AI models build the same game, one prompt at a time (prophesy.py; every signed-in person) ──
+    sp = Blueprint("prophesy", __name__, url_prefix="/shifting-prophesy")
+
+    def arm_or_404(arm):
+        if arm not in prophesy.ARMS:
+            abort(404)
+        return prophesy.ARMS[arm]
+
+    def bucket_file(folder, path):
+        """A file from one folder of the experiment's bucket, revalidated by ETag. A path that leaves the folder is a 404
+        before storage is asked."""
+        if prophesy.clean_path(path) is None:
+            abort(404)
+        data = prophesy.read(folder, path)
+        if data is None:
+            abort(404)
+        resp = app.response_class(data, mimetype=prophesy.mimetype_for(path))
+        resp.headers["Cache-Control"] = "no-cache"
+        resp.add_etag()
+        return resp.make_conditional(request)
+
+    @sp.get("/")
+    @auth.login_required
+    def board():
+        """Both arms' live builds and every turn, newest first, with the Captain's scores."""
+        rows = prophesy.turns()
+        versions = {a: prophesy.version(a) for a in prophesy.ARMS}
+        return render_template("prophesy.html", arms=prophesy.ARMS, versions=versions, turns=rows, totals=prophesy.totals(rows),
+                               short={a: prophesy.short_commit(v) for a, v in versions.items()})
+
+    @sp.get("/turns/<path:path>")
+    @auth.login_required
+    def record_file(path):
+        """A file of the turn record: a screenshot, a reply, the action lines, a report."""
+        return bucket_file(prophesy.RECORD, path)
+
+    @sp.get("/<arm>/")
+    @auth.login_required
+    def game(arm):
+        """An arm's newest build, framed under the portal's app bar; the query string (?seed=...) goes through to it."""
+        info_arm = arm_or_404(arm)
+        info = prophesy.version(arm)
+        if not info:
+            return render_template("prophesy_nobuild.html", arm=info_arm), 503
+        query = request.query_string.decode("utf-8", errors="replace")
+        resp = app.response_class(render_template("prophesy_game.html", arm=info_arm, commit=prophesy.short_commit(info),
+                                                  src="index.html" + ("?" + query if query else "")))
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+    @sp.get("/<arm>/version")
+    def arm_version(arm):
+        """Which build an arm's folder holds (public: a build id and a time; the referee's runner reads it)."""
+        arm_or_404(arm)
+        info = prophesy.version(arm)
+        resp = jsonify(bundled=bool(info), **info)
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+    @sp.get("/<arm>/<path:path>")
+    @auth.login_required
+    def game_file(arm, path):
+        """A file of an arm's build, read from the bucket."""
+        arm_or_404(arm)
+        return bucket_file(arm, path)
+
+    app.register_blueprint(sp)
 
     # ── chat ───────────────────────────────────────────────────────────────────
     talk = Blueprint("chat", __name__, url_prefix="/chat")

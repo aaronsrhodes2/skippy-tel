@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Shifting Prophesy — Browser Games{% endblock %}
+{% block app %}play{% endblock %}
+{% block content %}
+{# Shown when an arm has no build in the bucket yet (no bucket configured, or its first deploy hasn't landed). #}
+<p class="error">There is no {{ arm.label }} build of Shifting Prophesy yet. One appears here a few minutes after a push to its repo.</p>
+<a class="btn" href="{{ url_for('prophesy.board') }}">Back to the experiment</a>
+{% endblock %}

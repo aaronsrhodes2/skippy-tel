@@ -1870,12 +1870,12 @@ def test_weapon_vs_armor_is_playable_in_the_browser():
     assert not any(e.slug == "weapon-vs-armor" for e in experiments.EXPERIMENTS)
 
 
-def test_browser_games_lists_weapon_vs_armor_star_control_zero_orion_trail_and_doom_loop(env):
+def test_browser_games_lists_weapon_vs_armor_star_control_zero_orion_trail_doom_loop_and_shifting_prophesy(env):
     import re
     client, _, _ = env
     page = client.get("/play").data.decode()                                     # public, like the experiments
     assert '<body class="bridge" data-app="play">' in page and "Browser Games" not in page.split("<main")[1]   # glyphs, not a title
-    assert re.findall(r'data-tel="play:([\w-]+)"', page) == ["weapon-vs-armor", "star-control-zero", "orion-trail", "doom-loop"]
+    assert re.findall(r'data-tel="play:([\w-]+)"', page) == ["weapon-vs-armor", "star-control-zero", "orion-trail", "doom-loop", "shifting-prophesy"]
     assert 'class="hit" href="/experiments/weapon-vs-armor"' in page
     assert re.search(r'data-s="off" data-tel="play:doom-loop"', page) and 'title="Doom Loop"' in page      # no build yet: dark, no link
     assert "Star Control Zero: The Precursors" in page                                    # a game's name is a label, so it is text

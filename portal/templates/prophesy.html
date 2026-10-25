@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Shifting Prophesy — Browser Games{% endblock %}
+{% block app %}play{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}rune{% endblock %}
+{% block hud_back %}{{ url_for('play_index') }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge-panes.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='experiments.css') }}">
+<style>
+  #sppg .arms { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin: 8px 0 14px; }
+  #sppg .arm { border: 1px solid var(--dim-green-hi); border-radius: var(--radius); padding: 10px 12px; }
+  #sppg .arm h4 { margin: 0 0 2px; color: var(--white); }
+  #sppg .arm .play { display: inline-block; margin-top: 6px; color: var(--cyan); }
+  #sppg .tag { display: inline-block; padding: 0 6px; border: 1px solid var(--amber); color: var(--amber); font-size: 12px; border-radius: 999px; }
+  #sppg .turn { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 14px; }
+  #sppg .prompt { white-space: pre-wrap; border-left: 2px solid var(--dim-green-hi); padding-left: 10px; color: var(--white); }
+  #sppg .side { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+  #sppg .facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 6px 0; font-size: 14px; }
+  #sppg .facts dt { color: var(--muted); } #sppg .facts dd { margin: 0; }
+  #sppg .shots { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
+  #sppg .shots img { width: 100%; height: auto; display: block; border: 1px solid var(--dim-green-hi); }
+  #sppg .score { color: var(--amber); font-weight: 600; }
+  #sppg .bad { color: var(--red); } #sppg .good { color: var(--green); }
+</style>{% endblock %}
+{% block content %}
+{# The experiment (prophesy.py): two models build the same game, one prompt at a time. Each arm's live build, then every turn
+   newest first: the prompt, each arm's numbers, its screenshots, and the Captain's score. Read from the bucket, nothing cached here. #}
+<section class="adm" id="sp">
+  <header class="ahead" style="padding-top:6px"><svg class="g mark" aria-hidden="true"><use href="#g-rune"/></svg><h2>Shifting Prophesy: two models, one game</h2></header>
+  <div class="apane" style="flex:1;min-height:0">
+    <div class="pg" id="sppg"><div class="pg-flow">
+      <p>Two AI models build the same browser game, a top-down adventure with a procedurally generated overworld and dungeons,
+        from the same written spec. Each turn the Captain sends both the same prompt, word for word. They run in the same Claude
+        Code with the same instructions, rails and 131,072-token window; only the model differs. After each turn a referee
+        checks both against the spec on 500 seeds neither can see, takes the same screenshots of both, and the Captain scores them.</p>
+      <div class="arms">
+        {% for name, arm in arms.items() %}
+        {% set v = versions[name] %}{% set t = totals[name] %}
+        <div class="arm">
+          <h4>{{ arm.label }}</h4>
+          <div class="help">{{ arm.detail }}</div>
+          <div>{% if t.scored %}<span class="score">{{ "%g" % t.points }}</span> points over {{ t.scored }} scored turn{{ "s" if t.scored != 1 }}, {{ t.wins }} won{% else %}not scored yet{% endif %}</div>
+          {% if v %}<a class="play" href="{{ url_for('prophesy.game', arm=name) }}">Play the newest build</a> <span class="tag">{{ short[name] or "build" }}</span>
+          {% else %}<div class="help">No build yet.</div>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% if not turns %}<p class="help">No turns yet. The first one appears here a few minutes after the referee pushes it.</p>{% endif %}
+      {% for t in turns %}
+      <div class="turn">
+        <h3>Turn {{ t.n }}{% if t.captain %} <span class="tag">scored</span>{% endif %}</h3>
+        <div class="prompt">{{ t.prompt }}</div>
+        {% if t.captain and t.captain.note %}<p><span class="score">Captain:</span> {{ t.captain.note }}</p>{% endif %}
+        <div class="side">
+          {% for name, arm in arms.items() %}{% set a = t.arms.get(name) %}
+          {% if a %}
+          <div>
+            <h4>{{ arm.label }}{% if t.captain and t.captain.get(name) %} <span class="score">{{ "%g" % t.captain[name].score }}/10</span>{% endif %}</h4>
+            {% if t.captain and t.captain.get(name) and t.captain[name].note %}<p class="help">{{ t.captain[name].note }}</p>{% endif %}
+            <dl class="facts">
+              <dt>Outcome</dt><dd>{{ a.outcome or "?" }}{% if a.minutes is not none %}, {{ a.minutes }} min{% endif %}</dd>
+              <dt>Cost</dt><dd>{% if a.cost_usd is not none and a.cost_usd > 0 %}${{ "%.2f" % a.cost_usd }}{% else %}free{% endif %}</dd>
+              <dt>Context</dt><dd>{% if a.peak_context is not none %}{{ "{:,}".format(a.peak_context|int) }} tokens peak{% endif %}{% if a.compactions %}, {{ a.compactions }} compaction{{ "s" if a.compactions != 1 }}{% endif %}</dd>
+              <dt>Commits</dt><dd>{{ a.commits if a.commits is not none else "?" }}</dd>
+              <dt>Deploy</dt><dd class="{{ 'good' if a.deploy == 'success' else ('bad' if a.deploy in ('failure', 'not pushed') else '') }}">{{ a.deploy }}{% if a.live %}, live{% endif %}</dd>
+              <dt>Referee</dt><dd>{% if a.grade_status == "not-started" %}not started (no generator yet){% elif a.checks %}{% for k, v in a.checks.items() %}{{ k }} <span class="{{ 'good' if v == 100 else 'bad' }}">{{ "%g" % v }}%</span>{{ " · " if not loop.last }}{% endfor %}{% else %}not graded{% endif %}</dd>
+            </dl>
+            {% if a.shots %}<div class="shots">{% for s in a.shots %}<a href="{{ url_for('prophesy.record_file', path=s) }}"><img src="{{ url_for('prophesy.record_file', path=s) }}" alt="{{ arm.label }}, turn {{ t.n }}: {{ s.rsplit('/', 1)[-1] }}" loading="lazy"></a>{% endfor %}</div>{% endif %}
+            <p class="help"><a href="{{ url_for('prophesy.record_file', path=t.id ~ '/' ~ name ~ '/reply.md') }}">Its reply</a> ·
+              <a href="{{ url_for('prophesy.record_file', path=t.id ~ '/' ~ name ~ '/actions.txt') }}">every tool call</a></p>
+          </div>
+          {% endif %}{% endfor %}
+        </div>
+        <p class="help"><a href="{{ url_for('prophesy.record_file', path=t.id ~ '/report.md') }}">The full report</a></p>
+      </div>
+      {% endfor %}
+    </div></div>
+    <div class="pips" hidden><i></i></div>
+  </div>
+</section>
+<script>
+  (function () {
+    var panel = document.getElementById("sppg");
+    Bridge.pager(panel, { pips: panel.parentNode.querySelector(".pips") });
+  })();
+</script>
+{% endblock %}

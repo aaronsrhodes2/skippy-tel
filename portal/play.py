@@ -39,4 +39,8 @@ GAMES = (
                 "years of Sol, make the yearly calls at the moot, and learn how to stop The Others. Work in progress; "
                 "this card plays the newest build.",
                 "♾️", "https://github.com/aaronsrhodes2/doom-loop", glyph="loop"),
+    BrowserGame("shifting-prophesy", "Shifting Prophesy",
+                "An experiment: two AI models, Haiku and the home AI purple Skippy, build the same top-down adventure with a "
+                "procedurally generated world, from the same spec and the same prompts. Play both builds and see every turn scored.",
+                "🔮", "https://github.com/aaronsrhodes2/shifting-prophesy-referee", endpoint="prophesy.board", glyph="rune"),
 )
