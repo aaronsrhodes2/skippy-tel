@@ -70,7 +70,7 @@ def test_a_finished_picture_or_song_is_taken_wherever_it_is_kept():
 
 
 def test_the_waits_for_mentat_nest_outside_its_work():
-    call = int(re.search(r'MENTAT_CALL_TIMEOUT: "(\d+)"', text("docker-compose.override.yml")).group(1))
+    call = int(re.search(r'MENTAT_CALL_TIMEOUT=(\d+)', text("core/compose.core.yml")).group(1))     # Mentat on skippy-core
     reporter = int(re.search(r'fetch\(f"\{MENTAT\}/ask", "POST", body, timeout=(\d+)', text("services/home-reporter/reporter.py")).group(1))
     pickup = const("services/home-reporter/reporter.py", "FAST_INTERVAL") + 5        # the reporter polls fast while someone chats
     assert call < reporter and call + pickup < home_mod.Home.MENTAT_WAIT_S

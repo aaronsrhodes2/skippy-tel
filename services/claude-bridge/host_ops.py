@@ -26,7 +26,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-SERVICES = ("flask-api", "whisper", "music-studio", "music-gate", "video-gate", "voice-gate", "home-reporter", "mentat-home")
+SERVICES = ("flask-api", "whisper", "music-studio", "music-gate", "video-gate", "voice-gate", "home-reporter")
 COMPOSE_DIR = os.getenv("SKIPPY_COMPOSE_DIR", r"D:\Aaron\development\SkippyTel")
 SUPERVISOR_PID = Path(COMPOSE_DIR) / "state" / "bridge-supervisor.pid"
 FUNNEL_DOORS = (("443", "3005"), ("8443", "3006"), ("10000", "3007"))     # (public https port, local port): music, video, voice gate

@@ -94,7 +94,7 @@ ACTIONS: dict[str, Action] = {
 }
 
 # The services a "Restart service" button may name; the bridge holds the same list and checks again.
-PC_SERVICES = ("flask-api", "ollama", "whisper", "music-studio", "music-gate", "video-gate", "voice-gate", "home-reporter", "mentat-home")
+PC_SERVICES = ("flask-api", "whisper", "music-studio", "music-gate", "video-gate", "voice-gate", "home-reporter")
 PC_WAIT_S = 45                   # how long the button waits for skippy-pc's answer before saying "sent"
 
 

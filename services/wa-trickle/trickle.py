@@ -2,7 +2,7 @@
 
 Wolfram|Alpha's free API tier allows about 2,000 calls a month, non-commercial. This service spends a small, fixed
 daily budget of them (default 60) on a queue of questions, one call per question, ever: the answer is frozen the moment it
-arrives. The same question is also put to Mentat (POST /ask on mentat-home), and put again whenever Mentat's commit changes
+arrives. The same question is also put to Mentat (POST /ask on Mentat, on skippy-core), and put again whenever Mentat's commit changes
 (GET /version), so Mentat's progress is measured against a frozen Wolfram answer without spending another call.
 
     POST /enqueue        {"suite": "math329", "items": [{"id": "...", "question": "...", "expected": {...}, "priority": 5}]}
@@ -13,7 +13,7 @@ arrives. The same question is also put to Mentat (POST /ask on mentat-home), and
 
 State is one SQLite file (/state/trickle.sqlite). Scoring lives on the sigma-ground side (tools/wa_trickle_score.py), so
 the extractors can improve without a new Wolfram call. Environment: WOLFRAM_ALPHA_APP_ID, WA_DAILY_BUDGET=60,
-WA_MONTHLY_CAP=1900, WA_INTERVAL_S=900, MENTAT_URL=http://mentat-home:8080, WA_STATE=/state, WA_TIMEOUT_S=40.
+WA_MONTHLY_CAP=1900, WA_INTERVAL_S=900, MENTAT_URL=http://skippy-core:7348, WA_STATE=/state, WA_TIMEOUT_S=40.
 """
 from __future__ import annotations
 
@@ -96,7 +96,7 @@ def ask_wolfram(app_id: str, question: str, timeout_s: float = 40.0) -> dict:
 
 
 def ask_mentat(base_url: str, question: str, timeout_s: float = 120.0) -> dict:
-    """POST /ask on mentat-home. -> {ok, result|error}. Raises Unavailable on 429/503 (its Qwen is down, or rate-limited)."""
+    """POST /ask on Mentat. -> {ok, result|error}. Raises Unavailable on 429/503 (its Qwen is down, or rate-limited)."""
     req = urllib.request.Request(base_url.rstrip("/") + "/ask", data=json.dumps({"question": question}).encode("utf-8"),
                                  headers={"Content-Type": "application/json"})
     try:
@@ -367,7 +367,7 @@ def create_app(trickle: Trickle, start_worker: bool = False) -> Flask:
 def from_env() -> Trickle:
     state = os.environ.get("WA_STATE", "/state")
     os.makedirs(state, exist_ok=True)
-    mentat = os.environ.get("MENTAT_URL", "http://mentat-home:8080")
+    mentat = os.environ.get("MENTAT_URL", "http://skippy-core:7348")
     timeout = float(os.environ.get("WA_TIMEOUT_S", "40"))
     return Trickle(os.path.join(state, "trickle.sqlite"),
                    wolfram_fn=lambda app_id, q: ask_wolfram(app_id, q, timeout),

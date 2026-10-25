@@ -82,7 +82,7 @@ services:
     env_file: G:/My Drive/vault/.env           # same shared .env as flask-api: SKIPPY_HOME_TOKEN ("Pair home"), BILBY_MAC_URL
     environment:
       SKIPPY_API: http://flask-api:5000
-      MENTAT_URL: http://mentat-home:8080
+      MENTAT_URL: http://skippy-core:7348      # Mentat with Core's chat model, on skippy-core (tailnet only, core/install/tailnet.sh)
       MUSIC_URL: http://music-studio:8001      # ACE-Step: the portal chat's make_music
       IMAGE_URL: http://image-studio:8002      # SDXL: the portal chat's make_image, the QUICK tier (this PC, beside the voices)
       IMAGE_HQ_URL: http://skippy-core:7347    # make_image_hq, the QUALITY tier: Qwen-Image on skippy-core (core/image-studio), tailnet only
@@ -113,7 +113,7 @@ services:
     env_file: ${WA_TRICKLE_STATE:-./state/wa-trickle}/wolfram.env   # ONE line, WOLFRAM_ALPHA_APP_ID=..., copied from the vault:
                                                                     # this service does not get the rest of the vault (services/wa-trickle/setup.sh)
     environment:
-      MENTAT_URL: http://mentat-home:8080
+      MENTAT_URL: http://skippy-core:7348
       WA_DAILY_BUDGET: "60"
       WA_MONTHLY_CAP: "1900"
       WA_INTERVAL_S: "900"
@@ -121,30 +121,6 @@ services:
       - "127.0.0.1:3010:8080"
     volumes:
       - ${WA_TRICKLE_STATE:-./state/wa-trickle}:/state    # the queue's SQLite file; set WA_TRICKLE_STATE when deploying from a worktree
-    depends_on: [mentat-home]
-    logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
-
-  # Mentat with Qwen: sigma-ground's physics engine, its plain-English
-  # translator allowed to ask qwen2.5:7b (Ollama) for phrasings its keywords
-  # miss. Skippy's portal chat sends physics questions here while skippy-pc is up.
-  mentat-home:
-    build:
-      context: .
-      dockerfile: mentat/Dockerfile
-    container_name: skippytel-mentat
-    restart: unless-stopped
-    environment:
-      MENTAT_USE_LLM: "1"
-      OLLAMA_URL: http://skippy-core:11434
-      MATERIA_OLLAMA_MODEL: skippy-chat          # the translator's Qwen: skippy-core's chat slot (Qwen3.6-35B-A3B); qwen3:8b was its old name
-      MENTAT_ROUTER_MODEL: ${MENTAT_ROUTER_MODEL-mentat-router-v31-4b}   # the trained router stage in /ask (mentat/router_stage.py); empty = off
-      MENTAT_CALL_TIMEOUT: "90"
-      MENTAT_RATE_PER_MIN: "600"
-      MENTAT_INSTANCE: home
-      MENTAT_RESEARCH_DIR: /research   # everything Mentat outputs, forever (mentat/research.py): research data
-    volumes:
-      - ./state/mentat-research:/research   # <YYYY-MM>.jsonl, appended; survives rebuilds
-    command: gunicorn --bind 0.0.0.0:8080 --workers 1 --threads 4 --timeout 120 app:app
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
 
   # image-studio: SDXL on this PC's GPU for the portal chat's make_image (the Captain only, for now). The weights are the

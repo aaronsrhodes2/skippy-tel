@@ -19,7 +19,7 @@ import threading
 import time
 
 OPS = ("start", "stop", "restart", "heal", "repair")        # heal and repair: the doctor (doctor.py) and the one Recovery button
-HEAL_NAMES = ("flask-api", "whisper", "music-studio", "image-studio", "mentat-home", "music-gate", "video-gate",
+HEAL_NAMES = ("flask-api", "whisper", "music-studio", "image-studio", "music-gate", "video-gate",
               "voice-gate", "tts-studio", "home-reporter", "bridge", "docker", "core")
 RESUMES = ("7am", "4h", "manual")        # a stop can say when the stack comes back by itself: 7 AM (the default), in 4 hours, or only when asked
 ONLINE_S = 45                    # the starter polls every ~10 s; this long without a call and it is not there
