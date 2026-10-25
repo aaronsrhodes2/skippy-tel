@@ -159,9 +159,17 @@ WARMUP = "Fine. I'll warm up, since apparently that is my job now."
 
 
 def free_gib() -> float:
-    """The card's free memory right now, all processes counted (nvidia-smi's view)."""
-    import torch
-    return torch.cuda.mem_get_info()[0] / 2**30
+    """The card's free memory right now, all processes counted: nvidia-smi's figure (the container has it, and it sees the whole card).
+    Not torch's mem_get_info: under WSL it told this container 14.7 GB free when the card had 6.0 GB (2026-10-24), which would let a
+    load overfill the card. torch only when nvidia-smi can't be asked."""
+    import subprocess
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"], capture_output=True,
+                             text=True, timeout=10).stdout.split()
+        return float(out[0]) / 1024
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        import torch
+        return torch.cuda.mem_get_info()[0] / 2**30
 
 
 def room_for(voice: str) -> bool:
