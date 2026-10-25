@@ -37,8 +37,7 @@ CHUNK = 8 * 1024 * 1024      # Cloud Run caps a request at 32 MB
 ART_MAX = 400_000
 JSON_MAX = 4_000_000            # a JSON reply cut short would not parse and would read as "didn't answer"
 MUSIC = os.environ.get("MUSIC_URL", "").rstrip("/")           # music-studio on skippy-pc (ACE-Step on the GPU)
-IMAGES = os.environ.get("IMAGE_URL", "").rstrip("/")          # image-studio on skippy-pc (SDXL on the GPU)
-IMAGE_BOX = os.environ.get("IMAGE_BOX", "pc")                   # which machine that studio runs on: "pc", or "core" once it moves there
+IMAGES = os.environ.get("IMAGE_URL", "").rstrip("/")          # the QUICK tier: image-studio on skippy-pc (SDXL on the GPU)
 IMAGE_TIMEOUT = 900         # seconds a picture may take (the first after a restart loads 6.9 GB of weights)
 IMAGES_HQ = os.environ.get("IMAGE_HQ_URL", "").rstrip("/")     # the QUALITY tier: Qwen-Image on skippy-core (core/image-studio), over the tailnet
 IMAGE_HQ_TIMEOUT = 7200     # it draws for quality: ~13 min a picture at 40 steps, and it may queue behind skippy-core's own chats
@@ -325,11 +324,11 @@ def _capability_probes() -> dict:
             "voice_gate": voice_gate_capability}
 
 
-def image_capability(url: str | None = None, box: str | None = None) -> dict:
+def image_capability(url: str | None = None, box: str = "pc") -> dict:
     """The picture studio: ready, which machine it runs on (the portal's patient queue waits for THAT machine to be quiet), and the GPU
     figures its /health gives (skippy-core's studio: gpu_free_pct, gpu_util_pct, gpu_free_gib), so the portal starts a picture only when
     there is room for it."""
-    url, box = (IMAGES, IMAGE_BOX) if url is None else (url, box)
+    url = IMAGES if url is None else url
     health = (fetch(f"{url}/health", timeout=8) or {}) if url else {}    # skippy-core's studio samples its GPU for 2 s
     out = {"ready": bool(url) and health.get("ready") is True, "box": box,
            "loaded": health.get("loaded") is True}         # its model already holds its memory: only "is the card busy" matters

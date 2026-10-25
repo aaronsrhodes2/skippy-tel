@@ -200,12 +200,16 @@ MUSIC_WAIT_S = 3       # songs are patient jobs (portal/patient.py): made when s
 _MAKE_IMAGE = {
     "name": "make_image",
     "description": "Make a picture: free, no tokens. Give a vivid, specific description (subject, setting, style, lighting, "
-                   "composition). The picture shows as an image card under your reply; don't paste links or write [IMAGE: ...]. "
-                   "If it isn't ready yet the result says so: tell the user and use image_result later. Only when the user "
-                   "asks for a picture.",
+                   "composition; any words to show, in quotes). Quick by default, infographics included. Set quality only when "
+                   "the user asks for it in words (\"quality image\", \"high quality\", \"take your time\"): a big model "
+                   "that may take up to an hour. The picture shows as an image card under your reply; don't paste links or "
+                   "write [IMAGE: ...]. If it isn't ready yet the result says so: tell the user and use image_result later. "
+                   "Only when the user asks for a picture.",
     "input_schema": {"type": "object",
                      "properties": {"prompt": {"type": "string", "description": "What to draw, in detail."},
-                                    "orientation": {"type": "string", "enum": ["square", "landscape", "portrait"]}},
+                                    "orientation": {"type": "string", "enum": ["square", "landscape", "portrait"]},
+                                    "quality": {"type": "boolean",
+                                                "description": "Only when the user asked for a quality picture in words."}},
                      "required": ["prompt"], "additionalProperties": False},
 }
 
@@ -252,7 +256,8 @@ def parse_verb(message: str) -> tuple[str | None, str]:
 
 class ChatTools:
     def __init__(self, vm, is_admin: bool, visible: list[str] | None = None, who: str = "",
-                 music=None, home_mentat=None, home_music=None, home_image=None, image_allow=None, trace: str = ""):
+                 music=None, home_mentat=None, home_music=None, home_image=None, image_allow=None, trace: str = "",
+                 image_tiers: tuple = ("make_image",)):
         self.vm, self.is_admin, self.who = vm, is_admin, who
         self.trace = trace                    # this chat turn's id: Mentat keeps it with the research record
         self.visible = list(GAMES) if visible is None else list(visible)   # games this person may see
@@ -269,6 +274,7 @@ class ChatTools:
         self.home_image = home_image if tool_policy.allowed("image_gen", is_admin) else None
         # image_allow() spends one of a guest's pictures for the day (the Captain's never runs out); None = no limit.
         self.image_allow = image_allow
+        self.image_tiers = tuple(image_tiers)  # which picture kinds are ready: make_image (quick, skippy-pc), make_image_hq (quality, skippy-core)
         self.image_ok = bool(self.home_image)
         self.media: list[dict] = []           # audio made this turn: the chat page plays it
 
@@ -383,10 +389,17 @@ class ChatTools:
         if not prompt:
             raise ToolError("make_image needs a description of the picture.")
         width, height = _SIZES.get(str(args.get("orientation") or "square"), _SIZES["square"])
+        kind = "make_image_hq" if args.get("quality") is True else "make_image"
+        if kind not in self.image_tiers:
+            if not self.image_tiers:
+                raise ToolError("Pictures are offline at home right now. Say so plainly.")
+            raise ToolError("Quality pictures (skippy-core) aren't available right now; offer a quick one instead."
+                            if kind == "make_image_hq" else
+                            "Quick pictures (skippy-pc) aren't available right now; offer a quality one (it may take up to an hour).")
         if self.image_allow and not self.image_allow():
             raise ToolError("That's today's pictures used up (10 a day). Say so, and that it resets tomorrow.")
-        job_id = self.home_image.start("make_image", owner=self.who, prompt=prompt, width=width, height=height)
-        return self._image_status(job_id, IMAGE_WAIT_S)
+        job_id = self.home_image.start(kind, owner=self.who, prompt=prompt, width=width, height=height)
+        return self._image_status(job_id, IMAGE_WAIT_S, hq=kind == "make_image_hq")
 
     def _image_result(self, args) -> dict:
         job_id = str(args.get("job_id") or "")
@@ -397,7 +410,7 @@ class ChatTools:
             raise ToolError("That isn't your picture.")
         return self._image_status(job_id, 5)
 
-    def _image_status(self, job_id: str, wait: float) -> dict:
+    def _image_status(self, job_id: str, wait: float, hq: bool = False) -> dict:
         state = self.home_image.wait_result(job_id, wait)
         if state["state"] == "done":
             result = state["result"] if isinstance(state.get("result"), dict) else {}
@@ -409,10 +422,12 @@ class ChatTools:
         if state["state"] == "running":
             if not any(m["job_id"] == job_id for m in self.media):     # the page shows a "drawing" card that fills in by itself
                 self.media.append({"kind": "image", "job_id": job_id, "url": f"/chat/media/{job_id}", "pending": True,
-                                   "title": "your picture"})
+                                   "title": "your picture", **({"tier": "hq"} if hq else {})})
             return {"status": "queued", "job_id": job_id,
-                    "note": "Queued: pictures are drawn when their machine is quiet, for quality, so it may take a while. Say so in "
-                            "a few words: the picture will appear under your reply by itself when it's done. Don't promise a time."}
+                    "note": ("Queued: a quality picture, drawn by a big model when its machine is quiet; it may take up to an hour. "
+                             if hq else "Queued: pictures are drawn when their machine is quiet, so it may take a while. ") +
+                            "Say so in a few words: the picture will appear under your reply by itself when it's done."
+                            + ("" if hq else " Don't promise a time.")}
         if state["state"] == "error":
             raise ToolError(f"The picture failed: {state['error']}. Say so plainly.")
         raise ToolError("That picture job is gone (it expired, or the portal restarted). Offer to make it again.")

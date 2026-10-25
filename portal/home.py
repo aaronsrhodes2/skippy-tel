@@ -27,7 +27,7 @@ FAST_WINDOW = 300         # after chat activity, the reporter polls for jobs qui
 REDELIVER_AFTER = 20      # a job handed out but not answered goes out again after this
 MAX_REPORT = 1_000_000    # bytes (album art included)
 JOB_TTL = 600             # seconds a job waits for an answer before it's dropped (a job may ask for longer)
-KNOWN_CAPABILITIES = ("make_music", "make_image", "workshop", "music_gate", "video_gate", "voice_gate")   # what skippy-pc may advertise; anything else it sends is ignored
+KNOWN_CAPABILITIES = ("make_music", "make_image", "make_image_hq", "workshop", "music_gate", "video_gate", "voice_gate")   # what skippy-pc may advertise; anything else it sends is ignored
 _ACTIONS = {("music", "skip"), ("music", "pause"), ("music", "resume"), ("music", "stop")}
 PROJECT_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")                    # the private Skippy's project ids (projects.json)
 GITHUB_REPO = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}")
@@ -252,7 +252,7 @@ class Home:
     def patient_jobs(self) -> dict:
         """(a copy) The queued jobs the patient queue holds back or hands out: id -> {"job", "sent", "created", ...}."""
         with self._lock:
-            return {i: dict(j) for i, j in self._jobs.items() if j["job"].get("kind") in ("make_image", "make_music")
+            return {i: dict(j) for i, j in self._jobs.items() if j["job"].get("kind") in ("make_image", "make_image_hq", "make_music")
                     and not j["event"].is_set()}
 
     def has(self, job_id: str) -> bool:

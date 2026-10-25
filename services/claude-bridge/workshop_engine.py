@@ -229,14 +229,16 @@ _IMAGE_LINE = re.compile(r"^[ \t]*`?SKIPPY_IMAGE:[ \t]*(\S[^\n`]*?)[ \t]*`?[ \t]
 # A picture the agent wants MADE (not a file it has): `SKIPPY_PICTURE: <a detailed description>` in its reply. The bridge gives it
 # an id and the portal makes it a patient job (portal/patient.py) for the Captain, drawn when its machine is quiet; the chat shows a
 # card that fills in. The agent never runs the image studio by hand (2026-10-24: it did, and the run died trying to show the file).
+# `SKIPPY_PICTURE_HQ:` asks for the quality tier instead (skippy-core's big model, up to an hour), only when he asks for quality.
 MAX_PICTURES = 2
-_PICTURE_LINE = re.compile(r"^[ \t]*`?SKIPPY_PICTURE:[ \t]*(\S[^\n`]*?)[ \t]*`?[ \t]*$", re.M)
+_PICTURE_LINE = re.compile(r"^[ \t]*`?SKIPPY_PICTURE(_HQ)?:[ \t]*(\S[^\n`]*?)[ \t]*`?[ \t]*$", re.M)
 
 
-def split_pictures(text: str) -> tuple[str, list[str]]:
-    """An assistant text block without its `SKIPPY_PICTURE: <description>` lines, and those descriptions."""
-    prompts = [m.group(1).strip()[:900] for m in _PICTURE_LINE.finditer(text)]
-    return _PICTURE_LINE.sub("", text).strip(), [p for p in prompts if p]
+def split_pictures(text: str) -> tuple[str, list[tuple[str, str]]]:
+    """An assistant text block without its `SKIPPY_PICTURE[_HQ]: <description>` lines, and those as (description, tier):
+    tier "hq" for a quality picture, "" for a quick one."""
+    prompts = [(m.group(2).strip()[:900], "hq" if m.group(1) else "") for m in _PICTURE_LINE.finditer(text)]
+    return _PICTURE_LINE.sub("", text).strip(), [p for p in prompts if p[0]]
 
 
 def split_images(text: str) -> tuple[str, list[str]]:
@@ -302,7 +304,7 @@ class Run:
         self.clone = ""                        # that project's clone when the run started (the conversation log reads it)
         self.before_finish = None              # (run) -> None, called once just before the run ends (the ship check)
         self.image_paths: list[str] = []       # SKIPPY_IMAGE lines the agent printed: screenshots to attach at the end
-        self.picture_prompts: list[str] = []   # SKIPPY_PICTURE lines: pictures to have made (patient jobs, see _attach_images)
+        self.picture_prompts: list[tuple[str, str]] = []   # SKIPPY_PICTURE[_HQ] lines: (description, tier) to have made (patient jobs)
         self.pictures: list[str] = []          # a Core-brain run's attached pictures, described by the vision slot before it starts
         self.created = time.time() if created is None else created
         self.events: list[dict] = []
@@ -1182,8 +1184,8 @@ class Workshop:
                                                 f"most {MAX_SHOT_BYTES // (1024 * 1024)} MB inside my clone)"})
                 continue
             run.emit({"t": "image", "mime": mime, "name": name, "b64": base64.b64encode(data).decode("ascii")})
-        for prompt in run.picture_prompts[:MAX_PICTURES]:      # pictures to make: the portal queues each (its id is the job's)
-            run.emit({"t": "picture", "id": secrets.token_hex(8), "prompt": prompt})
+        for prompt, tier in run.picture_prompts[:MAX_PICTURES]:      # pictures to make: the portal queues each (its id is the job's)
+            run.emit({"t": "picture", "id": secrets.token_hex(8), "prompt": prompt, **({"tier": tier} if tier else {})})
 
     def _work(self, run: Run) -> None:
         try:

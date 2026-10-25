@@ -24,7 +24,8 @@ MCP_SERVERS: dict[str, str] = {
     "physics": EVERYONE,
     # The Captain's hardware: skippy-pc's GPU makes the music, so it's his alone
     "music_gen": ADMIN,
-    "image_gen": EVERYONE,      # make_image: this PC's GPU; guests 10 a day (app.py IMAGES_PER_DAY), the Captain no limit
+    "image_gen": EVERYONE,      # make_image: quick on skippy-pc, or quality (make_image_hq) on skippy-core; guests 10 a day
+                                # (app.py IMAGES_PER_DAY, both tiers together), the Captain no limit
     # The Captain's private data
     "gmail": ADMIN,
     "calendar": ADMIN,

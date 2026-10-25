@@ -439,7 +439,7 @@
           if (d.state === "done") return done();
           if (d.state === "unknown") { lamp.dataset.s = "off"; words.textContent = "That " + what + " is gone (it was given up on, or it expired)."; return; }
           if (d.state === "failed") { lamp.dataset.s = "warn"; words.textContent = "That " + what + " failed: " + (d.why || "no reason given") + "."; return; }
-          if (d.state === "working") { lamp.dataset.s = "on"; words.textContent = song ? "Composing…" : "Drawing…"; }
+          if (d.state === "working") { lamp.dataset.s = "on"; words.textContent = song ? "Composing…" : (d.tier === "hq" ? "Drawing (quality, up to an hour)…" : "Drawing…"); }
           else { lamp.dataset.s = "idle"; words.textContent = "In line: " + (d.why || "next up") + "."; }
         } catch (e) { /* offline for a moment: keep waiting */ }
         setTimeout(look, tries < 6 ? 10000 : 30000);

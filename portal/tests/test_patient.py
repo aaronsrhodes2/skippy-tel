@@ -176,6 +176,7 @@ def test_the_chat_keeps_a_place_for_pictures_and_songs_and_its_card_waits():
     page = (Path(portal.__file__).parent / "templates" / "_chat.html").read_text(encoding="utf-8")
     assert "function waitCard" in page and "[picture:" not in page.split("pictureNote")[0][-10:]
     assert '"song" : "picture"' in page and "In line: " in page and "Composing…" in page and "chat.media_state" in page
+    assert "Drawing (quality, up to an hour)…" in page and 'd.tier === "hq"' in page
 
 
 def test_skippy_core_counts_free_gigabytes_not_a_share_because_its_memory_is_shared_with_the_llms():
@@ -188,18 +189,36 @@ def test_skippy_core_counts_free_gigabytes_not_a_share_because_its_memory_is_sha
     assert p.ready("core", {"free_pct": 55, "util_pct": 70, "free_gib": 70.0}) == (False, "waiting for the GPU to settle (70% busy)")
 
 
-def test_a_picture_for_skippy_core_waits_for_the_core_studios_own_figures(world):
-    caps = {"make_image": {"ready": True, "box": "core", "gpu_free_pct": 25, "gpu_util_pct": 2, "gpu_free_gib": 30.0}}
+def test_a_quality_picture_goes_to_skippy_core_and_waits_for_the_core_studios_own_figures(world):
+    caps = {"make_image": {"ready": True, "box": "pc"},
+            "make_image_hq": {"ready": True, "box": "core", "gpu_free_pct": 25, "gpu_util_pct": 2, "gpu_free_gib": 30.0}}
     send = lambda: world["client"].post("/home/report", json={"status": {}, "capabilities": caps}, headers=world["H"])   # noqa: E731
     send()
-    item = ask(world, "make_image", {"prompt": "a nebula"})["media"][0]
+    item = ask(world, "make_image", {"prompt": "a nebula", "quality": True}, "a quality image of a nebula")["media"][0]
+    assert item["tier"] == "hq"
     world["clock"].t += pm.QUIET_S + 1
     send()
     assert handed(world) == []
-    assert world["client"].get(f"/chat/media/{item['job_id']}/state").get_json()["why"] == "waiting for memory to free up (30 GB free, 35 needed)"
-    caps["make_image"]["gpu_free_gib"] = 46.0                     # the box with its three LLMs resident
+    state = world["client"].get(f"/chat/media/{item['job_id']}/state").get_json()
+    assert state["why"] == "waiting for memory to free up (30 GB free, 35 needed)" and state["tier"] == "hq" and state["box"] == "core"
+    caps["make_image_hq"]["gpu_free_gib"] = 46.0                  # the box with its three LLMs resident
     reply = send().get_json()                                       # (the report's own reply is how the reporter gets its jobs)
-    assert [j["box"] for j in reply["jobs"] if j["kind"] in pm.KINDS] == ["core"]
+    (job,) = [j for j in reply["jobs"] if j["kind"] in pm.KINDS]
+    assert job["kind"] == "make_image_hq" and job["box"] == "core"
+    assert world["client"].get(f"/chat/media/{item['job_id']}/state").get_json() == {"state": "working", "tier": "hq"}
+
+
+def test_a_picture_is_quick_unless_quality_is_asked_for_and_each_tier_says_when_it_is_off(world):
+    caps = {"make_image": {"ready": True}}
+    world["client"].post("/home/report", json={"status": {}, "capabilities": caps}, headers=world["H"])
+    with world["app"].test_request_context():
+        tools = world["app"].extensions["chat_tools_for"]({"email": ADMIN})
+        with pytest.raises(chat_tools.ToolError, match="Quality pictures"):
+            tools._make_image({"prompt": "an owl", "quality": True})              # skippy-core isn't advertising: say so
+    (item,) = ask(world, "make_image", {"prompt": "an infographic of the planets"})["media"]
+    assert "tier" not in item and world["pats"].pending(item["job_id"])["kind"] == "make_image"
+    schema = next(t for t in tools.schemas() if t["name"] == "make_image")
+    assert "quality" in schema["input_schema"]["properties"] and "up to an hour" in schema["description"]
 
 
 # ── a picture the AGENT asked for (a SKIPPY_PICTURE line: the bridge sends {"t": "picture", "id", "prompt"}) ──
@@ -218,6 +237,17 @@ def test_an_agent_picture_becomes_a_patient_job_with_the_bridges_id_once_and_its
     assert world["client"].get(f"/chat/media/{pic['id']}/state").get_json()["state"] == "working"
     world["client"].put(f"/home/media/{pic['id']}?title=cat", data=PNG, headers={**world["H"], "Content-Type": "image/png"})
     assert world["client"].get(f"/chat/media/{pic['id']}").data == PNG
+
+
+def test_an_agent_quality_picture_is_drawn_on_skippy_core(world):
+    world["client"].post("/home/report", json={"status": {}, "capabilities": {
+        "make_image": {"ready": True}, "make_image_hq": {"ready": True, "box": "core", "gpu_free_gib": 50.0, "gpu_util_pct": 1}}},
+        headers=world["H"])
+    pic = {"t": "picture", "id": "fedcba9876543210", "prompt": "a lighthouse in a storm", "tier": "hq"}
+    world["client"].post("/home/workshop/abcd1234", headers=world["H"], json={
+        "who": ADMIN, "conv": CONV, "start": 0, "events": [pic], "state": "running"})
+    assert world["pats"].pending(pic["id"])["kind"] == "make_image_hq" and world["pats"].pending(pic["id"])["box"] == "core"
+    assert world["app"].extensions["workshop"].read(ADMIN, "abcd1234")["events"][0]["tier"] == "hq"
 
 
 @pytest.mark.parametrize("bad", [{"id": "nothex!!nothex!!"}, {"id": "abc"}, {"prompt": "  "}, {"prompt": 7}])
