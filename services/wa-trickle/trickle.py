@@ -13,7 +13,7 @@ arrives. The same question is also put to Mentat (POST /ask on Mentat, on skippy
 
 State is one SQLite file (/state/trickle.sqlite). Scoring lives on the sigma-ground side (tools/wa_trickle_score.py), so
 the extractors can improve without a new Wolfram call. Environment: WOLFRAM_ALPHA_APP_ID, WA_DAILY_BUDGET=60,
-WA_MONTHLY_CAP=1900, WA_INTERVAL_S=900, MENTAT_URL=http://skippy-core:7348, WA_STATE=/state, WA_TIMEOUT_S=40.
+WA_MONTHLY_CAP=1900, WA_INTERVAL_S=900, MENTAT_URL=http://skippy-core:7350, WA_STATE=/state, WA_TIMEOUT_S=40.
 """
 from __future__ import annotations
 
@@ -367,7 +367,7 @@ def create_app(trickle: Trickle, start_worker: bool = False) -> Flask:
 def from_env() -> Trickle:
     state = os.environ.get("WA_STATE", "/state")
     os.makedirs(state, exist_ok=True)
-    mentat = os.environ.get("MENTAT_URL", "http://skippy-core:7348")
+    mentat = os.environ.get("MENTAT_URL", "http://skippy-core:7350")
     timeout = float(os.environ.get("WA_TIMEOUT_S", "40"))
     return Trickle(os.path.join(state, "trickle.sqlite"),
                    wolfram_fn=lambda app_id, q: ask_wolfram(app_id, q, timeout),

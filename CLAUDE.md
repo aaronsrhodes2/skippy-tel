@@ -178,7 +178,7 @@ and jobs; while someone chats, the reporter also polls `GET /home/jobs` every
 
 - Physics in Skippy's chat = `ask_mentat` → a job → the reporter → **Mentat on skippy-core** (2026-10-25; it was `mentat-home`
   on skippy-pc): `mentat` in `core/compose.core.yml`, mentat/Dockerfile with `MENTAT_USE_LLM=1` and `MATERIA_OLLAMA_MODEL=skippy-chat`
-  (Core's resident Qwen3.6-35B-A3B through the shim) and its trained router first (`MENTAT_ROUTER_MODEL`, mentat-router-v31-4b, also resident), tailnet-only on `skippy-core:7348` (`core/install/tailnet.sh`); its research
+  (Core's resident Qwen3.6-35B-A3B through the shim) and its trained router first (`MENTAT_ROUTER_MODEL`, mentat-router-v31-4b, also resident), tailnet-only on `skippy-core:7350` (`core/install/tailnet.sh`); its research
   log is `/var/lib/skippy-core/mentat-research`. skippy-core's own doctor and deployer keep it up, not skippy-pc's. No Qwen → Mentat answers 503 and Skippy says it's offline;
   there is deliberately NO fallback to the cloud copy (keywords only), which
   serves the public Experiments playground.

@@ -82,7 +82,7 @@ services:
     env_file: G:/My Drive/vault/.env           # same shared .env as flask-api: SKIPPY_HOME_TOKEN ("Pair home"), BILBY_MAC_URL
     environment:
       SKIPPY_API: http://flask-api:5000
-      MENTAT_URL: http://skippy-core:7348      # Mentat with Core's chat model, on skippy-core (tailnet only, core/install/tailnet.sh)
+      MENTAT_URL: http://skippy-core:7350      # Mentat with Core's chat model, on skippy-core (tailnet only, core/install/tailnet.sh)
       MUSIC_URL: http://music-studio:8001      # ACE-Step: the portal chat's make_music
       IMAGE_URL: http://image-studio:8002      # SDXL: the portal chat's make_image, the QUICK tier (this PC, beside the voices)
       IMAGE_HQ_URL: http://skippy-core:7347    # make_image_hq, the QUALITY tier: Qwen-Image on skippy-core (core/image-studio), tailnet only
@@ -113,7 +113,7 @@ services:
     env_file: ${WA_TRICKLE_STATE:-./state/wa-trickle}/wolfram.env   # ONE line, WOLFRAM_ALPHA_APP_ID=..., copied from the vault:
                                                                     # this service does not get the rest of the vault (services/wa-trickle/setup.sh)
     environment:
-      MENTAT_URL: http://skippy-core:7348
+      MENTAT_URL: http://skippy-core:7350
       WA_DAILY_BUDGET: "60"
       WA_MONTHLY_CAP: "1900"
       WA_INTERVAL_S: "900"

@@ -7,7 +7,7 @@
 #            core/llm/models.py into ${CORE_STATE}/llm (config.yaml + shim.json) before every deploy.
 #   ollama   the Ollama shim (core/ollama-shim): same name and port as today's Ollama, so OLLAMA_BASE_URL never changes.
 #   flask-api  Skippy's core, unchanged code.
-#   mentat   the physics engine with Core's chat model (skippy-pc's reporter and wa-trickle call it on the tailnet, :7348).
+#   mentat   the physics engine with Core's chat model (skippy-pc's reporter and wa-trickle call it on the tailnet, :7350).
 #   image-studio  the portal chat's pictures: Qwen-Image-2512 through stable-diffusion.cpp (Vulkan), one sd-cli run per
 #            picture so it holds no memory between them. Host networking on 7347 so the box's ufw (not Docker's own NAT)
 #            keeps the LAN out; the tailnet gets in through Tailscale's own rules, and ALLOW_FROM narrows it to skippy-pc.
@@ -74,7 +74,7 @@ services:
 
   # Mentat with Core's chat model (2026-10-25; it was mentat-home on skippy-pc): sigma-ground's physics engine, its trained router first
   # and its translator asking the shim's skippy-chat (Qwen3.6-35B-A3B, resident) for phrasings its keywords miss. The tailnet reaches it through
-  # `tailscale serve --http=7348` (core/install/tailnet.sh); the port itself is on 127.0.0.1 only.
+  # `tailscale serve --http=7350` (core/install/tailnet.sh); the port itself is on 127.0.0.1 only.
   mentat:
     build:
       context: ..
@@ -92,7 +92,7 @@ services:
       - MENTAT_INSTANCE=home
       - MENTAT_RESEARCH_DIR=/research
     ports:
-      - "127.0.0.1:7348:8080"
+      - "127.0.0.1:7350:8080"
     volumes:
       - ${CORE_STATE:-/var/lib/skippy-core}/mentat-research:/research   # <YYYY-MM>.jsonl, appended forever (mentat/research.py)
     command: gunicorn --bind 0.0.0.0:8080 --workers 1 --threads 4 --timeout 120 app:app
