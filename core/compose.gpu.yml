@@ -7,3 +7,9 @@ services:
     group_add:                      # numeric: the image has no render group. The deployer reads them off /dev/dri.
       - "${VIDEO_GID:-44}"
       - "${RENDER_GID:-992}"
+  image-studio:
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${VIDEO_GID:-44}"
+      - "${RENDER_GID:-992}"
