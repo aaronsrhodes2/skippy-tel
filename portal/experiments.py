@@ -205,4 +205,15 @@ MINEBENCH_RUNS = (
                 "sleepers, a station with a red roof and gold trim, a water tower, trees. Short of the frontier builds: the wheels lie "
                 "beside the track instead of under the engine, the passenger cars are flat slabs with no windows, a few blocks float, "
                 "and most of the plate is empty ground."},
+    {"id": "v2", "title": "Choo-choo train, a full written specification",
+     "model": "Purple Skippy: Claude Code on Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8), local and free",
+     "prompt": "BUILD_REQUEST_V2: a 4-4-0 locomotive, tender and two passenger cars specified part by part (proportions in blocks, "
+               "materials, how the parts join), v1's mistakes, and a loop of render, look (the vision model describes each pass), fix",
+     "request": "experiments/minebench/v2/request.txt", "comparable": False, "blocks": 61098, "minutes": 29, "size": "206 x 66 x 169",
+     "verdict": "Much better parts: a long boiler on its frame with gold domes, bell and red bands, a cab with windows, a cowcatcher, a "
+                "big smoke plume, and real passenger cars (clerestory roofs, windows on both sides, stripes, end railings), a platform, "
+                "depot and water tower. One big miss: both passenger cars and their railings float in the air beside the plate, off "
+                "the track, and the wheels are thin rings. It looked at each pass through the vision model, which called the scene "
+                "recognisable and missed the floating cars: describing a picture is not checking it. Next: an objective floating-parts "
+                "check in the runtime, and pointed questions for the look."},
 )

@@ -49,8 +49,40 @@ for (const k of voxels.keys()) {
   const c = k % G, b = Math.floor(k / G) % G, a = Math.floor(k / G / G);
   [a, b, c].forEach((v, j) => { lo[j] = Math.min(lo[j], v); hi[j] = Math.max(hi[j], v); });
 }
+// Floating parts: pieces of the build (blocks joined face to face) that touch neither the ground (the build's lowest layer) nor anything
+// resting on it. A vision model describing a picture misses these (MineBench v2's passenger cars floated beside the plate and it called
+// the scene "recognisable"); this counts them. Smoke and clouds may float on purpose: the report says where each piece is and what it's made of.
+const floating = [];
+{
+  const seen = new Set(), ground = lo[1];
+  const dirs = [G * G, -G * G, G, -G, 1, -1];
+  for (const start of voxels.keys()) {
+    if (seen.has(start)) continue;
+    const stack = [start], part = []; seen.add(start);
+    let grounded = false;
+    while (stack.length) {
+      const k = stack.pop(); part.push(k);
+      if (Math.floor(k / G) % G === ground) grounded = true;
+      for (const d of dirs) {
+        const n = k + d;
+        if (voxels.has(n) && !seen.has(n) && Math.abs((n % G) - (k % G)) <= 1) { seen.add(n); stack.push(n); }
+      }
+    }
+    if (!grounded) {
+      const pl = [G, G, G], ph = [-1, -1, -1], kinds = new Map();
+      for (const k of part) {
+        const c = k % G, b = Math.floor(k / G) % G, a = Math.floor(k / G / G);
+        [a, b, c].forEach((v, j) => { pl[j] = Math.min(pl[j], v); ph[j] = Math.max(ph[j], v); });
+        const t = SIMPLE[voxels.get(k)]; kinds.set(t, (kinds.get(t) || 0) + 1);
+      }
+      floating.push({ blocks: part.length, min: pl, max: ph, made_of: [...kinds].sort((x, y) => y[1] - x[1]).slice(0, 3).map(([t]) => t) });
+    }
+  }
+  floating.sort((x, y) => y.blocks - x.blocks);
+}
 console.log(JSON.stringify({ blocks: voxels.size, placed_calls: placed, outside_grid: outside, unknown_types: Object.fromEntries(unknown),
-  bounds: { min: lo, max: hi }, ms: Date.now() - t0 }));
+  bounds: { min: lo, max: hi }, floating_parts: floating.length, floating_blocks: floating.reduce((n, f) => n + f.blocks, 0),
+  biggest_floating: floating.slice(0, 8), ms: Date.now() - t0 }));
 if (process.argv[3]) {
   const buf = Buffer.alloc(voxels.size * 7); let o = 0;
   for (const [k, i] of voxels) {

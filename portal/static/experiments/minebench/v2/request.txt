@@ -1,0 +1,96 @@
+# Build request v2: a choo-choo train, specified in full
+
+(The MineBench rules in MINEBENCH_PROMPT.md still apply: 256 grid, simple palette, voxel.exec JSON in build.json. This request
+replaces its one-line "a choo-choo train". Your first build, v1, is in git history: beat it.)
+
+## What v1 got wrong (do not repeat)
+- The wheels were rings lying BESIDE the track. Wheels are vertical discs standing on the rails, under the locomotive, touching its frame.
+- The passenger cars were flat red slabs: no windows, no roof shape, no ends, no wheels.
+- Stray single blocks floated in the sky.
+- The train was small on a huge empty plate (200 x 180). The train must dominate the frame.
+- The locomotive had no cab you could recognise, no cylinders, no rods.
+
+## The subject: a classic 19th-century American 4-4-0 steam locomotive with tender and two passenger cars, at a small station
+Think of the storybook "choo-choo": a black locomotive with red and brass trim, a big flared smokestack puffing white smoke, a
+cowcatcher at the front, a cab at the back, followed by a tender and two red passenger cars.
+
+## Layout and scale (blocks; y is up, ground top at y = 4)
+- Build along the x axis, the locomotive's front facing +x. Track centred on z = 128, running x = 40 to x = 216.
+- Track gauge: rails at z = 124 and z = 132 (iron_block, 1 block wide, 1 high, on y = 5), sleepers (oak_planks) every 3 blocks,
+  1 high, from z = 121 to z = 135, under the rails. A ballast bed of gravel-coloured stone/cobblestone, 2 high, 17 wide under it.
+- Overall: locomotive about 64 blocks long, tender 30, each passenger car 44, 3-block gaps with couplers between them.
+  Order from the front (+x): locomotive (x ≈ 150 to 214), tender (x ≈ 117 to 147), car 1 (x ≈ 70 to 114), car 2 (x ≈ 23 to 67)
+  — adjust to fit, but keep the whole train between x = 20 and x = 220.
+- Wheel rims sit ON the rails (lowest wheel block at y = 6), wheels in the planes z = 124 and z = 132 (one disc per rail).
+
+## The locomotive, part by part (front to back)
+1. Pilot (cowcatcher): a wedge at the very front, sloping down and forward from the buffer beam to just above the rails,
+   12 wide, made of red_wool slats with black_wool gaps, so it reads as bars, not a solid block.
+2. Buffer beam: a red_wool cross-beam above the pilot, full width (17), with a black coupler in the middle.
+3. Headlamp: a big box lantern on top of the smokebox front, about 5x5x5: gold_block frame, glowstone lens facing +x.
+4. Smokebox: the front of the boiler, a horizontal cylinder of radius 7 (black_wool), 10 long, with a round door on its front
+   face (gray_wool disc with an iron_block hinge bar and a gold_block centre dart).
+5. Smokestack: on top of the smokebox, the iconic flared "balloon" stack: a short narrow neck (radius 2) widening upward into a
+   wide cone/funnel (radius 5 at the top), about 16 tall in all, black_wool with a gold_block rim at the top.
+6. Smoke: a plume of white_wool and gray_wool puffs rising from the stack, drifting back over the train (toward -x) as it rises,
+   puffs as soft rounded blobs (radius 2 to 5) that grow and thin out: 6 to 10 puffs. Connected to the stack, not floating loose.
+7. Boiler: the long horizontal cylinder behind the smokebox, radius 6 (a little less than the smokebox), about 30 long, black_wool,
+   with 3 brass bands (gold_block rings) around it. Its centre line around y = 22; it sits on the frame, ABOVE the wheels.
+8. Domes on top of the boiler: a steam dome (a rounded cap, radius 3, 4 tall, gold_block) in the middle, a sand dome (radius 2.5,
+   red_wool with a gold_block top) in front of it. A bell (gold_block, bell-shaped, 3 tall) on a small yoke between stack and dome,
+   and a whistle (a thin gold_block pipe, 3 tall) on top near the cab.
+9. Running boards: a narrow walkway along each side of the boiler at frame height, with a thin handrail (iron_block line) above it.
+10. Cylinders: one on each side, low at the front, just behind the pilot: horizontal cylinders radius 3, 8 long, gray_wool with
+    gold_block end caps, outside the frame.
+11. Frame: a dark girder (black_wool) under the boiler, running the full length, connecting everything; nothing floats.
+12. Leading truck: two small wheels per side (radius 4) under the smokebox/cylinders, black_wool discs with a gray_wool hub.
+13. Driving wheels: two big wheels per side (radius 8) under the middle of the boiler and the cab: red_wool discs with black_wool
+    tyres (the rim), 8 to 10 spokes (iron_block lines), a gray_wool hub, and a counterweight (a black_wool crescent) on each.
+    A main rod from each cylinder's piston to the front driver's crank pin, and a side (coupling) rod joining the two drivers'
+    crank pins: iron_block, 1 thick, just outside the wheels.
+14. Cab: at the back of the locomotive, a box about 14 long, 15 wide, 14 tall, red_wool walls with oak_planks trim, a big
+    side window on each side (glass, framed with gold_block), a front window either side of the boiler, an arched roof that
+    overhangs a little (black_wool or gray_wool, curved), and a doorway at the back. Inside, a glowstone firebox glow and a seat.
+15. Name plate: a gold_block plate on the cab side.
+
+## The tender
+A box about 30 long, 15 wide, 9 tall on the frame, black_wool with a red_wool band and gold_block lining, sitting on two
+4-wheel trucks (wheel radius 4, black_wool, visible below). The top is open at the front, heaped with coal (black_wool and
+gray_wool mound, irregular), with a water hatch (iron_block) at the back. A short gap and a coupler (iron_block) to the
+locomotive and to car 1.
+
+## Two passenger cars (identical, or the second a little different)
+Each about 44 long, 15 wide, 15 tall: red_wool sides with a black_wool lower skirt, a row of 8 to 10 tall windows (glass, 3 wide,
+4 tall) with oak_planks or gold_block frames between them, a clerestory roof (a raised middle strip with small glass vents, on a
+curved gray_wool roof that overhangs the sides), open platforms with iron_block railings and steps at both ends, a gold_block
+name band along the side, and two 4-wheel trucks under each car (wheel radius 4) on the rails. Glowstone lamps inside behind
+some windows.
+
+## The scene (make the train the star; keep the plate tight)
+- Ground: a grass_block plate only about 200 x 80 around the track (x 20 to 220, z 88 to 168), with dirt patches and a few
+  rocks (stone), not a giant empty field.
+- A small station on the -z side of the track near the cars: a wooden platform (oak_planks, 2 high) along the track, a little
+  depot building (bricks or oak_planks walls, red_wool roof, glass windows, a door, a clock or sign in gold_block), a bench,
+  a lamp post with glowstone, a water tower (wooden barrel tank on oak_log legs with a spout swung toward the track) near the
+  tender.
+- A few trees (oak_log trunks, rounded oak_leaves crowns) and bushes on the +z side, a small fence, some flowers
+  (yellow_wool, red_wool).
+
+## Quality bar
+- Curved shapes (boiler, smokebox, stack, domes, wheels, roofs, smoke) built from circle maths (x² + y² ≤ r²), not boxes.
+- Every part touches the part that holds it up: the boiler sits on the frame, the frame on the wheels, the wheels on the rails.
+- Proportions: the drivers are clearly the biggest wheels; the stack is tall and flared; the cab is the tallest part after the
+  stack and smoke; the cars are long and lower than the cab roof.
+- Detail where the eye goes: the smokebox front, the stack, the wheels and rods, the cab windows.
+- No stray blocks: every block belongs to a part.
+
+## Work in passes, and LOOK at each one
+1. Write the frame, the boiler, the wheels and the track; run `node minebench_runtime.mjs build.json` (no errors, sensible count).
+2. Render it: `python D:/Aaron/development/SkippyTel/tools/voxel/render.py build.json shots/pass1.png "pass 1" --zoom 0.6`.
+3. LOOK at it: Read shots/pass1.png. (You can't see pictures; reading a picture gives you Skippy Core's vision model's
+   description of it.) Compare what it describes with this request: are the wheels on the rails, is it recognisably a steam
+   locomotive, what is missing or wrong?
+4. Fix, then add the next parts (stack, domes, cab, rods), render and look again; then the tender and cars; then the scene and
+   the smoke. At least four passes.
+5. When it is done: render the final with `--glb shots/final.glb`, commit everything locally, and show it in the chat on their
+   own lines: `SKIPPY_IMAGE: shots/final.png` and `SKIPPY_MODEL: shots/final.glb`.

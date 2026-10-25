@@ -35,7 +35,7 @@
       <p>{% if r.comparable %}<span class="tag">benchmark prompt</span>{% else %}<span class="tag">expanded prompt</span>{% endif %}</p>
       <dl class="facts">
         <dt>Builder</dt><dd>{{ r.model }}</dd>
-        <dt>Request</dt><dd>{% if r.comparable %}"{{ r.prompt }}"{% else %}{{ r.prompt }}{% endif %}</dd>
+        <dt>Request</dt><dd>{% if r.comparable %}"{{ r.prompt }}"{% else %}{{ r.prompt }}{% if r.request %} (<a href="{{ url_for('static', filename=r.request) }}">the full text</a>){% endif %}{% endif %}</dd>
         <dt>Blocks</dt><dd>{{ "{:,}".format(r.blocks) }}</dd>
         <dt>Size</dt><dd>{{ r.size }}</dd>
         <dt>Time</dt><dd>{{ r.minutes }} minutes</dd>
