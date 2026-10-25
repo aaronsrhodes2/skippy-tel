@@ -23,6 +23,7 @@ import os
 import random
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -258,8 +259,9 @@ def _free(keep: str | None = None) -> None:
 
 
 def _load_sao(name: str):
-    """Built in its final precision on the CPU and filled one tensor at a time from the safetensors file, so the Docker VM (8 GB,
-    shared by the whole stack) never holds a second, fp32 copy: SAO 1.0's file is 4.8 GB; built in fp16 it is 2.4 GB."""
+    """Built in its final precision directly on the card and filled one tensor at a time from the safetensors file, so the Docker VM
+    (8 GB, shared by the whole stack; an overshoot crashed it, 2026-10-24) holds one tensor at a time, never the model: SAO 1.0's file
+    is 4.8 GB of fp32; built in fp16 it is 2.4 GB of VRAM."""
     import torch
     from safetensors import safe_open
     from stable_audio_tools.models.factory import create_model_from_config
@@ -272,7 +274,8 @@ def _load_sao(name: str):
     previous = torch.get_default_dtype()
     torch.set_default_dtype(dtype)
     try:
-        model = create_model_from_config(config)
+        with torch.device(DEVICE):                               # built ON the card: the VM's RAM never holds the model at all
+            model = create_model_from_config(config)
     finally:
         torch.set_default_dtype(previous)
     own = model.state_dict()
@@ -329,14 +332,22 @@ def get(name: str, quality: str = "ft"):
 
 
 def _unload_when_idle():
+    """After IDLE_UNLOAD_S quiet seconds: drop the models and, once torch has been imported, end the process. Docker's restart policy
+    (unless-stopped) brings back a bare Flask of ~50 MB; staying up would keep ~1.2 GB of imported libraries in the Docker VM, which has
+    8 GB for the whole stack."""
     while True:
         time.sleep(30)
         with _lock:
-            if _loaded and time.time() - _last_used > IDLE_UNLOAD_S:
+            if time.time() - _last_used <= IDLE_UNLOAD_S:
+                continue
+            if _loaded:
                 names = list(_loaded)
                 _loaded.clear()
                 _free()
                 print(f"[audio-popups] unloaded {', '.join(names)} after idle", flush=True)
+            if "torch" in sys.modules and os.environ.get("EXIT_WHEN_IDLE", "1") == "1":
+                print("[audio-popups] idle: exiting so the restart policy brings back a small process", flush=True)
+                os._exit(0)
 
 
 class Job:
@@ -626,7 +637,6 @@ def native(name: str):
     return answer(name, params(), upload())
 
 
-threading.Thread(target=_unload_when_idle, daemon=True).start()
-
-if __name__ == "__main__":
+if __name__ == "__main__":                                       # only the service unloads and exits; an import (the tests) never does
+    threading.Thread(target=_unload_when_idle, daemon=True).start()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "47440")), threaded=True)
