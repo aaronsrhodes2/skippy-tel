@@ -128,7 +128,10 @@ def iso(moment: datetime | None) -> str | None:
 def run_gh(args: list[str]) -> str:
     """`gh <args>`: its stdout. A missing gh, a signed-out gh or an API error becomes a Problem with gh's own words."""
     try:
-        done = subprocess.run(["gh", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+        # GH_REPO: the checkout's origin is the house's own git now (docs/no-github.md), so gh can't infer the repo from it;
+        # GitHub is only the transition mirror whose workflows still deploy, until phase 3 retires this tool's GitHub side.
+        env = {**os.environ, "GH_REPO": os.environ.get("GH_REPO", "aaronsrhodes2/skippy-tel")}
+        done = subprocess.run(["gh", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60, env=env)
     except FileNotFoundError:
         raise Problem("the GitHub CLI (gh) isn't installed or isn't on PATH") from None
     except subprocess.TimeoutExpired:
