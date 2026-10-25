@@ -138,18 +138,28 @@ class Ear:
 from homectl import load_env  # noqa: E402,F401 — the vault .env; it lives in homectl so the house loads without the audio libraries
 
 
-def build(env: dict):
+def brain_client(env: dict, who: str = "ear"):
+    """The voice's brain: Skippy Core's chat model (local, free), through the same Anthropic SDK pointed at Core (SKIPPY_CORE_URL and
+    SKIPPY_CORE_API_KEY in the vault, as portal/brains.py does). Never a paid model: Claude is only for "put on your thinking cap".
+    -> (client, model)."""
     import anthropic                                                # noqa: PLC0415
+    url, key = env.get("SKIPPY_CORE_URL", ""), env.get("SKIPPY_CORE_API_KEY", "")
+    if not url or not key:
+        sys.exit(f"{who}: SKIPPY_CORE_URL and SKIPPY_CORE_API_KEY must be in the vault .env (or the environment)")
+    return anthropic.Anthropic(base_url=url.rstrip("/"), api_key=key), env.get("SATELLITE_MODEL", "skippy-chat")
+
+
+def build(env: dict):
     from brain import Brain                                         # noqa: PLC0415
     from timers import Timers                                       # noqa: PLC0415
     from voicegate import Gate                                      # noqa: PLC0415
     token = env.get("SKIPPY_HOME_TOKEN", "")
-    key = env.get("ANTHROPIC_API_KEY", "")
-    if not token or not key:
-        sys.exit("ear: SKIPPY_HOME_TOKEN and ANTHROPIC_API_KEY must be in the vault .env (or the environment)")
+    if not token:
+        sys.exit("ear: SKIPPY_HOME_TOKEN must be in the vault .env (or the environment)")
+    client, model = brain_client(env, "ear")
     timers = Timers()
     gate = Gate(env.get("SATELLITE_GATE", "http://127.0.0.1:3007"), token)
-    brain = Brain(anthropic.Anthropic(api_key=key), env.get("SATELLITE_MODEL", "claude-haiku-4-5"), timers, hass=build_house(env))
+    brain = Brain(client, model, timers, hass=build_house(env))
     return gate, brain, timers
 
 

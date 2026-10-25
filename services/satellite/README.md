@@ -10,8 +10,8 @@ the voice gate). First home: skippy-pc (`ear.py`); every other room through the 
     ./run.sh --text "set a timer for ten seconds"                              # the brain and the voice, no microphone
     ./run.sh                  # listen
 
-Settings (the vault `.env`, or the environment): `SKIPPY_HOME_TOKEN`, `ANTHROPIC_API_KEY` (required); `SATELLITE_MIC`, `SATELLITE_SPEAKER`, `SATELLITE_GAIN`,
-`SATELLITE_FLOOR`, `SATELLITE_GATE` (default the voice gate on :3007), `SATELLITE_MODEL` (default claude-haiku-4-5); `SATELLITE_WAKE_MODEL` (default
+Settings (the vault `.env`, or the environment): `SKIPPY_HOME_TOKEN`, `SKIPPY_CORE_URL`, `SKIPPY_CORE_API_KEY` (required: the brain is Skippy Core, local, never a paid model); `SATELLITE_MIC`, `SATELLITE_SPEAKER`, `SATELLITE_GAIN`,
+`SATELLITE_FLOOR`, `SATELLITE_GATE` (default the voice gate on :3007), `SATELLITE_MODEL` (default skippy-chat, Core's resident chat model); `SATELLITE_WAKE_MODEL` (default
 `state/wakeword/skippy.onnx`), `SATELLITE_WAKE_THRESHOLD` (default 0.5; `wakectl.py test` picks it); `SATELLITE_ROOMS` (the hub); `MATTER_URL` (skippy-core's Matter controller); `HOMEKIT_KEEP_WARM`
 (seconds between keep-warm pings, default 30; 0 turns it off).
 
