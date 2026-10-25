@@ -29,7 +29,7 @@ FAST_WINDOW = 300         # after chat activity, the reporter polls for jobs qui
 REDELIVER_AFTER = 20      # a job handed out but not answered goes out again after this
 MAX_REPORT = 1_000_000    # bytes (album art included)
 JOB_TTL = 600             # seconds a job waits for an answer before it's dropped (a job may ask for longer)
-KNOWN_CAPABILITIES = ("make_music", "make_image", "make_image_hq", "workshop", "music_gate", "video_gate", "voice_gate")   # what skippy-pc may advertise (and the pop-ups in popups.py); anything else it sends is ignored
+KNOWN_CAPABILITIES = ("make_music", "make_image", "make_image_hq", "workshop", "music_gate", "video_gate", "voice_gate", "house")   # what skippy-pc may advertise (and the pop-ups in popups.py); anything else it sends is ignored
 _ACTIONS = {("music", "skip"), ("music", "pause"), ("music", "resume"), ("music", "stop")}
 PROJECT_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")                    # the private Skippy's project ids (projects.json)
 GITHUB_REPO = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}")
@@ -280,6 +280,18 @@ class Home:
     def owner_of(self, job_id: str) -> str | None:
         j = self._jobs.get(job_id)
         return j["owner"] if j else None
+
+    HOUSE_WAIT_S = 30           # a Leviton through its cloud answers in about a second; the reporter picks up within 1.5 s while he chats
+
+    def house_tool(self, tool: str, args: dict, timeout: float = HOUSE_WAIT_S) -> str:
+        """One of the house's tools, run on skippy-pc (reporter.house_job): the sentence it answered."""
+        self.touch_chat()
+        outcome = self.wait(self.submit("house", tool=tool, args=args), timeout)
+        if outcome is None:
+            raise TimeoutError("skippy-pc didn't answer in time")
+        if outcome.get("error"):
+            raise RuntimeError(outcome["error"])
+        return str((outcome.get("result") or {}).get("text") or "")
 
     def mentat_ready(self) -> bool:
         """Mentat + Qwen on skippy-pc is up and reporting."""

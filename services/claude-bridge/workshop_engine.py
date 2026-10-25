@@ -1187,9 +1187,32 @@ class Workshop:
                *thinking, "--dangerously-skip-permissions",
                "--append-system-prompt-file", str(self.prompt_path(project)), "--system-prompt-snapshot", "off",
                "--add-dir", self.project(project).primary, "--settings", self.lane_settings()]
+        house = self.house_mcp_config()
+        if house:
+            cmd += ["--mcp-config", house]
         if session:
             cmd += ["--resume", session]
         return self._one_line_each(cmd)
+
+    def house_mcp_config(self) -> str | None:
+        """The house's tools for every run, either brain (services/satellite/house_mcp.py on the satellite's venv: lights and switches,
+        HomeKit, Matter, Leviton). None, and the run goes without them, until that venv exists. Written next to the runs."""
+        satellite = Path(__file__).resolve().parents[1] / "satellite"
+        python, server = satellite / ".venv" / "Scripts" / "python.exe", satellite / "house_mcp.py"
+        if not (python.is_file() and server.is_file()):
+            return None
+        text = json.dumps({"mcpServers": {"skippy-house": {"type": "stdio", "command": python.as_posix(), "args": [server.as_posix()]}}},
+                          indent=1)
+        for folder in (Path(self.state_dir), Path(tempfile.gettempdir()) / "skippy-workshop"):
+            path = folder / "house-mcp.json"
+            try:
+                if not path.is_file() or path.read_text(encoding="utf-8") != text:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(text, encoding="utf-8")
+                return str(path)
+            except OSError:
+                continue
+        return None
 
     def lane_settings(self) -> str:
         """The settings file every run gets with --settings: the lane guard (lane_guard.py) as a PreToolUse hook, so a run

@@ -361,7 +361,47 @@ def _capability_probes() -> dict:
             "workshop": workshop_capability,
             "music_gate": lambda: {"ready": bool(GATE and GATE_PUBLIC) and _up(f"{GATE}/health"), "url": GATE_PUBLIC},
             "video_gate": video_gate_capability,
-            "voice_gate": voice_gate_capability}
+            "voice_gate": voice_gate_capability,
+            "house": house_capability}
+
+
+# The house (lights and switches) for the Captain's portal chat: services/satellite's own code (mounted read-only at /srv/services), built
+# once here from this container's env (the vault: LEVITON_EMAIL/LEVITON_PASSWORD reach every Leviton through its cloud; HomeKit needs
+# the LAN's mDNS and stays with the hub and house_mcp.py on the host). Built lazily, and again after a failure.
+SATELLITE = os.environ.get("SATELLITE_DIR", "/srv/services/satellite")
+_house: list = []
+
+
+def house():
+    if not _house:
+        if SATELLITE not in sys.path:
+            sys.path.insert(0, SATELLITE)
+        try:
+            from homectl import build_house                       # noqa: PLC0415
+            built = build_house(dict(os.environ))
+        except Exception as e:                                    # noqa: BLE001 — a missing library or module: no house, say why
+            print(f"home-reporter: house not built ({type(e).__name__}: {e})", flush=True)
+            return None
+        if built is None:
+            return None
+        _house.append(built)
+    return _house[0]
+
+
+def house_capability() -> dict:
+    h = house()
+    return {"ready": h is not None}
+
+
+def house_job(job: dict) -> dict:
+    """One of the house's three tools (home_devices, home_state, home_control). confirm never comes from a chat: a lock waits for his voice."""
+    h = house()
+    if h is None:
+        return {"error": "the house isn't set up on skippy-pc"}
+    from house import run_tool                                    # noqa: PLC0415
+    args = dict(job.get("args") or {}) if isinstance(job.get("args"), dict) else {}
+    args.pop("confirm", None)
+    return {"result": {"text": run_tool(h, str(job.get("tool") or ""), args)}}
 
 
 def image_capability(url: str | None = None, box: str = "pc") -> dict:
@@ -959,6 +999,8 @@ def run_job(job: dict, token: str = "") -> dict:
         return make_image(job, token, hq=job.get("kind") == "make_image_hq")
     if job.get("kind") == "popup":
         return popup_job(job, token)
+    if job.get("kind") == "house":
+        return house_job(job)
     if job.get("kind") == "host_op":
         return host_op(job, token)
     if job.get("kind") in ("memory_list", "memory_get"):
