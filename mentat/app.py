@@ -49,6 +49,7 @@ from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS
 from mcp.types import LATEST_PROTOCOL_VERSION
 
 import research
+import router_stage
 import wva
 
 # Natural-language / stateful tools: need the local Ollama translator or keep
@@ -166,11 +167,23 @@ def _qwen_ready() -> bool:
         return False
 
 
+def _router_guard(name: str, args: dict) -> str | None:
+    """The same code guard /tools applies, for a plan the router wrote: an argument that looks like code is a router miss, nothing runs."""
+    return "That input looks like code, not maths." if unsafe_arg(args_for_guard(name, args)) is not None else None
+
+
 def _ask(question: str, given: dict | None = None) -> dict:
     from sigma_ground.mcp.tools.simulation import simulate
     if USE_LLM and not _qwen_ready():
         # The Captain's rule: the Qwen-backed Mentat fails rather than answer without Qwen.
         raise QwenUnavailable("Qwen (Ollama) is unreachable, so Mentat won't answer without it.")
+    if router_stage.enabled() and USE_LLM and not given:
+        # Opt-in (MENTAT_ROUTER_MODEL): the trained router goes first. On the 150 benchmark questions the bare keyword shortcut was wrong as often as right
+        # (it answered "escape velocity" with surface gravity), so it does not get to pre-empt the router. A miss (decline, clarification, error, router
+        # down) falls through to the keyword + Qwen translator, exactly as before the router existed.
+        routed = router_stage.answer(question, server=server, tools=TOOLS, ollama_url=OLLAMA_URL, guard=_router_guard)
+        if routed is not None:
+            return routed
     result = simulate(question, use_llm=USE_LLM, given=given or None).to_dict()
     result["interpreter"] = "keywords + qwen" if USE_LLM else "keywords"
     return result
