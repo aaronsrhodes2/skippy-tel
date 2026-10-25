@@ -73,8 +73,11 @@ voice print per stretch, the prints are clustered (cosine threshold 0.5, the cou
 not usable**: its weights on Hugging Face are gated (accepting terms with an account token), and the vault has no Hugging Face token
 (`HF_ID` is an id, not a token). The same segmentation-3.0 model, MIT-licensed, is published as ONNX by k2-fsa (sherpa-onnx's authors) with
 no gate: `D:\models\sherpa-onnx` (`SOURCE.json` has the URLs and sha256). **What each said**: each turn is cut out and posted to the whisper
-container behind voice-gate (`skippytel-whisper`, faster-whisper medium on the card, already resident), with the previous turn's last words
-as its prompt; no second whisper is loaded. That whisper always answers in English (`task="translate"`).
+container behind voice-gate (`skippytel-whisper`, faster-whisper medium on the card, already resident); no second whisper is loaded.
+That whisper always answers in English (`task="translate"`). It gets **no prompt**: the first version passed the previous turn's last words,
+and on the test clip whisper then invented a line for the next speaker ("Today we're going to talk about the outside of the lighthouse",
+twice, over a narrator saying something else entirely); without it every line came out right. An empty prompt would make that whisper fall
+back to its voice-command primer, so a single space is sent.
 
 ### Benchmark (a 47 s, three-speaker clip with known turns: a real narrator recording and two Windows voices)
 
@@ -89,7 +92,14 @@ as its prompt; no second whisper is loaded. That whisper always answers in Engli
 (3) made WeSpeaker merge two of the three, so the pop-up doesn't offer it. No VRAM of its own: 0 GB, so it needs no GPU lock and Ollama
 stays loaded.
 
-End to end (through the containers on skippy-pc): see "Verified" below.
+End to end: see "Verified" below.
+
+## Verified (2026-10-24, on skippy-pc, through the home reporter's own `run_job`, the step before the portal's card)
+
+- **diarize**, the 47 s three-speaker clip: 3 speakers, 6 turns, every speaker right and every line right, in **18.2 s** (11.8 s finding
+  who spoke when on the CPU, 4 s of whisper for six turns).
+
+SEARCH_VERIFIED
 
 ## Run it
 

@@ -21,7 +21,7 @@
         "additionalProperties": false
       },
       "outputs": ["text/plain", "application/json"],
-      "est_seconds": 30,
+      "est_seconds": 120,
       "vram_gb": 3,
       "audience": "admin",
       "description": "Searches the Captain's own past by meaning, not keywords: his conversations with the private Skippy, the Skippy Memory archive of his chats with every AI, and Mentat's research log. Returns the best matching passages, each with its source file, date and place in the conversation. Use it when he asks what he said, decided or worked on before ('what did we decide about...', 'when did I ask about...'). Runs entirely on skippy-pc."

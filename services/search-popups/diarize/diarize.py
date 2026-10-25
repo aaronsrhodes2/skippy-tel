@@ -44,6 +44,7 @@ MAX_BODY = 40_000_000             # base64 of the largest recording the portal p
 MAX_SECONDS = 3 * 3600
 MERGE_GAP = 1.0                   # one speaker's stretches this close together are one turn
 MIN_TURN = 0.4                    # shorter turns are a cough or a "mm": whisper gets nothing worth sending
+NO_PROMPT = " "                   # whisper's initial_prompt: present (so not its voice-command primer) and empty of words
 MAX_TURN = 30.0                   # whisper's window: a longer turn goes in pieces (one transcript line still)
 
 _sd = None
@@ -123,19 +124,18 @@ def whisper(clip: bytes, prompt: str = "") -> str:
 
 
 def transcribe(samples: np.ndarray, plan: list[dict], ask=None) -> list[dict]:
-    """Each turn's words. The previous turn's last words go along as whisper's prompt (it keeps names and spelling steady); a
-    turn longer than whisper's window goes in pieces."""
+    """Each turn's words; a turn longer than whisper's window goes in pieces. Whisper gets NO prompt: the previous speaker's words
+    as a prompt made it invent a line on the next speaker's turn (the benchmark clip, docs/search-speech-popups.md), and an empty
+    prompt makes skippytel-whisper fall back to its voice-command primer, so it is sent a single space."""
     ask = ask or whisper
-    said = ""
     for t in plan:
         a, b = int(t["start"] * RATE), int(t["end"] * RATE)
         bits = []
         for s in range(a, b, int(MAX_TURN * RATE)):
             piece = samples[s:min(b, s + int(MAX_TURN * RATE))]
             if len(piece) >= MIN_TURN * RATE:
-                bits.append(ask(wav_bytes(piece), said[-200:]))
+                bits.append(ask(wav_bytes(piece), NO_PROMPT))
         t["text"] = " ".join(x for x in bits if x).strip()
-        said = (said + " " + t["text"]).strip()
     return plan
 
 

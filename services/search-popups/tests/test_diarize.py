@@ -20,7 +20,7 @@ def test_turns_merge_one_speaker_and_renumber_in_order_of_first_words():
     assert [(t["speaker"], t["start"], t["end"]) for t in plan] == [(1, 0.0, 4.0), (2, 4.2, 6.0), (2, 9.0, 12.0)]
 
 
-def test_transcribe_cuts_long_turns_and_carries_the_prompt():
+def test_transcribe_cuts_long_turns_and_sends_no_prompt():
     calls = []
 
     def ask(clip, prompt):
@@ -29,7 +29,7 @@ def test_transcribe_cuts_long_turns_and_carries_the_prompt():
     samples = np.zeros(int(70 * D.RATE), np.float32)
     plan = D.transcribe(samples, [{"start": 0.0, "end": 65.0, "speaker": 1}, {"start": 66.0, "end": 69.0, "speaker": 2}], ask)
     assert [t["text"] for t in plan] == ["part1 part2 part3", "part4"]   # 65 s = 30 + 30 + 5
-    assert calls[0][1] == "" and calls[3][1] == "part1 part2 part3"
+    assert {c[1] for c in calls} == {" "}                             # no words as a prompt, and never the voice-command primer
     assert calls[0][0] == 44 + int(30 * D.RATE) * 2                         # a 16-bit mono WAV of exactly the piece
 
 
