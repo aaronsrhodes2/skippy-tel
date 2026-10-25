@@ -79,7 +79,6 @@ Key vars:
 - OLLAMA_MODEL — qwen3:8b (set in the vault; the code's fallback is qwen2.5:7b)
 - ANTHROPIC_API_KEY — for Claude tier
 - GEMINI_API_KEY — for Nagatha tier
-- SD_BASE_URL — retired (the old remnant-silly Stable Diffusion at :5000; pictures are image-studio patient jobs)
 - BILBY_MAC_URL — Mac Bilby daemon (default: http://skippy-mac:7334)
 - BILBY_DRIVE_FOLDER_ID — Drive folder for streaming (pending Drive setup)
 

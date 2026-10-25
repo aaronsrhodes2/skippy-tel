@@ -1,13 +1,11 @@
 {
-  "_comment": "The private Skippy's projects (projects.py reads this). One entry per GitHub repo the Captain develops from his phone. `clone` is the agent's own working copy (made by `git clone` on first use, never the Captain's checkout); `primary` is the Captain's checkout, which the agent may read (--add-dir) but works in only to deploy a skippy-pc service. Found 2026-09-30 from the origins of the repos directly under D:/Aaron/development (zPhone skipped: shelved; quarksum and toh-silly skipped: older checkouts of sigma-ground and remnant-silly, sigma-ground's CLAUDE.md calls quarksum a dead end).",
+  "_comment": "The private Skippy's projects (projects.py reads this). One entry per GitHub repo the Captain develops from his phone. `clone` is the agent's own working copy (made by `git clone` on first use, never the Captain's checkout); `primary` is the Captain's checkout, which the agent may read (--add-dir) but works in only to deploy a skippy-pc service. Found 2026-09-30 from the origins of the repos directly under D:/Aaron/development (zPhone skipped: shelved; quarksum skipped: an older checkout of sigma-ground, whose CLAUDE.md calls it a dead end).",
   "projects": [
     {"id": "skippytel", "name": "SkippyTel", "repo": "aaronsrhodes2/skippy-tel", "branch": "main",
      "primary": "D:/Aaron/development/SkippyTel", "clone": "D:/Aaron/development/SkippyTel-workshop",
      "deploy": "skippytel"},
     {"id": "music-collection", "name": "music-collection (Bilby)", "repo": "aaronsrhodes2/bilby", "branch": "main",
      "primary": "D:/Aaron/development/music-collection", "clone": "D:/Aaron/development/music-collection-workshop"},
-    {"id": "remnant-silly", "name": "remnant-silly", "repo": "aaronsrhodes2/remnant-silly", "branch": "main",
-     "primary": "D:/Aaron/development/remnant-silly", "clone": "D:/Aaron/development/remnant-silly-workshop"},
     {"id": "sigma-ground", "name": "sigma-ground", "repo": "aaronsrhodes2/sigma-ground", "branch": "master",
      "primary": "D:/Aaron/development/sigma-ground", "clone": "D:/Aaron/development/sigma-ground-workshop"},
     {"id": "star-control-precursors", "name": "star-control-precursors", "repo": "aaronsrhodes2/star-control-precursors",

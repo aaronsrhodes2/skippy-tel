@@ -187,8 +187,7 @@ browser <── poll /me/workshop/events ── portal <── POST /home/worksh
 
 - **Every project, not just SkippyTel.** `services/claude-bridge/projects.json` (checked by `projects.py` at bridge start)
   lists the Captain's repos: SkippyTel plus every repo directly under `D:\Aaron\development` whose origin is
-  `github.com/aaronsrhodes2/...` (zPhone left out: shelved; quarksum and toh-silly left out: older checkouts of sigma-ground
-  and remnant-silly). Each has its own working clone `D:\Aaron\development\<name>-workshop`, made by `git clone` on first
+  `github.com/aaronsrhodes2/...` (zPhone left out: shelved; quarksum left out: an older checkout of sigma-ground). Each has its own working clone `D:\Aaron\development\<name>-workshop`, made by `git clone` on first
   use and never the Captain's checkout (the registry refuses a clone that is, or is inside, any checkout), and the
   checkout itself is only passed with `--add-dir`. The card's picker shows the open conversation's project (fixed once it has
   a message); **New chat** asks which project the next one is for. The prompt (`workshop_prompt.md`) keeps SkippyTel's

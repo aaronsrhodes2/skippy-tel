@@ -1,0 +1,8 @@
+flask==3.0.3
+diffusers==0.27.2
+transformers==4.41.2
+accelerate==0.30.1
+safetensors==0.4.3
+Pillow==10.3.0
+# diffusers 0.27.x still imports huggingface_hub.cached_download, removed in hub 0.26: the last compatible release
+huggingface_hub==0.25.2
