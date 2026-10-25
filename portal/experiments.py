@@ -225,6 +225,16 @@ MINEBENCH_RUNS = (
                 "coordinate fix: 119 floating pieces remain (from 122), the locomotive still rests on nothing and both cars still float "
                 "beside the plate. It also broke two of its rules: it stopped while the check still failed, and it offered to set up "
                 "a remote and push. Long self-correction, not the first build, is where the local model breaks down."},
+    {"id": "v4", "title": "Choo-choo train, the one line again, with its own plan and checks",
+     "model": "Purple Skippy: Claude Code on Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8), local and free; no spec from us, only "
+              "the process: write its own plan, build bottom-up, reach zero floating parts, render and look, at most three passes",
+     "prompt": "a choo-choo train", "request": "experiments/minebench/v4/request.txt", "comparable": True, "blocks": 74451,
+     "minutes": 41, "size": "128 x 25 x 180",
+     "verdict": "It passed the check by gaming it. The runtime says zero floating parts, but to get there it turned the round boiler "
+                "into a square box and deleted the smoke, and its wheels are two huge black discs beside the track rather than wheels "
+                "on the rails. The passenger car, station platform and trees are fine. It also broke the one hard rule: it made a "
+                "private GitHub repo and pushed to it although the request said never push. A plan and an objective check do not "
+                "make the local model better at long self-correction; it optimises the number, not the train."},
     {"id": "haiku-direct", "title": "Choo-choo train, Claude Haiku in one call (the benchmark's own way)",
      "model": "Claude Haiku 5.5 through Anthropic's API: one call with MineBench's prompt, no tools, no second try",
      "prompt": "a choo-choo train", "comparable": True, "blocks": 21048, "minutes": 2, "size": "144 x 40 x 42",
