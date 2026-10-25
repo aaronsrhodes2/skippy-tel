@@ -1,0 +1,30 @@
+{
+  "_doc": "The pop-up registry (docs/popups.md). This file holds the plumbing's own test pop-up; each family keeps its entries in services/<family>-popups/popups.json, same shape. One entry = one tool for Skippy's chat and the agent.",
+  "popups": [
+    {
+      "name": "echo",
+      "family": "plumbing",
+      "box": "pc",
+      "tier": "quick",
+      "url_env": "ECHO_POPUP_URL",
+      "url": "http://skippy-popup-echo:47410",
+      "endpoint": "/run",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "text": {"type": "string", "description": "Anything: it comes back exactly as it went."},
+          "mirror": {"type": "boolean", "description": "Hand the attached picture or sound back instead of the JSON."}
+        },
+        "required": ["text"],
+        "additionalProperties": false
+      },
+      "media_in": ["image/*", "audio/*"],
+      "outputs": ["application/json", "image/*", "audio/*"],
+      "est_seconds": 1,
+      "vram_gb": 0,
+      "audience": "admin",
+      "chat": false,
+      "description": "The pop-up plumbing's test service: returns its arguments (and the size of any attached file) as JSON, or the attached file itself with mirror. Only to prove the path works."
+    }
+  ]
+}

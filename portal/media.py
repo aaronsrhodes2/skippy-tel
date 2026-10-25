@@ -11,9 +11,11 @@ from __future__ import annotations
 import threading
 import time
 
-# Songs and pictures: every type the patient queue keeps (patient.TYPES), or a result kept in the bucket was refused here (415)
-# and the reporter counted the whole job as failed.
-TYPES = {"audio/mpeg", "audio/mp3", "audio/ogg", "audio/wav", "audio/x-wav", "audio/flac", "image/png", "image/jpeg", "image/webp"}
+import popups
+
+# Every type the patient queue keeps (patient.TYPES: songs, pictures and what pop-ups hand back), or a result kept in the bucket
+# was refused here (415) and the reporter counted the whole job as failed.
+TYPES = set(popups.OUTPUT_TYPES)
 MAX_ONE = 30_000_000        # Cloud Run caps a request at 32 MB
 MAX_ALL = 120_000_000       # of the portal's 1 GiB
 TTL = 1800                  # seconds a clip stays playable
@@ -37,7 +39,7 @@ class Media:
 
     def put(self, key: str, data: bytes, ctype: str, owner: str, title: str = "") -> dict:
         if ctype not in TYPES:
-            raise MediaError(f"{ctype or 'that'} isn't an audio type the portal will hold", 415)
+            raise MediaError(f"{ctype or 'that'} isn't a type the portal will hold", 415)
         if not data:
             raise MediaError("empty upload", 400)
         if len(data) > MAX_ONE:

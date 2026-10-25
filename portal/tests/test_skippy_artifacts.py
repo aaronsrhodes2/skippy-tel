@@ -29,7 +29,8 @@ def test_the_node_tests_pass():
 
 def test_an_html_artifact_is_sandboxed_away_from_the_portal():
     sandbox = re.findall(r'setAttribute\("sandbox", "([^"]*)"\)', JS)
-    assert sandbox == ["allow-scripts allow-pointer-lock"]                       # scripts run; same-origin never granted
+    assert sandbox == ["allow-scripts allow-pointer-lock", ""]                   # scripts run; same-origin never granted
+    # (the second: a pop-up's JSON or text result, a frame on its portal URL that may do nothing at all)
     assert "srcdoc" in JS and ".innerHTML" not in JS
 
 

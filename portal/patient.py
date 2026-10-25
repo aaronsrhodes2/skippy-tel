@@ -19,6 +19,7 @@ import re
 import time
 
 import chat_history
+import popups
 import tabletop
 
 PREFIX = "chat-pictures/"           # (the name it had when it held pictures only; songs live here too)
@@ -30,9 +31,8 @@ FREE_GIB = {"core": 35}             # skippy-core's memory is shared with the LL
                                     # there it's GB, not a share: enough for the picture studio to load (Qwen-Image-2512 Q8 + its Q8 text
                                     # encoder + VAE ~30 GB, held only while drawing: the pictures session, 2026-10-24)
 BUSY_PCT = 20                       # ...and is busier than this at most
-KINDS = {"make_image": "image", "make_image_hq": "image", "make_music": "audio"}
-TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
-         "audio/mpeg": "mp3", "audio/mp3": "mp3", "audio/wav": "wav", "audio/x-wav": "wav", "audio/ogg": "ogg", "audio/flac": "flac"}
+KINDS = {"make_image": "image", "make_image_hq": "image", "make_music": "audio", "popup": "result"}   # popup: any registered pop-up
+TYPES = popups.OUTPUT_TYPES      # pictures, songs, and what pop-ups hand back (3D models, videos, JSON, text): media.TYPES is the same
 _JOB = re.compile(r"[A-Za-z0-9_-]{6,64}")
 
 
@@ -130,6 +130,11 @@ class Patient:
         self.store.put(base + ".json", json.dumps(done).encode(), "application/json")
         self.store.delete(PREFIX + "pending/" + job + ".json")
         return done
+
+    def type_of(self, job: str) -> str | None:
+        """A finished job's type (what kind of card it is), or None. No owner check: the type alone says nothing of what it is."""
+        found = self._done_meta(job) if self._ok(job) else None
+        return found[1].get("type") if found else None
 
     def owner(self, job: str) -> str | None:
         """The one-way id of whoever the picture or song is for (pending or done), or None."""

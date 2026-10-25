@@ -175,7 +175,7 @@ def test_the_chat_keeps_a_place_for_pictures_and_songs_and_its_card_waits():
     from pathlib import Path
     page = (Path(portal.__file__).parent / "templates" / "_chat.html").read_text(encoding="utf-8")
     assert "function waitCard" in page and "[picture:" not in page.split("pictureNote")[0][-10:]
-    assert '"song" : "picture"' in page and "In line: " in page and "Composing…" in page and "chat.media_state" in page
+    assert '"song" : m.kind === "image" ? "picture" : "result"' in page and "In line: " in page and "Composing…" in page and "chat.media_state" in page
     assert "Drawing (quality, up to an hour)…" in page and 'd.tier === "hq"' in page
 
 

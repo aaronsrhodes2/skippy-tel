@@ -99,6 +99,7 @@ services:
     volumes:
       - ./state/imports:/imports:ro   # game databases to carry to the games VM (see CLAUDE.md)
       - ./state/insights:/insights    # what guests' expired chats taught (portal/chat_history.py): chat-insights.jsonl, read by the agent
+      - ./services:/srv/services:ro   # the pop-up registry (docs/popups.md): services/popups/registry.json + services/*-popups/popups.json
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
 
   # wa-trickle: a slow, free Wolfram|Alpha vs Mentat comparison. One verbatim Wolfram call per queued question, ever, on a daily

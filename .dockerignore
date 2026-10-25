@@ -3,6 +3,8 @@
 !portal/
 !services/flask-api/app/skippy_persona.md
 !infra/gcp-games/discord-notify.py
+!services/popups/registry.json
+!services/*-popups/popups.json
 !mentat/
 portal/.env
 **/__pycache__

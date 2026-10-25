@@ -11,7 +11,8 @@
  * Safe by construction: text goes in with textContent; an HTML artifact runs in an iframe sandboxed WITHOUT allow-same-origin
  * (its scripts run, but it can't see the portal, its cookies or its storage); an SVG is shown as an <img> (no scripts run in an
  * image); media and models come only from the URLs the portal itself handed back. No network calls of its own, except loading
- * the self-hosted <model-viewer> module the first time a 3D model is opened.
+ * the self-hosted <model-viewer> module the first time a 3D model is opened. A pop-up's text or JSON result is its portal URL in a
+ * frame sandboxed with nothing allowed (no scripts).
  */
 (function (root, factory) {
   const api = factory();
@@ -21,7 +22,7 @@
   "use strict";
   const CODE_LINES = 15;                         // shorter code stays inline in the reply
   const KINDS = {                                // kind → glyph (templates/_glyphs.html)
-    doc: "note", code: "console", html: "play", svg: "image", image: "image", audio: "audio", video: "pip", model: "cube",
+    doc: "note", code: "console", html: "play", svg: "image", image: "image", audio: "audio", video: "pip", model: "cube", text: "note",
   };
   let config = { modelViewer: "", glyph: null, md: null, pager: null };
 
@@ -48,7 +49,7 @@
   function slug(s) { return String(s || "file").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "file"; }
 
   function fromMedia(m) {
-    const kind = { audio: "audio", video: "video", image: "image", model: "model" }[m && m.kind] || "audio";
+    const kind = { audio: "audio", video: "video", image: "image", model: "model", text: "text" }[m && m.kind] || "audio";
     return { kind, title: (m && m.title) || kind, url: m && m.url, seconds: m && m.seconds, open: true };
   }
 
@@ -86,6 +87,11 @@
       m.className = "art-model"; m.setAttribute("src", spec.url); m.setAttribute("camera-controls", ""); m.setAttribute("auto-rotate", "");
       m.setAttribute("touch-action", "pan-y"); m.setAttribute("alt", spec.title);
       return m;
+    }
+    if (k === "text") {                          // a pop-up's JSON or text: the portal's own URL in a frame that runs nothing
+      const f = el("iframe", "art-frame art-text"); f.setAttribute("sandbox", ""); f.setAttribute("referrerpolicy", "no-referrer");
+      f.title = spec.title; f.src = spec.url;
+      return f;
     }
     if (k === "doc") return config.md ? config.md(spec.content) : el("pre", "art-code", spec.content);
     const pre = el("pre", "art-code"); pre.appendChild(el("code", null, spec.content)); return pre;   // code

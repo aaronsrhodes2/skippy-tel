@@ -107,7 +107,29 @@ def _clean(event) -> dict | None:
             and isinstance(event.get("prompt"), str) and event["prompt"].strip()):
         return {"t": "picture", "id": event["id"], "prompt": " ".join(event["prompt"].split())[:900],   # a picture to make (patient.py)
                 **({"tier": "hq"} if event.get("tier") == "hq" else {})}                                  # (the quality tier)
+    if (event.get("t") == "popup" and isinstance(event.get("id"), str) and re.fullmatch(r"[0-9a-f]{16}", event["id"])
+            and isinstance(event.get("name"), str) and re.fullmatch(r"[a-z][a-z0-9_]{2,39}", event["name"])
+            and isinstance(event.get("args"), dict) and len(json.dumps(event["args"])) <= MAX_POPUP_ARGS):
+        return {"t": "popup", "id": event["id"], "name": event["name"], "args": event["args"]}      # a pop-up job (popups.py)
     return None
+
+
+MAX_POPUP_ARGS = 4000           # a SKIPPY_POPUP line's JSON arguments (the bridge caps them at the same)
+MAX_POPUP_INPUT_B64 = 1_400_000  # the file a SKIPPY_POPUP line names, as base64: what a chat attachment may be (attachments.MAX_B64_EACH)
+
+
+def popup_input(event: dict) -> dict | None:
+    """The file that came with a pop-up event (the bridge read it from the path the agent named), checked, or None."""
+    given = event.get("input")
+    if not isinstance(given, dict) or not isinstance(given.get("b64"), str) or len(given["b64"]) > MAX_POPUP_INPUT_B64:
+        return None
+    if not isinstance(given.get("type"), str) or not re.fullmatch(r"(image|audio)/[a-z0-9.+-]{1,40}", given["type"]):
+        return None
+    try:
+        base64.b64decode(given["b64"], validate=True)
+    except ValueError:
+        return None
+    return {"b64": given["b64"], "type": given["type"], "name": re.sub(r"[^\w .()+-]", "_", str(given.get("name") or "file"))[:80]}
 
 
 _SHA = re.compile(r"[0-9a-f]{40}")
@@ -218,6 +240,7 @@ class Workshop:
         self._ships: dict[tuple[str, str], dict] = {}
         self.on_final = None                     # (news: dict) -> None: a run this process saw going has ended (notify.py)
         self.on_picture = None                   # (owner, id, prompt, tier) -> None: the agent asked for a picture (patient.py, app.py)
+        self.on_popup = None                     # (owner, id, name, args, input) -> None: the agent asked for a pop-up job (popups.py)
         self._images: dict[tuple[str, int], tuple[str, str, bytes]] = {}   # (task, n) -> (owner, mime, bytes)
 
     def _keep_image(self, task: str, rec: dict, got) -> dict:
@@ -552,7 +575,7 @@ class Workshop:
                 rec["relearned"] = True           # a run that was already over when this portal first heard of it
             was = rec["state"]
             have = len(rec["events"])
-            shipped, pictures = [], []
+            shipped, pictures, wanted = [], [], []
             if start <= have:
                 for event in events[have - start:]:
                     if isinstance(event, dict) and event.get("t") == "image":
@@ -568,6 +591,8 @@ class Workshop:
                             shipped.append(cleaned)
                         if cleaned["t"] == "picture" and self.on_picture:
                             pictures.append((rec["owner"], cleaned["id"], cleaned["prompt"], cleaned.get("tier", "")))
+                        if cleaned["t"] == "popup" and self.on_popup:
+                            wanted.append((rec["owner"], cleaned["id"], cleaned["name"], cleaned["args"], popup_input(event)))
                 if state != "running":
                     rec["state"], rec["error"], ended = state, (str(error)[:500] if error else None), True
                 elif rec["state"] not in _FINAL:
@@ -595,6 +620,11 @@ class Workshop:
                 self.on_picture(who, picture_id, prompt, tier)
             except Exception as exc:  # noqa: BLE001 — a picture that can't be queued must never fail the reporter's push
                 print(json.dumps({"event": "agent_picture_failed", "job": picture_id, "why": str(exc)[:300]}), flush=True)
+        for who, job_id, name, args, given in wanted:                # the same for pop-ups
+            try:
+                self.on_popup(who, job_id, name, args, given)
+            except Exception as exc:  # noqa: BLE001 — a pop-up that can't be queued must never fail the reporter's push
+                print(json.dumps({"event": "agent_popup_failed", "job": job_id, "why": str(exc)[:300]}), flush=True)
         if final_news is not None and self.on_final is not None:
             try:
                 self.on_final(final_news)

@@ -23,6 +23,10 @@ Captain's GPU, admin only): it starts a job, waits a little, and if the song isn
 says so; music_result looks in later. Finished audio rides back through media.py and
 shows in the chat as a player (self.media).
 
+Pop-ups (popups.py): every registered on-demand model that home says is ready becomes a tool of its own name, for its audience, built
+from its registry entry (its description and input schema; an `attachment` number when it takes a picture or a sound the person
+attached). Each is a patient job like a picture; popup_result looks in later. Nothing here names a pop-up.
+
 Direct verbs: a message starting with "/physics", "/status", … forces that
 tool on the first step (see VERBS); the chat's badge panel inserts them.
 """
@@ -35,6 +39,7 @@ import re
 
 import diagnostics
 import ops
+import popups as popups_mod
 import readiness
 import tool_policy
 from catalog import GAMES
@@ -224,6 +229,29 @@ IMAGE_WAIT_S = 3       # pictures are patient jobs too (portal/patient.py): made
                        # shows a card that says where the picture is in line and fills in by itself when it's done
 _SIZES = {"square": (1024, 1024), "landscape": (1216, 832), "portrait": (832, 1216)}
 
+_POPUP_RESULT = {
+    "name": "popup_result",
+    "description": "Check on a job started earlier with one of the pop-up tools that wasn't ready when it returned.",
+    "input_schema": {"type": "object", "properties": {"job_id": {"type": "string"}},
+                     "required": ["job_id"], "additionalProperties": False},
+}
+POPUP_WAIT_S = 3       # pop-ups are patient jobs (portal/patient.py): the card under the reply waits and fills in by itself
+
+
+def popup_schema(entry: dict) -> dict:
+    """A pop-up's chat tool, from its registry entry alone."""
+    schema = copy.deepcopy(entry["inputs"])
+    if entry.get("media_in"):
+        schema.setdefault("properties", {})["attachment"] = {
+            "type": "integer", "minimum": 1, "maximum": 4,
+            "description": "Which file attached to the user's message to use (1 = the first). Accepts: " + ", ".join(entry["media_in"]) + "."}
+    minutes = max(1, round(entry["est_seconds"] / 60))
+    return {"name": entry["name"],
+            "description": (entry["description"].strip() + f" Runs at home when its machine is quiet (about {minutes} min once it starts); "
+                            "the result shows as a card under your reply by itself: don't paste links. If it isn't ready yet, say so "
+                            "in a few words and use popup_result later.")[:1500],
+            "input_schema": schema}
+
 # Direct verbs: "/verb …" at the start of a message forces that tool first.
 # (verb, tool, badge label, category)
 VERBS = (
@@ -257,7 +285,7 @@ def parse_verb(message: str) -> tuple[str | None, str]:
 class ChatTools:
     def __init__(self, vm, is_admin: bool, visible: list[str] | None = None, who: str = "",
                  music=None, home_mentat=None, home_music=None, home_image=None, image_allow=None, trace: str = "",
-                 image_tiers: tuple = ("make_image",)):
+                 image_tiers: tuple = ("make_image",), popups=None, home_popup=None, popup_payload=None, popup_allow=None):
         self.vm, self.is_admin, self.who = vm, is_admin, who
         self.trace = trace                    # this chat turn's id: Mentat keeps it with the research record
         self.visible = list(GAMES) if visible is None else list(visible)   # games this person may see
@@ -277,6 +305,10 @@ class ChatTools:
         self.image_tiers = tuple(image_tiers)  # which picture kinds are ready: make_image (quick, skippy-pc), make_image_hq (quality, skippy-core)
         self.image_ok = bool(self.home_image)
         self.media: list[dict] = []           # audio made this turn: the chat page plays it
+        # Pop-ups: the ready ones (app.py passes those home advertises) this person's audience allows; files = this message's attachments.
+        self.popups = {e["name"]: e for e in (popups or []) if tool_policy.popup_allowed(e, is_admin)} if home_popup else {}
+        self.home_popup, self.popup_payload, self.popup_allow = home_popup, popup_payload, popup_allow
+        self.files: list = []
 
     def available(self) -> list[str]:
         names = [n for n in self.names if n != "start_game" or self.visible]
@@ -288,6 +320,8 @@ class ChatTools:
             names += ["make_music", "music_result"]
         if self.image_ok:
             names += ["make_image", "image_result"]
+        if self.popups:
+            names += [*self.popups, "popup_result"]
         return names
 
     def badges(self) -> dict[str, list[dict]]:
@@ -316,12 +350,68 @@ class ChatTools:
             out += [_MAKE_MUSIC, _MUSIC_RESULT]
         if self.image_ok:
             out += [_MAKE_IMAGE, _IMAGE_RESULT]
+        if self.popups:
+            out += [popup_schema(e) for e in self.popups.values()] + [_POPUP_RESULT]
         return out
 
     def run(self, name: str, args: dict) -> str:
         if name not in self.available():
             raise ToolError(f"{name} isn't available to you.")
+        if name in self.popups:
+            return json.dumps(self._popup(self.popups[name], args or {}), default=str)[:20_000]
         return json.dumps(getattr(self, "_" + name)(args or {}), default=str)[:20_000]
+
+    def _popup(self, entry: dict, args: dict) -> dict:
+        args = dict(args) if isinstance(args, dict) else {}
+        pick, given = args.pop("attachment", None), None
+        if entry.get("media_in"):
+            takes = entry["media_in"]
+            usable = [f for f in self.files if popups_mod.matches(f.mime, takes)]
+            chosen = usable[0] if pick is None and len(usable) == 1 else None
+            if pick is not None:
+                try:
+                    chosen = self.files[int(pick) - 1] if int(pick) >= 1 else None
+                except (TypeError, ValueError, IndexError):
+                    chosen = None
+                if chosen is None:
+                    raise ToolError("There's no attached file with that number.")
+                if not popups_mod.matches(chosen.mime, takes):
+                    raise ToolError(f"{chosen.name} isn't a file {entry['name']} takes ({', '.join(takes)}).")
+            if chosen is None and entry.get("media_required"):
+                raise ToolError(f"{entry['name']} needs a file attached to the message ({', '.join(takes)})"
+                                + (": several are attached, so say which with `attachment`." if len(usable) > 1 else ". Ask for one."))
+            if chosen is not None:
+                given = {"b64": chosen.b64, "type": chosen.mime, "name": chosen.name}
+        if self.popup_allow and not self.popup_allow():
+            raise ToolError("That's today's pop-up jobs used up (10 a day). Say so, and that it resets tomorrow.")
+        job_id = self.home_popup.start("popup", owner=self.who, **self.popup_payload(entry, args, given))
+        return self._popup_status(job_id, POPUP_WAIT_S, entry)
+
+    def _popup_result(self, args) -> dict:
+        job_id = str(args.get("job_id") or "")
+        owner = self.home_popup.owner_of(job_id)
+        if owner is not None and owner != self.who and not self.is_admin:
+            raise ToolError("That isn't your job.")
+        return self._popup_status(job_id, 5, None)
+
+    def _popup_status(self, job_id: str, wait: float, entry: dict | None) -> dict:
+        state = self.home_popup.wait_result(job_id, wait)
+        if state["state"] == "done":
+            result = state["result"] if isinstance(state.get("result"), dict) else {}
+            if not any(m["job_id"] == job_id for m in self.media):
+                self.media.append({"kind": popups_mod.card_kind(str(result.get("type") or "")), "job_id": job_id,
+                                   "url": f"/chat/media/{job_id}", "title": str(result.get("title") or "the result")[:80]})
+            return {"status": "done", "note": "The result appears under your reply. Don't paste a link."}
+        if state["state"] == "running":
+            if not any(m["job_id"] == job_id for m in self.media):     # the page shows a waiting card that fills in by itself
+                self.media.append({"kind": "popup", "job_id": job_id, "url": f"/chat/media/{job_id}", "pending": True,
+                                   "title": (entry or {}).get("name") or "the result"})
+            return {"status": "queued", "job_id": job_id,
+                    "note": "Queued: it runs at home when its machine is quiet, so it may take a while. Say so in a few words: the "
+                            "result will appear under your reply by itself. Don't promise a time."}
+        if state["state"] == "error":
+            raise ToolError(f"It failed: {state['error']}. Say so plainly.")
+        raise ToolError("That job is gone (it expired, or the portal restarted). Offer to run it again.")
 
     def _ask_mentat(self, args) -> dict:
         question = str(args.get("question") or "").strip()

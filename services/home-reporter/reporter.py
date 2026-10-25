@@ -20,6 +20,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 import doctor_checks
 import localinfo
@@ -42,6 +43,10 @@ IMAGE_TIMEOUT = 900         # seconds a picture may take (the first after a rest
 IMAGES_HQ = os.environ.get("IMAGE_HQ_URL", "").rstrip("/")     # the QUALITY tier: Qwen-Image on skippy-core (core/image-studio), over the tailnet
 IMAGE_HQ_TIMEOUT = 7200     # it draws for quality: ~13 min a picture at 40 steps, and it may queue behind skippy-core's own chats
 OLLAMA = os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/")
+POPUPS_DIR = os.environ.get("POPUPS_DIR", "/srv/services")      # the repo's services/ (read-only mount): the pop-up registry (docs/popups.md)
+POPUP_TYPES = {"image/png", "image/jpeg", "image/webp", "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/ogg", "audio/flac",
+               "model/gltf-binary", "video/mp4", "application/json", "text/plain"}   # what the portal keeps (portal/popups.py OUTPUT_TYPES)
+POPUP_MAX_TIMEOUT = 7200     # the longest a pop-up may take (portal/popups.py MAX_TIMEOUT_S)
 GPU = threading.Lock()       # one heavy GPU job at a time: a song and a chat model can't share the card
 MUSIC_TIMEOUT = 600          # seconds a song may take
 MUSIC_POLL = 2.0              # seconds between asking the studio how the song is coming
@@ -313,9 +318,44 @@ def workshop_capability() -> dict:
     return out
 
 
+_popups_seen: dict = {"key": None, "entries": {}}
+
+
+def popups() -> dict[str, dict]:
+    """The pop-up registry (docs/popups.md, portal/popups.py checks every field): services/popups/registry.json and each family's
+    services/<family>-popups/popups.json, by name. Read again whenever a file changes, so a new entry needs no rebuild. The portal
+    validates the entries; here only what running one needs is checked."""
+    root = Path(POPUPS_DIR)
+    paths = [root / "popups" / "registry.json", *sorted(root.glob("*-popups/popups.json"))]
+    paths = [q for q in paths if q.is_file()]
+    key = tuple((str(q), q.stat().st_mtime_ns) for q in paths)
+    if key == _popups_seen["key"]:
+        return _popups_seen["entries"]
+    out = {}
+    for path in paths:
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8")).get("popups")
+        except (OSError, ValueError, AttributeError):
+            continue
+        for e in raw if isinstance(raw, list) else []:
+            if (isinstance(e, dict) and isinstance(e.get("name"), str) and re.fullmatch(r"[a-z][a-z0-9_]{2,39}", e["name"])
+                    and e["name"] not in out and e.get("box") in ("pc", "core") and isinstance(e.get("endpoint"), str)
+                    and e["endpoint"].startswith("/") and isinstance(e.get("url_env"), str)):
+                out[e["name"]] = e
+    _popups_seen.update(key=key, entries=out)
+    return out
+
+
+def popup_url(entry: dict) -> str:
+    """Where a pop-up's service is: its url_env if this container has it set, else the registry's default url."""
+    return (os.environ.get(entry.get("url_env") or "") or str(entry.get("url") or "")).rstrip("/")
+
+
 def _capability_probes() -> dict:
-    """One probe per capability, so `gather` can run them side by side (each waits at most ~4 s on its own service)."""
-    return {"make_music": lambda: {"ready": bool(MUSIC) and _up(f"{MUSIC}/health")},
+    """One probe per capability, so `gather` can run them side by side (each waits at most ~4 s on its own service). Every registered
+    pop-up is one too: ready when its service's /health says ready (with its machine and any GPU figures, like the picture studio)."""
+    return {**{name: (lambda e=e: image_capability(popup_url(e), e["box"])) for name, e in popups().items()},
+            "make_music": lambda: {"ready": bool(MUSIC) and _up(f"{MUSIC}/health")},
             "make_image": image_capability,
             "make_image_hq": lambda: image_capability(IMAGES_HQ, "core"),
             "workshop": workshop_capability,
@@ -482,6 +522,63 @@ def make_image(job: dict, token: str, hq: bool = False) -> dict:
     except Exception as e:  # noqa: BLE001
         return {"error": f"couldn't hand the picture to the portal: {e}"[:200]}
     return {"result": {"title": title, "bytes": len(png)}}
+
+
+def popup_job(job: dict, token: str) -> dict:
+    """A registered pop-up (docs/popups.md): POST {"args", "input"?} to its service, which answers with the result's bytes under its
+    type, then hand that to the portal like a picture (PUT /home/media/<job>). On skippy-pc a pop-up that uses the card (vram_gb > 0)
+    holds the GPU lock and has Ollama unloaded first, as a picture does; on skippy-core it needs neither."""
+    entry = popups().get(str(job.get("name") or ""))
+    if not entry:
+        return {"error": f"there is no pop-up called {job.get('name')!r} on skippy-pc"}
+    url = popup_url(entry)
+    if not url:
+        return {"error": f"{entry['name']} isn't set up on skippy-pc ({entry['url_env']})"}
+    try:
+        args = json.loads(job.get("args") or "{}")
+    except ValueError:
+        args = None
+    if not isinstance(args, dict):
+        return {"error": "the pop-up's arguments didn't arrive whole"}
+    body = {"args": args}
+    if job.get("input_b64"):
+        body["input"] = {"type": str(job.get("input_type") or ""), "name": str(job.get("input_name") or "file"), "b64": job["input_b64"]}
+    try:
+        timeout = max(60, min(POPUP_MAX_TIMEOUT, int(entry.get("est_seconds") or 60) * 4))
+    except (TypeError, ValueError):
+        timeout = 600
+    heavy = entry["box"] == "pc" and float(entry.get("vram_gb") or 0) > 0
+    with GPU if heavy else contextlib.nullcontext():
+        if heavy:
+            free_gpu()
+        req = urllib.request.Request(url + entry["endpoint"], data=json.dumps(body).encode(), method="POST",
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                data, ctype = r.read(CLIP_MAX + 1), r.headers.get_content_type()
+        except urllib.error.HTTPError as e:
+            try:
+                why = json.loads(e.read() or b"{}").get("error")
+            except (ValueError, AttributeError):
+                why = None
+            return {"error": str(why or f"{entry['name']} said {e.code}")[:200]}
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"{entry['name']} didn't answer: {e}"[:200]}
+    ctype = ctype.lower()
+    wanted = entry.get("outputs") or []
+    if ctype not in POPUP_TYPES or not any(o == ctype or (o.endswith("/*") and ctype.startswith(o[:-1])) for o in wanted):
+        return {"error": f"{entry['name']} answered with {ctype}, which isn't one of its outputs"}
+    if not data or len(data) > CLIP_MAX:
+        return {"error": f"{entry['name']}'s result was empty or too big to send"}
+    title = (str(args.get("prompt") or args.get("text") or "") or entry["name"])[:60]
+    up = urllib.request.Request(f"{PORTAL}/home/media/{job.get('id')}?title={urllib.parse.quote(title)}", data=data,
+                                method="PUT", headers={"Content-Type": ctype, "Authorization": f"Bearer {token}"})
+    try:
+        with urllib.request.urlopen(up, timeout=20 + len(data) / 200_000) as r:
+            r.read()
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"couldn't hand the result to the portal: {e}"[:200]}
+    return {"result": {"title": title, "type": ctype, "bytes": len(data)}}
 
 
 def _bridge(method: str, path: str, body: dict | None, token: str, timeout: float = 40) -> tuple[int | None, dict]:
@@ -860,6 +957,8 @@ def run_job(job: dict, token: str = "") -> dict:
         return make_music(job, token)
     if job.get("kind") in ("make_image", "make_image_hq"):
         return make_image(job, token, hq=job.get("kind") == "make_image_hq")
+    if job.get("kind") == "popup":
+        return popup_job(job, token)
     if job.get("kind") == "host_op":
         return host_op(job, token)
     if job.get("kind") in ("memory_list", "memory_get"):

@@ -58,6 +58,7 @@ import ship as ship_mod
 import tabletop as tabletop_mod
 import chat_history
 import patient as patient_mod
+import popups
 import chat_names
 import tasks
 import telemetry_web
@@ -114,26 +115,35 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     MENTAT_PER_MIN = 10
     CHAT_PER_HOUR = 60
     IMAGES_PER_DAY = 10          # pictures a guest may make (the Captain: no limit); the home GPU draws each one
+    POPUPS_PER_DAY = 10          # pop-up jobs a guest may start, all pop-ups together (only those whose audience is everyone)
     imports = imports or imports_mod.Imports(vm)
     media = media_mod.Media()
     # the patient queue (patient.py): pictures and songs, made when their machine is quiet, kept in the bucket until collected; the
     # Captain's are kept like his chats, forever
     pics = pictures if pictures is not None else patient_mod.from_env(forever=lambda e: str(e).strip().lower() in app.config["ADMIN_EMAILS"])
 
-    def box_for(kind: str) -> str:
-        """Which machine makes it: quality pictures (make_image_hq) on skippy-core; quick pictures and songs on skippy-pc."""
+    def box_for(kind: str, name: str = "") -> str:
+        """Which machine makes it: quality pictures (make_image_hq) on skippy-core; quick pictures and songs on skippy-pc; a pop-up
+        wherever its registry entry says (popups.py)."""
+        if kind == "popup":
+            return (popups.get(name) or {}).get("box") or "pc"
         return "core" if kind == "make_image_hq" else "pc"
 
     def gpu_for(box: str) -> dict | None:
         """The GPU's free memory and load where the portal can see it: skippy-pc's card, from the starter's nvidia-smi; skippy-core's,
         from its quality picture studio's /health, as the reporter passes it up with the make_image_hq capability."""
         if box == "core":
-            info = ((home.report or {}).get("capabilities") or {}).get("make_image_hq") if home.online() else None
-            if not isinstance(info, dict) or info.get("box") != "core":
-                return None
-            num = lambda k: info.get(k) if isinstance(info.get(k), (int, float)) and not isinstance(info.get(k), bool) else None  # noqa: E731
-            gpu = {"free_pct": num("gpu_free_pct"), "util_pct": num("gpu_util_pct"), "free_gib": num("gpu_free_gib")}
-            return gpu if any(v is not None for v in gpu.values()) else None
+            caps = ((home.report or {}).get("capabilities") or {}) if home.online() else {}
+            # the quality studio's figures first; else any pop-up on skippy-core whose /health gives them (it's one shared memory)
+            for name in ("make_image_hq", *(n for n, e in popups.load().items() if e["box"] == "core")):
+                info = caps.get(name)
+                if not isinstance(info, dict) or info.get("box") != "core":
+                    continue
+                gpu = {"free_pct": _num(info, "gpu_free_pct"), "util_pct": _num(info, "gpu_util_pct"),
+                       "free_gib": _num(info, "gpu_free_gib")}
+                if any(v is not None for v in gpu.values()):
+                    return gpu
+            return None
         if box != "pc" or not starter.online():
             return None
         st = starter.status or {}
@@ -152,10 +162,11 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         job = j["job"]
         if job.get("kind") not in patient_mod.KINDS:
             return False
-        box = job.get("box") or box_for(job["kind"])
+        box = job.get("box") or box_for(job["kind"], job.get("name", ""))
         for other in jobs:                                    # one per machine at a time, and the oldest goes first
             o = other["job"]
-            if other is j or o.get("kind") not in patient_mod.KINDS or (o.get("box") or box_for(o["kind"])) != box or other["event"].is_set():
+            if (other is j or o.get("kind") not in patient_mod.KINDS or (o.get("box") or box_for(o["kind"], o.get("name", ""))) != box
+                    or other["event"].is_set()):
                 continue
             if other["sent"] > 0 or other["created"] < j["created"]:
                 return True
@@ -872,7 +883,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 kept = None
                 print(json.dumps({"event": "patient_not_kept", "why": str(exc)[:200]}), flush=True)
             if kept and kept.get("keep"):                     # the Captain's: a Discord DM says it's ready
-                what = "picture" if kept.get("type", "").startswith("image/") else "song"
+                what = ("result" if kept.get("kind") == "popup" else
+                        "picture" if kept.get("type", "").startswith("image/") else "song")
                 notifier.alert(f"Your {what} is ready in Skippy's chat: {kept.get('title') or 'untitled'}.")
             if owner is None:
                 return (jsonify(ok=True, kept=True), 200) if kept else (jsonify(error="no such job"), 404)
@@ -1810,7 +1822,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             self.email = email
 
         def start(self, kind, owner="", **payload):
-            box = box_for(kind)
+            box = box_for(kind, payload.get("name", ""))
             job = home.start(kind, owner, ttl=patient_mod.JOB_TTL, box=box, **payload)
             try:
                 pics.expect(job, self.email, kind, box, payload)
@@ -1835,6 +1847,25 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         print(json.dumps({"event": "agent_picture_queued", "job": picture_id}), flush=True)
     workshop.on_picture = agent_picture
 
+    def popup_payload(entry: dict, args: dict, given: dict | None) -> dict:
+        """A pop-up job as the reporter reads it (services/home-reporter popup_job): its name, its arguments as one JSON string (the
+        patient queue writes down plain values only, so a restarted portal can put it back in line), and the file it takes, if any."""
+        summary = " ".join(str(v) for v in args.values() if isinstance(v, (str, int, float)) and not isinstance(v, bool))
+        out = {"name": entry["name"], "args": json.dumps(args)[:20_000], "prompt": (entry["name"] + ": " + summary)[:300]}
+        if given:
+            out.update(input_b64=given["b64"], input_type=given["type"], input_name=str(given.get("name") or "file")[:80])
+        return out
+
+    def agent_popup(owner: str, job_id: str, name: str, args: dict, given: dict | None = None) -> None:
+        """The private Skippy wrote `SKIPPY_POPUP: <name> <json args>` (services/claude-bridge): a patient pop-up job for the Captain under
+        the bridge's id, like agent_picture. Only a pop-up that is registered and ready at home; once, however often it is pushed."""
+        entry = popups.get(name)
+        if not entry or not home.can(name) or home.has(job_id) or pics.state(job_id, owner, True) != "unknown":
+            return
+        PatientJobs(owner).start("popup", owner, **popup_payload(entry, args, given), _id=job_id)
+        print(json.dumps({"event": "agent_popup_queued", "job": job_id, "popup": name}), flush=True)
+    workshop.on_popup = agent_popup
+
     def tools_for(user, trace: str = "") -> chat_tools.ChatTools:
         email = user["email"]
         return chat_tools.ChatTools(vm, is_admin=auth.is_admin(email), visible=auth.visible_games(email),
@@ -1844,6 +1875,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                                     home_music=PatientJobs(email) if home.can("make_music") else None,
                                     home_image=PatientJobs(email) if home.can("make_image") or home.can("make_image_hq") else None,
                                     image_tiers=tuple(k for k in ("make_image", "make_image_hq") if home.can(k)),
+                                    popups=[e for n, e in popups.load().items() if e["chat"] and home.can(n)],
+                                    home_popup=PatientJobs(email), popup_payload=popup_payload,
+                                    popup_allow=(lambda: True) if auth.is_admin(email) else
+                                                (lambda: limiter.allow("popup:" + email, POPUPS_PER_DAY, 86400)),
                                     image_allow=(lambda: True) if auth.is_admin(email) else
                                                 (lambda: limiter.allow("image:" + email, IMAGES_PER_DAY, 86400)))
 
@@ -2019,6 +2054,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             force = None
         try:
             tools = tools_for(user, trace)
+            tools.files = files               # a pop-up that takes a picture or a sound takes it from this message (popups.py)
             model = brains.model_of(brain)
             page = str(body.get("page") or "")[:100] or None
             prompt = chat.system_prompt(user["name"], is_admin=admin, page=page,
@@ -2224,8 +2260,12 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         else:
             state = pics.state(job_id, me(), auth.is_admin(me()))
             if state == "waiting":                            # in line, or being made: say which, and why it waits
-                if (pics.pending(job_id) or {}).get("kind") == "make_image_hq":
+                meta = pics.pending(job_id) or {}
+                if meta.get("kind") == "make_image_hq":
                     extra["tier"] = "hq"                        # a quality picture: the card says it may take up to an hour
+                if meta.get("kind") == "popup":                 # a pop-up: the card says roughly how long its kind takes
+                    entry = popups.get(str((meta.get("job") or {}).get("name") or "")) or {}
+                    extra.update(popup=entry.get("name") or "pop-up", est_s=entry.get("est_seconds"))
                 seen = home.peek(job_id)
                 if seen.get("handed_out"):
                     state = "working"
@@ -2236,6 +2276,9 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                     box = meta.get("box") or "pc"
                     state = "queued"
                     extra = {**extra, "why": pics.ready(box, gpu_for(box))[1] or "next in line", "box": box}
+        if state == "done":                                   # what kind of card it becomes (a pop-up's type is known only now)
+            ctype = item["type"] if item and (auth.is_admin(me()) or item["owner"] == me()) else pics.type_of(job_id)
+            extra["kind"] = popups.card_kind(ctype or "")
         resp = jsonify(state=state, **extra)
         resp.headers["Cache-Control"] = "private, no-store"
         return resp
@@ -2257,6 +2300,12 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     app.register_blueprint(talk)
     return app
+
+
+def _num(info: dict, key: str):
+    """A number a capability reported (a GPU figure), else None: a bool is not a number here."""
+    value = info.get(key)
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
 def _lazy_app():

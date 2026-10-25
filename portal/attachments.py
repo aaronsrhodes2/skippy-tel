@@ -25,6 +25,9 @@ MAX_TEXT_CHARS = 60_000          # what of one text file or PDF goes to a model 
 MAX_PDF_PAGES = 40
 
 IMAGE_MAGIC = {"image/jpeg": b"\xff\xd8\xff", "image/png": b"\x89PNG\r\n\x1a\n", "image/webp": b"RIFF"}
+# Sounds, for the pop-ups that take one (popups.py: stem separation, transcription). No brain hears them: each is a line naming it.
+AUDIO_TYPES = {"audio/wav": "audio/wav", "audio/x-wav": "audio/wav", "audio/wave": "audio/wav", "audio/mpeg": "audio/mpeg",
+               "audio/mp3": "audio/mpeg", "audio/flac": "audio/flac", "audio/x-flac": "audio/flac", "audio/ogg": "audio/ogg"}
 TEXT_TYPES = {"text/plain", "text/markdown", "text/csv", "text/html", "text/css", "text/x-python", "application/json",
               "application/javascript", "text/javascript", "application/xml", "text/xml", "application/x-yaml", "text/yaml"}
 TEXT_SUFFIXES = (".txt", ".md", ".csv", ".json", ".py", ".js", ".ts", ".html", ".css", ".yml", ".yaml", ".xml", ".sh",
@@ -33,10 +36,15 @@ _DATA_URL = re.compile(r"data:([a-z0-9.+/-]+)(?:;[a-z0-9=-]+)*;base64,([A-Za-z0-
 _NAME = re.compile(r"[^\w .()+-]")
 
 
+def _is_audio(mime: str, data: bytes) -> bool:
+    return {"audio/wav": data[:4] == b"RIFF" and data[8:12] == b"WAVE", "audio/flac": data[:4] == b"fLaC", "audio/ogg": data[:4] == b"OggS",
+            "audio/mpeg": data[:3] == b"ID3" or (len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0)}[mime]
+
+
 @dataclass(frozen=True)
 class File:
     name: str
-    kind: str            # "image" | "pdf" | "text"
+    kind: str            # "image" | "pdf" | "text" | "audio"
     mime: str
     data: bytes
 
@@ -86,6 +94,10 @@ def clean(raw) -> list[File]:
             if not data.startswith(IMAGE_MAGIC[mime]):
                 raise ValueError(f"{name} isn't the picture it says it is.")
             out.append(File(name, "image", mime, data))
+        elif mime in AUDIO_TYPES:
+            if not _is_audio(AUDIO_TYPES[mime], data):
+                raise ValueError(f"{name} isn't the sound it says it is.")
+            out.append(File(name, "audio", AUDIO_TYPES[mime], data))
         elif mime == "application/pdf" or name.lower().endswith(".pdf"):
             if not data.startswith(b"%PDF"):
                 raise ValueError(f"{name} isn't a PDF.")
@@ -97,7 +109,7 @@ def clean(raw) -> list[File]:
                 raise ValueError(f"{name} isn't plain text.") from None
             out.append(File(name, "text", "text/plain", data))
         else:
-            raise ValueError(f"{name}: pictures, PDFs and text or code files only.")
+            raise ValueError(f"{name}: pictures, sounds, PDFs and text or code files only.")
     return out
 
 
@@ -110,6 +122,10 @@ def _wrap(f: File, body: str) -> str:
     return f"<file name={f.name!r}>\n{body}\n</file>"
 
 
+def _heard(f: File) -> str:
+    return _wrap(f, f"A sound file ({f.mime}, {len(f.data) // 1024} KB). You can't hear it; a tool that takes an attachment can use it.")
+
+
 def anthropic_blocks(files: list[File], text: str) -> list[dict]:
     blocks = []
     for f in files:
@@ -118,6 +134,8 @@ def anthropic_blocks(files: list[File], text: str) -> list[dict]:
         elif f.kind == "pdf":
             blocks.append({"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": f.b64},
                            "title": f.name})
+        elif f.kind == "audio":
+            blocks.append({"type": "text", "text": _heard(f)})
         else:
             blocks.append({"type": "text", "text": _wrap(f, f.text())})
     return blocks + [{"type": "text", "text": text}]
@@ -128,6 +146,8 @@ def text_for(files: list[File], text: str, describe) -> str:
     for f in files:
         if f.kind == "image":
             parts.append(_wrap(f, "A picture. What the vision model sees in it:\n" + describe(f)))
+        elif f.kind == "audio":
+            parts.append(_heard(f))
         else:
             parts.append(_wrap(f, f.text()))
     return "\n\n".join(parts + [text])
@@ -138,6 +158,8 @@ def openai_parts(files: list[File], text: str) -> list[dict]:
     for f in files:
         if f.kind == "image":
             parts.append({"type": "image_url", "image_url": {"url": f"data:{f.mime};base64,{f.b64}"}})
+        elif f.kind == "audio":
+            parts.append({"type": "text", "text": _heard(f)})
         else:
             parts.append({"type": "text", "text": _wrap(f, f.text())})
     return parts + [{"type": "text", "text": text}]

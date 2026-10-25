@@ -42,7 +42,7 @@ def test_pictures_text_and_pdfs_are_accepted_and_typed_by_their_bytes():
 @pytest.mark.parametrize("item, says", [
     ({"name": "fake.png", "data": url("image/png", JPEG)}, "isn't the picture"),          # a jpeg pretending to be a png
     ({"name": "x.pdf", "data": url("application/pdf", b"not a pdf")}, "isn't a PDF"),
-    ({"name": "x.bin", "data": url("application/octet-stream", b"\x00\x01")}, "pictures, PDFs and text"),
+    ({"name": "x.bin", "data": url("application/octet-stream", b"\x00\x01")}, "pictures, sounds, PDFs and text"),
     ({"name": "x.txt", "data": url("text/plain", b"\xff\xfe\x00bad")}, "isn't plain text"),
     ({"name": "x.txt", "data": "data:text/plain;base64,@@@"}, "can read"),
     ({"name": "x.txt"}, "whole"),
@@ -99,5 +99,5 @@ def test_skippy_core_gets_the_files_as_blocks_and_a_bad_file_is_a_400():
     content = skippy.seen[1][-1]["content"]
     assert isinstance(content, str) and content.rstrip().endswith("read this")         # Skippy Core reads the PDF as text
     r = client.post("/chat/send", json={"message": "x", "files": [{"name": "x.exe", "data": url("application/x-msdownload", b"MZ")}]})
-    assert r.status_code == 400 and "pictures, PDFs and text" in r.get_json()["error"]
+    assert r.status_code == 400 and "pictures, sounds, PDFs and text" in r.get_json()["error"]
     assert json.dumps(r.get_json()).count("MZ") == 0

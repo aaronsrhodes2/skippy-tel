@@ -358,7 +358,10 @@ only, 30 MB) and plays from `GET /chat/media/<job_id>` (its requester or an admi
   reporter unloads Ollama's models first (`OLLAMA_KEEP_ALIVE=-1` would otherwise keep
   them in VRAM), then release_task, poll, download, upload; one GPU job at a time. The
   Captain's rule of thumb (why it's local): no tokens, and nothing to wait on or pay for.
-- **Adding one**: a job kind in `reporter.run_job`, a probe in `reporter.capabilities()`,
+- **Pop-ups** (2026-10-24, the way to add an on-demand model): ONE entry in `services/<family>-popups/popups.json` plus its own
+  container; no shared file changes. The reporter advertises and runs it (job kind `popup`), the portal makes it a patient job, a chat
+  tool and a `SKIPPY_POPUP:` agent line. Contract: [docs/popups.md](docs/popups.md); test service `services/popups/echo`.
+- **Adding one** (a built-in, not a pop-up): a job kind in `reporter.run_job`, a probe in `reporter.capabilities()`,
   the name in `home.KNOWN_CAPABILITIES`, a tool in `chat_tools.py`, an audience in
   `tool_policy.py`, and tests on both sides.
 - Models live in `D:\models` (`tools/models_archive.py`: verify with `python

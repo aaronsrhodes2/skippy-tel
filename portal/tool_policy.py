@@ -49,3 +49,8 @@ def allowed(server: str, is_admin: bool) -> bool:
 
 def allowed_servers(servers: list[str], is_admin: bool) -> list[str]:
     return [s for s in servers if allowed(s, is_admin)]
+
+
+def popup_allowed(entry: dict, is_admin: bool) -> bool:
+    """A pop-up (popups.py) carries its own audience in its registry entry: "everyone" or, the default, "admin"."""
+    return is_admin or (entry or {}).get("audience") == EVERYONE

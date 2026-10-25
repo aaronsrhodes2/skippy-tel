@@ -241,6 +241,38 @@ def split_pictures(text: str) -> tuple[str, list[tuple[str, str]]]:
     return _PICTURE_LINE.sub("", text).strip(), [p for p in prompts if p[0]]
 
 
+# A pop-up job the agent wants run (docs/popups.md): `SKIPPY_POPUP: <name> <json args>`, any model in the registry. Like a picture: an id
+# from the bridge, a patient job on the portal, a card in his chat. `"_file": "<path>"` in the arguments hands it a picture or a sound
+# from this run's clone or the Captain's attachments (the only places a file may leave this PC from), at most MAX_POPUP_INPUT.
+MAX_POPUPS = 3
+MAX_POPUP_ARGS = 4000              # characters of JSON arguments (the portal's workshop.MAX_POPUP_ARGS)
+MAX_POPUP_INPUT = 1_000_000        # bytes of file (as base64 it fits a chat attachment: attachments.MAX_B64_EACH)
+_POPUP_LINE = re.compile(r"^[ \t]*`?SKIPPY_POPUP:[ \t]*([a-z][a-z0-9_]{2,39})(?:[ \t]+([^\n`]*?))?[ \t]*`?[ \t]*$", re.M)
+_SOUND_MAGIC = ((b"RIFF", "audio/wav"), (b"fLaC", "audio/flac"), (b"OggS", "audio/ogg"), (b"ID3", "audio/mpeg"))
+
+
+def split_popups(text: str) -> tuple[str, list[tuple[str, dict | None]]]:
+    """An assistant text block without its `SKIPPY_POPUP: <name> <json>` lines, and those as (name, args): args None when the JSON
+    was not an object of at most MAX_POPUP_ARGS characters (the run then says so)."""
+    found = []
+    for m in _POPUP_LINE.finditer(text):
+        try:
+            args = json.loads(m.group(2) or "{}")
+        except ValueError:
+            args = None
+        found.append((m.group(1), args if isinstance(args, dict) and len(json.dumps(args)) <= MAX_POPUP_ARGS else None))
+    return _POPUP_LINE.sub("", text).strip(), found
+
+
+def file_mime(data: bytes) -> str | None:
+    """A picture's or a sound's type by its first bytes, or None."""
+    if image_mime(data):
+        return image_mime(data)
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return next((mime for magic, mime in _SOUND_MAGIC if data.startswith(magic) and (magic != b"RIFF" or data[8:12] == b"WAVE")), None)
+
+
 def split_images(text: str) -> tuple[str, list[str]]:
     """An assistant text block without its `SKIPPY_IMAGE: <path>` lines, and those paths (see _attach_images)."""
     paths = [m.group(1).strip().strip("\"'") for m in _IMAGE_LINE.finditer(text)]
@@ -305,6 +337,7 @@ class Run:
         self.before_finish = None              # (run) -> None, called once just before the run ends (the ship check)
         self.image_paths: list[str] = []       # SKIPPY_IMAGE lines the agent printed: screenshots to attach at the end
         self.picture_prompts: list[tuple[str, str]] = []   # SKIPPY_PICTURE[_HQ] lines: (description, tier) to have made (patient jobs)
+        self.popups: list[tuple[str, dict | None]] = []    # SKIPPY_POPUP lines: (name, args) to have run (patient jobs, docs/popups.md)
         self.pictures: list[str] = []          # a Core-brain run's attached pictures, described by the vision slot before it starts
         self.created = time.time() if created is None else created
         self.events: list[dict] = []
@@ -1186,6 +1219,39 @@ class Workshop:
             run.emit({"t": "image", "mime": mime, "name": name, "b64": base64.b64encode(data).decode("ascii")})
         for prompt, tier in run.picture_prompts[:MAX_PICTURES]:      # pictures to make: the portal queues each (its id is the job's)
             run.emit({"t": "picture", "id": secrets.token_hex(8), "prompt": prompt, **({"tier": tier} if tier else {})})
+        for name, args in run.popups[:MAX_POPUPS]:                    # pop-up jobs: the same, any model in the registry
+            if args is None:
+                run.emit({"t": "text", "text": f"(couldn't ask for {name}: its arguments must be one JSON object on the same line)"})
+                continue
+            event = {"t": "popup", "id": secrets.token_hex(8), "name": name, "args": {k: v for k, v in args.items() if k != "_file"}}
+            if "_file" in args:
+                given, why = self._popup_file(run, args["_file"], clone)
+                if given is None:
+                    run.emit({"t": "text", "text": f"(couldn't hand {name} the file: {why})"})
+                    continue
+                event["input"] = given
+            run.emit(event)
+
+    def _popup_file(self, run: Run, raw, clone: str) -> tuple[dict | None, str]:
+        """The file a SKIPPY_POPUP line names in `_file`: a picture or a sound inside the run's clone or the attachments folder."""
+        if not isinstance(raw, str) or not raw.strip():
+            return None, "_file must be a path"
+        path = os.path.realpath(raw if os.path.isabs(raw) else os.path.join(clone, raw))
+        roots = [clone, os.path.realpath(self.attach_dir)]
+        try:
+            inside = any(os.path.commonpath([root, path]) == root for root in roots)
+        except ValueError:                             # another drive
+            inside = False
+        if not inside or not os.path.isfile(path):
+            return None, "it must be a file inside my clone or the Captain's attachments"
+        if os.path.getsize(path) > MAX_POPUP_INPUT:
+            return None, f"it is over {MAX_POPUP_INPUT // 1_000_000} MB"
+        with open(path, "rb") as f:
+            data = f.read(MAX_POPUP_INPUT + 1)
+        mime = file_mime(data)
+        if mime is None:
+            return None, "it isn't a picture (png, jpeg, webp) or a sound (wav, flac, ogg, mp3)"
+        return {"type": mime, "name": os.path.basename(path)[:80], "b64": base64.b64encode(data).decode("ascii")}, ""
 
     def _work(self, run: Run) -> None:
         try:
@@ -1318,6 +1384,8 @@ class Workshop:
                         run.image_paths.extend(shots)          # attached when the run ends (see _attach_images)
                         said, wanted = split_pictures(said)
                         run.picture_prompts.extend(wanted)     # asked for when the run ends (see _attach_images)
+                        said, jobs = split_popups(said)
+                        run.popups.extend(jobs)                # ...and so are pop-up jobs
                         if not said:
                             continue
                         if pending is not None:
