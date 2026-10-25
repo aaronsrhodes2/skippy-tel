@@ -1811,7 +1811,8 @@ def test_the_inventory_highlights_the_demos_and_lists_everything_else(env):
     assert 'id="find"' in page and 'aria-label="Filter by kind"' in page       # search + kind filters
     assert json.loads(html.unescape(re.search(r"data-kinds='([^']*)'", page).group(1))).__len__() == 4   # the four kinds that exist (the key steps All, then these)
     assert 'id="kind-key"' in page
-    assert len(re.findall(r'<a class="tile( featured)?"', page)) == 5            # every experiment is one tile: no duplicates
+    import experiments
+    assert len(re.findall(r'<a class="tile( featured)?"', page)) == len(experiments.EXPERIMENTS)   # every experiment is one tile: no duplicates
     assert "Coming next" not in page                                              # the three it promised are here now
 
 

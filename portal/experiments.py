@@ -72,6 +72,12 @@ EXPERIMENTS = (
                "driving Mentat's tools beats both.",
                ("Evaluation",), "experiments.benchmark", f"{REPO}/tree/master/sigma_ground/mcp/benchmark",
                kind="results", icon="📊"),
+    Experiment("minebench", "MineBench: the home AI builds in blocks",
+               "MineBench asks a model to build an object in Minecraft blocks, and the detail and precision show at a glance what "
+               "it can do. Our local, free purple Skippy (Qwen3.6 on skippy-core) builds a choo-choo train: once from the benchmark's "
+               "one-line prompt, then from a full written spec with a look at its own work after each pass.",
+               ("Benchmark", "Voxels", "Local AI"), "experiments.minebench", "https://github.com/Ammaar-Alam/minebench",
+               kind="results", icon="🧱"),
     Experiment("radiance", "Radiance — simulated physics, rendered",
                "sigma-ground's own WebGL2 raymarcher replaying recorded simulations: falling metals, a "
                "Mach 2 projectile, glowing iron, gear trains, a windmill, water with Fresnel reflection.",
@@ -186,3 +192,17 @@ RADIANCE_SHOWCASE_SNIPPET = """
   });
 </script>
 """
+
+
+# MineBench runs (github.com/Ammaar-Alam/minebench: 256 grid, simple palette, its own system prompt; experiments/minebench.html).
+# One row per run, written from the run itself (block count from tools/voxel/runtime.mjs, time from the run), files under
+# static/experiments/minebench/<id>/: views.png (tools/voxel/render.py), model.glb (--glb), build.json (the voxel.exec call).
+MINEBENCH_RUNS = (
+    {"id": "v1", "title": "Choo-choo train, the benchmark's one-line prompt",
+     "model": "Purple Skippy: Claude Code on Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8), local and free",
+     "prompt": "a choo-choo train", "comparable": True, "blocks": 79351, "minutes": 13, "size": "200 x 47 x 180",
+     "verdict": "Reads clearly as a steam train: black boiler with white bands, a tall stack puffing smoke, a cowcatcher, track with "
+                "sleepers, a station with a red roof and gold trim, a water tower, trees. Short of the frontier builds: the wheels lie "
+                "beside the track instead of under the engine, the passenger cars are flat slabs with no windows, a few blocks float, "
+                "and most of the plate is empty ground."},
+)

@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}MineBench — Experiments{% endblock %}
+{% block app %}experiments{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}cube{% endblock %}
+{% block hud_back %}{{ url_for('experiments.index') }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge-panes.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='experiments.css') }}">
+<script type="module" src="{{ url_for('static', filename='vendor/model-viewer-4.0.0.min.js') }}"></script>
+<style>
+  #mbpg model-viewer { width: 100%; height: 46vh; background: #05090b; border: 1px solid var(--dim-green-hi); --poster-color: transparent; }
+  #mbpg .views { width: 100%; height: auto; display: block; border: 1px solid var(--dim-green-hi); }
+  #mbpg .facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 6px 0; }
+  #mbpg .facts dt { color: var(--dim); } #mbpg .facts dd { margin: 0; }
+  #mbpg .tag { display: inline-block; padding: 0 6px; border: 1px solid var(--amber); color: var(--amber); font-size: 12px; }
+</style>{% endblock %}
+{% block content %}
+{# MineBench (github.com/Ammaar-Alam/minebench): a model builds an object in Minecraft blocks; the build shows at a glance what it can
+   do. Our runs (experiments.MINEBENCH_RUNS), each with its picture and a 3D model to rotate, paged like every bridge page. #}
+<section class="adm" id="mb">
+  <header class="ahead" style="padding-top:6px"><svg class="g mark" aria-hidden="true"><use href="#g-cube"/></svg><h2>MineBench: the home AI builds in blocks</h2></header>
+  <div class="apane" style="flex:1;min-height:0">
+    <div class="pg" id="mbpg"><div class="pg-flow">
+      <p><a href="https://github.com/Ammaar-Alam/minebench" rel="noopener">MineBench</a> gives a model a build request and a
+        Minecraft-style grid, and people compare the results side by side. The detail and precision of a build show at a glance
+        what a model can do: shape, proportion, depth, planning.</p>
+      <p>Here the builder is <b>purple Skippy</b>: the Captain's own coding agent thinking with Skippy Core's local model, on hardware
+        in his house, free to run. Every run uses MineBench's own system prompt and rules: a 256-block grid, the simple palette of
+        25 blocks, and the <code>voxel.exec</code> tool (JavaScript that places blocks, boxes and lines). The frontier models'
+        builds are on MineBench's own site, for comparison.</p>
+      <p class="help">Each run below: the build request, the numbers, four views, and the model itself to turn with a finger or a
+        mouse. A run marked "expanded prompt" got a full written specification instead of the benchmark's one line: it shows how
+        far direction lifts a local model, and is not comparable with the leaderboard.</p>
+      {% for r in runs %}
+      <h3>{{ r.title }}</h3>
+      <p>{% if r.comparable %}<span class="tag">benchmark prompt</span>{% else %}<span class="tag">expanded prompt</span>{% endif %}</p>
+      <dl class="facts">
+        <dt>Builder</dt><dd>{{ r.model }}</dd>
+        <dt>Request</dt><dd>{% if r.comparable %}"{{ r.prompt }}"{% else %}{{ r.prompt }}{% endif %}</dd>
+        <dt>Blocks</dt><dd>{{ "{:,}".format(r.blocks) }}</dd>
+        <dt>Size</dt><dd>{{ r.size }}</dd>
+        <dt>Time</dt><dd>{{ r.minutes }} minutes</dd>
+      </dl>
+      <img class="views" src="{{ url_for('static', filename='experiments/minebench/' ~ r.id ~ '/views.png') }}" alt="{{ r.title }}: four views" loading="lazy">
+      <model-viewer src="{{ url_for('static', filename='experiments/minebench/' ~ r.id ~ '/model.glb') }}" alt="{{ r.title }}: the build in 3D"
+                    camera-controls auto-rotate touch-action="pan-y" shadow-intensity="0.6" exposure="1.1"></model-viewer>
+      <p>{{ r.verdict }}</p>
+      <p class="help"><a href="{{ url_for('static', filename='experiments/minebench/' ~ r.id ~ '/build.json') }}">The build itself</a>
+        (the voxel.exec call, as MineBench runs it).</p>
+      {% endfor %}
+    </div></div>
+    <div class="pips" hidden><i></i></div>
+  </div>
+</section>
+<script>
+  (function () {
+    var panel = document.getElementById("mbpg");
+    Bridge.pager(panel, { pips: panel.parentNode.querySelector(".pips") });
+  })();
+</script>
+{% endblock %}

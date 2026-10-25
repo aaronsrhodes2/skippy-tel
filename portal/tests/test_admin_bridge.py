@@ -83,7 +83,8 @@ def test_the_experiments_inventory_is_a_public_bridge_page_of_tiles_shown_a_scre
     assert 'aria-label="Sign in"' in page                                                # the strip says how to sign in
     for need in ('id="find"', 'id="kind-key"', 'id="scrub"', 'id="about"'):
         assert need in page, need
-    assert len(re.findall(r'<a class="tile( featured)?"', page)) == 5 and "data-tel=\"demo:nbody\"" in page    # the tiles are the page's data and its tap beacons
+    import experiments
+    assert len(re.findall(r'<a class="tile( featured)?"', page)) == len(experiments.EXPERIMENTS) and "data-tel=\"demo:nbody\"" in page    # the tiles are the page's data and its tap beacons
     glyphs = set(re.findall(r'<symbol id="g-([\w-]+)"', (PORTAL / "templates" / "_glyphs.html").read_text(encoding="utf-8")))
     drawn = set(re.findall(r'(?:live|recorded|results|tool|local): "(\w+)"', page)) | {"tools", "atom", "info", "search", "x"}
     assert drawn <= glyphs, drawn - glyphs                                               # every kind has a drawn glyph

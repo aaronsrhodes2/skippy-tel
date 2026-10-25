@@ -58,7 +58,7 @@ REGISTRY = {
         "auth.callback", "auth.login", "auth.logout", "auth.unauthorized", "health", "version", "index", "privacy", "request_access",
         "site_icons", "site_manifest", "legacy_bilby", "dashboard.legacy_dashboard", "music.player_manifest", "video.video_manifest",
         "doomloop.version", "starcontrol.version", "play_index", "orion_trail", "radiance_probe",
-        "experiments.benchmark", "experiments.double_slit", "experiments.index", "experiments.mentat_call", "experiments.mentat_page",
+        "experiments.benchmark", "experiments.minebench", "experiments.double_slit", "experiments.index", "experiments.mentat_call", "experiments.mentat_page",
         "experiments.mentat_tools", "experiments.nbody", "experiments.radiance_file", "experiments.radiance_index",
         "experiments.weapon_vs_armor", "experiments.wva_catalog", "experiments.wva_solve")},
 }

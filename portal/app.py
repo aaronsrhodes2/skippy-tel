@@ -1689,6 +1689,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def benchmark():
         return render_template("benchmark.html", bench=experiments.benchmark())
 
+    @lab.get("/minebench")
+    def minebench():
+        return render_template("minebench.html", runs=experiments.MINEBENCH_RUNS)
+
     @lab.get("/mentat/api/tools")
     def mentat_tools():
         if not mentat:
