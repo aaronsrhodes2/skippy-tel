@@ -1,6 +1,8 @@
-"""Shifting Prophesy: two AI models build the same browser game from the same spec, one prompt at a time (/shifting-prophesy).
+"""Shifting Prophesy: purple Skippy's shake-down cruise (/shifting-prophesy). The home AI, running as itself in the workshop
+on Skippy Core, builds a whole browser game one prompt at a time; Claude Haiku gets the same prompts with every tool, as the
+reference. Where purple falls short is what it needs next.
 
-The experiment lives in three repos: each model's build (aaronsrhodes2/shifting-prophesy-haiku, -purple) and the referee's
+The cruise lives in three repos: each model's build (aaronsrhodes2/shifting-prophesy-purple, -haiku) and the referee's
 record of every turn (aaronsrhodes2/shifting-prophesy-referee, which also runs the turns on skippy-pc). Each repo's CI
 uploads into its own folder of one GCS bucket (PROPHESY_BUCKET): haiku/ and purple/ hold the newest build of each game,
 turns/ holds the record. The portal reads them at request time, as the Doom Loop dev channel does (doomloop.py: the storage,
@@ -26,11 +28,11 @@ from doomloop import VERSION_FIELDS, clean_path
 log = logging.getLogger(__name__)
 
 BUCKET_ENV = "PROPHESY_BUCKET"
-ARMS = {
-    "haiku": {"label": "Haiku 5.5", "detail": "claude-haiku-5-5 through the Anthropic API",
-              "repo": "https://github.com/aaronsrhodes2/shifting-prophesy-haiku"},
-    "purple": {"label": "Purple Skippy", "detail": "Skippy Core's coder (Qwen3.6-35B-A3B), local and free",
+ARMS = {                     # purple first: it is the ship under test
+    "purple": {"label": "Purple Skippy", "detail": "the workshop's Private brain: Skippy Core's coder (Qwen3.6-35B-A3B), local and free",
                "repo": "https://github.com/aaronsrhodes2/shifting-prophesy-purple"},
+    "haiku": {"label": "Haiku 5.5", "detail": "the reference: claude-haiku-5-5 in Claude Code with every tool",
+              "repo": "https://github.com/aaronsrhodes2/shifting-prophesy-haiku"},
 }
 RECORD = "turns"
 VERSION_TTL = 10.0           # seconds a build's version.json is trusted before its folder is asked again

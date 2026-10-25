@@ -12,7 +12,7 @@ page. Code in [`portal/`](../../portal); deployed on every push by
 | `/admin` | admins | Game settings (world names, passwords, Dragonwilds owner ID), **Restart & update**, **Set up / repair Discord channels**, the **Recovery** cards (below) |
 | `/starcontrol/` | everyone signed in | **Star Control Zero**: the Captain's fan game, played in the browser; a card in Browser Games (`/play`) (see below) |
 | `/doomloop/` | everyone signed in | **Doom Loop**: the Captain's work-in-progress game, the newest build from its repo, with a dev-build badge; a card in Browser Games (`/play`) (see "Doom Loop dev channel" below) |
-| `/shifting-prophesy/` | everyone signed in | **Shifting Prophesy**: two AI models build the same game; both live builds and every turn, scored; a card in Browser Games (see "Shifting Prophesy" below) |
+| `/shifting-prophesy/` | everyone signed in | **Shifting Prophesy**: purple Skippy's shake-down cruise, with Haiku as the reference; both live builds and every turn, scored; a card in Browser Games (see "Shifting Prophesy" below) |
 | `/music` | admins | **Bilby's Audio Service**: the Captain's music collection streamed from skippy-pc to any browser (see below). `/bilby` redirects here |
 
 ## Friends: play without the Captain online
@@ -729,11 +729,15 @@ new builds without a redeploy, damaged or unsafe `version.json`, no-bucket behav
 
 ## Shifting Prophesy (`/shifting-prophesy`)
 
-An experiment: two AI models (Haiku 5.5, and purple Skippy on Skippy Core's coder) build the same top-down adventure game from
-the same spec, one prompt from the Captain at a time, each in its own repo (`shifting-prophesy-haiku`, `-purple`). The
-referee repo (`shifting-prophesy-referee`, checked out at `D:\Aaron\development\shifting-prophesy\referee`) runs the turns on
+Purple Skippy's shake-down cruise: the private Skippy on its Private brain (Skippy Core's coder), running as itself in the
+workshop, builds a whole top-down adventure game from a written spec, one prompt from the Captain at a time, in
+`D:\Aaron\development\shifting-prophesy-purple` (repo `shifting-prophesy-purple`, opened in place as
+`f-shifting-prophesy-purple`). Its turns go through `tools/retest_failures.py` in one conversation,
+`shifting-prophesy-purple`, which the Captain follows live in the chat. Claude Haiku 5.5 gets the same prompts with every
+Claude Code tool, as the reference (`shifting-prophesy-haiku`). Where purple falls short is what it needs next. The referee
+repo (`shifting-prophesy-referee`, checked out at `D:\Aaron\development\shifting-prophesy\referee`) runs the turns on
 skippy-pc, grades both builds against the spec on hidden seeds, screenshots them, and keeps the record. Its README is the
-experiment's manual; this section is only the portal's side.
+cruise's manual; this section is only the portal's side.
 
 **How things get here:** the same as Doom Loop's dev channel, with one bucket (`skippy-tel-shifting-prophesy-dev`) and three
 folders: each build's `dev-deploy` workflow uploads its site to `haiku/` or `purple/` (`version.json` last), and the referee's

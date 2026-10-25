@@ -28,10 +28,11 @@
   <header class="ahead" style="padding-top:6px"><svg class="g mark" aria-hidden="true"><use href="#g-rune"/></svg><h2>Shifting Prophesy: two models, one game</h2></header>
   <div class="apane" style="flex:1;min-height:0">
     <div class="pg" id="sppg"><div class="pg-flow">
-      <p>Two AI models build the same browser game, a top-down adventure with a procedurally generated overworld and dungeons,
-        from the same written spec. Each turn the Captain sends both the same prompt, word for word. They run in the same Claude
-        Code with the same instructions, rails and 131,072-token window; only the model differs. After each turn a referee
-        checks both against the spec on 500 seeds neither can see, takes the same screenshots of both, and the Captain scores them.</p>
+      <p>Purple Skippy's shake-down cruise. The home AI, running as itself in the workshop on Skippy Core's local model, builds a
+        whole browser game: a top-down adventure with a procedurally generated overworld and dungeons, from a written spec, one
+        prompt from the Captain at a time. Claude Haiku gets the same prompt with every tool Claude Code has, as the reference.
+        After each turn a referee checks both builds against the spec on 500 seeds neither can see and takes the same
+        screenshots of both, and the Captain scores them. Where purple falls short of Haiku is what it needs next.</p>
       <div class="arms">
         {% for name, arm in arms.items() %}
         {% set v = versions[name] %}{% set t = totals[name] %}

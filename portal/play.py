@@ -40,7 +40,8 @@ GAMES = (
                 "this card plays the newest build.",
                 "♾️", "https://github.com/aaronsrhodes2/doom-loop", glyph="loop"),
     BrowserGame("shifting-prophesy", "Shifting Prophesy",
-                "An experiment: two AI models, Haiku and the home AI purple Skippy, build the same top-down adventure with a "
-                "procedurally generated world, from the same spec and the same prompts. Play both builds and see every turn scored.",
+                "Purple Skippy's shake-down cruise: the home AI builds a whole top-down adventure with a procedurally generated "
+                "world, one prompt at a time, with Claude Haiku on the same prompts as the reference. Play both builds and see "
+                "every turn scored.",
                 "🔮", "https://github.com/aaronsrhodes2/shifting-prophesy-referee", endpoint="prophesy.board", glyph="rune"),
 )
