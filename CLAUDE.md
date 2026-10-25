@@ -220,7 +220,7 @@ the local music gate, transcoded to 16 kHz FLAC). Each box is a **Bilby Connect 
 write read back and retried once, keep-warm; `homectl.py prove` times a device) and **Matter** through skippy-core's controller (2026-10-24:
 python-matter-server, `core/compose.matter.yml`, set up by `core/install/matter.sh`: IPv6 required, the API on the tailnet only; the hub's backend is
 `matter.py`, `MATTER_URL`; the Nest goes this way; the Leviton switches are paired in bulk with `homectl.py matter-import <file>`, codes from the
-My Leviton app, and `homectl.py identify` flashes one; a D2MSD's motion sensor is a read-only `binary_sensor`). All backends are one house (`house.Combined`). Details: `services/satellite/README.md`, `rooms/README.md`, `core/README.md` → Matter.
+My Leviton app, and `homectl.py identify` flashes one; a D2MSD's motion sensor is a read-only `binary_sensor`); and every Leviton on his account through the My Leviton cloud (`leviton.py`, `LEVITON_EMAIL`/`LEVITON_PASSWORD` in the vault, nothing to pair; last, so a locally paired switch wins). All backends are one house (`house.Combined`). Details: `services/satellite/README.md`, `rooms/README.md`, `core/README.md` → Matter.
 
 ## Nagatha's Video Service (the browser video app, `/video`)
 

@@ -164,7 +164,8 @@ def build(env: dict):
 
 def build_house(env: dict):
     """The house: what Skippy can control, through every backend that is set up (None when none is). hub.py shares it across rooms.
-    HomeKit (paired with homectl.py), Matter (skippy-core's controller: MATTER_URL) and Home Assistant (HASS_URL + HASS_TOKEN)."""
+    HomeKit (paired with homectl.py), Matter (skippy-core's controller: MATTER_URL), Leviton's cloud (LEVITON_EMAIL + LEVITON_PASSWORD)
+    and Home Assistant (HASS_URL + HASS_TOKEN)."""
     from homectl import matter_path, store_path                     # noqa: PLC0415
     from homekit import HomeKit, Store                              # noqa: PLC0415
     from house import Combined                                      # noqa: PLC0415
@@ -178,6 +179,9 @@ def build_house(env: dict):
     if env.get("MATTER_URL"):                                       # Matter, through skippy-core's controller (core/compose.matter.yml)
         from matter import Matter, Names                            # noqa: PLC0415
         parts.append(Matter(env["MATTER_URL"], Names(matter_path(env)), sensitive=sensitive))
+    if env.get("LEVITON_EMAIL") and env.get("LEVITON_PASSWORD"):    # every Leviton switch on his account, through Leviton's cloud: after
+        from leviton import Leviton                                 # noqa: PLC0415  the local backends, so a switch paired locally wins
+        parts.append(Leviton(env["LEVITON_EMAIL"], env["LEVITON_PASSWORD"], sensitive=sensitive))
     if env.get("HASS_URL") and env.get("HASS_TOKEN"):               # or Home Assistant, if he runs one (the vault holds both)
         from hass import Hass                                       # noqa: PLC0415
         parts.append(Hass(env["HASS_URL"], env["HASS_TOKEN"], sensitive=sensitive))

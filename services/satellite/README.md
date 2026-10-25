@@ -71,6 +71,11 @@ its radio stays awake. The proof, on the real plug (it switches it, then leaves 
     ./.venv/Scripts/python homectl.py list                                              # HomeKit and Matter together
     ./.venv/Scripts/python homectl.py identify "kitchen light"                           # make it flash: which one on the wall is it
 
+**Every Leviton on his account, with nothing paired** (2026-10-25, `leviton.py`): with `LEVITON_EMAIL` and `LEVITON_PASSWORD` in the vault,
+the hub reaches every Decora Smart Wi-Fi switch through the My Leviton cloud, the same account Google Home and Alexa use (`decora_wifi`,
+Home Assistant's library): dimmers become lights, the rest switches, names straight from the app. It goes through Leviton's servers
+(about 0.4 s a command, read back), so it is the last backend: a switch also paired locally (HomeKit, Matter) is driven locally.
+
 **Switches already on the Wi-Fi, many at once** (the Leviton D2MSD / D215S, nothing unscrewed): in the My Leviton app update each
 to its Matter firmware (that drops its HomeKit link: a switch is paired one way, HomeKit or Matter, never both), then copy each
 one's code from Device > Device Settings > Matter Pairing Code into a text file, one switch a line:
