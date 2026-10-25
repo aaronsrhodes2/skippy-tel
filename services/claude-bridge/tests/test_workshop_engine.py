@@ -239,3 +239,30 @@ def test_a_picture_request_has_its_own_rule_the_local_model_cant_miss(shop):
     service instead. Its own guardrail line, naming the ask in the Captain's words."""
     rule = next(line for line in shop.prompt().splitlines() if "SKIPPY_PICTURE:" in line)
     assert rule.startswith("- Asked for a picture") and "no image tool" in rule
+
+
+def test_the_agent_shares_the_captains_memory_and_keeps_its_own_notes(tmp_path, monkeypatch):
+    """One memory (2026-10-25): the clone's notes folder links to the Captain's project notes; notes the agent had are folded in."""
+    import workshop_engine as engine
+    home = tmp_path / "home-claude"
+    monkeypatch.setenv("WORKSHOP_CLAUDE_HOME", str(home))
+    primary, clone = str(tmp_path / "SkippyTel"), str(tmp_path / "SkippyTel-workshop")
+    mine = home / "projects" / engine.Workshop.memory_key(primary) / "memory"
+    mine.mkdir(parents=True)
+    (mine / "MEMORY.md").write_text("- [Bash first](feedback_bash_first.md)\n", encoding="utf-8")
+    core_home = tmp_path / "core-claude"
+    agents = core_home / "projects" / engine.Workshop.memory_key(clone) / "memory"
+    agents.mkdir(parents=True)
+    (agents / "agent_note.md").write_text("an agent's own note", encoding="utf-8")
+    w = engine.Workshop.__new__(engine.Workshop)
+    w.share_memory(str(core_home), clone, primary)
+    assert (agents / "MEMORY.md").read_text(encoding="utf-8").startswith("- [Bash first]")      # it reads the Captain's notes
+    assert (mine / "agent_note.md").exists()                                                     # and its own were kept, in the shared folder
+    w.share_memory(str(core_home), clone, primary)                                               # again: nothing changes
+    assert sorted(p.name for p in mine.iterdir()) == ["MEMORY.md", "agent_note.md"]
+
+
+def test_the_core_brain_loads_only_the_coding_plugins():
+    import workshop_engine as engine
+    keep = engine.Workshop.CORE_PLUGINS
+    assert "plugin-dev" not in keep and "math-olympiad" not in keep and "code-review" in keep

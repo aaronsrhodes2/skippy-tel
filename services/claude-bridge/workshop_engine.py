@@ -160,6 +160,12 @@ _SECRETS = re.compile(
     r"|(?:token|secret|password|passwd|api[_-]?key)\s*[=:]\s*\S+)")
 
 
+
+def _is_junction(path: str) -> bool:
+    """A Windows directory junction (os.path.islink says no to those before Python 3.12's isjunction)."""
+    check = getattr(os.path, "isjunction", None)
+    return bool(check and check(path))
+
 class Busy(Exception):
     """Another task is running."""
 
@@ -977,6 +983,41 @@ class Workshop:
     # *.json holding tokens, history and sessions stay out (the folder exists precisely so his login can't win over the key).
     SHARED_DIRS = ("skills", "plugins", "agents", "commands")
     SHARED_SETTINGS = ("enabledPlugins", "extraKnownMarketplaces", "hooks", "effortLevel", "skipWorkflowUsageWarning")
+    # The Core brain's window is 128K, ~30K of it Claude Code's own prompt: of the Captain's plugins it loads only the coding ones (the
+    # rest, plugin authoring and maths-olympiad, cost ~2.4K tokens a turn for nothing; the Captain, 2026-10-25). A plugin is
+    # "name@marketplace"; the name is what is matched.
+    CORE_PLUGINS = ("code-review", "code-simplifier", "claude-md-management", "feature-dev", "claude-code-setup")
+
+    @staticmethod
+    def memory_key(path: str) -> str:
+        """Claude Code's folder for a project's notes, from the project's path (D:\\Aaron\\x -> D--Aaron-x)."""
+        return re.sub(r"[^A-Za-z0-9]", "-", os.path.normpath(path))
+
+    def share_memory(self, config_home: str, cwd: str, primary: str) -> None:
+        """One memory for the Captain and every brain (2026-10-25): the agent's notes folder for `cwd`, in `config_home`, is a link to his
+        own (~/.claude/projects/<primary>/memory, where his Claude Desktop sessions keep what he has taught them: bash first, no confirm
+        boxes, kill by PID...). Notes the agent writes land there too. A real folder already there is folded in first, never lost."""
+        home = os.getenv("WORKSHOP_CLAUDE_HOME") or os.path.join(os.path.expanduser("~"), ".claude")
+        source = os.path.join(home, "projects", self.memory_key(primary), "memory")
+        target = os.path.join(config_home, "projects", self.memory_key(cwd), "memory")
+        if os.path.normcase(os.path.abspath(source)) == os.path.normcase(os.path.abspath(target)):
+            return                                       # the Captain's own folder: it already is his memory
+        try:
+            os.makedirs(source, exist_ok=True)
+            if os.path.isdir(target) and os.path.samefile(target, source):
+                return
+            if os.path.isdir(target) and not os.path.islink(target) and not _is_junction(target):
+                for name in os.listdir(target):          # the agent's own notes so far: kept, in the shared folder
+                    dst = os.path.join(source, name if not os.path.exists(os.path.join(source, name)) else "agent-" + name)
+                    shutil.move(os.path.join(target, name), dst)
+                os.rmdir(target)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            if os.name == "nt":                          # a junction: no admin rights needed, unlike a symlink
+                subprocess.run(["cmd", "/c", "mklink", "/J", target, source], capture_output=True, timeout=20)
+            else:
+                os.symlink(source, target, target_is_directory=True)
+        except (OSError, subprocess.SubprocessError):
+            pass                                         # no shared memory this run: never a reason to fail one
 
     def _share_claude_setup(self, config: str) -> None:
         home = os.getenv("WORKSHOP_CLAUDE_HOME") or os.path.join(os.path.expanduser("~"), ".claude")
@@ -1004,6 +1045,8 @@ class Workshop:
         except (OSError, ValueError):
             mine = {}
         settings = {k: mine[k] for k in self.SHARED_SETTINGS if k in mine}
+        if isinstance(settings.get("enabledPlugins"), dict):
+            settings["enabledPlugins"] = {k: v for k, v in settings["enabledPlugins"].items() if k.split("@")[0] in self.CORE_PLUGINS}
         # llama.cpp's prompt cache: Claude Code's attribution header changes every request and makes llama-server re-read
         # the whole prompt each turn (reported: 24K tokens, 55 s a turn). Only settings.json's env turns it off.
         settings["env"] = {**(mine.get("env") or {}), "CLAUDE_CODE_ATTRIBUTION_HEADER": "0"}
@@ -1336,6 +1379,9 @@ class Workshop:
             env = self.core_env() if run.brain == "core" else child_env()
             # the lane guard's one exception: SkippyTel's primary checkout, where a skippy-pc service is pulled and deployed
             env["SKIPPY_LANE_DEPLOY"] = project.primary if project.deploy == "skippytel" and not project.inplace else ""
+            # One memory with the Captain's own Claude Code (both brains): the clone's notes folder links to his project's notes.
+            self.share_memory(env.get("CLAUDE_CONFIG_DIR") or os.getenv("WORKSHOP_CLAUDE_HOME")
+                              or os.path.join(os.path.expanduser("~"), ".claude"), project.clone, project.primary)
             proc = self._spawn(self.command(session, run.project, run.brain), cwd=project.clone, env=env)
         except (OSError, ValueError) as exc:           # FileNotFoundError, a refused argument ...
             run.finish(False, f"can't start Claude Code: {exc}")

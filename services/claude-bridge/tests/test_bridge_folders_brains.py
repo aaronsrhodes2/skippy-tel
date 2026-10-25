@@ -150,7 +150,7 @@ def test_a_core_run_gets_the_captains_skills_and_plugins_but_never_his_login(sho
     (home / "plugins").mkdir()
     (home / "plugins" / "installed.json").write_text("{}", encoding="utf-8")
     (home / ".credentials.json").write_text('{"token": "SECRET"}', encoding="utf-8")
-    (home / "settings.json").write_text(_json.dumps({"enabledPlugins": {"a@b": True}, "theme": "dark", "env": {"X": "1"}}), encoding="utf-8")
+    (home / "settings.json").write_text(_json.dumps({"enabledPlugins": {"code-review@official": True, "plugin-dev@official": True}, "theme": "dark", "env": {"X": "1"}}), encoding="utf-8")
     monkeypatch.setenv("WORKSHOP_CLAUDE_HOME", str(home))
     monkeypatch.setenv("SKIPPY_CORE_URL", "https://core.example")
     monkeypatch.setenv("SKIPPY_CORE_API_KEY", "k")
@@ -160,5 +160,5 @@ def test_a_core_run_gets_the_captains_skills_and_plugins_but_never_his_login(sho
     assert (config / "plugins" / "installed.json").is_file()
     assert not (config / ".credentials.json").exists() and "SECRET" not in "".join(p.read_text(errors="ignore") for p in config.rglob("*") if p.is_file())
     settings = _json.loads((config / "settings.json").read_text(encoding="utf-8"))
-    assert settings["enabledPlugins"] == {"a@b": True} and "theme" not in settings
+    assert settings["enabledPlugins"] == {"code-review@official": True} and "theme" not in settings   # coding plugins only (CORE_PLUGINS)
     assert settings["env"] == {"X": "1", "CLAUDE_CODE_ATTRIBUTION_HEADER": "0"}          # his env, plus the prompt-cache fix
