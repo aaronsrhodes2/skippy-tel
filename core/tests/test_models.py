@@ -40,10 +40,10 @@ def _put(root, chosen, slot, data: bytes):
 def test_the_real_manifest_loads_and_its_standins_fit():
     data = m.load()
     chosen = m.plan(data, set())
-    assert set(chosen) == {"chat", "vision", "general", "coder"}
+    assert set(chosen) == {"chat", "router", "vision", "general", "coder"}
     assert all(s["variant"] == "standin" for s in chosen.values())
     assert m.budget(data, chosen)["fits"]
-    assert m.budget(data, m.plan(data, m.parse_full("chat,coder,vision", data["slots"])))["fits"], "the box's full tier must fit"
+    assert m.budget(data, m.plan(data, m.parse_full("chat,coder,vision,router", data["slots"])))["fits"], "the box's full tier must fit"
     # The coder is resident (the Captain, 2026-10-24): gpt-oss-120b can't load beside it, so onlining it is refused, never a swap
     # that would pull the agent's model out from under a run.
     assert data["slots"]["coder"]["resident"] is True
@@ -183,3 +183,22 @@ def test_bench_candidates_serve_beside_the_slots_on_demand(tmp_path):
         m.load(_manifest(tmp_path, candidates={"bad": {**cand["try"], "for": ["nope"]}}))
     with pytest.raises(m.ManifestError):
         m.load(_manifest(tmp_path, candidates={"chat": cand["try"]}))
+
+
+def test_the_trained_router_is_a_small_resident_slot_with_its_own_names_and_pinned_files():
+    """Mentat's trained router (v3.1, 4B): always loaded beside the chat model, never an alias of it, its file pinned by size and sha256."""
+    data = m.load()
+    router = data["slots"]["router"]
+    assert router["resident"] is True and set(router["aliases"]) == {"mentat-router", "mentat-router-v31-4b"}
+    full = router["full"]
+    assert full["repo"] == "aaronsrhodes2/mentat-router-v31-4b"
+    assert full["files"] == [{"path": "mentat-router-v31-4b-Q4_K_M.gguf", "size": 2085924864,
+                              "sha256": "6f82c950ce558e6eb84ca092d9da7abb92d918806fbc84da206e83096e2bf905"}]
+    assert "--temp" in full["args"] and full["args"][full["args"].index("--temp") + 1] == "0"      # it was trained and scored at temperature 0
+    assert all(a not in data["slots"]["chat"]["aliases"] for a in router["aliases"])
+    chosen = m.plan(data, m.parse_full("chat,coder,vision,router", data["slots"]))
+    assert chosen["router"]["variant"] == "full" and m.budget(data, chosen)["fits"]
+    config, shim = m.render(chosen, 999)
+    assert "mentat-router-v31-4b-Q4_K_M.gguf" in config["models"]["router"]["cmd"] and "router" in config["groups"]["resident"]["members"]
+    assert {"mentat-router", "mentat-router-v31-4b", "router"} <= {n["name"] for n in shim["models"]}
+    assert "old names" not in data["slots"]["router"]["role"] and "OLD names" in data["slots"]["chat"]["role"]            # the chat slot says what qwen3:8b really is
