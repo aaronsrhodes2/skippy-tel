@@ -7,6 +7,9 @@
 #            core/llm/models.py into ${CORE_STATE}/llm (config.yaml + shim.json) before every deploy.
 #   ollama   the Ollama shim (core/ollama-shim): same name and port as today's Ollama, so OLLAMA_BASE_URL never changes.
 #   flask-api  Skippy's core, unchanged code.
+#   image-studio  the portal chat's pictures: Qwen-Image-2512 through stable-diffusion.cpp (Vulkan), one sd-cli run per
+#            picture so it holds no memory between them. Host networking on 7347 so the box's ufw (not Docker's own NAT)
+#            decides who reaches it: skippy-pc's home reporter over the tailnet (core/install/image-studio.sh).
 # Later stages (docs/local-ai-fallback-plan.md Phase 5): the home reporter, Mentat, the gates, Dozzle, Kuma.
 
 x-logging: &default-logging
@@ -67,3 +70,14 @@ services:
       timeout: 5s
       retries: 10
       start_period: 15s
+
+  image-studio:
+    build: ./image-studio
+    restart: unless-stopped
+    logging: *default-logging
+    network_mode: host
+    environment:
+      - PORT=7347
+      - MODELS=/models
+    volumes:
+      - ${MODELS_ROOT:-/srv/models}:/models:ro

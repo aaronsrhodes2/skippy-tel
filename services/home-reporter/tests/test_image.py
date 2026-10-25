@@ -60,18 +60,44 @@ def test_not_a_png_or_no_prompt_is_an_error_not_a_crash(home):
 
 
 def test_the_capability_is_ready_only_when_the_studio_says_so(home):
-    assert reporter._capability_probes()["make_image"]() == {"ready": True, "box": reporter.IMAGE_BOX, "loaded": False}   # (which machine: the patient queue waits for it)
+    assert reporter._capability_probes()["make_image"]() == {"ready": True, "box": "pc", "loaded": False}   # (which machine: the patient queue waits for it)
 
 
 def test_without_a_studio_it_says_so(monkeypatch):
     monkeypatch.setattr(reporter, "IMAGES", "")
     assert "aren't set up" in reporter.make_image({"id": "j", "prompt": "x"}, "tok")["error"]
-    assert reporter._capability_probes()["make_image"]() == {"ready": False, "box": reporter.IMAGE_BOX, "loaded": False}
+    assert reporter._capability_probes()["make_image"]() == {"ready": False, "box": "pc", "loaded": False}
 
 
 def test_the_core_studios_gpu_figures_ride_up_with_the_capability(monkeypatch):
-    monkeypatch.setattr(reporter, "IMAGES", "http://core-studio:8002")
-    monkeypatch.setattr(reporter, "IMAGE_BOX", "core")
+    monkeypatch.setattr(reporter, "IMAGES_HQ", "http://skippy-core:7347")
     monkeypatch.setattr(reporter, "fetch", lambda url, *a, **k: {"ready": True, "gpu_free_pct": 47, "gpu_util_pct": 3.4,
                                                                  "gpu_free_gib": 58.25, "gpu_free_note": "x", "evil": True, "loaded": True})
-    assert reporter.image_capability() == {"ready": True, "box": "core", "loaded": True, "gpu_free_pct": 47.0, "gpu_util_pct": 3.4, "gpu_free_gib": 58.2}
+    assert reporter._capability_probes()["make_image_hq"]() == {"ready": True, "box": "core", "loaded": True, "gpu_free_pct": 47.0, "gpu_util_pct": 3.4, "gpu_free_gib": 58.2}
+
+
+def test_the_quality_tier_goes_to_skippy_core_and_leaves_this_pcs_ollama_and_gpu_lock_alone(home, monkeypatch):
+    seen, _ = home
+    monkeypatch.setattr(reporter, "IMAGES_HQ", reporter.IMAGES)            # the fake studio stands in for skippy-core's
+    monkeypatch.setattr(reporter, "IMAGES", "")                            # (and the quick tier isn't even set up)
+    assert reporter.GPU.acquire(blocking=False)                            # a song holds this PC's card...
+    try:
+        out = reporter.run_job({"id": "job2", "kind": "make_image_hq", "prompt": "a lighthouse"}, "tok")
+    finally:
+        reporter.GPU.release()
+    assert out["result"]["title"] == "a lighthouse"                        # ...and the picture on skippy-core didn't wait for it
+    assert seen["ollama"] == []                                            # nor unload Ollama here
+    assert seen["portal"][0][1].startswith("/home/media/job2")
+
+
+def test_each_tier_advertises_its_own_box(monkeypatch):
+    monkeypatch.setattr(reporter, "IMAGES", "http://image-studio:8002")
+    monkeypatch.setattr(reporter, "IMAGES_HQ", "http://skippy-core:7347")
+    monkeypatch.setattr(reporter, "fetch", lambda url, *a, **k: {"ready": True, "gpu_free_gib": 51.3} if "7347" in url
+                        else {"ready": True, "loaded": True})
+    probes = reporter._capability_probes()
+    assert probes["make_image"]() == {"ready": True, "box": "pc", "loaded": True}
+    assert probes["make_image_hq"]() == {"ready": True, "box": "core", "loaded": False, "gpu_free_gib": 51.3}
+    monkeypatch.setattr(reporter, "IMAGES_HQ", "")
+    assert probes["make_image_hq"]()["ready"] is False
+    assert "skippy-core" in reporter.make_image({"id": "j", "prompt": "x"}, "tok", hq=True)["error"]

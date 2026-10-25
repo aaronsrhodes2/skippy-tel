@@ -121,16 +121,14 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     pics = pictures if pictures is not None else patient_mod.from_env(forever=lambda e: str(e).strip().lower() in app.config["ADMIN_EMAILS"])
 
     def box_for(kind: str) -> str:
-        """Which machine makes it: songs on skippy-pc; pictures where the reporter says its studio is (skippy-core, or skippy-pc)."""
-        if kind == "make_image":
-            return "core" if (home.capability_note("make_image", "box") or "pc") == "core" else "pc"
-        return "pc"
+        """Which machine makes it: quality pictures (make_image_hq) on skippy-core; quick pictures and songs on skippy-pc."""
+        return "core" if kind == "make_image_hq" else "pc"
 
     def gpu_for(box: str) -> dict | None:
         """The GPU's free memory and load where the portal can see it: skippy-pc's card, from the starter's nvidia-smi; skippy-core's,
-        from its picture studio's /health, as the reporter passes it up with the make_image capability."""
+        from its quality picture studio's /health, as the reporter passes it up with the make_image_hq capability."""
         if box == "core":
-            info = ((home.report or {}).get("capabilities") or {}).get("make_image") if home.online() else None
+            info = ((home.report or {}).get("capabilities") or {}).get("make_image_hq") if home.online() else None
             if not isinstance(info, dict) or info.get("box") != "core":
                 return None
             num = lambda k: info.get(k) if isinstance(info.get(k), (int, float)) and not isinstance(info.get(k), bool) else None  # noqa: E731
@@ -1826,12 +1824,14 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         def wait_result(self, job, wait):
             return home.wait_result(job, wait)
 
-    def agent_picture(owner: str, picture_id: str, prompt: str) -> None:
-        """The private Skippy wrote `SKIPPY_PICTURE: ...` (services/claude-bridge): a patient picture job for the Captain under the id
-        the bridge gave it, so his chat's card (and a reopened conversation) finds it. Once: a push that repeats it changes nothing."""
-        if not home.can("make_image") or home.has(picture_id) or pics.state(picture_id, owner, True) != "unknown":
+    def agent_picture(owner: str, picture_id: str, prompt: str, tier: str = "") -> None:
+        """The private Skippy wrote `SKIPPY_PICTURE: ...` (or `SKIPPY_PICTURE_HQ: ...` for a quality one; services/claude-bridge): a
+        patient picture job for the Captain under the id the bridge gave it, so his chat's card (and a reopened conversation) finds
+        it. Once: a push that repeats it changes nothing."""
+        kind = "make_image_hq" if tier == "hq" else "make_image"
+        if not home.can(kind) or home.has(picture_id) or pics.state(picture_id, owner, True) != "unknown":
             return
-        PatientJobs(owner).start("make_image", owner, prompt=prompt, width=1024, height=1024, _id=picture_id)
+        PatientJobs(owner).start(kind, owner, prompt=prompt, width=1024, height=1024, _id=picture_id)
         print(json.dumps({"event": "agent_picture_queued", "job": picture_id}), flush=True)
     workshop.on_picture = agent_picture
 
@@ -1842,7 +1842,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                                     music=home.music if auth.has_portal(email, "audio") else None,
                                     home_mentat=home if home.mentat_ready() else None,
                                     home_music=PatientJobs(email) if home.can("make_music") else None,
-                                    home_image=PatientJobs(email) if home.can("make_image") else None,
+                                    home_image=PatientJobs(email) if home.can("make_image") or home.can("make_image_hq") else None,
+                                    image_tiers=tuple(k for k in ("make_image", "make_image_hq") if home.can(k)),
                                     image_allow=(lambda: True) if auth.is_admin(email) else
                                                 (lambda: limiter.allow("image:" + email, IMAGES_PER_DAY, 86400)))
 
@@ -2223,16 +2224,18 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         else:
             state = pics.state(job_id, me(), auth.is_admin(me()))
             if state == "waiting":                            # in line, or being made: say which, and why it waits
+                if (pics.pending(job_id) or {}).get("kind") == "make_image_hq":
+                    extra["tier"] = "hq"                        # a quality picture: the card says it may take up to an hour
                 seen = home.peek(job_id)
                 if seen.get("handed_out"):
                     state = "working"
                 elif seen["state"] == "error":
-                    state, extra = "failed", {"why": seen.get("error")}
+                    state, extra = "failed", {**extra, "why": seen.get("error")}
                 else:
                     meta = pics.pending(job_id) or {}
                     box = meta.get("box") or "pc"
                     state = "queued"
-                    extra = {"why": pics.ready(box, gpu_for(box))[1] or "next in line", "box": box}
+                    extra = {**extra, "why": pics.ready(box, gpu_for(box))[1] or "next in line", "box": box}
         resp = jsonify(state=state, **extra)
         resp.headers["Cache-Control"] = "private, no-store"
         return resp

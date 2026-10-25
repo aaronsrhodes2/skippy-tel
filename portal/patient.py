@@ -30,7 +30,7 @@ FREE_GIB = {"core": 35}             # skippy-core's memory is shared with the LL
                                     # there it's GB, not a share: enough for the picture studio to load (Qwen-Image-2512 Q8 + its Q8 text
                                     # encoder + VAE ~30 GB, held only while drawing: the pictures session, 2026-10-24)
 BUSY_PCT = 20                       # ...and is busier than this at most
-KINDS = {"make_image": "image", "make_music": "audio"}
+KINDS = {"make_image": "image", "make_image_hq": "image", "make_music": "audio"}
 TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
          "audio/mpeg": "mp3", "audio/mp3": "mp3", "audio/wav": "wav", "audio/x-wav": "wav", "audio/ogg": "ogg", "audio/flac": "flac"}
 _JOB = re.compile(r"[A-Za-z0-9_-]{6,64}")

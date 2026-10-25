@@ -86,7 +86,7 @@ def test_a_picture_to_make_becomes_an_event_with_its_own_id_and_its_line_is_not_
 
 
 def test_split_pictures_takes_whole_lines_and_at_most_two_are_asked_for(shop, monkeypatch):
-    said, prompts = engine.split_pictures("say SKIPPY_PICTURE: inline\n`SKIPPY_PICTURE: a fox`\nend")
-    assert prompts == ["a fox"] and said == "say SKIPPY_PICTURE: inline\n\nend"
+    said, prompts = engine.split_pictures("say SKIPPY_PICTURE: inline\n`SKIPPY_PICTURE: a fox`\nSKIPPY_PICTURE_HQ: an owl\nend")
+    assert prompts == [("a fox", ""), ("an owl", "hq")] and said == "say SKIPPY_PICTURE: inline\n\n\nend"
     run = run_saying(shop, monkeypatch, "\n".join(f"SKIPPY_PICTURE: cat {i}" for i in range(4)))
     assert [e["prompt"] for e in run.events if e.get("t") == "picture"] == ["cat 0", "cat 1"]

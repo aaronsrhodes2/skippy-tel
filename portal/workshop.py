@@ -105,7 +105,8 @@ def _clean(event) -> dict | None:
         return ship_event(event)
     if (event.get("t") == "picture" and isinstance(event.get("id"), str) and re.fullmatch(r"[0-9a-f]{16}", event["id"])
             and isinstance(event.get("prompt"), str) and event["prompt"].strip()):
-        return {"t": "picture", "id": event["id"], "prompt": " ".join(event["prompt"].split())[:900]}   # a picture to make (patient.py)
+        return {"t": "picture", "id": event["id"], "prompt": " ".join(event["prompt"].split())[:900],   # a picture to make (patient.py)
+                **({"tier": "hq"} if event.get("tier") == "hq" else {})}                                  # (the quality tier)
     return None
 
 
@@ -216,7 +217,7 @@ class Workshop:
         # (or anyone with the Captain's cookie) can't make the portal query GitHub for an arbitrary commit.
         self._ships: dict[tuple[str, str], dict] = {}
         self.on_final = None                     # (news: dict) -> None: a run this process saw going has ended (notify.py)
-        self.on_picture = None                   # (owner, id, prompt) -> None: the agent asked for a picture (patient.py, app.py)
+        self.on_picture = None                   # (owner, id, prompt, tier) -> None: the agent asked for a picture (patient.py, app.py)
         self._images: dict[tuple[str, int], tuple[str, str, bytes]] = {}   # (task, n) -> (owner, mime, bytes)
 
     def _keep_image(self, task: str, rec: dict, got) -> dict:
@@ -566,7 +567,7 @@ class Workshop:
                         if cleaned["t"] == "ship":
                             shipped.append(cleaned)
                         if cleaned["t"] == "picture" and self.on_picture:
-                            pictures.append((rec["owner"], cleaned["id"], cleaned["prompt"]))
+                            pictures.append((rec["owner"], cleaned["id"], cleaned["prompt"], cleaned.get("tier", "")))
                 if state != "running":
                     rec["state"], rec["error"], ended = state, (str(error)[:500] if error else None), True
                 elif rec["state"] not in _FINAL:
@@ -589,9 +590,9 @@ class Workshop:
                               "last_text": last_text, "finished_age_s": age}
         for ship in shipped:
             self.remember_ship(owner, ship)
-        for who, picture_id, prompt in pictures:                    # outside the lock: it writes to the bucket
+        for who, picture_id, prompt, tier in pictures:              # outside the lock: it writes to the bucket
             try:
-                self.on_picture(who, picture_id, prompt)
+                self.on_picture(who, picture_id, prompt, tier)
             except Exception as exc:  # noqa: BLE001 — a picture that can't be queued must never fail the reporter's push
                 print(json.dumps({"event": "agent_picture_failed", "job": picture_id, "why": str(exc)[:300]}), flush=True)
         if final_news is not None and self.on_final is not None:

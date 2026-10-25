@@ -317,7 +317,8 @@ def clean_events(events: list) -> list[dict]:
             out.append(ship_event(e))
         elif (e.get("t") == "picture" and isinstance(e.get("id"), str) and re.fullmatch(r"[0-9a-f]{16}", e["id"])
               and isinstance(e.get("prompt"), str)):
-            out.append({"t": "picture", "id": e["id"], "prompt": e["prompt"][:900]})    # a picture asked for: its card finds it by id
+            out.append({"t": "picture", "id": e["id"], "prompt": e["prompt"][:900],     # a picture asked for: its card finds it by id
+                        **({"tier": "hq"} if e.get("tier") == "hq" else {})})
         elif e.get("t") == "image":            # the picture itself stays out of the index: a line saying it was there
             out.append({"t": "text", "text": f"(a screenshot was shown here: {str(e.get('name') or '')[:80]})"})
     return out

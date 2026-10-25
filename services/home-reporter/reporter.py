@@ -9,6 +9,7 @@ into the vault .env. The portal keeps only its hash. Standard library only.
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import json
 import os
@@ -36,9 +37,10 @@ CHUNK = 8 * 1024 * 1024      # Cloud Run caps a request at 32 MB
 ART_MAX = 400_000
 JSON_MAX = 4_000_000            # a JSON reply cut short would not parse and would read as "didn't answer"
 MUSIC = os.environ.get("MUSIC_URL", "").rstrip("/")           # music-studio on skippy-pc (ACE-Step on the GPU)
-IMAGES = os.environ.get("IMAGE_URL", "").rstrip("/")          # image-studio on skippy-pc (SDXL on the GPU)
-IMAGE_BOX = os.environ.get("IMAGE_BOX", "pc")                   # which machine that studio runs on: "pc", or "core" once it moves there
+IMAGES = os.environ.get("IMAGE_URL", "").rstrip("/")          # the QUICK tier: image-studio on skippy-pc (SDXL on the GPU)
 IMAGE_TIMEOUT = 900         # seconds a picture may take (the first after a restart loads 6.9 GB of weights)
+IMAGES_HQ = os.environ.get("IMAGE_HQ_URL", "").rstrip("/")     # the QUALITY tier: Qwen-Image on skippy-core (core/image-studio), over the tailnet
+IMAGE_HQ_TIMEOUT = 7200     # it draws for quality: ~13 min a picture at 40 steps, and it may queue behind skippy-core's own chats
 OLLAMA = os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/")
 GPU = threading.Lock()       # one heavy GPU job at a time: a song and a chat model can't share the card
 MUSIC_TIMEOUT = 600          # seconds a song may take
@@ -315,18 +317,20 @@ def _capability_probes() -> dict:
     """One probe per capability, so `gather` can run them side by side (each waits at most ~4 s on its own service)."""
     return {"make_music": lambda: {"ready": bool(MUSIC) and _up(f"{MUSIC}/health")},
             "make_image": image_capability,
+            "make_image_hq": lambda: image_capability(IMAGES_HQ, "core"),
             "workshop": workshop_capability,
             "music_gate": lambda: {"ready": bool(GATE and GATE_PUBLIC) and _up(f"{GATE}/health"), "url": GATE_PUBLIC},
             "video_gate": video_gate_capability,
             "voice_gate": voice_gate_capability}
 
 
-def image_capability() -> dict:
+def image_capability(url: str | None = None, box: str = "pc") -> dict:
     """The picture studio: ready, which machine it runs on (the portal's patient queue waits for THAT machine to be quiet), and the GPU
     figures its /health gives (skippy-core's studio: gpu_free_pct, gpu_util_pct, gpu_free_gib), so the portal starts a picture only when
     there is room for it."""
-    health = (fetch(f"{IMAGES}/health") or {}) if IMAGES else {}
-    out = {"ready": bool(IMAGES) and health.get("ready") is True, "box": IMAGE_BOX,
+    url = IMAGES if url is None else url
+    health = (fetch(f"{url}/health", timeout=8) or {}) if url else {}    # skippy-core's studio samples its GPU for 2 s
+    out = {"ready": bool(url) and health.get("ready") is True, "box": box,
            "loaded": health.get("loaded") is True}         # its model already holds its memory: only "is the card busy" matters
     for key in ("gpu_free_pct", "gpu_util_pct", "gpu_free_gib"):
         value = health.get(key)
@@ -438,22 +442,26 @@ def make_music(job: dict, token: str) -> dict:
     return {"result": {"title": title, "seconds": length}}
 
 
-def make_image(job: dict, token: str) -> dict:
-    """SDXL in image-studio: Ollama is unloaded first (the card is 16 GB and Qwen sits in 6 of it), the PNG is rendered and
-    handed to the portal like a song (PUT /home/media/<job>), which shows it as an image card in the chat."""
-    if not IMAGES:
-        return {"error": "pictures aren't set up on skippy-pc"}
+def make_image(job: dict, token: str, hq: bool = False) -> dict:
+    """A picture, handed to the portal like a song (PUT /home/media/<job>), which shows it as an image card in the chat.
+    The quick tier (make_image) is SDXL in image-studio on this PC's card: Ollama is unloaded first (the card is 16 GB and
+    Qwen sits in 6 of it) and the GPU lock is held. The quality tier (make_image_hq) is Qwen-Image on skippy-core's own GPU:
+    neither, and it may take up to two hours."""
+    url = IMAGES_HQ if hq else IMAGES
+    if not url:
+        return {"error": "quality pictures aren't set up on skippy-core" if hq else "pictures aren't set up on skippy-pc"}
     prompt = str(job.get("prompt") or "").strip()[:900]
     if not prompt:
         return {"error": "a picture needs a description"}
     ask = {"prompt": prompt, "negative": str(job.get("negative") or "")[:500] or None,
            "width": job.get("width") or 1024, "height": job.get("height") or 1024}
-    with GPU:
-        free_gpu()
-        req = urllib.request.Request(f"{IMAGES}/generate", data=json.dumps(ask).encode(), method="POST",
+    with contextlib.nullcontext() if hq else GPU:
+        if not hq:
+            free_gpu()
+        req = urllib.request.Request(f"{url}/generate", data=json.dumps(ask).encode(), method="POST",
                                      headers={"Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=IMAGE_TIMEOUT) as r:
+            with urllib.request.urlopen(req, timeout=IMAGE_HQ_TIMEOUT if hq else IMAGE_TIMEOUT) as r:
                 png = r.read(CLIP_MAX + 1)
         except urllib.error.HTTPError as e:
             try:
@@ -850,8 +858,8 @@ def run_job(job: dict, token: str = "") -> dict:
         return {"result": doctor_checks.deep()}
     if job.get("kind") == "make_music":
         return make_music(job, token)
-    if job.get("kind") == "make_image":
-        return make_image(job, token)
+    if job.get("kind") in ("make_image", "make_image_hq"):
+        return make_image(job, token, hq=job.get("kind") == "make_image_hq")
     if job.get("kind") == "host_op":
         return host_op(job, token)
     if job.get("kind") in ("memory_list", "memory_get"):
