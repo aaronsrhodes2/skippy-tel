@@ -2296,6 +2296,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         resp = send_file(io.BytesIO(item["data"]), mimetype=item["type"], conditional=True, max_age=0)
         resp.headers["Cache-Control"] = "private, no-store"
         resp.headers["X-Content-Type-Options"] = "nosniff"
+        if popups.card_kind(item["type"]) == "file":              # a pop-up's MIDI or zip: saved, never opened in the page
+            resp.headers["Content-Disposition"] = f'attachment; filename="{job_id}.{popups.OUTPUT_TYPES[item["type"]]}"'
         return resp
 
     app.register_blueprint(talk)

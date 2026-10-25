@@ -45,7 +45,7 @@ IMAGE_HQ_TIMEOUT = 7200     # it draws for quality: ~13 min a picture at 40 step
 OLLAMA = os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/")
 POPUPS_DIR = os.environ.get("POPUPS_DIR", "/srv/services")      # the repo's services/ (read-only mount): the pop-up registry (docs/popups.md)
 POPUP_TYPES = {"image/png", "image/jpeg", "image/webp", "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/ogg", "audio/flac",
-               "model/gltf-binary", "video/mp4", "application/json", "text/plain"}   # what the portal keeps (portal/popups.py OUTPUT_TYPES)
+               "model/gltf-binary", "video/mp4", "application/json", "text/plain", "audio/midi", "application/zip"}   # what the portal keeps (portal/popups.py OUTPUT_TYPES)
 POPUP_MAX_TIMEOUT = 7200     # the longest a pop-up may take (portal/popups.py MAX_TIMEOUT_S)
 GPU = threading.Lock()       # one heavy GPU job at a time: a song and a chat model can't share the card
 MUSIC_TIMEOUT = 600          # seconds a song may take

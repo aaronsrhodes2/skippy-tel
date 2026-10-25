@@ -12,7 +12,7 @@ reporter reads the registry from its mount (no rebuild, re-read when a file chan
 runs each job (on skippy-pc, `vram_gb > 0` takes the GPU lock and unloads Ollama first) and hands the result to the portal; the portal
 makes it a patient job on your `box` (5 quiet minutes, one job per machine, kept in the bucket), a chat tool named `name` for your
 `audience` (its `description` and `inputs` are what the brains read; guests get 10 pop-up jobs a day), a card that shows your output
-type (a picture, a player, a video, a 3D viewer for `model/gltf-binary`, a JSON/text block), and a line the private Skippy can write:
+type (a picture, a player, a video, a 3D viewer for `model/gltf-binary`, a JSON/text block, a download for `audio/midi` and `application/zip`), and a line the private Skippy can write:
 `SKIPPY_POPUP: <name> {json args}` (`"_file": "<path>"` hands it a picture or sound from its clone).
 
 ## An entry
@@ -40,7 +40,7 @@ type (a picture, a player, a video, a 3D viewer for `model/gltf-binary`, a JSON/
 | `inputs` | a JSON schema (type object) for the tool's arguments; don't name a property `attachment` |
 | `media_in` | optional: types of attached file it takes (`image/*`, `audio/*`, or exact); the tool then gets an `attachment` number |
 | `media_required` | optional: refuse without a file |
-| `outputs` | what it may answer with: `image/png`/`jpeg`/`webp`, `audio/*` (wav, flac, mpeg, ogg), `model/gltf-binary`, `video/mp4`, `application/json`, `text/plain` |
+| `outputs` | what it may answer with: `image/png`/`jpeg`/`webp`, `audio/*` (wav, flac, mpeg, ogg), `model/gltf-binary`, `video/mp4`, `application/json`, `text/plain`, and as a download card `audio/midi`, `application/zip` |
 | `est_seconds` | a typical run once started (the card says "about N min"; the reporter waits 4x, at most 2 h) |
 | `vram_gb` / `mem_gb` | memory it needs; on `pc`, more than 0 means it takes the GPU lock |
 | `audience` | `admin` (the Captain only) or `everyone` |

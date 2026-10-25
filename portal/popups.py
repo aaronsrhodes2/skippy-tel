@@ -27,7 +27,9 @@ RESERVED = {"server_status", "start_game", "stop_server", "server_logs", "restar
 # What a pop-up may hand back: the patient queue keeps exactly these (patient.TYPES), the chat's card shows each (_chat.html).
 OUTPUT_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
                 "audio/mpeg": "mp3", "audio/mp3": "mp3", "audio/wav": "wav", "audio/x-wav": "wav", "audio/ogg": "ogg", "audio/flac": "flac",
-                "model/gltf-binary": "glb", "video/mp4": "mp4", "application/json": "json", "text/plain": "txt"}
+                "model/gltf-binary": "glb", "video/mp4": "mp4", "application/json": "json", "text/plain": "txt",
+                "audio/midi": "mid", "application/zip": "zip"}
+FILE_TYPES = {"audio/midi", "application/zip"}      # nothing to play or show in the chat: the card is a download (a .mid for a DAW, stems)
 # What a pop-up may take in: a file the person attached to the message (attachments.py checks it), or the agent named.
 INPUT_TYPES = {"image/png", "image/jpeg", "image/webp", "audio/mpeg", "audio/wav", "audio/ogg", "audio/flac"}
 MAX_TIMEOUT_S = 7200                                 # the slowest machine's longest job (the reporter's IMAGE_HQ_TIMEOUT)
@@ -40,8 +42,11 @@ def matches(ctype: str, patterns) -> bool:
 
 
 def card_kind(ctype: str) -> str:
-    """How the chat shows a result of this type: image, audio, video, model (a 3D viewer) or text (a JSON or text block)."""
+    """How the chat shows a result of this type: image, audio, video, model (a 3D viewer), text (a JSON or text block) or file
+    (a download: MIDI, a zip of stems)."""
     ctype = (ctype or "").lower()
+    if ctype in FILE_TYPES:
+        return "file"
     if ctype == "model/gltf-binary":
         return "model"
     for head in ("image", "audio", "video"):

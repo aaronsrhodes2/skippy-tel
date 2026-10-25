@@ -424,7 +424,7 @@
     // where the job is (in line and why, or being made) and turns into the picture or the player when it's done, even after a reload.
     // A pop-up's result (portal/popups.py) is known only when it's done: the state then says which card it is (image, audio, video,
     // model: a 3D viewer, or text: a JSON or text block).
-    const WAIT_GLYPH = {audio: "wave", image: "image", video: "pip", model: "cube", text: "note"};
+    const WAIT_GLYPH = {audio: "wave", image: "image", video: "pip", model: "cube", text: "note", file: "down"};
     function waitCard(m) {
       const song = m.kind === "audio", what = song ? "song" : m.kind === "image" ? "picture" : "result";
       const box = document.createElement("div"); box.className = "picture-wait";

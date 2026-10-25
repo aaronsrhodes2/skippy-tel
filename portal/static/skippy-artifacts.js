@@ -22,7 +22,7 @@
   "use strict";
   const CODE_LINES = 15;                         // shorter code stays inline in the reply
   const KINDS = {                                // kind → glyph (templates/_glyphs.html)
-    doc: "note", code: "console", html: "play", svg: "image", image: "image", audio: "audio", video: "pip", model: "cube", text: "note",
+    doc: "note", code: "console", html: "play", svg: "image", image: "image", audio: "audio", video: "pip", model: "cube", text: "note", file: "down",
   };
   let config = { modelViewer: "", glyph: null, md: null, pager: null };
 
@@ -49,7 +49,7 @@
   function slug(s) { return String(s || "file").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "file"; }
 
   function fromMedia(m) {
-    const kind = { audio: "audio", video: "video", image: "image", model: "model", text: "text" }[m && m.kind] || "audio";
+    const kind = { audio: "audio", video: "video", image: "image", model: "model", text: "text", file: "file" }[m && m.kind] || "audio";
     return { kind, title: (m && m.title) || kind, url: m && m.url, seconds: m && m.seconds, open: true };
   }
 
@@ -87,6 +87,12 @@
       m.className = "art-model"; m.setAttribute("src", spec.url); m.setAttribute("camera-controls", ""); m.setAttribute("auto-rotate", "");
       m.setAttribute("touch-action", "pan-y"); m.setAttribute("alt", spec.title);
       return m;
+    }
+    if (k === "file") {                          // a pop-up's MIDI or zip of stems: nothing to show, one key that saves it
+      const a = el("a", "key art-file"); a.href = spec.url; a.download = ""; a.rel = "noopener"; a.title = a.ariaLabel = "Download " + spec.title;
+      if (config.glyph) a.appendChild(config.glyph("down"));
+      a.appendChild(el("span", null, spec.title));
+      return a;
     }
     if (k === "text") {                          // a pop-up's JSON or text: the portal's own URL in a frame that runs nothing
       const f = el("iframe", "art-frame art-text"); f.setAttribute("sandbox", ""); f.setAttribute("referrerpolicy", "no-referrer");

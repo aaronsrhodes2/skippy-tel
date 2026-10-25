@@ -75,8 +75,8 @@ def test_the_patient_queue_and_the_media_hand_off_keep_every_output_type_and_the
     assert set(pm.TYPES) == media.TYPES == set(popups.OUTPUT_TYPES)
     for ctype in ("model/gltf-binary", "video/mp4", "audio/wav", "audio/flac", "application/json", "text/plain"):
         assert ctype in pm.TYPES
-    assert [popups.card_kind(t) for t in ("image/png", "audio/flac", "video/mp4", "model/gltf-binary", "application/json")] == \
-        ["image", "audio", "video", "model", "text"]
+    assert [popups.card_kind(t) for t in ("image/png", "audio/flac", "video/mp4", "model/gltf-binary", "application/json",
+                                          "audio/midi", "application/zip")] == ["image", "audio", "video", "model", "text", "file", "file"]
 
 
 def test_a_sound_can_be_attached_and_no_brain_is_handed_the_bytes():
@@ -270,3 +270,15 @@ def test_end_to_end_an_agent_line_runs_the_echo_service_through_the_real_reporte
         service.shutdown()
         portal.shutdown()
         sys.path.remove(str(ROOT / "services/home-reporter"))
+
+
+def test_a_midi_or_zip_result_is_a_download_never_opened_in_the_page(world):
+    zipped = b"PK\x03\x04" + bytes(40)
+    world["pats"].expect("stems001", ADMIN, "popup", "pc", {"name": "echo", "args": "{}"})
+    world["client"].put("/home/media/stems001?title=stems", data=zipped, headers={**world["H"], "Content-Type": "application/zip"})
+    login(world["client"], ADMIN)
+    got = world["client"].get("/chat/media/stems001")
+    assert got.data == zipped and got.headers["Content-Disposition"] == 'attachment; filename="stems001.zip"'
+    assert world["client"].get("/chat/media/stems001/state").get_json()["kind"] == "file"
+    art = (ROOT / "portal/static/skippy-artifacts.js").read_text(encoding="utf-8")
+    assert 'k === "file"' in art and "a.download" in art
