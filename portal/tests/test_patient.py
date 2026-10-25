@@ -290,3 +290,18 @@ def test_an_unloaded_studio_still_needs_the_card_mostly_free(world):
     world["client"].post("/home/report", json={"status": {}, "capabilities": caps}, headers=world["H"])
     quiet(world, {"gpu_free_pct": 8, "gpu_util_pct": 3})
     assert handed(world) == []
+
+
+def test_a_redeployed_portal_remembers_when_each_machine_was_last_used():
+    clock, store = Clock(), tabletop.MemoryStore()
+    p = pm.Patient(store, clock=clock)
+    p.touch("pc")
+    clock.t += pm.QUIET_S + 1
+    again = pm.Patient(store, clock=clock)                # a deploy: same bucket, new process
+    assert again.ready("pc")[0] is True                   # quiet since that touch, not since the new process started
+    assert again.ready("core")[0] is False                # never used: still counts from this start
+    fresh_store = tabletop.MemoryStore()
+    q = pm.Patient(fresh_store, clock=clock)
+    q.touch("pc")
+    q.touch("core")                                       # within the minute: not written again (no bucket write per chat turn)
+    assert json.loads(fresh_store.get(pm.ACTIVITY)) == {"pc": clock.t}

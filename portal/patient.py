@@ -22,6 +22,8 @@ import chat_history
 import popups
 import tabletop
 
+ACTIVITY = "chat-pictures/activity.json"     # when each machine was last used (see Patient.__init__)
+SAVE_EVERY_S = 60
 PREFIX = "chat-pictures/"           # (the name it had when it held pictures only; songs live here too)
 JOB_TTL = 24 * 3600                 # how long a job may wait and work before the portal gives up on it
 QUIET_S = 300                       # a machine is quiet after this long without a chat, voice or agent run on it
@@ -41,8 +43,17 @@ class Patient:
         self.store = store if store is not None else tabletop.MemoryStore()
         self.forever = forever or (lambda email: False)
         self.clock = clock
-        self.last_active: dict[str, float] = {}       # machine ("pc", "core") -> when someone last used it (this portal's memory)
-        self.started = clock()                        # until someone uses a machine, its quiet counts from the portal's start
+        self.last_active: dict[str, float] = {}       # machine ("pc", "core") -> when someone last used it
+        self.started = clock()                        # until anyone has used a machine, its quiet counts from the portal's start
+        self._saved_at = 0.0
+        # When each machine was last used, kept in the bucket beside the jobs: a redeployed portal carries on from it instead of
+        # starting a fresh 5-minute wait. On a busy day of deploys (several an hour) that wait never ended, and pictures sat for
+        # hours (2026-10-24).
+        try:
+            saved = json.loads(self.store.get(ACTIVITY) or b"{}")
+            self.last_active = {b: float(t) for b, t in saved.items() if b in ("pc", "core") and isinstance(t, (int, float))}
+        except (ValueError, TypeError, AttributeError, OSError):
+            pass
 
     @staticmethod
     def _ok(job: str) -> bool:
@@ -62,6 +73,12 @@ class Patient:
         now = self.clock()
         for box in boxes:
             self.last_active[box] = now
+        if now - self._saved_at >= SAVE_EVERY_S:          # at most once a minute: a chat turn shouldn't write the bucket each time
+            self._saved_at = now
+            try:
+                self.store.put(ACTIVITY, json.dumps(self.last_active).encode(), "application/json")
+            except Exception:  # noqa: BLE001 — no bucket: quiet is this process's memory only, as before
+                pass
 
     def quiet_for(self, box: str) -> float:
         """Seconds since someone last used `box`. A portal that just started knows nothing yet: it counts from its own start."""
