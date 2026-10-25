@@ -39,7 +39,7 @@ services/flask-api/app/
 │   ├── status.py        # GET /status.json — what the home reporter sends the portal
 │   ├── portal.py        # /portal/{hud-state,chat-state,hud-frame,history,...} — the phone/glasses state relay
 │   ├── translate.py     # POST /translate/text, POST /translate/audio
-│   ├── image.py         # POST /image — Stable Diffusion proxy
+│   ├── image.py         # POST /image — retired 503: pictures are patient jobs (SKIPPY_PICTURE / make_image), never here
 │   ├── battery.py       # POST /battery — phone battery reporting
 │   ├── starmap.py       # GET /starmap — star map data
 │   └── health.py        # GET /health

@@ -1,11 +1,9 @@
-"""POST /image — Stable Diffusion image generation.
+"""POST /image — retired: pictures are NOT made here.
 
-NOT YET DEPLOYED. The endpoint exists so clients get a clean 503 with a
-useful message rather than a connection error.
-
-When we're ready to stand this up properly it will be a first-party
-service inside the SkippyTel Docker stack — not a dependency on any
-external project.
+Pictures are made by the image studio as patient jobs (portal/patient.py): the portal chat's make_image tool, or the private
+Skippy writing one line `SKIPPY_PICTURE: <description>` in its reply. This route only stays so the shelved phone apps get a
+clean 503 saying where pictures come from (tests/test_no_interface.py keeps it). An agent asked for a picture must not try to
+wire it up (2026-10-24: this stub talked Skippy Core's coder out of drawing a cat).
 """
 from flask import Blueprint
 from app.version import error
@@ -16,7 +14,7 @@ bp = Blueprint("image", __name__)
 @bp.post("/image")
 def generate_image():
     return error(
-        "Image generation not yet deployed — will be a first-party service in a future sprint.",
-        error_type="not_deployed",
+        "Pictures aren't made here: ask Skippy in the portal chat (the agent writes a SKIPPY_PICTURE: line).",
+        error_type="not_here",
         status=503,
     )
