@@ -42,14 +42,15 @@ MAX_ERRORS = 3
 LOG_TAIL = 4000
 
 # Each repo's jobs: what GitHub's run-tests.yml and test.yml did for it. `reqs` build the job's image (python:3.12-slim + these
-# requirement files); `cmd` runs in the checkout. A repo without a plan gets only the shell-syntax check.
+# requirement files); `cmd` runs in the checkout. {cpus} is CI_CPUS: pytest's workers match the container's CPU cap ("auto" would
+# count the whole box and oversubscribe it, and the timing-sensitive tests then fail). A repo without a plan gets only the shell-syntax check.
 PLANS = {
     "skippy-tel": [
         {"name": "suite", "reqs": ["portal/requirements.txt", "tools/requirements-ci.txt"],
          "cmd": "python -m pytest portal/tests memory/tests tools/tests services/home-reporter/tests services/claude-bridge/tests "
-                "services/wa-trickle/tests mentat/tests core/tests -q -n auto --dist loadfile -p no:cacheprovider"},
+                "services/wa-trickle/tests mentat/tests core/tests -q -n {cpus} --dist loadfile -p no:cacheprovider"},
         {"name": "flask-api", "reqs": ["services/flask-api/requirements.txt", "tools/requirements-ci.txt"],
-         "cmd": "python -m pytest services/flask-api/tests -q -n auto --dist loadfile -p no:cacheprovider"},
+         "cmd": "python -m pytest services/flask-api/tests -q -n {cpus} --dist loadfile -p no:cacheprovider"},
         {"name": "shell-syntax", "reqs": [],
          "cmd": "bash -n infra/gcp-games/*.sh infra/bootstrap/*.sh scripts/games.sh tools/*.sh"},
     ],
@@ -173,7 +174,7 @@ class CI:
                 ["docker", "run", "--rm", "--network", "none", f"--cpus={self.s['CI_CPUS']}", f"--memory={self.s['CI_MEMORY']}",
                  "-v", f"{work}:/src", "-w", "/src", "-e", "PYTHONDONTWRITEBYTECODE=1", "-e", "HOME=/tmp",
                  "--tmpfs", "/tmp:exec", "-e", "GIT_CONFIG_COUNT=1", "-e", "GIT_CONFIG_KEY_0=safe.directory", "-e", "GIT_CONFIG_VALUE_0=*",
-                 image, "bash", "-c", job["cmd"]],
+                 image, "bash", "-c", job["cmd"].replace("{cpus}", self.s["CI_CPUS"])],
                 stdout=open(log, "w", encoding="utf-8"), stderr=subprocess.STDOUT)
             started.append((job, proc, log, self.clock()))
         out = []
@@ -191,7 +192,7 @@ class CI:
 
     def image(self, job: dict, work: Path) -> str:
         """python:3.12-slim with the job's requirements, named by their content: built once per change, then reused."""
-        digest = hashlib.sha256(b"git nodejs")              # the base layer below: change it and every image is rebuilt
+        digest = hashlib.sha256(b"git nodejs curl")              # the base layer below: change it and every image is rebuilt
         for req in job["reqs"]:
             digest.update(req.encode() + b"\0" + (work / req).read_bytes())
         tag = f"skippy-ci:{digest.hexdigest()[:16]}"
@@ -199,7 +200,7 @@ class CI:
             return tag
         ctx = Path(tempfile.mkdtemp(prefix="ci-image-", dir=str(self.state)))
         try:
-            lines = ["FROM python:3.12-slim", "RUN apt-get update -q && apt-get install -yq --no-install-recommends git nodejs && rm -rf /var/lib/apt/lists/*"]
+            lines = ["FROM python:3.12-slim", "RUN apt-get update -q && apt-get install -yq --no-install-recommends git nodejs curl && rm -rf /var/lib/apt/lists/*"]
             for i, req in enumerate(job["reqs"]):
                 shutil.copy(work / req, ctx / f"req{i}.txt")
                 lines.append(f"COPY req{i}.txt /tmp/req{i}.txt")
