@@ -104,10 +104,10 @@ def test_heal_names_one_thing_from_its_list_and_repair_lists_what_is_failing():
         with pytest.raises(ValueError):
             Starter().request("heal", "doctor", arg=bad)
     s2 = Starter()
-    rid = s2.request("repair", ADMIN, arg="ollama,whisper")
-    assert s2.poll({}) == [{"id": rid, "op": "repair", "arg": "ollama,whisper"}]
+    rid = s2.request("repair", ADMIN, arg="flask-api,whisper")
+    assert s2.poll({}) == [{"id": rid, "op": "repair", "arg": "flask-api,whisper"}]
     with pytest.raises(ValueError):
-        Starter().request("repair", ADMIN, arg="ollama,evil")
+        Starter().request("repair", ADMIN, arg="whisper,evil")
     assert Starter().request("start", ADMIN, arg="ignored") and Starter().poll({}) == []
     s3 = Starter()
     c3 = s3.request("start", ADMIN, arg="ignored")

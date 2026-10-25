@@ -66,20 +66,20 @@ def test_a_failure_is_healed_only_after_it_has_lasted_and_a_recovery_resets_it()
 
 def test_three_tries_an_hour_then_one_dm_and_it_waits():
     d, starter, clock, told = world()
-    d.observe_home(failing("ollama"))
+    d.observe_home(failing("whisper"))
     healed = 0
     for _ in range(6):
         clock.t += doc.HEAL_AFTER_S + 1
         alive(starter)
-        d.observe_home(failing("ollama"))
+        d.observe_home(failing("whisper"))
         healed += len(d.tick())
         for c in starter.poll({"status": {"docker": True, "bridge": True}}):
             starter.poll({"results": [{"id": c["id"], "ok": False, "summary": "still broken"}]})
-    assert healed == doc.MAX_TRIES and len(told) == 1 and "Ollama" in told[0] and "3 tries" in told[0]
+    assert healed == doc.MAX_TRIES and len(told) == 1 and "Whisper" in told[0] and "3 tries" in told[0]
     clock.t += 3600
     alive(starter)
-    d.observe_home(failing("ollama"))
-    assert d.tick() == ["ollama"]                                    # a new hour: it tries again
+    d.observe_home(failing("whisper"))
+    assert d.tick() == ["whisper"]                                    # a new hour: it tries again
 
 
 def test_never_while_stopped_on_purpose_never_the_bridge_mid_run_and_docker_first():
@@ -139,12 +139,12 @@ def test_a_slow_core_with_every_model_loaded_is_busy_not_dead():
 
 def test_the_button_sends_one_repair_with_what_is_failing_and_starts_the_allowances_afresh():
     d, starter, clock, _ = world()
-    d.observe_home({**failing("ollama"), **failing("tts-studio"), "whisper": {"ok": True, "ms": 9, "why": ""}})
-    d.tries["ollama"] = [clock.t] * 3
+    d.observe_home({**failing("flask-api"), **failing("tts-studio"), "whisper": {"ok": True, "ms": 9, "why": ""}})
+    d.tries["flask-api"] = [clock.t] * 3
     r = d.repair("captain@example.com")
     assert r["done"] is False and d.tries == {}
-    assert handed(starter) == [("repair", "ollama,tts-studio")]
+    assert handed(starter) == [("repair", "flask-api,tts-studio")]
     assert d.tick() == []                                            # while the repair runs, no heals on top of it
     view = d.view()
-    assert {"starter", "docker", "home-reporter", "ollama", "tts-studio", "whisper"} <= {row["name"] for row in view["rows"]}
+    assert {"starter", "docker", "home-reporter", "flask-api", "tts-studio", "whisper"} <= {row["name"] for row in view["rows"]}
     assert view["actions"][0]["what"] == "repair"
