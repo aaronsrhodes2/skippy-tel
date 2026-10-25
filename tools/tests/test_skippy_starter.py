@@ -21,6 +21,7 @@ class World:
         self.cmds, self.spawned, self.posts, self.portal_down = [], [], [], False
         self.building, self.core_says = "", '{"state": "ok", "detail": "repaired"}' 
         self.pending_commands = []
+        self.battery = ""                                                           # no UPS unless a test plugs one in
         self.t = [0.0]
 
     def run(self, cmd, timeout=120, cwd=None, env=None):
@@ -38,6 +39,8 @@ class World:
         if cmd[0] == "powershell.exe" and "-File" in cmd:                          # the clean restart
             self.docker = self.docker_wakes
             return 0, ""
+        if cmd[0] == "powershell.exe" and ss.UPS_PS in cmd:                         # skippy-pc's UPS (Win32_Battery)
+            return 0, self.battery
         if cmd[0] == "powershell.exe":                                              # who is building? (read only)
             return 0, self.building
         if cmd[0] == "netstat":
@@ -367,3 +370,45 @@ def test_the_status_carries_skippy_pcs_gpu_for_the_patient_queue_and_nothing_whe
     w.run = lambda cmd, timeout=120, cwd=None, env=None: (127, "not found") if cmd[0] == "nvidia-smi" else real(cmd, timeout, cwd, env)
     s.run = w.run
     assert "gpu_free_pct" not in s.status()
+
+
+# ── skippy-pc's own UPS ──
+MAINS = '{"BatteryStatus":2,"EstimatedChargeRemaining":100,"EstimatedRunTime":66}'
+BATTERY = '{"BatteryStatus":1,"EstimatedChargeRemaining":97,"EstimatedRunTime":58}'
+
+
+def test_the_ups_reading_rides_in_the_status_and_no_ups_means_nothing():
+    s, w = make()
+    assert s.ups() == {} and "ups_on_battery" not in s.status()
+    w.battery = MAINS
+    assert s.ups() == {"ups_on_battery": False, "ups_charge": 100, "ups_runtime_min": 66}
+    assert s.status()["ups_charge"] == 100
+    w.battery = '{"BatteryStatus":2,"EstimatedChargeRemaining":100,"EstimatedRunTime":71582788}'   # Windows' "unknown"
+    assert s.ups()["ups_runtime_min"] == 0
+
+
+def test_two_minutes_on_battery_stops_the_stack_and_shuts_windows_down():
+    s, w = make(bridge=True)
+    w.battery = BATTERY
+    assert s.watch_power() is False                          # just went on battery: the clock starts
+    w.t[0] += ss.UPS_SHUTDOWN_AFTER_S - 1
+    assert s.watch_power() is False
+    w.t[0] += 2
+    assert s.watch_power() is True and s.power_down
+    assert ["docker", "compose", "stop"] in [c[:3] for c in w.cmds] and w.cmds[-1][:2] == ["shutdown", "/s"]
+    assert not w.bridge_up                                   # the bridge stopped by its PID first
+    assert any("shutting down" in r["summary"] for p, _ in w.posts for r in p["results"])   # the portal heard first
+    assert s.watch_power() is False                          # once
+
+
+def test_the_power_coming_back_in_time_cancels_it():
+    s, w = make()
+    w.battery = BATTERY
+    s.watch_power()
+    w.t[0] += 60
+    w.battery = MAINS
+    assert s.watch_power() is False and s.on_battery_since is None
+    w.battery = BATTERY
+    w.t[0] += ss.UPS_SHUTDOWN_AFTER_S - 10
+    assert s.watch_power() is False                          # a new outage starts its own two minutes
+    assert not any(c[0] == "shutdown" for c in w.cmds)

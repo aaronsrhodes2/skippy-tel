@@ -51,7 +51,7 @@ REGISTRY = {
     # skippy-pc, CI
     **{e: MACHINE for e in (
         "game_import_done", "game_import_download", "home_import_chunk", "home_job_done", "home_jobs", "home_media", "home_music_checkin", "home_report", "home_starter",
-        "home_telemetry", "home_workshop", "home_workshop_list", "home_patient", "ops_home", "tasks_run")},
+        "home_telemetry", "home_workshop", "home_workshop_list", "home_patient", "home_ups", "ops_home", "tasks_run")},
     "telemetry_tap": BEACON,
     # public: sign-in, the front door, static and informational pages, the public experiments (free local compute, rate limited)
     **{e: PUBLIC for e in (

@@ -27,7 +27,8 @@ REDELIVER_S = 30                 # a request not answered by then is handed over
 KEEP_RESULTS = 20
 MAX_PENDING = 3
 STATUS_KEYS = {"docker": bool, "containers_up": int, "containers_total": int, "bridge": bool, "busy": bool, "supervisor": bool, "working": str, "resume_at": str,
-               "gpu_free_pct": int, "gpu_util_pct": int}            # skippy-pc's card (nvidia-smi): when a patient job may start (patient.py)
+               "gpu_free_pct": int, "gpu_util_pct": int,            # skippy-pc's card (nvidia-smi): when a patient job may start (patient.py)
+               "ups_on_battery": bool, "ups_charge": int, "ups_runtime_min": int}   # skippy-pc's own UPS (power.py tells the Captain)
 
 
 class Starter:

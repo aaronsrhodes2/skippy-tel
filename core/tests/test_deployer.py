@@ -246,6 +246,18 @@ def test_the_doctor_restarts_llama_swap_after_two_failures_twice_an_hour_then_re
     assert look(False)["did"] == "restarted llama-swap"       # a new hour: it starts again
 
 
+def test_a_slow_llama_swap_with_every_model_loaded_is_left_alone(box):
+    """Busy, not dead: a video pop-up shares the GPU and replies crawl; restarting would reload every model mid-job (2026-10-24)."""
+    d, commit, first = box
+    d.run()
+    ran = len(getattr(d, "ran", []))
+    slow = lambda: (False, "no answer: TimeoutError")   # noqa: E731
+    for _ in range(4):
+        assert d.doctor(answers=slow, loaded=lambda: True, now=1_000_000.0) == {"ok": True, "busy": True}
+    assert len(getattr(d, "ran", [])) == ran                  # nothing restarted
+    assert d.doctor(answers=slow, loaded=lambda: False, now=1_000_000.0)["did"] == "watching"   # not loaded: the old rules apply
+
+
 def test_with_no_deploy_of_record_a_repair_only_restarts_what_runs(box):
     d, commit, first = box                                    # never deployed: the stack was set up by hand
     row = d.repair()

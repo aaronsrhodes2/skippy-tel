@@ -310,10 +310,29 @@ class Deployer:
         wrote = any(isinstance(b, dict) and (b.get("text") or b.get("thinking")) for b in got.get("content") or [])
         return wrote, "" if wrote else "it answered with nothing"
 
-    def doctor(self, answers=None, now=None) -> dict:
+    def models_loaded(self) -> bool:
+        """llama-swap answers /running (no GPU work) with every resident slot loaded and ready: alive, however slow its replies."""
+        key = self.s["LLM_API_KEY"]
+        req = urllib.request.Request("http://127.0.0.1:8080/running",
+                                     headers={**({"x-api-key": key, "Authorization": "Bearer " + key} if key else {})})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                got = json.loads(r.read() or b"{}")
+        except (OSError, ValueError):
+            return False
+        ready = {m.get("model") for m in got.get("running") or [] if isinstance(m, dict) and m.get("state") == "ready"}
+        return all(n in ready for n in ("chat", "coder", "vision"))
+
+    def doctor(self, answers=None, now=None, loaded=None) -> dict:
         now = time.time() if now is None else now
         d = self._read("doctor.json", {"fails": 0, "restarts": [], "repairs": []})
         ok, why = (answers or self.llm_answers)()
+        if not ok and (loaded or self.models_loaded)():
+            # Slow, not dead: every model is loaded, so a long job is sharing the GPU. Restarting llama-swap now only reloads every
+            # model while that job carries on (2026-10-24). Leave it, and look again next time.
+            d["last"] = {"at": now, "why": why, "did": "left alone: busy, every model loaded"}
+            self._write("doctor.json", d)
+            return {"ok": True, "busy": True}
         if ok:
             d["fails"] = 0
             self._write("doctor.json", d)

@@ -120,8 +120,21 @@ def test_the_core_test_is_a_real_short_reply_with_a_deadline():
 
     def hang(*a):
         raise TimeoutError("timed out")
-    assert doc.core_test("https://core.example", "k", post=hang)[:2] == (False, "no answer in time")
+    assert doc.core_test("https://core.example", "k", post=hang, get=lambda *a: {})[:2] == (False, "no answer in time")
     assert doc.core_test("", "", post=post)[:2] == (False, "Skippy Core isn't configured")
+
+
+def test_a_slow_core_with_every_model_loaded_is_busy_not_dead():
+    """2026-10-24: a video pop-up rendering on the same GPU made replies crawl, and the doctor reloaded every model mid-job, twice."""
+    def hang(*a):
+        raise TimeoutError("timed out")
+    ready = lambda *names: (lambda *a: {"running": [{"model": n, "state": "ready"} for n in names]})   # noqa: E731
+    ok, why, _ = doc.core_test("https://core.example", "k", post=hang, get=ready("chat", "coder", "vision"))
+    assert ok is True and why.startswith("busy")
+    assert doc.core_test("https://core.example", "k", post=hang, get=ready("chat", "vision"))[:2] == (False, "no answer in time")
+    def down(*a):
+        raise OSError("refused")
+    assert doc.core_test("https://core.example", "k", post=hang, get=down)[0] is False
 
 
 def test_the_button_sends_one_repair_with_what_is_failing_and_starts_the_allowances_afresh():

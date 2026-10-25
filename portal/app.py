@@ -53,6 +53,7 @@ import ratelimit
 import readiness
 import recovery
 import notify as notify_mod
+import power as power_mod
 import recovery_web
 import ship as ship_mod
 import tabletop as tabletop_mod
@@ -778,6 +779,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     app.extensions["ships"] = ships
     # Tell the Captain on Discord when a private-Skippy run ends (notify.py: a DM to him only, one per run, switchable).
     notifier = notify_mod.Notifier(app.config.get("DISCORD_BOT_TOKEN") or "", vm, app.config.get("PORTAL_URL") or "")
+    power = power_mod.Power(notify=lambda text: notifier.alert(text))   # the house's UPSes: one DM per change (power.py)
+    app.extensions["power"] = power
     app.extensions["notifier"] = notifier
 
     def run_ended(news: dict) -> None:
@@ -834,7 +837,28 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             abort(400)
         commands = starter.poll(payload)
         doctor.tick()                                             # (a heal it decides now goes out with the next call)
+        st = starter.status or {}
+        if "ups_on_battery" in st:                                # skippy-pc's own UPS: one DM per change (power.py)
+            power.observe("pc", st["ups_on_battery"], st.get("ups_charge"), st.get("ups_runtime_min"))
         return jsonify(commands=commands)
+
+    @app.post("/home/ups")
+    def home_ups():
+        """skippy-core's UPS (NUT's event hook on the box, core/install/ups.sh): on battery, low, back on mains. Home token, like the
+        reporter and the starter; skippy-core calls it directly because skippy-pc is already down by the time its battery runs low."""
+        if (request.content_length or 0) > 4_000:
+            abort(413)
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            abort(400)
+        status = str(body.get("status") or "")[:40].split()      # NUT's ups.status: "OL", "OB", "OB LB", "OL CHRG" ...
+        num = lambda k: body[k] if isinstance(body.get(k), int) and not isinstance(body.get(k), bool) and 0 <= body[k] <= 9999 else None  # noqa: E731
+        runtime = num("runtime_s")
+        said = power.observe("core", "OB" in status if ("OB" in status or "OL" in status) else None, num("charge"),
+                             runtime // 60 if runtime is not None else None, low="LB" in status)
+        return jsonify(ok=True, told=bool(said))
 
     @app.post("/home/music/checkin")
     def home_music_checkin():

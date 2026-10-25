@@ -191,7 +191,27 @@ class Doctor:
                 "repair": self.repair_result()}
 
 
-def core_test(base_url: str, key: str, model: str = "chat", post=None) -> tuple[bool, str, int]:
+RESIDENT = ("chat", "coder", "vision")      # Skippy Core's always-loaded models (core/models.json "resident")
+
+
+def core_loaded(base_url: str, key: str, get=None) -> bool:
+    """Is llama-swap up with every resident model loaded and ready? Its /running answers in milliseconds without touching the GPU, so a
+    box that is merely slow (a video or 3D pop-up rendering on the same GPU) says yes here while its replies crawl."""
+    import json
+    import urllib.request
+
+    def _get(url, headers, timeout):
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as r:
+            return json.loads(r.read(200_000) or b"{}")
+    try:
+        got = (get or _get)(base_url.rstrip("/") + "/running", {"x-api-key": key, "Authorization": "Bearer " + key}, 15)
+    except Exception:  # noqa: BLE001 — no answer at all: it really is down
+        return False
+    ready = {m.get("model") for m in (got.get("running") or []) if isinstance(m, dict) and m.get("state") == "ready"}
+    return all(name in ready for name in RESIDENT)
+
+
+def core_test(base_url: str, key: str, model: str = "chat", post=None, get=None) -> tuple[bool, str, int]:
     """Skippy Core writes a few tokens, within CORE_TIMEOUT_S: (ok, why, ms). Straight to its Messages API (llama-swap behind the
     Funnel), capped at 8 tokens, so a model that loads, thinks or loops forever is a failed test, not a hung portal."""
     import json
@@ -214,6 +234,11 @@ def core_test(base_url: str, key: str, model: str = "chat", post=None) -> tuple[
             return False, f"HTTP {status}", ms
         wrote = any(isinstance(b, dict) and (b.get("text") or b.get("thinking")) for b in got.get("content") or [])
         return wrote, "" if wrote else "it answered with nothing", ms
-    except Exception as exc:  # noqa: BLE001 — every way of not answering is a failed test
+    except Exception as exc:  # noqa: BLE001 — every way of not answering is a failed test...
         why = "no answer in time" if "timed out" in str(exc).lower() else f"no answer ({type(exc).__name__})"
-        return False, why, int((time.monotonic() - t0) * 1000)
+        ms = int((time.monotonic() - t0) * 1000)
+        # ...unless it is only slow: every model loaded and ready means a long job is sharing the GPU (a video pop-up), and healing it
+        # would reload every model while the job carries on (2026-10-24: twice). Busy is healthy; the next test looks again.
+        if core_loaded(base_url, key, get):
+            return True, "busy: slow to reply while the GPU works, every model loaded", ms
+        return False, why, ms

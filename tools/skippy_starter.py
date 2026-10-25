@@ -49,6 +49,13 @@ BRIDGE_CWD = os.environ.get("CLAUDE_BRIDGE_CWD", "D:/Aaron/development")
 DOCKER_WAIT_S, DOCKER_CLEAN_WAIT_S, BRIDGE_WAIT_S = 150, 120, 40
 LOCK_PORT = 9339
 VAULTS = ("D:/Aaron/development/.env", "G:/My Drive/vault/.env")
+# skippy-pc's own UPS (a CyberPower on USB, which Windows sees as a battery): after this long on battery the starter stops the stack
+# and shuts Windows down, leaving the UPS's runtime to skippy-core and the cameras. skippy-core wakes it when the power is back
+# (core/install/ups.sh). Win32_Battery.BatteryStatus: 1 discharging, 4 low, 5 critical, 11 partially charged on battery.
+UPS_SHUTDOWN_AFTER_S = int(os.environ.get("UPS_SHUTDOWN_AFTER_S", "120"))
+UPS_ON_BATTERY = (1, 4, 5, 11)
+UPS_PS = ("Get-CimInstance Win32_Battery | Select-Object -First 1 BatteryStatus,EstimatedChargeRemaining,EstimatedRunTime | "
+          "ConvertTo-Json -Compress")
 BUILDING_PS = ("Get-CimInstance Win32_Process -Filter \"Name='docker.exe' or Name='docker-compose.exe'\" | "
                "ForEach-Object { $_.CommandLine }")      # read-only: is anyone building right now? (a session's own rebuild)
 
@@ -91,6 +98,9 @@ class Starter:
         self.handled: dict[str, float] = {}
         self._lock = threading.Lock()
         self.resume_at: datetime | None = self._load_resume()
+        self.on_battery_since: float | None = None
+        self.power_down = False                   # the UPS shutdown has started: nothing else runs
+        self._ups: dict = {}
 
     # ── the "back on by itself" setting: kept HERE, in a file, so it works with the portal or the internet down and survives a reboot ──
     def _load_resume(self) -> datetime | None:
@@ -156,12 +166,58 @@ class Starter:
             return {}
         return {"gpu_free_pct": int(round(100 * (total - used) / total)), "gpu_util_pct": int(round(util))}
 
+    def ups(self) -> dict:
+        """skippy-pc's UPS as Windows sees it: on battery or not, charge and minutes of runtime. Empty when there is none."""
+        rc, out = self.run(["powershell.exe", "-NoProfile", "-Command", UPS_PS], 20)
+        try:
+            b = json.loads(out) if rc == 0 and out.strip() else None
+        except ValueError:
+            b = None
+        if not isinstance(b, dict) or not isinstance(b.get("BatteryStatus"), int):
+            self._ups = {}
+            return {}
+        num = lambda v: v if isinstance(v, int) and 0 <= v <= 999 else 0   # noqa: E731 (Windows says 71582788 for "unknown")
+        self._ups = {"ups_on_battery": b["BatteryStatus"] in UPS_ON_BATTERY, "ups_charge": num(b.get("EstimatedChargeRemaining")),
+                     "ups_runtime_min": num(b.get("EstimatedRunTime"))}
+        return self._ups
+
+    def watch_power(self) -> bool:
+        """On battery for UPS_SHUTDOWN_AFTER_S: stop the bridge and the containers cleanly and shut Windows down (the power returning
+        before then cancels it). Works with the portal and the internet down. Returns whether it started the shutdown."""
+        if self.power_down:
+            return False
+        if not self.ups().get("ups_on_battery"):
+            self.on_battery_since = None
+            return False
+        if self.on_battery_since is None:
+            self.on_battery_since = self.clock()
+            self.say("UPS: on battery")
+            return False
+        if self.clock() - self.on_battery_since < UPS_SHUTDOWN_AFTER_S:
+            return False
+        self.power_down, self.working = True, "UPS shutdown"
+        self.say("UPS: on battery too long: stopping the stack and shutting down")
+        with self._lock:
+            self.results.append({"id": "ups-" + self.now().strftime("%H%M"), "ok": True,
+                                 "summary": f"On battery for {UPS_SHUTDOWN_AFTER_S // 60} min: skippy-pc is shutting down."})
+        try:
+            self.poll_once(threaded=False)                    # tell the portal first (it DMs the Captain), while the network is up
+        except Exception:  # noqa: BLE001 — going down regardless
+            pass
+        for pid in (self.supervisor_pid(), self.bridge_pid()):
+            if pid:
+                self.kill(pid)
+        if self.docker_up():
+            self.run(["docker", "compose", "stop"], 120, cwd=str(self.root))
+        self.run(["shutdown", "/s", "/t", "20", "/c", "SkippyTel: on UPS battery, shutting down"], 30)
+        return True
+
     def status(self) -> dict:
         up, total = self.containers() if self.docker_up() else (0, 0)
         b = self.bridge()
         return {"docker": total > 0 or self.docker_up(), "containers_up": up, "containers_total": total, "bridge": b is not None,
                 "busy": bool(b and (b.get("workshop") or {}).get("busy")), "supervisor": b is not None, "working": self.working,
-                "resume_at": self.resume_at.isoformat(timespec="minutes") if self.resume_at else "", **self.gpu()}
+                "resume_at": self.resume_at.isoformat(timespec="minutes") if self.resume_at else "", **self.gpu(), **self._ups}
 
     # ── doing ──────────────────────────────────────────────────────────────────
     def _spawn(self, cmd: list[str], env: dict | None = None, log: str = "") -> None:
@@ -457,6 +513,8 @@ class Starter:
     def forever(self) -> None:
         while True:
             try:
+                if self.watch_power():                                              # going down: no more starting things
+                    return
                 self.check_resume()
                 self.watch_docker()
             except Exception as e:                                                  # noqa: BLE001 — the loop must never die
