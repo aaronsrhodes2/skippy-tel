@@ -51,7 +51,7 @@ DEFAULTS = {
     "CORE_FULL": "", "CORE_STATE": "/var/lib/skippy-core", "MODELS_ROOT": "/srv/models", "CORE_GPU": "1",
     "CORE_VAULT_ENV": "/etc/skippy-core/vault.env", "MUSIC_ROOT": "/srv/music", "SMOKE_WAIT": "900",
     "OLLAMA_MODEL": "qwen3:8b", "LLM_API_KEY": "", "CORE_MATTER": "0", "MATTER_ARGS": "",
-    "CORE_POPUPS3D": "0",
+    "CORE_POPUPS3D": "0", "CI_LOCAL": "", "CI_NAME": "skippy-tel",
 }
 KEEP_BAD = 50
 
@@ -164,7 +164,10 @@ class Deployer:
         self.git("checkout", "--quiet", "--force", "--detach", commit)
 
     def ci_state(self, commit: str) -> tuple[str, str]:
-        """("success" | "pending" | "failure", detail) for CI_WORKFLOW's newest push run on this commit."""
+        """("success" | "pending" | "failure", detail): this box's own CI when CI_LOCAL names its state folder (core/ci/ci.py,
+        docs/no-github.md), else CI_WORKFLOW's newest push run on this commit (GitHub, the old way)."""
+        if self.s["CI_LOCAL"]:
+            return self.local_ci_state(commit)
         workflow = self.s["CI_WORKFLOW"]
         if not workflow:
             return "success", "no CI gate"
@@ -186,6 +189,21 @@ class Deployer:
         if newest.get("conclusion") == "success":
             return "success", newest.get("html_url", "")
         return "failure", f"{workflow} concluded {newest.get('conclusion')}: {newest.get('html_url', '')}"
+
+    def local_ci_state(self, commit: str) -> tuple[str, str]:
+        """core/ci/ci.py's result for this commit (<CI_LOCAL>/<CI_NAME>/results/<sha>.json). Not tested yet, running or an
+        error on the box's side = pending; only a failed test is a failure."""
+        path = Path(self.s["CI_LOCAL"]) / self.s["CI_NAME"] / "results" / f"{commit}.json"
+        try:
+            got = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return "pending", "not tested yet by this box's CI"
+        if got.get("state") == "success":
+            return "success", f"this box's CI, {got.get('seconds')} s"
+        if got.get("state") == "failure":
+            bad = [j.get("name") for j in got.get("jobs") or [] if j.get("state") == "failure"]
+            return "failure", "this box's CI failed: " + ", ".join(str(b) for b in bad)
+        return "pending", f"this box's CI is {got.get('state')}"
 
     def compose_files(self) -> list[str]:
         files = ["-f", "core/compose.core.yml"]
