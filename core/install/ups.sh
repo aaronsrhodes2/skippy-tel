@@ -4,7 +4,7 @@
 #   sudo bash ups.sh            # dry run: says what it would write, changes nothing
 #   sudo bash ups.sh --apply    # write the NUT config (standalone), start the driver, server and monitor
 #   sudo bash ups.sh --check    # read-only: the UPS answers, the monitor runs, the timer and delays are set. Exit 1 if not
-#   ... | sudo bash ups.sh --token   # the home token on stdin (never an argument, never printed) -> /etc/skippy-core/ups.env
+#   ... | sudo bash ups.sh --token   # the home token on stdin (never an argument, never printed) -> /etc/nut/skippy-ups.env
 # What happens on a power cut:
 #   * on battery: upssched starts a 3-minute timer (ONBATT_S); mains back before it ends cancels it;
 #   * the timer ends, or the UPS says its battery is low (whichever comes first): upsmon shuts the box down (Docker stops its
@@ -22,13 +22,13 @@ ONBATT_S="${UPS_ONBATT_S:-180}"
 OFFDELAY="${UPS_OFFDELAY:-60}"          # outlets off this long after the shutdown hook asks (the box is already down by then)
 ONDELAY="${UPS_ONDELAY:-120}"           # back on this long after the mains returns (must be more than OFFDELAY for usbhid-ups)
 MODE="${1:-dry}"
-UPS_ENV=/etc/skippy-core/ups.env        # PORTAL_URL, SKIPPY_HOME_TOKEN (root and nut only), PC_MAC
+UPS_ENV=/etc/nut/skippy-ups.env        # PORTAL_URL, SKIPPY_HOME_TOKEN (root and nut only), PC_MAC
 PC_MAC="${PC_MAC:-F4:B5:20:54:3C:B9}"   # skippy-pc's wired adapter (Intel I219-V), to wake it
 
 if [[ "$MODE" == "--token" ]]; then
   [[ $EUID -eq 0 ]] || { echo "run it with sudo"; exit 1; }
   IFS= read -r tok; [[ ${#tok} -ge 20 ]] || { echo "no token on stdin"; exit 1; }
-  umask 077; mkdir -p /etc/skippy-core
+  umask 077; mkdir -p /etc/nut
   printf 'PORTAL_URL=%s\nSKIPPY_HOME_TOKEN=%s\nPC_MAC=%s\n' "${PORTAL_URL:-https://skippy-portal-1015050363686.us-west1.run.app}" "$tok" "$PC_MAC" > "$UPS_ENV"
   chown root:nut "$UPS_ENV" 2>/dev/null || true
   chmod 640 "$UPS_ENV"; echo "token written to $UPS_ENV (root and NUT's own user only)"; exit 0   # upsmon's hooks run as nut
@@ -123,7 +123,7 @@ cat > /usr/local/sbin/skippy-ups-event <<'EOF'
 #!/bin/sh
 # One UPS event: tell the portal (POST /home/ups, the home token), and when the power is back for a minute, wake skippy-pc.
 EVENT="$1"
-[ -r /etc/skippy-core/ups.env ] && . /etc/skippy-core/ups.env
+[ -r /etc/nut/skippy-ups.env ] && . /etc/nut/skippy-ups.env
 read_var() { upsc cp1500@localhost "$1" 2>/dev/null; }
 report() {
   [ -n "$SKIPPY_HOME_TOKEN" ] || return 0
