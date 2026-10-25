@@ -679,7 +679,7 @@ def test_inside_the_one_chat_the_agents_reply_goes_to_the_chats_voice_not_the_ca
     final = {"t": "text", "text": "Deployed, and the tests pass."}
     out = drive(page, [{"hearAgent": True}, {"tasks": {"t1": {"state": "done", "events": [ev(1), final]}}}, {"adv": 3 * S}],
                 tasks={"t1": {"state": "running", "events": [ev(1)]}}, follow="t1", with_window=True)
-    assert out["voice"] == [["chat", "step 1 Deployed, and the tests pass."]]
+    assert out["voice"] == [["chat", "Deployed, and the tests pass."]]     # only the closing report is spoken, not "step 1"
 
 
 @needs_node
@@ -687,4 +687,4 @@ def test_on_its_own_the_card_still_speaks_with_its_own_voice(page):
     final = {"t": "text", "text": "Done."}
     out = drive(page, [{"tasks": {"t1": {"state": "done", "events": [ev(1), final]}}}, {"adv": 3 * S}],
                 tasks={"t1": {"state": "running", "events": [ev(1)]}}, follow="t1")
-    assert out["voice"] == [["card", "step 1 Done."]]
+    assert out["voice"] == [["card", "Done."]]

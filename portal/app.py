@@ -141,6 +141,11 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         st = starter.status or {}
         if "gpu_free_pct" not in st:
             return None
+        info = ((home.report or {}).get("capabilities") or {}).get("make_image")
+        if isinstance(info, dict) and info.get("box", "pc") == "pc" and info.get("loaded") is True:
+            # The studio still holds its model from the last picture: that memory is the picture's own, so counting it as "not free"
+            # kept every picture after the first waiting until the studio unloaded (10 idle minutes), then loaded it again.
+            return {"util_pct": st.get("gpu_util_pct")}
         return {"free_pct": st.get("gpu_free_pct"), "util_pct": st.get("gpu_util_pct")}
 
     def patient_hold(j, jobs) -> bool:

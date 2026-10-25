@@ -243,3 +243,20 @@ def test_the_queue_says_where_each_job_is_to_whoever_holds_the_home_token(world)
     quiet(world)
     handed(world)
     assert c.get("/home/patient", headers=world["H"]).get_json()["jobs"][0]["where"] == "handed out"
+
+
+def test_a_picture_right_after_another_doesnt_wait_for_the_studio_to_unload(world):
+    """The studio holds its model ~10 GB for 10 idle minutes after a picture: that memory is the next picture's, not "in use"."""
+    item = ask(world, "make_image", {"prompt": "a second cat"})["media"][0]
+    caps = {"make_image": {"ready": True, "box": "pc", "loaded": True}}
+    world["client"].post("/home/report", json={"status": {}, "capabilities": caps}, headers=world["H"])
+    quiet(world, {"gpu_free_pct": 8, "gpu_util_pct": 3})
+    assert [j["id"] for j in handed(world)] == [item["job_id"]]
+
+
+def test_an_unloaded_studio_still_needs_the_card_mostly_free(world):
+    ask(world, "make_image", {"prompt": "a cat"})
+    caps = {"make_image": {"ready": True, "box": "pc", "loaded": False}}
+    world["client"].post("/home/report", json={"status": {}, "capabilities": caps}, headers=world["H"])
+    quiet(world, {"gpu_free_pct": 8, "gpu_util_pct": 3})
+    assert handed(world) == []

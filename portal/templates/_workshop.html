@@ -571,7 +571,10 @@
       if (running !== job) return;                 // left or reset while it napped: the card is someone else's now
       running = null; ui(); text.focus(); draw(job.turn); save();       // the working line goes
       if (out.end && !job.turn.note) drainQueue();                      // the queue goes as one message, unless he stopped it or it failed
-      const said = job.turn.bad ? null : (job.turn.parts || []).filter(p => p.t === "text").map(p => p.text).join(" ");
+      // Spoken: only the reply's LAST text, the agent's closing report (its prompt makes that one to three sentences). The progress
+      // notes before it ("my clone has uncommitted changes", "let me check…") are for reading, not for the voice (the Captain, 2026-10-24).
+      const texts = job.turn.bad ? [] : (job.turn.parts || []).filter(p => p.t === "text" && String(p.text || "").trim());
+      const said = job.turn.bad ? null : (texts.length ? texts[texts.length - 1].text : "");
       const hand = typeof window !== "undefined" && window.SkippyAgent && window.SkippyAgent.onReply;
       if (hand) hand(said);                                              // inside the one chat: its voice speaks it (always in Hands-off)
       else if (said == null) voice.resume();                             // no answer to speak: in a spoken conversation the turn comes back to him

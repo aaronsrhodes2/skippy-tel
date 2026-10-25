@@ -326,7 +326,8 @@ def image_capability() -> dict:
     figures its /health gives (skippy-core's studio: gpu_free_pct, gpu_util_pct, gpu_free_gib), so the portal starts a picture only when
     there is room for it."""
     health = (fetch(f"{IMAGES}/health") or {}) if IMAGES else {}
-    out = {"ready": bool(IMAGES) and health.get("ready") is True, "box": IMAGE_BOX}
+    out = {"ready": bool(IMAGES) and health.get("ready") is True, "box": IMAGE_BOX,
+           "loaded": health.get("loaded") is True}         # its model already holds its memory: only "is the card busy" matters
     for key in ("gpu_free_pct", "gpu_util_pct", "gpu_free_gib"):
         value = health.get(key)
         if isinstance(value, (int, float)) and not isinstance(value, bool):
