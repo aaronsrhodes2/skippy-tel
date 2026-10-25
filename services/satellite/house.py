@@ -236,6 +236,11 @@ class Combined(House):
         part._service(domain, service, data)
         self.last = getattr(part, "last", {})                # homectl.py prove reads it, whichever backend did the work
 
+    def owner(self, eid: str) -> House | None:
+        if eid not in self._owner:
+            self.states(fresh=True)
+        return self._owner.get(eid)
+
 
 TOOLS = [
     {"name": "home_devices", "description": "List what is in the house that he can control, with each one's state. Optionally for one area (room) or one kind (light, switch, fan, cover, climate, media_player).",

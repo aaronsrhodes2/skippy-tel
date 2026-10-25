@@ -5,6 +5,7 @@ module is the House backend that talks to its WebSocket API (MATTER_URL, e.g. ws
 What a node becomes (by its Descriptor's device types, endpoint by endpoint):
   * light.<name>    an on/off, dimmable or colour light (OnOff, LevelControl: on, off, toggle, brightness)
   * switch.<name>   a plug-in unit, or anything else with an OnOff cluster
+  * binary_sensor.<name>_motion  an occupancy sensor (the Leviton D2MSD dimmer's motion sensor): read only, "is anyone in the kitchen"
   * climate.<name>  a thermostat (Thermostat cluster: the temperature, the set point, the mode). Temperatures are in the unit the
                     thermostat itself shows (its UI configuration cluster): a Nest set to Fahrenheit is spoken to in Fahrenheit.
 The names and rooms he gives things live in state/home/matter.json beside HomeKit's home.json (git-ignored). Pairing:
@@ -22,7 +23,7 @@ from pathlib import Path
 from homekit import Loop, slug
 from house import House, HomeError
 
-ON_OFF, LEVEL, THERMOSTAT, THERMO_UI, DESCRIPTOR, BASIC = 6, 8, 513, 516, 29, 40
+ON_OFF, LEVEL, THERMOSTAT, THERMO_UI, DESCRIPTOR, BASIC, IDENTIFY, OCCUPANCY = 6, 8, 513, 516, 29, 40, 3, 1030
 LIGHT_TYPES = {0x0100, 0x0101, 0x010C, 0x010D}       # on/off, dimmable, colour temperature, extended colour light
 PLUG_TYPES = {0x010A, 0x010B}                         # on/off and dimmable plug-in units
 THERMOSTAT_TYPES = {0x0301}
@@ -65,6 +66,26 @@ def from_display(value: float, fahrenheit: bool) -> int:
     if not 5 <= c <= 35:
         raise HomeError(f"{value} degrees is outside what a thermostat should be set to.")
     return int(round(c * 100))
+
+
+def fingerprint(code: str) -> str:
+    """A one-way mark of a pairing code: matter.json remembers which codes were used, never the codes."""
+    import hashlib                                    # noqa: PLC0415
+    return hashlib.sha256(code.encode()).hexdigest()[:16]
+
+
+def parse_import(text: str) -> list[tuple[str, str, str]]:
+    """matter-import's list: one device a line, `code, name, room` (commas, tabs or | between); # starts a comment."""
+    out = []
+    for n, line in enumerate(text.splitlines(), 1):
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        parts = [p.strip() for p in re.split(r"\s*[,|\t]\s*", line)]
+        if len(parts) < 2 or not parts[0] or not parts[1]:
+            raise HomeError(f"line {n}: a device is `code, name, room` (the room may be left off)")
+        out.append((parts[0], parts[1], parts[2] if len(parts) > 2 else ""))
+    return out
 
 
 class Names:
@@ -146,9 +167,15 @@ class Matter(House):
             raise HomeError("The device was not added.")
         data = self.names.load()
         data["nodes"][str(node_id)] = {"name": name, "area": area}
+        data.setdefault("imported", {})[fingerprint(code)] = node_id     # matter-import skips it next time (never the code itself)
         self.names.save(data)
         self.invalidate()
         return f"Paired {name}."
+
+    def already(self, code: str):
+        """The node a code was already paired as (by matter-import), or None."""
+        code = (code or "").strip().replace("-", "").replace(" ", "")
+        return self.names.load().get("imported", {}).get(fingerprint(code))
 
     def label(self, node_id: int, name: str = "", area: str = "") -> None:
         data = self.names.load()
@@ -211,6 +238,13 @@ class Matter(House):
             elif f"{ep}/{ON_OFF}/0" in attrs:
                 found.append((ep, "light" if types & LIGHT_TYPES else "switch"))
         rows = []
+        for ep in endpoints(attrs):                       # motion: read only, whichever endpoint carries it (its own or the dimmer's)
+            if ep and f"{ep}/{OCCUPANCY}/0" in attrs:
+                name = f"{base} motion"
+                occupied = bool((attrs.get(f"{ep}/{OCCUPANCY}/0") or 0) & 1)
+                rows.append({"node": node_id, "ep": ep, "kind": "motion", "fahrenheit": False, "mode": None,
+                             "entity_id": f"binary_sensor.{slug(name)}", "state": "on" if occupied else "off",
+                             "attributes": {"friendly_name": name, "device_class": "occupancy"}})
         for ep, kind in found:
             name = base if len(found) == 1 else f"{base} {ep}"
             row = {"node": node_id, "ep": ep, "kind": kind, "fahrenheit": False, "mode": None,
@@ -231,6 +265,20 @@ class Matter(House):
             rows.append(row)
         return rows
 
+    def identify(self, eid: str = "", seconds: int = 15) -> str:
+        """Make the thing flash (Matter's Identify cluster): which switch on the wall is which."""
+        if eid not in self._index:
+            self.states(fresh=True)
+        if eid not in self._index:
+            raise HomeError("I do not know that one.")
+        node = self._index[eid]["node"]
+        attrs = next((n.get("attributes") or {} for n in (self.ask("get_nodes") or []) if n.get("node_id") == node), {})
+        eps = [ep for ep in endpoints(attrs) if ep and f"{ep}/{IDENTIFY}/0" in attrs] or [self._index[eid]["ep"]]
+        for ep in eps:
+            self.ask("device_command", node_id=node, endpoint_id=ep, cluster_id=IDENTIFY, command_name="Identify",
+                     payload={"identifyTime": int(seconds)})
+        return f"It is flashing for {seconds} seconds."
+
     def _service(self, domain: str, service: str, data: dict) -> None:
         eid = data["entity_id"]
         if eid not in self._index:
@@ -239,6 +287,8 @@ class Matter(House):
             raise HomeError("I do not know that one any more.")
         i = self._index[eid]
         node, ep = i["node"], i["ep"]
+        if i["kind"] == "motion":
+            raise HomeError("A motion sensor can only be read.")
         if i["kind"] == "climate":
             self._climate(node, ep, i, service, data)
             return

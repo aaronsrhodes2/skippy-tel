@@ -16,6 +16,10 @@ Matter (through skippy-core's controller, MATTER_URL in the vault; core/compose.
     ./.venv/Scripts/python homectl.py matter-pair 12345678901 "Thermostat" --network
                                                                             a device already on the network: the Nest, shared from the
                                                                             Google Home app (Settings > Linked Matter apps > Link apps)
+    ./.venv/Scripts/python homectl.py matter-import levitons.txt                  # many at once: one `code, name, room` a line
+                                                                            # (the My Leviton app: device > Device Settings >
+                                                                            # Matter Pairing Code); safe to run again
+    ./.venv/Scripts/python homectl.py identify "kitchen light"                 # make it flash: which switch is which
     ./.venv/Scripts/python homectl.py matter-label <node> --name "..." --area "..."
     ./.venv/Scripts/python homectl.py matter-forget <node>
 `list`, `say` and `prove` cover HomeKit and Matter together.
@@ -27,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -86,6 +91,32 @@ def prove(hk: HomeKit, name: str, rounds: int, gap: float, out=print, sleep=time
     return 0 if not failures else 1
 
 
+def matter_import(m, text: str, env: dict, new: bool, out=print) -> int:
+    """Pair a list of devices one after another; one that fails doesn't stop the rest; a code already paired is skipped."""
+    from matter import parse_import                                 # noqa: PLC0415
+    rows = parse_import(text)
+    if new:
+        ssid, password = env.get("ROOM_WIFI_SSID", ""), env.get("ROOM_WIFI_PASSWORD", "")
+        if not (ssid and password):
+            raise HomeError("New devices need the Wi-Fi to join: ROOM_WIFI_SSID and ROOM_WIFI_PASSWORD in the vault .env.")
+        m.set_wifi(ssid, password)
+    done = skipped = failed = 0
+    for n, (code, name, area) in enumerate(rows, 1):
+        if m.already(code) is not None:
+            out(f"{n}/{len(rows)} {name}: already paired")
+            skipped += 1
+            continue
+        try:
+            out(f"{n}/{len(rows)} {name}: " + m.pair(code, name, area, network_only=not new))
+            done += 1
+        except HomeError as e:
+            out(f"{n}/{len(rows)} {name}: FAILED: {e}")
+            failed += 1
+    out(f"{done} paired, {skipped} already done, {failed} failed." + (" Run it again for the failed ones (a fresh code from the app if "
+                                                                   "it timed out)." if failed else ""))
+    return 0 if not failed else 1
+
+
 def main(argv=None, hk: HomeKit | None = None, out=print, sleep=time.sleep, mt=None, env: dict | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -100,6 +131,8 @@ def main(argv=None, hk: HomeKit | None = None, out=print, sleep=time.sleep, mt=N
     p = sub.add_parser("matter-pair"); p.add_argument("code"); p.add_argument("name"); p.add_argument("--area", default=""); p.add_argument("--network", action="store_true")
     p = sub.add_parser("matter-label"); p.add_argument("node", type=int); p.add_argument("--name", default=""); p.add_argument("--area", default="")
     p = sub.add_parser("matter-forget"); p.add_argument("node", type=int)
+    p = sub.add_parser("matter-import"); p.add_argument("file"); p.add_argument("--new", action="store_true")
+    p = sub.add_parser("identify"); p.add_argument("target")
     args = ap.parse_args(argv)
     env = env if env is not None else _env()
     hk = hk or HomeKit(Store(store_path(env)))
@@ -158,6 +191,19 @@ def main(argv=None, hk: HomeKit | None = None, out=print, sleep=time.sleep, mt=N
         elif args.cmd == "matter-label":
             matter().label(args.node, args.name, args.area)
             out("Done.")
+        elif args.cmd == "matter-import":
+            return matter_import(matter(), Path(args.file).read_text(encoding="utf-8"), env, args.new, out)
+        elif args.cmd == "identify":
+            if re.fullmatch(r"[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}", args.target):     # a HomeKit id from scan: paired or not
+                out(hk.identify(accessory_id=args.target.lower()))
+            else:
+                h = house()
+                one, close = h.find(args.target)
+                if one is None:
+                    out(h._ambiguous(args.target, close))
+                    return 1
+                backend = (h.owner(one["entity_id"]) if isinstance(h, Combined) else None) or h
+                out(f"{h._label(one)}: " + backend.identify(eid=one["entity_id"]))
         elif args.cmd == "matter-forget":
             matter().forget(args.node)
             out("Removed from skippy-core's Matter fabric.")

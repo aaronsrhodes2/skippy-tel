@@ -30,6 +30,9 @@ class FakePairing:
         self.reads += 1
         return {k: {"value": self.values.get(k)} for k in wanted}
 
+    async def identify(self):
+        self.identified = True
+
     async def put_characteristics(self, writes):
         self.writes.append(list(writes))
         for aid, iid, value in writes:
@@ -40,6 +43,9 @@ class FakeDiscovery:
     def __init__(self, ident, name, unpaired, controller):
         self.description = NS(id=ident, name=name, status_flags=1 if unpaired else 0, address="192.168.0.9")
         self.controller = controller
+
+    async def async_identify(self):
+        self.controller.identified.append(self.description.id)
 
     async def async_start_pairing(self, alias):
         async def finish(code):
@@ -52,7 +58,7 @@ class FakeDiscovery:
 
 class FakeController:
     def __init__(self):
-        self.codes, self.loaded = [], []
+        self.codes, self.loaded, self.identified = [], [], []
         self.devices = [FakeDiscovery("aa:bb:cc:00:00:01", "LEVDS-MotDim-0001", True, self), FakeDiscovery("10:a6:d6:61:9b:8a", "LG webOS TV", False, self)]
         dimmer = NS(aid=1, name="Dimmer", services=[service(homekit.LIGHTBULB, char(homekit.ON, 10), char(homekit.BRIGHTNESS, 11))])
         switch = NS(aid=2, name="Plug", services=[service(homekit.OUTLET, char(homekit.ON, 20))])
@@ -187,6 +193,15 @@ def test_the_command_line_scans_pairs_lists_and_tries_a_control(kit):
     assert run("list") == 0 and "light.dimmer" in lines[-1] and "Hall" in lines[-1]
     assert run("say", "dimmer", "on") == 0 and lines[-1].startswith("Done")
     assert run("scan") == 0 and any("ours" in l for l in lines)
+
+
+def test_identify_flashes_an_unpaired_device_by_its_id_and_a_paired_one_by_its_name(kit):
+    assert kit.identify(accessory_id="aa:bb:cc:00:00:01") == "It is flashing." and kit.fc.identified == ["aa:bb:cc:00:00:01"]
+    kit.pair("aa:bb:cc:00:00:01", "123-45-678", "Dimmer")
+    kit.fc.pairings["aa:bb:cc:00:00:01"] = pairing = kit.fc.make_pairing()
+    assert kit.identify(eid="light.dimmer") == "It is flashing." and getattr(pairing, "identified", False)
+    with pytest.raises(homekit.HomeError, match="cannot see"):
+        kit.identify(accessory_id="ff:ff:ff:ff:ff:ff")
 
 
 def test_the_state_file_is_in_the_git_ignored_state_folder_by_default(monkeypatch):

@@ -27,6 +27,14 @@ def light(node_id=2):
         "1/29/0": [{"0": 257, "1": 1}], "1/6/0": True, "1/8/0": 127}}
 
 
+def leviton(node_id=5):
+    """A D2MSD: a dimmer with a motion sensor on a second endpoint, and Identify on the dimmer's."""
+    return {"node_id": node_id, "available": True, "attributes": {
+        "0/29/0": [{"0": 22, "1": 1}], "0/40/1": "Leviton", "0/40/5": "Kitchen Light",
+        "1/29/0": [{"0": 257, "1": 1}], "1/6/0": False, "1/8/0": 254, "1/3/0": 0,
+        "2/29/0": [{"0": 263, "1": 1}], "2/1030/0": 1}}
+
+
 def nest(node_id=3, mode=4, fahrenheit=True):
     return {"node_id": node_id, "available": True, "attributes": {
         "0/29/0": [{"deviceType": 22, "revision": 1}], "0/40/3": "Nest Thermostat",
@@ -40,7 +48,7 @@ class FakeController:
     def __init__(self, nodes):
         self.nodes = {n["node_id"]: n for n in nodes}
         self.calls, self.wifi, self.swallow = [], None, 0
-        self.fail = {}
+        self.fail, self.next_node = {}, 7
 
     async def handle(self, request):
         ws = web.WebSocketResponse()
@@ -52,7 +60,10 @@ class FakeController:
             req = msg.json()
             self.calls.append((req["command"], req.get("args") or {}))
             await ws.send_json({"event": "node_updated", "data": {}})       # events arrive between answers: the client skips them
-            if req["command"] in self.fail:
+            if req["command"] == "commission_with_code" and (req.get("args") or {}).get("code") in self.fail.get("bad_codes", ()):
+                await ws.send_json({"message_id": req["message_id"], "error_code": 5, "details": "Commissioning failed: timed out"})
+                continue
+            if req["command"] in self.fail and req["command"] != "bad_codes":
                 await ws.send_json({"message_id": req["message_id"], "error_code": 5, "details": self.fail[req["command"]]})
                 continue
             await ws.send_json({"message_id": req["message_id"], "result": self.run(req["command"], req.get("args") or {})})
@@ -84,8 +95,9 @@ class FakeController:
             self.wifi = (a["ssid"], a["credentials"])
             return None
         if command == "commission_with_code":
-            new = plug(node_id=7)
-            self.nodes[7] = new
+            new = plug(node_id=self.next_node)
+            self.nodes[self.next_node] = new
+            self.next_node += 1
             return new
         if command == "remove_node":
             self.nodes.pop(a["node_id"], None)
@@ -250,3 +262,83 @@ def test_the_listener_builds_a_matter_house_from_the_vault(tmp_path, monkeypatch
     house = ear.build_house({"MATTER_URL": "ws://skippy-core:5580/ws", "SKIPPY_HOME_STATE": str(tmp_path)})
     assert isinstance(house, Matter) and house.url == "ws://skippy-core:5580/ws"
     assert ear.build_house({"SKIPPY_HOME_STATE": str(tmp_path)}) is None
+
+
+def test_a_motion_dimmer_is_a_light_and_a_read_only_motion_sensor(house, controller):
+    controller.nodes[5] = leviton()
+    rows = {s["entity_id"]: s for s in house.states(fresh=True)}
+    assert rows["light.kitchen_light"]["state"] == "off"
+    motion = rows["binary_sensor.kitchen_light_motion"]
+    assert motion["state"] == "on" and motion["attributes"]["device_class"] == "occupancy"
+    with pytest.raises(HomeError, match="can only be read"):
+        house._service("binary_sensor", "turn_on", {"entity_id": "binary_sensor.kitchen_light_motion"})
+    controller.nodes[5]["attributes"]["2/1030/0"] = 0
+    assert {s["entity_id"]: s["state"] for s in house.states(fresh=True)}["binary_sensor.kitchen_light_motion"] == "off"
+
+
+def test_identify_flashes_the_endpoint_that_has_identify_or_the_things_own(house, controller):
+    controller.nodes[5] = leviton()
+    house.states(fresh=True)
+    assert "flashing" in house.identify("light.kitchen_light")
+    flashes = [a for c, a in controller.calls if c == "device_command" and a["cluster_id"] == 3]
+    assert flashes == [{"node_id": 5, "endpoint_id": 1, "cluster_id": 3, "command_name": "Identify", "payload": {"identifyTime": 15}}]
+    house.identify("switch.theater_fan", seconds=5)                           # no Identify listed: its own endpoint
+    assert [a for c, a in controller.calls if c == "device_command" and a["cluster_id"] == 3][-1]["endpoint_id"] == 1
+    with pytest.raises(HomeError, match="do not know"):
+        house.identify("light.nowhere")
+
+
+def test_the_import_list_reads_commas_tabs_and_bars_and_says_which_line_is_wrong():
+    rows = matter_mod.parse_import("# from the My Leviton app\n3497-011-2332, Kitchen Light, Kitchen\n\n1234-567-8901\tHall Light\n"
+                                   "MT:Y.K90AFN00KA0648G00 | Porch | Outside  # by the door\n")
+    assert rows == [("3497-011-2332", "Kitchen Light", "Kitchen"), ("1234-567-8901", "Hall Light", ""), ("MT:Y.K90AFN00KA0648G00", "Porch", "Outside")]
+    with pytest.raises(HomeError, match="line 2"):
+        matter_mod.parse_import("34970112332, A\njust-a-code\n")
+
+
+def test_matter_import_pairs_them_all_goes_on_past_a_failure_and_skips_the_done_ones_next_time(house, controller, tmp_path):
+    lines = []
+    listing = tmp_path / "levitons.txt"
+    listing.write_text("34970112332, Kitchen Light, Kitchen\n11111111111, Hall Light, Hall\n22222222222, Den Light, Den\n", encoding="utf-8")
+    controller.fail["bad_codes"] = {"11111111111"}
+
+    class NoKit(Combined.__mro__[1]):
+        def states(self, fresh=False):
+            return []
+    run = lambda *argv, env=None: homectl.main(list(argv), hk=NoKit(), out=lines.append, mt=house,   # noqa: E731
+                                               env=env or {"MATTER_URL": controller.url}, sleep=lambda s: None)
+    assert run("matter-import", str(listing)) == 1
+    assert lines[-4:] == ["1/3 Kitchen Light: Paired Kitchen Light.", "2/3 Hall Light: FAILED: Matter said no: Commissioning failed: timed out.",
+                          "3/3 Den Light: Paired Den Light.", lines[-1]]
+    assert lines[-1].startswith("2 paired, 0 already done, 1 failed.")
+    pairs = [a for c, a in controller.calls if c == "commission_with_code"]
+    assert all(a["network_only"] for a in pairs)                              # already on the Wi-Fi: no Bluetooth, no ladder
+    assert "34970112332" not in (tmp_path / "home" / "matter.json").read_text()       # the codes themselves are never kept
+    controller.fail["bad_codes"] = set()
+    assert run("matter-import", str(listing)) == 0
+    assert lines[-1] == "1 paired, 2 already done, 0 failed." and len([c for c, _ in controller.calls if c == "commission_with_code"]) == 4
+    rows = {s["entity_id"]: s for s in house.states(fresh=True)}
+    assert "switch.hall_light" in rows and {"name": "Hall Light", "area": "Hall"} in house.names.load()["nodes"].values()
+    assert run("matter-import", str(listing), "--new") == 1 and "ROOM_WIFI_SSID" in lines[-1]   # brand-new ones need the Wi-Fi
+
+
+def test_identify_from_the_command_line_finds_it_by_name_in_whichever_backend_has_it(house, controller):
+    lines = []
+    controller.nodes[5] = leviton()
+
+    class Kit(Combined.__mro__[1]):
+        flashed = []
+
+        def states(self, fresh=False):
+            return [{"entity_id": "light.living_room_dimmer", "state": "off", "attributes": {"friendly_name": "Living room dimmer"}}]
+
+        def identify(self, accessory_id="", eid=""):
+            self.flashed.append(accessory_id or eid)
+            return "It is flashing."
+    kit = Kit()
+    run = lambda *argv: homectl.main(list(argv), hk=kit, out=lines.append, mt=house, env={"MATTER_URL": controller.url})   # noqa: E731
+    assert run("identify", "kitchen light") == 0 and lines[-1].startswith("Kitchen Light") and "flashing" in lines[-1]
+    assert any(c == "device_command" and a["cluster_id"] == 3 for c, a in controller.calls)
+    assert run("identify", "living room dimmer") == 0 and kit.flashed == ["light.living_room_dimmer"]
+    assert run("identify", "AA:BB:CC:00:00:01") == 0 and kit.flashed[-1] == "aa:bb:cc:00:00:01"     # an unpaired one, by its id from scan
+    assert run("identify", "nothing like it") == 1

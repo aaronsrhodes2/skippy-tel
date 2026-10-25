@@ -148,6 +148,29 @@ class HomeKit(House):
         self.invalidate()
         return f"Paired {name}."
 
+    def identify(self, accessory_id: str = "", eid: str = "") -> str:
+        """Make it flash: an unpaired accessory by its id (from scan), a paired one by its id or its entity. Which switch is which."""
+        devices = self.store.load()["devices"]
+        if eid:
+            self.states()
+            if eid not in self._index:
+                raise HomeError("I do not know that one.")
+            accessory_id = self._index[eid][0]
+
+        async def go():
+            if accessory_id in devices:
+                pairing = await self._pairing(accessory_id)
+                await pairing.identify()
+                return
+            controller = await self._controller_ready()
+            async for d in controller.async_discover(8):
+                if d.description.id.lower() == accessory_id.lower():
+                    await d.async_identify()
+                    return
+            raise HomeError("I cannot see that device on the network.")
+        self._loop.run(go(), timeout=30)
+        return "It is flashing."
+
     def unpair(self, accessory_id: str) -> None:
         store = self.store.load()
         store["devices"].pop(accessory_id, None)

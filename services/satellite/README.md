@@ -69,8 +69,25 @@ its radio stays awake. The proof, on the real plug (it switches it, then leaves 
     ./.venv/Scripts/python homectl.py matter-pair <code> "Thermostat" --network          # the Nest: Google Home app > Settings >
                                                                                          # Linked Matter apps & services > Link apps
     ./.venv/Scripts/python homectl.py list                                              # HomeKit and Matter together
+    ./.venv/Scripts/python homectl.py identify "kitchen light"                           # make it flash: which one on the wall is it
 
-`matter.py` turns each node into lights, switches and a thermostat (spoken to in the unit the thermostat shows: a Nest in Fahrenheit
+**Switches already on the Wi-Fi, many at once** (the Leviton D2MSD / D215S, nothing unscrewed): in the My Leviton app update each
+to its Matter firmware (that drops its HomeKit link: a switch is paired one way, HomeKit or Matter, never both), then copy each
+one's code from Device > Device Settings > Matter Pairing Code into a text file, one switch a line:
+
+    34970112332, Kitchen Light, Kitchen        # code, name, room (commas, tabs or | between; # starts a comment)
+    1234-567-8901, Hall Light, Hall
+
+    ./.venv/Scripts/python homectl.py matter-import levitons.txt                          # pairs each over the network (no Bluetooth)
+
+Each line says how it went; one that fails doesn't stop the rest, and running it again skips the ones already done (matter.json
+keeps a one-way mark of each code used, never the code). A code times out about 15 minutes after the app shows it: a fresh one
+from the app for a failed line. `--new` is for brand-new boxes instead (Bluetooth, given ROOM_WIFI_SSID/PASSWORD). Then
+`identify` each name to check it flashes the switch you expect, and `matter-label` to rename one that doesn't. `identify` also
+takes a HomeKit id from `scan`, paired or not.
+
+`matter.py` turns each node into lights, switches, a thermostat and, for a switch with a motion sensor (the D2MSD), a read-only
+`binary_sensor.<name>_motion` ("Skippy, is anyone in the kitchen?"); the thermostat (spoken to in the unit the thermostat shows: a Nest in Fahrenheit
 hears 70). Every on/off is read back from the device and tried once more if it didn't change, as with HomeKit. HomeKit, Matter and Home
 Assistant together are one house (`house.Combined`): one set of names, one set of guard rails, and one backend that is down never hides
 another's things. Tests: `tests/test_sat_matter.py`, against a fake controller speaking python-matter-server's real message format.
