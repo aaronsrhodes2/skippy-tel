@@ -309,6 +309,11 @@ def workshop_capability() -> dict:
               if isinstance(b, dict) and b.get("id") in ("claude", "core")]
     if brains:
         out["brains"] = brains                                        # the chat's brain key: Claude, or Skippy Core's coder
+        if any(b["ready"] for b in brains):
+            # The bridge's own `ready` follows Claude's login, but the chat has one brain per conversation (the portal greys out an
+            # offline one and starts on a ready one): a lapsed Claude login must not hide the Skippy whose default brain is the local
+            # Core coder (2026-10-25: the whole chat read "offline" for an evening because `claude auth login` had lapsed).
+            out["ready"] = True
     reason = info.get("reason")
     if not out["ready"]:
         if isinstance(reason, str) and reason.strip():
