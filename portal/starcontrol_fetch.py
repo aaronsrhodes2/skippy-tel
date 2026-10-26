@@ -3,7 +3,7 @@
     python starcontrol_fetch.py <release tag> <sha256 of scz-web.tar.gz> <destination folder>
 
 Run by portal/Dockerfile. The archive is the tarball star-control-precursors' tools/build_web.py --tarball makes, kept in the
-trunk and handed to the build as .vendor/scz-web.tar.gz (a bind mount at /vendor): one top-level folder, scz-web/, holding what
+trunk and handed to the build as .vendor/scz-web.tar.gz (copied into the build stage at /vendor): one top-level folder, scz-web/, holding what
 portal/starcontrol.py serves. It is about half a gigabyte, so it is checked and unpacked in ONE build step: the archive never becomes an
 image layer of its own.
 
@@ -23,7 +23,7 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-ARCHIVE = Path(os.environ.get("STARCONTROL_ARCHIVE", "/vendor/scz-web.tar.gz"))        # the build's bind mount (portal/Dockerfile)
+ARCHIVE = Path(os.environ.get("STARCONTROL_ARCHIVE", "/vendor/scz-web.tar.gz"))        # where the build stage puts it (portal/Dockerfile)
 TOP = "scz-web"                      # the archive's one top-level folder
 NEEDED = ("index.html", "game.html", "version.json")
 

@@ -1,31 +1,43 @@
 # Built by skippy-core's deployer (core/cd/cd.py) from the REPO ROOT, so the image can
 # include files shared with other parts of the repo:
 #   docker build -f portal/Dockerfile .
+#
+# Nothing here is fetched from the internet: skippy-core's deployer (core/cd/cd.py, vendor()) puts what the build needs in .vendor/
+# of the build context, from the house's own git and trunk. A build by hand needs .vendor/sigma-ground/ (sigma-ground at the pin:
+# `git archive`) and .vendor/scz-web.tar.gz. Each is unpacked in a STAGE of its own and only the result is copied into the image,
+# so the half-gigabyte archive is never a layer of the image (this works with the classic builder skippy-core's Docker uses).
+
+# Experiments (portal/experiments.py): sigma-ground's Radiance viewer and its committed benchmark results, at the same pinned
+# commit as the Mentat service.
+FROM python:3.12-slim AS sigma
+ARG SIGMA_GROUND_REF=489ec0c1254e20c482fd9ca8351d0ab6d94f7920
+COPY .vendor/sigma-ground/ /vendor/sg/
+RUN mkdir -p /out/benchmark \
+    && cp -r /vendor/sg/sigma_ground/radiance/web /out/radiance \
+    && rm -f /out/radiance/*.py \
+    && cp /vendor/sg/sigma_ground/mcp/benchmark/results/*_scored.json /out/benchmark/
+
+# Star Control Zero (portal/starcontrol.py): the game's web build, the tarball of star-control-precursors' tools/build_web.py
+# --tarball kept in the trunk (the artifacts folder, star-control/<tag>/scz-web.tar.gz), at the tag and checksum pinned in
+# core/cd/deploy.json: checked against the pin and unpacked here.
+FROM python:3.12-slim AS game
+ARG STARCONTROL_REF=
+ARG STARCONTROL_SHA256=
+COPY portal/starcontrol_fetch.py /tmp/starcontrol_fetch.py
+COPY .vendor/ /vendor/
+RUN mkdir -p /out/starcontrol_static \
+    && python /tmp/starcontrol_fetch.py "${STARCONTROL_REF}" "${STARCONTROL_SHA256}" /out/starcontrol_static
+
 FROM python:3.12-slim
 
 WORKDIR /app
 COPY portal/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Nothing here is fetched from the internet: skippy-core's deployer (core/cd/cd.py, vendor()) puts what the build needs in .vendor/
-# of the build context, from the house's own git and trunk, and the steps below read it through a bind mount (never a layer of its
-# own). A build by hand needs .vendor/sigma-ground/ (sigma-ground at the pin: `git archive`) and .vendor/scz-web.tar.gz.
-#
-# Placed BEFORE the portal's own files: it depends only on the pinned ref, so with the layer cache it is reused on almost every
+# Placed BEFORE the portal's own files: these depend only on the pins, so with the layer cache they are reused on almost every
 # build instead of being redone after each code change.
-# Experiments (portal/experiments.py): sigma-ground's Radiance viewer and its
-# committed benchmark results, at the same pinned commit as the Mentat service.
-ARG SIGMA_GROUND_REF=489ec0c1254e20c482fd9ca8351d0ab6d94f7920
-RUN --mount=type=bind,source=.vendor/sigma-ground,target=/vendor/sg     mkdir -p experiments_static/benchmark     && cp -r /vendor/sg/sigma_ground/radiance/web experiments_static/radiance     && rm -f experiments_static/radiance/*.py     && cp /vendor/sg/sigma_ground/mcp/benchmark/results/*_scored.json experiments_static/benchmark/
-
-# Star Control Zero (portal/starcontrol.py): the game's web build, the tarball of star-control-precursors' tools/build_web.py
-# --tarball kept in the trunk (D:	runkrtifacts\star-control\<tag>\scz-web.tar.gz), at the tag and checksum pinned in
-# core/cd/deploy.json. Also before the portal's own files, and it copies in only the one script it runs, so this half-gigabyte
-# layer is rebuilt only when the pin (or that script) changes. One RUN: verify, unpack and delete, so the archive is never a layer.
-ARG STARCONTROL_REF=
-ARG STARCONTROL_SHA256=
-COPY portal/starcontrol_fetch.py /tmp/starcontrol_fetch.py
-RUN --mount=type=bind,source=.vendor,target=/vendor     python /tmp/starcontrol_fetch.py "${STARCONTROL_REF}" "${STARCONTROL_SHA256}" starcontrol_static     && rm /tmp/starcontrol_fetch.py
+COPY --from=sigma /out/ ./experiments_static/
+COPY --from=game /out/starcontrol_static ./starcontrol_static
 
 COPY portal/ .
 # Shared with the rest of the repo — one source of truth, copied in at build:

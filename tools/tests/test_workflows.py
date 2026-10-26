@@ -58,9 +58,9 @@ CI_PLAN = (ROOT / "core" / "ci" / "ci.py").read_text(encoding="utf-8")       # w
 def test_the_dockerfile_bakes_the_build_identity_in_last_so_the_dependency_layers_stay_cached():
     lines = (ROOT / "portal" / "Dockerfile").read_text(encoding="utf-8").splitlines()
     idx = {key: next(i for i, l in enumerate(lines) if l.startswith(key)) for key in
-           ("COPY portal/requirements.txt", "RUN pip install", "RUN --mount=type=bind,source=.vendor/sigma-ground", "COPY portal/ .", "ARG GIT_SHA", "ARG BUILD_TIME", "ENV GIT_SHA")}
+           ("COPY portal/requirements.txt", "RUN pip install", "COPY --from=sigma", "COPY portal/ .", "ARG GIT_SHA", "ARG BUILD_TIME", "ENV GIT_SHA")}
     assert "ENV GIT_SHA=$GIT_SHA BUILD_TIME=$BUILD_TIME" in lines
-    assert idx["RUN pip install"] < idx["RUN --mount=type=bind,source=.vendor/sigma-ground"] < idx["COPY portal/ ."] < idx["ARG GIT_SHA"] < idx["ENV GIT_SHA"]
+    assert idx["RUN pip install"] < idx["COPY --from=sigma"] < idx["COPY portal/ ."] < idx["ARG GIT_SHA"] < idx["ENV GIT_SHA"]
     assert idx["ARG BUILD_TIME"] < idx["ENV GIT_SHA"]
     copies_after = [l for l in lines[idx["ARG GIT_SHA"]:] if l.startswith(("COPY", "ADD", "RUN"))]
     assert copies_after == []                                                   # nothing after them is ever cached
