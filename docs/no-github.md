@@ -35,7 +35,7 @@ own machines in plain Docker.
 ## Progress
 
 - **Phase 1, done 2026-10-25:**
-  - 22 bare repos are in `D:	runk\git`, each with a `post-receive` hook that forwards to GitHub;
+  - 22 bare repos are in `D:\trunk\git`, each with a `post-receive` hook that forwards to GitHub;
   - every checkout's `origin` points there, and so does skippy-core's deployer checkout;
   - New folder makes a bare repo;
   - the nightly off-site bundle waits on the bucket.
