@@ -96,7 +96,7 @@ def test_one_segment_to_the_end(repo):
     opened, resumes, kept = go(run, repo, [[Opened("s1"), Said("Looking."), Did("Bash", {"command": "ls"}), Said("All done."), ok()]])
     assert run.done and run.ok
     assert [(e["t"], e.get("text") or e.get("detail")) for e in run.events] == [("text", "Looking."), ("tool", "ls"), ("text", "All done.")]
-    assert opened[0].prompt == run.message and resumes == [None] and kept == ["s1"] and opened[0].closed
+    assert opened[0].prompt == run.message and resumes == [None] and kept == ["s1"] and opened[0].closed      # (once: it is not said twice)
 
 
 def test_a_session_to_resume_goes_to_the_first_segment_only(repo):
@@ -127,7 +127,7 @@ def test_a_segment_ends_when_its_context_is_measured_full_and_the_next_one_start
          Usage(82000), Said("Found it."), Did("Edit", {"file_path": "a.mjs"}), ToolDone(), Said("never seen"), ok("never")],
         [Opened("s2"), Usage(31000), Said("Carrying on."), ok("s2")]], rotate_at=80000)
     assert run.ok and len(opened) == 2 and opened[0].interrupted and all(s.closed for s in opened)
-    assert kept == ["s-int", "s2"]                                     # the interrupted segment's own session is the one kept
+    assert kept == ["s1", "s-int", "s2"]                               # each session as it opens; the interrupted one's own id at its end
     assert "Found it." in opened[1].prompt and "Edit: a.mjs" in opened[1].prompt and "never seen" not in opened[1].prompt
     assert any("segment 2" in t for t in texts(run))
 
@@ -219,20 +219,21 @@ def test_the_lane_hook_denies_with_the_reason_and_has_no_opinion_otherwise(repo,
 
 def test_cancelling_the_run_closes_the_session(repo):
     run = new_run()
-    box = {}
+    box = {"kept": []}
 
     async def main():
         async def open_session(n, resume, hooks):
             box["s"] = FakeSession([Opened("s1"), Said("working")], hold=True)
             return box["s"]
         task = asyncio.ensure_future(sdk.drive(run, clone=str(repo), request=run.message, resume=None, open_session=open_session,
-                                               remember=lambda sid: None, detail=lambda n, a: "", lane=Lane(str(repo))))
+                                               remember=box["kept"].append, detail=lambda n, a: "", lane=Lane(str(repo))))
         await asyncio.sleep(0.05)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
     asyncio.run(main())
     assert box["s"].closed and not run.done          # the caller (run_core) says "stopped"
+    assert box["kept"] == ["s1"]                      # ... and the next message resumes THIS segment, not an older one
 
 
 def test_the_switch_is_a_file_that_names_projects_and_defaults_to_the_cli(tmp_path):

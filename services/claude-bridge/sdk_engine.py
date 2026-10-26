@@ -229,7 +229,15 @@ async def drive(run, *, clone: str, request: str, resume: str | None, open_sessi
     say = lambda text: run.emit({"t": "text", "text": text})            # noqa: E731 - a note in the chat, in parentheses
     gate = StopGate(clone, baseline, say=say)
     hooks = {"PreToolUse": [(LANE_TOOLS, lane_hook(lane))], "Stop": [(None, gate.hook)]}
-    session_id, pending = resume, None
+    session_id, pending, kept = resume, None, None
+
+    def keep(sid: str | None) -> None:
+        """Remember the conversation's session the moment it is known, so a run that is stopped (or dies) mid-segment still
+        leaves the NEXT message resuming the segment it was in, not an older one."""
+        nonlocal kept
+        if sid and sid != kept:
+            kept = sid
+            remember(sid)
 
     def flush() -> None:
         nonlocal pending
@@ -253,6 +261,7 @@ async def drive(run, *, clone: str, request: str, resume: str | None, open_sessi
                         await session.interrupt()
                 elif isinstance(ev, Opened):
                     session_id = ev.session or session_id
+                    keep(ev.session)
                 elif isinstance(ev, Said):
                     journal.said(ev.text)
                     flush()
@@ -276,8 +285,7 @@ async def drive(run, *, clone: str, request: str, resume: str | None, open_sessi
                        + (f": {stderr}" if stderr else ""))
             return
         session_id = ended.session or session_id
-        if session_id:
-            remember(session_id)
+        keep(session_id)
         if rotating or ended.subtype == "error_max_turns":
             flush()
             say(f"(fresh context: segment {n + 1}; the repository and my last messages carry over)")
