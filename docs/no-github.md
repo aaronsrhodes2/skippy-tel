@@ -32,6 +32,23 @@ own machines in plain Docker.
 | The portal image downloads Star Control's release from GitHub | CI builds it from `star-control-precursors` (or keeps the tarball in the bucket) and passes it in the build context |
 | Images on ghcr.io (llama-swap, python-matter-server, Valheim) and anything pip fetches from GitHub | **The mirror.** A `registry:2` container on skippy-core (tailnet only) holds a copy of each pinned image, and compose files name the mirror. A pip cache serves packages the same way. The games VM can't reach the house, so its images are copied to Artifact Registry in the project instead |
 
+## Progress
+
+- **Phase 1, done 2026-10-25:**
+  - 22 bare repos are in `D:	runk\git`, each with a `post-receive` hook that forwards to GitHub;
+  - every checkout's `origin` points there, and so does skippy-core's deployer checkout;
+  - New folder makes a bare repo;
+  - the nightly off-site bundle waits on the bucket.
+- **Phase 2, done 2026-10-25:**
+  - `core/ci/ci.py` on skippy-core (timer every minute, its own copy in `/opt/skippy-core/ci`: re-run `core/ci/install.sh --apply`
+    after changing it) tests main's newest commit in plain Docker: run-tests.yml's suite and flask-api jobs, and the shell syntax;
+  - results are in `/var/lib/skippy-core/ci/<repo>/results/<sha>.json`, each job's log beside them;
+  - the first green run took 85 s for all of SkippyTel's tests (2,806);
+  - the deployer gates on it (`CI_LOCAL` in core.env): green deploys, a failed test is refused, untested waits;
+  - the simulator (core.yml's `sim` job) isn't run: it stood in for the box, and the box is now the test;
+  - skippy-core's own deploy timer was never switched on, so its deploys still start by hand
+    (`sudo python3 core/deployer/deployer.py run`).
+
 ## Phases (each ends working and checked; GitHub keeps receiving pushes as a mirror until the last)
 
 1. **Git home:**
