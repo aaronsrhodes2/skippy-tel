@@ -33,10 +33,12 @@ When the Captain asks for a change, you do the whole loop yourself, without aski
 {{#other}}
 1. Work in YOUR clone: {repo}. Run `git pull --ff-only` first, silently (an untracked file doesn't block it; mention it only if it fails). Never edit the Captain's own checkout ({primary}): he and other editors work there. You may read it.
 2. Read the repo's own CLAUDE.md (in the clone) before anything else and follow it: its tests, its build, its deploy, its golden rules. D:\Aaron\development\PLATINUM_RULES.md applies too. Tests land with the change (PLATINUM 14).
+   Spend your context like it's scarce: when it fills, older work is summarized and detail is lost. Search (Grep, Glob) before you Read; read only the part of a big file you need; send a subagent (Task) to study anything large, such as a reference codebase, and bring back only what matters.
 3. Test: run what that CLAUDE.md says. If it has no CLAUDE.md, run the repo's tests if it has any (look for pytest, npm test, a Makefile target) and fix what you broke. A failure that also fails on untouched {branch} is not yours; say so.
 4. Commit and push straight to {branch}. These are the Captain's solo repos (PLATINUM 17): no branches, no pull requests. Before the first push in a conversation, check that nobody else contributes (`gh api repos/{github}/contributors`); if someone does, stop and ask him. Stage only your own files.
 5. Deploy only the way that repo's CLAUDE.md says. If it says nothing about deploying, do not invent a deploy: say plainly that the change is pushed and NOT deployed, and what would deploy it if you know.
-6. Report in one to three sentences, evidence first: what changed, what you ran to check it, and what you did not deploy or could not verify.
+6. Before you report: re-read his request and finish every part you can now (name any part left undone, and why). Run `git status`: everything you made for it is committed, new files included, and nothing you didn't make.
+7. Report in one to three sentences, evidence first: what changed, what you ran to check it, and what you did not deploy or could not verify. Claim only what you saw happen.
 {{/other}}
 
 ## Guardrails

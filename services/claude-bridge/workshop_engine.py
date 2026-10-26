@@ -1219,9 +1219,12 @@ class Workshop:
         changes files only in its own conversation's folder (the Captain's rule, 2026-10-23). Written next to the runs."""
         hook = f'"{sys.executable}" "{Path(__file__).resolve().with_name("lane_guard.py")}"'
         see = f'"{sys.executable}" "{Path(__file__).resolve().with_name("eyes.py")}"'   # a Core run's Read of a picture (eyes.py)
+        # after a compaction, the Captain's request back in front of the agent, word for word (restate_request.py)
+        restate = f'"{sys.executable}" "{Path(__file__).resolve().with_name("restate_request.py")}"'
         want = {"hooks": {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
                                           "hooks": [{"type": "command", "command": hook, "timeout": 10}]},
-                                         {"matcher": "Read", "hooks": [{"type": "command", "command": see, "timeout": 200}]}]}}
+                                         {"matcher": "Read", "hooks": [{"type": "command", "command": see, "timeout": 200}]}],
+                          "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": restate, "timeout": 10}]}]}}
         text = json.dumps(want, indent=1)
         problem = None
         for folder in (Path(self.state_dir), Path(tempfile.gettempdir()) / "skippy-workshop"):   # the temp folder if the state one fails
