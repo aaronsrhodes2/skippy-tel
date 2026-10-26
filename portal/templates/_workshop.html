@@ -10,7 +10,7 @@
   .me-chat { display: flex; flex-direction: column; flex: 1; min-height: 0; margin: 0; }
   .me-chat header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .me-chat header h3 { margin: 0; flex: 1; }
-  .me-chat .wlog { flex: 1; min-height: 0; margin: 8px 0; overflow-y: auto; overscroll-behavior: contain; }   /* a plain scrolling transcript: it is long, and a wide window must not cut it into columns */
+  .me-chat .wlog { flex: 1; min-height: 0; margin: 8px 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }   /* a plain scrolling transcript: it is long, and a wide window must not cut it into columns */
   .me-chat .turn { display: block; margin: 8px 6px; padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; font-size: .9rem; overflow-wrap: anywhere; }
   .me-chat .turn.user { background: #111; border: 1px solid #333; }
   .me-chat .turn.assistant { background: var(--dim-green); border: 1px solid var(--dim-green-hi); color: var(--ink); }
