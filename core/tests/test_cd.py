@@ -46,6 +46,9 @@ class FakeCD(cd_mod.CD):
             return "https://portal.example\n" if any("status.url" in a for a in args) else "skippy-portal-00041-old\n"
         return ""
 
+    def vendor(self, src, star_control):
+        self.calls.append(("vendor", star_control))
+
     def smoke_portal(self, src):
         self.calls.append(("smoke", "portal"))
         if "smoke" in self.fail:
@@ -159,3 +162,77 @@ def test_the_portal_follows_each_job_live(world):
     cd.run()
     seen = [r[0]["jobs"][-1]["name"] for r in cd.reports if r and r[0]["jobs"]]
     assert {"portal-image", "portal"} <= set(seen)
+
+
+# ── .vendor: our own code for the builds, from the trunk, never the internet ───────────────────────────────
+
+class VendorCD(cd_mod.CD):
+    def __init__(self, s):
+        super().__init__(s, log=lambda m: None)
+        self.cfg = json.loads((cd_mod.HERE / "deploy.json").read_text())
+
+
+@pytest.fixture
+def trunk(tmp_path):
+    """A stand-in trunk: sigma-ground as a bare repo with the pinned commit, and the Star Control tarball with its checksum."""
+    import hashlib
+    import tarfile
+    work = tmp_path / "sg"
+    work.mkdir()
+    git(work, "init", "--quiet", "-b", "main")
+    for k, v in (("user.name", "T"), ("user.email", "t@example.com")):
+        git(work, "config", k, v)
+    (work / "sigma_ground" / "radiance" / "web").mkdir(parents=True)
+    (work / "sigma_ground" / "radiance" / "web" / "viewer.js").write_text("x")
+    git(work, "add", "-A")
+    git(work, "commit", "--quiet", "-m", "sg")
+    pin = git(work, "rev-parse", "HEAD")
+    bare = tmp_path / "trunk-git" / "sigma-ground.git"
+    bare.parent.mkdir()
+    git(tmp_path, "clone", "--quiet", "--bare", str(work), str(bare))
+    art = tmp_path / "trunk-art" / "star-control" / "web-test"
+    art.mkdir(parents=True)
+    (tmp_path / "scz" / "scz-web").mkdir(parents=True)
+    (tmp_path / "scz" / "scz-web" / "index.html").write_text("<html>")
+    with tarfile.open(art / "scz-web.tar.gz", "w:gz") as t:
+        t.add(tmp_path / "scz" / "scz-web", arcname="scz-web")
+    sha = hashlib.sha256((art / "scz-web.tar.gz").read_bytes()).hexdigest()
+    s = {**cd_mod.DEFAULTS, "CD_STATE": str(tmp_path / "cd"), "CD_TRUNK_GIT": str(bare.parent), "CD_TRUNK_ARTIFACTS": str(tmp_path / "trunk-art")}
+    cd = VendorCD(s)
+    cd.cfg["pins"].update(SIGMA_GROUND_REF=pin, STARCONTROL_REF="web-test", STARCONTROL_SHA256=sha)
+    src = tmp_path / "src"
+    src.mkdir()
+    return cd, src, tmp_path
+
+
+def test_vendor_puts_the_pinned_sigma_ground_and_the_game_in_the_build_context(trunk):
+    cd, src, _ = trunk
+    cd.vendor(src, star_control=True)
+    assert (src / ".vendor" / "sigma-ground" / "sigma_ground" / "radiance" / "web" / "viewer.js").read_text() == "x"
+    assert (src / ".vendor" / "scz-web.tar.gz").is_file()
+    cd.vendor(src, star_control=False)                                           # Mentat: sigma-ground only
+    assert (src / ".vendor" / "sigma-ground").is_dir()
+
+
+def test_a_swapped_game_file_is_refused(trunk):
+    cd, src, tmp = trunk
+    (tmp / "trunk-art" / "star-control" / "web-test" / "scz-web.tar.gz").write_bytes(b"not the game")
+    with pytest.raises(cd_mod.Failed, match="sha256"):
+        cd.vendor(src, star_control=True)
+
+
+def test_a_pin_that_is_not_in_the_trunk_or_the_cache_stops_the_deploy_plainly(trunk):
+    cd, src, _ = trunk
+    cd.cfg["pins"]["SIGMA_GROUND_REF"] = "0" * 40
+    with pytest.raises(cd_mod.Failed, match="is skippy-pc on"):
+        cd.vendor(src, star_control=False)
+
+
+def test_with_skippy_pc_off_a_deploy_still_works_from_what_this_box_has_seen(trunk):
+    cd, src, tmp = trunk
+    cd.vendor(src, star_control=True)                                            # seen once: cached on this box
+    cd.s["CD_TRUNK_GIT"], cd.s["CD_TRUNK_ARTIFACTS"] = str(tmp / "gone"), str(tmp / "gone")
+    src2 = tmp / "src2"
+    src2.mkdir()
+    cd.vendor(src2, star_control=True)
+    assert (src2 / ".vendor" / "scz-web.tar.gz").is_file() and (src2 / ".vendor" / "sigma-ground" / "sigma_ground").is_dir()

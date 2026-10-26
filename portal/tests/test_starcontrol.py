@@ -263,6 +263,7 @@ def test_the_image_and_the_deploy_pin_the_same_release(tmp_path):
     cfg = json.loads((root / "core" / "cd" / "deploy.json").read_text(encoding="utf-8"))
     cd = (root / "core" / "cd" / "cd.py").read_text(encoding="utf-8")
     assert "starcontrol_fetch.py" in docker and "ARG STARCONTROL_REF" in docker and "ARG STARCONTROL_SHA256" in docker
+    assert "github.com" not in docker and "source=.vendor" in docker           # the build reads what the deployer prepared, not the internet
     assert docker.index("starcontrol_fetch.py") < docker.index("COPY portal/ .")     # before the portal's files: stays cached
     assert cfg["pins"]["STARCONTROL_REF"] and re.fullmatch(r"[0-9a-f]{64}", cfg["pins"]["STARCONTROL_SHA256"])
     assert "/starcontrol/version" in cd                                        # the smoke test checks the game is bundled

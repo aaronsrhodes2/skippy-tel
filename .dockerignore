@@ -6,5 +6,6 @@
 !services/popups/registry.json
 !services/*-popups/popups.json
 !mentat/
+!.vendor/
 portal/.env
 **/__pycache__

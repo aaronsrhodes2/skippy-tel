@@ -32,9 +32,11 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import hashlib
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 import traceback
@@ -51,7 +53,8 @@ ENV_FILE = "/etc/skippy-core/core.env"
 DEFAULTS = {"CD_STATE": "/var/lib/skippy-core/cd", "CI_LOCAL": "/var/lib/skippy-core/ci", "CI_NAME": "skippy-tel", "CI_BRANCH": "main",
             "CD_VAULT": "/etc/skippy-core/vault.env", "CD_PORTAL": "https://skippy-portal-1015050363686.us-west1.run.app",
             "CD_GCLOUD_IMAGE": "gcr.io/google.com/cloudsdktool/google-cloud-cli:stable",
-            "CD_TERRAFORM_IMAGE": "hashicorp/terraform:1.9"}
+            "CD_TERRAFORM_IMAGE": "hashicorp/terraform:1.9",
+            "CD_TRUNK_GIT": "/mnt/pc/trunk/git", "CD_TRUNK_ARTIFACTS": "/mnt/pc/trunk/artifacts"}
 OIDC_DIR = str(oidc.TOKEN_FILE.parent)
 KEEP_RUNS = 30
 
@@ -73,6 +76,14 @@ def settings() -> dict:
     s.update({k: v for k, v in read_env(ENV_FILE).items() if k in DEFAULTS})
     s.update({k: os.environ[k] for k in DEFAULTS if k in os.environ})
     return s
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
 
 
 def now_iso() -> str:
@@ -237,6 +248,63 @@ class CD:
         inputs = tuple(self.cfg[part]["inputs"])
         return any(p.startswith(inputs) for p in r.stdout.split())
 
+
+    # ── .vendor: what the builds need from our own repos, prepared here, never fetched from the internet ──────────
+    def vendor(self, src: Path, star_control: bool) -> None:
+        """src/.vendor/sigma-ground (the pinned commit, `git archive`) and, for the portal, src/.vendor/scz-web.tar.gz (the pinned
+        Star Control Zero web build, checked against its sha256). Both come from the trunk (skippy-pc's D:\trunk, through the data
+        trunk share) and are cached on this box, so a deploy still works while skippy-pc is off, once it has been seen here."""
+        out = src / ".vendor"
+        out.mkdir(exist_ok=True)
+        self.vendor_sigma_ground(out / "sigma-ground")
+        if star_control:
+            self.vendor_star_control(out)
+
+    def vendor_sigma_ground(self, dest: Path) -> None:
+        pin = self.cfg["pins"]["SIGMA_GROUND_REF"]
+        cache = self.home / "vendor" / "sigma-ground.git"
+        trunk = Path(self.s["CD_TRUNK_GIT"]) / "sigma-ground.git"
+        if not cache.is_dir():
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            self.sh(["git", "init", "--bare", "--quiet", str(cache)], quiet=True)
+        if trunk.is_dir():
+            try:                                              # best effort: the cache may already hold the pin
+                self.sh(["git", "-c", "safe.directory=*", "-C", str(cache), "fetch", "--quiet", "--force", str(trunk),
+                         "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"], quiet=True)
+            except Failed as e:
+                self.log(f"couldn't refresh the sigma-ground cache from the trunk: {e}")
+        have = subprocess.run(["git", "-c", "safe.directory=*", "-C", str(cache), "cat-file", "-e", f"{pin}^{{commit}}"],
+                              capture_output=True).returncode == 0
+        if not have:
+            raise Failed(f"sigma-ground {pin[:7]} is in neither the trunk ({trunk}) nor this box's cache: is skippy-pc on?")
+        tar = self.home / "vendor" / f"sigma-ground-{pin[:12]}.tar"
+        self.sh(["git", "-c", "safe.directory=*", "-C", str(cache), "archive", "--format=tar", "-o", str(tar), pin], quiet=True)
+        shutil.rmtree(dest, ignore_errors=True)
+        dest.mkdir(parents=True)
+        with tarfile.open(tar) as t:
+            t.extractall(dest, filter="data")
+        tar.unlink(missing_ok=True)
+
+    def vendor_star_control(self, out: Path) -> None:
+        pins = self.cfg["pins"]
+        tag, want = pins.get("STARCONTROL_REF", ""), pins.get("STARCONTROL_SHA256", "")
+        if not tag:
+            return
+        cached = self.home / "vendor" / f"scz-web-{tag}.tar.gz"
+        if not (cached.is_file() and sha256_file(cached) == want):
+            source = Path(self.s["CD_TRUNK_ARTIFACTS"]) / "star-control" / tag / "scz-web.tar.gz"
+            if not source.is_file():
+                raise Failed(f"Star Control {tag} isn't in the trunk ({source}) or this box's cache: is skippy-pc on?")
+            cached.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, cached)
+        if sha256_file(cached) != want:
+            cached.unlink(missing_ok=True)
+            raise Failed(f"Star Control {tag}: the file's sha256 isn't the pinned {want[:12]}")
+        try:
+            os.link(cached, out / "scz-web.tar.gz")           # no second copy of half a gigabyte
+        except OSError:
+            shutil.copyfile(cached, out / "scz-web.tar.gz")
+
     # ── the jobs ────────────────────────────────────────────────────────────────
     def docker_login(self) -> str:
         registry = f"{self.cfg['region']}-docker.pkg.dev"
@@ -249,6 +317,7 @@ class CD:
 
     def portal_image(self, src: Path, sha: str) -> None:
         p, pins = self.cfg["portal"], self.cfg["pins"]
+        self.vendor(src, star_control=True)
         args = []
         for k, v in {**pins, "GIT_SHA": sha, "BUILD_TIME": now_iso()}.items():
             args += ["--build-arg", f"{k}={v}"]
@@ -375,6 +444,7 @@ class CD:
             self.log(f"can't see {m['service_account']}: re-run infra/bootstrap. Skipping Mentat.")
             return "skipped"
         tag = f"{m['image']}:{sha}"
+        self.vendor(src, star_control=False)
         self.sh(["docker", "build", "-q", "-f", "mentat/Dockerfile", "--build-arg", f"SIGMA_GROUND_REF={self.cfg['pins']['SIGMA_GROUND_REF']}",
                  "-t", tag, "."], cwd=src, timeout=2400)
         self.sh(["docker", "--config", self.docker_login(), "push", "-q", tag], timeout=1800)

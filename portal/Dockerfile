@@ -7,27 +7,25 @@ WORKDIR /app
 COPY portal/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Placed BEFORE the portal's own files: it depends only on the pinned ref, so with the layer cache (type=gha in
-# core/cd/deploy.json) it is reused on almost every build instead of being re-downloaded after each code change.
+# Nothing here is fetched from the internet: skippy-core's deployer (core/cd/cd.py, vendor()) puts what the build needs in .vendor/
+# of the build context, from the house's own git and trunk, and the steps below read it through a bind mount (never a layer of its
+# own). A build by hand needs .vendor/sigma-ground/ (sigma-ground at the pin: `git archive`) and .vendor/scz-web.tar.gz.
+#
+# Placed BEFORE the portal's own files: it depends only on the pinned ref, so with the layer cache it is reused on almost every
+# build instead of being redone after each code change.
 # Experiments (portal/experiments.py): sigma-ground's Radiance viewer and its
 # committed benchmark results, at the same pinned commit as the Mentat service.
 ARG SIGMA_GROUND_REF=489ec0c1254e20c482fd9ca8351d0ab6d94f7920
-ADD https://github.com/aaronsrhodes2/sigma-ground/archive/${SIGMA_GROUND_REF}.tar.gz /tmp/sg.tar.gz
-RUN mkdir -p /tmp/sg experiments_static/benchmark \
-    && tar -xzf /tmp/sg.tar.gz -C /tmp/sg --strip-components=1 \
-    && cp -r /tmp/sg/sigma_ground/radiance/web experiments_static/radiance \
-    && rm -f experiments_static/radiance/*.py \
-    && cp /tmp/sg/sigma_ground/mcp/benchmark/results/*_scored.json experiments_static/benchmark/ \
-    && rm -rf /tmp/sg /tmp/sg.tar.gz
+RUN --mount=type=bind,source=.vendor/sigma-ground,target=/vendor/sg     mkdir -p experiments_static/benchmark     && cp -r /vendor/sg/sigma_ground/radiance/web experiments_static/radiance     && rm -f experiments_static/radiance/*.py     && cp /vendor/sg/sigma_ground/mcp/benchmark/results/*_scored.json experiments_static/benchmark/
 
-# Star Control Zero (portal/starcontrol.py): the game's web build, a GitHub Release of star-control-precursors, at
-# the tag and checksum pinned in core/cd/deploy.json. Also before the portal's own files, and it copies in only the one
-# script it runs, so this half-gigabyte layer is rebuilt only when the pin (or that script) changes. One RUN:
-# download, verify, unpack and delete, so the archive is never a layer of its own.
+# Star Control Zero (portal/starcontrol.py): the game's web build, the tarball of star-control-precursors' tools/build_web.py
+# --tarball kept in the trunk (D:	runkrtifacts\star-control\<tag>\scz-web.tar.gz), at the tag and checksum pinned in
+# core/cd/deploy.json. Also before the portal's own files, and it copies in only the one script it runs, so this half-gigabyte
+# layer is rebuilt only when the pin (or that script) changes. One RUN: verify, unpack and delete, so the archive is never a layer.
 ARG STARCONTROL_REF=
 ARG STARCONTROL_SHA256=
 COPY portal/starcontrol_fetch.py /tmp/starcontrol_fetch.py
-RUN python /tmp/starcontrol_fetch.py "${STARCONTROL_REF}" "${STARCONTROL_SHA256}" starcontrol_static     && rm /tmp/starcontrol_fetch.py
+RUN --mount=type=bind,source=.vendor,target=/vendor     python /tmp/starcontrol_fetch.py "${STARCONTROL_REF}" "${STARCONTROL_SHA256}" starcontrol_static     && rm /tmp/starcontrol_fetch.py
 
 COPY portal/ .
 # Shared with the rest of the repo — one source of truth, copied in at build:
