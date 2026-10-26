@@ -36,6 +36,7 @@ import fcntl
 import json
 import os
 import hashlib
+import io
 import shutil
 import subprocess
 import sys
@@ -621,9 +622,110 @@ class CD:
             sha = self.green()
             if sha and sha != self.state.get("delivered"):
                 self.deploy(sha)
+            self.publish_all()
             self.report()
 
-    SELF_FILES = ("cd.py", "oidc.py", "rollback_pick.py", "deploy.json")
+    # ── publish: what skippy-core puts in buckets besides the portal ────────────────────────────────────────────
+    PUBLISH_RETRY_S = 600
+
+    def publish_all(self) -> None:
+        """Each repo listed in publish.json whose tip (a tarball: whose published folder) changed is built and uploaded. A failure
+        is recorded and tried again in ten minutes; it never stops the others or the deploys."""
+        try:
+            specs = json.loads((HERE / "publish.json").read_text(encoding="utf-8"))["publish"]
+        except (OSError, ValueError, KeyError):
+            return
+        if not getattr(self, "cfg", None):
+            self.cfg = json.loads((HERE / "deploy.json").read_text(encoding="utf-8"))
+        done = self.state.setdefault("published", {})
+        for name, spec in specs.items():
+            key = None
+            try:
+                key = self.publish_key(spec)
+                have = done.get(name, {})
+                if have.get("key") == key and "error" not in have:
+                    continue                                  # published already
+                if have.get("failed_key") == key and time.time() - have.get("failed_at", 0) < self.PUBLISH_RETRY_S:
+                    continue                                  # this very version failed a moment ago: not again yet
+                self.publish_one(name, spec, key)
+                done[name] = {"key": key, "at": time.time()}
+                self.say(f"cd: published {name} ({key[:7]})")
+            except Exception as e:                            # noqa: BLE001 — the trunk away, a build that fails: said, retried later
+                prev = done.get(name, {})
+                done[name] = {"key": prev.get("key", ""), "error": str(e)[:300], "failed_at": time.time(), "failed_key": key}
+                if prev.get("error") != str(e)[:300]:
+                    self.say(f"cd: publishing {name} failed: {e}")
+            self.save()
+
+    def publish_repo(self, spec: dict) -> Path:
+        repo = Path(self.s["CD_TRUNK_GIT"]) / f"{spec['repo']}.git"
+        if not repo.is_dir():
+            raise Failed(f"{spec['repo']} isn't in the trunk ({repo}): is skippy-pc on?")
+        return repo
+
+    def publish_key(self, spec: dict) -> str:
+        """What identifies a version: the repo's tip, or for a tarball the tree id of the folder it carries (so a commit elsewhere in
+        the repo publishes nothing)."""
+        repo = self.publish_repo(spec)
+        tip = self.sh(["git", "-c", "safe.directory=*", "-C", str(repo), "rev-parse", spec["branch"]], quiet=True).strip()
+        if spec["kind"] == "tarball":
+            return self.sh(["git", "-c", "safe.directory=*", "-C", str(repo), "rev-parse", f"{tip}:{spec['path']}"], quiet=True).strip()
+        return tip
+
+    def publish_one(self, name: str, spec: dict, key: str) -> None:
+        repo = self.publish_repo(spec)
+        git = ["git", "-c", "safe.directory=*", "-C", str(repo)]
+        tip = self.sh([*git, "rev-parse", spec["branch"]], quiet=True).strip()
+        self.home.mkdir(parents=True, exist_ok=True)
+        work = Path(tempfile.mkdtemp(prefix=f"publish-{name}-", dir=str(self.home)))
+        try:
+            if spec["kind"] == "tarball":
+                self.publish_tarball(spec, repo, tip, key, work)
+            else:
+                self.publish_site(spec, repo, tip, work)
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    def publish_tarball(self, spec: dict, repo: Path, tip: str, tree: str, work: Path) -> None:
+        """`addon/<files>` and `SOURCE` ("<tree> <commit>") in a tar.gz, as <commit>.tar.gz (a pin) and <branch>.tar.gz (the tip)."""
+        raw = work / "raw.tar"
+        self.sh(["git", "-c", "safe.directory=*", "-C", str(repo), "archive", "--format=tar", "-o", str(raw), tip, spec["path"]], quiet=True)
+        out = work / "out"
+        out.mkdir()
+        archive = out / "addon.tar.gz"
+        prefix = spec["path"].rstrip("/") + "/"
+        with tarfile.open(raw) as src, tarfile.open(archive, "w:gz") as dst:
+            for member in src:
+                if not member.name.startswith(prefix) or not (member.isfile() or member.isdir()):
+                    continue
+                member.name = "addon/" + member.name[len(prefix):]
+                dst.addfile(member, src.extractfile(member) if member.isfile() else None)
+            source = f"{tree} {tip}\n".encode()
+            info = tarfile.TarInfo("SOURCE")
+            info.size = len(source)
+            dst.addfile(info, io.BytesIO(source))
+        base = f"gs://{spec['bucket']}/{spec['prefix']}"
+        for target in (f"{tip}.tar.gz", f"{spec['branch']}.tar.gz"):
+            self.gcloud("storage", "cp", "/src/addon.tar.gz", f"{base}/{target}", cwd=out)
+
+    def publish_site(self, spec: dict, repo: Path, tip: str, work: Path) -> None:
+        """Test, build and check in a container (the steps are the repo's own: what its GitHub workflow ran), then sync dist/ to the
+        bucket with the version file LAST, so a build in flight is never shown."""
+        src = work / "src"
+        self.sh(["git", "-c", "safe.directory=*", "clone", "--quiet", "--no-checkout", str(repo), str(src)], quiet=True)
+        self.sh(["git", "checkout", "--quiet", "--detach", tip], cwd=src, quiet=True)
+        script = " && ".join(spec["steps"])
+        self.sh(["docker", "run", "--rm", "-v", f"{src}:/src", "-w", "/src", "-e", "CI=1", "-e", f"GITHUB_REF_NAME={spec['branch']}",
+                 "-e", "npm_config_update_notifier=false", spec["image"], "bash", "-c", f"set -e; {script}"], timeout=1800, quiet=True)
+        dist = src / spec["dist"]
+        if not (dist / spec["last"]).is_file():
+            raise Failed(f"the build of {spec['repo']} left no {spec['dist']}/{spec['last']}")
+        dest = f"gs://{spec['bucket']}/{spec['prefix']}"
+        self.gcloud("storage", "rsync", "/src", dest, "--recursive", "--delete-unmatched-destination-objects",
+                    f"--exclude=^{spec['last'].replace('.', chr(92) + '.')}$", cwd=dist)
+        self.gcloud("storage", "cp", f"/src/{spec['last']}", f"{dest}/{spec['last']}", "--cache-control=no-store", cwd=dist)
+
+    SELF_FILES = ("cd.py", "oidc.py", "rollback_pick.py", "deploy.json", "publish.json")
 
     INSTALLED = Path("/opt/skippy-core/cd")
 

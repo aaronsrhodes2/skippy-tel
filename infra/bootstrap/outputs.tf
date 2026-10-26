@@ -2,11 +2,6 @@ output "project_number" {
   value = data.google_project.this.number
 }
 
-output "workload_identity_provider" {
-  description = "Paste into .github/workflows/deploy.yml (WIF_PROVIDER) — or just tell Claude."
-  value       = google_iam_workload_identity_pool_provider.github.name
-}
-
 output "deployer_service_account" {
   value = google_service_account.deployer.email
 }
@@ -18,16 +13,6 @@ output "portal_url" {
 
 output "state_bucket" {
   value = google_storage_bucket.tfstate.name
-}
-
-output "doomloop_workload_identity_provider" {
-  description = "doom-loop's GitHub variable WIF_PROVIDER (its dev-deploy workflow authenticates with it)."
-  value       = google_iam_workload_identity_pool_provider.doomloop.name
-}
-
-output "doomloop_publisher_service_account" {
-  description = "doom-loop's GitHub variable WIF_SERVICE_ACCOUNT."
-  value       = google_service_account.doomloop_publisher.email
 }
 
 output "doomloop_bucket" {
@@ -42,4 +27,9 @@ output "skippy_core_provider" {
 output "git_backup_bucket" {
   description = "Where skippy-core puts the nightly git bundles (docs/no-github.md)"
   value       = google_storage_bucket.git_backup.name
+}
+
+output "game_assets_bucket" {
+  description = "Where skippy-core puts the Garry's Mod addon for the games VM (infra/gcp-games/gmod_addon.sh reads it)"
+  value       = google_storage_bucket.game_assets.name
 }
