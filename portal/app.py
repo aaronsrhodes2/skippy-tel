@@ -11,6 +11,7 @@ import dataclasses
 import io
 import ipaddress
 import json
+import os
 import secrets
 import re
 import threading
@@ -52,6 +53,7 @@ import doomloop
 import prophesy
 import ratelimit
 import readiness
+import deploys as deploys_mod
 import recovery
 import notify as notify_mod
 import power as power_mod
@@ -81,7 +83,11 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     app.config.update(settings if settings is not None else config.load())
     # The recovery buttons' GitHub token lives only inside the client object, never in app.config (templates see that).
     token = app.config.pop("GITHUB_ACTIONS_TOKEN", "") or ""
-    github = github or recovery.GitHub(token)
+    # Who deploys the portal says where its deploys are read (docs/no-github.md): skippy-core's deploys (core/cd) set
+    # DEPLOYS_FROM=house, and its reports (POST /home/deploys) answer the ship cards and Recovery; GitHub's deploy.yml didn't.
+    house_deploys = deploys_mod.HouseDeploys()
+    if github is None:
+        github = house_deploys if os.environ.get("DEPLOYS_FROM") == "house" else recovery.GitHub(token)
     del token
     # Cloud Run terminates TLS; trust its X-Forwarded-Proto/Host so OAuth
     # redirect URLs come out as https://<portal-host>/...
@@ -825,6 +831,18 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         except Exception:                                         # noqa: BLE001 — never let a notification touch the report
             pass
         return jsonify(reply)
+
+    @app.post("/home/deploys")
+    def home_deploys():
+        """skippy-core's deploys (core/cd/cd.py): its recent runs in, the redeploy/rollback requests Recovery made out. Home token."""
+        if request.content_length is not None and request.content_length > 100_000:
+            abort(413)
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            abort(400)
+        return jsonify(house_deploys.report(payload))
 
     @app.post("/home/starter")
     def home_starter():

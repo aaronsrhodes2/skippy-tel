@@ -51,7 +51,7 @@ REGISTRY = {
         "prophesy.board", "prophesy.record_file", "prophesy.game", "prophesy.game_file")},
     # skippy-pc, CI
     **{e: MACHINE for e in (
-        "game_import_done", "game_import_download", "home_import_chunk", "home_job_done", "home_jobs", "home_media", "home_music_checkin", "home_report", "home_starter",
+        "game_import_done", "game_import_download", "home_import_chunk", "home_job_done", "home_jobs", "home_media", "home_music_checkin", "home_deploys", "home_report", "home_starter",
         "home_prophesy_put", "home_prophesy_finish",
         "home_telemetry", "home_workshop", "home_workshop_list", "home_patient", "home_ups", "ops_home", "tasks_run")},
     "telemetry_tap": BEACON,

@@ -114,7 +114,7 @@ class ShipWatch:
             card.update(headline=f"Pushed {short}. Can't see its deploy right now.", note=error)
             return card
         if not runs:
-            card.update(headline=f"Pushed {short}. Waiting for GitHub to start its deploy…",
+            card.update(headline=f"Pushed {short}. Waiting for its deploy to start…",
                         stages=[{"name": n, "state": "waiting"} for n, _ in STAGES])
             return card
         run = runs[0]
@@ -127,7 +127,7 @@ class ShipWatch:
         if word == "failed":
             failed = next((s["name"] for s in card["stages"] if s["state"] == "failed"), "")
             card.update(final=True, tone="bad", headline=f"The deploy of {short} failed" + (f" at {failed}." if failed else "."),
-                        note="Not live. Its log is on GitHub; Roll back is on the Admin page if the portal is broken.")
+                        note="Not live. Its log is with the deployer (skippy-core's core/cd, or GitHub before it); Roll back is on the Admin page if the portal is broken.")
             card["links"]["rollback"] = ROLLBACK
             return card
         if word == "cancelled":
