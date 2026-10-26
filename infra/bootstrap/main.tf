@@ -228,7 +228,7 @@ resource "google_service_account_iam_member" "github_impersonates_deployer" {
 resource "google_iam_workload_identity_pool_provider" "skippy_core" {
   workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
   workload_identity_pool_provider_id = "skippy-core"
-  display_name                       = "skippy-core (the house's own deployer)"
+  display_name                       = "skippy-core deployer"
   attribute_mapping = {
     "google.subject" = "assertion.sub"
   }
