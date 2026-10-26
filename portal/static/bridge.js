@@ -13,7 +13,7 @@
   document.addEventListener("touchstart", function () {}, { passive: true });
   document.addEventListener("touchmove", function (e) {
     // allow a drag only inside something that is meant to scroll or be dragged (a field, a marked panel)
-    var el = e.target.closest && e.target.closest("textarea, input, select, [data-pan]");
+    var el = e.target.closest && e.target.closest("textarea, input, select, [data-pan], .log");
     if (!el) e.preventDefault();
   }, { passive: false });
 
