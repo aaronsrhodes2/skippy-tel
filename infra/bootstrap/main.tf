@@ -218,6 +218,61 @@ resource "google_service_account_iam_member" "github_impersonates_deployer" {
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_repo}"
 }
 
+# ── skippy-core → skippy-deployer: keyless, like GitHub's above (docs/no-github.md, phase 3) ──────────────────────
+# skippy-core deploys the portal, Mentat cloud and the games VM's Terraform itself. It signs a short-lived token with its own
+# key (/etc/skippy-core/gcp-oidc/signing.pem, root-only on the box; never leaves it) and swaps it here for skippy-deployer's
+# credentials. The project forbids service-account keys (iam.disableServiceAccountKeyCreation), and this needs none: Google
+# holds only the PUBLIC half (skippy-core-jwks.json, made by core/cd/oidc.py keygen). There is no issuer URL to reach: the
+# keys are uploaded with the provider. Rotating = a new key pair on the box, a new skippy-core-jwks.json, a bootstrap run.
+
+resource "google_iam_workload_identity_pool_provider" "skippy_core" {
+  workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
+  workload_identity_pool_provider_id = "skippy-core"
+  display_name                       = "skippy-core (the house's own deployer)"
+  attribute_mapping = {
+    "google.subject" = "assertion.sub"
+  }
+  # Only the deployer's own subject: a token skippy-core signs for anything else gets nothing.
+  attribute_condition = "assertion.sub == \"skippy-core-deployer\""
+  oidc {
+    issuer_uri = "https://skippy-core.skippy-tel.invalid" # never fetched: the keys come from jwks_json
+    jwks_json  = file("${path.module}/skippy-core-jwks.json")
+  }
+}
+
+resource "google_service_account_iam_member" "skippy_core_impersonates_deployer" {
+  service_account_id = google_service_account.deployer.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principal://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/subject/skippy-core-deployer"
+}
+
+# The house's git, off site (docs/no-github.md): skippy-core puts a nightly `git bundle` of every repo here, as skippy-deployer.
+# Versioned, so a bad night never overwrites a good one; old versions go after 90 days.
+resource "google_storage_bucket" "git_backup" {
+  name                        = "${var.project}-git-backup"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  versioning {
+    enabled = true
+  }
+  lifecycle_rule {
+    condition {
+      days_since_noncurrent_time = 90
+    }
+    action {
+      type = "Delete"
+    }
+  }
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_storage_bucket_iam_member" "deployer_writes_git_backup" {
+  bucket = google_storage_bucket.git_backup.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.deployer.email}"
+}
+
 # ── Runtime secrets for the portal ────────────────────────────────────────────
 
 resource "google_secret_manager_secret" "portal" {

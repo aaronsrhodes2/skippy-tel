@@ -33,3 +33,13 @@ output "doomloop_publisher_service_account" {
 output "doomloop_bucket" {
   value = google_storage_bucket.doomloop_dev.name
 }
+
+output "skippy_core_provider" {
+  description = "skippy-core's keyless trust (core/cd/oidc.py's token audience is //iam.googleapis.com/ + this)"
+  value       = google_iam_workload_identity_pool_provider.skippy_core.name
+}
+
+output "git_backup_bucket" {
+  description = "Where skippy-core puts the nightly git bundles (docs/no-github.md)"
+  value       = google_storage_bucket.git_backup.name
+}
