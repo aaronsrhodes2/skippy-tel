@@ -49,6 +49,19 @@ own machines in plain Docker.
   - skippy-core's deploy timer is on (2026-10-25, every 2 minutes): push to main, skippy-core's CI tests it, and its deployer
     deploys it only when green. The first gated deploy (eeac5ff) passed every smoke check.
 
+- **Phase 3, done 2026-10-25:**
+  - skippy-core deploys the cloud: `core/cd/cd.py` (timer every minute, its own copy in `/opt/skippy-core/cd`: re-run
+    `core/cd/install.sh --apply` after changing it) builds the portal and Mentat images, pushes them to Artifact Registry,
+    deploys to Cloud Run, runs deploy.yml's smoke tests and puts the old revision back on any failure; Terraform for
+    `infra/gcp-games` runs when it changed. What it deploys, and the pins, are in `core/cd/deploy.json`;
+  - it signs in to Google with no key: its own signing key (`/etc/skippy-core/gcp-oidc`, root-only), trusted through the
+    `skippy-core` provider in infra/bootstrap (Google holds only the public JWKS; the project forbids service-account keys);
+  - the portal reads its deploys from skippy-core (`DEPLOYS_FROM=house`, `POST /home/deploys`, `portal/deploys.py`): the ship
+    cards and Recovery's redeploy and rollback go through it;
+  - GitHub's `deploy`, `core`, `test` and `run-tests` workflows are deleted. `rollback`, `ops` and `domains` stay as the phone's
+    way back while GitHub is still a mirror. First automatic deploy: run 2, 6dd397f (CI 53 s, then live).
+  - Still on GitHub's API, to move in phase 5: the `ops` and `domains` workflows, the bridge's `ship` card links, `loop_timer.py`.
+
 ## Phases (each ends working and checked; GitHub keeps receiving pushes as a mirror until the last)
 
 1. **Git home:**
@@ -59,7 +72,7 @@ own machines in plain Docker.
 2. **CI on skippy-core:**
    - `core/ci` runs the tests on every push and reports them;
    - skippy-core's own deploys gated by it.
-3. **CD on skippy-core:**
+3. **CD on skippy-core (done):**
    - the portal and Mentat-cloud deploys, Terraform, the smoke test and rollback;
    - the Recovery and ship cards and the ops commands moved off GitHub's API.
 4. **No fetch from GitHub:**
