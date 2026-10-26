@@ -106,20 +106,15 @@ Actions (the sandbox can't reach GCP or run.app directly):
   **Time it / check before pushing:** `python tools/loop_timer.py --watch --since now` (before the push; `make loop-watch`) prints
   "prompt sent -> new version visible" stage by stage from GitHub's stamps and the portal's public `/version`;
   `python tools/affected_tests.py` runs only the tests the change can break (the full CI commands when it can't tell). docs/cicd.md "Timing the loop".
-- **Operate/diagnose the games VM:** `workflow_dispatch` on `ops.yml` with
-  `command` = `status` | `logs` | `start` | `stop` | `restart` and `args`
-  (a game id for logs; game ids for start). Read the job log. Secrets are
-  masked. `status` shows state, games, invite codes, missing settings.
-  Don't stop/restart while people may be playing unless asked.
-  On the VM itself (ops agent, infra/gcp-games/ops_agent.py; VM must be on):
-  `tail <game> [lines]`, `search <game> <regex>` (whole container log),
-  `stats` (CPU/mem/disk/per-container), `restart-game <game>` (one container,
-  no VM reboot; for `garrysmod` it is stop, refresh the Mentat stage addon from GitHub, start: `gmod_addon.sh`). Requests go via metadata `ops-request`, replies on serial 3.
-  The agent and the snapshot script (diag.sh) reload from metadata, so
-  changing them needs only a deploy.
-  `command` = `discord-setup` creates/repairs every game's Discord channels:
-  it queues the job in VM metadata and the portal (which holds the bot token)
-  runs it via POST /tasks/run (portal/tasks.py). New portal-side jobs go there.
+- **Operate/diagnose the games VM and the portal's ops doors** (since 2026-10-25, from skippy-core, no GitHub):
+  `ssh skippy-core 'sudo python3 /opt/skippy-core/cd/cd.py ops <command> <args>'` with `command` = `status` | `logs` | `start` |
+  `stop` | `restart` | `tail` | `search` | `stats` | `restart-game` | `backups` | `restore-game` | `discord-setup` | `home` | `configure`
+  (what each does: `scripts/remote.py`). Secrets print as `(set)`. Don't stop/restart while people may be playing unless asked.
+  `cd.py domains` hooks the portal's domains up (idempotent). On the VM itself the ops agent (infra/gcp-games/ops_agent.py)
+  answers `tail`, `search`, `stats`, `restart-game <game>` (for `garrysmod`: stop, refresh the addon, start) over metadata
+  `ops-request`/serial 3; the agent and `diag.sh` reload from metadata, so changing them needs only a deploy.
+  `discord-setup` creates/repairs every game's Discord channels: it queues the job in VM metadata and the portal (which holds
+  the bot token) runs it via POST /tasks/run (portal/tasks.py). New portal-side jobs go there.
 - Portal: **https://makerportal.live** (the Captain's domain; www. and makerportal.studio redirect to it) —
   code in `portal/`, docs in `docs/portal/README.md` and `docs/cicd.md`. DNS is Cloud DNS in this project,
   hooked up by `tools/domains.py` (the `domains` workflow; idempotent, says what it waits for); the registrar

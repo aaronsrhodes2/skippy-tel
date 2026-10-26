@@ -38,7 +38,7 @@ You don't need to change the boot order. Use the one-time boot menu:
 
 ## First boot
 
-The repo is private, so the box can't fetch anything from GitHub yet: everything comes off the stick. Leave the stick in
+A fresh box has no data trunk mounted yet, so it can't fetch the repo: everything comes off the stick. Leave the stick in
 (or put it back), sign in on the box's own screen, find the stick (the ~31 GB vfat one) and copy its `skippycore` folder:
 
 ```bash
@@ -60,7 +60,7 @@ sudo bash ~/skippycore/firstboot.sh --apply
 ```
 
 It installs and starts SSH, installs Tailscale and runs `tailscale up` (open the link it prints on your phone),
-installs Docker, git and python3, clones the repo to `/opt/skippy-core/repo` from the bundle (origin then points at GitHub)
+installs Docker, git and python3, clones the repo to `/opt/skippy-core/repo` from the bundle (origin then points at the house's git on skippy-pc, through the data trunk)
 and runs `core/llm/models.py check`. Missing models are expected at this point. It never touches disks or the bootloader.
 Re-running it is safe.
 
@@ -74,8 +74,7 @@ The Captain never types keys or codes after this; skippy-pc (Claude, the box's a
   `echo 'aaron ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/90-aaron && sudo chmod 440 /etc/sudoers.d/90-aaron && sudo visudo -c`.
 - Secrets go from the vault straight into root-only files, never through a terminal or chat:
   `tr -d '\r' < "/g/My Drive/vault/.env" | ssh aaron@skippy-core 'sudo install -m 0600 /dev/stdin /etc/skippy-core/vault.env'`.
-  The deployer's `GITHUB_TOKEN` in `/etc/skippy-core/core.env` is the vault's `GITHUB_DEPLOYER_TOKEN` (the repo is private:
-  it needs Contents and Actions read; it is also what lets `git fetch` through).
+  The deployer needs no token any more: it fetches from the house's git (the data trunk) and gates on its own CI (`CI_LOCAL`).
 - Ubuntu's installer gives `/` only 100 GB of the disk: `sudo lvextend -r -l +100%FREE /dev/ubuntu-vg/ubuntu-lv` (grows, erases nothing).
 
 ## Headless and remote-only (`harden.sh`)

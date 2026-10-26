@@ -1,5 +1,5 @@
 """Operate the games VM from anywhere Google credentials are available — in
-practice from the `ops` GitHub Actions workflow, so Claude can diagnose and
+practice from skippy-core (`cd.py ops <command>`, which runs this with the box's own identity), so Claude can diagnose and
 act without anyone fetching logs or pressing buttons.
 
     python scripts/remote.py status
@@ -16,7 +16,7 @@ act without anyone fetching logs or pressing buttons.
     python scripts/remote.py configure [apply] [join-password]   # set every game up without typing anything:
                                                          # previews; `apply` writes (autoconfig.py)
     python scripts/remote.py home                        # skippy-pc as the portal sees it
-                                                         # (needs OPS_ID_TOKEN: the workflow mints it)
+                                                         # (needs OPS_ID_TOKEN: cd.py mints it)
 
 Uses the portal's own modules (portal/gcp.py, ops.py, diagnostics.py), so it
 follows exactly the rules the portal buttons do. Every secret value (world /
@@ -49,7 +49,7 @@ def is_secret(key: str) -> bool:
 
 
 def mask_secrets(env: dict[str, str]) -> None:
-    """Tell GitHub Actions to hide these values anywhere in this job's log."""
+    """Left over from the GitHub Actions days (a no-op without GITHUB_ACTIONS): scrub() below still redacts every secret."""
     if os.environ.get("GITHUB_ACTIONS") != "true":
         return
     for key, value in env.items():

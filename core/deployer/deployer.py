@@ -6,9 +6,8 @@ A systemd timer runs `deployer.py run` every 2 minutes (skippy-core-deployer.{se
   1. fetch origin/main
   2. the deploy key is commit + CORE_FULL: unchanged since the last good deploy -> nothing to do;
      a key that failed before -> left alone (it is never retried; a new commit or a new CORE_FULL is a new key)
-  3. require the commit's run of .github/workflows/core.yml to be green (GitHub's Actions API; the repo is public, so
-     a classic token with NO scopes only lifts the rate limit; fine-grained tokens can't read checks): pending -> wait
-     for the next run; red -> the key is marked bad
+  3. require this box's own CI (core/ci/ci.py, docs/no-github.md) to have passed the commit: its result file says success (pending -> wait
+     for the next run; a failed test -> the key is marked bad; CI_LOCAL empty = no CI gate: the simulator)
   4. check out the commit; core/llm/models.py check: missing model files -> REFUSED (the running stack is left as
      it is, the key is not marked bad: it deploys once the files land); a broken manifest -> bad
   5. models.py render into ${CORE_STATE}/llm, docker compose up -d --build --remove-orphans --wait, core/smoke.py
@@ -18,7 +17,7 @@ A systemd timer runs `deployer.py run` every 2 minutes (skippy-core-deployer.{se
 
 Every run writes ${CORE_STATE}/deployer/status.json (what the home reporter will carry to the portal) and state.json
 (last good key, bad keys). Settings: /etc/skippy-core/core.env (KEY=VALUE; the process environment overrides it):
-REPO_DIR, REMOTE, BRANCH, GITHUB_REPO, GITHUB_TOKEN, CI_WORKFLOW ("" = no CI gate: the simulator), CORE_FULL,
+REPO_DIR, REMOTE, BRANCH, CI_LOCAL (the CI state folder; "" = no CI gate: the simulator), CI_NAME, CORE_FULL,
 CORE_STATE, MODELS_ROOT, CORE_GPU (0 = no /dev/dri: the simulator), CORE_MATTER (1 = the house's Matter controller too:
 core/compose.matter.yml, set up by core/install/matter.sh, which also writes MATTER_ARGS), CORE_POPUPS3D (1 = the quality 3D
 and video pop-ups too: core/popups-3d/compose.yml, a ~20 GB ROCm image, so never in the simulator or CI), CORE_VAULT_ENV, MUSIC_ROOT, SMOKE_WAIT,
@@ -47,7 +46,6 @@ from pathlib import Path
 
 DEFAULTS = {
     "REPO_DIR": "/opt/skippy-core/repo", "REMOTE": "origin", "BRANCH": "main",
-    "GITHUB_REPO": "aaronsrhodes2/skippy-tel", "GITHUB_TOKEN": "", "CI_WORKFLOW": "core.yml",
     "CORE_FULL": "", "CORE_STATE": "/var/lib/skippy-core", "MODELS_ROOT": "/srv/models", "CORE_GPU": "1",
     "CORE_VAULT_ENV": "/etc/skippy-core/vault.env", "MUSIC_ROOT": "/srv/music", "SMOKE_WAIT": "900",
     "OLLAMA_MODEL": "qwen3:8b", "LLM_API_KEY": "", "CORE_MATTER": "0", "MATTER_ARGS": "",
@@ -164,31 +162,11 @@ class Deployer:
         self.git("checkout", "--quiet", "--force", "--detach", commit)
 
     def ci_state(self, commit: str) -> tuple[str, str]:
-        """("success" | "pending" | "failure", detail): this box's own CI when CI_LOCAL names its state folder (core/ci/ci.py,
-        docs/no-github.md), else CI_WORKFLOW's newest push run on this commit (GitHub, the old way)."""
-        if self.s["CI_LOCAL"]:
-            return self.local_ci_state(commit)
-        workflow = self.s["CI_WORKFLOW"]
-        if not workflow:
+        """("success" | "pending" | "failure", detail): this box's own CI (core/ci/ci.py) when CI_LOCAL names its state folder, else
+        no gate at all (the simulator)."""
+        if not self.s["CI_LOCAL"]:
             return "success", "no CI gate"
-        url = (f"https://api.github.com/repos/{self.s['GITHUB_REPO']}/actions/workflows/{workflow}/runs"
-               f"?head_sha={commit}&event=push&per_page=10")
-        req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "skippy-core-deployer"})
-        if self.s["GITHUB_TOKEN"]:
-            req.add_header("Authorization", f"Bearer {self.s['GITHUB_TOKEN']}")
-        try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                runs = json.loads(r.read()).get("workflow_runs") or []
-        except (OSError, ValueError) as e:
-            return "pending", f"GitHub unreachable: {e}"
-        if not runs:
-            return "pending", f"no {workflow} run yet"
-        newest = max(runs, key=lambda c: (c.get("run_attempt") or 0, c.get("created_at") or ""))
-        if newest.get("status") != "completed":
-            return "pending", f"{workflow} is {newest.get('status')}"
-        if newest.get("conclusion") == "success":
-            return "success", newest.get("html_url", "")
-        return "failure", f"{workflow} concluded {newest.get('conclusion')}: {newest.get('html_url', '')}"
+        return self.local_ci_state(commit)
 
     def local_ci_state(self, commit: str) -> tuple[str, str]:
         """core/ci/ci.py's result for this commit (<CI_LOCAL>/<CI_NAME>/results/<sha>.json). Not tested yet, running or an

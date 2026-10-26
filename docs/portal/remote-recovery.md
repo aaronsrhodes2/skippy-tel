@@ -71,10 +71,10 @@ The pill on **Skippy · private** and the **Home · skippy-pc** card tell you wh
 | `/me` will not load, or errors | the portal itself | step 3 |
 | Core · skippy-tel **Down** or **Degraded** | flask-api or Ollama at home; not the private Skippy's chain | the card lists the problem; step 4 for Docker |
 
-## 2. What does the portal see of skippy-pc? (GitHub mobile)
+## 2. What does the portal see of skippy-pc?
 
-GitHub app > this repo > **Actions** > **ops** > **Run workflow** > `command` = **home** > Run. Open the run, then its job log.
-(No app? The same screens work at github.com in the phone's browser.)
+On skippy-core (over Tailscale: `ssh aaron@skippy-core`): `sudo python3 /opt/skippy-core/cd/cd.py ops home`. The same box answers `status`, `logs
+<game>`, `restart-game <game>` and the rest of what the games VM offers (`cd.py ops` lists them). From a phone: any SSH app on the tailnet.
 
 | In the output | Meaning |
 |---|---|

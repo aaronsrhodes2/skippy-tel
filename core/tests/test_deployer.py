@@ -74,7 +74,7 @@ def box(tmp_path):
 
     first = commit()
     git(tmp_path, "clone", "--quiet", str(origin), str(clone))
-    settings = {**dep.DEFAULTS, "REPO_DIR": str(clone), "CORE_STATE": str(tmp_path / "state"), "CI_WORKFLOW": "core.yml"}
+    settings = {**dep.DEFAULTS, "REPO_DIR": str(clone), "CORE_STATE": str(tmp_path / "state")}
     return Fake(settings), commit, first
 
 
@@ -157,11 +157,11 @@ def test_nothing_to_roll_back_to(box):
 
 def test_settings_file_then_environment(tmp_path, monkeypatch):
     f = tmp_path / "core.env"
-    f.write_text("# c\nCORE_FULL=chat\nGITHUB_TOKEN='t0k'\nCI_WORKFLOW=\n")
+    f.write_text("# c\nCORE_FULL=chat\nCI_LOCAL='/var/lib/ci'\n")
     for k in dep.DEFAULTS:
         monkeypatch.delenv(k, raising=False)
     s = dep.load_settings(str(f))
-    assert s["CORE_FULL"] == "chat" and s["GITHUB_TOKEN"] == "t0k" and s["CI_WORKFLOW"] == "" and s["BRANCH"] == "main"
+    assert s["CORE_FULL"] == "chat" and s["CI_LOCAL"] == "/var/lib/ci" and s["BRANCH"] == "main" and "GITHUB_TOKEN" not in s
     monkeypatch.setenv("CORE_FULL", "all")
     assert dep.load_settings(str(f))["CORE_FULL"] == "all"
     assert dep.norm_full(" coder,chat,") == "chat,coder" and dep.norm_full("chat,all") == "all"
@@ -176,44 +176,19 @@ def test_the_llm_key_reaches_render_compose_and_smoke(tmp_path, monkeypatch):
     assert d.env("")["LLM_API_KEY"] == "sk-core-abc", "every child (models.py render, compose, smoke.py) needs it"
 
 
-def test_ci_state_reads_the_newest_check_run(box, monkeypatch):
+def test_ci_state_is_this_boxs_own_ci_or_no_gate_at_all(box, tmp_path):
     d, _, _ = box
-    real = dep.Deployer(d.s, log=lambda m: None)
-    payloads = []
+    real = dep.Deployer({**d.s, "CI_LOCAL": ""}, log=lambda m: None)
+    assert real.ci_state("abc") == ("success", "no CI gate")                           # the simulator
+    gated = dep.Deployer({**d.s, "CI_LOCAL": str(tmp_path / "ci"), "CI_NAME": "skippy-tel"}, log=lambda m: None)
+    assert gated.ci_state("abc")[0] == "pending"                                        # no result yet: wait, never deploy
+    done = tmp_path / "ci" / "skippy-tel" / "results"
+    done.mkdir(parents=True)
+    (done / "abc.json").write_text(json.dumps({"state": "success", "seconds": 3}))
+    (done / "bad.json").write_text(json.dumps({"state": "failure", "jobs": [{"name": "suite", "state": "failure"}]}))
+    assert gated.ci_state("abc")[0] == "success" and gated.ci_state("bad") == ("failure", "this box's CI failed: suite")
+    assert "github" not in Path(dep.__file__).read_text(encoding="utf-8").lower().replace("docs/no-github.md", "")      # the gate reads no GitHub
 
-    class R:
-        def __init__(self, body):
-            self.body = body
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-        def read(self):
-            return json.dumps(self.body).encode()
-
-    def urlopen(req, timeout):
-        payloads.append(req.full_url)
-        return R(answer)
-
-    monkeypatch.setattr(dep.urllib.request, "urlopen", urlopen)
-    answer = {"workflow_runs": []}
-    assert real.ci_state("abc")[0] == "pending"
-    assert "/actions/workflows/core.yml/runs?head_sha=abc&event=push" in payloads[-1]
-    answer = {"workflow_runs": [{"status": "completed", "conclusion": "failure", "run_attempt": 1, "created_at": "1"},
-                                {"status": "completed", "conclusion": "success", "run_attempt": 2, "created_at": "1"}]}
-    assert real.ci_state("abc")[0] == "success", "a re-run that went green counts"
-    answer = {"workflow_runs": [{"status": "completed", "conclusion": "failure", "run_attempt": 1, "created_at": "2"}]}
-    assert real.ci_state("abc")[0] == "failure"
-    answer = {"workflow_runs": [{"status": "in_progress", "run_attempt": 1, "created_at": "3"}]}
-    assert real.ci_state("abc")[0] == "pending"
-    real.s = {**real.s, "CI_WORKFLOW": ""}
-    assert real.ci_state("abc") == ("success", "no CI gate")
-
-
-# ── repair and the doctor (the portal's one Recovery operation; skippy-core-doctor.timer) ──
 def test_repair_recreates_the_last_good_deploy_and_smoke_tests_it(box):
     d, commit, first = box
     d.run()
