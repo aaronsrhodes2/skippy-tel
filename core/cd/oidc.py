@@ -19,6 +19,8 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 KEY = Path(os.environ.get("OIDC_KEY", "/etc/skippy-core/gcp-oidc/signing.pem"))
@@ -91,6 +93,29 @@ def token(key: Path = KEY, token_file: Path = TOKEN_FILE, cred_file: Path = CRED
     finally:
         os.umask(old)
     return cred_file
+
+
+def _post_json(url: str, body: dict, headers: dict | None = None, urlopen=urllib.request.urlopen) -> dict:
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", **(headers or {})})
+    try:
+        with urlopen(req, timeout=30) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"{url.split('/')[2]} answered {e.code}: {e.read().decode('utf-8', 'replace')[:300]}") from None
+
+
+def id_token(audience: str, token_file: Path = TOKEN_FILE, urlopen=urllib.request.urlopen) -> str:
+    """A Google ID token for skippy-deployer with this `audience` (the portal's ops doors accept only that). The box's own signed token
+    is exchanged at Google's STS for a federated access token, which asks IAM Credentials for the ID token: what GitHub's auth step
+    did. (gcloud can't: its impersonation would need the deployer to be allowed to impersonate itself.)"""
+    federated = _post_json("https://sts.googleapis.com/v1/token", {
+        "grantType": "urn:ietf:params:oauth:grant-type:token-exchange", "audience": f"//iam.googleapis.com/{PROVIDER}",
+        "scope": "https://www.googleapis.com/auth/cloud-platform", "requestedTokenType": "urn:ietf:params:oauth:token-type:access_token",
+        "subjectToken": Path(token_file).read_text(encoding="utf-8"), "subjectTokenType": "urn:ietf:params:oauth:token-type:jwt"},
+        urlopen=urlopen)["access_token"]
+    return _post_json(f"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{DEPLOYER}:generateIdToken",
+                      {"audience": audience, "includeEmail": True}, {"Authorization": f"Bearer {federated}"}, urlopen=urlopen)["token"]
 
 
 def main(argv: list[str]) -> int:

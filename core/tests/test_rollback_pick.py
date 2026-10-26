@@ -1,6 +1,6 @@
-"""tools/rollback_pick.py: which Cloud Run revision the `rollback` workflow serves.
+"""core/cd/rollback_pick.py: which Cloud Run revision a rollback serves (cd.py rollback; it replaced the `rollback` workflow).
 
-The cloud steps of rollback.yml can't be run from here, but the one decision in it can: given the JSON of
+The cloud steps can't be run from here, but the one decision in them can: given the JSON of
 `gcloud run revisions list`, which revision does a blank "Run workflow" go back to? The rule it must keep: one step back from
 the revision SERVING NOW, never "the newest other than serving". After a failed deploy rolls itself back the newest revision is
 the broken one, and a Captain who taps rollback on a phone must not be sent onto it.
@@ -11,7 +11,9 @@ import json
 
 import pytest
 
-import rollback_pick as rp
+from core_testlib import load
+
+rp = load("cd/rollback_pick.py", "core_rollback_pick")
 
 IMG = "us-west1-docker.pkg.dev/skippy-tel/skippy/portal"
 

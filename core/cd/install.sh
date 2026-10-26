@@ -11,7 +11,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 do_() { if (( APPLY )); then echo "+ $*"; "$@"; else echo "would: $*"; fi; }
 
 do_ install -d -m 0755 /opt/skippy-core/cd /var/lib/skippy-core/cd
-do_ install -m 0755 "$HERE/cd.py" "$HERE/oidc.py" /opt/skippy-core/cd/
+do_ install -m 0755 "$HERE/cd.py" "$HERE/oidc.py" "$HERE/rollback_pick.py" /opt/skippy-core/cd/
 do_ install -m 0644 "$HERE/deploy.json" /opt/skippy-core/cd/deploy.json
 [[ -f /etc/skippy-core/gcp-oidc/signing.pem ]] || do_ python3 "$HERE/oidc.py" keygen
 do_ install -m 0644 "$HERE/skippy-core-cd.service" "$HERE/skippy-core-cd.timer" /etc/systemd/system/

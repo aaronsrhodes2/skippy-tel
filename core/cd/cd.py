@@ -20,7 +20,10 @@ State: /var/lib/skippy-core/cd/state.json (runs, what is deployed where); each r
 
     cd.py run                one pass (the timer)
     cd.py deploy [sha]       deploy now (main's newest green commit, or that one), whatever state.json says
-    cd.py rollback [rev]     send the portal's traffic to that revision (blank: the one before the serving one)
+    cd.py rollback [rev]     send the portal's traffic to that revision (blank: one step back from the serving one; latest: undo)
+    cd.py ops <command> ...  scripts/remote.py on this box's identity: status, logs, start, stop, restart, tail, search, stats,
+                             restart-game, backups, restore-game, discord-setup, home, configure (what the `ops` workflow did)
+    cd.py domains            tools/domains.py: the portal's domains (what the `domains` workflow did)
     cd.py status             state.json
 
 Settings (/etc/skippy-core/core.env, the environment overrides): CD_STATE, CI_LOCAL, CI_NAME, CD_VAULT (/etc/skippy-core/vault.env:
@@ -48,6 +51,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import oidc  # noqa: E402
+import rollback_pick  # noqa: E402
 
 ENV_FILE = "/etc/skippy-core/core.env"
 DEFAULTS = {"CD_STATE": "/var/lib/skippy-core/cd", "CI_LOCAL": "/var/lib/skippy-core/ci", "CI_NAME": "skippy-tel", "CI_BRANCH": "main",
@@ -88,6 +92,15 @@ def sha256_file(path: Path) -> str:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+DOMAINS_RUN = (
+    "import os, sys, google.auth, google.auth.transport.requests as r\n"
+    "c, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/cloud-platform', "
+    "'https://www.googleapis.com/auth/siteverification'])\n"
+    "c.refresh(r.Request())\n"
+    "os.environ['TOKEN'] = c.token\n"
+    "os.execv(sys.executable, [sys.executable, 'tools/domains.py'])\n")
 
 
 class Failed(Exception):
@@ -489,24 +502,89 @@ class CD:
         self.sh([*base, "apply", "-input=false", "-auto-approve", "-var", f"project={self.cfg['project']}"], timeout=1800)
 
     def rollback(self, revision: str = "") -> str:
-        """The portal's traffic onto `revision` (blank: the one before the serving one; "latest": the newest)."""
+        """The portal's traffic onto `revision`: blank = one step back from the revision SERVING NOW (never "the newest other than
+        serving": after a failed deploy rolled itself back, the newest is the broken one), `latest` = undo a rollback, or a name.
+        core/cd/rollback_pick.py decides; afterwards /health must answer."""
         if not getattr(self, "cfg", None):
             self.cfg = json.loads((HERE / "deploy.json").read_text(encoding="utf-8"))
         oidc.token()
         service, region = self.cfg["portal"]["service"], self.cfg["region"]
-        if revision == "latest":
+        serving = self.serving(service)
+        listing = self.gcloud("run", "revisions", "list", f"--service={service}", f"--region={region}", "--format=json", quiet=True)
+        revs = rollback_pick.newest_first(json.loads(listing or "[]"))
+        try:
+            target = rollback_pick.pick(revs, serving, revision)
+        except rollback_pick.Nothing as e:
+            raise Failed(f"nothing was changed: {e}")
+        if target == "latest":
             self.gcloud("run", "services", "update-traffic", service, f"--region={region}", "--to-latest")
-            return "latest"
-        if not revision:
-            names = self.gcloud("run", "revisions", "list", f"--service={service}", f"--region={region}",
-                                "--sort-by=~metadata.creationTimestamp", "--format=value(metadata.name)", "--limit=10").split()
-            now = self.serving(service)
-            later = names[names.index(now) + 1:] if now in names else names[1:]
-            if not later:
-                raise Failed("no earlier revision to roll back to")
-            revision = later[0]
-        self.gcloud("run", "services", "update-traffic", service, f"--region={region}", f"--to-revisions={revision}=100")
-        return revision
+        elif target != serving:
+            self.gcloud("run", "services", "update-traffic", service, f"--region={region}", f"--to-revisions={target}=100")
+        code, _ = self.http("GET", f"{self.url(service)}/health", tries=6, timeout=20)
+        if code != 200:
+            raise Failed(f"traffic is on {target}, but /health answers {code}: the problem is not the revision")
+        return target
+
+    # ── ops and domains: what the `ops` and `domains` GitHub workflows did, from this box ───────────────────────
+    def checkout_main(self) -> Path:
+        mirror = Path(self.s["CI_LOCAL"]) / self.s["CI_NAME"] / "mirror.git"
+        self.home.mkdir(parents=True, exist_ok=True)
+        work = Path(tempfile.mkdtemp(prefix="cd-main-", dir=str(self.home)))
+        sha = self.sh(["git", "rev-parse", self.s["CI_BRANCH"]], cwd=mirror, quiet=True).strip()
+        self.sh(["git", "clone", "--quiet", "--no-checkout", str(mirror), str(work / "src")], quiet=True)
+        self.sh(["git", "checkout", "--quiet", "--detach", sha], cwd=work / "src", quiet=True)
+        return work
+
+    def ops_image(self, src: Path) -> str:
+        """python:3.12-slim with the portal's requirements (scripts/remote.py uses the portal's own modules), named by their hash."""
+        req = src / "portal" / "requirements.txt"
+        tag = f"skippy-ops:{sha256_file(req)[:16]}"
+        if subprocess.run(["docker", "image", "inspect", tag], capture_output=True).returncode == 0:
+            return tag
+        ctx = Path(tempfile.mkdtemp(prefix="cd-ops-image-", dir=str(self.home)))
+        try:
+            shutil.copy(req, ctx / "requirements.txt")
+            (ctx / "Dockerfile").write_text("FROM python:3.12-slim\nCOPY requirements.txt /tmp/requirements.txt\n"
+                                            "RUN pip install --no-cache-dir -r /tmp/requirements.txt\n", encoding="utf-8")
+            self.sh(["docker", "build", "-q", "-t", tag, str(ctx)], timeout=1800)
+        finally:
+            shutil.rmtree(ctx, ignore_errors=True)
+        return tag
+
+    def python_in_house(self, args: list[str], env: dict[str, str] | None = None) -> int:
+        """`python <args>` in a container with the checkout of main at /src and this box's Google identity: stdout and stderr are
+        the caller's own (an operator is watching). Arguments go as separate argv items: never through a shell."""
+        self.cfg = json.loads((HERE / "deploy.json").read_text(encoding="utf-8"))
+        oidc.token()
+        work = self.checkout_main()
+        try:
+            src = work / "src"
+            image = self.ops_image(src)
+            envs = []
+            for k, v in {"GOOGLE_APPLICATION_CREDENTIALS": str(oidc.CRED_FILE), "GOOGLE_CLOUD_PROJECT": self.cfg["project"],
+                         **(env or {})}.items():
+                envs += ["-e", f"{k}={v}"]
+            cmd = ["docker", "run", "--rm", "--network", "host", "-v", f"{src}:/src:ro", "-v", f"{OIDC_DIR}:{OIDC_DIR}:ro",
+                   "-w", "/src", "-e", "PYTHONDONTWRITEBYTECODE=1", *envs, image, "python", *args]
+            return subprocess.run(cmd).returncode
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
+    def ops(self, argv: list[str]) -> int:
+        """scripts/remote.py <command> <args>: the games VM and the portal's ops doors (status, logs, start, stop, restart, tail,
+        search, stats, restart-game, backups, restore-game, discord-setup, home, configure). `home` and `discord-setup` ask the
+        portal, which accepts only a Google ID token for the deployer: minted here, for the portal's ops audience."""
+        self.cfg = json.loads((HERE / "deploy.json").read_text(encoding="utf-8"))
+        env = {}
+        if argv and argv[0] in ("home", "discord-setup"):
+            oidc.token()
+            env["OPS_ID_TOKEN"] = oidc.id_token("skippy-portal-ops")
+        return self.python_in_house(["scripts/remote.py", *argv], env)
+
+    def domains(self) -> int:
+        """tools/domains.py: the portal's own domains (Cloud DNS, Google ownership, Cloud Run mappings). Idempotent. It needs an
+        access token with the cloud-platform and siteverification scopes, minted here from this box's identity."""
+        return self.python_in_house(["-c", DOMAINS_RUN])
 
     # ── the timer ───────────────────────────────────────────────────────────────
     def handle(self, requests: list[dict]) -> None:
@@ -536,11 +614,46 @@ class CD:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
                 return
+            sha = self.green()
+            if sha:
+                self.self_update(sha)
             self.handle(self.report())
             sha = self.green()
             if sha and sha != self.state.get("delivered"):
                 self.deploy(sha)
             self.report()
+
+    SELF_FILES = ("cd.py", "oidc.py", "rollback_pick.py", "deploy.json")
+
+    INSTALLED = Path("/opt/skippy-core/cd")
+
+    def self_update(self, sha: str, here: Path | None = None) -> None:
+        """The installed copy takes the version in the commit CI has just passed, then starts over as that version: a change to the
+        deployer is deployed with the tests it passed, with no hand step (an installed copy left behind once ran an old build for
+        an hour). Only the installed copy does this, and only once per start (no loops)."""
+        here = here or Path(__file__).resolve().parent
+        if here != self.INSTALLED or os.environ.get("CD_SELF_UPDATED"):
+            return
+        mirror = Path(self.s["CI_LOCAL"]) / self.s["CI_NAME"] / "mirror.git"
+        fresh = {}
+        for name in self.SELF_FILES:
+            r = subprocess.run(["git", "show", f"{sha}:core/cd/{name}"], cwd=mirror, capture_output=True)
+            if r.returncode != 0 or not r.stdout:
+                return                                       # the commit lacks a file: touch nothing
+            fresh[name] = r.stdout
+        changed = False
+        for name, data in fresh.items():
+            old = (here / name).read_bytes() if (here / name).is_file() else b""
+            if data != old:
+                tmp = here / f".{name}.new"
+                tmp.write_bytes(data)
+                os.chmod(tmp, 0o755 if name.endswith(".py") else 0o644)
+                tmp.replace(here / name)
+                changed = True
+        if changed:
+            self.say("cd: the installed deployer was behind this commit; updated, starting over")
+            os.environ["CD_SELF_UPDATED"] = "1"
+            os.execv(sys.executable, [sys.executable, str(here / "cd.py"), "run"])
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -563,6 +676,10 @@ def main(argv: list[str]) -> int:
     if cmd == "rollback":
         print(cd.rollback(argv[1] if len(argv) > 1 else ""))
         return 0
+    if cmd == "ops":
+        return cd.ops(argv[1:])
+    if cmd == "domains":
+        return cd.domains()
     if cmd == "status":
         print(json.dumps(cd.state, indent=1))
         return 0
