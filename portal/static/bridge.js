@@ -10,9 +10,8 @@
    refreshes on its own when the panel is resized). A panel marked .pg gets its pager as panel._pager.
    Nothing here talks to the network. */
 (function () {
-  document.addEventListener("touchstart", function () {}, { passive: true });
   document.addEventListener("touchmove", function (e) {
-    // allow a drag only inside something that is meant to scroll or be dragged (a field, a marked panel)
+    // allow a drag only inside something that is meant to scroll or be dragged (a field, a marked panel, the chat transcript)
     var el = e.target.closest && e.target.closest("textarea, input, select, [data-pan], .log");
     if (!el) e.preventDefault();
   }, { passive: false });
