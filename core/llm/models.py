@@ -299,8 +299,14 @@ def main(argv: list[str] | None = None) -> int:
         out = Path(a.out)
         out.mkdir(parents=True, exist_ok=True)
         for name, data in (("shim.json", shim), ("config.yaml", config)):   # llama-swap watches the file: never let it read half of one
+            text = json.dumps(data, indent=2) + "\n"
+            try:
+                if (out / name).read_text(encoding="utf-8") == text:
+                    continue                                   # unchanged: replacing it would make llama-swap reload every model
+            except OSError:
+                pass
             tmp = out / f".{name}.tmp"
-            tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            tmp.write_text(text, encoding="utf-8")
             os.replace(tmp, out / name)
         print(f"rendered {out}/config.yaml: " + ", ".join(f"{n}={s['variant']}" for n, s in chosen.items()))
     elif a.cmd == "check":

@@ -10,6 +10,7 @@ ENV_FILE=/etc/skippy-core/core.env
 do_() { if (( APPLY )); then echo "+ $*"; "$@"; else echo "would: $*"; fi; }
 
 do_ install -d -m 0755 /opt/skippy-core/ci /var/lib/skippy-core/ci
+do_ install -m 0644 "$HERE/../quiet.py" /opt/skippy-core/quiet.py
 do_ install -m 0755 "$HERE/ci.py" /opt/skippy-core/ci/ci.py
 do_ install -m 0644 "$HERE/skippy-core-ci.service" "$HERE/skippy-core-ci.timer" /etc/systemd/system/
 if ! grep -q '^CI_LOCAL=' "$ENV_FILE" 2>/dev/null; then

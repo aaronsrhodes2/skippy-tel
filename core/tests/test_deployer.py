@@ -48,6 +48,10 @@ class Fake(dep.Deployer):
         self.ran = getattr(self, "ran", []) + [cmd]
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
+    def compose_build(self, full):
+        if not self._fake().get("build", True):
+            raise subprocess.CalledProcessError(1, "build", "", "COPY .vendor failed")
+
     def smoke(self, full):
         ok = self._fake().get("smoke", True)
         return [{"check": "chat", "ok": ok, "detail": "" if ok else "no reply"}]
@@ -74,7 +78,7 @@ def box(tmp_path):
 
     first = commit()
     git(tmp_path, "clone", "--quiet", str(origin), str(clone))
-    settings = {**dep.DEFAULTS, "REPO_DIR": str(clone), "CORE_STATE": str(tmp_path / "state")}
+    settings = {**dep.DEFAULTS, "REPO_DIR": str(clone), "CORE_STATE": str(tmp_path / "state"), "QUIET": "0"}
     return Fake(settings), commit, first
 
 
@@ -122,6 +126,8 @@ def test_a_failed_build_rolls_back_but_is_retried(box):
     row = d.run()
     assert row["state"] == "rolled-back" and row["will_retry"] is True and d.running == (first, "")
     assert f"{flaky}|" not in d.state()["bad"]
+    assert d.run()["state"] == "retry-later"            # but not every two minutes
+    d.s["RETRY_S"] = "0"
     (d.repo / "fake.json").write_text("{}")             # the network is back (the fake reads the checkout)
     d._fake = lambda: {}
     assert d.run()["state"] == "ok" and d.running == (flaky, "")
@@ -268,3 +274,25 @@ def test_the_matter_compose_file_is_pinned_on_the_host_network_and_keeps_its_fab
     assert "network_mode: host" in text and "/run/dbus:/run/dbus:ro" in text
     assert "${CORE_STATE:-/var/lib/skippy-core}/matter:/data" in text and "${MATTER_ARGS:-}" in text
     assert "ports:" not in text                                                  # host network: the firewall decides (install/matter.sh)
+
+
+def test_a_failed_build_touches_nothing_and_waits_before_trying_again(box):
+    d, commit, first = box
+    d.run()
+    broken = commit(build=False)
+    row = d.run()
+    assert row["state"] == "refused" and row["stage"] == "build" and d.running == (first, "")   # no rollback, nothing redeployed
+    assert d.deployed == [(first, "")]
+    assert d.run()["state"] == "retry-later"                                                    # not every two minutes
+    d._write("retry.json", {f"{broken}|": 0})                                                   # the wait is over
+    fixed = commit()
+    assert d.run()["state"] == "ok" and d.running == (fixed, "")
+
+
+def test_it_holds_a_deploy_while_the_private_skippy_is_working(box, monkeypatch):
+    d, commit, first = box
+    d.s["QUIET"] = "1"
+    monkeypatch.setattr(dep.quiet, "busy", lambda *a, **k: True)
+    assert d.run()["state"] == "deferred" and d.running is None
+    monkeypatch.setattr(dep.quiet, "busy", lambda *a, **k: False)
+    assert d.run()["state"] == "ok" and d.running == (first, "")

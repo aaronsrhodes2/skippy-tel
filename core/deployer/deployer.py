@@ -44,12 +44,20 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))        # core/quiet.py (installed beside the copies in /opt/skippy-core)
+try:
+    import quiet
+except ImportError:                           # the doctor's copy runs without it: it never defers
+    quiet = None
+
 DEFAULTS = {
     "REPO_DIR": "/opt/skippy-core/repo", "REMOTE": "origin", "BRANCH": "main",
     "CORE_FULL": "", "CORE_STATE": "/var/lib/skippy-core", "MODELS_ROOT": "/srv/models", "CORE_GPU": "1",
     "CORE_VAULT_ENV": "/etc/skippy-core/vault.env", "MUSIC_ROOT": "/srv/music", "SMOKE_WAIT": "900",
     "OLLAMA_MODEL": "qwen3:8b", "LLM_API_KEY": "", "CORE_MATTER": "0", "MATTER_ARGS": "",
     "CORE_POPUPS3D": "0", "CI_LOCAL": "", "CI_NAME": "skippy-tel",
+    "CD_PY": "/opt/skippy-core/cd/cd.py", "RETRY_S": "1800", "QUIET": "1",
 }
 KEEP_BAD = 50
 
@@ -199,9 +207,20 @@ class Deployer:
             args += ["--out", str(Path(self.s["CORE_STATE"]) / "llm")]
         return self.sh(args, full=full, timeout=600, check=False)
 
+    def prepare_vendor(self) -> None:
+        """The Mentat build copies .vendor/sigma-ground from the build context: have core/cd/cd.py lay it out from the trunk."""
+        cd = Path(self.s["CD_PY"])
+        if cd.is_file():
+            self.sh([sys.executable, str(cd), "vendor", str(self.repo)], timeout=600)
+
+    def compose_build(self, full: str) -> None:
+        self.prepare_vendor()
+        self.sh(["docker", "compose", "-p", "skippycore", *self.compose_files(), "build"], full=full, timeout=3600)
+
     def compose_up(self, full: str, recreate: bool = False) -> None:
         for sub in ("flask-api", "drive-state"):
             (Path(self.s["CORE_STATE"]) / sub).mkdir(parents=True, exist_ok=True)
+        self.prepare_vendor()
         self.sh(["docker", "compose", "-p", "skippycore", *self.compose_files(), "up", "-d", "--build", "--remove-orphans",
                  *(["--force-recreate"] if recreate else []), "--wait", "--wait-timeout", "900"],
                 full=full, timeout=3600)
@@ -221,6 +240,10 @@ class Deployer:
             raise StepFailed("models", (r.stderr or r.stdout).strip()[-500:])
         if r.returncode != 0:
             raise StepFailed("models", (r.stderr or r.stdout).strip()[-500:], bad=False)
+        try:                                                # build first: a build that fails touches nothing that is running
+            self.compose_build(full)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            raise StepFailed("build", (getattr(e, "stderr", "") or str(e))[-500:], bad=False, rollback=False) from None
         r = self.models("render", full)
         if r.returncode != 0:
             raise StepFailed("render", (r.stderr or r.stdout).strip()[-500:])
@@ -236,6 +259,21 @@ class Deployer:
             raise err
         return results
 
+    def defer(self) -> bool:
+        if quiet is None or self.s["QUIET"] == "0":
+            return False
+        return quiet.should_defer(self.dir / "busy-since")
+
+    def retry_wait(self, key: str) -> float:
+        """Seconds left before a key whose deploy failed for a reason that may pass (a build, models not there) is tried again."""
+        at = self._read("retry.json", {}).get(key)
+        if not at:
+            return 0
+        return max(0.0, float(at) + float(self.s["RETRY_S"]) - time.time())
+
+    def note_retry(self, key: str) -> None:
+        self._write("retry.json", {key: time.time()})
+
     def run(self) -> dict:
         full = norm_full(self.s["CORE_FULL"])
         try:
@@ -249,18 +287,25 @@ class Deployer:
             return self.status("ok", commit=commit, full=full, detail="up to date")
         if key in st["bad"]:
             return self.status("known-bad", commit=commit, full=full, detail=st["bad"][key]["reason"])
+        wait = self.retry_wait(key)
+        if wait:
+            return self.status("retry-later", commit=commit, full=full, detail=f"last try failed; next in {int(wait // 60)} min")
         ci, detail = self.ci_state(commit)
         if ci == "pending":
             return self.status("waiting-ci", commit=commit, full=full, detail=detail)
         if ci == "failure":
             self.mark_bad(key, f"ci: {detail}")
             return self.status("ci-failed", commit=commit, full=full, detail=detail)
+        if self.defer():
+            return self.status("deferred", commit=commit, full=full, detail="the private Skippy is working: holding the deploy")
         self.status("deploying", commit=commit, full=full)
         try:
             results = self.deploy(commit, full)
         except StepFailed as e:
             if e.bad:
                 self.mark_bad(key, str(e))
+            else:
+                self.note_retry(key)
             if e.rollback:                                  # a red smoke, or a build that half-happened
                 return self.rollback(commit, full, e)
             if good:                                        # the models aren't there yet: leave the running stack alone
@@ -400,7 +445,7 @@ def main(argv: list[str] | None = None) -> int:
         row = d.repair() if cmd == "repair" else d.run()
     if cmd == "repair":
         print(json.dumps({k: row.get(k) for k in ("state", "detail", "stage", "commit")}), flush=True)
-    return 0 if row["state"] in ("ok", "waiting-ci", "known-bad", "refused") else 1
+    return 0 if row["state"] in ("ok", "waiting-ci", "known-bad", "refused", "deferred", "retry-later") else 1
 
 
 if __name__ == "__main__":

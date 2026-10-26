@@ -35,6 +35,10 @@ import tempfile
 import time
 from pathlib import Path
 
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+import quiet  # noqa: E402
+
 ENV_FILE = "/etc/skippy-core/core.env"
 DEFAULTS = {"CI_REPOS": "skippy-tel=/mnt/pc/trunk/git/skippy-tel.git", "CI_STATE": "/var/lib/skippy-core/ci", "CI_BRANCH": "main",
             "CI_CPUS": "8", "CI_MEMORY": "16g", "CI_TIMEOUT_S": "1500"}
@@ -222,6 +226,8 @@ class CI:
             except OSError:
                 return []                                 # a run is still going: this tick has nothing to add
             done = []
+            if quiet.should_defer(self.state / "busy-since"):
+                return done                               # the private Skippy is working: tests wait (they use the CPUs)
             for name, source in repos(self.s).items():
                 try:
                     got = self.check(name, source)

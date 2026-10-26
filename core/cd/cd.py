@@ -51,6 +51,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent))
+import quiet  # noqa: E402
 import oidc  # noqa: E402
 import rollback_pick  # noqa: E402
 
@@ -615,6 +617,9 @@ class CD:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
                 return
+            if quiet.should_defer(self.home / "busy-since"):
+                self.log("the private Skippy is working: holding this tick")
+                return
             sha = self.green()
             if sha:
                 self.self_update(sha)
@@ -782,6 +787,9 @@ def main(argv: list[str]) -> int:
         return cd.ops(argv[1:])
     if cmd == "domains":
         return cd.domains()
+    if cmd == "vendor":                                   # the Core deployer's Mentat build: <dest>/.vendor/sigma-ground
+        cd.vendor(Path(argv[1]), star_control=False)
+        return 0
     if cmd == "status":
         print(json.dumps(cd.state, indent=1))
         return 0
