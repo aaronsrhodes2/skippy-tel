@@ -62,6 +62,17 @@ own machines in plain Docker.
     way back while GitHub is still a mirror. First automatic deploy: run 2, 6dd397f (CI 53 s, then live).
   - Still on GitHub's API, to move in phase 5: the `ops` and `domains` workflows, the bridge's `ship` card links, `loop_timer.py`.
 
+- **Off-site backup, done 2026-10-25:**
+  - `core/backup/backup.py` on skippy-core (timer 03:30 nightly, its own copy in `/opt/skippy-core/backup`: re-run
+    `core/backup/install.sh --apply` after changing it) bundles every bare repo in the trunk and uploads it to
+    `gs://skippy-tel-git-backup/<name>.bundle`, signed in keylessly;
+  - a repo is uploaded only when its refs changed; each bundle is verified by git, and the bucket's MD5 must match the file's;
+  - the bucket is versioned: a changed repo's older bundles stay 90 days. An empty repo is noted, and an absent trunk
+    (skippy-pc off) is a quiet no-op;
+  - first run: 21 repos, 495 MB (Mycelium has no commits). **Proved by restoring `skippy-tel` from the bucket:** the same `main`
+    commit and 493 commits as the trunk. Restore any repo with
+    `sudo python3 /opt/skippy-core/backup/backup.py restore <name> <dir>`.
+
 ## Phases (each ends working and checked; GitHub keeps receiving pushes as a mirror until the last)
 
 1. **Git home:**
