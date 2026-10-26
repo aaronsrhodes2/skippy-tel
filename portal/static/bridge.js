@@ -11,10 +11,18 @@
    Nothing here talks to the network. */
 (function () {
   document.addEventListener("touchmove", function (e) {
-    // allow a drag only inside something that is meant to scroll or be dragged (a field, a marked panel, the chat transcript)
-    var el = e.target.closest && e.target.closest("textarea, input, select, [data-pan], .log");
-    if (!el) e.preventDefault();
-  }, { passive: false });
+    // block horizontal drags (the page never scrolls horizontally); let vertical scroll through natively
+    // iOS Safari breaks on passive:false — passive:true lets the browser handle vertical scrolls,
+    // and we only preventDefault for horizontal drags where the browser would do nothing anyway.
+    if (e.touches.length === 1) {
+      var t = e.touches[0], dx = t.clientX - (this._x0 || t.clientX), dy = t.clientY - (this._y0 || t.clientY);
+      if (!this._x0) { this._x0 = t.clientX; this._y0 = t.clientY; return; }
+      if (Math.abs(dx) > 40 && Math.abs(dx) > 1.5 * Math.abs(dy)) e.preventDefault();
+    }
+  }, { passive: true });
+  document.addEventListener("touchstart", function (e) {
+    if (e.touches.length === 1) { this._x0 = e.touches[0].clientX; this._y0 = e.touches[0].clientY; }
+  }, { passive: true });
 
   var Bridge = window.Bridge = window.Bridge || {};
 
