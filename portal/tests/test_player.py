@@ -365,7 +365,7 @@ def test_the_player_uses_the_portals_colours_and_keeps_every_focus_ring():
 def test_the_music_page_is_on_the_bridge_with_its_own_glyph(client):
     login(client, ADMIN)
     page = client.get("/music").data.decode()
-    assert '<body class="bridge"' in page and 'href="/static/bridge.css"' in page and "bridge.js" in page
+    assert '<body class="bridge"' in page and 'href="/static/bridge.css' in page and "bridge.js" in page
     assert '<use href="#g-wave"/>' in page                                                 # the strip's mark: the same glyph as its control on the launcher
     assert '<h1 class="apptitle"' not in page and 'id="home-btn"' not in page                               # none of the old pages' chrome
     glyphs = set(re.findall(r'<symbol id="g-([\w-]+)"', (PORTAL / "templates" / "_glyphs.html").read_text(encoding="utf-8")))

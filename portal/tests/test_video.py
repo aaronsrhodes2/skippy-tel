@@ -305,7 +305,7 @@ def test_a_friend_gets_a_read_only_pass_the_captain_a_read_write_one(client):
 def test_the_video_page_is_on_the_bridge_with_its_own_glyph(client):
     login(client, ADMIN)
     page = client.get("/video").data.decode()
-    assert '<body class="bridge"' in page and 'href="/static/bridge.css"' in page
+    assert '<body class="bridge"' in page and 'href="/static/bridge.css' in page
     assert page.index("/static/bridge-pure.js") < page.index("/static/bridge.js") < page.index("/static/nagatha-core.js")
     assert '<use href="#g-lens"/>' in page                                                  # the strip's mark: the same glyph as its control on the launcher
     assert '<h1 class="apptitle"' not in page and 'id="home-btn"' not in page               # none of the old pages' chrome
