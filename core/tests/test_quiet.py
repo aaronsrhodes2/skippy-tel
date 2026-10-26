@@ -19,3 +19,11 @@ def test_busy_defers_then_gives_up_after_the_limit(tmp_path):
 
 def test_an_unreachable_bridge_is_not_busy():
     assert quiet.busy("http://127.0.0.1:9/health", timeout=1) is False
+
+
+def test_busy_reads_the_bridges_nested_workshop_flag(monkeypatch):
+    import io
+    import json
+    for body, want in (({"workshop": {"busy": True}}, True), ({"workshop": {"busy": False}}, False), ({"busy": True}, True)):
+        monkeypatch.setattr(quiet.urllib.request, "urlopen", lambda *a, _b=body, **k: io.BytesIO(json.dumps(_b).encode()))
+        assert quiet.busy("http://x/health") is want

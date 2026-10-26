@@ -22,7 +22,8 @@ def busy(url: str | None = None, timeout: float = 5) -> bool:
             got = json.loads(r.read() or b"{}")
     except (OSError, ValueError):
         return False
-    return bool(got.get("busy"))
+    w = got.get("workshop")
+    return bool((w if isinstance(w, dict) else got).get("busy"))      # the bridge nests it: {"workshop": {"busy": ...}}
 
 
 def should_defer(state_file: Path, now: float | None = None, is_busy=None) -> bool:
