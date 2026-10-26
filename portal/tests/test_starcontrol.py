@@ -254,15 +254,15 @@ def test_the_fetch_command_builds_without_the_game_when_no_release_is_pinned(tmp
 
 
 def test_the_image_and_the_deploy_pin_the_same_release(tmp_path):
-    """portal/Dockerfile fetches the game; deploy.yml says which release and its checksum, and proves it shipped."""
+    """portal/Dockerfile fetches the game; core/cd/deploy.json (skippy-core's deployer) says which release and its checksum, and its
+    smoke test proves it shipped."""
+    import json
     from pathlib import Path
     root = Path(portal.__file__).resolve().parents[1]
     docker = (root / "portal" / "Dockerfile").read_text(encoding="utf-8")
-    deploy = (root / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
+    cfg = json.loads((root / "core" / "cd" / "deploy.json").read_text(encoding="utf-8"))
+    cd = (root / "core" / "cd" / "cd.py").read_text(encoding="utf-8")
     assert "starcontrol_fetch.py" in docker and "ARG STARCONTROL_REF" in docker and "ARG STARCONTROL_SHA256" in docker
     assert docker.index("starcontrol_fetch.py") < docker.index("COPY portal/ .")     # before the portal's files: stays cached
-    ref = re.search(r"^  STARCONTROL_REF: (\S+)$", deploy, re.M)
-    sha = re.search(r"^  STARCONTROL_SHA256: ([0-9a-f]{64})$", deploy, re.M)
-    assert ref and sha
-    assert "STARCONTROL_REF=${{ env.STARCONTROL_REF }}" in deploy and "STARCONTROL_SHA256=${{ env.STARCONTROL_SHA256 }}" in deploy
-    assert "/starcontrol/version" in deploy                                    # the smoke test checks the game is bundled
+    assert cfg["pins"]["STARCONTROL_REF"] and re.fullmatch(r"[0-9a-f]{64}", cfg["pins"]["STARCONTROL_SHA256"])
+    assert "/starcontrol/version" in cd                                        # the smoke test checks the game is bundled

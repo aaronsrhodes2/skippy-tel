@@ -101,24 +101,10 @@ cd "$ROOT/infra/gcp-games"
 terraform init -input=false -migrate-state -force-copy -backend-config="bucket=$BUCKET" >/dev/null
 echo "  done"
 
-# ── 6. point the workflow at this project, and push = first deploy ────────────
-say "Wiring GitHub Actions to this project"
-cd "$ROOT"
-WORKFLOW=.github/workflows/deploy.yml
-if grep -q "WIF_PROVIDER: projects/PROJECT_NUMBER" "$WORKFLOW"; then
-  sed -i "/WIF_PROVIDER: /s/PROJECT_NUMBER/$NUMBER/" "$WORKFLOW"
-  git add "$WORKFLOW"
-  git -c user.name="Skippy bootstrap" -c user.email="noreply@skippy-tel" \
-    commit -q -m "Point deploy workflow at GCP project $PROJECT ($NUMBER)"
-  if git push -q; then
-    echo "  pushed — the first deploy is running in GitHub Actions."
-  else
-    echo "  push failed. Tell Claude: project number is $NUMBER — it can make this edit."
-  fi
-else
-  echo "  already wired."
-fi
+# ── 6. deploys: skippy-core makes them now (core/cd, signed in through the skippy-core provider above; docs/no-github.md) ──
+say "Deploys"
+echo "  skippy-core deploys every commit its own CI passes (core/cd/cd.py); nothing to wire here."
 
 say "Done"
 echo "  Portal: $PORTAL_URL"
-echo "  From now on: tell Claude what to change; a push deploys it."
+echo "  From now on: tell Claude what to change; a push to the house git deploys it (through skippy-core)."

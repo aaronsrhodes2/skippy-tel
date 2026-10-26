@@ -97,8 +97,11 @@ Code changes: rebuild: `docker compose up --build -d flask-api`
 The Captain doesn't run commands or fetch logs. Claude does, through GitHub
 Actions (the sandbox can't reach GCP or run.app directly):
 
-- **Deploy:** push to `main` (the only branch Google trusts; see "Branches and deploys") → `deploy.yml`
-  (tests → Terraform `infra/gcp-games` → portal to Cloud Run). Redeploy without
+- **Deploy (since 2026-10-25, docs/no-github.md):** push `main` to the house git → skippy-core's CI (`core/ci`) tests it →
+  skippy-core's deployer (`core/cd/cd.py`, settings and pins in `core/cd/deploy.json`) deploys the portal to Cloud Run (and Mentat
+  cloud and `infra/gcp-games` Terraform when they changed), signed in to Google with no key (its own signing key, trusted by the
+  `skippy-core` provider in infra/bootstrap). Redeploy or roll back: Admin > Recovery (it asks skippy-core), or on skippy-core
+  `sudo python3 /opt/skippy-core/cd/cd.py deploy|rollback`. GitHub's `rollback` and `ops` workflows still work as the phone's way back. Redeploy without
   a code change: `workflow_dispatch` on `deploy.yml` (e.g. after a secret changes).
   **Time it / check before pushing:** `python tools/loop_timer.py --watch --since now` (before the push; `make loop-watch`) prints
   "prompt sent -> new version visible" stage by stage from GitHub's stamps and the portal's public `/version`;
@@ -318,7 +321,7 @@ the browser by every signed-in person (core and friends alike; a card in the Bro
 image carries the game). The portal only hands out files: `portal/starcontrol.py` + the `starcontrol` blueprint in `app.py`
 (`/starcontrol/` the page with the app bar injected, `/starcontrol/<file>` the bundle parts and the music,
 `/starcontrol/version` public, read by the deploy's smoke test). The files are NOT in this repo: `portal/Dockerfile`
-runs `portal/starcontrol_fetch.py`, which downloads the game repo's GitHub Release pinned in `deploy.yml`
+runs `portal/starcontrol_fetch.py`, which downloads the game repo's GitHub Release pinned in `core/cd/deploy.json`
 (`STARCONTROL_REF` + `STARCONTROL_SHA256`), checks the hash and unpacks it into the image. **To ship a new build of
 the game:** in the game repo run `python tools/build_web.py --tarball`, publish `build/scz-web.tar.gz` as a release,
 then change both pins here and push. Keyboard or controller only; a phone or tablet waits for a controller before it

@@ -2,6 +2,7 @@
 be refused, cut short or timed out by the next). Each test reads the real numbers from every hop of one chain and fails when they
 stop nesting: a downstream hop takes at least what the upstream one can send (after base64), and an outer wait outlasts the work
 inside it. Change one hop and this tells you which others must move with it."""
+import json
 import re
 from pathlib import Path
 
@@ -84,7 +85,8 @@ def test_the_captains_long_chats_keep_saving():
 
 def test_the_portal_has_a_thread_for_every_request_cloud_run_sends_it():
     threads = int(re.search(r"--threads (\d+)", text("portal/Dockerfile")).group(1))
-    concurrency = int(re.search(r"--concurrency (\d+) \\\n\s+--memory 1Gi", text(".github/workflows/deploy.yml")).group(1))
+    flags = json.loads(text("core/cd/deploy.json"))["portal"]["flags"]
+    concurrency = int(flags[flags.index("--concurrency") + 1])
     assert threads == concurrency >= 32
 
 

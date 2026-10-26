@@ -3,7 +3,7 @@
 The game lives in its own repo (github.com/aaronsrhodes2/star-control-precursors). Its web build
 (Python compiled to WebAssembly by pygbag; `tools/build_web.py` there) is published as a GitHub
 Release, and the portal image carries one copy of it, fetched by portal/Dockerfile at the release
-pinned in .github/workflows/deploy.yml (STARCONTROL_REF) into STARCONTROL_DIR:
+pinned in core/cd/deploy.json (STARCONTROL_REF) into STARCONTROL_DIR:
 
     index.html            the door: loads the game on a computer; on a phone or tablet it waits
                           for a controller (the game has no touch controls)

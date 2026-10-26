@@ -376,20 +376,26 @@ def test_the_report_stays_short_for_a_big_change(repo, capfd):
 
 # ── the real repository ──────────────────────────────────────────────────────────────
 
+def ci_commands() -> list[str]:
+    """The pytest commands skippy-core's CI runs (core/ci/ci.py PLANS), read from the file itself (it needs Linux to import)."""
+    import ast
+    tree = ast.parse((ROOT / "core" / "ci" / "ci.py").read_text(encoding="utf-8"))
+    plans = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "PLANS")
+    return [job["cmd"] for jobs in plans.values() for job in jobs if "pytest" in job["cmd"]]
+
+
 def ci_test_dirs() -> set[str]:
-    """Every test directory the CI workflows hand to pytest, read from the workflow files themselves."""
+    """Every test directory the CI hands to pytest."""
     found = set()
-    for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if "pytest" in line and "pip install" not in line:
-                found |= set(re.findall(r"(?<![\w/.-])((?:[\w-]+/)+tests)\b", line))
+    for cmd in ci_commands():
+        found |= set(re.findall(r"(?<![\w/.-])((?:[\w-]+/)+tests)\b", cmd))
     return found
 
 
 def test_the_full_plan_covers_every_directory_ci_runs():
     """Drift guard: if CI starts running a folder this tool doesn't know, FULL would be narrower than the gate."""
     ci = ci_test_dirs()
-    assert {"portal/tests", "services/flask-api/tests"} <= ci, f"the scan of the workflows found {ci}"
+    assert {"portal/tests", "services/flask-api/tests"} <= ci, f"the scan of the CI plan found {ci}"
     assert ci <= ALL_DIRS, f"CI runs {sorted(ci - ALL_DIRS)}: add it to affected_tests.MAIN (or FLASK)"
     plan = at.make_plan(["requirements.txt"], ROOT)
     assert {d for paths in plan.targets.values() for d in paths} == ALL_DIRS
@@ -397,10 +403,9 @@ def test_the_full_plan_covers_every_directory_ci_runs():
 
 def test_flask_api_stays_out_of_the_main_session_as_in_ci():
     assert "services/flask-api/tests" not in at.MAIN and set(at.FLASK) == {"services/flask-api/tests"}
-    for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if "pytest" in line and "services/flask-api/tests" in line:
-                assert "portal/tests" not in line, "flask-api's tests can't share a session with the portal's (its `app` package vs app.py)"
+    for cmd in ci_commands():
+        if "services/flask-api/tests" in cmd:
+            assert "portal/tests" not in cmd, "flask-api's tests can't share a session with the portal's (its `app` package vs app.py)"
 
 
 def test_every_test_folder_in_the_repo_has_a_session():

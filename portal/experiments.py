@@ -1,7 +1,7 @@
 """Experiments: the public showcase of the Captain's projects.
 
 v1 is sigma-ground (github.com/aaronsrhodes2/sigma-ground, pinned in
-.github/workflows/deploy.yml as SIGMA_GROUND_REF):
+core/cd/deploy.json's pins as SIGMA_GROUND_REF):
   • Mentat playground — the physics tools, live, through the skippy-mentat service
   • Weapon vs. Armor — sigma-ground's game: its own solver runs on Mentat (mentat/wva.py),
     the page only draws the fight (listed under Browser Games, play.py; its URL stays here)

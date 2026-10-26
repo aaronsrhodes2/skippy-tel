@@ -40,7 +40,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# The two CI commands (.github/workflows/deploy.yml `test` job). tools/tests/test_affected_tests.py fails if CI names a directory
+# The two CI commands (skippy-core's CI: core/ci/ci.py PLANS). tools/tests/test_affected_tests.py fails if CI names a directory
 # that is not here, so "FULL" can never become narrower than the gate.
 MAIN = ("portal/tests", "memory/tests", "tools/tests", "services/home-reporter/tests", "services/claude-bridge/tests", "services/wa-trickle/tests", "mentat/tests", "core/tests")
 FLASK = ("services/flask-api/tests",)             # its `app` package can't share a session with the portal's app.py, and it has its own requirements

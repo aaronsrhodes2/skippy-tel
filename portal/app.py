@@ -2,7 +2,7 @@
 their Discord channels, and the other services; chat with Skippy. Admins
 also get /admin: server settings, restart/update, Discord setup.
 
-Deployed by .github/workflows/deploy.yml on every push — see docs/cicd.md.
+Deployed by skippy-core (core/cd/cd.py, settings in core/cd/deploy.json) after every push its CI passes — see docs/no-github.md.
 Local run:  FLASK_APP=app.py flask run   (needs every var in .env.example)
 """
 from __future__ import annotations

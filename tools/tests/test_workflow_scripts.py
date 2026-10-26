@@ -1,4 +1,4 @@
-"""The shell inside deploy.yml's rollback step and rollback.yml, run for real against a stub `gcloud` and `curl`.
+"""The shell inside rollback.yml, run for real against a stub `gcloud` and `curl`.
 
 test_workflows.py reads the workflow files; this runs the exact `run:` text a runner would run (taken out of the YAML, not copied
 here), with `gcloud` and `curl` replaced by stubs that record their arguments, so the quoting, the order of calls and the exit
@@ -108,59 +108,9 @@ def step_run(workflow: str, job: str, needle: str) -> str:
 
 
 MOVE = step_run("rollback.yml", "rollback", "Move the traffic")
-DEPLOY_ROLLBACK = step_run("deploy.yml", "portal", "Roll back to the previous revision")
-DEPLOY_NOTE = step_run("deploy.yml", "portal", "Note the revision serving now")
 
 
-# ── deploy.yml: the rollback step ────────────────────────────────────────────
-
-def test_a_failed_deploy_moves_all_traffic_back_to_the_recorded_revision_and_says_so_loudly(tmp_path):
-    r = Rig(tmp_path, serving=name(6), PREV_REVISION=name(5))
-    done = r.run(DEPLOY_ROLLBACK)
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert r.moved() == [f"gcloud run services update-traffic skippy-portal --region us-west1 --to-revisions {name(5)}=100"]
-    assert f"::error::DEPLOY FAILED and was ROLLED BACK: the portal is serving {name(5)} again" in done.stdout
-    assert "fffffff" in done.stdout                                           # which commit it undid, 7 characters
-    assert any("curl" in c and "http://stub.invalid/health" in c and "--retry" in c for c in r.calls)    # and it checked health
-    assert f"ROLLED BACK to `{name(5)}`" in r.summary_text
-
-
-def test_if_the_rollback_itself_fails_the_step_fails_and_points_at_the_rollback_workflow(tmp_path):
-    r = Rig(tmp_path, serving=name(6), PREV_REVISION=name(5), STUB_UPDATE_FAIL="1")
-    done = r.run(DEPLOY_ROLLBACK)
-    assert done.returncode == 1
-    assert "::error::ROLLBACK FAILED" in done.stdout and "rollback" in done.stdout
-    assert not any("curl" in c for c in r.calls)                              # no health check to hide behind
-
-
-def test_if_health_does_not_answer_after_the_rollback_the_step_says_the_new_revision_was_not_the_cause(tmp_path):
-    r = Rig(tmp_path, serving=name(6), PREV_REVISION=name(5), STUB_CURL_RC="22")
-    done = r.run(DEPLOY_ROLLBACK)
-    assert done.returncode == 1
-    assert "/health still does not answer" in done.stdout and len(r.moved()) == 1     # traffic WAS moved back first
-
-
-def test_the_recording_step_notes_what_is_serving_and_survives_a_service_that_does_not_exist(tmp_path):
-    r = Rig(tmp_path, serving=name(5))
-    done = r.run(DEPLOY_NOTE + '\ncat "$GITHUB_ENV"\n')                      # what the next steps will see as env.PREV_REVISION
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert f"PREV_REVISION={name(5)}" in done.stdout
-    # a brand-new service: describe prints nothing -> no PREV_REVISION, a notice, and the deploy goes on
-    (tmp_path / "b").mkdir()
-    r2 = Rig(tmp_path / "b", serving="")
-    done = r2.run(DEPLOY_NOTE + '\ncat "$GITHUB_ENV"\n')
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert "PREV_REVISION=" not in done.stdout and "will NOT be rolled back" in done.stdout
-
-
-def test_a_describe_answer_that_is_not_a_revision_name_is_not_trusted(tmp_path):
-    r = Rig(tmp_path, serving="WARNING: something else gcloud printed")
-    done = r.run(DEPLOY_NOTE + '\ncat "$GITHUB_ENV"\n', timeout=60)
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert "PREV_REVISION=" not in done.stdout
-
-
-# ── rollback.yml ─────────────────────────────────────────────────────────────
+# (deploy.yml's own rollback step went with GitHub's deploy: skippy-core's cd.py rolls back, tested in core/tests/test_cd.py)
 
 def test_blank_goes_back_one_revision_lists_them_and_checks_health(tmp_path):
     r = Rig(tmp_path, serving=name(5), REVISION="")

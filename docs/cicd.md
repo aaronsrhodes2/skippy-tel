@@ -1,3 +1,7 @@
+> **Superseded 2026-10-25:** deploys no longer run in GitHub Actions. skippy-core tests (core/ci) and deploys (core/cd) every push
+> to the house git; see docs/no-github.md. What follows describes the old GitHub pipeline, kept for its history and for the
+> `rollback` and `ops` workflows, which still work.
+
 # CI/CD — push to deploy
 
 **The loop:** tell Claude what to change → Claude commits and pushes → GitHub

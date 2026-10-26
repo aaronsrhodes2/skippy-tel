@@ -1,7 +1,7 @@
 """Portal settings from environment variables (see .env.example).
 
 On Cloud Run the secrets come from Secret Manager via `--set-secrets` and
-the rest from `--set-env-vars`, both in .github/workflows/deploy.yml.
+the rest from `--set-env-vars`, both in core/cd/deploy.json (skippy-core's deployer).
 Secrets have no defaults: the app refuses to start without them rather than
 running unauthenticated.
 """

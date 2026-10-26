@@ -1,6 +1,6 @@
 # Mentat: sigma-ground's physics tools as a public JSON API (mentat/app.py), plus
 # sigma-ground's Weapon vs. Armor game solver (mentat/wva.py; games/weapon_vs_armor is in the tarball).
-# Built by .github/workflows/deploy.yml from the repo root:
+# Built by skippy-core's deployer (core/cd/cd.py) from the repo root:
 #   docker build -f mentat/Dockerfile --build-arg SIGMA_GROUND_REF=<sha> .
 FROM python:3.12-slim
 
