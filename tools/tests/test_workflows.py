@@ -1,4 +1,4 @@
-"""rollback.yml (the phone's way back while GitHub is still the mirror) and the runbook, as the files say they are. The deploy itself
+"""The workflows still on GitHub (ops, domains: until the cut-over) and the runbook, as the files say they are. The deploy itself
 left GitHub on 2026-10-25 (core/cd/cd.py on skippy-core; docs/no-github.md), and its tests went with it (core/tests/test_cd.py).
 
 The cloud steps can't run in CI (Google trusts only main's real runs), so the next best thing is pinned here: the files parse, the
@@ -49,7 +49,6 @@ def index_of(steps: list[dict], needle: str) -> int:
     return steps.index(step(steps, needle))
 
 
-ROLLBACK = load("rollback.yml")
 CI_PLAN = (ROOT / "core" / "ci" / "ci.py").read_text(encoding="utf-8")       # what skippy-core's CI runs
 
 
@@ -66,60 +65,11 @@ def test_the_dockerfile_bakes_the_build_identity_in_last_so_the_dependency_layer
     assert copies_after == []                                                   # nothing after them is ever cached
 
 
-# ── rollback.yml ─────────────────────────────────────────────────────────────
-
-def test_rollback_is_a_manual_workflow_with_one_optional_blank_input_so_a_phone_needs_no_typing():
-    on = triggers(ROLLBACK)
-    assert list(on) == ["workflow_dispatch"]
-    inputs = on["workflow_dispatch"]["inputs"]
-    assert list(inputs) == ["revision"]
-    assert inputs["revision"]["required"] is False and inputs["revision"]["default"] == ""
-
-
-def test_rollback_authenticates_as_the_deployer():
-    assert ROLLBACK["env"]["DEPLOYER_SA"] == "skippy-deployer@skippy-tel.iam.gserviceaccount.com"
-    assert ROLLBACK["env"]["WIF_PROVIDER"].endswith("/workloadIdentityPools/github/providers/github")
-    assert ROLLBACK["permissions"] == {"contents": "read", "id-token": "write"}
-    auth = [s for s in steps_of(ROLLBACK, "rollback") if str(s.get("uses", "")).startswith("google-github-actions/auth@")]
-    assert len(auth) == 1
-    assert any(str(s.get("uses", "")).startswith("google-github-actions/setup-gcloud@") for s in steps_of(ROLLBACK, "rollback"))
-
-
-def test_rollback_has_its_own_concurrency_group_so_a_pending_deploy_cannot_cancel_it():
-    assert ROLLBACK["concurrency"]["group"] == "rollback"
-    assert ROLLBACK["concurrency"]["cancel-in-progress"] is False
-
-
-def test_a_typed_revision_reaches_the_script_only_through_the_environment():
-    """`${{ inputs.revision }}` pasted into a shell script would let a typed value run commands."""
-    move = step(steps_of(ROLLBACK, "rollback"), "Move the traffic")
-    assert move["env"]["REVISION"] == "${{ inputs.revision }}"
-    assert "${{" not in move["run"]
-    assert '--want="$REVISION"' in move["run"]
-
-
-def test_rollback_lists_picks_moves_traffic_and_proves_health():
-    run = step(steps_of(ROLLBACK, "rollback"), "Move the traffic")["run"]
-    assert "gcloud run revisions list --service skippy-portal" in run and "--format=json" in run
-    assert "tools/rollback_pick.py" in run and '--summary="$GITHUB_STEP_SUMMARY"' in run
-    assert run.index("rollback_pick.py") < run.index("update-traffic")                   # decide first, then move
-    assert '--to-revisions "$target=100"' in run and "--to-latest" in run
-    assert '"$URL/health"' in run and "--retry" in run
-    assert run.rstrip().endswith('[ "$health" = ok ]')                                   # unhealthy afterwards = a red job
-    assert "set -euo pipefail" in run
-
-
-def test_rollback_fails_the_job_and_changes_nothing_when_there_is_no_safe_revision():
-    run = step(steps_of(ROLLBACK, "rollback"), "Move the traffic")["run"]
-    block = run[run.index("if ! target="):run.index("fi", run.index("if ! target="))]
-    assert "exit 1" in block and "Nothing was changed" in block
-
-
 # ── every shell block, every gcloud flag ─────────────────────────────────────
 
 def all_runs() -> list[tuple[str, str]]:
     out = []
-    for wf, name in ((ROLLBACK, "rollback.yml"), (load("ops.yml"), "ops.yml"), (load("domains.yml"), "domains.yml")):
+    for wf, name in ((load("ops.yml"), "ops.yml"), (load("domains.yml"), "domains.yml")):
         for job, body in wf["jobs"].items():
             for s in body.get("steps", []):                    # a job that `uses:` a reusable workflow has no steps here
                 if "run" in s:
@@ -138,35 +88,6 @@ def test_every_run_block_is_valid_bash(where, script):
     assert done.returncode == 0, f"{where}: {done.stderr}"
 
 
-# What `gcloud ... --help` lists for each command used (SDK 586.0.0, 2026-09-30). A flag outside this table fails the test.
-GCLOUD_FLAGS = {
-    "run services describe": {"--region", "--format"},
-    "run services update-traffic": {"--region", "--to-latest", "--to-revisions"},
-    "run revisions list": {"--service", "--region", "--format"},
-    "run deploy": {"--image", "--region", "--service-account", "--no-invoker-iam-check", "--timeout", "--max-instances",
-                   "--memory", "--set-env-vars", "--set-secrets", "--cpu", "--concurrency"},
-}
-
-
-def gcloud_commands(script: str):
-    joined = script.replace("\\\n", " ")
-    for line in joined.splitlines():
-        m = re.search(r"\bgcloud (run (?:services (?:describe|update-traffic)|revisions list|deploy))\b(.*)", line)
-        if m:
-            yield m.group(1), m.group(2)
-
-
-def test_every_gcloud_flag_used_for_cloud_run_is_one_the_command_has():
-    seen = 0
-    for where, script in all_runs():
-        for cmd, rest in gcloud_commands(script):
-            allowed = GCLOUD_FLAGS[cmd]
-            for flag in re.findall(r"(?<![\w$-])(--[a-z][a-z-]*)", re.sub(r'"[^"]*"|\'[^\']*\'', "", rest)):
-                assert flag in allowed, f"{where}: `gcloud {cmd}` uses {flag}, not in the verified list {sorted(allowed)}"
-                seen += 1
-    assert seen >= 3                                            # the scan really found the commands
-
-
 # ── the other files this change touches ──────────────────────────────────────
 
 def test_ci_checks_the_scripts_with_bash_dash_n_and_has_pyyaml_for_these_tests():
@@ -183,8 +104,8 @@ def test_the_supervisors_log_and_state_are_never_committed():
 # ── the runbook ──────────────────────────────────────────────────────────────
 
 RUNBOOK = ROOT / "docs" / "portal" / "remote-recovery.md"
-NEW_FILES = [RUNBOOK, WORKFLOWS / "rollback.yml", ROOT / "tools" / "bridge_supervisor.sh",
-             ROOT / "tools" / "install_bridge_startup.sh", ROOT / "tools" / "rollback_pick.py"]
+NEW_FILES = [RUNBOOK, ROOT / "tools" / "bridge_supervisor.sh", ROOT / "tools" / "install_bridge_startup.sh",
+             ROOT / "core" / "cd" / "rollback_pick.py"]
 
 
 def test_the_runbook_is_linked_from_the_ci_doc_and_from_claude_md():
@@ -194,7 +115,7 @@ def test_the_runbook_is_linked_from_the_ci_doc_and_from_claude_md():
 
 def test_the_runbook_names_the_steps_the_captain_must_be_able_to_find():
     text = RUNBOOK.read_text(encoding="utf-8")
-    for needle in ("Read the card on `/me`", "**ops**", "`command` = **home**", "**rollback**", "What only the PC can fix",
+    for needle in ("Read the card on `/me`", "**ops**", "`command` = **home**", "cd.py rollback", "What only the PC can fix",
                    "Start Docker Desktop when you sign in to Windows",
                    "powercfg /change standby-timeout-ac 0", "bash tools/install_bridge_startup.sh --apply",
                    "bash tools/bridge_supervisor.sh --status", "claude auth login", "docker logs"):
@@ -205,8 +126,8 @@ def test_the_runbook_names_the_steps_the_captain_must_be_able_to_find():
 def test_every_command_the_runbook_gives_exists():
     """The words in a runbook rot first. The workflows, make targets and script options it names must be real."""
     text = RUNBOOK.read_text(encoding="utf-8")
-    names = {yaml.safe_load((WORKFLOWS / f).read_text(encoding="utf-8"))["name"] for f in ("ops.yml", "rollback.yml")}
-    assert {"ops", "rollback"} <= names
+    names = {yaml.safe_load((WORKFLOWS / f).read_text(encoding="utf-8"))["name"] for f in ("ops.yml",)}
+    assert {"ops"} <= names
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     for target in re.findall(r"make (bridge[\w-]*)", text):
         assert re.search(rf"^{re.escape(target)}:", makefile, re.M), target
