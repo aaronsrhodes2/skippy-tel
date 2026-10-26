@@ -86,7 +86,7 @@ def core_check(report: dict | None) -> dict:
              {"name": "elevenlabs", "ok": tiers_in.get("elevenlabs") is True},
              {"name": "bridge", "ok": bool((health or {}).get("bridge"))}] if health else []
     services = [{"name": _text(s.get("name") or s.get("id"), 40), "available": bool(s.get("available")),
-                 "detail": _text(s.get("status_detail"))} for s in report.get("services") or []]
+                 "planned": bool(s.get("planned")), "detail": _text(s.get("status_detail"))} for s in report.get("services") or []]
     return {"verdict": verdict, "problems": problems, "tiers": tiers, "services": services,
             "api_version": (health or {}).get("spec_version")}
 

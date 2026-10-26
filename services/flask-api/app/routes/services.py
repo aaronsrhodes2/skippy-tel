@@ -68,7 +68,7 @@ def _bilby_available() -> tuple[bool, str | None]:
 
 
 def _image_available() -> tuple[bool, str | None]:
-    return False, "Image generation not yet deployed — first-party SD service pending"
+    return False, "retired here: pictures are patient jobs (the portal's make_image / make_image_hq)"
 
 
 def _ups_available() -> tuple[bool, str | None]:
@@ -194,6 +194,7 @@ def _build_manifest() -> list[dict]:
             "name":    "Image Generator",
             "tagline": "Stable Diffusion on Skippy PC — inline in chat",
             "available": image_ok,
+            "planned": True,                      # not an outage: the home reporter / portal show it grey, never red
             "status_detail": image_detail,
             "capabilities": ["chat"],
             "zphone_compliant": True,
@@ -245,6 +246,7 @@ def _build_manifest() -> list[dict]:
             "name":    "UPS Monitor",
             "tagline": "Power guardian — CyberPower ABMT1500",
             "available": ups_ok,
+            "planned": True,                      # the UPS plan is not set up yet (BIOS power-on-after-AC-loss, Wake-on-LAN)
             "status_detail": ups_detail,
             "capabilities": ["chat", "hud"],
             "zphone_compliant": True,
@@ -268,6 +270,7 @@ def _build_manifest() -> list[dict]:
             "name":    "StarMap",
             "tagline": "Celestial bodies overhead — stub, physics service pending",
             "available": False,
+            "planned": True,
             "status_detail": "physics-mcp service not yet built",
             "capabilities": ["hud", "fullscreen"],
             "zphone_compliant": True,

@@ -224,7 +224,7 @@ def gather() -> dict:
     return {
         "status": got.get("status"),
         "health": got.get("health"),
-        "services": [{k: s.get(k) for k in ("id", "name", "available", "status_detail")}
+        "services": [{k: s.get(k) for k in ("id", "name", "available", "status_detail", "planned")}
                      for s in services.get("services", []) if isinstance(s, dict)],
         "music_session": {k: session.get(k) for k in
                           ("mode", "status", "now_playing", "queue_remaining", "source")} if session else None,

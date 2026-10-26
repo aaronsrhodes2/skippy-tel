@@ -62,7 +62,7 @@ def test_probes_run_side_by_side_not_one_after_another(monkeypatch):
     assert time.monotonic() - began < 1.2
     assert set(report) == SHAPE
     assert report["status"] == {"services": []} and report["health"]["status"] == "ok"
-    assert report["services"] == [{"id": "a", "name": "A", "available": True, "status_detail": None}]
+    assert report["services"] == [{"id": "a", "name": "A", "available": True, "status_detail": None, "planned": None}]
 
 
 def test_a_wedged_service_is_missing_from_the_report_and_cannot_hold_it_up(monkeypatch):

@@ -193,7 +193,7 @@
         {% if core.tiers %}<p class="muted">Tiers:
           {% for t in core.tiers %}<span style="color: {{ 'var(--green)' if t.ok else 'var(--red)' }}">{{ '●' if t.ok else '○' }}</span> {{ t.name }}{{ ' · ' if not loop.last }}{% endfor %}</p>{% endif %}
         <details><summary class="muted">All {{ core.services | length }} services</summary>
-          <table>{% for s in core.services %}<tr><td><span style="color: {{ 'var(--green)' if s.available else 'var(--red)' }}">{{ '●' if s.available else '○' }}</span>
+          <table>{% for s in core.services %}<tr><td><span style="color: {{ 'var(--green)' if s.available else ('var(--muted)' if s.planned else 'var(--red)') }}">{{ '●' if s.available else '○' }}</span>
             {{ s.name }}</td><td class="muted">{{ s.detail or ('up' if s.available else 'down') }}</td></tr>{% endfor %}</table>
         </details>
       {% endif %}

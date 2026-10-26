@@ -1368,6 +1368,14 @@ def _core_report(health, containers_ok=True):
                          {"id": "image", "name": "Image Generator", "available": False, "status_detail": "not deployed"}]}
 
 
+def test_core_check_carries_planned_so_a_not_set_up_row_is_not_an_outage():
+    import home as home_mod
+    got = home_mod.core_check({"health": {"status": "ok"}, "services": [
+        {"id": "ups", "name": "UPS Monitor", "available": False, "planned": True, "status_detail": "not set up"},
+        {"id": "x", "name": "X", "available": False, "status_detail": "down"}]})
+    assert [s["planned"] for s in got["services"]] == [True, False]
+
+
 def test_core_check_is_unknown_until_home_reports():
     import home as home_mod
     assert home_mod.core_check(None)["verdict"] == "unknown"
