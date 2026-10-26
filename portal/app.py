@@ -1882,7 +1882,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         versions = {a: prophesy.version(a) for a in prophesy.ARMS}
         return render_template("prophesy.html", arms=prophesy.ARMS, versions=versions, turns=rows, totals=prophesy.totals(rows),
                                short={a: prophesy.short_commit(v) for a, v in versions.items()},
-                               check_order=prophesy.CHECKS, profile_order=prophesy.PROFILE)
+                               check_order=prophesy.CHECKS, profile_order=prophesy.PROFILE, legend=prophesy.legend())
 
     @sp.get("/turns/<path:path>")
     @auth.login_required

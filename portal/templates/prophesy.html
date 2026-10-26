@@ -38,6 +38,16 @@
   #sppg table.t td.n, #sppg table.t th.n { text-align: right; font-variant-numeric: tabular-nums; }
   #sppg .shots { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
   #sppg .shots img { width: 100%; height: auto; display: block; border: 1px solid var(--dim-green-hi); }
+  #sppg .thumb { width: 46px; height: 39px; object-fit: cover; border: 1px solid var(--dim-green-hi); border-radius: 3px; image-rendering: pixelated; display: block; }
+  #sppg .thumb.unc { border-style: dashed; border-color: var(--amber); } #sppg .thumb.none { opacity: .5; }
+  #sppg .wmaps { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 6px 0 10px; }
+  #sppg .wmaps.one { grid-template-columns: 1fr; max-width: 520px; }
+  #sppg figure.wmap { margin: 0; } #sppg figure.wmap img { width: 100%; height: auto; display: block; image-rendering: pixelated; border: 1px solid var(--dim-green-hi); }
+  #sppg figure.wmap figcaption { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  #sppg .legend ul { display: flex; flex-wrap: wrap; gap: 4px 14px; list-style: none; padding: 0; margin: 4px 0; font-size: 12px; }
+  #sppg .legend summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  #sppg .legend i { display: inline-block; width: 11px; height: 11px; border: 1px solid #000; vertical-align: -1px; margin-right: 4px; }
+  @media (max-width: 560px) { #sppg .wmaps { grid-template-columns: 1fr; } }
   #sppg .score { color: var(--amber); font-weight: 600; }
   #sppg .bad { color: var(--red); } #sppg .good { color: var(--green); }
 </style>{% endblock %}
@@ -45,6 +55,10 @@
 {# The experiment (prophesy.py): two models build the same game, one prompt at a time. One PAGE per turn (the pager flips them; the
    newest is where it opens), and on a turn's page every attempt at it, each a section that opens by itself (one at a time): the
    reference first, then purple's tries in the order they were made. Read from the bucket, nothing cached here. #}
+{% macro wmap(m, who) -%}
+<figure class="wmap"><a href="{{ url_for('prophesy.record_file', path=m.file) }}"><img src="{{ url_for('prophesy.record_file', path=m.file) }}" alt="{{ who }}: the world for seed {{ m.seed }}" loading="lazy"></a>
+  <figcaption>{{ who }} · seed {{ m.seed }}{% if not m.ok %} · <span class="bad">no world: {{ m.why or "?" }}</span>{% endif %}{% if m.world_sha %} · world {{ m.world_sha }}{% endif %}</figcaption></figure>
+{%- endmacro %}
 {% macro bars(checks) -%}
 <span class="bars" aria-label="the referee's six checks">{% for k in check_order %}{% set v = checks.get(k) %}<i class="{{ 'ok' if v == 100 else ('part' if v else ('zero' if v == 0 else '')) }}" title="{{ k }}{% if v is not none %} {{ v }}%{% endif %}"></i>{% endfor %}</span>
 {%- endmacro %}
@@ -83,6 +97,8 @@
           {% for a in t.attempts %}
           <details class="attempt" name="sp-t{{ t.id }}" id="a-{{ a.label|replace(':', '-')|replace('+', '-') }}" data-label="{{ a.label }}">
             <summary>
+              {% set okmaps = a.maps|selectattr('ok')|list %}{% set thumb = (okmaps|first) or (a.maps|first) %}
+              {% if thumb %}<img class="thumb{{ ' unc' if thumb.source == 'uncommitted' }}{{ '' if thumb.ok else ' none' }}" src="{{ url_for('prophesy.record_file', path=thumb.file) }}" alt="" loading="lazy" title="seed {{ thumb.seed }}{{ ', from what it left uncommitted' if thumb.source == 'uncommitted' }}">{% endif %}
               <span class="lab">{{ a.label }}</span>{% if a.benchmark %} <span class="tag">reference</span>{% endif %}
               <span class="{{ 'good' if a.outcome.startswith('success') else ('bad' if a.outcome else '') }}">{{ (a.outcome or "?")[:42] }}</span>
               {{ bars(a.checks) }}
@@ -99,6 +115,17 @@
                 <dt>Context</dt><dd>{% if a.peak_context is not none %}{{ "{:,}".format(a.peak_context|int) }} tokens peak{% else %}not reported{% endif %}{% if a.segments %}, {{ a.segments|int }} segment{{ "s" if a.segments != 1 }}{% endif %}{% if a.compactions %}, {{ a.compactions|int }} compaction{{ "s" if a.compactions != 1 }}{% if a.summary_chars %} (summaries of {% for n in a.summary_chars %}{{ "{:,}".format(n|int) }}{{ " / " if not loop.last }}{% endfor %} characters){% endif %}{% endif %}</dd>
                 {% if a.kind != "trial" %}<dt>Deploy</dt><dd class="{{ 'good' if a.deploy in ('success', 'uploaded') else ('bad' if a.deploy in ('failure', 'not pushed') else '') }}">{{ a.deploy or "?" }}{% if a.live %}, live{% endif %}</dd>{% endif %}
               </dl>
+              {% if a.maps %}
+              <h5>Generated worlds{% if not a.benchmark and t.reference_maps %} <span class="help" style="text-transform:none">(the reference's on the left)</span>{% endif %}</h5>
+              {% for m in a.maps if m.source == 'commit' %}{% set ref = (t.reference_maps|selectattr('seed', 'equalto', m.seed)|list|first) if not a.benchmark else none %}
+              <div class="wmaps{{ '' if ref else ' one' }}">{% if ref %}{{ wmap(ref, 'the reference') }}{% endif %}{{ wmap(m, a.label) }}</div>
+              {% endfor %}
+              {% if a.maps|selectattr('source', 'equalto', 'uncommitted')|list %}
+              <p class="help">What it left uncommitted (the referee grades only commits; this is what the files made):</p>
+              {% for m in a.maps if m.source == 'uncommitted' %}<div class="wmaps one">{{ wmap(m, a.label ~ ' (uncommitted)') }}</div>{% endfor %}
+              {% endif %}
+              {% if legend %}<details class="legend"><summary>What the colours mean</summary><ul>{% for c in legend %}<li><i style="background: {{ c.hex }}"></i>{{ c.name }}</li>{% endfor %}</ul></details>{% endif %}
+              {% endif %}
               <h5>Referee</h5>
               {% if a.grade_status == "not-started" %}<p class="help">Not started: there is no generator in the commit yet.</p>
               {% elif a.checks %}<table class="t"><tr>{% for k in check_order %}{% if k in a.checks %}<th>{{ k }}</th>{% endif %}{% endfor %}</tr>

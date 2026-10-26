@@ -51,6 +51,8 @@ KINDS = ("turn", "fix", "trial")
 CHECKS = ("runs", "deterministic", "schema", "finishable", "biomes", "clues")           # the referee's six, in the order shown
 PROFILE = ("calls", "reads", "distinct_reads", "writes", "test_runs", "gen_runs", "reference_reads")
 MAX_ATTEMPTS = 60
+_SEED = re.compile(r"^[0-9A-Za-z._-]{1,32}$")
+_HEX = re.compile(r"^#[0-9a-f]{6}$")
 TEXT_TYPES = {".md": "text/plain; charset=utf-8", ".txt": "text/plain; charset=utf-8"}
 
 
@@ -163,6 +165,33 @@ def _file(v, folder, tail=None):
     return v if (v.endswith(tail) if tail else v.endswith((".png", ".md", ".txt"))) else ""
 
 
+def _maps(raw, folder: str) -> list[dict]:
+    """The pictures of the worlds an attempt's generator made (one per seed and source), each file inside the attempt's own folder."""
+    out = []
+    for m in (raw if isinstance(raw, list) else [])[:12]:
+        if not isinstance(m, dict) or not (isinstance(m.get("seed"), str) and _SEED.match(m["seed"])) or m.get("source") not in ("commit", "uncommitted"):
+            continue
+        f = _file(m.get("file"), folder + "/maps", ".png")
+        if f:
+            out.append({"seed": m["seed"], "source": m["source"], "ok": m.get("ok") is True, "why": _short(m.get("why"), 160),
+                        "file": f, "world_sha": _short(m.get("world_sha"), 16) if isinstance(m.get("world_sha"), str) and _SAFE_ID.match(m["world_sha"]) else ""})
+    return out
+
+
+def legend() -> list[dict]:
+    """What the colours in the world pictures mean (the referee's own list, checked: a name and a #rrggbb)."""
+    def load():
+        raw = read(RECORD, "index.json")
+        try:
+            data = json.loads(raw.decode("utf-8")) if raw else {}
+        except (ValueError, UnicodeDecodeError):
+            data = {}
+        rows = data.get("legend") if isinstance(data, dict) else None
+        return [{"name": _short(r.get("name"), 60), "hex": r["hex"]} for r in (rows if isinstance(rows, list) else [])[:40]
+                if isinstance(r, dict) and isinstance(r.get("hex"), str) and _HEX.match(r["hex"]) and isinstance(r.get("name"), str)]
+    return _cached("legend", INDEX_TTL, load)
+
+
 def _attempt(raw) -> dict | None:
     """One attempt at a turn, reduced to what the board shows. None for anything that isn't one."""
     if not isinstance(raw, dict) or not isinstance(raw.get("label"), str) or not _LABEL.match(raw["label"]):
@@ -199,6 +228,7 @@ def _attempt(raw) -> dict | None:
             "sampling": {k: _num(v) for k, v in sampling.items() if isinstance(k, str) and len(k) <= 24 and _num(v) is not None}
                         if isinstance(sampling, dict) else {}},
         "shots": [x for x in ((_file(s, folder + "/shots", ".png")) for s in (raw.get("shots") or [])[:12]) if x] if isinstance(raw.get("shots"), list) else [],
+        "maps": _maps(raw.get("maps"), folder),
         "reply": _file(raw.get("reply"), folder, "reply.md") if has.get("reply") else "",
         "actions": _file(raw.get("actions"), folder, "actions.txt") if has.get("actions") else "",
         "report": _file(raw.get("report"), folder.split("/")[0], "report.md"),
@@ -214,7 +244,7 @@ def _legacy_attempts(tid: str, n, arms: dict) -> list[dict]:
                     "peak_context": a["peak_context"], "compactions": a["compactions"], "segments": None, "summary_chars": [],
                     "commits": a["commits"], "uncommitted": None, "deploy": a["deploy"], "live": a["live"], "benchmark": False,
                     "grade_status": a["grade_status"], "checks": {k: v for k, v in a["checks"].items() if k in CHECKS}, "parity": None, "profile": {},
-                    "harness": None, "shots": a["shots"], "reply": f"{tid}/{name}/reply.md", "actions": f"{tid}/{name}/actions.txt",
+                    "harness": None, "maps": [], "shots": a["shots"], "reply": f"{tid}/{name}/reply.md", "actions": f"{tid}/{name}/actions.txt",
                     "report": f"{tid}/report.md"})
     return out
 
@@ -261,7 +291,8 @@ def turns() -> list[dict]:
             ref = next((a for a in attempts if a["benchmark"]), None) or next((a for a in attempts if a["model"] == "haiku"), None)
             out.append({"id": t["id"], "n": _num(t.get("n")), "prompt": _text(t.get("prompt"), 2000),
                         "finished_at": _text(t.get("finished_at"), 40), "arms": arms, "captain": captain,
-                        "attempts": attempts, "reference": ref["profile"] if ref else {}})
+                        "attempts": attempts, "reference": ref["profile"] if ref else {},
+                        "reference_maps": [m for m in (ref["maps"] if ref else []) if m["source"] == "commit"]})
         return sorted(out, key=lambda r: r["id"], reverse=True)
     return _cached("index", INDEX_TTL, load)
 

@@ -249,6 +249,41 @@ def test_a_turns_page_has_every_attempt_as_a_section_that_opens_by_itself(stores
     assert "<td>reads</td><td class=\"n\">103</td><td class=\"n\">10</td>" in page                   # beside the reference's own numbers
 
 
+def _map(seed, source="commit", ok=True, folder="T08/purple", **over):
+    suffix = "-uncommitted" if source == "uncommitted" else ""
+    m = {"seed": seed, "source": source, "ok": ok, "why": "" if ok else "World generation failed after 5 attempts", "file": f"{folder}/maps/{seed}{suffix}.png",
+         "world_sha": "7aeea1598a21" if ok else ""}
+    m.update(over)
+    return m
+
+
+def test_the_worlds_pictures_sit_beside_the_references_for_the_same_seed(stores, client):
+    ref = _attempt("haiku:1:1", benchmark=True, maps=[_map("Prophesy", folder="001/haiku"), _map("seed-1", folder="001/haiku")])
+    mine = _attempt("purple:1:8", maps=[_map("Prophesy"), _map("seed-1", ok=False), _map("Prophesy", source="uncommitted")])
+    stores["turns"].files["index.json"] = json.dumps({"experiment": "shifting-prophesy", "turns": [_turn(1, attempts=[ref, mine])],
+                                                       "legend": [{"name": "water", "hex": "#2f6fd0"}, {"name": "<b>bad</b>", "hex": "red"}]}).encode()
+    login(client, FRIEND)
+    page = client.get("/shifting-prophesy/").data.decode()
+    assert page.count('class="wmaps one"') >= 2                                          # the reference's own pictures, and the uncommitted one
+    assert page.count('class="wmaps"') == 2                                              # this attempt's two seeds, each with the reference on its left
+    assert 'src="/shifting-prophesy/turns/001/haiku/maps/Prophesy.png"' in page and 'src="/shifting-prophesy/turns/T08/purple/maps/Prophesy.png"' in page
+    assert "the reference · seed Prophesy · world 7aeea1598a21" in page
+    assert "no world: World generation failed after 5 attempts" in page
+    assert "What it left uncommitted" in page and "T08/purple/maps/Prophesy-uncommitted.png" in page
+    assert '<img class="thumb"' in page and 'class="thumb unc"' not in page                # the first picture that is a world stands in the closed row
+    assert '<i style="background: #2f6fd0"></i>water' in page and "bad</b>" not in page and "#red" not in page      # the legend is checked too
+
+
+def test_a_pictures_name_and_place_are_checked_on_the_way_in(stores, client):
+    bad = [_map("../x"), _map("Prophesy", source="elsewhere"), _map("Prophesy", file="../../etc/passwd"), _map("Prophesy", file="001/haiku/maps/Prophesy.png"),
+           _map("Prophesy", file="T08/purple/maps/x.js"), "junk"]
+    stores["turns"].files["index.json"] = _index([_turn(1, attempts=[_attempt("purple:1:8", maps=[_map("good-seed"), *bad])])])
+    login(client, FRIEND)
+    page = client.get("/shifting-prophesy/").data.decode()
+    assert [m["seed"] for m in prophesy.turns()[0]["attempts"][0]["maps"]] == ["good-seed"]
+    assert "etc/passwd" not in page and "x.js" not in page and "001/haiku/maps/Prophesy.png" not in page
+
+
 def test_an_attempt_is_checked_on_the_way_in(stores, client):
     good = _attempt("purple:1:8", note="<script>alert(1)</script>", shots=["T08/purple/shots/a.png", "../../etc/passwd", "001/haiku/shots/b.png",
                                                                           "T08/purple/shots/c.js"])
