@@ -8,15 +8,18 @@ Code through the Agent SDK instead, so the run is typed events and callbacks all
              the engine understands (Said, Did, Opened, Retry, Ended); nothing is parsed out of model text.
   * HOOKS    the lane rule and the stop gate are callbacks in this process (lane_guard.Lane, run_state), not scripts that
              read JSON on stdin and exit with a code.
-  * SEGMENTS Claude Code ends a segment itself at its turn limit (an `error_max_turns` result); the next segment is a fresh
-             session opened with run_state.handoff(): the request, the repository as it is, the agent's own last words. The
-             model is never asked to summarize its conversation (the Core coder does that badly: run_state.py).
+  * SEGMENTS a segment ends when its context, measured from the usage on every model reply, reaches ROTATE_TOKENS (the engine
+             interrupts it after the next tool result), or at the turn limit (an `error_max_turns` result). The next segment is
+             a fresh session opened with run_state.handoff(): the request, the repository as it is, the agent's own last
+             words. The model is never asked to summarize its conversation (the Core coder does that badly: run_state.py).
+             A fresh session has to Read what it edits again (Claude Code requires it); that is the price of not summarizing.
   * GATE     before a run may end, the Stop hook looks at the repository: paths this run changed and did not commit send the
              agent back once or twice with the list, as facts.
   * CANCEL   Stop in the chat cancels the run's task; the session is closed (the CLI process with it). No kill.
 
-No quiet timer: Claude Code's own tools have their limits, and a model call that fails says so (api_retry events). The one
-limit left is the run's total ceiling (MAX_RUN_S), a cost cap and not a way to find out what the run is doing.
+No timers at all (the Captain, 2026-10-26: a modest local model can take many hours, and a clock that stops it only stops
+the work). Claude Code's own tools have their limits, and a model call that fails says so (api_retry events); Stop in the chat is
+the only way a run ends early.
 
 Switch: engines.json in the bridge's state folder, {"core": ["f-shifting-prophesy-purple"]} (or ["*"]), read at the start of
 every run, so the engine can be changed back with no restart. The Claude brain and every project not listed keep the CLI engine.
@@ -38,7 +41,9 @@ from typing import Any, AsyncIterator, Callable
 import run_state
 from lane_guard import Lane
 
-SEGMENT_TURNS = int(os.getenv("WORKSHOP_CORE_SEGMENT_TURNS", "70"))     # a segment's turn budget (Claude Code --max-turns)
+SEGMENT_TURNS = int(os.getenv("WORKSHOP_CORE_SEGMENT_TURNS", "120"))    # a segment's hard turn limit (Claude Code --max-turns): a backstop
+ROTATE_TOKENS = int(os.getenv("WORKSHOP_CORE_ROTATE_TOKENS", "90000"))  # the context at which a segment ends: well under the window's 131k,
+                                                                        # and under the ~100k where Claude Code would compact (and the coder fail to)
 MAX_SEGMENTS = int(os.getenv("WORKSHOP_CORE_MAX_SEGMENTS", "8"))
 MAX_BUFFER = 16 * 1024 * 1024                                           # one line of Claude Code's output (a big tool result)
 LANE_TOOLS = "Edit|Write|MultiEdit|NotebookEdit|Bash"
@@ -61,6 +66,16 @@ class Said:
 class Did:
     name: str
     args: dict
+
+
+@dataclass(frozen=True)
+class Usage:
+    tokens: int                     # the context the model just read (and wrote): what the next request starts from
+
+
+@dataclass(frozen=True)
+class ToolDone:
+    pass                            # a tool call finished and its result is on its way to the model
 
 
 @dataclass(frozen=True)
@@ -88,11 +103,19 @@ class Ended:
 
 def normalize(message: Any) -> list:
     """Claude Agent SDK message -> engine events. Unknown kinds give nothing (the SDK adds kinds over time)."""
-    from claude_agent_sdk import AssistantMessage, ResultMessage, SystemMessage, TextBlock, ToolUseBlock
+    from claude_agent_sdk import AssistantMessage, ResultMessage, SystemMessage, TextBlock, ToolResultBlock, ToolUseBlock, UserMessage
+    if isinstance(message, UserMessage):
+        if getattr(message, "parent_tool_use_id", None) or not isinstance(message.content, list):
+            return []
+        return [ToolDone()] if any(isinstance(b, ToolResultBlock) for b in message.content) else []
     if isinstance(message, AssistantMessage):
         if getattr(message, "parent_tool_use_id", None):
             return []                                   # a subagent's own steps: the run shows what the main agent did
         out: list = [Trouble(message.error)] if getattr(message, "error", None) else []
+        usage = message.usage if isinstance(getattr(message, "usage", None), dict) else {}
+        used = sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "output_tokens"))
+        if used:
+            out.append(Usage(used))
         for block in message.content:
             if isinstance(block, TextBlock) and block.text.strip():
                 out.append(Said(block.text))
@@ -141,6 +164,10 @@ class SdkSession:
         except Exception:                               # noqa: BLE001 - Claude Code exits non-zero after an error result; that is not news
             if not ended:
                 raise
+
+    async def interrupt(self) -> None:
+        """End the segment's current turn; the stream then closes with a result (terminal_reason aborted_*)."""
+        await self.client.interrupt()
 
     async def close(self) -> None:
         if self.client is not None:
@@ -192,8 +219,11 @@ OpenSession = Callable[[int, "str | None", dict], Any]        # (segment, resume
 
 async def drive(run, *, clone: str, request: str, resume: str | None, open_session: OpenSession,
                 remember: Callable[[str], None], detail: Callable[[str, dict], str], lane: Lane,
-                segments: int = MAX_SEGMENTS) -> None:
-    """Run `request` to its end in bounded segments; every outcome ends in run.finish()."""
+                segments: int = MAX_SEGMENTS, rotate_at: int = ROTATE_TOKENS) -> None:
+    """Run `request` to its end in bounded segments; every outcome ends in run.finish().
+
+    A segment ends one of two ways, both told by Claude Code itself: its context (measured from the usage on each model
+    reply) reaches `rotate_at`, and the engine interrupts it after the next tool result; or it uses its turn limit."""
     journal = run_state.Journal()
     baseline = set(run_state.dirty_paths(run_state.git_text(clone, "status", "--porcelain", "--untracked-files=all")))
     say = lambda text: run.emit({"t": "text", "text": text})            # noqa: E731 - a note in the chat, in parentheses
@@ -212,9 +242,16 @@ async def drive(run, *, clone: str, request: str, resume: str | None, open_sessi
         session = await open_session(n, resume if n == 1 else None, hooks)
         ended: Ended | None = None
         problem: str | None = None
+        context, rotating = 0, False
         try:
             async for ev in session.send(prompt):
-                if isinstance(ev, Opened):
+                if isinstance(ev, Usage):
+                    context = ev.tokens
+                elif isinstance(ev, ToolDone):
+                    if context >= rotate_at and not rotating:
+                        rotating = True
+                        await session.interrupt()
+                elif isinstance(ev, Opened):
                     session_id = ev.session or session_id
                 elif isinstance(ev, Said):
                     journal.said(ev.text)
@@ -241,7 +278,7 @@ async def drive(run, *, clone: str, request: str, resume: str | None, open_sessi
         session_id = ended.session or session_id
         if session_id:
             remember(session_id)
-        if ended.subtype == "error_max_turns":
+        if rotating or ended.subtype == "error_max_turns":
             flush()
             say(f"(fresh context: segment {n + 1}; the repository and my last messages carry over)")
             continue
@@ -274,10 +311,18 @@ def engine_for(state_dir: str, brain: str, project_id: str) -> str:
     return "sdk" if isinstance(listed, list) and ("*" in listed or project_id in listed) else "cli"
 
 
+def _positive(value, default: int) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else default
+
+
 def segment_turns(state_dir: str) -> int:
-    """A segment's turn budget: engines.json's `segment_turns` when it is a positive number (so it can be tuned with no restart)."""
-    value = _engines(state_dir).get("segment_turns")
-    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else SEGMENT_TURNS
+    """A segment's hard turn limit: engines.json's `segment_turns` when it is a positive number (tunable with no restart)."""
+    return _positive(_engines(state_dir).get("segment_turns"), SEGMENT_TURNS)
+
+
+def rotate_tokens(state_dir: str) -> int:
+    """The context at which a segment ends: engines.json's `rotate_tokens`, else ROTATE_TOKENS."""
+    return _positive(_engines(state_dir).get("rotate_tokens"), ROTATE_TOKENS)
 
 
 def native_cli(claude_cmd: list[str]) -> str:
@@ -320,7 +365,7 @@ def run_core(shop, run, session: str | None) -> None:
         cli = native_cli(shop.claude_cmd)
         settings, mcp = shop.sdk_settings(), shop.house_mcp_config()
         prompt_file = str(shop.prompt_path(run.project))
-        turns = segment_turns(shop.state_dir)
+        turns, rotate = segment_turns(shop.state_dir), rotate_tokens(shop.state_dir)
         sessions: list[SdkSession] = []
 
         async def open_session(n: int, resume_id: str | None, hooks: dict):
@@ -333,18 +378,15 @@ def run_core(shop, run, session: str | None) -> None:
         async def main() -> None:
             await drive(run, clone=project.clone, request=run.message, resume=resume, open_session=open_session,
                         remember=lambda sid: shop._remember(shop.session_key(run.project, run.conv, run.brain), sid),
-                        detail=we.tool_detail, lane=Lane(project.clone, env["SKIPPY_LANE_DEPLOY"]))
+                        detail=we.tool_detail, lane=Lane(project.clone, env["SKIPPY_LANE_DEPLOY"]), rotate_at=rotate)
 
         loop = asyncio.new_event_loop()
-        task = loop.create_task(asyncio.wait_for(main(), timeout=shop.max_run_s))
+        task = loop.create_task(main())
         run.abort = lambda: loop.call_soon_threadsafe(task.cancel)
         try:
             loop.run_until_complete(task)
         except asyncio.CancelledError:
             run.finish(False, "stopped")
-        except asyncio.TimeoutError:
-            run.finish(False, f"Claude Code was still going after {we._span(shop.max_run_s)}, so I stopped it. "
-                              "Send the message again, or a smaller one, to carry on.")
         finally:
             run.abort = None
             loop.close()

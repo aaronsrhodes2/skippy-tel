@@ -13,7 +13,7 @@ import sdk_engine as sdk
 import workshop_engine as engine
 from bridge_testkit import finish
 from lane_guard import Lane
-from sdk_engine import Did, Ended, Opened, Retry, Said, Trouble
+from sdk_engine import Did, Ended, Opened, Retry, Said, ToolDone, Trouble, Usage
 
 
 def git(repo, *args):
@@ -35,14 +35,20 @@ class FakeSession:
     """One segment: yields its scripted events. `hold` makes it wait forever (a run that is cancelled mid-stream)."""
 
     def __init__(self, events, hold=False):
-        self.events, self.hold, self.prompt, self.closed = events, hold, None, False
+        self.events, self.hold, self.prompt, self.closed, self.interrupted = events, hold, None, False, False
 
     async def send(self, prompt):
         self.prompt = prompt
         for ev in self.events:
             yield ev
+            if self.interrupted:                        # what Claude Code does: the turn ends with an aborted result
+                yield Ended("error_during_execution", True, "s-int", 5, None, ["interrupted"], "aborted_tools")
+                return
         if self.hold:
             await asyncio.Event().wait()
+
+    async def interrupt(self):
+        self.interrupted = True
 
     async def close(self):
         self.closed = True
@@ -111,6 +117,45 @@ def test_a_segment_that_uses_its_turns_is_followed_by_a_fresh_one_built_from_fac
     assert "segment 2 of the job above" in second and "?? gen.mjs" in second and "first" in second
     assert "The bug is the lock direction." in second and "Edit: src/solver.mjs" in second
     assert any("segment 2" in t for t in texts(run)) and all(s.closed for s in opened)
+
+
+def test_a_segment_ends_when_its_context_is_measured_full_and_the_next_one_starts_from_facts(repo):
+    run = new_run()
+    # 82k tokens after the second reply: the interrupt comes after the next tool result, not before
+    opened, resumes, kept = go(run, repo, [
+        [Opened("s1"), Usage(30000), Said("Reading."), Did("Read", {"file_path": "a.mjs"}), ToolDone(),
+         Usage(82000), Said("Found it."), Did("Edit", {"file_path": "a.mjs"}), ToolDone(), Said("never seen"), ok("never")],
+        [Opened("s2"), Usage(31000), Said("Carrying on."), ok("s2")]], rotate_at=80000)
+    assert run.ok and len(opened) == 2 and opened[0].interrupted and all(s.closed for s in opened)
+    assert kept == ["s-int", "s2"]                                     # the interrupted segment's own session is the one kept
+    assert "Found it." in opened[1].prompt and "Edit: a.mjs" in opened[1].prompt and "never seen" not in opened[1].prompt
+    assert any("segment 2" in t for t in texts(run))
+
+
+def test_a_context_under_the_limit_is_never_interrupted(repo):
+    run = new_run()
+    opened, _, _ = go(run, repo, [[Usage(79999), Did("Bash", {"command": "ls"}), ToolDone(), Usage(60000), ToolDone(), ok()]], rotate_at=80000)
+    assert run.ok and len(opened) == 1 and not opened[0].interrupted
+
+
+def test_the_interrupt_is_asked_once_per_segment(repo):
+    run = new_run()
+    calls = []
+
+    class Counting(FakeSession):
+        async def interrupt(self):
+            calls.append(1)
+            await super().interrupt()
+    events = [Usage(90000), ToolDone(), ToolDone(), ToolDone(), ok()]
+
+    async def open_session(n, resume, hooks):
+        return Counting(events) if n == 1 else FakeSession([ok("s2")])
+
+    async def main():
+        await sdk.drive(run, clone=str(repo), request=run.message, resume=None, open_session=open_session, remember=lambda sid: None,
+                        detail=lambda n, a: "", lane=Lane(str(repo)), rotate_at=80000)
+    asyncio.run(main())
+    assert len(calls) == 1 and run.ok
 
 
 def test_a_run_that_never_finishes_stops_at_the_segment_cap_and_says_so(repo):
@@ -202,21 +247,21 @@ def test_the_switch_is_a_file_that_names_projects_and_defaults_to_the_cli(tmp_pa
     assert sdk.engine_for(str(tmp_path), "core", "p") == "cli"
     (tmp_path / "engines.json").write_text("[]")
     assert sdk.engine_for(str(tmp_path), "core", "p") == "cli"
-    assert sdk.segment_turns(str(tmp_path)) == sdk.SEGMENT_TURNS
+    assert sdk.segment_turns(str(tmp_path)) == sdk.SEGMENT_TURNS and sdk.rotate_tokens(str(tmp_path)) == sdk.ROTATE_TOKENS
 
 
 def test_a_segments_turn_budget_can_be_tuned_in_the_same_file(tmp_path):
-    (tmp_path / "engines.json").write_text(json.dumps({"core": ["*"], "segment_turns": 3}))
-    assert sdk.segment_turns(str(tmp_path)) == 3
+    (tmp_path / "engines.json").write_text(json.dumps({"core": ["*"], "segment_turns": 3, "rotate_tokens": 40000}))
+    assert sdk.segment_turns(str(tmp_path)) == 3 and sdk.rotate_tokens(str(tmp_path)) == 40000
     for bad in (0, -5, "9", True, 2.5, None):
-        (tmp_path / "engines.json").write_text(json.dumps({"segment_turns": bad}))
-        assert sdk.segment_turns(str(tmp_path)) == sdk.SEGMENT_TURNS
+        (tmp_path / "engines.json").write_text(json.dumps({"segment_turns": bad, "rotate_tokens": bad}))
+        assert sdk.segment_turns(str(tmp_path)) == sdk.SEGMENT_TURNS and sdk.rotate_tokens(str(tmp_path)) == sdk.ROTATE_TOKENS
 
 
 def test_the_launch_is_the_cli_engines_launch_as_data():
     k = sdk.sdk_kwargs(cwd="D:/w", env={"A": "1"}, model="coder", cli="C:/claude.exe", prompt_file="D:/state/prompt.txt",
                        primary="D:/w", settings="D:/state/sdk-settings.json", mcp="D:/state/house.json", resume="abc")
-    assert k["max_turns"] == sdk.SEGMENT_TURNS and k["model"] == "coder" and k["cli_path"] == "C:/claude.exe" and k["resume"] == "abc"
+    assert k["max_turns"] == sdk.SEGMENT_TURNS == 120 and k["model"] == "coder" and k["cli_path"] == "C:/claude.exe" and k["resume"] == "abc"
     assert k["system_prompt"] == {"type": "preset", "preset": "claude_code"}
     assert k["extra_args"] == {"append-system-prompt-file": "D:/state/prompt.txt", "system-prompt-snapshot": "off",
                                "dangerously-skip-permissions": None}
@@ -249,11 +294,16 @@ def test_normalize_turns_sdk_messages_into_engine_events():
     sdk_types = pytest.importorskip("claude_agent_sdk")
     A, R, S, T, U = (sdk_types.AssistantMessage, sdk_types.ResultMessage, sdk_types.SystemMessage, sdk_types.TextBlock,
                      sdk_types.ToolUseBlock)
+    U_ = sdk_types.UserMessage
     thinking = sdk_types.ThinkingBlock("hmm", "sig")
     msg = A(content=[thinking, T("Hello"), T("   "), U("t1", "Bash", {"command": "ls"})], model="coder")
     assert sdk.normalize(msg) == [Said("Hello"), Did("Bash", {"command": "ls"})]
     assert sdk.normalize(A(content=[T("x")], model="coder", error="rate_limit")) == [Trouble("rate_limit"), Said("x")]
     assert sdk.normalize(A(content=[T("sub")], model="coder", parent_tool_use_id="t9")) == []
+    used = A(content=[T("x")], model="coder", usage={"input_tokens": 100, "cache_read_input_tokens": 60000, "cache_creation_input_tokens": 5, "output_tokens": 50})
+    assert sdk.normalize(used) == [Usage(60155), Said("x")]
+    assert sdk.normalize(U_(content=[sdk_types.ToolResultBlock("t1", "ok")])) == [ToolDone()]
+    assert sdk.normalize(U_(content="plain words")) == [] and sdk.normalize(U_(content=[sdk_types.ToolResultBlock("t1", "ok")], parent_tool_use_id="t9")) == []
     assert sdk.normalize(S(subtype="init", data={"session_id": "s1"})) == [Opened("s1")]
     assert sdk.normalize(S(subtype="api_retry", data={"attempt": 2, "error_status": 502, "error": "server_error"})) == [Retry(2, 502, "server_error")]
     assert sdk.normalize(S(subtype="something_new", data={})) == []
@@ -305,6 +355,23 @@ def test_a_core_run_on_a_listed_project_goes_through_the_sdk_engine(core_shop, t
     assert set(s.hooks) == {"PreToolUse", "Stop"} and s.prompt == "hi"
     assert shop._sessions()[shop.session_key("skippytel", "conv-12345678", "core")] == "sdk-1"
     assert not shop.record.exists()                                  # the CLI engine (the fake claude) was never started
+
+
+def test_a_run_is_never_stopped_for_taking_long(core_shop):
+    shop = core_shop
+    switch(shop, ["skippytel"])
+    shop.max_run_s = 0.2                                              # the CLI engine's 2-hour limit, made tiny: the SDK engine ignores it
+    shop.idle_s = 0.2
+
+    class Slow(shop.Fake):
+        async def send(self, prompt):
+            await asyncio.sleep(0.8)
+            async for ev in super().send(prompt):
+                yield ev
+    import sdk_engine
+    sdk_engine.SdkSession = Slow
+    run = finish(shop.start("aaaaaaaa", "conv-12345678", "a very long job", brain="core"))
+    assert run.ok and run.error is None
 
 
 def test_an_unlisted_project_and_the_claude_brain_keep_the_cli_engine(core_shop):

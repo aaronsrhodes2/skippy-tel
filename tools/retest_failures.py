@@ -8,7 +8,8 @@ chain is fixed, and keep each result as the home AI's baseline for the later sid
 cases.json: [{"name", "message", "project" ("f-skippy-retest", the sandbox, unless the case needs its own conversation),
 "conv" (optional: resume that conversation), "images" (optional: paths to pictures to attach)}]. It drives the bridge the way
 the home reporter does (POST /workshop, then GET /workshop/run/<task>), with the home token read from the reporter's
-container, never printed. It waits as long as a run takes (up to --max-min), and writes results.json after every case.
+container, never printed. It waits as long as a run takes (up to --max-min; 0 = for as long as it runs; it only stops WAITING, the run goes on), and
+writes results.json after every case.
 """
 from __future__ import annotations
 
@@ -71,7 +72,7 @@ def run_case(case: dict, brain: str, tok: str, max_min: float) -> dict:
     if status != 200:
         return {**out, "ok": False, "error": started.get("message") or started.get("error") or f"HTTP {status}", "seconds": 0, "events": []}
     events, after, done = [], 0, {}
-    while time.time() - t0 < max_min * 60:
+    while max_min <= 0 or time.time() - t0 < max_min * 60:
         s, got = call("GET", f"/workshop/run/{task}?after={after}&wait=20", None, tok, timeout=40)
         if s != 200:
             time.sleep(5)
@@ -96,7 +97,7 @@ def main() -> int:
     ap.add_argument("results")
     ap.add_argument("--brain", default="core")
     ap.add_argument("--only", default="")
-    ap.add_argument("--max-min", type=float, default=45)
+    ap.add_argument("--max-min", type=float, default=45, help="stop waiting after this many minutes (0 = never)")
     a = ap.parse_args()
     cases = json.loads(Path(a.cases).read_text(encoding="utf-8"))
     only = {n for n in a.only.split(",") if n}

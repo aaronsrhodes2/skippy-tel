@@ -148,15 +148,15 @@ file; they are the ones that would have caught the newline truncation.
 A Skippy Core (`brain: "core"`) run uses one of two engines:
 
 - **`cli`** (`workshop_engine.py::_attempt`): runs `claude -p`, reads its output as lines, watches the clock. The only engine for the Claude brain.
-- **`sdk`** (`sdk_engine.py`): drives Claude Code through the Claude Agent SDK, so a run is typed events and callbacks. The lane rule (`lane_guard.Lane`) and the stop gate are in-process hooks; a run goes on in **bounded segments** instead of relying on a model-written summary (`run_state.py` builds each next segment's opening prompt from the request, `git status`/`git log` and the agent's own last messages); Stop in the chat cancels the run's task. No quiet timer (only the run's total ceiling). What it does not do yet: the `SKIPPY_PICTURE` / `POPUP` / `IMAGE` text conventions.
+- **`sdk`** (`sdk_engine.py`): drives Claude Code through the Claude Agent SDK, so a run is typed events and callbacks. The lane rule (`lane_guard.Lane`) and the stop gate are in-process hooks; a run goes on in **bounded segments** (each ends when its measured context reaches 90,000 tokens) instead of relying on a model-written summary (`run_state.py` builds each next segment's opening prompt from the request, `git status`/`git log` and the agent's own last messages); Stop in the chat cancels the run's task. No timers: no quiet watchdog and no ceiling on a run's length (the CLI engine keeps its 30-minute quiet and 2-hour limits). What it does not do yet: the `SKIPPY_PICTURE` / `POPUP` / `IMAGE` text conventions.
 
 The switch is `engines.json` in the bridge's state folder (`.skippy-workshop-runs`), read at the start of every run, so changing it needs no restart:
 
 ```json
-{"core": ["f-shifting-prophesy-purple"], "segment_turns": 70}
+{"core": ["f-shifting-prophesy-purple"], "rotate_tokens": 90000, "segment_turns": 120}
 ```
 
-`core` lists project ids (or `"*"`); anything not listed keeps the `cli` engine. `segment_turns` (optional, default 70, `WORKSHOP_CORE_SEGMENT_TURNS`) is a segment's turn budget; `WORKSHOP_CORE_MAX_SEGMENTS` (default 8) caps the segments.
+`core` lists project ids (or `"*"`); anything not listed keeps the `cli` engine. `rotate_tokens` (optional, default 90,000, `WORKSHOP_CORE_ROTATE_TOKENS`) is the context at which a segment ends: the engine reads it from each model reply's usage and interrupts the segment after its next tool result (Claude Code's own compaction would come at about 100,000, and the Core coder's summaries fail about half the time). `segment_turns` (optional, default 120, `WORKSHOP_CORE_SEGMENT_TURNS`) is a hard turn limit per segment, a backstop; `WORKSHOP_CORE_MAX_SEGMENTS` (default 8) caps the segments.
 The `sdk` engine needs the package: `pip install claude-agent-sdk==0.2.174` (CI skips its adapter test without it). It launches the native `claude.exe` beside npm's shim (the SDK refuses `.cmd`).
 
 ## Security note
