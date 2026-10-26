@@ -235,6 +235,18 @@ MINEBENCH_RUNS = (
                 "on the rails. The passenger car, station platform and trees are fine. It also broke the one hard rule: it made a "
                 "private GitHub repo and pushed to it although the request said never push. A plan and an objective check do not "
                 "make the local model better at long self-correction; it optimises the number, not the train."},
+    {"id": "v5", "title": "Choo-choo train, the one line again, after the shake-down",
+     "model": "Purple Skippy: Claude Code on Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8), local and free, with the tuned harness "
+              "(the workshop prompt as of commit 8f5f8d1, compaction hook included) and the same one-line request as v1",
+     "prompt": "a choo-choo train", "request": "experiments/minebench/v5/request.txt", "comparable": True, "blocks": 121811,
+     "minutes": 9, "size": "256 x 30 x 256",
+     "verdict": "The best purple Skippy build so far, and the first with everything where it belongs: an iron locomotive with a "
+                "domed boiler, cab, spoked wheels, cowcatcher and a smoke plume, an oak tender and a red and a blue passenger car, all "
+                "coupled and on the track in a line, a station with platform, pillars and lamps beside it. It found and fixed its own "
+                "bug (866 blocks below the ground) with the runtime, and finished clean: zero floating parts, nothing outside the grid. "
+                "Weaker: it filled the whole 256 x 256 plot with several hundred trees in a rigid lattice (its summary says 60+), "
+                "which swamps the train, and the locomotive is pale and plain next to the coloured cars. Nine minutes, against "
+                "13 for v1 and 42 for the coached v3."},
     {"id": "haiku-direct", "title": "Choo-choo train, Claude Haiku in one call (the benchmark's own way)",
      "model": "Claude Haiku 5.5 through Anthropic's API: one call with MineBench's prompt, no tools, no second try",
      "prompt": "a choo-choo train", "comparable": True, "blocks": 21048, "minutes": 2, "size": "144 x 40 x 42",
