@@ -46,8 +46,8 @@ own machines in plain Docker.
   - the first green run took 85 s for all of SkippyTel's tests (2,806);
   - the deployer gates on it (`CI_LOCAL` in core.env): green deploys, a failed test is refused, untested waits;
   - the simulator (core.yml's `sim` job) isn't run: it stood in for the box, and the box is now the test;
-  - skippy-core's own deploy timer was never switched on, so its deploys still start by hand
-    (`sudo python3 core/deployer/deployer.py run`).
+  - skippy-core's deploy timer is on (2026-10-25, every 2 minutes): push to main, skippy-core's CI tests it, and its deployer
+    deploys it only when green. The first gated deploy (eeac5ff) passed every smoke check.
 
 ## Phases (each ends working and checked; GitHub keeps receiving pushes as a mirror until the last)
 

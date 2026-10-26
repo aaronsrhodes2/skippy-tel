@@ -435,7 +435,7 @@ done. State: metadata `portal-imports`.
 `D:\trunk\git\<name>.git` (skippy-core sees it as `/mnt/pc/trunk/git`), and every checkout's `origin` points there. Each bare repo's
 `post-receive` hook forwards the push to GitHub, so the old workflows still test and deploy until CI/CD moves to skippy-core
 (phase 3). Phase 2 is done too: skippy-core's own CI (`core/ci`, every minute) tests each new main in plain Docker and its deployer
-deploys only a commit that CI passed (`CI_LOCAL`). Push to `origin` as before; never add a GitHub remote; the workshop's New folder makes a bare repo, not a GitHub one.
+deploys only a commit that CI passed (`CI_LOCAL`); its deploy timer is on, so a green push reaches skippy-core within minutes. Push to `origin` as before; never add a GitHub remote; the workshop's New folder makes a bare repo, not a GitHub one.
 
 `main` is the truth: every deploy and ops run comes from it, and Google's
 Workload Identity only trusts GitHub tokens whose ref is `refs/heads/main`
