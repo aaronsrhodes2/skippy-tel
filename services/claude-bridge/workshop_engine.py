@@ -46,6 +46,7 @@ import eyes
 import conversation_log
 import new_folder
 import projects as projects_mod
+import sdk_engine
 
 MODEL = "claude-sonnet-5-5"        # Sonnet 5.5, on purpose: nothing else picks it (was Opus until 2026-10-10)
 EFFORT = "medium"                  # and its effort level: also fixed here, never from the environment or a request
@@ -372,6 +373,7 @@ class Run:
         self.done, self.ok, self.error = False, None, None
         self.cancelled = False
         self.proc: subprocess.Popen | None = None
+        self.abort = None                      # () -> None, set by an engine that has no process to kill (sdk_engine): cancels its task
         self.finished_at: float | None = None
         self._cond = threading.Condition()
         self.on_change = None                  # (run, force) -> None; the Workshop's saver. A Run itself never touches the disk.
@@ -780,6 +782,8 @@ class Workshop:
         run.cancelled = True
         if run.proc:
             _kill_tree(run.proc)
+        if run.abort:
+            run.abort()
         return True
 
     def busy(self) -> bool:
@@ -1225,10 +1229,23 @@ class Workshop:
                                           "hooks": [{"type": "command", "command": hook, "timeout": 10}]},
                                          {"matcher": "Read", "hooks": [{"type": "command", "command": see, "timeout": 200}]}],
                           "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": restate, "timeout": 10}]}]}}
+        return self._settings_file("lane-settings.json", want)
+
+    def sdk_settings(self) -> str:
+        """The SDK engine's settings file: only the hooks that stay scripts (a Core run's Read of a picture, and the compaction
+        backstop). The lane rule and the stop gate are callbacks in sdk_engine.py, not entries here."""
+        see = f'"{sys.executable}" "{Path(__file__).resolve().with_name("eyes.py")}"'
+        restate = f'"{sys.executable}" "{Path(__file__).resolve().with_name("restate_request.py")}"'
+        want = {"hooks": {"PreToolUse": [{"matcher": "Read", "hooks": [{"type": "command", "command": see, "timeout": 200}]}],
+                          "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": restate, "timeout": 10}]}]}}
+        return self._settings_file("sdk-settings.json", want)
+
+    def _settings_file(self, name: str, want: dict) -> str:
+        """Write a settings file next to the runs (the temp folder if that fails) and return its path; it is only written when it changed."""
         text = json.dumps(want, indent=1)
         problem = None
         for folder in (Path(self.state_dir), Path(tempfile.gettempdir()) / "skippy-workshop"):   # the temp folder if the state one fails
-            path = folder / "lane-settings.json"
+            path = folder / name
             try:
                 if not path.is_file() or path.read_text(encoding="utf-8") != text:
                     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1236,7 +1253,7 @@ class Workshop:
                 return str(path)
             except OSError as exc:
                 problem = exc
-        raise ValueError(f"can't write the lane settings ({problem}): no run starts without the guard")
+        raise ValueError(f"can't write the settings {name} ({problem}): no run starts without them")
 
     @staticmethod
     def _one_line_each(argv: list[str]) -> list[str]:
@@ -1365,7 +1382,10 @@ class Workshop:
                 run.finish(False, f"couldn't write my instructions file ({self.prompt_path(run.project)}): {exc}"[:300])
                 return
             session = self._sessions().get(self.session_key(run.project, run.conv, run.brain))
-            self._attempt(run, session)
+            if sdk_engine.engine_for(self.state_dir, run.brain, run.project) == "sdk":
+                sdk_engine.run_core(self, run, session)         # typed events, callbacks, bounded segments (sdk_engine.py)
+            else:
+                self._attempt(run, session)
         except Exception as exc:  # noqa: BLE001 — a crash must end the run, or the chat waits forever
             run.finish(False, f"the bridge hit a snag: {exc}"[:300])
         finally:
