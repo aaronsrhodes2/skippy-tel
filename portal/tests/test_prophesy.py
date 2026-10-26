@@ -202,15 +202,80 @@ def test_an_arm_with_no_build_says_so(stores, client):
 
 # ── the board ──────────────────────────────────────────────────────────────────
 
-def test_the_board_shows_both_arms_and_every_turn_newest_first_with_the_scores(client):
+def test_the_board_is_one_page_per_turn_oldest_to_newest_with_both_arms_and_the_scores(client):
     login(client, FRIEND)
     page = client.get("/shifting-prophesy/").data.decode()
-    assert page.index("Turn 2") < page.index("Turn 1")
+    assert page.index("Turn 1") < page.index("Turn 2")                                     # pages are added at the end
+    assert page.count('class="sppage"') == 3                                               # the overview, and a page per turn
+    assert 'id="sp-turn-1"' in page and 'id="sp-turn-2"' in page and "pager.go(" in page and "pager.refresh()" in page and "hashchange" in page
+    assert r'.replace(/["\\]/g, "")' in page                                              # the link's label is cleaned with a valid pattern
     assert "Prompt number 1" in page and "no doors" in page and "7/10" in page and "5/10" in page
     assert "$0.42" in page and "free" in page                                             # Haiku is billed, purple is not
     assert 'href="/shifting-prophesy/haiku/"' in page and 'href="/shifting-prophesy/purple/"' in page
     assert 'src="/shifting-prophesy/turns/001/haiku/shots/Prophesy-start.png"' in page
     assert "7</span> points over 1 scored turn, 1 won" in page                           # Haiku's running total
+
+
+def _attempt(label, **over):
+    n = label.split(":")
+    folder = over.pop("folder", "T08/purple" if label.startswith("purple:1:8") else f"001/{n[0]}")
+    a = {"label": label, "model": n[0], "kind": "trial" if folder.startswith("T") else "turn", "folder": folder, "note": "", "outcome": "success",
+         "minutes": 74, "checks": {"runs": 100, "schema": 6.7, "finishable": 0}, "profile": {"calls": 349, "reads": 103}, "shots": [],
+         "reply": f"{folder}/reply.md", "actions": f"{folder}/actions.txt", "report": f"{folder.split('/')[0]}/report.md",
+         "has": {"reply": True, "actions": False}}
+    a.update(over)
+    return a
+
+
+def test_a_turns_page_has_every_attempt_as_a_section_that_opens_by_itself(stores, client):
+    ref = _attempt("haiku:1:1", benchmark=True, profile={"calls": 62, "reads": 10}, checks={k: 100 for k in prophesy.CHECKS})
+    trial = _attempt("purple:1:8", note="SDK engine; no time limit", segments=3, compactions=1, summary_chars=[11015, 158],
+                     peak_context=101688, harness={"engine": "sdk", "sdk": "0.2.174", "core_model": "Qwen3.6-35B-A3B-Q8_0.gguf", "core_context": 131072,
+                                                   "sampling": {"temperature": 0.6, "top_k": 20}},
+                     parity={"ok": False, "floor": False, "short": ["referee checks", "rooms per dungeon"],
+                             "size": [{"measure": "rooms per dungeon", "bench_min": 9, "got": 5, "ok": False}]},
+                     shots=["T08/purple/shots/Prophesy-start.png"])
+    stores["turns"].files["index.json"] = _index([_turn(1, attempts=[ref, trial, _attempt("purple:1:2")])])
+    login(client, FRIEND)
+    page = client.get("/shifting-prophesy/").data.decode()
+    assert page.count('<details class="attempt" name="sp-t001"') == 3                      # one group: one open at a time
+    assert page.index("haiku:1:1") < page.index("purple:1:8") and page.index("purple:1:8") < page.index("purple:1:2")   # as the referee ordered them
+    assert '<span class="tag">reference</span>' in page and "parity short" in page
+    assert "SDK engine; no time limit" in page and "Agent SDK 0.2.174" in page and "Qwen3.6-35B-A3B-Q8_0.gguf" in page
+    assert "temperature 0.6, top_k 20" in page and "3 segments" in page and "summaries of 11,015 / 158 characters" in page
+    assert "Short on: referee checks, rooms per dungeon." in page and "<td>rooms per dungeon</td>" in page
+    assert 'src="/shifting-prophesy/turns/T08/purple/shots/Prophesy-start.png"' in page
+    assert 'href="/shifting-prophesy/turns/T08/purple/reply.md"' in page and "T08/purple/actions.txt" not in page    # no tool-call file was uploaded
+    assert "<td>reads</td><td class=\"n\">103</td><td class=\"n\">10</td>" in page                   # beside the reference's own numbers
+
+
+def test_an_attempt_is_checked_on_the_way_in(stores, client):
+    good = _attempt("purple:1:8", note="<script>alert(1)</script>", shots=["T08/purple/shots/a.png", "../../etc/passwd", "001/haiku/shots/b.png",
+                                                                          "T08/purple/shots/c.js"])
+    bad = [_attempt("purple:1:9", folder="../x/purple"), _attempt("nobody:1:1"), _attempt("purple:1:2", kind="smoke"), {"label": "purple:1:3"}, "junk",
+           _attempt("purple:one:two")]
+    stores["turns"].files["index.json"] = _index([_turn(1, attempts=[good, *bad])])
+    login(client, FRIEND)
+    page = client.get("/shifting-prophesy/").data.decode()
+    assert "<script>alert(1)" not in page and "&lt;script&gt;" in page
+    assert "etc/passwd" not in page and "001/haiku/shots/b.png" not in page and "c.js" not in page and "T08/purple/shots/a.png" in page
+    assert page.count('<details class="attempt"') == 1                                      # only the good one
+    assert [a["label"] for a in prophesy.turns()[0]["attempts"]] == ["purple:1:8"]
+
+
+def test_a_row_from_before_attempts_is_one_attempt_per_arm(stores, client):
+    login(client, FRIEND)
+    page = client.get("/shifting-prophesy/").data.decode()
+    row = [r for r in prophesy.turns() if r["id"] == "002"][0]
+    assert [a["label"] for a in row["attempts"]] == ["purple:2:1", "haiku:2:1"]
+    assert 'data-label="haiku:2:1"' in page and 'data-label="purple:2:1"' in page
+
+
+def test_the_references_numbers_come_from_the_benchmark_attempt(stores):
+    ref = _attempt("haiku:1:1", benchmark=True, profile={"calls": 62})
+    other = _attempt("haiku:1:2", profile={"calls": 99})
+    stores["turns"].files["index.json"] = _index([_turn(1, attempts=[other, ref])])
+    assert prophesy.turns()[0]["reference"] == {"calls": 62}
 
 
 def test_the_record_is_checked_on_the_way_in(stores, client):

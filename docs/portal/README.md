@@ -745,13 +745,21 @@ referee's README is the cruise's manual; this section is only the portal's side.
 extra cloud identity are involved. The hidden seeds and full transcripts never leave skippy-pc.
 
 **Routes** (`prophesy` blueprint in `app.py`, helpers in `portal/prophesy.py`, path and file-type rules from `doomloop.py`):
-`GET /shifting-prophesy/` (signed in) is the board: each arm's live build and running score, then every turn newest first with
-the prompt, each arm's numbers (outcome, time, cost, peak context, commits, deploy, referee pass rates), its screenshots and
-the Captain's score. `GET /shifting-prophesy/<arm>/` (signed in) frames that arm's build under the app bar, with the query
+`GET /shifting-prophesy/` (signed in) is the board, in pages you flip with the pager (swipe, arrow keys): the first is each
+arm's live build and running score; then ONE PAGE PER TURN, oldest to newest (it opens on the newest, or on the attempt a
+`#purple:1:7` link names). A turn's page is its prompt and the Captain's scores, then every ATTEMPT at it as a section that
+opens by itself (one at a time): the reference first, then the rest in the order they were made, named `model:turn:attempt`
+(`haiku:1:1`, `purple:1:7`; the early fix-up turns are `purple:1:1+fix1`). A closed attempt shows its outcome, the referee's six
+checks as six boxes, its parity verdict and its time and calls; open, it shows the result (time, cost, commits, context and
+segments), the referee's rates, parity with the reference (each measure, the reference's minimum against the attempt's median),
+what it did beside the reference's own tool-call numbers, the harness it ran under (engine, SDK, model, sampling), its
+screenshots, and links to its reply, tool calls and report. The data is each turn row's `attempts` in `index.json` (the
+referee's `board.mjs`, which also uploads every trial's readable files under `turns/<Tnn>/`); a row from before attempts
+existed (only `arms`) shows as one attempt per arm. `GET /shifting-prophesy/<arm>/` (signed in) frames that arm's build under the app bar, with the query
 string passed through (the spec's `?seed=...&screen=x,y` URLs); the build's own page is never edited. `GET
 /shifting-prophesy/<arm>/<path>` and `/shifting-prophesy/turns/<path>` (signed in) are files from the bucket, as Doom Loop's.
 `GET /shifting-prophesy/<arm>/version` is public: the referee's runner and the deploy's smoke test read it. The record's
-`index.json` is checked on the way in (turn ids, screenshot paths inside their own turn and arm, numbers as numbers).
+`index.json` is checked on the way in (turn ids, labels, screenshot and file paths inside their own attempt's folder, numbers as numbers).
 
 **Setup:** none beyond a paired home token (which skippy-pc already has).
 

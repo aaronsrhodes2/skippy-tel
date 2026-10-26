@@ -1876,11 +1876,13 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @sp.get("/")
     @auth.login_required
     def board():
-        """Both arms' live builds and every turn, newest first, with the Captain's scores."""
+        """Both arms' live builds, then one page per turn (turns() is newest first; the template lays them oldest to newest and
+        opens on the newest), each with every attempt at it."""
         rows = prophesy.turns()
         versions = {a: prophesy.version(a) for a in prophesy.ARMS}
         return render_template("prophesy.html", arms=prophesy.ARMS, versions=versions, turns=rows, totals=prophesy.totals(rows),
-                               short={a: prophesy.short_commit(v) for a, v in versions.items()})
+                               short={a: prophesy.short_commit(v) for a, v in versions.items()},
+                               check_order=prophesy.CHECKS, profile_order=prophesy.PROFILE)
 
     @sp.get("/turns/<path:path>")
     @auth.login_required

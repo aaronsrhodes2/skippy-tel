@@ -10,7 +10,12 @@ portal redeploy. Nothing here talks to an LLM.
 
     prophesy/haiku/, prophesy/purple/   index.html, version.json (uploaded last), and whatever the build loads
     prophesy/turns/                     index.json (one row per turn, uploaded last) and <NNN>/: turn.json, report.md,
-                                        reply.md and actions.txt per arm, and <arm>/shots/*.png
+                                        reply.md and actions.txt per arm, and <arm>/shots/*.png; and <Tnn>/ the same for each
+                                        trial (one more attempt at a turn)
+
+The board is one PAGE per turn (flip with the pager), and on a turn's page every ATTEMPT at it, each a section that opens on its
+own (one open at a time): haiku:1:1, purple:1:1 ... purple:1:8, named model:turn:attempt by the referee (labels.mjs). A row's
+`attempts` carries them; a row from before attempts existed (only `arms`) is shown as one attempt per arm.
 
 Every page and file is for signed-in people; each build's /version is public (the runner checks it after an upload).
 """
@@ -40,6 +45,12 @@ VERSION_TTL = 10.0           # seconds a build's version.json is trusted before 
 INDEX_TTL = 10.0             # and the record's index.json
 _SAFE_ID = re.compile(r"^[0-9A-Za-z._-]{1,64}$")
 _TURN_ID = re.compile(r"^\d{3}$")
+_LABEL = re.compile(r"^(?:haiku|purple):\d{1,3}:\d{1,3}(?:\+fix\d{1,2})?$")           # model:turn:attempt
+_FOLDER = re.compile(r"^[0-9A-Za-z]{1,8}/(?:haiku|purple)$")                          # an attempt's files: <turn or trial>/<arm>
+KINDS = ("turn", "fix", "trial")
+CHECKS = ("runs", "deterministic", "schema", "finishable", "biomes", "clues")           # the referee's six, in the order shown
+PROFILE = ("calls", "reads", "distinct_reads", "writes", "test_runs", "gen_runs", "reference_reads")
+MAX_ATTEMPTS = 60
 TEXT_TYPES = {".md": "text/plain; charset=utf-8", ".txt": "text/plain; charset=utf-8"}
 
 
@@ -141,6 +152,73 @@ def _text(v, limit=2000):
     return v[:limit] if isinstance(v, str) else ""
 
 
+def _short(v, limit):
+    return v[:limit] if isinstance(v, str) else ""
+
+
+def _file(v, folder, tail=None):
+    """A record file's path (it comes from a file, so it is checked): inside the attempt's own folder, a type the board serves."""
+    if not (isinstance(v, str) and clean_path(v) and v.startswith(folder + "/")):
+        return ""
+    return v if (v.endswith(tail) if tail else v.endswith((".png", ".md", ".txt"))) else ""
+
+
+def _attempt(raw) -> dict | None:
+    """One attempt at a turn, reduced to what the board shows. None for anything that isn't one."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("label"), str) or not _LABEL.match(raw["label"]):
+        return None
+    folder = raw.get("folder")
+    if not (isinstance(folder, str) and _FOLDER.match(folder)) or raw.get("model") not in ARMS or raw.get("kind") not in KINDS:
+        return None
+    checks = raw.get("checks") if isinstance(raw.get("checks"), dict) else None
+    par = raw.get("parity") if isinstance(raw.get("parity"), dict) else None
+    prof = raw.get("profile") if isinstance(raw.get("profile"), dict) else None
+    har = raw.get("harness") if isinstance(raw.get("harness"), dict) else None
+    has = raw.get("has") if isinstance(raw.get("has"), dict) else {}
+    sampling = (har or {}).get("sampling")
+    return {
+        "label": raw["label"], "model": raw["model"], "kind": raw["kind"], "folder": folder,
+        "note": _short(raw.get("note"), 600), "started_at": _short(raw.get("started_at"), 40), "finished_at": _short(raw.get("finished_at"), 40),
+        "outcome": _short(raw.get("outcome"), 120), "minutes": _num(raw.get("minutes")), "cost_usd": _num(raw.get("cost_usd")),
+        "peak_context": _num(raw.get("peak_context")), "compactions": _num(raw.get("compactions")), "segments": _num(raw.get("segments")),
+        "summary_chars": [n for n in (_num(x) for x in (raw.get("summary_chars") or [])[:12]) if n is not None]
+                         if isinstance(raw.get("summary_chars"), list) else [],
+        "commits": _num(raw.get("commits")), "uncommitted": _num(raw.get("uncommitted")),
+        "deploy": _short(raw.get("deploy"), 80), "live": raw.get("live") is True, "benchmark": raw.get("benchmark") is True,
+        "grade_status": _short(raw.get("grade_status"), 20),
+        "checks": {k: _num(checks.get(k)) for k in CHECKS if checks and _num(checks.get(k)) is not None} if checks else {},
+        "parity": None if par is None else {
+            "ok": par.get("ok") is True, "floor": par.get("floor") is True,
+            "short": [_short(x, 60) for x in (par.get("short") or [])[:12] if isinstance(x, str)] if isinstance(par.get("short"), list) else [],
+            "size": [{"measure": _short(r.get("measure"), 60), "bench_min": _num(r.get("bench_min")), "got": _num(r.get("got")), "ok": r.get("ok") is True}
+                     for r in (par.get("size") or [])[:12] if isinstance(r, dict)] if isinstance(par.get("size"), list) else []},
+        "profile": {k: _num(prof.get(k)) for k in PROFILE if _num(prof.get(k)) is not None} if prof else {},
+        "harness": None if har is None else {
+            "engine": _short(har.get("engine"), 8), "sdk": _short(har.get("sdk"), 20), "core_model": _short(har.get("core_model"), 80),
+            "core_context": _num(har.get("core_context")), "bridge_commits": _num(har.get("bridge_commits")),
+            "sampling": {k: _num(v) for k, v in sampling.items() if isinstance(k, str) and len(k) <= 24 and _num(v) is not None}
+                        if isinstance(sampling, dict) else {}},
+        "shots": [x for x in ((_file(s, folder + "/shots", ".png")) for s in (raw.get("shots") or [])[:12]) if x] if isinstance(raw.get("shots"), list) else [],
+        "reply": _file(raw.get("reply"), folder, "reply.md") if has.get("reply") else "",
+        "actions": _file(raw.get("actions"), folder, "actions.txt") if has.get("actions") else "",
+        "report": _file(raw.get("report"), folder.split("/")[0], "report.md"),
+    }
+
+
+def _legacy_attempts(tid: str, n, arms: dict) -> list[dict]:
+    """A row from before attempts existed: one attempt per arm, from its `arms` entry."""
+    out = []
+    for name, a in arms.items():
+        out.append({"label": f"{name}:{int(n) if isinstance(n, (int, float)) else int(tid)}:1", "model": name, "kind": "turn", "folder": f"{tid}/{name}",
+                    "note": "", "started_at": "", "finished_at": "", "outcome": a["outcome"], "minutes": a["minutes"], "cost_usd": a["cost_usd"],
+                    "peak_context": a["peak_context"], "compactions": a["compactions"], "segments": None, "summary_chars": [],
+                    "commits": a["commits"], "uncommitted": None, "deploy": a["deploy"], "live": a["live"], "benchmark": False,
+                    "grade_status": a["grade_status"], "checks": {k: v for k, v in a["checks"].items() if k in CHECKS}, "parity": None, "profile": {},
+                    "harness": None, "shots": a["shots"], "reply": f"{tid}/{name}/reply.md", "actions": f"{tid}/{name}/actions.txt",
+                    "report": f"{tid}/report.md"})
+    return out
+
+
 def turns() -> list[dict]:
     """The record's turns, newest first, reduced to the fields the board shows and checked on the way in (the record is
     the referee repo's own output, but it is still a file: nothing from it is trusted to be the right shape)."""
@@ -176,8 +254,14 @@ def turns() -> list[dict]:
                 captain = {"note": _text(cap.get("note"), 1000),
                            **{name: {"score": _num((cap.get(name) or {}).get("score")), "note": _text((cap.get(name) or {}).get("note"), 1000)}
                               for name in ARMS if isinstance(cap.get(name), dict)}}
+            raw_attempts = t.get("attempts")
+            attempts = [a for a in (_attempt(x) for x in (raw_attempts if isinstance(raw_attempts, list) else [])[:MAX_ATTEMPTS]) if a]
+            if not attempts:
+                attempts = _legacy_attempts(t["id"], _num(t.get("n")), arms)
+            ref = next((a for a in attempts if a["benchmark"]), None) or next((a for a in attempts if a["model"] == "haiku"), None)
             out.append({"id": t["id"], "n": _num(t.get("n")), "prompt": _text(t.get("prompt"), 2000),
-                        "finished_at": _text(t.get("finished_at"), 40), "arms": arms, "captain": captain})
+                        "finished_at": _text(t.get("finished_at"), 40), "arms": arms, "captain": captain,
+                        "attempts": attempts, "reference": ref["profile"] if ref else {}})
         return sorted(out, key=lambda r: r["id"], reverse=True)
     return _cached("index", INDEX_TTL, load)
 
