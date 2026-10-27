@@ -502,5 +502,35 @@
    "the room hub's Matter backend (services/satellite matter.py)",
    "the house tools in the Captain's chat (through the hub)"
   ]
+ },
+ "sfx-quick": {
+  "for": "A short sound effect or drum hit (0.5-11 s) from a description (Stable Audio Open Small). Waits on its Hugging Face licence.",
+  "used_by": [
+   "the Captain's chat and his agent"
+  ]
+ },
+ "sfx-loop": {
+  "for": "A loop or one-shot up to 47 s at a tempo and key, cut to whole bars (Stable Audio Open 1.0): 9-16 s once loaded.",
+  "used_by": [
+   "the Captain's chat and his agent"
+  ]
+ },
+ "melody-variations": {
+  "for": "An attached clip's melody in a new style, up to 30 s (MusicGen melody). Non-commercial licence: sketching only.",
+  "used_by": [
+   "the Captain's chat and his agent"
+  ]
+ },
+ "stems": {
+  "for": "Splits a track into drums, bass, vocals and other (Demucs): a whole song in under a minute.",
+  "used_by": [
+   "the Captain's chat and his agent"
+  ]
+ },
+ "audio-to-midi": {
+  "for": "Writes the notes of an attached clip as a MIDI file (Basic Pitch), best on one instrument.",
+  "used_by": [
+   "the Captain's chat and his agent"
+  ]
  }
 }

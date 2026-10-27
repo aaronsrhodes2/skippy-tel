@@ -1,0 +1,34 @@
+# The audio pop-ups (docs/popups.md, docs/audio-popups.md): its own Compose project on skippy-pc's network, so the home reporter
+# reaches it by name and no shared file changes. The weights volume is seeded once from D:/models by seed_weights.sh.
+#   bash services/audio-popups/seed_weights.sh
+#   docker compose -f services/audio-popups/compose.yml build && docker compose -f services/audio-popups/compose.yml up -d
+name: skippy-popups-audio
+services:
+  audio-popups:
+    build: .
+    container_name: skippy-popup-audio
+    restart: unless-stopped
+    networks: [skippytel]
+    expose: ["47440"]
+    environment:
+      IDLE_UNLOAD_S: "300"                 # the card goes back to the voices and Ollama five minutes after the last job
+    volumes:
+      - weights:/weights:ro
+    mem_limit: 6g                          # the Docker VM has 16 GB for the whole stack (2026-10-25): a load that overshoots dies, the VM doesn't
+    shm_size: "1gb"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    logging: {driver: json-file, options: {max-size: "2m", max-file: "2"}}
+networks:
+  skippytel:
+    name: skippytel_default
+    external: true
+volumes:
+  weights:
+    name: skippytel_audio-popups-weights
+    external: true

@@ -42,7 +42,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # The two CI commands (skippy-core's CI: core/ci/ci.py PLANS). tools/tests/test_affected_tests.py fails if CI names a directory
 # that is not here, so "FULL" can never become narrower than the gate.
-MAIN = ("portal/tests", "memory/tests", "tools/tests", "services/home-reporter/tests", "services/claude-bridge/tests", "services/wa-trickle/tests", "mentat/tests", "core/tests", "services/image-studio/tests")
+MAIN = ("portal/tests", "memory/tests", "tools/tests", "services/home-reporter/tests", "services/claude-bridge/tests", "services/wa-trickle/tests", "services/audio-popups/tests", "mentat/tests", "core/tests", "services/image-studio/tests")
 FLASK = ("services/flask-api/tests",)             # its `app` package can't share a session with the portal's app.py, and it has its own requirements
 AREAS = {"portal": "portal/tests", "memory": "memory/tests", "mentat": "mentat/tests", "tools": "tools/tests", "core": "core/tests"}
 GENERIC_NAMES = {"app.py", "__init__.py", "config.py", "main.py", "version.py", "utils.py", "README.md", "index.py"}
