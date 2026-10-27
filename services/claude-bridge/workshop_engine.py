@@ -857,8 +857,8 @@ class Workshop:
             if path.name.endswith(".tmp"):             # a write the last process died in the middle of
                 _unlink(path)
                 continue
-            if path.suffix != ".json":
-                continue
+            if path.suffix != ".json" or not _TASK.fullmatch(path.stem):
+                continue                               # not a run (a run's file is named by its task id): engines.json, the settings and MCP files live here too
             try:
                 mtime = path.stat().st_mtime
             except OSError:
