@@ -48,6 +48,7 @@ from flask import Flask, g, jsonify, request
 from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS
 from mcp.types import LATEST_PROTOCOL_VERSION
 
+import cascade_stage
 import ready as ready_mod
 import research
 import router_stage
@@ -179,6 +180,12 @@ def _ask(question: str, given: dict | None = None) -> dict:
         # The Captain's rule: the Qwen-backed Mentat fails rather than answer without Qwen.
         raise QwenUnavailable("Qwen (Ollama) is unreachable, so Mentat won't answer without it.")
     miss: dict = {}
+    if cascade_stage.enabled() and cascade_stage.MODE == "before" and not given:
+        # Opt-in (MENTAT_CASCADE=before): the benchmark's deterministic cascade ahead of the router, as the harness measured it (140 vs the
+        # router's 109 on the 150). A miss falls to the router with its reason in inputs.router_miss["cascade"].
+        hit = cascade_stage.answer(question, miss=miss)
+        if hit is not None:
+            return hit
     if router_stage.enabled() and USE_LLM and not given:
         # Opt-in (MENTAT_ROUTER_MODEL): the trained router goes first. On the 150 benchmark questions the bare keyword shortcut was wrong as often as right
         # (it answered "escape velocity" with surface gravity), so it does not get to pre-empt the router. A miss (decline, clarification, error, router
@@ -187,6 +194,11 @@ def _ask(question: str, given: dict | None = None) -> dict:
         routed = router_stage.answer(question, server=server, tools=TOOLS, ollama_url=OLLAMA_URL, guard=_router_guard, miss=miss)
         if routed is not None:
             return routed
+    if cascade_stage.enabled() and cascade_stage.MODE == "after" and not given:
+        # Opt-in (MENTAT_CASCADE=after): the cascade only where the router missed.
+        hit = cascade_stage.answer(question, miss=miss)
+        if hit is not None:
+            return hit
     result = simulate(question, use_llm=USE_LLM, given=given or None).to_dict()
     result["interpreter"] = "keywords + qwen" if USE_LLM else "keywords"
     if miss and isinstance(result.get("inputs"), dict):
