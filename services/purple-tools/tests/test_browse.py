@@ -55,7 +55,7 @@ def test_steps_run_in_order_and_the_page_comes_back_as_text_and_unique_web_links
     out = tools.browse({"url": "https://example.test/", "steps": [{"click": "text=Go"}, {"fill": "#q", "text": "hi"}], "screenshot": True}, cwd=tmp_path, launcher=launcher)
     assert page.log == [("goto", "https://example.test/"), ("click", "text=Go"), ("fill", "#q", "hi")] and browser.closed
     assert out.startswith("https://example.test/final") and "title: A title" in out and "step 2 fill: ok" in out
-    assert "Hello\n\nworld" in out and out.count("https://example.test/: Home") == 1 and "mailto" not in out and "(no text): https://example.test/b" in out
+    assert "Hello\n\nworld" in out and out.count("- Home: https://example.test/") == 1 and "mailto" not in out and "(no text): https://example.test/b" in out
     assert len(list((tmp_path / ".purple-out").iterdir())) == 1 and "screenshot saved" in out
 
 
