@@ -1495,7 +1495,10 @@ def main() -> None:
     threading.Thread(target=jobs.poll_forever, daemon=True).start()
     threading.Thread(target=watchdog.run_forever, daemon=True).start()
     if LOCAL_API_PORT:                               # the private Skippy's quick pop-up tools (local_api.py): loopback only, published by compose
-        threading.Thread(target=local_api.serve(LOCAL_API_PORT, popups, call_popup).serve_forever, daemon=True).start()
+        try:
+            threading.Thread(target=local_api.serve(LOCAL_API_PORT, popups, call_popup).serve_forever, daemon=True).start()
+        except OSError as e:                         # the port is taken: the reporter still reports, the tools just have no door
+            print(f"home-reporter: local door not started on :{LOCAL_API_PORT}: {e}", flush=True)
     if BRIDGE:                                       # the private Skippy: catch the portal up on whatever the bridge holds
         threading.Thread(target=WorkshopSync(token, jobs).run_forever, daemon=True).start()
     # What people did on the portal goes into flask-api's SQLite on its own thread: a collection may take 20 s, and while it
