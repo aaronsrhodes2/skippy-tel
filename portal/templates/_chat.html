@@ -538,6 +538,7 @@
       const PHOTO_MAX = 1100000, PHOTOS_MAX = 3100000;
       let shots = 0;
       SkippyCamera.attach({key: camKey, stage: root.querySelector(".stage"), say: flash,
+        html2canvas: "{{ url_for('static', filename='vendor/html2canvas.min.js') }}",      // the page snapshot for iPhone and iPad, loaded on first use
         budget: () => Math.min(PHOTO_MAX, PHOTOS_MAX - pending_files.reduce((n, f) => n + f.data.length, 0)),
         onPhoto: (url, meta) => {                                  // each picture is an attachment with its own remove key (paintFiles)
           if (pending_files.length >= MAX_FILES) { flash("At most " + MAX_FILES + " files to a message."); return false; }

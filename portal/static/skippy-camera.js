@@ -15,7 +15,7 @@
  *     each its own file; every camera is stopped as soon as its frame is taken;
  *   - SCREEN: a picture of what is on the screen now. Where the browser can capture the screen (getDisplayMedia: desktops) that
  *     is the real screen, one frame, the capture stopped at once; elsewhere (iPhone and iPad Safari cannot) it is a snapshot of
- *     this page, drawn by the self-hosted html2canvas (static/vendor/html2canvas.min.js) when the page loaded it.
+ *     this page, drawn by the self-hosted html2canvas 1.4.1 (static/vendor/html2canvas.min.js, MIT), loaded on first use (opts.html2canvas).
  * Every picture goes to opts.onPhoto(dataUrl, {width, height, name, kind}); it returns false when the message has no room left,
  * which stops a run of pictures. They arrive in the chat as ordinary attachments, each with its remove key.
  * The pure helper fit() is exported for portal/tests/js/camera/skippy-camera.test.js.
@@ -204,6 +204,16 @@
       }
     }
 
+    // The page-snapshot library (opts.html2canvas: its URL, self-hosted) is loaded the first time it is needed, not on every page view.
+    function loadSnapshotLibrary() {
+      if (typeof root.html2canvas === "function" || !opts.html2canvas) return Promise.resolve();
+      return new Promise((done) => {
+        const s = doc.createElement("script"); s.src = opts.html2canvas; s.async = true;
+        s.addEventListener("load", () => done()); s.addEventListener("error", () => done());
+        (doc.head || doc.body || stage).appendChild(s);
+      });
+    }
+
     // SCREEN: the real screen where the browser allows it, otherwise a snapshot of this page.
     async function screen() {
       close();
@@ -221,6 +231,7 @@
           } finally { s.getTracks().forEach(t => { try { t.stop(); } catch (e) {} }); }
         }
       }
+      await loadSnapshotLibrary();
       if (typeof root.html2canvas === "function") {                       // iPhone, iPad, Android: this page, as it looks now
         try {
           const canvas = await root.html2canvas(doc.body, {backgroundColor: null, logging: false, useCORS: true, scale: Math.min(2, root.devicePixelRatio || 1)});

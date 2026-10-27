@@ -229,3 +229,23 @@ test("without screen capture (iPhone, iPad) the screen key snapshots the page wi
   await denied.cam.screen();
   assert.match(denied.said.join(" "), /cancelled/);
 });
+
+test("the page-snapshot library is loaded on first use from the given URL, once, and its absence is survivable", async () => {
+  const doc = makeDoc(), key = new El("button"), stage = new El("div"), photos = [], said = [];
+  doc.head = new El("head"); doc.body = new El("body");
+  key.appendChild(Object.assign(new El("i"), {className: "lamp"}));
+  const cam = Cam.attach({key, stage, doc, media: makeMedia({}), say: t => said.push(t), budget: () => 1100000, html2canvas: "/static/vendor/html2canvas.min.js",
+    store: {getItem: () => "1", setItem() {}}, onPhoto: (u, m) => { photos.push(m.name); }});
+  assert.equal(doc.head.children.length, 0, "nothing loaded before it is needed");
+  const run = cam.screen();
+  await sleep(10);
+  const script = doc.head.children[0];
+  assert.equal(script.tag, "script");
+  assert.equal(script.src, "/static/vendor/html2canvas.min.js");
+  globalThis.html2canvas = async () => { const c = makeDoc().createElement("canvas"); c.width = 640; c.height = 480; return c; };
+  try { script.fire("load", {}); await run; } finally { delete globalThis.html2canvas; }
+  assert.deepEqual(photos, ["screen"]);
+  const run2 = cam.screen(); await sleep(10);                                  // a failed load (offline) still ends with a plain message
+  doc.head.children[1].fire("error", {}); await run2;
+  assert.match(said.join(" "), /can't take a screenshot/);
+});
