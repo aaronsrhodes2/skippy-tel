@@ -1257,7 +1257,7 @@ class Workshop:
         python, server = satellite / ".venv" / "Scripts" / "python.exe", satellite / "house_mcp.py"
         if not (python.is_file() and server.is_file()):
             return None
-        return self._write_state_file("house-mcp.json", json.dumps({"mcpServers": {"skippy-house": {"type": "stdio", "command": python.as_posix(), "args": [server.as_posix()]}}}, indent=1))
+        return self._write_state_file("house-mcp.json", json.dumps({"mcpServers": {"skippy-house": {"type": "stdio", "command": python.as_posix(), "args": [server.as_posix()], "alwaysLoad": True}}}, indent=1))
 
     def purple_mcp_config(self) -> str | None:
         """purple's Haiku-class tools (services/purple-tools: web search, Mentat, the quick pop-ups, PDF reading, a headless browser) as an MCP
@@ -1265,7 +1265,7 @@ class Workshop:
         server, python = PURPLE_TOOLS_SERVER, Path(sys.executable)
         if not (server.is_file() and python.is_file()):
             return None
-        return self._write_state_file("purple-tools-mcp.json", json.dumps({"mcpServers": {"purple-tools": {"type": "stdio", "command": python.as_posix(), "args": [server.as_posix()]}}}, indent=1))
+        return self._write_state_file("purple-tools-mcp.json", json.dumps({"mcpServers": {"purple-tools": {"type": "stdio", "command": python.as_posix(), "args": [server.as_posix()], "alwaysLoad": True}}}, indent=1))
 
     def core_mcp_config(self, house: bool, purple: bool, purple_only: list[str] | None = None) -> str | None:
         """One MCP config file holding only the servers switched on (the SDK engine takes a single one), or None when none is. `purple_only`

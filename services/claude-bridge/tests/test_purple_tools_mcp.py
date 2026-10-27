@@ -18,11 +18,12 @@ def server(tmp_path, monkeypatch):
     return f
 
 
+# alwaysLoad: Claude Code defers MCP tools behind ToolSearch and Core's coder never searches, so purple-tools is exempt (measured 2026-10-27: +1,253 tokens)
 def test_the_config_names_the_server_and_the_python_that_runs_it(shop, server):
     path = shop.purple_mcp_config()
     cfg = json.loads(Path(path).read_text(encoding="utf-8"))
     assert Path(path).name == "purple-tools-mcp.json"
-    assert cfg == {"mcpServers": {"purple-tools": {"type": "stdio", "command": Path(sys.executable).as_posix(), "args": [server.as_posix()]}}}
+    assert cfg == {"mcpServers": {"purple-tools": {"type": "stdio", "command": Path(sys.executable).as_posix(), "args": [server.as_posix()], "alwaysLoad": True}}}
 
 
 def test_without_the_server_there_is_no_config_and_a_run_goes_without(shop, tmp_path, monkeypatch):
