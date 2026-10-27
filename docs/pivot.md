@@ -29,7 +29,18 @@ git state and the agent's last messages). A pivot is the same boundary on demand
 - Portal side (this session): the Pivot key beside New chat, the persona examples file, the filler audio set and its picker, ElevenLabs
   removal as the fallback. Nothing starts before the engine side has a window (the cruise is first).
 
+## How a pivot is asked for (the Captain, 2026-10-27)
+
+- **Phrases that ask:** "let's pivot", "let's change the subject", "on to a new feature", "moving on to ...", "switching gears", "new topic", "next up" and
+  the like, at the start of a message (`static/skippy-pivot.js`, `detect()`, with node tests).
+- **Phrases that only add, never pivot:** "by the way", "also", "I noticed", "one more thing", "while we're at it", "side note", "quick question",
+  "speaking of". An additive opener wins over a pivot phrase behind it.
+- **Not a pivot:** "pivot table", "pivot point", or a pivot phrase buried deep in a long message (only the first 90 characters count).
+- **A pivot request only opens a question.** Nothing is dumped or compressed until he agrees. If stopping would lose something (a run still going, a goal being
+  worked on, uncommitted changes, queued messages) the chat says so and offers "Pivot now" or "Finish first" (`inTheMiddle()`); when nothing is in flight it
+  goes straight to the dump.
+
 ## Open choices
 
-- Pivot detection: only on his key, or also an offer when the router model sees a subject change (an offer, never automatic).
 - Where the dump is shown: as a card in the transcript he can edit before the boundary.
+- The wiring (the composer calls `detect()` before sending, the portal supplies the in-flight state) waits for the engine's pivot request.
