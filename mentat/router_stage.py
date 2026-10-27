@@ -11,11 +11,13 @@ and the caller carries on exactly as it did before the router existed. So the ro
 A miss is never silent: `answer(..., miss=d)` writes its reason (and the plan, when there was one) into `d`, and /ask keeps it in the fallback's
 `inputs.router_miss`, so the research log says why the router did not answer.
 
-The harness runs in the configuration the router was SCORED in (sigma-ground tools/eval_math_suite.py, misc/ROUTER_V31_PLAN.md): the `trained`
-tweak profile with `structured_results` on. Left at the registry defaults (2026-10-25 .. 2026-10-27), `structured_results` was off, and the harness
-then reads a symbolic or list result (a derivative, roots, a matrix) as "returned no value": the router planned every maths question right and /ask
-answered none of them (0 of 329; 317 with the profile set; sigma-ground misc/MENTAT_AUDIT_2026-10-27.md). MENTAT_ROUTER_PROFILE and
-MENTAT_ROUTER_TWEAKS_ON override it for an experiment.
+The harness runs with `structured_results` on, the switch the router's scores were taken with (sigma-ground tools/eval_math_suite.py,
+misc/ROUTER_V31_PLAN.md). Left at the registry defaults (2026-10-25 .. 2026-10-27) it was off, and the harness then reads a symbolic or list result (a
+derivative, roots, a matrix) as "returned no value": the router planned every maths question right and /ask answered none of them (0 of 329; 313-317
+with the switch on; sigma-ground misc/MENTAT_AUDIT_2026-10-27.md). Not the harness's `trained` profile: its `strict_params` refuses a plan that names a
+parameter the v3.1 router still writes but the schema no longer lists, either a pre-rename name the server accepts as an alias
+(joules_to_eV(energy_joules) -> energy_j) or an invented extra the tool ignores (free_fall_time(initial_velocity_m_s)); measured live, that profile
+lost 2 physics answers for nothing. MENTAT_ROUTER_PROFILE and MENTAT_ROUTER_TWEAKS_ON override it for an experiment.
 """
 from __future__ import annotations
 
@@ -28,7 +30,7 @@ from types import SimpleNamespace
 MODEL = os.environ.get("MENTAT_ROUTER_MODEL", "").strip()
 PLAN = os.environ.get("MENTAT_ROUTER_PLAN", "v3")                 # the plan format the model was trained on (v3.1 = v3; v3.2 = v4)
 TIMEOUT_S = float(os.environ.get("MENTAT_ROUTER_TIMEOUT", "60"))
-PROFILE = os.environ.get("MENTAT_ROUTER_PROFILE", "trained")      # the harness tweak profile the model was measured in
+PROFILE = os.environ.get("MENTAT_ROUTER_PROFILE", "") or None     # a harness tweak profile; empty = the registry defaults (see above)
 TWEAKS_ON = tuple(x for x in os.environ.get("MENTAT_ROUTER_TWEAKS_ON", "structured_results").replace(",", " ").split() if x)
 MISS_KEYS = ("router_error", "router_decline", "router_clarify")
 
@@ -61,7 +63,7 @@ def _params(tools: dict) -> dict[str, set[str]]:
 
 
 def configure_harness() -> None:
-    """The harness's tweak switches, set to the profile the router was scored in (on every call: another caller may have reset them)."""
+    """The harness's tweak switches, set to the configuration the router was scored in (on every call: another caller may have reset them)."""
     from sigma_ground.mcp.benchmark import tweaks
     tweaks.configure(PROFILE, on=TWEAKS_ON)
 

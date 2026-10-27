@@ -164,10 +164,32 @@ class TestRealHarness:
         assert out is None
         assert miss["reason"].startswith("error:") and "differentiate_expr" in miss["reason"] and miss["plan"] == self.PLAN
 
-    def test_the_harness_runs_in_the_measured_profile(self, stage, monkeypatch):
+    def test_the_harness_runs_in_the_measured_configuration(self, stage, monkeypatch):
         from sigma_ground.mcp.benchmark import tweaks
         tweaks.configure(None)                                     # the registry defaults: what the stage ran in before 2026-10-27
         assert not tweaks.on("structured_results")
         self._answer(stage, monkeypatch, {"value": 1.0, "units": "", "error": None})
-        assert stage.PROFILE == "trained" and stage.TWEAKS_ON == ("structured_results",)
-        assert tweaks.on("structured_results") and tweaks.on("strict_params") and not tweaks.on("hidden_tools")
+        assert stage.PROFILE is None and stage.TWEAKS_ON == ("structured_results",)
+        assert tweaks.on("structured_results")
+        # not strict_params: the v3.1 router writes pre-rename names the server accepts as aliases, and invented extras the tool ignores
+        # (measured live with strict_params on: -2 physics answers, +0)
+        assert not tweaks.on("strict_params")
+
+    def test_a_pre_rename_parameter_name_is_not_refused(self, stage, monkeypatch):
+        import json
+        import httpx
+        from types import SimpleNamespace
+        plan = '{"tool": "joules_to_eV", "tool_args": {"energy_joules": 1.0}}'
+        real = httpx.AsyncClient
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(
+            lambda r: httpx.Response(200, json={"message": {"content": plan}})), **kw))
+        monkeypatch.setattr(stage, "MODEL", "mentat-router-v31-4b")
+
+        class Server:
+            async def call_tool(self, name, args):
+                return [SimpleNamespace(text=json.dumps({"value": 6.242e18, "units": "eV", "error": None, "inputs": args}))], None
+
+        tools = {"joules_to_eV": SimpleNamespace(name="joules_to_eV", inputSchema={"properties": {"energy_j": {}}})}   # renamed since training
+        miss = {}
+        out = stage.answer("1 J in eV", server=Server(), tools=tools, ollama_url="http://fake:11434", miss=miss)
+        assert out is not None and out["value"] == 6.242e18, miss
