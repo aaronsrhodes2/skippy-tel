@@ -43,8 +43,9 @@ COPY portal/ .
 # Shared with the rest of the repo — one source of truth, copied in at build:
 COPY services/flask-api/app/skippy_persona.md ./skippy_persona.md
 COPY infra/gcp-games/discord-notify.py ./discord_notify.py
-# The pop-up registry (popups.py, docs/popups.md): only the registry files are in the build context (.dockerignore)
-COPY services/ ./popups_src/services/
+# The pop-up registry (popups.py, docs/popups.md): core/cd/cd.py vendor_popups lays the registry files out in .vendor/popups/services/ (not through
+# .dockerignore exceptions: the classic builder on skippy-core dropped every family's popups.json that way)
+COPY .vendor/popups/ ./popups_src/
 
 ENV PYTHONUNBUFFERED=1
 # The build's identity, for GET /version and the footer stamp. Last on purpose: these change on every build, so

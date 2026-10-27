@@ -349,7 +349,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def version():
         """Which build is serving: tools/loop_timer.py polls this (signed out, once a second) to learn the moment a deploy became
         visible, so it is public, tiny, never cached (a cached answer would make the new version appear late) and holds no secret."""
-        response = jsonify(buildinfo.info())
+        response = jsonify({**buildinfo.info(), "popups": len(popups.names())})     # how many pop-up tools it knows: the deploy's smoke test compares with the registry
         response.headers["Cache-Control"] = "no-store"
         return response
 

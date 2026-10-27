@@ -214,6 +214,25 @@ def test_vendor_puts_the_pinned_sigma_ground_and_the_game_in_the_build_context(t
     assert (src / ".vendor" / "sigma-ground").is_dir()
 
 
+def test_vendor_lays_out_every_pop_up_registry_file_for_the_portal_image(trunk):
+    """The portal image once held only the test pop-up's registry (the classic builder ignored the wildcard .dockerignore exception), so the
+    portal did not know the vision, search, 3D or video tools. Now the registry is copied into the build context and counted."""
+    cd, src, _ = trunk
+    (src / "services" / "popups").mkdir(parents=True)
+    (src / "services" / "popups" / "registry.json").write_text(json.dumps({"popups": [{"name": "echo"}]}))
+    for fam, names in (("vision-popups", ["a", "b", "c"]), ("3d-video-popups", ["d"])):
+        (src / "services" / fam).mkdir()
+        (src / "services" / fam / "popups.json").write_text(json.dumps({"popups": [{"name": n} for n in names]}))
+    (src / "services" / "flask-api").mkdir()                                     # not a registry: never copied
+    (src / "services" / "flask-api" / "popups.json").write_text("{}")
+    cd.vendor(src, star_control=True)
+    got = sorted(p.relative_to(src / ".vendor" / "popups").as_posix() for p in (src / ".vendor" / "popups").rglob("*.json"))
+    assert got == ["services/3d-video-popups/popups.json", "services/popups/registry.json", "services/vision-popups/popups.json"]
+    assert cd.popup_count(src) == 5                                              # echo + 3 + 1: what the portal must say it knows after the deploy
+    cd.vendor(src, star_control=True)                                            # again: no stale file survives
+    assert len(list((src / ".vendor" / "popups").rglob("*.json"))) == 3
+
+
 def test_a_swapped_game_file_is_refused(trunk):
     cd, src, tmp = trunk
     (tmp / "trunk-art" / "star-control" / "web-test" / "scz-web.tar.gz").write_bytes(b"not the game")

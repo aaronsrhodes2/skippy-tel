@@ -275,6 +275,31 @@ class CD:
         self.vendor_sigma_ground(out / "sigma-ground")
         if star_control:
             self.vendor_star_control(out)
+            self.vendor_popups(src, out / "popups")
+
+    @staticmethod
+    def popup_registry_files(src: Path) -> list[Path]:
+        """The pop-up registry: services/popups/registry.json and each family's services/<family>-popups/popups.json (docs/popups.md)."""
+        return [p for p in [src / "services" / "popups" / "registry.json", *sorted((src / "services").glob("*-popups/popups.json"))] if p.is_file()]
+
+    def vendor_popups(self, src: Path, dest: Path) -> None:
+        """The registry files, laid out as the portal image wants them (.vendor/popups/services/...). The Dockerfile used to COPY them through
+        .dockerignore exceptions, which the classic builder on this box ignores for a wildcard path: the image then held only the test pop-up, and the
+        portal did not know the vision, search, 3D or video tools (2026-10-27)."""
+        shutil.rmtree(dest, ignore_errors=True)
+        for path in self.popup_registry_files(src):
+            target = dest / path.relative_to(src)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, target)
+
+    def popup_count(self, src: Path) -> int:
+        n = 0
+        for path in self.popup_registry_files(src):
+            try:
+                n += len(json.loads(path.read_text(encoding="utf-8")).get("popups") or [])
+            except (OSError, ValueError):
+                pass
+        return n
 
     def vendor_sigma_ground(self, dest: Path) -> None:
         pin = self.cfg["pins"]["SIGMA_GROUND_REF"]
@@ -316,6 +341,7 @@ class CD:
         if sha256_file(cached) != want:
             cached.unlink(missing_ok=True)
             raise Failed(f"Star Control {tag}: the file's sha256 isn't the pinned {want[:12]}")
+        (out / "scz-web.tar.gz").unlink(missing_ok=True)      # (a second vendor() in the same folder)
         try:
             os.link(cached, out / "scz-web.tar.gz")           # no second copy of half a gigabyte
         except OSError:
@@ -445,6 +471,13 @@ class CD:
         self.expect(self.http("GET", f"{u}/privacy", tries=3)[0] == 200, "/privacy renders")
         self.expect(self.http("GET", f"{u}/me", follow=False, tries=3)[0] in (200, 301, 302, 303, 307, 308), "/me signed out")
         self.expect(self.http("GET", f"{u}/")[0] == 200, "the sign-in page renders")
+        want = self.popup_count(src)                                       # every registered pop-up must have reached the image (the portal answers how many it knows)
+        got = self.http("GET", f"{u}/version", tries=3)[1]
+        try:
+            known = int(json.loads(got).get("popups", -1))
+        except (ValueError, TypeError):
+            known = -1
+        self.expect(known == want, f"the portal knows {known} pop-ups, the registry has {want}")
         self.expect("Wolfram" in self.http("GET", f"{u}/experiments/benchmark")[1], "the benchmark is bundled")
         self.expect("viewer.js" in self.http("GET", f"{u}/experiments/radiance/")[1], "Radiance is bundled")
         self.expect('"bundled": true' in self.http("GET", f"{u}/starcontrol/version")[1].replace('"bundled":true', '"bundled": true'),

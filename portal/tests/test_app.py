@@ -2143,3 +2143,10 @@ def test_a_picture_asked_for_but_never_drawn_is_drawn_by_the_portal(monkeypatch)
     assert [(j["kind"], j["prompt"]) for j in jobs] == [("make_image", "a red barn at dusk")]
     skippy.reply = lambda *a, **k: "The speed of light is fast."
     assert client.post("/chat/send", json={"message": "how fast is light?"}).get_json()["tools"] == []   # no ask, no picture
+
+
+def test_version_says_how_many_pop_up_tools_the_portal_knows(env):
+    client, _, _ = env
+    got = client.get("/version").get_json()
+    import popups as popups_mod
+    assert got["popups"] == len(popups_mod.names()) and got["popups"] >= 13 and got["commit"]      # the deploy's smoke test compares this with the registry
