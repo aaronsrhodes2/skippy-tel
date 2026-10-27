@@ -187,6 +187,9 @@ and jobs; while someone chats, the reporter also polls `GET /home/jobs` every
   custom connector `mentat` = `https://skippy-mentat-1015050363686.us-west1.run.app/mcp`.
   Not a `docker exec` into `skippytel-mentat`: cloud sessions can't reach skippy-pc, and each
   exec was its own server process. Smoke-tested by `deploy.yml`.
+  **Claude Code on skippy-pc (the desktop app's Code tab, user scope)** points at the home copy on skippy-core, over the tailnet:
+  `claude mcp add -s user --transport http mentat http://skippy-core:7350/mcp` (2026-10-27; it was a `docker exec` into a skippy-pc container
+  that no longer exists). The chat tab's connectors and claude.ai keep the cloud copy above.
 - Token: dashboard → "Pair home" shows it once; the portal keeps only its
   sha256 in VM metadata `portal-home`. Put the line in the vault .env and
   SkippyTel's .env.

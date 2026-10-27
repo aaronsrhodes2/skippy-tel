@@ -58,6 +58,85 @@ def web_search(args: dict, get=http_get_json) -> str:
     return "\n".join(lines)[:MAX_TEXT]
 
 
+# ── Mentat: the physics (PLATINUM section 21: every physical number comes from Mentat, with its source) ──────────────────────────────────────────
+MENTAT_URL = os.environ.get("PURPLE_MENTAT_URL", "http://skippy-core:7350").rstrip("/")   # Mentat on skippy-core, tailnet only
+
+
+def http_post_json(url: str, body: dict, timeout: float = 90.0):
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", "Accept": "application/json", "User-Agent": "purple-tools/1"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read(2_000_000))
+    except urllib.error.HTTPError as e:                         # Mentat answers a refusal as JSON with a status: read it, it says why
+        try:
+            return json.loads(e.read(200_000))
+        except (ValueError, OSError):
+            raise e
+
+
+def format_mentat(answer) -> str:
+    """Mentat's {"ok", "result"} as words: the value WITH its unit and source (never a bare number), or what it needs, or why it refused."""
+    if not isinstance(answer, dict):
+        return "Mentat answered something unreadable."
+    r = answer.get("result") if isinstance(answer.get("result"), dict) else answer
+    err = r.get("error") if isinstance(r, dict) else None
+    follow = (r.get("clarification") or {}) if isinstance(r.get("clarification"), dict) else {}
+    lines = []
+    if r.get("value") is not None:
+        lines.append(f"Answer: {r['value']} {r.get('units') or ''}".rstrip())
+        for label, key in (("Formula", "formula"), ("Source", "source"), ("Interpreted as", "interpreted_as"), ("Notes", "notes"), ("Uncertainty", "uncertainty")):
+            if r.get(key):
+                lines.append(f"{label}: {_clean(r[key], 400)}")
+        if r.get("provenance_tag"):
+            lines.append(f"Provenance: {r['provenance_tag']}")
+    elif isinstance(err, dict) and err.get("code") == "needs_input" or follow:
+        lines.append("Mentat needs more from the person before it can answer: " + _clean((err or {}).get("message") or r.get("notes"), 500))
+        given = (follow.get("follow_up") or {}).get("given") if isinstance(follow.get("follow_up"), dict) else None
+        if given:
+            lines.append("It suggests these values: " + json.dumps(given) + ". Do NOT fill them in yourself: ask the person; only if they agree, call "
+                         "ask_mentat again with given set to those values (their yes is the permission).")
+    elif err:
+        lines.append("Mentat could not answer: " + _clean(err.get("message") if isinstance(err, dict) else err, 500))
+    elif answer.get("error"):
+        lines.append("Mentat refused: " + _clean(answer.get("error"), 400))
+    else:
+        lines.append("Mentat gave no value. " + _clean(r.get("notes"), 300))
+    return "\n".join(lines)[:MAX_TEXT]
+
+
+def ask_mentat(args: dict, post=http_post_json) -> str:
+    question = _clean(args.get("question"), 2000)
+    if not question:
+        raise ValueError("ask_mentat needs a question")
+    body = {"question": question}
+    if isinstance(args.get("given"), dict) and args["given"]:
+        body["given"] = args["given"]
+    return format_mentat(post(f"{MENTAT_URL}/ask", body))
+
+
+def mentat_tool(args: dict, post=http_post_json) -> str:
+    name = str(args.get("name") or "").strip()
+    if not re.fullmatch(r"[a-z][a-z0-9_]{1,80}", name):
+        raise ValueError("mentat_tool needs a tool name (see mentat_tools)")
+    arguments = args.get("arguments") if isinstance(args.get("arguments"), dict) else {}
+    return format_mentat(post(f"{MENTAT_URL}/tools/{name}", arguments))
+
+
+def mentat_tools(args: dict, get=http_get_json) -> str:
+    listing = get(f"{MENTAT_URL}/tools")
+    needle = _clean(args.get("search"), 80).lower()
+    rows = [t for t in listing if isinstance(t, dict) and t.get("name") and (not needle or needle in (t["name"] + " " + str(t.get("description"))).lower()
+                                                                              or needle == str(t.get("domain") or "").lower())]
+    if not rows:
+        return f"No Mentat tool matches {needle!r}." if needle else "Mentat lists no tools."
+    out = [f"{len(rows)} of {len(listing)} Mentat tools" + (f" matching {needle!r}" if needle else "") + " (showing up to 40):"]
+    for t in rows[:40]:
+        props = ", ".join(((t.get("input_schema") or {}).get("properties") or {}))
+        out.append(f"- {t['name']}({props}): {_clean(t.get('description'), 140)}")
+    return "\n".join(out)[:MAX_TEXT]
+
+
 TOOLS: dict[str, dict] = {
     "web_search": {
         "description": "Search the web (a self-hosted metasearch engine at home: no account, no key). Returns the top results with title, URL and a "
@@ -70,6 +149,27 @@ TOOLS: dict[str, dict] = {
             "category": {"type": "string", "enum": ["general", "news", "science", "it", "files", "images", "videos"], "description": "default general"}},
             "required": ["query"]},
         "run": web_search},
+    "ask_mentat": {
+        "description": "Ask Mentat a physics, chemistry or maths question in plain words. EVERY physical number you report must come from Mentat with its "
+                       "source (the Captain's rule): never calculate or recall one yourself. Returns the value with its unit, formula and source. If it "
+                       "says it needs more, ask the person: do not invent or fill in inputs, and pass `given` only with values the person agreed to.",
+        "input_schema": {"type": "object", "properties": {
+            "question": {"type": "string", "description": "the question, in plain words, with the numbers the person gave"},
+            "given": {"type": "object", "description": "inputs the person confirmed (name to number or quantity text); only after they agreed"}},
+            "required": ["question"]},
+        "run": ask_mentat},
+    "mentat_tool": {
+        "description": "Call one named Mentat tool with exact arguments (find names with mentat_tools). Use it when you already know which tool and "
+                       "its inputs; otherwise ask_mentat. The answer carries the value, unit and source.",
+        "input_schema": {"type": "object", "properties": {
+            "name": {"type": "string", "description": "the tool's name, for example schwarzschild_radius"},
+            "arguments": {"type": "object", "description": "the tool's arguments, as its schema names them"}}, "required": ["name"]},
+        "run": mentat_tool},
+    "mentat_tools": {
+        "description": "List Mentat's tools (about 220) with their argument names, optionally only those matching a word or a domain (for example "
+                       "'orbit', 'thermo', 'optics').",
+        "input_schema": {"type": "object", "properties": {"search": {"type": "string", "description": "a word to match in the name, description or domain (optional)"}}},
+        "run": mentat_tools},
 }
 
 
