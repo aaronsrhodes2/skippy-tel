@@ -12,7 +12,7 @@
 <section class="adm" id="adm">
   <div class="stage" id="astage">
     <div class="deck" id="adeck" style="--rows: {{ 4 if status else 2 }}; --rows-wide: 2; --rows-side: 2">
-      {% set units = [('graveyard', 'tomb', 'Graveyard')] %}
+      {% set units = [('status', 'server', 'Status'), ('graveyard', 'tomb', 'Graveyard')] %}
       {% set units = units + [('server', 'server', 'Server'), ('recovery-pane', 'past', 'Recovery')] %}
       {% if status %}{% set units = units + [('setup', 'wand', 'Set up'), ('settings', 'cog', 'Settings'), ('friends', 'user', 'Friends'), ('discord', 'talk', 'Discord')] %}{% endif %}
       {% for id, glyph, label in units %}
@@ -21,7 +21,8 @@
         {% if id == 'settings' and needs %}{% set lamp = 'warn' %}{% endif %}
         <div class="unit named" {% if lamp %}data-s="{{ lamp }}"{% endif %} style="--i: {{ loop.index0 }}">
           <i class="plate"></i>
-          <button type="button" class="hit" data-pane="{{ id }}" aria-label="{{ label }}" title="{{ label }}"></button>
+          {% if id == 'status' %}<a class="hit" href="{{ url_for('status.page') }}" aria-label="{{ label }}" title="{{ label }}"></a>
+          {% else %}<button type="button" class="hit" data-pane="{{ id }}" aria-label="{{ label }}" title="{{ label }}"></button>{% endif %}
           <i class="claws"><b></b><b></b><b></b></i>
           {% if lamp %}<span class="lamp"></span>{% endif %}
           <svg class="g" aria-hidden="true"><use href="#g-{{ glyph }}"/></svg>

@@ -70,7 +70,7 @@ def asked_for_by_scripts(text: str, url_map=None) -> set[str]:
 # (paths under static/; Nagatha's scripts and its self-hosted hls.js only talk to the video gate, whose address and pass come from
 # the page's data-gate-url route, which the scan sees; the Tabletop's poll and cards hang off its data-board-url and data-boards-url)
 STATIC_SCRIPTS = {"skippy-voice.js": "front.html", "nbody-flipbook.js": "demo_nbody.html", "bilby-app.js": "music.html", "nagatha-app.js": "video.html", "vendor/hls-1.6.15.min.js": "video.html",
-                  "tabletop.js": "tabletop.html", "tabletop-heroes.js": "tabletop.html",
+                  "tabletop.js": "tabletop.html", "status.js": "status.html", "tabletop-heroes.js": "tabletop.html",
                   # the self-hosted <model-viewer> (static/skippy-artifacts.js loads it for a 3D artifact): it fetches only the model URL the chat gives it
                   "vendor/model-viewer-4.0.0.min.js": "_chat.html"}
 

@@ -58,6 +58,8 @@ import recovery
 import notify as notify_mod
 import power as power_mod
 import recovery_web
+import status as status_mod
+import status_web
 import ship as ship_mod
 import tabletop as tabletop_mod
 import chat_history
@@ -782,6 +784,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     doctor = doctor_mod.Doctor(home, starter, notify=lambda text: notifier.alert(text))
     app.extensions["doctor"] = doctor
     recovery_web.init_app(app, workshop, limiter, github, home=home, starter=starter, doctor=doctor)   # Recovery: one button (/admin/recovery/repair)
+    status_web.init_app(app, status_mod.Status(), home, starter, doctor, workshop, limiter, vm_status)   # the Status map (docs/status-design.md)
     ships = ship_mod.ShipWatch(github, app.extensions["recovery"]["runs"])   # the private Skippy's ship card
     app.extensions["ships"] = ships
     # Tell the Captain on Discord when a private-Skippy run ends (notify.py: a DM to him only, one per run, switchable).
@@ -847,7 +850,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @app.post("/home/starter")
     def home_starter():
         """The starter on skippy-pc (starter.py): outbound calls with the home token. Takes its status and results, hands back the start/stop requests."""
-        if request.content_length is not None and request.content_length > 20_000:
+        if request.content_length is not None and request.content_length > 60_000:
             abort(413)
         if not home.authorized(request.headers.get("Authorization")):
             abort(401)

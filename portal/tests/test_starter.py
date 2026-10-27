@@ -75,7 +75,7 @@ def test_the_machine_route_wants_the_home_token_and_a_json_object(world):
     t = token(app)
     h = {"Authorization": f"Bearer {t}"}
     assert client.post("/home/starter", data="nope", headers=h).status_code == 400
-    assert client.post("/home/starter", data="x" * 30_000, headers={**h, "Content-Type": "application/json"}).status_code == 413
+    assert client.post("/home/starter", data="x" * 70_000, headers={**h, "Content-Type": "application/json"}).status_code == 413
     got = client.post("/home/starter", json={"status": {"docker": True}}, headers=h)
     assert got.status_code == 200 and got.get_json() == {"commands": []} and starter.online()
 

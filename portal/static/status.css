@@ -1,0 +1,52 @@
+/* The Status page (templates/status.html). Portal colour variables only; no scrolling page: the map pans and zooms, the sheet pages itself. */
+.stat { position: relative; height: calc(100dvh - 64px); display: flex; flex-direction: column; overflow: hidden; }
+.stat .bar { display: flex; align-items: center; gap: 10px; padding: 6px 4px; }
+.stat .grow { flex: 1; }
+.stat .age { color: var(--muted); font-size: .8rem; }
+.stat .key, .stat .chip { display: inline-flex; align-items: center; gap: 6px; min-width: 44px; height: 44px; justify-content: center; border: 1px solid var(--dim-green-hi);
+  background: transparent; color: var(--ink); clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); cursor: pointer; }
+.stat .key.close { border-color: var(--red); color: var(--red); clip-path: none; border-radius: 50%; }   /* unlike Back: round and red, a cross */
+.stat .chip b { font-weight: 600; }
+.stat .chip.warn { border-color: var(--amber); color: var(--amber); }
+.stat .chip.bad { border-color: var(--red); color: var(--red); }
+.stat .g { width: 22px; height: 22px; fill: none; stroke: currentColor; }
+.map { flex: 1; width: 100%; touch-action: none; cursor: grab; user-select: none; }
+.map.drag { cursor: grabbing; }
+.map text { fill: var(--ink); font-family: var(--font); font-size: 16px; pointer-events: none; }
+.map .sub { fill: var(--muted); font-size: 12px; }
+.map .node { cursor: pointer; }
+.map .node polygon { fill: var(--panel); stroke: var(--dim-green-hi); stroke-width: 2; }
+.map .node:hover polygon, .map .node.on polygon { stroke: var(--accent); }
+.map .edge { stroke-width: 2.5; fill: none; }
+.map .edge.trunk { stroke-dasharray: 2 7; stroke-linecap: round; }
+.map .edge.ok, .map .lamp.ok { stroke: var(--green); fill: var(--green); }
+.map .edge.degraded, .map .lamp.degraded { stroke: var(--amber); fill: var(--amber); }
+.map .edge.down, .map .lamp.down { stroke: var(--red); fill: var(--red); }
+.map .edge.stale, .map .edge.off, .map .lamp.stale, .map .lamp.off { stroke: var(--muted); fill: var(--muted); }
+.map .edge.ok { animation: flow 2.4s linear infinite; stroke-dasharray: 10 8; }
+.map .edge.trunk.ok { stroke-dasharray: 2 7; }
+.map .lamp { stroke: none; }
+.map .lamp.ok { animation: breathe 3.2s ease-in-out infinite; }
+.map .kid circle { stroke: none; }
+.map .kid { cursor: pointer; }
+.map .busy { fill: none; stroke: var(--cyan); stroke-width: 1.5; stroke-dasharray: 3 5; }
+@keyframes flow { to { stroke-dashoffset: -36; } }
+@keyframes breathe { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .map .edge.ok, .map .lamp.ok { animation: none; } }
+.sheet { position: absolute; right: 0; top: 56px; bottom: 0; width: min(420px, 100%); background: var(--panel); border-left: 2px solid var(--dim-green-hi);
+  display: flex; flex-direction: column; z-index: 5; }
+.sheet[hidden] { display: none; }
+.sheet header { display: flex; align-items: center; gap: 8px; padding: 8px; border-bottom: 1px solid var(--line); }
+.sheet header h2 { margin: 0 0 0 8px; font-size: 1.05rem; font-weight: 600; }
+.sheet .body { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+.sheet .rows { flex: 1; overflow: hidden; padding: 6px 10px; }
+.sheet .row { display: flex; align-items: center; gap: 10px; min-height: 44px; border-bottom: 1px solid var(--line); }
+.sheet .row .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+.sheet .row .dot.ok { background: var(--green); } .sheet .row .dot.degraded { background: var(--amber); }
+.sheet .row .dot.down { background: var(--red); } .sheet .row .dot.stale, .sheet .row .dot.off { background: var(--muted); }
+.sheet .row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet .row .dt { color: var(--muted); font-size: .8rem; }
+.sheet .row .key { height: 36px; min-width: 36px; }
+.sheet .pager { display: flex; justify-content: center; align-items: center; gap: 10px; padding: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: .85rem; }
+.sheet h3 { margin: 10px 10px 2px; font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.note { position: absolute; left: 12px; right: 12px; bottom: 12px; margin: 0; padding: 10px 12px; background: var(--panel); border: 1px solid var(--dim-green-hi); font-size: .9rem; z-index: 6; }

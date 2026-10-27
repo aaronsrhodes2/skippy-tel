@@ -148,6 +148,19 @@ class Starter:
         states = out.split() if rc == 0 else []
         return sum(1 for s in states if s == "running"), len(states)
 
+    def container_list(self) -> list[dict]:
+        """Every skippytel- container for the portal's Status map: name, state, status text, image (portal/status.py clean_containers)."""
+        rc, out = self.run(["docker", "ps", "-a", "--filter", "name=skippytel-", "--format", "{{json .}}"], 20)
+        rows = []
+        for line in (out.splitlines() if rc == 0 else []):
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(r, dict) and r.get("Names"):
+                rows.append({"name": r["Names"], "state": r.get("State", ""), "status": r.get("Status", ""), "image": r.get("Image", "")})
+        return rows
+
     def bridge(self) -> dict | None:
         try:
             return self.http(f"{BRIDGE_URL}/health", timeout=4)
@@ -217,7 +230,8 @@ class Starter:
         b = self.bridge()
         return {"docker": total > 0 or self.docker_up(), "containers_up": up, "containers_total": total, "bridge": b is not None,
                 "busy": bool(b and (b.get("workshop") or {}).get("busy")), "supervisor": b is not None, "working": self.working,
-                "resume_at": self.resume_at.isoformat(timespec="minutes") if self.resume_at else "", **self.gpu(), **self._ups}
+                "resume_at": self.resume_at.isoformat(timespec="minutes") if self.resume_at else "", **self.gpu(), **self._ups,
+                "containers": self.container_list() if self.docker_up() else []}
 
     # ── doing ──────────────────────────────────────────────────────────────────
     def _spawn(self, cmd: list[str], env: dict | None = None, log: str = "") -> None:
