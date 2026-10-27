@@ -20,7 +20,7 @@
    "GCP_INSTANCE": "skippy-games",
    "DISCORD_INVITE": "gPTVS7Hmj",
    "PORTAL_URL": "https://makerportal.live",
-   "MENTAT_URL": "https://skippy-core.tailab2cc7.ts.net:8443",
+   "MENTAT_URL": "https://skippy-mentat-1015050363686.us-west1.run.app",
    "DOOMLOOP_BUCKET": "skippy-tel-doomloop-dev",
    "TABLETOP_BUCKET": "skippy-tel-tabletop",
    "DEPLOYS_FROM": "house"
