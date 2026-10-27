@@ -143,6 +143,8 @@ Actions (the sandbox can't reach GCP or run.app directly):
   Experiments (the public inventory: tiles shown a screen at a time, a kind key, an about panel; the demos themselves are standalone pages).
   The experiment demos (the N-body shootout as a flip-book of plates from a real run of sigma-ground's shootout: `scripts/nbody_run.py`, `scripts/nbody_flipbook_build.py`; the double-slit, the Mentat playground, the benchmark).
   **Not yet** (old scrolling look, to migrate in batches): request access, privacy (Radiance and Weapon vs. Armor are separate apps).
+- **Back and Close sit side by side, and look different** (the Captain, 2026-10-27): any view with both puts them next to each other, and they
+  differ in glyph and shape (Back an arrow, Close a cross), never two near-identical keys.
 - Copyable things (the Captain's rule: **one click, everywhere**): anything a person is expected to
   copy (an invite code, `ip:port`, a password, a command, a block to paste) is marked
   `<code class="code">` / `<pre class="copy">` (or `data-copy="text"` on a button), and
