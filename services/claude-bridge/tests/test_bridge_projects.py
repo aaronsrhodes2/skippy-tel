@@ -160,8 +160,8 @@ def test_each_project_has_its_own_rules_file_and_rules(multi):
     own, other = multi.prompt("skippytel"), multi.prompt("other")
     assert multi.prompt_path("skippytel").name == engine.PROMPT_NAME
     assert multi.prompt_path("other").name == ".skippy-workshop-prompt-other.txt"
-    assert "deploy.yml" in own and "home-reporter" in own and "CLAUDE.md" in own
-    assert "deploy.yml" not in other and "home-reporter" not in other and "docker compose" not in other
+    assert "core/ci" in own and "home-reporter" in own and "CLAUDE.md" in own
+    assert "core/ci" not in other and "home-reporter" not in other and "docker compose" not in other
     assert "follow it" in other and "NOT deployed" in other and "Other thing" in other
     assert multi.project("other").clone in other and multi.project("other").primary in other
     for text in (own, other):

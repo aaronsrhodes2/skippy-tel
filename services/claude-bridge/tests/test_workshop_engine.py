@@ -69,16 +69,12 @@ def test_the_prompt_sends_all_physics_to_mentat_and_never_makes_skippy_the_calcu
 
 
 def test_the_prompt_watches_the_deploy_of_its_own_commit_and_checks_the_live_version(shop):
-    """Audit A4/L03: `gh run list --branch main --limit 1` right after a push returns the PREVIOUS run (already green) or
-    someone else's, so the agent reported 'deployed' for code that was not live. It must pick its own commit's run, bound
-    the watch, and believe only /version."""
+    """Audit A4/L03, redone for the house deploy (2026-10-25: skippy-core's CI and deployer, no GitHub Actions): only the portal's /version
+    serving its own commit (or a newer one containing it) is "live"; red CI is read on skippy-core, and someone else's commit is never reverted."""
     portal = next(line for line in shop.prompt().splitlines() if line.strip().startswith("- portal/"))
-    assert "--branch main --limit 1" not in portal
-    assert "gh run list --workflow deploy.yml --commit $sha --limit 1" in portal and "git rev-parse HEAD" in portal
-    assert "up to a minute" in portal                               # GitHub takes a few seconds to register the push
-    assert "timeout 1800 gh run watch <id> --exit-status" in portal
-    assert "/version" in portal and "your $sha" in portal          # green is not live: the serving commit must be its own
-    assert "cancelled" in portal and "never revert" in portal
+    assert "gh run" not in portal and "deploy.yml" not in portal
+    assert "git rev-parse HEAD" in portal and "/version" in portal and "your $sha" in portal and "merge-base --is-ancestor" in portal
+    assert "skippy-core/ci/skippy-tel/latest.json" in portal and "never revert over someone else" in portal
 
 
 def test_nothing_can_change_the_model(shop, monkeypatch):
