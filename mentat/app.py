@@ -178,15 +178,21 @@ def _ask(question: str, given: dict | None = None) -> dict:
     if USE_LLM and not _qwen_ready():
         # The Captain's rule: the Qwen-backed Mentat fails rather than answer without Qwen.
         raise QwenUnavailable("Qwen (Ollama) is unreachable, so Mentat won't answer without it.")
+    miss: dict = {}
     if router_stage.enabled() and USE_LLM and not given:
         # Opt-in (MENTAT_ROUTER_MODEL): the trained router goes first. On the 150 benchmark questions the bare keyword shortcut was wrong as often as right
         # (it answered "escape velocity" with surface gravity), so it does not get to pre-empt the router. A miss (decline, clarification, error, router
-        # down) falls through to the keyword + Qwen translator, exactly as before the router existed.
-        routed = router_stage.answer(question, server=server, tools=TOOLS, ollama_url=OLLAMA_URL, guard=_router_guard)
+        # down) falls through to the keyword + Qwen translator, exactly as before the router existed, and its reason travels with the fallback's
+        # answer (inputs.router_miss) into the research log.
+        routed = router_stage.answer(question, server=server, tools=TOOLS, ollama_url=OLLAMA_URL, guard=_router_guard, miss=miss)
         if routed is not None:
             return routed
     result = simulate(question, use_llm=USE_LLM, given=given or None).to_dict()
     result["interpreter"] = "keywords + qwen" if USE_LLM else "keywords"
+    if miss and isinstance(result.get("inputs"), dict):
+        result["inputs"]["router_miss"] = miss
+    elif miss:
+        result["inputs"] = {"router_miss": miss}
     return result
 
 

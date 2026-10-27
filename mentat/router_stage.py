@@ -8,6 +8,14 @@ runs here is what was measured there.
 Where it sits in /ask (mentat/app.py `_ask`): first, ahead of the keyword + Qwen translator. A router answer is returned only when a
 tool produced a value; a decline, a clarification, an unparseable plan, an unknown tool or parameter, a tool error, a timeout or the model being down all return None,
 and the caller carries on exactly as it did before the router existed. So the router can add answers; it cannot take one away or stop /ask from answering.
+A miss is never silent: `answer(..., miss=d)` writes its reason (and the plan, when there was one) into `d`, and /ask keeps it in the fallback's
+`inputs.router_miss`, so the research log says why the router did not answer.
+
+The harness runs in the configuration the router was SCORED in (sigma-ground tools/eval_math_suite.py, misc/ROUTER_V31_PLAN.md): the `trained`
+tweak profile with `structured_results` on. Left at the registry defaults (2026-10-25 .. 2026-10-27), `structured_results` was off, and the harness
+then reads a symbolic or list result (a derivative, roots, a matrix) as "returned no value": the router planned every maths question right and /ask
+answered none of them (0 of 329; 317 with the profile set; sigma-ground misc/MENTAT_AUDIT_2026-10-27.md). MENTAT_ROUTER_PROFILE and
+MENTAT_ROUTER_TWEAKS_ON override it for an experiment.
 """
 from __future__ import annotations
 
@@ -20,6 +28,9 @@ from types import SimpleNamespace
 MODEL = os.environ.get("MENTAT_ROUTER_MODEL", "").strip()
 PLAN = os.environ.get("MENTAT_ROUTER_PLAN", "v3")                 # the plan format the model was trained on (v3.1 = v3; v3.2 = v4)
 TIMEOUT_S = float(os.environ.get("MENTAT_ROUTER_TIMEOUT", "60"))
+PROFILE = os.environ.get("MENTAT_ROUTER_PROFILE", "trained")      # the harness tweak profile the model was measured in
+TWEAKS_ON = tuple(x for x in os.environ.get("MENTAT_ROUTER_TWEAKS_ON", "structured_results").replace(",", " ").split() if x)
+MISS_KEYS = ("router_error", "router_decline", "router_clarify")
 
 
 class _Session:
@@ -49,10 +60,17 @@ def _params(tools: dict) -> dict[str, set[str]]:
     return out
 
 
+def configure_harness() -> None:
+    """The harness's tweak switches, set to the profile the router was scored in (on every call: another caller may have reset them)."""
+    from sigma_ground.mcp.benchmark import tweaks
+    tweaks.configure(PROFILE, on=TWEAKS_ON)
+
+
 async def _run(question: str, server, tools: dict, ollama_url: str, guard) -> dict:
     import httpx
     from sigma_ground.mcp.benchmark import router_plan as RP
     from sigma_ground.mcp.benchmark.run_sigma_ground import _route_once
+    configure_harness()
     names = [n for n in tools if n != "request_clarification"]
     system = RP.system_prompt(PLAN)
     async with httpx.AsyncClient(timeout=TIMEOUT_S) as http:
@@ -70,19 +88,35 @@ def _tool_dict(text: str) -> dict | None:
     return d if isinstance(d, dict) else None
 
 
-def answer(question: str, *, server, tools: dict, ollama_url: str, guard=None) -> dict | None:
-    """The /ask result dict for a question the router and Mentat's tools answered, or None (the caller carries on without it)."""
+def _missed(miss: dict | None, reason: str, rec: dict | None = None) -> None:
+    if miss is not None:
+        miss["reason"] = reason
+        if rec and rec.get("router_plan"):
+            miss["plan"] = rec["router_plan"]
+
+
+def answer(question: str, *, server, tools: dict, ollama_url: str, guard=None, miss: dict | None = None) -> dict | None:
+    """The /ask result dict for a question the router and Mentat's tools answered, or None (the caller carries on without it).
+    `miss`, when given, receives why there was no answer: "reason", and "plan" when the model wrote one."""
     if not (MODEL and ollama_url):
+        _missed(miss, "router off")
         return None
     try:
         rec = asyncio.run(_run(question, server, tools, ollama_url, guard))
-    except Exception:                                              # noqa: BLE001 — a router that is down, slow or wrong never stops /ask
+    except Exception as exc:                                       # noqa: BLE001 — a router that is down, slow or wrong never stops /ask
+        _missed(miss, f"{type(exc).__name__}: {str(exc)[:200]}")
         return None
-    if any(k in rec for k in ("router_error", "router_decline", "router_clarify")) or rec.get("extracted_value") is None:
+    for key in MISS_KEYS:
+        if key in rec:
+            _missed(miss, f"{key.removeprefix('router_')}: {str(rec[key])[:300]}", rec)
+            return None
+    if rec.get("extracted_value") is None:
+        _missed(miss, "no value", rec)
         return None
     calls = rec.get("tool_calls") or []
     last = _tool_dict(calls[-1].get("result_text", "")) if calls else None
     if not last or last.get("error") or last.get("value") is None:
+        _missed(miss, f"tool error: {str(last.get('error'))[:200]}" if last and last.get("error") else "the last tool call carried no value", rec)
         return None
     plan = " then ".join(f"{c['name']}({', '.join(f'{k}={v!r}' for k, v in (c.get('args') or {}).items())})" for c in calls)
     chain = []
