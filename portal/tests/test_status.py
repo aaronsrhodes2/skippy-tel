@@ -211,3 +211,32 @@ def test_skippy_pcs_services_show_what_they_said_about_themselves_not_just_that_
     assert row["whisper"]["lamp"] == "off" and "cannot yet say whether it is ready" in row["whisper"]["detail"]      # answered, unverified: grey, not green
     assert row["flask-api"]["lamp"] == "down" and row["flask-api"]["detail"] == "HTTP 500"
     assert by(t, "skippy-pc")["state"] == "degraded" and any("video-gate is hung" in p["what"] for p in t["problems"])
+
+
+def test_every_part_carries_two_dots_reachable_and_ready_and_they_can_disagree():
+    st = status_mod.Status(clock=lambda: 1000.0)
+    st.accept_core({"containers": [{"name": "up-healthy", "state": "running", "health": "healthy"}, {"name": "up-sick", "state": "running", "health": "unhealthy"},
+                                   {"name": "up-unknown", "state": "running"}, {"name": "dead", "state": "restarting", "restarts": 4}],
+                    "models": [{"name": "chat", "state": "ready", "jobs": 0}, {"name": "coder", "state": "ready", "jobs": 1, "stuck_s": 300}], "doctor": {"ok": True}})
+    core = by(tree(st), "skippy-core")
+    dots = {c["name"]: (c["reach"], c["ready"]) for c in core["containers"]}
+    assert dots == {"up-healthy": ("ok", "ok"), "up-sick": ("ok", "down"), "up-unknown": ("ok", "off"), "dead": ("down", "off")}
+    models = {s["name"]: (s["reach"], s["ready"]) for s in core["serves"]}
+    assert models["chat"] == ("ok", "ok") and models["coder"] == ("ok", "hung") and models["router"] == ("off", "off")        # loaded and hung; not loaded
+    doctor = {"voice-gate": {"ok": True, "reachable": True, "state": "ready"}, "mentat-home": {"ok": False, "reachable": True, "state": "not-ready", "why": "no llm"},
+              "whisper": {"ok": True, "reachable": True}, "flask-api": {"ok": False, "reachable": False, "why": "no answer (URLError)"}}
+    pc = {s["name"]: (s["reach"], s["ready"]) for s in by(tree(status_mod.Status(), home_report={"doctor": doctor}), "skippy-pc")["serves"] if s["name"] in doctor}
+    assert pc == {"voice-gate": ("ok", "ok"), "mentat-home": ("ok", "down"), "whisper": ("ok", "off"), "flask-api": ("down", "down")}   # up but not ready is not down
+    st.accept_core({"models": [{"name": "chat", "state": "ready", "jobs": 0}], "doctor": {"ok": True}})
+    st2 = status_mod.Probes(lambda m: (False, "no answer in time", 60000))
+    st2.results["chat"] = {"ok": False, "why": "no answer in time", "ms": 60000, "at": 1}
+    got = by(tree(st, probes=st2.view()), "skippy-core")
+    assert {s["name"]: (s["reach"], s["ready"]) for s in got["serves"]}["chat"] == ("ok", "down")                 # it answered the port, and failed the real question
+
+
+def test_docker_health_is_read_from_the_status_text_when_the_machine_sent_only_that():
+    rows = status_mod.clean_containers([{"name": "a", "state": "running", "status": "Up 3 hours (healthy)"},
+                                        {"name": "b", "state": "running", "status": "Up 3 hours (unhealthy)"},
+                                        {"name": "c", "state": "running", "status": "Up 2 days"}, {"name": "d", "state": "running", "health": "healthy"}])
+    assert [r["health"] for r in rows] == ["healthy", "unhealthy", "", "healthy"]
+    assert [status_mod.container_dots(r) for r in rows] == [("ok", "ok"), ("ok", "down"), ("ok", "off"), ("ok", "ok")]

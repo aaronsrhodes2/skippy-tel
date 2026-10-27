@@ -31,7 +31,10 @@ def clean_containers(rows) -> list[dict]:
     for r in (rows if isinstance(rows, list) else [])[:MAX_ITEMS]:
         if not isinstance(r, dict) or not r.get("name"):
             continue
-        out.append({"name": _s(r["name"], 60), "state": _s(r.get("state"), 20), "health": _s(r.get("health"), 20),
+        status_text = _s(r.get("status"), 60)
+        health = _s(r.get("health"), 20) or ("unhealthy" if "(unhealthy)" in status_text else "healthy" if "(healthy)" in status_text
+                                              else "starting" if "health: starting" in status_text else "")     # docker's own words, when the machine sent only its status text
+        out.append({"name": _s(r["name"], 60), "state": _s(r.get("state"), 20), "health": health,
                     "status": _s(r.get("status"), 60), "image": _s(r.get("image"), 80),
                     "restarts": int(_num(r.get("restarts"), 0, 99999) or 0), "cpu": _num(r.get("cpu"), 0, 10000),
                     "mem_mb": _num(r.get("mem_mb"), 0, 10_000_000)})
@@ -46,6 +49,17 @@ def clean_models(rows) -> list[dict]:
                         "jobs": int(_num(r.get("jobs"), 0, 999) or 0), "decoded": int(_num(r.get("decoded"), 0, 10**9) or 0),
                         "stuck_s": int(_num(r.get("stuck_s"), 0, 10**7) or 0)})
     return out
+
+
+def container_dots(c: dict) -> tuple[str, str]:
+    """(reach, ready) for a container, the two dots on the Status page: is it up at all, and does it say it is well. A container only has
+    Docker's own health check to go on, so ready is grey (unknown) unless there is one."""
+    state, health = c.get("state", ""), c.get("health", "")
+    reach = "ok" if state == "running" else ("off" if state == "exited" and not c.get("restarts") else "down")
+    if reach != "ok":
+        return reach, "off"
+    ready = "ok" if health == "healthy" else ("down" if health == "unhealthy" else "off")
+    return reach, ready
 
 
 def container_lamp(c: dict) -> str:
@@ -148,12 +162,13 @@ class Status:
         pc_state = "ok" if home_online else ("stale" if home_age is not None else "off")
         if home_online and not st.get("docker", True):
             pc_state = "degraded"
-        pc_services = [{"kind": "endpoint", "name": _s(k).replace("_", " "), "lamp": "ok" if v else "down"}
+        pc_services = [{"kind": "endpoint", "name": _s(k).replace("_", " "), "lamp": "ok" if v else "down", "reach": "ok" if v else "down", "ready": "ok" if v else "down"}
                        for k, v in sorted((report.get("capabilities") or {}).items()) if isinstance(v, bool)]
         for s in report.get("services") or []:
             if isinstance(s, dict) and s.get("name"):
-                pc_services.append({"kind": "service", "name": _s(s["name"], 40),
-                                    "lamp": "ok" if s.get("available") else ("off" if s.get("planned") else "down"), "detail": _s(s.get("status_detail"), 100)})
+                lamp = "ok" if s.get("available") else ("off" if s.get("planned") else "down")
+                pc_services.append({"kind": "service", "name": _s(s["name"], 40), "lamp": lamp, "detail": _s(s.get("status_detail"), 100),
+                                    "reach": lamp, "ready": lamp})
         for name, d in sorted((report.get("doctor") or {}).items()):          # what each service SAID about itself (PLATINUM section 24)
             if not isinstance(d, dict):
                 continue
@@ -170,7 +185,9 @@ class Status:
             else:                                                     # a plain answer: up, but it cannot say whether it is ready
                 lamp = "down" if d.get("ok") is False else "off"
                 detail = _s(d.get("why"), 120) if d.get("ok") is False else "answers, but cannot yet say whether it is ready"
-            pc_services.append({"kind": "service", "name": _s(name, 40), "lamp": lamp, "detail": detail, "jobs": jobs})
+            reach = "ok" if d.get("reachable") is not False and (d.get("ok") or state or d.get("reachable")) else "down"
+            ready = {"ready": "ok", "busy": "ok", "hung": "hung", "not-ready": "down"}.get(state, "off" if reach == "ok" else "down")
+            pc_services.append({"kind": "service", "name": _s(name, 40), "lamp": lamp, "detail": detail, "jobs": jobs, "reach": reach, "ready": ready})
         if any(s.get("lamp") == "hung" for s in pc_services) and pc_state == "ok":
             pc_state = "degraded"
         pc = {"id": "skippy-pc", "label": "skippy-pc", "state": pc_state, "age": home_age,
@@ -194,14 +211,19 @@ class Status:
                     lamp, detail = "ok", f"busy: {m['jobs']} job{'s' if m['jobs'] != 1 else ''} running, {m['decoded']} words so far"
                 else:
                     lamp, detail = "ok", "ready: accepting work, no jobs"
-                core_serves.append({"kind": "model", "name": m["name"], "lamp": lamp, "detail": detail, "jobs": m["jobs"], "stuck_s": m["stuck_s"]})
+                loaded = m["state"] == "ready"
+                core_serves.append({"kind": "model", "name": m["name"], "lamp": lamp, "detail": detail, "jobs": m["jobs"], "stuck_s": m["stuck_s"],
+                                    "reach": "ok" if loaded else ("down" if m["state"] else "off"),
+                                    "ready": "hung" if lamp == "hung" else ("ok" if lamp == "ok" else ("down" if m["state"] else "off"))})
             have = {s["name"] for s in core_serves}
             for name in KNOWN_CORE_MODELS:                 # a slot that is not loaded right now is still a model he can ask
                 if name not in have:
-                    core_serves.append({"kind": "model", "name": name, "lamp": "off", "detail": "not loaded: it loads when asked"})
+                    core_serves.append({"kind": "model", "name": name, "lamp": "off", "detail": "not loaded: it loads when asked", "reach": "off", "ready": "off"})
             for s in core_serves:
                 if s["kind"] == "model":
                     s["probe"] = ((probes or {}).get("results") or {}).get(s["name"])
+                    if s["probe"]:                              # a real question was asked: what it did with it is the truest "ready"
+                        s["reach"], s["ready"] = ("ok", "ok") if s["probe"]["ok"] else ("ok", "down")
                     s["asking"] = (probes or {}).get("running") == s["name"]
             if core["deployer"]["state"] in ("failed", "rolled-back", "refused", "ci-failed"):
                 core_state = "degraded" if core_fresh else core_state
@@ -233,6 +255,9 @@ class Status:
         for node in (pc, core_node):                      # what each container said lately: {n, errors, last} (portal/logs.py activity)
             for c in node["containers"]:
                 c["logs"] = (activity or {}).get(f"{node['id']}|docker/{c['name']}")
+        for node in (pc, core_node):                      # the two dots of every container
+            for c in node["containers"]:
+                c["reach"], c["ready"] = container_dots(c)
         machines = [portal_node, pc, core_node, vm]
         by = {m["id"]: m for m in machines}
 

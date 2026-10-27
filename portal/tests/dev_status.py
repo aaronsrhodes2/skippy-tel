@@ -21,6 +21,10 @@ def main(port: int = 8765) -> None:
     home, starter, status, logs = app.extensions["home"], app.extensions["starter"], app.extensions["status"], app.extensions["logs"]
     home.accept({"capabilities": {"workshop": {"ready": True}, "make_image": True, "music_gate": True, "house": False},
                  "services": [{"name": "Skippy AI", "available": True}, {"name": "UPS Monitor", "available": False, "planned": True}],
+                 "doctor": {"voice-gate": {"ok": True, "reachable": True, "state": "ready"}, "music-gate": {"ok": True, "reachable": True, "state": "busy", "jobs": 2},
+                            "video-gate": {"ok": False, "reachable": True, "state": "hung", "jobs": 1, "stuck_s": 300, "why": "hung"},
+                            "mentat-home": {"ok": False, "reachable": True, "state": "not-ready", "why": "waiting on llm (skippy-core doesn't offer the chat model)"},
+                            "whisper": {"ok": True, "reachable": True}, "flask-api": {"ok": False, "reachable": False, "why": "no answer (URLError)"}},
                  "status": {"services": []}, "health": {"status": "ok", "models": {"ollama": {"available": True, "default_present": True}}}})
     starter.poll({"status": {"docker": True, "busy": True, "containers": [
         {"name": "skippytel-flask-api", "state": "running", "status": "Up 3 hours (healthy)", "image": "skippytel-flask-api"},

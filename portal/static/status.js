@@ -72,7 +72,9 @@
           const px = x + Math.cos(ang) * rad * 1.35, py = y + Math.sin(ang) * rad * 0.9;
           const k = el("g", { class: "kid" }, map);
           el("line", { x1: x, y1: y, x2: px, y2: py, class: `edge ${p.lamp}`, style: "stroke-width:1;animation:none;stroke-dasharray:none;opacity:.5" }, k);
-          el("circle", { cx: px, cy: py, r: 9, class: `lamp ${p.lamp}` }, k);
+          const pr = p.ref || {};
+          const st = pr.reach || pr.ready ? light(pr.reach, pr.ready) : p.lamp;      // the stoplight, as in the rows
+          el("circle", { cx: px, cy: py, r: 9, class: `lamp ${st}` }, k);
           const t = el("text", { x: px, y: py + 24, "text-anchor": "middle", class: "sub" }, k); t.textContent = p.name.slice(0, 18);
           k.addEventListener("click", (ev) => { ev.stopPropagation(); openKid = p; show(m); });
         });
@@ -87,9 +89,28 @@
     chip.classList.toggle("bad", count >= 3);
   }
 
-  function row(lamp, name, detail, key) {
+  // One stoplight dot per service, model or container, made from two facts (PLATINUM section 24): does it answer at all (reachable), and does it say
+  // it can take work (ready). GREEN = reachable and ready. YELLOW = it answers but says it is not ready (loading, waiting on something). RED = it does
+  // not answer, or it is hung (a job running and going nowhere). GREY = it cannot say (a plain 200 proves nothing), or it is not loaded or stopped.
+  function light(reach, ready) {
+    if (reach === "down" || ready === "hung") return "down";
+    if (reach === "ok" && ready === "ok") return "ok";
+    if (reach === "ok" && ready === "down") return "warn";
+    return "off";
+  }
+  const SAYS = {ok: "yes", down: "no", hung: "hung: a job is running and going nowhere", off: "can't tell"};
+  function dots(reach, ready, lamp) {
+    const box = html("span", "dots");
+    const state = reach || ready ? light(reach, ready) : lamp;
+    const d = html("span", `dot ${state}`);
+    if (reach || ready) { d.title = `reachable: ${SAYS[reach || "off"]}; ready: ${SAYS[ready || "off"]}`; d.setAttribute("aria-label", d.title); }
+    box.append(d);
+    return box;
+  }
+  function row(lamp, name, detail, key, pair) {
     const r = html("div", "hrow");
-    r.append(html("span", `dot ${lamp}`), html("span", "nm", name), html("span", "dt", detail || ""));
+    r.append(pair ? dots(pair.reach, pair.ready, lamp) : html("span", `dot ${lamp}`), html("span", "nm", name), html("span", "dt", detail || ""));
+    if ((detail || "").length > 26) r.classList.add("log");       // a long explanation goes under the name, never in place of it
     if (key) r.append(key);
     return r;
   }
@@ -170,7 +191,11 @@
     if (openKid) {
       title.textContent = `${m.label} · ${openKid.name}`;
       const r = openKid.ref;
-      rows.push(row(openKid.lamp, openKid.name, r.state || r.detail || ""));
+      rows.push(row(openKid.lamp, openKid.name, r.state || r.detail || "", null, r.reach || r.ready ? {reach: r.reach, ready: r.ready} : null));
+      if (r.reach || r.ready) {
+        rows.push(row(r.reach === "ok" ? "ok" : r.reach === "off" ? "off" : "down", "reachable", SAYS[r.reach || "off"]));
+        rows.push(row(r.ready === "ok" ? "ok" : r.ready === "off" ? "off" : r.ready === "hung" ? "hung" : "warn", "ready", SAYS[r.ready || "off"] + (r.detail ? " \u00b7 " + r.detail : "")));
+      }
       if (openKid.kind === "c") {
         [["status", r.status], ["image", r.image], ["restarts", r.restarts], ["cpu %", r.cpu], ["memory MB", r.mem_mb]].forEach(([k, v]) => { if (v !== null && v !== undefined && v !== "") rows.push(row("off", k, String(v))); });
         const lg = r.logs;
@@ -185,11 +210,16 @@
     if (m.deployer && m.deployer.state) rows.push(row(m.deployer.state === "ok" ? "ok" : "degraded", "deploys", `${m.deployer.state} ${m.deployer.commit || ""}`));
     for (const [k, v] of Object.entries(m.vitals || {})) rows.push(row("off", k.replace(/_/g, " "), String(v)));
     const opens = (r, part) => { r.classList.add("tap"); r.addEventListener("click", () => { openKid = part; page = 0; render(); }); return r; };   // a row opens its own card
-    for (const c of m.containers) rows.push(opens(row(c.lamp, c.name, c.status || c.state), {lamp: c.lamp, name: c.name, kind: "c", ref: c}));
+    if (m.containers.length || m.serves.length) {          // what the colours mean, once, at the top
+      const lg = html("div", "hrow legend");
+      [["ok", "ready"], ["warn", "not ready"], ["down", "down / hung"], ["off", "can't tell"]].forEach(([c, w]) => { lg.append(html("span", `dot ${c}`), html("span", "dt", w)); });
+      rows.unshift(lg);
+    }
+    for (const c of m.containers) rows.push(opens(row(c.lamp, c.name, c.status || c.state, null, {reach: c.reach, ready: c.ready}), {lamp: c.lamp, name: c.name, kind: "c", ref: c}));
     for (const s of m.serves) {
       const pr = s.probe ? (s.probe.ok ? "answered in " + (s.probe.ms / 1000).toFixed(1) + " s" : "no answer: " + s.probe.why) : "";
       const detail = s.asking ? "asking\u2026" : (pr ? pr : (s.detail || s.kind));
-      const r = opens(row(s.probe && !s.probe.ok ? "degraded" : s.lamp, s.name, detail), {lamp: s.lamp, name: s.name, kind: "s", ref: s});
+      const r = opens(row(s.probe && !s.probe.ok ? "degraded" : s.lamp, s.name, detail, null, s.reach || s.ready ? {reach: s.reach, ready: s.ready} : null), {lamp: s.lamp, name: s.name, kind: "s", ref: s});
       if (s.kind === "model" && m.id === "skippy-core") r.append(key("play", "Ask " + s.name + " a test question", (ev) => { ev.stopPropagation(); probe([s.name]); }));
       rows.push(r);
     }

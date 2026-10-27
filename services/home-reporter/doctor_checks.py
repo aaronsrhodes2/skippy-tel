@@ -102,14 +102,16 @@ def run_one(name: str, url: str, ok, get=_get, clock=time.monotonic) -> dict:
     """{"ok", "ms", "why"} for one test. Never raises: a timeout, a refusal or a wrong answer is a failed test with its reason."""
     t0 = clock()
     c = None
+    reached = False                                     # any answer at all, even a 503 that says why: the first of the Status page's two dots
     try:
         status, body = get(url)
+        reached = True
         c = contract(body)
         verdict = ok(body) if status == 200 else ((c or {}).get("detail") or f"HTTP {status}")
     except Exception as exc:  # noqa: BLE001 — every way of not answering is a failed test
         verdict = "no answer in time" if "timed out" in str(exc).lower() else f"no answer ({type(exc).__name__})"
     ms = int((clock() - t0) * 1000)
-    out = {"ok": verdict is True, "ms": ms, "why": "" if verdict is True else str(verdict)[:120]}
+    out = {"ok": verdict is True, "ms": ms, "why": "" if verdict is True else str(verdict)[:120], "reachable": reached}
     if c:                                               # what the service said about itself: ready, busy (jobs running) or hung
         out.update(state=c["state"], jobs=c["jobs"], stuck_s=c["stuck_s"])
     return out

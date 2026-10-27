@@ -9,7 +9,7 @@ def test_a_good_answer_passes_and_a_wrong_or_late_one_fails_with_its_reason():
     ok = lambda b: isinstance(b, dict) and b.get("status") == "ok" or "its /health isn't ok"     # noqa: E731
     assert dc.run_one("x", "u", ok, get=lambda url: (200, {"status": "ok"}))["ok"] is True
     bad = dc.run_one("x", "u", ok, get=lambda url: (200, {"status": "degraded"}))
-    assert bad == {"ok": False, "ms": bad["ms"], "why": "its /health isn't ok"}
+    assert bad == {"ok": False, "ms": bad["ms"], "why": "its /health isn't ok", "reachable": True}
     assert dc.run_one("x", "u", ok, get=lambda url: (503, None))["why"] == "HTTP 503"
 
     def hangs(url):
@@ -81,4 +81,5 @@ def test_a_503_that_says_why_is_an_answer_and_a_hung_service_is_a_failed_test_wi
     busy = dc.run_one("voice-gate", "u", ok, get=lambda url: (200, _body(running=2, stuck=3)))
     assert busy["ok"] is True and busy["state"] == "busy"
     plain = dc.run_one("whisper", "u", lambda b: True, get=lambda url: (200, None))
-    assert plain == {"ok": True, "ms": plain["ms"], "why": ""} and "state" not in plain   # answers, but never said it is ready
+    assert plain == {"ok": True, "ms": plain["ms"], "why": "", "reachable": True} and "state" not in plain   # answers, but never said it is ready
+    assert dc.run_one("x", "u", ok, get=lambda url: (_ for _ in ()).throw(OSError("refused")))["reachable"] is False   # no answer at all
