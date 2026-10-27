@@ -24,7 +24,7 @@ def fresh():
 
 
 def test_each_registered_quick_tool_becomes_a_tool_with_its_schema_and_a_file_argument():
-    got = tools.popup_tools(get=lambda url, timeout=0: [ENTRY, SEARCH, {"name": "web_search"}, {"name": "../bad"}, "junk"])
+    got = tools.popup_tools(get=lambda url, timeout=0: [ENTRY, SEARCH, {"name": "web_search"}, {"name": "../bad"}, "junk", {"name": "echo", "family": "plumbing"}])
     assert sorted(got) == ["remove_background", "search_memory"]                 # a name already taken, an unsafe name and junk are dropped
     rb = got["remove_background"]["input_schema"]
     assert rb["properties"]["input_path"]["type"] == "string" and rb["required"] == ["input_path"] and "output" in rb["properties"]

@@ -385,7 +385,7 @@ def popup_tools(get=http_get_json, now=time.monotonic) -> dict[str, dict]:
         listing = []
     out = {}
     for e in listing if isinstance(listing, list) else []:
-        if not isinstance(e, dict):
+        if not isinstance(e, dict) or e.get("family") == "plumbing":      # the test pop-up (echo) is for checking the pipes, not a tool for the agent
             continue
         name = str(e.get("name") or "")
         if not re.fullmatch(r"[a-z][a-z0-9_]{1,60}", name) or name in TOOLS:

@@ -102,7 +102,6 @@ services:
       - OLLAMA_URL=http://ollama:11434
       - MATERIA_OLLAMA_MODEL=skippy-chat    # the translator's Qwen: the chat slot (Qwen3.6-35B-A3B), resident
       - MENTAT_ROUTER_MODEL=${MENTAT_ROUTER_MODEL-mentat-router-v31-4b}   # the trained router stage in /ask (mentat/router_stage.py), resident; empty = off
-      - MENTAT_ROUTER_MODEL=mentat-router-v31-4b   # the trained router leads /ask (mentat/router_stage.py); the shim serves it on this box
       - MENTAT_CALL_TIMEOUT=90
       - MENTAT_RATE_PER_MIN=600
       - MENTAT_INSTANCE=home
