@@ -199,17 +199,17 @@
   ]
  },
  "image-studio": {
-  "for": "Draws pictures. On skippy-pc: SDXL, the quick pictures, loaded only while it works. On skippy-core: Qwen-Image, the quality pictures, which may take up to two hours.",
+  "for": "Draws pictures. On skippy-pc: FLUX.2 klein, the quick pictures (about 3 seconds), loaded only while it works. On skippy-core: Qwen-Image, the quality pictures, which may take up to two hours.",
   "used_by": [
    "the home reporter (patient picture jobs from the chats and the private Skippy's SKIPPY_PICTURE lines)"
   ],
   "example": {
    "ask": "GET /health (skippy-pc)",
-   "answer": "{\"model\": \"sdxl-base-1.0\", \"ready\": true, \"loaded\": false}"
+   "answer": "{\"model\": \"flux2-klein-4b\", \"ready\": true, \"loaded\": false}"
   }
  },
  "make-image": {
-  "for": "The chat's quick picture tool (make_image): SDXL in skippy-pc's image studio. Blue when the studio is ready but the model is not loaded yet.",
+  "for": "The chat's quick picture tool (make_image): FLUX.2 klein in skippy-pc's image studio. Blue when the studio is ready but the model is not loaded yet.",
   "used_by": [
    "everyone who may chat (guests 10 a day)",
    "the private Skippy's SKIPPY_PICTURE lines"

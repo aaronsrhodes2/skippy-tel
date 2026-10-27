@@ -53,7 +53,7 @@ PLANS = {
     "skippy-tel": [
         {"name": "suite", "reqs": ["portal/requirements.txt", "tools/requirements-ci.txt"],
          "cmd": "python -m pytest portal/tests memory/tests tools/tests services/home-reporter/tests services/claude-bridge/tests "
-                "services/wa-trickle/tests mentat/tests core/tests -q -n {cpus} --dist loadfile -p no:cacheprovider"},
+                "services/wa-trickle/tests mentat/tests core/tests services/image-studio/tests -q -n {cpus} --dist loadfile -p no:cacheprovider"},
         {"name": "flask-api", "reqs": ["services/flask-api/requirements.txt", "tools/requirements-ci.txt"],
          "cmd": "python -m pytest services/flask-api/tests -q -n {cpus} --dist loadfile -p no:cacheprovider"},
         # The services that build as their own images and keep their own `app`/`gate` modules, so each runs in its own pytest session (they never

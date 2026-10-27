@@ -38,7 +38,7 @@ CHUNK = 8 * 1024 * 1024      # Cloud Run caps a request at 32 MB
 ART_MAX = 400_000
 JSON_MAX = 4_000_000            # a JSON reply cut short would not parse and would read as "didn't answer"
 MUSIC = os.environ.get("MUSIC_URL", "").rstrip("/")           # music-studio on skippy-pc (ACE-Step on the GPU)
-IMAGES = os.environ.get("IMAGE_URL", "").rstrip("/")          # the QUICK tier: image-studio on skippy-pc (SDXL on the GPU)
+IMAGES = os.environ.get("IMAGE_URL", "").rstrip("/")          # the QUICK tier: image-studio on skippy-pc (FLUX.2 klein on the GPU)
 IMAGE_TIMEOUT = 900         # seconds a picture may take (the first after a restart loads 6.9 GB of weights)
 IMAGES_HQ = os.environ.get("IMAGE_HQ_URL", "").rstrip("/")     # the QUALITY tier: Qwen-Image on skippy-core (core/image-studio), over the tailnet
 IMAGE_HQ_TIMEOUT = 7200     # it draws for quality: ~13 min a picture at 40 steps, and it may queue behind skippy-core's own chats
@@ -543,7 +543,7 @@ def make_music(job: dict, token: str) -> dict:
 
 def make_image(job: dict, token: str, hq: bool = False) -> dict:
     """A picture, handed to the portal like a song (PUT /home/media/<job>), which shows it as an image card in the chat.
-    The quick tier (make_image) is SDXL in image-studio on this PC's card: Ollama is unloaded first (the card is 16 GB and
+    The quick tier (make_image) is FLUX.2 klein in image-studio on this PC's card: Ollama is unloaded first (the card is 16 GB and
     Qwen sits in 6 of it) and the GPU lock is held. The quality tier (make_image_hq) is Qwen-Image on skippy-core's own GPU:
     neither, and it may take up to two hours."""
     url = IMAGES_HQ if hq else IMAGES

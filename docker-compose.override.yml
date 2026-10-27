@@ -84,7 +84,7 @@ services:
       SKIPPY_API: http://flask-api:5000
       MENTAT_URL: http://skippy-core:7350      # Mentat with Core's chat model, on skippy-core (tailnet only, core/install/tailnet.sh)
       MUSIC_URL: http://music-studio:8001      # ACE-Step: the portal chat's make_music
-      IMAGE_URL: http://image-studio:8002      # SDXL: the portal chat's make_image, the QUICK tier (this PC, beside the voices)
+      IMAGE_URL: http://image-studio:8002      # FLUX.2 klein: the portal chat's make_image, the QUICK tier (this PC, beside the voices)
       IMAGE_HQ_URL: http://skippy-core:7347    # make_image_hq, the QUALITY tier: Qwen-Image on skippy-core (core/image-studio), tailnet only
       CAR_URL: http://skippy-core:7351         # the Captain's Tesla: TeslaMate's latest state from skippy-core's car reader (core/car), tailnet only
       OLLAMA_URL: http://skippy-core:11434          # unloaded before a song so it gets the whole GPU
@@ -126,19 +126,23 @@ services:
       - ${WA_TRICKLE_STATE:-./state/wa-trickle}:/state    # the queue's SQLite file; set WA_TRICKLE_STATE when deploying from a worktree
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
 
-  # image-studio: SDXL on this PC's GPU for the portal chat's make_image (the Captain only, for now). The weights are the
-  # nightly archive's copy in D:/models (read-only); the first load fetches SDXL's small config/tokenizer files from
-  # Hugging Face into its cache volume, so it is on the default network. No published port: only the reporter calls it.
+  # image-studio: the QUICK picture tier (make_image), FLUX.2 klein 4B on this PC's GPU: ~3 s a picture, ~7.5 GB of the card
+  # while loaded, unloaded after 10 idle minutes (the quality tier is Qwen-Image on skippy-core). Its weights are a copy of the
+  # nightly archive's, in a Docker volume on the SSD, because Docker reads D:/models at ~8 MB/s: fill it with
+  # `python services/image-studio/seed_weights.py --prepare skippytel-image-studio` (after a build). Offline. mem_limit: a
+  # load that runs away is killed here, not in Docker's 8 GB VM (which hung once). No published port: only the reporter calls it.
   image-studio:
     build: ./services/image-studio
     container_name: skippytel-image-studio
     restart: unless-stopped
     expose:
       - "8002"
+    environment:
+      MODEL: flux2-klein-4b
     volumes:
-      - ${MODELS_ROOT:-D:/models}/huggingface/stabilityai__stable-diffusion-xl-base-1.0:/weights:ro
-      - image-studio-cache:/cache
-    shm_size: "2gb"
+      - image-studio-weights:/weights:ro
+    mem_limit: 5g
+    shm_size: "1gb"
     deploy:
       resources:
         reservations:
@@ -189,4 +193,4 @@ networks:
     internal: true
 
 volumes:
-  image-studio-cache:
+  image-studio-weights:

@@ -46,7 +46,7 @@ silently kept only the `echo` test; `/version` now says how many it knows and th
 
 | Capability | What | Where | Notes |
 |---|---|---|---|
-| `make_image` | quick pictures | skippy-pc (image-studio, SDXL today) | FLUX.2 klein replaces it (about 3 s warm); on branch `claude/image-quick-klein`, not merged |
+| `make_image` | quick pictures | skippy-pc (image-studio, FLUX.2 klein 4B) | about 3 s warm; ~7.5 GB of the card while loaded |
 | `make_image_hq` | quality pictures | skippy-core (Qwen-Image-2512 through stable-diffusion.cpp, Vulkan) | on call; in main |
 | `make_music` | songs | skippy-pc (ACE-Step 1.5) | one GPU job at a time, patient queue |
 | voices | Skippy's own voice (F5-TTS clone) and a stock one (Kokoro) | skippy-pc `tts-studio`, through `voice-gate` | ElevenLabs is the fallback only |
@@ -59,7 +59,6 @@ silently kept only the `echo` test; `/version` now says how many it knows and th
 | Work | Branch | What it adds |
 |---|---|---|
 | audio pop-ups | `claude/audio-popups-786718` | sound effects, loops, stems, audio-to-MIDI (3 commits ahead of main) |
-| quick pictures | `claude/image-quick-klein` | FLUX.2 klein 4B instead of SDXL |
 | voice bake-off | `claude/hopeful-elgamal-0df0b1` | the clone and settings sweeps behind the live voice |
 
 ## 5. Purple against Claude Code with Haiku, tool by tool
