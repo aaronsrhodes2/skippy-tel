@@ -191,6 +191,36 @@ def _is_number(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def vault_value(name: str, env=os.environ, files=ENV_FILES) -> str:
+    """One setting from the environment, else the vault .env (read each time, so a value put in the vault works without a restart)."""
+    value = (env.get(name) or "").strip()
+    if value:
+        return value
+    for path in files:
+        try:
+            for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.startswith(name + "="):
+                    return line.split("=", 1)[1].strip().strip("\"'")
+        except OSError:
+            continue
+    return ""
+
+
+TOKEN_LIFE_DAYS = 365          # `claude setup-token` makes a token that lasts a year
+
+
+def token_days_left(env=os.environ, files=ENV_FILES, today=None) -> int | None:
+    """Days until the long-lived Claude token runs out, from CLAUDE_CODE_OAUTH_TOKEN_SET (the date tools/claude_token.sh wrote); None without one."""
+    import datetime as _dt
+    if not vault_value("CLAUDE_CODE_OAUTH_TOKEN", env, files):
+        return None
+    try:
+        made = _dt.date.fromisoformat(vault_value("CLAUDE_CODE_OAUTH_TOKEN_SET", env, files))
+    except ValueError:
+        return None
+    return TOKEN_LIFE_DAYS - ((today or _dt.date.today()) - made).days
+
+
 def home_token(env=os.environ, files=ENV_FILES) -> str:
     """SKIPPY_HOME_TOKEN, the reporter's bearer token, which also guards this endpoint.
     From the environment, else the vault .env. Empty means the endpoint stays shut."""
@@ -448,6 +478,11 @@ def child_env(base=None) -> dict:
     env = {k: v for k, v in (os.environ if base is None else base).items() if k != "SKIPPY_HOME_TOKEN"}
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GCM_INTERACTIVE"] = "never"
+    # The Captain's long-lived Claude token (`claude setup-token`, a year, kept in the vault): with it, claude never needs a /login at this PC,
+    # which is what used to tie him to his desk. Without one, claude falls back to its own stored sign-in, as before.
+    token = vault_value("CLAUDE_CODE_OAUTH_TOKEN", env, ENV_FILES)       # ENV_FILES looked up now, so a test can point it elsewhere
+    if token:
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = token
     return env
 
 
@@ -486,7 +521,7 @@ def run_auth_status(claude_cmd: list[str], timeout: float) -> str | None:
     Popen as a list exactly like every other claude call here, which is what lets a Windows .cmd shim (npm's
     claude.cmd) run; on a timeout the whole tree dies (taskkill /T), because killing only the shim's cmd.exe would
     leave node running."""
-    env = {k: v for k, v in os.environ.items() if k != "SKIPPY_HOME_TOKEN"}     # it needs nothing from this door's key
+    env = child_env()                     # the same sign-in the runs use (the long-lived token when there is one), never the door's key
     try:
         proc = subprocess.Popen([*claude_cmd, "auth", "status"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace", env=env)
@@ -1093,6 +1128,7 @@ class Workshop:
         os.makedirs(config, exist_ok=True)
         self._share_claude_setup(config)
         env = child_env()
+        env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)                 # a Core run signs in to Core with its key, never with the Captain's Claude token
         env.update(ANTHROPIC_BASE_URL=url, ANTHROPIC_API_KEY=key, ANTHROPIC_AUTH_TOKEN=key, CLAUDE_CONFIG_DIR=config,
                    ANTHROPIC_SMALL_FAST_MODEL=CORE_FAST_MODEL, ANTHROPIC_DEFAULT_HAIKU_MODEL=CORE_FAST_MODEL,
                    ANTHROPIC_DEFAULT_SONNET_MODEL=CORE_MODEL, ANTHROPIC_DEFAULT_OPUS_MODEL=CORE_MODEL,

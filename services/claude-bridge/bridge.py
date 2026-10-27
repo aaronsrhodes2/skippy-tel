@@ -127,10 +127,14 @@ def workshop_health() -> dict:
             "projects": WORKSHOP.projects(),         # ids, names and GitHub repos only (no paths): the chat's project picker
             "brains": [{"id": "claude", "label": "Claude Sonnet", "ready": token and login != "expired"},
                        {"id": "core", "label": "Skippy Core coder", "ready": token and WORKSHOP.core_ready()}]}
+    days = workshop.token_days_left()
+    info["login_token_days_left"] = days                 # the long-lived Claude token's year (None: no token, the stored sign-in is used)
     if not token:
         info["reason"] = "SKIPPY_HOME_TOKEN isn't configured on this PC"
     elif login == "expired":
-        info["reason"] = "Claude's login on skippy-pc expired: run `claude auth login` there"
+        info["reason"] = "Claude's login on skippy-pc expired: run `bash tools/claude_token.sh` there once (a year-long token, no more /login)"
+    elif days is not None and days <= 30:
+        info["warning"] = f"Claude's year-long token runs out in {max(days, 0)} days: run `bash tools/claude_token.sh` on skippy-pc"
     return info
 
 
