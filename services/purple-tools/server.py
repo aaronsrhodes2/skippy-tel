@@ -25,7 +25,9 @@ PROTOCOL = "2025-03-26"
 
 def mcp_config(python: str | None = None) -> dict:
     """What `--mcp-config` should hold to start this server (the bridge writes it per run)."""
-    return {"mcpServers": {"purple-tools": {"type": "stdio", "command": python or sys.executable, "args": [str(HERE / "server.py")]}}}
+    # alwaysLoad: Claude Code defers MCP tools behind ToolSearch by default and a local coder never searches for them (measured 2026-10-27: it
+    # answered physics from memory). This keeps these tools visible (+1,253 tokens for the six) while Claude Code's own stay deferred.
+    return {"mcpServers": {"purple-tools": {"type": "stdio", "command": python or sys.executable, "args": [str(HERE / "server.py")], "alwaysLoad": True}}}
 
 
 def handle(msg: dict) -> dict | None:
