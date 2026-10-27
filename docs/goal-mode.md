@@ -1,5 +1,8 @@
 # Goal mode: an unattended coder on purple Skippy (design, 2026-10-26)
 
+Order (the Captain, 2026-10-26): the Shifting Prophesy cruise first, Goal mode after it. Self-repair stays OFF (detect, park and notify only)
+until he says otherwise.
+
 Status: **design, not built.** Split agreed with the Shifting Prophesy session (2026-10-26): it builds the engine side in a worktree
 (GOAL.md writer and segment handoff, done-checks as the SDK engine's Stop hook, the fingerprint rule, the `goal/<slug>` branch and reset;
 the cruise's referee loop is the same hook with the referee as the check); the infra session builds the queue and windows, the quiet-gate
