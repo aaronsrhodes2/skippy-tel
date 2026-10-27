@@ -10,6 +10,14 @@
  * as far as the size limit requires (opts.budget(): the characters the JPEG data URL may have, the same limit pasted pictures have).
  * The photo then goes the way a pasted picture goes (opts.onPhoto). The front camera's preview is mirrored like a mirror; the photo is not.
  * On iPad the camera belongs to one app at a time: if Discord or FaceTime holds it, the key says so (and the viewfinder notes it once).
+ * MORE THAN ONE KEY IN THE VIEWFINDER (the Captain, 2026-10-27): besides the shutter and the flip there is
+ *   - EVERY CAMERA: one tap takes a picture with each camera the device has, one after the other (front and back when both),
+ *     each its own file; every camera is stopped as soon as its frame is taken;
+ *   - SCREEN: a picture of what is on the screen now. Where the browser can capture the screen (getDisplayMedia: desktops) that
+ *     is the real screen, one frame, the capture stopped at once; elsewhere (iPhone and iPad Safari cannot) it is a snapshot of
+ *     this page, drawn by the self-hosted html2canvas (static/vendor/html2canvas.min.js) when the page loaded it.
+ * Every picture goes to opts.onPhoto(dataUrl, {width, height, name, kind}); it returns false when the message has no room left,
+ * which stops a run of pictures. They arrive in the chat as ordinary attachments, each with its remove key.
  * The pure helper fit() is exported for portal/tests/js/camera/skippy-camera.test.js.
  */
 (function (root, factory) {
@@ -62,7 +70,7 @@
       key.title = text; key.setAttribute("aria-label", text); lamp("warn"); say(text);
       if (note) { note.textContent = text; note.hidden = false; }
     }
-    function calm() { key.title = "Camera: photograph a screen"; key.setAttribute("aria-label", key.title); lamp(null); }
+    function calm() { key.title = "Camera: photos, every camera, or the screen"; key.setAttribute("aria-label", key.title); lamp(null); }
     function stopStream() {
       if (stream) stream.getTracks().forEach(t => { try { t.stop(); } catch (e) {} });
       stream = null; if (video) video.srcObject = null;
@@ -118,26 +126,109 @@
       const keys = doc.createElement("div"); keys.className = "cam-keys";
       keys.append(button("x", "Close the camera", "cam-close", close),
                   button("camera", "Take the photo", "cam-snap", snap),
-                  button("flip", "Front or back camera", "cam-flip", () => { facing = facing === "user" ? "environment" : "user"; start(); }));
+                  button("flip", "Front or back camera", "cam-flip", () => { facing = facing === "user" ? "environment" : "user"; start(); }),
+                  button("stack", "Take a picture with every camera", "cam-all", snapAll),
+                  button("image", "Take a picture of the screen", "cam-screen", screen));
       view.append(video, note, keys); stage.appendChild(view);
       key.setAttribute("aria-pressed", "true");
       start();
     }
 
-    function snap() {
-      if (!video || !stream || !(video.videoWidth > 0)) return;          // nothing to take yet: the viewfinder stays
-      const w = video.videoWidth, h = video.videoHeight;
-      const full = doc.createElement("canvas"); full.width = w; full.height = h;
-      full.getContext("2d").drawImage(video, 0, 0, w, h);
-      close();                                                            // the camera light goes off now, before the encoding
+    // A canvas holding a finished frame -> the largest JPEG that fits the budget -> the chat. false = no room (stop taking more).
+    function deliver(full, w, h, meta) {
       const got = fit(w, h, opts.budget(), (k, q) => {
         if (k === 1) return full.toDataURL("image/jpeg", q);
         const c = doc.createElement("canvas"); c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
         c.getContext("2d").drawImage(full, 0, 0, c.width, c.height);
         return c.toDataURL("image/jpeg", q);
       });
-      if (!got) { say("No room for another picture in this message: send these first."); return; }
-      opts.onPhoto(got.url, {width: Math.round(w * got.scale), height: Math.round(h * got.scale)});
+      if (!got) { say("No room for another picture in this message: send these first."); return false; }
+      return opts.onPhoto(got.url, Object.assign({width: Math.round(w * got.scale), height: Math.round(h * got.scale)}, meta)) !== false;
+    }
+    function frameOf(v) {
+      const w = v.videoWidth, h = v.videoHeight, full = doc.createElement("canvas"); full.width = w; full.height = h;
+      full.getContext("2d").drawImage(v, 0, 0, w, h);
+      return {full, w, h};
+    }
+
+    function snap() {
+      if (!video || !stream || !(video.videoWidth > 0)) return;          // nothing to take yet: the viewfinder stays
+      const f = frameOf(video), kind = facing === "user" ? "front" : "back";
+      close();                                                            // the camera light goes off now, before the encoding
+      deliver(f.full, f.w, f.h, {name: "camera-" + kind, kind: "camera"});
+    }
+
+    // One picture from one specific camera, then it is stopped. {err} when it gave no frame in time.
+    async function takeFrom(constraints) {
+      let s;
+      try { s = await media.getUserMedia({audio: false, video: constraints}); } catch (e) { return {err: e}; }
+      const v = doc.createElement("video"); v.setAttribute("playsinline", ""); v.playsInline = true; v.muted = true; v.srcObject = s;
+      try {
+        try { await v.play(); } catch (e) {}
+        const t0 = Date.now();
+        while (!(v.videoWidth > 0)) {
+          if (Date.now() - t0 > WAIT_FRAME_MS) return {err: {name: "NotReadableError"}};
+          await new Promise(r => setTimeout(r, 100));
+        }
+        await new Promise(r => setTimeout(r, 250));                      // a first frame is often dark: let the exposure settle
+        const tr = s.getVideoTracks()[0], st = tr && tr.getSettings ? tr.getSettings() : {};
+        return {frame: frameOf(v), facing: st.facingMode || ""};
+      } finally { s.getTracks().forEach(t => { try { t.stop(); } catch (e) {} }); v.srcObject = null; }
+    }
+    function cameraName(label, facingMode, index) {
+      const l = String(label || "").toLowerCase();
+      if (facingMode === "user" || /front|user|face/.test(l)) return "front";
+      if (facingMode === "environment" || /back|rear|environment/.test(l)) return "back";
+      return "camera" + (index + 1);
+    }
+
+    // EVERY CAMERA: each video input the device has, one after the other.
+    async function snapAll() {
+      if (!media || !media.enumerateDevices) { snap(); return; }
+      close();                                                            // the viewfinder's own stream first: some devices open one camera at a time
+      let devices = [];
+      try { devices = (await media.enumerateDevices()).filter(d => d.kind === "videoinput"); } catch (e) {}
+      if (devices.length < 2) {                                           // one camera (or none listed): just that one
+        const only = await takeFrom({facingMode: {ideal: "environment"}, width: {ideal: ASK}, height: {ideal: ASK}});
+        if (only.err) { tell(why(only.err)); return; }
+        deliver(only.frame.full, only.frame.w, only.frame.h, {name: "camera-" + cameraName("", only.facing, 0), kind: "camera"});
+        return;
+      }
+      let taken = 0;
+      for (let i = 0; i < devices.length; i++) {
+        const got = await takeFrom({deviceId: {exact: devices[i].deviceId}, width: {ideal: ASK}, height: {ideal: ASK}});
+        if (got.err) { if (!taken) { tell(why(got.err)); return; } continue; }
+        const name = "camera-" + cameraName(devices[i].label, got.facing, i);
+        if (!deliver(got.frame.full, got.frame.w, got.frame.h, {name, kind: "camera"})) break;
+        taken++;
+      }
+    }
+
+    // SCREEN: the real screen where the browser allows it, otherwise a snapshot of this page.
+    async function screen() {
+      close();
+      if (media && media.getDisplayMedia) {
+        let s = null;
+        try { s = await media.getDisplayMedia({video: true, audio: false}); }
+        catch (e) { if (e && e.name === "NotAllowedError") { say("Screen capture was cancelled."); return; } }
+        if (s) {
+          try {
+            const v = doc.createElement("video"); v.muted = true; v.playsInline = true; v.srcObject = s;
+            try { await v.play(); } catch (e) {}
+            const t0 = Date.now();
+            while (!(v.videoWidth > 0) && Date.now() - t0 < WAIT_FRAME_MS) await new Promise(r => setTimeout(r, 100));
+            if (v.videoWidth > 0) { const f = frameOf(v); deliver(f.full, f.w, f.h, {name: "screen", kind: "screen"}); return; }
+          } finally { s.getTracks().forEach(t => { try { t.stop(); } catch (e) {} }); }
+        }
+      }
+      if (typeof root.html2canvas === "function") {                       // iPhone, iPad, Android: this page, as it looks now
+        try {
+          const canvas = await root.html2canvas(doc.body, {backgroundColor: null, logging: false, useCORS: true, scale: Math.min(2, root.devicePixelRatio || 1)});
+          deliver(canvas, canvas.width, canvas.height, {name: "screen", kind: "screen"});
+          return;
+        } catch (e) { say("The page couldn't be captured: " + (e && e.message ? e.message : "unknown error")); return; }
+      }
+      say("This browser can't take a screenshot here.");
     }
 
     key.addEventListener("click", () => {
@@ -148,7 +239,7 @@
     doc.addEventListener("visibilitychange", () => { if (doc.hidden && view) close(); });     // never left running behind the page
     doc.addEventListener("keydown", (e) => { if (e.key === "Escape" && view) close(); });
     calm();
-    return {open, close, snap, isOpen: () => !!view};
+    return {open, close, snap, snapAll, screen, isOpen: () => !!view};
   }
 
   return {attach, fit, BUSY, ONCE};

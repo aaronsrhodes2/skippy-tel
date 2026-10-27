@@ -71,7 +71,7 @@
       <button type="button" class="key clear" data-tel="chat:new"{% if 'new' in buried %} hidden{% endif %} aria-label="New chat" title="New chat"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
       <button type="button" class="key clip" data-tel="chat:attach"{% if 'attach' in buried %} hidden{% endif %} aria-label="Attach pictures or files (or paste, or drop them here)" title="Attach pictures or files (or paste, or drop them here)"><svg class="g" aria-hidden="true"><use href="#g-clip"/></svg></button>
       {% if captain %}{# the camera (static/skippy-camera.js): a tap opens the viewfinder, a second takes the photo; the Captain only #}
-      <button type="button" class="key cam" data-tel="chat:camera" aria-pressed="false" aria-label="Camera: photograph a screen" title="Camera: photograph a screen"><svg class="g" aria-hidden="true"><use href="#g-camera"/></svg><i class="lamp"></i></button>{% endif %}
+      <button type="button" class="key cam" data-tel="chat:camera" aria-pressed="false" aria-label="Camera: photos, every camera, or the screen" title="Camera: photos, every camera, or the screen"><svg class="g" aria-hidden="true"><use href="#g-camera"/></svg><i class="lamp"></i></button>{% endif %}
       {% if chat_modes|length > 1 %}<button type="button" class="key brain-key" data-open="brain" data-tel="chat:mode" aria-label="Mode" title="Mode"><svg class="g" aria-hidden="true"><use href="#g-core"/></svg></button>{% endif %}
       {# the voice key (static/skippy-voice.js two modes): Typing listens only for "Skippy"; Hands-off listens and speaks until "thanks" #}
       <button type="button" class="key voice" aria-pressed="false" aria-label="Typing: tap to talk" title="Typing: tap to talk"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg><i class="lamp"></i></button>
@@ -539,9 +539,10 @@
       let shots = 0;
       SkippyCamera.attach({key: camKey, stage: root.querySelector(".stage"), say: flash,
         budget: () => Math.min(PHOTO_MAX, PHOTOS_MAX - pending_files.reduce((n, f) => n + f.data.length, 0)),
-        onPhoto: (url) => {
-          if (pending_files.length >= MAX_FILES) { flash("At most " + MAX_FILES + " files to a message."); return; }
-          pending_files.push({name: "camera-" + (++shots) + ".jpg", data: url}); paintFiles(); msg.focus();
+        onPhoto: (url, meta) => {                                  // each picture is an attachment with its own remove key (paintFiles)
+          if (pending_files.length >= MAX_FILES) { flash("At most " + MAX_FILES + " files to a message."); return false; }
+          pending_files.push({name: ((meta && meta.name) || "camera") + "-" + (++shots) + ".jpg", data: url}); paintFiles(); msg.focus();
+          return pending_files.length < MAX_FILES;
         }});
     }{% endif %}
     picker.addEventListener("change", () => { takeFiles(picker.files); picker.value = ""; });
