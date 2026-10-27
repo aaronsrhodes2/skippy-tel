@@ -5,12 +5,16 @@ Each tool is {name, description, input_schema, run(args) -> text}. A tool return
 """
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
 import os
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 SEARCH_URL = os.environ.get("PURPLE_SEARCH_URL", "http://skippy-core:7360").rstrip("/")   # SearXNG on skippy-core (core/compose.core.yml), tailnet only
 MAX_TEXT = 7000
@@ -173,15 +177,86 @@ TOOLS: dict[str, dict] = {
 }
 
 
+# ── the quick pop-ups on this PC: picture and audio tools, one MCP tool each, straight from the registry ──────────────────────────────────────────
+# The home reporter owns the GPU lock and the registry, and has a loopback door for exactly this (services/home-reporter/local_api.py). The slow
+# ones (box core: 3D models, video) are not here: they wait for Core to be quiet through the portal's queue (a SKIPPY_POPUP: line).
+POPUP_URL = os.environ.get("PURPLE_POPUP_URL", "http://127.0.0.1:47450").rstrip("/")
+MAX_INPUT = 1_000_000          # docs/popups.md: about 1 MB of file
+_popup_cache: dict = {"at": 0.0, "tools": {}}
+
+
+def popup_tools(get=http_get_json, now=time.monotonic) -> dict[str, dict]:
+    """The registry's quick tools as MCP tools, read from the reporter (cached a minute; an unreachable reporter means none, never an error)."""
+    if now() - _popup_cache["at"] < 60 and _popup_cache["tools"]:
+        return _popup_cache["tools"]
+    try:
+        listing = get(f"{POPUP_URL}/popups", 5.0)
+    except Exception:  # noqa: BLE001 — the reporter is down: the other tools still work
+        listing = []
+    out = {}
+    for e in listing if isinstance(listing, list) else []:
+        if not isinstance(e, dict):
+            continue
+        name = str(e.get("name") or "")
+        if not re.fullmatch(r"[a-z][a-z0-9_]{1,60}", name) or name in TOOLS:
+            continue
+        schema = json.loads(json.dumps(e.get("inputs") or {"type": "object", "properties": {}}))
+        schema.setdefault("type", "object")
+        props = schema.setdefault("properties", {})
+        if e.get("media_in"):
+            props["input_path"] = {"type": "string", "description": "the path of the file to use (" + ", ".join(e["media_in"]) + "; about 1 MB at most)"}
+            if e.get("media_required"):
+                schema["required"] = sorted(set(schema.get("required") or []) | {"input_path"})
+        secs = e.get("est_seconds")
+        out[name] = {"description": f"{_clean(e.get('description'), 600)} Runs on this PC's card" + (f", about {secs} s" if secs else "") + "; results come back "
+                                    "as words, or as a file saved in .purple-out/ in your folder (Read a picture to see it).",
+                     "input_schema": schema, "popup": e, "run": None}
+    _popup_cache.update(at=now(), tools=out)
+    return out
+
+
+def run_popup(entry: dict, args: dict, post=http_post_json, cwd: Path | None = None) -> str:
+    args = dict(args)
+    path = args.pop("input_path", None)
+    body: dict = {"args": args}
+    if path:
+        f = Path(str(path)).expanduser()
+        if not f.is_file():
+            raise ValueError(f"there is no file at {path}")
+        raw = f.read_bytes()
+        if len(raw) > MAX_INPUT:
+            raise ValueError(f"{f.name} is {len(raw) // 1000} KB; a pop-up takes about {MAX_INPUT // 1000} KB at most (shrink it first)")
+        ctype = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
+        body["input"] = {"type": ctype, "name": f.name, "b64": base64.b64encode(raw).decode("ascii")}
+    got = post(f"{POPUP_URL}/popup/{entry['name']}", body, timeout=max(60.0, min(3600.0, float(entry.get("est_seconds") or 60) * 4)))
+    if not isinstance(got, dict) or got.get("error") or not got.get("b64"):
+        raise ValueError(str((got or {}).get("error") if isinstance(got, dict) else "no answer") or f"{entry['name']} failed")
+    data, ctype = base64.b64decode(got["b64"]), str(got.get("type") or "")
+    if ctype in ("application/json", "text/plain") or ctype.startswith("text/"):
+        return data.decode("utf-8", "replace")[:MAX_TEXT]
+    ext = mimetypes.guess_extension(ctype) or ".bin"
+    folder = (cwd or Path.cwd()) / ".purple-out"
+    folder.mkdir(exist_ok=True)
+    target = folder / f"{entry['name']}-{int(time.time())}{ext}"
+    target.write_bytes(data)
+    return f"{entry['name']} saved {target} ({len(data)} bytes, {ctype}). Read it to look at it."
+
+
+def _popup_runner(entry: dict):
+    return lambda args: run_popup(entry, args)
+
+
 def tool_list() -> list[dict]:
-    return [{"name": n, "description": t["description"], "inputSchema": t["input_schema"]} for n, t in TOOLS.items()]
+    return [{"name": n, "description": t["description"], "inputSchema": t["input_schema"]} for n, t in {**TOOLS, **popup_tools()}.items()]
 
 
 def call(name: str, args: dict) -> tuple[str, bool]:
     """(text, is_error). Never raises."""
     tool = TOOLS.get(name)
+    if tool is None and name in popup_tools():
+        tool = {"run": _popup_runner(popup_tools()[name]["popup"])}
     if tool is None:
-        return f"There is no tool named {name!r}. Tools: {', '.join(TOOLS)}.", True
+        return f"There is no tool named {name!r}. Tools: {', '.join({**TOOLS, **popup_tools()})}.", True
     try:
         return tool["run"](args), False
     except ValueError as e:

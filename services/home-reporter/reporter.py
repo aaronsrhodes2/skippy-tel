@@ -23,6 +23,7 @@ import urllib.request
 from pathlib import Path
 
 import doctor_checks
+import local_api
 import localinfo
 
 PORTAL = os.environ.get("PORTAL_URL", "https://skippy-portal-1015050363686.us-west1.run.app").rstrip("/")
@@ -46,6 +47,7 @@ OLLAMA = os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/")
 POPUPS_DIR = os.environ.get("POPUPS_DIR", "/srv/services")      # the repo's services/ (read-only mount): the pop-up registry (docs/popups.md)
 POPUP_TYPES = {"image/png", "image/jpeg", "image/webp", "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/ogg", "audio/flac",
                "model/gltf-binary", "video/mp4", "application/json", "text/plain", "audio/midi", "application/zip"}   # what the portal keeps (portal/popups.py OUTPUT_TYPES)
+LOCAL_API_PORT = int(os.environ.get("LOCAL_API_PORT", "47450") or 0)     # 0 turns the door off (tests)
 POPUP_MAX_TIMEOUT = 7200     # the longest a pop-up may take (portal/popups.py MAX_TIMEOUT_S)
 GPU = threading.Lock()       # one heavy GPU job at a time: a song and a chat model can't share the card
 MUSIC_TIMEOUT = 600          # seconds a song may take
@@ -584,29 +586,17 @@ def make_image(job: dict, token: str, hq: bool = False) -> dict:
     return {"result": {"title": title, "bytes": len(png)}}
 
 
-def popup_job(job: dict, token: str) -> dict:
-    """A registered pop-up (docs/popups.md): POST {"args", "input"?} to its service, which answers with the result's bytes under its
-    type, then hand that to the portal like a picture (PUT /home/media/<job>). On skippy-pc a pop-up that uses the card (vram_gb > 0)
-    holds the GPU lock and has Ollama unloaded first, as a picture does; on skippy-core it needs neither."""
-    entry = popups().get(str(job.get("name") or ""))
-    if not entry:
-        return {"error": f"there is no pop-up called {job.get('name')!r} on skippy-pc"}
+def call_popup(entry: dict, body: dict, timeout: float | None = None):
+    """Run one pop-up and get its bytes: (data, content type), or {"error"}. On skippy-pc one that uses the card (vram_gb > 0) holds the GPU
+    lock and has the models unloaded first, so a song, a picture and a pop-up never share it. The portal job and the loopback door both use this."""
     url = popup_url(entry)
     if not url:
-        return {"error": f"{entry['name']} isn't set up on skippy-pc ({entry['url_env']})"}
-    try:
-        args = json.loads(job.get("args") or "{}")
-    except ValueError:
-        args = None
-    if not isinstance(args, dict):
-        return {"error": "the pop-up's arguments didn't arrive whole"}
-    body = {"args": args}
-    if job.get("input_b64"):
-        body["input"] = {"type": str(job.get("input_type") or ""), "name": str(job.get("input_name") or "file"), "b64": job["input_b64"]}
-    try:
-        timeout = max(60, min(POPUP_MAX_TIMEOUT, int(entry.get("est_seconds") or 60) * 4))
-    except (TypeError, ValueError):
-        timeout = 600
+        return {"error": f"{entry['name']} isn't set up on skippy-pc ({entry.get('url_env')})"}
+    if timeout is None:
+        try:
+            timeout = max(60, min(POPUP_MAX_TIMEOUT, int(entry.get("est_seconds") or 60) * 4))
+        except (TypeError, ValueError):
+            timeout = 600
     heavy = entry["box"] == "pc" and float(entry.get("vram_gb") or 0) > 0
     with GPU if heavy else contextlib.nullcontext():
         if heavy:
@@ -630,6 +620,36 @@ def popup_job(job: dict, token: str) -> dict:
         return {"error": f"{entry['name']} answered with {ctype}, which isn't one of its outputs"}
     if not data or len(data) > CLIP_MAX:
         return {"error": f"{entry['name']}'s result was empty or too big to send"}
+    return data, ctype
+
+
+def popup_job(job: dict, token: str) -> dict:
+    """A registered pop-up (docs/popups.md): POST {"args", "input"?} to its service, which answers with the result's bytes under its
+    type, then hand that to the portal like a picture (PUT /home/media/<job>). On skippy-pc a pop-up that uses the card (vram_gb > 0)
+    holds the GPU lock and has Ollama unloaded first, as a picture does; on skippy-core it needs neither."""
+    entry = popups().get(str(job.get("name") or ""))
+    if not entry:
+        return {"error": f"there is no pop-up called {job.get('name')!r} on skippy-pc"}
+    url = popup_url(entry)
+    if not url:
+        return {"error": f"{entry['name']} isn't set up on skippy-pc ({entry['url_env']})"}
+    try:
+        args = json.loads(job.get("args") or "{}")
+    except ValueError:
+        args = None
+    if not isinstance(args, dict):
+        return {"error": "the pop-up's arguments didn't arrive whole"}
+    body = {"args": args}
+    if job.get("input_b64"):
+        body["input"] = {"type": str(job.get("input_type") or ""), "name": str(job.get("input_name") or "file"), "b64": job["input_b64"]}
+    try:
+        timeout = max(60, min(POPUP_MAX_TIMEOUT, int(entry.get("est_seconds") or 60) * 4))
+    except (TypeError, ValueError):
+        timeout = 600
+    got = call_popup(entry, body, timeout)
+    if isinstance(got, dict):
+        return got
+    data, ctype = got
     title = (str(args.get("prompt") or args.get("text") or "") or entry["name"])[:60]
     up = urllib.request.Request(f"{PORTAL}/home/media/{job.get('id')}?title={urllib.parse.quote(title)}", data=data,
                                 method="PUT", headers={"Content-Type": ctype, "Authorization": f"Bearer {token}"})
@@ -1474,6 +1494,8 @@ def main() -> None:
     watchdog = Watchdog()
     threading.Thread(target=jobs.poll_forever, daemon=True).start()
     threading.Thread(target=watchdog.run_forever, daemon=True).start()
+    if LOCAL_API_PORT:                               # the private Skippy's quick pop-up tools (local_api.py): loopback only, published by compose
+        threading.Thread(target=local_api.serve(LOCAL_API_PORT, popups, call_popup).serve_forever, daemon=True).start()
     if BRIDGE:                                       # the private Skippy: catch the portal up on whatever the bridge holds
         threading.Thread(target=WorkshopSync(token, jobs).run_forever, daemon=True).start()
     # What people did on the portal goes into flask-api's SQLite on its own thread: a collection may take 20 s, and while it

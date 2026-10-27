@@ -95,6 +95,8 @@ services:
       VIDEO_GATE_PUBLIC: https://skippy-pc.tailab2cc7.ts.net:8443   # ...and its Funnel address: 443 is the music gate's
       VOICE_GATE_URL: http://voice-gate:8080   # Skippy's ears and mouth (its /health "ready")...
       VOICE_GATE_PUBLIC: https://skippy-pc.tailab2cc7.ts.net:10000   # ...and its Funnel address: the third port
+    ports:
+      - "127.0.0.1:47450:47450"                # the private Skippy's quick pop-up tools (services/home-reporter/local_api.py): this PC only
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
