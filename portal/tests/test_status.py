@@ -195,3 +195,19 @@ def test_ready_busy_and_hung_are_three_different_things_not_just_an_http_200():
     assert row["vision"]["lamp"] == "degraded"
     assert core["state"] == "degraded"                                                    # a hung model makes the machine degraded
     assert any("router is hung" in p["what"] for p in tree(st)["problems"])
+
+
+def test_skippy_pcs_services_show_what_they_said_about_themselves_not_just_that_they_answered():
+    doctor = {"voice-gate": {"ok": True, "state": "ready"}, "music-gate": {"ok": True, "state": "busy", "jobs": 2},
+              "video-gate": {"ok": False, "state": "hung", "jobs": 1, "stuck_s": 300, "why": "hung: 1 job running, no progress for 300 s"},
+              "mentat-home": {"ok": False, "state": "not-ready", "why": "waiting on llm (skippy-core doesn't offer the chat model)"},
+              "whisper": {"ok": True}, "flask-api": {"ok": False, "why": "HTTP 500"}}
+    t = tree(status_mod.Status(), home_report={"doctor": doctor})
+    row = {s["name"]: s for s in by(t, "skippy-pc")["serves"] if s["name"] in doctor}
+    assert (row["voice-gate"]["lamp"], row["voice-gate"]["detail"]) == ("ok", "ready: accepting work, no jobs")
+    assert row["music-gate"]["lamp"] == "ok" and row["music-gate"]["detail"] == "busy: 2 jobs running"
+    assert row["video-gate"]["lamp"] == "hung" and row["video-gate"]["detail"] == "HUNG: 1 job running, no progress for 5 min 0 s"
+    assert row["mentat-home"]["lamp"] == "down" and "chat model" in row["mentat-home"]["detail"]
+    assert row["whisper"]["lamp"] == "off" and "cannot yet say whether it is ready" in row["whisper"]["detail"]      # answered, unverified: grey, not green
+    assert row["flask-api"]["lamp"] == "down" and row["flask-api"]["detail"] == "HTTP 500"
+    assert by(t, "skippy-pc")["state"] == "degraded" and any("video-gate is hung" in p["what"] for p in t["problems"])

@@ -24,7 +24,9 @@ import re
 import threading
 import time
 
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, g, jsonify, request
+
+import ready as ready_mod
 
 from spoken_numbers import say_numbers
 
@@ -228,11 +230,31 @@ def keep_resident():
         time.sleep(RETRY_S)
 
 
+READY = ready_mod.Readiness("tts-studio")
+
+
+@app.before_request
+def _job_begins():
+    if request.method == "POST":                          # a voice being rendered is a job while it runs (PLATINUM section 24)
+        g._job = READY.begin(request.path)
+
+
+@app.teardown_request
+def _job_ends(_exc):
+    token = g.pop("_job", None)
+    if token:
+        READY.end(token)
+
+
 @app.get("/health")
 def health():
     r = ready()
-    return jsonify(ready=any(r.values()), voices=r, loaded=sorted(_models), resident=RESIDENT, stock_voice=STOCK_VOICE, f5_nfe=F5_NFE,
-                   vram_reserved_gib=_status["vram_reserved_gib"], errors=_status["errors"])
+    any_voice = any(r.values())
+    errs = _status["errors"]
+    why = "" if any_voice else ("no voice is loaded yet" + (f": {errs}" if errs else " (they load when there is room on the card)"))
+    rep = READY.report(ready=any_voice, detail=why, voices=r, loaded=sorted(_models), resident=RESIDENT, stock_voice=STOCK_VOICE, f5_nfe=F5_NFE,
+                       vram_reserved_gib=_status["vram_reserved_gib"], errors=errs)
+    return jsonify(rep)
 
 
 @app.post("/speak")

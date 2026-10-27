@@ -44,10 +44,11 @@ import urllib.request
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as CallTimeout
 
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS
 from mcp.types import LATEST_PROTOCOL_VERSION
 
+import ready as ready_mod
 import research
 import router_stage
 import wva
@@ -205,9 +206,67 @@ def _call(name: str, args: dict):
     return result
 
 
+READY = ready_mod.Readiness("mentat")
+_CHECK_EVERY_S = 30
+_checks: dict[str, tuple[float, bool, str]] = {}
+
+
+def _cached(name: str, fn) -> tuple[bool, str]:
+    """A dependency check, repeated at most every _CHECK_EVERY_S (a health probe must stay cheap, never pile work on the thing it asks about)."""
+    at, ok, why = _checks.get(name, (0.0, False, ""))
+    if time.monotonic() - at > _CHECK_EVERY_S:
+        try:
+            ok, why = fn()
+        except Exception as e:  # noqa: BLE001 — a check that raises is a failed check
+            ok, why = False, f"{type(e).__name__}"
+        _checks[name] = (time.monotonic(), ok, why)
+    return ok, why
+
+
+def _tools_answer() -> tuple[bool, str]:
+    """Not "the process is up": a real physics call comes back right (the Sun's Schwarzschild radius is 2953 m)."""
+    got = _call("schwarzschild_radius", {"mass_kg": 1.989e30})
+    value = got.get("value") if isinstance(got, dict) else None
+    if isinstance(value, (int, float)) and abs(value - 2953.25) < 5:
+        return True, ""
+    return False, "the physics tools answered a known question wrongly"
+
+
+def _router_loaded() -> tuple[bool, str]:
+    from sigma_ground.materia import translator as tr
+    with urllib.request.urlopen(f"{OLLAMA_URL or tr.OLLAMA_URL}/api/tags", timeout=3) as r:
+        names = [m.get("name", "") for m in json.loads(r.read()).get("models", [])]
+    return (any(n.startswith(router_stage.MODEL) for n in names), "the router model isn't offered by skippy-core")
+
+
+@app.before_request
+def _job_begins():
+    if request.method == "POST":                       # a call that does work (a tool, a question, a game solve): counted while it runs
+        g._job = READY.begin(request.path)
+
+
+@app.teardown_request
+def _job_ends(_exc):
+    token = g.pop("_job", None)
+    if token:
+        READY.end(token)
+
+
 @app.get("/health")
 def health():
-    return "ok"
+    """Ready, accepting, and what it is doing (PLATINUM section 24): 200 only when it can take a question RIGHT NOW. The physics tools get a
+    real known question; on skippy-core (MENTAT_USE_LLM) the chat model and the trained router must be offered by skippy-core too."""
+    ok, why = _cached("tools", _tools_answer)
+    deps = {}
+    if USE_LLM:
+        q = _cached("llm", lambda: (_qwen_ready(), "skippy-core doesn't offer the chat model"))
+        deps["llm"] = {"ready": q[0], "detail": "" if q[0] else q[1]}
+        if router_stage.enabled():
+            r = _cached("router", _router_loaded)
+            deps["router"] = {"ready": r[0], "detail": "" if r[0] else r[1]}
+    rep = READY.report(ready=ok, detail=why, deps=deps, instance=os.environ.get("MENTAT_INSTANCE", "cloud"), tools=len(TOOLS),
+                       mode="llm" if USE_LLM else "keywords")
+    return jsonify(rep), ready_mod.status_code(rep)
 
 
 @app.get("/version")

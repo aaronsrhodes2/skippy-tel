@@ -59,6 +59,8 @@ def test_speak_refuses_what_it_should_without_touching_a_model(monkeypatch):
     assert c.post("/speak", json={"text": "x" * 1001, "voice": "stock"}).status_code == 413
     assert c.post("/speak", json={"text": "hi", "voice": "skippy"}).status_code == 503       # files missing: says so, loads nothing
     assert not studio._models and c.get("/health").get_json()["ready"] is False
+    nope = c.get("/health").get_json()
+    assert nope["accepting"] is False and "no voice is loaded" in nope["detail"] and nope["service"] == "tts-studio"   # not ready says why (PLATINUM section 24)
 
 
 def test_a_resident_voice_is_not_ready_until_it_is_warm_so_the_gate_falls_back_meanwhile(monkeypatch):

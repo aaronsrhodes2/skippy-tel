@@ -154,6 +154,25 @@ class Status:
             if isinstance(s, dict) and s.get("name"):
                 pc_services.append({"kind": "service", "name": _s(s["name"], 40),
                                     "lamp": "ok" if s.get("available") else ("off" if s.get("planned") else "down"), "detail": _s(s.get("status_detail"), 100)})
+        for name, d in sorted((report.get("doctor") or {}).items()):          # what each service SAID about itself (PLATINUM section 24)
+            if not isinstance(d, dict):
+                continue
+            jobs, stuck, state = int(d.get("jobs") or 0), int(d.get("stuck_s") or 0), d.get("state")
+            plural = "s" if jobs != 1 else ""
+            if state == "ready":
+                lamp, detail = "ok", "ready: accepting work, no jobs"
+            elif state == "busy":
+                lamp, detail = "ok", f"busy: {jobs} job{plural} running"
+            elif state == "hung":
+                lamp, detail = "hung", f"HUNG: {jobs} job{plural} running, no progress for {stuck // 60} min {stuck % 60} s"
+            elif state == "not-ready":
+                lamp, detail = "down", _s(d.get("why"), 120) or "it says it isn't ready"
+            else:                                                     # a plain answer: up, but it cannot say whether it is ready
+                lamp = "down" if d.get("ok") is False else "off"
+                detail = _s(d.get("why"), 120) if d.get("ok") is False else "answers, but cannot yet say whether it is ready"
+            pc_services.append({"kind": "service", "name": _s(name, 40), "lamp": lamp, "detail": detail, "jobs": jobs})
+        if any(s.get("lamp") == "hung" for s in pc_services) and pc_state == "ok":
+            pc_state = "degraded"
         pc = {"id": "skippy-pc", "label": "skippy-pc", "state": pc_state, "age": home_age,
               "vitals": {k: st[k] for k in ("gpu_util_pct", "gpu_free_pct", "ups_charge") if k in st},
               "busy": bool(st.get("busy")),

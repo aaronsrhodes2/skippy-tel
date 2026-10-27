@@ -37,6 +37,9 @@ import time
 import traceback
 
 from flask import Flask, Response, abort, jsonify, request
+from flask import g as _g
+
+import ready as ready_mod
 from werkzeug.exceptions import HTTPException
 
 import hls
@@ -264,13 +267,29 @@ def create_app(library: Library, client: Client, key: bytes, clock=time.time, se
         return h
 
     # ---- routes -----------------------------------------------------------------------------------------------
+    ready_state = ready_mod.Readiness("video-gate")
+
+    @app.before_request
+    def _job_begins():
+        if request.path != "/health" and request.method != "OPTIONS":      # a call that does work is a job while it runs (PLATINUM section 24)
+            _g._job = ready_state.begin(request.path)
+
+    @app.teardown_request
+    def _job_ends(_exc):
+        token = _g.pop("_job", None)
+        if token:
+            ready_state.end(token)
+
     @app.get("/health")
     def health():
         try:
             up = library.online()
         except Exception:  # noqa: BLE001 — a probe must always answer
             up = False
-        return jsonify(ok=True, ready=bool(library.ready and up), jellyfin=bool(up), items=library.count)
+        deps = {"jellyfin": {"ready": bool(up), "detail": "" if up else "Jellyfin isn't answering"}}
+        rep = ready_state.report(ready=bool(library.ready), detail="" if library.ready else "the film catalog is still being read", deps=deps,
+                                 ok=True, jellyfin=bool(up), items=library.count)
+        return jsonify(rep)
 
     @app.get("/t/<token>/catalog.json")
     def catalog(token):

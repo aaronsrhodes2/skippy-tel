@@ -82,6 +82,7 @@ def test_health_needs_no_pass(stack):
     c, _ = stack
     j = c.get("/health").get_json()
     assert j["ok"] and j["ready"] and j["tts"]
+    assert j["accepting"] is True and j["jobs"]["running"] == 0 and j["service"] == "voice-gate" and j["detail"] == ""   # PLATINUM section 24
 
 
 def test_stt_returns_the_text_and_validates_input(stack):

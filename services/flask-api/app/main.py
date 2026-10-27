@@ -78,6 +78,20 @@ def create_app() -> Flask:
     # The /dropship routes and the photo_tags store stay, dormant, for the restart.
     _start_ollama_warmup()
 
+    from flask import g, request as _request
+    from app.routes.health import READY as _READY
+
+    @app.before_request
+    def _job_begins():
+        if _request.method == "POST":                      # a call that does work is a job while it runs (/health says how many)
+            g._job = _READY.begin(_request.path)
+
+    @app.teardown_request
+    def _job_ends(_exc):
+        token = g.pop("_job", None)
+        if token:
+            _READY.end(token)
+
     app.register_blueprint(health_bp)
     app.register_blueprint(intent_bp)
     app.register_blueprint(battery_bp)

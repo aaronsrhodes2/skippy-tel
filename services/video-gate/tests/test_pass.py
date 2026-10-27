@@ -128,7 +128,9 @@ def test_unknown_path_under_a_bad_pass_is_403_and_under_a_good_pass_404(stack):
 
 def test_health_needs_no_pass_and_says_what_it_knows(stack):
     r = stack.web.get("/health")
-    assert r.status_code == 200 and r.get_json() == {"ok": True, "ready": True, "jellyfin": True, "items": 11}
+    body = r.get_json()
+    assert r.status_code == 200 and {k: body[k] for k in ("ok", "ready", "jellyfin", "items")} == {"ok": True, "ready": True, "jellyfin": True, "items": 11}
+    assert body["accepting"] is True and body["jobs"]["running"] == 0 and body["detail"] == "" and body["service"] == "video-gate"   # PLATINUM section 24
 
 
 def test_cors_preflight_needs_no_pass_and_asks_nothing_of_jellyfin(stack):

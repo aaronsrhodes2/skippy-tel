@@ -251,3 +251,29 @@ def test_karaoke_without_a_mac_url_does_not_even_try(karaoke, monkeypatch):
     resp = karaoke.client.get("/bilby/karaoke")
     assert resp.get_json() == {"line": None, "next_line": None, "elapsed_pct": 0.0}
     assert karaoke.called == []
+
+
+def test_health_says_ready_and_what_it_is_doing_not_just_ok(client, monkeypatch):
+    """PLATINUM section 24: a 200 from /health is not enough. It says ready (Ollama answers AND offers the default model), accepting, the jobs."""
+    from app.routes import health as health_mod
+    monkeypatch.setattr(health_mod, "_ollama_status", lambda: {"available": True, "models": ["qwen3:8b"], "default": "qwen3:8b", "default_present": True})
+    good = client.get("/health").get_json()
+    assert good["status"] == "ok" and good["ready"] is True and good["accepting"] is True and good["jobs"]["running"] == 0 and good["detail"] == ""
+    monkeypatch.setattr(health_mod, "_ollama_status", lambda: {"available": True, "models": [], "default": "qwen3:8b", "default_present": False})
+    missing = client.get("/health").get_json()
+    assert missing["ready"] is False and "qwen3:8b" in missing["detail"] and missing["deps"]["ollama"]["ready"] is False   # `ok` used to be said here
+    monkeypatch.setattr(health_mod, "_ollama_status", lambda: {"available": False, "models": [], "default": "qwen3:8b", "default_present": False})
+    away = client.get("/health").get_json()
+    assert away["ready"] is False and "isn't answering" in away["detail"]
+
+
+def test_a_post_in_flight_counts_as_a_job_and_is_gone_afterwards(client, monkeypatch):
+    from app.routes import health as health_mod
+    began = []
+    real_begin = health_mod.READY.begin
+    monkeypatch.setattr(health_mod.READY, "begin", lambda label="": began.append(label) or real_begin(label))
+    client.post("/battery", json={})                                         # any POST is a call that does work
+    assert began == ["/battery"]
+    assert health_mod.READY.report()["jobs"]["running"] == 0                  # and it is gone once the call has ended
+    client.get("/health")
+    assert began == ["/battery"]                                              # a GET (a health poll) is never a job
