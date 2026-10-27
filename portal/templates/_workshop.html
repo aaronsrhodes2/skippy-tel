@@ -564,7 +564,7 @@
       const kind = !d ? why : d.state === "unknown" ? "unknown" : (d.state === "stalled" || d.state === "offline") ? d.state : "";
       if (kind) goQuiet(job, kind, d && typeof d.quiet_s === "number" ? d.quiet_s : null);
       else { job.quietSince = null; job.kind = ""; job.srv = null; delete job.turn.note; job.turn.bad = false; }
-      if (d && d.state === "waiting") job.turn.note = WAIT_NOTE;     // sent while another run goes: it waits its turn (portal/workshop.py)
+      if (d && d.state === "waiting") job.turn.note = WAIT_NOTE + (d.ahead > 0 ? " " + d.ahead + (d.ahead === 1 ? " is" : " are") + " ahead of this." : "");     // sent while another run goes: it waits its turn (portal/workshop.py)
       const out = {kind, end: false, resume: null};
       if (d && (d.state === "done" || d.state === "error")) {
         out.end = true;
@@ -609,6 +609,7 @@
     // ── the queue: messages sent while Skippy works wait here, and go together, in one message, when the task returns ──
     const QK = "ps-queue";
     let queue = []; try { queue = JSON.parse(store.get(QK) || "[]"); if (!Array.isArray(queue)) queue = []; } catch (e) { queue = []; }
+    let lastQueuedAt = 0;
     const saveQueue = () => store.set(QK, JSON.stringify(queue.slice(0, 20)));
     function paintQueue() {
       queueBox.hidden = !queue.length;
@@ -691,7 +692,11 @@
       ev.preventDefault();
       let message = text.value.trim();
       if ((!message && !attached.length) || sending) return;
-      if (waiting() && message) { queue.push(message); saveQueue(); paintQueue(); text.value = ""; return; }   // queued, not lost
+      if (waiting() && message) {
+        const now = Date.now();                                  // the same words twice within a few seconds are one tap that looked unanswered
+        if (queue.length && queue[queue.length - 1] === message && now - lastQueuedAt < 8000) { text.value = ""; return; }
+        queue.push(message); lastQueuedAt = now; saveQueue(); paintQueue(); text.value = ""; return;   // queued, not lost
+      }
       let gone = null;
       if (running) { if (!canLeave(running)) return; gone = leave(running); }
       if (queue.length) { message = gulp([...queue.splice(0), ...(message ? [message] : [])]); saveQueue(); paintQueue(); }
@@ -703,10 +708,19 @@
       const reply = {role: "assistant", parts: [], t0: Date.now(), pending: true}; turns.push(reply); draw(reply); scroll(true); lockPicker();
       if (!pins.some(x => x.conv === conv)) { pin({conv, title: message || "(image)", project}); }      // a conversation you are in is pinned until you unpin it
       text.value = ""; sending = true; ui();
+      // The message shows as SENDING at once, and one id (client_id) rides with every try: a slow reply or a lost one is retried here
+      // with the same id, and the portal returns the task it already made, so it never queues twice (2026-10-27).
+      const cid = ((crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(36).slice(2)).replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40).padEnd(8, "0");
+      reply.note = "Sending\u2026"; draw(reply);
       let r;
-      try { r = await call(SEND, {method: "POST", headers: H, body: JSON.stringify({conv, message, project, brain, images: sent})}); }
-      catch (e) { r = {ok: false, data: {error: e.message}}; }
-      sending = false; reply.pending = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try { r = await call(SEND, {method: "POST", headers: H, body: JSON.stringify({conv, message, project, brain, images: sent, client_id: cid})}); }
+        catch (e) { r = {ok: false, data: {error: e.message}, lost: !e.signin}; }
+        if (r.ok || !r.lost) break;                                  // an answer (even a refusal) is final; only a lost one is tried again
+        reply.note = "Sending again\u2026"; draw(reply);
+        await new Promise(res => setTimeout(res, 1500 * (attempt + 1)));
+      }
+      sending = false; reply.pending = false; if (r.ok) { reply.note = ""; draw(reply); }
       if (!r.ok) {
         reply.note = (r.data && r.data.error) || "That didn't go through."; reply.bad = true; draw(reply); save(); ui(); voice.resume();
         if (gone && r.status === 409) resume(gone);   // the old task is still alive: don't lose sight of it

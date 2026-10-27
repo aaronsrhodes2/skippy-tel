@@ -1470,16 +1470,17 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         try:
             if str(body.get("brain") or "core") == "core":
                 pics.touch("core")                          # the agent thinking on Skippy Core: patient jobs there wait
-            task = workshop.send(me(), str(body.get("conv") or ""), message, str(body.get("project") or ""), body.get("images"),
-                                 brain=str(body.get("brain") or "core"))
+            task, again = workshop.send_once(me(), str(body.get("conv") or ""), message, str(body.get("project") or ""), body.get("images"),
+                                             brain=str(body.get("brain") or "core"), client_id=str(body.get("client_id") or ""))
         except workshop_mod.Busy as exc:
             return jsonify(error=str(exc)), 409
         except workshop_mod.NotReady as exc:
             return jsonify(error=str(exc)), 503
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
-        print(json.dumps({"event": "workshop", "user": me(), "task": task, "chars": len(message), "images": len(body.get("images") or [])}), flush=True)  # never the text
-        return jsonify(task=task)
+        if not again:
+            print(json.dumps({"event": "workshop", "user": me(), "task": task, "chars": len(message), "images": len(body.get("images") or [])}), flush=True)  # never the text
+        return jsonify(task=task, again=again)
 
     @mine.get("/workshop/events")
     @workshop_call

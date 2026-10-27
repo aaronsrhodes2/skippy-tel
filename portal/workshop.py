@@ -34,6 +34,8 @@ BRIEF_SILENCE_S = 300      # home silent no longer than this (a reporter restart
 WAIT_NOTE = "In line: Skippy is finishing another run first."
 STALL_S = 120              # a running task silent for this long: the link to skippy-pc broke
 WANT_S = 120               # a person's "check again" is still worth answering for this long
+_CLIENT_ID = re.compile(r"[A-Za-z0-9_-]{8,64}")          # a message id the page made (crypto.randomUUID, dashes kept or dropped)
+CLIENT_ID_KEEP_S = 900                                  # the same id within this long is the same message
 _CONV = re.compile(r"[A-Za-z0-9-]{8,64}")
 MAX_ATTACHED = 4                   # pictures that may go with one message (pasted screenshots, mostly)
 MAX_IMAGE_B64 = 1_200_000          # one picture, as base64 (the page shrinks each to about a megabyte)
@@ -274,6 +276,9 @@ class Workshop:
         self.on_picture = None                   # (owner, id, prompt, tier) -> None: the agent asked for a picture (patient.py, app.py)
         self.on_popup = None                     # (owner, id, name, args, input) -> None: the agent asked for a pop-up job (popups.py)
         self._images: dict[tuple[str, int], tuple[str, str, bytes]] = {}   # (task, n) -> (owner, mime, bytes)
+        # A message the page sent carries a client id; sending the same one again (a double tap, a retry after a slow or lost reply)
+        # returns the task it already made, never a second one (2026-10-27: a slow send looked unsent, was tried twice, and queued twice).
+        self._client_ids: dict[tuple[str, str], tuple[str, float]] = {}      # (owner, client_id) -> (task, when)
 
     def _keep_image(self, task: str, rec: dict, got) -> dict:
         """Hold a checked screenshot (call with the lock held) and return the event the chat gets: {"t":"image","n":..}
@@ -337,7 +342,21 @@ class Workshop:
         pid = pid or DEFAULT_PROJECT
         return next((p for p in self.projects() if p["id"] == pid), None)
 
-    def send(self, owner: str, conv: str, message: str, project: str = "", images=None, brain: str = "core") -> str:
+    def send(self, owner: str, conv: str, message: str, project: str = "", images=None, brain: str = "core", client_id: str = "") -> str:
+        return self.send_once(owner, conv, message, project, images, brain, client_id)[0]
+
+    def send_once(self, owner: str, conv: str, message: str, project: str = "", images=None, brain: str = "core",
+                  client_id: str = "") -> tuple[str, bool]:
+        """send(), and whether this was the same message again (its client id was already sent: the task it made is returned, nothing new)."""
+        client_id = (client_id or "").strip()
+        if client_id and not _CLIENT_ID.fullmatch(client_id):
+            raise ValueError("Bad message id.")
+        if client_id:
+            with self._lock:
+                self._prune_client_ids()
+                seen = self._client_ids.get((owner, client_id))
+                if seen and seen[0] in self._tasks:
+                    return seen[0], True
         message = (message or "").strip()
         pictures = clean_images(images)
         if not message and not pictures:
@@ -381,8 +400,25 @@ class Workshop:
             self._tasks[task] = {"owner": owner, "conv": conv, "events": [], "state": "waiting", "error": None,
                                  "created": now, "pushed_at": now, "touched": now, "stop": False, "project": project, "brain": brain,
                                  "message": message[:200], "job": job}   # its first words, for the notification (never shown to others)
+            if client_id:
+                self._client_ids[(owner, client_id)] = (task, now)
             self._advance()
-        return task
+        return task, False
+
+    def _prune_client_ids(self) -> None:
+        now = self.clock()
+        for key in [k for k, (_, at) in self._client_ids.items() if now - at > CLIENT_ID_KEEP_S]:
+            del self._client_ids[key]
+
+    def ahead_of(self, task: str) -> int:
+        """(lock held) How many other tasks are in front of this waiting one: the running or queued one, and any waiting longer.
+        Counts only; never what they are or whose."""
+        rec = self._tasks.get(task)
+        if not rec or rec["state"] != "waiting":
+            return 0
+        busy = sum(1 for t, r in self._tasks.items() if t != task and r["state"] in ("queued", "running"))
+        line = [t for t, r in sorted(((t, r) for t, r in self._tasks.items() if r["state"] == "waiting"), key=lambda tr: tr[1]["created"])]   # as _advance orders it
+        return busy + line.index(task)
 
     def briefly_silent(self) -> bool:
         """Home isn't reporting, but only for a moment: a restart or a deploy, not a skippy-pc that is off."""
@@ -421,6 +457,8 @@ class Workshop:
             after = max(0, after)
             out = {"state": state, "error": rec["error"], "events": rec["events"][after:],
                    "next": max(after, len(rec["events"])), "project": rec.get("project") or DEFAULT_PROJECT}
+            if state == "waiting":
+                out["ahead"] = self.ahead_of(task)                 # "2 ahead of you" (another chat, another device): counts only
             if rec["state"] in ("queued", "running"):          # the raw state: "stalled" and "offline" are these, gone quiet
                 out["quiet_s"] = max(0, int(now - rec["pushed_at"]))
             return out
