@@ -70,6 +70,7 @@ PRIMARY = os.getenv("WORKSHOP_PRIMARY", r"D:\Aaron\development\SkippyTel")
 REMOTE = os.getenv("WORKSHOP_REMOTE", "D:/trunk/git/skippy-tel.git")      # SkippyTel's home (docs/no-github.md): never GitHub
 SESSIONS = os.getenv("WORKSHOP_SESSIONS", os.path.join(os.path.dirname(REPO), ".skippy-workshop-sessions.json"))
 PROMPT_FILE = Path(__file__).with_name("workshop_prompt.md")
+PURPLE_TOOLS_SERVER = Path(__file__).resolve().parents[1] / "purple-tools" / "server.py"     # web search, Mentat, pop-ups, PDF, browser (an MCP server)
 PROMPT_NAME = ".skippy-workshop-prompt.txt"   # the prompt as claude reads it ({repo}/{primary} filled in), next to the sessions file
 ENV_FILES = ("G:/My Drive/vault/.env",)        # where SKIPPY_HOME_TOKEN lives if the environment doesn't have it
 
@@ -1193,24 +1194,17 @@ class Workshop:
                *thinking, "--dangerously-skip-permissions",
                "--append-system-prompt-file", str(self.prompt_path(project)), "--system-prompt-snapshot", "off",
                "--add-dir", self.project(project).primary, "--settings", self.lane_settings()]
-        house = self.house_mcp_config()
-        if house:
-            cmd += ["--mcp-config", house]
+        for config in (self.house_mcp_config(), self.purple_mcp_config()):       # the house's tools, then purple's (services/purple-tools)
+            if config:
+                cmd += ["--mcp-config", config]
         if session:
             cmd += ["--resume", session]
         return self._one_line_each(cmd)
 
-    def house_mcp_config(self) -> str | None:
-        """The house's tools for every run, either brain (services/satellite/house_mcp.py on the satellite's venv: lights and switches,
-        HomeKit, Matter, Leviton). None, and the run goes without them, until that venv exists. Written next to the runs."""
-        satellite = Path(__file__).resolve().parents[1] / "satellite"
-        python, server = satellite / ".venv" / "Scripts" / "python.exe", satellite / "house_mcp.py"
-        if not (python.is_file() and server.is_file()):
-            return None
-        text = json.dumps({"mcpServers": {"skippy-house": {"type": "stdio", "command": python.as_posix(), "args": [server.as_posix()]}}},
-                          indent=1)
+    def _write_state_file(self, name: str, text: str) -> str | None:
+        """Write `name` next to the runs (the temp folder if that fails), only when it changed; its path, or None if neither place works."""
         for folder in (Path(self.state_dir), Path(tempfile.gettempdir()) / "skippy-workshop"):
-            path = folder / "house-mcp.json"
+            path = folder / name
             try:
                 if not path.is_file() or path.read_text(encoding="utf-8") != text:
                     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1219,6 +1213,35 @@ class Workshop:
             except OSError:
                 continue
         return None
+
+    def house_mcp_config(self) -> str | None:
+        """The house's tools for every run, either brain (services/satellite/house_mcp.py on the satellite's venv: lights and switches,
+        HomeKit, Matter, Leviton). None, and the run goes without them, until that venv exists. Written next to the runs."""
+        satellite = Path(__file__).resolve().parents[1] / "satellite"
+        python, server = satellite / ".venv" / "Scripts" / "python.exe", satellite / "house_mcp.py"
+        if not (python.is_file() and server.is_file()):
+            return None
+        return self._write_state_file("house-mcp.json", json.dumps({"mcpServers": {"skippy-house": {"type": "stdio", "command": python.as_posix(), "args": [server.as_posix()]}}}, indent=1))
+
+    def purple_mcp_config(self) -> str | None:
+        """purple's Haiku-class tools (services/purple-tools: web search, Mentat, the quick pop-ups, PDF reading, a headless browser) as an MCP
+        server run by this bridge's own Python (which has pypdf and playwright). None, and the run goes without them, when the server isn't there."""
+        server, python = PURPLE_TOOLS_SERVER, Path(sys.executable)
+        if not (server.is_file() and python.is_file()):
+            return None
+        return self._write_state_file("purple-tools-mcp.json", json.dumps({"mcpServers": {"purple-tools": {"type": "stdio", "command": python.as_posix(), "args": [server.as_posix()]}}}, indent=1))
+
+    def core_mcp_config(self, house: bool, purple: bool) -> str | None:
+        """One MCP config file holding only the servers switched on (the SDK engine takes a single one), or None when none is."""
+        servers: dict = {}
+        for wanted, make in ((house, self.house_mcp_config), (purple, self.purple_mcp_config)):
+            path = make() if wanted else None
+            if path:
+                try:
+                    servers.update(json.loads(Path(path).read_text(encoding="utf-8")).get("mcpServers") or {})
+                except (OSError, ValueError):
+                    continue
+        return self._write_state_file("core-mcp.json", json.dumps({"mcpServers": servers}, indent=1)) if servers else None
 
     def lane_settings(self) -> str:
         """The settings file every run gets with --settings: the lane guard (lane_guard.py) as a PreToolUse hook, so a run

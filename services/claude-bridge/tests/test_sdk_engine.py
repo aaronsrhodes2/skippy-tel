@@ -249,7 +249,7 @@ def test_the_switch_is_a_file_that_names_projects_and_defaults_to_the_cli(tmp_pa
     (tmp_path / "engines.json").write_text("[]")
     assert sdk.engine_for(str(tmp_path), "core", "p") == "cli"
     assert sdk.segment_turns(str(tmp_path)) == sdk.SEGMENT_TURNS and sdk.rotate_tokens(str(tmp_path)) == sdk.ROTATE_TOKENS
-    assert sdk.engine_options(str(tmp_path)) == {"tools": list(sdk.CODING_TOOLS), "claude_md_excludes": [], "house_tools": False, "deny_read": []}
+    assert sdk.engine_options(str(tmp_path)) == {"tools": list(sdk.CODING_TOOLS), "claude_md_excludes": [], "house_tools": False, "purple_tools": False, "deny_read": []}
 
 
 def test_a_segments_turn_budget_can_be_tuned_in_the_same_file(tmp_path):
@@ -414,10 +414,10 @@ def test_stop_in_the_chat_cancels_an_sdk_run_and_closes_its_session(core_shop):
 def test_engine_options_come_from_engines_json_and_are_checked(tmp_path):
     (tmp_path / "engines.json").write_text(json.dumps({"core": ["*"], "tools": ["Read", "Bash", 7, ""], "claude_md_excludes": ["D:/x/CLAUDE.md", None],
                                                        "house_tools": True, "deny_read": ["D:/x/walled", 5, ""]}))
-    assert sdk.engine_options(str(tmp_path)) == {"tools": ["Read", "Bash"], "claude_md_excludes": ["D:/x/CLAUDE.md"], "house_tools": True, "deny_read": ["D:/x/walled"]}
+    assert sdk.engine_options(str(tmp_path)) == {"tools": ["Read", "Bash"], "claude_md_excludes": ["D:/x/CLAUDE.md"], "house_tools": True, "purple_tools": False, "deny_read": ["D:/x/walled"]}
     for bad in ({"tools": []}, {"tools": "Read"}, {"tools": None, "house_tools": "yes", "claude_md_excludes": "x"}):
         (tmp_path / "engines.json").write_text(json.dumps(bad))
-        assert sdk.engine_options(str(tmp_path)) == {"tools": list(sdk.CODING_TOOLS), "claude_md_excludes": [], "house_tools": False, "deny_read": []}
+        assert sdk.engine_options(str(tmp_path)) == {"tools": list(sdk.CODING_TOOLS), "claude_md_excludes": [], "house_tools": False, "purple_tools": False, "deny_read": []}
 
 
 def test_the_sdk_settings_name_the_claude_md_files_to_leave_out(shop):
