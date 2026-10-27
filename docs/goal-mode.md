@@ -1,6 +1,10 @@
 # Goal mode: an unattended coder on purple Skippy (design, 2026-10-26)
 
-Status: **design, not built.** All of it lives in `services/claude-bridge` (the engine, the supervisor) and a little in `portal/workshop.py`;
+Status: **design, not built.** Split agreed with the Shifting Prophesy session (2026-10-26): it builds the engine side in a worktree
+(GOAL.md writer and segment handoff, done-checks as the SDK engine's Stop hook, the fingerprint rule, the `goal/<slug>` branch and reset;
+the cruise's referee loop is the same hook with the referee as the check); the infra session builds the queue and windows, the quiet-gate
+integration, the Discord park/report, reviewer step (b), the orange plumbing and Core-slot telemetry. The boundary: the engine emits typed
+events, calls a done-check hook and writes the goal state file; the infra side consumes them. All of it lives in `services/claude-bridge` (the engine, the supervisor) and a little in `portal/workshop.py`;
 build it only in a window the Shifting Prophesy session gives (it owns the bridge and the Core coder while its trial runs).
 
 The Captain's aim: purple Skippy (the local coder on skippy-core) works for hours, alone, without asking "want to continue?", and ends in
@@ -31,10 +35,13 @@ step in the same queue.
    (Qwen3.6-35B-A3B) reads the diff against GOAL.md and answers drift / not-drift with reasons. (c) Orange (Claude) only when (a) or (b)
    flags something the coder cannot resolve in two tries.
 5. **Watchdog and self-repair, self-governed.**
-   - Detect: no tokens decoded (`n_decoded` flat) for N minutes, no working-tree change for N steps, a crashed or silently exited process,
-     the bridge or llama-swap down.
-   - Diagnose and fix: the supervisor starts a **repair step** with the failure evidence. It may fix a skippy-tel bug (normal commit, normal
-     CI gate, normal deploy through the quiet gate) and then resumes the goal from GOAL.md.
+   - Detect by **events, not timers** (the Captain calls timers instead of callbacks a band-aid): the SDK engine's api_retry and no_response,
+     an error ResultMessage, the process ending, a Stop-hook refusal repeating with the same fingerprint. Core-slot telemetry (`n_decoded`)
+     only annotates what a park report says; it never decides.
+   - Default: **detect, park and notify.** A self-repair step where an agent edits skippy-tel and deploys is PLATINUM §19 territory, so it
+     is off until the Captain says yes explicitly (he said he wants it, 2026-10-26; the choice of exactly what it may touch is still to be
+     confirmed). When on: orange fixes the **harness** (bridge, queue, skippy-tel), never the model that is running on it; normal commit,
+     normal CI gate, normal deploy through the quiet gate; then the goal resumes from GOAL.md.
    - Governors against thrash: a **repair budget** per goal and per 24 h; the same failure fingerprint twice after a repair = stop;
      exponential backoff between attempts; a circuit breaker that **parks** the goal ("stuck, here is why") and sends a Discord DM; a kill
      switch (Stop in the chat, and `goal-pause` in the bridge's state); the repair step is never allowed to touch the governors themselves.
@@ -43,6 +50,13 @@ step in the same queue.
 7. **Orange as the fixer (allowed by the Captain, 2026-10-26).** When purple parks a goal or a repair fails, the queue may hand the same
    GOAL.md and the failure log to orange for **one bounded session** (token cap per goal), then purple resumes. Every escalation is logged
    on the goal and counted.
+
+## Details to keep
+
+- `.skippy-goal/` is excluded from the Stop gate's uncommitted-path list and from commits (git info/exclude), or the gate would nag about
+  its own file.
+- Goal-mode code is off by default and must not change how a non-goal run behaves; anything touching `sdk_engine.drive` / `run_core` for
+  ordinary runs waits for a gap between trials. Work in a worktree, never the primary checkout.
 
 ## Order of work
 
