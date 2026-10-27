@@ -358,9 +358,10 @@ class Run:
     """One chat message being worked on: an append-only list of events, readable while it grows."""
 
     def __init__(self, task: str, conv: str, message: str, who: str = "", created: float | None = None,
-                 project: str = projects_mod.DEFAULT, brain: str = "claude"):
+                 project: str = projects_mod.DEFAULT, brain: str = "core", client_id: str = ""):
         self.task, self.conv, self.message, self.who = task, conv, message, who
-        self.brain = brain if brain in BRAINS else "claude"   # who does the thinking: Claude (Sonnet) or Skippy Core's coder
+        self.client_id = client_id                 # an opaque id the page chose for this send; echoed for tracing, never used to dedupe here
+        self.brain = brain if brain in BRAINS else "claude"   # who does the thinking: Skippy Core's coder (purple) unless another is named
         self.project = project                 # which repo (projects.json): picks the clone, the checkout and the session
         self.clone = ""                        # that project's clone when the run started (the conversation log reads it)
         self.before_finish = None              # (run) -> None, called once just before the run ends (the ship check)
@@ -423,7 +424,7 @@ class Run:
         """Everything worth keeping across a bridge restart. The message text is not in it: nothing needs it again."""
         with self._cond:
             return {"task": self.task, "conv": self.conv, "who": self.who, "project": self.project, "brain": self.brain,
-                    "created": self.created,
+                    "client_id": self.client_id, "created": self.created,
                     "finished_at": self.finished_at, "done": self.done, "ok": self.ok, "error": self.error,
                     "events": list(self.events)}
 
@@ -432,7 +433,7 @@ class Run:
         with self._cond:
             finished = self.finished_at
             return {"task": self.task, "conv": self.conv, "who": self.who, "project": self.project, "brain": self.brain,
-                    "events": len(self.events),
+                    "client_id": self.client_id, "events": len(self.events),
                     "done": self.done, "ok": self.ok, "error": self.error,
                     "age_s": round(max(0.0, now - self.created), 1),
                     "finished_age_s": None if finished is None else round(max(0.0, now - finished), 1)}
@@ -673,7 +674,7 @@ class Workshop:
 
     # ── runs ─────────────────────────────────────────────────────────────
     def start(self, task: str, conv: str, message: str, who: str = "", attach: bool = False,
-              project: str = "", images=None, brain: str = "claude") -> Run:
+              project: str = "", images=None, brain: str = "core", client_id: str = "") -> Run:
         """Begin a task, or re-attach if it's already known. One task at a time across ALL projects: the chat follows one
         run, the Captain reviews one outcome at a time, and two runs would race on the shared sessions file.
 
@@ -702,7 +703,7 @@ class Workshop:
             raise ValueError("unknown project") from None    # only projects.json, or a folder under the root, is a target
         if not attach:
             self._settle_remote(chosen)
-        brain = brain or "claude"
+        brain = brain or "core"                        # no brain named = purple (the Captain, 2026-10-27); old run files and session keys stay Claude's
         if brain not in BRAINS:
             raise ValueError("unknown brain")
         if brain == "core" and not attach and not self.core_ready():
@@ -721,7 +722,7 @@ class Workshop:
             elif any(not r.done for r in self._runs.values()):
                 raise Busy("Skippy is still working on the last thing")
             else:
-                run = self._runs[task] = Run(task, conv, message, who, project=project, brain=brain)
+                run = self._runs[task] = Run(task, conv, message, who, project=project, brain=brain, client_id=(client_id or "")[:64])
                 run.clone = chosen.clone
                 run.pictures = paths if brain == "core" else []
                 run.on_change = self._changed
@@ -897,7 +898,8 @@ class Workshop:
         run = Run(task, conv, "", who.strip()[:MAX_WHO] if isinstance(who, str) else "",
                   float(created) if _is_number(created) else mtime,
                   project if isinstance(project, str) and projects_mod._ID.fullmatch(project) else projects_mod.DEFAULT,
-                  data.get("brain") if data.get("brain") in BRAINS else "claude")
+                  data.get("brain") if data.get("brain") in BRAINS else "claude",     # a file with no brain is from before brains: Claude's
+                  data["client_id"][:64] if isinstance(data.get("client_id"), str) else "")
         run.events = [e for e in events if isinstance(e, dict)][:MAX_EVENTS]
         run.done = data.get("done") is True
         run.ok = data["ok"] if isinstance(data.get("ok"), bool) else None

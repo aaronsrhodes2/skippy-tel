@@ -28,6 +28,18 @@ def no_real_claude_login_probe(monkeypatch):
     monkeypatch.setattr(engine.Workshop, "ask_core", lambda self, system, text: (_ for _ in ()).throw(RuntimeError("no Core in tests")))
 
 
+@pytest.fixture(autouse=True)
+def these_tests_exercise_the_claude_brain_unless_they_name_another(monkeypatch):
+    """A request that names no brain is Skippy Core's coder now (the Captain, 2026-10-27: no brain named = purple). Most of these tests were
+    written for the Claude brain's CLI path and start runs without naming one: they keep that path by asking for it. A test that names a brain
+    (the core tests) is untouched, and test_default_brain_client_id.py checks the real default."""
+    real = engine.Workshop.start
+
+    def start(self, *args, brain=None, **kwargs):
+        return real(self, *args, brain=brain or "claude", **kwargs)
+    monkeypatch.setattr(engine.Workshop, "start", start)
+
+
 @pytest.fixture
 def shop(tmp_path, monkeypatch):
     return make_shop(tmp_path, monkeypatch)

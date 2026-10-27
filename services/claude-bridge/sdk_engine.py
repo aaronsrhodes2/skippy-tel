@@ -54,7 +54,7 @@ ROTATE_TOKENS = int(os.getenv("WORKSHOP_CORE_ROTATE_TOKENS", "100000"))  # the c
 CODING_TOOLS = ("Bash", "Read", "Edit", "Write", "Grep", "Glob", "TodoWrite", "Task", "WebFetch")   # Claude Code's built-ins this engine offers
 MAX_SEGMENTS = int(os.getenv("WORKSHOP_CORE_MAX_SEGMENTS", "8"))
 MAX_BUFFER = 16 * 1024 * 1024                                           # one line of Claude Code's output (a big tool result)
-LANE_TOOLS = "Edit|Write|MultiEdit|NotebookEdit|Bash"
+LANE_TOOLS = "Edit|Write|MultiEdit|NotebookEdit|Bash|Read|Glob|Grep"      # (the read tools are here for the walled folders: Lane.deny_read)
 ENGINES_FILE = "engines.json"
 
 
@@ -368,9 +368,11 @@ def engine_options(state_dir: str) -> dict:
     data = _engines(state_dir)
     names = data.get("tools")
     excl = data.get("claude_md_excludes")
+    deny = data.get("deny_read")
     return {"tools": [t for t in names if isinstance(t, str) and t] if isinstance(names, list) and names else list(CODING_TOOLS),
             "claude_md_excludes": [p for p in excl if isinstance(p, str) and p] if isinstance(excl, list) else [],
-            "house_tools": data.get("house_tools") is True}
+            "house_tools": data.get("house_tools") is True,
+            "deny_read": [p for p in deny if isinstance(p, str) and p] if isinstance(deny, list) else []}
 
 
 def sdk_kwargs(*, cwd: str, env: dict, model: str, cli: str, prompt_file: str, primary: str, settings: str,
@@ -420,7 +422,7 @@ def run_core(shop, run, session: str | None) -> None:
         async def main() -> None:
             await drive(run, clone=project.clone, request=run.message, resume=resume, open_session=open_session,
                         remember=lambda sid: shop._remember(shop.session_key(run.project, run.conv, run.brain), sid),
-                        detail=we.tool_detail, lane=Lane(project.clone, env["SKIPPY_LANE_DEPLOY"]), rotate_at=rotate)
+                        detail=we.tool_detail, lane=Lane(project.clone, env["SKIPPY_LANE_DEPLOY"], deny_read=opts["deny_read"]), rotate_at=rotate)
 
         loop = asyncio.new_event_loop()
         task = loop.create_task(main())
