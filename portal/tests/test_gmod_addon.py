@@ -1,14 +1,20 @@
-"""Our Garry's Mod addon (github.com/aaronsrhodes2/sigma-ground, stage/gmod/addon) goes onto the server's persistent disk before srcds
-starts, at every boot and at every `ops restart-game garrysmod`, and a failure to fetch it never stops the game from starting.
+"""Our Garry's Mod addon (sigma-ground, stage/gmod/addon) goes onto the server's persistent disk before srcds starts, at every boot and
+at every `ops restart-game garrysmod`, and a failure to fetch it never stops the game from starting.
 
-  * infra/gcp-games/gmod_addon.sh: shallow sparse clone -> addons/mentat-stage; run here for real against a local repo.
+  * infra/gcp-games/gmod_addon.sh: one authenticated GET of the addon's tarball from the games bucket -> addons/mentat-stage; run here for
+    real against a folder that stands in for the bucket (skippy-core's publisher writes it: core/cd/cd.py publish_tarball).
   * startup.sh runs it for garrysmod only, before the containers are created; ops_agent.py runs it between stop and start.
   * the file times stay put when the addon hasn't changed (game_backup.py fingerprints mtimes and backs up garrysmod/addons).
+  * nothing in it touches GitHub or git (docs/no-github.md).
 """
+import hashlib
 import importlib.util
+import io
+import json
 import os
 import shutil
 import subprocess
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -18,7 +24,7 @@ from test_fix_watchdog_startup import needs_bash, run_boot
 ROOT = Path(__file__).resolve().parents[2]
 INFRA = ROOT / "infra" / "gcp-games"
 SCRIPT = INFRA / "gmod_addon.sh"
-needs_git = pytest.mark.skipif(shutil.which("git") is None or shutil.which("bash") is None, reason="needs git and bash")
+needs_tools = pytest.mark.skipif(any(shutil.which(t) is None for t in ("bash", "curl", "tar")), reason="needs bash, curl and tar")
 
 
 # ── the plumbing ─────────────────────────────────────────────────────────────
@@ -41,26 +47,67 @@ def test_the_script_can_never_fail_the_boot():
 
 # ── the script, run for real ─────────────────────────────────────────────────
 
-def _git(cwd, *args):
-    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
-    subprocess.run(["git", *args], cwd=cwd, env=env, check=True, capture_output=True)
+def test_the_script_names_no_github_and_runs_no_git():
+    text = SCRIPT.read_text(encoding="utf-8")
+    assert "github.com" not in text and "git clone" not in text and "git fetch" not in text and "git init" not in text
+    assert "storage.googleapis.com/skippy-tel-game-assets/gmod-addon" in text                         # the games bucket
+
+
+class Bucket:
+    """A folder standing in for gs://skippy-tel-game-assets/gmod-addon, written the way core/cd/cd.py publish_tarball writes it:
+    <commit>.tar.gz and master.tar.gz, each holding addon/<files> and SOURCE ("<tree> <commit>")."""
+
+    def __init__(self, path):
+        self.path = path
+        path.mkdir(parents=True, exist_ok=True)
+        self.count = 0
+
+    @property
+    def url(self):
+        return self.path.as_uri()
+
+    def archive(self, files, source, links=()):
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as t:
+            for name, text in files.items():
+                data = text.encode()
+                info = tarfile.TarInfo(f"addon/{name}")
+                info.size = len(data)
+                t.addfile(info, io.BytesIO(data))
+            for name, target in links:
+                info = tarfile.TarInfo(f"addon/{name}")
+                info.type = tarfile.SYMTYPE
+                info.linkname = target
+                t.addfile(info)
+            if source is not None:
+                data = source.encode()
+                info = tarfile.TarInfo("SOURCE")
+                info.size = len(data)
+                t.addfile(info, io.BytesIO(data))
+        return buf.getvalue()
+
+    def publish(self, files, name="master", source=True, links=()):
+        self.count += 1
+        tree = hashlib.sha1(json.dumps(sorted(files.items())).encode()).hexdigest()
+        commit = hashlib.sha1(f"{tree}{self.count}".encode()).hexdigest()
+        data = self.archive(files, f"{tree} {commit}\n" if source is True else source, links)
+        for n in (commit, name):
+            (self.path / f"{n}.tar.gz").write_bytes(data)
+        return commit
+
+
+LUA = "lua/autorun/mentat_stage.lua"
 
 
 @pytest.fixture
 def origin(tmp_path):
-    repo = tmp_path / "origin"
-    (repo / "stage" / "gmod" / "addon" / "lua" / "autorun").mkdir(parents=True)
-    (repo / "stage" / "gmod" / "addon" / "lua" / "autorun" / "mentat_stage.lua").write_text("print('v1')\n")
-    (repo / "big").mkdir()
-    (repo / "big" / "data.json").write_text("{}")
-    _git(repo, "init", "-q", "-b", "master")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "one")
-    return repo
+    bucket = Bucket(tmp_path / "bucket")
+    bucket.v1 = bucket.publish({LUA: "print('v1')\n"})
+    return bucket
 
 
-def refresh(tmp_path, repo_url, **extra):
-    env = {**os.environ, "DATA": str(tmp_path / "data"), "GMOD_ADDON_REPO": repo_url, "GMOD_ADDON_OWNER": f"{os.getuid()}:{os.getgid()}" if hasattr(os, "getuid") else "0:0", **extra}
+def refresh(tmp_path, base_url, **extra):
+    env = {**os.environ, "DATA": (tmp_path / "data").as_posix(), "GMOD_ADDON_BASE": base_url, "GMOD_ADDON_OWNER": f"{os.getuid()}:{os.getgid()}" if hasattr(os, "getuid") else "0:0", **extra}
     done = subprocess.run([shutil.which("bash"), str(SCRIPT)], env=env, capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, done.stdout + done.stderr                                           # ALWAYS 0
     return done.stdout
@@ -70,56 +117,70 @@ def installed(tmp_path):
     return tmp_path / "data" / "garrysmod" / "addons" / "mentat-stage"
 
 
-@needs_git
-def test_a_fresh_boot_installs_only_the_addon_folder_and_leaves_no_clone_behind(tmp_path, origin):
-    out = refresh(tmp_path, origin.as_uri())
+@needs_tools
+def test_a_fresh_boot_installs_only_the_addon_folder_and_leaves_no_scratch_behind(tmp_path, origin):
+    out = refresh(tmp_path, origin.url)
     assert "mentat-stage updated none ->" in out
-    assert (installed(tmp_path) / "lua" / "autorun" / "mentat_stage.lua").read_text().strip() == "print('v1')"
-    assert not (installed(tmp_path) / ".git").exists() and not (installed(tmp_path) / "big").exists()
+    assert (installed(tmp_path) / LUA).read_text().strip() == "print('v1')"
+    assert not (installed(tmp_path) / "SOURCE").exists() and not (installed(tmp_path) / "addon").exists()
+    assert (installed(tmp_path) / ".source").read_text().split()[1] == origin.v1
     assert sorted(p.name for p in (tmp_path / "data" / "garrysmod").iterdir()) == ["addons"]         # no scratch folder left
 
 
-@needs_git
+@needs_tools
 def test_an_unchanged_addon_is_not_touched_so_the_backup_does_not_archive_it_at_every_boot(tmp_path, origin):
-    refresh(tmp_path, origin.as_uri())
-    f = installed(tmp_path) / "lua" / "autorun" / "mentat_stage.lua"
+    refresh(tmp_path, origin.url)
+    f = installed(tmp_path) / LUA
     os.utime(f, (1_000_000_000, 1_000_000_000))
-    out = refresh(tmp_path, origin.as_uri())
+    out = refresh(tmp_path, origin.url)
     assert "already at" in out and f.stat().st_mtime == 1_000_000_000
 
 
-@needs_git
-def test_a_push_to_master_shows_up_at_the_next_start(tmp_path, origin):
-    refresh(tmp_path, origin.as_uri())
-    (origin / "stage" / "gmod" / "addon" / "lua" / "autorun" / "mentat_stage.lua").write_text("print('v2')\n")
-    (origin / "stage" / "gmod" / "addon" / "lua" / "new.lua").write_text("x\n")
-    _git(origin, "add", "-A")
-    _git(origin, "commit", "-q", "-m", "two")
-    out = refresh(tmp_path, origin.as_uri())
+@needs_tools
+def test_a_new_master_shows_up_at_the_next_start(tmp_path, origin):
+    refresh(tmp_path, origin.url)
+    origin.publish({LUA: "print('v2')\n", "lua/new.lua": "x\n"})
+    out = refresh(tmp_path, origin.url)
     assert "updated" in out and "already" not in out
-    assert (installed(tmp_path) / "lua" / "autorun" / "mentat_stage.lua").read_text().strip() == "print('v2')"
+    assert (installed(tmp_path) / LUA).read_text().strip() == "print('v2')"
     assert (installed(tmp_path) / "lua" / "new.lua").exists()
 
 
-@needs_git
-def test_when_github_cannot_be_reached_the_previous_copy_stays_and_the_script_still_succeeds(tmp_path, origin):
-    refresh(tmp_path, origin.as_uri())
+@needs_tools
+def test_when_the_bucket_cannot_be_reached_the_previous_copy_stays_and_the_script_still_succeeds(tmp_path, origin):
+    refresh(tmp_path, origin.url)
     out = refresh(tmp_path, (tmp_path / "nowhere").as_uri())
     assert "couldn't fetch" in out and "keeping the addon as it is" in out
-    assert (installed(tmp_path) / "lua" / "autorun" / "mentat_stage.lua").exists()
+    assert (installed(tmp_path) / LUA).exists()
 
 
-@needs_git
+@needs_tools
 def test_a_first_boot_with_no_network_starts_without_the_addon_and_says_so(tmp_path):
     out = refresh(tmp_path, (tmp_path / "nowhere").as_uri())
     assert "couldn't fetch" in out and "(none)" in out and not installed(tmp_path).exists()
 
 
-@needs_git
-def test_a_path_that_is_not_in_the_repo_keeps_what_there_is(tmp_path, origin):
-    refresh(tmp_path, origin.as_uri())
-    out = refresh(tmp_path, origin.as_uri(), GMOD_ADDON_PATH="stage/gmod/not-there")
-    assert "isn't in" in out and installed(tmp_path).exists()
+@needs_tools
+@pytest.mark.parametrize("files, source", [
+    ({"README.md": "no lua here\n"}, True),                                          # nothing to run
+    ({LUA: "print('x')\n"}, None),                                                   # no SOURCE
+    ({LUA: "print('x')\n"}, "not a tree and a commit\n"),                           # a SOURCE that isn't ids
+])
+def test_an_archive_that_is_not_the_addon_keeps_what_there_is(tmp_path, origin, files, source):
+    refresh(tmp_path, origin.url)
+    origin.publish(files, source=source)
+    out = refresh(tmp_path, origin.url)
+    assert "keeping the addon as it is" in out
+    assert (installed(tmp_path) / LUA).read_text().strip() == "print('v1')"
+
+
+@needs_tools
+@pytest.mark.skipif(os.name == "nt", reason="Windows cannot create the symlink the archive carries: skippy-core's CI (Linux) runs this")
+def test_links_in_the_archive_are_dropped_because_this_runs_as_root_on_outside_content(tmp_path, origin):
+    origin.publish({LUA: "print('v3')\n"}, links=[("lua/passwd", "/etc/passwd")])
+    refresh(tmp_path, origin.url)
+    assert (installed(tmp_path) / LUA).exists() and not (installed(tmp_path) / "lua" / "passwd").exists()
+    assert not any(q.is_symlink() for q in installed(tmp_path).rglob("*"))
 
 
 # ── startup.sh's tail, run for real (the same fakes as test_fix_watchdog_startup.py) ───────────────
@@ -205,55 +266,49 @@ def test_other_games_still_use_docker_restart(monkeypatch, tmp_path):
     assert calls == [("docker", "restart", "--time", "60", "valheim")]
 
 
-def _head(repo):
-    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
-
-
-@needs_git
+@needs_tools
 def test_a_pinned_commit_is_exactly_what_runs_even_after_master_moves(tmp_path, origin):
-    pin = _head(origin)
-    (origin / "stage" / "gmod" / "addon" / "lua" / "autorun" / "mentat_stage.lua").write_text("print('v2 evil')\n")
-    _git(origin, "commit", "-q", "-am", "two")
-    out = refresh(tmp_path, origin.as_uri(), GMOD_ADDON_REF=pin)
+    pin = origin.v1
+    origin.publish({LUA: "print('v2 evil')\n"})
+    out = refresh(tmp_path, origin.url, GMOD_ADDON_REF=pin)
     assert f"updated none -> {pin[:7]}" in out
-    assert (installed(tmp_path) / "lua" / "autorun" / "mentat_stage.lua").read_text().strip() == "print('v1')"
-    assert not (installed(tmp_path) / ".git").exists() and not (installed(tmp_path) / "big").exists()
-    assert "already at" in refresh(tmp_path, origin.as_uri(), GMOD_ADDON_REF=pin)                       # and a second boot touches nothing
+    assert (installed(tmp_path) / LUA).read_text().strip() == "print('v1')"
+    assert "already at" in refresh(tmp_path, origin.url, GMOD_ADDON_REF=pin)                            # and a second boot touches nothing
 
 
-@needs_git
+@needs_tools
 def test_the_version_can_come_from_the_games_env_file(tmp_path, origin):
-    pin = _head(origin)
-    (origin / "stage" / "gmod" / "addon" / "lua" / "autorun" / "mentat_stage.lua").write_text("print('v2')\n")
-    _git(origin, "commit", "-q", "-am", "two")
+    pin = origin.v1
+    origin.publish({LUA: "print('v2')\n"})
     env_file = tmp_path / "games.env"
     env_file.write_text(f"FOO=1\nGARRYSMOD_ADDON_REF={pin}\nBAR=2\n")
-    refresh(tmp_path, origin.as_uri(), GAMES_ENV=str(env_file))
-    assert (installed(tmp_path) / "lua" / "autorun" / "mentat_stage.lua").read_text().strip() == "print('v1')"
+    refresh(tmp_path, origin.url, GAMES_ENV=env_file.as_posix())
+    assert (installed(tmp_path) / LUA).read_text().strip() == "print('v1')"
     env_file.write_text("GARRYSMOD_ADDON_REF=\n")                                                       # blank follows master again
-    refresh(tmp_path, origin.as_uri(), GAMES_ENV=str(env_file))
-    assert (installed(tmp_path) / "lua" / "autorun" / "mentat_stage.lua").read_text().strip() == "print('v2')"
+    refresh(tmp_path, origin.url, GAMES_ENV=env_file.as_posix())
+    assert (installed(tmp_path) / LUA).read_text().strip() == "print('v2')"
 
 
-@needs_git
-def test_a_version_that_is_not_a_commit_or_branch_name_is_refused_and_the_addon_stays(tmp_path, origin):
-    refresh(tmp_path, origin.as_uri())
-    out = refresh(tmp_path, origin.as_uri(), GMOD_ADDON_REF="--upload-pack=touch /tmp/x")
-    assert "is not a commit id or a branch name" in out and "keeping the addon as it is" in out
-    assert (installed(tmp_path) / "lua" / "autorun" / "mentat_stage.lua").exists()
+@needs_tools
+@pytest.mark.parametrize("bad", ["--upload-pack=touch /tmp/x", "../../etc/passwd", "some-branch", "ABCDEF"])
+def test_a_version_that_is_not_a_commit_or_master_is_refused_and_the_addon_stays(tmp_path, origin, bad):
+    refresh(tmp_path, origin.url)
+    out = refresh(tmp_path, origin.url, GMOD_ADDON_REF=bad)
+    assert "is not a commit id or master" in out and "keeping the addon as it is" in out
+    assert (installed(tmp_path) / LUA).exists()
 
 
 # ── the admin-only gate (docs/games/proposals/gmod-admin-only.md) ─────────────
 
-@needs_git
+@needs_tools
 def test_the_admin_gate_lets_only_the_captain_in_and_is_written_once(tmp_path, origin):
-    refresh(tmp_path, origin.as_uri())
+    refresh(tmp_path, origin.url)
     gate = tmp_path / "data" / "garrysmod" / "addons" / "skippy-admin-only" / "lua" / "autorun" / "server" / "sv_admin_only.lua"
     text = gate.read_text(encoding="utf-8")
     assert '["76561197989151002"] = true' in text and text.count("= true") == 1      # the Captain is the only admin
     assert 'hook.Add("CheckPassword"' in text and "return false" in text
     assert "lua/autorun/server" in gate.as_posix()
     mtime = gate.stat().st_mtime_ns
-    refresh(tmp_path, origin.as_uri())                                             # the next boot: same content, same file times
+    refresh(tmp_path, origin.url)                                                  # the next boot: same content, same file times
     assert gate.stat().st_mtime_ns == mtime
     assert not installed(tmp_path).joinpath("lua", "autorun", "server", "sv_admin_only.lua").exists()   # the Mentat addon stays separate

@@ -6,14 +6,16 @@ archive comes through the bridge's /memory door) and Mentat's research log. How 
 skippy-pc, refreshed at the start of each search (only new or changed files are read, only new passages embedded), then
 bge-reranker-v2-m3 reads the best 30 and the best `k` come back. The benchmark that chose those two: docs/search-speech-popups.md.
 
-A pop-up (docs/popups.md): the models are loaded for a search and unloaded after it, so between searches this holds no GPU memory.
-The home reporter runs a search under its GPU lock with Ollama unloaded first (vram_gb in popups.json). Everything stays on skippy-pc:
-the index, the models, the text. The only thing that leaves is the answer to the Captain's own question (the entry is admin-only).
+A pop-up (docs/popups.md) whose two models stay RESIDENT on skippy-pc's card (the Captain's choice, 2026-10-24: ~2.4 GB, so a search
+takes seconds instead of the ~5 minutes that loading them through Docker's VM cost each time). They are loaded at start, one at a time,
+each only when the card has the model plus MARGIN_GB free (a full card spills into Docker's 8 GB VM and freezes it); if Ollama is holding
+the room, it is asked once to unload, as the reporter does before a picture, and reloads around them on the next chat. Until both are
+in, a search loads what it needs for itself (on the card if there's room, else on the CPU) and lets go of it after. Everything stays on
+skippy-pc: the index, the models, the text. The only thing that leaves is the answer to the Captain's own question (admin-only).
 
-  GET  /health    {"ready", "loaded": false, "passages": {...per source}, "device"}
+  GET  /health    {"ready", "loaded", "models": "resident" | why not yet, "passages": {...per source}, "device"}
   POST /run       {"args": {"query", "k"?, "sources"?, "format"?: "text" | "json"}} -> text/plain or application/json
-  POST /refresh   bring the index up to date without a question (the first build after a deploy; uses the card outside the reporter's
-                  lock, so run it by hand, not from a job)
+  POST /refresh   bring the index up to date without a question (the first build after a deploy)
 """
 from __future__ import annotations
 
@@ -48,8 +50,111 @@ LABELS = {"agent": "private Skippy conversation", "memory": "Skippy Memory", "me
 EXCERPT = 900
 MAX_BODY = 100_000
 
+RESIDENT = os.environ.get("SEARCH_RESIDENT", "1") != "0"
+MODEL_GB = 1.3                     # one fp16 model on the card with its working memory (the benchmark: 1.2 GB peak each)
+MARGIN_GB = float(os.environ.get("VRAM_MARGIN_GB", "1.5"))       # what must stay free after a load (tts-studio keeps the same)
+RETRY_S = 60
+OLLAMA = os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/")
+
 _job = threading.Lock()
 _index: index_mod.Index | None = None
+
+
+def _cuda() -> bool:
+    try:
+        import torch
+        return DEVICE != "cpu" and torch.cuda.is_available()
+    except ImportError:
+        return False
+
+
+def free_gib() -> float:
+    """The card's free memory as nvidia-smi sees it (the whole card: Windows' own use, every container, Ollama). Not torch's
+    mem_get_info: under WSL a fresh process was told 14.7 GB free when the card had 6.0 GB (2026-10-24), which would let a load
+    overfill it. torch only when nvidia-smi isn't there."""
+    import subprocess
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"], capture_output=True,
+                             text=True, timeout=10).stdout.split()
+        return float(out[0]) / 1024
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        import torch
+        return torch.cuda.mem_get_info()[0] / 2**30
+
+
+def ollama_unload() -> None:
+    """Ask Ollama to let go of its models (reporter.free_gpu does the same before a picture); it reloads on its next chat."""
+    try:
+        with urllib.request.urlopen(f"{OLLAMA}/api/ps", timeout=5) as r:
+            loaded = json.loads(r.read()).get("models") or []
+        for m in loaded:
+            body = json.dumps({"model": m.get("name"), "keep_alive": 0}).encode()
+            urllib.request.urlopen(urllib.request.Request(f"{OLLAMA}/api/generate", data=body, method="POST",
+                                                          headers={"Content-Type": "application/json"}), timeout=60).read()
+        print(json.dumps({"event": "asked_ollama_to_unload", "models": len(loaded)}), flush=True)
+    except (OSError, ValueError):
+        pass
+
+
+class Models:
+    """The embedder and the reranker: resident once loaded, else borrowed for one search."""
+
+    def __init__(self):
+        self.emb = None
+        self.rk = None
+        self.state = "not loaded yet"
+
+    def loaded(self) -> bool:
+        return self.emb is not None and self.rk is not None
+
+    @staticmethod
+    def _room() -> bool:
+        return _cuda() and free_gib() >= MODEL_GB + MARGIN_GB
+
+    def load_resident(self, sleep=time.sleep, tries: int = 0) -> None:
+        """Load both onto the card and keep them; wait (asking Ollama once) while there's no room. `tries` > 0 gives up after that
+        many waits (the tests); 0 waits as long as it takes."""
+        import models
+        asked, waits = False, 0
+        while not self.loaded():
+            if not _cuda():
+                self.state = "no card here: each search loads the models on the CPU"
+                return
+            if self._room():
+                if self.emb is None:
+                    self.emb = models.Embedder("bge", "cuda", path=EMBED_DIR)
+                else:
+                    self.rk = models.Reranker("bge", "cuda", path=RERANK_DIR)
+                continue
+            if not asked and waits >= 1:
+                ollama_unload()
+                asked = True
+            self.state = f"waiting for room on the card ({free_gib():.1f} GB free, {MODEL_GB + MARGIN_GB:.1f} needed)"
+            waits += 1
+            if tries and waits >= tries:
+                return
+            sleep(RETRY_S)
+        self.state = "resident"
+        print(json.dumps({"event": "models_resident", "free_gib_after": round(free_gib(), 1)}), flush=True)
+
+    def _borrow_device(self) -> str:
+        return "cuda" if self._room() else "cpu"
+
+    def embedder(self):
+        """(the embedder, whether it must be closed after this search)."""
+        if self.emb is not None:
+            return self.emb, False
+        import models
+        return models.Embedder("bge", self._borrow_device(), path=EMBED_DIR), True
+
+    def reranker(self):
+        if self.rk is not None:
+            return self.rk, False
+        import models
+        return models.Reranker("bge", self._borrow_device(), path=RERANK_DIR), True
+
+
+MODELS = Models()
 
 
 def the_index() -> index_mod.Index:
@@ -99,41 +204,45 @@ def archive_extras() -> list:
     return out
 
 
-def refresh(embedder_box: dict) -> dict:
-    import models
-
+def refresh(box: dict) -> dict:
+    """Bring the index up to date; the embedder is only fetched when something is new. `box` keeps it for the search that follows."""
     def embed(texts):
-        if "e" not in embedder_box:
-            embedder_box["e"] = models.Embedder("bge", DEVICE, path=EMBED_DIR)
-        return embedder_box["e"].encode(texts)
+        if "e" not in box:
+            box["e"] = MODELS.embedder()
+        return box["e"][0].encode(texts)
     return the_index().refresh(sources(), embed, archive_extras())
 
 
+def _release(pair) -> None:
+    model, borrowed = pair
+    if borrowed:
+        model.close()
+
+
 def search(query: str, k: int = 6, only: set[str] | None = None) -> dict:
-    import models
     t0 = time.time()
     box: dict = {}
     try:
         report = refresh(box)
-        emb = box.get("e") or models.Embedder("bge", DEVICE, path=EMBED_DIR)
-        box["e"] = emb
-        cands = the_index().candidates(emb.encode([query], query=True)[0], index_mod.RERANK_K, only)
+        if "e" not in box:
+            box["e"] = MODELS.embedder()
+        cands = the_index().candidates(box["e"][0].encode([query], query=True)[0], index_mod.RERANK_K, only)
     finally:
         if "e" in box:
-            box["e"].close()
+            _release(box["e"])
     t1 = time.time()
     if cands:
-        rk = models.Reranker("bge", DEVICE, path=RERANK_DIR)
+        pair = MODELS.reranker()
         try:
-            scores = rk.score(query, [f"{c['title']}\n{c['text']}" for c in cands])
+            scores = pair[0].score(query, [f"{c['title']}\n{c['text']}" for c in cands])
         finally:
-            rk.close()
-        for c, s in zip(cands, scores):
-            c["score"] = round(float(s), 4)
+            _release(pair)
+        for c, sc in zip(cands, scores):
+            c["score"] = round(float(sc), 4)
         cands.sort(key=lambda c: -c["score"])
     t2 = time.time()
     timing = {"refresh_s": report["seconds"], "new_passages": report["passages_new"], "search_s": round(t1 - t0, 2),
-              "rerank_s": round(t2 - t1, 2)}
+              "rerank_s": round(t2 - t1, 2), "resident": MODELS.loaded()}
     print(json.dumps({"event": "search", **timing, "candidates": len(cands)}), flush=True)   # never the question: it's his
     return {"query": query, "results": cands[:k], "timing": timing}
 
@@ -171,8 +280,8 @@ def health() -> dict:
     except Exception:  # noqa: BLE001 - an unreadable index is "not ready", not a crash
         passages = None
     present = [n for n, r in ROOTS.items() if r.is_dir()]
-    return {"ready": bool(weights and passages is not None and present), "loaded": False, "weights": weights,
-            "passages": passages, "sources": present, "device": DEVICE}
+    return {"ready": bool(weights and passages is not None and present), "loaded": MODELS.loaded(), "models": MODELS.state,
+            "weights": weights, "passages": passages, "sources": present, "device": DEVICE}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -213,7 +322,7 @@ class Handler(BaseHTTPRequestHandler):
                     report = refresh(box)
                 finally:
                     if "e" in box:
-                        box["e"].close()
+                        _release(box["e"])
                 return self._send(200, json.dumps({**report, "passages": the_index().count()}).encode())
             found = search(query, k, only)
         except Exception as exc:  # noqa: BLE001 - one bad search must not take the service down
@@ -233,4 +342,6 @@ def serve(port: int) -> ThreadingHTTPServer:
 
 
 if __name__ == "__main__":
+    if RESIDENT:
+        threading.Thread(target=MODELS.load_resident, name="resident-models", daemon=True).start()
     serve(int(os.environ.get("PORT", "47430"))).serve_forever()

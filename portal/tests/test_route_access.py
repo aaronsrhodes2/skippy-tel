@@ -31,6 +31,7 @@ REGISTRY = {
     **{e: ADMIN_ONLY for e in (
         "admin.autoconfigure", "admin.discord_setup", "admin.friends_remove", "admin.friends_save", "admin.index", "admin.logs",
         "admin.module_switch", "admin.requests_dismiss", "admin.restart", "admin.settings", "recovery.repair", "recovery.state_json", "server_admin.fragment",
+        "status.page", "status.state_json", "status.heal", "status.repair", "status.logs", "status.probe", "car.page", "car.state",
         "me.index", "me.mcp_ask", "me.mcp_result", "me.pair_home", "me.toggle_experiment", "me.workshop_events", "me.workshop_history", "me.workshop_history_result",
         "me.workshop_image", "me.workshop_new_folder", "me.workshop_new_folder_result", "me.workshop_notify", "me.workshop_resync", "me.workshop_send", "me.workshop_ship", "me.workshop_stop",
         "chat.memory_ask", "chat.memory_result")},
@@ -47,18 +48,20 @@ REGISTRY = {
     # members
     **{e: MEMBER for e in (
         "apps", "app_tiles", "dashboard.game", "dashboard.game_discord", "dashboard.game_live", "dashboard.games_start", "dashboard.games_stop", "dashboard.index",
-        "doomloop.page", "doomloop.game_file", "starcontrol.page", "starcontrol.game_file")},
+        "doomloop.page", "doomloop.game_file", "starcontrol.page", "starcontrol.game_file",
+        "prophesy.board", "prophesy.record_file", "prophesy.game", "prophesy.game_file")},
     # skippy-pc, CI
     **{e: MACHINE for e in (
-        "game_import_done", "game_import_download", "home_import_chunk", "home_job_done", "home_jobs", "home_media", "home_music_checkin", "home_report", "home_starter",
-        "home_telemetry", "home_workshop", "home_workshop_list", "home_patient", "home_ups", "ops_home", "tasks_run")},
+        "game_import_done", "game_import_download", "home_import_chunk", "home_job_done", "home_jobs", "home_media", "home_music_checkin", "home_deploys", "home_report", "home_starter",
+        "home_prophesy_put", "home_prophesy_finish",
+        "home_telemetry", "home_workshop", "home_workshop_list", "home_patient", "home_ups", "home_core_report", "home_logs", "ops_home", "tasks_run")},
     "telemetry_tap": BEACON,
     # public: sign-in, the front door, static and informational pages, the public experiments (free local compute, rate limited)
     **{e: PUBLIC for e in (
         "auth.callback", "auth.login", "auth.logout", "auth.unauthorized", "health", "version", "index", "privacy", "request_access",
         "site_icons", "site_manifest", "legacy_bilby", "dashboard.legacy_dashboard", "music.player_manifest", "video.video_manifest",
-        "doomloop.version", "starcontrol.version", "play_index", "orion_trail", "radiance_probe",
-        "experiments.benchmark", "experiments.double_slit", "experiments.index", "experiments.mentat_call", "experiments.mentat_page",
+        "doomloop.version", "prophesy.arm_version", "starcontrol.version", "play_index", "orion_trail", "radiance_probe",
+        "experiments.benchmark", "experiments.minebench", "experiments.double_slit", "experiments.index", "experiments.mentat_call", "experiments.mentat_page",
         "experiments.mentat_tools", "experiments.nbody", "experiments.radiance_file", "experiments.radiance_index",
         "experiments.weapon_vs_armor", "experiments.wva_catalog", "experiments.wva_solve")},
 }
@@ -108,7 +111,7 @@ def test_every_route_is_classified_and_nothing_stale_is_listed(world):
 
 def test_anything_under_admin_or_me_or_that_can_reach_the_captains_private_data_is_admin_only():
     for endpoint, cls in REGISTRY.items():
-        if endpoint.startswith(("admin.", "me.", "recovery.", "server_admin.")):
+        if endpoint.startswith(("admin.", "me.", "recovery.", "server_admin.", "status.")):
             assert cls == ADMIN_ONLY, endpoint
 
 

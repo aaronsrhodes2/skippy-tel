@@ -1,5 +1,5 @@
 {
-  "_doc": "The search-speech pop-ups (docs/popups.md; benchmarks and choices: docs/search-speech-popups.md). Containers: compose.yml in this folder.",
+  "_doc": "The search-speech pop-ups (docs/popups.md; benchmarks and choices: docs/search-speech-popups.md). Containers: compose.yml in this folder. search_memory's two models stay resident on the card (~2.4 GB, app.py Models), so it takes no GPU lock (vram_gb 0).",
   "popups": [
     {
       "name": "search_memory",
@@ -12,17 +12,38 @@
       "inputs": {
         "type": "object",
         "properties": {
-          "query": {"type": "string", "description": "The question, in the Captain's own words: what was said, decided, built or asked about."},
-          "k": {"type": "integer", "description": "How many passages to bring back, 1-20 (default 6)."},
-          "sources": {"type": "array", "items": {"type": "string", "enum": ["agent", "memory", "mentat"]},
-                      "description": "Only these: agent (the private Skippy's conversations), memory (the Skippy Memory archive of every AI chat), mentat (Mentat's research log). Leave out for all three."}
+          "query": {
+            "type": "string",
+            "description": "The question, in the Captain's own words: what was said, decided, built or asked about."
+          },
+          "k": {
+            "type": "integer",
+            "description": "How many passages to bring back, 1-20 (default 6)."
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "agent",
+                "memory",
+                "mentat"
+              ]
+            },
+            "description": "Only these: agent (the private Skippy's conversations), memory (the Skippy Memory archive of every AI chat), mentat (Mentat's research log). Leave out for all three."
+          }
         },
-        "required": ["query"],
+        "required": [
+          "query"
+        ],
         "additionalProperties": false
       },
-      "outputs": ["text/plain", "application/json"],
-      "est_seconds": 30,
-      "vram_gb": 3,
+      "outputs": [
+        "text/plain",
+        "application/json"
+      ],
+      "est_seconds": 20,
+      "vram_gb": 0,
       "audience": "admin",
       "description": "Searches the Captain's own past by meaning, not keywords: his conversations with the private Skippy, the Skippy Memory archive of his chats with every AI, and Mentat's research log. Returns the best matching passages, each with its source file, date and place in the conversation. Use it when he asks what he said, decided or worked on before ('what did we decide about...', 'when did I ask about...'). Runs entirely on skippy-pc."
     },
@@ -37,13 +58,25 @@
       "inputs": {
         "type": "object",
         "properties": {
-          "format": {"type": "string", "enum": ["text", "json"], "description": "text (default): a readable transcript; json: every turn with its times."}
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "text (default): a readable transcript; json: every turn with its times."
+          }
         },
         "additionalProperties": false
       },
-      "media_in": ["audio/*"],
+      "media_in": [
+        "audio/*"
+      ],
       "media_required": true,
-      "outputs": ["text/plain", "application/json"],
+      "outputs": [
+        "text/plain",
+        "application/json"
+      ],
       "est_seconds": 60,
       "vram_gb": 0,
       "audience": "admin",

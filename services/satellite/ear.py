@@ -135,55 +135,38 @@ class Ear:
 
 
 # ── the program ──
-def load_env(path: str | None = None) -> dict:
-    env = dict(os.environ)
-    for candidate in (path, os.environ.get("SKIPPY_ENV"), "G:/My Drive/vault/.env"):
-        if candidate and Path(candidate).is_file():
-            for line in Path(candidate).read_text(encoding="utf-8", errors="replace").splitlines():
-                if "=" in line and not line.lstrip().startswith("#"):
-                    k, v = line.split("=", 1)
-                    env.setdefault(k.strip(), v.strip().strip("\"'"))
-            break
-    return env
+from homectl import load_env  # noqa: E402,F401 — the vault .env; it lives in homectl so the house loads without the audio libraries
+
+
+def brain_client(env: dict, who: str = "ear"):
+    """The voice's brain: Skippy Core's chat model (local, free), through the same Anthropic SDK pointed at Core (SKIPPY_CORE_URL and
+    SKIPPY_CORE_API_KEY in the vault, as portal/brains.py does). Never a paid model: Claude is only for "put on your thinking cap".
+    -> (client, model)."""
+    import anthropic                                                # noqa: PLC0415
+    url, key = env.get("SKIPPY_CORE_URL", ""), env.get("SKIPPY_CORE_API_KEY", "")
+    if not url or not key:
+        sys.exit(f"{who}: SKIPPY_CORE_URL and SKIPPY_CORE_API_KEY must be in the vault .env (or the environment)")
+    return anthropic.Anthropic(base_url=url.rstrip("/"), api_key=key), env.get("SATELLITE_MODEL", "skippy-chat")
 
 
 def build(env: dict):
-    import anthropic                                                # noqa: PLC0415
     from brain import Brain                                         # noqa: PLC0415
     from timers import Timers                                       # noqa: PLC0415
     from voicegate import Gate                                      # noqa: PLC0415
     token = env.get("SKIPPY_HOME_TOKEN", "")
-    key = env.get("ANTHROPIC_API_KEY", "")
-    if not token or not key:
-        sys.exit("ear: SKIPPY_HOME_TOKEN and ANTHROPIC_API_KEY must be in the vault .env (or the environment)")
+    if not token:
+        sys.exit("ear: SKIPPY_HOME_TOKEN must be in the vault .env (or the environment)")
+    client, model = brain_client(env, "ear")
     timers = Timers()
     gate = Gate(env.get("SATELLITE_GATE", "http://127.0.0.1:3007"), token)
-    brain = Brain(anthropic.Anthropic(api_key=key), env.get("SATELLITE_MODEL", "claude-haiku-4-5"), timers, hass=build_house(env))
+    brain = Brain(client, model, timers, hass=build_house(env))
     return gate, brain, timers
 
 
 def build_house(env: dict):
-    """The house: what Skippy can control, through every backend that is set up (None when none is). hub.py shares it across rooms.
-    HomeKit (paired with homectl.py), Matter (skippy-core's controller: MATTER_URL) and Home Assistant (HASS_URL + HASS_TOKEN)."""
-    from homectl import matter_path, store_path                     # noqa: PLC0415
-    from homekit import HomeKit, Store                              # noqa: PLC0415
-    from house import Combined                                      # noqa: PLC0415
-    sensitive = env.get("HASS_SENSITIVE") == "1"
-    parts = []
-    if Store(store_path(env)).load()["devices"]:                    # lights and switches paired with homectl.py: HomeKit, natively
-        kit = HomeKit(Store(store_path(env)), sensitive=sensitive)
-        kit.states()                                                # learn what is there now, so keep-warm knows what to ping
-        kit.keep_warm(float(env.get("HOMEKIT_KEEP_WARM", "30")))
-        parts.append(kit)
-    if env.get("MATTER_URL"):                                       # Matter, through skippy-core's controller (core/compose.matter.yml)
-        from matter import Matter, Names                            # noqa: PLC0415
-        parts.append(Matter(env["MATTER_URL"], Names(matter_path(env)), sensitive=sensitive))
-    if env.get("HASS_URL") and env.get("HASS_TOKEN"):               # or Home Assistant, if he runs one (the vault holds both)
-        from hass import Hass                                       # noqa: PLC0415
-        parts.append(Hass(env["HASS_URL"], env["HASS_TOKEN"], sensitive=sensitive))
-    if not parts:
-        return None
-    return parts[0] if len(parts) == 1 else Combined(parts, sensitive=sensitive)
+    """The house (homectl.build_house): here so the listener and hub.py keep calling ear.build_house."""
+    from homectl import build_house as build                     # noqa: PLC0415
+    return build(env)
 
 
 def build_spotter(env: dict, log=print):

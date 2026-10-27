@@ -61,8 +61,9 @@ def inside(path: str, root: str) -> bool:
 
 
 class Lane:
-    def __init__(self, lane: str, deploy: str = "", temps=None):
+    def __init__(self, lane: str, deploy: str = "", temps=None, deny_read=()):
         self.lane = norm(lane, lane)
+        self.deny_read = [norm(d, lane) for d in deny_read if isinstance(d, str) and d]      # folders no tool may touch, not even to read
         self.deploy = norm(deploy, lane) if deploy else ""
         temps = temps if temps is not None else [tempfile.gettempdir(), os.environ.get("TEMP", ""), os.environ.get("TMP", ""), "/tmp"]
         self.temps = [norm(t, lane) for t in temps if t]
@@ -73,6 +74,10 @@ class Lane:
 
     def check(self, tool: str, args: dict) -> str | None:
         """None if allowed, else the reason it isn't."""
+        if self.deny_read:
+            for p in self._touched(tool, args):
+                if any(inside(norm(p, self.lane), d) for d in self.deny_read):
+                    return f"{p} is in a folder this project may not read or change (it belongs to another run, which this one must not see)."
         if tool in FILE_TOOLS:
             path = str(args.get("file_path") or args.get("notebook_path") or "")
             if path and not self.ok_to_write(path):
@@ -86,6 +91,18 @@ class Lane:
             if reason:
                 return reason
         return None
+
+    @staticmethod
+    def _touched(tool: str, args: dict):
+        """The paths a tool call names: its file arguments, and for a shell command every path-like word and every cd target."""
+        for key in ("file_path", "notebook_path", "path", "pattern"):
+            if isinstance(args.get(key), str) and re.match(r"^(?:[A-Za-z]:[\\/]|/[a-zA-Z]/|~[\\/])", args[key]):
+                yield args[key]
+        if tool == "Bash":
+            cmd = str(args.get("command") or "")
+            yield from _paths(cmd)
+            for m in _MOVE.finditer(cmd):
+                yield m.group(1).strip("\"'")
 
     def _segment(self, seg: str) -> str | None:
         for m in _MOVE.finditer(seg):

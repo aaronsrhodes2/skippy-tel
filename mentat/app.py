@@ -44,11 +44,14 @@ import urllib.request
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as CallTimeout
 
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS
 from mcp.types import LATEST_PROTOCOL_VERSION
 
+import cascade_stage
+import ready as ready_mod
 import research
+import router_stage
 import wva
 
 # Natural-language / stateful tools: need the local Ollama translator or keep
@@ -166,13 +169,42 @@ def _qwen_ready() -> bool:
         return False
 
 
+def _router_guard(name: str, args: dict) -> str | None:
+    """The same code guard /tools applies, for a plan the router wrote: an argument that looks like code is a router miss, nothing runs."""
+    return "That input looks like code, not maths." if unsafe_arg(args_for_guard(name, args)) is not None else None
+
+
 def _ask(question: str, given: dict | None = None) -> dict:
     from sigma_ground.mcp.tools.simulation import simulate
     if USE_LLM and not _qwen_ready():
         # The Captain's rule: the Qwen-backed Mentat fails rather than answer without Qwen.
         raise QwenUnavailable("Qwen (Ollama) is unreachable, so Mentat won't answer without it.")
+    miss: dict = {}
+    if cascade_stage.enabled() and cascade_stage.MODE == "before" and not given:
+        # Opt-in (MENTAT_CASCADE=before): the benchmark's deterministic cascade ahead of the router, as the harness measured it (140 vs the
+        # router's 109 on the 150). A miss falls to the router with its reason in inputs.router_miss["cascade"].
+        hit = cascade_stage.answer(question, miss=miss)
+        if hit is not None:
+            return hit
+    if router_stage.enabled() and USE_LLM and not given:
+        # Opt-in (MENTAT_ROUTER_MODEL): the trained router goes first. On the 150 benchmark questions the bare keyword shortcut was wrong as often as right
+        # (it answered "escape velocity" with surface gravity), so it does not get to pre-empt the router. A miss (decline, clarification, error, router
+        # down) falls through to the keyword + Qwen translator, exactly as before the router existed, and its reason travels with the fallback's
+        # answer (inputs.router_miss) into the research log.
+        routed = router_stage.answer(question, server=server, tools=TOOLS, ollama_url=OLLAMA_URL, guard=_router_guard, miss=miss)
+        if routed is not None:
+            return routed
+    if cascade_stage.enabled() and cascade_stage.MODE == "after" and not given:
+        # Opt-in (MENTAT_CASCADE=after): the cascade only where the router missed.
+        hit = cascade_stage.answer(question, miss=miss)
+        if hit is not None:
+            return hit
     result = simulate(question, use_llm=USE_LLM, given=given or None).to_dict()
     result["interpreter"] = "keywords + qwen" if USE_LLM else "keywords"
+    if miss and isinstance(result.get("inputs"), dict):
+        result["inputs"]["router_miss"] = miss
+    elif miss:
+        result["inputs"] = {"router_miss": miss}
     return result
 
 
@@ -192,9 +224,69 @@ def _call(name: str, args: dict):
     return result
 
 
+READY = ready_mod.Readiness("mentat")
+_CHECK_EVERY_S = 30
+_checks: dict[str, tuple[float, bool, str]] = {}
+
+
+def _cached(name: str, fn) -> tuple[bool, str]:
+    """A dependency check, repeated at most every _CHECK_EVERY_S (a health probe must stay cheap, never pile work on the thing it asks about)."""
+    at, ok, why = _checks.get(name, (0.0, False, ""))
+    # (never checked = check now: on a fresh Cloud Run instance the monotonic clock starts near 0, so "0.0" looked fresh and /health
+    # said 503 "not ready" for its first 30 s without asking anything)
+    if name not in _checks or time.monotonic() - at > _CHECK_EVERY_S:
+        try:
+            ok, why = fn()
+        except Exception as e:  # noqa: BLE001 — a check that raises is a failed check
+            ok, why = False, f"{type(e).__name__}"
+        _checks[name] = (time.monotonic(), ok, why)
+    return ok, why
+
+
+def _tools_answer() -> tuple[bool, str]:
+    """Not "the process is up": a real physics call comes back right (the Sun's Schwarzschild radius is 2953 m)."""
+    got = _call("schwarzschild_radius", {"mass_kg": 1.989e30})
+    value = got.get("value") if isinstance(got, dict) else None
+    if isinstance(value, (int, float)) and abs(value - 2953.25) < 5:
+        return True, ""
+    return False, "the physics tools answered a known question wrongly"
+
+
+def _router_loaded() -> tuple[bool, str]:
+    from sigma_ground.materia import translator as tr
+    with urllib.request.urlopen(f"{OLLAMA_URL or tr.OLLAMA_URL}/api/tags", timeout=3) as r:
+        names = [m.get("name", "") for m in json.loads(r.read()).get("models", [])]
+    return (any(n.startswith(router_stage.MODEL) for n in names), "the router model isn't offered by skippy-core")
+
+
+@app.before_request
+def _job_begins():
+    if request.method == "POST":                       # a call that does work (a tool, a question, a game solve): counted while it runs
+        g._job = READY.begin(request.path)
+
+
+@app.teardown_request
+def _job_ends(_exc):
+    token = g.pop("_job", None)
+    if token:
+        READY.end(token)
+
+
 @app.get("/health")
 def health():
-    return "ok"
+    """Ready, accepting, and what it is doing (PLATINUM section 24): 200 only when it can take a question RIGHT NOW. The physics tools get a
+    real known question; on skippy-core (MENTAT_USE_LLM) the chat model and the trained router must be offered by skippy-core too."""
+    ok, why = _cached("tools", _tools_answer)
+    deps = {}
+    if USE_LLM:
+        q = _cached("llm", lambda: (_qwen_ready(), "skippy-core doesn't offer the chat model"))
+        deps["llm"] = {"ready": q[0], "detail": "" if q[0] else q[1]}
+        if router_stage.enabled():
+            r = _cached("router", _router_loaded)
+            deps["router"] = {"ready": r[0], "detail": "" if r[0] else r[1]}
+    rep = READY.report(ready=ok, detail=why, deps=deps, instance=os.environ.get("MENTAT_INSTANCE", "cloud"), tools=len(TOOLS),
+                       mode="llm" if USE_LLM else "keywords")
+    return jsonify(rep), ready_mod.status_code(rep)
 
 
 @app.get("/version")
@@ -356,6 +448,36 @@ MCP_TOOLS = [{"name": t.name, "description": (t.description or "").strip(), "inp
              for t in sorted(TOOLS.values(), key=lambda t: t.name)]
 MAX_MCP_BYTES = MAX_ARGS_BYTES + 4_000     # the arguments plus the JSON-RPC envelope
 
+# What an MCP client is SHOWN is three tools, not the 220+: listing every one costs a chat about 73,000 tokens of its context, and the research log shows
+# almost every real call is a plain question (958 of 989 in October 2026). The full set is still here: POST /tools/<name> serves each one, `find_tools`
+# searches them, `call_tool` runs one by name, and tools/call still accepts any real tool name directly (a client with an old tool list keeps working).
+# MENTAT_MCP_FULL=1 brings the long list back in tools/list for a client that wants it.
+MCP_META = [
+    {"name": "ask", "description": "Ask a physics, chemistry or maths question in plain words (with the numbers you were given). Mentat finds the right "
+                                   "calculation, runs it and answers with the value, unit, formula and source. Every physical number you report must come "
+                                   "from here with its source; never calculate or recall one yourself. If it asks for more input, ask the person: do not "
+                                   "fill in inputs, and pass `given` only with values they agreed to.",
+     "inputSchema": {"type": "object", "properties": {
+         "question": {"type": "string", "description": "the question, in plain words"},
+         "given": {"type": "object", "description": "inputs the person confirmed (name to number or quantity text); only after they agreed"}},
+         "required": ["question"]}},
+    {"name": "find_tools", "description": "Search Mentat's individual tools (about 220) by a word in the name, description or domain (for example 'orbit', "
+                                          "'optics', 'thermo'). Returns each match's name and argument names, for call_tool.",
+     "inputSchema": {"type": "object", "properties": {"search": {"type": "string", "description": "a word to match (empty lists the domains)"}}}},
+    {"name": "call_tool", "description": "Run one individual Mentat tool by name with exact arguments (find the name and arguments with find_tools). "
+                                          "Prefer `ask` unless you already know the tool.",
+     "inputSchema": {"type": "object", "properties": {
+         "name": {"type": "string", "description": "the tool's name, for example schwarzschild_radius"},
+         "arguments": {"type": "object", "description": "the tool's arguments, as find_tools shows them"}}, "required": ["name"]}},
+]
+MCP_META_NAMES = {t["name"] for t in MCP_META}
+# The cloud copy has no language model (keywords only): its `ask` understands only a few scenarios, so it says so up front and the model goes
+# straight to find_tools + call_tool for anything else, instead of trusting an `ask` that cannot answer.
+KEYWORDS_ONLY_NOTE = ("On THIS server `ask` has no language model and understands only a few simple scenarios (a falling object's impact, "
+                      "projectile range). For anything else, use find_tools to find the calculation and call_tool to run it.")
+if not USE_LLM:
+    MCP_META[0] = {**MCP_META[0], "description": MCP_META[0]["description"] + " " + KEYWORDS_ONLY_NOTE}
+
 
 def _mcp_instructions() -> str | None:
     """sigma-ground's own rules for the model (cite every number's source, never guess)."""
@@ -405,6 +527,59 @@ def _mcp_call_reply(name: str, args, ip: str) -> dict:
         return _tool_reply(str(exc)[:2000], True)
 
 
+def _mcp_ask(args, ip: str) -> dict:
+    """The `ask` tool: /ask's own path (rate limit, timeout, the Qwen rule), kept for research as an ask."""
+    started = time.monotonic()
+    question = str(args.get("question") or "").strip()[:2000]
+    given = args.get("given")
+    if not question:
+        return _tool_reply("ask needs a question", True)
+    if not _valid_given(given):
+        return _tool_reply("given must be an object of input name to number or quantity text (the clarification's follow_up.given, as Mentat sent it)", True)
+    reply, status = _guarded_reply("ask", _ask, question, given)
+    extra = {}
+    if isinstance(reply.get("result"), dict):
+        extra = {"interpreter": reply["result"].get("interpreter"), "understood": research.understood(reply["result"])}
+    keep("/mcp", "ask", {"question": question, "given": given}, reply, status, started, **extra)
+    if reply.get("ok"):
+        result = reply["result"]
+        if not USE_LLM and isinstance(result, dict) and result.get("value") is None:
+            return _tool_reply(json.dumps(result, default=str) + "\n\n" + KEYWORDS_ONLY_NOTE)
+        return _tool_reply(json.dumps(result, default=str))
+    return _tool_reply(json.dumps(reply.get("detail") or reply.get("error")), True)
+
+
+def _mcp_find_tools(args) -> dict:
+    needle = str(args.get("search") or "").strip().lower()[:80]
+    rows = sorted(TOOLS.values(), key=lambda t: t.name)
+    if not needle:
+        domains = {}
+        for t in rows:
+            domains[domain_of(t.name)] = domains.get(domain_of(t.name), 0) + 1
+        return _tool_reply("Domains (search one by name): " + ", ".join(f"{d} ({n})" for d, n in sorted(domains.items())))
+    hits = [t for t in rows if needle in t.name.lower() or needle in (t.description or "").lower() or needle == str(domain_of(t.name)).lower()]
+    if not hits:
+        return _tool_reply(f"No Mentat tool matches {needle!r}.")
+    lines = [f"{len(hits)} of {len(rows)} tools match {needle!r} (showing up to 40):"]
+    for t in hits[:40]:
+        props = ", ".join(((t.inputSchema or {}).get("properties") or {}))
+        lines.append(f"- {t.name}({props}): {' '.join((t.description or '').split())[:140]}")
+    return _tool_reply("\n".join(lines))
+
+
+def _mcp_meta(name: str, args, ip: str) -> dict:
+    if not isinstance(args, dict):
+        return _tool_reply("arguments must be a JSON object", True)
+    if name == "ask":
+        return _mcp_ask(args, ip)
+    if name == "find_tools":
+        return _mcp_find_tools(args)
+    target = str(args.get("name") or "")                      # call_tool
+    if target not in TOOLS:
+        return _tool_reply(f"There is no public tool named {target!r}; search with find_tools.", True)
+    return _mcp_call(target, args.get("arguments") or {}, ip)
+
+
 def _mcp_handle(msg, ip: str) -> dict | None:
     """One JSON-RPC message → its reply; None for a notification (or a client's reply)."""
     if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0":
@@ -425,9 +600,11 @@ def _mcp_handle(msg, ip: str) -> dict | None:
     if method == "ping":
         return _rpc_result(id_, {})
     if method == "tools/list":
-        return _rpc_result(id_, {"tools": MCP_TOOLS})
+        return _rpc_result(id_, {"tools": MCP_TOOLS if os.environ.get("MENTAT_MCP_FULL") == "1" else MCP_META})
     if method == "tools/call":
         name = params.get("name")
+        if name in MCP_META_NAMES:
+            return _rpc_result(id_, _mcp_meta(name, params.get("arguments") or {}, ip))
         if name not in TOOLS:
             return _rpc_error(id_, -32602, f"no public tool named {name!r}")
         return _rpc_result(id_, _mcp_call(name, params.get("arguments") or {}, ip))

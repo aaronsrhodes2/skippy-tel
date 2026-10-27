@@ -6,11 +6,11 @@
 # It never touches a disk or partition, and never edits the bootloader (the kernel options are a separate, manual step).
 set -euo pipefail
 APPLY=0; [[ "${1:-}" == "--apply" ]] && APPLY=1
-REPO_URL="${REPO_URL:-https://github.com/aaronsrhodes2/skippy-tel.git}"
+REPO_URL="${REPO_URL:-/mnt/pc/trunk/git/skippy-tel.git}"      # the house's own git on skippy-pc, through the data trunk
 REPO_DIR="${REPO_DIR:-/opt/skippy-core/repo}"
 MODELS_ROOT="${MODELS_ROOT:-/srv/models}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUNDLE="${BUNDLE:-$HERE/skippy-tel.bundle}"          # the USB stick carries one, for a box without GitHub yet
+BUNDLE="${BUNDLE:-$HERE/skippy-tel.bundle}"          # the USB stick carries one, for a box with no data trunk yet
 OWNER="${SUDO_USER:-}"
 
 do_() { if (( APPLY )); then echo "+ $*"; "$@"; else echo "would: $*"; fi; }
@@ -49,14 +49,14 @@ step "4/5 the repo -> $REPO_DIR"
 if [[ -d "$REPO_DIR/.git" ]]; then
   echo "already cloned: $(git -C "$REPO_DIR" log --oneline -1 2>/dev/null || echo '?')"
 else
-  # The repo is private: a fresh box has no GitHub credentials, so the stick's bundle comes first. origin is then
-  # pointed at GitHub; the deployer's token (core/README.md, deployer step) is what lets later fetches through.
+  # A fresh box has no data trunk mounted yet (docs/data-trunk.md), so the stick's bundle comes first. origin is then
+  # pointed at the house's git, which the deployer reaches once the trunk is mounted.
   do_ install -d -m 0755 "$(dirname "$REPO_DIR")"
   if [[ -f "$BUNDLE" ]]; then
     do_ git clone --quiet -b main "$BUNDLE" "$REPO_DIR"
     do_ git -C "$REPO_DIR" remote set-url origin "$REPO_URL"
   else
-    echo "no bundle at $BUNDLE: cloning from GitHub (private repo: needs credentials)"
+    echo "no bundle at $BUNDLE: cloning from $REPO_URL (the data trunk must be mounted)"
     do_ git clone --quiet "$REPO_URL" "$REPO_DIR"
   fi
 fi

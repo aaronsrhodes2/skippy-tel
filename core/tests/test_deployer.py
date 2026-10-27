@@ -48,6 +48,10 @@ class Fake(dep.Deployer):
         self.ran = getattr(self, "ran", []) + [cmd]
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
+    def compose_build(self, full):
+        if not self._fake().get("build", True):
+            raise subprocess.CalledProcessError(1, "build", "", "COPY .vendor failed")
+
     def smoke(self, full):
         ok = self._fake().get("smoke", True)
         return [{"check": "chat", "ok": ok, "detail": "" if ok else "no reply"}]
@@ -74,7 +78,7 @@ def box(tmp_path):
 
     first = commit()
     git(tmp_path, "clone", "--quiet", str(origin), str(clone))
-    settings = {**dep.DEFAULTS, "REPO_DIR": str(clone), "CORE_STATE": str(tmp_path / "state"), "CI_WORKFLOW": "core.yml"}
+    settings = {**dep.DEFAULTS, "REPO_DIR": str(clone), "CORE_STATE": str(tmp_path / "state"), "QUIET": "0"}
     return Fake(settings), commit, first
 
 
@@ -84,7 +88,8 @@ def test_a_green_commit_deploys_once(box):
     assert d.deployed == [(first, "")]
     row = d.run()
     assert row["state"] == "ok" and row["detail"] == "up to date" and len(d.deployed) == 1
-    assert json.loads((d.dir / "status.json").read_text())["last_good"]["commit"] == first
+    good = json.loads((d.dir / "status.json").read_text())["last_good"]
+    assert good["commit"] == first and good["started"] <= good["at"]          # when it began, for tools/loop_timer.py
 
 
 def test_it_waits_for_ci_and_never_deploys_a_red_one(box):
@@ -122,6 +127,8 @@ def test_a_failed_build_rolls_back_but_is_retried(box):
     row = d.run()
     assert row["state"] == "rolled-back" and row["will_retry"] is True and d.running == (first, "")
     assert f"{flaky}|" not in d.state()["bad"]
+    assert d.run()["state"] == "retry-later"            # but not every two minutes
+    d.s["RETRY_S"] = "0"
     (d.repo / "fake.json").write_text("{}")             # the network is back (the fake reads the checkout)
     d._fake = lambda: {}
     assert d.run()["state"] == "ok" and d.running == (flaky, "")
@@ -157,11 +164,11 @@ def test_nothing_to_roll_back_to(box):
 
 def test_settings_file_then_environment(tmp_path, monkeypatch):
     f = tmp_path / "core.env"
-    f.write_text("# c\nCORE_FULL=chat\nGITHUB_TOKEN='t0k'\nCI_WORKFLOW=\n")
+    f.write_text("# c\nCORE_FULL=chat\nCI_LOCAL='/var/lib/ci'\n")
     for k in dep.DEFAULTS:
         monkeypatch.delenv(k, raising=False)
     s = dep.load_settings(str(f))
-    assert s["CORE_FULL"] == "chat" and s["GITHUB_TOKEN"] == "t0k" and s["CI_WORKFLOW"] == "" and s["BRANCH"] == "main"
+    assert s["CORE_FULL"] == "chat" and s["CI_LOCAL"] == "/var/lib/ci" and s["BRANCH"] == "main" and "GITHUB_TOKEN" not in s
     monkeypatch.setenv("CORE_FULL", "all")
     assert dep.load_settings(str(f))["CORE_FULL"] == "all"
     assert dep.norm_full(" coder,chat,") == "chat,coder" and dep.norm_full("chat,all") == "all"
@@ -176,44 +183,19 @@ def test_the_llm_key_reaches_render_compose_and_smoke(tmp_path, monkeypatch):
     assert d.env("")["LLM_API_KEY"] == "sk-core-abc", "every child (models.py render, compose, smoke.py) needs it"
 
 
-def test_ci_state_reads_the_newest_check_run(box, monkeypatch):
+def test_ci_state_is_this_boxs_own_ci_or_no_gate_at_all(box, tmp_path):
     d, _, _ = box
-    real = dep.Deployer(d.s, log=lambda m: None)
-    payloads = []
+    real = dep.Deployer({**d.s, "CI_LOCAL": ""}, log=lambda m: None)
+    assert real.ci_state("abc") == ("success", "no CI gate")                           # the simulator
+    gated = dep.Deployer({**d.s, "CI_LOCAL": str(tmp_path / "ci"), "CI_NAME": "skippy-tel"}, log=lambda m: None)
+    assert gated.ci_state("abc")[0] == "pending"                                        # no result yet: wait, never deploy
+    done = tmp_path / "ci" / "skippy-tel" / "results"
+    done.mkdir(parents=True)
+    (done / "abc.json").write_text(json.dumps({"state": "success", "seconds": 3}))
+    (done / "bad.json").write_text(json.dumps({"state": "failure", "jobs": [{"name": "suite", "state": "failure"}]}))
+    assert gated.ci_state("abc")[0] == "success" and gated.ci_state("bad") == ("failure", "this box's CI failed: suite")
+    assert "github" not in Path(dep.__file__).read_text(encoding="utf-8").lower().replace("docs/no-github.md", "")      # the gate reads no GitHub
 
-    class R:
-        def __init__(self, body):
-            self.body = body
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-        def read(self):
-            return json.dumps(self.body).encode()
-
-    def urlopen(req, timeout):
-        payloads.append(req.full_url)
-        return R(answer)
-
-    monkeypatch.setattr(dep.urllib.request, "urlopen", urlopen)
-    answer = {"workflow_runs": []}
-    assert real.ci_state("abc")[0] == "pending"
-    assert "/actions/workflows/core.yml/runs?head_sha=abc&event=push" in payloads[-1]
-    answer = {"workflow_runs": [{"status": "completed", "conclusion": "failure", "run_attempt": 1, "created_at": "1"},
-                                {"status": "completed", "conclusion": "success", "run_attempt": 2, "created_at": "1"}]}
-    assert real.ci_state("abc")[0] == "success", "a re-run that went green counts"
-    answer = {"workflow_runs": [{"status": "completed", "conclusion": "failure", "run_attempt": 1, "created_at": "2"}]}
-    assert real.ci_state("abc")[0] == "failure"
-    answer = {"workflow_runs": [{"status": "in_progress", "run_attempt": 1, "created_at": "3"}]}
-    assert real.ci_state("abc")[0] == "pending"
-    real.s = {**real.s, "CI_WORKFLOW": ""}
-    assert real.ci_state("abc") == ("success", "no CI gate")
-
-
-# ── repair and the doctor (the portal's one Recovery operation; skippy-core-doctor.timer) ──
 def test_repair_recreates_the_last_good_deploy_and_smoke_tests_it(box):
     d, commit, first = box
     d.run()
@@ -276,6 +258,16 @@ def test_matter_joins_the_stack_only_when_core_env_says_so(tmp_path, monkeypatch
     assert d.env("")["MATTER_ARGS"] == "--primary-interface eno1 --bluetooth-adapter 0" and d.env("")["CORE_MATTER"] == "1"
 
 
+def test_the_3d_popups_join_the_stack_only_when_core_env_says_so(tmp_path, monkeypatch):
+    for k in dep.DEFAULTS:
+        monkeypatch.delenv(k, raising=False)
+    f = tmp_path / "core.env"
+    f.write_text("CORE_GPU=1\n")
+    assert "core/popups-3d/compose.yml" not in dep.Deployer(dep.load_settings(str(f)), log=lambda m: None).compose_files()
+    f.write_text("CORE_GPU=1\nCORE_POPUPS3D=1\n")
+    assert dep.Deployer(dep.load_settings(str(f)), log=lambda m: None).compose_files()[-2:] == ["-f", "core/popups-3d/compose.yml"]
+
+
 def test_the_matter_compose_file_is_pinned_on_the_host_network_and_keeps_its_fabric():
     from pathlib import Path
     text = (Path(dep.__file__).resolve().parents[1] / "compose.matter.yml").read_text(encoding="utf-8")
@@ -283,3 +275,54 @@ def test_the_matter_compose_file_is_pinned_on_the_host_network_and_keeps_its_fab
     assert "network_mode: host" in text and "/run/dbus:/run/dbus:ro" in text
     assert "${CORE_STATE:-/var/lib/skippy-core}/matter:/data" in text and "${MATTER_ARGS:-}" in text
     assert "ports:" not in text                                                  # host network: the firewall decides (install/matter.sh)
+
+
+def test_a_failed_build_touches_nothing_and_waits_before_trying_again(box):
+    d, commit, first = box
+    d.run()
+    broken = commit(build=False)
+    row = d.run()
+    assert row["state"] == "refused" and row["stage"] == "build" and d.running == (first, "")   # no rollback, nothing redeployed
+    assert d.deployed == [(first, "")]
+    assert d.run()["state"] == "retry-later"                                                    # not every two minutes
+    d._write("retry.json", {f"{broken}|": 0})                                                   # the wait is over
+    fixed = commit()
+    assert d.run()["state"] == "ok" and d.running == (fixed, "")
+
+
+def test_it_holds_a_deploy_while_the_private_skippy_is_working(box, monkeypatch):
+    d, commit, first = box
+    d.s["QUIET"] = "1"
+    monkeypatch.setattr(dep.quiet, "busy", lambda *a, **k: True)
+    assert d.run()["state"] == "deferred" and d.running is None
+    monkeypatch.setattr(dep.quiet, "busy", lambda *a, **k: False)
+    assert d.run()["state"] == "ok" and d.running == (first, "")
+
+
+def _doctor_box(tmp_path, monkeypatch, doctor_dir=True):
+    for k in dep.DEFAULTS:
+        monkeypatch.delenv(k, raising=False)
+    repo, state = tmp_path / "repo", tmp_path / "state"
+    (repo / "core" / "deployer").mkdir(parents=True)
+    state.mkdir()
+    (repo / "core" / "deployer" / "deployer.py").write_text("# this commit's deployer\n")
+    copy = tmp_path / "doctor" / "deployer.py"
+    if doctor_dir:
+        copy.parent.mkdir()
+        copy.write_text("# yesterday's deployer, no CORE_TESLA\n")
+    f = tmp_path / "core.env"
+    f.write_text(f"REPO_DIR={repo}\nCORE_STATE={state}\nDOCTOR_COPY={copy}\n")
+    return dep.Deployer(dep.load_settings(str(f)), log=lambda m: None), copy
+
+
+def test_a_good_deploy_brings_the_doctors_copy_up_to_date(tmp_path, monkeypatch):
+    d, copy = _doctor_box(tmp_path, monkeypatch)
+    d.mark_good("abc123", "")
+    assert copy.read_text() == "# this commit's deployer\n"         # a repair from the doctor now knows the stack this deploy knows
+    assert not copy.with_name("deployer.py.new").exists()
+
+
+def test_no_doctor_folder_no_copy(tmp_path, monkeypatch):
+    d, copy = _doctor_box(tmp_path, monkeypatch, doctor_dir=False)  # CI and the simulator: nothing installed the doctor
+    d.mark_good("abc123", "")
+    assert not copy.parent.exists()

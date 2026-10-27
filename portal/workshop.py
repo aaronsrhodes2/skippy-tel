@@ -34,6 +34,8 @@ BRIEF_SILENCE_S = 300      # home silent no longer than this (a reporter restart
 WAIT_NOTE = "In line: Skippy is finishing another run first."
 STALL_S = 120              # a running task silent for this long: the link to skippy-pc broke
 WANT_S = 120               # a person's "check again" is still worth answering for this long
+_CLIENT_ID = re.compile(r"[A-Za-z0-9_-]{8,64}")          # a message id the page made (crypto.randomUUID, dashes kept or dropped)
+CLIENT_ID_KEEP_S = 900                                  # the same id within this long is the same message
 _CONV = re.compile(r"[A-Za-z0-9-]{8,64}")
 MAX_ATTACHED = 4                   # pictures that may go with one message (pasted screenshots, mostly)
 MAX_IMAGE_B64 = 1_200_000          # one picture, as base64 (the page shrinks each to about a megabyte)
@@ -146,6 +148,39 @@ MAX_PUSH = 20 * 1024 * 1024     # one push from home (POST /home/workshop/<task>
 _B64 = re.compile(r"[A-Za-z0-9+/]+={0,2}")
 
 
+# What the agent may show, by its own first bytes: a picture, a 3D model (binary glTF 2, from tools/voxel/render.py --glb), sound,
+# video, or a file to save. The chat shows each inline (an image, a model to rotate, a player) or as a one-tap download: the browser
+# is only a window, everything is made on skippy-pc (the Captain, 2026-10-25). Served as exactly that type with nosniff: never
+# anything a browser would run. The bridge's workshop_engine.image_mime has the same rules (a test keeps them equal).
+def sniff(data: bytes) -> str | None:
+    if data[:4] == b"glTF" and data[4:8] == b"\x02\x00\x00\x00":
+        return "model/gltf-binary"
+    if data[:3] == b"ID3" or (len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0):
+        return "audio/mpeg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return "audio/wav"
+    if data[:4] == b"OggS":
+        return "audio/ogg"
+    if data[:4] == b"fLaC":
+        return "audio/flac"
+    if data[4:8] == b"ftyp":
+        return "video/mp4"
+    if data[:4] == b"MThd":
+        return "audio/midi"
+    if data[:4] == b"PK\x03\x04":
+        return "application/zip"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    return None
+
+
+MAGICS = ("image/png", "image/jpeg", "model/gltf-binary", "audio/mpeg", "audio/wav", "audio/ogg", "audio/flac", "video/mp4",
+          "audio/midi", "application/zip")
+SAVE_ONLY = ("audio/midi", "application/zip")            # nothing a browser plays: a download card
+
+
 def image_event(event) -> tuple[dict, bytes] | None:
     """A screenshot from the bridge ({"t": "image", mime, name, b64}), or None. Exactly that shape; the bytes must decode,
     be at most MAX_IMAGE_BYTES, and BE the type they claim by their own first bytes (PNG or JPEG only): the portal serves
@@ -153,7 +188,7 @@ def image_event(event) -> tuple[dict, bytes] | None:
     if not isinstance(event, dict) or set(event) != {"t", "mime", "name", "b64"} or event["t"] != "image":
         return None
     mime, name, b64 = event["mime"], event["name"], event["b64"]
-    if mime not in ("image/png", "image/jpeg") or not isinstance(name, str) or not isinstance(b64, str):
+    if mime not in MAGICS or not isinstance(name, str) or not isinstance(b64, str):
         return None
     if len(b64) > (MAX_IMAGE_BYTES * 4) // 3 + 4 or not _B64.fullmatch(b64):
         return None
@@ -161,8 +196,7 @@ def image_event(event) -> tuple[dict, bytes] | None:
         data = base64.b64decode(b64, validate=True)
     except (ValueError, binascii.Error):
         return None
-    magic = b"\x89PNG\r\n\x1a\n" if mime == "image/png" else b"\xff\xd8\xff"
-    if not data.startswith(magic) or len(data) > MAX_IMAGE_BYTES:
+    if sniff(data) != mime or len(data) > MAX_IMAGE_BYTES:
         return None
     clean_name = re.sub(r"[^A-Za-z0-9._-]", "_", name)[:80] or "screenshot"
     return {"t": "image", "mime": mime, "name": clean_name}, data
@@ -242,6 +276,9 @@ class Workshop:
         self.on_picture = None                   # (owner, id, prompt, tier) -> None: the agent asked for a picture (patient.py, app.py)
         self.on_popup = None                     # (owner, id, name, args, input) -> None: the agent asked for a pop-up job (popups.py)
         self._images: dict[tuple[str, int], tuple[str, str, bytes]] = {}   # (task, n) -> (owner, mime, bytes)
+        # A message the page sent carries a client id; sending the same one again (a double tap, a retry after a slow or lost reply)
+        # returns the task it already made, never a second one (2026-10-27: a slow send looked unsent, was tried twice, and queued twice).
+        self._client_ids: dict[tuple[str, str], tuple[str, float]] = {}      # (owner, client_id) -> (task, when)
 
     def _keep_image(self, task: str, rec: dict, got) -> dict:
         """Hold a checked screenshot (call with the lock held) and return the event the chat gets: {"t":"image","n":..}
@@ -298,14 +335,28 @@ class Workshop:
 
     def brains(self) -> list[dict]:
         """Who the agent can think with: what skippy-pc lists, else Claude alone (a home reporter older than brains)."""
-        return self.home.workshop_brains() or [{"id": "claude", "label": "Claude Sonnet", "ready": True}]
+        return self.home.workshop_brains() or [{"id": "core", "label": "Skippy Core", "ready": True}]
 
     def project(self, pid: str | None) -> dict | None:
         """One offered project by id ("" = the default), or None when skippy-pc doesn't offer it."""
         pid = pid or DEFAULT_PROJECT
         return next((p for p in self.projects() if p["id"] == pid), None)
 
-    def send(self, owner: str, conv: str, message: str, project: str = "", images=None, brain: str = "claude") -> str:
+    def send(self, owner: str, conv: str, message: str, project: str = "", images=None, brain: str = "core", client_id: str = "") -> str:
+        return self.send_once(owner, conv, message, project, images, brain, client_id)[0]
+
+    def send_once(self, owner: str, conv: str, message: str, project: str = "", images=None, brain: str = "core",
+                  client_id: str = "") -> tuple[str, bool]:
+        """send(), and whether this was the same message again (its client id was already sent: the task it made is returned, nothing new)."""
+        client_id = (client_id or "").strip()
+        if client_id and not _CLIENT_ID.fullmatch(client_id):
+            raise ValueError("Bad message id.")
+        if client_id:
+            with self._lock:
+                self._prune_client_ids()
+                seen = self._client_ids.get((owner, client_id))
+                if seen and seen[0] in self._tasks:
+                    return seen[0], True
         message = (message or "").strip()
         pictures = clean_images(images)
         if not message and not pictures:
@@ -318,7 +369,7 @@ class Workshop:
         if chosen is None:                       # only a project skippy-pc lists can be worked on: never a typed repo
             raise ValueError("skippy-pc doesn't offer that project.")
         project = chosen["id"]
-        brain = brain or "claude"
+        brain = brain or "core"
         if self.paused:
             raise Paused(PAUSED_MESSAGE)
         if self.briefly_silent():
@@ -349,8 +400,25 @@ class Workshop:
             self._tasks[task] = {"owner": owner, "conv": conv, "events": [], "state": "waiting", "error": None,
                                  "created": now, "pushed_at": now, "touched": now, "stop": False, "project": project, "brain": brain,
                                  "message": message[:200], "job": job}   # its first words, for the notification (never shown to others)
+            if client_id:
+                self._client_ids[(owner, client_id)] = (task, now)
             self._advance()
-        return task
+        return task, False
+
+    def _prune_client_ids(self) -> None:
+        now = self.clock()
+        for key in [k for k, (_, at) in self._client_ids.items() if now - at > CLIENT_ID_KEEP_S]:
+            del self._client_ids[key]
+
+    def ahead_of(self, task: str) -> int:
+        """(lock held) How many other tasks are in front of this waiting one: the running or queued one, and any waiting longer.
+        Counts only; never what they are or whose."""
+        rec = self._tasks.get(task)
+        if not rec or rec["state"] != "waiting":
+            return 0
+        busy = sum(1 for t, r in self._tasks.items() if t != task and r["state"] in ("queued", "running"))
+        line = [t for t, r in sorted(((t, r) for t, r in self._tasks.items() if r["state"] == "waiting"), key=lambda tr: tr[1]["created"])]   # as _advance orders it
+        return busy + line.index(task)
 
     def briefly_silent(self) -> bool:
         """Home isn't reporting, but only for a moment: a restart or a deploy, not a skippy-pc that is off."""
@@ -389,6 +457,8 @@ class Workshop:
             after = max(0, after)
             out = {"state": state, "error": rec["error"], "events": rec["events"][after:],
                    "next": max(after, len(rec["events"])), "project": rec.get("project") or DEFAULT_PROJECT}
+            if state == "waiting":
+                out["ahead"] = self.ahead_of(task)                 # "2 ahead of you" (another chat, another device): counts only
             if rec["state"] in ("queued", "running"):          # the raw state: "stalled" and "offline" are these, gone quiet
                 out["quiet_s"] = max(0, int(now - rec["pushed_at"]))
             return out

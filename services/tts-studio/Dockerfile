@@ -17,7 +17,7 @@ RUN HF_HUB_OFFLINE=0 python -c "from huggingface_hub import snapshot_download as
     s('charactr/vocos-mel-24khz', revision='0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21', local_dir='/vocos')"
 
 WORKDIR /studio
-COPY app.py spoken_numbers.py /studio/
+COPY app.py spoken_numbers.py ready.py /studio/
 ENV PYTHONUNBUFFERED=1 HF_HOME=/tmp/hf
 EXPOSE 8003
 ENTRYPOINT ["python", "/studio/app.py"]

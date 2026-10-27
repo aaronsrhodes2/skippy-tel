@@ -339,16 +339,16 @@ def test_with_the_starter_answering_the_button_asks_it_to_put_skippy_pc_back_wit
     app, client, t = env
     starter, doctor = app.extensions["starter"], app.extensions["doctor"]
     starter.poll({"status": {"docker": True, "containers_up": 9, "containers_total": 10, "bridge": True}})
-    doctor.observe_home({"ollama": {"ok": False, "ms": 5000, "why": "no answer in time"}, "whisper": {"ok": True, "ms": 12, "why": ""}})
+    doctor.observe_home({"flask-api": {"ok": False, "ms": 5000, "why": "no answer in time"}, "whisper": {"ok": True, "ms": 12, "why": ""}})
     login(client, ADMIN)
     press(client)
     (cmd,) = starter.poll({"status": {"docker": True}})
-    assert cmd["op"] == "repair" and cmd["arg"] == "ollama"
+    assert cmd["op"] == "repair" and cmd["arg"] == "flask-api"
     state = client.get("/admin/recovery/state").get_json()
     assert state["repair"]["done"] is False
-    starter.poll({"results": [{"id": cmd["id"], "ok": True, "summary": "Docker up; 10 of 10 containers; ollama recreated."}]})
+    starter.poll({"results": [{"id": cmd["id"], "ok": True, "summary": "Docker up; 10 of 10 containers; flask-api recreated."}]})
     state = client.get("/admin/recovery/state").get_json()
-    assert state["repair"] == {**state["repair"], "done": True, "ok": True, "summary": "Docker up; 10 of 10 containers; ollama recreated."}
+    assert state["repair"] == {**state["repair"], "done": True, "ok": True, "summary": "Docker up; 10 of 10 containers; flask-api recreated."}
 
 
 def test_the_checklist_shows_every_part_and_why_and_a_friend_never_sees_it(env):

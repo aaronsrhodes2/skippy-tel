@@ -6,9 +6,8 @@ A systemd timer runs `deployer.py run` every 2 minutes (skippy-core-deployer.{se
   1. fetch origin/main
   2. the deploy key is commit + CORE_FULL: unchanged since the last good deploy -> nothing to do;
      a key that failed before -> left alone (it is never retried; a new commit or a new CORE_FULL is a new key)
-  3. require the commit's run of .github/workflows/core.yml to be green (GitHub's Actions API; the repo is public, so
-     a classic token with NO scopes only lifts the rate limit; fine-grained tokens can't read checks): pending -> wait
-     for the next run; red -> the key is marked bad
+  3. require this box's own CI (core/ci/ci.py, docs/no-github.md) to have passed the commit: its result file says success (pending -> wait
+     for the next run; a failed test -> the key is marked bad; CI_LOCAL empty = no CI gate: the simulator)
   4. check out the commit; core/llm/models.py check: missing model files -> REFUSED (the running stack is left as
      it is, the key is not marked bad: it deploys once the files land); a broken manifest -> bad
   5. models.py render into ${CORE_STATE}/llm, docker compose up -d --build --remove-orphans --wait, core/smoke.py
@@ -18,9 +17,11 @@ A systemd timer runs `deployer.py run` every 2 minutes (skippy-core-deployer.{se
 
 Every run writes ${CORE_STATE}/deployer/status.json (what the home reporter will carry to the portal) and state.json
 (last good key, bad keys). Settings: /etc/skippy-core/core.env (KEY=VALUE; the process environment overrides it):
-REPO_DIR, REMOTE, BRANCH, GITHUB_REPO, GITHUB_TOKEN, CI_WORKFLOW ("" = no CI gate: the simulator), CORE_FULL,
+REPO_DIR, REMOTE, BRANCH, CI_LOCAL (the CI state folder; "" = no CI gate: the simulator), CI_NAME, CORE_FULL,
 CORE_STATE, MODELS_ROOT, CORE_GPU (0 = no /dev/dri: the simulator), CORE_MATTER (1 = the house's Matter controller too:
-core/compose.matter.yml, set up by core/install/matter.sh, which also writes MATTER_ARGS), CORE_VAULT_ENV, MUSIC_ROOT, SMOKE_WAIT,
+core/compose.matter.yml, set up by core/install/matter.sh, which also writes MATTER_ARGS), CORE_TESLA (1 = the Captain's car: TeslaMate
+and the car reader, core/compose.tesla.yml, set up by core/install/tesla.sh), CORE_POPUPS3D (1 = the quality 3D
+and video pop-ups too: core/popups-3d/compose.yml, a ~20 GB ROCm image, so never in the simulator or CI), CORE_VAULT_ENV, MUSIC_ROOT, SMOKE_WAIT,
 LLM_API_KEY (llama-swap's key: the render, the shim and the smoke test all use it; "" = an open llm port).
 
     deployer.py run        one pass (what the timer runs)
@@ -44,12 +45,21 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))        # core/quiet.py (installed beside the copies in /opt/skippy-core)
+try:
+    import quiet
+except ImportError:                           # the doctor's copy runs without it: it never defers
+    quiet = None
+
 DEFAULTS = {
     "REPO_DIR": "/opt/skippy-core/repo", "REMOTE": "origin", "BRANCH": "main",
-    "GITHUB_REPO": "aaronsrhodes2/skippy-tel", "GITHUB_TOKEN": "", "CI_WORKFLOW": "core.yml",
     "CORE_FULL": "", "CORE_STATE": "/var/lib/skippy-core", "MODELS_ROOT": "/srv/models", "CORE_GPU": "1",
     "CORE_VAULT_ENV": "/etc/skippy-core/vault.env", "MUSIC_ROOT": "/srv/music", "SMOKE_WAIT": "900",
-    "OLLAMA_MODEL": "qwen3:8b", "LLM_API_KEY": "", "CORE_MATTER": "0", "MATTER_ARGS": "",
+    "OLLAMA_MODEL": "qwen3:8b", "LLM_API_KEY": "", "CORE_MATTER": "0", "MATTER_ARGS": "", "CORE_TESLA": "0",
+    "CORE_POPUPS3D": "0", "CI_LOCAL": "", "CI_NAME": "skippy-tel",
+    "CD_PY": "/opt/skippy-core/cd/cd.py", "RETRY_S": "1800", "QUIET": "1",
+    "DOCTOR_COPY": "/opt/skippy-core/doctor/deployer.py",
 }
 KEEP_BAD = 50
 
@@ -124,17 +134,41 @@ class Deployer:
         st["bad"] = dict(list(st["bad"].items())[-KEEP_BAD:])
         self._write("state.json", st)
 
-    def mark_good(self, commit: str, full: str) -> None:
+    def mark_good(self, commit: str, full: str, started: str | None = None) -> None:
         st = self.state()
         st["last_good"] = {"commit": commit, "full": full, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        if started:                                       # when this deploy began (tools/loop_timer.py times it)
+            st["last_good"]["started"] = started
         self._write("state.json", st)
+        self.refresh_doctor()
+
+    def refresh_doctor(self) -> None:
+        """The doctor (and skippy-pc's starter, for the portal's "Put everything back") repair with their own copy of this file, made by
+        install.sh. A stale copy repairs with yesterday's idea of the stack: on 2026-10-26 one that predated CORE_TESLA recreated
+        everything without core/compose.tesla.yml and --remove-orphans took TeslaMate down. So every good deploy brings the copy up to
+        this commit's. Only where the copy's folder exists (the box, not CI or the simulator); a failure is logged, never fatal."""
+        dest = Path(self.s.get("DOCTOR_COPY") or "")
+        src = self.repo / "core" / "deployer" / "deployer.py"
+        if not self.s.get("DOCTOR_COPY") or not dest.parent.is_dir() or not src.is_file():
+            return
+        try:
+            new = src.read_bytes()
+            if dest.is_file() and dest.read_bytes() == new:
+                return
+            tmp = dest.with_name(dest.name + ".new")
+            tmp.write_bytes(new)
+            tmp.chmod(0o755)
+            os.replace(tmp, dest)
+            self.log(f"doctor's copy brought up to this deploy ({dest})")
+        except OSError as e:
+            self.log(f"couldn't refresh the doctor's copy at {dest}: {e}")
 
     # ── the outside world (tests replace these) ──────────────────────────────
     def env(self, full: str) -> dict:
         e = dict(os.environ)
         gpu = self.s["CORE_GPU"] != "0"
         e.update({k: self.s[k] for k in ("MODELS_ROOT", "CORE_STATE", "CORE_VAULT_ENV", "MUSIC_ROOT", "OLLAMA_MODEL",
-                                         "LLM_API_KEY", "CORE_MATTER", "MATTER_ARGS")})
+                                         "LLM_API_KEY", "CORE_MATTER", "MATTER_ARGS", "CORE_TESLA")})
         e["CORE_FULL"] = full
         e.setdefault("GPU_LAYERS", "999" if gpu else "0")
         if gpu:
@@ -162,28 +196,26 @@ class Deployer:
         self.git("checkout", "--quiet", "--force", "--detach", commit)
 
     def ci_state(self, commit: str) -> tuple[str, str]:
-        """("success" | "pending" | "failure", detail) for CI_WORKFLOW's newest push run on this commit."""
-        workflow = self.s["CI_WORKFLOW"]
-        if not workflow:
+        """("success" | "pending" | "failure", detail): this box's own CI (core/ci/ci.py) when CI_LOCAL names its state folder, else
+        no gate at all (the simulator)."""
+        if not self.s["CI_LOCAL"]:
             return "success", "no CI gate"
-        url = (f"https://api.github.com/repos/{self.s['GITHUB_REPO']}/actions/workflows/{workflow}/runs"
-               f"?head_sha={commit}&event=push&per_page=10")
-        req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "skippy-core-deployer"})
-        if self.s["GITHUB_TOKEN"]:
-            req.add_header("Authorization", f"Bearer {self.s['GITHUB_TOKEN']}")
+        return self.local_ci_state(commit)
+
+    def local_ci_state(self, commit: str) -> tuple[str, str]:
+        """core/ci/ci.py's result for this commit (<CI_LOCAL>/<CI_NAME>/results/<sha>.json). Not tested yet, running or an
+        error on the box's side = pending; only a failed test is a failure."""
+        path = Path(self.s["CI_LOCAL"]) / self.s["CI_NAME"] / "results" / f"{commit}.json"
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                runs = json.loads(r.read()).get("workflow_runs") or []
-        except (OSError, ValueError) as e:
-            return "pending", f"GitHub unreachable: {e}"
-        if not runs:
-            return "pending", f"no {workflow} run yet"
-        newest = max(runs, key=lambda c: (c.get("run_attempt") or 0, c.get("created_at") or ""))
-        if newest.get("status") != "completed":
-            return "pending", f"{workflow} is {newest.get('status')}"
-        if newest.get("conclusion") == "success":
-            return "success", newest.get("html_url", "")
-        return "failure", f"{workflow} concluded {newest.get('conclusion')}: {newest.get('html_url', '')}"
+            got = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return "pending", "not tested yet by this box's CI"
+        if got.get("state") == "success":
+            return "success", f"this box's CI, {got.get('seconds')} s"
+        if got.get("state") == "failure":
+            bad = [j.get("name") for j in got.get("jobs") or [] if j.get("state") == "failure"]
+            return "failure", "this box's CI failed: " + ", ".join(str(b) for b in bad)
+        return "pending", f"this box's CI is {got.get('state')}"
 
     def compose_files(self) -> list[str]:
         files = ["-f", "core/compose.core.yml"]
@@ -191,6 +223,10 @@ class Deployer:
             files += ["-f", "core/compose.gpu.yml"]
         if self.s["CORE_MATTER"] == "1":
             files += ["-f", "core/compose.matter.yml"]
+        if self.s["CORE_TESLA"] == "1":
+            files += ["-f", "core/compose.tesla.yml"]
+        if self.s["CORE_POPUPS3D"] == "1":
+            files += ["-f", "core/popups-3d/compose.yml"]
         return files
 
     def models(self, cmd: str, full: str) -> subprocess.CompletedProcess:
@@ -199,9 +235,20 @@ class Deployer:
             args += ["--out", str(Path(self.s["CORE_STATE"]) / "llm")]
         return self.sh(args, full=full, timeout=600, check=False)
 
+    def prepare_vendor(self) -> None:
+        """The Mentat build copies .vendor/sigma-ground from the build context: have core/cd/cd.py lay it out from the trunk."""
+        cd = Path(self.s["CD_PY"])
+        if cd.is_file():
+            self.sh([sys.executable, str(cd), "vendor", str(self.repo)], timeout=600)
+
+    def compose_build(self, full: str) -> None:
+        self.prepare_vendor()
+        self.sh(["docker", "compose", "-p", "skippycore", *self.compose_files(), "build"], full=full, timeout=3600)
+
     def compose_up(self, full: str, recreate: bool = False) -> None:
         for sub in ("flask-api", "drive-state"):
             (Path(self.s["CORE_STATE"]) / sub).mkdir(parents=True, exist_ok=True)
+        self.prepare_vendor()
         self.sh(["docker", "compose", "-p", "skippycore", *self.compose_files(), "up", "-d", "--build", "--remove-orphans",
                  *(["--force-recreate"] if recreate else []), "--wait", "--wait-timeout", "900"],
                 full=full, timeout=3600)
@@ -221,6 +268,10 @@ class Deployer:
             raise StepFailed("models", (r.stderr or r.stdout).strip()[-500:])
         if r.returncode != 0:
             raise StepFailed("models", (r.stderr or r.stdout).strip()[-500:], bad=False)
+        try:                                                # build first: a build that fails touches nothing that is running
+            self.compose_build(full)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            raise StepFailed("build", (getattr(e, "stderr", "") or str(e))[-500:], bad=False, rollback=False) from None
         r = self.models("render", full)
         if r.returncode != 0:
             raise StepFailed("render", (r.stderr or r.stdout).strip()[-500:])
@@ -236,6 +287,21 @@ class Deployer:
             raise err
         return results
 
+    def defer(self) -> bool:
+        if quiet is None or self.s["QUIET"] == "0":
+            return False
+        return quiet.should_defer(self.dir / "busy-since")
+
+    def retry_wait(self, key: str) -> float:
+        """Seconds left before a key whose deploy failed for a reason that may pass (a build, models not there) is tried again."""
+        at = self._read("retry.json", {}).get(key)
+        if not at:
+            return 0
+        return max(0.0, float(at) + float(self.s["RETRY_S"]) - time.time())
+
+    def note_retry(self, key: str) -> None:
+        self._write("retry.json", {key: time.time()})
+
     def run(self) -> dict:
         full = norm_full(self.s["CORE_FULL"])
         try:
@@ -249,24 +315,31 @@ class Deployer:
             return self.status("ok", commit=commit, full=full, detail="up to date")
         if key in st["bad"]:
             return self.status("known-bad", commit=commit, full=full, detail=st["bad"][key]["reason"])
+        wait = self.retry_wait(key)
+        if wait:
+            return self.status("retry-later", commit=commit, full=full, detail=f"last try failed; next in {int(wait // 60)} min")
         ci, detail = self.ci_state(commit)
         if ci == "pending":
             return self.status("waiting-ci", commit=commit, full=full, detail=detail)
         if ci == "failure":
             self.mark_bad(key, f"ci: {detail}")
             return self.status("ci-failed", commit=commit, full=full, detail=detail)
-        self.status("deploying", commit=commit, full=full)
+        if self.defer():
+            return self.status("deferred", commit=commit, full=full, detail="the private Skippy is working: holding the deploy")
+        started = self.status("deploying", commit=commit, full=full)["at"]
         try:
             results = self.deploy(commit, full)
         except StepFailed as e:
             if e.bad:
                 self.mark_bad(key, str(e))
+            else:
+                self.note_retry(key)
             if e.rollback:                                  # a red smoke, or a build that half-happened
                 return self.rollback(commit, full, e)
             if good:                                        # the models aren't there yet: leave the running stack alone
                 self.checkout(good["commit"])
             return self.status("refused", commit=commit, full=full, stage=e.stage, detail=e.detail)
-        self.mark_good(commit, full)
+        self.mark_good(commit, full, started)
         return self.status("ok", commit=commit, full=full, detail="deployed", smoke=results)
 
     # ── repair: the last good deploy, recreated (the portal's one Recovery operation) ──
@@ -400,7 +473,7 @@ def main(argv: list[str] | None = None) -> int:
         row = d.repair() if cmd == "repair" else d.run()
     if cmd == "repair":
         print(json.dumps({k: row.get(k) for k in ("state", "detail", "stage", "commit")}), flush=True)
-    return 0 if row["state"] in ("ok", "waiting-ci", "known-bad", "refused") else 1
+    return 0 if row["state"] in ("ok", "waiting-ci", "known-bad", "refused", "deferred", "retry-later") else 1
 
 
 if __name__ == "__main__":

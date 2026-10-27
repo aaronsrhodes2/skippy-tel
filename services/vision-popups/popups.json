@@ -1,0 +1,364 @@
+{
+  "_doc": "The vision and AR-development pop-ups (docs/vision-popups.md, docs/popups.md): one entry per tool of services/vision-popups, all in the one container on skippy-pc's GPU. vram_gb and est_seconds are bench.py's numbers (cold: weights loaded on the call).",
+  "popups": [
+    {
+      "name": "remove_background",
+      "family": "vision",
+      "box": "pc",
+      "tier": "quick",
+      "url_env": "VISION_POPUPS_URL",
+      "url": "http://skippy-popup-vision:8004",
+      "endpoint": "/popup/remove_background",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "output": {
+            "type": "string",
+            "enum": [
+              "cutout",
+              "on_black",
+              "mask",
+              "json"
+            ],
+            "description": "cutout = the subject on transparency (PNG, the default); on_black = the subject on pure #000000, which is see-through on the Captain's Viture XR glasses (AR art); mask = the matte alone; json = coverage and the subject's box."
+          },
+          "background": {
+            "type": "string",
+            "enum": [
+              "transparent",
+              "black",
+              "both"
+            ],
+            "description": "Which pictures to make (both by default)."
+          },
+          "lift": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 64,
+            "description": "For on_black: raise the subject's darkest pixels by this much so they don't vanish on the glasses (0 = exact colours)."
+          },
+          "model": {
+            "type": "string",
+            "enum": [
+              "birefnet",
+              "birefnet_matting"
+            ],
+            "description": "birefnet (default, crisp edges, best on ordinary photos); birefnet_matting for soft hair, fur and see-through edges."
+          }
+        },
+        "additionalProperties": false
+      },
+      "media_in": [
+        "image/png",
+        "image/jpeg",
+        "image/webp"
+      ],
+      "media_required": true,
+      "outputs": [
+        "image/png",
+        "image/webp",
+        "application/json"
+      ],
+      "est_seconds": 30,
+      "vram_gb": 3.4,
+      "audience": "everyone",
+      "description": "Cut the subject out of an attached picture (BiRefNet): a transparent PNG, or the subject on pure black, which the Captain's Viture XR glasses show as see-through, for AR art. Use when someone asks to remove or replace a background, make a sticker or cut-out, or prepare art for the glasses."
+    },
+    {
+      "name": "upscale_image",
+      "family": "vision",
+      "box": "pc",
+      "tier": "quick",
+      "url_env": "VISION_POPUPS_URL",
+      "url": "http://skippy-popup-vision:8004",
+      "endpoint": "/popup/upscale",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "output": {
+            "type": "string",
+            "enum": [
+              "upscaled",
+              "json"
+            ],
+            "description": "upscaled (default) or json (the new size)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "media_in": [
+        "image/png",
+        "image/jpeg",
+        "image/webp"
+      ],
+      "media_required": true,
+      "outputs": [
+        "image/png",
+        "image/webp",
+        "image/jpeg",
+        "application/json"
+      ],
+      "est_seconds": 30,
+      "vram_gb": 3.5,
+      "audience": "everyone",
+      "description": "Make an attached picture four times bigger and sharper (Real-ESRGAN x4), up to 4096 pixels on the long side; a transparent picture keeps its transparency. Use when someone asks to upscale, enlarge, sharpen or increase the resolution of a picture."
+    },
+    {
+      "name": "depth_map",
+      "family": "vision",
+      "box": "pc",
+      "tier": "quick",
+      "url_env": "VISION_POPUPS_URL",
+      "url": "http://skippy-popup-vision:8004",
+      "endpoint": "/popup/depth",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "output": {
+            "type": "string",
+            "enum": [
+              "depth",
+              "depth16",
+              "normals",
+              "json"
+            ],
+            "description": "depth = 8-bit greyscale, near is bright (default); depth16 = 16-bit for precise use; normals = a normal map (RGB = XYZ) for lighting; json = notes."
+          },
+          "strength": {
+            "type": "number",
+            "minimum": 0.5,
+            "maximum": 20,
+            "description": "How strongly depth bends the normal map (4 by default)."
+          },
+          "model": {
+            "type": "string",
+            "enum": [
+              "depth_anything_v2_large",
+              "depth_anything_v2_small"
+            ],
+            "description": "large (default, best detail) or small (faster)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "media_in": [
+        "image/png",
+        "image/jpeg",
+        "image/webp"
+      ],
+      "media_required": true,
+      "outputs": [
+        "image/png",
+        "application/json"
+      ],
+      "est_seconds": 20,
+      "vram_gb": 1.3,
+      "audience": "admin",
+      "description": "A depth map of an attached picture (Depth Anything V2: relative, near is bright) or a normal map made from it, for AR occlusion, parallax and relighting. Use when the Captain asks for depth, a depth map, a normal map, or how far things are in a picture (relative, not metres)."
+    },
+    {
+      "name": "segment_image",
+      "family": "vision",
+      "box": "pc",
+      "tier": "quick",
+      "url_env": "VISION_POPUPS_URL",
+      "url": "http://skippy-popup-vision:8004",
+      "endpoint": "/popup/segment",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "What to cut out, in words (\"the mug\"): Grounding DINO finds it, SAM 2.1 traces it."
+          },
+          "point": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 3,
+            "description": "[x, y] in the picture's pixels on the thing to cut out."
+          },
+          "box": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "[x0, y0, x1, y1] in pixels around the thing."
+          },
+          "output": {
+            "type": "string",
+            "enum": [
+              "cutout",
+              "on_black",
+              "mask",
+              "regions",
+              "json"
+            ],
+            "description": "cutout (default with a prompt), on_black (see-through on the glasses), mask, regions (every region coloured: the default with no prompt), json (boxes, areas, scores)."
+          },
+          "model": {
+            "type": "string",
+            "enum": [
+              "sam2.1_large",
+              "sam2.1_base_plus"
+            ],
+            "description": "large (default) or base_plus (faster)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "media_in": [
+        "image/png",
+        "image/jpeg",
+        "image/webp"
+      ],
+      "media_required": true,
+      "outputs": [
+        "image/png",
+        "application/json"
+      ],
+      "est_seconds": 30,
+      "vram_gb": 3.6,
+      "audience": "admin",
+      "description": "Segment an attached picture with SAM 2.1: cut out the thing named in words, at a point or in a box, or (with nothing given) outline every region. Use when the Captain asks to select, mask, isolate or cut out a particular object, or to split a picture into parts."
+    },
+    {
+      "name": "detect_objects",
+      "family": "vision",
+      "box": "pc",
+      "tier": "quick",
+      "url_env": "VISION_POPUPS_URL",
+      "url": "http://skippy-popup-vision:8004",
+      "endpoint": "/popup/detect",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "What to find, in words: \"find the mugs and the keyboard\"."
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 0.9,
+            "description": "How sure a box must be (0.4 by default)."
+          },
+          "output": {
+            "type": "string",
+            "enum": [
+              "boxes",
+              "json"
+            ],
+            "description": "boxes = the picture with labelled boxes (default); json = each label, score and box."
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "media_in": [
+        "image/png",
+        "image/jpeg",
+        "image/webp"
+      ],
+      "media_required": true,
+      "outputs": [
+        "image/png",
+        "application/json"
+      ],
+      "est_seconds": 20,
+      "vram_gb": 2.7,
+      "audience": "admin",
+      "description": "Find whatever the words name in an attached picture and box it (Grounding DINO, open vocabulary): \"find the mugs\". Use when the Captain asks where things are, how many there are, or for bounding boxes."
+    },
+    {
+      "name": "read_document",
+      "family": "vision",
+      "box": "pc",
+      "tier": "quick",
+      "url_env": "VISION_POPUPS_URL",
+      "url": "http://skippy-popup-vision:8004",
+      "endpoint": "/popup/ocr",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "enum": [
+              "text",
+              "table",
+              "formula",
+              "chart"
+            ],
+            "description": "text (default): all the words; table: the table as HTML; formula: LaTeX; chart: the chart's data."
+          },
+          "output": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "text (default) or json (with the task and length)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "media_in": [
+        "image/png",
+        "image/jpeg",
+        "image/webp"
+      ],
+      "media_required": true,
+      "outputs": [
+        "text/plain",
+        "application/json"
+      ],
+      "est_seconds": 60,
+      "vram_gb": 2.4,
+      "audience": "everyone",
+      "description": "Read a document, receipt, screenshot, table, formula or chart in an attached picture (PaddleOCR-VL, 100+ languages, mixed scripts): exact text, tables as HTML, formulas as LaTeX. Use for whole documents and tables; a quick glance at a picture doesn't need it."
+    },
+    {
+      "name": "body_pose",
+      "family": "vision",
+      "box": "pc",
+      "tier": "quick",
+      "url_env": "VISION_POPUPS_URL",
+      "url": "http://skippy-popup-vision:8004",
+      "endpoint": "/popup/pose",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "output": {
+            "type": "string",
+            "enum": [
+              "skeleton",
+              "json"
+            ],
+            "description": "skeleton = the picture with each person's keypoints drawn (default); json = 17 COCO keypoints per person, in pixels, with scores."
+          }
+        },
+        "additionalProperties": false
+      },
+      "media_in": [
+        "image/png",
+        "image/jpeg",
+        "image/webp"
+      ],
+      "media_required": true,
+      "outputs": [
+        "image/png",
+        "application/json"
+      ],
+      "est_seconds": 20,
+      "vram_gb": 1.0,
+      "audience": "admin",
+      "description": "Body pose of each person in an attached picture (RT-DETR finds people, ViTPose++ places 17 keypoints): a skeleton picture or the keypoints as JSON, for rigging, motion reference and AR anchoring. Use when the Captain asks for pose, keypoints or a skeleton."
+    }
+  ]
+}

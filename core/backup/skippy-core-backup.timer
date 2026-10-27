@@ -1,0 +1,10 @@
+[Unit]
+Description=Back the house's git up off site every night
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

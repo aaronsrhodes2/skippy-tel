@@ -4,7 +4,7 @@
   "max_parallel": 8,
   "slots": {
     "chat": {
-      "role": "Skippy's default tier, summaries, Mentat's phrasings: always loaded",
+      "role": "Skippy's default tier, summaries, Mentat's phrasings: always loaded. qwen3:8b and qwen2.5:7b are OLD names for this slot, kept as aliases for callers that still use them: it is Qwen3.6-35B-A3B, not an 8B. Use skippy-chat.",
       "resident": true,
       "aliases": ["qwen3:8b", "qwen2.5:7b", "skippy-chat"],
       "standin": {
@@ -19,6 +19,24 @@
         "ctx": 65536,
         "args": ["--jinja", "--temp", "0.7", "--top-p", "0.8", "--top-k", "20", "--min-p", "0", "--presence-penalty", "1.5",
                  "--chat-template-kwargs", "{\"enable_thinking\": false}"]
+      }
+    },
+    "router": {
+      "role": "Mentat's trained router (v3.1: Qwen3-4B + LoRA, plan format v3). It reads a physics or maths question and writes a JSON plan naming the Mentat tool and its arguments, constrained by a grammar. Always loaded (2 GB). It is NOT a chat model: it only answers in its own plan format. Trained 2026-10-13/14 on skippy-pc; the files are archived in D:/models/finetunes/mentat-router-v31-4b",
+      "resident": true,
+      "aliases": ["mentat-router", "mentat-router-v31-4b"],
+      "standin": {
+        "repo": "Qwen/Qwen3-0.6B-GGUF",
+        "files": [{"path": "Qwen3-0.6B-Q8_0.gguf", "size": 639446688, "sha256": null}],
+        "ctx": 16384,
+        "args": ["--jinja", "--chat-template-kwargs", "{\"enable_thinking\": false}"]
+      },
+      "full": {
+        "repo": "aaronsrhodes2/mentat-router-v31-4b",
+        "files": [{"path": "mentat-router-v31-4b-Q4_K_M.gguf", "size": 2497280832, "sha256": "c929e636f2b1c937de10122b52872a7226f3c839aa29182ce5e21e3d4ece2507"}],
+        "ctx": 16384,
+        "parallel": 2,
+        "args": ["--jinja", "--temp", "0", "--chat-template-kwargs", "{\"enable_thinking\": false}"]
       }
     },
     "vision": {

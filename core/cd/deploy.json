@@ -1,0 +1,46 @@
+{
+ "_comment": "What skippy-core's deployer (core/cd/cd.py) deploys, and how: moved from .github/workflows/deploy.yml (docs/no-github.md, phase 3). The pins are build arguments: sigma_ground_ref is served by Experiments and Mentat (bump to update both); starcontrol_ref/sha256 name the Star Control Zero web build the portal carries (change BOTH to ship a new one). Mentat is rebuilt when mentat/, .dockerignore or this file changed.",
+ "project": "skippy-tel",
+ "region": "us-west1",
+ "pins": {
+  "SIGMA_GROUND_REF": "d58306795b01892e20652e45493dbe6e551cfaaa",
+  "STARCONTROL_REF": "web-2026-10-02",
+  "STARCONTROL_SHA256": "15866e0e94ab0069f02f8c4d0a3bb31bf4fe7a96e54337f29cadc37fe74999b3"
+ },
+ "portal": {
+  "service": "skippy-portal",
+  "image": "us-west1-docker.pkg.dev/skippy-tel/skippy/portal",
+  "service_account": "skippy-agent@skippy-tel.iam.gserviceaccount.com",
+  "flags": ["--no-invoker-iam-check", "--timeout", "900", "--max-instances", "1", "--concurrency", "32", "--memory", "1Gi"],
+  "env": {
+   "ALLOWED_EMAILS": "aaron.s.rhodes@gmail.com",
+   "ADMIN_EMAILS": "aaron.s.rhodes@gmail.com",
+   "GCP_PROJECT": "skippy-tel",
+   "GCP_ZONE": "us-west1-b",
+   "GCP_INSTANCE": "skippy-games",
+   "DISCORD_INVITE": "gPTVS7Hmj",
+   "PORTAL_URL": "https://makerportal.live",
+   "MENTAT_URL": "https://skippy-core.tailab2cc7.ts.net:8443",
+   "DOOMLOOP_BUCKET": "skippy-tel-doomloop-dev",
+   "TABLETOP_BUCKET": "skippy-tel-tabletop",
+   "DEPLOYS_FROM": "house"
+  },
+  "secrets": {
+   "FLASK_SECRET_KEY": "portal-flask-secret",
+   "GOOGLE_CLIENT_ID": "portal-google-client-id",
+   "GOOGLE_CLIENT_SECRET": "portal-google-client-secret",
+   "ANTHROPIC_API_KEY": "anthropic-api-key",
+   "DISCORD_BOT_TOKEN": "discord-bot-token"
+  },
+  "vault_secrets": {
+   "_comment": "Copied from skippy-core's vault (/etc/skippy-core/vault.env) into Secret Manager when they change, then handed to the portal.",
+   "SKIPPY_CORE_URL": "skippy-core-url",
+   "SKIPPY_CORE_API_KEY": "skippy-core-api-key"
+  }
+ },
+ "infra": {
+  "dir": "infra/gcp-games",
+  "state_bucket": "skippy-tel-tfstate",
+  "inputs": ["infra/gcp-games/", "core/cd/deploy.json"]
+ }
+}

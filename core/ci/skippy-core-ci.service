@@ -1,0 +1,12 @@
+[Unit]
+Description=SkippyCore CI: test the newest main of each repo in the house's own git (core/ci/ci.py, docs/no-github.md)
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/skippy-core/ci/ci.py run
+# Tests are guests on the model box: lower priority than the models, and never forever.
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=2h

@@ -12,6 +12,7 @@ page. Code in [`portal/`](../../portal); deployed on every push by
 | `/admin` | admins | Game settings (world names, passwords, Dragonwilds owner ID), **Restart & update**, **Set up / repair Discord channels**, the **Recovery** cards (below) |
 | `/starcontrol/` | everyone signed in | **Star Control Zero**: the Captain's fan game, played in the browser; a card in Browser Games (`/play`) (see below) |
 | `/doomloop/` | everyone signed in | **Doom Loop**: the Captain's work-in-progress game, the newest build from its repo, with a dev-build badge; a card in Browser Games (`/play`) (see "Doom Loop dev channel" below) |
+| `/shifting-prophesy/` | everyone signed in | **Shifting Prophesy**: purple Skippy's shake-down cruise, with Haiku as the reference; both live builds and every turn, scored; a card in Browser Games (see "Shifting Prophesy" below) |
 | `/music` | admins | **Bilby's Audio Service**: the Captain's music collection streamed from skippy-pc to any browser (see below). `/bilby` redirects here |
 
 ## Friends: play without the Captain online
@@ -725,3 +726,42 @@ variables → Actions → Variables): `WIF_PROVIDER` = the `doomloop_workload_id
 
 Tests: `portal/tests/test_doomloop.py` (who gets in, the page and its badge, file types and revalidation, no path escape,
 new builds without a redeploy, damaged or unsafe `version.json`, no-bucket behavior, the `/play` card).
+
+## Shifting Prophesy (`/shifting-prophesy`)
+
+Purple Skippy's shake-down cruise: the private Skippy on its Private brain (Skippy Core's coder), running as itself in the
+workshop, builds a whole top-down adventure game from a written spec, one prompt from the Captain at a time, in
+`D:\Aaron\development\shifting-prophesy-purple` (opened in place as `f-shifting-prophesy-purple`). Its turns go through
+`tools/retest_failures.py`, a new conversation per turn, which the Captain follows live in the chat. Claude Haiku 5.5 gets the
+same prompts with every Claude Code tool, as the reference. Where purple falls short is what it needs next. The referee
+(`D:\Aaron\development\shifting-prophesy\referee`) runs the turns on skippy-pc, grades both builds against the spec on hidden
+seeds, screenshots them, and keeps the record. All three are local git repositories with no remote (Platinum §23). The
+referee's README is the cruise's manual; this section is only the portal's side.
+
+**How things get here:** after each turn the referee's runner uploads each build (`prophesy/haiku/`, `prophesy/purple/`,
+`version.json` last, then `finish` drops the previous build's leftovers) and the turn's record (`prophesy/turns/`,
+`index.json` last) into the portal's own bucket (`TABLETOP_BUCKET`), through `PUT /home/prophesy/<folder>/<path>` and
+`POST /home/prophesy/<folder>/finish` with the home token, like the reporter's other machine routes. No GitHub, no CI and no
+extra cloud identity are involved. The hidden seeds and full transcripts never leave skippy-pc.
+
+**Routes** (`prophesy` blueprint in `app.py`, helpers in `portal/prophesy.py`, path and file-type rules from `doomloop.py`):
+`GET /shifting-prophesy/` (signed in) is the board, in pages you flip with the pager (swipe, arrow keys): the first is each
+arm's live build and running score; then ONE PAGE PER TURN, oldest to newest (it opens on the newest, or on the attempt a
+`#purple:1:7` link names). A turn's page is its prompt and the Captain's scores, then every ATTEMPT at it as a section that
+opens by itself (one at a time): the reference first, then the rest in the order they were made, named `model:turn:attempt`
+(`haiku:1:1`, `purple:1:7`; the early fix-up turns are `purple:1:1+fix1`). A closed attempt shows its outcome, the referee's six
+checks as six boxes, its parity verdict and its time and calls; open, it shows the result (time, cost, commits, context and
+segments), the referee's rates, parity with the reference (each measure, the reference's minimum against the attempt's median),
+what it did beside the reference's own tool-call numbers, the harness it ran under (engine, SDK, model, sampling), its
+screenshots, and links to its reply, tool calls and report. The data is each turn row's `attempts` in `index.json` (the
+referee's `board.mjs`, which also uploads every trial's readable files under `turns/<Tnn>/`); a row from before attempts
+existed (only `arms`) shows as one attempt per arm. `GET /shifting-prophesy/<arm>/` (signed in) frames that arm's build under the app bar, with the query
+string passed through (the spec's `?seed=...&screen=x,y` URLs); the build's own page is never edited. `GET
+/shifting-prophesy/<arm>/<path>` and `/shifting-prophesy/turns/<path>` (signed in) are files from the bucket, as Doom Loop's.
+`GET /shifting-prophesy/<arm>/version` is public: the referee's runner and the deploy's smoke test read it. The record's
+`index.json` is checked on the way in (turn ids, labels, screenshot and file paths inside their own attempt's folder, numbers as numbers).
+
+**Setup:** none beyond a paired home token (which skippy-pc already has).
+
+Tests: `portal/tests/test_prophesy.py` (including: only the home token uploads, uploads stay inside the cruise's folders, a new
+build replaces the old one, the record only grows, an oversize file is refused, no bucket is a 503).

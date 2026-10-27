@@ -1,7 +1,7 @@
 """Portal settings from environment variables (see .env.example).
 
 On Cloud Run the secrets come from Secret Manager via `--set-secrets` and
-the rest from `--set-env-vars`, both in .github/workflows/deploy.yml.
+the rest from `--set-env-vars`, both in core/cd/deploy.json (skippy-core's deployer).
 Secrets have no defaults: the app refuses to start without them rather than
 running unauthenticated.
 """
@@ -52,9 +52,6 @@ def load() -> dict:
         "GCP_ZONE": _optional("GCP_ZONE", "us-west1-b"),
         "GCP_INSTANCE": _optional("GCP_INSTANCE", "skippy-games"),
 
-        # Skippy chat (ANTHROPIC_API_KEY is read by the SDK itself).
-        "CHAT_MODEL": _optional("CHAT_MODEL", "claude-haiku-4-5"),
-        "CHAT_ENABLED": bool(_optional("ANTHROPIC_API_KEY")),
 
         # Discord: the invite link shown to players, and the bot token the
         # admin page uses to create channels (optional until you want that).

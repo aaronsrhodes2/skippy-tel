@@ -37,6 +37,7 @@ import html
 import json
 import re
 
+import car_web
 import diagnostics
 import ops
 import popups as popups_mod
@@ -86,6 +87,24 @@ _SCHEMAS = {
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
 }
+
+# The house (lights and switches: HomeKit, Matter, every Leviton through its cloud), run on skippy-pc by the home reporter with
+# services/satellite's own house.run_tool. A copy of services/satellite/house.py's TOOLS (the portal image doesn't carry the satellite);
+# portal/tests/test_house_tools.py fails if they drift. The Captain's alone (tool_policy "house"); a chat can't
+# prove he said yes out loud, so a confirm is dropped before it leaves and a lock waits for his voice.
+HOUSE_TOOLS = [
+    {"name": "home_devices", "description": "List what is in the house that he can control, with each one's state. Optionally for one area (room) or one kind (light, switch, fan, cover, climate, media_player).",
+     "input_schema": {"type": "object", "properties": {"area": {"type": "string"}, "domain": {"type": "string"}}}},
+    {"name": "home_state", "description": "Ask the state of one thing in the house: a light, a temperature sensor, the thermostat, a door sensor. Use his own words for its name.",
+     "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
+    {"name": "home_control", "description": "Do something to one thing in the house. Actions: on, off, toggle, set_brightness (value 1-100), set_temperature (value in degrees), set_volume (value 0-100), "
+                                             "open, close, stop (covers), play, pause, next, previous (media players), activate (scenes, scripts). If several things fit the name, nothing happens and you must ask which. "
+                                             "Locks and alarms need confirm=true, and only after he has said yes aloud.",
+     "input_schema": {"type": "object", "properties": {"name": {"type": "string", "description": "His words for it, e.g. 'living room lamp'."},
+                                                       "action": {"type": "string"}, "value": {"type": "number"}, "confirm": {"type": "boolean"}},
+                      "required": ["name", "action"]}},
+]
+HOUSE_NAMES = tuple(t["name"] for t in HOUSE_TOOLS)
 
 _EVERYONE = ("server_status", "start_game", "stop_server")
 _ADMIN = _EVERYONE + ("restart_server", "server_logs")
@@ -177,6 +196,15 @@ _NOW_PLAYING = {
     "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
 }
 
+_CAR_STATUS = {
+    "name": "car_status",
+    "description": "The Captain's Tesla, a Model 3 named T3-P0, as TeslaMate last saw it at home: state (asleep, online, driving, charging), battery %, "
+                   "charge limit, estimated range in miles, charging (plugged in, kW, hours to full), locked, doors/windows/trunks open, "
+                   "sentry mode, inside/outside temperature in °F, where it is (the named place, and coordinates), software version, and "
+                   "how many seconds ago it last reported. Asking never wakes the car. Read only: it can't lock, heat or charge the car.",
+    "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+}
+
 _MAKE_MUSIC = {
     "name": "make_music",
     "description": "Compose a song or instrumental on the Captain's own GPU at home (ACE-Step): free, no "
@@ -262,6 +290,7 @@ VERBS = (
     ("logs", "server_logs", "Logs", "Game server"),
     ("physics", "ask_mentat", "Physics (Mentat)", "Physics"),
     ("playing", "now_playing", "Now playing", "Music"),
+    ("car", "car_status", "The car", "Car"),
     ("music", "make_music", "Make music", "Music"),
     ("image", "make_image", "Make a picture", "Pictures"),
 )
@@ -285,7 +314,8 @@ def parse_verb(message: str) -> tuple[str | None, str]:
 class ChatTools:
     def __init__(self, vm, is_admin: bool, visible: list[str] | None = None, who: str = "",
                  music=None, home_mentat=None, home_music=None, home_image=None, image_allow=None, trace: str = "",
-                 image_tiers: tuple = ("make_image",), popups=None, home_popup=None, popup_payload=None, popup_allow=None):
+                 image_tiers: tuple = ("make_image",), popups=None, home_popup=None, popup_payload=None, popup_allow=None,
+                 home_house=None, home_car=None):
         self.vm, self.is_admin, self.who = vm, is_admin, who
         self.trace = trace                    # this chat turn's id: Mentat keeps it with the research record
         self.visible = list(GAMES) if visible is None else list(visible)   # games this person may see
@@ -309,6 +339,8 @@ class ChatTools:
         self.popups = {e["name"]: e for e in (popups or []) if tool_policy.popup_allowed(e, is_admin)} if home_popup else {}
         self.home_popup, self.popup_payload, self.popup_allow = home_popup, popup_payload, popup_allow
         self.files: list = []
+        self.home_house = home_house if tool_policy.allowed("house", is_admin) else None   # the lights: the Captain's alone
+        self.home_car = home_car if tool_policy.allowed("car", is_admin) else None         # his Tesla, where it is included: his alone
 
     def available(self) -> list[str]:
         names = [n for n in self.names if n != "start_game" or self.visible]
@@ -322,6 +354,10 @@ class ChatTools:
             names += ["make_image", "image_result"]
         if self.popups:
             names += [*self.popups, "popup_result"]
+        if self.home_house:
+            names += list(HOUSE_NAMES)
+        if self.home_car:
+            names.append("car_status")
         return names
 
     def badges(self) -> dict[str, list[dict]]:
@@ -352,6 +388,10 @@ class ChatTools:
             out += [_MAKE_IMAGE, _IMAGE_RESULT]
         if self.popups:
             out += [popup_schema(e) for e in self.popups.values()] + [_POPUP_RESULT]
+        if self.home_house:
+            out += HOUSE_TOOLS
+        if self.home_car:
+            out.append(_CAR_STATUS)
         return out
 
     def run(self, name: str, args: dict) -> str:
@@ -413,6 +453,22 @@ class ChatTools:
             raise ToolError(f"It failed: {state['error']}. Say so plainly.")
         raise ToolError("That job is gone (it expired, or the portal restarted). Offer to run it again.")
 
+    def _house(self, tool: str, args: dict) -> dict:
+        args = {k: v for k, v in (args or {}).items() if k != "confirm"}
+        try:
+            return {"answer": self.home_house.house_tool(tool, args)}
+        except (TimeoutError, RuntimeError) as exc:
+            raise ToolError(f"The house didn't answer: {exc}. Say so plainly.") from exc
+
+    def _home_devices(self, args) -> dict:
+        return self._house("home_devices", args)
+
+    def _home_state(self, args) -> dict:
+        return self._house("home_state", args)
+
+    def _home_control(self, args) -> dict:
+        return self._house("home_control", args)
+
     def _ask_mentat(self, args) -> dict:
         question = str(args.get("question") or "").strip()
         if not question:
@@ -429,6 +485,12 @@ class ChatTools:
             raise ToolError(f"Mentat is offline: {exc}. Say so; don't answer it yourself.") from exc
         self.mentat_where = "home"
         return result
+
+    def _car_status(self, _args) -> dict:
+        got = car_web.summary(self.home_car.car())
+        if got is None:
+            raise ToolError("The car isn't reporting (skippy-pc or TeslaMate is down, or nobody signed in to Tesla). Say so plainly.")
+        return got
 
     def _now_playing(self, _args) -> dict:
         return self.music()

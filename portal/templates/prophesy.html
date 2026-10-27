@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Shifting Prophesy — Browser Games{% endblock %}
+{% block app %}play{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}rune{% endblock %}
+{% block hud_back %}{{ url_for('play_index') }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge-panes.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='experiments.css') }}">
+<style>
+  #sppg .sppage { height: 100%; box-sizing: border-box; overflow-y: auto; break-before: column; break-inside: avoid; padding: 0 6px 12px 0; }
+  #sppg .sppage:first-child { break-before: auto; }
+  #sppg .arms { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin: 8px 0 14px; }
+  #sppg .arm { border: 1px solid var(--dim-green-hi); border-radius: var(--radius); padding: 10px 12px; }
+  #sppg .arm h4 { margin: 0 0 2px; color: var(--white); }
+  #sppg .arm .play { display: inline-block; margin-top: 6px; color: var(--cyan); }
+  #sppg .tag { display: inline-block; padding: 0 6px; border: 1px solid var(--amber); color: var(--amber); font-size: 12px; border-radius: 999px; }
+  #sppg .tag.ok { border-color: var(--green); color: var(--green); } #sppg .tag.short { border-color: var(--red); color: var(--red); }
+  #sppg h3 { margin: 4px 0 6px; }
+  #sppg .prompt { white-space: pre-wrap; border-left: 2px solid var(--dim-green-hi); padding-left: 10px; color: var(--white); margin: 6px 0; }
+  #sppg details.promptbox > summary { cursor: pointer; color: var(--muted); }
+  #sppg .attempts { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+  #sppg details.attempt { border: 1px solid var(--dim-green-hi); border-radius: var(--radius); }
+  #sppg details.attempt[open] { border-color: var(--cyan); }
+  #sppg details.attempt > summary { cursor: pointer; padding: 7px 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; list-style: none; }
+  #sppg details.attempt > summary::-webkit-details-marker { display: none; }
+  #sppg details.attempt > summary::before { content: "\25B8"; color: var(--muted); }
+  #sppg details.attempt[open] > summary::before { content: "\25BE"; color: var(--cyan); }
+  #sppg .lab { color: var(--white); font-weight: 600; }
+  #sppg .meta { color: var(--muted); font-size: 13px; margin-left: auto; }
+  #sppg .bars { display: inline-flex; gap: 2px; }
+  #sppg .bars i { width: 12px; height: 12px; border-radius: 2px; background: var(--dim-green); display: block; }
+  #sppg .bars i.ok { background: var(--green); } #sppg .bars i.part { background: var(--amber); } #sppg .bars i.zero { background: var(--red); }
+  #sppg .abody { padding: 2px 12px 12px; border-top: 1px solid var(--line); }
+  #sppg .abody h5 { margin: 12px 0 4px; color: var(--cyan); font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+  #sppg .facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 6px 0; font-size: 14px; }
+  #sppg .facts dt { color: var(--muted); } #sppg .facts dd { margin: 0; }
+  #sppg table.t { border-collapse: collapse; font-size: 13px; width: 100%; }
+  #sppg table.t th, #sppg table.t td { text-align: left; padding: 2px 10px 2px 0; border-bottom: 1px solid var(--line); }
+  #sppg table.t td.n, #sppg table.t th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  #sppg .shots { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
+  #sppg .shots img { width: 100%; height: auto; display: block; border: 1px solid var(--dim-green-hi); }
+  #sppg .thumb { width: 46px; height: 39px; object-fit: cover; border: 1px solid var(--dim-green-hi); border-radius: 3px; image-rendering: pixelated; display: block; }
+  #sppg .thumb.unc { border-style: dashed; border-color: var(--amber); } #sppg .thumb.none { opacity: .5; }
+  #sppg .wmaps { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 6px 0 10px; }
+  #sppg .wmaps.one { grid-template-columns: 1fr; max-width: 520px; }
+  #sppg figure.wmap { margin: 0; } #sppg figure.wmap img { width: 100%; height: auto; display: block; image-rendering: pixelated; border: 1px solid var(--dim-green-hi); }
+  #sppg figure.wmap figcaption { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  #sppg .legend ul { display: flex; flex-wrap: wrap; gap: 4px 14px; list-style: none; padding: 0; margin: 4px 0; font-size: 12px; }
+  #sppg .legend summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  #sppg .legend i { display: inline-block; width: 11px; height: 11px; border: 1px solid #000; vertical-align: -1px; margin-right: 4px; }
+  @media (max-width: 560px) { #sppg .wmaps { grid-template-columns: 1fr; } }
+  #sppg .score { color: var(--amber); font-weight: 600; }
+  #sppg .bad { color: var(--red); } #sppg .good { color: var(--green); }
+</style>{% endblock %}
+{% block content %}
+{# The experiment (prophesy.py): two models build the same game, one prompt at a time. One PAGE per turn (the pager flips them; the
+   newest is where it opens), and on a turn's page every attempt at it, each a section that opens by itself (one at a time): the
+   reference first, then purple's tries in the order they were made. Read from the bucket, nothing cached here. #}
+{% macro wmap(m, who) -%}
+<figure class="wmap"><a href="{{ url_for('prophesy.record_file', path=m.file) }}"><img src="{{ url_for('prophesy.record_file', path=m.file) }}" alt="{{ who }}: the world for seed {{ m.seed }}" loading="lazy"></a>
+  <figcaption>{{ who }} · seed {{ m.seed }}{% if not m.ok %} · <span class="bad">no world: {{ m.why or "?" }}</span>{% endif %}{% if m.world_sha %} · world {{ m.world_sha }}{% endif %}</figcaption></figure>
+{%- endmacro %}
+{% macro bars(checks) -%}
+<span class="bars" aria-label="the referee's six checks">{% for k in check_order %}{% set v = checks.get(k) %}<i class="{{ 'ok' if v == 100 else ('part' if v else ('zero' if v == 0 else '')) }}" title="{{ k }}{% if v is not none %} {{ v }}%{% endif %}"></i>{% endfor %}</span>
+{%- endmacro %}
+<section class="adm" id="sp">
+  <header class="ahead" style="padding-top:6px"><svg class="g mark" aria-hidden="true"><use href="#g-rune"/></svg><h2>Shifting Prophesy: purple Skippy's shake-down cruise</h2></header>
+  <div class="apane" style="flex:1;min-height:0">
+    <div class="pg" id="sppg"><div class="pg-flow">
+      <div class="sppage" id="sp-overview">
+        <p>Purple Skippy's shake-down cruise. The home AI, running as itself in the workshop on Skippy Core's local model, builds a
+          whole browser game: a top-down adventure with a procedurally generated overworld and dungeons, from a written spec, one
+          prompt from the Captain at a time. Claude Haiku gets the same prompt with every tool Claude Code has, as the reference.
+          A referee checks both builds against the spec on 500 seeds neither can see; purple tries each turn again, from scratch,
+          until it matches what Haiku made of it. <b>One page per turn</b> (flip with a swipe or the arrow keys); on a turn's page,
+          every attempt is a section that opens on its own: <b>model:turn:attempt</b>, so <i>purple:1:7</i> is purple's seventh try at turn 1.</p>
+        <div class="arms">
+          {% for name, arm in arms.items() %}
+          {% set v = versions[name] %}{% set t = totals[name] %}
+          <div class="arm">
+            <h4>{{ arm.label }}</h4>
+            <div class="help">{{ arm.detail }}</div>
+            <div>{% if t.scored %}<span class="score">{{ "%g" % t.points }}</span> points over {{ t.scored }} scored turn{{ "s" if t.scored != 1 }}, {{ t.wins }} won{% else %}not scored yet{% endif %}</div>
+            {% if v %}<a class="play" href="{{ url_for('prophesy.game', arm=name) }}">Play the newest build</a> <span class="tag">{{ short[name] or "build" }}</span>
+            {% else %}<div class="help">No build yet.</div>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% if not turns %}<p class="help">No turns yet. The first one appears here a few minutes after the referee pushes it.</p>
+        {% else %}<p class="help">{{ turns|length }} turn page{{ "s" if turns|length != 1 }}, newest at the end. Open on the newest.</p>{% endif %}
+      </div>
+      {% for t in turns|reverse %}
+      <div class="sppage" id="sp-turn-{{ t.n|int }}" data-turn="{{ t.n|int }}">
+        <h3>Turn {{ t.n }}{% if t.captain %} <span class="tag">scored</span>{% endif %}</h3>
+        <details class="promptbox"><summary>The prompt</summary><div class="prompt">{{ t.prompt }}</div></details>
+        {% if t.captain %}<p>{% if t.captain.note %}<span class="score">Captain:</span> {{ t.captain.note }}<br>{% endif %}{% for name, arm in arms.items() %}{% if t.captain.get(name) %}<span class="score">{{ arm.label }} {{ "%g" % t.captain[name].score }}/10</span>{% if t.captain[name].note %} <span class="help">{{ t.captain[name].note }}</span>{% endif %}{{ " · " if not loop.last }}{% endif %}{% endfor %}</p>{% endif %}
+        <div class="attempts">
+          {% for a in t.attempts %}
+          <details class="attempt" name="sp-t{{ t.id }}" id="a-{{ a.label|replace(':', '-')|replace('+', '-') }}" data-label="{{ a.label }}">
+            <summary>
+              {% set okmaps = a.maps|selectattr('ok')|list %}{% set thumb = (okmaps|first) or (a.maps|first) %}
+              {% if thumb %}<img class="thumb{{ ' unc' if thumb.source == 'uncommitted' }}{{ '' if thumb.ok else ' none' }}" src="{{ url_for('prophesy.record_file', path=thumb.file) }}" alt="" loading="lazy" title="seed {{ thumb.seed }}{{ ', from what it left uncommitted' if thumb.source == 'uncommitted' }}">{% endif %}
+              <span class="lab">{{ a.label }}</span>{% if a.benchmark %} <span class="tag">reference</span>{% endif %}
+              <span class="{{ 'good' if a.outcome.startswith('success') else ('bad' if a.outcome else '') }}">{{ (a.outcome or "?")[:42] }}</span>
+              {{ bars(a.checks) }}
+              {% if a.parity %}<span class="tag {{ 'ok' if a.parity.ok else 'short' }}">parity {{ 'reached' if a.parity.ok else 'short' }}</span>{% endif %}
+              <span class="meta">{% if a.minutes is not none %}{{ a.minutes }} min{% endif %}{% if a.profile.calls %} · {{ a.profile.calls|int }} calls{% endif %}</span>
+            </summary>
+            <div class="abody">
+              {% if a.note %}<p class="help">{{ a.note }}</p>{% endif %}
+              <h5>Result</h5>
+              <dl class="facts">
+                <dt>Outcome</dt><dd>{{ a.outcome or "?" }}{% if a.minutes is not none %}, {{ a.minutes }} min{% endif %}</dd>
+                <dt>Cost</dt><dd>{% if a.cost_usd is not none and a.cost_usd > 0 %}${{ "%.2f" % a.cost_usd }}{% else %}free{% endif %}</dd>
+                <dt>Commits</dt><dd>{{ a.commits if a.commits is not none else "?" }}{% if a.uncommitted %}, {{ a.uncommitted|int }} path(s) left uncommitted{% endif %}</dd>
+                <dt>Context</dt><dd>{% if a.peak_context is not none %}{{ "{:,}".format(a.peak_context|int) }} tokens peak{% else %}not reported{% endif %}{% if a.segments %}, {{ a.segments|int }} segment{{ "s" if a.segments != 1 }}{% endif %}{% if a.compactions %}, {{ a.compactions|int }} compaction{{ "s" if a.compactions != 1 }}{% if a.summary_chars %} (summaries of {% for n in a.summary_chars %}{{ "{:,}".format(n|int) }}{{ " / " if not loop.last }}{% endfor %} characters){% endif %}{% endif %}</dd>
+                {% if a.kind != "trial" %}<dt>Deploy</dt><dd class="{{ 'good' if a.deploy in ('success', 'uploaded') else ('bad' if a.deploy in ('failure', 'not pushed') else '') }}">{{ a.deploy or "?" }}{% if a.live %}, live{% endif %}</dd>{% endif %}
+              </dl>
+              {% if a.maps %}
+              <h5>Generated worlds{% if not a.benchmark and t.reference_maps %} <span class="help" style="text-transform:none">(the reference's on the left)</span>{% endif %}</h5>
+              {% for m in a.maps if m.source == 'commit' %}{% set ref = (t.reference_maps|selectattr('seed', 'equalto', m.seed)|list|first) if not a.benchmark else none %}
+              <div class="wmaps{{ '' if ref else ' one' }}">{% if ref %}{{ wmap(ref, 'the reference') }}{% endif %}{{ wmap(m, a.label) }}</div>
+              {% endfor %}
+              {% if a.maps|selectattr('source', 'equalto', 'uncommitted')|list %}
+              <p class="help">What it left uncommitted (the referee grades only commits; this is what the files made):</p>
+              {% for m in a.maps if m.source == 'uncommitted' %}<div class="wmaps one">{{ wmap(m, a.label ~ ' (uncommitted)') }}</div>{% endfor %}
+              {% endif %}
+              {% if legend %}<details class="legend"><summary>What the colours mean</summary><ul>{% for c in legend %}<li><i style="background: {{ c.hex }}"></i>{{ c.name }}</li>{% endfor %}</ul></details>{% endif %}
+              {% endif %}
+              <h5>Referee</h5>
+              {% if a.grade_status == "not-started" %}<p class="help">Not started: there is no generator in the commit yet.</p>
+              {% elif a.checks %}<table class="t"><tr>{% for k in check_order %}{% if k in a.checks %}<th>{{ k }}</th>{% endif %}{% endfor %}</tr>
+                <tr>{% for k in check_order %}{% if k in a.checks %}<td class="{{ 'good' if a.checks[k] == 100 else 'bad' }}">{{ a.checks[k] }}%</td>{% endif %}{% endfor %}</tr></table>
+              {% else %}<p class="help">Not graded.</p>{% endif %}
+              {% if a.parity %}
+              <h5>Parity with the reference: <span class="{{ 'good' if a.parity.ok else 'bad' }}">{{ 'reached' if a.parity.ok else 'short' }}</span></h5>
+              {% if a.parity.short %}<p class="help">Short on: {{ a.parity.short|join(", ") }}.</p>{% endif %}
+              {% if a.parity.size %}<table class="t"><tr><th>Measure (median)</th><th class="n">Reference's min</th><th class="n">This attempt</th><th></th></tr>
+                {% for r in a.parity.size %}<tr><td>{{ r.measure }}</td><td class="n">{{ r.bench_min if r.bench_min is not none else "?" }}</td><td class="n">{{ r.got if r.got is not none else "none" }}</td><td class="{{ 'good' if r.ok else 'bad' }}">{{ "ok" if r.ok else "short" }}</td></tr>{% endfor %}</table>{% endif %}
+              {% endif %}
+              {% if a.profile %}
+              <h5>What it did</h5>
+              <table class="t"><tr><th></th><th class="n">This attempt</th>{% if not a.benchmark and t.reference %}<th class="n">Reference</th>{% endif %}</tr>
+                {% for k in profile_order %}{% if k in a.profile %}<tr><td>{{ k|replace("_", " ") }}</td><td class="n">{{ a.profile[k]|int }}</td>{% if not a.benchmark and t.reference %}<td class="n">{{ t.reference.get(k, "?") }}</td>{% endif %}</tr>{% endif %}{% endfor %}</table>
+              {% endif %}
+              {% if a.harness %}
+              <h5>Harness it ran under</h5>
+              <dl class="facts">
+                <dt>Engine</dt><dd>{{ a.harness.engine or "?" }}{% if a.harness.sdk %}, Agent SDK {{ a.harness.sdk }}{% endif %}</dd>
+                <dt>Model</dt><dd>{{ a.harness.core_model or "?" }}{% if a.harness.core_context %}, {{ "{:,}".format(a.harness.core_context|int) }} context{% endif %}</dd>
+                {% if a.harness.sampling %}<dt>Sampling</dt><dd>{% for k, v in a.harness.sampling.items() %}{{ k }} {{ v }}{{ ", " if not loop.last }}{% endfor %}</dd>{% endif %}
+              </dl>
+              {% endif %}
+              {% if a.shots %}<h5>Screenshots</h5><div class="shots">{% for s in a.shots %}<a href="{{ url_for('prophesy.record_file', path=s) }}"><img src="{{ url_for('prophesy.record_file', path=s) }}" alt="{{ a.label }}: {{ s.rsplit('/', 1)[-1] }}" loading="lazy"></a>{% endfor %}</div>{% endif %}
+              <p class="help">{% if a.reply %}<a href="{{ url_for('prophesy.record_file', path=a.reply) }}">Its reply</a>{% endif %}{% if a.reply and a.actions %} · {% endif %}{% if a.actions %}<a href="{{ url_for('prophesy.record_file', path=a.actions) }}">every tool call</a>{% endif %}{% if a.report %} · <a href="{{ url_for('prophesy.record_file', path=a.report) }}">the full report</a>{% endif %}</p>
+            </div>
+          </details>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div></div>
+    <div class="pips" hidden><i></i></div>
+  </div>
+</section>
+<script>
+  (function () {
+    var panel = document.getElementById("sppg");
+    var pager = Bridge.pager(panel, { pips: panel.parentNode.querySelector(".pips") });
+    var pages = [].slice.call(panel.querySelectorAll(".sppage"));
+    // one attempt open at a time, even where <details name> is not supported yet
+    panel.addEventListener("toggle", function (e) {
+      var d = e.target;
+      if (d.classList && d.classList.contains("attempt") && d.open) {
+        [].forEach.call(d.parentNode.querySelectorAll("details.attempt[open]"), function (o) { if (o !== d) o.open = false; });
+      }
+    }, true);
+    // open on the newest turn, or on the attempt a link names (…/shifting-prophesy/#purple:1:7), also when the link is followed here
+    function named() {
+      var hash = decodeURIComponent(location.hash.slice(1)).replace(/["\\]/g, "");
+      return hash ? panel.querySelector('details.attempt[data-label="' + hash + '"]') : null;
+    }
+    function show(animate) {
+      var el = named(), flow = panel.querySelector(".pg-flow");
+      if (el) el.open = true;
+      if (!animate) flow.style.transition = "none";                // arrive on the page, don't slide there
+      pager.refresh(); pager.go(el ? pages.indexOf(el.closest(".sppage")) : pages.length - 1);
+      void flow.offsetWidth; flow.style.transition = "";
+    }
+    // the pager measures once the page is laid out: before that it has one page, and go() would clamp to it
+    if (document.readyState === "complete") show(false); else window.addEventListener("load", function () { show(false); });
+    window.addEventListener("hashchange", function () { if (named()) show(true); });
+  })();
+</script>
+{% endblock %}

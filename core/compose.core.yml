@@ -7,10 +7,13 @@
 #            core/llm/models.py into ${CORE_STATE}/llm (config.yaml + shim.json) before every deploy.
 #   ollama   the Ollama shim (core/ollama-shim): same name and port as today's Ollama, so OLLAMA_BASE_URL never changes.
 #   flask-api  Skippy's core, unchanged code.
+#   mentat   the physics engine with Core's chat model (skippy-pc's reporter and wa-trickle call it on the tailnet, :7350).
 #   image-studio  the portal chat's pictures: Qwen-Image-2512 through stable-diffusion.cpp (Vulkan), one sd-cli run per
 #            picture so it holds no memory between them. Host networking on 7347 so the box's ufw (not Docker's own NAT)
 #            keeps the LAN out; the tailnet gets in through Tailscale's own rules, and ALLOW_FROM narrows it to skippy-pc.
-# Later stages (docs/local-ai-fallback-plan.md Phase 5): the home reporter, Mentat, the gates, Dozzle, Kuma.
+#   searxng  purple Skippy's WebSearch (docs/popup-inventory.md): a self-hosted metasearch engine, no account, no key; 127.0.0.1:7360, and the tailnet door
+#            (core/install/tailnet.sh) is the only way in for skippy-pc's search tool (services/purple-tools).
+# Later stages (docs/local-ai-fallback-plan.md Phase 5): the home reporter, the gates, Dozzle.
 
 x-logging: &default-logging
   driver: json-file
@@ -19,6 +22,20 @@ x-logging: &default-logging
     max-file: "3"
 
 services:
+  searxng:
+    image: searxng/searxng:2026.10.27-cb74e7f81@sha256:9dc6d0472930d981f5955f0379e107257383be2d81897b25df89cf37d789f152
+    restart: unless-stopped
+    logging: *default-logging
+    ports:
+      - "127.0.0.1:7360:8080"
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   llm:
     image: ghcr.io/mostlygeek/llama-swap:v265-vulkan-b11641@sha256:7a1d92c796dadb96fee7deac9ba41d46a2e0f50dabc6578f88f2d8fd21878110
     restart: unless-stopped
@@ -70,6 +87,37 @@ services:
       timeout: 5s
       retries: 10
       start_period: 15s
+
+  # Mentat with Core's chat model (2026-10-25; it was mentat-home on skippy-pc): sigma-ground's physics engine, its trained router first
+  # and its translator asking the shim's skippy-chat (Qwen3.6-35B-A3B, resident) for phrasings its keywords miss. The tailnet reaches it through
+  # `tailscale serve --http=7350` (core/install/tailnet.sh); the port itself is on 127.0.0.1 only.
+  mentat:
+    build:
+      context: ..
+      dockerfile: mentat/Dockerfile
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      - MENTAT_USE_LLM=1
+      - OLLAMA_URL=http://ollama:11434
+      - MATERIA_OLLAMA_MODEL=skippy-chat    # the translator's Qwen: the chat slot (Qwen3.6-35B-A3B), resident
+      - MENTAT_ROUTER_MODEL=${MENTAT_ROUTER_MODEL-mentat-router-v31-4b}   # the trained router stage in /ask (mentat/router_stage.py), resident; empty = off
+      - MENTAT_CASCADE=before   # the benchmark's deterministic cascade ahead of the router (mentat/cascade_stage.py); empty = off
+      - MENTAT_CASCADE_OFF=math   # its maths regexes took 19 right router answers (replay 2026-10-27: physics 108->132, maths 317 kept, adversarial 1->8 of 18)
+      - MENTAT_CALL_TIMEOUT=90
+      - MENTAT_RATE_PER_MIN=600
+      - MENTAT_INSTANCE=home
+      - MENTAT_RESEARCH_DIR=/research
+      - SIGMA_DATASETS=/datasets   # read-only data: the DE440 kernel (jpl/) and our sealed forecast table (forecast/); sigma_ground/field/datasets.py reads this
+    ports:
+      - "127.0.0.1:7350:8080"
+    volumes:
+      - ${CORE_STATE:-/var/lib/skippy-core}/mentat-research:/research   # <YYYY-MM>.jsonl, appended forever (mentat/research.py)
+      - ${CORE_DATASETS:-/srv/datasets}/jpl:/datasets/jpl:ro            # DE440s kernel + Horizons copies, mirrored from the PC (D:/datasets, scp or rsync over the LAN); read-only
+      - ${CORE_DATASETS:-/srv/datasets}/forecast:/datasets/forecast:ro  # the sealed N-body forecast table body_position serves for future dates (scripts/make_forecast_table.py); read-only
+    command: gunicorn --bind 0.0.0.0:8080 --workers 1 --threads 4 --timeout 120 app:app
+    depends_on:
+      - ollama
 
   image-studio:
     build: ./image-studio

@@ -7,7 +7,7 @@ from pathlib import Path
 # path, not by putting mentat/ on sys.path: this suite runs in one pytest process with the
 # portal's, and mentat/app.py would shadow the portal's `app` module.
 MENTAT = Path(__file__).resolve().parents[1]
-for _name in ("wva", "research"):        # research.py: the research log app.py imports
+for _name in ("ready", "wva", "research", "router_stage", "cascade_stage"):        # research.py: the research log app.py imports
     if _name not in sys.modules:
         _spec = importlib.util.spec_from_file_location(_name, MENTAT / f"{_name}.py")
         sys.modules[_name] = importlib.util.module_from_spec(_spec)

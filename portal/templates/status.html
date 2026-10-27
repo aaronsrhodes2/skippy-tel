@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Status — Maker Portal{% endblock %}
+{% block app %}admin{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}server{% endblock %}
+{% block hud_back %}{{ url_for('admin.index') }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='status.css') }}?v={{ (build.built_at if build else 'dev') }}">{% endblock %}
+{% block content %}
+{# The Status page: the whole house on one page, drawn as a graph (docs/status-design.md). Machines are nodes, the real connections are
+   lines; a server opens into its containers, models and MCPs, each with a lamp. Pan with a drag, zoom with the wheel or two fingers.
+   Back and Close sit side by side and look different (the Captain's rule): an arrow steps up one level, a cross leaves the sheet. #}
+<section class="stat" id="stat" data-heal='{{ heal_names | tojson }}' data-state-url="{{ url_for('status.state_json') }}"
+         data-heal-url="{{ url_for('status.heal') }}" data-repair-url="{{ url_for('status.repair') }}" data-logs-url="{{ url_for('status.logs') }}" data-probe-url="{{ url_for('status.probe') }}">
+  <div class="bar">
+    <button type="button" class="key" id="s-repair" aria-label="Put everything back" title="Put everything back"><svg class="g" aria-hidden="true"><use href="#g-retry"/></svg></button>
+    <button type="button" class="chip" id="s-problems" aria-label="Problems" title="Problems"><svg class="g" aria-hidden="true"><use href="#g-gauge"/></svg><b id="s-count">0</b></button>
+    <button type="button" class="key" id="s-logs" aria-label="Logs" title="Logs"><svg class="g" aria-hidden="true"><use href="#g-sheet"/></svg></button>
+    <span class="grow"></span>
+    <span class="age" id="s-age" role="status"></span>
+    <button type="button" class="key" id="s-fit" aria-label="Fit to screen" title="Fit to screen"><svg class="g" aria-hidden="true"><use href="#g-fit"/></svg></button>
+  </div>
+  <svg id="s-map" class="map" viewBox="0 0 1000 640" preserveAspectRatio="xMidYMid meet" role="img" aria-label="The house: machines and their connections"></svg>
+  <aside class="hsheet" id="s-sheet" hidden role="dialog" aria-label="Details">
+    <header>
+      <button type="button" class="key" id="s-back" aria-label="Back" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <button type="button" class="key close" id="s-close" aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
+      <h2 id="s-title"></h2>
+    </header>
+    <div class="body" id="s-body"></div>
+  </aside>
+  <p class="note" id="s-note" role="status" hidden></p>
+</section>
+<script src="{{ url_for('static', filename='status.js') }}?v={{ (build.built_at if build else 'dev') }}"></script>
+{% endblock %}

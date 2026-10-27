@@ -17,10 +17,11 @@ with tiny stand-in models on CPU. Onlining the real models later is a config lin
 | Ollama shim | `ollama-shim/` | Ollama's API on port 11434 in front of llama-swap, so flask-api, Mentat, the reporter, voice-gate and Bilby keep calling `OLLAMA_URL` unchanged. `keep_alive: 0` never unloads the resident chat slot. `/v1/...` passes straight through (OpenAI and Anthropic `/v1/messages`). |
 | Stack | `compose.core.yml`, `compose.gpu.yml` | `llm`, `ollama` (the shim) and `flask-api`. Paths come from the deployer's settings, not Windows drives. `compose.gpu.yml` hands `/dev/dri` to `llm` on the box only. |
 | Picture studio | `image-studio/` | The portal chat's QUALITY pictures (`make_image_hq`; the quick tier stays on skippy-pc): Qwen-Image-2512 (Q8_0, Apache 2.0) with its Qwen2.5-VL-7B text encoder, through stable-diffusion.cpp's Vulkan build (pinned release + sha256). One `sd-cli` run per picture with `--mmap` (~30 GB while drawing, nothing held between pictures; without `--mmap` the weights sit in RAM twice and the OOM killer fires). ~20 s a step at 1024 px, 40 steps by default, so ~13 min a picture: quality over speed, by the Captain's call. `/health` gives `gpu_free_gib`, `gpu_free_pct`, `gpu_util_pct` for the portal's patient queue. Host networking on 7347: ufw keeps the LAN out, Tailscale's own rules let the tailnet in, and `ALLOW_FROM` answers only skippy-pc (and the box itself). |
+| 3D and video pop-ups | `popups-3d/` | The quality pop-ups ([docs/popups.md](../docs/popups.md)): `image_to_3d` (Hunyuan3D-2 on ROCm PyTorch, TheRock wheels for gfx1151: a textured `.glb` in ~1-2 min, 16 GB peak), `text_to_3d` (the picture studio, then image_to_3d) and `make_video` (Wan 2.2 TI2V-5B through sd.cpp's Vulkan build: ~10 min per second of clip, 20 GB peak). Each job is its own process, so nothing is held between jobs. Port 7348, host networking and `ALLOW_FROM` like the picture studio; on only when `core.env` says `CORE_POPUPS3D=1`. **MIOpen stays off**: its convolutions starved llama-server into ring resets. Numbers and verdicts: [docs/3d-video-popups.md](../docs/3d-video-popups.md). |
 | Smoke test | `smoke.py` | Tags, chat (stream and not), JSON output, every slot including the general↔coder swap, Anthropic `/v1/messages` on coder, a wrong key refused (when `LLM_API_KEY` is set), flask-api `/health` and a real `/intent/unmatched` reply. |
-| Pull deployer | `deployer/` | A systemd timer every 2 minutes. It fetches `main`, waits for the commit's `core.yml` run to go green, deploys, runs the smoke test and rolls back to the last good commit if anything is red. A red smoke test marks the commit bad; a failed build or pull is retried. Nothing listens for inbound connections. |
+| Pull deployer | `deployer/` | A systemd timer every 2 minutes. It fetches `main`, waits for this box's own CI (`ci/`) to pass the commit, deploys, runs the smoke test and rolls back to the last good commit if anything is red. A red smoke test marks the commit bad; a failed build or pull is retried. Nothing listens for inbound connections. |
 | Simulator | `sim/` | Ubuntu 26.04 with its own Docker inside. It deploys the baseline, rolls back a deliberately broken commit, and refuses a `CORE_FULL` whose files are missing, checking the stack stays healthy throughout. |
-| CI | `.github/workflows/core.yml` | Runs on every push: the unit tests, and the simulator scenario on GitHub's `ubuntu-26.04` runner when `core/`, `services/flask-api/` or the workflow changed. The deployer requires its run to be green. |
+| CI | `ci/` | A systemd timer every minute (`ci/install.sh`). It fetches `main` from the house's git (the data trunk), and runs the unit tests in plain Docker, one container per job, no network. The deployer requires its green result for a commit (`CI_LOCAL`); the simulator scenario is run by hand with `sim/run.sh`. |
 
 ## Run the simulator
 
@@ -66,10 +67,9 @@ Inside the return window, do the burn-in from the plan (section 3) before wiping
    (the Captain's Google Drive vault folder) as `HF_ID`. Export it for that one command
    (`HF_ID=... python3 core/llm/models.py fetch ...`), never into a committed file. The midnight job on skippy-pc
    reads `HF_ID` from the vault by itself. The stand-ins and the three full models are not gated, so CI needs no token.
-6. **Deployer:** `sudo bash core/deployer/install.sh` (dry run), then `--apply`. In `/etc/skippy-core/core.env`, set
-   `GITHUB_TOKEN` to the vault's `GITHUB_DEPLOYER_TOKEN`: the repo is **private**, so the token is what lets the
-   box read Actions runs and `git fetch` at all (fine-grained, this repo only: Contents and Actions read). Copy the
-   vault to `/etc/skippy-core/vault.env` (0600). `core/install/README.md` shows how both go over SSH without
+6. **Deployer:** `sudo bash core/deployer/install.sh` (dry run), then `--apply`. In `/etc/skippy-core/core.env` set `CI_LOCAL` to
+   core/ci's results folder (`sudo bash core/ci/install.sh --apply` makes it). Copy the vault to `/etc/skippy-core/vault.env`
+   (0600). `core/install/README.md` shows how it goes over SSH without
    anyone typing them. The first tick deploys `main` with stand-ins.
 7. Online the slots one at a time (`CORE_FULL=chat`, then `chat,general`, then `all`), checking
    `python3 core/deployer/deployer.py status` after each.

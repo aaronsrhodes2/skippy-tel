@@ -1,6 +1,6 @@
 # Home → portal bridge. Docker Compose merges this file into docker-compose.yml
 # automatically, so a plain `docker compose up -d --build` on skippy-pc runs
-# these alongside flask-api and ollama (same network: they reach each other by
+# these alongside flask-api (same network: they reach each other by
 # service name). Nothing here publishes a port to the network: everything goes OUT to
 # the portal, except music-gate and video-gate, which listen on 127.0.0.1 for Tailscale Funnel.
 services:
@@ -62,7 +62,7 @@ services:
       VOICE_STYLE: "[whispers]"                # his delivery: close and soft (ElevenLabs v3 tag; empty = none). [softly] lost word endings in RNNoise
       VOICE_FX_PASSES: 1                       # 2 = clean harder (RNNoise twice); VOICE_FX=off = Skippy's voice raw
       # VOICE_FX: off = Skippy's voice raw (default on: a gate on the pauses and a close, dry polish; see services/voice-gate/gate.py FX_CHAIN)
-      OLLAMA_URL: http://ollama:11434          # writes the spoken summary of a long reply (SUMMARY_MODEL, default qwen2.5:7b)
+      OLLAMA_URL: http://skippy-core:11434          # writes the spoken summary of a long reply (SUMMARY_MODEL, default qwen2.5:7b)
       TTS_STUDIO_URL: http://tts-studio:8003   # the local voices (stock = Kokoro, skippy = F5 clone); which one is the pass's call
     networks: [default, tts-net]               # tts-net: the only way to reach the offline tts-studio
     volumes:
@@ -82,11 +82,12 @@ services:
     env_file: G:/My Drive/vault/.env           # same shared .env as flask-api: SKIPPY_HOME_TOKEN ("Pair home"), BILBY_MAC_URL
     environment:
       SKIPPY_API: http://flask-api:5000
-      MENTAT_URL: http://mentat-home:8080
+      MENTAT_URL: http://skippy-core:7350      # Mentat with Core's chat model, on skippy-core (tailnet only, core/install/tailnet.sh)
       MUSIC_URL: http://music-studio:8001      # ACE-Step: the portal chat's make_music
       IMAGE_URL: http://image-studio:8002      # SDXL: the portal chat's make_image, the QUICK tier (this PC, beside the voices)
       IMAGE_HQ_URL: http://skippy-core:7347    # make_image_hq, the QUALITY tier: Qwen-Image on skippy-core (core/image-studio), tailnet only
-      OLLAMA_URL: http://ollama:11434          # unloaded before a song so it gets the whole GPU
+      CAR_URL: http://skippy-core:7351         # the Captain's Tesla: TeslaMate's latest state from skippy-core's car reader (core/car), tailnet only
+      OLLAMA_URL: http://skippy-core:11434          # unloaded before a song so it gets the whole GPU
       CLAUDE_BRIDGE_URL: http://host.docker.internal:9337   # Claude Code's bridge on the host: the private Skippy on /me
       MUSIC_GATE_URL: http://music-gate:8080   # Bilby's Audio Service's library...
       MUSIC_GATE_PUBLIC: https://skippy-pc.tailab2cc7.ts.net   # ...and its Tailscale Funnel address (not a secret)
@@ -94,6 +95,8 @@ services:
       VIDEO_GATE_PUBLIC: https://skippy-pc.tailab2cc7.ts.net:8443   # ...and its Funnel address: 443 is the music gate's
       VOICE_GATE_URL: http://voice-gate:8080   # Skippy's ears and mouth (its /health "ready")...
       VOICE_GATE_PUBLIC: https://skippy-pc.tailab2cc7.ts.net:10000   # ...and its Funnel address: the third port
+    ports:
+      - "127.0.0.1:47450:47450"                # the private Skippy's quick pop-up tools (services/home-reporter/local_api.py): this PC only
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -113,7 +116,7 @@ services:
     env_file: ${WA_TRICKLE_STATE:-./state/wa-trickle}/wolfram.env   # ONE line, WOLFRAM_ALPHA_APP_ID=..., copied from the vault:
                                                                     # this service does not get the rest of the vault (services/wa-trickle/setup.sh)
     environment:
-      MENTAT_URL: http://mentat-home:8080
+      MENTAT_URL: http://skippy-core:7350
       WA_DAILY_BUDGET: "60"
       WA_MONTHLY_CAP: "1900"
       WA_INTERVAL_S: "900"
@@ -121,28 +124,6 @@ services:
       - "127.0.0.1:3010:8080"
     volumes:
       - ${WA_TRICKLE_STATE:-./state/wa-trickle}:/state    # the queue's SQLite file; set WA_TRICKLE_STATE when deploying from a worktree
-    depends_on: [mentat-home]
-    logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
-
-  # Mentat with Qwen: sigma-ground's physics engine, its plain-English
-  # translator allowed to ask qwen2.5:7b (Ollama) for phrasings its keywords
-  # miss. Skippy's portal chat sends physics questions here while skippy-pc is up.
-  mentat-home:
-    build:
-      context: .
-      dockerfile: mentat/Dockerfile
-    container_name: skippytel-mentat
-    restart: unless-stopped
-    environment:
-      MENTAT_USE_LLM: "1"
-      OLLAMA_URL: http://ollama:11434
-      MENTAT_CALL_TIMEOUT: "90"
-      MENTAT_RATE_PER_MIN: "600"
-      MENTAT_INSTANCE: home
-      MENTAT_RESEARCH_DIR: /research   # everything Mentat outputs, forever (mentat/research.py): research data
-    volumes:
-      - ./state/mentat-research:/research   # <YYYY-MM>.jsonl, appended; survives rebuilds
-    command: gunicorn --bind 0.0.0.0:8080 --workers 1 --threads 4 --timeout 120 app:app
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
 
   # image-studio: SDXL on this PC's GPU for the portal chat's make_image (the Captain only, for now). The weights are the

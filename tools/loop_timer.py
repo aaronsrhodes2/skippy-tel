@@ -1,25 +1,32 @@
 #!/usr/bin/env python3
 """Time ONE trip around the self-deploy loop: "prompt sent" to "new deployment visible".
 
-    python3 tools/loop_timer.py                          # the newest deploy run, as it happened (after the fact)
+    python3 tools/loop_timer.py                          # the newest commit CI has seen, as it happened (after the fact)
     python3 tools/loop_timer.py --since "12 minutes ago" # ... counting from when the prompt was sent
-    python3 tools/loop_timer.py --watch --since now      # BEFORE pushing: waits for the push, the run and the new version
+    python3 tools/loop_timer.py --watch --since now      # BEFORE pushing: waits for the push, CI, the deploy and the new version
     python3 tools/loop_timer.py --sha 8adcd7e --json     # one commit, as JSON
 
-`make loop-time` and `make loop-watch` call it. Standard library only (urllib for the portal, the `gh` CLI for GitHub), so
-it runs from Git Bash on Windows and on Linux. docs/cicd.md "Timing the loop" explains how to read the table.
+`make loop-time` and `make loop-watch` call it. Standard library only (urllib for the portal, `ssh` and `git` for the rest), so it
+runs from Git Bash on Windows and on Linux. docs/cicd.md "Timing the loop" explains how to read the table.
 
-Every stage comes from evidence and is never guessed; a stage with none prints `n/a (reason)`:
-  * the PUSH is the deploy run's `createdAt` (GitHub creates the run the moment the push lands);
-  * queue, every job and every step of the deploy job are GitHub's own start/end stamps (`gh run view --json jobs`);
-  * "the new revision starts serving" is the END of the deploy job's `Deploy to Cloud Run` step;
-  * "visible" is when THIS machine first saw `<portal>/version` report the pushed commit (polled once a second while
-    watching), so it needs the timer to be running before the deploy finishes: afterwards the moment is unknowable;
+The loop since 2026-10-25 (docs/no-github.md): a push to the house git (D:\\trunk\\git\\skippy-tel.git) -> skippy-core's CI (core/ci, a
+timer every minute) tests it -> skippy-core's portal deployer (core/cd/cd.py, a timer every minute) deploys it to Cloud Run; beside it,
+Core's deployer (core/deployer, every 2 minutes) updates Core's own services. Every stage comes from a record and is never guessed;
+a stage with none prints `n/a (reason)`:
+  * the PUSH is the house repo's reflog entry for the commit (`core.logAllRefUpdates`); without one, the ref file's time when the
+    commit is still main's tip, else the commit's committer date (said in the note);
+  * CI is its result file on skippy-core (results/<sha>.json: at, finished_at, each job's started_at / finished_at);
+  * the deploy is cd.py's run in /var/lib/skippy-core/cd/state.json (created_at, each job's started_at / completed_at, and the portal
+    job's serving_at: when all traffic moved to the new revision);
+  * Core's services are the deployer's last good deploy (status.json last_good: started, at) when it is this commit;
+  * "visible" is when THIS machine first saw `<portal>/version` report the pushed commit (polled once a second while watching), so it
+    needs the timer to be running before the deploy finishes: afterwards the moment is unknowable;
   * the agent's own marks (bridge received, first edit, git push) only exist when `--bridge` can read them.
-All the arithmetic is in UTC; the table shows local time (`--utc` for UTC).
+skippy-core is read over `ssh skippy-core` (one read-only Python snippet per look; nothing there is changed). All the arithmetic is in
+UTC; the table shows local time (`--utc` for UTC).
 
-Exit status: 0 the table printed and the new version is live (or, without --watch, the run succeeded); 1 the run failed
-or was cancelled, or the version never showed up while watching; 2 couldn't run (no run, gh missing/not signed in, bad flag).
+Exit status: 0 the table printed and the new version is live (or, without --watch, nothing failed); 1 CI or the deploy failed, or the
+version never showed up while watching; 2 couldn't run (no such commit, skippy-core unreachable, bad flag).
 """
 from __future__ import annotations
 
@@ -34,22 +41,41 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Callable
 
 PORTAL = "https://skippy-portal-1015050363686.us-west1.run.app"        # CLAUDE.md "Cloud: portal + games VM"
 BRIDGE = "http://localhost:9337"                                           # the Claude bridge on skippy-pc
-WORKFLOW, BRANCH = "deploy.yml", "main"
-DEPLOY_JOB, DEPLOY_STEP = "portal", "Deploy to Cloud Run"                  # the job and step after which the new revision serves
-RUN_FIELDS = "databaseId,headSha,createdAt,startedAt,updatedAt,event,status,conclusion,url,displayTitle"
-VIEW_FIELDS = RUN_FIELDS + ",jobs"
+CORE_HOST = "skippy-core"                                                  # `ssh skippy-core` (the Captain's ssh config)
+HOUSE = os.environ.get("LOOP_HOUSE_GIT") or ("D:/trunk/git/skippy-tel.git" if os.name == "nt" else "/mnt/pc/trunk/git/skippy-tel.git")
+BRANCH = "main"
+DEPLOY_JOB = "portal"                                                      # cd.py's job after which the new revision serves
 EDIT_TOOLS = frozenset({"Edit", "Write", "MultiEdit", "NotebookEdit"})     # what "first edit" means in the bridge's events
-SKEW_S = 5.0            # this machine's clock vs GitHub's: a run created this much BEFORE `--since` still counts as after it
-LABELS = {
-    "gate": "gate (bootstrapped?)", "changes": "changes (what to build)", "test": "tests",
-    "test-flask-api": "tests: flask-api", "portal-image": "build portal image", "mentat-test": "mentat tests",
-    "mentat": "mentat deploy", "infra": "infra (terraform)", "portal": "deploy portal",
-}
-NOISE_STEP = re.compile(r"Set up job|Complete job|Post .*", re.I)         # bookkeeping steps: no information in them
+SKEW_S = 5.0            # clocks of this machine and skippy-core: a record this much BEFORE `--since` still counts as after it
+LABELS = {"portal-image": "build portal image", "portal": "deploy portal", "mentat": "mentat deploy", "infra": "infra (terraform)",
+          "suite": "suite", "flask-api": "flask-api", "services": "services", "shell-syntax": "shell syntax"}
+
+# What `ssh skippy-core python3 -` runs: reads CI's newest results, Core's deployer status and cd.py's runs, and prints them as one JSON.
+# Read only (every file is world-readable); a job's log tail is dropped on the spot, so the answer stays small.
+REMOTE = r'''
+import glob, json, os
+B = "/var/lib/skippy-core"
+def rd(p):
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+ci = []
+for f in sorted(glob.glob(B + "/ci/skippy-tel/results/*.json"), key=os.path.getmtime, reverse=True)[:40]:
+    d = rd(f)
+    if isinstance(d, dict):
+        d.setdefault("sha", os.path.basename(f)[:-5])
+        for j in d.get("jobs") or []:
+            j.pop("tail", None)
+        ci.append(d)
+print(json.dumps({"ci": ci, "deployer": rd(B + "/deployer/status.json"), "cd_runs": (rd(B + "/cd/state.json") or {}).get("runs") or []}))
+'''
 
 
 class Problem(Exception):
@@ -63,8 +89,8 @@ def utcnow() -> datetime:
 
 
 def parse_ts(value: Any) -> datetime | None:
-    """A GitHub / ISO 8601 / epoch-seconds time as an aware UTC datetime. None for "missing": GitHub writes a job that has not
-    started as 0001-01-01T00:00:00Z, and anything unreadable is treated as absent rather than guessed."""
+    """An ISO 8601 / epoch-seconds time as an aware UTC datetime (CI writes epoch seconds, cd.py and the deployer ISO). None for
+    "missing": anything unreadable is treated as absent rather than guessed."""
     if value in (None, "", 0):
         return None
     try:
@@ -125,17 +151,85 @@ def iso(moment: datetime | None) -> str | None:
 
 # ── the outside world, behind seams ──────────────────────────────────────────────
 
-def run_gh(args: list[str]) -> str:
-    """`gh <args>`: its stdout. A missing gh, a signed-out gh or an API error becomes a Problem with gh's own words."""
+def read_core(host: str = CORE_HOST) -> dict:
+    """One look at skippy-core's records (REMOTE above). An unreachable box or an unreadable answer is a Problem with ssh's own words."""
     try:
-        done = subprocess.run(["gh", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+        done = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, "python3", "-"], input=REMOTE,
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
     except FileNotFoundError:
-        raise Problem("the GitHub CLI (gh) isn't installed or isn't on PATH") from None
+        raise Problem("ssh isn't installed or isn't on PATH") from None
     except subprocess.TimeoutExpired:
-        raise Problem(f"gh {' '.join(args[:3])} timed out") from None
+        raise Problem(f"ssh {host} timed out") from None
     if done.returncode != 0:
-        raise Problem(f"gh {' '.join(args[:3])} failed: {(done.stderr or done.stdout).strip()[:300]} (signed in? `gh auth status`)")
-    return done.stdout
+        raise Problem(f"ssh {host} failed: {(done.stderr or done.stdout).strip()[:300]}")
+    try:
+        data = json.loads(done.stdout)
+    except ValueError:
+        raise Problem(f"skippy-core didn't answer JSON: {done.stdout[:120]!r}") from None
+    if not isinstance(data, dict):
+        raise Problem("skippy-core's answer wasn't an object")
+    return data
+
+
+class HouseGit:
+    """The house's bare repo (docs/no-github.md): main's tip, a commit's subject, and when a commit was pushed."""
+
+    def __init__(self, path: str = HOUSE, branch: str = BRANCH):
+        self.path, self.branch = path, branch
+
+    def git(self, *args: str) -> str | None:
+        try:
+            done = subprocess.run(["git", "-c", "safe.directory=*", "--git-dir", self.path, *args], capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace", timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        return done.stdout.strip() if done.returncode == 0 else None
+
+    def tip(self) -> str | None:
+        return self.git("rev-parse", f"refs/heads/{self.branch}")
+
+    def resolve(self, prefix: str) -> str | None:
+        return self.git("rev-parse", "--verify", "--quiet", f"{prefix}^{{commit}}")
+
+    def subject(self, sha: str) -> str:
+        return self.git("log", "-1", "--format=%s", sha) or ""
+
+    def updates(self) -> list[tuple[str, str, datetime]]:
+        """(old, new, when) for every update of main the reflog kept, oldest first (`logs/refs/heads/<branch>`: "old new who <epoch> <tz>")."""
+        out = []
+        try:
+            lines = (Path(self.path) / "logs" / "refs" / "heads" / self.branch).read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return out
+        for line in lines:
+            found = re.match(r"([0-9a-f]{40}) ([0-9a-f]{40}) .*?> (\d+) [+-]\d{4}", line)
+            if found:
+                out.append((found.group(1), found.group(2), datetime.fromtimestamp(int(found.group(3)), timezone.utc)))
+        return out
+
+    def pushes(self) -> list[tuple[str, datetime]]:
+        return [(new, when) for _, new, when in self.updates()]
+
+    def _in(self, sha: str, tip: str) -> bool:
+        return not set(tip) <= {"0"} and (sha == tip or self.git("merge-base", "--is-ancestor", sha, tip) == "")
+
+    def pushed(self, sha: str) -> tuple[datetime | None, str]:
+        """When `sha` reached main, and how that is known. A commit pushed together with later ones is "pushed" with them: the update
+        whose new tip holds it and whose old tip doesn't."""
+        for old, new, when in self.updates():
+            if self._in(sha, new) and not self._in(sha, old):
+                return when, "reflog"
+        if self.tip() == sha:
+            try:
+                ref = Path(self.path) / "refs" / "heads" / self.branch
+                return datetime.fromtimestamp(ref.stat().st_mtime, timezone.utc), "the ref file's time (no reflog)"
+            except OSError:
+                pass
+        stamp = self.git("log", "-1", "--format=%ct", sha)
+        if stamp and stamp.isdigit():
+            return (datetime.fromtimestamp(int(stamp), timezone.utc),
+                    "the commit date: the push itself isn't recorded (git config core.logAllRefUpdates always on the house repo)")
+        return None, ""
 
 
 def http_json(url: str, headers: dict | None = None, timeout: float = 5.0) -> tuple[int, Any]:
@@ -156,53 +250,58 @@ def http_json(url: str, headers: dict | None = None, timeout: float = 5.0) -> tu
 
 @dataclass
 class Sources:
-    """Everything that touches the outside world. Tests hand in fakes (plain functions), so no test needs a real gh,
-    a real clock or the network; `sleep` is the only way time passes here, so a fake clock can run a 4-minute loop instantly."""
-    gh: Callable[[list[str]], str] = run_gh
+    """Everything that touches the outside world. Tests hand in fakes, so no test needs ssh, a real repo, a real clock or the network;
+    `sleep` is the only way time passes here, so a fake clock can run a 4-minute loop instantly."""
+    core: Callable[[], dict] = read_core
+    house: Any = field(default_factory=HouseGit)
     http: Callable[..., tuple[int, Any]] = http_json
     clock: Callable[[], datetime] = utcnow
     sleep: Callable[[float], None] = time.sleep
     env: Any = field(default_factory=lambda: os.environ)
 
 
-def gh_json(src: Sources, args: list[str]) -> Any:
-    text = src.gh(args)
-    try:
-        return json.loads(text)
-    except ValueError:
-        raise Problem(f"gh {' '.join(args[:3])} didn't answer JSON: {text[:120]!r}") from None
+# ── which commit, and its records ────────────────────────────────────────────────
+
+def ci_result(snap: dict, sha: str) -> dict | None:
+    return next((r for r in snap.get("ci") or [] if isinstance(r, dict) and r.get("sha") == sha), None)
 
 
-# ── GitHub: which run, and how it went ────────────────────────────────────────────
-
-def list_runs(src: Sources, repo: str, workflow: str = WORKFLOW, branch: str = BRANCH) -> list[dict]:
-    runs = gh_json(src, ["run", "list", "--repo", repo, "--workflow", workflow, "--branch", branch, "--limit", "30",
-                         "--json", RUN_FIELDS])
-    return runs if isinstance(runs, list) else []
-
-
-def pick_run(runs: list[dict], sha: str | None, since: datetime | None) -> dict | None:
-    """The run this loop is about. `--sha`: the newest run of that commit. `--since`: the FIRST run created after it (the one the
-    prompt caused; a run made before the prompt belongs to an earlier loop). Neither: the newest run. A push beats a manual
-    dispatch of the same candidates, because only a push is "the push" the table's first row measures."""
-    pool = [r for r in runs if parse_ts(r.get("createdAt"))]
-    if sha:
-        pool = [r for r in pool if str(r.get("headSha") or "").lower().startswith(sha.lower())]
-    elif since:
-        pool = [r for r in pool if parse_ts(r["createdAt"]) >= since - timedelta(seconds=SKEW_S)]
-    pushes = [r for r in pool if r.get("event") == "push"]
-    pool = pushes or pool
-    if not pool:
-        return None
-    key = lambda r: parse_ts(r["createdAt"])          # noqa: E731
-    return max(pool, key=key) if (sha or not since) else min(pool, key=key)
+def cd_run(snap: dict, sha: str, after: datetime | None) -> dict | None:
+    """cd.py's run for this commit: the FIRST one created after `after` (the one the push caused; a later one is a Recovery redeploy)."""
+    runs = [r for r in snap.get("cd_runs") or [] if isinstance(r, dict) and r.get("head_sha") == sha and parse_ts(r.get("created_at"))]
+    if after:
+        runs = [r for r in runs if parse_ts(r["created_at"]) >= after - timedelta(seconds=SKEW_S)] or runs
+    return min(runs, key=lambda r: parse_ts(r["created_at"]), default=None)
 
 
-def view_run(src: Sources, repo: str, run_id: Any) -> dict:
-    data = gh_json(src, ["run", "view", str(run_id), "--repo", repo, "--json", VIEW_FIELDS])
-    if not isinstance(data, dict):
-        raise Problem(f"gh run view {run_id}: unexpected answer")
-    return data
+def known_shas(snap: dict) -> list[tuple[str, datetime | None]]:
+    """Every commit skippy-core has a record of, with when CI began on it, newest first."""
+    seen: dict[str, datetime | None] = {}
+    for r in snap.get("ci") or []:
+        if isinstance(r, dict) and r.get("sha"):
+            seen[r["sha"]] = parse_ts(r.get("at"))
+    for r in snap.get("cd_runs") or []:
+        if isinstance(r, dict) and r.get("head_sha"):
+            seen.setdefault(r["head_sha"], parse_ts(r.get("created_at")))
+    far = datetime.min.replace(tzinfo=timezone.utc)
+    return sorted(seen.items(), key=lambda kv: kv[1] or far, reverse=True)
+
+
+def pick_sha(snap: dict, house: Any, want: str | None, since: datetime | None) -> str | None:
+    """The commit this loop is about. `--sha`: that commit (a prefix is enough). `--since`: the FIRST commit pushed after it (by the
+    reflog, else by when CI took it up). Neither: the newest commit CI has seen."""
+    shas = known_shas(snap)
+    if want:
+        hits = [s for s, _ in shas if s.lower().startswith(want.lower())]
+        return hits[0] if hits else house.resolve(want)
+    if since:
+        floor = since - timedelta(seconds=SKEW_S)
+        pushed = [(when, sha) for sha, when in house.pushes() if when >= floor]
+        if pushed:
+            return min(pushed)[1]
+        later = [(when, sha) for sha, when in shas if when and when >= floor]
+        return min(later)[1] if later else None
+    return shas[0][0] if shas else None
 
 
 # ── the bridge's marks (optional) ──────────────────────────────────────────────────
@@ -278,13 +377,14 @@ class Row:
     na: str = ""                       # no evidence: why. Printed as "n/a (reason)"; never filled with a guess
     depth: int = 0
     open: bool = False                 # still running: `end` is unknown, the duration shown is "so far"
+    took: float | None = None          # a recorded duration with no start/end stamps (CI results written before they carried them)
 
     def seconds(self, now: datetime | None = None) -> float | None:
         if self.start and self.end:
             return (self.end - self.start).total_seconds()
         if self.open and self.start and now:
             return (now - self.start).total_seconds()
-        return None
+        return self.took
 
 
 @dataclass
@@ -294,54 +394,59 @@ class Timeline:
     loop_start_is: str                 # "prompt sent" | "push (no --since)"
     total: Row
     critical_path: list[tuple[str, float]]
-    serving_at: datetime | None        # the deploy step's end
+    serving_at: datetime | None        # all traffic on the new revision (cd.py's portal job)
     notes: list[str]
     meta: dict
     now: datetime
+    failed: str = ""                   # CI or the deploy failed: what
 
 
-def _step_label(name: str) -> str:
-    name = re.sub(r"^Run\s+", "", name)
-    name = re.sub(r"^[\w.-]+/([\w.-]+@[\w.]+)", r"\1", name)       # google-github-actions/setup-gcloud@v2 -> setup-gcloud@v2
-    return name if len(name) <= 30 else name[:27] + "..."
+@dataclass
+class Records:
+    """What is known about one commit's trip, gathered from the sources (all of it may be missing)."""
+    sha: str
+    title: str = ""
+    push: datetime | None = None
+    push_how: str = ""
+    ci: dict | None = None
+    cd: dict | None = None
+    deployer: dict | None = None
 
 
-def _job_times(job: dict) -> tuple[datetime | None, datetime | None]:
-    return parse_ts(job.get("startedAt")), parse_ts(job.get("completedAt"))
+def _ci_end(ci: dict) -> datetime | None:
+    if ci.get("state") in ("running", None):
+        return None
+    start = parse_ts(ci.get("at"))
+    return parse_ts(ci.get("finished_at")) or (start + timedelta(seconds=float(ci["seconds"])) if start and ci.get("seconds") is not None else None)
 
 
-def critical_path(jobs: list[dict], serving_at: datetime | None) -> list[tuple[str, float]]:
-    """The chain of jobs that decided when the deploy could start, found from the stamps alone (gh doesn't say what a job `needs`):
-    a job starts when its LAST dependency ends, so its critical predecessor is the job that ended latest, at or before its start.
-    The chain ends at the deploy job, cut at the moment the new revision serves."""
-    timed = {j["name"]: _job_times(j) for j in jobs if j.get("conclusion") != "skipped"}
-    deploy = timed.get(DEPLOY_JOB)
-    if not deploy or not deploy[0]:
-        return []
-    chain = [(DEPLOY_JOB, deploy[0], serving_at or deploy[1])]
-    cur_start = deploy[0]
-    while True:
-        before = [(end, name, start) for name, (start, end) in timed.items()
-                  if name not in {c[0] for c in chain} and start and end and end <= cur_start + timedelta(seconds=1)]
-        if not before:
-            break
-        end, name, start = max(before)
-        chain.insert(0, (name, start, end))
-        cur_start = start
-    return [(LABELS.get(name, name) + (" (to serving)" if name == DEPLOY_JOB and serving_at else ""),
-             (end - start).total_seconds()) for name, start, end in chain if end]
+def _job(job: dict, key: str) -> Row:
+    """A CI job (started_at / finished_at) or a cd.py job (started_at / completed_at) as a depth-1 row."""
+    name = str(job.get("name") or "?")
+    start, end = parse_ts(job.get("started_at")), parse_ts(job.get("finished_at") or job.get("completed_at"))
+    verdict = job.get("conclusion") if "conclusion" in job else job.get("state")
+    running = job.get("status") == "in_progress" or verdict in ("running", "")
+    note = "" if verdict in ("success", "", None, "running") else str(verdict) + (f": {job['why']}" if job.get("why") else "")
+    row = Row("step", f"{key}.{name}", LABELS.get(name, name), start, end, note, depth=1, open=running and end is None)
+    if not start:
+        if isinstance(job.get("seconds"), (int, float)):
+            row.took = float(job["seconds"])
+            row.note = (note + "; " if note else "") + "no start/end stamps in this record, only how long it took"
+        elif running:
+            row.na = "running, not stamped"
+        else:
+            row.na = f"no stamps in this record ({verdict or 'unknown'})"
+    return row
 
 
-def build_timeline(run: dict, since: datetime | None, marks: dict[str, datetime], seen_at: datetime | None,
+def build_timeline(rec: Records, since: datetime | None, marks: dict[str, datetime], seen_at: datetime | None,
                    visible_why: str, now: datetime, portal: str = "") -> Timeline:
-    push = parse_ts(run.get("createdAt"))
-    event = str(run.get("event") or "push")
-    jobs = [j for j in run.get("jobs") or [] if isinstance(j, dict) and j.get("name")]
+    push, ci, cd, dep = rec.push, rec.ci, rec.cd, rec.deployer
     rows: list[Row] = []
     notes: list[str] = []
+    failed = ""
 
     # 1. prompt -> push, in as many pieces as the agent's marks allow
-    pushed = "push" if event == "push" else f"run created ({event})"
     chain: list[tuple[str, datetime]] = [("prompt", since)] if since else []
     dropped = []
     for name in ("bridge received", "first edit", "git push"):
@@ -356,87 +461,123 @@ def build_timeline(run: dict, since: datetime | None, marks: dict[str, datetime]
     if dropped:
         notes.append(f"ignored bridge marks outside the prompt..push window: {', '.join(dropped)}")
     if push:
-        chain.append((pushed, push))
+        chain.append(("push", push))
     if len(chain) < 2:                                            # only the push is known
-        rows.append(Row("stage", "prompt_to_push", f"prompt -> {pushed}",
+        rows.append(Row("stage", "prompt_to_push", "prompt -> push",
                         na="no --since: pass --since 'N minutes ago' (or an ISO time) to count from the prompt"))
     else:
         for (a, ta), (b, tb) in zip(chain, chain[1:]):
             rows.append(Row("stage", f"{a}_to_{b}".replace(" ", "_"), f"{a} -> {b}", ta, tb))
+    if push and rec.push_how != "reflog":
+        notes.append(f"the push time is {rec.push_how}")
+    if not push:
+        notes.append("the push time is unknown (the commit isn't in the house repo at --house?)")
 
-    # 2. queue: the run exists, then a runner picks up its first job
-    starts = [s for s in (_job_times(j)[0] for j in jobs) if s]
-    rows.append(Row("stage", "queue", "queue (runner pickup)", push, min(starts) if starts else None,
-                    na="" if starts else "no job has started yet"))
+    # 2. CI on skippy-core: the wait for its timer, then the jobs side by side
+    ci_start = parse_ts(ci.get("at")) if ci else None
+    ci_end = _ci_end(ci) if ci else None
+    rows.append(Row("stage", "ci_wait", "wait for CI (timer, 1 min)", push, ci_start,
+                    na="" if ci_start else ("" if push else "no push time") or "CI hasn't taken this commit up yet"))
+    if ci:
+        state = ci.get("state") or "?"
+        rows.append(Row("job", "ci", "CI (skippy-core)", ci_start, ci_end, note="" if state == "success" else state,
+                        open=ci_end is None))
+        rows += [_job(j, "ci") for j in ci.get("jobs") or [] if isinstance(j, dict)]
+        if state == "failure":
+            failed = "CI failed: " + ", ".join(j.get("name", "?") for j in ci.get("jobs") or [] if j.get("state") == "failure")
+        elif state == "error":
+            notes.append("CI hit the box's own trouble (an error, not the commit's fault): it tries again, at most three times")
+    else:
+        rows.append(Row("job", "ci", "CI (skippy-core)", na="no result for this commit (CI tests only main's newest commit)"))
 
-    # 3. the jobs, in the order they started; the deploy job with its steps
+    # 3. the portal deploy (cd.py): the wait for its timer, then its jobs, one after another
     serving_at = None
-    deploy_step_seen = False
-    skipped = [j["name"] for j in jobs if j.get("conclusion") == "skipped"]
-    for job in sorted((j for j in jobs if j.get("conclusion") != "skipped"),
-                      key=lambda j: _job_times(j)[0] or datetime.max.replace(tzinfo=timezone.utc)):
-        start, end = _job_times(job)
-        verdict = job.get("conclusion") or ""
-        label = LABELS.get(job["name"], job["name"])
-        if not start:
-            rows.append(Row("job", job["name"], label, na=f"not started ({job.get('status') or 'queued'})"))
-            continue
-        rows.append(Row("job", job["name"], label, start, end, note=("" if verdict in ("success", "") else verdict),
-                        open=end is None))
-        if job["name"] != DEPLOY_JOB:
-            continue
+    created = parse_ts(cd.get("created_at")) if cd else None
+    rows.append(Row("stage", "cd_wait", "wait for the deployer (timer)", ci_end, created,
+                    na="" if (ci_end and created) else ("no deploy run for this commit yet" if not cd else "CI's end isn't known")))
+    if cd:
+        done = cd.get("status") == "completed"
+        conclusion = cd.get("conclusion") or ""
+        rows.append(Row("job", "cd", f"deploy run {cd.get('id')} (cd.py)", created, parse_ts(cd.get("updated_at")) if done else None,
+                        note="" if conclusion in ("success", "") else conclusion, open=not done))
         after_serving = False
-        for step in job.get("steps") or []:
-            if NOISE_STEP.fullmatch(step.get("name") or ""):
+        for job in cd.get("jobs") or []:
+            if not isinstance(job, dict) or job.get("name") == "test":     # "test" is CI's verdict, already above
                 continue
-            s_start, s_end = parse_ts(step.get("startedAt")), parse_ts(step.get("completedAt"))
-            if not s_start:
-                continue
-            note = ""
-            if step.get("name") == DEPLOY_STEP:
-                deploy_step_seen = True
-                if step.get("conclusion") == "success" and s_end:
-                    serving_at, note, after_serving = s_end, "new revision serving at the end of this step", True
-                else:
-                    note = step.get("conclusion") or "running"
-            elif after_serving:
-                note = "after the new revision was already serving"
-            if step.get("conclusion") not in ("success", None, "") and step.get("name") != DEPLOY_STEP:
-                note = step["conclusion"]
-            rows.append(Row("step", f"{job['name']}.{step.get('number')}", _step_label(step.get("name") or "?"),
-                            s_start, s_end, note, depth=1, open=s_end is None))
-    if skipped:
-        notes.append(f"not run (skipped): {', '.join(skipped)}")
-    if not deploy_step_seen and any(j["name"] == DEPLOY_JOB for j in jobs):
-        notes.append(f"the {DEPLOY_JOB} job has no {DEPLOY_STEP!r} step yet (or at all)")
+            row = _job(job, "cd")
+            if job.get("name") == DEPLOY_JOB and parse_ts(job.get("serving_at")):
+                serving_at = parse_ts(job["serving_at"])
+                into = f" ({fmt_dur((serving_at - row.start).total_seconds())} in)" if row.start else ""
+                row.note = (row.note + "; " if row.note else "") + f"all traffic on the new revision at {fmt_clock(serving_at, True)} UTC{into}"
+                after_serving = True
+            elif after_serving and job.get("conclusion") == "success":
+                row.note = "after the new revision was already serving"
+            rows.append(row)
+        if done and conclusion not in ("success", "") and not failed:
+            failed = "the deploy failed: " + ", ".join(f"{j.get('name')} ({j.get('why') or 'failure'})" for j in cd.get("jobs") or []
+                                                        if j.get("conclusion") == "failure")
+        if done and conclusion == "success" and not serving_at:
+            portal_job = next((j for j in cd.get("jobs") or [] if j.get("name") == DEPLOY_JOB), None)
+            serving_at = parse_ts((portal_job or {}).get("completed_at")) or parse_ts(cd.get("updated_at"))
+            notes.append("this run's record has no serving_at (cd.py before 2026-10-27): the end of "
+                         + ("its portal job" if parse_ts((portal_job or {}).get("completed_at")) else "the whole run")
+                         + " stands in for it, so serving is a little later than the truth")
+    else:
+        rows.append(Row("job", "cd", "deploy run (cd.py)", na="none yet" if not failed else "CI failed: nothing to deploy"))
 
-    # 4. visible: the moment THIS machine first saw the pushed commit on /version
+    # 4. Core's own services (core/deployer), beside the portal deploy: only its LAST good deploy is kept
+    good = (dep or {}).get("last_good") or {}
+    if good.get("commit") == rec.sha:
+        rows.append(Row("job", "core", "Core services (deployer)", parse_ts(good.get("started")), parse_ts(good.get("at")),
+                        note="" if good.get("started") else "only the end is recorded (deployer before 2026-10-27)"))
+    elif dep and dep.get("commit") == rec.sha:
+        rows.append(Row("job", "core", "Core services (deployer)", na=f"{dep.get('state')}: {dep.get('detail') or ''}".strip(": ")))
+    else:
+        rows.append(Row("job", "core", "Core services (deployer)",
+                        na="the deployer keeps only its last good deploy, and that is another commit" if dep else "no deployer status"))
+
+    # 5. visible: the moment THIS machine first saw the pushed commit on /version
     if seen_at:
         lag = ""
         if serving_at:
             gap = (seen_at - serving_at).total_seconds()
-            lag = (f"{fmt_dur(gap)} after the deploy step ended" if gap >= 0
-                   else f"{fmt_dur(-gap)} BEFORE the deploy step's end stamp (traffic switches before the CLI returns)")
+            lag = (f"{fmt_dur(gap)} after all traffic moved" if gap >= 0
+                   else f"{fmt_dur(-gap)} BEFORE cd.py's stamp (traffic switches before gcloud returns)")
         rows.append(Row("visible", "visible", "visible on the portal", serving_at, seen_at,
                         note="first seen by this machine" + (f"; {lag}" if lag else "")))
     else:
         rows.append(Row("visible", "visible", "visible on the portal", na=visible_why or "not seen yet"))
 
-    # 5. the total
+    # 6. the total, and the critical path (the stages are one after another now; Core's services run beside them)
     loop_start, loop_start_is = (since, "prompt sent") if since else (push, "push (no --since)")
     if loop_start and seen_at:
         total = Row("stage", "total", f"TOTAL {loop_start_is} -> visible", loop_start, seen_at)
     elif loop_start and serving_at:
-        total = Row("stage", "total", f"TOTAL {loop_start_is} -> deploy step end", loop_start, serving_at,
-                    note="visible was not observed, so this stops where the new revision started serving")
+        total = Row("stage", "total", f"TOTAL {loop_start_is} -> serving", loop_start, serving_at,
+                    note="visible was not observed, so this stops where the new revision took all traffic")
     else:
-        total = Row("stage", "total", f"TOTAL {loop_start_is} -> visible", na="the loop has not finished (or the deploy never ran)")
-    notes.append("rows overlap (jobs run in parallel): only the critical path adds up")
-    meta = {"sha": run.get("headSha"), "run_id": run.get("databaseId"), "url": run.get("url"), "event": event,
-            "status": run.get("status"), "conclusion": run.get("conclusion"), "title": run.get("displayTitle"),
-            "push": iso(push), "portal": portal,
+        total = Row("stage", "total", f"TOTAL {loop_start_is} -> visible", na=failed or "the loop has not finished")
+    path: list[tuple[str, float]] = []
+    marks_at = [("push -> CI", push, ci_start), ("CI", ci_start, ci_end), ("CI -> deploy run", ci_end, created)]
+    image = next((j for j in (cd or {}).get("jobs") or [] if j.get("name") == "portal-image"), None)
+    image_end = parse_ts((image or {}).get("completed_at"))
+    if image and parse_ts(image.get("started_at")):
+        marks_at += [("run start", created, parse_ts(image["started_at"])), ("build portal image", parse_ts(image["started_at"]), image_end),
+                     ("deploy portal (to serving)", image_end, serving_at)]
+    else:
+        marks_at.append(("deploy run to serving", created, serving_at))
+    if seen_at:
+        marks_at.append(("serving -> visible", serving_at, seen_at))
+    for label, a, b in marks_at:
+        if a and b:
+            path.append((label, (b - a).total_seconds()))
+    if dep and good.get("commit") == rec.sha:
+        notes.append("Core's services deploy beside the portal, off its critical path")
+    meta = {"sha": rec.sha, "title": rec.title or (cd or {}).get("title"), "cd_run": (cd or {}).get("id"),
+            "ci_state": (ci or {}).get("state"), "deploy": (cd or {}).get("conclusion") or (cd or {}).get("status"),
+            "push": iso(push), "push_from": rec.push_how or None, "portal": portal,
             "push_to_serving_s": round((serving_at - push).total_seconds(), 1) if push and serving_at else None}
-    return Timeline(rows, loop_start, loop_start_is, total, critical_path(jobs, serving_at), serving_at, notes, meta, now)
+    return Timeline(rows, loop_start, loop_start_is, total, path, serving_at, notes, meta, now, failed)
 
 
 def render(tl: Timeline, utc: bool = False, extra: list[str] | None = None) -> str:
@@ -445,9 +586,8 @@ def render(tl: Timeline, utc: bool = False, extra: list[str] | None = None) -> s
     label_w = max(len(r.label) + 2 * r.depth for r in rows)
     zone = "UTC" if utc else (datetime.now().astimezone().strftime("UTC%z") or "local")
     meta = tl.meta
-    sha = str(meta.get("sha") or "")[:7]
-    out = [f"loop {sha}  {str(meta.get('title') or '')[:70]}",
-           f"run {meta.get('run_id')} ({meta.get('event')}, {meta.get('conclusion') or meta.get('status')})  {meta.get('url') or ''}",
+    out = [f"loop {str(meta.get('sha') or '')[:7]}  {str(meta.get('title') or '')[:70]}",
+           f"CI {meta.get('ci_state') or 'n/a'}, deploy run {meta.get('cd_run') or 'n/a'} ({meta.get('deploy') or 'n/a'})",
            f"portal {meta.get('portal') or '?'}   times are {'UTC' if utc else 'local'} ({zone}); took = end - start", ""]
     out.append(f"{'stage':<{label_w}}  {'start':<8}  {'end':<8}  {'took':>7}  note")
     for r in rows:
@@ -461,8 +601,7 @@ def render(tl: Timeline, utc: bool = False, extra: list[str] | None = None) -> s
     if tl.critical_path:
         path = " -> ".join(f"{name} {fmt_dur(sec)}" for name, sec in tl.critical_path)
         whole = meta.get("push_to_serving_s")
-        out += ["", f"critical path (from the stamps): {path}"
-                + (f"   [push -> serving: {fmt_dur(whole)}, the rest is queueing between jobs]" if whole is not None else "")]
+        out += ["", f"critical path: {path}" + (f"   [push -> serving: {fmt_dur(whole)}]" if whole is not None else "")]
     for line in [*tl.notes, *(extra or [])]:
         out.append(f"* {line}")
     return "\n".join(out).encode("ascii", "replace").decode("ascii")      # a commit title may carry characters a Windows console can't print
@@ -474,10 +613,9 @@ def to_dict(tl: Timeline, extra: list[str] | None = None) -> dict:
         return {"kind": r.kind, "key": r.key, "label": r.label, "depth": r.depth, "start": iso(r.start), "end": iso(r.end),
                 "seconds": None if sec is None else round(sec, 1), "running": bool(r.open and not r.end),
                 "note": r.note, "na": r.na or None}
-    total = one(tl.total)
     return {**tl.meta, "loop_start": iso(tl.loop_start), "loop_start_is": tl.loop_start_is,
-            "stages": [one(r) for r in tl.rows], "total": total,
-            "serving_at": iso(tl.serving_at),
+            "stages": [one(r) for r in tl.rows], "total": one(tl.total),
+            "serving_at": iso(tl.serving_at), "failed": tl.failed or None,
             "critical_path": [{"label": n, "seconds": round(s, 1)} for n, s in tl.critical_path],
             "notes": [*tl.notes, *(extra or [])]}
 
@@ -485,18 +623,18 @@ def to_dict(tl: Timeline, extra: list[str] | None = None) -> dict:
 # ── following one loop ────────────────────────────────────────────────────────────
 
 class Follow:
-    """One loop, observed: finds the run, refreshes it, and polls /version. `step()` does one tick; `watch()` ticks until the
-    loop is over. Everything slow goes through `src`, so a test drives it with a fake world and a fake clock."""
+    """One loop, observed: finds the commit, re-reads skippy-core's records, and polls /version. `step()` does one tick; `watch()`
+    ticks until the loop is over. Everything slow goes through `src`, so a test drives it with a fake world and a fake clock."""
 
-    def __init__(self, src: Sources, repo: str, portal: str, sha: str | None, since: datetime | None,
-                 watch: bool, gh_every: float = 5.0, timeout: float = 1800.0, grace: float = 120.0, utc: bool = False,
-                 workflow: str = WORKFLOW, branch: str = BRANCH):
-        self.src, self.repo, self.portal = src, repo, portal.rstrip("/")
-        self.workflow, self.branch = workflow, branch
-        self.want, self.since, self.watching, self.utc = sha, since, watch, utc   # `want` may be an abbreviation; `sha` (below) is the full commit
+    def __init__(self, src: Sources, portal: str, sha: str | None, since: datetime | None, watch: bool,
+                 core_every: float = 10.0, house_every: float = 2.0, timeout: float = 1800.0, grace: float = 180.0, utc: bool = False):
+        self.src, self.portal = src, portal.rstrip("/")
+        self.want, self.since, self.watching, self.utc = sha, since, watch, utc   # `want` may be an abbreviation; `sha` is the full commit
         self.sha: str | None = None
-        self.gh_every, self.timeout, self.grace = gh_every, timeout, grace
-        self.run: dict | None = None
+        self.core_every, self.house_every, self.timeout, self.grace = core_every, house_every, timeout, grace
+        self.snap: dict = {}
+        self.push: datetime | None = None
+        self.push_how = ""
         self.seen_at: datetime | None = None
         self.already_live_at: datetime | None = None   # the new commit was already serving at the first look: its start can't be known
         self.version: dict | None = None
@@ -504,53 +642,69 @@ class Follow:
         self.baseline: tuple | None = None
         self.ended = ""                    # why watching stopped ("" = still going)
         self.failed = False
-        self._last_gh: datetime | None = None
-        self.gh_errors = 0
-        self._run_id: Any = None
+        self._last_core: datetime | None = None
+        self._last_house: datetime | None = None
+        self.core_errors = 0
         self._announced: dict[str, str] = {}
         self.begun = src.clock()
+        self._tip0 = src.house.tip() if watch and not sha else None      # main before the push we wait for
 
-    # -- GitHub --
+    # -- the push --
+    def look_at_house(self) -> None:
+        """While watching for a push: main moving off the tip it had when the watch began IS the push. When the house keeps no reflog,
+        that moment, as seen from here, is the push time (a poll every couple of seconds)."""
+        self._last_house = self.src.clock()
+        tip = self.src.house.tip()
+        if not tip or tip == self._tip0:
+            return
+        self.sha = tip
+        when, how = self.src.house.pushed(tip)
+        if how != "reflog":
+            when, how = self._last_house, "when this machine saw main move (no reflog on the house repo)"
+        self.push, self.push_how = when, how
+
+    # -- skippy-core --
     def refresh(self) -> None:
-        """Re-read GitHub. A watch of several minutes rides out a dropped call or two (the portal's moment of truth is its own poll,
-        not GitHub's); five in a row, or any failure without --watch, is a Problem."""
+        """Re-read skippy-core. A watch of several minutes rides out a dropped ssh or two; five in a row, or any failure without
+        --watch, is a Problem."""
+        self._last_core = self.src.clock()
         try:
-            self._refresh()
-            self.gh_errors = 0
+            self.snap = self.src.core() or {}
+            self.core_errors = 0
         except Problem:
-            self.gh_errors += 1
-            if not self.watching or self.gh_errors >= 5:
+            self.core_errors += 1
+            if not self.watching or self.core_errors >= 5:
                 raise
+            return
+        if self.sha is None and not (self.watching and not self.want):
+            self.sha = pick_sha(self.snap, self.src.house, self.want, self.since)
+        if self.sha and self.push is None:
+            self.push, self.push_how = self.src.house.pushed(self.sha)
 
-    def _refresh(self) -> None:
-        """Find the run (once), then re-read it. Asking GitHub every few seconds only: with no run yet this is the wait for the push."""
-        self._last_gh = self.src.clock()
-        if self._run_id is None:
-            found = pick_run(list_runs(self.src, self.repo, self.workflow, self.branch), self.want, self.since)
-            if not found:
-                return
-            self._run_id, self.sha = found["databaseId"], str(found.get("headSha") or "")
-        self.run = view_run(self.src, self.repo, self._run_id)
-
-    def _deploy_step(self) -> dict | None:
-        for job in (self.run or {}).get("jobs") or []:
-            if job.get("name") == DEPLOY_JOB:
-                for step in job.get("steps") or []:
-                    if step.get("name") == DEPLOY_STEP:
-                        return step
-        return None
+    def records(self) -> Records:
+        sha = self.sha or ""
+        return Records(sha, self.src.house.subject(sha) if sha else "", self.push, self.push_how, ci_result(self.snap, sha),
+                       cd_run(self.snap, sha, self.push or self.since), self.snap.get("deployer"))
 
     def serving_at(self) -> datetime | None:
-        step = self._deploy_step()
-        return parse_ts(step.get("completedAt")) if step and step.get("conclusion") == "success" else None
+        run = cd_run(self.snap, self.sha or "", self.push or self.since)
+        job = next((j for j in (run or {}).get("jobs") or [] if j.get("name") == DEPLOY_JOB), None)
+        return parse_ts((job or {}).get("serving_at"))
 
     def _report(self, say: Callable[[str], None]) -> None:
-        """While watching: one stderr line per job whose state changed, so a long wait isn't silent."""
-        for job in (self.run or {}).get("jobs") or []:
-            state = job.get("conclusion") or job.get("status") or ""
-            if state and self._announced.get(job["name"]) != state:
-                self._announced[job["name"]] = state
-                say(f"[{fmt_clock(self.src.clock(), self.utc)}] {job['name']}: {state}")
+        """While watching: one stderr line per stage whose state changed, so a long wait isn't silent."""
+        rec = self.records()
+        states = {"push": iso(rec.push) and "seen"}
+        if rec.ci:
+            states["CI"] = rec.ci.get("state")
+            states.update({f"CI {j.get('name')}": j.get("state") for j in rec.ci.get("jobs") or []})
+        if rec.cd:
+            states.update({f"deploy {j.get('name')}": j.get("conclusion") or j.get("status") for j in rec.cd.get("jobs") or []
+                           if j.get("name") != "test"})
+        for name, state in states.items():
+            if state and self._announced.get(name) != state:
+                self._announced[name] = state
+                say(f"[{fmt_clock(self.src.clock(), self.utc)}] {name}: {state}")
 
     # -- the portal --
     def probe(self) -> None:
@@ -559,14 +713,13 @@ class Follow:
         if status != 200 or not isinstance(body, dict):
             return
         self.version = body
-        if self.seen_at or self.already_live_at or not self.run:
+        if self.seen_at or self.already_live_at or not self.sha:
             return
         ident = (body.get("revision"), body.get("started_at"))
         if self.first_probe is None:
             self.first_probe = (now, body)
             if body.get("commit") == self.sha:
-                step = self._deploy_step()
-                if step and parse_ts(step.get("startedAt")):
+                if cd_run(self.snap, self.sha, self.push or self.since):
                     self.already_live_at = now     # the deploy is under way or over: the new revision may have been serving for a while
                 else:
                     self.baseline = ident          # before the deploy even began: an earlier revision of the same commit. Wait for a NEW one
@@ -588,33 +741,40 @@ class Follow:
     def done(self) -> str:
         """"" while the loop is still going, else why it is over (only --watch ends on its own; a one-shot just looks once)."""
         now = self.src.clock()
-        run = self.run
         if self.seen_at:
             if self.serving_at() or (now - self.seen_at).total_seconds() > 30:
                 return "visible"
-            return ""                                   # seen; let GitHub's own stamps catch up so the lag row is real
+            return ""                                   # seen; let cd.py's own stamp catch up so the lag row is real
         if self.already_live_at:
             return "already live"
-        if run and run.get("status") == "completed":
-            if run.get("conclusion") != "success":
+        rec = self.records() if self.sha else None
+        if rec and rec.ci and rec.ci.get("state") == "failure":
+            self.failed = True
+            return "CI failed: the new version will not go live"
+        if rec and rec.cd and rec.cd.get("status") == "completed":
+            if rec.cd.get("conclusion") != "success":
                 self.failed = True
-                return f"the run ended {run.get('conclusion')}: the new version did not go live"
-            ended = parse_ts(run.get("updatedAt")) or now
+                return f"the deploy run ended {rec.cd.get('conclusion')}: the new version did not go live"
+            ended = parse_ts(rec.cd.get("updated_at")) or now
             if self.watching and (now - ended).total_seconds() > self.grace:
                 self.failed = True
-                return ("the run finished but /version never showed the new commit (deploy skipped by the gate? "
-                        "wrong --portal? the version route not deployed yet?)")
+                return "the deploy finished but /version never showed the new commit (wrong --portal? a later commit already deployed?)"
         if self.watching and (now - self.begun).total_seconds() > self.timeout:
             self.failed = True
             return f"gave up after {fmt_dur(self.timeout)}"
         return ""
 
     def step(self, say: Callable[[str], None] = lambda _m: None) -> str:
-        if self._last_gh is None or (self.src.clock() - self._last_gh).total_seconds() >= self.gh_every:
+        now = self.src.clock()
+        if self.sha is None and self._tip0 is not None and (self._last_house is None or (now - self._last_house).total_seconds() >= self.house_every):
+            self.look_at_house()
+        if self.sha and (self._last_core is None or (now - self._last_core).total_seconds() >= self.core_every):
             self.refresh()
             if self.watching:
                 self._report(say)
-        if self.run is not None:
+        elif self.sha is None and self._tip0 is None and self._last_core is None:
+            self.refresh()                               # --sha, or no house to watch: find the commit from skippy-core's records
+        if self.sha:
             self.probe()
         self.ended = self.done()
         return self.ended
@@ -629,34 +789,33 @@ class Follow:
 
 
 def run_once(follow: Follow) -> None:
-    """Without --watch: one look at GitHub and one at /version."""
+    """Without --watch: one look at skippy-core and one at /version."""
     follow.refresh()
-    if follow.run is not None:
+    if follow.sha:
         follow.probe()
-        follow.ended = follow.done() or ("running" if follow.run.get("status") != "completed" else "")
+        follow.ended = follow.done()
 
 
 # ── the command line ──────────────────────────────────────────────────────────────
 
 def main(argv: list[str] | None = None, src: Sources | None = None, out=None, err=None) -> int:
     out, err = out or sys.stdout, err or sys.stderr
-    src = src or Sources()
     ap = argparse.ArgumentParser(prog="loop_timer.py", description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--since", help="when the prompt was sent: an ISO time, 'N minutes ago' or 'now' (default: the run's push)")
-    ap.add_argument("--sha", help="the commit (full or abbreviated) whose deploy to time (default: the newest deploy run)")
+    ap.add_argument("--since", help="when the prompt was sent: an ISO time, 'N minutes ago' or 'now' (default: the push)")
+    ap.add_argument("--sha", help="the commit (full or abbreviated) whose loop to time (default: the newest commit CI has seen)")
     ap.add_argument("--watch", action="store_true", help="wait for the loop to finish (Ctrl-C prints what was seen)")
     ap.add_argument("--portal", default=PORTAL, help="the portal whose /version is polled (default: production)")
-    ap.add_argument("--repo", help="owner/name (default: this checkout's, from `gh repo view`)")
+    ap.add_argument("--core", default=CORE_HOST, help=f"the ssh host holding CI's and the deployers' records (default {CORE_HOST})")
+    ap.add_argument("--house", default=HOUSE, help=f"the house's bare repo, for the push time (default {HOUSE}; env LOOP_HOUSE_GIT)")
     ap.add_argument("--json", action="store_true", help="print JSON instead of the table")
     ap.add_argument("--utc", action="store_true", help="show UTC instead of this machine's local time")
     ap.add_argument("--bridge", nargs="?", const=BRIDGE, metavar="URL",
                     help=f"also read the agent's marks from the Claude bridge (default {BRIDGE}; needs SKIPPY_HOME_TOKEN)")
     ap.add_argument("--bridge-task", help="the bridge run (task id) to read, instead of the newest before the push")
     ap.add_argument("--timeout", type=float, default=1800.0, help="--watch gives up after this many seconds (default 1800)")
-    ap.add_argument("--workflow", default=WORKFLOW)
-    ap.add_argument("--branch", default=BRANCH)
     args = ap.parse_args(argv)
+    src = src or Sources(core=lambda: read_core(args.core), house=HouseGit(args.house))
 
     def say(message: str) -> None:
         print(message, file=err, flush=True)
@@ -664,31 +823,27 @@ def main(argv: list[str] | None = None, src: Sources | None = None, out=None, er
     try:
         now = src.clock()
         since = parse_since(args.since, now) if args.since else None
-        repo = args.repo or gh_json(src, ["repo", "view", "--json", "nameWithOwner"]).get("nameWithOwner")
-        if not repo:
-            raise Problem("couldn't tell which repository this is: pass --repo owner/name")
-        follow = Follow(src, repo, args.portal, args.sha, since, args.watch, timeout=args.timeout, utc=args.utc,
-                        workflow=args.workflow, branch=args.branch)
+        follow = Follow(src, args.portal, args.sha, since, args.watch, timeout=args.timeout, utc=args.utc)
         if args.watch:
-            say(f"watching {repo} {args.workflow}" + (f" for commit {args.sha}" if args.sha else "") + " (Ctrl-C prints what was seen)")
+            say("watching " + (f"commit {args.sha}" if args.sha else "for the next push to main") + " (Ctrl-C prints what was seen)")
             follow.watch(say)
         else:
             run_once(follow)
-        if follow.run is None:
-            raise Problem("no deploy run found" + (f" for commit {args.sha}" if args.sha else "")
-                          + (f" since {iso(since)}" if since and not args.sha else "")
+        if not follow.sha:
+            raise Problem("no commit found" + (f" for {args.sha}" if args.sha else "")
+                          + (f" pushed since {iso(since)}" if since and not args.sha else "")
                           + ": has the push happened? (--watch waits for it)")
+        rec = follow.records()
         marks, extra = ({}, [])
         if args.bridge:
-            marks, extra = bridge_marks(src, args.bridge, parse_ts(follow.run.get("createdAt")), since, args.bridge_task)
-        tl = build_timeline(follow.run, since, marks, follow.seen_at, "" if follow.seen_at else follow.why_not_visible(),
-                            src.clock(), follow.portal)
+            marks, extra = bridge_marks(src, args.bridge, rec.push, since, args.bridge_task)
+        tl = build_timeline(rec, since, marks, follow.seen_at, "" if follow.seen_at else follow.why_not_visible(), src.clock(), follow.portal)
         extra = list(extra)
         if follow.version and follow.seen_at:
             v = follow.version
             extra.append(f"serving instance: revision {v.get('revision') or '?'}, image built {v.get('built_at') or '?'}, "
                          f"process started {v.get('started_at') or '?'} (UTC, from /version)")
-        if follow.ended and follow.ended not in ("visible", "running"):
+        if follow.ended and follow.ended not in ("visible", "already live"):
             extra.append(follow.ended)
     except Problem as problem:
         print(f"loop_timer: {problem}", file=err)
@@ -697,11 +852,11 @@ def main(argv: list[str] | None = None, src: Sources | None = None, out=None, er
         print(json.dumps(to_dict(tl, extra), indent=2), file=out)
     else:
         print(render(tl, args.utc, extra), file=out)
-    if follow.failed:
+    if follow.failed or tl.failed:
         return 1
     if args.watch:
         return 0 if follow.seen_at or follow.ended == "already live" else 1
-    return 0 if follow.run.get("conclusion") in ("success", None, "") else 1
+    return 0
 
 
 if __name__ == "__main__":

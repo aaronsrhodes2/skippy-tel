@@ -234,5 +234,4 @@ def test_music_is_advertised_only_when_the_studio_answers(monkeypatch, home):
 
 
 def test_unknown_jobs_are_still_refused(monkeypatch):
-    monkeypatch.setattr(reporter, "MENTAT", "")
     assert reporter.run_job({"kind": "format_c_drive"}, "t") == {"error": "unknown job 'format_c_drive'"}

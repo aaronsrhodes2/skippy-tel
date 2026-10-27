@@ -42,6 +42,7 @@ MODULES = (
     Module("video", "lens", "video.video_page", "Nagatha's Video Service"),
     Module("experiments", "atom", "experiments.index", "Experiments"),
     Module("tabletop", "d20", "tabletop.page", "Tabletop"),
+    Module("car", "car", "car.page", "Car"),
     Module("dashboard", "gauge", "me.index", "Dashboard"),
     Module("admin", "gear", "admin.index", "Admin", retirable=False),
     # /me panes (id = "me-" + the pane's id in templates/me.html). MCP and Home are what /me is for; the rest wait here to be retired when
@@ -50,7 +51,6 @@ MODULES = (
     Module("me-core", "core", "me.index", "Dashboard: Core", pane=True),
     Module("me-activity-pane", "eye", "me.index", "Dashboard: Activity", pane=True),
     Module("me-watcher", "gauge", "me.index", "Dashboard: Watcher", pane=True),
-    Module("me-spend", "clock", "me.index", "Dashboard: Spend", pane=True),
     Module("me-people", "user", "me.index", "Dashboard: People", pane=True),
     Module("me-weather", "globe", "me.index", "Dashboard: Weather and traffic", pane=True),
     Module("me-links", "globe", "me.index", "Dashboard: Links", pane=True),

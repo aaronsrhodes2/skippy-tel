@@ -49,7 +49,13 @@ done
 # ── 3. bootstrap resources ────────────────────────────────────────────────────
 say "Creating CI/CD resources (state bucket, registry, deployer identity, secrets)"
 cd "$ROOT/infra/bootstrap"
-terraform init -input=false >/dev/null
+# The state lives in the project's state bucket (prefix "bootstrap"). From a local state (the first time after this change) init
+# migrates it up; on a project that has no bucket yet it starts local and migrates once the apply below has made the bucket.
+if gcloud storage buckets describe "gs://$PROJECT-tfstate" >/dev/null 2>&1; then
+  terraform init -input=false -migrate-state -force-copy -backend-config="bucket=$PROJECT-tfstate" >/dev/null
+else
+  terraform init -input=false -backend=false >/dev/null
+fi
 # A bucket made by hand (gcloud storage buckets create ...) is adopted, not fought: without this, apply stops with a 409 "already exists".
 adopt() {   # <terraform address> <bucket name>
   if gcloud storage buckets describe "gs://$2" >/dev/null 2>&1 && ! terraform state list 2>/dev/null | grep -qx "$1"; then
@@ -59,6 +65,9 @@ adopt() {   # <terraform address> <bucket name>
 }
 adopt google_storage_bucket.tabletop skippy-tel-tabletop
 terraform apply -input=false -auto-approve -var "project=$PROJECT" -var "region=$REGION"
+if [[ ! -f .terraform/terraform.tfstate ]] || ! grep -q '"type": "gcs"' .terraform/terraform.tfstate 2>/dev/null; then
+  terraform init -input=false -migrate-state -force-copy -backend-config="bucket=$PROJECT-tfstate" >/dev/null   # first time: the bucket exists now
+fi
 NUMBER=$(terraform output -raw project_number)
 PORTAL_URL=$(terraform output -raw portal_url)
 BUCKET=$(terraform output -raw state_bucket)
@@ -101,24 +110,10 @@ cd "$ROOT/infra/gcp-games"
 terraform init -input=false -migrate-state -force-copy -backend-config="bucket=$BUCKET" >/dev/null
 echo "  done"
 
-# ── 6. point the workflow at this project, and push = first deploy ────────────
-say "Wiring GitHub Actions to this project"
-cd "$ROOT"
-WORKFLOW=.github/workflows/deploy.yml
-if grep -q "WIF_PROVIDER: projects/PROJECT_NUMBER" "$WORKFLOW"; then
-  sed -i "/WIF_PROVIDER: /s/PROJECT_NUMBER/$NUMBER/" "$WORKFLOW"
-  git add "$WORKFLOW"
-  git -c user.name="Skippy bootstrap" -c user.email="noreply@skippy-tel" \
-    commit -q -m "Point deploy workflow at GCP project $PROJECT ($NUMBER)"
-  if git push -q; then
-    echo "  pushed — the first deploy is running in GitHub Actions."
-  else
-    echo "  push failed. Tell Claude: project number is $NUMBER — it can make this edit."
-  fi
-else
-  echo "  already wired."
-fi
+# ── 6. deploys: skippy-core makes them now (core/cd, signed in through the skippy-core provider above; docs/no-github.md) ──
+say "Deploys"
+echo "  skippy-core deploys every commit its own CI passes (core/cd/cd.py); nothing to wire here."
 
 say "Done"
 echo "  Portal: $PORTAL_URL"
-echo "  From now on: tell Claude what to change; a push deploys it."
+echo "  From now on: tell Claude what to change; a push to the house git deploys it (through skippy-core)."

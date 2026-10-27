@@ -24,7 +24,7 @@ one new client module + one TIERS entry.
 
 Streaming: clients send `Accept: text/event-stream` to opt in.
 SSE event shape:
-  data: {"spec_version":"1","type":"start","tier":"local"|"claude"|"gemini"}
+  data: {"spec_version":"1","type":"start","tier":"local"|"gemini"}
   data: {"type":"token","text":"..."}        (prefix first if any, then model)
   data: {"type":"done","reply":"<full incl. prefix>"}
 """
@@ -37,7 +37,7 @@ from typing import Callable, Iterator, Optional
 import httpx
 from flask import Blueprint, Response, request, stream_with_context
 
-from app.clients import ollama, anthropic_client, gemini
+from app.clients import ollama, gemini
 from app.config  import settings
 from app import keyword_memory as km
 from app import tts_settings
@@ -347,15 +347,8 @@ class Tier:
 
 
 TIERS: list[Tier] = [
-    # Heavy-hitter; strict literal phrase — see feedback_explicit_anthropic_only.md
-    Tier(
-        id="claude",
-        triggers=["put on your thinking cap"],
-        strip_re=re.compile(r"put on your thinking cap[,.:]?\s*", re.IGNORECASE),
-        prefix="",
-        chat=lambda text: anthropic_client.chat(text),
-        stream=lambda text: anthropic_client.stream_chat(text),
-    ),
+    # (The "put on your thinking cap" Claude tier was retired 2026-10-27, the Captain: the only paid Claude is orange Skippy and
+    # Claude Desktop. Nothing in flask-api calls Anthropic any more.)
     # Nagatha — free-tier general chat (Google Gemini under the hood; persona is
     # named after Captain's choice, see misc/FUTURE_PLANS.md). Multiple trigger
     # variants cover natural speech patterns ("Hey Nagatha", "Talk to Nagatha", etc.)

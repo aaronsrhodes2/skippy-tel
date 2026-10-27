@@ -78,7 +78,9 @@ def test_pass_rules():
 def test_nothing_without_a_pass(client):
     for path in ("/t/nope/catalog.json", f"/t/{NOW + 60}.{'0' * 32}/a/loose.mp3", "/", "/music/loose.mp3"):
         assert client.get(path).status_code in (403, 404), path
-    assert client.get("/health").get_json()["tracks"] == 3
+    health = client.get("/health").get_json()
+    assert health["tracks"] == 3 and health["ready"] is True and health["accepting"] is True and health["service"] == "music-gate"
+    assert health["jobs"]["running"] == 0 and health["detail"] == ""                            # ready, and what it is doing (PLATINUM section 24)
 
 
 # Every route behind the pass, new ones included: a missing, forged, expired or other-key pass is a 403, whatever follows it

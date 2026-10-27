@@ -192,8 +192,8 @@ case " $GAMES " in
     python3 /usr/local/bin/skippy-valheim-seed --env "$ROOT/.env" --data "$DATA" \
       || echo "valheim seed: FAILED; the world starts as it is" ;;
 esac
-# Garry's Mod: our mod (the public repo aaronsrhodes2/sigma-ground, folder stage/gmod/addon) is put into the persistent addons
-# folder, fresh from GitHub, before srcds starts (gmod_addon.sh: a shallow sparse clone). It never fails: a fetch that doesn't
+# Garry's Mod: our mod (sigma-ground's folder stage/gmod/addon) is put into the persistent addons
+# folder, fresh from the games bucket (skippy-core publishes it), before srcds starts (gmod_addon.sh: one authenticated GET). It never fails: a fetch that doesn't
 # work keeps the previous copy and the game starts anyway. `ops restart-game garrysmod` runs the same script (ops_agent.py).
 case " $GAMES " in
   *" garrysmod "*)

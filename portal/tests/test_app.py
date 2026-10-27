@@ -137,7 +137,7 @@ def test_the_launcher_has_one_tile_per_app_and_no_duplicate_paths(env):
     login(client, ADMIN)
     launcher = client.get("/apps").data.decode()
     assert re.findall(r'class="unit(?: named)?" data-app="(\w+)"', launcher) == \
-        ["skippy", "games", "play", "music", "video", "experiments", "tabletop", "dashboard", "admin"]
+        ["skippy", "games", "play", "music", "video", "experiments", "tabletop", "car", "dashboard", "admin"]
     assert launcher.count('href="/games"') == 1 and 'href="/games/' not in launcher      # games live in one app, not six tiles
     assert "Server room" not in launcher and "<nav" not in launcher
     _add_friend(client, PAL, ["dragonwilds"])
@@ -1099,23 +1099,30 @@ def _chat_with(mentat, email=ADMIN):
     return {t["name"] for t in skippy.tools}, skippy.run_tool
 
 
-def _home_with_mentat(client, answer):
-    """Pair skippy-pc, report Mentat + Qwen up, and run a fake reporter that
-    answers physics jobs with `answer(question)`."""
-    import threading, time
-    token = _pair(client)
-    report = {**json.loads(json.dumps(REPORT)), "mentat_home": True}
-    client.post("/home/report", json=report, headers={"Authorization": f"Bearer {token}"})
-    stop = threading.Event()
+class AskMentat:
+    """skippy-core's Mentat as the chat sees it (mentat_client.Mentat.ask_mentat): `answer(question)` gives
+    {"result": ...} or {"error": ...}; every ask is kept in `asked` (question, given, trace)."""
 
-    def reporter():
-        while not stop.is_set():
-            for job in client.get("/home/jobs", headers={"Authorization": f"Bearer {token}"}).get_json()["jobs"]:
-                client.post(f"/home/jobs/{job['id']}", json=answer(job["question"]),
-                            headers={"Authorization": f"Bearer {token}"})
-            time.sleep(0.01)
-    threading.Thread(target=reporter, daemon=True).start()
-    return stop
+    def __init__(self, answer, up=True):
+        self.answer, self.up, self.asked = answer, up, []
+
+    def ready(self):
+        return self.up
+
+    def ask_mentat(self, question, given=None, trace=""):
+        self.asked.append({"question": question, **({"given": given} if given else {}), "trace": trace})
+        out = self.answer(question) if not given else self.answer((question, given))
+        if "result" not in out:
+            raise RuntimeError(out.get("error") or "Mentat failed")
+        return out["result"]
+
+
+def _home_with_mentat(client, answer):
+    """Put a fake skippy-core Mentat behind the app (the chat asks it straight, over MENTAT_URL) answering with
+    `answer(question)`. Returns something with .set(), as the old fake reporter did."""
+    import threading
+    client.application.extensions["mentat"] = AskMentat(lambda q: answer(q if isinstance(q, str) else q[0]))
+    return threading.Event()
 
 
 def test_physics_goes_to_mentat_with_qwen_at_home():
@@ -1248,7 +1255,7 @@ def test_dashboard_is_admin_only_and_shows_the_widgets(env):
                     "--- data disk\n/dev/sda         59G  50G  9G  85% /srv/games/data\n=== end ===\n")
     login(client, ADMIN)
     page = client.get("/me").data.decode()
-    assert "AB12-CD34" in page and "Spend (estimate)" in page and "Friends" in page
+    assert "AB12-CD34" in page and "Spend (estimate)" not in page and "Friends" in page
     assert "Memory at 91%" in page and "World disk at 85%" in page      # watcher warnings
     assert 'data-tel="tile:dashboard"' in client.get("/apps").data.decode()   # tile on the front page
 
@@ -1356,7 +1363,7 @@ def test_the_old_bilby_page_is_gone_and_its_addresses_lead_to_the_audio_service(
 # ── core health (skippy-tel-core) on the dashboard ────────────────────────────
 
 CORE_OK = {"status": "ok", "spec_version": "1", "bridge": True, "hung_tiers": None,
-           "tiers": {"claude": True, "nagatha": True, "elevenlabs": True},
+           "tiers": {"nagatha": True, "elevenlabs": True},
            "ollama": {"available": True, "default": "qwen2.5:7b", "default_present": True}}
 
 
@@ -1366,6 +1373,14 @@ def _core_report(health, containers_ok=True):
                                     {"name": "whisper", "ok": containers_ok, "detail": "refused"}]},
             "services": [{"id": "intent", "name": "Skippy AI", "available": True, "status_detail": "default model: qwen2.5:7b"},
                          {"id": "image", "name": "Image Generator", "available": False, "status_detail": "not deployed"}]}
+
+
+def test_core_check_carries_planned_so_a_not_set_up_row_is_not_an_outage():
+    import home as home_mod
+    got = home_mod.core_check({"health": {"status": "ok"}, "services": [
+        {"id": "ups", "name": "UPS Monitor", "available": False, "planned": True, "status_detail": "not set up"},
+        {"id": "x", "name": "X", "available": False, "status_detail": "down"}]})
+    assert [s["planned"] for s in got["services"]] == [True, False]
 
 
 def test_core_check_is_unknown_until_home_reports():
@@ -1380,7 +1395,7 @@ def test_core_check_healthy_lists_tiers_and_every_service():
     import home as home_mod
     core = home_mod.core_check(_core_report(CORE_OK))
     assert core["verdict"] == "ok" and core["problems"] == [] and core["api_version"] == "1"
-    assert [t["name"] for t in core["tiers"]] == ["ollama", "claude", "nagatha", "elevenlabs", "bridge"]
+    assert [t["name"] for t in core["tiers"]] == ["ollama", "nagatha", "elevenlabs", "bridge"]
     assert all(t["ok"] for t in core["tiers"])
     assert [s["name"] for s in core["services"]] == ["Skippy AI", "Image Generator"]     # not just three of them
     assert core["services"][1]["available"] is False and core["problems"] == []          # not-deployed isn't a fault
@@ -1614,7 +1629,7 @@ def test_only_known_capabilities_count_and_only_while_home_is_reporting():
     h.accept({"capabilities": {"make_music": {"ready": True}, "format_c_drive": {"ready": True}}})
     import popups
     assert h.capabilities() == {"make_music": True, "make_image": False, "make_image_hq": False, "workshop": False, "music_gate": False,
-                                "video_gate": False, "voice_gate": False,
+                                "video_gate": False, "voice_gate": False, "house": False, "car": False,
                                 **{name: False for name in popups.load()}}   # unknown names are ignored (registered pop-ups count: popups.py)
     assert h.can("make_music") and not h.can("format_c_drive")
     h.accept({"capabilities": {"make_music": {"ready": "yes"}}})
@@ -1811,7 +1826,8 @@ def test_the_inventory_highlights_the_demos_and_lists_everything_else(env):
     assert 'id="find"' in page and 'aria-label="Filter by kind"' in page       # search + kind filters
     assert json.loads(html.unescape(re.search(r"data-kinds='([^']*)'", page).group(1))).__len__() == 4   # the four kinds that exist (the key steps All, then these)
     assert 'id="kind-key"' in page
-    assert len(re.findall(r'<a class="tile( featured)?"', page)) == 5            # every experiment is one tile: no duplicates
+    import experiments
+    assert len(re.findall(r'<a class="tile( featured)?"', page)) == len(experiments.EXPERIMENTS)   # every experiment is one tile: no duplicates
     assert "Coming next" not in page                                              # the three it promised are here now
 
 
@@ -1869,12 +1885,12 @@ def test_weapon_vs_armor_is_playable_in_the_browser():
     assert not any(e.slug == "weapon-vs-armor" for e in experiments.EXPERIMENTS)
 
 
-def test_browser_games_lists_weapon_vs_armor_star_control_zero_orion_trail_and_doom_loop(env):
+def test_browser_games_lists_weapon_vs_armor_star_control_zero_orion_trail_doom_loop_and_shifting_prophesy(env):
     import re
     client, _, _ = env
     page = client.get("/play").data.decode()                                     # public, like the experiments
     assert '<body class="bridge" data-app="play">' in page and "Browser Games" not in page.split("<main")[1]   # glyphs, not a title
-    assert re.findall(r'data-tel="play:([\w-]+)"', page) == ["weapon-vs-armor", "star-control-zero", "orion-trail", "doom-loop"]
+    assert re.findall(r'data-tel="play:([\w-]+)"', page) == ["weapon-vs-armor", "star-control-zero", "orion-trail", "doom-loop", "shifting-prophesy"]
     assert 'class="hit" href="/experiments/weapon-vs-armor"' in page
     assert re.search(r'data-s="off" data-tel="play:doom-loop"', page) and 'title="Doom Loop"' in page      # no build yet: dark, no link
     assert "Star Control Zero: The Precursors" in page                                    # a game's name is a label, so it is text
@@ -2134,3 +2150,10 @@ def test_a_picture_asked_for_but_never_drawn_is_drawn_by_the_portal(monkeypatch)
     assert [(j["kind"], j["prompt"]) for j in jobs] == [("make_image", "a red barn at dusk")]
     skippy.reply = lambda *a, **k: "The speed of light is fast."
     assert client.post("/chat/send", json={"message": "how fast is light?"}).get_json()["tools"] == []   # no ask, no picture
+
+
+def test_version_says_how_many_pop_up_tools_the_portal_knows(env):
+    client, _, _ = env
+    got = client.get("/version").get_json()
+    import popups as popups_mod
+    assert got["popups"] == len(popups_mod.names()) and got["popups"] >= 13 and got["commit"]      # the deploy's smoke test compares this with the registry

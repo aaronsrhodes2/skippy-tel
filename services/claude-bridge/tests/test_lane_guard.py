@@ -73,3 +73,44 @@ def test_every_run_gets_the_lane_guard_and_skippytel_its_deploy_checkout(shop):
     assert rule["matcher"] == "Edit|Write|MultiEdit|NotebookEdit|Bash" and "lane_guard.py" in rule["hooks"][0]["command"]
     assert see["matcher"] == "Read" and "eyes.py" in see["hooks"][0]["command"]      # a Core run's pictures (test_eyes.py)
     assert "SKIPPY_LANE_DEPLOY" in call["env"]
+
+
+# ── folders a project may not even read (the Shifting Prophesy cruise keeps the two builds and the referee apart) ──────────
+
+DENIED = ["D:/Aaron/development/shifting-prophesy/haiku-branch", "D:/Aaron/development/shifting-prophesy/referee"]
+
+
+@pytest.fixture
+def walled():
+    return lg.Lane(LANE, DEPLOY, temps=["C:/Users/aaron/AppData/Local/Temp"], deny_read=DENIED)
+
+
+@pytest.mark.parametrize("tool,args", [
+    ("Read", {"file_path": r"D:\Aaron\development\shifting-prophesy\haiku-branch\gen.mjs"}),
+    ("Read", {"file_path": "/d/Aaron/development/shifting-prophesy/referee/seeds.txt"}),
+    ("Glob", {"pattern": "**/*.mjs", "path": "D:/Aaron/development/shifting-prophesy/haiku-branch/src"}),
+    ("Grep", {"pattern": "solve", "path": "D:/Aaron/development/shifting-prophesy/referee"}),
+    ("Bash", {"command": "cat /d/Aaron/development/shifting-prophesy/haiku-branch/gen.mjs | head"}),
+    ("Bash", {"command": r"ls D:\Aaron\development\shifting-prophesy\referee\trials"}),
+    ("Bash", {"command": "cd D:/Aaron/development/shifting-prophesy/haiku-branch && git log"}),
+    ("Edit", {"file_path": "D:/Aaron/development/shifting-prophesy/haiku-branch/x.mjs"}),
+])
+def test_a_walled_folder_cannot_be_read_by_any_tool(walled, tool, args):
+    reason = walled.check(tool, args)
+    assert reason and "may not" in reason
+
+
+@pytest.mark.parametrize("tool,args", [
+    ("Read", {"file_path": "D:/Aaron/development/shifting-prophesy/references/metazelda/README.md"}),
+    ("Read", {"file_path": "D:/Aaron/development/shifting-prophesy-purple/SPEC.md"}),          # a sibling with the same prefix is not inside
+    ("Read", {"file_path": "D:/Aaron/development/arkanoid/game.py"}),
+    ("Grep", {"pattern": "x", "path": "D:/Aaron/development/arkanoid"}),
+    ("Bash", {"command": "ls D:/Aaron/development/shifting-prophesy/references"}),
+    ("Bash", {"command": "node gen.mjs Prophesy"}),
+])
+def test_everything_else_is_still_readable(walled, tool, args):
+    assert walled.check(tool, args) is None
+
+
+def test_without_a_wall_nothing_changes(lane):
+    assert lane.check("Read", {"file_path": "D:/Aaron/development/shifting-prophesy/haiku-branch/gen.mjs"}) is None

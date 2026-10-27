@@ -71,7 +71,7 @@
       <button type="button" class="key clear" data-tel="chat:new"{% if 'new' in buried %} hidden{% endif %} aria-label="New chat" title="New chat"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
       <button type="button" class="key clip" data-tel="chat:attach"{% if 'attach' in buried %} hidden{% endif %} aria-label="Attach pictures or files (or paste, or drop them here)" title="Attach pictures or files (or paste, or drop them here)"><svg class="g" aria-hidden="true"><use href="#g-clip"/></svg></button>
       {% if captain %}{# the camera (static/skippy-camera.js): a tap opens the viewfinder, a second takes the photo; the Captain only #}
-      <button type="button" class="key cam" data-tel="chat:camera" aria-pressed="false" aria-label="Camera: photograph a screen" title="Camera: photograph a screen"><svg class="g" aria-hidden="true"><use href="#g-camera"/></svg><i class="lamp"></i></button>{% endif %}
+      <button type="button" class="key cam" data-tel="chat:camera" aria-pressed="false" aria-label="Camera: photos, every camera, or the screen" title="Camera: photos, every camera, or the screen"><svg class="g" aria-hidden="true"><use href="#g-camera"/></svg><i class="lamp"></i></button>{% endif %}
       {% if chat_modes|length > 1 %}<button type="button" class="key brain-key" data-open="brain" data-tel="chat:mode" aria-label="Mode" title="Mode"><svg class="g" aria-hidden="true"><use href="#g-core"/></svg></button>{% endif %}
       {# the voice key (static/skippy-voice.js two modes): Typing listens only for "Skippy"; Hands-off listens and speaks until "thanks" #}
       <button type="button" class="key voice" aria-pressed="false" aria-label="Typing: tap to talk" title="Typing: tap to talk"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg><i class="lamp"></i></button>
@@ -107,6 +107,7 @@
     const logPager = {                                           // (the name it had when the transcript was pages; same calls)
       refresh() { if (stuck) logBox.scrollTop = logBox.scrollHeight; paintJump(); },
       last() { stuck = true; unseen = 0; logBox.scrollTop = logBox.scrollHeight; paintJump(); },
+      lastNow() { stuck = true; unseen = 0; requestAnimationFrame(() => { logBox.scrollTop = logBox.scrollHeight; paintJump(); }); },
     };
     jump.addEventListener("click", () => { logPager.last(); msg.focus(); });
     if (window.ResizeObserver) new ResizeObserver(() => logPager.refresh()).observe(log);   // a picture or a card that grows keeps the end in view
@@ -179,7 +180,7 @@
         const want = brain.slice(6);
         if (window.SkippyAgent.setBrain(want) !== want) flash("This conversation already runs on the other agent brain: New chat to switch.");
       }
-      paintStop(); if (!agent) logPager.last();                 // the transcript opens at its end
+      paintStop(); if (!agent) logPager.lastNow();               // the public transcript opens at its end (agent transcript scrolls in its own script)
     }
     root.querySelectorAll(".brain-opt").forEach(o => o.addEventListener("click", () => {
       brain = o.dataset.brain; try { localStorage.setItem(BRAIN_KEY, o.dataset.mode); } catch (e) {}
@@ -518,6 +519,17 @@
       paintFiles();
     }
     function flash(text) { const s = form.querySelector(".vstat"); s.textContent = text; s.hidden = false; setTimeout(() => { s.hidden = true; }, 4000); }
+    // A marked-up picture coming back from the annotator (static/skippy-annotate.js): the copy goes with the next message, the legend
+    // into the box above what he types, so the change request is the picture AND the words.
+    window.SkippyCompose = {
+      attach(name, dataUrl, legend) {
+        if (pending_files.length >= MAX_FILES) { flash("At most " + MAX_FILES + " files to a message."); return false; }
+        pending_files.push({name: name, data: dataUrl}); paintFiles();
+        if (legend) { msg.value = legend + (msg.value ? "\n" + msg.value : "\n"); grow(); }
+        msg.focus(); msg.setSelectionRange(msg.value.length, msg.value.length);
+        return true;
+      },
+    };
     form.querySelector("button.clip").addEventListener("click", () => picker.click());
     {% if captain %}{# The camera key (the Captain only): a photo of a screen goes with the message exactly like a pasted picture, kept
        as large as the agent's limit allows (workshop.MAX_IMAGE_B64 each, MAX_IMAGES_B64 together) so the text on it stays readable. #}
@@ -526,10 +538,12 @@
       const PHOTO_MAX = 1100000, PHOTOS_MAX = 3100000;
       let shots = 0;
       SkippyCamera.attach({key: camKey, stage: root.querySelector(".stage"), say: flash,
+        html2canvas: "{{ url_for('static', filename='vendor/html2canvas.min.js') }}",      // the page snapshot for iPhone and iPad, loaded on first use
         budget: () => Math.min(PHOTO_MAX, PHOTOS_MAX - pending_files.reduce((n, f) => n + f.data.length, 0)),
-        onPhoto: (url) => {
-          if (pending_files.length >= MAX_FILES) { flash("At most " + MAX_FILES + " files to a message."); return; }
-          pending_files.push({name: "camera-" + (++shots) + ".jpg", data: url}); paintFiles(); msg.focus();
+        onPhoto: (url, meta) => {                                  // each picture is an attachment with its own remove key (paintFiles)
+          if (pending_files.length >= MAX_FILES) { flash("At most " + MAX_FILES + " files to a message."); return false; }
+          pending_files.push({name: ((meta && meta.name) || "camera") + "-" + (++shots) + ".jpg", data: url}); paintFiles(); msg.focus();
+          return pending_files.length < MAX_FILES;
         }});
     }{% endif %}
     picker.addEventListener("change", () => { takeFiles(picker.files); picker.value = ""; });

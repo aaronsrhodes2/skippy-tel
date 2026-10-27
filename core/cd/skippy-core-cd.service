@@ -1,0 +1,10 @@
+[Unit]
+Description=SkippyCore CD: deploy the portal, Mentat cloud and the games VM's infra from the house's own git (core/cd/cd.py, docs/no-github.md)
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/skippy-core/cd/cd.py run
+Nice=5
+TimeoutStartSec=2h

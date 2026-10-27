@@ -1,4 +1,4 @@
-"""Hook the portal's own domains up to Cloud Run, end to end and idempotent (run by .github/workflows/domains.yml).
+"""Hook the portal's own domains up to Cloud Run, end to end and idempotent (run by skippy-core: `cd.py domains`).
 
 The Captain owns makerportal.live and makerportal.studio (registered at Squarespace, which has no DNS API). Their DNS
 lives in Cloud DNS in this project, so the only hand step is pointing the registrar at Google's nameservers. Every run

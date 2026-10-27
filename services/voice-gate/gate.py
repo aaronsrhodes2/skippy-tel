@@ -38,6 +38,9 @@ import time
 
 import requests
 from flask import Flask, Response, abort, request
+from flask import g as _g
+
+import ready as ready_mod
 from werkzeug.exceptions import HTTPException
 
 log = logging.getLogger("voice-gate")
@@ -289,13 +292,26 @@ def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slot
                 pass
         return out
 
+    ready_state = ready_mod.Readiness("voice-gate")
+
+    @app.before_request
+    def _job_begins():
+        if request.path != "/health" and request.method != "OPTIONS":      # a call that does work is a job while it runs (PLATINUM section 24)
+            _g._job = ready_state.begin(request.path)
+
+    @app.teardown_request
+    def _job_ends(_exc):
+        token = _g.pop("_job", None)
+        if token:
+            ready_state.end(token)
+
     @app.get("/health")
     def health():
         w, t = probe(f"{whisper_url}/health"), probe(f"{tts_url}/tts/health")
-        return Response(json.dumps({"ok": True, "ready": w, "whisper": w, "tts": t, "voices": dict(studio_voices(), elevenlabs=t),
-                                    "voice_chars_today": voice.used(), "voice_budget": daily_chars}),
-                        mimetype="application/json",
-                        headers={"Cache-Control": "no-store"})
+        deps = {"whisper": {"ready": bool(w), "detail": "" if w else "Whisper (speech to text, at home) isn't answering"}}
+        rep = ready_state.report(ready=True, deps=deps, ok=True, whisper=w, tts=t, voices=dict(studio_voices(), elevenlabs=t),
+                                 voice_chars_today=voice.used(), voice_budget=daily_chars)
+        return Response(json.dumps(rep), mimetype="application/json", headers={"Cache-Control": "no-store"})
 
     @app.post("/t/<token>/stt")
     def stt(token):

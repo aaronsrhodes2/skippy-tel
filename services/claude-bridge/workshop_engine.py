@@ -46,6 +46,7 @@ import eyes
 import conversation_log
 import new_folder
 import projects as projects_mod
+import sdk_engine
 
 MODEL = "claude-sonnet-5-5"        # Sonnet 5.5, on purpose: nothing else picks it (was Opus until 2026-10-10)
 EFFORT = "medium"                  # and its effort level: also fixed here, never from the environment or a request
@@ -66,9 +67,10 @@ CORE_MAX_OUTPUT = "16000"          # its reply reserve on Core: a local model's 
 VAULT_ENV = os.getenv("SKIPPY_VAULT_ENV", "G:/My Drive/vault/.env")
 REPO = os.getenv("WORKSHOP_REPO", r"D:\Aaron\development\SkippyTel-workshop")
 PRIMARY = os.getenv("WORKSHOP_PRIMARY", r"D:\Aaron\development\SkippyTel")
-REMOTE = os.getenv("WORKSHOP_REMOTE", "https://github.com/aaronsrhodes2/skippy-tel.git")
+REMOTE = os.getenv("WORKSHOP_REMOTE", "D:/trunk/git/skippy-tel.git")      # SkippyTel's home (docs/no-github.md): never GitHub
 SESSIONS = os.getenv("WORKSHOP_SESSIONS", os.path.join(os.path.dirname(REPO), ".skippy-workshop-sessions.json"))
 PROMPT_FILE = Path(__file__).with_name("workshop_prompt.md")
+PURPLE_TOOLS_SERVER = Path(__file__).resolve().parents[1] / "purple-tools" / "server.py"     # web search, Mentat, pop-ups, PDF, browser (an MCP server)
 PROMPT_NAME = ".skippy-workshop-prompt.txt"   # the prompt as claude reads it ({repo}/{primary} filled in), next to the sessions file
 ENV_FILES = ("G:/My Drive/vault/.env",)        # where SKIPPY_HOME_TOKEN lives if the environment doesn't have it
 
@@ -189,6 +191,36 @@ def _is_number(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def vault_value(name: str, env=os.environ, files=ENV_FILES) -> str:
+    """One setting from the environment, else the vault .env (read each time, so a value put in the vault works without a restart)."""
+    value = (env.get(name) or "").strip()
+    if value:
+        return value
+    for path in files:
+        try:
+            for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.startswith(name + "="):
+                    return line.split("=", 1)[1].strip().strip("\"'")
+        except OSError:
+            continue
+    return ""
+
+
+TOKEN_LIFE_DAYS = 365          # `claude setup-token` makes a token that lasts a year
+
+
+def token_days_left(env=os.environ, files=ENV_FILES, today=None) -> int | None:
+    """Days until the long-lived Claude token runs out, from CLAUDE_CODE_OAUTH_TOKEN_SET (the date tools/claude_token.sh wrote); None without one."""
+    import datetime as _dt
+    if not vault_value("CLAUDE_CODE_OAUTH_TOKEN", env, files):
+        return None
+    try:
+        made = _dt.date.fromisoformat(vault_value("CLAUDE_CODE_OAUTH_TOKEN_SET", env, files))
+    except ValueError:
+        return None
+    return TOKEN_LIFE_DAYS - ((today or _dt.date.today()) - made).days
+
+
 def home_token(env=os.environ, files=ENV_FILES) -> str:
     """SKIPPY_HOME_TOKEN, the reporter's bearer token, which also guards this endpoint.
     From the environment, else the vault .env. Empty means the endpoint stays shut."""
@@ -229,7 +261,11 @@ MAX_SHOTS = 3                      # pictures one run may attach (SKIPPY_IMAGE l
 # A picture the agent shows: up to 12 MB (a 4K screenshot, a full-size picture). It was 400 KB, which the event pipe needed, not the
 # Captain; and it was named MAX_IMAGE_BYTES too, which silently capped the pictures HE attaches (above, 3 MB) at 400 KB as well.
 MAX_SHOT_BYTES = 12 * 1024 * 1024
-_IMAGE_LINE = re.compile(r"^[ \t]*`?SKIPPY_IMAGE:[ \t]*(\S[^\n`]*?)[ \t]*`?[ \t]*$", re.M)
+# `SKIPPY_MODEL: <file.glb>` is the same, for a 3D model (a voxel build from tools/voxel/render.py --glb): the chat shows it inline
+# as a model to rotate (2026-10-25: the Captain wants 3D in the chat itself, not a file he can't reach from a browser).
+# SKIPPY_AUDIO / SKIPPY_VIDEO / SKIPPY_FILE the same for sound, video and a file to save (MIDI, a zip of stems): one rule for every
+# result, nothing ever left as a path on skippy-pc.
+_IMAGE_LINE = re.compile(r"^[ \t]*`?SKIPPY_(?:IMAGE|MODEL|AUDIO|VIDEO|FILE):[ \t]*(\S[^\n`]*?)[ \t]*`?[ \t]*$", re.M)
 
 
 # A picture the agent wants MADE (not a file it has): `SKIPPY_PICTURE: <a detailed description>` in its reply. The bridge gives it
@@ -286,7 +322,25 @@ def split_images(text: str) -> tuple[str, list[str]]:
 
 
 def image_mime(data: bytes) -> str | None:
-    """image/png or image/jpeg by the file's own first bytes (never by its name), else None."""
+    """What the agent may show in the chat, by the file's own first bytes (never by its name), else None: a picture, a 3D model
+    (binary glTF 2), sound (mp3, wav, ogg, flac), video (mp4), or a file to save (MIDI, zip). The same rules as the portal's
+    workshop.sniff (a test keeps them equal): the browser is only a window, everything is made here and shown there."""
+    if data[:4] == b"glTF" and data[4:8] == b"\x02\x00\x00\x00":
+        return "model/gltf-binary"                     # a binary glTF, version 2
+    if data[:3] == b"ID3" or (len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0):
+        return "audio/mpeg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return "audio/wav"
+    if data[:4] == b"OggS":
+        return "audio/ogg"
+    if data[:4] == b"fLaC":
+        return "audio/flac"
+    if data[4:8] == b"ftyp":
+        return "video/mp4"
+    if data[:4] == b"MThd":
+        return "audio/midi"
+    if data[:4] == b"PK\x03\x04":
+        return "application/zip"
     if data[:8] == b"\x89PNG\r\n\x1a\n":
         return "image/png"
     if data[:3] == b"\xff\xd8\xff":
@@ -335,9 +389,10 @@ class Run:
     """One chat message being worked on: an append-only list of events, readable while it grows."""
 
     def __init__(self, task: str, conv: str, message: str, who: str = "", created: float | None = None,
-                 project: str = projects_mod.DEFAULT, brain: str = "claude"):
+                 project: str = projects_mod.DEFAULT, brain: str = "core", client_id: str = ""):
         self.task, self.conv, self.message, self.who = task, conv, message, who
-        self.brain = brain if brain in BRAINS else "claude"   # who does the thinking: Claude (Sonnet) or Skippy Core's coder
+        self.client_id = client_id                 # an opaque id the page chose for this send; echoed for tracing, never used to dedupe here
+        self.brain = brain if brain in BRAINS else "claude"   # who does the thinking: Skippy Core's coder (purple) unless another is named
         self.project = project                 # which repo (projects.json): picks the clone, the checkout and the session
         self.clone = ""                        # that project's clone when the run started (the conversation log reads it)
         self.before_finish = None              # (run) -> None, called once just before the run ends (the ship check)
@@ -350,6 +405,7 @@ class Run:
         self.done, self.ok, self.error = False, None, None
         self.cancelled = False
         self.proc: subprocess.Popen | None = None
+        self.abort = None                      # () -> None, set by an engine that has no process to kill (sdk_engine): cancels its task
         self.finished_at: float | None = None
         self._cond = threading.Condition()
         self.on_change = None                  # (run, force) -> None; the Workshop's saver. A Run itself never touches the disk.
@@ -399,7 +455,7 @@ class Run:
         """Everything worth keeping across a bridge restart. The message text is not in it: nothing needs it again."""
         with self._cond:
             return {"task": self.task, "conv": self.conv, "who": self.who, "project": self.project, "brain": self.brain,
-                    "created": self.created,
+                    "client_id": self.client_id, "created": self.created,
                     "finished_at": self.finished_at, "done": self.done, "ok": self.ok, "error": self.error,
                     "events": list(self.events)}
 
@@ -408,7 +464,7 @@ class Run:
         with self._cond:
             finished = self.finished_at
             return {"task": self.task, "conv": self.conv, "who": self.who, "project": self.project, "brain": self.brain,
-                    "events": len(self.events),
+                    "client_id": self.client_id, "events": len(self.events),
                     "done": self.done, "ok": self.ok, "error": self.error,
                     "age_s": round(max(0.0, now - self.created), 1),
                     "finished_age_s": None if finished is None else round(max(0.0, now - finished), 1)}
@@ -422,6 +478,11 @@ def child_env(base=None) -> dict:
     env = {k: v for k, v in (os.environ if base is None else base).items() if k != "SKIPPY_HOME_TOKEN"}
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GCM_INTERACTIVE"] = "never"
+    # The Captain's long-lived Claude token (`claude setup-token`, a year, kept in the vault): with it, claude never needs a /login at this PC,
+    # which is what used to tie him to his desk. Without one, claude falls back to its own stored sign-in, as before.
+    token = "".join(vault_value("CLAUDE_CODE_OAUTH_TOKEN", env, ENV_FILES).split())   # a terminal-wrapped paste leaves a space inside; a token has none
+    if token:
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = token
     return env
 
 
@@ -460,7 +521,7 @@ def run_auth_status(claude_cmd: list[str], timeout: float) -> str | None:
     Popen as a list exactly like every other claude call here, which is what lets a Windows .cmd shim (npm's
     claude.cmd) run; on a timeout the whole tree dies (taskkill /T), because killing only the shim's cmd.exe would
     leave node running."""
-    env = {k: v for k, v in os.environ.items() if k != "SKIPPY_HOME_TOKEN"}     # it needs nothing from this door's key
+    env = child_env()                     # the same sign-in the runs use (the long-lived token when there is one), never the door's key
     try:
         proc = subprocess.Popen([*claude_cmd, "auth", "status"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace", env=env)
@@ -649,7 +710,7 @@ class Workshop:
 
     # ── runs ─────────────────────────────────────────────────────────────
     def start(self, task: str, conv: str, message: str, who: str = "", attach: bool = False,
-              project: str = "", images=None, brain: str = "claude") -> Run:
+              project: str = "", images=None, brain: str = "core", client_id: str = "") -> Run:
         """Begin a task, or re-attach if it's already known. One task at a time across ALL projects: the chat follows one
         run, the Captain reviews one outcome at a time, and two runs would race on the shared sessions file.
 
@@ -678,7 +739,7 @@ class Workshop:
             raise ValueError("unknown project") from None    # only projects.json, or a folder under the root, is a target
         if not attach:
             self._settle_remote(chosen)
-        brain = brain or "claude"
+        brain = brain or "core"                        # no brain named = purple (the Captain, 2026-10-27); old run files and session keys stay Claude's
         if brain not in BRAINS:
             raise ValueError("unknown brain")
         if brain == "core" and not attach and not self.core_ready():
@@ -697,7 +758,7 @@ class Workshop:
             elif any(not r.done for r in self._runs.values()):
                 raise Busy("Skippy is still working on the last thing")
             else:
-                run = self._runs[task] = Run(task, conv, message, who, project=project, brain=brain)
+                run = self._runs[task] = Run(task, conv, message, who, project=project, brain=brain, client_id=(client_id or "")[:64])
                 run.clone = chosen.clone
                 run.pictures = paths if brain == "core" else []
                 run.on_change = self._changed
@@ -758,6 +819,8 @@ class Workshop:
         run.cancelled = True
         if run.proc:
             _kill_tree(run.proc)
+        if run.abort:
+            run.abort()
         return True
 
     def busy(self) -> bool:
@@ -829,8 +892,8 @@ class Workshop:
             if path.name.endswith(".tmp"):             # a write the last process died in the middle of
                 _unlink(path)
                 continue
-            if path.suffix != ".json":
-                continue
+            if path.suffix != ".json" or not _TASK.fullmatch(path.stem):
+                continue                               # not a run (a run's file is named by its task id): engines.json, the settings and MCP files live here too
             try:
                 mtime = path.stat().st_mtime
             except OSError:
@@ -871,7 +934,8 @@ class Workshop:
         run = Run(task, conv, "", who.strip()[:MAX_WHO] if isinstance(who, str) else "",
                   float(created) if _is_number(created) else mtime,
                   project if isinstance(project, str) and projects_mod._ID.fullmatch(project) else projects_mod.DEFAULT,
-                  data.get("brain") if data.get("brain") in BRAINS else "claude")
+                  data.get("brain") if data.get("brain") in BRAINS else "claude",     # a file with no brain is from before brains: Claude's
+                  data["client_id"][:64] if isinstance(data.get("client_id"), str) else "")
         run.events = [e for e in events if isinstance(e, dict)][:MAX_EVENTS]
         run.done = data.get("done") is True
         run.ok = data["ok"] if isinstance(data.get("ok"), bool) else None
@@ -1064,6 +1128,7 @@ class Workshop:
         os.makedirs(config, exist_ok=True)
         self._share_claude_setup(config)
         env = child_env()
+        env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)                 # a Core run signs in to Core with its key, never with the Captain's Claude token
         env.update(ANTHROPIC_BASE_URL=url, ANTHROPIC_API_KEY=key, ANTHROPIC_AUTH_TOKEN=key, CLAUDE_CONFIG_DIR=config,
                    ANTHROPIC_SMALL_FAST_MODEL=CORE_FAST_MODEL, ANTHROPIC_DEFAULT_HAIKU_MODEL=CORE_FAST_MODEL,
                    ANTHROPIC_DEFAULT_SONNET_MODEL=CORE_MODEL, ANTHROPIC_DEFAULT_OPUS_MODEL=CORE_MODEL,
@@ -1165,22 +1230,89 @@ class Workshop:
                *thinking, "--dangerously-skip-permissions",
                "--append-system-prompt-file", str(self.prompt_path(project)), "--system-prompt-snapshot", "off",
                "--add-dir", self.project(project).primary, "--settings", self.lane_settings()]
+        for config in (self.house_mcp_config(), self.purple_mcp_config()):       # the house's tools, then purple's (services/purple-tools)
+            if config:
+                cmd += ["--mcp-config", config]
         if session:
             cmd += ["--resume", session]
         return self._one_line_each(cmd)
+
+    def _write_state_file(self, name: str, text: str) -> str | None:
+        """Write `name` next to the runs (the temp folder if that fails), only when it changed; its path, or None if neither place works."""
+        for folder in (Path(self.state_dir), Path(tempfile.gettempdir()) / "skippy-workshop"):
+            path = folder / name
+            try:
+                if not path.is_file() or path.read_text(encoding="utf-8") != text:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(text, encoding="utf-8")
+                return str(path)
+            except OSError:
+                continue
+        return None
+
+    def house_mcp_config(self) -> str | None:
+        """The house's tools for every run, either brain (services/satellite/house_mcp.py on the satellite's venv: lights and switches,
+        HomeKit, Matter, Leviton). None, and the run goes without them, until that venv exists. Written next to the runs."""
+        satellite = Path(__file__).resolve().parents[1] / "satellite"
+        python, server = satellite / ".venv" / "Scripts" / "python.exe", satellite / "house_mcp.py"
+        if not (python.is_file() and server.is_file()):
+            return None
+        return self._write_state_file("house-mcp.json", json.dumps({"mcpServers": {"skippy-house": {"type": "stdio", "command": python.as_posix(), "args": [server.as_posix()], "alwaysLoad": True}}}, indent=1))
+
+    def purple_mcp_config(self) -> str | None:
+        """purple's Haiku-class tools (services/purple-tools: web search, Mentat, the quick pop-ups, PDF reading, a headless browser) as an MCP
+        server run by this bridge's own Python (which has pypdf and playwright). None, and the run goes without them, when the server isn't there."""
+        server, python = PURPLE_TOOLS_SERVER, Path(sys.executable)
+        if not (server.is_file() and python.is_file()):
+            return None
+        return self._write_state_file("purple-tools-mcp.json", json.dumps({"mcpServers": {"purple-tools": {"type": "stdio", "command": python.as_posix(), "args": [server.as_posix()], "alwaysLoad": True}}}, indent=1))
+
+    def core_mcp_config(self, house: bool, purple: bool, purple_only: list[str] | None = None) -> str | None:
+        """One MCP config file holding only the servers switched on (the SDK engine takes a single one), or None when none is. `purple_only`
+        names the purple-tools to expose (the server's PURPLE_TOOLS_ONLY: a tool outside it is neither listed nor callable); none = all of them."""
+        servers: dict = {}
+        for wanted, make in ((house, self.house_mcp_config), (purple, self.purple_mcp_config)):
+            path = make() if wanted else None
+            if path:
+                try:
+                    servers.update(json.loads(Path(path).read_text(encoding="utf-8")).get("mcpServers") or {})
+                except (OSError, ValueError):
+                    continue
+        if purple_only and "purple-tools" in servers:
+            servers["purple-tools"] = {**servers["purple-tools"], "env": {"PURPLE_TOOLS_ONLY": ",".join(purple_only)}}
+        return self._write_state_file("core-mcp.json", json.dumps({"mcpServers": servers}, indent=1)) if servers else None
 
     def lane_settings(self) -> str:
         """The settings file every run gets with --settings: the lane guard (lane_guard.py) as a PreToolUse hook, so a run
         changes files only in its own conversation's folder (the Captain's rule, 2026-10-23). Written next to the runs."""
         hook = f'"{sys.executable}" "{Path(__file__).resolve().with_name("lane_guard.py")}"'
         see = f'"{sys.executable}" "{Path(__file__).resolve().with_name("eyes.py")}"'   # a Core run's Read of a picture (eyes.py)
+        # after a compaction, the Captain's request back in front of the agent, word for word (restate_request.py)
+        restate = f'"{sys.executable}" "{Path(__file__).resolve().with_name("restate_request.py")}"'
         want = {"hooks": {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
                                           "hooks": [{"type": "command", "command": hook, "timeout": 10}]},
-                                         {"matcher": "Read", "hooks": [{"type": "command", "command": see, "timeout": 200}]}]}}
+                                         {"matcher": "Read", "hooks": [{"type": "command", "command": see, "timeout": 200}]}],
+                          "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": restate, "timeout": 10}]}]}}
+        return self._settings_file("lane-settings.json", want)
+
+    def sdk_settings(self, claude_md_excludes=None) -> str:
+        """The SDK engine's settings file: only the hooks that stay scripts (a Core run's Read of a picture, and the compaction
+        backstop), and the CLAUDE.md files this project must not load (claudeMdExcludes, from engines.json). The lane rule and the
+        stop gate are callbacks in sdk_engine.py, not entries here."""
+        see = f'"{sys.executable}" "{Path(__file__).resolve().with_name("eyes.py")}"'
+        restate = f'"{sys.executable}" "{Path(__file__).resolve().with_name("restate_request.py")}"'
+        want = {"hooks": {"PreToolUse": [{"matcher": "Read", "hooks": [{"type": "command", "command": see, "timeout": 200}]}],
+                          "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": restate, "timeout": 10}]}]}}
+        if claude_md_excludes:
+            want["claudeMdExcludes"] = list(claude_md_excludes)
+        return self._settings_file("sdk-settings.json", want)
+
+    def _settings_file(self, name: str, want: dict) -> str:
+        """Write a settings file next to the runs (the temp folder if that fails) and return its path; it is only written when it changed."""
         text = json.dumps(want, indent=1)
         problem = None
         for folder in (Path(self.state_dir), Path(tempfile.gettempdir()) / "skippy-workshop"):   # the temp folder if the state one fails
-            path = folder / "lane-settings.json"
+            path = folder / name
             try:
                 if not path.is_file() or path.read_text(encoding="utf-8") != text:
                     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1188,7 +1320,7 @@ class Workshop:
                 return str(path)
             except OSError as exc:
                 problem = exc
-        raise ValueError(f"can't write the lane settings ({problem}): no run starts without the guard")
+        raise ValueError(f"can't write the settings {name} ({problem}): no run starts without them")
 
     @staticmethod
     def _one_line_each(argv: list[str]) -> list[str]:
@@ -1256,7 +1388,7 @@ class Workshop:
                     data = f.read(MAX_SHOT_BYTES + 1)
             mime = image_mime(data)
             if not inside or mime is None or len(data) > MAX_SHOT_BYTES:
-                run.emit({"t": "text", "text": f"(couldn't attach the picture {name}: it must be a PNG or JPEG of at "
+                run.emit({"t": "text", "text": f"(couldn't attach the picture {name}: it must be a PNG, JPEG or .glb of at "
                                                 f"most {MAX_SHOT_BYTES // (1024 * 1024)} MB inside my clone)"})
                 continue
             run.emit({"t": "image", "mime": mime, "name": name, "b64": base64.b64encode(data).decode("ascii")})
@@ -1317,7 +1449,10 @@ class Workshop:
                 run.finish(False, f"couldn't write my instructions file ({self.prompt_path(run.project)}): {exc}"[:300])
                 return
             session = self._sessions().get(self.session_key(run.project, run.conv, run.brain))
-            self._attempt(run, session)
+            if sdk_engine.engine_for(self.state_dir, run.brain, run.project) == "sdk":
+                sdk_engine.run_core(self, run, session)         # typed events, callbacks, bounded segments (sdk_engine.py)
+            else:
+                self._attempt(run, session)
         except Exception as exc:  # noqa: BLE001 — a crash must end the run, or the chat waits forever
             run.finish(False, f"the bridge hit a snag: {exc}"[:300])
         finally:

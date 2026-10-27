@@ -7,7 +7,7 @@ reachable = 1, unreachable = 0. Keep this hot.
 Model availability policy — no API calls that cost money:
   - Ollama: GET /api/tags (free local Docker call) confirms the daemon is
     running and which models are loaded.
-  - Paid tiers (Anthropic, Gemini, ElevenLabs): key-present check only.
+  - Paid tiers (Gemini, ElevenLabs): key-present check only.
     A configured key means the tier CAN be invoked; it does not ping the
     remote API. We never send inference requests from health checks.
 
@@ -94,10 +94,14 @@ def _tier_keys() -> dict:
     """Key presence only — no API calls, no cost."""
     from app.config import settings  # noqa: PLC0415
     return {
-        "claude":     bool(settings.anthropic_api_key),
         "nagatha":    bool(settings.gemini_api_key),
         "elevenlabs": bool(settings.elevenlabs_api_key),
     }
+
+
+from app import ready as ready_mod  # noqa: E402
+
+READY = ready_mod.Readiness("flask-api")        # main.py counts every POST (a chat, a translation, a battery report) as a job while it runs
 
 
 @bp.get("/health")
@@ -113,6 +117,16 @@ def health():
         "tiers":  _tier_keys(),
     }
     payload["bridge"] = _bridge_status()
+    # PLATINUM section 24: not just "ok": ready to take a chat NOW (Ollama answers AND offers the default model, no tier hung), what it is
+    # doing, and why not. The HTTP status stays 200 (phones and tools parse this body); `ready` is the word to read.
+    ollama = payload["models"]["ollama"]
+    llm_ok = bool(ollama.get("available") and ollama.get("default_present"))
+    deps = {"ollama": {"ready": llm_ok, "detail": "" if llm_ok else (
+        "the model server (skippy-core's Ollama shim) isn't answering" if not ollama.get("available")
+        else f"the default model {ollama.get('default')} isn't offered")}}
+    rep = READY.report(ready=not hang_events, deps=deps,
+                       detail=("a model tier is hung: " + ", ".join(str(h) for h in hang_events)) if hang_events else "")
+    payload.update({k: rep[k] for k in ("ready", "accepting", "jobs", "since", "stuck_s", "uptime_s", "detail", "deps")})
     ups = _ups_snapshot()
     if ups is not None:
         payload["ups"] = ups

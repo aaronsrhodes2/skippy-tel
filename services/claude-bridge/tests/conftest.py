@@ -23,9 +23,24 @@ def no_real_claude_login_probe(monkeypatch):
     module-level Workshop), so by default the probe finds out nothing ("unknown"). The login tests give a probe their
     own runner, or put the real function back deliberately."""
     monkeypatch.setattr(engine, "run_auth_status", lambda claude_cmd, timeout: None)
+    # Nor the real vault: child_env() adds the Captain's year token from it, so a test comparing an environment would depend on this PC
+    # (CI has no vault). The token tests point ENV_FILES at a vault of their own.
+    monkeypatch.setattr(engine, "ENV_FILES", ())
     # Nor the real Skippy Core: a conversation's name is asked of it on a thread (chat_names.py). Here it is never there, so
     # every name is the fallback (the naming tests give the log a namer of their own).
     monkeypatch.setattr(engine.Workshop, "ask_core", lambda self, system, text: (_ for _ in ()).throw(RuntimeError("no Core in tests")))
+
+
+@pytest.fixture(autouse=True)
+def these_tests_exercise_the_claude_brain_unless_they_name_another(monkeypatch):
+    """A request that names no brain is Skippy Core's coder now (the Captain, 2026-10-27: no brain named = purple). Most of these tests were
+    written for the Claude brain's CLI path and start runs without naming one: they keep that path by asking for it. A test that names a brain
+    (the core tests) is untouched, and test_default_brain_client_id.py checks the real default."""
+    real = engine.Workshop.start
+
+    def start(self, *args, brain=None, **kwargs):
+        return real(self, *args, brain=brain or "claude", **kwargs)
+    monkeypatch.setattr(engine.Workshop, "start", start)
 
 
 @pytest.fixture

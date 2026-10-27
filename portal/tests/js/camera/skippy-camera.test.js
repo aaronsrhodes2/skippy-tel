@@ -48,8 +48,15 @@ function makeDoc() {
   doc.createElementNS = (ns, tag) => new El(tag);
   return doc;
 }
-function makeMedia({frame = [4032, 3024], fail = null} = {}) {
+function makeMedia({frame = [4032, 3024], fail = null, devices = null, display = null} = {}) {
   const m = {asks: [], tracks: []};
+  if (devices) m.enumerateDevices = async () => devices.map(d => ({kind: "videoinput", deviceId: d.id, label: d.label}));
+  if (display) m.getDisplayMedia = async (c) => {
+    m.displayAsk = c;
+    if (display === "deny") { const e = new Error("no"); e.name = "NotAllowedError"; throw e; }
+    const track = new El("track"); track.stop = () => { track.stopped = true; log.push("stop-screen"); }; m.tracks.push(track);
+    return {frame: display, getTracks: () => [track], getVideoTracks: () => [track]};
+  };
   m.getUserMedia = async (c) => {
     m.asks.push(c);
     if (fail) { const e = new Error("held"); e.name = fail; throw e; }
@@ -57,6 +64,9 @@ function makeMedia({frame = [4032, 3024], fail = null} = {}) {
     track.stop = () => { track.stopped = true; log.push("stop"); };
     track.getCapabilities = () => ({width: {max: frame[0]}, height: {max: frame[1]}});
     track.applyConstraints = async (c2) => { m.applied = c2; };
+    const wanted = c.video && c.video.deviceId && c.video.deviceId.exact;
+    const dev = devices && devices.find(d => d.id === wanted);
+    track.getSettings = () => ({facingMode: dev ? dev.facing : ""});
     m.tracks.push(track);
     return {frame, getTracks: () => [track], getVideoTracks: () => [track]};
   };
@@ -87,7 +97,7 @@ test("one tap opens the back camera asking for full resolution; a second takes t
   assert.equal(view(s), undefined, "the viewfinder is gone");
   assert.ok(s.media.tracks[0].stopped, "the camera light is off");
   assert.ok(log.indexOf("stop") < log.indexOf("encode"), "stopped before the JPEG is made");
-  assert.deepEqual(s.photos[0].size, {width: 1280, height: 960});                    // it fits: full size, not shrunk
+  assert.deepEqual(s.photos[0].size, {width: 1280, height: 960, name: "camera-back", kind: "camera"});                    // it fits: full size, not shrunk
   assert.equal(encodes[0].q, 0.92);
 });
 
@@ -164,4 +174,78 @@ test("fit keeps full size when it fits and never goes below a readable floor", (
   const enc = (w, h) => (k, q) => "x".repeat(Math.round(w * k * h * k * q * 0.5));
   assert.equal(Cam.fit(1000, 800, 1e6, enc(1000, 800)).scale, 1);
   assert.equal(Cam.fit(4000, 3000, 10, enc(4000, 3000)), null);
+});
+
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+test("the every-camera key takes one picture with each camera, each its own file, each camera stopped at once", async () => {
+  const s = setup({frame: [1280, 720], devices: [{id: "b", label: "Back Camera", facing: "environment"}, {id: "f", label: "Front Camera", facing: "user"}]});
+  s.key.click(); await settle();
+  view(s).querySelector(".cam-all").click();
+  await sleep(900);
+  assert.equal(s.photos.length, 2);
+  assert.deepEqual(s.photos.map(p => p.size.name), ["camera-back", "camera-front"]);
+  assert.ok(s.media.tracks.every(t => t.stopped), "every camera is off");
+  assert.equal(view(s), undefined);
+});
+
+test("one camera only: every-camera takes just that one; a run stops when the message has no room", async () => {
+  const one = setup({frame: [800, 600], devices: [{id: "x", label: "Camera", facing: "environment"}]});
+  one.key.click(); await settle(); view(one).querySelector(".cam-all").click(); await sleep(700);
+  assert.equal(one.photos.length, 1);
+  encodes = []; log = [];
+  const doc = makeDoc(), key = new El("button"), stage = new El("div"), photos = [];
+  key.appendChild(Object.assign(new El("i"), {className: "lamp"}));
+  const media = makeMedia({frame: [800, 600], devices: [{id: "a", label: "Back", facing: "environment"}, {id: "b", label: "Front", facing: "user"}]});
+  const cam = Cam.attach({key, stage, doc, media, say() {}, budget: () => 1100000, store: {getItem: () => "1", setItem() {}}, onPhoto: (u, m) => { photos.push(m.name); return false; }});
+  await cam.snapAll();
+  assert.equal(photos.length, 1, "the first picture said there was no room, so the second camera was never asked");
+});
+
+test("the screen key takes one frame of the real screen where the browser can, and stops the capture", async () => {
+  const s = setup({display: [1920, 1080]});
+  s.key.click(); await settle();
+  view(s).querySelector(".cam-screen").click(); await sleep(150);
+  assert.equal(s.photos.length, 1);
+  assert.equal(s.photos[0].size.name, "screen");
+  assert.ok(s.media.tracks.at(-1).stopped, "the capture is stopped");
+  assert.equal(s.media.displayAsk.audio, false);
+});
+
+test("without screen capture (iPhone, iPad) the screen key snapshots the page with html2canvas; with neither it says so", async () => {
+  globalThis.html2canvas = async () => { const c = makeDoc().createElement("canvas"); c.width = 800; c.height = 600; return c; };
+  try {
+    const s = setup({});
+    await s.cam.screen();
+    assert.equal(s.photos.length, 1);
+    assert.equal(s.photos[0].size.name, "screen");
+  } finally { delete globalThis.html2canvas; }
+  const none = setup({});
+  await none.cam.screen();
+  assert.equal(none.photos.length, 0);
+  assert.match(none.said.join(" "), /can't take a screenshot/);
+  const denied = setup({display: "deny"});
+  await denied.cam.screen();
+  assert.match(denied.said.join(" "), /cancelled/);
+});
+
+test("the page-snapshot library is loaded on first use from the given URL, once, and its absence is survivable", async () => {
+  const doc = makeDoc(), key = new El("button"), stage = new El("div"), photos = [], said = [];
+  doc.head = new El("head"); doc.body = new El("body");
+  key.appendChild(Object.assign(new El("i"), {className: "lamp"}));
+  const cam = Cam.attach({key, stage, doc, media: makeMedia({}), say: t => said.push(t), budget: () => 1100000, html2canvas: "/static/vendor/html2canvas.min.js",
+    store: {getItem: () => "1", setItem() {}}, onPhoto: (u, m) => { photos.push(m.name); }});
+  assert.equal(doc.head.children.length, 0, "nothing loaded before it is needed");
+  const run = cam.screen();
+  await sleep(10);
+  const script = doc.head.children[0];
+  assert.equal(script.tag, "script");
+  assert.equal(script.src, "/static/vendor/html2canvas.min.js");
+  globalThis.html2canvas = async () => { const c = makeDoc().createElement("canvas"); c.width = 640; c.height = 480; return c; };
+  try { script.fire("load", {}); await run; } finally { delete globalThis.html2canvas; }
+  assert.deepEqual(photos, ["screen"]);
+  const run2 = cam.screen(); await sleep(10);                                  // a failed load (offline) still ends with a plain message
+  doc.head.children[1].fire("error", {}); await run2;
+  assert.match(said.join(" "), /can't take a screenshot/);
 });

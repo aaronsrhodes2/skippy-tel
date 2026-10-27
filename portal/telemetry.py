@@ -58,8 +58,9 @@ NOT_RECORDED = (
 ALSO = (        # not part of this recording, but true, and you should know
     "Google Cloud Run, which hosts the portal, keeps its own ordinary request logs, which can include your IP "
     "address. This recording doesn't copy them.",
-    "To answer you, Skippy sends your message and the conversation so far to Anthropic (Claude). The portal itself "
-    "keeps none of it; the conversation lives only in your browser tab.",
+    "Skippy answers on a computer in the Captain's home (Skippy Core): your message is not sent to an outside AI company. "
+    "The portal keeps your chats for 30 days (the Captain's, for good) and then has Skippy Core read them for what went right "
+    "or wrong before they are deleted; the insight, not the conversation, is kept.",
     "Signing in goes through Google, which tells the portal your email address and name.",
 )
 

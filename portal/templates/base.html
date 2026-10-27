@@ -41,6 +41,7 @@
   [data-app="experiments"] { --accent: var(--violet); }
   [data-app="tabletop"]    { --accent: var(--amber); }    /* the Tabletop: candlelight on a game table */
   [data-app="dashboard"]   { --accent: var(--cyan); }
+  [data-app="car"]         { --accent: var(--white); }    /* the Car: his Tesla, in plain white light */
   [data-app="me"]          { --accent: #b05cff; }    /* /me: deep purple (the whole palette is redefined in bridge-panes.css) */
   [data-app="admin"]       { --accent: var(--red); }
 
@@ -188,10 +189,10 @@
   .skippy-chat .continuing { border: 1px solid var(--violet); border-radius: 8px; padding: 6px 10px; margin: 6px 0; font-size: .8rem;
                              display: flex; gap: 8px; align-items: center; justify-content: space-between; }
 </style>
-{% if bridge %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge.css') }}">
+{% if bridge %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge.css') }}?v={{ (build.built_at if build else 'dev') }}">
 {# in the head and not deferred: a bridge page's own script (the chat's pager) runs before the page ends and needs Bridge #}
-<script src="{{ url_for('static', filename='bridge-pure.js') }}"></script>
-<script src="{{ url_for('static', filename='bridge.js') }}"></script>{% endif %}
+<script src="{{ url_for('static', filename='bridge-pure.js') }}?v={{ (build.built_at if build else 'dev') }}"></script>
+<script src="{{ url_for('static', filename='bridge.js') }}?v={{ (build.built_at if build else 'dev') }}"></script>{% endif %}
 {% block head %}{% endblock %}
 {# Full screen on phones and tablets: the site manifest (Add to Home Screen, no browser bars) unless the page brings its own (music, video); a page that does overrides this block with nothing. #}
 {% block pwa %}<link rel="manifest" href="{{ url_for('site_manifest') }}">
@@ -215,6 +216,9 @@
   {% if (self.glyph() | trim) == 'can' %}<img class="g mark face" src="{{ url_for('static', filename='skippy/skippy-head.png') }}" alt="Skippy" width="28" height="28" style="border-radius:50%">{% else %}<svg class="g mark" aria-hidden="true"><use href="#g-{{ self.glyph() | trim }}"/></svg>{% endif %}
   <span class="rail"></span>
   <button type="button" class="key" id="fs-key" hidden aria-label="Full screen" title="Full screen"><svg class="g" aria-hidden="true"><use href="#g-fs"/></svg></button>
+  {% if user and is_admin %}
+    <a class="key" href="{{ url_for('admin.index') }}#friends" aria-label="User access" title="User access"><svg class="g" aria-hidden="true"><use href="#g-keys"/></svg></a>
+  {% endif %}
   {% if user and on_apps %}
     <a class="key" href="{{ url_for('auth.logout') }}" aria-label="Sign out" title="Sign out"><svg class="g" aria-hidden="true"><use href="#g-out"/></svg></a>
   {% elif user %}

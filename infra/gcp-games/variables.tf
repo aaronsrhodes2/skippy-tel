@@ -1,6 +1,6 @@
 terraform {
   required_version = ">= 1.6"
-  # State lives in the bucket infra/bootstrap creates, so GitHub Actions can
+  # State lives in the bucket infra/bootstrap creates, so skippy-core's deployer can
   # apply this on every push. Bucket passed at init:
   #   terraform init -backend-config="bucket=skippy-tel-tfstate"
   backend "gcs" {

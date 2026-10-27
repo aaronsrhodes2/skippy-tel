@@ -45,7 +45,6 @@ services/flask-api/app/
 │   └── health.py        # GET /health
 └── clients/
     ├── ollama.py         # Default tier — OLLAMA_MODEL (the vault sets qwen3:8b)
-    ├── anthropic_client.py  # "put on your thinking cap" tier
     ├── gemini.py         # "ask nagatha" tier
     ├── bilby.py          # Mac Bilby daemon client
     └── whisper.py        # Audio transcription
@@ -60,7 +59,12 @@ reporter or the shelved phone apps use goes missing. A new human-facing page is 
 ## Tier trigger phrases (in intent.py)
 
 - Default → Ollama (OLLAMA_MODEL: qwen3:8b in the vault; config.py's fallback is still qwen2.5:7b)
-- "put on your thinking cap" → Anthropic Claude
+
+**There is no Ollama on skippy-pc any more** (2026-10-25): every `OLLAMA_URL`/`OLLAMA_BASE_URL` is `http://skippy-core:11434`,
+skippy-core's Ollama shim (`core/ollama-shim`, tailnet only through `tailscale serve --http=11434`), which answers every old name
+(qwen3:8b, qwen2.5:7b) with Core's resident chat model. skippy-pc's graphics card is left to the pop-ups, whisper and the studios.
+Uptime Kuma is gone too: the doctor (`portal/doctor.py` + the reporter's `doctor_checks.py`) watches every service.
+- (the "put on your thinking cap" Claude tier was retired 2026-10-27, the Captain: flask-api calls no paid Claude; the only paid Claude is orange Skippy and Claude Desktop)
 - "ask nagatha" / "ask gemini" → Gemini (Nagatha persona; flask-api only: the portal chat dropped Gemini 2026-10-23)
 
 ("trust the awesomeness" and "solid gold", the two Claude Code tiers, were removed 2026-09-30 at the Captain's request:
@@ -77,7 +81,6 @@ the private Skippy on the portal's `/me` has full access, so those verbs and fla
 
 Key vars:
 - OLLAMA_MODEL — qwen3:8b (set in the vault; the code's fallback is qwen2.5:7b)
-- ANTHROPIC_API_KEY — for Claude tier
 - GEMINI_API_KEY — for Nagatha tier
 - BILBY_MAC_URL — Mac Bilby daemon (default: http://skippy-mac:7334)
 - BILBY_DRIVE_FOLDER_ID — Drive folder for streaming (pending Drive setup)
@@ -92,26 +95,25 @@ Code changes: rebuild: `docker compose up --build -d flask-api`
 The Captain doesn't run commands or fetch logs. Claude does, through GitHub
 Actions (the sandbox can't reach GCP or run.app directly):
 
-- **Deploy:** push to `main` (the only branch Google trusts; see "Branches and deploys") → `deploy.yml`
-  (tests → Terraform `infra/gcp-games` → portal to Cloud Run). Redeploy without
+- **Deploy (since 2026-10-25, docs/no-github.md):** push `main` to the house git → skippy-core's CI (`core/ci`) tests it →
+  skippy-core's deployer (`core/cd/cd.py`, settings and pins in `core/cd/deploy.json`) deploys the portal to Cloud Run (and
+  `infra/gcp-games` Terraform when it changed; Mentat is NOT deployed to the cloud any more, 2026-10-27), signed in to Google with no key (its own signing key, trusted by the
+  `skippy-core` provider in infra/bootstrap). Redeploy or roll back: Admin > Recovery (it asks skippy-core), or on skippy-core
+  `sudo python3 /opt/skippy-core/cd/cd.py deploy|rollback`. GitHub's `rollback` and `ops` workflows still work as the phone's way back. Redeploy without
   a code change: `workflow_dispatch` on `deploy.yml` (e.g. after a secret changes).
   **Time it / check before pushing:** `python tools/loop_timer.py --watch --since now` (before the push; `make loop-watch`) prints
-  "prompt sent -> new version visible" stage by stage from GitHub's stamps and the portal's public `/version`;
+  "prompt sent -> new version visible" stage by stage from skippy-core's own records (the house repo's reflog for the push, CI's results,
+  cd.py's runs with `serving_at`, Core's deployer, read over `ssh skippy-core`) and the portal's public `/version`;
   `python tools/affected_tests.py` runs only the tests the change can break (the full CI commands when it can't tell). docs/cicd.md "Timing the loop".
-- **Operate/diagnose the games VM:** `workflow_dispatch` on `ops.yml` with
-  `command` = `status` | `logs` | `start` | `stop` | `restart` and `args`
-  (a game id for logs; game ids for start). Read the job log. Secrets are
-  masked. `status` shows state, games, invite codes, missing settings.
-  Don't stop/restart while people may be playing unless asked.
-  On the VM itself (ops agent, infra/gcp-games/ops_agent.py; VM must be on):
-  `tail <game> [lines]`, `search <game> <regex>` (whole container log),
-  `stats` (CPU/mem/disk/per-container), `restart-game <game>` (one container,
-  no VM reboot; for `garrysmod` it is stop, refresh the Mentat stage addon from GitHub, start: `gmod_addon.sh`). Requests go via metadata `ops-request`, replies on serial 3.
-  The agent and the snapshot script (diag.sh) reload from metadata, so
-  changing them needs only a deploy.
-  `command` = `discord-setup` creates/repairs every game's Discord channels:
-  it queues the job in VM metadata and the portal (which holds the bot token)
-  runs it via POST /tasks/run (portal/tasks.py). New portal-side jobs go there.
+- **Operate/diagnose the games VM and the portal's ops doors** (since 2026-10-25, from skippy-core, no GitHub):
+  `ssh skippy-core 'sudo python3 /opt/skippy-core/cd/cd.py ops <command> <args>'` with `command` = `status` | `logs` | `start` |
+  `stop` | `restart` | `tail` | `search` | `stats` | `restart-game` | `backups` | `restore-game` | `discord-setup` | `home` | `configure`
+  (what each does: `scripts/remote.py`). Secrets print as `(set)`. Don't stop/restart while people may be playing unless asked.
+  `cd.py domains` hooks the portal's domains up (idempotent). On the VM itself the ops agent (infra/gcp-games/ops_agent.py)
+  answers `tail`, `search`, `stats`, `restart-game <game>` (for `garrysmod`: stop, refresh the addon, start) over metadata
+  `ops-request`/serial 3; the agent and `diag.sh` reload from metadata, so changing them needs only a deploy.
+  `discord-setup` creates/repairs every game's Discord channels: it queues the job in VM metadata and the portal (which holds
+  the bot token) runs it via POST /tasks/run (portal/tasks.py). New portal-side jobs go there.
 - Portal: **https://makerportal.live** (the Captain's domain; www. and makerportal.studio redirect to it) —
   code in `portal/`, docs in `docs/portal/README.md` and `docs/cicd.md`. DNS is Cloud DNS in this project,
   hooked up by `tools/domains.py` (the `domains` workflow; idempotent, says what it waits for); the registrar
@@ -140,6 +142,8 @@ Actions (the sandbox can't reach GCP or run.app directly):
   Experiments (the public inventory: tiles shown a screen at a time, a kind key, an about panel; the demos themselves are standalone pages).
   The experiment demos (the N-body shootout as a flip-book of plates from a real run of sigma-ground's shootout: `scripts/nbody_run.py`, `scripts/nbody_flipbook_build.py`; the double-slit, the Mentat playground, the benchmark).
   **Not yet** (old scrolling look, to migrate in batches): request access, privacy (Radiance and Weapon vs. Armor are separate apps).
+- **Back and Close sit side by side, and look different** (the Captain, 2026-10-27): any view with both puts them next to each other, and they
+  differ in glyph and shape (Back an arrow, Close a cross), never two near-identical keys.
 - Copyable things (the Captain's rule: **one click, everywhere**): anything a person is expected to
   copy (an invite code, `ip:port`, a password, a command, a block to paste) is marked
   `<code class="code">` / `<pre class="copy">` (or `data-copy="text"` on a button), and
@@ -171,18 +175,24 @@ and jobs; while someone chats, the reporter also polls `GET /home/jobs` every
   `default` and `default_present`, because an up Ollama missing the default
   model still says `status: ok` while every default chat 503s.
 
-- Physics in Skippy's chat = `ask_mentat` → a job → `mentat-home` (same
-  override file: mentat/Dockerfile with `MENTAT_USE_LLM=1`, Qwen via
-  `ollama:11434`). No Qwen → Mentat answers 503 and Skippy says it's offline;
-  there is deliberately NO fallback to the cloud copy (keywords only), which
-  serves the public Experiments playground.
+- Physics in Skippy's chat = `ask_mentat` → **straight to Mentat on skippy-core** over its Funnel (`MENTAT_URL`, `mentat_client.ask_mentat`;
+  2026-10-27, the Captain: no hop through skippy-pc's reporter any more) → Mentat's answer → Skippy Core (big Qwen) words it → the chat: `mentat` in `core/compose.core.yml`, mentat/Dockerfile with `MENTAT_USE_LLM=1` and `MATERIA_OLLAMA_MODEL=skippy-chat`
+  (Core's resident Qwen3.6-35B-A3B through the shim) and its trained router first (`MENTAT_ROUTER_MODEL`, mentat-router-v31-4b, also resident), tailnet-only on `skippy-core:7350` (`core/install/tailnet.sh`); its research
+  log is `/var/lib/skippy-core/mentat-research`. skippy-core's own doctor and deployer keep it up, not skippy-pc's. No Qwen → Mentat answers 503 and Skippy says it's offline;
+  there is ONE Mentat, this one (2026-10-27, the Captain: a second cloud copy was needless cost and drifted). It also has a **public address
+  for the Captain's friends**: a Tailscale Funnel on :8443 straight to it, `https://skippy-core.tailab2cc7.ts.net:8443/` (opened by
+  `core/install/mentat_funnel.sh`; no key on purpose: a claude.ai connector cannot send one, and Mentat's own per-address rate limit and research log apply).
+  The cloud portal (Cloud Run) and the Experiments playground call that address (`MENTAT_URL` in `core/cd/deploy.json`).
 
-- Mentat for Claude (Desktop, claude.ai, phone, Claude Code): the **cloud** copy's `POST /mcp`
+- Mentat for Claude (Desktop, claude.ai, phone, Claude Code): that Funnel's `POST /mcp`
   (`mentat/app.py`: MCP Streamable HTTP, stateless, JSON replies; the same public tools and guards
-  as `/tools/<name>`, no Qwen, so no GPU), added once at claude.ai → Customize → Connectors →
-  custom connector `mentat` = `https://skippy-mentat-1015050363686.us-west1.run.app/mcp`.
-  Not a `docker exec` into `skippytel-mentat`: cloud sessions can't reach skippy-pc, and each
-  exec was its own server process. Smoke-tested by `deploy.yml`.
+  as `/tools/<name>`, with Qwen and the router), added once at claude.ai → Customize → Connectors →
+  custom connector `mentat` = `https://skippy-core.tailab2cc7.ts.net:8443/mcp`.
+  `/mcp`'s tools/list shows three tools (`ask`, `find_tools`, `call_tool`, 2026-10-27: the 220+ cost a chat ~73k tokens and 97% of real calls are plain questions); the full set stays on REST `/tools/<name>` and any real tool name still works in tools/call; `MENTAT_MCP_FULL=1` restores the long list.
+  Not a `docker exec` into `skippytel-mentat` (that container is gone). The old Cloud Run copy `skippy-mentat` (keywords only, no data) is retired:
+  its URL `https://skippy-mentat-1015050363686.us-west1.run.app/mcp` must be replaced in any connector that still uses it.
+  **Claude Code on skippy-pc (the desktop app's Code tab, user scope)** uses the same Mentat over the tailnet:
+  `claude mcp add -s user --transport http mentat http://skippy-core:7350/mcp` (sigma-ground's project `.mcp.json` says the same).
 - Token: dashboard → "Pair home" shows it once; the portal keeps only its
   sha256 in VM metadata `portal-home`. Put the line in the vault .env and
   SkippyTel's .env.
@@ -214,7 +224,15 @@ the local music gate, transcoded to 16 kHz FLAC). Each box is a **Bilby Connect 
 write read back and retried once, keep-warm; `homectl.py prove` times a device) and **Matter** through skippy-core's controller (2026-10-24:
 python-matter-server, `core/compose.matter.yml`, set up by `core/install/matter.sh`: IPv6 required, the API on the tailnet only; the hub's backend is
 `matter.py`, `MATTER_URL`; the Nest goes this way; the Leviton switches are paired in bulk with `homectl.py matter-import <file>`, codes from the
-My Leviton app, and `homectl.py identify` flashes one; a D2MSD's motion sensor is a read-only `binary_sensor`). All backends are one house (`house.Combined`). Details: `services/satellite/README.md`, `rooms/README.md`, `core/README.md` → Matter.
+My Leviton app, and `homectl.py identify` flashes one; a D2MSD's motion sensor is a read-only `binary_sensor`); and every Leviton on his account through the My Leviton cloud (`leviton.py`, `LEVITON_EMAIL`/`LEVITON_PASSWORD` in the vault, nothing to pair; last, so a locally paired switch wins). All backends are one house (`house.Combined`). Details: `services/satellite/README.md`, `rooms/README.md`, `core/README.md` → Matter.
+
+## The Car (the Captain's Tesla, `/car`)
+
+Read only (2026-10-26; commands through Tesla's Fleet API are saved for later): TeslaMate on skippy-core (`core/compose.tesla.yml`, on when
+core.env says `CORE_TESLA=1`, set up by `core/install/tesla.sh`) logs every drive and charge into its own Postgres and publishes the live
+state to MQTT; the car reader (`core/car`, tailnet `:7351`) keeps the latest values; skippy-pc's reporter carries them as the `car` capability;
+the portal shows the **Car** tile (`portal/car_web.py`) and Skippy gets `car_status`. Both are the Captain's alone (location). Reading never wakes
+the car. TeslaMate's own page (`http://skippy-core:4000`, tailnet only) is where he pastes his Tesla tokens once. Full description: docs/tesla.md.
 
 ## Nagatha's Video Service (the browser video app, `/video`)
 
@@ -312,7 +330,7 @@ the browser by every signed-in person (core and friends alike; a card in the Bro
 image carries the game). The portal only hands out files: `portal/starcontrol.py` + the `starcontrol` blueprint in `app.py`
 (`/starcontrol/` the page with the app bar injected, `/starcontrol/<file>` the bundle parts and the music,
 `/starcontrol/version` public, read by the deploy's smoke test). The files are NOT in this repo: `portal/Dockerfile`
-runs `portal/starcontrol_fetch.py`, which downloads the game repo's GitHub Release pinned in `deploy.yml`
+runs `portal/starcontrol_fetch.py`, which downloads the game repo's GitHub Release pinned in `core/cd/deploy.json`
 (`STARCONTROL_REF` + `STARCONTROL_SHA256`), checks the hash and unpacks it into the image. **To ship a new build of
 the game:** in the game repo run `python tools/build_web.py --tarball`, publish `build/scz-web.tar.gz` as a release,
 then change both pins here and push. Keyboard or controller only; a phone or tablet waits for a controller before it
@@ -342,6 +360,13 @@ description and setup: `docs/portal/README.md` → Private Skippy. Needs `make b
 the host and `claude` signed in (`/login`) there. When it or the portal stops answering from
 away: [docs/portal/remote-recovery.md](docs/portal/remote-recovery.md) (the phone-first runbook,
 the `rollback` workflow, `make bridge-supervised` and `tools/install_bridge_startup.sh`).
+
+## The data trunk (skippy-pc's D: on skippy-core)
+
+skippy-pc's 14 TB D: is storage and development; skippy-core's 2 TB is for running models. Two Windows shares on skippy-pc, mounted on
+skippy-core over the LAN with systemd automount (always reconnecting, never blocking boot): `D:\trunk` → `/mnt/pc/trunk` (read and write,
+both directions) and `D:\datasets` → `/mnt/pc/datasets` (read only). ~115 MB/s read, ~77 MB/s write. Login: the Windows account
+`skippy-core` (`SKIPPY_CORE_PWD` in the vault). Mentat's JPL data is a local copy at `/srv/datasets/jpl`. Details: docs/data-trunk.md.
 
 ## Local capabilities (skippy-pc's hardware, for the portal chat)
 
@@ -417,6 +442,12 @@ next EverQuest start loads it, runs `world database:updates`, and reports
 done. State: metadata `portal-imports`.
 
 ## Branches and deploys
+
+**GitHub is leaving** (the Captain, 2026-10-25; docs/no-github.md). Phase 1 is done: every repo's home is a bare repo in
+`D:\trunk\git\<name>.git` (skippy-core sees it as `/mnt/pc/trunk/git`), and every checkout's `origin` points there. Each bare repo's
+`post-receive` hook forwards the push to GitHub, so the old workflows still test and deploy until CI/CD moves to skippy-core
+(phase 3). Phase 2 is done too: skippy-core's own CI (`core/ci`, every minute) tests each new main in plain Docker and its deployer
+deploys only a commit that CI passed (`CI_LOCAL`); its deploy timer is on, so a green push reaches skippy-core within minutes. Push to `origin` as before; never add a GitHub remote; the workshop's New folder makes a bare repo, not a GitHub one.
 
 `main` is the truth: every deploy and ops run comes from it, and Google's
 Workload Identity only trusts GitHub tokens whose ref is `refs/heads/main`

@@ -28,7 +28,8 @@ SILENT_HEAL_S = 240         # no home report this long while the starter answers
 CORE_EVERY_S = 300          # how often the portal tests Skippy Core
 CORE_TIMEOUT_S = 120        # Core may be busy with a long reply: a test waits its turn this long
 UNREACHABLE_DM_S = 600      # skippy-pc and its starter both silent this long: tell the Captain (nothing here can fix it)
-HEALABLE = ("flask-api", "ollama", "whisper", "music-studio", "image-studio", "mentat-home", "music-gate", "video-gate",
+# No "ollama": since 2026-10-25 it is skippy-core's shim, which skippy-core's own doctor and deployer keep up.
+HEALABLE = ("flask-api", "whisper", "music-studio", "image-studio", "music-gate", "video-gate",
             "voice-gate", "tts-studio", "home-reporter", "bridge", "docker", "core")
 LABELS = {"flask-api": "Skippy's API", "ollama": "Ollama (local models)", "whisper": "Whisper (hearing)", "music-studio": "Music studio",
           "image-studio": "Picture studio", "mentat-home": "Mentat", "music-gate": "Audio service", "video-gate": "Video service",

@@ -9,3 +9,4 @@ aioesphomeapi>=46,<47
 aiohttp>=3.9,<4
 openwakeword>=0.6,<0.7
 pytest>=8
+decora_wifi==1.5

@@ -208,7 +208,7 @@ def test_an_expired_login_makes_the_workshop_not_ready_and_says_how_to_fix_it(do
     settle(probe)
     workshop = door("GET", "/health", token=None)[1]["workshop"]
     assert workshop["login"] == "expired" and workshop["ready"] is False
-    assert workshop["reason"] == "Claude's login on skippy-pc expired: run `claude auth login` there"
+    assert workshop["reason"].startswith("Claude's login on skippy-pc expired") and "tools/claude_token.sh" in workshop["reason"]
 
 
 def test_no_token_makes_it_not_ready_whatever_the_login_and_says_so(door, shop, monkeypatch):

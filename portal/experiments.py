@@ -1,8 +1,8 @@
 """Experiments: the public showcase of the Captain's projects.
 
 v1 is sigma-ground (github.com/aaronsrhodes2/sigma-ground, pinned in
-.github/workflows/deploy.yml as SIGMA_GROUND_REF):
-  • Mentat playground — the physics tools, live, through the skippy-mentat service
+core/cd/deploy.json's pins as SIGMA_GROUND_REF):
+  • Mentat playground — the physics tools, live, through skippy-core's Mentat (its Funnel)
   • Weapon vs. Armor — sigma-ground's game: its own solver runs on Mentat (mentat/wva.py),
     the page only draws the fight (listed under Browser Games, play.py; its URL stays here)
   • Radiance — sigma-ground's WebGL viewer + its recorded simulations, served as-is
@@ -72,6 +72,12 @@ EXPERIMENTS = (
                "driving Mentat's tools beats both.",
                ("Evaluation",), "experiments.benchmark", f"{REPO}/tree/master/sigma_ground/mcp/benchmark",
                kind="results", icon="📊"),
+    Experiment("minebench", "MineBench: the home AI builds in blocks",
+               "MineBench asks a model to build an object in Minecraft blocks, and the detail and precision show at a glance what "
+               "it can do. Our local, free purple Skippy (Qwen3.6 on skippy-core) builds a choo-choo train: once from the benchmark's "
+               "one-line prompt, then from a full written spec with a look at its own work after each pass.",
+               ("Benchmark", "Voxels", "Local AI"), "experiments.minebench", "https://github.com/Ammaar-Alam/minebench",
+               kind="results", icon="🧱"),
     Experiment("radiance", "Radiance — simulated physics, rendered",
                "sigma-ground's own WebGL2 raymarcher replaying recorded simulations: falling metals, a "
                "Mach 2 projectile, glowing iron, gear trains, a windmill, water with Fresnel reflection.",
@@ -186,3 +192,73 @@ RADIANCE_SHOWCASE_SNIPPET = """
   });
 </script>
 """
+
+
+# MineBench runs (github.com/Ammaar-Alam/minebench: 256 grid, simple palette, its own system prompt; experiments/minebench.html).
+# One row per run, written from the run itself (block count from tools/voxel/runtime.mjs, time from the run), files under
+# static/experiments/minebench/<id>/: views.png (tools/voxel/render.py), model.glb (--glb), build.json (the voxel.exec call).
+MINEBENCH_RUNS = (
+    {"id": "v1", "title": "Choo-choo train, the benchmark's one-line prompt",
+     "model": "Purple Skippy: Claude Code on Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8), local and free",
+     "prompt": "a choo-choo train", "comparable": True, "blocks": 79351, "minutes": 13, "size": "200 x 47 x 180",
+     "verdict": "Reads clearly as a steam train: black boiler with white bands, a tall stack puffing smoke, a cowcatcher, track with "
+                "sleepers, a station with a red roof and gold trim, a water tower, trees. Short of the frontier builds: the wheels lie "
+                "beside the track instead of under the engine, the passenger cars are flat slabs with no windows, a few blocks float, "
+                "and most of the plate is empty ground."},
+    {"id": "v2", "title": "Choo-choo train, a full written specification",
+     "model": "Purple Skippy: Claude Code on Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8), local and free",
+     "prompt": "BUILD_REQUEST_V2: a 4-4-0 locomotive, tender and two passenger cars specified part by part (proportions in blocks, "
+               "materials, how the parts join), v1's mistakes, and a loop of render, look (the vision model describes each pass), fix",
+     "request": "experiments/minebench/v2/request.txt", "comparable": False, "blocks": 61098, "minutes": 29, "size": "206 x 66 x 169",
+     "verdict": "Much better parts: a long boiler on its frame with gold domes, bell and red bands, a cab with windows, a cowcatcher, a "
+                "big smoke plume, and real passenger cars (clerestory roofs, windows on both sides, stripes, end railings), a platform, "
+                "depot and water tower. One big miss: both passenger cars and their railings float in the air beside the plate, off "
+                "the track, and the wheels are thin rings. It looked at each pass through the vision model, which called the scene "
+                "recognisable and missed the floating cars: describing a picture is not checking it. Next: an objective floating-parts "
+                "check in the runtime, and pointed questions for the look."},
+    {"id": "v3", "title": "Choo-choo train, coached and told to fix its floating parts",
+     "model": "Purple Skippy: Claude Code on Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8), local and free",
+     "prompt": "BUILD_REQUEST_V3: v2's specification, start from the v2 build, and the runtime's floating-parts report must reach zero "
+               "(smoke excepted) with pointed questions answered before stopping",
+     "request": "experiments/minebench/v3/request.txt", "comparable": False, "blocks": 67079, "minutes": 42, "size": "206 x 66 x 169",
+     "verdict": "A negative result, kept as one. It read the floating-parts report correctly but could not reason its way to the "
+                "coordinate fix: 119 floating pieces remain (from 122), the locomotive still rests on nothing and both cars still float "
+                "beside the plate. It also broke two of its rules: it stopped while the check still failed, and it offered to set up "
+                "a remote and push. Long self-correction, not the first build, is where the local model breaks down."},
+    {"id": "v4", "title": "Choo-choo train, the one line again, with its own plan and checks",
+     "model": "Purple Skippy: Claude Code on Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8), local and free; no spec from us, only "
+              "the process: write its own plan, build bottom-up, reach zero floating parts, render and look, at most three passes",
+     "prompt": "a choo-choo train", "request": "experiments/minebench/v4/request.txt", "comparable": True, "blocks": 74451,
+     "minutes": 41, "size": "128 x 25 x 180",
+     "verdict": "It passed the check by gaming it. The runtime says zero floating parts, but to get there it turned the round boiler "
+                "into a square box and deleted the smoke, and its wheels are two huge black discs beside the track rather than wheels "
+                "on the rails. The passenger car, station platform and trees are fine. It also broke the one hard rule: it made a "
+                "private GitHub repo and pushed to it although the request said never push. A plan and an objective check do not "
+                "make the local model better at long self-correction; it optimises the number, not the train."},
+    {"id": "v5", "title": "Choo-choo train, the one line again, after the shake-down",
+     "model": "Purple Skippy: Claude Code on Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8), local and free, with the tuned harness "
+              "(the workshop prompt as of commit 8f5f8d1, compaction hook included) and the same one-line request as v1",
+     "prompt": "a choo-choo train", "request": "experiments/minebench/v5/request.txt", "comparable": True, "blocks": 121811,
+     "minutes": 9, "size": "256 x 30 x 256",
+     "verdict": "The best purple Skippy build so far, and the first with everything where it belongs: an iron locomotive with a "
+                "domed boiler, cab, spoked wheels, cowcatcher and a smoke plume, an oak tender and a red and a blue passenger car, all "
+                "coupled and on the track in a line, a station with platform, pillars and lamps beside it. It found and fixed its own "
+                "bug (866 blocks below the ground) with the runtime, and finished clean: zero floating parts, nothing outside the grid. "
+                "Weaker: it filled the whole 256 x 256 plot with several hundred trees in a rigid lattice (its summary says 60+), "
+                "which swamps the train, and the locomotive is pale and plain next to the coloured cars. Nine minutes, against "
+                "13 for v1 and 42 for the coached v3."},
+    {"id": "haiku-direct", "title": "Choo-choo train, Claude Haiku in one call (the benchmark's own way)",
+     "model": "Claude Haiku 5.5 through Anthropic's API: one call with MineBench's prompt, no tools, no second try",
+     "prompt": "a choo-choo train", "comparable": True, "blocks": 21048, "minutes": 2, "size": "144 x 40 x 42",
+     "verdict": "Compact and coherent: a black locomotive with a curling smoke plume, a gold bell and a cab, a tender, two red "
+                "passenger cars with windows and a yellow stripe, a platform with a canopy, trees. Everything sits on the track (3 "
+                "tiny floating pieces). Fewer blocks than purple Skippy's v1, but the best composition: every part where it belongs."},
+    {"id": "haiku-agent", "title": "Choo-choo train, Claude Haiku as the agent (purple Skippy's v1 setup)",
+     "model": "Claude Haiku 5.5 in purple Skippy's place: the same Claude Code agent, instructions, folder, runtime and one-line "
+              "request as v1, context capped at 138K. About $1.15 of API use",
+     "prompt": "a choo-choo train", "comparable": True, "blocks": 61071, "minutes": 4, "size": "217 x 52 x 66",
+     "verdict": "The fullest scene: a locomotive with cab, dome, bell, cowcatcher and a big smoke plume, a coal tender, coaches with "
+                "rows of windows and a caboose with a cupola, all on the track, a raised platform, a brick-and-wood station house, a "
+                "pond and trees. The coaches run together into one long body. Like-for-like with purple Skippy's v1 (only the model "
+                "differs), it is clearly better, and three times faster."},
+)

@@ -207,6 +207,7 @@ function fakeFetch(url, opts) {
     const evs = t.events || [];
     const body = {state: t.state, error: t.error || null, events: evs.slice(after), next: evs.length};
     if (t.quiet_s !== undefined && t.quiet_s !== null) body.quiet_s = t.quiet_s;
+    if (t.ahead !== undefined) body.ahead = t.ahead;
     return later(reply(200, body));
   }
   if (route === "resync") {
@@ -241,6 +242,8 @@ function fakeFetch(url, opts) {
   }
   if (route === "send") {
     rec.message = JSON.parse(opts.body).message; rec.project = JSON.parse(opts.body).project; rec.conv = JSON.parse(opts.body).conv;
+    rec.client_id = JSON.parse(opts.body).client_id;
+    if (sendNext && sendNext.lose) { sendNext = null; return Promise.reject(new Error("network down")); }    // the reply never came
     if (sendNext) { const s = sendNext; sendNext = null; return Promise.resolve(reply(s.status, s.body)); }
     const id = "new" + (++made);
     tasks[id] = {state: "queued", events: [], error: null};
@@ -279,6 +282,7 @@ function snap() {
 }
 
 (async () => {
+  globalThis.requestAnimationFrame = (fn) => fakeSetTimeout(fn, 0);     // the transcript defers its scroll one frame (templates/_workshop.html scrollNow)
   if (input.withWindow) globalThis.window = {dispatchEvent() {}};     // inside the one chat (templates/_chat.html): window.SkippyAgent exists
   new Function("document", "localStorage", "crypto", "fetch", "setTimeout", "clearTimeout", "setInterval", "confirm",
                "AbortController", "Date", "location", "Bridge", "SkippyVoice", "SkippyMd", input.script)(
@@ -298,7 +302,11 @@ function snap() {
     else if ("submit" in s) { await els["ps-form"].requestSubmit(); await settle(); }          // Enter in the box: no button check
     else if ("click" in s) {                                                                    // a real click: not on a disabled or hidden control
       const el = els[s.click];
-      if (!el.disabled && !el.hidden) { await (s.click === "ps-send" ? els["ps-form"].requestSubmit() : el.fire("click")); await settle(); }
+      if (!el.disabled && !el.hidden) {
+        const done = s.click === "ps-send" ? els["ps-form"].requestSubmit() : el.fire("click");
+        if (!s.nowait) await done;                          // nowait: the handler waits on the fake clock (a retry delay), so the step must not
+        await settle();
+      }
     }
     else if ("toggle" in s) { els["ps-notify"].checked = s.toggle; await els["ps-notify"].fire("change"); await settle(); }
     else if ("pick" in s) { els["ps-project"].value = s.pick; await els["ps-project"].fire("change"); await settle(); }
@@ -688,3 +696,29 @@ def test_on_its_own_the_card_still_speaks_with_its_own_voice(page):
     out = drive(page, [{"tasks": {"t1": {"state": "done", "events": [ev(1), final]}}}, {"adv": 3 * S}],
                 tasks={"t1": {"state": "running", "events": [ev(1)]}}, follow="t1")
     assert out["voice"] == [["card", "Done."]]
+
+
+@needs_node
+def test_a_send_that_gets_no_answer_shows_sending_again_and_retries_with_the_same_message_id(page):
+    """2026-10-27: a slow or lost send looked unsent, was tried twice by hand and queued twice. Now it says it is sending, tries again by
+    itself with the SAME client_id (the portal returns the task it already made), and a second tap while it is out does nothing."""
+    out = drive(page, [
+        {"sendNext": {"lose": True}},
+        {"type": "make it green"}, {"click": "ps-send", "nowait": True}, {"snap": "lost"},
+        {"adv": 2 * S}, {"snap": "retried"},
+    ])
+    s = out["snaps"]
+    sends = [c for c in out["calls"] if c["route"] == "send"]
+    assert [b["text"] for b in s["lost"]["log"]] == ["make it green", "Sending again…"] and s["lost"]["sendDisabled"]
+    assert len(sends) == 2 and sends[0]["client_id"] == sends[1]["client_id"] and len(sends[0]["client_id"]) >= 8
+    assert s["retried"]["task"] == {"task": "new1", "after": 0} and not s["retried"]["sendDisabled"]
+
+
+@needs_node
+def test_a_message_waiting_behind_other_chats_says_how_many_are_ahead_of_it(page):
+    out = drive(page, [{"adv": 2 * S}, {"snap": "w1"},
+                       {"tasks": {"t1": {"state": "waiting", "events": [], "ahead": 1}}}, {"adv": 3 * S}, {"snap": "w2"}],
+                tasks={"t1": {"state": "waiting", "events": [], "ahead": 2}}, follow="t1")
+    s = out["snaps"]
+    assert "2 are ahead of this" in s["w1"]["log"][-1]["text"]
+    assert "1 is ahead of this" in s["w2"]["log"][-1]["text"]

@@ -29,7 +29,7 @@ services:
                             # Different machines, never collide. Internal 5000 = Flask convention.
     env_file: G:/My Drive/vault/.env       # Platinum Rule §10 — single dev-root vault
     environment:
-      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_BASE_URL=http://skippy-core:11434   # skippy-core's Ollama shim (tailnet only), since 2026-10-25
       - WHISPER_BASE_URL=http://whisper:8000
     extra_hosts:
       # /health pings the host-side claude-bridge (the private Skippy's engine) through this mapping.
@@ -48,7 +48,6 @@ services:
       # Local music library (Syncthing-synced corrected_music folder, read-only)
       - D:/Aaron/Music/corrected_music:/music:ro
     depends_on:
-      - ollama
       - whisper
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; urllib.request.urlopen('http://localhost:5000/health'); sys.exit(0)\" || exit 1"]
@@ -57,26 +56,6 @@ services:
       retries: 3
       start_period: 10s
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: skippytel-ollama
-    restart: unless-stopped
-    logging: *default-logging
-    expose:
-      - "11434"
-    volumes:
-      - ollama-data:/root/.ollama
-    environment:
-      - OLLAMA_KEEP_ALIVE=-1
-      - OLLAMA_MAX_LOADED_MODELS=2
-      - OLLAMA_NUM_PARALLEL=1
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
 
   whisper:
     build: ./services/whisper
@@ -146,22 +125,6 @@ services:
     environment:
       - DOZZLE_LEVEL=info   # show INFO and above; drop to debug for raw output
 
-  # ── Uptime Kuma — model server health monitoring ───────────────────────────
-  # Polls each service independently. Shows status page + optional alerts.
-  # Dashboard: http://localhost:3001
-  # First launch: create an admin account, then add monitors for:
-  #   http://skippytel-flask-api:5000/health (via Docker network)
-  #   http://skippytel-ollama:11434          (Ollama root responds 200)
-  #   http://skippytel-whisper:8000/health
-  uptime-kuma:
-    image: louislam/uptime-kuma:latest
-    container_name: skippytel-uptime-kuma
-    restart: unless-stopped
-    logging: *default-logging
-    ports:
-      - "3001:3001"
-    volumes:
-      - uptime-kuma-data:/app/data
 
 # ACE-Step's server downloads any model it thinks is missing. It's on this network alone, which has
 # no route out, so it can only ever run the weights we mounted. The home reporter joins it too.
@@ -170,7 +133,5 @@ networks:
     internal: true
 
 volumes:
-  ollama-data:
   whisper-cache:
-  uptime-kuma-data:
   music-studio-cache:

@@ -12,7 +12,7 @@ phone ──> portal (Cloud Run) <── skippy-pc's home reporter (Docker) ─�
 
 | Link | Lives on | What it needs to stay up | Who restarts it |
 |---|---|---|---|
-| Portal (the page, the chat's memory) | Cloud Run, Google's side | a good deploy | Google; a bad deploy is undone by `rollback` (below) |
+| Portal (the page, the chat's memory) | Cloud Run, Google's side | a good deploy | Google; a bad deploy is undone by skippy-core (step 3) or from Google's own console |
 | Home reporter | Docker on skippy-pc, container `skippytel-home-reporter` | Docker Desktop running, the internet | Docker (`restart: unless-stopped`); it also restarts itself after 15 minutes without reaching the portal |
 | Bridge | the Windows host, port 9337 | you signed in, `tools/bridge_supervisor.sh` | the supervisor (restarts it within seconds; restarts one that is up but mute after a few minutes) |
 | Claude Code | the host, signed in as you | its login not expired | you: `claude auth login` on the PC |
@@ -54,7 +54,7 @@ It never reverts code: undoing a change is the private Skippy's job, from a chat
 
 **Needs, once:** the starter installed on skippy-pc (`bash tools/install_starter_startup.sh --apply`), able to `ssh aaron@skippy-core`
 with its key, and the doctor's timer on skippy-core (`sudo bash core/deployer/install.sh --apply` on the box). The old cards (roll
-back, re-run, cancel, restart service, reset a copy, Funnel, start/stop) are gone; `rollback` is still a GitHub workflow (step 3).
+back, re-run, cancel, restart service, reset a copy, Funnel, start/stop) are gone; a rollback is `cd.py rollback` on skippy-core (step 3).
 
 ## 1. Read the card on `/me`
 
@@ -71,10 +71,10 @@ The pill on **Skippy · private** and the **Home · skippy-pc** card tell you wh
 | `/me` will not load, or errors | the portal itself | step 3 |
 | Core · skippy-tel **Down** or **Degraded** | flask-api or Ollama at home; not the private Skippy's chain | the card lists the problem; step 4 for Docker |
 
-## 2. What does the portal see of skippy-pc? (GitHub mobile)
+## 2. What does the portal see of skippy-pc?
 
-GitHub app > this repo > **Actions** > **ops** > **Run workflow** > `command` = **home** > Run. Open the run, then its job log.
-(No app? The same screens work at github.com in the phone's browser.)
+On skippy-core (over Tailscale: `ssh aaron@skippy-core`): `sudo python3 /opt/skippy-core/cd/cd.py ops home`. The same box answers `status`, `logs
+<game>`, `restart-game <game>` and the rest of what the games VM offers (`cd.py ops` lists them). From a phone: any SSH app on the tailnet.
 
 | In the output | Meaning |
 |---|---|
@@ -83,21 +83,24 @@ GitHub app > this repo > **Actions** > **ops** > **Run workflow** > `command` = 
 | `"online": true`, `"workshop": true`, `jobs_pending` above 0 for minutes | the reporter is up and the bridge ready but a job is not being taken: step 4, restart the reporter |
 | `"online": true`, `"workshop": true`, and the chat still stuck | give it 30 s and tap **Check again**; then step 3 if it began right after a deploy |
 
-## 3. Undo a bad deploy: the `rollback` workflow
+## 3. Undo a bad deploy
 
-GitHub app > **Actions** > **rollback** > **Run workflow** > leave the box **blank** > **Run workflow**.
+A deploy that fails its own smoke test is undone by skippy-core by itself (its log says **ROLLED BACK**, and the old revision is serving
+again). For a deploy that looked fine and is not, any one of these, in the order of how much of the house must still be working:
 
-- Blank goes back **one revision**: the newest healthy revision older than the one serving now. The run summary lists the last 5
-  revisions with the commit each came from, what it served before, what it serves now, and whether `/health` answers.
-- To go to a particular one, type its name from that list. To undo a rollback, type `latest`.
-- The next push to `main` deploys normally and sends traffic forward again.
-- A deploy that fails its own smoke test already does this by itself (the job ends red, with an error saying it was **rolled back**),
-  and so does a deploy you **cancel** (a hung one: every deploy job now gives up by itself after at most 20 minutes, and every
-  smoke-test request after 20 seconds). This workflow is for a deploy that looked fine and is not.
-- The same buttons are on the Admin page (Recovery > Deploy pipeline) while the portal still opens.
+1. **Admin > Recovery** on the portal (if the portal still opens): **Put everything back** redeploys main; the deploy card's rollback
+   asks skippy-core (`cd.py rollback`) through the portal.
+2. **On skippy-core** (over Tailscale: `ssh aaron@skippy-core`): `sudo python3 /opt/skippy-core/cd/cd.py rollback` goes back **one
+   revision**: the newest healthy revision older than the one serving now (never onto a broken newest). `cd.py rollback <name>` goes to
+   that revision, `cd.py rollback latest` undoes a rollback. It checks `/health` afterwards and fails loudly if it doesn't answer.
+3. **Google's console, on the phone's browser, with nothing of the house running:** console.cloud.google.com > Cloud Run >
+   **skippy-portal** > Revisions > **Manage traffic** > 100% to the previous revision > Save.
+
+- The next deploy sends traffic forward again.
 - It moves only the portal. It does not touch skippy-pc, the games VM or any data.
 
-To redeploy `main` unchanged (for example after a secret changed): Actions > **deploy** > Run workflow.
+To redeploy `main` unchanged (for example after a secret changed): `sudo python3 /opt/skippy-core/cd/cd.py deploy` on skippy-core, or
+**Put everything back** on the Admin page.
 
 ## 4. What only the PC can fix
 

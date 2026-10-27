@@ -90,3 +90,13 @@ def test_split_pictures_takes_whole_lines_and_at_most_two_are_asked_for(shop, mo
     assert prompts == [("a fox", ""), ("an owl", "hq")] and said == "say SKIPPY_PICTURE: inline\n\n\nend"
     run = run_saying(shop, monkeypatch, "\n".join(f"SKIPPY_PICTURE: cat {i}" for i in range(4)))
     assert [e["prompt"] for e in run.events if e.get("t") == "picture"] == ["cat 0", "cat 1"]
+
+
+GLB = b"glTF\x02\x00\x00\x00" + (200).to_bytes(4, "little") + b"\x00" * 188
+
+
+def test_a_3d_model_is_attached_like_a_picture_and_shown_in_the_chat(shop, monkeypatch):
+    (Path(shop.repo) / "train.glb").write_bytes(GLB)
+    run = run_saying(shop, monkeypatch, "Built it.\nSKIPPY_MODEL: train.glb")
+    assert [(i["mime"], i["name"]) for i in images(run)] == [("model/gltf-binary", "train.glb")] and texts(run) == ["Built it."]
+    assert engine.image_mime(b"glTF\x01\x00\x00\x00") is None            # only binary glTF 2

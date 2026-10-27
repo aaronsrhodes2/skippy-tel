@@ -50,8 +50,45 @@ def matter_path(env=os.environ) -> Path:
     return Path(env.get("SKIPPY_HOME_STATE") or ROOT / "state" / "home") / "matter.json"
 
 
+def build_house(env: dict):
+    """The house: what Skippy can control, through every backend that is set up (None when none is). hub.py shares it across rooms; house_mcp.py and the home
+    reporter (the portal chat's house tools) build the same one.
+    HomeKit (paired with homectl.py), Matter (skippy-core's controller: MATTER_URL), Leviton's cloud (LEVITON_EMAIL + LEVITON_PASSWORD)
+    and Home Assistant (HASS_URL + HASS_TOKEN)."""
+    sensitive = env.get("HASS_SENSITIVE") == "1"
+    parts = []
+    if Store(store_path(env)).load()["devices"]:                    # lights and switches paired with homectl.py: HomeKit, natively
+        kit = HomeKit(Store(store_path(env)), sensitive=sensitive)
+        kit.states()                                                # learn what is there now, so keep-warm knows what to ping
+        kit.keep_warm(float(env.get("HOMEKIT_KEEP_WARM", "30")))
+        parts.append(kit)
+    if env.get("MATTER_URL"):                                       # Matter, through skippy-core's controller (core/compose.matter.yml)
+        from matter import Matter, Names                            # noqa: PLC0415
+        parts.append(Matter(env["MATTER_URL"], Names(matter_path(env)), sensitive=sensitive))
+    if env.get("LEVITON_EMAIL") and env.get("LEVITON_PASSWORD"):    # every Leviton switch on his account, through Leviton's cloud: after
+        from leviton import Leviton                                 # noqa: PLC0415  the local backends, so a switch paired locally wins
+        parts.append(Leviton(env["LEVITON_EMAIL"], env["LEVITON_PASSWORD"], sensitive=sensitive))
+    if env.get("HASS_URL") and env.get("HASS_TOKEN"):               # or Home Assistant, if he runs one (the vault holds both)
+        from hass import Hass                                       # noqa: PLC0415
+        parts.append(Hass(env["HASS_URL"], env["HASS_TOKEN"], sensitive=sensitive))
+    if not parts:
+        return None
+    return parts[0] if len(parts) == 1 else Combined(parts, sensitive=sensitive)
+
+
+def load_env(path: str | None = None) -> dict:
+    env = dict(os.environ)
+    for candidate in (path, os.environ.get("SKIPPY_ENV"), "G:/My Drive/vault/.env"):
+        if candidate and Path(candidate).is_file():
+            for line in Path(candidate).read_text(encoding="utf-8", errors="replace").splitlines():
+                if "=" in line and not line.lstrip().startswith("#"):
+                    k, v = line.split("=", 1)
+                    env.setdefault(k.strip(), v.strip().strip("\"'"))
+            break
+    return env
+
+
 def _env() -> dict:
-    from ear import load_env                                        # noqa: PLC0415 — the vault .env, like the listener
     return load_env()
 
 

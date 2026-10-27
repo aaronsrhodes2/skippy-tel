@@ -111,7 +111,7 @@ def test_waiting_for_github_then_deploying_stage_by_stage():
     fake = GitHubFake()
     w, clock = watch(fake)
     card = w.status(SHIP, OLDER)
-    assert not card["final"] and "Waiting for GitHub" in card["headline"]
+    assert not card["final"] and "Waiting for its deploy to start" in card["headline"]
     assert [s["state"] for s in card["stages"]] == ["waiting"] * 3
     fake.by_sha[SHA] = [run(7, SHA, status="in_progress")]
     fake.jobs[7] = [job("test / tests (all but flask-api)", "in_progress"), job("portal-image")]

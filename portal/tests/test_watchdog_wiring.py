@@ -178,9 +178,9 @@ def test_the_budget_alerts_at_50_90_and_100_percent_of_the_monthly_amount():
     assert "projects/${data.google_project.this[0].number}" in BUDGET                # the API wants the project NUMBER
 
 
-def test_the_deploy_passes_the_billing_account_from_a_repository_variable_and_docs_say_what_is_needed():
-    deploy = text(ROOT / ".github" / "workflows" / "deploy.yml")
-    assert "TF_VAR_billing_account: ${{ vars.BILLING_ACCOUNT }}" in deploy
+def test_the_deploy_passes_the_billing_account_from_the_vault_and_docs_say_what_is_needed():
+    deploy = text(ROOT / "core" / "cd" / "cd.py")                                 # skippy-core's deployer runs the Terraform now
+    assert "TF_VAR_billing_account=" in deploy and "BILLING_ACCOUNT" in deploy
     for doc in ("docs/cicd.md", "docs/games/README.md"):
         body = text(ROOT / doc)
         assert "BILLING_ACCOUNT" in body and "billing.budgets" in body, doc

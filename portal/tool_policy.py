@@ -20,7 +20,7 @@ EVERYONE, ADMIN = "everyone", "admin"
 
 MCP_SERVERS: dict[str, str] = {
     # Features of the chat, fine for friends
-    "mentat": EVERYONE,     # sigma-ground's physics tools (the Wolfram rival), hosted as skippy-mentat
+    "mentat": EVERYONE,     # sigma-ground's physics tools (the Wolfram rival), the one Mentat, on skippy-core
     "physics": EVERYONE,
     # The Captain's hardware: skippy-pc's GPU makes the music, so it's his alone
     "music_gen": ADMIN,
@@ -35,7 +35,9 @@ MCP_SERVERS: dict[str, str] = {
     "sms": ADMIN,
     "location": ADMIN,
     "bilby": ADMIN,         # home music player
+    "house": ADMIN,         # the lights and switches (home_devices, home_state, home_control): his house, his alone
     "jellyfin": ADMIN,
+    "car": ADMIN,           # his Tesla (car_status): where it is, whether it's locked
 }
 
 

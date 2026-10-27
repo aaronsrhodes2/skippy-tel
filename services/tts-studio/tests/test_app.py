@@ -59,6 +59,8 @@ def test_speak_refuses_what_it_should_without_touching_a_model(monkeypatch):
     assert c.post("/speak", json={"text": "x" * 1001, "voice": "stock"}).status_code == 413
     assert c.post("/speak", json={"text": "hi", "voice": "skippy"}).status_code == 503       # files missing: says so, loads nothing
     assert not studio._models and c.get("/health").get_json()["ready"] is False
+    nope = c.get("/health").get_json()
+    assert nope["accepting"] is False and "no voice is loaded" in nope["detail"] and nope["service"] == "tts-studio"   # not ready says why (PLATINUM section 24)
 
 
 def test_a_resident_voice_is_not_ready_until_it_is_warm_so_the_gate_falls_back_meanwhile(monkeypatch):
@@ -122,3 +124,10 @@ def test_a_voice_loads_only_when_the_card_has_room_and_is_tried_again_later(monk
     assert c.post("/speak", json={"text": "hi", "voice": "skippy"}).status_code == 503 and not loads
     free[0] = 8.0
     assert studio.preload() is True and loads == [1] and "skippy" not in studio._status["errors"]
+
+
+def test_free_memory_is_nvidia_smi_s_figure_not_torch_s(monkeypatch):
+    """Under WSL torch's mem_get_info said 14.7 GB free on a card with 6.0 GB (2026-10-24): the room check must not trust it."""
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout="6142\n"))
+    assert round(studio.free_gib(), 2) == 6.0

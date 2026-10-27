@@ -70,7 +70,7 @@ def test_the_dashboard_is_a_bridge_page_of_widgets_and_the_private_skippy_has_mo
     panes = re.findall(r'<section id="([\w-]+)" class="apane"', page)
     assert controls[:2] == ["mcp", "home"] and sorted(controls) == sorted(panes), (controls, panes)
     assert 'id="private-skippy"' not in page and "skippy" not in controls                 # the chat is the front page now (front.html)
-    for widget in ("Server", "Core · skippy-tel", "Home · skippy-pc", "Watcher", "Spend (estimate)", "Friends", "Discord, lately", "Home links"):
+    for widget in ("Server", "Core · skippy-tel", "Home · skippy-pc", "Watcher", "Friends", "Discord, lately", "Home links"):
         assert f"<h3>{widget}</h3>" in page, widget                                      # every widget is still there
     front = client.get("/chat").data.decode()
     assert 'id="ps-flow"' in front and 'class="wlog pg"' not in front                  # the chat (the front page) is a scrolling transcript, not pages
@@ -83,7 +83,8 @@ def test_the_experiments_inventory_is_a_public_bridge_page_of_tiles_shown_a_scre
     assert 'aria-label="Sign in"' in page                                                # the strip says how to sign in
     for need in ('id="find"', 'id="kind-key"', 'id="scrub"', 'id="about"'):
         assert need in page, need
-    assert len(re.findall(r'<a class="tile( featured)?"', page)) == 5 and "data-tel=\"demo:nbody\"" in page    # the tiles are the page's data and its tap beacons
+    import experiments
+    assert len(re.findall(r'<a class="tile( featured)?"', page)) == len(experiments.EXPERIMENTS) and "data-tel=\"demo:nbody\"" in page    # the tiles are the page's data and its tap beacons
     glyphs = set(re.findall(r'<symbol id="g-([\w-]+)"', (PORTAL / "templates" / "_glyphs.html").read_text(encoding="utf-8")))
     drawn = set(re.findall(r'(?:live|recorded|results|tool|local): "(\w+)"', page)) | {"tools", "atom", "info", "search", "x"}
     assert drawn <= glyphs, drawn - glyphs                                               # every kind has a drawn glyph

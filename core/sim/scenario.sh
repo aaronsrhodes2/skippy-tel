@@ -53,7 +53,7 @@ git clone -q "$WORK/origin.git" "$REPO"
 install -m 0600 /dev/null "$WORK/vault.env"
 cat > "$CORE_ENV" <<CONF
 REPO_DIR=$REPO
-CI_WORKFLOW=
+CI_LOCAL=
 CORE_GPU=0
 CORE_FULL=
 MODELS_ROOT=$MODELS_ROOT

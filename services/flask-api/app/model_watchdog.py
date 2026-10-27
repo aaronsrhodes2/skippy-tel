@@ -18,7 +18,6 @@ enables writing a regression test for any prompt that kills a model.
 
 Tier IDs match the naming convention in intent.py:
   "local"   → Ollama (qwen2.5:7b inside Docker)
-  "claude"  → Anthropic Claude
   "nagatha" → Gemini
 """
 import subprocess

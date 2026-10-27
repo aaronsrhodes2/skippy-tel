@@ -4,16 +4,22 @@
 #   • APIs
 #   • a GCS bucket for Terraform state (so CI can run `terraform apply`)
 #   • an Artifact Registry repo for the portal image
-#   • skippy-deployer: the service account GitHub Actions acts as
-#   • Workload Identity Federation: GitHub's OIDC tokens for THIS repo can
-#     impersonate skippy-deployer. No key file exists anywhere.
+#   • skippy-deployer: the service account skippy-core deploys as (core/cd)
+#   • Workload Identity Federation: skippy-core's own signed tokens can
+#     impersonate skippy-deployer. No key file exists anywhere. (GitHub is
+#     not trusted any more: docs/no-github.md.)
 #   • Secret Manager secrets the portal reads at runtime
 #
-# State for this module stays local in Cloud Shell (~/skippy-tel/infra/bootstrap);
-# it changes rarely and holds the generated Flask session key.
+# State for this module lives in gs://skippy-tel-tfstate (prefix "bootstrap", versioned, private): it holds the generated Flask session
+# key. It used to stay local in Cloud Shell; the Cloud Shell run that adds skippy-bootstrap below also migrates it
+# (`terraform init -migrate-state`, bootstrap.sh), so skippy-core can run this module itself from then on: `cd.py bootstrap`
+# (plan only) and `cd.py bootstrap apply` (docs/no-github.md, "Bootstrap from skippy-core").
 
 terraform {
   required_version = ">= 1.6"
+  backend "gcs" {
+    prefix = "bootstrap" # the bucket is passed at init: -backend-config=bucket=skippy-tel-tfstate
+  }
   required_providers {
     google = {
       source  = "hashicorp/google"
@@ -91,11 +97,11 @@ resource "google_artifact_registry_repository" "skippy" {
   depends_on = [google_project_service.apis]
 }
 
-# ── The deployer identity GitHub Actions uses ─────────────────────────────────
+# ── The deployer identity skippy-core uses ────────────────────────────────────
 
 resource "google_service_account" "deployer" {
   account_id   = "skippy-deployer"
-  display_name = "GitHub Actions deployer (skippy-tel)"
+  display_name = "skippy-core deployer (skippy-tel)"
   depends_on   = [google_project_service.apis]
 }
 
@@ -187,35 +193,69 @@ resource "google_storage_bucket_iam_member" "mentat_writes_research" {
   member = "serviceAccount:${google_service_account.mentat.email}"
 }
 
-# ── Workload Identity Federation: GitHub → skippy-deployer ────────────────────
+# ── Workload Identity Federation: the pool (skippy-core's provider is below) ───
+# The pool is still NAMED "github" (renaming a pool destroys it and every provider in it); it holds only skippy-core's provider now.
+# GitHub's own provider and its binding to skippy-deployer were removed 2026-10-25 (docs/no-github.md).
 
 resource "google_iam_workload_identity_pool" "github" {
   workload_identity_pool_id = "github"
-  display_name              = "GitHub Actions"
+  display_name              = "skippy-core"
   depends_on                = [google_project_service.apis]
 }
 
-resource "google_iam_workload_identity_pool_provider" "github" {
+# ── skippy-core → skippy-deployer: keyless (docs/no-github.md, phase 3) ──────────────────────
+# skippy-core deploys the portal, Mentat cloud and the games VM's Terraform itself. It signs a short-lived token with its own
+# key (/etc/skippy-core/gcp-oidc/signing.pem, root-only on the box; never leaves it) and swaps it here for skippy-deployer's
+# credentials. The project forbids service-account keys (iam.disableServiceAccountKeyCreation), and this needs none: Google
+# holds only the PUBLIC half (skippy-core-jwks.json, made by core/cd/oidc.py keygen). There is no issuer URL to reach: the
+# keys are uploaded with the provider. Rotating = a new key pair on the box, a new skippy-core-jwks.json, a bootstrap run.
+
+resource "google_iam_workload_identity_pool_provider" "skippy_core" {
   workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
-  workload_identity_pool_provider_id = "github"
-  display_name                       = "GitHub OIDC"
+  workload_identity_pool_provider_id = "skippy-core"
+  display_name                       = "skippy-core deployer"
   attribute_mapping = {
-    "google.subject"       = "assertion.sub"
-    "attribute.repository" = "assertion.repository"
-    "attribute.ref"        = "assertion.ref"
+    "google.subject" = "assertion.sub"
   }
-  # Only workflows in this one repository, running from main, can use this
-  # provider at all: a workflow pushed on any other branch gets nothing.
-  attribute_condition = "assertion.repository == \"${var.github_repo}\" && assertion.ref == \"refs/heads/main\""
+  # Only the deployer's own subject: a token skippy-core signs for anything else gets nothing.
+  attribute_condition = "assertion.sub == \"skippy-core-deployer\""
   oidc {
-    issuer_uri = "https://token.actions.githubusercontent.com"
+    issuer_uri = "https://skippy-core.skippy-tel.invalid" # never fetched: the keys come from jwks_json
+    jwks_json  = file("${path.module}/skippy-core-jwks.json")
   }
 }
 
-resource "google_service_account_iam_member" "github_impersonates_deployer" {
+resource "google_service_account_iam_member" "skippy_core_impersonates_deployer" {
   service_account_id = google_service_account.deployer.name
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_repo}"
+  member             = "principal://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/subject/skippy-core-deployer"
+}
+
+# The house's git, off site (docs/no-github.md): skippy-core puts a nightly `git bundle` of every repo here, as skippy-deployer.
+# Versioned, so a bad night never overwrites a good one; old versions go after 90 days.
+resource "google_storage_bucket" "git_backup" {
+  name                        = "${var.project}-git-backup"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  versioning {
+    enabled = true
+  }
+  lifecycle_rule {
+    condition {
+      days_since_noncurrent_time = 90
+    }
+    action {
+      type = "Delete"
+    }
+  }
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_storage_bucket_iam_member" "deployer_writes_git_backup" {
+  bucket = google_storage_bucket.git_backup.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.deployer.email}"
 }
 
 # ── Runtime secrets for the portal ────────────────────────────────────────────
@@ -248,11 +288,9 @@ resource "google_secret_manager_secret_iam_member" "runtime_reads" {
 
 # ── Doom Loop dev channel (the Captain's work-in-progress browser game) ───────
 #
-# doom-loop's CI uploads each build of the game here; the portal (runtime SA) reads it at request time, so a new build
-# shows up at /doomloop/ with no portal redeploy (portal/doomloop.py). The uploader is NOT skippy-deployer: that identity
-# holds run.admin and compute.admin, so widening ITS trust to another repo would hand those roles to that repo's CI.
-# doomloop-publisher can only write objects in this one bucket, and a second provider in the same pool trusts only
-# doom-loop's main branch. skippy-deployer's own trust above is untouched.
+# skippy-core (core/cd, publish.json) builds each push of doom-loop and uploads it here; the portal (runtime SA) reads it at request time, so a new build
+# shows up at /doomloop/ with no portal redeploy (portal/doomloop.py). The uploader is skippy-deployer, as skippy-core: it can write
+# this one bucket and nothing GitHub-side exists any more.
 
 resource "google_storage_bucket" "doomloop_dev" {
   name                        = var.doomloop_bucket
@@ -267,16 +305,10 @@ resource "google_storage_bucket" "doomloop_dev" {
   depends_on = [google_project_service.apis]
 }
 
-resource "google_service_account" "doomloop_publisher" {
-  account_id   = "doomloop-publisher"
-  display_name = "doom-loop CI: uploads dev builds of the game (one bucket, nothing else)"
-  depends_on   = [google_project_service.apis]
-}
-
-resource "google_storage_bucket_iam_member" "doomloop_publisher_writes" {
+resource "google_storage_bucket_iam_member" "deployer_writes_doomloop" {
   bucket = google_storage_bucket.doomloop_dev.name
   role   = "roles/storage.objectAdmin" # overwrite and delete the previous build's files, in this bucket only
-  member = "serviceAccount:${google_service_account.doomloop_publisher.email}"
+  member = "serviceAccount:${google_service_account.deployer.email}"
 }
 
 resource "google_storage_bucket_iam_member" "portal_reads_doomloop" {
@@ -349,24 +381,74 @@ resource "google_storage_bucket_iam_member" "portal_uses_tabletop" {
   member = "serviceAccount:${data.google_service_account.runtime.email}"
 }
 
-resource "google_iam_workload_identity_pool_provider" "doomloop" {
-  workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
-  workload_identity_pool_provider_id = "doomloop"
-  display_name                       = "GitHub OIDC (doom-loop)"
-  attribute_mapping = {
-    "google.subject"       = "assertion.sub"
-    "attribute.repository" = "assertion.repository"
-    "attribute.ref"        = "assertion.ref"
-  }
-  # Only workflows in doom-loop, running from main.
-  attribute_condition = "assertion.repository == \"${var.doomloop_repo}\" && assertion.ref == \"refs/heads/main\""
-  oidc {
-    issuer_uri = "https://token.actions.githubusercontent.com"
-  }
+# ── What skippy-core hands the games VM (the Garry's Mod addon: gmod_addon.sh) ─────────────────────────────────────
+# skippy-core (core/cd, publish.json) puts a tarball of sigma-ground's stage/gmod/addon here whenever it changes; the games VM fetches it
+# at every boot and restart (infra/gcp-games/gmod_addon.sh) with its own token. The VM runs as the project's default compute account.
+resource "google_storage_bucket" "game_assets" {
+  name                        = "${var.project}-game-assets"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  depends_on                  = [google_project_service.apis]
 }
 
-resource "google_service_account_iam_member" "doomloop_impersonates_publisher" {
-  service_account_id = google_service_account.doomloop_publisher.name
-  role               = "roles/iam.workloadIdentityUser"
-  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.doomloop_repo}"
+resource "google_storage_bucket_iam_member" "deployer_writes_game_assets" {
+  bucket = google_storage_bucket.game_assets.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+resource "google_storage_bucket_iam_member" "games_vm_reads_game_assets" {
+  bucket = google_storage_bucket.game_assets.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${data.google_project.this.number}-compute@developer.gserviceaccount.com"
+}
+
+# ── skippy-bootstrap: what runs THIS module from skippy-core (no more Cloud Shell) ────────────────────────────────
+# skippy-deployer deploys code every push and can't change IAM, create buckets or edit the trust: that is deliberate, and it
+# is why every new bucket once needed a human in Cloud Shell. skippy-bootstrap holds just the roles this module's own resources
+# need (and no key: the project forbids them). Only skippy-deployer may impersonate it, and only core/cd/cd.py's `bootstrap`
+# command does: plan by default, `apply` only when typed. It can grant itself more (projectIamAdmin), so treat its use as
+# deliberate: every use is in the project's audit log (impersonation by skippy-deployer, then the changes by skippy-bootstrap).
+# The one Cloud Shell run that applies this block is the last one.
+
+locals {
+  bootstrap_roles = [
+    "roles/serviceusage.serviceUsageAdmin",      # google_project_service.apis
+    "roles/storage.admin",                       # the buckets and their IAM
+    "roles/artifactregistry.admin",              # the portal image repository
+    "roles/iam.serviceAccountAdmin",             # skippy-deployer, mentat, and who may act as whom
+    "roles/iam.workloadIdentityPoolAdmin",       # the skippy-core pool and provider
+    "roles/iam.roleAdmin",                       # the portal_vm custom role
+    "roles/resourcemanager.projectIamAdmin",     # google_project_iam_member (deployer roles, runtime)
+    "roles/secretmanager.admin",                 # the portal's secrets and who reads them
+    "roles/browser",                             # data.google_project (projects.get)
+  ]
+}
+
+resource "google_service_account" "bootstrap" {
+  account_id   = "skippy-bootstrap"
+  display_name = "skippy-core bootstrap (infra/bootstrap, by hand only)"
+  depends_on   = [google_project_service.apis]
+}
+
+resource "google_project_iam_member" "bootstrap" {
+  for_each = toset(local.bootstrap_roles)
+  project  = var.project
+  role     = each.key
+  member   = "serviceAccount:${google_service_account.bootstrap.email}"
+}
+
+# The state it reads and writes (versioned: a bad apply can be undone from the bucket).
+resource "google_storage_bucket_iam_member" "bootstrap_state" {
+  bucket = google_storage_bucket.tfstate.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.bootstrap.email}"
+}
+
+# skippy-deployer (and through it skippy-core's token) may become skippy-bootstrap: generateAccessToken only, on this one account.
+resource "google_service_account_iam_member" "deployer_impersonates_bootstrap" {
+  service_account_id = google_service_account.bootstrap.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.deployer.email}"
 }

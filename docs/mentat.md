@@ -1,9 +1,10 @@
 # Mentat as a service: suggestions, not defaults, and the research log
 
-Mentat (sigma-ground's physics engine) runs twice, from the same `mentat/` code: **mentat-home** on skippy-pc
-(`docker-compose.override.yml`, Qwen helps its translator; Skippy's chat and the private Skippy ask it) and the
-**cloud copy** `skippy-mentat` on Cloud Run (keywords only; the Experiments playground and Claude's `mentat` MCP
-connector). Endpoints: `mentat/app.py`'s docstring.
+Mentat (sigma-ground's physics engine) runs ONCE, on skippy-core (`core/compose.core.yml`: Qwen helps its translator, the trained router
+leads `/ask`, the DE440 data is mounted; Skippy's chat, the private Skippy, the portal's Experiments playground and Claude's `mentat` MCP
+connector all ask it). Its public address, for the Captain's friends, is a Tailscale Funnel on :8443
+(`core/install/mentat_funnel.sh`). Until 2026-10-27 there was a second, keywords-only copy on Cloud Run; the Captain retired it (needless
+cost, and two copies drift). Endpoints: `mentat/app.py`'s docstring.
 
 ## Mentat never fills in an input (the Captain, 2026-10-23)
 

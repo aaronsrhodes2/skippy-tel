@@ -8,7 +8,8 @@ chain is fixed, and keep each result as the home AI's baseline for the later sid
 cases.json: [{"name", "message", "project" ("f-skippy-retest", the sandbox, unless the case needs its own conversation),
 "conv" (optional: resume that conversation), "images" (optional: paths to pictures to attach)}]. It drives the bridge the way
 the home reporter does (POST /workshop, then GET /workshop/run/<task>), with the home token read from the reporter's
-container, never printed. It waits as long as a run takes (up to --max-min), and writes results.json after every case.
+container, never printed. It waits as long as a run takes (up to --max-min; 0 = for as long as it runs; it only stops WAITING, the run goes on), and
+writes results.json after every case.
 """
 from __future__ import annotations
 
@@ -70,8 +71,14 @@ def run_case(case: dict, brain: str, tok: str, max_min: float) -> dict:
            "start_status": status}
     if status != 200:
         return {**out, "ok": False, "error": started.get("message") or started.get("error") or f"HTTP {status}", "seconds": 0, "events": []}
+    return follow(out, task, tok, t0, max_min)
+
+
+def follow(out: dict, task: str, tok: str, t0: float, max_min: float) -> dict:
+    """Read a run's events, from the first, until it is done (the bridge holds each request until there is news), and
+    return `out` with the outcome: the same result whether this tool started the run or joined it."""
     events, after, done = [], 0, {}
-    while time.time() - t0 < max_min * 60:
+    while max_min <= 0 or time.time() - t0 < max_min * 60:
         s, got = call("GET", f"/workshop/run/{task}?after={after}&wait=20", None, tok, timeout=40)
         if s != 200:
             time.sleep(5)
@@ -90,13 +97,27 @@ def run_case(case: dict, brain: str, tok: str, max_min: float) -> dict:
             "answer": "\n".join(texts)[-6000:], "events": [{k: v for k, v in e.items() if k != "b64"} for e in events]}
 
 
+def attach_case(case: dict, task: str, brain: str, tok: str, max_min: float) -> dict:
+    """Join a run that is already going (its driver died, or was never this tool): its events from the first, its age as
+    the time it has taken. The run was started by someone else, so nothing here posts or cancels anything."""
+    status, listing = call("GET", "/workshop/runs", None, tok)
+    mine = next((r for r in (listing.get("runs") or []) if r.get("task") == task), None) if status == 200 else None
+    out = {"name": case["name"], "task": task, "conv": case.get("conv") or (mine or {}).get("conv"), "brain": brain,
+           "started": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - float((mine or {}).get("age_s") or 0))),
+           "start_status": "attached"}
+    if mine is None:
+        return {**out, "ok": False, "error": f"the bridge does not know a run {task}", "seconds": 0, "events": []}
+    return follow(out, task, tok, time.time() - float(mine.get("age_s") or 0), max_min)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("cases")
     ap.add_argument("results")
     ap.add_argument("--brain", default="core")
     ap.add_argument("--only", default="")
-    ap.add_argument("--max-min", type=float, default=45)
+    ap.add_argument("--max-min", type=float, default=45, help="stop waiting after this many minutes (0 = never)")
+    ap.add_argument("--attach", default="", metavar="TASK", help="follow a run that is already going (the case's first entry names it) instead of starting one")
     a = ap.parse_args()
     cases = json.loads(Path(a.cases).read_text(encoding="utf-8"))
     only = {n for n in a.only.split(",") if n}
@@ -106,8 +127,8 @@ def main() -> int:
     for case in cases:
         if only and case["name"] not in only:
             continue
-        print(f"-> {case['name']} ({a.brain})", flush=True)
-        r = run_case(case, a.brain, tok, a.max_min)
+        print(f"-> {case['name']} ({a.brain})" + (f" attached to {a.attach}" if a.attach else ""), flush=True)
+        r = attach_case(case, a.attach, a.brain, tok, a.max_min) if a.attach else run_case(case, a.brain, tok, a.max_min)
         print(f"   {'OK' if r['ok'] else 'FAILED'} in {r['seconds']} s, {r.get('tool_calls', 0)} tool calls"
               + ("" if r["ok"] else f": {str(r.get('error'))[:200]}"), flush=True)
         results.append(r)

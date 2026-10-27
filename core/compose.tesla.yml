@@ -1,0 +1,79 @@
+# The Captain's Tesla on SkippyCore (2026-10-26, the Captain's call: "option 1 today", the car's state and its history at home; sending
+# the car commands through Tesla's Fleet API is saved for later, docs/tesla.md). Read only, no Tesla API fee, nothing in the cloud.
+#
+# Deployed with the rest of the stack when /etc/skippy-core/core.env says CORE_TESLA=1 (core/install/tesla.sh sets it up: the secrets
+# in /etc/skippy-core/tesla.env, the tailnet doors). The simulator and CI leave it out.
+#
+#   teslamate  the open-source logger (pinned): signs in to Tesla with the Captain's own tokens (pasted once into its page on :4000),
+#              records every drive and charge in Postgres, publishes the live state to MQTT. Its page has no password of its own,
+#              so :4000 is on 127.0.0.1 and reaches the tailnet only through `tailscale serve` (install/tesla.sh), never the Funnel.
+#   tesla-db   TeslaMate's Postgres. ${CORE_STATE}/tesla/db: every drive and charge since day one, backed up with CORE_STATE.
+#   mosquitto  the MQTT broker between TeslaMate and the car reader; no published port.
+#   car        core/car: the latest state as JSON on 7351 (tailnet only, like :4000) for skippy-pc's reporter, so the portal and the
+#              chat never wake the car.
+x-logging: &tesla-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  teslamate:
+    image: teslamate/teslamate:4.4.0@sha256:c85b3d447502683ed7bf12fb478e0dae9a985fe975ac22cccb64faeb4c4a5d31
+    restart: unless-stopped
+    logging: *tesla-logging
+    env_file: ${TESLA_ENV:-/etc/skippy-core/tesla.env}     # ENCRYPTION_KEY (encrypts the stored Tesla tokens), DATABASE_PASS, TZ
+    environment:
+      - DATABASE_USER=teslamate
+      - DATABASE_NAME=teslamate
+      - DATABASE_HOST=tesla-db
+      - MQTT_HOST=mosquitto
+    ports:
+      - "127.0.0.1:4000:4000"
+    cap_drop:
+      - all
+    depends_on:
+      - tesla-db
+      - mosquitto
+
+  tesla-db:
+    image: postgres:17.6@sha256:00bc86618629af00d2937fdc5a5d63db3ff8450acf52f0636ec813c7f4902929
+    restart: unless-stopped
+    logging: *tesla-logging
+    env_file: ${TESLA_ENV:-/etc/skippy-core/tesla.env}     # POSTGRES_PASSWORD (= DATABASE_PASS)
+    environment:
+      - POSTGRES_USER=teslamate
+      - POSTGRES_DB=teslamate
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U teslamate -d teslamate"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - ${CORE_STATE:-/var/lib/skippy-core}/tesla/db:/var/lib/postgresql/data
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0.22@sha256:09b62ff32c2e7b64d4b431b9a89236073289b68db273de2b089edeb9b0d92b5c
+    restart: unless-stopped
+    logging: *tesla-logging
+    command: mosquitto -c /mosquitto/config/mosquitto.conf   # core/car/mosquitto.conf: no auth (no published port), values kept on disk
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -t '$$SYS/broker/uptime' -C 1 -W 3"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+    volumes:
+      - ./car/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ${CORE_STATE:-/var/lib/skippy-core}/tesla/mosquitto:/mosquitto/data
+
+  car:
+    build: ./car
+    restart: unless-stopped
+    logging: *tesla-logging
+    environment:
+      - MQTT_HOST=mosquitto
+      - TESLAMATE_SIGN_IN=http://skippy-core:4000
+    ports:
+      - "127.0.0.1:7351:7351"
+    depends_on:
+      - mosquitto

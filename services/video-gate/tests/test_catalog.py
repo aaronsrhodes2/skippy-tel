@@ -194,7 +194,9 @@ def test_jellyfin_down_serves_the_last_good_catalog(fake, make_stack, clock):
     clock.advance(10)                                                          # (/health caches Jellyfin's state for a few seconds)
     health = s.web.get("/health")
     assert health.status_code == 200                                           # alive...
-    assert health.get_json() == {"ok": True, "ready": False, "jellyfin": False, "items": 11}     # ...but not ready
+    body = health.get_json()
+    assert {k: body[k] for k in ("ok", "ready", "jellyfin", "items")} == {"ok": True, "ready": False, "jellyfin": False, "items": 11}     # ...but not ready
+    assert body["accepting"] is False and "Jellyfin isn't answering" in body["detail"]                    # and it says why, in words
     # and what needs Jellyfin says so plainly, never a 500 and never any upstream text
     r = s.get(f"/img/{fj.fid(1)}/poster")
     assert r.status_code == 503 and r.get_json() == {"error": "Jellyfin is not answering"}
@@ -233,7 +235,9 @@ def test_never_built_catalog_is_a_503_not_a_500(fake, make_stack):
     s.library.tried_at = s.clock()                 # (a download within a minute of an attempt doesn't poke a new one)
     r = s.get("/catalog.json")
     assert r.status_code == 503 and r.get_json()["error"] == "Jellyfin is not answering" and r.get_json()["retry"] is True
-    assert s.web.get("/health").get_json() == {"ok": True, "ready": False, "jellyfin": True, "items": 0}
+    body = s.web.get("/health").get_json()
+    assert {k: body[k] for k in ("ok", "ready", "jellyfin", "items")} == {"ok": True, "ready": False, "jellyfin": True, "items": 0}
+    assert "catalog" in body["detail"]
 
 
 @pytest.mark.parametrize("garbage", [b"not json", b'{"Items": "nope"}', b'["a"]', b'{"Items": [1, "x", null, {"Id": 5}]}', b""])

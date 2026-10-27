@@ -143,7 +143,6 @@ def test_health():
               f"models: {ollama.get('models','(none)')}")
 
         tiers = models.get("tiers", {})
-        check("Claude tier key live",       tiers.get("claude")     is True)
         check("ElevenLabs tier key live",   tiers.get("elevenlabs") is True)
         check("Nagatha tier key live",      tiers.get("nagatha")    is True)
 
@@ -201,16 +200,6 @@ def test_tier_routing():
             info(f"  Reply: {r.get('reply','')[:80]}")
         except Exception as e:
             check_exc(f"Nagatha trigger: {phrase!r}", e)
-
-    head("B3 — Claude thinking-cap tier")
-    rule()
-    try:
-        r = send("Put on your thinking cap. What is 17 multiplied by 23?")
-        check_tier("Thinking cap → claude tier", r, "claude")
-        check_reply("Got a real reply", r)
-        info(f"Reply: {r.get('reply','')[:100]}")
-    except Exception as e:
-        check_exc("Thinking cap request", e)
 
     head("B4 — Trust the awesomeness (bridge bypass)")
     rule()

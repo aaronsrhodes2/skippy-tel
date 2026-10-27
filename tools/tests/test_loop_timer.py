@@ -1,15 +1,20 @@
 """tools/loop_timer.py: the table, the arithmetic, and the watching, against a fake world.
 
-GitHub is a function (the `gh` seam returns what `gh run list|view --json` prints, computed from a fake clock), /version is another
-function, and `sleep` only moves the fake clock: a four-minute deploy plays out in milliseconds, and every moment the timer reports
-can be compared with the moment the scenario put it at. The real urllib path is exercised against a real HTTP server on an ephemeral port.
+skippy-core is a function (the `core` seam returns what the ssh snapshot prints: CI's results, Core's deployer status and cd.py's runs,
+computed from a fake clock), the house repo is a small object, /version is another function, and `sleep` only moves the fake clock:
+a five-minute loop plays out in milliseconds, and every moment the timer reports can be compared with the moment the scenario put it
+at. The real pieces are exercised too: HouseGit against a real bare repo, the ssh snippet against a folder laid out like skippy-core's,
+and the urllib path against a real HTTP server on an ephemeral port.
 """
 from __future__ import annotations
 
 import http.server
 import io
 import json
+import os
 import re
+import subprocess
+import sys
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -21,10 +26,9 @@ import loop_timer as lt
 
 ROOT = Path(__file__).resolve().parents[2]
 UTC = timezone.utc
-PUSH = datetime(2026, 9, 30, 19, 0, 0, tzinfo=UTC)         # the moment the push lands (the run's createdAt)
+PUSH = datetime(2026, 9, 30, 19, 0, 0, tzinfo=UTC)         # the moment the push lands (the house repo's reflog)
 SHA = "8adcd7ee35c3bf0096bb2f95babb6db113eb5ef6"
 OLD_SHA = "0123456789abcdef0123456789abcdef01234567"
-ZERO = "0001-01-01T00:00:00Z"                              # how GitHub says "has not happened"
 PORTAL = "https://portal.test"
 
 
@@ -36,47 +40,32 @@ def stamp(moment: datetime) -> str:
     return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-@dataclass
-class Job:
-    name: str
-    start: float                       # seconds after the push
-    end: float
-    steps: tuple = ()                  # (number, name, start, end)
-    ok: str = "success"
-    skipped: bool = False
-    fail_step: str = ""                # the step that fails (the job then ends there)
-
-
-def standard_jobs() -> list[Job]:
-    """deploy.yml as measured on 2026-09-30 (docs/cicd.md): the deploy job starts when `test` ends; Deploy to Cloud Run ends at +190."""
-    return [
-        Job("gate", 2, 5),
-        Job("mentat-test", 2, 40),
-        Job("test", 2, 104),
-        Job("infra", 106, 126),
-        Job("mentat", 106, 236),
-        Job("portal", 106, 197, steps=(
-            (1, "Set up job", 106, 107), (2, "Run actions/checkout@v4", 107, 108),
-            (3, "Run google-github-actions/auth@v2", 108, 108),
-            (4, "Run google-github-actions/setup-gcloud@v2", 108, 131), (5, "Build and push", 131, 165),
-            (6, "Deploy to Cloud Run", 165, 190), (7, "Smoke test", 190, 197),
-            (8, "Post Run actions/checkout@v4", 197, 197), (9, "Complete job", 197, 197))),
-    ]
+CI_JOBS = (("suite", 45, 150), ("flask-api", 45, 90), ("services", 45, 70), ("shell-syntax", 45, 46))   # seconds after the push
+CD_JOBS = (("portal-image", 172, 230), ("portal", 230, 275))
 
 
 @dataclass
 class World:
-    """One deploy loop on a fake clock. `now` only moves through sleep(); everything GitHub and the portal say is computed from it."""
+    """One loop on a fake clock. `now` only moves through sleep(); everything skippy-core, the house and the portal say is computed from it.
+    Defaults: CI takes the commit up at +40 and is done at +150; cd.py's run is created at +170, the new revision has all traffic at +262,
+    the run ends at +275; Core's deployer runs +160..+300; /version flips at +263."""
     now: datetime
-    jobs: list[Job] = field(default_factory=standard_jobs)
-    visible_at: float | None = 191                      # seconds after the push when /version starts answering the new commit
-    event: str = "push"
-    run_id: int = 4242
-    earlier: list[dict] = field(default_factory=list)   # older runs, newest first
-    version_before: dict | None = None                  # what /version says before the flip (default: the old commit)
+    ci_at: float | None = 40
+    ci_state: str = "success"
+    failing_job: str = ""
+    cd_at: float | None = 170
+    cd_fail: str = ""                                   # the cd job that fails
+    serving: float = 262
+    visible_at: float | None = 263
+    core_deploy: tuple | None = (160, 300)
+    stamps: bool = True                                 # records written by today's ci.py / cd.py (False: before 2026-10-27)
+    reflog: bool = True
+    earlier: list[dict] = field(default_factory=list)   # older CI results, as the snapshot shows them
+    version_before: dict | None = None
     version_down: bool = False
+    core_down: int = 0                                  # this many ssh looks fail, then it answers
     bridge: dict = field(default_factory=dict)          # path -> (status, body)
-    gh_calls: list = field(default_factory=list)
+    core_calls: int = 0
     http_calls: list = field(default_factory=list)
 
     def clock(self):
@@ -86,51 +75,74 @@ class World:
         self.now += timedelta(seconds=seconds)
 
     def sources(self, env=None) -> lt.Sources:
-        return lt.Sources(gh=self.gh, http=self.http, clock=self.clock, sleep=self.sleep, env=env if env is not None else {})
+        return lt.Sources(core=self.core, house=House(self), http=self.http, clock=self.clock, sleep=self.sleep,
+                          env=env if env is not None else {})
 
-    # -- GitHub --
-    def state(self, start, end, ok="success", skipped=False):
-        if skipped:
-            return {"status": "completed", "conclusion": "skipped", "startedAt": ZERO, "completedAt": ZERO}
-        if self.now < at(start):
-            return {"status": "queued", "conclusion": "", "startedAt": ZERO, "completedAt": ZERO}
-        if self.now < at(end):
-            return {"status": "in_progress", "conclusion": "", "startedAt": stamp(at(start)), "completedAt": ZERO}
-        return {"status": "completed", "conclusion": ok, "startedAt": stamp(at(start)), "completedAt": stamp(at(end))}
+    def t(self, seconds):
+        return self.now >= at(seconds)
 
-    def run_summary(self):
-        return {"databaseId": self.run_id, "headSha": SHA, "createdAt": stamp(PUSH), "startedAt": stamp(PUSH), "event": self.event,
-                "status": "completed", "conclusion": "success", "url": f"https://github.test/runs/{self.run_id}",
-                "displayTitle": "Portal: a change", "updatedAt": stamp(at(240))}
-
-    def view(self):
-        jobs = []
-        for n, job in enumerate(self.jobs, 1):
-            row = {"name": job.name, "databaseId": n, "url": f"https://github.test/jobs/{n}",
-                   **self.state(job.start, job.end, job.ok, job.skipped), "steps": []}
-            for number, name, s, e in job.steps:
-                failed = job.fail_step == name
-                row["steps"].append({"number": number, "name": name, **self.state(s, e, "failure" if failed else "success")})
+    # -- skippy-core --
+    def ci(self):
+        if self.ci_at is None or not self.t(self.ci_at):
+            return None
+        jobs, finished = [], max(e for _, _, e in CI_JOBS)
+        for name, s, e in CI_JOBS:
+            if not self.t(e):
+                continue                                # ci.py writes the jobs only when every one has ended
+            row = {"name": name, "state": "failure" if name == self.failing_job else "success", "why": "", "seconds": e - s}
+            if self.stamps:
+                row.update(started_at=at(s).timestamp(), finished_at=at(e).timestamp())
             jobs.append(row)
-        live = [j for j in self.jobs if not j.skipped]
-        done = self.now >= at(max(j.end for j in live))
-        verdict = "failure" if any(j.ok != "success" for j in live) else "success"
-        return {**self.run_summary(), "jobs": jobs, "status": "completed" if done else "in_progress",
-                "conclusion": verdict if done else "", "updatedAt": stamp(min(self.now, at(max(j.end for j in live))))}
+        if not self.t(finished):
+            return {"sha": SHA, "state": "running", "at": at(self.ci_at).timestamp(), "jobs": []}
+        out = {"sha": SHA, "state": self.ci_state, "at": at(self.ci_at).timestamp(), "seconds": finished - self.ci_at, "jobs": jobs}
+        if self.stamps:
+            out["finished_at"] = at(finished).timestamp()
+        return out
 
-    def gh(self, args):
-        self.gh_calls.append(list(args))
-        if args[:2] == ["repo", "view"]:
-            return json.dumps({"nameWithOwner": "owner/repo"})
-        if args[:2] == ["run", "list"]:
-            runs = list(self.earlier)
-            if self.now >= PUSH:
-                runs.insert(0, self.run_summary())
-            return json.dumps(runs)
-        if args[:2] == ["run", "view"]:
-            assert args[2] == str(self.run_id)
-            return json.dumps(self.view())
-        raise AssertionError(f"unexpected gh call {args}")
+    def cd(self):
+        if self.cd_at is None or not self.t(self.cd_at):
+            return None
+        jobs, ok = [{"name": "test", "status": "completed", "conclusion": "success"}], True
+        for name, s, e in CD_JOBS:
+            if not ok or not self.t(s):
+                break
+            row = {"name": name, "status": "in_progress", "conclusion": ""}
+            if self.stamps:
+                row["started_at"] = stamp(at(s))
+                if name == "portal" and self.t(self.serving) and self.cd_fail != "portal":
+                    row["serving_at"] = stamp(at(self.serving))
+            if self.t(e):
+                failed = self.cd_fail == name
+                row.update(status="completed", conclusion="failure" if failed else "success")
+                if failed:
+                    row["why"] = "smoke test: /health answers"
+                    ok = False
+                if self.stamps:
+                    row["completed_at"] = stamp(at(e))
+            jobs.append(row)
+        end = max(e for _, _, e in CD_JOBS) if ok else next(e for n, _, e in CD_JOBS if n == self.cd_fail)
+        done = self.t(end)
+        return {"id": 35, "head_sha": SHA, "status": "completed" if done else "in_progress",
+                "conclusion": ("success" if ok else "failure") if done else "", "created_at": stamp(at(self.cd_at)),
+                "updated_at": stamp(min(self.now, at(end))), "title": "Portal: a change", "jobs": jobs}
+
+    def deployer(self):
+        if self.core_deploy and self.t(self.core_deploy[1]):
+            good = {"commit": SHA, "full": "", "at": stamp(at(self.core_deploy[1]))}
+            if self.stamps:
+                good["started"] = stamp(at(self.core_deploy[0]))
+            return {"state": "ok", "at": stamp(self.now), "commit": SHA, "last_good": good}
+        return {"state": "waiting-ci", "at": stamp(self.now), "commit": SHA, "detail": "not tested yet by this box's CI",
+                "last_good": {"commit": OLD_SHA, "full": "", "at": stamp(at(-900))}}
+
+    def core(self):
+        self.core_calls += 1
+        if self.core_down:
+            self.core_down -= 1
+            raise lt.Problem("ssh skippy-core failed: Connection timed out")
+        ci, cd = self.ci(), self.cd()
+        return {"ci": ([ci] if ci else []) + self.earlier, "deployer": self.deployer(), "cd_runs": [cd] if cd else []}
 
     # -- the portal and the bridge --
     def http(self, url, headers=None, timeout=5.0):
@@ -138,13 +150,38 @@ class World:
         if url == f"{PORTAL}/version":
             if self.version_down:
                 return 0, None
-            if self.visible_at is not None and self.now >= at(self.visible_at):
-                return 200, {"commit": SHA, "short": SHA[:7], "built_at": stamp(at(100)),
-                             "revision": "skippy-portal-00043-new", "started_at": stamp(at(186))}
+            if self.visible_at is not None and self.t(self.visible_at):
+                return 200, {"commit": SHA, "short": SHA[:7], "built_at": stamp(at(200)),
+                             "revision": "skippy-portal-00043-new", "started_at": stamp(at(250))}
             return 200, self.version_before or {"commit": OLD_SHA, "short": OLD_SHA[:7], "built_at": "", "revision": "skippy-portal-00042-old",
                                                 "started_at": stamp(at(-3600))}
         path = "/" + url.split("//", 1)[1].split("/", 1)[1]
         return self.bridge.get(path, (404, None))
+
+
+class House:
+    """The house's bare repo, as the world says it is: main is OLD_SHA until the push, SHA after it."""
+
+    def __init__(self, world: World):
+        self.w = world
+
+    def tip(self):
+        return SHA if self.w.t(0) else OLD_SHA
+
+    def resolve(self, prefix):
+        return next((s for s in (SHA, OLD_SHA) if s.startswith(prefix)), None)
+
+    def subject(self, sha):
+        return "Portal: a change — with a dash" if sha == SHA else "older"
+
+    def pushes(self):
+        return [(OLD_SHA, at(-900)), *([(SHA, PUSH)] if self.w.t(0) else [])] if self.w.reflog else []
+
+    def pushed(self, sha):
+        for s, when in self.pushes():
+            if s == sha:
+                return when, "reflog"
+        return (at(-30), "the commit date: the push itself isn't recorded") if sha == SHA else (None, "")
 
 
 def run_main(world, *argv, env=None):
@@ -153,8 +190,8 @@ def run_main(world, *argv, env=None):
     return code, out.getvalue(), err.getvalue()
 
 
-def stages(text: str) -> dict:
-    return json.loads(text)
+def rows_of(out: str) -> dict:
+    return {line.strip().split("  ")[0]: line for line in out.splitlines() if "  " in line.strip()}
 
 
 def by_key(doc) -> dict:
@@ -163,11 +200,12 @@ def by_key(doc) -> dict:
 
 # ── pure helpers ────────────────────────────────────────────────────────────────────
 
-def test_github_times_parse_to_utc_and_never_started_is_none():
+def test_iso_and_epoch_times_parse_to_utc_and_nothing_is_none():
     assert lt.parse_ts("2026-09-30T19:03:12Z") == datetime(2026, 9, 30, 19, 3, 12, tzinfo=UTC)
     assert lt.parse_ts("2026-09-30T12:03:12-07:00") == datetime(2026, 9, 30, 19, 3, 12, tzinfo=UTC)
     assert lt.parse_ts(1_790_000_000) == datetime.fromtimestamp(1_790_000_000, UTC)
-    for nothing in (ZERO, "", None, "garbage", 0):
+    assert lt.parse_ts(1_793_088_970.7391725) == datetime.fromtimestamp(1_793_088_970.7391725, UTC)    # CI's `at`, as ci.py writes it
+    for nothing in ("0001-01-01T00:00:00Z", "", None, "garbage", 0):
         assert lt.parse_ts(nothing) is None
 
 
@@ -191,248 +229,191 @@ def test_durations_read_at_a_glance():
 # ── one finished loop, read after the fact ──────────────────────────────────────────
 
 def test_a_finished_loop_is_a_table_of_stamps_with_the_critical_path_and_the_total():
-    world = World(now=at(300))
+    world = World(now=at(400))
     code, out, err = run_main(world, "--since", "2026-09-30T18:57:00Z")
-    assert code == 0 and err == ""
-    rows = {line.split("  ")[0].strip(): line for line in out.splitlines()}
+    assert code == 0 and err == "", out + err
+    rows = rows_of(out)
     assert re.search(r"18:57:00\s+19:00:00\s+3m00s", rows["prompt -> push"])                    # 180 s from the prompt to the push
-    assert "queue (runner pickup)" in rows and re.search(r"19:00:00\s+19:00:02\s+2s", rows["queue (runner pickup)"])
-    assert re.search(r"19:00:02\s+19:00:05\s+3s", rows["gate (bootstrapped?)"])
-    assert re.search(r"19:00:02\s+19:01:44\s+1m42s", rows["tests"])
-    assert re.search(r"19:01:46\s+19:03:17\s+1m31s", rows["deploy portal"])
-    deploy = [l for l in out.splitlines() if "Deploy to Cloud Run" in l][0]
-    assert re.search(r"19:02:45\s+19:03:10\s+25s\s+new revision serving at the end of this step", deploy)
-    assert "after the new revision was already serving" in [l for l in out.splitlines() if "Smoke test" in l][0]
-    assert "Set up job" not in out and "Complete job" not in out and "Post Run" not in out          # bookkeeping steps are noise
-    total = [l for l in out.splitlines() if l.startswith("TOTAL")][0]
-    assert "prompt sent -> deploy step end" in total and re.search(r"18:57:00\s+19:03:10\s+6m10s", total)
-    assert "critical path (from the stamps): tests 1m42s -> deploy portal (to serving) 1m24s" in out
-    assert "[push -> serving: 3m10s" in out                              # the headline number: push to the new revision serving
-    assert "rows overlap" in out
-
-
-def test_visible_is_not_guessed_when_nobody_was_watching():
-    """The new commit is already live when the timer first looks, so WHEN it appeared is unknowable: n/a with the reason, not a number."""
-    world = World(now=at(300))
-    code, out, _ = run_main(world, "--since", "2026-09-30T18:57:00Z")
-    visible = [l for l in out.splitlines() if l.startswith("visible on the portal")][0]
-    assert "n/a (already live when first checked at 19:05:00" in visible and "loop-watch" in visible
-    assert not re.search(r"\d\d:\d\d:\d\d", visible.split("n/a")[0])
-
-
-def test_without_since_the_prompt_stage_is_n_a_and_the_total_counts_from_the_push():
-    world = World(now=at(300))
-    code, out, _ = run_main(world)
-    assert re.search(r"prompt -> push\s+n/a \(no --since", out)
-    assert "TOTAL push (no --since) -> deploy step end" in out and "3m10s" in out
+    assert re.search(r"19:00:00\s+19:00:40\s+40s", rows["wait for CI (timer, 1 min)"])
+    assert re.search(r"19:00:40\s+19:02:30\s+1m50s", rows["CI (skippy-core)"])
+    assert re.search(r"19:00:45\s+19:01:30\s+45s", rows["flask-api"])                          # each CI job its own stamps
+    assert re.search(r"19:02:30\s+19:02:50\s+20s", rows["wait for the deployer (timer)"])
+    assert re.search(r"19:02:50\s+19:04:35\s+1m45s", rows["deploy run 35 (cd.py)"])
+    assert re.search(r"19:03:50\s+19:04:35\s+45s\s+all traffic on the new revision at 19:04:22 UTC \(32s in\)", rows["deploy portal"])
+    assert re.search(r"19:02:40\s+19:05:00\s+2m20s", rows["Core services (deployer)"])
+    assert "already live when first checked" in rows["visible on the portal"]                  # nobody watched: the moment is unknowable
+    assert re.search(r"18:57:00\s+19:04:22\s+7m22s\s+visible was not observed", rows["TOTAL prompt sent -> serving"])
+    assert "critical path: push -> CI 40s -> CI 1m50s -> CI -> deploy run 20s -> run start 2s -> build portal image 58s -> " \
+           "deploy portal (to serving) 32s   [push -> serving: 4m22s]" in out
+    assert "Core's services deploy beside the portal, off its critical path" in out
+    assert "the push time is" not in out                                                        # from the reflog: nothing to say
 
 
 def test_json_carries_the_same_stages_in_utc_iso():
-    world = World(now=at(300))
-    code, out, _ = run_main(world, "--json", "--since", "2026-09-30T18:57:00Z")
+    world = World(now=at(400))
+    code, out, _ = run_main(world, "--json")
     doc = json.loads(out)
-    stage = by_key(doc)
-    assert doc["sha"] == SHA and doc["run_id"] == 4242 and doc["serving_at"] == "2026-09-30T19:03:10Z"
-    assert stage["prompt_to_push"]["seconds"] == 180 and stage["queue"]["seconds"] == 2
-    assert stage["tests" if "tests" in stage else "test"]["seconds"] == 102 and stage["portal"]["seconds"] == 91
-    assert stage["portal.6"]["start"] == "2026-09-30T19:02:45Z" and stage["portal.6"]["end"] == "2026-09-30T19:03:10Z"
-    assert doc["total"]["seconds"] == 370 and doc["total"]["start"] == "2026-09-30T18:57:00Z"
-    assert [c["label"] for c in doc["critical_path"]] == ["tests", "deploy portal (to serving)"]
-    assert stage["visible"]["na"] and stage["visible"]["seconds"] is None
+    stages = by_key(doc)
+    assert doc["sha"] == SHA and doc["push"] == "2026-09-30T19:00:00Z" and doc["push_from"] == "reflog" and doc["cd_run"] == 35
+    assert stages["ci"]["start"] == "2026-09-30T19:00:40Z" and stages["ci"]["seconds"] == 110
+    assert stages["cd.portal"]["depth"] == 1 and doc["serving_at"] == "2026-09-30T19:04:22Z"
+    assert stages["prompt_to_push"]["na"].startswith("no --since") and doc["loop_start_is"] == "push (no --since)"
+    assert doc["total"]["seconds"] == 262 and doc["failed"] is None
+    assert [p["label"] for p in doc["critical_path"]][:2] == ["push -> CI", "CI"]
 
 
 def test_the_table_is_plain_ascii_even_when_a_commit_title_is_not():
-    world = World(now=at(300))
-    run = world.run_summary()
-    world.run_summary = lambda: {**run, "displayTitle": "Game pages \u2026 the \u2713 mark"}       # what a Windows console would choke on
-    code, out, _ = run_main(world)
+    code, out, _ = run_main(World(now=at(400)))
     out.encode("ascii")
-    assert "Game pages" in out
+    assert "loop 8adcd7e  Portal: a change ? with a dash" in out
 
 
-def test_jobs_that_were_skipped_are_one_note_not_rows():
-    world = World(now=at(300))
-    world.jobs = [j for j in standard_jobs() if j.name not in ("mentat", "mentat-test")] + [
-        Job("mentat-test", 0, 0, skipped=True), Job("mentat", 0, 0, skipped=True)]
+def test_records_from_before_the_stamps_show_durations_and_say_what_stands_in():
+    world = World(now=at(400), stamps=False)
     code, out, _ = run_main(world)
-    assert "not run (skipped): mentat-test, mentat" in out
-    assert "mentat tests" not in out and "mentat deploy" not in out
+    rows = rows_of(out)
+    assert re.search(r"^\s+suite\s+1m45s\s+no start/end stamps in this record, only how long it took", rows["suite"])
+    assert "n/a (no stamps in this record (success))" in rows["deploy portal"]
+    assert re.search(r"19:02:40|19:05:00", rows["Core services (deployer)"]) and "only the end is recorded" in rows["Core services (deployer)"]
+    assert "the end of the whole run stands in for it" in out
+    assert re.search(r"TOTAL push \(no --since\) -> serving\s+19:00:00\s+19:04:35\s+4m35s", out)
 
 
-# ── watching ───────────────────────────────────────────────────────────────────────
+def test_without_a_reflog_the_push_is_the_commit_date_and_says_so():
+    code, out, _ = run_main(World(now=at(400), reflog=False))
+    assert "* the push time is the commit date: the push itself isn't recorded" in out
+    assert re.search(r"18:59:30\s+19:00:40\s+1m10s", rows_of(out)["wait for CI (timer, 1 min)"])
+
+
+def test_core_services_say_what_the_deployer_is_doing_or_that_it_moved_on():
+    code, out, _ = run_main(World(now=at(200)))                       # before Core's deploy ended: the status names this commit
+    assert "n/a (waiting-ci: not tested yet by this box's CI)" in rows_of(out)["Core services (deployer)"]
+    world = World(now=at(400), core_deploy=None)
+    world.deployer = lambda: {"state": "ok", "commit": OLD_SHA, "last_good": {"commit": OLD_SHA, "at": stamp(at(900))}}
+    code, out, _ = run_main(world)
+    assert "the deployer keeps only its last good deploy, and that is another commit" in out
+
+
+# ── which commit ───────────────────────────────────────────────────────────────────
+
+def test_since_picks_the_first_push_after_the_prompt_and_never_an_earlier_loops():
+    world = World(now=at(400))
+    code, out, _ = run_main(world, "--since", "2026-09-30T18:50:00Z", "--json")
+    assert json.loads(out)["sha"] == SHA                              # OLD_SHA was pushed at -900 s, before the prompt
+    world = World(now=at(400), reflog=False, earlier=[{"sha": OLD_SHA, "state": "success", "at": at(-860).timestamp(), "jobs": []}])
+    code, out, _ = run_main(world, "--since", "2026-09-30T18:50:00Z", "--json")
+    assert json.loads(out)["sha"] == SHA                              # no reflog: the first commit CI took up after the prompt
+
+
+def test_sha_picks_that_commit_by_prefix_and_the_default_is_the_newest():
+    earlier = [{"sha": OLD_SHA, "state": "success", "at": at(-860).timestamp(), "jobs": []}]
+    code, out, _ = run_main(World(now=at(400), earlier=earlier), "--sha", "0123456", "--json")
+    doc = json.loads(out)
+    assert doc["sha"] == OLD_SHA and doc["cd_run"] is None
+    code, out, _ = run_main(World(now=at(400), earlier=earlier), "--json")
+    assert json.loads(out)["sha"] == SHA
+
+
+def test_no_commit_is_a_clear_message_and_status_2():
+    code, out, err = run_main(World(now=at(-60), ci_at=None), "--since", "now")
+    assert code == 2 and "no commit found pushed since" in err and "--watch waits for it" in err
+
+
+def test_ssh_trouble_is_a_message_not_a_traceback():
+    world = World(now=at(400), core_down=1)
+    code, out, err = run_main(world)
+    assert code == 2 and err.startswith("loop_timer: ssh skippy-core failed")
+
+
+def test_a_failed_ci_or_deploy_is_status_1_with_the_reason():
+    code, out, _ = run_main(World(now=at(400), ci_state="failure", failing_job="suite", cd_at=None))
+    assert code == 1 and "n/a (CI failed: suite)" in out and "failure" in rows_of(out)["suite"]
+    code, out, _ = run_main(World(now=at(400), cd_fail="portal", visible_at=None))
+    assert code == 1 and "failure: smoke test: /health answers" in rows_of(out)["deploy portal"]
+
+
+# ── watching a live loop ─────────────────────────────────────────────────────────
 
 def test_watching_from_before_the_push_sees_the_version_the_second_it_flips():
     world = World(now=at(-30))
     code, out, err = run_main(world, "--watch", "--since", "now")
-    assert code == 0
-    doc_rows = out.splitlines()
-    visible = [l for l in doc_rows if l.startswith("visible on the portal")][0]
-    assert re.search(r"19:03:10\s+19:03:11\s+1s\s+first seen by this machine; 1s after the deploy step ended", visible)
-    total = [l for l in doc_rows if l.startswith("TOTAL")][0]
-    assert "prompt sent -> visible" in total and re.search(r"18:59:30\s+19:03:11\s+3m41s", total)
-    assert "serving instance: revision skippy-portal-00043-new" in out and "image built 2026-09-30T19:01:40Z" in out
-    assert "watching owner/repo" in err and "gate: success" in err and "portal: success" not in err.replace("in_progress", "")   # progress goes to stderr
-    runs_listed = [c for c in world.gh_calls if c[:2] == ["run", "list"]]
-    assert 0 < len(runs_listed) < 60                                  # GitHub is asked every few seconds, not every second
-    assert sum(u.endswith("/version") for u in world.http_calls) > 150  # the portal is asked every second once the run exists
+    assert code == 0, out + err
+    rows = rows_of(out)
+    assert re.search(r"18:59:30\s+19:00:00\s+30s", rows["prompt -> push"])
+    assert re.search(r"19:04:22\s+19:04:23\s+1s\s+first seen by this machine; 1s after all traffic moved", rows["visible on the portal"])
+    assert re.search(r"TOTAL prompt sent -> visible\s+18:59:30\s+19:04:23\s+4m53s", out)
+    assert "serving -> visible 1s" in out and "serving instance: revision skippy-portal-00043-new" in out
+    assert "CI: success" in err and "deploy portal: in_progress" in err      # visible before the job's own smoke test ended
+    assert world.core_calls < 60                                          # skippy-core is asked every 10 s, not every second
+
+
+def test_watching_without_a_reflog_takes_the_push_as_the_moment_main_moved():
+    world = World(now=at(-31), reflog=False)
+    code, out, _ = run_main(world, "--watch")
+    assert code == 0 and "the push time is when this machine saw main move (no reflog on the house repo)" in out
+    assert re.search(r"19:00:01\s+19:00:40\s+39s", rows_of(out)["wait for CI (timer, 1 min)"])       # polled every 2 s from -31
 
 
 def test_a_redeploy_of_the_same_commit_waits_for_the_new_revision_not_the_old_one():
-    old = {"commit": SHA, "short": SHA[:7], "built_at": "", "revision": "skippy-portal-00042-old", "started_at": stamp(at(-3600))}
-    world = World(now=at(-5), version_before=old, visible_at=195)
+    before = {"commit": SHA, "short": SHA[:7], "revision": "skippy-portal-00042-same", "started_at": stamp(at(-3600))}
+    world = World(now=at(-10), version_before=before)
     code, out, _ = run_main(world, "--watch", "--since", "now")
-    visible = [l for l in out.splitlines() if l.startswith("visible on the portal")][0]
-    assert code == 0 and re.search(r"19:03:10\s+19:03:15\s+5s", visible)       # the flip, not the first look
+    assert code == 0 and re.search(r"visible on the portal\s+19:04:22\s+19:04:23", out)
 
 
 def test_a_failed_run_ends_the_watch_with_the_reason_and_status_1():
-    world = World(now=at(-5), visible_at=None)
-    world.jobs = [j for j in standard_jobs() if j.name != "portal"] + [
-        Job("portal", 106, 170, ok="failure", fail_step="Build and push", steps=(
-            (1, "Set up job", 106, 107), (5, "Build and push", 131, 170)))]
+    world = World(now=at(-10), cd_fail="portal-image", visible_at=None)
     code, out, err = run_main(world, "--watch", "--since", "now")
-    assert code == 1
-    assert "the run ended failure: the new version did not go live" in out
-    assert re.search(r"visible on the portal\s+n/a", out) and "TOTAL prompt sent -> visible" in out and "n/a (the loop has not finished" in out
-    assert re.search(r"Build and push.*failure", out)
+    assert code == 1 and "the deploy run ended failure: the new version did not go live" in out
+    assert world.now < at(260)                                             # it stopped at the failure, not at the timeout
 
 
-def test_a_run_that_finishes_without_the_version_ever_changing_is_reported_not_waited_on_forever():
-    world = World(now=at(-5), visible_at=None)
+def test_red_ci_ends_the_watch_at_once():
+    world = World(now=at(-10), ci_state="failure", failing_job="flask-api", cd_at=None, visible_at=None)
+    code, out, _ = run_main(world, "--watch")
+    assert code == 1 and "CI failed: the new version will not go live" in out and world.now < at(170)
+
+
+def test_a_deploy_that_finishes_without_the_version_ever_changing_is_reported_not_waited_on_forever():
+    world = World(now=at(-10), visible_at=None)
     code, out, _ = run_main(world, "--watch", "--since", "now")
-    assert code == 1 and "never showed the new commit" in out
-    assert "reports 0123456, not 8adcd7e" in out                       # says what /version DID show
+    assert code == 1 and "the deploy finished but /version never showed the new commit" in out and world.now < at(500)
 
 
 def test_ctrl_c_prints_what_was_seen_so_far():
-    world = World(now=at(-5))
-    ticks = {"n": 0}
+    world = World(now=at(-10))
+    real = world.sleep
 
-    def sleepy(seconds):
-        ticks["n"] += 1
-        if ticks["n"] > 120:
+    def sleep(seconds):
+        if world.now >= at(100):
             raise KeyboardInterrupt
-        world.sleep(seconds)
-
-    src = world.sources()
-    src.sleep = sleepy
-    out, err = io.StringIO(), io.StringIO()
-    code = lt.main(["--portal", PORTAL, "--utc", "--watch", "--since", "now"], src, out, err)
-    assert code == 1 and "interrupted (Ctrl-C)" in out.getvalue() + err.getvalue()
-    assert "tests" in out.getvalue()                                  # the stages known so far are there
-    assert re.search(r"visible on the portal\s+n/a", out.getvalue())
-
-
-def test_a_dropped_github_call_does_not_end_a_watch_but_five_in_a_row_do():
-    world = World(now=at(-5))
-    real, state = world.gh, {"n": 0}
-
-    def flaky(args):
-        if args[:2] == ["run", "view"]:
-            state["n"] += 1
-            if state["n"] in (2, 3):                                  # two bad answers in the middle of the run
-                raise lt.Problem("gh run view failed: HTTP 502")
-        return real(args)
-
-    world.gh = flaky
+        real(seconds)
+    world.sleep = sleep
     code, out, err = run_main(world, "--watch", "--since", "now")
-    assert code == 0 and re.search(r"visible on the portal\s+19:03:10\s+19:03:11", out)       # the moment is the portal's own, not GitHub's
+    assert code == 1 and "interrupted (Ctrl-C)" in err and "interrupted (Ctrl-C)" in out
+    assert "running" in rows_of(out)["CI (skippy-core)"] and "+" in rows_of(out)["CI (skippy-core)"]
 
-    world = World(now=at(-5))
-    real = world.gh
-    world.gh = lambda args: (_ for _ in ()).throw(lt.Problem("gh run view failed: HTTP 502")) if args[:2] == ["run", "view"] else real(args)
+
+def test_a_dropped_ssh_does_not_end_a_watch_but_five_in_a_row_do():
+    world = World(now=at(-10), core_down=3)
+    code, out, _ = run_main(world, "--watch", "--since", "now")
+    assert code == 0
+    world = World(now=at(-10), core_down=99)
     code, out, err = run_main(world, "--watch", "--since", "now")
-    assert code == 2 and "HTTP 502" in err
+    assert code == 2 and "ssh skippy-core failed" in err
 
 
 def test_watching_with_no_push_gives_up_at_the_timeout():
-    world = World(now=at(-5))
-    world.run_summary = lambda: (_ for _ in ()).throw(AssertionError("no run exists"))
-    world.gh = lambda args: json.dumps({"nameWithOwner": "o/r"} if args[:2] == ["repo", "view"] else [])
-    code, out, err = run_main(world, "--watch", "--since", "now", "--timeout", "60")
-    assert code == 2 and "no deploy run found" in err
-
-
-# ── which run ────────────────────────────────────────────────────────────────────────
-
-def runs(*specs):
-    return [{"databaseId": i, "headSha": sha, "createdAt": stamp(created), "startedAt": stamp(created), "event": event,
-             "status": "completed", "conclusion": "success", "url": "u", "displayTitle": "t"} for i, sha, created, event in specs]
-
-
-def test_since_picks_the_first_run_after_the_prompt_and_never_an_earlier_loops():
-    pool = runs((1, "a" * 40, at(-3000), "push"), (3, "c" * 40, at(500), "push"), (2, "b" * 40, at(40), "push"))
-    assert lt.pick_run(pool, None, at(0))["databaseId"] == 2            # the earliest run created after the prompt
-    assert lt.pick_run(pool, None, at(46))["databaseId"] == 3           # run 2 (at +40) is the previous loop's by now
-    assert lt.pick_run(pool, None, at(520)) is None                     # the push hasn't happened yet
-    assert lt.pick_run(pool, None, at(44))["databaseId"] == 2           # a few seconds of clock skew (this machine vs GitHub) are forgiven
-
-
-def test_sha_picks_that_commit_by_prefix_and_the_default_is_the_newest():
-    pool = runs((1, "abc" + "0" * 37, at(-100), "push"), (2, "abd" + "0" * 37, at(0), "push"), (3, "abc" + "0" * 37, at(50), "workflow_dispatch"))
-    assert lt.pick_run(pool, "abd", None)["databaseId"] == 2
-    assert lt.pick_run(pool, "ABC", None)["databaseId"] == 1            # a push beats a manual re-run of the same commit
-    assert lt.pick_run(pool, "zzz", None) is None
-    assert lt.pick_run(pool, None, None)["databaseId"] == 2             # newest push
-    assert lt.pick_run([], None, None) is None
-
-
-def test_the_workflow_and_branch_flags_reach_github():
-    world = World(now=at(300))
-    run_main(world, "--workflow", "other.yml", "--branch", "feature")
-    listing = [c for c in world.gh_calls if c[:2] == ["run", "list"]][0]
-    assert listing[listing.index("--workflow") + 1] == "other.yml" and listing[listing.index("--branch") + 1] == "feature"
-    assert listing[listing.index("--repo") + 1] == "owner/repo"          # from `gh repo view`, since --repo wasn't given
-
-
-def test_a_manual_dispatch_is_labelled_as_what_it_is():
-    world = World(now=at(300), event="workflow_dispatch")
-    code, out, _ = run_main(world, "--since", "2026-09-30T18:57:00Z")
-    assert "prompt -> run created (workflow_dispatch)" in out
-
-
-def test_no_run_is_a_clear_message_and_status_2():
-    world = World(now=at(-5))
-    code, out, err = run_main(world, "--sha", "8adcd7e")
-    assert code == 2 and "no deploy run found for commit 8adcd7e" in err and out == ""
-
-
-def test_gh_trouble_is_a_message_not_a_traceback():
-    def broken(args):
-        raise lt.Problem("gh run list failed: not logged in (signed in? `gh auth status`)")
-    src = lt.Sources(gh=broken, clock=lambda: PUSH, sleep=lambda s: None, env={})
-    out, err = io.StringIO(), io.StringIO()
-    assert lt.main(["--repo", "o/r"], src, out, err) == 2 and "gh run list failed" in err.getvalue()
-
-
-# ── the critical path, from the stamps ───────────────────────────────────────────────
-
-def job(name, start, end, conclusion="success"):
-    return {"name": name, "startedAt": stamp(at(start)), "completedAt": stamp(at(end)), "conclusion": conclusion}
-
-
-def test_the_critical_path_follows_whichever_job_the_deploy_waited_for():
-    split = [job("gate", 0, 4), job("test", 2, 104), job("test-flask-api", 2, 14), job("portal-image", 4, 60), job("portal", 105, 200)]
-    assert [n for n, _ in lt.critical_path(split, at(190))] == ["tests", "deploy portal (to serving)"]
-    slow_build = [job("gate", 0, 4), job("test", 2, 60), job("test-flask-api", 2, 14), job("portal-image", 4, 120), job("portal", 121, 200)]
-    assert [n for n, _ in lt.critical_path(slow_build, at(190))] == ["gate (bootstrapped?)", "build portal image", "deploy portal (to serving)"]
-    chained = [job("gate", 0, 4), job("test", 5, 100), job("portal", 101, 200)]                  # a job that waited for another
-    assert [n for n, _ in lt.critical_path(chained, at(190))] == ["gate (bootstrapped?)", "tests", "deploy portal (to serving)"]
-
-
-def test_the_critical_path_ignores_skipped_jobs_and_a_missing_deploy_job():
-    assert lt.critical_path([job("test", 0, 90)], None) == []
-    skipped = [job("mentat", 0, 0, "skipped"), job("test", 2, 90), job("portal", 91, 150)]
-    assert [n for n, _ in lt.critical_path(skipped, at(140))] == ["tests", "deploy portal (to serving)"]
-    seconds = dict(lt.critical_path(skipped, at(140)))
-    assert seconds["tests"] == 88 and seconds["deploy portal (to serving)"] == 49          # cut where the revision serves, not at the job's end
+    world = World(now=at(-600))
+    code, out, err = run_main(world, "--watch", "--since", "now", "--timeout", "120")
+    assert code == 2 and "no commit found" in err and world.now <= at(-470)
 
 
 # ── the agent's marks, through the bridge (optional) ─────────────────────────────────
 
 def bridge_world(events, listing=None):
-    world = World(now=at(300))
-    world.bridge = {"/workshop/runs": (200, {"runs": listing if listing is not None else [{"task": "t1", "age_s": 470.0}]}),     # created at -170 s
+    world = World(now=at(400))
+    world.bridge = {"/workshop/runs": (200, {"runs": listing if listing is not None else [{"task": "t1", "age_s": 570.0}]}),     # created at -170 s
                     "/workshop/run/t1?after=0": (200, {"events": events, "next": len(events), "done": True})}
     return world
 
@@ -446,11 +427,11 @@ def test_bridge_marks_split_prompt_to_push_when_the_events_carry_ts():
     world = bridge_world(events)
     code, out, _ = run_main(world, "--bridge", "--since", "2026-09-30T18:57:00Z", env={"SKIPPY_HOME_TOKEN": "t0ken"})
     labels = [l.split("  ")[0].strip() for l in out.splitlines()]
-    assert labels[labels.index("prompt -> bridge received"):labels.index("queue (runner pickup)")] == [
+    assert labels[labels.index("prompt -> bridge received"):labels.index("wait for CI (timer, 1 min)")] == [
         "prompt -> bridge received", "bridge received -> first edit", "first edit -> git push", "git push -> push"]
     assert "prompt -> push" not in labels
     first = [l for l in out.splitlines() if l.startswith("bridge received -> first edit")][0]
-    assert re.search(r"18:57:10\s+18:58:00\s+50s", first)      # created = the reply's time (19:05:00) minus the bridge's own age_s (470 s)
+    assert re.search(r"18:57:10\s+18:58:00\s+50s", first)      # created = the reply's time (19:06:40) minus the bridge's own age_s (570 s)
 
 
 def test_bridge_without_a_token_or_without_ts_says_so_and_keeps_the_single_row():
@@ -459,7 +440,6 @@ def test_bridge_without_a_token_or_without_ts_says_so_and_keeps_the_single_row()
     assert "bridge: n/a (SKIPPY_HOME_TOKEN isn't set" in out and re.search(r"^prompt -> push\s+18:57:00", out, re.M)
     code, out, _ = run_main(world, "--bridge", "--since", "2026-09-30T18:57:00Z", env={"SKIPPY_HOME_TOKEN": "t0ken"})
     assert "bridge: first edit / git push n/a (the bridge's events carry no ts yet)" in out
-    assert "bridge received -> " not in out or "prompt -> bridge received" in out
 
 
 def test_the_token_is_sent_to_the_bridge_and_never_printed():
@@ -473,7 +453,7 @@ def test_the_token_is_sent_to_the_bridge_and_never_printed():
 
 
 def test_bridge_marks_outside_the_prompt_to_push_window_are_dropped():
-    events = [{"t": "tool", "name": "Bash", "detail": "git push", "ts": stamp(at(60))}]          # after the run was created: not this loop's
+    events = [{"t": "tool", "name": "Bash", "detail": "git push", "ts": stamp(at(60))}]          # after the push: not this loop's
     world = bridge_world(events)
     code, out, _ = run_main(world, "--bridge", "--since", "2026-09-30T18:57:00Z", env={"SKIPPY_HOME_TOKEN": "t"})
     assert "ignored bridge marks outside the prompt..push window: git push" in out
@@ -481,12 +461,70 @@ def test_bridge_marks_outside_the_prompt_to_push_window_are_dropped():
 
 
 def test_an_unreachable_bridge_is_a_note_not_a_failure():
-    world = World(now=at(300))                                         # no bridge routes: 404
-    code, out, _ = run_main(world, "--bridge", env={"SKIPPY_HOME_TOKEN": "t"})
+    code, out, _ = run_main(World(now=at(400)), "--bridge", env={"SKIPPY_HOME_TOKEN": "t"})
     assert code == 0 and "bridge: n/a (http://localhost:9337/workshop/runs answered 404" in out
 
 
-# ── the real urllib path, against a real server ───────────────────────────────────────
+# ── the real pieces: the house repo, the ssh snippet, urllib ──────────────────────────
+
+def git(cwd, *args, env=None):
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True,
+                          env={**os.environ, **(env or {})}).stdout.strip()
+
+
+@pytest.fixture
+def house(tmp_path):
+    bare, work = tmp_path / "house.git", tmp_path / "work"
+    git(tmp_path, "init", "--quiet", "--bare", "-b", "main", str(bare))
+    git(tmp_path, "clone", "--quiet", str(bare), str(work))
+    for k, v in (("user.name", "T"), ("user.email", "t@example.com")):
+        git(work, "config", k, v)
+
+    def commit(text, when, push=True):
+        (work / "f.txt").write_text(text)
+        git(work, "add", "f.txt")
+        git(work, "commit", "--quiet", "-m", text, env={"GIT_COMMITTER_DATE": when, "GIT_AUTHOR_DATE": when})
+        if push:
+            git(work, "push", "--quiet", "origin", "main")
+        return git(work, "rev-parse", "HEAD")
+    return bare, commit
+
+
+def test_house_git_reads_the_push_from_the_reflog_and_falls_back_honestly(house):
+    bare, commit = house
+    first = commit("one", "2026-09-30T18:00:00Z")                      # pushed before the reflog was switched on
+    when, how = lt.HouseGit(str(bare)).pushed(first)
+    assert how.startswith("the ref file's time")                       # still main's tip: the ref file was written by that push
+    git(bare, "config", "core.logAllRefUpdates", "always")
+    a = commit("two", "2026-09-30T18:10:00Z", push=False)
+    b = commit("three", "2026-09-30T18:11:00Z")                        # a and b reach main in ONE push
+    h = lt.HouseGit(str(bare))
+    assert h.tip() == b and h.resolve(b[:7]) == b and h.subject(b) == "three"
+    (when_b, how_b), (when_a, how_a) = h.pushed(b), h.pushed(a)
+    assert how_b == how_a == "reflog" and when_a == when_b and abs((datetime.now(UTC) - when_b).total_seconds()) < 120
+    assert [s for s, _ in h.pushes()] == [b]
+    when, how = h.pushed(first)                                        # older than the reflog and no longer the tip: the commit date
+    assert when == datetime(2026, 9, 30, 18, 0, tzinfo=UTC) and how.startswith("the commit date")
+    assert lt.HouseGit(str(bare.parent / "missing.git")).tip() is None
+
+
+def test_the_ssh_snippet_reads_skippy_cores_records_and_drops_the_log_tails(tmp_path):
+    base = tmp_path / "core"
+    (base / "ci" / "skippy-tel" / "results").mkdir(parents=True)
+    (base / "deployer").mkdir()
+    (base / "cd").mkdir()
+    (base / "ci" / "skippy-tel" / "results" / f"{SHA}.json").write_text(json.dumps(
+        {"sha": SHA, "state": "success", "at": 1.0, "jobs": [{"name": "suite", "state": "success", "tail": "x" * 4000}]}))
+    (base / "ci" / "skippy-tel" / "results" / f"{SHA}.suite.log").write_text("not json")
+    (base / "deployer" / "status.json").write_text(json.dumps({"state": "ok"}))
+    (base / "cd" / "state.json").write_text(json.dumps({"runs": [{"id": 1, "head_sha": SHA}], "deployed": {}}))
+    snippet = lt.REMOTE.replace('"/var/lib/skippy-core"', repr(base.as_posix()))
+    assert snippet != lt.REMOTE
+    done = subprocess.run([sys.executable, "-I", "-"], input=snippet, capture_output=True, text=True, check=True)
+    snap = json.loads(done.stdout)
+    assert snap["ci"] == [{"sha": SHA, "state": "success", "at": 1.0, "jobs": [{"name": "suite", "state": "success"}]}]
+    assert snap["deployer"] == {"state": "ok"} and snap["cd_runs"] == [{"id": 1, "head_sha": SHA}]
+
 
 class Handler(http.server.BaseHTTPRequestHandler):
     routes: dict = {}
@@ -529,11 +567,11 @@ def test_end_to_end_against_a_real_http_server(server):
     world = World(now=at(-3))
     routes["/version"] = lambda: (200, json.dumps(world.http(f"{PORTAL}/version")[1]).encode())       # flips when the FAKE clock says so
     src = world.sources()
-    src.http = lt.http_json                                           # the real urllib client, over a real socket; the fake GitHub and clock
+    src.http = lt.http_json                                           # the real urllib client, over a real socket; the fake core and clock
     out, err = io.StringIO(), io.StringIO()
     code = lt.main(["--portal", url, "--utc", "--watch", "--since", "now", "--timeout", "600"], src, out, err)
     assert code == 0, out.getvalue() + err.getvalue()
-    assert re.search(r"visible on the portal\s+19:03:10\s+19:03:11\s+1s", out.getvalue())
+    assert re.search(r"visible on the portal\s+19:04:22\s+19:04:23\s+1s", out.getvalue())
 
 
 # ── wiring ──────────────────────────────────────────────────────────────────────────
@@ -550,6 +588,11 @@ def test_the_make_targets_call_real_scripts_with_flags_they_accept():
     source = (ROOT / "tools" / "loop_timer.py").read_text(encoding="utf-8")
     for flag in flags:
         assert f'"{flag}"' in source, f"{flag} is in the Makefile but not an option of loop_timer.py"
+
+
+def test_github_is_out_of_the_loop():
+    source = (ROOT / "tools" / "loop_timer.py").read_text(encoding="utf-8")
+    assert '"gh"' not in source and "gh run" not in source and "GH_REPO" not in source
 
 
 def test_nothing_secret_is_in_the_script():

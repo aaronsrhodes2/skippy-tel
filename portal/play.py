@@ -39,4 +39,9 @@ GAMES = (
                 "years of Sol, make the yearly calls at the moot, and learn how to stop The Others. Work in progress; "
                 "this card plays the newest build.",
                 "♾️", "https://github.com/aaronsrhodes2/doom-loop", glyph="loop"),
+    BrowserGame("shifting-prophesy", "Shifting Prophesy",
+                "Purple Skippy's shake-down cruise: the home AI builds a whole top-down adventure with a procedurally generated "
+                "world, one prompt at a time, with Claude Haiku on the same prompts as the reference. Play both builds and see "
+                "every turn scored.",
+                "🔮", "https://github.com/aaronsrhodes2/shifting-prophesy-referee", endpoint="prophesy.board", glyph="rune"),
 )

@@ -40,8 +40,37 @@ def test_a_message_becomes_a_long_lived_home_job_and_its_id_is_the_task_id(shop)
     task = ws.send(ADMIN, CONV, "  make the tile green  ")
     [job] = home.jobs_reply()["jobs"]
     assert job == {"id": task, "kind": "workshop", "conv": CONV, "message": "make the tile green", "who": ADMIN,
-                   "project": "skippytel", "brain": "claude"}
+                   "project": "skippytel", "brain": "core"}
     assert home._jobs[task]["ttl"] == workshop_mod.JOB_TTL > home_mod.JOB_TTL
+
+
+def test_sending_the_same_message_id_again_returns_the_same_task_and_never_queues_twice(shop):
+    ws, home, clock = shop
+    first, again1 = ws.send_once(ADMIN, CONV, "make the tile green", client_id="a1b2c3d4e5f6")
+    second, again2 = ws.send_once(ADMIN, CONV, "make the tile green", client_id="a1b2c3d4e5f6")      # a double tap, or a retry after a lost reply
+    assert (again1, again2) == (False, True) and second == first
+    assert [j["id"] for j in home.jobs_reply()["jobs"]] == [first]                                   # one job, not two
+    other, again3 = ws.send_once(ADMIN, CONV, "make the tile green", client_id="ffffffff0000")       # the same words with a new id are a new message
+    assert again3 is False and other != first
+    third, _ = ws.send_once("pal@example.com", CONV, "hi", client_id="a1b2c3d4e5f6")                  # ids are per person
+    assert third not in (first, other)
+    clock.now += workshop_mod.CLIENT_ID_KEEP_S + 1
+    home.accept({"capabilities": {"workshop": {"ready": True, "model": "claude-sonnet-5-5"}}})          # (home is still reporting)
+    later, again4 = ws.send_once(ADMIN, CONV, "make the tile green", client_id="a1b2c3d4e5f6")        # long after: a new message
+    assert again4 is False and later != first
+    with pytest.raises(ValueError):
+        ws.send_once(ADMIN, CONV, "hi", client_id="no spaces or ../ allowed")
+
+
+def test_a_message_waiting_behind_other_chats_says_how_many_are_ahead(shop):
+    ws, home, clock = shop
+    running = ws.send(ADMIN, "aaaaaaaa-1", "first chat")
+    second = ws.send(ADMIN, "bbbbbbbb-2", "second chat")
+    third = ws.send(ADMIN, "cccccccc-3", "third chat")
+    assert ws.read(ADMIN, running)["state"] == "queued" and "ahead" not in ws.read(ADMIN, running)
+    r2, r3 = ws.read(ADMIN, second), ws.read(ADMIN, third)
+    assert (r2["state"], r2["ahead"]) == ("waiting", 1)
+    assert (r3["state"], r3["ahead"]) == ("waiting", 2)                                               # the running one and the one before it
 
 
 def test_it_refuses_bad_input_and_a_workshop_that_isnt_reporting(shop):
@@ -536,4 +565,4 @@ def test_only_a_brain_skippy_pc_offers_and_can_reach_is_accepted():
     w.home = SimpleNamespace(workshop_brains=lambda: offered)
     assert [b["id"] for b in w.brains()] == ["claude", "core"]
     w.home = SimpleNamespace(workshop_brains=lambda: [])
-    assert w.brains() == [{"id": "claude", "label": "Claude Sonnet", "ready": True}]     # an older home: Claude only
+    assert w.brains() == [{"id": "core", "label": "Skippy Core", "ready": True}]     # an older home: purple only (no brain named = purple)

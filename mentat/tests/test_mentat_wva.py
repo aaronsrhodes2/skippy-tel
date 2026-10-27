@@ -135,7 +135,10 @@ def _preset(catalog, kind, key):
 
 
 def test_mentat_still_serves_its_tools_at_this_sigma_ground(client):
-    assert client.get("/health").data == b"ok"
+    h = client.get("/health")
+    body = h.get_json()
+    assert h.status_code == 200 and body["ready"] is True and body["accepting"] is True and body["service"] == "mentat"   # ready, not just a 200
+    assert body["jobs"]["running"] == 0 and body["tools"] > 100 and body["detail"] == ""
     assert len(client.get("/tools").get_json()) > 100
     r = client.post("/tools/convert_units", json={"value": 1, "from_units": "mile", "to_units": "km"}).get_json()
     assert r["ok"] and abs(r["result"]["value"] - 1.609344) < 1e-9
@@ -250,3 +253,40 @@ def test_mentats_rate_limit_and_timeout_cover_the_game(mentat, client, monkeypat
     monkeypatch.setattr(mentat.GAME, "_solve", lambda *a: time.sleep(0.5) or real(*a))
     monkeypatch.setattr(mentat, "CALL_TIMEOUT_S", 0.05)
     assert client.post("/wva/solve", json=fight).status_code == 504
+
+
+def test_health_is_not_ready_when_the_physics_tools_answer_wrongly_or_a_dependency_is_missing(client, mentat, monkeypatch):
+    mentat_app = mentat
+    mentat_app._checks.clear()
+    monkeypatch.setattr(mentat_app, "_call", lambda name, args: {"value": 1.0})              # a known question answered wrongly
+    bad = client.get("/health")
+    assert bad.status_code == 503 and bad.get_json()["ready"] is False and "wrongly" in bad.get_json()["detail"]
+    mentat_app._checks.clear()
+    monkeypatch.undo()
+    monkeypatch.setattr(mentat_app, "USE_LLM", True)
+    monkeypatch.setattr(mentat_app, "_qwen_ready", lambda: False)                           # skippy-core's chat model is not offered
+    no_llm = client.get("/health")
+    assert no_llm.status_code == 503 and no_llm.get_json()["deps"]["llm"]["ready"] is False and "waiting on llm" in no_llm.get_json()["detail"]
+    mentat_app._checks.clear()
+
+
+def test_a_fresh_instance_checks_at_once_even_when_its_clock_starts_near_zero(client, mentat, monkeypatch):
+    mentat._checks.clear()
+    monkeypatch.setattr(mentat.time, "monotonic", lambda: 3.0)                              # a new Cloud Run sandbox, 3 s old
+    r = client.get("/health")
+    assert r.status_code == 200 and r.get_json()["ready"] is True
+    mentat._checks.clear()
+
+
+def test_a_question_in_flight_shows_as_a_running_job(client, mentat, monkeypatch):
+    mentat_app = mentat
+    seen = {}
+    real = mentat_app._ask
+
+    def slow(question, given):
+        seen["report"] = mentat_app.READY.report()
+        return real(question, given)
+    monkeypatch.setattr(mentat_app, "_ask", slow)
+    client.post("/ask", json={"question": "Schwarzschild radius of a 1 kg mass?"})
+    assert seen["report"]["jobs"]["running"] == 1 and seen["report"]["jobs"]["oldest_s"] is not None
+    assert mentat_app.READY.report()["jobs"]["running"] == 0                                # and gone when it finished

@@ -18,18 +18,54 @@ from __future__ import annotations
 import json
 import os
 import time
+import urllib.error
 import urllib.request
 
 TIMEOUT_S = 5.0
+HUNG_S = 120          # a job running with no progress this long: hung (PLATINUM section 24)
 
 
 def _get(url: str, timeout: float = TIMEOUT_S, data: dict | None = None):
     body = json.dumps(data).encode() if data is not None else None
     req = urllib.request.Request(url, data=body, method="POST" if body else "GET",
                                  headers={"Content-Type": "application/json"} if body else {})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        raw = r.read(200_000)
-        return r.status, (json.loads(raw) if raw[:1] in (b"{", b"[") else None)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read(200_000)
+            return r.status, (json.loads(raw) if raw[:1] in (b"{", b"[") else None)
+    except urllib.error.HTTPError as e:               # a 503 that says WHY (the readiness contract) is an answer, not "no answer"
+        raw = e.read(200_000) if hasattr(e, "read") else b""
+        try:
+            return e.code, (json.loads(raw) if raw[:1] in (b"{", b"[") else None)
+        except ValueError:
+            return e.code, None
+
+
+def contract(body) -> dict | None:
+    """The readiness contract (core/ready.py), if this answer is one: {state, jobs, stuck_s, detail}. state is ready, busy, hung or not-ready.
+    A bare "ok" or a 200 is NOT this: the portal shows such a service as answering but unverified (PLATINUM section 24)."""
+    if not (isinstance(body, dict) and "ready" in body and "accepting" in body and isinstance(body.get("jobs"), dict)):
+        return None
+    jobs, stuck = int(body["jobs"].get("running") or 0), int(body.get("stuck_s") or 0)
+    if body["ready"] is not True:
+        state = "not-ready"
+    elif jobs and stuck >= HUNG_S:
+        state = "hung"
+    else:
+        state = "busy" if jobs else "ready"
+    return {"state": state, "jobs": jobs, "stuck_s": stuck, "detail": str(body.get("detail") or "")[:160]}
+
+
+def ready_verdict(body, legacy=None):
+    """The doctor's verdict for a service that serves the contract: true only when it says it is ready and is not hung; else why, in its own words."""
+    c = contract(body)
+    if c is None:
+        return legacy(body) if legacy else True
+    if c["state"] == "not-ready":
+        return c["detail"] or "it says it isn't ready"
+    if c["state"] == "hung":
+        return f"hung: {c['jobs']} job{'s' if c['jobs'] != 1 else ''} running, no progress for {c['stuck_s']} s"
+    return True
 
 
 def _env(name: str, default: str = "") -> str:
@@ -48,10 +84,10 @@ def checks() -> dict:
     optional = {
         "music-studio": ("MUSIC_URL", "/health", lambda b: True),
         "image-studio": ("IMAGE_URL", "/health", lambda b: isinstance(b, dict) and b.get("ready") is True or "it isn't ready"),
-        "mentat-home": ("MENTAT_URL", "/health", lambda b: True),
-        "music-gate": ("MUSIC_GATE_URL", "/health", lambda b: True),
-        "video-gate": ("VIDEO_GATE_URL", "/health", lambda b: True),
-        "voice-gate": ("VOICE_GATE_URL", "/health", lambda b: isinstance(b, dict) and b.get("ready") is True or "Whisper isn't answering behind it"),
+        "mentat-home": ("MENTAT_URL", "/health", lambda b: ready_verdict(b)),
+        "music-gate": ("MUSIC_GATE_URL", "/health", lambda b: ready_verdict(b)),
+        "video-gate": ("VIDEO_GATE_URL", "/health", lambda b: ready_verdict(b)),
+        "voice-gate": ("VOICE_GATE_URL", "/health", lambda b: ready_verdict(b, lambda b: isinstance(b, dict) and b.get("ready") is True or "Whisper isn't answering behind it")),
         "bridge": ("CLAUDE_BRIDGE_URL", "/health",
                    lambda b: isinstance(b, dict) and b.get("status") == "ok" or "its /health isn't ok"),
     }
@@ -65,13 +101,20 @@ def checks() -> dict:
 def run_one(name: str, url: str, ok, get=_get, clock=time.monotonic) -> dict:
     """{"ok", "ms", "why"} for one test. Never raises: a timeout, a refusal or a wrong answer is a failed test with its reason."""
     t0 = clock()
+    c = None
+    reached = False                                     # any answer at all, even a 503 that says why: the first of the Status page's two dots
     try:
         status, body = get(url)
-        verdict = ok(body) if status == 200 else f"HTTP {status}"
+        reached = True
+        c = contract(body)
+        verdict = ok(body) if status == 200 else ((c or {}).get("detail") or f"HTTP {status}")
     except Exception as exc:  # noqa: BLE001 — every way of not answering is a failed test
         verdict = "no answer in time" if "timed out" in str(exc).lower() else f"no answer ({type(exc).__name__})"
     ms = int((clock() - t0) * 1000)
-    return {"ok": verdict is True, "ms": ms, "why": "" if verdict is True else str(verdict)[:120]}
+    out = {"ok": verdict is True, "ms": ms, "why": "" if verdict is True else str(verdict)[:120], "reachable": reached}
+    if c:                                               # what the service said about itself: ready, busy (jobs running) or hung
+        out.update(state=c["state"], jobs=c["jobs"], stuck_s=c["stuck_s"])
+    return out
 
 
 def deep(get=_get) -> dict:

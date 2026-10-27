@@ -144,7 +144,7 @@ canvas.alive { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0;
 .chat-bridge { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
 .chat-bridge .stage { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
 /* the transcript SCROLLS (the Captain's rule, 2026-10-23: long text is the one place a scrollbar belongs) */
-.chat-bridge .log { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 10px;
+.chat-bridge .log { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; padding-bottom: 10px;
                     background: rgba(0, 0, 0, .66); scrollbar-width: thin; scrollbar-color: var(--dim-green-hi) transparent; }
 .chat-bridge .log[hidden] { display: none; }
 .chat-bridge .jump { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 6; background: #000; border-color: var(--accent); color: var(--accent); }

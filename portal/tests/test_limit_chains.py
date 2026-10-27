@@ -2,12 +2,12 @@
 be refused, cut short or timed out by the next). Each test reads the real numbers from every hop of one chain and fails when they
 stop nesting: a downstream hop takes at least what the upstream one can send (after base64), and an outer wait outlasts the work
 inside it. Change one hop and this tells you which others must move with it."""
+import json
 import re
 from pathlib import Path
 
 import attachments
 import chat_history
-import home as home_mod
 import media
 import mentat_client
 import patient
@@ -70,12 +70,9 @@ def test_a_finished_picture_or_song_is_taken_wherever_it_is_kept():
 
 
 def test_the_waits_for_mentat_nest_outside_its_work():
-    call = int(re.search(r'MENTAT_CALL_TIMEOUT: "(\d+)"', text("docker-compose.override.yml")).group(1))
-    reporter = int(re.search(r'fetch\(f"\{MENTAT\}/ask", "POST", body, timeout=(\d+)', text("services/home-reporter/reporter.py")).group(1))
-    pickup = const("services/home-reporter/reporter.py", "FAST_INTERVAL") + 5        # the reporter polls fast while someone chats
-    assert call < reporter and call + pickup < home_mod.Home.MENTAT_WAIT_S
-    cloud_call = int(re.search(r'"MENTAT_CALL_TIMEOUT", "(\d+)"', text("mentat/app.py")).group(1))   # the cloud copy's default
-    assert mentat_client.TIMEOUT >= cloud_call + 15                                    # its call + a Cloud Run cold start
+    call = int(re.search(r'MENTAT_CALL_TIMEOUT=(\d+)', text("core/compose.core.yml")).group(1))     # the one Mentat, on skippy-core
+    assert call + 5 <= mentat_client.TIMEOUT < mentat_client.ASK_TIMEOUT                # a tool call, then a question (Qwen reads it first)
+    assert "/ask" not in text("services/home-reporter/reporter.py")                    # no second road to Mentat through skippy-pc
 
 
 def test_the_captains_long_chats_keep_saving():
@@ -84,7 +81,8 @@ def test_the_captains_long_chats_keep_saving():
 
 def test_the_portal_has_a_thread_for_every_request_cloud_run_sends_it():
     threads = int(re.search(r"--threads (\d+)", text("portal/Dockerfile")).group(1))
-    concurrency = int(re.search(r"--concurrency (\d+) \\\n\s+--memory 1Gi", text(".github/workflows/deploy.yml")).group(1))
+    flags = json.loads(text("core/cd/deploy.json"))["portal"]["flags"]
+    concurrency = int(flags[flags.index("--concurrency") + 1])
     assert threads == concurrency >= 32
 
 

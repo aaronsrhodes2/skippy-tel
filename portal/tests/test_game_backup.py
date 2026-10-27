@@ -379,5 +379,6 @@ def test_the_new_ops_commands_are_exposed_everywhere():
     assert {"backups", "restore-game"} <= set(agent.COMMANDS)
     remote = (INFRA.parents[1] / "scripts" / "remote.py").read_text(encoding="utf-8")
     assert '"backups", "restore-game")' in remote
-    ops_yml = (INFRA.parents[1] / ".github" / "workflows" / "ops.yml").read_text(encoding="utf-8")
-    assert "backups, restore-game" in ops_yml
+    for where in (("core", "cd", "cd.py"), ("CLAUDE.md",)):                    # skippy-core's `cd.py ops` and the docs name them (ops.yml is gone)
+        text = INFRA.parents[1].joinpath(*where).read_text(encoding="utf-8")
+        assert "backups" in text and "restore-game" in text, where

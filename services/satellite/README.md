@@ -10,8 +10,8 @@ the voice gate). First home: skippy-pc (`ear.py`); every other room through the 
     ./run.sh --text "set a timer for ten seconds"                              # the brain and the voice, no microphone
     ./run.sh                  # listen
 
-Settings (the vault `.env`, or the environment): `SKIPPY_HOME_TOKEN`, `ANTHROPIC_API_KEY` (required); `SATELLITE_MIC`, `SATELLITE_SPEAKER`, `SATELLITE_GAIN`,
-`SATELLITE_FLOOR`, `SATELLITE_GATE` (default the voice gate on :3007), `SATELLITE_MODEL` (default claude-haiku-4-5); `SATELLITE_WAKE_MODEL` (default
+Settings (the vault `.env`, or the environment): `SKIPPY_HOME_TOKEN`, `SKIPPY_CORE_URL`, `SKIPPY_CORE_API_KEY` (required: the brain is Skippy Core, local, never a paid model); `SATELLITE_MIC`, `SATELLITE_SPEAKER`, `SATELLITE_GAIN`,
+`SATELLITE_FLOOR`, `SATELLITE_GATE` (default the voice gate on :3007), `SATELLITE_MODEL` (default skippy-chat, Core's resident chat model); `SATELLITE_WAKE_MODEL` (default
 `state/wakeword/skippy.onnx`), `SATELLITE_WAKE_THRESHOLD` (default 0.5; `wakectl.py test` picks it); `SATELLITE_ROOMS` (the hub); `MATTER_URL` (skippy-core's Matter controller); `HOMEKIT_KEEP_WARM`
 (seconds between keep-warm pings, default 30; 0 turns it off).
 
@@ -70,6 +70,11 @@ its radio stays awake. The proof, on the real plug (it switches it, then leaves 
                                                                                          # Linked Matter apps & services > Link apps
     ./.venv/Scripts/python homectl.py list                                              # HomeKit and Matter together
     ./.venv/Scripts/python homectl.py identify "kitchen light"                           # make it flash: which one on the wall is it
+
+**Every Leviton on his account, with nothing paired** (2026-10-25, `leviton.py`): with `LEVITON_EMAIL` and `LEVITON_PASSWORD` in the vault,
+the hub reaches every Decora Smart Wi-Fi switch through the My Leviton cloud, the same account Google Home and Alexa use (`decora_wifi`,
+Home Assistant's library): dimmers become lights, the rest switches, names straight from the app. It goes through Leviton's servers
+(about 0.4 s a command, read back), so it is the last backend: a switch also paired locally (HomeKit, Matter) is driven locally.
 
 **Switches already on the Wi-Fi, many at once** (the Leviton D2MSD / D215S, nothing unscrewed): in the My Leviton app update each
 to its Matter firmware (that drops its HomeKit link: a switch is paired one way, HomeKit or Matter, never both), then copy each

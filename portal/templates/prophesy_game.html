@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}{{ arm.label }} — Shifting Prophesy{% endblock %}
+{% block app %}play{% endblock %}
+{% block public_up %}{{ url_for('prophesy.board') }}{% endblock %}
+{% block public_up_label %}Shifting Prophesy{% endblock %}
+{% block mainclass %}wide{% endblock %}
+{% block head %}
+<style>
+  /* One arm's newest build, framed under the app bar (as Orion Trail is) so the game's own page is never edited. The query
+     string (?seed=..., SPEC.md 1.3) goes through to it. */
+  .sp-game { display: block; width: 100%; height: calc(100vh - 170px); height: calc(100dvh - 170px); min-height: 520px; border: 1px solid var(--line);
+             border-radius: 8px; background: #000; }
+  @media (max-width: 700px) { .sp-game { min-height: 0; height: calc(100vh - 138px); height: calc(100dvh - 138px); border-radius: 0; border-left: 0; border-right: 0; } }
+  .sp-line { margin: 0 0 6px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .sp-line .tag { color: var(--amber); font-size: 12px; border: 1px solid var(--amber); border-radius: 999px; padding: 1px 8px; }
+</style>
+{% endblock %}
+{% block content %}
+<section>
+  <p class="sp-line"><b>{{ arm.label }}</b><span class="help">{{ arm.detail }}</span><span class="tag" id="sp-badge">{{ commit or "build" }}</span>
+    <a href="{{ url_for('prophesy.board') }}">The experiment</a></p>
+  <iframe class="sp-game" id="game" src="{{ src }}" title="{{ arm.label }}'s build of Shifting Prophesy" allow="fullscreen"></iframe>
+</section>
+<script>
+  // Keys go to the game straight away, without a first click.
+  (function (f) { f.addEventListener("load", () => { try { f.contentWindow.focus(); } catch (e) {} }); })(document.getElementById("game"));
+</script>
+{% endblock %}

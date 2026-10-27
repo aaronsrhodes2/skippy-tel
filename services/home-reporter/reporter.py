@@ -23,12 +23,12 @@ import urllib.request
 from pathlib import Path
 
 import doctor_checks
+import local_api
 import localinfo
 
 PORTAL = os.environ.get("PORTAL_URL", "https://skippy-portal-1015050363686.us-west1.run.app").rstrip("/")
 API = os.environ.get("SKIPPY_API", "http://flask-api:5000").rstrip("/")
 MAC = os.environ.get("BILBY_MAC_URL", "").rstrip("/")         # Mac DJ assistant, if enabled
-MENTAT = os.environ.get("MENTAT_URL", "").rstrip("/")         # Mentat + Qwen on skippy-pc
 INTERVAL = float(os.environ.get("REPORT_INTERVAL", "15"))
 FAST_INTERVAL = 1.5          # job polling while someone is chatting on the portal
 GATHER_BUDGET_S = float(os.environ.get("GATHER_BUDGET", "9"))   # the most one report waits for its probes (they run side by side)
@@ -46,6 +46,7 @@ OLLAMA = os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/")
 POPUPS_DIR = os.environ.get("POPUPS_DIR", "/srv/services")      # the repo's services/ (read-only mount): the pop-up registry (docs/popups.md)
 POPUP_TYPES = {"image/png", "image/jpeg", "image/webp", "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/ogg", "audio/flac",
                "model/gltf-binary", "video/mp4", "application/json", "text/plain", "audio/midi", "application/zip"}   # what the portal keeps (portal/popups.py OUTPUT_TYPES)
+LOCAL_API_PORT = int(os.environ.get("LOCAL_API_PORT", "47450") or 0)     # 0 turns the door off (tests)
 POPUP_MAX_TIMEOUT = 7200     # the longest a pop-up may take (portal/popups.py MAX_TIMEOUT_S)
 GPU = threading.Lock()       # one heavy GPU job at a time: a song and a chat model can't share the card
 MUSIC_TIMEOUT = 600          # seconds a song may take
@@ -58,6 +59,8 @@ VIDEO_GATE = os.environ.get("VIDEO_GATE_URL", "").rstrip("/")         # video-ga
 VIDEO_GATE_PUBLIC = os.environ.get("VIDEO_GATE_PUBLIC", "").rstrip("/")   # ... and its Funnel address (outside, :8443)
 VOICE_GATE = os.environ.get("VOICE_GATE_URL", "").rstrip("/")         # voice-gate: Skippy's ears (Whisper) and mouth (inside)
 VOICE_GATE_PUBLIC = os.environ.get("VOICE_GATE_PUBLIC", "").rstrip("/")   # ... and its Funnel address (outside, :10000)
+CAR = os.environ.get("CAR_URL", "").rstrip("/")               # the Captain's Tesla: skippy-core's car reader (core/car), tailnet only
+CAR_MAX = 3                  # cars carried in one report
 BRIDGE = os.environ.get("CLAUDE_BRIDGE_URL", "").rstrip("/")   # Claude Code's bridge on the host: the private Skippy
 LOCAL = localinfo.LocalInfo(os.environ)                           # weather and the commute for the /me dashboard (LOCAL_INFO=off in tests: no network)
 WORKSHOP_WAIT = 5            # seconds the bridge holds a request open waiting for news from the run
@@ -202,7 +205,6 @@ def gather() -> dict:
     probes.start("services", lambda: fetch(f"{API}/services"))
     probes.start("session", lambda: fetch(f"{API}/music/session"))
     probes.start("bilby", bilby_state)
-    probes.start("mentat_home", lambda: bool(MENTAT) and _up(f"{MENTAT}/health"))
     # What people did on the portal lately (flask-api's site_events table); the Activity widget on /me shows it.
     probes.start("site_activity", lambda: fetch(f"{API}/telemetry/site_summary"))
     probes.start("local", LOCAL.snapshot)                       # weather and the commute (localinfo.py), cached inside: cheap to ask every report
@@ -224,14 +226,13 @@ def gather() -> dict:
     return {
         "status": got.get("status"),
         "health": got.get("health"),
-        "services": [{k: s.get(k) for k in ("id", "name", "available", "status_detail")}
+        "services": [{k: s.get(k) for k in ("id", "name", "available", "status_detail", "planned")}
                      for s in services.get("services", []) if isinstance(s, dict)],
         "music_session": {k: session.get(k) for k in
                           ("mode", "status", "now_playing", "queue_remaining", "source")} if session else None,
         "bilby": bilby,
         "setlist": (setlist or [])[-20:],
         "up_next": up_next.get("track") if up_next.get("ok") else None,
-        "mentat_home": bool(got.get("mentat_home")),
         "capabilities": {name: got.get(f"cap_{name}") or _capability_down(name) for name in _capability_probes()},
         "site_activity": got.get("site_activity"),
         "local": got.get("local"),
@@ -309,6 +310,11 @@ def workshop_capability() -> dict:
               if isinstance(b, dict) and b.get("id") in ("claude", "core")]
     if brains:
         out["brains"] = brains                                        # the chat's brain key: Claude, or Skippy Core's coder
+        if any(b["ready"] for b in brains):
+            # The bridge's own `ready` follows Claude's login, but the chat has one brain per conversation (the portal greys out an
+            # offline one and starts on a ready one): a lapsed Claude login must not hide the Skippy whose default brain is the local
+            # Core coder (2026-10-25: the whole chat read "offline" for an evening because `claude auth login` had lapsed).
+            out["ready"] = True
     reason = info.get("reason")
     if not out["ready"]:
         if isinstance(reason, str) and reason.strip():
@@ -361,7 +367,48 @@ def _capability_probes() -> dict:
             "workshop": workshop_capability,
             "music_gate": lambda: {"ready": bool(GATE and GATE_PUBLIC) and _up(f"{GATE}/health"), "url": GATE_PUBLIC},
             "video_gate": video_gate_capability,
-            "voice_gate": voice_gate_capability}
+            "voice_gate": voice_gate_capability,
+            "house": house_capability,
+            "car": car_capability}
+
+
+# The house (lights and switches) for the Captain's portal chat: services/satellite's own code (mounted read-only at /srv/services), built
+# once here from this container's env (the vault: LEVITON_EMAIL/LEVITON_PASSWORD reach every Leviton through its cloud; HomeKit needs
+# the LAN's mDNS and stays with the hub and house_mcp.py on the host). Built lazily, and again after a failure.
+SATELLITE = os.environ.get("SATELLITE_DIR", "/srv/services/satellite")
+_house: list = []
+
+
+def house():
+    if not _house:
+        if SATELLITE not in sys.path:
+            sys.path.insert(0, SATELLITE)
+        try:
+            from homectl import build_house                       # noqa: PLC0415
+            built = build_house(dict(os.environ))
+        except Exception as e:                                    # noqa: BLE001 — a missing library or module: no house, say why
+            print(f"home-reporter: house not built ({type(e).__name__}: {e})", flush=True)
+            return None
+        if built is None:
+            return None
+        _house.append(built)
+    return _house[0]
+
+
+def house_capability() -> dict:
+    h = house()
+    return {"ready": h is not None}
+
+
+def house_job(job: dict) -> dict:
+    """One of the house's three tools (home_devices, home_state, home_control). confirm never comes from a chat: a lock waits for his voice."""
+    h = house()
+    if h is None:
+        return {"error": "the house isn't set up on skippy-pc"}
+    from house import run_tool                                    # noqa: PLC0415
+    args = dict(job.get("args") or {}) if isinstance(job.get("args"), dict) else {}
+    args.pop("confirm", None)
+    return {"result": {"text": run_tool(h, str(job.get("tool") or ""), args)}}
 
 
 def image_capability(url: str | None = None, box: str = "pc") -> dict:
@@ -390,6 +437,18 @@ def voice_gate_capability() -> dict:
     """Ready when Whisper answers behind the gate (the microphone); `speak` says whether Skippy's voice (flask-api's ElevenLabs) is up too."""
     health = fetch(f"{VOICE_GATE}/health") if VOICE_GATE and VOICE_GATE_PUBLIC else None
     return {"ready": isinstance(health, dict) and health.get("ready") is True, "url": VOICE_GATE_PUBLIC}
+
+
+def car_capability() -> dict:
+    """The Captain's car, as TeslaMate last published it (skippy-core's car reader keeps it; asking never wakes the car). Ready once
+    a car is signed in; `cars` carries the state itself, so the portal's Car app and Skippy's car_status read it from the report.
+    `mqtt` true with no car = TeslaMate runs but nobody signed in to Tesla yet (`sign_in` says where)."""
+    body = fetch(f"{CAR}/car") if CAR else None
+    if not isinstance(body, dict):
+        return {"ready": False}
+    cars = [c for c in body.get("cars") or [] if isinstance(c, dict)][:CAR_MAX]
+    return {"ready": bool(body.get("mqtt")) and bool(cars), "mqtt": bool(body.get("mqtt")), "cars": cars,
+            "sign_in": str(body.get("sign_in") or "")[:200]}
 
 
 def _capability_down(name: str) -> dict:
@@ -524,29 +583,17 @@ def make_image(job: dict, token: str, hq: bool = False) -> dict:
     return {"result": {"title": title, "bytes": len(png)}}
 
 
-def popup_job(job: dict, token: str) -> dict:
-    """A registered pop-up (docs/popups.md): POST {"args", "input"?} to its service, which answers with the result's bytes under its
-    type, then hand that to the portal like a picture (PUT /home/media/<job>). On skippy-pc a pop-up that uses the card (vram_gb > 0)
-    holds the GPU lock and has Ollama unloaded first, as a picture does; on skippy-core it needs neither."""
-    entry = popups().get(str(job.get("name") or ""))
-    if not entry:
-        return {"error": f"there is no pop-up called {job.get('name')!r} on skippy-pc"}
+def call_popup(entry: dict, body: dict, timeout: float | None = None):
+    """Run one pop-up and get its bytes: (data, content type), or {"error"}. On skippy-pc one that uses the card (vram_gb > 0) holds the GPU
+    lock and has the models unloaded first, so a song, a picture and a pop-up never share it. The portal job and the loopback door both use this."""
     url = popup_url(entry)
     if not url:
-        return {"error": f"{entry['name']} isn't set up on skippy-pc ({entry['url_env']})"}
-    try:
-        args = json.loads(job.get("args") or "{}")
-    except ValueError:
-        args = None
-    if not isinstance(args, dict):
-        return {"error": "the pop-up's arguments didn't arrive whole"}
-    body = {"args": args}
-    if job.get("input_b64"):
-        body["input"] = {"type": str(job.get("input_type") or ""), "name": str(job.get("input_name") or "file"), "b64": job["input_b64"]}
-    try:
-        timeout = max(60, min(POPUP_MAX_TIMEOUT, int(entry.get("est_seconds") or 60) * 4))
-    except (TypeError, ValueError):
-        timeout = 600
+        return {"error": f"{entry['name']} isn't set up on skippy-pc ({entry.get('url_env')})"}
+    if timeout is None:
+        try:
+            timeout = max(60, min(POPUP_MAX_TIMEOUT, int(entry.get("est_seconds") or 60) * 4))
+        except (TypeError, ValueError):
+            timeout = 600
     heavy = entry["box"] == "pc" and float(entry.get("vram_gb") or 0) > 0
     with GPU if heavy else contextlib.nullcontext():
         if heavy:
@@ -570,6 +617,36 @@ def popup_job(job: dict, token: str) -> dict:
         return {"error": f"{entry['name']} answered with {ctype}, which isn't one of its outputs"}
     if not data or len(data) > CLIP_MAX:
         return {"error": f"{entry['name']}'s result was empty or too big to send"}
+    return data, ctype
+
+
+def popup_job(job: dict, token: str) -> dict:
+    """A registered pop-up (docs/popups.md): POST {"args", "input"?} to its service, which answers with the result's bytes under its
+    type, then hand that to the portal like a picture (PUT /home/media/<job>). On skippy-pc a pop-up that uses the card (vram_gb > 0)
+    holds the GPU lock and has Ollama unloaded first, as a picture does; on skippy-core it needs neither."""
+    entry = popups().get(str(job.get("name") or ""))
+    if not entry:
+        return {"error": f"there is no pop-up called {job.get('name')!r} on skippy-pc"}
+    url = popup_url(entry)
+    if not url:
+        return {"error": f"{entry['name']} isn't set up on skippy-pc ({entry['url_env']})"}
+    try:
+        args = json.loads(job.get("args") or "{}")
+    except ValueError:
+        args = None
+    if not isinstance(args, dict):
+        return {"error": "the pop-up's arguments didn't arrive whole"}
+    body = {"args": args}
+    if job.get("input_b64"):
+        body["input"] = {"type": str(job.get("input_type") or ""), "name": str(job.get("input_name") or "file"), "b64": job["input_b64"]}
+    try:
+        timeout = max(60, min(POPUP_MAX_TIMEOUT, int(entry.get("est_seconds") or 60) * 4))
+    except (TypeError, ValueError):
+        timeout = 600
+    got = call_popup(entry, body, timeout)
+    if isinstance(got, dict):
+        return got
+    data, ctype = got
     title = (str(args.get("prompt") or args.get("text") or "") or entry["name"])[:60]
     up = urllib.request.Request(f"{PORTAL}/home/media/{job.get('id')}?title={urllib.parse.quote(title)}", data=data,
                                 method="PUT", headers={"Content-Type": ctype, "Authorization": f"Bearer {token}"})
@@ -943,7 +1020,7 @@ def host_op(job: dict, token: str) -> dict:
 
 
 def run_job(job: dict, token: str = "") -> dict:
-    """A job from the portal. ask_mentat → Mentat + Qwen here at home; make_music → the music studio;
+    """A job from the portal (physics is not one: the portal asks skippy-core's Mentat itself). make_music → the music studio;
     workshop → the private Skippy (Claude Code on the bridge); workshop_conversation(s) → its conversation history."""
     if job.get("kind") == "workshop":
         return workshop(job, token)
@@ -959,24 +1036,14 @@ def run_job(job: dict, token: str = "") -> dict:
         return make_image(job, token, hq=job.get("kind") == "make_image_hq")
     if job.get("kind") == "popup":
         return popup_job(job, token)
+    if job.get("kind") == "house":
+        return house_job(job)
     if job.get("kind") == "host_op":
         return host_op(job, token)
     if job.get("kind") in ("memory_list", "memory_get"):
         return memory_job(job, token)
     if job.get("kind") in ("mcp_list", "mcp_test"):
         return mcp_job(job, token)
-    if job.get("kind") == "ask_mentat" and MENTAT:
-        # `given`: the values the person said yes to (Mentat suggested them; it never fills them in itself).
-        # The trace id ties Mentat's research record (mentat/research.py) to this chat turn.
-        body = {"question": job.get("question", "")}
-        if isinstance(job.get("given"), dict) and job["given"]:
-            body["given"] = job["given"]
-        reply = fetch(f"{MENTAT}/ask", "POST", body, timeout=100,
-                      headers={"X-Skippy-Trace": str(job.get("trace") or job.get("id") or "")[:200],
-                               "X-Skippy-Caller": "portal-chat"})
-        if reply and reply.get("ok"):
-            return {"result": reply["result"]}
-        return {"error": (reply or {}).get("error") or "Mentat at home didn't answer"}
     return {"error": f"unknown job {job.get('kind')!r}"}
 
 
@@ -1412,6 +1479,11 @@ def main() -> None:
     watchdog = Watchdog()
     threading.Thread(target=jobs.poll_forever, daemon=True).start()
     threading.Thread(target=watchdog.run_forever, daemon=True).start()
+    if LOCAL_API_PORT:                               # the private Skippy's quick pop-up tools (local_api.py): loopback only, published by compose
+        try:
+            threading.Thread(target=local_api.serve(LOCAL_API_PORT, popups, call_popup).serve_forever, daemon=True).start()
+        except OSError as e:                         # the port is taken: the reporter still reports, the tools just have no door
+            print(f"home-reporter: local door not started on :{LOCAL_API_PORT}: {e}", flush=True)
     if BRIDGE:                                       # the private Skippy: catch the portal up on whatever the bridge holds
         threading.Thread(target=WorkshopSync(token, jobs).run_forever, daemon=True).start()
     # What people did on the portal goes into flask-api's SQLite on its own thread: a collection may take 20 s, and while it

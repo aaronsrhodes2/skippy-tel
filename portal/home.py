@@ -29,7 +29,7 @@ FAST_WINDOW = 300         # after chat activity, the reporter polls for jobs qui
 REDELIVER_AFTER = 20      # a job handed out but not answered goes out again after this
 MAX_REPORT = 1_000_000    # bytes (album art included)
 JOB_TTL = 600             # seconds a job waits for an answer before it's dropped (a job may ask for longer)
-KNOWN_CAPABILITIES = ("make_music", "make_image", "make_image_hq", "workshop", "music_gate", "video_gate", "voice_gate")   # what skippy-pc may advertise (and the pop-ups in popups.py); anything else it sends is ignored
+KNOWN_CAPABILITIES = ("make_music", "make_image", "make_image_hq", "workshop", "music_gate", "video_gate", "voice_gate", "house", "car")   # what skippy-pc may advertise (and the pop-ups in popups.py); anything else it sends is ignored
 _ACTIONS = {("music", "skip"), ("music", "pause"), ("music", "resume"), ("music", "stop")}
 PROJECT_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")                    # the private Skippy's project ids (projects.json)
 GITHUB_REPO = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}")
@@ -71,7 +71,7 @@ def core_check(report: dict | None) -> dict:
         elif ollama.get("default_present") is False:            # `is False`: an older core doesn't say
             problems.append(f"Skippy's default model {_text(ollama.get('default'), 60)} isn't installed in Ollama, "
                             "so default-tier chats fail (HTTP 503).")
-        for name, label in (("claude", "Claude"), ("nagatha", "Nagatha (Gemini)"), ("elevenlabs", "ElevenLabs")):
+        for name, label in (("nagatha", "Nagatha (Gemini)"), ("elevenlabs", "ElevenLabs")):
             if tiers_in.get(name) is False:
                 problems.append(f"{label} has no API key on skippy-pc.")
     for c in (report.get("status") or {}).get("services") or []:
@@ -81,12 +81,11 @@ def core_check(report: dict | None) -> dict:
         verdict = "degraded"
 
     tiers = [{"name": "ollama", "ok": ollama.get("available") is True and ollama.get("default_present") is not False},
-             {"name": "claude", "ok": tiers_in.get("claude") is True},
              {"name": "nagatha", "ok": tiers_in.get("nagatha") is True},
              {"name": "elevenlabs", "ok": tiers_in.get("elevenlabs") is True},
              {"name": "bridge", "ok": bool((health or {}).get("bridge"))}] if health else []
     services = [{"name": _text(s.get("name") or s.get("id"), 40), "available": bool(s.get("available")),
-                 "detail": _text(s.get("status_detail"))} for s in report.get("services") or []]
+                 "planned": bool(s.get("planned")), "detail": _text(s.get("status_detail"))} for s in report.get("services") or []]
     return {"verdict": verdict, "problems": problems, "tiers": tiers, "services": services,
             "api_version": (health or {}).get("spec_version")}
 
@@ -207,6 +206,12 @@ class Home:
         value = info.get(key) if isinstance(info, dict) and self.can(name) else None
         return value[:40] if isinstance(value, str) else None
 
+    def car(self) -> dict | None:
+        """The Captain's car as skippy-pc last carried it (its `car` capability: {ready, mqtt, cars, sign_in}; car_web reads it).
+        Kept even when not ready, so the Car app can say "nobody signed in to Tesla yet" rather than "down". None while home is silent."""
+        info = ((self.report or {}).get("capabilities") or {}).get("car")
+        return info if self.online() and isinstance(info, dict) else None
+
     def workshop_projects(self) -> list[dict]:
         """The private Skippy's projects as skippy-pc listed them (services/claude-bridge/projects.json, without paths):
         [{id, name, repo, branch}], checked again here because it comes from whatever holds the home token. Empty while
@@ -281,26 +286,17 @@ class Home:
         j = self._jobs.get(job_id)
         return j["owner"] if j else None
 
-    def mentat_ready(self) -> bool:
-        """Mentat + Qwen on skippy-pc is up and reporting."""
-        return self.online() and bool((self.report or {}).get("mentat_home"))
+    HOUSE_WAIT_S = 30           # a Leviton through its cloud answers in about a second; the reporter picks up within 1.5 s while he chats
 
-    # The wait nests OUTSIDE the work: Mentat's own call limit on skippy-pc (MENTAT_CALL_TIMEOUT 90 s, docker-compose.override.yml)
-    # plus the reporter picking the job up (1.5 s while someone chats, 15 s otherwise) and a margin. At 75 s a slow answer (Qwen
-    # reloading after a picture freed the card) came back after the chat had already said Mentat was offline.
-    MENTAT_WAIT_S = 110
-
-    def ask_mentat(self, question: str, timeout: float = MENTAT_WAIT_S, given: dict | None = None, trace: str = "") -> dict:
-        """`given`: values the person agreed to after Mentat suggested them. `trace`: this chat turn's id, kept in
-        Mentat's research record."""
+    def house_tool(self, tool: str, args: dict, timeout: float = HOUSE_WAIT_S) -> str:
+        """One of the house's tools, run on skippy-pc (reporter.house_job): the sentence it answered."""
         self.touch_chat()
-        extra = {"given": given} if given else {}
-        outcome = self.wait(self.submit("ask_mentat", question=question, trace=trace, **extra), timeout)
+        outcome = self.wait(self.submit("house", tool=tool, args=args), timeout)
         if outcome is None:
-            raise TimeoutError("Mentat at home didn't answer in time")
-        if "result" not in outcome:
-            raise RuntimeError(outcome.get("error") or "Mentat at home failed")
-        return outcome["result"]
+            raise TimeoutError("skippy-pc didn't answer in time")
+        if outcome.get("error"):
+            raise RuntimeError(outcome["error"])
+        return str((outcome.get("result") or {}).get("text") or "")
 
     def age(self) -> int | None:
         return None if self.received_at is None else int(self.clock() - self.received_at)
@@ -357,7 +353,6 @@ class Home:
             pending = sum(1 for j in self._jobs.values() if not j["event"].is_set())
         core = self.core()
         return {"paired": self.paired(), "online": self.online(), "last_report_s": self.age(),
-                "mentat_home": bool(r.get("mentat_home")),
                 "capabilities": self.capabilities(),
                 "core": {"verdict": core["verdict"], "problems": core["problems"]},
                 "services": {x.get("name"): x.get("ok") for x in st.get("services") or []},

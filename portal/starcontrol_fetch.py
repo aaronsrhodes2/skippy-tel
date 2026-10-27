@@ -2,12 +2,12 @@
 
     python starcontrol_fetch.py <release tag> <sha256 of scz-web.tar.gz> <destination folder>
 
-Run by portal/Dockerfile. The archive is a GitHub Release asset of star-control-precursors (made by that
-repo's tools/build_web.py --tarball): one top-level folder, scz-web/, holding what portal/starcontrol.py
-serves. It is about half a gigabyte, so it is streamed to disk, checked and unpacked in ONE build step and
-deleted in the same step: the archive never becomes an image layer of its own.
+Run by portal/Dockerfile. The archive is the tarball star-control-precursors' tools/build_web.py --tarball makes, kept in the
+trunk and handed to the build as .vendor/scz-web.tar.gz (copied into the build stage at /vendor): one top-level folder, scz-web/, holding what
+portal/starcontrol.py serves. It is about half a gigabyte, so it is checked and unpacked in ONE build step: the archive never becomes an
+image layer of its own.
 
-The checksum is the point of pinning: a release asset can be replaced after the fact, a hash cannot. A
+The checksum is the point of pinning: a file can be replaced after the fact, a hash cannot. A
 mismatch stops the build (nothing deploys) rather than shipping a game nobody chose.
 
 An empty tag means "build the portal without the game": the page then says it isn't bundled.
@@ -15,6 +15,7 @@ An empty tag means "build the portal without the game": the page then says it is
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import sys
 import tarfile
@@ -22,7 +23,7 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-ASSET_URL = "https://github.com/aaronsrhodes2/star-control-precursors/releases/download/{tag}/scz-web.tar.gz"
+ARCHIVE = Path(os.environ.get("STARCONTROL_ARCHIVE", "/vendor/scz-web.tar.gz"))        # where the build stage puts it (portal/Dockerfile)
 TOP = "scz-web"                      # the archive's one top-level folder
 NEEDED = ("index.html", "game.html", "version.json")
 
@@ -66,7 +67,7 @@ def main(argv: list[str]) -> int:
         print("starcontrol: no release pinned (STARCONTROL_REF is empty); building without the game")
         return 0
     try:
-        count = fetch(ASSET_URL.format(tag=tag), sha256, Path(dest))
+        count = fetch(ARCHIVE.as_uri(), sha256, Path(dest))
     except FetchError as exc:
         print(f"starcontrol: {exc}", file=sys.stderr)
         return 1

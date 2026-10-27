@@ -445,19 +445,18 @@ class Hub:
 def build_rooms(env: dict):
     """A Room factory sharing the gate, the house and the spotter's model file; each room gets its own brain memory and timers, and a box
     that plays music gets the music tools."""
-    import anthropic                                            # noqa: PLC0415
     import audio                                                # noqa: PLC0415
     import ear                                                  # noqa: PLC0415
     from brain import Brain                                     # noqa: PLC0415
     from timers import Timers                                   # noqa: PLC0415
     from wakeword import Spotter, default_model                 # noqa: PLC0415
     from voicegate import Gate                                  # noqa: PLC0415
-    token, key = env.get("SKIPPY_HOME_TOKEN", ""), env.get("ANTHROPIC_API_KEY", "")
-    if not token or not key:
-        sys.exit("hub: SKIPPY_HOME_TOKEN and ANTHROPIC_API_KEY must be in the vault .env (or the environment)")
+    token = env.get("SKIPPY_HOME_TOKEN", "")
+    if not token:
+        sys.exit("hub: SKIPPY_HOME_TOKEN must be in the vault .env (or the environment)")
     gate = Gate(env.get("SATELLITE_GATE", "http://127.0.0.1:3007"), token)
     house = ear.build_house(env)                                # the same house as the single-room listener: one set of lights
-    client = anthropic.Anthropic(api_key=key)
+    client, brain_model = ear.brain_client(env, "hub")           # Skippy Core's chat model: local, never a paid one
     model_path = default_model(env)
     threshold = float(env.get("SATELLITE_WAKE_THRESHOLD", "0.5"))
     if model_path.is_file():
@@ -473,7 +472,7 @@ def build_rooms(env: dict):
         holder: dict = {}
         plays_music = "player" in getattr(link, "keys", {})      # an ESPHome box with a media player (esphome_link.discover ran first)
         tools = music_tools(lambda: holder["room"], loop) if plays_music else None
-        brain = Brain(client, env.get("SATELLITE_MODEL", "claude-haiku-4-5"), timers, hass=house, extra=tools)
+        brain = Brain(client, brain_model, timers, hass=house, extra=tools)
         room = holder["room"] = Room(name, link, gate, brain, timers, spotter=spotter, local_voice=audio.local_voice_pcm16, log=log,
                                      floor=float(env.get("SATELLITE_FLOOR", "0.012")))
         return room

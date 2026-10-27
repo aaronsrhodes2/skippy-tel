@@ -220,6 +220,26 @@ def test_the_capability_passes_the_bridges_login_and_reason_through(monkeypatch,
         bridge.close()
 
 
+def test_a_lapsed_claude_login_does_not_hide_the_skippy_that_runs_on_the_core_coder(monkeypatch):
+    brains = [{"id": "claude", "label": "Claude Sonnet", "ready": False}, {"id": "core", "label": "Skippy Core coder", "ready": True}]
+    bridge = _bridge_saying({"ready": False, "model": "m", "login": "expired", "reason": EXPIRED, "brains": brains})
+    try:
+        monkeypatch.setattr(reporter, "BRIDGE", bridge.url)
+        got = reporter.workshop_capability()
+        assert got["ready"] is True and "reason" not in got and got["login"] == "expired"        # the card says nothing is wrong
+        assert got["brains"] == brains                                                          # the page still greys out Claude
+    finally:
+        bridge.close()
+    both = [{"id": "claude", "label": "Claude Sonnet", "ready": False}, {"id": "core", "label": "Skippy Core coder", "ready": False}]
+    bridge = _bridge_saying({"ready": False, "model": "m", "login": "expired", "reason": EXPIRED, "brains": both})
+    try:
+        monkeypatch.setattr(reporter, "BRIDGE", bridge.url)
+        got = reporter.workshop_capability()
+        assert got["ready"] is False and got["reason"] == EXPIRED                                # nothing ready: still offline, and why
+    finally:
+        bridge.close()
+
+
 def test_a_bridge_that_does_not_answer_is_the_reason_when_it_is_the_whole_story(monkeypatch):
     monkeypatch.setattr(reporter, "BRIDGE", "http://127.0.0.1:9")            # nothing listens there
     got = reporter.workshop_capability()

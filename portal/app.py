@@ -2,7 +2,7 @@
 their Discord channels, and the other services; chat with Skippy. Admins
 also get /admin: server settings, restart/update, Discord setup.
 
-Deployed by .github/workflows/deploy.yml on every push — see docs/cicd.md.
+Deployed by skippy-core (core/cd/cd.py, settings in core/cd/deploy.json) after every push its CI passes — see docs/no-github.md.
 Local run:  FLASK_APP=app.py flask run   (needs every var in .env.example)
 """
 from __future__ import annotations
@@ -11,6 +11,7 @@ import dataclasses
 import io
 import ipaddress
 import json
+import os
 import secrets
 import re
 import threading
@@ -49,12 +50,17 @@ import player as player_mod
 import spend
 import starcontrol
 import doomloop
+import prophesy
 import ratelimit
 import readiness
+import deploys as deploys_mod
 import recovery
 import notify as notify_mod
 import power as power_mod
 import recovery_web
+import status as status_mod
+import status_web
+import car_web
 import ship as ship_mod
 import tabletop as tabletop_mod
 import chat_history
@@ -80,7 +86,11 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     app.config.update(settings if settings is not None else config.load())
     # The recovery buttons' GitHub token lives only inside the client object, never in app.config (templates see that).
     token = app.config.pop("GITHUB_ACTIONS_TOKEN", "") or ""
-    github = github or recovery.GitHub(token)
+    # Who deploys the portal says where its deploys are read (docs/no-github.md): skippy-core's deploys (core/cd) set
+    # DEPLOYS_FROM=house, and its reports (POST /home/deploys) answer the ship cards and Recovery; GitHub's deploy.yml didn't.
+    house_deploys = deploys_mod.HouseDeploys()
+    if github is None:
+        github = house_deploys if os.environ.get("DEPLOYS_FROM") == "house" else recovery.GitHub(token)
     del token
     # Cloud Run terminates TLS; trust its X-Forwarded-Proto/Host so OAuth
     # redirect URLs come out as https://<portal-host>/...
@@ -311,6 +321,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         wanted = {"skippy": auth.has_portal(who, "skippy"), "games": bool(shown), "play": auth.has_portal(who, "play"),
                   "music": auth.has_portal(who, "audio"), "video": auth.has_portal(who, "video"),
                   "experiments": auth.has_portal(who, "experiments"), "tabletop": auth.has_portal(who, "tabletop"),
+                  "car": auth.is_admin(who),
                   "dashboard": auth.is_admin(who) and "me" in app.blueprints, "admin": auth.is_admin(who)}
         tiles = []
         for m in modules_mod.MODULES:
@@ -340,7 +351,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def version():
         """Which build is serving: tools/loop_timer.py polls this (signed out, once a second) to learn the moment a deploy became
         visible, so it is public, tiny, never cached (a cached answer would make the new version appear late) and holds no secret."""
-        response = jsonify(buildinfo.info())
+        response = jsonify({**buildinfo.info(), "popups": len(popups.names())})     # how many pop-up tools it knows: the deploy's smoke test compares with the registry
         response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -775,6 +786,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     doctor = doctor_mod.Doctor(home, starter, notify=lambda text: notifier.alert(text))
     app.extensions["doctor"] = doctor
     recovery_web.init_app(app, workshop, limiter, github, home=home, starter=starter, doctor=doctor)   # Recovery: one button (/admin/recovery/repair)
+    status_web.init_app(app, status_mod.Status(), home, starter, doctor, workshop, limiter, vm_status)   # the Status map (docs/status-design.md)
+    car_web.init_app(app, home)                         # the Captain's Tesla, read only (docs/tesla.md)
     ships = ship_mod.ShipWatch(github, app.extensions["recovery"]["runs"])   # the private Skippy's ship card
     app.extensions["ships"] = ships
     # Tell the Captain on Discord when a private-Skippy run ends (notify.py: a DM to him only, one per run, switchable).
@@ -825,10 +838,22 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             pass
         return jsonify(reply)
 
+    @app.post("/home/deploys")
+    def home_deploys():
+        """skippy-core's deploys (core/cd/cd.py): its recent runs in, the redeploy/rollback requests Recovery made out. Home token."""
+        if request.content_length is not None and request.content_length > 100_000:
+            abort(413)
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            abort(400)
+        return jsonify(house_deploys.report(payload))
+
     @app.post("/home/starter")
     def home_starter():
         """The starter on skippy-pc (starter.py): outbound calls with the home token. Takes its status and results, hands back the start/stop requests."""
-        if request.content_length is not None and request.content_length > 20_000:
+        if request.content_length is not None and request.content_length > 60_000:
             abort(413)
         if not home.authorized(request.headers.get("Authorization")):
             abort(401)
@@ -1420,7 +1445,6 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             codes=diagnostics.join_codes(snap), players=diagnostics.players_online(snap), res=res,
             warnings=warnings,
             session_cost=spend.session_cost(status.machine_type, status.minutes_up()) if status else None,
-            spend=spend.estimate(status.machine_type if status else "e2-standard-4"),
             friends=friends_list, chatter=discord_chatter(env),
             discord_ready=bool(app.config["DISCORD_BOT_TOKEN"]),
             experiments=experiments.EXPERIMENTS, hidden=experiments.hidden(vm), mentat_tools=mentat_tools,
@@ -1447,18 +1471,19 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         body = request.get_json(silent=True) or {}
         message = str(body.get("message") or "")
         try:
-            if str(body.get("brain") or "claude") == "core":
+            if str(body.get("brain") or "core") == "core":
                 pics.touch("core")                          # the agent thinking on Skippy Core: patient jobs there wait
-            task = workshop.send(me(), str(body.get("conv") or ""), message, str(body.get("project") or ""), body.get("images"),
-                                 brain=str(body.get("brain") or "claude"))
+            task, again = workshop.send_once(me(), str(body.get("conv") or ""), message, str(body.get("project") or ""), body.get("images"),
+                                             brain=str(body.get("brain") or "core"), client_id=str(body.get("client_id") or ""))
         except workshop_mod.Busy as exc:
             return jsonify(error=str(exc)), 409
         except workshop_mod.NotReady as exc:
             return jsonify(error=str(exc)), 503
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
-        print(json.dumps({"event": "workshop", "user": me(), "task": task, "chars": len(message), "images": len(body.get("images") or [])}), flush=True)  # never the text
-        return jsonify(task=task)
+        if not again:
+            print(json.dumps({"event": "workshop", "user": me(), "task": task, "chars": len(message), "images": len(body.get("images") or [])}), flush=True)  # never the text
+        return jsonify(task=task, again=again)
 
     @mine.get("/workshop/events")
     @workshop_call
@@ -1506,7 +1531,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         resp = app.response_class(data, mimetype=mime)
         resp.headers["X-Content-Type-Options"] = "nosniff"
         resp.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
-        resp.headers["Content-Disposition"] = "inline; filename=screenshot." + ("png" if mime == "image/png" else "jpg")
+        ext = {"image/png": "png", "image/jpeg": "jpg", "model/gltf-binary": "glb", "audio/mpeg": "mp3", "audio/wav": "wav",
+               "audio/ogg": "ogg", "audio/flac": "flac", "video/mp4": "mp4", "audio/midi": "mid", "application/zip": "zip"}.get(mime, "bin")
+        how = "attachment" if mime in workshop_mod.SAVE_ONLY else "inline"     # MIDI and zips are saved; the rest shows in the chat
+        resp.headers["Content-Disposition"] = f"{how}; filename=skippy-{request.args.get('n', type=int, default=0)}.{ext}"
         resp.headers["Cache-Control"] = "private, no-store"
         return resp
 
@@ -1686,6 +1714,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def benchmark():
         return render_template("benchmark.html", bench=experiments.benchmark())
 
+    @lab.get("/minebench")
+    def minebench():
+        return render_template("minebench.html", runs=experiments.MINEBENCH_RUNS)
+
     @lab.get("/mentat/api/tools")
     def mentat_tools():
         if not mentat:
@@ -1826,6 +1858,107 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     app.register_blueprint(dl)
 
+    # ── Shifting Prophesy: two AI models build the same game, one prompt at a time (prophesy.py; every signed-in person) ──
+    sp = Blueprint("prophesy", __name__, url_prefix="/shifting-prophesy")
+
+    def arm_or_404(arm):
+        if arm not in prophesy.ARMS:
+            abort(404)
+        return prophesy.ARMS[arm]
+
+    def bucket_file(folder, path):
+        """A file from one folder of the experiment's bucket, revalidated by ETag. A path that leaves the folder is a 404
+        before storage is asked."""
+        if prophesy.clean_path(path) is None:
+            abort(404)
+        data = prophesy.read(folder, path)
+        if data is None:
+            abort(404)
+        resp = app.response_class(data, mimetype=prophesy.mimetype_for(path))
+        resp.headers["Cache-Control"] = "no-cache"
+        resp.add_etag()
+        return resp.make_conditional(request)
+
+    @sp.get("/")
+    @auth.login_required
+    def board():
+        """Both arms' live builds, then one page per turn (turns() is newest first; the template lays them oldest to newest and
+        opens on the newest), each with every attempt at it."""
+        rows = prophesy.turns()
+        versions = {a: prophesy.version(a) for a in prophesy.ARMS}
+        return render_template("prophesy.html", arms=prophesy.ARMS, versions=versions, turns=rows, totals=prophesy.totals(rows),
+                               short={a: prophesy.short_commit(v) for a, v in versions.items()},
+                               check_order=prophesy.CHECKS, profile_order=prophesy.PROFILE, legend=prophesy.legend())
+
+    @sp.get("/turns/<path:path>")
+    @auth.login_required
+    def record_file(path):
+        """A file of the turn record: a screenshot, a reply, the action lines, a report."""
+        return bucket_file(prophesy.RECORD, path)
+
+    @sp.get("/<arm>/")
+    @auth.login_required
+    def game(arm):
+        """An arm's newest build, framed under the portal's app bar; the query string (?seed=...) goes through to it."""
+        info_arm = arm_or_404(arm)
+        info = prophesy.version(arm)
+        if not info:
+            return render_template("prophesy_nobuild.html", arm=info_arm), 503
+        query = request.query_string.decode("utf-8", errors="replace")
+        resp = app.response_class(render_template("prophesy_game.html", arm=info_arm, commit=prophesy.short_commit(info),
+                                                  src="index.html" + ("?" + query if query else "")))
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+    @sp.get("/<arm>/version")
+    def arm_version(arm):
+        """Which build an arm's folder holds (public: a build id and a time; the referee's runner reads it)."""
+        arm_or_404(arm)
+        info = prophesy.version(arm)
+        resp = jsonify(bundled=bool(info), **info)
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+    @sp.get("/<arm>/<path:path>")
+    @auth.login_required
+    def game_file(arm, path):
+        """A file of an arm's build, read from the bucket."""
+        arm_or_404(arm)
+        return bucket_file(arm, path)
+
+    app.register_blueprint(sp)
+
+    @app.put("/home/prophesy/<folder>/<path:path>")
+    def home_prophesy_put(folder, path):
+        """skippy-pc (the cruise's referee) uploading one file of a build or of the turn record (prophesy.py). The code is
+        local to skippy-pc (Platinum §23), so this, not a CI, is how a turn reaches the board."""
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        request.max_content_length = prophesy.MAX_FILE
+        try:
+            prophesy.put(folder, path, request.get_data(cache=False))
+        except ValueError:
+            abort(404)
+        except prophesy.tabletop.StorageMissing as exc:
+            return jsonify(error=str(exc)), 503
+        return jsonify(ok=True)
+
+    @app.post("/home/prophesy/<folder>/finish")
+    def home_prophesy_finish(folder):
+        """After a build's files are up: drop the previous build's leftovers ({"keep": [paths]})."""
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        keep = (request.get_json(silent=True) or {}).get("keep")
+        if not isinstance(keep, list):
+            abort(400)
+        try:
+            gone = prophesy.finish(folder, keep)
+        except ValueError:
+            abort(404)
+        except prophesy.tabletop.StorageMissing as exc:
+            return jsonify(error=str(exc)), 503
+        return jsonify(ok=True, deleted=gone)
+
     # ── chat ───────────────────────────────────────────────────────────────────
     talk = Blueprint("chat", __name__, url_prefix="/chat")
 
@@ -1890,12 +2023,19 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         print(json.dumps({"event": "agent_popup_queued", "job": job_id, "popup": name}), flush=True)
     workshop.on_popup = agent_popup
 
+    def chat_mentat():
+        """The chat's physics: skippy-core's Mentat, straight over its Funnel (MENTAT_URL), when it is up and thinking with Qwen."""
+        m = app.extensions.get("mentat")
+        return m if m is not None and m.ready() else None
+
     def tools_for(user, trace: str = "") -> chat_tools.ChatTools:
         email = user["email"]
         return chat_tools.ChatTools(vm, is_admin=auth.is_admin(email), visible=auth.visible_games(email),
                                     who=email, trace=trace,
                                     music=home.music if auth.has_portal(email, "audio") else None,
-                                    home_mentat=home if home.mentat_ready() else None,
+                                    home_mentat=chat_mentat(),
+                                    home_house=home if home.can("house") else None,
+                                    home_car=home if home.can("car") else None,
                                     home_music=PatientJobs(email) if home.can("make_music") else None,
                                     home_image=PatientJobs(email) if home.can("make_image") or home.can("make_image_hq") else None,
                                     image_tiers=tuple(k for k in ("make_image", "make_image_hq") if home.can(k)),
@@ -2043,7 +2183,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 return jsonify(error=f"That's {CHAT_PER_HOUR} messages this hour; Skippy needs a breather. "
                                      "Try again in a bit."), 429
         home.touch_chat()
-        pics.touch("core", "pc")                              # Core answers, Mentat thinks on skippy-pc: patient jobs wait (patient.py)
+        pics.touch("core")                                    # Core answers and Mentat thinks, both on skippy-core: patient jobs there wait (patient.py)
         trace = "chat-" + secrets.token_hex(8)        # this turn's id, kept with Mentat's research record of it
         # The person agreed to Mentat's suggested inputs: the page sends back the follow-up Mentat made, and the portal
         # asks Mentat with exactly those values (no brain retyping numbers). Anything but a plain yes ignores it.

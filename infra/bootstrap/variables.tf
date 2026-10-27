@@ -8,26 +8,14 @@ variable "region" {
   default = "us-west1"
 }
 
-variable "github_repo" {
-  description = "owner/repo whose GitHub Actions may deploy."
-  type        = string
-  default     = "aaronsrhodes2/skippy-tel"
-}
-
-variable "doomloop_repo" {
-  description = "owner/repo whose GitHub Actions may upload Doom Loop dev builds."
-  type        = string
-  default     = "aaronsrhodes2/doom-loop"
-}
-
 variable "doomloop_bucket" {
-  description = "GCS bucket holding the newest Doom Loop dev build (portal/doomloop.py reads it; deploy.yml sets DOOMLOOP_BUCKET to the same name)."
+  description = "GCS bucket holding the newest Doom Loop dev build (portal/doomloop.py reads it; core/cd/deploy.json sets DOOMLOOP_BUCKET to the same name)."
   type        = string
   default     = "skippy-tel-doomloop-dev"
 }
 
 variable "mentat_research_bucket" {
-  description = "Private GCS bucket keeping every request to the public Mentat and its whole answer, forever (mentat/research.py; deploy.yml sets MENTAT_RESEARCH_BUCKET to the same name)."
+  description = "Private GCS bucket keeping every request to the public Mentat and its whole answer, forever (mentat/research.py; core/cd/deploy.json sets MENTAT_RESEARCH_BUCKET to the same name)."
   type        = string
   default     = "skippy-tel-mentat-research"
 }

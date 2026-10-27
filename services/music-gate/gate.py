@@ -31,6 +31,9 @@ import time
 from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, request, send_file
+from flask import g as _g
+
+import ready as ready_mod
 
 from art import Busy, ThumbCache, pick_size
 from library import AUDIO, Library, etag_matches, read_art
@@ -84,9 +87,24 @@ def create_app(library: Library, key: bytes, clock=time.time, lyrics: LyricsStor
         if not valid(key, token, clock()):
             abort(403)
 
+    ready_state = ready_mod.Readiness("music-gate")
+
+    @app.before_request
+    def _job_begins():
+        if request.path != "/health" and request.method != "OPTIONS":      # a call that does work is a job while it runs (PLATINUM section 24)
+            _g._job = ready_state.begin(request.path)
+
+    @app.teardown_request
+    def _job_ends(_exc):
+        token = _g.pop("_job", None)
+        if token:
+            ready_state.end(token)
+
     @app.get("/health")
     def health():
-        return jsonify(ok=True, ready=library.ready, tracks=library.count, scanning=library.scanning, lyrics=lyrics.count)
+        rep = ready_state.report(ready=bool(library.ready), detail="" if library.ready else "the music library is still being read",
+                                 ok=True, tracks=library.count, scanning=library.scanning, lyrics=lyrics.count)
+        return jsonify(rep)
 
     @app.get("/t/<token>/catalog.json")
     def catalog(token):

@@ -23,7 +23,6 @@
   ('core', 'core', 'Core', core_lamp),
   ('activity-pane', 'eye', 'Activity', ''),
   ('watcher', 'gauge', 'Watcher', 'warn' if warnings else ''),
-  ('spend', 'clock', 'Spend', ''),
   ('people', 'user', 'People', ''),
   ('links', 'globe', 'Links', ''),
 ] %}
@@ -193,7 +192,7 @@
         {% if core.tiers %}<p class="muted">Tiers:
           {% for t in core.tiers %}<span style="color: {{ 'var(--green)' if t.ok else 'var(--red)' }}">{{ '●' if t.ok else '○' }}</span> {{ t.name }}{{ ' · ' if not loop.last }}{% endfor %}</p>{% endif %}
         <details><summary class="muted">All {{ core.services | length }} services</summary>
-          <table>{% for s in core.services %}<tr><td><span style="color: {{ 'var(--green)' if s.available else 'var(--red)' }}">{{ '●' if s.available else '○' }}</span>
+          <table>{% for s in core.services %}<tr><td><span style="color: {{ 'var(--green)' if s.available else ('var(--muted)' if s.planned else 'var(--red)') }}">{{ '●' if s.available else '○' }}</span>
             {{ s.name }}</td><td class="muted">{{ s.detail or ('up' if s.available else 'down') }}</td></tr>{% endfor %}</table>
         </details>
       {% endif %}
@@ -224,25 +223,6 @@
       {% if warnings %}{% for w in warnings %}<p class="warn">⚠ {{ w }}</p>{% endfor %}
       {% else %}<p>All quiet. <span class="muted">Memory, disk, crashes and blocked starts show here when
         they need attention.</span></p>{% endif %}
-    </div>
-      </div></div>
-      <div class="pips" hidden><i></i></div>
-    </section>
-    {% endif %}
-
-    {% if 'spend' not in buried %}
-    <section id="spend" class="apane" hidden>
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
-        <svg class="g mark" aria-hidden="true"><use href="#g-clock"/></svg><span class="title">Spend</span></header>
-      <div class="pg"><div class="pg-flow">
-    <div class="w">
-      <h3>Spend (estimate)</h3>
-      {% set avg = spend.months.average %}{% set mx = spend.months.max %}
-      <p class="big">${{ '%.0f' % avg.total }}<span class="muted"> / month typical · ${{ '%.0f' % mx.total }} heavy</span></p>
-      <table>{% for label, cost in avg['items'] %}<tr><td>{{ label }}</td><td>${{ '%.2f' % cost }}</td></tr>{% endfor %}</table>
-      <p class="muted">Model: ~{{ avg.hours }} awake hours/month on {{ spend.machine_type }} (${{ spend.hourly }}/h).
-        Always-on would be ~${{ '%.0f' % spend.always_on_total }}. Real numbers arrive with the billing export
-        and an Anthropic Admin key.</p>
     </div>
       </div></div>
       <div class="pips" hidden><i></i></div>

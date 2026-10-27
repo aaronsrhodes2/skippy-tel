@@ -13,7 +13,7 @@ import workshop_engine as engine
 from bridge_testkit import finish, make_door, make_shop, saved, wait_for
 
 BODY = {"task": "aaaaaaaa", "conv": "conv-12345678", "message": "a message that must not be written to disk"}
-FIELDS = {"task", "conv", "who", "project", "brain", "created", "finished_at", "done", "ok", "error", "events"}
+FIELDS = {"task", "conv", "who", "project", "brain", "client_id", "created", "finished_at", "done", "ok", "error", "events"}
 
 
 def write_run(shop, task, *, done, finished_ago=None, age=None, who="c@example.com", events=None, error=None, ok=None):
@@ -287,3 +287,17 @@ def test_importing_the_bridge_never_reads_or_writes_the_real_state_directory():
     real = Path(bridge.WORKSHOP.state_dir)
     assert real.name == engine.STATE_DIR_NAME and real.parent == Path(engine.SESSIONS).parent
     assert bridge.WORKSHOP.listing() == []                                       # not loaded: nothing in memory
+
+
+def test_loading_never_removes_the_bridges_own_config_files_however_old_they_are(shop):
+    """The runs folder also holds engines.json (which engine, which tools, the walled folders), the settings and MCP files the bridge writes, and
+    a run is a file named by its task id: only those age out. A restart an hour after engines.json was last edited once deleted it, and the Core
+    brain silently went back to the CLI engine with its walls gone."""
+    root = Path(shop.state_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    keep = ["engines.json", "sdk-settings.json", "lane-settings.json", "house-mcp.json", "purple-tools-mcp.json", "core-mcp.json"]
+    for name in keep:
+        (root / name).write_text("{}")
+        os.utime(root / name, (time.time() - 10 * engine.KEEP_FINISHED_S,) * 2)
+    shop.load()
+    assert sorted(p.name for p in root.iterdir() if p.name in keep) == sorted(keep)

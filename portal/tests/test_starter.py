@@ -75,7 +75,7 @@ def test_the_machine_route_wants_the_home_token_and_a_json_object(world):
     t = token(app)
     h = {"Authorization": f"Bearer {t}"}
     assert client.post("/home/starter", data="nope", headers=h).status_code == 400
-    assert client.post("/home/starter", data="x" * 30_000, headers={**h, "Content-Type": "application/json"}).status_code == 413
+    assert client.post("/home/starter", data="x" * 70_000, headers={**h, "Content-Type": "application/json"}).status_code == 413
     got = client.post("/home/starter", json={"status": {"docker": True}}, headers=h)
     assert got.status_code == 200 and got.get_json() == {"commands": []} and starter.online()
 
@@ -104,10 +104,10 @@ def test_heal_names_one_thing_from_its_list_and_repair_lists_what_is_failing():
         with pytest.raises(ValueError):
             Starter().request("heal", "doctor", arg=bad)
     s2 = Starter()
-    rid = s2.request("repair", ADMIN, arg="ollama,whisper")
-    assert s2.poll({}) == [{"id": rid, "op": "repair", "arg": "ollama,whisper"}]
+    rid = s2.request("repair", ADMIN, arg="flask-api,whisper")
+    assert s2.poll({}) == [{"id": rid, "op": "repair", "arg": "flask-api,whisper"}]
     with pytest.raises(ValueError):
-        Starter().request("repair", ADMIN, arg="ollama,evil")
+        Starter().request("repair", ADMIN, arg="whisper,evil")
     assert Starter().request("start", ADMIN, arg="ignored") and Starter().poll({}) == []
     s3 = Starter()
     c3 = s3.request("start", ADMIN, arg="ignored")

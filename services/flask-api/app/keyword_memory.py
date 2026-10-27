@@ -103,7 +103,6 @@ _HARDCODED_SEED = [
     ("skip song",           "bilby_next",    "Tell Bilby to skip the track",  None),
     ("next song",           "bilby_next",    "Tell Bilby to skip the track",  None),
     # ── AI tier escalation ──
-    ("put on your thinking cap",  "claude_tier",         "Escalate to Claude Sonnet",           "I find this flattering and insulting simultaneously."),
     ("ask nagatha",               "nagatha_tier",        "Route to Nagatha (Gemini)",            "Nagatha is charming. I tolerate her."),
     ("ask gemini",                "nagatha_tier",        "Route to Nagatha (Gemini, alias)",     None),
     ("trust the awesomeness",     "trust_awesomeness",   "Invoke trust-the-awesomeness (Opus)",  "The big gun. Use respectfully."),
