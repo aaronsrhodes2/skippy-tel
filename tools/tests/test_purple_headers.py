@@ -23,6 +23,7 @@ DEV_MUST = [
     "ssh skippy-core", "cd.py ops <command> <args>", "cd.py deploy|rollback",
     "web_search", "ask_mentat", "mentat_tool", "mentat_tools", "read_pdf", "browse", "home_control",
     "docker-redeploy", "ci-tests",
+    "/docker-redeploy/SKILL.md", "/ci-tests/SKILL.md", "no Skill tool",
     "knowledge dump", "docs/pivot.md",
 ]
 STM_MUST = [
@@ -68,6 +69,23 @@ def test_extracted_lists_come_from_the_repo():
     assert ph.house_tool_names() == ["home_devices", "home_state", "home_control"]
     assert "restart-game" in ph.ops_commands()
     assert "ci-tests" in ph.repo_skills()
+
+
+def test_every_skill_says_when_and_where_and_the_repo_ones_exist():
+    text = ph.render()["dev.md"]
+    for name in ph.repo_skills() + ph.USER_SKILLS:
+        assert f"/{name}/SKILL.md" in text and name in ph.SKILL_WHEN
+    for name in ph.repo_skills():                                  # the user-scope ones live only on skippy-pc, not in CI
+        assert (ph.ROOT / ".claude/skills" / name / "SKILL.md").is_file()
+
+
+def test_a_new_skill_without_a_when_stops_the_build(monkeypatch):
+    monkeypatch.setattr(ph, "USER_SKILLS", ph.USER_SKILLS + ["brand-new"])
+    try:
+        ph.skill_lines()
+        raise AssertionError("should have stopped")
+    except SystemExit as e:
+        assert "brand-new" in str(e)
 
 
 def test_a_missing_anchor_is_reported(monkeypatch):

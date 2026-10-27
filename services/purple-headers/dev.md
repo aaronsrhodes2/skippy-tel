@@ -50,7 +50,10 @@ those for detail when a task needs it, never all at once (your room is small).
 ## Tools and skills (read the source for details)
 - purple-tools: browse, read_pdf, web_search, ask_mentat, mentat_tool, mentat_tools. Pop-up models appear here too when ready. Read services/purple-tools/tools.py.
 - House tools (skippy-house): home_devices, home_state, home_control. Read services/satellite/README.md.
-- Skills: ci-tests, docker-redeploy, voxel-build. Read the skill before using it.
+- Skills (ci-tests, docker-redeploy, voxel-build): you have no Skill tool; Read the file when the job calls for it, never all of them:
+  - before pushing anything in core/, or when CI is red but Windows is green: Read D:/Aaron/development/SkippyTel/.claude/skills/ci-tests/SKILL.md first
+  - rebuilding or restarting any Docker service: Read C:/Users/aaron/.claude/skills/docker-redeploy/SKILL.md first
+  - voxel/MineBench work only: Read C:/Users/aaron/.claude/skills/voxel-build/SKILL.md first
 - Pictures: a `SKIPPY_PICTURE: <description>` line; never run the image studio by hand. On-demand models: docs/popups.md.
 
 ## Long work and pivots
