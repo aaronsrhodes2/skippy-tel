@@ -436,17 +436,28 @@ def _popup_runner(entry: dict):
     return lambda args: run_popup(entry, args)
 
 
+def offered() -> dict[str, dict]:
+    """Every tool this server offers, narrowed by PURPLE_TOOLS_ONLY (comma-separated names; unset or empty = all). A smaller set costs the run less of
+    its working room: each tool's schema is paid for in every request."""
+    only = {n.strip() for n in os.environ.get("PURPLE_TOOLS_ONLY", "").split(",") if n.strip()}
+    if only and only <= set(TOOLS):                       # no pop-up asked for: don't even ask the reporter what it has
+        return {n: t for n, t in TOOLS.items() if n in only}
+    allt = {**TOOLS, **popup_tools()}
+    return {n: t for n, t in allt.items() if n in only} if only else allt
+
+
 def tool_list() -> list[dict]:
-    return [{"name": n, "description": t["description"], "inputSchema": t["input_schema"]} for n, t in {**TOOLS, **popup_tools()}.items()]
+    return [{"name": n, "description": t["description"], "inputSchema": t["input_schema"]} for n, t in offered().items()]
 
 
 def call(name: str, args: dict) -> tuple[str, bool]:
     """(text, is_error). Never raises."""
-    tool = TOOLS.get(name)
-    if tool is None and name in popup_tools():
-        tool = {"run": _popup_runner(popup_tools()[name]["popup"])}
+    have = offered()
+    tool = have.get(name)
+    if tool is not None and tool.get("run") is None:
+        tool = {"run": _popup_runner(tool["popup"])}
     if tool is None:
-        return f"There is no tool named {name!r}. Tools: {', '.join({**TOOLS, **popup_tools()})}.", True
+        return f"There is no tool named {name!r}. Tools: {', '.join(have)}.", True
     try:
         return tool["run"](args), False
     except ValueError as e:
