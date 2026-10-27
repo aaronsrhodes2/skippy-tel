@@ -44,6 +44,11 @@ services:
     environment:
       - POSTGRES_USER=teslamate
       - POSTGRES_DB=teslamate
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U teslamate -d teslamate"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     volumes:
       - ${CORE_STATE:-/var/lib/skippy-core}/tesla/db:/var/lib/postgresql/data
 
@@ -51,8 +56,14 @@ services:
     image: eclipse-mosquitto:2.0.22@sha256:09b62ff32c2e7b64d4b431b9a89236073289b68db273de2b089edeb9b0d92b5c
     restart: unless-stopped
     logging: *tesla-logging
-    command: mosquitto -c /mosquitto-no-auth.conf      # inside the stack's own network only: nothing publishes its port
+    command: mosquitto -c /mosquitto/config/mosquitto.conf   # core/car/mosquitto.conf: no auth (no published port), values kept on disk
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -t '$$SYS/broker/uptime' -C 1 -W 3"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
     volumes:
+      - ./car/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ${CORE_STATE:-/var/lib/skippy-core}/tesla/mosquitto:/mosquitto/data
 
   car:

@@ -105,3 +105,10 @@ def test_the_tesla_compose_file_is_pinned_and_keeps_its_doors_local():
     assert ports == ['- "127.0.0.1:4000:4000"', '- "127.0.0.1:7351:7351"']   # nothing on the LAN; mosquitto and Postgres not at all
     assert "${CORE_STATE:-/var/lib/skippy-core}/tesla/db:" in text            # the history is kept with CORE_STATE
     assert "/etc/skippy-core/tesla.env" in text and "ENCRYPTION_KEY=" not in text   # secrets live on the box, never here
+
+
+def test_the_broker_keeps_the_cars_values_across_a_restart():
+    text = (CORE / "compose.tesla.yml").read_text(encoding="utf-8")
+    assert "./car/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro" in text
+    conf = (CORE / "car" / "mosquitto.conf").read_text(encoding="utf-8")
+    assert "persistence true" in conf and "persistence_location /mosquitto/data/" in conf
