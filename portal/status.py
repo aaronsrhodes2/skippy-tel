@@ -13,7 +13,8 @@ import time
 
 STALE_S = 120                 # the core reporter posts every 30 s; four missed reports is stale
 MAX_ITEMS = 120
-LAMPS = ("ok", "degraded", "down", "stale", "off")
+LAMPS = ("ok", "degraded", "down", "stale", "off", "hung")      # hung: a job is running and nothing new has come out of it (PLATINUM §24)
+HUNG_S = 90                                                       # no new words for this long, with a job running
 
 
 def _s(value, limit: int = 80) -> str:
@@ -41,7 +42,9 @@ def clean_models(rows) -> list[dict]:
     out = []
     for r in (rows if isinstance(rows, list) else [])[:MAX_ITEMS]:
         if isinstance(r, dict) and r.get("name"):
-            out.append({"name": _s(r["name"], 60), "state": _s(r.get("state"), 20), "detail": _s(r.get("detail"), 120)})
+            out.append({"name": _s(r["name"], 60), "state": _s(r.get("state"), 20), "detail": _s(r.get("detail"), 120),
+                        "jobs": int(_num(r.get("jobs"), 0, 999) or 0), "decoded": int(_num(r.get("decoded"), 0, 10**9) or 0),
+                        "stuck_s": int(_num(r.get("stuck_s"), 0, 10**7) or 0)})
     return out
 
 
@@ -163,8 +166,16 @@ class Status:
         if core:
             containers = [{**c, "lamp": container_lamp(c)} for c in core["containers"]]
             for m in core["models"]:
-                core_serves.append({"kind": "model", "name": m["name"], "lamp": "ok" if m["state"] == "ready" else ("degraded" if m["state"] else "off"),
-                                    "detail": m["detail"] or m["state"]})
+                if m["state"] != "ready":
+                    lamp, detail = ("degraded" if m["state"] else "off"), (m["detail"] or m["state"])
+                elif m["jobs"] and m["stuck_s"] >= HUNG_S:
+                    lamp = "hung"
+                    detail = f"HUNG: {m['jobs']} job{'s' if m['jobs'] != 1 else ''} running, no new words for {m['stuck_s'] // 60} min {m['stuck_s'] % 60} s"
+                elif m["jobs"]:
+                    lamp, detail = "ok", f"busy: {m['jobs']} job{'s' if m['jobs'] != 1 else ''} running, {m['decoded']} words so far"
+                else:
+                    lamp, detail = "ok", "ready: accepting work, no jobs"
+                core_serves.append({"kind": "model", "name": m["name"], "lamp": lamp, "detail": detail, "jobs": m["jobs"], "stuck_s": m["stuck_s"]})
             have = {s["name"] for s in core_serves}
             for name in KNOWN_CORE_MODELS:                 # a slot that is not loaded right now is still a model he can ask
                 if name not in have:
@@ -175,6 +186,8 @@ class Status:
                     s["asking"] = (probes or {}).get("running") == s["name"]
             if core["deployer"]["state"] in ("failed", "rolled-back", "refused", "ci-failed"):
                 core_state = "degraded" if core_fresh else core_state
+            if any(s["lamp"] == "hung" for s in core_serves) and core_fresh:
+                core_state = "degraded"
             if not core["doctor"]["ok"] and core_fresh:
                 core_state = "degraded"
             if any(c["lamp"] == "down" for c in containers) and core_fresh:
@@ -215,6 +228,8 @@ class Status:
                  edge("skippy-pc", "skippy-core", "data trunk + tailnet", home_online and core_fresh, "trunk"),
                  edge("skippy-portal", "games-vm", "ops", vm_state == "ok")]
         problems = [{"machine": m["id"], "what": m["label"] + " is " + m["state"]} for m in machines if m["state"] in ("down", "degraded", "stale")]
+        for m in machines:
+            problems += [{"machine": m["id"], "what": s["name"] + " is hung: " + s["detail"]} for s in m["serves"] if s.get("lamp") == "hung"]
         for m in machines:
             problems += [{"machine": m["id"], "what": c["name"] + " is " + c["lamp"]} for c in m["containers"] if c["lamp"] in ("down", "degraded")]
         return {"machines": machines, "edges": edges, "problems": problems, "at": int(self.clock())}

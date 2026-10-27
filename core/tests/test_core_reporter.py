@@ -80,3 +80,26 @@ def test_ship_logs_sends_a_crash_and_survives_the_portal_being_away(tmp_path):
     calls["up"] = True
     rep.ship_logs("https://x", "t", [{"name": "m", "state": "running", "restarts": 1}], run, tmp_path, post)
     assert sent and sent[0]["kind"] == "crash" and sent[0]["source"] == "docker/m"
+
+
+def test_slots_tell_a_working_model_from_a_hung_one():
+    busy = [{"is_processing": True, "next_token": {"n_decoded": 40}}, {"is_processing": False}, {"is_processing": True, "next_token": [{"n_decoded": 5}]}]
+    assert rep.slot_view(busy) == (2, 45) and rep.slot_view([]) == (0, 0) and rep.slot_view("junk") == (0, 0)
+    memory = {}
+    assert rep.progress(memory, "coder", 1, 100, 1000.0) == 0                           # first sight: it is producing
+    assert rep.progress(memory, "coder", 1, 180, 1030.0) == 0                           # new words: getting somewhere
+    assert rep.progress(memory, "coder", 1, 180, 1090.0) == 60                          # a job, and not one new word for a minute
+    assert rep.progress(memory, "coder", 1, 180, 1150.0) == 120
+    assert rep.progress(memory, "coder", 0, 0, 1200.0) == 0 and rep.progress(memory, "coder", 1, 180, 1230.0) == 0   # idle resets it
+
+
+def test_models_carry_jobs_words_and_how_long_a_job_has_stood_still():
+    def get(url, key):
+        if url.endswith("/running"):
+            return {"running": [{"model": "chat", "state": "ready"}, {"model": "coder", "state": "ready"}, {"model": "vision", "state": "starting"}]}
+        return [{"is_processing": url.endswith("/coder/slots"), "next_token": {"n_decoded": 7}}]
+    memory = {}
+    first = {m["name"]: m for m in rep.models(get, "k", memory, now=1000.0)}
+    assert first["chat"]["jobs"] == 0 and first["coder"]["jobs"] == 1 and first["coder"]["stuck_s"] == 0 and first["vision"]["jobs"] == 0
+    later = {m["name"]: m for m in rep.models(get, "k", memory, now=1120.0)}
+    assert later["coder"]["stuck_s"] == 120 and later["chat"]["stuck_s"] == 0              # the coder's words did not move in two minutes

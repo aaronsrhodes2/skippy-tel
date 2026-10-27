@@ -102,20 +102,62 @@ def containers(run=sh) -> list[dict]:
     return out
 
 
-def http_get(url: str, key: str = "") -> dict:
+def http_get(url: str, key: str = "") -> dict | list:
     req = urllib.request.Request(url, headers={"x-api-key": key, "Authorization": "Bearer " + key} if key else {})
     with urllib.request.urlopen(req, timeout=10) as r:
         return json.loads(r.read() or b"{}")
 
 
-def models(get, key: str) -> list[dict]:
+def slot_view(slots) -> tuple[int, int]:
+    """llama-server's /slots -> (jobs running, words written so far by them)."""
+    jobs = decoded = 0
+    for s in slots if isinstance(slots, list) else []:
+        if isinstance(s, dict) and s.get("is_processing"):
+            jobs += 1
+            nt = s.get("next_token")
+            nt = nt[0] if isinstance(nt, list) and nt else nt
+            decoded += int((nt or {}).get("n_decoded") or 0) if isinstance(nt, dict) else 0
+    return jobs, decoded
+
+
+def progress(memory: dict, name: str, jobs: int, decoded: int, now: float) -> int:
+    """Seconds this model has had a job running with no new words (0 = nothing running, or it is getting somewhere). The memory dict
+    ({model: {decoded, at}}) is what the last round saw; a model hung on a job never advances `decoded`."""
+    prev = memory.get(name) or {}
+    if not jobs:
+        memory[name] = {"decoded": 0, "at": now}
+        return 0
+    if decoded != prev.get("decoded"):
+        memory[name] = {"decoded": decoded, "at": now}
+        return 0
+    return int(now - prev.get("at", now))
+
+
+def models(get, key: str, memory: dict | None = None, now: float | None = None) -> list[dict]:
+    """What llama-swap has loaded, and for each: ready or not, jobs running, and `stuck_s` (a job with no new words for that long: HUNG).
+    A 200 from the port says nothing about that (docs: PLATINUM §24), so the slots are read."""
+    import time as _t
     try:
         got = get("http://127.0.0.1:8080/running", key)
     except (OSError, ValueError):
         return []
-    return [{"name": m.get("model", ""), "state": m.get("state", ""),
-             "detail": "loaded in llama-swap" if m.get("state") == "ready" else m.get("state", "")}
-            for m in got.get("running") or [] if isinstance(m, dict) and m.get("model")]
+    memory = memory if memory is not None else {}
+    now = _t.time() if now is None else now
+    out = []
+    for m in got.get("running") or []:
+        if not isinstance(m, dict) or not m.get("model"):
+            continue
+        name = m["model"]
+        jobs = decoded = stuck = 0
+        if m.get("state") == "ready":
+            try:
+                jobs, decoded = slot_view(get(f"http://127.0.0.1:8080/upstream/{name}/slots", key))
+            except (OSError, ValueError):
+                pass
+            stuck = progress(memory, name, jobs, decoded, now)
+        out.append({"name": name, "state": m.get("state", ""), "jobs": jobs, "decoded": decoded, "stuck_s": stuck,
+                    "detail": "loaded in llama-swap" if m.get("state") == "ready" else m.get("state", "")})
+    return out
 
 
 def read_json(path: Path) -> dict:
@@ -146,7 +188,14 @@ def vitals() -> dict:
 def gather(run=sh, get=http_get, state: Path = STATE, key: str = "") -> dict:
     dep = read_json(state / "deployer" / "status.json")
     doc = read_json(state / "deployer" / "doctor.json")
-    return {"containers": containers(run), "models": models(get, key),
+    memory = read_json(state / "reporter" / "progress.json")
+    models_now = models(get, key, memory)
+    try:
+        (state / "reporter").mkdir(parents=True, exist_ok=True)
+        (state / "reporter" / "progress.json").write_text(json.dumps(memory), encoding="utf-8")
+    except OSError:
+        pass
+    return {"containers": containers(run), "models": models_now,
             "deployer": {"state": dep.get("state", ""), "commit": str(dep.get("commit") or "")[:10], "detail": str(dep.get("detail") or "")[:160]},
             "doctor": {"ok": not (doc.get("fails", 0) >= 2), "last": str((doc.get("last") or {}).get("did", ""))[:120]},
             "vitals": vitals(), "busy": bool(quiet and quiet.busy())}

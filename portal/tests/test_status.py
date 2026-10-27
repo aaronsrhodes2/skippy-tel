@@ -178,3 +178,20 @@ def test_the_probe_answer_shows_on_the_models_row_and_the_route_guards_it(world)
     app.extensions["status"].core["busy"] = True
     app.extensions["probes"].running = None
     assert client.post("/status/probe", json={"names": ["chat"]}, headers=own).status_code == 409
+
+
+def test_ready_busy_and_hung_are_three_different_things_not_just_an_http_200():
+    st = status_mod.Status(clock=lambda: 1000.0)
+    st.accept_core({"models": [
+        {"name": "chat", "state": "ready", "jobs": 0, "decoded": 0, "stuck_s": 0},
+        {"name": "coder", "state": "ready", "jobs": 2, "decoded": 310, "stuck_s": 20},
+        {"name": "router", "state": "ready", "jobs": 1, "decoded": 5, "stuck_s": 200},
+        {"name": "vision", "state": "starting"}], "containers": [], "doctor": {"ok": True}})
+    core = by(tree(st), "skippy-core")
+    row = {s["name"]: s for s in core["serves"]}
+    assert (row["chat"]["lamp"], row["chat"]["detail"]) == ("ok", "ready: accepting work, no jobs")
+    assert row["coder"]["lamp"] == "ok" and row["coder"]["detail"].startswith("busy: 2 jobs running, 310 words")
+    assert row["router"]["lamp"] == "hung" and row["router"]["detail"].startswith("HUNG: 1 job running, no new words for 3 min 20 s")
+    assert row["vision"]["lamp"] == "degraded"
+    assert core["state"] == "degraded"                                                    # a hung model makes the machine degraded
+    assert any("router is hung" in p["what"] for p in tree(st)["problems"])
