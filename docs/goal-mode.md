@@ -62,6 +62,10 @@ Two files in the goal's folder, `.skippy-goal/`, plus the existing Run API (noth
   `GOAL.md` beside it is the readable copy, generated from the same data.
 - Control: start and cancel through the Run API (`Workshop.cancel(task)` ends cleanly with `segment_ended` why "stopped"). The queue, windows
   and kill switch are the infra side's.
+- `parked` in state.json is only ever the engine giving up (third identical failure, unrecoverable error, a goal that can't proceed). A
+  cancel through the Run API ends with `segment_ended` why "stopped" and state **"stopped"** (resumable: session and last green commit kept).
+  A window closing or a spent repair budget is the queue's own state ("parked by the queue"), kept in the queue's file, never in `.skippy-goal/`.
+  Resuming is a new run on the same goal, which starts from GOAL.md.
 - Fingerprint: first 12 hex of sha256 over the sorted failing check names plus each one's first `fail|error` line; twice = change of
   approach, three times = park (the engine counts).
 
