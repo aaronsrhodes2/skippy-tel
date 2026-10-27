@@ -27,7 +27,9 @@ def test_child_env_carries_it_and_never_the_doors_key(tmp_path, monkeypatch):
     env = we.child_env({"SKIPPY_HOME_TOKEN": "door", "PATH": "x"})
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "tok-123" and "SKIPPY_HOME_TOKEN" not in env
     monkeypatch.setattr(we, "ENV_FILES", (str(tmp_path / "none"),))
-    assert "CLAUDE_CODE_OAUTH_TOKEN" not in we.child_env({"PATH": "x"})               # no token anywhere: claude's own sign-in, as before
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in we.child_env({"PATH": "x"})
+    monkeypatch.setattr(we, "ENV_FILES", vault(tmp_path, "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-abc def"))     # wrapped in the terminal, joined by a space
+    assert we.child_env({"PATH": "x"})["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-ant-oat01-abcdef"               # no token anywhere: claude's own sign-in, as before
 
 
 def test_the_year_counts_down_and_says_nothing_without_a_token(tmp_path):

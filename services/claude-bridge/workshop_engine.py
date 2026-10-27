@@ -480,7 +480,7 @@ def child_env(base=None) -> dict:
     env["GCM_INTERACTIVE"] = "never"
     # The Captain's long-lived Claude token (`claude setup-token`, a year, kept in the vault): with it, claude never needs a /login at this PC,
     # which is what used to tie him to his desk. Without one, claude falls back to its own stored sign-in, as before.
-    token = vault_value("CLAUDE_CODE_OAUTH_TOKEN", env, ENV_FILES)       # ENV_FILES looked up now, so a test can point it elsewhere
+    token = "".join(vault_value("CLAUDE_CODE_OAUTH_TOKEN", env, ENV_FILES).split())   # a terminal-wrapped paste leaves a space inside; a token has none
     if token:
         env["CLAUDE_CODE_OAUTH_TOKEN"] = token
     return env
