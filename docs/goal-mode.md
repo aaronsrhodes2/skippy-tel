@@ -54,6 +54,25 @@ step in the same queue.
    GOAL.md and the failure log to orange for **one bounded session** (token cap per goal), then purple resumes. Every escalation is logged
    on the goal and counted.
 
+## The end-of-run orange review (the Captain, 2026-10-27)
+
+A long purple run ends with a question in the transcript: **"Would you like Orange Skippy to review this?"** (a key, not a typed answer).
+Yes starts a **separate orange conversation** (so the paid run is its own bounded thing, in his Claude Max, never inside purple's chat) seeded
+with a scripted review, not an open chat:
+- **What it gets:** the goal or request (GOAL.md when there is one), the diff of the goal branch against main, the commits, the check
+  results, and **static analysis output produced before orange starts, for free**: lint and type checks for the languages touched (ruff and
+  mypy for Python, eslint or tsc for JS), a secrets scan, a dependency and import check, the test run, and a diff-size and scope report
+  (files outside the goal). Orange reads findings, it does not re-run the tools.
+- **What it is asked for, in a fixed order:** (1) correctness bugs with file and line, (2) risks the checks cannot see (security, data loss,
+  a race, a change that breaks a promise in PLATINUM or CLAUDE.md), (3) architecture: does this fit the existing design, what would the
+  next change cost, what should be simpler, (4) a verdict: ship, fix first (a numbered list purple can act on), or redesign.
+- **What comes back:** one structured review card in the original purple chat (the fix list as keys: "have purple fix these"), so the loop
+  closes without him copying anything. Purple fixes, the checks run again, and the review can be asked a second time.
+- **Bounded:** one orange session per run, a token cap, logged on the goal. Never automatic; he taps it.
+- **Why it is cheap:** purple and the free tools do the volume; orange only reads a short, pre-chewed package.
+Built after the engine side exists (it needs the run-ended event and the goal branch), on the infra side: the offer key, the review script,
+the static-analysis step, the orange hand-off.
+
 ## The boundary (proposed by the engine side, 2026-10-26; held stable once the Captain picks the order)
 
 Two files in the goal's folder, `.skippy-goal/`, plus the existing Run API (nothing in-process):
