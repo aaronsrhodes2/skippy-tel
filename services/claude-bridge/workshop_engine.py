@@ -1231,13 +1231,16 @@ class Workshop:
                           "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": restate, "timeout": 10}]}]}}
         return self._settings_file("lane-settings.json", want)
 
-    def sdk_settings(self) -> str:
+    def sdk_settings(self, claude_md_excludes=None) -> str:
         """The SDK engine's settings file: only the hooks that stay scripts (a Core run's Read of a picture, and the compaction
-        backstop). The lane rule and the stop gate are callbacks in sdk_engine.py, not entries here."""
+        backstop), and the CLAUDE.md files this project must not load (claudeMdExcludes, from engines.json). The lane rule and the
+        stop gate are callbacks in sdk_engine.py, not entries here."""
         see = f'"{sys.executable}" "{Path(__file__).resolve().with_name("eyes.py")}"'
         restate = f'"{sys.executable}" "{Path(__file__).resolve().with_name("restate_request.py")}"'
         want = {"hooks": {"PreToolUse": [{"matcher": "Read", "hooks": [{"type": "command", "command": see, "timeout": 200}]}],
                           "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": restate, "timeout": 10}]}]}}
+        if claude_md_excludes:
+            want["claudeMdExcludes"] = list(claude_md_excludes)
         return self._settings_file("sdk-settings.json", want)
 
     def _settings_file(self, name: str, want: dict) -> str:

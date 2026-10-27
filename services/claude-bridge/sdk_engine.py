@@ -21,6 +21,11 @@ No timers at all (the Captain, 2026-10-26: a modest local model can take many ho
 the work). Claude Code's own tools have their limits, and a model call that fails says so (api_retry events); Stop in the chat is
 the only way a run ends early.
 
+BASE   a run starts with what Claude Code puts in front of the model: measured with its own get_context_usage on purple's project,
+       36,800 tokens, of which the built-in tools were 24,700 and the Captain's CLAUDE.md for the Skippy ecosystem (not this game's) 4,500.
+       Offering the coding tools only (CODING_TOOLS) and leaving that file out (engines.json `claude_md_excludes`) makes it 14,000, so a
+       segment has about 86,000 tokens to work in instead of 59,000.
+
 Switch: engines.json in the bridge's state folder, {"core": ["f-shifting-prophesy-purple"]} (or ["*"]), read at the start of
 every run, so the engine can be changed back with no restart. The Claude brain and every project not listed keep the CLI engine.
 What this engine does not do yet: the SKIPPY_PICTURE / POPUP / IMAGE text conventions (a Core run on this engine gets no
@@ -42,8 +47,11 @@ import run_state
 from lane_guard import Lane
 
 SEGMENT_TURNS = int(os.getenv("WORKSHOP_CORE_SEGMENT_TURNS", "120"))    # a segment's hard turn limit (Claude Code --max-turns): a backstop
-ROTATE_TOKENS = int(os.getenv("WORKSHOP_CORE_ROTATE_TOKENS", "90000"))  # the context at which a segment ends: well under the window's 131k,
-                                                                        # and under the ~100k where Claude Code would compact (and the coder fail to)
+ROTATE_TOKENS = int(os.getenv("WORKSHOP_CORE_ROTATE_TOKENS", "100000"))  # the context at which a segment ends. The window is 131,072 and the
+                                                                         # reply reserve 16,000, so a request may hold 115,000: this leaves 15,000
+                                                                         # for the one tool result that can still arrive. Claude Code's own compaction
+                                                                         # is off (DISABLE_AUTO_COMPACT): the coder fails its summary half the time
+CODING_TOOLS = ("Bash", "Read", "Edit", "Write", "Grep", "Glob", "TodoWrite", "Task", "WebFetch")   # Claude Code's built-ins this engine offers
 MAX_SEGMENTS = int(os.getenv("WORKSHOP_CORE_MAX_SEGMENTS", "8"))
 MAX_BUFFER = 16 * 1024 * 1024                                           # one line of Claude Code's output (a big tool result)
 LANE_TOOLS = "Edit|Write|MultiEdit|NotebookEdit|Bash"
@@ -217,6 +225,15 @@ class StopGate:
 OpenSession = Callable[[int, "str | None", dict], Any]        # (segment, resume, hooks) -> awaitable of an open session
 
 
+def context_overflow(ended: "Ended") -> bool:
+    """The request was too long for the model (a tool result landed after the last measurement): Claude Code's own error result, with
+    compaction off. It is a rotation, not a failure: the next segment starts from the handoff."""
+    if not ended.is_error:
+        return False
+    said = " ".join([*ended.errors, ended.text or "", ended.reason or ""]).lower()
+    return "prompt_too_long" in said or "prompt is too long" in said or "context length" in said or "context window" in said
+
+
 async def drive(run, *, clone: str, request: str, resume: str | None, open_session: OpenSession,
                 remember: Callable[[str], None], detail: Callable[[str, dict], str], lane: Lane,
                 segments: int = MAX_SEGMENTS, rotate_at: int = ROTATE_TOKENS) -> None:
@@ -269,6 +286,7 @@ async def drive(run, *, clone: str, request: str, resume: str | None, open_sessi
                 elif isinstance(ev, Did):
                     flush()
                     journal.did(ev.name, detail(ev.name, ev.args))
+                    journal.touched(ev.name, ev.args)
                     run.emit({"t": "tool", "name": ev.name, "detail": detail(ev.name, ev.args)})
                 elif isinstance(ev, Retry):
                     say(f"(the model call failed{f' ({ev.status})' if ev.status else ''}; retry {ev.attempt})")
@@ -286,7 +304,7 @@ async def drive(run, *, clone: str, request: str, resume: str | None, open_sessi
             return
         session_id = ended.session or session_id
         keep(session_id)
-        if rotating or ended.subtype == "error_max_turns":
+        if rotating or ended.subtype == "error_max_turns" or context_overflow(ended):
             flush()
             say(f"(fresh context: segment {n + 1}; the repository and my last messages carry over)")
             continue
@@ -344,14 +362,28 @@ def native_cli(claude_cmd: list[str]) -> str:
     raise FileNotFoundError(f"no native claude.exe beside {first}")
 
 
+def engine_options(state_dir: str) -> dict:
+    """The SDK engine's settings from engines.json (each optional, read at the start of every run): `tools` (Claude Code built-ins to
+    offer), `claude_md_excludes` (CLAUDE.md files, by absolute path, that must not be loaded), `house_tools` (the house MCP tools; off)."""
+    data = _engines(state_dir)
+    names = data.get("tools")
+    excl = data.get("claude_md_excludes")
+    return {"tools": [t for t in names if isinstance(t, str) and t] if isinstance(names, list) and names else list(CODING_TOOLS),
+            "claude_md_excludes": [p for p in excl if isinstance(p, str) and p] if isinstance(excl, list) else [],
+            "house_tools": data.get("house_tools") is True}
+
+
 def sdk_kwargs(*, cwd: str, env: dict, model: str, cli: str, prompt_file: str, primary: str, settings: str,
-               mcp: str | None, resume: str | None, max_turns: int = SEGMENT_TURNS) -> dict:
-    """ClaudeAgentOptions' arguments for one segment: the same launch the CLI engine makes, as data."""
+               mcp: str | None, resume: str | None, max_turns: int = SEGMENT_TURNS, tools: list[str] | None = None) -> dict:
+    """ClaudeAgentOptions' arguments for one segment: the same launch the CLI engine makes, as data. Auto-compaction is off: a segment
+    ends at ROTATE_TOKENS (drive), which does not depend on the model writing a good summary of itself."""
     kwargs: dict = dict(
-        cwd=cwd, env=env, model=model, cli_path=cli, max_turns=max_turns, max_buffer_size=MAX_BUFFER,
+        cwd=cwd, env={**env, "DISABLE_AUTO_COMPACT": "1"}, model=model, cli_path=cli, max_turns=max_turns, max_buffer_size=MAX_BUFFER,
         system_prompt={"type": "preset", "preset": "claude_code"},
         extra_args={"append-system-prompt-file": prompt_file, "system-prompt-snapshot": "off", "dangerously-skip-permissions": None},
         add_dirs=[primary], settings=settings)
+    if tools:
+        kwargs["tools"] = list(tools)
     if mcp:
         kwargs["mcp_servers"] = mcp
     if resume:
@@ -371,14 +403,16 @@ def run_core(shop, run, session: str | None) -> None:
         resume = session if run_state.can_resume(config, project.clone, session) else None
         removed = {k: "" for k in os.environ if k not in env}           # the SDK inherits os.environ: blank what child_env drops
         cli = native_cli(shop.claude_cmd)
-        settings, mcp = shop.sdk_settings(), shop.house_mcp_config()
+        opts = engine_options(shop.state_dir)
+        settings = shop.sdk_settings(opts["claude_md_excludes"])
+        mcp = shop.house_mcp_config() if opts["house_tools"] else None
         prompt_file = str(shop.prompt_path(run.project))
         turns, rotate = segment_turns(shop.state_dir), rotate_tokens(shop.state_dir)
         sessions: list[SdkSession] = []
 
         async def open_session(n: int, resume_id: str | None, hooks: dict):
             kwargs = sdk_kwargs(cwd=project.clone, env={**removed, **env}, model=we.CORE_MODEL, cli=cli, prompt_file=prompt_file,
-                                primary=project.primary, settings=settings, mcp=mcp, resume=resume_id, max_turns=turns)
+                                primary=project.primary, settings=settings, mcp=mcp, resume=resume_id, max_turns=turns, tools=opts["tools"])
             s = SdkSession(kwargs, hooks)
             sessions.append(s)
             return await s.open()

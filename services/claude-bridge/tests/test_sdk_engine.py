@@ -249,6 +249,7 @@ def test_the_switch_is_a_file_that_names_projects_and_defaults_to_the_cli(tmp_pa
     (tmp_path / "engines.json").write_text("[]")
     assert sdk.engine_for(str(tmp_path), "core", "p") == "cli"
     assert sdk.segment_turns(str(tmp_path)) == sdk.SEGMENT_TURNS and sdk.rotate_tokens(str(tmp_path)) == sdk.ROTATE_TOKENS
+    assert sdk.engine_options(str(tmp_path)) == {"tools": list(sdk.CODING_TOOLS), "claude_md_excludes": [], "house_tools": False}
 
 
 def test_a_segments_turn_budget_can_be_tuned_in_the_same_file(tmp_path):
@@ -268,7 +269,11 @@ def test_the_launch_is_the_cli_engines_launch_as_data():
                                "dangerously-skip-permissions": None}
     assert k["add_dirs"] == ["D:/w"] and k["settings"] == "D:/state/sdk-settings.json" and k["mcp_servers"] == "D:/state/house.json"
     bare = sdk.sdk_kwargs(cwd="D:/w", env={}, model="coder", cli="c", prompt_file="p", primary="D:/w", settings="s", mcp=None, resume=None)
-    assert "resume" not in bare and "mcp_servers" not in bare
+    assert "resume" not in bare and "mcp_servers" not in bare and "tools" not in bare
+    withtools = sdk.sdk_kwargs(cwd="D:/w", env={"A": "1"}, model="coder", cli="c", prompt_file="p", primary="D:/w", settings="s", mcp=None, resume=None,
+                               tools=["Read", "Edit"])
+    assert withtools["tools"] == ["Read", "Edit"]
+    assert withtools["env"] == {"A": "1", "DISABLE_AUTO_COMPACT": "1"}                # a segment ends at a measured context, not a summary
 
 
 def test_the_native_claude_is_found_beside_npms_shim(tmp_path):
@@ -354,6 +359,7 @@ def test_a_core_run_on_a_listed_project_goes_through_the_sdk_engine(core_shop, t
     assert s.kwargs["cli_path"] == "C:/fake/claude.exe" and s.kwargs["max_turns"] == sdk.SEGMENT_TURNS
     assert s.kwargs["env"]["ANTHROPIC_BASE_URL"] == "https://core.example" and s.kwargs["env"]["SKIPPY_HOME_TOKEN"] == ""
     assert set(s.hooks) == {"PreToolUse", "Stop"} and s.prompt == "hi"
+    assert s.kwargs["tools"] == list(sdk.CODING_TOOLS) and s.kwargs["env"]["DISABLE_AUTO_COMPACT"] == "1" and "mcp_servers" not in s.kwargs
     assert shop._sessions()[shop.session_key("skippytel", "conv-12345678", "core")] == "sdk-1"
     assert not shop.record.exists()                                  # the CLI engine (the fake claude) was never started
 
@@ -403,3 +409,44 @@ def test_stop_in_the_chat_cancels_an_sdk_run_and_closes_its_session(core_shop):
     assert shop.cancel("aaaaaaaa") is True
     finish(run)
     assert run.ok is False and run.error == "stopped" and shop.made[0].closed
+
+
+def test_engine_options_come_from_engines_json_and_are_checked(tmp_path):
+    (tmp_path / "engines.json").write_text(json.dumps({"core": ["*"], "tools": ["Read", "Bash", 7, ""], "claude_md_excludes": ["D:/x/CLAUDE.md", None],
+                                                       "house_tools": True}))
+    assert sdk.engine_options(str(tmp_path)) == {"tools": ["Read", "Bash"], "claude_md_excludes": ["D:/x/CLAUDE.md"], "house_tools": True}
+    for bad in ({"tools": []}, {"tools": "Read"}, {"tools": None, "house_tools": "yes", "claude_md_excludes": "x"}):
+        (tmp_path / "engines.json").write_text(json.dumps(bad))
+        assert sdk.engine_options(str(tmp_path)) == {"tools": list(sdk.CODING_TOOLS), "claude_md_excludes": [], "house_tools": False}
+
+
+def test_the_sdk_settings_name_the_claude_md_files_to_leave_out(shop):
+    plain = json.loads(Path(shop.sdk_settings()).read_text(encoding="utf-8"))
+    assert "claudeMdExcludes" not in plain
+    left = json.loads(Path(shop.sdk_settings(["D:/Aaron/development/CLAUDE.md"])).read_text(encoding="utf-8"))
+    assert left["claudeMdExcludes"] == ["D:/Aaron/development/CLAUDE.md"] and left["hooks"] == plain["hooks"]
+
+
+def test_a_request_too_long_for_the_model_is_a_rotation_not_a_failure(repo):
+    run = new_run()
+    long = Ended("error_during_execution", True, "s1", 5, None, ["Prompt is too long"], None)
+    opened, _, kept = go(run, repo, [[Opened("s1"), Said("Reading."), long], [Opened("s2"), ok("s2")]])
+    assert run.ok and len(opened) == 2 and kept == ["s1", "s2"]
+    assert any("segment 2" in t for t in texts(run)) and "segment 2 of the job above" in opened[1].prompt
+
+
+def test_other_errors_still_fail_and_only_a_too_long_error_counts_as_overflow():
+    assert sdk.context_overflow(Ended("error", True, "s", 1, None, ["Prompt is too long"], None))
+    assert sdk.context_overflow(Ended("error", True, "s", 1, None, [], "prompt_too_long"))
+    assert sdk.context_overflow(Ended("error", True, "s", 1, "Context window exceeded", [], None))
+    assert not sdk.context_overflow(Ended("error", True, "s", 1, None, ["rate limited"], None))
+    assert not sdk.context_overflow(Ended("success", False, "s", 1, "the prompt is too long, he said", [], None))     # a success is never an overflow
+
+
+def test_the_second_segments_handoff_lists_what_the_first_edited_first(repo):
+    (repo / "b.py").write_text("def later():\n    pass\n")
+    (repo / "a.txt").write_text("one\ntwo\n")                                  # newer than b.py, but b.py is the one it edited
+    run = new_run()
+    opened, _, _ = go(run, repo, [[Opened("s1"), Did("Edit", {"file_path": str(repo / "b.py")}), maxed("s1")], [ok("s2")]])
+    listing = opened[1].prompt.split("where their parts are")[1]
+    assert listing.index("b.py (2 lines): later:1") < listing.index("a.txt (2 lines)")
