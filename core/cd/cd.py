@@ -826,6 +826,7 @@ def main(argv: list[str]) -> int:
     if cmd == "bootstrap":                                # plan only, unless "apply" is typed
         return cd.bootstrap(apply=argv[1:2] == ["apply"])
     if cmd == "vendor":                                   # the Core deployer's Mentat build: <dest>/.vendor/sigma-ground
+        cd.cfg = json.loads((HERE / "deploy.json").read_text(encoding="utf-8"))      # (the pins live there; deploy() loads it, a bare command must too)
         cd.vendor(Path(argv[1]), star_control=False)
         return 0
     if cmd == "status":

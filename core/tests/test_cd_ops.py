@@ -291,3 +291,17 @@ def test_the_bootstrap_command_is_plan_unless_apply_is_typed(monkeypatch):
     monkeypatch.setattr(cd_mod.CD, "bootstrap", lambda self, apply=False: seen.append(apply) or 0)
     assert cd_mod.main(["bootstrap"]) == 0 and cd_mod.main(["bootstrap", "apply"]) == 0 and cd_mod.main(["bootstrap", "please"]) == 0
     assert seen == [False, True, False]
+
+
+def test_the_vendor_command_loads_the_pins_before_it_lays_out_the_build_context(tmp_path, monkeypatch):
+    """The Core deployer runs `cd.py vendor <repo>` before building Mentat. A bare command has no config loaded unless it loads it itself
+    (2026-10-27: it crashed on cfg and the Core deploy rolled back for hours)."""
+    seen = {}
+
+    def fake_vendor(self, src, star_control):
+        seen["pin"] = self.cfg["pins"]["SIGMA_GROUND_REF"]
+        seen["dest"], seen["star"] = src, star_control
+
+    monkeypatch.setattr(cd_mod.CD, "vendor", fake_vendor)
+    assert cd_mod.main(["vendor", str(tmp_path)]) == 0
+    assert len(seen["pin"]) == 40 and seen["dest"] == tmp_path and seen["star"] is False
