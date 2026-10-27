@@ -450,3 +450,14 @@ def test_the_second_segments_handoff_lists_what_the_first_edited_first(repo):
     opened, _, _ = go(run, repo, [[Opened("s1"), Did("Edit", {"file_path": str(repo / "b.py")}), maxed("s1")], [ok("s2")]])
     listing = opened[1].prompt.split("where their parts are")[1]
     assert listing.index("b.py (2 lines): later:1") < listing.index("a.txt (2 lines)")
+
+
+def test_picture_and_popup_lines_are_kept_for_the_end_of_the_run_and_never_shown(repo):
+    # what the CLI engine does with the same lines (workshop_prompt.md): the end-of-run step makes the jobs (Workshop._attach_images)
+    run = new_run()
+    go(run, repo, [[Opened("s1"), Said("Sprites coming.\nSKIPPY_PICTURE: a pixel-art knight, 32x32, transparent background"),
+                    Said("SKIPPY_POPUP: remove_background {\"_file\": \"art/knight.png\"}"),
+                    Said("SKIPPY_PICTURE_HQ: the title screen, a ruined tower at dusk\nSKIPPY_IMAGE: .skippy-shots/front.png"), ok()]])
+    assert texts(run) == ["Sprites coming."]
+    assert run.picture_prompts == [("a pixel-art knight, 32x32, transparent background", ""), ("the title screen, a ruined tower at dusk", "hq")]
+    assert run.popups == [("remove_background", {"_file": "art/knight.png"})] and run.image_paths == [".skippy-shots/front.png"]

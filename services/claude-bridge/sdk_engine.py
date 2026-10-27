@@ -28,8 +28,9 @@ BASE   a run starts with what Claude Code puts in front of the model: measured w
 
 Switch: engines.json in the bridge's state folder, {"core": ["f-shifting-prophesy-purple"]} (or ["*"]), read at the start of
 every run, so the engine can be changed back with no restart. The Claude brain and every project not listed keep the CLI engine.
-What this engine does not do yet: the SKIPPY_PICTURE / POPUP / IMAGE text conventions (a Core run on this engine gets no
-pictures made from its replies) until they are in-process tools.
+Pictures and pop-ups: the same text conventions as the CLI engine (SKIPPY_PICTURE[_HQ], SKIPPY_POPUP, SKIPPY_IMAGE lines in what the
+model says, workshop_prompt.md): `conventions` takes them out of each Said and keeps them on the run; the bridge's end-of-run step
+(Workshop._attach_images, run.before_finish) turns them into picture / popup / image events, exactly as for a CLI run.
 """
 from __future__ import annotations
 
@@ -234,6 +235,20 @@ def context_overflow(ended: "Ended") -> bool:
     return "prompt_too_long" in said or "prompt is too long" in said or "context length" in said or "context window" in said
 
 
+def conventions(run, text: str) -> str:
+    """`text` without its SKIPPY_IMAGE / SKIPPY_PICTURE[_HQ] / SKIPPY_POPUP lines; those go on the run (image_paths, picture_prompts,
+    popups) for the end-of-run step, the CLI engine's own parsers and limits (workshop_engine.split_*)."""
+    import workshop_engine as we                      # (here: workshop_engine imports this module)
+    said, shots = we.split_images(text)
+    said, wanted = we.split_pictures(said)
+    said, jobs = we.split_popups(said)
+    for attr, found in (("image_paths", shots), ("picture_prompts", wanted), ("popups", jobs)):
+        kept = getattr(run, attr, None)
+        if kept is not None:
+            kept.extend(found)
+    return said
+
+
 async def drive(run, *, clone: str, request: str, resume: str | None, open_session: OpenSession,
                 remember: Callable[[str], None], detail: Callable[[str, dict], str], lane: Lane,
                 segments: int = MAX_SEGMENTS, rotate_at: int = ROTATE_TOKENS) -> None:
@@ -280,9 +295,12 @@ async def drive(run, *, clone: str, request: str, resume: str | None, open_sessi
                     session_id = ev.session or session_id
                     keep(ev.session)
                 elif isinstance(ev, Said):
-                    journal.said(ev.text)
+                    said = conventions(run, ev.text)
+                    journal.said(said)
+                    if not said:                      # nothing but picture / pop-up lines: they're kept for the end of the run
+                        continue
                     flush()
-                    pending = ev.text
+                    pending = said
                 elif isinstance(ev, Did):
                     flush()
                     journal.did(ev.name, detail(ev.name, ev.args))
