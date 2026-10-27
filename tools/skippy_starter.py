@@ -41,6 +41,7 @@ DOCKER_DOWN_HEAL_S = 120
 BRIDGE_PORT = 9337
 RESUMES = ("7am", "4h", "manual")
 POLL_S = 10
+LOGS_EVERY_S = 30                                  # how often the container crashes and error lines go to the portal's log intake
 PORTAL = os.environ.get("PORTAL_URL", "https://skippy-portal-1015050363686.us-west1.run.app").rstrip("/")
 BRIDGE_URL = os.environ.get("CLAUDE_BRIDGE_URL", "http://127.0.0.1:9337").rstrip("/")
 DOCKER_EXE = os.environ.get("DOCKER_DESKTOP_EXE", r"C:\Program Files\Docker\Docker\Docker Desktop.exe")
@@ -98,6 +99,8 @@ class Starter:
         self.handled: dict[str, float] = {}
         self._lock = threading.Lock()
         self.resume_at: datetime | None = self._load_resume()
+        self._logs_at = -1e9                      # monotonic time of the last log round
+        self._shipper = None
         self.on_battery_since: float | None = None
         self.power_down = False                   # the UPS shutdown has started: nothing else runs
         self._ups: dict = {}
@@ -160,6 +163,40 @@ class Starter:
             if isinstance(r, dict) and r.get("Names"):
                 rows.append({"name": r["Names"], "state": r.get("State", ""), "status": r.get("Status", ""), "image": r.get("Image", "")})
         return rows
+
+    def watch_logs(self) -> None:
+        """Every LOGS_EVERY_S: a container that died or keeps restarting, and the error lines containers print, go to the portal (core/shipper.py:
+        spooled on disk first, so what a crash said survives the crash and the network). Never lets a log problem stop the starter."""
+        if self.power_down or self.clock() - self._logs_at < LOGS_EVERY_S or not self.token:
+            return
+        self._logs_at = self.clock()
+        try:
+            if not self.docker_up():
+                return
+            if self._shipper is None:
+                sys.path.insert(0, str(ROOT / "core"))
+                import shipper
+                self._shipper = shipper.Shipper("skippy-pc", self.root / "state" / "logs", lambda cmd, timeout=20: self.run(cmd, timeout)[1], self._post_logs)
+            rows = self.container_list()
+            counts = {}
+            if rows:
+                rc, out = self.run(["docker", "inspect", "--format", "{{.Name}} {{.RestartCount}}", *[r["name"] for r in rows]], 20)
+                for line in (out.splitlines() if rc == 0 else []):
+                    parts = line.strip().lstrip("/").split(" ")
+                    if len(parts) == 2 and parts[1].isdigit():
+                        counts[parts[0]] = int(parts[1])
+            for r in rows:
+                r["restarts"] = counts.get(r["name"], 0)
+            self._shipper.flush(self._shipper.collect(rows))
+        except Exception as e:  # noqa: BLE001
+            self.say(f"logs: {type(e).__name__}: {e}")
+
+    def _post_logs(self, rows: list[dict]) -> bool:
+        try:
+            self.http(f"{PORTAL}/home/logs", {"host": "skippy-pc", "records": rows}, {"Authorization": f"Bearer {self.token}"})
+            return True
+        except (OSError, ValueError, urllib.error.URLError):
+            return False
 
     def bridge(self) -> dict | None:
         try:
@@ -531,6 +568,7 @@ class Starter:
                     return
                 self.check_resume()
                 self.watch_docker()
+                self.watch_logs()
             except Exception as e:                                                  # noqa: BLE001 — the loop must never die
                 self.say(f"auto-start crashed ({type(e).__name__})")
             self.poll_once()

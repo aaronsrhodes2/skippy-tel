@@ -412,3 +412,51 @@ def test_the_power_coming_back_in_time_cancels_it():
     w.t[0] += ss.UPS_SHUTDOWN_AFTER_S - 10
     assert s.watch_power() is False                          # a new outage starts its own two minutes
     assert not any(c[0] == "shutdown" for c in w.cmds)
+
+
+def test_the_starter_ships_a_container_crash_to_the_portals_log_intake_and_keeps_it_if_the_portal_is_away(tmp_path):
+    w = LogWorld()
+    s = ss.Starter(run=w.run, http=w.http, token="tok", root=tmp_path, say=lambda m: None, clock=w.clock)
+    s.watch_logs()                                                                 # round one: learns what is running
+    assert w.logs == []
+    w.clock_t[0] += ss.LOGS_EVERY_S + 1
+    w.rows = [("skippytel-voice-gate", "exited", "Exited (137) 3 seconds ago")]
+    w.portal_down = True
+    s.watch_logs()                                                                 # it died, the portal is away: spooled, not lost
+    assert w.logs == [] and (tmp_path / "state" / "logs" / "spool.jsonl").exists()
+    w.clock_t[0] += ss.LOGS_EVERY_S + 1
+    w.portal_down = False
+    s.watch_logs()
+    crash = w.logs[0]
+    assert crash["kind"] == "crash" and crash["source"] == "docker/skippytel-voice-gate" and crash["fields"]["exit_code"] == 137
+    assert w.hosts == {"skippy-pc"}
+
+
+class LogWorld:
+    def __init__(self):
+        self.rows, self.logs, self.hosts, self.portal_down, self.clock_t = [("skippytel-voice-gate", "running", "Up 2 hours")], [], set(), False, [1000.0]
+
+    def clock(self):
+        return self.clock_t[0]
+
+    def run(self, cmd, timeout=120, cwd=None, env=None):
+        if cmd[:3] == ["docker", "ps", "-a"] and "{{json .}}" in cmd:
+            import json as _j
+            return 0, "\n".join(_j.dumps({"Names": n, "State": st, "Status": su, "Image": "img"}) for n, st, su in self.rows)
+        if cmd[:3] == ["docker", "ps", "-a"]:
+            return 0, "\n".join(st for _, st, _ in self.rows)
+        if cmd[:2] == ["docker", "ps"]:
+            return 0, "abc"
+        if cmd[:2] == ["docker", "inspect"]:
+            return 0, "\n".join(f"/{n} 0" for n, _, _ in self.rows)
+        if cmd[:2] == ["docker", "logs"]:
+            return 0, "whisper did not answer\nfatal: gone" if "--tail" in cmd else ""
+        return 0, ""
+
+    def http(self, url, data=None, headers=None, timeout=15):
+        if self.portal_down:
+            raise urllib.error.URLError("down")
+        if url.endswith("/home/logs"):
+            self.hosts.add(data["host"])
+            self.logs.extend(data["records"])
+        return {"ok": True}

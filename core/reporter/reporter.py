@@ -21,6 +21,10 @@ try:
     import quiet
 except ImportError:
     quiet = None
+try:
+    import shipper
+except ImportError:
+    shipper = None
 
 UPS_ENV = "/etc/nut/skippy-ups.env"            # SKIPPY_HOME_TOKEN, PORTAL_URL (core/install/ups.sh)
 CORE_ENV = "/etc/skippy-core/core.env"
@@ -148,6 +152,59 @@ def gather(run=sh, get=http_get, state: Path = STATE, key: str = "") -> dict:
             "vitals": vitals(), "busy": bool(quiet and quiet.busy())}
 
 
+UNITS = ("skippy-core-deployer", "skippy-core-doctor", "skippy-core-ci", "skippy-core-cd", "skippy-core-backup", "skippy-core-reporter", "docker")
+LOG_STATE = STATE / "reporter" / "logs"
+
+
+def journal_records(run=sh, state: Path = LOG_STATE) -> list[dict]:
+    """Warnings and errors from skippy-core's own services (the deployer, the doctor, CI, CD, the backup, docker) and the kernel's out-of-memory
+    kills, since the last cursor (the first time: the last two minutes). The cursor is saved after, so a line is shipped once."""
+    state.mkdir(parents=True, exist_ok=True)
+    out: list[dict] = []
+    jobs = (("units", ["-p", "warning", *[a for u in UNITS for a in ("-u", u)]], "journal/"),
+            ("kernel", ["-k", "-g", "Out of memory|oom-kill|Killed process"], "kernel/"))
+    for name, args, prefix in jobs:
+        cur_file = state / f"journal-{name}.cursor"
+        cursor = cur_file.read_text().strip() if cur_file.exists() else ""
+        cmd = ["journalctl", "-o", "json", "--no-pager", "-n", "200", *args, *(["--after-cursor", cursor] if cursor else ["--since", "-2min"])]
+        last = cursor
+        for line in run(cmd, 20).splitlines():
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(e, dict) or not e.get("MESSAGE") or not isinstance(e.get("MESSAGE"), str):
+                continue
+            last = e.get("__CURSOR") or last
+            prio = int(e.get("PRIORITY") or 6) if str(e.get("PRIORITY") or "6").isdigit() else 6
+            unit = str(e.get("_SYSTEMD_UNIT") or e.get("SYSLOG_IDENTIFIER") or name).replace(".service", "")
+            kind = "crash" if name == "kernel" else ("error" if prio <= 3 else "warn")
+            out.append({"source": prefix + unit, "level": "error" if prio <= 3 else "warn", "kind": kind, "msg": e["MESSAGE"][:600], "fields": {"priority": prio}, "trace": ""})
+        if last and last != cursor:
+            cur_file.write_text(last)
+    return out
+
+
+def post_logs(url: str, token: str, rows: list[dict]) -> bool:
+    req = urllib.request.Request(url + "/home/logs", data=json.dumps({"host": "skippy-core", "records": rows}).encode(), method="POST",
+                                 headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.status == 200
+    except OSError:
+        return False
+
+
+def ship_logs(url: str, token: str, containers_now: list[dict], run=sh, state: Path = LOG_STATE, post=None) -> int:
+    """Everything worth saying since last time goes to the portal's log intake, spooled first so a crash's last lines survive the network."""
+    if shipper is None:
+        return 0
+    send = post or (lambda rows: post_logs(url, token, rows))
+    s = shipper.Shipper("skippy-core", state, run, send)
+    records = s.collect(containers_now) + journal_records(run, state)
+    return s.flush(records)
+
+
 def post(url: str, token: str, body: dict) -> bool:
     req = urllib.request.Request(url + "/home/core-report", data=json.dumps(body).encode(), method="POST",
                                  headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
@@ -165,7 +222,12 @@ def main() -> int:
         print("core reporter: SKIPPY_HOME_TOKEN / PORTAL_URL missing in " + UPS_ENV, file=sys.stderr)
         return 1
     key = read_env(CORE_ENV).get("LLM_API_KEY", "")
-    return 0 if post(url, token, gather(key=key)) else 2
+    report = gather(key=key)
+    try:
+        ship_logs(url, token, report["containers"])           # never lets a log problem stop the report
+    except Exception as e:  # noqa: BLE001
+        print(f"core reporter: logs: {e}", file=sys.stderr)
+    return 0 if post(url, token, report) else 2
 
 
 if __name__ == "__main__":

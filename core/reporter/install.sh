@@ -9,7 +9,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 do_() { if (( APPLY )); then echo "+ $*"; "$@"; else echo "would: $*"; fi; }
 
 do_ install -d -m 0755 /opt/skippy-core/reporter
-do_ install -m 0644 "$HERE/../quiet.py" /opt/skippy-core/quiet.py
+do_ install -m 0644 "$HERE/../quiet.py" "$HERE/../shipper.py" /opt/skippy-core/
 do_ install -m 0755 "$HERE/reporter.py" /opt/skippy-core/reporter/reporter.py
 do_ install -m 0644 "$HERE/skippy-core-reporter.service" "$HERE/skippy-core-reporter.timer" /etc/systemd/system/
 do_ systemctl daemon-reload
