@@ -19,8 +19,6 @@ class Settings:
     # LLM routing
     ollama_base_url:    str = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
     ollama_model:       str = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
-    anthropic_api_key:  str = os.getenv("ANTHROPIC_API_KEY", "")
-    anthropic_model:    str = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
     gemini_api_key:     str = os.getenv("GEMINI_API_KEY", "")
     gemini_model:       str = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 

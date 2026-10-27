@@ -262,8 +262,8 @@
     // Who thinks: Claude, or Skippy Core's coder. Like the project, fixed once the conversation has a message (each brain's
     // Claude Code sessions live in its own config folder on skippy-pc, so switching mid-conversation would lose the thread).
     const BRAINS = {{ workshop_brains | tojson }}, brainPick = root.querySelector("#ps-brain");
-    let brain = store.get("ps-brain") || "claude";
-    if (!BRAINS.some(b => b.id === brain && b.ready)) brain = (BRAINS.find(b => b.ready) || {id: "claude"}).id;
+    let brain = store.get("ps-brain") || "core";
+    if (!BRAINS.some(b => b.id === brain && b.ready)) brain = (BRAINS.find(b => b.ready) || {id: "core"}).id;
     function setBrain(id) { brain = id; store.set("ps-brain", id); brainPick.value = id; }
     setBrain(brain);
     brainPick.addEventListener("change", () => { if (!turns.length && BRAINS.some(b => b.id === brainPick.value && b.ready)) setBrain(brainPick.value); else brainPick.value = brain; });

@@ -1248,7 +1248,7 @@ def test_dashboard_is_admin_only_and_shows_the_widgets(env):
                     "--- data disk\n/dev/sda         59G  50G  9G  85% /srv/games/data\n=== end ===\n")
     login(client, ADMIN)
     page = client.get("/me").data.decode()
-    assert "AB12-CD34" in page and "Spend (estimate)" in page and "Friends" in page
+    assert "AB12-CD34" in page and "Spend (estimate)" not in page and "Friends" in page
     assert "Memory at 91%" in page and "World disk at 85%" in page      # watcher warnings
     assert 'data-tel="tile:dashboard"' in client.get("/apps").data.decode()   # tile on the front page
 
@@ -1356,7 +1356,7 @@ def test_the_old_bilby_page_is_gone_and_its_addresses_lead_to_the_audio_service(
 # ── core health (skippy-tel-core) on the dashboard ────────────────────────────
 
 CORE_OK = {"status": "ok", "spec_version": "1", "bridge": True, "hung_tiers": None,
-           "tiers": {"claude": True, "nagatha": True, "elevenlabs": True},
+           "tiers": {"nagatha": True, "elevenlabs": True},
            "ollama": {"available": True, "default": "qwen2.5:7b", "default_present": True}}
 
 
@@ -1388,7 +1388,7 @@ def test_core_check_healthy_lists_tiers_and_every_service():
     import home as home_mod
     core = home_mod.core_check(_core_report(CORE_OK))
     assert core["verdict"] == "ok" and core["problems"] == [] and core["api_version"] == "1"
-    assert [t["name"] for t in core["tiers"]] == ["ollama", "claude", "nagatha", "elevenlabs", "bridge"]
+    assert [t["name"] for t in core["tiers"]] == ["ollama", "nagatha", "elevenlabs", "bridge"]
     assert all(t["ok"] for t in core["tiers"])
     assert [s["name"] for s in core["services"]] == ["Skippy AI", "Image Generator"]     # not just three of them
     assert core["services"][1]["available"] is False and core["problems"] == []          # not-deployed isn't a fault

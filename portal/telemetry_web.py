@@ -60,7 +60,7 @@ SAFE_VALUES = {
 }
 _TAP = re.compile(r"[a-z0-9:_.\-]{1,60}")
 LAUNCHER_TILES = ("skippy", "games", "play", "music", "video", "experiments", "tabletop", "dashboard", "admin")   # templates/home.html
-ME_PANES = ("mcp", "home", "server", "core", "activity-pane", "watcher", "spend", "people", "links", "weather")   # templates/me.html: pane:<id>, for the Graveyard
+ME_PANES = ("mcp", "home", "server", "core", "activity-pane", "watcher", "people", "links", "weather")   # templates/me.html: pane:<id>, for the Graveyard
 TAPS_PER_MIN = 120          # one person's beacon budget
 STUCK_AFTER_S = 900         # an event this old is still unacknowledged although home keeps pulling: the widget says so (normally < 1 min)
 

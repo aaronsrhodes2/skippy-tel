@@ -1442,7 +1442,6 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             codes=diagnostics.join_codes(snap), players=diagnostics.players_online(snap), res=res,
             warnings=warnings,
             session_cost=spend.session_cost(status.machine_type, status.minutes_up()) if status else None,
-            spend=spend.estimate(status.machine_type if status else "e2-standard-4"),
             friends=friends_list, chatter=discord_chatter(env),
             discord_ready=bool(app.config["DISCORD_BOT_TOKEN"]),
             experiments=experiments.EXPERIMENTS, hidden=experiments.hidden(vm), mentat_tools=mentat_tools,
@@ -1469,10 +1468,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         body = request.get_json(silent=True) or {}
         message = str(body.get("message") or "")
         try:
-            if str(body.get("brain") or "claude") == "core":
+            if str(body.get("brain") or "core") == "core":
                 pics.touch("core")                          # the agent thinking on Skippy Core: patient jobs there wait
             task = workshop.send(me(), str(body.get("conv") or ""), message, str(body.get("project") or ""), body.get("images"),
-                                 brain=str(body.get("brain") or "claude"))
+                                 brain=str(body.get("brain") or "core"))
         except workshop_mod.Busy as exc:
             return jsonify(error=str(exc)), 409
         except workshop_mod.NotReady as exc:

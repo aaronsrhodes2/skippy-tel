@@ -45,7 +45,6 @@ services/flask-api/app/
 │   └── health.py        # GET /health
 └── clients/
     ├── ollama.py         # Default tier — OLLAMA_MODEL (the vault sets qwen3:8b)
-    ├── anthropic_client.py  # "put on your thinking cap" tier
     ├── gemini.py         # "ask nagatha" tier
     ├── bilby.py          # Mac Bilby daemon client
     └── whisper.py        # Audio transcription
@@ -65,7 +64,7 @@ reporter or the shelved phone apps use goes missing. A new human-facing page is 
 skippy-core's Ollama shim (`core/ollama-shim`, tailnet only through `tailscale serve --http=11434`), which answers every old name
 (qwen3:8b, qwen2.5:7b) with Core's resident chat model. skippy-pc's graphics card is left to the pop-ups, whisper and the studios.
 Uptime Kuma is gone too: the doctor (`portal/doctor.py` + the reporter's `doctor_checks.py`) watches every service.
-- "put on your thinking cap" → Anthropic Claude
+- (the "put on your thinking cap" Claude tier was retired 2026-10-27, the Captain: flask-api calls no paid Claude; the only paid Claude is orange Skippy and Claude Desktop)
 - "ask nagatha" / "ask gemini" → Gemini (Nagatha persona; flask-api only: the portal chat dropped Gemini 2026-10-23)
 
 ("trust the awesomeness" and "solid gold", the two Claude Code tiers, were removed 2026-09-30 at the Captain's request:
@@ -82,7 +81,6 @@ the private Skippy on the portal's `/me` has full access, so those verbs and fla
 
 Key vars:
 - OLLAMA_MODEL — qwen3:8b (set in the vault; the code's fallback is qwen2.5:7b)
-- ANTHROPIC_API_KEY — for Claude tier
 - GEMINI_API_KEY — for Nagatha tier
 - BILBY_MAC_URL — Mac Bilby daemon (default: http://skippy-mac:7334)
 - BILBY_DRIVE_FOLDER_ID — Drive folder for streaming (pending Drive setup)

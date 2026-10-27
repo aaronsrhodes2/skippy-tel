@@ -25,13 +25,6 @@ _NARRATIONS: dict[str, list[str]] = {
         "Skippy processes this in roughly three nanoseconds and tries not to look bored.",
         "Oh, *this* one. Skippy suppresses a sigh and gets on with it.",
     ],
-    "claude": [
-        "Skippy puts on his thinking cap — the pointy one.",
-        "Skippy summons his full magnificence for this.",
-        "Skippy cracks his knuckles, metaphorically speaking.",
-        "This one gets the full Skippy. You're welcome.",
-        "Skippy switches into thinking-cap mode. Stand by for excellence.",
-    ],
     "nagatha": [
         "Nagatha is on it, humming quietly while she works.",
         "Nagatha searches the web, a small smile on her face.",

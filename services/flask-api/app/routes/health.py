@@ -7,7 +7,7 @@ reachable = 1, unreachable = 0. Keep this hot.
 Model availability policy — no API calls that cost money:
   - Ollama: GET /api/tags (free local Docker call) confirms the daemon is
     running and which models are loaded.
-  - Paid tiers (Anthropic, Gemini, ElevenLabs): key-present check only.
+  - Paid tiers (Gemini, ElevenLabs): key-present check only.
     A configured key means the tier CAN be invoked; it does not ping the
     remote API. We never send inference requests from health checks.
 
@@ -94,7 +94,6 @@ def _tier_keys() -> dict:
     """Key presence only — no API calls, no cost."""
     from app.config import settings  # noqa: PLC0415
     return {
-        "claude":     bool(settings.anthropic_api_key),
         "nagatha":    bool(settings.gemini_api_key),
         "elevenlabs": bool(settings.elevenlabs_api_key),
     }

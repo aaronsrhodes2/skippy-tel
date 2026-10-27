@@ -71,7 +71,7 @@ def core_check(report: dict | None) -> dict:
         elif ollama.get("default_present") is False:            # `is False`: an older core doesn't say
             problems.append(f"Skippy's default model {_text(ollama.get('default'), 60)} isn't installed in Ollama, "
                             "so default-tier chats fail (HTTP 503).")
-        for name, label in (("claude", "Claude"), ("nagatha", "Nagatha (Gemini)"), ("elevenlabs", "ElevenLabs")):
+        for name, label in (("nagatha", "Nagatha (Gemini)"), ("elevenlabs", "ElevenLabs")):
             if tiers_in.get(name) is False:
                 problems.append(f"{label} has no API key on skippy-pc.")
     for c in (report.get("status") or {}).get("services") or []:
@@ -81,7 +81,6 @@ def core_check(report: dict | None) -> dict:
         verdict = "degraded"
 
     tiers = [{"name": "ollama", "ok": ollama.get("available") is True and ollama.get("default_present") is not False},
-             {"name": "claude", "ok": tiers_in.get("claude") is True},
              {"name": "nagatha", "ok": tiers_in.get("nagatha") is True},
              {"name": "elevenlabs", "ok": tiers_in.get("elevenlabs") is True},
              {"name": "bridge", "ok": bool((health or {}).get("bridge"))}] if health else []

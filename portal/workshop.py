@@ -330,14 +330,14 @@ class Workshop:
 
     def brains(self) -> list[dict]:
         """Who the agent can think with: what skippy-pc lists, else Claude alone (a home reporter older than brains)."""
-        return self.home.workshop_brains() or [{"id": "claude", "label": "Claude Sonnet", "ready": True}]
+        return self.home.workshop_brains() or [{"id": "core", "label": "Skippy Core", "ready": True}]
 
     def project(self, pid: str | None) -> dict | None:
         """One offered project by id ("" = the default), or None when skippy-pc doesn't offer it."""
         pid = pid or DEFAULT_PROJECT
         return next((p for p in self.projects() if p["id"] == pid), None)
 
-    def send(self, owner: str, conv: str, message: str, project: str = "", images=None, brain: str = "claude") -> str:
+    def send(self, owner: str, conv: str, message: str, project: str = "", images=None, brain: str = "core") -> str:
         message = (message or "").strip()
         pictures = clean_images(images)
         if not message and not pictures:
@@ -350,7 +350,7 @@ class Workshop:
         if chosen is None:                       # only a project skippy-pc lists can be worked on: never a typed repo
             raise ValueError("skippy-pc doesn't offer that project.")
         project = chosen["id"]
-        brain = brain or "claude"
+        brain = brain or "core"
         if self.paused:
             raise Paused(PAUSED_MESSAGE)
         if self.briefly_silent():

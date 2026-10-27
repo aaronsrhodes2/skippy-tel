@@ -558,7 +558,7 @@ def test_privacy_says_who_sees_it_where_it_is_kept_for_how_long_and_how_to_have_
     assert "Aaron only" in page and "isn't shared" in page
     assert "skippy-pc" in page and f"{tel_mod.KEEP_DAYS} days" in page and tel_mod.KEEP_DAYS == 180
     assert "Ask Aaron" in page and "delete everything recorded under your email" in page
-    assert "IP address" in page and "Anthropic" in page and "Cloud Run" in page       # what else is true, said plainly
+    assert "IP address" in page and "Skippy Core" in page and "Anthropic" not in page and "Cloud Run" in page       # what else is true, said plainly
 
 
 def test_privacy_is_reachable_signed_in_with_a_back_button():

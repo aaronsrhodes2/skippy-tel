@@ -18,7 +18,6 @@
    "GCP_PROJECT": "skippy-tel",
    "GCP_ZONE": "us-west1-b",
    "GCP_INSTANCE": "skippy-games",
-   "CHAT_MODEL": "claude-haiku-4-5",
    "DISCORD_INVITE": "gPTVS7Hmj",
    "PORTAL_URL": "https://makerportal.live",
    "MENTAT_URL": "https://skippy-mentat-1015050363686.us-west1.run.app",
