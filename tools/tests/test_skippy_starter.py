@@ -161,7 +161,7 @@ def test_each_poll_tells_the_portal_how_things_are_with_the_home_token_and_nothi
     s.poll_once(threaded=False)
     data, headers = w.posts[0]
     assert headers == {"Authorization": "Bearer home-token"} and data["results"] == []
-    assert data["status"] == {"docker": True, "containers_up": 3, "containers_total": 3, "bridge": True, "busy": True, "supervisor": True, "working": "", "resume_at": ""}
+    assert data["status"] == {"docker": True, "containers_up": 3, "containers_total": 3, "bridge": True, "busy": True, "supervisor": True, "working": "", "resume_at": "", "containers": []}
 
 
 def test_a_request_from_the_portal_is_done_once_and_its_result_goes_back_on_the_next_poll():
