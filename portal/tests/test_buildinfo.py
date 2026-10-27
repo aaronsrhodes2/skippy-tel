@@ -101,7 +101,7 @@ def test_version_is_public_json_and_never_cached(monkeypatch):
     assert resp.status_code == 200 and resp.mimetype == "application/json"
     assert resp.headers["Cache-Control"] == "no-store"
     body = resp.get_json()
-    assert set(body) == {"commit", "short", "built_at", "revision", "started_at"}
+    assert set(body) == {"commit", "short", "built_at", "revision", "started_at", "popups"}
     assert body["commit"] == SHA and body["short"] == "8adcd7e"
     assert body["built_at"] == "2026-09-30T19:03:12Z" and body["revision"] == "skippy-portal-00042-abc"
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", body["started_at"])
@@ -130,7 +130,7 @@ def test_version_holds_no_secret(monkeypatch):
     text = client.get("/version").get_data(as_text=True)
     for secret in ("sentinel", "sk-ant", SETTINGS["SECRET_KEY"] + "x", SETTINGS["GOOGLE_CLIENT_SECRET"]):
         assert secret not in text
-    assert set(json.loads(text)) == {"commit", "short", "built_at", "revision", "started_at"}   # a closed list, not "whatever is in the environment"
+    assert set(json.loads(text)) == {"commit", "short", "built_at", "revision", "started_at", "popups"}   # a closed list, not "whatever is in the environment"
 
 
 def test_a_signed_in_poll_of_version_is_not_a_page_view():
