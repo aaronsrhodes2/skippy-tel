@@ -10,7 +10,7 @@
    lines; a server opens into its containers, models and MCPs, each with a lamp. Pan with a drag, zoom with the wheel or two fingers.
    Back and Close sit side by side and look different (the Captain's rule): an arrow steps up one level, a cross leaves the sheet. #}
 <section class="stat" id="stat" data-heal='{{ heal_names | tojson }}' data-state-url="{{ url_for('status.state_json') }}"
-         data-heal-url="{{ url_for('status.heal') }}" data-repair-url="{{ url_for('status.repair') }}" data-logs-url="{{ url_for('status.logs') }}">
+         data-heal-url="{{ url_for('status.heal') }}" data-repair-url="{{ url_for('status.repair') }}" data-logs-url="{{ url_for('status.logs') }}" data-probe-url="{{ url_for('status.probe') }}">
   <div class="bar">
     <button type="button" class="key" id="s-repair" aria-label="Put everything back" title="Put everything back"><svg class="g" aria-hidden="true"><use href="#g-retry"/></svg></button>
     <button type="button" class="chip" id="s-problems" aria-label="Problems" title="Problems"><svg class="g" aria-hidden="true"><use href="#g-gauge"/></svg><b id="s-count">0</b></button>

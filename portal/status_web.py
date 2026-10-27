@@ -11,17 +11,23 @@ from __future__ import annotations
 from flask import Blueprint, abort, jsonify, render_template, request
 
 import auth
+import brains
 import buildinfo
+import doctor as doctor_mod
 import logs as logs_mod
 import recovery
 import starter as starter_mod
+import status as status_mod
 
 REPAIR_LIMIT, REPAIR_WINDOW_S = 2, 300
 
 
-def init_app(app, status, home, starter, doctor, workshop, limiter, vm_status, logstore=None) -> None:
+def init_app(app, status, home, starter, doctor, workshop, limiter, vm_status, logstore=None, probes=None) -> None:
     bp = Blueprint("status", __name__)
     app.extensions["status"] = status
+    probes = probes if probes is not None else status_mod.Probes(
+        lambda model: doctor_mod.core_test(brains.CORE.base_url(), brains.CORE.key(), model))
+    app.extensions["probes"] = probes
     logstore = logstore if logstore is not None else logs_mod.LogStore()
     app.extensions["logs"] = logstore
 
@@ -32,7 +38,7 @@ def init_app(app, status, home, starter, doctor, workshop, limiter, vm_status, l
         vm, _ = vm_status()
         return status.tree(
             home_online=home.online(), home_age=home.age(), home_report=home.report, starter_view=starter.view(),
-            portal=buildinfo.info(), games_vm={"status": vm.status} if vm else None, core_verdict=home.core(), activity=logstore.activity())
+            portal=buildinfo.info(), games_vm={"status": vm.status} if vm else None, core_verdict=home.core(), activity=logstore.activity(), probes=probes.view())
 
     @bp.get("/status")
     @auth.admin_required
@@ -59,6 +65,18 @@ def init_app(app, status, home, starter, doctor, workshop, limiter, vm_status, l
         resp = jsonify(records=rows, quiet={h: int(logstore.clock() - at) for h, at in logstore.received.items()})
         resp.headers["Cache-Control"] = "private, no-store"
         return resp
+
+    @bp.post("/status/probe")
+    @auth.admin_required
+    def probe():
+        same_origin_or_abort()
+        if not limiter.allow("status:probe", 8, 300):
+            return jsonify(ok=False, why="That's a lot of probes: give it a few minutes."), 429
+        names = (request.get_json(silent=True) or {}).get("names")
+        if names == "all":
+            names = list(status_mod.KNOWN_CORE_MODELS)
+        ok, why = probes.start(names, busy=bool((status.core or {}).get("busy")))
+        return jsonify(ok=ok, why=why), 200 if ok else 409
 
     @bp.post("/status/heal")
     @auth.admin_required

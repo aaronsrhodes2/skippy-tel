@@ -58,6 +58,56 @@ def container_lamp(c: dict) -> str:
     return "degraded"
 
 
+KNOWN_CORE_MODELS = ("chat", "coder", "router", "vision")      # llama-swap's slots (core/models.json): shown even when one is not loaded right now
+
+
+class Probes:
+    """A tiny test question to a model, to see that it answers (the Captain, 2026-10-27: "send a test prompt to dormant models to see if they
+    respond"). Straight to Skippy Core's Messages API through core_test (doctor.py), one model at a time, in the background; the answer is
+    "responded in N ms" or why not. A sweep never starts while the private Skippy is working on the box, and never two at once."""
+
+    def __init__(self, test, clock=time.time):
+        self.test, self.clock = test, clock           # test(model) -> (ok, why, ms)
+        self.results: dict[str, dict] = {}
+        self.running: str | None = None
+        self._lock = threading.Lock()
+
+    def start(self, names, busy: bool, spawn=None) -> tuple[bool, str]:
+        names = [n for n in (names if isinstance(names, list) else []) if n in KNOWN_CORE_MODELS]
+        if not names:
+            return False, "Nothing to ask: name one of " + ", ".join(KNOWN_CORE_MODELS) + "."
+        if busy:
+            return False, "The private Skippy is working on skippy-core: probes wait until it is idle (they would load models under it)."
+        with self._lock:
+            if self.running:
+                return False, f"Already asking {self.running}."
+            self.running = names[0]
+        (spawn or self._thread)(names)
+        return True, "Asking " + ", ".join(names) + "."
+
+    def _thread(self, names) -> None:
+        threading.Thread(target=self.run, args=(names,), daemon=True).start()
+
+    def run(self, names) -> None:
+        try:
+            for name in names:
+                with self._lock:
+                    self.running = name
+                try:
+                    ok, why, ms = self.test(name)
+                except Exception as e:  # noqa: BLE001 — a probe that blows up is a failed probe
+                    ok, why, ms = False, f"error ({type(e).__name__})", 0
+                with self._lock:
+                    self.results[name] = {"ok": bool(ok), "why": _s(why, 120), "ms": int(ms), "at": int(self.clock())}
+        finally:
+            with self._lock:
+                self.running = None
+
+    def view(self) -> dict:
+        with self._lock:
+            return {"results": {k: dict(v) for k, v in self.results.items()}, "running": self.running}
+
+
 class Status:
     def __init__(self, clock=time.time):
         self.clock = clock
@@ -84,7 +134,7 @@ class Status:
 
     # ── the map ────────────────────────────────────────────────────────────────
     def tree(self, *, home_online: bool, home_age: int | None, home_report: dict | None, starter_view: dict, portal: dict,
-             games_vm: dict | None, core_verdict: dict | None, activity: dict | None = None) -> dict:
+             games_vm: dict | None, core_verdict: dict | None, activity: dict | None = None, probes: dict | None = None) -> dict:
         """The whole map as plain data. Every argument is read from the portal's own objects by the route; nothing here calls out."""
         report = home_report or {}
         st = starter_view.get("status") or {}
@@ -115,6 +165,14 @@ class Status:
             for m in core["models"]:
                 core_serves.append({"kind": "model", "name": m["name"], "lamp": "ok" if m["state"] == "ready" else ("degraded" if m["state"] else "off"),
                                     "detail": m["detail"] or m["state"]})
+            have = {s["name"] for s in core_serves}
+            for name in KNOWN_CORE_MODELS:                 # a slot that is not loaded right now is still a model he can ask
+                if name not in have:
+                    core_serves.append({"kind": "model", "name": name, "lamp": "off", "detail": "not loaded: it loads when asked"})
+            for s in core_serves:
+                if s["kind"] == "model":
+                    s["probe"] = ((probes or {}).get("results") or {}).get(s["name"])
+                    s["asking"] = (probes or {}).get("running") == s["name"]
             if core["deployer"]["state"] in ("failed", "rolled-back", "refused", "ci-failed"):
                 core_state = "degraded" if core_fresh else core_state
             if not core["doctor"]["ok"] and core_fresh:

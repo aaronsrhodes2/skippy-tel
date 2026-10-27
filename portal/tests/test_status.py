@@ -29,7 +29,7 @@ def test_a_fresh_core_report_is_ok_and_its_models_and_containers_get_lamps():
     assert core["state"] == "degraded"                                    # a restarting container
     lamps = {c["name"]: c["lamp"] for c in core["containers"]}
     assert lamps == {"skippycore-mentat-1": "ok", "skippycore-llm-1": "down"}
-    assert {s["name"]: s["lamp"] for s in core["serves"]} == {"chat": "ok", "coder": "degraded"}
+    assert {s["name"]: s["lamp"] for s in core["serves"]} == {"chat": "ok", "coder": "degraded", "router": "off", "vision": "off"}   # a slot not loaded is still listed
     assert any("skippycore-llm-1" in p["what"] for p in tree(st)["problems"])
 
 
@@ -128,3 +128,53 @@ def test_the_user_access_key_sits_by_logout_for_the_captain_only(world):
     client.get("/auth/logout")
     login(client, ADMIN)
     assert b'aria-label="User access"' in client.get("/apps").data
+
+
+# ── probes: a test question to each model ─────────────────────────────────────
+def test_a_probe_records_how_each_model_answered_one_at_a_time_and_never_while_the_box_is_busy():
+    asked = []
+
+    def test(model):
+        asked.append(model)
+        return (model != "coder", "" if model != "coder" else "no answer in time", 1200)
+    p = status_mod.Probes(test, clock=lambda: 5000.0)
+    ok, why = p.start(["chat", "coder", "evil; rm"], busy=True)
+    assert ok is False and "private Skippy" in why and asked == []                      # the box is busy: nothing is loaded under the run
+    ok, why = p.start(["nope"], busy=False)
+    assert ok is False and "Nothing to ask" in why
+    ok, why = p.start(["chat", "coder", "evil; rm"], busy=False, spawn=lambda names: p.run(names))
+    assert ok is True and asked == ["chat", "coder"]                                    # only known slots are asked; the junk name is dropped
+    got = p.view()
+    assert got["running"] is None and got["results"]["chat"] == {"ok": True, "why": "", "ms": 1200, "at": 5000}
+    assert got["results"]["coder"]["ok"] is False and got["results"]["coder"]["why"] == "no answer in time"
+
+
+def test_a_probe_that_blows_up_is_a_failed_probe_and_two_never_run_at_once():
+    def boom(model):
+        raise RuntimeError("x")
+    p = status_mod.Probes(boom)
+    p.start(["chat"], busy=False, spawn=lambda names: p.run(names))
+    assert p.view()["results"]["chat"]["ok"] is False and "RuntimeError" in p.view()["results"]["chat"]["why"]
+    q = status_mod.Probes(lambda m: (True, "", 1))
+    q.running = "chat"
+    assert q.start(["coder"], busy=False)[0] is False                                    # one at a time
+
+
+def test_the_probe_answer_shows_on_the_models_row_and_the_route_guards_it(world):
+    app, client = world
+    h = {"Authorization": f"Bearer {app.extensions['home'].pair()}"}
+    client.post("/home/core-report", json={"models": [{"name": "chat", "state": "ready"}], "busy": False}, headers=h)
+    app.extensions["probes"].test = lambda model: (True, "", 900)
+    login(client, ADMIN)
+    own = {"Origin": "http://localhost"}
+    assert client.post("/status/probe", json={"names": ["chat"]}).status_code == 403              # not from the page
+    spawned = []
+    app.extensions["probes"]._thread = lambda names: spawned.append(names)
+    assert client.post("/status/probe", json={"names": "all"}, headers=own).status_code == 200 and spawned == [["chat", "coder", "router", "vision"]]
+    app.extensions["probes"].run(["chat"])
+    core = next(m for m in client.get("/status/state").get_json()["machines"] if m["id"] == "skippy-core")
+    chat = next(s for s in core["serves"] if s["name"] == "chat")
+    assert chat["probe"]["ok"] is True and chat["probe"]["ms"] == 900
+    app.extensions["status"].core["busy"] = True
+    app.extensions["probes"].running = None
+    assert client.post("/status/probe", json={"names": ["chat"]}, headers=own).status_code == 409

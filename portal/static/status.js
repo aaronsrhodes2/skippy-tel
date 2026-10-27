@@ -96,7 +96,7 @@
   function key(glyph, label, onClick) {
     const b = html("button", "key"); b.type = "button"; b.setAttribute("aria-label", label); b.title = label;
     b.innerHTML = '<svg class="g" aria-hidden="true"><use href="#g-' + glyph + '"/></svg>';
-    b.addEventListener("click", onClick);
+    b.addEventListener("click", (ev) => onClick(ev));
     return b;
   }
   // The log lines: a screen at a time, newest first, filtered by machine, by errors only, or by one source (a container's own).
@@ -131,6 +131,9 @@
       pageRows(rows, Math.max(3, Math.floor((sheet.clientHeight - 200) / 66)));
       body.prepend(bar);
     }).catch(() => say("Couldn't read the logs."));
+  }
+  function probe(names) {
+    post(root.dataset.probeUrl, {names}).then((r) => { say(r.why); setTimeout(load, 1500); });
   }
   function healKey(name) {
     const b = html("button", "key"); b.type = "button";
@@ -183,7 +186,14 @@
     for (const [k, v] of Object.entries(m.vitals || {})) rows.push(row("off", k.replace(/_/g, " "), String(v)));
     const opens = (r, part) => { r.classList.add("tap"); r.addEventListener("click", () => { openKid = part; page = 0; render(); }); return r; };   // a row opens its own card
     for (const c of m.containers) rows.push(opens(row(c.lamp, c.name, c.status || c.state), {lamp: c.lamp, name: c.name, kind: "c", ref: c}));
-    for (const s of m.serves) rows.push(opens(row(s.lamp, s.name, s.detail || s.kind), {lamp: s.lamp, name: s.name, kind: "s", ref: s}));
+    for (const s of m.serves) {
+      const pr = s.probe ? (s.probe.ok ? "answered in " + (s.probe.ms / 1000).toFixed(1) + " s" : "no answer: " + s.probe.why) : "";
+      const detail = s.asking ? "asking\u2026" : (pr ? pr : (s.detail || s.kind));
+      const r = opens(row(s.probe && !s.probe.ok ? "degraded" : s.lamp, s.name, detail), {lamp: s.lamp, name: s.name, kind: "s", ref: s});
+      if (s.kind === "model" && m.id === "skippy-core") r.append(key("play", "Ask " + s.name + " a test question", (ev) => { ev.stopPropagation(); probe([s.name]); }));
+      rows.push(r);
+    }
+    if (m.id === "skippy-core") rows.push(row("off", "ask every model a test question", "", key("play", "Probe every model", () => probe("all"))));
     if (!rows.length) rows.push(row(m.state, "nothing reported yet", ""));
     pageRows(rows, perPage);
   }
