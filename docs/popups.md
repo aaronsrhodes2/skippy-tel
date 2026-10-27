@@ -4,8 +4,9 @@
 (`{"popups": [ ... ]}`, same shape as `services/popups/registry.json`) plus your own container, defined in
 `services/<family>-popups/compose.yml` as its own Compose project on the external network `skippytel_default` (copy
 `services/popups/compose.yml`; give it a `name:` and a `container_name`). You never edit a shared file. Your service answers
-`GET /health` with `{"ready": true}` (add `loaded`, `gpu_free_pct`, `gpu_util_pct`, `gpu_free_gib` if you can, as the picture studio
-does), and `POST <endpoint>` with the JSON body `{"args": {...the tool's arguments...}, "input": {"type", "name", "b64"}}` (`input`
+`GET /health` with the readiness contract (PLATINUM section 24: a 200 is not "fine"): `ready`, `accepting`, `jobs` (running, queued, oldest_s), `stuck_s`,
+`detail` in plain words when not ready (`core/ready.py` is the helper; keep an identical copy beside your service and add it to tools/tests/test_ready_copies.py);
+add `loaded`, `gpu_free_pct`, `gpu_util_pct`, `gpu_free_gib` if you can, as the picture studio does, and `POST <endpoint>` with the JSON body `{"args": {...the tool's arguments...}, "input": {"type", "name", "b64"}}` (`input`
 only when the person attached a file or the agent named one, at most ~1 MB of file), replying with the result's raw bytes under its
 own `Content-Type` (one of your entry's `outputs`, at most 25 MB), or a non-2xx with `{"error": "plain words"}`. That is all: the home
 reporter reads the registry from its mount (no rebuild, re-read when a file changes), advertises your pop-up while `/health` is ready,
