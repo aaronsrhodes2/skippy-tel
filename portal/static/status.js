@@ -11,7 +11,16 @@
   const title = document.getElementById("s-title");
   const note = document.getElementById("s-note");
   const HEAL = new Set(JSON.parse(root.dataset.heal || "[]"));
-  const POS = { "skippy-portal": [500, 90], "skippy-pc": [170, 330], "skippy-core": [830, 330], "games-vm": [500, 550] };
+  // Two layouts: a wide window spreads the machines out; a phone held upright stacks them in a tall box so the words stay readable.
+  const LAYOUTS = {
+    wide: {box: [1000, 640], pos: {"skippy-portal": [500, 90], "skippy-pc": [170, 330], "skippy-core": [830, 330], "games-vm": [500, 550]}},
+    tall: {box: [560, 900], pos: {"skippy-portal": [280, 110], "skippy-pc": [150, 420], "skippy-core": [410, 420], "games-vm": [280, 760]}},
+  };
+  let layout = LAYOUTS.wide, POS = layout.pos;
+  function pickLayout() {
+    const next = map.clientWidth && map.clientHeight && map.clientWidth < map.clientHeight ? LAYOUTS.tall : LAYOUTS.wide;
+    if (next !== layout) { layout = next; POS = layout.pos; fit(); draw(); }
+  }
   const W = 190, H = 84, CUT = 14;
 
   let data = null, open = null, openKid = null, page = 0, view = { x: 0, y: 0, w: 1000, h: 640 };
@@ -26,7 +35,7 @@
   const worst = (lamps) => ["down", "degraded", "stale", "off", "ok"].find((l) => lamps.includes(l)) || "ok";
 
   function applyView() { map.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`); }
-  function fit() { view = { x: 0, y: 0, w: 1000, h: 640 }; applyView(); }
+  function fit() { view = { x: 0, y: 0, w: layout.box[0], h: layout.box[1] }; applyView(); }
 
   function cutBox(x, y, w, h, c) {
     return `${x - w / 2 + c},${y - h / 2} ${x + w / 2},${y - h / 2} ${x + w / 2},${y + h / 2 - c} ${x + w / 2 - c},${y + h / 2} ${x - w / 2},${y + h / 2} ${x - w / 2},${y - h / 2 + c}`;
@@ -79,10 +88,49 @@
   }
 
   function row(lamp, name, detail, key) {
-    const r = html("div", "row");
+    const r = html("div", "hrow");
     r.append(html("span", `dot ${lamp}`), html("span", "nm", name), html("span", "dt", detail || ""));
     if (key) r.append(key);
     return r;
+  }
+  function key(glyph, label, onClick) {
+    const b = html("button", "key"); b.type = "button"; b.setAttribute("aria-label", label); b.title = label;
+    b.innerHTML = '<svg class="g" aria-hidden="true"><use href="#g-' + glyph + '"/></svg>';
+    b.addEventListener("click", onClick);
+    return b;
+  }
+  // The log lines: a screen at a time, newest first, filtered by machine, by errors only, or by one source (a container's own).
+  let logFilter = {};
+  function showLogs(filter) {
+    logFilter = Object.assign({}, filter || {});
+    current = {id: "logs", label: "Logs"}; openKid = null; open = null; page = 0; draw(); sheet.hidden = false;
+    renderLogs();
+  }
+  function renderLogs() {
+    if (!current || current.id !== "logs") return;
+    title.textContent = "Logs" + (logFilter.source ? " \u00b7 " + logFilter.source.replace(/^docker\//, "") : "");
+    const qs = new URLSearchParams();
+    ["host", "source", "level"].forEach((k) => { if (logFilter[k]) qs.set(k, logFilter[k]); });
+    qs.set("limit", "300");
+    fetch(root.dataset.logsUrl + "?" + qs, {credentials: "same-origin", cache: "no-store"}).then((r) => r.json()).then((d) => {
+      if (!current || current.id !== "logs") return;
+      const bar = html("div", "hrow");
+      ["", "skippy-pc", "skippy-core", "games-vm", "portal"].forEach((h) => {
+        const b = html("button", "chip" + ((logFilter.host || "") === h ? " on" : ""), h ? h.replace("skippy-", "") : "all"); b.type = "button";
+        b.addEventListener("click", () => { logFilter.host = h; page = 0; renderLogs(); }); bar.append(b);
+      });
+      const err = html("button", "chip" + (logFilter.level === "error" ? " on" : ""), "errors"); err.type = "button";
+      err.addEventListener("click", () => { logFilter.level = logFilter.level === "error" ? "" : "error"; page = 0; renderLogs(); }); bar.append(err);
+      const rows = d.records.map((r) => {
+        const one = row(r.level === "error" ? "down" : r.level === "warn" ? "degraded" : "ok", r.msg.split("\n")[0].slice(0, 140),
+                        r.ts.slice(11, 19) + " " + r.host.replace("skippy-", "") + " " + r.source.replace(/^docker\//, ""));
+        one.classList.add("log");
+        return one;
+      });
+      if (!rows.length) rows.push(row("ok", "no lines match", ""));
+      pageRows(rows, Math.max(3, Math.floor((sheet.clientHeight - 200) / 66)));
+      body.prepend(bar);
+    }).catch(() => say("Couldn't read the logs."));
   }
   function healKey(name) {
     const b = html("button", "key"); b.type = "button";
@@ -92,17 +140,18 @@
     return b;
   }
   function pageRows(rows, perPage) {
-    const rowsBox = html("div", "rows");
+    const rowsBox = html("div", "hrows");
     const pages = Math.max(1, Math.ceil(rows.length / perPage));
     page = Math.min(page, pages - 1);
     rows.slice(page * perPage, page * perPage + perPage).forEach((r) => rowsBox.append(r));
-    const pager = html("div", "pager");
+    const pager = html("div", "hpager");
     const prev = html("button", "key"), next = html("button", "key");
     prev.type = next.type = "button";
     prev.innerHTML = '<svg class="g" aria-hidden="true"><use href="#g-up"/></svg>'; prev.setAttribute("aria-label", "Previous page");
     next.innerHTML = '<svg class="g" aria-hidden="true"><use href="#g-down"/></svg>'; next.setAttribute("aria-label", "Next page");
     prev.disabled = page === 0; next.disabled = page >= pages - 1;
-    prev.onclick = () => { page--; render(); }; next.onclick = () => { page++; render(); };
+    const again = () => (current && current.id === "logs" ? renderLogs() : render());
+    prev.onclick = () => { page--; again(); }; next.onclick = () => { page++; again(); };
     pager.append(prev, html("span", "", `${page + 1} / ${pages}`), next);
     body.replaceChildren(rowsBox, pager);
   }
@@ -121,6 +170,9 @@
       rows.push(row(openKid.lamp, openKid.name, r.state || r.detail || ""));
       if (openKid.kind === "c") {
         [["status", r.status], ["image", r.image], ["restarts", r.restarts], ["cpu %", r.cpu], ["memory MB", r.mem_mb]].forEach(([k, v]) => { if (v !== null && v !== undefined && v !== "") rows.push(row("off", k, String(v))); });
+        const lg = r.logs;
+        rows.push(row(lg && lg.errors ? "degraded" : lg ? "ok" : "off", "its log lines (15 min)", lg ? lg.n + " lines, " + lg.errors + " errors" : "none",
+                      key("sheet", "Show its log lines", () => showLogs({host: m.id, source: "docker/" + r.name}))));
         if (m.id === "skippy-pc" && HEAL.has(r.name.replace(/^skippytel-/, ""))) rows.push(row("off", "heal this one", "", healKey(r.name.replace(/^skippytel-/, ""))));
       }
       pageRows(rows, perPage);
@@ -129,8 +181,9 @@
     title.textContent = `${m.label} · ${m.state}`;
     if (m.deployer && m.deployer.state) rows.push(row(m.deployer.state === "ok" ? "ok" : "degraded", "deploys", `${m.deployer.state} ${m.deployer.commit || ""}`));
     for (const [k, v] of Object.entries(m.vitals || {})) rows.push(row("off", k.replace(/_/g, " "), String(v)));
-    for (const c of m.containers) rows.push(row(c.lamp, c.name, c.status || c.state));
-    for (const s of m.serves) rows.push(row(s.lamp, s.name, s.detail || s.kind));
+    const opens = (r, part) => { r.classList.add("tap"); r.addEventListener("click", () => { openKid = part; page = 0; render(); }); return r; };   // a row opens its own card
+    for (const c of m.containers) rows.push(opens(row(c.lamp, c.name, c.status || c.state), {lamp: c.lamp, name: c.name, kind: "c", ref: c}));
+    for (const s of m.serves) rows.push(opens(row(s.lamp, s.name, s.detail || s.kind), {lamp: s.lamp, name: s.name, kind: "s", ref: s}));
     if (!rows.length) rows.push(row(m.state, "nothing reported yet", ""));
     pageRows(rows, perPage);
   }
@@ -147,6 +200,7 @@
   document.getElementById("s-back").addEventListener("click", () => { if (openKid) { openKid = null; page = 0; render(); } else { open = null; hide(); draw(); } });
   document.getElementById("s-close").addEventListener("click", () => { open = null; openKid = null; hide(); draw(); });
   document.getElementById("s-problems").addEventListener("click", problems);
+  document.getElementById("s-logs").addEventListener("click", () => showLogs({}));
   document.getElementById("s-fit").addEventListener("click", fit);
   document.getElementById("s-repair").addEventListener("click", () => post(root.dataset.repairUrl, {}).then((r) => say(r.why)));
 
@@ -189,6 +243,8 @@
     }).catch(() => { document.getElementById("s-age").textContent = "offline"; });
   }
   document.addEventListener("visibilitychange", load);
+  window.addEventListener("resize", pickLayout);
+  pickLayout();
   load();
   setInterval(load, 10000);
 })();

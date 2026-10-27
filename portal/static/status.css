@@ -29,24 +29,31 @@
 .map .lamp.ok { animation: breathe 3.2s ease-in-out infinite; }
 .map .kid circle { stroke: none; }
 .map .kid { cursor: pointer; }
-.map .busy { fill: none; stroke: var(--cyan); stroke-width: 1.5; stroke-dasharray: 3 5; }
+.map .node polygon.busy { fill: none; stroke: var(--cyan); stroke-width: 1.5; stroke-dasharray: 3 5; }   /* drawn over its node: no fill, or it hides the words */
 @keyframes flow { to { stroke-dashoffset: -36; } }
 @keyframes breathe { 50% { opacity: .55; } }
 @media (prefers-reduced-motion: reduce) { .map .edge.ok, .map .lamp.ok { animation: none; } }
-.sheet { position: absolute; right: 0; top: 56px; bottom: 0; width: min(420px, 100%); background: var(--panel); border-left: 2px solid var(--dim-green-hi);
+.hsheet { position: absolute; right: 0; top: 56px; bottom: 0; width: min(420px, 100%); background: #000; border-left: 2px solid var(--dim-green-hi);
   display: flex; flex-direction: column; z-index: 5; }
-.sheet[hidden] { display: none; }
-.sheet header { display: flex; align-items: center; gap: 8px; padding: 8px; border-bottom: 1px solid var(--line); }
-.sheet header h2 { margin: 0 0 0 8px; font-size: 1.05rem; font-weight: 600; }
-.sheet .body { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
-.sheet .rows { flex: 1; overflow: hidden; padding: 6px 10px; }
-.sheet .row { display: flex; align-items: center; gap: 10px; min-height: 44px; border-bottom: 1px solid var(--line); }
-.sheet .row .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
-.sheet .row .dot.ok { background: var(--green); } .sheet .row .dot.degraded { background: var(--amber); }
-.sheet .row .dot.down { background: var(--red); } .sheet .row .dot.stale, .sheet .row .dot.off { background: var(--muted); }
-.sheet .row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sheet .row .dt { color: var(--muted); font-size: .8rem; }
-.sheet .row .key { height: 36px; min-width: 36px; }
-.sheet .pager { display: flex; justify-content: center; align-items: center; gap: 10px; padding: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: .85rem; }
-.sheet h3 { margin: 10px 10px 2px; font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.hsheet[hidden] { display: none; }
+.hsheet header { display: flex; align-items: center; gap: 8px; padding: 8px; border-bottom: 1px solid var(--line); }
+.hsheet header h2 { margin: 0 0 0 8px; font-size: 1.05rem; font-weight: 600; }
+.hsheet .body { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+.hsheet .hrows { flex: 1; overflow: hidden; padding: 6px 10px; }
+.hsheet .hrow { display: flex; align-items: center; gap: 10px; min-height: 44px; border-bottom: 1px solid var(--line); }
+.hsheet .hrow .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+.hsheet .hrow .dot.ok { background: var(--green); } .hsheet .hrow .dot.degraded { background: var(--amber); }
+.hsheet .hrow .dot.down { background: var(--red); } .hsheet .hrow .dot.stale, .hsheet .hrow .dot.off { background: var(--muted); }
+.hsheet .hrow .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hsheet .hrow .dt { color: var(--muted); font-size: .8rem; }
+.hsheet .hrow .key { height: 36px; min-width: 36px; }
+.hsheet .hrow .key.on, .hsheet .key.on { border-color: var(--accent); color: var(--accent); }
+.hsheet .hrow.log { flex-wrap: wrap; align-items: flex-start; padding: 6px 0; }
+.hsheet .hrow.log .nm { white-space: normal; flex-basis: calc(100% - 24px); }
+.hsheet .hrow.log .dt { flex-basis: 100%; padding-left: 22px; }
+.hsheet .hrow .chip { height: 36px; }
+.hsheet .hrow.tap { cursor: pointer; }
+.hsheet .hrow.tap:hover { background: var(--dim-green); }
+.hsheet .hpager { display: flex; justify-content: center; align-items: center; gap: 10px; padding: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: .85rem; }
+.hsheet h3 { margin: 10px 10px 2px; font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
 .note { position: absolute; left: 12px; right: 12px; bottom: 12px; margin: 0; padding: 10px 12px; background: var(--panel); border: 1px solid var(--dim-green-hi); font-size: .9rem; z-index: 6; }

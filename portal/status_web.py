@@ -12,15 +12,18 @@ from flask import Blueprint, abort, jsonify, render_template, request
 
 import auth
 import buildinfo
+import logs as logs_mod
 import recovery
 import starter as starter_mod
 
 REPAIR_LIMIT, REPAIR_WINDOW_S = 2, 300
 
 
-def init_app(app, status, home, starter, doctor, workshop, limiter, vm_status) -> None:
+def init_app(app, status, home, starter, doctor, workshop, limiter, vm_status, logstore=None) -> None:
     bp = Blueprint("status", __name__)
     app.extensions["status"] = status
+    logstore = logstore if logstore is not None else logs_mod.LogStore()
+    app.extensions["logs"] = logstore
 
     def roots() -> list[str]:
         return [r for r in (app.config.get("PORTAL_URL"), request.host_url.rstrip("/")) if r]
@@ -29,7 +32,7 @@ def init_app(app, status, home, starter, doctor, workshop, limiter, vm_status) -
         vm, _ = vm_status()
         return status.tree(
             home_online=home.online(), home_age=home.age(), home_report=home.report, starter_view=starter.view(),
-            portal=buildinfo.info(), games_vm={"status": vm.status} if vm else None, core_verdict=home.core())
+            portal=buildinfo.info(), games_vm={"status": vm.status} if vm else None, core_verdict=home.core(), activity=logstore.activity())
 
     @bp.get("/status")
     @auth.admin_required
@@ -46,6 +49,16 @@ def init_app(app, status, home, starter, doctor, workshop, limiter, vm_status) -
     def same_origin_or_abort() -> None:
         if not recovery.same_origin(request.headers.get("Origin"), request.headers.get("Referer"), roots()):
             abort(403)
+
+    @bp.get("/status/logs")
+    @auth.admin_required
+    def logs():
+        a = request.args
+        rows = logstore.query(host=a.get("host", ""), source=a.get("source", ""), kind=a.get("kind", ""), level=a.get("level", ""),
+                              q=a.get("q", "")[:100], trace=a.get("trace", ""), limit=a.get("limit", type=int, default=200))
+        resp = jsonify(records=rows, quiet={h: int(logstore.clock() - at) for h, at in logstore.received.items()})
+        resp.headers["Cache-Control"] = "private, no-store"
+        return resp
 
     @bp.post("/status/heal")
     @auth.admin_required
@@ -79,6 +92,22 @@ def init_app(app, status, home, starter, doctor, workshop, limiter, vm_status) -
         else:
             said.append("skippy-pc's starter isn't answering, so skippy-pc and skippy-core can't be reached")
         return jsonify(ok=True, why="; ".join(said) + ".")
+
+    @app.post("/home/logs")
+    def home_logs():
+        """A machine's important lines (docs/status-design.md Part 2): {"host", "records": [...]}, the home token, at most 500 records."""
+        if (request.content_length or 0) > 600_000:
+            abort(413)
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            abort(400)
+        try:
+            kept = logstore.add(str(body.get("host") or ""), body.get("records"))
+        except ValueError:
+            abort(400)
+        return jsonify(ok=True, kept=kept)
 
     @app.post("/home/core-report")
     def home_core_report():

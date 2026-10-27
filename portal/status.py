@@ -84,7 +84,7 @@ class Status:
 
     # ── the map ────────────────────────────────────────────────────────────────
     def tree(self, *, home_online: bool, home_age: int | None, home_report: dict | None, starter_view: dict, portal: dict,
-             games_vm: dict | None, core_verdict: dict | None) -> dict:
+             games_vm: dict | None, core_verdict: dict | None, activity: dict | None = None) -> dict:
         """The whole map as plain data. Every argument is read from the portal's own objects by the route; nothing here calls out."""
         report = home_report or {}
         st = starter_view.get("status") or {}
@@ -140,6 +140,9 @@ class Status:
                                                      "detail": _s(portal.get("short") or portal.get("commit"), 12)},
                                                     {"kind": "service", "name": "revision", "lamp": "ok", "detail": _s(portal.get("revision"), 40)}]}
 
+        for node in (pc, core_node):                      # what each container said lately: {n, errors, last} (portal/logs.py activity)
+            for c in node["containers"]:
+                c["logs"] = (activity or {}).get(f"{node['id']}|docker/{c['name']}")
         machines = [portal_node, pc, core_node, vm]
         by = {m["id"]: m for m in machines}
 
