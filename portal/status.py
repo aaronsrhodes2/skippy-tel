@@ -8,13 +8,37 @@ A lamp is one of: ok, degraded, down, stale (no report within STALE_S: grey, nev
 """
 from __future__ import annotations
 
+import json
+import re
 import threading
 import time
+from pathlib import Path
 
 STALE_S = 120                 # the core reporter posts every 30 s; four missed reports is stale
 MAX_ITEMS = 120
 LAMPS = ("ok", "degraded", "down", "stale", "off", "hung", "call")   # call (blue): on call, a tool that loads when asked and is not warm right now      # hung: a job is running and nothing new has come out of it (PLATINUM §24)
 HUNG_S = 90                                                       # no new words for this long, with a job running
+
+
+NODES = json.loads((Path(__file__).resolve().parent / "status_nodes.json").read_text(encoding="utf-8"))
+USAGE_KEYS = ("asks", "direct", "tools_called", "tools_total", "schema_tokens", "since")      # what a machine may report about how a node is used
+
+
+def node_key(name: str) -> str:
+    """A node's catalog key: a container's name without its project prefix and replica number, a model's or service's own name."""
+    return re.sub(r"-\d+$", "", re.sub(r"^(skippycore|skippytel)-", "", str(name or "")))
+
+
+def about(name: str, usage: dict | None = None) -> dict | None:
+    """The catalog entry for a node (what it is for, what uses it, an example), with live usage numbers when the machine reported any."""
+    entry = NODES.get(node_key(name))
+    if not entry:
+        return None
+    out = {k: entry[k] for k in ("for", "used_by", "example", "note") if k in entry}
+    mine = (usage or {}).get(node_key(name))
+    if isinstance(mine, dict) and mine:
+        out["usage"] = mine
+    return out
 
 
 def _s(value, limit: int = 80) -> str:
@@ -142,7 +166,9 @@ class Status:
                  "deployer": {"state": _s(deployer.get("state"), 30), "commit": _s(deployer.get("commit"), 12), "detail": _s(deployer.get("detail"), 160)},
                  "doctor": {"ok": doctor.get("ok") is not False, "last": _s(doctor.get("last"), 120)},
                  "vitals": {k: _num(vitals.get(k), 0, 1e9) for k in ("mem_pct", "disk_pct", "load1", "uptime_h", "ups_charge") if _num(vitals.get(k), 0, 1e9) is not None},
-                 "busy": bool(body.get("busy"))}
+                 "busy": bool(body.get("busy")),
+                 "usage": {_s(k, 40): {u: (_s(v.get(u), 20) if u == "since" else _num(v.get(u), 0, 1e12)) for u in USAGE_KEYS if v.get(u) is not None}
+                           for k, v in list((body.get("usage") or {}).items())[:20] if isinstance(v, dict)} if isinstance(body.get("usage"), dict) else {}}
         with self._lock:
             self.core, self.core_at = clean, self.clock()
 
@@ -210,7 +236,7 @@ class Status:
         core_serves = []
         containers = []
         if core:
-            containers = [{**c, "lamp": container_lamp(c)} for c in core["containers"]]
+            containers = [{**c, "lamp": container_lamp(c), "about": about(c["name"], core.get("usage"))} for c in core["containers"]]
             for m in core["models"]:
                 if m["state"] != "ready":
                     lamp, detail = ("degraded" if m["state"] else "off"), (m["detail"] or m["state"])
@@ -222,13 +248,13 @@ class Status:
                 else:
                     lamp, detail = "ok", "ready: accepting work, no jobs"
                 loaded = m["state"] == "ready"
-                core_serves.append({"kind": "model", "name": m["name"], "lamp": lamp, "detail": detail, "jobs": m["jobs"], "stuck_s": m["stuck_s"],
+                core_serves.append({"kind": "model", "name": m["name"], "lamp": lamp, "detail": detail, "jobs": m["jobs"], "stuck_s": m["stuck_s"], "about": about(m["name"]),
                                     "reach": "ok" if loaded else ("down" if m["state"] else "off"),
                                     "ready": "hung" if lamp == "hung" else ("ok" if lamp == "ok" else ("down" if m["state"] else "off"))})
             have = {s["name"] for s in core_serves}
             for name in KNOWN_CORE_MODELS:                 # a slot that is not loaded right now is still a model he can ask
                 if name not in have:
-                    core_serves.append({"kind": "model", "name": name, "lamp": "call", "detail": "on call: loads when asked", "reach": "ok", "ready": "call"})
+                    core_serves.append({"kind": "model", "name": name, "lamp": "call", "detail": "on call: loads when asked", "reach": "ok", "ready": "call", "about": about(name)})
             for s in core_serves:
                 if s["kind"] == "model":
                     s["probe"] = ((probes or {}).get("results") or {}).get(s["name"])

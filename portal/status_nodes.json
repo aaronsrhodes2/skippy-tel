@@ -1,0 +1,51 @@
+{
+ "_about": "What each node on the Status page is for, what uses it, and a real example. Keyed by the node's short name (a container's name without skippycore-/skippytel- and without the -1 on the end; a model's or service's own name). A new node means a new entry here; portal/tests/test_status_nodes.py fails on a stale one. `usage` fields are filled live from what the machine reports (core/reporter).",
+ "mentat": {
+  "for": "The physics, chemistry and maths answerer. You (or Skippy) ask a question in plain words; Mentat works out which sigma-ground calculation it is, runs it, and answers with the value, its unit, the formula and the source. It never makes a number up: no source, no number.",
+  "used_by": ["Skippy's chats, public and private (ask_mentat, forced when a reply claims physics)", "Claude Code on skippy-pc (the `mentat` MCP)", "purple Skippy (purple-tools: ask_mentat, mentat_tool, mentat_tools)", "the Experiments playground (the cloud copy, keywords only)"],
+  "example": {"ask": "If I throw a baseball at 45 degrees at 100 miles per hour, how far will it travel before it touches the ground?", "answer": "203.8 m (range at 45° and 44.7 m/s, no air). Source: sigma_ground.materia (projectile_motion). Derived, 230 ms."},
+  "note": "Almost every call is a plain question (/ask); the 200+ individual tools are rarely called by name. Showing all of them to a chat costs about 73,000 tokens of its context, so the chats that can should list only ask_mentat plus a lookup (purple-tools already does)."
+ },
+ "llm": {
+  "for": "skippy-core's model server (llama-swap). It holds the chat, coder, router and vision models and loads the one a request names.",
+  "used_by": ["every Skippy chat (public and private)", "Mentat's interpreter and router", "the Ollama shim that old services still call", "the portal's tests and probes"]
+ },
+ "searxng": {
+  "for": "A self-hosted web search engine. It asks several public search engines for you and returns plain results, with no account, no key and no tracking.",
+  "used_by": ["purple Skippy's web_search tool (purple-tools)"],
+  "example": {"ask": "web_search: \"llama.cpp prompt cache flag\"", "answer": "Title, URL and a one-line snippet for the top six results."}
+ },
+ "mosquitto": {
+  "for": "The message broker between the car's logger and the car reader. TeslaMate publishes the car's live state to it; it keeps the last value of every topic on disk.",
+  "used_by": ["TeslaMate (publishes)", "the car reader (subscribes)"]
+ },
+ "tesla-db": {
+  "for": "TeslaMate's Postgres database: every drive and charge the car has logged.",
+  "used_by": ["TeslaMate"]
+ },
+ "teslamate": {
+  "for": "Logs the Tesla's drives, charges and state around the clock from Tesla's own API, without waking the car. Its page (tailnet only, port 4000) is where the Tesla sign-in is kept.",
+  "used_by": ["the car reader (through the broker)", "the Car tile and Skippy's car_status (through the reader)"]
+ },
+ "car": {
+  "for": "The car reader: keeps the latest values the broker has (charge, lock, location) and serves them as one small answer with the readiness contract.",
+  "used_by": ["skippy-pc's reporter (the `car` capability)", "the portal's Car tile", "Skippy's car_status tool"],
+  "example": {"ask": "GET /car", "answer": "T3-P0: charging, 55% of 80%, locked."}
+ },
+ "chat": {
+  "for": "The resident chat model (Qwen3.6-35B-A3B). It answers the public Skippy chat, writes chat names and summaries, and is the 'skippy-chat' that old services ask for.",
+  "used_by": ["the public chat", "Mentat (interpreter)", "Barney Style", "WebFetch's page summariser in Core runs"]
+ },
+ "coder": {
+  "for": "The coding model behind the private Skippy (Claude Code on Core's own brain).",
+  "used_by": ["private Skippy (Private mode)", "purple Skippy's runs"]
+ },
+ "router": {
+  "for": "A small fast model that reads a physics question and picks the Mentat calculation to run.",
+  "used_by": ["Mentat"]
+ },
+ "vision": {
+  "for": "Looks at pictures: describes screenshots and photos, copies out the words in them.",
+  "used_by": ["the private Skippy's eyes (pictures the Core coder cannot read)", "attached pictures in chat"]
+ }
+}

@@ -62,6 +62,8 @@
 .hsheet .hrow .dot.none { background: none; border: 0; }
 .hsheet .hrow .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hsheet .hrow .dt { color: var(--muted); font-size: .8rem; }
+.hsheet .hrow.about { align-items: flex-start; padding: 8px 0; }
+.hsheet .hrow.about .say { flex-basis: 100%; white-space: pre-wrap; font-size: .85rem; line-height: 1.4; color: var(--fg, #e8e8e8); }
 .hsheet .hrow .key { height: 36px; min-width: 36px; }
 .hsheet .hrow .key.on, .hsheet .key.on { border-color: var(--accent); color: var(--accent); }
 .hsheet .hrow.log { flex-wrap: wrap; align-items: flex-start; padding: 6px 0; }

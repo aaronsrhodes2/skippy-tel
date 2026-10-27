@@ -117,6 +117,24 @@
     if (key) r.append(key);
     return r;
   }
+  // What a node is for, what uses it, a real example, and (when its machine reports it) how it is actually used: the sentences stay here, in the card
+  function aboutRows(a) {
+    const out = [];
+    const text = (label, body) => { const r = row("none", label, ""); r.classList.add("log", "about"); r.append(html("div", "say", body)); return r; };
+    if (a.for) out.push(text("for", a.for));
+    if (a.used_by && a.used_by.length) out.push(text("used by", a.used_by.join(" \u00b7 ")));
+    if (a.example) out.push(text("example", "Ask: " + a.example.ask + "\n\u2192 " + a.example.answer));
+    const u = a.usage;
+    if (u) {
+      const bits = [];
+      if (u.asks !== undefined) bits.push(`${u.asks} plain questions${u.since ? " in " + u.since : ""}`);
+      if (u.direct !== undefined) bits.push(`${u.direct} tool calls by name (${u.tools_called || 0} different tools${u.tools_total ? " of " + u.tools_total : ""})`);
+      if (u.schema_tokens) bits.push(`listing every tool to a chat costs about ${Math.round(u.schema_tokens / 1000)}k tokens`);
+      if (bits.length) out.push(text("how it's used", bits.join("; ")));
+    }
+    if (a.note) out.push(text("note", a.note));
+    return out;
+  }
   function key(glyph, label, onClick) {
     const b = html("button", "key"); b.type = "button"; b.setAttribute("aria-label", label); b.title = label;
     b.innerHTML = '<svg class="g" aria-hidden="true"><use href="#g-' + glyph + '"/></svg>';
@@ -168,9 +186,14 @@
   }
   function pageRows(rows, perPage) {
     const rowsBox = html("div", "hrows");
-    const pages = Math.max(1, Math.ceil(rows.length / perPage));
+    // a long sentence (an "about" row) takes several lines' room, so a page is filled by weight and a row is never cut across two pages
+    const weight = (r) => (r.classList.contains("about") ? (34 + 19 * Math.ceil((r.textContent || "").length / 52)) / 46 : 1);        // in rows of 46 px
+    const chunks = [[]];
+    let used = 0;
+    rows.forEach((r) => { const w = weight(r); if (used + w > perPage && chunks[chunks.length - 1].length) { chunks.push([]); used = 0; } chunks[chunks.length - 1].push(r); used += w; });
+    const pages = chunks.length;
     page = Math.min(page, pages - 1);
-    rows.slice(page * perPage, page * perPage + perPage).forEach((r) => rowsBox.append(r));
+    chunks[page].forEach((r) => rowsBox.append(r));
     const pager = html("div", "hpager");
     const prev = html("button", "key"), next = html("button", "key");
     prev.type = next.type = "button";
@@ -195,6 +218,7 @@
       title.textContent = `${m.label} · ${openKid.name}`;
       const r = openKid.ref;
       rows.push(row(openKid.lamp, openKid.name, r.state || r.detail || "", null, r.reach || r.ready ? {reach: r.reach, ready: r.ready} : null));
+      if (r.about) aboutRows(r.about).forEach((x) => rows.push(x));
       if (r.reach || r.ready) {
         rows.push(row(r.reach === "ok" ? "ok" : r.reach === "off" ? "off" : "down", "reachable", SAYS[r.reach || "off"]));
         rows.push(row(r.ready === "ok" ? "ok" : r.ready === "off" ? "off" : r.ready === "hung" ? "hung" : r.ready === "call" ? "call" : "warn", "ready", SAYS[r.ready || "off"] + (r.detail && r.ready !== "call" ? " \u00b7 " + r.detail : "")));

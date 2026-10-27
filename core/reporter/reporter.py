@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
@@ -185,6 +186,52 @@ def vitals() -> dict:
     return out
 
 
+MENTAT_URL = os.environ.get("MENTAT_URL", "http://127.0.0.1:7350")
+MENTAT_LOG = Path(os.environ.get("MENTAT_RESEARCH", str(STATE / "mentat-research")))
+_usage_cache: dict = {"sig": None, "usage": {}, "schema_at": 0.0, "schema": None}
+
+
+def mentat_usage(log_dir: Path = MENTAT_LOG, post=None, now=time.time) -> dict:
+    """How Mentat is used this month, read from its own research log: plain questions (/ask) against tools called by name, and what showing every
+    tool to a chat costs (the size of its tools/list, asked about once an hour). Re-read only when the log file changed."""
+    files = sorted(log_dir.glob("*.jsonl")) if log_dir.is_dir() else []
+    if not files:
+        return {}
+    latest = files[-1]
+    sig = (latest.name, latest.stat().st_size, int(latest.stat().st_mtime))
+    if _usage_cache["sig"] != sig:
+        asks, direct, names = 0, 0, set()
+        for line in latest.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            endpoint = str(row.get("endpoint") or "")
+            if endpoint == "/ask":
+                asks += 1
+            elif endpoint.startswith("/tools/"):
+                direct += 1
+                names.add(endpoint[7:])
+        _usage_cache.update(sig=sig, usage={"asks": asks, "direct": direct, "tools_called": len(names), "since": latest.stem})
+    if now() - _usage_cache["schema_at"] > 3600 and post is not None:
+        _usage_cache["schema_at"] = now()
+        try:
+            tools = post(MENTAT_URL + "/mcp", {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})["result"]["tools"]
+            _usage_cache["schema"] = (len(tools), len(json.dumps(tools)) // 4)
+        except Exception:  # noqa: BLE001 — an unreachable Mentat just means no schema number this hour
+            pass
+    out = dict(_usage_cache["usage"])
+    if _usage_cache["schema"]:
+        out["tools_total"], out["schema_tokens"] = _usage_cache["schema"]
+    return out
+
+
+def _post_json(url: str, body: dict):
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json", "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read())
+
+
 def gather(run=sh, get=http_get, state: Path = STATE, key: str = "") -> dict:
     dep = read_json(state / "deployer" / "status.json")
     doc = read_json(state / "deployer" / "doctor.json")
@@ -198,7 +245,15 @@ def gather(run=sh, get=http_get, state: Path = STATE, key: str = "") -> dict:
     return {"containers": containers(run), "models": models_now,
             "deployer": {"state": dep.get("state", ""), "commit": str(dep.get("commit") or "")[:10], "detail": str(dep.get("detail") or "")[:160]},
             "doctor": {"ok": not (doc.get("fails", 0) >= 2), "last": str((doc.get("last") or {}).get("did", ""))[:120]},
-            "vitals": vitals(), "busy": bool(quiet and quiet.busy())}
+            "vitals": vitals(), "busy": bool(quiet and quiet.busy()),
+            "usage": {"mentat": _safe(lambda: mentat_usage(post=_post_json))}}
+
+
+def _safe(fn):
+    try:
+        return fn()
+    except Exception:  # noqa: BLE001 — a usage number is never worth a missed report
+        return {}
 
 
 UNITS = ("skippy-core-deployer", "skippy-core-doctor", "skippy-core-ci", "skippy-core-cd", "skippy-core-backup", "skippy-core-reporter", "docker")

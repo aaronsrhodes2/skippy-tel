@@ -34,7 +34,8 @@ def main(port: int = 8765) -> None:
     status.accept_core({"containers": [{"name": "skippycore-llm-1", "state": "running", "health": "healthy", "status": "Up 20 hours", "cpu": 12.5, "mem_mb": 1536},
                                        {"name": "skippycore-mentat-1", "state": "restarting", "restarts": 7}],
                         "models": [{"name": "chat", "state": "ready"}, {"name": "coder", "state": "ready"}, {"name": "router", "state": "ready"}, {"name": "vision", "state": "starting"}],
-                        "deployer": {"state": "deferred", "commit": "d18a24e", "detail": "holding"}, "doctor": {"ok": True}, "vitals": {"mem_pct": 41, "disk_pct": 20}, "busy": True})
+                        "deployer": {"state": "deferred", "commit": "d18a24e", "detail": "holding"}, "doctor": {"ok": True}, "vitals": {"mem_pct": 41, "disk_pct": 20}, "busy": True,
+                        "usage": {"mentat": {"asks": 958, "direct": 31, "tools_called": 13, "tools_total": 221, "schema_tokens": 73317, "since": "2026-10"}}})
     logs.add("skippy-pc", [{"source": "docker/skippytel-voice-gate", "level": "error", "kind": "crash", "msg": "whisper did not answer in 30s"},
                            {"source": "docker/skippytel-flask-api", "level": "info", "msg": "GET /health 200"}])
     logs.add("skippy-core", [{"source": "docker/skippycore-mentat-1", "level": "error", "kind": "crash", "msg": "ModuleNotFoundError: No module named 'sigma_ground'"},
