@@ -255,3 +255,32 @@ def test_with_skippy_pc_off_a_deploy_still_works_from_what_this_box_has_seen(tru
     src2.mkdir()
     cd.vendor(src2, star_control=True)
     assert (src2 / ".vendor" / "scz-web.tar.gz").is_file() and (src2 / ".vendor" / "sigma-ground" / "sigma_ground").is_dir()
+
+
+class HealthOnly(cd_mod.CD):
+    """Just the smoke test's /health wait: each GET answers the next code in `codes` (the last one repeats), no sleeping."""
+    def __init__(self, codes):
+        self.logfile, self.codes, self.asked, self.lines = None, list(codes), 0, []
+
+    def log(self, text):
+        self.lines.append(text)
+
+    def http(self, method, url, body=None, follow=True, timeout=30, tries=1, headers=None):
+        self.asked += 1
+        code = self.codes.pop(0) if len(self.codes) > 1 else self.codes[0]
+        if code == 0:
+            raise OSError("connection reset")
+        return code, '{"ready": %s, "detail": "not ready"}' % ("true" if code == 200 else "false")
+
+
+def test_mentat_health_waits_out_a_warming_new_revision_but_still_fails_one_that_never_gets_ready(monkeypatch):
+    monkeypatch.setattr(cd_mod.time, "sleep", lambda s: None)
+    warming = HealthOnly([503, 0, 503, 200])                     # a new revision says 503 while warming, a reset on the way
+    assert warming.wait_ready("https://m.example/health") and warming.asked == 4
+    clock = iter(range(0, 10_000, 5))
+    monkeypatch.setattr(cd_mod.time, "monotonic", lambda: next(clock))
+    never = HealthOnly([503])
+    assert not never.wait_ready("https://m.example/health", wait=90)
+    assert 10 <= never.asked <= 25 and "503" in never.lines[-1]  # bounded, and the last answer is in the run's log
+    with pytest.raises(cd_mod.Failed, match="Mentat /health"):
+        never.expect(never.wait_ready("https://m.example/health", wait=0), "Mentat /health")

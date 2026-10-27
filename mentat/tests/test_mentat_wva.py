@@ -270,6 +270,14 @@ def test_health_is_not_ready_when_the_physics_tools_answer_wrongly_or_a_dependen
     mentat_app._checks.clear()
 
 
+def test_a_fresh_instance_checks_at_once_even_when_its_clock_starts_near_zero(client, mentat, monkeypatch):
+    mentat._checks.clear()
+    monkeypatch.setattr(mentat.time, "monotonic", lambda: 3.0)                              # a new Cloud Run sandbox, 3 s old
+    r = client.get("/health")
+    assert r.status_code == 200 and r.get_json()["ready"] is True
+    mentat._checks.clear()
+
+
 def test_a_question_in_flight_shows_as_a_running_job(client, mentat, monkeypatch):
     mentat_app = mentat
     seen = {}

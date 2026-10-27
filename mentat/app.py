@@ -214,7 +214,9 @@ _checks: dict[str, tuple[float, bool, str]] = {}
 def _cached(name: str, fn) -> tuple[bool, str]:
     """A dependency check, repeated at most every _CHECK_EVERY_S (a health probe must stay cheap, never pile work on the thing it asks about)."""
     at, ok, why = _checks.get(name, (0.0, False, ""))
-    if time.monotonic() - at > _CHECK_EVERY_S:
+    # (never checked = check now: on a fresh Cloud Run instance the monotonic clock starts near 0, so "0.0" looked fresh and /health
+    # said 503 "not ready" for its first 30 s without asking anything)
+    if name not in _checks or time.monotonic() - at > _CHECK_EVERY_S:
         try:
             ok, why = fn()
         except Exception as e:  # noqa: BLE001 — a check that raises is a failed check

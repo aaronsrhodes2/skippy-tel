@@ -455,6 +455,22 @@ class CD:
             time.sleep(5)
         return 0, ""
 
+    def wait_ready(self, url: str, wait: float = 90, every: float = 5) -> bool:
+        """A just-deployed service's /health (the readiness contract, core/ready.py): its 503 says "warming up, not yet", so ask again until
+        it says 200 or `wait` runs out. A service that never gets ready still fails; the last answer goes in the log."""
+        deadline = time.monotonic() + wait
+        while True:
+            try:
+                code, body = self.http("GET", url, timeout=20)
+            except OSError as e:
+                code, body = 0, str(e)
+            if code == 200:
+                return True
+            if time.monotonic() >= deadline:
+                self.log(f"      {url}: {code} {body[:300]}")
+                return False
+            time.sleep(every)
+
     def expect(self, ok: bool, what: str) -> None:
         self.log(("ok    " if ok else "FAIL  ") + what)
         if not ok:
@@ -505,7 +521,7 @@ class CD:
 
     def smoke_mentat(self, u: str) -> None:
         """deploy.yml's Mentat checks."""
-        self.expect(self.http("GET", f"{u}/health")[0] == 200, "Mentat /health")
+        self.expect(self.wait_ready(f"{u}/health"), "Mentat /health")
         self.expect(len(json.loads(self.http("GET", f"{u}/tools")[1])) > 100, "more than 100 tools")
         self.expect(self.http("POST", f"{u}/tools/convert_units", {"value": 1, "from_units": "mile", "to_units": "km"})[0] == 200,
                     "convert_units")
