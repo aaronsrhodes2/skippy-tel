@@ -112,6 +112,7 @@
   function row(lamp, name, detail, key, pair) {
     const r = html("div", "hrow");
     r.append(pair ? dots(pair.reach, pair.ready, lamp) : html("span", `dot ${lamp}`), html("span", "nm", name), html("span", "dt", detail || ""));
+    if (lamp === "none") r.classList.add("plain");
     if ((detail || "").length > 26) r.classList.add("log");       // a long explanation goes under the name, never in place of it
     if (key) r.append(key);
     return r;
@@ -210,14 +211,16 @@
     }
     title.textContent = `${m.label} · ${m.state}`;
     if (m.deployer && m.deployer.state) rows.push(row(m.deployer.state === "ok" ? "ok" : "degraded", "deploys", `${m.deployer.state} ${m.deployer.commit || ""}`));
-    for (const [k, v] of Object.entries(m.vitals || {})) rows.push(row("off", k.replace(/_/g, " "), String(v)));
+    for (const [k, v] of Object.entries(m.vitals || {})) rows.push(row("none", k.replace(/_/g, " "), String(v)));
     const opens = (r, part) => { r.classList.add("tap"); r.addEventListener("click", () => { openKid = part; page = 0; render(); }); return r; };   // a row opens its own card
     if (m.containers.length || m.serves.length) {          // what the colours mean, once, at the top
       const lg = html("div", "hrow legend");
       [["ok", "ready"], ["call", "on call"], ["warn", "not ready"], ["down", "down / hung"], ["off", "can't tell"]].forEach(([c, w]) => { lg.append(html("span", `dot ${c}`), html("span", "dt", w)); });
       rows.unshift(lg);
     }
-    for (const c of m.containers) rows.push(opens(row(c.lamp, c.name, c.status || c.state, null, {reach: c.reach, ready: c.ready}), {lamp: c.lamp, name: c.name, kind: "c", ref: c}));
+    // "Up 16 minutes" says it is running, not that it is ready: a container with no readiness check shows a hollow ring and says so in words
+    const unsure = (c) => light(c.reach, c.ready) === "off" && /^up\b/i.test(c.status || "");
+    for (const c of m.containers) rows.push(opens(row(c.lamp, c.name, unsure(c) ? (c.status || "") + " \u00b7 no readiness check" : (c.status || c.state), null, {reach: c.reach, ready: c.ready}), {lamp: c.lamp, name: c.name, kind: "c", ref: c}));
     for (const s of m.serves) {
       const pr = s.probe ? (s.probe.ok ? "answered in " + (s.probe.ms / 1000).toFixed(1) + " s" : "no answer: " + s.probe.why) : "";
       const detail = s.asking ? "asking\u2026" : (pr ? pr : (s.detail || s.kind));
