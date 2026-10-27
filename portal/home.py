@@ -29,7 +29,7 @@ FAST_WINDOW = 300         # after chat activity, the reporter polls for jobs qui
 REDELIVER_AFTER = 20      # a job handed out but not answered goes out again after this
 MAX_REPORT = 1_000_000    # bytes (album art included)
 JOB_TTL = 600             # seconds a job waits for an answer before it's dropped (a job may ask for longer)
-KNOWN_CAPABILITIES = ("make_music", "make_image", "make_image_hq", "workshop", "music_gate", "video_gate", "voice_gate", "house")   # what skippy-pc may advertise (and the pop-ups in popups.py); anything else it sends is ignored
+KNOWN_CAPABILITIES = ("make_music", "make_image", "make_image_hq", "workshop", "music_gate", "video_gate", "voice_gate", "house", "car")   # what skippy-pc may advertise (and the pop-ups in popups.py); anything else it sends is ignored
 _ACTIONS = {("music", "skip"), ("music", "pause"), ("music", "resume"), ("music", "stop")}
 PROJECT_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")                    # the private Skippy's project ids (projects.json)
 GITHUB_REPO = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}")
@@ -205,6 +205,12 @@ class Home:
         info = ((self.report or {}).get("capabilities") or {}).get(name)
         value = info.get(key) if isinstance(info, dict) and self.can(name) else None
         return value[:40] if isinstance(value, str) else None
+
+    def car(self) -> dict | None:
+        """The Captain's car as skippy-pc last carried it (its `car` capability: {ready, mqtt, cars, sign_in}; car_web reads it).
+        Kept even when not ready, so the Car app can say "nobody signed in to Tesla yet" rather than "down". None while home is silent."""
+        info = ((self.report or {}).get("capabilities") or {}).get("car")
+        return info if self.online() and isinstance(info, dict) else None
 
     def workshop_projects(self) -> list[dict]:
         """The private Skippy's projects as skippy-pc listed them (services/claude-bridge/projects.json, without paths):

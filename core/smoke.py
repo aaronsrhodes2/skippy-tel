@@ -15,6 +15,8 @@ Checks, in order (each prints ok/FAIL and its time; exit 1 if any fails):
   health      flask-api /health says models.ollama.default_present
   intent      flask-api /intent/unmatched gets Skippy's reply
   matter      (only when CORE_MATTER=1) the Matter controller's /info answers with its fabric (compose.matter.yml)
+  car         (only when CORE_TESLA=1) the car reader's /car answers and is connected to MQTT (compose.tesla.yml). A car not signed
+              in yet is not a failure: that is the Captain's one step, and the Status page says so
 
 URLs: SMOKE_SHIM (http://127.0.0.1:11434), SMOKE_LLM (http://127.0.0.1:8080), SMOKE_API (http://127.0.0.1:3003);
 the slot list comes from ${CORE_STATE}/llm/shim.json (or SMOKE_NAMES).
@@ -34,6 +36,7 @@ SHIM = os.environ.get("SMOKE_SHIM", "http://127.0.0.1:11434").rstrip("/")
 LLM = os.environ.get("SMOKE_LLM", "http://127.0.0.1:8080").rstrip("/")
 API = os.environ.get("SMOKE_API", "http://127.0.0.1:3003").rstrip("/")
 MATTER = os.environ.get("SMOKE_MATTER", "http://127.0.0.1:5580").rstrip("/")
+CAR = os.environ.get("SMOKE_CAR", "http://127.0.0.1:7351").rstrip("/")
 DEFAULT = os.environ.get("OLLAMA_MODEL", "qwen3:8b")
 TIMEOUT = float(os.environ.get("SMOKE_TIMEOUT", "300"))   # CPU stand-ins, cold loads: generous
 
@@ -181,6 +184,22 @@ def check_matter():
            f"bluetooth {'on' if body.get('bluetooth_enabled') else 'off'}"
 
 
+def check_car(wait: float = 30):
+    deadline = time.monotonic() + wait            # just recreated: give its MQTT connection a moment
+    while True:
+        try:
+            body = call_json("GET", f"{CAR}/car", timeout=10)
+            if body.get("mqtt"):
+                cars = body.get("cars") or []
+                return f"{len(cars)} car(s)" + (f", {cars[0].get('name')} {cars[0].get('state')}" if cars else ", not signed in to Tesla yet")
+            last = "not connected to MQTT"
+        except (OSError, urllib.error.URLError, ValueError) as e:
+            last = str(e)
+        if time.monotonic() >= deadline:
+            raise Fail(last)
+        time.sleep(2)
+
+
 CHECKS = [("tags", check_tags), ("chat", check_chat), ("stream", check_stream), ("json", check_json),
           ("slots", check_slots), ("messages", check_messages), ("auth", check_auth), ("health", check_health), ("intent", check_intent)]
 
@@ -210,7 +229,8 @@ def run(only: list[str] | None = None, wait: float = 0) -> list[dict]:
             results.append({"check": "ready", "ok": True, "detail": "", "s": round(time.monotonic() - t0, 1)})
         except Fail as e:
             return [{"check": "ready", "ok": False, "detail": str(e), "s": round(time.monotonic() - t0, 1)}]
-    for name, fn in CHECKS + ([("matter", check_matter)] if os.environ.get("CORE_MATTER") == "1" else []):
+    extra = ([("matter", check_matter)] if os.environ.get("CORE_MATTER") == "1" else []) +             ([("car", check_car)] if os.environ.get("CORE_TESLA") == "1" else [])
+    for name, fn in CHECKS + extra:
         if only and name not in only:
             continue
         t0 = time.monotonic()

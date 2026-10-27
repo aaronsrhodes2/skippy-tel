@@ -220,6 +220,14 @@ python-matter-server, `core/compose.matter.yml`, set up by `core/install/matter.
 `matter.py`, `MATTER_URL`; the Nest goes this way; the Leviton switches are paired in bulk with `homectl.py matter-import <file>`, codes from the
 My Leviton app, and `homectl.py identify` flashes one; a D2MSD's motion sensor is a read-only `binary_sensor`); and every Leviton on his account through the My Leviton cloud (`leviton.py`, `LEVITON_EMAIL`/`LEVITON_PASSWORD` in the vault, nothing to pair; last, so a locally paired switch wins). All backends are one house (`house.Combined`). Details: `services/satellite/README.md`, `rooms/README.md`, `core/README.md` → Matter.
 
+## The Car (the Captain's Tesla, `/car`)
+
+Read only (2026-10-26; commands through Tesla's Fleet API are saved for later): TeslaMate on skippy-core (`core/compose.tesla.yml`, on when
+core.env says `CORE_TESLA=1`, set up by `core/install/tesla.sh`) logs every drive and charge into its own Postgres and publishes the live
+state to MQTT; the car reader (`core/car`, tailnet `:7351`) keeps the latest values; skippy-pc's reporter carries them as the `car` capability;
+the portal shows the **Car** tile (`portal/car_web.py`) and Skippy gets `car_status`. Both are the Captain's alone (location). Reading never wakes
+the car. TeslaMate's own page (`http://skippy-core:4000`, tailnet only) is where he pastes his Tesla tokens once. Full description: docs/tesla.md.
+
 ## Nagatha's Video Service (the browser video app, `/video`)
 
 The Captain's Jellyfin films in any browser (the Captain, and friends granted "video"; a friend's viewing never moves his Continue Watching), a tile beside Bilby's: `portal/templates/video.html` +

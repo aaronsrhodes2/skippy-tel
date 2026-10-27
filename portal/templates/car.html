@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Car — Maker Portal{% endblock %}
+{% block app %}car{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}car{% endblock %}
+{% block content %}
+{# The Car app (car_web.py, the Captain only): his Tesla as TeslaMate last saw it, a lit control per reading. Read only; opening it
+   never wakes the car. Words only for numbers and names (the place, the sign-in address). #}
+<section id="car" data-state-url="{{ url_for('car.state') }}">
+  {% if car.state == 'ok' %}
+    <div class="deck" id="car-deck" style="--rows: {{ (car.units | length + 1) // 2 }}; --rows-wide: {{ (car.units | length + 3) // 4 }}; --rows-side: {{ (car.units | length + 4) // 5 }}">
+      {% for u in car.units %}
+        <div class="unit named" data-k="{{ u.key }}" {% if u.lamp %}data-s="{{ u.lamp }}"{% endif %} style="--i: {{ loop.index0 }}" title="{{ u.label }}">
+          <i class="plate"></i>
+          <i class="claws"><b></b><b></b><b></b></i>
+          <span class="lamp"></span>
+          <svg class="g" aria-hidden="true"><use href="#g-{{ u.glyph }}"/></svg>
+          <span class="name" aria-label="{{ u.label }}">{{ u.text }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="deck" style="--rows: 1; --rows-wide: 1; --rows-side: 1">
+      <div class="unit named" data-s="{{ 'idle' if car.state == 'no_car' else 'off' }}" title="{{ {'no_home': 'skippy-pc is not reporting', 'no_teslamate': 'TeslaMate is not running on skippy-core', 'no_car': 'Sign in to Tesla in TeslaMate'}[car.state] }}">
+        <i class="plate"></i>
+        {% if car.state == 'no_car' and car.sign_in %}<a class="hit" href="{{ car.sign_in }}" target="_blank" rel="noopener" aria-label="Sign in to Tesla"></a>{% endif %}
+        <i class="claws"><b></b><b></b><b></b></i>
+        <span class="lamp"></span>
+        <svg class="g" aria-hidden="true"><use href="#g-{{ 'in' if car.state == 'no_car' else 'car' }}"/></svg>
+        <span class="name">{{ car.sign_in | replace('http://', '') if car.state == 'no_car' else ('skippy-pc' if car.state == 'no_home' else 'TeslaMate') }}</span>
+      </div>
+    </div>
+  {% endif %}
+</section>
+<script>
+// Fresh numbers while the page is open (the reporter brings new ones every ~15 s); a change of state reloads the page.
+(() => {
+  const root = document.getElementById("car");
+  let shown = {{ car.state | tojson }};
+  async function tick() {
+    if (document.hidden) return;
+    try {
+      const r = await fetch(root.dataset.stateUrl, {headers: {"Accept": "application/json"}});
+      if (!r.ok) return;
+      const v = await r.json();
+      if (v.state !== shown) { location.reload(); return; }
+      for (const u of v.units || []) {
+        const el = root.querySelector(`.unit[data-k="${u.key}"]`);
+        if (!el) continue;
+        el.querySelector(".name").textContent = u.text;
+        if (u.lamp) el.dataset.s = u.lamp; else delete el.dataset.s;
+      }
+    } catch (e) { /* a dead zone: try again next time */ }
+  }
+  setInterval(tick, 15000);
+  document.addEventListener("visibilitychange", tick);
+})();
+</script>
+{% endblock %}

@@ -7,7 +7,8 @@ CANON = ROOT / "core" / "ready.py"
 # (where the copy sits, the Dockerfile that must ship it)
 COPIES = (("mentat", "mentat/Dockerfile"), ("services/flask-api/app", "services/flask-api/Dockerfile"),
           ("services/music-gate", "services/music-gate/Dockerfile"), ("services/video-gate", "services/video-gate/Dockerfile"),
-          ("services/voice-gate", "services/voice-gate/Dockerfile"), ("services/tts-studio", "services/tts-studio/Dockerfile"))
+          ("services/voice-gate", "services/voice-gate/Dockerfile"), ("services/tts-studio", "services/tts-studio/Dockerfile"),
+          ("core/car", "core/car/Dockerfile"))
 
 
 def _text(path: Path) -> bytes:

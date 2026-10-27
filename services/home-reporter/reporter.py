@@ -58,6 +58,8 @@ VIDEO_GATE = os.environ.get("VIDEO_GATE_URL", "").rstrip("/")         # video-ga
 VIDEO_GATE_PUBLIC = os.environ.get("VIDEO_GATE_PUBLIC", "").rstrip("/")   # ... and its Funnel address (outside, :8443)
 VOICE_GATE = os.environ.get("VOICE_GATE_URL", "").rstrip("/")         # voice-gate: Skippy's ears (Whisper) and mouth (inside)
 VOICE_GATE_PUBLIC = os.environ.get("VOICE_GATE_PUBLIC", "").rstrip("/")   # ... and its Funnel address (outside, :10000)
+CAR = os.environ.get("CAR_URL", "").rstrip("/")               # the Captain's Tesla: skippy-core's car reader (core/car), tailnet only
+CAR_MAX = 3                  # cars carried in one report
 BRIDGE = os.environ.get("CLAUDE_BRIDGE_URL", "").rstrip("/")   # Claude Code's bridge on the host: the private Skippy
 LOCAL = localinfo.LocalInfo(os.environ)                           # weather and the commute for the /me dashboard (LOCAL_INFO=off in tests: no network)
 WORKSHOP_WAIT = 5            # seconds the bridge holds a request open waiting for news from the run
@@ -367,7 +369,8 @@ def _capability_probes() -> dict:
             "music_gate": lambda: {"ready": bool(GATE and GATE_PUBLIC) and _up(f"{GATE}/health"), "url": GATE_PUBLIC},
             "video_gate": video_gate_capability,
             "voice_gate": voice_gate_capability,
-            "house": house_capability}
+            "house": house_capability,
+            "car": car_capability}
 
 
 # The house (lights and switches) for the Captain's portal chat: services/satellite's own code (mounted read-only at /srv/services), built
@@ -435,6 +438,18 @@ def voice_gate_capability() -> dict:
     """Ready when Whisper answers behind the gate (the microphone); `speak` says whether Skippy's voice (flask-api's ElevenLabs) is up too."""
     health = fetch(f"{VOICE_GATE}/health") if VOICE_GATE and VOICE_GATE_PUBLIC else None
     return {"ready": isinstance(health, dict) and health.get("ready") is True, "url": VOICE_GATE_PUBLIC}
+
+
+def car_capability() -> dict:
+    """The Captain's car, as TeslaMate last published it (skippy-core's car reader keeps it; asking never wakes the car). Ready once
+    a car is signed in; `cars` carries the state itself, so the portal's Car app and Skippy's car_status read it from the report.
+    `mqtt` true with no car = TeslaMate runs but nobody signed in to Tesla yet (`sign_in` says where)."""
+    body = fetch(f"{CAR}/car") if CAR else None
+    if not isinstance(body, dict):
+        return {"ready": False}
+    cars = [c for c in body.get("cars") or [] if isinstance(c, dict)][:CAR_MAX]
+    return {"ready": bool(body.get("mqtt")) and bool(cars), "mqtt": bool(body.get("mqtt")), "cars": cars,
+            "sign_in": str(body.get("sign_in") or "")[:200]}
 
 
 def _capability_down(name: str) -> dict:

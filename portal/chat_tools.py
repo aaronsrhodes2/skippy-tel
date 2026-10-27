@@ -37,6 +37,7 @@ import html
 import json
 import re
 
+import car_web
 import diagnostics
 import ops
 import popups as popups_mod
@@ -195,6 +196,15 @@ _NOW_PLAYING = {
     "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
 }
 
+_CAR_STATUS = {
+    "name": "car_status",
+    "description": "The Captain's Tesla (a Model 3) as TeslaMate last saw it at home: state (asleep, online, driving, charging), battery %, "
+                   "charge limit, estimated range in miles, charging (plugged in, kW, hours to full), locked, doors/windows/trunks open, "
+                   "sentry mode, inside/outside temperature in °F, where it is (the named place, and coordinates), software version, and "
+                   "how many seconds ago it last reported. Asking never wakes the car. Read only: it can't lock, heat or charge the car.",
+    "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+}
+
 _MAKE_MUSIC = {
     "name": "make_music",
     "description": "Compose a song or instrumental on the Captain's own GPU at home (ACE-Step): free, no "
@@ -280,6 +290,7 @@ VERBS = (
     ("logs", "server_logs", "Logs", "Game server"),
     ("physics", "ask_mentat", "Physics (Mentat)", "Physics"),
     ("playing", "now_playing", "Now playing", "Music"),
+    ("car", "car_status", "The car", "Car"),
     ("music", "make_music", "Make music", "Music"),
     ("image", "make_image", "Make a picture", "Pictures"),
 )
@@ -304,7 +315,7 @@ class ChatTools:
     def __init__(self, vm, is_admin: bool, visible: list[str] | None = None, who: str = "",
                  music=None, home_mentat=None, home_music=None, home_image=None, image_allow=None, trace: str = "",
                  image_tiers: tuple = ("make_image",), popups=None, home_popup=None, popup_payload=None, popup_allow=None,
-                 home_house=None):
+                 home_house=None, home_car=None):
         self.vm, self.is_admin, self.who = vm, is_admin, who
         self.trace = trace                    # this chat turn's id: Mentat keeps it with the research record
         self.visible = list(GAMES) if visible is None else list(visible)   # games this person may see
@@ -329,6 +340,7 @@ class ChatTools:
         self.home_popup, self.popup_payload, self.popup_allow = home_popup, popup_payload, popup_allow
         self.files: list = []
         self.home_house = home_house if tool_policy.allowed("house", is_admin) else None   # the lights: the Captain's alone
+        self.home_car = home_car if tool_policy.allowed("car", is_admin) else None         # his Tesla, where it is included: his alone
 
     def available(self) -> list[str]:
         names = [n for n in self.names if n != "start_game" or self.visible]
@@ -344,6 +356,8 @@ class ChatTools:
             names += [*self.popups, "popup_result"]
         if self.home_house:
             names += list(HOUSE_NAMES)
+        if self.home_car:
+            names.append("car_status")
         return names
 
     def badges(self) -> dict[str, list[dict]]:
@@ -376,6 +390,8 @@ class ChatTools:
             out += [popup_schema(e) for e in self.popups.values()] + [_POPUP_RESULT]
         if self.home_house:
             out += HOUSE_TOOLS
+        if self.home_car:
+            out.append(_CAR_STATUS)
         return out
 
     def run(self, name: str, args: dict) -> str:
@@ -469,6 +485,12 @@ class ChatTools:
             raise ToolError(f"Mentat is offline: {exc}. Say so; don't answer it yourself.") from exc
         self.mentat_where = "home"
         return result
+
+    def _car_status(self, _args) -> dict:
+        got = car_web.summary(self.home_car.car())
+        if got is None:
+            raise ToolError("The car isn't reporting (skippy-pc or TeslaMate is down, or nobody signed in to Tesla). Say so plainly.")
+        return got
 
     def _now_playing(self, _args) -> dict:
         return self.music()

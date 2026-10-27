@@ -37,6 +37,7 @@ MCP_SERVERS: dict[str, str] = {
     "bilby": ADMIN,         # home music player
     "house": ADMIN,         # the lights and switches (home_devices, home_state, home_control): his house, his alone
     "jellyfin": ADMIN,
+    "car": ADMIN,           # his Tesla (car_status): where it is, whether it's locked
 }
 
 
