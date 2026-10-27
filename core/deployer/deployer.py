@@ -292,6 +292,12 @@ class Deployer:
             return False
         return quiet.should_defer(self.dir / "busy-since")
 
+    def mentat_only(self, commit: str, good: dict | None) -> bool:
+        """True when nothing but Mentat differs from the last good deploy: such a deploy goes through the quiet gate (core/quiet.py)."""
+        if quiet is None or self.s["QUIET"] == "0" or not good:
+            return False
+        return quiet.git_mentat_only(self.repo, good["commit"], commit)
+
     def retry_wait(self, key: str) -> float:
         """Seconds left before a key whose deploy failed for a reason that may pass (a build, models not there) is tried again."""
         at = self._read("retry.json", {}).get(key)
@@ -324,7 +330,8 @@ class Deployer:
         if ci == "failure":
             self.mark_bad(key, f"ci: {detail}")
             return self.status("ci-failed", commit=commit, full=full, detail=detail)
-        if self.defer():
+        mentat_only = self.mentat_only(commit, good)
+        if not mentat_only and self.defer():
             return self.status("deferred", commit=commit, full=full, detail="the private Skippy is working: holding the deploy")
         started = self.status("deploying", commit=commit, full=full)["at"]
         try:
@@ -340,7 +347,8 @@ class Deployer:
                 self.checkout(good["commit"])
             return self.status("refused", commit=commit, full=full, stage=e.stage, detail=e.detail)
         self.mark_good(commit, full, started)
-        return self.status("ok", commit=commit, full=full, detail="deployed", smoke=results)
+        return self.status("ok", commit=commit, full=full, smoke=results,
+                           detail="deployed (only Mentat changed: the quiet gate does not apply)" if mentat_only else "deployed")
 
     # ── repair: the last good deploy, recreated (the portal's one Recovery operation) ──
     def repair(self) -> dict:

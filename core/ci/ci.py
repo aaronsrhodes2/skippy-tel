@@ -143,12 +143,21 @@ class CI:
             return True
         return got.get("state") == "error" and int(got.get("errors") or 1) < MAX_ERRORS
 
-    def check(self, name: str, source: str) -> dict | None:
-        """Fetch; test main's newest commit if it is due. The result, or None when there was nothing to do."""
+    def check(self, name: str, source: str, deferred: bool = False) -> dict | None:
+        """Fetch; test main's newest commit if it is due. The result, or None when there was nothing to do.
+        `deferred`: the quiet gate is closed (the private Skippy is working); only a commit that changes nothing but Mentat
+        relative to the last commit tested here goes ahead (core/quiet.py, mentat_only)."""
         mirror = self.mirror(name, source)
         sha = self.git("rev-parse", self.s["CI_BRANCH"], cwd=mirror)
         if not self.due(name, sha):
             return None
+        if deferred:
+            try:
+                last = json.loads((self.state / name / "latest.json").read_text(encoding="utf-8")).get("sha")
+            except (OSError, ValueError):
+                last = None
+            if not quiet.git_mentat_only(mirror, last, sha):
+                return None
         return self.test(name, sha, mirror)
 
     def test(self, name: str, sha: str, mirror: Path | None = None) -> dict:
@@ -249,11 +258,10 @@ class CI:
             except OSError:
                 return []                                 # a run is still going: this tick has nothing to add
             done = []
-            if quiet.should_defer(self.state / "busy-since"):
-                return done                               # the private Skippy is working: tests wait (they use the CPUs)
-            for name, source in repos(self.s).items():
+            deferred = quiet.should_defer(self.state / "busy-since")     # the private Skippy is working: tests wait (they use the CPUs) ...
+            for name, source in repos(self.s).items():                   # ... except a Mentat-only commit (check())
                 try:
-                    got = self.check(name, source)
+                    got = self.check(name, source, deferred)
                 except Exception as e:                    # noqa: BLE001 — skippy-pc away (the trunk), a bad repo: the next tick tries again
                     self.log(f"ci: {name}: {e}")
                     continue

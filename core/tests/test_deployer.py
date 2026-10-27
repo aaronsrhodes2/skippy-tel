@@ -326,3 +326,33 @@ def test_no_doctor_folder_no_copy(tmp_path, monkeypatch):
     d, copy = _doctor_box(tmp_path, monkeypatch, doctor_dir=False)  # CI and the simulator: nothing installed the doctor
     d.mark_good("abc123", "")
     assert not copy.parent.exists()
+
+
+def test_a_mentat_only_deploy_goes_through_a_closed_quiet_gate(box, monkeypatch):
+    """The Captain, 2026-10-27: approved Mentat changes go live in one step. Only Mentat's files differing from the last good
+    deploy means the quiet gate is not applied; anything else in between still waits."""
+    d, commit, first = box
+    work = d.repo.parent / "work"
+    d.s["QUIET"] = "1"
+    monkeypatch.setattr(dep.quiet, "busy", lambda *a, **k: False)
+    assert d.run()["state"] == "ok"                                       # idle: the first deploy
+    monkeypatch.setattr(dep.quiet, "busy", lambda *a, **k: True)
+
+    def push(path):
+        (work / path).parent.mkdir(parents=True, exist_ok=True)
+        (work / path).write_text(path + git(work, "rev-parse", "HEAD"))
+        git(work, "add", "-A")
+        git(work, "commit", "--quiet", "-m", "c")
+        git(work, "push", "--quiet", "origin", "HEAD:main")
+        return git(work, "rev-parse", "HEAD")
+    push("portal/app.py")
+    assert d.run()["state"] == "deferred" and d.running == (first, "")    # a portal change waits for the gate
+    push("mentat/app.py")
+    assert d.run()["state"] == "deferred"                                 # Mentat's change is behind the portal's: not Mentat-only
+    d.s["QUIET"] = "0"
+    row = d.run()
+    assert row["state"] == "ok" and row["detail"] == "deployed"           # the gate off: both go
+    only = push("mentat/app.py")
+    d.s["QUIET"] = "1"
+    row = d.run()
+    assert row["state"] == "ok" and "only Mentat changed" in row["detail"] and d.running == (only, "")

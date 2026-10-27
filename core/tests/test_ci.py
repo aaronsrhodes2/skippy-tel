@@ -143,3 +143,33 @@ def test_a_result_says_when_testing_finished(world):
     FakeCI(s).run()
     got = json.loads((ci_mod.CI(s).results("skippy-tel") / f"{sha}.json").read_text())
     assert got["finished_at"] >= got["at"]
+
+
+def test_a_closed_quiet_gate_lets_only_a_mentat_only_commit_be_tested(world, monkeypatch, tmp_path):
+    """The Captain, 2026-10-27: approved Mentat changes go live in one step. While the private Skippy is working, CI still tests a
+    commit that differs from the last tested one only in Mentat's files, and holds anything else."""
+    s, commit = world
+    work = tmp_path / "work"
+
+    def push(path):
+        (work / path).parent.mkdir(parents=True, exist_ok=True)
+        (work / path).write_text(path + git(work, "rev-parse", "HEAD"))
+        git(work, "add", "-A")
+        git(work, "commit", "--quiet", "-m", path)
+        git(work, "push", "--quiet", "origin", "main")
+        return git(work, "rev-parse", "HEAD")
+    monkeypatch.setattr(ci_mod.quiet, "busy", lambda *a, **k: True)
+    ci = FakeCI(s)
+    first = commit("one")
+    assert ci.run() == [] and ci.tested == []                             # closed, and no tested commit to compare with: held
+    monkeypatch.setattr(ci_mod.quiet, "busy", lambda *a, **k: False)
+    ci.run()
+    assert ci.tested == [first]
+    monkeypatch.setattr(ci_mod.quiet, "busy", lambda *a, **k: True)
+    m = push("mentat/app.py")
+    assert [r["state"] for r in ci.run()] == ["success"] and ci.tested == [first, m]      # Mentat only: tested through the closed gate
+    push("portal/app.py")
+    push("mentat/app.py")
+    assert ci.run() == [] and ci.tested == [first, m]                     # a portal change in between: held
+    monkeypatch.setattr(ci_mod.quiet, "busy", lambda *a, **k: False)
+    assert len(ci.run()) == 1 and len(ci.tested) == 3                     # open again: the newest goes
