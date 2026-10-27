@@ -2,13 +2,14 @@
 # SkippyCore's tailnet-only doors for skippy-pc (never the Funnel: these ports have no key of their own).
 #   11434  the Ollama shim (core/ollama-shim): every OLLAMA_URL on skippy-pc, Core's models under the old names
 #   7350   Mentat with Core's chat model (the reporter's MENTAT_URL, wa-trickle)
+#   7360   SearXNG, purple Skippy's WebSearch (services/purple-tools/server.py web_search)
 #   sudo bash tailnet.sh            # dry run: says what it would do
 #   sudo bash tailnet.sh --apply    # serve each port to the tailnet (idempotent; Tailscale keeps it across reboots)
 #   sudo bash tailnet.sh --check    # read-only: each door served, tailnet only. Exit 1 if not
 # Each proxies to 127.0.0.1, where compose publishes the container, so ufw keeps denying everything inbound.
 set -euo pipefail
-DOORS=(11434 7350)
-declare -A PROBE=([11434]=/api/version [7350]=/health)
+DOORS=(11434 7350 7360)
+declare -A PROBE=([11434]=/api/version [7350]=/health [7360]=/healthz)
 MODE="${1:-dry}"
 served() { tailscale serve status 2>/dev/null | grep -q ":$1 (tailnet only)"; }
 

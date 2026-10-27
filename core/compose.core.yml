@@ -11,6 +11,8 @@
 #   image-studio  the portal chat's pictures: Qwen-Image-2512 through stable-diffusion.cpp (Vulkan), one sd-cli run per
 #            picture so it holds no memory between them. Host networking on 7347 so the box's ufw (not Docker's own NAT)
 #            keeps the LAN out; the tailnet gets in through Tailscale's own rules, and ALLOW_FROM narrows it to skippy-pc.
+#   searxng  purple Skippy's WebSearch (docs/popup-inventory.md): a self-hosted metasearch engine, no account, no key; 127.0.0.1:7360, and the tailnet door
+#            (core/install/tailnet.sh) is the only way in for skippy-pc's search tool (services/purple-tools).
 # Later stages (docs/local-ai-fallback-plan.md Phase 5): the home reporter, the gates, Dozzle.
 
 x-logging: &default-logging
@@ -20,6 +22,20 @@ x-logging: &default-logging
     max-file: "3"
 
 services:
+  searxng:
+    image: searxng/searxng:2026.10.27-cb74e7f81@sha256:9dc6d0472930d981f5955f0379e107257383be2d81897b25df89cf37d789f152
+    restart: unless-stopped
+    logging: *default-logging
+    ports:
+      - "127.0.0.1:7360:8080"
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   llm:
     image: ghcr.io/mostlygeek/llama-swap:v265-vulkan-b11641@sha256:7a1d92c796dadb96fee7deac9ba41d46a2e0f50dabc6578f88f2d8fd21878110
     restart: unless-stopped
