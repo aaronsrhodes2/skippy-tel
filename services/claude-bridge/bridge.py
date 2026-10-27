@@ -256,7 +256,7 @@ class Handler(BaseHTTPRequestHandler):
             run = WORKSHOP.start(str(body.get("task") or ""), str(body.get("conv") or ""),
                                  str(body.get("message") or ""), who=str(body.get("who") or ""),
                                  attach=bool(body.get("attach")), project=str(body.get("project") or ""),
-                                 images=body.get("images"), brain=str(body.get("brain") or "core"),
+                                 images=body.get("images"), brain=str(body.get("brain") or ""),   # none named: start() makes it Core
                                  client_id=str(body.get("client_id") or "")[:64])
         except workshop.Busy as exc:
             self._json(409, {"error": "busy", "message": str(exc)})

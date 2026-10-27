@@ -198,7 +198,7 @@ _NOW_PLAYING = {
 
 _CAR_STATUS = {
     "name": "car_status",
-    "description": "The Captain's Tesla (a Model 3) as TeslaMate last saw it at home: state (asleep, online, driving, charging), battery %, "
+    "description": "The Captain's Tesla, a Model 3 named T3-P0, as TeslaMate last saw it at home: state (asleep, online, driving, charging), battery %, "
                    "charge limit, estimated range in miles, charging (plugged in, kW, hours to full), locked, doors/windows/trunks open, "
                    "sentry mode, inside/outside temperature in °F, where it is (the named place, and coordinates), software version, and "
                    "how many seconds ago it last reported. Asking never wakes the car. Read only: it can't lock, heat or charge the car.",

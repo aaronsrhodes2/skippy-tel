@@ -9,7 +9,7 @@ import car_web  # noqa: E402
 import chat_tools  # noqa: E402
 from test_app import ADMIN, FRIEND, env, login  # noqa: E402,F401
 
-CAR = {"id": 1, "name": "Zippy", "state": "charging", "battery_level": 64, "charge_limit_soc": 80, "est_battery_range_km": 321.9,
+CAR = {"id": 1, "name": "T3-P0", "state": "charging", "battery_level": 64, "charge_limit_soc": 80, "est_battery_range_km": 321.9,
        "plugged_in": True, "charger_power": 11, "time_to_full_charge": 1.5, "locked": True, "doors_open": False, "windows_open": False,
        "trunk_open": False, "frunk_open": False, "inside_temp": 21.0, "outside_temp": 10.0, "is_climate_on": False, "geofence": "Home",
        "sentry_mode": False, "odometer": 16093.44, "latitude": 47.6, "longitude": -122.3, "updated_s": 9}
@@ -22,7 +22,7 @@ def report(app, car):
 
 def test_view_reads_in_miles_and_fahrenheit():
     v = car_web.view(SIGNED_IN, online=True)
-    assert v["state"] == "ok" and v["name"] == "Zippy"
+    assert v["state"] == "ok" and v["name"] == "T3-P0"
     u = {x["key"]: x for x in v["units"]}
     assert u["battery"]["text"] == "64% / 80%" and u["range"]["text"] == "200 mi"
     assert u["charge"]["text"] == "11 kW · 1.5 h" and u["charge"]["lamp"] == "on"

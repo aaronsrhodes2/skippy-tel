@@ -29,12 +29,12 @@ class Clock:
 def test_values_are_kept_per_car_and_typed():
     clock = Clock()
     cars = car.Cars(clock=clock)
-    for name, raw in (("display_name", "Zippy"), ("state", "asleep"), ("battery_level", "78"), ("est_battery_range_km", "301.4"),
+    for name, raw in (("display_name", "T3-P0"), ("state", "asleep"), ("battery_level", "78"), ("est_battery_range_km", "301.4"),
                       ("plugged_in", "true"), ("locked", "false"), ("inside_temp", ""), ("charge_limit_soc", "nil")):
         assert cars.topic(f"teslamate/cars/1/{name}", name == "state" and b"asleep" or raw.encode())
     clock.t += 12
     (c,) = cars.view()
-    assert c["id"] == 1 and c["name"] == "Zippy" and c["state"] == "asleep"
+    assert c["id"] == 1 and c["name"] == "T3-P0" and c["state"] == "asleep"
     assert c["battery_level"] == 78 and c["est_battery_range_km"] == 301.4
     assert c["plugged_in"] is True and c["locked"] is False
     assert c["inside_temp"] is None and c["charge_limit_soc"] is None        # empty and nil read as unknown, never 0
