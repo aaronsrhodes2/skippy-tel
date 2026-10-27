@@ -459,6 +459,12 @@ MCP_META = [
          "arguments": {"type": "object", "description": "the tool's arguments, as find_tools shows them"}}, "required": ["name"]}},
 ]
 MCP_META_NAMES = {t["name"] for t in MCP_META}
+# The cloud copy has no language model (keywords only): its `ask` understands only a few scenarios, so it says so up front and the model goes
+# straight to find_tools + call_tool for anything else, instead of trusting an `ask` that cannot answer.
+KEYWORDS_ONLY_NOTE = ("On THIS server `ask` has no language model and understands only a few simple scenarios (a falling object's impact, "
+                      "projectile range). For anything else, use find_tools to find the calculation and call_tool to run it.")
+if not USE_LLM:
+    MCP_META[0] = {**MCP_META[0], "description": MCP_META[0]["description"] + " " + KEYWORDS_ONLY_NOTE}
 
 
 def _mcp_instructions() -> str | None:
@@ -524,7 +530,10 @@ def _mcp_ask(args, ip: str) -> dict:
         extra = {"interpreter": reply["result"].get("interpreter"), "understood": research.understood(reply["result"])}
     keep("/mcp", "ask", {"question": question, "given": given}, reply, status, started, **extra)
     if reply.get("ok"):
-        return _tool_reply(json.dumps(reply["result"], default=str))
+        result = reply["result"]
+        if not USE_LLM and isinstance(result, dict) and result.get("value") is None:
+            return _tool_reply(json.dumps(result, default=str) + "\n\n" + KEYWORDS_ONLY_NOTE)
+        return _tool_reply(json.dumps(result, default=str))
     return _tool_reply(json.dumps(reply.get("detail") or reply.get("error")), True)
 
 

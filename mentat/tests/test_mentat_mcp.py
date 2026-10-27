@@ -198,3 +198,12 @@ def test_ask_answers_a_question_the_same_way_the_rest_api_does_and_refuses_the_e
     assert call(client, "ask", {"question": "  "})["isError"]
     assert call(client, "ask", {"question": "q", "given": {"x": [1]}})["isError"]
 
+
+
+def test_a_keywords_only_ask_that_finds_nothing_points_to_find_tools(client, mentat, monkeypatch):
+    monkeypatch.setattr(mentat, "USE_LLM", False)
+    monkeypatch.setattr(mentat, "_ask", lambda q, given=None: {"value": None, "notes": "I can simulate a falling object"})
+    res = call(client, "ask", {"question": "escape velocity of Earth"})
+    assert not res["isError"] and "find_tools" in res["content"][0]["text"]
+    monkeypatch.setattr(mentat, "_ask", lambda q, given=None: {"value": 3.0, "units": "m"})
+    assert "find_tools" not in call(client, "ask", {"question": "q"})["content"][0]["text"]
