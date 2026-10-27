@@ -141,7 +141,89 @@ def mentat_tools(args: dict, get=http_get_json) -> str:
     return "\n".join(out)[:MAX_TEXT]
 
 
+# ── PDFs: the text layer first (free, instant), a picture of the page for the OCR pop-up when there is none ─────────────────────────────────────
+MAX_PDF_BYTES = 60_000_000
+
+
+def _page_range(spec, total: int) -> list[int]:
+    """'1-5', '3', '2,4,7-9' (1-based) as 0-based page numbers inside the document; empty or missing = the first 20."""
+    spec = str(spec or "").strip()
+    if not spec:
+        return list(range(min(total, 20)))
+    out: list[int] = []
+    for part in spec.split(","):
+        m = re.fullmatch(r"\s*(\d+)\s*(?:-\s*(\d+))?\s*", part)
+        if not m:
+            raise ValueError(f"pages must look like '1-5' or '2,4,7-9', not {spec!r}")
+        lo, hi = int(m.group(1)), int(m.group(2) or m.group(1))
+        out += [n - 1 for n in range(lo, min(hi, total) + 1) if n >= 1]
+    if not out:
+        raise ValueError(f"the document has {total} pages; {spec!r} is outside it")
+    return sorted(set(out))[:60]
+
+
+def _render_page(path: Path, number: int, folder: Path) -> str | None:
+    """A PNG of one page for the OCR pop-up (read_document), if a renderer is installed; None when not."""
+    try:
+        import pypdfium2 as pdfium                                        # noqa: PLC0415 — optional
+        image = pdfium.PdfDocument(str(path))[number].render(scale=1.6).to_pil()
+    except Exception:  # noqa: BLE001
+        return None
+    folder.mkdir(exist_ok=True)
+    target = folder / f"{path.stem[:40]}-page{number + 1}.png"
+    image.convert("L").save(target, optimize=True)
+    return str(target) if target.stat().st_size <= MAX_INPUT else None
+
+
+def read_pdf(args: dict, cwd: Path | None = None) -> str:
+    path = Path(str(args.get("path") or "")).expanduser()
+    if not path.is_file():
+        raise ValueError(f"there is no file at {path}")
+    if path.stat().st_size > MAX_PDF_BYTES:
+        raise ValueError(f"{path.name} is over {MAX_PDF_BYTES // 1_000_000} MB")
+    try:
+        from pypdf import PdfReader                                       # noqa: PLC0415
+    except ImportError as e:
+        raise ValueError("pypdf is not installed for the tool server (pip install pypdf)") from e
+    reader = PdfReader(str(path))
+    if reader.is_encrypted:
+        try:
+            reader.decrypt("")
+        except Exception:  # noqa: BLE001
+            raise ValueError(f"{path.name} is password protected") from None
+    total = len(reader.pages)
+    wanted = _page_range(args.get("pages"), total)
+    out, blank = [f"{path.name}: {total} pages" + (f" (showing {len(wanted)})" if len(wanted) != total else "")], []
+    used = len(out[0])
+    for n in wanted:
+        text = re.sub(r"[ \t]+\n", "\n", (reader.pages[n].extract_text() or "")).strip()
+        if len(text) < 20:
+            blank.append(n)
+            continue
+        chunk = f"\n--- page {n + 1} ---\n{text}"
+        if used + len(chunk) > MAX_TEXT:
+            out.append(f"\n[stopped at page {n + 1} to stay short: ask for the next pages with pages='{n + 1}-{n + 6}']")
+            break
+        out.append(chunk)
+        used += len(chunk)
+    if blank:
+        shots = [(n, _render_page(path, n, (cwd or Path.cwd()) / ".purple-out")) for n in blank[:6]]
+        made = [f"page {n + 1}: {s}" for n, s in shots if s]
+        out.append(f"\n[no text layer on page(s) {', '.join(str(n + 1) for n in blank)} (a scan). "
+                   + ("Pictures of them are saved; run read_document with input_path on each to read it: " + "; ".join(made) if made
+                      else "No page renderer is installed here (pip install pypdfium2) to make pictures for read_document.") + "]")
+    return "".join(out)[:MAX_TEXT + 1200]
+
+
 TOOLS: dict[str, dict] = {
+    "read_pdf": {
+        "description": "Read a PDF from a path on this PC: the text of up to 20 pages at a time (give `pages`, like '5-9', for others), page by page. "
+                       "Instant and free. Pages that are scans have no text; for those it saves a picture of the page in .purple-out/ and tells you to run "
+                       "read_document (OCR) on it.",
+        "input_schema": {"type": "object", "properties": {
+            "path": {"type": "string", "description": "the PDF's path"},
+            "pages": {"type": "string", "description": "which pages, 1-based: '1-5', '3', '2,4,7-9' (default: the first 20)"}}, "required": ["path"]},
+        "run": read_pdf},
     "web_search": {
         "description": "Search the web (a self-hosted metasearch engine at home: no account, no key). Returns the top results with title, URL and a "
                        "snippet. Use it for anything after your training, for documentation, error messages, versions and facts you are not sure of; "
