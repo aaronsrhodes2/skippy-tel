@@ -296,3 +296,32 @@ def test_it_holds_a_deploy_while_the_private_skippy_is_working(box, monkeypatch)
     assert d.run()["state"] == "deferred" and d.running is None
     monkeypatch.setattr(dep.quiet, "busy", lambda *a, **k: False)
     assert d.run()["state"] == "ok" and d.running == (first, "")
+
+
+def _doctor_box(tmp_path, monkeypatch, doctor_dir=True):
+    for k in dep.DEFAULTS:
+        monkeypatch.delenv(k, raising=False)
+    repo, state = tmp_path / "repo", tmp_path / "state"
+    (repo / "core" / "deployer").mkdir(parents=True)
+    state.mkdir()
+    (repo / "core" / "deployer" / "deployer.py").write_text("# this commit's deployer\n")
+    copy = tmp_path / "doctor" / "deployer.py"
+    if doctor_dir:
+        copy.parent.mkdir()
+        copy.write_text("# yesterday's deployer, no CORE_TESLA\n")
+    f = tmp_path / "core.env"
+    f.write_text(f"REPO_DIR={repo}\nCORE_STATE={state}\nDOCTOR_COPY={copy}\n")
+    return dep.Deployer(dep.load_settings(str(f)), log=lambda m: None), copy
+
+
+def test_a_good_deploy_brings_the_doctors_copy_up_to_date(tmp_path, monkeypatch):
+    d, copy = _doctor_box(tmp_path, monkeypatch)
+    d.mark_good("abc123", "")
+    assert copy.read_text() == "# this commit's deployer\n"         # a repair from the doctor now knows the stack this deploy knows
+    assert not copy.with_name("deployer.py.new").exists()
+
+
+def test_no_doctor_folder_no_copy(tmp_path, monkeypatch):
+    d, copy = _doctor_box(tmp_path, monkeypatch, doctor_dir=False)  # CI and the simulator: nothing installed the doctor
+    d.mark_good("abc123", "")
+    assert not copy.parent.exists()

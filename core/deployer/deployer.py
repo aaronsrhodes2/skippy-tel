@@ -59,6 +59,7 @@ DEFAULTS = {
     "OLLAMA_MODEL": "qwen3:8b", "LLM_API_KEY": "", "CORE_MATTER": "0", "MATTER_ARGS": "", "CORE_TESLA": "0",
     "CORE_POPUPS3D": "0", "CI_LOCAL": "", "CI_NAME": "skippy-tel",
     "CD_PY": "/opt/skippy-core/cd/cd.py", "RETRY_S": "1800", "QUIET": "1",
+    "DOCTOR_COPY": "/opt/skippy-core/doctor/deployer.py",
 }
 KEEP_BAD = 50
 
@@ -137,6 +138,28 @@ class Deployer:
         st = self.state()
         st["last_good"] = {"commit": commit, "full": full, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
         self._write("state.json", st)
+        self.refresh_doctor()
+
+    def refresh_doctor(self) -> None:
+        """The doctor (and skippy-pc's starter, for the portal's "Put everything back") repair with their own copy of this file, made by
+        install.sh. A stale copy repairs with yesterday's idea of the stack: on 2026-10-26 one that predated CORE_TESLA recreated
+        everything without core/compose.tesla.yml and --remove-orphans took TeslaMate down. So every good deploy brings the copy up to
+        this commit's. Only where the copy's folder exists (the box, not CI or the simulator); a failure is logged, never fatal."""
+        dest = Path(self.s.get("DOCTOR_COPY") or "")
+        src = self.repo / "core" / "deployer" / "deployer.py"
+        if not self.s.get("DOCTOR_COPY") or not dest.parent.is_dir() or not src.is_file():
+            return
+        try:
+            new = src.read_bytes()
+            if dest.is_file() and dest.read_bytes() == new:
+                return
+            tmp = dest.with_name(dest.name + ".new")
+            tmp.write_bytes(new)
+            tmp.chmod(0o755)
+            os.replace(tmp, dest)
+            self.log(f"doctor's copy brought up to this deploy ({dest})")
+        except OSError as e:
+            self.log(f"couldn't refresh the doctor's copy at {dest}: {e}")
 
     # ── the outside world (tests replace these) ──────────────────────────────
     def env(self, full: str) -> dict:
