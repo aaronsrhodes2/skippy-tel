@@ -30,8 +30,9 @@ def node_key(name: str) -> str:
 
 
 def about(name: str, usage: dict | None = None) -> dict | None:
-    """The catalog entry for a node (what it is for, what uses it, an example), with live usage numbers when the machine reported any."""
-    entry = NODES.get(node_key(name))
+    """The catalog entry for a node (what it is for, what uses it, an example), with live usage numbers when the machine reported any.
+    A capability's key (make_image) finds the entry of the same name with hyphens (make-image)."""
+    entry = NODES.get(node_key(name)) or NODES.get(node_key(name).replace("_", "-"))
     if not entry:
         return None
     out = {k: entry[k] for k in ("for", "used_by", "example", "note") if k in entry}
@@ -197,13 +198,13 @@ class Status:
             up = v.get("ready") is True
             on_call = up and v.get("loaded") is False                  # a service that loads its model when asked, and has not: on call (blue)
             lamp = "call" if on_call else ("ok" if up else "down")
-            pc_services.append({"kind": "endpoint", "name": _s(k).replace("_", " "), "lamp": lamp,
+            pc_services.append({"kind": "endpoint", "name": _s(k).replace("_", " "), "lamp": lamp, "about": about(k),
                                 "detail": "on call: loads when asked" if on_call else ("ready" if up else "not ready"),
                                 "reach": "ok" if up else "down", "ready": "call" if on_call else ("ok" if up else "down")})
         for s in report.get("services") or []:
             if isinstance(s, dict) and s.get("name"):
                 lamp = "ok" if s.get("available") else ("off" if s.get("planned") else "down")
-                pc_services.append({"kind": "service", "name": _s(s["name"], 40), "lamp": lamp, "detail": _s(s.get("status_detail"), 100),
+                pc_services.append({"kind": "service", "name": _s(s["name"], 40), "lamp": lamp, "detail": _s(s.get("status_detail"), 100), "about": about(s["name"]),
                                     "reach": lamp, "ready": lamp})
         for name, d in sorted((report.get("doctor") or {}).items()):          # what each service SAID about itself (PLATINUM section 24)
             if not isinstance(d, dict):
@@ -223,13 +224,14 @@ class Status:
                 detail = _s(d.get("why"), 120) if d.get("ok") is False else "answers, but cannot yet say whether it is ready"
             reach = "ok" if d.get("reachable") is not False and (d.get("ok") or state or d.get("reachable")) else "down"
             ready = {"ready": "ok", "busy": "ok", "hung": "hung", "not-ready": "down"}.get(state, "off" if reach == "ok" else "down")
-            pc_services.append({"kind": "service", "name": _s(name, 40), "lamp": lamp, "detail": detail, "jobs": jobs, "reach": reach, "ready": ready})
+            pc_services.append({"kind": "service", "name": _s(name, 40), "lamp": lamp, "detail": detail, "jobs": jobs, "reach": reach, "ready": ready,
+                                "about": about(name)})
         if any(s.get("lamp") == "hung" for s in pc_services) and pc_state == "ok":
             pc_state = "degraded"
-        pc = {"id": "skippy-pc", "label": "skippy-pc", "state": pc_state, "age": home_age,
+        pc = {"id": "skippy-pc", "label": "skippy-pc", "state": pc_state, "age": home_age, "about": about("skippy-pc"),
               "vitals": {k: st[k] for k in ("gpu_util_pct", "gpu_free_pct", "ups_charge") if k in st},
               "busy": bool(st.get("busy")),
-              "containers": [{**c, "lamp": container_lamp(c)} for c in pc_containers],
+              "containers": [{**c, "lamp": container_lamp(c), "about": about(c["name"])} for c in pc_containers],
               "serves": pc_services}
 
         core_state = "stale" if core is not None and not core_fresh else ("off" if core is None else "ok")
@@ -273,7 +275,7 @@ class Status:
                 core_state = "degraded"
         if core_verdict and core_verdict.get("verdict") == "down" and not core_fresh:
             core_state = "down"
-        core_node = {"id": "skippy-core", "label": "skippy-core", "state": core_state, "age": core_age,
+        core_node = {"id": "skippy-core", "label": "skippy-core", "state": core_state, "age": core_age, "about": about("skippy-core"),
                      "vitals": (core or {}).get("vitals", {}), "busy": bool((core or {}).get("busy")),
                      "deployer": (core or {}).get("deployer"), "doctor": (core or {}).get("doctor"),
                      "containers": containers, "serves": core_serves}
@@ -281,14 +283,15 @@ class Status:
         vm_state = "off"
         if games_vm is not None:
             vm_state = {"RUNNING": "ok", "TERMINATED": "off", "STOPPED": "off"}.get(_s(games_vm.get("status")).upper(), "degraded")
-        vm = {"id": "games-vm", "label": "games VM", "state": vm_state, "age": None, "vitals": {}, "busy": False, "containers": [],
+        vm = {"id": "games-vm", "label": "games VM", "state": vm_state, "age": None, "vitals": {}, "busy": False, "containers": [], "about": about("games-vm"),
               "serves": [{"kind": "service", "name": "game servers", "lamp": vm_state if vm_state in ("ok", "off") else "degraded",
-                          "detail": _s((games_vm or {}).get("status"), 20)}]}
+                          "detail": _s((games_vm or {}).get("status"), 20), "about": about("game servers")}]}
 
-        portal_node = {"id": "skippy-portal", "label": "skippy-portal", "state": "ok", "age": 0, "vitals": {}, "busy": False,
+        portal_node = {"id": "skippy-portal", "label": "skippy-portal", "state": "ok", "age": 0, "vitals": {}, "busy": False, "about": about("skippy-portal"),
                        "containers": [], "serves": [{"kind": "service", "name": "portal", "lamp": "ok",
-                                                     "detail": _s(portal.get("short") or portal.get("commit"), 12)},
-                                                    {"kind": "service", "name": "revision", "lamp": "ok", "detail": _s(portal.get("revision"), 40)}]}
+                                                     "detail": _s(portal.get("short") or portal.get("commit"), 12), "about": about("portal")},
+                                                    {"kind": "service", "name": "revision", "lamp": "ok", "detail": _s(portal.get("revision"), 40),
+                                                     "about": about("revision")}]}
 
         for node in (pc, core_node):                      # what each container said lately: {n, errors, last} (portal/logs.py activity)
             for c in node["containers"]:

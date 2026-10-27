@@ -16,7 +16,8 @@ from test_app import ADMIN, SETTINGS, FakeSkippy, FakeVm  # noqa: E402
 import app as portal  # noqa: E402
 
 
-def main(port: int = 8765) -> None:
+def build_app():
+    """The portal app with the made-up machines already reporting (test_status_nodes.py reads the same fixture)."""
     app = portal.create_app(dict(SETTINGS), vm=FakeVm(), skippy=FakeSkippy())
     home, starter, status, logs = app.extensions["home"], app.extensions["starter"], app.extensions["status"], app.extensions["logs"]
     home.accept({"capabilities": {"workshop": {"ready": True}, "make_image": {"ready": True, "loaded": True}, "make_image_hq": {"ready": True, "loaded": False, "box": "core"},
@@ -40,6 +41,11 @@ def main(port: int = 8765) -> None:
                            {"source": "docker/skippytel-flask-api", "level": "info", "msg": "GET /health 200"}])
     logs.add("skippy-core", [{"source": "docker/skippycore-mentat-1", "level": "error", "kind": "crash", "msg": "ModuleNotFoundError: No module named 'sigma_ground'"},
                              {"source": "journal/skippy-core-deployer", "level": "warn", "msg": "deferred: the private Skippy is working"}])
+    return app
+
+
+def main(port: int = 8765) -> None:
+    app = build_app()
 
     @app.get("/dev-login")
     def dev_login():

@@ -2,50 +2,505 @@
  "_about": "What each node on the Status page is for, what uses it, and a real example. Keyed by the node's short name (a container's name without skippycore-/skippytel- and without the -1 on the end; a model's or service's own name). A new node means a new entry here; portal/tests/test_status_nodes.py fails on a stale one. `usage` fields are filled live from what the machine reports (core/reporter).",
  "mentat": {
   "for": "The physics, chemistry and maths answerer. You (or Skippy) ask a question in plain words; Mentat works out which sigma-ground calculation it is, runs it, and answers with the value, its unit, the formula and the source. It never makes a number up: no source, no number.",
-  "used_by": ["Skippy's chats, public and private (ask_mentat, forced when a reply claims physics)", "Claude Code on skippy-pc (the `mentat` MCP)", "purple Skippy (purple-tools: ask_mentat, mentat_tool, mentat_tools)", "the Experiments playground (the cloud copy, keywords only)"],
-  "example": {"ask": "If I throw a baseball at 45 degrees at 100 miles per hour, how far will it travel before it touches the ground?", "answer": "203.8 m (range at 45° and 44.7 m/s, no air). Source: sigma_ground.materia (projectile_motion). Derived, 230 ms."},
+  "used_by": [
+   "Skippy's chats, public and private (ask_mentat, forced when a reply claims physics)",
+   "Claude Code on skippy-pc (the `mentat` MCP)",
+   "purple Skippy (purple-tools: ask_mentat, mentat_tool, mentat_tools)",
+   "the Experiments playground (the cloud copy, keywords only)"
+  ],
+  "example": {
+   "ask": "If I throw a baseball at 45 degrees at 100 miles per hour, how far will it travel before it touches the ground?",
+   "answer": "203.8 m (range at 45° and 44.7 m/s, no air). Source: sigma_ground.materia (projectile_motion). Derived, 230 ms."
+  },
   "note": "Almost every call is a plain question (/ask); the 200+ individual tools are rarely called by name. Showing all of them to a chat cost about 73,000 tokens of its context, so over MCP Mentat now shows only three tools (ask, find_tools, call_tool); the full set is still on REST /tools/<name> and any tool can still be called by name."
  },
  "llm": {
   "for": "skippy-core's model server (llama-swap). It holds the chat, coder, router and vision models and loads the one a request names.",
-  "used_by": ["every Skippy chat (public and private)", "Mentat's interpreter and router", "the Ollama shim that old services still call", "the portal's tests and probes"]
+  "used_by": [
+   "every Skippy chat (public and private)",
+   "Mentat's interpreter and router",
+   "the Ollama shim that old services still call",
+   "the portal's tests and probes"
+  ]
  },
  "searxng": {
   "for": "A self-hosted web search engine. It asks several public search engines for you and returns plain results, with no account, no key and no tracking.",
-  "used_by": ["purple Skippy's web_search tool (purple-tools)"],
-  "example": {"ask": "web_search: \"llama.cpp prompt cache flag\"", "answer": "Title, URL and a one-line snippet for the top six results."}
+  "used_by": [
+   "purple Skippy's web_search tool (purple-tools)"
+  ],
+  "example": {
+   "ask": "web_search: \"llama.cpp prompt cache flag\"",
+   "answer": "Title, URL and a one-line snippet for the top six results."
+  }
  },
  "mosquitto": {
   "for": "The message broker between the car's logger and the car reader. TeslaMate publishes the car's live state to it; it keeps the last value of every topic on disk.",
-  "used_by": ["TeslaMate (publishes)", "the car reader (subscribes)"]
+  "used_by": [
+   "TeslaMate (publishes)",
+   "the car reader (subscribes)"
+  ]
  },
  "tesla-db": {
   "for": "TeslaMate's Postgres database: every drive and charge the car has logged.",
-  "used_by": ["TeslaMate"]
+  "used_by": [
+   "TeslaMate"
+  ]
  },
  "teslamate": {
   "for": "Logs the Tesla's drives, charges and state around the clock from Tesla's own API, without waking the car. Its page (tailnet only, port 4000) is where the Tesla sign-in is kept.",
-  "used_by": ["the car reader (through the broker)", "the Car tile and Skippy's car_status (through the reader)"]
+  "used_by": [
+   "the car reader (through the broker)",
+   "the Car tile and Skippy's car_status (through the reader)"
+  ]
  },
  "car": {
   "for": "The car reader: keeps the latest values the broker has (charge, lock, location) and serves them as one small answer with the readiness contract.",
-  "used_by": ["skippy-pc's reporter (the `car` capability)", "the portal's Car tile", "Skippy's car_status tool"],
-  "example": {"ask": "GET /car", "answer": "T3-P0: charging, 55% of 80%, locked."}
+  "used_by": [
+   "skippy-pc's reporter (the `car` capability)",
+   "the portal's Car tile",
+   "Skippy's car_status tool"
+  ],
+  "example": {
+   "ask": "GET /car",
+   "answer": "T3-P0: charging, 55% of 80%, locked."
+  }
  },
  "chat": {
   "for": "The resident chat model (Qwen3.6-35B-A3B). It answers the public Skippy chat, writes chat names and summaries, and is the 'skippy-chat' that old services ask for.",
-  "used_by": ["the public chat", "Mentat (interpreter)", "Barney Style", "WebFetch's page summariser in Core runs"]
+  "used_by": [
+   "the public chat",
+   "Mentat (interpreter)",
+   "Barney Style",
+   "WebFetch's page summariser in Core runs"
+  ]
  },
  "coder": {
   "for": "The coding model behind the private Skippy (Claude Code on Core's own brain).",
-  "used_by": ["private Skippy (Private mode)", "purple Skippy's runs"]
+  "used_by": [
+   "private Skippy (Private mode)",
+   "purple Skippy's runs"
+  ]
  },
  "router": {
   "for": "A small fast model that reads a physics question and picks the Mentat calculation to run.",
-  "used_by": ["Mentat"]
+  "used_by": [
+   "Mentat"
+  ]
  },
  "vision": {
   "for": "Looks at pictures: describes screenshots and photos, copies out the words in them.",
-  "used_by": ["the private Skippy's eyes (pictures the Core coder cannot read)", "attached pictures in chat"]
+  "used_by": [
+   "the private Skippy's eyes (pictures the Core coder cannot read)",
+   "attached pictures in chat"
+  ]
+ },
+ "skippy-portal": {
+  "for": "The Maker Portal on Google Cloud Run (makerportal.live): every page you open, the chats, the sign-in, and the hub every other machine reports in to. It runs one copy, so it is always the one that knows the whole house.",
+  "used_by": [
+   "you and your friends, in any browser",
+   "skippy-pc's home reporter and starter (they post out to it)",
+   "skippy-core's reporter (POST /home/core-report)",
+   "the deploy smoke test and the loop timer (public /version)"
+  ],
+  "example": {
+   "ask": "GET /version",
+   "answer": "The commit it is running (e.g. f1a8448) and the Cloud Run revision."
+  }
+ },
+ "skippy-pc": {
+  "for": "The Windows PC at home with the 16 GB graphics card: Docker services for hearing, voices, pictures, songs and the media gates, the private Skippy's bridge, and the home reporter that tells the portal all of it.",
+  "used_by": [
+   "the portal (through the home reporter and the starter; it cannot reach the PC directly)",
+   "the private Skippy (Claude Code runs here)",
+   "skippy-core (the data trunk: D:\\trunk and D:\\datasets over the LAN)"
+  ],
+  "note": "Its lamps come from what the reporter sends every ~15 s; grey means no report lately, not that it is fine."
+ },
+ "skippy-core": {
+  "for": "The Ubuntu AI box (Bosgame M5): the local models (chat, coder, router, vision), Mentat, web search, quality pictures and 3D, the Matter controller and the car stack. It deploys the portal itself from a green main.",
+  "used_by": [
+   "every Skippy chat (its models answer them)",
+   "skippy-pc's reporter (Mentat, the Ollama shim, quality pictures)",
+   "the private Skippy in Private mode (its coder)",
+   "the deployer and CI for every push"
+  ],
+  "note": "It reports on its own (core/reporter, every 30 s), so its lamp stays true even when skippy-pc is off."
+ },
+ "games-vm": {
+  "for": "The Google Cloud VM that runs the game servers (EverQuest, Garry's Mod, Satisfactory and the rest), started and stopped from the portal. Each game's world is backed up at every boot.",
+  "used_by": [
+   "you and your friends, from the game clients",
+   "the portal's Game Servers app and its ops doors (start, stop, status)",
+   "the Discord bot's game channels"
+  ],
+  "note": "Off (grey) is its normal state when nobody is playing: it costs money only while it runs."
+ },
+ "game servers": {
+  "for": "The games VM's power state as Google reports it: RUNNING when the servers are up, TERMINATED when the VM is stopped to save money.",
+  "used_by": [
+   "the Game Servers app (its lit controls)",
+   "the ops doors (cd.py ops status, start, stop)"
+  ]
+ },
+ "portal": {
+  "for": "The portal's own code version: the short commit hash this Cloud Run copy was built from. If it is not the newest main, a deploy is still on its way or failed.",
+  "used_by": [
+   "the deploy smoke test and the loop timer (they read /version)",
+   "the ship card under a private Skippy push"
+  ],
+  "example": {
+   "ask": "GET /version",
+   "answer": "The running commit, e.g. short f1a8448."
+  }
+ },
+ "revision": {
+  "for": "The Cloud Run revision serving the portal right now: each deploy makes a new one, and Admin > Recovery can roll back to an older one.",
+  "used_by": [
+   "Admin > Recovery (rollback)",
+   "the rollback workflow"
+  ]
+ },
+ "flask-api": {
+  "for": "Skippy's original API (SkippyTel core): JSON only, no pages. It holds the ElevenLabs key for Skippy's cloud voice, the music session and Bilby's status, the site-activity summary, and the old chat routing. skippy-core runs a second copy.",
+  "used_by": [
+   "the home reporter (/status.json, /services, /health, /music/session)",
+   "voice-gate (the ElevenLabs voice through /tts)",
+   "the shelved phone apps",
+   "skippy-core's smoke test (its own copy)"
+  ],
+  "example": {
+   "ask": "GET /health",
+   "answer": "{\"accepting\": true, \"models\": {\"ollama\": {\"default\": \"qwen3:8b\", \"default_present\": true}}, \"jobs\": {\"running\": 0, \"queued\": 0}}"
+  }
+ },
+ "whisper": {
+  "for": "Speech to text on skippy-pc's card (faster-whisper, the medium model, kept loaded). Turns a recording into words.",
+  "used_by": [
+   "voice-gate (the chats' microphone)",
+   "the diarize pop-up (who said what)",
+   "flask-api's audio routes"
+  ],
+  "example": {
+   "ask": "GET /health",
+   "answer": "{\"status\": \"ok\", \"model\": \"medium\", \"device\": \"cuda\", \"loaded\": true}"
+  }
+ },
+ "music-studio": {
+  "for": "Makes songs (ACE-Step 1.5) on skippy-pc's card: a description and optional lyrics in, an mp3 out. Offline, weights read-only from D:\\models, no published port.",
+  "used_by": [
+   "the home reporter only (the chat's make_music, the Captain only)"
+  ],
+  "note": "A song is a patient job: it waits until the PC has been idle for 5 minutes and the card is free."
+ },
+ "make-music": {
+  "for": "The chat's make_music tool, as the reporter offers it: ready when the music studio answers its /health.",
+  "used_by": [
+   "the Captain's chats (make_music, a patient job)"
+  ]
+ },
+ "image-studio": {
+  "for": "Draws pictures. On skippy-pc: SDXL, the quick pictures, loaded only while it works. On skippy-core: Qwen-Image, the quality pictures, which may take up to two hours.",
+  "used_by": [
+   "the home reporter (patient picture jobs from the chats and the private Skippy's SKIPPY_PICTURE lines)"
+  ],
+  "example": {
+   "ask": "GET /health (skippy-pc)",
+   "answer": "{\"model\": \"sdxl-base-1.0\", \"ready\": true, \"loaded\": false}"
+  }
+ },
+ "make-image": {
+  "for": "The chat's quick picture tool (make_image): SDXL in skippy-pc's image studio. Blue when the studio is ready but the model is not loaded yet.",
+  "used_by": [
+   "everyone who may chat (guests 10 a day)",
+   "the private Skippy's SKIPPY_PICTURE lines"
+  ]
+ },
+ "make-image-hq": {
+  "for": "The chat's quality picture tool (make_image_hq): Qwen-Image on skippy-core's own GPU, slow and careful.",
+  "used_by": [
+   "the Captain's chats (a patient job)"
+  ],
+  "example": {
+   "ask": "GET /health (skippy-core :7347)",
+   "answer": "{\"model\": \"qwen-image-2512-q8\", \"ready\": true, \"busy\": false, \"gpu_free_pct\": 36.9}"
+  }
+ },
+ "music-gate": {
+  "for": "The door to Bilby's Audio Service: streams tracks from the Captain's music library to a browser through Tailscale Funnel, only with a pass the portal signs. The audio never passes through the portal.",
+  "used_by": [
+   "the /music player (the Captain and friends with 'audio')",
+   "the room boxes' hub (tracks for the speakers)"
+  ],
+  "example": {
+   "ask": "GET /health",
+   "answer": "{\"ready\": true, \"tracks\": 21451, \"lyrics\": 20863, \"scanning\": false}"
+  }
+ },
+ "video-gate": {
+  "for": "The door to Nagatha's Video Service: the Captain's Jellyfin films for a browser through Funnel :8443, behind a signed pass. Jellyfin's admin key never leaves this container.",
+  "used_by": [
+   "the /video app (the Captain and friends with 'video')"
+  ],
+  "example": {
+   "ask": "GET /health",
+   "answer": "{\"ready\": true, \"jellyfin\": true, \"items\": 266}"
+  }
+ },
+ "voice-gate": {
+  "for": "Skippy's ears and mouth for the portal's chats: a microphone recording goes to Whisper, a reply comes back as speech (the local voices from tts-studio, or ElevenLabs through flask-api), through Funnel :10000 with a signed pass.",
+  "used_by": [
+   "the chats' voice key (Typing and Hands-off modes)"
+  ],
+  "example": {
+   "ask": "GET /health",
+   "answer": "{\"ready\": true, \"whisper\": true, \"voices\": {\"stock\": true, \"skippy\": true, \"elevenlabs\": true}, \"voice_chars_today\": 0, \"voice_budget\": 4000}"
+  }
+ },
+ "tts-studio": {
+  "for": "Skippy's local voices on skippy-pc's card: 'stock' (Kokoro, for everyone) and 'skippy' (an F5-TTS clone of his Skippy voice, the Captain only). Both stay loaded; no route out, no published port.",
+  "used_by": [
+   "voice-gate only"
+  ],
+  "example": {
+   "ask": "GET /health",
+   "answer": "{\"ready\": true, \"resident\": [\"skippy\", \"stock\"], \"stock_voice\": \"bm_george\", \"vram_reserved_gib\": 3.0}"
+  }
+ },
+ "home-reporter": {
+  "for": "skippy-pc's voice to the portal: every ~15 s it sends what is running and ready here, Bilby's music and the doctor's checks, and it runs the jobs the portal hands back (Mentat questions, pictures, songs, pop-ups, the house).",
+  "used_by": [
+   "the portal (the only way it hears from skippy-pc)",
+   "the private Skippy's quick pop-up tools (localhost :47450)"
+  ],
+  "example": {
+   "ask": "GET /health (:47450)",
+   "answer": "{\"ok\": true}"
+  }
+ },
+ "wa-trickle": {
+  "for": "A slow, free Wolfram|Alpha vs Mentat comparison: one Wolfram call per queued question, ever, on a daily budget inside the free tier; the same question to Mentat again per commit.",
+  "used_by": [
+   "sigma-ground's tools/wa_trickle_*.py (the loader queues, the scorer reads)"
+  ],
+  "example": {
+   "ask": "GET /health",
+   "answer": "ok"
+  }
+ },
+ "dozzle": {
+  "for": "A live Docker log viewer for skippy-pc's containers, in a browser at http://localhost:9999. It keeps working when flask-api crashes.",
+  "used_by": [
+   "the Captain, by hand (no program calls it)"
+  ],
+  "note": "The Status page's own Logs sheet now carries the same lines from every machine; if nobody opens :9999 it can go."
+ },
+ "ollama": {
+  "for": "The Ollama door. On skippy-core it is the Ollama shim: Ollama's API in front of llama-swap, answering every old model name (qwen3:8b, qwen2.5:7b) with Core's resident chat model. skippy-pc has no Ollama any more; its check points here.",
+  "used_by": [
+   "flask-api",
+   "Mentat",
+   "the home reporter",
+   "voice-gate",
+   "Bilby"
+  ],
+  "example": {
+   "ask": "GET /",
+   "answer": "Ollama is running"
+  }
+ },
+ "mentat-home": {
+  "for": "skippy-pc's check on the home Mentat (on skippy-core, tailnet :7350): does it say it is ready, with its models behind it.",
+  "used_by": [
+   "the chats' ask_mentat jobs (through the reporter)"
+  ],
+  "example": {
+   "ask": "GET /health",
+   "answer": "{\"ready\": true, \"mode\": \"llm\", \"tools\": 224, \"deps\": {\"llm\": {\"ready\": true}, \"router\": {\"ready\": true}}}"
+  }
+ },
+ "bridge": {
+  "for": "The private Skippy's bridge on skippy-pc (not a container: a Python process on the host, :9337). It runs Claude Code for the Workshop, one run at a time, and says whether Claude's login is good.",
+  "used_by": [
+   "the private Skippy (Private and Auto modes) through the reporter",
+   "the loop timer and the starter"
+  ],
+  "example": {
+   "ask": "GET /health",
+   "answer": "{\"status\": \"ok\", \"workshop\": {\"ready\": true, \"model\": \"claude-sonnet-5-5\", \"busy\": false, \"login\": \"ok\"}}"
+  }
+ },
+ "workshop": {
+  "for": "The private Skippy, as the reporter offers it: ready when the bridge is up, has its token and Claude's login is not known to be expired.",
+  "used_by": [
+   "the Captain's chat in Private and Auto modes"
+  ]
+ },
+ "house": {
+  "for": "The house's lights and switches for the Captain's chat: HomeKit, Matter (through skippy-core) and the Leviton cloud as one house.",
+  "used_by": [
+   "the Captain's chat (home_devices, home_state, home_control)"
+  ]
+ },
+ "echo": {
+  "for": "The pop-up plumbing's test service: hands back what it was sent. Only there to prove the path works.",
+  "used_by": [
+   "the pop-up tests (admin only)"
+  ]
+ },
+ "image-to-3d": {
+  "for": "Turns one picture of a single object into a textured 3D model (.glb) for AR, Garry's Mod props or miniatures. On skippy-core, loaded only while it works.",
+  "used_by": [
+   "the Captain's chat (a patient job)",
+   "the private Skippy (SKIPPY_POPUP lines)"
+  ]
+ },
+ "text-to-3d": {
+  "for": "Makes a textured 3D model (.glb) of one object from a description: it draws the object first, then turns the picture into 3D. On skippy-core.",
+  "used_by": [
+   "the Captain's chat (a patient job)",
+   "the private Skippy (SKIPPY_POPUP lines)"
+  ]
+ },
+ "make-video": {
+  "for": "Makes a short silent clip (1 to 4 seconds, mp4) from a description; an attached picture becomes its first frame. On skippy-core, up to an hour.",
+  "used_by": [
+   "the Captain's chat (a patient job)",
+   "the private Skippy (SKIPPY_POPUP lines)"
+  ]
+ },
+ "popups-3d": {
+  "for": "skippy-core's 3D and video pop-up service (port 7348): image_to_3d, text_to_3d and make_video, each loaded only while it works.",
+  "used_by": [
+   "the home reporter (patient pop-up jobs)"
+  ],
+  "example": {
+   "ask": "GET /health",
+   "answer": "{\"ready\": true, \"busy\": false, \"popups\": {\"image_to_3d\": {\"peak_gib\": 18}, \"make_video\": {\"peak_gib\": 22}, \"text_to_3d\": {\"peak_gib\": 30}}}"
+  }
+ },
+ "search-memory": {
+  "for": "Searches the Captain's own past by meaning: his private Skippy conversations, the Skippy Memory archive and Mentat's research log.",
+  "used_by": [
+   "the Captain's chat",
+   "the private Skippy"
+  ]
+ },
+ "diarize": {
+  "for": "Turns a recording with several people talking into a transcript labelled by speaker, with times.",
+  "used_by": [
+   "the Captain's chat (an attached recording)"
+  ]
+ },
+ "remove-background": {
+  "for": "Cuts the subject out of a picture (BiRefNet): a transparent PNG, or the subject on pure black, which the Viture glasses show as see-through.",
+  "used_by": [
+   "everyone who may chat"
+  ]
+ },
+ "upscale-image": {
+  "for": "Makes a picture four times bigger and sharper (Real-ESRGAN x4), up to 4096 pixels on the long side.",
+  "used_by": [
+   "everyone who may chat"
+  ]
+ },
+ "depth-map": {
+  "for": "A depth map (Depth Anything V2) or a normal map of a picture, for AR occlusion, parallax and relighting.",
+  "used_by": [
+   "the Captain's chat"
+  ]
+ },
+ "segment-image": {
+  "for": "Cuts out what is named, pointed at or boxed in a picture (SAM 2.1), or outlines every region.",
+  "used_by": [
+   "the Captain's chat"
+  ]
+ },
+ "detect-objects": {
+  "for": "Finds and boxes whatever the words name in a picture (Grounding DINO): 'find the mugs'.",
+  "used_by": [
+   "the Captain's chat"
+  ]
+ },
+ "read-document": {
+  "for": "Reads a document, receipt, screenshot, table or formula in a picture (PaddleOCR-VL): exact text, tables as HTML, formulas as LaTeX.",
+  "used_by": [
+   "everyone who may chat"
+  ]
+ },
+ "body-pose": {
+  "for": "The body pose of each person in a picture (ViTPose++, 17 keypoints): a skeleton picture or the points as JSON.",
+  "used_by": [
+   "the Captain's chat"
+  ]
+ },
+ "Skippy AI": {
+  "for": "flask-api's own chat routing (/intent/unmatched): the default Ollama tier and 'ask nagatha' for Gemini. The portal's chats no longer use it.",
+  "used_by": [
+   "the shelved phone apps",
+   "skippy-core's smoke test (one real reply)"
+  ]
+ },
+ "Bilby": {
+  "for": "flask-api's view of Bilby, the DJ assistant on the Mac (Traktor): what is playing and what to play next. 'Drive mode' when the Mac is off.",
+  "used_by": [
+   "the home reporter (Bilby's status for /me and the chat)",
+   "the shelved phone apps (the karaoke line)"
+  ]
+ },
+ "DropShip": {
+  "for": "Photo tagging into a Drive folder. Parked on purpose (the Captain, 2026-10-13: to restart later with more planning); its routes stay, dormant.",
+  "used_by": [
+   "nobody right now (parked)"
+  ]
+ },
+ "Image Generator": {
+  "for": "The old picture route on flask-api (POST /image). Retired: it answers 503, and pictures are patient jobs (make_image, make_image_hq).",
+  "used_by": [
+   "nobody (retired)"
+  ]
+ },
+ "Translator": {
+  "for": "Text and audio translation on flask-api (/translate/text, /translate/audio).",
+  "used_by": [
+   "unknown: only the old services/chat app and the test scripts call it"
+  ]
+ },
+ "UPS Monitor": {
+  "for": "The UPS's battery and power state from ups-monitor.py on the host. Planned: grey until that script runs.",
+  "used_by": [
+   "the vitals rows (ups_charge), once it reports"
+  ]
+ },
+ "StarMap": {
+  "for": "Star map data (GET /starmap) for the AR glasses, meant to come from physics-mcp. Planned: that service is not built yet.",
+  "used_by": [
+   "nobody yet (planned for the shelved glasses HUD)"
+  ]
+ },
+ "Jellyfin": {
+  "for": "The Captain's film library server (a Windows service on skippy-pc, :8096). flask-api says whether it answers and has an API key.",
+  "used_by": [
+   "video-gate (Nagatha's Video Service)"
+  ]
+ },
+ "Skippy Music": {
+  "for": "flask-api's music session: plays from the Drive library or the Mac and takes skip, pause, resume and stop.",
+  "used_by": [
+   "the home reporter (/music/session, and the portal's queued music commands)",
+   "/me's music widget and the chat's music tool"
+  ]
+ },
+ "Vault": {
+  "for": "flask-api's settings bootstrap for the phone apps (/vault/bootstrap) and the APK downloads (/apk/<app>).",
+  "used_by": [
+   "the shelved phone apps (SkippyChat, SkippyDroid)"
+  ]
+ },
+ "matter": {
+  "for": "skippy-core's Matter controller (python-matter-server, tailnet only): the Nest and the Leviton switches paired locally.",
+  "used_by": [
+   "the room hub's Matter backend (services/satellite matter.py)",
+   "the house tools in the Captain's chat (through the hub)"
+  ]
  }
 }

@@ -242,6 +242,7 @@
       [["ok", "ready"], ["call", "on call"], ["warn", "not ready"], ["down", "down / hung"], ["off", "can't tell"]].forEach(([c, w]) => { lg.append(html("span", `dot ${c}`), html("span", "dt", w)); });
       rows.unshift(lg);
     }
+    if (m.about) rows.unshift(...aboutRows(m.about));      // what the machine itself is for comes first, above the legend
     // "Up 16 minutes" says it is running, not that it is ready: a container with no readiness check shows a hollow ring and says so in words
     const unsure = (c) => light(c.reach, c.ready) === "off" && /^up\b/i.test(c.status || "");
     for (const c of m.containers) rows.push(opens(row(c.lamp, c.name, unsure(c) ? (c.status || "") + " \u00b7 no readiness check" : (c.status || c.state), null, {reach: c.reach, ready: c.ready}), {lamp: c.lamp, name: c.name, kind: "c", ref: c}));
