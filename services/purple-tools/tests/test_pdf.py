@@ -57,7 +57,7 @@ def test_a_page_without_text_is_named_as_a_scan_and_never_invented(tmp_path):
 
 def test_missing_and_non_pdf_files_say_why(tmp_path):
     with pytest.raises(ValueError, match="no file at"):
-        tools.read_pdf({"path": str(tmp_path / "nope.pdf")})
+        tools.read_pdf({"path": str(tmp_path / "nope.pdf")}, cwd=tmp_path)
     junk = tmp_path / "junk.pdf"
     junk.write_bytes(b"not a pdf")
     out, is_error = tools.call("read_pdf", {"path": str(junk)})

@@ -18,6 +18,21 @@ from pathlib import Path
 
 SEARCH_URL = os.environ.get("PURPLE_SEARCH_URL", "http://skippy-core:7360").rstrip("/")   # SearXNG on skippy-core (core/compose.core.yml), tailnet only
 MAX_TEXT = 7000
+
+
+def allowed_roots(cwd: Path | None = None) -> list[Path]:
+    """The folders a tool may read a file from: the run's own folder (the server's working directory) plus PURPLE_ALLOWED_ROOTS (paths separated
+    by the OS path separator). An MCP tool sits outside the bridge's deny_read wall, so it keeps its own."""
+    roots = [cwd or Path.cwd()] + [Path(x) for x in os.environ.get("PURPLE_ALLOWED_ROOTS", "").split(os.pathsep) if x.strip()]
+    return [r.resolve() for r in roots]
+
+
+def checked_path(raw, cwd: Path | None = None) -> Path:
+    path = Path(str(raw or "")).expanduser()
+    path = (path if path.is_absolute() else (cwd or Path.cwd()) / path).resolve()
+    if not any(path == r or r in path.parents for r in allowed_roots(cwd)):
+        raise ValueError(f"{path.name or path}: that file is outside this run's folder; copy it into the folder first")
+    return path
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 
@@ -176,7 +191,7 @@ def _render_page(path: Path, number: int, folder: Path) -> str | None:
 
 
 def read_pdf(args: dict, cwd: Path | None = None) -> str:
-    path = Path(str(args.get("path") or "")).expanduser()
+    path = checked_path(args.get("path"), cwd)
     if not path.is_file():
         raise ValueError(f"there is no file at {path}")
     if path.stat().st_size > MAX_PDF_BYTES:
@@ -395,7 +410,7 @@ def run_popup(entry: dict, args: dict, post=http_post_json, cwd: Path | None = N
     path = args.pop("input_path", None)
     body: dict = {"args": args}
     if path:
-        f = Path(str(path)).expanduser()
+        f = checked_path(path, cwd)
         if not f.is_file():
             raise ValueError(f"there is no file at {path}")
         raw = f.read_bytes()
