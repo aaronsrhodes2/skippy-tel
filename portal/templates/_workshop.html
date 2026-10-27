@@ -364,6 +364,7 @@
     // The log is a plain scrolling transcript: a new turn takes you to the bottom (the latest words), and a conversation you are
     // reading further up is left where it is while Skippy keeps writing.
     const scroll = (force) => { if (force || log.scrollHeight - log.scrollTop - log.clientHeight < 160) log.scrollTop = log.scrollHeight; };
+    const scrollNow = () => requestAnimationFrame(() => scroll(true));  // defer: let the DOM settle first
     const pane = root.closest(".apane");
     if (pane) pane.addEventListener("pane-shown", () => scroll(true));
 
@@ -571,7 +572,7 @@
         if (d.error === BUSY && job.left) out.resume = job.left;   // the bridge is still on the task this one replaced
         store.del(K.task);
       }
-      draw(job.turn); save(); scroll();
+      draw(job.turn); save(); scrollNow();
       return out;
     }
 
@@ -815,7 +816,7 @@
         reply.task = t.task;
         turns.push(reply);
       });
-      save(); flow.replaceChildren(); turns.forEach(draw); lockPicker(); showConvs(false); scroll(true);
+      save(); flow.replaceChildren(); turns.forEach(draw); lockPicker(); showConvs(false); scrollNow();
       const last = got.turns && got.turns[got.turns.length - 1];
       if (last && last.state === "running" && last.task) {       // still being worked on: follow it from the start
         const reply = turns[turns.length - 1]; reply.parts = []; draw(reply);
@@ -831,7 +832,7 @@
       if (!r || !r.ok || !r.data || r.data.on !== want) notifyBox.checked = !want;
     });
 
-    turns.forEach(draw); scroll(true); lockPicker(); ui(); refreshCopyAll();
+    turns.forEach(draw); scrollNow(); lockPicker(); ui(); refreshCopyAll();
     // A new browser, window or device has no memory of this chat, but skippy-pc does: open the latest conversation there instead of
     // starting a blank one beside it (the chat used to look like it kept making new chats). New chat is still the explicit way to start one.
     async function resumeLatest() {

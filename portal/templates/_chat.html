@@ -107,6 +107,7 @@
     const logPager = {                                           // (the name it had when the transcript was pages; same calls)
       refresh() { if (stuck) logBox.scrollTop = logBox.scrollHeight; paintJump(); },
       last() { stuck = true; unseen = 0; logBox.scrollTop = logBox.scrollHeight; paintJump(); },
+      lastNow() { stuck = true; unseen = 0; requestAnimationFrame(() => { logBox.scrollTop = logBox.scrollHeight; paintJump(); }); },
     };
     jump.addEventListener("click", () => { logPager.last(); msg.focus(); });
     if (window.ResizeObserver) new ResizeObserver(() => logPager.refresh()).observe(log);   // a picture or a card that grows keeps the end in view
@@ -179,7 +180,7 @@
         const want = brain.slice(6);
         if (window.SkippyAgent.setBrain(want) !== want) flash("This conversation already runs on the other agent brain: New chat to switch.");
       }
-      paintStop(); if (!agent) logPager.last();                 // the transcript opens at its end
+      paintStop(); if (!agent) logPager.lastNow();               // the public transcript opens at its end (agent transcript scrolls in its own script)
     }
     root.querySelectorAll(".brain-opt").forEach(o => o.addEventListener("click", () => {
       brain = o.dataset.brain; try { localStorage.setItem(BRAIN_KEY, o.dataset.mode); } catch (e) {}
