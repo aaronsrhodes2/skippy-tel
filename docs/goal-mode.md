@@ -51,6 +51,20 @@ step in the same queue.
    GOAL.md and the failure log to orange for **one bounded session** (token cap per goal), then purple resumes. Every escalation is logged
    on the goal and counted.
 
+## The boundary (proposed by the engine side, 2026-10-26; held stable once the Captain picks the order)
+
+Two files in the goal's folder, `.skippy-goal/`, plus the existing Run API (nothing in-process):
+- `events.jsonl`, append-only, written by the engine: `{"ts": ms, "goal", "ev", ...}` with events `segment_started`, `usage`, `tool`, `retry`,
+  `trouble`, `segment_ended` (why: context|turn_limit|done|error|stopped), `gate_blocked`, `check_result` (name, passed, fingerprint, tail),
+  `committed`, `reset`, `parked`, `finished`. The watchdog reads this stream only: "stalled" = the stream is quiet while state says running.
+- `state.json`, rewritten atomically after every step: version, goal, slug, branch, task (the Captain's words), state
+  (queued|running|checking|parked|done|failed), segment, session, checks [{name, command}], last_green, fingerprints, parked, updated.
+  `GOAL.md` beside it is the readable copy, generated from the same data.
+- Control: start and cancel through the Run API (`Workshop.cancel(task)` ends cleanly with `segment_ended` why "stopped"). The queue, windows
+  and kill switch are the infra side's.
+- Fingerprint: first 12 hex of sha256 over the sorted failing check names plus each one's first `fail|error` line; twice = change of
+  approach, three times = park (the engine counts).
+
 ## Details to keep
 
 - `.skippy-goal/` is excluded from the Stop gate's uncommitted-path list and from commits (git info/exclude), or the gate would nag about
