@@ -215,7 +215,100 @@ def read_pdf(args: dict, cwd: Path | None = None) -> str:
     return "".join(out)[:MAX_TEXT + 1200]
 
 
+# ── a headless browser: the page as a person sees it (scripts run), for sites WebFetch can't read and for looking at a page you built ──────────────
+# Playwright's Chromium on this PC, one fresh private context per call (no cookies, no sign-ins, nothing kept): a call is a URL, optional steps, then
+# the text, the links and, if asked, a picture. http(s) only; file:, chrome: and the like are refused.
+BROWSE_STEPS = ("click", "fill", "press", "wait_ms", "wait_for", "scroll")
+
+
+def _check_url(url: str) -> str:
+    url = str(url or "").strip()
+    if not re.fullmatch(r"https?://[^\s]+", url):
+        raise ValueError("browse needs a full http:// or https:// address")
+    return url
+
+
+def browse(args: dict, cwd: Path | None = None, launcher=None) -> str:
+    url = _check_url(args.get("url"))
+    steps = args.get("steps") if isinstance(args.get("steps"), list) else []
+    if len(steps) > 20:
+        raise ValueError("at most 20 steps in one call")
+    if launcher is None:
+        try:
+            from playwright.sync_api import sync_playwright               # noqa: PLC0415 — optional
+        except ImportError as e:
+            raise ValueError("Playwright is not installed for the tool server (pip install playwright; playwright install chromium)") from e
+        launcher = sync_playwright
+    width, height = (int(args.get("width") or 1280), int(args.get("height") or 800))
+    notes: list[str] = []
+    with launcher() as pw:
+        browser = pw.chromium.launch(headless=True)
+        try:
+            page = browser.new_context(viewport={"width": max(320, min(width, 2400)), "height": max(320, min(height, 3000))}).new_page()
+            page.set_default_timeout(15000)
+            page.goto(url, wait_until="load", timeout=30000)
+            for i, step in enumerate(steps, 1):
+                if not isinstance(step, dict) or len(step) < 1 or next(iter(step)) not in BROWSE_STEPS:
+                    raise ValueError(f"step {i} must be one of {', '.join(BROWSE_STEPS)}, for example {{\"click\": \"text=Sign in\"}}")
+                kind, value = next(iter(step.items()))
+                if kind == "click":
+                    page.click(str(value))
+                elif kind == "fill":
+                    page.fill(str(value), str(step.get("text", "")))
+                elif kind == "press":
+                    page.keyboard.press(str(value))
+                elif kind == "wait_ms":
+                    page.wait_for_timeout(max(0, min(int(value), 10000)))
+                elif kind == "wait_for":
+                    page.wait_for_selector(str(value))
+                elif kind == "scroll":
+                    page.mouse.wheel(0, int(value))
+                notes.append(f"step {i} {kind}: ok")
+            title = page.title()
+            text = page.inner_text("body") if page.query_selector("body") else ""
+            links = page.eval_on_selector_all("a[href]", "els => els.slice(0, 200).map(a => [a.innerText.trim().slice(0, 60), a.href])")
+            shot = None
+            if args.get("screenshot"):
+                folder = (cwd or Path.cwd()) / ".purple-out"
+                folder.mkdir(exist_ok=True)
+                shot = folder / f"browse-{int(time.time())}.png"
+                page.screenshot(path=str(shot), full_page=bool(args.get("full_page")))
+            final = page.url
+        finally:
+            browser.close()
+    text = re.sub(r"\n{3,}", "\n\n", _CONTROL.sub("", text)).strip()
+    out = [f"{final}", f"title: {_clean(title, 200)}"] + notes
+    if shot:
+        out.append(f"screenshot saved {shot} (Read it to look at it)")
+    out.append("--- text ---\n" + text[: MAX_TEXT - 1500])
+    seen, rows = set(), []
+    for label, href in links:
+        if href in seen or not href.startswith(("http://", "https://")):
+            continue
+        seen.add(href)
+        rows.append(f"- {label or '(no text)'}: {href}")
+    if rows:
+        out.append("--- links (first 25) ---\n" + "\n".join(rows[:25]))
+    return "\n".join(out)[:MAX_TEXT + 1500]
+
+
 TOOLS: dict[str, dict] = {
+    "browse": {
+        "description": "Open a web page in a real headless browser on this PC (scripts run, so single-page apps and JavaScript-built pages work) and get its "
+                       "title, visible text and links; optionally click, type or scroll first, and save a screenshot. A fresh private browser each call: "
+                       "nothing is signed in and nothing is kept. Use WebFetch for plain pages; use this when WebFetch gets an empty shell, when a click "
+                       "is needed, or to look at a page you built (use screenshot, then Read the picture).",
+        "input_schema": {"type": "object", "properties": {
+            "url": {"type": "string", "description": "the full http:// or https:// address"},
+            "steps": {"type": "array", "description": "do these in order before reading: {\"click\": selector}, {\"fill\": selector, \"text\": \"...\"}, "
+                                                      "{\"press\": \"Enter\"}, {\"wait_ms\": 1000}, {\"wait_for\": selector}, {\"scroll\": 600}; a selector is "
+                                                      "CSS or Playwright's text=...",
+                      "items": {"type": "object"}},
+            "screenshot": {"type": "boolean", "description": "save a picture of the page in .purple-out/"},
+            "full_page": {"type": "boolean", "description": "with screenshot: the whole page, not just the window"},
+            "width": {"type": "integer", "description": "window width (default 1280; 390 is a phone)"},
+            "height": {"type": "integer", "description": "window height (default 800)"}}, "required": ["url"]},
+        "run": browse},
     "read_pdf": {
         "description": "Read a PDF from a path on this PC: the text of up to 20 pages at a time (give `pages`, like '5-9', for others), page by page. "
                        "Instant and free. Pages that are scans have no text; for those it saves a picture of the page in .purple-out/ and tells you to run "
