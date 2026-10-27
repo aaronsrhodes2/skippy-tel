@@ -96,8 +96,8 @@ The Captain doesn't run commands or fetch logs. Claude does, through GitHub
 Actions (the sandbox can't reach GCP or run.app directly):
 
 - **Deploy (since 2026-10-25, docs/no-github.md):** push `main` to the house git → skippy-core's CI (`core/ci`) tests it →
-  skippy-core's deployer (`core/cd/cd.py`, settings and pins in `core/cd/deploy.json`) deploys the portal to Cloud Run (and Mentat
-  cloud and `infra/gcp-games` Terraform when they changed), signed in to Google with no key (its own signing key, trusted by the
+  skippy-core's deployer (`core/cd/cd.py`, settings and pins in `core/cd/deploy.json`) deploys the portal to Cloud Run (and
+  `infra/gcp-games` Terraform when it changed; Mentat is NOT deployed to the cloud any more, 2026-10-27), signed in to Google with no key (its own signing key, trusted by the
   `skippy-core` provider in infra/bootstrap). Redeploy or roll back: Admin > Recovery (it asks skippy-core), or on skippy-core
   `sudo python3 /opt/skippy-core/cd/cd.py deploy|rollback`. GitHub's `rollback` and `ops` workflows still work as the phone's way back. Redeploy without
   a code change: `workflow_dispatch` on `deploy.yml` (e.g. after a secret changes).
@@ -179,19 +179,20 @@ and jobs; while someone chats, the reporter also polls `GET /home/jobs` every
   on skippy-pc): `mentat` in `core/compose.core.yml`, mentat/Dockerfile with `MENTAT_USE_LLM=1` and `MATERIA_OLLAMA_MODEL=skippy-chat`
   (Core's resident Qwen3.6-35B-A3B through the shim) and its trained router first (`MENTAT_ROUTER_MODEL`, mentat-router-v31-4b, also resident), tailnet-only on `skippy-core:7350` (`core/install/tailnet.sh`); its research
   log is `/var/lib/skippy-core/mentat-research`. skippy-core's own doctor and deployer keep it up, not skippy-pc's. No Qwen → Mentat answers 503 and Skippy says it's offline;
-  there is deliberately NO fallback to the cloud copy (keywords only), which
-  serves the public Experiments playground.
+  there is ONE Mentat, this one (2026-10-27, the Captain: a second cloud copy was needless cost and drifted). It also has a **public address
+  for the Captain's friends**: a Tailscale Funnel on :8443 straight to it, `https://skippy-core.tailab2cc7.ts.net:8443/` (opened by
+  `core/install/mentat_funnel.sh`; no key on purpose: a claude.ai connector cannot send one, and Mentat's own per-address rate limit and research log apply).
+  The cloud portal (Cloud Run) and the Experiments playground call that address (`MENTAT_URL` in `core/cd/deploy.json`).
 
-- Mentat for Claude (Desktop, claude.ai, phone, Claude Code): the **cloud** copy's `POST /mcp`
+- Mentat for Claude (Desktop, claude.ai, phone, Claude Code): that Funnel's `POST /mcp`
   (`mentat/app.py`: MCP Streamable HTTP, stateless, JSON replies; the same public tools and guards
-  as `/tools/<name>`, no Qwen, so no GPU), added once at claude.ai → Customize → Connectors →
-  custom connector `mentat` = `https://skippy-mentat-1015050363686.us-west1.run.app/mcp`.
+  as `/tools/<name>`, with Qwen and the router), added once at claude.ai → Customize → Connectors →
+  custom connector `mentat` = `https://skippy-core.tailab2cc7.ts.net:8443/mcp`.
   `/mcp`'s tools/list shows three tools (`ask`, `find_tools`, `call_tool`, 2026-10-27: the 220+ cost a chat ~73k tokens and 97% of real calls are plain questions); the full set stays on REST `/tools/<name>` and any real tool name still works in tools/call; `MENTAT_MCP_FULL=1` restores the long list.
-  Not a `docker exec` into `skippytel-mentat`: cloud sessions can't reach skippy-pc, and each
-  exec was its own server process. Smoke-tested by `deploy.yml`.
-  **Claude Code on skippy-pc (the desktop app's Code tab, user scope)** points at the home copy on skippy-core, over the tailnet:
-  `claude mcp add -s user --transport http mentat http://skippy-core:7350/mcp` (2026-10-27; it was a `docker exec` into a skippy-pc container
-  that no longer exists). The chat tab's connectors and claude.ai keep the cloud copy above.
+  Not a `docker exec` into `skippytel-mentat` (that container is gone). The old Cloud Run copy `skippy-mentat` (keywords only, no data) is retired:
+  its URL `https://skippy-mentat-1015050363686.us-west1.run.app/mcp` must be replaced in any connector that still uses it.
+  **Claude Code on skippy-pc (the desktop app's Code tab, user scope)** uses the same Mentat over the tailnet:
+  `claude mcp add -s user --transport http mentat http://skippy-core:7350/mcp` (sigma-ground's project `.mcp.json` says the same).
 - Token: dashboard → "Pair home" shows it once; the portal keeps only its
   sha256 in VM metadata `portal-home`. Put the line in the vault .env and
   SkippyTel's .env.

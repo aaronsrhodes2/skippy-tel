@@ -11,8 +11,8 @@ Each run:
        portal        copy the vault's Skippy Core secrets into Secret Manager, note the serving revision, gcloud run deploy (with
                      DEPLOYS_FROM=house, so the portal reads its deploys from here), send it all traffic, smoke-test it; on any
                      failure, ALL traffic goes back to the noted revision
-       mentat        only when mentat/, .dockerignore or deploy.json changed since Mentat's last good deploy: build, push, deploy,
-                     smoke (the same checks deploy.yml made)
+       (no Mentat job: there is ONE Mentat, on skippy-core, built by the core deployer, and its Tailscale Funnel is the public address,
+        core/install/mentat_funnel.sh. The Cloud Run copy was retired 2026-10-27: the Captain, needless cost, and two copies drift.)
        infra         only when infra/gcp-games/ or deploy.json changed since its last good apply: terraform apply
   3. report again after every job, so the ship card follows it live.
 
@@ -237,11 +237,6 @@ class CD:
             ok = self.job(run, "portal-image", self.portal_image, src, sha) and self.job(run, "portal", self.portal, src, sha)
             if ok:
                 self.state["deployed"]["portal"] = sha
-            if self.changed(src, "mentat", sha):
-                if self.job(run, "mentat", self.mentat, src, sha):
-                    self.state["deployed"]["mentat"] = sha
-                else:
-                    ok = False
             if self.changed(src, "infra", sha):
                 if self.job(run, "infra", self.infra, src):
                     self.state["deployed"]["infra"] = sha
@@ -506,50 +501,6 @@ class CD:
                     "Star Control Zero is bundled")
         for path in ("/doomloop/version", "/shifting-prophesy/haiku/version"):
             self.expect('"bundled"' in self.http("GET", f"{u}{path}")[1], f"{path} answers")
-
-    def mentat(self, src: Path, sha: str) -> str:
-        m, region = self.cfg["mentat"], self.cfg["region"]
-        try:
-            self.gcloud("iam", "service-accounts", "describe", m["service_account"], quiet=True)
-        except Failed:
-            self.log(f"can't see {m['service_account']}: re-run infra/bootstrap. Skipping Mentat.")
-            return "skipped"
-        tag = f"{m['image']}:{sha}"
-        self.vendor(src, star_control=False)
-        self.sh(["docker", "build", "-q", "-f", "mentat/Dockerfile", "--build-arg", f"SIGMA_GROUND_REF={self.cfg['pins']['SIGMA_GROUND_REF']}",
-                 "-t", tag, "."], cwd=src, timeout=2400)
-        self.sh(["docker", "--config", self.docker_login(), "push", "-q", tag], timeout=1800)
-        env = ",".join(f"{k}={v}" for k, v in m["env"].items())
-        self.gcloud("run", "deploy", m["service"], f"--image={tag}", f"--region={region}", f"--service-account={m['service_account']}",
-                    *m["flags"], f"--set-env-vars={env}")
-        self.smoke_mentat(self.url(m["service"]))
-        return ""
-
-    def smoke_mentat(self, u: str) -> None:
-        """deploy.yml's Mentat checks."""
-        self.expect(self.wait_ready(f"{u}/health"), "Mentat /health")
-        self.expect(len(json.loads(self.http("GET", f"{u}/tools")[1])) > 100, "more than 100 tools")
-        self.expect(self.http("POST", f"{u}/tools/convert_units", {"value": 1, "from_units": "mile", "to_units": "km"})[0] == 200,
-                    "convert_units")
-        caller = {"X-Skippy-Caller": "deploy-smoke"}
-        r = json.loads(self.http("POST", f"{u}/ask", {"question": "If I throw a baseball at 45 degrees at 100 miles per hour, how far will "
-                                 "it travel before it touches the ground on a flat surface?"}, timeout=60, headers=caller)[1])["result"]
-        self.expect(203 < r["value"] < 205, f"the baseball goes {r['value']} {r.get('units')}")
-        r = json.loads(self.http("POST", f"{u}/ask", {"question": "range of a projectile launched at 45 degrees"}, timeout=60,
-                                 headers=caller)[1])["result"]
-        self.expect(r["value"] is None and r["clarification"]["needs"] == ["speed_m_s"], "a missing input is asked for, not filled in")
-        self.expect(self.http("GET", f"{u}/research")[0] == 200, "/research")
-        accept = {"Accept": "application/json, text/event-stream"}
-        r = json.loads(self.http("POST", f"{u}/mcp", {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-            "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "deploy-smoke", "version": "0"}}},
-            headers=accept)[1])["result"]
-        self.expect("tools" in r["capabilities"], "/mcp initializes")
-        r = json.loads(self.http("POST", f"{u}/mcp", {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
-            "name": "schwarzschild_radius", "arguments": {"mass_kg": 1.989e30}}}, headers=accept)[1])["result"]
-        v = json.loads(r["content"][0]["text"])["value"]
-        self.expect(not r["isError"] and 2950 < v < 2960, f"/mcp r_s = {v}")
-        r = json.loads(self.http("GET", f"{u}/wva/catalog")[1])["result"]
-        self.expect(sum("weapon" in w for w in r["weapons"]) >= 20, "Weapon vs. Armor presets")
 
     def infra(self, src: Path) -> None:
         i = self.cfg["infra"]

@@ -6,7 +6,7 @@
    "Skippy's chats, public and private (ask_mentat, forced when a reply claims physics)",
    "Claude Code on skippy-pc (the `mentat` MCP)",
    "purple Skippy (purple-tools: ask_mentat, mentat_tool, mentat_tools)",
-   "the Experiments playground (the cloud copy, keywords only)"
+   "the Experiments playground and the Captain's friends' claude.ai connector (through the Funnel on :8443)"
   ],
   "example": {
    "ask": "If I throw a baseball at 45 degrees at 100 miles per hour, how far will it travel before it touches the ground?",

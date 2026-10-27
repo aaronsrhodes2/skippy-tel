@@ -54,9 +54,6 @@ class FakeCD(cd_mod.CD):
         if "smoke" in self.fail:
             raise cd_mod.Failed("smoke test: /health answers")
 
-    def smoke_mentat(self, u):
-        self.calls.append(("smoke", "mentat"))
-
 
 @pytest.fixture
 def world(tmp_path):
@@ -98,9 +95,8 @@ def test_a_green_commit_is_deployed_once_with_everything_the_first_time(world):
     cd.run()
     run = cd.state["runs"][0]
     assert run["head_sha"] == sha and run["conclusion"] == "success"
-    assert jobs(run) == [("test", "success"), ("portal-image", "success"), ("portal", "success"), ("mentat", "success"),
-                         ("infra", "success")]
-    assert cd.state["deployed"] == {"portal": sha, "mentat": sha, "infra": sha}
+    assert jobs(run) == [("test", "success"), ("portal-image", "success"), ("portal", "success"), ("infra", "success")]
+    assert cd.state["deployed"] == {"portal": sha, "infra": sha}                # never a Mentat: the one Mentat is on skippy-core
     before = len(cd.calls)
     cd.run()
     assert len(cd.calls) == before                                                  # already delivered: nothing again
@@ -131,7 +127,7 @@ def test_an_untested_or_red_commit_is_never_deployed(world):
     assert cd.state["runs"] == []
 
 
-def test_mentat_and_infra_only_when_what_they_are_built_from_changed(world):
+def test_infra_only_when_what_it_is_built_from_changed_and_mentat_is_never_a_cloud_job(world):
     s, commit = world
     commit("portal/app.py", "one")
     cd = FakeCD(s)
@@ -139,9 +135,13 @@ def test_mentat_and_infra_only_when_what_they_are_built_from_changed(world):
     commit("portal/app.py", "two")
     cd.run()
     assert [n for n, _ in jobs(cd.state["runs"][0])] == ["test", "portal-image", "portal"]
-    commit("mentat/app.py", "three")
+    commit("mentat/app.py", "three")                                               # BUG if a Mentat change redeployed a second, cloud copy
     cd.run()
-    assert [n for n, _ in jobs(cd.state["runs"][0])] == ["test", "portal-image", "portal", "mentat"]
+    assert [n for n, _ in jobs(cd.state["runs"][0])] == ["test", "portal-image", "portal"]
+    assert "mentat" not in cd.state["deployed"]
+    commit("infra/gcp-games/main.tf", "four")
+    cd.run()
+    assert [n for n, _ in jobs(cd.state["runs"][0])] == ["test", "portal-image", "portal", "infra"]
 
 
 def test_a_failed_smoke_test_puts_the_old_revision_back(world):

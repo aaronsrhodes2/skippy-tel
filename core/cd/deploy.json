@@ -20,7 +20,7 @@
    "GCP_INSTANCE": "skippy-games",
    "DISCORD_INVITE": "gPTVS7Hmj",
    "PORTAL_URL": "https://makerportal.live",
-   "MENTAT_URL": "https://skippy-mentat-1015050363686.us-west1.run.app",
+   "MENTAT_URL": "https://skippy-core.tailab2cc7.ts.net:8443",
    "DOOMLOOP_BUCKET": "skippy-tel-doomloop-dev",
    "TABLETOP_BUCKET": "skippy-tel-tabletop",
    "DEPLOYS_FROM": "house"
@@ -37,14 +37,6 @@
    "SKIPPY_CORE_URL": "skippy-core-url",
    "SKIPPY_CORE_API_KEY": "skippy-core-api-key"
   }
- },
- "mentat": {
-  "service": "skippy-mentat",
-  "image": "us-west1-docker.pkg.dev/skippy-tel/skippy/mentat",
-  "service_account": "skippy-mentat@skippy-tel.iam.gserviceaccount.com",
-  "flags": ["--no-invoker-iam-check", "--cpu", "1", "--memory", "1Gi", "--concurrency", "8", "--max-instances", "2", "--timeout", "60"],
-  "env": {"MENTAT_INSTANCE": "cloud", "MENTAT_RESEARCH_BUCKET": "skippy-tel-mentat-research"},
-  "inputs": ["mentat/", ".dockerignore", "core/cd/deploy.json"]
  },
  "infra": {
   "dir": "infra/gcp-games",
