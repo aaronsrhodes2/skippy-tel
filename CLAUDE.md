@@ -185,6 +185,7 @@ and jobs; while someone chats, the reporter also polls `GET /home/jobs` every
   (`mentat/app.py`: MCP Streamable HTTP, stateless, JSON replies; the same public tools and guards
   as `/tools/<name>`, no Qwen, so no GPU), added once at claude.ai → Customize → Connectors →
   custom connector `mentat` = `https://skippy-mentat-1015050363686.us-west1.run.app/mcp`.
+  `/mcp`'s tools/list shows three tools (`ask`, `find_tools`, `call_tool`, 2026-10-27: the 220+ cost a chat ~73k tokens and 97% of real calls are plain questions); the full set stays on REST `/tools/<name>` and any real tool name still works in tools/call; `MENTAT_MCP_FULL=1` restores the long list.
   Not a `docker exec` into `skippytel-mentat`: cloud sessions can't reach skippy-pc, and each
   exec was its own server process. Smoke-tested by `deploy.yml`.
   **Claude Code on skippy-pc (the desktop app's Code tab, user scope)** points at the home copy on skippy-core, over the tailnet:

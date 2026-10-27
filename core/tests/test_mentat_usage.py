@@ -11,10 +11,11 @@ def write(path, rows):
 
 
 def test_plain_questions_and_named_tools_are_counted_apart(tmp_path):
-    write(tmp_path / "2026-10.jsonl", [{"endpoint": "/ask"}] * 5 + [{"endpoint": "/tools/solar_system_body"}] * 2 + [{"endpoint": "/tools/range"}])
+    write(tmp_path / "2026-10.jsonl", [{"endpoint": "/ask"}] * 3 + [{"endpoint": "/mcp", "tool": "ask"}] * 2 + [{"endpoint": "/tools/solar_system_body"}] * 2
+          + [{"endpoint": "/tools/range"}, {"endpoint": "/mcp", "tool": "range"}])
     rep._usage_cache.update(sig=None, usage={}, schema_at=0.0, schema=None)
     got = rep.mentat_usage(tmp_path, post=lambda url, body: {"result": {"tools": [{"name": "a"}, {"name": "b"}]}})
-    assert got["asks"] == 5 and got["direct"] == 3 and got["tools_called"] == 2 and got["since"] == "2026-10"
+    assert got["asks"] == 5 and got["direct"] == 4 and got["tools_called"] == 2 and got["since"] == "2026-10"
     assert got["tools_total"] == 2 and got["schema_tokens"] > 0
 
 

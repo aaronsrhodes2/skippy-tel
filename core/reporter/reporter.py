@@ -207,11 +207,11 @@ def mentat_usage(log_dir: Path = MENTAT_LOG, post=None, now=time.time) -> dict:
             except ValueError:
                 continue
             endpoint = str(row.get("endpoint") or "")
-            if endpoint == "/ask":
+            if endpoint == "/ask" or (endpoint == "/mcp" and row.get("tool") == "ask"):
                 asks += 1
-            elif endpoint.startswith("/tools/"):
+            elif endpoint.startswith("/tools/") or endpoint == "/mcp":          # a tool called by name, over REST or through MCP's call_tool
                 direct += 1
-                names.add(endpoint[7:])
+                names.add(endpoint[7:] if endpoint != "/mcp" else str(row.get("tool") or "?"))
         _usage_cache.update(sig=sig, usage={"asks": asks, "direct": direct, "tools_called": len(names), "since": latest.stem})
     if now() - _usage_cache["schema_at"] > 3600 and post is not None:
         _usage_cache["schema_at"] = now()

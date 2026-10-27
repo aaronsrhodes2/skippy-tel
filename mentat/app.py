@@ -430,6 +430,30 @@ MCP_TOOLS = [{"name": t.name, "description": (t.description or "").strip(), "inp
              for t in sorted(TOOLS.values(), key=lambda t: t.name)]
 MAX_MCP_BYTES = MAX_ARGS_BYTES + 4_000     # the arguments plus the JSON-RPC envelope
 
+# What an MCP client is SHOWN is three tools, not the 220+: listing every one costs a chat about 73,000 tokens of its context, and the research log shows
+# almost every real call is a plain question (958 of 989 in October 2026). The full set is still here: POST /tools/<name> serves each one, `find_tools`
+# searches them, `call_tool` runs one by name, and tools/call still accepts any real tool name directly (a client with an old tool list keeps working).
+# MENTAT_MCP_FULL=1 brings the long list back in tools/list for a client that wants it.
+MCP_META = [
+    {"name": "ask", "description": "Ask a physics, chemistry or maths question in plain words (with the numbers you were given). Mentat finds the right "
+                                   "calculation, runs it and answers with the value, unit, formula and source. Every physical number you report must come "
+                                   "from here with its source; never calculate or recall one yourself. If it asks for more input, ask the person: do not "
+                                   "fill in inputs, and pass `given` only with values they agreed to.",
+     "inputSchema": {"type": "object", "properties": {
+         "question": {"type": "string", "description": "the question, in plain words"},
+         "given": {"type": "object", "description": "inputs the person confirmed (name to number or quantity text); only after they agreed"}},
+         "required": ["question"]}},
+    {"name": "find_tools", "description": "Search Mentat's individual tools (about 220) by a word in the name, description or domain (for example 'orbit', "
+                                          "'optics', 'thermo'). Returns each match's name and argument names, for call_tool.",
+     "inputSchema": {"type": "object", "properties": {"search": {"type": "string", "description": "a word to match (empty lists the domains)"}}}},
+    {"name": "call_tool", "description": "Run one individual Mentat tool by name with exact arguments (find the name and arguments with find_tools). "
+                                          "Prefer `ask` unless you already know the tool.",
+     "inputSchema": {"type": "object", "properties": {
+         "name": {"type": "string", "description": "the tool's name, for example schwarzschild_radius"},
+         "arguments": {"type": "object", "description": "the tool's arguments, as find_tools shows them"}}, "required": ["name"]}},
+]
+MCP_META_NAMES = {t["name"] for t in MCP_META}
+
 
 def _mcp_instructions() -> str | None:
     """sigma-ground's own rules for the model (cite every number's source, never guess)."""
@@ -479,6 +503,56 @@ def _mcp_call_reply(name: str, args, ip: str) -> dict:
         return _tool_reply(str(exc)[:2000], True)
 
 
+def _mcp_ask(args, ip: str) -> dict:
+    """The `ask` tool: /ask's own path (rate limit, timeout, the Qwen rule), kept for research as an ask."""
+    started = time.monotonic()
+    question = str(args.get("question") or "").strip()[:2000]
+    given = args.get("given")
+    if not question:
+        return _tool_reply("ask needs a question", True)
+    if not _valid_given(given):
+        return _tool_reply("given must be an object of input name to number or quantity text (the clarification's follow_up.given, as Mentat sent it)", True)
+    reply, status = _guarded_reply("ask", _ask, question, given)
+    extra = {}
+    if isinstance(reply.get("result"), dict):
+        extra = {"interpreter": reply["result"].get("interpreter"), "understood": research.understood(reply["result"])}
+    keep("/mcp", "ask", {"question": question, "given": given}, reply, status, started, **extra)
+    if reply.get("ok"):
+        return _tool_reply(json.dumps(reply["result"], default=str))
+    return _tool_reply(json.dumps(reply.get("detail") or reply.get("error")), True)
+
+
+def _mcp_find_tools(args) -> dict:
+    needle = str(args.get("search") or "").strip().lower()[:80]
+    rows = sorted(TOOLS.values(), key=lambda t: t.name)
+    if not needle:
+        domains = {}
+        for t in rows:
+            domains[domain_of(t.name)] = domains.get(domain_of(t.name), 0) + 1
+        return _tool_reply("Domains (search one by name): " + ", ".join(f"{d} ({n})" for d, n in sorted(domains.items())))
+    hits = [t for t in rows if needle in t.name.lower() or needle in (t.description or "").lower() or needle == str(domain_of(t.name)).lower()]
+    if not hits:
+        return _tool_reply(f"No Mentat tool matches {needle!r}.")
+    lines = [f"{len(hits)} of {len(rows)} tools match {needle!r} (showing up to 40):"]
+    for t in hits[:40]:
+        props = ", ".join(((t.inputSchema or {}).get("properties") or {}))
+        lines.append(f"- {t.name}({props}): {' '.join((t.description or '').split())[:140]}")
+    return _tool_reply("\n".join(lines))
+
+
+def _mcp_meta(name: str, args, ip: str) -> dict:
+    if not isinstance(args, dict):
+        return _tool_reply("arguments must be a JSON object", True)
+    if name == "ask":
+        return _mcp_ask(args, ip)
+    if name == "find_tools":
+        return _mcp_find_tools(args)
+    target = str(args.get("name") or "")                      # call_tool
+    if target not in TOOLS:
+        return _tool_reply(f"There is no public tool named {target!r}; search with find_tools.", True)
+    return _mcp_call(target, args.get("arguments") or {}, ip)
+
+
 def _mcp_handle(msg, ip: str) -> dict | None:
     """One JSON-RPC message → its reply; None for a notification (or a client's reply)."""
     if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0":
@@ -499,9 +573,11 @@ def _mcp_handle(msg, ip: str) -> dict | None:
     if method == "ping":
         return _rpc_result(id_, {})
     if method == "tools/list":
-        return _rpc_result(id_, {"tools": MCP_TOOLS})
+        return _rpc_result(id_, {"tools": MCP_TOOLS if os.environ.get("MENTAT_MCP_FULL") == "1" else MCP_META})
     if method == "tools/call":
         name = params.get("name")
+        if name in MCP_META_NAMES:
+            return _rpc_result(id_, _mcp_meta(name, params.get("arguments") or {}, ip))
         if name not in TOOLS:
             return _rpc_error(id_, -32602, f"no public tool named {name!r}")
         return _rpc_result(id_, _mcp_call(name, params.get("arguments") or {}, ip))

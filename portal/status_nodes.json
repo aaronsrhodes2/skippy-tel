@@ -4,7 +4,7 @@
   "for": "The physics, chemistry and maths answerer. You (or Skippy) ask a question in plain words; Mentat works out which sigma-ground calculation it is, runs it, and answers with the value, its unit, the formula and the source. It never makes a number up: no source, no number.",
   "used_by": ["Skippy's chats, public and private (ask_mentat, forced when a reply claims physics)", "Claude Code on skippy-pc (the `mentat` MCP)", "purple Skippy (purple-tools: ask_mentat, mentat_tool, mentat_tools)", "the Experiments playground (the cloud copy, keywords only)"],
   "example": {"ask": "If I throw a baseball at 45 degrees at 100 miles per hour, how far will it travel before it touches the ground?", "answer": "203.8 m (range at 45° and 44.7 m/s, no air). Source: sigma_ground.materia (projectile_motion). Derived, 230 ms."},
-  "note": "Almost every call is a plain question (/ask); the 200+ individual tools are rarely called by name. Showing all of them to a chat costs about 73,000 tokens of its context, so the chats that can should list only ask_mentat plus a lookup (purple-tools already does)."
+  "note": "Almost every call is a plain question (/ask); the 200+ individual tools are rarely called by name. Showing all of them to a chat cost about 73,000 tokens of its context, so over MCP Mentat now shows only three tools (ask, find_tools, call_tool); the full set is still on REST /tools/<name> and any tool can still be called by name."
  },
  "llm": {
   "for": "skippy-core's model server (llama-swap). It holds the chat, coder, router and vision models and loads the one a request names.",

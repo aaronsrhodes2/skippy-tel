@@ -60,7 +60,15 @@ def test_notifications_get_202_and_no_body(client):
     assert r.status_code == 202 and r.data == b""
 
 
-def test_tools_list_is_exactly_the_public_set_the_rest_api_serves(client):
+def test_tools_list_shows_three_tools_not_the_whole_set(client):
+    tools = rpc(client, "tools/list")["result"]["tools"]
+    assert [t["name"] for t in tools] == ["ask", "find_tools", "call_tool"]
+    assert len(json.dumps(tools)) < 4000                                    # the long list was ~290,000 characters (~73k tokens) of every chat's context
+    assert all(t["inputSchema"]["type"] == "object" for t in tools)
+
+
+def test_the_full_list_is_still_there_when_asked_for_and_is_the_public_set_the_rest_api_serves(client, monkeypatch):
+    monkeypatch.setenv("MENTAT_MCP_FULL", "1")
     tools = rpc(client, "tools/list")["result"]["tools"]
     names = [t["name"] for t in tools]
     assert names == [t["name"] for t in client.get("/tools").get_json()]
@@ -115,7 +123,7 @@ def test_the_official_mcp_client_connects_lists_and_calls(mentat):
             async with ClientSession(read, write) as s:
                 init = await s.initialize()
                 tools = (await s.list_tools()).tools
-                res = await s.call_tool("hawking_temperature", {"mass_kg": 1.989e30})
+                res = await s.call_tool("call_tool", {"name": "hawking_temperature", "arguments": {"mass_kg": 1.989e30}})
                 return init, tools, res
 
     try:
@@ -124,7 +132,7 @@ def test_the_official_mcp_client_connects_lists_and_calls(mentat):
     finally:
         httpd.shutdown()
     assert init.serverInfo.name == "mentat"
-    assert len(tools) == len(mentat.TOOLS) > 100
+    assert [t.name for t in tools] == ["ask", "find_tools", "call_tool"]
     assert not res.isError
     assert json.loads(res.content[0].text)["value"] == pytest.approx(6.17e-8, rel=1e-2)
 
@@ -164,3 +172,29 @@ def test_the_tool_contract_reaches_the_rest_and_mcp_callers(client, mentat):
     # over MCP the same failure is a tool error the model reads
     via_mcp = call(client, "schwarzschild_radius", {})
     assert via_mcp["isError"] is True and json.loads(via_mcp["content"][0]["text"])["code"] == "missing_argument"
+
+
+def test_find_tools_lists_domains_searches_and_bounds_its_answer(client):
+    domains = call(client, "find_tools", {})["content"][0]["text"]
+    assert domains.startswith("Domains") and "(" in domains
+    hits = call(client, "find_tools", {"search": "hawking"})["content"][0]["text"]
+    assert "hawking_temperature(" in hits and hits.count("\n- ") <= 40
+    assert "No Mentat tool matches" in call(client, "find_tools", {"search": "zzzqqq"})["content"][0]["text"]
+
+
+def test_call_tool_runs_a_named_tool_and_says_why_when_it_cannot(client):
+    ok = call(client, "call_tool", {"name": "convert_units", "arguments": {"value": 1, "from_units": "mile", "to_units": "km"}})
+    assert not ok["isError"] and json.loads(ok["content"][0]["text"])["value"] == pytest.approx(1.609344)
+    for bad in ({"name": "simulate"}, {"name": "no_such_tool"}, {}):
+        r = call(client, "call_tool", bad)
+        assert r["isError"] and "find_tools" in r["content"][0]["text"]
+    assert call(client, "call_tool", {"name": "solve_equation", "arguments": {"equation": "__import__('os').system('id')", "variable": "x"}})["isError"]
+
+
+def test_ask_answers_a_question_the_same_way_the_rest_api_does_and_refuses_the_empty_one(client, mentat, monkeypatch):
+    monkeypatch.setattr(mentat, "_ask", lambda q, given=None: {"value": 1.5, "units": "m", "source": "test", "interpreter": "keywords"})
+    res = call(client, "ask", {"question": "how long is a thing"})
+    assert not res["isError"] and json.loads(res["content"][0]["text"])["value"] == 1.5
+    assert call(client, "ask", {"question": "  "})["isError"]
+    assert call(client, "ask", {"question": "q", "given": {"x": [1]}})["isError"]
+
