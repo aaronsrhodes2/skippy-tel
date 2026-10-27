@@ -20,7 +20,7 @@
         "additionalProperties": false
       },
       "outputs": ["audio/wav"],
-      "est_seconds": 15,
+      "est_seconds": 30,
       "vram_gb": 3,
       "audience": "admin",
       "description": "Makes one short sound effect or drum hit for the Captain's electronic music in seconds (Stable Audio Open Small): kicks, snares, hats, risers, impacts, glitches, foley. 0.5 to 11 seconds, a 44.1 kHz stereo WAV he can drop into his DAW. Use for single hits and FX; for tempo-locked loops use sfx_loop; for whole songs use make_music."
@@ -48,7 +48,7 @@
         "additionalProperties": false
       },
       "outputs": ["audio/wav"],
-      "est_seconds": 60,
+      "est_seconds": 100,
       "vram_gb": 5,
       "audience": "admin",
       "description": "Makes a tempo- and key-aware loop or longer one-shot for the Captain's tracks (Stable Audio Open 1.0): drum loops, hat loops, basslines, chord stabs, arps, pads, textures, up to 47 seconds. Give bpm and bars and it is cut to exactly that length so it loops on the DAW's grid; give a key for tonal parts. Returns a 44.1 kHz stereo WAV. Not for whole songs (make_music) or single quick hits (sfx_quick)."
@@ -74,7 +74,7 @@
       "media_in": ["audio/*"],
       "media_required": true,
       "outputs": ["audio/wav"],
-      "est_seconds": 60,
+      "est_seconds": 75,
       "vram_gb": 6,
       "audience": "admin",
       "description": "Takes a clip the Captain attached (a hummed or played melody, a riff, a loop) and re-imagines it in the style he describes, keeping its melody and harmony (MusicGen stereo-melody; the first 30 seconds of the clip count). Up to 30 seconds of 32 kHz stereo WAV. Good for trying a hook in another genre or arrangement. Sketching only: its licence is non-commercial."
@@ -125,7 +125,7 @@
       "media_in": ["audio/*"],
       "media_required": true,
       "outputs": ["audio/midi"],
-      "est_seconds": 10,
+      "est_seconds": 25,
       "vram_gb": 0,
       "audience": "admin",
       "description": "Turns an attached clip (a melody, bassline, chords, a sung or played idea, or a stem from the stems tool) into a MIDI file the Captain drags into his DAW (Spotify Basic Pitch; polyphonic, with pitch bends). Works best on one instrument at a time. Runs on the CPU in seconds."

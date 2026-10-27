@@ -81,6 +81,9 @@ Stable Audio models directly on the card (one tensor at a time through the VM), 
 
 ## Notes
 
+- **`est_seconds` covers the cold call:** the reporter and purple-tools wait 4x `est_seconds`, so each entry is a quarter of its
+  measured COLD call, not its warm one (sfx_loop 100: 350 s cold; melody_variations 75: 254 s; audio_to_midi 25: 54 s). At the old
+  values the first call of a session timed out (2026-10-27, an end-to-end call through purple-tools).
 - **Inputs through the chat are ~1 MB** (the framework's cap): about a minute of mp3. Stems of a whole track need the native route
   (`POST /stems` multipart, any length up to 12 min) or a bigger input path (a framework follow-up).
 - **Stable Audio Open Small is gated** on Hugging Face: the vault token's account must accept its licence once

@@ -405,6 +405,11 @@ def popup_tools(get=http_get_json, now=time.monotonic) -> dict[str, dict]:
     return out
 
 
+# Types Windows' mimetypes doesn't know (a MIDI came back as .bin), so a result keeps an extension a tool or a person can open.
+_EXT = {"audio/midi": ".mid", "audio/x-midi": ".mid", "model/gltf-binary": ".glb", "audio/flac": ".flac", "audio/ogg": ".ogg",
+        "image/webp": ".webp", "application/zip": ".zip"}
+
+
 def run_popup(entry: dict, args: dict, post=http_post_json, cwd: Path | None = None) -> str:
     args = dict(args)
     path = args.pop("input_path", None)
@@ -424,7 +429,7 @@ def run_popup(entry: dict, args: dict, post=http_post_json, cwd: Path | None = N
     data, ctype = base64.b64decode(got["b64"]), str(got.get("type") or "")
     if ctype in ("application/json", "text/plain") or ctype.startswith("text/"):
         return data.decode("utf-8", "replace")[:MAX_TEXT]
-    ext = mimetypes.guess_extension(ctype) or ".bin"
+    ext = _EXT.get(ctype) or mimetypes.guess_extension(ctype) or ".bin"
     folder = (cwd or Path.cwd()) / ".purple-out"
     folder.mkdir(exist_ok=True)
     target = folder / f"{entry['name']}-{int(time.time())}{ext}"

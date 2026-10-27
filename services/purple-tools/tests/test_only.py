@@ -33,3 +33,12 @@ def test_a_hidden_tool_cannot_be_called_and_a_listed_popup_still_can(monkeypatch
     monkeypatch.setattr(tools, "popup_tools", lambda *a, **k: {"search_memory": {"description": "d", "input_schema": {}, "popup": entry, "run": None}})
     monkeypatch.setattr(tools, "run_popup", lambda e, a, **k: "ran " + e["name"])
     assert tools.call("search_memory", {}) == ("ran search_memory", False)
+
+
+def test_a_popup_result_keeps_an_extension_people_can_open(tmp_path):
+    import base64
+    import tools
+    for ctype, ext in (("audio/midi", ".mid"), ("model/gltf-binary", ".glb"), ("image/png", ".png")):
+        got = tools.run_popup({"name": "x", "est_seconds": 1}, {}, cwd=tmp_path,
+                              post=lambda url, body, timeout: {"type": ctype, "b64": base64.b64encode(b"data").decode()})
+        assert f"{ext} (" in got and any(f.suffix == ext for f in (tmp_path / ".purple-out").iterdir())
