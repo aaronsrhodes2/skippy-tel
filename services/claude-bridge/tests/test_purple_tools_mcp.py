@@ -61,3 +61,19 @@ def test_purple_tools_are_a_switch_in_engines_json_and_off_by_default(tmp_path):
     assert sdk.engine_options(str(tmp_path))["purple_tools"] is True
     (tmp_path / "engines.json").write_text(json.dumps({"purple_tools": "yes"}))
     assert sdk.engine_options(str(tmp_path))["purple_tools"] is False
+
+
+def test_a_list_of_tool_names_goes_to_the_server_as_one_comma_separated_env(shop, server):
+    only = ["web_search", "ask_mentat", "mentat_tool", "mentat_tools", "read_pdf", "browse"]
+    cfg = json.loads(Path(shop.core_mcp_config(house=False, purple=True, purple_only=only)).read_text(encoding="utf-8"))
+    assert cfg["mcpServers"]["purple-tools"]["env"] == {"PURPLE_TOOLS_ONLY": "web_search,ask_mentat,mentat_tool,mentat_tools,read_pdf,browse"}
+    plain = json.loads(Path(shop.core_mcp_config(house=False, purple=True)).read_text(encoding="utf-8"))
+    assert "env" not in plain["mcpServers"]["purple-tools"]                              # no list: all of the server's tools
+
+
+def test_purple_tools_only_in_engines_json_is_a_list_of_names_and_nothing_else_counts(tmp_path):
+    assert sdk.engine_options(str(tmp_path))["purple_tools_only"] == []
+    (tmp_path / "engines.json").write_text(json.dumps({"purple_tools_only": ["browse", 7, "", "read_pdf"]}))
+    assert sdk.engine_options(str(tmp_path))["purple_tools_only"] == ["browse", "read_pdf"]
+    (tmp_path / "engines.json").write_text(json.dumps({"purple_tools_only": "browse"}))
+    assert sdk.engine_options(str(tmp_path))["purple_tools_only"] == []

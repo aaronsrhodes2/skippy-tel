@@ -372,6 +372,7 @@ def engine_options(state_dir: str) -> dict:
     return {"tools": [t for t in names if isinstance(t, str) and t] if isinstance(names, list) and names else list(CODING_TOOLS),
             "claude_md_excludes": [p for p in excl if isinstance(p, str) and p] if isinstance(excl, list) else [],
             "house_tools": data.get("house_tools") is True, "purple_tools": data.get("purple_tools") is True,
+            "purple_tools_only": [n for n in data["purple_tools_only"] if isinstance(n, str) and n] if isinstance(data.get("purple_tools_only"), list) else [],
             "deny_read": [p for p in deny if isinstance(p, str) and p] if isinstance(deny, list) else []}
 
 
@@ -407,7 +408,7 @@ def run_core(shop, run, session: str | None) -> None:
         cli = native_cli(shop.claude_cmd)
         opts = engine_options(shop.state_dir)
         settings = shop.sdk_settings(opts["claude_md_excludes"])
-        mcp = shop.core_mcp_config(opts["house_tools"], opts["purple_tools"])
+        mcp = shop.core_mcp_config(opts["house_tools"], opts["purple_tools"], opts["purple_tools_only"])
         prompt_file = str(shop.prompt_path(run.project))
         turns, rotate = segment_turns(shop.state_dir), rotate_tokens(shop.state_dir)
         sessions: list[SdkSession] = []

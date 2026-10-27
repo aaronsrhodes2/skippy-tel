@@ -1231,8 +1231,9 @@ class Workshop:
             return None
         return self._write_state_file("purple-tools-mcp.json", json.dumps({"mcpServers": {"purple-tools": {"type": "stdio", "command": python.as_posix(), "args": [server.as_posix()]}}}, indent=1))
 
-    def core_mcp_config(self, house: bool, purple: bool) -> str | None:
-        """One MCP config file holding only the servers switched on (the SDK engine takes a single one), or None when none is."""
+    def core_mcp_config(self, house: bool, purple: bool, purple_only: list[str] | None = None) -> str | None:
+        """One MCP config file holding only the servers switched on (the SDK engine takes a single one), or None when none is. `purple_only`
+        names the purple-tools to expose (the server's PURPLE_TOOLS_ONLY: a tool outside it is neither listed nor callable); none = all of them."""
         servers: dict = {}
         for wanted, make in ((house, self.house_mcp_config), (purple, self.purple_mcp_config)):
             path = make() if wanted else None
@@ -1241,6 +1242,8 @@ class Workshop:
                     servers.update(json.loads(Path(path).read_text(encoding="utf-8")).get("mcpServers") or {})
                 except (OSError, ValueError):
                     continue
+        if purple_only and "purple-tools" in servers:
+            servers["purple-tools"] = {**servers["purple-tools"], "env": {"PURPLE_TOOLS_ONLY": ",".join(purple_only)}}
         return self._write_state_file("core-mcp.json", json.dumps({"mcpServers": servers}, indent=1)) if servers else None
 
     def lane_settings(self) -> str:
