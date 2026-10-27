@@ -78,6 +78,17 @@ def test_a_broken_cascade_never_stops_ask(stage, monkeypatch, harness):
     assert stage.answer("q", miss=miss) is None and miss["cascade"].startswith("RuntimeError: classifier exploded")
 
 
+def test_stages_named_in_mentat_cascade_off_are_switched_off(stage, monkeypatch, harness):
+    H, T = harness
+    monkeypatch.setattr(stage, "OFF", ("math", "nonsense"))
+    stage.configure_harness()
+    assert not T.on("cascade.math") and T.on("cascade.thermo") and T.on("cascade.refusal")
+    monkeypatch.setattr(stage, "OFF", ())
+    stage.configure_harness()
+    assert T.on("cascade.math")
+    assert set(stage.STAGES) == {n.removeprefix("cascade.") for n in T.REGISTRY if n.startswith("cascade.")}   # the names stay the harness's
+
+
 def test_the_semantic_stage_is_opt_in(stage, monkeypatch, harness):
     H, T = harness
     monkeypatch.setattr(stage, "SEMANTIC", True)

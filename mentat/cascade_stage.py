@@ -20,6 +20,12 @@ import time
 
 MODE = os.environ.get("MENTAT_CASCADE", "").strip().lower()
 SEMANTIC = os.environ.get("MENTAT_CASCADE_SEMANTIC", "") == "1"
+# Stages switched off by name (MENTAT_CASCADE_OFF=math,thermo): the harness tweak `cascade.<name>` for each. The 2026-10-27 replay measured
+# `math` (regexes such as "factor ..." and "integral of ... from a to b") at 7 of 27 on the maths suite against the router's 317 of 329, and it
+# took 19 answers the router had; the other stages only gained. So the deployed cascade runs with `math` off.
+OFF = tuple(s.strip() for s in os.environ.get("MENTAT_CASCADE_OFF", "").split(",") if s.strip())
+STAGES = ("frontier", "new_tools", "refusal", "clarification", "conversion", "gr", "cosmology", "math", "thermo", "modern", "classical_intro",
+          "optics", "astro", "semantic")
 STAGE_KEYS = ("frontier_router_hit", "new_tools_router_hit", "refusal_hit", "clarification_hit", "conversion_hit", "gr_hit", "cosmology_hit",
               "math_hit", "thermo_hit", "modern_hit", "classical_intro_hit", "optics_hit", "astro_hit", "semantic_hit")
 
@@ -29,9 +35,13 @@ def enabled() -> bool:
 
 
 def configure_harness() -> None:
-    """The cascade's tweak switches: the registry defaults (every classifier on), the semantic stage only when asked for."""
+    """The cascade's tweak switches: the registry defaults (every classifier on), minus the stages named in MENTAT_CASCADE_OFF, and the semantic
+    stage only when asked for."""
     from sigma_ground.mcp.benchmark import tweaks
-    tweaks.configure(None, off=() if SEMANTIC else ("cascade.semantic",))
+    off = {f"cascade.{s}" for s in OFF if s in STAGES}
+    if not SEMANTIC:
+        off.add("cascade.semantic")
+    tweaks.configure(None, off=tuple(sorted(off)))
 
 
 def _stage(rec: dict) -> str:
