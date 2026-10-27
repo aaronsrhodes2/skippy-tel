@@ -561,6 +561,14 @@ class CD:
         mirror = Path(self.s["CI_LOCAL"]) / self.s["CI_NAME"] / "mirror.git"
         self.home.mkdir(parents=True, exist_ok=True)
         work = Path(tempfile.mkdtemp(prefix="cd-main-", dir=str(self.home)))
+        trunk = Path(self.s["CD_TRUNK_GIT"]) / f"{self.s['CI_NAME']}.git"
+        if trunk.is_dir():                    # CI is held while the private Skippy works, and its mirror with it: take the newest from the house
+            branch = self.s["CI_BRANCH"]
+            try:
+                self.sh(["git", "-c", "safe.directory=*", "fetch", "--quiet", "--force", str(trunk), f"+refs/heads/{branch}:refs/heads/{branch}"],
+                        cwd=mirror, quiet=True)
+            except Failed as e:
+                self.log(f"couldn't refresh the mirror from the trunk, using what CI last saw: {e}")
         sha = self.sh(["git", "rev-parse", self.s["CI_BRANCH"]], cwd=mirror, quiet=True).strip()
         self.sh(["git", "clone", "--quiet", "--no-checkout", str(mirror), str(work / "src")], quiet=True)
         self.sh(["git", "checkout", "--quiet", "--detach", sha], cwd=work / "src", quiet=True)

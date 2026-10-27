@@ -231,6 +231,26 @@ def test_the_checkout_of_main_for_ops_is_a_real_working_tree(tmp_path, tested_co
     assert subprocess.run(["git", "rev-parse", "HEAD"], cwd=work / "src", capture_output=True, text=True).stdout.strip() == sha
 
 
+def test_ops_and_bootstrap_see_the_newest_main_even_when_ci_has_not_refreshed_its_mirror(tmp_path, tested_commit):
+    sha, _ = tested_commit
+    work = tmp_path / "w"
+    trunk = tmp_path / "trunk"
+    trunk.mkdir()
+    git(tmp_path, "clone", "--quiet", "--bare", str(work), str(trunk / "skippy-tel.git"))
+    (work / "newer.txt").write_text("a push CI has not seen\n")
+    git(work, "add", "-A")
+    git(work, "commit", "--quiet", "-m", "newer")
+    git(work, "push", "--quiet", str(trunk / "skippy-tel.git"), "HEAD:main")
+    newest = git(work, "rev-parse", "HEAD")
+    cd = cd_mod.CD(settings(tmp_path, CD_TRUNK_GIT=str(trunk)), log=lambda m: None)
+    got = cd.checkout_main()
+    assert (got / "src" / "newer.txt").exists()
+    assert subprocess.run(["git", "rev-parse", "HEAD"], cwd=got / "src", capture_output=True, text=True).stdout.strip() == newest != sha
+    # a trunk that is away (skippy-pc off) is not an error: the mirror's own main is used
+    away = cd_mod.CD(settings(tmp_path, CD_TRUNK_GIT=str(tmp_path / "gone")), log=lambda m: None).checkout_main()
+    assert (away / "src" / "core" / "cd" / "cd.py").exists()
+
+
 class BootstrapCD(cd_mod.CD):
     def __init__(self, s, tmp, code=0):
         super().__init__(s, log=lambda m: None)
