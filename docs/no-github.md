@@ -97,9 +97,24 @@ own machines in plain Docker.
    - The GitHub repos are archived. **Deleting them is the Captain's call, repo by repo**: some are public (sigma-ground, orion-trail,
      star-control-precursors, quarksum, ...) and others may use them.
 
+## Bootstrap from skippy-core (2026-10-27): no more Cloud Shell for new buckets and permissions
+
+`infra/bootstrap` (the project's buckets, IAM and the skippy-core trust) used to need the Captain in Cloud Shell, because `skippy-deployer`
+cannot change IAM or create buckets (on purpose). Now a second identity does it, reached only from skippy-core:
+
+- **`skippy-bootstrap`** (infra/bootstrap/main.tf): the roles that module's own resources need, no key. Only `skippy-deployer` may
+  impersonate it (`roles/iam.serviceAccountTokenCreator` on that one account). It can grant itself more (projectIamAdmin), so using it is
+  deliberate; every use is in the project's audit log.
+- **State** moved into `gs://skippy-tel-tfstate`, prefix `bootstrap` (versioned, private).
+- **`sudo python3 /opt/skippy-core/cd/cd.py bootstrap`** shows the PLAN. **`... bootstrap apply`** applies it. Nothing runs it on a timer.
+  Normal flow: change `infra/bootstrap/*.tf`, push, run the plan, read it, apply.
+- **The one last Cloud Shell run** (`bootstrap.sh`) creates `skippy-bootstrap` and migrates the state; after it, Cloud Shell is not needed
+  for Terraform again. Secrets with values only the Captain has (`infra/bootstrap/secrets.sh`) are still his; the vault ones skippy-core
+  copies itself.
+
 ## What only the Captain can do
 
-- **A Cloud Shell run of `infra/bootstrap`** after phase 1's change:
+- **One last Cloud Shell run of `infra/bootstrap`** (see "Bootstrap from skippy-core" above); older note, after phase 1's change:
   - it makes the backup bucket and a key for the deployer identity;
   - the key goes into skippy-core's root-only settings and is never shown.
 - **Each GitHub repo's archiving or deletion** at the end.

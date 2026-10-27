@@ -49,7 +49,13 @@ done
 # ── 3. bootstrap resources ────────────────────────────────────────────────────
 say "Creating CI/CD resources (state bucket, registry, deployer identity, secrets)"
 cd "$ROOT/infra/bootstrap"
-terraform init -input=false >/dev/null
+# The state lives in the project's state bucket (prefix "bootstrap"). From a local state (the first time after this change) init
+# migrates it up; on a project that has no bucket yet it starts local and migrates once the apply below has made the bucket.
+if gcloud storage buckets describe "gs://$PROJECT-tfstate" >/dev/null 2>&1; then
+  terraform init -input=false -migrate-state -force-copy -backend-config="bucket=$PROJECT-tfstate" >/dev/null
+else
+  terraform init -input=false -backend=false >/dev/null
+fi
 # A bucket made by hand (gcloud storage buckets create ...) is adopted, not fought: without this, apply stops with a 409 "already exists".
 adopt() {   # <terraform address> <bucket name>
   if gcloud storage buckets describe "gs://$2" >/dev/null 2>&1 && ! terraform state list 2>/dev/null | grep -qx "$1"; then
@@ -59,6 +65,9 @@ adopt() {   # <terraform address> <bucket name>
 }
 adopt google_storage_bucket.tabletop skippy-tel-tabletop
 terraform apply -input=false -auto-approve -var "project=$PROJECT" -var "region=$REGION"
+if [[ ! -f .terraform/terraform.tfstate ]] || ! grep -q '"type": "gcs"' .terraform/terraform.tfstate 2>/dev/null; then
+  terraform init -input=false -migrate-state -force-copy -backend-config="bucket=$PROJECT-tfstate" >/dev/null   # first time: the bucket exists now
+fi
 NUMBER=$(terraform output -raw project_number)
 PORTAL_URL=$(terraform output -raw portal_url)
 BUCKET=$(terraform output -raw state_bucket)

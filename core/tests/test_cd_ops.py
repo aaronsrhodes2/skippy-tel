@@ -229,3 +229,45 @@ def test_the_checkout_of_main_for_ops_is_a_real_working_tree(tmp_path, tested_co
     work = cd.checkout_main()
     assert (work / "src" / "core" / "cd" / "cd.py").read_text() == "new cd.py\n"
     assert subprocess.run(["git", "rev-parse", "HEAD"], cwd=work / "src", capture_output=True, text=True).stdout.strip() == sha
+
+
+class BootstrapCD(cd_mod.CD):
+    def __init__(self, s, tmp, code=0):
+        super().__init__(s, log=lambda m: None)
+        self.ran, self.code, self.tmp = [], code, tmp
+        cd_mod.oidc.token = lambda: None
+
+    def checkout_main(self):
+        work = self.tmp / "work"
+        (work / "src").mkdir(parents=True)
+        return work
+
+    def terraform(self, cmd):
+        self.ran.append(cmd)
+        return self.code if "init" in cmd else 0
+
+
+def test_bootstrap_plans_by_default_applies_only_when_typed_and_signs_in_as_skippy_bootstrap(tmp_path):
+    plan = BootstrapCD(settings(tmp_path), tmp_path)
+    assert plan.bootstrap() == 0
+    init, last = plan.ran
+    assert "init" in init and "-backend-config=bucket=skippy-tel-tfstate" in init
+    assert "plan" in last and "apply" not in last and "-auto-approve" not in last          # nothing changes without the word
+    assert "GOOGLE_IMPERSONATE_SERVICE_ACCOUNT=skippy-bootstrap@skippy-tel.iam.gserviceaccount.com" in last
+    assert "/src/infra/bootstrap" in last and "TF_IN_AUTOMATION=1" in last
+    assert not (tmp_path / "work").exists()                                                  # the checkout is cleaned up
+    go = BootstrapCD(settings(tmp_path), tmp_path)
+    assert go.bootstrap(apply=True) == 0 and "apply" in go.ran[-1] and "-auto-approve" in go.ran[-1]
+
+
+def test_a_failed_init_stops_before_any_plan_or_apply(tmp_path):
+    cd = BootstrapCD(settings(tmp_path), tmp_path, code=3)
+    assert cd.bootstrap(apply=True) == 3
+    assert len(cd.ran) == 1 and "init" in cd.ran[0]
+
+
+def test_the_bootstrap_command_is_plan_unless_apply_is_typed(monkeypatch):
+    seen = []
+    monkeypatch.setattr(cd_mod.CD, "bootstrap", lambda self, apply=False: seen.append(apply) or 0)
+    assert cd_mod.main(["bootstrap"]) == 0 and cd_mod.main(["bootstrap", "apply"]) == 0 and cd_mod.main(["bootstrap", "please"]) == 0
+    assert seen == [False, True, False]

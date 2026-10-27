@@ -504,6 +504,34 @@ class CD:
         self.sh([*base, "init", "-input=false", f"-backend-config=bucket={i['state_bucket']}"], timeout=600)
         self.sh([*base, "apply", "-input=false", "-auto-approve", "-var", f"project={self.cfg['project']}"], timeout=1800)
 
+    # ── bootstrap: infra/bootstrap from this box, so a new bucket or a permission never needs Cloud Shell again ────
+    BOOTSTRAP_SA = "skippy-bootstrap@skippy-tel.iam.gserviceaccount.com"
+
+    def terraform(self, cmd: list[str]) -> int:
+        """A command whose output the operator watches (stdout and stderr are the caller's own); its exit code."""
+        return subprocess.run(cmd).returncode
+
+    def bootstrap(self, apply: bool = False) -> int:
+        """infra/bootstrap (the project's buckets, IAM and the skippy-core trust) from main, in the Terraform container, signed in as
+        skippy-bootstrap (skippy-deployer impersonates it: infra/bootstrap/main.tf). A PLAN unless `apply` is typed. The state is in
+        gs://skippy-tel-tfstate, prefix bootstrap. It cannot run before the one Cloud Shell run that creates skippy-bootstrap."""
+        self.cfg = json.loads((HERE / "deploy.json").read_text(encoding="utf-8"))
+        oidc.token()
+        work = self.checkout_main()
+        try:
+            src = work / "src"
+            base = ["docker", "run", "--rm", "--network", "host", "-v", f"{OIDC_DIR}:{OIDC_DIR}:ro", "-v", f"{src}:/src", "-w", "/src/infra/bootstrap",
+                    "-e", f"GOOGLE_APPLICATION_CREDENTIALS={oidc.CRED_FILE}", "-e", f"GOOGLE_IMPERSONATE_SERVICE_ACCOUNT={self.BOOTSTRAP_SA}",
+                    "-e", "TF_IN_AUTOMATION=1", self.s["CD_TERRAFORM_IMAGE"]]
+            bucket = self.cfg["infra"]["state_bucket"]
+            code = self.terraform([*base, "init", "-input=false", f"-backend-config=bucket={bucket}"])
+            if code:
+                return code
+            args = ["-input=false", "-var", f"project={self.cfg['project']}", "-var", f"region={self.cfg['region']}"]
+            return self.terraform([*base, "apply", "-auto-approve", *args] if apply else [*base, "plan", *args])
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
     def rollback(self, revision: str = "") -> str:
         """The portal's traffic onto `revision`: blank = one step back from the revision SERVING NOW (never "the newest other than
         serving": after a failed deploy rolled itself back, the newest is the broken one), `latest` = undo a rollback, or a name.
@@ -787,6 +815,8 @@ def main(argv: list[str]) -> int:
         return cd.ops(argv[1:])
     if cmd == "domains":
         return cd.domains()
+    if cmd == "bootstrap":                                # plan only, unless "apply" is typed
+        return cd.bootstrap(apply=argv[1:2] == ["apply"])
     if cmd == "vendor":                                   # the Core deployer's Mentat build: <dest>/.vendor/sigma-ground
         cd.vendor(Path(argv[1]), star_control=False)
         return 0

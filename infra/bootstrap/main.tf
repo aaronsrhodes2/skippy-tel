@@ -10,11 +10,16 @@
 #     not trusted any more: docs/no-github.md.)
 #   • Secret Manager secrets the portal reads at runtime
 #
-# State for this module stays local in Cloud Shell (~/skippy-tel/infra/bootstrap);
-# it changes rarely and holds the generated Flask session key.
+# State for this module lives in gs://skippy-tel-tfstate (prefix "bootstrap", versioned, private): it holds the generated Flask session
+# key. It used to stay local in Cloud Shell; the Cloud Shell run that adds skippy-bootstrap below also migrates it
+# (`terraform init -migrate-state`, bootstrap.sh), so skippy-core can run this module itself from then on: `cd.py bootstrap`
+# (plan only) and `cd.py bootstrap apply` (docs/no-github.md, "Bootstrap from skippy-core").
 
 terraform {
   required_version = ">= 1.6"
+  backend "gcs" {
+    prefix = "bootstrap" # the bucket is passed at init: -backend-config=bucket=skippy-tel-tfstate
+  }
   required_providers {
     google = {
       source  = "hashicorp/google"
@@ -397,4 +402,53 @@ resource "google_storage_bucket_iam_member" "games_vm_reads_game_assets" {
   bucket = google_storage_bucket.game_assets.name
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${data.google_project.this.number}-compute@developer.gserviceaccount.com"
+}
+
+# ── skippy-bootstrap: what runs THIS module from skippy-core (no more Cloud Shell) ────────────────────────────────
+# skippy-deployer deploys code every push and can't change IAM, create buckets or edit the trust: that is deliberate, and it
+# is why every new bucket once needed a human in Cloud Shell. skippy-bootstrap holds just the roles this module's own resources
+# need (and no key: the project forbids them). Only skippy-deployer may impersonate it, and only core/cd/cd.py's `bootstrap`
+# command does: plan by default, `apply` only when typed. It can grant itself more (projectIamAdmin), so treat its use as
+# deliberate: every use is in the project's audit log (impersonation by skippy-deployer, then the changes by skippy-bootstrap).
+# The one Cloud Shell run that applies this block is the last one.
+
+locals {
+  bootstrap_roles = [
+    "roles/serviceusage.serviceUsageAdmin",      # google_project_service.apis
+    "roles/storage.admin",                       # the buckets and their IAM
+    "roles/artifactregistry.admin",              # the portal image repository
+    "roles/iam.serviceAccountAdmin",             # skippy-deployer, mentat, and who may act as whom
+    "roles/iam.workloadIdentityPoolAdmin",       # the skippy-core pool and provider
+    "roles/iam.roleAdmin",                       # the portal_vm custom role
+    "roles/resourcemanager.projectIamAdmin",     # google_project_iam_member (deployer roles, runtime)
+    "roles/secretmanager.admin",                 # the portal's secrets and who reads them
+    "roles/browser",                             # data.google_project (projects.get)
+  ]
+}
+
+resource "google_service_account" "bootstrap" {
+  account_id   = "skippy-bootstrap"
+  display_name = "skippy-core bootstrap (infra/bootstrap, by hand only)"
+  depends_on   = [google_project_service.apis]
+}
+
+resource "google_project_iam_member" "bootstrap" {
+  for_each = toset(local.bootstrap_roles)
+  project  = var.project
+  role     = each.key
+  member   = "serviceAccount:${google_service_account.bootstrap.email}"
+}
+
+# The state it reads and writes (versioned: a bad apply can be undone from the bucket).
+resource "google_storage_bucket_iam_member" "bootstrap_state" {
+  bucket = google_storage_bucket.tfstate.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.bootstrap.email}"
+}
+
+# skippy-deployer (and through it skippy-core's token) may become skippy-bootstrap: generateAccessToken only, on this one account.
+resource "google_service_account_iam_member" "deployer_impersonates_bootstrap" {
+  service_account_id = google_service_account.bootstrap.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.deployer.email}"
 }
