@@ -1135,7 +1135,7 @@ def test_physics_goes_to_mentat_with_qwen_at_home():
     login(client, ADMIN)
     skippy.reply = lambda system, messages, tools=None, run_tool=None, **_: (
         setattr(skippy, "tools", tools) or run_tool("ask_mentat", {"question": "5 cm copper ball from 10 km?"}))
-    data = client.post("/chat/send", json={"message": "/physics 5 cm copper ball from 10 km?"}).get_json()
+    data = client.post("/chat/send", json={"message": "5 cm copper ball from 10 km?"}).get_json()   # (the brain picks Mentat itself)
     stop.set()
     assert asked == ["5 cm copper ball from 10 km?"]                     # passed through, not pre-solved
     assert json.loads(data["reply"])["value"] == 159.6 and data["mentat_where"] == "home"
@@ -1167,11 +1167,11 @@ def test_direct_verbs_force_the_tool_and_badges_list_what_you_have():
     client = app.test_client()
     stop = _home_with_mentat(app.test_client(), lambda q: {"result": {"value": 1}})
     login(client, ADMIN)
-    client.post("/chat/send", json={"message": "/physics how fast does a 5 cm copper ball fall 10 km?"})
-    assert skippy.force_tool == "ask_mentat"
-    assert skippy.seen[1][-1]["content"] == "how fast does a 5 cm copper ball fall 10 km?"   # verb stripped
-    client.post("/chat/send", json={"message": "/mentat 1 mile in km"})                  # old name still works
-    assert skippy.force_tool == "ask_mentat"
+    # /mentat (and the old /physics): Mentat first, then the brain says it Barney Style with no tools (test_chat_raw.py has the detail)
+    d = client.post("/chat/send", json={"message": "/physics how fast does a 5 cm copper ball fall 10 km?"}).get_json()
+    assert d["barney"] is True and skippy.force_tool is None and skippy.seen[1][-1]["content"] == "Give it to me Barney Style"
+    assert skippy.seen[1][-3]["content"] == "how fast does a 5 cm copper ball fall 10 km?"   # verb stripped
+    assert client.post("/chat/send", json={"message": "/mentat 1 mile in km"}).get_json()["barney"] is True
     client.post("/chat/send", json={"message": "/status"})
     assert skippy.force_tool == "server_status"
     client.post("/chat/send", json={"message": "is it up?"})
@@ -1179,7 +1179,7 @@ def test_direct_verbs_force_the_tool_and_badges_list_what_you_have():
     login(client, FRIEND)
     badges = client.get("/chat/badges").get_json()
     stop.set()
-    assert [b["verb"] for b in badges["Physics"]] == ["physics"]
+    assert [b["verb"] for b in badges["Physics"]] == ["mentat"]
     assert "restart" not in [b["verb"] for b in badges["Game server"]]                    # admin-only
     assert "Music" in badges                                                             # core users have Bilby
     _add_friend(client, PAL, ["dragonwilds", "skippy"])

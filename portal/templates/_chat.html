@@ -566,6 +566,12 @@
     // The box grows with what you type (up to about two fifths of the screen, then it scrolls inside itself).
     function grow() { msg.style.height = "auto"; msg.style.height = Math.min(msg.scrollHeight + 2, Math.round(innerHeight * 0.4)) + "px"; }
     msg.addEventListener("input", grow);
+    // Typing "/" in an empty box lists the direct commands (the tools sheet); a box that no longer starts with "/" puts it away.
+    let slashSheet = false;
+    msg.addEventListener("input", () => {
+      if (msg.value === "/" && openSheet !== "tools") { showSheet("tools"); loadTools(); slashSheet = true; }
+      else if (slashSheet && !msg.value.startsWith("/")) { if (openSheet === "tools") showSheet("tools"); slashSheet = false; }
+    });
 
     // The agent's half of the composer: what is typed (and any pictures) goes to Claude Code on skippy-pc, into its transcript.
     const stopKey = form.querySelector("button.stopk");
@@ -599,8 +605,10 @@
     // as a version behind ‹ n/m ›.
     async function ask(text, opts) {
       opts = opts || {};
-      if (agentOn()) return askAgent(text);
+      const physics = /^\s*\/(mentat|physics)\s+\S/i.test(text || "");
+      if (agentOn() && !physics) { applyMode(); return askAgent(text); }
       if (!text || busy) return;
+      if (agentOn()) { agentView.hidden = true; logBox.hidden = false; }   // the answer shows in the chat's own log; the next agent message brings its transcript back
       busy = true; paintTail();
       const files = pending_files.splice(0);                          // they go with this message only
       paintFiles();
@@ -875,10 +883,11 @@
       fetch("{{ url_for('chat.badges') }}").then(r => r.json()).then(cats => {
         list.replaceChildren(...Object.entries(cats).flatMap(([cat, items]) => items.map(it => {
           const b = document.createElement("button"); b.type = "button"; b.className = "verb";
-          b.append(glyph(VERB_GLYPH[cat.toLowerCase()] || "server"), document.createTextNode("/" + it.verb)); b.title = it.label;
+          const what = document.createElement("small"); what.textContent = it.label;
+          b.append(glyph(VERB_GLYPH[cat.toLowerCase()] || "server"), document.createTextNode("/" + it.verb), what); b.title = it.label;
           b.onclick = () => {
             msg.value = "/" + it.verb + " " + msg.value.replace(/^\/[a-z]+\s*/i, "");
-            showSheet("tools"); msg.focus(); msg.setSelectionRange(msg.value.length, msg.value.length);
+            slashSheet = false; showSheet("tools"); msg.focus(); msg.setSelectionRange(msg.value.length, msg.value.length);
           };
           return b;
         })));

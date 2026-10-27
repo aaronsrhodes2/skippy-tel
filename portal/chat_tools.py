@@ -288,7 +288,7 @@ VERBS = (
     ("stop", "stop_server", "Stop the server", "Game server"),
     ("restart", "restart_server", "Restart", "Game server"),
     ("logs", "server_logs", "Logs", "Game server"),
-    ("physics", "ask_mentat", "Physics (Mentat)", "Physics"),
+    ("mentat", "ask_mentat", "Physics: Mentat works it out, then Skippy says it plainly", "Physics"),
     ("playing", "now_playing", "Now playing", "Music"),
     ("car", "car_status", "The car", "Car"),
     ("music", "make_music", "Make music", "Music"),
@@ -297,7 +297,7 @@ VERBS = (
 _VERB_RE = re.compile(r"^/([a-z]+)\b\s*(.*)$", re.S | re.I)
 
 
-_ALIASES = {"mentat": "physics"}
+_ALIASES = {"physics": "mentat"}
 
 
 def parse_verb(message: str) -> tuple[str | None, str]:

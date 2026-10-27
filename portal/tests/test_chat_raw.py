@@ -237,3 +237,38 @@ def test_a_guest_whose_skippy_core_is_down_gets_mentat_straight_never_a_paid_mod
     stop.set()
     assert not brains.BRAINS["core"].ready()
     assert d["raw"] is True and json.loads(d["reply"]) == ANSWER and asked == ["escape velocity of Mars?"]
+
+
+def test_mentat_verb_goes_to_mentat_first_then_core_says_it_barney_style():
+    # the Captain, 2026-10-27: /mentat never waits on a model (or the agent's run queue): Mentat answers with its own model, THEN
+    # Skippy Core explains that answer plainly, with no tools
+    seen = []
+    skippy = FakeSkippy()
+    skippy._normal = True
+    skippy.reply = lambda system, messages, tools=None, run_tool=None, **_: seen.append((system, messages, tools)) or "About 160 m/s: fast."
+    client, asked, stop = _setup(skippy=skippy)
+    login(client, FRIEND)
+    for verb in ("/mentat", "/physics"):
+        d = client.post("/chat/send", json={"message": f"{verb} light in diamond", "brain": "agent-core"}).get_json()
+        assert d["reply"] == "About 160 m/s: fast." and d["barney"] is True and d["tools"] == ["ask_mentat"]
+        assert d["mentat"][0]["value"] == 159.6
+    stop.set()
+    assert asked == ["light in diamond", "light in diamond"]
+    system, messages, tools = seen[0]
+    assert tools is None and "Barney Style" in system
+    assert messages[-1]["content"] == "Give it to me Barney Style" and json.loads(messages[-2]["content"])["value"] == 159.6
+
+
+def test_mentat_verb_with_core_failing_gives_mentats_own_answer():
+    import chat
+
+    def down(*_a, **_k):
+        raise chat.ChatError("Skippy Core is offline")
+    skippy = FakeSkippy()
+    skippy._normal = True
+    skippy.reply = down
+    client, asked, stop = _setup(skippy=skippy)
+    login(client, FRIEND)
+    d = client.post("/chat/send", json={"message": "/mentat light in diamond"}).get_json()
+    stop.set()
+    assert d["raw"] is True and json.loads(d["reply"]) == ANSWER and d["mentat"][0]["value"] == 159.6

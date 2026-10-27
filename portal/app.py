@@ -2133,6 +2133,49 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         return jsonify(reply=text, tools=["ask_mentat"], mentat_available=True, mentat_where=tools.mentat_where,
                        media=[], raw=True, mentat=[card] if card else [])
 
+    def mentat_first(user, message, question, history, save, follow=None, trace="", page=None):
+        """/mentat (or /physics) with a question: straight to Mentat, no model reading it first (Mentat has its own: Qwen and the
+        router, on skippy-core), and THEN Skippy Core puts Mentat's answer Barney Style, with no tools. Whatever mode the chat is
+        in (the agent's run queue never holds it up). Core down: Mentat's own answer, as the raw path gives it."""
+        tools = tools_for(user, trace)
+        args = follow if follow else {"question": question}
+        try:
+            out = tools.run("ask_mentat", args)
+        except chat_tools.ToolError as exc:
+            return jsonify(error=str(exc)), 503
+        gap = log_mentat_gap(user, question, out, "/mentat, then Barney Style", save)
+        card = mentat_card(args["question"], out)
+        base = dict(tools=["ask_mentat"], mentat_available=True, mentat_where=tools.mentat_where, media=[],
+                    mentat=[card] if card else [])
+        if gap:
+            return jsonify(reply="failed due to incompetence", raw=True, gap=gap, **base)
+        brain = brains.BRAINS[brains.BARNEY]
+        text, model = None, None
+        if brain_ready(brain):
+            admin = auth.is_admin(user["email"])
+            prompt = (chat.system_prompt(user["name"], is_admin=admin, page=page,
+                                         games=[GAMES[g].name for g in auth.visible_games(user["email"])])
+                      + chat.language_instruction() + chat.barney_instruction())
+            convo = chat.build_messages(history, question) + [
+                {"role": "assistant", "content": out[:6000]}, {"role": "user", "content": chat.BARNEY_PHRASE}]
+            model = brains.model_of(brain)
+            try:
+                text = chat.strip_sentinels((bot_override or brains.chat_for(brain)).reply(prompt, convo, tools=None, run_tool=None,
+                                                                                             model=model))
+            except chat.ChatError as exc:
+                print(json.dumps({"event": "mentat_first_barney_failed", "error": str(exc)[:200]}), flush=True)
+        print(json.dumps({"event": "chat", "user": user["email"], "model": model or "none (raw Mentat)", "tools": ["ask_mentat"],
+                          "mentat_available": True, "mentat_where": tools.mentat_where, "mentat_first": True}), flush=True)
+        if text is None:                                    # Skippy Core is down: Mentat's own words, not nothing
+            try:
+                text = json.dumps(json.loads(out), indent=2, ensure_ascii=False)
+            except ValueError:
+                text = out
+            return jsonify(reply=text, raw=True, **base)
+        if save:
+            telemetry_web.record_chat(message, text, model, [("ask_mentat", args, out)], forced="ask_mentat")
+        return jsonify(reply=text, brain=brain.id, barney=True, **base)
+
     def mentat_card(question: str, out: str) -> dict | None:
         """What the page's ⚛ card shows for one Mentat answer: the result, and the proof (steps with sources) as Mentat
         gave it. Mentat's own JSON, trimmed to the fields a reader needs; None when the tool answered with an error."""
@@ -2195,6 +2238,9 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                     }.get(force, "Go ahead.")
         if body.get("raw") is True:                       # Mentat straight, no model either side (kept for anyone who asks for it)
             return raw_mentat(user, message, rest, body.get("save") is True, follow, trace)
+        if force == "ask_mentat" and not rest.startswith("(the user chose") and not chat.wants_barney(rest):
+            return mentat_first(user, message, rest, body.get("history"), body.get("save") is True, follow, trace,
+                                str(body.get("page") or "")[:100] or None)
         # Which brain: the server decides. Guests always get Skippy Core; the Captain gets his pick. Barney Style (the
         # page's key, or the phrase) always runs on Skippy Core with no tools, whoever asks.
         barney = body.get("barney") is True or chat.wants_barney(rest)
