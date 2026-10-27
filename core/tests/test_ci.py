@@ -109,3 +109,37 @@ def test_the_deployer_gates_on_this_boxs_ci(world, tmp_path):
     assert d.ci_state(good)[0] == "success"
     assert d.ci_state(bad) == ("failure", "this box's CI failed: flask-api")
     assert d.ci_state("0" * 40)[0] == "pending"
+
+
+def test_each_job_carries_its_own_start_and_end_stamps(world, tmp_path, monkeypatch):
+    """Jobs run side by side; each one's finished_at is when IT ended (tools/loop_timer.py draws the timeline from these), even
+    when an earlier job in the plan is still running."""
+    s, _ = world
+    t = [100.0]
+
+    class Proc:
+        def __init__(self, ends):
+            self.ends = ends
+
+        def poll(self):
+            return 0 if t[0] >= self.ends else None
+
+        def kill(self):
+            pass
+    ends = iter([110.0, 103.0, 105.0, 101.0])                        # the first job in the plan ends LAST
+    monkeypatch.setattr(ci_mod.subprocess, "Popen", lambda *a, **k: Proc(next(ends)))
+    ci = ci_mod.CI(s, clock=lambda: t[0], log=lambda m: None, pause=lambda sec: t.__setitem__(0, t[0] + sec))
+    ci.image = lambda job, work: "skippy-ci:test"
+    ci.results("skippy-tel").mkdir(parents=True)
+    jobs = {j["name"]: j for j in ci.run_jobs("skippy-tel", "a" * 40, tmp_path)}
+    assert [(jobs[n]["started_at"], jobs[n]["finished_at"]) for n in ("suite", "flask-api", "services", "shell-syntax")] == [
+        (100.0, 110.0), (100.0, 103.0), (100.0, 105.0), (100.0, 101.0)]
+    assert jobs["flask-api"]["seconds"] == 3 and all(j["state"] == "success" for j in jobs.values())
+
+
+def test_a_result_says_when_testing_finished(world):
+    s, commit = world
+    sha = commit("one")
+    FakeCI(s).run()
+    got = json.loads((ci_mod.CI(s).results("skippy-tel") / f"{sha}.json").read_text())
+    assert got["finished_at"] >= got["at"]

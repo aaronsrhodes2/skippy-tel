@@ -134,9 +134,11 @@ class Deployer:
         st["bad"] = dict(list(st["bad"].items())[-KEEP_BAD:])
         self._write("state.json", st)
 
-    def mark_good(self, commit: str, full: str) -> None:
+    def mark_good(self, commit: str, full: str, started: str | None = None) -> None:
         st = self.state()
         st["last_good"] = {"commit": commit, "full": full, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        if started:                                       # when this deploy began (tools/loop_timer.py times it)
+            st["last_good"]["started"] = started
         self._write("state.json", st)
         self.refresh_doctor()
 
@@ -324,7 +326,7 @@ class Deployer:
             return self.status("ci-failed", commit=commit, full=full, detail=detail)
         if self.defer():
             return self.status("deferred", commit=commit, full=full, detail="the private Skippy is working: holding the deploy")
-        self.status("deploying", commit=commit, full=full)
+        started = self.status("deploying", commit=commit, full=full)["at"]
         try:
             results = self.deploy(commit, full)
         except StepFailed as e:
@@ -337,7 +339,7 @@ class Deployer:
             if good:                                        # the models aren't there yet: leave the running stack alone
                 self.checkout(good["commit"])
             return self.status("refused", commit=commit, full=full, stage=e.stage, detail=e.detail)
-        self.mark_good(commit, full)
+        self.mark_good(commit, full, started)
         return self.status("ok", commit=commit, full=full, detail="deployed", smoke=results)
 
     # ── repair: the last good deploy, recreated (the portal's one Recovery operation) ──

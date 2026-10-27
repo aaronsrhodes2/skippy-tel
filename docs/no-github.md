@@ -60,7 +60,7 @@ own machines in plain Docker.
     cards and Recovery's redeploy and rollback go through it;
   - GitHub's `deploy`, `core`, `test` and `run-tests` workflows are deleted. `rollback`, `ops` and `domains` stay as the phone's
     way back while GitHub is still a mirror. First automatic deploy: run 2, 6dd397f (CI 53 s, then live).
-  - Still on GitHub's API, to move in phase 5: the `ops` and `domains` workflows, the bridge's `ship` card links, `loop_timer.py`.
+  - Still on GitHub's API, to move in phase 5: the `ops` and `domains` workflows, the bridge's `ship` card links. (`loop_timer.py` moved off GitHub on 2026-10-27: it reads skippy-core's records, docs/cicd.md "Timing the loop".)
 
 - **Off-site backup, done 2026-10-25:**
   - `core/backup/backup.py` on skippy-core (timer 03:30 nightly, its own copy in `/opt/skippy-core/backup`: re-run

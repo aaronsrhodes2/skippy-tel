@@ -106,6 +106,20 @@ def test_a_green_commit_is_deployed_once_with_everything_the_first_time(world):
     assert len(cd.calls) == before                                                  # already delivered: nothing again
 
 
+def test_each_job_is_stamped_and_the_portal_says_when_it_served(world):
+    """tools/loop_timer.py times the loop from these: every job's started_at and completed_at, and the portal job's serving_at (all
+    traffic on the new revision), which falls inside the job, before its smoke test ends."""
+    s, commit = world
+    commit("portal/app.py", "one")
+    cd = FakeCD(s)
+    cd.run()
+    for job in cd.state["runs"][0]["jobs"][1:]:
+        assert job["started_at"] <= job["completed_at"]
+    portal = next(j for j in cd.state["runs"][0]["jobs"] if j["name"] == "portal")
+    assert portal["started_at"] <= portal["serving_at"] <= portal["completed_at"]
+    assert all("serving_at" not in j for j in cd.state["runs"][0]["jobs"] if j["name"] != "portal")
+
+
 def test_an_untested_or_red_commit_is_never_deployed(world):
     s, commit = world
     commit("portal/app.py", "x", ci_state=None)

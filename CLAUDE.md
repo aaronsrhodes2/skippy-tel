@@ -102,7 +102,8 @@ Actions (the sandbox can't reach GCP or run.app directly):
   `sudo python3 /opt/skippy-core/cd/cd.py deploy|rollback`. GitHub's `rollback` and `ops` workflows still work as the phone's way back. Redeploy without
   a code change: `workflow_dispatch` on `deploy.yml` (e.g. after a secret changes).
   **Time it / check before pushing:** `python tools/loop_timer.py --watch --since now` (before the push; `make loop-watch`) prints
-  "prompt sent -> new version visible" stage by stage from GitHub's stamps and the portal's public `/version`;
+  "prompt sent -> new version visible" stage by stage from skippy-core's own records (the house repo's reflog for the push, CI's results,
+  cd.py's runs with `serving_at`, Core's deployer, read over `ssh skippy-core`) and the portal's public `/version`;
   `python tools/affected_tests.py` runs only the tests the change can break (the full CI commands when it can't tell). docs/cicd.md "Timing the loop".
 - **Operate/diagnose the games VM and the portal's ops doors** (since 2026-10-25, from skippy-core, no GitHub):
   `ssh skippy-core 'sudo python3 /opt/skippy-core/cd/cd.py ops <command> <args>'` with `command` = `status` | `logs` | `start` |

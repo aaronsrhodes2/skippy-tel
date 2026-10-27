@@ -194,53 +194,67 @@ idle watchdog's evidence block: why the VM does or doesn't go to sleep.
 ## Timing the loop
 
 The loop has one stopwatch: **from "prompt sent" to "the new version is visible"**. [`tools/loop_timer.py`](../tools/loop_timer.py)
-reads it off GitHub's own start/end stamps and off the portal's `/version`; a stage it has no evidence for prints
-`n/a (reason)`, never a guess. Standard library plus the `gh` CLI, so it runs from Git Bash on Windows and on Linux.
+reads it off skippy-core's own records (since 2026-10-25 the loop doesn't touch GitHub: docs/no-github.md) and off the portal's
+`/version`; a stage it has no record for prints `n/a (reason)`, never a guess. Standard library plus `ssh` and `git`, so it runs from Git
+Bash on Windows and on Linux.
 
 ```bash
-python tools/loop_timer.py --watch --since now             # start BEFORE the push: waits for the run and for /version to flip
+python tools/loop_timer.py --watch --since now             # start BEFORE the push: waits for the push, CI, the deploy and /version to flip
 python tools/loop_timer.py --since "12 minutes ago"        # after the fact (the exact moment of "visible" is then unknowable)
 python tools/loop_timer.py --sha 8adcd7e --json --utc      # one commit, as JSON, in UTC
 make loop-watch SINCE=now                                  # the same through make (loop-time for after the fact; LOOP_ARGS="...")
 ```
 
 Flags: `--since` (an ISO time, `N minutes ago`, `now`), `--sha`, `--watch` (Ctrl-C prints what was seen so far), `--portal URL`
-(default production), `--repo owner/name` (default from `gh repo view`), `--bridge [URL]` (see the last section), `--json`, `--utc`.
-Exit status: 0 = printed and live, 1 = the run failed or the version never showed up, 2 = couldn't run (no run, gh not signed in).
+(default production), `--core HOST` (default `skippy-core`), `--house PATH` (the bare repo, default `D:/trunk/git/skippy-tel.git`, or
+`LOOP_HOUSE_GIT`), `--bridge [URL]` (see the last section), `--json`, `--utc`. Without `--sha` or `--since` it times the newest commit CI
+has seen. Exit status: 0 = printed and live (or nothing failed), 1 = CI or the deploy failed, or the version never showed up while
+watching, 2 = couldn't run (no such commit, skippy-core unreachable).
+
+Where each time comes from (all read only: one `ssh skippy-core python3 -` per look, every file world-readable):
+
+| Record | What it gives |
+|---|---|
+| the house repo's reflog (`D:\trunk\git\skippy-tel.git`, `core.logAllRefUpdates always`, switched on 2026-10-27) | **the push**: when main moved to (or past) the commit. Without an entry: the ref file's time while it is still main's tip, else the commit date, and a note says which. While watching, the moment this machine saw main move |
+| CI, `/var/lib/skippy-core/ci/skippy-tel/results/<sha>.json` (`core/ci/ci.py`) | `at` (CI took it up), `finished_at`, and each job's `started_at` / `finished_at` (epoch seconds) |
+| the portal deploy, `/var/lib/skippy-core/cd/state.json` runs (`core/cd/cd.py`) | the run's `created_at` / `updated_at`; each job's `started_at` / `completed_at`; the portal job's **`serving_at`**: all traffic on the new revision |
+| Core's deployer, `/var/lib/skippy-core/deployer/status.json` (`core/deployer/deployer.py`) | `last_good.started` / `last_good.at`, only while the last good deploy is this commit (it keeps no history) |
+| the portal's `/version` | **visible**: the first second this machine saw it report the commit (polled every second while watching) |
+
+The per-job stamps, `finished_at` and `serving_at` were added on 2026-10-27. An older record still prints: a CI job shows only how long it
+took, and the end of the deploy run stands in for `serving_at` (a little late, and the note says so).
 
 ### Reading the table
 
-The real deploy of 2026-09-30 (run 36805974511), read afterwards with `--since` set to a made-up prompt time, in UTC (some rows trimmed):
+A real loop (2026-10-27, commit 699788e, read afterwards, in UTC; its records predate the per-job stamps):
 
 ```
-stage                                 start     end          took  note
-prompt -> push                        02:25:00  02:28:08    3m08s
-queue (runner pickup)                 02:28:08  02:28:10       2s
-gate (bootstrapped?)                  02:28:10  02:28:13       3s
-mentat tests                          02:28:10  02:28:48      38s
-tests                                 02:28:10  02:29:52    1m42s
-deploy portal                         02:29:54  02:31:30    1m36s
-  setup-gcloud@v2                     02:29:57  02:30:20      23s
-  Build and push                      02:30:20  02:30:54      34s
-  Deploy to Cloud Run                 02:30:54  02:31:19      25s  new revision serving at the end of this step
-  Smoke test                          02:31:19  02:31:26       7s  after the new revision was already serving
-visible on the portal                                              n/a (<portal>/version didn't answer ...)
-TOTAL prompt sent -> deploy step end  02:25:00  02:31:19    6m19s  visible was not observed, so this stops where ...
-critical path (from the stamps): tests 1m42s -> deploy portal (to serving) 1m25s   [push -> serving: 3m11s, ...]
+stage                               start     end          took  note
+prompt -> push                                                   n/a (no --since: pass --since 'N minutes ago' ...)
+wait for CI (timer, 1 min)          08:13:36  08:14:17      42s
+CI (skippy-core)                    08:14:17  08:15:09      52s
+  suite                                                     52s  no start/end stamps in this record, only how long it took
+wait for the deployer (timer)       08:15:09  08:16:08      58s
+deploy run 35 (cd.py)               08:16:08  08:17:23    1m15s
+  build portal image                                             n/a (no stamps in this record (success))
+  deploy portal                                                  n/a (no stamps in this record (success))
+Core services (deployer)                                         n/a (the deployer keeps only its last good deploy, ...)
+visible on the portal                                            n/a (<portal>/version reports 79d3678, not 699788e: ...)
+TOTAL push (no --since) -> serving  08:13:36  08:17:23    3m47s  visible was not observed, so this stops where ...
+critical path: push -> CI 42s -> CI 52s -> CI -> deploy run 58s -> deploy run to serving 1m15s   [push -> serving: 3m47s]
 ```
-
-That deploy predates `/version`, so `visible` is `n/a`. With a `--watch` that was running when the version flipped, the row has times
-(`first seen by this machine; 1s after the deploy step ended`) and `TOTAL` ends at `visible`.
 
 | Row | What the two times are |
 |---|---|
-| `prompt -> push` | `--since` (when the prompt was sent) to the run's `createdAt`, which GitHub sets the moment the push lands. `n/a` without `--since`. A manual run reads `prompt -> run created (workflow_dispatch)` |
-| `queue (runner pickup)` | the run exists, then a runner picks up its first job (2-3 s). GitHub's run-level `startedAt` equals `createdAt`, so the first job's start is the evidence |
-| one row per job | the job's own start and end. They **overlap** (parallel jobs): only the critical path adds up. Skipped jobs are one note below the table, not rows |
-| the deploy job's steps | each step's start and end, bookkeeping steps hidden. **`Deploy to Cloud Run` ends = the new revision starts serving**; the smoke test and the rollback logic run after it |
-| `visible on the portal` | from the deploy step's end to the first second this machine saw `<portal>/version` report the pushed commit (polled every second while watching). A **negative lag** means the traffic switched a moment before the CLI returned |
-| `TOTAL` | the loop start (`--since`, else the push) to `visible`; if `visible` wasn't observed it stops at the deploy step's end and says so |
-| critical path | the chain of jobs that decided when the deploy could start, inferred from the stamps (a job starts when its last dependency ends). `push -> serving` is the headline number |
+| `prompt -> push` | `--since` (when the prompt was sent) to the push. `n/a` without `--since`. With `--bridge` marks it splits further |
+| `wait for CI (timer, 1 min)` | the push to CI taking the commit up: CI's timer ticks every minute, and it waits while the private Skippy works |
+| `CI (skippy-core)` and its jobs | CI's start and end, and each job's own; the jobs run **side by side** in their own containers, so they overlap |
+| `wait for the deployer (timer)` | CI's end to cd.py creating its run (cd.py's timer ticks every minute) |
+| `deploy run N (cd.py)` and its jobs | the run, then `build portal image`, `deploy portal` (its note says when all traffic moved), `mentat deploy` and `infra` when they changed, one after another |
+| `Core services (deployer)` | Core's own services, deployed beside the portal (its timer ticks every 2 minutes): off the portal's critical path |
+| `visible on the portal` | from `serving_at` to the first second this machine saw `/version` report the commit. A **negative lag** means traffic switched a moment before gcloud returned |
+| `TOTAL` | the loop start (`--since`, else the push) to `visible`; if `visible` wasn't observed it stops at serving and says so |
+| critical path | the stages are one after another now: push -> CI -> the deployer's wait -> run start -> image -> deploy to serving -> visible. `push -> serving` is the headline number |
 
 A `visible` that shows `n/a (already live ...)` means the new commit was already serving at the timer's first look, so when it appeared
 can't be known (start `--watch` before the push). Same-commit redeploys wait for a *new revision* of that commit instead.
@@ -256,7 +270,7 @@ which build he is looking at. The login page and the public pages never show it.
 
 ### What the speed-ups should do
 
-Measured before (the last eight successful push deploys, no queueing): push to deploy-finished **242 s**, median. The critical path was gate (3 s) ->
+(GitHub Actions days, kept for the record: the loop runs on skippy-core now.) Measured before (the last eight successful push deploys, no queueing): push to deploy-finished **242 s**, median. The critical path was gate (3 s) ->
 `test` (102-122 s: pip 10-16 s, pytest 79-85 s) -> `portal` (93-105 s: setup-gcloud 23-30 s, image build + push 34-45 s, Cloud Run deploy 25 s,
 smoke). The build is not on the critical path any more once it runs next to the tests, pip comes from a cache, and pytest runs on both
 cores; the image also stops waiting for the tests. Expected, not yet measured: tests ~60-70 s, the `portal` job ~55-60 s (about 30 s if

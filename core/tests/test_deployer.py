@@ -88,7 +88,8 @@ def test_a_green_commit_deploys_once(box):
     assert d.deployed == [(first, "")]
     row = d.run()
     assert row["state"] == "ok" and row["detail"] == "up to date" and len(d.deployed) == 1
-    assert json.loads((d.dir / "status.json").read_text())["last_good"]["commit"] == first
+    good = json.loads((d.dir / "status.json").read_text())["last_good"]
+    assert good["commit"] == first and good["started"] <= good["at"]          # when it began, for tools/loop_timer.py
 
 
 def test_it_waits_for_ci_and_never_deploys_a_red_one(box):

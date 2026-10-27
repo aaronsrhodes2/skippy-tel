@@ -16,7 +16,8 @@ Each run:
        infra         only when infra/gcp-games/ or deploy.json changed since its last good apply: terraform apply
   3. report again after every job, so the ship card follows it live.
 
-State: /var/lib/skippy-core/cd/state.json (runs, what is deployed where); each run's log in runs/<id>.log.
+State: /var/lib/skippy-core/cd/state.json (runs, what is deployed where; each job's started_at and completed_at, and the portal job's
+serving_at: when all traffic moved to the new revision); each run's log in runs/<id>.log.
 
     cd.py run                one pass (the timer)
     cd.py deploy [sha]       deploy now (main's newest green commit, or that one), whatever state.json says
@@ -118,6 +119,7 @@ class CD:
         self.say = log
         self.state = self.load()
         self.logfile = None
+        self.entry = None                                 # the job running now (job())
 
     # ── state ───────────────────────────────────────────────────────────────────
     def load(self) -> dict:
@@ -196,8 +198,9 @@ class CD:
 
     def job(self, run: dict, name: str, fn, *args) -> bool:
         """Run one job, keeping the run's record (and the portal) up to date. True when it passed."""
-        entry = {"name": name, "status": "in_progress", "conclusion": ""}
+        entry = {"name": name, "status": "in_progress", "conclusion": "", "started_at": now_iso()}
         run["jobs"].append(entry)
+        self.entry = entry                                # a job may stamp its own moments on it (portal: serving_at)
         run["updated_at"] = now_iso()
         self.save()
         self.report()
@@ -212,7 +215,8 @@ class CD:
             self.say(f"cd: {name} failed: {e}")
             return False
         finally:
-            run["updated_at"] = now_iso()
+            entry["completed_at"] = run["updated_at"] = now_iso()
+            self.entry = None
             self.save()
 
     def deploy(self, sha: str, why: str = "push") -> dict:
@@ -426,6 +430,8 @@ class CD:
                         f"--service-account={p['service_account']}", *p["flags"], f"--set-env-vars={env}",
                         f"--set-secrets={secrets}")
             self.gcloud("run", "services", "update-traffic", p["service"], f"--region={region}", "--to-latest")
+            if self.entry is not None:                    # the new revision has all the traffic from here (tools/loop_timer.py)
+                self.entry["serving_at"] = now_iso()
             self.smoke_portal(src)
         except Exception:
             if prev:

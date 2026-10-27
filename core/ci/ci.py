@@ -8,7 +8,8 @@ Each run, for each repo in CI_REPOS (name=path, the bare repo on skippy-pc throu
      container, side by side. Each job's image is built from its requirement files and named by their hash, so dependencies are
      installed once per change, not per commit. Tests run with no network (--network none: loopback only), capped in CPU and
      memory so the models keep the box;
-  3. write <state>/<name>/results/<sha>.json: {"state": "success" | "failure" | "error", "jobs": [...], "at", "seconds"}, with each
+  3. write <state>/<name>/results/<sha>.json: {"state": "success" | "failure" | "error", "jobs": [...], "at", "finished_at", "seconds"}
+     (epoch seconds; each job carries its own started_at and finished_at), with each
      job's log beside it, and latest.json. A job that fails is a failure (the commit's fault); a build or Docker that fails is an
      error (the box's fault): it is tried again next run, at most three times, and an error never blocks forever as a failure would.
 
@@ -92,10 +93,10 @@ def repos(s: dict) -> dict[str, str]:
 
 
 class CI:
-    def __init__(self, s: dict | None = None, run=subprocess.run, clock=time.time, log=print):
+    def __init__(self, s: dict | None = None, run=subprocess.run, clock=time.time, log=print, pause=time.sleep):
         self.s = s or settings()
         self.state = Path(self.s["CI_STATE"])
-        self._run, self.clock, self.log = run, clock, log
+        self._run, self.clock, self.log, self.pause = run, clock, log, pause
 
     # ── shell ───────────────────────────────────────────────────────────────────
     def sh(self, cmd: list[str], cwd: str | Path | None = None, timeout: float = 600) -> subprocess.CompletedProcess:
@@ -168,7 +169,8 @@ class CI:
             shutil.rmtree(work.parent if work.name == "src" else work, ignore_errors=True)
         states = {j["state"] for j in jobs}
         state = "error" if "error" in states else "failure" if "failure" in states else "success"
-        result = {"state": state, "at": started, "seconds": round(self.clock() - started), "jobs": jobs}
+        finished = self.clock()
+        result = {"state": state, "at": started, "finished_at": finished, "seconds": round(finished - started), "jobs": jobs}
         if state == "error":
             result["errors"] = int(before.get("errors") or 0) + 1
         self.write(name, sha, result)
@@ -188,17 +190,31 @@ class CI:
                  image, "bash", "-c", job["cmd"].replace("{cpus}", self.s["CI_CPUS"])],
                 stdout=open(log, "w", encoding="utf-8"), stderr=subprocess.STDOUT)
             started.append((job, proc, log, self.clock()))
+        # Polled, not waited on in order: each job's finished_at is when IT ended, not when the one before it did
+        # (tools/loop_timer.py draws the timeline from these stamps).
+        ended: dict[int, tuple[int | None, float]] = {}
+        while len(ended) < len(started):
+            for i, (job, proc, log, t0) in enumerate(started):
+                if i in ended:
+                    continue
+                code = proc.poll()
+                if code is not None:
+                    ended[i] = (code, self.clock())
+                elif self.clock() - t0 > int(self.s["CI_TIMEOUT_S"]):
+                    proc.kill()
+                    ended[i] = (None, self.clock())
+            if len(ended) < len(started):
+                self.pause(1)
         out = []
-        for job, proc, log, t0 in started:
-            try:
-                code = proc.wait(timeout=int(self.s["CI_TIMEOUT_S"]))
-                state = "success" if code == 0 else "failure"
-                why = "" if code == 0 else f"exit {code}"
-            except subprocess.TimeoutExpired:
-                proc.kill()
+        for i, (job, proc, log, t0) in enumerate(started):
+            code, t1 = ended[i]
+            if code is None:
                 state, why = "failure", f"timed out after {self.s['CI_TIMEOUT_S']} s"
+            else:
+                state, why = ("success", "") if code == 0 else ("failure", f"exit {code}")
             tail = Path(log).read_text(encoding="utf-8", errors="replace")[-LOG_TAIL:] if Path(log).is_file() else ""
-            out.append({"name": job["name"], "state": state, "why": why, "seconds": round(self.clock() - t0), "tail": tail})
+            out.append({"name": job["name"], "state": state, "why": why, "seconds": round(t1 - t0), "started_at": t0,
+                        "finished_at": t1, "tail": tail})
         return out
 
     def image(self, job: dict, work: Path) -> str:

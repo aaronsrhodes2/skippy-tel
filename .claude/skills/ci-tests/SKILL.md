@@ -47,7 +47,7 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd -W)":/src -w /src python:3.12-slim 
   ssh skippy-core 'sudo python3 -c "import json;d=json.load(open(\"/var/lib/skippy-core/ci/skippy-tel/latest.json\"));print(d[\"sha\"][:7],d[\"state\"]);[print(j[\"name\"],j[\"state\"]) for j in d[\"jobs\"]]"'
   ```
   A failed job's `tail` holds the pytest summary. The deployer's view: `/var/lib/skippy-core/deployer/status.json` (`waiting-ci`,
-  `known-bad`, `ok`). `tools/loop_timer.py` still asks GitHub and no longer works for this.
+  `known-bad`, `ok`). `python tools/loop_timer.py --sha <commit>` shows one commit's whole trip (CI, the deploy, serving) from these records.
 
 ## 4. Windows runs still have a place
 
