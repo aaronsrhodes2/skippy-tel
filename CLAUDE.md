@@ -175,8 +175,8 @@ and jobs; while someone chats, the reporter also polls `GET /home/jobs` every
   `default` and `default_present`, because an up Ollama missing the default
   model still says `status: ok` while every default chat 503s.
 
-- Physics in Skippy's chat = `ask_mentat` → a job → the reporter → **Mentat on skippy-core** (2026-10-25; it was `mentat-home`
-  on skippy-pc): `mentat` in `core/compose.core.yml`, mentat/Dockerfile with `MENTAT_USE_LLM=1` and `MATERIA_OLLAMA_MODEL=skippy-chat`
+- Physics in Skippy's chat = `ask_mentat` → **straight to Mentat on skippy-core** over its Funnel (`MENTAT_URL`, `mentat_client.ask_mentat`;
+  2026-10-27, the Captain: no hop through skippy-pc's reporter any more) → Mentat's answer → Skippy Core (big Qwen) words it → the chat: `mentat` in `core/compose.core.yml`, mentat/Dockerfile with `MENTAT_USE_LLM=1` and `MATERIA_OLLAMA_MODEL=skippy-chat`
   (Core's resident Qwen3.6-35B-A3B through the shim) and its trained router first (`MENTAT_ROUTER_MODEL`, mentat-router-v31-4b, also resident), tailnet-only on `skippy-core:7350` (`core/install/tailnet.sh`); its research
   log is `/var/lib/skippy-core/mentat-research`. skippy-core's own doctor and deployer keep it up, not skippy-pc's. No Qwen → Mentat answers 503 and Skippy says it's offline;
   there is ONE Mentat, this one (2026-10-27, the Captain: a second cloud copy was needless cost and drifted). It also has a **public address

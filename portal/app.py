@@ -2023,12 +2023,17 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         print(json.dumps({"event": "agent_popup_queued", "job": job_id, "popup": name}), flush=True)
     workshop.on_popup = agent_popup
 
+    def chat_mentat():
+        """The chat's physics: skippy-core's Mentat, straight over its Funnel (MENTAT_URL), when it is up and thinking with Qwen."""
+        m = app.extensions.get("mentat")
+        return m if m is not None and m.ready() else None
+
     def tools_for(user, trace: str = "") -> chat_tools.ChatTools:
         email = user["email"]
         return chat_tools.ChatTools(vm, is_admin=auth.is_admin(email), visible=auth.visible_games(email),
                                     who=email, trace=trace,
                                     music=home.music if auth.has_portal(email, "audio") else None,
-                                    home_mentat=home if home.mentat_ready() else None,
+                                    home_mentat=chat_mentat(),
                                     home_house=home if home.can("house") else None,
                                     home_car=home if home.can("car") else None,
                                     home_music=PatientJobs(email) if home.can("make_music") else None,
@@ -2178,7 +2183,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 return jsonify(error=f"That's {CHAT_PER_HOUR} messages this hour; Skippy needs a breather. "
                                      "Try again in a bit."), 429
         home.touch_chat()
-        pics.touch("core", "pc")                              # Core answers, Mentat thinks on skippy-pc: patient jobs wait (patient.py)
+        pics.touch("core")                                    # Core answers and Mentat thinks, both on skippy-core: patient jobs there wait (patient.py)
         trace = "chat-" + secrets.token_hex(8)        # this turn's id, kept with Mentat's research record of it
         # The person agreed to Mentat's suggested inputs: the page sends back the follow-up Mentat made, and the portal
         # asks Mentat with exactly those values (no brain retyping numbers). Anything but a plain yes ignores it.

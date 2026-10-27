@@ -29,7 +29,6 @@ import localinfo
 PORTAL = os.environ.get("PORTAL_URL", "https://skippy-portal-1015050363686.us-west1.run.app").rstrip("/")
 API = os.environ.get("SKIPPY_API", "http://flask-api:5000").rstrip("/")
 MAC = os.environ.get("BILBY_MAC_URL", "").rstrip("/")         # Mac DJ assistant, if enabled
-MENTAT = os.environ.get("MENTAT_URL", "").rstrip("/")         # Mentat + Qwen on skippy-pc
 INTERVAL = float(os.environ.get("REPORT_INTERVAL", "15"))
 FAST_INTERVAL = 1.5          # job polling while someone is chatting on the portal
 GATHER_BUDGET_S = float(os.environ.get("GATHER_BUDGET", "9"))   # the most one report waits for its probes (they run side by side)
@@ -206,7 +205,6 @@ def gather() -> dict:
     probes.start("services", lambda: fetch(f"{API}/services"))
     probes.start("session", lambda: fetch(f"{API}/music/session"))
     probes.start("bilby", bilby_state)
-    probes.start("mentat_home", lambda: bool(MENTAT) and _up(f"{MENTAT}/health"))
     # What people did on the portal lately (flask-api's site_events table); the Activity widget on /me shows it.
     probes.start("site_activity", lambda: fetch(f"{API}/telemetry/site_summary"))
     probes.start("local", LOCAL.snapshot)                       # weather and the commute (localinfo.py), cached inside: cheap to ask every report
@@ -235,7 +233,6 @@ def gather() -> dict:
         "bilby": bilby,
         "setlist": (setlist or [])[-20:],
         "up_next": up_next.get("track") if up_next.get("ok") else None,
-        "mentat_home": bool(got.get("mentat_home")),
         "capabilities": {name: got.get(f"cap_{name}") or _capability_down(name) for name in _capability_probes()},
         "site_activity": got.get("site_activity"),
         "local": got.get("local"),
@@ -1023,7 +1020,7 @@ def host_op(job: dict, token: str) -> dict:
 
 
 def run_job(job: dict, token: str = "") -> dict:
-    """A job from the portal. ask_mentat → Mentat + Qwen here at home; make_music → the music studio;
+    """A job from the portal (physics is not one: the portal asks skippy-core's Mentat itself). make_music → the music studio;
     workshop → the private Skippy (Claude Code on the bridge); workshop_conversation(s) → its conversation history."""
     if job.get("kind") == "workshop":
         return workshop(job, token)
@@ -1047,18 +1044,6 @@ def run_job(job: dict, token: str = "") -> dict:
         return memory_job(job, token)
     if job.get("kind") in ("mcp_list", "mcp_test"):
         return mcp_job(job, token)
-    if job.get("kind") == "ask_mentat" and MENTAT:
-        # `given`: the values the person said yes to (Mentat suggested them; it never fills them in itself).
-        # The trace id ties Mentat's research record (mentat/research.py) to this chat turn.
-        body = {"question": job.get("question", "")}
-        if isinstance(job.get("given"), dict) and job["given"]:
-            body["given"] = job["given"]
-        reply = fetch(f"{MENTAT}/ask", "POST", body, timeout=100,
-                      headers={"X-Skippy-Trace": str(job.get("trace") or job.get("id") or "")[:200],
-                               "X-Skippy-Caller": "portal-chat"})
-        if reply and reply.get("ok"):
-            return {"result": reply["result"]}
-        return {"error": (reply or {}).get("error") or "Mentat at home didn't answer"}
     return {"error": f"unknown job {job.get('kind')!r}"}
 
 

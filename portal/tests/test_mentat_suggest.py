@@ -33,21 +33,12 @@ ANSWER = {"value": 91.77, "units": "m", "source": "sigma_ground.materia (project
 
 
 def _home(client, jobs):
-    """Pair skippy-pc and run a fake reporter that keeps each whole job: a suggestion unless `given` came with it."""
-    token = _pair(client)
-    client.post("/home/report", json={**json.loads(json.dumps(REPORT)), "mentat_home": True},
-                headers={"Authorization": f"Bearer {token}"})
-    stop = threading.Event()
-
-    def reporter():
-        while not stop.is_set():
-            for job in client.get("/home/jobs", headers={"Authorization": f"Bearer {token}"}).get_json()["jobs"]:
-                jobs.append(job)
-                client.post(f"/home/jobs/{job['id']}", json={"result": ANSWER if job.get("given") else SUGGESTION},
-                            headers={"Authorization": f"Bearer {token}"})
-            time.sleep(0.01)
-    threading.Thread(target=reporter, daemon=True).start()
-    return stop
+    """A fake skippy-core Mentat (the chat asks it straight) that keeps each whole ask: a suggestion unless `given` came with it."""
+    from test_app import AskMentat
+    m = AskMentat(lambda q: {"result": ANSWER if isinstance(q, tuple) else SUGGESTION})
+    m.asked = jobs
+    client.application.extensions["mentat"] = m
+    return threading.Event()
 
 
 @pytest.fixture

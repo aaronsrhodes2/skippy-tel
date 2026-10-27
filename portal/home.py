@@ -298,27 +298,6 @@ class Home:
             raise RuntimeError(outcome["error"])
         return str((outcome.get("result") or {}).get("text") or "")
 
-    def mentat_ready(self) -> bool:
-        """Mentat + Qwen on skippy-pc is up and reporting."""
-        return self.online() and bool((self.report or {}).get("mentat_home"))
-
-    # The wait nests OUTSIDE the work: Mentat's own call limit on skippy-pc (MENTAT_CALL_TIMEOUT 90 s, docker-compose.override.yml)
-    # plus the reporter picking the job up (1.5 s while someone chats, 15 s otherwise) and a margin. At 75 s a slow answer (Qwen
-    # reloading after a picture freed the card) came back after the chat had already said Mentat was offline.
-    MENTAT_WAIT_S = 110
-
-    def ask_mentat(self, question: str, timeout: float = MENTAT_WAIT_S, given: dict | None = None, trace: str = "") -> dict:
-        """`given`: values the person agreed to after Mentat suggested them. `trace`: this chat turn's id, kept in
-        Mentat's research record."""
-        self.touch_chat()
-        extra = {"given": given} if given else {}
-        outcome = self.wait(self.submit("ask_mentat", question=question, trace=trace, **extra), timeout)
-        if outcome is None:
-            raise TimeoutError("Mentat at home didn't answer in time")
-        if "result" not in outcome:
-            raise RuntimeError(outcome.get("error") or "Mentat at home failed")
-        return outcome["result"]
-
     def age(self) -> int | None:
         return None if self.received_at is None else int(self.clock() - self.received_at)
 
@@ -374,7 +353,6 @@ class Home:
             pending = sum(1 for j in self._jobs.values() if not j["event"].is_set())
         core = self.core()
         return {"paired": self.paired(), "online": self.online(), "last_report_s": self.age(),
-                "mentat_home": bool(r.get("mentat_home")),
                 "capabilities": self.capabilities(),
                 "core": {"verdict": core["verdict"], "problems": core["problems"]},
                 "services": {x.get("name"): x.get("ok") for x in st.get("services") or []},

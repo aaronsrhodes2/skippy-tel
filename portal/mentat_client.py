@@ -1,6 +1,7 @@
 """The portal's client for Mentat (mentat/app.py): sigma-ground's physics tools
-over HTTP, for the public Experiments playground. (Skippy's chat asks the
-Mentat + Qwen copy on skippy-pc instead, through home.py.)
+over HTTP. There is ONE Mentat, on skippy-core (Qwen + the router), and MENTAT_URL is its
+Tailscale Funnel: the Experiments playground, Weapon vs. Armor and Skippy's chat
+(`ask_mentat`) all come straight here, no hop through skippy-pc.
 
 Mentat's tool list is fetched once and cached; everything degrades to "no
 physics tools" if Mentat is unreachable, never to a broken page or chat.
@@ -13,7 +14,10 @@ import urllib.error
 import urllib.request
 
 CACHE_SECONDS = 600
-TIMEOUT = 45                 # over the cloud Mentat's own 20 s call limit plus a Cloud Run cold start
+TIMEOUT = 100                # a tool call: over Mentat's own per-call limit (MENTAT_CALL_TIMEOUT 90 s, core/compose.core.yml)
+# A question: the same limit plus Qwen reading it first (the router, the card busy with another chat).
+ASK_TIMEOUT = 110
+READY_SECONDS = 30           # how long a /health answer counts (the chat asks before every turn)
 
 
 class MentatError(Exception):
@@ -34,13 +38,14 @@ class Mentat:
         self.url = url.rstrip("/")
         self._tools: tuple[float, list[dict]] | None = None
         self._wva: tuple[float, dict] | None = None
+        self._ready: tuple[float, bool] | None = None
 
-    def _request(self, method: str, path: str, payload=None):
+    def _request(self, method: str, path: str, payload=None, timeout: float = TIMEOUT, headers: dict | None = None):
         data = json.dumps(payload).encode() if payload is not None else None
         req = urllib.request.Request(f"{self.url}{path}", data=data, method=method,
-                                     headers={"Content-Type": "application/json"})
+                                     headers={"Content-Type": "application/json", **(headers or {})})
         try:
-            with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read())
         except urllib.error.HTTPError as err:
             try:
@@ -50,6 +55,34 @@ class Mentat:
             raise MentatError(body.get("error") or f"Mentat answered {err.code}", err.code) from err
         except (urllib.error.URLError, TimeoutError, ValueError) as err:
             raise MentatError(f"Mentat is unreachable ({err})") from err
+
+    def ready(self) -> bool:
+        """Mentat answers /health ready AND thinks with Qwen (mode "llm"): a keywords-only Mentat is not offered to the chat
+        (the Captain wants a clear "offline" over a degraded answer). Cached READY_SECONDS, a short timeout: never slows a turn much."""
+        if self._ready and time.monotonic() - self._ready[0] < READY_SECONDS:
+            return self._ready[1]
+        try:
+            h = self._request("GET", "/health", timeout=5)
+            ok = bool(h.get("ready")) and h.get("mode") == "llm"
+        except MentatError:
+            ok = False
+        self._ready = (time.monotonic(), ok)
+        return ok
+
+    def ask_mentat(self, question: str, given: dict | None = None, trace: str = "", timeout: float = ASK_TIMEOUT) -> dict:
+        """Skippy's chat: a question in words, Mentat's answer (its own JSON). `given`: values the person agreed to after Mentat
+        suggested them; `trace`: this chat turn's id, kept in Mentat's research record. TimeoutError / RuntimeError when it can't."""
+        body = {"question": question, **({"given": given} if given else {})}
+        try:
+            reply = self._request("POST", "/ask", body, timeout=timeout,
+                                  headers={"X-Skippy-Trace": str(trace)[:200], "X-Skippy-Caller": "portal-chat"})
+        except MentatError as exc:
+            if exc.status is None and "timed out" in str(exc).lower():
+                raise TimeoutError("Mentat didn't answer in time") from exc
+            raise RuntimeError(str(exc)) from exc
+        if not reply.get("ok"):
+            raise RuntimeError(reply.get("error") or "Mentat failed")
+        return reply["result"]
 
     def tools(self) -> list[dict]:
         if self._tools and time.monotonic() - self._tools[0] < CACHE_SECONDS:

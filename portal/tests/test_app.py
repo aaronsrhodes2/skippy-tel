@@ -1099,23 +1099,30 @@ def _chat_with(mentat, email=ADMIN):
     return {t["name"] for t in skippy.tools}, skippy.run_tool
 
 
-def _home_with_mentat(client, answer):
-    """Pair skippy-pc, report Mentat + Qwen up, and run a fake reporter that
-    answers physics jobs with `answer(question)`."""
-    import threading, time
-    token = _pair(client)
-    report = {**json.loads(json.dumps(REPORT)), "mentat_home": True}
-    client.post("/home/report", json=report, headers={"Authorization": f"Bearer {token}"})
-    stop = threading.Event()
+class AskMentat:
+    """skippy-core's Mentat as the chat sees it (mentat_client.Mentat.ask_mentat): `answer(question)` gives
+    {"result": ...} or {"error": ...}; every ask is kept in `asked` (question, given, trace)."""
 
-    def reporter():
-        while not stop.is_set():
-            for job in client.get("/home/jobs", headers={"Authorization": f"Bearer {token}"}).get_json()["jobs"]:
-                client.post(f"/home/jobs/{job['id']}", json=answer(job["question"]),
-                            headers={"Authorization": f"Bearer {token}"})
-            time.sleep(0.01)
-    threading.Thread(target=reporter, daemon=True).start()
-    return stop
+    def __init__(self, answer, up=True):
+        self.answer, self.up, self.asked = answer, up, []
+
+    def ready(self):
+        return self.up
+
+    def ask_mentat(self, question, given=None, trace=""):
+        self.asked.append({"question": question, **({"given": given} if given else {}), "trace": trace})
+        out = self.answer(question) if not given else self.answer((question, given))
+        if "result" not in out:
+            raise RuntimeError(out.get("error") or "Mentat failed")
+        return out["result"]
+
+
+def _home_with_mentat(client, answer):
+    """Put a fake skippy-core Mentat behind the app (the chat asks it straight, over MENTAT_URL) answering with
+    `answer(question)`. Returns something with .set(), as the old fake reporter did."""
+    import threading
+    client.application.extensions["mentat"] = AskMentat(lambda q: answer(q if isinstance(q, str) else q[0]))
+    return threading.Event()
 
 
 def test_physics_goes_to_mentat_with_qwen_at_home():

@@ -2,7 +2,7 @@
 
 v1 is sigma-ground (github.com/aaronsrhodes2/sigma-ground, pinned in
 core/cd/deploy.json's pins as SIGMA_GROUND_REF):
-  • Mentat playground — the physics tools, live, through the skippy-mentat service
+  • Mentat playground — the physics tools, live, through skippy-core's Mentat (its Funnel)
   • Weapon vs. Armor — sigma-ground's game: its own solver runs on Mentat (mentat/wva.py),
     the page only draws the fight (listed under Browser Games, play.py; its URL stays here)
   • Radiance — sigma-ground's WebGL viewer + its recorded simulations, served as-is

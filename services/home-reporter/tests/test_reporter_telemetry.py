@@ -270,7 +270,6 @@ def test_the_report_carries_flask_apis_site_summary(monkeypatch):
     monkeypatch.setattr(reporter, "fetch", fake_fetch)
     monkeypatch.setattr(reporter, "BRIDGE", "")
     monkeypatch.setattr(reporter, "MUSIC", "")
-    monkeypatch.setattr(reporter, "MENTAT", "")
     monkeypatch.setattr(reporter, "MAC", "")
     assert reporter.gather()["site_activity"] == summary
     assert f"{reporter.API}/telemetry/site_summary" in asked
