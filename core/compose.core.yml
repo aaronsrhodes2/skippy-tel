@@ -107,10 +107,13 @@ services:
       - MENTAT_RATE_PER_MIN=600
       - MENTAT_INSTANCE=home
       - MENTAT_RESEARCH_DIR=/research
+      - SIGMA_DATASETS=/datasets   # read-only data: the DE440 kernel (jpl/) and our sealed forecast table (forecast/); sigma_ground/field/datasets.py reads this
     ports:
       - "127.0.0.1:7350:8080"
     volumes:
       - ${CORE_STATE:-/var/lib/skippy-core}/mentat-research:/research   # <YYYY-MM>.jsonl, appended forever (mentat/research.py)
+      - ${CORE_DATASETS:-/srv/datasets}/jpl:/datasets/jpl:ro            # DE440s kernel + Horizons copies, mirrored from the PC (D:/datasets, scp or rsync over the LAN); read-only
+      - ${CORE_DATASETS:-/srv/datasets}/forecast:/datasets/forecast:ro  # the sealed N-body forecast table body_position serves for future dates (scripts/make_forecast_table.py); read-only
     command: gunicorn --bind 0.0.0.0:8080 --workers 1 --threads 4 --timeout 120 app:app
     depends_on:
       - ollama
