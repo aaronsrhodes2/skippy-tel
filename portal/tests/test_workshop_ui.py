@@ -279,6 +279,7 @@ function snap() {
 }
 
 (async () => {
+  globalThis.requestAnimationFrame = (fn) => fakeSetTimeout(fn, 0);     // the transcript defers its scroll one frame (templates/_workshop.html scrollNow)
   if (input.withWindow) globalThis.window = {dispatchEvent() {}};     // inside the one chat (templates/_chat.html): window.SkippyAgent exists
   new Function("document", "localStorage", "crypto", "fetch", "setTimeout", "clearTimeout", "setInterval", "confirm",
                "AbortController", "Date", "location", "Bridge", "SkippyVoice", "SkippyMd", input.script)(
