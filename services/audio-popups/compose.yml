@@ -14,7 +14,7 @@ services:
       IDLE_UNLOAD_S: "300"                 # the card goes back to the voices and Ollama five minutes after the last job
     volumes:
       - weights:/weights:ro
-    mem_limit: 4g                          # the Docker VM has 8 GB for the whole stack: a load that overshoots dies, the VM doesn't
+    mem_limit: 6g                          # the Docker VM has 16 GB for the whole stack (2026-10-25): a load that overshoots dies, the VM doesn't
     shm_size: "1gb"
     deploy:
       resources:

@@ -4,7 +4,8 @@ numpy==1.26.4
 stable-audio-tools==0.0.20
 # its inference path still imports pytorch_lightning (the version its own "train" extra pins)
 pytorch_lightning==2.5.5
-demucs==4.0.1
+# 4.1.0 loads its checkpoints with weights_only=False itself (4.0.1 breaks on torch >= 2.6); they are Meta's, sha-checked
+demucs==4.1.0
 transformers==4.57.1
 accelerate==1.10.1
 onnxruntime==1.22.1
