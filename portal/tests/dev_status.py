@@ -19,7 +19,8 @@ import app as portal  # noqa: E402
 def main(port: int = 8765) -> None:
     app = portal.create_app(dict(SETTINGS), vm=FakeVm(), skippy=FakeSkippy())
     home, starter, status, logs = app.extensions["home"], app.extensions["starter"], app.extensions["status"], app.extensions["logs"]
-    home.accept({"capabilities": {"workshop": {"ready": True}, "make_image": True, "music_gate": True, "house": False},
+    home.accept({"capabilities": {"workshop": {"ready": True}, "make_image": {"ready": True, "loaded": True}, "make_image_hq": {"ready": True, "loaded": False, "box": "core"},
+                                 "image_to_3d": {"ready": True, "loaded": False}, "music_gate": {"ready": True}, "house": {"ready": False}},
                  "services": [{"name": "Skippy AI", "available": True}, {"name": "UPS Monitor", "available": False, "planned": True}],
                  "doctor": {"voice-gate": {"ok": True, "reachable": True, "state": "ready"}, "music-gate": {"ok": True, "reachable": True, "state": "busy", "jobs": 2},
                             "video-gate": {"ok": False, "reachable": True, "state": "hung", "jobs": 1, "stuck_s": 300, "why": "hung"},

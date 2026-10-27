@@ -21,6 +21,7 @@
 .map .edge.trunk { stroke-dasharray: 2 7; stroke-linecap: round; }
 .map .edge.ok, .map .lamp.ok { stroke: var(--green); fill: var(--green); }
 .map .edge.degraded, .map .lamp.degraded, .map .lamp.warn { stroke: var(--amber); fill: var(--amber); }
+.map .lamp.call { stroke: #4da3ff; fill: #4da3ff; }
 .map .edge.down, .map .lamp.down, .map .lamp.hung { stroke: var(--red); fill: var(--red); }
 .map .lamp.hung { animation: breathe 0.8s ease-in-out infinite; }
 .map .edge.stale, .map .edge.off, .map .lamp.stale, .map .lamp.off { stroke: var(--muted); fill: var(--muted); }
@@ -48,7 +49,8 @@
 .hsheet .hrow.legend .dot { width: 9px; height: 9px; }
 .hsheet .hrow.legend .dt { flex: none; margin-right: 8px; font-size: .75rem; }
 .hsheet .hrow .dot.ok { background: var(--green); }
-.hsheet .hrow .dot.warn { background: var(--amber); } .hsheet .hrow .dot.degraded { background: var(--amber); }
+.hsheet .hrow .dot.warn { background: var(--amber); }
+.hsheet .hrow .dot.call { background: #4da3ff; }               /* on call: blue */ .hsheet .hrow .dot.degraded { background: var(--amber); }
 .hsheet .hrow .dot.down, .hsheet .hrow .dot.hung { background: var(--red); }
 .hsheet .hrow .dot.hung { animation: breathe 0.8s ease-in-out infinite; } .hsheet .hrow .dot.stale, .hsheet .hrow .dot.off { background: var(--muted); }
 .hsheet .hrow .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

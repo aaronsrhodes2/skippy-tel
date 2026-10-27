@@ -29,7 +29,7 @@ def test_a_fresh_core_report_is_ok_and_its_models_and_containers_get_lamps():
     assert core["state"] == "degraded"                                    # a restarting container
     lamps = {c["name"]: c["lamp"] for c in core["containers"]}
     assert lamps == {"skippycore-mentat-1": "ok", "skippycore-llm-1": "down"}
-    assert {s["name"]: s["lamp"] for s in core["serves"]} == {"chat": "ok", "coder": "degraded", "router": "off", "vision": "off"}   # a slot not loaded is still listed
+    assert {s["name"]: s["lamp"] for s in core["serves"]} == {"chat": "ok", "coder": "degraded", "router": "call", "vision": "call"}   # a slot not loaded is listed, ON CALL (blue)
     assert any("skippycore-llm-1" in p["what"] for p in tree(st)["problems"])
 
 
@@ -222,7 +222,7 @@ def test_every_part_carries_two_dots_reachable_and_ready_and_they_can_disagree()
     dots = {c["name"]: (c["reach"], c["ready"]) for c in core["containers"]}
     assert dots == {"up-healthy": ("ok", "ok"), "up-sick": ("ok", "down"), "up-unknown": ("ok", "off"), "dead": ("down", "off")}
     models = {s["name"]: (s["reach"], s["ready"]) for s in core["serves"]}
-    assert models["chat"] == ("ok", "ok") and models["coder"] == ("ok", "hung") and models["router"] == ("off", "off")        # loaded and hung; not loaded
+    assert models["chat"] == ("ok", "ok") and models["coder"] == ("ok", "hung") and models["router"] == ("ok", "call")        # loaded and hung; not loaded
     doctor = {"voice-gate": {"ok": True, "reachable": True, "state": "ready"}, "mentat-home": {"ok": False, "reachable": True, "state": "not-ready", "why": "no llm"},
               "whisper": {"ok": True, "reachable": True}, "flask-api": {"ok": False, "reachable": False, "why": "no answer (URLError)"}}
     pc = {s["name"]: (s["reach"], s["ready"]) for s in by(tree(status_mod.Status(), home_report={"doctor": doctor}), "skippy-pc")["serves"] if s["name"] in doctor}
@@ -240,3 +240,23 @@ def test_docker_health_is_read_from_the_status_text_when_the_machine_sent_only_t
                                         {"name": "c", "state": "running", "status": "Up 2 days"}, {"name": "d", "state": "running", "health": "healthy"}])
     assert [r["health"] for r in rows] == ["healthy", "unhealthy", "", "healthy"]
     assert [status_mod.container_dots(r) for r in rows] == [("ok", "ok"), ("ok", "down"), ("ok", "off"), ("ok", "ok")]
+
+
+def test_a_tool_that_loads_when_asked_and_is_not_warm_is_on_call_blue_and_a_warm_one_is_green():
+    caps = {"make_image": {"ready": True, "loaded": True}, "make_image_hq": {"ready": True, "loaded": False, "box": "core"},
+            "image_to_3d": {"ready": True, "loaded": False}, "music_gate": {"ready": True}, "make_video": {"ready": False, "loaded": False}}
+    serves = {s["name"]: s for s in by(tree(status_mod.Status(), home_report={"capabilities": caps}), "skippy-pc")["serves"] if s["kind"] == "endpoint"}
+    assert serves["make image"]["lamp"] == "ok" and serves["make image"]["detail"] == "ready"                        # warm: green
+    assert serves["make image hq"]["lamp"] == "call" and serves["make image hq"]["detail"] == "on call: loads when asked"
+    assert (serves["make image hq"]["reach"], serves["make image hq"]["ready"]) == ("ok", "call")
+    assert serves["image to 3d"]["lamp"] == "call" and serves["music gate"]["lamp"] == "ok"                          # always-on: green, never blue
+    assert serves["make video"]["lamp"] == "down" and serves["make video"]["detail"] == "not ready"                  # not even answering: red, not on call
+
+
+def test_a_model_on_call_that_answers_its_test_question_becomes_warm_green():
+    st = status_mod.Status(clock=lambda: 1000.0)
+    st.accept_core({"models": [{"name": "chat", "state": "ready", "jobs": 0}], "doctor": {"ok": True}})
+    probes = {"results": {"vision": {"ok": True, "why": "", "ms": 4000, "at": 1}}, "running": None}
+    serves = {s["name"]: s for s in by(tree(st, probes=probes), "skippy-core")["serves"]}
+    assert serves["router"]["lamp"] == "call"                                                                         # nobody asked it: on call
+    assert serves["vision"]["lamp"] == "ok" and (serves["vision"]["reach"], serves["vision"]["ready"]) == ("ok", "ok")  # asked, answered: warm now

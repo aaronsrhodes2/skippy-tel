@@ -13,7 +13,7 @@ import time
 
 STALE_S = 120                 # the core reporter posts every 30 s; four missed reports is stale
 MAX_ITEMS = 120
-LAMPS = ("ok", "degraded", "down", "stale", "off", "hung")      # hung: a job is running and nothing new has come out of it (PLATINUM §24)
+LAMPS = ("ok", "degraded", "down", "stale", "off", "hung", "call")   # call (blue): on call, a tool that loads when asked and is not warm right now      # hung: a job is running and nothing new has come out of it (PLATINUM §24)
 HUNG_S = 90                                                       # no new words for this long, with a job running
 
 
@@ -162,8 +162,18 @@ class Status:
         pc_state = "ok" if home_online else ("stale" if home_age is not None else "off")
         if home_online and not st.get("docker", True):
             pc_state = "degraded"
-        pc_services = [{"kind": "endpoint", "name": _s(k).replace("_", " "), "lamp": "ok" if v else "down", "reach": "ok" if v else "down", "ready": "ok" if v else "down"}
-                       for k, v in sorted((report.get("capabilities") or {}).items()) if isinstance(v, bool)]
+        pc_services = []
+        for k, v in sorted((report.get("capabilities") or {}).items()):
+            if isinstance(v, bool):
+                v = {"ready": v}
+            if not isinstance(v, dict):
+                continue
+            up = v.get("ready") is True
+            on_call = up and v.get("loaded") is False                  # a service that loads its model when asked, and has not: on call (blue)
+            lamp = "call" if on_call else ("ok" if up else "down")
+            pc_services.append({"kind": "endpoint", "name": _s(k).replace("_", " "), "lamp": lamp,
+                                "detail": "on call: loads when asked" if on_call else ("ready" if up else "not ready"),
+                                "reach": "ok" if up else "down", "ready": "call" if on_call else ("ok" if up else "down")})
         for s in report.get("services") or []:
             if isinstance(s, dict) and s.get("name"):
                 lamp = "ok" if s.get("available") else ("off" if s.get("planned") else "down")
@@ -218,10 +228,12 @@ class Status:
             have = {s["name"] for s in core_serves}
             for name in KNOWN_CORE_MODELS:                 # a slot that is not loaded right now is still a model he can ask
                 if name not in have:
-                    core_serves.append({"kind": "model", "name": name, "lamp": "off", "detail": "not loaded: it loads when asked", "reach": "off", "ready": "off"})
+                    core_serves.append({"kind": "model", "name": name, "lamp": "call", "detail": "on call: loads when asked", "reach": "ok", "ready": "call"})
             for s in core_serves:
                 if s["kind"] == "model":
                     s["probe"] = ((probes or {}).get("results") or {}).get(s["name"])
+                    if s["probe"] and s["probe"]["ok"]:
+                        s["lamp"] = "ok"
                     if s["probe"]:                              # a real question was asked: what it did with it is the truest "ready"
                         s["reach"], s["ready"] = ("ok", "ok") if s["probe"]["ok"] else ("ok", "down")
                     s["asking"] = (probes or {}).get("running") == s["name"]
