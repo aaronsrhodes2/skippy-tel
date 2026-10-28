@@ -53,7 +53,7 @@ ROTATE_TOKENS = int(os.getenv("WORKSHOP_CORE_ROTATE_TOKENS", "100000"))  # the c
                                                                          # for the one tool result that can still arrive. Claude Code's own compaction
                                                                          # is off (DISABLE_AUTO_COMPACT): the coder fails its summary half the time
 CODING_TOOLS = ("Bash", "Read", "Edit", "Write", "Grep", "Glob", "TodoWrite", "Task", "WebFetch")   # Claude Code's built-ins this engine offers
-MAX_SEGMENTS = int(os.getenv("WORKSHOP_CORE_MAX_SEGMENTS", "8"))
+MAX_SEGMENTS = int(os.getenv("WORKSHOP_CORE_MAX_SEGMENTS", "12"))  # raised from 8: complex debugging (solver, generator) needs more segments before hitting the hard cap
 MAX_BUFFER = 16 * 1024 * 1024                                           # one line of Claude Code's output (a big tool result)
 LANE_TOOLS = "Edit|Write|MultiEdit|NotebookEdit|Bash|Read|Glob|Grep"      # (the read tools are here for the walled folders: Lane.deny_read)
 ENGINES_FILE = "engines.json"

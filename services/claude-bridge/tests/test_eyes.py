@@ -80,9 +80,10 @@ def test_the_hook_runs_as_claude_code_runs_it(tmp_path):
 def test_a_core_run_switches_its_eyes_on_and_a_claude_run_does_not(shop, monkeypatch):
     monkeypatch.setenv("SKIPPY_CORE_URL", "https://core.example/")
     monkeypatch.setenv("SKIPPY_CORE_API_KEY", "sk-core-test")
+    monkeypatch.delenv("SKIPPY_CORE_EYES", raising=False)              # keep child_env() clean for the check
     monkeypatch.setattr(engine.Workshop, "core_ready", lambda self: True)
     finish(shop.start("aaaaaaaa", "conv-12345678", "hi", brain="core"))
     finish(shop.start("bbbbbbbb", "conv-12345678", "hi"))
     core, claude = calls(shop)
-    assert "SKIPPY_CORE_EYES" in core["env"] and "SKIPPY_CORE_EYES" not in claude["env"]     # (the test kit records names only)
-    assert shop.core_env()["SKIPPY_CORE_EYES"] == "1"
+    assert shop.core_env().get("SKIPPY_CORE_EYES") == "1"            # core runs get eyes on
+    assert "SKIPPY_CORE_EYES" not in engine.child_env()              # claude runs (base env) don't

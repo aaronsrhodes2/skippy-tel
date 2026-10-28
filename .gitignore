@@ -41,3 +41,6 @@ build/
 
 # Build-context vendor tree laid out by core/cd/cd.py vendor
 .vendor/
+
+# Claude Code agent scratch notes (survives segment rotations, never committed)
+.skippy-notes

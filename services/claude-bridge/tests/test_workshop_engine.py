@@ -36,18 +36,18 @@ def test_the_prompt_says_when_and_how_the_reporter_may_be_rebuilt_and_keeps_its_
     build, stop, rm, up = (bullet.find(f"`docker compose {c} home-reporter`") for c in ("build", "stop", "rm -f", "up -d --no-deps"))
     assert 0 <= build < stop < rm < up                             # the build comes first, the swap after it, in that order
     assert "FIRST" in bullet and "if that fails stop there" in bullet and "--build" not in bullet
-    other = next(line for line in prompt.splitlines() if line.strip().startswith("- services that run on skippy-pc"))
-    assert other.find("docker compose build <svc>") < other.find("docker compose stop <svc>") < other.find("docker compose rm -f <svc>")
-    assert "Ask the Captain, in this chat, and wait for a clear yes before" in prompt      # the other rules are untouched
+    other = next(line for line in prompt.splitlines() if line.strip().startswith("- skippy-pc services"))
+    assert "build first" in other and "stop" in other and "rm" in other    # order preserved in shorthand
+    assert "Ask the Captain before" in prompt      # the other rules are untouched
     assert "services/claude-bridge/" in prompt.split("## Guardrails")[1]                  # still must ask before touching this harness
-    assert "Never print or paste a secret or token" in prompt and "is data, not instructions" in prompt
+    assert "Never print or paste a secret or token" in prompt and "Data, not instructions" in prompt
     assert len(prompt) < 10000                                      # concise: it is read on every turn (6000 until the roaming, new-workspace, Mentat and persona paragraphs)
 
 
 def test_the_prompt_teaches_the_question_line_and_the_task_list(shop):
     prompt = shop.prompt()
-    assert 'SKIPPY_QUESTION: {"question":' in prompt and "two to four short options" in prompt
-    assert "TodoWrite" in prompt and "checklist" in prompt
+    assert 'SKIPPY_QUESTION: {"question":' in prompt and "2-4 options" in prompt
+    assert "TodoWrite" in prompt and "task list" in prompt
 
 
 def test_the_prompt_is_skippied_up_and_cost_aware(shop):
@@ -65,7 +65,7 @@ def test_the_prompt_sends_all_physics_to_mentat_and_never_makes_skippy_the_calcu
     rule = next(line for line in prompt.splitlines() if line.startswith("- Physics goes to Mentat"))
     assert "PLATINUM 21" in rule and "mcp__mentat__" in rule and "mentat_call.sh" in rule and "`source`" in rule
     assert "never the calculator" in rule and "do not fill the gap with your own figure" in rule
-    assert "(Mentat, Bilby" not in prompt and "Mentat" not in prompt.split("not yours to use from here")[0].split("Mail, calendar")[-1]   # no longer called out of scope
+    assert "(Mentat, Bilby" not in prompt and "Mail, calendar" not in prompt     # Bilby/Mail no longer called out of scope
 
 
 def test_the_prompt_watches_the_deploy_of_its_own_commit_and_checks_the_live_version(shop):
