@@ -29,7 +29,6 @@ from app.routes.telemetry            import bp as telemetry_bp, init_db as telem
 from app.routes.status               import bp as status_bp
 from app.routes.explain              import bp as explain_bp
 from app.routes.keywords             import bp as keywords_bp
-from app.routes.tts                  import bp as tts_bp
 from app.routes.portal               import bp as portal_bp
 from app.routes.geo                  import bp as geo_bp
 
@@ -112,7 +111,6 @@ def create_app() -> Flask:
     app.register_blueprint(status_bp)
     app.register_blueprint(explain_bp)
     app.register_blueprint(keywords_bp)
-    app.register_blueprint(tts_bp)
     app.register_blueprint(portal_bp)
     app.register_blueprint(geo_bp)
     return app

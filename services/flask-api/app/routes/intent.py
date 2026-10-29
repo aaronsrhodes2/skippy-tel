@@ -40,7 +40,6 @@ from flask import Blueprint, Response, request, stream_with_context
 from app.clients import ollama, gemini
 from app.config  import settings
 from app import keyword_memory as km
-from app import tts_settings
 from app import conversation_store as cs
 from app.narration import get_narration
 from app.version import envelope, error, scrub, SPEC_VERSION
@@ -123,9 +122,6 @@ def _try_music_intent(text: str) -> Optional[dict]:
                 "narration":     get_narration("bilby", title or None),
                 "music_session": session,
             }
-            vid = _tier_voice_id("bilby")
-            if vid:
-                resp["voice_id"] = vid
             return resp
         elif r.status_code == 404:
             reply = "♫ Bilby: no tracks available. Is the music library mounted at /music?"
@@ -247,35 +243,16 @@ _TTS_ADJUST_RE = re.compile(r'\[TTS_ADJUST:\s*(\{[^}]+\})\s*\]', re.IGNORECASE |
 
 
 def _extract_and_apply_tts_adjust(text: str) -> str:
-    """Strip [TTS_ADJUST: {...}] annotations, apply settings, return clean text."""
+    """Strip [TTS_ADJUST: {...}] annotations — settings are no longer stored locally."""
     import logging as _log
     _logger = _log.getLogger(__name__)
     for m in _TTS_ADJUST_RE.finditer(text):
         try:
             data = json.loads(m.group(1))
-            tts_settings.update(data)
-            _logger.info("intent: TTS_ADJUST applied: %s", data)
+            _logger.info("intent: TTS_ADJUST annotation found (ignored): %s", data)
         except Exception as exc:
             _logger.warning("intent: TTS_ADJUST parse failed: %s", exc)
     return _TTS_ADJUST_RE.sub("", text).strip()
-
-
-# ── Voice routing ─────────────────────────────────────────────────────────
-# Each tier maps to a persona-specific ElevenLabs voice ID.
-# Empty string = fall back to Skippy's default voice.
-def _tier_voice_id(tier_id: str) -> str | None:
-    """Return the ElevenLabs voice_id for this tier, or None to use Skippy's default."""
-    mapping = {
-        "nagatha":         settings.nagatha_voice_id,
-        "bilby":           settings.bilby_voice_id,
-        # "local" tier = default Ollama / Skippy response.
-        # grumpy_voice_id is returned for all local replies so the phone
-        # can use it when "grumpy mode" (ElevenLabs TTS) is enabled.
-        # Android-TTS mode ignores the voice_id entirely — no cost for non-grumpy.
-        "local":           settings.grumpy_voice_id,
-    }
-    vid = mapping.get(tier_id, "")
-    return vid if vid else None
 
 
 # ── Image sentinel (stub) ─────────────────────────────────────────────────
@@ -408,10 +385,9 @@ def _wants_sse() -> bool:
 
 # ── TTS summarizer ────────────────────────────────────────────────────────
 #
-# ElevenLabs hangs or errors on long inputs. 475 chars is the safe ceiling:
-#   - Well under ElevenLabs' practical chunking threshold
-#   - Long enough for 2-3 Skippy sentences
-#   - Short enough to start streaming in < 400ms
+# Local TTS (Kokoro/F5) can also choke on long inputs. 475 chars is the
+# safe ceiling: long enough for 2-3 Skippy sentences, short enough to
+# start streaming in < 400ms.
 #
 # If the full reply exceeds this, we run it through Ollama (free, local)
 # to get a spoken summary. The full text still goes to `reply` for the feed;
@@ -435,7 +411,7 @@ def _truncate_at_sentence(text: str, max_chars: int) -> str:
 
 def _tts_summarize(text: str) -> str:
     """
-    Compress `text` to a speakable ≤475-char summary for ElevenLabs.
+    Compress `text` to a speakable ≤475-char summary for TTS.
 
     Uses Ollama (local, free) — no cost regardless of tier. Falls back to
     sentence-boundary truncation if Ollama is unavailable.
@@ -549,7 +525,7 @@ def _single_shot(text: str, tier: Optional[Tier], source: str = "phone"):
         clean, _ = _extract_image_prompt(full)
 
         # TTS speak field: compress to ≤475 chars via Ollama if the reply is long.
-        # `reply` stays full (feed shows everything); `speak` is what ElevenLabs
+        # `reply` stays full (feed shows everything); `speak` is what the TTS
         # actually reads. For short replies they're identical.
         spoken = _tts_summarize(clean)
 
@@ -560,9 +536,6 @@ def _single_shot(text: str, tier: Optional[Tier], source: str = "phone"):
             "tier":      tier_id,
             "narration": narration_text,
         }
-        voice_id = _tier_voice_id(tier_id)
-        if voice_id:
-            resp["voice_id"] = voice_id
         if learned:
             resp["learned_keywords"] = learned
 
@@ -613,9 +586,6 @@ def _sse(text: str, tier: Optional[Tier], source: str = "phone") -> Iterator[str
         # TTS speak field: compress to ≤475 chars if the response is long.
         spoken = _tts_summarize(complete)
         done_evt: dict = {"type": "done", "reply": complete, "speak": spoken, "tier": tier_id}
-        voice_id = _tier_voice_id(tier_id)
-        if voice_id:
-            done_evt["voice_id"] = voice_id
         if learned:
             done_evt["learned_keywords"] = learned
         # Record the assistant reply for the portal
