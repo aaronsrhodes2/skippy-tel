@@ -1,8 +1,8 @@
 # Skippy at home (the Alexa replacement)
 
 An always-on listener for a room. It hears through a microphone, wakes on **"Skippy"** (a small openWakeWord model trained on his name, `wakeword/`; until
-it is trained, the home Whisper hears the name), thinks with a small fast model in Skippy's character, and answers in Skippy's own voice (ElevenLabs through
-the voice gate). First home: skippy-pc (`ear.py`); every other room through the Wyoming hub (`hub.py`, below).
+it is trained, the home Whisper hears the name), thinks with a small fast model in Skippy's character, and answers in Skippy's own voice (local TTS via
+the voice gate: Kokoro + F5-TTS). First home: skippy-pc (`ear.py`); every other room through the Wyoming hub (`hub.py`, below).
 
     python -m venv .venv && .venv/Scripts/pip install -r requirements.txt     # once
     ./run.sh --devices        # which microphone and speaker numbers

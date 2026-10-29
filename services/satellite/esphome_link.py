@@ -22,7 +22,7 @@ def _voice_seconds(voice) -> float:
     if voice is None:
         return 0.0
     if voice[0] == "mp3":
-        return len(voice[1]) * 8 / 64000                           # ElevenLabs' mp3 is 64 to 128 kbps: assume the longer
+        return len(voice[1]) * 8 / 64000                           # mp3: assume 64 kbps (local voices are similar)
     return len(voice[1]) / (2 * voice[2])
 
 

@@ -1,7 +1,7 @@
 """The home listener's way to ears and mouth: the voice gate (services/voice-gate) on this same PC, with a pass signed from the home token.
 
-The gate does the work already built for the portal's chats: Whisper for speech to text, Skippy's ElevenLabs voice (polished with RNNoise, with a daily
-character budget and a cache of what was said before) for text to speech, and the Ollama summary that turns a long reply into a few spoken sentences.
+The gate does the work already built for the portal's chats: Whisper for speech to text, Skippy's local voice (Kokoro + F5-TTS via tts-studio,
+with a cache of what was said before) for text to speech, and the Ollama summary that turns a long reply into a few spoken sentences.
 Passes are the same scheme as portal/voice.py (label "voice-gate-v1"); services/satellite/tests pin this against services/voice-gate/gate.py.
 """
 from __future__ import annotations

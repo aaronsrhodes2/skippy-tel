@@ -2,7 +2,7 @@
 
     microphone -> the "Skippy" spotter (wakeword.py: a small model trained on his name; without one, each utterance to Whisper and only speech
     that starts with "Skippy" counts) -> the command to Whisper (the voice gate)
-    -> the quick Skippy brain (Anthropic + timers) -> Skippy's voice (the gate: ElevenLabs, RNNoise polish, a daily budget) -> the speaker
+    -> the quick Skippy brain (Anthropic + timers) -> Skippy's voice (the gate: Kokoro + F5-TTS, local) -> the speaker
 
 Nothing is recorded or kept: an utterance lives in memory until it has been transcribed, and only the words after "Skippy" are ever logged.
 Like Alexa it has a follow-up window: after an answer it keeps listening for a few seconds without the wake word. It runs as a plain Python process

@@ -7,7 +7,7 @@ Two kinds of box, both dialled by the hub (the same direction Home Assistant use
 * **a Wyoming satellite** (`host[:port]`, port 10700): wyoming-satellite on a Raspberry Pi, for example. It either heard "Skippy" itself
   (its own openWakeWord with our model; start_stage `asr`) or streams everything (start_stage `wake`) and the hub listens for the name.
 
-    box  --(audio)-->  hub: the "Skippy" spotter (wakeword.py), Vad, the voice gate's Whisper, the quick brain, Skippy's ElevenLabs voice
+    box  --(audio)-->  hub: the "Skippy" spotter (wakeword.py), Vad, the voice gate's Whisper, the quick brain, Skippy's local voice (Kokoro + F5-TTS)
          <--(what it heard, Skippy's voice, the music)--
 
 Nothing is recorded or kept, as in ear.py. Timers are per room and are announced in the room that set them; each room has its own short
@@ -235,7 +235,7 @@ class Room:
         self.mode, self.deadline = mode, self.t + window_ms
 
     async def say(self, text: str, follow_up: bool = False, announce: bool = False) -> None:
-        """Skippy's voice in this room: the gate's ElevenLabs (a summary when long), else the machine's own voice. Waits until it has played."""
+        """Skippy's voice in this room: the gate's local TTS (a summary when long), else the machine's own voice. Waits until it has played."""
         said = text
         if len(text) > self.summarize_over:
             try:
