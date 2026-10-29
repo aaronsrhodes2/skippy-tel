@@ -94,8 +94,7 @@ def _tier_keys() -> dict:
     """Key presence only — no API calls, no cost."""
     from app.config import settings  # noqa: PLC0415
     return {
-        "nagatha":    bool(settings.gemini_api_key),
-        "elevenlabs": bool(settings.elevenlabs_api_key),
+        "nagatha": bool(settings.gemini_api_key),
     }
 
 

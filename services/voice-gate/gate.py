@@ -5,23 +5,20 @@ the portal's chats (/chat and the personal assistant on /me) can hear a micropho
 without the device joining the tailnet. The portal renders the page and signs short-lived passes; this gate shows the
 internet exactly two things:
 
-    GET  /health                     {"ok", "ready", "whisper", "tts"}                 (no pass: the reporter's probe)
+    GET  /health                     {"ok", "ready", "whisper", "tts", "voices"}           (no pass: the reporter's probe)
     POST /t/<pass>/stt[?lang=xx]     body = one recording (webm/ogg/mp4/wav, at most 4 MB) -> {"text", "lang"}   (Whisper, at home)
     POST /t/<pass>/tts               {"text", "voice"?} (at most 500 chars) -> audio/mpeg in the pass's voice (or "stock"): see VOICES
-    POST /t/<pass>/summary           {"text"} (at most 8000 chars) -> {"text"}: what a person would SAY aloud about it, 2 to 4 short
+    POST /t/<pass>/summary           {"text"} (at most 8000 chars) -> {"text}: what a person would SAY aloud about it, 2 to 4 short
                                      sentences (the home Ollama writes it); any pass. A long reply is spoken as this, not word for word
 
 Passes work like the music and video gates', with their own label and signed text, so none of the three opens another. A pass
 names the one voice it may speak in (the portal decides who gets which; this gate only checks the signature):
 
     stock       Kokoro-82M, a stock voice, rendered here at home by tts-studio. Everyone the portal lets chat (the Public mode).
-    skippy      the cloned Skippy voice, F5-TTS zero-shot, rendered here at home by tts-studio. The Captain's (the Private mode).
-    elevenlabs  the cloud Skippy voice, ElevenLabs via flask-api (daily character budget, cache, delivery tag, RNNoise polish).
-                The Captain's, in the Auto mode.
+    skippy      the cloned Skippy voice, F5-TTS zero-shot, rendered here at home by tts-studio. The Captain (the Private mode).
 
-Any voice pass may also ask for "stock"; nothing else crosses over. The cloned voices are for personal use only, so no pass the
-portal gives a guest can reach them. Older passes still work: "listen" hears only (/stt, /summary), "speak" is an elevenlabs pass.
-ElevenLabs' key stays in flask-api; this process never holds it.
+Any voice pass may also ask for "stock". The cloned voices are for personal use only, so no pass the portal gives a guest
+can reach them.
 """
 from __future__ import annotations
 
@@ -53,22 +50,6 @@ AUDIO_TYPES = {"audio/webm": ".webm", "audio/ogg": ".ogg", "audio/mp4": ".m4a", 
 MAX_AUDIO = 4 * 1024 * 1024
 MAX_TEXT = 500
 MAX_SUMMARY_IN = 8000
-# Skippy's cloned voice is rough and noisy by nature (measured: the harmonic-to-noise ratio is about 3 dB, the same as in the recording it was
-# cloned from; clean speech is 15+), and in the pauses its background sits near -36 dBFS. A GATE on the pauses was tried first and made it
-# worse: the hiss under the voice stood out more when the gate opened (the "flare", 16 dB raw, 34 to 40 dB gated). RNNoise, a neural
-# denoiser run by ffmpeg's arnndn, cleans the voice itself, so nothing pumps: pauses -52 dBFS, flare 17 dB, hiss during speech down
-# 3 to 10 dB. (Not for [softly]: RNNoise took its quietest word endings for noise and dipped them out; [whispers] is fine.) The model (bd.rnnn, GregorR/rnnoise-models) is mounted at /models, not kept in the repo. Without it: only the clean-up EQ.
-# A touch of low warmth and a softer top end give the close, dry "in the room" feel. VOICE_FX=off hears the voice raw.
-FX_MODEL = "/models/bd.rnnn"
-FX_TAIL = ",equalizer=f=140:t=h:width=140:g=2.5,equalizer=f=9500:t=h:width=2000:g=-3"
-
-
-def fx_chain_for(model: str = FX_MODEL, passes: int = 1, exists=os.path.exists) -> str:
-    """The polish chain: rumble out, RNNoise (once or twice) when its model is there, then the warmth. No gate, no compressor, no
-    loudness normaliser: each of them lifted or exposed the noise in testing."""
-    if model and exists(model):
-        return "highpass=f=70," + ",".join([f"arnndn=m={model}"] * max(1, min(2, passes))) + FX_TAIL
-    return "highpass=f=70" + FX_TAIL
 
 
 SUMMARY_PROMPT = (
@@ -88,19 +69,18 @@ def gate_key(home_token: str) -> bytes:
     return hmac.new(hashed.encode(), b"voice-gate-v1", hashlib.sha256).digest()
 
 
-VOICES = ("stock", "skippy", "elevenlabs")
-LOCAL_VOICES = ("stock", "skippy")                     # tts-studio's; elevenlabs is flask-api's
-SCOPES = ("speak", "listen") + VOICES
+VOICES = ("stock", "skippy")
+SCOPES = ("listen",) + VOICES
 
 
 def sign(key: bytes, exp: int, scope: str = "listen") -> str:
-    """scope: "listen", "speak" (the older elevenlabs pass) or a voice name. Must match portal/voice.py sign()."""
-    text = f"voice-speak:{exp}" if scope == "speak" else f"voice-tts-{scope}:{exp}" if scope in VOICES else f"voice:{exp}"
+    """scope: "listen" or a voice name. Must match portal/voice.py sign()."""
+    text = f"voice-tts-{scope}:{exp}" if scope in VOICES else f"voice:{exp}"
     return f"{exp}.{hmac.new(key, text.encode(), hashlib.sha256).hexdigest()[:32]}"
 
 
 def valid(key: bytes, token: str, now: float) -> str | None:
-    """The pass's scope ("listen", "speak" or a voice name), or None when it isn't a good pass."""
+    """The pass's scope ("listen" or a voice name), or None when it isn't a good pass."""
     m = TOKEN_RE.fullmatch(token or "")
     if not m or not key:
         return None
@@ -114,8 +94,8 @@ def valid(key: bytes, token: str, now: float) -> str | None:
 
 
 def voice_of(scope: str | None) -> str | None:
-    """The voice a pass may speak in: None for a listen pass, elevenlabs for the older speak pass."""
-    return "elevenlabs" if scope == "speak" else scope if scope in VOICES else None
+    """The voice a pass may speak in: None for a listen pass."""
+    return scope if scope in VOICES else None
 
 
 def allowed(scope: str | None, wanted: str | None) -> str | None:
@@ -129,52 +109,14 @@ def allowed(scope: str | None, wanted: str | None) -> str | None:
 
 
 class Voice:
-    """What Skippy's real voice costs, and keeps it cheap: a DAILY CHARACTER BUDGET (ElevenLabs bills per character; this key cannot read
-    its own subscription, so the gate counts what it sends) and a CACHE of what was already said (the same words never cost twice).
-    Over budget, /tts answers 429 and the page speaks with the device's own free voice instead; tomorrow it is back. state_dir="" keeps
-    it all in memory (tests); `daily` 0 means no limit."""
+    """A cache of what was already said (the same words never cost twice to render).
+    state_dir="" keeps it all in memory (tests); otherwise files in the cache directory."""
 
-    def __init__(self, state_dir: str, daily: int, clock, cache_keep: int = 300):
-        self.dir, self.daily, self.clock, self.keep = state_dir, int(daily), clock, cache_keep
-        self._lock, self._chars, self._day, self._mem = threading.Lock(), 0, self._today(), {}
+    def __init__(self, state_dir: str, clock, cache_keep: int = 300):
+        self.dir, self.clock, self.keep = state_dir, clock, cache_keep
+        self._lock, self._mem = threading.Lock(), {}
         if state_dir:
             pathlib.Path(state_dir, "tts-cache").mkdir(parents=True, exist_ok=True)
-            try:
-                d = json.loads(pathlib.Path(state_dir, "tts-usage.json").read_text())
-                if d.get("day") == self._day:
-                    self._chars = int(d.get("chars", 0))
-            except (OSError, ValueError):
-                pass
-
-    def _today(self) -> str:
-        return time.strftime("%Y-%m-%d", time.gmtime(self.clock()))
-
-    def _roll(self):
-        if self._today() != self._day:
-            self._day, self._chars = self._today(), 0
-
-    def left(self) -> int | None:
-        with self._lock:
-            self._roll()
-            return None if not self.daily else max(0, self.daily - self._chars)
-
-    def spend(self, n: int) -> None:
-        with self._lock:
-            self._roll()
-            self._chars += n
-            if self.dir:
-                try:
-                    pathlib.Path(self.dir, "tts-usage.json").write_text(json.dumps({"day": self._day, "chars": self._chars}))
-                except OSError:
-                    pass
-
-    def used(self) -> int:
-        with self._lock:
-            self._roll()
-            return self._chars
-
-    def _path(self, text: str) -> pathlib.Path:
-        return pathlib.Path(self.dir, "tts-cache", hashlib.sha256(text.encode()).hexdigest()[:32] + ".mp3")
 
     def cached(self, text: str) -> bytes | None:
         if not self.dir:
@@ -199,17 +141,8 @@ class Voice:
         except OSError:
             pass
 
-
-def polish(audio: bytes, chain: str, run=subprocess.run, timeout: float = 25) -> bytes:
-    """The voice through ffmpeg's chain (mp3 in, mp3 out). Anything that goes wrong returns the raw audio: a plain voice beats no voice."""
-    if not chain:
-        return audio
-    try:
-        p = run(["ffmpeg", "-v", "error", "-i", "pipe:0", "-af", chain, "-f", "mp3", "-b:a", "192k", "pipe:1"], input=audio,
-                capture_output=True, timeout=timeout)
-    except (OSError, subprocess.SubprocessError):
-        return audio
-    return p.stdout if p.returncode == 0 and len(p.stdout) > 1000 else audio
+    def _path(self, text: str) -> pathlib.Path:
+        return pathlib.Path(self.dir, "tts-cache", hashlib.sha256(text.encode()).hexdigest()[:32] + ".mp3")
 
 
 def spoken(text: str) -> str:
@@ -224,14 +157,15 @@ def spoken(text: str) -> str:
     return t.strip()
 
 
-def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slots: int = 3,
-               post=requests.post, get=requests.get, ollama_url: str = "", summary_model: str = "qwen2.5:7b", fx_chain: str = "", polisher=polish, style: str = "",
-               state_dir: str = "", daily_chars: int = 0, studio_url: str = "") -> Flask:
+def create_app(key: bytes, whisper_url: str, studio_url: str, clock=time.time,
+               slots: int = 3, post=requests.post, get=requests.get,
+               ollama_url: str = "", summary_model: str = "qwen2.5:7b",
+               state_dir: str = "") -> Flask:
     app = Flask(__name__, static_folder=None)
     app.url_map.merge_slashes = False
     app.config["MAX_CONTENT_LENGTH"] = MAX_AUDIO + 4096
     busy = threading.BoundedSemaphore(slots)          # the GPU is shared with everything else at home: a few at a time
-    voice = Voice(state_dir, daily_chars, clock)
+    voice = Voice(state_dir, clock)
 
     def err(code: int) -> Response:
         return Response(json.dumps({"error": MESSAGES.get(code, "request failed")}), status=code,
@@ -281,13 +215,13 @@ def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slot
 
     def studio_voices() -> dict:
         """Which local voices can speak right now, from tts-studio's own /health."""
-        out = dict.fromkeys(LOCAL_VOICES, False)
+        out = dict.fromkeys(VOICES, False)
         if studio_url:
             try:
                 r = get(f"{studio_url}/health", timeout=3)
                 got = r.json().get("voices") if r.status_code == 200 else None
                 if isinstance(got, dict):
-                    out = {v: got.get(v) is True for v in LOCAL_VOICES}
+                    out = {v: got.get(v) is True for v in VOICES}
             except (requests.RequestException, ValueError, AttributeError):
                 pass
         return out
@@ -307,10 +241,10 @@ def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slot
 
     @app.get("/health")
     def health():
-        w, t = probe(f"{whisper_url}/health"), probe(f"{tts_url}/tts/health")
+        w = probe(f"{whisper_url}/health")
         deps = {"whisper": {"ready": bool(w), "detail": "" if w else "Whisper (speech to text, at home) isn't answering"}}
-        rep = ready_state.report(ready=True, deps=deps, ok=True, whisper=w, tts=t, voices=dict(studio_voices(), elevenlabs=t),
-                                 voice_chars_today=voice.used(), voice_budget=daily_chars)
+        rep = ready_state.report(ready=True, deps=deps, ok=True, whisper=w, voices=dict(studio_voices()),
+                                 tts=bool(studio_url))
         return Response(json.dumps(rep), mimetype="application/json", headers={"Cache-Control": "no-store"})
 
     @app.post("/t/<token>/stt")
@@ -359,37 +293,8 @@ def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slot
             return err(400)
         if len(text) > MAX_TEXT:
             return err(413)
-        if which in LOCAL_VOICES:
-            out = local(which, text.strip())
-            if out.status_code < 400 or which != "skippy":
-                return out
-            # The local Skippy couldn't (tts-studio down, loading or busy): his cloud Skippy speaks instead, with its budget. Only
-            # for a skippy pass, which is the Captain's; a stock voice never falls back to a cloned one.
-        spoken_text = text.strip()
-        if style and not spoken_text.startswith("["):             # the delivery tag (ElevenLabs v3 audio tag), unless the text brings its own
-            spoken_text = f"{style} {spoken_text}"
-        said = voice.cached(spoken_text)
-        if said is not None:                                      # said before: free
-            return Response(said, mimetype="audio/mpeg", headers={"Cache-Control": "no-store", "X-Voice-Cache": "hit", "X-Voice": "elevenlabs"})
-        left = voice.left()
-        if left is not None and len(spoken_text) > left:          # today's budget is spent: the page uses the device's own voice
-            return Response(json.dumps({"error": "Skippy's voice has used today's budget", "budget": True}), status=429,
-                            mimetype="application/json", headers={"Cache-Control": "no-store", "Retry-After": "3600"})
-        if not busy.acquire(blocking=False):
-            return err(429)
-        try:
-            r = get(f"{tts_url}/tts/stream", params={"text": spoken_text}, timeout=60)
-            if r.status_code != 200 or not r.content:
-                return err(503)
-            audio = r.content
-        except requests.RequestException:
-            return err(503)
-        finally:
-            busy.release()
-        voice.spend(len(spoken_text))
-        audio = polisher(audio, fx_chain)
-        voice.remember(spoken_text, audio)
-        return Response(audio, mimetype="audio/mpeg", headers={"Cache-Control": "no-store", "X-Voice": "elevenlabs"})
+        out = local(which, text.strip())
+        return out
 
     def local(which: str, text: str) -> Response:
         """A local voice from tts-studio: no budget (it costs nothing), the same cache, and streamed through as it renders, so the
@@ -418,7 +323,6 @@ def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slot
                 for piece in r.iter_content(chunk_size=None):
                     if piece:
                         got.append(piece)
-                        yield piece
                 whole = True
             except requests.RequestException:
                 log.warning("voice-gate: tts-studio broke off a %s line", which)
@@ -426,6 +330,7 @@ def create_app(key: bytes, whisper_url: str, tts_url: str, clock=time.time, slot
                 r.close()
                 if whole and got:
                     voice.remember(key_text, b"".join(got))
+            yield from got
 
         resp = Response(relay(), mimetype="audio/mpeg", headers={"Cache-Control": "no-store", "X-Voice": which})
         resp.call_on_close(busy.release)
@@ -469,11 +374,7 @@ def from_env() -> Flask:
     if not token:
         logging.warning("voice-gate: SKIPPY_HOME_TOKEN isn't set; every pass will be refused")
     return create_app(gate_key(token) if token else b"", os.environ.get("WHISPER_URL", "http://whisper:8000").rstrip("/"),
-                      os.environ.get("TTS_URL", "http://flask-api:5000").rstrip("/"),
                       studio_url=os.environ.get("TTS_STUDIO_URL", "http://tts-studio:8003").rstrip("/"),
                       ollama_url=os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/"),
                       summary_model=os.environ.get("SUMMARY_MODEL", "qwen2.5:7b"),
-                      state_dir=os.environ.get("STATE_DIR", "/state"), daily_chars=int(os.environ.get("VOICE_DAILY_CHARS", "4000") or 0),
-                      style=os.environ.get("VOICE_STYLE", "[whispers]").strip(),                  # the Captain's pick (2026-10-11): close and soft, "in the room"
-                      fx_chain="" if os.environ.get("VOICE_FX", "on").lower() == "off" else os.environ.get("VOICE_FX_CHAIN", "").strip()
-                      or fx_chain_for(os.environ.get("VOICE_FX_MODEL", FX_MODEL), int(os.environ.get("VOICE_FX_PASSES", "1") or 1)))
+                      state_dir=os.environ.get("STATE_DIR", "/state"))

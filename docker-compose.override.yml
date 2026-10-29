@@ -48,7 +48,7 @@ services:
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
 
   # Skippy's ears and mouth for the portal's chats (/chat and /me): a microphone recording to Whisper, and Skippy's voice from
-  # flask-api's ElevenLabs (the key stays there). The same kind of pass as the other gates (services/voice-gate/gate.py). Funnel's
+  # tts-studio (Kokoro stock + F5-TTS clone). The same kind of pass as the other gates (services/voice-gate/gate.py). Funnel's
   # third port:   tailscale funnel --https=10000 --bg 3007   -> https://skippy-pc.<tailnet>.ts.net:10000/
   voice-gate:
     build: ./services/voice-gate
@@ -57,17 +57,10 @@ services:
     env_file: G:/My Drive/vault/.env           # SKIPPY_HOME_TOKEN (the pass key is derived from it)
     environment:
       WHISPER_URL: http://whisper:8000
-      TTS_URL: http://flask-api:5000
-      VOICE_DAILY_CHARS: 4000                  # Skippy's real voice (ElevenLabs bills per character): at most this many a day, then the device voice; the same words are cached
-      VOICE_STYLE: "[whispers]"                # his delivery: close and soft (ElevenLabs v3 tag; empty = none). [softly] lost word endings in RNNoise
-      VOICE_FX_PASSES: 1                       # 2 = clean harder (RNNoise twice); VOICE_FX=off = Skippy's voice raw
-      # VOICE_FX: off = Skippy's voice raw (default on: a gate on the pauses and a close, dry polish; see services/voice-gate/gate.py FX_CHAIN)
-      OLLAMA_URL: http://skippy-core:11434          # writes the spoken summary of a long reply (SUMMARY_MODEL, default qwen2.5:7b)
       TTS_STUDIO_URL: http://tts-studio:8003   # the local voices (stock = Kokoro, skippy = F5 clone); which one is the pass's call
     networks: [default, tts-net]               # tts-net: the only way to reach the offline tts-studio
     volumes:
-      - ./state/voice-gate:/state                # today's character count and the cache of what was already said
-      - ./state/voice-lab/models-dl:/models:ro    # bd.rnnn, the RNNoise model (GregorR/rnnoise-models; not in the repo): see services/voice-gate/README.md
+      - ./state/voice-gate:/state                # cache of what was already said
     ports:
       - "127.0.0.1:3007:8080"                  # localhost only; Funnel is the one way in from outside
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}

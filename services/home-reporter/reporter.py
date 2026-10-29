@@ -434,7 +434,7 @@ def video_gate_capability() -> dict:
 
 
 def voice_gate_capability() -> dict:
-    """Ready when Whisper answers behind the gate (the microphone); `speak` says whether Skippy's voice (flask-api's ElevenLabs) is up too."""
+    """Ready when Whisper answers behind the gate (the microphone); `speak` says whether Skippy's voice (tts-studio, F5 model) is up too."""
     health = fetch(f"{VOICE_GATE}/health") if VOICE_GATE and VOICE_GATE_PUBLIC else None
     return {"ready": isinstance(health, dict) and health.get("ready") is True, "url": VOICE_GATE_PUBLIC}
 

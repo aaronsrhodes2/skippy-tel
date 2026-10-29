@@ -60,10 +60,15 @@ def test_the_pass_opens_the_voice_gate_with_the_right_scope():
     pytest.importorskip("requests")
     clock = Clock()
     v = voice_mod.Voice(paired_home(clock), clock=clock)
-    listen, speak = v.gate(), v.gate(speak=True)
-    assert listen["ok"] and listen["url"] == GATE and not listen["speak"] and speak["speak"]
-    assert gate_says(TOKEN, [listen["pass"], speak["pass"]], clock.now) == ["listen", "speak"]
-    assert listen["pass"] != speak["pass"]
+    listen, speak, voice = v.gate(), v.gate(speak=True), v.gate(voice="skippy")
+    assert listen["ok"] and not listen["speak"]
+    assert speak["ok"] and speak["speak"]
+    assert voice["ok"] and voice["speak"] and voice["voice"] == "skippy"
+    # listen and speak=True both sign "listen" scope (the gate has no "speak" scope);
+    # the voice-specific pass signs the voice name ("skippy")
+    assert gate_says(TOKEN, [listen["pass"], speak["pass"], voice["pass"]], clock.now) == ["listen", "listen", "skippy"]
+    assert listen["pass"] == speak["pass"]  # same scope, same token
+    assert listen["pass"] != voice["pass"]
     assert gate_says("another-token", [listen["pass"]], clock.now) == [False]
     assert gate_says(TOKEN, [listen["pass"]], listen["exp"] + 1) == [False]
 
@@ -146,15 +151,15 @@ def test_the_voice_clients_helpers_pass_their_node_tests():
 
 
 def test_who_gets_which_voice_is_the_portals_call_and_only_the_captain_gets_a_clone():
-    for mode in (None, "", "public", "private", "auto", "AUTO", "elevenlabs", "skippy"):
+    for mode in (None, "", "public", "private", "auto", "AUTO"):
         assert voice_mod.voice_for(False, mode) == "stock", mode                 # a guest is stock, whatever the page says
-    assert voice_mod.voice_for(True, "auto") == "elevenlabs" and voice_mod.voice_for(True, " Auto ") == "elevenlabs"
+    assert voice_mod.voice_for(True, "auto") == "skippy" and voice_mod.voice_for(True, " Auto ") == "skippy"
     assert voice_mod.voice_for(True, "private") == "skippy" and voice_mod.voice_for(True, None) == "skippy"
     assert voice_mod.voice_for(True, "public") == "stock"
-    assert voice_mod.voice_for(True, "nonsense") == "skippy"                       # only the word "auto" reaches the cloud voice
+    assert voice_mod.voice_for(True, "nonsense") == "skippy"                       # only "public" gives stock; everything else is local Skippy
 
 
-def test_each_voice_pass_opens_the_gate_as_that_voice_and_the_older_passes_are_unchanged():
+def test_each_voice_pass_opens_the_gate_as_that_voice_and_the_listen_pass_hears_only():
     pytest.importorskip("requests")
     clock = Clock()
     v = voice_mod.Voice(paired_home(clock), clock=clock)
@@ -162,8 +167,8 @@ def test_each_voice_pass_opens_the_gate_as_that_voice_and_the_older_passes_are_u
     for name, g in passes.items():
         assert g["ok"] and g["speak"] is True and g["voice"] == name and g["url"] == GATE
     assert gate_says(TOKEN, [g["pass"] for g in passes.values()], clock.now) == list(voice_mod.VOICES)
-    assert v.gate()["voice"] is None and v.gate(speak=True)["voice"] == "elevenlabs"
-    assert gate_says(TOKEN, [v.gate()["pass"], v.gate(speak=True)["pass"]], clock.now) == ["listen", "speak"]
+    assert v.gate()["voice"] is None and v.gate(speak=True)["voice"] is None
+    assert gate_says(TOKEN, [v.gate()["pass"], v.gate(speak=True)["pass"]], clock.now) == ["listen", "listen"]
     with pytest.raises(ValueError):
         v.gate(voice="kaelen")
 
@@ -174,11 +179,11 @@ def test_the_gate_takes_a_stock_pass_for_stock_only():
     clock = Clock()
     g = voice_mod.Voice(paired_home(clock), clock=clock).gate(voice=voice_mod.voice_for(False, "auto"))
     code = ("import json, sys; sys.path.insert(0, '.'); import gate; a = json.loads(sys.argv[1]); s = gate.valid(gate.gate_key(a['token']), a['p'], a['now']); "
-            "print(json.dumps([gate.allowed(s, w) for w in (None, 'stock', 'skippy', 'elevenlabs')]))")
+            "print(json.dumps([gate.allowed(s, w) for w in (None, 'stock', 'skippy')]))")
     run = subprocess.run([sys.executable, "-c", code, json.dumps({"token": TOKEN, "p": g["pass"], "now": clock.now})],
                          cwd=str(VOICE_GATE), capture_output=True, text=True, timeout=60)
     assert run.returncode == 0, run.stderr[-2000:]
-    assert json.loads(run.stdout) == ["stock", "stock", None, None]
+    assert json.loads(run.stdout) == ["stock", "stock", None]
 
 
 def test_the_gate_route_signs_the_captain_the_voice_of_his_chat_mode():
@@ -189,10 +194,10 @@ def test_the_gate_route_signs_the_captain_the_voice_of_his_chat_mode():
     c = app.test_client()
     login(c, ADMIN)
     got = {m: c.get("/chat/voice/gate" + (f"?mode={m}" if m else "")).get_json() for m in ("", "private", "auto", "public", "nonsense")}
-    assert {m: g["voice"] for m, g in got.items()} == {"": "skippy", "private": "skippy", "auto": "elevenlabs", "public": "stock",
+    assert {m: g["voice"] for m, g in got.items()} == {"": "skippy", "private": "skippy", "auto": "skippy", "public": "stock",
                                                        "nonsense": "skippy"}
     assert all(g["ok"] and g["speak"] for g in got.values())
-    assert gate_says(TOKEN, [got["private"]["pass"], got["auto"]["pass"]], time.time()) == ["skippy", "elevenlabs"]
+    assert gate_says(TOKEN, [got["private"]["pass"], got["auto"]["pass"]], time.time()) == ["skippy", "skippy"]
 
 
 def test_the_chat_tells_the_voice_client_its_mode():

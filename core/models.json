@@ -103,11 +103,10 @@
       "service": "tts-studio (services/tts-studio), reached only through voice-gate (services/voice-gate) on tts-net; the portal's pass says which voice",
       "voices": {
         "skippy": "F5-TTS v1 Base at 16 flow steps, zero-shot from the Captain's ElevenLabs Skippy print: the Captain in Private mode (his default). Resident.",
-        "stock": "Kokoro-82M, bm_george: everyone else who may chat (Public). Resident.",
-        "elevenlabs": "the cloud Skippy voice via flask-api: the Captain in Auto mode only, and the fallback while tts-studio is down or busy"
+        "stock": "Kokoro-82M, bm_george: everyone else who may chat (Public). Resident."
       },
       "how_a_chat_speaks": "the page does it: with the chat's speaker key (or Hands-off) on, skippy-voice.js sends each finished reply to voice-gate /tts. No model and no tool call is involved; an agent never renders speech itself.",
-      "health": "voice-gate /health inside skippytel-voice-gate (port 8080): voices.skippy, voices.stock, voices.elevenlabs",
+      "health": "voice-gate /health inside skippytel-voice-gate (port 8080): voices.skippy, voices.stock",
       "weights": ["huggingface/SWivid__F5-TTS", "huggingface/hexgrad__Kokoro-82M"],
       "docs": "services/tts-studio/README.md, docs/voice-bakeoff.md"
     },
