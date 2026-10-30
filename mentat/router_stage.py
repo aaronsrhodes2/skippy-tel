@@ -163,6 +163,8 @@ def _answer_with(model: str, index: bool, question: str, *, server, tools: dict,
         chain.append({"tool": c["name"], "args": c.get("args"), "value": got.get("value"), "units": got.get("units"), "source": got.get("source"),
                       "formula": got.get("formula")})
     out = {k: last.get(k) for k in ("value", "units", "source", "formula", "uncertainty", "provenance_tag", "display", "notes")}
+    if "value_float" in last:
+        out["value_float"] = last["value_float"]        # the decimal beside an exact symbolic value ("1/3" -> 0.333...), sigma-ground contract
     out["error"], out["clarification"], out["assumed"] = None, None, last.get("assumed")
     record = None
     if isinstance(last.get("value"), dict) and rec.get("extracted_by") == "cue" and rec.get("extracted_field"):

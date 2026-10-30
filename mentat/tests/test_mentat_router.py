@@ -81,6 +81,15 @@ def test_a_cued_field_of_a_record_is_the_answer(stage, monkeypatch):
     assert out["source"] == "NASA Planetary Fact Sheet 2024"
 
 
+def test_value_float_rides_along_with_a_symbolic_value(stage, monkeypatch):
+    import json
+    rec = record("integrate_expr", {"expression": "x**2", "lower": "0", "upper": "1"}, value="1/3")
+    rec["tool_calls"][0]["result_text"] = json.dumps({"value": "1/3", "value_float": 1 / 3, "units": "", "source": "sympy.integrate"})
+    out = run_answer(stage, monkeypatch, rec)
+    assert out["value"] == "1/3" and out["value_float"] == 1 / 3
+    assert "value_float" not in run_answer(stage, monkeypatch, record())
+
+
 def test_a_guessed_field_keeps_the_whole_record(stage, monkeypatch):
     # no phrase named a field (extracted_by "default"): presenting the guess would be a silently wrong answer, so the record stays
     out = run_answer(stage, monkeypatch, _record_tool("mass_kg", "default"))
