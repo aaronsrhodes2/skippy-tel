@@ -1,6 +1,7 @@
 """Mentat's trained router as a stage of /ask (opt-in: MENTAT_ROUTER_MODEL; unset, nothing here runs).
 
-The router (core/models.json slot `router`: Qwen3-4B + LoRA, "mentat-router-v31-4b") reads a question and writes ONE grammar-constrained JSON plan: which Mentat tool,
+The router (core/models.json slot `router`: stock Qwen3-8B "qwen3-8b-stock" since 2026-10-29; the trained Qwen3-4B + LoRA "mentat-router-v31-4b" before) reads a question
+and writes ONE grammar-constrained JSON plan: which Mentat tool,
 with which arguments, or a chain of up to three tools ("$1.mass_kg" feeds one call's result to the next), or a decline, or a clarification. It never computes: Mentat's
 tools do. It was trained, and scored, with sigma-ground's benchmark harness (`run_sigma_ground._route_once`, plan format v3), which this module calls as it is, so what
 runs here is what was measured there.
@@ -32,6 +33,10 @@ PLAN = os.environ.get("MENTAT_ROUTER_PLAN", "v3")                 # the plan for
 TIMEOUT_S = float(os.environ.get("MENTAT_ROUTER_TIMEOUT", "60"))
 PROFILE = os.environ.get("MENTAT_ROUTER_PROFILE", "") or None     # a harness tweak profile; empty = the registry defaults (see above)
 TWEAKS_ON = tuple(x for x in os.environ.get("MENTAT_ROUTER_TWEAKS_ON", "structured_results").replace(",", " ").split() if x)
+# A stock model has no tool catalogue in its weights: with MENTAT_ROUTER_INDEX=1 the prompt carries the harness's tool index (every public tool, its
+# parameters and a line of what it does, about 17k tokens), exactly as sigma-ground's stock baselines were scored (run_sigma_ground --router-index).
+# A trained router (v3.1) learned the catalogue and runs without it (0).
+INDEX = os.environ.get("MENTAT_ROUTER_INDEX", "0").strip() not in ("", "0", "false", "no")
 MISS_KEYS = ("router_error", "router_decline", "router_clarify")
 
 
@@ -75,6 +80,9 @@ async def _run(question: str, server, tools: dict, ollama_url: str, guard) -> di
     configure_harness()
     names = [n for n in tools if n != "request_clarification"]
     system = RP.system_prompt(PLAN)
+    if INDEX:
+        from sigma_ground.mcp.benchmark.run_sigma_ground import _ollama_tools, _router_system_prompt
+        system = _router_system_prompt(_ollama_tools([tools[n] for n in names]), True, PLAN)
     async with httpx.AsyncClient(timeout=TIMEOUT_S) as http:
         return await asyncio.wait_for(
             _route_once(_Session(server, guard), http, ollama_url.rstrip("/") + "/api/chat", MODEL, question, system,

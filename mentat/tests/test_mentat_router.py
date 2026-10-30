@@ -202,6 +202,34 @@ class TestRealHarness:
         # (measured live with strict_params on: -2 physics answers, +0)
         assert not tweaks.on("strict_params")
 
+    def test_a_stock_model_gets_the_tool_index_in_its_prompt(self, stage, monkeypatch):
+        """MENTAT_ROUTER_INDEX=1 (stock Qwen3-8B since 2026-10-29): the prompt names the tools and their parameters; off, it is the trained router's bare prompt."""
+        import json
+        import httpx
+        from types import SimpleNamespace
+        seen = []
+
+        def model(request):
+            seen.append(json.loads(request.content)["messages"][0]["content"])
+            return httpx.Response(200, json={"message": {"content": '{"tool": "escape_velocity", "tool_args": {"body_name": "mars"}}'}})
+
+        class Server:
+            async def call_tool(self, name, args):
+                return [SimpleNamespace(text=json.dumps({"value": 5027.0, "units": "m/s", "error": None, "inputs": args}))], None
+
+        tools = {"escape_velocity": SimpleNamespace(name="escape_velocity", description="Classical escape velocity v_esc = sqrt(2 G M / r).",
+                                                    inputSchema={"properties": {"mass_kg": {}, "radius_m": {}, "body_name": {}, "altitude_km": {}}})}
+        real = httpx.AsyncClient
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(model), **kw))
+        monkeypatch.setattr(stage, "MODEL", "qwen3-8b-stock")
+        for index in (True, False):
+            monkeypatch.setattr(stage, "INDEX", index)
+            out = stage.answer("escape velocity from Mars?", server=Server(), tools=tools, ollama_url="http://fake:11434")
+            assert out is not None and out["value"] == 5027.0 and out["interpreter"] == "router qwen3-8b-stock"
+        with_index, bare = seen
+        assert "escape_velocity(" in with_index and "body_name" in with_index and len(with_index) > len(bare)
+        assert "body_name" not in bare
+
     def test_a_pre_rename_parameter_name_is_not_refused(self, stage, monkeypatch):
         import json
         import httpx
