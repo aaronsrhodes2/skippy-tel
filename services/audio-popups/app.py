@@ -34,7 +34,7 @@ from flask import Flask, Response, jsonify, request
 
 WEIGHTS = os.environ.get("AUDIO_POPUPS_WEIGHTS", "/weights")
 IDLE_UNLOAD_S = int(os.environ.get("IDLE_UNLOAD_S", "300"))
-MAX_UPLOAD = int(os.environ.get("MAX_UPLOAD_MB", "80")) * 1024 * 1024
+MAX_UPLOAD = int(os.environ.get("MAX_UPLOAD_MB", "96")) * 1024 * 1024   # a 64 MB track base64'd in the contract's JSON is ~86 MB
 DEVICE = os.environ.get("AUDIO_POPUPS_DEVICE", "cuda")
 
 # Where each model's files live inside WEIGHTS (the D:/models folder names, so a look at the archive says what is used).
