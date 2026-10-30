@@ -40,7 +40,7 @@
         <dt>Size</dt><dd>{{ r.size }}</dd>
         <dt>Time</dt><dd>{{ r.minutes }} minutes</dd>
       </dl>
-      <img class="views" src="{{ url_for('static', filename='experiments/minebench/' ~ r.id ~ '/views.png') }}" alt="{{ r.title }}: four views" loading="lazy">
+      <img class="views" width="1800" height="1320" src="{{ url_for('static', filename='experiments/minebench/' ~ r.id ~ '/views.png') }}" alt="{{ r.title }}: four views" loading="lazy">
       <model-viewer src="{{ url_for('static', filename='experiments/minebench/' ~ r.id ~ '/model.glb') }}" alt="{{ r.title }}: the build in 3D"
                     camera-controls auto-rotate touch-action="pan-y" shadow-intensity="0.6" exposure="1.1"></model-viewer>
       <p>{{ r.verdict }}</p>

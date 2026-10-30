@@ -12,6 +12,8 @@ pytest.importorskip("authlib")
 
 from test_app import env  # noqa: E402,F401
 
+import experiments  # noqa: E402
+
 PORTAL = Path(__file__).resolve().parents[1]
 STATIC = PORTAL / "static"
 DATA = STATIC / "demos" / "nbody" / "flipbook.json"
@@ -70,3 +72,13 @@ def test_the_other_demos_are_bridge_pages_that_keep_what_they_had(env):
         assert need in slit, need
     css = re.sub(r"/\*.*?\*/", "", (STATIC / "experiments.css").read_text(encoding="utf-8"), flags=re.S)
     assert not re.search(r"overflow(?:-y)?\s*:\s*(?:auto|scroll)", css) and "gradient" not in css
+
+
+def test_every_minebench_run_can_be_reached_however_late_its_pictures_load(env):
+    """The pager counted its pages once, before the pictures arrived, and stopped at page 4 of 9 (runs 4 to 8 out of reach). Now it
+    counts again whenever something in the flow loads, and each picture holds its place before it loads."""
+    script = (STATIC / "bridge.js").read_text(encoding="utf-8")
+    assert 'flow.addEventListener("load", refresh, true)' in script
+    client, _, _ = env
+    page = client.get("/experiments/minebench").get_data(as_text=True)
+    assert page.count('<img class="views" width="1800" height="1320"') == len(experiments.MINEBENCH_RUNS)

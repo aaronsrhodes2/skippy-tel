@@ -231,6 +231,9 @@
       if (pips) { pips.setAttribute("aria-valuemin", "1"); pips.setAttribute("aria-valuemax", String(pages)); pips.setAttribute("aria-valuenow", String(page + 1)); }
     };
     if (window.ResizeObserver) new ResizeObserver(refresh).observe(panel);
+    // a picture or a 3D model that arrives later makes the flow longer without resizing the panel: count the pages again (load doesn't
+    // bubble, so listen as it comes down). Without this a page of late pictures stopped at the pages it had when it opened.
+    flow.addEventListener("load", refresh, true);
     var api = { go: go, page: function () { return page; }, pages: function () { return pages; },
                 last: function () { go(pages - 1); }, refresh: refresh };
     panel._pager = api;
