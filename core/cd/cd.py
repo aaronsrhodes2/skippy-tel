@@ -269,6 +269,13 @@ class CD:
         """src/.vendor/sigma-ground (the pinned commit, `git archive`) and, for the portal, src/.vendor/scz-web.tar.gz (the pinned
         Star Control Zero web build, checked against its sha256). Both come from the trunk (skippy-pc's D:\trunk, through the data
         trunk share) and are cached on this box, so a deploy still works while skippy-pc is off, once it has been seen here."""
+        # The pins of the checkout being BUILT, not this installed copy's: `cd.py vendor` ran with /opt/skippy-core/cd/deploy.json, which
+        # install.sh refreshes only after the build, so a pin bump built the Mentat image from the previous pin while the image's
+        # SIGMA_GROUND_REF (the Dockerfile ARG, from the checkout) named the new one; /version lied and check_mentat_deploy.sh believed it
+        # (2026-10-30: the box ran 3f374fe's tree under the label 8145ed8).
+        checkout_cfg = src / "core" / "cd" / "deploy.json"
+        if checkout_cfg.is_file():
+            self.cfg = json.loads(checkout_cfg.read_text(encoding="utf-8"))
         out = src / ".vendor"
         out.mkdir(exist_ok=True)
         self.vendor_sigma_ground(out / "sigma-ground")
@@ -324,6 +331,7 @@ class CD:
         with tarfile.open(tar) as t:
             t.extractall(dest, filter="data")
         tar.unlink(missing_ok=True)
+        (dest / "VENDORED_REF").write_text(pin + "\n", encoding="utf-8")   # what the tree IS; mentat/app.py /version reports it over the build ARG
 
     def vendor_star_control(self, out: Path) -> None:
         pins = self.cfg["pins"]

@@ -237,6 +237,24 @@ def test_vendor_puts_the_pinned_sigma_ground_and_the_game_in_the_build_context(t
     assert (src / ".vendor" / "sigma-ground").is_dir()
 
 
+def test_vendor_takes_the_pins_of_the_checkout_being_built_and_marks_the_tree(trunk, tmp_path):
+    # 2026-10-30: `cd.py vendor` read the installed copy's deploy.json (refreshed by install.sh only AFTER the build), so a pin bump built
+    # Mentat from the previous pin under the new pin's label. The checkout's own core/cd/deploy.json wins, and the tree says what it is.
+    cd, src, _ = trunk
+    work = tmp_path / "sg"
+    (work / "sigma_ground" / "radiance" / "web" / "viewer.js").write_text("y")
+    git(work, "add", "-A")
+    git(work, "commit", "--quiet", "-m", "sg2")
+    pin2 = git(work, "rev-parse", "HEAD")
+    git(tmp_path / "trunk-git" / "sigma-ground.git", "fetch", "--quiet", str(work), "+refs/heads/*:refs/heads/*")
+    (src / "core" / "cd").mkdir(parents=True)
+    (src / "core" / "cd" / "deploy.json").write_text(json.dumps({**cd.cfg, "pins": {**cd.cfg["pins"], "SIGMA_GROUND_REF": pin2}}))
+    cd.vendor(src, star_control=False)
+    tree = src / ".vendor" / "sigma-ground"
+    assert (tree / "sigma_ground" / "radiance" / "web" / "viewer.js").read_text() == "y"
+    assert (tree / "VENDORED_REF").read_text().strip() == pin2
+
+
 def test_vendor_lays_out_every_pop_up_registry_file_for_the_portal_image(trunk):
     """The portal image once held only the test pop-up's registry (the classic builder ignored the wildcard .dockerignore exception), so the
     portal did not know the vision, search, 3D or video tools. Now the registry is copied into the build context and counted."""

@@ -137,13 +137,32 @@ def test_the_official_mcp_client_connects_lists_and_calls(mentat):
     assert json.loads(res.content[0].text)["value"] == pytest.approx(6.17e-8, rel=1e-2)
 
 
-def test_version_reports_the_sigma_ground_commit_and_the_tool_count(client, mentat, monkeypatch):
+def test_version_reports_the_sigma_ground_commit_and_the_tool_count(client, mentat, monkeypatch, tmp_path):
+    import sys
+    import types
+    # no VENDORED_REF beside the tree (a dev checkout): the build argument, else "dev"
+    monkeypatch.setitem(sys.modules, "sigma_ground", types.SimpleNamespace(__file__=str(tmp_path / "sigma_ground" / "__init__.py")))
     monkeypatch.setenv("SIGMA_GROUND_REF", "feedface0123")
     got = client.get("/version").get_json()
-    assert got["sigma_ground_ref"] == "feedface0123"
+    assert got["sigma_ground_ref"] == "feedface0123" and "build_arg_ref" not in got
     assert got["tools"] == len(mentat.TOOLS) and got["tools"] > 100
     monkeypatch.delenv("SIGMA_GROUND_REF")
     assert client.get("/version").get_json()["sigma_ground_ref"] == "dev"
+
+
+def test_version_prefers_the_vendored_trees_own_marker_and_shows_a_mismatch(client, mentat, monkeypatch, tmp_path):
+    # 2026-10-30: the image's build argument named 8145ed8 while the vendored tree was 3f374fe's; the tree's marker is the truth
+    import sys
+    import types
+    (tmp_path / "sigma_ground").mkdir()
+    (tmp_path / "VENDORED_REF").write_text("3f374fe97e668f1c1a770417e56d5a7572d068ed\n")
+    monkeypatch.setitem(sys.modules, "sigma_ground", types.SimpleNamespace(__file__=str(tmp_path / "sigma_ground" / "__init__.py")))
+    monkeypatch.setenv("SIGMA_GROUND_REF", "8145ed80333f5c64b92660f178a5990940b8b5a1")
+    got = client.get("/version").get_json()
+    assert got["sigma_ground_ref"] == "3f374fe97e668f1c1a770417e56d5a7572d068ed"
+    assert got["build_arg_ref"] == "8145ed80333f5c64b92660f178a5990940b8b5a1"
+    monkeypatch.setenv("SIGMA_GROUND_REF", "3f374fe97e668f1c1a770417e56d5a7572d068ed")
+    assert "build_arg_ref" not in client.get("/version").get_json()
 
 
 def test_an_ode_with_primes_is_maths_but_a_quote_elsewhere_is_still_code(client, mentat):

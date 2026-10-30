@@ -326,11 +326,31 @@ def health():
     return jsonify(rep), ready_mod.status_code(rep)
 
 
+def sigma_ground_ref() -> str:
+    """The commit of the sigma-ground tree this process imports: the VENDORED_REF the deployer writes beside it (core/cd/cd.py vendor),
+    else the image's SIGMA_GROUND_REF build argument, else "dev". The file wins because the argument once named a newer commit than the
+    tree it was built with (2026-10-30), and /version is what tools/check_mentat_deploy.sh trusts."""
+    try:
+        import sigma_ground
+        marker = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(sigma_ground.__file__))), "VENDORED_REF")
+        with open(marker, encoding="utf-8") as f:
+            vendored = f.read().strip()
+        if vendored:
+            return vendored
+    except (ImportError, OSError):
+        pass
+    return os.environ.get("SIGMA_GROUND_REF") or "dev"
+
+
 @app.get("/version")
 def version():
-    """Which sigma-ground commit this Mentat runs (the image's SIGMA_GROUND_REF) and how many tools it serves.
-    sigma-ground's tools/check_mentat_deploy.sh and the wa-trickle service read it."""
-    return jsonify(sigma_ground_ref=os.environ.get("SIGMA_GROUND_REF") or "dev", tools=len(TOOLS))
+    """Which sigma-ground commit this Mentat runs (the vendored tree's own marker, else the image's SIGMA_GROUND_REF) and how many
+    tools it serves. sigma-ground's tools/check_mentat_deploy.sh and the wa-trickle service read it."""
+    out = {"sigma_ground_ref": sigma_ground_ref(), "tools": len(TOOLS)}
+    built_as = os.environ.get("SIGMA_GROUND_REF")
+    if built_as and built_as != out["sigma_ground_ref"]:
+        out["build_arg_ref"] = built_as            # the image claims one commit and holds another: visible, not silent
+    return jsonify(out)
 
 
 @app.get("/tools")
