@@ -32,8 +32,12 @@ def gate_key(home_token: str) -> bytes:
     return hmac.new(hashed.encode(), b"voice-gate-v1", hashlib.sha256).digest()
 
 
-def sign(key: bytes, exp: int, scope: str = "speak") -> str:
-    text = f"voice-speak:{exp}" if scope == "speak" else f"voice:{exp}"
+VOICES = ("stock", "skippy")          # services/voice-gate/gate.py: a pass names the one voice it may speak in
+
+
+def sign(key: bytes, exp: int, scope: str = "skippy") -> str:
+    """scope: "listen" or a voice name (the house is the Captain's: the rooms speak as the local Skippy clone). Must match gate.sign()."""
+    text = f"voice-tts-{scope}:{exp}" if scope in VOICES else f"voice:{exp}"
     return f"{exp}.{hmac.new(key, text.encode(), hashlib.sha256).hexdigest()[:32]}"
 
 

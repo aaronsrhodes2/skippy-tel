@@ -407,7 +407,10 @@ interval:
     then:
       - if:
           condition:
-            lambda: 'return millis() - id(last_activity) > 120000 && !id(player).is_playing();'
+            lambda: |-
+              auto st = id(player).state;       // the media player has no is_playing(): playing or announcing keeps the screen lit
+              return millis() - id(last_activity) > 120000 && st != media_player::MEDIA_PLAYER_STATE_PLAYING
+                     && st != media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
           then:
             - light.turn_on:
                 id: backlight

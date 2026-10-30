@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build and flash one room box (the Waveshare ESP32-S3 Smart 86 Box) with skippy-room.yaml.
-#   bash services/satellite/rooms/flash.sh kitchen "Kitchen"          first time: plug the box into skippy-pc by USB-C
+#   bash services/satellite/rooms/flash.sh kitchen "Kitchen"          first time: plug the box into skippy-pc by USB-C (ROOM_PORT=COM8 picks the port)
 #   bash services/satellite/rooms/flash.sh kitchen "Kitchen"          afterwards: the same line updates it over Wi-Fi
-# The settings come from the vault .env (ROOM_WIFI_SSID, ROOM_WIFI_PASSWORD, SATELLITE_ESPHOME_KEY, SATELLITE_ESPHOME_OTA); a missing key or
+# The settings come from the vault .env (ROOM_WIFI_SSID, ROOM_WIFI_PASSWORD, else the house HOME_WIFI/HOME_WIFI_PWD, SATELLITE_ESPHOME_KEY, SATELLITE_ESPHOME_OTA); a missing key or
 # OTA password is generated and printed once, to be added to the vault. ESPHome is pinned to the dev commit that has I2S full duplex
 # (needed: the mics and the speaker share one bus) until 2026.11.0 is released; then set ESPHOME_PIN=esphome==2026.11.0.
 set -euo pipefail
@@ -16,8 +16,10 @@ VENV="$ROOT/state/esphome-venv"
 VAULT="${SKIPPY_ENV:-/g/My Drive/vault/.env}"
 
 get() { [ -f "$VAULT" ] && grep -E "^$1=" "$VAULT" | tail -1 | cut -d= -f2- | sed -e 's/^["'\'']//' -e 's/["'\'']$//' || true; }
-SSID="$(get ROOM_WIFI_SSID)"; PASS="$(get ROOM_WIFI_PASSWORD)"; KEY="$(get SATELLITE_ESPHOME_KEY)"; OTA="$(get SATELLITE_ESPHOME_OTA)"
-[ -n "$SSID" ] && [ -n "$PASS" ] || { echo "add ROOM_WIFI_SSID and ROOM_WIFI_PASSWORD (a 2.4 GHz network) to $VAULT"; exit 1; }
+SSID="$(get ROOM_WIFI_SSID)"; PASS="$(get ROOM_WIFI_PASSWORD)"
+[ -n "$SSID" ] || { SSID="$(get HOME_WIFI)"; PASS="$(get HOME_WIFI_PWD)"; }   # the house network the vault already names (MakerNet)
+ KEY="$(get SATELLITE_ESPHOME_KEY)"; OTA="$(get SATELLITE_ESPHOME_OTA)"
+[ -n "$SSID" ] && [ -n "$PASS" ] || { echo "add ROOM_WIFI_SSID and ROOM_WIFI_PASSWORD (a 2.4 GHz network; else HOME_WIFI/HOME_WIFI_PWD) to $VAULT"; exit 1; }
 if [ -z "$KEY" ]; then KEY="$(python -c 'import base64,os;print(base64.b64encode(os.urandom(32)).decode())')"; echo "NEW: add to the vault .env:  SATELLITE_ESPHOME_KEY=$KEY"; fi
 if [ -z "$OTA" ]; then OTA="$(python -c 'import secrets;print(secrets.token_urlsafe(18))')"; echo "NEW: add to the vault .env:  SATELLITE_ESPHOME_OTA=$OTA"; fi
 
@@ -35,5 +37,9 @@ if [ ! -x "$VENV/Scripts/esphome" ] && [ ! -x "$VENV/bin/esphome" ]; then
 fi
 ESPHOME="$VENV/Scripts/esphome"; [ -x "$ESPHOME" ] || ESPHOME="$VENV/bin/esphome"
 cd "$KIT"
-"$ESPHOME" -s name "skippy-$ROOM" -s room "$NAME" run skippy-room.yaml
+if [ -n "${MSYSTEM:-}" ]; then                 # Git Bash: ESP-IDF's installer refuses to run while MSYSTEM is set, and Git Bash puts it back
+  powershell.exe -NoProfile -Command "Remove-Item Env:MSYSTEM -ErrorAction SilentlyContinue; & '$(cygpath -w "$ESPHOME")' -s name 'skippy-$ROOM' -s room '$NAME' run skippy-room.yaml --no-logs ${ROOM_PORT:+--device $ROOM_PORT}; if (-not \$?) { exit 1 }; exit \$LASTEXITCODE"
+else
+  "$ESPHOME" -s name "skippy-$ROOM" -s room "$NAME" run skippy-room.yaml --no-logs ${ROOM_PORT:+--device "$ROOM_PORT"}
+fi
 echo "flashed skippy-$ROOM. Add it to SATELLITE_ROOMS in the vault: $ROOM=esphome://skippy-$ROOM.local"

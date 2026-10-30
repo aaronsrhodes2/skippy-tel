@@ -24,7 +24,7 @@ def test_passes_are_exactly_what_the_real_voice_gate_signs_and_accepts():
     real = real_gate()
     assert voicegate.gate_key("test-home-token") == real.gate_key("test-home-token")
     key = voicegate.gate_key("test-home-token")
-    for scope in ("speak", "listen"):
+    for scope in ("skippy", "stock", "listen"):
         token = voicegate.sign(key, 1_800_003_600, scope)
         assert token == real.sign(real.gate_key("test-home-token"), 1_800_003_600, scope)
         assert real.valid(real.gate_key("test-home-token"), token, 1_800_000_000) == scope
@@ -56,7 +56,7 @@ def test_stt_posts_a_wav_with_a_speak_pass_and_returns_the_words():
     assert g.stt(b"RIFFxxxx") == "hello there"
     url, kw = calls[0]
     assert url.startswith("http://127.0.0.1:3007/t/") and "/stt?lang=en" in url and kw["headers"]["Content-Type"] == "audio/wav" and kw["data"] == b"RIFFxxxx"
-    assert real_gate().valid(real_gate().gate_key("tok"), url.split("/t/")[1].split("/")[0], 1_800_000_000) == "speak"
+    assert real_gate().valid(real_gate().gate_key("tok"), url.split("/t/")[1].split("/")[0], 1_800_000_000) == "skippy"
 
 
 def test_tts_and_summary_and_every_way_the_gate_can_fail():
