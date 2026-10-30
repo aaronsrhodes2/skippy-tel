@@ -43,6 +43,12 @@ commercial use), is archived and seeded, but **its first song took skippy-pc's D
 stay on the 8-step turbo until it is proven safe (`MUSIC_MODEL`, `MUSIC_STEPS` in the reporter). ACE-Step's best, XL-SFT (4 B,
 ~19 GB bf16), fits neither the 16 GB card nor the 16 GB VM: a candidate for skippy-core.
 
+Turbo, measured after the revert (2026-10-30, a 45 s melodic-techno song through the reporter's own `make_music`): **226 s from cold**,
+a 720 KB mp3. ACE-Step's CPU offload parked up to **9.8 GB in the Docker VM's RAM** (of 16 GB, shared with the whole stack) and the card
+peaked at **15.8 of 16 GB**; two minutes after the song music_idle.py ended the server, Docker restarted it bare (0.6 GB, nothing loaded)
+and the card fell back to 7.3 GB. That margin is why sft (same DiT size, plus CFG's doubled activations) tipped the VM over: before
+trying it again, measure it with the VM's own memory watched, or move it to skippy-core.
+
 ## Method
 
 - **Machine:** skippy-pc, RTX 4070 Ti SUPER 16 GB, Docker Desktop's WSL VM (16 GB RAM for the whole stack since 2026-10-25, see "The Docker VM").
