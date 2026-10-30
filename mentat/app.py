@@ -214,11 +214,35 @@ def _ask(question: str, given: dict | None = None) -> dict:
             return hit
     result = simulate(question, use_llm=USE_LLM, given=given or None).to_dict()
     result["interpreter"] = "keywords + qwen" if USE_LLM else "keywords"
+    _decline_plainly(question, result)
     if miss and isinstance(result.get("inputs"), dict):
         result["inputs"]["router_miss"] = miss
     elif miss:
         result["inputs"] = {"router_miss": miss}
     return result
+
+
+_FALLING_WORDS = re.compile(r"\b(fall|falls|falling|fell|drop|drops|dropped|dropping|hit the ground|impact|terminal velocity|heat up|heats up)\b", re.I)
+
+
+def _decline_plainly(question: str, result: dict) -> None:
+    """The last stop of /ask, when the cascade, the router and its fallback all missed: if the keyword translator can only offer its generic
+    "I can simulate a falling object's impact speed..." blurb, a question about bananas, heartbeats or a puzzle was answered with an offer
+    about falling objects (the 2026-10-30 adversarial misses). Say plainly that no tool covers the question, and keep the falling-object hint
+    only for a question that mentions falling. The value stays null and nothing is guessed: this changes the text, the source and the route."""
+    from sigma_ground.materia import translator as tr
+    if result.get("value") is not None or result.get("clarification") or result.get("error"):
+        return
+    generic = getattr(tr, "_CLARIFY", None)                    # a private name: if sigma-ground renames it, /ask keeps its old answer
+    if not generic or str(result.get("notes") or "") != generic:
+        return
+    hint = f" {generic}" if _FALLING_WORDS.search(question) else ""
+    result["notes"] = ("Mentat has no tool that answers this question, so it won't guess a number. It computes standard physics, chemistry and "
+                       "maths from its tools: ask for a quantity and give the inputs (\"escape velocity of Mars\", \"energy of a 500 nm photon\", "
+                       "\"derivative of x^2 sin x\")." + hint)
+    result["source"] = "mentat"
+    if isinstance(result.get("inputs"), dict):
+        result["inputs"]["route"] = "decline"
 
 
 def _call(name: str, args: dict):
