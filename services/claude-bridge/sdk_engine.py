@@ -35,6 +35,7 @@ model says, workshop_prompt.md): `conventions` takes them out of each Said and k
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import os
 import threading
@@ -53,7 +54,7 @@ ROTATE_TOKENS = int(os.getenv("WORKSHOP_CORE_ROTATE_TOKENS", "100000"))  # the c
                                                                          # for the one tool result that can still arrive. Claude Code's own compaction
                                                                          # is off (DISABLE_AUTO_COMPACT): the coder fails its summary half the time
 CODING_TOOLS = ("Bash", "Read", "Edit", "Write", "Grep", "Glob", "TodoWrite", "Task", "WebFetch")   # Claude Code's built-ins this engine offers
-MAX_SEGMENTS = int(os.getenv("WORKSHOP_CORE_MAX_SEGMENTS", "12"))  # raised from 8: complex debugging (solver, generator) needs more segments before hitting the hard cap
+MAX_SEGMENTS = int(os.getenv("WORKSHOP_CORE_MAX_SEGMENTS") or 0) or None   # no cap unless one is set: a run takes as long as it takes (the Captain, 2026-10-26)
 MAX_BUFFER = 16 * 1024 * 1024                                           # one line of Claude Code's output (a big tool result)
 LANE_TOOLS = "Edit|Write|MultiEdit|NotebookEdit|Bash|Read|Glob|Grep"      # (the read tools are here for the walled folders: Lane.deny_read)
 ENGINES_FILE = "engines.json"
@@ -251,8 +252,8 @@ def conventions(run, text: str) -> str:
 
 async def drive(run, *, clone: str, request: str, resume: str | None, open_session: OpenSession,
                 remember: Callable[[str], None], detail: Callable[[str, dict], str], lane: Lane,
-                segments: int = MAX_SEGMENTS, rotate_at: int = ROTATE_TOKENS) -> None:
-    """Run `request` to its end in bounded segments; every outcome ends in run.finish().
+                segments: int | None = MAX_SEGMENTS, rotate_at: int = ROTATE_TOKENS) -> None:
+    """Run `request` to its end in segments, as many as it needs unless `segments` caps them; every outcome ends in run.finish().
 
     A segment ends one of two ways, both told by Claude Code itself: its context (measured from the usage on each model
     reply) reaches `rotate_at`, and the engine interrupts it after the next tool result; or it uses its turn limit."""
@@ -277,7 +278,9 @@ async def drive(run, *, clone: str, request: str, resume: str | None, open_sessi
             run.emit({"t": "text", "text": pending})
             pending = None
 
-    for n in range(1, segments + 1):
+    for n in itertools.count(1):
+        if segments is not None and n > segments:
+            break
         prompt = request if n == 1 else run_state.handoff(request, n, clone, journal)
         session = await open_session(n, resume if n == 1 else None, hooks)
         ended: Ended | None = None

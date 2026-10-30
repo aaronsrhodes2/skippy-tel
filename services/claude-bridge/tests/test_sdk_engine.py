@@ -461,3 +461,9 @@ def test_picture_and_popup_lines_are_kept_for_the_end_of_the_run_and_never_shown
     assert texts(run) == ["Sprites coming."]
     assert run.picture_prompts == [("a pixel-art knight, 32x32, transparent background", ""), ("the title screen, a ruined tower at dusk", "hq")]
     assert run.popups == [("remove_background", {"_file": "art/knight.png"})] and run.image_paths == [".skippy-shots/front.png"]
+
+
+def test_with_no_cap_set_a_run_takes_as_many_segments_as_it_needs_and_ends_only_on_its_result(repo):
+    run = new_run()
+    opened, _, _ = go(run, repo, [[maxed(f"s{i}")] for i in range(1, 16)] + [[ok("s16")]])
+    assert run.done and run.ok and len(opened) == 16
