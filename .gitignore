@@ -37,6 +37,7 @@ portal/experiments_static/
 
 # The private Skippy's screenshots (tools/workshop_screenshot.py): shown in the chat, never committed
 .skippy-shots/
+.purple-out/
 build/
 
 # Build-context vendor tree laid out by core/cd/cd.py vendor

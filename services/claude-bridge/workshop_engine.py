@@ -1202,7 +1202,9 @@ class Workshop:
                     run.finish(False, "couldn't clone the repo: " + redact(out.stderr.strip())[:300])
                     return False
                 return True
-            if self._git("status", "--porcelain", cwd=clone).stdout.strip():
+            # Only tracked changes are earlier work to protect: a file git doesn't track (the agent's own `.purple-out/` scratch) never blocks a
+            # fast-forward, and counting it kept the clone 7 commits behind main on 2026-10-29.
+            if self._git("status", "--porcelain", "--untracked-files=no", cwd=clone).stdout.strip():
                 run.emit({"t": "text", "text": "(my clone has uncommitted changes from an earlier task, so I'm not pulling)"})
                 return True
             out = self._git("pull", "--ff-only", cwd=clone)

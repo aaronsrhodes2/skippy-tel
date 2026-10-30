@@ -202,6 +202,24 @@ def test_the_door_passes_the_project_and_refuses_an_unknown_one(door, shop):
     assert finish(shop.get("aaaaaaaa")).project == "skippytel"
 
 
+def test_an_untracked_file_never_stops_the_pull_but_a_tracked_change_does(multi, tmp_path):
+    # 2026-10-29: the agent's own `.purple-out/` scratch counted as "uncommitted changes" and the clone sat 7 commits behind main.
+    finish(multi.start("aaaaaaaa", "conv-12345678", "x", project="other"))
+    clone = Path(multi.project("other").clone)
+    origin = Path(multi.project("other").url)             # a plain repo standing in for the house git: main moves on
+    (origin / "NEW.md").write_text("newer", encoding="utf-8")
+    git("add", "NEW.md", cwd=origin)
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "newer", cwd=origin)
+    (clone / ".purple-out").mkdir()
+    (clone / ".purple-out" / "scratch.txt").write_text("tool output", encoding="utf-8")
+    run = finish(multi.start("bbbbbbbb", "conv-12345678", "y", project="other"))
+    assert not any("not pulling" in (e.get("text") or "") for e in run.events) and (clone / "NEW.md").exists()
+    (clone / "README.md").write_text("half-done edit", encoding="utf-8")
+    run = finish(multi.start("cccccccc", "conv-12345678", "z", project="other"))
+    assert any("not pulling" in (e.get("text") or "") for e in run.events)
+    assert (clone / "README.md").read_text(encoding="utf-8") == "half-done edit"
+
+
 def test_a_clone_path_that_holds_something_else_is_never_cloned_into(multi):
     clone = Path(multi.project("other").clone)
     clone.mkdir()
