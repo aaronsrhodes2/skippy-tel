@@ -229,7 +229,7 @@ media_player:
   - platform: speaker
     id: player
     name: Speaker
-    volume_initial: 0.6
+    volume_initial: 0.4                   # 0.6 was loud in the Office; the side keys go up from here
     announcement_pipeline:                # Skippy's voice and announcements: over the music, which ducks under it
       speaker: voice_resampler
       format: FLAC
@@ -430,6 +430,13 @@ light:
     restore_mode: ALWAYS_ON
     default_transition_length: 600ms
 
+image:
+  - file: ../../../portal/static/skippy/skippy-head.png     # the chat's avatar (one file for both)
+    id: skippy_face
+    type: RGB565
+    transparency: alpha_channel
+    resize: 240x240
+
 display:
   - platform: mipi_rgb
     id: lcd
@@ -518,6 +525,11 @@ lvgl:
             border_color: 0x1e3a5f
             border_opa: 50%
             scrollable: false
+        - image:                          # Skippy's face, the chat's avatar, inside the ring (the ring's colour still says what he's doing)
+            id: face_img
+            src: skippy_face
+            align: CENTER
+            y: -30
         - label:
             id: subtitle_label
             align: BOTTOM_MID
