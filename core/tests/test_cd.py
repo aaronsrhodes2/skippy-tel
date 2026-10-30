@@ -108,7 +108,16 @@ def test_each_job_is_stamped_and_the_portal_says_when_it_served(world):
     s, commit = world
     commit("portal/app.py", "one")
     cd = FakeCD(s)
+    stamped_by_traffic_call = []
+    gcloud = cd.gcloud
+
+    def watch(*args, **kw):
+        if args[:3] == ("run", "services", "update-traffic"):          # run deploy already moved the traffic: stamped before this
+            stamped_by_traffic_call.append("serving_at" in (cd.entry or {}))
+        return gcloud(*args, **kw)
+    cd.gcloud = watch
     cd.run()
+    assert stamped_by_traffic_call == [True]
     for job in cd.state["runs"][0]["jobs"][1:]:
         assert job["started_at"] <= job["completed_at"]
     portal = next(j for j in cd.state["runs"][0]["jobs"] if j["name"] == "portal")

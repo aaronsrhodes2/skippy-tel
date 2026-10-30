@@ -424,9 +424,9 @@ class CD:
             self.gcloud("run", "deploy", p["service"], f"--image={p['image']}:{sha}", f"--region={region}",
                         f"--service-account={p['service_account']}", *p["flags"], f"--set-env-vars={env}",
                         f"--set-secrets={secrets}")
+            if self.entry is not None:                    # run deploy (no --no-traffic) returns once the new revision has the traffic:
+                self.entry["serving_at"] = now_iso()      # tools/loop_timer.py's "serving" (stamped after update-traffic it ran ~20 s late)
             self.gcloud("run", "services", "update-traffic", p["service"], f"--region={region}", "--to-latest")
-            if self.entry is not None:                    # the new revision has all the traffic from here (tools/loop_timer.py)
-                self.entry["serving_at"] = now_iso()
             self.smoke_portal(src)
         except Exception:
             if prev:

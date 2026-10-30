@@ -217,7 +217,7 @@ Where each time comes from (all read only: one `ssh skippy-core python3 -` per l
 |---|---|
 | the house repo's reflog (`D:\trunk\git\skippy-tel.git`, `core.logAllRefUpdates always`, switched on 2026-10-27) | **the push**: when main moved to (or past) the commit. Without an entry: the ref file's time while it is still main's tip, else the commit date, and a note says which. While watching, the moment this machine saw main move |
 | CI, `/var/lib/skippy-core/ci/skippy-tel/results/<sha>.json` (`core/ci/ci.py`) | `at` (CI took it up), `finished_at`, and each job's `started_at` / `finished_at` (epoch seconds) |
-| the portal deploy, `/var/lib/skippy-core/cd/state.json` runs (`core/cd/cd.py`) | the run's `created_at` / `updated_at`; each job's `started_at` / `completed_at`; the portal job's **`serving_at`**: all traffic on the new revision |
+| the portal deploy, `/var/lib/skippy-core/cd/state.json` runs (`core/cd/cd.py`) | the run's `created_at` / `updated_at`; each job's `started_at` / `completed_at`; the portal job's **`serving_at`**: all traffic on the new revision (stamped when `gcloud run deploy` returns, which is when it has moved the traffic; until 2026-10-29 it was stamped after the extra `update-traffic` call, about 20 s late) |
 | Core's deployer, `/var/lib/skippy-core/deployer/status.json` (`core/deployer/deployer.py`) | `last_good.started` / `last_good.at`, only while the last good deploy is this commit (it keeps no history) |
 | the portal's `/version` | **visible**: the first second this machine saw it report the commit (polled every second while watching) |
 
