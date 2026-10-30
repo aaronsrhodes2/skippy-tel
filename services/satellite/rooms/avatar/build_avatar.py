@@ -1,5 +1,6 @@
 """The room box's animated Skippy: the chat's 3D model rendered to frames, and the firmware's include for them.
 
+    python services/satellite/rooms/avatar/build_avatar.py head       (the box now uses this: one still head, 320x320 with transparency, open the printed URL with &look=0&zoom=1.12; the box draws the mouth)
     python services/satellite/rooms/avatar/build_avatar.py serve      serve render.html on http://localhost:47313 and save every frame it sends
                                                                      (open the printed URL in a browser; it says "done" in its title when finished)
     python services/satellite/rooms/avatar/build_avatar.py preview    the same, three talking frames at twice the size into frames/preview (to judge a change)
@@ -44,11 +45,24 @@ class Handler(SimpleHTTPRequestHandler):
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_bytes(base64.b64decode(body.split(b",", 1)[1]))
             print("frame", parts[1], parts[2], flush=True)
+        elif parts[0] == "meta":
+            (FRAMES / "meta.json").write_bytes(body)
+            print("meta", body.decode(), flush=True)
         elif parts[0] == "done":
             print("done", len(json.loads(body)), "frames", flush=True)
             self.server.done = True
         self.send_response(204)
         self.end_headers()
+
+
+def serve_head() -> None:
+    """The head alone, still (the box animates it and draws the mouth), at 320x320 with transparency; writes frames/head/00.png and frames/meta.json."""
+    srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    srv.done = False
+    Handler.names = {"head"}
+    print(f"open http://localhost:{PORT}/services/satellite/rooms/avatar/render.html?w=320&h=320&head=1", flush=True)
+    while not srv.done:
+        srv.handle_request()
 
 
 def serve(preview: bool = False) -> None:
@@ -84,4 +98,4 @@ def write_yaml() -> None:
 
 
 if __name__ == "__main__":
-    {"serve": serve, "preview": lambda: serve(preview=True), "yaml": write_yaml}[sys.argv[1] if len(sys.argv) > 1 else "serve"]()
+    {"head": serve_head, "serve": serve, "preview": lambda: serve(preview=True), "yaml": write_yaml}[sys.argv[1] if len(sys.argv) > 1 else "serve"]()

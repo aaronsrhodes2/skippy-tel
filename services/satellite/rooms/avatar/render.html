@@ -3,7 +3,7 @@
      Served and captured by build_avatar.py; not part of the portal. Each loop's sine speeds are rounded to whole cycles, so it loops seamlessly. -->
 <meta charset="utf-8">
 <title>Skippy frames</title>
-<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+<style>html,body{margin:0;background:#303}canvas{display:block}</style>
 <script type="importmap">{"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 <script type="module">
 import * as THREE from "three";
@@ -15,8 +15,8 @@ const LOOPS = JSON.parse(P.get("loops") || '[{"name":"idle","seconds":5.333,"fra
 
 const SS = 2;                                                   // drawn at twice the size, then shrunk: smooth edges and fine ink lines
 const canvas = document.createElement("canvas"); document.body.append(canvas);
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, preserveDrawingBuffer: true });
-renderer.setPixelRatio(1); renderer.setSize(W * SS, H * SS, false); renderer.setClearColor(0x000000, 1);
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: true, preserveDrawingBuffer: true, premultipliedAlpha: false });
+renderer.setPixelRatio(1); renderer.setSize(W * SS, H * SS, false); renderer.setClearColor(0x000000, 0);
 const small = document.createElement("canvas"); small.width = W; small.height = H;
 const sctx = small.getContext("2d"); sctx.imageSmoothingQuality = "high";
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -41,10 +41,37 @@ function pivot(mesh, where) {                                   // as skippy-3d.
 const head = part.head && pivot(part.head, "base"), hat = part.hat && pivot(part.hat, "base");
 if (head && hat) head.attach(hat);
 const pointer = part.hand_r && pivot(part.hand_r, "centre"), rest = part.hand_l && pivot(part.hand_l, "centre");
-const box = new THREE.Box3().setFromObject(gltf.scene), size = box.getSize(new THREE.Vector3()), mid = box.getCenter(new THREE.Vector3());
+const HEADMODE = P.get("head") === "1";                         // the head and hat alone, still; the box animates it and draws the mouth itself
+let mouth = null;
+if (HEADMODE) {
+  gltf.scene.traverse(o => { if (o.isMesh && o !== part.head && o !== part.hat) o.visible = false; });
+  const g = part.head.geometry, col = g.getAttribute("color"), pos = g.getAttribute("position");
+  const isRed = i => col.getX(i) > 0.25 && col.getX(i) > 1.6 * col.getY(i) && col.getX(i) > 1.6 * col.getZ(i);
+  let skin = [0, 0, 0, 0];
+  for (let i = 0; i < col.count; i++) if (!isRed(i) && col.getX(i) > 0.55 && col.getY(i) > 0.55) { skin[0] += col.getX(i); skin[1] += col.getY(i); skin[2] += col.getZ(i); skin[3]++; }
+  const mv = []; for (let i = 0; i < col.count; i++) if (isRed(i)) mv.push(i);
+  const pos0 = pos.array.slice(), col0 = col.array.slice(), sk = skin.map(v => v / skin[3]);
+  const mean = new THREE.Vector3(), all = new THREE.Vector3();
+  for (const i of mv) mean.add(new THREE.Vector3(pos0[i * 3], pos0[i * 3 + 1], pos0[i * 3 + 2]));
+  for (let i = 0; i < pos.count; i++) all.add(new THREE.Vector3(pos0[i * 3], pos0[i * 3 + 1], pos0[i * 3 + 2]));
+  const dir = mean.divideScalar(mv.length).sub(all.divideScalar(pos.count)).normalize();
+  let rim = -1e9; for (const i of mv) rim = Math.max(rim, pos0[i * 3] * dir.x + pos0[i * 3 + 1] * dir.y + pos0[i * 3 + 2] * dir.z);
+  // open: 1 = as modelled, 0 = the cavity pushed out to the lip plane and painted skin (the box draws the closed line over it)
+  const setOpen = open => {
+    for (const i of mv) {
+      const d = pos0[i * 3] * dir.x + pos0[i * 3 + 1] * dir.y + pos0[i * 3 + 2] * dir.z, k = 0 * (rim - d) * (1 - open);
+      pos.setXYZ(i, pos0[i * 3] + dir.x * k, pos0[i * 3 + 1] + dir.y * k, pos0[i * 3 + 2] + dir.z * k);
+      for (let c = 0; c < 3; c++) col.array[i * col.itemSize + c] = sk[c] + (col0[i * col.itemSize + c] - sk[c]) * open;
+    }
+    pos.needsUpdate = true; col.needsUpdate = true;
+  };
+  console.log("mouth vertices", mv.length, "dir", dir.toArray());
+  mouth = { idx: mv, pos, setOpen };
+}
+const box = new THREE.Box3().setFromObject(HEADMODE ? head : gltf.scene), size = box.getSize(new THREE.Vector3()), mid = box.getCenter(new THREE.Vector3());
 const camera = new THREE.PerspectiveCamera(30, W / H, 0.1, 1000);
-const fit = Math.max(size.y * 1.12, size.x / camera.aspect) * 0.62 / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));   // a little room for the float
-const LOOK = +(P.get("look") || 0.14);                         // the camera a little below his middle, looking up: his eyes show under the brim
+const fit = Math.max(size.y * 1.12, size.x / camera.aspect) * 0.62 / (+P.get('zoom') || 1) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));   // a little room for the float
+const LOOK = P.has("look") ? +P.get("look") : 0.14;                         // the camera a little below his middle, looking up: his eyes show under the brim
 camera.position.set(mid.x, mid.y - size.y * LOOK, mid.z + fit); camera.lookAt(mid.x, mid.y + size.y * 0.04, mid.z); camera.updateProjectionMatrix();
 const base = { head: head && head.rotation.clone(), hat: hat && hat.rotation.clone(), y: skippy.position.y };
 
@@ -67,7 +94,7 @@ const ink = new THREE.ShaderMaterial({
         e = max(e, smoothstep(0.012, 0.03, abs(lin(v + o[i] * 1.5) - d) / d));
       }
       vec4 c = texture2D(col, v);
-      gl_FragColor = vec4(c.rgb * (1. - 0.85 * e), 1.);
+      gl_FragColor = vec4(c.rgb * (1. - 0.85 * e), max(c.a, 0.85 * e));
     }`,
 });
 const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), ink), post = new THREE.Scene(), flat = new THREE.Camera(); post.add(quad);
@@ -98,6 +125,20 @@ function pose(t, T, level, tilt) {
 }
 
 const out = [];
+if (HEADMODE) {                                                 // one still frame, and where the painted mouth was, in its pixels
+  head.updateMatrixWorld(true); camera.updateMatrixWorld(true);
+  const pts = []; const v = new THREE.Vector3();
+  for (const i of mouth.idx) { v.fromBufferAttribute(mouth.pos, i).applyMatrix4(part.head.matrixWorld).project(camera); pts.push([(v.x + 1) / 2 * W, (1 - v.y) / 2 * H]); }
+  const ys = pts.map(p => p[1]), ylo = Math.min(...ys), yhi = Math.max(...ys);
+  const low = pts.filter(p => p[1] > ylo + 0.35 * (yhi - ylo));          // the eye slits are red too: the mouth is the lower part
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const [x, y] of low) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  for (let i = 0; i < 1; i++) { mouth.setOpen(0); draw(); await fetch(`/frame/head/${i}`, { method: "POST", body: small.toDataURL("image/png") }); }
+  await fetch("/meta", { method: "POST", body: JSON.stringify({ cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0, n: mouth.idx.length }) });
+  await fetch("/done", { method: "POST", body: "[]" });
+  document.title = "done head " + JSON.stringify([x0, y0, x1, y1]);
+  throw new Error("done");
+}
 for (const L of LOOPS) {
   for (let i = 0; i < L.frames; i++) {
     pose(i * L.seconds / L.frames, L.seconds, L.level, L.tilt);

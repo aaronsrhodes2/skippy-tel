@@ -282,11 +282,9 @@ media_player:
                 id: music_in
                 decibel_reduction: 0
                 duration: 1.0s
-            - lvgl.widget.hide: avatar_talk
-            - lvgl.widget.show: avatar_idle
-          else:                                # Skippy is speaking: the talking loop
-            - lvgl.widget.hide: avatar_idle
-            - lvgl.widget.show: avatar_talk
+            - lambda: 'id(talking) = false;'
+          else:                                # Skippy is speaking: the mouth moves
+            - lambda: 'id(talking) = true;'
     on_play:
       - script.execute:
           id: face
@@ -316,6 +314,12 @@ voice_assistant:
         id: face
         state: offline
   on_wake_word_detected:
+    - lvgl.label.update:
+        id: heard_label
+        text: ""
+    - lvgl.label.update:
+        id: subtitle_label
+        text: ""
     - script.execute:
         id: face
         state: listening
@@ -323,11 +327,25 @@ voice_assistant:
     - script.execute:
         id: face
         state: listening
+  on_stt_vad_start:                       # the box is recording your voice
+    - script.execute:
+        id: face
+        state: recording
   on_stt_vad_end:
     - script.execute:
         id: face
         state: thinking
-  on_tts_start:
+  on_stt_end:                             # what Whisper heard you say
+    - lvgl.label.update:
+        id: heard_label
+        text: !lambda |-
+          static std::string quoted;
+          quoted = "\"" + x + "\"";
+          return quoted.c_str();
+  on_tts_start:                           # and what Skippy says back
+    - lvgl.label.update:
+        id: subtitle_label
+        text: !lambda return x.c_str();
     - script.execute:
         id: face
         state: speaking
@@ -399,7 +417,16 @@ binary_sensor:
 globals:
   - id: face_rgb
     type: uint32_t
-    initial_value: '0x1e3a5f'
+    initial_value: '0x6a28c9'
+  - id: talking
+    type: bool
+    initial_value: 'false'
+  - id: energy
+    type: float
+    initial_value: '0.3'
+  - id: energy_target
+    type: float
+    initial_value: '0.3'
   - id: breath
     type: int
     initial_value: '0'
@@ -414,16 +441,22 @@ script:
       state: string
     then:
       - lambda: |-
-          // idle: deep blue, barely breathing; listening: cyan; thinking: amber; speaking: Skippy purple; music: green; muted: red; offline: grey
-          uint32_t c = 0x1e3a5f;
-          if (state == "listening") c = 0x22d3ee;
-          else if (state == "thinking") c = 0xf59e0b;
-          else if (state == "speaking") c = 0xa855f7;
-          else if (state == "music") c = 0x22c55e;
-          else if (state == "muted") c = 0xef4444;
-          else if (state == "offline") c = 0x475569;
+          // the nimbus and the line above the head say what the box is doing. idle: purple, breathing; listening (your name was heard): cyan;
+          // recording your voice: red; thinking: amber; speaking: Skippy purple; music: green; muted: red; offline: grey
+          uint32_t c = 0x6a28c9; const char *t = "say \"Skippy\""; float en = 0.3f;
+          if (state == "listening") { c = 0x22d3ee; t = "listening"; en = 1.0f; }
+          else if (state == "recording") { c = 0xff3b6b; t = "recording"; en = 1.4f; }
+          else if (state == "thinking") { c = 0xf59e0b; t = "thinking"; en = 1.6f; }
+          else if (state == "speaking") { c = 0xb05cff; t = "speaking"; en = 1.0f; }
+          else if (state == "music") { c = 0x22c55e; t = "playing"; en = 0.6f; }
+          else if (state == "muted") { c = 0xef4444; t = "microphone off"; en = 0.2f; }
+          else if (state == "offline") { c = 0x475569; t = "hub offline"; en = 0.1f; }
           id(face_rgb) = c;
-          lv_obj_set_style_border_color(id(ring), lv_color_hex(c), LV_PART_MAIN);
+          id(energy_target) = en;
+          lv_obj_t *n[4] = {id(nim_1), id(nim_2), id(nim_3), id(nim_4)};
+          for (int i = 0; i < 4; i++) lv_obj_set_style_border_color(n[i], lv_color_hex(c), LV_PART_MAIN);
+          lv_label_set_text(id(status_label), t);
+          lv_obj_set_style_text_color(id(status_label), lv_color_hex(c == 0x6a28c9 ? 0xb05cff : c), LV_PART_MAIN);
           if (state != "idle" && state != "offline") id(last_activity) = millis();
       - if:
           condition:
@@ -437,10 +470,52 @@ interval:
   - interval: 60ms                        # the lamp breathes: slow when idle, quicker when something is happening
     then:
       - lambda: |-
-          bool busy = id(face_rgb) != 0x1e3a5f && id(face_rgb) != 0x475569;
+          bool busy = id(face_rgb) != 0x6a28c9 && id(face_rgb) != 0x475569;
           id(breath) = (id(breath) + (busy ? 6 : 2)) % 360;
           float s = (sinf(id(breath) * 3.14159f / 180.0f) + 1.0f) / 2.0f;
-          lv_obj_set_style_border_opa(id(ring), (lv_opa_t)(busy ? 120 + 135 * s : 60 + 80 * s), LV_PART_MAIN);
+          float k = busy ? 0.65f + 0.35f * s : 0.45f + 0.35f * s;
+          static const int base[4] = {230, 150, 90, 45};
+          lv_obj_t *n[4] = {id(nim_1), id(nim_2), id(nim_3), id(nim_4)};
+          for (int i = 0; i < 4; i++) lv_obj_set_style_border_opa(n[i], (lv_opa_t)(base[i] * k), LV_PART_MAIN);
+  - interval: 60ms                        # the head bobs, and the mouth moves while Skippy talks (random syllables: the box has no audio level)
+    then:
+      - lambda: |-
+          static float ph = 0, openv = 0, tgt = 0; static int hold = 0;
+          bool talk = id(talking);
+          if (talk) {
+            if (hold <= 0) { tgt = (random_uint32() % 100) / 100.0f; if (tgt < 0.25f) tgt = 0.0f; hold = 1 + random_uint32() % 3; }
+            hold--;
+          } else tgt = 0;
+          openv += (tgt - openv) * 0.6f;
+          int h = 4 + (int) (openv * 44), w = 70 + (int) (openv * 26);
+          lv_obj_set_size(id(mouth), w, h);
+          lv_obj_set_pos(id(mouth), 158 - w / 2, 235 - h / 2);
+          lv_obj_set_style_bg_color(id(mouth), lv_color_hex(openv > 0.15f ? 0x7a1020 : 0x3a1a2a), LV_PART_MAIN);
+          ph += talk ? 0.13f : 0.06f;
+          lv_obj_set_y(id(head_box), -30 + (int) (sinf(ph) * 6));
+          lv_obj_set_x(id(head_box), (int) (sinf(ph * 0.5f) * 5));
+  - interval: 80ms                        # the swirling background: three neon spirals drifting, quicker and brighter the busier he is
+    then:
+      - lambda: |-
+          static float t = 0; static lv_point_precise_t pts[3][40];
+          id(energy) += (id(energy_target) - id(energy)) * 0.1f;
+          float e = id(energy);
+          t += 0.08f * (0.5f + 0.8f * e);
+          lv_obj_t *o[3] = {id(sp_a)->obj, id(sp_b)->obj, id(sp_c)->obj};
+          for (int k = 0; k < 3; k++) {
+            float f1 = 0.05f + 0.03f * k, f2 = 0.07f + 0.02f * k;
+            float cx = 240 + sinf(t * f1 * 3.0f + k * 2.1f) * 120 + sinf(t * f2 * 7.0f + k) * 40;
+            float cy = 240 + sinf(t * f2 * 3.0f + k * 1.3f) * 120 + sinf(t * f1 * 6.0f + k * 0.7f) * 40;
+            float R = 150 + 40 * sinf(t * 0.2f + k * 1.7f), spin = (k % 2) ? -0.5f : 0.4f;
+            for (int i = 0; i < 40; i++) {
+              float u = i / 39.0f, th = u * 3.8f * 6.2832f;
+              float r = R * powf(u, 0.82f) * (1 + 0.1f * sinf(th * 3 + t * 1.2f)), a = th + t * spin;
+              int x = (int) (cx + r * cosf(a)), y = (int) (cy + r * sinf(a) * 0.85f);
+              pts[k][i].x = x < 0 ? 0 : (x > 479 ? 479 : x); pts[k][i].y = y < 0 ? 0 : (y > 479 ? 479 : y);
+            }
+            lv_line_set_points(o[k], pts[k], 40);
+            lv_obj_set_style_line_opa(o[k], (lv_opa_t) (70 + 60 * e), LV_PART_MAIN);
+          }
   - interval: 15s                         # the screen dims when nothing has happened for two minutes
     then:
       - if:
@@ -538,27 +613,162 @@ lvgl:
     - id: home
       bg_color: 0x000000
       widgets:
+        - line:
+            id: sp_a
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 2
+            line_color: 0xb05cff
+            line_opa: 40%
+        - line:
+            id: sp_b
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 2
+            line_color: 0xe070ff
+            line_opa: 40%
+        - line:
+            id: sp_c
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 2
+            line_color: 0x9a55ff
+            line_opa: 40%
         - obj:
-            id: ring
+            id: nim_1
+            x: 0
+            y: 0
+            width: 480
+            height: 480
+            radius: 30
+            bg_opa: TRANSP
+            border_width: 10
+            border_color: 0x6a28c9
+            border_opa: 50%
+            outline_width: 0
+            shadow_width: 0
+            scrollable: false
+        - obj:
+            id: nim_2
+            x: 10
+            y: 10
+            width: 460
+            height: 460
+            radius: 22
+            bg_opa: TRANSP
+            border_width: 10
+            border_color: 0x6a28c9
+            border_opa: 50%
+            outline_width: 0
+            shadow_width: 0
+            scrollable: false
+        - obj:
+            id: nim_3
+            x: 20
+            y: 20
+            width: 440
+            height: 440
+            radius: 14
+            bg_opa: TRANSP
+            border_width: 10
+            border_color: 0x6a28c9
+            border_opa: 50%
+            outline_width: 0
+            shadow_width: 0
+            scrollable: false
+        - obj:
+            id: nim_4
+            x: 30
+            y: 30
+            width: 420
+            height: 420
+            radius: 6
+            bg_opa: TRANSP
+            border_width: 10
+            border_color: 0x6a28c9
+            border_opa: 50%
+            outline_width: 0
+            shadow_width: 0
+            scrollable: false
+        - obj:
+            id: head_box
             align: CENTER
             y: -30
             width: 320
             height: 320
-            radius: 160
             bg_opa: TRANSP
-            border_width: 18
-            border_color: 0x1e3a5f
-            border_opa: 50%
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            pad_all: 0
             scrollable: false
-        - !include avatar/widget-idle.yaml   # Skippy, the chat's 3D model rendered to frames (avatar/build_avatar.py), inside the ring
-        - !include avatar/widget-talk.yaml   # ... and talking, while the box speaks (the media player's on_state below)
+            widgets:
+              - image:
+                  id: head_img
+                  src: skippy_head
+                  x: 0
+                  y: 0
+              - obj:
+                  id: mouth_patch
+                  x: 98
+                  y: 200
+                  width: 120
+                  height: 70
+                  radius: 35
+                  bg_color: 0xc6c4c8
+                  bg_opa: COVER
+                  border_width: 0
+                  outline_width: 0
+                  shadow_width: 0
+                  scrollable: false
+              - obj:
+                  id: mouth
+                  x: 123
+                  y: 233
+                  width: 70
+                  height: 4
+                  radius: 100
+                  bg_color: 0x3a1a2a
+                  bg_opa: COVER
+                  border_width: 0
+                  outline_width: 0
+                  shadow_width: 0
+                  scrollable: false
+        - label:
+            id: status_label
+            align: TOP_MID
+            y: 20
+            text: ""
+            text_font: montserrat_20
+            text_color: 0xb05cff
+        - label:
+            id: heard_label
+            align: BOTTOM_MID
+            y: -76
+            width: 440
+            height: 52
+            text: ""
+            text_font: montserrat_20
+            text_color: 0xffffff
+            text_align: CENTER
+            long_mode: DOT
         - label:
             id: subtitle_label
             align: BOTTOM_MID
-            y: -28
+            y: -22
             width: 440
+            height: 52
             text: ""
             text_font: montserrat_20
-            text_color: 0xcbd5e1
+            text_color: 0xd6c2ff
             text_align: CENTER
             long_mode: DOT
