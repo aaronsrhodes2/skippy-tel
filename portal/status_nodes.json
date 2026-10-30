@@ -161,10 +161,10 @@
   ]
  },
  "flask-api": {
-  "for": "Skippy's original API (SkippyTel core): JSON only, no pages. It holds the ElevenLabs key for Skippy's cloud voice, the music session and Bilby's status, the site-activity summary, and the old chat routing.",
+  "for": "Skippy's original API (SkippyTel core): JSON only, no pages. It holds the music session and Bilby's status, the songs' lyric summaries, the site-activity summary, and the old chat routing.",
   "used_by": [
    "the home reporter (/status.json, /services, /health, /music/session)",
-   "voice-gate (the ElevenLabs voice through /tts)",
+   "music-gate (Bilby's 'what the song is about' lines)",
    "the shelved phone apps"
   ],
   "example": {
@@ -173,11 +173,10 @@
   }
  },
  "whisper": {
-  "for": "Speech to text on skippy-pc's card (faster-whisper, the medium model, kept loaded). Turns a recording into words.",
+  "for": "Speech to text on skippy-pc's card (faster-whisper, the medium model, kept loaded). Any language in, English out (task=translate), with the language it heard.",
   "used_by": [
-   "voice-gate (the chats' microphone)",
-   "the diarize pop-up (who said what)",
-   "flask-api's audio routes"
+   "voice-gate (the chats' microphone, and Hands-off's translator)",
+   "the diarize pop-up (who said what)"
   ],
   "example": {
    "ask": "GET /health",
@@ -246,13 +245,13 @@
   }
  },
  "voice-gate": {
-  "for": "Skippy's ears and mouth for the portal's chats: a microphone recording goes to Whisper, a reply comes back as speech (the local voices from tts-studio, or ElevenLabs through flask-api), through Funnel :10000 with a signed pass.",
+  "for": "Skippy's ears and mouth for the portal's chats: a microphone recording goes to Whisper (in Hands-off, another language becomes a translated 'heard' line), and a reply comes back as speech in the local voices from tts-studio, through Funnel :10000 with a signed pass.",
   "used_by": [
    "the chats' voice key (Typing and Hands-off modes)"
   ],
   "example": {
    "ask": "GET /health",
-   "answer": "{\"ready\": true, \"whisper\": true, \"voices\": {\"stock\": true, \"skippy\": true, \"elevenlabs\": true}, \"voice_chars_today\": 0, \"voice_budget\": 4000}"
+   "answer": "{\"ready\": true, \"whisper\": true, \"voices\": {\"stock\": true, \"skippy\": true}}"
   }
  },
  "tts-studio": {
