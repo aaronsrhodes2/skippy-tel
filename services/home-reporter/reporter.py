@@ -49,9 +49,10 @@ POPUP_TYPES = {"image/png", "image/jpeg", "image/webp", "audio/mpeg", "audio/mp3
 LOCAL_API_PORT = int(os.environ.get("LOCAL_API_PORT", "47450") or 0)     # 0 turns the door off (tests)
 POPUP_MAX_TIMEOUT = 7200     # the longest a pop-up may take (portal/popups.py MAX_TIMEOUT_S)
 GPU = threading.Lock()       # one heavy GPU job at a time: a song and a chat model can't share the card
-MUSIC_TIMEOUT = 600          # seconds a song may take
+MUSIC_TIMEOUT = 3600         # seconds a song may take: quality over speed (the Captain, 2026-10-29), and every song loads its models
 MUSIC_POLL = 2.0              # seconds between asking the studio how the song is coming
-MUSIC_MODEL = os.environ.get("MUSIC_MODEL", "acestep-v15-turbo")   # 8-step turbo model
+MUSIC_MODEL = os.environ.get("MUSIC_MODEL", "acestep-v15-sft")    # the 2 B quality DiT (50 steps with guidance), not the 8-step turbo
+MUSIC_STEPS = int(os.environ.get("MUSIC_STEPS", "50"))
 CLIP_MAX = 25_000_000        # the portal takes up to 30 MB; a request may be 32 MB
 GATE = os.environ.get("MUSIC_GATE_URL", "").rstrip("/")        # music-gate: Bilby's Audio Service's library (inside)
 GATE_PUBLIC = os.environ.get("MUSIC_GATE_PUBLIC", "").rstrip("/")   # ... and where Tailscale Funnel shows it (outside)
@@ -525,7 +526,7 @@ def make_music(job: dict, token: str) -> dict:
     seconds = max(10, min(120, seconds))
     prompt = str(job.get("prompt") or "")[:500]
     ask = {"prompt": prompt, "lyrics": str(job.get("lyrics") or "").strip()[:3000] or "[Instrumental]",
-           "audio_duration": seconds, "inference_steps": 8, "batch_size": 1, "audio_format": "mp3",
+           "audio_duration": seconds, "inference_steps": MUSIC_STEPS, "guidance_scale": 7.0, "batch_size": 1, "audio_format": "mp3",
            "thinking": True, "use_random_seed": True, "model": MUSIC_MODEL}
     with GPU:
         free_gpu()

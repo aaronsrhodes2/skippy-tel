@@ -196,3 +196,15 @@ def test_notes_read_like_a_piano_roll():
     rows = popups.note_list([(1.0, 1.5, 45, 0.5, []), (0.0, 0.25, 33, 1.0, [])], 120)
     assert rows == [{"note": "A1", "beat": 0.0, "beats": 0.5, "velocity": 127},
                     {"note": "A2", "beat": 2.0, "beats": 1.0, "velocity": 64}]
+
+
+def test_only_the_running_service_ends_itself_after_a_job(client, monkeypatch):
+    ended = []
+    monkeypatch.setattr(popups, "_end_after_job", lambda: ended.append(1))
+    monkeypatch.setitem(popups.WORK, "audio_to_midi", lambda b, c: popups.Result(b"MThd", "audio/midi", "x.mid", {}))
+    monkeypatch.setitem(popups._loaded, "audio_to_midi", object())
+    client.post("/audio_to_midi", data=b"RIFF", content_type="audio/wav").close()
+    assert ended == []                                                         # an import (these tests) never exits
+    monkeypatch.setitem(popups.app.config, "SERVING", True)
+    client.post("/audio_to_midi", data=b"RIFF", content_type="audio/wav").close()
+    assert ended == [1]                                                        # the service does, once the reply is sent

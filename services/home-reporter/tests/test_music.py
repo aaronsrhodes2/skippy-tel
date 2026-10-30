@@ -125,13 +125,13 @@ def test_a_song_is_made_polled_downloaded_uploaded_with_the_token_and_reported(h
     assert put["body"] == b"ID3fake-audio"
 
 
-def test_the_task_asks_for_the_turbo_model_an_mp3_and_an_instrumental_when_there_are_no_lyrics(home):
+def test_the_task_asks_for_the_quality_model_an_mp3_and_an_instrumental_when_there_are_no_lyrics(home):
     studio, *_ = home
     reporter.run_job(JOB, "t")
     ask = _release(studio)
     assert ask["prompt"] == "dreamy lofi beat" and ask["lyrics"] == "[Instrumental]"
-    assert ask["audio_duration"] == 30 and ask["audio_format"] == "mp3" and ask["inference_steps"] == 8
-    assert ask["model"] == "acestep-v15-turbo" and ask["batch_size"] == 1
+    assert ask["audio_duration"] == 30 and ask["audio_format"] == "mp3" and ask["inference_steps"] == 50
+    assert ask["model"] == "acestep-v15-sft" and ask["guidance_scale"] == 7.0 and ask["batch_size"] == 1
 
 
 def test_lyrics_are_passed_through(home):

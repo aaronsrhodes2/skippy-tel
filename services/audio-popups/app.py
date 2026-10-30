@@ -4,15 +4,17 @@
     POST /sfx_quick            {"prompt", "seconds"?, "seed"?}                         -> audio/wav   Stable Audio Open Small
     POST /sfx_loop             {"prompt", "seconds"? | "bpm"+"bars"?, "key"?, "seed"?, "steps"?, "loop"?}
                                                                                        -> audio/wav   Stable Audio Open 1.0
-    POST /melody_variations    multipart: audio + prompt [+ seconds, seed]             -> audio/wav   MusicGen stereo-melody
+    POST /melody_variations    multipart: audio + prompt [+ seconds, seed]             -> audio/wav   MusicGen stereo-melody-large
     POST /stems                multipart: audio [+ stem, format (flac|wav|mp3), quality (ft|fast)]
                                                                                        -> application/zip, or one stem   Demucs v4
     POST /audio_to_midi        multipart: audio [+ bpm, onset, frame, min_note_ms]     -> audio/midi  Basic Pitch (CPU)
 
 The weights are D:/models' own copies, seeded once into a Docker volume (seed_weights.sh: Docker reads D: at ~8 MB/s, so a
-mount straight from D: would take minutes per load) and mounted read-only. Everything runs offline. A GPU model loads on its
-first request, unloads any other GPU model first (the card is 16 GB and shared with the resident voices), and unloads itself
-after IDLE_UNLOAD_S idle seconds. One job at a time. Every reply carries X-Seconds, X-Peak-VRAM-MB and X-Seed (when it used one).
+mount straight from D: would take minutes per load) and mounted read-only. Everything runs offline. Nothing is kept warm (the
+Captain, 2026-10-29: music takes time, quality over speed): a model loads for its job, and once the reply has gone the process ends,
+so Docker's restart policy brings back a bare Flask and the card and the VM get everything back. The settings are the quality ones
+(the large MusicGen, two Demucs passes, 150 diffusion steps), not the fast ones. One job at a time. Every reply carries X-Seconds,
+X-Peak-VRAM-MB and X-Seed (when it used one).
 Full songs are NOT here: they stay with ACE-Step's music-studio (make_music).
 """
 from __future__ import annotations
@@ -33,7 +35,9 @@ import zipfile
 from flask import Flask, Response, jsonify, request
 
 WEIGHTS = os.environ.get("AUDIO_POPUPS_WEIGHTS", "/weights")
-IDLE_UNLOAD_S = int(os.environ.get("IDLE_UNLOAD_S", "300"))
+IDLE_UNLOAD_S = int(os.environ.get("IDLE_UNLOAD_S", "300"))      # the fallback only: normally the process ends after each job
+EXIT_AFTER_JOB = os.environ.get("EXIT_AFTER_JOB", "1") == "1"
+DEMUCS_SHIFTS = int(os.environ.get("DEMUCS_SHIFTS", "2"))         # passes at shifted offsets, averaged: a little cleaner, twice the time
 MAX_UPLOAD = int(os.environ.get("MAX_UPLOAD_MB", "96")) * 1024 * 1024   # a 64 MB track base64'd in the contract's JSON is ~86 MB
 DEVICE = os.environ.get("AUDIO_POPUPS_DEVICE", "cuda")
 
@@ -42,7 +46,7 @@ PATHS = {
     "sfx_quick": "stabilityai__stable-audio-open-small",
     "sfx_loop": "stabilityai__stable-audio-open-1.0",
     "t5": "google-t5__t5-base",
-    "melody_variations": "facebook__musicgen-stereo-melody",
+    "melody_variations": os.environ.get("MELODY_MODEL", "facebook__musicgen-stereo-melody-large"),   # 3.3 B; the 1.5 B is the fallback
     "stems": "facebookresearch__demucs",
     "audio_to_midi": "spotify__basic-pitch",
 }
@@ -426,9 +430,9 @@ def run_sao(name: str, body: dict, _clip=None) -> Result:
             kw = {"steps": 8, "cfg_scale": 1.0, "sampler_type": "pingpong"}
         else:
             try:
-                steps = max(20, min(150, int(body.get("steps") or 100)))
+                steps = max(20, min(250, int(body.get("steps") or 150)))
             except (TypeError, ValueError):
-                steps = 100
+                steps = 150
             kw = {"steps": steps, "cfg_scale": 7.0, "sigma_min": 0.3, "sigma_max": 500, "sampler_type": "dpmpp-3m-sde"}
         with torch.inference_mode():
             audio = generate_diffusion_cond(model, conditioning=[{"prompt": prompt, "seconds_start": 0, "seconds_total": seconds}],
@@ -466,15 +470,8 @@ def run_melody(body: dict, clip) -> Result:
 
 STEM_TYPES = {"flac": "audio/flac", "wav": "audio/wav", "mp3": "audio/mpeg"}
 STEM_NAMES = ("drums", "bass", "other", "vocals")
-_separated: dict = {}                      # the last clip's stems, by its sha256: asking for a second stem costs nothing
-
-
 def separate(clip: bytes, quality: str):
-    """(stems {name: float array}, rate, seconds) for this clip, from the cache when the same clip was just split."""
-    import hashlib
-    key = (hashlib.sha256(clip).hexdigest(), quality)
-    if key in _separated:
-        return _separated[key]
+    """(stems {name: float array}, rate, seconds) for this clip."""
     import torch
     from demucs.apply import apply_model
     model = get("stems", quality)["model"]
@@ -483,12 +480,10 @@ def separate(clip: bytes, quality: str):
     ref = mix.mean(0)
     mean, std = ref.mean(), ref.std() + 1e-8
     with torch.inference_mode():
-        out = apply_model(model, ((mix - mean) / std)[None].to(DEVICE), device=DEVICE, shifts=1, split=True,
-                          overlap=0.25, progress=False)[0]
+        out = apply_model(model, ((mix - mean) / std)[None].to(DEVICE), device=DEVICE,
+                          shifts=DEMUCS_SHIFTS if quality == "ft" else 1, split=True, overlap=0.25, progress=False)[0]
     out = (out * std.to(out.device) + mean.to(out.device)).float().cpu().numpy()
-    _separated.clear()
-    _separated[key] = ({n: out[i] for i, n in enumerate(model.sources)}, rate, mix.shape[1] / rate)
-    return _separated[key]
+    return {n: out[i] for i, n in enumerate(model.sources)}, rate, mix.shape[1] / rate
 
 
 def run_stems(body: dict, clip) -> Result:
@@ -572,14 +567,27 @@ WORK = {"sfx_quick": lambda b, c: run_sao("sfx_quick", b, c), "sfx_loop": lambda
 def answer(name: str, body: dict, clip) -> Response:
     try:
         r = WORK[name](body, clip)
+        headers = dict(r.headers, **{"Content-Disposition": f'attachment; filename="{r.filename}"'})
+        response = Response(r.data, mimetype=r.mimetype, headers=headers)
     except Refused as exc:
-        return jsonify(error=str(exc)), exc.status
+        response = jsonify(error=str(exc))
+        response.status_code = exc.status
     except BadClip as exc:
-        return jsonify(error=str(exc)[:300]), 400
+        response = jsonify(error=str(exc)[:300])
+        response.status_code = 400
     except Exception as exc:  # noqa: BLE001 — the reporter shows the reason in the chat
-        return jsonify(error=f"{type(exc).__name__}: {exc}"[:300]), 500
-    headers = dict(r.headers, **{"Content-Disposition": f'attachment; filename="{r.filename}"'})
-    return Response(r.data, mimetype=r.mimetype, headers=headers)
+        response = jsonify(error=f"{type(exc).__name__}: {exc}"[:300])
+        response.status_code = 500
+    if EXIT_AFTER_JOB and app.config.get("SERVING") and (_loaded or "torch" in sys.modules):
+        response.call_on_close(_end_after_job)            # a refusal before any load leaves the small process be
+    return response
+
+
+def _end_after_job() -> None:
+    """Once the reply has been sent: end the process, unless another job already holds the lock (it ends it instead)."""
+    if _lock.acquire(blocking=False):
+        print("[audio-popups] job done: exiting so the card and the VM get everything back", flush=True)
+        os._exit(0)
 
 
 # ── routes ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -639,4 +647,5 @@ def native(name: str):
 
 if __name__ == "__main__":                                       # only the service unloads and exits; an import (the tests) never does
     threading.Thread(target=_unload_when_idle, daemon=True).start()
+    app.config["SERVING"] = True
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "47440")), threaded=True)

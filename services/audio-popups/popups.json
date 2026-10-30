@@ -20,10 +20,10 @@
         "additionalProperties": false
       },
       "outputs": ["audio/wav"],
-      "est_seconds": 30,
+      "est_seconds": 90,
       "vram_gb": 3,
       "audience": "admin",
-      "description": "Makes one short sound effect or drum hit for the Captain's electronic music in seconds (Stable Audio Open Small): kicks, snares, hats, risers, impacts, glitches, foley. 0.5 to 11 seconds, a 44.1 kHz stereo WAV he can drop into his DAW. Use for single hits and FX; for tempo-locked loops use sfx_loop; for whole songs use make_music."
+      "description": "Makes one short sound effect or drum hit for the Captain's electronic music (Stable Audio Open Small): kicks, snares, hats, risers, impacts, glitches, foley. 0.5 to 11 seconds, a 44.1 kHz stereo WAV he can drop into his DAW. Use for single hits and FX; for tempo-locked loops use sfx_loop; for whole songs use make_music."
     },
     {
       "name": "sfx_loop",
@@ -48,7 +48,7 @@
         "additionalProperties": false
       },
       "outputs": ["audio/wav"],
-      "est_seconds": 100,
+      "est_seconds": 420,
       "vram_gb": 5,
       "audience": "admin",
       "description": "Makes a tempo- and key-aware loop or longer one-shot for the Captain's tracks (Stable Audio Open 1.0): drum loops, hat loops, basslines, chord stabs, arps, pads, textures, up to 47 seconds. Give bpm and bars and it is cut to exactly that length so it loops on the DAW's grid; give a key for tonal parts. Returns a 44.1 kHz stereo WAV. Not for whole songs (make_music) or single quick hits (sfx_quick)."
@@ -75,10 +75,10 @@
       "media_required": true,
       "max_input_mb": 64,
       "outputs": ["audio/wav"],
-      "est_seconds": 75,
-      "vram_gb": 6,
+      "est_seconds": 600,
+      "vram_gb": 9,
       "audience": "admin",
-      "description": "Takes a clip the Captain attached (a hummed or played melody, a riff, a loop) and re-imagines it in the style he describes, keeping its melody and harmony (MusicGen stereo-melody; the first 30 seconds of the clip count). Up to 30 seconds of 32 kHz stereo WAV. Good for trying a hook in another genre or arrangement. Sketching only: its licence is non-commercial."
+      "description": "Takes a clip the Captain attached (a hummed or played melody, a riff, a loop) and re-imagines it in the style he describes, keeping its melody and harmony (MusicGen stereo-melody-large, 3.3 B; the first 30 seconds of the clip count). Up to 30 seconds of 32 kHz stereo WAV. Good for trying a hook in another genre or arrangement. Sketching only: its licence is non-commercial."
     },
     {
       "name": "stems",
@@ -101,10 +101,10 @@
       "media_required": true,
       "max_input_mb": 64,
       "outputs": ["application/zip", "audio/mpeg"],
-      "est_seconds": 60,
+      "est_seconds": 180,
       "vram_gb": 3,
       "audience": "admin",
-      "description": "Splits an attached track into drums, bass, vocals and other (Demucs v4) for remixing, sampling or study: a zip of four 320 kbps mp3s, or one stem (or the instrumental) to play in the chat. A second stem of the same clip comes back at once."
+      "description": "Splits an attached track into drums, bass, vocals and other (Demucs v4) for remixing, sampling or study: a zip of four 320 kbps mp3s, or one stem (or the instrumental) to play in the chat. Two averaged passes for the cleanest split."
     },
     {
       "name": "audio_to_midi",
@@ -128,10 +128,10 @@
       "media_required": true,
       "max_input_mb": 64,
       "outputs": ["audio/midi"],
-      "est_seconds": 25,
+      "est_seconds": 60,
       "vram_gb": 0,
       "audience": "admin",
-      "description": "Turns an attached clip (a melody, bassline, chords, a sung or played idea, or a stem from the stems tool) into a MIDI file the Captain drags into his DAW (Spotify Basic Pitch; polyphonic, with pitch bends). Works best on one instrument at a time. Runs on the CPU in seconds."
+      "description": "Turns an attached clip (a melody, bassline, chords, a sung or played idea, or a stem from the stems tool) into a MIDI file the Captain drags into his DAW (Spotify Basic Pitch; polyphonic, with pitch bends). Works best on one instrument at a time. Runs on the CPU."
     }
   ]
 }

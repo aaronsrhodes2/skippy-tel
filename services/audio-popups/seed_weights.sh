@@ -18,6 +18,7 @@ FOLDERS=(
   huggingface/stabilityai__stable-audio-open-1.0
   huggingface/google-t5__t5-base
   huggingface/facebook__musicgen-stereo-melody
+  huggingface/facebook__musicgen-stereo-melody-large
   direct/facebookresearch__demucs
   direct/spotify__basic-pitch
 )
