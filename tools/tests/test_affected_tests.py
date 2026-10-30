@@ -50,7 +50,7 @@ def template(tmp_path_factory):
     write(root, "portal/templates/base.html", "<p>hi</p>\n")
     write(root, "services/flask-api/app/main.py", "y = 1\n")
     write(root, "services/home-reporter/reporter.py", "z = 1\n")
-    write(root, "services/music-studio/server.py", "w = 1\n")
+    write(root, "services/ups-monitor/monitor.py", "w = 1\n")
     write(root, "tools/helper.py", "t = 1\n")
     write(root, "docs/guide.md", "# guide\n")
     write(root, "docs/cicd.md", "# ci\n")
@@ -188,7 +188,7 @@ def test_full_beats_everything_else_in_the_same_change(repo):
 
 
 def test_a_service_without_tests_that_no_test_names_has_nothing_to_run(repo):
-    plan = plan_for(repo, "services/music-studio/server.py")
+    plan = plan_for(repo, "services/ups-monitor/monitor.py")
     assert not plan.full and plan.targets == {}
 
 
