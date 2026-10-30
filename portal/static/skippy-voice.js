@@ -89,6 +89,11 @@
   /* Said alone during the send countdown, these mean "don't send it". */
   const STOP_RE = /^\s*(?:ok(?:ay)?[ ,]*)?(?:stop|cancel|wait|hold on|hold it|don'?t send(?: it)?|never ?mind|no|abort)\s*[.!?]*\s*$/i;
   const SEND_DELAY_MS = 4000;
+  // HEARD SPEECH (the Captain, 2026-10-29: a translator for the AR glasses). Whisper on skippy-pc always answers in English and says which
+  // language it heard and how sure it is. In Hands-off, speech in another language that Whisper is this sure of is someone else talking
+  // near you: it goes into the chat as a translated "heard" line (opts.onHeard), is not sent to Skippy, and the listening goes on.
+  const HEARD_SURE = 0.7;
+  function heard(lang, sure) { return !!lang && !/^en\b/i.test(lang) && typeof sure === "number" && sure >= HEARD_SURE; }
   /* Standby: the page hears every utterance (the microphone stays open, but only SPEECH is ever sent to the home Whisper, and it is thrown away
      unless it begins with the wake word). "Hey Skippy, turn that down" wakes it and "turn that down" is the message; "Skippy." alone wakes it and
      the next thing said is the message. */
@@ -165,7 +170,8 @@
       let r = await fetch(base(g) + "/stt" + q, { method: "POST", headers: { "Content-Type": type }, body: blob });
       if (r.status === 403) { pass = null; g = await gate(); r = await fetch(base(g) + "/stt" + q, { method: "POST", headers: { "Content-Type": type }, body: blob }); }
       if (!r.ok) throw new Error("not understood");
-      return (await r.json()).text || "";
+      const d = await r.json();
+      return { text: d.text || "", lang: d.lang || "", sure: typeof d.sure === "number" ? d.sure : 0 };
     }
 
     // A long reply is not read out word for word (it comes in parts, and symbols and paths are no way to talk): the gate writes what a
@@ -237,7 +243,7 @@
         rec.onstop = async function () {
           if (!spoke) return finish({ spoke: false, text: "" });
           if (seg.minSpeechMs && Date.now() - speechAt < seg.minSpeechMs) return finish({ spoke: false, text: "", short: true });      // a cough or a click: not worth sending
-          try { finish({ spoke: true, text: word(await transcribe(blob(), type)) }); } catch (e) { finish({ spoke: true, text: lastInterim, failed: true }); }
+          try { const t = await transcribe(blob(), type); finish({ spoke: true, text: word(t.text), lang: t.lang, sure: t.sure }); } catch (e) { finish({ spoke: true, text: lastInterim, failed: true }); }
         };
         seg.abort = function () { ended = true; clearInterval(timer); try { if (rec.state !== "inactive") { rec.onstop = null; rec.stop(); } } catch (e) {} resolve({ spoke: false, text: "", aborted: true }); };
         rec.start(250);
@@ -254,7 +260,7 @@
           if (now - t0 >= MAX_REC_MS) { try { rec.stop(); } catch (e) {} return; }
           if (spoke && seg.interim && !busy && (mic_.blind || vad.speaking) && now - speechAt >= 1200 && now - interimAt > 2200 && chunks.length > 4) {      // the words appear while you are still speaking
             busy = true; interimAt = now;
-            try { const t = word(await transcribe(blob(), type)); if (!ended && t) { lastInterim = t; if (seg.interim) seg.interim(t); } } catch (e) {}
+            try { const t = word((await transcribe(blob(), type)).text); if (!ended && t) { lastInterim = t; if (seg.interim) seg.interim(t); } } catch (e) {}
             busy = false;
           }
         }, 60);
@@ -302,6 +308,12 @@
             break;                                               // the count ran out: send
           }
           paintStatus("Understanding\u2026", 0, true); paint(mic, "boot");
+          if (chat && opts.onHeard && r.text && heard(r.lang, r.sure)) {        // someone else, in another language: write it down, keep listening
+            show(message); onText(message, false);
+            opts.onHeard({ text: r.text, lang: r.lang, sure: r.sure });
+            paintStatus("Heard: written in the chat", 0, true); paint(mic, "on");
+            continue;
+          }
           if (chat && END_RE.test(r.text)) { endChat(twoMode ? "Back to typing" : "Conversation ended"); return; }               // "goodbye": no touch needed to leave either
           if (!first && STOP_RE.test(r.text)) {
             if (chat) {                                          // in a conversation "stop" throws the message away and listens again: just say it again
@@ -565,5 +577,5 @@
     return { say: say, stop: stopSpeaking, cancel: cancel, resume: replied, standby: function () { return standbyOn; }, chatting: function () { return chat; }, enabled: function () { return !!wanted; } };
   }
 
-  return { attach: attach, pickMime: pickMime, speakable: speakable, plain: plain, createVad: createVad, wakeSplit: wakeSplit, isIOS: isIOS, iosHint: iosHint, OPEN_IN_SAFARI: OPEN_IN_SAFARI, EAR_KEY: EAR_KEY, WAKE_TEXT: WAKE_TEXT, SAFARI_HINT: SAFARI_HINT, WAKE_RE: WAKE_RE, STOP_RE: STOP_RE, END_RE: END_RE, SEND_DELAY_MS: SEND_DELAY_MS, MAX_SPEECH: MAX_SPEECH };
+  return { attach: attach, pickMime: pickMime, speakable: speakable, plain: plain, createVad: createVad, wakeSplit: wakeSplit, isIOS: isIOS, iosHint: iosHint, OPEN_IN_SAFARI: OPEN_IN_SAFARI, EAR_KEY: EAR_KEY, WAKE_TEXT: WAKE_TEXT, SAFARI_HINT: SAFARI_HINT, WAKE_RE: WAKE_RE, STOP_RE: STOP_RE, END_RE: END_RE, SEND_DELAY_MS: SEND_DELAY_MS, MAX_SPEECH: MAX_SPEECH, heard: heard, HEARD_SURE: HEARD_SURE };
 });

@@ -27,7 +27,7 @@ class Resp:
 class Fake:
     def __init__(self):
         self.posts, self.gets = [], []
-        self.stt = Resp(200, {"english_text": " hello there ", "detected_lang": "en"})
+        self.stt = Resp(200, {"english_text": " hello there ", "detected_lang": "en", "confidence": 0.987})
         self.ollama = Resp(200, {"response": "Done: the pill is orange and the tests pass."})
         self._speak = None  # set after Stream is defined
 
@@ -94,12 +94,21 @@ def test_health_needs_no_pass(stack):
 def test_stt_returns_the_text_and_validates_input(stack):
     c, fake = stack
     r = c.post(f"/t/{listen()}/stt?lang=en", data=b"abc", content_type="audio/webm;codecs=opus")
-    assert r.status_code == 200 and r.get_json() == {"text": "hello there", "lang": "en"}
+    assert r.status_code == 200 and r.get_json() == {"text": "hello there", "lang": "en", "sure": 0.99}
     assert fake.posts[0][1]["data"] == {"hint_lang": "en"}
     assert c.post(f"/t/{listen()}/stt", data=b"abc", content_type="text/plain").status_code == 415
     assert c.post(f"/t/{listen()}/stt?lang=../x", data=b"abc", content_type="audio/webm").status_code == 400
     assert c.post(f"/t/{listen()}/stt", data=b"", content_type="audio/webm").status_code == 400
     assert c.post(f"/t/{listen()}/stt", data=b"x" * (gate.MAX_AUDIO + 8192), content_type="audio/webm").status_code == 413
+
+
+def test_stt_says_how_sure_whisper_is_of_the_language(stack):
+    c, fake = stack
+    fake.stt = Resp(200, {"english_text": "where is the station", "detected_lang": "es", "confidence": 0.93})
+    assert c.post(f"/t/{listen()}/stt", data=b"abc", content_type="audio/webm").get_json() == {"text": "where is the station", "lang": "es", "sure": 0.93}
+    for odd in (None, "x", 7):                                            # missing or nonsense: never more than 1, never an error
+        fake.stt = Resp(200, {"english_text": "hi", "detected_lang": "fr", "confidence": odd})
+        assert c.post(f"/t/{listen()}/stt", data=b"abc", content_type="audio/webm").get_json()["sure"] in (0.0, 1.0)
 
 
 def test_stt_survives_a_dead_whisper(stack):

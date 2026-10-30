@@ -249,16 +249,36 @@ def continued(context) -> str:
             + "\n</earlier_conversation>")
 
 
+HEARD_LANG = re.compile(r"[a-z]{2,3}(?:-[A-Za-z]{2,4})?")
+
+
+def heard_note(heard: list[str]) -> str:
+    """What Hands-off heard other people say (another language, translated by Whisper on skippy-pc), as context ahead of the
+    Captain's next message. Not his words: the model is told so."""
+    if not heard:
+        return ""
+    return ("[Heard near me while Hands-off listened, translated into English by Whisper (other people talking, not me):\n"
+            + "\n".join(heard) + "]\n\n")
+
+
 def build_messages(history, message: str) -> list[dict]:
     """Validate browser-supplied history into Messages API turns and append
-    the new user message. Drops anything malformed rather than failing."""
-    clean = []
+    the new user message. Drops anything malformed rather than failing.
+    A `heard` turn (Hands-off: someone else, in another language) is not a turn of its own: it rides ahead of the next user message."""
+    clean, heard = [], []
     for turn in history if isinstance(history, list) else []:
         if not isinstance(turn, dict):
             continue
         role, content = turn.get("role"), turn.get("content")
+        if role == "heard" and isinstance(content, str) and content.strip():
+            lang = str(turn.get("lang") or "")
+            heard.append(f"- ({lang if HEARD_LANG.fullmatch(lang) else 'another language'}) {content.strip()[:400]}")
+            heard = heard[-10:]                       # the last ten, each cut short: the note never crowds out his own words
+            continue
         if role not in ("user", "assistant") or not isinstance(content, str) or not content.strip():
             continue
+        if role == "user" and heard:
+            content, heard = heard_note(heard) + content, []
         if clean and clean[-1]["role"] == role:
             clean[-1] = {"role": role, "content": content[:MAX_CHARS]}   # keep the latest of a run
         else:
@@ -268,7 +288,7 @@ def build_messages(history, message: str) -> list[dict]:
         clean.pop(0)
     if clean and clean[-1]["role"] == "user":
         clean.pop()                                   # an unanswered turn; the new message replaces it
-    return clean + [{"role": "user", "content": message[:MAX_CHARS]}]
+    return clean + [{"role": "user", "content": (heard_note(heard) + message)[:MAX_CHARS]}]
 
 
 class ChatError(Exception):

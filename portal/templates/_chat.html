@@ -117,7 +117,8 @@
 
     const voice = SkippyVoice.attach({gate: "{{ url_for('chat.voice_gate') }}", key: form.querySelector("button.voice"),
       box: msg, status: form.querySelector(".vstat"), onSend: () => form.requestSubmit(),          // hands-free: a pause ends it, a countdown sends it
-      mode: () => (BRAINS.find(x => x.id === brain) || {}).mode});                                  // the voice follows the mode (the server decides which)
+      mode: () => (BRAINS.find(x => x.id === brain) || {}).mode,                                    // the voice follows the mode (the server decides which)
+      onHeard: (h) => heardLine(h)});                                                               // Hands-off: someone near you, in another language
     // The agent (Private, Auto) answers in its own transcript; its finished reply comes back here so THIS voice says it: in Hands-off
     // every reply is spoken (summarised when long), in Typing none is. null = no answer is coming (it failed or was stopped).
     const hearAgent = () => { if (window.SkippyAgent) window.SkippyAgent.onReply = (t) => { if (t == null) voice.resume(); else voice.say(t); }; };
@@ -239,6 +240,33 @@
       if (md && window.SkippyMd && text !== "…") { el.replaceChildren(SkippyMd.render(text, document, {block: artifact})); el.classList.add("rich"); }
       else fill(el, text);
     }
+    // HEARD: what Hands-off heard someone else say in another language, as Whisper translated it (skippy-voice.js onHeard). It is not a
+    // message to Skippy: it is written into the chat, kept with it, and goes to the model with your next message as context.
+    const langName = (code) => { try { return new Intl.DisplayNames(["en"], {type: "language"}).of(code) || code; } catch (e) { return code; } };
+    function addHeard(t) {
+      const div = document.createElement("div"); div.className = "turn heard";
+      const body = document.createElement("div"); body.className = "tx";
+      const who = document.createElement("div"); who.className = "who"; who.textContent = "heard \u00b7 " + langName(t.lang || "") + " \u2192 English";
+      const said = document.createElement("div"); fill(said, t.content); body._raw = t.content;
+      body.append(who, said);
+      div.append(glyph("globe"), body);
+      const acts = document.createElement("div"); acts.className = "acts";
+      acts.append(keyBtn("sheet", "Copy", e => copyText(t.content, e.currentTarget), "copy-turn"));
+      div.append(acts);
+      log.appendChild(div);
+      if (!stuck) unseen++; logPager.refresh();
+      return body;
+    }
+    function heardLine(h) {
+      const text = String(h && h.text || "").trim(), lang = String(h && h.lang || "").slice(0, 8);
+      if (!text) return;
+      if (agentOn() && window.SkippyAgent.heard) { window.SkippyAgent.heard(text, lang, langName(lang)); return; }    // Private and Auto: in the agent's transcript
+      const turn = {role: "heard", content: text.slice(0, 2000), lang: lang};
+      addHeard(turn);
+      if (busy) { lateHeard.push(turn); return; }                  // a question is out: it joins the history after the reply, in the order seen
+      history.push(turn); paintTail(); save();
+    }
+    const lateHeard = [];
     function add(role, text, extra) {
       const div = document.createElement("div");
       div.className = "turn " + role + (extra ? " " + extra : "");
@@ -329,6 +357,7 @@
     function replay() {
       log.replaceChildren();
       history.forEach(t => {
+        if (t.role === "heard") { addHeard(t); return; }
         const jobs = t.role === "assistant" ? [...t.content.matchAll(PIC)].map(m => ({kind: {song: "audio", picture: "image"}[m[1]] || "popup", job_id: m[2]})) : [];
         const body = add(t.role, t.content.split("\n\n[Mentat's own answer")[0].replace(PIC, ""));   // the notes are for the models
         jobs.forEach(j => body.parentElement.insertBefore(waitCard({...j, url: "{{ url_for('chat.media_file', job_id='JOB') }}".replace("JOB", j.job_id)}), body.parentElement.querySelector(".acts")));
@@ -666,17 +695,19 @@
         voice.resume();                           // no reply is coming: in a spoken conversation the turn comes back to him
       } finally {
         busy = false; inflight = null; paintStop();
+        if (lateHeard.length) { history = history.concat(lateHeard.splice(0)); save(); }
         sendBtn.disabled = false; delete sendBtn.dataset.s;
         logPager.refresh(); paintTail();
         if (matchMedia("(pointer: fine)").matches) msg.focus();
       }
     }
     // Retry: the last question again; Edit: your last message back in the box (or ↑ in an empty box), sent in its place.
-    function retry() { if (history.length >= 2 && !busy) ask(history[history.length - 2].content.replace(/\s*\[attached:[^\]]*\]$/, ""), {replace: true}); }
+    const lastPair = () => history.length >= 2 && history[history.length - 2].role === "user" && history[history.length - 1].role === "assistant";
+    function retry() { if (lastPair() && !busy) ask(history[history.length - 2].content.replace(/\s*\[attached:[^\]]*\]$/, ""), {replace: true}); }
     let editing = false;
     const editBar = form.querySelector(".editing");
     function startEdit() {
-      if (busy || history.length < 2) return;
+      if (busy || !lastPair()) return;
       editing = true; editBar.hidden = false;
       msg.value = history[history.length - 2].content.replace(/\s*\[attached:[^\]]*\]$/, ""); grow(); msg.focus();
       msg.setSelectionRange(msg.value.length, msg.value.length);

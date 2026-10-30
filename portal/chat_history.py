@@ -122,14 +122,15 @@ class History:
         return sorted((c for c in chats if forever or _fresh(c, now)), key=lambda c: c.get("updated", ""), reverse=True)
 
     def save(self, email: str, chat_id: str, title: str, history) -> dict:
-        """Keep (or replace) one chat. Only role/content turns are kept: whatever else the page sends is dropped."""
+        """Keep (or replace) one chat. Only role/content turns are kept (and a heard turn's language): whatever else the page sends is dropped."""
         if not _ID.fullmatch(str(chat_id or "")):
             raise Refused("That isn't a chat id.")
         if not isinstance(history, list) or not history:
             raise Refused("A chat needs at least one turn.")
-        turns = [{"role": t["role"], "content": t["content"]} for t in history
-                 if isinstance(t, dict) and t.get("role") in ("user", "assistant") and isinstance(t.get("content"), str)]
-        if not turns:
+        turns = [{"role": t["role"], "content": t["content"],
+                  **({"lang": str(t.get("lang") or "")[:8]} if t["role"] == "heard" else {})} for t in history
+                 if isinstance(t, dict) and t.get("role") in ("user", "assistant", "heard") and isinstance(t.get("content"), str)]
+        if not any(t["role"] != "heard" for t in turns):
             raise Refused("A chat needs at least one turn.")
         path, forever = self._path(email), self.forever(email)
         if len(json.dumps(turns)) > (MAX_CHAT_BYTES_FOREVER if forever else MAX_CHAT_BYTES):

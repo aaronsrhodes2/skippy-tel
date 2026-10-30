@@ -214,6 +214,7 @@
     const fresh = !store.get(K.conv) && !store.get(K.log);       // a browser that has never opened this chat
     let conv = store.get(K.conv) || uuid(); store.set(K.conv, conv);
     let turns = []; try { turns = JSON.parse(store.get(K.log) || "[]"); } catch (e) { turns = []; }
+    const talked = () => turns.some(t => t.role !== "heard");     // a heard line (Hands-off, someone else) is not a message: it fixes nothing
     const known = (id) => PROJECTS.some(p => p.id === id);
     const projectName = (id) => { const p = PROJECTS.find(x => x.id === id); return p ? p.name : id; };
     // The open conversation's project (every conversation before projects was SkippyTel's).
@@ -221,15 +222,15 @@
     if (!known(project)) project = PROJECTS.length ? PROJECTS[0].id : "skippytel";
     function setProject(id) { project = id; store.set(K.project, id); picker.value = id; }
     function lockPicker() {                        // one conversation, one repo: the picker is fixed once it has a message
-      picker.disabled = turns.length > 0;
-      brainPick.disabled = turns.length > 0;       // the brain too (see BRAINS below)
-      if (turns.length) pickHint.hidden = true;
+      picker.disabled = talked();
+      brainPick.disabled = talked();               // the brain too (see BRAINS below)
+      if (talked()) pickHint.hidden = true;
     }
     setProject(project);
     const nf = root.querySelector("#ps-newfolder"), nfName = root.querySelector("#ps-newfolder-name"), nfMsg = root.querySelector("#ps-newfolder-msg");
     picker.addEventListener("change", () => {
-      if (picker.value === "__new__" && !turns.length) { picker.value = project; if (nf) { nf.hidden = false; nfMsg.textContent = ""; nfName.focus(); } return; }
-      if (!turns.length && known(picker.value)) setProject(picker.value); else picker.value = project;
+      if (picker.value === "__new__" && !talked()) { picker.value = project; if (nf) { nf.hidden = false; nfMsg.textContent = ""; nfName.focus(); } return; }
+      if (!talked() && known(picker.value)) setProject(picker.value); else picker.value = project;
     });
     // New folder: skippy-pc makes the folder, its git repo and the GitHub repo (or marks GitHub as owed), then this
     // conversation works in it. A job on skippy-pc, polled like the conversations list.
@@ -266,11 +267,16 @@
     if (!BRAINS.some(b => b.id === brain && b.ready)) brain = (BRAINS.find(b => b.ready) || {id: "core"}).id;
     function setBrain(id) { brain = id; store.set("ps-brain", id); brainPick.value = id; }
     setBrain(brain);
-    brainPick.addEventListener("change", () => { if (!turns.length && BRAINS.some(b => b.id === brainPick.value && b.ready)) setBrain(brainPick.value); else brainPick.value = brain; });
-    brainPick.disabled = turns.length > 0;
+    brainPick.addEventListener("change", () => { if (!talked() && BRAINS.some(b => b.id === brainPick.value && b.ready)) setBrain(brainPick.value); else brainPick.value = brain; });
+    brainPick.disabled = talked();
     let running = null;                            // {task, after, turn, quietSince, kind, ...}: the task this page follows
     let sending = false;                           // a message is on its way to the portal
 
+    function withHeard(heard, message) {
+      if (!heard.length) return message;
+      return "[Heard near me while Hands-off listened, translated into English by Whisper:\n" +
+        heard.map(h => "- (" + (h.name || h.lang) + ") " + h.text).join("\n") + "]\n\n" + (message || "");
+    }
     const save = () => { store.set(K.log, JSON.stringify(turns.slice(-60))); if (typeof refreshCopyAll === "function") refreshCopyAll(); };
     let liveClock = null, askBox = null;           // askBox: the answer buttons on screen (they go when anything is sent)
     // (liveClock: the seconds counter of the turn being worked on)
@@ -278,11 +284,12 @@
     function el(tag, cls, txt) { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
     const setText = (node, t) => { if (node.textContent !== t) node.textContent = t; };   // an unchanged note is not re-announced
     // ── copy as markdown: one prompt, one reply, or the whole conversation ──
-    const turnMd = (t) => t.role === "user" ? t.text : (t.parts || []).filter(x => x.t === "text").map(x => x.text).join("\n\n");
+    const turnMd = (t) => t.role === "heard" ? "_Heard (" + (t.name || t.lang) + ", translated):_ " + t.text : t.role === "user" ? t.text : (t.parts || []).filter(x => x.t === "text").map(x => x.text).join("\n\n");
     function conversationMd() {
       const title = ((pins.find(x => x.conv === conv) || {}).title) || projectName(project);
       const out = ["# " + title, ""];
       turns.forEach(t => {
+        if (t.role === "heard") { out.push(turnMd(t), ""); return; }
         out.push(t.role === "user" ? "## You" : "## Skippy", "", turnMd(t));
         const n = t.role === "user" ? 0 : (t.parts || []).filter(x => x.t !== "text" && x.t !== "image" && x.t !== "ship").length;
         if (n) out.push("", "_Ran " + n + (n === 1 ? " command" : " commands") + "_");
@@ -305,6 +312,12 @@
       let box = boxes.get(turn);
       if (!box) { box = el("div", "turn " + turn.role); boxes.set(turn, box); flow.appendChild(box); }
       box.replaceChildren();
+      if (turn.role === "heard") {                 // someone near you, in another language, as Whisper translated it
+        addCopy(box, turn);                        // first, floated right like a reply's: at the end the turn's notch clips it
+        box.appendChild(el("div", "who", "heard \u00b7 " + (turn.name || turn.lang) + " \u2192 English"));
+        box.appendChild(el("div", null, turn.text));
+        return;
+      }
       if (turn.role === "user") {
         box.textContent = turn.text;
         addCopy(box, turn);
@@ -703,6 +716,8 @@
       showConvs(false);
       if (askBox) askBox.hidden = true;               // asked and answered (by a tap or by typing)
       const sent = attached.map(a => a.url); attached = []; paintAttached();
+      const fresh = [];                                          // heard since your last message: it goes with this one, as context
+      for (let i = turns.length - 1; i >= 0 && turns[i].role === "heard"; i--) if (!turns[i].sent) fresh.unshift(turns[i]);
       const mine = {role: "user", text: message || "(image)"}; if (sent.length) { mine.imgs = sent.length; thumbsOf.set(mine, sent); }
       turns.push(mine); draw(mine);
       const reply = {role: "assistant", parts: [], t0: Date.now(), pending: true}; turns.push(reply); draw(reply); scroll(true); lockPicker();
@@ -714,7 +729,7 @@
       reply.note = "Sending\u2026"; draw(reply);
       let r;
       for (let attempt = 0; attempt < 3; attempt++) {
-        try { r = await call(SEND, {method: "POST", headers: H, body: JSON.stringify({conv, message, project, brain, images: sent, client_id: cid})}); }
+        try { r = await call(SEND, {method: "POST", headers: H, body: JSON.stringify({conv, message: withHeard(fresh, message), project, brain, images: sent, client_id: cid})}); }
         catch (e) { r = {ok: false, data: {error: e.message}, lost: !e.signin}; }
         if (r.ok || !r.lost) break;                                  // an answer (even a refusal) is final; only a lost one is tried again
         reply.note = "Sending again\u2026"; draw(reply);
@@ -726,6 +741,7 @@
         if (gone && r.status === 409) resume(gone);   // the old task is still alive: don't lose sight of it
         return;
       }
+      fresh.forEach(h => { h.sent = true; });
       save(); follow({task: r.data.task, after: 0, turn: reply, left: gone});
     });
     text.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
@@ -853,27 +869,32 @@
       try {
         const d = await history({});
         const rows = d && Array.isArray(d.conversations) ? d.conversations : [];
-        if (!rows.length || turns.length || sending || running) return;      // the Captain already started typing here: leave it
+        if (!rows.length || talked() || sending || running) return;      // the Captain already started typing here: leave it
         await openConversation(rows.slice().sort((a, b) => (b.last || 0) - (a.last || 0))[0]);
       } catch (e) {}
     }
     if (fresh) resumeLatest();
     // A reload (or a portal deploy) mid-task: pick the task back up where this page left off.
     const pending = store.get(K.task);
-    if (pending && turns.length && turns[turns.length - 1].role === "assistant") {
-      try { const t = JSON.parse(pending); if (t && t.task) follow({task: t.task, after: t.after || 0, turn: turns[turns.length - 1]}); } catch (e) {}
+    const lastReply = [...turns].reverse().find(t => t.role !== "heard");
+    if (pending && lastReply && lastReply.role === "assistant") {
+      try { const t = JSON.parse(pending); if (t && t.task) follow({task: t.task, after: t.after || 0, turn: lastReply}); } catch (e) {}
     }
 
     // ── the handle the one chat drives this with (templates/_chat.html: the agent is two of its brains) ──
     // Everything above is unchanged; the chat's composer, keys and chats sheet call these instead of this card's own.
     if (typeof window !== "undefined") window.SkippyAgent = {
       projects: PROJECTS, brains: BRAINS,
-      project: () => project, brain: () => brain, locked: () => turns.length > 0, busy: () => !!running || sending,
-      setProject(id) { if (!turns.length && known(id)) setProject(id); return project; },
-      setBrain(id) { if (!turns.length && BRAINS.some(b => b.id === id && b.ready)) setBrain(id); return brain; },
+      project: () => project, brain: () => brain, locked: () => talked(), busy: () => !!running || sending,
+      setProject(id) { if (!talked() && known(id)) setProject(id); return project; },
+      setBrain(id) { if (!talked() && BRAINS.some(b => b.id === id && b.ready)) setBrain(id); return brain; },
       send(message, images) {                       // pictures as data URLs (the chat shrinks them already)
         attached = (images || []).slice(0, MAX_IMAGES).map(u => ({url: u})); paintAttached();
         text.value = message || ""; form.requestSubmit();
+      },
+      heard(text, lang, name) {                    // Hands-off heard someone in another language: a line in this transcript
+        const turn = {role: "heard", text: String(text).slice(0, 2000), lang: String(lang || "").slice(0, 8), name: String(name || lang || "").slice(0, 40)};
+        turns.push(turn); draw(turn); save(); scroll(true);
       },
       stop() { stopBtn.click(); },
       newChat() { newBtn.click(); },

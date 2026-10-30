@@ -276,7 +276,11 @@ def create_app(key: bytes, whisper_url: str, studio_url: str, clock=time.time,
         text = out.get("english_text") if isinstance(out, dict) else None
         if not isinstance(text, str):
             return err(502)
-        return Response(json.dumps({"text": text.strip()[:2000], "lang": str(out.get("detected_lang") or "")[:8]}),
+        try:                                    # how sure Whisper is of the language: the chat's Hands-off writes another language down as heard speech
+            sure = round(min(1.0, max(0.0, float(out.get("confidence")))), 2)
+        except (TypeError, ValueError):
+            sure = 0.0
+        return Response(json.dumps({"text": text.strip()[:2000], "lang": str(out.get("detected_lang") or "")[:8], "sure": sure}),
                         mimetype="application/json", headers={"Cache-Control": "no-store"})
 
     @app.post("/t/<token>/tts")

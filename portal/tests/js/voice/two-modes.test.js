@@ -8,7 +8,7 @@ const assert = require("node:assert/strict");
 const level = { v: 0.004 };
 let stt = [], sttCalls = [], recorders = [];
 // what the fake Whisper says: one text per utterance (the recorder that is asking), the whole of it once that recorder has stopped, its first words while it is still recording
-let say = [], fetchLog = [], summaryMode = "ok", spoken = [];
+let say = [], langs = [], fetchLog = [], summaryMode = "ok", spoken = [];      // langs[i]: [lang, sure] Whisper reports for utterance i
 class FakeAnalyser { constructor() { this.fftSize = 1024; } getFloatTimeDomainData(buf) { buf.fill(level.v); } connect() {} }
 class FakeCtx { createMediaStreamSource() { return { connect() {} }; } createAnalyser() { return new FakeAnalyser(); } close() { return Promise.resolve(); } }
 class FakeRec {
@@ -35,7 +35,7 @@ globalThis.fetch = async (url, init) => {
   if (u.includes("/g")) return { ok: true, status: 200, json: async () => ({ ok: true, url: "https://x.ts.net:10000", pass: "1.a", exp: Date.now() / 1000 + 3600, speak: false }) };
   fetchLog.push(u);
   if (u.includes("/summary")) { if (summaryMode === "fail") return { ok: false, status: 503, json: async () => ({}) }; return { ok: true, status: 200, json: async () => ({ text: "Short spoken version." }) }; }
-  if (u.includes("/stt")) { sttCalls.push(u); const idx = recorders.length - 1, full = say[idx] || "words", done = !recorders[idx] || recorders[idx].state === "inactive"; return { ok: true, status: 200, json: async () => ({ text: done ? full : full.split(" ").slice(0, Math.max(1, full.split(" ").length - 1)).join(" ") }) }; }
+  if (u.includes("/stt")) { sttCalls.push(u); const idx = recorders.length - 1, full = say[idx] || "words", done = !recorders[idx] || recorders[idx].state === "inactive"; return { ok: true, status: 200, json: async () => ({ text: done ? full : full.split(" ").slice(0, Math.max(1, full.split(" ").length - 1)).join(" "), lang: (langs[idx] || ["en"])[0], sure: (langs[idx] || ["en", 0.99])[1] }) }; }
   return { ok: false, status: 404, json: async () => ({}) };
 };
 const V = require("../../../static/skippy-voice.js");
@@ -43,13 +43,13 @@ const V = require("../../../static/skippy-voice.js");
 async function flush() { for (let i = 0; i < 12; i++) await Promise.resolve(); }
 async function advance(t, ms) { for (let x = 0; x < ms; x += 50) { t.mock.timers.tick(50); await flush(); } }
 
-function setup(t, granted) {
+function setup(t, granted, more) {
   t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"], now: 1000000 });
-  level.v = 0.004; stt = []; say = []; sttCalls = []; recorders = []; gStreams.length = 0; fetchLog = []; summaryMode = "ok"; spoken = [];
+  level.v = 0.004; stt = []; say = []; langs = []; sttCalls = []; recorders = []; gStreams.length = 0; fetchLog = []; summaryMode = "ok"; spoken = [];
   navigator.permissions = { query: async () => ({ state: granted ? "granted" : "prompt" }) };
   const key = node("button"), box = node("textarea"), status = node("div"), sent = [];
   box.value = "";
-  const voice = V.attach({ gate: "/g", key, box, status, onSend: (m) => sent.push(m), lang: () => "" });
+  const voice = V.attach(Object.assign({ gate: "/g", key, box, status, onSend: (m) => sent.push(m), lang: () => "" }, more || {}));
   return { voice, key, box, status, sent, label: () => (status.hidden ? null : status._built && status._built.label.textContent) };
 }
 const listening = () => recorders.length > 0 && recorders[recorders.length - 1].state === "recording";
@@ -110,4 +110,38 @@ test("the sleep words, and only said alone", () => {
     assert.ok(V.END_RE.test(w), w);
   for (const w of ["thanks for the code, now run the tests", "thank you for asking about the weather"])
     assert.ok(!V.END_RE.test(w), w);
+});
+
+test("Hands-off: someone speaking another language is written down as heard, not sent; your English still goes to Skippy", async (t) => {
+  const heardLines = [];
+  const s = setup(t, false, { onHeard: (h) => heardLines.push(h) });
+  await advance(t, 700);
+  s.key._on.click(); await advance(t, 600);                                                           // Hands-off
+  assert.equal(s.voice.chatting(), true);
+  say[recorders.length - 1] = "Where is the train station?"; langs[recorders.length - 1] = ["es", 0.94];
+  await speak(t, 1500); await advance(t, 2200);
+  assert.deepEqual(heardLines, [{ text: "Where is the train station?", lang: "es", sure: 0.94 }]);
+  assert.equal(s.box.value, ""); assert.deepEqual(s.sent, []);                                         // nothing in the box, nothing sent
+  assert.ok(listening()); assert.equal(s.voice.chatting(), true);                                     // and it keeps listening
+  say[recorders.length - 1] = "Goodbye"; langs[recorders.length - 1] = ["fr", 0.9];                  // a stranger's "au revoir" is not your sleep word
+  await speak(t, 1500); await advance(t, 2200);
+  assert.equal(s.voice.chatting(), true); assert.equal(heardLines.length, 2);
+  say[recorders.length - 1] = "what did she say"; langs[recorders.length - 1] = ["en", 0.99];
+  await speak(t, 1500); await advance(t, 2200); await advance(t, 4300);
+  assert.deepEqual(s.sent, ["what did she say"]); assert.equal(heardLines.length, 2);
+});
+
+test("Hands-off: a language Whisper is unsure of stays your message, and without onHeard nothing changes", async (t) => {
+  const heardLines = [];
+  const s = setup(t, false, { onHeard: (h) => heardLines.push(h) });
+  await advance(t, 700);
+  s.key._on.click(); await advance(t, 600);
+  say[recorders.length - 1] = "turn on the lights"; langs[recorders.length - 1] = ["nl", 0.41];      // a short English line misheard as Dutch
+  await speak(t, 1500); await advance(t, 2200); await advance(t, 4300);
+  assert.deepEqual(heardLines, []); assert.deepEqual(s.sent, ["turn on the lights"]);
+});
+
+test("heard(): another language, sure enough", () => {
+  assert.ok(V.heard("es", 0.9)); assert.ok(V.heard("ja", V.HEARD_SURE));
+  for (const [l, p] of [["en", 0.99], ["", 0.99], ["es", 0.5], ["es", undefined], [undefined, 1]]) assert.ok(!V.heard(l, p), l + " " + p);
 });

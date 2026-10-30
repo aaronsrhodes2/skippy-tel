@@ -82,6 +82,8 @@ pre.log { margin: 0 10px 10px; white-space: pre-wrap; word-break: break-word; fo
 :is(body[data-app="me"], html.agent body.captain) .me-chat .turn.user { background: #0b0b0b; border: 1px solid #8a63d2; color: #fff; }
 :is(body[data-app="me"], html.agent body.captain) .me-chat .turn.assistant { background: #1d0640; border: 1px solid var(--dim-green-hi); color: #fff; }
 :is(body[data-app="me"], html.agent body.captain) .me-chat .turn.assistant p { color: #fff; }
+:is(body[data-app="me"], html.agent body.captain, html.auto body.captain) .me-chat .turn.heard { background: #000; border: 1px dashed var(--cyan); color: #fff; }
+:is(body[data-app="me"], html.agent body.captain, html.auto body.captain) .me-chat .turn.heard .who { font-size: .72rem; color: var(--cyan); margin-bottom: 2px; }
 :is(body[data-app="me"], html.agent body.captain) .me-chat textarea::placeholder { color: #b9a2f2; }
 :is(body[data-app="me"], html.agent body.captain) a { color: #d6b3ff; }
 body[data-app="me"] .adm { z-index: 1; }

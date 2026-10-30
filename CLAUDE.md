@@ -314,7 +314,11 @@ Tests: `portal/tests/test_chat_camera.py`, `portal/tests/js/camera`.
 
 **Two modes, one voice key** (2026-10-23): **Typing** speaks nothing and, once the browser already allows the mic (the Permissions API,
 never a prompt on load), listens only for "Skippy"; saying it (or a tap) switches to **Hands-off**, which listens and speaks round after
-round, silence included, until a sleep word ("thanks", "thank you", "goodbye", "go to sleep", "that's all") or a tap. On any device with a current browser: `portal/static/skippy-voice.js` (MediaRecorder, no browser
+round, silence included, until a sleep word ("thanks", "thank you", "goodbye", "go to sleep", "that's all") or a tap.
+**Hands-off is also the translator** (2026-10-29, for the AR glasses): Whisper always answers in English (`task="translate"`) and voice-gate's `/stt`
+says the language and how sure it is (`sure`); speech in another language at 0.7 or more is someone else talking, so it becomes a **heard** line in
+the chat (dashed cyan, "heard · Spanish → English"), is not sent to Skippy, and rides ahead of his next message as context (`chat.build_messages`;
+the agent's `withHeard`). Tests: `portal/tests/test_heard_speech.py`, `tests/js/voice/two-modes.test.js`. On any device with a current browser: `portal/static/skippy-voice.js` (MediaRecorder, no browser
 vendor speech cloud) + `portal/voice.py` (the pass, label `voice-gate-v1`; scopes `listen` for everyone who may chat, `speak` for admins only,
 because the cloned Skippy voice is personal-use) + `/chat/voice/gate` (the pass route). The recording goes browser → Tailscale Funnel `:10000` →
 `services/voice-gate` → Whisper at home (flask-api's ElevenLabs for Skippy's voice; its key never leaves home); never through the portal.
