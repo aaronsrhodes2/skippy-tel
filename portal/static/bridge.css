@@ -252,6 +252,11 @@ canvas.alive { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0;
 .art-sheet .art-img, .art-sheet .art-media { max-height: none; flex: 1; min-height: 0; object-fit: contain; }
 /* files with the next message (templates/_chat.html takeFiles): a row of chips over the box, thumbnails for pictures */
 .chat-bridge .files { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+/* What was sent while Skippy works: waiting in line, dashed, one row each (the agent's queue looks the same) */
+.chat-bridge .queue { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.chat-bridge .queue .qrow { display: flex; gap: 6px; align-items: center; border: 1px dashed var(--dim-green-hi); padding: 3px 4px 3px 8px;
+                            font-size: .8rem; color: var(--muted); }
+.chat-bridge .queue .qt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 4px 3px 6px; font-size: .78rem;
              color: var(--ink); background: #05090b; border: 1px solid var(--dim-green-hi); }
 .file-chip img { width: 28px; height: 28px; object-fit: cover; } .file-chip .g { width: 16px; height: 16px; }

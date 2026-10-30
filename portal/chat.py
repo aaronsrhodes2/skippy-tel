@@ -231,24 +231,6 @@ def barney_instruction() -> str:
     )
 
 
-CONTEXT_MAX_CHARS = 60_000   # an earlier conversation the Captain continues (Skippy Memory): about 15k tokens
-
-
-def continued(context) -> str:
-    """The system prompt's tail when the Captain continues a saved conversation (Skippy Memory: Grok, Claude, ...).
-    Checked here because it comes from the page: anything malformed adds nothing."""
-    if not isinstance(context, dict) or not isinstance(context.get("text"), str) or not context["text"].strip():
-        return ""
-    source = str(context.get("source") or "another AI")[:20]
-    title = " ".join(str(context.get("title") or "").split())[:120]
-    when = str(context.get("updated") or "")[:10]
-    return ("\n\nThe Captain is continuing an earlier conversation he had with "
-            f"{source.title()}{f' ({when})' if when else ''}{f', titled {title!r}' if title else ''}. "
-            "Here it is as it was saved, oldest first. Pick up from where it left off, as Skippy, and don't recap it "
-            "unless he asks:\n<earlier_conversation>\n" + context["text"][-CONTEXT_MAX_CHARS:]
-            + "\n</earlier_conversation>")
-
-
 HEARD_LANG = re.compile(r"[a-z]{2,3}(?:-[A-Za-z]{2,4})?")
 
 

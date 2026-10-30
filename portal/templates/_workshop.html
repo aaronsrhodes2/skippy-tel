@@ -622,7 +622,6 @@
     // ── the queue: messages sent while Skippy works wait here, and go together, in one message, when the task returns ──
     const QK = "ps-queue";
     let queue = []; try { queue = JSON.parse(store.get(QK) || "[]"); if (!Array.isArray(queue)) queue = []; } catch (e) { queue = []; }
-    let lastQueuedAt = 0;
     const saveQueue = () => store.set(QK, JSON.stringify(queue.slice(0, 20)));
     function paintQueue() {
       queueBox.hidden = !queue.length;
@@ -633,7 +632,7 @@
         row.append(el("span", "qt", q), x); return row;
       }));
     }
-    const gulp = (items) => items.length === 1 ? items[0] : "Several things queued while you worked, in order:\n" + items.map((t, i) => (i + 1) + ". " + t).join("\n");
+    const gulp = (items) => SkippyQueue.gulp(items);           // static/skippy-queue.js, the same line as green's: repeats taken out
     const waiting = () => !!running && !running.kind;           // a healthy run: new messages queue instead of being refused
     function drainQueue() {                                     // the task returned: everything queued goes as ONE message
       if (!queue.length || sending || running) return;
@@ -706,9 +705,8 @@
       let message = text.value.trim();
       if ((!message && !attached.length) || sending) return;
       if (waiting() && message) {
-        const now = Date.now();                                  // the same words twice within a few seconds are one tap that looked unanswered
-        if (queue.length && queue[queue.length - 1] === message && now - lastQueuedAt < 8000) { text.value = ""; return; }
-        queue.push(message); lastQueuedAt = now; saveQueue(); paintQueue(); text.value = ""; return;   // queued, not lost
+        if (SkippyQueue.add(queue, message)) { saveQueue(); paintQueue(); }   // queued, not lost; the same words again are one tap that looked unanswered
+        text.value = ""; return;
       }
       let gone = null;
       if (running) { if (!canLeave(running)) return; gone = leave(running); }

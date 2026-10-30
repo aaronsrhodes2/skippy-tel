@@ -518,7 +518,7 @@ def test_chat_tools_match_dashboard_rights(env):
     names, _ = _tools_for(client, skippy, FRIEND)
     assert names == {"server_status", "start_game", "stop_server", "now_playing"}   # core users have Bilby
     names, _ = _tools_for(client, skippy, ADMIN)
-    assert "restart_server" in names
+    assert names == {"server_status", "start_game", "stop_server", "now_playing"}   # green is the guest chat, the Captain's too
     _, run = _tools_for(client, skippy, FRIEND)
     with pytest.raises(Exception, match="isn't available"):
         run("restart_server", {})                       # not offered, and refused if tried anyway
@@ -566,12 +566,13 @@ def test_admin_logs_page_shows_latest_snapshot_masked(env):
 
 
 def test_server_logs_tool_is_admin_only(env):
-    client, _, skippy = env
+    import chat_tools
+    client, vm, skippy = env
     names, _ = _tools_for(client, skippy, FRIEND)
     assert "server_logs" not in names
-    names, run = _tools_for(client, skippy, ADMIN)
-    assert "server_logs" in names
-    out = run("server_logs", {})
+    names, _ = _tools_for(client, skippy, ADMIN)
+    assert "server_logs" not in names                                  # green is the guest chat, the Captain's too
+    out = chat_tools.ChatTools(vm, is_admin=True).run("server_logs", {})   # the tool itself still never leaks a password
     assert "Up 3 minutes" in out and "dragonpw" not in out
 
 
@@ -1592,21 +1593,6 @@ def _advertise(client, token, **caps):
     return client.post("/home/report", json=body, headers={"Authorization": f"Bearer {token}"})
 
 
-def _reporter(app, token, handler):
-    """Play skippy-pc's home reporter: poll the portal for jobs and answer them, on a thread."""
-    import threading, time
-    stop = threading.Event()
-    client, headers = app.test_client(), {"Authorization": f"Bearer {token}"}
-
-    def loop():
-        while not stop.is_set():
-            for job in client.get("/home/jobs", headers=headers).get_json()["jobs"]:
-                handler(client, headers, job)
-            time.sleep(0.02)
-    threading.Thread(target=loop, daemon=True).start()
-    return stop
-
-
 def _music_app():
     skippy = FakeSkippy()
     app = portal.create_app(dict(SETTINGS), vm=FakeVm(), skippy=skippy)
@@ -1657,10 +1643,11 @@ def test_a_long_job_can_be_started_looked_at_and_finished_without_being_consumed
     assert h.owner_of(failed) == ""
 
 
-def test_music_is_offered_to_the_admin_only_and_only_while_home_says_it_can(env):
+def test_green_never_makes_songs_not_even_for_the_captain(env):
+    """Green is the guest chat (the Captain, 2026-10-30): songs on skippy-pc's card are not one of its tools, whoever asks."""
     client, _, skippy = env
     token = _pair(client)
-    for who, ready, expected in ((ADMIN, False, False), (ADMIN, True, True), (FRIEND, True, False)):
+    for who, ready, expected in ((ADMIN, False, False), (ADMIN, True, False), (FRIEND, True, False)):
         _advertise(client, token, make_music=ready)
         login(client, who)
         if who == ADMIN:
@@ -1675,55 +1662,6 @@ def test_music_is_offered_to_the_admin_only_and_only_while_home_says_it_can(env)
 def test_the_admin_prompt_knows_about_music_and_a_friends_does_not():
     assert "Music is made at home" in chat.system_prompt("Aaron", is_admin=True)
     assert "Music is made at home" not in chat.system_prompt("Pal", is_admin=False)
-
-
-def test_admin_makes_music_end_to_end_and_hears_it():
-    app, client, token, skippy = _music_app()
-    jobs = []
-
-    def skippy_pc(c, headers, job):
-        jobs.append(job)
-        c.put(f"/home/media/{job['id']}?title=lofi", data=b"ID3fake-mp3-bytes",
-              headers={**headers, "Content-Type": "audio/mpeg"})
-        c.post(f"/home/jobs/{job['id']}", json={"result": {"title": job["prompt"], "seconds": 30}}, headers=headers)
-
-    stop = _reporter(app, token, skippy_pc)
-    try:
-        skippy.reply = lambda system, messages, tools=None, run_tool=None, **_: (
-            run_tool("make_music", {"prompt": "  dreamy lofi beat, rain, 80 bpm  ", "lyrics": "", "duration_s": 5000}) and "Here you go.")
-        data = client.post("/chat/send", json={"message": "make me a lofi beat"}).get_json()
-    finally:
-        stop.set()
-    assert data["reply"] == "Here you go." and data["tools"] == ["make_music"]
-    assert len(jobs) == 1 and jobs[0]["kind"] == "make_music"
-    assert jobs[0]["prompt"] == "dreamy lofi beat, rain, 80 bpm" and jobs[0]["duration_s"] == 120   # trimmed, clamped
-    (clip,) = data["media"]
-    assert clip["kind"] == "audio" and clip["url"] == f"/chat/media/{jobs[0]['id']}" and clip["seconds"] == 30
-    played = client.get(clip["url"])
-    assert played.status_code == 200 and played.data == b"ID3fake-mp3-bytes" and played.mimetype == "audio/mpeg"
-    assert played.headers["X-Content-Type-Options"] == "nosniff" and "no-store" in played.headers["Cache-Control"]
-    part = client.get(clip["url"], headers={"Range": "bytes=0-2"})                 # so the player can seek
-    assert part.status_code == 206 and part.data == b"ID3"
-
-
-def test_a_clip_is_private_to_whoever_asked_for_it_and_admins(env):
-    app, client, token, skippy = _music_app()
-
-    def skippy_pc(c, headers, job):
-        c.put(f"/home/media/{job['id']}", data=b"ID3x", headers={**headers, "Content-Type": "audio/mpeg"})
-        c.post(f"/home/jobs/{job['id']}", json={"result": {"seconds": 5}}, headers=headers)
-
-    stop = _reporter(app, token, skippy_pc)
-    try:
-        skippy.reply = lambda system, messages, tools=None, run_tool=None, **_: run_tool("make_music", {"prompt": "x"}) and "ok"
-        url = client.post("/chat/send", json={"message": "music"}).get_json()["media"][0]["url"]
-    finally:
-        stop.set()
-    friend = app.test_client()
-    login(friend, FRIEND)
-    assert friend.get(url).status_code == 404                                      # not 403: it isn't confirmed to exist
-    assert app.test_client().get(url).status_code == 302                           # signed out: to the login page
-    assert client.get(url).status_code == 200
 
 
 def test_the_media_upload_is_only_for_skippy_pc_and_only_for_a_job_we_are_waiting_on():
@@ -1748,65 +1686,6 @@ def test_the_upload_size_cap_is_enforced_by_the_server(monkeypatch):
     resp = client.put(f"/home/media/{job}", data=b"x" * 50,
                       headers={"Authorization": f"Bearer {token}", "Content-Type": "audio/mpeg"})
     assert resp.status_code == 413
-
-
-def test_a_song_that_isnt_ready_says_so_and_music_result_finds_it_later(monkeypatch):
-    import chat_tools
-    monkeypatch.setattr(chat_tools, "MUSIC_WAIT_S", 0.05)                          # don't hold the chat hostage
-    app, client, token, skippy = _music_app()
-    home = app.extensions["home"]
-    seen = {}
-
-    def first(system, messages, tools=None, run_tool=None, **_):
-        seen["first"] = run_tool("make_music", {"prompt": "slow blues"})
-        return "It's cooking."
-    skippy.reply = first
-    data = client.post("/chat/send", json={"message": "a slow blues"}).get_json()
-    started = json.loads(seen["first"])
-    assert started["status"] == "queued" and started["job_id"] and [m["pending"] for m in data["media"]] == [True]
-    job_id = started["job_id"]
-    home.finish(job_id, {"result": {"title": "slow blues", "seconds": 42}})         # skippy-pc finishes, later
-    client.put(f"/home/media/{job_id}", data=b"ID3late",
-               headers={"Authorization": f"Bearer {token}", "Content-Type": "audio/mpeg"})
-
-    skippy.reply = lambda system, messages, tools=None, run_tool=None, **_: (
-        seen.update(second=run_tool("music_result", {"job_id": job_id})) or "Ready.")
-    data = client.post("/chat/send", json={"message": "is it done?"}).get_json()
-    assert json.loads(seen["second"])["status"] == "done"
-    assert data["media"][0]["url"] == f"/chat/media/{job_id}" and client.get(data["media"][0]["url"]).data == b"ID3late"
-
-
-def test_a_failed_song_is_reported_plainly_and_a_gone_one_is_not_a_crash():
-    import chat_tools
-    app, client, token, skippy = _music_app()
-    home = app.extensions["home"]
-    out = {}
-
-    def ask(system, messages, tools=None, run_tool=None, **_):
-        for label, args, name in (("fail", {"prompt": "x"}, "make_music"), ("gone", {"job_id": "deadbeef"}, "music_result"),
-                                  ("empty", {"prompt": "  "}, "make_music")):
-            try:
-                out[label] = run_tool(name, args)
-            except chat_tools.ToolError as exc:
-                out[label] = "ERR " + str(exc)
-        return "ok"
-    skippy.reply = ask
-    stop = _reporter(app, token, lambda c, h, job: c.post(f"/home/jobs/{job['id']}", json={"error": "GPU out of memory"}, headers=h))
-    try:
-        client.post("/chat/send", json={"message": "music"})
-    finally:
-        stop.set()
-    assert out["fail"].startswith("ERR Music failed: GPU out of memory")
-    assert out["gone"].startswith("ERR That music job is gone")
-    assert out["empty"].startswith("ERR make_music needs a style description")
-
-
-def test_the_music_verb_with_nothing_after_it_asks_instead_of_forcing_an_empty_tool_call():
-    app, client, token, skippy = _music_app()
-    client.post("/chat/send", json={"message": "/music"})
-    assert skippy.force_tool is None and "what kind of music" in skippy.seen[1][-1]["content"]
-    client.post("/chat/send", json={"message": "/music a sea shanty"})
-    assert skippy.force_tool == "make_music" and skippy.seen[1][-1]["content"] == "a sea shanty"
 
 
 # ── Experiments: one inventory of every simulation and demonstration ──────────

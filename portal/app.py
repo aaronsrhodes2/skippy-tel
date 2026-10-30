@@ -2038,8 +2038,11 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         return m if m is not None and m.ready() else None
 
     def tools_for(user, trace: str = "") -> chat_tools.ChatTools:
+        """Green Skippy's tools: the guest chat, the same set for everyone, the Captain included (his call, 2026-10-30: the tool
+        list is green's security layer; the house, the car, songs, the VM's restart and logs and Skippy Memory are purple's).
+        Only the Captain's quotas differ: his pictures and pop-ups never run out."""
         email = user["email"]
-        return chat_tools.ChatTools(vm, is_admin=auth.is_admin(email), visible=auth.visible_games(email),
+        return chat_tools.ChatTools(vm, is_admin=False, visible=auth.visible_games(email),
                                     who=email, trace=trace,
                                     music=home.music if auth.has_portal(email, "audio") else None,
                                     home_mentat=chat_mentat(),
@@ -2176,8 +2179,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         brain = brains.BRAINS[brains.BARNEY]
         text, model = None, None
         if brain_ready(brain):
-            admin = auth.is_admin(user["email"])
-            prompt = (chat.system_prompt(user["name"], is_admin=admin, page=page,
+            prompt = (chat.system_prompt(user["name"], page=page,
                                          games=[GAMES[g].name for g in auth.visible_games(user["email"])])
                       + chat.language_instruction() + chat.barney_instruction())
             convo = chat.build_messages(history, question) + [
@@ -2272,9 +2274,9 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             brain = brains.BRAINS[brains.BARNEY] if barney else brains.pick(body.get("mode") or body.get("brain"), admin)
         except PermissionError as exc:
             return jsonify(error=str(exc)), 403
-        if not brain_ready(brain) and not admin and not barney:
-            # A guest's only brain is down (or not set up yet): they get Mentat straight, as before Skippy Core existed,
-            # never a paid model in its place.
+        if not brain_ready(brain) and not barney:
+            # Green's only brain is down (or not set up yet): Mentat straight, as before Skippy Core existed, never a paid
+            # model in its place.
             return raw_mentat(user, message, rest, body.get("save") is True, follow, trace)
         if not brain_ready(brain):
             return jsonify(error=f"{brain.label} isn't available right now"
@@ -2284,17 +2286,13 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
         bot = bot_override or brains.chat_for(brain)
-        if not admin:
-            force = None
         try:
             tools = tools_for(user, trace)
             tools.files = files               # a pop-up that takes a picture or a sound takes it from this message (popups.py)
             model = brains.model_of(brain)
             page = str(body.get("page") or "")[:100] or None
-            prompt = chat.system_prompt(user["name"], is_admin=admin, page=page,
+            prompt = chat.system_prompt(user["name"], page=page,
                                         games=[GAMES[g].name for g in auth.visible_games(user["email"])])
-            if admin:                     # "Continue with Skippy": a saved conversation from Skippy Memory (the Captain's own)
-                prompt += chat.continued(body.get("context"))
             used: list[str] = []
             calls: list[tuple] = []       # (tool, arguments, result): kept only if this person allowed saving (below)
             cards: list[dict] = []        # every Mentat answer in this reply, for the page's ⚛ card
@@ -2313,6 +2311,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 return out
 
             schemas = tools.schemas()
+            if force not in tools.available():
+                force = None                     # a direct verb (/status, /image) forces only a tool this person has: the same for all
             if force in ("ask_mentat", "make_music") and rest.startswith("(the user chose"):
                 force = None                     # nothing to act on yet: let Skippy ask
             prompt += chat.language_instruction()

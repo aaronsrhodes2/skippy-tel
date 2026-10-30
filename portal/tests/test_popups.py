@@ -118,11 +118,12 @@ def test_a_ready_popup_is_a_tool_for_its_audience_only(world, registered):
     assert "remove_bg" not in tools(world["app"], ADMIN).available()              # not ready at home: not offered
     _advertise(world["client"], world["token"], remove_bg=True, secret_lab=True)
     captain, friend = tools(world["app"], ADMIN), tools(world["app"], FRIEND)
-    assert {"remove_bg", "secret_lab", "popup_result"} <= set(captain.available())
+    assert {"remove_bg", "popup_result"} <= set(captain.available())
     assert "remove_bg" in friend.available() and "secret_lab" not in friend.available()
+    assert "secret_lab" not in captain.available()                                # green is the guest chat: an admin pop-up is purple's
+    assert "attachment" not in chat_tools.popup_schema(registered["secret_lab"])["input_schema"]["properties"]   # nothing to attach
     schema = next(t for t in friend.schemas() if t["name"] == "remove_bg")
     assert schema["input_schema"]["properties"]["attachment"]["type"] == "integer" and "Cuts the subject out" in schema["description"]
-    assert "attachment" not in next(t for t in captain.schemas() if t["name"] == "secret_lab")["input_schema"]["properties"]
 
 
 def test_the_attached_picture_rides_with_the_job_and_waits_for_a_quiet_machine(world, registered, monkeypatch):
@@ -378,7 +379,7 @@ def test_end_to_end_a_big_track_goes_home_through_the_gate_and_the_real_reporter
         assert popup_in.gate_key(home_hash) == gate_mod.gate_key(world["token"])         # the portal's key opens the gate
         gate_url = f"http://127.0.0.1:{gate_srv.server_port}"
         world["app"].extensions["popup_in"].gate_url_re = _re.compile(r"http://127\.0\.0\.1:\d+")
-        echo_chat = {**popups.load()["echo"], "chat": True}
+        echo_chat = {**popups.load()["echo"], "chat": True, "audience": "everyone"}   # green offers only everyone's pop-ups
         monkeypatch.setattr(popups, "load", lambda root=None: {"echo": echo_chat})
         monkeypatch.setattr(chat_tools, "POPUP_WAIT_S", 0.01)
         monkeypatch.setattr(reporter, "PORTAL", f"http://127.0.0.1:{portal_srv.server_port}")

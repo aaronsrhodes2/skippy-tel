@@ -74,19 +74,25 @@ def test_the_page_points_at_the_sign_in_when_no_car(env):
     assert b'href="http://skippy-core:4000"' in page and b"skippy-core:4000" in page
 
 
-def test_car_status_only_for_the_captain_and_only_when_a_car_reports(env):
+def test_green_never_has_the_car_not_even_for_the_captain(env):
+    """Green is the guest chat (the Captain, 2026-10-30): where his car is stays with purple."""
     client, _, _ = env
     tools_for = client.application.extensions["chat_tools_for"]
     ctx = client.application.app_context()
     ctx.push()
-    report(client.application, {"ready": False, "mqtt": True, "cars": []})
-    assert "car_status" not in tools_for({"email": ADMIN}).available()       # nobody signed in: no tool, no made-up answer
     report(client.application, SIGNED_IN)
-    assert "car_status" not in tools_for({"email": FRIEND}).available()
-    mine = tools_for({"email": ADMIN})
-    assert "car_status" in mine.available() and any(s["name"] == "car_status" for s in mine.schemas())
-    assert '"estimated_range_mi": 200' in mine.run("car_status", {})
+    for who in (ADMIN, FRIEND):
+        assert "car_status" not in tools_for({"email": who}).available()
     ctx.pop()
+
+
+def test_the_car_tool_reads_the_report_when_given_one():
+    class Car:
+        def car(self):
+            return SIGNED_IN
+    tools = chat_tools.ChatTools(None, is_admin=True, home_car=Car())
+    assert "car_status" in tools.available() and any(s["name"] == "car_status" for s in tools.schemas())
+    assert '"estimated_range_mi": 200' in tools.run("car_status", {})
 
 
 def test_a_car_that_stopped_reporting_is_said_plainly():

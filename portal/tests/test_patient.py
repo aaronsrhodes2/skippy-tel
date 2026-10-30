@@ -113,17 +113,16 @@ def test_a_picture_waits_for_a_quiet_machine_and_the_card_says_why(world):
 
 
 def test_skippy_pcs_gpu_must_be_mostly_free_and_one_job_at_a_time_oldest_first(world):
-    first = ask(world, "make_music", {"prompt": "sea shanty"})["media"][0]
+    first = ask(world, "make_image", {"prompt": "a sea shanty's ship"})["media"][0]
     second = ask(world, "make_image", {"prompt": "a lighthouse"})["media"][0]
-    assert first["kind"] == "audio" and first["pending"] is True
+    assert first["kind"] == "image" and first["pending"] is True
     quiet(world, {"gpu_free_pct": 22, "gpu_util_pct": 86})
     assert handed(world) == []                                       # quiet, but the card is busy
     why = world["client"].get(f"/chat/media/{first['job_id']}/state").get_json()["why"]
     assert why == "waiting for the GPU to free up (22% free)"
     quiet(world, {"gpu_free_pct": 75, "gpu_util_pct": 3})
-    assert [j["id"] for j in handed(world)] == [first["job_id"]]     # the oldest; the picture waits its turn on the same machine
-    world["client"].put(f"/home/media/{first['job_id']}?title=shanty", data=MP3, headers={**world["H"], "Content-Type": "audio/mpeg"})
-    world["client"].post(f"/home/jobs/{first['job_id']}", json={"result": {"title": "shanty", "seconds": 45}}, headers=world["H"])
+    assert [j["id"] for j in handed(world)] == [first["job_id"]]     # the oldest; the next picture waits its turn on the same machine
+    world["client"].post(f"/home/jobs/{first['job_id']}", json={"error": "out of memory"}, headers=world["H"])   # done (badly): the machine is free
     quiet(world, {"gpu_free_pct": 75, "gpu_util_pct": 3})
     assert [j["id"] for j in handed(world)] == [second["job_id"]]
 

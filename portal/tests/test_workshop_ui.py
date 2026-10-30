@@ -163,6 +163,7 @@ els["ps-notify"].checked = true;
 for (const id of ["ps-stop", "ps-quiet", "ps-quiet-hint", "ps-reload", "ps-project-hint", "ps-convs"]) els[id].hidden = true;
 const Bridge = {pager: () => ({refresh() {}, last() {}, go() {}, page() { return 0; }, pages() { return 1; }})};   // the page flips are the bridge's, not under test here
 const SkippyMd = require(input.mdPath);                       // the real renderer (static/skippy-md.js), on the harness's fake DOM
+const SkippyQueue = require(input.mdPath.replace(/skippy-md\.js$/, "skippy-queue.js"));   // the real queue (static/skippy-queue.js), shared with green
 const voiceLog = [];                                            // what was handed to a voice: ["card", text] / ["card-resume"] / ["chat", text|null]
 const SkippyVoice = {attach: () => ({say(t) { voiceLog.push(["card", t]); }, stop() {}, resume() { voiceLog.push(["card-resume"]); }, cancel() {}, chatting: () => false, enabled: () => false})};   // the mic and speaker are static/skippy-voice.js's, tested in test_voice.py
 const root = {closest: () => null, querySelector(sel) { const e = els[sel.slice(1)]; if (!e) throw new Error("the script looked up " + sel + ", which the markup lacks"); return e; }};
@@ -285,8 +286,8 @@ function snap() {
   globalThis.requestAnimationFrame = (fn) => fakeSetTimeout(fn, 0);     // the transcript defers its scroll one frame (templates/_workshop.html scrollNow)
   if (input.withWindow) globalThis.window = {dispatchEvent() {}};     // inside the one chat (templates/_chat.html): window.SkippyAgent exists
   new Function("document", "localStorage", "crypto", "fetch", "setTimeout", "clearTimeout", "setInterval", "confirm",
-               "AbortController", "Date", "location", "Bridge", "SkippyVoice", "SkippyMd", input.script)(
-    document, localStorage, crypto, fakeFetch, fakeSetTimeout, fakeClearTimeout, fakeSetInterval, confirm, FakeAbort, FakeDate, location, Bridge, SkippyVoice, SkippyMd);
+               "AbortController", "Date", "location", "Bridge", "SkippyVoice", "SkippyMd", "SkippyQueue", input.script)(
+    document, localStorage, crypto, fakeFetch, fakeSetTimeout, fakeClearTimeout, fakeSetInterval, confirm, FakeAbort, FakeDate, location, Bridge, SkippyVoice, SkippyMd, SkippyQueue);
   await settle();
   const snaps = {};
   for (const s of input.steps) {

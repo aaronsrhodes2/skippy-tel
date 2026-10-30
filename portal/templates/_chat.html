@@ -61,6 +61,7 @@
   <form class="ask">
     <div class="vstat" hidden aria-live="polite"></div>
     <div class="editing" hidden><svg class="g" aria-hidden="true"><use href="#g-pen"/></svg><span>Editing your last message</span><button type="button" class="key sm" aria-label="Stop editing" title="Stop editing (Esc)"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></div>
+    <div class="queue" hidden aria-live="polite"></div>
     <div class="files" hidden></div>
     <input type="file" class="file-pick" multiple hidden accept="image/jpeg,image/png,image/webp,audio/wav,audio/mpeg,audio/flac,audio/ogg,application/pdf,text/*,.md,.csv,.json,.py,.js,.ts,.tsx,.jsx,.html,.css,.yml,.yaml,.xml,.sh,.kt,.java,.c,.h,.cpp,.rs,.go,.sql,.toml,.ini,.log">
     <textarea rows="1" aria-label="Message" placeholder="Message Skippy" required></textarea>
@@ -196,10 +197,12 @@
     root.querySelectorAll(".brain-opt").forEach(o => o.addEventListener("click", () => {
       brain = o.dataset.brain; try { localStorage.setItem(BRAIN_KEY, o.dataset.mode); } catch (e) {}
       paintBrain(); showSheet("brain"); applyMode();
+      if (!isAgent(brain)) setContext(null);                      // a Skippy Memory conversation goes to the agent only, never to green
     }));
     paintBrain();
 
-    // A saved conversation being continued (Skippy Memory; admins only): sent with each message, kept in this tab.
+    // A saved conversation being continued (Skippy Memory; the Captain only): it goes to the agent (Private) with his next message,
+    // never to green, which is the guest chat (2026-10-30). Kept in this tab until it has gone.
     const CTX = KEY + "-ctx";
     let context = null;
     try { context = JSON.parse(sessionStorage.getItem(CTX) || "null"); } catch (e) { context = null; }
@@ -209,6 +212,16 @@
       banner.hidden = !context;
       if (context) banner.querySelector("span").textContent = context.title + " · " + context.source + (context.updated ? " · " + context.updated.slice(0, 10) : "") + (context.cut ? " ✂" : "");
       logPager.refresh();
+    }
+    const CONTEXT_MAX = 60000;                                    // about 15k tokens of the saved conversation, its newest part
+    function earlier(c) {
+      const when = (c.updated || "").slice(0, 10), src = String(c.source || "another AI");
+      return "I'm continuing an earlier conversation I had with " + src.charAt(0).toUpperCase() + src.slice(1) + (when ? " (" + when + ")" : "")
+        + (c.title ? ", titled \"" + c.title + "\"" : "") + ". Here it is as it was saved, oldest first. Pick up from where it left off and"
+        + " don't recap it unless I ask:
+<earlier_conversation>
+" + String(c.text || "").slice(-CONTEXT_MAX) + "
+</earlier_conversation>";
     }
     function setContext(c) { context = c; try { c ? sessionStorage.setItem(CTX, JSON.stringify(c)) : sessionStorage.removeItem(CTX); } catch (e) {} showContext(); }
 
@@ -654,6 +667,9 @@
       if (files.length > pics.length + texts.length) flash("The agent takes pictures and text here; put other files in its folder.");
       if (!text && !pics.length) return;
       quickLine(text);                                           // before send: the context is the turns before this message
+      if (context) { text = earlier(context) + "
+
+" + text; setContext(null); }   // Skippy Memory's conversation rides with the first message
       window.SkippyAgent.send(text, pics);
       alive().pulse(1); paintStop();
     }
@@ -673,6 +689,7 @@
       if (!text || busy) return;
       if (agentOn()) { agentView.hidden = true; logBox.hidden = false; }   // the answer shows in the chat's own log; the next agent message brings its transcript back
       busy = true; paintTail();
+      let answered = false;                                         // a reply landed: whatever queued meanwhile goes next
       const files = pending_files.splice(0);                          // they go with this message only
       paintFiles();
       let before = history;
@@ -697,7 +714,7 @@
           method: "POST", headers: {"Content-Type": "application/json"}, signal: inflight.signal,
           // `page` lets Skippy know what you're looking at ("this game" = the one on screen).
           body: JSON.stringify({message: text, history: before, page: location.pathname, brain: BRAINS.length > 1 ? brain : undefined,
-                                files: files.filter(f => !f.sending).map(f => f.ref ? {name: f.name, ref: f.ref, type: f.type, bytes: f.bytes} : {name: f.name, data: f.data}), save: allowSave(), context: context,
+                                files: files.filter(f => !f.sending).map(f => f.ref ? {name: f.name, ref: f.ref, type: f.type, bytes: f.bytes} : {name: f.name, data: f.data}), save: allowSave(),
                                 // the suggestion this may be a yes to (the server uses it only for a plain yes)
                                 mentat_follow_up: mentatFollow && mentatFollow.chat === chatId ? mentatFollow.follow : undefined}),
         });
@@ -720,6 +737,7 @@
         history = before.concat({role: "user", content: said}, {role: "assistant", content: answer});
         if (opts.replace) { alts.push({user: said, assistant: answer}); alt = alts.length - 1; }
         saveAlts(); save(); ping();
+        answered = true;
       } catch (err) {
         const stopped = err.name === "AbortError";
         pending.textContent = stopped ? "Stopped." : err.message;
@@ -733,6 +751,7 @@
         sendBtn.disabled = false; delete sendBtn.dataset.s;
         logPager.refresh(); paintTail();
         if (matchMedia("(pointer: fine)").matches) msg.focus();
+        if (answered) setTimeout(drainQueue, 0);                    // stopped or failed: the line waits for his next message
       }
     }
     // Retry: the last question again; Edit: your last message back in the box (or ↑ in an empty box), sent in its place.
@@ -748,12 +767,32 @@
     }
     function endEdit() { editing = false; editBar.hidden = true; }
     editBar.querySelector("button").addEventListener("click", () => { endEdit(); msg.value = ""; grow(); });
+    // ── The queue (static/skippy-queue.js, the same as the agent's): what is sent while Skippy answers waits here, under the box,
+    // and goes as ONE message when the reply lands; a repeat is taken out. Kept in this tab; a stopped or failed reply holds it. ──
+    const queueBox = form.querySelector(".queue"), QUEUE = KEY + "-queue";
+    let queue = []; try { queue = JSON.parse(sessionStorage.getItem(QUEUE) || "[]"); if (!Array.isArray(queue)) queue = []; } catch (e) { queue = []; }
+    function paintQueue() {
+      try { queue.length ? sessionStorage.setItem(QUEUE, JSON.stringify(queue.slice(0, 20))) : sessionStorage.removeItem(QUEUE); } catch (e) {}
+      queueBox.hidden = !queue.length;
+      queueBox.replaceChildren(...queue.map((q, i) => {
+        const row = document.createElement("div"), t = document.createElement("span"); row.className = "qrow"; t.className = "qt"; t.textContent = q;
+        row.append(t, keyBtn("x", "Take this out of the queue", () => { queue.splice(i, 1); paintQueue(); })); return row;
+      }));
+    }
+    function drainQueue() { if (queue.length && !busy && !agentOn()) { const all = queue.splice(0); paintQueue(); ask(SkippyQueue.gulp(all)); } }
+    paintQueue();
+
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      const text = msg.value.trim();
+      let text = msg.value.trim();
       if (!text) return;
+      if (busy && !agentOn()) {                                     // Skippy is answering: it waits in line, not lost
+        if (editing) { flash("Wait for the reply to edit your message."); return; }
+        SkippyQueue.add(queue, text); paintQueue(); msg.value = ""; grow(); return;
+      }
       msg.value = ""; grow();
       const redo = editing; endEdit();
+      if (queue.length && !redo && !agentOn()) { text = SkippyQueue.gulp([...queue.splice(0), text]); paintQueue(); }
       ask(text, redo ? {replace: true} : {});
     });
     msg.addEventListener("keydown", (e) => {
@@ -762,8 +801,8 @@
       else if (e.key === "Escape" && editing) { endEdit(); msg.value = ""; grow(); }
     });
     function newChat() {                                                                // the one before stays in Your chats
-      if (agentOn()) { window.SkippyAgent.newChat(); applyMode(); msg.focus(); return; }   // a new agent conversation (same folder and brain to start)
-      startChat(newId(), []); setContext(null); msg.focus();
+      if (agentOn()) { window.SkippyAgent.newChat(); applyMode(); setContext(null); msg.focus(); return; }   // a new agent conversation (same folder and brain to start)
+      startChat(newId(), []); setContext(null); queue = []; paintQueue(); msg.focus();
     }
     root.querySelector(".clear").addEventListener("click", newChat);
     if (banner) banner.querySelector(".drop-ctx").addEventListener("click", () => setContext(null));
@@ -898,11 +937,13 @@
         if (m && m.id !== brain) { brain = m.id; try { localStorage.setItem(BRAIN_KEY, m.mode); } catch (e) {} paintBrain(); applyMode(); }
         window.SkippyAgent.open(r.c); showSheet("chats"); return;
       }
-      btn.disabled = true; btn.dataset.s = "on";                     // the archive: continue that conversation here, in Public
+      btn.disabled = true; btn.dataset.s = "on";                     // the archive: continue that conversation with the agent, in Private
+      const priv = byMode("private") || BRAINS.find(x => isAgent(x.id) && x.ready);
+      if (!priv) { btn.disabled = false; btn.querySelector(".chat-when").textContent = "The agent isn't answering, so there's nowhere to continue it."; return; }
       try {
         const c = await askHome({key: r.id});
-        if (agentOn()) { brain = "core"; paintBrain(); applyMode(); }
-        startChat(newId(), []);
+        if (priv.id !== brain) { brain = priv.id; try { localStorage.setItem(BRAIN_KEY, priv.mode); } catch (e) {} paintBrain(); }
+        applyMode(); if (window.SkippyAgent) window.SkippyAgent.newChat();
         setContext({source: c.source, title: c.title, updated: c.updated, text: c.text, cut: c.cut});
         showSheet("chats"); msg.focus();
       } catch (err) { btn.disabled = false; btn.querySelector(".chat-when").textContent = err.message; }

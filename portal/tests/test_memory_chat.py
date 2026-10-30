@@ -1,5 +1,6 @@
 """Continue with Skippy (Skippy Memory): the Captain's chat lists every saved AI conversation and carries one on. The list
-and the text come from skippy-pc as jobs; only an admin may ask, and only an admin's `context` reaches Skippy's prompt."""
+and the text come from skippy-pc as jobs; only an admin may ask, and the conversation
+goes on with the agent (Private): green, the guest chat, never takes it."""
 import pytest
 
 pytest.importorskip("flask")
@@ -22,25 +23,12 @@ def env():
     return app, app.test_client(), skippy
 
 
-def test_the_continued_conversation_goes_into_the_prompt_and_malformed_ones_add_nothing():
-    tail = chat.continued(CTX)
-    assert "continuing an earlier conversation he had with Grok (2026-09-28)" in tail and "20 to 30 percent" in tail
-    long = chat.continued({**CTX, "text": "x" * 100 + "END" + "y" * chat.CONTEXT_MAX_CHARS})
-    assert "END" not in long and len(long) < chat.CONTEXT_MAX_CHARS + 600
-    for bad in (None, "text", {"text": ""}, {"text": 5}, []):
-        assert chat.continued(bad) == ""
-
-
-def test_only_the_captains_context_reaches_skippy(env):
+def test_green_never_takes_a_saved_conversation_not_even_the_captains(env):
+    """Green is the guest chat (the Captain, 2026-10-30): Skippy Memory's conversation goes to the agent (Private) from the page."""
     app, client, skippy = env
     login(client, ADMIN)
     assert client.post("/chat/send", json={"message": "carry on", "context": CTX}).status_code == 200
-    assert "<earlier_conversation>" in skippy.seen[0]
-    client.get("/logout")
-    login(client, FRIEND)
-    app.config["ADMIN_EMAILS"] = frozenset({ADMIN})
-    client.post("/chat/send", json={"message": "carry on, Barney Style", "context": CTX})
-    assert "<earlier_conversation>" not in skippy.seen[0]
+    assert "<earlier_conversation>" not in skippy.seen[0] and "20 to 30 percent" not in skippy.seen[0]
 
 
 def test_the_list_and_a_conversation_are_jobs_for_skippy_pc_and_only_the_asker_reads_them(env):
