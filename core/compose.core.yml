@@ -74,8 +74,7 @@ services:
       - MENTAT_USE_LLM=1
       - OLLAMA_URL=http://ollama:11434
       - MATERIA_OLLAMA_MODEL=skippy-chat    # the translator's Qwen: the chat slot (Qwen3.6-35B-A3B), resident
-      - MENTAT_ROUTER_MODEL=${MENTAT_ROUTER_MODEL-qwen3-8b-stock}   # the router stage in /ask (mentat/router_stage.py): stock Qwen3-8B, resident; empty = off
-      - MENTAT_ROUTER_INDEX=${MENTAT_ROUTER_INDEX-1}   # a stock model has no catalogue in its weights: the tool index goes in its prompt (0 for a trained router)
+      - MENTAT_ROUTER_MODEL=${MENTAT_ROUTER_MODEL-mentat-router-v31-4b}   # the trained router stage in /ask (mentat/router_stage.py), resident; empty = off
       - MENTAT_CASCADE=before   # the benchmark's deterministic cascade ahead of the router (mentat/cascade_stage.py); empty = off
       - MENTAT_CASCADE_OFF=math   # its maths regexes took 19 right router answers (replay 2026-10-27: physics 108->132, maths 317 kept, adversarial 1->8 of 18)
       - MENTAT_CALL_TIMEOUT=90

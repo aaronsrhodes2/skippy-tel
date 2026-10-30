@@ -22,9 +22,9 @@
       }
     },
     "router": {
-      "role": "Mentat's router: stock Qwen3-8B (no fine-tune) since 2026-10-29, the Captain's call (training is hard to repeat; sigma-ground folded the common chains into single tools, misc/FOLDED_CHAINS.md, which a stock model reads from the tool index). It reads a physics or maths question with the tool index in its prompt (MENTAT_ROUTER_INDEX=1, about 17k tokens) and writes a JSON plan naming the Mentat tool and its arguments, constrained by a grammar. Always loaded (5 GB). The trained v3.1 4B it replaced is archived in D:/models/finetunes/mentat-router-v31-4b and stays on skippy-core in /srv/models (repo aaronsrhodes2/mentat-router-v31-4b, sha256 c929e636...) for a rollback",
+      "role": "Mentat's trained router (v3.1: Qwen3-4B + LoRA, plan format v3). It reads a physics or maths question and writes a JSON plan naming the Mentat tool and its arguments, constrained by a grammar. Always loaded (2 GB). It is NOT a chat model: it only answers in its own plan format. Trained 2026-10-13/14 on skippy-pc; the files are archived in D:/models/finetunes/mentat-router-v31-4b",
       "resident": true,
-      "aliases": ["mentat-router", "qwen3-8b-stock"],
+      "aliases": ["mentat-router", "mentat-router-v31-4b"],
       "standin": {
         "repo": "Qwen/Qwen3-0.6B-GGUF",
         "files": [{"path": "Qwen3-0.6B-Q8_0.gguf", "size": 639446688, "sha256": null}],
@@ -32,9 +32,9 @@
         "args": ["--jinja", "--chat-template-kwargs", "{\"enable_thinking\": false}"]
       },
       "full": {
-        "repo": "Qwen/Qwen3-8B-GGUF",
-        "files": [{"path": "Qwen3-8B-Q4_K_M.gguf", "size": 5027783488, "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785"}],
-        "ctx": 49152,
+        "repo": "aaronsrhodes2/mentat-router-v31-4b",
+        "files": [{"path": "mentat-router-v31-4b-Q4_K_M.gguf", "size": 2497280832, "sha256": "c929e636f2b1c937de10122b52872a7226f3c839aa29182ce5e21e3d4ece2507"}],
+        "ctx": 16384,
         "parallel": 2,
         "args": ["--jinja", "--temp", "0", "--chat-template-kwargs", "{\"enable_thinking\": false}"]
       }

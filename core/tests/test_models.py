@@ -185,22 +185,20 @@ def test_bench_candidates_serve_beside_the_slots_on_demand(tmp_path):
         m.load(_manifest(tmp_path, candidates={"chat": cand["try"]}))
 
 
-def test_the_router_is_a_resident_stock_qwen3_8b_with_its_own_names_and_pinned_files():
-    """Mentat's router (stock Qwen3-8B since 2026-10-29, the trained v3.1 4B before): always loaded beside the chat model, never an alias of it,
-    its file pinned by size and sha256, and a context that holds the tool index it reads (about 17k tokens) twice over (two slots, one KV pool)."""
+def test_the_trained_router_is_a_small_resident_slot_with_its_own_names_and_pinned_files():
+    """Mentat's trained router (v3.1, 4B): always loaded beside the chat model, never an alias of it, its file pinned by size and sha256."""
     data = m.load()
     router = data["slots"]["router"]
-    assert router["resident"] is True and set(router["aliases"]) == {"mentat-router", "qwen3-8b-stock"}
+    assert router["resident"] is True and set(router["aliases"]) == {"mentat-router", "mentat-router-v31-4b"}
     full = router["full"]
-    assert full["repo"] == "Qwen/Qwen3-8B-GGUF"
-    assert full["files"] == [{"path": "Qwen3-8B-Q4_K_M.gguf", "size": 5027783488,
-                              "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785"}]   # D:/models/huggingface/Qwen__Qwen3-8B-GGUF, revision 7c41481f
-    assert full["ctx"] >= 2 * 20000 and full.get("parallel", 2) == 2
-    assert "--temp" in full["args"] and full["args"][full["args"].index("--temp") + 1] == "0"      # plans are scored at temperature 0
+    assert full["repo"] == "aaronsrhodes2/mentat-router-v31-4b"
+    assert full["files"] == [{"path": "mentat-router-v31-4b-Q4_K_M.gguf", "size": 2497280832,
+                              "sha256": "c929e636f2b1c937de10122b52872a7226f3c839aa29182ce5e21e3d4ece2507"}]   # Ollama's blob; the WSL Q4_K_M (2.09 GB) was truncated
+    assert "--temp" in full["args"] and full["args"][full["args"].index("--temp") + 1] == "0"      # it was trained and scored at temperature 0
     assert all(a not in data["slots"]["chat"]["aliases"] for a in router["aliases"])
     chosen = m.plan(data, m.parse_full("chat,coder,vision,router", data["slots"]))
     assert chosen["router"]["variant"] == "full" and m.budget(data, chosen)["fits"]
     config, shim = m.render(chosen, 999)
-    assert "Qwen3-8B-Q4_K_M.gguf" in config["models"]["router"]["cmd"] and "router" in config["groups"]["resident"]["members"]
-    assert {"mentat-router", "qwen3-8b-stock", "router"} <= {n["name"] for n in shim["models"]}
+    assert "mentat-router-v31-4b-Q4_K_M.gguf" in config["models"]["router"]["cmd"] and "router" in config["groups"]["resident"]["members"]
+    assert {"mentat-router", "mentat-router-v31-4b", "router"} <= {n["name"] for n in shim["models"]}
     assert "old names" not in data["slots"]["router"]["role"] and "OLD names" in data["slots"]["chat"]["role"]            # the chat slot says what qwen3:8b really is
