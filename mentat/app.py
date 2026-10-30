@@ -54,6 +54,7 @@ import research
 import position_stage
 import fold_stage
 import router_stage
+import word_stage
 import wva
 
 # Natural-language / stateful tools: need the local Ollama translator or keep
@@ -214,6 +215,16 @@ def _ask(question: str, given: dict | None = None) -> dict:
             return hit
     result = simulate(question, use_llm=USE_LLM, given=given or None).to_dict()
     result["interpreter"] = "keywords + qwen" if USE_LLM else "keywords"
+    if word_stage.enabled() and USE_LLM and not given and _unanswered(result):
+        # Opt-in (MENTAT_WORD_MODEL): nothing above answered, so before declining, a question that states its own numbers is read into one expression
+        # (the model only reads; every number must be the question's own) and sigma-ground's evaluate_quantity does the arithmetic (word_stage.py).
+        word_miss: dict = {}
+        hit = word_stage.answer(question, call=_call, ollama_url=OLLAMA_URL, guard=_router_guard, miss=word_miss)
+        if hit is not None:
+            if miss:
+                hit["inputs"]["router_miss"] = miss
+            return hit
+        miss["word_problem"] = word_miss
     _decline_plainly(question, result)
     if miss and isinstance(result.get("inputs"), dict):
         result["inputs"]["router_miss"] = miss
@@ -225,17 +236,25 @@ def _ask(question: str, given: dict | None = None) -> dict:
 _FALLING_WORDS = re.compile(r"\b(fall|falls|falling|fell|drop|drops|dropped|dropping|hit the ground|impact|terminal velocity|heat up|heats up)\b", re.I)
 
 
+def _unanswered(result: dict) -> bool:
+    """True when the keyword translator had nothing but its generic "I can simulate a falling object's impact speed..." blurb: no value, no
+    clarification, no error."""
+    from sigma_ground.materia import translator as tr
+    if result.get("value") is not None or result.get("clarification") or result.get("error"):
+        return False
+    generic = getattr(tr, "_CLARIFY", None)                    # a private name: if sigma-ground renames it, /ask keeps its old answer
+    return bool(generic) and str(result.get("notes") or "") == generic
+
+
 def _decline_plainly(question: str, result: dict) -> None:
     """The last stop of /ask, when the cascade, the router and its fallback all missed: if the keyword translator can only offer its generic
     "I can simulate a falling object's impact speed..." blurb, a question about bananas, heartbeats or a puzzle was answered with an offer
     about falling objects (the 2026-10-30 adversarial misses). Say plainly that no tool covers the question, and keep the falling-object hint
     only for a question that mentions falling. The value stays null and nothing is guessed: this changes the text, the source and the route."""
     from sigma_ground.materia import translator as tr
-    if result.get("value") is not None or result.get("clarification") or result.get("error"):
+    if not _unanswered(result):
         return
-    generic = getattr(tr, "_CLARIFY", None)                    # a private name: if sigma-ground renames it, /ask keeps its old answer
-    if not generic or str(result.get("notes") or "") != generic:
-        return
+    generic = tr._CLARIFY
     hint = f" {generic}" if _FALLING_WORDS.search(question) else ""
     result["notes"] = ("Mentat has no tool that answers this question, so it won't guess a number. It computes standard physics, chemistry and "
                        "maths from its tools: ask for a quantity and give the inputs (\"escape velocity of Mars\", \"energy of a 500 nm photon\", "
