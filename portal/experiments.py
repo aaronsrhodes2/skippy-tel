@@ -252,12 +252,15 @@ MINEBENCH_RUNS = (
               "harness as of commit e2d7a02 (context discipline: scratch notes, more segments, a trimmed prompt); the same message as v5, word for word",
      "prompt": "a choo-choo train", "request": "experiments/minebench/v6/request.txt", "comparable": True, "blocks": 23104,
      "minutes": 28, "size": "102 x 50 x 151",
-     "verdict": "A step back from v5. The locomotive itself is the most detailed yet: an iron boiler with bands, stack, dome, cab "
-                "windows, cowcatcher, spoked drivers and a leading truck, and a tall curling smoke plume. But the tender and the "
-                "passenger car stand off the scene's base beside the track, so it does not read as one train; the plume is 1,423 "
-                "floating blocks and a few gold and iron bits float by the boiler (8 floating parts, against v5's zero); and it is a "
-                "fifth of v5's blocks in three times the time. Same model, same words: the run-to-run spread, or the harness "
-                "change, is larger than the progress. One run can't say which."},
+     "verdict": "Almost flawless, in the Captain's judgement: the most detailed locomotive yet (an iron boiler with bands, stack, "
+                "dome, cab windows, cowcatcher, spoked drivers and a leading truck, a tall curling smoke plume) on a track with a "
+                "station and trees. The one real mistake is the wheels: every one is drawn facing along the track instead of rolling "
+                "down it (the code draws each in the x-y plane while the track runs along z), a mistake the Captain has seen before "
+                "on vehicles. The same lost sense of forward strings the tender and the passenger car out sideways beside the track "
+                "instead of behind the engine. The fix is one rule, now in purple Skippy's voxel skill and its header: name the "
+                "forward axis once; wheels stand in the forward-and-up plane; every car follows along forward. Smaller: the plume "
+                "and a few trim blocks float (8 parts, against v5's zero), and it is a fifth of v5's blocks in three times the "
+                "time, with the same model and the same words."},
     {"id": "haiku-direct", "title": "Choo-choo train, Claude Haiku in one call (the benchmark's own way)",
      "model": "Claude Haiku 5.5 through Anthropic's API: one call with MineBench's prompt, no tools, no second try",
      "prompt": "a choo-choo train", "comparable": True, "blocks": 21048, "minutes": 2, "size": "144 x 40 x 42",

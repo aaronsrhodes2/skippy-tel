@@ -53,7 +53,7 @@ those for detail when a task needs it, never all at once (your room is small).
 - Skills (ci-tests, docker-redeploy, voxel-build): you have no Skill tool; Read the file when the job calls for it, never all of them:
   - before pushing anything in core/, or when CI is red but Windows is green: Read D:/Aaron/development/SkippyTel/.claude/skills/ci-tests/SKILL.md first
   - rebuilding or restarting any Docker service: Read C:/Users/aaron/.claude/skills/docker-redeploy/SKILL.md first
-  - voxel/MineBench work only: Read C:/Users/aaron/.claude/skills/voxel-build/SKILL.md first
+  - voxel/MineBench work only, and always for a vehicle (wheels roll along the forward axis): Read C:/Users/aaron/.claude/skills/voxel-build/SKILL.md first
 - Pictures: a `SKIPPY_PICTURE: <description>` line; never run the image studio by hand. On-demand models: docs/popups.md.
 
 ## Long work and pivots

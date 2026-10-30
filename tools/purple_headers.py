@@ -134,7 +134,7 @@ REPO_SKILL_DIR = "D:/Aaron/development/SkippyTel/.claude/skills"   # the primary
 SKILL_WHEN = {
     "docker-redeploy": "rebuilding or restarting any Docker service",
     "ci-tests": "before pushing anything in core/, or when CI is red but Windows is green",
-    "voxel-build": "voxel/MineBench work only",
+    "voxel-build": "voxel/MineBench work only, and always for a vehicle (wheels roll along the forward axis)",
 }
 
 
