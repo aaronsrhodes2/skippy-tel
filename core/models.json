@@ -39,6 +39,24 @@
         "args": ["--jinja", "--temp", "0", "--chat-template-kwargs", "{\"enable_thinking\": false}"]
       }
     },
+    "router-stock": {
+      "role": "The second opinion for Mentat's router (2026-10-30, the Captain): stock Qwen3-8B, no fine-tune, asked only when the trained router misses (mentat/router_stage.py, MENTAT_ROUTER_FALLBACK_MODEL). It reads the tool index in its prompt (about 17k tokens), so it knows tools added after the router was trained. Alone it scored 141/150 physics but 224/329 maths against the trained router's 317, so it never goes first. Always loaded (5 GB), one request at a time. The file is D:/models/huggingface/Qwen__Qwen3-8B-GGUF, copied to /srv/models",
+      "resident": true,
+      "aliases": ["qwen3-8b-stock"],
+      "standin": {
+        "repo": "Qwen/Qwen3-0.6B-GGUF",
+        "files": [{"path": "Qwen3-0.6B-Q8_0.gguf", "size": 639446688, "sha256": null}],
+        "ctx": 32768,
+        "args": ["--jinja", "--chat-template-kwargs", "{\"enable_thinking\": false}"]
+      },
+      "full": {
+        "repo": "Qwen/Qwen3-8B-GGUF",
+        "files": [{"path": "Qwen3-8B-Q4_K_M.gguf", "size": 5027783488, "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785"}],
+        "ctx": 32768,
+        "parallel": 1,
+        "args": ["--jinja", "--temp", "0", "--chat-template-kwargs", "{\"enable_thinking\": false}"]
+      }
+    },
     "vision": {
       "role": "eyes for the text-only slots: describes images and screenshots (the coder's reference pictures, its own page). Always loaded, so it never swaps out the coder",
       "resident": true,

@@ -230,6 +230,54 @@ class TestRealHarness:
         assert "escape_velocity(" in with_index and "body_name" in with_index and len(with_index) > len(bare)
         assert "body_name" not in bare
 
+    def _fallback(self, stage, monkeypatch, replies: dict):
+        """replies: model -> plan text. Returns (answer, miss, the models asked in order, the system prompts they got)."""
+        import json
+        import httpx
+        from types import SimpleNamespace
+        asked, prompts = [], []
+
+        def model(request):
+            body = json.loads(request.content)
+            asked.append(body["model"])
+            prompts.append(body["messages"][0]["content"])
+            return httpx.Response(200, json={"message": {"content": replies[body["model"]]}})
+
+        class Server:
+            async def call_tool(self, name, args):
+                return [SimpleNamespace(text=json.dumps({"value": 24.587, "units": "eV", "error": None, "inputs": args}))], None
+
+        tools = {"first_ionization_energy": SimpleNamespace(name="first_ionization_energy", description="First ionisation energy of an element.",
+                                                            inputSchema={"properties": {"element_symbol": {}}})}
+        real = httpx.AsyncClient
+        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(model), **kw))
+        monkeypatch.setattr(stage, "MODEL", "mentat-router-v31-4b")
+        monkeypatch.setattr(stage, "INDEX", False)
+        monkeypatch.setattr(stage, "FALLBACK_MODEL", "qwen3-8b-stock")
+        monkeypatch.setattr(stage, "FALLBACK_INDEX", True)
+        miss = {}
+        out = stage.answer("highest noble gas first ionization energy?", server=Server(), tools=tools, ollama_url="http://fake:11434", miss=miss)
+        return out, miss, asked, prompts
+
+    PLAN_HE = '{"tool": "first_ionization_energy", "tool_args": {"element_symbol": "He"}}'
+    DECLINE = '{"decline": "not a physics question"}'
+
+    def test_the_fallback_is_not_asked_when_the_router_answers(self, stage, monkeypatch):
+        out, _, asked, _ = self._fallback(stage, monkeypatch, {"mentat-router-v31-4b": self.PLAN_HE, "qwen3-8b-stock": self.DECLINE})
+        assert asked == ["mentat-router-v31-4b"] and out["interpreter"] == "router mentat-router-v31-4b"
+
+    def test_a_router_miss_goes_to_the_fallback_with_the_tool_index(self, stage, monkeypatch):
+        out, _, asked, prompts = self._fallback(stage, monkeypatch, {"mentat-router-v31-4b": self.DECLINE, "qwen3-8b-stock": self.PLAN_HE})
+        assert asked == ["mentat-router-v31-4b", "qwen3-8b-stock"]
+        assert "first_ionization_energy(" not in prompts[0] and "first_ionization_energy(" in prompts[1]      # only the stock model reads the index
+        assert out["value"] == 24.587 and out["interpreter"] == "router qwen3-8b-stock after mentat-router-v31-4b"
+        assert out["inputs"]["router_first_miss"]["reason"].startswith("decline")
+
+    def test_when_both_miss_both_reasons_are_kept(self, stage, monkeypatch):
+        out, miss, asked, _ = self._fallback(stage, monkeypatch, {"mentat-router-v31-4b": self.DECLINE, "qwen3-8b-stock": "not json"})
+        assert out is None and asked == ["mentat-router-v31-4b", "qwen3-8b-stock"]
+        assert miss["reason"].startswith("decline") and miss["fallback"]["model"] == "qwen3-8b-stock" and miss["fallback"]["reason"]
+
     def test_a_pre_rename_parameter_name_is_not_refused(self, stage, monkeypatch):
         import json
         import httpx

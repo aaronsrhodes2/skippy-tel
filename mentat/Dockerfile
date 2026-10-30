@@ -14,7 +14,7 @@ WORKDIR /app
 COPY mentat/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY mentat/app.py mentat/wva.py mentat/research.py mentat/router_stage.py mentat/ready.py ./
-COPY mentat/app.py mentat/wva.py mentat/research.py mentat/cascade_stage.py mentat/position_stage.py mentat/ready.py ./
+COPY mentat/app.py mentat/wva.py mentat/research.py mentat/cascade_stage.py mentat/position_stage.py mentat/fold_stage.py mentat/ready.py ./
 
 ENV PYTHONPATH=/opt/sigma-ground PYTHONUNBUFFERED=1 SIGMA_GROUND_REF=${SIGMA_GROUND_REF}
 # Runs as a non-root user with nothing writable but /tmp.

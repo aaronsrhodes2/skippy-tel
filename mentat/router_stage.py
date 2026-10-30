@@ -37,6 +37,11 @@ TWEAKS_ON = tuple(x for x in os.environ.get("MENTAT_ROUTER_TWEAKS_ON", "structur
 # parameters and a line of what it does, about 17k tokens), exactly as sigma-ground's stock baselines were scored (run_sigma_ground --router-index).
 # A trained router (v3.1) learned the catalogue and runs without it (0).
 INDEX = os.environ.get("MENTAT_ROUTER_INDEX", "0").strip() not in ("", "0", "false", "no")
+# A second opinion where the trained router misses (2026-10-30, the Captain): a stock model reads the tool index, so it knows tools added after the
+# router was trained, but alone it lost 93 of 329 maths answers (it asks for clarification where the router answers). Asked only after a miss,
+# the router keeps what it answers and the stock model gets the rest. Empty = off.
+FALLBACK_MODEL = os.environ.get("MENTAT_ROUTER_FALLBACK_MODEL", "").strip()
+FALLBACK_INDEX = os.environ.get("MENTAT_ROUTER_FALLBACK_INDEX", "1").strip() not in ("", "0", "false", "no")
 MISS_KEYS = ("router_error", "router_decline", "router_clarify")
 
 
@@ -73,19 +78,20 @@ def configure_harness() -> None:
     tweaks.configure(PROFILE, on=TWEAKS_ON)
 
 
-async def _run(question: str, server, tools: dict, ollama_url: str, guard) -> dict:
+async def _run(question: str, server, tools: dict, ollama_url: str, guard, model: str | None = None, index: bool | None = None) -> dict:
     import httpx
     from sigma_ground.mcp.benchmark import router_plan as RP
     from sigma_ground.mcp.benchmark.run_sigma_ground import _route_once
     configure_harness()
     names = [n for n in tools if n != "request_clarification"]
+    model = MODEL if model is None else model
     system = RP.system_prompt(PLAN)
-    if INDEX:
+    if (INDEX if index is None else index):
         from sigma_ground.mcp.benchmark.run_sigma_ground import _ollama_tools, _router_system_prompt
         system = _router_system_prompt(_ollama_tools([tools[n] for n in names]), True, PLAN)
     async with httpx.AsyncClient(timeout=TIMEOUT_S) as http:
         return await asyncio.wait_for(
-            _route_once(_Session(server, guard), http, ollama_url.rstrip("/") + "/api/chat", MODEL, question, system,
+            _route_once(_Session(server, guard), http, ollama_url.rstrip("/") + "/api/chat", model, question, system,
                         [{"function": {"name": n}} for n in names], _params(tools), time.time(), "toolfirst", PLAN),
             TIMEOUT_S + 30)
 
@@ -107,12 +113,34 @@ def _missed(miss: dict | None, reason: str, rec: dict | None = None) -> None:
 
 def answer(question: str, *, server, tools: dict, ollama_url: str, guard=None, miss: dict | None = None) -> dict | None:
     """The /ask result dict for a question the router and Mentat's tools answered, or None (the caller carries on without it).
-    `miss`, when given, receives why there was no answer: "reason", and "plan" when the model wrote one."""
+    `miss`, when given, receives why there was no answer: "reason", and "plan" when the model wrote one.
+    When the router misses and MENTAT_ROUTER_FALLBACK_MODEL is set, that model is asked the same way (with the tool index); its answer says
+    so (interpreter "router <fallback> after <router>", inputs.router_first_miss) and its miss is reported beside the router's."""
     if not (MODEL and ollama_url):
         _missed(miss, "router off")
         return None
+    first: dict = {}
+    out = _answer_with(MODEL, INDEX, question, server=server, tools=tools, ollama_url=ollama_url, guard=guard, miss=first)
+    if out is not None or not FALLBACK_MODEL:
+        if miss is not None:
+            miss.update(first)
+        return out
+    second: dict = {}
+    out = _answer_with(FALLBACK_MODEL, FALLBACK_INDEX, question, server=server, tools=tools, ollama_url=ollama_url, guard=guard, miss=second)
+    if out is not None:
+        out["interpreter"] = f"router {FALLBACK_MODEL} after {MODEL}"
+        out["inputs"]["router_first_miss"] = first
+        return out
+    if miss is not None:
+        miss.update(first)
+        miss["fallback"] = {"model": FALLBACK_MODEL, **second}
+    return None
+
+
+def _answer_with(model: str, index: bool, question: str, *, server, tools: dict, ollama_url: str, guard=None, miss: dict | None = None) -> dict | None:
+    """One model's attempt: answer() for `model`, with or without the tool index in its prompt."""
     try:
-        rec = asyncio.run(_run(question, server, tools, ollama_url, guard))
+        rec = asyncio.run(_run(question, server, tools, ollama_url, guard, model, index))
     except Exception as exc:                                       # noqa: BLE001 — a router that is down, slow or wrong never stops /ask
         _missed(miss, f"{type(exc).__name__}: {str(exc)[:200]}")
         return None
@@ -146,7 +174,7 @@ def answer(question: str, *, server, tools: dict, ollama_url: str, guard=None, m
         out["value"], out["units"] = rec.get("extracted_value"), rec.get("extracted_units") or ""
         out["notes"] = f"{field} of the {calls[-1]['name']} record (the whole record is in inputs.record). " + (out.get("notes") or "")
     out["interpreted_as"] = plan
-    out["interpreter"] = f"router {MODEL}"
+    out["interpreter"] = f"router {model}"
     out["inputs"] = {"route": "router", "plan": rec.get("router_plan"), "chain": chain, "understood": [{"tool": c["name"], "params": c.get("args")} for c in calls]}
     if record is not None:
         out["inputs"]["record"], out["inputs"]["field"] = record, rec["extracted_field"]

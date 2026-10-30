@@ -40,10 +40,10 @@ def _put(root, chosen, slot, data: bytes):
 def test_the_real_manifest_loads_and_its_standins_fit():
     data = m.load()
     chosen = m.plan(data, set())
-    assert set(chosen) == {"chat", "router", "vision", "general", "coder"}
+    assert set(chosen) == {"chat", "router", "router-stock", "vision", "general", "coder"}
     assert all(s["variant"] == "standin" for s in chosen.values())
     assert m.budget(data, chosen)["fits"]
-    assert m.budget(data, m.plan(data, m.parse_full("chat,coder,vision,router", data["slots"])))["fits"], "the box's full tier must fit"
+    assert m.budget(data, m.plan(data, m.parse_full("chat,coder,vision,router,router-stock", data["slots"])))["fits"], "the box's full tier must fit"
     # The coder is resident (the Captain, 2026-10-24): gpt-oss-120b can't load beside it, so onlining it is refused, never a swap
     # that would pull the agent's model out from under a run.
     assert data["slots"]["coder"]["resident"] is True
@@ -183,6 +183,23 @@ def test_bench_candidates_serve_beside_the_slots_on_demand(tmp_path):
         m.load(_manifest(tmp_path, candidates={"bad": {**cand["try"], "for": ["nope"]}}))
     with pytest.raises(m.ManifestError):
         m.load(_manifest(tmp_path, candidates={"chat": cand["try"]}))
+
+
+def test_the_routers_second_opinion_is_a_resident_stock_qwen3_8b():
+    """Asked only when the trained router misses (mentat/router_stage.py FALLBACK_MODEL): its own slot and name, its file pinned, a context that
+    holds the ~17k-token tool index it reads, one request at a time, and it fits beside the four full slots Core runs."""
+    data = m.load()
+    s = data["slots"]["router-stock"]
+    assert s["resident"] is True and s["aliases"] == ["qwen3-8b-stock"]
+    assert s["full"]["files"] == [{"path": "Qwen3-8B-Q4_K_M.gguf", "size": 5027783488,
+                                   "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785"}]
+    assert s["full"]["ctx"] >= 24576 and s["full"]["parallel"] == 1
+    others = {a for name, slot in data["slots"].items() if name != "router-stock" for a in slot.get("aliases", [])}
+    assert "qwen3-8b-stock" not in others
+    chosen = m.plan(data, m.parse_full("chat,coder,vision,router,router-stock", data["slots"]))
+    assert m.budget(data, chosen)["fits"]
+    config, shim = m.render(chosen, 999)
+    assert "router-stock" in config["groups"]["resident"]["members"] and "qwen3-8b-stock" in {n["name"] for n in shim["models"]}
 
 
 def test_the_trained_router_is_a_small_resident_slot_with_its_own_names_and_pinned_files():

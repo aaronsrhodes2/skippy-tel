@@ -52,6 +52,7 @@ import cascade_stage
 import ready as ready_mod
 import research
 import position_stage
+import fold_stage
 import router_stage
 import wva
 
@@ -185,6 +186,11 @@ def _ask(question: str, given: dict | None = None) -> dict:
         # Where is a planet, the Sun or the Moon at a time: a fixed rule, ahead of the cascade and the router (the router was trained before
         # body_position existed and sent these to the fact sheet). Only a question naming a body, a position word and a time; else it carries on.
         hit = position_stage.answer(question, call=_call, miss=miss)
+        if hit is not None:
+            return hit
+        # A named body and a quantity sigma-ground folded into one call (escape velocity, Schwarzschild radius, ... with body_name):
+        # a fixed rule, because the trained router predates body_name and plans solar_system_body > the formula (fold_stage.py).
+        hit = fold_stage.answer(question, call=_call, miss=miss)
         if hit is not None:
             return hit
     if cascade_stage.enabled() and cascade_stage.MODE == "before" and not given:

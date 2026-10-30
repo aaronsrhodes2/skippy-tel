@@ -177,7 +177,7 @@ and jobs; while someone chats, the reporter also polls `GET /home/jobs` every
 
 - Physics in Skippy's chat = `ask_mentat` → **straight to Mentat on skippy-core** over its Funnel (`MENTAT_URL`, `mentat_client.ask_mentat`;
   2026-10-27, the Captain: no hop through skippy-pc's reporter any more) → Mentat's answer → Skippy Core (big Qwen) words it → the chat: `mentat` in `core/compose.core.yml`, mentat/Dockerfile with `MENTAT_USE_LLM=1` and `MATERIA_OLLAMA_MODEL=skippy-chat`
-  (Core's resident Qwen3.6-35B-A3B through the shim) and its trained router first (`MENTAT_ROUTER_MODEL`, mentat-router-v31-4b, also resident), tailnet-only on `skippy-core:7350` (`core/install/tailnet.sh`); its research
+  (Core's resident Qwen3.6-35B-A3B through the shim) and its trained router first (`MENTAT_ROUTER_MODEL`, mentat-router-v31-4b, also resident; a miss goes to stock Qwen3-8B with the tool index, slot `router-stock`, `MENTAT_ROUTER_FALLBACK_MODEL`, and ahead of both sits the fold rule `mentat/fold_stage.py`: a named body plus escape velocity, Schwarzschild radius, ... goes straight to the tool's `body_name`), tailnet-only on `skippy-core:7350` (`core/install/tailnet.sh`); its research
   log is `/var/lib/skippy-core/mentat-research`. skippy-core's own doctor and deployer keep it up, not skippy-pc's. No Qwen → Mentat answers 503 and Skippy says it's offline;
   there is ONE Mentat, this one (2026-10-27, the Captain: a second cloud copy was needless cost and drifted). It also has a **public address
   for the Captain's friends**: a Tailscale Funnel on :8443 straight to it, `https://skippy-core.tailab2cc7.ts.net:8443/` (opened by
