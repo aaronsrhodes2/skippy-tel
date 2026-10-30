@@ -128,7 +128,18 @@ def answer(question: str, *, server, tools: dict, ollama_url: str, guard=None, m
                       "formula": got.get("formula")})
     out = {k: last.get(k) for k in ("value", "units", "source", "formula", "uncertainty", "provenance_tag", "display", "notes")}
     out["error"], out["clarification"], out["assumed"] = None, None, last.get("assumed")
+    record = None
+    if isinstance(last.get("value"), dict) and rec.get("extracted_by") == "cue" and rec.get("extracted_field"):
+        # A record tool answered (solar_system_body, element_atomic_data) and a phrase in the question named one field of it
+        # ("surface gravity of Mars" -> surface_g_ms2): that field is the answer, the record travels in inputs.record. The harness
+        # (sigma-ground run_sigma_ground.pick_field) decides the field; a guessed field (extracted_by "default") keeps the whole record,
+        # because a guess presented as the answer is a silently wrong one. 7 of the 18 physics misses of 2026-10-27 were this.
+        record, field = last["value"], rec["extracted_field"]
+        out["value"], out["units"] = rec.get("extracted_value"), rec.get("extracted_units") or ""
+        out["notes"] = f"{field} of the {calls[-1]['name']} record (the whole record is in inputs.record). " + (out.get("notes") or "")
     out["interpreted_as"] = plan
     out["interpreter"] = f"router {MODEL}"
     out["inputs"] = {"route": "router", "plan": rec.get("router_plan"), "chain": chain, "understood": [{"tool": c["name"], "params": c.get("args")} for c in calls]}
+    if record is not None:
+        out["inputs"]["record"], out["inputs"]["field"] = record, rec["extracted_field"]
     return out

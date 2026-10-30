@@ -60,6 +60,33 @@ def test_a_tool_value_becomes_the_ask_result(stage, monkeypatch):
     assert out["inputs"]["route"] == "router" and out["inputs"]["chain"][0]["tool"] == "escape_velocity"
 
 
+MARS = {"mass_kg": 6.4171e23, "radius_m": 3389500.0, "surface_g_ms2": 3.711}
+
+
+def _record_tool(field, by):
+    import json
+    rec = record("solar_system_body", {"body_name": "mars"}, value=3.711)
+    rec["tool_calls"][0]["result_text"] = json.dumps({"value": MARS, "units": "", "source": "NASA Planetary Fact Sheet 2024"})
+    rec["extracted_value"], rec["extracted_units"] = (3.711, "m/s^2") if field == "surface_g_ms2" else (6.4171e23, "kg")
+    rec["extracted_field"], rec["extracted_by"] = field, by
+    return rec
+
+
+def test_a_cued_field_of_a_record_is_the_answer(stage, monkeypatch):
+    # "surface gravity of Mars": the harness named surface_g_ms2 from a phrase in the question -> that field answers, the record rides along
+    out = run_answer(stage, monkeypatch, _record_tool("surface_g_ms2", "cue"))
+    assert out["value"] == 3.711 and out["units"] == "m/s^2"
+    assert out["inputs"]["record"] == MARS and out["inputs"]["field"] == "surface_g_ms2"
+    assert out["notes"].startswith("surface_g_ms2 of the solar_system_body record")
+    assert out["source"] == "NASA Planetary Fact Sheet 2024"
+
+
+def test_a_guessed_field_keeps_the_whole_record(stage, monkeypatch):
+    # no phrase named a field (extracted_by "default"): presenting the guess would be a silently wrong answer, so the record stays
+    out = run_answer(stage, monkeypatch, _record_tool("mass_kg", "default"))
+    assert out["value"] == MARS and "record" not in out["inputs"]
+
+
 @pytest.mark.parametrize("extra", [{"router_decline": True}, {"router_clarify": "which body?"}, {"router_error": "bad json"}])
 def test_declines_clarifications_and_errors_fall_through(stage, monkeypatch, extra):
     assert run_answer(stage, monkeypatch, record(**extra)) is None
