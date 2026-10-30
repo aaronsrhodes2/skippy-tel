@@ -246,8 +246,6 @@ class Deployer:
         self.sh(["docker", "compose", "-p", "skippycore", *self.compose_files(), "build"], full=full, timeout=3600)
 
     def compose_up(self, full: str, recreate: bool = False) -> None:
-        for sub in ("flask-api", "drive-state"):
-            (Path(self.s["CORE_STATE"]) / sub).mkdir(parents=True, exist_ok=True)
         self.prepare_vendor()
         self.sh(["docker", "compose", "-p", "skippycore", *self.compose_files(), "up", "-d", "--build", "--remove-orphans",
                  *(["--force-recreate"] if recreate else []), "--wait", "--wait-timeout", "900"],

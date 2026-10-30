@@ -66,8 +66,8 @@ def test_only_the_mentat_block_counts_in_the_compose_file():
     mentat_changed = COMPOSE.replace("      - MENTAT_CASCADE=before", "      - MENTAT_CASCADE=after\n      - MENTAT_X=1")
     assert mentat_changed != COMPOSE and _only([p], {p: COMPOSE}, {p: mentat_changed})
     assert _only([p], {p: COMPOSE}, {p: COMPOSE + "\n\n# a trailing comment\n"})                # comments and blank lines do not count
-    other = COMPOSE.replace("      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3:8b}", "      - OLLAMA_MODEL=other")
-    assert other != COMPOSE and not _only([p], {p: COMPOSE}, {p: other})              # flask-api's block
+    other = COMPOSE.replace("      - LLM_URL=http://llm:8080", "      - LLM_URL=http://other:8080")
+    assert other != COMPOSE and not _only([p], {p: COMPOSE}, {p: other})              # the shim's block
     searx = COMPOSE.replace('"127.0.0.1:7360:8080"', '"127.0.0.1:7361:8080"')
     assert searx != COMPOSE and not _only([p], {p: COMPOSE}, {p: searx})
     llm = COMPOSE.replace("restart: unless-stopped", "restart: always", 1)

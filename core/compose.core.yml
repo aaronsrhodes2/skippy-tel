@@ -6,7 +6,6 @@
 #   llm      llama-swap + llama.cpp (Vulkan build): one llama-server per slot, swapped on demand. Config is rendered by
 #            core/llm/models.py into ${CORE_STATE}/llm (config.yaml + shim.json) before every deploy.
 #   ollama   the Ollama shim (core/ollama-shim): same name and port as today's Ollama, so OLLAMA_BASE_URL never changes.
-#   flask-api  Skippy's core, unchanged code.
 #   mentat   the physics engine with Core's chat model (skippy-pc's reporter and wa-trickle call it on the tailnet, :7350).
 #   image-studio  the portal chat's pictures: Qwen-Image-2512 through stable-diffusion.cpp (Vulkan), one sd-cli run per
 #            picture so it holds no memory between them. Host networking on 7347 so the box's ufw (not Docker's own NAT)
@@ -65,32 +64,6 @@ services:
     depends_on:
       - llm
 
-  flask-api:
-    build: ../services/flask-api
-    restart: unless-stopped
-    logging: *default-logging
-    ports:
-      - "3003:5000"
-    env_file: ${CORE_VAULT_ENV:-/etc/skippy-core/vault.env}
-    environment:
-      - OLLAMA_BASE_URL=http://ollama:11434
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3:8b}
-    volumes:
-      - ${CORE_STATE:-/var/lib/skippy-core}/flask-api:/app/state:rw
-      - ${CORE_STATE:-/var/lib/skippy-core}/drive-state:/drive-state:rw   # photo tags, Drive tokens (skippy-pc: ../music-collection/state)
-      - ${MUSIC_ROOT:-/srv/music}:/music:ro
-    depends_on:
-      - ollama
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=4)\""]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 15s
-
-  # Mentat with Core's chat model (2026-10-25; it was mentat-home on skippy-pc): sigma-ground's physics engine, its trained router first
-  # and its translator asking the shim's skippy-chat (Qwen3.6-35B-A3B, resident) for phrasings its keywords miss. The tailnet reaches it through
-  # `tailscale serve --http=7350` (core/install/tailnet.sh); the port itself is on 127.0.0.1 only.
   mentat:
     build:
       context: ..

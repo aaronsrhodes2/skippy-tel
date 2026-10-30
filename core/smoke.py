@@ -12,13 +12,11 @@ Checks, in order (each prints ok/FAIL and its time; exit 1 if any fails):
   slots       llama-swap /v1/chat/completions on every slot in shim.json; the on-demand ones swap (the last one
               loaded is the only on-demand slot running afterwards)
   messages    Anthropic /v1/messages on the coder slot (the coding fallback: Claude Code with ANTHROPIC_BASE_URL)
-  health      flask-api /health says models.ollama.default_present
-  intent      flask-api /intent/unmatched gets Skippy's reply
   matter      (only when CORE_MATTER=1) the Matter controller's /info answers with its fabric (compose.matter.yml)
   car         (only when CORE_TESLA=1) the car reader's /car answers and is connected to MQTT (compose.tesla.yml). A car not signed
               in yet is not a failure: that is the Captain's one step, and the Status page says so
 
-URLs: SMOKE_SHIM (http://127.0.0.1:11434), SMOKE_LLM (http://127.0.0.1:8080), SMOKE_API (http://127.0.0.1:3003);
+URLs: SMOKE_SHIM (http://127.0.0.1:11434), SMOKE_LLM (http://127.0.0.1:8080);
 the slot list comes from ${CORE_STATE}/llm/shim.json (or SMOKE_NAMES).
 """
 from __future__ import annotations
@@ -34,7 +32,6 @@ from pathlib import Path
 
 SHIM = os.environ.get("SMOKE_SHIM", "http://127.0.0.1:11434").rstrip("/")
 LLM = os.environ.get("SMOKE_LLM", "http://127.0.0.1:8080").rstrip("/")
-API = os.environ.get("SMOKE_API", "http://127.0.0.1:3003").rstrip("/")
 MATTER = os.environ.get("SMOKE_MATTER", "http://127.0.0.1:5580").rstrip("/")
 CAR = os.environ.get("SMOKE_CAR", "http://127.0.0.1:7351").rstrip("/")
 DEFAULT = os.environ.get("OLLAMA_MODEL", "qwen3:8b")
@@ -161,21 +158,6 @@ def check_auth():
     return "401 without the key"
 
 
-def check_health():
-    body = call_json("GET", f"{API}/health", timeout=30)
-    ollama = (body.get("models") or {}).get("ollama") or {}
-    if not ollama.get("default_present"):
-        raise Fail(f"flask-api says the default model is missing: {ollama}")
-    return f"default {ollama.get('default')}"
-
-
-def check_intent():
-    body = call_json("POST", f"{API}/intent/unmatched", {"text": "Hello Skippy, are you awake?"})
-    if not (body.get("reply") or "").strip():
-        raise Fail(f"no reply: {json.dumps(body)[:300]}")
-    return repr(body["reply"].strip()[:60])
-
-
 def check_matter():
     body = call_json("GET", f"{MATTER}/info", timeout=30)
     if not body.get("fabric_id"):
@@ -201,16 +183,16 @@ def check_car(wait: float = 30):
 
 
 CHECKS = [("tags", check_tags), ("chat", check_chat), ("stream", check_stream), ("json", check_json),
-          ("slots", check_slots), ("messages", check_messages), ("auth", check_auth), ("health", check_health), ("intent", check_intent)]
+          ("slots", check_slots), ("messages", check_messages), ("auth", check_auth)]
 
 
 def wait_ready(seconds: float) -> None:
-    """Until the shim and flask-api answer at all (containers just started; the chat model is loading)."""
+    """Until the shim answers at all (containers just started; the chat model is loading)."""
     deadline = time.monotonic() + seconds
     last = ""
     while True:
         try:
-            if call("GET", f"{SHIM}/api/tags", timeout=5)[0] == 200 and call("GET", f"{API}/health", timeout=10)[0] == 200:
+            if call("GET", f"{SHIM}/api/tags", timeout=5)[0] == 200:
                 return
         except (OSError, urllib.error.URLError) as e:
             last = str(e)

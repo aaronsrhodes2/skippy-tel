@@ -36,25 +36,11 @@ def stack(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_URL", llm.url)
     monkeypatch.setenv("SHIM_NAMES", str(names))
     shim_server, shim_url = _serve(shim_mod.create_app())
-    api_state = {"present": True}
-    api = Flask("fake_api")
-
-    @api.get("/health")
-    def health():
-        return jsonify(status="ok", models={"ollama": {"default": "qwen3:8b", "default_present": api_state["present"]}})
-
-    @api.post("/intent/unmatched")
-    def intent():
-        return jsonify(reply="I am Skippy the Magnificent.")
-
-    api_server, api_url = _serve(api)
     monkeypatch.setattr(smoke, "SHIM", shim_url)
     monkeypatch.setattr(smoke, "LLM", llm.url)
-    monkeypatch.setattr(smoke, "API", api_url)
     monkeypatch.setenv("SMOKE_NAMES", str(names))
-    yield llm, api_state
-    for s in (shim_server, api_server):
-        s.shutdown()
+    yield llm
+    shim_server.shutdown()
     llm.close()
 
 
@@ -66,12 +52,11 @@ def test_a_healthy_stack_passes(stack, capsys):
 
 
 def test_each_failure_is_named(stack):
-    llm, api_state = stack
+    llm = stack
     llm.running.append({"model": "general", "state": "ready"})        # the swap didn't happen
-    api_state["present"] = False
     llm.reply = "not json at all"
     failed = {r["check"] for r in smoke.run() if not r["ok"]}
-    assert failed == {"json", "slots", "health"}
+    assert failed == {"json", "slots"}
 
 
 def test_a_dead_stack_fails_the_wait(monkeypatch):
@@ -81,7 +66,7 @@ def test_a_dead_stack_fails_the_wait(monkeypatch):
 
 
 def test_a_keyed_llm_port_is_used_with_the_key_and_must_refuse_without_it(stack, monkeypatch):
-    llm, _ = stack
+    llm = stack
     llm.key = "sekrit"
     monkeypatch.setenv("LLM_API_KEY", "sekrit")
     assert all(r["ok"] for r in smoke.run()), "every llm call carries the key; the auth check sees the 401"

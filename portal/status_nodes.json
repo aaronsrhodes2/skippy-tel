@@ -161,12 +161,11 @@
   ]
  },
  "flask-api": {
-  "for": "Skippy's original API (SkippyTel core): JSON only, no pages. It holds the ElevenLabs key for Skippy's cloud voice, the music session and Bilby's status, the site-activity summary, and the old chat routing. skippy-core runs a second copy.",
+  "for": "Skippy's original API (SkippyTel core): JSON only, no pages. It holds the ElevenLabs key for Skippy's cloud voice, the music session and Bilby's status, the site-activity summary, and the old chat routing.",
   "used_by": [
    "the home reporter (/status.json, /services, /health, /music/session)",
    "voice-gate (the ElevenLabs voice through /tts)",
-   "the shelved phone apps",
-   "skippy-core's smoke test (its own copy)"
+   "the shelved phone apps"
   ],
   "example": {
    "ask": "GET /health",
@@ -429,8 +428,7 @@
  "Skippy AI": {
   "for": "flask-api's own chat routing (/intent/unmatched): the default Ollama tier and 'ask nagatha' for Gemini. The portal's chats no longer use it.",
   "used_by": [
-   "the shelved phone apps",
-   "skippy-core's smoke test (one real reply)"
+   "the shelved phone apps"
   ]
  },
  "Bilby": {
