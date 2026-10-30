@@ -12,7 +12,8 @@ first found in an allow-list:
   reset-workshop <project> the private Skippy's own clone of that project back to origin/<branch>. Nothing is thrown away:
                            uncommitted work goes into a stash, unpushed commits stay on a rescue/<stamp> branch. Refused
                            while a run is going
-  funnel on|off|status     Tailscale Funnel's three doors: 443 -> music gate (3005), 8443 -> video gate (3006), 10000 -> voice gate (3007)
+  funnel on|off|status     Tailscale Funnel's doors: 443 -> music gate (3005), 8443 -> video gate (3006), 10000 -> voice gate (3007),
+                           and 10000/in -> popup-gate (3008: big files for pop-ups, a path on the voice gate's port)
 
 Pure where it can be: `runner` (subprocess) and `clock` are arguments, so the tests drive it without docker or git.
 """
@@ -29,7 +30,8 @@ from pathlib import Path
 SERVICES = ("flask-api", "whisper", "music-studio", "music-gate", "video-gate", "voice-gate", "home-reporter")
 COMPOSE_DIR = os.getenv("SKIPPY_COMPOSE_DIR", r"D:\Aaron\development\SkippyTel")
 SUPERVISOR_PID = Path(COMPOSE_DIR) / "state" / "bridge-supervisor.pid"
-FUNNEL_DOORS = (("443", "3005"), ("8443", "3006"), ("10000", "3007"))     # (public https port, local port): music, video, voice gate
+# (public https port, local port, path): music, video, voice gate, popup-gate. Funnel has only three ports, so the fourth is a path.
+FUNNEL_DOORS = (("443", "3005", ""), ("8443", "3006", ""), ("10000", "3007", ""), ("10000", "3008", "/in"))
 OUTPUT_MAX = 1500
 TIMEOUT_S = 120
 SELF_RESTART_DELAY_S = 1.5        # long enough for the reply to leave before this process (or the reporter) goes away
@@ -196,14 +198,14 @@ class HostOps:
             raise Refused("Funnel takes on, off or status.")
         outs, ok = [], True
         if what != "status":
-            for public, local in FUNNEL_DOORS:
-                cmd = [TAILSCALE, "funnel", f"--https={public}", "--bg", local] if what == "on" else \
-                      [TAILSCALE, "funnel", f"--https={public}", "off"]
+            for public, local, path in (FUNNEL_DOORS if what == "on" else reversed(FUNNEL_DOORS)):   # a path comes off before its port
+                where = [f"--https={public}"] + ([f"--set-path={path}"] if path else [])
+                cmd = [TAILSCALE, "funnel", *where] + (["--bg", local] if what == "on" else ["off"])
                 code, out = self.run(cmd)
                 ok = ok and code == 0
-                outs.append(f"$ tailscale funnel --https={public} {'--bg ' + local if what == 'on' else 'off'}\n{out}".strip())
+                outs.append(f"$ tailscale {' '.join(cmd[1:])}\n{out}".strip())
         _, status = self.run([TAILSCALE, "funnel", "status"])
         outs.append(status)
-        word = {"on": "Funnel is on: music on :443, video on :8443, voice on :10000.", "off": "Funnel is off: the audio, video and voice "
+        word = {"on": "Funnel is on: music on :443, video on :8443, voice on :10000, big files on :10000/in.", "off": "Funnel is off: the audio, video and voice "
                 "services can't be reached from outside until it's back on.", "status": "Funnel's current state:"}[what]
         return Result(ok, word if ok else "Funnel didn't do all of that; see the output.", _trim("\n\n".join(outs)))

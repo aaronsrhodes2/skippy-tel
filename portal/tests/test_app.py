@@ -1629,7 +1629,7 @@ def test_only_known_capabilities_count_and_only_while_home_is_reporting():
     h.accept({"capabilities": {"make_music": {"ready": True}, "format_c_drive": {"ready": True}}})
     import popups
     assert h.capabilities() == {"make_music": True, "make_image": False, "make_image_hq": False, "workshop": False, "music_gate": False,
-                                "video_gate": False, "voice_gate": False, "house": False, "car": False,
+                                "video_gate": False, "voice_gate": False, "popup_gate": False, "house": False, "car": False,
                                 **{name: False for name in popups.load()}}   # unknown names are ignored (registered pop-ups count: popups.py)
     assert h.can("make_music") and not h.can("format_c_drive")
     h.accept({"capabilities": {"make_music": {"ready": "yes"}}})

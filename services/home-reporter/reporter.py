@@ -58,7 +58,11 @@ GATE_PUBLIC = os.environ.get("MUSIC_GATE_PUBLIC", "").rstrip("/")   # ... and wh
 VIDEO_GATE = os.environ.get("VIDEO_GATE_URL", "").rstrip("/")         # video-gate: Nagatha's Video Service's Jellyfin (inside)
 VIDEO_GATE_PUBLIC = os.environ.get("VIDEO_GATE_PUBLIC", "").rstrip("/")   # ... and its Funnel address (outside, :8443)
 VOICE_GATE = os.environ.get("VOICE_GATE_URL", "").rstrip("/")         # voice-gate: Skippy's ears (Whisper) and mouth (inside)
-VOICE_GATE_PUBLIC = os.environ.get("VOICE_GATE_PUBLIC", "").rstrip("/")   # ... and its Funnel address (outside, :10000)
+VOICE_GATE_PUBLIC = os.environ.get("VOICE_GATE_PUBLIC", "").rstrip("/")
+POPUP_GATE = os.environ.get("POPUP_GATE_URL", "").rstrip("/")         # popup-gate: big files for pop-ups (inside)...
+POPUP_GATE_PUBLIC = os.environ.get("POPUP_GATE_PUBLIC", "").rstrip("/")   # ... and its Funnel address (outside, :10000/in)
+POPUP_INPUTS = os.environ.get("POPUP_INPUTS_DIR", "/popup-inputs")    # where it keeps them (mounted read-only here)
+POPUP_INPUT_MAX = 64 * 1024 * 1024   # the biggest file a pop-up job may carry (popup-gate MAX_BYTES, portal/popups.py MAX_INPUT_MB)   # ... and its Funnel address (outside, :10000)
 CAR = os.environ.get("CAR_URL", "").rstrip("/")               # the Captain's Tesla: skippy-core's car reader (core/car), tailnet only
 CAR_MAX = 3                  # cars carried in one report
 BRIDGE = os.environ.get("CLAUDE_BRIDGE_URL", "").rstrip("/")   # Claude Code's bridge on the host: the private Skippy
@@ -369,7 +373,8 @@ def _capability_probes() -> dict:
             "video_gate": video_gate_capability,
             "voice_gate": voice_gate_capability,
             "house": house_capability,
-            "car": car_capability}
+            "car": car_capability,
+            "popup_gate": popup_gate_capability}
 
 
 # The house (lights and switches) for the Captain's portal chat: services/satellite's own code (mounted read-only at /srv/services), built
@@ -451,6 +456,33 @@ def car_capability() -> dict:
             "sign_in": str(body.get("sign_in") or "")[:200]}
 
 
+def popup_gate_capability() -> dict:
+    """Ready when the popup-gate says ready (it keeps big files for pop-ups); `url` is where the browser sends them."""
+    health = fetch(f"{POPUP_GATE}/health") if POPUP_GATE and POPUP_GATE_PUBLIC else None
+    return {"ready": isinstance(health, dict) and health.get("ready") is True, "url": POPUP_GATE_PUBLIC}
+
+
+def popup_input(ref: str, owner: str) -> tuple[dict | None, str]:
+    """A file the popup-gate kept for a pop-up job: ({"type", "name", "b64"}, "") or (None, why). Only its owner's (the portal names the
+    owner in the job; the gate wrote it from the pass), only one of the types it takes, at most POPUP_INPUT_MAX."""
+    if not re.fullmatch(r"[0-9a-f]{32}", ref or ""):
+        return None, "the file's id is malformed"
+    root = Path(POPUP_INPUTS)
+    try:
+        meta = json.loads((root / f"{ref}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None, "that file is gone from skippy-pc (files are kept a day)"
+    if not isinstance(meta, dict) or meta.get("owner") != owner:
+        return None, "that file isn't yours"
+    ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "audio/wav": "wav", "audio/flac": "flac",
+           "audio/ogg": "ogg", "audio/mpeg": "mp3"}.get(meta.get("type"))
+    path = root / f"{ref}.{ext}"
+    if not ext or not path.is_file() or path.stat().st_size > POPUP_INPUT_MAX:
+        return None, "that file is gone from skippy-pc, or too big"
+    return {"type": meta["type"], "name": str(meta.get("name") or "file")[:80],
+            "b64": base64.b64encode(path.read_bytes()).decode("ascii")}, ""
+
+
 def _capability_down(name: str) -> dict:
     """What a capability reads as when its probe was late or failed: not ready (the safe answer), never the last known one."""
     if name == "music_gate":
@@ -459,6 +491,8 @@ def _capability_down(name: str) -> dict:
         return {"ready": False, "url": VIDEO_GATE_PUBLIC}
     if name == "voice_gate":
         return {"ready": False, "url": VOICE_GATE_PUBLIC}
+    if name == "popup_gate":
+        return {"ready": False, "url": POPUP_GATE_PUBLIC}
     return {"ready": False}
 
 
@@ -639,6 +673,13 @@ def popup_job(job: dict, token: str) -> dict:
     body = {"args": args}
     if job.get("input_b64"):
         body["input"] = {"type": str(job.get("input_type") or ""), "name": str(job.get("input_name") or "file"), "b64": job["input_b64"]}
+    elif job.get("input_ref"):                              # a big file the popup-gate kept (docs/popups.md "Big files")
+        given, why = popup_input(str(job["input_ref"]), str(job.get("input_owner") or ""))
+        if given is None:
+            return {"error": why}
+        if len(given["b64"]) * 3 // 4 > float(entry.get("max_input_mb") or 1) * 1024 * 1024:
+            return {"error": f"that file is bigger than {entry['name']} takes ({entry.get('max_input_mb') or 1} MB)"}
+        body["input"] = given
     try:
         timeout = max(60, min(POPUP_MAX_TIMEOUT, int(entry.get("est_seconds") or 60) * 4))
     except (TypeError, ValueError):

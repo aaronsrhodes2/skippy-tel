@@ -282,3 +282,130 @@ def test_a_midi_or_zip_result_is_a_download_never_opened_in_the_page(world):
     assert world["client"].get("/chat/media/stems001/state").get_json()["kind"] == "file"
     art = (ROOT / "portal/static/skippy-artifacts.js").read_text(encoding="utf-8")
     assert 'k === "file"' in art and "a.download" in art
+
+
+# ── big files (docs/popups.md "Big files"): straight home through the popup-gate, the job names them ──
+import re as _re  # noqa: E402
+import urllib.request as _urlreq  # noqa: E402
+
+import popup_in  # noqa: E402
+
+BIG = WAV + bytes(2_000_000)                          # over the 1 MB a chat message may carry
+GATE = "https://skippy-pc.tail.ts.net:10000/in"
+
+
+class FakeHome:
+    def __init__(self, online=True, can=True):
+        self.report = {"capabilities": {"popup_gate": {"ready": can, "url": GATE}}}
+        self._online, self._can = online, can
+
+    def _stored_hash(self):
+        return "ab" * 32
+
+    def online(self):
+        return self._online
+
+    def can(self, name):
+        return self._can
+
+
+def test_a_pass_is_for_one_file_and_guests_get_200_mb_a_day():
+    p = popup_in.PopupIn(FakeHome(), clock=lambda: 1_000_000.0)
+    g = p.grant(FRIEND, False, 50 * 1024 * 1024)
+    assert g["ok"] and g["url"] == GATE and len(g["id"]) == 32 and g["max"] == 50 * 1024 * 1024
+    assert p.grant(FRIEND, False, 50 * 1024 * 1024)["ok"] and p.grant(FRIEND, False, 50 * 1024 * 1024)["ok"]
+    assert g["pass"].split(".")[1] == g["id"] and g["pass"].split(".")[3] == popup_in.chat_history.owner_id(FRIEND)
+    assert not p.grant(FRIEND, False, 60 * 1024 * 1024)["ok"]                    # 150 + 60 > 200 today
+    assert p.grant(ADMIN, True, 64 * 1024 * 1024)["ok"] and p.grant(ADMIN, True, 64 * 1024 * 1024)["ok"]   # the Captain: no day's limit
+    assert "over 64 MB" in p.grant(ADMIN, True, 64 * 1024 * 1024 + 1)["why"]
+    assert not popup_in.PopupIn(FakeHome(online=False)).grant(ADMIN, True, 10)["ok"]
+    assert "isn't answering" in popup_in.PopupIn(FakeHome(can=False)).grant(ADMIN, True, 10)["why"]
+
+
+def test_the_pass_route_is_only_for_someone_a_file_taking_popup_is_offered_to(world, registered):
+    report = lambda caps: world["client"].post("/home/report", headers=world["H"], json={"status": {}, "capabilities": {   # noqa: E731
+        **caps, "popup_gate": {"ready": True, "url": GATE}}})
+    report({"secret_lab": {"ready": True}})
+    login(world["client"], FRIEND)
+    assert "No tool that takes files" in world["client"].post("/chat/popup-in", json={"bytes": 10}).get_json()["why"]
+    report({"remove_bg": {"ready": True}})
+    r = world["client"].post("/chat/popup-in", json={"bytes": 10})
+    assert r.get_json()["ok"] is True and r.headers["Cache-Control"] == "no-store"
+
+
+def test_a_big_file_rides_by_reference_and_each_popup_says_how_big_it_takes(world, registered, monkeypatch):
+    from test_app import _advertise
+    monkeypatch.setattr(chat_tools, "POPUP_WAIT_S", 0.01)
+    registered["remove_bg"].update(media_in=["audio/*"], max_input_mb=64)
+    _advertise(world["client"], world["token"], remove_bg=True)
+    t = tools(world["app"], ADMIN)
+    t.files = attachments.clean([{"name": "track.wav", "ref": "c" * 32, "type": "audio/wav", "bytes": 40 * 1024 * 1024}])
+    assert t.files[0].kind == "home" and "40.0 MB" in attachments.text_for(t.files, "hi", None)
+    t.run("remove_bg", {"text": "split it"})
+    quiet(world)
+    (job,) = handed(world)
+    assert job["input_ref"] == "c" * 32 and job["input_owner"] == popup_in.chat_history.owner_id(ADMIN) and "input_b64" not in job
+    registered["remove_bg"]["max_input_mb"] = 10
+    with pytest.raises(chat_tools.ToolError, match="takes files up to 10 MB"):
+        t.run("remove_bg", {"text": "split it"})
+    for bad in ({"name": "x.wav", "ref": "nothex", "type": "audio/wav", "bytes": 5},
+                {"name": "x.exe", "ref": "c" * 32, "type": "application/x", "bytes": 5}):
+        with pytest.raises(ValueError):
+            attachments.clean([bad])
+
+
+def test_max_input_mb_needs_media_in_and_is_at_most_64():
+    assert "max_input_mb" in popups.check({**ECHO, "max_input_mb": 65})
+    assert "max_input_mb" in popups.check({**ECHO, "media_in": [], "max_input_mb": 5})
+    assert popups.check({**ECHO, "max_input_mb": 64}) is None and ECHO["max_input_mb"] == 64
+
+
+def test_end_to_end_a_big_track_goes_home_through_the_gate_and_the_real_reporter_hands_it_to_echo(world, monkeypatch, tmp_path):
+    from werkzeug.serving import make_server
+    sys.path.insert(0, str(ROOT / "services/home-reporter"))
+    sys.path.insert(0, str(ROOT / "services/popup-gate"))
+    reporter = _load("reporter_big", ROOT / "services/home-reporter/reporter.py")
+    echo = _load("echo_big", ROOT / "services/popups/echo/echo.py")
+    gate_mod = _load("popup_gate_big", ROOT / "services/popup-gate/gate.py")
+    inputs = tmp_path / "inputs"
+    home_hash = __import__("hashlib").sha256(world["token"].encode()).hexdigest()
+    servers = [echo.serve(0), make_server("127.0.0.1", 0, gate_mod.create_app(gate_mod.gate_key(world["token"]), str(inputs)), threaded=True),
+               make_server("127.0.0.1", 0, world["app"], threaded=True)]
+    for srv in servers:
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+    service, gate_srv, portal_srv = servers
+    try:
+        assert popup_in.gate_key(home_hash) == gate_mod.gate_key(world["token"])         # the portal's key opens the gate
+        gate_url = f"http://127.0.0.1:{gate_srv.server_port}"
+        world["app"].extensions["popup_in"].gate_url_re = _re.compile(r"http://127\.0\.0\.1:\d+")
+        echo_chat = {**popups.load()["echo"], "chat": True}
+        monkeypatch.setattr(popups, "load", lambda root=None: {"echo": echo_chat})
+        monkeypatch.setattr(chat_tools, "POPUP_WAIT_S", 0.01)
+        monkeypatch.setattr(reporter, "PORTAL", f"http://127.0.0.1:{portal_srv.server_port}")
+        monkeypatch.setattr(reporter, "POPUPS_DIR", str(ROOT / "services"))
+        monkeypatch.setattr(reporter, "POPUP_INPUTS", str(inputs))
+        monkeypatch.setenv("ECHO_POPUP_URL", f"http://127.0.0.1:{service.server_address[1]}")
+        world["client"].post("/home/report", headers=world["H"], json={"status": {}, "capabilities": {
+            "echo": {"ready": True}, "popup_gate": {"ready": True, "url": gate_url}}})
+        login(world["client"], ADMIN)
+        g = world["client"].post("/chat/popup-in", json={"bytes": len(BIG)}).get_json()          # 1. a pass for one file
+        req = _urlreq.Request(f"{g['url']}/t/{g['pass']}/file", data=BIG, method="PUT", headers={"X-File-Name": "track.wav"})
+        up = json.loads(_urlreq.urlopen(req, timeout=30).read())                                  # 2. the browser sends it home
+        assert up == {"id": g["id"], "type": "audio/wav", "bytes": len(BIG)}
+        world["asked"].update(tool="echo", args={"text": "split"})                                 # 3. the chat names it
+        world["client"].post("/chat/send", json={"message": "split this", "files": [
+            {"name": "track.wav", "ref": up["id"], "type": "audio/wav", "bytes": len(BIG)}]})
+        quiet(world)
+        (job,) = handed(world)
+        outcome = reporter.run_job(job, world["token"])                                           # 4. the reporter reads it, runs echo
+        assert outcome["result"]["type"] == "application/json"
+        world["client"].post(f"/home/jobs/{job['id']}", json=outcome, headers=world["H"])
+        got = world["client"].get(f"/chat/media/{job['id']}").get_json()
+        assert got["input"] == {"type": "audio/wav", "name": "track.wav", "bytes": len(BIG)}      # 5. echo saw the whole file
+        stolen = {**job, "input_owner": popup_in.chat_history.owner_id(FRIEND)}
+        assert reporter.run_job(stolen, world["token"]) == {"error": "that file isn't yours"}
+    finally:
+        for srv in servers:
+            srv.shutdown()
+        for d in ("services/home-reporter", "services/popup-gate"):
+            sys.path.remove(str(ROOT / d))

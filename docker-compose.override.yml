@@ -65,6 +65,19 @@ services:
       - "127.0.0.1:3007:8080"                  # localhost only; Funnel is the one way in from outside
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
 
+  # popup-gate: a file a pop-up should work on (a whole track to split into stems), too big for a chat message, comes home straight
+  # from the browser on a pass the portal signs (docs/popups.md "Big files"). Funnel's :10000/in mount is its one way in.
+  popup-gate:
+    build: ./services/popup-gate
+    container_name: skippytel-popup-gate
+    restart: unless-stopped
+    env_file: G:/My Drive/vault/.env           # SKIPPY_HOME_TOKEN (the pass key is derived from it)
+    volumes:
+      - ./state/popup-inputs:/inputs           # the files, kept a day; the home reporter reads them (read-only)
+    ports:
+      - "127.0.0.1:3008:8080"                  # localhost only; Funnel (:10000 /in) is the one way in from outside
+    logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
+
   # Pushes status + Bilby's music to the portal every ~15 s, and fetches the
   # portal's jobs (controls, physics questions for Mentat). See CLAUDE.md.
   home-reporter:
@@ -88,6 +101,8 @@ services:
       VIDEO_GATE_PUBLIC: https://skippy-pc.tailab2cc7.ts.net:8443   # ...and its Funnel address: 443 is the music gate's
       VOICE_GATE_URL: http://voice-gate:8080   # Skippy's ears and mouth (its /health "ready")...
       VOICE_GATE_PUBLIC: https://skippy-pc.tailab2cc7.ts.net:10000   # ...and its Funnel address: the third port
+      POPUP_GATE_URL: http://popup-gate:8080   # big files for pop-ups (its /health "ready")...
+      POPUP_GATE_PUBLIC: https://skippy-pc.tailab2cc7.ts.net:10000/in   # ...and its Funnel address: a path on the voice gate's port
     ports:
       - "127.0.0.1:47450:47450"                # the private Skippy's quick pop-up tools (services/home-reporter/local_api.py): this PC only
     extra_hosts:
@@ -96,6 +111,7 @@ services:
       - ./state/imports:/imports:ro   # game databases to carry to the games VM (see CLAUDE.md)
       - ./state/insights:/insights    # what guests' expired chats taught (portal/chat_history.py): chat-insights.jsonl, read by the agent
       - ./services:/srv/services:ro   # the pop-up registry (docs/popups.md): services/popups/registry.json + services/*-popups/popups.json
+      - ./state/popup-inputs:/popup-inputs:ro   # big files for pop-ups, from the popup-gate (docs/popups.md "Big files")
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
 
   # wa-trickle: a slow, free Wolfram|Alpha vs Mentat comparison. One verbatim Wolfram call per queued question, ever, on a daily

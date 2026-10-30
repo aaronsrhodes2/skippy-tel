@@ -11,6 +11,7 @@ import chat_history
 import media
 import mentat_client
 import patient
+import popup_in
 import popups
 import workshop
 
@@ -96,7 +97,6 @@ def test_a_popup_job_and_its_file_fit_every_hop():
     reporter = "services/home-reporter/reporter.py"
     # the file a person attaches (or the agent names) rides in the job: the reporter reads the whole job list, the service takes it
     assert workshop.MAX_POPUP_INPUT_B64 <= attachments.MAX_B64_EACH
-    assert const("services/claude-bridge/workshop_engine.py", "MAX_POPUP_INPUT") * B64 <= workshop.MAX_POPUP_INPUT_B64
     assert const("services/claude-bridge/workshop_engine.py", "MAX_POPUP_ARGS") == workshop.MAX_POPUP_ARGS
     assert attachments.MAX_B64_EACH + 100_000 <= const(reporter, "JSON_MAX")
     assert attachments.MAX_B64_EACH + 100_000 <= const("services/popups/echo/echo.py", "MAX_BODY")
@@ -106,3 +106,15 @@ def test_a_popup_job_and_its_file_fit_every_hop():
     types = re.search(r"POPUP_TYPES = \{(.*?)\}", text(reporter), re.S).group(1)
     assert set(re.findall(r'"([a-z]+/[a-z0-9.+-]+)"', types)) == set(popups.OUTPUT_TYPES)
     assert const(reporter, "POPUP_MAX_TIMEOUT") == popups.MAX_TIMEOUT_S <= patient.JOB_TTL
+
+
+def test_a_big_file_for_a_popup_is_taken_at_every_hop_home():
+    """docs/popups.md "Big files": the page, the portal's pass, the gate, the reporter and the agent's bridge agree on the one cap."""
+    cap = popups.MAX_INPUT_MB * 1024 * 1024
+    assert popup_in.MAX_BYTES == cap == const("services/popup-gate/gate.py", "MAX_BYTES")
+    assert const("services/home-reporter/reporter.py", "POPUP_INPUT_MAX") == cap
+    assert const("services/claude-bridge/workshop_engine.py", "MAX_POPUP_INPUT") == cap
+    assert "BIG_MAX = 64 * 1024 * 1024" in text("portal/templates/_chat.html") and popups.MAX_INPUT_MB == 64
+    assert popup_in.DAILY_GUEST_BYTES >= cap                                  # a guest can send at least one whole file a day
+    assert const("services/popup-gate/gate.py", "KEEP_S") >= patient.JOB_TTL # the file outlives the longest wait for its job
+    assert int(re.search(r'"--timeout", "(\d+)"', text("services/popup-gate/Dockerfile")).group(1)) >= 600   # a slow phone upload

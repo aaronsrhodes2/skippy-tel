@@ -32,6 +32,7 @@ OUTPUT_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
 FILE_TYPES = {"audio/midi", "application/zip"}      # nothing to play or show in the chat: the card is a download (a .mid for a DAW, stems)
 # What a pop-up may take in: a file the person attached to the message (attachments.py checks it), or the agent named.
 INPUT_TYPES = {"image/png", "image/jpeg", "image/webp", "audio/mpeg", "audio/wav", "audio/ogg", "audio/flac"}
+MAX_INPUT_MB = 64                                    # the biggest file a pop-up may take (services/popup-gate MAX_BYTES)
 MAX_TIMEOUT_S = 7200                                 # the slowest machine's longest job (the reporter's IMAGE_HQ_TIMEOUT)
 
 
@@ -105,6 +106,10 @@ def check(entry) -> str | None:
             return f"{flag} must be true or false"
     if entry.get("media_required") and not media_in:
         return "media_required needs media_in"
+    if "max_input_mb" in entry:
+        mb = entry["max_input_mb"]
+        if not media_in or isinstance(mb, bool) or not isinstance(mb, (int, float)) or not 0 < mb <= MAX_INPUT_MB:
+            return f"max_input_mb (with media_in) must be a number of MB, at most {MAX_INPUT_MB}"
     return None
 
 
@@ -142,7 +147,8 @@ def load(root: Path | None = None) -> dict[str, dict]:
                 problems.append(f"{path.parent.name}/{path.name}: {why}")
                 continue
             entries[entry["name"]] = {**entry, "mem_gb": entry.get("mem_gb", entry.get("vram_gb", 0)),
-                                      "chat": entry.get("chat", True), "media_in": entry.get("media_in", [])}
+                                      "chat": entry.get("chat", True), "media_in": entry.get("media_in", []),
+                                      "max_input_mb": entry.get("max_input_mb", 1)}
     for why in problems:
         print(json.dumps({"event": "popup_registry_problem", "why": why[:300]}), flush=True)
     _cache.update(key=key, entries=entries, problems=problems)

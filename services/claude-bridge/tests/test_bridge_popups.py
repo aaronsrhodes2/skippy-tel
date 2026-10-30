@@ -1,6 +1,7 @@
 """SKIPPY_POPUP lines (docs/popups.md): `SKIPPY_POPUP: <name> <json args>` becomes a {"t": "popup", id, name, args} event the portal
 queues as a patient job; `_file` hands the job a picture or sound from the clone or the Captain's attachments, nothing else."""
-import base64
+import hashlib
+import json
 from pathlib import Path
 
 import workshop_engine as engine
@@ -35,11 +36,16 @@ def test_at_most_three_and_bad_args_are_said(shop, monkeypatch):
     assert popups(run) == [] and any("one JSON object" in t for t in texts(run))
 
 
-def test_a_file_in_the_clone_rides_along_and_one_outside_does_not(shop, monkeypatch, tmp_path):
-    (Path(shop.repo) / "riff.wav").write_bytes(WAV)
+def test_a_file_in_the_clone_is_handed_over_by_reference_and_one_outside_is_not(shop, monkeypatch, tmp_path):
+    (Path(shop.repo) / "riff.wav").write_bytes(WAV + bytes(3 * 1024 * 1024))          # bigger than a chat message: no matter
     run = run_saying(shop, monkeypatch, 'SKIPPY_POPUP: echo {"text": "x", "_file": "riff.wav"}')
     (ev,) = popups(run)
-    assert ev["args"] == {"text": "x"} and ev["input"]["type"] == "audio/wav" and base64.b64decode(ev["input"]["b64"]) == WAV
+    assert ev["args"] == {"text": "x"} and ev["input"]["type"] == "audio/wav" and "b64" not in ev["input"]
+    ref = ev["input"]["ref"]
+    kept = Path(shop.popup_inputs)
+    assert (kept / f"{ref}.wav").read_bytes()[:len(WAV)] == WAV
+    meta = json.loads((kept / f"{ref}.json").read_text())
+    assert meta["owner"] == hashlib.sha256(str(run.who).strip().lower().encode()).hexdigest()[:16]     # the portal's owner_id
     outside = tmp_path / "secret.wav"
     outside.write_bytes(WAV)
     run = run_saying(shop, monkeypatch, f'SKIPPY_POPUP: echo {{"text": "x", "_file": "{outside.as_posix()}"}}', task="cccccccc")

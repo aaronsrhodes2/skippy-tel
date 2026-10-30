@@ -133,6 +133,7 @@ def test_funnel_on_and_off_touch_both_doors_and_report_the_status():
     cmds = [c[0][1:] for c in r.calls]
     assert ["funnel", "--https=443", "--bg", "3005"] in cmds and ["funnel", "--https=8443", "--bg", "3006"] in cmds
     assert ["funnel", "--https=10000", "--bg", "3007"] in cmds
+    assert ["funnel", "--https=10000", "--set-path=/in", "--bg", "3008"] in cmds          # the popup-gate: a path on the voice gate's port
     assert res.ok and "Funnel on" in res.output
     r2 = Runner()
     ops(runner=r2)[0].do("funnel", "off")

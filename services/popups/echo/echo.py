@@ -12,7 +12,7 @@ import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-MAX_BODY = 4_000_000        # the job's attachment rides as base64: the portal holds it to about 1 MB of file
+MAX_BODY = 90_000_000       # the job's file rides as base64: up to 64 MB of file (registry max_input_mb, the popup-gate's cap)
 
 
 class Handler(BaseHTTPRequestHandler):

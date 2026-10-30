@@ -61,7 +61,8 @@ PLANS = {
         {"name": "services", "reqs": ["services/music-gate/requirements.txt", "services/video-gate/requirements.txt", "services/voice-gate/requirements.txt",
                                       "tools/requirements-ci.txt"],
          "cmd": "cd services/music-gate && python -m pytest tests -q -p no:cacheprovider && cd ../video-gate && python -m pytest tests -q -p no:cacheprovider "
-                "&& cd ../voice-gate && python -m pytest tests -q -p no:cacheprovider && cd ../tts-studio && python -m pytest tests -q -p no:cacheprovider "
+                "&& cd ../voice-gate && python -m pytest tests -q -p no:cacheprovider && cd ../popup-gate && python -m pytest tests -q -p no:cacheprovider "
+                "&& cd ../tts-studio && python -m pytest tests -q -p no:cacheprovider "
                 "&& cd ../purple-tools && python -m pytest tests -q -p no:cacheprovider"},
         {"name": "shell-syntax", "reqs": [],
          "cmd": "bash -n infra/gcp-games/*.sh infra/bootstrap/*.sh scripts/games.sh tools/*.sh"},

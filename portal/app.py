@@ -65,6 +65,8 @@ import ship as ship_mod
 import tabletop as tabletop_mod
 import chat_history
 import patient as patient_mod
+import popup_in as popup_in_mod
+import tool_policy
 import popups
 import chat_names
 import tasks
@@ -205,6 +207,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     app.extensions["player"] = player               # (so tests/dev_music.py can point it at a gate on this machine)
     video = video_mod.Video(home)                   # Nagatha's Video Service: the pass for the video gate (admin only)
     voice = voice_mod.Voice(home)                   # Skippy's ears and mouth: the pass for the voice gate (every chat)
+    big_files = popup_in_mod.PopupIn(home)          # big files for pop-ups: the pass for skippy-pc's popup-gate (docs/popups.md)
+    app.extensions["popup_in"] = big_files
     app.extensions["voice"] = voice
     app.extensions["video"] = video                 # (so tests/dev_video.py can point it at the gate on this machine)
     telemetry_web.init_app(app)                     # usage recording, /privacy, the tap beacon, /home/telemetry
@@ -2009,7 +2013,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         patient queue writes down plain values only, so a restarted portal can put it back in line), and the file it takes, if any."""
         summary = " ".join(str(v) for v in args.values() if isinstance(v, (str, int, float)) and not isinstance(v, bool))
         out = {"name": entry["name"], "args": json.dumps(args)[:20_000], "prompt": (entry["name"] + ": " + summary)[:300]}
-        if given:
+        if given and given.get("ref"):                  # a big file kept at home: its id and whose it is (the reporter checks both)
+            out.update(input_ref=given["ref"], input_owner=chat_history.owner_id(given["owner"]), input_type=given["type"],
+                       input_name=str(given.get("name") or "file")[:80])
+        elif given:
             out.update(input_b64=given["b64"], input_type=given["type"], input_name=str(given.get("name") or "file")[:80])
         return out
 
@@ -2019,6 +2026,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         entry = popups.get(name)
         if not entry or not home.can(name) or home.has(job_id) or pics.state(job_id, owner, True) != "unknown":
             return
+        if given and given.get("ref"):
+            given = {**given, "owner": owner}             # the bridge kept it under the Captain's id (workshop_engine._popup_file)
         PatientJobs(owner).start("popup", owner, **popup_payload(entry, args, given), _id=job_id)
         print(json.dumps({"event": "agent_popup_queued", "job": job_id, "popup": name}), flush=True)
     workshop.on_popup = agent_popup
@@ -2054,6 +2063,21 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         """The chat's direct-verb badge panel for this person."""
         home.touch_chat()
         return jsonify(tools_for(auth.current_user()).badges())
+
+    @talk.post("/popup-in")
+    @skippy_required
+    def popup_in_pass():
+        """A pass to send ONE big file (a whole track) straight to skippy-pc's popup-gate for a pop-up (popup_in.py): only for someone
+        a ready pop-up that takes files is offered to; guests' bytes are counted against the day."""
+        email, captain = me(), auth.is_admin(me())
+        takers = [e for n, e in popups.load().items() if e["media_in"] and e["chat"] and home.can(n) and tool_policy.popup_allowed(e, captain)]
+        if not takers:
+            out = {"ok": False, "why": "No tool that takes files is ready for you right now."}
+        else:
+            out = big_files.grant(email, captain, (request.get_json(silent=True) or {}).get("bytes"))
+        resp = jsonify(out)
+        resp.headers["Cache-Control"] = "no-store"         # a pass is a credential: never from a cache
+        return resp
 
     @talk.get("/voice/gate")
     @skippy_required

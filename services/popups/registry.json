@@ -19,6 +19,7 @@
         "additionalProperties": false
       },
       "media_in": ["image/*", "audio/*"],
+      "max_input_mb": 64,
       "outputs": ["application/json", "image/*", "audio/*"],
       "est_seconds": 1,
       "vram_gb": 0,

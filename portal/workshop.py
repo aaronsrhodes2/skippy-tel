@@ -123,6 +123,9 @@ MAX_POPUP_INPUT_B64 = 1_400_000  # the file a SKIPPY_POPUP line names, as base64
 def popup_input(event: dict) -> dict | None:
     """The file that came with a pop-up event (the bridge read it from the path the agent named), checked, or None."""
     given = event.get("input")
+    if (isinstance(given, dict) and isinstance(given.get("ref"), str) and re.fullmatch(r"[0-9a-f]{32}", given["ref"])
+            and isinstance(given.get("type"), str) and re.fullmatch(r"(image|audio)/[a-z0-9.+-]{1,40}", given["type"])):
+        return {"ref": given["ref"], "type": given["type"], "name": re.sub(r"[^\w .()+-]", "_", str(given.get("name") or "file"))[:80]}
     if not isinstance(given, dict) or not isinstance(given.get("b64"), str) or len(given["b64"]) > MAX_POPUP_INPUT_B64:
         return None
     if not isinstance(given.get("type"), str) or not re.fullmatch(r"(image|audio)/[a-z0-9.+-]{1,40}", given["type"]):

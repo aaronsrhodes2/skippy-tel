@@ -524,17 +524,40 @@
       filesBox.replaceChildren(...pending_files.map((f, i) => {
         const chip = document.createElement("span"); chip.className = "file-chip" + (f.pasted ? " pasted" : "");
         if (f.data.startsWith("data:image/")) { const t = document.createElement("img"); t.src = f.data; t.alt = ""; chip.append(t); }
-        else chip.append(glyph(f.data.startsWith("data:audio/") ? "wave" : "note"));
-        const n = document.createElement("span"); n.className = "fn"; n.textContent = f.pasted ? f.name + " · " + f.lines + " lines" : f.name; chip.append(n);
+        else chip.append(glyph(f.ref || f.sending || f.data.startsWith("data:audio/") ? "wave" : "note"));
+        const n = document.createElement("span"); n.className = "fn";
+        n.textContent = f.pasted ? f.name + " · " + f.lines + " lines" : f.sending ? f.name + " · sending home…" : f.ref ? f.name + " · " + (f.bytes / 1048576).toFixed(1) + " MB at home" : f.name;
+        chip.append(n);
         if (f.pasted) chip.append(keyBtn("in", "Put it back in the box", () => { pending_files.splice(i, 1); msg.value += (msg.value ? "\n" : "") + dataText(f.data); grow(); paintFiles(); }));
         chip.append(keyBtn("x", "Remove " + f.name, () => { pending_files.splice(i, 1); paintFiles(); }));
         return chip;
       }));
       logPager.refresh();
     }
+    // A sound over the message limit (a whole track for a pop-up that splits it into stems) goes HOME first, straight to skippy-pc's
+    // popup-gate on a one-file pass (portal/popup_in.py, docs/popups.md "Big files"); the message then carries only its id.
+    const BIG_SOUND = /^audio\/(wav|x-wav|wave|mpeg|mp3|flac|x-flac|ogg)$/, BIG_MAX = 64 * 1024 * 1024;
+    async function sendHome(file) {
+      if (file.size > BIG_MAX) { flash(file.name + " is over 64 MB, the most one file can be."); return; }
+      const r = await fetch("{{ url_for('chat.popup_in_pass') }}", {method: "POST", headers: {"Content-Type": "application/json"},
+                                                                  body: JSON.stringify({bytes: file.size})});
+      const g = r.ok ? await r.json() : {ok: false, why: "The portal didn't answer."};
+      if (!g.ok) { flash(g.why || "That file can't go home right now."); return; }
+      const chip = {name: file.name, data: "", sending: true}; pending_files.push(chip); paintFiles();
+      try {
+        const up = await fetch(g.url + "/t/" + g.pass + "/file", {method: "PUT", body: file, headers: {"X-File-Name": file.name}});
+        const d = await up.json().catch(() => ({}));
+        if (!up.ok || !d.id) throw new Error(d.error || "the upload failed");
+        Object.assign(chip, {ref: d.id, type: d.type, bytes: d.bytes, sending: false});
+      } catch (e) {
+        pending_files.splice(pending_files.indexOf(chip), 1); flash(file.name + " didn't reach skippy-pc: " + e.message + ".");
+      }
+      paintFiles();
+    }
     async function takeFiles(list) {
       for (const file of [...list]) {
         if (pending_files.length >= MAX_FILES) { flash("At most " + MAX_FILES + " files to a message."); break; }
+        if (BIG_SOUND.test(file.type) && file.size > MAX_BYTES) { await sendHome(file); continue; }
         try {
           const isPic = /^image\/(jpeg|png|webp|gif|bmp)$/.test(file.type);
           const room = Math.min(FILE_B64, FILES_B64 - used());
@@ -663,7 +686,7 @@
           method: "POST", headers: {"Content-Type": "application/json"}, signal: inflight.signal,
           // `page` lets Skippy know what you're looking at ("this game" = the one on screen).
           body: JSON.stringify({message: text, history: before, page: location.pathname, brain: BRAINS.length > 1 ? brain : undefined,
-                                files: files.map(f => ({name: f.name, data: f.data})), save: allowSave(), context: context,
+                                files: files.filter(f => !f.sending).map(f => f.ref ? {name: f.name, ref: f.ref, type: f.type, bytes: f.bytes} : {name: f.name, data: f.data}), save: allowSave(), context: context,
                                 // the suggestion this may be a yes to (the server uses it only for a plain yes)
                                 mentat_follow_up: mentatFollow && mentatFollow.chat === chatId ? mentatFollow.follow : undefined}),
         });

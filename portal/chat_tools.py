@@ -421,7 +421,12 @@ class ChatTools:
                 raise ToolError(f"{entry['name']} needs a file attached to the message ({', '.join(takes)})"
                                 + (": several are attached, so say which with `attachment`." if len(usable) > 1 else ". Ask for one."))
             if chosen is not None:
-                given = {"b64": chosen.b64, "type": chosen.mime, "name": chosen.name}
+                size = chosen.size if chosen.kind == "home" else len(chosen.data)
+                cap = float(entry.get("max_input_mb") or 1)
+                if size > cap * 1024 * 1024:
+                    raise ToolError(f"{chosen.name} is {size / 1048576:.1f} MB; {entry['name']} takes files up to {cap:g} MB. Say so.")
+                given = ({"ref": chosen.ref, "type": chosen.mime, "name": chosen.name, "owner": self.who} if chosen.kind == "home" else
+                         {"b64": chosen.b64, "type": chosen.mime, "name": chosen.name})
         if self.popup_allow and not self.popup_allow():
             raise ToolError("That's today's pop-up jobs used up (10 a day). Say so, and that it resets tomorrow.")
         job_id = self.home_popup.start("popup", owner=self.who, **self.popup_payload(entry, args, given))

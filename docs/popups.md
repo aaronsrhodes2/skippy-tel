@@ -7,7 +7,7 @@
 `GET /health` with the readiness contract (PLATINUM section 24: a 200 is not "fine"): `ready`, `accepting`, `jobs` (running, queued, oldest_s), `stuck_s`,
 `detail` in plain words when not ready (`core/ready.py` is the helper; keep an identical copy beside your service and add it to tools/tests/test_ready_copies.py);
 add `loaded`, `gpu_free_pct`, `gpu_util_pct`, `gpu_free_gib` if you can, as the picture studio does, and `POST <endpoint>` with the JSON body `{"args": {...the tool's arguments...}, "input": {"type", "name", "b64"}}` (`input`
-only when the person attached a file or the agent named one, at most ~1 MB of file), replying with the result's raw bytes under its
+only when the person attached a file or the agent named one, at most `max_input_mb` of file, see Big files), replying with the result's raw bytes under its
 own `Content-Type` (one of your entry's `outputs`, at most 25 MB), or a non-2xx with `{"error": "plain words"}`. That is all: the home
 reporter reads the registry from its mount (no rebuild, re-read when a file changes), advertises your pop-up while `/health` is ready,
 runs each job (on skippy-pc, `vram_gb > 0` takes the GPU lock and unloads Ollama first) and hands the result to the portal; the portal
@@ -41,12 +41,23 @@ type (a picture, a player, a video, a 3D viewer for `model/gltf-binary`, a JSON/
 | `inputs` | a JSON schema (type object) for the tool's arguments; don't name a property `attachment` |
 | `media_in` | optional: types of attached file it takes (`image/*`, `audio/*`, or exact); the tool then gets an `attachment` number |
 | `media_required` | optional: refuse without a file |
+| `max_input_mb` | optional (with `media_in`), default 1: the biggest file it takes, at most 64. Over 1 MB means your service must accept a body of about 4/3 of it (the file rides as base64) |
 | `outputs` | what it may answer with: `image/png`/`jpeg`/`webp`, `audio/*` (wav, flac, mpeg, ogg), `model/gltf-binary`, `video/mp4`, `application/json`, `text/plain`, and as a download card `audio/midi`, `application/zip` |
 | `est_seconds` | a typical run once started (the card says "about N min"; the reporter waits 4x, at most 2 h) |
 | `vram_gb` / `mem_gb` | memory it needs; on `pc`, more than 0 means it takes the GPU lock |
 | `audience` | `admin` (the Captain only) or `everyone` |
 | `description` | what the brains read to decide when to call it (10-1000 characters) |
 | `chat` | optional, default true: false keeps it out of the chat's tools (the agent can still use it) |
+
+## Big files
+
+A file over 1 MB (a whole track to split into stems) can't ride in a chat message: it goes home first. The chat page asks the portal for a
+one-file pass (`POST /chat/popup-in`, `portal/popup_in.py`: up to 64 MB a file; guests 200 MB a day, the Captain no limit) and sends the
+file straight to skippy-pc's **popup-gate** (`services/popup-gate`, Funnel `:10000/in`, never through the portal), which checks it is a
+picture or a sound by its own first bytes and keeps it a day in `state/popup-inputs/`. The message then carries only its id; the job
+carries `input_ref` and whose it is; the home reporter reads the file there (only its owner's, only up to your `max_input_mb`) and sends it
+to you as the usual `input.b64`. **Your service changes nothing** but how big a body it accepts. The private Skippy's `"_file"` goes the
+same way, up to 64 MB.
 
 ## Check before you hand over
 

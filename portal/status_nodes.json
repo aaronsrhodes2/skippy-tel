@@ -254,6 +254,17 @@
    "answer": "{\"ready\": true, \"whisper\": true, \"voices\": {\"stock\": true, \"skippy\": true}}"
   }
  },
+ "popup-gate": {
+  "for": "Big files for pop-ups: a whole track (up to 64 MB) goes from the browser straight home through Funnel :10000/in on a one-file pass the portal signs, never through the portal; it keeps each a day in state/popup-inputs.",
+  "used_by": [
+   "the chat's attach key (a sound over 1 MB)",
+   "the home reporter, which hands the file to the pop-up job that names it"
+  ],
+  "example": {
+   "ask": "GET /health",
+   "answer": "{\"ready\": true, \"service\": \"popup-gate\", \"files\": 2, \"max_bytes\": 67108864}"
+  }
+ },
  "tts-studio": {
   "for": "Skippy's local voices on skippy-pc's card: 'stock' (Kokoro, for everyone) and 'skippy' (an F5-TTS clone of his Skippy voice, the Captain only). Both stay loaded; no route out, no published port.",
   "used_by": [

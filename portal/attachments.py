@@ -44,9 +44,11 @@ def _is_audio(mime: str, data: bytes) -> bool:
 @dataclass(frozen=True)
 class File:
     name: str
-    kind: str            # "image" | "pdf" | "text" | "audio"
+    kind: str            # "image" | "pdf" | "text" | "audio" | "home" (a big file kept by skippy-pc's popup-gate: `ref`, no bytes here)
     mime: str
     data: bytes
+    ref: str = ""
+    size: int = 0
 
     @property
     def b64(self) -> str:
@@ -76,6 +78,9 @@ def clean(raw) -> list[File]:
         raise ValueError(f"At most {MAX_FILES} files to a message.")
     out, total = [], 0
     for item in raw:
+        if isinstance(item, dict) and "ref" in item:          # a big file the page sent home first (popup_in.py): its id, never its bytes
+            out.append(_home_file(item))
+            continue
         if not isinstance(item, dict) or not isinstance(item.get("data"), str):
             raise ValueError("A file didn't arrive whole.")
         name = _NAME.sub("_", str(item.get("name") or "file"))[:80] or "file"
@@ -113,6 +118,18 @@ def clean(raw) -> list[File]:
     return out
 
 
+HOME_TYPES = {"audio/wav", "audio/mpeg", "audio/flac", "audio/ogg", "image/png", "image/jpeg", "image/webp"}   # popup-gate's own
+
+
+def _home_file(item: dict) -> File:
+    name = _NAME.sub("_", str(item.get("name") or "file"))[:80] or "file"
+    ref, mime, size = item.get("ref"), str(item.get("type") or "").lower(), item.get("bytes")
+    if (not isinstance(ref, str) or not re.fullmatch(r"[0-9a-f]{32}", ref) or mime not in HOME_TYPES
+            or isinstance(size, bool) or not isinstance(size, int) or size <= 0):
+        raise ValueError(f"{name} didn't arrive whole.")
+    return File(name, "home", mime, b"", ref=ref, size=size)
+
+
 def note(files: list[File]) -> str:
     """What the history keeps of a message's files: their names, never their bytes."""
     return "\n[attached: " + ", ".join(f.name for f in files) + "]" if files else ""
@@ -123,6 +140,9 @@ def _wrap(f: File, body: str) -> str:
 
 
 def _heard(f: File) -> str:
+    if f.kind == "home":
+        return _wrap(f, f"A {'picture' if f.mime.startswith('image/') else 'sound'} file ({f.mime}, {f.size / 1048576:.1f} MB), kept at "
+                        "home for a tool. You can't see or hear it; a tool that takes an attachment can use it.")
     return _wrap(f, f"A sound file ({f.mime}, {len(f.data) // 1024} KB). You can't hear it; a tool that takes an attachment can use it.")
 
 
@@ -134,7 +154,7 @@ def anthropic_blocks(files: list[File], text: str) -> list[dict]:
         elif f.kind == "pdf":
             blocks.append({"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": f.b64},
                            "title": f.name})
-        elif f.kind == "audio":
+        elif f.kind in ("audio", "home"):
             blocks.append({"type": "text", "text": _heard(f)})
         else:
             blocks.append({"type": "text", "text": _wrap(f, f.text())})
@@ -146,7 +166,7 @@ def text_for(files: list[File], text: str, describe) -> str:
     for f in files:
         if f.kind == "image":
             parts.append(_wrap(f, "A picture. What the vision model sees in it:\n" + describe(f)))
-        elif f.kind == "audio":
+        elif f.kind in ("audio", "home"):
             parts.append(_heard(f))
         else:
             parts.append(_wrap(f, f.text()))
@@ -158,7 +178,7 @@ def openai_parts(files: list[File], text: str) -> list[dict]:
     for f in files:
         if f.kind == "image":
             parts.append({"type": "image_url", "image_url": {"url": f"data:{f.mime};base64,{f.b64}"}})
-        elif f.kind == "audio":
+        elif f.kind in ("audio", "home"):
             parts.append({"type": "text", "text": _heard(f)})
         else:
             parts.append({"type": "text", "text": _wrap(f, f.text())})

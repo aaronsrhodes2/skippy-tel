@@ -155,6 +155,7 @@ def make_shop(tmp_path, monkeypatch, name="clone"):
                         sessions=str(tmp_path / "sessions.json"), remote=str(origin))
     assert Path(w.state_dir).parent == tmp_path          # the runs directory is in the tmp dir, never the real one
     w.record, w.origin, w.fake = record, origin, fake
+    w.popup_inputs = str(tmp_path / "popup-inputs")       # never the real state/popup-inputs
     return w
 
 

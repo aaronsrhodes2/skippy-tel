@@ -96,3 +96,39 @@ def test_a_result_of_the_wrong_type_is_refused(home, ctype, why):
 def test_an_unknown_popup_or_bad_args_fail_plainly(home):
     assert "no pop-up called" in reporter.run_job({"id": "j4", "kind": "popup", "name": "nosuch", "args": "{}"}, "tok")["error"]
     assert "didn't arrive whole" in reporter.run_job({"id": "j5", "kind": "popup", "name": "remove_bg", "args": "[1]"}, "tok")["error"]
+
+
+# ── big files (docs/popups.md "Big files"): the job names a file the popup-gate kept; only its owner's, only up to the entry's cap ──
+def keep(root, ref="d" * 32, owner="0123456789abcdef", data=PNG, ctype="image/png", ext="png"):
+    root.mkdir(exist_ok=True)
+    (root / f"{ref}.{ext}").write_bytes(data)
+    (root / f"{ref}.json").write_text(json.dumps({"id": ref, "owner": owner, "type": ctype, "name": "dog.png", "bytes": len(data)}))
+    return ref
+
+
+def test_a_kept_file_rides_to_the_service_for_its_owner_only(home, monkeypatch, tmp_path):
+    seen, _, root = home
+    inputs = tmp_path / "inputs"
+    monkeypatch.setattr(reporter, "POPUP_INPUTS", str(inputs))
+    ref = keep(inputs)
+    job = {"id": "big1", "kind": "popup", "name": "remove_bg", "args": "{}", "input_ref": ref, "input_owner": "0123456789abcdef"}
+    assert "result" in reporter.run_job(job, "tok")
+    (_, _, body), = [c for c in seen["svc"] if c[1] == "/cut"]
+    assert body["input"]["type"] == "image/png" and body["input"]["name"] == "dog.png"
+    assert reporter.run_job({**job, "input_owner": "ffffffffffffffff"}, "tok") == {"error": "that file isn't yours"}
+    assert "gone" in reporter.run_job({**job, "input_ref": "e" * 32}, "tok")["error"]
+    assert "malformed" in reporter.run_job({**job, "input_ref": "../../etc"}, "tok")["error"]
+
+
+def test_a_kept_file_bigger_than_the_entry_takes_is_refused(home, monkeypatch, tmp_path):
+    _, _, root = home
+    inputs = tmp_path / "inputs"
+    monkeypatch.setattr(reporter, "POPUP_INPUTS", str(inputs))
+    ref = keep(inputs, data=PNG + bytes(2 * 1024 * 1024))                    # ENTRY has no max_input_mb: 1 MB
+    job = {"id": "big2", "kind": "popup", "name": "remove_bg", "args": "{}", "input_ref": ref, "input_owner": "0123456789abcdef"}
+    assert "bigger than remove_bg takes (1 MB)" in reporter.run_job(job, "tok")["error"]
+
+
+def test_the_gate_is_a_capability_with_its_public_address(home, monkeypatch):
+    monkeypatch.setattr(reporter, "POPUP_GATE", "")
+    assert reporter.capabilities()["popup_gate"] == {"ready": False, "url": reporter.POPUP_GATE_PUBLIC}

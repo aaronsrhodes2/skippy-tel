@@ -27,6 +27,7 @@ every argument goes through cmd.exe):
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import queue
@@ -285,10 +286,12 @@ def split_pictures(text: str) -> tuple[str, list[tuple[str, str]]]:
 
 # A pop-up job the agent wants run (docs/popups.md): `SKIPPY_POPUP: <name> <json args>`, any model in the registry. Like a picture: an id
 # from the bridge, a patient job on the portal, a card in his chat. `"_file": "<path>"` in the arguments hands it a picture or a sound
-# from this run's clone or the Captain's attachments (the only places a file may leave this PC from), at most MAX_POPUP_INPUT.
+# from this run's clone or the Captain's attachments (the only places a file may leave this PC from), at most MAX_POPUP_INPUT: it is
+# copied into the popup-gate's folder (state/popup-inputs, docs/popups.md "Big files") and the event names it, never carries it.
 MAX_POPUPS = 3
 MAX_POPUP_ARGS = 4000              # characters of JSON arguments (the portal's workshop.MAX_POPUP_ARGS)
-MAX_POPUP_INPUT = 1_000_000        # bytes of file (as base64 it fits a chat attachment: attachments.MAX_B64_EACH)
+MAX_POPUP_INPUT = 64 * 1024 * 1024  # bytes of file (services/popup-gate MAX_BYTES)
+POPUP_INPUTS = os.environ.get("SKIPPY_POPUP_INPUTS") or str(Path(__file__).resolve().parents[2] / "state" / "popup-inputs")
 _POPUP_LINE = re.compile(r"^[ \t]*`?SKIPPY_POPUP:[ \t]*([a-z][a-z0-9_]{2,39})(?:[ \t]+([^\n`]*?))?[ \t]*`?[ \t]*$", re.M)
 _SOUND_MAGIC = ((b"RIFF", "audio/wav"), (b"fLaC", "audio/flac"), (b"OggS", "audio/ogg"), (b"ID3", "audio/mpeg"))
 
@@ -621,6 +624,7 @@ class Workshop:
         # the runs with it; nothing but the real bridge ever writes to the real directory.
         self.state_dir = str(state_dir or os.path.join(os.path.dirname(sessions), STATE_DIR_NAME))
         self.attach_dir = os.path.join(os.path.dirname(sessions), ".skippy-workshop-attachments")   # pasted pictures (save_images)
+        self.popup_inputs = POPUP_INPUTS               # where a SKIPPY_POPUP line's `_file` is handed over (the popup-gate's folder)
         self.login_probe = LoginProbe(self.claude_cmd)
         # Every conversation in full, in files the Captain owns (conversation_log.py). The real folder only for the real
         # bridge: a Workshop pointed at other sessions (a test's tmp dir) keeps its conversations next to them.
@@ -1420,13 +1424,23 @@ class Workshop:
         if not inside or not os.path.isfile(path):
             return None, "it must be a file inside my clone or the Captain's attachments"
         if os.path.getsize(path) > MAX_POPUP_INPUT:
-            return None, f"it is over {MAX_POPUP_INPUT // 1_000_000} MB"
+            return None, f"it is over {MAX_POPUP_INPUT // (1024 * 1024)} MB"
         with open(path, "rb") as f:
-            data = f.read(MAX_POPUP_INPUT + 1)
-        mime = file_mime(data)
+            mime = file_mime(f.read(16))
         if mime is None:
             return None, "it isn't a picture (png, jpeg, webp) or a sound (wav, flac, ogg, mp3)"
-        return {"type": mime, "name": os.path.basename(path)[:80], "b64": base64.b64encode(data).decode("ascii")}, ""
+        ref, ext = secrets.token_hex(16), {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "audio/wav": "wav",
+                                           "audio/flac": "flac", "audio/ogg": "ogg", "audio/mpeg": "mp3"}[mime]
+        inputs = Path(self.popup_inputs)
+        try:
+            inputs.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, inputs / f"{ref}.{ext}")
+            owner = hashlib.sha256(str(run.who).strip().lower().encode()).hexdigest()[:16]     # portal chat_history.owner_id
+            (inputs / f"{ref}.json").write_text(json.dumps({"id": ref, "owner": owner, "type": mime, "name": os.path.basename(path)[:80],
+                                                            "bytes": os.path.getsize(path), "at": int(time.time())}))
+        except OSError as exc:
+            return None, f"it couldn't be handed over ({exc})"
+        return {"type": mime, "name": os.path.basename(path)[:80], "ref": ref}, ""
 
     def _work(self, run: Run) -> None:
         try:
