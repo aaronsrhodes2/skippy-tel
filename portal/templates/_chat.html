@@ -218,10 +218,7 @@
       const when = (c.updated || "").slice(0, 10), src = String(c.source || "another AI");
       return "I'm continuing an earlier conversation I had with " + src.charAt(0).toUpperCase() + src.slice(1) + (when ? " (" + when + ")" : "")
         + (c.title ? ", titled \"" + c.title + "\"" : "") + ". Here it is as it was saved, oldest first. Pick up from where it left off and"
-        + " don't recap it unless I ask:
-<earlier_conversation>
-" + String(c.text || "").slice(-CONTEXT_MAX) + "
-</earlier_conversation>";
+        + " don't recap it unless I ask:\n<earlier_conversation>\n" + String(c.text || "").slice(-CONTEXT_MAX) + "\n</earlier_conversation>";
     }
     function setContext(c) { context = c; try { c ? sessionStorage.setItem(CTX, JSON.stringify(c)) : sessionStorage.removeItem(CTX); } catch (e) {} showContext(); }
 
@@ -667,9 +664,7 @@
       if (files.length > pics.length + texts.length) flash("The agent takes pictures and text here; put other files in its folder.");
       if (!text && !pics.length) return;
       quickLine(text);                                           // before send: the context is the turns before this message
-      if (context) { text = earlier(context) + "
-
-" + text; setContext(null); }   // Skippy Memory's conversation rides with the first message
+      if (context) { text = earlier(context) + "\n\n" + text; setContext(null); }   // Skippy Memory's conversation rides with the first message
       window.SkippyAgent.send(text, pics);
       alive().pulse(1); paintStop();
     }
