@@ -56,7 +56,7 @@ Sandbox limits found: Docker runs here, but image pulls are blocked (GHCR blobs 
    - write a status JSON that the home reporter later carries to the portal.
 
    The deploy key is commit + `CORE_FULL`, so onlining a slot redeploys. Tests: fake git, compose and smoke.
-5. **`core/compose.core.yml`**: services `llm` (pinned llama-swap, `/dev/dri`, `${MODELS_ROOT}:/models:ro`, `${CORE_STATE}/llm:/config:ro`), `ollama` (the shim, same name and port 11434 so `OLLAMA_URL` doesn't change) and `flask-api` (vault path `${CORE_VAULT_ENV:-/etc/skippy-core/vault.env}`, music `${MUSIC_ROOT}`; no `G:`/`D:` paths, no `driver: nvidia`). Add the reporter, Mentat, the gates, Dozzle and Kuma in later stages, as the plan's Phase 5 describes.
+5. **`core/compose.core.yml`**: services `llm` (pinned llama-swap, `/dev/dri`, `${MODELS_ROOT}:/models:ro`, `${CORE_STATE}/llm:/config:ro`), `ollama` (the shim, same name and port 11434 so `OLLAMA_URL` doesn't change) and `flask-api` (vault path `${CORE_VAULT_ENV:-/etc/skippy-core/vault.env}`, music `${MUSIC_ROOT}`; no `G:`/`D:` paths, no `driver: nvidia`). Add the reporter, Mentat, the gates and Kuma in later stages, as the plan's Phase 5 describes.
 6. **`core/smoke.py`**, used by both CI and the deployer:
    - the shim's `/api/tags` lists `qwen3:8b`;
    - chat (stream and non-stream) and generate with JSON;

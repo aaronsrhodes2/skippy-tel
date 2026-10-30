@@ -13,7 +13,7 @@
 #            keeps the LAN out; the tailnet gets in through Tailscale's own rules, and ALLOW_FROM narrows it to skippy-pc.
 #   searxng  purple Skippy's WebSearch (docs/popup-inventory.md): a self-hosted metasearch engine, no account, no key; 127.0.0.1:7360, and the tailnet door
 #            (core/install/tailnet.sh) is the only way in for skippy-pc's search tool (services/purple-tools).
-# Later stages (docs/local-ai-fallback-plan.md Phase 5): the home reporter, the gates, Dozzle.
+# Later stages (docs/local-ai-fallback-plan.md Phase 5): the home reporter, the gates.
 
 x-logging: &default-logging
   driver: json-file

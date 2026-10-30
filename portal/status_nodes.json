@@ -287,13 +287,6 @@
    "answer": "ok"
   }
  },
- "dozzle": {
-  "for": "A live Docker log viewer for skippy-pc's containers, in a browser at http://localhost:9999. It keeps working when flask-api crashes.",
-  "used_by": [
-   "the Captain, by hand (no program calls it)"
-  ],
-  "note": "The Status page's own Logs sheet now carries the same lines from every machine; if nobody opens :9999 it can go."
- },
  "ollama": {
   "for": "The Ollama door. On skippy-core it is the Ollama shim: Ollama's API in front of llama-swap, answering every old model name (qwen3:8b, qwen2.5:7b) with Core's resident chat model. skippy-pc has no Ollama any more; its check points here.",
   "used_by": [

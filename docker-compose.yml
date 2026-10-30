@@ -110,21 +110,6 @@ services:
               count: all
               capabilities: [gpu]
 
-  # ── Dozzle — real-time Docker log viewer ──────────────────────────────────
-  # Survives flask-api crashes. Shows live logs from all containers.
-  # Dashboard: http://localhost:9999
-  dozzle:
-    image: amir20/dozzle:latest
-    container_name: skippytel-dozzle
-    restart: unless-stopped
-    logging: *default-logging
-    ports:
-      - "9999:8080"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      - DOZZLE_LEVEL=info   # show INFO and above; drop to debug for raw output
-
 
 # ACE-Step's server downloads any model it thinks is missing. It's on this network alone, which has
 # no route out, so it can only ever run the weights we mounted. The home reporter joins it too.
