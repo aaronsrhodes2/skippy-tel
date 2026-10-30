@@ -897,6 +897,8 @@
         turns.push(turn); draw(turn); save(); scroll(true);
       },
       stop() { stopBtn.click(); },
+      // the last few turns as plain words (the quick spoken line's context: /chat/quick)
+      recent(n) { return turns.filter(t => t.role !== "heard").slice(-(n || 6)).map(t => ({role: t.role, text: String(turnMd(t) || "").slice(0, 1500)})); },
       newChat() { newBtn.click(); },
       async conversations() {                       // skippy-pc's list, for the chat's sheet: [{conv, title, project, turns, last, state}]
         const d = await history({});

@@ -121,7 +121,17 @@
       onHeard: (h) => heardLine(h)});                                                               // Hands-off: someone near you, in another language
     // The agent (Private, Auto) answers in its own transcript; its finished reply comes back here so THIS voice says it: in Hands-off
     // every reply is spoken (summarised when long), in Typing none is. null = no answer is coming (it failed or was stopped).
-    const hearAgent = () => { if (window.SkippyAgent) window.SkippyAgent.onReply = (t) => { if (t == null) voice.resume(); else voice.say(t); }; };
+    const hearAgent = () => { if (window.SkippyAgent) window.SkippyAgent.onReply = (t) => { quickSeq++; if (t == null) voice.resume(); else voice.say(t); }; };
+    // In a spoken conversation the agent takes a minute, so Skippy Core's chat model says one line at once (/chat/quick); the agent's
+    // answer is still spoken when it lands, and a quick line that arrives after it is dropped (quickSeq).
+    let quickSeq = 0;
+    function quickLine(text) {
+      if (!voice.chatting() || !voice.brief) return;
+      const mine = ++quickSeq;
+      const context = window.SkippyAgent.recent ? window.SkippyAgent.recent(6) : [];
+      fetch("{{ url_for('chat.quick_line') }}", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({message: text, context: context})})
+        .then(r => r.ok ? r.json() : {}).then(d => { if (mine === quickSeq && d && d.say && voice.chatting()) voice.brief(d.say); }).catch(() => {});
+    }
     hearAgent(); window.addEventListener("skippy-agent-ready", hearAgent);
     const sheets = {}; root.querySelectorAll(".sheet").forEach(s => { sheets[s.dataset.sheet] = s; });
     let openSheet = null;
@@ -643,6 +653,7 @@
       texts.forEach(f => { text += "\n\n" + f.name + ":\n```\n" + dataText(f.data) + "\n```"; });          // a long paste or a text file: in the message
       if (files.length > pics.length + texts.length) flash("The agent takes pictures and text here; put other files in its folder.");
       if (!text && !pics.length) return;
+      quickLine(text);                                           // before send: the context is the turns before this message
       window.SkippyAgent.send(text, pics);
       alive().pulse(1); paintStop();
     }

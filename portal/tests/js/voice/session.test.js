@@ -186,6 +186,17 @@ test("a tap while Skippy is thinking ends the conversation; no reply reopens any
   assert.equal(gStreams.length, 1);                                                      // the late reply does not reopen the mic
 });
 
+test("a brief line while the agent works is spoken but keeps the mic shut; the real answer gives the turn back", async (t) => {
+  const s = setup(t);
+  s.mic._on.click(); await advance(t, 600);
+  await talk(t, s, 1500, "is the bridge up");
+  s.voice.brief("Checking the bridge now."); await advance(t, 1200);                     // /chat/quick's line, spoken at once
+  assert.ok(!listening()); assert.equal(s.label(), "Skippy is still working on it…");   // still Skippy's turn
+  await advance(t, 5000); assert.ok(!listening());
+  s.voice.say("The bridge is up."); await advance(t, 1200);                               // the agent's answer
+  assert.ok(listening()); assert.equal(s.label(), "Listening");
+});
+
 test("an error reply still gives him the turn back", async (t) => {
   const s = setup(t);
   s.mic._on.click(); await advance(t, 600);

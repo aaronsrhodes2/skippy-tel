@@ -525,9 +525,13 @@
       u.onend = u.onerror = function () { if (playing === u) { playing = null; paint(speaker, "idle"); if (done) done(); } };
       playing = u; paint(speaker, "on"); speechSynthesis.speak(u);
     }
-    async function say(text) {
+    // keep: a line spoken while the real answer is still coming (the agent's quick line, /chat/quick): when it ends the turn stays
+    // with Skippy (the mic stays shut) until the real answer is said, or resume() says none is coming.
+    async function say(text, keep) {
       let finished = false;
-      const done = function () { if (finished) return; finished = true; if (chat) paintStatus(null); replied(); };
+      const done = keep
+        ? function () { if (finished) return; finished = true; if (chat) paintStatus("Skippy is still working on it…", 0, true); }
+        : function () { if (finished) return; finished = true; if (chat) paintStatus(null); replied(); };
       if (!(twoMode ? chat : wanted)) { done(); return; }         // two modes: only Hands-off speaks
       const full = plain(text);
       if (!full) { done(); return; }
@@ -574,7 +578,7 @@
       });
     }
     ifRemembered();
-    return { say: say, stop: stopSpeaking, cancel: cancel, resume: replied, standby: function () { return standbyOn; }, chatting: function () { return chat; }, enabled: function () { return !!wanted; } };
+    return { say: say, brief: function (text) { return say(text, true); }, stop: stopSpeaking, cancel: cancel, resume: replied, standby: function () { return standbyOn; }, chatting: function () { return chat; }, enabled: function () { return !!wanted; } };
   }
 
   return { attach: attach, pickMime: pickMime, speakable: speakable, plain: plain, createVad: createVad, wakeSplit: wakeSplit, isIOS: isIOS, iosHint: iosHint, OPEN_IN_SAFARI: OPEN_IN_SAFARI, EAR_KEY: EAR_KEY, WAKE_TEXT: WAKE_TEXT, SAFARI_HINT: SAFARI_HINT, WAKE_RE: WAKE_RE, STOP_RE: STOP_RE, END_RE: END_RE, SEND_DELAY_MS: SEND_DELAY_MS, MAX_SPEECH: MAX_SPEECH, heard: heard, HEARD_SURE: HEARD_SURE };

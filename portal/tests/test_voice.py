@@ -221,5 +221,7 @@ def test_the_one_chat_takes_the_agents_reply_into_its_own_voice():
     silent. test_workshop_ui.py pins the card's side of the handshake."""
     from pathlib import Path
     chat = (Path(__file__).resolve().parents[1] / "templates" / "_chat.html").read_text(encoding="utf-8")
-    assert "window.SkippyAgent.onReply = (t) => { if (t == null) voice.resume(); else voice.say(t); }" in chat
+    assert "window.SkippyAgent.onReply = (t) => { quickSeq++; if (t == null) voice.resume(); else voice.say(t); }" in chat
+    # the quick spoken line (/chat/quick) goes out before the agent's send, and one that lands after the answer is dropped
+    assert "quickLine(text);" in chat and "mine === quickSeq" in chat and "voice.brief(d.say)" in chat
     assert 'addEventListener("skippy-agent-ready", hearAgent)' in chat

@@ -2380,6 +2380,45 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         return jsonify(reply=text, tools=used, mentat_available=mentat_on, mentat_where=where,
                        media=tools.media, brain=brain.id, mentat=cards, barney=barney)
 
+    # ── The quick spoken line: in Hands-off with the agent (Private, Auto), Skippy Core's resident chat model says one line at once ──
+    # The agent's turn takes a minute (2026-10-29: 64 of the 68 s he waited for "respond to me with voice" were the agent's own tool calls;
+    # the voice itself started in 0.94 s). So while it works, the chat model, always loaded, answers in a sentence or two: the answer
+    # itself when the conversation already holds it or it's small talk, else what is about to happen. It never claims anything was done.
+    QUICK_SYSTEM = ("You are Skippy, talking out loud with the Captain. Your full self (an agent with tools) is already working on his "
+                    "message and will answer properly in a minute. Right now say ONE or TWO short spoken sentences, no lists, no markdown: "
+                    "if it is small talk or the conversation below already holds the answer, answer it; otherwise say plainly what you are "
+                    "about to check or do. Never say you did, found, changed or fixed anything: nothing has run yet. Never invent a number.")
+
+    @talk.post("/quick")
+    @auth.admin_required
+    def quick_line():
+        body = request.get_json(silent=True) or {}
+        message = str(body.get("message") or "").strip()[:2000]
+        if not message:
+            return jsonify(error="Say something."), 400
+        context = body.get("context") if isinstance(body.get("context"), list) else []
+        convo = [{"role": "assistant" if t.get("role") == "assistant" else "user", "content": str(t.get("text") or "")[:1500]}
+                 for t in context[-6:] if isinstance(t, dict) and str(t.get("text") or "").strip()]
+        while convo and convo[0]["role"] != "user":         # a conversation starts with him
+            convo.pop(0)
+        convo.append({"role": "user", "content": message})
+        merged = []                                          # two of his in a row (a heard line, a queued message) become one turn
+        for t in convo:
+            if merged and merged[-1]["role"] == t["role"]:
+                merged[-1]["content"] += "\n" + t["content"]
+            else:
+                merged.append(dict(t))
+        brain = brains.BRAINS[brains.BARNEY]                # Skippy Core's chat model, no tools
+        if not brain_ready(brain):
+            return jsonify(say=""), 200                      # no quick line: the agent's answer still comes
+        try:
+            text = chat.strip_sentinels((bot_override or brains.chat_for(brain)).reply(QUICK_SYSTEM, merged, tools=None, run_tool=None,
+                                                                                         model=brains.model_of(brain)))
+        except chat.ChatError as exc:
+            print(json.dumps({"event": "quick_line_failed", "error": str(exc)[:200]}), flush=True)
+            return jsonify(say=""), 200
+        return jsonify(say=" ".join(str(text or "").split())[:400])
+
     # ── Skippy Memory: every saved AI conversation (Grok, Claude, ...), to continue here (admin only) ──
     @talk.post("/memory")
     @auth.admin_required
