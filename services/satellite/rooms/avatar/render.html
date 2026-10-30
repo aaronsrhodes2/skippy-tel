@@ -1,0 +1,112 @@
+<!doctype html>
+<!-- Renders the chat's 3D Skippy (portal/static/skippy/skippy.glb, the motion of portal/static/skippy-3d.js) to the room box's animation frames.
+     Served and captured by build_avatar.py; not part of the portal. Each loop's sine speeds are rounded to whole cycles, so it loops seamlessly. -->
+<meta charset="utf-8">
+<title>Skippy frames</title>
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+<script type="importmap">{"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+const P = new URLSearchParams(location.search);
+const W = +P.get("w") || 180, H = +P.get("h") || 220;
+const LOOPS = JSON.parse(P.get("loops") || '[{"name":"idle","seconds":5.333,"frames":32,"level":0,"tilt":0}]');
+
+const SS = 2;                                                   // drawn at twice the size, then shrunk: smooth edges and fine ink lines
+const canvas = document.createElement("canvas"); document.body.append(canvas);
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1); renderer.setSize(W * SS, H * SS, false); renderer.setClearColor(0x000000, 1);
+const small = document.createElement("canvas"); small.width = W; small.height = H;
+const sctx = small.getContext("2d"); sctx.imageSmoothingQuality = "high";
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+const scene = new THREE.Scene();
+scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x202038, 0.9));          // less fill than the chat's: the features cast shadows
+const sun = new THREE.DirectionalLight(0xffffff, 3.2); sun.position.set(-2.2, 2.2, 2.4); scene.add(sun);
+const rim = new THREE.DirectionalLight(0xa66cff, 1.4); rim.position.set(2, 1, -2); scene.add(rim);
+
+const gltf = await new GLTFLoader().loadAsync("/portal/static/skippy/skippy.glb");
+const skippy = new THREE.Group(); skippy.add(gltf.scene); scene.add(skippy);
+const part = {};
+gltf.scene.traverse(o => { if (o.isMesh) part[o.name.replace(/\.\d+$/, "")] = o; });
+gltf.scene.traverse(o => {                                      // the head's face colours are its second colour set (the first is all white)
+  const g = o.isMesh && o.geometry;
+  if (g && g.getAttribute("color_1")) { g.setAttribute("color", g.getAttribute("color_1")); o.material.vertexColors = true; o.material.needsUpdate = true; }
+});
+function pivot(mesh, where) {                                   // as skippy-3d.js: each moving part turns about its joint
+  const box = new THREE.Box3().setFromObject(mesh), c = box.getCenter(new THREE.Vector3());
+  const p = new THREE.Group(); p.position.set(c.x, where === "base" ? box.min.y : c.y, c.z);
+  mesh.parent.add(p); p.attach(mesh); return p;
+}
+const head = part.head && pivot(part.head, "base"), hat = part.hat && pivot(part.hat, "base");
+if (head && hat) head.attach(hat);
+const pointer = part.hand_r && pivot(part.hand_r, "centre"), rest = part.hand_l && pivot(part.hand_l, "centre");
+const box = new THREE.Box3().setFromObject(gltf.scene), size = box.getSize(new THREE.Vector3()), mid = box.getCenter(new THREE.Vector3());
+const camera = new THREE.PerspectiveCamera(30, W / H, 0.1, 1000);
+const fit = Math.max(size.y * 1.12, size.x / camera.aspect) * 0.62 / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));   // a little room for the float
+const LOOK = +(P.get("look") || 0.14);                         // the camera a little below his middle, looking up: his eyes show under the brim
+camera.position.set(mid.x, mid.y - size.y * LOOK, mid.z + fit); camera.lookAt(mid.x, mid.y + size.y * 0.04, mid.z); camera.updateProjectionMatrix();
+const base = { head: head && head.rotation.clone(), hat: hat && hat.rotation.clone(), y: skippy.position.y };
+
+// The ink: edges where the surface turns sharply (normals) or one part sits in front of another (depth), drawn dark over the colour.
+const rtColour = new THREE.WebGLRenderTarget(W * SS, H * SS, { samples: 4 });
+const rtNormal = new THREE.WebGLRenderTarget(W * SS, H * SS, { depthTexture: new THREE.DepthTexture(W * SS, H * SS) });
+const normalMat = new THREE.MeshNormalMaterial();
+const ink = new THREE.ShaderMaterial({
+  uniforms: { col: { value: rtColour.texture }, nrm: { value: rtNormal.texture }, dep: { value: rtNormal.depthTexture },
+              px: { value: new THREE.Vector2(1 / (W * SS), 1 / (H * SS)) }, near: { value: camera.near }, far: { value: camera.far } },
+  vertexShader: "varying vec2 v; void main(){ v = uv; gl_Position = vec4(position.xy, 0., 1.); }",
+  fragmentShader: `
+    uniform sampler2D col, nrm, dep; uniform vec2 px; uniform float near, far; varying vec2 v;
+    float lin(vec2 p){ float z = texture2D(dep, p).x * 2. - 1.; return 2. * near * far / (far + near - z * (far - near)); }
+    void main(){
+      vec3 n = texture2D(nrm, v).xyz; float d = lin(v), e = 0.;
+      vec2 o[4]; o[0] = vec2(px.x, 0.); o[1] = vec2(-px.x, 0.); o[2] = vec2(0., px.y); o[3] = vec2(0., -px.y);
+      for (int i = 0; i < 4; i++) {
+        e = max(e, smoothstep(0.25, 0.6, distance(n, texture2D(nrm, v + o[i] * 1.5).xyz)));
+        e = max(e, smoothstep(0.012, 0.03, abs(lin(v + o[i] * 1.5) - d) / d));
+      }
+      vec4 c = texture2D(col, v);
+      gl_FragColor = vec4(c.rgb * (1. - 0.85 * e), 1.);
+    }`,
+});
+const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), ink), post = new THREE.Scene(), flat = new THREE.Camera(); post.add(quad);
+function draw() {
+  renderer.setRenderTarget(rtColour); renderer.render(scene, camera);
+  scene.overrideMaterial = normalMat; renderer.setRenderTarget(rtNormal); renderer.render(scene, camera); scene.overrideMaterial = null;
+  renderer.setRenderTarget(null); renderer.render(post, flat);
+  sctx.clearRect(0, 0, W, H); sctx.drawImage(canvas, 0, 0, W, H);
+}
+
+function pose(t, T, level, tilt) {
+  const w = (f) => { const n = Math.round(f * T / (2 * Math.PI)); return n * 2 * Math.PI / T; };   // whole cycles per loop
+  const s = (f, ph = 0) => Math.sin(w(f) * t + ph);
+  const chatter = s(13) * 0.5 + s(7.3, 1) * 0.5;
+  skippy.position.y = base.y + s(1.6) * 0.9 + level * Math.abs(s(6.5)) * 0.9;
+  skippy.rotation.y = s(0.55) * 0.22 + level * s(2.1) * 0.12;
+  if (head) {
+    head.rotation.x = base.head.x + s(1.1) * 0.04 + level * (0.10 + chatter * 0.10);
+    head.rotation.z = base.head.z + s(0.8) * 0.05 + tilt * 0.22;
+    head.scale.y = 1 + level * 0.035 * (chatter * 0.5 + 0.5);
+  }
+  if (hat) {
+    hat.rotation.x = base.hat.x + s(1.1, -0.5) * 0.05 + level * s(9) * 0.06;
+    hat.rotation.z = base.hat.z + s(0.8, -0.6) * 0.04 - tilt * 0.05;
+  }
+  if (pointer) pointer.rotation.z = s(2.4) * 0.05 + level * s(5.2) * 0.1;
+  if (rest) rest.rotation.z = s(1.3, 2) * 0.04;
+}
+
+const out = [];
+for (const L of LOOPS) {
+  for (let i = 0; i < L.frames; i++) {
+    pose(i * L.seconds / L.frames, L.seconds, L.level, L.tilt);
+    draw();
+    const png = small.toDataURL("image/png");
+    await fetch(`/frame/${L.name}/${i}`, { method: "POST", body: png });
+    out.push(`${L.name}/${i}`);
+  }
+}
+await fetch("/done", { method: "POST", body: JSON.stringify(out) });
+document.title = "done " + out.length;
+</script>

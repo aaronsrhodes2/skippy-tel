@@ -1,0 +1,41 @@
+# Made by avatar/build_avatar.py. Skippy idle: 32 frames, 5.333 s, looping.
+animimg:
+  id: avatar_idle
+  align: CENTER
+  y: -30
+  duration: 5333ms
+  repeat_count: forever
+  auto_start: true
+  src:
+    - skippy_idle_00
+    - skippy_idle_01
+    - skippy_idle_02
+    - skippy_idle_03
+    - skippy_idle_04
+    - skippy_idle_05
+    - skippy_idle_06
+    - skippy_idle_07
+    - skippy_idle_08
+    - skippy_idle_09
+    - skippy_idle_10
+    - skippy_idle_11
+    - skippy_idle_12
+    - skippy_idle_13
+    - skippy_idle_14
+    - skippy_idle_15
+    - skippy_idle_16
+    - skippy_idle_17
+    - skippy_idle_18
+    - skippy_idle_19
+    - skippy_idle_20
+    - skippy_idle_21
+    - skippy_idle_22
+    - skippy_idle_23
+    - skippy_idle_24
+    - skippy_idle_25
+    - skippy_idle_26
+    - skippy_idle_27
+    - skippy_idle_28
+    - skippy_idle_29
+    - skippy_idle_30
+    - skippy_idle_31

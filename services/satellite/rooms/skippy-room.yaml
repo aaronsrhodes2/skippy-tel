@@ -17,6 +17,9 @@
 # The voice assistant needs a 16 kHz microphone and duplex needs the speaker at the same rate: music is 16 kHz mono, which is about what
 # this small speaker can reproduce anyway.
 
+packages:
+  avatar: !include avatar/skippy-avatar.yaml   # every frame as an image (merged into the image list)
+
 substitutions:
   name: skippy-room
   room: "Room"
@@ -255,6 +258,11 @@ media_player:
                 id: music_in
                 decibel_reduction: 0
                 duration: 1.0s
+            - lvgl.widget.hide: avatar_talk
+            - lvgl.widget.show: avatar_idle
+          else:                                # Skippy is speaking: the talking loop
+            - lvgl.widget.hide: avatar_idle
+            - lvgl.widget.show: avatar_talk
     on_play:
       - script.execute:
           id: face
@@ -430,13 +438,6 @@ light:
     restore_mode: ALWAYS_ON
     default_transition_length: 600ms
 
-image:
-  - file: ../../../portal/static/skippy/skippy-head.png     # the chat's avatar (one file for both)
-    id: skippy_face
-    type: RGB565
-    transparency: alpha_channel
-    resize: 240x240
-
 display:
   - platform: mipi_rgb
     id: lcd
@@ -525,11 +526,8 @@ lvgl:
             border_color: 0x1e3a5f
             border_opa: 50%
             scrollable: false
-        - image:                          # Skippy's face, the chat's avatar, inside the ring (the ring's colour still says what he's doing)
-            id: face_img
-            src: skippy_face
-            align: CENTER
-            y: -30
+        - !include avatar/widget-idle.yaml   # Skippy, the chat's 3D model rendered to frames (avatar/build_avatar.py), inside the ring
+        - !include avatar/widget-talk.yaml   # ... and talking, while the box speaks (the media player's on_state below)
         - label:
             id: subtitle_label
             align: BOTTOM_MID
