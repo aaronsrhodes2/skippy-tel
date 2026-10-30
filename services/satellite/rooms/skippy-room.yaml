@@ -28,6 +28,8 @@ esphome:
   name: ${name}
   friendly_name: Skippy ${room}
   min_version: 2026.11.0-dev
+  build_flags:
+    - -DLV_USE_SNAPSHOT=1                 # lv_snapshot_take, for the screenshot action
   on_boot:
     - priority: 200
       then:
@@ -114,9 +116,31 @@ psram:
 
 logger:
 
+http_request:                             # only to bring in the HTTP client the screenshot action posts with
+
 api:
   encryption:
     key: !secret skippy_room_api_key      # the same key in the vault .env as SATELLITE_ESPHOME_KEY: the hub is the only client
+  actions:
+    - action: screenshot                  # what the screen shows now, as raw RGB565 posted to `url` (tools/ ... rooms/shot.py asks for it and makes the PNG)
+      variables:
+        url: string
+      then:
+        - lambda: |-
+            lv_draw_buf_t *snap = lv_snapshot_take(lv_screen_active(), LV_COLOR_FORMAT_RGB565);
+            if (snap == nullptr) { ESP_LOGE("shot", "snapshot failed (no memory?)"); return; }
+            esp_http_client_config_t cfg = {};
+            cfg.url = url.c_str();
+            cfg.method = HTTP_METHOD_POST;
+            cfg.timeout_ms = 15000;
+            esp_http_client_handle_t h = esp_http_client_init(&cfg);
+            char dims[24]; snprintf(dims, sizeof dims, "%d,%d,%d", (int) snap->header.w, (int) snap->header.h, (int) snap->header.stride);
+            esp_http_client_set_header(h, "X-Dims", dims);
+            esp_http_client_set_post_field(h, (const char *) snap->data, snap->data_size);
+            esp_err_t e = esp_http_client_perform(h);
+            ESP_LOGI("shot", "sent %u bytes: %s", (unsigned) snap->data_size, esp_err_to_name(e));
+            esp_http_client_cleanup(h);
+            lv_draw_buf_destroy(snap);
 
 ota:
   - platform: esphome
