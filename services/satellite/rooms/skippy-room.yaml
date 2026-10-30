@@ -219,6 +219,12 @@ speaker:
     id: music_resampler
     output_speaker: music_in
 
+audio:                                    # since ESPHome 2026.10 every decoder is opt-in: without mp3 the box refuses Skippy's voice (ESP_ERR_NOT_SUPPORTED)
+  codecs:
+    mp3:                                  # Skippy's voice (the voice gate's TTS)
+    wav:                                  # the machine's own voice, when the gate can't speak
+    flac:                                 # Bilby's tracks (the hub's media server transcodes to 16 kHz FLAC)
+
 media_player:
   - platform: speaker
     id: player
