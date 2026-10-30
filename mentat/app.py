@@ -51,6 +51,7 @@ from mcp.types import LATEST_PROTOCOL_VERSION
 import cascade_stage
 import ready as ready_mod
 import research
+import position_stage
 import router_stage
 import wva
 
@@ -180,6 +181,12 @@ def _ask(question: str, given: dict | None = None) -> dict:
         # The Captain's rule: the Qwen-backed Mentat fails rather than answer without Qwen.
         raise QwenUnavailable("Qwen (Ollama) is unreachable, so Mentat won't answer without it.")
     miss: dict = {}
+    if not given:
+        # Where is a planet, the Sun or the Moon at a time: a fixed rule, ahead of the cascade and the router (the router was trained before
+        # body_position existed and sent these to the fact sheet). Only a question naming a body, a position word and a time; else it carries on.
+        hit = position_stage.answer(question, call=_call, miss=miss)
+        if hit is not None:
+            return hit
     if cascade_stage.enabled() and cascade_stage.MODE == "before" and not given:
         # Opt-in (MENTAT_CASCADE=before): the benchmark's deterministic cascade ahead of the router, as the harness measured it (140 vs the
         # router's 109 on the 150). A miss falls to the router with its reason in inputs.router_miss["cascade"].
