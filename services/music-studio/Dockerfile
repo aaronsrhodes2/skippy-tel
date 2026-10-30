@@ -18,8 +18,8 @@
 # It loads the models on the first song (ACESTEP_NO_INIT) and parks them in CPU RAM after
 # (ACESTEP_OFFLOAD_TO_CPU); music_idle.py then ends the server two minutes after the song, so nothing
 # stays warm (the Captain, 2026-10-29: music takes time, quality over speed) and Docker's restart brings
-# back a bare one. The DiT is acestep-v15-sft (the 2 B "higher quality" model: 50 steps with guidance),
-# not the 8-step turbo.
+# back a bare one. The DiT is the 8-step turbo: acestep-v15-sft (the 2 B quality model) is seeded and ready,
+# but its first song took the Docker VM down (2026-10-29), so it waits until it is proven safe.
 # Weights seeded into the cache volume (/app/.cache/weights, on the C: SSD: seed_weights.sh) win over the
 # D:/models mount, which Docker reads at ~8 MB/s; acestep-v15-sft lives only there.
 ARG CUDA_VERSION=12.8.1
@@ -64,7 +64,7 @@ RUN sed -i 's/\x0d$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/e
 ENV ACESTEP_API_HOST=0.0.0.0 \
     ACESTEP_API_PORT=8001 \
     ACESTEP_CHECKPOINTS_DIR=/app/checkpoints \
-    ACESTEP_CONFIG_PATH=acestep-v15-sft \
+    ACESTEP_CONFIG_PATH=acestep-v15-turbo \
     ACESTEP_LM_MODEL_PATH=acestep-5Hz-lm-1.7B \
     ACESTEP_LM_BACKEND=pt \
     ACESTEP_INIT_LLM=true \

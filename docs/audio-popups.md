@@ -9,8 +9,8 @@ ACE-Step's `make_music`.
 |---|---|---|---|
 | `sfx_quick` | Stable Audio Open Small | a 0.5-11 s hit or FX, WAV | Stability AI Community Licence: free (personal, and commercial under $1 M revenue) |
 | `sfx_loop` | Stable Audio Open 1.0 | a tempo/key loop or one-shot up to 47 s, cut to whole bars, WAV | same |
-| `melody_variations` | MusicGen stereo-melody (1.5 B) | the attached clip's melody in a new style, up to 30 s, WAV | **CC-BY-NC 4.0: sketching only, not in a release** |
-| `stems` | Demucs v4 htdemucs_ft (htdemucs for `fast`) | drums/bass/vocals/other as a zip of mp3s, or one stem | MIT |
+| `melody_variations` | MusicGen stereo-melody-large (3.3 B; the 1.5 B is the fallback, `MELODY_MODEL`) | the attached clip's melody in a new style, up to 30 s, WAV | **CC-BY-NC 4.0: sketching only, not in a release** |
+| `stems` | Demucs v4 htdemucs_ft, two averaged passes (htdemucs, one pass, for `fast`) | drums/bass/vocals/other as a zip of mp3s, or one stem | MIT |
 | `audio_to_midi` | Spotify Basic Pitch | a .mid of the attached clip (polyphonic, bends) | Apache 2.0 |
 
 (T5-base, the Stable Audio text encoder, is Apache 2.0.)
@@ -29,7 +29,19 @@ counts are checked below; how good each one *sounds* is the Captain's call (the 
 | `sfx_quick` | **not run** | Stable Audio Open Small is gated: the Captain accepts its licence on Hugging Face once, then it seeds like the others |
 
 Cold loads are the cost: Stable Audio is built on the card one tensor at a time (so the Docker VM never holds it), and MusicGen loads
-4 GB. Both stay loaded for IDLE_UNLOAD_S (5 min) after the last job, so a session of several asks pays the load once.
+4 GB.
+
+**Since 2026-10-29 nothing stays warm and the settings are the quality ones** (the Captain: music takes time, quality over speed).
+Every job pays its load, the process ends once the reply is sent (Docker brings back a bare Flask), and the estimates in popups.json
+are cold ones. MusicGen is the 3.3 B stereo-melody-large, Demucs averages two passes (`DEMUCS_SHIFTS`), Stable Audio Open 1.0 takes
+150 steps. These were not re-benchmarked: the numbers above are the earlier settings' (1.5 B MusicGen, one pass, 100 steps).
+
+**Songs (`make_music`, ACE-Step) follow the same rule:** `services/music-studio/music_idle.py` ends ACE-Step's server two minutes
+after each song (it has no unload and kept both models parked in RAM), and its weights are seeded onto the SSD
+(`services/music-studio/seed_weights.sh`). The quality DiT, acestep-v15-sft (2 B, 50 steps with guidance, MIT, output cleared for
+commercial use), is archived and seeded, but **its first song took skippy-pc's Docker VM down** (WSL wedged; 2026-10-29), so songs
+stay on the 8-step turbo until it is proven safe (`MUSIC_MODEL`, `MUSIC_STEPS` in the reporter). ACE-Step's best, XL-SFT (4 B,
+~19 GB bf16), fits neither the 16 GB card nor the 16 GB VM: a candidate for skippy-core.
 
 ## Method
 

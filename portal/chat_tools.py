@@ -207,8 +207,8 @@ _CAR_STATUS = {
 
 _MAKE_MUSIC = {
     "name": "make_music",
-    "description": "Compose a song or instrumental on the Captain's own GPU at home (ACE-Step, its quality "
-                   "model): free, no tokens, and it takes a while (quality over speed). Give a compact style description (genre, mood, instruments, "
+    "description": "Compose a song or instrumental on the Captain's own GPU at home (ACE-Step): free, no "
+                   "tokens, a few minutes (it loads for each song). Give a compact style description (genre, mood, instruments, "
                    "tempo) and, only if wanted, lyrics with [verse]/[chorus] markers; no lyrics = "
                    "instrumental. The finished clip shows as a player under your reply. If it isn't ready "
                    "yet the result says so: tell the user and use music_result later. Only when the user "
