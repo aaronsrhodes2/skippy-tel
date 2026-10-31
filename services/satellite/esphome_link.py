@@ -16,6 +16,8 @@ import asyncio
 import os
 from pathlib import Path
 
+import emotion
+
 PLAY_TIMEOUT_S = 90
 
 
@@ -98,6 +100,7 @@ class EsphomeLink:
         self._played = asyncio.Event()
         self._follow = False
         self._tasks: set = set()
+        self.asked = ""
 
     def discover(self, entities) -> None:
         for e in entities:
@@ -108,6 +111,8 @@ class EsphomeLink:
                 self.keys["subtitle"] = e.key
             elif kind == "TextInfo" and "session" in oid:
                 self.keys["session"] = e.key
+            elif kind == "TextInfo" and "emote" in oid:
+                self.keys["emote"] = e.key
             elif kind == "TextInfo" and "mouth" in oid:
                 self.keys["mouth"] = e.key
             elif kind == "BinarySensorInfo" and oid.endswith("tap"):
@@ -168,6 +173,9 @@ class EsphomeLink:
             self.vad_ended = True
 
     async def heard(self, text: str) -> None:
+        self.asked = text
+        if "emote" in self.keys:                                    # how he looks while he thinks about what he was just told
+            self.client.text_command(self.keys["emote"], emotion.reaction(text) + "|")
         await self.voice_stopped()                                  # (heard in one breath with the name: the box must still stop listening)
         self._event(self.E.VOICE_ASSISTANT_STT_END, {"text": text})
         self._event(self.E.VOICE_ASSISTANT_INTENT_START)
@@ -197,6 +205,8 @@ class EsphomeLink:
                                                         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
             pcm, _ = await asyncio.wait_for(proc.communicate(voice[1]), 10)
             self.client.text_command(self.keys["mouth"], mood + envelope(pcm, cap=249))
+            if "emote" in self.keys:                                # what he feels, sentence by sentence, over the length of his voice
+                self.client.text_command(self.keys["emote"], emotion.reaction(self.asked) + "|" + emotion.track(plain(said), self.asked, len(pcm) / 32000.0))
         except Exception as e:                                      # noqa: BLE001 — the mouth just babbles
             self.log(f"[{self.room.name}] (mouth envelope: {type(e).__name__})")
             return
