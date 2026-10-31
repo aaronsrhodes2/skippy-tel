@@ -112,9 +112,52 @@ class PcBookOut:
         return s
 
 
-def build_outputs(env: dict, room: str, log=print) -> list[PcBookOut]:
-    """The PC outputs a room's book plays on, the same ones and the same start delays as Skippy's voice (SATELLITE_OUT, SATELLITE_OUT_DELAYS)."""
-    return [PcBookOut(p.kind, p.part, p.delay_s, log=log) for p in speaker_out.parse_outputs(env, room, log)[1]]
+class RoutedBookOut:
+    """The book on ALL of a room's PC outputs through the house's audio router (router.py): one ffmpeg for every output, on the `media`
+    layer, so Skippy's voice ducks it in the mix instead of it stopping. Same start/stop/gain as PcBookOut, so audiobooks.BookPlayer is unchanged."""
+
+    def __init__(self, router, kinds: list[str], log=print, popen=subprocess.Popen):
+        self.router, self.kinds, self.log, self.popen = router, set(kinds), log, popen
+        self.kind = "+".join(kinds)
+        self._play = None
+        self._gain = 1.0
+
+    def available(self):
+        return any(self.router.available(k) for k in self.kinds) or None
+
+    @property
+    def running(self) -> bool:
+        return self._play is not None and not self._play.finished.is_set()
+
+    @property
+    def gain(self) -> float:
+        return self._gain
+
+    @gain.setter
+    def gain(self, g: float) -> None:
+        self._gain = g
+        if self._play is not None:
+            self._play.gain = g
+
+    def start(self, source: str, start_s: float, speed: float = 1.0) -> bool:
+        import router as router_mod                               # noqa: PLC0415
+        self.stop()
+        self._play = self.router.play(router_mod.PipeSource(pcm_args(source, start_s, speed), popen=self.popen), layer="media",
+                                      targets=self.kinds, gain=self._gain)
+        return True
+
+    def stop(self) -> None:
+        p, self._play = self._play, None
+        self.router.stop(p)
 
 
-__all__ = ["PcBookOut", "build_outputs", "pcm_args", "tempo_filter"]
+def build_outputs(env: dict, room: str, log=print) -> list:
+    """The PC outputs a room's book plays on, the same ones and the same start delays as Skippy's voice (SATELLITE_OUT, SATELLITE_OUT_DELAYS):
+    one RoutedBookOut through the audio router, or (SATELLITE_ROUTER=0) one PcBookOut per output as before."""
+    outs = speaker_out.parse_outputs(env, room, log)[1]
+    if outs and isinstance(outs[0], speaker_out.RoutedOut):
+        return [RoutedBookOut(outs[0].router, sorted(outs[0].kinds), log=log)]
+    return [PcBookOut(p.kind, p.part, p.delay_s, log=log) for p in outs]
+
+
+__all__ = ["PcBookOut", "RoutedBookOut", "build_outputs", "pcm_args", "tempo_filter"]

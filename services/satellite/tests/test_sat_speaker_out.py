@@ -10,9 +10,9 @@ import speaker_out as S  # noqa: E402
 def test_the_settings_name_the_outputs_per_room_and_default_to_the_box_alone():
     pod, outs = S.parse_outputs({}, "office")
     assert pod is True and outs == []
-    pod, outs = S.parse_outputs({"SATELLITE_OUT": "office=pod+hdmi+bt;kitchen=hdmi", "SATELLITE_OUT_BT": "Enclave"}, "office")
+    pod, outs = S.parse_outputs({"SATELLITE_OUT": "office=pod+hdmi+bt;kitchen=hdmi", "SATELLITE_OUT_BT": "Enclave", "SATELLITE_ROUTER": "0"}, "office")
     assert pod is True and [o.kind for o in outs] == ["hdmi", "bt"] and outs[1].part == "Enclave" and outs[1].delay_s == 0.4
-    pod, outs = S.parse_outputs({"SATELLITE_OUT": "office=pod+hdmi+bt;kitchen=hdmi"}, "kitchen")
+    pod, outs = S.parse_outputs({"SATELLITE_OUT": "office=pod+hdmi+bt;kitchen=hdmi", "SATELLITE_ROUTER": "0"}, "kitchen")   # the old path (the router: test_sat_router)
     assert pod is False and [o.kind for o in outs] == ["hdmi"]
 
 

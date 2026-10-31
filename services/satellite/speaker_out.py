@@ -103,18 +103,67 @@ class PcOut:
             return False
 
 
-def parse_outputs(env: dict, room: str, log=print) -> tuple[bool, list[PcOut]]:
-    """(play on the box's own speaker?, the PC outputs) for a room from the vault settings; the default is the box only."""
-    want = "pod"
-    for part in (env.get("SATELLITE_OUT") or "").split(";"):
-        if part.strip().startswith(room + "="):
-            want = part.split("=", 1)[1].strip()
-    kinds = [k.strip() for k in want.split("+") if k.strip()]
+class RoutedOut:
+    """Skippy's voice on ALL of a room's PC outputs through the house's audio router (router.py): decoded once, mixed over a book or music
+    (which ducks under it instead of stopping), on outputs that stay open. Same `play` as PcOut, so the hub's Room uses it unchanged."""
+
+    def __init__(self, router, kinds: list[str], log=print, duck_others: bool = True, decoder=None):
+        self.router, self.kinds, self.log, self.duck_others = router, set(kinds), log, duck_others
+        self.kind = "+".join(kinds)
+        self.decoder = decoder or decode
+
+    def available(self):
+        return any(self.router.available(k) for k in self.kinds) or None
+
+    async def play(self, mp3: bytes, gain: float = 1.0) -> bool:
+        try:
+            pcm = await asyncio.to_thread(self.decoder, mp3, gain)
+        except Exception as e:                                     # noqa: BLE001
+            self.log(f"(output {self.kind}: could not decode: {type(e).__name__})")
+            return False
+        import router as router_mod                                # noqa: PLC0415
+        ducker = Ducker() if self.duck_others else None            # other programs (Bilby in a browser, a game) still duck under him
+        if ducker:
+            await asyncio.to_thread(ducker.duck)
+        try:
+            p = self.router.play(router_mod.ClipSource(pcm), layer="voice", targets=self.kinds)
+            await asyncio.to_thread(p.finished.wait, len(pcm) / RATE + 5)
+            await asyncio.sleep(max((self.router.sinks[k].delay_s for k in self.kinds if k in self.router.sinks), default=0))
+        finally:
+            if ducker:
+                await asyncio.to_thread(ducker.restore)
+        return True
+
+
+def output_parts(env: dict) -> dict:
+    return {"hdmi": env.get("SATELLITE_OUT_HDMI", "NVIDIA High Definition"), "bt": env.get("SATELLITE_OUT_BT", "Enclave Audio")}
+
+
+def output_delays(env: dict) -> dict:
     delays = {}
     for pair in (env.get("SATELLITE_OUT_DELAYS") or "pod=0.6,bt=0.4,hdmi=0.5").split(","):
         if "=" in pair:
             k, v = pair.split("=", 1)
             delays[k.strip()] = float(v)
-    parts = {"hdmi": env.get("SATELLITE_OUT_HDMI", "NVIDIA High Definition"), "bt": env.get("SATELLITE_OUT_BT", "Enclave Audio")}
-    pcs = [PcOut(k, parts[k], delays.get(k, 0.0), log=log) for k in kinds if k in parts]
+    return delays
+
+
+def room_kinds(env: dict, room: str) -> list[str]:
+    want = "pod"
+    for part in (env.get("SATELLITE_OUT") or "").split(";"):
+        if part.strip().startswith(room + "="):
+            want = part.split("=", 1)[1].strip()
+    return [k.strip() for k in want.split("+") if k.strip()]
+
+
+def parse_outputs(env: dict, room: str, log=print) -> tuple[bool, list]:
+    """(play on the box's own speaker?, the PC outputs) for a room from the vault settings; the default is the box only.
+    The PC outputs go through the house's audio router (router.py) unless SATELLITE_ROUTER=0, which keeps the old one-PcOut-per-output path."""
+    kinds = room_kinds(env, room)
+    parts, delays = output_parts(env), output_delays(env)
+    pc_kinds = [k for k in kinds if k in parts]
+    if pc_kinds and env.get("SATELLITE_ROUTER", "1") != "0":
+        import router as router_mod                                # noqa: PLC0415
+        return "pod" in kinds, [RoutedOut(router_mod.shared(env, log), pc_kinds, log=log)]
+    pcs = [PcOut(k, parts[k], delays.get(k, 0.0), log=log) for k in pc_kinds]
     return ("pod" in kinds or not pcs), pcs
