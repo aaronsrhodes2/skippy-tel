@@ -88,19 +88,12 @@ def looks_technical(text: str) -> bool:
     return sum(text.count(c) for c in "{}[]<>=;_#|") > max(6, len(text) // 25)
 
 
-def one_stream(mp3: bytes, run=None) -> bytes:
-    """One clean MP3 stream from MP3s joined end to end. The voice gate joins its own pieces (one per sentence) and the hub joins the gate's: each
-    piece starts with its own LAME 'Info' header, and the pod's decoder stops at the second one (2026-10-31: the pod went silent mid-answer while
-    the PC outputs, decoded by ffmpeg, said all of it). A clip with one header comes back unchanged; if ffmpeg fails, so does the joined clip."""
-    if mp3.count(b"Info") + mp3.count(b"Xing") <= 1:
-        return mp3
-    import subprocess                                           # noqa: PLC0415
-    try:
-        got = (run or subprocess.run)(["ffmpeg", "-v", "error", "-nostdin", "-i", "pipe:0", "-ac", "1", "-ar", "24000", "-c:a", "libmp3lame",
-                                      "-b:a", "64k", "-f", "mp3", "pipe:1"], input=mp3, capture_output=True, timeout=30).stdout
-    except (OSError, subprocess.SubprocessError):
-        return mp3
-    return got or mp3
+def one_stream(mp3: bytes, run=None, decoder=None) -> bytes:
+    """One clean MP3 stream for the pod from MP3 pieces joined end to end (the voice gate joins one per sentence, the hub joins the gate's; the pod's
+    decoder stopped at the second piece's header: silent mid-answer, 2026-10-31). The audio router's single pass (speaker_out.prepare): decoded once,
+    the PC outputs play that same sound, the pod's copy is encoded from it."""
+    import speaker_out                                          # noqa: PLC0415
+    return speaker_out.prepare(mp3, run=run, decoder=decoder)
 
 
 def split_for_voice(text: str, limit: int = 480) -> list[str]:

@@ -157,13 +157,20 @@ def test_the_room_is_deaf_while_the_pc_outputs_still_say_his_words():
     assert spot.fed == 1
 
 
-def test_joined_mp3_pieces_become_one_stream_the_pod_plays_to_the_end():
-    """2026-10-31: the voice gate joins one MP3 per sentence; the pod's decoder stopped at the second piece's header (silent mid-answer)."""
+def test_joined_mp3_pieces_become_one_stream_the_pod_plays_to_the_end_decoded_only_once():
+    """2026-10-31: the voice gate joins one MP3 per sentence; the pod's decoder stopped at the second piece's header (silent mid-answer). The
+    router's one pass decodes the reply once, encodes the pod's copy from that sound, and the PC outputs reuse the same sound."""
     import hub as hub_mod
-    calls = []
+    calls, decoded = [], []
 
     def run(args, input, capture_output, timeout):
         calls.append(args)
         return type("R", (), {"stdout": b"ONE-CLEAN-STREAM"})()
-    assert hub_mod.one_stream(b"\xff\xfbInfo...audio", run=run) == b"\xff\xfbInfo...audio" and not calls     # one piece: untouched
-    assert hub_mod.one_stream(b"Info..a..Info..b", run=run) == b"ONE-CLEAN-STREAM" and "libmp3lame" in calls[0]
+
+    def dec(mp3):
+        decoded.append(mp3)
+        return tone(0.1)
+    assert hub_mod.one_stream(b"MP3Info...audio", run=run, decoder=dec) == b"MP3Info...audio" and not calls     # one piece: untouched
+    pod = hub_mod.one_stream(b"Info..a..Info..b", run=run, decoder=dec)
+    assert pod == b"ONE-CLEAN-STREAM" and "libmp3lame" in calls[0] and len(decoded) == 1
+    assert speaker_out.decode_cached(pod).shape == tone(0.1).shape and len(decoded) == 1     # the Sony's copy: no second decode

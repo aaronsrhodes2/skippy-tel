@@ -30,6 +30,59 @@ def find_device(part: str):
     return best
 
 
+_PCM: "collections.OrderedDict[bytes, object]" = None             # sha1(mp3) -> its decoded sound: each clip is decoded once (prepare, decode_cached)
+_PCM_MAX = 48
+
+
+def _cache():
+    global _PCM
+    if _PCM is None:
+        import collections                                         # noqa: PLC0415
+        _PCM = collections.OrderedDict()
+    return _PCM
+
+
+def _key(mp3: bytes) -> bytes:
+    import hashlib                                                 # noqa: PLC0415
+    return hashlib.sha1(mp3).digest()
+
+
+def _remember(mp3: bytes, pcm) -> None:
+    c = _cache()
+    c[_key(mp3)] = pcm
+    c.move_to_end(_key(mp3))
+    while len(c) > _PCM_MAX:
+        c.popitem(last=False)
+
+
+def decode_cached(mp3: bytes, gain: float = 1.0):
+    """decode(), once per clip: a clip prepare() made, or a pre-recorded quip played before, is not decoded again."""
+    pcm = _cache().get(_key(mp3))
+    if pcm is None:
+        pcm = decode(mp3)
+        _remember(mp3, pcm)
+    return pcm if gain == 1.0 else (pcm * gain).astype("float32")
+
+
+def prepare(mp3: bytes, run=None, decoder=None) -> bytes:
+    """The audio router's one pass over a reply, on skippy-pc: decode it ONCE (the voice gate's MP3 pieces joined end to end, one header each),
+    keep that sound for the PC outputs (decode_cached finds it), and encode the pod's copy from the same sound as ONE clean MP3 stream (the pod's
+    decoder stops at a second piece's header: 2026-10-31, silent mid-answer). Returns the pod's MP3; a single-piece clip is returned as it is."""
+    if mp3.count(b"Info") + mp3.count(b"Xing") <= 1:
+        return mp3
+    try:
+        pcm = (decoder or decode)(mp3)
+        got = (run or subprocess.run)(["ffmpeg", "-v", "error", "-nostdin", "-f", "f32le", "-ar", str(RATE), "-ac", "2", "-i", "pipe:0",
+                                      "-ac", "1", "-ar", "24000", "-c:a", "libmp3lame", "-b:a", "64k", "-f", "mp3", "pipe:1"],
+                                     input=pcm.tobytes(), capture_output=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return mp3
+    if not got:
+        return mp3
+    _remember(got, pcm)                                            # the PC outputs play the very same sound, not a second decode
+    return got
+
+
 def decode(mp3: bytes, gain: float = 1.0):
     import numpy as np                                         # noqa: PLC0415
     raw = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-i", "pipe:0", "-f", "f32le", "-ac", "2", "-ar", str(RATE), "pipe:1"],
@@ -111,7 +164,7 @@ class RoutedOut:
     def __init__(self, router, kinds: list[str], log=print, duck_others: bool = True, decoder=None):
         self.router, self.kinds, self.log, self.duck_others = router, set(kinds), log, duck_others
         self.kind = "+".join(kinds)
-        self.decoder = decoder or decode
+        self.decoder = decoder or decode_cached
         self.talking_until = 0.0                                   # (monotonic) when the outputs fall silent: the room stays deaf until then (hub.Room.feed)
 
     def available(self):
