@@ -3,7 +3,7 @@
  "project": "skippy-tel",
  "region": "us-west1",
  "pins": {
-  "SIGMA_GROUND_REF": "dabcc5d1ad42c4bf398562917559eadbc19090ac",
+  "SIGMA_GROUND_REF": "7c9ef6025c838e1b6d59ce45443d5a42612c622e",
   "STARCONTROL_REF": "web-2026-10-02",
   "STARCONTROL_SHA256": "15866e0e94ab0069f02f8c4d0a3bb31bf4fe7a96e54337f29cadc37fe74999b3"
  },
