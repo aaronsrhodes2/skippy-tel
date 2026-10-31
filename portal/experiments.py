@@ -334,6 +334,18 @@ MINEBENCH_RUNS = (
                 "blocks lying flat under the boiler instead of upright wheels, which the check flags as lying flat. The runtime counts "
                 "381 floating parts (489 blocks): mostly small white wool pieces, probably steam, and some glass that is not steam. The "
                 "scene reads as a small town with a plume of smoke, not a train. Two debug scripts were left uncommitted in the folder."},
+    {"id": "v9", "title": "Choo-choo train, the same words, wheels buried in the ground (a negative result)",
+     "model": "Purple Skippy: Claude Code on Skippy Core's coder (the same Qwen3.6-35B-A3B, MTP, Q8), local and free, the same message as v5 "
+              "word for word",
+     "prompt": "a choo-choo train", "request": "experiments/minebench/v9/request.txt", "comparable": True, "blocks": 166589,
+     "minutes": None, "size": "216 x 82 x 108",
+     "verdict": "A negative result, kept. No wheel can be seen: the three driving wheels are brick rings round an iron hub, centred "
+                "at ground level and drawn facing along the track, so the ground and the sleepers cover them. The agent never opened "
+                "the voxel-build skill, which has a tested wheel helper, and the copy of the check in its folder was an old one with no "
+                "wheel check, so it saw no problem: zero floating parts, committed as clean. The ground and the coal use Math.random "
+                "instead of the seeded rng, so each run of the build is slightly different. Tool fixes from this run: the folder now "
+                "gets the current check, which finds wheels of mixed materials (these three: facing along the track) and prints the "
+                "wheel helper itself when wheels are turned or missing."},
     {"id": "haiku-direct", "title": "Choo-choo train, Claude Haiku in one call (the benchmark's own way)",
      "model": "Claude Haiku 5.5 through Anthropic's API: one call with MineBench's prompt, no tools, no second try",
      "prompt": "a choo-choo train", "comparable": True, "blocks": 21048, "minutes": 2, "size": "144 x 40 x 42",
