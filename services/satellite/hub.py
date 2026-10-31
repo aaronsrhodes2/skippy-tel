@@ -133,6 +133,8 @@ class Room:
         self.vad = Vad(floor_min=floor)
         self.pre: deque = deque(maxlen=24)                      # 1.2 s before the voice was noticed: "Hey Skippy" is quieter than what follows, so the bar is crossed late
         self.buf: list | None = None
+        self._speech_t0 = self._shown_t = None                  # when the voice began; when he last perked up for something that may not be for him
+        self._probed = False
         self.t, self._carry = 0, []                             # t: milliseconds of audio heard on this connection (the room's own clock)
         self.mode, self.deadline = IDLE, 0
         self.recorder = None                                    # wakerec.Recorder: `hub.py --record` sends the room's audio there instead of listening
@@ -190,11 +192,29 @@ class Room:
             self.buf.append(block)
         if event == "speech":
             self.buf = list(self.pre)
+            self._speech_t0, self._probed = self.t, False
             if self.mode in (LISTENING, FOLLOWUP):
                 self._spawn(self.link.voice_started())
+        if self.mode == IDLE and self.spotter is None and self.buf is not None and self._speech_t0 is not None and hasattr(self.link, "idle_face"):     # (with a wake-word model, room talk never goes to Whisper)
+            spoken = self.t - self._speech_t0
+            if self._shown_t is None and spoken >= 500:       # a voice that lasts: he perks up at once, before it is known whether it was for him
+                self._shown_t = self.t
+                self._spawn(self.link.woke("noticed"))
+            if not self._probed and spoken >= 1000:           # and about a second in, Whisper is asked whether it began with his name (no waiting for the end of the sentence)
+                self._probed = True
+                self._spawn(self._probe(list(self.buf)))
         elif event == "end" and self.buf is not None:
             self._finish()
         self._tick()
+
+    async def _probe(self, blocks) -> None:
+        try:
+            text = await asyncio.to_thread(self.gate.stt, wav_bytes([x for block in blocks for x in block]))
+        except GateError:
+            return
+        woke, _ = wake_split(text)
+        if woke and self.mode == IDLE and self.buf is not None:        # still speaking and still waiting: he is addressed
+            self._woke("early")
 
     def _woke(self, by: str) -> None:
         self.log(f"[{self.name}] woke")
@@ -205,6 +225,11 @@ class Room:
         self._spawn(self.link.woke(by))
 
     def _tick(self) -> None:
+        if self._shown_t is not None and self.mode == IDLE and self.buf is None and self.t > self._shown_t + 2500:
+            self._shown_t = None                                    # he perked up for nothing (a cough, the TV): back to his resting face
+            self._spawn(self.link.idle_face())
+        elif self._shown_t is not None and self.mode != IDLE:
+            self._shown_t = None
         if self.mode in (LISTENING, FOLLOWUP) and self.t > self.deadline and self.buf is None:
             self.mode = IDLE
             self._session(False)
