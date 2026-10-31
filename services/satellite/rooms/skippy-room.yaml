@@ -379,6 +379,17 @@ switch:
 
 # What the hub wants shown under the ring: now playing, or what Skippy just said. The hub writes it; the box only displays it.
 text:
+  - platform: template                    # the hub says a conversation is open (the name opened it; a goodbye or a long silence closes it)
+    id: session_text
+    name: Session
+    mode: text
+    max_length: 4
+    optimistic: true
+    on_value:
+      - lambda: |-
+          id(in_session) = (x == "1");
+          if (id(state_now) == "idle" || id(state_now).empty())
+            lv_label_set_text(id(status_label), id(in_session) ? "listening" : "say \"Skippy\"");
   - platform: template                    # how loud each 60 ms of Skippy's next clip is (digits 0-9), written by the hub so the mouth follows the words
     id: mouth_env_text
     name: Mouth
@@ -432,6 +443,9 @@ globals:
   - id: face_rgb
     type: uint32_t
     initial_value: '0x6a28c9'
+  - id: in_session
+    type: bool
+    initial_value: 'false'
   - id: talking
     type: bool
     initial_value: 'false'
@@ -464,7 +478,7 @@ script:
       - lambda: |-
           // the nimbus and the line above the head say what the box is doing. idle: purple, breathing; listening (your name was heard): cyan;
           // recording your voice: red; thinking: amber; speaking: Skippy purple; music: green; muted: red; offline: grey
-          uint32_t c = 0x6a28c9; const char *t = "say \"Skippy\""; float en = 0.3f;
+          uint32_t c = 0x6a28c9; const char *t = id(in_session) ? "listening" : "say \"Skippy\""; float en = id(in_session) ? 0.6f : 0.3f;
           if (state == "listening") { c = 0x22d3ee; t = "listening"; en = 1.0f; }
           else if (state == "recording") { c = 0xff3b6b; t = "recording"; en = 1.4f; }
           else if (state == "thinking") { c = 0xf59e0b; t = "thinking"; en = 1.6f; }

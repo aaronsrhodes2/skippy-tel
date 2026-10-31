@@ -160,11 +160,11 @@ def test_skippy_and_a_command_in_one_breath_runs_the_pipeline_as_home_assistant_
                                   E.VOICE_ASSISTANT_TTS_END, E.VOICE_ASSISTANT_RUN_END]
         data = dict(client.events)
         assert data[E.VOICE_ASSISTANT_STT_END] == {"text": "turn the lights off."}
-        assert data[E.VOICE_ASSISTANT_INTENT_END]["continue_conversation"] == "1" and data[E.VOICE_ASSISTANT_INTENT_END]["speech"] == "Done, monkey."
+        assert data[E.VOICE_ASSISTANT_INTENT_END]["continue_conversation"] == "0" and data[E.VOICE_ASSISTANT_INTENT_END]["speech"] == "Done, monkey."
         assert data[E.VOICE_ASSISTANT_TTS_END] == {"url": "http://hub:10800/v/s/1.mp3"} and media.clips == [("mp3", b"mp3")]
         assert client.texts == [(2, "Done, monkey.")]                                 # the box's subtitle
         assert made["brain"].heard == ["turn the lights off."]
-        await settle(lambda: made["room"].mode == "idle")
+        await settle(lambda: made["room"].mode == "followup")    # the name opened a conversation: it stays open (Room.followup_ms) instead of going back to sleep after one answer
         task.cancel()
     run(go())
 

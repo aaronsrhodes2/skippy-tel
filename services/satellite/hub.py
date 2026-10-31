@@ -162,6 +162,7 @@ class Room:
     def _tick(self) -> None:
         if self.mode in (LISTENING, FOLLOWUP) and self.t > self.deadline and self.buf is None:
             self.mode = IDLE
+            self._session(False)
             self._spawn(self.link.released())                   # nothing said: the box goes back to waiting for its name
 
     def _finish(self) -> None:
@@ -233,6 +234,13 @@ class Room:
     def _resume(self, mode: str, window_ms: int = 0) -> None:
         self._fresh()
         self.mode, self.deadline = mode, self.t + window_ms
+        self._session(mode == FOLLOWUP)
+
+    def _session(self, on: bool) -> None:
+        """A conversation is open (the name opened it; it closes after a long silence or a goodbye): the box says so on its screen."""
+        show = getattr(self.link, "session", None)
+        if show is not None:
+            show(on)
 
     async def say(self, text: str, follow_up: bool = False, announce: bool = False) -> None:
         """Skippy's voice in this room: the gate's local TTS (a summary when long), else the machine's own voice. Waits until it has played."""
@@ -474,7 +482,8 @@ def build_rooms(env: dict):
         tools = music_tools(lambda: holder["room"], loop) if plays_music else None
         brain = Brain(client, brain_model, timers, hass=house, extra=tools)
         room = holder["room"] = Room(name, link, gate, brain, timers, spotter=spotter, local_voice=audio.local_voice_pcm16, log=log,
-                                     floor=float(env.get("SATELLITE_FLOOR", "0.012")))
+                                     floor=float(env.get("SATELLITE_FLOOR", "0.012")),
+                                     followup_ms=int(float(env.get("SATELLITE_SESSION_S", "180")) * 1000))      # the name opens a conversation: it stays open this long without a word
         return room
     return make_room
 

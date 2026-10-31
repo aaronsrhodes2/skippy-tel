@@ -86,7 +86,7 @@ def shapes(cues, step_ms: int = 60, cap: int = 249) -> str:
 
 
 class EsphomeLink:
-    hub_follows_up = False                                          # the box does it (continue_conversation)
+    hub_follows_up = True                                           # the hub keeps the conversation open (the box streams again after each answer), see Room.followup_ms
 
     def __init__(self, client, media, box_host: str, log=print, wait_cap: float = PLAY_TIMEOUT_S):
         from aioesphomeapi import VoiceAssistantEventType as E    # noqa: PLC0415
@@ -106,6 +106,8 @@ class EsphomeLink:
                 self.keys.setdefault("player", e.key)
             elif kind == "TextInfo" and "subtitle" in oid:
                 self.keys["subtitle"] = e.key
+            elif kind == "TextInfo" and "session" in oid:
+                self.keys["session"] = e.key
             elif kind == "TextInfo" and "mouth" in oid:
                 self.keys["mouth"] = e.key
             elif kind == "BinarySensorInfo" and oid.endswith("tap"):
@@ -179,6 +181,10 @@ class EsphomeLink:
             self._event(self.E.VOICE_ASSISTANT_RUN_END)
             self.run_live, self.stage = False, ""
 
+    def session(self, on: bool) -> None:
+        if "session" in self.keys:
+            self.client.text_command(self.keys["session"], "1" if on else "0")
+
     async def mouth(self, voice, said: str = "") -> None:
         """What the box's drawn face needs to talk: a mood letter, then one character per 60 ms for the mouth. Sent at once as loudness digits
         (ffmpeg, ~50 ms), then replaced by Rhubarb's mouth shapes when they are ready (a second or two later): the box reads them by elapsed time,
@@ -226,12 +232,12 @@ class EsphomeLink:
             return
         url = self.media.put_clip(voice, self.box_host) if voice else ""
         await self.mouth(voice, said)
-        self._event(self.E.VOICE_ASSISTANT_INTENT_END, {"conversation_id": "", "continue_conversation": "1" if follow_up else "0", "speech": said})
+        self._event(self.E.VOICE_ASSISTANT_INTENT_END, {"conversation_id": "", "continue_conversation": "0", "speech": said})
         self._event(self.E.VOICE_ASSISTANT_TTS_START, {"text": plain(said)})
         self._played.clear()
         if url:
             self._event(self.E.VOICE_ASSISTANT_TTS_END, {"url": url})
-        self._follow = follow_up and bool(url)
+        self._follow = False
         self._event(self.E.VOICE_ASSISTANT_RUN_END)
         self.run_live, self.stage = False, ""
         if url:
