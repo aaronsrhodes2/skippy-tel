@@ -321,3 +321,53 @@ def test_the_player_mixes_one_track_into_the_next_and_moves_the_queue_on(tmp_pat
         assert any("mixed into B" in str(m) for m in logs)
         await player.stop()
     asyncio.run(go())
+
+
+def test_walk_keeps_spotify_items_it_cannot_place():
+    lib = {f"t{i}": track(path=f"t{i}") for i in range(6)}
+    tracks = list(lib) + ["spotify:track:abc"]
+    assert sorted(dj.walk(tracks, lib.get)) == sorted(tracks)
+
+
+def test_spotify_taking_over_stops_the_chain_and_its_feeder():
+    import asyncio
+    import threading
+
+    class Play:
+        def __init__(self, src):
+            self.source, self.finished, self.gain = src, threading.Event(), 1.0
+
+    class Router:
+        sinks = {"hdmi": 1}
+
+        def __init__(self):
+            self.plays, self.stopped = [], []
+
+        def available(self, k): return True
+
+        def play(self, source, layer, targets, gain):
+            self.plays.append(Play(source))
+            return self.plays[-1]
+
+        def stop(self, p):
+            self.stopped.append(p)
+            p.source.close()
+            p.finished.set()
+
+    r = Router()
+    spot = type("S", (), {"play": lambda self, u, ms: None, "pause": lambda self: None})()
+    player = dj.DjPlayer(r, ["hdmi"], lib=dj.Library("nowhere", nml="", log=lambda m: None), log=lambda m: None, spotify=spot)
+    player._ensure_stream = lambda: None                       # no spotify container here
+    chain = dj.ChainSource()
+    p = r.play(chain, "media", {"hdmi"}, 1.0)
+    player.play_obj, player.chain = p, chain
+    gen = player.gen
+    player._adopt({"uri": "spotify:track:x", "title": "T", "artist": "A"})
+    assert p in r.stopped and player.chain is None and player.gen != gen
+
+    async def go():
+        player.play_obj, player.chain = r.play(dj.ChainSource(), "media", {"hdmi"}, 1.0), None
+        g = player.gen
+        await player.play_spotify("spotify:track:y")
+        assert player.gen != g and r.stopped[-1] is not p
+    asyncio.run(go())

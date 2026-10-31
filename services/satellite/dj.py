@@ -773,6 +773,12 @@ class DjPlayer(stereo.RouterPlayer):
         self.chain = None
         await super().play_spotify(uri, pos)
 
+    def _adopt(self, st: dict) -> None:
+        """A Spotify play started from his phone: RouterPlayer stops the chain (a plain cut); its feeder stops with it."""
+        self.gen += 1
+        self.chain = None
+        super()._adopt(st)
+
 class _Clip:
     """A rendered crossing (router.ClipSource without importing the router)."""
 
