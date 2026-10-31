@@ -79,3 +79,31 @@ def track(said: str, asked: str, seconds: float, cap: int = 248) -> str:
         out.append(code * n)
         t += n
     return "".join(out)[:cap]
+
+
+CODES = "nhelsqamdwbrvk"
+
+
+def codes_prompt(sentences: list[str], asked: str) -> str:
+    """What to ask a small model, cheaply: one letter of face per sentence of his reply (read in the background, so it never delays an answer)."""
+    listing = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(sentences))
+    return (f"The Captain said: {asked!r}\nSkippy, a sarcastic, vain, secretly fond AI beer can, answers in these sentences:\n{listing}\n\n"
+            "For each sentence give ONE letter for how his face should look while he says it: n neutral, h happy, e excited, l laughing, s surprised, q curious, a annoyed, "
+            "m smug or sarcastic, d sad, w worried, b bored, r embarrassed, v loving, k sick. Use a CAPITAL if the feeling is strong. Sarcasm is smug (m), a sigh is bored (b). "
+            "Reply with only the letters in order, no spaces, no words.")
+
+
+def parse_codes(text: str, n: int) -> str | None:
+    """The letters from a model's answer, if there are exactly n of them."""
+    letters = [c for c in (text or "") if c.lower() in CODES and c.isalpha()]
+    return "".join(letters) if len(letters) == n else None
+
+
+def track_from_codes(said: str, codes: str, seconds: float, cap: int = 248) -> str:
+    """Like track(), with the letters chosen by a model instead of by the word rules."""
+    sentences = split(said)
+    if not sentences or seconds <= 0 or len(codes) != len(sentences):
+        return ""
+    weights = [max(1, len(re.sub(r"\[^\]]*\]", "", t))) for t in sentences]
+    total = float(sum(weights))
+    return "".join(c * max(1, round(seconds * w / total / STEP_S)) for c, w in zip(codes, weights))[:cap]

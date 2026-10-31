@@ -412,7 +412,7 @@ def test_a_slow_answer_is_covered_by_a_prerecorded_quip_and_a_quick_command_is_n
     async def body(box, made, hub, log, start):
         await start()
         room = made["room"]
-        room.filler, room.filler_after_s = bank, 0.05
+        room.filler, room.filler_after_s = bank, 0.2
         said = []
 
         async def announce(text, voice):
@@ -425,4 +425,5 @@ def test_a_slow_answer_is_covered_by_a_prerecorded_quip_and_a_quick_command_is_n
         await room._cover_the_wait(asyncio.ensure_future(asyncio.sleep(0.3)), "turn the lights off")
         assert said == []
         assert bank.kind_for("recite a haiku to me") == "performance" and bank.kind_for("why is the sky blue") == "thinking"
+        assert bank.kind_for("how fast is light") == "science" and bank.kind_for("you are stupid") == "insult" and bank.kind_for("turn the lights off") == "home"
     run(body)

@@ -133,7 +133,6 @@ class EsphomeLink:
                     break
                 await asyncio.sleep(0.05)
         self._follow = False
-        self.log(f"[{self.room.name}] (the box started a turn, {'waiting for its name' if remote else 'listening'})")
         self.run_live, self.stage, self.vad_ended = True, "wake" if remote else "stt", False
         self._event(self.E.VOICE_ASSISTANT_RUN_START)
         self._event(self.E.VOICE_ASSISTANT_WAKE_WORD_START if remote else self.E.VOICE_ASSISTANT_STT_START)
@@ -141,32 +140,7 @@ class EsphomeLink:
         return 0                                                    # 0: the audio comes over the API connection itself
 
     async def handle_audio(self, data: bytes, data2: bytes | None = None) -> None:
-        import time                                                 # noqa: PLC0415
-        self._audio_bytes = getattr(self, "_audio_bytes", 0) + len(data)
-        import array                                                # noqa: PLC0415
-        pk = max((abs(v) for v in array.array("h", data[:len(data) // 2 * 2])), default=0)
-        self._audio_peak = max(getattr(self, "_audio_peak", 0), pk)
-        now = time.time()
-        if now - getattr(self, "_audio_t", 0) > 30:                 # a heartbeat: is the box's microphone reaching the hub?
-            self.log(f"[{self.room.name}] (hearing {self._audio_bytes / 1024:.0f} kB of audio in the last 30 s; loudest sound {self._audio_peak} of 32768)")
-            self._audio_peak = 0
-            self._audio_bytes, self._audio_t = 0, now
-            try:
-                self.dump_mic(Path(__file__).resolve().parents[2] / "state" / "mic-debug.wav")
-            except Exception:                                       # noqa: BLE001
-                pass
-        from collections import deque                                # noqa: PLC0415
-        if not hasattr(self, "_ring"):
-            self._ring = deque(maxlen=60)                           # about 20 s of the box's microphone, kept for diagnosis (state/mic-debug.wav)
-        self._ring.append(data)
         self.room.feed_pcm(data)
-
-    def dump_mic(self, path) -> int:
-        import wave                                                  # noqa: PLC0415
-        raw = b"".join(getattr(self, "_ring", []))
-        with wave.open(str(path), "wb") as w:
-            w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(raw)
-        return len(raw)
 
     async def handle_stop(self, abort: bool) -> None:
         self.room.stream_ended()
@@ -269,6 +243,8 @@ class EsphomeLink:
                 self.client.text_command(self.keys["emote"], etext)
             for other in self.others():                             # every other pod does the same, silently, at the same moment
                 self._spawn_mirror(other.mirror(text, etext, len(pcm) / 32000.0))
+            if "emote" in self.keys:                                # and a small model reads the sarcasm a second later (replaces the word rules; costs no waiting)
+                self._spawn_mirror(self._model_emotion(said, len(pcm) / 32000.0))
         except Exception as e:                                      # noqa: BLE001 — the mouth just babbles
             self.log(f"[{self.room.name}] (mouth envelope: {type(e).__name__})")
             return
@@ -281,6 +257,26 @@ class EsphomeLink:
         task = asyncio.create_task(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+
+    async def _model_emotion(self, said: str, seconds: float) -> None:
+        brain = getattr(self.room, "brain", None)
+        sentences = emotion.split(plain(said))
+        if brain is None or not hasattr(brain, "client") or not sentences or len(sentences) > 14:
+            return
+        try:
+            def ask():
+                return brain.client.messages.create(model=brain.model, max_tokens=40, temperature=0, messages=[{"role": "user", "content": emotion.codes_prompt(sentences, self.asked)}])
+            resp = await asyncio.wait_for(asyncio.to_thread(ask), 8)
+            codes = emotion.parse_codes("".join(getattr(b, "text", "") for b in resp.content), len(sentences))
+            if codes is None:
+                return
+            etext = emotion.reaction(self.asked) + "|" + emotion.track_from_codes(plain(said), codes, seconds)
+            self.client.text_command(self.keys["emote"], etext)
+            for other in self.others():
+                if "emote" in other.keys:
+                    other.client.text_command(other.keys["emote"], etext)
+        except Exception as e:                                      # noqa: BLE001 — the word rules stay
+            self.log(f"[{self.room.name}] (emotion model: {type(e).__name__})")
 
     async def _rhubarb(self, voice, mood: str) -> None:
         import tempfile                                             # noqa: PLC0415

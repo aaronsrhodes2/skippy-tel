@@ -44,7 +44,7 @@ def test_one_word_wakes_it_once_then_it_is_deaf_for_a_moment():
 
 def test_the_model_lives_in_the_git_ignored_state_folder_unless_told_otherwise():
     assert default_model({}).as_posix().endswith("state/wakeword/skippy.onnx")
-    assert str(default_model({"SATELLITE_WAKE_MODEL": "/x/y.onnx"})) == "/x/y.onnx"
+    assert default_model({"SATELLITE_WAKE_MODEL": "/x/y.onnx"}).as_posix() == "/x/y.onnx"      # (as_posix: Windows writes the path with backslashes)
 
 
 def test_loading_a_model_that_is_not_there_says_where_to_get_one(tmp_path):
