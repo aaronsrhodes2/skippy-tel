@@ -1087,7 +1087,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @listen.get("")
     @auth.portal_required("audio")
     def player_page():
-        return render_template("music.html", rooms=player_mod.ROOMS)
+        return render_template("music.html", rooms=player_mod.ROOMS,
+                               fav_url=url_for("music.favorites_add") if auth.is_admin(me()) else "")   # the favorite key: the Captain's list only
 
     @listen.get("/manifest.webmanifest")
     def player_manifest():

@@ -27,7 +27,7 @@
     get(k, d) { try { const v = localStorage.getItem("music." + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem("music." + k, JSON.stringify(v)); } catch (e) { /* full or blocked: carry on without */ } },
   };
-  const cfg = { gate: root.dataset.gateUrl, checkin: root.dataset.checkinUrl, command: root.dataset.commandUrl };
+  const cfg = { gate: root.dataset.gateUrl, checkin: root.dataset.checkinUrl, command: root.dataset.commandUrl, fav: root.dataset.favUrl || "" };
   const env = C.detectEnv(navigator.userAgent, navigator.platform, navigator.maxTouchPoints);
   const coarse = window.matchMedia && matchMedia("(pointer: coarse)").matches;
   root.classList.toggle("coarse", !!coarse);
@@ -769,12 +769,14 @@
       <input type="range" class="rg vol" data-vol min="0" max="100" step="1" value="100" aria-label="Volume"></div>
     <button type="button" class="key" data-act="sleep" aria-label="Sleep timer" title="Sleep timer"><i data-i="sleep"></i><sup data-bind="sleep"></sup></button>
     <button type="button" class="key" data-act="devices" aria-label="Other devices" title="Other devices (Connect)"><i data-i="devices"></i><sup data-bind="dev"></sup></button>
+    <button type="button" class="key" data-act="fav" data-fav-only hidden aria-label="Add to favorites" title="Add this song to your favorites (F)"><i data-i="star"></i></button>
     <button type="button" class="key" data-act="shield" aria-pressed="true" aria-label="Signal shield" title="Signal shield: keep the next 20 minutes of songs in memory so the music rides through a dead zone"><i data-i="shield"></i></button>`;
   function buildSlots() {
     for (const s of $$('[data-slot="tp"]')) s.innerHTML = TP;
     for (const s of $$('[data-slot="sk"]')) s.innerHTML = SK;
     for (const s of $$('[data-slot="right"]')) s.innerHTML = RIGHT;
     fillIcons();
+    for (const b of $$("[data-fav-only]")) b.hidden = !cfg.fav;
     els.play = $$('[data-act="play"]'); els.seek = $$("[data-seek]"); els.cur = $$('[data-bind="cur"]'); els.rem = $$('[data-bind="rem"]');
     els.vol = $$("[data-vol]"); els.shuffle = $$('[data-act="shuffle"]'); els.repeat = $$('[data-act="repeat"]');
     els.dj = $$('[data-act="dj"]'); els.mute = $$('[data-act="mute"]'); els.sleep = $$('[data-bind="sleep"]'); els.devices = $$('[data-bind="dev"]'); els.shield = $$('[data-act="shield"]');
@@ -1804,12 +1806,25 @@
       case "ArrowDown": if (onRange) return; e.preventDefault(); actions.volBy(-0.05); break;
       case "PageDown": case "PageUp": { e.preventDefault(); const L = S.sheet && S.tab === "queue" ? qList : list; L.go(L.page + (e.key === "PageDown" ? 1 : -1)); break; }
       case "m": case "M": e.preventDefault(); actions.mute(); break;
+      case "f": case "F": if (cfg.fav) { e.preventDefault(); favorite(); } break;
       case "s": case "S": e.preventDefault(); actions.shuffle(); break;
       case "r": case "R": e.preventDefault(); actions.repeat(); break;
       case "/": e.preventDefault(); if (e.shiftKey) openKeys(); else { $("#q").focus(); $("#q").select(); } break;     // Shift+/ is "?" on a US keyboard
       case "?": e.preventDefault(); openKeys(); break;
     }
   });
+  // ★ the song playing here goes on the Captain's favorites list, for DJing later (portal/favorites.py; the key shows for him only)
+  async function favorite() {
+    const t = curTrack();
+    if (!cfg.fav || !t) return;
+    try {
+      const r = await fetch(cfg.fav, { method: "POST", headers: { "Content-Type": "application/json" },
+                                       body: JSON.stringify({ track: t.p, title: t.t, artist: t.a || "", name: "this browser" }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || r.status);
+      toast((d.favorite && d.favorite.count > 1 ? "Already a favorite: back at the top · " : "Added to favorites · ") + (t.t || "this song"), { ms: 2200 });
+    } catch (e) { toast("Couldn't add it to favorites (" + e.message + ")", { ms: 2600 }); }
+  }
   function openKeys() { const d = $("#keys"); if (d.showModal) { if (!d.open) d.showModal(); } else d.setAttribute("open", ""); }
 
   root.addEventListener("click", ev => {
@@ -1843,6 +1858,7 @@
         if (S.shield) prefetchSoon(); else for (const [, ac] of fetching) ac.abort();
         toast(S.shield ? "Signal shield on: the next songs are kept ready" : "Signal shield off", { ms: 1800 });
         break;
+      case "fav": favorite(); break;
       case "back": goBack(); break;
       case "clear-search": clearSearch(); $("#q").focus(); break;
       case "clear-queue": if (S.q.cur && S.q.length - S.q.qi - 1 > 0) { const n = S.q.length - S.q.qi - 1; S.q.clearUpcoming(); onQueueChanged(); toast(`Cleared ${n.toLocaleString()} from the queue`); } break;

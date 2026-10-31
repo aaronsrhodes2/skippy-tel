@@ -21,7 +21,7 @@
    The three URLs below are the only things the page needs from this template. #}
 <section id="bp" class="bp" data-state="boot" data-playing="0" data-sheet=""
          data-gate-url="{{ url_for('music.player_gate') }}" data-checkin-url="{{ url_for('music.player_checkin') }}"
-         data-command-url="{{ url_for('music.player_command') }}" data-rooms='{{ rooms|tojson }}' aria-label="Bilby's Audio Service">
+         data-command-url="{{ url_for('music.player_command') }}" data-rooms='{{ rooms|tojson }}'{% if fav_url %} data-fav-url="{{ fav_url }}"{% endif %} aria-label="Bilby's Audio Service">
   <noscript><p class="warn" style="margin:12px">Bilby's Audio Service needs JavaScript.</p></noscript>
 
   {# The browser only lets a page make sound after a tap on it. After a reload (or a remote Play from another device) this is
@@ -147,6 +147,7 @@
       <dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Volume up / down</dd>
       <dt><kbd>PgUp</kbd> <kbd>PgDn</kbd></dt><dd>Previous / next page of the list</dd>
       <dt><kbd>M</kbd></dt><dd>Mute</dd>
+      {% if fav_url %}<dt><kbd>F</kbd></dt><dd>Add this song to your favorites</dd>{% endif %}
       <dt><kbd>S</kbd></dt><dd>Shuffle</dd>
       <dt><kbd>R</kbd></dt><dd>Repeat: off, all, one</dd>
       <dt><kbd>/</kbd></dt><dd>Search</dd>

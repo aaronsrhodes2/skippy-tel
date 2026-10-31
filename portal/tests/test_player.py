@@ -428,7 +428,8 @@ def test_the_player_never_tells_the_portal_what_is_playing_except_through_connec
     js = (STATIC / "bilby-app.js").read_text(encoding="utf-8")
     assert "sendBeacon" not in js and "/telemetry" not in js and "data-tel" not in js
     posts = re.findall(r"(?:fetch|post)\((cfg\.\w+|url)", js)
-    assert set(posts) <= {"cfg.checkin", "cfg.command", "cfg.gate", "url"}, posts
+    # cfg.fav: the Captain's own ★ tap sends the one song he chose to his favorites list (never automatic; the key shows for him alone)
+    assert set(posts) <= {"cfg.checkin", "cfg.command", "cfg.gate", "cfg.fav", "url"}, posts
 
 
 # ── the speakers on skippy-pc: two browser windows, each pinned to one audio output ─────────────────────────────────────
@@ -531,3 +532,14 @@ def test_favorites_are_marked_from_a_pod_or_purple_and_from_the_player_and_playe
     assert client.get("/music/favorites").get_json()["favorites"][0]["title"] == "Porcelain"
     m3u = client.get("/music/favorites.m3u")
     assert m3u.status_code == 200 and b"Moby/Play/03 Porcelain.mp3" in m3u.data
+
+
+def test_the_favorite_key_is_the_captains_alone(client):
+    """The ★ key in the player marks the song playing in that browser (portal/favorites.py); a friend with the audio grant never sees it."""
+    login(client, ADMIN)
+    page = client.get("/music").get_data(as_text=True)
+    assert 'data-fav-url="/music/favorites"' in page and "Add this song to your favorites" in page
+    js = (STATIC / "bilby-app.js").read_text(encoding="utf-8")
+    assert 'data-act="fav" data-fav-only hidden' in js and 'case "fav": favorite(); break;' in js and "b.hidden = !cfg.fav" in js
+    got = client.post("/music/favorites", json={"track": "Moby/Play/03 Porcelain.mp3", "title": "Porcelain", "artist": "Moby"}).get_json()
+    assert got["favorite"]["title"] == "Porcelain"
