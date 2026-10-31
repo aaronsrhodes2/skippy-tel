@@ -26,3 +26,7 @@ WORKDIR /work
 
 # datasets 2.14.6 needs the pyarrow of its day (PyExtensionType is gone from newer ones)
 RUN pip install --no-cache-dir "pyarrow==14.0.2"
+
+# The trainer validates false positives by building every sliding window of the 11.3 h validation set in RAM (~6 GB) and running them as ONE batch, first at
+# 75% of the steps: that killed the container (and Docker's VM) three times. skippy.yml points at a quarter of the set (slice_features.py), so the hours shrink too.
+RUN sed -i 's/val_set_hrs = 11.3/val_set_hrs = 2.825/; s/val_set_hrs=11.3/val_set_hrs=2.825/' /opt/openwakeword/openwakeword/train.py  && grep -c "2.825" /opt/openwakeword/openwakeword/train.py

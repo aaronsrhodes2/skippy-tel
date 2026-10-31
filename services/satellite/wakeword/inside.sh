@@ -6,6 +6,7 @@ TRAIN=/opt/openwakeword/openwakeword/train.py
 python -c "import openwakeword.utils as u; u.download_models(model_names=['__features_only__'])"   # the shared melspectrogram + embedding models
 python /kit/data.py
 python /kit/slice_features.py /work/data/openwakeword_features_ACAV100M_2000_hrs_16bit.npy /fast/acav_quarter.npy 0.25   # see slice_features.py: the full file starves the Docker VM
+python /kit/slice_features.py /work/data/validation_set_features.npy /fast/validation_quarter.npy 0.25   # and the trainer's false-positive validation (Dockerfile: 2.825 h)
 python "$TRAIN" --training_config /kit/skippy.yml --generate_clips
 
 # The Captain's own voice through the pod (wakerec.py), mixed in with the 50,000 synthetic voices: each real clip 20 times at x2..x5 (the hub gains the pod's
