@@ -99,10 +99,12 @@ def test_the_tesla_stack_joins_only_when_core_env_says_so(tmp_path, monkeypatch)
 
 def test_the_tesla_compose_file_is_pinned_and_keeps_its_doors_local():
     text = (CORE / "compose.tesla.yml").read_text(encoding="utf-8")
-    for image in ("teslamate/teslamate:4.4.0@sha256:", "postgres:17.6@sha256:", "eclipse-mosquitto:2.0.22@sha256:"):
+    for image in ("teslamate/teslamate:4.4.0@sha256:", "postgres:17.6@sha256:", "eclipse-mosquitto:2.0.22@sha256:",
+                  "tesla/fleet-telemetry:v0.9.5@sha256:"):
         assert image in text
     ports = [line.strip() for line in text.splitlines() if line.strip().startswith('- "') and ":" in line and "/" not in line]
-    assert ports == ['- "127.0.0.1:4000:4000"', '- "127.0.0.1:7351:7351"']   # nothing on the LAN; mosquitto and Postgres not at all
+    assert ports == ['- "127.0.0.1:4000:4000"', '- "127.0.0.1:7351:7351"',   # nothing on the LAN; mosquitto and Postgres not at all
+                     '- "127.0.0.1:7443:7443"', '- "127.0.0.1:7353:7353"']   # the car's streaming door reaches the world only through the Funnel
     assert "${CORE_STATE:-/var/lib/skippy-core}/tesla/db:" in text            # the history is kept with CORE_STATE
     assert "/etc/skippy-core/tesla.env" in text and "ENCRYPTION_KEY=" not in text   # secrets live on the box, never here
 

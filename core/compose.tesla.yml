@@ -11,6 +11,7 @@
 #   mosquitto  the MQTT broker between TeslaMate and the car reader; no published port.
 #   car        core/car: the latest state as JSON on 7351 (tailnet only, like :4000) for skippy-pc's reporter, so the portal and the
 #              chat never wake the car.
+#   fleet-telemetry, car-fleet   the car as a guard: Sentry's state streamed live, and the alarm answered (below).
 x-logging: &tesla-logging
   driver: json-file
   options:
@@ -93,3 +94,43 @@ services:
       - TESLA_KEY_FILE=/keys/private.pem
     volumes:
       - /etc/skippy-core/tesla-ble/private.pem:/keys/private.pem:ro
+
+  # The car as a guard (2026-10-31, docs/tesla.md → Sentry): the car streams its Sentry state to fleet-telemetry (Tesla's own server,
+  # pinned), reached from anywhere through a Tailscale Funnel TCP door (:10000, raw TCP: the car's mutual TLS ends here, never at the
+  # Funnel). It publishes to the broker; car-fleet (core/car-fleet) listens, keeps the events for skippy-pc's reporter, and on the alarm
+  # flashes the lights and locks the doors through Tesla's signing proxy. The app's key and his tokens are /etc/skippy-core/tesla-fleet.
+  fleet-telemetry:
+    image: tesla/fleet-telemetry:v0.9.5@sha256:7cb5f429210128b8edc5aac1e403589315893106f4c5a3ff85cb32213e2f8e37
+    restart: unless-stopped
+    logging: *tesla-logging
+    command: ["/fleet-telemetry", "-config=/etc/fleet-telemetry/config.json"]
+    user: "0:0"                                  # reads the root-only server key; no capabilities beyond that
+    cap_drop:
+      - all
+    environment:
+      - SUPPRESS_TLS_HANDSHAKE_ERROR_LOGGING=true   # the Funnel is public: strangers' knocks aren't news
+    ports:
+      - "127.0.0.1:7443:7443"
+    volumes:
+      - ./car-fleet/telemetry.json:/etc/fleet-telemetry/config.json:ro
+      - /etc/skippy-core/tesla-fleet/telemetry:/certs:ro
+    depends_on:
+      - mosquitto
+
+  car-fleet:
+    build: ./car-fleet
+    restart: unless-stopped
+    logging: *tesla-logging
+    env_file:
+      - path: ${TESLA_BLE_ENV:-/etc/skippy-core/tesla-ble/vin.env}     # TESLA_VIN
+        required: false
+      - path: /etc/skippy-core/tesla-fleet/telemetry/host.env          # TELEMETRY_HOST (install/tesla.sh)
+        required: false
+    environment:
+      - MQTT_HOST=mosquitto
+    ports:
+      - "127.0.0.1:7353:7353"
+    volumes:
+      - /etc/skippy-core/tesla-fleet:/keys        # read-write: the tokens are refreshed in place
+    depends_on:
+      - mosquitto

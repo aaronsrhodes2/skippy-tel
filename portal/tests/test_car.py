@@ -118,3 +118,29 @@ def test_the_oauth_callback_never_shows_the_code(env):
     assert got.status_code == 200 and b"SECRET-ONE-TIME-CODE" not in got.data and b"Tesla said yes" in got.data
     assert got.headers["Cache-Control"] == "no-store" and got.headers["Referrer-Policy"] == "no-referrer"
     assert b"Tesla said no" in client.get("/car/oauth/callback?error=access_denied").data
+
+
+def test_sentry_live_state_wins_over_teslamates_switch():
+    cap = {**SIGNED_IN, "sentry": {"state": "panic", "events": []}}
+    u = {x["key"]: x for x in car_web.view(cap, online=True)["units"]}
+    assert u["sentry"]["text"] == "alarm" and u["sentry"]["lamp"] == "warn"
+    cap["sentry"]["state"] = "armed"
+    assert {x["key"]: x for x in car_web.view(cap, online=True)["units"]}["sentry"]["text"] == "sentry on"
+    assert {x["key"]: x for x in car_web.view(SIGNED_IN, online=True)["units"]}["sentry"]["text"] == "sentry off"
+
+
+def test_each_sentry_event_is_one_dm_and_old_ones_are_history():
+    now = 10_000.0
+    cap = {"sentry": {"events": [{"id": "a", "at": now - 30, "state": "aware", "said": "someone came close"},
+                                 {"id": "b", "at": now - 5, "state": "panic", "said": "someone touched the car; lights flashed, doors locked"},
+                                 {"id": "old", "at": now - 4000, "state": "panic", "said": "x"}]}}
+    told = set()
+    lines = car_web.sentry_news(cap, told, now, "T3-P0")
+    assert len(lines) == 2 and lines[0].startswith("Sentry: T3-P0: someone came close") and lines[1].startswith("ALARM: T3-P0")
+    assert car_web.sentry_news(cap, told, now + 15, "T3-P0") == []          # the next report carries them again: told already
+    assert car_web.sentry_news(None, told, now) == []
+
+
+def test_skippy_hears_sentrys_latest():
+    s = car_web.summary({**SIGNED_IN, "sentry": {"state": "aware", "events": [{"id": "a", "at": 1, "state": "aware", "said": "near"}]}})
+    assert s["sentry_now"] == "aware" and s["sentry_events"] == [{"at": 1, "state": "aware", "said": "near"}]

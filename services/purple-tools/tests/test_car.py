@@ -38,3 +38,16 @@ def test_a_refusal_or_an_unknown_action_is_an_error_in_words():
         tools.car_charge({"action": "unlock"})
     text, err = tools.call("car_charge", {"action": "honk"})
     assert err and "start, stop, limit or status" in text
+
+
+def test_car_sentry_arms_through_the_guard_and_says_what_it_saw():
+    sent = []
+    view = {"state": "armed", "events": [{"at": 1_700_000_000, "said": "someone came close"}], "telemetry": {"heard_s": 4}}
+    out = tools.car_sentry({"action": "arm"}, post=lambda url, body, timeout=0: sent.append((url, body)) or {"ok": True, "said": "Sentry Mode on"},
+                           get=lambda url, t=0: view)
+    assert sent == [(f"{tools.CAR_FLEET_URL}/sentry", {"action": "arm"})]
+    assert out.startswith("Sentry Mode on. Sentry is armed") and "someone came close" in out
+    assert "hasn't streamed" in tools.car_sentry({"action": "status"}, post=lambda *a, **k: pytest.fail("status must not send"),
+                                                 get=lambda url, t=0: {"state": "unknown", "events": [], "telemetry": {}})
+    with pytest.raises(ValueError):
+        tools.car_sentry({"action": "honk"})

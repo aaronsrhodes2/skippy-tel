@@ -15,6 +15,7 @@ Tesla's Fleet API, saved for later (docs/tesla.md). Location is his alone: no gr
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from flask import Blueprint, abort, jsonify, render_template, request
@@ -82,11 +83,42 @@ def view(capability: dict | None, online: bool) -> dict:
          "lamp": "on" if car.get("is_climate_on") else ""},
         {"key": "where", "glyph": "globe", "label": "Where", "text": str(car.get("geofence") or ("driving" if car.get("shift_state") in ("D", "R") else "away")),
          "lamp": ""},
-        {"key": "sentry", "glyph": "eye", "label": "Sentry mode", "text": "sentry on" if car.get("sentry_mode") else "sentry off",
-         "lamp": "on" if car.get("sentry_mode") else ""},
+        sentry_unit(car, cap.get("sentry")),
     ]
     return {"state": "ok", "name": str(car.get("name") or "Car"), "updated_s": _num(car.get("updated_s")),
             "version": car.get("version"), "update": bool(car.get("update_available")), "units": units}
+
+
+SENTRY_WORDS = {"aware": "someone near", "panic": "alarm", "armed": "sentry on", "quiet": "sentry on", "idle": "sentry off", "off": "sentry off"}
+NEWS_S = 600                 # an event older than this when the portal first sees it (a restart, a silent home) is history, not news
+
+
+def sentry_unit(car: dict, sentry: dict | None) -> dict:
+    """Sentry's live state when the car streams it (core/car-fleet: someone near, the alarm), else TeslaMate's on/off."""
+    state = str((sentry or {}).get("state") or "")
+    if state in SENTRY_WORDS:
+        return {"key": "sentry", "glyph": "eye", "label": "Sentry mode", "text": SENTRY_WORDS[state],
+                "lamp": "warn" if state in ("aware", "panic") else ("on" if state in ("armed", "quiet") else "")}
+    return {"key": "sentry", "glyph": "eye", "label": "Sentry mode", "text": "sentry on" if car.get("sentry_mode") else "sentry off",
+            "lamp": "on" if car.get("sentry_mode") else ""}
+
+
+def sentry_news(capability: dict | None, told: set, now: float, name: str = "the car") -> list[str]:
+    """The guard's events the Captain hasn't been told about yet, as DM lines (each event once; `told` is kept by the caller)."""
+    out = []
+    for e in ((capability or {}).get("sentry") or {}).get("events") or []:
+        eid = str(e.get("id") or "") if isinstance(e, dict) else ""
+        if not eid or eid in told:
+            continue
+        told.add(eid)
+        at = _num(e.get("at"))
+        if at is None or now - at > NEWS_S or e.get("state") not in ("aware", "panic"):
+            continue
+        head = "ALARM: " if e["state"] == "panic" else "Sentry: "
+        out.append(f"{head}{name}: {e.get('said') or e['state']} ({time.strftime('%H:%M', time.localtime(at))}).")
+    if len(told) > 500:
+        told.clear()
+    return out
 
 
 def summary(capability: dict | None) -> dict | None:
@@ -107,6 +139,10 @@ def summary(capability: dict | None) -> dict | None:
             out[k + "_f"] = round(car[k] * 9 / 5 + 32)
     if _num(car.get("odometer")) is not None:
         out["odometer_mi"] = round(car["odometer"] * KM_TO_MI)
+    sentry = (capability or {}).get("sentry")
+    if isinstance(sentry, dict):
+        out["sentry_now"] = sentry.get("state")
+        out["sentry_events"] = [{k: e.get(k) for k in ("at", "state", "said")} for e in (sentry.get("events") or [])[-5:] if isinstance(e, dict)]
     return out
 
 

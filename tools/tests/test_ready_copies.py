@@ -9,7 +9,8 @@ COPIES = (("mentat", "mentat/Dockerfile"), ("services/flask-api/app", "services/
           ("services/music-gate", "services/music-gate/Dockerfile"), ("services/video-gate", "services/video-gate/Dockerfile"), ("services/audiobook-gate", "services/audiobook-gate/Dockerfile"),
           ("services/voice-gate", "services/voice-gate/Dockerfile"),
           ("services/popup-gate", "services/popup-gate/Dockerfile"), ("services/tts-studio", "services/tts-studio/Dockerfile"),
-          ("core/car", "core/car/Dockerfile"), ("core/car-ble", "core/car-ble/Dockerfile"))
+          ("core/car", "core/car/Dockerfile"), ("core/car-ble", "core/car-ble/Dockerfile"),
+          ("core/car-fleet", "core/car-fleet/Dockerfile"))
 
 
 def _text(path: Path) -> bytes:

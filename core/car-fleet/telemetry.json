@@ -1,0 +1,12 @@
+{
+  "host": "0.0.0.0",
+  "port": 7443,
+  "log_level": "info",
+  "json_log_enable": true,
+  "namespace": "tesla",
+  "reliable_ack": false,
+  "rate_limit": {"enabled": true, "message_interval_time": 30, "message_limit": 1000},
+  "records": {"V": ["mqtt"], "connectivity": ["mqtt"], "alerts": ["logger"], "errors": ["logger"]},
+  "mqtt": {"broker": "mosquitto:1883", "client_id": "fleet-telemetry", "topic_base": "telemetry", "qos": 1, "retained": true},
+  "tls": {"server_cert": "/certs/server.pem", "server_key": "/certs/server.key"}
+}

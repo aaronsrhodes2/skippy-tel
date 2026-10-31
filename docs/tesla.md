@@ -52,6 +52,35 @@ purple Skippy ── car_charge (services/purple-tools) ── :7352 car-ble (co
 - **purple Skippy's `car_charge`**: start, stop, limit, status; after a command it reads the state back from the car reader.
 - Out of Bluetooth range (away from home) it can't reach the car: that is what the Fleet API below would add.
 
+## The car as a guard: Sentry, live (2026-10-31)
+
+The Captain: "operate my car as an external security device". When someone comes near the parked car, or touches it, he hears about it at
+once, and the car answers the alarm itself.
+
+```
+car ──(its own mutual TLS, from anywhere)── Funnel :10000 (raw TCP) ── fleet-telemetry (:7443) ── MQTT ── car-fleet (:7353) ── reporter ── portal
+                                                                                                    │                          (DM, Car tile)
+                                                                         tesla-http-proxy ◄─────────┘ on the alarm: flash the lights, lock
+```
+
+- **What the car streams:** only `SentryMode` (Tesla's states: off, idle, armed, **aware** = someone came close and the cameras are
+  recording, **panic** = a threat, touched or leaned on, the car's own alarm, quiet). Every streamed signal is billed; this one changes rarely.
+- **fleet-telemetry** (Tesla's server, pinned v0.9.5, `core/car-fleet/telemetry.json`) on 127.0.0.1:7443, reached through the Funnel's raw TCP
+  door :10000, so the car's mutual TLS ends at Tesla's own server. Its certificate is ours (`/etc/skippy-core/tesla-fleet/telemetry/`:
+  a CA made by `tesla.sh --apply`, the CA goes to the car in the signed config).
+- **car-fleet** (`core/car-fleet/fleet.py`): keeps the state and the last 20 AWARE / PANIC events; on PANIC it flashes the lights and locks the
+  doors, at most once a minute (**never the horn**: the Captain). Commands are signed by Tesla's tesla-http-proxy (built pinned into the image)
+  with the app's key; his tokens (`tokens.json`, from `tools/tesla_fleet.py exchange`) are refreshed in place.
+  `POST /sentry arm|disarm` (wakes the car once), `POST /command flash|lock` (to test), `POST /telemetry push|status`.
+- **The Captain hears it:** the reporter carries the events (`CAR_FLEET_URL`), the portal DMs him on Discord once per event
+  (`car_web.sentry_news`; "ALARM:" for panic), the Car tile's Sentry control says "someone near" / "alarm", `car_status` includes them, and
+  purple Skippy's `car_sentry` arms, disarms and reports.
+- **What Tesla doesn't allow any app:** the cameras' pictures (Sentry's clips stay on the car's USB drive) and the cabin lights. The alarm's
+  own flashing, sound and screen warning are the car's.
+- **Set up, once:** the virtual key on the car (`https://tesla.com/_ak/makerportal.live`, then approve on the car's screen), then
+  `curl -s -X POST http://skippy-core:7353/telemetry -d '{"action":"push"}'` and wait for `status` to say `synced`. car-fleet pushes it again
+  before it runs out (Tesla caps a config at a year).
+
 ## Phase 2, saved for later: control from anywhere (Tesla's Fleet API)
 
 Commands (climate, locks, charge limit, frunk, horn, **media next/previous**) are signed commands through the Fleet API:

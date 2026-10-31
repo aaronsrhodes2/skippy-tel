@@ -129,11 +129,27 @@ def exchange(v: dict, callback: str) -> int:
 
 
 def user_token() -> str:
+    """His access token, refreshed first when it has under 5 minutes left (Tesla's last about 8 hours; a refresh needs only the
+    client id and the refresh token, and Tesla hands back a new refresh token each time, so the file is rewritten)."""
     import subprocess
+    import time
     r = subprocess.run(["ssh", "skippy-core", f"sudo cat {TOKENS}"], capture_output=True)
     if r.returncode:
         sys.exit("no tokens on skippy-core yet: login-url, then exchange")
-    return json.loads(r.stdout)["access_token"]
+    keep = json.loads(r.stdout)
+    if int(keep.get("expires_at") or 0) - time.time() > 300:
+        return keep["access_token"]
+    code, got = call("POST", AUTH, form={"grant_type": "refresh_token", "client_id": keep["client_id"],
+                                         "refresh_token": keep["refresh_token"]})
+    if code != 200 or not got.get("access_token"):
+        sys.exit(f"token refresh refused: HTTP {code} {got.get('error')} (sign in again: login-url, then exchange)")
+    keep.update({k: got[k] for k in ("access_token", "refresh_token", "id_token") if got.get(k)})
+    keep["expires_at"] = int(time.time()) + int(got.get("expires_in") or 0)
+    w = subprocess.run(["ssh", "skippy-core", f"sudo sh -c 'umask 077; cat > {TOKENS}.new && mv {TOKENS}.new {TOKENS}'"],
+                       input=json.dumps(keep).encode(), capture_output=True)
+    if w.returncode:
+        sys.exit(f"refreshed, but couldn't store the new tokens on skippy-core: {w.stderr.decode()[-300:]}")
+    return keep["access_token"]
 
 
 def main() -> int:

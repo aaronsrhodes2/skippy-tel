@@ -71,7 +71,9 @@ POPUP_GATE_PUBLIC = os.environ.get("POPUP_GATE_PUBLIC", "").rstrip("/")   # ... 
 POPUP_INPUTS = os.environ.get("POPUP_INPUTS_DIR", "/popup-inputs")    # where it keeps them (mounted read-only here)
 POPUP_INPUT_MAX = 64 * 1024 * 1024   # the biggest file a pop-up job may carry (popup-gate MAX_BYTES, portal/popups.py MAX_INPUT_MB)   # ... and its Funnel address (outside, :10000)
 CAR = os.environ.get("CAR_URL", "").rstrip("/")               # the Captain's Tesla: skippy-core's car reader (core/car), tailnet only
+CAR_FLEET = os.environ.get("CAR_FLEET_URL", "").rstrip("/")   # the car as a guard (core/car-fleet): Sentry's state and events, tailnet only
 CAR_MAX = 3                  # cars carried in one report
+SENTRY_EVENTS = 10           # the guard's latest events carried in one report
 BRIDGE = os.environ.get("CLAUDE_BRIDGE_URL", "").rstrip("/")   # Claude Code's bridge on the host: the private Skippy
 LOCAL = localinfo.LocalInfo(os.environ)                           # weather and the commute for the /me dashboard (LOCAL_INFO=off in tests: no network)
 WORKSHOP_WAIT = 5            # seconds the bridge holds a request open waiting for news from the run
@@ -466,8 +468,24 @@ def car_capability() -> dict:
     if not isinstance(body, dict):
         return {"ready": False}
     cars = [c for c in body.get("cars") or [] if isinstance(c, dict)][:CAR_MAX]
-    return {"ready": bool(body.get("mqtt")) and bool(cars), "mqtt": bool(body.get("mqtt")), "cars": cars,
-            "sign_in": str(body.get("sign_in") or "")[:200]}
+    out = {"ready": bool(body.get("mqtt")) and bool(cars), "mqtt": bool(body.get("mqtt")), "cars": cars,
+           "sign_in": str(body.get("sign_in") or "")[:200]}
+    sentry = sentry_of(fetch(f"{CAR_FLEET}/sentry") if CAR_FLEET else None)
+    if sentry:
+        out["sentry"] = sentry
+    return out
+
+
+def sentry_of(body) -> dict | None:
+    """The guard's view (Sentry's live state and its latest AWARE / PANIC events), trimmed for the report; the portal DMs the Captain
+    once per event."""
+    if not isinstance(body, dict):
+        return None
+    events = [{"id": str(e.get("id"))[:40], "at": e.get("at"), "state": str(e.get("state"))[:12], "said": str(e.get("said") or "")[:240]}
+              for e in (body.get("events") or [])[-SENTRY_EVENTS:] if isinstance(e, dict) and e.get("id")]
+    tele = body.get("telemetry") if isinstance(body.get("telemetry"), dict) else {}
+    return {"state": str(body.get("state") or "unknown")[:12], "since": body.get("since"), "events": events,
+            "heard_s": tele.get("heard_s"), "online": tele.get("online")}
 
 
 def popup_gate_capability() -> dict:

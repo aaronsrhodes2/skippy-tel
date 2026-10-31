@@ -53,6 +53,19 @@
    "the Car tile and Skippy's car_status (through the reader)"
   ]
  },
+ "fleet-telemetry": {
+  "for": "Tesla's own Fleet Telemetry server: the car streams its Sentry state here from anywhere, through the Funnel's raw TCP door (port 10000), and it passes each value to the broker.",
+  "used_by": [
+   "the guard (car-fleet, through the broker)"
+  ]
+ },
+ "car-fleet": {
+  "for": "The car as a guard: keeps Sentry's alerts (someone near, the alarm), answers the alarm by flashing the lights and locking, and signs Fleet API commands with the app's key. Tailnet only, port 7353.",
+  "used_by": [
+   "the Captain's Discord alerts and the Car tile (through the reporter)",
+   "purple Skippy's car_sentry tool"
+  ]
+ },
  "car-ble": {
   "for": "Switches the Tesla's charging on and off over Bluetooth (Tesla's tesla-control with a charging-only key that never leaves skippy-core). Tailnet only, port 7352.",
   "used_by": [

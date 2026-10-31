@@ -37,3 +37,17 @@ def test_down_or_unset_is_not_ready(monkeypatch):
     monkeypatch.setattr(reporter, "CAR", "")
     asked = answer(monkeypatch, {"cars": [{"id": 1}], "mqtt": True})
     assert reporter.car_capability() == {"ready": False} and asked == []
+
+
+def test_the_guards_sentry_events_ride_along_trimmed(monkeypatch):
+    monkeypatch.setattr(reporter, "CAR", "http://skippy-core:7351")
+    monkeypatch.setattr(reporter, "CAR_FLEET", "http://skippy-core:7353")
+    events = [{"id": f"{i}-1", "at": 100 + i, "state": "aware", "said": "someone came close"} for i in range(15)]
+    replies = {"http://skippy-core:7351/car": {"cars": [{"id": 1}], "mqtt": True},
+               "http://skippy-core:7353/sentry": {"state": "aware", "since": 114, "events": events, "telemetry": {"heard_s": 3, "online": True}}}
+    monkeypatch.setattr(reporter, "fetch", lambda url, **kw: replies.get(url))
+    got = reporter.car_capability()["sentry"]
+    assert got["state"] == "aware" and got["online"] is True and len(got["events"]) == reporter.SENTRY_EVENTS
+    assert got["events"][-1]["id"] == "14-1"
+    replies.pop("http://skippy-core:7353/sentry")
+    assert "sentry" not in reporter.car_capability()                 # the guard down: the car's state still goes
