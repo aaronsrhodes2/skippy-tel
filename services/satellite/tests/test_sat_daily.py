@@ -304,7 +304,7 @@ def test_coming_home_lights_now_then_news_music_and_his_day_once_he_is_heard(tmp
         await finish(d)
     asyncio.run(go())
     assert shuffles == [1]
-    assert link.spoken[0].startswith("<Welcome him home") and link.spoken[-1].startswith("<He just got home")
+    assert link.spoken[0].startswith("<He just got home: welcome") and link.spoken[-1].startswith("<He just got home from work")
     assert brain.offers and room.mode == FOLLOWUP
 
 
