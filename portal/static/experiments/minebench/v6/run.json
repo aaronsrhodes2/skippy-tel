@@ -1,0 +1,12 @@
+{
+ "n": 8,
+ "title": "Choo-choo train, the one line again, five days on",
+ "model": "Purple Skippy: Claude Code on Skippy Core's coder (the same Qwen3.6-35B-A3B, MTP, Q8 as v5), local and free, with the harness as of commit e2d7a02 (context discipline: scratch notes, more segments, a trimmed prompt); the same message as v5, word for word",
+ "prompt": "a choo-choo train",
+ "request": "experiments/minebench/v6/request.txt",
+ "comparable": true,
+ "blocks": 23104,
+ "minutes": 28,
+ "size": "102 x 50 x 151",
+ "verdict": "Almost flawless, in the Captain's judgement: the most detailed locomotive yet (an iron boiler with bands, stack, dome, cab windows, cowcatcher, spoked drivers and a leading truck, a tall curling smoke plume) on a track with a station and trees. The one real mistake is the wheels: every one is drawn facing along the track instead of rolling down it (the code draws each in the x-y plane while the track runs along z), a mistake the Captain has seen before on vehicles. The same lost sense of forward strings the tender and the passenger car out sideways beside the track instead of behind the engine. The fix is one rule, now in purple Skippy's voxel skill and its header: name the forward axis once; wheels stand in the forward-and-up plane; every car follows along forward. Smaller: the plume and a few trim blocks float (8 parts, against v5's zero), and it is a fifth of v5's blocks in three times the time, with the same model and the same words."
+}

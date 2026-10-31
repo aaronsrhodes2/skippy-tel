@@ -12,6 +12,12 @@
   #mbpg model-viewer { break-inside: avoid; }
   #mbpg .facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 6px 0; }
   #mbpg .facts dt { color: var(--dim); } #mbpg .facts dd { margin: 0; }
+  /* every run starts a page of its own, newest first; the keys on the first page jump to one */
+  #mbpg .run { break-before: column; -webkit-column-break-before: always; }
+  #mbpg .runs { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  #mbpg .runs .key { width: auto; min-width: 40px; padding: 0 10px; }
+  #mbpg .runs .key span { position: relative; z-index: 1; font-size: 13px; }
+  #mbpg .runs .key:active span, #mbpg .runs .key:focus-visible span { color: #000; }
   #mbpg .tag { display: inline-block; padding: 0 6px; border: 1px solid var(--amber); color: var(--amber); font-size: 12px; }
 </style>{% endblock %}
 {% block content %}
@@ -31,7 +37,9 @@
       <p class="help">Each run below: the build request, the numbers, four views, and the model itself to turn with a finger or a
         mouse. A run marked "expanded prompt" got a full written specification instead of the benchmark's one line: it shows how
         far direction lifts a local model, and is not comparable with the leaderboard.</p>
+      <nav class="runs" aria-label="Runs">{% for r in runs %}<button type="button" class="key sm" data-run="{{ r.id }}" title="{{ r.title }}"><span>{{ r.id }}</span></button>{% endfor %}</nav>
       {% for r in runs %}
+      <section class="run" id="run-{{ r.id }}">
       <h3>{{ r.title }}</h3>
       <p>{% if r.comparable %}<span class="tag">benchmark prompt</span>{% else %}<span class="tag">expanded prompt</span>{% endif %}</p>
       <dl class="facts">
@@ -47,6 +55,7 @@
       <p>{{ r.verdict }}</p>
       <p class="help"><a href="{{ url_for('static', filename='experiments/minebench/' ~ r.id ~ '/build.json') }}">The build itself</a>
         (the voxel.exec call, as MineBench runs it).</p>
+      </section>
       {% endfor %}
     </div></div>
     <div class="pips" hidden><i></i></div>
@@ -55,7 +64,19 @@
 <script>
   (function () {
     var panel = document.getElementById("mbpg");
-    Bridge.pager(panel, { pips: panel.parentNode.querySelector(".pips") });
+    var pager = Bridge.pager(panel, { pips: panel.parentNode.querySelector(".pips") }), flow = panel.querySelector(".pg-flow");
+    // the page a run starts on: where its section sits in the flow, whatever page the flow is showing now
+    function show(id) {
+      var run = document.getElementById("run-" + id);
+      if (!run || !panel.clientWidth) return;
+      pager.go(Math.round((run.getBoundingClientRect().left - flow.getBoundingClientRect().left) / panel.clientWidth));
+    }
+    panel.querySelector(".runs").addEventListener("click", function (e) {
+      var k = e.target.closest("[data-run]");
+      if (k) { show(k.dataset.run); history.replaceState(null, "", "#run-" + k.dataset.run); }
+    });
+    // a link to one run (…/minebench#run-v9) opens on its page, once the pages are measured
+    if (location.hash.indexOf("#run-") === 0) window.addEventListener("load", function () { pager.refresh(); show(location.hash.slice(5)); });
   })();
 </script>
 {% endblock %}

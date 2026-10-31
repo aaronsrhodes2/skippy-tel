@@ -109,3 +109,5 @@ def test_every_minebench_run_can_be_reached_however_late_its_pictures_load(env):
     client, _, _ = env
     page = client.get("/experiments/minebench").get_data(as_text=True)
     assert page.count('<img class="views" width="1800" height="1320"') == len(experiments.MINEBENCH_RUNS)
+    assert page.count('<section class="run"') == len(experiments.MINEBENCH_RUNS)
+    assert [r["n"] for r in experiments.MINEBENCH_RUNS] == sorted((r["n"] for r in experiments.MINEBENCH_RUNS), reverse=True)

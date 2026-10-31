@@ -1,0 +1,12 @@
+{
+ "n": 10,
+ "title": "Choo-choo train, the same words, a wider scene (a negative result)",
+ "model": "Purple Skippy: Claude Code on Skippy Core's coder (the same Qwen3.6-35B-A3B, MTP, Q8), local and free, the same message as v5 word for word; the runtime now checks the wheels against the direction of travel",
+ "prompt": "a choo-choo train",
+ "request": "experiments/minebench/v8/request.txt",
+ "comparable": true,
+ "blocks": 191612,
+ "minutes": null,
+ "size": "256 x 87 x 256",
+ "verdict": "A negative result, kept. The agent covered the whole 256 x 256 plot with grass, so the locomotive is a small piece in the middle of a field, and it added a second track, lamp posts, a water crane and a thicker plume. The wheels are iron blocks lying flat under the boiler instead of upright wheels, which the check flags as lying flat. The runtime counts 381 floating parts (489 blocks): mostly small white wool pieces, probably steam, and some glass that is not steam. The scene reads as a small town with a plume of smoke, not a train. Two debug scripts were left uncommitted in the folder."
+}

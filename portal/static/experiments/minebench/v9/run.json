@@ -1,0 +1,12 @@
+{
+ "n": 11,
+ "title": "Choo-choo train, the same words, wheels buried in the ground (a negative result)",
+ "model": "Purple Skippy: Claude Code on Skippy Core's coder (the same Qwen3.6-35B-A3B, MTP, Q8), local and free, the same message as v5 word for word",
+ "prompt": "a choo-choo train",
+ "request": "experiments/minebench/v9/request.txt",
+ "comparable": true,
+ "blocks": 166589,
+ "minutes": null,
+ "size": "216 x 82 x 108",
+ "verdict": "A negative result, kept. No wheel can be seen: the three driving wheels are brick rings round an iron hub, centred at ground level and drawn facing along the track, so the ground and the sleepers cover them. The agent never opened the voxel-build skill, which has a tested wheel helper, and the copy of the check in its folder was an old one with no wheel check, so it saw no problem: zero floating parts, committed as clean. The ground and the coal use Math.random instead of the seeded rng, so each run of the build is slightly different. Tool fixes from this run: the folder now gets the current check, which finds wheels of mixed materials (these three: facing along the track) and prints the wheel helper itself when wheels are turned or missing."
+}
