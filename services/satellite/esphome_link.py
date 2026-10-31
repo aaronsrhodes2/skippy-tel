@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import socket
 from pathlib import Path
 
 import emotion
@@ -103,6 +104,7 @@ class EsphomeLink:
         self.hub = None                                             # set by serve(): the other rooms' pods, to mirror his speech onto
         self.services: list = []                                    # the box's API actions (the `face` one drives the mirror)
         self.asked = ""
+        self.streamer = None                                        # the face skippy-pc draws for this box (face_stream.FaceStreamer), once it is connected
 
     def discover(self, entities) -> None:
         for e in entities:
@@ -119,6 +121,41 @@ class EsphomeLink:
                 self.keys["mouth"] = e.key
             elif kind == "BinarySensorInfo" and oid.endswith("tap"):
                 self.keys["tap"] = e.key
+            elif kind == "BinarySensorInfo" and "stream_live" in oid:
+                self.keys["stream_live"] = e.key
+            elif kind == "TextSensorInfo" and oid == "face":
+                self.keys["face"] = e.key
+
+    def set_text(self, name: str, text: str) -> None:
+        """Write one of the box's text entities (mouth, emote, session) and tell the face drawn here the same thing."""
+        if name in self.keys:
+            self.client.text_command(self.keys[name], text)
+        f = self.streamer.face if self.streamer is not None else None
+        if f is not None:
+            if name == "mouth":
+                f.mouth = text
+            elif name == "emote":
+                f.emote = text
+            elif name == "session":
+                f.set_session(text == "1")
+
+    def start_stream(self, enabled: bool = True) -> None:
+        """Draw the face on skippy-pc and stream it to this box, if its firmware has the streamed face (a `Face` text sensor)."""
+        if not enabled or "face" not in self.keys or self.streamer is not None:
+            return
+        from face_stream import FaceStreamer                    # noqa: PLC0415 — OpenCV only loads when a box wants it
+        try:
+            ip = getattr(self.client, "connected_address", None) or socket.gethostbyname(self.box_host)
+        except OSError as e:
+            self.log(f"[{self.room.name if self.room else self.box_host}] (face stream: cannot resolve {self.box_host}: {e})")
+            return
+        self.streamer = FaceStreamer(ip, log=self.log, name=self.room.name if self.room else self.box_host)
+        self.streamer.start()
+
+    def stop_stream(self) -> None:
+        if self.streamer is not None:
+            self.streamer.stop()
+            self.streamer = None
 
     def _event(self, kind, data: dict | None = None) -> None:
         self.client.send_voice_assistant_event(kind, {k: str(v) for k, v in (data or {}).items()} or None)
@@ -154,6 +191,11 @@ class EsphomeLink:
         kind = type(state).__name__
         if kind == "BinarySensorState" and state.key == self.keys.get("tap") and state.state:
             self.room.tap()
+        elif kind == "BinarySensorState" and state.key == self.keys.get("stream_live") and self.streamer is not None:
+            self.streamer.set_live(bool(state.state) and not getattr(state, "missing_state", False))
+        elif kind == "TextSensorState" and state.key == self.keys.get("face") and self.streamer is not None:
+            name, _, talking = str(state.state).partition(",")
+            self.streamer.set_box_state(name, talking == "1")
         elif kind == "MediaPlayerEntityState" and state.key == self.keys.get("player") and self.music is not None:
             from aioesphomeapi import MediaPlayerState            # noqa: PLC0415
             if state.state == MediaPlayerState.IDLE:
@@ -176,8 +218,10 @@ class EsphomeLink:
 
     async def heard(self, text: str) -> None:
         self.asked = text
+        if self.streamer is not None:
+            self.streamer.face.add_convo(0, text)
         if "emote" in self.keys:                                    # how he looks while he thinks about what he was just told
-            self.client.text_command(self.keys["emote"], emotion.reaction(text) + "|")
+            self.set_text("emote", emotion.reaction(text) + "|")
         await self.voice_stopped()                                  # (heard in one breath with the name: the box must still stop listening)
         self._event(self.E.VOICE_ASSISTANT_STT_END, {"text": text})
         self._event(self.E.VOICE_ASSISTANT_INTENT_START)
@@ -212,9 +256,9 @@ class EsphomeLink:
         if face is None or "mouth" not in self.keys:
             return
         try:
-            self.client.text_command(self.keys["mouth"], mouth_text)
+            self.set_text("mouth", mouth_text)
             if "emote" in self.keys and emote_text:
-                self.client.text_command(self.keys["emote"], emote_text)
+                self.set_text("emote", emote_text)
             await self.client.execute_service(face, {"state": "speaking"})
             await asyncio.sleep(min(seconds + 0.4, 30))
             await self.client.execute_service(face, {"state": "idle"})
@@ -223,7 +267,7 @@ class EsphomeLink:
 
     def session(self, on: bool) -> None:
         if "session" in self.keys:
-            self.client.text_command(self.keys["session"], "1" if on else "0")
+            self.set_text("session", "1" if on else "0")
 
     async def mouth(self, voice, said: str = "") -> None:
         """What the box's drawn face needs to talk: a mood letter, then one character per 60 ms for the mouth. Sent at once as loudness digits
@@ -237,10 +281,10 @@ class EsphomeLink:
                                                         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
             pcm, _ = await asyncio.wait_for(proc.communicate(voice[1]), 10)
             text = mood + envelope(pcm, cap=249)
-            self.client.text_command(self.keys["mouth"], text)
+            self.set_text("mouth", text)
             etext = emotion.reaction(self.asked) + "|" + emotion.track(plain(said), self.asked, len(pcm) / 32000.0)
             if "emote" in self.keys:                                # what he feels, sentence by sentence, over the length of his voice
-                self.client.text_command(self.keys["emote"], etext)
+                self.set_text("emote", etext)
             for other in self.others():                             # every other pod does the same, silently, at the same moment
                 self._spawn_mirror(other.mirror(text, etext, len(pcm) / 32000.0))
             if "emote" in self.keys:                                # and a small model reads the sarcasm a second later (replaces the word rules; costs no waiting)
@@ -271,10 +315,10 @@ class EsphomeLink:
             if codes is None:
                 return
             etext = emotion.reaction(self.asked) + "|" + emotion.track_from_codes(plain(said), codes, seconds)
-            self.client.text_command(self.keys["emote"], etext)
+            self.set_text("emote", etext)
             for other in self.others():
                 if "emote" in other.keys:
-                    other.client.text_command(other.keys["emote"], etext)
+                    other.set_text("emote", etext)
         except Exception as e:                                      # noqa: BLE001 — the word rules stay
             self.log(f"[{self.room.name}] (emotion model: {type(e).__name__})")
 
@@ -291,16 +335,18 @@ class EsphomeLink:
                 await asyncio.wait_for(rb.wait(), 20)
                 with open(tsv, encoding="utf-8") as f:
                     cues = [(float(a), b) for a, b in (ln.split("	") for ln in f.read().splitlines() if "	" in ln)]
-            self.client.text_command(self.keys["mouth"], mood + shapes(cues, cap=249))
+            self.set_text("mouth", mood + shapes(cues, cap=249))
             for other in self.others():                             # the better mouth shapes, to the pods that are mirroring
                 if "mouth" in other.keys:
-                    other.client.text_command(other.keys["mouth"], mood + shapes(cues, cap=249))
+                    other.set_text("mouth", mood + shapes(cues, cap=249))
         except Exception as e:                                      # noqa: BLE001 — the loudness digits stay
             self.log(f"[{self.room.name}] (rhubarb: {type(e).__name__})")
 
     async def show(self, text: str) -> None:
         if "subtitle" in self.keys:
             self.client.text_command(self.keys["subtitle"], plain(text)[:120])
+            if self.streamer is not None:                           # the box adds the same line to its conversation text
+                self.streamer.face.add_convo(1, plain(text)[:120])
 
     async def speak(self, said: str, voice, follow_up: bool = False) -> None:
         if not self.run_live:
@@ -380,6 +426,7 @@ async def serve(hub, name: str, host: str, port: int, *, media, noise_psk: str, 
             if connect is not None:
                 connect.add(name, label or f"{name.replace('-', ' ').title()} (Skippy)", room.music)
         client.subscribe_states(link.on_state)
+        link.start_stream(os.environ.get("SATELLITE_FACE_STREAM", "1") != "0")
         unsub = client.subscribe_voice_assistant(handle_start=link.handle_start, handle_stop=link.handle_stop, handle_audio=link.handle_audio,
                                                  handle_announcement_finished=link.handle_announcement_finished)
         ticker = asyncio.ensure_future(hub.tick(room))
@@ -389,6 +436,7 @@ async def serve(hub, name: str, host: str, port: int, *, media, noise_psk: str, 
         finally:
             ticker.cancel()
             unsub()
+            link.stop_stream()
     finally:
         if connect is not None:
             connect.remove(name)

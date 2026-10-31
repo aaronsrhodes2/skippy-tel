@@ -65,3 +65,24 @@ box fetches each track from skippy-pc's media server, which reads it from the lo
 * **Not yet:** a compiled build and a real box. The firmware's first compile, the panel init, the speaker's loudness and the microphone gain
   (`mic_gain`, `volume_multiplier`) all get checked on the first box. If the screen stays black, it is the panel init sequence; if it can't hear
   across the room, raise `mic_gain` (33 dB now) before anything else.
+
+## The streamed face (2026-10-31): skippy-pc draws Skippy, the box only shows him
+
+The box's own LVGL drawing of Skippy (the 50 ms `interval` in `skippy-room.yaml`) only reaches 5 frames/s on the ESP32-S3. So when the hub is connected it draws him
+itself and streams him: `face_render.py` is a line-for-line port of that tick (same expression easing, emotion table, tints, hat physics, effects, ears, thinking
+graphics, rocking, the conversation text) drawing with numpy + OpenCV in about 8 ms a frame, and `face_stream.py` sends the box only the 16x16 tiles that changed,
+deflated, many to a UDP datagram, at 20 frames/s (the tick rate) on port 10803. The box's `components/skippy_stream` inflates them and writes them straight into the
+panel's frame buffer, each frame at its last datagram, so a frame is never half drawn.
+
+* **What the hub knows.** The box publishes its state as the `Face` text sensor (`"<state>,<talking 0/1>"`: it knows when the audio really starts), the hub writes
+  `Mouth`, `Emote` and `Session` itself (`EsphomeLink.set_text` tells the box and the drawing the same thing, mirrored pods included) and adds the conversation lines.
+* **The box owns the screen unless datagrams arrive.** The first valid datagram makes the yaml pause LVGL and let the receiver draw (`Stream live` turns on and the hub
+  sends the whole picture at once); 1.2 s without one (the hub is down, the Wi-Fi is gone) and LVGL resumes, so the box draws its own Skippy, the `offline` face
+  included. The `Streamed face` switch (and `SATELLITE_FACE_STREAM=0` on the hub) turns it off.
+* **Loss.** UDP over a weak Wi-Fi drops datagrams: the box draws what arrived, and the sender resends a rolling slice of the screen every frame (the whole screen every
+  ~6 s) and a keyframe whenever the box says it took over, so a lost tile never stays wrong for long.
+* **Safety.** The receiver checks every field before using it (magic, version, rectangle inside the panel, lengths, exact inflated size), never writes unless LVGL is
+  paused, and decompresses with a heap-held state on an 8 KB task (the first version put the ~11 KB inflate state on a 4 KB stack: the LoadProhibited crash).
+  `tests/test_sat_face_stream.py` runs the same checks against garbage.
+* **Changing how he looks:** change the yaml drawing (the fallback), then `face_render.py` to match. `tools/face_stream_demo.py` streams by hand (a colour-bar test picture, a
+  scripted run, a throughput test); `tools/box_fps.py` reads the box's own rates; `rooms/shot.py` takes the picture from the panel itself while streaming.

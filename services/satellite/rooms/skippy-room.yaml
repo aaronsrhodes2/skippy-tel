@@ -20,6 +20,17 @@
 packages:
   avatar: !include avatar/skippy-avatar.yaml   # every frame as an image (merged into the image list)
 
+external_components:
+  - source:
+      type: local
+      path: components                    # skippy_stream: shows the face skippy-pc draws (the hub's face_stream.py); the drawing below is the fallback
+
+skippy_stream:
+  id: stream
+  display: lcd
+  port: 10803
+  timeout: 1200ms                         # no valid datagram for this long: the screen goes back to LVGL (the drawing below)
+
 substitutions:
   name: skippy-room
   room: "Room"
@@ -109,6 +120,7 @@ esp32:
       CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
       CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
       CONFIG_SPIRAM_RODATA: "y"
+      CONFIG_LWIP_UDP_RECVMBOX_SIZE: "48"      # the streamed face: datagrams queue here while the receiving task is busy (the default 6 dropped bursts)
 
 psram:
   mode: octal
@@ -146,11 +158,25 @@ api:
         - lambda: |-
             if (state == "speaking" && !id(talking)) id(talk_t0) = millis();
             id(talking) = (state == "speaking");
+        - script.execute: pub_face
     - action: screenshot                  # what the screen shows now, as raw RGB565 posted to `url` (tools/ ... rooms/shot.py asks for it and makes the PNG)
       variables:
         url: string
       then:
         - lambda: |-
+            if (id(stream)->ready()) {                          // the hub is drawing: take the picture from the panel itself
+              size_t n = 0; uint8_t *fbc = id(stream)->snapshot(&n);
+              if (fbc == nullptr) { ESP_LOGE("shot", "panel snapshot failed"); return; }
+              esp_http_client_config_t cfg0 = {};
+              cfg0.url = url.c_str(); cfg0.method = HTTP_METHOD_POST; cfg0.timeout_ms = 15000;
+              esp_http_client_handle_t h0 = esp_http_client_init(&cfg0);
+              esp_http_client_set_header(h0, "X-Dims", "480,480,960");
+              esp_http_client_set_post_field(h0, (const char *) fbc, n);
+              esp_err_t e0 = esp_http_client_perform(h0);
+              ESP_LOGI("shot", "sent %u bytes of the panel: %s", (unsigned) n, esp_err_to_name(e0));
+              esp_http_client_cleanup(h0); free(fbc);
+              return;
+            }
             lv_draw_buf_t *snap = lv_snapshot_take(lv_screen_active(), LV_COLOR_FORMAT_RGB565);
             if (snap == nullptr) { ESP_LOGE("shot", "snapshot failed (no memory?)"); return; }
             esp_http_client_config_t cfg = {};
@@ -313,10 +339,12 @@ media_player:
             - lambda: |-
                 id(talking) = false;
                 id(mouth_env) = "";
+            - script.execute: pub_face
           else:                                # Skippy is speaking: the mouth moves
             - lambda: |-
                 if (!id(talking)) id(talk_t0) = millis();
                 id(talking) = true;
+            - script.execute: pub_face
     on_play:
       - script.execute:
           id: face
@@ -387,6 +415,15 @@ voice_assistant:
         state: idle
 
 switch:
+  - platform: template                    # the hub's streamed face on/off (off: the box always draws its own)
+    id: stream_on
+    name: Streamed face
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - lambda: 'id(stream)->set_enabled(true);'
+    on_turn_off:
+      - lambda: 'id(stream)->set_enabled(false);'
   - platform: template
     id: mic_on
     name: Microphone
@@ -449,6 +486,11 @@ text:
           who: 1
           text: !lambda 'return x;'
 
+text_sensor:
+  - platform: template                    # "<state>,<talking 0/1>": the hub's renderer draws the face from this (and from the Mouth/Emote/Session it writes itself)
+    id: face_sync
+    name: Face
+
 sensor:
   - platform: wifi_signal                 # how strong the box hears the router (also in the hub's log when it drops)
     name: Wi-Fi signal
@@ -458,6 +500,9 @@ sensor:
     update_interval: 15s
 
 binary_sensor:
+  - platform: template                    # the hub's streamed face has the screen (the hub answers by sending the whole picture at once)
+    id: stream_live
+    name: Stream live
   - platform: template                    # a tap on the screen: the hub treats it as "Skippy"
     id: tapped
     name: Tap
@@ -470,7 +515,18 @@ binary_sensor:
     filters:
       - delayed_on: 20ms
     on_press:
-      - media_player.volume_down: player
+      - lambda: 'id(key_t0) = millis();'
+    on_release:
+      - if:
+          condition:
+            lambda: 'return millis() - id(key_t0) > 1000;'
+          then:
+            - lambda: |-
+                // held for a second: mute the pod's own speaker (or bring it back); the PC outputs are unaffected
+                if (id(player)->volume > 0.01f) { id(mute_saved) = id(player)->volume; id(player)->make_call().set_volume(0.0f).perform(); }
+                else { id(player)->make_call().set_volume(id(mute_saved) > 0.01f ? id(mute_saved) : 0.4f).perform(); }
+          else:
+            - media_player.volume_down: player
   - platform: gpio
     id: key_up
     pin:
@@ -504,6 +560,12 @@ globals:
   - id: in_session
     type: bool
     initial_value: 'false'
+  - id: key_t0
+    type: uint32_t
+    initial_value: '0'
+  - id: mute_saved
+    type: float
+    initial_value: '0.4'
   - id: talking
     type: bool
     initial_value: 'false'
@@ -528,6 +590,10 @@ globals:
     initial_value: '0'
 
 script:
+  - id: pub_face
+    mode: restart
+    then:
+      - lambda: 'id(face_sync)->publish_state(id(state_now) + (id(talking) ? ",1" : ",0"));'
   - id: convo_add                         # a line of the conversation flows up behind the ball: yours (cyan, with >) and Skippy's (lavender)
     mode: queued
     parameters:
@@ -577,12 +643,20 @@ script:
             - light.turn_on:
                 id: backlight
                 brightness: 70%
+      - script.execute: pub_face
 
 interval:
+  - interval: 40ms                        # who owns the screen: LVGL (this file's drawing) or the hub's stream. Datagrams lately -> pause LVGL, then let the receiver draw; a stalled stream -> LVGL again
+    then:
+      - lambda: |-
+          auto *s = id(stream);
+          bool want = s->wants();
+          if (want && !s->ready()) { id(lvgl_comp)->set_paused(true, false); s->set_ready(true); ESP_LOGI("stream", "the hub draws the face"); id(stream_live)->publish_state(true); }
+          else if (!want && s->ready()) { s->set_ready(false); id(lvgl_comp)->set_paused(false, false); ESP_LOGI("stream", "stream stopped: drawing on the box"); id(stream_live)->publish_state(false); }
   - interval: 250ms                       # the lamp breathes: slow when idle, quicker when something is happening
     then:
       - lambda: |-
-          if (id(talking)) return;                      // (same: the glow holds while he talks)
+          if (id(talking) || id(stream)->ready()) return;                      // (same: the glow holds while he talks; the hub draws it while it streams)
           bool busy = id(face_rgb) != 0x6a28c9 && id(face_rgb) != 0x475569;
           id(breath) = (id(breath) + (busy ? 6 : 2)) % 360;
           float s = (sinf(id(breath) * 3.14159f / 180.0f) + 1.0f) / 2.0f;
@@ -593,6 +667,7 @@ interval:
   - interval: 50ms                        # Skippy's wireframe face: a neon globe with eyes, brows and a mouth that follow his state, his mood and his words
     then:
       - lambda: |-
+          if (id(stream)->ready()) return;                                          // the hub is drawing the face: nothing to do here (the stall watchdog hands the screen back)
           uint32_t t_us0 = micros();
           // ── what the face is doing: targets, eased toward every tick ──
           static float ph = 0, rot = 0, eo = 1, bh = 0, ba = 0, bl = 0, br = 0, lx = 0, ly = 0, sm = 0, mw = 22, mu = 0.5f, ml = 0.5f, teethv = 0;
@@ -1007,22 +1082,27 @@ interval:
               for (int i = 0; i < 5; i++) lv_obj_set_style_line_opa(ry[i], 0, LV_PART_MAIN);
             }
           }
-          // ── ears: while he listens two big metal ears grow out of the ball, cocked at different angles, like he is being sarcastic ──
-          { static float ear = 0; static lv_point_precise_t eo_[2][18], ef_[2][16];
+          // ── ears: while he listens two big rounded ears grow out of the sides of the can, cocked at different angles, like he is being sarcastic ──
+          { static float ear = 0; static lv_point_precise_t eo_[2][26], ef_[2][26];
             bool hearing = st == "listening" || st == "recording" || (st == "idle" && id(in_session) && !talk) || (st.empty() && id(in_session));
             ear += ((hearing ? 1.0f : 0.0f) - ear) * 0.3f;
             lv_obj_t *fo[4] = {id(ear_fl)->obj, id(ear_fr)->obj, id(ear_ol)->obj, id(ear_or)->obj};
             if (ear < 0.06f) { for (int k = 0; k < 4; k++) lv_obj_set_style_line_opa(fo[k], 0, LV_PART_MAIN); }
             else for (int sd = 0; sd < 2; sd++) {
-              float s2 = sd ? 1.0f : -1.0f, a = (sd ? 0.95f : 0.55f) + 0.12f * sinf(ph * 2.3f + sd * 2.0f) + 0.2f * (st == "recording");
-              float by = cy - 4, bx = cx + (pivotY - by) * lt + s2 * 104, L = 96 * K * ear, Wd = 58 * K * ear, dx = s2 * sinf(a), dy = -cosf(a), nx = -dy, ny = dx;
-              for (int i = 0; i <= 8; i++) {
-                float t = i / 8.0f, hw = Wd / 2 * powf(sinf(3.14159f * t), 0.7f), px = bx + dx * L * t, py = by + dy * L * t;
-                int lx = clampi(px + nx * hw), ly = clampi(py + ny * hw), rx = clampi(px - nx * hw), ry = clampi(py - ny * hw);
-                eo_[sd][i].x = lx; eo_[sd][i].y = ly; eo_[sd][17 - i].x = rx; eo_[sd][17 - i].y = ry;
-                if (i >= 1 && i <= 7) { bool f = i % 2; ef_[sd][(i - 1) * 2].x = f ? lx : rx; ef_[sd][(i - 1) * 2].y = f ? ly : ry; ef_[sd][(i - 1) * 2 + 1].x = f ? rx : lx; ef_[sd][(i - 1) * 2 + 1].y = f ? ry : ly; }
+              float s2 = sd ? 1.0f : -1.0f, a = (sd ? 0.95f : 0.45f) + 0.12f * sinf(ph * 2.3f + sd * 2.0f) + 0.2f * (st == "recording"), rot = s2 * a;
+              float by = cy - 4, bx = cx + (pivotY - by) * lt + s2 * 104, ew = 21 * ear, eh = 44 * ear;
+              float ux = sinf(rot), uy = -cosf(rot), rx = cosf(rot), ry = sinf(rot);          // up along the ear's long axis, and across it
+              float c0x = bx + ux * eh * 0.7f, c0y = by + uy * eh * 0.7f;
+              for (int i = 0; i < 26; i++) { float t = i * 6.2832f / 25; float lx = ew * cosf(t), lu = eh * sinf(t);
+                eo_[sd][i].x = (int) (c0x + rx * lx + ux * lu); eo_[sd][i].y = (int) (c0y + ry * lx + uy * lu); }
+              int nf = 0; bool lr = true;                                                       // the fill: rows across the ear, kept inside the outline
+              for (float u = -(eh - 8); u <= eh - 8 && nf < 24; u += 7) {
+                float half = (ew - 7) * sqrtf(fmaxf(1 - (u / (eh - 5)) * (u / (eh - 5)), 0.0f)); if (half < 1) half = 1;
+                float l0 = lr ? -half : half, l1 = lr ? half : -half; lr = !lr;
+                ef_[sd][nf].x = (int) (c0x + rx * l0 + ux * u); ef_[sd][nf++].y = (int) (c0y + ry * l0 + uy * u);
+                ef_[sd][nf].x = (int) (c0x + rx * l1 + ux * u); ef_[sd][nf++].y = (int) (c0y + ry * l1 + uy * u);
               }
-              put(fo[sd], ef_[sd], 14); put(fo[2 + sd], eo_[sd], 18);
+              put(fo[sd], ef_[sd], nf); put(fo[2 + sd], eo_[sd], 26);
               lv_obj_set_style_line_opa(fo[sd], 255, LV_PART_MAIN); lv_obj_set_style_line_opa(fo[2 + sd], 255, LV_PART_MAIN);
             }
           }
@@ -1116,6 +1196,7 @@ touchscreen:
           state: false
 
 lvgl:
+  id: lvgl_comp
   displays:
     - lcd
   touchscreens:
@@ -1353,7 +1434,7 @@ lvgl:
             points:
               - 0, 0
               - 2, 2
-            line_width: 15
+            line_width: 8
             line_color: 0x7d8492
             line_opa: 0%
             line_rounded: true
@@ -1364,7 +1445,7 @@ lvgl:
             points:
               - 0, 0
               - 2, 2
-            line_width: 15
+            line_width: 8
             line_color: 0x7d8492
             line_opa: 0%
             line_rounded: true
