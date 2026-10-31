@@ -220,7 +220,7 @@ class Face:
         self._balls = [np.asarray(Image.open(BALL_DIR / f"0{i}.png").convert("RGBA")) for i in range(5)]
         self._ball_cache: dict = {}
         mk = Line
-        self.ear_fl, self.ear_fr = mk(15, 0x7d8492, 0, True), mk(15, 0x7d8492, 0, True)
+        self.ear_fl, self.ear_fr = mk(8, 0x7d8492, 0, True), mk(8, 0x7d8492, 0, True)
         self.ear_ol, self.ear_or = mk(3, 0xe6e9ef, 0, True), mk(3, 0xe6e9ef, 0, True)
         self.hat_cast = mk(20, 0x000000, int(255 * 0.55), True)
         self.hc = 0
@@ -796,24 +796,26 @@ class Face:
             return
         for sd in range(2):
             s2 = 1.0 if sd else -1.0
-            a = (0.95 if sd else 0.55) + 0.12 * math.sin(self.ph * 2.3 + sd * 2.0) + 0.2 * (st == "recording")
+            a = (0.95 if sd else 0.45) + 0.12 * math.sin(self.ph * 2.3 + sd * 2.0) + 0.2 * (st == "recording")
+            rot = s2 * a
             by = cy - 4
             bx = cx + (pivotY - by) * lt + s2 * 104
-            L, Wd = 96 * self.ear, 58 * self.ear
-            dx, dy = s2 * math.sin(a), -math.cos(a)
-            nx, ny = -dy, dx
-            outl, fill = [None] * 18, [None] * 14
-            for i in range(9):
-                t = i / 8.0
-                hw = Wd / 2 * math.pow(math.sin(3.14159 * t), 0.7)
-                px, py = bx + dx * L * t, by + dy * L * t
-                l = (clampi(px + nx * hw), clampi(py + ny * hw))
-                r = (clampi(px - nx * hw), clampi(py - ny * hw))
-                outl[i], outl[17 - i] = l, r
-                if 1 <= i <= 7:
-                    f = i % 2
-                    fill[(i - 1) * 2] = l if f else r
-                    fill[(i - 1) * 2 + 1] = r if f else l
+            ew, eh = 21 * self.ear, 44 * self.ear
+            ux, uy, rx, ry = math.sin(rot), -math.cos(rot), math.cos(rot), math.sin(rot)
+            c0x, c0y = bx + ux * eh * 0.7, by + uy * eh * 0.7
+            outl = []
+            for i in range(26):
+                t = i * 6.2832 / 25
+                lx, lu = ew * math.cos(t), eh * math.sin(t)
+                outl.append((int(c0x + rx * lx + ux * lu), int(c0y + ry * lx + uy * lu)))
+            fill, lr, u = [], True, -(eh - 8)
+            while u <= eh - 8 and len(fill) < 24:
+                half = max((ew - 7) * math.sqrt(max(1 - (u / (eh - 5)) ** 2, 0.0)), 1.0)
+                l0, l1 = (-half, half) if lr else (half, -half)
+                lr = not lr
+                fill.append((int(c0x + rx * l0 + ux * u), int(c0y + ry * l0 + uy * u)))
+                fill.append((int(c0x + rx * l1 + ux * u), int(c0y + ry * l1 + uy * u)))
+                u += 7
             fo[sd].put(fill); fo[2 + sd].put(outl)
             fo[sd].opa = fo[2 + sd].opa = 255
 
