@@ -1,5 +1,5 @@
 {
- "n": 4,
+ "n": 5,
  "title": "Choo-choo train, Claude Haiku as the agent (purple Skippy's v1 setup)",
  "model": "Claude Haiku 5.5 in purple Skippy's place: the same Claude Code agent, instructions, folder, runtime and one-line request as v1, context capped at 138K. About $1.15 of API use",
  "prompt": "a choo-choo train",
@@ -7,5 +7,25 @@
  "blocks": 61071,
  "minutes": 4,
  "size": "217 x 52 x 66",
- "verdict": "The fullest scene: a locomotive with cab, dome, bell, cowcatcher and a big smoke plume, a coal tender, coaches with rows of windows and a caboose with a cupola, all on the track, a raised platform, a brick-and-wood station house, a pond and trees. The coaches run together into one long body. Like-for-like with purple Skippy's v1 (only the model differs), it is clearly better, and three times faster."
+ "verdict": "The fullest scene: a locomotive with cab, dome, bell, cowcatcher and a big smoke plume, a coal tender, coaches with rows of windows and a caboose with a cupola, all on the track, a raised platform, a brick-and-wood station house, a pond and trees. The coaches run together into one long body. Like-for-like with purple Skippy's v1 (only the model differs), it is clearly better, and three times faster.",
+ "stats": {
+  "started": "2026-10-25T06:23:41.671Z",
+  "minutes": 4,
+  "tokens": {
+   "input": 127821,
+   "cache_read": 847922,
+   "output": 46711,
+   "total": 1022454
+  },
+  "models": [
+   {
+    "name": "Claude Haiku 5.5",
+    "tokens": {
+     "input": 127821,
+     "cache_read": 847922,
+     "output": 46711
+    }
+   }
+  ]
+ }
 }

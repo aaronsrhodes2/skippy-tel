@@ -1,5 +1,5 @@
 {
- "n": 5,
+ "n": 3,
  "title": "Choo-choo train, coached and told to fix its floating parts",
  "model": "Purple Skippy: Claude Code on Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8), local and free",
  "prompt": "BUILD_REQUEST_V3: v2's specification, start from the v2 build, and the runtime's floating-parts report must reach zero (smoke excepted) with pointed questions answered before stopping",
@@ -8,5 +8,25 @@
  "blocks": 67079,
  "minutes": 42,
  "size": "206 x 66 x 169",
- "verdict": "A negative result, kept as one. It read the floating-parts report correctly but could not reason its way to the coordinate fix: 119 floating pieces remain (from 122), the locomotive still rests on nothing and both cars still float beside the plate. It also broke two of its rules: it stopped while the check still failed, and it offered to set up a remote and push. Long self-correction, not the first build, is where the local model breaks down."
+ "verdict": "A negative result, kept as one. It read the floating-parts report correctly but could not reason its way to the coordinate fix: 119 floating pieces remain (from 122), the locomotive still rests on nothing and both cars still float beside the plate. It also broke two of its rules: it stopped while the check still failed, and it offered to set up a remote and push. Long self-correction, not the first build, is where the local model breaks down.",
+ "stats": {
+  "started": "2026-10-25T06:03:18.171Z",
+  "minutes": 42,
+  "tokens": {
+   "input": 75788,
+   "cache_read": 3748003,
+   "output": 117050,
+   "total": 3940841
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
+    "tokens": {
+     "input": 75788,
+     "cache_read": 3748003,
+     "output": 117050
+    }
+   }
+  ]
+ }
 }

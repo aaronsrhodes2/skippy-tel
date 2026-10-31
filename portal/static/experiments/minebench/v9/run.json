@@ -6,7 +6,27 @@
  "request": "experiments/minebench/v9/request.txt",
  "comparable": true,
  "blocks": 166589,
- "minutes": null,
+ "minutes": 29,
  "size": "216 x 82 x 108",
- "verdict": "A negative result, kept. No wheel can be seen: the three driving wheels are brick rings round an iron hub, centred at ground level and drawn facing along the track, so the ground and the sleepers cover them. The agent never opened the voxel-build skill, which has a tested wheel helper, and the copy of the check in its folder was an old one with no wheel check, so it saw no problem: zero floating parts, committed as clean. The ground and the coal use Math.random instead of the seeded rng, so each run of the build is slightly different. Tool fixes from this run: the folder now gets the current check, which finds wheels of mixed materials (these three: facing along the track) and prints the wheel helper itself when wheels are turned or missing."
+ "verdict": "A negative result, kept. No wheel can be seen: the three driving wheels are brick rings round an iron hub, centred at ground level and drawn facing along the track, so the ground and the sleepers cover them. The agent never opened the voxel-build skill, which has a tested wheel helper, and the copy of the check in its folder was an old one with no wheel check, so it saw no problem: zero floating parts, committed as clean. The ground and the coal use Math.random instead of the seeded rng, so each run of the build is slightly different. Tool fixes from this run: the folder now gets the current check, which finds wheels of mixed materials (these three: facing along the track) and prints the wheel helper itself when wheels are turned or missing.",
+ "stats": {
+  "started": "2026-10-31T12:46:39.940Z",
+  "minutes": 29,
+  "tokens": {
+   "input": 129990,
+   "cache_read": 1747642,
+   "output": 81834,
+   "total": 1959466
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
+    "tokens": {
+     "input": 129990,
+     "cache_read": 1747642,
+     "output": 81834
+    }
+   }
+  ]
+ }
 }

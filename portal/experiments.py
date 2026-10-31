@@ -250,8 +250,9 @@ RADIANCE_SHOWCASE_SNIPPET = """
 
 # MineBench runs (github.com/Ammaar-Alam/minebench: 256 grid, simple palette, its own system prompt; experiments/minebench.html).
 # A run is its folder, static/experiments/minebench/<id>/: run.json (n, the run's place in time; title, model, prompt, comparable,
-# blocks, minutes, size, verdict, and request when the full text is there), views.png, model.glb and build.json. A new folder is a new
-# page, newest first: nothing to add here. tools/voxel/publish_run.py writes the folder from a run's working folder.
+# blocks, minutes, size, verdict, request when the full text is there, and stats: when it started, its tokens and every model it used,
+# tools/voxel/run_stats.py), views.png, model.glb and build.json. A new folder is a new page, in the order the runs happened (the
+# Captain, 2026-10-31): nothing to add here. tools/voxel/publish_run.py writes the folder from a run's working folder.
 MINEBENCH_DIR = pathlib.Path(__file__).parent / "static" / "experiments" / "minebench"
 
 
@@ -261,7 +262,7 @@ def load_minebench_runs(root=MINEBENCH_DIR):
         run = json.loads(f.read_text(encoding="utf-8"))
         run["id"] = f.parent.name
         runs.append(run)
-    return tuple(sorted(runs, key=lambda r: -r["n"]))
+    return tuple(sorted(runs, key=lambda r: ((r.get("stats") or {}).get("started") or "~", r["n"])))
 
 
 MINEBENCH_RUNS = load_minebench_runs()

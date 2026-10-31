@@ -6,7 +6,27 @@
  "request": "experiments/minebench/v7/request.txt",
  "comparable": true,
  "blocks": 129664,
- "minutes": null,
+ "minutes": 43,
  "size": "171 x 85 x 86",
- "verdict": "A negative result, kept. The wheels are still turned: the runtime's wheel check finds eight black discs whose faces point along the track, the same mistake as v6, although the one rule was in the skill and in the agent's header. The one fix it made was to the boiler loops (commit 0a910d4), which stopped blocks floating past the shell. 31 floating parts remain (44 blocks, small iron pieces at the driving wheels). It is three times v5's blocks, and the rule the Captain asked for is not yet enforced by the builder, only written down."
+ "verdict": "A negative result, kept. The wheels are still turned: the runtime's wheel check finds eight black discs whose faces point along the track, the same mistake as v6, although the one rule was in the skill and in the agent's header. The one fix it made was to the boiler loops (commit 0a910d4), which stopped blocks floating past the shell. 31 floating parts remain (44 blocks, small iron pieces at the driving wheels). It is three times v5's blocks, and the rule the Captain asked for is not yet enforced by the builder, only written down.",
+ "stats": {
+  "started": "2026-10-30T22:33:37.533Z",
+  "minutes": 43,
+  "tokens": {
+   "input": 89285,
+   "cache_read": 2256613,
+   "output": 81738,
+   "total": 2427636
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
+    "tokens": {
+     "input": 89285,
+     "cache_read": 2256613,
+     "output": 81738
+    }
+   }
+  ]
+ }
 }

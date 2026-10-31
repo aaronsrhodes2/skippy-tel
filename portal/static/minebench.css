@@ -1,0 +1,50 @@
+/* MineBench (templates/minebench.html): an opening page with the runs' table, then every run exactly one page (media, numbers, verdict),
+   and the full-screen viewer (static/minebench.js). Portal tokens only; black base, no gradients. */
+#mbpg .mbruns { width: 100%; border-collapse: collapse; font: 600 .78rem var(--mono); margin: 8px 0; break-inside: avoid; }
+#mbpg .mbruns th { color: var(--accent); text-align: right; padding: 3px 6px; border-bottom: 1px solid var(--dim-green-hi); }
+#mbpg .mbruns td { text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--line); color: var(--ink); }
+#mbpg .mbruns th:first-child, #mbpg .mbruns td:first-child { text-align: left; }
+#mbpg .mbruns td b { color: var(--accent); display: inline-block; min-width: 1.6em; }
+#mbpg .mbruns tbody tr { cursor: pointer; }
+#mbpg .mbruns tbody tr:hover, #mbpg .mbruns tbody tr:focus-visible { background: var(--panel); outline: none; }
+
+/* a run is one page: as tall as the panel, starting a column of its own, nothing spilling to the next */
+#mbpg .run { break-before: column; -webkit-column-break-before: always; break-inside: avoid; height: 100%; overflow: hidden; box-sizing: border-box;
+             display: grid; gap: 8px; grid-template-rows: auto minmax(0, 1fr) auto; grid-template-columns: 100%; padding-bottom: 2px; }
+#mbpg .run header { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+#mbpg .run header .no { flex: none; color: var(--accent); font: 700 .8rem var(--mono); }
+#mbpg .run h3 { margin: 0; font-size: .95rem; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+#mbpg .media { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; min-height: 0; }
+#mbpg .shot { position: relative; margin: 0; min-height: 0; min-width: 0; border: 1px solid var(--dim-green-hi); background: #05090b; }
+#mbpg .shot .views { width: 100%; height: 100%; object-fit: contain; display: block; cursor: zoom-in; }
+#mbpg .shot model-viewer { width: 100%; height: 100%; display: block; background: #05090b; --poster-color: transparent; }
+#mbpg .shot .full { position: absolute; top: 4px; right: 4px; z-index: 2; }
+#mbpg .data { min-height: 0; display: flex; flex-direction: column; gap: 4px; }
+#mbpg .facts { display: grid; grid-template-columns: max-content 1fr; gap: 1px 10px; margin: 0; font-size: .78rem; line-height: 1.3; }
+#mbpg .facts dt { color: var(--dim); }
+#mbpg .facts dd { margin: 0; min-width: 0; }
+#mbpg .facts small { color: var(--muted); }
+#mbpg .models { margin: 0; padding: 0; list-style: none; }
+#mbpg .tag { display: inline-block; padding: 0 5px; border: 1px solid var(--amber); color: var(--amber); font-size: .7rem; }
+#mbpg .verdict { font-size: .8rem; line-height: 1.4; max-height: 5.6em; overflow: hidden; cursor: zoom-in; border-left: 2px solid var(--accent); padding-left: 8px; }
+#mbpg .verdict:focus-visible { outline: 1px solid var(--white); }
+#mbpg .run .help { margin: 0; font-size: .72rem; }
+
+/* wide screens: pictures on the left, the numbers on the right, the verdict as long as there is room */
+@media (min-aspect-ratio: 5/4) {
+  #mbpg .run { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  #mbpg .run header { grid-column: 1 / -1; }
+  #mbpg .media { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+  #mbpg .data { overflow: hidden; }
+  #mbpg .verdict { max-height: none; flex: 0 1 auto; min-height: 0; }
+}
+
+/* full screen: one picture, model or verdict over everything; the picture zooms and pans, the model turns and zooms */
+#mbfull { position: fixed; inset: 0; z-index: 2147483000; background: var(--black); display: flex; }
+#mbfull[hidden] { display: none; }
+#mbfull .stage { flex: 1; min-width: 0; position: relative; overflow: hidden; touch-action: none; }
+#mbfull .stage img { position: absolute; left: 0; top: 0; transform-origin: 0 0; max-width: none; user-select: none; -webkit-user-drag: none; cursor: grab; }
+#mbfull .stage model-viewer { width: 100%; height: 100%; background: #05090b; --poster-color: transparent; }
+#mbfull .stage .text { max-width: 60em; margin: 0 auto; padding: 56px 20px 20px; font-size: 1.05rem; line-height: 1.55; color: var(--ink); }
+#mbfull .bar { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; z-index: 2; }
+#mbfull.text-only [data-z] { display: none; }
