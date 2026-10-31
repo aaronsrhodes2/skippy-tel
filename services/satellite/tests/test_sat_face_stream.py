@@ -366,3 +366,27 @@ def test_loss_counter_wraps_and_a_reboot_does_not_look_like_loss():
     s2 = FaceStreamer("127.0.0.1", send=lambda d: None)
     s2.note_loss(5000, now=1.0); s2.note_loss(3, now=2.0)        # the box rebooted: the counter went back to zero (a drop, not a loss)
     assert not s2.slow_now(2.1)
+
+
+def test_flat_can_is_flat_and_keeps_the_silhouette():
+    import numpy as np
+    from PIL import Image
+    from face_render import BALL_DIR
+    old = BALL_DIR.parent / "ball"
+    for i in range(5):
+        a = np.asarray(Image.open(BALL_DIR / f"0{i}.png").convert("RGBA"))
+        o = np.asarray(Image.open(old / f"0{i}.png").convert("RGBA"))
+        assert a.shape == o.shape
+        assert ((a[..., 3] > 128) == (o[..., 3] > 128)).mean() > 0.999          # the same shape
+        assert len(np.unique(a[a[..., 3] > 128][:, :3], axis=0)) <= 8           # a handful of flat tones, no texture
+
+
+def test_flat_can_sends_much_less_than_the_brushed_one():
+    import numpy as np
+    from face_render import Face, to565
+    from face_stream import Encoder
+    f = Face(); f.set_state("idle"); e = Encoder(); e.encode(to565(f.render())); sizes = []
+    for i in range(120):
+        f.tick(100000 + i * 50)
+        sizes.append(sum(len(d) for d in e.encode(to565(f.render()))))
+    assert np.mean(sizes) < 16 * 1024                           # (the brushed can averaged 18 KB a frame, 366 KB/s)

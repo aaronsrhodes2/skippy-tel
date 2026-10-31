@@ -23,7 +23,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 W = H = 480
 HERE = Path(__file__).resolve().parent
-BALL_DIR = HERE / "rooms" / "avatar" / "frames" / "ball"
+BALL_DIR = HERE / "rooms" / "avatar" / "frames" / "ball_flat"
 ANGS = (-0.1396, -0.0698, 0.0, 0.0698, 0.1396)
 
 

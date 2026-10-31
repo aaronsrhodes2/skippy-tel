@@ -9,6 +9,7 @@
 extern "C" {
 #include "miniz.h"                           // the ROM's tinfl (the S3 ROM has it)
 }
+#include <esp_lcd_panel_ops.h>
 #include <freertos/task.h>
 #include <string.h>
 #include <esp_timer.h>
@@ -107,10 +108,21 @@ void SkippyStream::accept_(const uint8_t *buf, int n) {
   if (flags & 1) { this->finish_(); this->have_frame_ = false; this->frames_++; }
 }
 
+bool IRAM_ATTR SkippyStream::vsync_isr_(void *panel, const void *event, void *ctx) {
+  auto *self = static_cast<SkippyStream *>(ctx);
+  BaseType_t woken = pdFALSE;
+  if (self->draw_handle_ != nullptr) vTaskNotifyGiveFromISR(self->draw_handle_, &woken);
+  return woken == pdTRUE;
+}
+
 void SkippyStream::draw_loop_() {
   for (;;) {
     Item it;
     if (xQueueReceive(this->ready_q_, &it, portMAX_DELAY) != pdTRUE) continue;
+    if (this->vsync_on_) {                               // write right after the scan restarts: our writes run faster than the scan, so they stay ahead of it and the picture never tears
+      ulTaskNotifyTake(pdTRUE, 0);                       // (forget a vsync that already passed)
+      if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(25)) > 0) this->synced_++; else this->unsynced_++;
+    }
     this->draw_(this->bufs_[it.idx], it.len);
     it.len = 0;
     xQueueSend(this->free_q_, &it, 0);
@@ -177,12 +189,19 @@ void SkippyStream::loop() {
     if (m->fb_ != nullptr && m->buffer_ == nullptr) this->fb_ = m->fb_;
     ESP_LOGI(TAG, "drawing %s", this->fb_ != nullptr ? "straight into the panel frame buffer" : "through the display API");
     xTaskCreatePinnedToCore(SkippyStream::recv_task_, "skippy_rx", 4096, this, 7, nullptr, 0);
-    xTaskCreatePinnedToCore(SkippyStream::draw_task_, "skippy_draw", 8192, this, 8, nullptr, 1);
+    xTaskCreatePinnedToCore(SkippyStream::draw_task_, "skippy_draw", 8192, this, 8, &this->draw_handle_, 1);
+    if (this->fb_ != nullptr) {
+      esp_lcd_rgb_panel_event_callbacks_t cbs = {};
+      cbs.on_vsync = (esp_lcd_rgb_panel_vsync_cb_t) SkippyStream::vsync_isr_;
+      esp_err_t e = esp_lcd_rgb_panel_register_event_callbacks(m->handle_, &cbs, this);
+      this->vsync_on_ = e == ESP_OK;
+      ESP_LOGI(TAG, "vsync callback: %s", esp_err_to_name(e));
+    }
   }
   if (this->ready_ && millis() - this->last_log_ > 5000) {
-    ESP_LOGI(TAG, "%.1f frames/s, %u dgrams/s, %u tiles/s (inflate %u us, blit %u us per tile), missing %u, partial frames %u, dropped %u, bad %u", this->frames_ / 5.0f, (unsigned) (this->dgrams_ / 5),
-             (unsigned) (this->tiles_ / 5), (unsigned) (this->inflate_us_ / (this->tiles_ + 1)), (unsigned) (this->blit_us_ / (this->tiles_ + 1)), (unsigned) this->missing_, (unsigned) this->lost_, (unsigned) this->dropped_, (unsigned) this->bad_);
-    this->frames_ = this->tiles_ = this->dgrams_ = this->missing_ = this->lost_ = this->dropped_ = this->inflate_us_ = this->blit_us_ = 0;
+    ESP_LOGI(TAG, "%.1f frames/s, %u dgrams/s, %u tiles/s (inflate %u us, blit %u us per tile), missing %u, partial frames %u, dropped %u, bad %u, vsync-synced %u/%u", this->frames_ / 5.0f, (unsigned) (this->dgrams_ / 5),
+             (unsigned) (this->tiles_ / 5), (unsigned) (this->inflate_us_ / (this->tiles_ + 1)), (unsigned) (this->blit_us_ / (this->tiles_ + 1)), (unsigned) this->missing_, (unsigned) this->lost_, (unsigned) this->dropped_, (unsigned) this->bad_, (unsigned) this->synced_, (unsigned) (this->synced_ + this->unsynced_));
+    this->frames_ = this->tiles_ = this->dgrams_ = this->missing_ = this->lost_ = this->dropped_ = this->inflate_us_ = this->blit_us_ = this->synced_ = this->unsynced_ = 0;
     this->last_log_ = millis();
   }
 }

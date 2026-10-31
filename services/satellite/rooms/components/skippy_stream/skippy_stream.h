@@ -38,7 +38,7 @@ class SkippyStream : public Component {
   uint16_t port_{10803};
   uint32_t timeout_ms_{1200};
   int sock_{-1};
-  bool enabled_{true}, started_{false};
+  bool enabled_{true}, started_{false}, vsync_on_{false};
   volatile bool ready_{false}, rx_ever_{false};
   volatile uint32_t rx_ms_{0};
   SemaphoreHandle_t lock_{nullptr};
@@ -55,8 +55,11 @@ class SkippyStream : public Component {
   volatile uint32_t missing_all_{0};
   volatile uint32_t dgrams_{0}, frames_{0}, tiles_{0}, bad_{0}, lost_{0}, missing_{0}, dropped_{0};
   uint32_t last_log_{0};
+  TaskHandle_t draw_handle_{nullptr};                // woken at every vsync: a frame is written right after the scan restarts, ahead of it (the scan cannot catch up, so the can never shears)
+  volatile uint32_t synced_{0}, unsynced_{0};
   static void recv_task_(void *arg);
   static void draw_task_(void *arg);
+  static bool vsync_isr_(void *panel, const void *event, void *ctx);
   void run_();
   void draw_loop_();
   void finish_();                                    // hand the buffer being filled to the drawing task
