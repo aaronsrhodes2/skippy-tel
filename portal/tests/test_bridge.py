@@ -64,7 +64,7 @@ def test_the_launcher_is_glyphs_with_a_lamp_and_no_sentence_on_it(env):
 def test_the_launcher_sizes_its_grid_to_the_number_of_controls_so_nothing_scrolls(env):
     client, _, _ = env
     login(client, ADMIN)
-    assert 'style="--rows: 5; --rows-wide: 3; --rows-side: 2"' in client.get("/apps").data.decode()          # 9 controls
+    assert 'style="--rows: 6; --rows-wide: 3; --rows-side: 3"' in client.get("/apps").data.decode()          # 11 controls
     _add_friend(client, PAL, ["dragonwilds"])
     login(client, PAL)
     assert 'style="--rows: 1; --rows-wide: 1; --rows-side: 1"' in client.get("/apps").data.decode()          # one
@@ -89,10 +89,10 @@ def test_the_bridge_is_exactly_the_viewport_and_never_scrolls():
     body = re.search(r"body\.bridge \{(.*?)\}", css, re.S).group(1)
     assert "height: 100dvh" in body and "overflow: hidden" in body and "overscroll-behavior: none" in body
     assert "100vh" in body                                                      # the fallback for a browser without dvh
-    # the one exception (the Captain's rule, 2026-10-23): Skippy's transcript scrolls, and the message box scrolls inside itself
+    # the one exception (the Captain's rule, 2026-10-23): Skippy's transcript scrolls (the Home chat's is the same transcript), and the message box scrolls inside itself
     bare = re.sub(r"/\*.*?\*/", "", css, flags=re.S)                                  # (comments aside)
     scrollers = [m.group(1).strip() for m in re.finditer(r"([^{}]+)\{[^}]*overflow(?:-y)?: (?:auto|scroll)", bare)]
-    assert scrollers == [".chat-bridge .log", ".chat-bridge textarea"], scrollers
+    assert scrollers == [".chat-bridge .log", ".chat-bridge textarea", ".chat-bridge .home-flow"], scrollers
     assert "grid-template-rows: repeat(var(--rows" in css                       # rows share the height: nothing is taller than the screen
 
 
