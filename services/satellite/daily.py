@@ -26,12 +26,14 @@ import re
 import time
 import urllib.parse
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 KM_TO_MI = 0.621371192237334            # Mentat convert_units 1 km -> mile (pint UnitRegistry), 2026-10-31
 CAR_URL = os.environ.get("SKIPPY_CAR_URL", "http://skippy-core:7351").rstrip("/")            # the car reader (core/car): TeslaMate's latest values
 CAR_BLE_URL = os.environ.get("SKIPPY_CAR_BLE_URL", "http://skippy-core:7352").rstrip("/")    # charging over Bluetooth (core/car-ble)
 CAR_FLEET_URL = os.environ.get("SKIPPY_CAR_FLEET_URL", "http://skippy-core:7353").rstrip("/")  # Sentry through the Fleet API (core/car-fleet)
+ROUTES_URL = os.environ.get("SKIPPY_ROUTES_URL", "http://skippy-core:7354").rstrip("/")      # roads and addresses on skippy-core (core/routes)
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 GAP_S = 3.0                              # the pause after each part: room for "skip", "later", "stop"
 SNOOZE_S = 600
@@ -41,6 +43,9 @@ TALK_WAIT_S = 90                         # room talk (not to Skippy) holds the n
 HOME_NEAR_KM = 0.3                       # the car this close to home is home
 AWAY_KM = 1.0                            # ... and this far is away
 PRESENCE_WAIT_S = 45 * 60                # after the car gets home, the spoken part waits this long for him to be heard in the room
+LEAVE_BUFFER_MIN = 10                    # leave-by: this much spare before the drive (SKIPPY_LEAVE_BUFFER_MIN)
+TIGHT_RANGE = 0.8                        # today's miles past this share of the car's range is "close" (rated range is optimistic)
+ONLINE_RE = re.compile(r"https?://|www\.|zoom|meet\.google|google meet|teams|webex|skype|facetime|\b(?:online|virtual|remote|phone|call|dial[- ]in|tbd|n/?a)\b", re.I)
 
 SKIP_RE = re.compile(r"^\W*(?:ok(?:ay)?\W+)?(?:skip(?: (?:it|that|this|ahead|that one))?|next|move on|pass)\W*$", re.I)
 LATER_RE = re.compile(r"^\W*(?:ok(?:ay)?\W+)?(?:later|snooze|not now|in a (?:bit|minute|few minutes)|give me (?:ten|10|a few) minutes)\W*$", re.I)
@@ -133,6 +138,9 @@ class Daily:
         self.stereo = stereo                                      # () -> StereoMusic or None: Bilby's library on the house stereo (router.py)
         self.get, self.post, self.clock, self.mono, self.sleep, self.log, self.persona = get, post, clock, mono, sleep, log, persona
         self.extras = extras or {}                                # more morning / bedtime parts from elsewhere: {"calendar": async () -> str|None, ...}
+        self.extras.setdefault("miles_today", self.miles_today)   # today's driving from the calendar (needs "events_today": async () -> [event])
+        self._trip: tuple[str, dict | None] | None = None         # (date, today's trip): worked out once a day
+        self._places: dict[str, dict | None] = {}                 # a calendar location -> where it is (or None: not a place)
         self.dir = Path(state_dir) if state_dir else Path(__file__).resolve().parents[2] / "state" / "daily"
         self.room_name = (env.get("SKIPPY_ROUTINE_ROOM") or "").strip()
         self.morning_at = env.get("SKIPPY_MORNING_AT", "07:10")
@@ -760,10 +768,92 @@ class Daily:
         plug = "plugged in" if car.get("plugged_in") else "not plugged in"
         charging = car.get("charging_state") or "unknown"
         need = (self.extras.get("miles_today") and await self.extras["miles_today"]()) or None
+        verdict = ""
+        if need and rng:
+            have = rng * KM_TO_MI
+            verdict = (" That is MORE than the car's range: it must charge before or during the day." if need > have else
+                       " That is close to the car's range." if need > TIGHT_RANGE * have else " The range covers it.")
         material = (f"Battery {car.get('battery_level')} percent, range {miles}, {plug}, charging state {charging}, charge limit "
-                    f"{car.get('charge_limit_soc')} percent." + (f" Today's calendar needs about {need} miles of driving." if need else ""))
+                    f"{car.get('charge_limit_soc')} percent." + (f" Today's calendar needs about {need} miles of driving.{verdict}" if need else ""))
         return await self.aword("One or two sentences on the car." + (" Warn him plainly if today's driving needs more range than it has." if need else ""),
                                 material, 150, fallback="The car: " + material)
+
+    # ── today's driving (core/routes on skippy-core: Valhalla's roads, Nominatim's addresses, California's OpenStreetMap) ──
+    def where_is(self, text: str, home: tuple[float, float]) -> dict | None:
+        """Where a calendar location is, or None (an online meeting, a room name, nothing the map knows). A location without a comma is
+        only looked for within ~100 km of home, so "Room 4B" never lands on a stranger's street."""
+        key = (text or "").strip()
+        if not key or ONLINE_RE.search(key):
+            return None
+        if key not in self._places:
+            q = {"q": key, "near": f"{home[0]},{home[1]}"}
+            if "," not in key:
+                q["bounded"] = "1"
+            try:
+                self._places[key] = self.get(f"{ROUTES_URL}/geocode?{urllib.parse.urlencode(q)}", 20) or None
+            except Exception as e:                                    # noqa: BLE001 — 404 (no such place) or the door is down
+                self.log(f"(daily: no place for {key[:60]!r}: {type(e).__name__})")
+                return None                                           # (not remembered: the door may be back tomorrow)
+        return self._places[key]
+
+    async def trip_today(self) -> dict | None:
+        """Today's off-site stops in order and the drive: {"stops": [{event, ts, place, km, minutes}], "km"} (home -> each stop -> home),
+        or None (no calendar, no home, no router). Worked out once a day."""
+        today = time.strftime("%Y-%m-%d", time.localtime(self.clock()))
+        if self._trip and self._trip[0] == today:
+            return self._trip[1]
+        fn, home = self.extras.get("events_today"), self.home()
+        if fn is None or home is None:
+            return None
+        events = await fn()
+        if events is None:
+            return None
+        stops = []
+        for e in events:
+            if e.get("all_day") or not e.get("start"):
+                continue
+            place = await asyncio.to_thread(self.where_is, e.get("location") or "", home)
+            if place is None or km_between(home, (place["lat"], place["lon"])) <= AWAY_KM:
+                continue                                              # online, unknown, or at home
+            stops.append({"event": e, "ts": datetime.fromisoformat(e["start"].replace("Z", "+00:00")).timestamp(), "place": place})
+        plan: dict | None = {"stops": stops, "km": 0.0}
+        if stops:
+            points = [list(home)] + [[s["place"]["lat"], s["place"]["lon"]] for s in stops] + [list(home)]
+            try:
+                got = await asyncio.to_thread(self.post, f"{ROUTES_URL}/route", {"points": points}, 60)
+            except Exception as e:                                    # noqa: BLE001 — no router today: say nothing rather than guess
+                self.log(f"(daily: no route for today: {type(e).__name__}: {e})")
+                return None
+            for s, leg in zip(stops, got["legs"]):
+                s["km"], s["minutes"] = leg["km"], leg["minutes"]
+            plan = {"stops": stops, "km": got["km"], "source": got.get("source")}
+        self._trip = (today, plan)
+        return plan
+
+    async def miles_today(self) -> int | None:
+        """Today's driving in miles (home, every off-site event, home), from the router's km; None when there is none to do."""
+        plan = await self.trip_today()
+        return round(plan["km"] * KM_TO_MI) if plan and plan["stops"] else None
+
+    async def leave_by(self) -> str | None:
+        """For the first off-site event: when to leave home (its start, less the router's drive time, less LEAVE_BUFFER_MIN)."""
+        plan = await self.trip_today()
+        if not plan or not plan["stops"]:
+            return None
+        s = plan["stops"][0]
+        if s["ts"] <= self.clock():
+            return None
+        buffer = float(self.env.get("SKIPPY_LEAVE_BUFFER_MIN", LEAVE_BUFFER_MIN))
+        leave = s["ts"] - 60 * (s["minutes"] + buffer)
+        leave -= leave % 300                                          # down to five minutes
+        e, place = s["event"], s["place"]
+        where = (e.get("location") or place.get("label") or "").split(",")[0].strip()
+        what = e.get("summary") or "Your first stop"
+        rough = " I could only find the town, so that's rough." if place.get("approx") else ""
+        drive = f"about {s['minutes']} minutes and {round(s['km'] * KM_TO_MI)} miles by road, before traffic"
+        if leave <= self.clock():
+            return f"{what} at {clock_words(s['ts'])} is at {where}, {drive}. You should be leaving now.{rough}"
+        return f"{what} at {clock_words(s['ts'])} is at {where}, {drive}. Leave by {clock_words(leave)}.{rough}"
 
     async def car_bedtime(self) -> str | None:
         """Charging on if it's plugged in and not full or charging; Sentry armed (the guard: lights and locks, never the horn)."""
@@ -843,8 +933,9 @@ class Daily:
 
         steps = [Step("", act=self.lights_gently), Step("the weather", make=self._join(greet, self.weather)),
                  Step("the news", make=self.morning_news)]
-        for key, title in (("calendar", "your calendar"), ("mail", "your mail"), ("birthdays", "birthdays"), ("packages", "packages")):
-            fn = self.extras.get(key)
+        for key, title in (("calendar", "your calendar"), ("leave", "when to leave"), ("mail", "your mail"), ("birthdays", "birthdays"),
+                           ("packages", "packages")):
+            fn = self.leave_by if key == "leave" and "events_today" in self.extras else self.extras.get(key)
             if fn is not None:
                 steps.append(Step(title, make=fn))
         steps += [Step("the car", make=self.car_report), Step("a joke", make=self.joke), Step("the word of the day", make=self.word_of_day),

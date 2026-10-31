@@ -2,7 +2,7 @@
 
 Code: `services/satellite/daily.py` (the routines, inside the hub), `services/satellite/stereo.py` (Bilby on the house stereo),
 `services/satellite/google_home.py` (his calendar, mail, contacts, to-dos: read only), `tools/nightly.py` (the night shift).
-Tests: `services/satellite/tests/test_sat_daily.py`, `test_sat_google_home.py`. State (not in git): `state/daily/`, `state/ledger/`.
+Tests: `services/satellite/tests/test_sat_daily.py`, `test_sat_google_home.py`, `core/tests/test_routes.py`. State (not in git): `state/daily/`, `state/ledger/`.
 
 ## What he hears
 
@@ -11,8 +11,9 @@ last evening). An early first event tomorrow moves it earlier (90 min before it,
 1. The lights come up (`SKIPPY_MORNING_LIGHTS`, default the Bedroom; a dimmable light ramps 5 → 50% over a minute).
 2. Good morning, the weather and what to wear (Open-Meteo for home).
 3. The news: major world news, new science (space, physics), AI, AR, software, each with its source (the house's SearXNG).
-4. Today's calendar, then the mail that matters (bills, people in his contacts), birthdays, packages due today (once Google is connected).
-5. The car: charge, range, plugged in.
+4. Today's calendar, then **when to leave** for the first off-site event, the mail that matters (bills, people in his contacts), birthdays,
+   packages due today (once Google is connected).
+5. The car: charge, range, plugged in, and today's miles against its range (a plain warning when the day needs more than it has).
 6. A joke, a word of the day (its meaning read from the web), a science fact from the checked quip bank, the overnight report.
 7. Bilby's library shuffled on the stereo (`SKIPPY_STEREO_OUT`, default `hdmi`: the downstairs projector/Sony output; `hdmi+bt` later).
 
@@ -42,6 +43,23 @@ services/satellite/.venv/Scripts/python services/satellite/daily.py run morning
 ```bash
 services/satellite/.venv/Scripts/python tools/nightly.py --dry-run
 ```
+
+## Leave-by and today's miles (no cloud: roads on skippy-core)
+
+The morning works out today's driving from the calendar, on skippy-core's own map (`core/routes`: Valhalla and Nominatim, OpenStreetMap's
+California extract; `SKIPPY_ROUTES_URL`, default `http://skippy-core:7354`). Each timed event's location is looked up: online meetings
+(a link, Zoom, Teams, "phone"...), places the map doesn't know (a room name) and places within 1 km of home are skipped; a location with
+no comma is only looked for within ~100 km of home. The rest, in order, make the day's trip: home → each stop → home, one route.
+
+- **Leave by**: the first off-site event's start, less the router's drive time, less `SKIPPY_LEAVE_BUFFER_MIN` (10), down to five minutes.
+  "Dentist at 10 AM is at Smile Dental, about 32 minutes and 15 miles by road, before traffic. Leave by 9:15 AM." Times have no live
+  traffic. When only the town could be found, it says so.
+- **Today's miles** (`extras["miles_today"]`): the whole trip's km in miles; the car part compares it with TeslaMate's range (more than
+  the range: a plain warning; over 80% of it: "close").
+- The router down, or no Google: nothing is said about either (never a guess). Worked out once a day.
+
+Switching the roads on (once, on skippy-core): `sudo bash core/install/routes.sh --apply`, then `--check` (the first map import takes
+about an hour; until then `/health` says what it is waiting on).
 
 ## Connecting his Google account (once, read only)
 
@@ -78,8 +96,7 @@ Signed in to the **work** Google account, at calendar.google.com:
 
 ## Not done yet
 
-- Leave-by time for an off-site first meeting, and the range warning against today's driving: both need travel times, and there is no
-  local routing service yet.
+- Live traffic in the leave-by time (the router has none), and the work office as a stop for work meetings in a room with no address.
 - Doors, plugs, the Nest and pre-conditioning the car at night: the house shows no door sensors or thermostat right now (Matter's Nest
   isn't listed), and car-ble has no climate command.
 - The bridge front-door switch-over, and wake-word retraining from the day's recordings: each is its own piece of work.

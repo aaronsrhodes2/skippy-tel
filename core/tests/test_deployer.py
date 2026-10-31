@@ -268,6 +268,26 @@ def test_the_3d_popups_join_the_stack_only_when_core_env_says_so(tmp_path, monke
     assert dep.Deployer(dep.load_settings(str(f)), log=lambda m: None).compose_files()[-2:] == ["-f", "core/popups-3d/compose.yml"]
 
 
+def test_roads_join_the_stack_only_when_core_env_says_so(tmp_path, monkeypatch):
+    for k in dep.DEFAULTS:
+        monkeypatch.delenv(k, raising=False)
+    f = tmp_path / "core.env"
+    f.write_text("CORE_GPU=1\nCORE_TESLA=1\n")
+    assert "core/compose.routes.yml" not in dep.Deployer(dep.load_settings(str(f)), log=lambda m: None).compose_files()
+    f.write_text("CORE_GPU=1\nCORE_TESLA=1\nCORE_ROUTES=1\n")
+    d = dep.Deployer(dep.load_settings(str(f)), log=lambda m: None)
+    assert d.compose_files()[-4:] == ["-f", "core/compose.tesla.yml", "-f", "core/compose.routes.yml"]
+    assert d.env("")["CORE_ROUTES"] == "1"                                      # the smoke test reads it
+
+
+def test_the_routes_compose_file_pins_both_engines_and_keeps_its_door_on_localhost():
+    from pathlib import Path
+    text = (Path(dep.__file__).resolve().parents[1] / "compose.routes.yml").read_text(encoding="utf-8")
+    assert "valhalla-scripted:3.9.1@sha256:" in text and "nominatim:5.1@sha256:" in text
+    assert '"127.0.0.1:7354:7354"' in text and text.count("ports:") == 1          # only the door is published, and only on 127.0.0.1
+    assert "healthcheck" not in text                                            # an hour-long first import must not fail the deploy's --wait
+
+
 def test_the_matter_compose_file_is_pinned_on_the_host_network_and_keeps_its_fabric():
     from pathlib import Path
     text = (Path(dep.__file__).resolve().parents[1] / "compose.matter.yml").read_text(encoding="utf-8")

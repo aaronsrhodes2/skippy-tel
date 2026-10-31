@@ -330,8 +330,12 @@ def extras(g: Google, word, log=print) -> dict:
         timed = [e for e in events or [] if not e["all_day"]]
         return datetime.fromisoformat(timed[0]["start"].replace("Z", "+00:00")).timestamp() if timed else None
 
+    async def events_today():
+        """Today's events as they are (Daily works out the leave-by time and the day's miles from their locations)."""
+        return await run(g.events, today()) if g.connected else None
+
     return {"calendar": calendar, "mail": mail, "packages": packages, "birthdays": birthdays, "tomorrow": tomorrow, "day": day,
-            "first_tomorrow": first_tomorrow}
+            "first_tomorrow": first_tomorrow, "events_today": events_today}
 
 
 def main(argv=None) -> int:

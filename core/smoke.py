@@ -16,6 +16,8 @@ Checks, in order (each prints ok/FAIL and its time; exit 1 if any fails):
   car         (only when CORE_TESLA=1) the car reader's /car answers and is connected to MQTT (compose.tesla.yml). A car not signed
               in yet is not a failure: that is the Captain's one step, and the Status page says so
   car-fleet   (only when CORE_TESLA=1) the guard's /health answers (core/car-fleet); not ready (no tokens yet) is said, not failed
+  routes      (only when CORE_ROUTES=1) the road door's /health answers (core/routes); not ready (the first map import, about an hour)
+              is said, not failed
   car-ble     (only when CORE_TESLA=1) the charging door's /health answers (core/car-ble); not ready (no key paired) is said, not failed
 
 URLs: SMOKE_SHIM (http://127.0.0.1:11434), SMOKE_LLM (http://127.0.0.1:8080);
@@ -36,6 +38,7 @@ SHIM = os.environ.get("SMOKE_SHIM", "http://127.0.0.1:11434").rstrip("/")
 LLM = os.environ.get("SMOKE_LLM", "http://127.0.0.1:8080").rstrip("/")
 MATTER = os.environ.get("SMOKE_MATTER", "http://127.0.0.1:5580").rstrip("/")
 CAR = os.environ.get("SMOKE_CAR", "http://127.0.0.1:7351").rstrip("/")
+ROUTES = os.environ.get("SMOKE_ROUTES", "http://127.0.0.1:7354").rstrip("/")
 CAR_BLE = os.environ.get("SMOKE_CAR_BLE", "http://127.0.0.1:7352").rstrip("/")
 CAR_FLEET = os.environ.get("SMOKE_CAR_FLEET", "http://127.0.0.1:7353").rstrip("/")
 DEFAULT = os.environ.get("OLLAMA_MODEL", "qwen3:8b")
@@ -235,7 +238,8 @@ def run(only: list[str] | None = None, wait: float = 0) -> list[dict]:
         except Fail as e:
             return [{"check": "ready", "ok": False, "detail": str(e), "s": round(time.monotonic() - t0, 1)}]
     extra = ([("matter", check_matter)] if os.environ.get("CORE_MATTER") == "1" else []) +             ([("car", check_car), ("car-ble", check_car_ble),
-                                                                                               ("car-fleet", lambda: check_car_ble(url=CAR_FLEET))] if os.environ.get("CORE_TESLA") == "1" else [])
+                                                                                               ("car-fleet", lambda: check_car_ble(url=CAR_FLEET))] if os.environ.get("CORE_TESLA") == "1" else []) + \
+        ([("routes", lambda: check_car_ble(url=ROUTES))] if os.environ.get("CORE_ROUTES") == "1" else [])
     for name, fn in CHECKS + extra:
         if only and name not in only:
             continue

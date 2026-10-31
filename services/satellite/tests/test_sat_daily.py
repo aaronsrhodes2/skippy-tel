@@ -503,3 +503,129 @@ def test_stop_the_music_reaches_the_stereo(tmp_path):
         await room.handle("what time is it")
     asyncio.run(go())
     assert calls == ["next", "stop", "resume"] and brain.heard == ["what time is it"]
+
+
+# ── today's driving: leave-by and miles (core/routes on skippy-core) ──
+DENTIST = (37.2266, -121.9747)
+STORE = (37.2872, -121.9500)
+
+
+def iso(date, hm):
+    from datetime import datetime
+    return datetime.fromtimestamp(stamp(date, hm)).astimezone().isoformat()
+
+
+def with_roads(d, events, legs=((24.1, 32), (10.0, 15), (30.0, 35)), router_up=True):
+    """The calendar's events, the road door's geocode and route answers, faked; returns what was asked of the door."""
+    asked = {"geocode": [], "route": []}
+    places = {"Smile Dental, 100 Main St Suite 2, Los Gatos, CA 95030, USA": {"lat": DENTIST[0], "lon": DENTIST[1], "label": "Smile Dental", "approx": False},
+              "Orchard Supply, Campbell, CA": {"lat": STORE[0], "lon": STORE[1], "label": "Campbell", "approx": True},
+              "The Captain's house": {"lat": HOME[0] + 0.001, "lon": HOME[1], "label": "home", "approx": False}}
+    get0, post0 = d.get, d.post
+
+    def get(url, timeout=15):
+        if url.startswith(daily.ROUTES_URL + "/geocode?"):
+            import urllib.parse
+            q = dict(urllib.parse.parse_qsl(url.split("?", 1)[1]))
+            asked["geocode"].append(q)
+            if q["q"] not in places:
+                raise OSError("HTTP Error 404: no place matches")
+            return places[q["q"]]
+        return get0(url, timeout)
+
+    def post(url, body, timeout=120):
+        if url == daily.ROUTES_URL + "/route":
+            asked["route"].append(body["points"])
+            if not router_up:
+                raise OSError("connection refused")
+            return {"km": round(sum(k for k, _ in legs), 2), "minutes": sum(m for _, m in legs),
+                    "legs": [{"km": k, "minutes": m} for k, m in legs], "source": "Valhalla"}
+        return post0(url, body, timeout)
+    d.get, d.post = get, post
+
+    async def events_today():
+        return events
+    d.extras["events_today"] = events_today
+    return asked
+
+
+def a_day(date="2026-11-02"):
+    return [{"start": date, "end": date, "all_day": True, "summary": "Payday", "location": "Somewhere, CA"},
+            {"start": iso(date, "08:00"), "end": iso(date, "08:30"), "all_day": False, "summary": "Standup", "location": "https://zoom.us/j/123"},
+            {"start": iso(date, "10:00"), "end": iso(date, "11:00"), "all_day": False, "summary": "Dentist",
+             "location": "Smile Dental, 100 Main St Suite 2, Los Gatos, CA 95030, USA"},
+            {"start": iso(date, "12:30"), "end": iso(date, "13:00"), "all_day": False, "summary": "Lunch", "location": "The Captain's house"},
+            {"start": iso(date, "16:00"), "end": iso(date, "16:30"), "all_day": False, "summary": "Hardware", "location": "Orchard Supply, Campbell, CA"},
+            {"start": iso(date, "17:00"), "end": iso(date, "17:30"), "all_day": False, "summary": "Sync", "location": "Conf Room 4B"}]
+
+
+def test_the_morning_says_when_to_leave_for_the_first_off_site_meeting(tmp_path):
+    now = [stamp("2026-11-02", "07:10")]
+    d, room, link, *_ = make(tmp_path, now, car=car_at(HOME))
+    asked = with_roads(d, a_day())
+    said = asyncio.run(d.leave_by())
+    # 10:00, less the router's 32 minutes, less 10 spare = 9:18, down to five minutes
+    assert said == "Dentist at 10 AM is at Smile Dental, about 32 minutes and 15 miles by road, before traffic. Leave by 9:15 AM."
+    # home -> the dentist -> the store -> home: no Zoom, no all-day event, nothing at home, no room name the map doesn't know
+    assert asked["route"] == [[list(HOME), list(DENTIST), list(STORE), list(HOME)]]
+    assert [q["q"] for q in asked["geocode"]] == ["Smile Dental, 100 Main St Suite 2, Los Gatos, CA 95030, USA", "The Captain's house",
+                                                 "Orchard Supply, Campbell, CA", "Conf Room 4B"]
+    assert asked["geocode"][-1]["bounded"] == "1" and "bounded" not in asked["geocode"][0]     # no comma: only near home
+    assert asyncio.run(d.extras["miles_today"]()) == round(64.1 * daily.KM_TO_MI) == 40
+    assert len(asked["route"]) == 1                                                     # worked out once a day
+
+    d2, room2, link2, *_ = make(tmp_path / "b", now, car=car_at(HOME))
+    with_roads(d2, a_day())
+
+    async def go():
+        await room2.handle("Good morning")
+        await finish(d2, 15)
+    asyncio.run(go())
+    text = " ".join(link2.spoken)
+    assert "Leave by 9:15 AM." in text and "Next: when to leave." in text
+
+
+def test_a_late_start_or_a_town_only_place_is_said_plainly(tmp_path):
+    now = [stamp("2026-11-02", "09:25")]
+    d, *_ = make(tmp_path, now)
+    with_roads(d, a_day())
+    assert asyncio.run(d.leave_by()).endswith("You should be leaving now.")
+    now[0] = stamp("2026-11-02", "07:00")
+    d2, *_ = make(tmp_path / "b", now)
+    with_roads(d2, [e for e in a_day() if e["summary"] != "Dentist"], legs=((20.0, 25), (20.0, 25)))
+    assert asyncio.run(d2.leave_by()) == ("Hardware at 4 PM is at Orchard Supply, about 25 minutes and 12 miles by road, before traffic. "
+                                          "Leave by 3:25 PM. I could only find the town, so that's rough.")
+
+
+def test_todays_driving_past_the_cars_range_is_a_plain_warning(tmp_path):
+    now = [stamp("2026-11-02", "07:10")]
+
+    class Down:
+        def __init__(self):
+            self.messages = self
+
+        def create(self, **k):
+            raise ConnectionError("Core is restarting")
+    short = car_at(HOME, rated_battery_range_km=50.0)                               # ~31 miles; the day needs 40
+    d, *_ = make(tmp_path, now, car=short)
+    d.client = Down()
+    with_roads(d, a_day())
+    said = asyncio.run(d.car_report())
+    assert "needs about 40 miles of driving. That is MORE than the car's range" in said
+    d2, *_ = make(tmp_path / "b", now, car=car_at(HOME))                             # 300 km: ~186 miles
+    d2.client = Down()
+    with_roads(d2, a_day())
+    assert "needs about 40 miles of driving. The range covers it." in asyncio.run(d2.car_report())
+
+
+def test_no_leave_by_on_an_online_day_without_a_calendar_or_without_the_router(tmp_path):
+    now = [stamp("2026-11-02", "07:10")]
+    d, *_ = make(tmp_path, now)
+    with_roads(d, [e for e in a_day() if e["summary"] in ("Standup", "Lunch", "Sync")])
+    assert asyncio.run(d.leave_by()) is None and asyncio.run(d.miles_today()) is None
+    d2, *_ = make(tmp_path / "b", now)
+    assert asyncio.run(d2.leave_by()) is None and asyncio.run(d2.miles_today()) is None   # no Google: no calendar
+    assert "when to leave" not in [s.title for s in d2.morning_steps(None)]
+    d3, *_ = make(tmp_path / "c", now)
+    with_roads(d3, a_day(), router_up=False)
+    assert asyncio.run(d3.leave_by()) is None and asyncio.run(d3.miles_today()) is None   # said nothing rather than guessed
