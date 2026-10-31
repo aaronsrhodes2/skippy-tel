@@ -66,11 +66,14 @@ class Recorder:
         self.t = 0
         self.got: asyncio.Future | None = None
         self.done = 0
+        self.blocks_heard, self.peak = 0, 0.0                    # what the pod delivered since the last prompt: tells a silent room from a dead stream
 
     # the room hands us every block
     def feed(self, block) -> None:
         self.t += BLOCK_MS
         self.pre = (self.pre + [block])[-PRE_BLOCKS:]
+        self.blocks_heard += 1
+        self.peak = max(self.peak, rms(block))
         if not self.armed:
             return
         event = self.vad.push(rms(block), self.t)
@@ -98,12 +101,13 @@ class Recorder:
             await self.speak(text)
             await asyncio.sleep(0.5)                            # his own voice is still ringing in the pod's microphone
             self.vad.restart()
+            self.blocks_heard, self.peak = 0, 0.0
             self.buf, self.got, self.armed = None, asyncio.get_running_loop().create_future(), True
             try:
                 clip = await asyncio.wait_for(self.got, self.wait_s)
             except asyncio.TimeoutError:
                 self.armed = False
-                self.log("   (heard nothing: skipped)")
+                self.log(f"   (heard nothing: skipped; the pod sent {self.blocks_heard * BLOCK_MS / 1000:.1f} s of audio, loudest {self.peak:.4f}, the bar is {self.vad.bar():.4f})")
                 continue
             held = (n + 1) % HOLD_OUT_EVERY == 0
             folder = self._folder(held)
