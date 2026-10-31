@@ -66,6 +66,28 @@
    "purple Skippy's car_sentry tool"
   ]
  },
+ "routes": {
+  "for": "The road door: drive times and distances (Valhalla) and addresses turned into places (Nominatim), from OpenStreetMap's California map on skippy-core. No cloud, no fee. Tailnet only, port 7354.",
+  "used_by": [
+   "the morning briefing's leave-by time and today's miles (daily.py)"
+  ],
+  "example": {
+   "ask": "POST /route {\"points\": [[37.17, -122.14], [37.06, -122.01]]}",
+   "answer": "{\"km\": 24.6, \"minutes\": 31, ...}"
+  }
+ },
+ "valhalla": {
+  "for": "The router behind the road door: distance and drive time by car between places (no live traffic), from road tiles it built once from OpenStreetMap's California extract.",
+  "used_by": [
+   "the road door (routes)"
+  ]
+ },
+ "nominatim": {
+  "for": "The geocoder behind the road door: turns a calendar's address or place name into a position, from its own Postgres import of OpenStreetMap's California extract.",
+  "used_by": [
+   "the road door (routes)"
+  ]
+ },
  "car-ble": {
   "for": "Switches the Tesla's charging on and off over Bluetooth (Tesla's tesla-control with a charging-only key that never leaves skippy-core). Tailnet only, port 7352.",
   "used_by": [

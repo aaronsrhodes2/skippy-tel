@@ -52,9 +52,9 @@ RAMP_STEPS = 4
 PHRASES = (32, 16, 8)             # mix-out points, in beats from the first beat, best first
 MAX_STRETCH = 0.06
 CLASH = 3                         # Camelot distance from which two keys don't mix
-NUDGE_S = 0.06                    # how far the audio may move a grid
+NUDGE_S = 0.15                    # how far the audio may move a grid (Traktor's autocue anchors are up to ~70 ms out on live drums)
 SEAM_S = 0.008                    # the tiny crossfades between the stretched pieces
-LEAD_S = 2.0                      # audio decoded ahead of the mix-out point (to line the grid up)
+LEAD_S = 8.0                      # audio decoded ahead of the mix-out point (to line the grid up on its last bars with drums)
 BASS_HZ = 180.0
 MARGIN_S = 6.0                    # a mix-out point closer than this to where the track is now is too late to render for
 
@@ -65,7 +65,10 @@ def _np():
 
 
 def _nfc(s: str) -> str:
-    return unicodedata.normalize("NFC", s).replace("\\", "/").strip("/")
+    s = unicodedata.normalize("NFC", s).replace("\\", "/")
+    while "//" in s:
+        s = s.replace("//", "/")
+    return s.strip("/")
 
 
 # ── keys ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -265,7 +268,7 @@ def analyse_file(path: str) -> Track | None:
         r = float(np.corrcoef(chroma, prof)[0, 1])
         best = max(best, (r, v))
     key, minor = camelot(best[1])
-    return Track("", 60.0 / slope, first, len(y) / sr, key, minor, 0, "librosa")
+    return Track("", float(60.0 / slope), first, float(len(y) / sr), key, minor, 0, "librosa")
 
 
 # ── audio ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -297,8 +300,8 @@ def fit(x, frames: int):
     return np.concatenate([x, np.zeros((frames - len(x), 2), dtype="float32")])
 
 
-def onset_envelope(x, hop: int = 256, n_fft: int = 1024):
-    """Spectral flux of a mono mix: high where something hits. One value per `hop` frames."""
+def onset_envelope(x, hop: int = 256, n_fft: int = 1024, max_hz: float | None = None):
+    """Spectral flux of a mono mix: high where something hits. One value per `hop` frames. `max_hz` keeps only the kick's band."""
     np = _np()
     mono = x.mean(axis=1) if x.ndim == 2 else x
     if len(mono) < n_fft:
@@ -306,24 +309,35 @@ def onset_envelope(x, hop: int = 256, n_fft: int = 1024):
     frames = 1 + (len(mono) - n_fft) // hop
     idx = np.arange(n_fft)[None, :] + hop * np.arange(frames)[:, None]
     mag = np.abs(np.fft.rfft(mono[idx] * np.hanning(n_fft), axis=1))
+    if max_hz:
+        mag = mag[:, : int(max_hz * n_fft / RATE) + 1]
     mag = np.log1p(100 * mag)
     flux = np.maximum(np.diff(mag, axis=0), 0).sum(axis=1)
     return np.concatenate([[0.0], flux])
 
 
 def nudge(x, first_beat_s: float, period: float, hop: int = 128, n_fft: int = 1024, limit: float = NUDGE_S) -> float:
-    """How far (seconds) to move a grid so its beats, inside the audio `x`, sit on the onsets. 0 unless the audio says so clearly: much of his
-    library is played by drummers, and there Traktor's grid is the better guess than a weak, wandering onset curve."""
+    """How far (seconds) to move a grid so its beats, inside the audio `x`, sit on the onsets: the kick drum first (it is on the beat; hi-hats are
+    often between), then everything. 0 unless the audio says so clearly: much of his library is played by drummers, and there Traktor's grid is
+    the better guess than a weak, wandering onset curve."""
+    for max_hz in (200.0, None):
+        got = _nudge(x, first_beat_s, period, hop, n_fft, limit, max_hz)
+        if got is not None:
+            return got
+    return 0.0
+
+
+def _nudge(x, first_beat_s, period, hop, n_fft, limit, max_hz):
     np = _np()
-    env = onset_envelope(x, hop, n_fft)
+    env = onset_envelope(x, hop, n_fft, max_hz)
     if not env.any():
-        return 0.0
+        return None
     rate = RATE / hop
     centre = (n_fft / 2 + 0.0067 * RATE) / hop                     # a hit shows most a little past the middle of its window (measured on clicks)
     beats = first_beat_s + period * np.arange(int((len(x) / RATE - first_beat_s) / period) + 1)
     beats = beats[(beats >= period / 2) & (beats < len(x) / RATE - period / 2)]
     if len(beats) < 4:
-        return 0.0
+        return None
     shifts = np.arange(-period / 2, period / 2, 1.0 / rate)        # the whole beat, to tell a clear peak from noise
     scores = []
     for s in shifts:
@@ -335,14 +349,14 @@ def nudge(x, first_beat_s: float, period: float, hop: int = 128, n_fft: int = 10
     zero = int(np.abs(shifts).argmin())
     clear = scores[best] >= 2.0 * np.median(scores) and scores[best] >= 1.25 * scores[zero]
     if not clear:
-        return 0.0
+        return None
     off = 0.0
     if 0 < best < len(scores) - 1:                                 # the peak between two steps (a parabola through three)
         y0, y1, y2 = scores[best - 1], scores[best], scores[best + 1]
         den = y0 - 2 * y1 + y2
         off = 0.5 * (y0 - y2) / den if den else 0.0
     shift = float(shifts[best] + off / rate)
-    return shift if abs(shift) <= limit else 0.0
+    return shift if abs(shift) <= limit else None
 
 
 def loud_end(x, start_s: float) -> float:
@@ -442,7 +456,7 @@ def render(p: Plan, a_path: str, b_path: str, run=subprocess.run):
     # line both grids up on the audio itself
     a_raw = decode(a_path, p.a_out - LEAD_S, LEAD_S + p.overlap * p.a_period + 0.5, run=run)
     da = nudge(a_raw, LEAD_S, p.a_period)
-    b_head = decode(b_path, p.b_in - 0.5, 0.5 + p.overlap * p.b_period, run=run)
+    b_head = decode(b_path, p.b_in - 0.5, 0.5 + max(p.overlap, 32) * p.b_period, run=run)
     db = nudge(b_head, 0.5, p.b_period)
     a_out, b_in = p.a_out + da, p.b_in + db
     span = int(round(p.overlap * p.a_period * RATE))
