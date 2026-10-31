@@ -52,7 +52,7 @@ def make_gate(lib: Path, state: Path, inbox: Path):
     return gate.create_app(library, places, gate.gate_key(TOKEN)), library
 
 
-def stand_in_box(app, library):
+def stand_in_box(app, library, name="Office", room="office"):
     """A room box that plays books on a clock, checked in through the real Connect route and moved by the `book:` commands it is handed."""
     player = app.extensions["player"]
     captain = next(iter(sorted(app.config["ADMIN_EMAILS"])))
@@ -84,9 +84,9 @@ def stand_in_box(app, library):
             state = {"queue": [], "armed": True}
             if book:
                 state["book"] = {"id": box["id"], "title": book["t"], "pos": round(pos(), 1), "chapter": 1, "playing": box["playing"], "speed": box["speed"]}
-            reply = player.checkin(captain, "skippyroom-office", "Office (Skippy)", state, room="box-office", box=True)
+            reply = player.checkin(captain, f"skippyroom-{room}", f"{name} (Skippy)", state, room=f"box-{room}", box=True)
             for action in reply["commands"]:
-                print("office box got", action, flush=True)
+                print(room, "box got", action, flush=True)
                 act(action)
             time.sleep(2)
 
@@ -138,6 +138,7 @@ def main() -> None:
     Server(gate_app, args.gate_port).start()
     portal_app = make_portal(args.gate_port)
     stand_in_box(portal_app, library)
+    stand_in_box(portal_app, library, "Kitchen", "kitchen")
     print(f"dev_books: the real audiobook-gate on :{args.gate_port} ({library.count} books), the portal on :{args.port}; open http://127.0.0.1:{args.port}/dev-login")
     Server(portal_app, args.port).start()
     try:

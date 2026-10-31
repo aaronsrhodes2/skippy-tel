@@ -276,10 +276,15 @@
 
   function toggle() {
     if (!S.cur) return;
-    if (S.remote) return remoteCmd(playingNow() ? "book:pause" : "book:resume");
+    if (S.remote) {
+      if (!S.remote.book) return remoteCmd(`book:play:${S.cur.id}` + resumeSuffix(S.cur));       // the box has told us nothing yet: start it from the place
+      return remoteCmd(playingNow() ? "book:pause" : "book:resume");
+    }
     if (au.paused) { au.play().then(() => { root.dataset.playing = "1"; $("#tapbar").hidden = true; paintAll(); }).catch(() => { $("#tapbar").hidden = false; }); }
     else au.pause();
   }
+
+  const resumeSuffix = b => { const r = P.resumeAt(S.places[b.id], b.d); return r ? `:${r.toFixed(1)}` : ""; };
 
   function seekTo(sec) {
     const b = S.cur; if (!b) return;
@@ -390,8 +395,10 @@
     if (S.remote) {
       const dev = S.rooms.find(d => d.id === S.remote.device);
       if (!dev || !dev.live) { S.remote.lost = (S.remote.lost || 0) + 1; if (S.remote.lost > 3) { toast(`${S.remote.name} went away`); S.remote = null; paintAll(); } }
-      else if (dev.book) {
-        S.remote.lost = 0; S.remote.book = Object.assign({}, dev.book); S.remote.at = Date.now() - dev.age * 1000;
+      else if (dev.book && S.remote.holdUntil && Date.now() < S.remote.holdUntil && dev.book.playing !== S.remote.expectPlaying) {
+        S.remote.lost = 0;                                  // an older state than our command: keep what we showed
+      } else if (dev.book) {
+        S.remote.lost = 0; S.remote.holdUntil = 0; S.remote.book = Object.assign({}, dev.book); S.remote.at = Date.now() - dev.age * 1000;
         S.remote.book.pos = dev.book.pos;
         const b = S.byId[dev.book.id];
         if (b && (!S.cur || S.cur.id !== b.id)) setCurrent(b, false);
@@ -416,8 +423,28 @@
       if (!r.ok) { toast(`${S.remote.name} isn't answering`); return false; }
     } catch (e) { toast("No signal"); return false; }
     if (book) { setCurrent(book, false); }
+    expect(action, book || S.cur);
     setTimeout(pollRooms, 1500); setTimeout(pollRooms, 4000);        // the hub takes its next check-in to act
     return true;
+  }
+
+  /** What the box will say once it has done `action`, shown at once and held for HOLD_MS: the check-in that carried the command still reports the old
+   *  state, and believing it would flip the keys back (and the next press would then send the opposite command). */
+  const HOLD_MS = 6000;
+  function expect(action, b) {
+    const r = S.remote; if (!r || !b) return;
+    const cur = r.book && r.book.id === b.id ? r.book : { id: b.id, title: b.t, pos: curPos(b), chapter: 0, playing: false, speed: S.speed };
+    const now = Date.now(), pos = P.remotePos(cur, (now - r.at) / 1000, b.d);
+    let m;
+    const next = Object.assign({}, cur, { pos });
+    if ((m = /^book:play:[a-z0-9-]+(?::([\d.]+))?$/.exec(action))) { next.playing = true; if (m[1]) next.pos = +m[1]; }
+    else if (action === "book:resume") next.playing = true;
+    else if (action === "book:pause") next.playing = false;
+    else if ((m = /^book:skip:(-?\d+)$/.exec(action))) next.pos = Math.max(0, pos + +m[1]);
+    else if ((m = /^book:speed:([\d.]+)$/.exec(action))) next.speed = +m[1];
+    else if (action.startsWith("book:chapter:")) { /* the box says where it lands */ }
+    r.book = next; r.at = now; r.holdUntil = now + HOLD_MS; r.expectPlaying = next.playing;
+    paintAll();
   }
 
   async function stopRemote() {
@@ -430,8 +457,10 @@
     const b = S.cur || S.byId[S.sheet]; if (!b) return;
     const pos = Math.round(curPos(b) * 10) / 10;
     const resume = P.resumeAt({ pos, finished: (S.places[b.id] || {}).finished }, b.d);
+    if (S.remote && S.remote.device === device.id) { closeMenu(); return; }  // already there
     if (playingHere()) au.pause();                                           // one place at a time: this browser stops, the box takes over
     await savePlace(true);
+    if (S.remote) await stopRemote();                                        // from one box to another: the first one stops
     S.remote = { device: device.id, name: device.name, book: null, at: Date.now() };
     const ok = await remoteCmd(`book:play:${b.id}` + (resume ? `:${resume.toFixed(1)}` : ""), b);
     if (!ok) S.remote = null;
