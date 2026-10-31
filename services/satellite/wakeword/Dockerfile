@@ -23,3 +23,6 @@ RUN pip install --no-cache-dir "numpy<2" onnxruntime==1.16.3 onnx==1.14.1 tqdm s
     deep-phonemizer==0.0.19 tensorflow-cpu==2.8.1 tensorflow_probability==0.16.0 onnx_tf==1.10.0 protobuf==3.20.3
 
 WORKDIR /work
+
+# datasets 2.14.6 needs the pyarrow of its day (PyExtensionType is gone from newer ones)
+RUN pip install --no-cache-dir "pyarrow==14.0.2"
