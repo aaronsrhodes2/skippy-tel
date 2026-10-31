@@ -148,3 +148,27 @@ def test_the_button_sends_one_repair_with_what_is_failing_and_starts_the_allowan
     view = d.view()
     assert {"starter", "docker", "home-reporter", "flask-api", "tts-studio", "whisper"} <= {row["name"] for row in view["rows"]}
     assert view["actions"][0]["what"] == "repair"
+
+
+def test_openaudible_is_healed_when_its_app_is_gone_and_only_reported_when_the_app_runs():
+    d, starter, clock, told = world()
+    alive(starter, openaudible=False, openaudible_app=False)
+    assert d.tick() == []
+    clock.t += doc.HEAL_AFTER_S + 1
+    alive(starter, openaudible=False, openaudible_app=False)
+    assert d.tick() == ["openaudible"] and handed(starter) == [("heal", "openaudible")]
+    row = next(r for r in d.view()["rows"] if r["name"] == "openaudible")
+    assert not row["ok"] and row["label"] == "OpenAudible (web server)" and row["why"] == "the app is not running" and row["for_s"] > doc.HEAL_AFTER_S
+    alive(starter, openaudible=True, openaudible_app=True)           # healed: green, and the clock starts over
+    d.tick()
+    assert next(r for r in d.view()["rows"] if r["name"] == "openaudible")["ok"]
+    # running with the web server off: never healed, the Captain told once
+    d2, starter2, clock2, told2 = world()
+    alive(starter2, openaudible=False, openaudible_app=True)
+    d2.tick()
+    clock2.t += doc.HEAL_AFTER_S + 1
+    alive(starter2, openaudible=False, openaudible_app=True)
+    assert d2.tick() == [] and handed(starter2) == [] and len(told2) == 1 and "Preferences > Web Server" in told2[0]
+    alive(starter2, openaudible=False, openaudible_app=True)
+    d2.tick()
+    assert len(told2) == 1

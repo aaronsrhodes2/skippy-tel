@@ -23,6 +23,7 @@ class World:
         self.pending_commands = []
         self.battery = ""                                                           # no UPS unless a test plugs one in
         self.t = [0.0]
+        self.oa_running, self.oa_web, self.oa_web_on_start = False, False, True      # OpenAudible: the app, its web server
 
     def run(self, cmd, timeout=120, cwd=None, env=None):
         self.cmds.append(cmd)
@@ -36,6 +37,8 @@ class World:
         if cmd[:3] == ["docker", "compose", "stop"]:
             self.states = ["exited"] * 3
             return 0, ""
+        if cmd[0] == "tasklist":
+            return 0, '"OpenAudible.exe","4711","Console","1","300,000 K"' if self.oa_running else "INFO: No tasks are running which match the specified criteria."
         if cmd[0] == "powershell.exe" and "-File" in cmd:                          # the clean restart
             self.docker = self.docker_wakes
             return 0, ""
@@ -58,8 +61,10 @@ class World:
             return 0, "main" if "rev-parse" in cmd else ""
         return 0, ""
 
-    def spawn(self, cmd, env=None, log=""):
+    def spawn(self, cmd, env=None, log="", minimized=False):
         self.spawned.append(cmd)
+        if cmd[0] == ss.OPENAUDIBLE_EXE:
+            self.oa_running, self.oa_web = True, self.oa_web_on_start
         if cmd[0] == ss.DOCKER_EXE and self.docker_wakes and not getattr(self, "needs_clean", False):
             self.docker = True
         elif "bridge_supervisor.sh" in " ".join(cmd):
@@ -91,6 +96,7 @@ def make(state_file=None, **kw):
     s = ss.Starter(run=w.run, http=w.http, spawn=w.spawn, sleep=w.sleep, clock=lambda: w.t[0], token="home-token", root=Path("/repo"), say=lambda *_: None,
                    now=lambda: NOW[0], state_file=state_file)
     s.state_file = state_file
+    s.openaudible_probe = lambda: w.oa_web
     return s, w
 
 
@@ -161,7 +167,7 @@ def test_each_poll_tells_the_portal_how_things_are_with_the_home_token_and_nothi
     s.poll_once(threaded=False)
     data, headers = w.posts[0]
     assert headers == {"Authorization": "Bearer home-token"} and data["results"] == []
-    assert data["status"] == {"docker": True, "containers_up": 3, "containers_total": 3, "bridge": True, "busy": True, "supervisor": True, "working": "", "resume_at": "", "containers": []}
+    assert data["status"] == {"docker": True, "containers_up": 3, "containers_total": 3, "bridge": True, "busy": True, "supervisor": True, "working": "", "resume_at": "", "containers": [], "openaudible": False, "openaudible_app": False}
 
 
 def test_a_request_from_the_portal_is_done_once_and_its_result_goes_back_on_the_next_poll():
@@ -181,7 +187,7 @@ def test_garbage_commands_are_answered_and_nothing_runs():
     s, w = make()
     w.pending_commands = [{"id": "aaaa1111", "op": "rm -rf /"}, {"id": "bbbb2222"}, "nope", {"op": "start"}, {"id": 5, "op": "start"}]
     s.poll_once(threaded=False)
-    assert w.cmds == [c for c in w.cmds if (c[0] == "docker" and c[1] == "ps") or c[0] == "nvidia-smi"]   # only the status looks, no operation
+    assert w.cmds == [c for c in w.cmds if (c[0] == "docker" and c[1] == "ps") or c[0] in ("nvidia-smi", "tasklist")]   # only the status looks, no operation
     s.poll_once(threaded=False)
     assert {r["id"]: r["summary"] for r in w.posts[1][0]["results"]} == {"aaaa1111": "I do not do that.", "bbbb2222": "I do not do that."}
 
@@ -460,3 +466,42 @@ class LogWorld:
             self.hosts.add(data["host"])
             self.logs.extend(data["records"])
         return {"ok": True}
+
+
+def test_the_status_says_whether_openaudible_answers_and_whether_the_app_is_even_running():
+    s, w = make()
+    assert (s.status()["openaudible"], s.status()["openaudible_app"]) == (False, False)
+    w.oa_running = True
+    assert (s.status()["openaudible"], s.status()["openaudible_app"]) == (False, True)       # the app is there, the web server is off
+    w.oa_web = True
+    assert (s.status()["openaudible"], s.status()["openaudible_app"]) == (True, True)
+
+
+def test_heal_openaudible_starts_the_app_only_when_it_is_not_running(tmp_path, monkeypatch):
+    exe = tmp_path / "OpenAudible.exe"
+    exe.write_text("x")
+    monkeypatch.setattr(ss, "OPENAUDIBLE_EXE", str(exe))
+    s, w = make()
+    ok, text = s.do("heal", arg="openaudible")
+    assert ok and "started" in text and w.spawned == [[str(exe)]] and w.oa_running
+    assert not any(c[0] == "taskkill" for c in w.cmds)
+    assert s.do("heal", arg="openaudible") == (True, "OpenAudible's web server is answering.")
+    w.spawned.clear()
+    s2, w2 = make()
+    w2.oa_web_on_start = False                                      # started, but the web server preference is off
+    ok, text = s2.do("heal", arg="openaudible")
+    assert not ok and "Preferences > Web Server" in text
+
+
+def test_heal_openaudible_never_touches_a_running_app_and_works_with_docker_down(tmp_path, monkeypatch):
+    exe = tmp_path / "OpenAudible.exe"
+    exe.write_text("x")
+    monkeypatch.setattr(ss, "OPENAUDIBLE_EXE", str(exe))
+    s, w = make(docker=False, containers=())
+    w.oa_running = True                                             # it may be converting his library
+    ok, text = s.do("heal", arg="openaudible")
+    assert not ok and "left alone" in text and w.spawned == [] and not any(c[0] == "taskkill" for c in w.cmds)
+    s2, w2 = make(docker=False, containers=())
+    monkeypatch.setattr(ss, "OPENAUDIBLE_EXE", str(tmp_path / "nope.exe"))
+    ok, text = s2.do("heal", arg="openaudible")
+    assert not ok and "not installed" in text and w2.spawned == []

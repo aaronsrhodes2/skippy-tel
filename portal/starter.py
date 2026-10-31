@@ -22,13 +22,13 @@ import status as status_mod
 
 OPS = ("start", "stop", "restart", "heal", "repair")        # heal and repair: the doctor (doctor.py) and the one Recovery button
 HEAL_NAMES = ("flask-api", "whisper", "music-studio", "image-studio", "music-gate", "video-gate",
-              "voice-gate", "tts-studio", "home-reporter", "bridge", "docker", "core")
+              "voice-gate", "tts-studio", "home-reporter", "bridge", "docker", "core", "openaudible")
 RESUMES = ("7am", "4h", "manual")        # a stop can say when the stack comes back by itself: 7 AM (the default), in 4 hours, or only when asked
 ONLINE_S = 45                    # the starter polls every ~10 s; this long without a call and it is not there
 REDELIVER_S = 30                 # a request not answered by then is handed over again (the starter ignores one it already has)
 KEEP_RESULTS = 20
 MAX_PENDING = 3
-STATUS_KEYS = {"docker": bool, "containers_up": int, "containers_total": int, "bridge": bool, "busy": bool, "supervisor": bool, "working": str, "resume_at": str,
+STATUS_KEYS = {"docker": bool, "containers_up": int, "containers_total": int, "bridge": bool, "busy": bool, "supervisor": bool, "openaudible": bool, "openaudible_app": bool, "working": str, "resume_at": str,
                "gpu_free_pct": int, "gpu_util_pct": int,            # skippy-pc's card (nvidia-smi): when a patient job may start (patient.py)
                "ups_on_battery": bool, "ups_charge": int, "ups_runtime_min": int,
                "containers": list}                                  # the Status map's container list (status.clean_containers cleans it)   # skippy-pc's own UPS (power.py tells the Captain)

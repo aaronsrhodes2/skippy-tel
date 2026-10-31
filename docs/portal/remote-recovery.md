@@ -15,6 +15,7 @@ phone ──> portal (Cloud Run) <── skippy-pc's home reporter (Docker) ─�
 | Portal (the page, the chat's memory) | Cloud Run, Google's side | a good deploy | Google; a bad deploy is undone by skippy-core (step 3) or from Google's own console |
 | Home reporter | Docker on skippy-pc, container `skippytel-home-reporter` | Docker Desktop running, the internet | Docker (`restart: unless-stopped`); it also restarts itself after 15 minutes without reaching the portal |
 | Bridge | the Windows host, port 9337 | you signed in, `tools/bridge_supervisor.sh` | the supervisor (restarts it within seconds; restarts one that is up but mute after a few minutes) |
+| OpenAudible (the Audible library, its web server on `127.0.0.1:5758`) | the Windows host, a desktop app | the web server switched on in its Preferences > Web Server | the starter probes it (any HTTP answer is up) and the doctor starts the app when it is not running; a running app with the web server off is never touched, the Captain is DMed |
 | Claude Code | the host, signed in as you | its login not expired | you: `claude auth login` on the PC |
 
 The reporter calls **out** to the portal every ~15 s. Nothing connects in to your house, so if the house has no internet, or the PC is

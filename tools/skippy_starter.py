@@ -34,7 +34,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OPS = ("start", "stop", "restart", "heal", "repair")
-HEAL_SPECIAL = ("bridge", "docker", "core")             # the rest a heal may name: a service in `docker compose config --services`
+HEAL_SPECIAL = ("bridge", "docker", "core", "openaudible")             # the rest a heal may name: a service in `docker compose config --services`
 CORE_SSH = os.environ.get("SKIPPY_CORE_SSH", "aaron@skippy-core")
 CORE_REPAIR = ["sudo", "-n", "/usr/bin/python3", "/opt/skippy-core/doctor/deployer.py", "repair"]   # the doctor's own copy (core/deployer/install.sh)
 DOCKER_DOWN_HEAL_S = 120
@@ -48,6 +48,13 @@ DOCKER_EXE = os.environ.get("DOCKER_DESKTOP_EXE", r"C:\Program Files\Docker\Dock
 CLEAN_PS1 = os.environ.get("DOCKER_CLEAN_PS1", r"D:\Aaron\development\start-docker-clean.ps1")
 BRIDGE_CWD = os.environ.get("CLAUDE_BRIDGE_CWD", "D:/Aaron/development")
 DOCKER_WAIT_S, DOCKER_CLEAN_WAIT_S, BRIDGE_WAIT_S = 150, 120, 40
+# OpenAudible (the Captain's Audible library, a Java desktop app on this host, not Docker): its web server listens on loopback only, which a
+# container cannot reach, so the starter probes it. ANY HTTP answer (401 without the admin login, a page, ...) means up; no answer means down.
+# No credentials are ever read or sent: the probe is a bare GET to the root.
+OPENAUDIBLE_URL = os.environ.get("OPENAUDIBLE_URL", "http://127.0.0.1:5758/")
+OPENAUDIBLE_EXE = os.environ.get("OPENAUDIBLE_EXE", r"C:\Program Files\OpenAudible\OpenAudible.exe")
+OPENAUDIBLE_IMAGE = "OpenAudible.exe"
+OPENAUDIBLE_WAIT_S = 90
 LOCK_PORT = 9339
 VAULTS = ("D:/Aaron/development/.env", "G:/My Drive/vault/.env")
 # skippy-pc's own UPS (a CyberPower on USB, which Windows sees as a battery): after this long on battery the starter stops the stack
@@ -94,6 +101,7 @@ class Starter:
         self.run, self.http, self.sleep, self.clock, self.token, self.root, self.say, self.now = run, http, sleep, clock, token, root, say, now
         self.state_file = Path(state_file) if state_file else root / "state" / "starter.json"
         self.spawn = spawn or self._spawn
+        self.openaudible_probe = self.openaudible_web
         self.working = ""
         self.results: list[dict] = []
         self.handled: dict[str, float] = {}
@@ -204,6 +212,42 @@ class Starter:
         except (OSError, ValueError, urllib.error.URLError):
             return None
 
+    def openaudible_web(self) -> bool:
+        """Does OpenAudible's web server answer at all? Any HTTP status counts (a 401 for the missing login is an answer); refused or
+        a timeout is down. A bare GET: no login is sent, and nothing it says is read."""
+        try:
+            urllib.request.urlopen(urllib.request.Request(OPENAUDIBLE_URL), timeout=3).close()
+            return True
+        except urllib.error.HTTPError:
+            return True
+        except (OSError, ValueError, urllib.error.URLError):
+            return False
+
+    def openaudible_running(self) -> bool:
+        """Is the OpenAudible desktop app a process right now? (tasklist, read only.)"""
+        rc, out = self.run(["tasklist", "/FI", f"IMAGENAME eq {OPENAUDIBLE_IMAGE}", "/FO", "CSV", "/NH"], 15)
+        return rc == 0 and OPENAUDIBLE_IMAGE.lower() in out.lower()
+
+    def openaudible(self) -> dict:
+        web = self.openaudible_probe()
+        return {"openaudible": web, "openaudible_app": True if web else self.openaudible_running()}
+
+    def heal_openaudible(self) -> tuple[bool, str]:
+        """Start the app if it is not running. A running OpenAudible is NEVER touched (it may be converting or downloading his library):
+        with its web server down that is a setting only he can change, so this just says so."""
+        if self.openaudible_probe():
+            return True, "OpenAudible's web server is answering."
+        if self.openaudible_running():
+            return False, ("OpenAudible is running but its web server is not answering: left alone (it may be busy with the library). "
+                           "Enable it in OpenAudible > Preferences > Web Server.")
+        if not Path(OPENAUDIBLE_EXE).is_file():
+            return False, f"OpenAudible is not installed at {OPENAUDIBLE_EXE}."
+        self.working = "starting OpenAudible"
+        self.spawn([OPENAUDIBLE_EXE], minimized=True)
+        if self._wait(self.openaudible_probe, OPENAUDIBLE_WAIT_S):
+            return True, "OpenAudible started; its web server is answering."
+        return False, "OpenAudible was started but its web server is not answering (Preferences > Web Server must be on)."
+
     def gpu(self) -> dict:
         """skippy-pc's card, from nvidia-smi: how much of its memory is free and how busy it is (the portal starts a patient job, a
         picture or a song, only when it is mostly free: portal/patient.py). Empty when there is no nvidia-smi or it doesn't answer."""
@@ -268,13 +312,19 @@ class Starter:
         return {"docker": total > 0 or self.docker_up(), "containers_up": up, "containers_total": total, "bridge": b is not None,
                 "busy": bool(b and (b.get("workshop") or {}).get("busy")), "supervisor": b is not None, "working": self.working,
                 "resume_at": self.resume_at.isoformat(timespec="minutes") if self.resume_at else "", **self.gpu(), **self._ups,
-                "containers": self.container_list() if self.docker_up() else []}
+                "containers": self.container_list() if self.docker_up() else [], **self.openaudible()}
 
     # ── doing ──────────────────────────────────────────────────────────────────
-    def _spawn(self, cmd: list[str], env: dict | None = None, log: str = "") -> None:
+    def _spawn(self, cmd: list[str], env: dict | None = None, log: str = "", minimized: bool = False) -> None:
         flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         out = open(log, "ab") if log else subprocess.DEVNULL
-        subprocess.Popen(cmd, stdout=out, stderr=out, stdin=subprocess.DEVNULL, env=env, creationflags=flags, close_fds=True, cwd=str(self.root))
+        si = None
+        if minimized and hasattr(subprocess, "STARTUPINFO"):               # a window that opens minimised and does not take focus
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = 7                                             # SW_SHOWMINNOACTIVE
+        subprocess.Popen(cmd, stdout=out, stderr=out, stdin=subprocess.DEVNULL, env=env, creationflags=flags, close_fds=True, cwd=str(self.root),
+                         **({"startupinfo": si} if si else {}))
 
     def _wait(self, check, seconds: float) -> bool:
         end = self.clock() + seconds
@@ -419,6 +469,8 @@ class Starter:
     def heal(self, name: str) -> tuple[bool, str]:
         if name == "docker":
             return self.restart_docker()
+        if name == "openaudible":
+            return self.heal_openaudible()
         if not self.docker_up() and name not in ("core",):
             return False, "Docker isn't answering: that comes first (heal docker)."
         if name == "bridge":
