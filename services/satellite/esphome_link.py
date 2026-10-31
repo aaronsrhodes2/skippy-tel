@@ -227,6 +227,16 @@ class EsphomeLink:
         self._event(self.E.VOICE_ASSISTANT_INTENT_START)
         self.stage = "intent"
 
+    async def perk(self) -> None:
+        """His ears and cyan glow, as a face only: it must NOT send the box voice-assistant events (a wake event for room talk leaves its voice assistant waiting
+        for a command that never comes, deaf and stuck 'listening')."""
+        face = next((x for x in self.services if x.name == "face"), None)
+        if face is not None:
+            try:
+                await self.client.execute_service(face, {"state": "listening"})
+            except Exception as e:                                  # noqa: BLE001
+                self.log(f"[{self.room.name}] (face: {type(e).__name__})")
+
     async def idle_face(self) -> None:
         """Put his resting face back (a goodbye or a stop ends the conversation without any answer, so no event ever tells the box it is over)."""
         face = next((x for x in self.services if x.name == "face"), None)
@@ -425,7 +435,7 @@ async def serve(hub, name: str, host: str, port: int, *, media, noise_psk: str, 
         if "player" in link.keys:
             link.music = room.music = BoxMusic(link, media, towards=host, log=hub.log, name=name)
             if connect is not None:
-                connect.add(name, label or f"{name.replace('-', ' ').title()} (Skippy)", room.music)
+                connect.add(name, label or f"{name.replace('-', ' ').title()} (Skippy)", room.music, book=getattr(room, "book", None))
         client.subscribe_states(link.on_state)
         link.start_stream(os.environ.get("SATELLITE_FACE_STREAM", "1") != "0")
         unsub = client.subscribe_voice_assistant(handle_start=link.handle_start, handle_stop=link.handle_stop, handle_audio=link.handle_audio,

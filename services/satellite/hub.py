@@ -175,6 +175,7 @@ class Room:
 
     # ── the audio, 50 ms at a time ──
     def feed_pcm(self, pcm: bytes) -> None:
+        self._last_audio = time.monotonic()
         floats = pcm_floats(pcm)
         if self.mic_gain != 1.0:                                # the pod's microphone is quiet for a normal voice across a room: lift it (clipped) before anything listens
             g = self.mic_gain
@@ -207,11 +208,11 @@ class Room:
             self._speech_t0, self._probed = self.t, False
             if self.mode in (LISTENING, FOLLOWUP):
                 self._spawn(self.link.voice_started())
-        if self.mode == IDLE and self.spotter is None and self.buf is not None and self._speech_t0 is not None and hasattr(self.link, "idle_face"):     # (with a wake-word model, room talk never goes to Whisper)
+        if self.mode == IDLE and self.spotter is None and self.buf is not None and self._speech_t0 is not None and hasattr(self.link, "perk"):     # (with a wake-word model, room talk never goes to Whisper)
             spoken = self.t - self._speech_t0
             if self._shown_t is None and spoken >= 500:       # a voice that lasts: he perks up at once, before it is known whether it was for him
                 self._shown_t = self.t
-                self._spawn(self.link.woke("noticed"))
+                self._spawn(self.link.perk())
             if not self._probed and spoken >= 1000:           # and about a second in, Whisper is asked whether it began with his name (no waiting for the end of the sentence)
                 self._probed = True
                 self._spawn(self._probe(list(self.buf)))
@@ -477,6 +478,13 @@ class Room:
             self._resume(IDLE if was == BUSY else was, self.followup_ms if was == FOLLOWUP else 0)
 
     async def timers_due(self) -> None:
+        # a watchdog: the room's clock runs on the audio it hears, so if the box's audio stops while he is waiting for a command, nothing would ever time out
+        last = getattr(self, "_last_audio", None)
+        if last is not None and self.mode in (LISTENING, FOLLOWUP) and time.monotonic() - last > 8:
+            self.log(f"[{self.name}] (no audio from the box for 8 s while listening: back to rest)")
+            self._resume(IDLE)
+            self._shown_t = None
+            await self.link.released()
         for timer in self.timers.due():
             self.log(f"[{self.name}] timer done: {timer.label}")
             await self.announce(f"Your {timer.label} timer is done.")
