@@ -563,11 +563,21 @@
       filesBox.hidden = !pending_files.length;
       filesBox.replaceChildren(...pending_files.map((f, i) => {
         const chip = document.createElement("span"); chip.className = "file-chip" + (f.pasted ? " pasted" : "");
-        if (f.data.startsWith("data:image/")) { const t = document.createElement("img"); t.src = f.data; t.alt = ""; chip.append(t); }
+        const pic = f.data.startsWith("data:image/");
+        if (pic) { const t = document.createElement("img"); t.src = f.data; t.alt = ""; chip.append(t); }
         else chip.append(glyph(f.ref || f.sending || f.data.startsWith("data:audio/") ? "wave" : "note"));
         const n = document.createElement("span"); n.className = "fn";
         n.textContent = f.pasted ? f.name + " · " + f.lines + " lines" : f.sending ? f.name + " · sending home…" : f.ref ? f.name + " · " + (f.bytes / 1048576).toFixed(1) + " MB at home" : f.name;
         chip.append(n);
+        if (pic && window.SkippyAnnotate) {          // mark it up (boxes and arrows, static/skippy-annotate.js): the marked copy REPLACES this picture, no question asked
+          const markUp = () => SkippyAnnotate.open({src: f.data, name: f.name, label: "✓ Done", onSend: (url, legend) => {
+            f.data = url; paintFiles();
+            if (legend) { msg.value = legend + (msg.value ? "\n" + msg.value : "\n"); grow(); }
+            msg.focus(); msg.setSelectionRange(msg.value.length, msg.value.length);
+          }});
+          chip.firstChild.style.cursor = "pointer"; chip.firstChild.title = "Mark it up"; chip.firstChild.addEventListener("click", markUp);
+          chip.append(keyBtn("pen", "Mark up " + f.name + " (boxes and arrows)", markUp, "markup"));
+        }
         if (f.pasted) chip.append(keyBtn("in", "Put it back in the box", () => { pending_files.splice(i, 1); msg.value += (msg.value ? "\n" : "") + dataText(f.data); grow(); paintFiles(); }));
         chip.append(keyBtn("x", "Remove " + f.name, () => { pending_files.splice(i, 1); paintFiles(); }));
         return chip;

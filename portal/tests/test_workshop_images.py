@@ -2,6 +2,7 @@
 400 KB, kept in memory for its owner, served as exactly that type with nosniff (never as HTML), and a refused one
 still takes its place in the event list so the reporter's count stays in step."""
 import base64
+from pathlib import Path
 
 import pytest
 
@@ -147,3 +148,15 @@ def test_a_screenshot_in_the_agents_chat_opens_the_annotator_and_comes_back_as_a
     line = next(i for i, l in enumerate(front.splitlines()) if "skippy-annotate.js" in l)
     assert "{% if captain %}" in front.splitlines()[line - 1] and "{% endif %}" in front.splitlines()[line]      # the Captain's chat only
     assert all(c in js for c in ("#FF4444", "#FFAA00", "#00FF88", "#00CCFF"))                       # the house palette
+
+
+def test_an_attached_picture_can_be_marked_up_from_its_chip_and_the_marked_copy_replaces_it():
+    """The Captain, 2026-10-31: coloured boxes and arrows on any picture he attaches, and the marked copy overwrites it without asking."""
+    root = Path(__file__).resolve().parents[1]
+    chat = (root / "templates" / "_chat.html").read_text(encoding="utf-8")
+    block = chat[chat.index("if (pic && window.SkippyAnnotate)"):]
+    block = block[:block.index("return chip;")]
+    assert "SkippyAnnotate.open({src: f.data" in block and "f.data = url; paintFiles();" in block     # in place: no new chip, no confirm
+    assert 'keyBtn("pen"' in block and "confirm(" not in block
+    js = (root / "static" / "skippy-annotate.js").read_text(encoding="utf-8")
+    assert '"Arrow"' in js and '"Box"' in js and "opts.label ||" in js

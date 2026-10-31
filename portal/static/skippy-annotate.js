@@ -3,7 +3,8 @@
  * words, what is where: the colour, the shape and its exact place in the ORIGINAL picture's pixels. The words matter: Skippy Core's
  * coder is text-only and sees pictures through the vision model's description, so the legend carries the marks exactly.
  *
- *   SkippyAnnotate.open({src, name, onSend(dataUrl, legend, fileName)})   full screen over the page; Esc or ✕ closes it
+ *   SkippyAnnotate.open({src, name, label?, onSend(dataUrl, legend, fileName)})   full screen over the page; Esc or ✕ closes it
+ *   (a picture already attached in the composer opens it too, from its chip: the marked copy then replaces the picture, _chat.html)
  *
  * Colours are the house palette (CLAUDE.md, the colour doctrine): red, amber, green, cyan. The Captain says what each one asks for in
  * his own words; the legend only says where they are. Nothing is stored on the device: the picture is drawn here and sent.
@@ -98,7 +99,7 @@
     const sp = document.createElement("span"); sp.className = "sp";
     const undo = key("↶", "Undo the last mark", () => { marks.pop(); redraw(); });
     const close = key("✕", "Close without sending", done);
-    const go = key("✓ Add to message", "Add the marked-up picture to your message", send); go.className = "go";
+    const go = key(opts.label || "✓ Add to message", opts.label ? "Keep the marked-up picture" : "Add the marked-up picture to your message", send); go.className = "go";
     bar.append(...tools, ...swatches, sp, undo, close, go);
     function pick(t) { tool = t; tools.forEach(b => b.setAttribute("aria-pressed", String(b.title.toLowerCase() === t))); }
     function paint(c) { color = c; swatches.forEach(b => b.setAttribute("aria-pressed", String(b.dataset.c === c))); }
