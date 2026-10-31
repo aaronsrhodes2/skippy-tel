@@ -116,10 +116,11 @@ class Room:
     touched it. The room calls the link's woke / voice_started / voice_stopped / heard / released / show / speak / announce."""
 
     def __init__(self, name, link, gate, brain, timers, spotter=None, local_voice=None, log=print, floor: float = 0.012,
-                 min_speech_ms: int = 600, listen_ms: int = 8000, followup_ms: int = 6000, summarize_over: int = 1500, filler=None, filler_after_s: float = 1.0, pc_outs=(), debug: bool = False, hlog=None, workspace=None, run_action=None):
+                 min_speech_ms: int = 600, listen_ms: int = 8000, followup_ms: int = 6000, summarize_over: int = 1500, filler=None, filler_after_s: float = 1.0, pc_outs=(), debug: bool = False, mic_gain: float = 1.0, hlog=None, workspace=None, run_action=None):
         self.name, self.link, self.gate, self.brain, self.timers, self.spotter = name, link, gate, brain, timers, spotter
         self.local_voice, self.log = local_voice, log
         self.floor, self.min_speech_ms, self.listen_ms, self.followup_ms, self.summarize_over = floor, min_speech_ms, listen_ms, followup_ms, summarize_over
+        self.mic_gain = mic_gain                                # SATELLITE_MIC_GAIN: digital gain on the box's audio
         self.debug = debug                                      # SATELLITE_DEBUG=1: the log shows what room talk was heard (private: off by default)
         self.pc_outs = list(pc_outs)                            # speaker_out.PcOut: his voice also out of skippy-pc's HDMI / Bluetooth stereo
         self.filler, self.filler_after_s = filler, filler_after_s       # pre-recorded quips (filler.py) to cover a slow answer
@@ -172,7 +173,11 @@ class Room:
 
     # ── the audio, 50 ms at a time ──
     def feed_pcm(self, pcm: bytes) -> None:
-        self._carry.extend(pcm_floats(pcm))
+        floats = pcm_floats(pcm)
+        if self.mic_gain != 1.0:                                # the pod's microphone is quiet for a normal voice across a room: lift it (clipped) before anything listens
+            g = self.mic_gain
+            floats = [max(-1.0, min(1.0, x * g)) for x in floats]
+        self._carry.extend(floats)
         while len(self._carry) >= BLOCK:
             block, self._carry = self._carry[:BLOCK], self._carry[BLOCK:]
             self.t += BLOCK_MS
@@ -676,7 +681,7 @@ def build_rooms(env: dict):
         tools = music_tools(lambda: holder["room"], loop) if plays_music else None
         brain = Brain(client, brain_model, timers, hass=house, extra=tools)
         room = holder["room"] = Room(name, link, gate, brain, timers, spotter=spotter, local_voice=audio.local_voice_pcm16, log=log,
-                                     floor=float(env.get("SATELLITE_FLOOR", "0.012")), filler=filler_bank, debug=env.get("SATELLITE_DEBUG") == "1", pc_outs=speaker_out.parse_outputs(env, name, log)[1],
+                                     floor=float(env.get("SATELLITE_FLOOR", "0.012")), filler=filler_bank, debug=env.get("SATELLITE_DEBUG") == "1", mic_gain=float(env.get("SATELLITE_MIC_GAIN", "1.0")), pc_outs=speaker_out.parse_outputs(env, name, log)[1],
                                      filler_after_s=float(env.get("SATELLITE_FILLER_S", "1.0")), hlog=hlog, workspace=workspace, run_action=run_action,
                                      followup_ms=int(float(env.get("SATELLITE_SESSION_S", "180")) * 1000))      # the name opens a conversation: it stays open this long without a word
         return room
