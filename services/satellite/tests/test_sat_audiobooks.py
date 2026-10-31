@@ -466,3 +466,9 @@ def _record(into):
     async def command(action, devices):
         into.append(action)
     return command
+
+
+def test_a_transcript_with_a_full_stop_still_routes():
+    from book_voice import normalize
+    assert normalize("Skippy, read my audiobook.") == "read my audiobook"
+    assert normalize("Speed 1.5") == "speed 1.5"

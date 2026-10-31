@@ -33,6 +33,7 @@ def _amount(m) -> float | None:
 
 def normalize(heard: str) -> str:
     t = re.sub(r"[^a-z0-9. ']+", " ", (heard or "").lower())
+    t = re.sub(r"\.(?!\d)", " ", t)                            # a sentence's full stop ("Read my audiobook."), but not a decimal ("1.5")
     t = re.sub(r"\b(?:hey |ok |okay )?skippy\b|\bplease\b|\bcan you\b|\bcould you\b|\bwould you\b|\bnow\b", " ", t)
     return re.sub(r"\s+", " ", t).strip()
 

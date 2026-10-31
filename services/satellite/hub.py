@@ -739,7 +739,7 @@ def build_rooms(env: dict):
         room = holder["room"] = Room(name, link, gate, brain, timers, spotter=spotter, local_voice=audio.local_voice_pcm16, log=log,
                                      floor=float(env.get("SATELLITE_FLOOR", "0.012")), filler=filler_bank, debug=env.get("SATELLITE_DEBUG") == "1", mic_gain=float(env.get("SATELLITE_MIC_GAIN", "1.0")), pc_outs=speaker_out.parse_outputs(env, name, log)[1],
                                      filler_after_s=float(env.get("SATELLITE_FILLER_S", "1.0")), hlog=hlog, workspace=workspace, run_action=run_action, homechat=homechat,
-                                     followup_ms=int(float(env.get("SATELLITE_SESSION_S", "180")) * 1000))      # the name opens a conversation: it stays open this long without a word
+                                     followup_ms=int(float(env.get("SATELLITE_SESSION_S", "30")) * 1000))      # the name opens a conversation: it stays open this long without a word
         room.book = book
         return room
     make_room.homechat = homechat                               # _main runs its sync loop (never under --record)
