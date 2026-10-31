@@ -34,7 +34,8 @@ REGISTRY = {
         "status.page", "status.state_json", "status.heal", "status.repair", "status.logs", "status.probe", "car.page", "car.state",
         "me.index", "me.mcp_ask", "me.mcp_result", "me.pair_home", "me.toggle_experiment", "me.workshop_events", "me.workshop_history", "me.workshop_history_result",
         "me.workshop_image", "me.workshop_new_folder", "me.workshop_new_folder_result", "me.workshop_notify", "me.workshop_resync", "me.workshop_send", "me.workshop_ship", "me.workshop_stop",
-        "chat.memory_ask", "chat.memory_result", "chat.quick_line")},
+        "chat.memory_ask", "chat.memory_result", "chat.quick_line",
+        "housechat.home_chat_events", "housechat.home_chat_send", "housechat.home_chat_forward")},
     # granted apps
     "music.player_page": G("audio"), "music.player_gate": G("audio"), "music.player_checkin": G("audio"), "music.player_command": G("audio"),
     "video.video_page": G("video"), "video.video_gate": G("video"),
@@ -52,7 +53,7 @@ REGISTRY = {
         "prophesy.board", "prophesy.record_file", "prophesy.game", "prophesy.game_file")},
     # skippy-pc, CI
     **{e: MACHINE for e in (
-        "game_import_done", "game_import_download", "home_import_chunk", "home_job_done", "home_jobs", "home_media", "home_music_checkin", "home_deploys", "home_report", "home_starter",
+        "game_import_done", "game_import_download", "home_import_chunk", "home_job_done", "home_jobs", "home_media", "home_music_checkin", "housechat.home_house_sync", "home_deploys", "home_report", "home_starter",
         "home_prophesy_put", "home_prophesy_finish",
         "home_telemetry", "home_workshop", "home_workshop_list", "home_patient", "home_ups", "home_core_report", "home_logs", "ops_home", "tasks_run")},
     "telemetry_tap": BEACON,

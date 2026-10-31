@@ -15,6 +15,24 @@
     {% endif %}
     <div class="log" aria-live="polite"><div class="flow"></div></div>
     <button type="button" class="key jump" hidden aria-label="Jump to the latest" title="Jump to the latest (End)"><svg class="g" aria-hidden="true"><use href="#g-down"/></svg><b class="badge"></b></button>
+    {% if captain %}
+    {# The permanent Home chat (housechat.py, static/skippy-home.js): the house conversation through the room hubs, words only; opened from the
+       first row of Your chats. Its composer is this chat's box: "say to Skippy" (as if spoken in the room) or "make Skippy say". #}
+    <div class="home-view" hidden>
+      <div class="home-bar">
+        <span class="home-title"><svg class="g" aria-hidden="true"><use href="#g-home"/></svg>Home</span>
+        <span class="home-modes" role="group" aria-label="What the box does" style="display:contents">
+          <button type="button" class="key sm" data-mode="say" aria-pressed="true" aria-label="Say to Skippy: as if spoken in the room" title="Say to Skippy: as if spoken in the room"><svg class="g" aria-hidden="true"><use href="#g-talk"/></svg></button>
+          <button type="button" class="key sm" data-mode="announce" aria-pressed="false" aria-label="Make Skippy say this" title="Make Skippy say this"><svg class="g" aria-hidden="true"><use href="#g-vol"/></svg></button>
+        </span>
+        <select class="home-room" aria-label="Which room"><option value="*">all rooms</option></select>
+        <button type="button" class="key sm home-speak" aria-pressed="true" aria-label="Speak aloud" title="Speak aloud (off: the answer only appears here)"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg></button>
+        <button type="button" class="key sm home-forward" aria-pressed="true" aria-label="Forwarding" title="Forwarding"><svg class="g" aria-hidden="true"><use href="#g-eye"/></svg></button>
+      </div>
+      <div class="home-state" hidden aria-live="polite"></div>
+      <div class="home-flow" aria-live="polite"></div>
+    </div>
+    {% endif %}
     {% if captain and workshop_brains is defined %}
     {# The Captain's agent, in the same stage: shown instead of the log in Private and Auto. Its own composer is hidden; this
        chat's composer, keys and sheets drive it through window.SkippyAgent. It has its own scrolling transcript. #}
@@ -49,6 +67,7 @@
         <button type="button" data-kind="archive" aria-pressed="false"><svg class="g" aria-hidden="true"><use href="#g-past"/></svg>Archive</button>
       </div>
       {% endif %}
+      {% if is_admin %}<div class="chat-row"><button type="button" class="chat-open chat-home" aria-label="Home: the house conversation"><svg class="g" aria-hidden="true"><use href="#g-home"/></svg><span class="chat-title">Home</span><span class="chat-when">the house, live</span></button></div>{% endif %}
       <div class="pg"><div class="pg-flow chats-list"></div></div>
       <div class="pips" aria-hidden="true"><i></i></div>
     </div>
@@ -183,6 +202,7 @@
     const agentView = root.querySelector(".agent-view");
     const isAgent = (id) => typeof id === "string" && id.indexOf("agent-") === 0;
     function applyMode() {
+      leaveHome();
       const agent = isAgent(brain) && !!agentView;
       if (agentView) agentView.hidden = !agent;
       logBox.hidden = agent;
@@ -648,6 +668,23 @@
     // The agent's half of the composer: what is typed (and any pictures) goes to Claude Code on skippy-pc, into its transcript.
     const stopKey = form.querySelector("button.stopk");
     const agentOn = () => isAgent(brain) && !!agentView && !!window.SkippyAgent;
+    // ── Home: the permanent house chat (the Captain only). Shown in the stage instead of the log or the agent; the box sends to the house. ──
+    const homeView = root.querySelector(".home-view"), homeRow = root.querySelector(".chat-home");
+    const home = homeView && window.SkippyHome ? SkippyHome.attach({view: homeView, composer: msg, restore: msg.placeholder, glyph: (id) => glyph(id), say: (t) => flash(t),
+      urls: {events: "{{ url_for('housechat.home_chat_events') if is_admin else '' }}", send: "{{ url_for('housechat.home_chat_send') if is_admin else '' }}", forward: "{{ url_for('housechat.home_chat_forward') if is_admin else '' }}"}}) : null;
+    const homeOn = () => !!home && home.isOpen();
+    function leaveHome() {
+      if (!homeOn()) return;
+      home.close(); root.classList.remove("home-mode"); if (homeRow) homeRow.parentElement.classList.remove("lit");
+      logBox.hidden = agentOn(); if (agentView) agentView.hidden = !agentOn();
+    }
+    function enterHome() {
+      if (!home) return;
+      logBox.hidden = true; if (agentView) agentView.hidden = true;
+      root.classList.add("home-mode"); if (homeRow) homeRow.parentElement.classList.add("lit");
+      home.open(); msg.focus();
+    }
+    if (homeRow) homeRow.addEventListener("click", () => { enterHome(); if (openSheet === "chats") showSheet("chats"); });
     let inflight = null;                                          // the public chat's request, while it waits (Stop aborts it)
     function paintStop() { if (stopKey) stopKey.hidden = !(agentOn() ? window.SkippyAgent.busy() : !!inflight); }
     if (stopKey) {
@@ -781,6 +818,7 @@
       event.preventDefault();
       let text = msg.value.trim();
       if (!text) return;
+      if (homeOn()) { msg.value = ""; grow(); home.send(text).then(ok => { if (!ok) { msg.value = text; grow(); } }); return; }
       if (busy && !agentOn()) {                                     // Skippy is answering: it waits in line, not lost
         if (editing) { flash("Wait for the reply to edit your message."); return; }
         SkippyQueue.add(queue, text); paintQueue(); msg.value = ""; grow(); return;
@@ -796,6 +834,7 @@
       else if (e.key === "Escape" && editing) { endEdit(); msg.value = ""; grow(); }
     });
     function newChat() {                                                                // the one before stays in Your chats
+      leaveHome();
       if (agentOn()) { window.SkippyAgent.newChat(); applyMode(); setContext(null); msg.focus(); return; }   // a new agent conversation (same folder and brain to start)
       startChat(newId(), []); setContext(null); queue = []; paintQueue(); msg.focus();
     }
@@ -923,6 +962,7 @@
       box.addEventListener("blur", () => done(true));
     }
     async function openRow(r, btn) {
+      leaveHome();
       if (r.kind === "chat") {
         if (agentOn()) { const pub = BRAINS.find(x => x.id === "core"); if (pub) { brain = "core"; try { localStorage.setItem(BRAIN_KEY, "public"); } catch (e) {} paintBrain(); applyMode(); } }
         startChat(r.id, r.c.history || []); showSheet("chats"); return;

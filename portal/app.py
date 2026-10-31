@@ -40,6 +40,7 @@ import envfile
 import experiments
 import friends as friends_mod
 import home as home_mod
+import housechat as housechat_mod
 import imports as imports_mod
 import media as media_mod
 import mentat_client
@@ -2455,6 +2456,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         chats_kept.namer = lambda message: chat_names.name(message, ask_core)
     chats_kept.forever = lambda email: str(email).strip().lower() in app.config["ADMIN_EMAILS"]   # the Captain's: forever; a guest's: 30 days
     app.extensions["chat_history"] = chats_kept
+    housechat_mod.register(app, auth, home, me, chats_kept.store)   # the permanent Home chat (the house conversation); not one of these chats, so nothing here can expire or rename it
 
     # Expiry (chat_history.sweep): about once an hour, nudged by the home reporter's check-ins, Skippy Core analyses up to ten
     # expired guest chats before they are deleted; each insight is kept in the bucket and handed home to skippy-pc in the

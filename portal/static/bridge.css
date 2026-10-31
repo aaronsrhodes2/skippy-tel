@@ -528,3 +528,21 @@ dialog.keys .key { margin: 0 0 0 auto; }
                 color: var(--muted); border: 1px dashed var(--accent); background: #02080a; }
 .picture-wait .g { width: 18px; height: 18px; color: var(--accent); }
 .picture-wait .lamp { width: 8px; height: 8px; margin-left: auto; }
+
+/* The permanent Home chat (static/skippy-home.js, templates/_chat.html .home-view): the house conversation in the one chat's stage, the Captain only. */
+.chat-bridge .home-view { flex: 1; min-height: 0; display: flex; flex-direction: column; background: rgba(0, 0, 0, .66); }
+.chat-bridge .home-view[hidden] { display: none; }
+.home-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--dim-green-hi); }
+.home-bar .home-title { display: flex; align-items: center; gap: 6px; color: var(--accent); font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; margin-right: auto; }
+.home-bar .home-title .g { width: 18px; height: 18px; }
+.home-bar .key[aria-pressed="false"] { opacity: .55; }
+.home-bar .key[aria-pressed="true"]::after { background: var(--accent); } .home-bar .key[aria-pressed="true"] .g { color: var(--black, #000); }
+.home-bar select { flex: 0 1 auto; width: auto; max-width: 40%; background: #000; color: var(--ink); border: 1px solid var(--dim-green-hi); padding: 4px 6px; font-size: .8rem; }
+.home-state { margin: 6px 10px 0; padding: 4px 8px; font-size: .8rem; color: var(--amber, #ffaa00); border: 1px dashed var(--amber, #ffaa00); }
+.home-state[hidden] { display: none; }
+.chat-bridge .home-flow { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 10px; scrollbar-width: thin; scrollbar-color: var(--dim-green-hi) transparent; }
+.home-turn .who { font-size: .72rem; color: var(--muted, #8aa); margin-bottom: 2px; }
+.home-turn.announce { border-style: dashed; } .home-turn.typed.user { border-style: dotted; } .home-turn.silent { opacity: .75; }
+.home-line { display: flex; align-items: center; gap: 6px; margin: 4px 14px 0; font-size: .76rem; color: var(--muted, #8aa); }
+.home-line .g { width: 14px; height: 14px; flex: none; } .home-line.note { color: var(--amber, #ffaa00); }
+.chat-bridge .chat-home { margin: 0 0 8px; }
