@@ -455,7 +455,21 @@ class Room:
         finally:
             self._resume(IDLE if was == BUSY else was, self.followup_ms if was == FOLLOWUP else 0)
 
+    def is_echo(self, command: str) -> bool:
+        """Skippy's own last words heard back (2026-10-31: the projector played "News about what? ..." 18 s late, after the room's deaf window,
+        and the room took it as his answer): most of what was heard is in what he said in the last 90 s."""
+        said, at = getattr(self, "_last_said", ("", 0.0))
+        words = re.findall(r"[a-z']+", (command or "").lower())
+        if len(words) < 4 or time.monotonic() - at > 90:
+            return False
+        mine = set(re.findall(r"[a-z']+", said.lower()))
+        return sum(w in mine for w in words) >= 0.8 * len(words)
+
     async def handle(self, command: str, typed: bool = False, speak: bool = True) -> None:
+        if not typed and self.is_echo(command):
+            self.log(f"[{self.name}] (heard my own voice back: ignored)")
+            self._resume(FOLLOWUP if self.remote_wake and self.link.hub_follows_up else IDLE, self.followup_ms)
+            return
         if not typed:
             await self.link.heard(command)                      # also tells a self-waking satellite to stop streaming
             self._emit("heard", text=command)                   # addressed to him (his name, a tap, or an open conversation): the Home chat
@@ -569,6 +583,7 @@ class Room:
         self._emit("announce" if announce else "said", text=said, mood=emotion_of(said), typed=True if typed else None, silent=True if silent else None)
         if silent:
             return                                              # "speak aloud" off: the answer only appears in the thread
+        self._last_said = (said, time.monotonic())              # an echo of it is not the Captain talking (is_echo)
         async with self.voice:
             voice = await self._voice(said)
             await self.link.show(said)

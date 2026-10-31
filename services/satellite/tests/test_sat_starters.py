@@ -253,3 +253,13 @@ def test_refresh_writes_candidates_and_drops_offered_and_expired(tmp_path):
     s.mark_offered(cand("said"), "office")
     sr.refresh(folder, lambda p: '{"pick": 0}', {}, search=lambda q, w: [], clock=lambda: now[0], log=lambda m: None)
     assert [c["id"] for c in s.candidates()] == ["keep"]
+
+
+def test_his_own_words_heard_back_are_not_a_command(tmp_path):
+    now = [stamp("2026-10-31", "14:24")]
+    room, link, brain, s = room_with(tmp_path, now, [])
+    asyncio.run(room.say("News about what? Politics, science, your games, something near home? Pick one, monkey."))
+    asyncio.run(room.handle("Politics, science, your games, something near home. Pick one, monkey."))
+    assert brain.heard == [] and room.mode == FOLLOWUP                  # the projector's late echo: ignored, still listening
+    asyncio.run(room.handle("politics"))
+    assert brain.heard == ["politics"]
