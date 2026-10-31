@@ -108,6 +108,7 @@ class EsphomeLink:
         self.streamer = None                                        # the face skippy-pc draws for this box (face_stream.FaceStreamer), once it is connected
         self._box_face = ("idle", False, False, False)              # the box's own last `Face` report: state, talking, mic off, speaker off
         self._lips_until = 0.0                                      # (monotonic) the hub drives the mouth until then: his voice is on the PC output (lips)
+        self._mirror_next = None                                    # (mouth, emote) for the other pods, started by lips()
 
     def discover(self, entities) -> None:
         for e in entities:
@@ -300,7 +301,7 @@ class EsphomeLink:
         if "session" in self.keys:
             self.set_text("session", "1" if on else "0")
 
-    async def mouth(self, voice, said: str = "") -> None:
+    async def mouth(self, voice, said: str = "", mirror_now: bool = True) -> None:
         """What the box's drawn face needs to talk: a mood letter, then one character per 60 ms for the mouth. Sent at once as loudness digits
         (ffmpeg, ~50 ms), then replaced by Rhubarb's mouth shapes when they are ready (a second or two later): the box reads them by elapsed time,
         so nothing waits and the speech starts at once. Best effort: without any of it the mouth just babbles."""
@@ -316,8 +317,11 @@ class EsphomeLink:
             etext = emotion.reaction(self.asked) + "|" + emotion.track(plain(said), self.asked, len(pcm) / 32000.0)
             if "emote" in self.keys:                                # what he feels, sentence by sentence, over the length of his voice
                 self.set_text("emote", etext)
-            for other in self.others():                             # every other pod does the same, silently, at the same moment
-                self._spawn_mirror(other.mirror(text, etext, len(pcm) / 32000.0))
+            if mirror_now:
+                for other in self.others():                         # every other pod does the same, silently, at the same moment
+                    self._spawn_mirror(other.mirror(text, etext, len(pcm) / 32000.0))
+            else:
+                self._mirror_next = (text, etext)                   # lips() starts them when the PC output sounds
             if "emote" in self.keys:                                # and a small model reads the sarcasm a second later (replaces the word rules; costs no waiting)
                 self._spawn_mirror(self._model_emotion(said, len(pcm) / 32000.0))
         except Exception as e:                                      # noqa: BLE001 — the mouth just babbles
@@ -334,16 +338,31 @@ class EsphomeLink:
         loop = asyncio.get_running_loop()
         now = time.monotonic()
         self._lips_until = max(self._lips_until, at + seconds)
-        loop.call_later(max(0.0, at - now), self._lips, True)
-        loop.call_later(max(0.0, at + seconds - now), self._lips, False)
+        loop.call_later(max(0.0, at - now), self._lips, True, seconds)
+        loop.call_later(max(0.0, at + seconds - now), self._lips, False, 0.0)
 
-    def _lips(self, on: bool) -> None:
-        if self.streamer is None:
+    def _lips(self, on: bool, seconds: float) -> None:
+        if not on and time.monotonic() < self._lips_until - 0.02:  # a later clip is still talking: keep the mouth going
             return
-        if on:
-            self.streamer.set_box_state("speaking", True, self._box_face[2], self._box_face[3])
-        elif time.monotonic() >= self._lips_until - 0.02:          # a later clip still talking keeps the mouth going
-            self.streamer.set_box_state(*self._box_face)
+        if self.streamer is not None:                               # the face skippy-pc draws and streams to the box
+            if on:
+                self.streamer.set_box_state("speaking", True, self._box_face[2], self._box_face[3])
+            else:
+                self.streamer.set_box_state(*self._box_face)
+        face = next((x for x in getattr(self, "services", []) if x.name == "face"), None)
+        if face is not None:                                        # and the box's own drawing (when the stream is down): its mouth runs from now
+            self._spawn_mirror(self._face_action(face, "speaking" if on else "idle"))
+        if on and self._mirror_next is not None:                    # the other pods, silently, at the moment it sounds
+            text, etext = self._mirror_next
+            self._mirror_next = None
+            for other in self.others():
+                self._spawn_mirror(other.mirror(text, etext, seconds))
+
+    async def _face_action(self, face, state: str) -> None:
+        try:
+            await self.client.execute_service(face, {"state": state})
+        except Exception as e:                                      # noqa: BLE001 — the mouth just doesn't move this time
+            self.log(f"[{self.room.name}] (face: {type(e).__name__})")
 
     def _spawn_mirror(self, coro) -> None:
         task = asyncio.create_task(coro)

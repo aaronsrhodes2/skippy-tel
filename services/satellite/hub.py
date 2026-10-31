@@ -622,7 +622,7 @@ class Room:
             return
         mouth = getattr(self.link, "mouth", None)
         if mouth is not None:
-            await mouth(voice, said)                            # the shapes, from the very clip; lips() starts them when it sounds
+            await mouth(voice, said, mirror_now=False)          # the shapes, from the very clip; lips() starts them (and the other pods) when it sounds
         playing = asyncio.ensure_future(sole.play(voice[1], on_sound=getattr(self.link, "lips", None)))
         if announce:
             await self.link.announce(said, None)                # the box's turn ends without its own sound

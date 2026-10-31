@@ -29,8 +29,8 @@ class Link:
     async def announce(self, said, voice):
         self.spoken.append(("announce", said, voice))
 
-    async def mouth(self, voice, said=""):
-        self.mouths.append(said)
+    async def mouth(self, voice, said="", mirror_now=True):
+        self.mouths.append((said, mirror_now))
 
     def lips(self, at, seconds):
         self.lip_calls.append((at, seconds))
@@ -65,7 +65,7 @@ def test_with_the_stereo_open_only_the_stereo_speaks_and_the_pod_draws_the_lips(
     asyncio.run(r._out("Hello, monkey.", ("mp3", b"CLIP")))
     assert out.played == [b"CLIP"]
     assert r.link.spoken == [("speak", "Hello, monkey.", None)]       # the pod gets the words, not the sound
-    assert r.link.mouths == ["Hello, monkey."] and len(r.link.lip_calls) == 1
+    assert r.link.mouths == [("Hello, monkey.", False)] and len(r.link.lip_calls) == 1     # the other pods wait for lips()
 
 
 def test_no_stereo_open_the_pod_speaks():
@@ -129,13 +129,26 @@ def test_one_voice_measures_how_late_the_output_really_sounds(tmp_path):
 def test_the_streamed_face_talks_on_the_stereos_clock_not_the_boxs():
     import esphome_link
 
-    calls = []
+    calls, actions, mirrored = [], [], []
+
+    class Client:
+        async def execute_service(self, svc, data):
+            actions.append(data["state"])
+
+    class Other:
+        async def mirror(self, text, etext, seconds):
+            mirrored.append((text, round(seconds, 2)))
+
     link = esphome_link.EsphomeLink.__new__(esphome_link.EsphomeLink)
     link.streamer = type("S", (), {"set_box_state": lambda self, *a: calls.append(a)})()
-    link._box_face, link._lips_until = ("thinking", False, False, False), 0.0
+    link._box_face, link._lips_until, link._mirror_next, link._tasks = ("thinking", False, False, False), 0.0, ("nABC", "e"), set()
+    link.client, link.services = Client(), [type("F", (), {"name": "face"})()]
+    link.others = lambda: [Other()]
 
     async def go():
         link.lips(time.monotonic() + 0.05, 0.1)
         await asyncio.sleep(0.3)
     asyncio.run(go())
-    assert calls[0] == ("speaking", True, False, False) and calls[-1] == ("thinking", False, False, False)
+    assert calls[0] == ("speaking", True, False, False) and calls[-1] == ("thinking", False, False, False)     # the streamed face
+    assert actions == ["speaking", "idle"]                                                                     # the box's own face
+    assert mirrored == [("nABC", 0.1)]                                                                         # the other pods, at the same moment
