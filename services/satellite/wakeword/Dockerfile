@@ -3,7 +3,7 @@
 FROM pytorch/pytorch:2.1.2-cuda12.1-cudnn8-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends git wget ffmpeg libsndfile1 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends git wget build-essential ffmpeg libsndfile1 && rm -rf /var/lib/apt/lists/*
 
 # openWakeWord at a pinned commit (its train.py is the trainer), installed without its runtime extras (speexdsp-ns needs a compiler)
 ARG OWW_COMMIT=368c03716d1e92591906a84949bc477f3a834455
