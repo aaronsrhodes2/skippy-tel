@@ -191,16 +191,16 @@ def check_car(wait: float = 30):
 
 def check_car_ble(wait: float = 30, url: str = ""):
     """The charging door (core/car-ble) answers its /health. Not ready (no key paired yet, no radio) is said, not failed: the reader is the car's
-    pulse; this one only needs to be up. The guard (core/car-fleet) is checked the same way."""
+    pulse; this one only needs to be up. The guard (core/car-fleet) and the road door (core/routes: an hour-long first map import) are checked
+    the same way."""
     deadline = time.monotonic() + wait
     while True:
         try:
-            body = call_json("GET", f"{url or CAR_BLE}/health", timeout=10)
-            return "ready" if body.get("ready") else f"up, not ready: {body.get('detail')}"
-        except urllib.error.HTTPError as e:
-            if e.code == 503:
-                return "up, not ready: " + str(json.loads(e.read() or b"{}").get("detail"))
-            last = str(e)
+            status, text = call("GET", f"{url or CAR_BLE}/health", timeout=10)     # (not call_json: its Fail on a 503 would fail the deploy)
+            if status in (200, 503):
+                body = json.loads(text or "{}")
+                return "ready" if status == 200 and body.get("ready") else f"up, not ready: {body.get('detail')}"
+            last = f"HTTP {status}: {text[:200]}"
         except (OSError, urllib.error.URLError, ValueError) as e:
             last = str(e)
         if time.monotonic() >= deadline:
