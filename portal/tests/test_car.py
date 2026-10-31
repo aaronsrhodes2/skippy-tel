@@ -102,3 +102,11 @@ def test_a_car_that_stopped_reporting_is_said_plainly():
     tools = chat_tools.ChatTools(None, is_admin=True, home_car=Silent())
     with pytest.raises(chat_tools.ToolError, match="isn't reporting"):
         tools.run("car_status", {})
+
+
+def test_the_fleet_public_key_is_served_to_everyone_at_teslas_address(env):
+    client, _, _ = env
+    got = client.get("/.well-known/appspecific/com.tesla.3p.public-key.pem")       # signed out: Tesla reads it with no cookie
+    assert got.status_code == 200 and got.mimetype == "application/x-pem-file"
+    text = got.get_data(as_text=True)
+    assert text.startswith("-----BEGIN PUBLIC KEY-----") and "PRIVATE" not in text   # only ever the public half

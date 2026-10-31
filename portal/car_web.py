@@ -6,13 +6,19 @@ Tesla's Fleet API, saved for later (docs/tesla.md). Location is his alone: no gr
 
   GET /car         the page
   GET /car/state   the same as JSON, refreshed while the page is open
+  GET /.well-known/appspecific/com.tesla.3p.public-key.pem   public: the Fleet API app's public key (docs/tesla.md). Tesla reads it from
+                   makerportal.live to register the domain, and the car checks commands against it. Its private half is on skippy-core
+                   only (/etc/skippy-core/tesla-fleet/private.pem, root, made 2026-10-30).
 """
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, render_template
+from pathlib import Path
+
+from flask import Blueprint, abort, jsonify, render_template
 
 import auth
 
+FLEET_PUBLIC_KEY = Path(__file__).resolve().parent / "tesla-fleet-public-key.pem"
 KM_TO_MI = 0.621371          # a definition (1 mi = 1.609344 km), not a measurement
 LIVE = {"online", "driving", "charging", "updating"}     # TeslaMate's states that mean the car is awake
 
@@ -117,6 +123,16 @@ def init_app(app, home) -> None:
     def state():
         resp = jsonify(current())
         resp.headers["Cache-Control"] = "private, no-store"
+        return resp
+
+    @bp.get("/.well-known/appspecific/com.tesla.3p.public-key.pem")
+    def fleet_public_key():
+        try:
+            pem = FLEET_PUBLIC_KEY.read_text(encoding="ascii")
+        except OSError:
+            abort(404)
+        resp = app.response_class(pem, mimetype="application/x-pem-file")
+        resp.headers["Cache-Control"] = "public, max-age=3600"
         return resp
 
     app.register_blueprint(bp)
