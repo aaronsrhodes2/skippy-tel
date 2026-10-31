@@ -116,10 +116,11 @@ class Room:
     touched it. The room calls the link's woke / voice_started / voice_stopped / heard / released / show / speak / announce."""
 
     def __init__(self, name, link, gate, brain, timers, spotter=None, local_voice=None, log=print, floor: float = 0.012,
-                 min_speech_ms: int = 600, listen_ms: int = 8000, followup_ms: int = 6000, summarize_over: int = 1500, filler=None, filler_after_s: float = 1.0):
+                 min_speech_ms: int = 600, listen_ms: int = 8000, followup_ms: int = 6000, summarize_over: int = 1500, filler=None, filler_after_s: float = 1.0, pc_outs=()):
         self.name, self.link, self.gate, self.brain, self.timers, self.spotter = name, link, gate, brain, timers, spotter
         self.local_voice, self.log = local_voice, log
         self.floor, self.min_speech_ms, self.listen_ms, self.followup_ms, self.summarize_over = floor, min_speech_ms, listen_ms, followup_ms, summarize_over
+        self.pc_outs = list(pc_outs)                            # speaker_out.PcOut: his voice also out of skippy-pc's HDMI / Bluetooth stereo
         self.filler, self.filler_after_s = filler, filler_after_s       # pre-recorded quips (filler.py) to cover a slow answer
         self.remote_wake = True                                 # until the box says it woke on its own
         self.music = None                                       # music.BoxMusic for a box that plays Bilby's library
@@ -283,6 +284,7 @@ class Room:
             self.log(f"[{self.name}] (sign-off: {text})")
             async with self.voice:
                 await self.link.show(text)
+                self._also(("mp3", mp3))
                 await self.link.announce(text, ("mp3", mp3))
 
     async def _cover_the_wait(self, work, command: str) -> None:
@@ -303,6 +305,7 @@ class Room:
                 self.log(f"[{self.name}] (filler: {text})")
                 async with self.voice:
                     await self.link.show(text)
+                    self._also(("mp3", mp3))
                     await self.link.announce(text, ("mp3", mp3))
             done, _ = await asyncio.wait({work}, timeout=5.0)
 
@@ -328,10 +331,17 @@ class Room:
         async with self.voice:
             voice = await self._voice(said)
             await self.link.show(said)
+            self._also(voice)
             if announce:
                 await self.link.announce(said, voice)
             else:
                 await self.link.speak(said, voice, follow_up)
+
+    def _also(self, voice) -> None:
+        """Start this clip on the PC's own outputs too (each waits its own delay so they line up with the box); never holds anything up."""
+        if voice is not None and voice[0] == "mp3":
+            for out in self.pc_outs:
+                asyncio.ensure_future(out.play(voice[1]))
 
     async def _voice(self, said: str):
         """("mp3", bytes) from Skippy's own voice, ("pcm", bytes, rate) from the machine's, or None when neither answers."""
@@ -544,6 +554,7 @@ def build_rooms(env: dict):
     client, brain_model = ear.brain_client(env, "hub")           # Skippy Core's chat model: local, never a paid one
     model_path = default_model(env)
     from filler import FillerBank                                # noqa: PLC0415
+    import speaker_out                                           # noqa: PLC0415
     filler_bank = FillerBank.load(Path(__file__).resolve().parents[2] / "state" / "filler")      # recorded by tools/make_filler_bank.py; none = no quips
     threshold = float(env.get("SATELLITE_WAKE_THRESHOLD", "0.5"))
     if model_path.is_file():
@@ -561,7 +572,7 @@ def build_rooms(env: dict):
         tools = music_tools(lambda: holder["room"], loop) if plays_music else None
         brain = Brain(client, brain_model, timers, hass=house, extra=tools)
         room = holder["room"] = Room(name, link, gate, brain, timers, spotter=spotter, local_voice=audio.local_voice_pcm16, log=log,
-                                     floor=float(env.get("SATELLITE_FLOOR", "0.012")), filler=filler_bank,
+                                     floor=float(env.get("SATELLITE_FLOOR", "0.012")), filler=filler_bank, pc_outs=speaker_out.parse_outputs(env, name, log)[1],
                                      filler_after_s=float(env.get("SATELLITE_FILLER_S", "1.0")),
                                      followup_ms=int(float(env.get("SATELLITE_SESSION_S", "180")) * 1000))      # the name opens a conversation: it stays open this long without a word
         return room
