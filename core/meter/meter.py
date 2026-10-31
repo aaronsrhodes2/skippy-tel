@@ -119,7 +119,9 @@ class Meter:
         inside = [w for t, w in self.samples if a - 1 <= t <= b + 1]
         if inside:
             return round(statistics.fmean(inside), 2)
-        return round(self.samples[-1][1], 2) if self.samples else None
+        if self.samples and abs(self.samples[-1][0] - b) <= 15:      # a request older than our samples (llama-swap's backlog at start): unknown
+            return round(self.samples[-1][1], 2)
+        return None
 
     def poll(self) -> int:
         """Write every request llama-swap has finished since last time. Returns how many."""

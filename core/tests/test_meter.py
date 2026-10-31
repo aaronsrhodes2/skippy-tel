@@ -96,3 +96,9 @@ def test_power_file_is_found_by_the_amdgpu_name(tmp_path):
     pf = meter.find_power_file(str(tmp_path))
     assert pf is not None and meter.read_watts(pf) == 42.0
     assert meter.read_watts(None) is None
+
+
+def test_a_request_from_before_we_were_sampling_has_no_watts_rather_than_a_wrong_one(tmp_path):
+    m = make(tmp_path, [act(1, -3000)])
+    m.poll()
+    assert lines(tmp_path)[0]["w"] is None
