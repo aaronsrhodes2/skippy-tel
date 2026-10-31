@@ -776,6 +776,8 @@ lvgl:
   pages:
     - id: home
       bg_color: 0x000000
+      scrollbar_mode: "OFF"
+      scrollable: false
       widgets:
         - line:
             id: sp_a
