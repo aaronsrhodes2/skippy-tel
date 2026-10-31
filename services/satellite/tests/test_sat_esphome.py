@@ -225,6 +225,20 @@ def test_room_talk_never_leaves_the_hub_and_a_tap_is_the_same_as_its_name():
     run(go())
 
 
+def test_an_answer_after_a_quip_is_announced_not_sent_into_the_turn_the_box_opened_by_itself():
+    """2026-10-31: a quip (an announcement) covers the wait; the box then opens a new turn on its own, listening for its name. The answer sent as
+    that turn's reply was dropped by the box (a silent pod, the PC outputs alone spoke it). It must be announced, like the quip."""
+    async def go():
+        client, media, made, hub, task, log = await boot()
+        link = made["room"].link
+        link.run_live, link.stage = True, "wake"                   # the turn the box started by itself after the quip
+        await link.speak("It is 13:16.", ("mp3", b"x"))
+        assert client.announced and client.announced[-1][1] == "It is 13:16."
+        assert E.VOICE_ASSISTANT_TTS_END not in client.kinds()
+        task.cancel()
+    run(go())
+
+
 def test_a_timer_is_an_announcement_over_the_music():
     async def go():
         client, media, made, hub, task, log = await boot()

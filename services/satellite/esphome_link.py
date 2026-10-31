@@ -359,7 +359,10 @@ class EsphomeLink:
                 self.streamer.face.add_convo(1, plain(text)[:120])
 
     async def speak(self, said: str, voice, follow_up: bool = False) -> None:
-        if not self.run_live:
+        # Not inside the Captain's own turn: none is open, or the open one is the turn the box started BY ITSELF after an announcement (a quip
+        # covering the wait), still only listening for its name. An answer sent as that turn's reply is dropped by the box: silent pod, the
+        # PC outputs alone speak it (2026-10-31). Announce it, like the quip.
+        if not self.run_live or self.stage == "wake":
             await self.announce(said, voice)
             return
         url = self.media.put_clip(voice, self.box_host) if voice else ""
