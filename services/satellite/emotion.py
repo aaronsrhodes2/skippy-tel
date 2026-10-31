@@ -2,7 +2,7 @@
 so it costs nothing before he speaks: the hub sends the box a track, one letter per 100 ms of his voice, and the box reads it by elapsed time.
 
 Emotions (the letter is the code; UPPERCASE is strong, lowercase mild):
-  n neutral  h happy  e excited  l laughing  s surprised  q curious  a annoyed  m smug  d sad  w worried  b bored  r embarrassed  v loving
+  n neutral  h happy  e excited  l laughing  s surprised  q curious  a annoyed  m smug  d sad  w worried  b bored  r embarrassed  v loving  k sick
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ _RULES = [                                   # (emotion, words that suggest it):
     ("l", ("haha", "ha ha", "lol", "[laughs]", "[chuckles]", "hilarious", "funny")),
     ("v", ("love", "adore", "darling", "sweetheart", "[affection")),
     ("r", ("blush", "embarrass", "awkward", "oops", "my bad", "ahem")),
+    ("k", ("sick", "nauseous", "queasy", "fever", "feel awful", "feeling ill", "i'm ill", "i am ill", "disgusting", "[coughs", "[sneezes", "cough")),
     ("w", ("careful", "danger", "warning", "worried", "afraid", "uh oh", "problem", "broken", "error", "failed", "[nervous")),
     ("d", ("sorry", "unfortunately", "can't", "cannot", "unable", "alas", "sadly", "miss you", "[sad", "[sobs")),
     ("a", ("ugh", "seriously", "idiot", "stupid", "moron", "annoying", "unbelievable", "enough", "[groans", "[annoyed", "[angry")),
@@ -56,7 +57,7 @@ def reaction(asked: str) -> str:
         return "r"
     if any(w in t for w in ("stupid", "idiot", "shut up", "you suck", "useless", "dumb")):
         return "d"
-    if any(w in t for w in ("help", "broken", "doesn't work", "not working", "error", "problem", "emergency", "hurry")):
+    if any(w in t for w in ("i'm sick", "i am sick", "feel sick", "feeling sick", "help", "broken", "doesn't work", "not working", "error", "problem", "emergency", "hurry")):
         return "w"
     if any(w in t for w in ("tell me about", "explain", "why", "how does", "what is")):
         return "q"

@@ -100,6 +100,8 @@ class EsphomeLink:
         self._played = asyncio.Event()
         self._follow = False
         self._tasks: set = set()
+        self.hub = None                                             # set by serve(): the other rooms' pods, to mirror his speech onto
+        self.services: list = []                                    # the box's API actions (the `face` one drives the mirror)
         self.asked = ""
 
     def discover(self, entities) -> None:
@@ -189,6 +191,26 @@ class EsphomeLink:
             self._event(self.E.VOICE_ASSISTANT_RUN_END)
             self.run_live, self.stage = False, ""
 
+    def others(self):
+        """The other pods' links (every connected room but this one)."""
+        rooms = getattr(self.hub, "rooms", {}) if self.hub is not None else {}
+        return [r.link for r in rooms.values() if r.link is not self and hasattr(r.link, "mirror")]
+
+    async def mirror(self, mouth_text: str, emote_text: str, seconds: float) -> None:
+        """Another pod is speaking: this one animates the same speech, silently and at the same moment (his mouth, mood and rocking mirror in every room)."""
+        face = next((x for x in self.services if x.name == "face"), None)
+        if face is None or "mouth" not in self.keys:
+            return
+        try:
+            self.client.text_command(self.keys["mouth"], mouth_text)
+            if "emote" in self.keys and emote_text:
+                self.client.text_command(self.keys["emote"], emote_text)
+            await self.client.execute_service(face, {"state": "speaking"})
+            await asyncio.sleep(min(seconds + 0.4, 30))
+            await self.client.execute_service(face, {"state": "idle"})
+        except Exception as e:                                      # noqa: BLE001 — a pod that is busy or gone simply misses it
+            self.log(f"[{self.room.name}] (mirror: {type(e).__name__})")
+
     def session(self, on: bool) -> None:
         if "session" in self.keys:
             self.client.text_command(self.keys["session"], "1" if on else "0")
@@ -204,9 +226,13 @@ class EsphomeLink:
             proc = await asyncio.create_subprocess_exec("ffmpeg", "-v", "error", "-nostdin", "-i", "pipe:0", "-f", "s16le", "-ac", "1", "-ar", "16000", "pipe:1",
                                                         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
             pcm, _ = await asyncio.wait_for(proc.communicate(voice[1]), 10)
-            self.client.text_command(self.keys["mouth"], mood + envelope(pcm, cap=249))
+            text = mood + envelope(pcm, cap=249)
+            self.client.text_command(self.keys["mouth"], text)
+            etext = emotion.reaction(self.asked) + "|" + emotion.track(plain(said), self.asked, len(pcm) / 32000.0)
             if "emote" in self.keys:                                # what he feels, sentence by sentence, over the length of his voice
-                self.client.text_command(self.keys["emote"], emotion.reaction(self.asked) + "|" + emotion.track(plain(said), self.asked, len(pcm) / 32000.0))
+                self.client.text_command(self.keys["emote"], etext)
+            for other in self.others():                             # every other pod does the same, silently, at the same moment
+                self._spawn_mirror(other.mirror(text, etext, len(pcm) / 32000.0))
         except Exception as e:                                      # noqa: BLE001 — the mouth just babbles
             self.log(f"[{self.room.name}] (mouth envelope: {type(e).__name__})")
             return
@@ -214,6 +240,11 @@ class EsphomeLink:
             task = asyncio.create_task(self._rhubarb(voice, mood))
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
+
+    def _spawn_mirror(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     async def _rhubarb(self, voice, mood: str) -> None:
         import tempfile                                             # noqa: PLC0415
@@ -229,6 +260,9 @@ class EsphomeLink:
                 with open(tsv, encoding="utf-8") as f:
                     cues = [(float(a), b) for a, b in (ln.split("	") for ln in f.read().splitlines() if "	" in ln)]
             self.client.text_command(self.keys["mouth"], mood + shapes(cues, cap=249))
+            for other in self.others():                             # the better mouth shapes, to the pods that are mirroring
+                if "mouth" in other.keys:
+                    other.client.text_command(other.keys["mouth"], mood + shapes(cues, cap=249))
         except Exception as e:                                      # noqa: BLE001 — the loudness digits stay
             self.log(f"[{self.room.name}] (rhubarb: {type(e).__name__})")
 
@@ -303,9 +337,10 @@ async def serve(hub, name: str, host: str, port: int, *, media, noise_psk: str, 
     room = None
     try:
         info = await client.device_info()
-        entities, _ = await client.list_entities_services()
+        entities, services = await client.list_entities_services()
         link = EsphomeLink(client, media, host, log=hub.log)
         link.discover(entities)
+        link.hub, link.services = hub, services
         room = hub.rooms[name] = hub.make_room(name, link)
         hub.log(f"[{name}] connected: {getattr(info, 'friendly_name', '') or getattr(info, 'name', '') or 'an ESPHome box'}")
         if "player" in link.keys:
