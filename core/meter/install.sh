@@ -9,6 +9,7 @@ do_() { if (( APPLY )); then echo "+ $*"; "$@"; else echo "would: $*"; fi; }
 
 do_ install -d -m 0755 /opt/skippy-core/meter /var/lib/skippy-core/meter
 do_ install -m 0755 "$HERE/meter.py" /opt/skippy-core/meter/meter.py
+do_ install -m 0644 "$HERE/savings.py" /opt/skippy-core/meter/savings.py
 do_ install -m 0644 "$HERE/skippy-core-meter.service" /etc/systemd/system/
 do_ systemctl daemon-reload
 do_ systemctl enable skippy-core-meter.service
