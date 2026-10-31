@@ -81,6 +81,7 @@
     <div class="vstat" hidden aria-live="polite"></div>
     <div class="editing" hidden><svg class="g" aria-hidden="true"><use href="#g-pen"/></svg><span>Editing your last message</span><button type="button" class="key sm" aria-label="Stop editing" title="Stop editing (Esc)"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></div>
     <div class="queue" hidden aria-live="polite"></div>
+    <div class="quotes" hidden></div>   {# the parts of messages this one replies to (static/skippy-reply.js): select words, tap Reply #}
     <div class="files" hidden></div>
     <input type="file" class="file-pick" multiple hidden accept="image/jpeg,image/png,image/webp,audio/wav,audio/mpeg,audio/flac,audio/ogg,application/pdf,text/*,.md,.csv,.json,.py,.js,.ts,.tsx,.jsx,.html,.css,.yml,.yaml,.xml,.sh,.kt,.java,.c,.h,.cpp,.rs,.go,.sql,.toml,.ini,.log">
     <textarea rows="1" aria-label="Message" placeholder="Message Skippy" required></textarea>
@@ -313,6 +314,10 @@
       const body = document.createElement("div"); body.className = "tx";
       div.append(glyph(role === "user" ? "user" : extra === "raw" ? "atom" : "can"), body);
       show(body, text, role === "assistant" && extra !== "raw");
+      if (role === "user" && window.SkippyReply) {                 // the parts it replies to, as quote blocks over your words
+        const s = SkippyReply.split(text);
+        if (s.quotes.length) { fill(body, s.rest); body.prepend(...s.quotes.map(q => SkippyReply.quoteNode(q, document))); body._raw = text; }
+      }
       const acts = document.createElement("div"); acts.className = "acts";
       acts.append(keyBtn("sheet", "Copy", e => copyText(body._raw || body.textContent, e.currentTarget), "copy-turn"));
       div.append(acts);
@@ -633,6 +638,30 @@
         return true;
       },
     };
+    // ── Reply to a part (static/skippy-reply.js): select words in any message, yours or Skippy's, here or in the agent's transcript,
+    // and tap the Reply key by them. Each quote waits over the box with its own remove key and goes at the start of the message as
+    // a markdown blockquote, so every brain and the agent know which part you mean. ──
+    const MAX_QUOTES = 6, pending_quotes = [], quotesBox = form.querySelector(".quotes");
+    function paintQuotes() {
+      quotesBox.hidden = !pending_quotes.length;
+      msg.required = !pending_quotes.length;                      // a quote alone may go
+      quotesBox.replaceChildren(...pending_quotes.map((q, i) => {
+        const row = document.createElement("div"); row.className = "quote-chip";
+        row.append(glyph("reply"), SkippyReply.quoteNode(q, document), keyBtn("x", "Remove this quote", () => { pending_quotes.splice(i, 1); paintQuotes(); msg.focus(); }));
+        return row;
+      }));
+      logPager.refresh();
+    }
+    function addQuote(q) {
+      q = SkippyReply.clean(q);
+      if (!q || pending_quotes.includes(q)) { msg.focus(); return false; }
+      if (pending_quotes.length >= MAX_QUOTES) { flash("At most " + MAX_QUOTES + " quotes to a message."); return false; }
+      pending_quotes.push(q); paintQuotes();
+      msg.focus(); msg.setSelectionRange(msg.value.length, msg.value.length);
+      return true;
+    }
+    window.SkippyCompose.quote = addQuote;
+    if (window.SkippyReply) SkippyReply.attach({scope: root.querySelector(".stage"), bodies: ".turn .tx, .me-chat .turn", onQuote: addQuote});
     form.querySelector("button.clip").addEventListener("click", () => picker.click());
     {% if captain %}{# The camera key (the Captain only): a photo of a screen goes with the message exactly like a pasted picture, kept
        as large as the agent's limit allows (workshop.MAX_IMAGE_B64 each, MAX_IMAGES_B64 together) so the text on it stays readable. #}
@@ -805,11 +834,14 @@
     function startEdit() {
       if (busy || !lastPair()) return;
       editing = true; editBar.hidden = false;
-      msg.value = history[history.length - 2].content.replace(/\s*\[attached:[^\]]*\]$/, ""); grow(); msg.focus();
+      const was = SkippyReply.split(history[history.length - 2].content.replace(/\s*\[attached:[^\]]*\]$/, ""));
+      pending_quotes.splice(0, pending_quotes.length, ...was.quotes); paintQuotes();     // its quotes back over the box, as they were
+      msg.value = was.rest; grow(); msg.focus();
       msg.setSelectionRange(msg.value.length, msg.value.length);
     }
     function endEdit() { editing = false; editBar.hidden = true; }
-    editBar.querySelector("button").addEventListener("click", () => { endEdit(); msg.value = ""; grow(); });
+    const dropQuotes = () => { pending_quotes.length = 0; paintQuotes(); };
+    editBar.querySelector("button").addEventListener("click", () => { endEdit(); msg.value = ""; grow(); dropQuotes(); });
     // ── The queue (static/skippy-queue.js, the same as the agent's): what is sent while Skippy answers waits here, under the box,
     // and goes as ONE message when the reply lands; a repeat is taken out. Kept in this tab; a stopped or failed reply holds it. ──
     const queueBox = form.querySelector(".queue"), QUEUE = KEY + "-queue";
@@ -828,7 +860,8 @@
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       let text = msg.value.trim();
-      if (!text) return;
+      if (!text && !pending_quotes.length) return;
+      if (pending_quotes.length) { text = SkippyReply.compose(pending_quotes.splice(0), text); paintQuotes(); }   // the quotes ride at its start
       if (homeOn()) { msg.value = ""; grow(); home.send(text).then(ok => { if (!ok) { msg.value = text; grow(); } }); return; }
       if (busy && !agentOn()) {                                     // Skippy is answering: it waits in line, not lost
         if (editing) { flash("Wait for the reply to edit your message."); return; }
@@ -842,7 +875,7 @@
     msg.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit(); }
       else if (e.key === "ArrowUp" && !msg.value && !agentOn()) { e.preventDefault(); startEdit(); }
-      else if (e.key === "Escape" && editing) { endEdit(); msg.value = ""; grow(); }
+      else if (e.key === "Escape" && editing) { endEdit(); msg.value = ""; grow(); dropQuotes(); }
     });
     function newChat() {                                                                // the one before stays in Your chats
       leaveHome();

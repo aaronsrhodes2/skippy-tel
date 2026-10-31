@@ -511,6 +511,17 @@ dialog.keys .key { margin: 0 0 0 auto; }
 .chat-bridge .editing[hidden] { display: none; }
 .chat-bridge .editing span { flex: 1; }
 .file-chip.pasted { border-style: dashed; }
+/* Reply to a part (static/skippy-reply.js): the key by a selection, the quotes waiting over the box, and the quotes in a sent bubble */
+.reply-key { position: fixed; z-index: 60; width: 36px; height: 36px; color: var(--accent); background: #000; }
+.reply-key[hidden] { display: none; }
+.chat-bridge .quotes { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }   /* each quote is clamped to three lines; at most six */
+.chat-bridge .quotes[hidden] { display: none; }
+.quote-chip { display: flex; align-items: flex-start; gap: 6px; padding: 3px 4px 3px 6px; background: #000; border: 1px solid var(--dim-green-hi); }
+.quote-chip > .g { flex: none; width: 16px; height: 16px; margin-top: 3px; color: var(--accent); }
+.quote-chip blockquote.quote { flex: 1; min-width: 0; margin: 0; max-height: 4.2em; overflow: hidden; font-size: .8rem; }
+.quote-chip .key.sm { flex: none; width: 22px; height: 22px; padding: 0; }
+blockquote.quote { margin: 0 0 6px; padding: 1px 0 1px 8px; border-left: 3px solid var(--accent); color: var(--muted);
+                   white-space: pre-wrap; overflow-wrap: anywhere; }
 /* Your chats: the filter row (the Captain), day headings, and each row's star, rename and bin */
 .chat-bridge .chats-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
 .chat-bridge .chats-kinds button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; font-size: .8rem; color: var(--muted);

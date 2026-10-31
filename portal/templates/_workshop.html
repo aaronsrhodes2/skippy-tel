@@ -319,7 +319,9 @@
         return;
       }
       if (turn.role === "user") {
-        box.textContent = turn.text;
+        const s = typeof window !== "undefined" && window.SkippyReply ? SkippyReply.split(turn.text) : {quotes: [], rest: turn.text};   // the parts it replies to (static/skippy-reply.js)
+        box.textContent = s.rest;
+        if (s.quotes.length) box.prepend(...s.quotes.map(q => SkippyReply.quoteNode(q, document)));
         addCopy(box, turn);
         if (turn.imgs) {                           // thumbnails while this page has them; just a count after a reload
           const row = el("div", "imgs"), shown = thumbsOf.get(turn) || [];
