@@ -26,7 +26,8 @@ from pathlib import Path
 RATE = 48000                     # the router's rate
 FS = 16000                       # what the correlation runs at
 RING_S = 40.0
-GAIN = 0.6
+GAIN = 0.6                       # the share of a measured offset taken off the delay at once
+FINE_GAIN, FINE_S = 0.3, 0.10    # under FINE_S the rest is the pod's own start jitter (+-40 ms live, 2026-10-31): smaller steps
 MIN_DELAY, MAX_DELAY = 0.0, 2.0
 MAX_OFFSET = 1.5
 DEAD_BAND = 0.010
@@ -188,7 +189,9 @@ class Calibrator:
         result = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "outputs": {}}
         if pod is None or not mine:
             heard = ", ".join(f"{k} {mine[k][1]:.0f}x" for k in mine) or "no PC output"
-            self.log(f"(sync: heard {heard}{', the pod' if pod else ', not the pod'}: nothing to line up; {len(found)} copies)")
+            due = min(expected.values())
+            where = ", ".join(f"{(t - due) * 1000:+.0f} ms {h:.0f}x" for t, h in found)
+            self.log(f"(sync: heard {heard}{', the pod' if pod else ', not the pod'}: nothing to line up; copies at {where} from where the output's was due)")
             return None
         for k, (t, h) in mine.items():
             off = t - pod[0]                                        # positive: this output is behind the pod
@@ -207,7 +210,7 @@ class Calibrator:
             elif abs(off) < DEAD_BAND:
                 note = "together"
             else:
-                new = min(MAX_DELAY, max(MIN_DELAY, old - GAIN * off))
+                new = min(MAX_DELAY, max(MIN_DELAY, old - (GAIN if abs(off) > FINE_S else FINE_GAIN) * off))
                 sink.delay_s = new                                  # the next clip gets it (router.Sink.realign)
                 note = f"delay {old:.3f} -> {new:.3f} s"
             self.log(f"(sync: {k} {off * 1000:+.0f} ms {'behind' if off >= 0 else 'ahead of'} the pod (peaks pod {pod[1]:.0f}x, {k} {h:.0f}x); {note})")
