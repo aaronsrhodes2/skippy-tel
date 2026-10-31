@@ -120,6 +120,7 @@ def make(tmp_path, now, car=None, things=None, env=None, posts=None, home_ll=HOM
     d = daily.Daily({"SKIPPY_HOME_LATLON": f"{home_ll[0]},{home_ll[1]}", **(env or {})}, house=house, client=Client(), model="m", hlog=hlog,
                     state_dir=tmp_path / "daily", get=get, post=post, clock=lambda: now[0], sleep=lambda s: asyncio.sleep(0.001), log=lambda m: None)
     d.gap_s = 0.05
+    d.night_shift = lambda: None                                        # never the real tools/nightly.py from a test (it prunes Docker and may deploy)
     link, brain = Link(), Brain()
     room = Room("office", link, Gate(), brain, Timers(), log=lambda m: None, hlog=hlog)
     room.daily = d
