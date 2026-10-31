@@ -116,3 +116,54 @@ def test_the_hub_adapters_put_voice_and_books_on_the_router(monkeypatch):
     books = book_out.build_outputs(env, "office")
     assert len(books) == 1 and isinstance(books[0], book_out.RoutedBookOut)
     assert speaker_out.parse_outputs({**env, "SATELLITE_ROUTER": "0"}, "office")[1][0].__class__ is speaker_out.PcOut
+
+
+def test_the_routed_voice_knows_when_the_pc_outputs_fall_silent(monkeypatch):
+    import asyncio
+    import time
+    w = World()
+    r = make(w, delays=(0.5, 0.0))
+    out = speaker_out.RoutedOut(r, ["hdmi"], duck_others=False, decoder=lambda mp3, gain: tone(2.0))
+    r.autostart = True
+    before = time.monotonic()
+    asyncio.run(asyncio.wait_for(out.play(b"mp3"), 10))
+    r.close()
+    assert out.talking_until >= before + 2.0 + 0.5 + speaker_out.ECHO_TAIL_S - 0.01   # the clip, the Sony's delay, the room's echo
+
+
+def test_the_room_is_deaf_while_the_pc_outputs_still_say_his_words():
+    """2026-10-31: the Sony plays his voice ~0.5 s after the pod; the room left BUSY when the pod finished and could hear his own last words."""
+    import time
+    import hub as hub_mod
+
+    class Spotter:
+        def __init__(self):
+            self.fed = 0
+
+        def feed(self, block):
+            self.fed += 1
+            return False
+
+    class Out:
+        talking_until = time.monotonic() + 30
+
+    spot = Spotter()
+    room = hub_mod.Room("office", type("Link", (), {})(), None, None, None, spotter=spot, log=lambda *a: None)
+    room.pc_outs = [Out()]
+    room.feed([0.3] * hub_mod.BLOCK)
+    assert spot.fed == 0
+    Out.talking_until = 0
+    room.feed([0.3] * hub_mod.BLOCK)
+    assert spot.fed == 1
+
+
+def test_joined_mp3_pieces_become_one_stream_the_pod_plays_to_the_end():
+    """2026-10-31: the voice gate joins one MP3 per sentence; the pod's decoder stopped at the second piece's header (silent mid-answer)."""
+    import hub as hub_mod
+    calls = []
+
+    def run(args, input, capture_output, timeout):
+        calls.append(args)
+        return type("R", (), {"stdout": b"ONE-CLEAN-STREAM"})()
+    assert hub_mod.one_stream(b"\xff\xfbInfo...audio", run=run) == b"\xff\xfbInfo...audio" and not calls     # one piece: untouched
+    assert hub_mod.one_stream(b"Info..a..Info..b", run=run) == b"ONE-CLEAN-STREAM" and "libmp3lame" in calls[0]

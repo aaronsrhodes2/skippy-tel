@@ -15,6 +15,7 @@ import asyncio
 import subprocess
 
 RATE = 48000
+ECHO_TAIL_S = 0.6                                                  # a stereo's own buffering and the room's echo, after the clip's last sample
 
 
 def find_device(part: str):
@@ -111,6 +112,7 @@ class RoutedOut:
         self.router, self.kinds, self.log, self.duck_others = router, set(kinds), log, duck_others
         self.kind = "+".join(kinds)
         self.decoder = decoder or decode
+        self.talking_until = 0.0                                   # (monotonic) when the outputs fall silent: the room stays deaf until then (hub.Room.feed)
 
     def available(self):
         return any(self.router.available(k) for k in self.kinds) or None
@@ -122,6 +124,9 @@ class RoutedOut:
             self.log(f"(output {self.kind}: could not decode: {type(e).__name__})")
             return False
         import router as router_mod                                # noqa: PLC0415
+        import time                                                # noqa: PLC0415
+        lag = max((self.router.sinks[k].delay_s for k in self.kinds if k in self.router.sinks), default=0)
+        self.talking_until = max(self.talking_until, time.monotonic() + len(pcm) / RATE + lag + ECHO_TAIL_S)
         ducker = Ducker() if self.duck_others else None            # other programs (Bilby in a browser, a game) still duck under him
         if ducker:
             await asyncio.to_thread(ducker.duck)

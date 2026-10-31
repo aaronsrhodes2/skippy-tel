@@ -88,6 +88,21 @@ def looks_technical(text: str) -> bool:
     return sum(text.count(c) for c in "{}[]<>=;_#|") > max(6, len(text) // 25)
 
 
+def one_stream(mp3: bytes, run=None) -> bytes:
+    """One clean MP3 stream from MP3s joined end to end. The voice gate joins its own pieces (one per sentence) and the hub joins the gate's: each
+    piece starts with its own LAME 'Info' header, and the pod's decoder stops at the second one (2026-10-31: the pod went silent mid-answer while
+    the PC outputs, decoded by ffmpeg, said all of it). A clip with one header comes back unchanged; if ffmpeg fails, so does the joined clip."""
+    if mp3.count(b"Info") + mp3.count(b"Xing") <= 1:
+        return mp3
+    import subprocess                                           # noqa: PLC0415
+    try:
+        got = (run or subprocess.run)(["ffmpeg", "-v", "error", "-nostdin", "-i", "pipe:0", "-ac", "1", "-ar", "24000", "-c:a", "libmp3lame",
+                                      "-b:a", "64k", "-f", "mp3", "pipe:1"], input=mp3, capture_output=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return mp3
+    return got or mp3
+
+
 def split_for_voice(text: str, limit: int = 480) -> list[str]:
     """Pieces of at most `limit` characters, cut at sentence ends where there are any, so a long reply can be spoken whole (mp3 pieces join into one clip)."""
     import re                                                   # noqa: PLC0415
@@ -198,6 +213,9 @@ class Room:
             return
         if self.mode == BUSY:
             return                                              # thinking or talking: never answer our own voice
+        if any(getattr(o, "talking_until", 0) > time.monotonic() for o in self.pc_outs):
+            self.pre.clear()                                    # the PC outputs (the Sony) still say his last words, after the pod: deaf to them too
+            return
         self.pre.append(block)
         if self.mode == IDLE and self.spotter is not None and self.remote_wake and self.spotter.feed(block):
             self._woke(getattr(self.spotter, "name", "skippy"))
@@ -484,7 +502,7 @@ class Room:
         try:
             parts = split_for_voice(said)                       # the gate speaks at most 500 characters at a time: a longer reply is spoken in pieces, joined into one clip
             clips = await asyncio.gather(*[asyncio.to_thread(self.gate.tts, t) for t in parts])
-            return ("mp3", b"".join(clips))
+            return ("mp3", await asyncio.to_thread(one_stream, b"".join(clips)))
         except BudgetSpent:
             self.log(f"[{self.name}] (Skippy's voice has used today's budget: using the machine's own voice)")
         except (GateError, RuntimeError, OSError) as e:
