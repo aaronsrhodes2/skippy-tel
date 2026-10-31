@@ -335,6 +335,9 @@ voice_assistant:
   auto_gain: 31dBFS
   volume_multiplier: 2.0
   on_client_connected:
+    - script.execute:                  # the hub is back: he is not offline any more
+        id: face
+        state: idle
     - if:
         condition:
           switch.is_on: mic_on
@@ -1063,7 +1066,7 @@ display:
     hsync_pin: GPIO46
     vsync_pin: GPIO3
     pclk_pin: GPIO9
-    pclk_frequency: 16MHz
+    pclk_frequency: 12MHz
     pclk_inverted: false
     pixel_mode: 16bit
     dimensions:
