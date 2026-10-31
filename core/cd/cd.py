@@ -678,7 +678,53 @@ class CD:
             if sha and sha != self.state.get("delivered"):
                 self.deploy(sha)
             self.publish_all()
+            self.home_dns()
             self.report()
+
+    # ── home's public name: the router forwards the car's telemetry door here, and home's IP changes ──────────────
+    HOME_IP_EVERY_S = 300
+    IP_SOURCES = ("https://api.ipify.org", "https://ipv4.icanhazip.com")
+
+    def public_ip(self) -> str | None:
+        """Home's public IPv4, only when two services agree (one wrong answer must never repoint the name)."""
+        seen = set()
+        for url in self.IP_SOURCES:
+            try:
+                with urllib.request.urlopen(url, timeout=10) as r:
+                    seen.add(r.read().decode().strip())
+            except (OSError, ValueError):
+                return None
+        ip = seen.pop() if len(seen) == 1 else ""
+        parts = ip.split(".")
+        return ip if len(parts) == 4 and all(p.isdigit() and int(p) < 256 for p in parts) else None
+
+    def home_dns(self, force: bool = False) -> str | None:
+        """Keep deploy.json's home_dns host's A record on home's public IP: checked every 5 minutes, Cloud DNS touched only when
+        the IP moved. Never raises (a tick must not fail over it)."""
+        if not getattr(self, "cfg", None):
+            self.cfg = json.loads((HERE / "deploy.json").read_text(encoding="utf-8"))
+        spec = self.cfg.get("home_dns") or {}
+        if not spec.get("host") or (not force and time.time() - self.state.get("home_ip_at", 0) < self.HOME_IP_EVERY_S):
+            return None
+        self.state["home_ip_at"] = time.time()
+        ip = self.public_ip()
+        if not ip or (ip == self.state.get("home_ip") and not force):
+            self.save()
+            return ip
+        name, zone = spec["host"].rstrip(".") + ".", spec["zone"]
+        try:
+            oidc.token()
+            have = self.gcloud("dns", "record-sets", "list", f"--zone={zone}", f"--name={name}", "--type=A",
+                               "--format=value(rrdatas)", quiet=True).strip()
+            if have != ip:
+                verb = "update" if have else "create"
+                self.gcloud("dns", "record-sets", verb, name, f"--zone={zone}", "--type=A", "--ttl=60", f"--rrdatas={ip}")
+                self.say(f"cd: {name} -> {ip} (was {have or 'unset'})")
+            self.state["home_ip"] = ip
+        except Exception as e:                            # noqa: BLE001
+            self.say(f"cd: couldn't point {name} at {ip}: {e}")
+        self.save()
+        return ip
 
     # ── publish: what skippy-core puts in buckets besides the portal ────────────────────────────────────────────
     PUBLISH_RETRY_S = 600
@@ -837,6 +883,9 @@ def main(argv: list[str]) -> int:
         return cd.ops(argv[1:])
     if cmd == "domains":
         return cd.domains()
+    if cmd == "home-dns":
+        print(cd.home_dns(force=True) or "home's public IP isn't known (the two IP services disagree or don't answer)")
+        return 0
     if cmd == "bootstrap":                                # plan only, unless "apply" is typed
         return cd.bootstrap(apply=argv[1:2] == ["apply"])
     if cmd == "vendor":                                   # the Core deployer's Mentat build: <dest>/.vendor/sigma-ground

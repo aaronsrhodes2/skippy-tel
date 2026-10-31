@@ -104,7 +104,7 @@ def test_the_tesla_compose_file_is_pinned_and_keeps_its_doors_local():
         assert image in text
     ports = [line.strip() for line in text.splitlines() if line.strip().startswith('- "') and ":" in line and "/" not in line]
     assert ports == ['- "127.0.0.1:4000:4000"', '- "127.0.0.1:7351:7351"',   # nothing on the LAN; mosquitto and Postgres not at all
-                     '- "127.0.0.1:7443:7443"', '- "127.0.0.1:7353:7353"']   # the car's streaming door reaches the world only through the Funnel
+                     '- "7443:7443"', '- "127.0.0.1:7353:7353"']   # only the car's streaming door is beyond localhost (mutual TLS)
     assert "${CORE_STATE:-/var/lib/skippy-core}/tesla/db:" in text            # the history is kept with CORE_STATE
     assert "/etc/skippy-core/tesla.env" in text and "ENCRYPTION_KEY=" not in text   # secrets live on the box, never here
 

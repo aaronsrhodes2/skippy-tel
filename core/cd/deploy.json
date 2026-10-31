@@ -2,6 +2,7 @@
  "_comment": "What skippy-core's deployer (core/cd/cd.py) deploys, and how: moved from .github/workflows/deploy.yml (docs/no-github.md, phase 3). The pins are build arguments: sigma_ground_ref is served by Experiments and Mentat (bump to update both); starcontrol_ref/sha256 name the Star Control Zero web build the portal carries (change BOTH to ship a new one). Mentat is rebuilt when mentat/, .dockerignore or this file changed.",
  "project": "skippy-tel",
  "region": "us-west1",
+ "home_dns": {"_comment": "A public name for home (the car's telemetry door, forwarded by the router to skippy-core:7443): its A record follows home's public IP (cd.py home_dns).", "host": "telemetry.makerportal.live", "zone": "makerportal-live"},
  "pins": {
   "SIGMA_GROUND_REF": "883ea00dd2293d7c67179fae8d2ef63f3e696ee6",
   "STARCONTROL_REF": "web-2026-10-02",

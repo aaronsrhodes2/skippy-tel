@@ -101,9 +101,10 @@ services:
       - /etc/skippy-core/tesla-ble/private.pem:/keys/private.pem:ro
 
   # The car as a guard (2026-10-31, docs/tesla.md → Sentry): the car streams its Sentry state to fleet-telemetry (Tesla's own server,
-  # pinned), reached from anywhere through a Tailscale Funnel TCP door (:10000, raw TCP: the car's mutual TLS ends here, never at the
-  # Funnel). It publishes to the broker; car-fleet (core/car-fleet) listens, keeps the events for skippy-pc's reporter, and on the alarm
-  # flashes the lights and locks the doors through Tesla's signing proxy. The app's key and his tokens are /etc/skippy-core/tesla-fleet.
+  # pinned) at telemetry.makerportal.live:7443. Tesla takes only a name under the app's domain, so not the Funnel: the home router
+  # forwards TCP 7443 here and cd.py keeps the name on home's public IP; the car's mutual TLS ends here. It publishes to the broker;
+  # car-fleet (core/car-fleet) listens, keeps the events for skippy-pc's reporter, and on the alarm flashes the lights and locks the
+  # doors through Tesla's signing proxy. The app's key and his tokens are /etc/skippy-core/tesla-fleet.
   fleet-telemetry:
     image: tesla/fleet-telemetry:v0.9.5@sha256:7cb5f429210128b8edc5aac1e403589315893106f4c5a3ff85cb32213e2f8e37
     restart: unless-stopped
@@ -113,9 +114,9 @@ services:
     cap_drop:
       - all
     environment:
-      - SUPPRESS_TLS_HANDSHAKE_ERROR_LOGGING=true   # the Funnel is public: strangers' knocks aren't news
-    ports:
-      - "127.0.0.1:7443:7443"
+      - SUPPRESS_TLS_HANDSHAKE_ERROR_LOGGING=true   # the door is public: strangers' knocks aren't news
+    ports:                                       # the car's door: the home router forwards TCP 7443 here (mutual TLS: only cars Tesla signed get past the handshake)
+      - "7443:7443"
     volumes:
       - ./car-fleet/telemetry.json:/etc/fleet-telemetry/config.json:ro
       - /etc/skippy-core/tesla-fleet/telemetry:/certs:ro

@@ -65,16 +65,20 @@ The Captain: "operate my car as an external security device". When someone comes
 once, and the car answers the alarm itself.
 
 ```
-car ──(its own mutual TLS, from anywhere)── Funnel :10000 (raw TCP) ── fleet-telemetry (:7443) ── MQTT ── car-fleet (:7353) ── reporter ── portal
+car ──(its own mutual TLS, from anywhere)── telemetry.makerportal.live:7443 ── home router ── fleet-telemetry (:7443) ── MQTT ── car-fleet (:7353) ── reporter ── portal
                                                                                                     │                          (DM, Car tile)
                                                                          tesla-http-proxy ◄─────────┘ on the alarm: flash the lights, lock
 ```
 
 - **What the car streams:** only `SentryMode` (Tesla's states: off, idle, armed, **aware** = someone came close and the cameras are
   recording, **panic** = a threat, touched or leaned on, the car's own alarm, quiet). Every streamed signal is billed; this one changes rarely.
-- **fleet-telemetry** (Tesla's server, pinned v0.9.5, `core/car-fleet/telemetry.json`) on 127.0.0.1:7443, reached through the Funnel's raw TCP
-  door :10000, so the car's mutual TLS ends at Tesla's own server. Its certificate is ours (`/etc/skippy-core/tesla-fleet/telemetry/`:
-  a CA made by `tesla.sh --apply`, the CA goes to the car in the signed config).
+- **fleet-telemetry** (Tesla's server, pinned v0.9.5, `core/car-fleet/telemetry.json`) on :7443, so the car's mutual TLS ends at
+  Tesla's own server. **Not the Funnel:** Tesla takes only a streaming name under the app's domain ("hostname domain does not match with
+  partner account"), and the Funnel routes by its own ts.net names. So the home router forwards TCP 7443 to skippy-core (192.168.0.242),
+  and skippy-core's deployer keeps `telemetry.makerportal.live`'s A record on home's public IP (`cd.py home_dns`: checked every 5 minutes,
+  two IP services must agree, Cloud DNS touched only when it moved; `deploy.json` → `home_dns`; by hand: `cd.py home-dns`). Its
+  certificate is ours (`/etc/skippy-core/tesla-fleet/telemetry/`: a CA made once by `tesla.sh --apply` and kept, the CA goes to the car
+  in the signed config; the server certificate names telemetry.makerportal.live).
 - **car-fleet** (`core/car-fleet/fleet.py`): keeps the state and the last 20 AWARE / PANIC events; on PANIC it flashes the lights and locks the
   doors, at most once a minute (**never the horn**: the Captain). Commands are signed by Tesla's tesla-http-proxy (built pinned into the image)
   with the app's key; his tokens (`tokens.json`, from `tools/tesla_fleet.py exchange`) are refreshed in place.

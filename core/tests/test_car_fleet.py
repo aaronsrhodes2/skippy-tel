@@ -120,16 +120,16 @@ def _problem(tokens):
 def test_the_streaming_config_carries_our_ca_and_only_sentry(tmp_path, monkeypatch):
     (tmp_path / "ca.pem").write_text("-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----\n")
     monkeypatch.setattr(fleet, "TELEMETRY_CA", tmp_path / "ca.pem")
-    monkeypatch.setattr(fleet, "TELEMETRY_HOST", "skippy-core.example.ts.net")
+    monkeypatch.setattr(fleet, "TELEMETRY_HOST", "telemetry.example.live")
     cfg = fleet.Fleet(tokens=None, vin="V").telemetry_config(now=0)
-    assert cfg["hostname"] == "skippy-core.example.ts.net" and cfg["port"] == 10000 and "BEGIN CERTIFICATE" in cfg["ca"]
+    assert cfg["hostname"] == "telemetry.example.live" and cfg["port"] == 7443 and "BEGIN CERTIFICATE" in cfg["ca"]
     assert list(cfg["fields"]) == ["SentryMode"] and cfg["exp"] == fleet.CONFIG_DAYS * 86400
 
 
 def test_the_container_keeps_its_doors_local_and_the_server_pinned():
     text = (CORE / "compose.tesla.yml").read_text(encoding="utf-8")
     tele = text.split("  fleet-telemetry:", 1)[1].split("\n\n", 1)[0]
-    assert '"127.0.0.1:7443:7443"' in tele and "cap_drop" in tele and "/etc/skippy-core/tesla-fleet/telemetry:/certs:ro" in tele
+    assert '"7443:7443"' in tele and "cap_drop" in tele and "/etc/skippy-core/tesla-fleet/telemetry:/certs:ro" in tele
     guard = text.split("  car-fleet:", 1)[1]
     assert '"127.0.0.1:7353:7353"' in guard and "required: false" in guard
     conf = json.loads((CORE / "car-fleet" / "telemetry.json").read_text(encoding="utf-8"))

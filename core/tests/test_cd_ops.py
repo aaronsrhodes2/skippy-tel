@@ -305,3 +305,48 @@ def test_the_vendor_command_loads_the_pins_before_it_lays_out_the_build_context(
     monkeypatch.setattr(cd_mod.CD, "vendor", fake_vendor)
     assert cd_mod.main(["vendor", str(tmp_path)]) == 0
     assert len(seen["pin"]) == 40 and seen["dest"] == tmp_path and seen["star"] is False
+
+
+class HomeDnsCD(cd_mod.CD):
+    """Home's public IP is `ips` (one per IP service); Cloud DNS holds `have`; every gcloud call is recorded."""
+
+    def __init__(self, s, ips, have=""):
+        super().__init__(s, log=lambda m: None)
+        self.ips, self.have, self.calls = list(ips), have, []
+        cd_mod.oidc.token = lambda: None
+
+    def public_ip(self):
+        self.calls.append("ip")
+        seen = set(self.ips)
+        return seen.pop() if len(seen) == 1 else None
+
+    def gcloud(self, *args, cwd=None, timeout=900, quiet=False):
+        self.calls.append(args[:3])
+        if args[2] == "list":
+            return self.have + "\n"
+        self.have = next(a.split("=", 1)[1] for a in args if a.startswith("--rrdatas="))
+        return ""
+
+
+def test_the_telemetry_name_follows_homes_ip_and_dns_is_touched_only_when_it_moved(tmp_path):
+    b = HomeDnsCD(settings(tmp_path), ["76.1.2.3", "76.1.2.3"])
+    assert b.home_dns() == "76.1.2.3"
+    assert b.calls == ["ip", ("dns", "record-sets", "list"), ("dns", "record-sets", "create")] and b.have == "76.1.2.3"
+    b.calls.clear()
+    assert b.home_dns() is None and b.calls == []                                 # inside 5 minutes: not even asked
+    b.state["home_ip_at"] = 0
+    assert b.home_dns() == "76.1.2.3" and b.calls == ["ip"]                       # same IP: Cloud DNS untouched
+    b.state["home_ip_at"], b.ips = 0, ["76.9.9.9", "76.9.9.9"]
+    b.calls.clear()
+    b.home_dns()
+    assert b.calls[-1] == ("dns", "record-sets", "update") and b.have == "76.9.9.9"
+
+
+def test_two_ip_services_that_disagree_never_repoint_the_name(tmp_path):
+    b = HomeDnsCD(settings(tmp_path), ["76.1.2.3", "10.0.0.1"], have="76.1.2.3")
+    assert b.home_dns() is None and b.calls == ["ip"] and b.have == "76.1.2.3"
+
+
+def test_the_home_name_is_one_under_the_tesla_apps_domain():
+    spec = json.loads((cd_mod.HERE / "deploy.json").read_text())["home_dns"]
+    assert spec["host"].endswith(".makerportal.live") and spec["zone"] == "makerportal-live"

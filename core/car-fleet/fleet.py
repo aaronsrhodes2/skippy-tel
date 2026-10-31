@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The Captain's car as a guard (2026-10-31, the Captain: "operate my car as an external security device"): Tesla's Fleet API from skippy-core.
 
-The car streams its Sentry state to our own Fleet Telemetry server (the fleet-telemetry container, reached through a Tailscale Funnel TCP
-door), which publishes it to MQTT; this listens. Sentry's states (Tesla's schema): off, idle, armed, AWARE (someone came close, the
+The car streams its Sentry state to our own Fleet Telemetry server (the fleet-telemetry container at telemetry.makerportal.live:7443,
+forwarded by the home router), which publishes it to MQTT; this listens. Sentry's states (Tesla's schema): off, idle, armed, AWARE (someone came close, the
 cameras are recording), PANIC (a threat: touched, leaned on; the car's own alarm), quiet. On AWARE and PANIC it keeps an event, which
 skippy-pc's reporter carries to the portal (a Discord DM to the Captain). On PANIC it also answers: flashes the lights and locks the
 doors (the Captain: no honk). Commands are signed by Tesla's own tesla-http-proxy (built pinned into this image) with the app's key
@@ -39,8 +39,8 @@ PRIVATE = KEYS / "private.pem"
 TELEMETRY_CA = KEYS / "telemetry" / "ca.pem"
 PUSHED = KEYS / "telemetry" / "pushed.json"
 VIN = os.environ.get("TESLA_VIN", "").strip()
-TELEMETRY_HOST = os.environ.get("TELEMETRY_HOST", "").strip()            # the Funnel's name (install/tesla.sh writes it)
-TELEMETRY_PORT = int(os.environ.get("TELEMETRY_PORT", "10000"))
+TELEMETRY_HOST = os.environ.get("TELEMETRY_HOST", "").strip()            # telemetry.makerportal.live (install/tesla.sh writes it)
+TELEMETRY_PORT = int(os.environ.get("TELEMETRY_PORT", "7443"))     # the router forwards it straight through
 MQTT_HOST = os.environ.get("MQTT_HOST", "mosquitto")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
 TOPIC_BASE = os.environ.get("TELEMETRY_TOPIC", "telemetry")

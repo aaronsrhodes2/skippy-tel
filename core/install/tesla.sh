@@ -16,8 +16,9 @@
 #     vin.env (TESLA_VIN, read from TeslaMate). The car-ble container (core/car-ble) signs charge commands with it over Bluetooth; the
 #     key is enrolled as charging_manager, so the car takes nothing else from it. :7352 is its tailnet door.
 #   * /etc/skippy-core/tesla-fleet/telemetry/ (root, 700): the car's streaming door (docs/tesla.md → Sentry): our own CA and a server
-#     certificate for the box's Funnel name (made once; the CA goes to the car in its signed config), host.env (TELEMETRY_HOST), and the
-#     Funnel's raw TCP door :10000 → 127.0.0.1:7443 (fleet-telemetry: the car's mutual TLS ends there, not at the Funnel). :7353 is
+#     certificate for telemetry.makerportal.live (Tesla takes only a name under the app's domain, so not the Funnel; the CA is made
+#     once and goes to the car in its signed config), host.env (TELEMETRY_HOST). The home router forwards TCP 7443 to this box's
+#     7443 (fleet-telemetry: the car's mutual TLS ends there) and cd.py keeps the name on home's public IP. :7353 is
 #     car-fleet's tailnet door (the guard: Sentry's events, arm/disarm, the alarm's answer).
 #   * /etc/skippy-core/core.env: CORE_TESLA=1, then a repair so it starts now rather than at the next commit.
 set -euo pipefail
@@ -29,9 +30,9 @@ REPO="${REPO:-/opt/skippy-core/repo}"
 BLE="${BLE:-/etc/skippy-core/tesla-ble}"
 DOORS=(4000 7351 7352 7353)
 TELE="${TELE:-/etc/skippy-core/tesla-fleet/telemetry}"
-TELE_PORT=10000
+TELE_PORT=7443
+TELE_HOST="${TELE_HOST:-telemetry.makerportal.live}"   # Tesla takes only a name under the app's domain
 served() { tailscale serve status 2>/dev/null | grep -q ":$1 (tailnet only)"; }
-funneled() { tailscale funnel status 2>/dev/null | grep -q ":$1"; }
 
 if [[ "$MODE" == "--check" ]]; then
   bad=0
@@ -43,7 +44,7 @@ if [[ "$MODE" == "--check" ]]; then
   chk "the charging key exists, root only" '[[ $(stat -c %a "$BLE/private.pem") == 600 ]] && grep -q "^TESLA_VIN=." "$BLE/vin.env"'
   chk "the charging door answers on :7352" 'curl -sS --max-time 5 -o /dev/null http://127.0.0.1:7352/health'
   chk "the telemetry certificate exists, root only" '[[ $(stat -c %a "$TELE/server.key") == 600 ]] && grep -q "^TELEMETRY_HOST=." "$TELE/host.env"'
-  chk "the car's streaming door :$TELE_PORT is on the Funnel" "funneled $TELE_PORT"
+  chk "$TELE_HOST points at home" '[[ $(getent ahostsv4 "$TELE_HOST" | awk "NR==1{print \$1}") == $(curl -s -m 10 -4 https://api.ipify.org) ]]'
   chk "fleet-telemetry listens on :7443" 'timeout 5 bash -c "</dev/tcp/127.0.0.1/7443"'
   chk "the guard answers on :7353" 'curl -sS --max-time 5 -o /dev/null http://127.0.0.1:7353/health'
   chk "car reader connected to MQTT"     'curl -fsS --max-time 5 http://127.0.0.1:7351/car | grep -q "\"mqtt\": true"'
@@ -98,27 +99,28 @@ elif (( APPLY )); then
 else echo "would: write $BLE/vin.env with the car's VIN from TeslaMate"; fi
 
 echo "== the car's streaming door ($TELE)"
-host=$(tailscale status --json 2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))' 2>/dev/null || true)
-if [[ -s "$TELE/server.key" ]]; then echo "ok: $TELE/server.key (kept: a new CA would need the car's config pushed again)"
+host="$TELE_HOST"
+if [[ -s "$TELE/server.key" ]] && openssl x509 -in "$TELE/server.pem" -noout -ext subjectAltName 2>/dev/null | grep -q "DNS:$host"; then
+  echo "ok: $TELE/server.pem names $host"
 elif (( APPLY )); then
-  [[ -n "$host" ]] || { echo "can't read the box's tailnet name (tailscale status)" >&2; exit 1; }
   install -d -m 700 "$TELE"
   ( umask 077; cd "$TELE"
-    openssl ecparam -name prime256v1 -genkey -noout -out ca.key
-    openssl req -x509 -new -key ca.key -sha256 -days 3650 -subj "/CN=skippy-core car telemetry CA" -out ca.pem
+    if [[ ! -s ca.key ]]; then                                   # the CA is kept: the car's pushed config carries it
+      openssl ecparam -name prime256v1 -genkey -noout -out ca.key
+      openssl req -x509 -new -key ca.key -sha256 -days 3650 -subj "/CN=skippy-core car telemetry CA" -out ca.pem
+    fi
     openssl ecparam -name prime256v1 -genkey -noout -out server.key
     openssl req -new -key server.key -subj "/CN=$host" -out server.csr
     printf 'subjectAltName=DNS:%s\nextendedKeyUsage=serverAuth\n' "$host" > server.ext
     openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 3650 -sha256 -extfile server.ext -out server.pem
     cat ca.pem >> server.pem
     rm -f server.csr server.ext )
-  echo "+ made the telemetry CA and a certificate for $host"
-else echo "would: make a telemetry CA and a server certificate for ${host:-its tailnet name} in $TELE (700, root)"; fi
-if grep -q "^TELEMETRY_HOST=." "$TELE/host.env" 2>/dev/null; then echo "ok: $TELE/host.env"
+  echo "+ made a telemetry certificate for $host (signed by the box's own CA)"
+else echo "would: make a telemetry certificate for $host in $TELE (700, root; the CA made once and kept)"; fi
+if grep -qx "TELEMETRY_HOST=$host" "$TELE/host.env" 2>/dev/null; then echo "ok: $TELE/host.env"
 elif (( APPLY )); then ( umask 077; echo "TELEMETRY_HOST=$host" > "$TELE/host.env" ); echo "+ wrote $TELE/host.env"
 else echo "would: write $TELE/host.env (TELEMETRY_HOST=$host)"; fi
-if funneled "$TELE_PORT"; then echo "ok: :$TELE_PORT on the Funnel"
-else do_ tailscale funnel --bg --tcp="$TELE_PORT" tcp://127.0.0.1:7443; fi
+echo "the router forwards TCP $TELE_PORT to this box's $TELE_PORT; cd.py keeps $host on home's public IP (deploy.json home_dns)"
 
 echo "== 2/3 the tailnet doors (TeslaMate's page, the car reader, the charging door)"
 for p in "${DOORS[@]}"; do
