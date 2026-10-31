@@ -12,6 +12,7 @@ pass is the same scheme as the portal's (portal/player.py), from the home token,
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 import gzip
 import hashlib
 import hmac
@@ -139,6 +140,7 @@ class MediaServer:
         app = web.Application()
         app.router.add_get("/v/{secret}/{clip}", self._clip)
         app.router.add_get("/m/{secret}/track.flac", self._track)
+        app.router.add_post("/shot", self._shot)                    # a box's screenshot (rooms/shot.py asks for it); LAN only, nothing secret on a screen
         self._runner = web.AppRunner(app, access_log=None)
         await self._runner.setup()
         await web.TCPSite(self._runner, "0.0.0.0", self.port).start()
@@ -146,6 +148,14 @@ class MediaServer:
     async def stop(self) -> None:
         if self._runner is not None:
             await self._runner.cleanup()
+
+    async def _shot(self, request):
+        from aiohttp import web                                  # noqa: PLC0415
+        out = Path(__file__).resolve().parents[2] / "state"
+        body = await request.read()
+        (out / "box-shot.txt").write_text(request.headers.get("X-Dims", "480,480,960"), encoding="utf-8")
+        (out / "box-shot.bin").write_bytes(body)
+        return web.Response(text="ok")
 
     async def _clip(self, request):
         from aiohttp import web                                  # noqa: PLC0415

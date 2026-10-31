@@ -1,6 +1,6 @@
 """A screenshot of a room box's screen: python services/satellite/rooms/shot.py [host] [out.png]
 
-Starts a one-shot receiver on the media port (10800: stop the hub first if it is running), asks the box to post its screen to it
+Starts a one-shot receiver on the media port (10800; when the hub runs and holds it, the hub's media server takes the picture instead), asks the box to post its screen to it
 (the box's `screenshot` action), and writes a PNG. The box key is SATELLITE_ESPHOME_KEY in the vault .env.
 """
 import asyncio, struct, sys, zlib
@@ -38,12 +38,23 @@ async def main(host: str, out: Path) -> None:
         return web.Response(text="ok")
     app = web.Application(client_max_size=4_000_000); app.router.add_post("/shot", post)
     runner = web.AppRunner(app); await runner.setup()
-    await web.TCPSite(runner, "0.0.0.0", 10800).start()
+    shot_file = HERE.parents[2] / "state" / "box-shot.bin"
+    hub = False
+    try:
+        await web.TCPSite(runner, "0.0.0.0", 10800).start()
+    except OSError:                                                # the hub is running and holds the port: its media server takes the picture
+        hub, before = True, (shot_file.stat().st_mtime if shot_file.exists() else 0)
     c = APIClient(host, 6053, None, noise_psk=env()["SATELLITE_ESPHOME_KEY"])
     await c.connect(login=True)
     _, services = await c.list_entities_services()
     svc = next(s for s in services if s.name == "screenshot")
     await c.execute_service(svc, {"url": f"http://{local_address(host)}:10800/shot"})
+    if hub:
+        for _ in range(60):
+            await asyncio.sleep(0.5)
+            if shot_file.exists() and shot_file.stat().st_mtime > before:
+                break
+        got.set_result((shot_file.with_suffix(".txt").read_text(encoding="utf-8"), shot_file.read_bytes()))
     dims, data = await asyncio.wait_for(got, 30)
     w, h, stride = (int(x) for x in dims.split(","))
     rgb = bytearray()

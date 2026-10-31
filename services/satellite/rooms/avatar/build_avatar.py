@@ -65,6 +65,16 @@ def serve_head() -> None:
         srv.handle_request()
 
 
+def serve_ball() -> None:
+    """The aluminium ball with its engraved face, ten frames (mouth shapes X A B C D E F G H, then a blink): frames/ball/00-09.png, 320x320 with transparency."""
+    srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    srv.done = False
+    Handler.names = {"ball"}
+    print(f"open http://localhost:{PORT}/services/satellite/rooms/avatar/render_ball.html   (add ?only=D to render one shape)", flush=True)
+    while not srv.done:
+        srv.handle_request()
+
+
 def serve(preview: bool = False) -> None:
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     srv.done = False
@@ -98,4 +108,4 @@ def write_yaml() -> None:
 
 
 if __name__ == "__main__":
-    {"head": serve_head, "serve": serve, "preview": lambda: serve(preview=True), "yaml": write_yaml}[sys.argv[1] if len(sys.argv) > 1 else "serve"]()
+    {"ball": serve_ball, "head": serve_head, "serve": serve, "preview": lambda: serve(preview=True), "yaml": write_yaml}[sys.argv[1] if len(sys.argv) > 1 else "serve"]()

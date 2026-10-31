@@ -1,6 +1,6 @@
-# Made by avatar/build_avatar.py head: Skippy's head (the chat's 3D model, mouth cavity painted out; the box draws the mouth). Don't edit by hand.
+# Made by avatar/build_avatar.py ball: Skippy's brushed-aluminium ball, blank (render_ball.html?only=X&blank=1); the box draws the face on it live. Don't edit by hand.
 image:
-  - file: avatar/frames/head/00.png
-    id: skippy_head
+  - file: avatar/frames/ball/00.png
+    id: skippy_ball
     type: RGB565
     transparency: alpha_channel

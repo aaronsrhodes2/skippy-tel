@@ -13,6 +13,8 @@ writes; a tap is a `binary_sensor` the hub hears as "Skippy".
 from __future__ import annotations
 
 import asyncio
+import os
+from pathlib import Path
 
 PLAY_TIMEOUT_S = 90
 
@@ -40,6 +42,40 @@ def envelope(pcm: bytes, step_ms: int = 60, rate: int = 16000, cap: int = 250) -
     return "".join(str(min(9, int(9 * l / top + 0.35))) if l > 0.04 * top else "0" for l in levels)
 
 
+RHUBARB = Path(os.environ.get("RHUBARB", "")) if os.environ.get("RHUBARB") else     Path(__file__).resolve().parents[2] / "state" / "rhubarb" / "Rhubarb-Lip-Sync-1.13.0-Windows" / "rhubarb.exe"   # Rhubarb Lip Sync (MIT): mouth shapes from audio
+
+
+def mood_of(said: str) -> str:
+    """The face's mood while he says this: n neutral, h happy, a sarcastic, s surprised, q curious, d sad."""
+    t = (said or "").lower()
+    if any(w in t for w in ("sorry", "unfortunately", "can't", "cannot", "unable", "afraid")):
+        return "d"
+    if any(w in t for w in ("monkey", "obviously", "idiot", "genius", "magnificent", "of course")):
+        return "a"
+    if any(w in t for w in ("wow", "whoa", "no way", "incredible")):
+        return "s"
+    if t.rstrip().endswith("?"):
+        return "q"
+    if "!" in t or any(w in t for w in ("great", "done", "ready", "awesome", "glad")):
+        return "h"
+    return "n"
+
+
+def shapes(cues, step_ms: int = 60, cap: int = 249) -> str:
+    """Rhubarb's cues [(start seconds, shape letter)] as one letter per `step_ms`."""
+    if not cues:
+        return ""
+    out, j = [], 0
+    for i in range(cap):
+        t = i * step_ms / 1000.0
+        while j + 1 < len(cues) and cues[j + 1][0] <= t:
+            j += 1
+        out.append(cues[j][1])
+        if t > cues[-1][0] + 0.3:
+            break
+    return "".join(out)
+
+
 class EsphomeLink:
     hub_follows_up = False                                          # the box does it (continue_conversation)
 
@@ -52,6 +88,7 @@ class EsphomeLink:
         self.run_live, self.stage, self.vad_ended = False, "", False
         self._played = asyncio.Event()
         self._follow = False
+        self._tasks: set = set()
 
     def discover(self, entities) -> None:
         for e in entities:
@@ -133,18 +170,42 @@ class EsphomeLink:
             self._event(self.E.VOICE_ASSISTANT_RUN_END)
             self.run_live, self.stage = False, ""
 
-    async def mouth(self, voice) -> None:
-        """Tell the box how loud Skippy's voice is, a digit (0-9) per 60 ms, so its drawn mouth follows the words. The box starts reading it
-        when the clip starts playing. Best effort: without it (or past ~15 s) the mouth moves at random."""
+    async def mouth(self, voice, said: str = "") -> None:
+        """What the box's drawn face needs to talk: a mood letter, then one character per 60 ms for the mouth. Sent at once as loudness digits
+        (ffmpeg, ~50 ms), then replaced by Rhubarb's mouth shapes when they are ready (a second or two later): the box reads them by elapsed time,
+        so nothing waits and the speech starts at once. Best effort: without any of it the mouth just babbles."""
         if "mouth" not in self.keys or not voice:
             return
+        mood = mood_of(said)
         try:
             proc = await asyncio.create_subprocess_exec("ffmpeg", "-v", "error", "-nostdin", "-i", "pipe:0", "-f", "s16le", "-ac", "1", "-ar", "16000", "pipe:1",
                                                         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
             pcm, _ = await asyncio.wait_for(proc.communicate(voice[1]), 10)
-            self.client.text_command(self.keys["mouth"], envelope(pcm))
-        except Exception as e:                                      # noqa: BLE001 — the mouth just flaps at random
+            self.client.text_command(self.keys["mouth"], mood + envelope(pcm, cap=249))
+        except Exception as e:                                      # noqa: BLE001 — the mouth just babbles
             self.log(f"[{self.room.name}] (mouth envelope: {type(e).__name__})")
+            return
+        if RHUBARB.exists():
+            task = asyncio.create_task(self._rhubarb(voice, mood))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+
+    async def _rhubarb(self, voice, mood: str) -> None:
+        import tempfile                                             # noqa: PLC0415
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                wav, tsv = f"{d}/c.wav", f"{d}/c.tsv"
+                ff = await asyncio.create_subprocess_exec("ffmpeg", "-v", "error", "-nostdin", "-y", "-i", "pipe:0", "-ac", "1", "-ar", "16000", wav,
+                                                          stdin=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+                await asyncio.wait_for(ff.communicate(voice[1]), 10)
+                rb = await asyncio.create_subprocess_exec(str(RHUBARB), "-r", "phonetic", "-f", "tsv", "-o", tsv, wav,
+                                                          stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+                await asyncio.wait_for(rb.wait(), 20)
+                with open(tsv, encoding="utf-8") as f:
+                    cues = [(float(a), b) for a, b in (ln.split("	") for ln in f.read().splitlines() if "	" in ln)]
+            self.client.text_command(self.keys["mouth"], mood + shapes(cues, cap=249))
+        except Exception as e:                                      # noqa: BLE001 — the loudness digits stay
+            self.log(f"[{self.room.name}] (rhubarb: {type(e).__name__})")
 
     async def show(self, text: str) -> None:
         if "subtitle" in self.keys:
@@ -155,7 +216,7 @@ class EsphomeLink:
             await self.announce(said, voice)
             return
         url = self.media.put_clip(voice, self.box_host) if voice else ""
-        await self.mouth(voice)
+        await self.mouth(voice, said)
         self._event(self.E.VOICE_ASSISTANT_INTENT_END, {"conversation_id": "", "continue_conversation": "1" if follow_up else "0", "speech": said})
         self._event(self.E.VOICE_ASSISTANT_TTS_START, {"text": said})
         self._played.clear()
@@ -177,7 +238,7 @@ class EsphomeLink:
         if voice is None:
             return
         url = self.media.put_clip(voice, self.box_host)
-        await self.mouth(voice)
+        await self.mouth(voice, said)
         self.run_live, self.stage = False, ""                       # the box stops listening to announce, then starts a new turn by itself
         try:
             await self.client.send_voice_assistant_announcement_await_response(media_id=url, timeout=min(self.wait_cap, _voice_seconds(voice) + 10),
