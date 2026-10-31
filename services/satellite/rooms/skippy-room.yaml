@@ -623,7 +623,7 @@ script:
           else if (state == "muted") { c = 0xef4444; t = "microphone off"; en = 0.2f; }
           else if (state == "offline") { c = 0x475569; t = "hub offline"; en = 0.1f; }
           else if (state == "sick") { c = 0xd6c92a; t = ""; en = 0.4f; }
-          // the keys: mic off = earplugs, speaker off = a floating microphone, both = off duty (fuchsia glow, he is listening to music): never blue (backend down) or red
+          // the keys: mic off = earplugs, listening with the speaker on = a floating microphone, both = off duty (fuchsia glow, he is listening to music): never blue (backend down) or red
           if (id(mic_off) && id(spk_off) && (state == "idle" || state.empty())) { c = 0xc026d3; t = "off duty"; en = 0.6f; }
           else if (id(mic_off) && (state == "idle" || state.empty())) t = "microphone off";
           else if (id(spk_off) && (state == "idle" || state.empty())) t = "speaker off";
@@ -1126,9 +1126,9 @@ interval:
               } else lv_obj_set_style_line_opa(pg, 0, LV_PART_MAIN);
             }
           }
-          { static lv_point_precise_t mc[2], ma[10], ms_[2];                               // the pod's speaker is off: a microphone floats beside him (never over his mouth)
+          { static lv_point_precise_t mc[2], ma[10], ms_[2];                               // he is listening and the pod's speaker is on: a microphone floats beside him (never over his mouth); mic off or speaker off: none
             lv_obj_t *mp[3] = {id(mic_cap)->obj, id(mic_arc)->obj, id(mic_stem)->obj};
-            if (id(spk_off) && !dead) {
+            if (!id(mic_off) && !id(spk_off) && !dead) {
               float my0 = 340 + 7 * sinf(ph * 1.3f), mx0 = 425;
               mc[0].x = (int) mx0; mc[0].y = (int) (my0 - 16); mc[1].x = (int) mx0; mc[1].y = (int) (my0 + 6);
               for (int i = 0; i < 10; i++) { float a = 3.14159f * i / 9.0f; ma[i].x = (int) (mx0 + 20 * cosf(a + 3.14159f)); ma[i].y = (int) (my0 + 4 - 20 * sinf(a + 3.14159f)); }

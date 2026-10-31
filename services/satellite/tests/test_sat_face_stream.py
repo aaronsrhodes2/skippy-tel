@@ -310,14 +310,15 @@ def test_keys_change_the_picture_and_back():
     from face_render import Face
     f = Face(); f.set_state("idle")
     base = _settle(f)
+    assert f.mic_cap.opa == 255                                 # listening, speaker on: the floating microphone
     f.set_keys(True, False); plugs = _settle(f, t0=200000)
     assert (plugs != base).any() and f.plug[0].opa == 255 and f.plug[1].opa == 255 and f.mic_cap.opa == 0
-    f.set_keys(False, True); mic = _settle(f, t0=300000)
-    assert f.mic_cap.opa == 255 and f.plug[0].opa == 0 and (mic != base).any()
+    f.set_keys(False, True); quiet = _settle(f, t0=300000)
+    assert f.mic_cap.opa == 0 and f.plug[0].opa == 0 and (quiet != base).any()
     f.set_keys(True, True); off = _settle(f, t0=400000)
-    assert f.face_rgb == 0xc026d3 and f.mic_cap.opa == 255 and f.plug[0].opa == 255
+    assert f.face_rgb == 0xc026d3 and f.mic_cap.opa == 0 and f.plug[0].opa == 255
     f.set_keys(False, False); back = _settle(f, t0=500000)
-    assert f.face_rgb == 0x6a28c9 and f.plug[0].opa == 0 and f.mic_cap.opa == 0 and (off != back).any()
+    assert f.face_rgb == 0x6a28c9 and f.plug[0].opa == 0 and f.mic_cap.opa == 255 and (off != back).any()
 
 
 def test_off_duty_never_blue_or_red_and_offline_wins():

@@ -847,8 +847,8 @@ class Face:
                 self.plug[sd].opa = 0
 
     def _mic(self, st) -> None:
-        """The pod's speaker is off: a microphone floats beside him (never over his mouth: he may still be talking through the house stereos)."""
-        if not self.spk_off or st == "offline":
+        """He is listening and the pod's speaker is on: a microphone floats beside him (never over his mouth). Mic off (earplugs) or speaker off: none."""
+        if self.mic_off or self.spk_off or st == "offline":
             for ln in (self.mic_cap, self.mic_arc, self.mic_stem):
                 ln.opa = 0
             return
