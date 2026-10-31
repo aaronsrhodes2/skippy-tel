@@ -175,6 +175,11 @@ class Face:
         self.in_session = False
         self.mic_off = False                              # the pod's microphone key: earplugs on his ears
         self.spk_off = False                              # the pod's speaker key: a microphone floats beside him
+        self.music_heard = False                          # the room has music on and nothing else: in rest mode he sometimes dances to it
+        self.dance_until = 0
+        self.next_dance = 0
+        self.dk = 0
+        self._could_dance = False
         # the face script's globals
         self.face_rgb = 0x6a28c9
         self.last_activity = 0
@@ -272,6 +277,10 @@ class Face:
     def off_duty(self) -> bool:
         return self.mic_off and self.spk_off
 
+    @property
+    def mic_off_only(self) -> bool:
+        return self.mic_off and not self.spk_off          # (earplugs in: he cannot hear the music)
+
     def set_keys(self, mic_off: bool, spk_off: bool) -> None:
         """The box's microphone and speaker keys (the 3rd and 4th fields of its `Face` sensor)."""
         if (mic_off, spk_off) != (self.mic_off, self.spk_off):
@@ -334,6 +343,23 @@ class Face:
         st = self.state_now
         if self.off_duty and st in ("idle", "") and not self.talking:
             st = "music"                                    # off duty: the music face, with a fuchsia tint
+        rest = st in ("idle", "", "music") and not self.talking and not self.in_session
+        if self.music_heard and rest:
+            st = "music"                                    # music and nothing else: the happy face, and now and then a dance
+        can_dance = st == "music" and rest and not self.mic_off_only
+        if can_dance and not self._could_dance:
+            self.next_dance = now + 3000 + u32() % 8000     # (music just started: the first dance comes after a few seconds)
+        self._could_dance = can_dance
+        dancing = False
+        if can_dance:
+            if self.dance_until == 0 and now >= self.next_dance:
+                self.dance_until = now + 6000 + u32() % 6000
+                self.next_dance = self.dance_until + 15000 + u32() % 25000
+            dancing = now < self.dance_until
+            if not dancing:
+                self.dance_until = 0
+        else:
+            self.dance_until = 0
         dead = st == "offline"
         talk = self.talking
         mood, vis = "n", "X"
@@ -474,7 +500,7 @@ class Face:
             wob = {"e": 1.0, "l": 1.0, "a": 0.9, "s": 0.8, "w": 0.7, "h": 0.6, "r": 0.6, "v": 0.6, "q": 0.5, "m": 0.5, "d": 0.25, "b": 0.2}.get(lc, 0.35)
             wob *= 1.0 if st0 else 0.7
         self.wobs += (wob - self.wobs) * 0.2
-        self.ramp += ((0.0 if dead else (4.0 + 19.0 * self.wobs if talk else 3.0)) - self.ramp) * 0.15
+        self.ramp += ((0.0 if dead else (4.0 + 19.0 * self.wobs if talk else (12.0 if dancing else 3.0))) - self.ramp) * 0.15
         if talk:
             if now > self.next_beat:
                 self.next_beat = now + int(270 - 120 * self.wobs) + u32() % 70
@@ -489,9 +515,15 @@ class Face:
             else:
                 self.rk += 0.05
             if not dead and now > self.next_idle:
-                self.next_idle = now + 450
-                self.bx_ = roundf(math.sin(self.rk * 9) * self.ramp)
-                self.by_ = roundf(-abs(math.sin(self.rk * 9)) * self.ramp * 0.35)
+                if dancing:                                  # on the beat (125 bpm): sway to one side, then the other, with a bounce on every other half beat
+                    self.next_idle = now + 240
+                    self.dk += 1
+                    self.bx_ = roundf((1 if (self.dk // 2) % 2 else -1) * self.ramp * 0.8)
+                    self.by_ = roundf(-(self.dk % 2) * self.ramp * 0.55)
+                else:
+                    self.next_idle = now + 450
+                    self.bx_ = roundf(math.sin(self.rk * 9) * self.ramp)
+                    self.by_ = roundf(-abs(math.sin(self.rk * 9)) * self.ramp * 0.35)
             ox, oy = self.bx_, self.by_
         rkv = ox - self.prev_bx
         self.prev_bx = ox

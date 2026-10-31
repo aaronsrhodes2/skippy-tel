@@ -390,3 +390,66 @@ def test_flat_can_sends_much_less_than_the_brushed_one():
         f.tick(100000 + i * 50)
         sizes.append(sum(len(d) for d in e.encode(to565(f.render()))))
     assert np.mean(sizes) < 16 * 1024                           # (the brushed can averaged 18 KB a frame, 366 KB/s)
+
+
+# ── the face drawn in a child process of its own (the hub's work cannot make its frames late) ──
+def test_remote_streamer_draws_in_a_child_and_ends_with_its_input():
+    import socket, time
+    from face_stream import RemoteFaceStreamer
+    rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); rx.bind(("127.0.0.1", 0)); rx.settimeout(0.5)
+    port = rx.getsockname()[1]
+    r = RemoteFaceStreamer("127.0.0.1", name="test", port=port)
+    r.start()
+    try:
+        got, t0 = [], time.time()
+        while time.time() - t0 < 20 and len(got) < 5:                 # (the child imports numpy, OpenCV and Pillow first)
+            try:
+                got.append(rx.recvfrom(2000)[0])
+            except socket.timeout:
+                pass
+        assert len(got) >= 5 and all(d[:2] == b"K\x02" for d in got)
+        r.set_box_state("thinking", False, True, False); r.face.mouth = "n|BBB"; r.face.emote = "a|AAA"; r.face.set_session(True)
+        r.face.add_convo(0, "what time is it?"); r.set_live(True); r.note_loss(0)
+        time.sleep(0.5)
+        assert r.alive
+    finally:
+        r.stop()
+    assert not r.alive                                                 # the child leaves when its input ends (a killed hub takes it along)
+    rx.close()
+
+
+# ── music and nothing else: in rest mode he now and then dances ──
+def _poses(f, t0, seconds):
+    seen = set()
+    for i in range(int(seconds * 20)):
+        f.tick(t0 + i * 50)
+        seen.add((int(f.bx_), int(f.by_)))
+    return seen
+
+
+def test_he_dances_to_music_in_rest_mode_only_now_and_then():
+    from face_render import Face
+    f = Face(); f.set_state("idle")
+    still = _poses(f, 100000, 20)
+    assert max(abs(x) for x, _ in still) <= 4                    # (the idle sway is small)
+    f.music_heard = True
+    big = _poses(f, 200000, 60)                                   # (a minute of music: at least one dance of 6-12 s)
+    assert max(abs(x) for x, _ in big) >= 8 and min(y for _, y in big) <= -5
+    assert f.next_dance > 0 and f.state_now == "idle"
+    quiet = sum(1 for i in range(60 * 20) if (f.tick(300000 + i * 50) or True) and abs(f.bx_) <= 4)
+    assert quiet > 20 * 15                                        # (it is not dancing all the time: only now and then)
+
+
+def test_no_dance_when_a_conversation_is_open_or_earplugs_are_in():
+    from face_render import Face
+    f = Face(); f.set_state("idle"); f.music_heard = True; f.set_session(True)
+    assert max(abs(x) for x, _ in _poses(f, 100000, 40)) <= 4
+    g = Face(); g.set_state("idle"); g.music_heard = True; g.set_keys(True, False)
+    assert max(abs(x) for x, _ in _poses(g, 100000, 40)) <= 4
+
+
+def test_music_flag_reaches_the_face_through_the_link():
+    from face_stream import FaceStreamer
+    s = FaceStreamer("127.0.0.1", send=lambda d: None)
+    s.set_music(True)
+    assert s.face.music_heard

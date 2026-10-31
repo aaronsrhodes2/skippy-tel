@@ -141,17 +141,26 @@ class EsphomeLink:
             elif name == "session":
                 f.set_session(text == "1")
 
+    def music_heard(self, heard: bool) -> None:
+        """The room has music on and nothing else: he dances to it now and then, in rest mode (the streamed face only)."""
+        if self.streamer is not None:
+            self.streamer.set_music(heard)
+
     def start_stream(self, enabled: bool = True) -> None:
         """Draw the face on skippy-pc and stream it to this box, if its firmware has the streamed face (a `Face` text sensor)."""
         if not enabled or "face" not in self.keys or self.streamer is not None:
             return
-        from face_stream import FaceStreamer                    # noqa: PLC0415 — OpenCV only loads when a box wants it
+        from face_stream import FaceStreamer, RemoteFaceStreamer  # noqa: PLC0415 — OpenCV only loads when a box wants it
         try:
             ip = getattr(self.client, "connected_address", None) or socket.gethostbyname(self.box_host)
         except OSError as e:
             self.log(f"[{self.room.name if self.room else self.box_host}] (face stream: cannot resolve {self.box_host}: {e})")
             return
-        self.streamer = FaceStreamer(ip, log=self.log, name=self.room.name if self.room else self.box_host)
+        label = self.room.name if self.room else self.box_host
+        if os.environ.get("SATELLITE_FACE_PROC", "1") != "0":     # drawn in a child process of its own: the hub's work cannot make its frames late
+            self.streamer = RemoteFaceStreamer(ip, log=self.log, name=label)
+        else:
+            self.streamer = FaceStreamer(ip, log=self.log, name=label)
         self.streamer.start()
 
     def stop_stream(self) -> None:

@@ -13,11 +13,14 @@ A frame is sent at least every HEARTBEAT_S even when nothing changed (the box ha
 """
 from __future__ import annotations
 
+import json
 import socket
 import struct
+import sys
 import threading
 import time
 import zlib
+from pathlib import Path
 
 import numpy as np
 
@@ -209,6 +212,10 @@ class FaceStreamer(threading.Thread):
         self.degraded = bad
         return bad
 
+    def set_music(self, heard: bool) -> None:
+        """The room has music on and nothing else (the hub knows): in rest mode he dances to it now and then."""
+        self.face.music_heard = bool(heard)
+
     def set_live(self, live: bool) -> None:
         """The box says it has taken the screen over: send it the whole picture now."""
         if live and not self.live:
@@ -285,3 +292,114 @@ class FaceStreamer(threading.Thread):
             wait = t - time.perf_counter()
             if wait > 0.002:
                 time.sleep(wait)
+
+
+class _RemoteFace:
+    """What the link does to `streamer.face`, forwarded to the child that really draws it."""
+
+    def __init__(self, owner: "RemoteFaceStreamer"):
+        object.__setattr__(self, "_o", owner)
+
+    def __setattr__(self, name: str, value) -> None:
+        if name in ("mouth", "emote"):
+            self._o._send(name, value)
+        else:
+            raise AttributeError(name)
+
+    def set_session(self, on: bool) -> None:
+        self._o._send("session", bool(on))
+
+    def add_convo(self, who: int, text: str) -> None:
+        self._o._send("convo", int(who), str(text))
+
+
+class RemoteFaceStreamer:
+    """The same surface as FaceStreamer for the link, but the face is drawn and sent by a child process of its own.
+
+    Why: the drawing runs 20 times a second and the hub's own work (a clip starting: the voice, the router, the PC outputs) held the hub's Python
+    long enough to make frames late, which shows as the can jumping when Skippy starts to speak. In its own process nothing of the hub's holds it up.
+    The child reads one JSON line per input from its stdin and ends when stdin closes, so a hub that is killed takes the child with it (no stray
+    second stream); its log lines go to the same place as the hub's."""
+
+    def __init__(self, host: str, log=print, name: str = "", port: int = STREAM_PORT, rate: float = 900_000.0):
+        self.host, self.port, self.log, self.label, self.rate = host, port, log, name, rate
+        self.face = _RemoteFace(self)
+        self.proc = None
+        self._lock = threading.Lock()
+
+    def start(self) -> None:
+        import subprocess
+        import sys
+        self.proc = subprocess.Popen([sys.executable, "-u", str(Path(__file__).resolve()), "--child", self.host, str(self.port), self.label, str(self.rate)],
+                                     stdin=subprocess.PIPE, cwd=str(Path(__file__).resolve().parent))
+
+    @property
+    def alive(self) -> bool:
+        return self.proc is not None and self.proc.poll() is None
+
+    def _send(self, *msg) -> None:
+        if not self.alive:
+            return
+        with self._lock:
+            try:
+                self.proc.stdin.write((json.dumps(msg) + "\n").encode())
+                self.proc.stdin.flush()
+            except (OSError, ValueError):
+                pass
+
+    def set_box_state(self, state: str, talking: bool, mic_off: bool = False, spk_off: bool = False) -> None:
+        self._send("state", state, bool(talking), bool(mic_off), bool(spk_off))
+
+    def set_live(self, live: bool) -> None:
+        self._send("live", bool(live))
+
+    def set_music(self, heard: bool) -> None:
+        self._send("music", bool(heard))
+
+    def note_loss(self, total: int) -> None:
+        self._send("loss", int(total))
+
+    def stop(self) -> None:
+        if self.proc is None:
+            return
+        try:
+            self.proc.stdin.close()                       # the child sees the end of its input and exits
+        except (OSError, ValueError):
+            pass
+        try:
+            self.proc.wait(timeout=3)
+        except Exception:                                  # noqa: BLE001 — it did not leave in time: end it
+            self.proc.terminate()
+
+
+def _child_main(host: str, port: int, name: str, rate: float) -> None:
+    s = FaceStreamer(host, log=lambda m: print(m, flush=True), name=name, port=port, rate=rate)
+    s.start()
+    for line in sys.stdin:
+        try:
+            msg = json.loads(line)
+            kind = msg[0]
+            if kind == "state":
+                s.set_box_state(msg[1], msg[2], msg[3], msg[4])
+            elif kind == "live":
+                s.set_live(msg[1])
+            elif kind == "loss":
+                s.note_loss(msg[1])
+            elif kind == "music":
+                s.set_music(msg[1])
+            elif kind == "mouth":
+                s.face.mouth = msg[1]
+            elif kind == "emote":
+                s.face.emote = msg[1]
+            elif kind == "session":
+                s.face.set_session(msg[1])
+            elif kind == "convo":
+                s.face.add_convo(msg[1], msg[2])
+        except Exception as e:                             # noqa: BLE001 — one bad message must not end the stream
+            print(f"[{name}] (face stream child: {type(e).__name__}: {e})", flush=True)
+    s.stop()
+
+
+if __name__ == "__main__":
+    if len(sys.argv) >= 6 and sys.argv[1] == "--child":
+        _child_main(sys.argv[2], int(sys.argv[3]), sys.argv[4], float(sys.argv[5]))
