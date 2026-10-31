@@ -8,7 +8,7 @@
  "blocks": 191612,
  "minutes": 31,
  "size": "256 x 87 x 256",
- "verdict": "A negative result, kept. The agent covered the whole 256 x 256 plot with grass, so the locomotive is a small piece in the middle of a field, and it added a second track, lamp posts, a water crane and a thicker plume. The wheels are iron blocks lying flat under the boiler instead of upright wheels, which the check flags as lying flat. The runtime counts 381 floating parts (489 blocks): mostly small white wool pieces, probably steam, and some glass that is not steam. The scene reads as a small town with a plume of smoke, not a train. Two debug scripts were left uncommitted in the folder.",
+ "verdict": "A negative result, kept. The agent covered the whole 256 x 256 plot with grass, so the locomotive is a small piece in the middle of a field, and it added a second track, lamp posts, a water crane and a thicker plume. It has no wheels you can see. The runtime counts 381 floating parts (489 blocks): mostly small white wool pieces, probably steam, and some glass that is not steam. The scene reads as a small town with a plume of smoke, not a train. Two debug scripts were left uncommitted in the folder.",
  "stats": {
   "started": "2026-10-31T02:07:04.608Z",
   "minutes": 31,

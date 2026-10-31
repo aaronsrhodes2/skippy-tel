@@ -8,7 +8,7 @@
  "blocks": 121811,
  "minutes": 9,
  "size": "256 x 30 x 256",
- "verdict": "The best purple Skippy build so far, and the first with everything where it belongs: an iron locomotive with a domed boiler, cab, spoked wheels, cowcatcher and a smoke plume, an oak tender and a red and a blue passenger car, all coupled and on the track in a line, a station with platform, pillars and lamps beside it. It found and fixed its own bug (866 blocks below the ground) with the runtime, and finished clean: zero floating parts, nothing outside the grid. Weaker: it filled the whole 256 x 256 plot with several hundred trees in a rigid lattice (its summary says 60+), which swamps the train, and the locomotive is pale and plain next to the coloured cars. Nine minutes, against 13 for v1 and 42 for the coached v3.",
+ "verdict": "The best purple Skippy build so far, and the first with everything where it belongs: an iron locomotive with a domed boiler, cab, cowcatcher and a smoke plume, an oak tender and a red and a blue passenger car, all coupled and on the track in a line, a station with platform, pillars and lamps beside it. It found and fixed its own bug (866 blocks below the ground) with the runtime, and finished clean: zero floating parts, nothing outside the grid. Weaker: it has no wheels you can see, and it filled the whole 256 x 256 plot with several hundred trees in a rigid lattice (its summary says 60+), which swamps the train, and the locomotive is pale and plain next to the coloured cars. Nine minutes, against 13 for v1 and 42 for the coached v3.",
  "stats": {
   "started": "2026-10-26T02:49:32.077Z",
   "minutes": 9,
