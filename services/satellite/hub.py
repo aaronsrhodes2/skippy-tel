@@ -914,7 +914,7 @@ def build_rooms(env: dict):
             kinds = [k for k in env.get("SKIPPY_STEREO_OUT", "hdmi").split("+") if k]
             import spotify as spotify_mod                        # noqa: PLC0415 — his Spotify on the same stereo (services/spotify), unless SKIPPY_SPOTIFY=off
             spot = None if env.get("SKIPPY_SPOTIFY", "on").lower() in ("off", "0", "no") else spotify_mod.Client.from_env(env)
-            music = stereo_holder["music"] = StereoMusic(router_mod.shared(env, log), kinds, stereo_holder["media"], log=log, spotify=spot)
+            music = stereo_holder["music"] = StereoMusic(router_mod.shared(env, log), kinds, stereo_holder["media"], log=log, spotify=spot, env=env)
             music.start()
             connect = getattr(make_room, "connect", None)        # the stereo is a Bilby Connect player too: "Play on", its state, "favorite this"
             if connect is not None:
@@ -965,8 +965,13 @@ MUSIC_TOOLS = [
                                           "'favorites' for his favorites list; 'everything' for the whole library. shuffle=true for 'shuffle ...'. "
                                           "queue=true for 'after this', 'queue ...', 'add ... to the queue' (it plays after what plays now, Spotify included).",
      "input_schema": {"type": "object", "properties": {"what": {"type": "string", "description": "e.g. 'Pink Floyd', 'Comfortably Numb', 'favorites', 'everything'"},
-                                                       "shuffle": {"type": "boolean"}, "queue": {"type": "boolean"}},
+                                                       "shuffle": {"type": "boolean"}, "queue": {"type": "boolean"},
+                                                       "speaker": {"type": "string", "enum": ["here", "stereo"],
+                                                                   "description": "stereo: on the house stereo (the Sony): 'on the stereo', 'downstairs', 'DJ ...'"}},
                       "required": ["what"]}},
+    {"name": "dj_mode", "description": "Bilby's DJ mode for his library on the house stereo: 'DJ mode on' / 'DJ mode off'. On: each track mixes into the "
+                                       "next on the beat (tempo matched, on a phrase) and a shuffle is ordered like a DJ set; off: one ends, the next starts.",
+     "input_schema": {"type": "object", "properties": {"on": {"type": "boolean"}}, "required": ["on"]}},
     {"name": "spotify", "description": "The Captain's Spotify (Premium), played on the house stereo (the Sony), not this room's pod. Only when he says Spotify. "
                                        "play: an artist, a song, an album, one of his playlists ('my road trip playlist') or 'liked songs'; shuffle=true for "
                                        "'shuffle ...'; queue=true for 'after this' / 'queue ...'. add: add the song playing now to one of his Spotify playlists "
@@ -985,6 +990,12 @@ def music_tools(room_of, loop, favorites=None, stereo=None):
     without a speaker for music says so."""
     def run(name: str, args: dict) -> str:
         import music as music_mod                               # noqa: PLC0415
+        if name == "dj_mode":                                   # house-wide, kept in state/dj.json (the vault's BILBY_DJ is the default)
+            import dj                                           # noqa: PLC0415
+            on = bool((args or {}).get("on"))
+            dj.set_enabled(on)
+            return ("Done: DJ mode is on. His tracks on the house stereo now mix into each other on the beat, from the next change of track."
+                    if on else "Done: DJ mode is off. On the house stereo one track now ends and the next starts.")
         room = room_of()
         box = getattr(room, "music", None)
         if box is None:
@@ -1038,6 +1049,17 @@ def music_tools(room_of, loop, favorites=None, stereo=None):
                 target = house.box if on_stereo else box        # one queue: Bilby's tracks after the Spotify ones on the stereo, or the pod's own
                 await target.append(found)
                 return f"Queued {len(found)} track{'s' if len(found) != 1 else ''} after this" + (" on the house stereo." if on_stereo else ".")
+            if (args or {}).get("speaker") == "stereo" and house is not None:
+                if book is not None:
+                    await book.pause()
+                if box.playing:
+                    await box.pause()                           # the pod and the stereo never play at once
+                room.last_media = "stereo"
+                n = await house.play_tracks(found, mixed)
+                title, artist = house.box.title()
+                import dj                                       # noqa: PLC0415
+                return (f"Playing {n} track{'s' if n != 1 else ''} on the house stereo" + (" in DJ mode" if dj.enabled(house.env) else "")
+                        + f", starting with {title}" + (f" by {artist}." if artist else "."))
             if book is not None:
                 await book.pause()                              # music and a book never play at once
             if house is not None and house.playing:

@@ -715,7 +715,7 @@ class DjPlayer(stereo.RouterPlayer):
 
     async def _feed(self, gen: int, chain: ChainSource, piece: Piece, idx: int, rel: str, start: float) -> None:
         """Keep the next track lined up behind the one playing: its crossing rendered and queued, or a plain join."""
-        while gen == self.gen and self.music is not None:
+        while gen == self.gen and self.chain is chain and self.music is not None:
             queue = self.music.queue
             if idx + 1 >= len(queue):
                 chain.finish()
@@ -730,7 +730,7 @@ class DjPlayer(stereo.RouterPlayer):
             except Exception as e:                                 # noqa: BLE001 — a failed mix is a plain cut
                 self.log(f"(dj: mix failed: {type(e).__name__}: {str(e)[:100]})")
                 step = Next("cut", "error")
-            if gen != self.gen:
+            if gen != self.gen or self.chain is not chain:
                 return
             if step.kind == "mix" and chain.cut_at(piece, int(round((step.a_stop - start) * RATE))):
                 chain.append(_Clip(step.clip), on_start=self._advancer(gen, idx + 1, step.b_pos, True))
@@ -742,7 +742,7 @@ class DjPlayer(stereo.RouterPlayer):
                 self.log(f"(dj: plain cut into the next track: {step.reason})")
                 body = chain.append(self._body(nxt, 0.0), on_start=self._advancer(gen, idx + 1, 0.0, False), tag=nxt)
                 start = 0.0
-            while gen == self.gen and not body.started:
+            while gen == self.gen and self.chain is chain and not body.started:
                 await asyncio.sleep(0.5)
             piece, idx, rel = body, idx + 1, nxt
 
@@ -765,6 +765,13 @@ class DjPlayer(stereo.RouterPlayer):
         self.gen += 1
         self.chain = None
         await super().stop()
+
+    async def play_spotify(self, uri: str, pos: float = 0.0) -> None:
+        """RouterPlayer's (a plain cut from Bilby to Spotify); the chain's feeder stops with it. Without a Spotify client RouterPlayer sets this
+        to None on the instance, and BoxMusic skips Spotify items, as before."""
+        self.gen += 1
+        self.chain = None
+        await super().play_spotify(uri, pos)
 
 class _Clip:
     """A rendered crossing (router.ClipSource without importing the router)."""

@@ -151,4 +151,24 @@ himself; there is no hook built for it yet.
   `audiobooks.run_command` on the room's `BookPlayer`.
 * Tests: `tests/test_sat_audiobooks.py` (real ffmpeg builds a synthetic multi-chapter m4b and a track-per-chapter folder).
 
+## Bilby's DJ mode on the house stereo (`dj.py`)
+
+His library on the Sony mixed like a DJ set, from his own Traktor work, all on skippy-pc. The house stereo's player (`stereo.StereoMusic`, made by
+the hub) is a `dj.DjPlayer`: the queue plays as one gapless chain on the router's `media` layer (Skippy still ducks it).
+
+* **Analysis:** BPM, the beat grid's anchor and the key come from Traktor's `collection.nml` (music-collection's `corrected_traktor/`; 98% of the
+  library, indexed once into `state/dj/traktor-index.json`); a track Traktor never saw is analysed once with librosa (`state/dj/analysis.json`).
+* **The mix:** the outgoing track leaves on a 32-beat phrase (else 16, else 8) that still has music after it; the incoming one comes in on its first
+  beat, time-stretched to the outgoing tempo with ffmpeg's rubberband (pitch kept), both grids checked against the kick drum (moved only when the
+  audio is clear, up to 150 ms: Traktor's autocue anchors are sometimes ~70 ms out on live drums), 16 beats together with a bass swap at halfway,
+  then a 16-beat glide back to the incoming track's own tempo. The crossing is rendered (about 2 s) while the outgoing track plays.
+* **A plain cut** (one ends, the next starts, still gapless) when the keys clash (Camelot distance 3+), the tempos are more than 6% apart (half and
+  double time count), a track isn't on this PC, or the next item is Spotify (never mixed).
+* **Order:** a shuffle in DJ mode is `dj.walk`: each next track mixes with the last, his higher-rated tracks a little more often.
+* **Control:** `BILBY_DJ=on|off` in the vault; "Skippy, DJ mode on/off" (`dj_mode` tool) overrides it in `state/dj.json`, from the next change of
+  track. "Skippy, play Depeche Mode on the stereo" (`play_music` with `speaker: stereo`) puts Bilby on the Sony.
+* **By hand:** `python dj.py plan "<catalog path A>" "<B>"` says what the mix would do; `python dj.py demo "<A>" "<B>"` plays the last bars of A
+  into B on the HDMI output (the hub may keep running).
+* The browser player and the pods are unchanged. Tests: `tests/test_sat_dj.py` (synthetic click tracks: B's beats land within 8 ms of A's grid).
+
 Tests: `python -m pytest tests` from this folder (its own session: other services have a `gate.py` too).

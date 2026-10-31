@@ -177,9 +177,15 @@ class RouterPlayer:
 class StereoMusic:
     """Shuffle, stop, and duck under Skippy (the room calls duck() when he is addressed, as it does for a book)."""
 
-    def __init__(self, router, kinds: list[str], media, log=print, clock=None, popen=None, spotify=None):
+    def __init__(self, router, kinds: list[str], media, log=print, clock=None, popen=None, spotify=None, env=None):
         import music as music_mod                                   # noqa: PLC0415
-        self.player = RouterPlayer(router, kinds, popen=popen, log=log, spotify=spotify, **({"clock": clock} if clock is not None else {}))
+        pkw = {"popen": popen, "log": log, "spotify": spotify, **({"clock": clock} if clock is not None else {})}
+        if env is not None:                                         # the hub: Bilby's tracks as one gapless chain, mixed like a DJ in DJ mode (dj.py)
+            import dj                                               # noqa: PLC0415
+            self.player = dj.DjPlayer(router, kinds, env=env, **pkw)
+        else:
+            self.player = RouterPlayer(router, kinds, **pkw)
+        self.env = env
         kw = {"clock": clock} if clock is not None else {}
         self.box = music_mod.BoxMusic(self.player, media, log=log, name="stereo", **kw)
         # BoxMusic's settle window is for a pod that reports "idle" while a track starts; the router never does, so no settle is needed
@@ -198,7 +204,17 @@ class StereoMusic:
         if not tracks:
             self.log("(stereo: the music gate's catalog is empty or not answering)")
             return 0
-        random.shuffle(tracks)
+        return await self.play_tracks(tracks, True, limit)
+
+    async def play_tracks(self, tracks: list[str], mixed: bool = False, limit: int = 500) -> int:
+        """Bilby's tracks on the stereo. `mixed`: in a random order, or in DJ mode a DJ's order (dj.walk: each next track mixes with the last)."""
+        tracks = list(tracks)
+        if mixed:
+            random.shuffle(tracks)
+            if self.env is not None:
+                import dj                                           # noqa: PLC0415
+                if dj.enabled(self.env):
+                    tracks = await asyncio.to_thread(dj.order, tracks, self.player.lib, limit)
         await self.box.play_queue(tracks[:limit])
         return len(tracks[:limit])
 
