@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 import house as hass_mod                                         # the house: any backend (HomeKit, Home Assistant ...)
+import news as news_mod
 
 PERSONA_FILE = Path(__file__).resolve().parents[1] / "flask-api" / "app" / "skippy_persona.md"
 FALLBACK_PERSONA = ("You are Skippy the Magnificent, the Elder AI: an ancient beer can of unimaginable power, sardonic, loyal, and secretly fond "
@@ -56,7 +57,7 @@ def say_duration(seconds: int) -> str:
 
 
 class Brain:
-    def __init__(self, client, model: str, timers, persona: str | None = None, clock=time.time, now=None, hass=None, extra=None):
+    def __init__(self, client, model: str, timers, persona: str | None = None, clock=time.time, now=None, hass=None, extra=None, news=None):
         self.client, self.model, self.timers, self.clock = client, model, timers, clock
         self.hass = hass                                              # a hass.Hass when Home Assistant is connected, else None
         self.extra_tools, self.run_extra = extra if extra else ([], None)   # more tools from where the brain lives (hub.py: the room's music)
@@ -66,6 +67,8 @@ class Brain:
         self.actions: list[dict] = []                                 # the tools called for the last reply (the house log reads them): {tool, args, outcome}
         self._last = 0.0
         self.pre_route = None                                         # heard -> tool args for plain commands the model is unreliable at (hub.py: the audiobook); None = the model decides
+        self.news = news                                              # news.News: the `news` tool, "about what?", and the headlines it found last
+        self.offered: dict | None = None                              # what he brought up himself (a conversation starter) and its sources: {"note", "at"}
 
     def system(self) -> str:
         house = (", and the house: lights, plugs, the thermostat (in the unit it shows), covers, speakers, scenes; always say plainly what you did "
@@ -75,7 +78,22 @@ class Brain:
         books = (" He has audiobooks (DRM-free files he supplied): the audiobook tool plays and steers them, and while one plays 'stop' or 'pause' means pause it. "
                  "Anything about the book (play, stop, pause, skip, where he is, a sleep timer) needs the audiobook tool called in that very turn; you cannot see the book, "
                  "so never say what is in it, what chapter it is, or that you did something unless the tool just told you. You never read a book aloud yourself.") if any(t["name"] == "audiobook" for t in self.extra_tools) else ""
-        return self.persona + SPOKEN.format(now=self.now(), house=house, nohouse=nohouse, music=music) + books
+        news = (news_mod.PROMPT + self.news.recent()) if self.news is not None else ""
+        offered = ""
+        if self.offered and self.clock() - self.offered["at"] < news_mod.KEEP_S:
+            offered = ("\n\nYou brought this up yourself a moment ago, unasked; if he wants more, talk only from these sources and say when they don't settle "
+                       f"something:\n{self.offered['note']}")
+        return self.persona + SPOKEN.format(now=self.now(), house=house, nohouse=nohouse, music=music) + books + news + offered
+
+    def offer(self, text: str, note: str) -> None:
+        """He is about to say `text` unasked (starters.py): it joins his memory, with `note` (its sources) for the follow-up questions."""
+        now = self.clock()
+        if now - self._last > FORGET_AFTER_S:
+            self.history = []
+        self._last = now
+        self.history = (self.history + [{"role": "user", "content": "(Nobody spoke: you bring something up yourself.)"},
+                                        {"role": "assistant", "content": text}])[-2 * MEMORY_TURNS:]
+        self.offered = {"note": note, "at": now}
 
     def run_tool(self, name: str, args: dict) -> str:
         args = args if isinstance(args, dict) else {}
@@ -96,6 +114,8 @@ class Brain:
                 return "No timers running." if not left else "; ".join(f"{label}: {say_duration(s)} left" for label, s in left)
         except (ValueError, TypeError) as e:
             return f"That did not work: {e}"
+        if name == "news" and self.news is not None:
+            return self.news.run(args)
         if self.hass is not None and name in {t["name"] for t in hass_mod.TOOLS}:
             return hass_mod.run_tool(self.hass, name, args)
         if self.run_extra is not None and name in {t["name"] for t in self.extra_tools}:
@@ -103,7 +123,7 @@ class Brain:
         return "I have no such tool."
 
     def tools(self) -> list[dict]:
-        return TOOLS + (hass_mod.TOOLS if self.hass is not None else []) + list(self.extra_tools)
+        return TOOLS + (hass_mod.TOOLS if self.hass is not None else []) + list(self.extra_tools) + (self.news.tools() if self.news is not None else [])
 
     def reply(self, heard: str) -> str:
         """What Skippy says to what was heard. Raises whatever the API raises (the caller decides what to do aloud)."""
@@ -114,16 +134,22 @@ class Brain:
         self._last = now
         messages = self.history[-2 * MEMORY_TURNS:] + [{"role": "user", "content": heard}]
         text = ""
-        routed = self.pre_route(heard) if self.pre_route is not None else None
+        if self.news is not None and news_mod.is_bare_request(heard):  # "what's the news?": about what, before any model runs
+            self.history = (self.history + [{"role": "user", "content": heard}, {"role": "assistant", "content": news_mod.ASK_WHAT}])[-2 * MEMORY_TURNS:]
+            return news_mod.ASK_WHAT
+        tool, routed = "audiobook", (self.pre_route(heard) if self.pre_route is not None else None)
+        if not routed and self.news is not None:
+            tool, routed = "news", self.news.pre_route(heard, self.history)   # "politics", in answer to "news about what?"
         if routed:                                                    # the tool runs first; the model only words the answer, with no tools to forget to call
-            result = self.run_tool("audiobook", routed)
-            messages[-1] = {"role": "user", "content": f"{heard}\n\n[Already done by the house for this request: {result}]"}
+            result = self.run_tool(tool, routed)
+            label = "Already done by the house for this request" if tool == "audiobook" else "The news tool's answer for this request"
+            messages[-1] = {"role": "user", "content": f"{heard}\n\n[{label}: {result}]"}
             try:
-                resp = self.client.messages.create(model=self.model, max_tokens=200, system=self.system(), messages=messages)
+                resp = self.client.messages.create(model=self.model, max_tokens=200 if tool == "audiobook" else 600, system=self.system(), messages=messages)
                 text = " ".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
             except Exception:                                         # noqa: BLE001 — it happened; say it plainly
                 text = ""
-            text = text or result.split(") ", 1)[-1]
+            text = text or (result.split(") ", 1)[-1] if tool == "audiobook" else "I found the headlines, and then my brain wandered off. Ask me again.")
             self.history = (self.history + [{"role": "user", "content": heard}, {"role": "assistant", "content": text}])[-2 * MEMORY_TURNS:]
             return text
         for _ in range(4):                                            # a few rounds of tool use at most

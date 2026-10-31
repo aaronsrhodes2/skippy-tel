@@ -38,6 +38,9 @@ BLOCK = 800                                                     # 50 ms: what th
 BLOCK_MS = 50
 CHUNK = 2048                                                    # samples per audio-chunk sent back over Wyoming
 IDLE, LISTENING, FOLLOWUP, BUSY = "idle", "listening", "followup", "busy"
+PRESENT_S = 20 * 60                                             # a voice heard in the room this recently: someone is around (for a conversation starter)
+HUSH_S = 45                                                     # ... but not in the last this many seconds: never talk over people
+AFTER_TURN_S = 180                                              # nor this soon after he last spoke to Skippy
 
 
 def parse_rooms(spec: str) -> list[tuple[str, str, str, int]]:
@@ -124,7 +127,7 @@ class Room:
     touched it. The room calls the link's woke / voice_started / voice_stopped / heard / released / show / speak / announce."""
 
     def __init__(self, name, link, gate, brain, timers, spotter=None, local_voice=None, log=print, floor: float = 0.012,
-                 min_speech_ms: int = 600, listen_ms: int = 8000, followup_ms: int = 6000, summarize_over: int = 1500, filler=None, filler_after_s: float = 1.0, pc_outs=(), debug: bool = False, mic_gain: float = 1.0, hlog=None, workspace=None, run_action=None, homechat=None):
+                 min_speech_ms: int = 600, listen_ms: int = 8000, followup_ms: int = 6000, summarize_over: int = 1500, filler=None, filler_after_s: float = 1.0, pc_outs=(), debug: bool = False, mic_gain: float = 1.0, hlog=None, workspace=None, run_action=None, homechat=None, starters=None):
         self.name, self.link, self.gate, self.brain, self.timers, self.spotter = name, link, gate, brain, timers, spotter
         self.local_voice, self.log = local_voice, log
         self.floor, self.min_speech_ms, self.listen_ms, self.followup_ms, self.summarize_over = floor, min_speech_ms, listen_ms, followup_ms, summarize_over
@@ -136,6 +139,10 @@ class Room:
         self.workspace, self.run_action = workspace, run_action  # proposals.Workspace (what Skippy may ask, the automations a yes made) and house.run_tool bound to the house
         self.homechat = homechat                                # homechat.HomeChat: what is addressed to him and what he says, words only, for the portal's Home chat
         self.pending = None                                     # the proposal just put to him, waiting for yes / no / never
+        self.starters = starters                                # starters.Starters (shared by every room): things Skippy brings up himself
+        self.pending_starter = None                             # the starter just offered, waiting for his answer
+        self._voice_at = self._turn_at = None                   # (monotonic) a voice last heard in the room; his last turn with Skippy
+        self._starter_check = 0.0
         self.remote_wake = True                                 # until the box says it woke on its own
         self.music = None                                       # music.BoxMusic for a box that plays Bilby's library
         self.book = None                                        # audiobooks.BookPlayer: the Captain's audiobooks (pod and PC outputs); ducked while Skippy listens and talks
@@ -216,6 +223,7 @@ class Room:
         if self.buf is not None and event != "speech":
             self.buf.append(block)
         if event == "speech":
+            self._voice_at = time.monotonic()
             self.buf = list(self.pre)
             self._speech_t0, self._probed = self.t, False
             if self.mode in (LISTENING, FOLLOWUP):
@@ -258,6 +266,9 @@ class Room:
         elif self._shown_t is not None and self.mode != IDLE:
             self._shown_t = None
         if self.mode in (LISTENING, FOLLOWUP) and self.t > self.deadline and self.buf is None:
+            if self.pending_starter is not None:                # offered, and nobody answered
+                self._starter_answer(self.pending_starter, "ignored", "")
+                self.pending_starter = None
             self.mode = IDLE
             self._session(False)
             self._spawn(self.link.released())                   # nothing said: the box goes back to waiting for its name
@@ -359,6 +370,76 @@ class Room:
         self.log(f"[{self.name}] proposing: {p['id']}")
         await self.say(p["text"], follow_up=True)
 
+    def _starter_answer(self, cand: dict, answer: str, words: str) -> None:
+        try:
+            self.starters.answer(cand["id"], answer, words)
+        except Exception as e:                                  # noqa: BLE001 — a record that can't be written must never stop the house answering
+            self.log(f"[{self.name}] (starters: {type(e).__name__}: {e})")
+        self._record("starter_answer", starter=cand["id"], answer=answer, words=words or None)
+
+    async def _answer_starter(self, command: str) -> tuple[bool, str]:
+        """He was just offered a conversation starter: a no / not now / never (or a stop) ends it, and backs Skippy off; anything else takes it up
+        (a bare yes asks for more on it). -> (handled, the command to go on with)."""
+        cand, self.pending_starter = self.pending_starter, None
+        from proposals import parse_answer                      # noqa: PLC0415
+        answer = parse_answer(command)
+        if answer is None and (is_stop(command) or is_goodbye(command)):
+            answer = "no"
+        if answer in ("no", "never"):
+            self._starter_answer(cand, answer, command)
+            topic = {"world": "news", "": "of that"}.get(cand.get("topic", ""), cand.get("topic", ""))
+            reply = ("Fine. I will keep my brilliance to myself for the rest of the day." if answer == "no"
+                     else f"Understood. No more {topic} from me for a month.")
+            await self.say(reply)                               # (still busy: the room never hears its own voice)
+            self._resume(IDLE)
+            await self.link.released()
+            return True, command
+        self._starter_answer(cand, "yes", command)
+        if answer == "yes" and len(command.split()) <= 4:
+            command = f"{command}. Tell me more about that."
+        return False, command
+
+    async def maybe_start(self) -> None:
+        """Bring something up unasked (starters.py): only when this room is idle and quiet, someone has been around lately, nothing plays, and the
+        house-wide rules (hours, a few a day, backed off after a no) allow it. Checked once a minute from the tick."""
+        if self.starters is None or self.mode != IDLE or self.pending is not None or self.pending_starter is not None or self.recorder is not None:
+            return
+        now = time.monotonic()
+        if now - self._starter_check < 60 or self.voice.locked() or self.buf is not None:
+            return
+        self._starter_check = now
+        if getattr(self.music, "playing", False) or getattr(self.book, "playing", False):
+            return                                              # never over music or a book
+        if any(getattr(o, "talking_until", 0) > now for o in self.pc_outs):
+            return
+        heard, turn = self._voice_at, self._turn_at
+        around = (heard is not None and now - heard < PRESENT_S) or (turn is not None and now - turn < PRESENT_S)
+        hushed = (heard is None or now - heard > HUSH_S) and (turn is None or now - turn > AFTER_TURN_S)
+        if not (around and hushed):
+            return
+        try:
+            cand = await asyncio.to_thread(self.starters.next)
+        except Exception as e:                                  # noqa: BLE001
+            self.log(f"[{self.name}] (starters: {type(e).__name__}: {e})")
+            return
+        if cand is None or self.mode != IDLE or self.buf is not None:
+            return
+        self.starters.mark_offered(cand, self.name)
+        from starters import note_of                            # noqa: PLC0415
+        if hasattr(self.brain, "offer"):
+            self.brain.offer(cand["opener"], note_of(cand))
+        news = getattr(self.brain, "news", None)
+        if news is not None and cand.get("sources"):
+            news.adopt(cand.get("headline") or cand.get("topic", "the news"), cand["sources"])
+        self.pending_starter = cand
+        self._record("starter", starter=cand["id"], topic=cand.get("topic"), text=cand["opener"])
+        self.log(f"[{self.name}] starter ({cand.get('topic')}): {cand['opener'][:120]}")
+        self.mode = BUSY
+        try:
+            await self.say(cand["opener"], announce=True)
+        finally:
+            self._resume(FOLLOWUP, self.followup_ms)            # he can answer without the name
+
     async def typed(self, command: str, speak: bool = True) -> None:
         """Words the Captain typed in the portal's Home chat, treated exactly as if they had been spoken here (the brain answers; the answer is spoken
         on this room's outputs when `speak`). The room is busy meanwhile, so it never hears its own voice, then goes back to what it was doing."""
@@ -374,7 +455,12 @@ class Room:
             self._emit("heard", text=command)                   # addressed to him (his name, a tap, or an open conversation): the Home chat
             if self.pending is not None and await self._answer_proposal(command):
                 return
+            if self.pending_starter is not None:
+                done, command = await self._answer_starter(command)
+                if done:
+                    return
         self.pending = None
+        self._turn_at = time.monotonic()
         if not typed and (is_goodbye(command) or is_stop(command)):
             self._record("command", words=command, tools=[], outcome="sign_off")
             self._resume(IDLE)
@@ -536,6 +622,7 @@ class Room:
                 self.log(f"[{self.name}] automation {auto['id']}: {result}")
                 self._record("automation", automation=auto["id"], tool=auto["action"]["tool"], target=auto["action"]["args"].get("name"),
                              act=auto["action"]["args"].get("action"), outcome=str(result)[:120])
+        await self.maybe_start()
 
 
 class WyomingLink:
@@ -731,6 +818,10 @@ def build_rooms(env: dict):
     import house as house_mod                                    # noqa: PLC0415
     from proposals import Workspace                              # noqa: PLC0415
     hlog = housemem.HouseLog(housemem.home_dir(env))              # skippy-home/log: local, append-only, words and outcomes, never audio
+    import news as news_mod                                      # noqa: PLC0415
+    from starters import Starters                                # noqa: PLC0415
+    starters = None if env.get("SATELLITE_STARTERS", "on").lower() in ("off", "0", "no") else \
+        Starters(Path(__file__).resolve().parents[2] / "state" / "starters", log_root=hlog.root)   # filled daily by tools/starter_refresh.py
     workspace = Workspace(hlog.root)
     run_action = (lambda tool, args: house_mod.run_tool(house, tool, args)) if house is not None else None
     loop = asyncio.get_running_loop()                           # build_rooms runs on the hub's loop (_main)
@@ -747,12 +838,12 @@ def build_rooms(env: dict):
         book = audiobooks.build_player(env, name, link, log)     # None when SATELLITE_AUDIOBOOKS=off
         if book is not None:
             tools = audiobooks.combine(tools, audiobooks.book_tools(lambda: holder["room"], loop))
-        brain = Brain(client, brain_model, timers, hass=house, extra=tools)
+        brain = Brain(client, brain_model, timers, hass=house, extra=tools, news=news_mod.News(env, log=log))
         if book is not None:
             brain.pre_route = lambda heard: book_voice.pre_route(heard, holder["room"])
         room = holder["room"] = Room(name, link, gate, brain, timers, spotter=spotter, local_voice=audio.local_voice_pcm16, log=log,
                                      floor=float(env.get("SATELLITE_FLOOR", "0.012")), filler=filler_bank, debug=env.get("SATELLITE_DEBUG") == "1", mic_gain=float(env.get("SATELLITE_MIC_GAIN", "1.0")), pc_outs=speaker_out.parse_outputs(env, name, log)[1],
-                                     filler_after_s=float(env.get("SATELLITE_FILLER_S", "1.0")), hlog=hlog, workspace=workspace, run_action=run_action, homechat=homechat,
+                                     filler_after_s=float(env.get("SATELLITE_FILLER_S", "1.0")), hlog=hlog, workspace=workspace, run_action=run_action, homechat=homechat, starters=starters,
                                      followup_ms=int(float(env.get("SATELLITE_SESSION_S", "30")) * 1000))      # the name opens a conversation: it stays open this long without a word
         room.book = book
         return room

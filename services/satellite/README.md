@@ -107,6 +107,21 @@ Guard rails (`house.py`, the same for every backend; tests in `tests/test_sat_ho
 Other backends plug into the same `House`: Home Assistant (`hass.py`, if he ever runs one: `HASS_URL` + `HASS_TOKEN` in the vault). Later: the LG webOS TV
 (`aiowebostv`), other rooms' satellites over the Wyoming protocol.
 
+## The news, and things Skippy brings up himself (`news.py`, `starters.py`, `tools/starter_refresh.py`)
+
+"Skippy, what's the news?" "News about what?" (said at once, no model) "Politics." The answer goes straight to the `news` tool: the house's SearXNG
+(`http://skippy-core:7360`, news category, the last day, the week when the day is quiet); Core talks him through two or three stories from the snippets
+alone. "More on the second one" (or words from its headline) searches that story again; the headlines stay in his head for 15 minutes. "Near me" uses the
+town in the vault's `HOME_ADDRESS`.
+
+**Conversation starters:** the task "Skippy starters refresh" (06:40 daily, `tools/starter_refresh.sh`, log `state/starter-refresh.log`) searches each
+interest in `filler.TOPICS` and a few world subjects (elections, laws, his town and state), lets Core pick one real new development per subject and word
+an opener with no figures (PLATINUM 21), and keeps it only when a strict second reading of the reports supports it. They wait in
+`state/starters/candidates.json`. The hub offers one when the room is idle, a voice was heard there in the last 20 minutes but not in the last 45 s, he
+hasn't spoken to Skippy for 3 minutes, no music or book plays, 9:00 to 21:00 (and, once the house log has 5 days, his usual hours): 3 a day at most,
+2.5 h apart, house-wide. "No" / "not now" ends them for the day, "never" mutes that subject for a month, two unanswered end the day; anything else
+takes it up. Every offer and answer: `state/starters/offers.json` and the house log. `SATELLITE_STARTERS=off` stops them.
+
 ## Audiobooks, by voice (`audiobooks.py`, `book_voice.py`, `book_out.py`)
 
 "Skippy, read my book." He plays his own **DRM-free** audiobook files; nothing here opens, decrypts or logs in to Audible (an `.aax`/`.aaxc`/`.aa` file in the
