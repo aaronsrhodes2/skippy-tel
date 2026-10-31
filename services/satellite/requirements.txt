@@ -11,3 +11,5 @@ openwakeword>=0.6,<0.7
 pytest>=8
 decora_wifi==1.5
 opencv-python-headless>=4.9
+scipy>=1.11
+librosa>=0.10               # dj.py: beat tracking for a track Traktor never analysed
