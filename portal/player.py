@@ -45,6 +45,9 @@ ROOMS = {
 BOX_ROOM = re.compile(r"box-[a-z0-9-]{1,20}")
 BOX_DEVICE = re.compile(r"skippyroom-[a-z0-9-]{1,20}")
 TAKE = re.compile(r"take:[A-Za-z0-9_-]{8,40}")      # "pick up what that device is playing": a room's push, since a page can only pull
+# The Audiobooks app (audiobooks.py) plays on a room box through the same commands queue: the hub's Connect hands `book:` ones to the room's BookPlayer
+# (services/satellite/audiobooks.py COMMAND, kept identical): play:<book id>[:<second>], pause, resume, skip:<seconds>, chapter:<1|-1>, speed:<x>.
+BOOK_CMD = re.compile(r"book:(?:play:[a-z0-9-]{1,200}(?::\d{1,6}(?:\.\d)?)?|pause|resume|skip:-?\d{1,4}|chapter:-?1|speed:\d(?:\.\d{1,2})?)")
 REPEATS = ("off", "all", "one")
 GATE_URL = re.compile(r"https://[a-z0-9-]+(\.[a-z0-9-]+)*\.ts\.net")
 
@@ -79,7 +82,16 @@ def _state(body: dict, previous: dict | None = None) -> dict:
     idx = body.get("idx")
     idx = idx if isinstance(idx, int) and not isinstance(idx, bool) and 0 <= idx < len(queue) else 0
     armed = body.get("armed")
-    return {"track": _text(body.get("track"), MAX_PATH), "title": _text(body.get("title"), 200),
+    book = body.get("book")
+    if isinstance(book, dict) and isinstance(book.get("id"), str) and re.fullmatch(r"[a-z0-9-]{1,200}", book["id"]):
+        try:
+            book = {"id": book["id"], "title": _text(book.get("title"), 200), "pos": round(max(0.0, min(float(book.get("pos") or 0), 864000.0)), 1),
+                    "chapter": int(book.get("chapter") or 0), "playing": book.get("playing") is True, "speed": round(float(book.get("speed") or 1.0), 2)}
+        except (TypeError, ValueError):
+            book = None
+    else:
+        book = None
+    return {"book": book, "track": _text(body.get("track"), MAX_PATH), "title": _text(body.get("title"), 200),
             "artist": _text(body.get("artist"), 200), "pos": round(pos, 1), "playing": body.get("playing") is True,
             "queue": queue, "idx": idx, "dj": body.get("dj") is True, "shuffle": body.get("shuffle") is True,
             "repeat": body.get("repeat") if body.get("repeat") in REPEATS else "off",
@@ -151,8 +163,13 @@ class Player:
                         "room": d.get("room") or ""})
         return sorted(out, key=lambda x: x["age"])
 
+    def listing(self, user: str) -> list[dict]:
+        """Every device that is listed under "Play on" for this person right now (what a check-in is answered with), newest first."""
+        with self._lock:
+            return self._list(user, "", self.clock())
+
     def command(self, user: str, device: str, action: str) -> bool:
-        if action not in ACTIONS and not TAKE.fullmatch(action):
+        if action not in ACTIONS and not TAKE.fullmatch(action) and not BOOK_CMD.fullmatch(action):
             return False
         with self._lock:
             d = self._devices.get(user, {}).get(device)

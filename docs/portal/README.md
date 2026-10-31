@@ -351,6 +351,31 @@ the virtual lists at full size; `/dev/gate-down` and `/dev/home-off` show the "i
 failed, when Node or mutagen is missing). What only a browser can show (the audio element, drag and drop, the lock screen, the
 layouts) was checked by hand, not by a test.
 
+## Audiobooks (the Captain's converted audiobooks, `/audiobooks`)
+
+His own DRM-free conversions of books he bought (OpenAudible writes them to `D:\Audiobooks`: `books/`, `art/`, `books.json`), in any browser and on a pod. **The Captain
+only: not in `catalog.PORTALS`, so no friend can be granted it** (`portal/tests/test_audiobooks.py` fails if a "book" grant appears). Nothing here opens, decrypts or logs in to
+Audible or OpenAudible; there is no Audible sync (Audible has no official API; OpenAudible's data has only a `finished` flag), so the app keeps its own places.
+
+* **Pieces:** `portal/audiobooks.py` (the pass and Play on), the `audiobooks` blueprint in `app.py`, `templates/audiobooks.html`, `static/audiobooks-{app,pure}.js` + `audiobooks.css`
+  (the bridge: a shelf of covers shown a screen at a time with `Bridge.PList`, a book's panel, a player strip; glyphs, no scrolling), and **`services/audiobook-gate`** on skippy-pc.
+* **The gate** (a pass the portal signs, label `audiobook-gate-v1`: a music, video or voice pass never opens it, and the portal signs only for a `*.ts.net` address ending in `/books`):
+  Tailscale Funnel carries `https://skippy-pc.<tailnet>.ts.net:10000/books` to it (127.0.0.1:3009). Funnel has only three ports, so it is a **path on the voice gate's :10000**, like the
+  popup-gate's `/in` (`host_ops.FUNNEL_DOORS`; `funnel on` opens it). The browser fetches the **catalog, covers, the audio (with Range) and the places straight from the gate**: the files
+  never pass through the portal. The catalog is OpenAudible's `books.json` joined to the files, and a book's id is the hub's own (`audiobooks.slug` of the file name), so a place means the
+  same to the page and to "Skippy, read my book". Covers are served by the gate from `art/` (thumbnails cut in memory), never through the portal.
+* **Places:** the browser PUTs its place to the gate (every 15 s while playing, on pause, seek and close). The gate writes one small file per book into `state/audiobooks-inbox/`; the hub's
+  `audiobooks.Store` merges that inbox (newest `last_played` wins, either way), so "continue my book" by voice starts where the page stopped, and the page reads the hub's
+  `state/audiobooks.json` back through the gate. (This replaces writing places back through the home reporter: no extra hop, and no portal in the way.)
+* **Play on a pod:** the hub's box checks in through Bilby's Connect and now says what its book is doing (`state.book`); the page lists the live room boxes (`/audiobooks/rooms`) and
+  queues `book:play:<id>[:<second>]`, `book:pause`, `book:resume`, `book:skip:<±s>`, `book:chapter:<±1>`, `book:speed:<x>` (`/audiobooks/command`; the same grammar in `player.BOOK_CMD` and
+  the hub's `audiobooks.COMMAND`, a test keeps them equal). The hub's `BookPlayer` plays it (pod speaker and PC outputs, as by voice) and the page becomes its remote.
+* **Home reporter:** capability `book_gate` (ready only when the gate's own `/health` says there are books); `docker-compose.override.yml` gives it `BOOK_GATE_URL` and `BOOK_GATE_PUBLIC`.
+* **Dev:** `python portal/tests/dev_books.py` runs the portal beside the REAL gate on the real library (read-only; places go to a temp inbox, or `--real-state`), with a stand-in
+  "Office" box, then open `http://127.0.0.1:8765/dev-login`. Tests: `portal/tests/test_audiobooks.py`, `tests/js/books.test.js`, `services/audiobook-gate/tests`,
+  `services/satellite/tests/test_sat_audiobooks.py`.
+* **Privacy:** no title is logged (the gate has no access log: the pass is in every URL); the library folder is mounted read-only.
+
 ## Skippy's voice (the mic and the speaker on `/chat` and `/me`)
 
 Both Skippy chats (the portal chat, with its Mentat / Barney Style toggle, and the Captain's personal Skippy on `/me`) have two glyph keys:

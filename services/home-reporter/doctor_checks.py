@@ -87,6 +87,7 @@ def checks() -> dict:
         "mentat-home": ("MENTAT_URL", "/health", lambda b: ready_verdict(b)),
         "music-gate": ("MUSIC_GATE_URL", "/health", lambda b: ready_verdict(b)),
         "video-gate": ("VIDEO_GATE_URL", "/health", lambda b: ready_verdict(b)),
+        "audiobook-gate": ("BOOK_GATE_URL", "/health", lambda b: ready_verdict(b)),
         "voice-gate": ("VOICE_GATE_URL", "/health", lambda b: ready_verdict(b, lambda b: isinstance(b, dict) and b.get("ready") is True or "Whisper isn't answering behind it")),
         "bridge": ("CLAUDE_BRIDGE_URL", "/health",
                    lambda b: isinstance(b, dict) and b.get("status") == "ok" or "its /health isn't ok"),

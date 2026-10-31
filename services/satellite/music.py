@@ -160,6 +160,7 @@ class Connect:
         self.portal, self.token, self.log, self.sleep = portal.rstrip("/"), token, log, sleep
         self.post = post or self._post
         self.boxes: dict[str, tuple[str, BoxMusic]] = {}         # room -> (its name for people, its music)
+        self.books: dict[str, object] = {}                       # room -> its audiobooks.BookPlayer (the portal's Audiobooks app plays on a box through Connect)
         self._warned = False
 
     def _post(self, url: str, body: dict) -> dict:
@@ -168,15 +169,23 @@ class Connect:
         r.raise_for_status()
         return r.json()
 
-    def add(self, room: str, label: str, music: BoxMusic) -> None:
+    def add(self, room: str, label: str, music: BoxMusic, book=None) -> None:
         self.boxes[room] = (label, music)
+        if book is not None:
+            self.books[room] = book
 
     def remove(self, room: str) -> None:
         self.boxes.pop(room, None)
+        self.books.pop(room, None)
 
     async def once(self) -> None:
         for room, (label, music) in list(self.boxes.items()):
-            body = {"device": device_id(room), "name": label, "room": room_key(room), "state": music.state()}
+            book = self.books.get(room)
+            state = music.state()
+            if book is not None:
+                import audiobooks                                # noqa: PLC0415
+                state["book"] = audiobooks.book_state(book)
+            body = {"device": device_id(room), "name": label, "room": room_key(room), "state": state}
             try:
                 reply = await asyncio.to_thread(self.post, f"{self.portal}/home/music/checkin", body)
                 self._warned = False
@@ -188,6 +197,11 @@ class Connect:
                 continue
             for action in (reply or {}).get("commands") or []:
                 try:
+                    if str(action).startswith("book:"):
+                        import audiobooks                        # noqa: PLC0415
+                        if book is None or not await audiobooks.run_command(book, str(action)):
+                            self.log(f"[{room}] (book command refused)")
+                        continue
                     await music.command(str(action), (reply or {}).get("devices") or [])
                 except Exception as e:                           # noqa: BLE001 — one bad command must not stop the check-ins
                     self.log(f"[{room}] (music command {action!r} failed: {type(e).__name__}: {e})")

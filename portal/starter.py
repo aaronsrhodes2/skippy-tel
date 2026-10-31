@@ -22,7 +22,7 @@ import status as status_mod
 
 OPS = ("start", "stop", "restart", "heal", "repair")        # heal and repair: the doctor (doctor.py) and the one Recovery button
 HEAL_NAMES = ("flask-api", "whisper", "music-studio", "image-studio", "music-gate", "video-gate",
-              "voice-gate", "tts-studio", "home-reporter", "bridge", "docker", "core", "openaudible")
+              "audiobook-gate", "voice-gate", "tts-studio", "home-reporter", "bridge", "docker", "core", "openaudible")
 RESUMES = ("7am", "4h", "manual")        # a stop can say when the stack comes back by itself: 7 AM (the default), in 4 hours, or only when asked
 ONLINE_S = 45                    # the starter polls every ~10 s; this long without a call and it is not there
 REDELIVER_S = 30                 # a request not answered by then is handed over again (the starter ignores one it already has)

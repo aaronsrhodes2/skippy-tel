@@ -40,6 +40,7 @@ MODULES = (
     Module("play", "ship", "play_index", "Browser games"),
     Module("music", "wave", "music.player_page", "Bilby's Audio Service"),
     Module("video", "lens", "video.video_page", "Nagatha's Video Service"),
+    Module("books", "book", "audiobooks.page", "Audiobooks"),
     Module("experiments", "atom", "experiments.index", "Experiments"),
     Module("tabletop", "d20", "tabletop.page", "Tabletop"),
     Module("car", "car", "car.page", "Car"),

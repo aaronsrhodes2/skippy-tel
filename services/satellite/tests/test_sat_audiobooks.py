@@ -369,3 +369,100 @@ def test_the_brain_runs_the_tool_first_and_the_model_only_words_it():
     b.pre_route = lambda heard: {"action": "pause"} if "stop" in heard else None
     assert b.reply("stop") == "Paused. Silence, at last." and ran == [("audiobook", {"action": "pause"})]
     assert seen["tools"] is None and "Paused it." in seen["last"] and b.actions[-1]["tool"] == "audiobook"
+
+
+# ── the portal's Audiobooks app (portal/audiobooks.py, services/audiobook-gate): places saved from the browser, and commands through Connect ──
+def _web_place(inbox: Path, bid: str, pos: float, seen: int, finished: bool = False) -> None:
+    inbox.mkdir(parents=True, exist_ok=True)
+    (inbox / (bid[:8] + ".json")).write_text(
+        '{"id": "%s", "pos": %s, "chapter": 1, "speed": 1.25, "last_played": %d, "finished": %s, "src": "web"}' % (bid, pos, seen, str(finished).lower()), encoding="utf-8")
+
+
+def test_a_place_saved_in_the_browser_is_the_voice_players_place(shelf, tmp_path):
+    async def go():
+        clock = Clock()
+        p, pod, out, clock, store = make_player(shelf, tmp_path, clock)
+        store.inbox, store.mono = tmp_path / "inbox", clock
+        bid = "anne-mccaffrey-dragonflight-m4b"
+        await p.play(bid)
+        clock.t += 2
+        await p.pause()                                                                            # the voice stopped at 2 s (last_played = the clock, 1002)
+        _web_place(store.inbox, bid, 9.0, seen=5000)                                               # then he listened further in the browser
+        clock.t += 10
+        w = await p.resume()
+        assert w["pos"] == 9.0 and p.speed == 1.25 and store.current == bid                        # "continue my book" picks up where the browser left off
+        _web_place(store.inbox, bid, 1.0, seen=10)                                                 # an older place never wins
+        clock.t += 10
+        assert store.progress(bid)["pos"] != 1.0
+    asyncio.run(go())
+
+
+def test_an_inbox_place_for_a_book_the_hub_never_played_becomes_current(tmp_path):
+    clock = Clock()
+    store = A.Store(tmp_path / "audiobooks.json", inbox=tmp_path / "inbox", mono=clock)
+    _web_place(tmp_path / "inbox", "some-book-m4b", 33.0, seen=4000)
+    (tmp_path / "inbox" / "broken.json").write_text("{nope", encoding="utf-8")                    # a torn file is skipped
+    assert store.current == "some-book-m4b" and store.progress("some-book-m4b")["pos"] == 33.0
+    store.save(force=True)
+    assert A.Store(tmp_path / "audiobooks.json").progress("some-book-m4b")["pos"] == 33.0
+
+
+def test_the_portals_book_commands_drive_the_rooms_player(shelf, tmp_path):
+    async def go():
+        p, pod, out, clock, store = make_player(shelf, tmp_path)
+        bid = "anne-mccaffrey-dragonflight-m4b"
+        assert A.book_state(p) is None
+        assert await A.run_command(p, f"book:play:{bid}:6.5")
+        assert p.playing and p.pos() == 6.5 and pod.urls[-1].endswith("?s=6.5&t=1.00")
+        assert A.book_state(p)["id"] == bid and A.book_state(p)["playing"] is True and A.book_state(p)["chapter"] == 2
+        assert await A.run_command(p, "book:skip:-3") and p.pos() == 3.5
+        assert await A.run_command(p, "book:chapter:1") and p.pos() == 4.0
+        assert await A.run_command(p, "book:speed:1.5") and p.speed == 1.5
+        assert await A.run_command(p, "book:pause") and not p.playing
+        assert await A.run_command(p, "book:resume") and p.playing
+        assert await A.run_command(p, f"book:play:{bid}")                                          # no second: the remembered place
+        for bad in ("book:play:not-in-the-library", "book:rm -rf", "music:play", "book:play:../x", "book:skip:99999"):
+            assert not await A.run_command(p, bad)
+    asyncio.run(go())
+
+
+def test_connect_checks_in_the_book_and_hands_it_the_commands():
+    import music as music_mod
+
+    class Book:
+        book = {"id": "b", "title": "T", "duration": 100.0, "chapters": [{"title": "c", "start": 0, "end": 100}]}
+        playing, speed = False, 1.0
+        got = []
+
+        def where(self):
+            return {"title": "T", "pos": 12.0, "chapter": 1, "playing": False, "speed": 1.0}
+
+    async def go():
+        book, posted = Book(), []
+
+        def post(url, body):
+            posted.append(body)
+            return {"commands": ["book:pause", "play"], "devices": []}
+        connect = music_mod.Connect("https://p", "tok", post=post, log=lambda m: None)
+        music = SimpleNamespace(state=lambda: {"track": "", "playing": False, "queue": []}, command=_record(book.got))
+        connect.add("office", "Office", music, book=book)
+        import audiobooks
+        seen = []
+
+        async def fake(player, action):
+            seen.append(action)
+            return True
+        real, audiobooks.run_command = audiobooks.run_command, fake
+        try:
+            await connect.once()
+        finally:
+            audiobooks.run_command = real
+        assert posted[0]["state"]["book"] == {"id": "b", "title": "T", "pos": 12.0, "chapter": 1, "playing": False, "speed": 1.0}
+        assert seen == ["book:pause"] and book.got == ["play"]                                      # book: goes to the book, the rest to the music as before
+    asyncio.run(go())
+
+
+def _record(into):
+    async def command(action, devices):
+        into.append(action)
+    return command

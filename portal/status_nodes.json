@@ -250,6 +250,16 @@
    "answer": "{\"ready\": true, \"jellyfin\": true, \"items\": 266}"
   }
  },
+ "audiobook-gate": {
+  "for": "The door to Audiobooks: the Captain's own converted audiobooks (OpenAudible's folder, read-only) for a browser through Funnel :10000/books, behind a signed pass; it also takes the places the browser saves, for the room hub to pick up.",
+  "used_by": [
+   "the /audiobooks app (the Captain only)"
+  ],
+  "example": {
+   "ask": "GET /health",
+   "answer": "{\"ready\": true, \"books\": 394}"
+  }
+ },
  "voice-gate": {
   "for": "Skippy's ears and mouth for the portal's chats: a microphone recording goes to Whisper (in Hands-off, another language becomes a translated 'heard' line), and a reply comes back as speech in the local voices from tts-studio, through Funnel :10000 with a signed pass.",
   "used_by": [

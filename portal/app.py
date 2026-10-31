@@ -47,6 +47,7 @@ import mentat_client
 import modules as modules_mod
 import ops
 import play
+import audiobooks as audiobooks_mod
 import player as player_mod
 import spend
 import starcontrol
@@ -206,6 +207,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     app.extensions["workshop"] = workshop
     player = player_mod.Player(home)                # Bilby's Audio Service: the pass and Connect (admin only)
     app.extensions["player"] = player               # (so tests/dev_music.py can point it at a gate on this machine)
+    books = audiobooks_mod.Books(home, player)      # Audiobooks: the pass for the audiobook gate, and "Play on" a room box (admin only, never a grant)
+    app.extensions["books"] = books                 # (so tests/dev_books.py can point it at a gate on this machine)
     video = video_mod.Video(home)                   # Nagatha's Video Service: the pass for the video gate (admin only)
     voice = voice_mod.Voice(home)                   # Skippy's ears and mouth: the pass for the voice gate (every chat)
     big_files = popup_in_mod.PopupIn(home)          # big files for pop-ups: the pass for skippy-pc's popup-gate (docs/popups.md)
@@ -324,7 +327,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         up = bool(status and status.status == "RUNNING")
         who = me()
         wanted = {"skippy": auth.has_portal(who, "skippy"), "games": bool(shown), "play": auth.has_portal(who, "play"),
-                  "music": auth.has_portal(who, "audio"), "video": auth.has_portal(who, "video"),
+                  "music": auth.has_portal(who, "audio"), "video": auth.has_portal(who, "video"), "books": auth.is_admin(who),
                   "experiments": auth.has_portal(who, "experiments"), "tabletop": auth.has_portal(who, "tabletop"),
                   "car": auth.is_admin(who),
                   "dashboard": auth.is_admin(who) and "me" in app.blueprints, "admin": auth.is_admin(who)}
@@ -343,6 +346,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 tile["state"] = "on" if home.can("music_gate") else "off"
             elif m.id == "video":
                 tile["state"] = "on" if home.can("video_gate") else "off"
+            elif m.id == "books":
+                tile["state"] = "on" if home.can("book_gate") else "off"
             elif m.id == "admin" and asking:
                 tile["badge"], tile["href"] = asking, url_for("admin.index") + "#friends"
             tiles.append(tile)
@@ -1145,6 +1150,37 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         return resp
 
     app.register_blueprint(films)
+
+    # ── Audiobooks: the Captain's converted audiobooks in a browser, or on a room box (audiobooks.py; the Captain only, never a grant) ────
+    shelf = Blueprint("audiobooks", __name__, url_prefix="/audiobooks")
+
+    @shelf.get("")
+    @auth.admin_required
+    def page():
+        return render_template("audiobooks.html")
+
+    @shelf.get("/gate")
+    @auth.admin_required
+    def gate():
+        resp = jsonify(books.gate())
+        resp.headers["Cache-Control"] = "no-store"          # a pass is a credential: never from a cache
+        return resp
+
+    @shelf.get("/rooms")
+    @auth.admin_required
+    def rooms():
+        resp = jsonify(rooms=books.rooms(me()))
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+    @shelf.post("/command")
+    @auth.admin_required
+    def command():
+        body = request.get_json(silent=True) or {}
+        ok = books.command(me(), str(body.get("device") or ""), str(body.get("action") or ""))
+        return jsonify(queued=ok), (200 if ok else 409)
+
+    app.register_blueprint(shelf)
 
     # ── The Tabletop: Heroes of Chance, the heroes and the cork board (tabletop.py; the Captain and friends granted "tabletop") ──
     # Every write needs the X-Tabletop header: a page on another site can make a player's browser POST a form, but it

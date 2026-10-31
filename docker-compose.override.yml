@@ -78,6 +78,22 @@ services:
       - "127.0.0.1:3008:8080"                  # localhost only; Funnel (:10000 /in) is the one way in from outside
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
 
+  # audiobook-gate: the Captain's converted audiobooks (OpenAudible's folder: books/, art/, books.json) for the Audiobooks app, under a pass only
+  # the portal can sign (services/audiobook-gate/gate.py). Funnel's :10000/books mount is its one way in. It reads the hub's places (state/, read-only)
+  # and writes the ones saved from the browser into the inbox the hub reads (state/audiobooks-inbox): never anywhere else.
+  audiobook-gate:
+    build: ./services/audiobook-gate
+    container_name: skippytel-audiobook-gate
+    restart: unless-stopped
+    env_file: G:/My Drive/vault/.env           # SKIPPY_HOME_TOKEN: the pass key is derived from it
+    volumes:
+      - D:/Audiobooks:/audiobooks:ro           # OpenAudible's library: its converted books (books/), covers (art/) and data (books.json); read-only
+      - ./state:/state:ro                      # the hub's state/audiobooks.json (the voice player's places)
+      - ./state/audiobooks-inbox:/inbox        # the places saved from the browser: the one thing this gate writes
+    ports:
+      - "127.0.0.1:3009:8080"                  # localhost only; Funnel (:10000 /books) is the one way in from outside
+    logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
+
   # Pushes status + Bilby's music to the portal every ~15 s, and fetches the
   # portal's jobs (controls, physics questions for Mentat). See CLAUDE.md.
   home-reporter:
@@ -99,6 +115,8 @@ services:
       MUSIC_GATE_PUBLIC: https://skippy-pc.tailab2cc7.ts.net   # ...and its Tailscale Funnel address (not a secret)
       VIDEO_GATE_URL: http://video-gate:8080   # Nagatha's Video Service's library (its /health "ready")...
       VIDEO_GATE_PUBLIC: https://skippy-pc.tailab2cc7.ts.net:8443   # ...and its Funnel address: 443 is the music gate's
+      BOOK_GATE_URL: http://audiobook-gate:8080   # the Audiobooks app's library (its /health "ready")...
+      BOOK_GATE_PUBLIC: https://skippy-pc.tailab2cc7.ts.net:10000/books   # ...and its Funnel address: a path on the voice gate's port, like popup-gate's /in
       VOICE_GATE_URL: http://voice-gate:8080   # Skippy's ears and mouth (its /health "ready")...
       VOICE_GATE_PUBLIC: https://skippy-pc.tailab2cc7.ts.net:10000   # ...and its Funnel address: the third port
       POPUP_GATE_URL: http://popup-gate:8080   # big files for pop-ups (its /health "ready")...

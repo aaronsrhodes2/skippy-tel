@@ -60,6 +60,10 @@ GATE = os.environ.get("MUSIC_GATE_URL", "").rstrip("/")        # music-gate: Bil
 GATE_PUBLIC = os.environ.get("MUSIC_GATE_PUBLIC", "").rstrip("/")   # ... and where Tailscale Funnel shows it (outside)
 VIDEO_GATE = os.environ.get("VIDEO_GATE_URL", "").rstrip("/")         # video-gate: Nagatha's Video Service's Jellyfin (inside)
 VIDEO_GATE_PUBLIC = os.environ.get("VIDEO_GATE_PUBLIC", "").rstrip("/")   # ... and its Funnel address (outside, :8443)
+BOOK_GATE = os.environ.get("BOOK_GATE_URL", "").rstrip("/")           # audiobook-gate: the Audiobooks app's library (inside)
+BOOK_GATE_PUBLIC = os.environ.get("BOOK_GATE_PUBLIC", "").rstrip("/")   # ... and its Funnel address (outside, a path on :10000)
+BOOK_GATE = os.environ.get("BOOK_GATE_URL", "").rstrip("/")           # audiobook-gate: the Audiobooks app's library (inside)
+BOOK_GATE_PUBLIC = os.environ.get("BOOK_GATE_PUBLIC", "").rstrip("/")   # ... and its Funnel address (outside, a path on :10000)
 VOICE_GATE = os.environ.get("VOICE_GATE_URL", "").rstrip("/")         # voice-gate: Skippy's ears (Whisper) and mouth (inside)
 VOICE_GATE_PUBLIC = os.environ.get("VOICE_GATE_PUBLIC", "").rstrip("/")
 POPUP_GATE = os.environ.get("POPUP_GATE_URL", "").rstrip("/")         # popup-gate: big files for pop-ups (inside)...
@@ -374,6 +378,7 @@ def _capability_probes() -> dict:
             "workshop": workshop_capability,
             "music_gate": lambda: {"ready": bool(GATE and GATE_PUBLIC) and _up(f"{GATE}/health"), "url": GATE_PUBLIC},
             "video_gate": video_gate_capability,
+            "book_gate": book_gate_capability,
             "voice_gate": voice_gate_capability,
             "house": house_capability,
             "car": car_capability,
@@ -441,6 +446,12 @@ def video_gate_capability() -> dict:
     return {"ready": isinstance(health, dict) and health.get("ready") is True, "url": VIDEO_GATE_PUBLIC}
 
 
+def book_gate_capability() -> dict:
+    """Ready only when the audiobook gate's own `ready` says there are books to serve (a 200 alone would not)."""
+    health = fetch(f"{BOOK_GATE}/health") if BOOK_GATE and BOOK_GATE_PUBLIC else None
+    return {"ready": isinstance(health, dict) and health.get("ready") is True, "url": BOOK_GATE_PUBLIC}
+
+
 def voice_gate_capability() -> dict:
     """Ready when Whisper answers behind the gate (the microphone); `speak` says whether Skippy's voice (tts-studio, F5 model) is up too."""
     health = fetch(f"{VOICE_GATE}/health") if VOICE_GATE and VOICE_GATE_PUBLIC else None
@@ -492,6 +503,8 @@ def _capability_down(name: str) -> dict:
         return {"ready": False, "url": GATE_PUBLIC}
     if name == "video_gate":
         return {"ready": False, "url": VIDEO_GATE_PUBLIC}
+    if name == "book_gate":
+        return {"ready": False, "url": BOOK_GATE_PUBLIC}
     if name == "voice_gate":
         return {"ready": False, "url": VOICE_GATE_PUBLIC}
     if name == "popup_gate":

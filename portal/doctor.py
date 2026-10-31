@@ -30,9 +30,9 @@ CORE_TIMEOUT_S = 120        # Core may be busy with a long reply: a test waits i
 UNREACHABLE_DM_S = 600      # skippy-pc and its starter both silent this long: tell the Captain (nothing here can fix it)
 # No "ollama": since 2026-10-25 it is skippy-core's shim, which skippy-core's own doctor and deployer keep up.
 HEALABLE = ("flask-api", "whisper", "music-studio", "image-studio", "music-gate", "video-gate",
-            "voice-gate", "tts-studio", "home-reporter", "bridge", "docker", "core", "openaudible")
+            "audiobook-gate", "voice-gate", "tts-studio", "home-reporter", "bridge", "docker", "core", "openaudible")
 LABELS = {"flask-api": "Skippy's API", "ollama": "Ollama (local models)", "whisper": "Whisper (hearing)", "music-studio": "Music studio",
-          "image-studio": "Picture studio", "mentat-home": "Mentat", "music-gate": "Audio service", "video-gate": "Video service",
+          "image-studio": "Picture studio", "mentat-home": "Mentat", "music-gate": "Audio service", "video-gate": "Video service", "audiobook-gate": "Audiobooks",
           "voice-gate": "Voice", "tts-studio": "Local voices", "home-reporter": "Home reporter", "bridge": "Private Skippy's bridge",
           "docker": "Docker", "openaudible": "OpenAudible (web server)", "core": "Skippy Core", "portal": "Portal", "starter": "Starter (skippy-pc's own)"}
 

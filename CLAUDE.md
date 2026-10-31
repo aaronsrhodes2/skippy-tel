@@ -235,6 +235,13 @@ the portal shows the **Car** tile (`portal/car_web.py`) and Skippy gets `car_sta
 the car. **Charging on/off** (2026-10-30) goes over Bluetooth from skippy-core: `core/car-ble` (Tesla's tesla-control, a charging_manager key in
 `/etc/skippy-core/tesla-ble`, paired once with `tesla.sh --pair` + the key card), tailnet `:7352`, purple Skippy's `car_charge` tool. TeslaMate's own page (`http://skippy-core:4000`, tailnet only) is where he pastes his Tesla tokens once. Full description: docs/tesla.md.
 
+## Audiobooks (the Captain's own converted audiobooks, `/audiobooks`: admin only, never a grant)
+
+His DRM-free OpenAudible conversions (`D:\Audiobooks`), browsed, played in the browser, or sent to a pod ("Play on"): `portal/audiobooks.py` + `templates/audiobooks.html` +
+`static/audiobooks-{app,pure}.js`, and `services/audiobook-gate` (pass label `audiobook-gate-v1`, Funnel `:10000/books`, the covers/audio/places straight from it, never through the portal). The
+browser's places go to `state/audiobooks-inbox/` and the hub's `audiobooks.Store` merges them, so voice and page agree; "Play on" is Bilby's Connect with `book:` commands. No Audible/OpenAudible
+login is read or asked for. Run it against the real library with `python portal/tests/dev_books.py`. Full description: `docs/portal/README.md` → Audiobooks.
+
 ## Nagatha's Video Service (the browser video app, `/video`)
 
 The Captain's Jellyfin films in any browser (the Captain, and friends granted "video"; a friend's viewing never moves his Continue Watching), a tile beside Bilby's: `portal/templates/video.html` +

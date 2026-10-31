@@ -27,11 +27,11 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-SERVICES = ("flask-api", "whisper", "music-studio", "music-gate", "video-gate", "voice-gate", "home-reporter")
+SERVICES = ("flask-api", "whisper", "music-studio", "music-gate", "video-gate", "audiobook-gate", "voice-gate", "home-reporter")
 COMPOSE_DIR = os.getenv("SKIPPY_COMPOSE_DIR", r"D:\Aaron\development\SkippyTel")
 SUPERVISOR_PID = Path(COMPOSE_DIR) / "state" / "bridge-supervisor.pid"
-# (public https port, local port, path): music, video, voice gate, popup-gate. Funnel has only three ports, so the fourth is a path.
-FUNNEL_DOORS = (("443", "3005", ""), ("8443", "3006", ""), ("10000", "3007", ""), ("10000", "3008", "/in"))
+# (public https port, local port, path): music, video, voice gate, popup-gate, audiobook-gate. Funnel has only three ports, so the others are paths.
+FUNNEL_DOORS = (("443", "3005", ""), ("8443", "3006", ""), ("10000", "3007", ""), ("10000", "3008", "/in"), ("10000", "3009", "/books"))
 OUTPUT_MAX = 1500
 TIMEOUT_S = 120
 SELF_RESTART_DELAY_S = 1.5        # long enough for the reply to leave before this process (or the reporter) goes away

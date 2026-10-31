@@ -131,6 +131,9 @@ himself; there is no hook built for it yet.
 * **With his voice:** on the PC outputs the book ducks to 20 % when the name is heard and while Skippy talks, and comes back after the conversation window. The pod's own
   speaker ducks its media under an announcement itself, as it does for music. The outputs line up by the configured start delays, not by measurement (so there can be a
   fraction of a second between the pod and a PC output; tune `SATELLITE_OUT_DELAYS` by ear).
+* **The portal's Audiobooks app** (`/audiobooks`, docs/portal/README.md): the browser saves its place into `state/audiobooks-inbox/` (through `services/audiobook-gate`), which `Store` merges
+  (newest wins), and the box's Connect check-in carries `state.book`; a `book:` command from the page (`play:<id>[:<s>]`, `pause`, `resume`, `skip:<s>`, `chapter:<±1>`, `speed:<x>`) is run by
+  `audiobooks.run_command` on the room's `BookPlayer`.
 * Tests: `tests/test_sat_audiobooks.py` (real ffmpeg builds a synthetic multi-chapter m4b and a track-per-chapter folder).
 
 Tests: `python -m pytest tests` from this folder (its own session: other services have a `gate.py` too).

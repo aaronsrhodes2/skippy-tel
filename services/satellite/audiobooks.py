@@ -29,6 +29,7 @@ from pathlib import Path
 AUDIO_EXT = {".m4b", ".m4a", ".mp3", ".ogg", ".opus", ".flac", ".aac"}
 PROTECTED_EXT = {".aax", ".aaxc", ".aa"}                       # Audible's own: noticed and skipped, never opened
 SAVE_EVERY_S = 5.0
+INBOX_EVERY_S = 3.0                                            # how often the places saved from the browser are looked for
 REWIND_AFTER_PAUSE_S = 3.0                                     # a pause of half a minute or more picks up a few seconds earlier
 REWIND_THRESHOLD_S = 30.0
 PART_S = 900                                                   # a file with no chapter markers is cut into quarter-hour parts for skipping
@@ -216,8 +217,10 @@ class Library:
 class Store:
     """state/audiobooks.json: {current, books:{id:{pos, chapter, speed, last_played, finished}}}. Written atomically, at most every few seconds."""
 
-    def __init__(self, path: Path, wall=time.time):
-        self.path, self.wall = Path(path), wall
+    def __init__(self, path: Path, wall=time.time, inbox: Path | None = None, mono=time.monotonic):
+        self.path, self.wall, self.mono = Path(path), wall, mono
+        self.inbox = Path(inbox) if inbox is not None else None   # places saved from the browser (services/audiobook-gate): one small file per book
+        self._inbox_at = -INBOX_EVERY_S
         self.data = {"version": 1, "current": None, "books": {}}
         self._saved = 0.0
         self._dirty = False
@@ -230,9 +233,37 @@ class Store:
 
     @property
     def current(self) -> str | None:
+        self.merge_inbox()
         return self.data.get("current")
 
+    def merge_inbox(self, force: bool = False) -> None:
+        """Take the places saved from the browser that are newer than ours (at most every few seconds). Newest last_played wins either way."""
+        now = self.mono()
+        if self.inbox is None or (not force and now - self._inbox_at < INBOX_EVERY_S):
+            return
+        self._inbox_at = now
+        try:
+            files = list(self.inbox.glob("*.json"))
+        except OSError:
+            return
+        for f in files:
+            try:
+                d = json.loads(f.read_text(encoding="utf-8"))
+                bid, seen = d["id"], float(d["last_played"])
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            if not isinstance(bid, str) or seen <= float((self.data["books"].get(bid) or {}).get("last_played") or 0):
+                continue
+            mine = self.data["books"].get(bid) or {}
+            self.data["books"][bid] = {**mine, "pos": float(d.get("pos") or 0), "chapter": int(d.get("chapter") or 0), "speed": float(d.get("speed") or 1.0),
+                                       "last_played": int(seen), "finished": d.get("finished") is True}
+            cur = self.data.get("current")
+            if not cur or seen > float((self.data["books"].get(cur) or {}).get("last_played") or 0):
+                self.data["current"] = bid
+            self._dirty = True
+
     def progress(self, bid: str) -> dict:
+        self.merge_inbox()
         return dict(self.data["books"].get(bid) or {"pos": 0.0, "chapter": 0, "speed": 1.0, "last_played": 0, "finished": False})
 
     def put(self, bid: str, *, current: bool = True, **fields) -> None:
@@ -325,8 +356,17 @@ class BookPlayer:
             raise LookupError("no book chosen")
         if self.playing:
             return self.where()
+        self._sync_from_store()
         await self._begin(self.offset)
         return self.where()
+
+    def _sync_from_store(self) -> None:
+        """A paused book's place is the store's (every pause and seek is remembered), and the store may hold a newer one saved from the browser."""
+        if self.book is not None and not self.playing:
+            prog = self.store.progress(self.book["id"])
+            if not prog.get("finished"):
+                self.offset = min(float(prog.get("pos") or 0.0), max(0.0, self.book["duration"] - 1))
+                self.speed = float(prog.get("speed") or self.speed)
 
     async def _begin(self, pos: float) -> None:
         if self.yield_to is not None:
@@ -369,6 +409,7 @@ class BookPlayer:
         if self.book is None:
             raise LookupError("no book chosen")
         if not self.playing:
+            self._sync_from_store()
             back = REWIND_AFTER_PAUSE_S if self.paused_at and self.clock() - self.paused_at >= REWIND_THRESHOLD_S else 0.0
             await self._begin(max(0.0, self.offset - back))
         return self.where()
@@ -468,6 +509,50 @@ class BookPlayer:
         if self._ticker is not None:
             self._ticker.cancel()
         await self.pause()
+
+
+# ── the portal's Audiobooks app: what a box says it is doing, and what it is told (Connect, music.py) ──
+COMMAND = re.compile(r"book:(?:play:(?P<id>[a-z0-9-]{1,200})(?::(?P<pos>\d{1,6}(?:\.\d)?))?|(?P<verb>pause|resume)|skip:(?P<skip>-?\d{1,4})|chapter:(?P<chap>-?1)|speed:(?P<speed>\d(?:\.\d{1,2})?))")
+
+
+def book_state(player: BookPlayer | None) -> dict | None:
+    """What the room's book is doing, for Connect's check-in (portal/player.py keeps it as the device's `book`); None when no book is chosen."""
+    if player is None or player.book is None:
+        return None
+    w = player.where()
+    return {"id": player.book["id"], "title": w["title"], "pos": w["pos"], "chapter": w["chapter"], "playing": w["playing"], "speed": w["speed"]}
+
+
+async def run_command(player: BookPlayer, action: str) -> bool:
+    """One of the portal's `book:` commands, on the hub's loop. False when it was not one (or not for a book we have)."""
+    m = COMMAND.fullmatch(action)
+    if not m:
+        return False
+    if m["id"]:
+        await asyncio.to_thread(player.library.refresh)
+        if player.library.get(m["id"]) is None:
+            return False
+        if m["pos"] is not None:
+            player.load(m["id"])
+            await player.seek(float(m["pos"]))                 # remembered at once, so play() starts from it
+            await player.play()
+        else:
+            await player.play(m["id"])
+    elif player.book is None:
+        player.load(player.store.current) if player.store.current in player.library.books else None
+        if player.book is None:
+            return False
+    if m["verb"] == "pause":
+        await player.pause()
+    elif m["verb"] == "resume":
+        await player.resume()
+    elif m["skip"]:
+        await player.skip(float(m["skip"]))
+    elif m["chap"]:
+        await (player.next_chapter() if m["chap"] == "1" else player.previous_chapter())
+    elif m["speed"]:
+        await player.set_speed(float(m["speed"]))
+    return True
 
 
 # ── the brain's tool ──
@@ -610,7 +695,7 @@ def build_player(env: dict, room: str, link=None, log=print) -> BookPlayer | Non
         return None
     state = Path(__file__).resolve().parents[2] / "state"
     lib = _libraries.setdefault(raw, Library(Path(raw) if raw else default_dir(), state / "audiobooks-library.json", log=log))
-    store = _stores.setdefault(str(state), Store(state / "audiobooks.json"))
+    store = _stores.setdefault(str(state), Store(state / "audiobooks.json", inbox=state / "audiobooks-inbox"))
     import speaker_out                                        # noqa: PLC0415
     pod_on = speaker_out.parse_outputs(env, room, log)[0]
     has_pod = pod_on and link is not None and "player" in getattr(link, "keys", {})

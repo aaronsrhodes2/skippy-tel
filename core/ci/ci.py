@@ -58,9 +58,10 @@ PLANS = {
          "cmd": "python -m pytest services/flask-api/tests -q -n {cpus} --dist loadfile -p no:cacheprovider"},
         # The services that build as their own images and keep their own `app`/`gate` modules, so each runs in its own pytest session (they never
         # shared the portal's). They were not in CI at all until 2026-10-27, when the readiness contract changed every one of them.
-        {"name": "services", "reqs": ["services/music-gate/requirements.txt", "services/video-gate/requirements.txt", "services/voice-gate/requirements.txt",
+        {"name": "services", "reqs": ["services/music-gate/requirements.txt", "services/video-gate/requirements.txt", "services/audiobook-gate/requirements.txt", "services/voice-gate/requirements.txt",
                                       "tools/requirements-ci.txt"],
          "cmd": "cd services/music-gate && python -m pytest tests -q -p no:cacheprovider && cd ../video-gate && python -m pytest tests -q -p no:cacheprovider "
+                "&& cd ../audiobook-gate && python -m pytest tests -q -p no:cacheprovider "
                 "&& cd ../voice-gate && python -m pytest tests -q -p no:cacheprovider && cd ../popup-gate && python -m pytest tests -q -p no:cacheprovider "
                 "&& cd ../tts-studio && python -m pytest tests -q -p no:cacheprovider "
                 "&& cd ../purple-tools && python -m pytest tests -q -p no:cacheprovider"},

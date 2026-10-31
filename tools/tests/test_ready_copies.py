@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CANON = ROOT / "core" / "ready.py"
 # (where the copy sits, the Dockerfile that must ship it)
 COPIES = (("mentat", "mentat/Dockerfile"), ("services/flask-api/app", "services/flask-api/Dockerfile"),
-          ("services/music-gate", "services/music-gate/Dockerfile"), ("services/video-gate", "services/video-gate/Dockerfile"),
+          ("services/music-gate", "services/music-gate/Dockerfile"), ("services/video-gate", "services/video-gate/Dockerfile"), ("services/audiobook-gate", "services/audiobook-gate/Dockerfile"),
           ("services/voice-gate", "services/voice-gate/Dockerfile"),
           ("services/popup-gate", "services/popup-gate/Dockerfile"), ("services/tts-studio", "services/tts-studio/Dockerfile"),
           ("core/car", "core/car/Dockerfile"), ("core/car-ble", "core/car-ble/Dockerfile"))
