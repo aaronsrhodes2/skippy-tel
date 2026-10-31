@@ -102,6 +102,28 @@ class Starters:
             self._hours_at, self._hours = self.clock(), usual_hours(self.log_root, clock=self.clock)
         return self._hours
 
+    def last_seen(self) -> float | None:
+        """When he last spoke to Skippy anywhere (a wake or a command in today's house log), as epoch seconds: the hub's own memory of it is lost
+        on every restart, the log is not."""
+        if self.log_root is None:
+            return None
+        path = Path(self.log_root) / "log" / f"{time.strftime('%Y-%m-%d', time.localtime(self.clock()))}.jsonl"
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return None
+        for line in reversed(lines):
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if e.get("kind") in ("wake", "command") and e.get("ts"):
+                try:
+                    return time.mktime(time.strptime(e["ts"], "%Y-%m-%dT%H:%M:%S"))
+                except ValueError:
+                    return None
+        return None
+
     def why_not(self) -> str | None:
         """Why no starter may be offered now (house-wide), or None when one may."""
         now = self.clock()

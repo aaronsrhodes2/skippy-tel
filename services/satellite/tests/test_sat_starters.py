@@ -322,3 +322,13 @@ def test_a_busy_studio_gets_a_stocked_quip_instead_of_silence(tmp_path):
     room.gate, room.filler = Studio(), Bank()
     assert asyncio.run(room._voice("A new moon was found around a distant planet."))[0] == "mp3"
     assert link.spoken == ["a fact:space line"]
+
+
+def test_a_restart_remembers_who_was_around_from_the_house_log(tmp_path):
+    now = [stamp("2026-10-31", "11:00")]
+    room, link, brain, s = room_with(tmp_path, now, [cand("a", now=now[0])])
+    s.log_root = tmp_path / "home"
+    housemem.HouseLog(s.log_root, clock=lambda: now[0] - 600).event("command", room="office", words="you are a jerk")
+    asyncio.run(room.maybe_start())                                     # no voice heard since the restart, but he spoke ten minutes ago
+    assert link.spoken == [cand("a")["opener"]]
+    assert s.last_seen() is not None

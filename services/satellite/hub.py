@@ -419,6 +419,10 @@ class Room:
         if any(getattr(o, "talking_until", 0) > now for o in self.pc_outs):
             return
         heard, turn = self._voice_at, self._turn_at
+        if heard is None and turn is None:                      # a restart forgot who was around: the house log remembers his last words to Skippy
+            seen = await asyncio.to_thread(self.starters.last_seen)
+            if seen is not None:
+                turn = now - max(0.0, self.starters.clock() - seen)
         spoke = getattr(self, "_last_said", ("", None))[1]      # Skippy's own last words, a routine's or a timer's included (2026-10-31: a starter 13 s after the morning routine)
         around = (heard is not None and now - heard < PRESENT_S) or (turn is not None and now - turn < PRESENT_S)
         hushed = ((heard is None or now - heard > HUSH_S) and (turn is None or now - turn > AFTER_TURN_S)
