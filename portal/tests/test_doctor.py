@@ -172,3 +172,25 @@ def test_openaudible_is_healed_when_its_app_is_gone_and_only_reported_when_the_a
     alive(starter2, openaudible=False, openaudible_app=True)
     d2.tick()
     assert len(told2) == 1
+
+
+def test_the_starters_down_count_survives_a_portal_redeploy_and_apps_are_healed_never_killed():
+    d, starter, clock, told = world()
+    # a fresh portal (just redeployed) is told by the starter that Discord has already been down 6 minutes
+    alive(starter, discord=False, spotify=True, vbcable=False, openaudible=True, down_s={"discord": 360})
+    assert d.tick() == ["discord"] and handed(starter) == [("heal", "discord")]
+    rows = {r["name"]: r for r in d.view()["rows"]}
+    assert rows["discord"]["label"] == "Discord (desktop)" and not rows["discord"]["ok"] and rows["discord"]["for_s"] >= 360
+    assert rows["spotify"]["ok"] and rows["openaudible"]["ok"]
+    assert not rows["vbcable"]["ok"] and "VB-Cable" in rows["vbcable"]["label"]
+
+
+def test_the_vb_cable_is_a_row_only_and_a_short_outage_is_left_alone():
+    d, starter, clock, _ = world()
+    alive(starter, spotify=False, vbcable=False, down_s={"spotify": 20})
+    clock.t += 2000
+    alive(starter, spotify=False, vbcable=False, down_s={"spotify": 2020})
+    assert d.tick() == ["spotify"]                                   # 2000 s of VB-Cable failing is never a heal
+    d2, starter2, clock2, _ = world()
+    alive(starter2, discord=False, down_s={"discord": 30})
+    assert d2.tick() == []

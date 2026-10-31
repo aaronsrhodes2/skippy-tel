@@ -34,7 +34,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OPS = ("start", "stop", "restart", "heal", "repair")
-HEAL_SPECIAL = ("bridge", "docker", "core", "openaudible")             # the rest a heal may name: a service in `docker compose config --services`
+HEAL_SPECIAL = ("bridge", "docker", "core", "openaudible", "spotify", "discord")             # the rest a heal may name: a service in `docker compose config --services`
 CORE_SSH = os.environ.get("SKIPPY_CORE_SSH", "aaron@skippy-core")
 CORE_REPAIR = ["sudo", "-n", "/usr/bin/python3", "/opt/skippy-core/doctor/deployer.py", "repair"]   # the doctor's own copy (core/deployer/install.sh)
 DOCKER_DOWN_HEAL_S = 120
@@ -55,6 +55,17 @@ OPENAUDIBLE_URL = os.environ.get("OPENAUDIBLE_URL", "http://127.0.0.1:5758/")
 OPENAUDIBLE_EXE = os.environ.get("OPENAUDIBLE_EXE", r"C:\Program Files\OpenAudible\OpenAudible.exe")
 OPENAUDIBLE_IMAGE = "OpenAudible.exe"
 OPENAUDIBLE_WAIT_S = 90
+# The other desktop apps that support the house (2026-10-31): up means the process is there. A running one is never touched; a missing one is
+# started minimized by the doctor's heal. Spotify is the Store build (its execution alias), its sound routed through VB-Cable to the hub.
+LOCALAPPDATA = os.environ.get("LOCALAPPDATA", "")
+DESKTOP_APPS = {
+    "spotify": {"image": "Spotify.exe", "launch": [os.path.join(LOCALAPPDATA, "Microsoft", "WindowsApps", "Spotify.exe")]},
+    "discord": {"image": "Discord.exe", "launch": [os.path.join(LOCALAPPDATA, "Discord", "Update.exe"), "--processStart", "Discord.exe",
+                                                     "--process-start-args", "--start-minimized"]},
+}
+DESKTOP_WAIT_S = 60
+VBCABLE_PS = "(Get-CimInstance Win32_SoundDevice | Where-Object { $_.Name -match 'VB-Audio|CABLE' } | Measure-Object).Count"
+VBCABLE_EVERY_S = 60
 LOCK_PORT = 9339
 VAULTS = ("D:/Aaron/development/.env", "G:/My Drive/vault/.env")
 # skippy-pc's own UPS (a CyberPower on USB, which Windows sees as a battery): after this long on battery the starter stops the stack
@@ -102,6 +113,8 @@ class Starter:
         self.state_file = Path(state_file) if state_file else root / "state" / "starter.json"
         self.spawn = spawn or self._spawn
         self.openaudible_probe = self.openaudible_web
+        self._vb, self._vb_at = None, -1e9
+        self._down: dict[str, float] = {}         # app -> when this starter first saw it down (it outlives portal redeploys, the doctor does not)
         self.working = ""
         self.results: list[dict] = []
         self.handled: dict[str, float] = {}
@@ -228,6 +241,58 @@ class Starter:
         rc, out = self.run(["tasklist", "/FI", f"IMAGENAME eq {OPENAUDIBLE_IMAGE}", "/FO", "CSV", "/NH"], 15)
         return rc == 0 and OPENAUDIBLE_IMAGE.lower() in out.lower()
 
+    def images_running(self) -> set[str]:
+        """Every program name running now, lower-cased (one read-only tasklist)."""
+        rc, out = self.run(["tasklist", "/FO", "CSV", "/NH"], 15)
+        names = set()
+        for line in out.splitlines() if rc == 0 else []:
+            first = line.split('","')[0].strip('"').lower()
+            if first.endswith(".exe"):
+                names.add(first)
+        return names
+
+    def vbcable(self) -> bool | None:
+        """Is the VB-Cable playback device installed? Report only (read only, at most once a minute); None when it cannot tell."""
+        if self.clock() - self._vb_at < VBCABLE_EVERY_S:
+            return self._vb
+        self._vb_at = self.clock()
+        rc, out = self.run(["powershell.exe", "-NoProfile", "-Command", VBCABLE_PS], 20)
+        last = (out.strip().splitlines() or [""])[-1]
+        self._vb = int(last) > 0 if rc == 0 and last.isdigit() else None
+        return self._vb
+
+    def desktop_apps(self) -> dict:
+        running = self.images_running()
+        got = {name: app["image"].lower() in running for name, app in DESKTOP_APPS.items()}
+        vb = self.vbcable()
+        return {**got, **({"vbcable": vb} if vb is not None else {})}
+
+    def heal_desktop_app(self, name: str) -> tuple[bool, str]:
+        """Start the app minimized when it is not running. A running one is NEVER touched."""
+        app = DESKTOP_APPS[name]
+        if app["image"].lower() in self.images_running():
+            return True, f"{name.capitalize()} is already running."
+        if not Path(app["launch"][0]).is_file():
+            return False, f"{name.capitalize()} is not installed at {app['launch'][0]}."
+        self.working = f"starting {name.capitalize()}"
+        self.spawn(app["launch"], minimized=True)
+        if self._wait(lambda: app["image"].lower() in self.images_running(), DESKTOP_WAIT_S):
+            return True, f"{name.capitalize()} started."
+        return False, f"{name.capitalize()} was started but is not showing up as running."
+
+    def _apps(self) -> dict:
+        """The apps' flags plus `down_s`: how long each one has been down, counted HERE. The portal redeploys every few minutes and forgets
+        what it saw, so the doctor takes its 5 minutes of failing from this, not from its own clock."""
+        got = {**self.openaudible(), **self.desktop_apps()}
+        now = self.clock()
+        for name in ("openaudible", *DESKTOP_APPS):
+            if got.get(name) is False:
+                self._down.setdefault(name, now)
+            else:
+                self._down.pop(name, None)
+        got["down_s"] = {n: int(now - t) for n, t in self._down.items()}
+        return got
+
     def openaudible(self) -> dict:
         web = self.openaudible_probe()
         return {"openaudible": web, "openaudible_app": True if web else self.openaudible_running()}
@@ -312,7 +377,7 @@ class Starter:
         return {"docker": total > 0 or self.docker_up(), "containers_up": up, "containers_total": total, "bridge": b is not None,
                 "busy": bool(b and (b.get("workshop") or {}).get("busy")), "supervisor": b is not None, "working": self.working,
                 "resume_at": self.resume_at.isoformat(timespec="minutes") if self.resume_at else "", **self.gpu(), **self._ups,
-                "containers": self.container_list() if self.docker_up() else [], **self.openaudible()}
+                "containers": self.container_list() if self.docker_up() else [], **self._apps()}
 
     # ── doing ──────────────────────────────────────────────────────────────────
     def _spawn(self, cmd: list[str], env: dict | None = None, log: str = "", minimized: bool = False) -> None:
@@ -471,6 +536,8 @@ class Starter:
             return self.restart_docker()
         if name == "openaudible":
             return self.heal_openaudible()
+        if name in DESKTOP_APPS:
+            return self.heal_desktop_app(name)
         if not self.docker_up() and name not in ("core",):
             return False, "Docker isn't answering: that comes first (heal docker)."
         if name == "bridge":

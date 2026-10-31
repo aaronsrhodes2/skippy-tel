@@ -23,6 +23,7 @@ class World:
         self.pending_commands = []
         self.battery = ""                                                           # no UPS unless a test plugs one in
         self.t = [0.0]
+        self.procs, self.vb = ["Spotify.exe", "Discord.exe"], "1"                    # the desktop apps running, and whether VB-Cable is installed
         self.oa_running, self.oa_web, self.oa_web_on_start = False, False, True      # OpenAudible: the app, its web server
 
     def run(self, cmd, timeout=120, cwd=None, env=None):
@@ -38,10 +39,13 @@ class World:
             self.states = ["exited"] * 3
             return 0, ""
         if cmd[0] == "tasklist":
-            return 0, '"OpenAudible.exe","4711","Console","1","300,000 K"' if self.oa_running else "INFO: No tasks are running which match the specified criteria."
+            names = (["OpenAudible.exe"] if self.oa_running else []) + list(self.procs)
+            return 0, chr(10).join(f'"{n}","4711","Console","1","300,000 K"' for n in names) or "INFO: No tasks are running which match the specified criteria."
         if cmd[0] == "powershell.exe" and "-File" in cmd:                          # the clean restart
             self.docker = self.docker_wakes
             return 0, ""
+        if cmd[0] == "powershell.exe" and ss.VBCABLE_PS in cmd:
+            return 0, self.vb
         if cmd[0] == "powershell.exe" and ss.UPS_PS in cmd:                         # skippy-pc's UPS (Win32_Battery)
             return 0, self.battery
         if cmd[0] == "powershell.exe":                                              # who is building? (read only)
@@ -63,6 +67,9 @@ class World:
 
     def spawn(self, cmd, env=None, log="", minimized=False):
         self.spawned.append(cmd)
+        if cmd[0] in [a["launch"][0] for a in ss.DESKTOP_APPS.values()]:
+            name = next(n for n, a in ss.DESKTOP_APPS.items() if a["launch"][0] == cmd[0])
+            self.procs.append(ss.DESKTOP_APPS[name]["image"])
         if cmd[0] == ss.OPENAUDIBLE_EXE:
             self.oa_running, self.oa_web = True, self.oa_web_on_start
         if cmd[0] == ss.DOCKER_EXE and self.docker_wakes and not getattr(self, "needs_clean", False):
@@ -167,7 +174,7 @@ def test_each_poll_tells_the_portal_how_things_are_with_the_home_token_and_nothi
     s.poll_once(threaded=False)
     data, headers = w.posts[0]
     assert headers == {"Authorization": "Bearer home-token"} and data["results"] == []
-    assert data["status"] == {"docker": True, "containers_up": 3, "containers_total": 3, "bridge": True, "busy": True, "supervisor": True, "working": "", "resume_at": "", "containers": [], "openaudible": False, "openaudible_app": False}
+    assert data["status"] == {"docker": True, "containers_up": 3, "containers_total": 3, "bridge": True, "busy": True, "supervisor": True, "working": "", "resume_at": "", "containers": [], "openaudible": False, "openaudible_app": False, "spotify": True, "discord": True, "vbcable": True, "down_s": {"openaudible": 0}}
 
 
 def test_a_request_from_the_portal_is_done_once_and_its_result_goes_back_on_the_next_poll():
@@ -187,7 +194,7 @@ def test_garbage_commands_are_answered_and_nothing_runs():
     s, w = make()
     w.pending_commands = [{"id": "aaaa1111", "op": "rm -rf /"}, {"id": "bbbb2222"}, "nope", {"op": "start"}, {"id": 5, "op": "start"}]
     s.poll_once(threaded=False)
-    assert w.cmds == [c for c in w.cmds if (c[0] == "docker" and c[1] == "ps") or c[0] in ("nvidia-smi", "tasklist")]   # only the status looks, no operation
+    assert w.cmds == [c for c in w.cmds if (c[0] == "docker" and c[1] == "ps") or c[0] in ("nvidia-smi", "tasklist") or (c[0] == "powershell.exe" and ss.VBCABLE_PS in c)]   # only the status looks, no operation
     s.poll_once(threaded=False)
     assert {r["id"]: r["summary"] for r in w.posts[1][0]["results"]} == {"aaaa1111": "I do not do that.", "bbbb2222": "I do not do that."}
 
@@ -505,3 +512,36 @@ def test_heal_openaudible_never_touches_a_running_app_and_works_with_docker_down
     monkeypatch.setattr(ss, "OPENAUDIBLE_EXE", str(tmp_path / "nope.exe"))
     ok, text = s2.do("heal", arg="openaudible")
     assert not ok and "not installed" in text and w2.spawned == []
+
+
+def test_spotify_and_discord_are_started_minimized_only_when_not_running_and_never_touched_otherwise(tmp_path, monkeypatch):
+    for name in ("spotify", "discord"):
+        exe = tmp_path / (name + ".exe")
+        exe.write_text("x")
+        monkeypatch.setitem(ss.DESKTOP_APPS[name], "launch", [str(exe), *ss.DESKTOP_APPS[name]["launch"][1:]])
+    s, w = make()
+    w.procs = []
+    assert (s.status()["spotify"], s.status()["discord"]) == (False, False)
+    ok, text = s.do("heal", arg="discord")
+    assert ok and text == "Discord started." and w.spawned[-1][0].endswith("discord.exe") and "--start-minimized" in w.spawned[-1]
+    assert s.status()["discord"] is True and s.status()["spotify"] is False
+    n = len(w.spawned)
+    assert s.do("heal", arg="discord") == (True, "Discord is already running.") and len(w.spawned) == n
+    assert s.do("heal", arg="spotify")[0] and s.status()["spotify"] is True
+    assert not any(c[0] == "taskkill" for c in w.cmds)
+    monkeypatch.setitem(ss.DESKTOP_APPS["spotify"], "launch", [str(tmp_path / "nope.exe")])
+    w.procs = []
+    ok, text = s.do("heal", arg="spotify")
+    assert not ok and "not installed" in text
+
+
+def test_the_starter_counts_how_long_an_app_has_been_down_and_reports_the_vb_cable():
+    s, w = make()
+    w.procs, w.vb = [], "0"
+    st = s.status()
+    assert st["spotify"] is False and st["vbcable"] is False and st["down_s"]["spotify"] == 0
+    w.t[0] += 400
+    st = s.status()
+    assert st["down_s"]["spotify"] == 400 and st["down_s"]["discord"] == 400 and st["down_s"]["openaudible"] == 400
+    w.procs = ["Spotify.exe"]
+    assert "spotify" not in s.status()["down_s"]                        # back: the count is gone

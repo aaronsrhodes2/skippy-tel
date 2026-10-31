@@ -30,11 +30,13 @@ CORE_TIMEOUT_S = 120        # Core may be busy with a long reply: a test waits i
 UNREACHABLE_DM_S = 600      # skippy-pc and its starter both silent this long: tell the Captain (nothing here can fix it)
 # No "ollama": since 2026-10-25 it is skippy-core's shim, which skippy-core's own doctor and deployer keep up.
 HEALABLE = ("flask-api", "whisper", "music-studio", "image-studio", "music-gate", "video-gate",
-            "audiobook-gate", "voice-gate", "tts-studio", "home-reporter", "bridge", "docker", "core", "openaudible")
+            "audiobook-gate", "voice-gate", "tts-studio", "home-reporter", "bridge", "docker", "core", "openaudible", "spotify", "discord")
+REPORT_ONLY = ("vbcable",)   # shown as a row, never healed
 LABELS = {"flask-api": "Skippy's API", "ollama": "Ollama (local models)", "whisper": "Whisper (hearing)", "music-studio": "Music studio",
           "image-studio": "Picture studio", "mentat-home": "Mentat", "music-gate": "Audio service", "video-gate": "Video service", "audiobook-gate": "Audiobooks",
           "voice-gate": "Voice", "tts-studio": "Local voices", "home-reporter": "Home reporter", "bridge": "Private Skippy's bridge",
-          "docker": "Docker", "openaudible": "OpenAudible (web server)", "core": "Skippy Core", "portal": "Portal", "starter": "Starter (skippy-pc's own)"}
+          "docker": "Docker", "openaudible": "OpenAudible (web server)", "spotify": "Spotify (desktop)", "discord": "Discord (desktop)",
+          "vbcable": "VB-Cable (Spotify's sound path)", "core": "Skippy Core", "portal": "Portal", "starter": "Starter (skippy-pc's own)"}
 
 
 class Doctor:
@@ -50,10 +52,12 @@ class Doctor:
         self.repairing: dict | None = None         # the button's run: {at, by, steps, done, ok}
 
     # ── what it sees ──
-    def _set(self, name: str, ok: bool, why: str = "", ms: int | None = None) -> None:
+    def _set(self, name: str, ok: bool, why: str = "", ms: int | None = None, down_s: int | None = None) -> None:
         now = self.clock()
         old = self.checks.get(name)
         since = old["since"] if old and old["ok"] == ok else now
+        if not ok and down_s is not None:                  # the starter's own count: right even when this portal has just been redeployed
+            since = min(since, now - down_s)
         self.checks[name] = {"ok": ok, "why": "" if ok else str(why)[:160], "ms": ms, "since": since, "at": now}
 
     def observe_home(self, tests) -> None:
@@ -118,7 +122,12 @@ class Doctor:
             status = self.starter.status or {}
             if isinstance(status.get("openaudible"), bool):  # the starter probes it itself: it listens on the host's loopback only
                 self._set("openaudible", status["openaudible"], "" if status["openaudible"] else
-                          ("the app is running but its web server is off" if status.get("openaudible_app") else "the app is not running"))
+                          ("the app is running but its web server is off" if status.get("openaudible_app") else "the app is not running"),
+                          down_s=(status.get("down_s") or {}).get("openaudible"))
+            for app in ("spotify", "discord", "vbcable"):    # the starter reads the host's processes and sound devices itself
+                if isinstance(status.get(app), bool):
+                    self._set(app, status[app], "" if status[app] else ("not installed or disabled" if app == "vbcable" else "the app is not running"),
+                              down_s=(status.get("down_s") or {}).get(app))
             if status.get("docker") is False:                # Docker itself: the starter restarts it clean
                 if self._try("docker", "Docker isn't answering"):
                     healed.append("docker")
@@ -129,6 +138,8 @@ class Doctor:
                     healed.append("home-reporter")
             for name, c in self.checks.items():
                 if c["ok"] or now - c["since"] < HEAL_AFTER_S:
+                    continue
+                if name in REPORT_ONLY:
                     continue
                 if name == "bridge" and status.get("busy"):
                     continue                                 # mid-run: never pulled out from under a task
@@ -164,7 +175,7 @@ class Doctor:
         (never discarding anything), every container up from it (rebuilt where it changed), whatever is failing recreated, the bridge
         restarted when it isn't mid-run, Skippy Core repaired. The portal's own part (a redeploy when it is behind main or its last
         deploy failed, stuck agent records cleared) is done by the caller (recovery_web.py)."""
-        failing = sorted(n for n, c in self.checks.items() if not c["ok"] and n not in ("docker", "core", "bridge", "openaudible"))
+        failing = sorted(n for n, c in self.checks.items() if not c["ok"] and n not in ("docker", "core", "bridge", "openaudible", "spotify", "discord", "vbcable"))
         cid = self.starter.request("repair", by, arg=",".join(failing))
         with self._lock:
             self.repairing = {"at": self.clock(), "by": by, "id": cid, "done": False, "ok": None, "summary": ""}
