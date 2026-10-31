@@ -107,4 +107,30 @@ Guard rails (`house.py`, the same for every backend; tests in `tests/test_sat_ho
 Other backends plug into the same `House`: Home Assistant (`hass.py`, if he ever runs one: `HASS_URL` + `HASS_TOKEN` in the vault). Later: the LG webOS TV
 (`aiowebostv`), other rooms' satellites over the Wyoming protocol.
 
+## Audiobooks, by voice (`audiobooks.py`, `book_voice.py`, `book_out.py`)
+
+"Skippy, read my book." He plays his own **DRM-free** audiobook files; nothing here opens, decrypts or logs in to Audible (an `.aax`/`.aaxc`/`.aa` file in the
+folder is noticed and skipped, and Skippy says so when it is all that is there). Syncing an Audible listening position would be a separate step he authenticates
+himself; there is no hook built for it yet.
+
+* **Where the files go:** `D:\Aaronudiobooks` (or `SATELLITE_AUDIOBOOKS` in the vault; `off` switches it off). One folder or file per book: m4b, m4a, mp3, ogg,
+  opus, flac, aac. Chapters come from the file's chapter markers (ffprobe); a folder of one file per chapter is one chapter per file (natural order, `2` before `10`);
+  a file with no markers is cut into quarter-hour parts so "next chapter" still works. Title and author come from the tags, else `Author - Title` in the name, else
+  `Author/Title/` folders. The library is rescanned at most every five minutes (cache: `state/audiobooks-library.json`).
+* **The place:** `state/audiobooks.json` (per book: place in book seconds, chapter, speed, last played, finished), written atomically at most every 5 s while a book plays
+  and at every pause or skip, so a hub restart loses a few seconds. After a restart "read my book" continues from there; a pause of 30 s or more resumes 3 s earlier.
+* **What he says:** read my book / continue / play the dragon one (loose title or author), stop / pause, resume, next or previous chapter, back (or forward) thirty seconds,
+  where was I, stop in twenty minutes (or at the end of the chapter), read faster / normal speed. These plain commands are caught by `book_voice.pre_route` BEFORE the model
+  (Skippy Core's chat model answers "stop" with a joke and never calls a tool): the `audiobook` tool runs first and the model only words the answer in character, with no tools,
+  and is told never to read or invent the book. Anything else goes to the model, which has the same `audiobook` tool. "Stop"/"pause" and "resume" mean the book only while a
+  book is playing or was the last thing played; otherwise they are Bilby's.
+* **Where it plays:** the pod's speaker (the hub's media server turns the file into 16 kHz FLAC from any second at any speed: `/b/<secret>/<token>.flac?s=&t=`, the box never sees a
+  path), and skippy-pc's own outputs named in `SATELLITE_OUT` (HDMI, the "Enclave Audio" Bluetooth stereo when it is on), streamed by ffmpeg into sounddevice (`book_out.py`),
+  started with the same `SATELLITE_OUT_DELAYS` as his voice. The clock is the player's, so the outputs only ever start, stop and start again from a second.
+  Starting a book pauses Bilby's music in that room and the other way round.
+* **With his voice:** on the PC outputs the book ducks to 20 % when the name is heard and while Skippy talks, and comes back after the conversation window. The pod's own
+  speaker ducks its media under an announcement itself, as it does for music. The outputs line up by the configured start delays, not by measurement (so there can be a
+  fraction of a second between the pod and a PC output; tune `SATELLITE_OUT_DELAYS` by ear).
+* Tests: `tests/test_sat_audiobooks.py` (real ffmpeg builds a synthetic multi-chapter m4b and a track-per-chapter folder).
+
 Tests: `python -m pytest tests` from this folder (its own session: other services have a `gate.py` too).

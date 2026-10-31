@@ -65,13 +65,17 @@ class Brain:
         self.history: list[dict] = []
         self.actions: list[dict] = []                                 # the tools called for the last reply (the house log reads them): {tool, args, outcome}
         self._last = 0.0
+        self.pre_route = None                                         # heard -> tool args for plain commands the model is unreliable at (hub.py: the audiobook); None = the model decides
 
     def system(self) -> str:
         house = (", and the house: lights, plugs, the thermostat (in the unit it shows), covers, speakers, scenes; always say plainly what you did "
                  "or could not do, and never claim a change you did not make") if self.hass else ""
         nohouse = "" if self.hass else "If he asks for something in the house (the lights and the rest are not connected yet), say so plainly, in character, and offer what you can do. "
         music = ", and the music in this room from his own library" if any(t["name"] == "play_music" for t in self.extra_tools) else ""
-        return self.persona + SPOKEN.format(now=self.now(), house=house, nohouse=nohouse, music=music)
+        books = (" He has audiobooks (DRM-free files he supplied): the audiobook tool plays and steers them, and while one plays 'stop' or 'pause' means pause it. "
+                 "Anything about the book (play, stop, pause, skip, where he is, a sleep timer) needs the audiobook tool called in that very turn; you cannot see the book, "
+                 "so never say what is in it, what chapter it is, or that you did something unless the tool just told you. You never read a book aloud yourself.") if any(t["name"] == "audiobook" for t in self.extra_tools) else ""
+        return self.persona + SPOKEN.format(now=self.now(), house=house, nohouse=nohouse, music=music) + books
 
     def run_tool(self, name: str, args: dict) -> str:
         args = args if isinstance(args, dict) else {}
@@ -110,6 +114,18 @@ class Brain:
         self._last = now
         messages = self.history[-2 * MEMORY_TURNS:] + [{"role": "user", "content": heard}]
         text = ""
+        routed = self.pre_route(heard) if self.pre_route is not None else None
+        if routed:                                                    # the tool runs first; the model only words the answer, with no tools to forget to call
+            result = self.run_tool("audiobook", routed)
+            messages[-1] = {"role": "user", "content": f"{heard}\n\n[Already done by the house for this request: {result}]"}
+            try:
+                resp = self.client.messages.create(model=self.model, max_tokens=200, system=self.system(), messages=messages)
+                text = " ".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
+            except Exception:                                         # noqa: BLE001 — it happened; say it plainly
+                text = ""
+            text = text or result.split(") ", 1)[-1]
+            self.history = (self.history + [{"role": "user", "content": heard}, {"role": "assistant", "content": text}])[-2 * MEMORY_TURNS:]
+            return text
         for _ in range(4):                                            # a few rounds of tool use at most
             resp = self.client.messages.create(model=self.model, max_tokens=600, system=self.system(), messages=messages, tools=self.tools())
             blocks = list(resp.content)

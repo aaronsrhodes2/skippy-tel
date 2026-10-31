@@ -63,11 +63,12 @@ def local_address(towards: str) -> str:
             return "127.0.0.1"
 
 
-def ffmpeg_args(source: str, start_s: float) -> list[str]:
+def ffmpeg_args(source: str, start_s: float, speed: float = 1.0) -> list[str]:
     args = ["ffmpeg", "-v", "error", "-nostdin"]
     if start_s > 0:
         args += ["-ss", f"{start_s:.1f}"]
-    return args + ["-i", source, "-vn", "-ac", "1", "-ar", str(OUT_RATE), "-c:a", "flac", "-f", "flac", "pipe:1"]
+    tempo = ["-af", f"atempo={speed:.2f}"] if abs(speed - 1.0) > 0.01 else []     # an audiobook at 1.25x: atempo keeps the pitch
+    return args + ["-i", source, "-vn", *tempo, "-ac", "1", "-ar", str(OUT_RATE), "-c:a", "flac", "-f", "flac", "pipe:1"]
 
 
 class MediaServer:
@@ -81,6 +82,7 @@ class MediaServer:
         self._catalog: tuple[float, dict] | None = None
         self._runner = None
         self._seen_from: dict[str, str] = {}
+        self.books: dict[str, str] = {}                          # token -> a book file on this machine (the box never sees a path)
 
     def _address(self, towards: str) -> str:
         if towards not in self._seen_from:                       # resolving skippy-kitchen.local takes a moment: once per box is enough
@@ -106,6 +108,12 @@ class MediaServer:
 
     def track_url(self, path: str, start_s: float = 0.0, towards: str = "") -> str:
         return f"{self.base(towards)}/m/{self.secret}/track.flac?p={quote(path, safe='')}&s={max(0.0, start_s):.1f}"
+
+    def book_url(self, path: str, start_s: float = 0.0, speed: float = 1.0, towards: str = "") -> str:
+        """An audiobook file (a local file the library found) from `start_s`, for the box, through the same ffmpeg as a track."""
+        token = hashlib.sha1(path.encode("utf-8", "replace")).hexdigest()[:16]
+        self.books[token] = path
+        return f"{self.base(towards)}/b/{self.secret}/{token}.flac?s={max(0.0, start_s):.1f}&t={speed:.2f}"
 
     def gate_track(self, path: str) -> str:
         return f"{self.gate}/t/{music_pass(self.key, self.clock())}/a/{quote(path)}"
@@ -140,6 +148,7 @@ class MediaServer:
         app = web.Application()
         app.router.add_get("/v/{secret}/{clip}", self._clip)
         app.router.add_get("/m/{secret}/track.flac", self._track)
+        app.router.add_get("/b/{secret}/{token}", self._book)
         app.router.add_post("/shot", self._shot)                    # a box's screenshot (rooms/shot.py asks for it); LAN only, nothing secret on a screen
         self._runner = web.AppRunner(app, access_log=None)
         await self._runner.setup()
@@ -166,6 +175,34 @@ class MediaServer:
         if not found or found[2] < self.clock():
             raise web.HTTPNotFound()
         return web.Response(body=found[0], content_type=found[1])
+
+    async def _book(self, request):
+        from aiohttp import web                                  # noqa: PLC0415
+        if not hmac.compare_digest(request.match_info["secret"], self.secret):
+            raise web.HTTPNotFound()
+        path = self.books.get(request.match_info["token"].rsplit(".", 1)[0])
+        if not path:
+            raise web.HTTPNotFound()
+        try:
+            start, speed = float(request.query.get("s", "0")), min(2.0, max(0.5, float(request.query.get("t", "1"))))
+        except ValueError:
+            start, speed = 0.0, 1.0
+        proc = await self.spawn(*ffmpeg_args(path, start, speed), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        resp = web.StreamResponse(headers={"Content-Type": "audio/flac", "Cache-Control": "no-store"})
+        await resp.prepare(request)
+        try:
+            while True:
+                chunk = await proc.stdout.read(16384)
+                if not chunk:
+                    break
+                await resp.write(chunk)
+        except (ConnectionResetError, asyncio.CancelledError):
+            pass                                                 # the box paused or skipped: stop transcoding
+        finally:
+            if proc.returncode is None:
+                proc.kill()
+            await proc.wait()
+        return resp
 
     async def _track(self, request):
         from aiohttp import web                                  # noqa: PLC0415

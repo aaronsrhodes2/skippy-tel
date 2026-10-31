@@ -129,6 +129,8 @@ class Room:
         self.pending = None                                     # the proposal just put to him, waiting for yes / no / never
         self.remote_wake = True                                 # until the box says it woke on its own
         self.music = None                                       # music.BoxMusic for a box that plays Bilby's library
+        self.book = None                                        # audiobooks.BookPlayer: the Captain's audiobooks (pod and PC outputs); ducked while Skippy listens and talks
+        self.last_media = "music"                               # "music" or "book": what "pause" and "resume" mean when both exist
         self.tasks: set = set()
         self.voice = asyncio.Lock()                             # one thing said at a time (a timer waits for an answer to finish)
         self.vad = Vad(floor_min=floor)
@@ -228,6 +230,8 @@ class Room:
 
     def _woke(self, by: str) -> None:
         self.log(f"[{self.name}] woke")
+        if self.book is not None:
+            self.book.duck(True, 25)                            # a book playing on the PC outputs goes quiet while he talks to Skippy
         self._record("wake", by=by)
         self.mode, self.deadline = LISTENING, self.t + self.listen_ms
         if self.buf is None:
@@ -429,10 +433,16 @@ class Room:
             voice = await self._voice(said)
             await self.link.show(said)
             self._also(voice)
-            if announce:
-                await self.link.announce(said, voice)
-            else:
-                await self.link.speak(said, voice, follow_up)
+            if self.book is not None:
+                self.book.duck(True, 90)                        # the book (on the PC outputs) ducks under Skippy's voice, then comes back
+            try:
+                if announce:
+                    await self.link.announce(said, voice)
+                else:
+                    await self.link.speak(said, voice, follow_up)
+            finally:
+                if self.book is not None:
+                    self.book.duck(True, self.followup_ms / 1000 if follow_up else 2.5)
 
     def _also(self, voice) -> None:
         """Start this clip on the PC's own outputs too (each waits its own delay so they line up with the box); never holds anything up."""
@@ -644,6 +654,8 @@ def build_rooms(env: dict):
     """A Room factory sharing the gate, the house and the spotter's model file; each room gets its own brain memory and timers, and a box
     that plays music gets the music tools."""
     import audio                                                # noqa: PLC0415
+    import audiobooks                                           # noqa: PLC0415
+    import book_voice                                           # noqa: PLC0415
     import ear                                                  # noqa: PLC0415
     from brain import Brain                                     # noqa: PLC0415
     from timers import Timers                                   # noqa: PLC0415
@@ -679,11 +691,17 @@ def build_rooms(env: dict):
         holder: dict = {}
         plays_music = "player" in getattr(link, "keys", {})      # an ESPHome box with a media player (esphome_link.discover ran first)
         tools = music_tools(lambda: holder["room"], loop) if plays_music else None
+        book = audiobooks.build_player(env, name, link, log)     # None when SATELLITE_AUDIOBOOKS=off
+        if book is not None:
+            tools = audiobooks.combine(tools, audiobooks.book_tools(lambda: holder["room"], loop))
         brain = Brain(client, brain_model, timers, hass=house, extra=tools)
+        if book is not None:
+            brain.pre_route = lambda heard: book_voice.pre_route(heard, holder["room"])
         room = holder["room"] = Room(name, link, gate, brain, timers, spotter=spotter, local_voice=audio.local_voice_pcm16, log=log,
                                      floor=float(env.get("SATELLITE_FLOOR", "0.012")), filler=filler_bank, debug=env.get("SATELLITE_DEBUG") == "1", mic_gain=float(env.get("SATELLITE_MIC_GAIN", "1.0")), pc_outs=speaker_out.parse_outputs(env, name, log)[1],
                                      filler_after_s=float(env.get("SATELLITE_FILLER_S", "1.0")), hlog=hlog, workspace=workspace, run_action=run_action,
                                      followup_ms=int(float(env.get("SATELLITE_SESSION_S", "180")) * 1000))      # the name opens a conversation: it stays open this long without a word
+        room.book = book
         return room
     return make_room
 
@@ -709,8 +727,16 @@ def music_tools(room_of, loop):
             return "This room has no speaker for music."
 
         async def go() -> str:
+            book = getattr(room, "book", None)
             if name == "music":
                 action = str((args or {}).get("action") or "")
+                if book is not None and book.book is not None and (book.playing or (room.last_media == "book" and not box.playing)):
+                    if action == "pause":                       # "stop" / "pause" while a book plays means the book
+                        await book.pause()
+                        return "Done: paused the audiobook."
+                    if action == "resume":
+                        await book.resume()
+                        return "Done: the audiobook is playing again."
                 step = {"pause": box.pause, "resume": box.resume, "next": box.next, "previous": box.prev}.get(action)
                 if step is not None:
                     await step()
@@ -723,6 +749,9 @@ def music_tools(room_of, loop):
             found = music_mod.search(await box.media.catalog(), what)
             if not found:
                 return f"Nothing in his library matches {what!r}."
+            if book is not None:
+                await book.pause()                              # music and a book never play at once
+            room.last_media = "music"
             await box.play_queue(found)
             title, artist = box.title()
             return f"Playing {len(found)} track{'s' if len(found) != 1 else ''}, starting with {title}" + (f" by {artist}." if artist else ".")
