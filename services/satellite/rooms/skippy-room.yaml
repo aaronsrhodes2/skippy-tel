@@ -665,6 +665,33 @@ interval:
           th[0].x = clampi(cx - mw * 0.7f); th[0].y = clampi(my - mu * 0.35f); th[1].x = clampi(cx + mw * 0.7f); th[1].y = th[0].y;
           put(id(teeth)->obj, th, 2);
           lv_obj_set_style_line_opa(id(teeth)->obj, (lv_opa_t) (teethv > 0.5f && mu + ml > 6 ? 150 : 0), LV_PART_MAIN);
+          // ── the admiral's hat: a bicorne a size too big, riding loose on his head. It lags his motion, swings, slides and bounces on the loud syllables, and never falls off ──
+          { static float ha = 0, hv = 0, hx = 0, hxv = 0, hy = 0, hyv = 0, last_open = 0;
+            static lv_point_precise_t hf[40], ht[24], hb[24];
+            float open = mu + ml, kick = 0;
+            if (talk && open - last_open > 4) kick = ((now / 60) % 2 ? 1 : -1) * 0.035f + 0.0f;      // a loud syllable jolts the head, and the hat is late to follow
+            last_open = open;
+            float sway = 0.10f * sinf(ph * 0.9f) + (talk ? 0.06f * sinf(ph * 2.7f) : 0) + (st == "thinking" ? -0.08f : 0) + (st == "listening" ? 0.05f : 0);
+            hv += (sway - ha) * 0.10f - hv * 0.16f + kick; ha += hv;                 // an underdamped spring: it overshoots and rocks
+            hxv += (sinf(ph * 0.9f + 1.0f) * 14 - hx) * 0.08f - hxv * 0.2f + kick * 90; hx += hxv;      // it slides along the top of his head
+            hyv += (-hy) * 0.14f - hyv * 0.22f + (kick != 0 ? 3.0f : 0); hy += hyv;                    // and bounces a little
+            if (ha > 0.35f) { ha = 0.35f; hv = 0; } if (ha < -0.35f) { ha = -0.35f; hv = 0; }          // loose, but it never falls off
+            if (hx > 30) { hx = 30; hxv = 0; } if (hx < -30) { hx = -30; hxv = 0; }
+            if (hy > 6) hy = 6; if (hy < -10) hy = -10;
+            const float hw = 124, px = cx + hx, py = cy - 94 + hy, ca = cosf(ha), sa = sinf(ha);
+            auto rot = [&](float lx, float ly, lv_point_precise_t &o) { o.x = clampi(px + lx * ca - ly * sa); o.y = clampi(py + lx * sa + ly * ca); };
+            int nt = 0, nb = 0, nfp = 0; bool up = true;
+            for (int i = 0; i <= 22; i++) {
+              float u = -1 + i * 2.0f / 22, r = sqrtf(fmaxf(1 - u * u, 0));
+              float top = -68 * r - 30 * u * u, bot = -14 * r - 30 * u * u;     // the two edges meet at the raised points: a crescent
+              rot(u * hw, top, ht[nt++]); rot(u * hw, bot, hb[nb++]);
+              if (i >= 1 && i <= 21 && nfp < 38) {                                 // the cloth: vertical strokes between the edges
+                rot(u * hw, up ? top + 2 : bot - 2, hf[nfp++]); rot(u * hw, up ? bot - 2 : top + 2, hf[nfp++]); up = !up;
+              }
+            }
+            put(id(hat_fill)->obj, hf, nfp); put(id(hat_top)->obj, ht, nt); put(id(hat_bot)->obj, hb, nb);
+            { lv_point_precise_t cp; rot(hw * 0.55f, -42, cp); lv_obj_set_pos(id(cockade), cp.x - 8, cp.y - 8); }
+          }
           // ── thinking: equations and little graphs pop out around his head and dissolve; when he is done thinking, an idea bulb lights up ──
           { struct Sl { bool on; uint32_t t0; int x, y; };
             static Sl sl[6]; static std::string prev; static uint32_t next_spawn = 0, bulb_t0 = 0; static bool bulb_was = false;
@@ -684,7 +711,7 @@ interval:
                   lv_label_set_text(lab[k], t);
                   int w = (int) strlen(t) * 11; if (w > 440) w = 440;
                   sl[k].x = 10 + (int) (random_uint32() % (uint32_t) (460 - w));
-                  sl[k].y = (random_uint32() % 2) ? 36 + (int) (random_uint32() % 24) : 392 + (int) (random_uint32() % 40);
+                  sl[k].y = 386 + (int) (random_uint32() % 46);
                 } else { sl[k].x = (k == 4) ? 14 : 402; sl[k].y = 90 + (int) (random_uint32() % 190); }    // a graph, at a side
                 next_spawn = now + 300 + random_uint32() % 300;
                 break;
@@ -722,7 +749,7 @@ interval:
             if (bulb_on) {                                                     // the idea: a bulb pops in with a little overshoot, glows, fades
               float k = bage < 280 ? (bage / 280.0f) * 1.25f : (bage < 400 ? 1.25f - (bage - 280) / 120.0f * 0.25f : 1.0f);
               float fade = bage > 1500 ? (2000 - bage) / 500.0f : 1.0f;
-              float bx = 240, by = 44, r = 22 * k;
+              float bx = 372, by = 70, r = 22 * k;
               int no = 0, nf2 = 0;
               for (int i = 0; i < 19; i++) { float aa = i * 6.2832f / 18; bo[no].x = clampi(bx + r * cosf(aa)); bo[no++].y = clampi(by + r * sinf(aa)); }
               bo[no].x = clampi(bx - r * 0.38f); bo[no++].y = clampi(by + r * 1.4f);
@@ -1141,6 +1168,50 @@ lvgl:
             src: skippy_ball
             x: 80
             y: 55
+        - line:
+            id: hat_fill
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 15
+            line_color: 0x1d2b64
+            line_rounded: true
+        - line:
+            id: hat_top
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 3
+            line_color: 0xf5c542
+            line_rounded: true
+        - line:
+            id: hat_bot
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 4
+            line_color: 0xf5c542
+            line_rounded: true
+        - obj:
+            id: cockade
+            x: 0
+            y: 0
+            width: 16
+            height: 16
+            radius: 8
+            bg_color: 0xf5c542
+            bg_opa: COVER
+            border_width: 3
+            border_color: 0x1d2b64
+            outline_width: 0
+            shadow_width: 0
+            scrollable: false
         - line:
             id: mfill
             x: 0
