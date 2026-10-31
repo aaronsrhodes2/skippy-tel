@@ -54,6 +54,7 @@ import research
 import research_stage
 import position_stage
 import fold_stage
+import emission_stage
 import router_stage
 import word_stage
 import wva
@@ -193,6 +194,11 @@ def _ask(question: str, given: dict | None = None) -> dict:
         # A named body and a quantity sigma-ground folded into one call (escape velocity, Schwarzschild radius, ... with body_name):
         # a fixed rule, because the trained router predates body_name and plans solar_system_body > the formula (fold_stage.py).
         hit = fold_stage.answer(question, call=_call, miss=miss)
+        if hit is not None:
+            return hit
+        # A named material's own emission (emissivity, the glow of a hot block, the power it radiates): a fixed rule, because the trained
+        # router predates the emissivity and thermal_glow tools and answered with a blackbody's numbers, dropping the material (emission_stage.py).
+        hit = emission_stage.answer(question, call=_call, miss=miss)
         if hit is not None:
             return hit
     if research_stage.enabled() and USE_LLM and not given and research_stage.is_conceptual(question):
