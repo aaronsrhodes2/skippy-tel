@@ -25,9 +25,9 @@ SEMANTIC = os.environ.get("MENTAT_CASCADE_SEMANTIC", "") == "1"
 # took 19 answers the router had; the other stages only gained. So the deployed cascade runs with `math` off.
 OFF = tuple(s.strip() for s in os.environ.get("MENTAT_CASCADE_OFF", "").split(",") if s.strip())
 STAGES = ("frontier", "new_tools", "refusal", "clarification", "conversion", "gr", "cosmology", "math", "thermo", "modern", "classical_intro",
-          "optics", "astro", "semantic")
+          "optics", "astro", "group_extreme", "puzzle", "semantic")
 STAGE_KEYS = ("frontier_router_hit", "new_tools_router_hit", "refusal_hit", "clarification_hit", "conversion_hit", "gr_hit", "cosmology_hit",
-              "math_hit", "thermo_hit", "modern_hit", "classical_intro_hit", "optics_hit", "astro_hit", "semantic_hit")
+              "math_hit", "thermo_hit", "modern_hit", "classical_intro_hit", "optics_hit", "astro_hit", "group_extreme_hit", "puzzle_hit", "semantic_hit")
 
 
 def enabled() -> bool:
