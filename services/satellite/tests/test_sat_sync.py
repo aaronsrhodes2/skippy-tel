@@ -96,7 +96,7 @@ def test_a_wild_offset_is_not_trusted(tmp_path):
     hdmi_at = 101.7
     c, logs = calibrator(router, room_hearing(clip, [(hdmi_at - 1.9, 1.0), (hdmi_at, 0.5)], t_start=99.0, seconds=9.0), tmp_path)
     c.measure(clip, {"hdmi": (101.0, 0.5, 0.1)})
-    assert router.sinks["hdmi"].delay_s == 0.5 and "unchanged" in logs[-1]
+    assert router.sinks["hdmi"].delay_s == 0.5 and "came 1.9 s late" in logs[-1] and "unchanged" in logs[-1]
 
 
 def test_the_microphone_not_covering_the_clip_is_no_measurement(tmp_path):
@@ -153,3 +153,41 @@ def test_the_routers_device_scan_opens_the_microphone_and_reopens_it_after_a_rer
     assert w.reinits == 1 and opened == ["CMTECK"] and mic.stream is not None
     r.scan()
     assert opened == ["CMTECK"]                                 # already open, nothing missing: left alone
+
+
+def test_a_pod_copy_8_s_late_is_found_and_said_not_chased(tmp_path):
+    """2026-10-31: the Captain heard the two copies start ~8 s apart; the +-2 s search never saw it."""
+    clip = voice(seed=7)
+    push = 101.0
+    hdmi_at = push + 0.5 + 0.1 + 0.1
+    router = FakeSinks(0.5)
+    c, logs = calibrator(router, room_hearing(clip, [(hdmi_at, 0.6), (hdmi_at + 8.0, 1.0)], t_start=95.0, seconds=20.0), tmp_path)
+    got = c.measure(clip, {"hdmi": (push, 0.5, 0.1)})
+    assert abs(got["outputs"]["hdmi"]["offset"] + 8.0) < 0.01
+    assert router.sinks["hdmi"].delay_s == 0.5 and "the pod's copy came 8.0 s late" in logs[-1]
+
+
+def test_the_box_fetching_its_clip_is_logged_with_how_late():
+    import asyncio
+    import media as media_mod
+
+    logs = []
+    m = media_mod.MediaServer()
+    m.log = logs.append
+    url = m.put_clip(("mp3", b"ID3..."))
+    clip = url.rsplit("/", 1)[1]
+    req = type("Q", (), {"match_info": {"secret": m.secret, "clip": clip}})()
+    asyncio.run(m._clip(req))
+    asyncio.run(m._clip(req))                                  # a second fetch (a retry) is not logged again
+    assert len(logs) == 1 and "fetched Skippy's clip" in logs[0]
+
+
+def test_a_reflection_beside_the_projector_copy_is_not_taken_for_a_late_pod(tmp_path):
+    clip = voice(seed=8)
+    push = 101.0
+    hdmi_at = push + 0.7
+    router = FakeSinks(0.5)
+    ring = room_hearing(clip, [(hdmi_at, 1.0), (hdmi_at + 0.012, 0.8), (hdmi_at + 5.0, 0.6)], t_start=95.0, seconds=20.0)
+    c, logs = calibrator(router, ring, tmp_path)
+    got = c.measure(clip, {"hdmi": (push, 0.5, 0.1)})
+    assert abs(got["outputs"]["hdmi"]["offset"] + 5.0) < 0.01 and "the pod's copy came 5.0 s late" in logs[-1]

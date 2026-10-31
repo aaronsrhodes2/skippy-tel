@@ -25,15 +25,17 @@ from pathlib import Path
 
 RATE = 48000                     # the router's rate
 FS = 16000                       # what the correlation runs at
-RING_S = 40.0
+RING_S = 90.0
 GAIN = 0.6                       # the share of a measured offset taken off the delay at once
 FINE_GAIN, FINE_S = 0.3, 0.10    # under FINE_S the rest is the pod's own start jitter (+-40 ms live, 2026-10-31): smaller steps
 MIN_DELAY, MAX_DELAY = 0.0, 2.0
 MAX_OFFSET = 1.5
 DEAD_BAND = 0.010
-SEARCH_BEFORE, SEARCH_AFTER = 1.5, 2.5   # seconds around the router's first push in which a copy can arrive
+SEARCH_BEFORE, SEARCH_AFTER = 12.0, 12.0   # seconds around the router's first push in which a copy can arrive (2026-10-31: the Captain heard
+                                           # one copy ~8 s after the other, which a +-2 s window never saw)
 PEAK_MIN = 8.0                   # a peak this many times the response's noise floor is a copy of the clip
 PEAK_REL = 0.06                  # and at least this fraction of the strongest copy
+ECHO_S = 0.025                   # a copy this close to an output's is as likely its reflection off a wall as the pod
 TELL_APART_S = 0.015             # two copies whose distances from where an output's was due differ by less than this: can't say which is which
 ASSIGN_S = 0.30                  # an output's copy lands within this of where the router expected it (plus the learned extra)
 STATE = Path(__file__).resolve().parents[2] / "state" / "audio-sync.json"
@@ -185,7 +187,12 @@ class Calibrator:
                 left.remove(ranked[0])
                 if len(ranked) > 1 and abs(ranked[1][0] - e) - abs(ranked[0][0] - e) < TELL_APART_S:
                     unsure.add(k)                                    # the pod's copy lands about as near: they are close together anyway
-        pod = max(left, key=lambda p: p[1], default=None)
+        near = [p for p in left if any(abs(p[0] - m[0]) <= ECHO_S for m in mine.values())]
+        far = [p for p in left if p not in near]
+        pod = max(far, key=lambda p: p[1], default=None)          # an output's own reflection (15:37: two copies 12 ms apart) is not the pod
+        best_near = max(near, key=lambda p: p[1], default=None)
+        if pod is None or (best_near is not None and pod[1] < 0.3 * best_near[1]):
+            pod = best_near or pod                                # nothing clearly apart: the pod is right beside it
         result = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "outputs": {}}
         if pod is None or not mine:
             heard = ", ".join(f"{k} {mine[k][1]:.0f}x" for k in mine) or "no PC output"
@@ -203,10 +210,11 @@ class Calibrator:
                 with self.lock:
                     self.extra[k] = 0.3 * self.extra[k] + 0.7 * (t - (marks[k][0] + marks[k][1] + marks[k][2]))
             new = old
-            if k in unsure:
+            if abs(off) > MAX_OFFSET:
+                who = "the pod's" if off < 0 else f"the {k}'s"
+                note = f"{who} copy came {abs(off):.1f} s late: no delay can fix that, unchanged"
+            elif k in unsure:
                 note = f"too close to tell which copy is which (under {abs(off) * 1000:.0f} ms): unchanged"
-            elif abs(off) > MAX_OFFSET:
-                note = "too far to trust: unchanged"
             elif abs(off) < DEAD_BAND:
                 note = "together"
             else:

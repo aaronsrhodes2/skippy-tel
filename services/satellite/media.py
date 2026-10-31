@@ -78,6 +78,8 @@ class MediaServer:
         self.key = music_key(home_token) if home_token else b""
         self.secret = secrets.token_urlsafe(18)
         self.clips: OrderedDict[str, tuple[bytes, str, float]] = OrderedDict()
+        self.ready_at: dict[str, float] = {}                     # clip -> (monotonic) when it was put up: how late the box fetches it is logged
+        self.log = None                                          # the hub's log (hub._main sets it)
         self.fetch = fetch or self._fetch
         self._catalog: tuple[float, dict] | None = None
         self._runner = None
@@ -102,6 +104,9 @@ class MediaServer:
         clip = secrets.token_urlsafe(9)
         now = self.clock()
         self.clips[clip] = (body, kind, now + CLIP_S)
+        self.ready_at[clip] = time.monotonic()
+        while len(self.ready_at) > MAX_CLIPS:
+            self.ready_at.pop(next(iter(self.ready_at)))
         while len(self.clips) > MAX_CLIPS or (self.clips and next(iter(self.clips.values()))[2] < now):
             self.clips.popitem(last=False)
         return f"{self.base(towards)}/v/{self.secret}/{clip}.{ext}"
@@ -174,6 +179,9 @@ class MediaServer:
         found = self.clips.get(clip)
         if not found or found[2] < self.clock():
             raise web.HTTPNotFound()
+        ready = self.ready_at.pop(clip, None)
+        if ready is not None and self.log is not None:           # the pod's copy can only start after this: is it the late one? (sync.py measures the rest)
+            self.log(f"(media: the box fetched Skippy's clip {time.monotonic() - ready:.2f} s after it was ready)")
         return web.Response(body=found[0], content_type=found[1])
 
     async def _book(self, request):
