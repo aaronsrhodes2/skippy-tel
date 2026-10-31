@@ -246,7 +246,28 @@ def gather(run=sh, get=http_get, state: Path = STATE, key: str = "") -> dict:
             "deployer": {"state": dep.get("state", ""), "commit": str(dep.get("commit") or "")[:10], "detail": str(dep.get("detail") or "")[:160]},
             "doctor": {"ok": not (doc.get("fails", 0) >= 2), "last": str((doc.get("last") or {}).get("did", ""))[:120]},
             "vitals": vitals(), "busy": bool(quiet and quiet.busy()),
-            "usage": {"mentat": _safe(lambda: mentat_usage(post=_post_json))}}
+            "usage": {"mentat": _safe(lambda: mentat_usage(post=_post_json)), "llm": _safe(llm_tally)}}
+
+
+METER_DIR = Path(os.environ.get("METER_DIR", str(STATE / "meter")))
+_tally_cache: dict = {"sig": None, "usage": {}}
+
+
+def llm_tally(meter_dir: Path = METER_DIR) -> dict:
+    """What the local models have saved against a paid Haiku, all time, net of electricity (core/meter/savings.py): the one line the
+    Status map shows on the llm node. Re-read only when the meter's files change. Empty when the meter isn't installed."""
+    sys.path.insert(0, "/opt/skippy-core/meter")
+    sys.path.insert(0, str(HERE.parent / "meter"))
+    import savings
+    files = sorted(meter_dir.glob("tokens-*.jsonl"))
+    sig = [(f.name, f.stat().st_size) for f in files]
+    if sig != _tally_cache["sig"]:
+        s = savings.summarize(savings.load_dir(meter_dir), rate=float(os.environ.get("ELECTRICITY_USD_PER_KWH", savings.DEFAULT_RATE)))
+        t = s["periods"]["all time"]
+        _tally_cache.update(sig=sig, usage={"calls": t["calls"], "tokens_in": t["in"] + t["cached"], "tokens_out": t["out"],
+                                            "haiku_usd": round(t["haiku"], 4), "power_usd": round(t["electricity"], 4),
+                                            "net_usd": round(t["net"], 4), "since": (s["since"] or "")[:10]} if t["calls"] else {})
+    return _tally_cache["usage"]
 
 
 def _safe(fn):

@@ -102,3 +102,13 @@ def test_a_request_from_before_we_were_sampling_has_no_watts_rather_than_a_wrong
     m = make(tmp_path, [act(1, -3000)])
     m.poll()
     assert lines(tmp_path)[0]["w"] is None
+
+
+def test_the_reporters_tally_line_reads_the_meters_files_and_is_empty_without_them(tmp_path):
+    rep = load("reporter/reporter.py", "core_reporter_for_tally")
+    assert rep.llm_tally(tmp_path) == {}
+    rep._tally_cache["sig"] = None
+    (tmp_path / "tokens-2026-10.jsonl").write_text(json.dumps(
+        {"ts": "2026-10-31T03:45:55Z", "model": "chat", "in": 50_000, "cached": 0, "out": 1_000_000, "ms": 3_600_000, "w": 112.0, "idle_w": 12.0, "overlap": 1}) + "\n")
+    got = rep.llm_tally(tmp_path)
+    assert got["calls"] == 1 and got["tokens_out"] == 1_000_000 and abs(got["haiku_usd"] - 0.505) < 1e-6 and got["net_usd"] > 0

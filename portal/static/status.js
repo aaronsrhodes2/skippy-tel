@@ -130,6 +130,13 @@
       if (u.asks !== undefined) bits.push(`${u.asks} plain questions${u.since ? " in " + u.since : ""}`);
       if (u.direct !== undefined) bits.push(`${u.direct} tool calls by name (${u.tools_called || 0} different tools${u.tools_total ? " of " + u.tools_total : ""})`);
       if (u.schema_tokens) bits.push(`listing every tool to a chat costs about ${Math.round(u.schema_tokens / 1000)}k tokens`);
+      if (u.calls !== undefined) {
+        const k = (n) => n >= 1e6 ? (n / 1e6).toFixed(2) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(n);
+        const d = (x) => "$" + (Math.abs(x) < 1 ? x.toFixed(3) : x.toFixed(2));
+        bits.push(`${u.calls} calls, ${k(u.tokens_in)} tokens in, ${k(u.tokens_out)} out${u.since ? " since " + u.since : ""}; ` +
+                  `a paid Haiku 5.5 would have cost ${d(u.haiku_usd)}, electricity above idle ${d(u.power_usd)}, so about ${d(u.net_usd)} saved ` +
+                  "(list prices; the electricity rate is a guess; not counted: skippy-pc's pictures, songs and speech)");
+      }
       if (bits.length) out.push(text("how it's used", bits.join("; ")));
     }
     if (a.note) out.push(text("note", a.note));

@@ -21,7 +21,8 @@ HUNG_S = 90                                                       # no new words
 
 
 NODES = json.loads((Path(__file__).resolve().parent / "status_nodes.json").read_text(encoding="utf-8"))
-USAGE_KEYS = ("asks", "direct", "tools_called", "tools_total", "schema_tokens", "since")      # what a machine may report about how a node is used
+USAGE_KEYS = ("asks", "direct", "tools_called", "tools_total", "schema_tokens", "since",
+              "calls", "tokens_in", "tokens_out", "haiku_usd", "power_usd", "net_usd")      # what a machine may report about how a node is used
 
 
 def node_key(name: str) -> str:

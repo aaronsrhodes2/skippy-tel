@@ -99,3 +99,13 @@ def test_every_node_on_every_machine_carries_its_card():
         assert m["about"]["for"], m["id"]
         for p in m["containers"] + m["serves"]:
             assert p["about"]["for"], (m["id"], p["name"])
+
+
+def test_the_llm_node_carries_the_token_tally_numbers():
+    st = status_mod.Status(clock=lambda: 1000.0)
+    st.accept_core({"containers": [{"name": "skippycore-llm-1", "state": "running"}], "models": [],
+                    "usage": {"llm": {"calls": 25, "tokens_in": 1.3e6, "tokens_out": 17209, "haiku_usd": 0.0232, "power_usd": 0.0001,
+                                      "net_usd": 0.0231, "since": "2026-10-31", "evil": "x"}}})
+    core = next(m for m in tree(st)["machines"] if m["id"] == "skippy-core")
+    llm = next(c for c in core["containers"] if c["name"] == "skippycore-llm-1")
+    assert llm["about"]["usage"]["net_usd"] == 0.0231 and llm["about"]["usage"]["calls"] == 25 and "evil" not in llm["about"]["usage"]
