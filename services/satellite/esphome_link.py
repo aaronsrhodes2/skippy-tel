@@ -45,9 +45,18 @@ def envelope(pcm: bytes, step_ms: int = 60, rate: int = 16000, cap: int = 250) -
 RHUBARB = Path(os.environ.get("RHUBARB", "")) if os.environ.get("RHUBARB") else     Path(__file__).resolve().parents[2] / "state" / "rhubarb" / "Rhubarb-Lip-Sync-1.13.0-Windows" / "rhubarb.exe"   # Rhubarb Lip Sync (MIT): mouth shapes from audio
 
 
+def plain(said: str) -> str:
+    """What to show on the screen: the words without the voice's stage directions ([sighs])."""
+    import re
+    return re.sub(r"\s*\[[^\]]*\]\s*", " ", said or "").strip()
+
+
 def mood_of(said: str) -> str:
     """The face's mood while he says this: n neutral, h happy, a sarcastic, s surprised, q curious, d sad."""
     t = (said or "").lower()
+    if "[sigh" in t or "[groan" in t:
+        return "a"
+    t = plain(t)
     if any(w in t for w in ("sorry", "unfortunately", "can't", "cannot", "unable", "afraid")):
         return "d"
     if any(w in t for w in ("monkey", "obviously", "idiot", "genius", "magnificent", "of course")):
@@ -209,7 +218,7 @@ class EsphomeLink:
 
     async def show(self, text: str) -> None:
         if "subtitle" in self.keys:
-            self.client.text_command(self.keys["subtitle"], (text or "")[:120])
+            self.client.text_command(self.keys["subtitle"], plain(text)[:120])
 
     async def speak(self, said: str, voice, follow_up: bool = False) -> None:
         if not self.run_live:
@@ -218,7 +227,7 @@ class EsphomeLink:
         url = self.media.put_clip(voice, self.box_host) if voice else ""
         await self.mouth(voice, said)
         self._event(self.E.VOICE_ASSISTANT_INTENT_END, {"conversation_id": "", "continue_conversation": "1" if follow_up else "0", "speech": said})
-        self._event(self.E.VOICE_ASSISTANT_TTS_START, {"text": said})
+        self._event(self.E.VOICE_ASSISTANT_TTS_START, {"text": plain(said)})
         self._played.clear()
         if url:
             self._event(self.E.VOICE_ASSISTANT_TTS_END, {"url": url})
