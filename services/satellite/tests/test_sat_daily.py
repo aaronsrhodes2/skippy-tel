@@ -385,3 +385,69 @@ def test_stereo_shuffles_the_library_and_moves_on_when_a_track_ends():
         await s.stop()
         assert not s.playing
     asyncio.run(go())
+
+
+def test_a_request_file_starts_a_routine(tmp_path):
+    now = [stamp("2026-10-31", "22:30")]
+    d, room, link, *_ = make(tmp_path, now, car=car_at(HOME))
+    (tmp_path / "daily").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "daily" / "request.json").write_text('{"routine": "bedtime"}', encoding="utf-8")
+
+    async def go():
+        await d.tick(room)
+        assert d.busy and not (tmp_path / "daily" / "request.json").exists()
+        await finish(d)
+    asyncio.run(go())
+    assert "Anything on your mind" in link.spoken[-1]
+
+
+def test_a_routine_moves_to_the_new_room_when_the_box_reconnects(tmp_path):
+    now = [stamp("2026-10-31", "22:30")]
+    d, room, link, brain, *_ = make(tmp_path, now, car=car_at(HOME))
+    new_link = Link()
+    new_room = Room("office", new_link, Gate(), brain, Timers(), log=lambda m: None)
+    new_room.daily = d
+
+    async def go():
+        await room.handle("goodnight")
+        room.buf = []                                                   # the old connection died mid-sentence: it never goes quiet
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+        await d.tick(new_room)
+        await finish(d)
+    asyncio.run(go())
+    assert "Anything on your mind" in new_link.spoken[-1]
+
+
+def test_core_down_means_plain_sourced_words_not_silence(tmp_path):
+    now = [stamp("2026-11-02", "07:10")]
+    d, room, link, *_ = make(tmp_path, now, car=car_at(HOME))
+
+    class Down:
+        messages = None
+
+        def __init__(self):
+            self.messages = self
+
+        def create(self, **k):
+            raise ConnectionError("Core is restarting")
+    d.client = Down()
+    assert asyncio.run(d.weather()).startswith("Today: a high of 66 and a low of 48 degrees, partly cloudy")
+    assert "news.example" in asyncio.run(d.morning_news()) or "The headlines." in asyncio.run(d.morning_news())
+    assert asyncio.run(d.joke()) is None
+
+
+def test_an_early_first_event_moves_tomorrows_morning(tmp_path):
+    now = [stamp("2026-11-02", "22:00")]
+    d, *_ = make(tmp_path, now)
+
+    async def first():
+        return stamp("2026-11-03", "07:00")
+    d.extras["first_tomorrow"] = first
+    said = asyncio.run(d.plan_tomorrow())
+    assert d.morning_time("2026-11-03") == "05:30" and "5:30 AM" in said
+
+    async def late():
+        return stamp("2026-11-03", "10:00")
+    d.extras["first_tomorrow"] = late
+    assert asyncio.run(d.plan_tomorrow()) is None and d.morning_time("2026-11-03") == "07:10"

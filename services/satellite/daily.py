@@ -35,6 +35,8 @@ CAR_FLEET_URL = os.environ.get("SKIPPY_CAR_FLEET_URL", "http://skippy-core:7353"
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 GAP_S = 3.0                              # the pause after each part: room for "skip", "later", "stop"
 SNOOZE_S = 600
+CORE_LIMIT_S = 75                        # Core gets this long to word one part
+SAY_LIMIT_S = 240                        # one part said aloud never holds the routine longer than this
 TALK_WAIT_S = 90                         # room talk (not to Skippy) holds the next part back at most this long
 HOME_NEAR_KM = 0.3                       # the car this close to home is home
 AWAY_KM = 1.0                            # ... and this far is away
@@ -89,6 +91,12 @@ def hm_of(text: str) -> tuple[int, int]:
 def clock_words(ts: float) -> str:
     t = time.localtime(ts)
     return time.strftime("%I:%M %p", t).lstrip("0").replace(":00 ", " ")
+
+
+def plain_headlines(found: list, n: int = 5) -> str:
+    """The headlines as they are, each with its source: what is said when Core can't word them."""
+    picked = [it for _, it in found][:n]
+    return "The headlines. " + " ".join(f"{it.get('source')}: {str(it.get('title')).rstrip('.')}." for it in picked)
 
 
 class Step:
@@ -245,6 +253,20 @@ class Daily:
         if self.room_name and room.name != self.room_name:
             return
         self.room_name = self.room_name or room.name
+        if self.run is not None and self.run.room is not room and self.run.room.name == room.name:
+            self.run.room = room                                      # the box reconnected: the routine carries on in its new Room
+        if self.asking is not None and self.asking["room"] is not room and self.asking["room"].name == room.name:
+            self.asking["room"] = room
+        req = self.dir / "request.json"
+        if req.exists() and not self.busy and room.mode != "busy":   # `python daily.py run morning` (from this PC, or a session testing it)
+            try:
+                name = json.loads(req.read_text(encoding="utf-8")).get("routine")
+            except (OSError, ValueError, AttributeError):
+                name = None
+            req.unlink(missing_ok=True)
+            if name in ("morning", "bedtime", "homecoming"):
+                self.start(name, room)
+                return
         now = self.clock()
         lt = time.localtime(now)
         today = time.strftime("%Y-%m-%d", lt)
@@ -366,7 +388,6 @@ class Daily:
         self.log(f"[{room.name}] routine: {name}")
 
     async def _go(self, run: Run) -> None:
-        room = run.room
         from hub import BUSY, FOLLOWUP, IDLE                        # noqa: PLC0415
         try:
             for s in run.steps:                                       # the words are gathered in parallel while the first parts are said
@@ -375,6 +396,7 @@ class Daily:
             spoken = 0
             for i, s in enumerate(run.steps):
                 await self._wait_turn(run, first=spoken == 0)
+                room = run.room                                       # (the box may have reconnected: tick() hands the run the new Room)
                 if run.skip_next and spoken:
                     run.skip_next = False
                     self._record("routine", routine=run.name, outcome="skipped", step=s.title)
@@ -396,10 +418,14 @@ class Daily:
                 nxt = next((n for n in run.steps[i + 1:] if (n.ready is None or not n.ready.done() or n.text or n.clip) and n.title), None)
                 tail = f" Next: {nxt.title}." if nxt is not None and not s.last else ""
                 room.mode = BUSY
-                if s.clip is not None:
-                    await self._clip(room, s.clip, (words or "") + tail)
-                else:
-                    await room.say(words + tail, announce=True)
+                self.log(f"[{room.name}] routine {run.name}: {s.title or 'part'}: {((s.clip[0] + ' ') if s.clip else '') + (words or '')}"[:300])
+                try:
+                    if s.clip is not None:
+                        await asyncio.wait_for(self._clip(room, s.clip, (words or "") + tail), SAY_LIMIT_S)
+                    else:
+                        await asyncio.wait_for(room.say(words + tail, announce=True), SAY_LIMIT_S)
+                except asyncio.TimeoutError:                          # a box that went away mid-sentence: on with the routine
+                    self.log(f"[{room.name}] (routine {run.name}: {s.title}: the box never finished saying it)")
                 spoken += 1
                 room._resume(FOLLOWUP, room.followup_ms if s.last else int(self.gap_s * 1000) + 6000)
                 run.step_end = self.mono()
@@ -410,8 +436,8 @@ class Daily:
             for s in run.steps:
                 if s.ready is not None and not s.ready.done():
                     s.ready.cancel()
-            if room.mode == BUSY:
-                room._resume(IDLE)
+            if run.room.mode == BUSY:
+                run.room._resume(IDLE)
 
     async def _make(self, s: Step) -> None:
         try:
@@ -426,11 +452,11 @@ class Daily:
 
     async def _wait_turn(self, run: Run, first: bool) -> None:
         """Before the next part: the pause after the last one, nobody talking (to Skippy or in the room), and no snooze."""
-        room = run.room
         from hub import BUSY                                        # noqa: PLC0415
         started = self.mono()
         resumed = False
         while True:
+            room = run.room
             if run.snooze_until > self.mono():
                 resumed = True
                 await self.sleep(1.0)
@@ -469,8 +495,13 @@ class Daily:
         text = re.sub(r"<think>.*?</think>|\[IMAGE:[^\]]*\]", "", text, flags=re.S | re.I).strip()   # no picture tags in a spoken line
         return text or None
 
-    async def aword(self, task: str, material: str, max_tokens: int = 400, persona: bool = True) -> str | None:
-        return await asyncio.to_thread(self.word, task, material, max_tokens, persona)
+    async def aword(self, task: str, material: str, max_tokens: int = 400, persona: bool = True, fallback: str | None = None) -> str | None:
+        """Core's words, or `fallback` (the plain sourced material) when Core is down or slow: a routine never goes silent for want of a model."""
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(self.word, task, material, max_tokens, persona), CORE_LIMIT_S) or fallback
+        except Exception as e:                                        # noqa: BLE001
+            self.log(f"(routine: Core didn't answer ({type(e).__name__}): plain words instead)")
+            return fallback
 
     # ── the house ──
     def _entities(self, want) -> list[dict]:
@@ -578,7 +609,9 @@ class Daily:
         except (KeyError, IndexError, TypeError):
             return None
         return await self.aword("Give him today's weather in two sentences, then one sentence on what to wear (a jacket, layers, an umbrella, "
-                                "sunglasses) that follows from it.", material, 220)
+                                "sunglasses) that follows from it. Use the temperatures exactly as given (46 F is cold, not freezing).", material, 220,
+                                fallback=f"Today: a high of {d['temperature_2m_max'][0]} and a low of {d['temperature_2m_min'][0]} degrees, "
+                                         f"{WMO.get(d['weather_code'][0], 'mixed')}, with a {d['precipitation_probability_max'][0]} percent chance of rain.")
 
     # ── the news ──
     async def headlines(self, subjects: list[tuple[str, str]], per: int = 3) -> list[tuple[str, dict]]:
@@ -609,7 +642,8 @@ class Daily:
         material = "\n".join(f"[{label}] {it.get('title')} ({it.get('source')}): {str(it.get('content') or '')[:300]}" for label, it in found)
         return await self.aword("This morning's news. Pick the two most important world stories, the newest scientific discovery, and the two most "
                                 "interesting software, AR or AI stories. One or two sentences each, and name the source of each (\"Reuters says\"). "
-                                "Skip anything that is only opinion, an ad or a stock tip; a kind with nothing worthwhile is left out without a word about it.", material, 700)
+                                "Skip anything that is only opinion, an ad or a stock tip; a kind with nothing worthwhile is left out without a word about it.", material, 700,
+                                fallback=plain_headlines(found))
 
     async def latest_news(self) -> str | None:
         found = await self.headlines([("world", "major world news"), ("nation", "breaking news today")], per=4)
@@ -619,7 +653,8 @@ class Daily:
             self.news.adopt("today's news", [it for _, it in found])
         material = "\n".join(f"{it.get('title')} ({it.get('source')}): {str(it.get('content') or '')[:300]}" for _, it in found)
         return await self.aword("He just got home: welcome him home in a few words, then the three most important stories of the day (world events, politics, science; "
-                                "never sports, celebrities or shopping), a sentence each, naming each source.", material, 500)
+                                "never sports, celebrities or shopping), a sentence each, naming each source.", material, 500,
+                                fallback="Welcome home. " + plain_headlines(found, 3))
 
     # ── fun ──
     def _said(self, kind: str) -> list[str]:
@@ -686,7 +721,7 @@ class Daily:
         material = (f"Battery {car.get('battery_level')} percent, range {miles}, {plug}, charging state {charging}, charge limit "
                     f"{car.get('charge_limit_soc')} percent." + (f" Today's calendar needs about {need} miles of driving." if need else ""))
         return await self.aword("One or two sentences on the car." + (" Warn him plainly if today's driving needs more range than it has." if need else ""),
-                                material, 150)
+                                material, 150, fallback="The car: " + material)
 
     async def car_bedtime(self) -> str | None:
         """Charging on if it's plugged in and not full or charging; Sentry armed (the guard: lights and locks, never the horn)."""
@@ -785,7 +820,27 @@ class Daily:
                 await stereo.stop()
             return None
         return [Step("", act=quiet), Step("your day", act=lights_and_car), Step("your day and tomorrow", make=self.day_summary),
-                Step("", make=self.anything_else, last=True)]
+                Step("", act=self.plan_tomorrow), Step("", make=self.anything_else, last=True)]
+
+    async def plan_tomorrow(self) -> str | None:
+        """An early first event tomorrow moves tomorrow's morning earlier (SKIPPY_MORNING_LEAD_MIN before it, never before 04:30)."""
+        fn = self.extras.get("first_tomorrow")
+        ts = await fn() if fn is not None else None
+        tomorrow = time.strftime("%Y-%m-%d", time.localtime(self.clock() + 86400))
+        over = self.state.setdefault("morning_override", {})
+        for d in [d for d in over if d < time.strftime("%Y-%m-%d", time.localtime(self.clock()))]:
+            over.pop(d)
+        if not ts:
+            return None
+        want = time.localtime(ts - 60 * float(self.env.get("SKIPPY_MORNING_LEAD_MIN", "90")))
+        hm = (want.tm_hour, want.tm_min - want.tm_min % 5)
+        if time.strftime("%Y-%m-%d", want) != tomorrow or hm >= hm_of(self.morning_at) or hm < (4, 30):
+            over.pop(tomorrow, None)
+            self._save()
+            return None
+        over[tomorrow] = f"{hm[0]:02d}:{hm[1]:02d}"
+        self._save()
+        return f"Your first thing tomorrow is early, so the morning briefing comes at {clock_words(time.mktime(want))}."
 
     async def anything_else(self) -> str:
         return "Anything on your mind before you sleep? I'm listening. If not, goodnight, Captain."
@@ -812,3 +867,21 @@ class Daily:
             n = await stereo.shuffle()
             return said if n else None
         return go
+
+
+def main(argv=None) -> int:
+    """python daily.py run morning|bedtime|homecoming : the running hub starts it in the routine room within a second."""
+    import argparse                                                   # noqa: PLC0415
+    ap = argparse.ArgumentParser(description=main.__doc__)
+    ap.add_argument("cmd", choices=["run"])
+    ap.add_argument("routine", choices=["morning", "bedtime", "homecoming"])
+    args = ap.parse_args(argv)
+    folder = Path(__file__).resolve().parents[2] / "state" / "daily"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "request.json").write_text(json.dumps({"routine": args.routine, "at": time.time()}), encoding="utf-8")
+    print(f"asked the hub to run the {args.routine} routine")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

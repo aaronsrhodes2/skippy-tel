@@ -871,6 +871,9 @@ def build_rooms(env: dict):
             stereo_holder["music"] = StereoMusic(router_mod.shared(env, log), kinds, stereo_holder["media"], log=log)
         return stereo_holder.get("music")
     routines = None if env.get("SKIPPY_ROUTINES", "on").lower() in ("off", "0", "no") else         daily_mod.Daily(env, house=house, client=client, model=brain_model, filler=filler_bank, stereo=stereo, hlog=hlog, log=log, persona=load_persona())
+    if routines is not None:
+        import google_home                                       # noqa: PLC0415 — his calendar, mail and contacts, read only, once he has signed in
+        routines.extras.update(google_home.extras(google_home.Google(env, log=log), routines.aword, log=log))
     from homechat import HomeChat                                # noqa: PLC0415
     import music as music_mod                                    # noqa: PLC0415
     homechat = HomeChat(env.get("PORTAL_URL") or music_mod.PORTAL, token, enabled=env.get("SATELLITE_HOME_CHAT", "on").lower() not in ("off", "0", "no"), log=log)
