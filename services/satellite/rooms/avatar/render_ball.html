@@ -12,6 +12,7 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
 const P = new URLSearchParams(location.search);
 const W = +P.get("w") || 320, H = +P.get("h") || 320, SS = 2;
+const CAN = P.get("shape") === "can";                              // an upright beer can instead of the ball
 const ONLY = P.get("only");                                     // a single shape letter, to look at one
 const SHAPES = ["X", "A", "B", "C", "D", "E", "F", "G", "H", "Z"];   // Z: eyes closed, mouth at rest
 
@@ -27,7 +28,7 @@ scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnviron
 const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(-2, 2.5, 3); scene.add(key);
 const rim = new THREE.DirectionalLight(0xb05cff, 2.2); rim.position.set(3, 0.5, -2); scene.add(rim);     // purple Skippy's glow on the edge
 const camera = new THREE.PerspectiveCamera(28, W / H, 0.1, 50);
-camera.position.set(0, 0.04, 4.35); camera.lookAt(0, 0, 0);
+if (CAN) { camera.position.set(0, 0.5, 3.6); camera.lookAt(0, 0.02, 0); } else { camera.position.set(0, 0.04, 4.35); camera.lookAt(0, 0, 0); }
 
 const CW = 2048, CH = 1024, K = CW / 360;                        // pixels per degree, both ways (equirectangular)
 const colour = document.createElement("canvas"), bump = document.createElement("canvas");
@@ -35,8 +36,13 @@ colour.width = bump.width = CW; colour.height = bump.height = CH;
 const cx = colour.getContext("2d"), bx = bump.getContext("2d");
 const colourTex = new THREE.CanvasTexture(colour), bumpTex = new THREE.CanvasTexture(bump);
 colourTex.colorSpace = THREE.SRGBColorSpace; colourTex.anisotropy = 8; bumpTex.anisotropy = 8;
-const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 128, 96),
-  new THREE.MeshStandardMaterial({ color: 0xffffff, map: colourTex, bumpMap: bumpTex, bumpScale: 6, metalness: 1, roughness: 0.3 }));
+const canGeo = () => {
+  const R = 0.5, Hh = 0.75, pts = [[0.001, -Hh], [R * 0.8, -Hh], [R * 0.9, -Hh + 0.025], [R * 0.97, -Hh + 0.07], [R, -Hh + 0.13], [R, Hh - 0.15], [R * 0.97, Hh - 0.085],
+    [R * 0.9, Hh - 0.035], [R * 0.82, Hh - 0.008], [R * 0.8, Hh], [R * 0.72, Hh - 0.025], [0.001, Hh - 0.025]].map(([x, y]) => new THREE.Vector2(x, y));
+  return new THREE.LatheGeometry(pts, 96);
+};
+const ball = new THREE.Mesh(CAN ? canGeo() : new THREE.SphereGeometry(1, 128, 96),
+  new THREE.MeshStandardMaterial({ color: 0xffffff, map: colourTex, bumpMap: bumpTex, bumpScale: CAN ? 1.2 : 6, metalness: 1, roughness: CAN ? 0.34 : 0.3 }));
 scene.add(ball);
 
 const FX = 0.25 * CW, FY = 0.5 * CH;                            // the face looks at the camera (u = .25 is +z on a three.js sphere)
@@ -49,7 +55,14 @@ function face(shape) {
   cx.fillStyle = "#cfd3da"; cx.fillRect(0, 0, CW, CH);            // the metal's own colour, a touch of blue
   bx.fillStyle = "#808080"; bx.fillRect(0, 0, CW, CH);
   const blink = shape === "Z", m = blink ? "X" : shape;
-  if (P.get("blank") === "1") { colourTex.needsUpdate = true; bumpTex.needsUpdate = true; return; }       // the bare ball: the box draws the face live
+  if (P.get("blank") === "1") {
+    if (CAN) for (let i = 0; i < 2600; i++) {                      // brushed: fine rings round the can, in the colour and in the bump
+      const y = Math.random() * CH, a = 0.015 + Math.random() * 0.035, g = Math.random() < 0.5 ? "255,255,255" : "40,44,52";
+      cx.fillStyle = `rgba(${g},${a})`; cx.fillRect(0, y, CW, 1 + Math.random());
+      bx.fillStyle = `rgba(${g},${a * 1.5})`; bx.fillRect(0, y, CW, 1);
+    }
+    colourTex.needsUpdate = true; bumpTex.needsUpdate = true; return;
+  }       // the bare ball: the box draws the face live
   // brows: two slanting cuts, a little sarcastic
   for (const s of [-1, 1]) {
     for (const [c, col] of [[cx, "#22252b"], [bx, "#202020"]]) {

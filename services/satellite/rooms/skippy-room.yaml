@@ -800,7 +800,7 @@ interval:
             if (ear < 0.06f) { for (int k = 0; k < 4; k++) lv_obj_set_style_line_opa(fo[k], 0, LV_PART_MAIN); }
             else for (int sd = 0; sd < 2; sd++) {
               float s2 = sd ? 1.0f : -1.0f, a = (sd ? 0.95f : 0.55f) + 0.12f * sinf(ph * 2.3f + sd * 2.0f) + 0.2f * (st == "recording");
-              float bx = cx + s2 * 128 * K, by = cy - 52 * K, L = 96 * K * ear, Wd = 58 * K * ear, dx = s2 * sinf(a), dy = -cosf(a), nx = -dy, ny = dx;
+              float bx = cx + s2 * 74, by = cy - 4, L = 96 * K * ear, Wd = 58 * K * ear, dx = s2 * sinf(a), dy = -cosf(a), nx = -dy, ny = dx;
               for (int i = 0; i <= 8; i++) {
                 float t = i / 8.0f, hw = Wd / 2 * powf(sinf(3.14159f * t), 0.7f), px = bx + dx * L * t, py = by + dy * L * t;
                 int lx = clampi(px + nx * hw), ly = clampi(py + ny * hw), rx = clampi(px - nx * hw), ry = clampi(py - ny * hw);
@@ -1176,7 +1176,7 @@ lvgl:
         - image:
             id: ball_img
             src: skippy_ball
-            x: 110
+            x: 150
             y: 115
         - line:
             id: hat_fill
