@@ -91,7 +91,7 @@ class Room:
         self.tasks: set = set()
         self.voice = asyncio.Lock()                             # one thing said at a time (a timer waits for an answer to finish)
         self.vad = Vad(floor_min=floor)
-        self.pre: deque = deque(maxlen=8)                       # 400 ms before the voice was noticed, so the first syllable is not lost
+        self.pre: deque = deque(maxlen=24)                      # 1.2 s before the voice was noticed: "Hey Skippy" is quieter than what follows, so the bar is crossed late
         self.buf: list | None = None
         self.t, self._carry = 0, []                             # t: milliseconds of audio heard on this connection (the room's own clock)
         self.mode, self.deadline = IDLE, 0

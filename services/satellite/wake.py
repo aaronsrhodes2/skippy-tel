@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-WAKE_RE = re.compile(r"\b(?:(?:hey|hi|ok|okay|yo)[ ,]+)?skipp(?:y|ie|ey)\b[ ,.!?:;-]*", re.I)
+WAKE_RE = re.compile(r"\b(?:(?:hey|hi|ok|okay|yo)[ ,]+)?(?:skipp(?:y|ie|ey|i)|skibb(?:y|ie)|gibby)\b[ ,.!?:;-]*", re.I)
 STOP_RE = re.compile(r"^\s*(?:ok(?:ay)?[ ,]*)?(?:stop|cancel|wait|hold on|hold it|never ?mind|abort|that'?s all|that is all|thanks?|thank you)\s*[.!?]*\s*$", re.I)
 END_RE = re.compile(r"^\s*(?:ok(?:ay)?[ ,]*)?(?:good ?bye|bye(?: bye)?|stop listening|we'?re done|i'?m done|talk to you later)\s*[.!?]*\s*$", re.I)
 
