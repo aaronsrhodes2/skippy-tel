@@ -860,6 +860,17 @@
     if (list) list.refresh();
     if (qList) qList.refresh();
     syncTime(); syncPlay();
+    showSpotify();
+  }
+  /** His Spotify on the house stereo (services/spotify): with nothing playing here, the bar says what it plays, with a Spotify badge. */
+  const isSpotify = t => /^spotify:/.test(t || "");
+  function showSpotify() {
+    const d = curTrack() ? null : connect.others.find(x => x.live && x.state && x.state.playing && isSpotify(x.state.track));
+    const badge = $("#b-spot");
+    if (badge) badge.hidden = !d;
+    if (!d) return;
+    $("#b-title").textContent = d.state.title || "Spotify";
+    $("#b-sub").textContent = [d.state.artist, d.name].filter(Boolean).join(" · ");
   }
   /** What the song is about, one sentence, from the Mac's lyric index. Hidden when there is none. */
   function showLyric() {
@@ -1673,6 +1684,7 @@
     const sig = devs.map(d => [d.id, d.state.playing, d.state.title, d.state.armed, d.state.tap].join("|")).join(";") + "#" + roomSig;
     if (sig === connect.sig) return;
     connect.sig = sig;
+    showSpotify();
     if (menu && menu.kind === "devices") devicesMenu(menu.anchor);
     if (S.route.name === "home" && !S.search && S.view && S.view.key === "home") scheduleView();
   }
@@ -1682,6 +1694,7 @@
   /** Pick up another device's queue and place (and ask it to pause, if it is playing). */
   function adopt(s, takeOver) {
     if (!S.lib || !s) return;
+    if (isSpotify(s.track)) { toast("That's Spotify: it plays on the house stereo, not in the browser."); return; }
     const list = (s.queue || []).map(p => S.lib.byPath.get(p)).filter(i => i !== undefined);
     const at = list.indexOf(S.lib.byPath.get(s.track));
     if (at < 0) { toast("That song isn't in the library any more."); return; }
@@ -1727,6 +1740,7 @@
       const s = d.state, box = el("div", "dev"), who = el("div", "who"), what = el("div", "what");
       who.append(el("b", "", d.name));
       what.textContent = s.playing ? `${s.title || "Playing"} — ${s.artist || ""}` : `${s.title ? s.title + " (paused)" : "Paused"}`;
+      if (isSpotify(s.track)) what.prepend(el("span", "spot", "Spotify"), " ");
       const acts = el("div", "acts");
       const mk = (label, icon, run) => { const b = el("button", "key"); b.type = "button"; b.innerHTML = ico(icon); b.setAttribute("aria-label", label); b.title = label; b.onclick = () => { closeMenu(true); run(); }; return b; };
       acts.append(mk(s.playing ? "Pause" : "Play", s.playing ? "pause" : "play", () => sendRemote(d, s.playing ? "pause" : "play")), mk("Next", "next", () => sendRemote(d, "next")),

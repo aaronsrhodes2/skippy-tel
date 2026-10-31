@@ -43,9 +43,10 @@ class Favorites:
         except ValueError:
             return r.status_code, {}
 
-    def mark(self, room: str) -> str:
-        """Mark the song he is listening to now (this room's own box first). Returns what to say."""
-        code, got = self.request("POST", "/home/music/favorite", {"device": device_id(room), "source": "voice"})
+    def mark(self, room: str, device: str = "") -> str:
+        """Mark the song he is listening to now (this room's own box first, or `device`: the house stereo when that is what plays). Returns what
+        to say. A Spotify track is kept by its URI (portal/favorites.py writes it into the .m3u as a comment line)."""
+        code, got = self.request("POST", "/home/music/favorite", {"device": device or device_id(room), "source": "voice"})
         if code == 409:
             return "Nothing is playing, so there is nothing to add to his favorites."
         if code != 200:
@@ -67,6 +68,7 @@ class BoxMusic:
         self.queue: list[str] = []
         self.idx, self.offset, self.started, self.playing = 0, 0.0, 0.0, False
         self.titles: dict = {}
+        self.spotify_titles: dict = {}                       # spotify:track:... -> (title, artist): a queue may mix them with Bilby's paths (spotify.py)
         self._settle_until = 0.0
         self._queue_sent = False
 
@@ -78,7 +80,7 @@ class BoxMusic:
         return self.queue[self.idx] if 0 <= self.idx < len(self.queue) else ""
 
     def title(self) -> tuple[str, str]:
-        t = self.titles.get(self.track()) or ()
+        t = self.titles.get(self.track()) or self.spotify_titles.get(self.track()) or ()
         name = t[0] if t else re.sub(r"\.\w+$", "", self.track().rsplit("/", 1)[-1])
         return name, (t[1] if len(t) > 1 else "")
 
@@ -110,10 +112,42 @@ class BoxMusic:
             pass
         await self._start(idx, pos)
 
+    def add_spotify(self, tracks: list[dict]) -> list[str]:
+        """Spotify tracks (spotify.Client's {uri, title, artist}) as queue items: their URIs, their names kept for title()."""
+        for t in tracks:
+            if t.get("uri"):
+                self.spotify_titles[t["uri"]] = (t.get("title") or "", t.get("artist") or "")
+        return [t["uri"] for t in tracks if t.get("uri")]
+
+    async def append(self, items: list[str]) -> None:
+        """More after what is queued ("queue ... after this"); starts playing them when nothing is."""
+        if not self.queue or not self.playing:
+            await self.play_queue(items)
+            return
+        self.queue = (self.queue + list(items))[:MAX_QUEUE]
+        self._queue_sent = False
+
+    def adopt(self, uri: str, title: str, artist: str, pos: float = 0.0) -> None:
+        """Something else started this player (his phone's Spotify app, on the "Skippy" speaker): show it as its one track, so Connect, "favorite
+        this" and "next" know what plays."""
+        self.spotify_titles[uri] = (title, artist)
+        self.queue, self.idx, self._queue_sent = [uri], 0, False
+        self.offset, self.started, self.playing = max(0.0, pos), self.clock(), True
+
     async def _start(self, idx: int, pos: float = 0.0) -> None:
+        import spotify                                       # noqa: PLC0415
+        play_spotify = getattr(self.player, "play_spotify", None)
+        while 0 <= idx < len(self.queue) and spotify.is_uri(self.queue[idx]) and play_spotify is None:
+            idx, pos = idx + 1, 0.0                          # a pod's own speaker can't play Spotify (only the PC's outputs can): skip it
+        if not 0 <= idx < len(self.queue):
+            self.idx, self.offset, self.playing = max(0, len(self.queue) - 1), 0.0, False
+            return
         self.idx, self.offset = idx, max(0.0, pos)
         self._settle_until = self.clock() + SETTLE_S
-        await self.player.play(self.media.track_url(self.track(), self.offset, self.towards))
+        if spotify.is_uri(self.track()):
+            await play_spotify(self.track(), self.offset)
+        else:
+            await self.player.play(self.media.track_url(self.track(), self.offset, self.towards))
         self.playing, self.started = True, self.clock()
         title, artist = self.title()
         self.log(f"[{self.name}] playing {title}" + (f" by {artist}" if artist else ""))

@@ -94,6 +94,20 @@ services:
       - "127.0.0.1:3009:8080"                  # localhost only; Funnel (:10000 /books) is the one way in from outside
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
 
+  # The Captain's Spotify (services/spotify/README.md): go-librespot makes skippy-pc a Spotify Connect speaker ("Skippy"), its sound goes over TCP
+  # into the hub's audio router (services/satellite/spotify.py), and service.py holds his Web API sign-in (signin.py, once). Localhost only.
+  spotify:
+    build: ./services/spotify
+    container_name: skippytel-spotify
+    restart: unless-stopped
+    env_file: G:/My Drive/vault/.env           # SPOTIFY_CLIENT_ID, SPOTIFY_REFRESH_TOKEN (signin.py writes them), SKIPPY_HOME_TOKEN
+    volumes:
+      - ./state/spotify:/state                 # the current refresh token (Spotify hands a new one on refresh) and the speaker's login
+    ports:
+      - "127.0.0.1:43872:43872"                # the sound (f32le, 44.1 kHz stereo) for the hub
+      - "127.0.0.1:43873:43873"                # the API for the hub and purple Skippy
+    logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
+
   # Pushes status + Bilby's music to the portal every ~15 s, and fetches the
   # portal's jobs (controls, physics questions for Mentat). See CLAUDE.md.
   home-reporter:

@@ -59,7 +59,11 @@ class Favorites:
     def m3u(self) -> str:
         lines = ["#EXTM3U", "#PLAYLIST:Bilby favorites"]
         for f in self.items():
-            lines += [f"#EXTINF:-1,{f.get('artist') or ''} - {f.get('title') or f['track']}", f["track"]]
+            name = f"{f.get('artist') or ''} - {f.get('title') or f['track']}"
+            if f["track"].startswith("spotify:"):                # a Spotify track (on the house stereo): no file for Traktor, so a comment line
+                lines.append(f"# Spotify: {name} {f['track']}")
+                continue
+            lines += [f"#EXTINF:-1,{name}", f["track"]]
         return "\n".join(lines) + "\n"
 
 

@@ -373,7 +373,7 @@ def test_spoken_music_requests_find_his_tracks_and_the_tools_drive_this_rooms_bo
     async def go():
         client, media, made, hub, task, log = await boot()
         tools, run_tool = music_tools(lambda: made["room"], asyncio.get_running_loop())
-        assert {t["name"] for t in tools} == {"music", "play_music"}
+        assert {t["name"] for t in tools} == {"music", "play_music", "spotify"}
         said = await asyncio.to_thread(run_tool, "play_music", {"what": "Pink Floyd"})
         assert said == "Playing 2 tracks, starting with Dogs by Pink Floyd." and "Dogs" in client.media[-1][1]["media_url"]
         sent = len(client.media)

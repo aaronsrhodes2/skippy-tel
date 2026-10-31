@@ -295,6 +295,17 @@
    "answer": "{\"ready\": true, \"books\": 394}"
   }
  },
+ "spotify": {
+  "for": "The Captain's Spotify at home: go-librespot makes skippy-pc a Spotify Connect speaker called Skippy, its sound goes into the hub's audio router (the Sony over HDMI, ducked under Skippy's voice), and it holds his Web API sign-in (search, playlists, liked songs). Localhost only.",
+  "used_by": [
+   "the room hub (\"play Daft Punk on Spotify\", one queue with Bilby on the house stereo)",
+   "purple Skippy's spotify tool"
+  ],
+  "example": {
+   "ask": "GET /health",
+   "answer": "{\"ready\": true, \"deps\": {\"web_api\": {\"ready\": true}, \"player\": {\"ready\": true}}, \"playing\": true}"
+  }
+ },
  "voice-gate": {
   "for": "Skippy's ears and mouth for the portal's chats: a microphone recording goes to Whisper (in Hands-off, another language becomes a translated 'heard' line), and a reply comes back as speech in the local voices from tts-studio, through Funnel :10000 with a signed pass.",
   "used_by": [

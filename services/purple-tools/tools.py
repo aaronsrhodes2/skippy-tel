@@ -401,6 +401,82 @@ def bilby_favorite(args: dict, request=None) -> str:
     return f"Added to his favorites: {f.get('artist') or '?'} - {f.get('title') or f.get('track')}" + (" (already there; moved to the top)" if int(f.get("count") or 1) > 1 else "")
 
 
+# ── the Captain's Spotify: skippy-pc's Spotify speaker and his sign-in, in the spotify container (services/spotify) ───────────────────────────────────
+SPOTIFY_URL = os.environ.get("PURPLE_SPOTIFY_URL", "http://127.0.0.1:43873").rstrip("/")
+SPOTIFY_URI = re.compile(r"spotify:(?:track|album|playlist|artist):[A-Za-z0-9]{22}")
+
+
+def _spotify_request(method: str, path: str, body: dict | None = None, timeout: float = 30.0):
+    req = urllib.request.Request(SPOTIFY_URL + path, data=json.dumps(body).encode() if body is not None else (b"" if method == "POST" else None),
+                                 method=method, headers={"Content-Type": "application/json", "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read(2_000_000) or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read(200_000) or b"{}")
+        except ValueError:
+            return e.code, {}
+
+
+def spotify(args: dict, request=None) -> str:
+    """Search his Spotify, play on the house stereo (the "Skippy" speaker; the hub routes it to the Sony), his playlists, add to one, like."""
+    request = request or _spotify_request
+    action = str(args.get("action") or "").strip().lower()
+    q = str(args.get("query") or "").strip()
+
+    def ok(method, path, body=None):
+        code, got = request(method, path, body)
+        if code != 200:
+            raise ValueError("spotify: " + str(got.get("error") or got.get("detail") or f"the Spotify service answered {code}"))
+        return got
+
+    def line(t: dict) -> str:
+        return f"{t.get('artist') or t.get('by') or '?'} - {t.get('title') or t.get('name') or '?'}  {t.get('uri', '')}"
+
+    if action == "search":
+        kind = str(args.get("type") or "track")
+        got = ok("GET", "/search?" + urllib.parse.urlencode({"q": q, "type": kind, "n": 10}))
+        return "\n".join(line(t) for t in got.get("items") or []) or f"Spotify found nothing for {q!r}."
+    if action == "play":
+        uri = q if SPOTIFY_URI.fullmatch(q) else ""
+        if not uri:
+            tracks = ok("GET", "/tracks?" + urllib.parse.urlencode({"what": q, "n": 10})).get("tracks") or []
+            if not tracks:
+                return f"Spotify found nothing for {q!r}."
+            uri = tracks[0]["uri"]
+        ok("POST", "/play", {"uri": uri})
+        return f"Playing {uri} on the house stereo (the Skippy speaker)."
+    if action in ("pause", "resume"):
+        ok("POST", "/" + action)
+        return f"Done: {action}."
+    if action == "now":
+        st = ok("GET", "/now")
+        if not st.get("logged_in"):
+            return "The Spotify speaker is not logged in yet (services/spotify/signin.py)."
+        return (("Playing" if st.get("playing") else "Paused" if st.get("paused") else "Stopped") +
+                (f": {st.get('artist')} - {st.get('title')} {st.get('uri')}" if st.get("uri") else ""))
+    if action == "playlists":
+        return "\n".join(f"{p['name']} ({p.get('count', 0)} tracks{', his' if p.get('mine') else ''}) {p.get('uri', '')}"
+                         for p in ok("GET", "/playlists").get("playlists") or []) or "He has no playlists."
+    if action == "playlist":
+        got = ok("GET", "/playlist?" + urllib.parse.urlencode({"name": q}))
+        return f"{got['playlist'].get('name')}:\n" + "\n".join(line(t) for t in (got.get("tracks") or [])[:100])
+    if action in ("add", "like"):
+        uri = str(args.get("uri") or "").strip()
+        if not SPOTIFY_URI.fullmatch(uri):
+            st = ok("GET", "/now")
+            uri = st.get("uri") or ""
+        if not uri.startswith("spotify:track:"):
+            raise ValueError("spotify: give a spotify:track: uri (search first), or play something")
+        if action == "like":
+            ok("POST", "/save", {"uris": [uri]})
+            return f"Saved {uri} to his liked songs."
+        got = ok("POST", "/playlist/add", {"playlist": str(args.get("playlist") or q), "uris": [uri]})
+        return f"Added {uri} to his playlist {(got.get('playlist') or {}).get('name')}."
+    raise ValueError("spotify's action is search, play, pause, resume, now, playlists, playlist, add or like")
+
+
 TOOLS: dict[str, dict] = {
     "browse": {
         "description": "Open a web page in a real headless browser on this PC (scripts run, so single-page apps and JavaScript-built pages work) and get its "
@@ -463,6 +539,18 @@ TOOLS: dict[str, dict] = {
                        "list, or list the favorites. Use when he says 'add this song to my favorites', 'favorite this', 'what's on my favorites'.",
         "input_schema": {"type": "object", "properties": {"action": {"type": "string", "enum": ["add", "list"]}}},
         "run": bilby_favorite},
+    "spotify": {
+        "description": "The Captain's Spotify (Premium). search (query, type track|artist|album|playlist), play (a spotify: URI, or words: plays the best "
+                       "match on the house stereo, the 'Skippy' speaker), pause, resume, now (what plays), playlists (his), playlist (query = its name: its "
+                       "tracks), add (uri, or the song playing now, to playlist), like (save uri, or the song playing now, to his liked songs). For his own "
+                       "music library use Bilby (bilby_favorite and the portal), not this.",
+        "input_schema": {"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["search", "play", "pause", "resume", "now", "playlists", "playlist", "add", "like"]},
+            "query": {"type": "string", "description": "search words, a spotify: URI to play, or a playlist's name"},
+            "type": {"type": "string", "enum": ["track", "artist", "album", "playlist"]},
+            "uri": {"type": "string", "description": "add/like: a spotify:track: URI (default: the song playing now)"},
+            "playlist": {"type": "string", "description": "add: the playlist's name"}}, "required": ["action"]},
+        "run": spotify},
     "car_charge": {
         "description": "The Captain's Tesla: start or stop charging, set the charge limit, or read the charge state. Commands go over Bluetooth from "
                        "skippy-core (parked near it) with a charging-only key; the car must be plugged in to start. Use status to check before or after.",
