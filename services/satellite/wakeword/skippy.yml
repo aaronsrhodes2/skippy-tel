@@ -43,7 +43,7 @@ background_paths_duplication_rate:
 
 false_positive_validation_data_path: "/work/data/validation_set_features.npy"
 feature_data_files:
-  "ACAV100M_sample": "/work/data/openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
+  "ACAV100M_sample": "/fast/acav_quarter.npy"
 batch_n_per_class:
   "ACAV100M_sample": 1024
   "adversarial_negative": 50
