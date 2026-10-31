@@ -179,6 +179,11 @@ class Room:
             self.feed(block)
 
     def feed(self, block) -> None:
+        if self.debug:                                          # SATELLITE_DEBUG=1: a heartbeat of what the room's microphone and the room's state are doing
+            self._dbg_n, self._dbg_peak = getattr(self, "_dbg_n", 0) + 1, max(getattr(self, "_dbg_peak", 0.0), rms(block))
+            if self._dbg_n % 600 == 0:
+                self.log(f"[{self.name}] (debug: 30 s of audio, loudest {self._dbg_peak:.3f}, mode {self.mode}, recorder {self.recorder is not None}, buf {self.buf is not None})")
+                self._dbg_peak = 0.0
         if self.recorder is not None:
             self.recorder.feed(block)
             return

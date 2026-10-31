@@ -309,7 +309,7 @@ class EsphomeLink:
             return
         try:
             def ask():
-                return brain.client.messages.create(model=brain.model, max_tokens=40, temperature=0, messages=[{"role": "user", "content": emotion.codes_prompt(sentences, self.asked)}])
+                return brain.client.messages.create(model=brain.model, max_tokens=40, messages=[{"role": "user", "content": emotion.codes_prompt(sentences, self.asked)}])
             resp = await asyncio.wait_for(asyncio.to_thread(ask), 8)
             codes = emotion.parse_codes("".join(getattr(b, "text", "") for b in resp.content), len(sentences))
             if codes is None:
