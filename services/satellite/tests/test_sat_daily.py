@@ -142,6 +142,7 @@ async def finish(d, timeout=5):
 def test_goodnight_turns_lights_off_charges_arms_sentry_and_offers_to_talk(tmp_path):
     now = [stamp("2026-10-31", "22:30")]
     d, room, link, brain, house, posts, _ = make(tmp_path, now, car=car_at(HOME))
+    d.hlog.event("command", room="office", words="what time is it?", outcome="ok")     # something happened today, for the day's summary
 
     async def go():
         await room.handle("goodnight")
@@ -156,6 +157,7 @@ def test_goodnight_turns_lights_off_charges_arms_sentry_and_offers_to_talk(tmp_p
     assert "Anything on your mind" in link.spoken[-1] and room.mode == FOLLOWUP
     log = [json.loads(x) for x in (tmp_path / "home" / "log" / "2026-10-31.jsonl").read_text(encoding="utf-8").splitlines()]
     assert [e.get("outcome") for e in log if e["kind"] == "routine"] == ["started", "done"]
+    assert "routine" not in d.client.tasks and not any("routine" in t for t in d.client.tasks)
 
 
 def test_a_car_already_charging_is_left_alone_and_sentry_can_be_off(tmp_path):

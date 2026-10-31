@@ -790,7 +790,7 @@ class Daily:
         return out
 
     async def day_summary(self) -> str | None:
-        events = [e for e in self.today_log() if e.get("kind") in ("command", "action", "routine", "automation")]
+        events = [e for e in self.today_log() if e.get("kind") in ("command", "action", "automation")]     # (not the routines' own starts: they read as his day)
         lines = [f"{e.get('time')} {e.get('kind')}: {e.get('words') or e.get('tool') or e.get('routine') or ''} {e.get('outcome') or ''}".strip() for e in events][-60:]
         extra = []
         for key in ("day", "tomorrow"):
