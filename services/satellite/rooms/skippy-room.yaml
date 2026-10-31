@@ -284,7 +284,9 @@ media_player:
                 duration: 1.0s
             - lambda: 'id(talking) = false;'
           else:                                # Skippy is speaking: the mouth moves
-            - lambda: 'id(talking) = true;'
+            - lambda: |-
+                if (!id(talking)) id(env_i) = 0;
+                id(talking) = true;
     on_play:
       - script.execute:
           id: face
@@ -375,6 +377,17 @@ switch:
 
 # What the hub wants shown under the ring: now playing, or what Skippy just said. The hub writes it; the box only displays it.
 text:
+  - platform: template                    # how loud each 60 ms of Skippy's next clip is (digits 0-9), written by the hub so the mouth follows the words
+    id: mouth_env_text
+    name: Mouth
+    mode: text
+    max_length: 255
+    optimistic: true
+    internal: false
+    on_value:
+      - lambda: |-
+          id(mouth_env) = x;
+          id(env_i) = 0;
   - platform: template
     id: subtitle
     name: Subtitle
@@ -421,6 +434,11 @@ globals:
   - id: talking
     type: bool
     initial_value: 'false'
+  - id: mouth_env
+    type: std::string
+  - id: env_i
+    type: int
+    initial_value: '0'
   - id: energy
     type: float
     initial_value: '0.3'
@@ -482,7 +500,11 @@ interval:
       - lambda: |-
           static float ph = 0, openv = 0, tgt = 0; static int hold = 0;
           bool talk = id(talking);
-          if (talk) {
+          const std::string &env = id(mouth_env);
+          if (talk && id(env_i) < (int) env.size()) {         // the hub sent how loud each 60 ms of this clip is (0-9): the mouth follows the words
+            int d = env[id(env_i)++] - '0';
+            tgt = d <= 0 ? 0.0f : (d + 1) / 10.0f;
+          } else if (talk) {                                    // no envelope (or it ran out): random syllables
             if (hold <= 0) { tgt = (random_uint32() % 100) / 100.0f; if (tgt < 0.25f) tgt = 0.0f; hold = 1 + random_uint32() % 3; }
             hold--;
           } else tgt = 0;
@@ -490,7 +512,13 @@ interval:
           int h = 4 + (int) (openv * 44), w = 70 + (int) (openv * 26);
           lv_obj_set_size(id(mouth), w, h);
           lv_obj_set_pos(id(mouth), 158 - w / 2, 235 - h / 2);
-          lv_obj_set_style_bg_color(id(mouth), lv_color_hex(openv > 0.15f ? 0x7a1020 : 0x3a1a2a), LV_PART_MAIN);
+          lv_obj_set_style_bg_color(id(mouth), lv_color_hex(openv > 0.15f ? 0x6a0f1e : 0x3a1a2a), LV_PART_MAIN);
+          if (openv > 0.3f) {                                   // a tongue in the bottom of the open mouth
+            int tw = w * 5 / 9, th = h / 3;
+            lv_obj_set_size(id(tongue), tw, th);
+            lv_obj_set_pos(id(tongue), 158 - tw / 2, 235 + h / 2 - th - 1);
+            lv_obj_clear_flag(id(tongue), LV_OBJ_FLAG_HIDDEN);
+          } else lv_obj_add_flag(id(tongue), LV_OBJ_FLAG_HIDDEN);
           ph += talk ? 0.13f : 0.06f;
           lv_obj_set_y(id(head_box), -30 + (int) (sinf(ph) * 6));
           lv_obj_set_x(id(head_box), (int) (sinf(ph * 0.5f) * 5));
@@ -724,11 +752,16 @@ lvgl:
                   width: 120
                   height: 70
                   radius: 35
-                  bg_color: 0xc6c4c8
+                  bg_color: 0xd2d0d6
+                  bg_grad_color: 0x9c9aa4
+                  bg_grad_dir: VER
                   bg_opa: COVER
                   border_width: 0
                   outline_width: 0
-                  shadow_width: 0
+                  shadow_width: 22
+                  shadow_spread: 2
+                  shadow_color: 0xb4b2ba
+                  shadow_opa: 70%
                   scrollable: false
               - obj:
                   id: mouth
@@ -742,6 +775,20 @@ lvgl:
                   border_width: 0
                   outline_width: 0
                   shadow_width: 0
+                  scrollable: false
+              - obj:
+                  id: tongue
+                  x: 140
+                  y: 240
+                  width: 36
+                  height: 8
+                  radius: 100
+                  bg_color: 0xd0607a
+                  bg_opa: COVER
+                  border_width: 0
+                  outline_width: 0
+                  shadow_width: 0
+                  hidden: true
                   scrollable: false
         - label:
             id: status_label

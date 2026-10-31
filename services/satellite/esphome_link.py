@@ -26,6 +26,20 @@ def _voice_seconds(voice) -> float:
     return len(voice[1]) / (2 * voice[2])
 
 
+def envelope(pcm: bytes, step_ms: int = 60, rate: int = 16000, cap: int = 250) -> str:
+    """One digit per `step_ms` of 16 kHz mono s16le audio: its loudness, 0 (silent) to 9 (as loud as the clip gets)."""
+    import array
+    import math
+    a = array.array("h")
+    a.frombytes(pcm[:len(pcm) // 2 * 2])
+    n = rate * step_ms // 1000
+    levels = [math.sqrt(sum(x * x for x in a[i:i + n]) / max(1, len(a[i:i + n]))) for i in range(0, len(a), n)][:cap]
+    if not levels:
+        return ""
+    top = sorted(levels)[int(len(levels) * 0.95) - 1 if len(levels) > 20 else -1] or 1
+    return "".join(str(min(9, int(9 * l / top + 0.35))) if l > 0.04 * top else "0" for l in levels)
+
+
 class EsphomeLink:
     hub_follows_up = False                                          # the box does it (continue_conversation)
 
@@ -46,6 +60,8 @@ class EsphomeLink:
                 self.keys.setdefault("player", e.key)
             elif kind == "TextInfo" and "subtitle" in oid:
                 self.keys["subtitle"] = e.key
+            elif kind == "TextInfo" and "mouth" in oid:
+                self.keys["mouth"] = e.key
             elif kind == "BinarySensorInfo" and oid.endswith("tap"):
                 self.keys["tap"] = e.key
 
@@ -117,6 +133,19 @@ class EsphomeLink:
             self._event(self.E.VOICE_ASSISTANT_RUN_END)
             self.run_live, self.stage = False, ""
 
+    async def mouth(self, voice) -> None:
+        """Tell the box how loud Skippy's voice is, a digit (0-9) per 60 ms, so its drawn mouth follows the words. The box starts reading it
+        when the clip starts playing. Best effort: without it (or past ~15 s) the mouth moves at random."""
+        if "mouth" not in self.keys or not voice:
+            return
+        try:
+            proc = await asyncio.create_subprocess_exec("ffmpeg", "-v", "error", "-nostdin", "-i", "pipe:0", "-f", "s16le", "-ac", "1", "-ar", "16000", "pipe:1",
+                                                        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+            pcm, _ = await asyncio.wait_for(proc.communicate(voice[1]), 10)
+            self.client.text_command(self.keys["mouth"], envelope(pcm))
+        except Exception as e:                                      # noqa: BLE001 — the mouth just flaps at random
+            self.log(f"[{self.room.name}] (mouth envelope: {type(e).__name__})")
+
     async def show(self, text: str) -> None:
         if "subtitle" in self.keys:
             self.client.text_command(self.keys["subtitle"], (text or "")[:120])
@@ -126,6 +155,7 @@ class EsphomeLink:
             await self.announce(said, voice)
             return
         url = self.media.put_clip(voice, self.box_host) if voice else ""
+        await self.mouth(voice)
         self._event(self.E.VOICE_ASSISTANT_INTENT_END, {"conversation_id": "", "continue_conversation": "1" if follow_up else "0", "speech": said})
         self._event(self.E.VOICE_ASSISTANT_TTS_START, {"text": said})
         self._played.clear()
@@ -147,6 +177,7 @@ class EsphomeLink:
         if voice is None:
             return
         url = self.media.put_clip(voice, self.box_host)
+        await self.mouth(voice)
         self.run_live, self.stage = False, ""                       # the box stops listening to announce, then starts a new turn by itself
         try:
             await self.client.send_voice_assistant_announcement_await_response(media_id=url, timeout=min(self.wait_cap, _voice_seconds(voice) + 10),

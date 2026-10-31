@@ -50,7 +50,8 @@ if (HEADMODE) {
   let skin = [0, 0, 0, 0];
   for (let i = 0; i < col.count; i++) if (!isRed(i) && col.getX(i) > 0.55 && col.getY(i) > 0.55) { skin[0] += col.getX(i); skin[1] += col.getY(i); skin[2] += col.getZ(i); skin[3]++; }
   const mv = []; for (let i = 0; i < col.count; i++) if (isRed(i)) mv.push(i);
-  const pos0 = pos.array.slice(), col0 = col.array.slice(), sk = skin.map(v => v / skin[3]);
+  const flat = (at) => { const o = new Float32Array(at.count * 3); for (let i = 0; i < at.count; i++) { o[i * 3] = at.getX(i); o[i * 3 + 1] = at.getY(i); o[i * 3 + 2] = at.getZ(i); } return o; };
+  const nrm = g.getAttribute("normal"), nrm0 = flat(nrm), pos0 = flat(pos), col0 = col.array.slice(), sk = skin.map(v => v / skin[3]);
   const mean = new THREE.Vector3(), all = new THREE.Vector3();
   for (const i of mv) mean.add(new THREE.Vector3(pos0[i * 3], pos0[i * 3 + 1], pos0[i * 3 + 2]));
   for (let i = 0; i < pos.count; i++) all.add(new THREE.Vector3(pos0[i * 3], pos0[i * 3 + 1], pos0[i * 3 + 2]));
@@ -59,11 +60,12 @@ if (HEADMODE) {
   // open: 1 = as modelled, 0 = the cavity pushed out to the lip plane and painted skin (the box draws the closed line over it)
   const setOpen = open => {
     for (const i of mv) {
-      const d = pos0[i * 3] * dir.x + pos0[i * 3 + 1] * dir.y + pos0[i * 3 + 2] * dir.z, k = 0 * (rim - d) * (1 - open);
+      const d = pos0[i * 3] * dir.x + pos0[i * 3 + 1] * dir.y + pos0[i * 3 + 2] * dir.z, k = (rim - d) * (1 - open);
       pos.setXYZ(i, pos0[i * 3] + dir.x * k, pos0[i * 3 + 1] + dir.y * k, pos0[i * 3 + 2] + dir.z * k);
+      nrm.setXYZ(i, nrm0[i * 3] + (dir.x - nrm0[i * 3]) * (1 - open), nrm0[i * 3 + 1] + (dir.y - nrm0[i * 3 + 1]) * (1 - open), nrm0[i * 3 + 2] + (dir.z - nrm0[i * 3 + 2]) * (1 - open));
       for (let c = 0; c < 3; c++) col.array[i * col.itemSize + c] = sk[c] + (col0[i * col.itemSize + c] - sk[c]) * open;
     }
-    pos.needsUpdate = true; col.needsUpdate = true;
+    pos.needsUpdate = true; col.needsUpdate = true; nrm.needsUpdate = true;
   };
   console.log("mouth vertices", mv.length, "dir", dir.toArray());
   mouth = { idx: mv, pos, setOpen };
