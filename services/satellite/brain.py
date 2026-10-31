@@ -63,6 +63,7 @@ class Brain:
         self.persona = persona if persona is not None else load_persona()
         self.now = now or (lambda: time.strftime("%A %H:%M"))
         self.history: list[dict] = []
+        self.actions: list[dict] = []                                 # the tools called for the last reply (the house log reads them): {tool, args, outcome}
         self._last = 0.0
 
     def system(self) -> str:
@@ -74,6 +75,11 @@ class Brain:
 
     def run_tool(self, name: str, args: dict) -> str:
         args = args if isinstance(args, dict) else {}
+        out = self._run_tool(name, args)
+        self.actions.append({"tool": name, "args": {k: v for k, v in args.items() if isinstance(v, (str, int, float, bool))}, "outcome": str(out)[:120]})
+        return out
+
+    def _run_tool(self, name: str, args: dict) -> str:
         try:
             if name == "set_timer":
                 t = self.timers.add(int(args.get("seconds")), str(args.get("label") or ""))
@@ -98,6 +104,7 @@ class Brain:
     def reply(self, heard: str) -> str:
         """What Skippy says to what was heard. Raises whatever the API raises (the caller decides what to do aloud)."""
         now = self.clock()
+        self.actions = []
         if now - self._last > FORGET_AFTER_S:
             self.history = []                                         # a new conversation after ten quiet minutes
         self._last = now

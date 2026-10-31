@@ -116,12 +116,15 @@ class Room:
     touched it. The room calls the link's woke / voice_started / voice_stopped / heard / released / show / speak / announce."""
 
     def __init__(self, name, link, gate, brain, timers, spotter=None, local_voice=None, log=print, floor: float = 0.012,
-                 min_speech_ms: int = 600, listen_ms: int = 8000, followup_ms: int = 6000, summarize_over: int = 1500, filler=None, filler_after_s: float = 1.0, pc_outs=()):
+                 min_speech_ms: int = 600, listen_ms: int = 8000, followup_ms: int = 6000, summarize_over: int = 1500, filler=None, filler_after_s: float = 1.0, pc_outs=(), hlog=None, workspace=None, run_action=None):
         self.name, self.link, self.gate, self.brain, self.timers, self.spotter = name, link, gate, brain, timers, spotter
         self.local_voice, self.log = local_voice, log
         self.floor, self.min_speech_ms, self.listen_ms, self.followup_ms, self.summarize_over = floor, min_speech_ms, listen_ms, followup_ms, summarize_over
         self.pc_outs = list(pc_outs)                            # speaker_out.PcOut: his voice also out of skippy-pc's HDMI / Bluetooth stereo
         self.filler, self.filler_after_s = filler, filler_after_s       # pre-recorded quips (filler.py) to cover a slow answer
+        self.hlog = hlog                                        # housemem.HouseLog: the house log (words after the name, tools, outcomes; never audio)
+        self.workspace, self.run_action = workspace, run_action  # proposals.Workspace (what Skippy may ask, the automations a yes made) and house.run_tool bound to the house
+        self.pending = None                                     # the proposal just put to him, waiting for yes / no / never
         self.remote_wake = True                                 # until the box says it woke on its own
         self.music = None                                       # music.BoxMusic for a box that plays Bilby's library
         self.tasks: set = set()
@@ -178,8 +181,6 @@ class Room:
         if self.mode == IDLE and self.spotter is not None and self.remote_wake and self.spotter.feed(block):
             self._woke(getattr(self.spotter, "name", "skippy"))
         event = self.vad.push(rms(block), self.t)
-        if event in ("speech", "end"):
-            self.log(f"[{self.name}] (voice {event}: level {rms(block):.3f}, mode {self.mode})")
         if self.buf is not None and event != "speech":
             self.buf.append(block)
         if event == "speech":
@@ -192,6 +193,7 @@ class Room:
 
     def _woke(self, by: str) -> None:
         self.log(f"[{self.name}] woke")
+        self._record("wake", by=by)
         self.mode, self.deadline = LISTENING, self.t + self.listen_ms
         if self.buf is None:
             self.buf = list(self.pre)[:-1]                      # "Skippy, lights off" in one breath: keep the whole sentence (this block is added below)
@@ -231,10 +233,11 @@ class Room:
             woke, rest = wake_split(text)
             if was == IDLE:                                     # no spotter: Whisper is the wake word
                 if not woke:
-                    self.log(f"[{self.name}] (heard, not for me: {text!r})")
+                    self.log(f"[{self.name}] (heard something that was not for me)")
                     self._resume(IDLE)
                     return
                 self.log(f"[{self.name}] woke")
+                self._record("wake", by="whisper")
                 await self.link.woke("skippy")
                 if not rest:
                     self._resume(LISTENING, self.listen_ms)
@@ -251,23 +254,71 @@ class Room:
             self._resume(IDLE)
             await self.link.released()
 
+    def _record(self, kind: str, **fields) -> None:
+        if self.hlog is not None:
+            self.hlog.event(kind, room=self.name, **fields)
+
+    async def _answer_proposal(self, command: str) -> bool:
+        """He was just asked about a routine: yes / no / never is stored (and a yes becomes an automation); anything else is an ordinary command."""
+        pending, self.pending = self.pending, None
+        from proposals import parse_answer                      # noqa: PLC0415
+        answer = parse_answer(command)
+        if answer is None or self.workspace is None:
+            return False
+        auto = self.workspace.answer(pending["id"], answer, command)
+        self._record("answer", proposal=pending["id"], answer=answer, words=command, automation=auto["id"] if auto else None)
+        reply = {"yes": f"Done. Every {pending['weekday']} at {pending['time']}, and I will not even gloat.", "no": "Fine. I will keep my brilliance to myself for a month.",
+                 "never": "Understood. I will never ask again."}[answer]
+        await self.say(reply, follow_up=True)
+        self._resume(FOLLOWUP if self.remote_wake and self.link.hub_follows_up else IDLE, self.followup_ms)
+        return True
+
+    async def _maybe_propose(self) -> None:
+        """A conversation is open and he is awake: put one confident routine to him, once a day at most (proposals.next_to_ask decides)."""
+        if self.workspace is None or self.pending is not None:
+            return
+        try:
+            p = self.workspace.next_to_ask()
+            if p is None:
+                return
+            self.workspace.mark_asked(p["id"])
+        except Exception as e:                                  # noqa: BLE001 — a bad proposal file must never stop the house answering
+            self.log(f"[{self.name}] (proposals: {type(e).__name__}: {e})")
+            return
+        self.pending = p
+        self._record("proposal", proposal=p["id"], text=p["text"])
+        self.log(f"[{self.name}] proposing: {p['id']}")
+        await self.say(p["text"], follow_up=True)
+
     async def handle(self, command: str) -> None:
         await self.link.heard(command)                          # also tells a self-waking satellite to stop streaming
+        if self.pending is not None and await self._answer_proposal(command):
+            return
+        self.pending = None
         if is_goodbye(command) or is_stop(command):
+            self._record("command", words=command, tools=[], outcome="sign_off")
             self._resume(IDLE)
             await self._sign_off(command)
             await self.link.released()
             return
         self.log(f"[{self.name}] heard: {command}")
+        started, outcome = time.time(), "ok"
         try:
             work = asyncio.ensure_future(asyncio.to_thread(self.brain.reply, command))
             await self._cover_the_wait(work, command)
             reply = await work
         except Exception as e:                                  # noqa: BLE001 — whatever the API did, he gets an answer
             self.log(f"[{self.name}] (brain failed: {type(e).__name__})")
+            outcome = "brain_failed"
             reply = "My brain is not answering. Typical."
         self.log(f"[{self.name}] said: {reply[:120]}")
+        calls = list(getattr(self.brain, "actions", None) or [])
+        if self.hlog is not None:
+            self._record("command", words=command, tools=[c["tool"] for c in calls], outcome=outcome, reply=reply, seconds=round(time.time() - started, 1))
+            self.hlog.actions(self.name, calls)
         await self.say(reply, follow_up=True)
+        if outcome == "ok":
+            await self._maybe_propose()
         if self.remote_wake and self.link.hub_follows_up:
             self._resume(FOLLOWUP, self.followup_ms)            # like Alexa: a few seconds to answer back without the name
         else:
@@ -293,9 +344,8 @@ class Room:
         if self.filler is None or self.filler_after_s <= 0:
             return
         kind = self.filler.kind_for(command)
-        if kind is None:
-            return
-        done, _ = await asyncio.wait({work}, timeout=self.filler_after_s)
+        wait = self.filler_after_s * (2.2 if kind == "home" else 1.0)     # a quick household command is usually answered at once: give it longer
+        done, _ = await asyncio.wait({work}, timeout=wait)
         for stage in (kind, "long"):
             if done:
                 return
@@ -373,6 +423,12 @@ class Room:
         for timer in self.timers.due():
             self.log(f"[{self.name}] timer done: {timer.label}")
             await self.announce(f"Your {timer.label} timer is done.")
+        if self.workspace is not None and self.run_action is not None:
+            for auto in self.workspace.due():                   # automations only exist after his recorded yes; each fires once a day, quietly
+                result = await asyncio.to_thread(self.run_action, auto["action"]["tool"], auto["action"]["args"])
+                self.log(f"[{self.name}] automation {auto['id']}: {result}")
+                self._record("automation", automation=auto["id"], tool=auto["action"]["tool"], target=auto["action"]["args"].get("name"),
+                             act=auto["action"]["args"].get("action"), outcome=str(result)[:120])
 
 
 class WyomingLink:
@@ -562,6 +618,12 @@ def build_rooms(env: dict):
     else:
         print(f"wake word: no model at {model_path}; using Whisper for the wake word (see wakeword/README.md)", flush=True)
     log = lambda m: print(time.strftime("%H:%M:%S"), m, flush=True)   # noqa: E731
+    import housemem                                              # noqa: PLC0415
+    import house as house_mod                                    # noqa: PLC0415
+    from proposals import Workspace                              # noqa: PLC0415
+    hlog = housemem.HouseLog(housemem.home_dir(env))              # skippy-home/log: local, append-only, words and outcomes, never audio
+    workspace = Workspace(hlog.root)
+    run_action = (lambda tool, args: house_mod.run_tool(house, tool, args)) if house is not None else None
     loop = asyncio.get_running_loop()                           # build_rooms runs on the hub's loop (_main)
 
     def make_room(name, link):
@@ -573,7 +635,7 @@ def build_rooms(env: dict):
         brain = Brain(client, brain_model, timers, hass=house, extra=tools)
         room = holder["room"] = Room(name, link, gate, brain, timers, spotter=spotter, local_voice=audio.local_voice_pcm16, log=log,
                                      floor=float(env.get("SATELLITE_FLOOR", "0.012")), filler=filler_bank, pc_outs=speaker_out.parse_outputs(env, name, log)[1],
-                                     filler_after_s=float(env.get("SATELLITE_FILLER_S", "1.0")),
+                                     filler_after_s=float(env.get("SATELLITE_FILLER_S", "1.0")), hlog=hlog, workspace=workspace, run_action=run_action,
                                      followup_ms=int(float(env.get("SATELLITE_SESSION_S", "180")) * 1000))      # the name opens a conversation: it stays open this long without a word
         return room
     return make_room
