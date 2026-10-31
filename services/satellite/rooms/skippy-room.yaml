@@ -665,6 +665,96 @@ interval:
           th[0].x = clampi(cx - mw * 0.7f); th[0].y = clampi(my - mu * 0.35f); th[1].x = clampi(cx + mw * 0.7f); th[1].y = th[0].y;
           put(id(teeth)->obj, th, 2);
           lv_obj_set_style_line_opa(id(teeth)->obj, (lv_opa_t) (teethv > 0.5f && mu + ml > 6 ? 150 : 0), LV_PART_MAIN);
+          // ── thinking: equations and little graphs pop out around his head and dissolve; when he is done thinking, an idea bulb lights up ──
+          { struct Sl { bool on; uint32_t t0; int x, y; };
+            static Sl sl[6]; static std::string prev; static uint32_t next_spawn = 0, bulb_t0 = 0; static bool bulb_was = false;
+            static lv_point_precise_t gp[2][28], bf[24], bo[24], rp[5][2];
+            static const char *eqs[] = {"E = mc^2", "a^2 + b^2 = c^2", "F = ma", "PV = nRT", "e^(i*pi) = -1", "dx/dt = v", "sin(x) / x", "x = (-b +- sqrt(D)) / 2a",
+                                        "S >= 0", "1 + 1 = 2?", "div B = 0", "f(x) = x^2"};
+            lv_obj_t *lab[4] = {id(eq0), id(eq1), id(eq2), id(eq3)};
+            lv_obj_t *gr[2] = {id(gr0)->obj, id(gr1)->obj};
+            bool thinking = st == "thinking";
+            if (prev == "thinking" && !thinking) bulb_t0 = now;               // done thinking: the idea
+            prev = st;
+            if (thinking && now > next_spawn) {
+              for (int k = 0; k < 6; k++) if (!sl[k].on) {
+                sl[k].on = true; sl[k].t0 = now;
+                if (k < 4) {                                                  // an equation, above or below the ball
+                  const char *t = eqs[random_uint32() % 12];
+                  lv_label_set_text(lab[k], t);
+                  int w = (int) strlen(t) * 11; if (w > 440) w = 440;
+                  sl[k].x = 10 + (int) (random_uint32() % (uint32_t) (460 - w));
+                  sl[k].y = (random_uint32() % 2) ? 36 + (int) (random_uint32() % 24) : 392 + (int) (random_uint32() % 40);
+                } else { sl[k].x = (k == 4) ? 14 : 402; sl[k].y = 90 + (int) (random_uint32() % 190); }    // a graph, at a side
+                next_spawn = now + 300 + random_uint32() % 300;
+                break;
+              }
+            }
+            for (int k = 0; k < 6; k++) {
+              if (!sl[k].on) continue;
+              uint32_t age = now - sl[k].t0; const uint32_t life = 1700;
+              if (age > life) {
+                sl[k].on = false;
+                if (k < 4) lv_obj_set_style_text_opa(lab[k], 0, LV_PART_MAIN); else lv_obj_set_style_line_opa(gr[k - 4], 0, LV_PART_MAIN);
+                continue;
+              }
+              float a = age < 250 ? age / 250.0f : (age > life - 800 ? (life - age) / 800.0f : 1.0f);      // in quickly, dissolves slowly
+              int rise = (int) (age * 0.012f);
+              if (k < 4) {
+                lv_obj_set_pos(lab[k], sl[k].x, sl[k].y + (sl[k].y < 200 ? -rise : rise));
+                lv_obj_set_style_text_opa(lab[k], (lv_opa_t) (255 * a), LV_PART_MAIN);
+              } else {                                                         // a graph drawing itself: axes, then the curve
+                int g = k - 4, type = (int) ((sl[k].t0 / 7) % 4), n = 0; const int w = 64, h = 44;
+                float draw = age / 900.0f; if (draw > 1) draw = 1;
+                int ox = sl[k].x, oy = sl[k].y - rise;
+                auto add = [&](int x, int y) { gp[g][n].x = clampi(ox + x); gp[g][n].y = clampi(oy + y); n++; };
+                add(0, 0); add(0, h); add(w, h); add(0, h);
+                int m = (int) (22 * draw);
+                for (int i = 0; i < m && n < 28; i++) {
+                  float u = i / 21.0f, v = type == 0 ? 0.5f + 0.4f * sinf(u * 9.0f) : type == 1 ? 1 - 4 * (u - 0.5f) * (u - 0.5f) : type == 2 ? u * u : (i % 6 < 3 ? 0.3f + 0.1f * (i % 6) : 0.9f - 0.15f * (i % 6));
+                  add((int) (u * w), (int) (h - v * (h - 4)));
+                }
+                put(gr[g], gp[g], n);
+                lv_obj_set_style_line_opa(gr[g], (lv_opa_t) (230 * a), LV_PART_MAIN);
+              }
+            }
+            uint32_t bage = now - bulb_t0; bool bulb_on = bulb_t0 != 0 && bage < 2000;
+            if (bulb_on) {                                                     // the idea: a bulb pops in with a little overshoot, glows, fades
+              float k = bage < 280 ? (bage / 280.0f) * 1.25f : (bage < 400 ? 1.25f - (bage - 280) / 120.0f * 0.25f : 1.0f);
+              float fade = bage > 1500 ? (2000 - bage) / 500.0f : 1.0f;
+              float bx = 240, by = 44, r = 22 * k;
+              int no = 0, nf2 = 0;
+              for (int i = 0; i < 19; i++) { float aa = i * 6.2832f / 18; bo[no].x = clampi(bx + r * cosf(aa)); bo[no++].y = clampi(by + r * sinf(aa)); }
+              bo[no].x = clampi(bx - r * 0.38f); bo[no++].y = clampi(by + r * 1.4f);
+              bo[no].x = clampi(bx + r * 0.38f); bo[no++].y = clampi(by + r * 1.4f);
+              bo[no].x = clampi(bx + r * 0.38f); bo[no++].y = clampi(by + r * 0.85f);
+              bool ltr = true;
+              for (float yy = by - r + 3; yy < by + r - 2 && nf2 < 22; yy += 5) {
+                float dy = yy - by, half = sqrtf(fmaxf(r * r - dy * dy, 0)) * 0.9f;
+                bf[nf2].x = clampi(bx + (ltr ? -half : half)); bf[nf2++].y = clampi(yy);
+                bf[nf2].x = clampi(bx + (ltr ? half : -half)); bf[nf2++].y = clampi(yy);
+                ltr = !ltr;
+              }
+              put(id(bulb_out)->obj, bo, no); put(id(bulb_fill)->obj, bf, nf2);
+              lv_obj_set_style_line_opa(id(bulb_out)->obj, (lv_opa_t) (255 * fade), LV_PART_MAIN);
+              lv_obj_set_style_line_opa(id(bulb_fill)->obj, (lv_opa_t) (220 * fade), LV_PART_MAIN);
+              lv_obj_t *ry[5] = {id(ray0)->obj, id(ray1)->obj, id(ray2)->obj, id(ray3)->obj, id(ray4)->obj};
+              static const float ang[5] = {-2.9f, -2.3f, -1.5708f, -0.85f, -0.25f};
+              for (int i = 0; i < 5; i++) {
+                float c2 = cosf(ang[i]), s3 = sinf(ang[i]);
+                rp[i][0].x = clampi(bx + c2 * (r + 8)); rp[i][0].y = clampi(by + s3 * (r + 8));
+                rp[i][1].x = clampi(bx + c2 * (r + 8 + 14 * k)); rp[i][1].y = clampi(by + s3 * (r + 8 + 14 * k));
+                put(ry[i], rp[i], 2);
+                lv_obj_set_style_line_opa(ry[i], (lv_opa_t) (255 * fade * (bage > 150 ? 1 : 0)), LV_PART_MAIN);
+              }
+              bulb_was = true;
+            } else if (bulb_was) {
+              bulb_was = false;
+              lv_obj_set_style_line_opa(id(bulb_out)->obj, 0, LV_PART_MAIN); lv_obj_set_style_line_opa(id(bulb_fill)->obj, 0, LV_PART_MAIN);
+              lv_obj_t *ry[5] = {id(ray0)->obj, id(ray1)->obj, id(ray2)->obj, id(ray3)->obj, id(ray4)->obj};
+              for (int i = 0; i < 5; i++) lv_obj_set_style_line_opa(ry[i], 0, LV_PART_MAIN);
+            }
+          }
           // ── ears: while he listens two big metal ears grow out of the ball, cocked at different angles, like he is being sarcastic ──
           { static float ear = 0; static lv_point_precise_t eo_[2][18], ef_[2][16];
             bool hearing = st == "listening" || st == "recording" || (st == "idle" && id(in_session) && !talk) || (st.empty() && id(in_session));
@@ -1180,6 +1270,137 @@ lvgl:
             outline_width: 0
             shadow_width: 0
             scrollable: false
+        - label:
+            id: eq0
+            x: 0
+            y: 0
+            text: ""
+            text_font: montserrat_20
+            text_color: 0xf59e0b
+            text_opa: 0%
+        - label:
+            id: eq1
+            x: 0
+            y: 0
+            text: ""
+            text_font: montserrat_20
+            text_color: 0xf59e0b
+            text_opa: 0%
+        - label:
+            id: eq2
+            x: 0
+            y: 0
+            text: ""
+            text_font: montserrat_20
+            text_color: 0xf59e0b
+            text_opa: 0%
+        - label:
+            id: eq3
+            x: 0
+            y: 0
+            text: ""
+            text_font: montserrat_20
+            text_color: 0xf59e0b
+            text_opa: 0%
+        - line:
+            id: gr0
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 3
+            line_color: 0x22d3ee
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: gr1
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 3
+            line_color: 0xf59e0b
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: bulb_fill
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 5
+            line_color: 0xfacc15
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: bulb_out
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 3
+            line_color: 0xfff7b0
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: ray0
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 4
+            line_color: 0xfde047
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: ray1
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 4
+            line_color: 0xfde047
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: ray2
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 4
+            line_color: 0xfde047
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: ray3
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 4
+            line_color: 0xfde047
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: ray4
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 4
+            line_color: 0xfde047
+            line_opa: 0%
+            line_rounded: true
         - label:
             id: status_label
             hidden: true                       # his face says it: no words
