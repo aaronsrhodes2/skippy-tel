@@ -43,7 +43,8 @@ const canGeo = () => {
 };
 const ball = new THREE.Mesh(CAN ? canGeo() : new THREE.SphereGeometry(1, 128, 96),
   new THREE.MeshStandardMaterial({ color: 0xffffff, map: colourTex, bumpMap: bumpTex, bumpScale: CAN ? 1.2 : 6, metalness: 1, roughness: CAN ? 0.34 : 0.3 }));
-scene.add(ball);
+const pivotG = new THREE.Group(); scene.add(pivotG); pivotG.add(ball);
+if (CAN) { pivotG.position.y = -0.7; ball.position.y = 0.7; }                   // lean about the base of the can
 
 const FX = 0.25 * CW, FY = 0.5 * CH;                            // the face looks at the camera (u = .25 is +z on a three.js sphere)
 const deg = d => d * K;
@@ -92,6 +93,20 @@ function face(shape) {
 }
 
 const out = [];
+if (P.get("tilts")) {                                                     // the blank can at each lean angle (degrees, + leans to the right): frame k
+  face("X"); const blankOnly = P.get("blank") === "1";
+  const list = P.get("tilts").split(",").map(Number);
+  for (let k = 0; k < list.length; k++) {
+    pivotG.rotation.z = -list[k] * Math.PI / 180;
+    renderer.render(scene, camera);
+    sctx.clearRect(0, 0, W, H); sctx.drawImage(renderer.domElement, 0, 0, W, H);
+    await fetch(`/frame/ball/${k}`, { method: "POST", body: small.toDataURL("image/png") });
+    out.push(list[k]);
+  }
+  await fetch("/done", { method: "POST", body: JSON.stringify(out) });
+  document.title = "done " + out.join(",");
+  throw new Error("done");
+}
 for (let i = 0; i < SHAPES.length; i++) {
   if (ONLY && SHAPES[i] !== ONLY) continue;
   face(SHAPES[i]);

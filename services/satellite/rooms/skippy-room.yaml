@@ -122,6 +122,20 @@ api:
   encryption:
     key: !secret skippy_room_api_key      # the same key in the vault .env as SATELLITE_ESPHOME_KEY: the hub is the only client
   actions:
+    - action: profile                     # hide parts of the screen to find what is slow to draw (bit 1 hat, 2 can, 4 conversation text, 8 edge glow, 16 mouth, 32 eyes)
+      variables:
+        mask: int
+      then:
+        - lambda: |-
+            auto hide = [](lv_obj_t *o, bool h) { if (h) lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN); else lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN); };
+            lv_obj_t *hat[] = {id(hat_cast)->obj, id(hat_crease_l)->obj, id(hat_crease_r)->obj, id(hat_top)->obj, id(hat_bot)->obj, id(rose_a), id(rose_b), id(rose_c), id(rose_d), id(lace_edge)->obj, id(lace)->obj, id(rose_btn)};
+            for (lv_obj_t *o : hat) hide(o, mask & 1);
+            hide(id(ball_img), mask & 2);
+            hide(id(convo_label), mask & 4);
+            lv_obj_t *nim[] = {id(nim_t1), id(nim_b1), id(nim_l1), id(nim_r1), id(nim_t2), id(nim_b2), id(nim_l2), id(nim_r2), id(nim_t3), id(nim_b3), id(nim_l3), id(nim_r3), id(nim_t4), id(nim_b4), id(nim_l4), id(nim_r4)};
+            for (lv_obj_t *o : nim) hide(o, mask & 8);
+            hide(id(mouth)->obj, mask & 16); hide(id(mfill)->obj, mask & 16);
+            hide(id(eye_l)->obj, mask & 32); hide(id(eye_r)->obj, mask & 32); hide(id(white_l), mask & 32); hide(id(white_r), mask & 32);
     - action: face                        # show a state by hand (listening, recording, thinking, speaking, music, muted, idle): for looking at the expressions
       variables:
         state: string
@@ -561,6 +575,7 @@ interval:
   - interval: 50ms                        # Skippy's wireframe face: a neon globe with eyes, brows and a mouth that follow his state, his mood and his words
     then:
       - lambda: |-
+          uint32_t t_us0 = micros();
           // ── what the face is doing: targets, eased toward every tick ──
           static float ph = 0, rot = 0, eo = 1, bh = 0, ba = 0, bl = 0, br = 0, lx = 0, ly = 0, sm = 0, mw = 22, mu = 0.5f, ml = 0.5f, teethv = 0;
           static uint32_t blink_at = 0, glance_at = 0; static float gx = 0, gy = 0;
@@ -636,12 +651,42 @@ interval:
           lx += (t_lx - lx) * 0.25f; ly += (t_ly - ly) * 0.25f; sm += (t_sm - sm) * 0.3f;
           mw += (tw - mw) * 0.55f; mu += (tu - mu) * 0.55f; ml += (tl - ml) * 0.55f; teethv += (tt - teethv) * 0.5f;
           ph += talk ? 0.13f : 0.06f; rot += 0.012f * (0.6f + id(energy));
-          static float rk = 0, ramp = 3;
-          rk += talk ? 0.24f : 0.05f; ramp += ((talk ? 15.0f : 3.0f) - ramp) * 0.15f;       // when he speaks the whole can rocks around
-          float rkv = ramp * cosf(rk) * (talk ? 0.24f : 0.05f);                                // its sideways speed: what makes the hat tumble
-          float ox = sinf(rk) * ramp, oy = -fabsf(sinf(rk)) * ramp * 0.35f + sinf(ph) * 2, cx = 240 + ox, cy = 245 + oy;
-          lv_obj_set_pos(id(ball_img), 115 + (int) ox, 80 + (int) oy);                 // the can moves with its face
-          const float K = 1.0f;                          // the head is this much of its old size (the hat and the rest keep theirs)
+          // when he speaks the whole can rocks around, in jumpy beats (cheaper to draw than a smooth glide, and more cartoon); the hat is thrown about by each beat
+          static float rk = 0, ramp = 3, bx_ = 0, by_ = 0, prev_bx = 0; static uint32_t next_beat = 0; bool beat = false;
+          // how worked up he is by what he is saying sets how hard he rocks: the emotion letter of this moment of his speech (strong = uppercase) -> a wobble level
+          static float wobs = 0.4f; float wob = 0.4f;
+          if (talk) {
+            const std::string &em0 = id(emote_env); char c0 = 'n';
+            if (em0.size() >= 3 && em0[1] == '|') { size_t tl0 = em0.size() - 2, i0 = (now - id(talk_t0)) / 100; if (i0 >= tl0) i0 = tl0 - 1; c0 = em0[2 + i0]; }
+            bool st0 = c0 >= 'A' && c0 <= 'Z'; char lc = st0 ? c0 + 32 : c0;
+            switch (lc) { case 'e': case 'l': wob = 1.0f; break; case 'a': wob = 0.9f; break; case 's': wob = 0.8f; break; case 'w': wob = 0.7f; break;
+                          case 'h': case 'r': case 'v': wob = 0.6f; break; case 'q': case 'm': wob = 0.5f; break; case 'd': wob = 0.25f; break; case 'b': wob = 0.2f; break; default: wob = 0.35f; }
+            wob *= st0 ? 1.0f : 0.7f;
+          }
+          wobs += (wob - wobs) * 0.2f;
+          ramp += ((talk ? 4.0f + 19.0f * wobs : 3.0f) - ramp) * 0.15f;
+          float ox, oy;
+          if (talk) {
+            if (now > next_beat) { next_beat = now + (uint32_t) (270 - 120 * wobs) + random_uint32() % 70; rk += 1.7f + (random_uint32() % 100) / 60.0f; bx_ = sinf(rk) * ramp; by_ = -fabsf(sinf(rk * 0.7f)) * ramp * 0.55f; beat = true; }
+            ox = bx_; oy = by_;
+          } else {                                                                              // at rest he sways a pixel or two, slowly and in steps (every move of the can redraws all of it)
+            static uint32_t next_idle = 0;
+            rk += 0.05f; if (now > next_idle) { next_idle = now + 450; bx_ = roundf(sinf(rk * 9) * ramp); by_ = roundf(-fabsf(sinf(rk * 9)) * ramp * 0.35f); }
+            ox = bx_; oy = by_;
+          }
+          float rkv = ox - prev_bx; prev_bx = ox;
+          static int lean_k = 2; static const float angs[5] = {-0.1396f, -0.0698f, 0.0f, 0.0698f, 0.1396f};     // the can leans about its base: one of five pre-drawn angles
+          {
+            int k = 2 + (int) roundf(bx_ / fmaxf(ramp, 1.0f) * 2.0f); if (k < 0) k = 0; if (k > 4) k = 4;
+            if (k != lean_k) {
+              lean_k = k; image::Image *cans[5] = {id(skippy_can_0), id(skippy_can_1), id(skippy_can_2), id(skippy_can_3), id(skippy_can_4)};
+              lv_image_set_src(id(ball_img), cans[k]->get_lv_image_dsc());
+            }
+          }
+          const float theta = angs[lean_k], lt = tanf(theta);                                              // how far it just moved sideways: what throws the hat
+          float cx = 240 + ox, cy = 245 + oy;
+          lv_obj_set_pos(id(ball_img), 90 + (int) ox, 80 + (int) oy);                 // the can moves with its face
+          const float K = 1.0f, pivotY = cy + 140;                          // the head is this much of its old size (the hat and the rest keep theirs)
           auto clampi = [](float v) { int i = (int) v; return i < 0 ? 0 : (i > 479 ? 479 : i); };
           auto put = [](lv_obj_t *o, lv_point_precise_t *p, int n) {     // a line widget's box runs from its own corner to its last point: anchor it at its points, or every change redraws a huge rectangle
             int mx = 479, my = 479;
@@ -649,7 +694,7 @@ interval:
             for (int i = 0; i < n; i++) { p[i].x -= mx; p[i].y -= my; }
             lv_line_set_points(o, p, n); lv_obj_set_pos(o, mx, my);
           };
-          static lv_point_precise_t el[18], er[18], bl_[4], br_[4], mo[25], th[2], mf[24];
+          static lv_point_precise_t el[18], er[18], bl_[4], br_[4], mo[25], th[2], mf[64];
           id(convo_y) += (id(convo_target) - id(convo_y)) * 0.18f;
           { int yy = (int) id(convo_y); if (yy != lv_obj_get_y(id(convo_label))) lv_obj_set_y(id(convo_label), yy); }     // only when it moved: every change redraws
           { static uint32_t last = 0, n = 0, acc = 0;                      // how fast does this tick really run?
@@ -660,7 +705,7 @@ interval:
             float w = 25 * K, h = 22 * K * eo * blinking; if (h < 2) h = 2;
             for (int i = 0; i < 18; i++) { float a = i * 6.2832f / 17; p[i].x = clampi(ex + w * cosf(a)); p[i].y = clampi(ey + h * sinf(a)); }
           };
-          float exl = cx - 52 * K, exr = cx + 52 * K, ey = cy - 36 * K;
+          float ey = cy - 36 * K, cxe = cx + (pivotY - ey) * lt, exl = cxe - 52 * K, exr = cxe + 52 * K;      // (his face leans with the can)
           eye(el, exl, ey); eye(er, exr, ey);
           put(id(eye_l)->obj, el, 18); put(id(eye_r)->obj, er, 18);
           bool open = eo * blinking > 0.3f;
@@ -690,31 +735,33 @@ interval:
           brow(bl_, exl, -1, bl + (br < 0 ? 0 : 0)); brow(br_, exr, 1, br + 0);
           put(id(brow_l)->obj, bl_, 4); put(id(brow_r)->obj, br_, 4);
           // ── mouth: an upper and a lower lip meeting at the corners; the smile lifts them ──
-          float my = cy + 52 * K, MW = mw * 2.1f, MU = mu * 2.1f, ML = ml * 2.1f;       // a big mouth: half as big again as it was, on a smaller head
+          static float mg = 2.1f; mg += ((talk ? 3.1f : 2.1f) - mg) * 0.3f;                                // he is a big mouth: it gets bigger still when he talks
+          float my = cy + 52 * K, MW = mw * mg, MU = mu * mg, ML = ml * mg;       // a big mouth: half as big again as it was, on a smaller head
+          float cxm = cx + (pivotY - my) * lt;
           for (int i = 0; i < 12; i++) {                                // upper lip, left to right
             float u = -1 + i * 2.0f / 11, edge = 1 - u * u;
-            mo[i].x = clampi(cx + MW * u); mo[i].y = clampi(my - MU * edge - sm * (1 - edge) * 0.5f - as_ * u);
+            mo[i].x = clampi(cxm + MW * u); mo[i].y = clampi(my - MU * edge - sm * (1 - edge) * 0.5f - as_ * u);
           }
           for (int i = 0; i < 12; i++) {                                // lower lip, right to left
             float u = 1 - i * 2.0f / 11, edge = 1 - u * u;
-            mo[12 + i].x = clampi(cx + MW * u); mo[12 + i].y = clampi(my + ML * edge - sm * (1 - edge) * 0.5f - as_ * u);
+            mo[12 + i].x = clampi(cxm + MW * u); mo[12 + i].y = clampi(my + ML * edge - sm * (1 - edge) * 0.5f - as_ * u);
           }
           mo[24] = mo[0];
           put(id(mouth)->obj, mo, 25);
           int nf = 0;                                                    // the inside of the mouth: scan lines between the lips, one polyline
           if (MU + ML > 3) {
             float top = my - MU, bot = my + ML; bool ltr = true;
-            for (float yy = top + 1.5f; yy < bot - 1 && nf < 22; yy += 5.0f) {
+            for (float yy = top + 1.5f; yy < bot - 1 && nf < 62; yy += 5.5f) {
               float v = (yy - my) < 0 ? (my - yy) / MU : (yy - my) / ML; if (v > 1) v = 1;
               float half = MW * sqrtf(1 - v * v) * 0.97f;
-              mf[nf].x = clampi(cx + (ltr ? -half : half)); mf[nf].y = clampi(yy); nf++;
-              mf[nf].x = clampi(cx + (ltr ? half : -half)); mf[nf].y = clampi(yy); nf++;
+              mf[nf].x = clampi(cxm + (ltr ? -half : half)); mf[nf].y = clampi(yy); nf++;
+              mf[nf].x = clampi(cxm + (ltr ? half : -half)); mf[nf].y = clampi(yy); nf++;
               ltr = !ltr;
             }
           }
           if (nf >= 2) { put(id(mfill)->obj, mf, nf); lv_obj_set_style_line_opa(id(mfill)->obj, 255, LV_PART_MAIN); }
           else lv_obj_set_style_line_opa(id(mfill)->obj, 0, LV_PART_MAIN);
-          th[0].x = clampi(cx - MW * 0.7f); th[0].y = clampi(my - MU * 0.35f); th[1].x = clampi(cx + MW * 0.7f); th[1].y = th[0].y;
+          th[0].x = clampi(cxm - MW * 0.7f); th[0].y = clampi(my - MU * 0.35f); th[1].x = clampi(cxm + MW * 0.7f); th[1].y = th[0].y;
           put(id(teeth)->obj, th, 2);
           lv_obj_set_style_line_opa(id(teeth)->obj, (lv_opa_t) (teethv > 0.5f && mu + ml > 4 ? 150 : 0), LV_PART_MAIN);
           // ── a few extra pen strokes, cartoon style: a line under the lower lip, smile lines and frown lines at the corners, furrows between the brows ──
@@ -722,14 +769,15 @@ interval:
             float sc = sm > 3 ? fminf((sm - 3) / 8.0f, 1.0f) : 0, fc2 = sm < -2 ? fminf((-sm - 2) / 6.0f, 1.0f) : 0;
             // under the lower lip: it follows the lip down when the mouth opens
             float cw = 14 + MW * 0.18f, cyy = my + ML + 13;
-            for (int i = 0; i < 7; i++) { float u = -1 + i / 3.0f; ch[i].x = clampi(cx + cw * u); ch[i].y = clampi(cyy + 5 * (1 - u * u)); }
+            for (int i = 0; i < 7; i++) { float u = -1 + i / 3.0f; ch[i].x = clampi(cxm + cw * u); ch[i].y = clampi(cyy + 5 * (1 - u * u)); }
             put(id(chin)->obj, ch, 7);
             lv_obj_set_style_line_opa(id(chin)->obj, (lv_opa_t) (st == "muted" ? 0 : 230), LV_PART_MAIN);
             lv_obj_t *so[2] = {id(smile_l)->obj, id(smile_r)->obj}, *fo2[2] = {id(frown_l)->obj, id(frown_r)->obj};
             for (int sd = 0; sd < 2; sd++) {
-              float side = sd ? 1.0f : -1.0f, kx = cx + side * MW, ky = my - sm * 0.5f;
-              if (sc > 0.05f) {                                                   // a smile line bowing out from each corner, up the cheek
-                for (int i = 0; i < 7; i++) { float t = i / 6.0f; sl_[sd][i].x = clampi(kx + side * (10 + 12 * sinf(3.14159f * t * 0.9f))); sl_[sd][i].y = clampi(ky - 4 - 44 * sc * t); }
+              float side = sd ? 1.0f : -1.0f, kx = cxm + side * MW, ky = my - sm * 0.5f;
+              if (sc > 0.05f) {                                                   // a smile line on each side of the mouth opening, bowing out
+                float half = (MU + ML) * 0.5f + 10 + 12 * sc, mid = my + (ML - MU) * 0.5f - sm * 0.2f;
+                for (int i = 0; i < 7; i++) { float t = -1 + i / 3.0f; sl_[sd][i].x = clampi(kx + side * (7 + 11 * (1 - t * t) * (0.5f + 0.5f * sc))); sl_[sd][i].y = clampi(mid + t * half); }
                 put(so[sd], sl_[sd], 7); lv_obj_set_style_line_opa(so[sd], (lv_opa_t) (255 * sc), LV_PART_MAIN);
               } else lv_obj_set_style_line_opa(so[sd], 0, LV_PART_MAIN);
               if (fc2 > 0.05f) {                                                  // a frown line dragging down from each corner
@@ -741,7 +789,7 @@ interval:
             lv_obj_t *fv[2] = {id(furrow_a)->obj, id(furrow_b)->obj};
             for (int sd = 0; sd < 2; sd++) {
               if (fu_a > 0.05f) {
-                float fx = cx + (sd ? 8 : -8), fy = cy - (36 + 36 * eo * 0.45f + 14 + bh) * K - 4;
+                float fx = cxe + (sd ? 8 : -8), fy = cy - (36 + 36 * eo * 0.45f + 14 + bh) * K - 4;
                 fu[sd][0].x = clampi(fx); fu[sd][0].y = clampi(fy); fu[sd][1].x = clampi(fx + (sd ? 2 : -2)); fu[sd][1].y = clampi(fy + 24 * fu_a);
                 put(fv[sd], fu[sd], 2); lv_obj_set_style_line_opa(fv[sd], (lv_opa_t) (255 * fu_a), LV_PART_MAIN);
               } else lv_obj_set_style_line_opa(fv[sd], 0, LV_PART_MAIN);
@@ -750,18 +798,27 @@ interval:
           // ── the admiral's hat: a big black bicorne a size too big, pulled low, riding loose on his head, with a rosette and a strip of gold lace. It lags his motion, swings, slides and
           //    bounces on the loud syllables, and never falls off ──
           { static float ha = 0, hv = 0, hx = 0, hxv = 0, hy = 0, hyv = 0, last_open = 0;
-            static lv_point_precise_t hf[84], ht[42], hb[42], lp[2], lq[2];
-            float open = mu + ml, kick = 0;
-            if (talk && open - last_open > 4) kick = ((now / 60) % 2 ? 1 : -1) * 0.035f - rkv * 0.01f;      // a loud syllable jolts the head, and the hat is late to follow
-            last_open = open;
-            float sway = -rkv * 0.035f + 0.09f * sinf(ph * 0.9f) + (talk ? 0.05f * sinf(ph * 2.7f) : 0) + (st == "thinking" ? -0.07f : 0) + (st == "listening" ? 0.05f : 0);
-            hv += (sway - ha) * 0.09f - hv * 0.16f + kick; ha += hv;                 // an underdamped spring: it overshoots and rocks
-            hxv += (sinf(ph * 0.9f + 1.0f) * 12 - hx) * 0.08f - hxv * 0.2f + kick * 80; hx += hxv;      // it slides along the top of his head
-            hyv += (-hy) * 0.14f - hyv * 0.22f + (kick != 0 ? 3.0f : 0); hy += hyv;                    // and bounces a little
-            if (ha > 0.30f) { ha = 0.30f; hv = 0; } if (ha < -0.30f) { ha = -0.30f; hv = 0; }          // loose, but it never falls off
-            if (hx > 26) { hx = 26; hxv = 0; } if (hx < -26) { hx = -26; hxv = 0; }
+            static lv_point_precise_t hf[84], ht[42], hb[42], lp[2], lq[2], hc_[42], cl_[2][10];
+            static int hc = 0; bool hat_step = (++hc % 4 == 0) || beat;      // the hat is the costliest thing to draw: it moves in chunky steps (four ticks of physics at once), on the beats too
+            if (hat_step) {
+            // gravity: the hat is balanced on top of the can with gaps under it on both sides, so the least lean tips it, hard, toward that side until it
+            // meets the edge of the can; a sharp sideways jerk of the can can throw it back the other way. (An inverted pendulum: the lean feeds itself.)
+            static float pv = 0; static uint32_t nudge_at = 0;
+            float ax = rkv - pv; pv = rkv;
+            for (int sub = 0; sub < 4; sub++) {                                                // how hard the can just accelerated sideways
+            float lean = theta;                                                      // the can leans a few degrees as it rocks
+            float tq = 0.032f * sinf(ha + lean) - (sub == 0 ? ax : 0) * 0.0035f * cosf(ha);
+            if (beat && sub == 0) tq += (((int) (random_uint32() % 200)) - 100) / 100.0f * 0.012f * (0.4f + 1.2f * wobs);
+            hv += tq - hv * 0.02f; ha += hv;
+            if (!talk && now > nudge_at) { nudge_at = now + 5000 + random_uint32() % 6000; hv += (ha > 0 ? -0.1f : 0.1f); }   // now and then a shiver tips it the other way
+            if (ha > 0.45f) { ha = 0.45f; if (hv > 0.04f) hyv += 3; hv = -hv * 0.3f; }     // it never falls off: it knocks against the can and settles tipped
+            if (ha < -0.45f) { ha = -0.45f; if (hv < -0.04f) hyv += 3; hv = -hv * 0.3f; }
+            hxv += (ha * 60 - hx) * 0.08f - hxv * 0.2f - (sub == 0 ? ax : 0) * 0.35f; hx += hxv;           // it slides toward the side it leans, and is left behind when the can jerks
+            hyv += (-hy) * 0.14f - hyv * 0.22f; hy += hyv;
+            if (hx > 40) { hx = 40; hxv = -hxv * 0.5f; } if (hx < -40) { hx = -40; hxv = -hxv * 0.5f; }
             if (hy > 6) hy = 6; if (hy < -10) hy = -10;
-            const float hw = 285, px = cx + hx, py = cy - 62 + hy, ca = cosf(ha), sa = sinf(ha);
+            }
+            const float hw = 285, py = cy - 62 + hy, px = cx + (pivotY - (cy - 62)) * lt + hx, ca = cosf(ha + theta), sa = sinf(ha + theta);
             auto rot = [&](float lx, float ly, lv_point_precise_t &o) { o.x = (int) (px + lx * ca - ly * sa); o.y = (int) (py + lx * sa + ly * ca); };   // not clamped: the hat runs off both sides of the screen
             int nt = 0, nb = 0, nfp = 0; bool up = true;
             for (int i = 0; i <= 40; i++) {
@@ -773,7 +830,28 @@ interval:
                 rot(u * hw, up ? top + 3 : bot - 3, hf[nfp++]); rot(u * hw, up ? bot - 3 : top + 3, hf[nfp++]); up = !up;
               }
             }
-            put(id(hat_fill)->obj, hf, nfp); put(id(hat_top)->obj, ht, nt); put(id(hat_bot)->obj, hb, nb);
+            for (int i = 0; i < nb; i++) { hc_[i] = hb[i]; hc_[i].y += 13; }                            // the shadow the brim throws on his forehead
+            for (int sd = 0; sd < 2; sd++) {                                                          // creases where the front crown clefts from the swept-back sides
+              float uu = sd ? 0.30f : -0.30f, au2 = fabsf(uu), tip2 = 44 * uu * uu;
+              float tp = tip2 - 152 * powf(1 - powf(au2, 2.3f), 1.25f) - 42 * expf(-(uu * uu) / 0.11f), bt2 = tip2 - 24 * (1 - uu * uu);
+              for (int i = 0; i < 10; i++) { float t = i / 9.0f; rot(uu * hw * (1 + 0.10f * t), bt2 + (tp - bt2) * (0.92f * t), cl_[sd][i]); }
+            }
+            {                                                                                      // the cloth: solid vertical bars between the (rotated) top and bottom edges, which the screen fills far faster than stroked lines
+              auto yat = [](lv_point_precise_t *p, int n, float x) -> float {
+                for (int i = 0; i + 1 < n; i++) { float x0 = p[i].x, x1 = p[i + 1].x; if ((x0 <= x && x < x1) || (x1 <= x && x < x0)) return p[i].y + (x - x0) / (x1 - x0) * (p[i + 1].y - p[i].y); }
+                return NAN;
+              };
+              lv_obj_t *cl[40] = {id(hc0), id(hc1), id(hc2), id(hc3), id(hc4), id(hc5), id(hc6), id(hc7), id(hc8), id(hc9), id(hc10), id(hc11), id(hc12), id(hc13), id(hc14), id(hc15), id(hc16), id(hc17), id(hc18), id(hc19), id(hc20), id(hc21), id(hc22), id(hc23), id(hc24), id(hc25), id(hc26), id(hc27), id(hc28), id(hc29), id(hc30), id(hc31), id(hc32), id(hc33), id(hc34), id(hc35), id(hc36), id(hc37), id(hc38), id(hc39)};
+              for (int c = 0; c < 40; c++) {
+                float xc = c * 12 + 6, yt = yat(ht, nt, xc), yb = yat(hb, nb, xc);
+                if (isnan(yt) || isnan(yb)) { lv_obj_add_flag(cl[c], LV_OBJ_FLAG_HIDDEN); continue; }
+                if (yt > yb) { float tmp = yt; yt = yb; yb = tmp; }
+                lv_obj_clear_flag(cl[c], LV_OBJ_FLAG_HIDDEN); lv_obj_set_pos(cl[c], c * 12, (int) yt - 1); lv_obj_set_size(cl[c], 13, (int) (yb - yt) + 2);
+              }
+            }
+            put(id(hat_cast)->obj, hc_, nb);
+            put(id(hat_crease_l)->obj, cl_[0], 10); put(id(hat_crease_r)->obj, cl_[1], 10);
+            put(id(hat_top)->obj, ht, nt); put(id(hat_bot)->obj, hb, nb);
             // the rosette (red and white rings) and the gold lace across it with its button, on the hat's right side
             lv_point_precise_t c0; rot(hw * 0.34f, -52, c0);
             lv_obj_t *rg[4] = {id(rose_a), id(rose_b), id(rose_c), id(rose_d)}; static const int rs[4] = {52, 42, 30, 18};
@@ -782,6 +860,7 @@ interval:
             lq[0] = lp[0]; lq[1] = lp[1];
             put(id(lace_edge)->obj, lp, 2); put(id(lace)->obj, lq, 2);
             lv_point_precise_t bt; rot(hw * 0.34f - 30, -52 + 36, bt); lv_obj_set_pos(id(rose_btn), bt.x - 8, bt.y - 8);
+            }
           }
           // ── effects around him: a flush, a sweat drop, an anger mark, hearts ──
           { static lv_point_precise_t vp[5], hp[26];
@@ -896,7 +975,7 @@ interval:
             if (ear < 0.06f) { for (int k = 0; k < 4; k++) lv_obj_set_style_line_opa(fo[k], 0, LV_PART_MAIN); }
             else for (int sd = 0; sd < 2; sd++) {
               float s2 = sd ? 1.0f : -1.0f, a = (sd ? 0.95f : 0.55f) + 0.12f * sinf(ph * 2.3f + sd * 2.0f) + 0.2f * (st == "recording");
-              float bx = cx + s2 * 104, by = cy - 4, L = 96 * K * ear, Wd = 58 * K * ear, dx = s2 * sinf(a), dy = -cosf(a), nx = -dy, ny = dx;
+              float by = cy - 4, bx = cx + (pivotY - by) * lt + s2 * 104, L = 96 * K * ear, Wd = 58 * K * ear, dx = s2 * sinf(a), dy = -cosf(a), nx = -dy, ny = dx;
               for (int i = 0; i <= 8; i++) {
                 float t = i / 8.0f, hw = Wd / 2 * powf(sinf(3.14159f * t), 0.7f), px = bx + dx * L * t, py = by + dy * L * t;
                 int lx = clampi(px + nx * hw), ly = clampi(py + ny * hw), rx = clampi(px - nx * hw), ry = clampi(py - ny * hw);
@@ -907,6 +986,8 @@ interval:
               lv_obj_set_style_line_opa(fo[sd], 255, LV_PART_MAIN); lv_obj_set_style_line_opa(fo[2 + sd], 255, LV_PART_MAIN);
             }
           }
+          { static uint32_t acc_us = 0, n_us = 0; acc_us += micros() - t_us0;                // how much of the tick is this code (the rest is drawing)
+            if (++n_us == 60) { ESP_LOGI("face", "code %.1f ms per tick", acc_us / 60000.0f); acc_us = n_us = 0; } }
   - interval: 15s                         # the screen dims when nothing has happened for two minutes
     then:
       - if:
@@ -999,7 +1080,7 @@ lvgl:
     - lcd
   touchscreens:
     - touch
-  buffer_size: 50%
+  buffer_size: 100%                       # a whole frame at a time: with strips the can tears between its old and new position
   pages:
     - id: home
       bg_color: 0x000000
@@ -1271,18 +1352,601 @@ lvgl:
             line_rounded: true
         - image:
             id: ball_img
-            src: skippy_ball
-            x: 115
+            src: skippy_can_2
+            x: 90
             y: 80
         - line:
-            id: hat_fill
+            id: hat_cast
             x: 0
             y: 0
             points:
               - 0, 0
               - 2, 2
-            line_width: 17
-            line_color: 0x1a1f3a
+            line_width: 20
+            line_color: 0x000000
+            line_opa: 55%
+            line_rounded: true
+        - obj:
+            id: hc0
+            x: 0
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc1
+            x: 12
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc2
+            x: 24
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc3
+            x: 36
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc4
+            x: 48
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc5
+            x: 60
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc6
+            x: 72
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc7
+            x: 84
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc8
+            x: 96
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc9
+            x: 108
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc10
+            x: 120
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc11
+            x: 132
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc12
+            x: 144
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc13
+            x: 156
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc14
+            x: 168
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc15
+            x: 180
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc16
+            x: 192
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc17
+            x: 204
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc18
+            x: 216
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc19
+            x: 228
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc20
+            x: 240
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc21
+            x: 252
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc22
+            x: 264
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc23
+            x: 276
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc24
+            x: 288
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc25
+            x: 300
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc26
+            x: 312
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc27
+            x: 324
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc28
+            x: 336
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc29
+            x: 348
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc30
+            x: 360
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc31
+            x: 372
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc32
+            x: 384
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc33
+            x: 396
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc34
+            x: 408
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc35
+            x: 420
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc36
+            x: 432
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc37
+            x: 444
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc38
+            x: 456
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: hc39
+            x: 468
+            y: 0
+            width: 13
+            height: 2
+            radius: 0
+            bg_color: 0x1a1f3a
+            bg_opa: COVER
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - line:
+            id: hat_crease_l
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 12
+            line_color: 0x0a0d20
+            line_opa: 70%
+            line_rounded: true
+        - line:
+            id: hat_crease_r
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 12
+            line_color: 0x0a0d20
+            line_opa: 70%
             line_rounded: true
         - line:
             id: hat_top
@@ -1457,7 +2121,7 @@ lvgl:
             points:
               - 0, 0
               - 2, 2
-            line_width: 5
+            line_width: 7
             line_color: 0x0b0b0e
             line_opa: 100%
             line_rounded: false
