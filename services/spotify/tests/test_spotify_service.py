@@ -73,7 +73,7 @@ def test_an_artists_songs_come_from_a_search_paged_by_ten(tmp_path):
     got = w.tracks_for("daft punk", 25)
     assert got["kind"] == "artist" and got["name"] == "Daft Punk" and len(got["tracks"]) == 21
     pages = [c for c in fake.calls if c[1] == "/v1/search" and c[2]["type"] == "track"]
-    assert [p[2]["offset"] for p in pages] == ["0", "10", "20"] and pages[0][2]["q"] == 'artist:"Daft Punk"'
+    assert [p[2]["offset"] for p in pages] == ["0", "10", "20"] and pages[0][2]["q"] == "Daft Punk"
 
 
 def test_playlists_by_name_their_items_and_adding_and_saving(tmp_path):
@@ -128,7 +128,7 @@ def test_signin_edits_only_its_own_lines_of_the_vault(tmp_path):
     assert env.read_bytes() == b"A=1\r\nSPOTIFY_CLIENT_ID=new\r\nB=2\r\nSPOTIFY_REFRESH_TOKEN=rt\r\n"
     url = urllib.parse.urlsplit(signin.authorize_url("cid", "chal", "st"))
     q = dict(urllib.parse.parse_qsl(url.query))
-    assert q["code_challenge_method"] == "S256" and q["redirect_uri"] == "http://127.0.0.1:43874/callback"
+    assert q["code_challenge_method"] == "S256" and q["redirect_uri"] == "http://127.0.0.1:8888/callback"
     assert "playlist-modify-private" in q["scope"] and "user-library-modify" in q["scope"]
 
 

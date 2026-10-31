@@ -179,7 +179,9 @@ class WebApi:
         want = _norm(what)
         for a in self.search(what, "artist", 3):
             if _norm(a.get("name", "")) == want:
-                tracks = [t for t in self.search(f'artist:"{a["name"]}"', "track", n) if any(x.get("id") == a.get("id") for x in t.get("artists") or [])]
+                # a plain search, kept to his tracks: the field filter (artist:"...") answers only 5 in Development Mode (measured 2026-10-31)
+                found = self.search(a["name"], "track", min(200, n * 2))
+                tracks = [t for t in found if any(x.get("id") == a.get("id") for x in t.get("artists") or [])][:n]
                 if tracks:
                     return {"kind": "artist", "name": a["name"], "tracks": [brief(t) for t in tracks]}
         return {"kind": "search", "name": what, "tracks": [brief(t) for t in self.search(what, "track", min(n, 10))]}

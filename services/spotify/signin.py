@@ -1,6 +1,6 @@
 """The Captain's one-time Spotify sign-in, on skippy-pc (services/spotify/README.md). Standard library only; Claude runs it, he only clicks.
 
-    python services/spotify/signin.py            opens http://127.0.0.1:43874/ in his browser and waits (30 minutes at most)
+    python services/spotify/signin.py            opens http://127.0.0.1:8888/ in his browser and waits (30 minutes at most)
 
 Two steps on one page, both on Spotify's own pages, so his password never passes through here:
   1. the Web API (his playlists, search, adding songs): the authorization code flow with PKCE for his own Spotify app. If the vault has no
@@ -28,7 +28,7 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-PORT = 43874
+PORT = int(os.environ.get("SPOTIFY_SIGNIN_PORT", "8888"))   # the Redirect URI registered in his app (arhodes-music-organizer)
 REDIRECT = f"http://127.0.0.1:{PORT}/callback"
 AUTH_URL = "https://accounts.spotify.com/authorize"
 TOKEN_URL = "https://accounts.spotify.com/api/token"

@@ -32,10 +32,10 @@ line). "Next", "pause", "stop the music" reach the stereo when it is what plays.
 python services/spotify/signin.py
 ```
 
-It opens `http://127.0.0.1:43874/` in skippy-pc's browser:
+It opens `http://127.0.0.1:8888/` in skippy-pc's browser:
 
 1. **The Web API**: his own Spotify app. If the vault has no `SPOTIFY_CLIENT_ID`, the page says how to make one at developer.spotify.com (the music
-   organizer's app on the Mac is fine if it is his) and to add the Redirect URI `http://127.0.0.1:43874/callback`; he pastes its Client ID (not a
+   organizer's app on the Mac is fine if it is his) and to add the Redirect URI `http://127.0.0.1:8888/callback`; he pastes its Client ID (not a
    secret). Then Spotify's own consent page (authorization code + PKCE; his password never comes here). `SPOTIFY_CLIENT_ID` and
    `SPOTIFY_REFRESH_TOKEN` go into the vault `.env`, and straight to the container. Spotify hands a new refresh token on refresh: the container
    keeps the current one in `state/spotify/token.json` (a new one in the vault, from a fresh sign-in, wins).
