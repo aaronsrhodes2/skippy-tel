@@ -82,5 +82,7 @@ Signed in to the **work** Google account, at calendar.google.com:
   local routing service yet.
 - Doors, plugs, the Nest and pre-conditioning the car at night: the house shows no door sensors or thermostat right now (Matter's Nest
   isn't listed), and car-ble has no climate command.
-- Archiving chats older than 14 days as zips in the portal (`portal/chat_history.py`), the bridge front-door switch-over, and wake-word
-  retraining from the day's recordings: each is its own piece of work.
+- The bridge front-door switch-over, and wake-word retraining from the day's recordings: each is its own piece of work.
+
+(Chat archiving is done, on the portal's side: once a night, nudged by the home report, every chat untouched for 14 days is zipped to
+`chat-archive/<owner>/<id>.zip` in the Tabletop bucket and leaves a stub in the chats list; opening it restores it. `portal/chat_history.py`.)

@@ -376,17 +376,18 @@
       const words = (first ? first.content : "chat").replace(/\s*\[attached:[^\]]*\]/, "").replace(/\s+/g, " ").trim().slice(0, 70);
       const had = chats().find(x => x.id === chatId) || {};
       const named = had.named || NAMED.test(had.title || "");
-      const c = Object.assign({}, had, {id: chatId, title: named ? had.title : words, named: !!named, updated: new Date().toISOString(), history: history});
+      const c = Object.assign({}, had, {id: chatId, title: named ? had.title : words, named: !!named, updated: new Date().toISOString(), history: history, archived: undefined, turns: undefined});
       keepChats([c, ...chats().filter(x => x.id !== chatId)]);
       clearTimeout(pushTimer); pushTimer = setTimeout(() => upload(c), 800);
     }
     // On load: the portal's list and this browser's are merged (the newer copy of a chat wins); a chat only this browser has
-    // (made before the portal kept chats, or while it couldn't) goes up once.
+    // (made before the portal kept chats, or while it couldn't) goes up once. A chat the portal archived (untouched 14 days, zipped:
+    // chat_history.archive) comes as a stub with no history, and this browser drops its own copy of the words too; opening it restores it.
     fetch(HIST, {cache: "no-store"}).then(r => r.ok ? r.json() : null).then(d => {
       if (!d || !Array.isArray(d.chats)) return;
       const mine = {}, theirs = new Set(d.chats.map(c => c.id));
       chats().forEach(c => { mine[c.id] = c; });
-      d.chats.forEach(c => { if (!mine[c.id] || (mine[c.id].updated || "") < c.updated) mine[c.id] = c; else Object.assign(mine[c.id], {title: c.title, named: c.named, star: c.star}); });
+      d.chats.forEach(c => { if (!mine[c.id] || (mine[c.id].updated || "") < c.updated || (c.archived && (mine[c.id].updated || "") <= c.updated)) mine[c.id] = c; else Object.assign(mine[c.id], {title: c.title, named: c.named, star: c.star}); });
       const all = Object.values(mine).sort((a, b) => (b.updated || "").localeCompare(a.updated || ""));
       keepChats(all);
       all.filter(c => !theirs.has(c.id)).slice(0, 40).forEach(upload);
@@ -932,7 +933,8 @@
       const open = document.createElement("button"); open.type = "button"; open.className = "chat-open";
       const t = document.createElement("span"); t.className = "chat-title"; t.textContent = r.title;
       const sub = document.createElement("span"); sub.className = "chat-when";
-      if (r.kind === "chat") sub.textContent = (r.c.history || []).filter(x => x.role === "user").length + " · " + new Date(r.at).toLocaleString(undefined, {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"});
+      if (r.kind === "chat") sub.textContent = (r.c.archived ? r.c.turns || 0 : (r.c.history || []).filter(x => x.role === "user").length) + " · " + new Date(r.at).toLocaleString(undefined, {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"});
+      if (r.kind === "chat" && r.c.archived) { row.classList.add("archived"); sub.prepend(glyph("stack", "dim"), " "); }   // zipped on the portal: opens on demand
       if (r.kind === "agent") {
         const proj = (window.SkippyAgent.projects.find(p => p.id === r.c.project) || {name: r.c.project}).name;
         sub.textContent = proj + " · " + (r.c.turns || 0) + (r.c.state === "running" ? " · working" : "");
@@ -975,6 +977,16 @@
       leaveHome();
       if (r.kind === "chat") {
         if (agentOn()) { const pub = BRAINS.find(x => x.id === "core"); if (pub) { brain = "core"; try { localStorage.setItem(BRAIN_KEY, "public"); } catch (e) {} paintBrain(); applyMode(); } }
+        if (r.c.archived) {                                          // zipped on the portal: fetch it back (it's restored there too)
+          btn.disabled = true; btn.dataset.s = "on";
+          try {
+            const res = await fetch(HIST + "/" + encodeURIComponent(r.id), {cache: "no-store"});
+            const full = await res.json();
+            if (!res.ok || !Array.isArray(full.history)) throw new Error(full.error || "That chat couldn't be opened.");
+            patchLocal(r.id, {history: full.history, archived: undefined, turns: undefined});
+            r.c = Object.assign({}, r.c, {history: full.history, archived: undefined});
+          } catch (err) { btn.disabled = false; btn.querySelector(".chat-when").textContent = err.message; return; }
+        }
         startChat(r.id, r.c.history || []); showSheet("chats"); return;
       }
       if (r.kind === "agent") {

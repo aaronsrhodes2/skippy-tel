@@ -162,3 +162,98 @@ def test_rename_and_star_keep_and_dont_count_as_using_the_chat(kept):
     assert client.patch("/chat/history/zzz999", json={"star": True}).status_code == 400
     login(client, ADMIN)
     assert client.patch("/chat/history/abc123", json={"star": True}).status_code == 400        # someone else's chat: no such chat
+
+
+# ── the nightly archive: zipped after 14 days, a stub in the list, restored when opened ──
+def _aged(store, email, chats):
+    path = chat_history.PREFIX + chat_history.owner_id(email) + ".json"
+    store.put(path, json.dumps(chats).encode(), "application/json")
+    return path
+
+
+def _ago(days):
+    return (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def test_the_archive_zips_old_chats_and_leaves_a_light_stub(kept):
+    client, h, store = kept
+    old = _ago(20)
+    path = _aged(store, FRIEND, [{"id": "new111", "title": "fresh-chat-is-here", "updated": _ago(2), "history": TURNS},
+                                 {"id": "old111", "title": "barn-gets-red-picture", "updated": old, "history": TURNS, "star": True}])
+    assert h.archive() == 1
+    assert h.archive() == 0                                              # once archived, it stays a stub
+    zp = chat_history.ARCHIVE + chat_history.owner_id(FRIEND) + "/old111.zip"
+    assert store.files[zp][1] == "application/zip"
+    assert chat_history._unzip(store.get(zp))["history"] == TURNS
+    stub = next(c for c in json.loads(store.get(path)) if c["id"] == "old111")
+    assert stub == {"id": "old111", "title": "barn-gets-red-picture", "updated": old, "named": True,
+                    "turns": 1, "archived": True, "star": True} and "history" not in stub
+    login(client, FRIEND)
+    listed = {c["id"]: c for c in client.get("/chat/history").get_json()["chats"]}
+    assert listed["old111"]["archived"] and listed["old111"]["title"] == "barn-gets-red-picture" and "history" not in listed["old111"]
+    assert "history" in listed["new111"]
+
+
+def test_opening_an_archived_chat_restores_it(kept):
+    client, h, store = kept
+    old = _ago(400)
+    path = _aged(store, ADMIN, [{"id": "old222", "title": "core-runs-hot-tonight", "updated": old, "history": TURNS}])
+    h.archive(keep_owners={chat_history.owner_id(ADMIN)})
+    login(client, ADMIN)
+    client.patch("/chat/history/old222", json={"title": "renamed while away"})     # a stub can still be renamed
+    r = client.get("/chat/history/old222")
+    assert r.status_code == 200 and r.get_json()["history"] == TURNS and r.get_json()["title"] == "renamed while away"
+    assert r.headers["Cache-Control"] == "private, no-store"
+    kept_now = json.loads(store.get(path))[0]
+    assert kept_now["history"] == TURNS and "archived" not in kept_now and kept_now["updated"] == old   # not "used"
+    assert not store.list(chat_history.ARCHIVE)                          # the zip is gone once restored
+    assert client.get("/chat/history/nope99").status_code == 400
+    login(client, FRIEND)
+    assert client.get("/chat/history/old222").status_code == 400          # never another person's
+
+
+def test_saving_or_deleting_an_archived_chat_drops_its_zip(kept):
+    client, h, store = kept
+    _aged(store, FRIEND, [{"id": "aaa111", "title": "a-b-c-d", "updated": _ago(20), "history": TURNS},
+                          {"id": "bbb222", "title": "e-f-g-h", "updated": _ago(20), "history": TURNS}])
+    h.archive()
+    login(client, FRIEND)
+    client.put("/chat/history/aaa111", json={"title": "x", "history": TURNS + TURNS})
+    client.delete("/chat/history/bbb222")
+    assert not store.list(chat_history.ARCHIVE)
+    assert [c["title"] for c in client.get("/chat/history").get_json()["chats"]] == ["a-b-c-d"]
+
+
+def test_a_guests_archived_chat_is_still_analysed_from_its_zip_then_deleted(kept):
+    _, h, store = kept
+    path = _aged(store, FRIEND, [{"id": "old333", "title": "barn-gets-red-picture", "updated": _ago(20), "history": TURNS}])
+    h.archive()
+    stub = json.loads(store.get(path))
+    stub[0]["updated"] = _ago(31)                                          # and then its 30 days run out
+    store.put(path, json.dumps(stub).encode(), "application/json")
+    seen = []
+    assert h.sweep(lambda chat: seen.append(chat["history"]) or {"right": []}, lambda *a: None) == 1
+    assert seen == [TURNS] and path not in store.files and not store.list(chat_history.ARCHIVE)
+
+
+def test_an_orphaned_zip_gets_its_stub_back_or_goes(kept):
+    _, h, store = kept
+    cap, guest = chat_history.owner_id(ADMIN), chat_history.owner_id(FRIEND)
+    store.put(f"{chat_history.ARCHIVE}{cap}/kept11.zip", chat_history._zip({"id": "kept11", "title": "t", "updated": _ago(90), "history": TURNS}), "application/zip")
+    store.put(f"{chat_history.ARCHIVE}{guest}/gone11.zip", chat_history._zip({"id": "gone11", "title": "t", "updated": _ago(90), "history": TURNS}), "application/zip")
+    h.archive(keep_owners={cap})
+    assert [c["id"] for c in json.loads(store.get(chat_history.PREFIX + cap + ".json"))] == ["kept11"]
+    assert store.list(chat_history.ARCHIVE) == [f"{chat_history.ARCHIVE}{cap}/kept11.zip"]
+
+
+def test_the_report_runs_the_archive_once_a_night(kept, monkeypatch):
+    client, h, _ = kept
+    from test_app import _pair
+    token = _pair(client)
+    runs = []
+    monkeypatch.setattr(h, "archive", lambda keep_owners=(): runs.append(1) or 0)
+    for _ in range(3):
+        client.post("/home/report", json={"status": {}}, headers={"Authorization": f"Bearer {token}"})
+    import time as _t
+    _t.sleep(0.2)
+    assert runs == [1]

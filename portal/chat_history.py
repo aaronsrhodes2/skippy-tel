@@ -9,19 +9,28 @@ improvements), records that insight (chat-insights/<YYYY-MM>.json in the same bu
 deletes the chat. If Core can't be reached the chat waits for the next sweep. The bucket's lifecycle rule (infra/bootstrap)
 deletes a file no one has written for 60 days, a backstop far behind the sweep. Without a bucket (a local run, tests) it all
 lives in memory (MemoryStore); the page also keeps its own copy, so a chat survives a portal without storage.
+
+Archive (the Captain's bedtime routine, 2026-10-31): once a night archive() zips every chat untouched for 14 days into its own
+file, chat-archive/<owner>/<id>.zip (outside the chat-history/ lifecycle rule), and leaves a light stub in the person's file
+({id, title, updated, turns, archived: true}, no history), so the list and the file stay small. The list shows the stub with its
+name and date; opening it (restore()) puts the chat back in the file and deletes its zip. A guest's archived chat still expires
+at 30 days: the sweep reads its zip for the analysis and deletes both.
 """
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import re
 import threading
+import zipfile
 from datetime import datetime, timedelta, timezone
 
 import chat_names
 import tabletop
 
 KEEP_DAYS = 30
+ARCHIVE_DAYS = 14               # a chat untouched this long is zipped, leaving a stub in the list
 MAX_CHATS = 40                  # a guest's newest 40, as the page's own list
 MAX_CHATS_FOREVER = 1000        # the Captain's: kept forever, so only a sanity cap
 MAX_CHAT_BYTES = 256 * 1024     # one chat's history, as JSON (a guest's)
@@ -30,8 +39,10 @@ MAX_FILE_BYTES = 2 * 1024 * 1024
 MAX_FILE_BYTES_FOREVER = 24 * 1024 * 1024
 PREFIX = "chat-history/"
 INSIGHTS = "chat-insights/"
+ARCHIVE = "chat-archive/"
 _ID = re.compile(r"[a-z0-9]{4,24}")
 _OWNER_FILE = re.compile(r"chat-history/([0-9a-f]{16})\.json")
+_ARCHIVE_FILE = re.compile(r"chat-archive/([0-9a-f]{16})/([a-z0-9]{4,24})\.zip")
 
 ANALYSE = ("You review a finished conversation between a guest of the Maker Portal and Skippy, its assistant, before it is deleted. "
            "Say what it teaches the people who build Skippy. Answer with JSON only, exactly this shape: "
@@ -54,14 +65,36 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _fresh(chat: dict, now: datetime) -> bool:
+def _fresh(chat: dict, now: datetime, days: int = KEEP_DAYS) -> bool:
     try:
         when = datetime.fromisoformat(str(chat.get("updated", "")).replace("Z", "+00:00"))
     except ValueError:
         return False
     if when.tzinfo is None:
         when = when.replace(tzinfo=timezone.utc)
-    return now - when <= timedelta(days=KEEP_DAYS)
+    return now - when <= timedelta(days=days)
+
+
+def _zip(chat: dict) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("chat.json", json.dumps(chat, separators=(",", ":")))
+    return buf.getvalue()
+
+
+def _unzip(data: bytes) -> dict:
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        chat = json.loads(z.read("chat.json"))
+    if not isinstance(chat, dict):
+        raise ValueError("not a chat")
+    return chat
+
+
+def _stub(chat: dict) -> dict:
+    """What stays in the list for an archived chat: its name, date and size, no history."""
+    return {"id": chat["id"], "title": chat.get("title") or "chat", "updated": chat.get("updated", ""), "named": True,
+            "turns": sum(1 for t in chat.get("history") or [] if isinstance(t, dict) and t.get("role") == "user"),
+            "archived": True, **({"star": True} if chat.get("star") else {})}
 
 
 def parse_insight(text: str) -> dict:
@@ -87,6 +120,9 @@ class History:
     # ── files ──
     def _path(self, email: str) -> str:
         return PREFIX + owner_id(email) + ".json"
+
+    def _zip_path(self, owner: str, chat_id: str) -> str:
+        return f"{ARCHIVE}{owner}/{chat_id}.zip"
 
     def _load(self, path: str) -> list[dict]:
         """Every chat in a file, expired ones included (they wait there for the sweep)."""
@@ -146,6 +182,8 @@ class History:
                 "named": True, **({"star": True} if had and had.get("star") else {})}
         with self._lock:
             self._store(path, [chat] + [c for c in self._load(path) if c.get("id") != chat_id], forever)
+            if had and had.get("archived"):                      # used again: the whole chat is back in the file, its zip goes
+                self.store.delete(self._zip_path(owner_id(email), chat_id))
         return {"id": chat_id, "updated": chat["updated"], "title": name}
 
     def update(self, email: str, chat_id: str, title=None, star=None) -> dict:
@@ -175,7 +213,70 @@ class History:
         """The person's own bin: gone at once (a chat they delete themselves is not analysed)."""
         path = self._path(email)
         with self._lock:
-            self._store(path, [c for c in self._load(path) if c.get("id") != chat_id], self.forever(email))
+            chats = self._load(path)
+            if any(c.get("id") == chat_id and c.get("archived") for c in chats):
+                self.store.delete(self._zip_path(owner_id(email), chat_id))
+            self._store(path, [c for c in chats if c.get("id") != chat_id], self.forever(email))
+
+    # ── archive: zipped after 14 days, a stub left in the list, restored when opened ──
+    def restore(self, email: str, chat_id: str) -> dict:
+        """One chat, whole: an archived one is unzipped back into the file (its `updated` left alone) and its zip deleted."""
+        path, owner = self._path(email), owner_id(email)
+        with self._lock:
+            chats = self._load(path)
+            chat = next((c for c in chats if c.get("id") == chat_id), None)
+            if chat is None or not (self.forever(email) or _fresh(chat, _now())):
+                raise Refused("There's no such chat.")
+            if not chat.get("archived"):
+                return chat
+            data = self.store.get(self._zip_path(owner, chat_id))
+            if data is None:
+                raise Refused("That chat's archive is missing.")
+            full = {k: v for k, v in _unzip(data).items() if k not in ("archived", "star")}
+            full.update(title=chat.get("title") or full.get("title"), named=True)   # renamed or starred while archived: the stub wins
+            if chat.get("star"):
+                full["star"] = True
+            self._store(path, [full if c.get("id") == chat_id else c for c in chats], self.forever(email))
+            self.store.delete(self._zip_path(owner, chat_id))
+        return full
+
+    def archive(self, keep_owners=()) -> int:
+        """The nightly pass: every chat untouched for 14 days goes to its own zip and leaves a stub. A zip whose stub is gone
+        (its file lost to the bucket's lifecycle rule) gets its stub back while the chat is still kept, else is deleted.
+        `keep_owners` are the Captain's owner ids (kept forever). Answers how many chats were archived."""
+        done, now = 0, _now()
+        zips: dict[str, set] = {}
+        for p in self.store.list(ARCHIVE):
+            m = _ARCHIVE_FILE.fullmatch(p)
+            if m:
+                zips.setdefault(m.group(1), set()).add(m.group(2))
+        owners = {m.group(1) for m in map(_OWNER_FILE.fullmatch, self.store.list(PREFIX)) if m} | set(zips)
+        for owner in sorted(owners):
+            path, forever = PREFIX + owner + ".json", owner in keep_owners
+            with self._lock:
+                chats, changed = self._load(path), False
+                for i, chat in enumerate(chats):
+                    if chat.get("archived") or not chat.get("history") or _fresh(chat, now, ARCHIVE_DAYS) \
+                            or not _ID.fullmatch(str(chat.get("id") or "")):
+                        continue
+                    self.store.put(self._zip_path(owner, chat["id"]), _zip(chat), "application/zip")
+                    chats[i], changed = _stub(chat), True
+                    done += 1
+                listed = {c.get("id") for c in chats}
+                for chat_id in sorted(zips.get(owner, set()) - listed):    # an orphaned zip
+                    zp = self._zip_path(owner, chat_id)
+                    try:
+                        chat = _unzip(self.store.get(zp) or b"")
+                    except (ValueError, KeyError, zipfile.BadZipFile):
+                        chat = None
+                    if chat and chat.get("id") == chat_id and (forever or _fresh(chat, now)):
+                        chats.append(_stub(chat))
+                        changed = True
+                    else:
+                        self.store.delete(zp)
+                if changed:
+                    self._store(path, chats, forever)
+        return done
 
     # ── expiry: analyse, record, then delete ──
     def sweep(self, analyse, record, keep_owners=(), limit: int = 10) -> int:
@@ -192,10 +293,16 @@ class History:
             for chat in stale:
                 if done >= limit:
                     return done
-                insight = analyse(chat)                          # raises when it can't: the chat stays for next time
-                record(m.group(1), chat, insight)
+                zp = self._zip_path(m.group(1), str(chat.get("id")))
+                if chat.get("archived"):                         # its words are in its zip
+                    data = self.store.get(zp)
+                    chat = _unzip(data) if data else {**chat, "history": []}
+                if chat.get("history"):
+                    insight = analyse(chat)                      # raises when it can't: the chat stays for next time
+                    record(m.group(1), chat, insight)
                 with self._lock:
                     self._store(path, [c for c in self._load(path) if c.get("id") != chat.get("id")], False)
+                    self.store.delete(zp)                        # its zip, if it was archived (none is no harm)
                 done += 1
         return done
 

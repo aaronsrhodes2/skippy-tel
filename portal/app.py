@@ -2578,7 +2578,19 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         finally:
             sweep_state["running"] = False
 
+    def archive_now():
+        try:
+            keep = {chat_history.owner_id(e) for e in app.config["ADMIN_EMAILS"]}
+            done = chats_kept.archive(keep_owners=keep)
+            print(json.dumps({"event": "chat_archive", "archived": done}), flush=True)
+        except Exception as exc:  # noqa: BLE001 — the bucket away: tomorrow night
+            print(json.dumps({"event": "chat_archive_paused", "why": str(exc)[:200]}), flush=True)
+
     def maybe_sweep():
+        night = time.strftime("%Y-%m-%d", time.gmtime(time.time() - 36000))   # a "night" turns over at 10:00 UTC, ~3 am Pacific
+        if sweep_state.get("archived") != night:                  # once a night: chats untouched for 14 days are zipped (chat_history.archive)
+            sweep_state["archived"] = night
+            threading.Thread(target=archive_now, daemon=True).start()
         if sweep_state["running"] or time.time() - sweep_state["last"] < 3600 or not brain_ready(brains.CORE):
             return
         sweep_state.update(last=time.time(), running=True)
@@ -2612,6 +2624,15 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def history_save(chat_id):
         body = request.get_json(silent=True) or {}
         return history_call(lambda: chats_kept.save(me(), chat_id, body.get("title"), body.get("history")))
+
+    @talk.get("/history/<chat_id>")
+    @skippy_required
+    def history_open(chat_id):
+        """One chat whole; an archived one is restored from its zip (chat_history.restore)."""
+        resp = history_call(lambda: chats_kept.restore(me(), chat_id))
+        resp = resp if isinstance(resp, tuple) else (resp, 200)
+        resp[0].headers["Cache-Control"] = "private, no-store"
+        return resp
 
     @talk.patch("/history/<chat_id>")
     @skippy_required
