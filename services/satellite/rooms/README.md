@@ -84,5 +84,14 @@ panel's frame buffer, each frame at its last datagram, so a frame is never half 
 * **Safety.** The receiver checks every field before using it (magic, version, rectangle inside the panel, lengths, exact inflated size), never writes unless LVGL is
   paused, and decompresses with a heap-held state on an 8 KB task (the first version put the ~11 KB inflate state on a 4 KB stack: the LoadProhibited crash).
   `tests/test_sat_face_stream.py` runs the same checks against garbage.
+* **Later additions (2026-10-31).** (1) The face is drawn in a **child process** (`RemoteFaceStreamer`, `SATELLITE_FACE_PROC=0` for in-process): the hub's own work when a clip
+  starts made frames late, which showed as the can jumping; the child reads JSON lines on stdin and ends with its input, so killing the hub never leaves a second stream.
+  (2) The can is a **flat cartoon-shaded** image (`avatar/flat_can.py` makes `frames/ball_flat` from the brushed renders; the box's own drawing uses the same files) and
+  **glides** to its sway position every tick (`GLIDE`) instead of jumping. (3) The box writes each streamed frame **right after vsync** (`vsync-synced` in its log), so the
+  scan never catches a write: no shear. (4) The box reports its lost-datagram count (`Stream loss` sensor); while it grows the hub sends at half rate and resends the
+  whole face when the burst ends (`FaceStreamer.note_loss`/`slow_now`); what really cured the bursts was the router's 2.4 GHz channel (1, 20 MHz, not Auto/9).
+  (5) Keys and looks: top key = pod speaker, bottom key = microphone (`Face` sensor: `<state>,<talking>,<mic off>,<speaker off>`); mic off = earplugs, listening with the
+  speaker on = a floating microphone, both off = off duty (fuchsia, music face). The pod volume is locked at `pod_volume` (0.7) at boot. With music on and nothing else
+  (`Face.music_heard`, set through `EsphomeLink.music_heard`, or the pod's own `music` state) he dances now and then in rest mode (streamed face only).
 * **Changing how he looks:** change the yaml drawing (the fallback), then `face_render.py` to match. `tools/face_stream_demo.py` streams by hand (a colour-bar test picture, a
   scripted run, a throughput test); `tools/box_fps.py` reads the box's own rates; `rooms/shot.py` takes the picture from the panel itself while streaming.
