@@ -23,6 +23,18 @@ docker compose up -d flask-api
 
 Full rebuild cycle: ~15 seconds. No manual restart needed.
 
+## See and test it (the harness: run these before and after a change)
+
+- **Which tests:** `python tools/affected_tests.py` (only what the change can break); before a push, the Linux CI run (`.claude/skills/ci-tests`).
+- **Portal pages:** `python tools/workshop_screenshot.py <page> --out .skippy-shots/x.png` (a real browser, signed in as the Captain); purple's
+  `browse` tool clicks and screenshots any URL. Each app against its REAL service on this PC: `python portal/tests/dev_{chat,music,video,books,car,status}.py`.
+- **Live and deployed:** `curl -s http://localhost:3003/health` (flask-api), the portal's `/version` (`commit`), `python tools/loop_timer.py --watch --since now`
+  (push → CI → live), CI's verdict `ssh skippy-core 'sudo cat /var/lib/skippy-core/ci/skippy-tel/latest.json'`.
+- **The pods and the hub:** `python services/satellite/rooms/shot.py` (a screenshot of a pod's screen), `python tools/box_watch.py` (its Wi-Fi drops),
+  `services/satellite/homectl.py` (lights and plugs: `prove`, `identify`), `services/satellite/wakectl.py` (the wake word), the hub's log in `state/`.
+- **The bridge (purple):** `curl -s http://localhost:9337/health` (its `front` block lists the generations), `bash tools/bridge_supervisor.sh --status`.
+- **Marked-up screenshots:** a picture attached to a Core run has its hand-drawn marks found and read one by one (`services/claude-bridge/markup.py`).
+
 ## Project structure
 
 ```

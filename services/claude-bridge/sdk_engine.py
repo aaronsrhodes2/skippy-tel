@@ -421,7 +421,7 @@ def run_core(shop, run, session: str | None) -> None:
     try:
         project = shop.project(run.project)
         env = shop.core_env()
-        env["SKIPPY_LANE_DEPLOY"] = project.primary if project.deploy == "skippytel" and not project.inplace else ""
+        env.update(shop.lane_env(project))
         shop.share_memory(env.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude"), project.clone, project.primary)
         config = env.get("CLAUDE_CONFIG_DIR") or ""
         resume = session if run_state.can_resume(config, project.clone, session) else None
@@ -444,7 +444,7 @@ def run_core(shop, run, session: str | None) -> None:
         async def main() -> None:
             await drive(run, clone=project.clone, request=run.message, resume=resume, open_session=open_session,
                         remember=lambda sid: shop._remember(shop.session_key(run.project, run.conv, run.brain), sid),
-                        detail=we.tool_detail, lane=Lane(project.clone, env["SKIPPY_LANE_DEPLOY"], deny_read=opts["deny_read"]), rotate_at=rotate)
+                        detail=we.tool_detail, lane=Lane(project.clone, env["SKIPPY_LANE_DEPLOY"], deny_read=opts["deny_read"], fix=env["SKIPPY_LANE_FIX"]), rotate_at=rotate)
 
         loop = asyncio.new_event_loop()
         task = loop.create_task(main())

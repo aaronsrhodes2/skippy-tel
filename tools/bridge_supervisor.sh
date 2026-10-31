@@ -12,7 +12,7 @@
 # the bridge even up?" was a question only someone at the PC could answer.)
 #
 # What it does:
-#   * runs `python bridge.py` (same environment defaults as `make bridge`: CLAUDE_BRIDGE_CWD, CLAUDE_PATH) and, whenever
+#   * runs `python front.py`, the front door that runs bridge.py behind it (BRIDGE_FRONT=0: bridge.py itself; same environment defaults as `make bridge`: CLAUDE_BRIDGE_CWD, CLAUDE_PATH) and, whenever
 #     it exits, starts it again: after 3 s, then 6, 12, 24, 48, 60, 60 ... A bridge that stayed up for 5 minutes counts as
 #     healthy, so the next failure starts the ladder from 3 s again.
 #   * never runs a second bridge: if one already answers /health on the bridge's port (a hand-started `make bridge`, or
@@ -125,7 +125,9 @@ build_cmd() {
   fi
   local py
   py=$(pick_python) || return 1
-  CMD=("$py" bridge.py)
+  # The front door (services/claude-bridge/front.py, 2026-10-31) runs bridge.py behind it as generations, so a bridge deploy is a
+  # hand-over (the old one finishes its run) instead of a stop. BRIDGE_FRONT=0 runs bridge.py directly, as before.
+  if [ "${BRIDGE_FRONT:-1}" = 0 ]; then CMD=("$py" bridge.py); else CMD=("$py" front.py); fi
 }
 
 rotate_log() {                  # copy-truncate: the child keeps its (append-mode) handle, so nothing is lost for long

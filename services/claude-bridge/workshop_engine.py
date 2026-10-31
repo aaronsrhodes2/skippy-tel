@@ -44,6 +44,7 @@ from pathlib import Path
 
 import chat_names
 import eyes
+import markup
 import conversation_log
 import new_folder
 import projects as projects_mod
@@ -366,6 +367,11 @@ INPLACE_NOTE = (
     "If the folder isn't a git repo, say so before changing files, since there is then no undo.\n\n")
 
 
+def norm_path(p: str) -> str:
+    """A path to compare with another: forward slashes, lower case, no trailing slash."""
+    return str(p).replace("\\", "/").rstrip("/").lower()
+
+
 def render_prompt(template: str, project) -> str:
     """workshop_prompt.md for one project: the {{#skippytel}}...{{/skippytel}} block only for a project with SkippyTel's
     deploy rules, the {{#other}}...{{/other}} block only for the rest (whose own CLAUDE.md says how to test and ship),
@@ -655,6 +661,19 @@ class Workshop:
         return self.login_probe.status()
 
     # ── projects ─────────────────────────────────────────────────────────
+    def lane_env(self, project) -> dict:
+        """The lane guard's two exceptions for a run in `project` (lane_guard.py): SKIPPY_LANE_DEPLOY, SkippyTel's primary checkout (pull and
+        deploy a skippy-pc service there, never edit), and SKIPPY_LANE_FIX, SkippyTel's own clone, writable from EVERY conversation (the Captain,
+        2026-10-31: a SkippyTel bug found from any chat is fixed, pushed and deployed from that chat). Blank where the lane already is that folder."""
+        try:
+            st = self.project(projects_mod.DEFAULT)
+        except KeyError:
+            return {"SKIPPY_LANE_DEPLOY": "", "SKIPPY_LANE_FIX": ""}
+        same = lambda a, b: bool(a and b) and norm_path(a) == norm_path(b)
+        deploy = "" if same(project.clone, st.primary) else st.primary
+        fix = "" if same(project.clone, st.clone) or same(project.clone, st.primary) else st.clone
+        return {"SKIPPY_LANE_DEPLOY": deploy, "SKIPPY_LANE_FIX": fix}
+
     def project(self, pid: str | None = None) -> projects_mod.Project:
         """A project by id (KeyError if this bridge has no such project). The default one is SkippyTel."""
         pid = pid or projects_mod.DEFAULT
@@ -788,7 +807,23 @@ class Workshop:
         self._save(run, True)
 
     def get(self, task: str) -> Run | None:
-        return self._runs.get(task)
+        """A run by task id. One this bridge doesn't hold but that a FINISHED file on disk has (a run an older generation
+        finished during a hand-over, front.py) is taken back from the file, so the chat still gets its answer."""
+        run = self._runs.get(task)
+        if run is not None or not _TASK.fullmatch(task or ""):
+            return run
+        path = self._file(task)
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return None
+        found = self._read(path, mtime)
+        if found is None or not found.done:
+            return None                                # still running in the older generation: front.py routes to it
+        with self._lock:
+            run = self._runs.setdefault(task, found)
+        run.on_change = self._save
+        return run
 
     def listing(self) -> list[dict]:
         """The newest runs (at most MAX_LISTED), for GET /workshop/runs: what the reporter reconciles the portal with."""
@@ -880,12 +915,15 @@ class Workshop:
                 self._save_error = message
                 print(f"[bridge] couldn't save run {run.task}: {message}", file=sys.stderr, flush=True)
 
-    def load(self) -> int:
+    def load(self, close_unfinished: bool = True) -> int:
         """At bridge start: take back the runs on disk that are younger than KEEP_FINISHED_S (a finished run counts
         from when it finished, a run caught mid-flight from when it was last written), prune the rest. A run that
         was not done had its process die with the bridge: it is closed as failed and says so, so the chat shows an
         ending instead of waiting. Returns how many runs came back. Called by main(), not at import, so merely
-        importing this module (a test) never touches the real directory."""
+        importing this module (a test) never touches the real directory.
+
+        close_unfinished=False is a hand-over (front.py): an older bridge is still alive and still running the unfinished ones, so
+        they are left alone (not taken, file untouched); the front door calls load() again (POST /workshop/adopt) once it is gone."""
         root = Path(self.state_dir)
         try:
             entries = sorted(root.iterdir())
@@ -909,6 +947,8 @@ class Workshop:
                 continue
             if run is None:
                 continue                               # unreadable and recent: leave it alone, never crash the start
+            if not run.done and not close_unfinished:
+                continue                               # the older generation's live run (a hand-over): not ours yet
             with self._lock:
                 if run.task in self._runs:
                     continue
@@ -1007,14 +1047,27 @@ class Workshop:
         url, key = self._core_settings()
         return eyes.describe(url, key, path, post=post)
 
+    def read_marks(self, path: str, post=None) -> str:
+        """The marks the Captain drew on a picture (circles, arrows, boxes...), each with what is under it (markup.py); "" when none."""
+        url, key = self._core_settings()
+        return markup.read(path, url, key, post=post)
+
     def _describe_pictures(self, message: str, paths: list[str]) -> str:
-        """The message for a Core-brain run with pictures: each one described by the vision slot, and the coder told not to open them."""
+        """The message for a Core-brain run with pictures: each one described by the vision slot (and the marks he drew on it read one
+        by one, markup.py), and the coder told not to open them."""
         parts = []
         for n, path in enumerate(paths, 1):
             try:
                 seen = self.describe_picture(path)
             except Exception as exc:                   # noqa: BLE001 — say so in the message; never fail the run over it
                 seen = f"(Skippy Core's vision model couldn't look at it: {type(exc).__name__}: {exc})"
+            try:
+                marks = self.read_marks(path)
+            except Exception as exc:                   # noqa: BLE001 — the description alone still goes
+                marks = f"(the marks on it couldn't be read: {type(exc).__name__})"
+            if marks:
+                seen = ("The Captain's marks on it (each is what he is pointing at; positions in the picture's pixels):\n"
+                        + marks + "\n\nThe whole picture:\n" + seen)
             parts.append(f"Picture {n} ({path}):\n{seen}")
         many = len(paths) != 1
         return (message + "\n\n[The Captain attached " + str(len(paths)) + (" pictures" if many else " picture") + ". You can't see "
@@ -1528,8 +1581,7 @@ class Workshop:
         try:
             project = self.project(run.project)
             env = self.core_env() if run.brain == "core" else child_env()
-            # the lane guard's one exception: SkippyTel's primary checkout, where a skippy-pc service is pulled and deployed
-            env["SKIPPY_LANE_DEPLOY"] = project.primary if project.deploy == "skippytel" and not project.inplace else ""
+            env.update(self.lane_env(project))         # the lane guard's exceptions: SkippyTel's deploy checkout and its fix lane
             # One memory with the Captain's own Claude Code (both brains): the clone's notes folder links to his project's notes.
             self.share_memory(env.get("CLAUDE_CONFIG_DIR") or os.getenv("WORKSHOP_CLAUDE_HOME")
                               or os.path.join(os.path.expanduser("~"), ".claude"), project.clone, project.primary)

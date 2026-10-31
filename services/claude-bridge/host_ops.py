@@ -19,6 +19,7 @@ Pure where it can be: `runner` (subprocess) and `clock` are arguments, so the te
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -34,6 +35,15 @@ SUPERVISOR_PID = Path(COMPOSE_DIR) / "state" / "bridge-supervisor.pid"
 FUNNEL_DOORS = (("443", "3005", ""), ("8443", "3006", ""), ("10000", "3007", ""), ("10000", "3008", "/in"), ("10000", "3009", "/books"))
 OUTPUT_MAX = 1500
 TIMEOUT_S = 120
+def _front_token() -> str:
+    """The home token, which the front door (front.py) also asks for."""
+    try:
+        import workshop_engine
+        return workshop_engine.home_token() or ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 SELF_RESTART_DELAY_S = 1.5        # long enough for the reply to leave before this process (or the reporter) goes away
 
 
@@ -136,6 +146,9 @@ class HostOps:
 
     # ── the bridge itself ────────────────────────────────────────────────
     def restart_bridge(self) -> Result:
+        front = os.getenv("BRIDGE_FRONT_URL", "").rstrip("/")
+        if front:                                   # behind the front door (front.py): a hand-over, never a stop
+            return self.handover(front)
         if not self.is_supervised():
             raise Refused("The bridge isn't running under tools/bridge_supervisor.sh, so nothing would start it again. "
                           "Not restarting it.")
@@ -143,6 +156,18 @@ class HostOps:
             raise Refused("The private Skippy is in the middle of a run; cancel it first (the card above).")
         self.later(SELF_RESTART_DELAY_S, lambda: os._exit(0))       # held until then: no run can start and be cut off
         return Result(True, "The bridge restarts now; its supervisor brings it back within a few seconds.")
+
+    def handover(self, front: str, post=None) -> Result:
+        """Ask the front door (front.py) for a new bridge generation: it starts one from the code on disk, sends every NEW job to it,
+        and lets this one finish the run it has (even the run that asked for this) before it exits. Nothing is cut off."""
+        import urllib.request
+        req = urllib.request.Request(front + "/front/handover", data=b"{}", method="POST",
+                                     headers={"Content-Type": "application/json", "Authorization": "Bearer " + _front_token()})
+        try:
+            got = post(req) if post else json.loads(urllib.request.urlopen(req, timeout=60).read() or b"{}")
+        except Exception as exc:  # noqa: BLE001
+            return Result(False, f"The front door didn't take the hand-over ({type(exc).__name__}: {exc}).")
+        return Result(bool(got.get("ok")), str(got.get("summary") or "hand-over asked"))
 
     # ── the private Skippy's clone ───────────────────────────────────────
     def reset_workshop(self, project_id: str) -> Result:

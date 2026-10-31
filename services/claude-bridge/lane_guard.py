@@ -10,6 +10,9 @@ lane is refused, with the reason, which Claude Code shows the model so it can sa
     mkdir, touch, tee, sed -i, a > redirect, PowerShell's *-Item/Set-Content/Out-File) and names a path outside the lane.
   * SKIPPY_LANE_DEPLOY (the project's primary checkout, the place SkippyTel's skippy-pc services deploy from): it may go there
     to run git pull/fetch/status/log, docker compose and make. Never an edit there.
+  * SKIPPY_LANE_FIX (SkippyTel's own workshop clone, the Captain's rule 2026-10-31: "always fix a SkippyTel bug from any chat"):
+    a second lane every conversation may change, commit and push in, so a bug in the architecture found from any project's chat
+    is fixed there, pushed, tested by CI and deployed, without leaving the conversation.
 
 It is a guard rail for a model that wanders, not a sandbox: a determined command can get past a text check, and the prompt
 (workshop_prompt.md) tells it the lane is the Captain's rule. Exit 2 = refused (the reason on stderr); 0 = allowed.
@@ -61,8 +64,9 @@ def inside(path: str, root: str) -> bool:
 
 
 class Lane:
-    def __init__(self, lane: str, deploy: str = "", temps=None, deny_read=()):
+    def __init__(self, lane: str, deploy: str = "", temps=None, deny_read=(), fix: str = ""):
         self.lane = norm(lane, lane)
+        self.fix = norm(fix, lane) if fix else ""                                              # SkippyTel's clone: writable from every conversation
         self.deny_read = [norm(d, lane) for d in deny_read if isinstance(d, str) and d]      # folders no tool may touch, not even to read
         self.deploy = norm(deploy, lane) if deploy else ""
         temps = temps if temps is not None else [tempfile.gettempdir(), os.environ.get("TEMP", ""), os.environ.get("TMP", ""), "/tmp"]
@@ -70,7 +74,10 @@ class Lane:
 
     def ok_to_write(self, path: str) -> bool:
         p = norm(path, self.lane)
-        return inside(p, self.lane) or any(inside(p, t) for t in self.temps) or p.startswith("/dev/")
+        return inside(p, self.lane) or self._in_fix(p) or any(inside(p, t) for t in self.temps) or p.startswith("/dev/")
+
+    def _in_fix(self, p: str) -> bool:
+        return bool(self.fix) and inside(p, self.fix)
 
     def check(self, tool: str, args: dict) -> str | None:
         """None if allowed, else the reason it isn't."""
@@ -107,13 +114,13 @@ class Lane:
     def _segment(self, seg: str) -> str | None:
         for m in _MOVE.finditer(seg):
             where = norm(m.group(1), self.lane)
-            if not (inside(where, self.lane) or any(inside(where, t) for t in self.temps)):
+            if not (inside(where, self.lane) or self._in_fix(where) or any(inside(where, t) for t in self.temps)):
                 if self.deploy and inside(where, self.deploy):
                     continue                                    # the deploy checkout: what it may run there is checked below
                 return f"`{m.group(0).strip()}` leaves this conversation's folder ({self.lane})."
         for m in _GIT_C.finditer(seg):
             where = norm(m.group(1), self.lane)
-            if inside(where, self.lane):
+            if inside(where, self.lane) or self._in_fix(where):
                 continue
             if self.deploy and inside(where, self.deploy) and m.group(2).lower() in ("pull", "fetch", "status", "log", "diff", "show", "rev-parse"):
                 continue
@@ -146,7 +153,7 @@ def main() -> int:
     lane = os.environ.get("CLAUDE_PROJECT_DIR") or event.get("cwd") or ""
     if not lane:
         return 0
-    reason = Lane(lane, os.environ.get("SKIPPY_LANE_DEPLOY", "")).check(str(event.get("tool_name") or ""), event.get("tool_input") or {})
+    reason = Lane(lane, os.environ.get("SKIPPY_LANE_DEPLOY", ""), fix=os.environ.get("SKIPPY_LANE_FIX", "")).check(str(event.get("tool_name") or ""), event.get("tool_input") or {})
     if reason:
         print(f"Refused by the Captain's lane rule: {reason} If this really needs doing, say so and ask him.", file=sys.stderr)
         return 2

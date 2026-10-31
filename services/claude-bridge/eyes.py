@@ -27,17 +27,21 @@ PROMPT = ("Describe this picture precisely for someone who can't see it and need
 
 def describe(url: str, key: str, path: str, post=None, timeout: float = 180) -> str:
     """What Skippy Core's vision slot sees in the picture at `path`. Raises when Core can't be asked or says nothing."""
-    import urllib.request
-    if not (url and key):
-        raise RuntimeError("Skippy Core isn't configured")
     data = Path(path).read_bytes()
     if len(data) > MAX_BYTES:
         raise RuntimeError(f"the picture is {len(data) // 1048576} MB, too big to send")
-    mime = IMAGE_TYPES.get(Path(path).suffix.lower(), "image/jpeg")
-    body = json.dumps({"model": "vision", "max_tokens": 1500, "system": "You describe pictures precisely.",
+    return ask(url, key, data, IMAGE_TYPES.get(Path(path).suffix.lower(), "image/jpeg"), PROMPT, post=post, timeout=timeout)
+
+
+def ask(url: str, key: str, data: bytes, mime: str, prompt: str, max_tokens: int = 1500, post=None, timeout: float = 180) -> str:
+    """One question about one picture (its bytes) to Skippy Core's vision slot; its words. Raises when Core can't be asked or says nothing."""
+    import urllib.request
+    if not (url and key):
+        raise RuntimeError("Skippy Core isn't configured")
+    body = json.dumps({"model": "vision", "max_tokens": max_tokens, "system": "You describe pictures precisely.",
                        "messages": [{"role": "user", "content": [
                            {"type": "image", "source": {"type": "base64", "media_type": mime, "data": base64.b64encode(data).decode()}},
-                           {"type": "text", "text": PROMPT}]}]}).encode()
+                           {"type": "text", "text": prompt}]}]}).encode()
     req = urllib.request.Request(url.rstrip("/") + "/v1/messages", data=body, method="POST",
                                  headers={"x-api-key": key, "Authorization": "Bearer " + key,
                                           "anthropic-version": "2023-06-01", "Content-Type": "application/json"})

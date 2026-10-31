@@ -207,6 +207,10 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError as exc:
                     self._json(409, {"error": "refused", "message": str(exc)})
             return
+        if path == "/workshop/adopt":                           # front.py: the older generation is gone, its runs are ours now
+            if self._workshop_ok():
+                self._json(200, {"ok": True, "restored": adopt()})
+            return
         if path.startswith("/workshop/cancel/"):
             if self._workshop_ok():
                 self._json(200, {"ok": WORKSHOP.cancel(path.rsplit("/", 1)[1])})
@@ -356,18 +360,38 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write(f"[bridge] {self.address_string()} {fmt % args}\n")
 
 
+_adopted = threading.Lock()
+_memory_started = False
+
+
+def adopt(close_unfinished: bool = True, memory: bool = True) -> int:
+    """Take back the saved runs (and, once, start Skippy Memory's import). At start, and again by POST /workshop/adopt when the older
+    generation of a hand-over is gone. Never raises: being reachable matters more than remembering."""
+    global _memory_started
+    with _adopted:
+        try:
+            n = WORKSHOP.load(close_unfinished=close_unfinished)
+            print(f"[bridge] {n} saved run(s) restored from {WORKSHOP.state_dir}", file=sys.stderr)
+        except Exception:  # noqa: BLE001
+            print("[bridge] couldn't restore saved runs; starting without them:", file=sys.stderr)
+            traceback.print_exc()
+            n = 0
+        if memory and not _memory_started:
+            _memory_started = True
+            MEMORY.start()      # Skippy Memory: imports this PC's Claude Code sessions and the inbox every 30 min (memory_service.py)
+        return n
+
+
 def main():
     print(f"[bridge] PORT={PORT} CWD={CWD} CLAUDE={CLAUDE}",
           file=sys.stderr)
     # Take back the runs saved on disk before the first request, so a restart (a crash, a reboot, the supervisor) keeps
     # finished runs deliverable and ends the interrupted ones with an error the chat can show. Whatever is wrong with
     # that directory, the bridge still starts: being reachable matters more than remembering.
-    try:
-        print(f"[bridge] {WORKSHOP.load()} saved run(s) restored from {WORKSHOP.state_dir}", file=sys.stderr)
-    except Exception:  # noqa: BLE001
-        print("[bridge] couldn't restore saved runs; starting without them:", file=sys.stderr)
-        traceback.print_exc()
-    MEMORY.start()      # Skippy Memory: imports this PC's Claude Code sessions and the inbox every 30 min (memory_service.py)
+    # A HAND-OVER (front.py started this generation while an older one finishes its run): leave that run alone, and leave Skippy
+    # Memory's import to the older one; the front door says POST /workshop/adopt once it is gone, and this bridge then does both.
+    handover = os.getenv("BRIDGE_HANDOVER") == "1"
+    adopt(close_unfinished=not handover, memory=not handover)
     # Bind 0.0.0.0 so Docker Desktop's host.docker.internal can reach us.
     # On Windows + Docker Desktop, host-gateway routes container traffic to
     # the host's loopback through a special address; binding to 0.0.0.0

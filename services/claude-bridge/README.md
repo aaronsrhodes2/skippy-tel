@@ -173,3 +173,12 @@ with the same value. Anything else on the network can knock on port 9337 and get
 Currently launched manually with `make bridge`. To survive a reboot
 without hand-launching, register a Windows scheduled task running on
 user logon. See `misc/FUTURE_PLANS.md`.
+
+## The front door (front.py): deploying the bridge without stopping it
+
+`tools/bridge_supervisor.sh` runs `front.py` on :9337, and the front door runs `bridge.py` behind it as generations on loopback ports
+9341-9344. A hand-over (Admin's restart-bridge, or by itself when the bridge's code on disk changes after a `git pull`) starts a new
+generation for every NEW message while the old one finishes the run it has, then stops it once idle and lets the new one adopt its
+runs. One queue still holds: a new run waits (busy) while an older generation is running. The front door holds no run, so restarting it
+loses nothing: it takes its generations back from `state/bridge-front.json`. `BRIDGE_FRONT=0` runs bridge.py directly, as before.
+Tests: `tests/test_bridge_front.py`.

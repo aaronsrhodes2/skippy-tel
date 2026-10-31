@@ -147,7 +147,6 @@ def test_a_finished_run_comes_back_after_a_restart_and_can_be_followed_again(sho
     run = finish(shop.start("aaaaaaaa", "conv-12345678", "hi", who="captain@example.com"))
     saved(shop, "aaaaaaaa", lambda d: d["done"])
     restarted = make_shop(tmp_path, monkeypatch)
-    assert restarted.get("aaaaaaaa") is None                                     # nothing until main() loads
     assert restarted.load() == 1
     back = restarted.get("aaaaaaaa")
     assert back.since(0) == run.since(0) and back.since(2)["events"] == run.events[2:]
@@ -155,6 +154,13 @@ def test_a_finished_run_comes_back_after_a_restart_and_can_be_followed_again(sho
     assert back.done is True and back.ok is True and back.message == ""
     assert restarted.start("aaaaaaaa", "conv-12345678", "", attach=True) is back             # re-attach, no new claude run
     assert not restarted.busy() and len(restarted.listing()) == 1
+
+
+def test_a_finished_run_is_taken_back_from_disk_on_demand_without_a_load(shop, tmp_path, monkeypatch):
+    """A hand-over (front.py): the older generation finishes a run after the new one started; the chat's next poll still gets it."""
+    finish(shop.start("aaaaaaaa", "conv-12345678", "hi"))
+    saved(shop, "aaaaaaaa", lambda d: d["done"])
+    assert make_shop(tmp_path, monkeypatch).get("aaaaaaaa").done
 
 
 def test_a_run_that_was_running_when_the_bridge_died_is_closed_with_the_restart_error(shop):
