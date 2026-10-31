@@ -72,8 +72,8 @@
    "the morning briefing's leave-by time and today's miles (daily.py)"
   ],
   "example": {
-   "ask": "POST /route {\"points\": [[37.17, -122.14], [37.06, -122.01]]}",
-   "answer": "{\"km\": 24.6, \"minutes\": 31, ...}"
+   "ask": "POST /route {\"points\": [[lat, lon], [lat, lon]]}",
+   "answer": "{\"km\": <Valhalla's km>, \"minutes\": <its minutes>, \"legs\": [...]}"
   }
  },
  "valhalla": {
