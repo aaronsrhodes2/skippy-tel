@@ -600,6 +600,7 @@ interval:
           mw += (tw - mw) * 0.55f; mu += (tu - mu) * 0.55f; ml += (tl - ml) * 0.55f; teethv += (tt - teethv) * 0.5f;
           ph += talk ? 0.13f : 0.06f; rot += 0.012f * (0.6f + id(energy));
           float ox = sinf(ph * 0.5f) * 5, oy = sinf(ph) * 5, cx = 240 + ox, cy = 245 + oy;
+          const float K = 0.81f;                          // the head is this much of its old size (the hat and the rest keep theirs)
           auto clampi = [](float v) { int i = (int) v; return i < 0 ? 0 : (i > 479 ? 479 : i); };
           auto put = [](lv_obj_t *o, lv_point_precise_t *p, int n) {     // a line widget's box runs from its own corner to its last point: anchor it at its points, or every change redraws a huge rectangle
             int mx = 479, my = 479;
@@ -615,46 +616,46 @@ interval:
             last = now; }
           // ── eyes ──
           auto eye = [&](lv_point_precise_t *p, float ex, float ey) {
-            float w = 25, h = 22 * eo * blinking; if (h < 2) h = 2;
+            float w = 25 * K, h = 22 * K * eo * blinking; if (h < 2) h = 2;
             for (int i = 0; i < 18; i++) { float a = i * 6.2832f / 17; p[i].x = clampi(ex + w * cosf(a)); p[i].y = clampi(ey + h * sinf(a)); }
           };
-          float exl = cx - 52, exr = cx + 52, ey = cy - 36;
+          float exl = cx - 52 * K, exr = cx + 52 * K, ey = cy - 36 * K;
           eye(el, exl, ey); eye(er, exr, ey);
           put(id(eye_l)->obj, el, 18); put(id(eye_r)->obj, er, 18);
           bool open = eo * blinking > 0.3f;
           for (int s2 = 0; s2 < 2; s2++) {
             lv_obj_t *pu = s2 ? id(pup_r) : id(pup_l);
-            if (open) { lv_obj_clear_flag(pu, LV_OBJ_FLAG_HIDDEN); lv_obj_set_pos(pu, (int) ((s2 ? exr : exl) + lx * 12 - 7), (int) (ey + ly * 8 - 7)); lv_obj_t *gl = s2 ? id(glint_r) : id(glint_l); lv_obj_clear_flag(gl, LV_OBJ_FLAG_HIDDEN); lv_obj_set_pos(gl, (int) ((s2 ? exr : exl) + lx * 12 - 1), (int) (ey + ly * 8 - 7)); }
+            if (open) { lv_obj_clear_flag(pu, LV_OBJ_FLAG_HIDDEN); lv_obj_set_pos(pu, (int) ((s2 ? exr : exl) + lx * 12 * K - 7), (int) (ey + ly * 8 * K - 7)); lv_obj_t *gl = s2 ? id(glint_r) : id(glint_l); lv_obj_clear_flag(gl, LV_OBJ_FLAG_HIDDEN); lv_obj_set_pos(gl, (int) ((s2 ? exr : exl) + lx * 12 * K - 1), (int) (ey + ly * 8 - 7)); }
             else { lv_obj_add_flag(pu, LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(s2 ? id(glint_r) : id(glint_l), LV_OBJ_FLAG_HIDDEN); }
           }
           // ── brows ──
           auto brow = [&](lv_point_precise_t *p, float bx, float side, float extra) {
-            float y0 = cy - 36 - 36 * eo * 0.45f - 14 - bh - extra, sl = ba * 18 * side;     // side -1 left, +1 right: inner end lower when angry
-            p[0].x = clampi(bx - 26); p[0].y = clampi(y0 - sl * -1 * (side < 0 ? 1 : -1) * 0 + (side < 0 ? sl : -sl) * -1);
-            p[1].x = clampi(bx - 9);  p[1].y = clampi(y0 + (side < 0 ? -sl : sl) * 0.3f - 3);
-            p[2].x = clampi(bx + 9);  p[2].y = clampi(y0 + (side < 0 ? sl : -sl) * 0.3f - 3);
-            p[3].x = clampi(bx + 26); p[3].y = clampi(y0 + (side < 0 ? sl : -sl) * -1 * -1);
+            float y0 = cy - (36 + 36 * eo * 0.45f + 14 + bh + extra) * K, sl = ba * 18 * side * K;     // side -1 left, +1 right: inner end lower when angry
+            p[0].x = clampi(bx - 26 * K); p[0].y = clampi(y0 - sl * -1 * (side < 0 ? 1 : -1) * 0 + (side < 0 ? sl : -sl) * -1);
+            p[1].x = clampi(bx - 9 * K);  p[1].y = clampi(y0 + (side < 0 ? -sl : sl) * 0.3f - 3);
+            p[2].x = clampi(bx + 9 * K);  p[2].y = clampi(y0 + (side < 0 ? sl : -sl) * 0.3f - 3);
+            p[3].x = clampi(bx + 26 * K); p[3].y = clampi(y0 + (side < 0 ? sl : -sl) * -1 * -1);
           };
           brow(bl_, exl, -1, bl + (br < 0 ? 0 : 0)); brow(br_, exr, 1, br + 0);
           put(id(brow_l)->obj, bl_, 4); put(id(brow_r)->obj, br_, 4);
           // ── mouth: an upper and a lower lip meeting at the corners; the smile lifts them ──
-          float my = cy + 52;
+          float my = cy + 52 * K, MW = mw * 1.55f, MU = mu * 1.55f, ML = ml * 1.55f;       // a big mouth: half as big again as it was, on a smaller head
           for (int i = 0; i < 12; i++) {                                // upper lip, left to right
             float u = -1 + i * 2.0f / 11, edge = 1 - u * u;
-            mo[i].x = clampi(cx + mw * u); mo[i].y = clampi(my - mu * edge - sm * (1 - edge) * 0.5f);
+            mo[i].x = clampi(cx + MW * u); mo[i].y = clampi(my - MU * edge - sm * (1 - edge) * 0.5f);
           }
           for (int i = 0; i < 12; i++) {                                // lower lip, right to left
             float u = 1 - i * 2.0f / 11, edge = 1 - u * u;
-            mo[12 + i].x = clampi(cx + mw * u); mo[12 + i].y = clampi(my + ml * edge - sm * (1 - edge) * 0.5f);
+            mo[12 + i].x = clampi(cx + MW * u); mo[12 + i].y = clampi(my + ML * edge - sm * (1 - edge) * 0.5f);
           }
           mo[24] = mo[0];
           put(id(mouth)->obj, mo, 25);
           int nf = 0;                                                    // the inside of the mouth: scan lines between the lips, one polyline
-          if (mu + ml > 3) {
-            float top = my - mu, bot = my + ml; bool ltr = true;
+          if (MU + ML > 3) {
+            float top = my - MU, bot = my + ML; bool ltr = true;
             for (float yy = top + 1.5f; yy < bot - 1 && nf < 22; yy += 5.0f) {
-              float v = (yy - my) < 0 ? (my - yy) / mu : (yy - my) / ml; if (v > 1) v = 1;
-              float half = mw * sqrtf(1 - v * v) * 0.97f;
+              float v = (yy - my) < 0 ? (my - yy) / MU : (yy - my) / ML; if (v > 1) v = 1;
+              float half = MW * sqrtf(1 - v * v) * 0.97f;
               mf[nf].x = clampi(cx + (ltr ? -half : half)); mf[nf].y = clampi(yy); nf++;
               mf[nf].x = clampi(cx + (ltr ? half : -half)); mf[nf].y = clampi(yy); nf++;
               ltr = !ltr;
@@ -662,9 +663,9 @@ interval:
           }
           if (nf >= 2) { put(id(mfill)->obj, mf, nf); lv_obj_set_style_line_opa(id(mfill)->obj, 255, LV_PART_MAIN); }
           else lv_obj_set_style_line_opa(id(mfill)->obj, 0, LV_PART_MAIN);
-          th[0].x = clampi(cx - mw * 0.7f); th[0].y = clampi(my - mu * 0.35f); th[1].x = clampi(cx + mw * 0.7f); th[1].y = th[0].y;
+          th[0].x = clampi(cx - MW * 0.7f); th[0].y = clampi(my - MU * 0.35f); th[1].x = clampi(cx + MW * 0.7f); th[1].y = th[0].y;
           put(id(teeth)->obj, th, 2);
-          lv_obj_set_style_line_opa(id(teeth)->obj, (lv_opa_t) (teethv > 0.5f && mu + ml > 6 ? 150 : 0), LV_PART_MAIN);
+          lv_obj_set_style_line_opa(id(teeth)->obj, (lv_opa_t) (teethv > 0.5f && mu + ml > 4 ? 150 : 0), LV_PART_MAIN);
           // ── the admiral's hat: a big black bicorne a size too big, pulled low, riding loose on his head, with a rosette and a strip of gold lace. It lags his motion, swings, slides and
           //    bounces on the loud syllables, and never falls off ──
           { static float ha = 0, hv = 0, hx = 0, hxv = 0, hy = 0, hyv = 0, last_open = 0;
@@ -799,7 +800,7 @@ interval:
             if (ear < 0.06f) { for (int k = 0; k < 4; k++) lv_obj_set_style_line_opa(fo[k], 0, LV_PART_MAIN); }
             else for (int sd = 0; sd < 2; sd++) {
               float s2 = sd ? 1.0f : -1.0f, a = (sd ? 0.95f : 0.55f) + 0.12f * sinf(ph * 2.3f + sd * 2.0f) + 0.2f * (st == "recording");
-              float bx = cx + s2 * 128, by = cy - 52, L = 96 * ear, Wd = 58 * ear, dx = s2 * sinf(a), dy = -cosf(a), nx = -dy, ny = dx;
+              float bx = cx + s2 * 128 * K, by = cy - 52 * K, L = 96 * K * ear, Wd = 58 * K * ear, dx = s2 * sinf(a), dy = -cosf(a), nx = -dy, ny = dx;
               for (int i = 0; i <= 8; i++) {
                 float t = i / 8.0f, hw = Wd / 2 * powf(sinf(3.14159f * t), 0.7f), px = bx + dx * L * t, py = by + dy * L * t;
                 int lx = clampi(px + nx * hw), ly = clampi(py + ny * hw), rx = clampi(px - nx * hw), ry = clampi(py - ny * hw);
@@ -1175,8 +1176,8 @@ lvgl:
         - image:
             id: ball_img
             src: skippy_ball
-            x: 80
-            y: 85
+            x: 110
+            y: 115
         - line:
             id: hat_fill
             x: 0
