@@ -43,6 +43,9 @@ esphome:
   build_flags:
     - -DLV_USE_SNAPSHOT=1                 # lv_snapshot_take, for the screenshot action
   on_boot:
+    - priority: -100                       # after the media player: the pod's volume is always ${pod_volume} at boot (the player restores its last one otherwise)
+      then:
+        - lambda: 'id(player)->make_call().set_volume(${pod_volume}f).perform();'
     - priority: 200
       then:
         - lambda: |-
@@ -311,7 +314,7 @@ media_player:
   - platform: speaker
     id: player
     name: Speaker
-    volume_initial: ${pod_volume}         # locked: the watcher below puts it back if anything changes it (the house stereos have the volume controls)
+    volume_initial: ${pod_volume}         # locked: set once here, changed only by the speaker key (mute / un-mute); the house stereos have the volume controls
     announcement_pipeline:                # Skippy's voice and announcements: over the music, which ducks under it
       speaker: voice_resampler
       format: FLAC
@@ -526,8 +529,11 @@ binary_sensor:
       - delayed_on: 20ms
     on_press:
       - lambda: |-
-          if (id(player)->volume > 0.01f) { id(mute_saved) = id(player)->volume; id(player)->make_call().set_volume(0.0f).perform(); }
-          else { id(player)->make_call().set_volume(${pod_volume}f).perform(); }
+          id(spk_off) = !id(spk_off);                                   // the key owns the flag (never derived from the player's volume, which moves during announcements)
+          id(player)->make_call().set_volume(id(spk_off) ? 0.0f : ${pod_volume}f).perform();
+      - script.execute:
+          id: face
+          state: !lambda 'return id(state_now);'
 
 # ── the face: one ring that breathes, coloured by what is happening ───────────────────────────────────────
 globals:
@@ -652,14 +658,12 @@ interval:
           bool want = s->wants();
           if (want && !s->ready()) { id(lvgl_comp)->set_paused(true, false); s->set_ready(true); ESP_LOGI("stream", "the hub draws the face"); id(stream_live)->publish_state(true); }
           else if (!want && s->ready()) { s->set_ready(false); id(lvgl_comp)->set_paused(false, false); ESP_LOGI("stream", "stream stopped: drawing on the box"); id(stream_live)->publish_state(false); }
-  - interval: 250ms                       # the keys' state: the microphone switch and the pod's speaker volume; when either changes the face redraws and the hub is told
+  - interval: 250ms                       # the microphone switch: when it changes the face redraws and the hub is told
     then:
       - lambda: |-
-          float v = id(player)->volume;
-          if (v > 0.01f && fabsf(v - ${pod_volume}f) > 0.005f) { id(player)->make_call().set_volume(${pod_volume}f).perform(); v = ${pod_volume}f; }   // locked
-          bool mo = !id(mic_on)->state, so = v <= 0.01f;
-          if (mo != id(mic_off) || so != id(spk_off)) {
-            id(mic_off) = mo; id(spk_off) = so;
+          bool mo = !id(mic_on)->state;                                   // (the volume is set once: volume_initial; the speaker key owns spk_off)
+          if (mo != id(mic_off)) {
+            id(mic_off) = mo;
             id(face)->execute(id(state_now));
           }
   - interval: 250ms                       # the lamp breathes: slow when idle, quicker when something is happening
