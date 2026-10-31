@@ -514,3 +514,20 @@ def test_the_hub_checks_a_box_in_with_the_home_token_and_gets_a_phones_take(clie
 def test_with_more_than_two_speakers_the_play_on_menu_offers_all_of_them():
     js = (STATIC / "bilby-app.js").read_text(encoding="utf-8")
     assert 'rooms.length === 2 ? "Both" : "All"' in js
+
+
+def test_favorites_are_marked_from_a_pod_or_purple_and_from_the_player_and_played_back(client):
+    """The Captain, 2026-10-31: "Skippy, add this song to my favorites", from a pod, purple Skippy or the player; the hub then plays them back."""
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    box = {"device": "skippyroom-office", "name": "Office (Skippy)", "room": "box-office",
+           "state": {"track": "Moby/Play/03 Porcelain.mp3", "title": "Porcelain", "artist": "Moby", "playing": True}}
+    assert client.post("/home/music/favorite", json={"device": "skippyroom-office"}).status_code == 401
+    assert client.post("/home/music/favorite", json={}, headers=auth).status_code == 409          # nothing playing yet
+    client.post("/home/music/checkin", json=box, headers=auth)
+    got = client.post("/home/music/favorite", json={"device": "skippyroom-office", "source": "pod"}, headers=auth).get_json()
+    assert got["favorite"]["title"] == "Porcelain" and got["favorite"]["source"] == "pod"
+    assert client.get("/home/music/favorites", headers=auth).get_json()["favorites"][0]["track"] == "Moby/Play/03 Porcelain.mp3"
+    login(client, ADMIN)
+    assert client.get("/music/favorites").get_json()["favorites"][0]["title"] == "Porcelain"
+    m3u = client.get("/music/favorites.m3u")
+    assert m3u.status_code == 200 and b"Moby/Play/03 Porcelain.mp3" in m3u.data

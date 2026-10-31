@@ -20,6 +20,7 @@ EsphomeLink in esphome_link.py).
 from __future__ import annotations
 
 import argparse
+import re
 import asyncio
 import sys
 import time
@@ -147,6 +148,8 @@ class Room:
         self.music = None                                       # music.BoxMusic for a box that plays Bilby's library
         self.book = None                                        # audiobooks.BookPlayer: the Captain's audiobooks (pod and PC outputs); ducked while Skippy listens and talks
         self.last_media = "music"                               # "music" or "book": what "pause" and "resume" mean when both exist
+        self.daily = None                                       # daily.Daily (shared): the morning, coming-home and bedtime routines
+        self.stereo = None                                      # stereo.StereoMusic: Bilby's library on the house stereo (the routines' music); ducked like a book
         self.tasks: set = set()
         self.voice = asyncio.Lock()                             # one thing said at a time (a timer waits for an answer to finish)
         self.vad = Vad(floor_min=floor)
@@ -251,8 +254,9 @@ class Room:
 
     def _woke(self, by: str) -> None:
         self.log(f"[{self.name}] woke")
-        if self.book is not None:
-            self.book.duck(True, 25)                            # a book playing on the PC outputs goes quiet while he talks to Skippy
+        for media in (self.book, self.stereo):
+            if media is not None:
+                media.duck(True, 25)                            # a book or the stereo playing on the PC outputs goes quiet while he talks to Skippy
         self._record("wake", by=by)
         self.mode, self.deadline = LISTENING, self.t + self.listen_ms
         if self.buf is None:
@@ -404,6 +408,8 @@ class Room:
         house-wide rules (hours, a few a day, backed off after a no) allow it. Checked once a minute from the tick."""
         if self.starters is None or self.mode != IDLE or self.pending is not None or self.pending_starter is not None or self.recorder is not None:
             return
+        if self.daily is not None and (self.daily.busy or self.daily.arrived_at is not None):
+            return                                              # a routine is running (or waiting for him to come in): no starters on top
         now = time.monotonic()
         if now - self._starter_check < 60 or self.voice.locked() or self.buf is not None:
             return
@@ -459,6 +465,11 @@ class Room:
                 done, command = await self._answer_starter(command)
                 if done:
                     return
+        if self.daily is not None and await self.daily.claim(self, command):
+            self._turn_at = time.monotonic()                    # a routine's words ("goodnight", "skip", "later"): the routine answers, not the brain
+            if self.mode == BUSY and not typed:
+                self._resume(IDLE)
+            return
         self.pending = None
         self._turn_at = time.monotonic()
         if not typed and (is_goodbye(command) or is_stop(command)):
@@ -562,16 +573,18 @@ class Room:
             voice = await self._voice(said)
             await self.link.show(said)
             self._also(voice)
-            if self.book is not None:
-                self.book.duck(True, 90)                        # the book (on the PC outputs) ducks under Skippy's voice, then comes back
+            for media in (self.book, self.stereo):
+                if media is not None:
+                    media.duck(True, 90)                        # a book or the stereo (on the PC outputs) ducks under Skippy's voice, then comes back
             try:
                 if announce:
                     await self.link.announce(said, voice)
                 else:
                     await self.link.speak(said, voice, follow_up)
             finally:
-                if self.book is not None:
-                    self.book.duck(True, self.followup_ms / 1000 if follow_up else 2.5)
+                for media in (self.book, self.stereo):
+                    if media is not None:
+                        media.duck(True, self.followup_ms / 1000 if follow_up else 2.5)
 
     def _also(self, voice) -> None:
         """Start this clip on the PC's own outputs too (each waits its own delay so they line up with the box); never holds anything up."""
@@ -622,6 +635,11 @@ class Room:
                 self.log(f"[{self.name}] automation {auto['id']}: {result}")
                 self._record("automation", automation=auto["id"], tool=auto["action"]["tool"], target=auto["action"]["args"].get("name"),
                              act=auto["action"]["args"].get("action"), outcome=str(result)[:120])
+        if self.daily is not None:
+            try:
+                await self.daily.tick(self)
+            except Exception as e:                              # noqa: BLE001 — a routine's trouble never stops the room's clock
+                self.log(f"[{self.name}] (routines: {type(e).__name__}: {e})")
         await self.maybe_start()
 
 
@@ -825,6 +843,19 @@ def build_rooms(env: dict):
     workspace = Workspace(hlog.root)
     run_action = (lambda tool, args: house_mod.run_tool(house, tool, args)) if house is not None else None
     loop = asyncio.get_running_loop()                           # build_rooms runs on the hub's loop (_main)
+    import daily as daily_mod                                    # noqa: PLC0415
+    from brain import load_persona                               # noqa: PLC0415
+    stereo_holder: dict = {}
+
+    def stereo():
+        """The house stereo (SKIPPY_STEREO_OUT, default the HDMI to the Sony), made once the first box with a media server is connected."""
+        if "music" not in stereo_holder and stereo_holder.get("media") is not None:
+            import router as router_mod                          # noqa: PLC0415
+            from stereo import StereoMusic                       # noqa: PLC0415
+            kinds = [k for k in env.get("SKIPPY_STEREO_OUT", "hdmi").split("+") if k]
+            stereo_holder["music"] = StereoMusic(router_mod.shared(env, log), kinds, stereo_holder["media"], log=log)
+        return stereo_holder.get("music")
+    routines = None if env.get("SKIPPY_ROUTINES", "on").lower() in ("off", "0", "no") else         daily_mod.Daily(env, house=house, client=client, model=brain_model, filler=filler_bank, stereo=stereo, hlog=hlog, log=log, persona=load_persona())
     from homechat import HomeChat                                # noqa: PLC0415
     import music as music_mod                                    # noqa: PLC0415
     homechat = HomeChat(env.get("PORTAL_URL") or music_mod.PORTAL, token, enabled=env.get("SATELLITE_HOME_CHAT", "on").lower() not in ("off", "0", "no"), log=log)
@@ -834,7 +865,7 @@ def build_rooms(env: dict):
         spotter = Spotter.load(model_path, threshold=threshold) if model_path.is_file() else None
         holder: dict = {}
         plays_music = "player" in getattr(link, "keys", {})      # an ESPHome box with a media player (esphome_link.discover ran first)
-        tools = music_tools(lambda: holder["room"], loop) if plays_music else None
+        tools = music_tools(lambda: holder["room"], loop, favorites=music_mod.Favorites(env.get("PORTAL_URL") or music_mod.PORTAL, token)) if plays_music else None
         book = audiobooks.build_player(env, name, link, log)     # None when SATELLITE_AUDIOBOOKS=off
         if book is not None:
             tools = audiobooks.combine(tools, audiobooks.book_tools(lambda: holder["room"], loop))
@@ -846,6 +877,10 @@ def build_rooms(env: dict):
                                      filler_after_s=float(env.get("SATELLITE_FILLER_S", "1.0")), hlog=hlog, workspace=workspace, run_action=run_action, homechat=homechat, starters=starters,
                                      followup_ms=int(float(env.get("SATELLITE_SESSION_S", "30")) * 1000))      # the name opens a conversation: it stays open this long without a word
         room.book = book
+        if getattr(link, "media", None) is not None:
+            stereo_holder.setdefault("media", link.media)
+        room.daily = routines
+        room.stereo = stereo() if routines is not None else None
         return room
     make_room.homechat = homechat                               # _main runs its sync loop (never under --record)
     return make_room
@@ -853,15 +888,18 @@ def build_rooms(env: dict):
 
 MUSIC_TOOLS = [
     {"name": "music", "description": "Control the music playing in THIS room (Bilby's Audio Service on this room's speaker).",
-     "input_schema": {"type": "object", "properties": {"action": {"type": "string", "enum": ["pause", "resume", "next", "previous", "louder", "quieter"]}},
+     "input_schema": {"type": "object", "properties": {"action": {"type": "string", "enum": ["pause", "resume", "next", "previous", "louder", "quieter", "favorite"],
+                      "description": "favorite: add the song playing now to his favorites (for DJing later): 'add this song to my favorites', 'favorite this'"}},
                       "required": ["action"]}},
-    {"name": "play_music", "description": "Play music from the Captain's own library in THIS room: an artist, an album or a song, in his words.",
-     "input_schema": {"type": "object", "properties": {"what": {"type": "string", "description": "e.g. 'Pink Floyd', 'Dark Side of the Moon', 'Comfortably Numb'"}},
+    {"name": "play_music", "description": "Play music from the Captain's own library in THIS room: an artist, an album or a song, in his words; "
+                                          "'favorites' for his favorites list; 'everything' for the whole library. shuffle=true for 'shuffle ...'.",
+     "input_schema": {"type": "object", "properties": {"what": {"type": "string", "description": "e.g. 'Pink Floyd', 'Comfortably Numb', 'favorites', 'everything'"},
+                                                       "shuffle": {"type": "boolean"}},
                       "required": ["what"]}},
 ]
 
 
-def music_tools(room_of, loop):
+def music_tools(room_of, loop, favorites=None):
     """(tools, run) for Brain(extra=...): the music in the room the brain belongs to. The brain runs in a worker thread; the music lives on
     the hub's event loop, so each call is handed over to it. A room without a speaker for music says so."""
     def run(name: str, args: dict) -> str:
@@ -886,14 +924,30 @@ def music_tools(room_of, loop):
                 if step is not None:
                     await step()
                     return f"Done: {action}."
+                if action == "favorite":                        # "Skippy, add this song to my favorites" (portal/favorites.py)
+                    if favorites is None:
+                        return "His favorites list is not set up here."
+                    return await asyncio.to_thread(favorites.mark, room.name)
                 if action in ("louder", "quieter"):              # the pods' volume is locked at 70% (the Captain, 2026-10-31: louder, they crackle)
                     return ("Not done: the pods' volume is locked at one level on purpose (louder, they crackle). "
                             "The house stereos have their own volume knobs; tell him to use those.")
                 return "I cannot do that to the music."
             what = str((args or {}).get("what") or "")
-            found = music_mod.search(await box.media.catalog(), what)
+            mixed = bool((args or {}).get("shuffle"))
+            plain = " ".join(re.findall(r"[a-z]+", what.lower()))
+            if re.fullmatch(r"(?:my |his )?(?:favou?rites?|favou?rite songs?|liked songs)", plain):
+                found = await asyncio.to_thread(favorites.tracks) if favorites is not None else []
+                if not found:
+                    return "His favorites list is empty so far."
+            elif re.fullmatch(r"(?:everything|all|all (?:of )?(?:my |his )?music|(?:my |his |the )?(?:whole |entire )?(?:library|collection))", plain):
+                found, mixed = list(await box.media.catalog()), True
+            else:
+                found = music_mod.search(await box.media.catalog(), what)
             if not found:
                 return f"Nothing in his library matches {what!r}."
+            if mixed:
+                import random                                   # noqa: PLC0415
+                found = random.sample(found, len(found))[:music_mod.MAX_QUEUE]
             if book is not None:
                 await book.pause()                              # music and a book never play at once
             room.last_media = "music"

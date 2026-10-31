@@ -28,6 +28,37 @@ def room_key(room: str) -> str:
     return f"box-{room}"
 
 
+class Favorites:
+    """The Captain's Bilby favorites, kept on the portal (portal/favorites.py): mark what he is listening to, and fetch the list to play."""
+
+    def __init__(self, portal: str, token: str, request=None):
+        self.portal, self.token = portal.rstrip("/"), token
+        self.request = request or self._request
+
+    def _request(self, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
+        import requests                                          # noqa: PLC0415
+        r = requests.request(method, self.portal + path, json=body, headers={"Authorization": f"Bearer {self.token}"}, timeout=10)
+        try:
+            return r.status_code, r.json()
+        except ValueError:
+            return r.status_code, {}
+
+    def mark(self, room: str) -> str:
+        """Mark the song he is listening to now (this room's own box first). Returns what to say."""
+        code, got = self.request("POST", "/home/music/favorite", {"device": device_id(room), "source": "voice"})
+        if code == 409:
+            return "Nothing is playing, so there is nothing to add to his favorites."
+        if code != 200:
+            return f"The favorites list did not answer ({code})."
+        f = got.get("favorite") or {}
+        again = " It was already there; it is back at the top." if int(f.get("count") or 1) > 1 else ""
+        return f"Added {f.get('title') or 'the song'}" + (f" by {f['artist']}" if f.get("artist") else "") + " to his favorites." + again
+
+    def tracks(self) -> list[str]:
+        code, got = self.request("GET", "/home/music/favorites")
+        return [f["track"] for f in (got.get("favorites") or []) if isinstance(f, dict) and f.get("track")] if code == 200 else []
+
+
 class BoxMusic:
     """`player` is the box: async play(url), stop(), volume(step). `media` makes track URLs and knows the titles."""
 

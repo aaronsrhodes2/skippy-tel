@@ -19,6 +19,7 @@ from pathlib import Path
 SEARCH_URL = os.environ.get("PURPLE_SEARCH_URL", "http://skippy-core:7360").rstrip("/")   # SearXNG on skippy-core (core/compose.core.yml), tailnet only
 MAX_TEXT = 7000
 CAR_BLE_URL = os.environ.get("PURPLE_CAR_BLE_URL", "http://skippy-core:7352").rstrip("/")   # the car's charging door on skippy-core (core/car-ble), tailnet only
+CAR_FLEET_URL = os.environ.get("PURPLE_CAR_FLEET_URL", "http://skippy-core:7353").rstrip("/")   # the car as a guard (core/car-fleet), tailnet only
 CAR_URL = os.environ.get("PURPLE_CAR_URL", "http://skippy-core:7351").rstrip("/")           # the car reader (core/car): TeslaMate's latest values
 
 
@@ -333,6 +334,73 @@ def car_charge(args: dict, post=http_post_json, get=http_get_json) -> str:
     return said + f"{car.get('name') or 'The car'}: " + ", ".join(bits) + f"{lag}."
 
 
+def car_sentry(args: dict, post=http_post_json, get=http_get_json) -> str:
+    """Sentry Mode on or off through the Fleet API (from anywhere), or what Sentry has seen. The alarm's answer (lights, lock) is automatic."""
+    action = str(args.get("action") or "").strip().lower()
+    if action not in ("arm", "disarm", "status"):
+        raise ValueError("car_sentry's action is arm, disarm or status")
+    said = ""
+    if action != "status":
+        got = post(f"{CAR_FLEET_URL}/sentry", {"action": action}, timeout=90.0)
+        if not isinstance(got, dict) or not got.get("ok"):
+            raise ValueError("The car didn't take it: " + str((got or {}).get("error") if isinstance(got, dict) else "no answer"))
+        said = str(got.get("said") or "done") + ". "
+    view = get(f"{CAR_FLEET_URL}/sentry", 10.0)
+    events = [f"{time.strftime('%a %H:%M', time.localtime(e['at']))} {e.get('said')}" for e in (view.get("events") or [])[-5:] if e.get("at")]
+    heard = (view.get("telemetry") or {}).get("heard_s")
+    out = said + f"Sentry is {view.get('state') or 'unknown'}"
+    out += f" (last word from the car {heard} s ago)" if heard is not None else " (the car hasn't streamed yet)"
+    return out + (". Recent: " + "; ".join(events) if events else ". Nothing seen lately.")
+
+
+# ── Bilby favorites: mark the song the Captain is listening to, for DJing later (portal/favorites.py) ──────────────────────────────────────────────
+PORTAL_URL = os.environ.get("PURPLE_PORTAL_URL", "https://skippy-portal-1015050363686.us-west1.run.app").rstrip("/")
+
+
+def _home_token() -> str:
+    """The home token (the reporter's, the hub's): from the environment, else the vault on G:."""
+    tok = os.environ.get("SKIPPY_HOME_TOKEN", "")
+    if tok:
+        return tok
+    try:
+        for line in Path(os.environ.get("PURPLE_VAULT", "G:/My Drive/vault/.env")).read_text(encoding="utf-8").splitlines():
+            if line.startswith("SKIPPY_HOME_TOKEN="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
+def bilby_favorite(args: dict, request=None) -> str:
+    """Mark what he is listening to now (any of his Bilby players or pods), or list the favorites."""
+    action = args.get("action") or "add"
+    token = _home_token()
+    if not token:
+        raise ValueError("bilby_favorite: no home token on this PC")
+    if request is None:
+        def request(method, url, body=None):
+            req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None, method=method,
+                                         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=20) as r:
+                    return r.status, json.loads(r.read() or b"{}")
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read() or b"{}")
+    if action == "list":
+        code, got = request("GET", f"{PORTAL_URL}/home/music/favorites")
+        items = got.get("favorites") or []
+        if not items:
+            return "His favorites list is empty."
+        return "\n".join(f"{i + 1}. {f.get('artist') or '?'} - {f.get('title') or f.get('track')}" for i, f in enumerate(items[:100]))[:MAX_TEXT]
+    code, got = request("POST", f"{PORTAL_URL}/home/music/favorite", {"source": "purple"})
+    if code == 409:
+        return "Nothing is playing on any of his Bilby players, so there is nothing to add."
+    if code != 200:
+        raise ValueError(f"bilby_favorite: the portal answered {code}")
+    f = got.get("favorite") or {}
+    return f"Added to his favorites: {f.get('artist') or '?'} - {f.get('title') or f.get('track')}" + (" (already there; moved to the top)" if int(f.get("count") or 1) > 1 else "")
+
+
 TOOLS: dict[str, dict] = {
     "browse": {
         "description": "Open a web page in a real headless browser on this PC (scripts run, so single-page apps and JavaScript-built pages work) and get its "
@@ -390,6 +458,11 @@ TOOLS: dict[str, dict] = {
                        "'orbit', 'thermo', 'optics').",
         "input_schema": {"type": "object", "properties": {"search": {"type": "string", "description": "a word to match in the name, description or domain (optional)"}}},
         "run": mentat_tools},
+    "bilby_favorite": {
+        "description": "Bilby (the Captain's music): add the song he is listening to RIGHT NOW (on any of his Bilby players or room pods) to his DJ favorites "
+                       "list, or list the favorites. Use when he says 'add this song to my favorites', 'favorite this', 'what's on my favorites'.",
+        "input_schema": {"type": "object", "properties": {"action": {"type": "string", "enum": ["add", "list"]}}},
+        "run": bilby_favorite},
     "car_charge": {
         "description": "The Captain's Tesla: start or stop charging, set the charge limit, or read the charge state. Commands go over Bluetooth from "
                        "skippy-core (parked near it) with a charging-only key; the car must be plugged in to start. Use status to check before or after.",
@@ -397,6 +470,12 @@ TOOLS: dict[str, dict] = {
             "action": {"type": "string", "enum": ["start", "stop", "limit", "status"]},
             "percent": {"type": "integer", "description": "with limit: the new charge limit, 50 to 100"}}, "required": ["action"]},
         "run": car_charge},
+    "car_sentry": {
+        "description": "The Captain's Tesla as a guard: arm or disarm Sentry Mode (through Tesla's Fleet API, from anywhere; wakes the car once if needed), "
+                       "or read what Sentry has seen (someone near, the alarm). When the alarm goes off the car flashes its lights and locks by itself "
+                       "(never the horn) and the Captain gets a Discord DM.",
+        "input_schema": {"type": "object", "properties": {"action": {"type": "string", "enum": ["arm", "disarm", "status"]}}, "required": ["action"]},
+        "run": car_sentry},
 }
 
 

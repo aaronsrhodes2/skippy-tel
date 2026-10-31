@@ -66,6 +66,7 @@ import car_web
 import ship as ship_mod
 import tabletop as tabletop_mod
 import chat_history
+import favorites as favorites_mod
 import patient as patient_mod
 import popup_in as popup_in_mod
 import tool_policy
@@ -206,6 +207,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     workshop = workshop_mod.Workshop(home)          # the Captain's private Skippy (admin only)
     app.extensions["workshop"] = workshop
     player = player_mod.Player(home)                # Bilby's Audio Service: the pass and Connect (admin only)
+    favs = favorites_mod.from_env()                 # Bilby favorites: the Captain's songs marked for DJing (favorites.py)
     app.extensions["player"] = player               # (so tests/dev_music.py can point it at a gate on this machine)
     books = audiobooks_mod.Books(home, player)      # Audiobooks: the pass for the audiobook gate, and "Play on" a room box (admin only, never a grant)
     app.extensions["books"] = books                 # (so tests/dev_books.py can point it at a gate on this machine)
@@ -813,6 +815,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     workshop.on_final = run_ended
 
     # ── home reporter (services/home-reporter) ─────────────────────────────────
+    sentry_told: set = set()                                      # the car's Sentry events already DMed (car_web.sentry_news)
+
     @app.post("/home/report")
     def home_report():
         """No login: the paired home reporter's bearer token is the key."""
@@ -845,6 +849,13 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         try:                                                      # a slow drive or a crash on his road: one DM per episode (notify.py)
             notifier.traffic_alert(next(iter(sorted(app.config["ADMIN_EMAILS"])), ""), alert)
         except Exception:                                         # noqa: BLE001 — never let a notification touch the report
+            pass
+        try:                                                      # someone at the car, or its alarm (car_web.sentry_news): one DM per event
+            car = home.car()
+            name = str(((car_web.car_of(car) or {}).get("name")) or "the car")
+            for line in car_web.sentry_news(car, sentry_told, time.time(), name):
+                notifier.alert(line)
+        except Exception:                                         # noqa: BLE001
             pass
         return jsonify(reply)
 
@@ -1117,7 +1128,60 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         # needs_tap: the other player's browser will refuse sound until someone taps it (it says so in its check-in)
         return jsonify(queued=ok, needs_tap=ok and player.needs_tap(me(), dev)), (200 if ok else 409)
 
+    # ── Bilby favorites (favorites.py): the Captain marks what he is listening to, for DJing later; the Captain only ──
+    @listen.get("/favorites")
+    @auth.admin_required
+    def favorites_list():
+        return jsonify(favorites=favs.items())
+
+    @listen.post("/favorites")
+    @auth.admin_required
+    def favorites_add():
+        """Mark a song: the one this player says it is playing (`track` etc. in the body), else whatever he is listening to now."""
+        body = request.get_json(silent=True) or {}
+        state = body if body.get("track") else favorites_mod.now_playing(player.listing(me()), str(body.get("device") or ""))
+        if not state:
+            return jsonify(error="Nothing is playing on any of your players."), 409
+        return jsonify(favorite=favs.add(state, source="player", where=str(body.get("name") or state.get("name") or "")))
+
+    @listen.post("/favorites/remove")
+    @auth.admin_required
+    def favorites_remove():
+        return jsonify(removed=favs.remove(str((request.get_json(silent=True) or {}).get("track") or "")))
+
+    @listen.get("/favorites.m3u")
+    @auth.admin_required
+    def favorites_m3u():
+        resp = app.response_class(favs.m3u(), mimetype="audio/x-mpegurl")
+        resp.headers["Content-Disposition"] = 'attachment; filename="bilby-favorites.m3u"'
+        return resp
+
     app.register_blueprint(listen)
+
+    @app.get("/home/music/favorites")
+    def home_music_favorites():
+        """The Captain's favorites for the hub ("Skippy, play/shuffle my favorites"): track paths and names, newest first. Home token."""
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        return jsonify(favorites=[{k: f.get(k) for k in ("track", "title", "artist")} for f in favs.items()])
+
+    @app.post("/home/music/favorite")
+    def home_music_favorite():
+        """The hub ("Skippy, favorite this song" at a pod) or purple Skippy's `bilby_favorite` tool, with the home token, as the Captain:
+        marks what he is listening to now (`device`: the asking pod's own Connect id, preferred when it is playing)."""
+        if (request.content_length or 0) > 4_000:
+            abort(413)
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        captain = next(iter(sorted(app.config["ADMIN_EMAILS"])), "")
+        if not captain:
+            abort(404)
+        body = request.get_json(silent=True) or {}
+        state = favorites_mod.now_playing(player.listing(captain), str(body.get("device") or ""))
+        if not state:
+            return jsonify(error="Nothing is playing on any of his players."), 409
+        source = str(body.get("source") or "home")[:20]
+        return jsonify(favorite=favs.add(state, source=source, where=state.get("name", "")))
 
     # ── Nagatha's Video Service: the Captain's Jellyfin films on any browser (video.py; the Captain and friends granted "video") ────
     films = Blueprint("video", __name__, url_prefix="/video")

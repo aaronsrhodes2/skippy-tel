@@ -339,6 +339,30 @@ def test_a_portal_that_is_away_never_stops_the_music_and_gets_the_queue_again_wh
     run(go())
 
 
+def test_favorites_by_voice_add_the_song_and_play_or_shuffle_them_and_shuffle_everything():
+    """The Captain, 2026-10-31: "Skippy, add this song to my favorites", "play my favorites", "shuffle my favorites", "shuffle all"."""
+    calls = []
+
+    def request(method, path, body=None):
+        calls.append((method, path, body))
+        if method == "POST":
+            return 200, {"favorite": {"title": "Dogs", "artist": "Pink Floyd", "count": 1}}
+        return 200, {"favorites": [{"track": "Queen/News/01 We Will Rock You.m4a"}, {"track": "Pink Floyd/Animals/02 Pigs.mp3"}]}
+
+    async def go():
+        client, media, made, hub, task, log = await boot()
+        favs = music_mod.Favorites("https://portal", "tok", request=request)
+        tools, run_tool = music_tools(lambda: made["room"], asyncio.get_running_loop(), favorites=favs)
+        assert await asyncio.to_thread(run_tool, "music", {"action": "favorite"}) == "Added Dogs by Pink Floyd to his favorites."
+        assert calls[-1] == ("POST", "/home/music/favorite", {"device": "skippyroom-kitchen", "source": "voice"})
+        said = await asyncio.to_thread(run_tool, "play_music", {"what": "my favorites"})
+        assert said.startswith("Playing 2 tracks, starting with We Will Rock You")                    # in the list's order
+        said = await asyncio.to_thread(run_tool, "play_music", {"what": "everything", "shuffle": True})
+        assert said.startswith("Playing 3 tracks")
+        task.cancel()
+    run(go())
+
+
 def test_spoken_music_requests_find_his_tracks_and_the_tools_drive_this_rooms_box():
     cat = FakeMedia().cat
     assert music_mod.search(cat, "some Pink Floyd") == ["Pink Floyd/Animals/01 Dogs.mp3", "Pink Floyd/Animals/02 Pigs.mp3"]
