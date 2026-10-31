@@ -623,9 +623,19 @@ interval:
           eye(el, exl, ey); eye(er, exr, ey);
           put(id(eye_l)->obj, el, 18); put(id(eye_r)->obj, er, 18);
           bool open = eo * blinking > 0.3f;
+          { float ew = 25 * K, eh = 22 * K * eo * blinking;                  // the whites of his eyes, and the blue iris that follows where he looks
+            for (int s2 = 0; s2 < 2; s2++) {
+              lv_obj_t *wh = s2 ? id(white_r) : id(white_l), *ir = s2 ? id(iris_r) : id(iris_l); float exx = s2 ? exr : exl;
+              if (eh > 6) {
+                lv_obj_clear_flag(wh, LV_OBJ_FLAG_HIDDEN); lv_obj_set_size(wh, (int) (2 * ew - 4), (int) (2 * eh - 4)); lv_obj_set_pos(wh, (int) (exx - ew + 2), (int) (ey - eh + 2));
+                int d = (int) (32 * K * fminf(1.0f, eh / (22 * K * 0.9f)));      // the iris shrinks a little when he squints
+                lv_obj_clear_flag(ir, LV_OBJ_FLAG_HIDDEN); lv_obj_set_size(ir, d, d); lv_obj_set_pos(ir, (int) (exx + lx * 8 * K - d / 2), (int) (ey + ly * 6 * K - d / 2));
+              } else { lv_obj_add_flag(wh, LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(ir, LV_OBJ_FLAG_HIDDEN); }
+            }
+          }
           for (int s2 = 0; s2 < 2; s2++) {
             lv_obj_t *pu = s2 ? id(pup_r) : id(pup_l);
-            if (open) { lv_obj_clear_flag(pu, LV_OBJ_FLAG_HIDDEN); lv_obj_set_pos(pu, (int) ((s2 ? exr : exl) + lx * 12 * K - 7), (int) (ey + ly * 8 * K - 7)); lv_obj_t *gl = s2 ? id(glint_r) : id(glint_l); lv_obj_clear_flag(gl, LV_OBJ_FLAG_HIDDEN); lv_obj_set_pos(gl, (int) ((s2 ? exr : exl) + lx * 12 * K - 1), (int) (ey + ly * 8 - 7)); }
+            if (open) { lv_obj_clear_flag(pu, LV_OBJ_FLAG_HIDDEN); lv_obj_set_pos(pu, (int) ((s2 ? exr : exl) + lx * 8 * K - 7), (int) (ey + ly * 6 * K - 7)); lv_obj_t *gl = s2 ? id(glint_r) : id(glint_l); lv_obj_clear_flag(gl, LV_OBJ_FLAG_HIDDEN); lv_obj_set_pos(gl, (int) ((s2 ? exr : exl) + lx * 8 * K - 1), (int) (ey + ly * 8 - 7)); }
             else { lv_obj_add_flag(pu, LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(s2 ? id(glint_r) : id(glint_l), LV_OBJ_FLAG_HIDDEN); }
           }
           // ── brows ──
@@ -666,6 +676,36 @@ interval:
           th[0].x = clampi(cx - MW * 0.7f); th[0].y = clampi(my - MU * 0.35f); th[1].x = clampi(cx + MW * 0.7f); th[1].y = th[0].y;
           put(id(teeth)->obj, th, 2);
           lv_obj_set_style_line_opa(id(teeth)->obj, (lv_opa_t) (teethv > 0.5f && mu + ml > 4 ? 150 : 0), LV_PART_MAIN);
+          // ── a few extra pen strokes, cartoon style: a line under the lower lip, smile lines and frown lines at the corners, furrows between the brows ──
+          { static lv_point_precise_t ch[7], sl_[2][7], fr_[2][7], fu[2][2];
+            float sc = sm > 3 ? fminf((sm - 3) / 8.0f, 1.0f) : 0, fc2 = sm < -2 ? fminf((-sm - 2) / 6.0f, 1.0f) : 0;
+            // under the lower lip: it follows the lip down when the mouth opens
+            float cw = 30 + MW * 0.45f, cyy = my + ML + 13;
+            for (int i = 0; i < 7; i++) { float u = -1 + i / 3.0f; ch[i].x = clampi(cx + cw * u); ch[i].y = clampi(cyy + 5 * (1 - u * u)); }
+            put(id(chin)->obj, ch, 7);
+            lv_obj_set_style_line_opa(id(chin)->obj, (lv_opa_t) (st == "muted" ? 0 : 230), LV_PART_MAIN);
+            lv_obj_t *so[2] = {id(smile_l)->obj, id(smile_r)->obj}, *fo2[2] = {id(frown_l)->obj, id(frown_r)->obj};
+            for (int sd = 0; sd < 2; sd++) {
+              float side = sd ? 1.0f : -1.0f, kx = cx + side * MW, ky = my - sm * 0.5f;
+              if (sc > 0.05f) {                                                   // a smile line bowing out from each corner, up the cheek
+                for (int i = 0; i < 7; i++) { float t = i / 6.0f; sl_[sd][i].x = clampi(kx + side * (10 + 12 * sinf(3.14159f * t * 0.9f))); sl_[sd][i].y = clampi(ky - 4 - 44 * sc * t); }
+                put(so[sd], sl_[sd], 7); lv_obj_set_style_line_opa(so[sd], (lv_opa_t) (255 * sc), LV_PART_MAIN);
+              } else lv_obj_set_style_line_opa(so[sd], 0, LV_PART_MAIN);
+              if (fc2 > 0.05f) {                                                  // a frown line dragging down from each corner
+                for (int i = 0; i < 7; i++) { float t = i / 6.0f; fr_[sd][i].x = clampi(kx + side * (6 + 9 * sinf(3.14159f * t * 0.8f))); fr_[sd][i].y = clampi(ky + 6 + 40 * fc2 * t); }
+                put(fo2[sd], fr_[sd], 7); lv_obj_set_style_line_opa(fo2[sd], (lv_opa_t) (255 * fc2), LV_PART_MAIN);
+              } else lv_obj_set_style_line_opa(fo2[sd], 0, LV_PART_MAIN);
+            }
+            float fu_a = ba > 0.12f ? fminf(ba / 0.4f, 1.0f) : 0;                 // furrows between the brows when he is cross or sceptical
+            lv_obj_t *fv[2] = {id(furrow_a)->obj, id(furrow_b)->obj};
+            for (int sd = 0; sd < 2; sd++) {
+              if (fu_a > 0.05f) {
+                float fx = cx + (sd ? 8 : -8), fy = cy - (36 + 36 * eo * 0.45f + 14 + bh) * K - 4;
+                fu[sd][0].x = clampi(fx); fu[sd][0].y = clampi(fy); fu[sd][1].x = clampi(fx + (sd ? 2 : -2)); fu[sd][1].y = clampi(fy + 24 * fu_a);
+                put(fv[sd], fu[sd], 2); lv_obj_set_style_line_opa(fv[sd], (lv_opa_t) (255 * fu_a), LV_PART_MAIN);
+              } else lv_obj_set_style_line_opa(fv[sd], 0, LV_PART_MAIN);
+            }
+          }
           // ── the admiral's hat: a big black bicorne a size too big, pulled low, riding loose on his head, with a rosette and a strip of gold lace. It lags his motion, swings, slides and
           //    bounces on the loud syllables, and never falls off ──
           { static float ha = 0, hv = 0, hx = 0, hxv = 0, hy = 0, hyv = 0, last_open = 0;
@@ -680,13 +720,13 @@ interval:
             if (ha > 0.30f) { ha = 0.30f; hv = 0; } if (ha < -0.30f) { ha = -0.30f; hv = 0; }          // loose, but it never falls off
             if (hx > 26) { hx = 26; hxv = 0; } if (hx < -26) { hx = -26; hxv = 0; }
             if (hy > 6) hy = 6; if (hy < -10) hy = -10;
-            const float hw = 250, px = cx + hx, py = cy - 62 + hy, ca = cosf(ha), sa = sinf(ha);
+            const float hw = 285, px = cx + hx, py = cy - 62 + hy, ca = cosf(ha), sa = sinf(ha);
             auto rot = [&](float lx, float ly, lv_point_precise_t &o) { o.x = (int) (px + lx * ca - ly * sa); o.y = (int) (py + lx * sa + ly * ca); };   // not clamped: the hat runs off both sides of the screen
             int nt = 0, nb = 0, nfp = 0; bool up = true;
             for (int i = 0; i <= 40; i++) {
               float u = -1 + i * 2.0f / 40, r = sqrtf(fmaxf(1 - u * u, 0));
               float au = fabsf(u), tip = 44 * u * u;                                         // a tall felt bell: the sides sweep out in concave curves to low points; the lower edge arches over his head
-              float top = tip - 160 * powf(1 - powf(au, 2.3f), 1.25f), bot = tip - 24 * (1 - u * u);       // a high dome whose two ends droop down over the sides of his head
+              float top = tip - 152 * powf(1 - powf(au, 2.3f), 1.25f) - 42 * expf(-(u * u) / 0.11f), bot = tip - 24 * (1 - u * u);       // plus a taller crown at the front       // a high dome whose two ends droop down over the sides of his head
               rot(u * hw, top, ht[nt++]); rot(u * hw, bot, hb[nb++]);
               if (i >= 1 && i <= 39 && nfp < 82) {                                           // the cloth: vertical strokes between the edges
                 rot(u * hw, up ? top + 3 : bot - 3, hf[nfp++]); rot(u * hw, up ? bot - 3 : top + 3, hf[nfp++]); up = !up;
@@ -1298,6 +1338,36 @@ lvgl:
             outline_width: 0
             shadow_width: 0
             scrollable: false
+        - obj:
+            id: white_l
+            x: 0
+            y: 0
+            width: 20
+            height: 20
+            radius: 100
+            bg_color: 0xf7f7fa
+            bg_opa: COVER
+            border_width: 0
+            border_color: 0x000000
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: white_r
+            x: 0
+            y: 0
+            width: 20
+            height: 20
+            radius: 100
+            bg_color: 0xf7f7fa
+            bg_opa: COVER
+            border_width: 0
+            border_color: 0x000000
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
         - line:
             id: mfill
             x: 0
@@ -1375,6 +1445,113 @@ lvgl:
             line_color: 0xeceef2
             line_opa: 0%
             line_rounded: false
+        - line:
+            id: chin
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 4
+            line_color: 0x1b1d22
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: smile_l
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 4
+            line_color: 0x1b1d22
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: smile_r
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 4
+            line_color: 0x1b1d22
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: frown_l
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 4
+            line_color: 0x1b1d22
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: frown_r
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 4
+            line_color: 0x1b1d22
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: furrow_a
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 4
+            line_color: 0x1b1d22
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: furrow_b
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 4
+            line_color: 0x1b1d22
+            line_opa: 0%
+            line_rounded: true
+        - obj:
+            id: iris_l
+            x: 0
+            y: 0
+            width: 20
+            height: 20
+            radius: 100
+            bg_color: 0x2f7bd9
+            bg_opa: COVER
+            border_width: 2
+            border_color: 0x1d4fa0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
+        - obj:
+            id: iris_r
+            x: 0
+            y: 0
+            width: 20
+            height: 20
+            radius: 100
+            bg_color: 0x2f7bd9
+            bg_opa: COVER
+            border_width: 2
+            border_color: 0x1d4fa0
+            outline_width: 0
+            shadow_width: 0
+            hidden: true
+            scrollable: false
         - obj:
             id: pup_l
             x: 0
