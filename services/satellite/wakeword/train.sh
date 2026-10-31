@@ -10,4 +10,4 @@ mkdir -p "$STATE"
 to_host() { if command -v cygpath > /dev/null; then cygpath -w "$1"; else echo "$1"; fi; }   # Git Bash on Windows: Docker wants D:\...
 export MSYS_NO_PATHCONV=1
 docker build -t skippy-wakeword "$(to_host "$KIT")"
-docker run --rm --gpus all -v "$(to_host "$STATE"):/work" -v "$(to_host "$KIT"):/kit:ro" skippy-wakeword bash /kit/inside.sh
+docker run --rm --gpus all -v skippy-wake-train:/fast -v "$(to_host "$STATE"):/work" -v "$(to_host "$KIT"):/kit:ro" skippy-wakeword bash /kit/inside.sh
