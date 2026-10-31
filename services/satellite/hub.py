@@ -25,6 +25,7 @@ import sys
 import time
 from array import array
 from collections import deque
+from pathlib import Path
 
 from vad import Vad, rms
 from voicegate import BudgetSpent, GateError, wav_bytes
@@ -115,10 +116,11 @@ class Room:
     touched it. The room calls the link's woke / voice_started / voice_stopped / heard / released / show / speak / announce."""
 
     def __init__(self, name, link, gate, brain, timers, spotter=None, local_voice=None, log=print, floor: float = 0.012,
-                 min_speech_ms: int = 600, listen_ms: int = 8000, followup_ms: int = 6000, summarize_over: int = 1500):
+                 min_speech_ms: int = 600, listen_ms: int = 8000, followup_ms: int = 6000, summarize_over: int = 1500, filler=None, filler_after_s: float = 1.0):
         self.name, self.link, self.gate, self.brain, self.timers, self.spotter = name, link, gate, brain, timers, spotter
         self.local_voice, self.log = local_voice, log
         self.floor, self.min_speech_ms, self.listen_ms, self.followup_ms, self.summarize_over = floor, min_speech_ms, listen_ms, followup_ms, summarize_over
+        self.filler, self.filler_after_s = filler, filler_after_s       # pre-recorded quips (filler.py) to cover a slow answer
         self.remote_wake = True                                 # until the box says it woke on its own
         self.music = None                                       # music.BoxMusic for a box that plays Bilby's library
         self.tasks: set = set()
@@ -256,7 +258,9 @@ class Room:
             return
         self.log(f"[{self.name}] heard: {command}")
         try:
-            reply = await asyncio.to_thread(self.brain.reply, command)
+            work = asyncio.ensure_future(asyncio.to_thread(self.brain.reply, command))
+            await self._cover_the_wait(work, command)
+            reply = await work
         except Exception as e:                                  # noqa: BLE001 — whatever the API did, he gets an answer
             self.log(f"[{self.name}] (brain failed: {type(e).__name__})")
             reply = "My brain is not answering. Typical."
@@ -266,6 +270,27 @@ class Room:
             self._resume(FOLLOWUP, self.followup_ms)            # like Alexa: a few seconds to answer back without the name
         else:
             self._resume(IDLE)
+
+    async def _cover_the_wait(self, work, command: str) -> None:
+        """While the answer is worked out, say a pre-recorded quip as soon as it is clearly not going to be instant (never for a quick home command), and one more
+        if it is still not ready after the first: Skippy answers at once, and the real answer follows."""
+        if self.filler is None or self.filler_after_s <= 0:
+            return
+        kind = self.filler.kind_for(command)
+        if kind is None:
+            return
+        done, _ = await asyncio.wait({work}, timeout=self.filler_after_s)
+        for stage in (kind, "long"):
+            if done:
+                return
+            quip = self.filler.pick(stage)
+            if quip is not None:
+                text, mp3 = quip
+                self.log(f"[{self.name}] (filler: {text})")
+                async with self.voice:
+                    await self.link.show(text)
+                    await self.link.announce(text, ("mp3", mp3))
+            done, _ = await asyncio.wait({work}, timeout=5.0)
 
     def _resume(self, mode: str, window_ms: int = 0) -> None:
         self._fresh()
@@ -504,6 +529,8 @@ def build_rooms(env: dict):
     house = ear.build_house(env)                                # the same house as the single-room listener: one set of lights
     client, brain_model = ear.brain_client(env, "hub")           # Skippy Core's chat model: local, never a paid one
     model_path = default_model(env)
+    from filler import FillerBank                                # noqa: PLC0415
+    filler_bank = FillerBank.load(Path(__file__).resolve().parents[2] / "state" / "filler")      # recorded by tools/make_filler_bank.py; none = no quips
     threshold = float(env.get("SATELLITE_WAKE_THRESHOLD", "0.5"))
     if model_path.is_file():
         print(f"wake word: {model_path.name} (threshold {threshold})", flush=True)
@@ -520,7 +547,8 @@ def build_rooms(env: dict):
         tools = music_tools(lambda: holder["room"], loop) if plays_music else None
         brain = Brain(client, brain_model, timers, hass=house, extra=tools)
         room = holder["room"] = Room(name, link, gate, brain, timers, spotter=spotter, local_voice=audio.local_voice_pcm16, log=log,
-                                     floor=float(env.get("SATELLITE_FLOOR", "0.012")),
+                                     floor=float(env.get("SATELLITE_FLOOR", "0.012")), filler=filler_bank,
+                                     filler_after_s=float(env.get("SATELLITE_FILLER_S", "1.0")),
                                      followup_ms=int(float(env.get("SATELLITE_SESSION_S", "180")) * 1000))      # the name opens a conversation: it stays open this long without a word
         return room
     return make_room

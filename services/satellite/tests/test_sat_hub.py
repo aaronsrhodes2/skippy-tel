@@ -1,6 +1,7 @@
 """The Wyoming hub against a simulated room box: a real TCP connection speaking the real protocol (the `wyoming` package's own reader and
 writer), quiet and voice streamed as PCM, and what the hub sends back checked event by event. No hardware, no network beyond localhost."""
 import asyncio
+from pathlib import Path
 import struct
 
 import pytest
@@ -400,4 +401,28 @@ def test_the_box_answers_ping():
         await start()
         await box.send("ping", {"text": "x"})
         await box.wait_for("pong")
+    run(body)
+
+
+def test_a_slow_answer_is_covered_by_a_prerecorded_quip_and_a_quick_command_is_not():
+    import filler as F
+    bank = F.FillerBank(Path("."), {"thinking": [{"file": "x.mp3", "text": "Hmm. One moment, monkey."}], "performance": [], "long": []})
+    bank.pick = lambda kind: ("Hmm. One moment, monkey.", b"mp3") if kind == "thinking" else None
+
+    async def body(box, made, hub, log, start):
+        await start()
+        room = made["room"]
+        room.filler, room.filler_after_s = bank, 0.05
+        said = []
+
+        async def announce(text, voice):
+            said.append(text)
+        room.link.announce = announce
+        slow = asyncio.ensure_future(asyncio.sleep(0.3))
+        await room._cover_the_wait(slow, "what is the capital of france")
+        assert said == ["Hmm. One moment, monkey."]
+        said.clear()
+        await room._cover_the_wait(asyncio.ensure_future(asyncio.sleep(0.3)), "turn the lights off")
+        assert said == []
+        assert bank.kind_for("recite a haiku to me") == "performance" and bank.kind_for("why is the sky blue") == "thinking"
     run(body)
