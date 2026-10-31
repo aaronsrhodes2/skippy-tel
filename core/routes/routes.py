@@ -39,6 +39,8 @@ NOMINATIM = os.environ.get("NOMINATIM_URL", "http://nominatim:8080").rstrip("/")
 MAP = os.environ.get("ROUTES_MAP", "OpenStreetMap, California extract (Geofabrik)")
 BOUND_DEG = 1.0                                           # bounded=1: a box this many degrees each way around `near` (~110 km north-south)
 NEAR_DEG = 0.5                                            # near=: the preferred box (results outside it still count)
+STREET_DEG = 0.1                                          # only the town found: its street is looked for this close to it (~11 km)
+TOWNISH = ("city", "town", "village", "hamlet", "county", "state", "postcode", "municipality", "suburb")
 
 READY = Readiness("routes")
 _deps: tuple[float, dict] | None = None
@@ -80,20 +82,34 @@ def candidates(text: str) -> list[tuple[str, bool]]:
     return out
 
 
+def _search(q: str, near: tuple[float, float] | None, deg: float, bounded: bool, get) -> dict | None:
+    params = {"q": q, "format": "jsonv2", "limit": 1, "addressdetails": 0}
+    if near is not None:
+        params["viewbox"] = f"{near[1] - deg:.4f},{near[0] + deg:.4f},{near[1] + deg:.4f},{near[0] - deg:.4f}"
+        if bounded:
+            params["bounded"] = 1
+    got = get(f"{NOMINATIM}/search?{urllib.parse.urlencode(params)}", timeout=15) or []
+    return got[0] if got else None
+
+
 def geocode(text: str, near: tuple[float, float] | None = None, bounded: bool = False, get=http_json) -> dict | None:
-    for q, approx in candidates(text):
-        params = {"q": q, "format": "jsonv2", "limit": 1, "addressdetails": 0}
-        if near is not None:
-            d = BOUND_DEG if bounded else NEAR_DEG
-            params["viewbox"] = f"{near[1] - d:.4f},{near[0] + d:.4f},{near[1] + d:.4f},{near[0] - d:.4f}"
-            if bounded:
-                params["bounded"] = 1
-        got = get(f"{NOMINATIM}/search?{urllib.parse.urlencode(params)}", timeout=15) or []
-        if got:
-            hit = got[0]
-            return {"lat": float(hit["lat"]), "lon": float(hit["lon"]), "label": hit.get("display_name") or q, "query": q,
-                    "approx": approx or hit.get("addresstype") in ("city", "town", "village", "county", "state", "postcode"),
-                    "source": f"Nominatim ({MAP})"}
+    """The first search that answers. When only the town answers, the street is looked for again within STREET_DEG of that town: an
+    address's postal town is often not the place OpenStreetMap files the street under (171 Geyer Rd, "Scotts Valley", is in Skypark)."""
+    def found(hit: dict, q: str, approx: bool) -> dict:
+        return {"lat": float(hit["lat"]), "lon": float(hit["lon"]), "label": hit.get("display_name") or q, "query": q, "approx": approx,
+                "source": f"Nominatim ({MAP})"}
+    tried = candidates(text)
+    for q, approx in tried:
+        hit = _search(q, near, BOUND_DEG if bounded else NEAR_DEG, bounded, get)
+        if not hit:
+            continue
+        approx = approx or hit.get("addresstype") in TOWNISH
+        if approx:
+            street = next((p.strip() for c, _ in tried for p in c.split(",") if p.strip()[:1].isdigit()), None)
+            near_town = _search(street, (float(hit["lat"]), float(hit["lon"])), STREET_DEG, True, get) if street else None
+            if near_town and near_town.get("addresstype") not in TOWNISH:
+                return found(near_town, f"{street} (near {q})", False)
+        return found(hit, q, approx)
     return None
 
 
