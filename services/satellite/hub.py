@@ -142,6 +142,8 @@ class Room:
         if self.mode == IDLE and self.spotter is not None and self.remote_wake and self.spotter.feed(block):
             self._woke(getattr(self.spotter, "name", "skippy"))
         event = self.vad.push(rms(block), self.t)
+        if event in ("speech", "end"):
+            self.log(f"[{self.name}] (voice {event}: level {rms(block):.3f}, mode {self.mode})")
         if self.buf is not None and event != "speech":
             self.buf.append(block)
         if event == "speech":
@@ -193,6 +195,7 @@ class Room:
             woke, rest = wake_split(text)
             if was == IDLE:                                     # no spotter: Whisper is the wake word
                 if not woke:
+                    self.log(f"[{self.name}] (heard, not for me: {text!r})")
                     self._resume(IDLE)
                     return
                 self.log(f"[{self.name}] woke")
