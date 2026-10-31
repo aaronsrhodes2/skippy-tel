@@ -133,8 +133,12 @@ app is there, open it; otherwise <b>Create app</b> (any name, e.g. <i>Skippy</i>
         return PAGE.format(refresh="", body=body)
     if not st.web_done:
         err = f'<p class="bad">{html.escape(st.error)}</p>' if st.error else ""
-        return PAGE.format(refresh="", body=f"""{err}<p>Step 1 of 2: <a href="/go">sign in to Spotify</a> and allow Skippy to read and change your playlists,
-your library and playback.</p><p>(Client ID <code>{html.escape(st.client_id)}</code>. <a href="/forget">Use another app</a>.)</p>""")
+        return PAGE.format(refresh="", body=f"""{err}<p>Step 1 of 2, once:</p><ol>
+<li>At <a href="https://developer.spotify.com/dashboard" target="_blank">developer.spotify.com/dashboard</a>, open the app with Client ID
+<code>{html.escape(st.client_id)}</code> (the vault's), <b>Edit Settings</b>, add the Redirect URI <code>{REDIRECT}</code> and save. (Spotify
+refuses the sign-in with "Invalid redirect URI" until it is there.)</li>
+<li><a href="/go">Sign in to Spotify</a> and allow Skippy to read and change your playlists, your library and playback.</li></ol>
+<p>(<a href="/forget">Use another app</a>.)</p>""")
     code, h = service("GET", "/health")
     player = (h.get("deps") or {}).get("player") or {}
     web = (h.get("deps") or {}).get("web_api") or {}
