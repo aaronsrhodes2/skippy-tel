@@ -74,10 +74,10 @@ class Recorder:
 
     def trim(self, win):
         """The phrase inside a window of blocks, or None when only room noise is in it. The pod's noise floor drifts, so the bar is a multiple of this window's own
-        quiet level (its 20th-percentile 100 ms), never under the floor; a phrase is at least 300 ms above it. Returns (samples, info)."""
+        quiet level (its 20th-percentile 100 ms), never under 0.003; a phrase is at least 300 ms above it. Returns (samples, info)."""
         lv = [rms([x for b in win[i:i + 2] for x in b]) for i in range(0, len(win) - 1, 2)]       # 100 ms levels
         noise = sorted(lv)[len(lv) // 5]
-        bar = max(noise * 2.0, self.floor * 1.3)
+        bar = max(noise * 3.0, 0.003)                           # the pod's own noise is ~0.001-0.008 and his far, quiet voice only ~10x that
         info = {"noise": round(noise, 4), "bar": round(bar, 4), "peak": round(max(lv), 4)}
         hot = [i for i in range(len(lv) - 2) if all(v > bar for v in lv[i:i + 3])]               # three 100 ms levels in a row
         if not hot:
@@ -120,3 +120,34 @@ class Recorder:
             self.log(f"   kept {len(clip) / 16000:.1f} s{' (held out for testing)' if held else ''}")
         await self.speak(f"That is all {self.count}. Thank you, Captain." if self.done else "I heard nothing at all. Is the pod's microphone muted?")
         return self.done
+
+
+def salvage(root: Path, floor: float = 0.007, log=print) -> int:
+    """Re-trim the windows in real/skipped (kept when a phrase was not found) with the current rule, and file the ones that now have a phrase."""
+    import wave                                                 # noqa: PLC0415
+    n = 0
+    for path in sorted((Path(root) / "skipped").glob("*.wav")):
+        kind = path.stem.split("-")[2]
+        with wave.open(str(path)) as w:
+            raw = w.readframes(w.getnframes())
+        samples = [int.from_bytes(raw[i:i + 2], "little", signed=True) / 32768 for i in range(0, len(raw) - 1, 2)]
+        win = [samples[i:i + 800] for i in range(0, len(samples) - 799, 800)]
+        rec = Recorder(kind, 0, root, None, floor=floor)
+        clip, info = rec.trim(win)
+        if clip is None:
+            log(f"{path.name}: still no phrase {info}")
+            continue
+        held = (rec.existing() + 1) % HOLD_OUT_EVERY == 0
+        folder = rec._folder(held)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / path.name.replace(f"-{kind}-", "-")).write_bytes(wav_bytes(clip))
+        path.unlink()
+        n += 1
+        log(f"{path.name}: kept {len(clip) / 16000:.1f} s {info}")
+    return n
+
+
+if __name__ == "__main__":
+    import sys
+    root = Path(__file__).resolve().parents[2] / "state" / "wakeword" / "real"
+    sys.exit(0 if len(sys.argv) > 1 and sys.argv[1] == "salvage" and salvage(root) >= 0 else 2)
