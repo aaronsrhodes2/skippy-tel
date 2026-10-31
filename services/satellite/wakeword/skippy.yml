@@ -52,6 +52,6 @@ batch_n_per_class:
 model_type: "dnn"
 layer_size: 32
 steps: 50000
-max_negative_weight: 1500
+max_negative_weight: 400
 # A house that hears all day: fewer than one false wake every ten hours is the target (the default is ~0.2 an hour)
 target_false_positives_per_hour: 0.1
