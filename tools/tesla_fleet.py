@@ -3,6 +3,9 @@
 
     python tools/tesla_fleet.py register   # partner token, register makerportal.live as the app's domain, then read back the key Tesla saw
     python tools/tesla_fleet.py check      # read back only: is makerportal.live registered, and does Tesla hold OUR public key?
+    python tools/tesla_fleet.py login-url  # the address the Captain signs in at (the state is kept in STATE_FILE for `exchange`)
+    python tools/tesla_fleet.py exchange '<the callback address>'   # the one-time code -> his tokens, stored on skippy-core (root, 600)
+    python tools/tesla_fleet.py vehicles   # end to end: his token lists his cars (one Fleet API data request)
 
 TESLA_CLIENT_ID and TESLA_SECRET come from the vault (VAULT_ENV, default G:/My Drive/vault/.env) and are never printed. The public key Tesla
 must find is portal/tesla-fleet-public-key.pem, served at https://makerportal.live/.well-known/appspecific/com.tesla.3p.public-key.pem; its
@@ -26,6 +29,11 @@ AUTH = "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token"
 API = os.environ.get("TESLA_FLEET_API", "https://fleet-api.prd.na.vn.cloud.tesla.com")    # North America
 SCOPES = "openid vehicle_device_data vehicle_location vehicle_cmds vehicle_charging_cmds"
 OUR_KEY = ROOT / "portal" / "tesla-fleet-public-key.pem"
+AUTHORIZE = "https://auth.tesla.com/oauth2/v3/authorize"
+REDIRECT = f"https://{DOMAIN}/car/oauth/callback"           # the app's Allowed Redirect URI (portal/car_web.py)
+USER_SCOPES = "openid offline_access " + SCOPES.split(" ", 1)[1]
+STATE_FILE = Path(os.environ.get("TEMP", "/tmp")) / "tesla-fleet-oauth-state"
+TOKENS = "/etc/skippy-core/tesla-fleet/tokens.json"      # on skippy-core, beside the private key
 
 
 def vault() -> dict:
@@ -87,10 +95,62 @@ def check(token: str) -> bool:
     return ok
 
 
+def login_url(v: dict) -> str:
+    import secrets
+    state = secrets.token_urlsafe(24)
+    STATE_FILE.write_text(state)
+    return AUTHORIZE + "?" + urllib.parse.urlencode({"response_type": "code", "client_id": v["TESLA_CLIENT_ID"], "redirect_uri": REDIRECT,
+                                                     "scope": USER_SCOPES, "state": state, "locale": "en-US", "prompt": "login"})
+
+
+def exchange(v: dict, callback: str) -> int:
+    import subprocess
+    import time
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(callback).query)
+    if q.get("error"):
+        sys.exit(f"Tesla refused: {q['error'][0]} {q.get('error_description', [''])[0]}")
+    want = STATE_FILE.read_text().strip() if STATE_FILE.exists() else ""
+    if not want or q.get("state", [""])[0] != want:
+        sys.exit("the state doesn't match the last login-url: start again with login-url")
+    code, got = call("POST", AUTH, form={"grant_type": "authorization_code", "client_id": v["TESLA_CLIENT_ID"],
+                                         "client_secret": v["TESLA_SECRET"], "code": q.get("code", [""])[0], "audience": API,
+                                         "redirect_uri": REDIRECT})
+    if code != 200 or not got.get("refresh_token"):
+        sys.exit(f"token swap refused: HTTP {code} {got.get('error')} {got.get('error_description', '')}".strip())
+    keep = {k: got.get(k) for k in ("access_token", "refresh_token", "id_token", "token_type", "scope")}
+    keep["expires_at"] = int(time.time()) + int(got.get("expires_in") or 0)
+    keep["client_id"] = v["TESLA_CLIENT_ID"]
+    r = subprocess.run(["ssh", "skippy-core", f"sudo sh -c 'umask 077; cat > {TOKENS}'"], input=json.dumps(keep).encode(), capture_output=True)
+    if r.returncode:
+        sys.exit(f"couldn't store the tokens on skippy-core: {r.stderr.decode()[-300:]}")
+    STATE_FILE.unlink(missing_ok=True)
+    print(f"tokens stored on skippy-core ({TOKENS}); scopes: {got.get('scope')}")
+    return 0
+
+
+def user_token() -> str:
+    import subprocess
+    r = subprocess.run(["ssh", "skippy-core", f"sudo cat {TOKENS}"], capture_output=True)
+    if r.returncode:
+        sys.exit("no tokens on skippy-core yet: login-url, then exchange")
+    return json.loads(r.stdout)["access_token"]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=("register", "check"))
+    ap.add_argument("cmd", choices=("register", "check", "login-url", "exchange", "vehicles"))
+    ap.add_argument("callback", nargs="?", default="")
     args = ap.parse_args()
+    if args.cmd == "login-url":
+        print(login_url(vault()))
+        return 0
+    if args.cmd == "exchange":
+        return exchange(vault(), args.callback)
+    if args.cmd == "vehicles":
+        code, got = call("GET", f"{API}/api/1/vehicles", token=user_token())
+        cars = got.get("response") or []
+        print(f"HTTP {code}: " + (", ".join(f"{c.get('display_name')} ({c.get('state')})" for c in cars) or str(got.get("error") or got)))
+        return 0 if code == 200 else 1
     token = partner_token(vault())
     print("partner token: ok")
     if args.cmd == "register":

@@ -110,3 +110,11 @@ def test_the_fleet_public_key_is_served_to_everyone_at_teslas_address(env):
     assert got.status_code == 200 and got.mimetype == "application/x-pem-file"
     text = got.get_data(as_text=True)
     assert text.startswith("-----BEGIN PUBLIC KEY-----") and "PRIVATE" not in text   # only ever the public half
+
+
+def test_the_oauth_callback_never_shows_the_code(env):
+    client, _, _ = env
+    got = client.get("/car/oauth/callback?code=SECRET-ONE-TIME-CODE&state=abc")
+    assert got.status_code == 200 and b"SECRET-ONE-TIME-CODE" not in got.data and b"Tesla said yes" in got.data
+    assert got.headers["Cache-Control"] == "no-store" and got.headers["Referrer-Policy"] == "no-referrer"
+    assert b"Tesla said no" in client.get("/car/oauth/callback?error=access_denied").data

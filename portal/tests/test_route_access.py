@@ -63,7 +63,7 @@ REGISTRY = {
         "doomloop.version", "prophesy.arm_version", "starcontrol.version", "play_index", "orion_trail", "radiance_probe",
         "experiments.benchmark", "experiments.minebench", "experiments.double_slit", "experiments.index", "experiments.mentat_call", "experiments.mentat_page",
         "experiments.mentat_tools", "experiments.nbody", "experiments.radiance_file", "experiments.radiance_index",
-        "experiments.weapon_vs_armor", "experiments.wva_catalog", "experiments.wva_solve", "car.fleet_public_key")},
+        "experiments.weapon_vs_armor", "experiments.wva_catalog", "experiments.wva_solve", "car.fleet_public_key", "car.fleet_callback")},
 }
 FRIEND_CHAT_ONLY = "pal@example.com"
 STRANGER = "stranger@example.com"

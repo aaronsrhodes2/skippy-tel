@@ -9,12 +9,15 @@ Tesla's Fleet API, saved for later (docs/tesla.md). Location is his alone: no gr
   GET /.well-known/appspecific/com.tesla.3p.public-key.pem   public: the Fleet API app's public key (docs/tesla.md). Tesla reads it from
                    makerportal.live to register the domain, and the car checks commands against it. Its private half is on skippy-core
                    only (/etc/skippy-core/tesla-fleet/private.pem, root, made 2026-10-30).
+  GET /car/oauth/callback   public: where Tesla sends the Captain back after he authorizes the app (the app's redirect URI). The page only
+                   says it's done; it never shows or keeps the one-time code in the address: tools/tesla_fleet.py reads it from the browser
+                   and swaps it for tokens at home, so the portal never holds the client secret or his tokens.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
-from flask import Blueprint, abort, jsonify, render_template
+from flask import Blueprint, abort, jsonify, render_template, request
 
 import auth
 
@@ -123,6 +126,18 @@ def init_app(app, home) -> None:
     def state():
         resp = jsonify(current())
         resp.headers["Cache-Control"] = "private, no-store"
+        return resp
+
+    @bp.get("/car/oauth/callback")
+    def fleet_callback():
+        failed = bool(request.args.get("error"))
+        resp = app.response_class(
+            "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><title>Tesla</title>"
+            "<body style='background:#000;color:#00ff88;font:16px ui-monospace,monospace;display:grid;place-items:center;height:90vh'>"
+            + ("<p style='color:#ff4444'>Tesla said no. Tell Skippy.</p>" if failed else "<p>Tesla said yes. Skippy takes it from here.</p>"),
+            mimetype="text/html")
+        resp.headers["Cache-Control"] = "no-store"
+        resp.headers["Referrer-Policy"] = "no-referrer"          # the code in this address never leaves in a Referer
         return resp
 
     @bp.get("/.well-known/appspecific/com.tesla.3p.public-key.pem")
