@@ -418,6 +418,7 @@ async def serve(hub, name: str, host: str, port: int, *, media, noise_psk: str, 
         entities, services = await client.list_entities_services()
         link = EsphomeLink(client, media, host, log=hub.log)
         link.discover(entities)
+        link.session(False)                                     # a restarted hub knows of no conversation: the box must not keep its ears out for one that was open
         link.hub, link.services = hub, services
         room = hub.rooms[name] = hub.make_room(name, link)
         hub.log(f"[{name}] connected: {getattr(info, 'friendly_name', '') or getattr(info, 'name', '') or 'an ESPHome box'}")
