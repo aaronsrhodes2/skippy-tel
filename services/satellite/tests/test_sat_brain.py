@@ -37,7 +37,7 @@ def test_the_system_prompt_is_the_persona_plus_how_to_speak_aloud_and_the_time()
     b.reply("hello")
     system = c.calls[0]["system"]
     assert system.startswith("PERSONA") and "speaking aloud" in system and "no markdown" in system and "Sunday 09:30" in system
-    assert "replacing his Alexa" in system and c.calls[0]["model"] == "m" and c.calls[0]["max_tokens"] <= 400
+    assert "replacing his Alexa" in system and c.calls[0]["model"] == "m" and c.calls[0]["max_tokens"] <= 700 and "WHOLE thing" in system
 
 
 def test_a_timer_request_runs_the_tool_and_speaks_the_result():

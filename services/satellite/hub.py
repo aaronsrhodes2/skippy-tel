@@ -75,6 +75,39 @@ def pcm_floats(pcm: bytes) -> list[float]:
     return [x / 32768 for x in a]
 
 
+def looks_technical(text: str) -> bool:
+    """Code, file paths, flags, hex, tracebacks: what nobody wants intoned aloud (the summary is for this, not for his personality)."""
+    import re                                                   # noqa: PLC0415
+    if "`" in text or "```" in text or "->" in text or "::" in text:
+        return True
+    if re.search(r"[\w-]+\.(?:py|js|ts|yaml|yml|json|sh|md|cpp|h|tf|html|css|log)", text) or re.search(r"0x[0-9a-fA-F]{3,}", text):
+        return True
+    if re.search(r"[\w.]+[\/][\w.]+[\/][\w.]+", text) or re.search(r"[A-Za-z_][\w.]*\([^)]{0,40}\)", text):
+        return True
+    return sum(text.count(c) for c in "{}[]<>=;_#|") > max(6, len(text) // 25)
+
+
+def split_for_voice(text: str, limit: int = 480) -> list[str]:
+    """Pieces of at most `limit` characters, cut at sentence ends where there are any, so a long reply can be spoken whole (mp3 pieces join into one clip)."""
+    import re                                                   # noqa: PLC0415
+    out, cur = [], ""
+    for sentence in re.split(r"(?<=[.!?])\s+", text.strip()):
+        while len(sentence) > limit:                            # a sentence longer than a piece: cut it at a space
+            cut = sentence.rfind(" ", 0, limit) or limit
+            if cur:
+                out.append(cur)
+                cur = ""
+            out.append(sentence[:cut])
+            sentence = sentence[cut:].strip()
+        if len(cur) + len(sentence) + 1 > limit and cur:
+            out.append(cur)
+            cur = ""
+        cur = (cur + " " + sentence).strip()
+    if cur:
+        out.append(cur)
+    return out or [text[:limit]]
+
+
 class Room:
     """One room: the audio its box streams in, what Skippy hears and decides, and what goes back through its `link`.
 
@@ -82,7 +115,7 @@ class Room:
     touched it. The room calls the link's woke / voice_started / voice_stopped / heard / released / show / speak / announce."""
 
     def __init__(self, name, link, gate, brain, timers, spotter=None, local_voice=None, log=print, floor: float = 0.012,
-                 min_speech_ms: int = 600, listen_ms: int = 8000, followup_ms: int = 6000, summarize_over: int = 280):
+                 min_speech_ms: int = 600, listen_ms: int = 8000, followup_ms: int = 6000, summarize_over: int = 1500):
         self.name, self.link, self.gate, self.brain, self.timers, self.spotter = name, link, gate, brain, timers, spotter
         self.local_voice, self.log = local_voice, log
         self.floor, self.min_speech_ms, self.listen_ms, self.followup_ms, self.summarize_over = floor, min_speech_ms, listen_ms, followup_ms, summarize_over
@@ -248,7 +281,7 @@ class Room:
     async def say(self, text: str, follow_up: bool = False, announce: bool = False) -> None:
         """Skippy's voice in this room: the gate's local TTS (a summary when long), else the machine's own voice. Waits until it has played."""
         said = text
-        if len(text) > self.summarize_over:
+        if looks_technical(text) or len(text) > self.summarize_over:       # only technical or very long output is boiled down: his voice and jokes are spoken whole
             try:
                 said = await asyncio.to_thread(self.gate.summary, text)
             except GateError:
@@ -264,7 +297,9 @@ class Room:
     async def _voice(self, said: str):
         """("mp3", bytes) from Skippy's own voice, ("pcm", bytes, rate) from the machine's, or None when neither answers."""
         try:
-            return ("mp3", await asyncio.to_thread(self.gate.tts, said))
+            parts = split_for_voice(said)                       # the gate speaks at most 500 characters at a time: a longer reply is spoken in pieces, joined into one clip
+            clips = await asyncio.gather(*[asyncio.to_thread(self.gate.tts, t) for t in parts])
+            return ("mp3", b"".join(clips))
         except BudgetSpent:
             self.log(f"[{self.name}] (Skippy's voice has used today's budget: using the machine's own voice)")
         except (GateError, RuntimeError, OSError) as e:

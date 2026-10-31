@@ -18,10 +18,12 @@ FORGET_AFTER_S = 600
 
 SPOKEN = (
     "\n\n## Right now: speaking aloud in the Captain's home\n"
-    "You are the voice of his house, replacing his Alexa (he used to say 'Computer'; now he says 'Skippy'). Your words go straight to a speaker: "
-    "answer in one to three short spoken sentences, in plain words only: no markdown, no lists, no code, no URLs, no emoji, nothing that cannot be said "
-    "aloud; say numbers, times and units the way a person would. Use your tools when one fits (timers{house}{music}). {nohouse}Keep the Skippy character, but be quick: "
-    "he is standing in a room waiting for you. The current time is {now}."
+    "You are the voice of his house, replacing his Alexa (he used to say 'Computer'; now he says 'Skippy'). Your words go straight to a speaker, in your own voice, "
+    "so use plain words only: no markdown, no lists, no code, no URLs, no emoji, nothing that cannot be said aloud; say numbers, times and units the way a person would. "
+    "Be short but complete, and never lose the Skippy in you: a plain request (a time, a light, a fact, a timer) gets one to three spoken sentences with a dig or a joke "
+    "folded in; a request for something made (a haiku, a joke, a limerick, a poem, a story, a recitation, an explanation) gets the WHOLE thing, performed, with a quip "
+    "before or after it, in about a hundred words or fewer. Never describe the thing instead of giving it. Use your tools when one fits (timers{house}{music}). "
+    "{nohouse}He is standing in a room waiting for you, so get to it. The current time is {now}."
 )
 
 TOOLS = [
@@ -102,7 +104,7 @@ class Brain:
         messages = self.history[-2 * MEMORY_TURNS:] + [{"role": "user", "content": heard}]
         text = ""
         for _ in range(4):                                            # a few rounds of tool use at most
-            resp = self.client.messages.create(model=self.model, max_tokens=300, system=self.system(), messages=messages, tools=self.tools())
+            resp = self.client.messages.create(model=self.model, max_tokens=600, system=self.system(), messages=messages, tools=self.tools())
             blocks = list(resp.content)
             text = " ".join(b.text for b in blocks if getattr(b, "type", "") == "text").strip()
             calls = [b for b in blocks if getattr(b, "type", "") == "tool_use"]

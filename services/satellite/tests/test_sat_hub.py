@@ -355,12 +355,21 @@ def test_when_skippys_voice_is_out_of_budget_the_machine_voice_speaks_and_with_n
     run(body)
 
 
-def test_a_long_answer_is_spoken_as_its_summary():
+def test_a_long_technical_answer_is_spoken_as_its_summary():
     async def body(box, made, hub, log, start):
         await start()
-        await made["room"].say("word " * 100)
+        await made["room"].say("I changed services/satellite/hub.py and ran pytest. " * 8)       # file names and commands: nobody wants those intoned
         await box.wait_for("audio-stop")
         assert made["gate"].tts_calls == ["SUMMARY"]
+    run(body)
+
+
+def test_a_long_plain_answer_is_spoken_whole_in_pieces():
+    async def body(box, made, hub, log, start):
+        await start()
+        await made["room"].say("The monkeys are at it again and I am magnificent. " * 20)        # about a thousand characters of him: jokes and all
+        await box.wait_for("audio-stop")
+        assert len(made["gate"].tts_calls) >= 2 and "SUMMARY" not in made["gate"].tts_calls and all(len(t) <= 480 for t in made["gate"].tts_calls)
     run(body)
 
 
