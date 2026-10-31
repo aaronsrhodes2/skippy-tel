@@ -1716,7 +1716,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     @lab.get("/benchmark")
     def benchmark():
-        return render_template("benchmark.html", bench=experiments.benchmark())
+        return render_template("benchmark.html", bench=experiments.benchmark(), distill=experiments.distillation())
 
     @lab.get("/minebench")
     def minebench():

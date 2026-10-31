@@ -171,6 +171,59 @@ def benchmark() -> dict:
     return {"main": main, "adversarial": rows(ADVERSARIAL_RUNS), "domains": domains}
 
 
+DISTILL_CAUSES = ("no_route", "bad_args", "tool_error", "wrong_tool", "wrong_value")
+
+
+def distillation() -> dict:
+    """The improvement-distillation branch (sigma-ground misc/DISTILLATION_BRANCH_PLAN.md): every day a NEW set of terse science questions
+    goes to Wolfram|Alpha (once, free tier) and to Mentat; Mentat is judged against OUR oracle and a miss is classified from Mentat's own
+    record. Read from the committed day files (results/distill/distill-<date>.json, written by benchmark/distill_score.py) and the sets
+    (distill-<date>.set.json) for days queued but not yet scored. Wolfram's column is the yardstick; nothing of Wolfram's is in the files."""
+    folder = ROOT / "benchmark" / "distill"
+    days, causes, unverified = [], {}, []
+    try:
+        scored = sorted(folder.glob("distill-*.json"))
+        sets = sorted(folder.glob("distill-*.set.json"))
+    except OSError:
+        scored, sets = [], []
+    scored = [p for p in scored if not p.name.endswith(".set.json")]
+    have = {p.name.removesuffix(".json") for p in scored}
+    for p in scored:
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        s = d.get("summary") or {}
+        w = s.get("wolfram") or {}
+        days.append({"day": d.get("suite", p.stem).removeprefix("distill-"), "n": s.get("n", 0), "judged": s.get("judged", 0),
+                     "right": s.get("mentat_right", 0), "misses": dict(s.get("mentat_misses") or {}), "unverified": s.get("unverified", 0),
+                     "unasked": s.get("unasked", 0), "wa_answered": w.get("answered", 0), "wa_no_result": w.get("no_result", 0),
+                     "wa_agrees": w.get("agrees_with_us", 0), "wa_disagrees": w.get("disagrees_with_us", 0), "ref": str(s.get("mentat_ref") or "")[:7],
+                     "by_domain": s.get("by_domain") or {}})
+        for r in d.get("rows") or []:
+            if r.get("cause") in DISTILL_CAUSES:
+                causes.setdefault((r["cause"], r.get("expected_tool") or "?"), []).append(r)
+            elif r.get("cause") == "unverified":
+                unverified.append(r)
+    for p in sets:                                                           # queued, not yet scored: say so, with the count
+        suite = p.name.removesuffix(".set.json")
+        if suite in have:
+            continue
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            days.append({"day": suite.removeprefix("distill-"), "n": len(d.get("items") or []), "pending": True,
+                         "made": (d.get("generator") or {}).get("made") or {}})
+        except (OSError, ValueError):
+            continue
+    days.sort(key=lambda x: x["day"])
+    grouped = [{"cause": c, "tool": t, "rows": len(rs), "examples": [r["question"] for r in rs[:2]]}
+               for (c, t), rs in sorted(causes.items(), key=lambda kv: -len(kv[1]))]
+    total = {"n": sum(x.get("n", 0) for x in days if not x.get("pending")), "judged": sum(x.get("judged", 0) for x in days),
+             "right": sum(x.get("right", 0) for x in days), "wa_answered": sum(x.get("wa_answered", 0) for x in days),
+             "wa_agrees": sum(x.get("wa_agrees", 0) for x in days)}
+    return {"days": days, "causes": grouped, "unverified": unverified[:20], "total": total, "cause_names": DISTILL_CAUSES}
+
+
 def radiance_dir() -> Path:
     return ROOT / "radiance"
 

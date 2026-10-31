@@ -51,6 +51,40 @@
   <p class="help">Source: <a href="https://github.com/aaronsrhodes2/sigma-ground/tree/master/sigma_ground/mcp/benchmark">sigma_ground/mcp/benchmark</a>
     ({% for r in bench.main + bench.adversarial %}{{ r.file }}{{ ', ' if not loop.last }}{% endfor %}).</p>
   {% endif %}
+
+  <h3>Improvement distillation</h3>
+  <p>A branch that runs every day: purple Skippy writes a <b>new</b> set of short science questions of the kind Wolfram Alpha's free tier
+    accepts, with our own oracle answer where we have one. Each goes to Wolfram Alpha once and to Mentat. Mentat is judged against
+    <b>our</b> oracle, and a miss is classified from Mentat's own record (no route, bad arguments, tool error, wrong tool, wrong value).
+    Wolfram's column is the yardstick only: nothing it answers is used to improve Mentat; our own questions, answers and miss reasons are.</p>
+  {% if not distill.days %}
+    <p class="help">No days yet.</p>
+  {% else %}
+  <table class="domains">
+    <tr><th>Day</th><th>Questions</th><th>Mentat right / judged</th><th>Misses by cause</th><th>Unverified</th><th>Wolfram answered / no result</th><th>Wolfram agrees / disagrees with our oracle</th></tr>
+    {% for d in distill.days %}
+      <tr><td>{{ d.day }}</td>
+        {% if d.pending %}
+          <td>{{ d.n }}</td><td colspan="5" class="help">queued: being asked ({% for k, v in d.made.items() %}{{ k }} {{ v }}{{ ', ' if not loop.last }}{% endfor %})</td>
+        {% else %}
+          <td>{{ d.n }}</td><td><b>{{ d.right }}</b> / {{ d.judged }}</td>
+          <td>{% for k, v in d.misses.items() %}{{ k | replace('_', ' ') }} {{ v }}{{ '; ' if not loop.last }}{% else %}none{% endfor %}</td>
+          <td>{{ d.unverified }}</td><td>{{ d.wa_answered }} / {{ d.wa_no_result }}</td><td>{{ d.wa_agrees }} / {{ d.wa_disagrees }}</td>
+        {% endif %}</tr>
+    {% endfor %}
+  </table>
+  {% if distill.causes %}
+    <h4>Open causes, grouped: the fixes to make</h4>
+    <table class="domains">
+      <tr><th>Cause</th><th>Expected tool</th><th>Rows</th><th>Examples</th></tr>
+      {% for c in distill.causes %}
+        <tr><td>{{ c.cause | replace('_', ' ') }}</td><td>{{ c.tool }}</td><td>{{ c.rows }}</td><td class="help">{{ c.examples | join('; ') }}</td></tr>
+      {% endfor %}
+    </table>
+  {% endif %}
+  <p class="help">Source: sigma-ground <a href="https://github.com/aaronsrhodes2/sigma-ground/blob/master/misc/DISTILLATION_BRANCH_PLAN.md">misc/DISTILLATION_BRANCH_PLAN.md</a>,
+    <code>tools/distill_day.py</code>, <code>benchmark/distill_score.py</code>; the day files are committed in <code>results/distill/</code>.</p>
+  {% endif %}
     </div></div>
     <div class="pips" hidden><i></i></div>
   </div>

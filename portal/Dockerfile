@@ -15,7 +15,8 @@ COPY .vendor/sigma-ground/ /vendor/sg/
 RUN mkdir -p /out/benchmark \
     && cp -r /vendor/sg/sigma_ground/radiance/web /out/radiance \
     && rm -f /out/radiance/*.py \
-    && cp /vendor/sg/sigma_ground/mcp/benchmark/results/*_scored.json /out/benchmark/
+    && cp /vendor/sg/sigma_ground/mcp/benchmark/results/*_scored.json /out/benchmark/ \
+    && if [ -d /vendor/sg/sigma_ground/mcp/benchmark/results/distill ]; then cp -r /vendor/sg/sigma_ground/mcp/benchmark/results/distill /out/benchmark/distill; fi
 
 # Star Control Zero (portal/starcontrol.py): the game's web build, the tarball of star-control-precursors' tools/build_web.py
 # --tarball kept in the trunk (the artifacts folder, star-control/<tag>/scz-web.tar.gz), at the tag and checksum pinned in

@@ -74,6 +74,33 @@ def test_the_other_demos_are_bridge_pages_that_keep_what_they_had(env):
     assert not re.search(r"overflow(?:-y)?\s*:\s*(?:auto|scroll)", css) and "gradient" not in css
 
 
+def test_the_distillation_branch_reads_the_committed_day_files_and_shows_queued_days(env, tmp_path, monkeypatch):
+    # sigma-ground misc/DISTILLATION_BRANCH_PLAN.md: a scored day, a queued day, the causes grouped; Wolfram is a yardstick column only
+    folder = tmp_path / "benchmark" / "distill"
+    folder.mkdir(parents=True)
+    (folder / "distill-2026-10-30.json").write_text(json.dumps({
+        "suite": "distill-2026-10-30",
+        "summary": {"n": 3, "judged": 2, "mentat_right": 1, "mentat_misses": {"wrong_value": 1}, "unverified": 1, "unasked": 0,
+                    "wolfram": {"answered": 2, "no_result": 1, "unasked": 0, "agrees_with_us": 1, "disagrees_with_us": 0}, "mentat_ref": "abc1234def"},
+        "rows": [{"id": "a", "question": "integrate x^2 from 0 to 1", "cause": None, "expected_tool": "integrate_expr"},
+                 {"id": "b", "question": "derivative of exp(-3*x)", "cause": "wrong_value", "expected_tool": "differentiate_expr"},
+                 {"id": "c", "question": "molar mass of sulfuric acid", "cause": "unverified", "expected_tool": None}]}), encoding="utf-8")
+    (folder / "distill-2026-10-31.set.json").write_text(json.dumps({"suite": "distill-2026-10-31", "generator": {"made": {"math": 20, "physics": 12}},
+                                                                     "items": [{"id": str(i)} for i in range(32)]}), encoding="utf-8")
+    monkeypatch.setattr(experiments, "ROOT", tmp_path)
+    d = experiments.distillation()
+    assert [x["day"] for x in d["days"]] == ["2026-10-30", "2026-10-31"] and d["days"][1]["pending"] and d["days"][1]["n"] == 32
+    assert d["days"][0]["right"] == 1 and d["days"][0]["wa_answered"] == 2 and d["days"][0]["ref"] == "abc1234"
+    assert d["causes"] == [{"cause": "wrong_value", "tool": "differentiate_expr", "rows": 1, "examples": ["derivative of exp(-3*x)"]}]
+    assert d["total"] == {"n": 3, "judged": 2, "right": 1, "wa_answered": 2, "wa_agrees": 1}
+    client, _, _ = env
+    page = client.get("/experiments/benchmark").data.decode()
+    assert "Improvement distillation" in page and "2026-10-30" in page and "queued: being asked" in page and "wrong value" in page
+    assert "nothing it answers is used to improve Mentat" in page
+    monkeypatch.setattr(experiments, "ROOT", tmp_path / "nowhere")
+    assert experiments.distillation()["days"] == [] and "No days yet." in client.get("/experiments/benchmark").data.decode()
+
+
 def test_every_minebench_run_can_be_reached_however_late_its_pictures_load(env):
     """The pager counted its pages once, before the pictures arrived, and stopped at page 4 of 9 (runs 4 to 8 out of reach). Now it
     counts again whenever something in the flow loads, and each picture holds its place before it loads."""
