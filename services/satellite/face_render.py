@@ -23,6 +23,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 W = H = 480
 HERE = Path(__file__).resolve().parent
+GLIDE = 0.4                                        # how much of the way to its target the can goes each 50 ms tick
 BALL_DIR = HERE / "rooms" / "avatar" / "frames" / "ball_flat"
 ANGS = (-0.1396, -0.0698, 0.0, 0.0698, 0.1396)
 
@@ -215,6 +216,7 @@ class Face:
         self.pv = 0.0
         self.nudge_at = 0
         self.ear = 0.0
+        self.sx = self.sy = 0.0                            # where the can is drawn (it glides toward its target bx_, by_)
         self.sl = [dict(on=False, t0=0, x=0, y=0) for _ in range(6)]
         self.prev_state_think = ""
         self.next_spawn = self.bulb_t0 = 0
@@ -525,14 +527,17 @@ class Face:
                     self.bx_ = roundf(math.sin(self.rk * 9) * self.ramp)
                     self.by_ = roundf(-abs(math.sin(self.rk * 9)) * self.ramp * 0.35)
             ox, oy = self.bx_, self.by_
-        rkv = ox - self.prev_bx
+        rkv = ox - self.prev_bx                                    # (the hat is thrown by the step itself, as it was tuned to be)
         self.prev_bx = ox
-        k = 2 + int(roundf(self.bx_ / max(self.ramp, 1.0) * 2.0))
+        self.sx += (ox - self.sx) * GLIDE                          # the can itself glides to where the step says: at 20 frames a second it need not jump
+        self.sy += (oy - self.sy) * GLIDE
+        ox, oy = self.sx, self.sy
+        k = 2 + int(roundf(ox / max(self.ramp, 1.0) * 2.0))
         self.lean_k = min(4, max(0, k))
         theta = ANGS[self.lean_k]
         lt = math.tan(theta)
         cx, cy = 240 + ox, 245 + oy
-        self.ball_pos = (90 + int(ox), 80 + int(oy))
+        self.ball_pos = (90 + int(roundf(ox)), 80 + int(roundf(oy)))
         pivotY = cy + 140
         self.convo_y += (self.convo_target - self.convo_y) * 0.18
         # eyes

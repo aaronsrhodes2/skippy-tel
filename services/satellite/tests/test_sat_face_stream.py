@@ -389,7 +389,7 @@ def test_flat_can_sends_much_less_than_the_brushed_one():
     for i in range(120):
         f.tick(100000 + i * 50)
         sizes.append(sum(len(d) for d in e.encode(to565(f.render()))))
-    assert np.mean(sizes) < 16 * 1024                           # (the brushed can averaged 18 KB a frame, 366 KB/s)
+    assert np.mean(sizes) < 22 * 1024                           # (a gliding flat can: about 18 KB a frame; the brushed one went 366 KB/s stepped and a stream of changes when it glides)
 
 
 # ── the face drawn in a child process of its own (the hub's work cannot make its frames late) ──
@@ -453,3 +453,19 @@ def test_music_flag_reaches_the_face_through_the_link():
     s = FaceStreamer("127.0.0.1", send=lambda d: None)
     s.set_music(True)
     assert s.face.music_heard
+
+
+def test_the_can_glides_instead_of_teleporting():
+    from face_render import Face
+    for setup in ("idle", "dance", "talk"):
+        f = Face(); f.set_state("idle")
+        if setup == "dance":
+            f.music_heard = True
+        if setup == "talk":
+            f.talking = True; f.talk_t0 = 0; f.mouth = "n|" + "DDCCBB" * 20
+        xs, jump = [], 0
+        for i in range(400):
+            f.tick(200000 + i * 50)
+            xs.append(f.ball_pos)
+        jump = max(max(abs(a[0] - b[0]), abs(a[1] - b[1])) for a, b in zip(xs, xs[1:]))
+        assert jump <= 9, (setup, jump)                        # (stepped, a swing jumped 20+ pixels in one frame)
