@@ -338,8 +338,9 @@ def test_spoken_music_requests_find_his_tracks_and_the_tools_drive_this_rooms_bo
         assert {t["name"] for t in tools} == {"music", "play_music"}
         said = await asyncio.to_thread(run_tool, "play_music", {"what": "Pink Floyd"})
         assert said == "Playing 2 tracks, starting with Dogs by Pink Floyd." and "Dogs" in client.media[-1][1]["media_url"]
-        assert await asyncio.to_thread(run_tool, "music", {"action": "louder"}) == "Done: louder."
-        assert client.media[-1] == (1, {"command": MediaPlayerCommand.VOLUME_UP})
+        sent = len(client.media)
+        assert "locked" in await asyncio.to_thread(run_tool, "music", {"action": "louder"})     # the pods' volume is locked at 70%
+        assert len(client.media) == sent                                                        # nothing was sent to the box
         assert await asyncio.to_thread(run_tool, "play_music", {"what": "abba"}) == "Nothing in his library matches 'abba'."
         made["room"].music = None
         assert await asyncio.to_thread(run_tool, "music", {"action": "pause"}) == "This room has no speaker for music."

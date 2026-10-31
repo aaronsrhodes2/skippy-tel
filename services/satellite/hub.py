@@ -781,9 +781,9 @@ def music_tools(room_of, loop):
                 if step is not None:
                     await step()
                     return f"Done: {action}."
-                if action in ("louder", "quieter"):
-                    await box.volume(1 if action == "louder" else -1)
-                    return f"Done: {action}."
+                if action in ("louder", "quieter"):              # the pods' volume is locked at 70% (the Captain, 2026-10-31: louder, they crackle)
+                    return ("Not done: the pods' volume is locked at one level on purpose (louder, they crackle). "
+                            "The house stereos have their own volume knobs; tell him to use those.")
                 return "I cannot do that to the music."
             what = str((args or {}).get("what") or "")
             found = music_mod.search(await box.media.catalog(), what)
