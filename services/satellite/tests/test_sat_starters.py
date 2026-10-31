@@ -283,3 +283,42 @@ def test_held_back_when_his_voice_is_down_or_he_just_spoke(tmp_path):
     room._last_said, room._starter_check = ("Good morning, Captain.", time.monotonic() - 400), 0
     asyncio.run(room.maybe_start())
     assert link.spoken == [cand("a")["opener"]]
+
+
+def test_a_long_reply_is_voiced_piece_by_piece_and_a_busy_refusal_is_retried(tmp_path):
+    now = [stamp("2026-10-31", "11:00")]
+    room, link, brain, s = room_with(tmp_path, now, [])
+    calls, busy = [], [True]
+
+    class Studio:
+        def tts(self, text):
+            calls.append(text)
+            if busy[0]:
+                busy[0] = False
+                raise hub.GateError("text to speech refused (503)")
+            return b"mp3"
+        def summary(self, text): return text
+    room.gate = Studio()
+    voice = asyncio.run(room._voice("A sentence about the news. " * 40))
+    assert voice[0] == "mp3" and len(calls) >= 3 and calls[0] == calls[1]          # retried, then every piece in turn
+
+
+def test_a_busy_studio_gets_a_stocked_quip_instead_of_silence(tmp_path):
+    now = [stamp("2026-10-31", "11:00")]
+    room, link, brain, s = room_with(tmp_path, now, [])
+    busy = [True]
+
+    class Studio:
+        def tts(self, text):
+            if busy[0]:
+                busy[0] = False
+                raise hub.GateError("text to speech refused (429)")
+            return b"mp3"
+        def summary(self, text): return text
+
+    class Bank:
+        def has(self, kind): return kind == "fact:space"
+        def pick(self, kind, command=""): return (f"a {kind} line", b"q")
+    room.gate, room.filler = Studio(), Bank()
+    assert asyncio.run(room._voice("A new moon was found around a distant planet."))[0] == "mp3"
+    assert link.spoken == ["a fact:space line"]

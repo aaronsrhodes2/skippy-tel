@@ -614,11 +614,44 @@ class Room:
             for out in self.pc_outs:
                 asyncio.ensure_future(out.play(voice[1]))
 
+    async def _tts_piece(self, text: str, tries: int = 3, wait_s: float = 1.5) -> bytes:
+        """One piece in Skippy's voice; a refusal while the studio is busy with someone else's line (a routine, a quip refresh) is tried again."""
+        for attempt in range(tries):
+            try:
+                return await asyncio.to_thread(self.gate.tts, text)
+            except BudgetSpent:
+                raise
+            except GateError as e:
+                if attempt == tries - 1 or not re.search(r"\((?:429|503)\)", str(e)):
+                    raise
+                if not await self._quip_while_busy(text):       # the Captain, 2026-10-31: a refusal is a moment for a stocked factoid or quip
+                    await asyncio.sleep(wait_s)
+        raise GateError("text to speech refused")
+
+    async def _quip_while_busy(self, text: str) -> bool:
+        """A recorded line (no studio needed) while the studio is busy: a factoid on the subject if one is stocked, else a 'still working' quip.
+        Once per reply. Called with the room's voice lock held (inside say), so it plays straight to the link. True when one played."""
+        if self.filler is None or getattr(self, "_quipped_for", None) == text[:80]:
+            return False
+        self._quipped_for = text[:80]
+        import filler as filler_mod                             # noqa: PLC0415
+        topic = filler_mod.topic_for(text)
+        kind = f"fact:{topic}" if topic and getattr(self.filler, "has", lambda k: False)(f"fact:{topic}") else "long"
+        quip = self.filler.pick(kind, text)
+        if quip is None:
+            return False
+        said, mp3 = quip
+        self.log(f"[{self.name}] (voice busy, filler: {said})")
+        await self.link.show(said)
+        self._also(("mp3", mp3))
+        await self.link.announce(said, ("mp3", mp3))
+        return True
+
     async def _voice(self, said: str):
         """("mp3", bytes) from Skippy's own voice, ("pcm", bytes, rate) from the machine's, or None when neither answers."""
         try:
             parts = split_for_voice(said)                       # the gate speaks at most 500 characters at a time: a longer reply is spoken in pieces, joined into one clip
-            clips = await asyncio.gather(*[asyncio.to_thread(self.gate.tts, t) for t in parts])
+            clips = [await self._tts_piece(t) for t in parts]  # one after another: the voice studio speaks one line at a time and refuses a second (2026-10-31)
             return ("mp3", await asyncio.to_thread(one_stream, b"".join(clips)))
         except BudgetSpent:
             self.log(f"[{self.name}] (Skippy's voice has used today's budget: using the machine's own voice)")
