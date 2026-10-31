@@ -528,8 +528,7 @@ class Daily:
         text, mp3 = clip
         async with room.voice:
             await room.link.show(text)
-            room._also(("mp3", mp3))
-            await room.link.announce(text, ("mp3", mp3))
+            await room._out(text, ("mp3", mp3), announce=True)
         rest = said.strip()
         if rest:
             await room.say(rest, announce=True)

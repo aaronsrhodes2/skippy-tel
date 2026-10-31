@@ -544,8 +544,7 @@ class Room:
             self.log(f"[{self.name}] (sign-off: {text})")
             async with self.voice:
                 await self.link.show(text)
-                self._also(("mp3", mp3))
-                await self.link.announce(text, ("mp3", mp3))
+                await self._out(text, ("mp3", mp3), announce=True)
 
     async def _cover_the_wait(self, work, command: str) -> None:
         """While the answer is worked out, say a pre-recorded quip as soon as it is clearly not going to be instant (never for a quick home command), and one more
@@ -567,8 +566,7 @@ class Room:
                 self.log(f"[{self.name}] (filler: {text})")
                 async with self.voice:
                     await self.link.show(text)
-                    self._also(("mp3", mp3))
-                    await self.link.announce(text, ("mp3", mp3))
+                    await self._out(text, ("mp3", mp3), announce=True)
             done, _ = await asyncio.wait({work}, timeout=5.0)
 
     def _resume(self, mode: str, window_ms: int = 0) -> None:
@@ -598,19 +596,41 @@ class Room:
         async with self.voice:
             voice = voice if voice is not None and said == text else await self._voice(said)    # a clip made already (a starter) is used as it is
             await self.link.show(said)
-            self._also(voice)
             for media in (self.book, self.stereo):
                 if media is not None:
                     media.duck(True, 90)                        # a book or the stereo (on the PC outputs) ducks under Skippy's voice, then comes back
             try:
-                if announce:
-                    await self.link.announce(said, voice)
-                else:
-                    await self.link.speak(said, voice, follow_up)
+                await self._out(said, voice, follow_up=follow_up, announce=announce)
             finally:
                 for media in (self.book, self.stereo):
                     if media is not None:
                         media.duck(True, self.followup_ms / 1000 if follow_up else 2.5)
+
+    async def _out(self, said: str, voice, follow_up: bool = False, announce: bool = False) -> None:
+        """One clip of Skippy's voice in this room (the voice lock held). With a PC output open that is the room's one voice (the Captain,
+        2026-10-31: two speakers never line up exactly enough for an ear), it plays there ALONE: the pod gets the words without the sound,
+        draws the lips on the PC output's clock, and stays the mic. No PC output open, or the router dropped the clip: the pod says it."""
+        sole = None
+        if voice is not None and voice[0] == "mp3":
+            sole = next((o for o in self.pc_outs if getattr(o, "sole", False) and o.available()), None)
+        if sole is None:
+            self._also(voice)
+            if announce:
+                await self.link.announce(said, voice)
+            else:
+                await self.link.speak(said, voice, follow_up)
+            return
+        mouth = getattr(self.link, "mouth", None)
+        if mouth is not None:
+            await mouth(voice, said)                            # the shapes, from the very clip; lips() starts them when it sounds
+        playing = asyncio.ensure_future(sole.play(voice[1], on_sound=getattr(self.link, "lips", None)))
+        if announce:
+            await self.link.announce(said, None)                # the box's turn ends without its own sound
+        else:
+            await self.link.speak(said, None, follow_up)
+        if not await playing:
+            self.log(f"[{self.name}] (the {sole.kind} output dropped it: the pod says it)")
+            await self.link.announce(said, voice)
 
     def _also(self, voice) -> None:
         """Start this clip on the PC's own outputs too (each waits its own delay so they line up with the box); never holds anything up."""
@@ -647,8 +667,7 @@ class Room:
         said, mp3 = quip
         self.log(f"[{self.name}] (voice busy, filler: {said})")
         await self.link.show(said)
-        self._also(("mp3", mp3))
-        await self.link.announce(said, ("mp3", mp3))
+        await self._out(said, ("mp3", mp3), announce=True)
         return True
 
     async def _voice(self, said: str):

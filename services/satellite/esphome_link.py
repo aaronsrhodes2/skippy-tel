@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import os
 import socket
+import time
 from pathlib import Path
 
 import emotion
@@ -105,6 +106,8 @@ class EsphomeLink:
         self.services: list = []                                    # the box's API actions (the `face` one drives the mirror)
         self.asked = ""
         self.streamer = None                                        # the face skippy-pc draws for this box (face_stream.FaceStreamer), once it is connected
+        self._box_face = ("idle", False, False, False)              # the box's own last `Face` report: state, talking, mic off, speaker off
+        self._lips_until = 0.0                                      # (monotonic) the hub drives the mouth until then: his voice is on the PC output (lips)
 
     def discover(self, entities) -> None:
         for e in entities:
@@ -209,7 +212,11 @@ class EsphomeLink:
                 self.streamer.note_loss(int(state.state))
         elif kind == "TextSensorState" and state.key == self.keys.get("face") and self.streamer is not None:
             f = (str(state.state).split(",") + ["0", "0", "0"])[:4]          # "<state>,<talking>,<mic off>,<speaker off>" (older firmware sends two fields)
-            self.streamer.set_box_state(f[0], f[1] == "1", f[2] == "1", f[3] == "1")
+            self._box_face = (f[0], f[1] == "1", f[2] == "1", f[3] == "1")
+            if time.monotonic() < self._lips_until:                 # his voice is on the stereo, not this box: the box's "not talking" is not the truth
+                self.streamer.set_box_state("speaking", True, self._box_face[2], self._box_face[3])
+            else:
+                self.streamer.set_box_state(*self._box_face)
         elif kind == "MediaPlayerEntityState" and state.key == self.keys.get("player") and self.music is not None:
             from aioesphomeapi import MediaPlayerState            # noqa: PLC0415
             if state.state == MediaPlayerState.IDLE:
@@ -320,6 +327,23 @@ class EsphomeLink:
             task = asyncio.create_task(self._rhubarb(voice, mood))
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
+
+    def lips(self, at: float, seconds: float) -> None:
+        """Skippy's voice sounds from the room's PC output, not this box (the Captain, 2026-10-31: one source): the drawn face talks from `at`
+        (time.monotonic, when the router says it sounds there) for `seconds`, on that clock, not the box's playback. mouth() set the shapes."""
+        loop = asyncio.get_running_loop()
+        now = time.monotonic()
+        self._lips_until = max(self._lips_until, at + seconds)
+        loop.call_later(max(0.0, at - now), self._lips, True)
+        loop.call_later(max(0.0, at + seconds - now), self._lips, False)
+
+    def _lips(self, on: bool) -> None:
+        if self.streamer is None:
+            return
+        if on:
+            self.streamer.set_box_state("speaking", True, self._box_face[2], self._box_face[3])
+        elif time.monotonic() >= self._lips_until - 0.02:          # a later clip still talking keeps the mouth going
+            self.streamer.set_box_state(*self._box_face)
 
     def _spawn_mirror(self, coro) -> None:
         task = asyncio.create_task(coro)

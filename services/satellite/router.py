@@ -33,6 +33,7 @@ DUCK = 0.25
 RAMP = 0.15                       # how far a layer's gain moves per block (about 0.3 s from full to ducked)
 RESCAN_S = 20.0
 SLACK_S = 0.4                     # a sink more than this past its delay (its device runs slow) drops a block to catch up
+SOLO_DELAY_S = 0.15               # a room's only voice: the queue kept ahead of it, so a late mixer block never stutters (SATELLITE_SOLO_DELAY)
 
 
 def _np():
@@ -425,9 +426,14 @@ def shared(env: dict, log=print) -> Router:
                 if "=" in part:
                     used |= {k.strip() for k in part.split("=", 1)[1].split("+")}
             import sync                                           # noqa: PLC0415
-            delays.update(sync.saved_delays())                    # what the last calibration settled on beats the vault's starting guess
+            solo = speaker_out.one_voice(env)
+            if solo:                                              # the PC output is the room's only voice: nothing to wait for, just a jitter cushion
+                for k in sync.pod_rooms_kinds(env):
+                    delays[k] = float(env.get("SATELLITE_SOLO_DELAY", str(SOLO_DELAY_S)))
+            else:
+                delays.update(sync.saved_delays())                # what the last calibration settled on beats the vault's starting guess
             _ROUTER = Router([(k, parts[k], delays.get(k, 0.0)) for k in parts if k in used], log=log)
-            _ROUTER.calibrator = sync.for_router(_ROUTER, env, log)   # the PC's microphone hears the pod and these outputs: their offset, each reply
+            _ROUTER.calibrator = sync.for_router(_ROUTER, env, log, solo=solo)   # the PC's microphone hears each reply: when it really sounded
             if _ROUTER.sinks:
                 _ROUTER.start()                                   # open the outputs now: PortAudio's first device scan takes seconds
         return _ROUTER

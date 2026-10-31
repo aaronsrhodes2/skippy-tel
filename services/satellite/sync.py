@@ -37,6 +37,8 @@ PEAK_MIN = 8.0                   # a peak this many times the response's noise f
 PEAK_REL = 0.06                  # and at least this fraction of the strongest copy
 ECHO_S = 0.025                   # a copy this close to an output's is as likely its reflection off a wall as the pod
 TELL_APART_S = 0.015             # two copies whose distances from where an output's was due differ by less than this: can't say which is which
+DEFAULT_EXTRA = 0.1
+SOLO_WINDOW_S = 1.0              # one voice: its copy sounds within this of its queue (more is a mishearing)
 ASSIGN_S = 0.30                  # an output's copy lands within this of where the router expected it (plus the learned extra)
 STATE = Path(__file__).resolve().parents[2] / "state" / "audio-sync.json"
 
@@ -124,7 +126,8 @@ class MicRing:
         return True
 
     def _callback(self, indata, frames, _time, _status) -> None:
-        self.add(self.clock() - frames / RATE, indata[:, 0].copy())
+        lag = float(getattr(self.stream, "latency", 0.0) or 0.0)  # the input's own buffering: the block was heard that much earlier
+        self.add(self.clock() - frames / RATE - lag, indata[:, 0].copy())
 
     def add(self, t0: float, samples48) -> None:
         samples = to_fs(samples48)
@@ -145,10 +148,11 @@ class MicRing:
 
 
 class Calibrator:
-    def __init__(self, router, kinds, mic: MicRing, log=print, path: Path = STATE, clock=time.monotonic):
+    def __init__(self, router, kinds, mic: MicRing, log=print, path: Path = STATE, clock=time.monotonic, solo: bool = False):
         self.router, self.kinds, self.mic, self.log, self.path, self.clock = router, list(kinds), mic, log, path, clock
+        self.solo = solo                                           # the PC output is the room's one voice (speaker_out.one_voice): measure its latency only
         saved = load(path).get("outputs") or {}
-        self.extra = {k: float((saved.get(k) or {}).get("extra", 0.1)) for k in self.kinds}   # each output's own latency past its stream's (the projector's)
+        self.extra = {k: float((saved.get(k) or {}).get("extra", DEFAULT_EXTRA)) for k in self.kinds}   # each output's own latency past its stream's (the projector's)
         self.lock = threading.Lock()
 
     def measure(self, pcm48, marks: dict) -> dict | None:
@@ -178,6 +182,8 @@ class Calibrator:
         if not found:
             self.log("(sync: no copy of the clip heard in the room)")
             return None
+        if self.solo:
+            return self._latency(found, marks)
         expected = {k: m[0] + m[1] + m[2] + self.extra[k] for k, m in marks.items()}
         mine, left, unsure = {}, list(found), set()
         for k, e in sorted(expected.items()):
@@ -226,6 +232,28 @@ class Calibrator:
         self._save(result)
         return result
 
+    def _latency(self, found, marks: dict) -> dict | None:
+        """One voice: the strongest copy is the PC output's. How long after its queue it sounded (the stream, the projector's own audio delay, the
+        air) is `extra`: the pod's lips start then (speaker_out.sound_at) and the room stays deaf to it until it has ended."""
+        result = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "outputs": {}}
+        for k, m in marks.items():
+            base = m[0] + m[1] + m[2]
+            near = [p for p in found if -0.05 <= p[0] - base <= SOLO_WINDOW_S]
+            if not near:
+                self.log(f"(sync: {k}: no copy heard within {SOLO_WINDOW_S:.1f} s of its queue: the lips keep {self.extra[k] * 1000:.0f} ms)")
+                continue
+            t, h = max(near, key=lambda p: p[1])
+            got = t - base
+            with self.lock:
+                old = self.extra[k]
+                self.extra[k] = got if old == DEFAULT_EXTRA else 0.5 * old + 0.5 * got
+            self.log(f"(sync: {k} sounded {got * 1000:.0f} ms after its queue ({h:.0f}x); the lips use {self.extra[k] * 1000:.0f} ms)")
+            result["outputs"][k] = {"latency": round(got, 4), "delay": round(m[1], 4), "extra": round(self.extra[k], 4)}
+        if result["outputs"]:
+            self._save(result)
+            return result
+        return None
+
     def _save(self, result: dict) -> None:
         data = load(self.path)
         outs = data.setdefault("outputs", {})
@@ -266,9 +294,9 @@ def pod_rooms_kinds(env: dict) -> set[str]:
     return out
 
 
-def for_router(router, env: dict, log=print) -> Calibrator | None:
+def for_router(router, env: dict, log=print, solo: bool = False) -> Calibrator | None:
     part = env.get("SATELLITE_SYNC_MIC", "CMTECK")
     kinds = pod_rooms_kinds(env) & set(router.sinks)
     if not kinds or part in ("", "0"):
         return None
-    return Calibrator(router, kinds, MicRing(part, log=log), log=log)   # the router's device scan opens the microphone
+    return Calibrator(router, kinds, MicRing(part, log=log), log=log, solo=solo)   # the router's device scan opens the microphone

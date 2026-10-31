@@ -8,6 +8,8 @@ is ~200 ms late, the box ~600 ms), and ducks whatever else is playing on the PC 
     SATELLITE_OUT_HDMI=NVIDIA High Definition        a part of the Windows output's name
     SATELLITE_OUT_BT=Enclave Audio
     SATELLITE_OUT_DELAYS=hdmi=0.5,bt=0.4,pod=0       seconds to wait before starting each, to line them up by ear
+    SATELLITE_ONE_VOICE=1                            (default) a room with a pod AND a PC output speaks from the PC output alone while it
+                                                     is open: the pod is the mic, the face and the lips, and the voice only as the fallback
 """
 from __future__ import annotations
 
@@ -161,8 +163,9 @@ class RoutedOut:
     """Skippy's voice on ALL of a room's PC outputs through the house's audio router (router.py): decoded once, mixed over a book or music
     (which ducks under it instead of stopping), on outputs that stay open. Same `play` as PcOut, so the hub's Room uses it unchanged."""
 
-    def __init__(self, router, kinds: list[str], log=print, duck_others: bool = True, decoder=None):
+    def __init__(self, router, kinds: list[str], log=print, duck_others: bool = True, decoder=None, sole: bool = False):
         self.router, self.kinds, self.log, self.duck_others = router, set(kinds), log, duck_others
+        self.sole = sole                                           # the room's ONE voice while open: the pod stays silent (hub.Room._out)
         self.kind = "+".join(kinds)
         self.decoder = decoder or decode_cached
         self.talking_until = 0.0                                   # (monotonic) when the outputs fall silent: the room stays deaf until then (hub.Room.feed)
@@ -170,7 +173,9 @@ class RoutedOut:
     def available(self):
         return any(self.router.available(k) for k in self.kinds) or None
 
-    async def play(self, mp3: bytes, gain: float = 1.0) -> bool:
+    async def play(self, mp3: bytes, gain: float = 1.0, on_sound=None) -> bool:
+        """Play it on the outputs; True when it started (False: dropped, never late). `on_sound(at, seconds)`, at once when it starts: when it
+        sounds in the room (time.monotonic: the router's queue, the stream's latency and the measured rest, sync.py), for the pod's drawn lips."""
         try:
             pcm = await asyncio.to_thread(self.decoder, mp3, gain)
         except Exception as e:                                     # noqa: BLE001
@@ -181,10 +186,17 @@ class RoutedOut:
         lag = max((self.router.sinks[k].delay_s for k in self.kinds if k in self.router.sinks), default=0)
         self.talking_until = max(self.talking_until, time.monotonic() + len(pcm) / RATE + lag + ECHO_TAIL_S)
         ducker = Ducker() if self.duck_others else None            # other programs (Bilby in a browser, a game) still duck under him
+        started = False
         if ducker:
             await asyncio.to_thread(ducker.duck)
         try:
             p = self.router.play(router_mod.ClipSource(pcm), layer="voice", targets=self.kinds)
+            started = await asyncio.to_thread(_wait_started, p, router_mod.STALE_VOICE_S + 1.0)
+            if started and p.marks:
+                at = sound_at(self.router, p.marks)
+                self.talking_until = max(self.talking_until, at + len(pcm) / RATE + ECHO_TAIL_S)
+                if on_sound is not None:
+                    on_sound(at, len(pcm) / RATE)
             await asyncio.to_thread(p.finished.wait, len(pcm) / RATE + 5)
             await asyncio.sleep(max((self.router.sinks[k].delay_s for k in self.kinds if k in self.router.sinks), default=0))
             cal = getattr(self.router, "calibrator", None)
@@ -193,7 +205,26 @@ class RoutedOut:
         finally:
             if ducker:
                 await asyncio.to_thread(ducker.restore)
-        return True
+        return bool(started)
+
+
+SOUND_EXTRA_S = 0.05                                               # past the stream's own latency, until sync.py has measured the output
+
+
+def _wait_started(p, timeout: float) -> bool:
+    import time                                                    # noqa: PLC0415
+    end = time.monotonic() + timeout
+    while not getattr(p, "started", True) is True and not p.finished.is_set() and time.monotonic() < end:
+        time.sleep(0.01)
+    return bool(getattr(p, "started", True))
+
+
+def sound_at(router, marks: dict) -> float:
+    """When a voice clip sounds in the room (time.monotonic): its first block's push, the queue ahead of it, the stream's latency, and what the
+    room's microphone measured on top (sync.Calibrator.extra: the projector's own audio delay). The earliest of its outputs."""
+    cal = getattr(router, "calibrator", None)
+    extra = getattr(cal, "extra", {}) if cal is not None else {}
+    return min(m[0] + m[1] + m[2] + extra.get(k, SOUND_EXTRA_S) for k, m in marks.items())
 
 
 def output_parts(env: dict) -> dict:
@@ -217,6 +248,12 @@ def room_kinds(env: dict, room: str) -> list[str]:
     return [k.strip() for k in want.split("+") if k.strip()]
 
 
+def one_voice(env: dict) -> bool:
+    """SATELLITE_ONE_VOICE (default on; the Captain, 2026-10-31: "it's too hard to sync these wimpy hubs"): a room with a pod AND a PC output
+    speaks from the PC output alone while it is open; the pod stays the mic, the face and the lips, and speaks only when no PC output plays."""
+    return env.get("SATELLITE_ONE_VOICE", "1").lower() not in ("0", "off", "no")
+
+
 def parse_outputs(env: dict, room: str, log=print) -> tuple[bool, list]:
     """(play on the box's own speaker?, the PC outputs) for a room from the vault settings; the default is the box only.
     The PC outputs go through the house's audio router (router.py) unless SATELLITE_ROUTER=0, which keeps the old one-PcOut-per-output path."""
@@ -225,6 +262,7 @@ def parse_outputs(env: dict, room: str, log=print) -> tuple[bool, list]:
     pc_kinds = [k for k in kinds if k in parts]
     if pc_kinds and env.get("SATELLITE_ROUTER", "1") != "0":
         import router as router_mod                                # noqa: PLC0415
-        return "pod" in kinds, [RoutedOut(router_mod.shared(env, log), pc_kinds, log=log)]
+        sole = "pod" in kinds and one_voice(env)
+        return "pod" in kinds, [RoutedOut(router_mod.shared(env, log), pc_kinds, log=log, sole=sole)]
     pcs = [PcOut(k, parts[k], delays.get(k, 0.0), log=log) for k in pc_kinds]
     return ("pod" in kinds or not pcs), pcs
