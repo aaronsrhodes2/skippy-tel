@@ -232,7 +232,8 @@ Read only (2026-10-26; commands through Tesla's Fleet API are saved for later): 
 core.env says `CORE_TESLA=1`, set up by `core/install/tesla.sh`) logs every drive and charge into its own Postgres and publishes the live
 state to MQTT; the car reader (`core/car`, tailnet `:7351`) keeps the latest values; skippy-pc's reporter carries them as the `car` capability;
 the portal shows the **Car** tile (`portal/car_web.py`) and Skippy gets `car_status`. Both are the Captain's alone (location). Reading never wakes
-the car. TeslaMate's own page (`http://skippy-core:4000`, tailnet only) is where he pastes his Tesla tokens once. Full description: docs/tesla.md.
+the car. **Charging on/off** (2026-10-30) goes over Bluetooth from skippy-core: `core/car-ble` (Tesla's tesla-control, a charging_manager key in
+`/etc/skippy-core/tesla-ble`, paired once with `tesla.sh --pair` + the key card), tailnet `:7352`, purple Skippy's `car_charge` tool. TeslaMate's own page (`http://skippy-core:4000`, tailnet only) is where he pastes his Tesla tokens once. Full description: docs/tesla.md.
 
 ## Nagatha's Video Service (the browser video app, `/video`)
 

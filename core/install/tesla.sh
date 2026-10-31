@@ -4,6 +4,7 @@
 #   sudo bash core/install/tesla.sh            # dry run: says what it would do, changes nothing
 #   sudo bash core/install/tesla.sh --apply
 #   sudo bash core/install/tesla.sh --check    # read-only: is all of it live? exit 1 if not
+#   sudo bash core/install/tesla.sh --pair     # sends the charging key's pairing request: then tap the key card on the centre console
 # Idempotent.
 #
 #   * /etc/skippy-core/tesla.env (root, 600): ENCRYPTION_KEY (TeslaMate encrypts the Tesla tokens with it), DATABASE_PASS and
@@ -11,6 +12,9 @@
 #     make the stored tokens unreadable and the Captain would have to sign in again.
 #   * the tailnet doors (never the Funnel): :4000 TeslaMate's page (the one-time sign-in, and its settings), :7351 the car reader
 #     (skippy-pc's reporter, CAR_URL). Both proxy to 127.0.0.1, so ufw keeps denying everything inbound.
+#   * /etc/skippy-core/tesla-ble/ (root, 700): the charging key (private.pem, made here once, never leaves the box; public.pem) and
+#     vin.env (TESLA_VIN, read from TeslaMate). The car-ble container (core/car-ble) signs charge commands with it over Bluetooth; the
+#     key is enrolled as charging_manager, so the car takes nothing else from it. :7352 is its tailnet door.
 #   * /etc/skippy-core/core.env: CORE_TESLA=1, then a repair so it starts now rather than at the next commit.
 set -euo pipefail
 MODE="${1:-}"
@@ -18,7 +22,8 @@ APPLY=0; [[ "$MODE" == "--apply" ]] && APPLY=1
 CORE_ENV="${CORE_ENV:-/etc/skippy-core/core.env}"
 TESLA_ENV="${TESLA_ENV:-/etc/skippy-core/tesla.env}"
 REPO="${REPO:-/opt/skippy-core/repo}"
-DOORS=(4000 7351)
+BLE="${BLE:-/etc/skippy-core/tesla-ble}"
+DOORS=(4000 7351 7352)
 served() { tailscale serve status 2>/dev/null | grep -q ":$1 (tailnet only)"; }
 
 if [[ "$MODE" == "--check" ]]; then
@@ -28,10 +33,22 @@ if [[ "$MODE" == "--check" ]]; then
   chk "CORE_TESLA=1 in $CORE_ENV"        'grep -qx "CORE_TESLA=1" "$CORE_ENV"'
   for p in "${DOORS[@]}"; do chk ":$p served to the tailnet only" "served $p"; done
   chk "TeslaMate's page answers on :4000" 'curl -fsS --max-time 5 -o /dev/null http://127.0.0.1:4000/'
+  chk "the charging key exists, root only" '[[ $(stat -c %a "$BLE/private.pem") == 600 ]] && grep -q "^TESLA_VIN=." "$BLE/vin.env"'
+  chk "the charging door answers on :7352" 'curl -sS --max-time 5 -o /dev/null http://127.0.0.1:7352/health'
   chk "car reader connected to MQTT"     'curl -fsS --max-time 5 http://127.0.0.1:7351/car | grep -q "\"mqtt\": true"'
   if curl -fsS --max-time 5 http://127.0.0.1:7351/health >/dev/null 2>&1; then echo "ok    a car is signed in"
   else echo "todo  no car yet: the Captain signs in to Tesla at http://skippy-core:4000 (not a failure)"; fi
   exit $bad
+fi
+
+if [[ "$MODE" == "--pair" ]]; then
+  [[ $EUID -eq 0 ]] || { echo "run it with sudo" >&2; exit 1; }
+  # shellcheck disable=SC1091
+  . "$BLE/vin.env"
+  c=$(docker ps --format '{{.Names}}' | grep -m1 'car-ble') || { echo "the car-ble container isn't running (sudo bash $0 --apply)" >&2; exit 1; }
+  docker exec "$c" tesla-control -ble -vin "$TESLA_VIN" add-key-request /keys/private.pem charging_manager cloud_key
+  echo "now tap the key card on the centre console and approve it on the car's screen"
+  exit 0
 fi
 
 do_() { if (( APPLY )); then echo "+ $*"; "$@"; else echo "would: $*"; fi; }
@@ -54,7 +71,22 @@ elif (( APPLY )); then
   echo "+ made $TESLA_ENV (600)"
 else echo "would: make $TESLA_ENV with a new ENCRYPTION_KEY and database password (600, root)"; fi
 
-echo "== 2/3 the tailnet doors (TeslaMate's page, the car reader)"
+echo "== the charging key ($BLE)"
+if [[ -s "$BLE/private.pem" ]]; then echo "ok: $BLE/private.pem (kept: a new key would need pairing again)"
+elif (( APPLY )); then
+  install -d -m 700 "$BLE"
+  ( umask 077; openssl ecparam -name prime256v1 -genkey -noout -out "$BLE/private.pem"; openssl ec -in "$BLE/private.pem" -pubout -out "$BLE/public.pem" 2>/dev/null )
+  echo "+ made $BLE/private.pem (600): pair it with --pair"
+else echo "would: make the charging key in $BLE (700, root)"; fi
+if grep -q "^TESLA_VIN=." "$BLE/vin.env" 2>/dev/null; then echo "ok: $BLE/vin.env"
+elif (( APPLY )); then
+  db=$(docker ps --format '{{.Names}}' | grep -m1 'tesla-db' || true)
+  vin=$([[ -n "$db" ]] && docker exec "$db" psql -U teslamate -d teslamate -Atc "select vin from cars order by id limit 1" || true)
+  if [[ -n "$vin" ]]; then ( umask 077; echo "TESLA_VIN=$vin" > "$BLE/vin.env" ); echo "+ wrote $BLE/vin.env"
+  else ( umask 077; : > "$BLE/vin.env" ); echo "todo: no car in TeslaMate yet; run --apply again after signing in to Tesla"; fi
+else echo "would: write $BLE/vin.env with the car's VIN from TeslaMate"; fi
+
+echo "== 2/3 the tailnet doors (TeslaMate's page, the car reader, the charging door)"
 for p in "${DOORS[@]}"; do
   if served "$p"; then echo "ok: :$p already served"; else do_ tailscale serve --bg --http="$p" "http://127.0.0.1:$p"; fi
 done

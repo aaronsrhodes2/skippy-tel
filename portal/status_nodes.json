@@ -53,6 +53,12 @@
    "the Car tile and Skippy's car_status (through the reader)"
   ]
  },
+ "car-ble": {
+  "for": "Switches the Tesla's charging on and off over Bluetooth (Tesla's tesla-control with a charging-only key that never leaves skippy-core). Tailnet only, port 7352.",
+  "used_by": [
+   "purple Skippy's car_charge tool"
+  ]
+ },
  "car": {
   "for": "The car reader: keeps the latest values the broker has (charge, lock, location) and serves them as one small answer with the readiness contract.",
   "used_by": [

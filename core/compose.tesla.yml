@@ -77,3 +77,19 @@ services:
       - "127.0.0.1:7351:7351"
     depends_on:
       - mosquitto
+
+  # The car's charging over Bluetooth (core/car-ble): tesla-control with the box's charging-only key (paired once with the key card,
+  # install/tesla.sh). Host networking and NET_ADMIN/NET_RAW because the radio is the host's; it listens on 127.0.0.1:7352 only.
+  car-ble:
+    build: ./car-ble
+    restart: unless-stopped
+    logging: *tesla-logging
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    env_file: ${TESLA_BLE_ENV:-/etc/skippy-core/tesla-ble/vin.env}     # TESLA_VIN
+    environment:
+      - TESLA_KEY_FILE=/keys/private.pem
+    volumes:
+      - /etc/skippy-core/tesla-ble/private.pem:/keys/private.pem:ro

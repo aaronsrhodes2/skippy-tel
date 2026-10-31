@@ -18,6 +18,8 @@ from pathlib import Path
 
 SEARCH_URL = os.environ.get("PURPLE_SEARCH_URL", "http://skippy-core:7360").rstrip("/")   # SearXNG on skippy-core (core/compose.core.yml), tailnet only
 MAX_TEXT = 7000
+CAR_BLE_URL = os.environ.get("PURPLE_CAR_BLE_URL", "http://skippy-core:7352").rstrip("/")   # the car's charging door on skippy-core (core/car-ble), tailnet only
+CAR_URL = os.environ.get("PURPLE_CAR_URL", "http://skippy-core:7351").rstrip("/")           # the car reader (core/car): TeslaMate's latest values
 
 
 def allowed_roots(cwd: Path | None = None) -> list[Path]:
@@ -307,6 +309,30 @@ def browse(args: dict, cwd: Path | None = None, launcher=None) -> str:
     return "\n".join(out)[:MAX_TEXT + 1500]
 
 
+# ── the Captain's car: charging on and off, over Bluetooth from skippy-core ───────────────────────────────────────────────────────────────────
+def car_charge(args: dict, post=http_post_json, get=http_get_json) -> str:
+    action = str(args.get("action") or "").strip().lower()
+    if action not in ("start", "stop", "limit", "status"):
+        raise ValueError("car_charge's action is start, stop, limit or status")
+    said = ""
+    if action != "status":
+        body = {"action": action} | ({"percent": args.get("percent")} if action == "limit" else {})
+        got = post(f"{CAR_BLE_URL}/charge", body, timeout=120.0)
+        if not isinstance(got, dict) or not got.get("ok"):
+            raise ValueError("The car didn't take it: " + str((got or {}).get("error") if isinstance(got, dict) else "no answer"))
+        said = str(got.get("said") or "done") + ". "
+    try:
+        car = (get(f"{CAR_URL}/car", 10.0).get("cars") or [{}])[0]
+    except Exception:  # noqa: BLE001 — the command went through; the reading is a bonus
+        return said + "(TeslaMate's reading isn't available right now.)"
+    bits = [f"battery {car.get('battery_level')}%", f"limit {car.get('charge_limit_soc')}%",
+            "plugged in" if car.get("plugged_in") else "not plugged in", f"charging state {car.get('charging_state') or 'unknown'}"]
+    if car.get("charger_power"):
+        bits.append(f"{car['charger_power']} kW")
+    lag = " (TeslaMate's reading can take a minute to catch up)" if action != "status" else ""
+    return said + f"{car.get('name') or 'The car'}: " + ", ".join(bits) + f"{lag}."
+
+
 TOOLS: dict[str, dict] = {
     "browse": {
         "description": "Open a web page in a real headless browser on this PC (scripts run, so single-page apps and JavaScript-built pages work) and get its "
@@ -364,6 +390,13 @@ TOOLS: dict[str, dict] = {
                        "'orbit', 'thermo', 'optics').",
         "input_schema": {"type": "object", "properties": {"search": {"type": "string", "description": "a word to match in the name, description or domain (optional)"}}},
         "run": mentat_tools},
+    "car_charge": {
+        "description": "The Captain's Tesla: start or stop charging, set the charge limit, or read the charge state. Commands go over Bluetooth from "
+                       "skippy-core (parked near it) with a charging-only key; the car must be plugged in to start. Use status to check before or after.",
+        "input_schema": {"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["start", "stop", "limit", "status"]},
+            "percent": {"type": "integer", "description": "with limit: the new charge limit, 50 to 100"}}, "required": ["action"]},
+        "run": car_charge},
 }
 
 

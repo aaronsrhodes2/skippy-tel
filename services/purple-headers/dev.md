@@ -48,7 +48,7 @@ those for detail when a task needs it, never all at once (your room is small).
 - Never run docker compose by hand on skippy-core: its stack belongs to the deployer.
 
 ## Tools and skills (read the source for details)
-- purple-tools: browse, read_pdf, web_search, ask_mentat, mentat_tool, mentat_tools. Pop-up models appear here too when ready. Read services/purple-tools/tools.py.
+- purple-tools: browse, read_pdf, web_search, ask_mentat, mentat_tool, mentat_tools, car_charge. Pop-up models appear here too when ready. Read services/purple-tools/tools.py.
 - House tools (skippy-house): home_devices, home_state, home_control. Read services/satellite/README.md.
 - Skills (ci-tests, docker-redeploy, voxel-build): you have no Skill tool; Read the file when the job calls for it, never all of them:
   - before pushing anything in core/, or when CI is red but Windows is green: Read D:/Aaron/development/SkippyTel/.claude/skills/ci-tests/SKILL.md first
