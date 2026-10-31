@@ -475,3 +475,31 @@ def test_the_night_shift_starts_once_when_the_house_is_quiet_and_the_morning_rea
     assert asyncio.run(d.overnight()) == "Overnight: all clean."
     now[0] += 2 * 86400
     assert asyncio.run(d.overnight()) is None
+
+
+def test_stop_the_music_reaches_the_stereo(tmp_path):
+    now = [stamp("2026-11-02", "08:00")]
+    d, room, link, brain, *_ = make(tmp_path, now)
+    calls = []
+
+    class Box:
+        queue = ["a"]
+        async def next(self): calls.append("next")
+        async def resume(self): calls.append("resume")
+
+    class Stereo:
+        playing = True
+        box = Box()
+        async def stop(self):
+            calls.append("stop")
+            Stereo.playing = False
+        def duck(self, *a): pass
+    d.stereo = lambda: Stereo()
+
+    async def go():
+        await room.handle("next song")
+        await room.handle("stop the music")
+        await room.handle("play the music")
+        await room.handle("what time is it")
+    asyncio.run(go())
+    assert calls == ["next", "stop", "resume"] and brain.heard == ["what time is it"]

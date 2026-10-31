@@ -49,6 +49,9 @@ GOODNIGHT_RE = re.compile(r"^\W*(?:good ?night|night night|nighty night|bed ?tim
                           r"(?:run|start) (?:the |my )?bed ?time(?: routine)?)(?:,? (?:skippy|monkey|buddy))?\W*$", re.I)
 TIMED_RE = re.compile(r"^\W*(?:good ?night|bed ?time(?: routine)?)\s+(?:at|for)\s+(\d{1,2})(?:[: ](\d\d))?\s*(a\.?m\.?|p\.?m\.?)?\W*$", re.I)
 MORNING_RE = re.compile(r"^\W*(?:good morning|(?:run|start|do) (?:the |my )?morning(?: routine| briefing)?|morning briefing)(?:,? (?:skippy|monkey))?\W*$", re.I)
+STEREO_STOP_RE = re.compile(r"^\W*(?:ok(?:ay)?\W+)?(?:stop|pause|end|kill|turn off|shut off|enough)(?: the| that)? ?(?:music|song|stereo|shuffle|tunes)?\W*$", re.I)
+STEREO_NEXT_RE = re.compile(r"^\W*(?:next(?: song| track)?|skip (?:this|the|that) (?:song|track)|another song)\W*$", re.I)
+STEREO_ON_RE = re.compile(r"^\W*(?:resume|continue|play) (?:the )?(?:music|stereo|shuffle)\W*$", re.I)
 HOME_RE = re.compile(r"^\W*(?:i'?m home|i am home|honey,? i'?m home|i'?m back(?: home)?|(?:run|start) (?:the )?(?:coming|getting) home(?: routine)?)\W*$", re.I)
 
 # Open-Meteo's weather codes (WMO), in words
@@ -205,6 +208,20 @@ class Daily:
             if SKIP_RE.match(c):
                 self.run.skip_next = True
                 await self._reply(room, "Skipping it.")
+                return True
+        stereo = self.stereo() if self.stereo is not None else None
+        if stereo is not None and not self.busy:                     # Bilby on the house stereo (the brain's music tool only knows the pod's)
+            if stereo.playing and STEREO_STOP_RE.match(c):
+                await stereo.stop()
+                await self._reply(room, "Music off.", release=True)
+                return True
+            if stereo.playing and STEREO_NEXT_RE.match(c):
+                await stereo.box.next()
+                await self._reply(room, "Next one.", release=True)
+                return True
+            if not stereo.playing and stereo.box.queue and STEREO_ON_RE.match(c):
+                await stereo.box.resume()
+                await self._reply(room, "Back on.", release=True)
                 return True
         m = TIMED_RE.match(c)
         if m:
