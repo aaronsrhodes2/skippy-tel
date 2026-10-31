@@ -574,10 +574,17 @@
     return "file";
   }
 
-  /** Which songs to hold in memory: the one playing (for a drop mid-song), then the next few. No duplicates, no "none". */
-  function prefetchOrder(cur, upcoming, depth) {
+  /** Which songs to hold in memory: the one playing (for a drop mid-song), then the next `depth`, and more until the ones after the playing
+   *  song add up to `aheadS` seconds (`secs(t)` a song's length; the Captain's dead zone over the mountains is ~17 minutes). No duplicates, no "none". */
+  function prefetchOrder(cur, upcoming, depth, secs, aheadS) {
     const out = [];
-    for (const t of [cur].concat((upcoming || []).slice(0, Math.max(0, depth | 0)))) if (t >= 0 && !out.includes(t)) out.push(t);
+    if (cur >= 0) out.push(cur);
+    let n = 0, ahead = 0;
+    for (const t of upcoming || []) {
+      if (n >= Math.max(0, depth | 0) && (!secs || !(aheadS > 0) || ahead >= aheadS)) break;
+      if (t < 0 || out.includes(t)) continue;
+      out.push(t); n++; ahead += secs ? (+secs(t) || 0) : 0;
+    }
     return out;
   }
 

@@ -640,6 +640,13 @@ test("what to hold in memory: the playing song, then the next few, without dupli
   assert.deepEqual(C.prefetchOrder(5, [6, 7], 0), [5]);
 });
 
+test("the signal shield holds 20 minutes ahead: as many songs as that takes, never fewer than the depth", () => {
+  const secs = t => ({ 6: 300, 7: 300, 8: 300, 9: 300, 10: 300, 11: 300 })[t];
+  assert.deepEqual(C.prefetchOrder(5, [6, 7, 8, 9, 10, 11], 2, secs, 1200), [5, 6, 7, 8, 9]);      // four 5-minute songs = 20 minutes
+  assert.deepEqual(C.prefetchOrder(5, [6, 7, 8], 2, t => 900, 1200), [5, 6, 7]);                 // long songs: still the two
+  assert.deepEqual(C.prefetchOrder(5, [6, 7, 8], 2, t => 30, 1200), [5, 6, 7, 8]);                // the queue runs out first
+});
+
 test("the memory cache drops the least recently used song first, within a count and a size, and never a pinned one", () => {
   const gone = [];
   const c = new C.BlobCache({ maxBytes: 100, maxItems: 3, onEvict: v => gone.push(v) });

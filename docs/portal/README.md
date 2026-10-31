@@ -313,7 +313,8 @@ a song's options, the sleep timer and other devices are small panels of glyph ke
 an artist, a device) or an error. The lamp is lit when all is well, a triangle while the line is lost, a diamond when the library is
 out of reach.
 
-**Losing the signal (the mountains).** The playing song and the next two are held in memory (the **signal shield**, on by default;
+**Losing the signal (the mountains).** The playing song and the next 20 minutes of the queue (at least two songs; his dead zone over the
+mountains is ~17 minutes; up to 14 songs or 220 MB) are held in memory (the **signal shield**, on by default;
 a shield key in Now Playing turns it off, and it stands down by itself when the browser asks to save data), so a song finishes and the
 next one starts with no network at all. If a song that was playing fails or stalls for 8 s, the player keeps the place and the wish to
 play, keeps the lock screen and the car showing "playing", and retries at 2, 4, 8, 15 and then every 30 s for as long as it takes,

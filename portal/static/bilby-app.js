@@ -349,7 +349,8 @@
   // ═══ the signal shield: songs in memory ahead of time, and the way back after a dead zone ════════════════════════
   // A song held in memory plays with no network at all: the playing one (so a drop mid-song is nothing), then the next few. Fetched one
   // at a time, after the playing song has settled, and only when this browser is not asked to save data.
-  const blobs = new C.BlobCache({ maxBytes: 90e6, maxItems: 5, onEvict: v => { try { URL.revokeObjectURL(v.url); } catch (e) { /* gone already */ } } });
+  const SHIELD_AHEAD_S = 20 * 60;                            // music held ahead of the playing song: his ~17-minute dead zone, with room to spare
+  const blobs = new C.BlobCache({ maxBytes: 220e6, maxItems: 14, onEvict: v => { try { URL.revokeObjectURL(v.url); } catch (e) { /* gone already */ } } });
   const fetching = new Map();                                // song index -> AbortController
   let prefetchTok = 0;
   const saveData = () => !!(navigator.connection && navigator.connection.saveData);
@@ -366,10 +367,10 @@
     } catch (e) { if (e && e.name !== "AbortError") S.netBadAt = Date.now(); /* the line dropped: the next pass tries again */ } finally { fetching.delete(tIdx); }
   }
   function upcomingTracks() { return S.q.upcoming().map(it => it.t); }
-  /** Hold the playing song and the next two. Restarted whenever the queue moves; an unwanted fetch in flight is cancelled. */
+  /** Hold the playing song and the next 20 minutes (at least two songs). Restarted whenever the queue moves; an unwanted fetch in flight is cancelled. */
   async function prefetchSoon() {
     if (!S.shield || !S.lib || !S.q.cur || saveData() || !gate.info) return;
-    const order = C.prefetchOrder(S.q.cur.t, S.repeat === "one" ? [] : upcomingTracks(), 2);
+    const order = C.prefetchOrder(S.q.cur.t, S.repeat === "one" ? [] : upcomingTracks(), 2, t => S.lib.T[t].s, SHIELD_AHEAD_S);
     blobs.pin(order);
     for (const [k, ac] of fetching) if (!order.includes(k)) ac.abort();
     const tok = ++prefetchTok;
@@ -768,7 +769,7 @@
       <input type="range" class="rg vol" data-vol min="0" max="100" step="1" value="100" aria-label="Volume"></div>
     <button type="button" class="key" data-act="sleep" aria-label="Sleep timer" title="Sleep timer"><i data-i="sleep"></i><sup data-bind="sleep"></sup></button>
     <button type="button" class="key" data-act="devices" aria-label="Other devices" title="Other devices (Connect)"><i data-i="devices"></i><sup data-bind="dev"></sup></button>
-    <button type="button" class="key" data-act="shield" aria-pressed="true" aria-label="Signal shield" title="Signal shield: keep the next songs in memory so the music rides through a dead zone"><i data-i="shield"></i></button>`;
+    <button type="button" class="key" data-act="shield" aria-pressed="true" aria-label="Signal shield" title="Signal shield: keep the next 20 minutes of songs in memory so the music rides through a dead zone"><i data-i="shield"></i></button>`;
   function buildSlots() {
     for (const s of $$('[data-slot="tp"]')) s.innerHTML = TP;
     for (const s of $$('[data-slot="sk"]')) s.innerHTML = SK;
