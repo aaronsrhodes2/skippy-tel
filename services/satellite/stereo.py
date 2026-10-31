@@ -115,8 +115,10 @@ class RouterPlayer:
         box = self.music
         if self.spot_uri:
             if uri == self.spot_uri and playing:
-                if not self.spot_seen and box is not None:
-                    box.offset, box.started, box.playing = (st.get("pos_ms") or 0) / 1000.0, self.clock(), True
+                if not self.spot_seen:
+                    self._road(uri)
+                    if box is not None:
+                        box.offset, box.started, box.playing = (st.get("pos_ms") or 0) / 1000.0, self.clock(), True
                 self.spot_seen = True
                 if box is not None and not box.playing:
                     box.offset, box.started, box.playing = (st.get("pos_ms") or 0) / 1000.0, self.clock(), True   # resumed from his phone
@@ -149,9 +151,22 @@ class RouterPlayer:
             self.router.stop(p)
         self._ensure_stream()
         self.spot_uri, self.spot_seen = st["uri"], True
+        self._road(st["uri"])
         if self.music is not None:
             self.music.adopt(st["uri"], st.get("title") or "", st.get("artist") or "", (st.get("pos_ms") or 0) / 1000.0)
         self.log(f"[stereo] Spotify: {st.get('title')} by {st.get('artist')} (started from {st.get('origin') or 'Spotify'})")
+
+    def _road(self, uri: str) -> None:
+        """A Spotify track that started playing goes into his "Skippy Road" playlist, once (his phone keeps it downloaded for the drive)."""
+        def add() -> None:
+            try:
+                self.spotify.road(uri)
+            except Exception as e:                                          # noqa: BLE001 — the music plays either way
+                self.log(f"(stereo: Skippy Road: {type(e).__name__}: {e})")
+        try:
+            asyncio.get_running_loop().run_in_executor(None, add)
+        except RuntimeError:
+            add()
 
     async def watch_spotify(self) -> None:
         """Forever: follow go-librespot (a track ending, a play started from his phone)."""

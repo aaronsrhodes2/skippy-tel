@@ -164,3 +164,22 @@ def test_the_relay_hands_the_fifo_to_the_hub_unaltered_and_drops_what_nobody_hea
     assert got == b"\x01\x02\x03\x04" * 4096
     c.close()
     os.close(w)
+
+
+def test_the_road_playlist_is_made_once_and_each_track_goes_in_once(tmp_path):
+    w, fake = web(tmp_path)
+    made = []
+    real = fake.__call__
+
+    def http(method, url, headers, body, timeout=15.0):
+        if url.endswith("/v1/me/playlists") and method == "POST":
+            made.append(json.loads(body)["name"])
+            return 201, b'{"id": "rrrrrrrrrrrrrrrrrrrrrr"}'
+        return real(method, url, headers, body, timeout)
+    w.http = http
+    uri = "spotify:track:" + "9" * 22
+    assert w.road(uri)["added"] is True and made == ["Skippy Road"]
+    assert w.road(uri)["added"] is False                                      # once only
+    adds = [c for c in fake.calls if c[0] == "POST" and c[1] == "/v1/playlists/rrrrrrrrrrrrrrrrrrrrrr/items"]
+    assert len(adds) == 1 and adds[0][3] == {"uris": [uri]}
+    assert w.road("spotify:episode:" + "1" * 22)["added"] is False

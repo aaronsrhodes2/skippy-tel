@@ -18,6 +18,7 @@ Endpoints (JSON; 127.0.0.1 only on the host, see docker-compose.override.yml):
     GET  /tracks?what=&n=           tracks for a spoken request (an artist's, else a search)
     GET  /search?q=&type=&n=        GET /playlists   GET /playlist?name=|id=   GET /liked?n=
     POST /playlist/add {playlist, uris}             POST /save {uris}
+    POST /road {uri}                the track into his "Skippy Road" playlist, once (his phone downloads it for the drive)
     POST /token {client_id, refresh_token}          from signin.py, with the home token
 
 Development Mode rules (February 2026, still in force): the app owner needs Premium, at most 5 users, search returns at most 10 a page (so this
@@ -55,6 +56,7 @@ TOKEN_URL = "https://accounts.spotify.com/api/token"
 SCOPES = ("user-read-playback-state user-modify-playback-state user-read-currently-playing playlist-read-private playlist-read-collaborative "
           "playlist-modify-private playlist-modify-public user-library-read user-library-modify")
 PAGE = 10                                       # Development Mode's largest search page
+ROAD = os.environ.get("SPOTIFY_ROAD_PLAYLIST", "Skippy Road")   # every track played through Skippy, for his phone to keep downloaded
 
 
 def _norm(s: str) -> str:
@@ -255,6 +257,37 @@ class WebApi:
 
     def save(self, uris: list[str]) -> None:
         self.call("PUT", "/me/library", {"uris": ",".join(uris)})
+
+    def road(self, uri: str, name: str = ROAD) -> dict:
+        """Every Spotify track played through Skippy, once, in one playlist his phone keeps downloaded for the drive (the Captain, 2026-10-31: no
+        signal for ~17 minutes over the mountains; the Web API can't start a download, so he taps Download on this playlist once in the app)."""
+        if not uri.startswith("spotify:track:"):
+            return {"added": False}
+        path = self.state / "road.json"
+        with self._lock:
+            try:
+                kept = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                kept = {}
+        pid, have = kept.get("id", ""), set(kept.get("uris") or [])
+        if not pid:
+            found = next((p for p in self.playlists() if p["name"] == name and p["mine"]), None)
+            if found is not None:
+                pid, have = found["id"], {t["uri"] for t in self.playlist_tracks(found["id"], 5000)}
+            else:
+                pid = self.call("POST", "/me/playlists", body={"name": name, "public": False,
+                                                               "description": "Everything Skippy played, for the drive. Set to Download in the app."})["id"]
+        added = uri not in have
+        if added:
+            self.call("POST", f"/playlists/{pid}/items", body={"uris": [uri]})
+            have.add(uri)
+        with self._lock:
+            try:
+                self.state.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps({"id": pid, "uris": sorted(have)}), encoding="utf-8")
+            except OSError:
+                pass
+        return {"added": added, "playlist": pid}
 
 
 def _fingerprint(s: str) -> str:
@@ -479,6 +512,8 @@ class Service:
                     return 400, {"error": "uris are needed"}
                 self.web.save(uris)
                 return 200, {"ok": True}
+            if method == "POST" and path == "/road":
+                return 200, self.web.road(str(body.get("uri") or ""))
             if method == "POST" and path == "/token":
                 if not self.home_token or auth != "Bearer " + self.home_token:
                     return 403, {"error": "the home token is needed"}

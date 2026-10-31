@@ -80,6 +80,10 @@ class Client:
     def save(self, uris: list[str]) -> None:
         self._ok("POST", "/save", body={"uris": uris})
 
+    def road(self, uri: str) -> dict:
+        """Into his "Skippy Road" playlist, once: every Spotify track played through Skippy, which his phone keeps downloaded for the drive."""
+        return self._ok("POST", "/road", body={"uri": uri})
+
     # ── the speaker ──
     def play(self, uri: str, pos_ms: int = 0) -> None:
         self._ok("POST", "/play", body={"uri": uri, "pos_ms": int(pos_ms)})

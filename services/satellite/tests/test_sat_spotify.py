@@ -101,6 +101,9 @@ class FakeClient:
     def save(self, uris):
         self.calls.append(("save", tuple(uris)))
 
+    def road(self, uri):
+        self.calls.append(("road", uri))
+
 
 class FakeMedia:
     async def catalog(self):
@@ -336,3 +339,20 @@ def test_favorite_this_names_the_stereo_when_that_is_what_plays():
     runner("spotify", {"action": "play", "what": "Daft Punk"})
     runner("music", {"action": "favorite"})
     assert sent[-1] == ("office", "skippyroom-stereo")
+
+
+def test_every_spotify_track_that_starts_goes_into_his_road_playlist_once():
+    async def go():
+        s, router, clock = make()
+        client = s.player.spotify
+        await s.play_spotify([{"uri": A, "title": "a", "artist": "x"}])
+        client.status = {"logged_in": True, "playing": True, "uri": A, "origin": "go-librespot", "pos_ms": 1000, "ms": 200000}
+        await s.player.spotify_tick(client.now())
+        await s.player.spotify_tick(client.now())
+        await asyncio.sleep(0.1)
+        assert client.calls.count(("road", A)) == 1
+        await s.player.spotify_tick({"logged_in": True, "playing": True, "uri": B, "title": "b", "artist": "y", "origin": "android"})
+        await asyncio.sleep(0.1)
+        assert ("road", B) in client.calls                                # one his phone played on the Skippy speaker too
+        await s.stop()
+    run(go())
