@@ -10,6 +10,10 @@ Settings (the vault `.env`, which the reporter container reads): HOME_ADDRESS, W
 America/Los_Angeles), COMMUTE_ROADS and COMMUTE_BOX (south,west,north,east) if the route changes. No coordinates or IPs are hard-coded: addresses are geocoded.
 Polite with the services: everything is cached (weather 15 min; times and incidents 5 min in the commute hours, weekdays 6 to 10 and 15 to 19, else 30 min).
 A failure keeps the last good answer, marked stale, and never raises.
+
+His normal routes (2026-10-31, the Captain: "only notify us of things that are along our normal routes"): with CAR_URL set, the car reader's /routes
+(core/car: every ~100 m square his Tesla drove through on at least two drives, from TeslaMate's log) replaces the box and the road list: an incident
+counts only within ROUTE_RADIUS squares (about 300 m) of one of them, on any road. No drive log yet (or the reader down): the box and the roads, as before.
 """
 from __future__ import annotations
 
@@ -28,6 +32,7 @@ DEFAULT_WORK = "250 E Caribbean Dr, Sunnyvale, CA"
 DEFAULT_ROADS = "9,17,35,85,236,237,101,280"
 DEFAULT_BOX = (37.05, -122.30, 37.50, -121.90)             # south, west, north, east: Boulder Creek to Sunnyvale and a margin
 WEATHER_TTL, BUSY_TTL, QUIET_TTL = 900, 300, 1800
+ROUTES_TTL, ROUTE_RADIUS = 3600, 3                          # his normal roads re-read hourly; "near" = within 3 squares of 0.001° (~300 m)
 STALE_AFTER = 3 * 3600
 DELAY_MIN_SECONDS, DELAY_FRACTION = 600, 0.4               # a delayed drive is 10 minutes AND 40 percent over free flow
 CHP_URL = "https://media.chp.ca.gov/sa_xml/sa.xml"
@@ -75,6 +80,8 @@ class LocalInfo:
         self._commute: dict | None = None
         self._incidents: dict | None = None
         self._broken: set[str] = set()                     # providers that said "not allowed": do not hammer them
+        self.car = (self.env.get("CAR_URL") or "").rstrip("/")
+        self._routes: tuple[float, set] | None = None
 
     def busy_hours(self) -> bool:
         now = datetime.fromtimestamp(self.clock(), self.tz)
@@ -144,6 +151,28 @@ class LocalInfo:
         age = self.clock() - c["at"]
         return {**{k: v for k, v in c.items() if k != "at"}, "age_s": int(age), "stale": age > STALE_AFTER}
 
+    # ── his normal routes (the car's drive log) ─────────────────────────────────
+    def routes(self) -> set:
+        """The ~100 m squares (lat*1000, lon*1000) of his normal roads, or an empty set when there is no drive log to go on."""
+        if self._routes and self.clock() - self._routes[0] < ROUTES_TTL:
+            return self._routes[1]
+        cells = self._routes[1] if self._routes else set()
+        if self.car:
+            try:
+                body = self.fetch(f"{self.car}/routes", timeout=20)
+                got = {(int(a), int(b)) for a, b in body.get("cells") or []}
+                cells = got or cells
+            except (OSError, ValueError, TypeError, AttributeError, urllib.error.URLError):
+                pass                                          # the reader is down: keep what we had
+        self._routes = (self.clock(), cells)
+        return cells
+
+    @staticmethod
+    def near(cells: set, lat: float, lon: float) -> bool:
+        a, b = round(lat * 1000), round(lon * 1000)
+        r = range(-ROUTE_RADIUS, ROUTE_RADIUS + 1)
+        return any((a + i, b + j) in cells for i in r for j in r)
+
     # ── highway incidents (CHP) ─────────────────────────────────────────────────
     def incidents(self) -> dict:
         """{ok, items: [{time, kind, severity, where, detail, area}], age_s}: crashes and hazards on the road between home and work, worst first."""
@@ -152,6 +181,7 @@ class LocalInfo:
         try:
             root = ET.fromstring(self.fetch(CHP_URL, raw=True))
             items = []
+            cells = self.routes()
             for log in root.iter("Log"):
                 g = lambda t: (log.findtext(t) or "").strip().strip('"')           # noqa: E731
                 where, desc = g("Location"), g("LocationDesc")
@@ -161,14 +191,17 @@ class LocalInfo:
                 except ValueError:
                     continue
                 s, w, n, e = self.box
-                if not (s <= lat <= n and w <= lon <= e) or not (self._road and self._road.search(where + " " + desc)):
+                if cells:
+                    if not self.near(cells, lat, lon):                             # his normal roads: anywhere he drives, any road
+                        continue
+                elif not (s <= lat <= n and w <= lon <= e) or not (self._road and self._road.search(where + " " + desc)):
                     continue
                 code = g("LogType")
                 kind, severity = next(((k, sev) for pat, k, sev in KINDS if re.match(pat, code, re.I)), (code.split("-", 1)[-1].strip().lower(), "info"))
                 items.append({"time": g("LogTime"), "kind": kind, "severity": severity, "where": where, "detail": desc, "area": g("Area")})
             order = {"major": 0, "minor": 1, "info": 2}
             items.sort(key=lambda i: (order[i["severity"]], i["where"]))
-            self._incidents = {"ok": True, "at": self.clock(), "items": items[:12]}
+            self._incidents = {"ok": True, "at": self.clock(), "items": items[:12], "by": "routes" if cells else "box"}
         except (OSError, ValueError, ET.ParseError, urllib.error.URLError) as e:
             if not self._incidents:
                 return {"ok": False, "error": f"incidents unavailable ({type(e).__name__})"}

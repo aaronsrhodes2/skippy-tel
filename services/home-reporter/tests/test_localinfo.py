@@ -40,6 +40,10 @@ class Net:
             return weather_json(self.kw.get("temp", 55))
         if "api.weather.gov" in url:
             return {"features": [{"properties": {"event": "Wind Advisory", "headline": "Wind Advisory until 8 PM", "severity": "Moderate"}}]} if self.kw.get("alert") else {"features": []}
+        if url.endswith("/routes"):
+            if self.kw.get("routes") is None:
+                raise urllib.error.URLError("down")
+            return {"cells": self.kw["routes"], "drives": 8}
         if "media.chp.ca.gov" in url:
             if self.kw.get("chp_down"):
                 raise urllib.error.URLError("down")
@@ -154,3 +158,24 @@ def test_snapshot_carries_both_towns_and_the_commute_and_can_be_switched_off():
     json.dumps(snap)                                                                   # it travels in the report
     assert make({"LOCAL_INFO": "off"}).snapshot() == {"disabled": True}
     assert set(make({"HOME_ADDRESS": ""}).snapshot()["weather"]) == {"work"}
+
+
+def test_with_a_drive_log_only_incidents_near_his_normal_roads_count_on_any_road():
+    # his drives pass the SR 17 crash (37.250, -121.950) and an I-80 one in San Francisco; never the SR 9 hazard or SR 85
+    li = make({"CAR_URL": "http://skippy-core:7351"}, routes=[[37249, -121951], [37808, -122367]])
+    inc = li.incidents()
+    assert inc["by"] == "routes" and sorted(i["where"] for i in inc["items"]) == ["I80 W / Treasure Island Onr", "Sr17 N / Lark Ave Ofr"]
+    assert li.commute()["alert"].startswith("Possible delays: crash at ") and "and 1 more" in li.commute()["alert"]
+
+
+def test_far_from_his_roads_is_quiet_and_no_drive_log_falls_back_to_the_box():
+    li = make({"CAR_URL": "http://skippy-core:7351"}, routes=[[37500, -121500]])
+    assert li.incidents()["items"] == [] and li.commute()["alert"] == ""
+    down = make({"CAR_URL": "http://skippy-core:7351"}, routes=None)                 # the reader is down: the old box and roads
+    assert down.incidents()["by"] == "box" and len(down.incidents()["items"]) == 3
+    assert make({"CAR_URL": "http://skippy-core:7351"}, routes=[]).incidents()["by"] == "box"   # no drives logged yet
+
+
+def test_near_is_about_three_hundred_metres():
+    cells = {(37250, -121950)}
+    assert LocalInfo.near(cells, 37.2529, -121.9471) and not LocalInfo.near(cells, 37.2545, -121.950)

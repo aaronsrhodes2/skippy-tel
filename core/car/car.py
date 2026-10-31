@@ -7,6 +7,9 @@ keeps the last value of each, so asking never wakes the car and never costs a Te
 a command (that is the Fleet API, saved for later: docs/tesla.md).
 
     GET /car      {"cars": [{"id": 1, "name": ..., "state": "asleep", "battery_level": 78, ..., "updated_s": 12}], "mqtt": true}
+    GET /routes   {"cells": [[lat*1000, lon*1000], ...], "drives": n, "min_drives": 2, "days": 180}: his normal roads, from TeslaMate's drive log
+                  (every ~100 m square he drove through on at least MIN_DRIVES separate drives in the last ROUTE_DAYS). The traffic alerts
+                  (services/home-reporter/localinfo.py) keep only incidents near these. Computed at most hourly; it stays on the tailnet.
     GET /health   the readiness contract (ready.py): ready once MQTT is connected and TeslaMate has published a car
 """
 from __future__ import annotations
@@ -24,6 +27,12 @@ MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
 NAMESPACE = os.environ.get("MQTT_NAMESPACE", "").strip("/")
 PORT = int(os.environ.get("PORT", "7351"))
 SIGN_IN = os.environ.get("TESLAMATE_SIGN_IN", "http://skippy-core:4000")
+DB = {"host": os.environ.get("DATABASE_HOST", "tesla-db"), "user": os.environ.get("DATABASE_USER", "teslamate"),
+      "database": os.environ.get("DATABASE_NAME", "teslamate"), "password": os.environ.get("DATABASE_PASS", "")}
+ROUTE_DAYS, MIN_DRIVES, ROUTES_TTL = 180, 2, 3600
+ROUTES_SQL = ("select (round(latitude::numeric, 3) * 1000)::int, (round(longitude::numeric, 3) * 1000)::int "
+              "from positions where drive_id is not null and date > now() - make_interval(days => %s) "
+              "group by 1, 2 having count(distinct drive_id) >= %s")
 
 # What a reader gets, and the type each value is read as (TeslaMate sends every value as text). Anything else on the topic is ignored.
 NUM = ("battery_level", "usable_battery_level", "est_battery_range_km", "rated_battery_range_km", "ideal_battery_range_km",
@@ -89,7 +98,41 @@ class Cars:
             return out
 
 
+class Routes:
+    """His normal roads from TeslaMate's Postgres, cached ROUTES_TTL. `query(days, min_drives)` returns (cells, drives)."""
+
+    def __init__(self, query=None, clock=time.time):
+        self.query, self.clock = query or _query_routes, clock
+        self._at, self._body = 0.0, None
+        self._lock = threading.Lock()
+
+    def get(self) -> dict:
+        with self._lock:
+            if self._body is None or self.clock() - self._at > ROUTES_TTL:
+                try:
+                    cells, drives = self.query(ROUTE_DAYS, MIN_DRIVES)
+                    self._body = {"cells": sorted([int(a), int(b)] for a, b in cells), "drives": drives, "min_drives": MIN_DRIVES, "days": ROUTE_DAYS}
+                    self._at = self.clock()
+                except Exception as exc:  # noqa: BLE001 — the database is down or not set: say so, keep the last good answer
+                    if self._body is None:
+                        return {"cells": [], "drives": 0, "error": f"no drive log ({type(exc).__name__})"}
+            return self._body
+
+
+def _query_routes(days: int, min_drives: int):
+    import pg8000.native   # here, so the tests (and CI) don't need it
+
+    con = pg8000.native.Connection(**DB, timeout=20)
+    try:
+        cells = con.run(ROUTES_SQL.replace("%s", ":d", 1).replace("%s", ":m", 1), d=days, m=min_drives)
+        drives = con.run("select count(*) from drives where start_date > now() - make_interval(days => :d)", d=days)[0][0]
+        return [tuple(r) for r in cells], int(drives)
+    finally:
+        con.close()
+
+
 CARS = Cars()
+ROUTES = Routes()
 READY = Readiness("car")
 
 
@@ -118,6 +161,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/health":
             got = health()
             self._send(200 if got["ready"] else 503, got)
+        elif path == "/routes":
+            self._send(200, ROUTES.get())
         elif path == "/car":
             self._send(200, {"cars": CARS.view(), "mqtt": CARS.connected, "sign_in": SIGN_IN})
         else:

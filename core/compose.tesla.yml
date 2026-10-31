@@ -71,13 +71,18 @@ services:
     build: ./car
     restart: unless-stopped
     logging: *tesla-logging
+    env_file: ${TESLA_ENV:-/etc/skippy-core/tesla.env}     # DATABASE_PASS: it reads the drive log for his normal roads (/routes)
     environment:
       - MQTT_HOST=mosquitto
       - TESLAMATE_SIGN_IN=http://skippy-core:4000
+      - DATABASE_HOST=tesla-db
+      - DATABASE_USER=teslamate
+      - DATABASE_NAME=teslamate
     ports:
       - "127.0.0.1:7351:7351"
     depends_on:
       - mosquitto
+      - tesla-db
 
   # The car's charging over Bluetooth (core/car-ble): tesla-control with the box's charging-only key (paired once with the key card,
   # install/tesla.sh). Host networking and NET_ADMIN/NET_RAW because the radio is the host's; it listens on 127.0.0.1:7352 only.

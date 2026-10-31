@@ -114,3 +114,27 @@ def test_the_broker_keeps_the_cars_values_across_a_restart():
     assert "./car/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro" in text
     conf = (CORE / "car" / "mosquitto.conf").read_text(encoding="utf-8")
     assert "persistence true" in conf and "persistence_location /mosquitto/data/" in conf
+
+
+def test_normal_routes_come_from_the_drive_log_cached_and_say_when_it_is_missing():
+    asked, t = [], [0.0]
+
+    def query(days, min_drives):
+        asked.append((days, min_drives))
+        return [(37250, -121950), (37249, -121951)], 8
+    r = car.Routes(query=query, clock=lambda: t[0])
+    got = r.get()
+    assert got["cells"] == [[37249, -121951], [37250, -121950]] and got["drives"] == 8 and asked == [(car.ROUTE_DAYS, car.MIN_DRIVES)]
+    t[0] += 60
+    r.get()
+    assert len(asked) == 1                                       # cached for the hour
+
+    def down(days, min_drives):
+        raise OSError("no database")
+    assert car.Routes(query=down).get()["error"].startswith("no drive log")
+    assert "count(distinct drive_id) >= %s" in car.ROUTES_SQL      # two separate drives make a road "normal"
+
+
+def test_the_reader_reads_the_drive_log_with_the_boxes_secret_not_a_written_one():
+    block = (CORE / "compose.tesla.yml").read_text(encoding="utf-8").split("  car:", 1)[1].split("\n\n", 1)[0]
+    assert "/etc/skippy-core/tesla.env" in block and "DATABASE_HOST=tesla-db" in block and "DATABASE_PASS=" not in block

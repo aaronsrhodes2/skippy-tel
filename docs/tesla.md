@@ -52,6 +52,13 @@ purple Skippy ── car_charge (services/purple-tools) ── :7352 car-ble (co
 - **purple Skippy's `car_charge`**: start, stop, limit, status; after a command it reads the state back from the car reader.
 - Out of Bluetooth range (away from home) it can't reach the car: that is what the Fleet API below would add.
 
+## His normal routes trim the traffic alerts (2026-10-31)
+
+The car reader's `GET /routes` (core/car) reads TeslaMate's drive log: every ~100 m square the car drove through on at least two separate drives
+in the last 180 days. skippy-pc's traffic check (`services/home-reporter/localinfo.py`, `CAR_URL`) keeps only CHP incidents within ~300 m of one,
+on any road, so the Discord traffic DM and "how's the commute" speak only of his roads. With no drive log (the reader down, or nothing logged
+yet) it falls back to the old box and highway list. The squares stay on the tailnet and skippy-pc; they never go to the portal.
+
 ## The car as a guard: Sentry, live (2026-10-31)
 
 The Captain: "operate my car as an external security device". When someone comes near the parked car, or touches it, he hears about it at
