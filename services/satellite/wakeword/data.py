@@ -24,7 +24,7 @@ def _wav_dir(rows, out: Path, limit: int | None = None) -> None:
         audio = row["audio"]
         name = Path(str(audio.get("path") or f"{i}.wav")).stem + ".wav"
         scipy.io.wavfile.write(out / name, 16000, (np.asarray(audio["array"]) * 32767).astype(np.int16))
-    (out / ".done").touch()
+    out.with_name(out.name + ".done").touch()   # beside the folder, not in it: the trainer reads every file it finds
 
 
 def _parquet_wavs(shards, out: Path) -> None:
@@ -47,11 +47,11 @@ def _parquet_wavs(shards, out: Path) -> None:
                     d = gcd(sr, 16000)
                     a = scipy.signal.resample_poly(a, 16000 // d, sr // d)
                 scipy.io.wavfile.write(out / f"{row['video_id']}.wav", 16000, (np.clip(a, -1, 1) * 32767).astype(np.int16))
-    (out / ".done").touch()
+    out.with_name(out.name + ".done").touch()   # beside the folder, not in it: the trainer reads every file it finds
 
 
 def _done(path: Path) -> bool:
-    return (path / ".done").exists() if path.suffix == "" else path.is_file()
+    return path.with_name(path.name + ".done").exists() if path.suffix == "" else path.is_file()
 
 
 def main() -> int:
