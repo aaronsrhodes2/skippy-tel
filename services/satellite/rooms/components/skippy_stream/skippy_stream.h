@@ -23,6 +23,7 @@ class SkippyStream : public Component {
   // wants(): valid datagrams arrived lately and streaming is switched on. ready(): the owner (the yaml) has paused LVGL, so the task may draw.
   bool wants() const { return this->enabled_ && this->rx_ever_ && (millis() - this->rx_ms_) < this->timeout_ms_; }
   bool ready() const { return this->ready_; }
+  uint32_t missing_total() const { return this->missing_all_; }     // datagrams that never arrived, since boot (the hub reads its growth as 'the air is bad')
   void set_ready(bool r);
   void set_enabled(bool e) { this->enabled_ = e; }
   // a copy of the panel's frame buffer as little-endian RGB565 (what lv_snapshot gives), for the screenshot action; free() it. nullptr when not possible.
@@ -51,6 +52,7 @@ class SkippyStream : public Component {
   size_t stage_len_{0};
   uint16_t cur_frame_{0}, next_seq_{0};
   bool have_frame_{false}, have_seq_{false};
+  volatile uint32_t missing_all_{0};
   volatile uint32_t dgrams_{0}, frames_{0}, tiles_{0}, bad_{0}, lost_{0}, missing_{0}, dropped_{0};
   uint32_t last_log_{0};
   static void recv_task_(void *arg);

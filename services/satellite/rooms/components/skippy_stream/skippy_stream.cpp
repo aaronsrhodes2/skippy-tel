@@ -82,7 +82,7 @@ void SkippyStream::accept_(const uint8_t *buf, int n) {
   this->rx_ever_ = true;
   this->dgrams_++;
   uint16_t seq = buf[5] | (buf[6] << 8);
-  if (this->have_seq_) this->missing_ += (uint16_t) (seq - this->next_seq_);        // datagrams that never arrived
+  if (this->have_seq_) { uint16_t gap = (uint16_t) (seq - this->next_seq_); this->missing_ += gap; this->missing_all_ += gap; }        // datagrams that never arrived
   this->have_seq_ = true;
   this->next_seq_ = seq + 1;
   if (!this->ready_) return;                               // LVGL still owns the screen: only the arrival counts (it makes wants() true)

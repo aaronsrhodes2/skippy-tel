@@ -338,3 +338,31 @@ def test_face_sensor_fields_reach_the_renderer():
     assert s.face.mic_off and s.face.spk_off and s.face.face_rgb == 0xc026d3
     s.set_box_state("speaking", True, True, False)
     assert s.face.mic_off and not s.face.spk_off
+
+
+# ── the stream rides out Wi-Fi loss bursts: half rate while the box's loss counter grows, the whole face again afterwards ──
+def test_loss_burst_slows_the_stream_then_resends_everything():
+    from face_stream import FaceStreamer, LOSS_HOLD_S
+    s = FaceStreamer("127.0.0.1", send=lambda d: None)
+    s.note_loss(100, now=10.0)                                   # the first report is only a baseline
+    assert not s.slow_now(10.1)
+    s.note_loss(100, now=11.0)
+    assert not s.slow_now(11.1)                                  # no growth: no loss
+    s.note_loss(130, now=12.0)                                   # 30 datagrams never arrived
+    assert s.slow_now(12.1) and s.slow_now(12.0 + LOSS_HOLD_S - 0.1)
+    s.note_loss(160, now=13.0)                                   # still losing: the hold is renewed
+    assert s.slow_now(13.0 + LOSS_HOLD_S - 0.1)
+    s.enc.keyframes = 0
+    assert not s.slow_now(13.0 + LOSS_HOLD_S + 0.1)              # the burst is over...
+    assert s.enc.keyframes == 2 and s.recoveries == 1            # ...so the whole face is sent again
+    assert not s.slow_now(20.0) and s.recoveries == 1
+
+
+def test_loss_counter_wraps_and_a_reboot_does_not_look_like_loss():
+    from face_stream import FaceStreamer
+    s = FaceStreamer("127.0.0.1", send=lambda d: None)
+    s.note_loss(4294967290, now=1.0); s.note_loss(4294967295, now=2.0)
+    assert s.slow_now(2.1)
+    s2 = FaceStreamer("127.0.0.1", send=lambda d: None)
+    s2.note_loss(5000, now=1.0); s2.note_loss(3, now=2.0)        # the box rebooted: the counter went back to zero (a drop, not a loss)
+    assert not s2.slow_now(2.1)

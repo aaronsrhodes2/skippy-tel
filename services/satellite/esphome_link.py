@@ -125,6 +125,8 @@ class EsphomeLink:
                 self.keys["stream_live"] = e.key
             elif kind == "TextSensorInfo" and oid == "face":
                 self.keys["face"] = e.key
+            elif kind == "SensorInfo" and oid == "stream_loss":
+                self.keys["stream_loss"] = e.key
 
     def set_text(self, name: str, text: str) -> None:
         """Write one of the box's text entities (mouth, emote, session) and tell the face drawn here the same thing."""
@@ -193,6 +195,9 @@ class EsphomeLink:
             self.room.tap()
         elif kind == "BinarySensorState" and state.key == self.keys.get("stream_live") and self.streamer is not None:
             self.streamer.set_live(bool(state.state) and not getattr(state, "missing_state", False))
+        elif kind == "SensorState" and state.key == self.keys.get("stream_loss") and self.streamer is not None:
+            if not getattr(state, "missing_state", False):
+                self.streamer.note_loss(int(state.state))
         elif kind == "TextSensorState" and state.key == self.keys.get("face") and self.streamer is not None:
             f = (str(state.state).split(",") + ["0", "0", "0"])[:4]          # "<state>,<talking>,<mic off>,<speaker off>" (older firmware sends two fields)
             self.streamer.set_box_state(f[0], f[1] == "1", f[2] == "1", f[3] == "1")

@@ -493,6 +493,11 @@ text_sensor:
     name: Face
 
 sensor:
+  - platform: template                    # datagrams of the hub's face that never arrived, since boot: the hub slows its stream while this grows and resends the whole face when it stops
+    id: stream_loss
+    name: Stream loss
+    accuracy_decimals: 0
+    update_interval: never
   - platform: wifi_signal                 # how strong the box hears the router (also in the hub's log when it drops)
     name: Wi-Fi signal
     update_interval: 15s
@@ -651,6 +656,10 @@ script:
       - script.execute: pub_face
 
 interval:
+  - interval: 1s                          # the stream's loss counter, for the hub (only while it draws)
+    then:
+      - lambda: |-
+          if (id(stream)->ready()) id(stream_loss)->publish_state(id(stream)->missing_total());
   - interval: 40ms                        # who owns the screen: LVGL (this file's drawing) or the hub's stream. Datagrams lately -> pause LVGL, then let the receiver draw; a stalled stream -> LVGL again
     then:
       - lambda: |-

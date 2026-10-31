@@ -29,6 +29,7 @@ MAX_DATAGRAM = 1400
 HEARTBEAT_S = 0.3
 REFRESH_TILES = 8                                  # resent every frame, round robin over the whole screen
 STREAM_PORT = 10803
+LOSS_HOLD_S = 3.0                                  # how long after the last lost datagram the stream stays at half rate
 
 
 def deflate(raw: bytes) -> bytes:
@@ -173,6 +174,10 @@ class FaceStreamer(threading.Thread):
         self.send = send or (lambda d: self.sock.sendto(d, (self.host, self.port)))
         self.stats = {"frames": 0, "bytes": 0, "render_ms": 0.0, "late": 0}
         self.live = False
+        self.loss_total: int | None = None                # the box's count of datagrams that never arrived (its `Stream loss` sensor)
+        self.loss_until = 0.0                              # while the air is bad (loss seen lately) the stream runs at half rate
+        self.degraded = False
+        self.recoveries = 0
         self._start_keys = [0.0, 0.2, 0.6, 1.5]
 
     # ── inputs, from the hub's event loop ──
@@ -187,6 +192,22 @@ class FaceStreamer(threading.Thread):
         if f.talking and not talking:
             f.mouth = ""
         f.talking = talking
+
+    def note_loss(self, total: int, now: float | None = None) -> None:
+        """The box's loss counter grew: the Wi-Fi is dropping datagrams. Slow down for LOSS_HOLD_S after the last loss."""
+        now = time.monotonic() if now is None else now
+        if self.loss_total is not None and total != self.loss_total and (total - self.loss_total) % 4294967296 < 2147483648:
+            self.loss_until = now + LOSS_HOLD_S
+        self.loss_total = total
+
+    def slow_now(self, now: float) -> bool:
+        """True while the stream should run at half rate; the first call after the burst ends sends the whole face again (a half-drawn face never lingers)."""
+        bad = now < self.loss_until
+        if self.degraded and not bad:
+            self.enc.keyframe(2)
+            self.recoveries += 1
+        self.degraded = bad
+        return bad
 
     def set_live(self, live: bool) -> None:
         """The box says it has taken the screen over: send it the whole picture now."""
@@ -219,6 +240,8 @@ class FaceStreamer(threading.Thread):
                 time.sleep(min(next_tick - now, 0.01))
                 continue
             next_tick += 0.05
+            slow = self.slow_now(now)
+            self._tick_n = getattr(self, "_tick_n", 0) + 1
             if now - next_tick > 0.25:                         # fell far behind (a stall): do not run ticks to catch up
                 next_tick = now + 0.05
                 self.stats["late"] += 1
@@ -226,6 +249,8 @@ class FaceStreamer(threading.Thread):
             try:
                 self.face.tick(self.now_ms())
                 img = to565(self.face.render())
+                if slow and self._tick_n % 2:
+                    continue                                   # half rate: draw it but do not encode: the next frame carries what changed since the last one sent
                 while keys and now - t_start >= keys[0]:
                     keys.pop(0)
                     self.enc.keyframe(1)
