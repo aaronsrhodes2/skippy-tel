@@ -39,7 +39,7 @@
         <dt>Request</dt><dd>{% if r.comparable %}"{{ r.prompt }}"{% else %}{{ r.prompt }}{% if r.request %} (<a href="{{ url_for('static', filename=r.request) }}">the full text</a>){% endif %}{% endif %}</dd>
         <dt>Blocks</dt><dd>{{ "{:,}".format(r.blocks) }}</dd>
         <dt>Size</dt><dd>{{ r.size }}</dd>
-        <dt>Time</dt><dd>{{ r.minutes }} minutes</dd>
+        <dt>Time</dt><dd>{% if r.minutes %}{{ r.minutes }} minutes{% else %}not timed{% endif %}</dd>
       </dl>
       <img class="views" width="1800" height="1320" src="{{ url_for('static', filename='experiments/minebench/' ~ r.id ~ '/views.png') }}" alt="{{ r.title }}: four views" loading="lazy">
       <model-viewer src="{{ url_for('static', filename='experiments/minebench/' ~ r.id ~ '/model.glb') }}" alt="{{ r.title }}: the build in 3D"

@@ -314,6 +314,26 @@ MINEBENCH_RUNS = (
                 "forward axis once; wheels stand in the forward-and-up plane; every car follows along forward. Smaller: the plume "
                 "and a few trim blocks float (8 parts, against v5's zero), and it is a fifth of v5's blocks in three times the "
                 "time, with the same model and the same words."},
+    {"id": "v7", "title": "Choo-choo train, the same words, the wheel rule in the tool (a negative result)",
+     "model": "Purple Skippy: Claude Code on Skippy Core's coder (the same Qwen3.6-35B-A3B, MTP, Q8), local and free, the same message as v5 "
+              "word for word; the voxel skill now carries the forward-axis rule",
+     "prompt": "a choo-choo train", "request": "experiments/minebench/v7/request.txt", "comparable": True, "blocks": 129664,
+     "minutes": None, "size": "171 x 85 x 86",
+     "verdict": "A negative result, kept. The wheels are still turned: the runtime's wheel check finds eight black discs whose faces "
+                "point along the track, the same mistake as v6, although the one rule was in the skill and in the agent's header. The "
+                "one fix it made was to the boiler loops (commit 0a910d4), which stopped blocks floating past the shell. 31 floating "
+                "parts remain (44 blocks, small iron pieces at the driving wheels). It is three times v5's blocks, and the rule the "
+                "Captain asked for is not yet enforced by the builder, only written down."},
+    {"id": "v8", "title": "Choo-choo train, the same words, a wider scene (a negative result)",
+     "model": "Purple Skippy: Claude Code on Skippy Core's coder (the same Qwen3.6-35B-A3B, MTP, Q8), local and free, the same message as v5 "
+              "word for word; the runtime now checks the wheels against the direction of travel",
+     "prompt": "a choo-choo train", "request": "experiments/minebench/v8/request.txt", "comparable": True, "blocks": 191612,
+     "minutes": None, "size": "256 x 87 x 256",
+     "verdict": "A negative result, kept. The agent covered the whole 256 x 256 plot with grass, so the locomotive is a small piece in "
+                "the middle of a field, and it added a second track, lamp posts, a water crane and a thicker plume. The wheels are iron "
+                "blocks lying flat under the boiler instead of upright wheels, which the check flags as lying flat. The runtime counts "
+                "381 floating parts (489 blocks): mostly small white wool pieces, probably steam, and some glass that is not steam. The "
+                "scene reads as a small town with a plume of smoke, not a train. Two debug scripts were left uncommitted in the folder."},
     {"id": "haiku-direct", "title": "Choo-choo train, Claude Haiku in one call (the benchmark's own way)",
      "model": "Claude Haiku 5.5 through Anthropic's API: one call with MineBench's prompt, no tools, no second try",
      "prompt": "a choo-choo train", "comparable": True, "blocks": 21048, "minutes": 2, "size": "144 x 40 x 42",
