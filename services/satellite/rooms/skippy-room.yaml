@@ -122,6 +122,14 @@ api:
   encryption:
     key: !secret skippy_room_api_key      # the same key in the vault .env as SATELLITE_ESPHOME_KEY: the hub is the only client
   actions:
+    - action: face                        # show a state by hand (listening, recording, thinking, speaking, music, muted, idle): for looking at the expressions
+      variables:
+        state: string
+      then:
+        - script.execute:
+            id: face
+            state: !lambda 'return state;'
+        - lambda: 'id(talking) = (state == "speaking");'
     - action: screenshot                  # what the screen shows now, as raw RGB565 posted to `url` (tools/ ... rooms/shot.py asks for it and makes the PNG)
       variables:
         url: string
@@ -657,6 +665,25 @@ interval:
           th[0].x = clampi(cx - mw * 0.7f); th[0].y = clampi(my - mu * 0.35f); th[1].x = clampi(cx + mw * 0.7f); th[1].y = th[0].y;
           put(id(teeth)->obj, th, 2);
           lv_obj_set_style_line_opa(id(teeth)->obj, (lv_opa_t) (teethv > 0.5f && mu + ml > 6 ? 150 : 0), LV_PART_MAIN);
+          // ── ears: while he listens two big metal ears grow out of the ball, cocked at different angles, like he is being sarcastic ──
+          { static float ear = 0; static lv_point_precise_t eo_[2][18], ef_[2][16];
+            bool hearing = st == "listening" || st == "recording" || (st == "idle" && id(in_session) && !talk) || (st.empty() && id(in_session));
+            ear += ((hearing ? 1.0f : 0.0f) - ear) * 0.3f;
+            lv_obj_t *fo[4] = {id(ear_fl)->obj, id(ear_fr)->obj, id(ear_ol)->obj, id(ear_or)->obj};
+            if (ear < 0.06f) { for (int k = 0; k < 4; k++) lv_obj_set_style_line_opa(fo[k], 0, LV_PART_MAIN); }
+            else for (int sd = 0; sd < 2; sd++) {
+              float s2 = sd ? 1.0f : -1.0f, a = (sd ? 0.95f : 0.55f) + 0.12f * sinf(ph * 2.3f + sd * 2.0f) + 0.2f * (st == "recording");
+              float bx = cx + s2 * 128, by = cy - 52, L = 96 * ear, Wd = 58 * ear, dx = s2 * sinf(a), dy = -cosf(a), nx = -dy, ny = dx;
+              for (int i = 0; i <= 8; i++) {
+                float t = i / 8.0f, hw = Wd / 2 * powf(sinf(3.14159f * t), 0.7f), px = bx + dx * L * t, py = by + dy * L * t;
+                int lx = clampi(px + nx * hw), ly = clampi(py + ny * hw), rx = clampi(px - nx * hw), ry = clampi(py - ny * hw);
+                eo_[sd][i].x = lx; eo_[sd][i].y = ly; eo_[sd][17 - i].x = rx; eo_[sd][17 - i].y = ry;
+                if (i >= 1 && i <= 7) { bool f = i % 2; ef_[sd][(i - 1) * 2].x = f ? lx : rx; ef_[sd][(i - 1) * 2].y = f ? ly : ry; ef_[sd][(i - 1) * 2 + 1].x = f ? rx : lx; ef_[sd][(i - 1) * 2 + 1].y = f ? ry : ly; }
+              }
+              put(fo[sd], ef_[sd], 14); put(fo[2 + sd], eo_[sd], 18);
+              lv_obj_set_style_line_opa(fo[sd], 255, LV_PART_MAIN); lv_obj_set_style_line_opa(fo[2 + sd], 255, LV_PART_MAIN);
+            }
+          }
   - interval: 15s                         # the screen dims when nothing has happened for two minutes
     then:
       - if:
@@ -975,6 +1002,50 @@ lvgl:
             text_color: 0xd6c2ff
             text_opa: 55%
             long_mode: WRAP
+        - line:
+            id: ear_fl
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 15
+            line_color: 0x7d8492
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: ear_fr
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 15
+            line_color: 0x7d8492
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: ear_ol
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 3
+            line_color: 0xe6e9ef
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: ear_or
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 3
+            line_color: 0xe6e9ef
+            line_opa: 0%
+            line_rounded: true
         - image:
             id: ball_img
             src: skippy_ball
