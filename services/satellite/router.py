@@ -201,9 +201,14 @@ class PipeSource:
             pass
 
 
+STALE_VOICE_S = 2.0              # Skippy's voice that could not start within this long is dropped, never played late (2026-10-31: the first clip
+                                 # after a restart waited 18 s for PortAudio's first device scan, and the room heard "News about what?" as his answer)
+
+
 class Play:
-    def __init__(self, pid: int, source, layer: str, targets: set[str], gain: float):
+    def __init__(self, pid: int, source, layer: str, targets: set[str], gain: float, created: float = 0.0):
         self.id, self.source, self.layer, self.targets, self.gain = pid, source, layer, set(targets), gain
+        self.created, self.started = created, False
         self.finished = threading.Event()
 
 
@@ -234,7 +239,7 @@ class Router:
 
     def play(self, source, layer: str = "voice", targets=None, gain: float = 1.0) -> Play:
         with self.lock:
-            p = Play(next(self.ids), source, layer, targets if targets is not None else set(self.sinks), gain)
+            p = Play(next(self.ids), source, layer, targets if targets is not None else set(self.sinks), gain, created=self.clock())
             self.plays[p.id] = p
         if self.autostart:
             self.start()
@@ -314,6 +319,17 @@ class Router:
             self.layer_gain[layer] = target if abs(target - g) <= RAMP else g + (RAMP if target > g else -RAMP)
         mixes = {k: None for k, s in self.sinks.items() if s.open}
         for p in plays:
+            if not p.started:
+                if not any(k in mixes for k in p.targets):
+                    if p.layer == "voice" and self.clock() - p.created > STALE_VOICE_S:
+                        self.log(f"(router: a voice clip waited {self.clock() - p.created:.1f} s for an output: dropped, never played late)")
+                        self.stop(p)
+                    continue                                      # its outputs aren't open (yet): wait, don't spend it on nothing
+                if p.layer == "voice" and self.clock() - p.created > STALE_VOICE_S:
+                    self.log(f"(router: a voice clip started {self.clock() - p.created:.1f} s late: dropped, never played late)")
+                    self.stop(p)
+                    continue
+                p.started = True
             chunk = p.source.read(BLOCK)
             if len(chunk):
                 chunk = chunk * (p.gain * self.layer_gain.get(p.layer, 1.0))
@@ -364,4 +380,6 @@ def shared(env: dict, log=print) -> Router:
                 if "=" in part:
                     used |= {k.strip() for k in part.split("=", 1)[1].split("+")}
             _ROUTER = Router([(k, parts[k], delays.get(k, 0.0)) for k in parts if k in used], log=log)
+            if _ROUTER.sinks:
+                _ROUTER.start()                                   # open the outputs now: PortAudio's first device scan takes seconds
         return _ROUTER

@@ -174,3 +174,31 @@ def test_joined_mp3_pieces_become_one_stream_the_pod_plays_to_the_end_decoded_on
     pod = hub_mod.one_stream(b"Info..a..Info..b", run=run, decoder=dec)
     assert pod == b"ONE-CLEAN-STREAM" and "libmp3lame" in calls[0] and len(decoded) == 1
     assert speaker_out.decode_cached(pod).shape == tone(0.1).shape and len(decoded) == 1     # the Sony's copy: no second decode
+
+
+def test_a_voice_clip_that_cannot_start_in_time_is_dropped_never_played_late():
+    """2026-10-31: the first clip after a restart waited 18 s for the first device scan; the room then heard it as the Captain's answer."""
+    w = World(present=())
+    t = {"now": 100.0}
+    r = rt.Router([("hdmi", "HDMI", 0.0)], find=w.find, stream_factory=w.factory, reinit=w.reinit, log=lambda *a: None,
+                  clock=lambda: t["now"], autostart=False)
+    p = r.play(rt.ClipSource(tone(1.0)), targets={"hdmi"})
+    r.mix_once()
+    assert p.id in r.plays                                          # no output yet: it waits
+    t["now"] += rt.STALE_VOICE_S + 0.5
+    w.present.add("HDMI")
+    r._last_scan = -1e9
+    r.mix_once()
+    assert p.finished.is_set() and p.id not in r.plays              # too late: dropped
+    assert w.streams[len("HDMI")].pull(rt.BLOCK * 2).max() == 0     # nothing was played
+
+
+def test_a_book_waits_for_its_output_instead_of_being_dropped():
+    w = World(present=())
+    t = {"now": 100.0}
+    r = rt.Router([("hdmi", "HDMI", 0.0)], find=w.find, stream_factory=w.factory, reinit=w.reinit, log=lambda *a: None,
+                  clock=lambda: t["now"], autostart=False)
+    p = r.play(rt.ClipSource(tone(1.0)), layer="media", targets={"hdmi"})
+    t["now"] += 30
+    r.mix_once()
+    assert p.id in r.plays and not p.started
