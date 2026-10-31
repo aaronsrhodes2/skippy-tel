@@ -173,6 +173,8 @@ class Face:
         self.mouth = ""
         self.emote = ""
         self.in_session = False
+        self.mic_off = False                              # the pod's microphone key: earplugs on his ears
+        self.spk_off = False                              # the pod's speaker key: a microphone floats beside him
         # the face script's globals
         self.face_rgb = 0x6a28c9
         self.last_activity = 0
@@ -222,6 +224,8 @@ class Face:
         mk = Line
         self.ear_fl, self.ear_fr = mk(8, 0x7d8492, 0, True), mk(8, 0x7d8492, 0, True)
         self.ear_ol, self.ear_or = mk(3, 0xe6e9ef, 0, True), mk(3, 0xe6e9ef, 0, True)
+        self.plug = [mk(30, 0xff6a00, 0, True), mk(30, 0xff6a00, 0, True)]
+        self.mic_cap, self.mic_arc, self.mic_stem = mk(26, 0xe6e9ef, 0, True), mk(4, 0xe6e9ef, 0, True), mk(4, 0xe6e9ef, 0, True)
         self.hat_cast = mk(20, 0x000000, int(255 * 0.55), True)
         self.hc = 0
         self.cloth = [Box(13, 2, 0x1a1f3a, hidden=True) for _ in range(40)]
@@ -260,7 +264,19 @@ class Face:
                  "offline": 0x475569, "sick": 0xd6c92a}
         if state in table:
             c = table[state]
+        if self.off_duty and state in ("idle", ""):
+            c = 0xc026d3                                   # both keys off: fuchsia (never blue = backend down, nor red)
         self.face_rgb, self.state_now = c, state
+
+    @property
+    def off_duty(self) -> bool:
+        return self.mic_off and self.spk_off
+
+    def set_keys(self, mic_off: bool, spk_off: bool) -> None:
+        """The box's microphone and speaker keys (the 3rd and 4th fields of its `Face` sensor)."""
+        if (mic_off, spk_off) != (self.mic_off, self.spk_off):
+            self.mic_off, self.spk_off = mic_off, spk_off
+            self.set_state(self.state_now)
 
     def set_session(self, on: bool) -> None:
         self.in_session = on
@@ -316,6 +332,8 @@ class Face:
     def tick(self, now: int) -> None:
         self._ring_tick(now)
         st = self.state_now
+        if self.off_duty and st in ("idle", "") and not self.talking:
+            st = "music"                                    # off duty: the music face, with a fuchsia tint
         dead = st == "offline"
         talk = self.talking
         mood, vis = "n", "X"
@@ -412,6 +430,8 @@ class Face:
         R = G = B = A = 0.0
         if st == "offline":
             R, G, B, A = 47, 107, 255, 120
+        elif self.off_duty and self.state_now != "offline":
+            R, G, B, A = 170, 60, 255, 70
         elif st == "sick" or emo == "k":
             R, G, B, A = 222, 215, 40, 105
         elif st == "thinking":
@@ -787,11 +807,12 @@ class Face:
                 ry.opa = 0
 
     def _ears(self, st, talk, cx, cy, pivotY, lt) -> None:
-        hearing = st in ("listening", "recording") or (st == "idle" and self.in_session and not talk) or (st == "" and self.in_session)
+        hearing = self.mic_off or st in ("listening", "recording") or (st == "idle" and self.in_session and not talk) or (st == "" and self.in_session)
         self.ear += ((1.0 if hearing else 0.0) - self.ear) * 0.3
         fo = (self.ear_fl, self.ear_fr, self.ear_ol, self.ear_or)
+        self._mic(st)
         if self.ear < 0.06:
-            for ln in fo:
+            for ln in (*fo, *self.plug):
                 ln.opa = 0
             return
         for sd in range(2):
@@ -818,6 +839,25 @@ class Face:
                 u += 7
             fo[sd].put(fill); fo[2 + sd].put(outl)
             fo[sd].opa = fo[2 + sd].opa = 255
+            if self.mic_off and self.ear > 0.5:             # an earplug, far too big, pushed into the ear's opening (overstated, on purpose)
+                px, py = bx + ux * eh * 0.45, by + uy * eh * 0.45
+                self.plug[sd].put([(px - ux * 12 * self.ear, py - uy * 12 * self.ear), (px + ux * 12 * self.ear, py + uy * 12 * self.ear)])
+                self.plug[sd].opa = 255
+            else:
+                self.plug[sd].opa = 0
+
+    def _mic(self, st) -> None:
+        """The pod's speaker is off: a microphone floats beside him (never over his mouth: he may still be talking through the house stereos)."""
+        if not self.spk_off or st == "offline":
+            for ln in (self.mic_cap, self.mic_arc, self.mic_stem):
+                ln.opa = 0
+            return
+        my0, mx0 = 340 + 7 * math.sin(self.ph * 1.3), 425
+        self.mic_cap.put([(mx0, my0 - 16), (mx0, my0 + 6)])
+        self.mic_arc.put([(mx0 + 20 * math.cos(math.pi * i / 9 + math.pi), my0 + 4 - 20 * math.sin(math.pi * i / 9 + math.pi)) for i in range(10)])
+        self.mic_stem.put([(mx0, my0 + 24), (mx0, my0 + 40)])
+        for ln in (self.mic_cap, self.mic_arc, self.mic_stem):
+            ln.opa = 255
 
     # ── drawing, in the yaml's order ──
     def _ball(self) -> np.ndarray:
@@ -854,7 +894,7 @@ class Face:
             top = max(0, -y)
             if y < H and y + L.shape[0] > 0:
                 blit_rgba(c, L[top:min(L.shape[0], H - y)], 0, y + top, 204)
-        for ln in (self.ear_fl, self.ear_fr, self.ear_ol, self.ear_or):
+        for ln in (self.ear_fl, self.ear_fr, self.ear_ol, self.ear_or, *self.plug, self.mic_cap, self.mic_arc, self.mic_stem):
             draw_line(c, ln)
         blit_rgba(c, self._ball(), self.ball_pos[0], self.ball_pos[1], 255)
         draw_line(c, self.hat_cast)

@@ -176,9 +176,10 @@ class FaceStreamer(threading.Thread):
         self._start_keys = [0.0, 0.2, 0.6, 1.5]
 
     # ── inputs, from the hub's event loop ──
-    def set_box_state(self, state: str, talking: bool) -> None:
+    def set_box_state(self, state: str, talking: bool, mic_off: bool = False, spk_off: bool = False) -> None:
         """The box's `Face` text sensor ("<state>,<talking>"): the box knows when the audio starts, so the mouth follows it."""
         f = self.face
+        f.set_keys(mic_off, spk_off)
         if state != f.state_now:
             f.set_state(state)
         if talking and not f.talking:

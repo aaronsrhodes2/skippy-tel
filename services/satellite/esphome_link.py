@@ -194,8 +194,8 @@ class EsphomeLink:
         elif kind == "BinarySensorState" and state.key == self.keys.get("stream_live") and self.streamer is not None:
             self.streamer.set_live(bool(state.state) and not getattr(state, "missing_state", False))
         elif kind == "TextSensorState" and state.key == self.keys.get("face") and self.streamer is not None:
-            name, _, talking = str(state.state).partition(",")
-            self.streamer.set_box_state(name, talking == "1")
+            f = (str(state.state).split(",") + ["0", "0", "0"])[:4]          # "<state>,<talking>,<mic off>,<speaker off>" (older firmware sends two fields)
+            self.streamer.set_box_state(f[0], f[1] == "1", f[2] == "1", f[3] == "1")
         elif kind == "MediaPlayerEntityState" and state.key == self.keys.get("player") and self.music is not None:
             from aioesphomeapi import MediaPlayerState            # noqa: PLC0415
             if state.state == MediaPlayerState.IDLE:
@@ -404,9 +404,8 @@ class EsphomeLink:
             self.client.media_player_command(self.keys["player"], command=MediaPlayerCommand.STOP)
 
     async def volume(self, step: float) -> None:
-        from aioesphomeapi import MediaPlayerCommand              # noqa: PLC0415
-        if "player" in self.keys:
-            self.client.media_player_command(self.keys["player"], command=MediaPlayerCommand.VOLUME_UP if step > 0 else MediaPlayerCommand.VOLUME_DOWN)
+        """A pod's volume is locked (the Captain, 2026-10-31: full volume crackles; the house stereos have the controls): nothing to change."""
+        return None
 
 
 async def serve(hub, name: str, host: str, port: int, *, media, noise_psk: str, connect=None, label: str = "", make_client=None) -> None:

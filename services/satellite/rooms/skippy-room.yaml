@@ -7,7 +7,7 @@
 #   * streams the microphone (16 kHz, cleaned by its own noise suppression and auto gain) to the hub whenever the hub is connected;
 #   * plays whatever URL the hub hands it (Skippy's voice as an announcement over the music, Bilby's tracks as media), ducking the music
 #     under the voice itself, with no round trip;
-#   * the volume keys change the volume at once;
+#   * the volume is locked at ${pod_volume} (the keys are the microphone and speaker switches);
 #   * the ring shows what is happening the moment it happens (listening, thinking, speaking, music).
 # A tap on the screen is reported to the hub as "Skippy" (the hub decides what it means).
 #
@@ -34,6 +34,7 @@ skippy_stream:
 substitutions:
   name: skippy-room
   room: "Room"
+  pod_volume: "0.7"                     # the pod's one volume (the Captain, 2026-10-31): full volume crackles, so it is locked here; the keys and the hub never change it
 
 esphome:
   name: ${name}
@@ -310,7 +311,7 @@ media_player:
   - platform: speaker
     id: player
     name: Speaker
-    volume_initial: 0.4                   # 0.6 was loud in the Office; the side keys go up from here
+    volume_initial: ${pod_volume}         # locked: the watcher below puts it back if anything changes it (the house stereos have the volume controls)
     announcement_pipeline:                # Skippy's voice and announcements: over the music, which ducks under it
       speaker: voice_resampler
       format: FLAC
@@ -434,9 +435,6 @@ switch:
       - voice_assistant.start_continuous:
     on_turn_off:
       - voice_assistant.stop:
-      - script.execute:
-          id: face
-          state: muted
 
 # What the hub wants shown under the ring: now playing, or what Skippy just said. The hub writes it; the box only displays it.
 text:
@@ -506,7 +504,7 @@ binary_sensor:
   - platform: template                    # a tap on the screen: the hub treats it as "Skippy"
     id: tapped
     name: Tap
-  - platform: gpio
+  - platform: gpio                        # bottom key: a click switches the microphone off and on (the same switch the hub and Home Assistant see)
     id: key_down
     pin:
       number: GPIO0
@@ -515,19 +513,8 @@ binary_sensor:
     filters:
       - delayed_on: 20ms
     on_press:
-      - lambda: 'id(key_t0) = millis();'
-    on_release:
-      - if:
-          condition:
-            lambda: 'return millis() - id(key_t0) > 1000;'
-          then:
-            - lambda: |-
-                // held for a second: mute the pod's own speaker (or bring it back); the PC outputs are unaffected
-                if (id(player)->volume > 0.01f) { id(mute_saved) = id(player)->volume; id(player)->make_call().set_volume(0.0f).perform(); }
-                else { id(player)->make_call().set_volume(id(mute_saved) > 0.01f ? id(mute_saved) : 0.4f).perform(); }
-          else:
-            - media_player.volume_down: player
-  - platform: gpio
+      - switch.toggle: mic_on
+  - platform: gpio                        # top key: a click switches the pod's OWN speaker off and on (the house stereos are unaffected and keep their own volume)
     id: key_up
     pin:
       pca9554: expander
@@ -538,7 +525,9 @@ binary_sensor:
     filters:
       - delayed_on: 20ms
     on_press:
-      - media_player.volume_up: player
+      - lambda: |-
+          if (id(player)->volume > 0.01f) { id(mute_saved) = id(player)->volume; id(player)->make_call().set_volume(0.0f).perform(); }
+          else { id(player)->make_call().set_volume(${pod_volume}f).perform(); }
 
 # ── the face: one ring that breathes, coloured by what is happening ───────────────────────────────────────
 globals:
@@ -566,6 +555,12 @@ globals:
   - id: mute_saved
     type: float
     initial_value: '0.4'
+  - id: mic_off                          # the microphone switch is off: earplugs on his ears
+    type: bool
+    initial_value: 'false'
+  - id: spk_off                          # the pod's own speaker is silent (volume 0): a microphone floats beside him
+    type: bool
+    initial_value: 'false'
   - id: talking
     type: bool
     initial_value: 'false'
@@ -593,7 +588,7 @@ script:
   - id: pub_face
     mode: restart
     then:
-      - lambda: 'id(face_sync)->publish_state(id(state_now) + (id(talking) ? ",1" : ",0"));'
+      - lambda: 'id(face_sync)->publish_state(id(state_now) + (id(talking) ? ",1" : ",0") + (id(mic_off) ? ",1" : ",0") + (id(spk_off) ? ",1" : ",0"));'
   - id: convo_add                         # a line of the conversation flows up behind the ball: yours (cyan, with >) and Skippy's (lavender)
     mode: queued
     parameters:
@@ -628,6 +623,10 @@ script:
           else if (state == "muted") { c = 0xef4444; t = "microphone off"; en = 0.2f; }
           else if (state == "offline") { c = 0x475569; t = "hub offline"; en = 0.1f; }
           else if (state == "sick") { c = 0xd6c92a; t = ""; en = 0.4f; }
+          // the keys: mic off = earplugs, speaker off = a floating microphone, both = off duty (fuchsia glow, he is listening to music): never blue (backend down) or red
+          if (id(mic_off) && id(spk_off) && (state == "idle" || state.empty())) { c = 0xc026d3; t = "off duty"; en = 0.6f; }
+          else if (id(mic_off) && (state == "idle" || state.empty())) t = "microphone off";
+          else if (id(spk_off) && (state == "idle" || state.empty())) t = "speaker off";
           id(face_rgb) = c;
           id(state_now) = state;
           id(energy_target) = en;
@@ -653,6 +652,16 @@ interval:
           bool want = s->wants();
           if (want && !s->ready()) { id(lvgl_comp)->set_paused(true, false); s->set_ready(true); ESP_LOGI("stream", "the hub draws the face"); id(stream_live)->publish_state(true); }
           else if (!want && s->ready()) { s->set_ready(false); id(lvgl_comp)->set_paused(false, false); ESP_LOGI("stream", "stream stopped: drawing on the box"); id(stream_live)->publish_state(false); }
+  - interval: 250ms                       # the keys' state: the microphone switch and the pod's speaker volume; when either changes the face redraws and the hub is told
+    then:
+      - lambda: |-
+          float v = id(player)->volume;
+          if (v > 0.01f && fabsf(v - ${pod_volume}f) > 0.005f) { id(player)->make_call().set_volume(${pod_volume}f).perform(); v = ${pod_volume}f; }   // locked
+          bool mo = !id(mic_on)->state, so = v <= 0.01f;
+          if (mo != id(mic_off) || so != id(spk_off)) {
+            id(mic_off) = mo; id(spk_off) = so;
+            id(face)->execute(id(state_now));
+          }
   - interval: 250ms                       # the lamp breathes: slow when idle, quicker when something is happening
     then:
       - lambda: |-
@@ -672,7 +681,9 @@ interval:
           // ── what the face is doing: targets, eased toward every tick ──
           static float ph = 0, rot = 0, eo = 1, bh = 0, ba = 0, bl = 0, br = 0, lx = 0, ly = 0, sm = 0, mw = 22, mu = 0.5f, ml = 0.5f, teethv = 0;
           static uint32_t blink_at = 0, glance_at = 0; static float gx = 0, gy = 0;
-          const std::string &st = id(state_now);
+          std::string st = id(state_now);
+          const bool off_duty = id(mic_off) && id(spk_off);                         // both keys off: he listens to music, off duty (the music face, a fuchsia tint)
+          if (off_duty && (st == "idle" || st.empty()) && !id(talking)) st = "music";
           const bool dead = st == "offline";                                           // offline: eyes shut, can blue, nothing moves
           bool talk = id(talking);
           uint32_t now = millis();
@@ -745,6 +756,7 @@ interval:
             pst = st;
             float R = 0, G = 0, B = 0, A = 0;
             if (st == "offline") { R = 47; G = 107; B = 255; A = 120; }
+            else if (off_duty && id(state_now) != "offline") { R = 170; G = 60; B = 255; A = 70; }
             else if (st == "sick" || emo == 'k') { R = 222; G = 215; B = 40; A = 105; }
             else if (st == "thinking") { float k = fminf((now - think_t0) / 4000.0f, 1.0f); R = 255; G = 138; B = 31; A = 30 + 90 * k; }
             else if (emo == 'a') { R = 255; G = 42; B = 42; A = estrong ? 130 : 80; }
@@ -1084,7 +1096,7 @@ interval:
           }
           // ── ears: while he listens two big rounded ears grow out of the sides of the can, cocked at different angles, like he is being sarcastic ──
           { static float ear = 0; static lv_point_precise_t eo_[2][26], ef_[2][26];
-            bool hearing = st == "listening" || st == "recording" || (st == "idle" && id(in_session) && !talk) || (st.empty() && id(in_session));
+            bool hearing = id(mic_off) || st == "listening" || st == "recording" || (st == "idle" && id(in_session) && !talk) || (st.empty() && id(in_session));   // (mic off: ears out, plugged)
             ear += ((hearing ? 1.0f : 0.0f) - ear) * 0.3f;
             lv_obj_t *fo[4] = {id(ear_fl)->obj, id(ear_fr)->obj, id(ear_ol)->obj, id(ear_or)->obj};
             if (ear < 0.06f) { for (int k = 0; k < 4; k++) lv_obj_set_style_line_opa(fo[k], 0, LV_PART_MAIN); }
@@ -1104,7 +1116,26 @@ interval:
               }
               put(fo[sd], ef_[sd], nf); put(fo[2 + sd], eo_[sd], 26);
               lv_obj_set_style_line_opa(fo[sd], 255, LV_PART_MAIN); lv_obj_set_style_line_opa(fo[2 + sd], 255, LV_PART_MAIN);
+              static lv_point_precise_t pl_[2][2];                                           // an earplug, far too big, pushed into the ear's opening (overstated, on purpose)
+              lv_obj_t *pg = sd ? id(plug_r)->obj : id(plug_l)->obj;
+              if (id(mic_off) && ear > 0.5f) {
+                float px = bx + ux * eh * 0.45f, py = by + uy * eh * 0.45f;
+                pl_[sd][0].x = (int) (px - ux * 12 * ear); pl_[sd][0].y = (int) (py - uy * 12 * ear);
+                pl_[sd][1].x = (int) (px + ux * 12 * ear); pl_[sd][1].y = (int) (py + uy * 12 * ear);
+                put(pg, pl_[sd], 2); lv_obj_set_style_line_opa(pg, 255, LV_PART_MAIN);
+              } else lv_obj_set_style_line_opa(pg, 0, LV_PART_MAIN);
             }
+          }
+          { static lv_point_precise_t mc[2], ma[10], ms_[2];                               // the pod's speaker is off: a microphone floats beside him (never over his mouth)
+            lv_obj_t *mp[3] = {id(mic_cap)->obj, id(mic_arc)->obj, id(mic_stem)->obj};
+            if (id(spk_off) && !dead) {
+              float my0 = 340 + 7 * sinf(ph * 1.3f), mx0 = 425;
+              mc[0].x = (int) mx0; mc[0].y = (int) (my0 - 16); mc[1].x = (int) mx0; mc[1].y = (int) (my0 + 6);
+              for (int i = 0; i < 10; i++) { float a = 3.14159f * i / 9.0f; ma[i].x = (int) (mx0 + 20 * cosf(a + 3.14159f)); ma[i].y = (int) (my0 + 4 - 20 * sinf(a + 3.14159f)); }
+              ms_[0].x = (int) mx0; ms_[0].y = (int) (my0 + 24); ms_[1].x = (int) mx0; ms_[1].y = (int) (my0 + 40);
+              put(mp[0], mc, 2); put(mp[1], ma, 10); put(mp[2], ms_, 2);
+              for (int k = 0; k < 3; k++) lv_obj_set_style_line_opa(mp[k], 255, LV_PART_MAIN);
+            } else for (int k = 0; k < 3; k++) lv_obj_set_style_line_opa(mp[k], 0, LV_PART_MAIN);
           }
           { static uint32_t acc_us = 0, n_us = 0; acc_us += micros() - t_us0;                // how much of the tick is this code (the rest is drawing)
             if (++n_us == 60) { ESP_LOGI("face", "code %.1f ms per tick", acc_us / 60000.0f); acc_us = n_us = 0; } }
@@ -1468,6 +1499,61 @@ lvgl:
               - 0, 0
               - 2, 2
             line_width: 3
+            line_color: 0xe6e9ef
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: plug_l
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 30
+            line_color: 0xff6a00
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: plug_r
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 30
+            line_color: 0xff6a00
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: mic_cap
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 26
+            line_color: 0xe6e9ef
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: mic_arc
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 4
+            line_color: 0xe6e9ef
+            line_opa: 0%
+            line_rounded: true
+        - line:
+            id: mic_stem
+            x: 0
+            y: 0
+            points:
+              - 0, 0
+              - 2, 2
+            line_width: 4
             line_color: 0xe6e9ef
             line_opa: 0%
             line_rounded: true

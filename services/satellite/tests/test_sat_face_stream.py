@@ -297,3 +297,43 @@ def test_link_without_the_face_sensor_does_not_stream():
     link.start_stream(True)
     assert link.streamer is None
     link.set_text("mouth", "n")                                                     # and everything still works without one
+
+
+# ── the pod's two keys: microphone off = earplugs, speaker off = a floating microphone, both = off duty ──
+def _settle(f, n=40, t0=100000):
+    for i in range(n):
+        f.tick(t0 + i * 50)
+    return f.render()
+
+
+def test_keys_change_the_picture_and_back():
+    from face_render import Face
+    f = Face(); f.set_state("idle")
+    base = _settle(f)
+    f.set_keys(True, False); plugs = _settle(f, t0=200000)
+    assert (plugs != base).any() and f.plug[0].opa == 255 and f.plug[1].opa == 255 and f.mic_cap.opa == 0
+    f.set_keys(False, True); mic = _settle(f, t0=300000)
+    assert f.mic_cap.opa == 255 and f.plug[0].opa == 0 and (mic != base).any()
+    f.set_keys(True, True); off = _settle(f, t0=400000)
+    assert f.face_rgb == 0xc026d3 and f.mic_cap.opa == 255 and f.plug[0].opa == 255
+    f.set_keys(False, False); back = _settle(f, t0=500000)
+    assert f.face_rgb == 0x6a28c9 and f.plug[0].opa == 0 and f.mic_cap.opa == 0 and (off != back).any()
+
+
+def test_off_duty_never_blue_or_red_and_offline_wins():
+    from face_render import Face
+    f = Face(); f.set_state("idle"); f.set_keys(True, True)
+    assert f.face_rgb not in (0x475569, 0xef4444) and f.face_rgb == 0xc026d3
+    f.set_state("offline")
+    assert f.face_rgb == 0x475569
+    _settle(f)
+    assert f.mic_cap.opa == 0                                  # (no floating microphone on a dead face)
+
+
+def test_face_sensor_fields_reach_the_renderer():
+    from face_stream import FaceStreamer
+    s = FaceStreamer("127.0.0.1", send=lambda d: None)
+    s.set_box_state("idle", False, True, True)
+    assert s.face.mic_off and s.face.spk_off and s.face.face_rgb == 0xc026d3
+    s.set_box_state("speaking", True, True, False)
+    assert s.face.mic_off and not s.face.spk_off
