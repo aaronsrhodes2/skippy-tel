@@ -407,7 +407,7 @@ def test_the_box_answers_ping():
 def test_a_slow_answer_is_covered_by_a_prerecorded_quip_and_a_quick_command_is_not():
     import filler as F
     bank = F.FillerBank(Path("."), {"thinking": [{"file": "x.mp3", "text": "Hmm. One moment, monkey."}], "performance": [], "long": []})
-    bank.pick = lambda kind: ("Hmm. One moment, monkey.", b"mp3") if kind == "thinking" else None
+    bank.pick = lambda kind, command="": ("Hmm. One moment, monkey.", b"mp3") if kind == "thinking" else None
 
     async def body(box, made, hub, log, start):
         await start()

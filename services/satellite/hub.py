@@ -416,7 +416,7 @@ class Room:
         import re                                               # noqa: PLC0415
         if self.filler is None or not re.search(r"thank|bye|done|later", command, re.I):
             return
-        quip = self.filler.pick("goodbye")
+        quip = self.filler.pick("goodbye", command)
         if quip is not None:
             text, mp3 = quip
             self.log(f"[{self.name}] (sign-off: {text})")
@@ -436,7 +436,7 @@ class Room:
         for stage in (kind, "long"):
             if done:
                 return
-            quip = self.filler.pick(stage)
+            quip = self.filler.pick(stage, command)
             if quip is not None:
                 text, mp3 = quip
                 self.log(f"[{self.name}] (filler: {text})")

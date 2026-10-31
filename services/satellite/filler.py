@@ -198,10 +198,27 @@ LINES = {
 }
 
 
+MAX_PLAYS = 3                 # the Captain, 2026-10-31: a joke is funny three times at most; after that tools/quip_refresh.py retires and replaces it
+RECENT = 6                    # never one of the last few heard in that kind, whatever the counts say
+
+
+def norm_question(command: str) -> str:
+    """The question as the inventory remembers it: lower case, words only (so "What time is it?" and "what time is it" are one question)."""
+    return " ".join(re.findall(r"[a-z0-9']+", (command or "").lower()))[:120]
+
+
 class FillerBank:
-    def __init__(self, folder: Path, index: dict):
+    """The recorded quips, and their INVENTORY (state/filler/plays.json: how often each was played, when, and to which questions), so a quip is
+    never repeated for the same question, the least-played one goes first, and a worn-out one (MAX_PLAYS) is left for the refresher to replace.
+    The bank re-reads index.json when the refresher changes it: no hub restart."""
+
+    def __init__(self, folder: Path, index: dict, clock=None):
+        import time                                             # noqa: PLC0415
         self.folder, self.index = Path(folder), index
+        self.clock = clock or time.time
         self.last: dict[str, int] = {}
+        self.plays = self._read_plays()
+        self._mtime = self._index_mtime()
 
     @classmethod
     def load(cls, folder) -> "FillerBank | None":
@@ -211,6 +228,50 @@ class FillerBank:
         except (OSError, ValueError):
             return None
         return cls(folder, index) if index else None
+
+    # ── the inventory ──
+    def _index_mtime(self) -> float:
+        try:
+            return (self.folder / "index.json").stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def _read_plays(self) -> dict:
+        try:
+            got = json.loads((self.folder / "plays.json").read_text(encoding="utf-8"))
+            return got if isinstance(got, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _save_plays(self) -> None:
+        path = self.folder / "plays.json"
+        try:
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self.plays, indent=0), encoding="utf-8")
+            tmp.replace(path)
+        except OSError:
+            pass                                                # an inventory that can't be written must never cost a quip
+
+    def _refresh(self) -> None:
+        m = self._index_mtime()
+        if m and m != self._mtime:
+            try:
+                self.index = json.loads((self.folder / "index.json").read_text(encoding="utf-8")) or self.index
+                self._mtime = m
+            except (OSError, ValueError):
+                pass
+
+    def uses(self, file: str) -> int:
+        return int((self.plays.get(file) or {}).get("n", 0))
+
+    def record(self, file: str, command: str = "") -> None:
+        p = self.plays.setdefault(file, {"n": 0, "at": 0, "asked": []})
+        p["n"] = int(p.get("n", 0)) + 1
+        p["at"] = self.clock()
+        q = norm_question(command)
+        if q and q not in p.setdefault("asked", []):
+            p["asked"] = (p["asked"] + [q])[-20:]
+        self._save_plays()
 
     def kind_for(self, command: str) -> str:
         """Which kind of quip suits what was asked. `home` is a quick household command (the hub waits longer before using one: it is usually answered at once)."""
@@ -233,16 +294,31 @@ class FillerBank:
             return "personal"
         return "thinking"
 
-    def pick(self, kind: str) -> tuple[str, bytes] | None:
-        """(the words, the mp3) of one quip of this kind, never the same one twice running; a kind with no recordings falls back to `thinking`."""
+    def pick(self, kind: str, command: str = "") -> tuple[str, bytes] | None:
+        """(the words, the mp3) of one quip of this kind; a kind with no recordings falls back to `thinking`. The order of preference:
+        never one already said for this same question, not one of the last few in this kind, not a worn-out one (MAX_PLAYS), then the
+        least played, the longest ago, a random one among equals. Each rule gives way only when nothing is left without breaking it."""
+        self._refresh()
         items = self.index.get(kind) or self.index.get("thinking") or []
         if not items:
             return None
-        choices = [i for i in range(len(items)) if i != self.last.get(kind)] or [0]
-        i = random.choice(choices)
+        q = norm_question(command)
+        recent = sorted((it["file"] for it in items if self.plays.get(it["file"], {}).get("at")),
+                        key=lambda f: self.plays[f]["at"], reverse=True)[:min(RECENT, max(0, len(items) - 1))]
+        pool = list(range(len(items)))
+        for rule in (lambda i: q not in (self.plays.get(items[i]["file"], {}).get("asked") or []),
+                     lambda i: items[i]["file"] not in recent,
+                     lambda i: self.uses(items[i]["file"]) < MAX_PLAYS):
+            kept = [i for i in pool if rule(i)]
+            pool = kept or pool
+        low = min(self.uses(items[i]["file"]) for i in pool)
+        pool = [i for i in pool if self.uses(items[i]["file"]) == low]
+        oldest = min((self.plays.get(items[i]["file"], {}).get("at", 0) for i in pool))
+        i = random.choice([i for i in pool if self.plays.get(items[i]["file"], {}).get("at", 0) == oldest])
         try:
             data = (self.folder / items[i]["file"]).read_bytes()
         except OSError:
             return None
         self.last[kind] = i
+        self.record(items[i]["file"], command)
         return items[i]["text"], data
