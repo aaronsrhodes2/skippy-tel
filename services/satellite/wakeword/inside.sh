@@ -18,6 +18,16 @@ if compgen -G "/work/real/positive/*.wav" > /dev/null; then
   echo "mixed in $n of his own recordings"
 fi
 
+# and what must NOT wake it, in his voice through the pod (Skipper, skip it, Computer ...): trains as adversarial negatives
+NEG=/work/train/skippy/negative_train
+if compgen -G "/work/real/negative/*.wav" > /dev/null; then
+  mkdir -p "$NEG"
+  for f in /work/real/negative/*.wav; do
+    for i in $(seq 1 20); do cp "$f" "$NEG/real_${i}_$(basename "$f")"; done
+  done
+  echo "mixed in his own negatives"
+fi
+
 python "$TRAIN" --training_config /kit/skippy.yml --augment_clips
 python "$TRAIN" --training_config /kit/skippy.yml --train_model
 cp /work/train/skippy.onnx /work/skippy.onnx

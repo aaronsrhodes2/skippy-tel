@@ -51,8 +51,10 @@ def peak(model, samples: list[float]) -> float:
 
 
 def score(model, real: Path) -> tuple[list[float], list[float]]:
-    pos = [peak(model, read_wav(p)) for p in sorted((real / "positive").glob("*.wav"))]
-    neg = [peak(model, read_wav(p)) for p in sorted((real / "negative").glob("*.wav"))]
+    held = real / "test"                                        # wakerec.py holds every 5th clip out of training: those are the honest test
+    base = held if any(held.glob("*/*.wav")) else real
+    pos = [peak(model, read_wav(p)) for p in sorted((base / "positive").glob("*.wav"))]
+    neg = [peak(model, read_wav(p)) for p in sorted((base / "negative").glob("*.wav"))]
     return pos, neg
 
 

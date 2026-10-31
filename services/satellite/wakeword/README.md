@@ -40,3 +40,13 @@ With it, nothing said in a room goes anywhere until the room is addressed: no ut
   its trainer imports; the notebook's library versions). The notebook's AudioSet `.tar` link no longer exists; `data.py` reads a parquet shard instead.
 
 The `state/wakeword/` folder is git-ignored: his recordings are his voice, and the model is rebuilt from them.
+
+## Recording through a room pod (the way to do it)
+
+A pod's microphone (ESP32-S3, its ADC, noise suppression and gain) sounds nothing like skippy-pc's USB mic, so record through the pod itself:
+
+    bash services/satellite/wakeword/record.sh positive 50 [room]     # stops the hub (by PID), Skippy prompts aloud and on the pod's screen, restarts the hub
+    bash services/satellite/wakeword/record.sh negative 30 [room]
+
+`wakerec.py` keeps each clip (0.6 s before his voice, to the end of the phrase) in `state/wakeword/real/{positive,negative}/`, every 5th in `real/test/`
+(held out of training, so `wakectl.py test` is honest). It resumes where it stopped. `train.sh` trains on the rest, his negatives included.

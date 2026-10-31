@@ -135,6 +135,7 @@ class Room:
         self.buf: list | None = None
         self.t, self._carry = 0, []                             # t: milliseconds of audio heard on this connection (the room's own clock)
         self.mode, self.deadline = IDLE, 0
+        self.recorder = None                                    # wakerec.Recorder: `hub.py --record` sends the room's audio there instead of listening
         link.room = self
 
     def _fresh(self) -> None:
@@ -176,6 +177,9 @@ class Room:
             self.feed(block)
 
     def feed(self, block) -> None:
+        if self.recorder is not None:
+            self.recorder.feed(block)
+            return
         if self.mode == BUSY:
             return                                              # thinking or talking: never answer our own voice
         self.pre.append(block)
@@ -697,6 +701,7 @@ def music_tools(room_of, loop):
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--say", nargs=2, metavar=("ROOM", "TEXT"), help="say this in one room, then quit")
+    ap.add_argument("--record", nargs="+", metavar=("KIND", "COUNT"), help="record wake-word clips through the pod's microphone: positive|negative [COUNT [ROOM]] (stop the running hub first; wakerec.py)")
     args = ap.parse_args(argv)
     from ear import load_env                                    # noqa: PLC0415
     env = load_env()
@@ -728,12 +733,40 @@ async def _main(env: dict, rooms, args) -> int:
     try:
         if args.say:
             return await _say_once(hub, rooms, *args.say)
+        if args.record:
+            return await _record(hub, rooms, env, *args.record)
         log("hub: rooms " + ", ".join(f"{n} ({k} {h}:{p})" for n, k, h, p in rooms))
         await asyncio.gather(hub.run(), *([connect.run()] if connect else []))
         return 0
     finally:
         if media is not None:
             await media.stop()
+
+
+async def _record(hub: Hub, rooms, env: dict, kind: str, count: str = "30", name: str = "") -> int:
+    """hub.py --record: connect to one room as usual, then take its audio for wakerec.Recorder (the pod's own microphone chain, which is what the wake word hears)."""
+    from wakerec import Recorder                                # noqa: PLC0415
+    spec = next((r for r in rooms if not name or r[0] == name), None)
+    if kind not in ("positive", "negative") or spec is None:
+        print(f"hub: --record positive|negative [COUNT [ROOM]]; room {name or '(first)'!r} {'unknown' if spec is None else 'ok'}")
+        return 1
+    serving = asyncio.ensure_future(hub.keep(*spec, forever=False))
+    for _ in range(100):
+        if spec[0] in hub.rooms:
+            break
+        await asyncio.sleep(0.1)
+    room = hub.rooms.get(spec[0])
+    if room is None:
+        print(f"hub: could not reach {spec[0]}")
+        serving.cancel()
+        return 1
+    await asyncio.sleep(2)                                      # the box starts its first listening turn
+    root = Path(__file__).resolve().parents[2] / "state" / "wakeword" / "real"
+    rec = room.recorder = Recorder(kind, int(count), root, lambda text: room.say(text, announce=True), log=room.log, floor=float(env.get("SATELLITE_FLOOR", "0.012")))
+    done = await rec.run()
+    room.recorder = None
+    serving.cancel()
+    return 0 if done else 1
 
 
 async def _say_once(hub: Hub, rooms, name: str, text: str) -> int:
