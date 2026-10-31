@@ -115,9 +115,11 @@ for (const s0 of voxels.keys()) {
   // a disc: two wide sides, a thin third side (a cube or a long bar is not a wheel)
   if (Math.min(p, q) < 5 || ext[thin] > 0.6 * Math.min(p, q)) continue;
   wheels.discs++;
-  if (AXES[thin] === forward) {
+  // turned: the face points along the direction of travel. lying: the face points up, so the wheel lies flat on the ground.
+  const turnedAlong = AXES[thin] === forward, lying = AXES[thin] === "y";
+  if (turnedAlong || lying) {
     wheels.turned++;
-    wheels.turned_at.push({ at: pl.map((v, j) => Math.round((v + ph[j]) / 2)), face_along: forward, size: [p, q], blocks: part.length });
+    wheels.turned_at.push({ at: pl.map((v, j) => Math.round((v + ph[j]) / 2)), face: AXES[thin], why: turnedAlong ? "along" : "flat", size: [p, q], blocks: part.length });
   }
 }
 wheels.turned_at.sort((a, b) => b.blocks - a.blocks);
