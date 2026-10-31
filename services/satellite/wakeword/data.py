@@ -27,6 +27,29 @@ def _wav_dir(rows, out: Path, limit: int | None = None) -> None:
     (out / ".done").touch()
 
 
+def _parquet_wavs(shards, out: Path) -> None:
+    """AudioSet parquet shards to 16 kHz mono wavs. Read with pyarrow + soundfile: the pinned `datasets` cannot parse this shard's newer feature metadata."""
+    import io                                               # noqa: PLC0415
+    from math import gcd                                    # noqa: PLC0415
+    import numpy as np                                      # noqa: PLC0415
+    import scipy.io.wavfile                                 # noqa: PLC0415
+    import scipy.signal                                     # noqa: PLC0415
+    import soundfile                                        # noqa: PLC0415
+    import pyarrow.parquet as pq                            # noqa: PLC0415
+    out.mkdir(parents=True, exist_ok=True)
+    for shard in shards:
+        pf = pq.ParquetFile(shard)
+        for g in range(pf.num_row_groups):
+            for row in pf.read_row_group(g, columns=["video_id", "audio"]).to_pylist():
+                a, sr = soundfile.read(io.BytesIO(row["audio"]["bytes"]))
+                a = a.mean(axis=1) if a.ndim > 1 else a
+                if sr != 16000:
+                    d = gcd(sr, 16000)
+                    a = scipy.signal.resample_poly(a, 16000 // d, sr // d)
+                scipy.io.wavfile.write(out / f"{row['video_id']}.wav", 16000, (np.clip(a, -1, 1) * 32767).astype(np.int16))
+    (out / ".done").touch()
+
+
 def _done(path: Path) -> bool:
     return (path / ".done").exists() if path.suffix == "" else path.is_file()
 
@@ -45,8 +68,7 @@ def main() -> int:
     if not _done(DATA / "audioset_16k"):
         from huggingface_hub import hf_hub_download         # noqa: PLC0415 — datasets' own dependency
         shards = [hf_hub_download("agkphysics/AudioSet", s, repo_type="dataset", cache_dir=str(DATA / "hf")) for s in AUDIOSET_SHARDS]
-        noise = datasets.load_dataset("parquet", data_files=shards, split="train").cast_column("audio", datasets.Audio(sampling_rate=16000))
-        _wav_dir(noise, DATA / "audioset_16k")
+        _parquet_wavs(shards, DATA / "audioset_16k")
     if not _done(DATA / "fma"):
         fma = datasets.load_dataset("rudraml/fma", name="small", split="train", streaming=True).cast_column("audio", datasets.Audio(sampling_rate=16000))
         _wav_dir(fma, DATA / "fma", limit=FMA_HOURS * 3600 // 30)   # 30 s clips

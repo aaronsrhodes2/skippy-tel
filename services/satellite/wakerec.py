@@ -15,11 +15,11 @@ import json
 import time
 from pathlib import Path
 
-from vad import Vad, rms
+from vad import rms
 from voicegate import wav_bytes
 
 BLOCK_MS = 50
-PRE_BLOCKS = 12                                                 # 0.6 s kept from before the voice crossed the bar
+LEAD_BLOCKS, TAIL_BLOCKS = 10, 8                                # 0.5 s kept before his voice, 0.4 s after
 HOLD_OUT_EVERY = 5
 
 POSITIVE_SAYINGS = ("Skippy", "Hey Skippy")
@@ -56,35 +56,35 @@ def prompt_text(kind: str, what: str, way: str) -> str:
 class Recorder:
     """Takes the room's 50 ms blocks, one clip per prompt. `speak(text)` says it aloud and shows it; `log` reports; `root` is state/wakeword/real."""
 
-    def __init__(self, kind: str, count: int, root: Path, speak, log=print, floor: float = 0.007, wait_s: float = 9.0, clock=time.time):
+    def __init__(self, kind: str, count: int, root: Path, speak, log=print, floor: float = 0.007, window_s: float = 4.5):
         self.kind, self.count, self.root, self.speak, self.log = kind, count, Path(root), speak, log
-        self.floor, self.wait_s, self.clock = floor, wait_s, clock
-        self.pre: list = []
-        self.buf: list | None = None
-        self.vad = Vad(floor_min=floor * 0.6, ratio=2.0, end_silence_ms=700, cal_ms=1)   # a lower bar than the hub's: a far, quiet "Skippy" must still be kept
-        self.armed = False
-        self.t = 0
+        self.floor, self.window = floor, int(window_s * 1000 / BLOCK_MS)
+        self.win: list | None = None                            # the blocks since the prompt was spoken
         self.got: asyncio.Future | None = None
         self.done = 0
-        self.blocks_heard, self.peak = 0, 0.0                    # what the pod delivered since the last prompt: tells a silent room from a dead stream
 
     # the room hands us every block
     def feed(self, block) -> None:
-        self.t += BLOCK_MS
-        self.pre = (self.pre + [block])[-PRE_BLOCKS:]
-        self.blocks_heard += 1
-        self.peak = max(self.peak, rms(block))
-        if not self.armed:
+        if self.win is None:
             return
-        event = self.vad.push(rms(block), self.t)
-        if self.buf is not None and event != "speech":
-            self.buf.append(block)
-        if event == "speech":
-            self.buf = list(self.pre)
-        elif event == "end" and self.buf is not None:
-            clip, self.buf, self.armed = self.buf, None, False
-            if self.got is not None and not self.got.done():
-                self.got.set_result([x for b in clip for x in b])
+        self.win.append(block)
+        if len(self.win) >= self.window and self.got is not None and not self.got.done():
+            win, self.win = self.win, None
+            self.got.set_result(win)
+
+    def trim(self, win):
+        """The phrase inside a window of blocks, or None when only room noise is in it. The pod's noise floor drifts, so the bar is a multiple of this window's own
+        quiet level (its 20th-percentile 100 ms), never under the floor; a phrase is at least 300 ms above it. Returns (samples, info)."""
+        lv = [rms([x for b in win[i:i + 2] for x in b]) for i in range(0, len(win) - 1, 2)]       # 100 ms levels
+        noise = sorted(lv)[len(lv) // 5]
+        bar = max(noise * 2.0, self.floor * 1.3)
+        info = {"noise": round(noise, 4), "bar": round(bar, 4), "peak": round(max(lv), 4)}
+        hot = [i for i in range(len(lv) - 2) if all(v > bar for v in lv[i:i + 3])]               # three 100 ms levels in a row
+        if not hot:
+            return None, info
+        first, last = hot[0] * 2, (hot[-1] + 3) * 2
+        i0, i1 = max(0, first - LEAD_BLOCKS), min(len(win), last + TAIL_BLOCKS)
+        return [x for b in win[i0:i1] for x in b], info
 
     def _folder(self, held_out: bool) -> Path:
         return self.root / "test" / self.kind if held_out else self.root / self.kind
@@ -100,21 +100,22 @@ class Recorder:
             self.log(f"[{i + 1}/{self.count}] {text}")
             await self.speak(text)
             await asyncio.sleep(0.5)                            # his own voice is still ringing in the pod's microphone
-            self.vad.restart()
-            self.blocks_heard, self.peak = 0, 0.0
-            self.buf, self.got, self.armed = None, asyncio.get_running_loop().create_future(), True
-            try:
-                clip = await asyncio.wait_for(self.got, self.wait_s)
-            except asyncio.TimeoutError:
-                self.armed = False
-                self.log(f"   (heard nothing: skipped; the pod sent {self.blocks_heard * BLOCK_MS / 1000:.1f} s of audio, loudest {self.peak:.4f}, the bar is {self.vad.bar():.4f})")
+            self.got = asyncio.get_running_loop().create_future()
+            self.win = []
+            win = await self.got
+            clip, info = self.trim(win)
+            if clip is None:
+                skipped = self.root / "skipped"
+                skipped.mkdir(parents=True, exist_ok=True)
+                (skipped / f"{time.strftime('%Y%m%d-%H%M%S')}-{self.kind}-{n:03}.wav").write_bytes(wav_bytes([x for b in win for x in b]))
+                self.log(f"   (heard no phrase: noise {info['noise']}, loudest {info['peak']}, bar {info['bar']}; the window is in real/skipped)")
                 continue
             held = (n + 1) % HOLD_OUT_EVERY == 0
             folder = self._folder(held)
             folder.mkdir(parents=True, exist_ok=True)
             (folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{n:03}.wav").write_bytes(wav_bytes(clip))
             with (self.root / "index.jsonl").open("a", encoding="utf-8") as f:
-                f.write(json.dumps({"kind": self.kind, "n": n, "said": what, "way": way, "held_out": held, "seconds": round(len(clip) / 16000, 2)}) + "\n")
+                f.write(json.dumps({"kind": self.kind, "n": n, "said": what, "way": way, "held_out": held, "seconds": round(len(clip) / 16000, 2), **info}) + "\n")
             self.done += 1
             self.log(f"   kept {len(clip) / 16000:.1f} s{' (held out for testing)' if held else ''}")
         await self.speak(f"That is all {self.count}. Thank you, Captain." if self.done else "I heard nothing at all. Is the pod's microphone muted?")

@@ -29,14 +29,13 @@ def run_recorder(tmp_path, count, speech_each=True):
 
         async def voice():                                      # the Captain answers 0.7 s after the prompt: quiet, 6 loud blocks, quiet
             await asyncio.sleep(0.7)
-            for block in [QUIET] * 4 + [LOUD] * 6 + [QUIET] * 20:
+            for block in [QUIET] * 4 + [LOUD if speech_each else QUIET] * 6 + [QUIET] * 20:
                 rec.feed(block)
                 await asyncio.sleep(0.001)
-        if speech_each:
-            asyncio.ensure_future(voice())
+        asyncio.ensure_future(voice())
 
     async def go():
-        rec = holder["rec"] = Recorder("positive", count, tmp_path, speak, log=logs.append, wait_s=3)
+        rec = holder["rec"] = Recorder("positive", count, tmp_path, speak, log=logs.append, window_s=1.5)
         return rec, await rec.run()
     rec, done = asyncio.run(go())
     return rec, done, spoken, logs
@@ -64,4 +63,4 @@ def test_every_fifth_clip_is_held_out_and_numbering_resumes(tmp_path):
 
 def test_silence_is_skipped_and_said(tmp_path):
     rec, done, spoken, logs = run_recorder(tmp_path, 1, speech_each=False)
-    assert done == 0 and "skipped" in "".join(logs) and "microphone" in spoken[-1]
+    assert done == 0 and "heard no phrase" in "".join(logs) and list((tmp_path / "skipped").glob("*.wav")) and "microphone" in spoken[-1]
