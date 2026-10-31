@@ -402,6 +402,7 @@ class BookPlayer:
             return
         self.offset, self.playing, self.paused_at = self.pos(), False, self.clock()
         self.sleep_at = self.sleep_chapter_end = None
+        self.log(f"[{self.name}] book: paused at {say_time(self.offset)}")
         await self._stop_outputs()
         self._remember(force=True)
 
