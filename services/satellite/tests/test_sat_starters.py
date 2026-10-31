@@ -332,3 +332,15 @@ def test_a_restart_remembers_who_was_around_from_the_house_log(tmp_path):
     asyncio.run(room.maybe_start())                                     # no voice heard since the restart, but he spoke ten minutes ago
     assert link.spoken == [cand("a")["opener"]]
     assert s.last_seen() is not None
+
+
+def test_an_unanswered_starter_left_by_the_watchdog_is_ignored_after_a_while(tmp_path):
+    now = [stamp("2026-10-31", "11:00")]
+    room, link, brain, s = room_with(tmp_path, now, [cand("a", now=now[0]), cand("b", now=now[0])])
+    present(room, 300)
+    asyncio.run(room.maybe_start())
+    room._resume(IDLE)                                                  # the no-audio watchdog: back to rest, the starter still pending
+    room._starter_at -= hub.STARTER_ANSWER_S + 1
+    room._starter_check = 0
+    asyncio.run(room.maybe_start())
+    assert room.pending_starter is None and s.state()["offers"][0]["answer"] == "ignored"

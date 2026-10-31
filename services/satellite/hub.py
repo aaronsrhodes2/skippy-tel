@@ -42,6 +42,7 @@ IDLE, LISTENING, FOLLOWUP, BUSY = "idle", "listening", "followup", "busy"
 PRESENT_S = 20 * 60                                             # a voice heard in the room this recently: someone is around (for a conversation starter)
 HUSH_S = 45                                                     # ... but not in the last this many seconds: never talk over people
 AFTER_TURN_S = 180                                              # nor this soon after he last spoke to Skippy
+STARTER_ANSWER_S = 180                                          # an offered starter still takes "Skippy, tell me more" this long
 
 
 def parse_rooms(spec: str) -> list[tuple[str, str, str, int]]:
@@ -406,6 +407,10 @@ class Room:
     async def maybe_start(self) -> None:
         """Bring something up unasked (starters.py): only when this room is idle and quiet, someone has been around lately, nothing plays, and the
         house-wide rules (hours, a few a day, backed off after a no) allow it. Checked once a minute from the tick."""
+        if (self.pending_starter is not None and self.mode == IDLE
+                and time.monotonic() - getattr(self, "_starter_at", 0.0) > STARTER_ANSWER_S):
+            self._starter_answer(self.pending_starter, "ignored", "")   # the room went back to rest without an answer (2026-10-31: the box stopped
+            self.pending_starter = None                                 # streaming after the announcement and the watchdog ended the follow-up)
         if self.starters is None or self.mode != IDLE or self.pending is not None or self.pending_starter is not None or self.recorder is not None:
             return
         if self.daily is not None and (self.daily.busy or self.daily.arrived_at is not None):
@@ -449,7 +454,7 @@ class Room:
         news = getattr(self.brain, "news", None)
         if news is not None and cand.get("sources"):
             news.adopt(cand.get("headline") or cand.get("topic", "the news"), cand["sources"])
-        self.pending_starter = cand
+        self.pending_starter, self._starter_at = cand, time.monotonic()
         self._record("starter", starter=cand["id"], topic=cand.get("topic"), text=cand["opener"])
         self.log(f"[{self.name}] starter ({cand.get('topic')}): {cand['opener'][:120]}")
         try:
