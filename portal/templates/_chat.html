@@ -335,7 +335,7 @@
       for (const n of [MAX_CHATS, 40, 20, 8]) { try { localStorage.setItem(STORE, JSON.stringify(list.slice(0, n))); return; } catch (e) {} }   // full: keep fewer
     }
     const HIST = "{{ url_for('chat.history_list') }}";
-    const NAMED = /^[a-z]+(?:-[a-z]+){3}$/;               // a chat's name (portal/chat_names.py): noun-verb-adjective-noun
+    const NAMED = /^[a-z]+(?:-[a-z]+){3,5}$/;             // a chat's name (portal/chat_names.py): four to six words, like a short sentence
     const patchLocal = (id, fields) => keepChats(chats().map(x => x.id === id ? Object.assign({}, x, fields) : x));
     function upload(c) {                                   // keep one chat on the portal; a failure only means it stays here
       return fetch(HIST + "/" + encodeURIComponent(c.id), {method: "PUT", headers: {"Content-Type": "application/json"},

@@ -1,4 +1,4 @@
-"""Chat names (chat_names.py): noun-verb-adjective-noun from the first prompt, by Skippy Core, with a fallback; the portal and
+"""Chat names (chat_names.py): four to six words, like a short sentence, from the first prompt, by Skippy Core, with a fallback; the portal and
 the bridge carry the same file; a portal chat is named once, on its first save."""
 from pathlib import Path
 
@@ -21,6 +21,9 @@ def test_the_portal_and_the_bridge_carry_the_same_file():
     ("Name: Portal-Needs-Faster-Pictures.", "portal-needs-faster-pictures"),
     ("Sure! I'd call it that", None),
     ("three-word-name", None),
+    ("chat-names-get-longer-and-smarter", "chat-names-get-longer-and-smarter"),
+    ("pod-face-streams-smoothly-from-pc", "pod-face-streams-smoothly-from-pc"),
+    ("seven-words-is-one-too-many-here", None),
 ])
 def test_the_name_is_read_from_the_reply(reply, name):
     assert chat_names.from_reply(reply) == name
@@ -29,8 +32,9 @@ def test_the_name_is_read_from_the_reply(reply, name):
 def test_core_names_it_and_without_core_it_is_the_first_content_words():
     asked = []
     got = chat_names.name("The voice keys are a mess", lambda system, text: asked.append(text) or "voice-needs-simpler-modes")
-    assert got == "voice-needs-simpler-modes" and asked[0].endswith("/no_think") and "noun-verb-adjective-noun" in chat_names.SYSTEM
+    assert got == "voice-needs-simpler-modes" and asked[0].endswith("/no_think") and "noun-verb-adjective-noun" in chat_names.SYSTEM and "six" in chat_names.SYSTEM
     assert chat_names.name("The voice keys are a mess", lambda s, t: 1 / 0) == "voice-keys-mess-chat"
+    assert chat_names.fallback("Please make the portal chat names longer and smarter for phones") == "portal-chat-names-longer-smarter"
     assert chat_names.name("hi", lambda s, t: "nope") == "chat-chat-chat-chat"
     assert chat_names.valid(chat_names.fallback("Can you make me a picture of a red barn at dusk?"))
 
