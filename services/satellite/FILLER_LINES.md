@@ -1,6 +1,6 @@
 # Skippy's filler quips (the text)
 
-These are recorded in his voice by `tools/make_filler_bank.py` into `state/filler/` and played by the hub while a slow answer is worked out (`services/satellite/filler.py`). Edit `LINES` in that file, then re-run the tool with `--force` for lines you changed.
+These are recorded in his voice by `tools/make_filler_bank.py` into `state/filler/` and played by the hub (`services/satellite/filler.py`): `thinking`/`performance`/`long` while a slow answer is worked out, `goodbye` when he is thanked or told goodbye. Edit `LINES` in that file, then re-run the tool with `--force` for lines you changed.
 
 ## thinking (10)
 
@@ -22,6 +22,13 @@ These are recorded in his voice by `tools/make_filler_bank.py` into `state/fille
 3. Fine. Prepare to be moved. Or at least mildly impressed.
 4. Request noted. Genius is warming up.
 5. A commission! Lucky you. Hold still.
+
+## goodbye (4)
+
+1. You are welcome, monkey. Try to contain your gratitude.
+2. Anytime. Well, not anytime. But just now, yes.
+3. Off I go. Do not break anything while I am gone.
+4. Farewell. I will be here, being magnificent.
 
 ## long (4)
 

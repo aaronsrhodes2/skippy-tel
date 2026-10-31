@@ -35,6 +35,12 @@ LINES = {
         "Request noted. Genius is warming up.",
         "A commission! Lucky you. Hold still.",
     ],
+    "goodbye": [
+        "You are welcome, monkey. Try to contain your gratitude.",
+        "Anytime. Well, not anytime. But just now, yes.",
+        "Off I go. Do not break anything while I am gone.",
+        "Farewell. I will be here, being magnificent.",
+    ],
     "long": [
         "Still here. Still magnificent. Still thinking.",
         "Patience is a virtue you monkeys can barely spell.",

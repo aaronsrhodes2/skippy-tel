@@ -209,8 +209,18 @@ class EsphomeLink:
         self._event(self.E.VOICE_ASSISTANT_INTENT_START)
         self.stage = "intent"
 
+    async def idle_face(self) -> None:
+        """Put his resting face back (a goodbye or a stop ends the conversation without any answer, so no event ever tells the box it is over)."""
+        face = next((x for x in self.services if x.name == "face"), None)
+        if face is not None:
+            try:
+                await self.client.execute_service(face, {"state": "idle"})
+            except Exception as e:                                  # noqa: BLE001
+                self.log(f"[{self.room.name}] (face: {type(e).__name__})")
+
     async def released(self) -> None:
         """Nothing (more) to say: end the turn; the box starts listening for its name again by itself (start_continuous)."""
+        await self.idle_face()
         if self.run_live and self.stage != "wake":
             # The box keeps the last turn's continue_conversation: say 0, or after a "goodbye" it would start its next turn without the name
             self._event(self.E.VOICE_ASSISTANT_INTENT_END, {"conversation_id": "", "continue_conversation": "0", "speech": ""})

@@ -254,6 +254,7 @@ class Room:
         await self.link.heard(command)                          # also tells a self-waking satellite to stop streaming
         if is_goodbye(command) or is_stop(command):
             self._resume(IDLE)
+            await self._sign_off(command)
             await self.link.released()
             return
         self.log(f"[{self.name}] heard: {command}")
@@ -270,6 +271,19 @@ class Room:
             self._resume(FOLLOWUP, self.followup_ms)            # like Alexa: a few seconds to answer back without the name
         else:
             self._resume(IDLE)
+
+    async def _sign_off(self, command: str) -> None:
+        """A short pre-recorded line when he is thanked or told goodbye (not for a plain stop or cancel)."""
+        import re                                               # noqa: PLC0415
+        if self.filler is None or not re.search(r"thank|bye|done|later", command, re.I):
+            return
+        quip = self.filler.pick("goodbye")
+        if quip is not None:
+            text, mp3 = quip
+            self.log(f"[{self.name}] (sign-off: {text})")
+            async with self.voice:
+                await self.link.show(text)
+                await self.link.announce(text, ("mp3", mp3))
 
     async def _cover_the_wait(self, work, command: str) -> None:
         """While the answer is worked out, say a pre-recorded quip as soon as it is clearly not going to be instant (never for a quick home command), and one more
