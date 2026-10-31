@@ -77,6 +77,8 @@ services:
       - MENTAT_ROUTER_MODEL=${MENTAT_ROUTER_MODEL-mentat-router-v31-4b}   # the trained router stage in /ask (mentat/router_stage.py), resident; empty = off
       - MENTAT_ROUTER_FALLBACK_MODEL=${MENTAT_ROUTER_FALLBACK_MODEL-qwen3-8b-stock}   # asked (with the tool index) only when the router misses: slot router-stock; empty = off
       - MENTAT_WORD_MODEL=${MENTAT_WORD_MODEL-qwen3-8b-stock}   # the last stop before a plain decline: reads a word problem's own numbers into one expression for evaluate_quantity (mentat/word_stage.py); slot router-stock; empty = off
+      - MENTAT_RESEARCH_SEARCH_URL=${MENTAT_RESEARCH_SEARCH_URL-http://searxng:8080}   # concept questions and the last stop before a decline are researched through the self-hosted SearXNG and explained with citations (mentat/research_stage.py); empty = off
+      - MENTAT_RESEARCH_MODEL=${MENTAT_RESEARCH_MODEL-skippy-chat}   # the chat slot (Qwen3.6-35B-A3B): it names the concept to search for and words the results, nothing else; the 8B stock model searched for the wrong idea on the one-way-speed question (2026-10-31)
       - MENTAT_CASCADE=before   # the benchmark's deterministic cascade ahead of the router (mentat/cascade_stage.py); empty = off
       - MENTAT_CASCADE_OFF=math   # its maths regexes took 19 right router answers (replay 2026-10-27: physics 108->132, maths 317 kept, adversarial 1->8 of 18)
       - MENTAT_CALL_TIMEOUT=90

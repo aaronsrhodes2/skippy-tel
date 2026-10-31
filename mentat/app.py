@@ -51,6 +51,7 @@ from mcp.types import LATEST_PROTOCOL_VERSION
 import cascade_stage
 import ready as ready_mod
 import research
+import research_stage
 import position_stage
 import fold_stage
 import router_stage
@@ -194,6 +195,15 @@ def _ask(question: str, given: dict | None = None) -> dict:
         hit = fold_stage.answer(question, call=_call, miss=miss)
         if hit is not None:
             return hit
+    if research_stage.enabled() and USE_LLM and not given and research_stage.is_conceptual(question):
+        # A yes/no or why/how-does question that states no number and asks for no quantity is a concept, not a calculation: researched and cited
+        # (research_stage.py), ahead of the cascade and the router, because the router answered one with the nearest tool's number (2026-10-31, one-way light speed).
+        # A miss (search down, no answer in the results, a number not in a source) falls through to the stages below, exactly as before.
+        research_miss: dict = {}
+        hit = research_stage.answer(question, ollama_url=OLLAMA_URL, miss=research_miss)
+        if hit is not None:
+            return hit
+        miss["research"] = research_miss
     if cascade_stage.enabled() and cascade_stage.MODE == "before" and not given:
         # Opt-in (MENTAT_CASCADE=before): the benchmark's deterministic cascade ahead of the router, as the harness measured it (140 vs the
         # router's 109 on the 150). A miss falls to the router with its reason in inputs.router_miss["cascade"].
@@ -225,6 +235,15 @@ def _ask(question: str, given: dict | None = None) -> dict:
                 hit["inputs"]["router_miss"] = miss
             return hit
         miss["word_problem"] = word_miss
+    if research_stage.enabled() and research_stage.LAST_STOP and USE_LLM and not given and _unanswered(result) and "research" not in miss:
+        # Nothing above answered: before declining, research it (the Captain, 2026-10-31). The same rules as the gate: cited, no number that is not in a source.
+        research_miss = {}
+        hit = research_stage.answer(question, ollama_url=OLLAMA_URL, miss=research_miss)
+        if hit is not None:
+            if miss:
+                hit["inputs"]["router_miss"] = miss
+            return hit
+        miss["research"] = research_miss
     _decline_plainly(question, result)
     if miss and isinstance(result.get("inputs"), dict):
         result["inputs"]["router_miss"] = miss
