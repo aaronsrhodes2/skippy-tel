@@ -577,6 +577,7 @@ interval:
           } else {                                                     // idle: looks around now and then
             if (now > glance_at) { gx = ((random_uint32() % 100) / 50.0f - 1) * 0.6f; gy = ((random_uint32() % 100) / 50.0f - 1) * 0.3f; glance_at = now + 1500 + random_uint32() % 3500; }
             t_lx = gx; t_ly = gy;
+            if (id(in_session)) { t_eo = 1.12f; t_bh = 4; t_sm = 4; }     // a conversation is open: a little more alert
           }
           if (now > blink_at) { blink_at = now + 2500 + random_uint32() % 3500; ph += 0; id(breath) = id(breath); bl = 0; }
           float blinking = (now + 150 > blink_at && now < blink_at) ? 0.1f : 1.0f;   // a blink: the 150 ms before each stamp
@@ -651,35 +652,6 @@ interval:
           th[0].x = clampi(cx - mw * 0.7f); th[0].y = clampi(my - mu * 0.35f); th[1].x = clampi(cx + mw * 0.7f); th[1].y = th[0].y;
           put(id(teeth)->obj, th, 2);
           lv_obj_set_style_line_opa(id(teeth)->obj, (lv_opa_t) (teethv > 0.5f && mu + ml > 6 ? 150 : 0), LV_PART_MAIN);
-  - interval: 500ms                       # the swirling background (it redraws the whole screen, so slowly: the face has the frame rate): three neon spirals drifting, quicker and brighter the busier he is
-    then:
-      - lambda: |-
-          auto put = [](lv_obj_t *o, lv_point_precise_t *p, int n) {     // a line widget's box runs from its own corner to its last point: anchor it at its points, or every change redraws a huge rectangle
-            int mx = 479, my = 479;
-            for (int i = 0; i < n; i++) { if (p[i].x < mx) mx = p[i].x; if (p[i].y < my) my = p[i].y; }
-            for (int i = 0; i < n; i++) { p[i].x -= mx; p[i].y -= my; }
-            lv_line_set_points(o, p, n); lv_obj_set_pos(o, mx, my);
-          };
-          if (id(talking)) return;                      // while he talks the face gets every frame: the background holds still
-          static float t = 0; static lv_point_precise_t pts[3][40];
-          id(energy) += (id(energy_target) - id(energy)) * 0.1f;
-          float e = id(energy);
-          t += 0.12f * (0.5f + 0.8f * e) * 3.3f;
-          lv_obj_t *o[3] = {id(sp_a)->obj, id(sp_b)->obj, id(sp_c)->obj};
-          for (int k = 0; k < 3; k++) {
-            float f1 = 0.05f + 0.03f * k, f2 = 0.07f + 0.02f * k;
-            float cx = 240 + sinf(t * f1 * 3.0f + k * 2.1f) * 120 + sinf(t * f2 * 7.0f + k) * 40;
-            float cy = 240 + sinf(t * f2 * 3.0f + k * 1.3f) * 120 + sinf(t * f1 * 6.0f + k * 0.7f) * 40;
-            float R = 150 + 40 * sinf(t * 0.2f + k * 1.7f), spin = (k % 2) ? -0.5f : 0.4f;
-            for (int i = 0; i < 40; i++) {
-              float u = i / 39.0f, th = u * 3.8f * 6.2832f;
-              float r = R * powf(u, 0.82f) * (1 + 0.1f * sinf(th * 3 + t * 1.2f)), a = th + t * spin;
-              int x = (int) (cx + r * cosf(a)), y = (int) (cy + r * sinf(a) * 0.85f);
-              pts[k][i].x = x < 0 ? 0 : (x > 479 ? 479 : x); pts[k][i].y = y < 0 ? 0 : (y > 479 ? 479 : y);
-            }
-            put(o[k], pts[k], 40);
-            lv_obj_set_style_line_opa(o[k], (lv_opa_t) (70 + 60 * e), LV_PART_MAIN);
-          }
   - interval: 15s                         # the screen dims when nothing has happened for two minutes
     then:
       - if:
@@ -779,36 +751,6 @@ lvgl:
       scrollbar_mode: "OFF"
       scrollable: false
       widgets:
-        - line:
-            id: sp_a
-            x: 0
-            y: 0
-            points:
-              - 0, 0
-              - 2, 2
-            line_width: 2
-            line_color: 0xb05cff
-            line_opa: 40%
-        - line:
-            id: sp_b
-            x: 0
-            y: 0
-            points:
-              - 0, 0
-              - 2, 2
-            line_width: 2
-            line_color: 0xe070ff
-            line_opa: 40%
-        - line:
-            id: sp_c
-            x: 0
-            y: 0
-            points:
-              - 0, 0
-              - 2, 2
-            line_width: 2
-            line_color: 0x9a55ff
-            line_opa: 40%
         - obj:
             id: nim_t1
             x: 0
@@ -1164,6 +1106,7 @@ lvgl:
             scrollable: false
         - label:
             id: status_label
+            hidden: true                       # his face says it: no words
             align: TOP_MID
             y: 20
             text: ""
