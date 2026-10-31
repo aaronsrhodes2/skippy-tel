@@ -14,7 +14,7 @@ clipped the first word while it woke. Now:
 
     SATELLITE_OUT=office=pod+hdmi+bt            which outputs a room uses (speaker_out.parse_outputs)
     SATELLITE_OUT_HDMI / SATELLITE_OUT_BT       a part of each Windows output's name
-    SATELLITE_OUT_DELAYS=hdmi=0.5,bt=0.4        each output's delay, to line up with the pod
+    SATELLITE_OUT_DELAYS=hdmi=0.5,bt=0.4        each output's starting delay; sync.py then measures and corrects it from the PC's microphone
 
 Thread-safe; the mixer runs in its own thread. `stream_factory` and `find` are the seams the tests replace.
 """
@@ -51,6 +51,9 @@ class Sink:
         self.buffered = 0
         self.lock = threading.Lock()
         self._partial = None
+        self.pushed = 0                                            # frames pushed since it opened
+        self._loud_at = 0                                          # `pushed` just after the last block that was not silence
+        self.latency = 0.0                                         # the stream's own output latency (PortAudio's figure), seconds
 
     @property
     def open(self) -> bool:
@@ -70,8 +73,10 @@ class Sink:
             pad = int(RATE * self.delay_s)
             self.fifo.append(np.zeros((pad, 2), dtype="float32"))
             self.buffered, self._partial = pad, None
+            self.pushed = self._loud_at = 0
         try:
             self.stream = self.factory(dev[0], self._callback)
+            self.latency = float(getattr(self.stream, "latency", 0.0) or 0.0)
         except Exception as e:                                     # noqa: BLE001
             self.log(f"(router: output {self.kind} {dev[1]!r} would not open: {type(e).__name__}: {str(e)[:80]})")
             self.stream = None
@@ -90,11 +95,37 @@ class Sink:
                 pass
 
     def push(self, block) -> None:
+        loud = bool(block.any())
         with self.lock:
             self.fifo.append(block)
             self.buffered += len(block)
+            self.pushed += len(block)
+            if loud:
+                self._loud_at = self.pushed
             while self.buffered > int(RATE * (self.delay_s + SLACK_S)) and len(self.fifo) > 1:
                 self.buffered -= len(self.fifo.popleft())      # its clock runs slower than the mixer's: catch up by a block
+
+    @property
+    def idle(self) -> bool:
+        """Only silence is queued (the last sound already went out to the device)."""
+        with self.lock:
+            return self.pushed - self._loud_at >= self.buffered
+
+    def realign(self) -> float:
+        """Just before a voice clip: put exactly `delay_s` of silence in front of it, so the device's clock running a little fast or slow
+        against the mixer's (the FIFO drifting anywhere from empty to delay + SLACK_S) never shifts where Skippy lands against the pod.
+        Only while idle (the queue is silence): a sound is never cut. Returns the queue's length in seconds before the clip."""
+        np = _np()
+        with self.lock:
+            if self.pushed - self._loud_at < self.buffered:
+                return self.buffered / RATE
+            pad = int(RATE * self.delay_s)
+            self.fifo.clear()
+            self._partial = None
+            if pad:
+                self.fifo.append(np.zeros((pad, 2), dtype="float32"))
+            self.buffered = pad
+            return pad / RATE
 
     def take(self, frames: int):
         """`frames` frames from the FIFO, padded with silence when it runs dry."""
@@ -209,6 +240,7 @@ class Play:
     def __init__(self, pid: int, source, layer: str, targets: set[str], gain: float, created: float = 0.0):
         self.id, self.source, self.layer, self.targets, self.gain = pid, source, layer, set(targets), gain
         self.created, self.started = created, False
+        self.marks: dict[str, tuple[float, float, float]] = {}    # kind -> (clock when its first block went in, seconds queued ahead of it, stream latency)
         self.finished = threading.Event()
 
 
@@ -228,6 +260,7 @@ class Router:
         self._stop = threading.Event()
         self._last_scan = -1e9
         self.autostart = autostart
+        self.calibrator = None                                    # sync.Calibrator, set by shared(): measures each voice clip against the pod
 
     # ── what the hub calls ────────────────────────────────────────────────────────────────────────────────────────────────────
     def kinds(self) -> list[str]:
@@ -285,9 +318,13 @@ class Router:
                 nxt = self.clock()                                # fell far behind (the PC slept): start the clock again
 
     def scan(self) -> None:
-        """Open the outputs that aren't open. A missing device makes PortAudio read the device list again, only while nothing plays."""
+        """Open the outputs that aren't open. A missing device makes PortAudio read the device list again, only while nothing plays.
+        The sync microphone (sync.MicRing) is opened here too, after any re-read: re-reading closes every stream, its included."""
+        mic = getattr(self.calibrator, "mic", None)
         missing = [s for s in self.sinks.values() if not s.open]
         if not missing:
+            if mic is not None and mic.stream is None:
+                mic.start()
             return
         with self.lock:
             quiet = not self.plays
@@ -300,6 +337,9 @@ class Router:
                 pass
             for s in self.sinks.values():
                 s.try_open()
+            if mic is not None:
+                mic.stream = None                                 # the re-read closed it
+                mic.start()
         else:
             for s in missing:
                 s.try_open()
@@ -330,6 +370,11 @@ class Router:
                     self.stop(p)
                     continue
                 p.started = True
+                if p.layer == "voice":                            # line it up: exactly its delay of silence ahead of it (sync.py measures the rest)
+                    for k in p.targets:
+                        if k in mixes:
+                            sink = self.sinks[k]
+                            p.marks[k] = (self.clock(), sink.realign(), sink.latency)
             chunk = p.source.read(BLOCK)
             if len(chunk):
                 chunk = chunk * (p.gain * self.layer_gain.get(p.layer, 1.0))
@@ -379,7 +424,10 @@ def shared(env: dict, log=print) -> Router:
             for part in (env.get("SATELLITE_OUT") or "").split(";"):
                 if "=" in part:
                     used |= {k.strip() for k in part.split("=", 1)[1].split("+")}
+            import sync                                           # noqa: PLC0415
+            delays.update(sync.saved_delays())                    # what the last calibration settled on beats the vault's starting guess
             _ROUTER = Router([(k, parts[k], delays.get(k, 0.0)) for k in parts if k in used], log=log)
+            _ROUTER.calibrator = sync.for_router(_ROUTER, env, log)   # the PC's microphone hears the pod and these outputs: their offset, each reply
             if _ROUTER.sinks:
                 _ROUTER.start()                                   # open the outputs now: PortAudio's first device scan takes seconds
         return _ROUTER

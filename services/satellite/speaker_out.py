@@ -187,6 +187,9 @@ class RoutedOut:
             p = self.router.play(router_mod.ClipSource(pcm), layer="voice", targets=self.kinds)
             await asyncio.to_thread(p.finished.wait, len(pcm) / RATE + 5)
             await asyncio.sleep(max((self.router.sinks[k].delay_s for k in self.kinds if k in self.router.sinks), default=0))
+            cal = getattr(self.router, "calibrator", None)
+            if cal is not None and p.marks:                        # how far each copy landed from the pod's (sync.py), in the background
+                asyncio.ensure_future(asyncio.to_thread(cal.measure, pcm, dict(p.marks)))
         finally:
             if ducker:
                 await asyncio.to_thread(ducker.restore)
