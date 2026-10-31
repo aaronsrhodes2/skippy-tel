@@ -373,7 +373,7 @@ class RemoteFaceStreamer:
 
 
 def _child_main(host: str, port: int, name: str, rate: float) -> None:
-    s = FaceStreamer(host, log=lambda m: print(m, flush=True), name=name, port=port, rate=rate)
+    s = FaceStreamer(host, log=lambda m: print(time.strftime("%H:%M:%S ") + m, flush=True), name=name, port=port, rate=rate)
     s.start()
     for line in sys.stdin:
         try:
