@@ -289,6 +289,7 @@ class Daily:
             elif self.mono() - self.arrived_at > PRESENCE_WAIT_S:
                 self.arrived_at = None
                 self.log(f"[{room.name}] (coming home: nobody heard in the room; the talking part is skipped)")
+        await self._maybe_nightly(room, lt, today)
         when = self.morning_time(today)
         if when and (lt.tm_hour, lt.tm_min) >= hm_of(when) and lt.tm_hour < 11 and self.state.get("last_morning") != today and not self.busy:
             self.state["last_morning"] = today
@@ -298,6 +299,30 @@ class Daily:
             else:
                 self.log(f"[{room.name}] (morning routine: he isn't home; skipped)")
                 self._record("routine", routine="morning", outcome="away")
+
+    async def _maybe_nightly(self, room, lt, today: str) -> None:
+        """The night shift (tools/nightly.py) once a night, from SKIPPY_NIGHTLY_AT until 04:30, when the house has been quiet 20 minutes."""
+        at = hm_of(self.env.get("SKIPPY_NIGHTLY_AT", "01:30"))
+        if not (at <= (lt.tm_hour, lt.tm_min) < (4, 30)) or self.state.get("last_nightly") == today or self.busy:
+            return
+        last = max(getattr(room, "_turn_at", None) or 0.0, getattr(room, "_voice_at", None) or 0.0)
+        if last and self.mono() - last < 1200:
+            return
+        self.state["last_nightly"] = today
+        self._save()
+        self.night_shift()
+
+    def night_shift(self) -> None:
+        import subprocess                                             # noqa: PLC0415
+        import sys                                                    # noqa: PLC0415
+        root = Path(__file__).resolve().parents[2]
+        (root / "state" / "ledger").mkdir(parents=True, exist_ok=True)
+        out = open(root / "state" / "ledger" / "nightly.log", "a", encoding="utf-8")     # noqa: SIM115 — the child keeps it
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)   # survives a hub restart (it may do one)
+        subprocess.Popen([sys.executable, "-u", str(root / "tools" / "nightly.py")], cwd=str(root), stdout=out, stderr=subprocess.STDOUT,
+                         creationflags=flags, env={**os.environ, "PYTHONUTF8": "1"})
+        self.log("(night shift started: tools/nightly.py)")
+        self._record("routine", routine="nightly", outcome="started")
 
     def morning_time(self, date: str) -> str:
         over = self.state.get("morning_override") or {}
@@ -781,8 +806,15 @@ class Daily:
                                 "if the material has them.", material, 300)
 
     async def overnight(self) -> str | None:
+        """The night shift's one line (tools/nightly.py writes it), if it is from last night."""
         fn = self.extras.get("overnight")
-        return await fn() if fn is not None else None
+        if fn is not None:
+            return await fn()
+        try:
+            got = json.loads((self.dir / "overnight.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return got.get("line") if self.clock() - float(got.get("at") or 0) < 18 * 3600 else None
 
     # ── the routines ──
     def morning_steps(self, room, **_) -> list[Step]:
@@ -865,7 +897,7 @@ class Daily:
             if stereo is None:
                 return None
             n = await stereo.shuffle()
-            return said if n else None
+            return said if n else "I wanted to play your music, but Bilby's library isn't answering."
         return go
 
 

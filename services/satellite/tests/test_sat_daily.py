@@ -451,3 +451,24 @@ def test_an_early_first_event_moves_tomorrows_morning(tmp_path):
         return stamp("2026-11-03", "10:00")
     d.extras["first_tomorrow"] = late
     assert asyncio.run(d.plan_tomorrow()) is None and d.morning_time("2026-11-03") == "07:10"
+
+
+def test_the_night_shift_starts_once_when_the_house_is_quiet_and_the_morning_reads_its_line(tmp_path):
+    now = [stamp("2026-11-03", "01:40")]
+    d, room, link, *_ = make(tmp_path, now)
+    started = []
+    d.night_shift = lambda: started.append(1)
+    room._turn_at = time.monotonic() - 60                               # he was still talking a minute ago
+
+    async def go():
+        await d.tick(room)
+        assert started == []
+        room._turn_at = time.monotonic() - 3600
+        await d.tick(room)
+        await d.tick(room)
+    asyncio.run(go())
+    assert started == [1]
+    (tmp_path / "daily" / "overnight.json").write_text(json.dumps({"at": now[0], "line": "Overnight: all clean."}), encoding="utf-8")
+    assert asyncio.run(d.overnight()) == "Overnight: all clean."
+    now[0] += 2 * 86400
+    assert asyncio.run(d.overnight()) is None
