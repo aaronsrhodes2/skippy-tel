@@ -7,26 +7,12 @@ python -c "import openwakeword.utils as u; u.download_models(model_names=['__fea
 python /kit/data.py
 python "$TRAIN" --training_config /kit/skippy.yml --generate_clips
 
-# The Captain's own voice (record.py), mixed in with the 50,000 synthetic voices: each real clip 20 times (augmentation makes every copy different)
-POS=/work/train/skippy/positive_train
-if compgen -G "/work/real/positive/*.wav" > /dev/null; then
-  n=0
-  for f in /work/real/positive/*.wav; do
-    for i in $(seq 1 20); do cp "$f" "$POS/real_${i}_$(basename "$f")"; done
-    n=$((n + 1))
-  done
-  echo "mixed in $n of his own recordings"
-fi
-
-# and what must NOT wake it, in his voice through the pod (Skipper, skip it, Computer ...): trains as adversarial negatives
-NEG=/work/train/skippy/negative_train
-if compgen -G "/work/real/negative/*.wav" > /dev/null; then
-  mkdir -p "$NEG"
-  for f in /work/real/negative/*.wav; do
-    for i in $(seq 1 20); do cp "$f" "$NEG/real_${i}_$(basename "$f")"; done
-  done
-  echo "mixed in his own negatives"
-fi
+# The Captain's own voice through the pod (wakerec.py), mixed in with the 50,000 synthetic voices: each real clip 20 times at x2..x5 (the hub gains the pod's
+# quiet microphone x3 before the model hears it), and augmentation makes every copy different. His negatives (Skipper, skip it, Computer ...) the same.
+rm -f /work/train/skippy/positive_features_train.npy /work/train/skippy/negative_features_train.npy   # recomputed whenever the real clips change
+find /work/train/skippy/positive_train /work/train/skippy/negative_train -name 'real_*' -delete 2>/dev/null || true
+if compgen -G "/work/real/positive/*.wav" > /dev/null; then python /kit/mix_real.py /work/real/positive /work/train/skippy/positive_train; fi
+if compgen -G "/work/real/negative/*.wav" > /dev/null; then python /kit/mix_real.py /work/real/negative /work/train/skippy/negative_train; fi
 
 python "$TRAIN" --training_config /kit/skippy.yml --augment_clips
 python "$TRAIN" --training_config /kit/skippy.yml --train_model

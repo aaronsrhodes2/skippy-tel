@@ -72,17 +72,17 @@ class Recorder:
             win, self.win = self.win, None
             self.got.set_result(win)
 
-    def trim(self, win):
+    def trim(self, win, need: int = 3):
         """The phrase inside a window of blocks, or None when only room noise is in it. The pod's noise floor drifts, so the bar is a multiple of this window's own
         quiet level (its 20th-percentile 100 ms), never under 0.003; a phrase is at least 300 ms above it. Returns (samples, info)."""
         lv = [rms([x for b in win[i:i + 2] for x in b]) for i in range(0, len(win) - 1, 2)]       # 100 ms levels
         noise = sorted(lv)[len(lv) // 5]
         bar = max(noise * 3.0, 0.003)                           # the pod's own noise is ~0.001-0.008 and his far, quiet voice only ~10x that
         info = {"noise": round(noise, 4), "bar": round(bar, 4), "peak": round(max(lv), 4)}
-        hot = [i for i in range(len(lv) - 2) if all(v > bar for v in lv[i:i + 3])]               # three 100 ms levels in a row
+        hot = [i for i in range(len(lv) - need + 1) if all(v > bar for v in lv[i:i + need])]     # `need` 100 ms levels in a row
         if not hot:
             return None, info
-        first, last = hot[0] * 2, (hot[-1] + 3) * 2
+        first, last = hot[0] * 2, (hot[-1] + need) * 2
         i0, i1 = max(0, first - LEAD_BLOCKS), min(len(win), last + TAIL_BLOCKS)
         return [x for b in win[i0:i1] for x in b], info
 
@@ -134,6 +134,8 @@ def salvage(root: Path, floor: float = 0.007, log=print) -> int:
         win = [samples[i:i + 800] for i in range(0, len(samples) - 799, 800)]
         rec = Recorder(kind, 0, root, None, floor=floor)
         clip, info = rec.trim(win)
+        if clip is None:
+            clip, info = rec.trim(win, need=2)                  # a quick, quiet "Skippy" is only ~200 ms above the noise
         if clip is None:
             log(f"{path.name}: still no phrase {info}")
             continue
