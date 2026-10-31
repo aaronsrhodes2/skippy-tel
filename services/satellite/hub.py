@@ -419,8 +419,10 @@ class Room:
         if any(getattr(o, "talking_until", 0) > now for o in self.pc_outs):
             return
         heard, turn = self._voice_at, self._turn_at
+        spoke = getattr(self, "_last_said", ("", None))[1]      # Skippy's own last words, a routine's or a timer's included (2026-10-31: a starter 13 s after the morning routine)
         around = (heard is not None and now - heard < PRESENT_S) or (turn is not None and now - turn < PRESENT_S)
-        hushed = (heard is None or now - heard > HUSH_S) and (turn is None or now - turn > AFTER_TURN_S)
+        hushed = ((heard is None or now - heard > HUSH_S) and (turn is None or now - turn > AFTER_TURN_S)
+                  and (spoke is None or now - spoke > AFTER_TURN_S))
         if not (around and hushed):
             return
         try:
@@ -429,6 +431,12 @@ class Room:
             self.log(f"[{self.name}] (starters: {type(e).__name__}: {e})")
             return
         if cand is None or self.mode != IDLE or self.buf is not None:
+            return
+        self.mode = BUSY
+        voice = await self._voice(cand["opener"])               # only in his own voice: with the gate down (2026-10-31) it went out unheard and spent the slot
+        if voice is None or voice[0] != "mp3" or self.mode != BUSY:
+            self.log(f"[{self.name}] (starter held back: Skippy's voice is not answering)")
+            self._resume(IDLE)
             return
         self.starters.mark_offered(cand, self.name)
         from starters import note_of                            # noqa: PLC0415
@@ -440,9 +448,8 @@ class Room:
         self.pending_starter = cand
         self._record("starter", starter=cand["id"], topic=cand.get("topic"), text=cand["opener"])
         self.log(f"[{self.name}] starter ({cand.get('topic')}): {cand['opener'][:120]}")
-        self.mode = BUSY
         try:
-            await self.say(cand["opener"], announce=True)
+            await self.say(cand["opener"], announce=True, voice=voice)
         finally:
             self._resume(FOLLOWUP, self.followup_ms)            # he can answer without the name
 
@@ -571,7 +578,7 @@ class Room:
         if show is not None:
             show(on)
 
-    async def say(self, text: str, follow_up: bool = False, announce: bool = False, silent: bool = False, typed: bool = False) -> None:
+    async def say(self, text: str, follow_up: bool = False, announce: bool = False, silent: bool = False, typed: bool = False, voice=None) -> None:
         """Skippy's voice in this room: the gate's local TTS (a summary when long), else the machine's own voice. Waits until it has played."""
         said = text
         if looks_technical(text) or len(text) > self.summarize_over:       # only technical or very long output is boiled down: his voice and jokes are spoken whole
@@ -585,7 +592,7 @@ class Room:
             return                                              # "speak aloud" off: the answer only appears in the thread
         self._last_said = (said, time.monotonic())              # an echo of it is not the Captain talking (is_echo)
         async with self.voice:
-            voice = await self._voice(said)
+            voice = voice if voice is not None and said == text else await self._voice(said)    # a clip made already (a starter) is used as it is
             await self.link.show(said)
             self._also(voice)
             for media in (self.book, self.stereo):

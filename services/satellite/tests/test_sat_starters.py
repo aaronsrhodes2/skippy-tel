@@ -192,7 +192,7 @@ def test_not_now_backs_off_and_yes_goes_to_the_brain(tmp_path):
     now[0] = stamp("2026-11-01", "11:00")
     room._starter_check = 0
     present(room, 300)
-    room._turn_at = None
+    room._turn_at, room._last_said = None, ("", None)                  # a day later: nothing said lately
     asyncio.run(room.maybe_start())
     asyncio.run(room.handle("yes"))
     assert brain.heard == ["yes. Tell me more about that."] and link.spoken[-1] == "More, monkey."
@@ -263,3 +263,23 @@ def test_his_own_words_heard_back_are_not_a_command(tmp_path):
     assert brain.heard == [] and room.mode == FOLLOWUP                  # the projector's late echo: ignored, still listening
     asyncio.run(room.handle("politics"))
     assert brain.heard == ["politics"]
+
+
+def test_held_back_when_his_voice_is_down_or_he_just_spoke(tmp_path):
+    now = [stamp("2026-10-31", "11:00")]
+    room, link, brain, s = room_with(tmp_path, now, [cand("a", now=now[0])])
+    present(room, 300)
+
+    class Down:
+        def tts(self, text): raise hub.GateError("the voice gate is not answering")
+        def summary(self, text): return text
+    room.gate, room.local_voice = Down(), None
+    asyncio.run(room.maybe_start())
+    assert link.spoken == [] and s.state()["offers"] == [] and room.mode == IDLE   # nothing spent
+    room.gate, room._starter_check = Gate(), 0
+    room._last_said = ("Good morning, Captain.", time.monotonic() - 20)             # a routine just spoke
+    asyncio.run(room.maybe_start())
+    assert link.spoken == []
+    room._last_said, room._starter_check = ("Good morning, Captain.", time.monotonic() - 400), 0
+    asyncio.run(room.maybe_start())
+    assert link.spoken == [cand("a")["opener"]]
