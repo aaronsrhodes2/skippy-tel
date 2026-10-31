@@ -97,7 +97,7 @@ class FakePlayer:
     def pairing(self):
         return None if self.logged_in else {"url": "https://spotify.com/pair?code=ABC123", "code": "ABC123", "expires_at": ""}
 
-    def play(self, uri, pos_ms=0):
+    def play(self, uri, pos_ms=0, then=None):
         self.played.append((uri, pos_ms))
         return 200
 

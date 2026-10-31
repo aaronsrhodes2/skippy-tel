@@ -101,6 +101,10 @@ services:
     container_name: skippytel-spotify
     restart: unless-stopped
     env_file: G:/My Drive/vault/.env           # SPOTIFY_CLIENT_ID, SPOTIFY_REFRESH_TOKEN (signin.py writes them), SKIPPY_HOME_TOKEN
+    environment:
+      # The speaker is the official Spotify app on skippy-pc (Spotify refuses go-librespot the audio key on his account): its name in his devices,
+      # its output set to "CABLE Input" in Windows' volume mixer, and the hub captures "CABLE Output". Empty = go-librespot again.
+      SPOTIFY_DESKTOP_DEVICE: SPYDER-MEDIA
     volumes:
       - ./state/spotify:/state                 # the current refresh token (Spotify hands a new one on refresh) and the speaker's login
     ports:

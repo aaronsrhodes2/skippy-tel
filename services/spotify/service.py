@@ -14,7 +14,7 @@ Three jobs in one container, beside go-librespot (github.com/devgianlu/go-libres
 Endpoints (JSON; 127.0.0.1 only on the host, see docker-compose.override.yml):
     GET  /health                    the readiness contract (ready.py): web sign-in, player login, the pairing code while it waits for one
     GET  /now                       what the player is doing
-    POST /play {uri, pos_ms}        POST /pause   POST /resume
+    POST /play {uri, pos_ms, then}  (then: more tracks straight after it)    POST /pause   POST /resume
     GET  /tracks?what=&n=           tracks for a spoken request (an artist's, else a search)
     GET  /search?q=&type=&n=        GET /playlists   GET /playlist?name=|id=   GET /liked?n=
     POST /playlist/add {playlist, uris}             POST /save {uris}
@@ -332,14 +332,109 @@ class Player:
         code, got = self._req("GET", "/auth/code")
         return {"url": got.get("url", ""), "code": got.get("code", ""), "expires_at": got.get("expires_at", "")} if code == 200 else None
 
-    def play(self, uri: str, pos_ms: int = 0) -> int:
-        return self._req("POST", "/player/play", {"uri": uri, "position": int(pos_ms)} if pos_ms else {"uri": uri})[0]
+    def play(self, uri: str, pos_ms: int = 0, then: list[str] | None = None) -> int:
+        return self._req("POST", "/player/play", {"uri": uri, "position": int(pos_ms)} if pos_ms else {"uri": uri})[0]   # one at a time here
 
     def pause(self) -> int:
         return self._req("POST", "/player/pause")[0]
 
     def resume(self) -> int:
         return self._req("POST", "/player/resume")[0]
+
+
+class DesktopPlayer:
+    """The official Spotify app on skippy-pc as the speaker (2026-10-31: Spotify refuses go-librespot the audio key on his account, its PlayPlay
+    DRM), driven through the Web API's player endpoints. Its sound goes to the virtual cable (the app's output set to "CABLE Input" in Windows'
+    volume mixer), and the hub captures "CABLE Output" into the router. Same face as Player: status(), pairing(), play(), pause(), resume()."""
+
+    def __init__(self, web: WebApi, device: str, clock=time.monotonic, cache_s: float = 1.0):
+        self.web, self.device, self.clock, self.cache_s = web, device, clock, cache_s
+        self._id: tuple[str, float] = ("", -1e9)
+        self._st: tuple[dict, float] = ({}, -1e9)
+        self._lock = threading.Lock()
+
+    def device_id(self) -> str:
+        """The app's Connect id (looked up again every minute: it changes when the app restarts)."""
+        if self._id[0] and self.clock() - self._id[1] < 60:
+            return self._id[0]
+        want = self.device.lower()
+        for d in self.web.call("GET", "/me/player/devices").get("devices") or []:
+            if (d.get("name") or "").lower() == want:
+                self._id = (d.get("id") or "", self.clock())
+                return self._id[0]
+        self._id = ("", self.clock())
+        return ""
+
+    def status(self) -> dict:
+        with self._lock:
+            if self.clock() - self._st[1] < self.cache_s:
+                return dict(self._st[0])
+        try:
+            dev = self.device_id()
+            if not dev:
+                st = {"logged_in": False, "error": f"the Spotify app on skippy-pc ({self.device}) is not running or not signed in"}
+            else:
+                got = self.web.call("GET", "/me/player")                    # {} (204) when nothing plays anywhere
+                here = (got.get("device") or {}).get("id") == dev
+                t = (got.get("item") or {}) if here else {}
+                playing = bool(here and got.get("is_playing") and t)
+                st = {"logged_in": True, "playing": playing, "paused": bool(here and t and not got.get("is_playing")),
+                      "stopped": not t, "buffering": False, "uri": t.get("uri", ""), "title": t.get("name", ""),
+                      "artist": ", ".join(a.get("name", "") for a in t.get("artists") or []), "album": (t.get("album") or {}).get("name", ""),
+                      "pos_ms": got.get("progress_ms") or 0 if here else 0, "ms": t.get("duration_ms") or 0, "origin": "", "device": self.device,
+                      "elsewhere": "" if here or not got.get("is_playing") else (got.get("device") or {}).get("name", "")}
+        except NotSignedIn as e:
+            st = {"logged_in": False, "error": str(e)}
+        except Exception as e:                                              # noqa: BLE001
+            st = {"logged_in": False, "error": f"{type(e).__name__}: {str(e)[:120]}"}
+        with self._lock:
+            self._st = (st, self.clock())
+        return dict(st)
+
+    def pairing(self) -> dict | None:
+        return None                                                         # the app signs itself in
+
+    def _put(self, path: str, body: dict | None = None) -> int:
+        dev = self.device_id()
+        if not dev:
+            return 404
+        try:
+            self.web.call("PUT", f"{path}{'&' if '?' in path else '?'}device_id={urllib.parse.quote(dev)}", body=body)
+        except Exception:                                                   # noqa: BLE001
+            return 502
+        with self._lock:
+            self._st = ({}, -1e9)                                           # the next status is read fresh
+        return 200
+
+    _albums: dict = {}
+
+    def play(self, uri: str, pos_ms: int = 0, then: list[str] | None = None) -> int:
+        """`uri` from `pos_ms`. The desktop app (1.306, measured 2026-10-31) starts nothing for a `uris` list ("Restriction violated" after), but
+        plays a context: so a track is played as its album from that track. The album going on afterwards is the hub's cue that the track ended
+        (it plays the next queue item, or pauses). `then` is not used here: the hub plays each Spotify item itself."""
+        body: dict = {"context_uri": uri}
+        if uri.startswith("spotify:track:"):
+            album = self._albums.get(uri)
+            if album is None:
+                try:
+                    album = (self.web.call("GET", f"/tracks/{uri.rsplit(':', 1)[1]}").get("album") or {}).get("uri") or ""
+                except Exception:                                           # noqa: BLE001
+                    album = ""
+                self._albums[uri] = album
+            body = {"context_uri": album, "offset": {"uri": uri}} if album else {"uris": [uri]}
+        if pos_ms:
+            body["position_ms"] = int(pos_ms)
+        code = self._put("/me/player/play", body)
+        if code == 200:
+            self._put("/me/player/repeat?state=off")                        # a track must end, not repeat
+            self._put("/me/player/shuffle?state=false")                     # and the album must go on in order (the hub's end-of-track cue)
+        return code
+
+    def pause(self) -> int:
+        return self._put("/me/player/pause")
+
+    def resume(self) -> int:
+        return self._put("/me/player/play")
 
 
 def librespot_config(name: str) -> str:
@@ -457,7 +552,8 @@ class Service:
         web_detail = self.web.error or ("" if self.web.signed_in else "not signed in (services/spotify/signin.py)")
         player_detail = "" if st.get("logged_in") else (f"pair it: {pair['url']} code {pair['code']}" if pair else (st.get("error") or "not logged in"))
         deps = {"web_api": {"ready": web_ok, "detail": web_detail}, "player": {"ready": bool(st.get("logged_in")), "detail": player_detail}}
-        return self.readiness.report(True, deps=deps, pair=pair, playing=bool(st.get("playing")), listening=bool(self.relay and self.relay.client))
+        return self.readiness.report(True, deps=deps, pair=pair, playing=bool(st.get("playing")), listening=bool(self.relay and self.relay.client),
+                                     player=type(self.player).__name__)
 
     def handle(self, method: str, path: str, query: dict, body: dict, auth: str = "") -> tuple[int, dict]:
         q = lambda k, d="": (query.get(k) or [d])[0]                     # noqa: E731
@@ -471,8 +567,9 @@ class Service:
                 uri = str(body.get("uri") or "")
                 if not re.fullmatch(r"spotify:(track|album|playlist|artist|episode):[A-Za-z0-9]{22}|spotify:user:[^:]+:collection", uri):
                     return 400, {"error": "uri must be a spotify: URI"}
+                then = [u for u in body.get("then") or [] if isinstance(u, str) and re.fullmatch(r"spotify:(track|episode):[A-Za-z0-9]{22}", u)][:99]
                 with self.readiness.job("play"):
-                    code = self.player.play(uri, int(body.get("pos_ms") or 0))
+                    code = self.player.play(uri, int(body.get("pos_ms") or 0), then)
                 return (200, {"ok": True}) if code == 200 else (502, {"error": f"the player said {code}"})
             if method == "POST" and path in ("/pause", "/resume"):
                 code = (self.player.pause if path == "/pause" else self.player.resume)()
@@ -560,12 +657,19 @@ def make_handler(service: Service):
 
 def main() -> None:
     web = WebApi(os.environ.get("SPOTIFY_CLIENT_ID", ""), os.environ.get("SPOTIFY_REFRESH_TOKEN", ""))
-    relay = Relay()
-    threading.Thread(target=relay.serve, daemon=True, name="relay").start()
-    time.sleep(0.5)                                                       # the FIFO exists before the player opens it
-    threading.Thread(target=run_librespot, args=(os.environ.get("SPOTIFY_DEVICE_NAME", "Skippy"),), daemon=True, name="librespot").start()
-    service = Service(web, Player(), relay, os.environ.get("SKIPPY_HOME_TOKEN", ""))
-    print(f"spotify: api on :{API_PORT}, web sign-in {'yes' if web.signed_in else 'NO (services/spotify/signin.py)'}", flush=True)
+    desktop = os.environ.get("SPOTIFY_DESKTOP_DEVICE", "")               # the official app's device name (his account refuses go-librespot)
+    relay = None
+    if desktop:
+        player = DesktopPlayer(web, desktop)
+    else:
+        relay = Relay()
+        threading.Thread(target=relay.serve, daemon=True, name="relay").start()
+        time.sleep(0.5)                                                   # the FIFO exists before the player opens it
+        threading.Thread(target=run_librespot, args=(os.environ.get("SPOTIFY_DEVICE_NAME", "Skippy"),), daemon=True, name="librespot").start()
+        player = Player()
+    service = Service(web, player, relay, os.environ.get("SKIPPY_HOME_TOKEN", ""))
+    print(f"spotify: api on :{API_PORT}, web sign-in {'yes' if web.signed_in else 'NO (services/spotify/signin.py)'}, "
+          f"player {'the desktop app ' + desktop if desktop else 'go-librespot'}", flush=True)
     ThreadingHTTPServer(("0.0.0.0", API_PORT), make_handler(service)).serve_forever()
 
 

@@ -23,7 +23,7 @@ DUCK = 0.25
 class RouterPlayer:
     """BoxMusic's `player` (async play(url), stop(), volume(step)) on the router's outputs."""
 
-    def __init__(self, router, kinds: list[str], loop=None, popen=None, log=print, spotify=None, clock=time.monotonic):
+    def __init__(self, router, kinds: list[str], loop=None, popen=None, log=print, spotify=None, clock=time.monotonic, xfade_s: float = 6.0):
         self.router, self.kinds, self.log = router, set(kinds), log
         self.loop = loop
         self.popen = popen
@@ -31,10 +31,15 @@ class RouterPlayer:
         self.play_obj = None
         self.gain = 1.0
         self.spotify, self.clock = spotify, clock                  # spotify.Client, or None (then BoxMusic skips Spotify items here too)
-        self.spot_play = None                                      # the router's play of the spotify container's stream
+        self.spot_play = None                                      # the router's play of the Spotify sound (the cable, or go-librespot's stream)
         self.spot_uri = ""                                         # the Spotify track this player is playing (asked for, or picked up)
-        self.spot_seen = False                                     # go-librespot has said it is playing spot_uri
+        self.spot_seen = False                                     # the speaker has said it is playing spot_uri
+        self.spot_ours = False                                     # we asked for it (else his phone did): a change of track means the run ended
+        self.spot_run: list[str] = []                              # the Spotify tracks handed to the speaker as one list (spot_uri first)
         self.spot_asked = 0.0
+        self.spot_last = (0, 0)                                    # (pos_ms, ms) of spot_uri, last seen
+        self.xfade_s = xfade_s                                     # Spotify -> Bilby: Spotify fades out over its last seconds as Bilby fades in
+        self._handing = False                                      # the next play() is that crossfade (the Spotify sound fades, not cut)
         if spotify is None:
             self.play_spotify = None                               # BoxMusic looks for it: without one, Spotify items are skipped
 
@@ -44,11 +49,15 @@ class RouterPlayer:
     async def play(self, url: str) -> None:
         import book_out                                             # noqa: PLC0415
         import router as router_mod                                 # noqa: PLC0415
-        await self.stop()                                           # from Spotify too: a plain cut
+        fading = self._handing
+        await self.stop()                                           # from Spotify too: a plain cut, or its crossfade when one is under way
         kw = {"popen": self.popen} if self.popen is not None else {}
-        p = self.router.play(router_mod.PipeSource(book_out.pcm_args(url, 0.0), **kw), layer="media", targets=self.kinds, gain=self.gain)
+        p = self.router.play(router_mod.PipeSource(book_out.pcm_args(url, 0.0), **kw), layer="media", targets=self.kinds,
+                             gain=0.0 if fading else self.gain)
         self.play_obj = p
         loop = self.loop or asyncio.get_running_loop()
+        if fading:
+            self.fade_in(p)
 
         async def watch() -> None:
             await asyncio.to_thread(p.finished.wait)
@@ -63,71 +72,186 @@ class RouterPlayer:
             self.router.stop(p)
         await self._stop_spotify()
 
+    # ── crossfades: router gains, nothing else is done to the sound ──
+    def _ramp(self, p, up: bool, seconds: float, then=None) -> None:
+        """Move one play's gain from silent to self.gain (up) or back down, equal-power, over `seconds`; `then()` after a fade out."""
+        async def go() -> None:
+            t0 = self.clock()
+            while True:
+                k = min(1.0, (self.clock() - t0) / max(seconds, 1e-3))
+                g = (k if up else 1.0 - k) ** 0.5
+                if p.finished.is_set():
+                    return
+                p.gain = self.gain * g
+                if k >= 1.0:
+                    break
+                await asyncio.sleep(0.05)
+            if then is not None:
+                await then()
+        (self.loop or asyncio.get_running_loop()).create_task(go())
+
+    def fade_in(self, p, seconds: float | None = None) -> None:
+        """A play started at gain 0 (the incoming side of a crossfade) comes up to full (DjPlayer's chain too)."""
+        self._handing = False
+        self._ramp(p, True, self.xfade_s if seconds is None else seconds)
+
     # ── Spotify ──
     def _ensure_stream(self) -> None:
-        """The container's sound into the router (one stream, kept while Spotify tracks follow each other)."""
+        """The Spotify sound into the router (one stream, kept while Spotify tracks follow each other)."""
         if self.spot_play is not None and not self.spot_play.finished.is_set():
             return
         import router as router_mod                                 # noqa: PLC0415
         import spotify as spotify_mod                               # noqa: PLC0415
-        kw = {"popen": self.popen} if self.popen is not None else {}
-        self.spot_play = self.router.play(router_mod.PipeSource(spotify_mod.pcm_args(self.spotify.pcm), ahead_s=0.5, **kw),
-                                          layer="media", targets=self.kinds, gain=self.gain)
+        pcm = self.spotify.pcm
+        if pcm.startswith("capture:"):                              # the Spotify app on the virtual cable
+            try:
+                src = spotify_mod.CaptureSource(pcm.split(":", 1)[1])
+            except Exception as e:                                  # noqa: BLE001 — said in the log; the speaker still plays (silently, into the cable)
+                self.log(f"(stereo: Spotify's cable would not open: {type(e).__name__}: {e})")
+                return
+        else:
+            kw = {"popen": self.popen} if self.popen is not None else {}
+            src = router_mod.PipeSource(spotify_mod.pcm_args(pcm), ahead_s=0.5, **kw)
+        self.spot_play = self.router.play(src, layer="media", targets=self.kinds, gain=self.gain)
 
-    async def play_spotify(self, uri: str, pos: float = 0.0) -> None:
+    def _run_from(self, uri: str) -> list[str]:
+        """What the speaker is handed: one track. (Spotify's desktop app starts nothing for a list of tracks, 2026-10-31, so each Spotify item is
+        played by itself and the next one is started just before this one ends.)"""
+        return [uri]
+
+    def _next_is_spotify(self) -> bool:
+        import spotify as spotify_mod                               # noqa: PLC0415
+        m = self.music
+        return bool(m is not None and m.playing and m.idx + 1 < len(m.queue) and spotify_mod.is_uri(m.queue[m.idx + 1]))
+
+    async def play_spotify(self, uri: str, pos: float = 0.0, fade_s: float = 0.0) -> None:
+        """Play a Spotify track (and the Spotify run after it). From Bilby: a plain cut, or with `fade_s` Bilby fades out as Spotify comes in
+        (handoff_to_spotify)."""
         p, self.play_obj = self.play_obj, None
         if p is not None:
-            self.router.stop(p)                                     # Bilby was playing: a plain cut
-        self._ensure_stream()                                       # listening before go-librespot starts, so nothing is lost
-        self.spot_uri, self.spot_seen, self.spot_asked = uri, False, self.clock()
+            if fade_s > 0:
+                self._ramp(p, False, fade_s, then=lambda: self._router_stop(p))
+            else:
+                self.router.stop(p)                                 # Bilby was playing: a plain cut
+        self._ensure_stream()                                       # listening before the speaker starts, so nothing is lost
+        self.spot_run = self._run_from(uri)
+        self.spot_uri, self.spot_seen, self.spot_ours, self.spot_asked, self.spot_last = uri, False, True, self.clock(), (0, 0)
         try:
-            await asyncio.to_thread(self.spotify.play, uri, int(pos * 1000))
+            await asyncio.to_thread(self.spotify.play, uri, int(pos * 1000), self.spot_run[1:])
         except Exception as e:                                      # noqa: BLE001 — the watcher moves on from a track that never starts
             self.log(f"(stereo: Spotify would not play {uri}: {e})")
+
+    async def handoff_to_spotify(self, fade_s: float = 0.0) -> None:
+        """The next queue item is Spotify's and the playing Bilby track is near its end (DjPlayer calls this at its phrase point): move the queue
+        on and start Spotify while Bilby fades out over `fade_s` (0: a plain cut)."""
+        m = self.music
+        if m is None or m.idx + 1 >= len(m.queue):
+            return
+        m.idx, m.offset, m.started, m.playing = m.idx + 1, 0.0, m.clock(), True
+        m._queue_sent = False
+        await self.play_spotify(m.track(), 0.0, fade_s)
+
+    async def _router_stop(self, p) -> None:
+        self.router.stop(p)
 
     async def _stop_spotify(self) -> None:
         sp, self.spot_play = self.spot_play, None
         had = bool(self.spot_uri) or sp is not None
-        self.spot_uri, self.spot_seen = "", False
+        self.spot_uri, self.spot_seen, self.spot_ours, self.spot_run = "", False, False, []
         if sp is not None:
+            if self._handing:                                       # the crossfade to Bilby: fade it out, then pause the speaker
+                self._ramp(sp, False, self.xfade_s, then=lambda: self._pause_after(sp))
+                return
             self.router.stop(sp)
         if had and self.spotify is not None:
-            try:
-                await asyncio.to_thread(self.spotify.pause)
-            except Exception:                                       # noqa: BLE001 — the container is away: nothing plays there anyway
-                pass
+            await self._pause_speaker()
+
+    async def _pause_after(self, sp) -> None:
+        self.router.stop(sp)
+        if self.spot_play is None:                                  # Spotify didn't start again meanwhile
+            await self._pause_speaker()
+
+    async def _pause_speaker(self) -> None:
+        try:
+            await asyncio.to_thread(self.spotify.pause)
+        except Exception:                                           # noqa: BLE001 — the container is away: nothing plays there anyway
+            pass
 
     async def _drained(self, limit_s: float = 3.0) -> None:
-        """Wait until what is already in the stream has gone out (the end of a track, before a cut to Bilby)."""
+        """Wait until what is already in the stream has gone out (the end of a track, before a cut to Bilby). The cable has nothing to drain."""
         sp = self.spot_play
+        if sp is None or getattr(sp.source, "live", False):
+            return
         end = self.clock() + limit_s
         quiet = 0
-        while sp is not None and self.clock() < end and quiet < 3:
+        while self.clock() < end and quiet < 3:
             quiet = quiet + 1 if not getattr(sp.source, "have", 0) else 0
             await asyncio.sleep(0.1)
 
+    def _next_is_bilby(self) -> bool:
+        import spotify as spotify_mod                               # noqa: PLC0415
+        m = self.music
+        return bool(m is not None and m.playing and m.idx + 1 < len(m.queue) and not spotify_mod.is_uri(m.queue[m.idx + 1]))
+
     async def spotify_tick(self, st: dict) -> float:
-        """One look at go-librespot's status (spotify.Client.now()). Returns how long to wait before the next look."""
+        """One look at the speaker's status (spotify.Client.now()). Returns how long to wait before the next look."""
         if not st or not st.get("logged_in"):
             return 5.0
         uri, playing = st.get("uri") or "", bool(st.get("playing"))
-        near_end = bool(st.get("ms")) and (st.get("pos_ms") or 0) >= st["ms"] - 1500
+        pos, ms = st.get("pos_ms") or 0, st.get("ms") or 0
+        near_end = bool(ms) and pos >= ms - 1500
         box = self.music
         if self.spot_uri:
+            if st.get("elsewhere") and self.spot_seen:              # he moved it to another speaker (his phone): let it go, don't pull it back
+                self.log(f"(stereo: Spotify moved to {st['elsewhere']})")
+                sp, self.spot_play = self.spot_play, None
+                if sp is not None:
+                    self.router.stop(sp)
+                self.spot_uri, self.spot_seen, self.spot_ours = "", False, False
+                if box is not None:
+                    box.offset, box.playing = box.pos(), False
+                return 1.5
             if uri == self.spot_uri and playing:
                 if not self.spot_seen:
                     self._road(uri)
                     if box is not None:
-                        box.offset, box.started, box.playing = (st.get("pos_ms") or 0) / 1000.0, self.clock(), True
+                        box.offset, box.started, box.playing = pos / 1000.0, self.clock(), True
                 self.spot_seen = True
+                self.spot_last = (pos, ms)
                 if box is not None and not box.playing:
-                    box.offset, box.started, box.playing = (st.get("pos_ms") or 0) / 1000.0, self.clock(), True   # resumed from his phone
-            if uri and uri != self.spot_uri and playing and self.spot_seen:   # it moved on by itself (an album or playlist played whole, from his
-                self._adopt(st)                                             # phone or purple; the hub's own items are single tracks): follow it
-            elif self.spot_seen and (st.get("stopped") or not uri or uri != self.spot_uri or (st.get("paused") and near_end)):
-                self.spot_uri, self.spot_seen = "", False                   # the track ended: on to the next item, Bilby's or Spotify's
+                    box.offset, box.started, box.playing = pos / 1000.0, self.clock(), True   # resumed from his phone
+                if (self.spot_ours and self.xfade_s > 0 and ms and pos >= ms - self.xfade_s * 1000 and self.spot_run[-1:] == [uri]
+                        and self._next_is_bilby() and box is not None):
+                    self._handing = True                            # the run's last Spotify track is ending into Bilby: crossfade them
+                    self.spot_uri = ""
+                    try:
+                        await box.next()
+                        if self._handing and self.play_obj is not None:  # a player that didn't fade its start in itself (DjPlayer's chain)
+                            self.play_obj.gain = 0.0
+                            self.fade_in(self.play_obj)
+                    finally:
+                        self._handing = False
+                    return 0.5
+                if self.spot_ours and ms and pos >= ms - 1500 and self._next_is_spotify() and box is not None:
+                    self.spot_uri = ""                              # the next Spotify item, started before the app's album goes on by itself
+                    await box.next()
+                    return 0.5
+            moved = bool(uri) and uri != self.spot_uri and self.spot_seen
+            if moved and self.spot_ours and uri in self.spot_run and box is not None and uri in box.queue:
+                self.spot_uri, self.spot_last = uri, (pos, ms)       # the speaker went on to the run's next track by itself: the queue follows
+                box.idx, box.offset, box.started, box.playing, box._queue_sent = box.queue.index(uri, box.idx), pos / 1000.0, self.clock(), True, False
+                self._road(uri)
+                title, artist = box.title()
+                self.log(f"[{box.name}] playing {title}" + (f" by {artist}" if artist else "") + " (Spotify)")
+            elif moved and playing and not self.spot_ours:          # his phone's album or playlist went on by itself: follow it
+                self._adopt(st)
+            elif self.spot_seen and (st.get("stopped") or not uri or moved or (st.get("paused") and near_end)
+                                     or (st.get("paused") and pos < 1500 and self.spot_last[1] and self.spot_last[0] >= self.spot_last[1] - 6000)):
+                self.spot_uri, self.spot_seen = "", False           # the track (the run) ended: on to the next item, Bilby's or Spotify's
                 await self._drained()
                 if box is not None:
+                    if self.spot_run and box.track() in self.spot_run:
+                        box.idx = box.queue.index(self.spot_run[-1], box.idx)   # past the whole run, whatever the speaker reported last
                     await box.on_idle()
             elif not self.spot_seen and self.clock() - self.spot_asked > 20:
                 self.log(f"(stereo: Spotify never started {self.spot_uri}; skipping it)")
@@ -135,13 +259,13 @@ class RouterPlayer:
                 if box is not None:
                     await box.on_idle()
             elif self.spot_seen and st.get("paused") and box is not None and box.playing:
-                box.offset, box.playing = box.pos(), False                  # paused from his phone
+                box.offset, box.playing = box.pos(), False          # paused from his phone
             return 0.5
-        if playing and uri:                                                 # started from elsewhere (his phone): play it on the stereo
+        if playing and uri:                                         # started from elsewhere (his phone): play it on the stereo
             self._adopt(st)
             return 0.5
-        if self.spot_play is not None:
-            sp, self.spot_play = self.spot_play, None                       # nothing of ours plays: let the router go quiet
+        if self.spot_play is not None and not self._handing:
+            sp, self.spot_play = self.spot_play, None               # nothing of ours plays: let the router go quiet
             self.router.stop(sp)
         return 1.5
 
@@ -150,11 +274,11 @@ class RouterPlayer:
         if p is not None:
             self.router.stop(p)
         self._ensure_stream()
-        self.spot_uri, self.spot_seen = st["uri"], True
+        self.spot_uri, self.spot_seen, self.spot_ours, self.spot_run = st["uri"], True, False, [st["uri"]]
         self._road(st["uri"])
         if self.music is not None:
             self.music.adopt(st["uri"], st.get("title") or "", st.get("artist") or "", (st.get("pos_ms") or 0) / 1000.0)
-        self.log(f"[stereo] Spotify: {st.get('title')} by {st.get('artist')} (started from {st.get('origin') or 'Spotify'})")
+        self.log(f"[stereo] Spotify: {st.get('title')} by {st.get('artist')} (started from {st.get('origin') or 'his phone'})")
 
     def _road(self, uri: str) -> None:
         """A Spotify track that started playing goes into his "Skippy Road" playlist, once (his phone keeps it downloaded for the drive)."""
@@ -194,7 +318,8 @@ class StereoMusic:
 
     def __init__(self, router, kinds: list[str], media, log=print, clock=None, popen=None, spotify=None, env=None):
         import music as music_mod                                   # noqa: PLC0415
-        pkw = {"popen": popen, "log": log, "spotify": spotify, **({"clock": clock} if clock is not None else {})}
+        pkw = {"popen": popen, "log": log, "spotify": spotify, **({"clock": clock} if clock is not None else {}),
+               **({"xfade_s": float(env.get("SPOTIFY_XFADE_S", "6"))} if env is not None else {})}   # Spotify -> Bilby (0: plain cuts)
         if env is not None:                                         # the hub: Bilby's tracks as one gapless chain, mixed like a DJ in DJ mode (dj.py)
             import dj                                               # noqa: PLC0415
             self.player = dj.DjPlayer(router, kinds, env=env, **pkw)

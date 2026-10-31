@@ -37,6 +37,7 @@ class FakeRouter:
 
     def play(self, source, layer="voice", targets=None, gain=1.0):
         p = FakePlay(source, layer, targets or ())
+        p.gain = gain
         self.plays.append(p)
         return p
 
@@ -69,8 +70,9 @@ class FakeClient:
         self.status: dict = {"logged_in": True}
         self.lists = {"gym": {"playlist": {"id": "p1", "name": "Gym"}, "tracks": [{"uri": C, "title": "Lift", "artist": "Iron"}]}}
 
-    def play(self, uri, pos_ms=0):
+    def play(self, uri, pos_ms=0, then=None):
         self.calls.append(("play", uri, pos_ms))
+        self.then = list(then or [])
 
     def pause(self):
         self.calls.append(("pause",))
@@ -159,19 +161,85 @@ def test_one_queue_mixes_bilby_and_spotify_with_a_plain_cut_between_them():
     run(go())
 
 
-def test_consecutive_spotify_tracks_share_one_stream_and_a_tracks_end_moves_the_queue_on():
+def test_the_next_spotify_item_is_started_just_before_this_one_ends_on_the_same_stream():
+    async def go():
+        s, router, clock = make()
+        client = s.player.spotify
+        s.box.add_spotify([{"uri": A, "title": "a", "artist": "x"}, {"uri": B, "title": "b", "artist": "y"}])
+        await s.box.play_queue([A, B, "Pink Floyd/Money.flac"])
+        assert client.calls[-1] == ("play", A, 0) and client.then == []              # one track at a time (the desktop app takes no lists)
+        stream = router.live()[-1]
+        client.status = {"logged_in": True, "playing": True, "uri": A, "pos_ms": 1000, "ms": 200000}
+        await s.player.spotify_tick(client.now())
+        client.status.update(pos_ms=199000)                                         # a second left: B is started, no wait for the album to go on
+        await s.player.spotify_tick(client.now())
+        assert client.calls[-1] == ("play", B, 0) and s.box.idx == 1 and s.box.title() == ("b", "y") and router.live() == [stream]
+        await s.stop()
+    run(go())
+
+
+def test_the_album_going_on_by_itself_ends_the_track():
+    async def go():
+        s, router, clock = make()
+        client = s.player.spotify
+        s.box.add_spotify([{"uri": A, "title": "a", "artist": "x"}])
+        await s.box.play_queue([A])
+        client.status = {"logged_in": True, "playing": True, "uri": A, "pos_ms": 1000, "ms": 200000}
+        await s.player.spotify_tick(client.now())
+        clock.t += 200
+        client.status.update(uri=C, pos_ms=300)                                     # the album's next track: ours ended, the queue is done
+        await s.player.spotify_tick(client.now())
+        assert not s.box.playing and ("pause",) in client.calls
+    run(go())
+
+
+def test_the_end_of_a_spotify_run_crossfades_into_the_next_bilby_track():
+    async def go():
+        s, router, clock = make()
+        client = s.player.spotify
+        s.box.add_spotify([{"uri": A, "title": "a", "artist": "x"}])
+        await s.box.play_queue([A, "Pink Floyd/Money.flac"])
+        stream = router.live()[-1]
+        client.status = {"logged_in": True, "playing": True, "uri": A, "pos_ms": 1000, "ms": 200000}
+        await s.player.spotify_tick(client.now())
+        client.status.update(pos_ms=195000)                                          # 5 s left, inside the 6 s crossfade
+        await s.player.spotify_tick(client.now())
+        bilby = s.player.play_obj
+        assert s.box.idx == 1 and bilby is not None and bilby is not stream
+        assert stream not in router.stopped and bilby.gain < 0.5                    # both play: Spotify fading out, Bilby fading in
+        for _ in range(30):
+            clock.t += 0.5
+            await asyncio.sleep(0.06)
+        assert stream in router.stopped and bilby.gain == 1.0 and ("pause",) in client.calls
+        await s.stop()
+    run(go())
+
+
+def test_bilby_hands_over_to_spotify_with_a_fade_when_the_dj_chain_asks():
+    async def go():
+        s, router, clock = make()
+        s.box.add_spotify([{"uri": A, "title": "a", "artist": "x"}])
+        await s.box.play_queue(["Pink Floyd/Money.flac", A])
+        bilby = router.plays[-1]
+        await s.player.handoff_to_spotify(4.0)
+        assert s.box.idx == 1 and s.player.spotify.calls[-1] == ("play", A, 0) and bilby not in router.stopped
+        for _ in range(20):
+            clock.t += 0.5
+            await asyncio.sleep(0.06)
+        assert bilby in router.stopped
+        await s.stop()
+    run(go())
+
+
+def test_spotify_moved_to_his_phone_is_let_go_not_pulled_back():
     async def go():
         s, router, clock = make()
         client = s.player.spotify
         await s.play_spotify([{"uri": A, "title": "a", "artist": "x"}, {"uri": B, "title": "b", "artist": "y"}])
-        stream = router.live()[-1]
-        client.status = {"logged_in": True, "playing": True, "uri": A, "origin": "go-librespot", "pos_ms": 1000, "ms": 200000}
+        client.status = {"logged_in": True, "playing": True, "uri": A, "pos_ms": 1000, "ms": 200000}
         await s.player.spotify_tick(client.now())
-        clock.t += 200
-        client.status = {"logged_in": True, "playing": False, "stopped": True, "uri": "", "origin": "go-librespot"}
-        await s.player.spotify_tick(client.now())
-        assert client.calls[-1] == ("play", B, 0) and s.box.idx == 1
-        assert router.live() == [stream]                                   # the same stream: no gap, no second decode
+        await s.player.spotify_tick({"logged_in": True, "playing": False, "stopped": True, "uri": "", "elsewhere": "Aaron's iPhone"})
+        assert not s.box.playing and router.live() == [] and [c for c in client.calls if c[0] == "play"] == [("play", A, 0)]
     run(go())
 
 
@@ -351,6 +419,7 @@ def test_every_spotify_track_that_starts_goes_into_his_road_playlist_once():
         await s.player.spotify_tick(client.now())
         await asyncio.sleep(0.1)
         assert client.calls.count(("road", A)) == 1
+        await s.stop()
         await s.player.spotify_tick({"logged_in": True, "playing": True, "uri": B, "title": "b", "artist": "y", "origin": "android"})
         await asyncio.sleep(0.1)
         assert ("road", B) in client.calls                                # one his phone played on the Skippy speaker too

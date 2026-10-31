@@ -8,11 +8,19 @@ sign-in; this is the hub's side of it.
 * A queue (music.BoxMusic) holds Bilby paths and Spotify URIs side by side; is_uri() tells them apart. The stereo (stereo.py) plays each kind its
   own way, with a plain cut where the kind changes.
 
-    SPOTIFY_URL=http://127.0.0.1:43873      the container's API        SPOTIFY_PCM=tcp://127.0.0.1:43872      its sound
+    SPOTIFY_URL=http://127.0.0.1:43873      the container's API
+    SPOTIFY_PCM=capture:CABLE Output        its sound: the Spotify app on the virtual cable (the default), or tcp://127.0.0.1:43872 (go-librespot)
+    SPOTIFY_XFADE_S=6                       the crossfade where Spotify hands over to Bilby (0: plain cuts)
+
+Since 2026-10-31 the speaker is Spotify's own app (Spotify refuses go-librespot the audio key on his account): the container drives it through the
+Web API, the hub captures the cable (CaptureSource), and a run of Spotify tracks goes to the app as one list, so the app's own crossfade applies
+between them.
 """
 from __future__ import annotations
 
 import re
+import threading
+from collections import deque
 
 URI_RE = re.compile(r"spotify:(?:track|episode):[A-Za-z0-9]{22}")
 RATE_IN = 44100
@@ -28,18 +36,84 @@ def pcm_args(pcm: str = "tcp://127.0.0.1:43872") -> list[str]:
             "-f", "f32le", "-ar", str(RATE_IN), "-ac", "2", "-i", pcm, "-f", "f32le", "-ac", "2", "-ar", str(router.RATE), "pipe:1"]
 
 
+class CaptureSource:
+    """The Spotify app's sound, from the virtual cable (2026-10-31: his account plays only in Spotify's own app, whose output is set to "CABLE
+    Input" in Windows' volume mixer): a WASAPI input on "CABLE Output" at the router's 48 kHz stereo float, as a router source. It keeps at most
+    `keep_s` ready (the cable's clock and the mixer's drift apart: the oldest goes first), and it never ends by itself. `live`: nothing to drain."""
+    live = True
+
+    def __init__(self, part: str = "CABLE Output", open_stream=None, keep_s: float = 0.3):
+        import router                                           # noqa: PLC0415
+        self.rate, self.keep = router.RATE, int(router.RATE * keep_s)
+        self.buf: deque = deque()
+        self.have = 0
+        self.lock = threading.Lock()
+        self.failed = False
+        self.stream = (open_stream or _open_capture)(part, self._callback)
+
+    def _callback(self, indata, _frames, _time, _status) -> None:
+        block = indata[:, :2].copy()
+        with self.lock:
+            self.buf.append(block)
+            self.have += len(block)
+            while self.have - len(self.buf[0]) >= self.keep and len(self.buf) > 1:
+                self.have -= len(self.buf.popleft())
+
+    def read(self, frames: int):
+        import numpy as np                                      # noqa: PLC0415
+        parts, got = [], 0
+        with self.lock:
+            while got < frames and self.buf:
+                head = self.buf[0]
+                n = min(frames - got, len(head))
+                parts.append(head[:n])
+                got += n
+                if n < len(head):
+                    self.buf[0] = head[n:]
+                else:
+                    self.buf.popleft()
+            self.have -= got
+        return np.concatenate(parts) if parts else np.zeros((0, 2), dtype="float32")
+
+    @property
+    def done(self) -> bool:
+        return self.failed
+
+    def close(self) -> None:
+        s, self.stream = self.stream, None
+        if s is not None:
+            try:
+                s.stop()
+                s.close()
+            except Exception:                                   # noqa: BLE001
+                pass
+
+
+def _open_capture(part: str, callback):
+    import router                                               # noqa: PLC0415
+    import sounddevice as sd                                    # noqa: PLC0415
+    wasapi = next((i for i, a in enumerate(sd.query_hostapis()) if "WASAPI" in a["name"]), None)
+    dev = next((i for i, d in enumerate(sd.query_devices()) if part.lower() in d["name"].lower() and d["max_input_channels"] >= 2
+                and (wasapi is None or d["hostapi"] == wasapi)), None)
+    if dev is None:
+        raise OSError(f"no input called {part!r} (is VB-CABLE installed?)")
+    s = sd.InputStream(samplerate=router.RATE, channels=2, dtype="float32", device=dev, callback=callback, blocksize=router.BLOCK, latency="low")
+    s.start()
+    return s
+
+
 class SpotifyError(Exception):
     """The container said no, in words worth saying aloud."""
 
 
 class Client:
-    def __init__(self, base: str = "http://127.0.0.1:43873", pcm: str = "tcp://127.0.0.1:43872", request=None):
+    def __init__(self, base: str = "http://127.0.0.1:43873", pcm: str = "capture:CABLE Output", request=None):
         self.base, self.pcm = base.rstrip("/"), pcm
         self.request = request or self._request
 
     @classmethod
     def from_env(cls, env: dict) -> "Client":
-        return cls(env.get("SPOTIFY_URL") or "http://127.0.0.1:43873", env.get("SPOTIFY_PCM") or "tcp://127.0.0.1:43872")
+        return cls(env.get("SPOTIFY_URL") or "http://127.0.0.1:43873", env.get("SPOTIFY_PCM") or "capture:CABLE Output")
 
     def _request(self, method: str, path: str, params: dict | None = None, body: dict | None = None) -> tuple[int, dict]:
         import requests                                          # noqa: PLC0415
@@ -85,8 +159,9 @@ class Client:
         return self._ok("POST", "/road", body={"uri": uri})
 
     # ── the speaker ──
-    def play(self, uri: str, pos_ms: int = 0) -> None:
-        self._ok("POST", "/play", body={"uri": uri, "pos_ms": int(pos_ms)})
+    def play(self, uri: str, pos_ms: int = 0, then: list[str] | None = None) -> None:
+        """`uri` from `pos_ms`, and `then` after it with no gap (the app's own crossfade between them)."""
+        self._ok("POST", "/play", body={"uri": uri, "pos_ms": int(pos_ms), **({"then": then} if then else {})})
 
     def pause(self) -> None:
         self._ok("POST", "/pause")
