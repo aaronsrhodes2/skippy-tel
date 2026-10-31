@@ -90,3 +90,30 @@ def test_a_dry_run_changes_nothing(tmp_path):
     before = (tmp_path / "index.json").read_text()
     qr.refresh(tmp_path, lambda p: "[]", lambda t: b"", budget=5, dry=True, log=lambda *a: None)
     assert (tmp_path / "index.json").read_text() == before and not (tmp_path / "retired.json").exists()
+
+
+def test_factoids_are_kept_only_when_web_sources_support_them_and_carry_no_figures(tmp_path):
+    """2026-10-31: the model checking itself passed a false factoid; now each claim is searched and judged against the snippets."""
+    calls = []
+
+    def ask(prompt):
+        calls.append(prompt)
+        if prompt.startswith("A claim, and what a web search found"):
+            return "contradicted" if "Great Wall" in prompt else "supported"
+        return ('["Fun fact: Venus spins backwards compared to most planets.", "Fun fact: the Great Wall is visible from space.", '
+                '"Fun fact: light from the Sun takes eight minutes to reach you.", "Fun fact: it is 3 degrees on Pluto.", '
+                '"Fun fact: nobody has searched this one."]')
+
+    def search(q):
+        return [] if "nobody" in q else [f"Source about {q}"]
+    lines = qr.write_lines(ask, "fact:space", 3, [], [], search=search)
+    assert lines == ["Fun fact: Venus spins backwards compared to most planets."]     # a myth, a figure and an unsourced claim never get in
+    assert not any("eight minutes" in c or "3 degrees" in c for c in calls[1:])
+
+
+def test_a_factoid_is_chosen_by_subject():
+    assert filler.topic_for("how far away is the moon") == "space"
+    assert filler.topic_for("play some Daft Punk") == "music"
+    assert filler.topic_for("roll a d20 for me") == "tabletop"
+    assert filler.topic_for("hello there") is None
+    assert "fact:space" in qr.kinds_of({"thinking": []})

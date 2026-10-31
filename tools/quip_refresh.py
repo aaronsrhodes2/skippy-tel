@@ -33,7 +33,34 @@ import filler  # noqa: E402
 
 BANK = ROOT / "state" / "filler"
 STOCK = 12                      # per kind: quips with plays to spare (below MAX_PLAYS)
+FACT_STOCK = 8                  # per subject: factoids with plays to spare
 MAX_WORDS = 16
+FACT_WORDS = 32
+
+FACT_HINTS = {
+    "space": "space, planets, stars, black holes, spaceflight", "physics": "physics: quantum, relativity, light, energy, gravity",
+    "chemistry": "chemistry, the elements, materials", "music": "music, DJing, electronic music, famous albums and artists",
+    "games": "video games: EverQuest, Garry's Mod, Star Control, Factorio, Satisfactory, Baldur's Gate 3, Minecraft",
+    "tabletop": "tabletop roleplaying: Daggerheart, Dungeons & Dragons, dice, famous modules", "cars": "electric cars, Tesla, batteries, driving",
+    "smarthome": "smart homes, lighting, home automation", "ai": "AI, computers, programming, robots",
+    "books": "science fiction books, especially Craig Alanson's Expeditionary Force (Skippy, Joe Bishop)", "film": "films and TV",
+    "food": "food, cooking, coffee, beer", "ar": "augmented reality, smart glasses, displays",
+}
+
+FACT_PROMPT = """You write short spoken factoids for Skippy the Magnificent, the sarcastic, vain ancient AI beer can from the Expeditionary Force books.
+He says one while the Captain waits for an answer about: {hint}.
+
+Rules for every factoid:
+- One surprising, TRUE, well-established fact, {words} words or fewer, said in Skippy's voice (a short sarcastic lead-in is fine, like "Fun fact:").
+- NO numbers, figures, measurements, percentages or dates of any kind, not even spelled out (a number must never come from a language model).
+- Nothing you are not certain of; no rumours, no trivia that is commonly repeated but false.
+- Not one of these, and not the same fact reworded:
+{existing}
+
+Write exactly {n} factoids as a JSON array of strings, and nothing else."""
+
+NUMBER_WORDS = re.compile(r"\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|thirty|forty|fifty|hundred|thousand|"
+                          r"million|billion|trillion|percent|half|dozen|first|second|third)\b", re.I)
 
 KIND_HINTS = {
     "thinking": "any question at all, while he thinks",
@@ -83,6 +110,11 @@ def write_json(path: Path, data) -> None:
     tmp.replace(path)
 
 
+def kinds_of(index: dict) -> list[str]:
+    """Every kind the bank keeps: the quip kinds in the index, and a factoid kind per subject (filler.TOPICS)."""
+    return list(dict.fromkeys(list(index) + [f"fact:{t}" for t in filler.TOPICS]))
+
+
 def worn(plays: dict, file: str) -> bool:
     return int((plays.get(file) or {}).get("n", 0)) >= filler.MAX_PLAYS
 
@@ -90,7 +122,8 @@ def worn(plays: dict, file: str) -> bool:
 def plan(index: dict, plays: dict, budget: int) -> tuple[dict, dict]:
     """({kind: [retired entries]}, {kind: how many new to write}); the new ones fill the kinds with the least stock first, within `budget`."""
     retire = {k: [e for e in v if worn(plays, e["file"])] for k, v in index.items()}
-    short = {k: max(0, STOCK - sum(1 for e in v if not worn(plays, e["file"]))) for k, v in index.items()}
+    short = {k: max(0, (FACT_STOCK if k.startswith("fact:") else STOCK) - sum(1 for e in index.get(k, []) if not worn(plays, e["file"])))
+             for k in kinds_of(index)}
     want: dict = {}
     while budget > 0 and any(short.values()):
         k = max(short, key=lambda x: short[x])
@@ -111,34 +144,83 @@ def parse_lines(text: str) -> list[str]:
     return [str(x).strip() for x in got if isinstance(x, str) and str(x).strip()]
 
 
-def acceptable(line: str, seen: set) -> bool:
+def acceptable(line: str, seen: set, fact: bool = False) -> bool:
     n = norm(line)
-    return bool(n) and n not in seen and len(n.split()) <= MAX_WORDS and not re.search(r"\d|https?:|\*|#", line)
+    if not n or n in seen or len(n.split()) > (FACT_WORDS if fact else MAX_WORDS) or re.search(r"\d|https?:|\*|#", line):
+        return False
+    return not (fact and NUMBER_WORDS.search(line))             # PLATINUM 21: no figure in a factoid, not even spelled out
 
 
-def write_lines(ask, kind: str, n: int, existing: list[str], examples: list[str]) -> list[str]:
-    """Up to n new lines of this kind from the model (`ask(prompt) -> text`), checked; two tries at most."""
+GROUND_PROMPT = """A claim, and what a web search found about it. Do these sources CLEARLY and DIRECTLY state the claim's fact (ignore its joking tone)?
+Answer with one word: "supported" only if they plainly do; "contradicted" if they say otherwise; "unclear" if they don't settle it.
+
+Claim: {fact}
+
+Sources:
+{sources}"""
+
+
+def web_search(query: str, get=None) -> list[str]:
+    """Snippets for `query` from the house's own search (SearXNG on skippy-core, the same one purple Skippy uses)."""
+    import os
+    import urllib.parse
+    import urllib.request
+    base = os.environ.get("PURPLE_SEARCH_URL", "http://skippy-core:7360").rstrip("/")
+    url = f"{base}/search?{urllib.parse.urlencode({'q': query, 'format': 'json'})}"
+    data = get(url) if get else json.loads(urllib.request.urlopen(url, timeout=20).read())
+    return [f"{r.get('title', '')}: {r.get('content', '')}"[:400] for r in (data.get("results") or [])[:6] if isinstance(r, dict)]
+
+
+def checked(ask, facts: list[str], search=web_search) -> list[str]:
+    """The factoids the sources support (2026-10-31: a model checking itself passed a false one: "Daggerheart uses dice with symbols instead of
+    numbers"). Each claim is searched on the web and kept only when the model, shown the snippets, calls it clearly supported; a claim with no
+    search results, or an unclear one, is dropped."""
+    kept = []
+    for fact in facts:
+        claim = re.sub(r"^(?:[^:]{0,60}:\s*)?", "", fact.split("Fun fact:")[-1]).strip() or fact
+        try:
+            sources = search(claim[:200])
+        except Exception:  # noqa: BLE001 — no search, no proof: dropped
+            sources = []
+        if not sources:
+            continue
+        verdict = ask(GROUND_PROMPT.format(fact=claim, sources="\n".join(f"- {s}" for s in sources)))
+        if re.search(r"\bsupported\b", verdict or "", re.I) and not re.search(r"\b(?:contradicted|unclear)\b", verdict or "", re.I):
+            kept.append(fact)
+    return kept
+
+
+def write_lines(ask, kind: str, n: int, existing: list[str], examples: list[str], search=web_search) -> list[str]:
+    """Up to n new lines of this kind from the model (`ask(prompt) -> text`), checked; two tries at most. A factoid (kind fact:<topic>) is
+    also checked for truth by a second, strict pass."""
+    fact = kind.startswith("fact:")
     seen = {norm(t) for t in existing}
     out: list[str] = []
     for _ in range(2):
         need = n - len(out)
         if need <= 0:
             break
-        prompt = PROMPT.format(hint=KIND_HINTS.get(kind, "any request"), words=MAX_WORDS, n=need + 2,
-                               existing="\n".join(f"  - {t}" for t in existing[-80:]) or "  (none yet)",
-                               examples="\n".join(f"  - {t}" for t in examples[:6]))
-        for line in parse_lines(ask(prompt)):
-            if len(out) < n and acceptable(line, seen):
+        listing = "\n".join(f"  - {t}" for t in existing[-80:]) or "  (none yet)"
+        if fact:
+            prompt = FACT_PROMPT.format(hint=FACT_HINTS.get(kind[5:], kind[5:]), words=FACT_WORDS, n=need + 3, existing=listing)
+        else:
+            prompt = PROMPT.format(hint=KIND_HINTS.get(kind, "any request"), words=MAX_WORDS, n=need + 2, existing=listing,
+                                   examples="\n".join(f"  - {t}" for t in examples[:6]))
+        fresh = [line for line in parse_lines(ask(prompt)) if acceptable(line, seen, fact)]
+        if fact:
+            fresh = checked(ask, fresh, search)
+        for line in fresh:
+            if len(out) < n and norm(line) not in seen:
                 out.append(line)
                 seen.add(norm(line))
     return out
 
 
 def file_for(kind: str, text: str) -> str:
-    return f"{kind}/q{hashlib.sha1(text.encode('utf-8')).hexdigest()[:10]}.mp3"
+    return f"{kind.replace(':', '-')}/q{hashlib.sha1(text.encode('utf-8')).hexdigest()[:10]}.mp3"
 
 
-def refresh(bank: Path, ask, tts, budget: int = 40, dry: bool = False, log=print) -> dict:
+def refresh(bank: Path, ask, tts, budget: int = 40, dry: bool = False, log=print, search=web_search) -> dict:
     index = load(bank / "index.json", {})
     plays = load(bank / "plays.json", {})
     retired = load(bank / "retired.json", {})
@@ -157,7 +239,7 @@ def refresh(bank: Path, ask, tts, budget: int = 40, dry: bool = False, log=print
         index[kind] = [e for e in index[kind] if e not in gone]
     for kind, n in want.items():
         existing = [e["text"] for e in index.get(kind, [])] + [e["text"] for e in retired.get(kind, [])]
-        lines = write_lines(ask, kind, n, existing, [e["text"] for e in index.get(kind, [])] or existing)
+        lines = write_lines(ask, kind, n, existing, [e["text"] for e in index.get(kind, [])] or existing, search)
         for text in lines:
             rel = file_for(kind, text)
             try:

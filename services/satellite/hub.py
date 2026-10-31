@@ -433,7 +433,10 @@ class Room:
         kind = self.filler.kind_for(command)
         wait = self.filler_after_s * (2.2 if kind == "home" else 1.0)     # a quick household command is usually answered at once: give it longer
         done, _ = await asyncio.wait({work}, timeout=wait)
-        for stage in (kind, "long"):
+        import filler as filler_mod                             # noqa: PLC0415
+        topic = filler_mod.topic_for(command)                   # the second line, when the wait drags: a factoid about what he asked, if there is one in stock
+        second = f"fact:{topic}" if topic and getattr(self.filler, "has", lambda k: False)(f"fact:{topic}") else "long"
+        for stage in (kind, second):
             if done:
                 return
             quip = self.filler.pick(stage, command)

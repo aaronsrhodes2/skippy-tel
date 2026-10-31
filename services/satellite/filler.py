@@ -198,7 +198,35 @@ LINES = {
 }
 
 
-MAX_PLAYS = 3                 # the Captain, 2026-10-31: a joke is funny three times at most; after that tools/quip_refresh.py retires and replaces it
+# Factoids (the Captain, 2026-10-31): when the wait drags past the first quip, the second line is a short true fact about what he asked, from his own
+# interests. Kind "fact:<topic>"; written, checked and voiced by tools/quip_refresh.py. The first match wins.
+TOPICS = {
+    "space": r"\b(?:space|planet|star|galaxy|black hole|orbit|moon|mars|jupiter|saturn|sun|nasa|rocket|asteroid|comet|universe|cosmos|telescope)\b",
+    "physics": r"\b(?:physics|quantum|relativity|gravity|atom|particle|electron|photon|energy|light|speed of|magnet|thermodynamic|entropy|mentat)\b",
+    "chemistry": r"\b(?:chemistry|element|molecule|metal|alloy|boil|melt|reaction|acid|carbon|oxygen|periodic)\b",
+    "games": r"\b(?:game|gaming|everquest|garry'?s mod|gmod|star control|satisfactory|factorio|baldur|bg3|minecraft|steam|server|raid|level up)\b",
+    "music": r"\b(?:music|play|song|album|artist|band|dj|traktor|mix|beat|bpm|playlist|vinyl|guitar|synth|bilby|concert)\b",
+    "tabletop": r"\b(?:daggerheart|d&d|dungeons|dragons|dice|d20|campaign|tabletop|tomb of horrors|rpg|dungeon master|gm)\b",
+    "cars": r"\b(?:car|tesla|drive|driving|charge|charging|battery|ev|electric vehicle|autopilot|road trip)\b",
+    "smarthome": r"\b(?:light|lights|lamp|switch|plug|thermostat|nest|leviton|homekit|matter|house|home|alexa)\b",
+    "ai": r"\b(?:ai|artificial intelligence|model|llm|claude|qwen|neural|robot|computer|gpu|code|coding|program|software)\b",
+    "books": r"\b(?:book|books|audiobook|novel|author|story|expeditionary force|skippy|joe bishop|sci-?fi|read)\b",
+    "film": r"\b(?:movie|film|show|series|episode|jellyfin|cinema|actor|director|netflix)\b",
+    "food": r"\b(?:food|cook|cooking|recipe|eat|dinner|lunch|breakfast|coffee|beer|pizza|bake)\b",
+    "ar": r"\b(?:glasses|viture|augmented reality|ar|vr|headset|hud|display)\b",
+}
+_TOPIC_RES = {k: re.compile(v, re.I) for k, v in TOPICS.items()}
+
+
+def topic_for(command: str) -> str | None:
+    """The subject of what was asked, for a factoid; None when nothing fits."""
+    for name, rx in _TOPIC_RES.items():
+        if rx.search(command or ""):
+            return name
+    return None
+
+
+MAX_PLAYS = 3                # the Captain, 2026-10-31: a joke is funny three times at most; after that tools/quip_refresh.py retires and replaces it
 RECENT = 6                    # never one of the last few heard in that kind, whatever the counts say
 
 
@@ -293,6 +321,10 @@ class FillerBank:
         if PERSONAL_RE.search(c):
             return "personal"
         return "thinking"
+
+    def has(self, kind: str) -> bool:
+        self._refresh()
+        return bool(self.index.get(kind))
 
     def pick(self, kind: str, command: str = "") -> tuple[str, bytes] | None:
         """(the words, the mp3) of one quip of this kind; a kind with no recordings falls back to `thinking`. The order of preference:
