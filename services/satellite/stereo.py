@@ -20,6 +20,27 @@ import time
 DUCK = 0.25
 
 
+def blend_rule(env: dict | None) -> tuple[int, int] | None:
+    """BILBY_BLEND="3:2" (the default): in a shuffle on the stereo, two of his Spotify liked songs after every three of Bilby's. "off" for none."""
+    raw = str((env or {}).get("BILBY_BLEND", "3:2")).strip().lower()
+    try:
+        every, take = (int(x) for x in raw.split(":"))
+    except ValueError:
+        return None
+    return (every, take) if every > 0 and take > 0 else None
+
+
+def blend(bilby: list[str], spotify: list[str], every: int = 3, take: int = 2) -> list[str]:
+    """Bilby's tracks with `take` Spotify items after every `every` of them, while Spotify items last."""
+    out, si = [], 0
+    for i, t in enumerate(bilby):
+        out.append(t)
+        if (i + 1) % every == 0 and si < len(spotify):
+            out += spotify[si:si + take]
+            si += take
+    return out
+
+
 class RouterPlayer:
     """BoxMusic's `player` (async play(url), stop(), volume(step)) on the router's outputs."""
 
@@ -355,8 +376,24 @@ class StereoMusic:
                 import dj                                           # noqa: PLC0415
                 if dj.enabled(self.env):
                     tracks = await asyncio.to_thread(dj.order, tracks, self.player.lib, limit)
-        await self.box.play_queue(tracks[:limit])
-        return len(tracks[:limit])
+            tracks = await self._blend(tracks[:limit])
+        await self.box.play_queue(tracks[:limit * 2])
+        return len(tracks[:limit * 2])
+
+    async def _blend(self, tracks: list[str]) -> list[str]:
+        """A shuffle with his Spotify mixed in (blend_rule). Spotify not answering: Bilby alone. A Spotify item that won't play when its turn comes
+        is skipped by the player (dj.DjPlayer), so Bilby fills in."""
+        rule = blend_rule(self.env) if self.env is not None else None
+        spot = getattr(self.player, "spotify", None)
+        if rule is None or spot is None or getattr(self.player, "spotify_down", lambda: False)():
+            return tracks
+        try:
+            liked = await asyncio.to_thread(spot.liked, 200)
+        except Exception as e:                                      # noqa: BLE001 — Bilby alone
+            self.log(f"(stereo: no Spotify songs for the blend: {type(e).__name__}: {e})")
+            return tracks
+        random.shuffle(liked)
+        return blend(tracks, self.box.add_spotify(liked), *rule)
 
     async def stop(self) -> None:
         await self.box.pause()

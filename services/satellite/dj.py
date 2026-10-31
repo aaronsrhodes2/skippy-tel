@@ -56,6 +56,8 @@ NUDGE_S = 0.15                    # how far the audio may move a grid (Traktor's
 SEAM_S = 0.008                    # the tiny crossfades between the stretched pieces
 LEAD_S = 8.0                      # audio decoded ahead of the mix-out point (to line the grid up on its last bars with drums)
 BASS_HZ = 180.0
+SPOT_START_S = 15.0               # a Spotify item that hasn't started by then is skipped (Bilby fills in): the desktop app takes a few seconds
+SPOT_REST_S = 30 * 60.0           # ...and Spotify isn't tried again for this long
 MARGIN_S = 6.0                    # a mix-out point closer than this to where the track is now is too late to render for
 
 
@@ -682,6 +684,7 @@ class DjPlayer(stereo.RouterPlayer):
         self.mixer = mixer or Mixer(self.lib, env, log)
         self.chain: ChainSource | None = None
         self.gen = 0
+        self.spot_down_until = 0.0                                 # a Spotify item failed: skip Spotify until then, Bilby fills in
 
     def _body(self, rel: str, start: float):
         """One track from `start` as a router source: the file itself when it is on this PC, else the hub's media server's URL."""
@@ -720,8 +723,14 @@ class DjPlayer(stereo.RouterPlayer):
             if idx + 1 >= len(queue):
                 chain.finish()
                 return
-            nxt = queue[idx + 1]
-            if str(nxt).startswith("spotify:"):
+            j = idx + 1
+            while j < len(queue) and _is_spotify(queue[j]) and self.spotify_down():
+                j += 1                                             # Spotify is resting: mix straight into the next of Bilby's
+            if j >= len(queue):
+                chain.finish()
+                return
+            nxt = queue[j]
+            if _is_spotify(nxt):
                 chain.finish()                                     # not Bilby's: the chain ends and RouterPlayer plays it
                 return
             here = start + piece.read / RATE
@@ -733,18 +742,18 @@ class DjPlayer(stereo.RouterPlayer):
             if gen != self.gen or self.chain is not chain:
                 return
             if step.kind == "mix" and chain.cut_at(piece, int(round((step.a_stop - start) * RATE))):
-                chain.append(_Clip(step.clip), on_start=self._advancer(gen, idx + 1, step.b_pos, True))
+                chain.append(_Clip(step.clip), on_start=self._advancer(gen, j, step.b_pos, True))
                 body = chain.append(self._body(nxt, step.b_start), tag=nxt)
                 start = step.b_start
             else:
                 if step.kind == "mix":
                     step.reason = "too late to mix in"
                 self.log(f"(dj: plain cut into the next track: {step.reason})")
-                body = chain.append(self._body(nxt, 0.0), on_start=self._advancer(gen, idx + 1, 0.0, False), tag=nxt)
+                body = chain.append(self._body(nxt, 0.0), on_start=self._advancer(gen, j, 0.0, False), tag=nxt)
                 start = 0.0
             while gen == self.gen and self.chain is chain and not body.started:
                 await asyncio.sleep(0.5)
-            piece, idx, rel = body, idx + 1, nxt
+            piece, idx, rel = body, j, nxt
 
     def _advancer(self, gen: int, idx: int, pos: float, mixed: bool):
         loop = self.loop
@@ -766,18 +775,44 @@ class DjPlayer(stereo.RouterPlayer):
         self.chain = None
         await super().stop()
 
-    async def play_spotify(self, uri: str, pos: float = 0.0) -> None:
+    async def play_spotify(self, uri: str, pos: float = 0.0, fade_s: float = 0.0) -> None:
         """RouterPlayer's (a plain cut from Bilby to Spotify); the chain's feeder stops with it. Without a Spotify client RouterPlayer sets this
-        to None on the instance, and BoxMusic skips Spotify items, as before."""
+        to None on the instance, and BoxMusic skips Spotify items, as before. A Spotify item that doesn't start within SPOT_START_S (or while
+        Spotify is known to be failing) is skipped at once and Spotify rests SPOT_REST_S: Bilby fills in."""
         self.gen += 1
         self.chain = None
-        await super().play_spotify(uri, pos)
+        loop = asyncio.get_running_loop()
+        if self.spotify_down():
+            loop.create_task(self._skip_spotify(self.gen))
+            return
+        await (super().play_spotify(uri, pos, fade_s) if fade_s else super().play_spotify(uri, pos))
+        gen = self.gen
+
+        async def watchdog() -> None:
+            await asyncio.sleep(SPOT_START_S)
+            if gen == self.gen and self.spot_uri == uri and not self.spot_seen:
+                self.spot_down_until = self.clock() + SPOT_REST_S
+                self.log(f"(dj: Spotify didn't start {uri} in {SPOT_START_S:.0f} s: Bilby fills in, Spotify rests {SPOT_REST_S / 60:.0f} min)")
+                await self._skip_spotify(gen)
+        loop.create_task(watchdog())
+
+    def spotify_down(self) -> bool:
+        return self.clock() < self.spot_down_until
+
+    async def _skip_spotify(self, gen: int) -> None:
+        if gen == self.gen and self.music is not None:
+            await self.music.next()                                 # next() plays the next item; Spotify ones come back here and are skipped too
 
     def _adopt(self, st: dict) -> None:
         """A Spotify play started from his phone: RouterPlayer stops the chain (a plain cut); its feeder stops with it."""
         self.gen += 1
         self.chain = None
         super()._adopt(st)
+
+def _is_spotify(item) -> bool:
+    import spotify                                                  # noqa: PLC0415
+    return spotify.is_uri(str(item))
+
 
 class _Clip:
     """A rendered crossing (router.ClipSource without importing the router)."""

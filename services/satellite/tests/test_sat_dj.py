@@ -371,3 +371,74 @@ def test_spotify_taking_over_stops_the_chain_and_its_feeder():
         await player.play_spotify("spotify:track:y")
         assert player.gen != g and r.stopped[-1] is not p
     asyncio.run(go())
+
+
+# ── Spotify blended into a Bilby shuffle on the stereo ──
+def test_blend_puts_two_spotify_after_every_three_bilby():
+    import stereo
+    assert stereo.blend(list("abcdefg"), ["s1", "s2", "s3", "s4"]) == ["a", "b", "c", "s1", "s2", "d", "e", "f", "s3", "s4", "g"]
+    assert stereo.blend(list("abcdef"), ["s1"]) == ["a", "b", "c", "s1", "d", "e", "f"]   # Spotify ran out: Bilby alone
+    assert stereo.blend_rule({}) == (3, 2) and stereo.blend_rule({"BILBY_BLEND": "off"}) is None
+    assert stereo.blend_rule({"BILBY_BLEND": "4:1"}) == (4, 1)
+
+
+def test_a_spotify_item_that_wont_start_is_skipped_and_spotify_rests():
+    import asyncio
+    import threading
+
+    import music
+
+    class Play:
+        def __init__(self, src):
+            self.source, self.finished, self.gain = src, threading.Event(), 1.0
+
+    class Router:
+        sinks = {"hdmi": 1}
+
+        def available(self, k): return True
+
+        def play(self, source, layer, targets, gain): return Play(source)
+
+        def stop(self, p):
+            p.source.close()
+            p.finished.set()
+
+    asked = []
+    spot = type("S", (), {"play": lambda self, u, ms, *rest: asked.append(u), "pause": lambda self: None})()
+    clock = [1000.0]
+    logs = []
+    player = dj.DjPlayer(Router(), ["hdmi"], lib=dj.Library("nowhere", nml="", log=lambda m: None), log=logs.append, spotify=spot,
+                         clock=lambda: clock[0], popen=lambda *a, **k: type("P", (), {"stdout": type("O", (), {"read": lambda s, n: b""})(),
+                                                                                      "kill": lambda s: None})())
+    player._ensure_stream = lambda: None
+
+    class Media:
+        async def catalog(self): return {}
+        def track_url(self, path, start, towards=""): return "http://x/" + path
+
+    box = music.BoxMusic(player, Media(), log=logs.append, name="stereo", clock=lambda: clock[0])
+    player.music = box
+
+    async def go(monkey_start):
+        dj.SPOT_START_S = monkey_start
+        await box.play_queue(["spotify:track:AAAAAAAAAAAAAAAAAAAAAA", "spotify:track:BBBBBBBBBBBBBBBBBBBBBB", "a.mp3"])
+        await asyncio.sleep(0.15)                                   # the watchdog fires: Spotify never started
+        assert player.spotify_down(), (logs, asked, player.spot_uri, player.spot_seen, box.idx)
+        for _ in range(20):
+            await asyncio.sleep(0.02)
+            if box.idx == 2:
+                break
+        assert box.track() == "a.mp3" and asked == ["spotify:track:AAAAAAAAAAAAAAAAAAAAAA"]   # the second Spotify item was skipped without asking
+        await player.stop()
+
+    async def guarded():
+        try:
+            await go(0.05)
+        finally:
+            await player.stop()                                     # releases the router play's watcher thread, pass or fail
+
+    old = dj.SPOT_START_S
+    try:
+        asyncio.run(guarded())
+    finally:
+        dj.SPOT_START_S = old
