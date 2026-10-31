@@ -318,12 +318,6 @@ voice_assistant:
         id: face
         state: offline
   on_wake_word_detected:
-    - lvgl.label.update:
-        id: heard_label
-        text: ""
-    - lvgl.label.update:
-        id: subtitle_label
-        text: ""
     - script.execute:
         id: face
         state: listening
@@ -340,16 +334,15 @@ voice_assistant:
         id: face
         state: thinking
   on_stt_end:                             # what Whisper heard you say
-    - lvgl.label.update:
-        id: heard_label
-        text: !lambda |-
-          static std::string quoted;
-          quoted = "\"" + x + "\"";
-          return quoted.c_str();
+    - script.execute:
+        id: convo_add
+        who: 0
+        text: !lambda 'return x;'
   on_tts_start:                           # and what Skippy says back
-    - lvgl.label.update:
-        id: subtitle_label
-        text: !lambda return x.c_str();
+    - script.execute:
+        id: convo_add
+        who: 1
+        text: !lambda 'return x;'
     - script.execute:
         id: face
         state: speaking
@@ -407,9 +400,10 @@ text:
     max_length: 120
     optimistic: true
     on_value:
-      - lvgl.label.update:
-          id: subtitle_label
-          text: !lambda return x;
+      - script.execute:
+          id: convo_add
+          who: 1
+          text: !lambda 'return x;'
 
 binary_sensor:
   - platform: template                    # a tap on the screen: the hub treats it as "Skippy"
@@ -443,6 +437,16 @@ globals:
   - id: face_rgb
     type: uint32_t
     initial_value: '0x6a28c9'
+  - id: convo
+    type: std::string
+  - id: last_reply
+    type: std::string
+  - id: convo_target
+    type: float
+    initial_value: '470'
+  - id: convo_y
+    type: float
+    initial_value: '480'
   - id: in_session
     type: bool
     initial_value: 'false'
@@ -470,6 +474,23 @@ globals:
     initial_value: '0'
 
 script:
+  - id: convo_add                         # a line of the conversation flows up behind the ball: yours (cyan, with >) and Skippy's (lavender)
+    mode: queued
+    parameters:
+      who: int
+      text: string
+    then:
+      - lambda: |-
+          std::string t = text;
+          for (auto &ch : t) if (ch == '#' || ch == '\n') ch = ' ';
+          if (t.empty()) return;
+          if (who == 1) { if (id(last_reply) == t) return; id(last_reply) = t; }
+          id(convo) += std::string(who ? "#d6c2ff " : "#8fe9ff > ") + t + "#\n";
+          while (id(convo).size() > 900) { auto p = id(convo).find('\n'); if (p == std::string::npos) break; id(convo).erase(0, p + 1); }
+          lv_label_set_text(id(convo_label), id(convo).c_str());
+          lv_obj_update_layout(id(convo_label));
+          id(convo_target) = 466 - (int) lv_obj_get_height(id(convo_label));
+          id(last_activity) = millis();
   - id: face
     mode: restart
     parameters:
@@ -489,8 +510,8 @@ script:
           id(face_rgb) = c;
           id(state_now) = state;
           id(energy_target) = en;
-          lv_obj_t *n[4] = {id(nim_1), id(nim_2), id(nim_3), id(nim_4)};
-          for (int i = 0; i < 4; i++) lv_obj_set_style_border_color(n[i], lv_color_hex(c), LV_PART_MAIN);
+          lv_obj_t *n[16] = {id(nim_t1), id(nim_b1), id(nim_l1), id(nim_r1), id(nim_t2), id(nim_b2), id(nim_l2), id(nim_r2), id(nim_t3), id(nim_b3), id(nim_l3), id(nim_r3), id(nim_t4), id(nim_b4), id(nim_l4), id(nim_r4)};
+          for (int i = 0; i < 16; i++) lv_obj_set_style_bg_color(n[i], lv_color_hex(c), LV_PART_MAIN);
           lv_label_set_text(id(status_label), t);
           lv_obj_set_style_text_color(id(status_label), lv_color_hex(c == 0x6a28c9 ? 0xb05cff : c), LV_PART_MAIN);
           if (state != "idle" && state != "offline") id(last_activity) = millis();
@@ -503,16 +524,17 @@ script:
                 brightness: 70%
 
 interval:
-  - interval: 60ms                        # the lamp breathes: slow when idle, quicker when something is happening
+  - interval: 250ms                       # the lamp breathes: slow when idle, quicker when something is happening
     then:
       - lambda: |-
+          if (id(talking)) return;                      // (same: the glow holds while he talks)
           bool busy = id(face_rgb) != 0x6a28c9 && id(face_rgb) != 0x475569;
           id(breath) = (id(breath) + (busy ? 6 : 2)) % 360;
           float s = (sinf(id(breath) * 3.14159f / 180.0f) + 1.0f) / 2.0f;
           float k = busy ? 0.65f + 0.35f * s : 0.45f + 0.35f * s;
           static const int base[4] = {230, 150, 90, 45};
-          lv_obj_t *n[4] = {id(nim_1), id(nim_2), id(nim_3), id(nim_4)};
-          for (int i = 0; i < 4; i++) lv_obj_set_style_border_opa(n[i], (lv_opa_t)(base[i] * k), LV_PART_MAIN);
+          lv_obj_t *n[16] = {id(nim_t1), id(nim_b1), id(nim_l1), id(nim_r1), id(nim_t2), id(nim_b2), id(nim_l2), id(nim_r2), id(nim_t3), id(nim_b3), id(nim_l3), id(nim_r3), id(nim_t4), id(nim_b4), id(nim_l4), id(nim_r4)};
+          for (int i = 0; i < 16; i++) lv_obj_set_style_bg_opa(n[i], (lv_opa_t)(base[i / 4] * k), LV_PART_MAIN);
   - interval: 50ms                        # Skippy's wireframe face: a neon globe with eyes, brows and a mouth that follow his state, his mood and his words
     then:
       - lambda: |-
@@ -565,15 +587,26 @@ interval:
           ph += talk ? 0.13f : 0.06f; rot += 0.012f * (0.6f + id(energy));
           float ox = sinf(ph * 0.5f) * 5, oy = sinf(ph) * 5, cx = 240 + ox, cy = 215 + oy;
           auto clampi = [](float v) { int i = (int) v; return i < 0 ? 0 : (i > 479 ? 479 : i); };
-          static lv_point_precise_t el[28], er[28], bl_[4], br_[4], mo[37], th[2], mf[40];
+          auto put = [](lv_obj_t *o, lv_point_precise_t *p, int n) {     // a line widget's box runs from its own corner to its last point: anchor it at its points, or every change redraws a huge rectangle
+            int mx = 479, my = 479;
+            for (int i = 0; i < n; i++) { if (p[i].x < mx) mx = p[i].x; if (p[i].y < my) my = p[i].y; }
+            for (int i = 0; i < n; i++) { p[i].x -= mx; p[i].y -= my; }
+            lv_line_set_points(o, p, n); lv_obj_set_pos(o, mx, my);
+          };
+          static lv_point_precise_t el[18], er[18], bl_[4], br_[4], mo[25], th[2], mf[24];
+          id(convo_y) += (id(convo_target) - id(convo_y)) * 0.18f;
+          { int yy = (int) id(convo_y); if (yy != lv_obj_get_y(id(convo_label))) lv_obj_set_y(id(convo_label), yy); }     // only when it moved: every change redraws
+          { static uint32_t last = 0, n = 0, acc = 0;                      // how fast does this tick really run?
+            if (last) { acc += now - last; if (++n == 60) { ESP_LOGI("face", "tick %.0f ms (%.1f Hz)", acc / 60.0f, 60000.0f / acc); n = acc = 0; } }
+            last = now; }
           // ── eyes ──
           auto eye = [&](lv_point_precise_t *p, float ex, float ey) {
             float w = 25, h = 22 * eo * blinking; if (h < 2) h = 2;
-            for (int i = 0; i < 28; i++) { float a = i * 6.2832f / 27; p[i].x = clampi(ex + w * cosf(a)); p[i].y = clampi(ey + h * sinf(a)); }
+            for (int i = 0; i < 18; i++) { float a = i * 6.2832f / 17; p[i].x = clampi(ex + w * cosf(a)); p[i].y = clampi(ey + h * sinf(a)); }
           };
           float exl = cx - 52, exr = cx + 52, ey = cy - 36;
           eye(el, exl, ey); eye(er, exr, ey);
-          lv_line_set_points(id(eye_l)->obj, el, 28); lv_line_set_points(id(eye_r)->obj, er, 28);
+          put(id(eye_l)->obj, el, 18); put(id(eye_r)->obj, er, 18);
           bool open = eo * blinking > 0.3f;
           for (int s2 = 0; s2 < 2; s2++) {
             lv_obj_t *pu = s2 ? id(pup_r) : id(pup_l);
@@ -589,23 +622,23 @@ interval:
             p[3].x = clampi(bx + 26); p[3].y = clampi(y0 + (side < 0 ? sl : -sl) * -1 * -1);
           };
           brow(bl_, exl, -1, bl + (br < 0 ? 0 : 0)); brow(br_, exr, 1, br + 0);
-          lv_line_set_points(id(brow_l)->obj, bl_, 4); lv_line_set_points(id(brow_r)->obj, br_, 4);
+          put(id(brow_l)->obj, bl_, 4); put(id(brow_r)->obj, br_, 4);
           // ── mouth: an upper and a lower lip meeting at the corners; the smile lifts them ──
           float my = cy + 52;
-          for (int i = 0; i < 18; i++) {                                // upper lip, left to right
-            float u = -1 + i * 2.0f / 17, edge = 1 - u * u;
+          for (int i = 0; i < 12; i++) {                                // upper lip, left to right
+            float u = -1 + i * 2.0f / 11, edge = 1 - u * u;
             mo[i].x = clampi(cx + mw * u); mo[i].y = clampi(my - mu * edge - sm * (1 - edge) * 0.5f);
           }
-          for (int i = 0; i < 18; i++) {                                // lower lip, right to left
-            float u = 1 - i * 2.0f / 17, edge = 1 - u * u;
-            mo[18 + i].x = clampi(cx + mw * u); mo[18 + i].y = clampi(my + ml * edge - sm * (1 - edge) * 0.5f);
+          for (int i = 0; i < 12; i++) {                                // lower lip, right to left
+            float u = 1 - i * 2.0f / 11, edge = 1 - u * u;
+            mo[12 + i].x = clampi(cx + mw * u); mo[12 + i].y = clampi(my + ml * edge - sm * (1 - edge) * 0.5f);
           }
-          mo[36] = mo[0];
-          lv_line_set_points(id(mouth)->obj, mo, 37);
+          mo[24] = mo[0];
+          put(id(mouth)->obj, mo, 25);
           int nf = 0;                                                    // the inside of the mouth: scan lines between the lips, one polyline
           if (mu + ml > 3) {
             float top = my - mu, bot = my + ml; bool ltr = true;
-            for (float yy = top + 1.5f; yy < bot - 1 && nf < 38; yy += 3.5f) {
+            for (float yy = top + 1.5f; yy < bot - 1 && nf < 22; yy += 5.0f) {
               float v = (yy - my) < 0 ? (my - yy) / mu : (yy - my) / ml; if (v > 1) v = 1;
               float half = mw * sqrtf(1 - v * v) * 0.97f;
               mf[nf].x = clampi(cx + (ltr ? -half : half)); mf[nf].y = clampi(yy); nf++;
@@ -613,18 +646,25 @@ interval:
               ltr = !ltr;
             }
           }
-          if (nf >= 2) { lv_line_set_points(id(mfill)->obj, mf, nf); lv_obj_set_style_line_opa(id(mfill)->obj, 255, LV_PART_MAIN); }
+          if (nf >= 2) { put(id(mfill)->obj, mf, nf); lv_obj_set_style_line_opa(id(mfill)->obj, 255, LV_PART_MAIN); }
           else lv_obj_set_style_line_opa(id(mfill)->obj, 0, LV_PART_MAIN);
           th[0].x = clampi(cx - mw * 0.7f); th[0].y = clampi(my - mu * 0.35f); th[1].x = clampi(cx + mw * 0.7f); th[1].y = th[0].y;
-          lv_line_set_points(id(teeth)->obj, th, 2);
+          put(id(teeth)->obj, th, 2);
           lv_obj_set_style_line_opa(id(teeth)->obj, (lv_opa_t) (teethv > 0.5f && mu + ml > 6 ? 150 : 0), LV_PART_MAIN);
-  - interval: 80ms                        # the swirling background: three neon spirals drifting, quicker and brighter the busier he is
+  - interval: 500ms                       # the swirling background (it redraws the whole screen, so slowly: the face has the frame rate): three neon spirals drifting, quicker and brighter the busier he is
     then:
       - lambda: |-
+          auto put = [](lv_obj_t *o, lv_point_precise_t *p, int n) {     // a line widget's box runs from its own corner to its last point: anchor it at its points, or every change redraws a huge rectangle
+            int mx = 479, my = 479;
+            for (int i = 0; i < n; i++) { if (p[i].x < mx) mx = p[i].x; if (p[i].y < my) my = p[i].y; }
+            for (int i = 0; i < n; i++) { p[i].x -= mx; p[i].y -= my; }
+            lv_line_set_points(o, p, n); lv_obj_set_pos(o, mx, my);
+          };
+          if (id(talking)) return;                      // while he talks the face gets every frame: the background holds still
           static float t = 0; static lv_point_precise_t pts[3][40];
           id(energy) += (id(energy_target) - id(energy)) * 0.1f;
           float e = id(energy);
-          t += 0.08f * (0.5f + 0.8f * e);
+          t += 0.12f * (0.5f + 0.8f * e) * 3.3f;
           lv_obj_t *o[3] = {id(sp_a)->obj, id(sp_b)->obj, id(sp_c)->obj};
           for (int k = 0; k < 3; k++) {
             float f1 = 0.05f + 0.03f * k, f2 = 0.07f + 0.02f * k;
@@ -637,7 +677,7 @@ interval:
               int x = (int) (cx + r * cosf(a)), y = (int) (cy + r * sinf(a) * 0.85f);
               pts[k][i].x = x < 0 ? 0 : (x > 479 ? 479 : x); pts[k][i].y = y < 0 ? 0 : (y > 479 ? 479 : y);
             }
-            lv_line_set_points(o[k], pts[k], 40);
+            put(o[k], pts[k], 40);
             lv_obj_set_style_line_opa(o[k], (lv_opa_t) (70 + 60 * e), LV_PART_MAIN);
           }
   - interval: 15s                         # the screen dims when nothing has happened for two minutes
@@ -732,7 +772,7 @@ lvgl:
     - lcd
   touchscreens:
     - touch
-  buffer_size: 25%
+  buffer_size: 50%
   pages:
     - id: home
       bg_color: 0x000000
@@ -768,61 +808,224 @@ lvgl:
             line_color: 0x9a55ff
             line_opa: 40%
         - obj:
-            id: nim_1
+            id: nim_t1
             x: 0
             y: 0
             width: 480
-            height: 480
-            radius: 30
-            bg_opa: TRANSP
-            border_width: 10
-            border_color: 0x6a28c9
-            border_opa: 50%
+            height: 10
+            radius: 0
+            bg_color: 0x6a28c9
+            bg_opa: 40%
+            border_width: 0
             outline_width: 0
             shadow_width: 0
             scrollable: false
         - obj:
-            id: nim_2
+            id: nim_b1
+            x: 0
+            y: 470
+            width: 480
+            height: 10
+            radius: 0
+            bg_color: 0x6a28c9
+            bg_opa: 40%
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            scrollable: false
+        - obj:
+            id: nim_l1
+            x: 0
+            y: 10
+            width: 10
+            height: 460
+            radius: 0
+            bg_color: 0x6a28c9
+            bg_opa: 40%
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            scrollable: false
+        - obj:
+            id: nim_r1
+            x: 470
+            y: 10
+            width: 10
+            height: 460
+            radius: 0
+            bg_color: 0x6a28c9
+            bg_opa: 40%
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            scrollable: false
+        - obj:
+            id: nim_t2
             x: 10
             y: 10
             width: 460
-            height: 460
-            radius: 22
-            bg_opa: TRANSP
-            border_width: 10
-            border_color: 0x6a28c9
-            border_opa: 50%
+            height: 10
+            radius: 0
+            bg_color: 0x6a28c9
+            bg_opa: 40%
+            border_width: 0
             outline_width: 0
             shadow_width: 0
             scrollable: false
         - obj:
-            id: nim_3
+            id: nim_b2
+            x: 10
+            y: 460
+            width: 460
+            height: 10
+            radius: 0
+            bg_color: 0x6a28c9
+            bg_opa: 40%
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            scrollable: false
+        - obj:
+            id: nim_l2
+            x: 10
+            y: 20
+            width: 10
+            height: 440
+            radius: 0
+            bg_color: 0x6a28c9
+            bg_opa: 40%
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            scrollable: false
+        - obj:
+            id: nim_r2
+            x: 460
+            y: 20
+            width: 10
+            height: 440
+            radius: 0
+            bg_color: 0x6a28c9
+            bg_opa: 40%
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            scrollable: false
+        - obj:
+            id: nim_t3
             x: 20
             y: 20
             width: 440
-            height: 440
-            radius: 14
-            bg_opa: TRANSP
-            border_width: 10
-            border_color: 0x6a28c9
-            border_opa: 50%
+            height: 10
+            radius: 0
+            bg_color: 0x6a28c9
+            bg_opa: 40%
+            border_width: 0
             outline_width: 0
             shadow_width: 0
             scrollable: false
         - obj:
-            id: nim_4
-            x: 30
-            y: 30
-            width: 420
-            height: 420
-            radius: 6
-            bg_opa: TRANSP
-            border_width: 10
-            border_color: 0x6a28c9
-            border_opa: 50%
+            id: nim_b3
+            x: 20
+            y: 450
+            width: 440
+            height: 10
+            radius: 0
+            bg_color: 0x6a28c9
+            bg_opa: 40%
+            border_width: 0
             outline_width: 0
             shadow_width: 0
             scrollable: false
+        - obj:
+            id: nim_l3
+            x: 20
+            y: 30
+            width: 10
+            height: 420
+            radius: 0
+            bg_color: 0x6a28c9
+            bg_opa: 40%
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            scrollable: false
+        - obj:
+            id: nim_r3
+            x: 450
+            y: 30
+            width: 10
+            height: 420
+            radius: 0
+            bg_color: 0x6a28c9
+            bg_opa: 40%
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            scrollable: false
+        - obj:
+            id: nim_t4
+            x: 30
+            y: 30
+            width: 420
+            height: 10
+            radius: 0
+            bg_color: 0x6a28c9
+            bg_opa: 40%
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            scrollable: false
+        - obj:
+            id: nim_b4
+            x: 30
+            y: 440
+            width: 420
+            height: 10
+            radius: 0
+            bg_color: 0x6a28c9
+            bg_opa: 40%
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            scrollable: false
+        - obj:
+            id: nim_l4
+            x: 30
+            y: 40
+            width: 10
+            height: 400
+            radius: 0
+            bg_color: 0x6a28c9
+            bg_opa: 40%
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            scrollable: false
+        - obj:
+            id: nim_r4
+            x: 440
+            y: 40
+            width: 10
+            height: 400
+            radius: 0
+            bg_color: 0x6a28c9
+            bg_opa: 40%
+            border_width: 0
+            outline_width: 0
+            shadow_width: 0
+            scrollable: false
+        - label:
+            id: convo_label
+            x: 20
+            y: 480
+            width: 440
+            text: ""
+            recolor: true
+            text_font: montserrat_24
+            text_color: 0xd6c2ff
+            text_opa: 55%
+            long_mode: WRAP
         - image:
             id: ball_img
             src: skippy_ball
@@ -838,7 +1041,7 @@ lvgl:
             line_width: 5
             line_color: 0x0b0b0e
             line_opa: 100%
-            line_rounded: true
+            line_rounded: false
         - line:
             id: eye_l
             x: 0
@@ -849,7 +1052,7 @@ lvgl:
             line_width: 5
             line_color: 0x1b1d22
             line_opa: 100%
-            line_rounded: true
+            line_rounded: false
         - line:
             id: eye_r
             x: 0
@@ -860,7 +1063,7 @@ lvgl:
             line_width: 5
             line_color: 0x1b1d22
             line_opa: 100%
-            line_rounded: true
+            line_rounded: false
         - line:
             id: brow_l
             x: 0
@@ -871,7 +1074,7 @@ lvgl:
             line_width: 5
             line_color: 0x1b1d22
             line_opa: 100%
-            line_rounded: true
+            line_rounded: false
         - line:
             id: brow_r
             x: 0
@@ -882,7 +1085,7 @@ lvgl:
             line_width: 5
             line_color: 0x1b1d22
             line_opa: 100%
-            line_rounded: true
+            line_rounded: false
         - line:
             id: mouth
             x: 0
@@ -893,7 +1096,7 @@ lvgl:
             line_width: 5
             line_color: 0x1b1d22
             line_opa: 100%
-            line_rounded: true
+            line_rounded: false
         - line:
             id: teeth
             x: 0
@@ -904,7 +1107,7 @@ lvgl:
             line_width: 3
             line_color: 0xeceef2
             line_opa: 0%
-            line_rounded: true
+            line_rounded: false
         - obj:
             id: pup_l
             x: 0
@@ -964,25 +1167,3 @@ lvgl:
             text: ""
             text_font: montserrat_20
             text_color: 0xb05cff
-        - label:
-            id: heard_label
-            align: BOTTOM_MID
-            y: -76
-            width: 440
-            height: 52
-            text: ""
-            text_font: montserrat_20
-            text_color: 0xffffff
-            text_align: CENTER
-            long_mode: DOT
-        - label:
-            id: subtitle_label
-            align: BOTTOM_MID
-            y: -22
-            width: 440
-            height: 52
-            text: ""
-            text_font: montserrat_20
-            text_color: 0xd6c2ff
-            text_align: CENTER
-            long_mode: DOT
