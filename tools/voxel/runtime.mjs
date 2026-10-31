@@ -95,6 +95,12 @@ const forward = fwdFlag || (hi[0] - lo[0] >= hi[2] - lo[2] ? "x" : "z");
 const AXES = ["x", "y", "z"];
 const wheels = { forward, forward_source: fwdFlag ? "flag" : "inferred", discs: 0, upright: 0, along: 0, flat: 0, turned: 0,
   upright_at: [], turned_at: [] };
+const longer = hi[0] - lo[0] >= hi[2] - lo[2] ? "x" : "z";
+if (fwdFlag && fwdFlag !== longer) wheels.forward_note = `--forward=${fwdFlag}, but the build is longest along ${longer}: if the track runs along ${longer}, run again with --forward=${longer}`;
+// A wheel of mixed materials (a brick rim round an iron hub, a rim cut by a sleeper or the ground it sinks into: MineBench v9) is no
+// round piece of any ONE material, so each slice is also looked at as one material, MIXED: every block in it. Those discs are counted
+// after the single-material ones, and only where none of those was found already.
+const MIXED = 31, NAME = (m) => (m === MIXED ? "mixed" : SIMPLE[m]);
 {
   const cells = [];
   for (const [k, m] of voxels) cells.push([Math.floor(k / G / G), Math.floor(k / G) % G, k % G, m]);
@@ -116,6 +122,9 @@ const wheels = { forward, forward_source: fwdFlag ? "flag" : "inferred", discs: 
       let set = slices.get(key);
       if (!set) slices.set(key, (set = new Set()));
       set.add(c[ua] * G + c[va]);
+      const mk = c[ax] * 32 + MIXED;
+      if (!slices.has(mk)) slices.set(mk, new Set());
+      slices.get(mk).add(c[ua] * G + c[va]);
     }
     const found = new Map();                         // same key -> [{u, v, d}]
     for (const [key, S] of slices) {
@@ -164,7 +173,7 @@ const wheels = { forward, forward_source: fwdFlag ? "flag" : "inferred", discs: 
             for (const q of [p + G, p - G, p + 1, p - 1]) if (E.has(q) && !seen.has(q) && Math.abs((q % G) - v) <= 1) { seen.add(q); stack.push(q); }
           }
           const pu = a1 - a0 + 1, pv = b1 - b0 + 1, fill = n / (pu * pv);
-          if (process.env.VOXEL_DEBUG === SIMPLE[key % 32]) console.error(JSON.stringify({ ax: AXES[ax], s: (key - key % 32) / 32, pu, pv, n, fill: +fill.toFixed(2), at: [a0, b0] }));
+          if (process.env.VOXEL_DEBUG === NAME(key % 32)) console.error(JSON.stringify({ ax: AXES[ax], s: (key - key % 32) / 32, pu, pv, n, fill: +fill.toFixed(2), at: [a0, b0] }));
           if (Math.min(pu, pv) < 3 || Math.max(pu, pv) > 1.75 * Math.min(pu, pv) || fill < 0.5 || fill > 0.92) continue;
           if (!found.has(key)) found.set(key, []);
           found.get(key).push({ u: Math.round((a0 + a1) / 2), v: Math.round((b0 + b1) / 2), d: Math.max(pu, pv) + 4 });
@@ -172,9 +181,10 @@ const wheels = { forward, forward_source: fwdFlag ? "flag" : "inferred", discs: 
       }
     }
     // join the same disc over neighbouring slices: its thickness
-    const used = new Set();
+    const used = new Set(), counted = [];
     const keys = [...found.keys()].sort((a, b) => a - b);
-    for (const key of keys) {
+    const at3 = (ax3, s, u, v) => { const c = [0, 0, 0]; c[ax3] = s; c[ua] = u; c[va] = v; return voxels.get((c[0] * G + c[1]) * G + c[2]); };
+    for (const key of [...keys.filter((k) => k % 32 !== MIXED), ...keys.filter((k) => k % 32 === MIXED)]) {
       const m = key % 32, s0 = (key - m) / 32;
       for (const disc of found.get(key)) {
         if (used.has(disc)) continue;
@@ -186,20 +196,46 @@ const wheels = { forward, forward_source: fwdFlag ? "flag" : "inferred", discs: 
           used.add(next); s++;
         }
         const thick = s - s0, centre = disc.u * G + disc.v;
-        const dbg = (why) => process.env.VOXEL_DEBUG && console.error(JSON.stringify({ ax: AXES[ax], s0, m: SIMPLE[m], ...disc, thick, why }));
+        const dbg = (why) => process.env.VOXEL_DEBUG && console.error(JSON.stringify({ ax: AXES[ax], s0, m: NAME(m), ...disc, thick, why }));
         if (thick > 0.4 * disc.d) { dbg("thick"); continue; }                // a cylinder or a drum, not a wheel
-        if ((slices.get((s0 - 1) * 32 + m) || new Set()).has(centre) || (slices.get(s * 32 + m) || new Set()).has(centre)) { dbg("solid"); continue; }  // one layer of a solid
+        // one layer of a solid: the same material goes on at its centre in the slice before or after (for MIXED: the very block that is
+        // at its centre here, since every slice of a scene has something in it)
+        const mid = at3(ax, s0, disc.u, disc.v);
+        const solid = m === MIXED ? at3(ax, s0 - 1, disc.u, disc.v) === mid || at3(ax, s, disc.u, disc.v) === mid
+          : (slices.get((s0 - 1) * 32 + m) || new Set()).has(centre) || (slices.get(s * 32 + m) || new Set()).has(centre);
+        if (solid) { dbg("solid"); continue; }
+        if (m === MIXED && counted.some((c) => c.s0 <= s - 1 && s0 <= c.s1 && Math.abs(c.u - disc.u) <= 2 && Math.abs(c.v - disc.v) <= 2)) { dbg("found already"); continue; }
+        counted.push({ s0, s1: s - 1, u: disc.u, v: disc.v });
         wheels.discs++;
         const at = [0, 0, 0]; at[ax] = s0; at[ua] = disc.u; at[va] = disc.v;
         const why = AXES[ax] === forward ? "along" : AXES[ax] === "y" ? "flat" : "";
-        if (!why) { wheels.upright++; wheels.upright_at.push({ at, face: AXES[ax], across: disc.d, thick, made_of: SIMPLE[m] }); continue; }
+        if (!why) { wheels.upright++; wheels.upright_at.push({ at, face: AXES[ax], across: disc.d, thick, made_of: NAME(m) }); continue; }
         wheels.turned++; wheels[why]++;
-        wheels.turned_at.push({ at, face: AXES[ax], why, across: disc.d, thick, made_of: SIMPLE[m] });
+        wheels.turned_at.push({ at, face: AXES[ax], why, across: disc.d, thick, made_of: NAME(m) });
       }
     }
   }
 }
 if (!wheels.discs) wheels.note = "no wheel-shaped discs found (round, 7 or more across): on a vehicle that means the wheels are missing or not round";
+// what to do about it, printed where the builder looks (the run's output), since a builder may never open the voxel-build skill
+// (MineBench v9 didn't): the skill's tested helper, word for word
+const WHEEL_HELPER = `// FWD: "x" or "z", the direction of travel. (cx, cy, cz) is the hub; cy = the rail's y + 1 + r, so the lowest block sits on the rail.
+// The wheel is w blocks thick, going +across from cx (FWD z) or cz (FWD x): the left wheel from its outer face, the right from its inner.
+function wheel(FWD, cx, cy, cz, r, w, type, hub) {
+  for (var a = -r; a <= r; a++) for (var b = -r; b <= r; b++) {
+    if (a * a + b * b > r * r + r) continue;
+    if (r >= 5 && a * a + b * b < (r - 2) * (r - 2) && a !== 0 && b !== 0 && Math.abs(a) !== Math.abs(b)) continue;
+    for (var t = 0; t < w; t++) {
+      if (FWD === "z") block(cx + t, cy + b, cz + a, type);
+      else block(cx + a, cy + b, cz + t, type);
+    }
+  }
+  if (hub) block(FWD === "z" ? cx - 1 : cx, cy, FWD === "z" ? cz : cz - 1, hub);
+}`;
+if (wheels.turned || !wheels.discs)
+  wheels.fix = `A vehicle's wheels must all be upright (face across the direction of travel, ${forward}) and sit ON the rails or the road, not in them. ` +
+    `Ignore a listed disc that is not a wheel (a boiler band, a platform, smoke). Draw every wheel with this helper, copied as it is:
+` + WHEEL_HELPER;
 wheels.turned_at.sort((a, b) => b.across - a.across);
 wheels.upright_at.sort((a, b) => b.across - a.across);
 wheels.upright_at = wheels.upright_at.slice(0, 8);
