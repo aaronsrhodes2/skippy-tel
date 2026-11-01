@@ -15,6 +15,11 @@ stretch of the room is deconvolved by the clip itself (the voice band): every co
     SATELLITE_SYNC_MIC=CMTECK        a part of the PC microphone's name; 0 turns the measuring off (the delays then stay as they are)
 
 Every measurement is one line in the hub log: "(sync: hdmi +312 ms behind the pod; delay 0.500 -> 0.313 s)".
+
+One voice (solo) and the output switched off (the Captain turns the projector off at night, 2026-11-01: the morning routine spoke into
+nothing): SILENT_AFTER replies of SILENT_MIN_S or more in a row with no copy heard make the output SILENT, and the pod speaks instead
+(speaker_out.RoutedOut). Every PROBE_S one reply goes to the output alone again as a probe, measured at once; heard, it is the room's
+voice again; not heard, the pod repeats it.
 """
 from __future__ import annotations
 
@@ -38,6 +43,9 @@ PEAK_REL = 0.06                  # and at least this fraction of the strongest c
 ECHO_S = 0.025                   # a copy this close to an output's is as likely its reflection off a wall as the pod
 TELL_APART_S = 0.015             # two copies whose distances from where an output's was due differ by less than this: can't say which is which
 DEFAULT_EXTRA = 0.1
+SILENT_AFTER = 4                 # one voice: this many long replies in a row unheard and the output is taken for off (short quips miss often)
+SILENT_MIN_S = 2.0               # (a reply shorter than this counts neither way, except that a silent output heard is back)
+PROBE_S = 600.0                  # while silent, one reply this often goes to the output alone again, to hear whether it is back
 SOLO_WINDOW_S = 1.0              # one voice: its copy sounds within this of its queue (more is a mishearing)
 ASSIGN_S = 0.30                  # an output's copy lands within this of where the router expected it (plus the learned extra)
 STATE = Path(__file__).resolve().parents[2] / "state" / "audio-sync.json"
@@ -154,6 +162,34 @@ class Calibrator:
         saved = load(path).get("outputs") or {}
         self.extra = {k: float((saved.get(k) or {}).get("extra", DEFAULT_EXTRA)) for k in self.kinds}   # each output's own latency past its stream's (the projector's)
         self.lock = threading.Lock()
+        self.misses = {k: 0 for k in self.kinds}                   # long replies in a row with no copy heard (solo)
+        self.silent_since: dict[str, float] = {}                   # output -> (clock) taken for off then, or when it was last probed
+
+    # ── one voice: is the output really heard? ──
+    def silent(self, k: str) -> bool:
+        return k in self.silent_since
+
+    def probe_due(self, k: str) -> bool:
+        """A silent output is due a probe (one reply alone on it): True once per PROBE_S, and the clock starts again."""
+        with self.lock:
+            if k in self.silent_since and self.clock() - self.silent_since[k] >= PROBE_S:
+                self.silent_since[k] = self.clock()
+                return True
+        return False
+
+    def _heard(self, k: str, heard: bool, seconds: float) -> None:
+        if seconds < SILENT_MIN_S and not (heard and k in self.silent_since):
+            return
+        with self.lock:
+            if heard:
+                self.misses[k] = 0
+                if self.silent_since.pop(k, None) is not None:
+                    self.log(f"(sync: {k} heard in the room again: it is the room's voice again)")
+                return
+            self.misses[k] = self.misses.get(k, 0) + 1
+            if k not in self.silent_since and self.misses[k] >= SILENT_AFTER:
+                self.silent_since[k] = self.clock()
+                self.log(f"(sync: {k}: {self.misses[k]} replies in a row not heard in the room: taken for off, the pod speaks until it is heard again)")
 
     def measure(self, pcm48, marks: dict) -> dict | None:
         """After a clip has played: where each copy landed, and the corrected delays. None when nothing could be told."""
@@ -171,19 +207,23 @@ class Calibrator:
         if len(ref) < FS // 2 or not ref.any():
             return None
         t_push = min(m[0] for m in marks.values())
-        wait = t_push + len(ref) / FS + SEARCH_AFTER - self.clock()
+        after = SEARCH_AFTER if not self.solo else max(m[1] + m[2] for m in marks.values()) + SOLO_WINDOW_S + 0.3   # one voice: its own window only
+        wait = t_push + len(ref) / FS + after - self.clock()
         if wait > 0:
             time.sleep(wait)                                        # the last copy's tail is still in the air (this runs in a thread)
-        room, t0 = self.mic.slice(t_push - SEARCH_BEFORE, t_push + len(ref) / FS + SEARCH_AFTER)
+        room, t0 = self.mic.slice(t_push - SEARCH_BEFORE, t_push + len(ref) / FS + after)
         if room is None or len(room) < len(ref):
             self.log("(sync: the microphone did not cover the clip: no measurement)")
             return None
         found = [(t0 + lag / FS, h) for lag, h in peaks(correlate(room, ref))]
         if not found:
             self.log("(sync: no copy of the clip heard in the room)")
+            if self.solo:
+                for k in marks:
+                    self._heard(k, False, len(ref) / FS)
             return None
         if self.solo:
-            return self._latency(found, marks)
+            return self._latency(found, marks, len(ref) / FS)
         expected = {k: m[0] + m[1] + m[2] + self.extra[k] for k, m in marks.items()}
         mine, left, unsure = {}, list(found), set()
         for k, e in sorted(expected.items()):
@@ -232,7 +272,7 @@ class Calibrator:
         self._save(result)
         return result
 
-    def _latency(self, found, marks: dict) -> dict | None:
+    def _latency(self, found, marks: dict, seconds: float = SILENT_MIN_S) -> dict | None:
         """One voice: the strongest copy is the PC output's. How long after its queue it sounded (the stream, the projector's own audio delay, the
         air) is `extra`: the pod's lips start then (speaker_out.sound_at) and the room stays deaf to it until it has ended."""
         result = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "outputs": {}}
@@ -241,7 +281,9 @@ class Calibrator:
             near = [p for p in found if -0.05 <= p[0] - base <= SOLO_WINDOW_S]
             if not near:
                 self.log(f"(sync: {k}: no copy heard within {SOLO_WINDOW_S:.1f} s of its queue: the lips keep {self.extra[k] * 1000:.0f} ms)")
+                self._heard(k, False, seconds)
                 continue
+            self._heard(k, True, seconds)
             t, h = max(near, key=lambda p: p[1])
             got = t - base
             with self.lock:

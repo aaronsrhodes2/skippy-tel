@@ -152,3 +152,75 @@ def test_the_streamed_face_talks_on_the_stereos_clock_not_the_boxs():
     assert calls[0] == ("speaking", True, False, False) and calls[-1] == ("thinking", False, False, False)     # the streamed face
     assert actions == ["speaking", "idle"]                                                                     # the box's own face
     assert mirrored == [("nABC", 0.1)]                                                                         # the other pods, at the same moment
+
+
+def test_an_output_nobody_hears_is_taken_for_off_then_probed_and_heard_again(tmp_path):
+    """2026-11-01: the Captain turns the projector off at night; the morning routine spoke into it, unheard. Four long replies in a row
+    with no copy in the room: the output is silent and the pod speaks. Once per PROBE_S one reply goes to it alone; heard, it is back."""
+    from test_sat_sync import FakeSinks, room_hearing, voice
+    clip = voice(seconds=2.5, seed=3)
+    push, now = 101.0, [1e9]
+    logs = []
+    quiet = room_hearing(clip, [])                                  # the projector is off: nothing of the clip in the room
+    c = sync.Calibrator(FakeSinks(0.15), ["hdmi"], quiet, log=logs.append, path=tmp_path / "a.json", clock=lambda: now[0], solo=True)
+    for _ in range(sync.SILENT_AFTER - 1):
+        c.measure(clip, {"hdmi": (push, 0.15, 0.1)})
+    assert not c.silent("hdmi")
+    c.measure(clip, {"hdmi": (push, 0.15, 0.1)})
+    assert c.silent("hdmi") and "taken for off" in logs[-1]
+    assert not c.probe_due("hdmi")
+    now[0] += sync.PROBE_S
+    assert c.probe_due("hdmi") and not c.probe_due("hdmi")          # once per PROBE_S
+    c.mic = room_hearing(clip, [(push + 0.15 + 0.1 + 0.17, 1.0)])   # switched back on
+    c.measure(clip, {"hdmi": (push, 0.15, 0.1)})
+    assert not c.silent("hdmi") and any("room's voice again" in line for line in logs)
+
+
+def test_short_quips_unheard_never_take_the_output_for_off(tmp_path):
+    from test_sat_sync import FakeSinks, room_hearing, voice
+    clip = voice(seconds=1.0, seed=3)
+    c = sync.Calibrator(FakeSinks(0.15), ["hdmi"], room_hearing(clip, []), log=lambda m: None, path=tmp_path / "a.json", clock=lambda: 1e9, solo=True)
+    for _ in range(sync.SILENT_AFTER + 2):
+        c.measure(clip, {"hdmi": (101.0, 0.15, 0.1)})
+    assert not c.silent("hdmi")
+
+
+class SilentCal:
+    def __init__(self, due=False):
+        self.due, self.silent_now = due, True
+
+    def silent(self, k):
+        return self.silent_now
+
+    def probe_due(self, k):
+        due, self.due = self.due, False
+        return due
+
+
+def test_with_the_output_taken_for_off_the_pod_speaks_and_nothing_goes_to_it():
+    from test_sat_router import World, tone
+    w = World(present=("HDMI",))
+    router = rt.Router([("hdmi", "HDMI", 0.15)], find=w.find, stream_factory=w.factory, reinit=w.reinit, log=lambda *a: None, autostart=True)
+    router.calibrator = SilentCal()
+    out = speaker_out.RoutedOut(router, ["hdmi"], log=lambda *a: None, duck_others=False, decoder=lambda mp3, gain: tone(0.2), sole=True)
+    r = room(out)
+    try:
+        assert out.available() is None
+        asyncio.run(r._out("Good morning.", ("mp3", b"CLIP"), announce=True))
+        assert r.link.spoken == [("announce", "Good morning.", ("mp3", b"CLIP"))]
+        assert asyncio.run(out.play(b"x")) is False                   # (Room._also: nothing is pushed to an output nobody hears)
+    finally:
+        router.close()
+
+
+def test_a_probe_nobody_heard_is_said_again_by_the_pod():
+    out = Out()
+    r = room(out)
+
+    async def play(mp3, gain=1.0, on_sound=None):
+        out.played.append(mp3)
+        out.last_heard = False                                       # the probe went out and the room's microphone heard nothing
+        return True
+    out.play = play
+    asyncio.run(r._out("Good morning.", ("mp3", b"CLIP"), announce=True))
+    assert out.played == [b"CLIP"] and r.link.spoken[-1] == ("announce", "Good morning.", ("mp3", b"CLIP"))

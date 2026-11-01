@@ -169,13 +169,31 @@ class RoutedOut:
         self.kind = "+".join(kinds)
         self.decoder = decoder or decode_cached
         self.talking_until = 0.0                                   # (monotonic) when the outputs fall silent: the room stays deaf until then (hub.Room.feed)
+        self.probe = False                                         # the next clip is a probe of a silent output (sync.Calibrator.probe_due)
+        self.last_heard = True                                     # False: the last probe was not heard in the room (the pod should say it)
+
+    def _silent(self, k: str) -> bool:
+        cal = getattr(self.router, "calibrator", None)
+        return bool(cal is not None and hasattr(cal, "silent") and cal.silent(k))
 
     def available(self):
-        return any(self.router.available(k) for k in self.kinds) or None
+        """Open and heard: the room's voice. Open but taken for off (the projector, at night: sync.py) is not, except once per PROBE_S."""
+        if not any(self.router.available(k) for k in self.kinds):
+            return None
+        if any(not self._silent(k) for k in self.kinds):
+            return True
+        if any(self.router.calibrator.probe_due(k) for k in self.kinds):
+            self.probe = True
+            return True
+        return None
 
     async def play(self, mp3: bytes, gain: float = 1.0, on_sound=None) -> bool:
         """Play it on the outputs; True when it started (False: dropped, never late). `on_sound(at, seconds)`, at once when it starts: when it
         sounds in the room (time.monotonic: the router's queue, the stream's latency and the measured rest, sync.py), for the pod's drawn lips."""
+        probe, self.probe, self.last_heard = self.probe, False, True
+        targets = self.kinds if probe else {k for k in self.kinds if not self._silent(k)}
+        if not targets:
+            return False                                           # taken for off: nobody would hear it (and its copy would confuse sync.py)
         try:
             pcm = await asyncio.to_thread(self.decoder, mp3, gain)
         except Exception as e:                                     # noqa: BLE001
@@ -190,7 +208,7 @@ class RoutedOut:
         if ducker:
             await asyncio.to_thread(ducker.duck)
         try:
-            p = self.router.play(router_mod.ClipSource(pcm), layer="voice", targets=self.kinds)
+            p = self.router.play(router_mod.ClipSource(pcm), layer="voice", targets=targets)
             started = await asyncio.to_thread(_wait_started, p, router_mod.STALE_VOICE_S + 1.0)
             if started and p.marks:
                 at = sound_at(self.router, p.marks)
@@ -200,7 +218,10 @@ class RoutedOut:
             await asyncio.to_thread(p.finished.wait, len(pcm) / RATE + 5)
             await asyncio.sleep(max((self.router.sinks[k].delay_s for k in self.kinds if k in self.router.sinks), default=0))
             cal = getattr(self.router, "calibrator", None)
-            if cal is not None and p.marks:                        # how far each copy landed from the pod's (sync.py), in the background
+            if cal is not None and p.marks and probe:              # a probe: was it heard? (the hub has the pod say it when not)
+                await asyncio.to_thread(cal.measure, pcm, dict(p.marks))
+                self.last_heard = not any(self._silent(k) for k in targets)
+            elif cal is not None and p.marks:                      # how far each copy landed from the pod's (sync.py), in the background
                 asyncio.ensure_future(asyncio.to_thread(cal.measure, pcm, dict(p.marks)))
         finally:
             if ducker:

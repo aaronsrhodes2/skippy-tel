@@ -703,6 +703,9 @@ class Room:
         if not await playing:
             self.log(f"[{self.name}] (the {sole.kind} output dropped it: the pod says it)")
             await self.link.announce(said, voice)
+        elif getattr(sole, "last_heard", True) is False:         # a probe of an output taken for off (sync.py), and still nobody heard it
+            self.log(f"[{self.name}] (the {sole.kind} output is still off: the pod says it)")
+            await self.link.announce(said, voice)
 
     def _also(self, voice) -> None:
         """Start this clip on the PC's own outputs too (each waits its own delay so they line up with the box); never holds anything up."""
@@ -1244,6 +1247,9 @@ def main(argv=None) -> int:
     ap.add_argument("--say", nargs=2, metavar=("ROOM", "TEXT"), help="say this in one room, then quit")
     ap.add_argument("--record", nargs="+", metavar=("KIND", "COUNT"), help="record wake-word clips through the pod's microphone: positive|negative [COUNT [ROOM]] (stop the running hub first; wakerec.py)")
     args = ap.parse_args(argv)
+    for stream in (sys.stdout, sys.stderr):                     # a title with a Unicode hyphen must not kill a callback on Windows' cp1252 log
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     from ear import load_env                                    # noqa: PLC0415
     env = load_env()
     try:

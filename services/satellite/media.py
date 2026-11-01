@@ -6,6 +6,9 @@
                                             127.0.0.1:3005) with a pass the hub signs itself, and turned by ffmpeg into what the box plays:
                                             16 kHz mono FLAC (an .m4a is AAC, which an ESP32 cannot decode), starting `s` seconds in
 
+    GET /w/<pass>/<name>.wav|.mp3            a wake-loop test clip from state/wakeloop/ (wakeloop.py puts it there and has the pod play it); <pass> is
+                                            wakeloop_pass(), from the home token, so the tool and the hub agree without talking
+
 <secret> is made fresh at every start and only handed to the boxes inside URLs: anyone else on the network gets a 404. The music gate's
 pass is the same scheme as the portal's (portal/player.py), from the home token, so there is nothing new to configure.
 """
@@ -36,6 +39,14 @@ def music_key(home_token: str) -> bytes:
     """The music gate's signing key (services/music-gate/gate.py gate_key), from the home token."""
     hashed = hashlib.sha256(home_token.encode()).hexdigest()
     return hmac.new(hashed.encode(), b"music-gate-v1", hashlib.sha256).digest()
+
+
+def wakeloop_pass(home_token: str) -> str:
+    """The test clips' door (GET /w/<pass>/...): wakeloop.py and the hub both make it from the home token."""
+    return hmac.new(music_key(home_token), b"wakeloop-v1", hashlib.sha256).hexdigest()[:24] if home_token else ""
+
+
+WAKELOOP_DIR = Path(__file__).resolve().parents[2] / "state" / "wakeloop"
 
 
 def music_pass(key: bytes, now: float) -> str:
@@ -76,6 +87,7 @@ class MediaServer:
                  clock=time.time, spawn=asyncio.create_subprocess_exec, fetch=None):
         self.port, self.host, self.gate, self.clock, self.spawn = port, host, gate.rstrip("/"), clock, spawn
         self.key = music_key(home_token) if home_token else b""
+        self.wakeloop = wakeloop_pass(home_token)
         self.secret = secrets.token_urlsafe(18)
         self.clips: OrderedDict[str, tuple[bytes, str, float]] = OrderedDict()
         self.ready_at: dict[str, float] = {}                     # clip -> (monotonic) when it was put up: how late the box fetches it is logged
@@ -154,6 +166,7 @@ class MediaServer:
         app.router.add_get("/v/{secret}/{clip}", self._clip)
         app.router.add_get("/m/{secret}/track.flac", self._track)
         app.router.add_get("/b/{secret}/{token}", self._book)
+        app.router.add_get("/w/{wpass}/{name}", self._wakeloop)
         app.router.add_post("/shot", self._shot)                    # a box's screenshot (rooms/shot.py asks for it); LAN only, nothing secret on a screen
         self._runner = web.AppRunner(app, access_log=None)
         await self._runner.setup()
@@ -170,6 +183,17 @@ class MediaServer:
         (out / "box-shot.txt").write_text(request.headers.get("X-Dims", "480,480,960"), encoding="utf-8")
         (out / "box-shot.bin").write_bytes(body)
         return web.Response(text="ok")
+
+    async def _wakeloop(self, request):
+        from aiohttp import web                                  # noqa: PLC0415
+        name = request.match_info["name"]
+        if not self.wakeloop or not hmac.compare_digest(request.match_info["wpass"], self.wakeloop):
+            raise web.HTTPNotFound()
+        kind = {"wav": "audio/wav", "mp3": "audio/mpeg"}.get(name.rsplit(".", 1)[-1].lower())
+        path = WAKELOOP_DIR / name
+        if kind is None or "/" in name or "\\" in name or name.startswith(".") or not path.is_file():
+            raise web.HTTPNotFound()
+        return web.Response(body=path.read_bytes(), content_type=kind)
 
     async def _clip(self, request):
         from aiohttp import web                                  # noqa: PLC0415

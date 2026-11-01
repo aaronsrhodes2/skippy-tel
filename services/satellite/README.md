@@ -40,6 +40,26 @@ their names in Bilby), `SATELLITE_MEDIA_PORT` (10800), `SATELLITE_MEDIA_HOST` (t
 `SATELLITE_MUSIC_GATE` (`http://127.0.0.1:3005`), `PORTAL_URL`. Tests: `tests/test_sat_hub.py` (a fake Wyoming box over a real socket, the real
 protocol through the `wyoming` package) and `tests/test_sat_esphome.py` (a fake ESPHome box, Home Assistant's event order).
 
+**Testing the wake loop for real: through the pod's own speaker** (the Captain, 2026-11-01: the standard loop test). `wakeloop.py` plays a
+"Hey Skippy" and then a command on the pod's media player as media (an announcement would stop its microphone), so the pod's own microphone hears
+them like a voice in the room; it reads `state/hub.log` for `woke`, `heard:` and the watchdog, and prints one line per trial (exit 0 when all pass).
+The synthesized "Hey Skippy" wakes the model about half the time (`woke=False` with the clip played is the model, not the loop); it waits for
+the room to be quiet first, but the Captain talking to Skippy can still land inside a trial.
+The hub keeps running; the pod plays it aloud. Not the projector's HDMI: it is off at night and too quiet at the pod.
+
+    ./.venv/Scripts/python wakeloop.py                       # 3 trials: "Hey Skippy", 3 s, a question (a new one each trial)
+    ./.venv/Scripts/python wakeloop.py --command ""          # the name alone: the room must keep listening (no "no audio from the box")
+    ./.venv/Scripts/python wakeloop.py --wake clips          # his own recordings (state/wakeword/real/test), served by the hub (GET /w/<pass>/)
+
+**The box's microphone stream** (2026-11-01): a box streams the whole time it rests, so the hub hears its name. The hub stops it (STT_VAD_END)
+only once a transcript has something to answer, never for the name alone; the 8 s no-audio watchdog counts from when a listening window opens;
+and a box that sends nothing for 20 s at rest is asked to start again (its turn ended, then its Microphone switch off and on; never when the
+Captain switched it off), logged as `(no audio from the box ...: ...)` and `(the box's audio is back, N s after asking)`.
+
+**One voice when the projector is off** (`sync.py`): with `SATELLITE_ONE_VOICE` the room speaks from the PC output alone; the PC's microphone
+checks every reply. Four long replies in a row it never heard and the output is taken for off: the pod speaks. Every 10 min one reply goes to the
+output alone as a probe; heard, it is the room's voice again, not heard, the pod says it right after.
+
 ## The house, natively (no Alexa, no cloud, no hub)
 
 Skippy talks to the lights and switches itself, over the local network, with open-source libraries. His Leviton Decora Smart Wi-Fi dimmers and switches
