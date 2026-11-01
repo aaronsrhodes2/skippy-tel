@@ -39,6 +39,7 @@ BLOCK = 800                                                     # 50 ms: what th
 BLOCK_MS = 50
 CHUNK = 2048                                                    # samples per audio-chunk sent back over Wyoming
 IDLE, LISTENING, FOLLOWUP, BUSY = "idle", "listening", "followup", "busy"
+REST_SILENCE_S = 20                                             # a box streams all the time it rests (the hub hears its name): this long with no audio, it is asked to start again
 PRESENT_S = 20 * 60                                             # a voice heard in the room this recently: someone is around (for a conversation starter)
 HUSH_S = 45                                                     # ... but not in the last this many seconds: never talk over people
 AFTER_TURN_S = 180                                              # nor this soon after he last spoke to Skippy
@@ -161,7 +162,13 @@ class Room:
         self.t, self._carry = 0, []                             # t: milliseconds of audio heard on this connection (the room's own clock)
         self.mode, self.deadline = IDLE, 0
         self.recorder = None                                    # wakerec.Recorder: `hub.py --record` sends the room's audio there instead of listening
+        self._last_audio = time.monotonic()                     # (monotonic) the box's last audio; a box that never sends any is noticed too
         link.room = self
+
+    def link_mic_off(self) -> bool:
+        """The box's microphone switch is off (its key, or Home Assistant): it is meant to send nothing."""
+        mic_off = getattr(self.link, "mic_off", None)
+        return bool(mic_off()) if mic_off is not None else False
 
     def _fresh(self) -> None:
         """Ready for the next thing said: the room's learned quiet level stays, everything half-heard goes."""
@@ -196,6 +203,9 @@ class Room:
     # ── the audio, 50 ms at a time ──
     def feed_pcm(self, pcm: bytes) -> None:
         self._last_audio = time.monotonic()
+        if getattr(self, "_kicked", 0):
+            self.log(f"[{self.name}] (the box's audio is back, {self._last_audio - self._kicked_at:.1f} s after asking)")
+            self._kicked = 0
         floats = pcm_floats(pcm)
         if self.mic_gain != 1.0:                                # the pod's microphone is quiet for a normal voice across a room: lift it (clipped) before anything listens
             g = self.mic_gain
@@ -260,6 +270,7 @@ class Room:
                 media.duck(True, 25)                            # a book or the stereo playing on the PC outputs goes quiet while he talks to Skippy
         self._record("wake", by=by)
         self.mode, self.deadline = LISTENING, self.t + self.listen_ms
+        self._window_opened()
         if self.buf is None:
             self.buf = list(self.pre)[:-1]                      # "Skippy, lights off" in one breath: keep the whole sentence (this block is added below)
         self._spawn(self.link.woke(by))
@@ -296,8 +307,9 @@ class Room:
     # ── what was said ──
     async def _utterance(self, was: str, samples) -> None:
         try:
-            if was != IDLE:
-                await self.link.voice_stopped()
+            # No voice_stopped() here: it stops the box's microphone until an answer comes. "Skippy" and a pause is an utterance of just the name
+            # (or Whisper refuses it): the room listens on for the command, and a box told to stop sent nothing more (2026-11-01: 8 s of silence,
+            # then the watchdog). heard() stops it once there is something to answer.
             if self.debug:                                      # keep the last thing heard, to listen to what was cut off
                 try:
                     (Path(__file__).resolve().parents[2] / "state" / "utterances").mkdir(exist_ok=True)
@@ -609,7 +621,30 @@ class Room:
     def _resume(self, mode: str, window_ms: int = 0) -> None:
         self._fresh()
         self.mode, self.deadline = mode, self.t + window_ms
+        if mode in (LISTENING, FOLLOWUP):
+            self._window_opened()
         self._session(mode == FOLLOWUP)
+
+    def _window_opened(self) -> None:
+        """A listening window opens: the watchdog's 8 s count from now, not from the box's last audio (the pod saying something stops its
+        microphone; it starts again a moment after, by which time the old count said 'no audio' and ended every routine's follow-up)."""
+        self._last_audio = max(self._last_audio or 0.0, time.monotonic())
+
+    async def _restart_box(self, why: str) -> None:
+        """The box sends no audio when it should: ask it to start its stream again (a box that can; a Wyoming satellite reconnects by itself)."""
+        restart = getattr(self.link, "restart_stream", None)
+        if restart is None:
+            return
+        tries = getattr(self, "_kicked", 0) + 1
+        self._kicked_at = time.monotonic()
+        try:
+            how = await restart(hard=tries >= 2)                # the first time its turn is ended; after that its microphone switch goes off and on
+        except Exception as e:                                  # noqa: BLE001 — the next check tries again
+            self.log(f"[{self.name}] (restarting the box's microphone failed: {type(e).__name__}: {e})")
+            return
+        if how:
+            self._kicked = tries
+            self.log(f"[{self.name}] (no audio from the box {why}: {how})")
 
     def _session(self, on: bool) -> None:
         """A conversation is open (the name opened it; it closes after a long silence or a goodbye): the box says so on its screen."""
@@ -741,6 +776,11 @@ class Room:
             self._resume(IDLE)
             self._shown_t = None
             await self.link.released()
+            await self._restart_box("while listening")
+        elif (last is not None and self.mode == IDLE and self.recorder is None and not self.voice.locked() and not self.link_mic_off()
+              and time.monotonic() - last > REST_SILENCE_S
+              and time.monotonic() - getattr(self, "_kicked_at", 0.0) > (REST_SILENCE_S if getattr(self, "_kicked", 0) < 3 else 300)):
+            await self._restart_box(f"for {time.monotonic() - last:.0f} s while resting")       # deaf at rest: his name would never be heard
         for timer in self.timers.due():
             self.log(f"[{self.name}] timer done: {timer.label}")
             await self.announce(f"Your {timer.label} timer is done.")
@@ -811,6 +851,7 @@ class WyomingLink:
         await self.send(ev("voice-stopped", {"timestamp": self.room.t}))
 
     async def heard(self, text: str) -> None:
+        await self.voice_stopped()                              # only now: "Skippy" and a pause must not stop it before the command (Room._utterance)
         await self.send(ev("transcript", {"text": text}))
 
     async def released(self) -> None:

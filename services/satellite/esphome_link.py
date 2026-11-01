@@ -109,6 +109,8 @@ class EsphomeLink:
         self._box_face = ("idle", False, False, False)              # the box's own last `Face` report: state, talking, mic off, speaker off
         self._lips_until = 0.0                                      # (monotonic) the hub drives the mouth until then: his voice is on the PC output (lips)
         self._mirror_next = None                                    # (mouth, emote) for the other pods, started by lips()
+        self._mic_switch_off = False                                # the box's Microphone switch, as it last reported it
+        self._ended_at = 0.0                                        # (monotonic) when released() last ended a turn on the box
 
     def discover(self, entities) -> None:
         for e in entities:
@@ -131,6 +133,8 @@ class EsphomeLink:
                 self.keys["face"] = e.key
             elif kind == "SensorInfo" and oid == "stream_loss":
                 self.keys["stream_loss"] = e.key
+            elif kind == "SwitchInfo" and oid == "microphone":
+                self.keys["mic"] = e.key
 
     def set_text(self, name: str, text: str) -> None:
         """Write one of the box's text entities (mouth, emote, session) and tell the face drawn here the same thing."""
@@ -188,7 +192,10 @@ class EsphomeLink:
         self.run_live, self.stage, self.vad_ended = True, "wake" if remote else "stt", False
         self._event(self.E.VOICE_ASSISTANT_RUN_START)
         self._event(self.E.VOICE_ASSISTANT_WAKE_WORD_START if remote else self.E.VOICE_ASSISTANT_STT_START)
-        await self.room.begin(remote_wake=remote)
+        try:
+            await self.room.begin(remote_wake=remote)
+        except Exception as e:                                      # noqa: BLE001 — no answer to its start request leaves the box waiting forever, deaf
+            self.log(f"[{self.room.name}] (starting a turn: {type(e).__name__}: {e})")
         return 0                                                    # 0: the audio comes over the API connection itself
 
     async def handle_audio(self, data: bytes, data2: bytes | None = None) -> None:
@@ -202,9 +209,31 @@ class EsphomeLink:
     async def handle_announcement_finished(self, finished) -> None:
         self._played.set()
 
+    def mic_off(self) -> bool:
+        """The box's microphone is switched off (its key or Home Assistant): no audio is expected, and the hub never switches it back on."""
+        return self._mic_switch_off or self._box_face[2]
+
+    async def restart_stream(self, hard: bool = False) -> str:
+        """The box should be streaming and is not (Room's watchdogs). Soft: end whatever turn it is stuck in (RUN_END takes it from waiting for
+        an answer, or for the hub's reply to its start, back to idle, where it starts streaming again by itself). Hard: its Microphone switch off
+        and on, which also brings back a box that stopped trying. What was done, or "" when nothing needed doing."""
+        if hard and "mic" in self.keys and not self.mic_off():
+            self.client.switch_command(self.keys["mic"], False)
+            await asyncio.sleep(1.5)                                # (switched on before it has stopped, the box ignores the start)
+            self.client.switch_command(self.keys["mic"], True)
+            self.run_live, self.stage = False, ""
+            return "switched its microphone off and on"
+        if time.monotonic() - self._ended_at < 2:                   # released() just ended its turn: it is starting again already
+            return ""
+        self._event(self.E.VOICE_ASSISTANT_RUN_END)
+        self.run_live, self.stage = False, ""
+        return "ended its turn so it starts listening again"
+
     def on_state(self, state) -> None:
         kind = type(state).__name__
-        if kind == "BinarySensorState" and state.key == self.keys.get("tap") and state.state:
+        if kind == "SwitchState" and state.key == self.keys.get("mic"):
+            self._mic_switch_off = not state.state
+        elif kind == "BinarySensorState" and state.key == self.keys.get("tap") and state.state:
             self.room.tap()
         elif kind == "BinarySensorState" and state.key == self.keys.get("stream_live") and self.streamer is not None:
             self.streamer.set_live(bool(state.state) and not getattr(state, "missing_state", False))
@@ -276,6 +305,7 @@ class EsphomeLink:
             self._event(self.E.VOICE_ASSISTANT_INTENT_END, {"conversation_id": "", "continue_conversation": "0", "speech": ""})
             self._event(self.E.VOICE_ASSISTANT_RUN_END)
             self.run_live, self.stage = False, ""
+            self._ended_at = time.monotonic()
 
     def others(self):
         """The other pods' links (every connected room but this one)."""

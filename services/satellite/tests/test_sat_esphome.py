@@ -33,7 +33,7 @@ class FakeClient:
     """The parts of aioesphomeapi.APIClient the hub uses, recording what it sends."""
 
     def __init__(self):
-        self.events, self.texts, self.media, self.announced = [], [], [], []
+        self.events, self.texts, self.media, self.announced, self.switches = [], [], [], [], []
         self.va = {}
         self.on_states = None
         self.on_stop = None
@@ -68,6 +68,9 @@ class FakeClient:
 
     def media_player_command(self, key, **kw):
         self.media.append((key, kw))
+
+    def switch_command(self, key, state):
+        self.switches.append((key, state))
 
     async def send_voice_assistant_announcement_await_response(self, media_id, timeout, text=""):
         self.announced.append((media_id, text))
@@ -235,6 +238,80 @@ def test_an_answer_after_a_quip_is_announced_not_sent_into_the_turn_the_box_open
         await link.speak("It is 13:16.", ("mp3", b"x"))
         assert client.announced and client.announced[-1][1] == "It is 13:16."
         assert E.VOICE_ASSISTANT_TTS_END not in client.kinds()
+        task.cancel()
+    run(go())
+
+
+def test_the_name_and_a_pause_keeps_the_box_streaming_for_the_command():
+    """2026-11-01: "Skippy" ... (a breath) ... "what time is it?". The name alone was a finished utterance; the hub told the box the voice had
+    ended (STT_VAD_END: the box stops its microphone and waits for an answer), Whisper heard only the name, the room listened on, and the box
+    sent nothing more: 8 s of silence, then the watchdog. The box is told only once there is something to answer."""
+    async def go():
+        client, media, made, hub, task, log = await boot()
+        await client.va["handle_start"]("", WAKE, None, None)
+        await stream(client, QUIET, 600)
+        made["gate"].said.append("Skippy.")
+        made["spotter"].arm()
+        await stream(client, VOICE, 700)
+        await stream(client, QUIET, 1500)
+        await settle(lambda: made["gate"].stt_calls == 1 and made["room"].mode == "listening")
+        assert E.VOICE_ASSISTANT_STT_VAD_END not in client.kinds() and E.VOICE_ASSISTANT_RUN_END not in client.kinds()
+        made["gate"].said.append("What time is it?")
+        await stream(client, VOICE, 1200)
+        await stream(client, QUIET, 1500)
+        await settle(lambda: made["brain"].heard == ["What time is it?"])
+        assert client.kinds().count(E.VOICE_ASSISTANT_STT_VAD_END) == 1
+        task.cancel()
+    run(go())
+
+
+def test_a_listening_window_counts_the_boxs_silence_from_when_it_opens():
+    """The pod saying something stops its microphone for as long as it talks; the follow-up window after it must not end at once for the
+    silence while it was talking (every part of the morning routine ended its follow-up that way)."""
+    async def go():
+        client, media, made, hub, task, log = await boot()
+        room = made["room"]
+        room._last_audio -= 30                                    # it talked for 30 s
+        room._resume("followup", room.followup_ms)
+        await room.timers_due()
+        assert room.mode == "followup" and not any("no audio" in line for line in log)
+        room._last_audio -= 9
+        await room.timers_due()
+        assert room.mode == "idle" and any("no audio from the box for 8 s" in line for line in log)
+        assert client.kinds()[-1] == E.VOICE_ASSISTANT_RUN_END    # and the box is told to start its stream again
+        task.cancel()
+    run(go())
+
+
+def test_a_box_gone_quiet_at_rest_is_restarted_then_switched_off_and_on():
+    async def go():
+        client, media, made, hub, task, log = await boot()
+        room, link = made["room"], made["room"].link
+        link.keys["mic"] = 9
+        room._last_audio -= 25
+        await room.timers_due()
+        assert client.kinds()[-1] == E.VOICE_ASSISTANT_RUN_END and client.switches == []
+        await room.timers_due()                                   # asked a moment ago: not again yet
+        assert client.kinds().count(E.VOICE_ASSISTANT_RUN_END) == 1
+        room._kicked_at -= 25
+        await room.timers_due()
+        assert client.switches == [(9, False), (9, True)]
+        await client.va["handle_audio"](pcm(QUIET, 50))
+        assert any("audio is back" in line for line in log) and room._kicked == 0
+        task.cancel()
+    run(go())
+
+
+def test_a_box_with_its_microphone_switched_off_is_left_alone():
+    async def go():
+        client, media, made, hub, task, log = await boot()
+        room, link = made["room"], made["room"].link
+        from aioesphomeapi import SwitchState
+        link.keys["mic"] = 9
+        link.on_state(SwitchState(key=9, state=False))
+        room._last_audio -= 60
+        await room.timers_due()
+        assert E.VOICE_ASSISTANT_RUN_END not in client.kinds() and client.switches == []
         task.cancel()
     run(go())
 
