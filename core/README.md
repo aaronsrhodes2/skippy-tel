@@ -145,6 +145,27 @@ on the home LAN, which Docker on Windows doesn't give a container; SkippyCore is
 - **On skippy-pc:** `MATTER_URL=ws://skippy-core:5580/ws` in the vault `.env`; then `homectl.py matter-info`, `matter-pair`, `list`,
   `say`, `prove` (`services/satellite/README.md`).
 
+## The Enclave speakers on its Bluetooth (2026-11-01)
+
+The Captain's **Enclave Audio** speakers are paired with SkippyCore's own Bluetooth radio (hci0) and play the house's sound: the hub on
+skippy-pc still makes every sound (Skippy's voice, Bilby, the routines) and sends it over the tailnet; this box only plays it. Why here:
+the projector's HDMI is off at night, and skippy-pc's own Bluetooth is weak.
+
+    hub (skippy-pc, services/satellite/router.py NetStream) ──raw PCM, tcp :4953──▶ snapserver ──▶ snapclient ──▶ PipeWire ──A2DP──▶ Enclave
+
+- **Install:** `sudo bash core/install/enclave.sh` (dry run), `--apply`, then `--pair` with the speaker in Bluetooth pairing mode, then
+  `--check`. It installs headless PipeWire + WirePlumber + bluez5 as aaron's user services (linger: no login needed; WirePlumber told not
+  to wait for a desk seat), **snapserver** (one source: raw PCM pushed by the hub on 127.0.0.1:4953, a 300 ms buffer; its JSON-RPC on
+  127.0.0.1:1780), and both doors onto the **tailnet only** through `tailscale serve` (no key of their own: never the LAN or the Funnel).
+- **enclave-keep** (`core/enclave/keep.sh`, aaron's user service): connects the speaker whenever it is on (every 10 s while it isn't) and
+  runs snapclient (`enclave-snap`) into its A2DP sink only while it is connected. So snapserver lists a connected client exactly when the
+  Enclave plays, and that is the one thing the hub asks before it sends.
+- **One sender:** snapserver takes one stream at a time: the hub, or `services/satellite/sync_outputs.py` while the hub isn't sending.
+- **The car shares the radio, badly:** tesla-control (core/car-ble) takes its adapter away from bluez for every charge command, which drops
+  the speaker for ~30 s (the keeper reconnects it; the hub moves the voice to the other outputs meanwhile). The fix is the car's own USB
+  radio: plug one in, then `TESLA_BT_ADAPTER=hci1` in `/etc/skippy-core/tesla-ble/vin.env` and a repair (ble.py passes `-bt-adapter`).
+- **Look:** `journalctl --user -u enclave-keep -u enclave-snap`, `pactl list short sinks`, `bluetoothctl info 00:07:80:C5:32:90`.
+
 ## Status and recovery
 
 - `python3 /opt/skippy-core/repo/core/deployer/deployer.py status`: the last run (`ok`, `waiting-ci`, `refused`,

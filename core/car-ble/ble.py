@@ -27,7 +27,10 @@ PORT = int(os.environ.get("PORT", "7352"))
 HOST = os.environ.get("HOST", "127.0.0.1")                 # host networking (the radio): the tailnet reaches it only through tailscale serve
 KEY = os.environ.get("TESLA_KEY_FILE", "/keys/private.pem")
 VIN = os.environ.get("TESLA_VIN", "").strip()
-HCI = Path(os.environ.get("HCI_PATH", "/sys/class/bluetooth/hci0"))
+# Which radio: tesla-control takes its adapter away from bluez for each command, which drops any Bluetooth audio on it (the Enclave,
+# core/install/enclave.sh, 2026-11-01). So the car gets its own USB radio when there is one: TESLA_BT_ADAPTER=hci1 in vin.env.
+ADAPTER = os.environ.get("TESLA_BT_ADAPTER", "hci0").strip() or "hci0"
+HCI = Path(os.environ.get("HCI_PATH", f"/sys/class/bluetooth/{ADAPTER}"))
 TOOL = os.environ.get("TESLA_CONTROL", "tesla-control")
 TIMEOUT = 45
 
@@ -73,7 +76,7 @@ def why(out: str) -> str:
 
 def run(args: list[str], runner=subprocess.run) -> tuple[bool, str]:
     try:
-        got = runner([TOOL, "-ble", "-vin", VIN, "-key-file", KEY, *args], capture_output=True, text=True, timeout=TIMEOUT)
+        got = runner([TOOL, "-ble", *(["-bt-adapter", ADAPTER] if ADAPTER != "hci0" else []), "-vin", VIN, "-key-file", KEY, *args], capture_output=True, text=True, timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
         return False, "timeout: the car didn't answer over Bluetooth"
     out = (got.stdout or "") + (got.stderr or "")

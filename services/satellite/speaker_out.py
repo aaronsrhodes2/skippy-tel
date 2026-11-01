@@ -249,7 +249,26 @@ def sound_at(router, marks: dict) -> float:
 
 
 def output_parts(env: dict) -> dict:
-    return {"hdmi": env.get("SATELLITE_OUT_HDMI", "NVIDIA High Definition"), "bt": env.get("SATELLITE_OUT_BT", "Enclave Audio")}
+    return {"hdmi": env.get("SATELLITE_OUT_HDMI", "NVIDIA High Definition"), "bt": env.get("SATELLITE_OUT_BT", "Enclave Audio"),
+            "enclave": env.get("SATELLITE_OUT_ENCLAVE", "tcp://skippy-core:4953")}   # the Enclave on skippy-core's Bluetooth (router.NetStream)
+
+
+def split_kinds(spec: str) -> list[str]:
+    """Every output a spec names: "pod+enclave>hdmi" -> ["pod", "enclave", "hdmi"] ('+' all of them, '>' the first that is open)."""
+    return [k.strip() for k in spec.replace(">", "+").split("+") if k.strip()]
+
+
+def prefer_chains(env: dict) -> list[list[str]]:
+    """Every '>' preference in SATELLITE_OUT and SKIPPY_STEREO_OUT: "pod+enclave>hdmi" -> [["enclave", "hdmi"]] (router.Router.effective)."""
+    specs = [part.split("=", 1)[1] for part in (env.get("SATELLITE_OUT") or "").split(";") if "=" in part]
+    specs.append(env.get("SKIPPY_STEREO_OUT") or "")
+    chains = []
+    for spec in specs:
+        for group in spec.split("+"):
+            chain = [k.strip() for k in group.split(">") if k.strip()]
+            if len(chain) > 1 and chain not in chains:
+                chains.append(chain)
+    return chains
 
 
 def output_delays(env: dict) -> dict:
@@ -266,7 +285,7 @@ def room_kinds(env: dict, room: str) -> list[str]:
     for part in (env.get("SATELLITE_OUT") or "").split(";"):
         if part.strip().startswith(room + "="):
             want = part.split("=", 1)[1].strip()
-    return [k.strip() for k in want.split("+") if k.strip()]
+    return split_kinds(want)
 
 
 def one_voice(env: dict) -> bool:

@@ -191,3 +191,15 @@ def test_a_reflection_beside_the_projector_copy_is_not_taken_for_a_late_pod(tmp_
     c, logs = calibrator(router, ring, tmp_path)
     got = c.measure(clip, {"hdmi": (push, 0.5, 0.1)})
     assert abs(got["outputs"]["hdmi"]["offset"] + 5.0) < 0.01 and "the pod's copy came 5.0 s late" in logs[-1]
+
+
+def test_saved_align_reads_each_outputs_wait(tmp_path):
+    import json
+    p = tmp_path / "audio-sync.json"
+    p.write_text(json.dumps({"align": {"wait": {"hdmi": 0.147, "enclave": 0.0}}}))
+    assert sync.saved_align(p) == {"hdmi": 0.147, "enclave": 0.0}
+    assert sync.saved_align(tmp_path / "none.json") == {}
+
+
+def test_pod_rooms_kinds_reads_preferences():
+    assert sync.pod_rooms_kinds({"SATELLITE_OUT": "office=pod+enclave>hdmi"}) == {"enclave", "hdmi"}

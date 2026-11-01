@@ -67,6 +67,11 @@ def saved_delays(path: Path = STATE) -> dict:
     return {k: float(v["delay"]) for k, v in (load(path).get("outputs") or {}).items() if isinstance(v, dict) and "delay" in v}
 
 
+def saved_align(path: Path = STATE) -> dict:
+    """Several outputs in one room (sync_outputs.py): how long each waits so all of them sound with the slowest."""
+    return {k: float(v) for k, v in ((load(path).get("align") or {}).get("wait") or {}).items()}
+
+
 def to_fs(pcm48):
     """The router's 48 kHz stereo clip as 16 kHz mono (a 3-sample average, then every third: plenty for a voice band correlation)."""
     np = _np()
@@ -330,7 +335,7 @@ def pod_rooms_kinds(env: dict) -> set[str]:
     out = set()
     for part in (env.get("SATELLITE_OUT") or "").split(";"):
         if "=" in part:
-            kinds = {k.strip() for k in part.split("=", 1)[1].split("+")}
+            kinds = set(part.split("=", 1)[1].replace(">", "+").split("+")) - {""}
             if "pod" in kinds:
                 out |= kinds - {"pod"}
     return out

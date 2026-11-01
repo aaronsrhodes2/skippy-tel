@@ -202,3 +202,97 @@ def test_a_book_waits_for_its_output_instead_of_being_dropped():
     t["now"] += 30
     r.mix_once()
     assert p.id in r.plays and not p.started
+
+
+# ── the Enclave on skippy-core: a network output, and `a>b` preferences (2026-11-01) ──────────────────────────────────────────
+def test_a_preference_plays_only_the_first_open_output():
+    w = World()
+    r = rt.Router([("hdmi", "HDMI", 0.0), ("bt", "Enclave", 0.0)], find=w.find, stream_factory=w.factory, reinit=w.reinit,
+                  log=lambda *a: None, autostart=False, prefer=[["bt", "hdmi"]])
+    r.mix_once()
+    assert r.effective({"bt", "hdmi"}) == {"bt"}
+    r.play(rt.ClipSource(tone(0.1)), targets={"bt", "hdmi"})
+    r.mix_once()
+    assert w.streams[len("Enclave")].pull(rt.BLOCK).any()
+    assert not w.streams[len("HDMI")].pull(rt.BLOCK).any()
+    r.sinks["bt"].close()                                       # the Enclave went off: the projector takes over
+    assert r.effective({"bt", "hdmi"}) == {"hdmi"}
+
+
+def test_a_network_output_that_is_missing_never_resets_the_others():
+    w = World(present=("HDMI",))
+    r = rt.Router([("hdmi", "HDMI", 0.0), ("enclave", "tcp://core:4953", 0.0)], find=w.find, stream_factory=w.factory,
+                  reinit=w.reinit, log=lambda *a: None, autostart=False)
+    r.mix_once()
+    first = w.reinits
+    for _ in range(3):
+        r.scan()
+    assert w.reinits == first and r.available("hdmi") and not r.available("enclave")
+    w.present.add("tcp://core:4953")
+    r.scan()
+    assert r.available("enclave") and w.reinits == first
+
+
+def test_a_dead_network_stream_reads_as_closed_and_is_reopened():
+    w = World(present=("HDMI", "tcp://core:4953"))
+    r = rt.Router([("enclave", "tcp://core:4953", 0.0)], find=w.find, stream_factory=w.factory, reinit=w.reinit,
+                  log=lambda *a: None, autostart=False)
+    r.mix_once()
+    old = r.sinks["enclave"].stream
+    old.alive = False                                           # the speaker stopped playing
+    assert not r.available("enclave")
+    r.scan()
+    assert r.available("enclave") and old.closed
+
+
+def test_netstream_sends_s16_pcm_and_dies_when_the_speaker_stops(monkeypatch):
+    import threading
+    sent, done = [], threading.Event()
+
+    class Sock:
+        def settimeout(self, _t):
+            pass
+
+        def sendall(self, b):
+            sent.append(b)
+            if len(sent) >= 3:
+                watch.playing = None
+                done.set()
+
+        def close(self):
+            pass
+
+    watch = rt.NetWatch("core", start=False)
+    watch.ready.set()
+    watch.playing = "skippy-core"
+    monkeypatch.setitem(rt.NetWatch._all, "core", watch)
+
+    def cb(out, frames, _t, _s):
+        out[:] = 0.5
+    s = rt.NetStream("tcp://core:4953", cb, connect=Sock)
+    assert done.wait(2)
+    for _ in range(50):
+        if not s.alive:
+            break
+        import time
+        time.sleep(0.02)
+    assert not s.alive
+    pcm = np.frombuffer(sent[0], dtype="<i2")
+    assert len(pcm) == rt.BLOCK * 2 and abs(int(pcm[0]) - 16383) <= 1
+
+
+def test_net_find_answers_from_the_poller_without_waiting(monkeypatch):
+    watch = rt.NetWatch("core", start=False)
+    watch.ready.set()
+    monkeypatch.setitem(rt.NetWatch._all, "core", watch)
+    assert rt.net_find("tcp://core:4953") is None
+    watch.playing = "skippy-core"
+    assert rt.net_find("tcp://core:4953") == ("tcp://core:4953", "skippy-core on core")
+
+
+def test_output_specs_with_preferences():
+    assert speaker_out.split_kinds("pod+enclave>hdmi") == ["pod", "enclave", "hdmi"]
+    env = {"SATELLITE_OUT": "office=pod+enclave>hdmi;den=pod", "SKIPPY_STEREO_OUT": "enclave>hdmi"}
+    assert speaker_out.prefer_chains(env) == [["enclave", "hdmi"]]
+    assert speaker_out.room_kinds(env, "office") == ["pod", "enclave", "hdmi"]
+    assert speaker_out.output_parts({})["enclave"].startswith("tcp://")

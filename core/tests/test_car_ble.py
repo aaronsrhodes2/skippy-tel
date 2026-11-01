@@ -78,3 +78,12 @@ def test_the_container_owns_the_radio_but_keeps_the_key_read_only_and_the_door_l
     assert ble.HOST == "127.0.0.1"                                            # host networking: the tailnet only through tailscale serve
     docker = (CORE / "car-ble" / "Dockerfile").read_text(encoding="utf-8")
     assert "ARG VEHICLE_COMMAND=v0.4.1" in docker                             # Tesla's tool, pinned
+
+
+def test_the_car_can_have_its_own_radio(monkeypatch):
+    """A second USB radio for the car (TESLA_BT_ADAPTER): the Enclave's audio on hci0 isn't dropped by every charge command."""
+    seen = []
+    monkeypatch.setattr(ble, "ADAPTER", "hci1")
+    monkeypatch.setattr(ble, "VIN", "5YJTEST")
+    ble.run(["charging-start"], runner=lambda args, **kw: seen.append(args) or type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})())
+    assert seen[0][:4] == ["tesla-control", "-ble", "-bt-adapter", "hci1"]

@@ -15,6 +15,12 @@ clipped the first word while it woke. Now:
     SATELLITE_OUT=office=pod+hdmi+bt            which outputs a room uses (speaker_out.parse_outputs)
     SATELLITE_OUT_HDMI / SATELLITE_OUT_BT       a part of each Windows output's name
     SATELLITE_OUT_DELAYS=hdmi=0.5,bt=0.4        each output's starting delay; sync.py then measures and corrects it from the PC's microphone
+    SATELLITE_OUT_ENCLAVE=tcp://skippy-core:4953   a NETWORK output (2026-11-01): the Enclave speakers on skippy-core's Bluetooth, fed over
+                                                the tailnet to its snapserver (core/install/enclave.sh, NetStream below); open only while
+                                                skippy-core says the speaker is on and playing
+    SATELLITE_OUT=office=pod+enclave>hdmi       `a>b`: a preference, not both: b plays only while a is not open (the Enclave, else the
+                                                projector); SKIPPY_STEREO_OUT takes the same form for music
+    Several outputs in one room line up with each other by `align` (sync_outputs.py measures each one's latency from the microphone).
 
 Thread-safe; the mixer runs in its own thread. `stream_factory` and `find` are the seams the tests replace.
 """
@@ -58,9 +64,15 @@ class Sink:
 
     @property
     def open(self) -> bool:
-        return self.stream is not None
+        return self.stream is not None and getattr(self.stream, "alive", True)
+
+    @property
+    def net(self) -> bool:
+        return is_net(self.part)
 
     def try_open(self) -> bool:
+        if self.stream is not None:                                # a network output that went away: let go of the old connection first
+            self.close()
         dev = None
         try:
             dev = self.find(self.part)
@@ -246,7 +258,8 @@ class Play:
 
 
 class Router:
-    def __init__(self, outputs: list[tuple[str, str, float]], find=None, stream_factory=None, reinit=None, log=print, clock=time.monotonic, autostart: bool = True):
+    def __init__(self, outputs: list[tuple[str, str, float]], find=None, stream_factory=None, reinit=None, log=print, clock=time.monotonic, autostart: bool = True,
+                 prefer: list[list[str]] | None = None):
         self.find = find or _find_device
         self.factory = stream_factory or _sd_stream
         self.reinit = reinit or _reinit_portaudio
@@ -262,6 +275,7 @@ class Router:
         self._last_scan = -1e9
         self.autostart = autostart
         self.calibrator = None                                    # sync.Calibrator, set by shared(): measures each voice clip against the pod
+        self.prefer = [c for c in (prefer or []) if len(c) > 1]   # ["enclave", "hdmi"]: the first of them that is open plays, the rest don't
 
     # ── what the hub calls ────────────────────────────────────────────────────────────────────────────────────────────────────
     def kinds(self) -> list[str]:
@@ -270,6 +284,15 @@ class Router:
     def available(self, kind: str) -> bool:
         s = self.sinks.get(kind)
         return bool(s and s.open)
+
+    def effective(self, targets) -> set[str]:
+        """A play's targets after the preferences: in each chain, only the first output that is open (none open: left as they are)."""
+        out = set(targets)
+        for chain in self.prefer:
+            first = next((k for k in chain if k in out and self.available(k)), None)
+            if first is not None:
+                out -= set(chain) - {first}
+        return out
 
     def play(self, source, layer: str = "voice", targets=None, gain: float = 1.0) -> Play:
         with self.lock:
@@ -323,6 +346,9 @@ class Router:
         The sync microphone (sync.MicRing) is opened here too, after any re-read: re-reading closes every stream, its included."""
         mic = getattr(self.calibrator, "mic", None)
         missing = [s for s in self.sinks.values() if not s.open]
+        for s in [s for s in missing if s.net]:                   # a network output: no device list to re-read, never a reason to reset the others
+            s.try_open()
+        missing = [s for s in missing if not s.net]
         if not missing:
             if mic is not None and mic.stream is None:
                 mic.start()
@@ -332,12 +358,14 @@ class Router:
         if quiet:                                                 # nothing to interrupt: read the device list again, open everything
             try:
                 for s in self.sinks.values():
-                    s.close()
+                    if not s.net:
+                        s.close()
                 self.reinit()
             except Exception:                                     # noqa: BLE001
                 pass
             for s in self.sinks.values():
-                s.try_open()
+                if not s.net:
+                    s.try_open()
             if mic is not None:
                 mic.stream = None                                 # the re-read closed it
                 mic.start()
@@ -360,8 +388,9 @@ class Router:
             self.layer_gain[layer] = target if abs(target - g) <= RAMP else g + (RAMP if target > g else -RAMP)
         mixes = {k: None for k, s in self.sinks.items() if s.open}
         for p in plays:
+            targets = self.effective(p.targets) if self.prefer else p.targets
             if not p.started:
-                if not any(k in mixes for k in p.targets):
+                if not any(k in mixes for k in targets):
                     if p.layer == "voice" and self.clock() - p.created > STALE_VOICE_S:
                         self.log(f"(router: a voice clip waited {self.clock() - p.created:.1f} s for an output: dropped, never played late)")
                         self.stop(p)
@@ -372,7 +401,7 @@ class Router:
                     continue
                 p.started = True
                 if p.layer == "voice":                            # line it up: exactly its delay of silence ahead of it (sync.py measures the rest)
-                    for k in p.targets:
+                    for k in targets:
                         if k in mixes:
                             sink = self.sinks[k]
                             p.marks[k] = (self.clock(), sink.realign(), sink.latency)
@@ -381,7 +410,7 @@ class Router:
                 chunk = chunk * (p.gain * self.layer_gain.get(p.layer, 1.0))
                 if len(chunk) < BLOCK:
                     chunk = np.concatenate([chunk, np.zeros((BLOCK - len(chunk), 2), dtype="float32")])
-                for k in p.targets:
+                for k in targets:
                     if k in mixes:
                         mixes[k] = chunk if mixes[k] is None else mixes[k] + chunk
             if p.source.done:
@@ -393,11 +422,15 @@ class Router:
 
 # ── the real devices ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 def _find_device(part: str):
+    if is_net(part):
+        return net_find(part)
     import speaker_out                                            # noqa: PLC0415
     return speaker_out.find_device(part)
 
 
-def _sd_stream(device: int, callback):
+def _sd_stream(device, callback):
+    if is_net(device):
+        return NetStream(device, callback)
     import sounddevice as sd                                      # noqa: PLC0415
     s = sd.OutputStream(samplerate=RATE, channels=2, dtype="float32", device=device, callback=callback, blocksize=BLOCK, latency="low")
     s.start()
@@ -408,6 +441,124 @@ def _reinit_portaudio() -> None:
     import sounddevice as sd                                      # noqa: PLC0415
     sd._terminate()                                               # noqa: SLF001 — the only way PortAudio reads the device list again
     sd._initialize()                                              # noqa: SLF001
+
+
+# ── a network output: the Enclave on skippy-core (core/install/enclave.sh) ─────────────────────────────────────────────────────
+#   hub ──raw PCM, 48 kHz s16 stereo, tcp :4953──▶ snapserver ──▶ snapclient ──▶ PipeWire ──A2DP──▶ Enclave
+# skippy-core's keeper runs snapclient only while the speaker is connected, so "snapserver has a connected client" = "it plays".
+# That answer is kept fresh by a poller thread: net_find never blocks the mixer, which calls it from its own thread.
+NET_STATUS_PORT = 1780            # snapserver's JSON-RPC (tailnet only)
+NET_POLL_S = 3.0
+NET_LATENCY_S = 0.3               # snapserver's buffer (core/install/enclave.sh): the part known up front; the rest is measured
+
+
+def is_net(part) -> bool:
+    return isinstance(part, str) and part.startswith("tcp://")
+
+
+def _host_port(url: str) -> tuple[str, int]:
+    hp = url[len("tcp://"):].split("/", 1)[0].split("?", 1)[0]
+    host, _, port = hp.rpartition(":")
+    return host, int(port)
+
+
+def snap_playing(host: str, timeout: float = 2.0) -> str | None:
+    """The name of a snapclient connected to the snapserver on `host` (the speaker plays), or None."""
+    import json                                                   # noqa: PLC0415
+    import urllib.request                                         # noqa: PLC0415
+    body = json.dumps({"id": 1, "jsonrpc": "2.0", "method": "Server.GetStatus"}).encode()
+    req = urllib.request.Request(f"http://{host}:{NET_STATUS_PORT}/jsonrpc", data=body, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:      # noqa: S310 — a tailnet host from the vault
+        status = json.loads(r.read())
+    for g in status.get("result", {}).get("server", {}).get("groups", []):
+        for c in g.get("clients", []):
+            if c.get("connected"):
+                return (c.get("host") or {}).get("name") or c.get("id") or "snapclient"
+    return None
+
+
+class NetWatch:
+    """One poller per host: whether its speaker plays, refreshed every NET_POLL_S in the background."""
+    _all: dict = {}
+    _lock = threading.Lock()
+
+    def __init__(self, host: str, check=snap_playing, start: bool = True):
+        self.host, self.check = host, check
+        self.playing: str | None = None
+        self.ready = threading.Event()                            # set after the first answer
+        if start:
+            threading.Thread(target=self._loop, daemon=True, name=f"net-watch-{host}").start()
+
+    def _loop(self) -> None:
+        while True:
+            try:
+                self.playing = self.check(self.host)
+            except Exception:                                     # noqa: BLE001 — unreachable is just "not playing"
+                self.playing = None
+            self.ready.set()
+            time.sleep(NET_POLL_S)
+
+    @classmethod
+    def of(cls, host: str) -> "NetWatch":
+        with cls._lock:
+            if host not in cls._all:
+                cls._all[host] = cls(host)
+            return cls._all[host]
+
+
+def net_find(part: str):
+    """(the url, a name) while the speaker behind it plays; None otherwise. Never waits: the first call starts the poller."""
+    host, _ = _host_port(part)
+    w = NetWatch.of(host)
+    w.ready.wait(2.5)                                             # only the first call waits (the hub's start), for the first answer
+    return (part, f"{w.playing} on {host}") if w.playing else None
+
+
+class NetStream:
+    """An output stream to a network speaker: sounddevice's callback contract, paced by this PC's clock (snapclient keeps the speaker on
+    snapserver's; the drift between them is snapcast's to absorb). Goes dead (`alive` False: the router reopens it later) when the
+    connection breaks or the speaker stops playing."""
+
+    def __init__(self, url: str, callback, connect=None, clock=time.monotonic):
+        import socket                                             # noqa: PLC0415
+        self.url, self.callback, self.clock = url, callback, clock
+        self.host, self.port = _host_port(url)
+        self.sock = (connect or (lambda: socket.create_connection((self.host, self.port), timeout=3)))()
+        self.sock.settimeout(1.0)
+        self.latency = NET_LATENCY_S
+        self.alive = True
+        self._stop = threading.Event()
+        threading.Thread(target=self._loop, daemon=True, name="net-out").start()
+
+    def _loop(self) -> None:
+        np = _np()
+        buf = np.zeros((BLOCK, 2), dtype="float32")
+        nxt = self.clock()
+        while not self._stop.is_set():
+            self.callback(buf, BLOCK, None, None)
+            try:
+                self.sock.sendall((np.clip(buf, -1.0, 1.0) * 32767).astype("<i2").tobytes())
+            except OSError:
+                break
+            if not NetWatch.of(self.host).playing:
+                break                                             # the speaker went off: closed, so the room's voice moves elsewhere
+            nxt += BLOCK_S
+            pause = nxt - self.clock()
+            if pause > 0:
+                time.sleep(pause)
+            elif pause < -1.0:
+                nxt = self.clock()
+        self.alive = False
+
+    def stop(self) -> None:
+        self._stop.set()
+        self.alive = False
+
+    def close(self) -> None:
+        try:
+            self.sock.close()
+        except OSError:
+            pass
 
 
 _ROUTER: Router | None = None
@@ -424,15 +575,16 @@ def shared(env: dict, log=print) -> Router:
             used = set()
             for part in (env.get("SATELLITE_OUT") or "").split(";"):
                 if "=" in part:
-                    used |= {k.strip() for k in part.split("=", 1)[1].split("+")}
+                    used |= set(speaker_out.split_kinds(part.split("=", 1)[1]))
             import sync                                           # noqa: PLC0415
             solo = speaker_out.one_voice(env)
             if solo:                                              # the PC output is the room's only voice: nothing to wait for, just a jitter cushion
+                align = sync.saved_align()                        # several outputs in one room: the faster ones wait for the slowest (sync_outputs.py)
                 for k in sync.pod_rooms_kinds(env):
-                    delays[k] = float(env.get("SATELLITE_SOLO_DELAY", str(SOLO_DELAY_S)))
+                    delays[k] = float(env.get("SATELLITE_SOLO_DELAY", str(SOLO_DELAY_S))) + align.get(k, 0.0)
             else:
                 delays.update(sync.saved_delays())                # what the last calibration settled on beats the vault's starting guess
-            _ROUTER = Router([(k, parts[k], delays.get(k, 0.0)) for k in parts if k in used], log=log)
+            _ROUTER = Router([(k, parts[k], delays.get(k, 0.0)) for k in parts if k in used], log=log, prefer=speaker_out.prefer_chains(env))
             _ROUTER.calibrator = sync.for_router(_ROUTER, env, log, solo=solo)   # the PC's microphone hears each reply: when it really sounded
             if _ROUTER.sinks:
                 _ROUTER.start()                                   # open the outputs now: PortAudio's first device scan takes seconds

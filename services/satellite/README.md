@@ -177,6 +177,29 @@ himself; there is no hook built for it yet.
   `audiobooks.run_command` on the room's `BookPlayer`.
 * Tests: `tests/test_sat_audiobooks.py` (real ffmpeg builds a synthetic multi-chapter m4b and a track-per-chapter folder).
 
+## The Enclave on skippy-core, and several outputs in one room (`router.py`, `sync_outputs.py`)
+
+The Enclave Audio speakers hang off **skippy-core's** Bluetooth (core/README.md → The Enclave speakers), not skippy-pc's. To the hub they are
+one more router output, `enclave`, whose part is a URL instead of a Windows device name:
+
+    SATELLITE_OUT_ENCLAVE=tcp://skippy-core:4953     (the default)
+    SATELLITE_OUT=office=pod+enclave+hdmi             the theater today: the Enclave and the Sony together, the pod the mic and the face
+    SKIPPY_STEREO_OUT=enclave+hdmi                    Bilby on both
+    SATELLITE_OUT=office=pod+enclave>hdmi             `a>b`: a preference: the HDMI plays only while the Enclave isn't open
+
+* **`router.NetStream`** sends the sink's blocks as 48 kHz 16-bit stereo PCM to skippy-core's snapserver, paced by this PC's clock (snapcast keeps
+  the speaker on its own clock and absorbs the drift). **`NetWatch`** asks snapserver every 3 s whether a client plays (the speaker is on);
+  the output is open only while it does, and a stream that breaks or whose speaker stops goes dead, so the voice moves to the other outputs
+  and the next scan reopens it. A network output never makes the router re-read PortAudio's device list.
+* **Lining up several outputs in one room:** sync.py lines a PC output up with the pod, or (one voice) learns its latency; it can't tell two
+  PC outputs apart. `python services/satellite/sync_outputs.py enclave hdmi` plays a chirp on each alone (4 rounds), times it with the
+  sync mic, and saves `align` in `state/audio-sync.json`: each output waits for the slowest. `router.shared()` adds that wait to the
+  one-voice cushion; restart the hub to use it. Measured 2026-11-01 in the theater: Enclave 297 ms, Sony (HDMI) 150 ms, so the HDMI waits
+  147 ms, and a clip on both is heard as one copy. The numbers are each output's own latency, so they stay right when the Enclave moves
+  to another room (a whole-house sound lines up with them); measure again when a speaker or its connection changes. Run it while the hub
+  isn't sending to the Enclave (snapserver takes one sender), e.g. right after stopping the hub.
+* The pod's own speaker isn't in it (its sound goes through ESPHome's media player, not the router).
+
 ## Bilby's DJ mode on the house stereo (`dj.py`)
 
 His library on the Sony mixed like a DJ set, from his own Traktor work, all on skippy-pc. The house stereo's player (`stereo.StereoMusic`, made by

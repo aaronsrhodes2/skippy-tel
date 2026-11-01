@@ -1013,7 +1013,7 @@ def build_rooms(env: dict):
         if "music" not in stereo_holder and stereo_holder.get("media") is not None:
             import router as router_mod                          # noqa: PLC0415
             from stereo import StereoMusic                       # noqa: PLC0415
-            kinds = [k for k in env.get("SKIPPY_STEREO_OUT", "hdmi").split("+") if k]
+            kinds = speaker_out.split_kinds(env.get("SKIPPY_STEREO_OUT", "hdmi"))   # "enclave>hdmi": the router plays the first that is open
             import spotify as spotify_mod                        # noqa: PLC0415 — his Spotify on the same stereo (services/spotify), unless SKIPPY_SPOTIFY=off
             spot = None if env.get("SKIPPY_SPOTIFY", "on").lower() in ("off", "0", "no") else spotify_mod.Client.from_env(env)
             music = stereo_holder["music"] = StereoMusic(router_mod.shared(env, log), kinds, stereo_holder["media"], log=log, spotify=spot, env=env)
