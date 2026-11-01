@@ -50,3 +50,11 @@ A pod's microphone (ESP32-S3, its ADC, noise suppression and gain) sounds nothin
 
 `wakerec.py` keeps each clip (0.6 s before his voice, to the end of the phrase) in `state/wakeword/real/{positive,negative}/`, every 5th in `real/test/`
 (held out of training, so `wakectl.py test` is honest). It resumes where it stopped. `train.sh` trains on the rest, his negatives included.
+
+## What the first models did (2026-10-31, Office pod)
+
+Trained on 29 real positives and 28 real negatives through the pod (plus 7+8 held out), each mixed in 20 times at x2..x5 gain, and 50,000 synthetic voices.
+`skippy.onnx` is **v1** (negative weight 1500) at `SATELLITE_WAKE_THRESHOLD=0.2`; v2 (weight 400, cleaned labels) was no better (`skippy_v2.onnx`).
+Measured: held-out "Skippy" 5 of 7, recorded training clips 16 of 29, 0 false wakes in 2.4 h of background audio, 2 of 36 of his not-Skippy clips wake it.
+The limit is the data: the pod's microphone is quiet and some takes are mush (7 of 43 "positives" were not the word at all). Record more, clean takes, then `train.sh`.
+Training pitfalls fixed here: it needs a Docker volume (`skippy-wake-train`), `--shm-size`, and a quarter of the big negative and validation sets, or it kills Docker's VM.
