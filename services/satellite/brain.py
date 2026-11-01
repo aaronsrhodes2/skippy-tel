@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 import house_layout
+import lists as lists_mod
 import house as hass_mod                                         # the house: any backend (HomeKit, Home Assistant ...)
 import news as news_mod
 import weather as weather_mod
@@ -67,7 +68,7 @@ TOOLS = [
 # A reply that says it set something, with no tool called (2026-11-01: Core said "Alarm set for 14:05" and set nothing). Told so, it gets one
 # more go; still nothing, and he hears that it did not happen instead of a promise the house will not keep.
 CLAIMED = re.compile(r"\b(?:alarm|reminder|timer)s?\b[^.!?]*\b(?:set|is on|scheduled|cancel+ed|off)\b|\bset (?:an? |your |the )?(?:alarm|reminder|timer)\b"
-                     r"|\bi(?:'ll| will)(?: \w+)? (?:remind|wake)\b|\b(?:added|put|took|crossed|removed)\b[^.!?]*\blist\b|\bannounced\b", re.I)
+                     r"|\bi(?:'ll| will)(?: \w+)? (?:remind|wake)\b|\b(?:added|adding|put|putting|took|taking|crossed|removed|removing)\b[^.!?]*\blist\b|\bi(?:'ll|'ve| will| have) (?:add|put)\b|\bannounced\b", re.I)
 UNCLAIM = "That did not get done: nothing was set. Say it again and I'll actually do it this time."
 # The persona is shared with flask-api, whose chat strips [SKIPPY_LEARN: {...}] / [TTS_ADJUST: {...}]; here they would be read aloud. Worse
 # (2026-11-01): one such line in the memory and Core wrote every tool call after it as text, "[list action="read" list="shopping"]".
@@ -212,6 +213,8 @@ class Brain:
             tool, routed = "news", self.news.pre_route(heard, self.history)   # "politics", in answer to "news about what?"
         if not routed and self.weather is not None:
             tool, routed = "weather", weather_mod.pre_route(heard)   # left to itself, Core made up tomorrow's forecast (2026-10-31)
+        if not routed and any(t["name"] == "list" for t in self.extra_tools):
+            tool, routed = "list", lists_mod.pre_route(heard)        # left to itself, Core said "Adding milk ..." and added nothing (2026-11-01)
         if routed:                                                    # the tool runs first; the model only words the answer, with no tools to forget to call
             result = self.run_tool(tool, routed)
             label = {"audiobook": "Already done by the house for this request"}.get(tool, f"The {tool} tool's answer for this request")

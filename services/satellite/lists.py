@@ -27,6 +27,30 @@ def list_name(words: str) -> str:
     return ALIASES.get(w, w)
 
 
+_LIST = r"(?:my |the |our )?(?P<list>[\w' -]{0,30}?)\s*list"
+_ROUTES = [
+    ("add", re.compile(rf"^(?:please |can you |could you )?(?:add|put|stick|throw)\s+(?P<items>.+?)\s+(?:to|on|onto|in)\s+{_LIST}\b")),
+    ("remove", re.compile(rf"^(?:please |can you |could you )?(?:take|cross|scratch|strike)\s+(?P<items>.+?)\s+off\s+(?:of\s+)?{_LIST}\b")),
+    ("remove", re.compile(rf"^(?:please |can you |could you )?(?:remove|delete)\s+(?P<items>.+?)\s+from\s+{_LIST}\b")),
+    ("read", re.compile(rf"^(?:what'?s|what is|what are|read(?: me)?|tell me(?: what'?s)?)\s+(?:on|in)?\s*{_LIST}\b")),
+    ("read", re.compile(rf"^(?:read|check)\s+(?:me\s+)?{_LIST}\b")),
+    ("clear", re.compile(rf"^(?:clear|empty|wipe|erase)\s+(?:out\s+)?{_LIST}\b")),
+]
+
+
+def pre_route(heard: str) -> dict | None:
+    """The `list` tool's arguments for a plain list request (Core skipped the tool and said "Adding milk ..." anyway, 2026-11-01); None otherwise."""
+    w = re.sub(r"^\W*(?:hey |ok |okay )?skippy\W*", "", (heard or "").lower()).strip(" ?!.")
+    for action, rx in _ROUTES:
+        m = rx.match(w)
+        if m:
+            args = {"action": action, "list": list_name(m.group("list") or "shopping")}
+            if "items" in rx.groupindex:
+                args["items"] = [i.strip() for i in re.split(r",|\band\b", m.group("items")) if i.strip()]
+            return args
+    return None
+
+
 def say_items(items: list[str]) -> str:
     if len(items) <= 1:
         return "".join(items)

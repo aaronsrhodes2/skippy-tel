@@ -200,3 +200,15 @@ def test_words_handed_to_the_running_hub_from_this_pc_are_taken_as_typed(tmp_pat
     r.inbox.write_text(json.dumps({"text": "what's on my shopping list"}), encoding="utf-8")
     asyncio.run(r.timers_due())
     assert brain.heard == ["what's on my shopping list"] and not r.inbox.exists()
+
+
+def test_plain_list_requests_are_routed_to_the_tool_before_the_model():
+    from lists import pre_route
+    assert pre_route("Skippy, add milk, eggs and coffee to the shopping list") == {"action": "add", "list": "shopping", "items": ["milk", "eggs", "coffee"]}
+    assert pre_route("put batteries on my Costco list") == {"action": "add", "list": "costco", "items": ["batteries"]}
+    assert pre_route("take the eggs off the shopping list") == {"action": "remove", "list": "shopping", "items": ["the eggs"]}
+    assert pre_route("remove bread from my grocery list") == {"action": "remove", "list": "shopping", "items": ["bread"]}
+    assert pre_route("what's on my shopping list?") == {"action": "read", "list": "shopping"}
+    assert pre_route("what's on my to do list") == {"action": "read", "list": "to-do"}
+    assert pre_route("clear the shopping list") == {"action": "clear", "list": "shopping"}
+    assert pre_route("add a timer for ten minutes") is None and pre_route("what's the weather") is None
