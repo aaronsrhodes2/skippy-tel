@@ -1058,8 +1058,10 @@
     },
     bind(e, r) {
       const x = e._r, v = r.sv, cur = v.now;
-      x.kind.replaceChildren(); x.kind.insertAdjacentHTML("beforeend", ico(cur && cur.src === "spotify" ? "arcs" : "note"));
+      x.kind.replaceChildren(); x.kind.insertAdjacentHTML("beforeend", ico(v.playing ? "play" : "pause"));
+      x.kind.append(el("b", "", r.dev.name || "House stereo"));
       if (cur && cur.src === "spotify") x.kind.append(el("span", "spot", "Spotify"));
+      e.classList.toggle("paused", !v.playing);
       x.h.textContent = cur ? cur.title : "Nothing playing"; x.who.textContent = cur ? cur.artist : "";
       const lib = v.items.filter(i => i.src === "library").length, sp = v.items.length - lib;
       counts(x.meta, [[lib, "note"], [sp, "arcs"]].filter(p => p[0] > 0));
@@ -1080,7 +1082,7 @@
     },
     bind(e, r) {
       const it = r.it, x = e._r;
-      e.classList.toggle("cur", it.cur); e.classList.toggle("spotify", it.src === "spotify");
+      e.classList.toggle("spotify", it.src === "spotify");
       x.src.innerHTML = ico(it.src === "spotify" ? "arcs" : "note");
       x.l1t.textContent = it.title; x.l2.textContent = it.artist;
       x.tr.innerHTML = it.trans && it.trans !== "cut" ? ico("mix") : "";
@@ -1241,8 +1243,10 @@
         const sv = stereoOf(st);
         rows.push({ type: "sctl", h: 100, dev: st, sv });
         if (!sv.items.length) { msg("Nothing is queued on the stereo. Say “play something on the stereo”, or ask for Spotify."); break; }
-        const first = Math.max(0, sv.idx - 1);              // a little of what has played, then what is coming
-        sv.items.slice(first).forEach(it => rows.push({ type: "srow", h: g.rowH, it }));
+        const up = sv.items.slice(sv.idx + 1);               // the hero is what plays now; the rows are only what comes next
+        head("next", up.length ? String(up.length) : "");
+        if (!up.length) msg("Nothing is queued after this.", "next");
+        up.forEach(it => rows.push({ type: "srow", h: g.rowH, it }));
         break;
       }
       case "genre": {

@@ -69,6 +69,8 @@
 .sctl .acts { flex: none; display: grid; grid-template-columns: repeat(2, 40px); margin-top: 0; }
 .sctl .acts .key[hidden] { display: none; }
 .sctl h2 { -webkit-line-clamp: 1; }
+.sctl .kind { align-items: center; gap: 6px; color: var(--accent); } .sctl .kind b { font: 700 .72rem var(--mono); color: var(--muted); }
+.sctl.paused h2 { color: var(--muted); }
 .sctl .spot { margin-left: 8px; align-self: center; }
 .stv .src { display: flex; align-items: center; justify-content: center; color: var(--dim-green-hi); }
 .stv .src .g { width: 18px; height: 18px; }
