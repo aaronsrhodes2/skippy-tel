@@ -1447,7 +1447,8 @@ class Workshop:
                 status = self._git("status", "--porcelain", "--untracked-files=all", cwd=clone, timeout=SHIP_GIT_TIMEOUT)
                 porcelain = status.stdout.rstrip() if status.returncode == 0 else ""
                 path.write_text(json.dumps({"clone": clone, "baseline": run_state.dirty_paths(porcelain),
-                                            "head": self._head(clone) or "", "sent_back": 0}), encoding="utf-8")
+                                            "head": self._head(clone) or "", "sent_back": 0,
+                                            "started": time.time()}), encoding="utf-8")       # work_check.py: what this run made
         except OSError:
             return ""                                  # nowhere to keep it: the gate has no opinion, the run goes on
         return str(path)

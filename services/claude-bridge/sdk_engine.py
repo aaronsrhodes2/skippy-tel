@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Callable
 
 import run_state
+import work_check
 from lane_guard import Lane
 
 SEGMENT_TURNS = int(os.getenv("WORKSHOP_CORE_SEGMENT_TURNS", "120"))    # a segment's hard turn limit (Claude Code --max-turns): a backstop
@@ -212,8 +213,14 @@ class StopGate:
                  base_head: str = ""):
         self.clone, self.baseline, self.limit, self.say, self.base_head = clone, baseline, limit, say, base_head
         self.sent_back = 0
+        self.started, self.work = time.time(), {}       # the project's own work check (work_check.py), with its own limits
 
     async def hook(self, input_data: dict, tool_use_id: str | None, context: Any) -> dict:
+        why = await asyncio.to_thread(work_check.unfinished, self.clone, self.started, self.work,
+                                      str((input_data or {}).get("transcript_path") or ""))
+        if why:
+            self.say("(stop gate: the work isn't finished by the project's own check; sent back)")
+            return {"decision": "block", "reason": why}
         if self.sent_back >= self.limit:
             return {}
         reason = await asyncio.to_thread(run_state.loose_ends, self.clone, self.baseline, self.base_head)
