@@ -114,6 +114,12 @@ Other backends plug into the same `House`: Home Assistant (`hass.py`, if he ever
 alone. "More on the second one" (or words from its headline) searches that story again; the headlines stay in his head for 15 minutes. "Near me" uses the
 town in the vault's `HOME_ADDRESS`.
 
+**The weather** (`weather.py`): "What's the weather like?", "Do I need an umbrella tomorrow?", "How's the surf?" go straight to the `weather` tool
+(Core left to itself made up a forecast): the National Weather Service's forecast in words and any alert for home, Open-Meteo's temperature now, and
+for the coast NOAA's tide times at the nearest tide station (which way it is going now) and the nearest NDBC buoy that reports waves (wave height and
+period, sea temperature, wind; metres and Celsius converted with Mentat's factors). Home is `SKIPPY_HOME_LATLON`, else where the car spends the night
+(`state/daily/state.json`); the stations found are kept in `state/weather.json`. Skippy gives the takeaway, a figure or two at most, never a data card.
+
 **Conversation starters:** the task "Skippy starters refresh" (06:40 daily, `tools/starter_refresh.sh`, log `state/starter-refresh.log`) searches each
 interest in `filler.TOPICS` and a few world subjects (elections, laws, his town and state), lets Core pick one real new development per subject and word
 an opener with no figures (PLATINUM 21), and keeps it only when a strict second reading of the reports supports it. They wait in

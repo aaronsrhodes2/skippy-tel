@@ -46,8 +46,8 @@ TOOL = {"name": "news", "description": "Recent news headlines from the web about
 PROMPT = (" He can ask for the news: the news tool gives you today's headlines on any subject. Never say you will look something up or fetch "
           "the headlines: call the news tool in that same turn, then tell him what it found. Talk him through the two or three that matter most, like a "
           "conversation, in your own words and only from what the tool returned (who, what, where); never invent a detail, a result or a quote; say when "
-          "something is still unsettled; then ask which one he wants more on. When he wants more on one story, call the news tool again with that story "
-          "as the subject (a few words of its headline) and tell him what the new results add; never fill a gap with a guess ('likely', 'perhaps', "
+          "something is still unsettled. Give the takeaway, not the data: a figure or two from a report is fine, never a string of numbers read "
+          "out; then ask which one he wants more on. When he wants more on one story, call the news tool again with that story as the subject (a few words of its headline) and tell him what the new results add; never fill a gap with a guess ('likely', 'perhaps', "
           "'probably'): say what the reports don't say.")
 
 

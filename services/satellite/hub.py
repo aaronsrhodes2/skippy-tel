@@ -920,6 +920,8 @@ def build_rooms(env: dict):
     from proposals import Workspace                              # noqa: PLC0415
     hlog = housemem.HouseLog(housemem.home_dir(env))              # skippy-home/log: local, append-only, words and outcomes, never audio
     import news as news_mod                                      # noqa: PLC0415
+    import weather as weather_mod                                # noqa: PLC0415
+    house_weather = weather_mod.Weather(env, log=log)            # one house, one weather (its stations and cache are shared by every room)
     from starters import Starters                                # noqa: PLC0415
     starters = None if env.get("SATELLITE_STARTERS", "on").lower() in ("off", "0", "no") else \
         Starters(Path(__file__).resolve().parents[2] / "state" / "starters", log_root=hlog.root)   # filled daily by tools/starter_refresh.py
@@ -962,7 +964,7 @@ def build_rooms(env: dict):
         book = audiobooks.build_player(env, name, link, log)     # None when SATELLITE_AUDIOBOOKS=off
         if book is not None:
             tools = audiobooks.combine(tools, audiobooks.book_tools(lambda: holder["room"], loop))
-        brain = Brain(client, brain_model, timers, hass=house, extra=tools, news=news_mod.News(env, log=log))
+        brain = Brain(client, brain_model, timers, hass=house, extra=tools, news=news_mod.News(env, log=log), weather=house_weather)
         if book is not None:
             brain.pre_route = lambda heard: book_voice.pre_route(heard, holder["room"])
         room = holder["room"] = Room(name, link, gate, brain, timers, spotter=spotter, local_voice=audio.local_voice_pcm16, log=log,
