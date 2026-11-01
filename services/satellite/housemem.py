@@ -12,7 +12,8 @@ import threading
 import time
 from pathlib import Path
 
-ACTIONS = {"home_control": "home", "set_timer": "timer", "cancel_timers": "timer", "music": "music", "play_music": "music"}   # tool -> what it is
+ACTIONS = {"home_control": "home", "set_timer": "timer", "cancel_timers": "timer", "music": "music", "play_music": "music",
+           "set_alarm": "alarm", "set_reminder": "reminder", "cancel_alarm": "alarm", "list": "list", "announce": "announce"}   # tool -> what it is
 MAX_TEXT = 300
 
 
