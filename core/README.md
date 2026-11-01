@@ -166,6 +166,25 @@ over the tailnet; this box only plays it.
 - **One sender:** snapserver takes one stream at a time: the hub, or `services/satellite/sync_outputs.py` while the hub is stopped.
 - **Look:** `journalctl --user -u enclave-keep -u enclave-snap`, `pactl list short sinks`, `amixer -c 1 contents | grep -A2 Jack`.
 
+## The bedroom TV: skippy-pc on the couch (Moonlight, 2026-11-01)
+
+skippy-core sits in the bedroom with the TV on its HDMI. The TV is a console that IS skippy-pc: no SteamOS, no desktop, no login.
+
+    skippy-pc: Sunshine (NVENC, apps "Desktop" + "Steam Big Picture") ──LAN──▶ skippy-core: cage + Moonlight (user couch) ──HDMI──▶ TV
+
+- **Install:** `sudo bash core/install/couch.sh` (dry run), `--apply`, `--pair` (with `SUNSHINE_USER`/`SUNSHINE_PASSWORD` from the
+  vault: Moonlight's PIN goes straight to Sunshine's API with the waiting request's `pairing_id`), `--controller` (hold the pad's pair
+  button; an Xbox pad is trusted before pairing, in one bluetoothctl session), `--check`.
+- **The kiosk:** `couch.service` logs user `couch` (no sudo, no docker) in on tty1 and runs cage with `core/couch/run.sh`: Moonlight
+  streams skippy-pc's `Desktop` (COUCH_APP) at 4K60 HEVC, hardware decode, and starts again whenever the stream ends. Its log:
+  `/home/couch/moonlight.log`. The login hands down an ambient CAP_WAKE_ALARM that Flatpak's sandbox refuses: run.sh drops it (setpriv).
+- **Bitrate:** 40 Mbit/s (`COUCH_KBPS`): the box at the far end of the bedroom's Ethernet only does 100 Mbit/s (80 dropped frames).
+  On gigabit, 80000.
+- **Sound:** the TV's HDMI is couch's PipeWire; the analog jack (the Enclave) aaron's. Each WirePlumber disables the other's card
+  (`~/.config/wireplumber/wireplumber.conf.d/60-skippy-cards.conf`).
+- **skippy-pc:** Sunshine from winget (`LizardByte.Sunshine`, a Windows service); its web login `SUNSHINE_USER`/`SUNSHINE_PASSWORD` in
+  the vault; web UI https://localhost:47990.
+
 ## Status and recovery
 
 - `python3 /opt/skippy-core/repo/core/deployer/deployer.py status`: the last run (`ok`, `waiting-ci`, `refused`,
