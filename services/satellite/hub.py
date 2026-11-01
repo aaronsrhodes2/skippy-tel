@@ -683,6 +683,9 @@ class Room:
         2026-10-31: two speakers never line up exactly enough for an ear), it plays there ALONE: the pod gets the words without the sound,
         draws the lips on the PC output's clock, and stays the mic. No PC output open, or the router dropped the clip: the pod says it."""
         sole = None
+        if announce and voice is not None and voice[0] == "mp3":
+            for out in getattr(self, "announce_outs", ()):      # a room with no pod and no mic (upstairs): no lips, no "was it heard?", never waited for
+                asyncio.ensure_future(out.play(voice[1]))
         if voice is not None and voice[0] == "mp3":
             sole = next((o for o in self.pc_outs if getattr(o, "sole", False) and o.available()), None)
         if sole is None:
@@ -1048,6 +1051,7 @@ def build_rooms(env: dict):
                                      filler_after_s=float(env.get("SATELLITE_FILLER_S", "1.0")), hlog=hlog, workspace=workspace, run_action=run_action, homechat=homechat, starters=starters,
                                      followup_ms=int(float(env.get("SATELLITE_SESSION_S", "30")) * 1000))      # the name opens a conversation: it stays open this long without a word
         room.book = book
+        room.announce_outs = speaker_out.announce_outputs(env, name, log)   # the routines, timers and messages also upstairs (SATELLITE_ANNOUNCE_OUT)
         if getattr(link, "media", None) is not None:
             stereo_holder.setdefault("media", link.media)
         room.daily = routines

@@ -576,11 +576,12 @@ def shared(env: dict, log=print) -> Router:
             for part in (env.get("SATELLITE_OUT") or "").split(";"):
                 if "=" in part:
                     used |= set(speaker_out.split_kinds(part.split("=", 1)[1]))
+            used |= set(speaker_out.announce_kinds(env))          # the routines upstairs (SATELLITE_ANNOUNCE_OUT)
             import sync                                           # noqa: PLC0415
             solo = speaker_out.one_voice(env)
             if solo:                                              # the PC output is the room's only voice: nothing to wait for, just a jitter cushion
                 align = sync.saved_align(used)                    # several outputs in use: the faster ones wait for the slowest (sync_outputs.py)
-                for k in sync.pod_rooms_kinds(env):
+                for k in sync.pod_rooms_kinds(env) | set(speaker_out.announce_kinds(env)):
                     delays[k] = float(env.get("SATELLITE_SOLO_DELAY", str(SOLO_DELAY_S))) + align.get(k, 0.0)
             else:
                 delays.update(sync.saved_delays())                # what the last calibration settled on beats the vault's starting guess

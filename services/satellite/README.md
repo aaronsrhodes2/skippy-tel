@@ -201,6 +201,10 @@ one more router output, `enclave`, whose part is a URL instead of a Windows devi
   to another room (a whole-house sound lines up with them); measure again when a speaker or its connection changes. Run it while the hub
   isn't sending to the Enclave (snapserver takes one sender), e.g. right after stopping the hub.
 * The pod's own speaker isn't in it (its sound goes through ESPHome's media player, not the router).
+* **Announcements upstairs** (`SATELLITE_ANNOUNCE_OUT=enclave`, 2026-11-01): outputs in a place with no pod and no microphone play every
+  room's announcements (the morning and bedtime routines, timers, messages typed in the portal's Home chat), never a conversation's
+  replies. sync.py never measures them (no mic hears them), so they are never taken for off; they get the one-voice cushion and, when
+  other outputs play too, the house-wide wait for the slowest. `speaker_out.announce_outputs`, `hub.Room._out`.
 
 ## Bilby's DJ mode on the house stereo (`dj.py`)
 

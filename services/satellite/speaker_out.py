@@ -294,6 +294,22 @@ def one_voice(env: dict) -> bool:
     return env.get("SATELLITE_ONE_VOICE", "1").lower() not in ("0", "off", "no")
 
 
+def announce_kinds(env: dict) -> list[str]:
+    """SATELLITE_ANNOUNCE_OUT=enclave (2026-11-01): outputs in a place with no pod and no microphone (the Enclave upstairs) that play every
+    room's announcements: the routines, timers, messages typed in the portal. Never the replies of a conversation."""
+    return [k for k in split_kinds(env.get("SATELLITE_ANNOUNCE_OUT") or "") if k in output_parts(env)]
+
+
+def announce_outputs(env: dict, room: str, log=print) -> list:
+    """The announcement outputs for `room` (those it doesn't already play on), through the router. sync.py never measures them (no microphone
+    hears them), so they are never taken for off: an announcement is sent whenever the output is open (the speaker on)."""
+    kinds = [k for k in announce_kinds(env) if k not in room_kinds(env, room)]
+    if not kinds or env.get("SATELLITE_ROUTER", "1") == "0":
+        return []
+    import router as router_mod                                    # noqa: PLC0415
+    return [RoutedOut(router_mod.shared(env, log), kinds, log=log, duck_others=False)]
+
+
 def parse_outputs(env: dict, room: str, log=print) -> tuple[bool, list]:
     """(play on the box's own speaker?, the PC outputs) for a room from the vault settings; the default is the box only.
     The PC outputs go through the house's audio router (router.py) unless SATELLITE_ROUTER=0, which keeps the old one-PcOut-per-output path."""

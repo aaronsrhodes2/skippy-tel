@@ -20,3 +20,14 @@ def test_an_output_that_is_not_there_is_skipped_and_logged():
     said = []
     out = S.PcOut("bt", "No Such Speaker 12345", log=said.append)
     assert asyncio.run(out.play(b"not really an mp3")) is False and "no sound device" in said[0]
+
+
+def test_announcement_outputs_are_only_the_ones_a_room_does_not_play_on(monkeypatch):
+    import router as rt
+    monkeypatch.setattr(rt, "shared", lambda env, log=print: "the router")
+    env = {"SATELLITE_OUT": "office=pod+hdmi;den=pod+enclave", "SATELLITE_ANNOUNCE_OUT": "enclave+nonsense"}
+    assert S.announce_kinds(env) == ["enclave"]
+    outs = S.announce_outputs(env, "office")
+    assert len(outs) == 1 and outs[0].kinds == {"enclave"} and outs[0].duck_others is False
+    assert S.announce_outputs(env, "den") == []          # it plays there anyway
+    assert S.announce_outputs({"SATELLITE_OUT": "office=pod+hdmi"}, "office") == []
