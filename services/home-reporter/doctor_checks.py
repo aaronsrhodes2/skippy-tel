@@ -118,6 +118,24 @@ def run_one(name: str, url: str, ok, get=_get, clock=time.monotonic) -> dict:
     return out
 
 
+class DownClock:
+    """How long each test has been failing, kept here in the reporter: the portal's own count starts over at every portal deploy, so on a
+    day of pushes a service that stayed down was healed only after 5 minutes without one (the chaos drill, 2026-11-01: flask-api waited
+    637 s, not 300). Each failing answer carries `down_s`; the doctor counts from the longer of the two."""
+
+    def __init__(self, clock=time.monotonic):
+        self.clock, self.since = clock, {}
+
+    def stamp(self, tests: dict) -> dict:
+        now = self.clock()
+        for name, t in tests.items():
+            if not isinstance(t, dict) or t.get("ok"):
+                self.since.pop(name, None)
+            else:
+                t["down_s"] = int(now - self.since.setdefault(name, now))
+        return tests
+
+
 def deep(get=_get) -> dict:
     """The tests that do real work on the GPU, for a repair's last step only: Ollama writes a few words (then unloads the model)."""
     out = {}

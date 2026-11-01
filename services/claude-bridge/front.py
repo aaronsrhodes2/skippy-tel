@@ -131,6 +131,8 @@ class Front:
         self.request, self.state, self.code, self.kill = request, state, code, kill
         self.gens: list[Gen] = []
         self.owner: dict[str, int] = {}               # task -> generation number
+        self.last_n = 0                               # the highest number ever given: a replacement never reuses one (the chaos drill
+                                                      # killed the only generation and its replacement was numbered 1 again, 2026-11-01)
         self.lock = threading.RLock()
         self.handing_over = threading.Lock()
         self.token = ""                               # the last Authorization a generation accepted: the adopt call carries it
@@ -156,7 +158,8 @@ class Front:
         with self.lock:
             used = {g.port for g in self.gens}
             port = next((p for p in GEN_PORTS if p not in used), None)
-            n = max([g.n for g in self.gens] + [0]) + 1
+            n = max([g.n for g in self.gens] + [self.last_n]) + 1
+            self.last_n = n
         if port is None:
             log("no free port for a new generation (every one is still draining)")
             return None
@@ -282,7 +285,7 @@ class Front:
         try:
             self.state.parent.mkdir(parents=True, exist_ok=True)
             with self.lock:
-                data = {"front_pid": os.getpid(), "gens": [g.record() for g in self.gens]}
+                data = {"front_pid": os.getpid(), "last_n": self.last_n, "gens": [g.record() for g in self.gens]}
             tmp = self.state.with_suffix(".tmp")
             tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
             os.replace(tmp, self.state)
@@ -295,6 +298,10 @@ class Front:
             data = json.loads(self.state.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return
+        try:
+            self.last_n = int(data.get("last_n") or 0)
+        except (TypeError, ValueError):
+            pass
         for rec in data.get("gens") or []:
             try:
                 g = Gen(int(rec["n"]), int(rec["port"]), int(rec["pid"]), str(rec.get("code") or ""), draining=bool(rec.get("draining")),

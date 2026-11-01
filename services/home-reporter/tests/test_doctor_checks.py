@@ -49,7 +49,7 @@ def test_every_report_carries_the_tests_and_a_late_one_reads_as_failed(monkeypat
     monkeypatch.setattr(reporter, "fetch", lambda *a, **k: None)
     monkeypatch.setattr(reporter, "_capability_probes", lambda: {})
     got = reporter.gather()["doctor"]
-    assert got["flask-api"]["ok"] is True and got["ollama"] == {"ok": False, "ms": got["ollama"]["ms"], "why": "no answer in time"}
+    assert got["flask-api"]["ok"] is True and got["ollama"] == {"ok": False, "ms": got["ollama"]["ms"], "why": "no answer in time", "down_s": got["ollama"]["down_s"]}
 
 
 # ── the readiness contract (PLATINUM section 24): a 200 is not "fine" ───────────────────────────────────────────
@@ -83,3 +83,15 @@ def test_a_503_that_says_why_is_an_answer_and_a_hung_service_is_a_failed_test_wi
     plain = dc.run_one("whisper", "u", lambda b: True, get=lambda url: (200, None))
     assert plain == {"ok": True, "ms": plain["ms"], "why": "", "reachable": True} and "state" not in plain   # answers, but never said it is ready
     assert dc.run_one("x", "u", ok, get=lambda url: (_ for _ in ()).throw(OSError("refused")))["reachable"] is False   # no answer at all
+
+
+def test_the_down_clock_counts_how_long_each_test_has_failed_and_forgets_it_once_it_passes():
+    t = [100.0]
+    clock = dc.DownClock(clock=lambda: t[0])
+    assert "down_s" not in clock.stamp({"flask-api": {"ok": True}})["flask-api"]
+    assert clock.stamp({"flask-api": {"ok": False}})["flask-api"]["down_s"] == 0
+    t[0] = 400.0
+    assert clock.stamp({"flask-api": {"ok": False}})["flask-api"]["down_s"] == 300
+    clock.stamp({"flask-api": {"ok": True}})
+    t[0] = 500.0
+    assert clock.stamp({"flask-api": {"ok": False}})["flask-api"]["down_s"] == 0

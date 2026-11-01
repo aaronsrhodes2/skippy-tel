@@ -164,6 +164,17 @@ def test_a_dead_newest_generation_is_replaced(tmp_path):
     assert f.current() is not None and not w.procs[f.current().port].dead
 
 
+def test_a_replacement_never_reuses_a_generation_number_even_when_none_was_left(tmp_path):
+    w, f = make(tmp_path)
+    first = f.current().n
+    w.procs[f.current().port].dead = True         # the only generation dies (the chaos drill, 2026-11-01): the next one is NOT 1 again
+    f.tick()
+    assert f.current().n == first + 1
+    again = fr.Front(spawn=w.spawn, request=w.request, state=tmp_path / "front.json", code=lambda: w.code, kill=w.kill)
+    again.restore()
+    assert again.last_n == first + 1                # a restarted front door keeps counting from there
+
+
 def test_handover_needs_the_token(tmp_path):
     w, f = make(tmp_path)
     assert f.route("POST", "/front/handover", "", b"{}", {})[0] == 401

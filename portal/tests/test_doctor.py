@@ -64,6 +64,17 @@ def test_a_failure_is_healed_only_after_it_has_lasted_and_a_recovery_resets_it()
     assert d.tick() == []                                            # it came back: nothing more to do
 
 
+def test_a_freshly_deployed_portal_believes_the_reporters_own_down_count():
+    d, starter, clock, _ = world()                                    # this portal has just started (a deploy)...
+    alive(starter)
+    d.observe_home({"flask-api": {"ok": False, "ms": 5000, "why": "no answer", "down_s": doc.HEAL_AFTER_S + 30}})
+    assert d.tick() == ["flask-api"]                                  # ...but flask-api has been down for over 5 min: healed now
+    d2, starter2, _, _ = world()
+    alive(starter2)
+    d2.observe_home({"flask-api": {"ok": False, "ms": 5000, "why": "no answer", "down_s": 10**9}})
+    assert d2.tick() == []                                            # a nonsense count is ignored: the portal's own clock rules
+
+
 def test_three_tries_an_hour_then_one_dm_and_it_waits():
     d, starter, clock, told = world()
     d.observe_home(failing("whisper"))

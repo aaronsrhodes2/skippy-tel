@@ -178,6 +178,55 @@ Two situations, two answers:
   What it cannot do: wake a PC that is off, asleep or at the sign-in screen. With the setup above that is a power cut with a PC that failed to come back: look at it in person.
   The card says "The starter isn't answering" in that case, and shows when it was last heard.
 
+## Proving it heals: the chaos drill
+
+`tools/chaos_drill.py` (the Captain, 2026-11-01: "be resilient to loss of service", Netflix's chaos monkey) takes ONE thing down on purpose
+and times how long the stack takes to put it back with nobody's help. It is dry-run by default, so plain `python tools/chaos_drill.py` only
+prints what it would stop and whether the gates are open.
+
+```bash
+python tools/chaos_drill.py                    # dry run: every target, the exact command, the gates
+python tools/chaos_drill.py flask-api --go     # the real drill, one target
+python tools/chaos_drill.py --history          # every drill so far (state/chaos/drills.jsonl)
+```
+
+| Target | How it goes down | Who should bring it back |
+|---|---|---|
+| `flask-api`, `voice-gate`, `music-gate` | `docker stop <container>` (Docker's restart policy leaves a stopped container alone) | the doctor, through the starter: a recreate after 5 min of failed tests |
+| `bridge` | the newest bridge generation's PID, from `state/bridge-front.json`, checked against its command line | `front.py` starts the next generation |
+| `core` | `docker stop skippycore-llm-1` on skippy-core (chat, coder and vision together) | skippy-core's doctor (`deployer.py doctor`, every 3 min, two failed replies, then `compose restart llm`) |
+
+Each drill reports the time until a healer **acted** (detect) and until a **real request worked** again (heal): flask-api's `/health`, a
+gate's readiness, the bridge's `/health` ready, a Core chat reply. It also reports whether a human was needed. If nothing heals the target
+within 15 minutes (5 for the bridge), the drill puts it back itself and records `human_needed`. That is a gap to fix, not a pass.
+
+It never runs while someone is using the stack. It checks twice, 20 s apart, for any of these: a purple run (the bridge says busy, or
+`holders.active_runs()`), a slot of Core's chat or coder model processing, a POST to Whisper in the last 5 minutes, or conversation,
+routine or starter lines in `state/hub.log` in the last 3 minutes. It also needs the starter running and every target healthy before it
+starts (one fault at a time). It stops a container by name or a process by PID, never by process name, and never touches the hub or the
+games VM.
+
+**The first drills (2026-11-01):**
+
+| Target | Detect | Heal | Human | Healer |
+|---|---|---|---|---|
+| bridge | 2 s | 5 s | no | front.py (a new generation) |
+| flask-api | 637 s | 667 s | no | the doctor (recreate) |
+| music-gate | 336 s | 426 s | no | the doctor (recreate) |
+| voice-gate | 335 s | 335 s | no | the doctor (recreate) |
+| core | 307 s | 313 s | no | skippy-core's doctor (`compose restart llm` on its second failed look) |
+
+What the drills found, and what was fixed:
+- **The doctor's 5-minute clock started over at every portal deploy.** flask-api waited 637 s, not ~330, because a push redeployed the
+  portal mid-outage. The reporter now counts each test's downtime itself (`doctor_checks.DownClock`, `down_s` in every failing test), and
+  the doctor counts from the longer of the two, as it already did for the starter's apps.
+- **The starter's log was silent for 14 hours**, because stdout to a file is block-buffered. Lines are now stamped and flushed, and each
+  request from the portal is logged when it starts (`heal flask-api: asked by the portal, starting`).
+- **A bridge generation that died alone was replaced as generation 1**, so the numbers went backwards. `front.py` now never reuses a
+  number, across its own restarts too. This takes effect the next time `front.py` itself restarts (a hand-over replaces only the generations).
+- **The first Core drill was healed by luck.** A routine deploy of a new commit ran `compose up` 98 s in, before Core's doctor had looked
+  twice. The drill now names that healer, so a lucky heal can't pass for the doctor's.
+
 ## If none of this helps
 
 Open the `ops` workflow with `command` = **status** (the games VM) and **home**, read both logs, and tell Skippy (or Claude) what

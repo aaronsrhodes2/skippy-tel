@@ -30,6 +30,7 @@ PORTAL = os.environ.get("PORTAL_URL", "https://skippy-portal-1015050363686.us-we
 API = os.environ.get("SKIPPY_API", "http://flask-api:5000").rstrip("/")
 MAC = os.environ.get("BILBY_MAC_URL", "").rstrip("/")         # Mac DJ assistant, if enabled
 INTERVAL = float(os.environ.get("REPORT_INTERVAL", "15"))
+DOWN = doctor_checks.DownClock()   # how long each doctor test has failed, here: the portal's count restarts with every portal deploy
 FAST_INTERVAL = 1.5          # job polling while someone is chatting on the portal
 GATHER_BUDGET_S = float(os.environ.get("GATHER_BUDGET", "9"))   # the most one report waits for its probes (they run side by side)
 IMPORTS_DIR = os.environ.get("IMPORTS_DIR", "/imports")      # game databases to carry to the VM
@@ -251,8 +252,8 @@ def gather() -> dict:
         "site_activity": got.get("site_activity"),
         "local": got.get("local"),
         # each test's answer; one that missed the report's deadline is a failure ("no answer in time"), never the last known one
-        "doctor": {name: got.get(f"doc_{name}") or {"ok": False, "ms": int(GATHER_BUDGET_S * 1000), "why": "no answer in time"}
-                   for name in doctor_checks.checks()},
+        "doctor": DOWN.stamp({name: got.get(f"doc_{name}") or {"ok": False, "ms": int(GATHER_BUDGET_S * 1000), "why": "no answer in time"}
+                              for name in doctor_checks.checks()}),
     }
 
 

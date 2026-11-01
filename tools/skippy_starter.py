@@ -105,8 +105,14 @@ def http(url: str, data: dict | None = None, headers: dict | None = None, timeou
         return json.loads(r.read() or b"{}")
 
 
+def say(text: str) -> None:
+    """A line in state/starter.log, stamped and flushed at once: stdout to a file is block-buffered, so without the flush the log showed
+    nothing for hours, the doctor's heals included (the chaos drill found it, 2026-11-01)."""
+    print(f"{datetime.now():%Y-%m-%d %H:%M:%S} {text}", flush=True)
+
+
 class Starter:
-    def __init__(self, run=run, http=http, spawn=None, sleep=time.sleep, clock=time.monotonic, token: str = "", root: Path = ROOT, say=print, now=datetime.now, state_file=None):
+    def __init__(self, run=run, http=http, spawn=None, sleep=time.sleep, clock=time.monotonic, token: str = "", root: Path = ROOT, say=say, now=datetime.now, state_file=None):
         self.run, self.http, self.sleep, self.clock, self.token, self.root, self.say, self.now = run, http, sleep, clock, token, root, say, now
         self.state_file = Path(state_file) if state_file else root / "state" / "starter.json"
         self.spawn = spawn or self._spawn
@@ -644,6 +650,7 @@ class Starter:
                     self.results.append({"id": cid, "ok": False, "summary": f"Busy: {self.working}."})
                 continue
             self.working = op
+            self.say(f"{op} {arg[:60]}: asked by the portal, starting".replace("  ", " "))
             if threaded:
                 threading.Thread(target=self._work, args=(cid, op, resume, arg[:300]), daemon=True).start()
             else:

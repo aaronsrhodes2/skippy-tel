@@ -67,7 +67,8 @@ class Doctor:
         with self._lock:
             for name, t in list(tests.items())[:40]:
                 if isinstance(name, str) and name in HEALABLE and isinstance(t, dict):
-                    self._set(name, t.get("ok") is True, str(t.get("why") or ""), t.get("ms") if isinstance(t.get("ms"), int) else None)
+                    self._set(name, t.get("ok") is True, str(t.get("why") or ""), t.get("ms") if isinstance(t.get("ms"), int) else None,
+                              down_s=t.get("down_s") if isinstance(t.get("down_s"), int) and 0 <= t["down_s"] < 86400 else None)
 
     def observe_core(self, ok: bool, why: str = "", ms: int | None = None) -> None:
         with self._lock:
