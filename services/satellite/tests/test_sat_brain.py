@@ -152,3 +152,18 @@ def test_plain_music_commands_are_routed_to_the_music_tool():
     assert music_route("pause the music") == {"action": "pause"} and music_route("next song") == {"action": "next"}
     assert music_route("resume") == {"action": "resume"} and music_route("previous track") == {"action": "previous"}
     assert music_route("what's the weather") is None and music_route("play Creedence") is None and music_route("what's on my list") is None
+
+
+def test_bilby_is_his_music_however_whisper_spells_it():
+    # 2026-11-01: "Bill be everywhere." and "Tell Bill B to play music everywhere." went to Core, which didn't know Bilby and asked to confirm
+    from brain import bilby_route, fix_bilby
+    assert bilby_route("Bill be everywhere.") == {"what": "everything", "shuffle": True, "speaker": "everywhere"}
+    assert bilby_route("Tell Bill B to play music everywhere.") == {"what": "everything", "shuffle": True, "speaker": "everywhere"}
+    assert bilby_route("Skippy, bilby upstairs") == {"what": "everything", "shuffle": True, "speaker": "upstairs"}
+    assert bilby_route("play bilby in the living room")["speaker"] == "upstairs"
+    assert bilby_route("tell bilby to play some music on the sony")["speaker"] == "downstairs"
+    assert bilby_route("bilby") == {"what": "everything", "shuffle": True}
+    assert bilby_route("music everywhere")["speaker"] == "everywhere"
+    for not_music in ("pay the bill by friday", "my phone bill", "did the bill be paid", "what is the weather", "play Pink Floyd upstairs"):
+        assert bilby_route(not_music) is None, not_music
+    assert fix_bilby("pay the bill by friday") == "pay the bill by friday" and fix_bilby("Bill B upstairs") == "Bilby upstairs"

@@ -124,6 +124,33 @@ def music_route(heard: str) -> dict | None:
     return None
 
 
+# Bilby is his music (the Captain, 2026-11-01: "Bilby == music"). Whisper doesn't know the word: "Bill be everywhere", "Tell Bill B to play music".
+BILBY_HEARD = re.compile(r"\b(?:bill\s*-?\s*(?:b|be|bee|bie|bey)|bil(?:by|bo|bee|bie|bey|be))\b(?!\s+(?:paid|due|payment|pay|sent|sure))", re.I)   # never "bill by"
+_SPEAKER = {"everywhere": "everywhere", "the whole house": "everywhere", "the house": "everywhere", "both": "everywhere", "both floors": "everywhere",
+            "upstairs": "upstairs", "the living room": "upstairs", "living room": "upstairs", "the enclave": "upstairs", "enclave": "upstairs",
+            "downstairs": "downstairs", "the theater": "downstairs", "theater": "downstairs", "the sony": "downstairs", "sony": "downstairs"}
+_WHERE = "(?:(?:on|in|to|through) )?(?P<place>" + "|".join(sorted(map(re.escape, _SPEAKER), key=len, reverse=True)) + ")"
+BILBY_RX = [re.compile(rf"^(?:play |start |put on |turn on )?(?:some )?bilby(?: music)?(?: {_WHERE})?$"),
+            re.compile(rf"^(?:tell|ask|have|get) bilby (?:to )?(?:play|start|put on)(?: (?:some|the|my) )?(?: ?music| ?something| ?songs)?(?: {_WHERE})?$"),
+            re.compile(rf"^(?:play |start |put on )?(?:some |the )?music {_WHERE}$")]
+
+
+def fix_bilby(heard: str) -> str:
+    return BILBY_HEARD.sub("Bilby", heard or "")
+
+
+def bilby_route(heard: str) -> dict | None:
+    """play_music's arguments for a plain "bilby [where]": his whole library, shuffled, on the speakers he named (else where music plays now)."""
+    w = re.sub(r"^\W*(?:hey |ok |okay )?skippy\W*", "", fix_bilby(heard).lower()).strip(" ?!.,")
+    w = re.sub(r"\s+(?:please|now)$", "", re.sub(r"^(?:please|can you|could you)\s+", "", w))
+    for rx in BILBY_RX:
+        m = rx.match(w)
+        if m:
+            place = m.groupdict().get("place")
+            return {"what": "everything", "shuffle": True, **({"speaker": _SPEAKER[place]} if place else {})}
+    return None
+
+
 def load_persona() -> str:
     try:
         return PERSONA_FILE.read_text(encoding="utf-8")
@@ -163,7 +190,9 @@ class Brain:
         house = (", and the house: lights, plugs, the thermostat (in the unit it shows), covers, speakers, scenes; always say plainly what you did "
                  "or could not do, and never claim a change you did not make") if self.hass else ""
         nohouse = "" if self.hass else "If he asks for something in the house (the lights and the rest are not connected yet), say so plainly, in character, and offer what you can do. "
-        music = ", and the music in this room from his own library" if any(t["name"] == "play_music" for t in self.extra_tools) else ""
+        music = (", and the music in this room from his own library (Bilby is his music: 'Bilby' always means play or steer his music; "
+                 "'everywhere', 'upstairs' and 'downstairs' are where it plays. Do it at once: an ordinary request never needs his confirmation)"
+                 if any(t["name"] == "play_music" for t in self.extra_tools) else "")
         books = (" He has audiobooks (DRM-free files he supplied): the audiobook tool plays and steers them, and while one plays 'stop' or 'pause' means pause it. "
                  "Anything about the book (play, stop, pause, skip, where he is, a sleep timer) needs the audiobook tool called in that very turn; you cannot see the book, "
                  "so never say what is in it, what chapter it is, or that you did something unless the tool just told you. You never read a book aloud yourself.") if any(t["name"] == "audiobook" for t in self.extra_tools) else ""
@@ -250,6 +279,7 @@ class Brain:
         if now - self._last > FORGET_AFTER_S:
             self.history = []                                         # a new conversation after ten quiet minutes
         self._last = now
+        heard = fix_bilby(heard)                                      # Whisper writes "Bill be" / "Bill B" for Bilby (2026-11-01)
         messages = self.history[-2 * MEMORY_TURNS:] + [{"role": "user", "content": heard}]
         text = ""
         if self.news is not None and news_mod.is_bare_request(heard):  # "what's the news?": about what, before any model runs
@@ -266,6 +296,8 @@ class Brain:
             tool, routed = alarms_mod.pre_route(heard) or (tool, None)   # left to itself, Core said "I cannot set alarms" (2026-11-01)
         if not routed and any(t["name"] == "announce" for t in self.extra_tools):
             tool, routed = "announce", announce_route(heard)
+        if not routed and any(t["name"] == "play_music" for t in self.extra_tools):
+            tool, routed = "play_music", bilby_route(heard)          # "bilby everywhere": the hub didn't know Bilby was his music (2026-11-01)
         if not routed and any(t["name"] == "music" for t in self.extra_tools):
             tool, routed = "music", music_route(heard)
         if routed:                                                    # the tool runs first; the model only words the answer, with no tools to forget to call
