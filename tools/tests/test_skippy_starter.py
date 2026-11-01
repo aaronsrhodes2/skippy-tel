@@ -23,7 +23,7 @@ class World:
         self.pending_commands = []
         self.battery = ""                                                           # no UPS unless a test plugs one in
         self.t = [0.0]
-        self.procs, self.vb = ["Spotify.exe", "Discord.exe"], "1"                    # the desktop apps running, and whether VB-Cable is installed
+        self.procs, self.vb = ["Spotify.exe"], "1"                    # the desktop apps running, and whether VB-Cable is installed
         self.oa_running, self.oa_web, self.oa_web_on_start = False, False, True      # OpenAudible: the app, its web server
 
     def run(self, cmd, timeout=120, cwd=None, env=None):
@@ -174,7 +174,7 @@ def test_each_poll_tells_the_portal_how_things_are_with_the_home_token_and_nothi
     s.poll_once(threaded=False)
     data, headers = w.posts[0]
     assert headers == {"Authorization": "Bearer home-token"} and data["results"] == []
-    assert data["status"] == {"docker": True, "containers_up": 3, "containers_total": 3, "bridge": True, "busy": True, "supervisor": True, "working": "", "resume_at": "", "containers": [], "openaudible": False, "openaudible_app": False, "spotify": True, "discord": True, "vbcable": True, "down_s": {"openaudible": 0}}
+    assert data["status"] == {"docker": True, "containers_up": 3, "containers_total": 3, "bridge": True, "busy": True, "supervisor": True, "working": "", "resume_at": "", "containers": [], "openaudible": False, "openaudible_app": False, "spotify": True, "vbcable": True, "down_s": {"openaudible": 0}}
 
 
 def test_a_request_from_the_portal_is_done_once_and_its_result_goes_back_on_the_next_poll():
@@ -514,21 +514,19 @@ def test_heal_openaudible_never_touches_a_running_app_and_works_with_docker_down
     assert not ok and "not installed" in text and w2.spawned == []
 
 
-def test_spotify_and_discord_are_started_minimized_only_when_not_running_and_never_touched_otherwise(tmp_path, monkeypatch):
-    for name in ("spotify", "discord"):
-        exe = tmp_path / (name + ".exe")
-        exe.write_text("x")
-        monkeypatch.setitem(ss.DESKTOP_APPS[name], "launch", [str(exe), *ss.DESKTOP_APPS[name]["launch"][1:]])
+def test_spotify_is_started_minimized_only_when_not_running_and_never_touched_otherwise(tmp_path, monkeypatch):
+    exe = tmp_path / "spotify.exe"
+    exe.write_text("x")
+    monkeypatch.setitem(ss.DESKTOP_APPS["spotify"], "launch", [str(exe)])
     s, w = make()
     w.procs = []
-    assert (s.status()["spotify"], s.status()["discord"]) == (False, False)
-    ok, text = s.do("heal", arg="discord")
-    assert ok and text == "Discord started." and w.spawned[-1][0].endswith("discord.exe") and "--start-minimized" in w.spawned[-1]
-    assert s.status()["discord"] is True and s.status()["spotify"] is False
+    assert s.status()["spotify"] is False
+    ok, text = s.do("heal", arg="spotify")
+    assert ok and text == "Spotify started." and w.spawned[-1] == [str(exe)] and s.status()["spotify"] is True
     n = len(w.spawned)
-    assert s.do("heal", arg="discord") == (True, "Discord is already running.") and len(w.spawned) == n
-    assert s.do("heal", arg="spotify")[0] and s.status()["spotify"] is True
+    assert s.do("heal", arg="spotify") == (True, "Spotify is already running.") and len(w.spawned) == n
     assert not any(c[0] == "taskkill" for c in w.cmds)
+    assert "discord" not in ss.DESKTOP_APPS and "discord" not in s.status()          # not part of SkippyTel: its bot uses Discord's REST API
     monkeypatch.setitem(ss.DESKTOP_APPS["spotify"], "launch", [str(tmp_path / "nope.exe")])
     w.procs = []
     ok, text = s.do("heal", arg="spotify")
@@ -542,6 +540,11 @@ def test_the_starter_counts_how_long_an_app_has_been_down_and_reports_the_vb_cab
     assert st["spotify"] is False and st["vbcable"] is False and st["down_s"]["spotify"] == 0
     w.t[0] += 400
     st = s.status()
-    assert st["down_s"]["spotify"] == 400 and st["down_s"]["discord"] == 400 and st["down_s"]["openaudible"] == 400
+    assert st["down_s"]["spotify"] == 400 and st["down_s"]["openaudible"] == 400
     w.procs = ["Spotify.exe"]
     assert "spotify" not in s.status()["down_s"]                        # back: the count is gone
+
+
+def test_run_decodes_a_program_s_output_as_utf8_and_never_dies_on_odd_bytes():
+    rc, out = ss.run([sys.executable, "-c", "import sys; sys.stdout.buffer.write(bytes([111, 107, 32, 0x81, 0x8d, 32, 0xe2, 0x9c, 0x93]))"])
+    assert rc == 0 and out.startswith("ok ") and out.endswith("✓")

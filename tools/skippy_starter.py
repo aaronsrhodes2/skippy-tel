@@ -34,7 +34,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OPS = ("start", "stop", "restart", "heal", "repair")
-HEAL_SPECIAL = ("bridge", "docker", "core", "openaudible", "spotify", "discord")             # the rest a heal may name: a service in `docker compose config --services`
+HEAL_SPECIAL = ("bridge", "docker", "core", "openaudible", "spotify")             # the rest a heal may name: a service in `docker compose config --services`
 CORE_SSH = os.environ.get("SKIPPY_CORE_SSH", "aaron@skippy-core")
 CORE_REPAIR = ["sudo", "-n", "/usr/bin/python3", "/opt/skippy-core/doctor/deployer.py", "repair"]   # the doctor's own copy (core/deployer/install.sh)
 DOCKER_DOWN_HEAL_S = 120
@@ -55,13 +55,11 @@ OPENAUDIBLE_URL = os.environ.get("OPENAUDIBLE_URL", "http://127.0.0.1:5758/")
 OPENAUDIBLE_EXE = os.environ.get("OPENAUDIBLE_EXE", r"C:\Program Files\OpenAudible\OpenAudible.exe")
 OPENAUDIBLE_IMAGE = "OpenAudible.exe"
 OPENAUDIBLE_WAIT_S = 90
-# The other desktop apps that support the house (2026-10-31): up means the process is there. A running one is never touched; a missing one is
+# The other desktop app the house needs (2026-10-31; Discord is not one: the portal's bot talks to Discord over its REST API): up means the process is there. A running one is never touched; a missing one is
 # started minimized by the doctor's heal. Spotify is the Store build (its execution alias), its sound routed through VB-Cable to the hub.
 LOCALAPPDATA = os.environ.get("LOCALAPPDATA", "")
 DESKTOP_APPS = {
     "spotify": {"image": "Spotify.exe", "launch": [os.path.join(LOCALAPPDATA, "Microsoft", "WindowsApps", "Spotify.exe")]},
-    "discord": {"image": "Discord.exe", "launch": [os.path.join(LOCALAPPDATA, "Discord", "Update.exe"), "--processStart", "Discord.exe",
-                                                     "--process-start-args", "--start-minimized"]},
 }
 DESKTOP_WAIT_S = 60
 VBCABLE_PS = "(Get-CimInstance Win32_SoundDevice | Where-Object { $_.Name -match 'VB-Audio|CABLE' } | Measure-Object).Count"
@@ -92,7 +90,7 @@ def load_token(env=os.environ, vaults=VAULTS) -> str:
 
 def run(cmd: list[str], timeout: float = 120, cwd: str | None = None, env: dict | None = None) -> tuple[int, str]:
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd, env=env)
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, cwd=cwd, env=env)
         return p.returncode, (p.stdout + p.stderr).strip()
     except subprocess.TimeoutExpired:
         return 124, "timed out"
