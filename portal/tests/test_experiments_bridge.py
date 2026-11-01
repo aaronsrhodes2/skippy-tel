@@ -108,9 +108,17 @@ def test_every_minebench_run_can_be_reached_however_late_its_pictures_load(env):
     assert 'flow.addEventListener("load", refresh, true)' in script
     client, _, _ = env
     page = client.get("/experiments/minebench").get_data(as_text=True)
-    assert page.count('<img class="views" width="1800" height="1320"') == len(experiments.MINEBENCH_RUNS)
+    built = [r for r in experiments.MINEBENCH_RUNS if not r.get("failed")]      # a run whose code fails has its error, no pictures
+    assert page.count('<img class="views" width="1800" height="1320"') == len(built)
+    assert page.count('class="media failed"') == len(experiments.MINEBENCH_RUNS) - len(built)
     assert page.count('<section class="run"') == len(experiments.MINEBENCH_RUNS)
-    started = [r["stats"]["started"] for r in experiments.MINEBENCH_RUNS]    # every run has its numbers, in the order they ran
-    assert started == sorted(started) and [r["n"] for r in experiments.MINEBENCH_RUNS] == list(range(1, len(started) + 1))
+    runs = experiments.MINEBENCH_RUNS                                        # every run has its numbers, its series in the order they ran
+    order = [key for key, _, _ in experiments.MINEBENCH_SERIES]
+    assert [order.index(r["series"]) for r in runs] == sorted(order.index(r["series"]) for r in runs)
+    for key in order:
+        mine = [r for r in runs if r["series"] == key]
+        assert [r["stats"]["started"] for r in mine] == sorted(r["stats"]["started"] for r in mine)
+        assert [r["k"] for r in mine] == list(range(1, len(mine) + 1)) and all(r["of"] == len(mine) for r in mine)
+    assert sorted(r["n"] for r in runs) == list(range(1, len(runs) + 1))
     assert all(r["stats"]["models"] and r["stats"]["tokens"]["total"] for r in experiments.MINEBENCH_RUNS)
-    assert page.count('class="key sm full" data-full') == 2 * len(experiments.MINEBENCH_RUNS) and 'id="mbfull"' in page
+    assert page.count('class="key sm full" data-full') == 2 * len(built) and 'id="mbfull"' in page

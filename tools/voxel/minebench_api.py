@@ -1,6 +1,8 @@
 """MineBench the way MineBench itself runs a model: one API call with its system prompt (its own prompts.ts, rendered for a 256 grid
 and the simple palette) and its user message, and whatever comes back is the build. No runtime, no retries, no agent.
     python tools/voxel/minebench_api.py PROMPT.md "a choo-choo train" out_dir --model claude-haiku-5-5
+    python tools/voxel/minebench_api.py PROMPT.md "a choo-choo train" out_dir --core --model coder   (a Skippy Core slot: chat, coder,
+        qwen3-8b-stock: the same Anthropic API on llama-swap, SKIPPY_CORE_URL and SKIPPY_CORE_API_KEY from the vault)
 PROMPT.md is MineBench's system prompt (skippy-minebench/MINEBENCH_PROMPT.md: everything before "## Build Request"). Writes
 out_dir/build.json, out_dir/raw.txt and out_dir/run.json (model, seconds, tokens). The key comes from ANTHROPIC_API_KEY or the vault.
 """
@@ -17,16 +19,16 @@ from pathlib import Path
 VAULTS = ("G:/My Drive/vault/.env", "D:/Aaron/development/.env")
 
 
-def api_key() -> str:
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return os.environ["ANTHROPIC_API_KEY"]
+def vault(name: str) -> str:
+    if os.environ.get(name):
+        return os.environ[name]
     for v in VAULTS:
         p = Path(v)
         if p.is_file():
             for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
-                if line.startswith("ANTHROPIC_API_KEY="):
+                if line.startswith(name + "="):
                     return line.split("=", 1)[1].strip().strip("\"'")
-    sys.exit("no ANTHROPIC_API_KEY")
+    sys.exit(f"no {name}")
 
 
 def first_json(text: str) -> dict:
@@ -48,21 +50,27 @@ def main(argv=None) -> int:
     ap.add_argument("out_dir")
     ap.add_argument("--model", default="claude-haiku-5-5")
     ap.add_argument("--max-tokens", type=int, default=32000)
+    ap.add_argument("--core", action="store_true", help="the model is a Skippy Core slot, not Claude")
     a = ap.parse_args(argv)
     import anthropic
     system = Path(a.prompt_file).read_text(encoding="utf-8").split("## Build Request")[0].rstrip()
     user = f"## Build Request\nHere is what you need to build:\n<build_request>\n{a.request}\n</build_request>"   # MineBench's buildUserPrompt
     out = Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    client = anthropic.Anthropic(api_key=api_key())
+    if a.core:   # the key both ways, as the bridge sends it; a local model can take many minutes
+        key = vault("SKIPPY_CORE_API_KEY")
+        client = anthropic.Anthropic(base_url=vault("SKIPPY_CORE_URL"), api_key=key, auth_token=key, timeout=3600)
+    else:
+        client = anthropic.Anthropic(api_key=vault("ANTHROPIC_API_KEY"))
     t0 = time.time()
+    started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t0))
     with client.messages.stream(model=a.model, max_tokens=a.max_tokens, system=system,
                                 messages=[{"role": "user", "content": user}]) as stream:
         final = stream.get_final_message()
     secs = round(time.time() - t0)
     text = "".join(b.text for b in final.content if getattr(b, "type", "") == "text")
     (out / "raw.txt").write_text(text, encoding="utf-8")
-    run = {"model": final.model, "seconds": secs, "stop_reason": final.stop_reason,
+    run = {"model": a.model if a.core else final.model, "started": started, "seconds": secs, "stop_reason": final.stop_reason,
            "input_tokens": final.usage.input_tokens, "output_tokens": final.usage.output_tokens}
     try:
         call = first_json(text)

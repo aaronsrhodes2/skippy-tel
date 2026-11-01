@@ -253,6 +253,16 @@ RADIANCE_SHOWCASE_SNIPPET = """
 # blocks, minutes, size, verdict, request when the full text is there, and stats: when it started, its tokens and every model it used,
 # tools/voxel/run_stats.py), views.png, model.glb and build.json. A new folder is a new page, in the order the runs happened (the
 # Captain, 2026-10-31): nothing to add here. tools/voxel/publish_run.py writes the folder from a run's working folder.
+# Runs come in series (run.json "series", "tuned" when absent), newest series first, each in the order its runs happened. The first
+# eleven are the tuned branch: by the Captain's call (2026-10-31) its tooling had tainted the comparison, so the fresh start began.
+MINEBENCH_SERIES = (
+    ("fresh", "Fresh start", "Nothing made for MineBench or for trains: MineBench's own prompt, and either one call to a model on "
+     "Skippy Core, the way MineBench itself runs one, or purple Skippy with an empty setup (none of the Captain's skills, no "
+     "checker, no shared memory)."),
+    ("tuned", "The tuned branch", "Runs where purple Skippy had tooling written for this build: our runtime and its floating-parts "
+     "and wheel checks, a voxel skill with a wheel helper, rules in its header. Set aside on 2026-10-31 as a tainted comparison; "
+     "kept, good and bad."),
+)
 MINEBENCH_DIR = pathlib.Path(__file__).parent / "static" / "experiments" / "minebench"
 
 
@@ -262,7 +272,13 @@ def load_minebench_runs(root=MINEBENCH_DIR):
         run = json.loads(f.read_text(encoding="utf-8"))
         run["id"] = f.parent.name
         runs.append(run)
-    return tuple(sorted(runs, key=lambda r: ((r.get("stats") or {}).get("started") or "~", r["n"])))
+    rank = {key: i for i, (key, _, _) in enumerate(MINEBENCH_SERIES)}
+    runs.sort(key=lambda r: (rank[r.setdefault("series", "tuned")], (r.get("stats") or {}).get("started") or "~", r["n"]))
+    for key in rank:
+        mine = [r for r in runs if r["series"] == key]
+        for k, r in enumerate(mine, 1):
+            r["k"], r["of"] = k, len(mine)
+    return tuple(runs)
 
 
 MINEBENCH_RUNS = load_minebench_runs()

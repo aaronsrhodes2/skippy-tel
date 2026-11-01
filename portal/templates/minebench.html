@@ -21,26 +21,30 @@
         Minecraft-style grid; the build shows at a glance what a model can do. The builder here is <b>purple Skippy</b>, the
         Captain's coding agent thinking with Skippy Core's local model, with Claude Haiku as a yardstick. Every run uses MineBench's own
         prompt and rules (256 grid, 25 blocks, <code>voxel.exec</code>); good and bad runs are all kept.</p>
+      {% set names = {} %}{% for key, name, about in series %}{% set _ = names.update({key: name}) %}{% endfor %}
       <table class="mbruns">
         <thead><tr><th>Run</th><th>Started</th><th>Min</th><th>Tokens</th><th>Blocks</th></tr></thead>
-        <tbody>{% for r in runs %}{% set s = r.stats or {} %}
-          <tr data-run="{{ r.id }}" tabindex="0" title="{{ r.title }}"><td><b>{{ loop.index }}</b> {{ r.id }}</td>
+        {% for key, name, about in series %}{% set mine = runs|selectattr('series', 'equalto', key)|list %}{% if mine %}
+        <tbody><tr class="series"><th colspan="5" title="{{ about }}">{{ name }}</th></tr>{% for r in mine %}{% set s = r.stats or {} %}
+          <tr data-run="{{ r.id }}" tabindex="0" title="{{ r.title }}"><td><b>{{ r.k }}</b> {{ r.id }}</td>
             <td>{{ (s.started or '')[:10] }}</td><td>{{ r.minutes if r.minutes is not none else '—' }}</td>
             <td>{{ num(s.tokens.total) if s.tokens else '—' }}</td><td>{{ num(r.blocks) }}</td></tr>{% endfor %}
-        </tbody>
+        </tbody>{% endif %}{% endfor %}
       </table>
       <p class="help">Tokens: everything the models read and wrote, re-read context included (most of it, on an agent). A run marked
         "expanded prompt" got a full written specification instead of the benchmark's one line.</p>
+      {% for key, name, about in series %}<p class="help"><b>{{ name }}:</b> {{ about }}</p>{% endfor %}
       {% for r in runs %}{% set s = r.stats or {} %}
       <section class="run" id="run-{{ r.id }}">
-        <header><span class="no">{{ loop.index }}/{{ runs|length }}</span><h3>{{ r.title }}</h3></header>
-        <div class="media">
+        <header><span class="no">{{ names[r.series] }} · {{ r.k }}/{{ r.of }}</span><h3>{{ r.title }}</h3></header>
+        {% if r.failed %}<div class="media failed"><p><b>No build.</b> Its code does not run, so MineBench would score nothing:
+          <code>{{ r.failed }}</code></p></div>{% else %}<div class="media">
           <figure class="shot"><img class="views" width="1800" height="1320" src="{{ url_for('static', filename='experiments/minebench/' ~ r.id ~ '/views.png') }}" alt="{{ r.title }}: four views" loading="lazy">
             <button type="button" class="key sm full" data-full title="Full screen" aria-label="Full screen"><svg class="g" aria-hidden="true"><use href="#g-fs"/></svg></button></figure>
           <figure class="shot"><model-viewer src="{{ url_for('static', filename='experiments/minebench/' ~ r.id ~ '/model.glb') }}" alt="{{ r.title }}: the build in 3D"
                     camera-controls auto-rotate touch-action="pan-y" shadow-intensity="0.6" exposure="1.1" loading="lazy"></model-viewer>
             <button type="button" class="key sm full" data-full title="Full screen" aria-label="Full screen"><svg class="g" aria-hidden="true"><use href="#g-fs"/></svg></button></figure>
-        </div>
+        </div>{% endif %}
         <div class="data">
           <dl class="facts">
             <dt>Prompt</dt><dd>{% if r.comparable %}<span class="tag">benchmark</span> "{{ r.prompt }}"{% else %}<span class="tag">expanded</span> {{ r.prompt }}{% endif %}{% if r.request %} (<a href="{{ url_for('static', filename=r.request) }}">full text</a>){% endif %}</dd>

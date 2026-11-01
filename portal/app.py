@@ -1822,7 +1822,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     @lab.get("/minebench")
     def minebench():
-        return render_template("minebench.html", runs=experiments.MINEBENCH_RUNS)
+        return render_template("minebench.html", runs=experiments.MINEBENCH_RUNS, series=experiments.MINEBENCH_SERIES)
 
     @lab.get("/mentat/api/tools")
     def mentat_tools():

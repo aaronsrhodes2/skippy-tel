@@ -1,11 +1,12 @@
 """Put a MineBench run on the Experiments page: one folder, no code to change.
 
     python tools/voxel/publish_run.py <run's working folder> <id> --title "..." --verdict "..." [--model "..."] [--prompt "..."]
-        [--expanded] [--request request.txt] [--transcript session.jsonl]
+        [--expanded] [--request request.txt] [--transcript session.jsonl | --single run.json] [--series fresh]
 
 Renders the run's build.json (tools/voxel/render.py: four views and the 3D model), copies it into
 portal/static/experiments/minebench/<id>/ and writes run.json there with the next n. The run's time, tokens and models come from
-its Claude Code transcript (tools/voxel/run_stats.py: the newest one kept for the working folder, or --transcript).
+its Claude Code transcript (tools/voxel/run_stats.py: the newest one kept for the working folder, or --transcript), or for a one-call
+run from tools/voxel/minebench_api.py's run.json (--single). --series names the series it belongs to (experiments.MINEBENCH_SERIES).
 A verdict is required: a bad run is published too, saying why it is bad. Commit and push to deploy.
 """
 import argparse
@@ -31,23 +32,43 @@ def main():
     ap.add_argument("--model", default=CORE)
     ap.add_argument("--prompt", default="a choo-choo train")
     ap.add_argument("--transcript", type=pathlib.Path, help="the run's session transcript, when it isn't the folder's newest")
+    ap.add_argument("--single", type=pathlib.Path, help="a one-call run: minebench_api.py's run.json instead of a transcript")
+    ap.add_argument("--series", default="tuned", help="experiments.MINEBENCH_SERIES: tuned (runs 1-11) or fresh")
     ap.add_argument("--expanded", action="store_true", help="the run got more than the benchmark's one line")
     ap.add_argument("--request", type=pathlib.Path, help="the full message the builder got")
     a = ap.parse_args()
-    transcript = a.transcript or run_stats.find_transcript(a.work)
-    if not transcript:
-        raise SystemExit(f"no Claude Code transcript for {a.work}: pass --transcript")
-    stats = run_stats.stats(transcript)
+    if a.single:
+        stats = run_stats.single(a.single)
+    else:
+        transcript = a.transcript or run_stats.find_transcript(a.work)
+        if not transcript:
+            raise SystemExit(f"no Claude Code transcript for {a.work}: pass --transcript")
+        stats = run_stats.stats(transcript)
     out = RUNS / a.id
     old = json.loads((out / "run.json").read_text(encoding="utf-8")) if (out / "run.json").exists() else None
     out.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(a.work / "build.json", out / "build.json")
-    r = subprocess.run([sys.executable, str(HERE / "render.py"), str(out / "build.json"), str(out / "views.png"), a.title,
-                        "--glb", str(out / "model.glb")], capture_output=True, text=True, check=True)
-    shot = json.loads(r.stdout.strip().splitlines()[-1])
+    # the runtime first: a build whose code throws fails here in a second, with its own error, not after render.py's 120 s wait
+    r = subprocess.run(["node", str(HERE / "runtime.mjs"), str(out / "build.json")], capture_output=True, text=True)
+    if r.returncode == 0:
+        r = subprocess.run([sys.executable, str(HERE / "render.py"), str(out / "build.json"), str(out / "views.png"), a.title,
+                            "--glb", str(out / "model.glb")], capture_output=True, text=True)
+    failed = None
+    if r.returncode == 0:
+        shot = json.loads(r.stdout.strip().splitlines()[-1])
+    else:      # its code does not run: MineBench would score no build. Published as that, with the error, no pictures.
+        err = [ln.strip() for ln in (r.stderr + r.stdout).splitlines() if "Error" in ln]
+        failed = err[-1] if err else "the build's code failed to run"
+        shot = {"blocks": 0, "size": []}
+        for f in ("views.png", "model.glb"):
+            (out / f).unlink(missing_ok=True)
     n = old["n"] if old else 1 + max((json.loads(f.read_text(encoding="utf-8"))["n"] for f in RUNS.glob("*/run.json")), default=0)
     run = {"n": n, "title": a.title, "model": a.model, "prompt": a.prompt, "comparable": not a.expanded,
-           "blocks": shot["blocks"], "minutes": stats["minutes"], "size": " x ".join(map(str, shot["size"])), "verdict": a.verdict, "stats": stats}
+           "blocks": shot["blocks"], "minutes": stats["minutes"], "size": " x ".join(map(str, shot["size"])) or "none", "verdict": a.verdict, "stats": stats}
+    if failed:
+        run["failed"] = failed
+    if a.series != "tuned":
+        run["series"] = a.series
     if a.request:
         shutil.copyfile(a.request, out / "request.txt")
     if (out / "request.txt").exists():

@@ -1,0 +1,33 @@
+{
+ "n": 12,
+ "title": "Choo-choo train, Skippy Core's chat model in one call (fails to run)",
+ "model": "Skippy Core's chat model (Qwen3.6-35B-A3B, Q4), one call with MineBench's own prompt, the way MineBench runs a model",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 0,
+ "minutes": 5,
+ "size": "none",
+ "verdict": "A failed build, kept. In one reply (5 minutes, 5,052 tokens) it planned a sensible scene: a steam locomotive with a cowcatcher and boiler, a tender and passenger cars on a ballasted track with scenery, drawn with its own box, cylinder and sphere helpers. But every helper places blocks with voxel.setBlock, which MineBench does not give it (its code gets block(x, y, z, type)), so the code stops at the first block and MineBench would score no build at all. It got one try, as every model does in MineBench itself.",
+ "stats": {
+  "started": "2026-11-01T00:08:51Z",
+  "minutes": 5,
+  "tokens": {
+   "input": 1633,
+   "cache_read": 0,
+   "output": 5052,
+   "total": 6685
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's chat slot: UD-Q4_K_XL)",
+    "tokens": {
+     "input": 1633,
+     "cache_read": 0,
+     "output": 5052
+    }
+   }
+  ]
+ },
+ "failed": "ReferenceError: voxel is not defined",
+ "series": "fresh"
+}
