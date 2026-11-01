@@ -1366,10 +1366,9 @@ STEREO_LEVELS = 10
 def stereo_volume(house, action: str, level=None) -> str:
     """The house stereo's own loudness, in tenths of full (the router's gain on Bilby and Spotify; ducking under Skippy is separate). Full is
     where the Sony's and the Enclave's knobs were set, so "louder" past full is theirs to do."""
-    player = getattr(house, "player", None)
-    if player is None or not hasattr(player, "set_gain"):
+    if not hasattr(house, "set_level"):
         return "The house stereo's volume is on its own knob."
-    now = max(1, min(STEREO_LEVELS, round(getattr(player, "gain", 1.0) * STEREO_LEVELS)))
+    now = max(1, min(STEREO_LEVELS, round(getattr(house, "level", 1.0) * STEREO_LEVELS)))
     if action == "volume":
         try:
             want = int(level)
@@ -1380,7 +1379,7 @@ def stereo_volume(house, action: str, level=None) -> str:
     want = max(1, min(STEREO_LEVELS, want))
     if action == "louder" and now >= STEREO_LEVELS:
         return f"Not louder: the house stereo is already at full ({STEREO_LEVELS} of {STEREO_LEVELS}); past that is the speaker's own knob."
-    player.set_gain(want / STEREO_LEVELS)
+    house.set_level(want / STEREO_LEVELS)
     return f"Done: the house stereo is at {want} of {STEREO_LEVELS}."
 
 

@@ -151,7 +151,11 @@ class _Player:
 
 class _House:
     def __init__(self):
-        self.player = _Player()
+        self.player, self.level = _Player(), 1.0
+
+    def set_level(self, v):
+        self.level = v
+        self.player.set_gain(v)
 
 
 def test_stereo_volume_steps_down_and_up_in_tenths_and_full_is_the_top():
@@ -212,3 +216,23 @@ def test_plain_list_requests_are_routed_to_the_tool_before_the_model():
     assert pre_route("what's on my to do list") == {"action": "read", "list": "to-do"}
     assert pre_route("clear the shopping list") == {"action": "clear", "list": "shopping"}
     assert pre_route("add a timer for ten minutes") is None and pre_route("what's the weather") is None
+
+
+def test_the_stereo_level_survives_ducking_under_skippy():
+    import asyncio
+
+    from stereo import DUCK, StereoMusic
+
+    class P(_Player):
+        pass
+
+    async def go():
+        s = StereoMusic.__new__(StereoMusic)
+        s.player, s._undo, s.level = P(), None, 1.0
+        s.set_level(0.4)
+        assert s.player.gain == 0.4
+        s.duck(True, 0.01)
+        assert abs(s.player.gain - DUCK * 0.4) < 1e-9
+        await asyncio.sleep(0.05)
+        assert s.player.gain == 0.4 and s._undo is None
+    asyncio.run(go())

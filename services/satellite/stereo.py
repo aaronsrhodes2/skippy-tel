@@ -365,6 +365,12 @@ class StereoMusic:
             self.box.mix = {"get": lambda: {"on": dj.enabled(env), "xfade": xfade}, "set": dj.set_enabled}
         self.media, self.log = media, log
         self._undo: asyncio.TimerHandle | None = None
+        self.level = 1.0                                            # his "turn it down" (hub.stereo_volume): the ducking below is on top of it
+
+    def set_level(self, level: float) -> None:
+        self.level = max(0.05, min(1.0, level))
+        if self._undo is None:                                      # ducked under Skippy right now: it comes back to the new level
+            self.player.set_gain(self.level)
 
     @property
     def playing(self) -> bool:
@@ -435,13 +441,17 @@ class StereoMusic:
         if self.player.spotify is not None:
             asyncio.get_running_loop().create_task(self.player.watch_spotify())
 
+    def _unduck(self) -> None:
+        self._undo = None
+        self.player.set_gain(self.level)
+
     def duck(self, on: bool, hold_s: float = 30.0) -> None:
         if self._undo is not None:
             self._undo.cancel()
             self._undo = None
-        self.player.set_gain(DUCK if on else 1.0)
+        self.player.set_gain((DUCK if on else 1.0) * self.level)
         if on:
             try:
-                self._undo = asyncio.get_running_loop().call_later(hold_s, self.player.set_gain, 1.0)
+                self._undo = asyncio.get_running_loop().call_later(hold_s, self._unduck)
             except RuntimeError:
                 pass
