@@ -953,9 +953,10 @@ class Workshop:
             if not run.done and (not close_unfinished or run.task in keep):
                 continue                               # the older generation's live run (a hand-over): not ours yet
             with self._lock:
-                if run.task in self._runs:
-                    continue
-                self._runs[run.task] = run
+                held = self._runs.get(run.task)
+                if held is not None and not (held.done and held.error == RESTART_ERROR and run.done and run.error != RESTART_ERROR):
+                    continue                           # ours already; but a run wrongly closed here that another generation then
+                self._runs[run.task] = run             # really finished (its file says how) is replaced by the real ending
             run.on_change = self._save
             if not run.done:
                 run.finish(False, RESTART_ERROR)       # re-saves it, now closed

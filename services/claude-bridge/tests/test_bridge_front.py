@@ -126,6 +126,16 @@ def test_adopt_leaves_a_run_another_generation_holds(shop):
     assert path.read_text(encoding="utf-8") == before
 
 
+def test_a_run_wrongly_closed_here_takes_the_real_ending_its_own_generation_wrote(shop):
+    write_run(shop, "abcdefab", done=False)
+    shop.load(close_unfinished=True)                                   # the old bug: closed here as "bridge restarted"
+    assert shop.get("abcdefab").error == engine.RESTART_ERROR
+    write_run(shop, "abcdefab", done=True, finished_ago=1, ok=True)    # the generation that really ran it finishes it
+    shop.load(close_unfinished=True)
+    run = shop.get("abcdefab")
+    assert run.done and run.ok and run.error is None
+
+
 def test_runs_and_health_cover_every_generation(tmp_path):
     w, f = make(tmp_path)
     start(f, "task-old1")
