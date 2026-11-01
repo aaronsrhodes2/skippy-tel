@@ -216,22 +216,34 @@ def test_an_untracked_file_never_stops_the_pull(multi, tmp_path):
     assert not any("not pulling" in (e.get("text") or "") for e in run.events) and (clone / "NEW.md").exists()
 
 
-def test_leftover_edits_are_committed_to_a_branch_and_the_pull_still_happens(multi, tmp_path):
+def _upstream_moves(origin, name="NEW.md", text="newer"):
+    (origin / name).write_text(text, encoding="utf-8")
+    git("add", name, cwd=origin)
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "newer", cwd=origin)
+
+
+def test_leftover_edits_are_committed_in_place_and_the_pull_still_happens(multi, tmp_path):
     # 2026-11-01, the Captain: "(my clone has uncommitted changes ...) so I'm not pulling" was read aloud and kept the clone behind.
     finish(multi.start("aaaaaaaa", "conv-12345678", "x", project="other"))
-    clone = Path(multi.project("other").clone)
-    origin = Path(multi.project("other").url)
-    (origin / "NEW.md").write_text("newer", encoding="utf-8")
-    git("add", "NEW.md", cwd=origin)
-    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "newer", cwd=origin)
+    clone, origin = Path(multi.project("other").clone), Path(multi.project("other").url)
+    _upstream_moves(origin)
     (clone / "README.md").write_text("half-done edit", encoding="utf-8")
     run = finish(multi.start("cccccccc", "conv-12345678", "z", project="other"))
     assert not any(e.get("t") == "text" and "pull" in (e.get("text") or "") for e in run.events)
-    saved = [e["detail"] for e in run.events if e.get("t") == "tool" and "leftover" in (e.get("detail") or "")]
-    assert saved and (clone / "NEW.md").exists()                          # pulled
-    branch = saved[0].rsplit(" ", 1)[1]
+    said = [e["detail"] for e in run.events if e.get("t") == "tool" and e.get("name") == "git"]
+    assert said == ["committed an earlier turn's unfinished edits; pulled"]
+    assert (clone / "NEW.md").exists() and (clone / "README.md").read_text(encoding="utf-8") == "half-done edit"
     assert git("status", "--porcelain", "--untracked-files=no", cwd=clone).strip() == ""
-    assert git("show", f"{branch}:README.md", cwd=clone) == "half-done edit"          # nothing lost
+
+
+def test_a_conflict_with_upstream_keeps_our_side(multi, tmp_path):
+    finish(multi.start("aaaaaaaa", "conv-12345678", "x", project="other"))
+    clone, origin = Path(multi.project("other").clone), Path(multi.project("other").url)
+    _upstream_moves(origin, "README.md", "theirs")
+    (clone / "README.md").write_text("ours", encoding="utf-8")
+    finish(multi.start("cccccccc", "conv-12345678", "z", project="other"))
+    assert (clone / "README.md").read_text(encoding="utf-8") == "ours"
+    assert git("rev-parse", "HEAD~1", cwd=clone).strip() == git("rev-parse", "HEAD", cwd=origin).strip()   # on top of upstream
 
 
 def test_a_clone_path_that_holds_something_else_is_never_cloned_into(multi):

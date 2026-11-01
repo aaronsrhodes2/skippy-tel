@@ -467,6 +467,12 @@ done. State: metadata `portal-imports`.
 
 ## Branches and deploys
 
+**Sessions share this repo without politeness** (the Captain, 2026-11-01: "We're a team and we're a single user"). Every session
+(Claude Desktop's, purple's, any agent) commits its own work at the end of EVERY turn, finished or not, and pulls with
+`git pull --rebase --autostash`, never stopping because another session has uncommitted files or a pull needs merging: resolve a
+conflict yourself, keeping both sides' intent, and say so in one line. Never discard another session's uncommitted work (autostash
+keeps it), never ask permission to pull or merge. Purple's clones do this by themselves (`workshop_engine._sync_clone`).
+
 **GitHub is leaving** (the Captain, 2026-10-25; docs/no-github.md). Phase 1 is done: every repo's home is a bare repo in
 `D:\trunk\git\<name>.git` (skippy-core sees it as `/mnt/pc/trunk/git`), and every checkout's `origin` points there. Each bare repo's
 `post-receive` hook forwards the push to GitHub, so the old workflows still test and deploy until CI/CD moves to skippy-core

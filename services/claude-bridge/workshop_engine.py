@@ -1297,23 +1297,28 @@ class Workshop:
         return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8",
                               errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, env=child_env())
 
-    def _save_leftovers(self, clone: str, task: str) -> str:
-        """Commit the clone's uncommitted tracked edits to a new local branch `purple-leftovers/<time>-<task>` and come back
-        to the branch it was on, clean. Never pushed, never deleted. Returns the branch name, or "" if any step failed
-        (then the clone is left as it was found, or on the new branch with the edits still in it: never lost)."""
-        back = self._git("rev-parse", "--abbrev-ref", "HEAD", cwd=clone).stdout.strip()
-        if not back or back == "HEAD":
-            return ""                                  # a detached clone: leave it to a human
-        branch = f"purple-leftovers/{time.strftime('%Y%m%d-%H%M%S')}-{task[:8]}"
+    def _sync_clone(self, clone: str, task: str) -> str:
+        """Bring the clone up to date with no politeness and nothing lost (the Captain, 2026-11-01: "forcibly pull and forcibly merge
+        ... always commit between turns ... we're a team and a single user"). Uncommitted tracked edits from a turn that never
+        reached its finish gate are committed where they are, then the clone rebases onto upstream, our side winning a conflict.
+        If even that fails, our commits are kept on `purple-leftovers/<time>-<task>` and the clone is reset to upstream. Returns
+        one line for the transcript's tool fold (never chat text: nothing to read aloud)."""
+        said = []
         who = [] if self._git("config", "user.email", cwd=clone).stdout.strip() else \
-            ["-c", "user.name=Private Skippy", "-c", "user.email=skippy@skippy-pc"]
-        steps = (("checkout", "-q", "-b", branch), ("add", "-u"),
-                 (*who, "commit", "-qm", f"Leftover edits from an unfinished private Skippy task (saved before task {task[:8]} pulled)"),
-                 ("checkout", "-q", back))
-        for step in steps:
-            if self._git(*step, cwd=clone).returncode != 0:
-                return ""
-        return branch
+            ["-c", "user.name=Private Skippy", "-c", "user.email=skippy@skippy-pc"]   # a rebase writes commits too
+        if self._git("status", "--porcelain", "--untracked-files=no", cwd=clone).stdout.strip():
+            self._git("add", "-u", cwd=clone)
+            if self._git(*who, "commit", "-qm", f"Unfinished edits from an earlier private Skippy turn (committed before task {task[:8]})",
+                         cwd=clone).returncode == 0:
+                said.append("committed an earlier turn's unfinished edits")
+        if self._git(*who, "pull", "-q", "--rebase", "-X", "theirs", cwd=clone).returncode == 0:   # in a rebase, "theirs" is our own commits
+            return "; ".join(said + ["pulled"]) if said else ""             # a plain pull says nothing
+        self._git("rebase", "--abort", cwd=clone)
+        branch = f"purple-leftovers/{time.strftime('%Y%m%d-%H%M%S')}-{task[:8]}"
+        if self._git("branch", branch, cwd=clone).returncode == 0 and \
+                self._git("reset", "-q", "--hard", "@{u}", cwd=clone).returncode == 0:
+            return "; ".join(said + [f"couldn't merge, so kept my commits on {branch} and reset to upstream"])
+        return "; ".join(said + ["couldn't pull (left as it was)"])
 
     def _prepare_repo(self, run: Run) -> bool:
         """The project's own clone, on the latest of its branch. False (with the run failed) if there's no clone to work
@@ -1337,20 +1342,11 @@ class Workshop:
                     run.finish(False, "couldn't clone the repo: " + redact(out.stderr.strip())[:300])
                     return False
                 return True
-            # Only tracked changes are earlier work to protect: a file git doesn't track (the agent's own `.purple-out/` scratch) never blocks a
-            # fast-forward, and counting it kept the clone 7 commits behind main on 2026-10-29.
-            if self._git("status", "--porcelain", "--untracked-files=no", cwd=clone).stdout.strip():
-                # A run that never reached its finish gate (cancelled, failed, cut by a restart) left edits behind. They are
-                # committed to a branch of their own and the clone goes back clean, so the pull is never skipped (the
-                # Captain, 2026-11-01: "make them always commit"). A tool line, never chat text: nothing to read aloud.
-                saved = self._save_leftovers(clone, run.task)
-                if not saved:
-                    run.emit({"t": "tool", "name": "git", "detail": "earlier edits couldn't be saved to a branch; not pulling"})
-                    return True
-                run.emit({"t": "tool", "name": "git", "detail": f"saved an earlier task's leftover edits to branch {saved}"})
-            out = self._git("pull", "--ff-only", cwd=clone)
-            if out.returncode != 0:
-                run.emit({"t": "text", "text": "(couldn't fast-forward my clone: " + redact(out.stderr.strip())[:200] + ")"})
+            # Only tracked changes are earlier work: a file git doesn't track (the agent's own `.purple-out/` scratch) is left alone, and
+            # nothing ever stops the pull (2026-10-29 the clone sat 7 commits behind main; 2026-11-01 "not pulling" kept a turn on stale code).
+            said = self._sync_clone(clone, run.task)
+            if said:
+                run.emit({"t": "tool", "name": "git", "detail": said})
         except (OSError, subprocess.SubprocessError) as exc:
             run.finish(False, f"git isn't working: {exc}")
             return False
