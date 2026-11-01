@@ -95,3 +95,49 @@ panel's frame buffer, each frame at its last datagram, so a frame is never half 
   (`Face.music_heard`, set through `EsphomeLink.music_heard`, or the pod's own `music` state) he dances now and then in rest mode (streamed face only).
 * **Changing how he looks:** change the yaml drawing (the fallback), then `face_render.py` to match. `tools/face_stream_demo.py` streams by hand (a colour-bar test picture, a
   scripted run, a throughput test); `tools/box_fps.py` reads the box's own rates; `rooms/shot.py` takes the picture from the panel itself while streaming.
+
+## The garage door (`garage.yaml`, a ratgdo32; staged 2026-11-01, the board is on order)
+
+Chamberlain closed MyQ to third parties in 2023, and the "MyQ-DFC" that skippy-core's Bluetooth sees is only MyQ's setup channel. So the
+door gets a **ratgdo32**: an ESP32 board that speaks the opener's own wall-button protocol, **Security+ 2.0** (the opener's learn button is
+**yellow**). `garage.yaml` is ratgdo's official `v32board.yaml` + `base.yaml`, pinned to tag `v1635` (commit `c11e9347`) instead of `main`,
+with an encrypted API and an OTA password and none of the Home Assistant-only parts. The hub is its Home Assistant: `garage.py` connects with
+aioesphomeapi the way `esphome_link.py` reaches the pods, and puts the door, its light, motion, obstruction and the remotes lockout into the
+house (`house.Combined`). That means voice and the skippy-house MCP get it, with the usual guard rails. The door is invisible unless
+`HASS_SENSITIVE=1`, opening and closing need his spoken yes, a text chat can never do it (`confirm` is dropped there), and it never closes on
+an obstruction.
+
+**Wiring** (ratgdo's Security+ 2.0 instructions, ratcloud.llc/pages/wiring-security-2-0; unplug the opener first). The ratgdo32 comes
+with a three-wire lead. Its wires go to the screw terminals on the back of the opener, the ones the wall button and the safety beam use:
+
+| ratgdo32 wire | opener terminal (LiftMaster) | what it is |
+|---|---|---|
+| **red** (Ctrl) | **red** | the wall button's control line: Security+ 2.0 talks over it |
+| **white** (GND) | **white** | ground |
+| **black** (Obst) | **grey** (the safety beam's terminal; ratgdo's docs call it "black") | the obstruction beam, so the ratgdo sees it directly |
+
+The terminals with the orange push buttons on the ratgdo32 are pass-throughs. The existing wall button and safety-sensor wires can move
+there, or stay on the opener beside the ratgdo's wires (both work). Power is **USB-C** from any 5 V adapter (the opener's ceiling outlet):
+the ratgdo is not powered from the opener. Windows already has the driver for its USB chip (CH9102); don't install a separate one.
+
+**Flash it** (skippy-pc, Git Bash, the board on USB-C):
+
+    bash services/satellite/rooms/flash_garage.sh                 # GARAGE_PORT=COM9 picks the port; later runs update it over Wi-Fi
+    bash services/satellite/rooms/flash_garage.sh --check         # only compiles (proven 2026-11-01: 52% flash, 27% RAM)
+
+It uses its own ESPHome release (`esphome==2026.10.1` in `state/esphome-garage-venv`, not the pods' dev pin). The API key and OTA password
+are `GARAGE_ESPHOME_KEY` / `GARAGE_ESPHOME_OTA` in the vault (already there), and Wi-Fi is `ROOM_WIFI_*` or `HOME_WIFI*`, as for the pods. If
+Wi-Fi fails it opens a `skippy-garage` hotspot (the OTA password) to pick a network. The board's own page `http://skippy-garage.local`
+(user `skippy`, the OTA password) shows the door and has ratgdo's diagnostics.
+
+**When it arrives (the checklist):**
+
+1. Wire it: opener unplugged, ratgdo red to red, white to white, black to grey (as above), USB-C power, opener back on.
+2. Flash it: USB-C to skippy-pc, `bash services/satellite/rooms/flash_garage.sh`, then back on its USB power in the garage.
+3. Check it on the opener: on `http://skippy-garage.local`, the Door shows the real state and the Light key switches the opener light.
+   If the door says unknown, press **Sync**, or the yellow learn button once.
+4. Set the IP: in the vault, `GARAGE_ESPHOME=esphome://<its IP>` (pin it in the router; `skippy-garage.local` works too if mDNS is reliable).
+5. Turn on the sensitive things: `HASS_SENSITIVE=1` in the vault (it also unhides locks: every one of them still needs a spoken yes).
+6. Restart the hub: only by its python PIDs, and only after `state/hub.log` shows no woke/heard/said/routine/starter activity for 2 minutes.
+   `tools/hub_run.sh` starts it again by itself. The log says `garage: connected to the ratgdo at ...`.
+7. Say "Skippy, is the garage door open?". Then "open the garage door", which he asks you to confirm out loud.

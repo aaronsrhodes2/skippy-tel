@@ -53,7 +53,7 @@ def matter_path(env=os.environ) -> Path:
 def build_house(env: dict):
     """The house: what Skippy can control, through every backend that is set up (None when none is). hub.py shares it across rooms; house_mcp.py and the home
     reporter (the portal chat's house tools) build the same one.
-    HomeKit (paired with homectl.py), Matter (skippy-core's controller: MATTER_URL), Leviton's cloud (LEVITON_EMAIL + LEVITON_PASSWORD)
+    HomeKit (paired with homectl.py), Matter (skippy-core's controller: MATTER_URL), the garage door's ratgdo (GARAGE_ESPHOME), Leviton's cloud (LEVITON_EMAIL + LEVITON_PASSWORD)
     and Home Assistant (HASS_URL + HASS_TOKEN)."""
     sensitive = env.get("HASS_SENSITIVE") == "1"
     parts = []
@@ -65,6 +65,9 @@ def build_house(env: dict):
     if env.get("MATTER_URL"):                                       # Matter, through skippy-core's controller (core/compose.matter.yml)
         from matter import Matter, Names                            # noqa: PLC0415
         parts.append(Matter(env["MATTER_URL"], Names(matter_path(env)), sensitive=sensitive))
+    if env.get("GARAGE_ESPHOME"):                                   # the garage door: a ratgdo32 on the opener (rooms/garage.yaml), over ESPHome
+        from garage import Garage                                   # noqa: PLC0415
+        parts.append(Garage(env["GARAGE_ESPHOME"], env.get("GARAGE_ESPHOME_KEY", ""), sensitive=sensitive))
     if env.get("LEVITON_EMAIL") and env.get("LEVITON_PASSWORD"):    # every Leviton switch on his account, through Leviton's cloud: after
         from leviton import Leviton                                 # noqa: PLC0415  the local backends, so a switch paired locally wins
         parts.append(Leviton(env["LEVITON_EMAIL"], env["LEVITON_PASSWORD"], sensitive=sensitive))

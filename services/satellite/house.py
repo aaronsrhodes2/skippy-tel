@@ -159,6 +159,12 @@ class House:
             extra = f", currently {a.get('current_temperature')} degrees, set to {a.get('temperature')}"
         if self._domain(s) == "light" and a.get("brightness") is not None:
             extra = f", at {round(int(a['brightness']) / 255 * 100)} percent"
+        if self._domain(s) == "cover":
+            pos = a.get("current_position")
+            if isinstance(pos, (int, float)) and 0 < pos < 100 and s.get("state") == "open":
+                extra = f", {int(pos)} percent of the way"
+            if a.get("obstructed"):
+                extra += ", and its safety sensor says something is in the way"
         return f"{self._label(s)} is {s.get('state')}{(' ' + unit) if unit else ''}{extra}."
 
     def _ambiguous(self, query: str, close: list[dict]) -> str:
@@ -177,6 +183,8 @@ class House:
         domain, eid, label = self._domain(s), s["entity_id"], self._label(s)
         if domain in READ_ONLY:
             return f"{label} can only be read, not changed."
+        if domain == "cover" and action in ("close", "set_position") and (s.get("attributes") or {}).get("obstructed"):
+            return f"I won't close {label}: its safety sensor says something is in the way. Tell him that; it has to be cleared first."
         if self._is_sensitive(s) and not confirm:
             return f"{label} needs him to confirm out loud first. Ask him, and only call again with confirm set once he has said yes."
         service, data = self._plan(domain, action, value, s)
@@ -197,9 +205,10 @@ class House:
         if [w for w in rest_words if not any(w in ws for ws in GROUP_WORDS.values())]:
             return None                                            # more than a place and a kind: a name ("kitchen under 1")
         said = set(house_layout.words(target)) - set(FILLER)
-        visible = [s for s in self.states() if self._visible(s) and self._domain(s) in ("light", "switch", "fan")]
-        if any(set(house_layout.words(self._label(s))) == said for s in visible):
-            return None
+        everything = self.states()
+        if any(set(house_layout.words(self._label(s))) - set(FILLER) == said for s in everything):
+            return None                                            # one thing's own name ("Bedroom", "Garage door", even a hidden one)
+        visible = [s for s in everything if self._visible(s) and self._domain(s) in ("light", "switch", "fan")]
         lay, areas = self._layout(), self.rooms()
         out = []
         for s in visible:
@@ -257,6 +266,8 @@ class House:
             return ("set_temperature", {"temperature": number}) if 5 <= number <= 95 else (None, {})
         if action == "set_volume" and domain == "media_player" and number is not None:
             return "volume_set", {"volume_level": max(0, min(100, number)) / 100}
+        if domain == "cover" and action == "set_position" and number is not None:
+            return "set_cover_position", {"position": max(0, min(100, int(number)))}
         if domain == "cover" and action in ("open", "close", "stop"):
             return {"open": "open_cover", "close": "close_cover", "stop": "stop_cover"}[action], {}
         if domain == "media_player" and action in ("play", "pause", "stop", "next", "previous"):
@@ -325,8 +336,8 @@ TOOLS = [
     {"name": "home_state", "description": "Ask the state of one thing in the house: a light, a temperature sensor, the thermostat, a door sensor. Use his own words for its name.",
      "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
     {"name": "home_control", "description": "Do something to one thing in the house. Actions: on, off, toggle, set_brightness (value 1-100), set_temperature (value in degrees), set_volume (value 0-100), "
-                                             "open, close, stop (covers), play, pause, next, previous (media players), activate (scenes, scripts). If several things fit the name, nothing happens and you must ask which. "
-                                             "Locks and alarms need confirm=true, and only after he has said yes aloud.",
+                                             "open, close, stop, set_position (value 0-100) (covers), play, pause, next, previous (media players), activate (scenes, scripts). If several things fit the name, nothing happens and you must ask which. "
+                                             "Locks, alarms and the garage door need confirm=true, and only after he has said yes aloud.",
      "input_schema": {"type": "object", "properties": {"name": {"type": "string", "description": "His words for it, e.g. 'living room lamp'; or a place and a kind for all of them at once: 'upstairs lights', 'kitchen lights', 'all the lights', 'everything downstairs' (on, off, toggle, set_brightness only)."},
                                                        "action": {"type": "string"}, "value": {"type": "number"}, "confirm": {"type": "boolean"}},
                       "required": ["name", "action"]}},

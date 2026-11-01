@@ -37,7 +37,7 @@ def handle(msg: dict, house_of) -> dict | None:
         args.pop("confirm", None)                                   # never from text: only his voice confirms a lock
         house = house_of()
         text = run_tool(house, str(params.get("name") or ""), args) if house else \
-            "Nothing in the house is set up (no HomeKit pairings, no MATTER_URL, no Leviton login in the vault)."
+            "Nothing in the house is set up (no HomeKit pairings, no MATTER_URL, no GARAGE_ESPHOME, no Leviton login in the vault)."
         result = {"content": [{"type": "text", "text": text}], "isError": False}
     elif method == "ping":
         result = {}

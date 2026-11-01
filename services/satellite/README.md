@@ -123,6 +123,12 @@ Guard rails (`house.py`, the same for every backend; tests in `tests/test_sat_ho
 * locks, alarm panels and garage doors/gates are invisible unless `HASS_SENSITIVE=1`, and then still need a spoken yes (`confirm`); an alarm panel is never driven;
 * a spoken name must match one entity (the room counts as part of the name); several matches change nothing and Skippy asks which;
 * no raw service calls from the model; pairing keys and tokens are never returned or printed.
+* the garage door is never closed while the opener reports an obstruction (the safety beam): Skippy says so instead (`house.control`, and again in `garage.py`).
+
+**The garage door** (`garage.py`, `rooms/garage.yaml`): a ratgdo32 on the LiftMaster's wall-button terminals, reached over ESPHome's API like
+the pods (no MyQ, no cloud). It is off until the vault has `GARAGE_ESPHOME=esphome://<ip>`; then it is `cover.garage_door` ("Garage door"),
+`light.garage_light`, `binary_sensor.garage_motion`, `binary_sensor.garage_obstruction` and the remotes lockout `lock.garage_remotes`, all in
+the garage. Wiring, flashing and the "when it arrives" checklist: `rooms/README.md` → The garage door. Tests: `tests/test_sat_garage.py`.
 
 Other backends plug into the same `House`: Home Assistant (`hass.py`, if he ever runs one: `HASS_URL` + `HASS_TOKEN` in the vault). Later: the LG webOS TV
 (`aiowebostv`), other rooms' satellites over the Wyoming protocol.

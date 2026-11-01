@@ -23,7 +23,11 @@
       "pods": [],
       "outputs": [],
       "devices": [
-        {"name": "garage door opener", "kind": "garage door", "planned": true, "note": "ratgdo (session stage-the-ratgdo-garage); next to the theater, lower floor"}
+        {"id": "cover.garage_door", "name": "Garage door", "kind": "garage door", "planned": true, "note": "the LiftMaster (Security+ 2.0) through a ratgdo32 (garage.py, rooms/garage.yaml); hidden unless HASS_SENSITIVE=1, opening and closing need his spoken yes"},
+        {"id": "light.garage_light", "name": "Garage light", "kind": "light", "planned": true, "note": "the opener's own light, through the ratgdo"},
+        {"id": "binary_sensor.garage_motion", "name": "Garage motion", "kind": "sensor", "planned": true, "note": "the opener's motion sensor"},
+        {"id": "binary_sensor.garage_obstruction", "name": "Garage obstruction", "kind": "sensor", "planned": true, "note": "the safety beam: Skippy never closes the door while it is blocked"},
+        {"id": "lock.garage_remotes", "name": "Garage remotes", "kind": "lock", "planned": true, "note": "the opener's remote lockout; a lock, so it needs HASS_SENSITIVE=1 and his spoken yes"}
       ]
     },
     "office": {
