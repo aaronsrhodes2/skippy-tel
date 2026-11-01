@@ -17,7 +17,7 @@
   const GAP = 8, PAD = 4;
 
   const S = {
-    url: "", pass: "", exp: 0, books: [], byId: {}, places: {}, mode: "all", q: "", shown: [],
+    url: "", pass: "", exp: 0, books: [], byId: {}, places: {}, mode: "all", sort: "series", q: "", shown: [],
     cur: null,                    // the book the page is showing as current (here, or on a box)
     loaded: "",                   // the id of the book in the <audio> element, once it has been told to load
     remote: null,                 // {device, name, book, at} while a room box is playing
@@ -111,7 +111,7 @@
         const e = document.createElement("div"); e.className = "vrow shelf"; e.setAttribute("role", "list");
         for (let i = 0; i < cols; i++) {
           const c = document.createElement("button"); c.type = "button"; c.className = "cell"; c.dataset.act = "open";
-          c.innerHTML = `<span class="cover">${icon("book")}<img alt=""></span><i class="bar"><b></b></i><span class="t"></span>`;
+          c.innerHTML = `<span class="cover">${icon("book")}<img alt=""><b class="sq"></b></span><i class="bar"><b></b></i><span class="t"></span>`;
           const img = $("img", c); img.addEventListener("load", () => img.classList.add("ok"));
           e.append(c);
         }
@@ -132,6 +132,8 @@
           const pos = (S.places[b.id] || {}).pos || 0;
           $(".bar b", c).style.width = st === "listening" && b.d ? Math.min(100, 100 * pos / b.d) + "%" : (st === "finished" ? "100%" : "0%");
           $(".t", c).textContent = b.t;
+          $(".sq", c).textContent = S.sort === "series" && b.sr && b.sq != null ? "#" + b.sq : "";
+          c.title = b.t + (b.a ? " — " + b.a : "") + (b.sr ? " (" + b.sr + (b.sq != null ? " #" + b.sq : "") + ")" : "");
           c.classList.toggle("cur", !!S.cur && S.cur.id === b.id);
         });
       },
@@ -141,12 +143,19 @@
 
   function render(page) {
     S.cols = P.colsFor($("#scroll").clientWidth, 104);
-    S.shown = P.visible(S.books, S.places, S.q, S.mode);
+    S.shown = P.visible(S.books, S.places, S.q, S.mode, S.sort);
     const h = cellW() + 52;
     const rows = P.gridRows(S.shown, S.cols, h).map(r => Object.assign(r, { type: ensureShelf(S.cols) }));
     list.setRows(rows, page || 0);
     counts();
     $("#host").dataset.empty = S.shown.length ? "0" : "1";
+  }
+
+  const SORT_NAMES = { series: "Sorted by series", title: "Sorted by title", author: "Sorted by author" };
+  function paintSort() {
+    const k = $("#sort");
+    k.setAttribute("aria-label", SORT_NAMES[S.sort]); k.title = SORT_NAMES[S.sort];
+    $(".cnt", k).textContent = S.sort === "series" ? "S" : S.sort === "title" ? "T" : "A";
   }
 
   function counts() {
@@ -184,7 +193,7 @@
     $("#s-nar").innerHTML = b.n ? icon("mic") : "";
     if (b.n) $("#s-nar").append(" " + b.n);
     $("#s-nar").hidden = !b.n;
-    $("#s-meta").textContent = [P.left(b.d), b.g, b.y].filter(Boolean).join(" · ");
+    $("#s-meta").textContent = [b.sr ? b.sr + (b.sq != null ? " #" + b.sq : "") : "", P.left(b.d), b.g, b.y].filter(Boolean).join(" · ");
     $("#s-summary").textContent = b.s || "";
     showTab("about");
     cList.setRows(b.ch.map((c, i) => ({ type: "ch", h: 46, title: c[0], start: c[1] })), 0);
@@ -499,6 +508,7 @@
       case "close-sheet": closeSheet(); break;
       case "tab-about": showTab("about"); break;
       case "tab-chapters": showTab("chapters"); break;
+      case "sort": S.sort = P.SORTS[(P.SORTS.indexOf(S.sort) + 1) % P.SORTS.length]; paintSort(); render(0); break;
       case "mode": S.mode = el.dataset.mode; $$("#filters .key").forEach(k => k.setAttribute("aria-pressed", k === el)); render(0); break;
       case "clear-search": $("#q").value = ""; S.q = ""; $("#q-clear").hidden = true; render(0); break;
       case "tap": au.play().then(() => { $("#tapbar").hidden = true; paintAll(); }).catch(() => {}); break;

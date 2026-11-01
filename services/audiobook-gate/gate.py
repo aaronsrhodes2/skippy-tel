@@ -8,7 +8,7 @@ Nothing works without a pass: every path but /health starts with /t/<exp>.<sig>/
 the home token's sha256 under its own label ("audiobook-gate-v1"), so a music, video or voice pass never opens this gate.
 
     GET /health                       the readiness contract (ready.py), with how many books there are            (no pass: the reporter's probe)
-    GET /t/<pass>/catalog.json        every book: title, author, narrator, summary, chapters, length; gzipped, with an ETag
+    GET /t/<pass>/catalog.json        every book: title, author, narrator, series (sr) and its number (sq), release date, summary, chapters, length; gzipped, with an ETag
     GET /t/<pass>/places.json         {"current", "books": {id: {pos, chapter, speed, last_played, finished}}}: the hub's places and the ones saved here, newest wins
     PUT /t/<pass>/place/<id>          {"pos", "chapter", "speed", "finished"}: a place saved from the browser, for the hub (the voice player) to pick up
     GET /t/<pass>/a/<id>              the book's file, with Range (seeking; Safari insists on it)
@@ -77,6 +77,11 @@ def plain(html: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
+def clean(text: str) -> str:
+    """OpenAudible's data lost its apostrophes (they arrive as U+FFFD): put them back, never show the replacement mark."""
+    return re.sub(r"(?<=\w)�(?=\w)", "'", text or "").replace("�", "'")
+
+
 def num(v, default=0.0) -> float:
     try:
         return float(v)
@@ -138,9 +143,10 @@ class Library:
                         chapters.append([str(c.get("title") or "").strip() or f"Chapter {len(chapters) + 1}", round(num(c.get("start_offset_ms")) / 1000, 1)])
                 art = self.root / "art" / (stem + ".jpg")
                 books[bid] = {
-                    "id": bid, "t": str(m.get("title") or stem), "a": str(m.get("author") or ""), "n": str(m.get("narrated_by") or ""),
+                    "id": bid, "t": clean(str(m.get("title") or stem)), "a": clean(str(m.get("author") or "")), "n": clean(str(m.get("narrated_by") or "")),
                     "s": plain(str(m.get("summary") or m.get("description") or ""))[:1500], "d": round(num(m.get("seconds")), 1),
                     "g": str(m.get("genre") or "").split(":")[0], "y": str(m.get("release_date") or "")[:4], "ch": chapters,
+                    "sr": clean(str(m.get("series_name") or "")).strip(), "sq": num(m.get("series_sequence"), None), "rd": str(m.get("release_date") or "")[:10],
                     "c": art.is_file(), "oa": str(m.get("finished") or "").lower() == "true", "_file": folder / name, "_art": art}
             self.books, self._sig = books, sig
             body = json.dumps({"v": 1, "books": [{k: v for k, v in b.items() if not k.startswith("_")} for b in books.values()]},

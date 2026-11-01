@@ -28,6 +28,7 @@ def _make(tmp_path: Path):
     (root / "books.json").write_text(json.dumps([{
         "filename": "Dune - Part One", "title": "Dune", "author": "Frank Herbert", "narrated_by": "Scott Brick", "seconds": "3600",
         "summary": "<p>Spice &amp; sand.</p><p>Worms.</p>", "genre": "Sci-Fi:Classics", "release_date": "2007-01-02", "finished": "true",
+        "series_name": "Old Man�s War", "series_sequence": "3",
         "chapters": [{"title": "One", "start_offset_ms": 0}, {"title": "Two", "start_offset_ms": 1800000}]}]), encoding="utf-8")
     return root
 
@@ -83,6 +84,8 @@ def test_catalog(env):
     dune = books["dune-part-one-m4b"]
     assert (dune["t"], dune["a"], dune["n"], dune["g"], dune["y"], dune["oa"], dune["c"]) == ("Dune", "Frank Herbert", "Scott Brick", "Sci-Fi", "2007", True, True)
     assert dune["s"] == "Spice & sand.\nWorms." and dune["ch"] == [["One", 0.0], ["Two", 1800.0]] and dune["d"] == 3600.0
+    assert (dune["sr"], dune["sq"], dune["rd"]) == ("Old Man's War", 3.0, "2007-01-02")                  # the lost apostrophe is put back
+    assert books["no-meta-m4b"]["sr"] == "" and books["no-meta-m4b"]["sq"] is None
     assert books["no-meta-m4b"]["t"] == "No Meta" and books["no-meta-m4b"]["c"] is False      # a file OpenAudible never described still plays
     assert "_file" not in dune and "pdf" not in json.dumps(books)                              # no paths leave, no non-audio files
     assert c.get(f"/t/{_pass()}/catalog.json", headers={"If-None-Match": r.headers["ETag"]}).status_code == 304

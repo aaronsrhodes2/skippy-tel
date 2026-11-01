@@ -56,3 +56,6 @@
 .ab .menu .s-head h4 .g { width: 22px; height: 22px; }
 .ab-names .meta:empty, .ab-names .nar[hidden] { display: none; }
 .ab .key .tx { position: relative; z-index: 1; }
+.shelf .cell .cover .sq { position: absolute; left: 0; bottom: 0; z-index: 2; padding: 1px 5px; background: var(--black); color: var(--accent); font: 700 .68rem var(--mono); }
+.shelf .cell .cover .sq:empty { display: none; }
+.ab .ab-filters .key.sortkey { flex: 0 0 44px; }

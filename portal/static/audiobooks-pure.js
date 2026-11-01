@@ -3,7 +3,7 @@
      fmt / left           a time as 1:02:03, and how much is left as "3h 20m"
      chapterAt            which chapter a second falls in
      status               new, listening or finished, from a book and its saved place
-     visible              the books to show for a search and a filter, in the order that suits the filter
+     visible              the books to show for a search and a filter, in the order asked for: series (the default), title or author
      gridRows             the covers cut into rows of `cols`, for a list shown a screen at a time
      colsFor              how many covers fit across `width` px
      resumeAt             where Resume starts (a few seconds back, the start of a finished book)
@@ -59,9 +59,30 @@
 
   const norm = s => (s || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "");
 
-  /** mode: "all" | "listening" | "new" | "finished". Search matches every word in the title, author or narrator. Listening comes
-   *  most-recently-played first; the rest by title (an article does not count: "The Hobbit" files under H). */
-  function visible(books, places, q, mode) {
+  const bare = s => norm(s).replace(/^(the|a|an)\s+/, "");
+  const cmp = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
+
+  /** Books in reading order: series by name (an article does not count), each series by its number then release date, the books in no series
+   *  after them by title. */
+  function bySeries(a, b) {
+    if (!!a.sr !== !!b.sr) return a.sr ? -1 : 1;
+    if (a.sr) {
+      const s = cmp(bare(a.sr), bare(b.sr));
+      if (s) return s;
+      const qa = a.sq == null ? Infinity : a.sq, qb = b.sq == null ? Infinity : b.sq;
+      if (qa !== qb) return qa < qb ? -1 : 1;
+      const d = cmp(a.rd || "", b.rd || "");
+      if (d) return d;
+    }
+    return cmp(bare(a.t), bare(b.t));
+  }
+  const byAuthor = (a, b) => cmp(norm(a.a), norm(b.a)) || bySeries(a, b);
+  const byTitle = (a, b) => cmp(bare(a.t), bare(b.t));
+  const SORTS = ["series", "title", "author"];
+
+  /** mode: "all" | "listening" | "new" | "finished". Search matches every word in the title, author, narrator or series. `sort`: "series"
+   *  (default), "title" or "author"; the Listening filter is always most-recently-played first. */
+  function visible(books, places, q, mode, sort) {
     const words = norm(q).split(/[^a-z0-9']+/).filter(Boolean);
     const out = [];
     for (const b of books) {
@@ -69,15 +90,15 @@
       const st = status(b, place);
       if (mode && mode !== "all" && st !== mode) continue;
       if (words.length) {
-        const hay = norm(`${b.t} ${b.a} ${b.n}`);
+        const hay = norm(`${b.t} ${b.a} ${b.n} ${b.sr || ""}`);
         if (!words.every(w => hay.includes(w))) continue;
       }
       out.push(b);
     }
-    const key = b => norm(b.t).replace(/^(the|a|an)\s+/, "");
+    const order = sort === "title" ? byTitle : sort === "author" ? byAuthor : bySeries;
     out.sort((x, y) => {
       if (mode === "listening") return ((places[y.id] || {}).last_played || 0) - ((places[x.id] || {}).last_played || 0);
-      return key(x) < key(y) ? -1 : key(x) > key(y) ? 1 : 0;
+      return order(x, y);
     });
     return out;
   }
@@ -110,5 +131,5 @@
     return clamp(p, 0, duration || p);
   }
 
-  return { fmt, left, chapterAt, status, finished, visible, colsFor, gridRows, resumeAt, shouldSave, remotePos, SAVE_EVERY_S, DONE_LEFT_S, REWIND_S };
+  return { fmt, left, chapterAt, status, finished, visible, SORTS, bySeries, colsFor, gridRows, resumeAt, shouldSave, remotePos, SAVE_EVERY_S, DONE_LEFT_S, REWIND_S };
 });

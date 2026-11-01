@@ -43,6 +43,20 @@ test("search and filters", () => {
   assert.deepEqual(P.visible(books, places, "nothing here", "all"), []);
 });
 
+test("series order: each series in reading order, then the books with no series by title", () => {
+  const S = (id, t, sr, sq, rd, a) => ({ id, t, a: a || "Z", n: "", sr, sq, rd, d: 1, ch: [], oa: false });
+  const lib = [S("w", "Zebra", "", null), S("b2", "Beta Two", "The Beta Saga", 2, "2005-01-01"), S("a1", "Alpha", "Alpha Cycle", 1, "2001-01-01"),
+               S("b1", "Beta One", "The Beta Saga", 1, "2004-01-01"), S("a0", "Alpha Prequel", "Alpha Cycle", null, "1999-01-01"),
+               S("x", "Aardvark", "", null), S("a1b", "Alpha Again", "Alpha Cycle", 1, "2002-06-01", "Y")];
+  const ids = sort => P.visible(lib, {}, "", "all", sort).map(b => b.id);
+  assert.deepEqual(ids(), ["a1", "a1b", "a0", "b1", "b2", "x", "w"]);                  // Alpha Cycle (1 by date, then the unnumbered), The Beta Saga (filed under B), then the rest
+  assert.deepEqual(ids("series"), ids());
+  assert.deepEqual(ids("title"), ["x", "a1", "a1b", "a0", "b1", "b2", "w"]);                  // Aardvark, Alpha, Alpha Again, Alpha Prequel, Beta One, Beta Two, Zebra
+  assert.deepEqual(ids("author"), ["a1b", "a1", "a0", "b1", "b2", "x", "w"]);                // by author, a series still in order within one author
+  assert.equal(P.visible(lib, {}, "beta saga", "all").length, 2);                      // the series name is searchable
+  assert.deepEqual(P.SORTS, ["series", "title", "author"]);
+});
+
 test("the grid is cut into rows", () => {
   assert.equal(P.colsFor(375), 3);
   assert.equal(P.colsFor(50), 2);
