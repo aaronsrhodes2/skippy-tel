@@ -1,0 +1,33 @@
+{
+ "n": 21,
+ "title": "Round 2, Skippy Core's coder: lost",
+ "model": "Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8) as a vanilla agent: Claude Code with purple's system prompt and an empty setup (no skills, no memory, no checker), effort high, a 131K window; only MineBench's tool-mode prompt in the folder",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 76527,
+ "minutes": 10,
+ "size": "191 x 71 x 123",
+ "verdict": "Lost round 2 (blind judge, high confidence). A pleasant diorama (grass, a pond, trees, a bench, a signal post, a big smoke plume), but the locomotive is two huge grey spheres, one with a red band, joined by a thin rod, on big brown wheels that stand beside or across the rails instead of along them, with a brown box of coal behind. The judge: it reads as an odd machine more than a choo-choo train. 10 minutes, 15 turns, no cost (local).",
+ "stats": {
+  "started": "2026-11-01T07:18:47.944Z",
+  "minutes": 10,
+  "tokens": {
+   "input": 40253,
+   "cache_read": 406421,
+   "output": 33991,
+   "total": 480665
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
+    "tokens": {
+     "input": 40253,
+     "cache_read": 406421,
+     "output": 33991
+    }
+   }
+  ]
+ },
+ "series": "h2h",
+ "request": "experiments/minebench/h2h-r2-coder/request.txt"
+}
