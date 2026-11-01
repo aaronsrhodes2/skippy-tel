@@ -278,7 +278,7 @@ def test_netstream_sends_s16_pcm_and_dies_when_the_speaker_stops(monkeypatch):
         time.sleep(0.02)
     assert not s.alive
     pcm = np.frombuffer(sent[0], dtype="<i2")
-    assert len(pcm) == rt.BLOCK * 2 and abs(int(pcm[0]) - 16383) <= 1
+    assert len(pcm) == rt.BLOCK * 2 and abs(int(pcm[0]) - 16383) <= 2 * rt.NET_DITHER_LSB + 1     # the signal, give or take the dither
 
 
 def test_net_find_answers_from_the_poller_without_waiting(monkeypatch):

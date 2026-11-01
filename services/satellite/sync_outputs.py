@@ -8,6 +8,9 @@ speaker changes (a new Bluetooth latency, the Enclave moved to another room: the
 
     python services/satellite/sync_outputs.py enclave hdmi          # measure, print, save
     python services/satellite/sync_outputs.py enclave hdmi --dry    # measure and print only
+    python services/satellite/sync_outputs.py enclave hdmi --ticks 8                    # BY EAR: clicks on all of them at once, as the hub would
+    python services/satellite/sync_outputs.py enclave hdmi --ticks 8 --late enclave=20  # the Enclave sounds 20 ms later than measured: saved, then clicks
+      (standing between the speakers, the Captain says which one is late; each --late adds to that output's saved latency, the others wait for it)
 
 It opens its own router (the outputs are shared, so the hub keeps running) and its own microphone (SATELLITE_SYNC_MIC). The hub must NOT be
 sending to a network output at the same time (snapserver takes one sender): run it before the hub's router opens `enclave`, or briefly
@@ -84,11 +87,74 @@ def measure(r: rt.Router, mic: sync.MicRing, kind: str, clip) -> float | None:
     return got
 
 
+def click(level: float = 0.6):
+    """A short sharp click (5 ms of a decaying 2 kHz burst): two copies a few ms apart are heard as a flam, so the ear can say which leads."""
+    import numpy as np                                            # noqa: PLC0415
+    n = int(rt.RATE * 0.005)
+    t = np.arange(n) / rt.RATE
+    mono = (level * np.sin(2 * np.pi * 2000 * t) * np.exp(-t / 0.0015)).astype("float32")
+    return np.stack([mono, mono], axis=1)
+
+
+SCALE = (523.3, 659.3, 784.0, 1046.5, 784.0, 659.3)              # C E G C' G E: each beep a different note, so a late copy is a different pitch
+
+
+def tone(freq: float, seconds: float = 0.12, level: float = 0.5):
+    """A short beep with a sharp start (the ear times the onset) and a quick fade (no click at the end)."""
+    import numpy as np                                            # noqa: PLC0415
+    t = np.arange(int(rt.RATE * seconds)) / rt.RATE
+    env_ = np.minimum(1.0, (seconds - t) / 0.03)
+    mono = (level * np.sin(2 * np.pi * freq * t) * env_).astype("float32")
+    return np.stack([mono, mono], axis=1)
+
+
+def by_ear(env: dict, parts: dict, args) -> int:
+    """Clicks on all the outputs at once, each with the wait the hub gives it; --late first moves one output's saved latency."""
+    data = sync.load()
+    align = data.setdefault("align", {})
+    lat = align.setdefault("latency", {})
+    if args.late:
+        kind, ms = args.late.split("=", 1)
+        kind = kind.strip()
+        if kind not in lat:
+            print(f"no saved latency for {kind!r}: measure first (without --ticks)")
+            return 2
+        lat[kind] = round(float(lat[kind]) + float(ms) / 1000, 4)
+        align["by_ear"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        sync.STATE.write_text(json.dumps(data, indent=1), encoding="utf-8")
+    wait = sync.saved_align(args.outputs)
+    cushion = float(env.get("SATELLITE_SOLO_DELAY", str(rt.SOLO_DELAY_S)))
+    print("latency " + ", ".join(f"{k} {float(lat.get(k, 0)) * 1000:.0f} ms" for k in args.outputs)
+          + " -> waits " + ", ".join(f"{k} {wait.get(k, 0) * 1000:.0f} ms" for k in args.outputs))
+    r = rt.Router([(k, parts[k], cushion + wait.get(k, 0.0)) for k in args.outputs], log=lambda m: print(" ", m))
+    r.start()
+    end = time.monotonic() + 15
+    while time.monotonic() < end and not all(r.available(k) for k in args.outputs):
+        time.sleep(0.5)
+        r._last_scan = -1e9                                       # noqa: SLF001
+    closed = [k for k in args.outputs if not r.available(k)]
+    if closed:
+        print(f"not open: {closed}")
+        return 1
+    time.sleep(1.0)
+    for i in range(args.ticks):
+        clip = tone(SCALE[i % len(SCALE)]) if args.tones else click()
+        r.play(rt.ClipSource(clip), layer="voice", targets=set(args.outputs))
+        time.sleep(args.every)
+    time.sleep(1.0)
+    r.close()
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("outputs", nargs="+", help="router kinds in one room, e.g. enclave hdmi")
     ap.add_argument("--rounds", type=int, default=ROUNDS)
     ap.add_argument("--dry", action="store_true", help="measure only, save nothing")
+    ap.add_argument("--ticks", type=int, default=0, help="by ear: this many clicks on all the outputs at once, with the saved waits")
+    ap.add_argument("--tones", action="store_true", help="by ear: beeps up and down a scale instead of clicks (walk between the floors)")
+    ap.add_argument("--every", type=float, default=1.5, help="by ear: seconds between beeps")
+    ap.add_argument("--late", default="", help="by ear: KIND=MS, that output sounds MS later (negative: earlier) than its saved latency")
     args = ap.parse_args()
     env = vault_env()
     parts = speaker_out.output_parts(env)
@@ -97,6 +163,8 @@ def main() -> int:
         print(f"unknown outputs {unknown}: one of {sorted(parts)}")
         return 2
     import types                                                  # noqa: PLC0415
+    if args.ticks:
+        return by_ear(env, parts, args)
     mic = sync.MicRing(env.get("SATELLITE_SYNC_MIC", "CMTECK"), log=lambda m: print(" ", m))
     r = rt.Router([(k, parts[k], 0.0) for k in args.outputs], log=lambda m: print(" ", m))
     r.calibrator = types.SimpleNamespace(mic=mic)                 # the router's scan opens the mic too: on Windows every stream must be opened

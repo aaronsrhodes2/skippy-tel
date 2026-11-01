@@ -460,6 +460,8 @@ def _reinit_portaudio() -> None:
 NET_STATUS_PORT = 1780            # snapserver's JSON-RPC (tailnet only)
 NET_POLL_S = 3.0
 NET_LATENCY_S = 0.3               # snapserver's buffer (core/install/enclave.sh): the part known up front; the rest is measured
+NET_DITHER_LSB = 3                # a noise floor ~80 dB down, never exact digital zero: the Enclave's amp gated itself on silence and woke with a
+                                  # scratch before every sound (the Captain, 2026-11-01). SATELLITE_NET_DITHER=0 turns it off
 
 
 def is_net(part) -> bool:
@@ -541,13 +543,19 @@ class NetStream:
         threading.Thread(target=self._loop, daemon=True, name="net-out").start()
 
     def _loop(self) -> None:
+        import os                                                 # noqa: PLC0415
         np = _np()
         buf = np.zeros((BLOCK, 2), dtype="float32")
+        lsb = int(os.environ.get("SATELLITE_NET_DITHER", NET_DITHER_LSB))
+        rng = np.random.default_rng()
         nxt = self.clock()
         while not self._stop.is_set():
             self.callback(buf, BLOCK, None, None)
             try:
-                self.sock.sendall((np.clip(buf, -1.0, 1.0) * 32767).astype("<i2").tobytes())
+                pcm = np.clip(buf, -1.0, 1.0) * 32767
+                if lsb:                                           # triangular dither: two uniform draws, mean zero
+                    pcm += rng.uniform(-lsb, lsb, pcm.shape) + rng.uniform(-lsb, lsb, pcm.shape)
+                self.sock.sendall(np.clip(pcm, -32768, 32767).astype("<i2").tobytes())
             except OSError:
                 break
             if not NetWatch.of(self.host).playing:
