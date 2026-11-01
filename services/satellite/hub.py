@@ -1101,6 +1101,16 @@ def build_rooms(env: dict):
         async def alarm_tomorrow():
             return house_clock.tomorrow_line()
         routines.extras["alarm_tomorrow"] = alarm_tomorrow        # bedtime: "Your alarm is set for 6:30." (daily.py)
+        nest = next((p for p in getattr(house, "parts", [house]) if type(p).__name__ == "Nest"), None)
+        if nest is not None:
+            async def thermostat_night():
+                night = env.get("SKIPPY_NIGHT_SETPOINT", "").strip()
+                try:
+                    return await asyncio.to_thread(nest.bedtime, float(night) if night else None)
+                except Exception as e:                           # noqa: BLE001 — not connected or Google down: bedtime goes on without it
+                    log(f"(nest: {str(e)[:120]})")
+                    return None
+            routines.extras["thermostat_night"] = thermostat_night   # bedtime: the thermostat's line, and the night set point if he chose one
     connected: dict = {}                                         # room name -> Room, for announcements to the other rooms
 
     def make_room(name, link):

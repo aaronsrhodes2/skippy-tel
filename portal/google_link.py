@@ -4,6 +4,12 @@ through the portal's own Google sign-in (the same web client and the same callba
   GET  /admin/google/connect      (admin) off to Google, asking the read-only scopes with offline access; back at auth.callback
   POST /admin/google/disconnect   (admin) revokes the grant at Google and forgets it
   GET  /home/google/access        (home token) a short-lived access token for skippy-pc (services/satellite/google_home.py)
+  POST /admin/google/nest         (admin) the Nest's Device Access project id (console.nest.google.com/device-access)
+
+The Nest (2026-11-01): his Nest Thermostat E has no Matter, so Skippy reaches it through Google's Smart Device Management API. Once the
+Device Access project id is saved here, Connect also asks sdm.service and goes through Nest's own partner-connections page first (where he
+ticks the thermostat), then Google's consent, back at the same callback. The hub uses the same access tokens (services/satellite/nest.py);
+the project id rides along in /home/google/access.
 
 The connect flow is told apart from a normal sign-in by its `state`: the connect route picks it and keeps it in the session, and
 auth.callback hands the answer here only when Google sends that same state back. A normal sign-in never touches it. The grant is
@@ -16,6 +22,7 @@ portal's own client.
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import threading
 import time
@@ -28,7 +35,10 @@ SCOPES = ["https://www.googleapis.com/auth/calendar.readonly", "https://www.goog
           "https://www.googleapis.com/auth/contacts.readonly", "https://www.googleapis.com/auth/tasks.readonly"]
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 REVOKE_URL = "https://oauth2.googleapis.com/revoke"
+SDM_SCOPE = "https://www.googleapis.com/auth/sdm.service"
+NEST_AUTH = "https://nestservices.google.com/partnerconnections/{project}/auth"
 PATH = "google-link/skippy.json"
+NEST_PATH = "google-link/nest.json"
 STATE_KEY = "google_link_state"
 EARLY_S = 120                    # an access token is handed out only while it has at least this long left
 
@@ -59,14 +69,32 @@ class Link:
             return None
         return data if isinstance(data, dict) and data.get("refresh_token") else None
 
+    def nest_project(self) -> str:
+        raw = self.store.get(NEST_PATH)
+        try:
+            return str((json.loads(raw) if raw else {}).get("project") or "")
+        except ValueError:
+            return ""
+
+    def set_nest_project(self, project: str) -> None:
+        if project:
+            self.store.put(NEST_PATH, json.dumps({"project": project}).encode(), "application/json")
+        else:
+            self.store.delete(NEST_PATH)
+
+    def scopes(self) -> list[str]:
+        """What Connect asks for: the read-only four, and the Nest's sdm.service once its project is saved."""
+        return SCOPES + ([SDM_SCOPE] if self.nest_project() else [])
+
     def state(self) -> dict:
         """What the Admin page shows: never the token."""
-        rec = self.record()
+        rec, project = self.record(), self.nest_project()
         if not rec:
-            return {"connected": False}
+            return {"connected": False, "nest_project": project, "nest": False}
         granted = set(rec.get("scopes") or [])
         return {"connected": not rec.get("broken"), "email": rec.get("email", ""), "granted": rec.get("granted", 0),
-                "missing": [s.rsplit("/", 1)[-1] for s in SCOPES if s not in granted], "broken": rec.get("broken", "")}
+                "missing": [s.rsplit("/", 1)[-1] for s in self.scopes() if s not in granted], "broken": rec.get("broken", ""),
+                "nest_project": project, "nest": SDM_SCOPE in granted}
 
     def save(self, email: str, token: dict) -> list[str]:
         """Keep a fresh grant from the callback. Returns the read-only scopes Google did NOT grant (he can untick boxes)."""
@@ -77,7 +105,7 @@ class Link:
             self._access = None
             if token.get("access_token"):
                 self._access = (token["access_token"], self.clock() + float(token.get("expires_in") or 3600))
-        return [s.rsplit("/", 1)[-1] for s in SCOPES if s not in scopes]
+        return [s.rsplit("/", 1)[-1] for s in self.scopes() if s not in scopes]
 
     def access(self) -> dict:
         """{"connected": True, "access_token", "expires_at", "email", "scopes"} or {"connected": False, "why"}."""
@@ -99,7 +127,7 @@ class Link:
                 self._access = (body["access_token"], self.clock() + float(body.get("expires_in") or 3600))
             token, expires = self._access
         return {"connected": True, "access_token": token, "expires_at": int(expires), "expires_in": int(expires - self.clock()),
-                "email": rec.get("email", ""), "scopes": rec.get("scopes") or []}
+                "email": rec.get("email", ""), "scopes": rec.get("scopes") or [], "nest_project": self.nest_project()}
 
     def forget(self) -> bool:
         """Revoke at Google (best effort) and forget. True when Google confirmed the revoke."""
@@ -134,7 +162,7 @@ def finish():
         if request.args.get("error"):
             raise OAuthError(error=request.args["error"])
         token = auth.oauth.google.authorize_access_token()
-        info = token.get("userinfo") or {}
+        info = token.get("userinfo") or auth.oauth.google.userinfo(token=token)   # no openid on this flow (Nest's page drops the nonce)
     except OAuthError:
         flash("Google wasn't connected: it was cancelled or timed out. Press Connect again.", "error")
         return back
@@ -162,9 +190,28 @@ def init_app(app, home, store) -> Link:
     def connect():
         state = secrets.token_urlsafe(24)
         session[STATE_KEY] = state
-        return auth.oauth.google.authorize_redirect(
-            url_for("auth.callback", _external=True), state=state, scope=" ".join(["openid", "email", *SCOPES]),
-            access_type="offline", prompt="consent", include_granted_scopes="true", login_hint=auth.current_user()["email"])
+        google = auth.oauth.google
+        redirect_uri = url_for("auth.callback", _external=True)
+        # "email", not "openid": the address comes from userinfo, so no id_token nonce has to survive Nest's page
+        rv = google.create_authorization_url(redirect_uri, state=state, scope=" ".join(["email", *link.scopes()]),
+                                             access_type="offline", prompt="consent", include_granted_scopes="true",
+                                             login_hint=auth.current_user()["email"])
+        google.save_authorize_data(redirect_uri=redirect_uri, **rv)
+        url, project = rv["url"], link.nest_project()
+        if project:                                       # Nest's page first (he ticks the thermostat), then Google's consent
+            url = NEST_AUTH.format(project=project) + "?" + url.split("?", 1)[1]
+        return redirect(url)
+
+    @bp.post("/admin/google/nest")
+    @auth.admin_required
+    def nest_project():
+        project = request.form.get("project", "").strip().lower()
+        if project and not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", project):
+            flash("That isn't a Device Access project id (it looks like 12345678-abcd-...). Nothing was saved.", "error")
+        else:
+            link.set_nest_project(project)
+            flash("Nest project saved: now press Connect Google for Skippy and tick the thermostat." if project else "Nest project cleared.", "ok")
+        return redirect(url_for("admin.index") + "#google")
 
     @bp.post("/admin/google/disconnect")
     @auth.admin_required

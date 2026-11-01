@@ -79,7 +79,8 @@ class Google:
         self.home_token = (env.get("SKIPPY_HOME_TOKEN") or "").strip()
         self.opener, self.post_form, self.clock, self.log, self.get_json = opener, post_form, clock, log, get_json
         self._access: tuple[str, float] | None = None
-        self._portal_no: tuple[str, float] | None = None                 # the portal's "not connected" (why, until when): asked again after a minute
+        self._portal_no: tuple[str, float] | None = None
+        self.nest_project = (env.get("NEST_PROJECT_ID") or "").strip()                 # the portal's "not connected" (why, until when): asked again after a minute
         self._contacts: tuple[float, dict] | None = None
 
     # ── the grant ──
@@ -124,6 +125,7 @@ class Google:
             self._portal_no = (why, self.clock() + 60)
             raise NotConnected(why)
         self._portal_no = None
+        self.nest_project = str(got.get("nest_project") or "")             # the Nest's Device Access project (nest.py), set in Admin
         self._access = (got["access_token"], self.clock() + float(got.get("expires_in") or 600))
         return self._access[0]
 

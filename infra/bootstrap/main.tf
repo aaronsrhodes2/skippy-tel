@@ -45,6 +45,7 @@ locals {
     "run", "secretmanager", "serviceusage", "storage", "sts",
     # the Captain's Google, read only, for Skippy's routines (portal/google_link.py; services/satellite/google_home.py)
     "calendar-json", "gmail", "people", "tasks",
+    "smartdevicemanagement", # the Nest thermostat (Device Access: services/satellite/nest.py)
   ]
   deployer_roles = [
     "roles/run.admin",                      # deploy the portal

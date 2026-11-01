@@ -113,6 +113,20 @@
             your admin account. The lasting key stays on the portal (never in a page); skippy-pc borrows an hour's access at a time.
             Disconnect revokes it at Google.</p>
         </div>
+        <div class="card" id="google-nest">
+          <h3>Nest thermostat</h3>
+          {% if google.nest %}<p>Connected: Skippy reads and sets the thermostat.</p>
+          {% elif google.nest_project %}<p class="warn">Project saved. Press Connect Google for Skippy and tick the thermostat on Nest's page.</p>
+          {% else %}<p>Not set up. In the Device Access Console (console.nest.google.com/device-access), make a project with this OAuth
+            client ID, then paste its project ID here:</p>
+            <p><code class="code">{{ config.GOOGLE_CLIENT_ID }}</code></p>{% endif %}
+          <form method="post" action="{{ url_for('google_link.nest_project') }}">
+            <label class="field" for="nest_project">Device Access project ID</label>
+            <input type="text" id="nest_project" name="project" value="{{ google.nest_project or '' }}" autocomplete="off"
+                   placeholder="12345678-abcd-...">
+            <p><button type="submit">Save</button></p>
+          </form>
+        </div>
       </div></div>
       <div class="pips" hidden><i></i></div>
     </section>

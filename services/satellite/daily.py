@@ -980,6 +980,8 @@ class Daily:
             return None
         steps = [Step("", act=quiet), Step("your day", act=lights_and_car), Step("your day and tomorrow", make=self.day_summary),
                  Step("", act=self.plan_tomorrow)]
+        if self.extras.get("thermostat_night"):                     # the Nest (nest.py): where it stands, or SKIPPY_NIGHT_SETPOINT for the night
+            steps.append(Step("", make=self.extras["thermostat_night"]))
         if self.extras.get("alarm_tomorrow"):                       # "Your alarm is set for 6:30." / "No alarm is set for tomorrow." (alarm_clock.py)
             steps.append(Step("", make=self.extras["alarm_tomorrow"]))
         return steps + [Step("", make=self.anything_else, last=True)]

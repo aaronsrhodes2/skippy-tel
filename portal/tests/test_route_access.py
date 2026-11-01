@@ -36,7 +36,7 @@ REGISTRY = {
         "me.index", "me.mcp_ask", "me.mcp_result", "me.pair_home", "me.toggle_experiment", "me.workshop_events", "me.workshop_history", "me.workshop_history_result",
         "me.workshop_image", "me.workshop_new_folder", "me.workshop_new_folder_result", "me.workshop_notify", "me.workshop_resync", "me.workshop_send", "me.workshop_ship", "me.workshop_stop",
         "chat.memory_ask", "chat.memory_result", "chat.quick_line",
-        "housechat.home_chat_events", "housechat.home_chat_send", "housechat.home_chat_forward", "google_link.connect", "google_link.disconnect")},
+        "housechat.home_chat_events", "housechat.home_chat_send", "housechat.home_chat_forward", "google_link.connect", "google_link.disconnect", "google_link.nest_project")},
     # granted apps
     "music.player_page": G("audio"), "music.player_gate": G("audio"), "music.player_checkin": G("audio"), "music.player_command": G("audio"),
     "video.video_page": G("video"), "video.video_gate": G("video"),

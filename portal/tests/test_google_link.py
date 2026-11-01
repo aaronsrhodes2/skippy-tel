@@ -37,11 +37,13 @@ def world(monkeypatch):
     app.extensions["google_link"].post = fake
     sent = {}
 
-    def redirect_to_google(redirect_uri, **kwargs):              # what the connect key asks Google for, without the network
+    def google_url(redirect_uri, **kwargs):                       # what the connect key asks Google for, without the network
         sent.update(kwargs, redirect_uri=redirect_uri)
-        from flask import redirect
-        return redirect("https://accounts.google.com/o/oauth2/v2/auth?state=" + kwargs.get("state", ""))
-    monkeypatch.setattr(auth.oauth.google, "authorize_redirect", redirect_to_google)
+        from urllib.parse import urlencode
+        return {"url": "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode({"state": kwargs["state"], "scope": kwargs["scope"]}),
+                "state": kwargs["state"]}
+    monkeypatch.setattr(auth.oauth.google, "create_authorization_url", google_url)
+    monkeypatch.setattr(auth.oauth.google, "save_authorize_data", lambda **kw: None)
     return app, app.test_client(), fake, sent
 
 
@@ -53,9 +55,9 @@ def answer(monkeypatch, email=ADMIN, refresh=REFRESH, scope=" ".join(["openid", 
     monkeypatch.setattr(auth.oauth.google, "authorize_access_token", lambda **kw: token)
 
 
-def connect(client):
+def connect(client, via="https://accounts.google.com/"):
     r = client.get("/admin/google/connect")
-    assert r.status_code == 302 and r.location.startswith("https://accounts.google.com/")
+    assert r.status_code == 302 and r.location.startswith(via), r.location
     return parse_qs(urlparse(r.location).query)["state"][0]
 
 
@@ -69,7 +71,7 @@ def test_connect_is_admin_only_and_asks_read_only_offline_access_at_the_existing
     connect(client)
     assert sent["redirect_uri"].endswith("/auth/callback")                               # the registered one: no new redirect URI
     scopes = sent["scope"].split()
-    assert set(google_link.SCOPES) <= set(scopes) and {"openid", "email"} <= set(scopes)
+    assert set(google_link.SCOPES) <= set(scopes) and "email" in scopes and google_link.SDM_SCOPE not in scopes   # no Nest until its project is set
     assert all(s.endswith(".readonly") for s in scopes if s.startswith("https://"))      # read only, every one
     assert sent["access_type"] == "offline" and sent["prompt"] == "consent" and sent["include_granted_scopes"] == "true"
 
@@ -165,3 +167,26 @@ def test_the_about_page_is_public_names_the_app_says_its_purpose_and_how_google_
     front = client.get("/").data.decode()                                               # the sign-in page links it
     assert 'href="/about"' in front and 'href="/privacy"' in front and "Maker Portal" in front
     assert "Limited Use" in client.get("/privacy").data.decode()
+
+
+PROJECT = "0a1b2c3d-1111-2222-3333-444455556666"
+
+
+def test_the_nest_project_is_admin_only_checked_and_then_connect_asks_sdm_through_nests_own_page(world, monkeypatch):
+    app, client, fake, sent = world
+    login(client, FRIEND)
+    assert client.post("/admin/google/nest", data={"project": PROJECT}).status_code == 403
+    login(client, ADMIN)
+    page = client.get("/admin").data.decode()
+    assert "Device Access project ID" in page and "<code class=\"code\">id</code>" in page      # the client ID to paste, one click to copy
+    client.post("/admin/google/nest", data={"project": "not a project"})
+    assert app.extensions["google_link"].nest_project() == ""
+    client.post("/admin/google/nest", data={"project": PROJECT.upper()})
+    assert app.extensions["google_link"].nest_project() == PROJECT
+    state = connect(client, via=f"https://nestservices.google.com/partnerconnections/{PROJECT}/auth?")
+    assert google_link.SDM_SCOPE in sent["scope"].split()
+    answer(monkeypatch, scope=" ".join(["email", *google_link.SCOPES, google_link.SDM_SCOPE]))
+    client.get(f"/auth/callback?state={state}&code=x")
+    assert app.extensions["google_link"].state()["nest"] is True
+    home = {"Authorization": f"Bearer {_pair(client)}"}
+    assert client.get("/home/google/access", headers=home).get_json()["nest_project"] == PROJECT

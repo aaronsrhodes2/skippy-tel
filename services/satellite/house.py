@@ -246,6 +246,8 @@ class House:
         return said.strip() or f"I cannot {action.replace('_', ' ')} anything in {target}."
 
     def _plan(self, domain: str, action: str, value, s: dict):
+        if domain == "climate" and action in ("heat", "cool", "heat_cool"):           # the thermostat's mode (the Nest: nest.py)
+            return "set_hvac_mode", {"hvac_mode": action}
         number = None
         if value is not None:
             try:
@@ -337,7 +339,7 @@ TOOLS = [
      "input_schema": {"type": "object", "properties": {"area": {"type": "string"}, "domain": {"type": "string"}}}},
     {"name": "home_state", "description": "Ask the state of one thing in the house: a light, a temperature sensor, the thermostat, a door sensor. Use his own words for its name.",
      "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
-    {"name": "home_control", "description": "Do something to one thing in the house. Actions: on, off, toggle, set_brightness (value 1-100), set_temperature (value in degrees), set_volume (value 0-100), "
+    {"name": "home_control", "description": "Do something to one thing in the house. Actions: on, off, toggle, set_brightness (value 1-100), set_temperature (value in degrees), heat, cool, heat_cool (a thermostat's mode; off turns it off), set_volume (value 0-100), "
                                              "open, close, stop, set_position (value 0-100) (covers), play, pause, next, previous (media players), activate (scenes, scripts). If several things fit the name, nothing happens and you must ask which. "
                                              "Locks, alarms and the garage door need confirm=true, and only after he has said yes aloud.",
      "input_schema": {"type": "object", "properties": {"name": {"type": "string", "description": "His words for it, e.g. 'living room lamp'; or a place and a kind for all of them at once: 'upstairs lights', 'kitchen lights', 'all the lights', 'everything downstairs' (on, off, toggle, set_brightness only)."},
