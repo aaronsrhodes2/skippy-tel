@@ -1193,17 +1193,26 @@ MUSIC_TOOLS = [
                                      "volume ('turn it down', 'volume 5')"},
                                                        "level": {"type": "integer", "description": "volume: 1 (quietest) to 10 (full)"}},
                       "required": ["action"]}},
-    {"name": "play_music", "description": "Play music from the Captain's own library in THIS room: an artist, an album or a song, in his words; "
-                                          "'favorites' for his favorites list; 'everything' for the whole library. shuffle=true for 'shuffle ...'. "
-                                          "queue=true for 'after this', 'queue ...', 'add ... to the queue' (it plays after what plays now, Spotify included).",
+    {"name": "play_music", "description": "Play music from the Captain's own library (Bilby) in THIS room or on the speakers named: an artist, an album "
+                                          "or a song, in his words; 'favorites' for his favorites list; 'everything' for the whole library. shuffle=true for "
+                                          "'shuffle ...'. queue=true for 'after this', 'queue ...', 'add ... to the queue' (it plays after what plays now, Spotify "
+                                          "included). His grammar: mode (discovery / favorites) + filters (genre, playlist, artist, album, song, new) + speaker; "
+                                          "never ask him to confirm, just play it.",
      "input_schema": {"type": "object", "properties": {"what": {"type": "string", "description": "e.g. 'Pink Floyd', 'Comfortably Numb', 'favorites', 'everything'"},
+                                                       "mode": {"type": "string", "enum": ["discovery", "favorites"],
+                                                                "description": "discovery: all his songs, his favorites about one in four, and Spotify suggestions; "
+                                                                               "favorites ('favorite music', 'my library'): his favorites and Spotify liked songs"},
+                                                       "genre": {"type": "string", "description": "e.g. 'goth', 'darkwave', 'industrial'"},
+                                                       "playlist": {"type": "string", "description": "one of his playlists (Traktor's DJ sets or Spotify's), by name"},
+                                                       "artist": {"type": "string"}, "album": {"type": "string"}, "song": {"type": "string"},
+                                                       "new": {"type": "boolean", "description": "'new songs': the ones added to Bilby most recently"},
                                                        "shuffle": {"type": "boolean"}, "queue": {"type": "boolean"},
                                                        "speaker": {"type": "string", "enum": ["here", "stereo", "everywhere", "downstairs", "upstairs"],
                                                                    "description": "stereo: the house stereo where it plays now ('on the stereo', 'DJ ...'); "
                                                                                   "everywhere: downstairs AND upstairs ('everywhere', 'the whole house', 'both'); "
                                                                                   "downstairs: the theater's Sony ('downstairs', 'theater', 'Sony'); "
                                                                                   "upstairs: the Enclave ('upstairs', 'living room', 'Enclave')"}},
-                      "required": ["what"]}},
+                      "required": []}},
     {"name": "speakers", "description": "Where the house's sound plays, on command: 'move the music upstairs', 'music everywhere', 'talk to me "
                                         "upstairs', 'your voice back downstairs'. what=music for Bilby / Spotify on the stereo, voice for Skippy's own replies. "
                                         "everywhere: downstairs and upstairs; downstairs: the theater's Sony; upstairs: the Enclave (living room).",
@@ -1296,6 +1305,38 @@ def not_there(house) -> str:
     return f" {words[:1].upper()}{words[1:]} isn't on, so not there." if words else ""
 
 
+GRAMMAR_KEYS = ("mode", "genre", "playlist", "artist", "album", "song", "new")
+
+
+def grammar_of(args) -> dict:
+    """The parts of play_music's arguments that are his grammar's mode and filters (mixes.resolve), not the old free `what`."""
+    return {k: v for k, v in (args or {}).items() if k in GRAMMAR_KEYS and v}
+
+
+def mix_words(args) -> str:
+    import mixes                                                # noqa: PLC0415
+    d = mixes.describe(grammar_of(args))
+    return f" of {d}" if d else ""
+
+
+async def grammar_queue(args: dict, box, house, favorites) -> tuple[list[str], str, bool]:
+    """mixes.resolve with the hub's sources: the gate's catalog, his favorites, Spotify (liked, suggestions, playlists: the stereo's client)
+    and Traktor's playlists (the DJ's collection.nml, cached in state/dj)."""
+    import dj                                                   # noqa: PLC0415
+    import mixes                                                # noqa: PLC0415
+    catalog = await box.media.catalog()
+    env = (getattr(house, "env", None) or {}) if house is not None else {}
+    spot = getattr(getattr(house, "player", None), "spotify", None) if house is not None else None
+    if spot is not None and getattr(house.player, "spotify_down", lambda: False)():
+        spot = None
+
+    def work():
+        favs = favorites.tracks() if favorites is not None and (args.get("mode") or "") != "" else []
+        lists = mixes.traktor_playlists(env.get("BILBY_TRAKTOR_NML", dj.DEFAULT_NML), dj.STATE) if args.get("playlist") else {}
+        return mixes.resolve(args, catalog, favs, spot, lists)
+    return await asyncio.to_thread(work)
+
+
 def music_tools(room_of, loop, favorites=None, stereo=None):
     """(tools, run) for Brain(extra=...): the music in the room the brain belongs to, and the house stereo (`stereo()`: stereo.StereoMusic or None),
     where his Spotify plays. The brain runs in a worker thread; the music lives on the hub's event loop, so each call is handed over to it. A room
@@ -1365,10 +1406,16 @@ def music_tools(room_of, loop, favorites=None, stereo=None):
                 return "I cannot do that to the music."
             if name == "spotify":
                 return await spotify_go(room, box, book, house, args or {})
-            what = str((args or {}).get("what") or "")
+            what = str((args or {}).get("what") or ("" if grammar_of(args) else "everything"))
             mixed = bool((args or {}).get("shuffle"))
             plain = " ".join(re.findall(r"[a-z]+", what.lower()))
-            if re.fullmatch(r"(?:my |his )?(?:favou?rites?|favou?rite songs?|liked songs)", plain):
+            note, premixed = "", False
+            if grammar_of(args):                                # his grammar: mode + filters (mixes.py); Spotify rows he owns play from Bilby
+                found, note, ordered = await grammar_queue(args, box, house, favorites)
+                mixed, premixed = not ordered, not ordered
+                if not found:
+                    return "Nothing in his library to play right now (the music gate is not answering)."
+            elif re.fullmatch(r"(?:my |his )?(?:favou?rites?|favou?rite songs?|liked songs)", plain):
                 found = await asyncio.to_thread(favorites.tracks) if favorites is not None else []
                 if not found:
                     return "His favorites list is empty so far."
@@ -1376,11 +1423,15 @@ def music_tools(room_of, loop, favorites=None, stereo=None):
                 found, mixed = list(await box.media.catalog()), True
             else:
                 found = music_mod.search(await box.media.catalog(), what)
+                if not found and what.strip():                  # not a name: maybe a genre ("polka"); else the closest is the shuffle, said in one line
+                    found, note, _ordered = await grammar_queue({**(args or {}), "genre": what, "shuffle": True}, box, house, favorites)
+                    mixed = premixed = True
             if not found:
                 return f"Nothing in his library matches {what!r}."
-            if mixed:
+            if mixed and not premixed:
                 import random                                   # noqa: PLC0415
                 found = random.sample(found, len(found))[:music_mod.MAX_QUEUE]
+            said = (note + " ") if note else ""
             if (args or {}).get("queue") and (on_stereo or box.playing):
                 target = house.box if on_stereo else box        # one queue: Bilby's tracks after the Spotify ones on the stereo, or the pod's own
                 await target.append(found)
@@ -1396,10 +1447,11 @@ def music_tools(room_of, loop, favorites=None, stereo=None):
                 if box.playing:
                     await box.pause()                           # the pod and the stereo never play at once
                 room.last_media = "stereo"
-                n = await house.play_tracks(found, mixed)
+                n = await house.play_tracks(found, mixed, premixed=premixed)
                 title, artist = house.box.title()
                 import dj                                       # noqa: PLC0415
-                return (f"Playing {n} track{'s' if n != 1 else ''} {where_said(house)}" + (" in DJ mode" if dj.enabled(house.env) else "")
+                return (f"{said}Playing {n} track{'s' if n != 1 else ''}{mix_words(args)} {where_said(house)}"
+                        + (" in DJ mode" if dj.enabled(house.env) else "")
                         + f", starting with {title}" + (f" by {artist}." if artist else ".") + not_there(house))
             if book is not None:
                 await book.pause()                              # music and a book never play at once
@@ -1408,7 +1460,8 @@ def music_tools(room_of, loop, favorites=None, stereo=None):
             room.last_media = "music"
             await box.play_queue(found)
             title, artist = box.title()
-            return f"Playing {len(found)} track{'s' if len(found) != 1 else ''}, starting with {title}" + (f" by {artist}." if artist else ".")
+            return (f"{said}Playing {len(found)} track{'s' if len(found) != 1 else ''}{mix_words(args)}, starting with {title}"
+                    + (f" by {artist}." if artist else "."))
         try:
             return asyncio.run_coroutine_threadsafe(go(), loop).result(40)
         except Exception as e:                                  # noqa: BLE001 — said aloud, not raised

@@ -385,10 +385,21 @@ class StereoMusic:
             return 0
         return await self.play_tracks(tracks, True, limit)
 
-    async def play_tracks(self, tracks: list[str], mixed: bool = False, limit: int = 500) -> int:
-        """Bilby's tracks on the stereo. `mixed`: in a random order, or in DJ mode a DJ's order (dj.walk: each next track mixes with the last)."""
+    async def play_tracks(self, tracks: list[str], mixed: bool = False, limit: int = 500, premixed: bool = False) -> int:
+        """Bilby's tracks on the stereo. `mixed`: in a random order, or in DJ mode a DJ's order (dj.walk: each next track mixes with the last).
+        `premixed`: the queue is a mix already (mixes.resolve: its Spotify rows and the favorite every fourth placed), so it is neither shuffled
+        nor blended again; in DJ mode only Bilby's own tracks are put in a DJ's order, each Spotify row keeping its place."""
         tracks = list(tracks)
-        if mixed:
+        if mixed and premixed:
+            if self.env is not None:
+                import dj                                           # noqa: PLC0415
+                import spotify                                      # noqa: PLC0415
+                if dj.enabled(self.env):
+                    mine = [t for t in tracks[:limit] if not spotify.is_uri(t)]
+                    walked = iter(await asyncio.to_thread(dj.order, mine, self.player.lib, limit))
+                    tracks = [t if spotify.is_uri(t) else next(walked, None) for t in tracks[:limit]]
+                    tracks = [t for t in tracks if t]
+        elif mixed:
             random.shuffle(tracks)
             if self.env is not None:
                 import dj                                           # noqa: PLC0415

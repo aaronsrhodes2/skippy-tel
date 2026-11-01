@@ -143,7 +143,8 @@ class MediaServer:
         return r.content
 
     async def catalog(self) -> dict:
-        """{path: (title, artist, album)} from the gate's catalog.json, cached ten minutes. {} when the gate is not answering."""
+        """{path: (title, artist, album, genre, date added)} from the gate's catalog.json, cached ten minutes. {} when the gate is not answering.
+        (The genre and the date added are for the music grammar's filters, mixes.py; older readers take the first three.)"""
         if self._catalog and self.clock() - self._catalog[0] < 600:
             return self._catalog[1]
         try:
@@ -152,8 +153,9 @@ class MediaServer:
                 raw = gzip.decompress(raw)
             data = json.loads(raw)
             fields = data.get("fields") or []
-            ip, it, ia, ial = (fields.index(f) if f in fields else -1 for f in ("p", "t", "a", "al"))
-            out = {row[ip]: (row[it] if it >= 0 else "", row[ia] if ia >= 0 else "", row[ial] if ial >= 0 else "") for row in data.get("tracks") or []}
+            ip, it, ia, ial, ig, im = (fields.index(f) if f in fields else -1 for f in ("p", "t", "a", "al", "g", "m"))
+            out = {row[ip]: (row[it] if it >= 0 else "", row[ia] if ia >= 0 else "", row[ial] if ial >= 0 else "",
+                             row[ig] if ig >= 0 else "", row[im] if im >= 0 else 0) for row in data.get("tracks") or []}
         except Exception:                                        # noqa: BLE001 — the gate is down or the catalog changed shape: no titles, still playable
             return self._catalog[1] if self._catalog else {}
         self._catalog = (self.clock(), out)

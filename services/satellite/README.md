@@ -240,6 +240,14 @@ one more router output, `enclave`, whose part is a URL instead of a Windows devi
   "Sony" (skippy-pc's HDMI). `play_music` takes `speaker: everywhere|downstairs|upstairs`, and the `speakers` tool moves the music (what plays now
   included: `Router.retarget`) or Skippy's own voice. The words come from `house_layout.json` when it is there (else `SKIPPY_PLACES`,
   default `downstairs=hdmi;upstairs=enclave`). Skippy says only where the sound really goes: a place whose speaker is off is named as off.
+* **His music grammar** (2026-11-01): wake + function (music / Bilby) + mode + filters + location, every part but the function optional:
+  "bilby discovery everywhere", "play favorite music upstairs", "tell bilby to shuffle new darkwave songs", "play goth songs downstairs on
+  discovery mode". `brain.music_grammar` parses it straight to `play_music` (mode, genre, playlist, artist, album, song, new, speaker), no
+  model in between and never a confirmation question; `mixes.resolve` queues it: discovery is the car's Bilby Shuffle (`drive-pure.js
+  buildQueue`: everything, favorites about one in four, Spotify suggestions), favorites is his favorites + Spotify liked, "new" the most
+  recently added; genres by family from the files' tags (goth covers gothic rock, deathrock, post-punk ...); playlists are Traktor's
+  (collection.nml) or Spotify's, and a Spotify row he owns plays from Bilby. A filter that matches nothing is said in one line and the
+  closest plays.
 * **Announcements upstairs** (`SATELLITE_ANNOUNCE_OUT=enclave`, 2026-11-01): outputs in a place with no pod and no microphone play every
   room's announcements (the morning and bedtime routines, timers, messages typed in the portal's Home chat), never a conversation's
   replies. sync.py never measures them (no mic hears them), so they are never taken for off; they get the one-voice cushion and, when

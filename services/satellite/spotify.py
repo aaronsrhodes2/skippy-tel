@@ -175,6 +175,10 @@ class Client:
     def liked(self, n: int = 200) -> list[dict]:
         return self._ok("GET", "/liked", {"n": n}).get("tracks") or []
 
+    def mix(self) -> dict:
+        """The car's Bilby Shuffle sources: {"liked": [...], "suggested": [...]} (his liked artists' other songs), kept 30 minutes by the service."""
+        return self._ok("GET", "/mix")
+
     def add_to_playlist(self, playlist: str, uris: list[str]) -> dict:
         return self._ok("POST", "/playlist/add", body={"playlist": playlist, "uris": uris}).get("playlist") or {}
 

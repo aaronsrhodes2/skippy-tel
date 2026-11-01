@@ -130,26 +130,88 @@ BILBY_HEARD = re.compile(r"\b(?:bill\s*-?\s*(?:b|be|bee|bie|bey)|bil(?:by|bo|bee
 _SPEAKER = {"everywhere": "everywhere", "the whole house": "everywhere", "the house": "everywhere", "both": "everywhere", "both floors": "everywhere",
             "upstairs": "upstairs", "the living room": "upstairs", "living room": "upstairs", "the enclave": "upstairs", "enclave": "upstairs",
             "downstairs": "downstairs", "the theater": "downstairs", "theater": "downstairs", "the sony": "downstairs", "sony": "downstairs"}
-_WHERE = "(?:(?:on|in|to|through) )?(?P<place>" + "|".join(sorted(map(re.escape, _SPEAKER), key=len, reverse=True)) + ")"
-BILBY_RX = [re.compile(rf"^(?:play |start |put on |turn on )?(?:some )?bilby(?: music)?(?: {_WHERE})?$"),
-            re.compile(rf"^(?:tell|ask|have|get) bilby (?:to )?(?:play|start|put on)(?: (?:some|the|my) )?(?: ?music| ?something| ?songs)?(?: {_WHERE})?$"),
-            re.compile(rf"^(?:play |start |put on )?(?:some |the )?music {_WHERE}$")]
+_WHERE = r"(?:^|\s)(?:(?:on|in|to|through) )?(?:the )?(?P<place>" + "|".join(sorted({re.escape(k.removeprefix("the ")) for k in _SPEAKER}, key=len, reverse=True)) + r")\b"
+_LEAD = re.compile(r"^(?:(?:tell|ask|have|get) bilby (?:to )?|bilby,? )")
+_VERB = re.compile(r"^(?:play|shuffle|put on|start|turn on|throw on|give me|let'?s hear)\b")
+_NOT_PLAY = re.compile(r"\b(?:spotify|audiobooks?|books?|podcasts?|radio|news|pause|stop|skip|next|previous|louder|quieter|volume|down|up|what|who|which)\b")
+_MODES = [("discovery", re.compile(r"\b(?:(?:on|in) )?(?:the )?discover(?:y)?(?: mode)?\b")),
+          ("favorites", re.compile(r"\b(?:(?:on|from|in) )?(?:my |his )?(?:favou?rites?(?: (?:music|songs|tracks|list))?|(?<!whole )(?<!entire )library)(?: mode)?\b"))]
+_FILLER = re.compile(r"\b(?:play|shuffle|put on|start|turn on|throw on|give me|let'?s hear|bilby|music|songs?|tracks?|tunes|some|my|his|the|me|a few|"
+                     r"of|from|mode|please|now|for me|to|all|any|stuff|everything|anything|a bit of|a little|and)\b")
 
 
 def fix_bilby(heard: str) -> str:
     return BILBY_HEARD.sub("Bilby", heard or "")
 
 
-def bilby_route(heard: str) -> dict | None:
-    """play_music's arguments for a plain "bilby [where]": his whole library, shuffled, on the speakers he named (else where music plays now)."""
+def music_grammar(heard: str) -> dict | None:
+    """play_music's arguments for his music grammar (the Captain, 2026-11-01): wake + function (music / Bilby) + mode + filters + location,
+    every part but the function optional. None when it isn't a plain request to play his music (then the model hears it).
+
+      "bilby discovery everywhere"                     -> {mode: discovery, shuffle, speaker: everywhere}
+      "play favorite music upstairs"                   -> {mode: favorites, shuffle, speaker: upstairs}
+      "tell bilby to shuffle new darkwave songs"       -> {new, genre: darkwave, shuffle}
+      "play goth songs downstairs on discovery mode"   -> {mode: discovery, genre: goth, shuffle, speaker: downstairs}
+      "bilby" / "music everywhere"                     -> {what: everything, shuffle (, speaker)}: the plain library
+
+    Modes: discovery, favorites ("favorite music", "my library"). Filters: a genre (mixes.GENRE_WORDS), "new" (recently added; never "new wave"),
+    "playlist X" / "my X playlist", "by X" (artist), "the album X", "the song X"; a name left over is the old free search (`what`).
+    Places: everywhere (both), upstairs / living room / Enclave, downstairs / theater / Sony."""
+    import mixes                                                  # noqa: PLC0415
     w = re.sub(r"^\W*(?:hey |ok |okay )?skippy\W*", "", fix_bilby(heard).lower()).strip(" ?!.,")
-    w = re.sub(r"\s+(?:please|now)$", "", re.sub(r"^(?:please|can you|could you)\s+", "", w))
-    for rx in BILBY_RX:
-        m = rx.match(w)
-        if m:
-            place = m.groupdict().get("place")
-            return {"what": "everything", "shuffle": True, **({"speaker": _SPEAKER[place]} if place else {})}
-    return None
+    w = re.sub(r"\s+(?:please|now)$", "", re.sub(r"^(?:please|can you|could you|would you)\s+", "", w))
+    w = re.sub(r"[^\w'&\- ]+", " ", w).strip()
+    led = bool(_LEAD.match(w + " ")) or w == "bilby"
+    w = _LEAD.sub("", w + " ").strip() if led else w
+    if not (led or _VERB.match(w) or re.match(r"^(?:music|bilby)\b", w)) or _NOT_PLAY.search(w):
+        return None
+    out: dict = {}
+    m = re.search(_WHERE, w)
+    if m:
+        out["speaker"] = _SPEAKER.get(m.group("place")) or _SPEAKER["the " + m.group("place")]
+        w = (w[:m.start()] + " " + w[m.end():]).strip()
+    mode_said = False
+    for mode, rx in _MODES:
+        if rx.search(w):
+            out["mode"], mode_said = mode, True
+            w = rx.sub(" ", w, count=1)
+            break
+    shuffle = bool(re.match(r"^shuffle\b", w))
+    if re.search(r"\bnew\b(?!\s+(?:wave|romantic|age))", w):
+        out["new"] = True
+        w = re.sub(r"\b(?:brand )?new\b(?!\s+(?:wave|romantic|age))(?: (?:stuff|additions|ones|arrivals))?", " ", w, count=1)
+    function = led or mode_said or bool(re.search(r"\b(?:bilby|music|songs?|tracks?|tunes|playlist|album|library|collection)\b", w))
+    if not function:
+        return None                                               # "play Pink Floyd upstairs": the model's call, as before
+    for key, rx in (("playlist", r"\b(?:the |my |his )?playlist (?:called |named )?(?P<v>.+)$"), ("playlist", r"\b(?:the |my |his )?(?P<v>[\w' &-]+?) playlist\b"),
+                    ("artist", r"\bby (?P<v>.+)$"), ("album", r"\b(?:the |off the |from the )?album (?:called )?(?P<v>.+)$"),
+                    ("song", r"\b(?:the )?song (?:called |named )?(?P<v>.+)$")):
+        m = re.search(rx, w)
+        if m and key not in out:
+            v = _FILLER.sub(" ", m.group("v")).strip() if key != "song" else m.group("v").strip()
+            if v:
+                out[key] = " ".join(v.split())
+            w = (w[:m.start()] + " " + w[m.end():]).strip()
+    rest = " ".join(_FILLER.sub(" ", w).split())
+    genre = next((g for g in mixes.GENRE_WORDS if re.fullmatch(rf"{re.escape(g)}(?: music| songs)?", rest)), None)
+    if genre:
+        out["genre"] = genre
+    elif rest:
+        if any(k in out for k in ("mode", "new")):
+            out["artist"] = rest                                  # "play Bauhaus on discovery": the name is the artist
+        else:
+            out["what"] = rest
+    if not any(k in out for k in ("mode", "new", "genre", "playlist", "artist", "album", "song", "what")):
+        out["what"] = "everything"
+    if shuffle or any(k in out for k in ("mode", "genre", "new")) or not any(k in out for k in ("playlist", "artist", "album", "song", "what")) \
+            or out.get("what") == "everything":
+        out["shuffle"] = True
+    return out
+
+
+def bilby_route(heard: str) -> dict | None:
+    """play_music's arguments for a plain music request, from "bilby [where]" to the whole grammar (music_grammar)."""
+    return music_grammar(heard)
 
 
 def load_persona() -> str:
