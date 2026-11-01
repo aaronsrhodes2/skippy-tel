@@ -44,6 +44,7 @@ MODULES = (
     Module("experiments", "atom", "experiments.index", "Experiments"),
     Module("tabletop", "d20", "tabletop.page", "Tabletop"),
     Module("car", "car", "car.page", "Car"),
+    Module("alarms", "bell", "alarms.page", "Alarms and timers"),
     Module("drive", "wheel", "drive.page", "Drive"),
     Module("dashboard", "gauge", "me.index", "Dashboard"),
     Module("admin", "gear", "admin.index", "Admin", retirable=False),

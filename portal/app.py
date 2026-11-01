@@ -64,6 +64,7 @@ import recovery_web
 import status as status_mod
 import status_web
 import car_web
+import alarms as alarms_web
 import google_link
 import drive as drive_mod
 import ship as ship_mod
@@ -334,7 +335,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         wanted = {"skippy": auth.has_portal(who, "skippy"), "games": bool(shown), "play": auth.has_portal(who, "play"),
                   "music": auth.has_portal(who, "audio"), "video": auth.has_portal(who, "video"), "books": auth.is_admin(who),
                   "experiments": auth.has_portal(who, "experiments"), "tabletop": auth.has_portal(who, "tabletop"),
-                  "car": auth.is_admin(who), "drive": auth.is_admin(who),
+                  "car": auth.is_admin(who), "alarms": auth.is_admin(who), "drive": auth.is_admin(who),
                   "dashboard": auth.is_admin(who) and "me" in app.blueprints, "admin": auth.is_admin(who)}
         tiles = []
         for m in modules_mod.MODULES:
@@ -817,6 +818,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     power = power_mod.Power(notify=lambda text: notifier.alert(text))   # the house's UPSes: one DM per change (power.py)
     app.extensions["power"] = power
     app.extensions["notifier"] = notifier
+    alarms_web.init_app(app, home, lambda text: notifier.alert(text), store=tabletop_mod.store_from_env())   # Alarms & timers + the wake-up backup (alarms.py)
 
     def run_ended(news: dict) -> None:
         project = workshop.project(news["project"]) or {"name": news["project"]}

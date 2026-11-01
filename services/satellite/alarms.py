@@ -16,17 +16,20 @@ RINGS = {"alarm": 5, "reminder": 2}
 RING_GAP_S = 60
 SNOOZE_S = 9 * 60
 MAX = 40
+WAKE_HOURS = (3, 12)              # an alarm for 03:00-11:59 is a wake-up: it rings where he sleeps unless he said where
 DISMISS = set("ok okay alright all right stop it off alarm reminder turn i'm im i am up awake thanks thank you got enough shut quiet cancel dismiss "
               "yes yeah yep sure fine skippy the that please now already".split())    # a reply made only of these words just stops it
 
 TOOLS = [
-    {"name": "set_alarm", "description": "Set an alarm at a time of day ('wake me at 7', 'alarm for 6:30 every weekday'). It rings in this room until he "
-                                         "answers. For a length of time ('in 20 minutes') use set_timer instead.",
+    {"name": "set_alarm", "description": "Set an alarm at a time of day ('wake me at 7', 'alarm for 6:30 every weekday'). It rings until he "
+                                         "answers (stop or snooze, aloud or on his phone); a morning one rings upstairs where he sleeps. For a length of time ('in 20 minutes') use set_timer instead.",
      "input_schema": {"type": "object", "properties": {
          "time": {"type": "string", "description": "24-hour HH:MM, e.g. 07:00 or 18:30"},
          "date": {"type": "string", "description": "YYYY-MM-DD for a one-off on a given day; leave out for the next time that clock time comes round"},
          "repeat": {"type": "string", "description": "once (default), daily, weekdays, weekends, or days like 'mon,wed,fri'"},
-         "label": {"type": "string", "description": "what it is for, if he said"}}, "required": ["time"]}},
+         "label": {"type": "string", "description": "what it is for, if he said"},
+         "where": {"type": "string", "description": "where it rings, if he said: here, upstairs, downstairs, everywhere, or a room ('in the bedroom'). "
+                                                   "Leave out: a morning alarm rings upstairs where he sleeps, any other in this room"}}, "required": ["time"]}},
     {"name": "set_reminder", "description": "Remind him of something at a time ('remind me at 5 to call Mom', 'remind me in 20 minutes to check the oven', "
                                             "'every Monday at 8 remind me to take the bins out'). Said aloud in this room.",
      "input_schema": {"type": "object", "properties": {
@@ -50,6 +53,8 @@ class Alarm:
     hhmm: str                     # "07:00": when a repeating one comes back
     days: list[str] = field(default_factory=list)   # [] = once
     label: str = ""               # an alarm's purpose, a reminder's words
+    where: str = ""               # where it rings: a place in his words ("upstairs", "everywhere", "bedroom"); "" = the room that set it
+    room: str = ""                # the hub room it was set in ("theater"; "" = the portal's Alarms page or an old file)
 
 
 def parse_days(repeat: str) -> list[str]:
@@ -116,9 +121,10 @@ def say_days(days: list[str]) -> str:
 
 
 class Alarms:
-    def __init__(self, path: Path | str | None = None, clock=time.time, log=print):
+    def __init__(self, path: Path | str | None = None, clock=time.time, log=print, wake_place: str = ""):
         self.path = Path(path) if path else None
         self.clock, self.log = clock, log
+        self.wake_place = wake_place              # where a wake-up alarm rings when he doesn't say (alarm_clock.py: "upstairs"); "" = where it was set
         self.items: list[Alarm] = []
         self.ringing: dict | None = None          # {"alarm": Alarm, "left": n, "next": t}: going off now, until he answers
         self._load()
@@ -152,7 +158,8 @@ class Alarms:
             self.log(f"(alarms: could not save: {e})")
 
     # ── setting ──
-    def add(self, kind: str, hhmm: str = "", label: str = "", repeat: str = "once", date: str = "", in_minutes: int | None = None) -> Alarm:
+    def add(self, kind: str, hhmm: str = "", label: str = "", repeat: str = "once", date: str = "", in_minutes: int | None = None,
+            where: str | None = None, room: str = "") -> Alarm:
         if len(self.items) >= MAX:
             raise ValueError("that is a lot of alarms already")
         now = self.clock()
@@ -167,7 +174,11 @@ class Alarms:
             h, mi = parse_hhmm(hhmm)
             hhmm, days = f"{h:02d}:{mi:02d}", parse_days(repeat)
             due = next_at(hhmm, days, now, "" if days else (date or ""))
-        a = Alarm(id=max((x.id for x in self.items), default=0) + 1, kind=kind, due=due, hhmm=hhmm, days=days, label=(label or "").strip()[:120])
+        if where is None:                         # not said: a wake-up alarm rings where he sleeps (WAKE_PLACE), anything else where it was set
+            where = self.wake_place if kind == "alarm" and WAKE_HOURS[0] <= int(hhmm[:2]) < WAKE_HOURS[1] else ""
+        where = "" if str(where).strip().lower() in ("", "here", "this room") else str(where).strip().lower()[:40]
+        a = Alarm(id=max((x.id for x in self.items), default=0) + 1, kind=kind, due=due, hhmm=hhmm, days=days, label=(label or "").strip()[:120],
+                  where=where, room=room)
         self.items.append(a)
         self._save()
         return a
@@ -194,13 +205,23 @@ class Alarms:
         self._save()
         return len(hit)
 
+    def cancel_id(self, alarm_id: int) -> bool:
+        before = len(self.items)
+        self.items = [a for a in self.items if a.id != int(alarm_id)]
+        self._save()
+        return len(self.items) != before
+
+    def snooze(self, a: Alarm, minutes: int = SNOOZE_S // 60) -> Alarm:
+        """A one-off copy of `a`, `minutes` from now, ringing in the same place."""
+        return self.add(a.kind, label=a.label, in_minutes=minutes, where=a.where, room=a.room)
+
     def listing(self) -> str:
         now = self.clock()
         if not self.items:
             return "No alarms or reminders are set."
         parts = []
         for a in sorted(self.items, key=lambda a: a.due):
-            when = say_when(a.due, now) + (f", {say_days(a.days)}" if a.days else "")
+            when = say_when(a.due, now) + (f", {say_days(a.days)}" if a.days else "") + (f", {a.where}" if a.where else "")
             parts.append(f"alarm {when}" + (f" ({a.label})" if a.label else "") if a.kind == "alarm" else f"reminder {when}: {a.label}")
         return "; ".join(parts) + "."
 
@@ -242,7 +263,7 @@ class Alarms:
         a = r["alarm"]
         w = (words or "").lower()
         if re.search(r"\bsnooze\b|five more minutes|ten more minutes|let me sleep", w):
-            s = self.add(a.kind, label=a.label, in_minutes=SNOOZE_S // 60)
+            s = self.snooze(a)
             return f"Fine. Snoozed until {say_when(s.due, self.clock())}. Nine minutes, not a second more."
         said = re.findall(r"[a-z']+", w)
         if said and all(t in DISMISS for t in said):
@@ -252,23 +273,27 @@ class Alarms:
     def spoken(self, a: Alarm) -> str:
         if a.kind == "reminder":
             return f"Reminder: {a.label}."
-        clock = say_when(self.clock(), self.clock())
-        return f"It's {clock}. " + (f"Your {a.label} alarm. " if a.label else "This is your alarm. ") + "Say stop, or snooze."
+        lt = time.localtime(self.clock())
+        hello = "Good morning. " if WAKE_HOURS[0] <= lt.tm_hour < WAKE_HOURS[1] else ""
+        clock = f"{lt.tm_hour % 12 or 12}:{lt.tm_min:02d}" + ("" if hello else (" PM" if lt.tm_hour >= 12 else " AM"))
+        return f"{hello}It's {clock}. " + (f"Your {a.label} alarm. " if a.label else "This is your alarm. ") + "Say stop, or snooze."
 
     # ── the brain's tools ──
-    def run(self, name: str, args: dict) -> str:
+    def run(self, name: str, args: dict, room: str = "") -> str:
         args = args or {}
         try:
             if name == "set_alarm":
-                a = self.add("alarm", str(args.get("time") or ""), str(args.get("label") or ""), str(args.get("repeat") or "once"), str(args.get("date") or ""))
-                return f"Alarm set for {say_when(a.due, self.clock())}" + (f", {say_days(a.days)}" if a.days else "") + (f" ({a.label})." if a.label else ".")
+                a = self.add("alarm", str(args.get("time") or ""), str(args.get("label") or ""), str(args.get("repeat") or "once"), str(args.get("date") or ""),
+                             where=str(args["where"]) if args.get("where") else None, room=room)
+                return (f"Alarm set for {say_when(a.due, self.clock())}" + (f", {say_days(a.days)}" if a.days else "") + (f", ringing {a.where}" if a.where else "")
+                        + (f" ({a.label})." if a.label else "."))
             if name == "set_reminder":
                 text = str(args.get("text") or "").strip()
                 if not text:
                     return "Not set: remind him of what?"
                 mins = args.get("in_minutes")
                 a = self.add("reminder", str(args.get("time") or ""), text, str(args.get("repeat") or "once"), str(args.get("date") or ""),
-                             in_minutes=int(mins) if mins not in (None, "") else None)
+                             in_minutes=int(mins) if mins not in (None, "") else None, room=room)
                 return f"Reminder set for {say_when(a.due, self.clock())}" + (f", {say_days(a.days)}" if a.days else "") + f": {a.label}."
             if name == "list_alarms":
                 return self.listing()
@@ -279,5 +304,5 @@ class Alarms:
             return f"Not set: {e}"
         return "I have no such tool."
 
-    def tools(self):
-        return TOOLS, self.run
+    def tools(self, room: str = ""):
+        return TOOLS, (lambda name, args: self.run(name, args, room=room))

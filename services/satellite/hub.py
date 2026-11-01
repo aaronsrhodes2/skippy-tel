@@ -154,6 +154,7 @@ class Room:
         self.daily = None                                       # daily.Daily (shared): the morning, coming-home and bedtime routines
         self.stereo = None                                      # stereo.StereoMusic: Bilby's library on the house stereo (the routines' music); ducked like a book
         self.alarms = None                                      # alarms.Alarms: this room's alarms and reminders (on disk); one rings here until he answers
+        self.clock = None                                       # alarm_clock.AlarmClock (the house's, shared): rings the alarms and timers instead of this room
         self.inbox = None                                       # a Path: words handed to the running hub from this PC (`hub.py --type ROOM TEXT`), taken as typed
         self.tasks: set = set()
         self.voice = asyncio.Lock()                             # one thing said at a time (a timer waits for an answer to finish)
@@ -537,8 +538,9 @@ class Room:
                 done, command = await self._answer_starter(command)
                 if done:
                     return
-        if self.alarms is not None and self.alarms.ringing is not None:
-            answer = self.alarms.answered(command)              # any word to this room stops it; "stop" / "snooze" are answered here, anything else goes on to the brain
+        ringing = self.clock is not None and self.clock.ringing is not None
+        if ringing or (self.clock is None and self.alarms is not None and self.alarms.ringing is not None):
+            answer = self.clock.answered(command, by=self.name) if ringing else self.alarms.answered(command)   # any word to any pod: "stop" / "snooze" here, anything else to the brain
             if answer is not None:
                 self.log(f"[{self.name}] alarm answered: {command} -> {answer}")
                 self._record("command", words=command, tools=["alarm"], outcome="alarm_answered")
@@ -788,6 +790,21 @@ class Room:
         finally:
             self._resume(IDLE if was == BUSY else was, self.followup_ms if was == FOLLOWUP else 0)
 
+    async def ring(self, tone: bytes, voice, text: str) -> None:
+        """One ring of the house's alarm clock on this pod (alarm_clock.py): the chime, then the words; then a plain "stop" needs no name."""
+        import alarm_clock                                      # noqa: PLC0415
+        was, self.mode = self.mode, BUSY
+        try:
+            async with self.voice:
+                await self.link.show(text)
+                await self.link.announce("", ("pcm", *alarm_clock.pcm_of(tone)))
+                if voice is not None:
+                    clip = ("mp3", voice) if voice[:4] != b"RIFF" else ("pcm", *alarm_clock.pcm_of(voice))
+                    await self.link.announce(text, clip)
+        finally:
+            self._resume(IDLE if was == BUSY else was, self.followup_ms if was == FOLLOWUP else 0)
+        self._listen_for_answer()
+
     def _listen_for_answer(self) -> None:
         """After an alarm or a reminder: a plain "stop" or "snooze" needs no name, as after a routine's question (daily.py)."""
         if self.mode == IDLE and self.remote_wake and self.link.hub_follows_up:
@@ -806,10 +823,10 @@ class Room:
               and time.monotonic() - last > REST_SILENCE_S
               and time.monotonic() - getattr(self, "_kicked_at", 0.0) > (REST_SILENCE_S if getattr(self, "_kicked", 0) < 3 else 300)):
             await self._restart_box(f"for {time.monotonic() - last:.0f} s while resting")       # deaf at rest: his name would never be heard
-        for timer in self.timers.due():
+        for timer in (self.timers.due() if self.clock is None else ()):     # with the house's clock, it rings them (alarm_clock.py)
             self.log(f"[{self.name}] timer done: {timer.label}")
             await self.announce(f"Your {timer.label} timer is done.")
-        if self.alarms is not None:
+        if self.alarms is not None and self.clock is None:
             for alarm in self.alarms.due():
                 self.log(f"[{self.name}] {alarm.kind} going off: {alarm.hhmm} {alarm.label}")
                 self._record("alarm", what=alarm.kind, label=alarm.label or None)
@@ -1013,7 +1030,6 @@ def build_rooms(env: dict):
     import book_voice                                           # noqa: PLC0415
     import ear                                                  # noqa: PLC0415
     from brain import Brain                                     # noqa: PLC0415
-    from timers import Timers                                   # noqa: PLC0415
     from wakeword import Spotter, default_model                 # noqa: PLC0415
     from voicegate import Gate                                  # noqa: PLC0415
     token = env.get("SKIPPY_HOME_TOKEN", "")
@@ -1074,15 +1090,22 @@ def build_rooms(env: dict):
     from homechat import HomeChat                                # noqa: PLC0415
     import music as music_mod                                    # noqa: PLC0415
     homechat = HomeChat(env.get("PORTAL_URL") or music_mod.PORTAL, token, enabled=env.get("SATELLITE_HOME_CHAT", "on").lower() not in ("off", "0", "no"), log=log)
-    import alarms as alarms_mod                                  # noqa: PLC0415
     import lists as lists_mod                                    # noqa: PLC0415
     state = Path(__file__).resolve().parents[2] / "state"
     house_lists = lists_mod.Lists(state / "lists.json", log=log)  # one set of lists for the whole house
+    import alarm_clock as alarm_clock_mod                        # noqa: PLC0415 — the house's one alarm clock: rings even with every pod away
+    import router as router_mod                                  # noqa: PLC0415
+    house_clock = alarm_clock_mod.AlarmClock(state, env, gate=gate, local_voice=audio.local_voice_pcm16, log=log,
+                                             router=router_mod.shared(env, log) if env.get("SATELLITE_ROUTER", "1") != "0" else None)
+    if routines is not None:
+        async def alarm_tomorrow():
+            return house_clock.tomorrow_line()
+        routines.extras["alarm_tomorrow"] = alarm_tomorrow        # bedtime: "Your alarm is set for 6:30." (daily.py)
     connected: dict = {}                                         # room name -> Room, for announcements to the other rooms
 
     def make_room(name, link):
-        timers = Timers(path=state / "timers" / f"{name}.json")
-        alarms = alarms_mod.Alarms(state / "alarms" / f"{name}.json", log=log)
+        timers = house_clock.timers_for(name)
+        alarms = house_clock.alarms
         spotter = Spotter.load(model_path, threshold=threshold) if model_path.is_file() else None
         holder: dict = {}
         plays_music = "player" in getattr(link, "keys", {})      # an ESPHome box with a media player (esphome_link.discover ran first)
@@ -1091,7 +1114,7 @@ def build_rooms(env: dict):
         book = audiobooks.build_player(env, name, link, log)     # None when SATELLITE_AUDIOBOOKS=off
         if book is not None:
             tools = audiobooks.combine(tools, audiobooks.book_tools(lambda: holder["room"], loop))
-        tools = audiobooks.combine(tools, alarms.tools(), house_lists.tools(), announce_tools(lambda: holder["room"], connected, env, loop))
+        tools = audiobooks.combine(tools, house_clock.tools(name), house_lists.tools(), announce_tools(lambda: holder["room"], connected, env, loop))
         brain = Brain(client, brain_model, timers, hass=house, extra=tools, news=news_mod.News(env, log=log), weather=house_weather)
         brain.room = name                                        # the primer says which room of house_layout.json he is talking from
         if book is not None:
@@ -1102,6 +1125,7 @@ def build_rooms(env: dict):
                                      followup_ms=int(float(env.get("SATELLITE_SESSION_S", "30")) * 1000))      # the name opens a conversation: it stays open this long without a word
         room.book = book
         room.alarms = alarms
+        room.clock = house_clock
         room.inbox = state / "hub-inbox" / f"{name}.json"
         connected[name] = room
         room.announce_outs = speaker_out.announce_outputs(env, name, log)   # the routines, timers and messages also upstairs (SATELLITE_ANNOUNCE_OUT)
@@ -1111,6 +1135,7 @@ def build_rooms(env: dict):
         room.stereo = stereo() if routines is not None else None
         return room
     make_room.homechat = homechat                               # _main runs its sync loop (never under --record)
+    make_room.alarm_clock = house_clock                         # _main runs it
     make_room.garage_watch = garage_watch                       # _main runs it (autoclose.py)
     make_room.routine_room = lambda: getattr(routines, "room_name", "") or ""
     return make_room
@@ -1500,8 +1525,10 @@ async def _main(env: dict, rooms, args) -> int:
         log("hub: rooms " + ", ".join(f"{n} ({k} {h}:{p})" for n, k, h, p in rooms))
         homechat = getattr(hub.make_room, "homechat", None)
         watch = getattr(hub.make_room, "garage_watch", None)
+        clock = getattr(hub.make_room, "alarm_clock", None)
         await asyncio.gather(hub.run(), *([connect.run()] if connect else []), *([homechat.run(hub)] if homechat is not None else []),
-                             *([watch.run(hub, hub.make_room.routine_room)] if watch is not None else []))
+                             *([watch.run(hub, hub.make_room.routine_room)] if watch is not None else []),
+                             *([clock.run(hub)] if clock is not None else []))
         return 0
     finally:
         if media is not None:

@@ -197,6 +197,21 @@ himself; there is no hook built for it yet.
   `audiobooks.run_command` on the room's `BookPlayer`.
 * Tests: `tests/test_sat_audiobooks.py` (real ffmpeg builds a synthetic multi-chapter m4b and a track-per-chapter folder).
 
+## Alarms and timers: the house's alarm clock (`alarm_clock.py`, `alarms.py`, `timers.py`; the portal's `/alarms`)
+
+One clock for the house, ticking on its own (an alarm rings with every pod off the Wi-Fi). The alarms are one list, `state/alarms/house.json`
+(the old per-room files were merged into it once), set by voice in any room or on the portal's **Alarms** tile (the Captain only).
+- **Where:** where he said ("upstairs", "everywhere", "in the bedroom", from `house_layout.json`); not said, a 03:00-11:59 alarm rings
+  `SATELLITE_WAKE_PLACE` (default `upstairs`: the Enclave, and the bedroom pod once it is in `SATELLITE_ROOMS` and the layout's pods).
+- **Ringing:** a chime, then "Good morning, it's 7:00 ...", once a minute, louder each time, until answered; after 3 min (and 10) his phone
+  gets a Discord DM through `/home/alert` with the Alarms page; after 30 min it stops and says so.
+- **Answering:** any word to any pod ("stop", "snooze": 9 min), or Stop / Snooze on the Alarms page. The first answer wins everywhere.
+- **The backup:** the hub syncs everything to the portal (`POST /home/alarms`, every 15 s, every second while ringing). The portal
+  (`portal/alarms.py`) messages his phone itself when an alarm's time passes without the hub saying it rang, when the hub goes quiet
+  mid-ring, or the evening before when the hub has been silent 15 min. At 21:30 the hub checks the alarm's speaker; the bedtime routine
+  says "Your alarm is set for 6:30." or "No alarm is set for tomorrow."
+- **Timers** stay per room (the brain sets them) and are rung by the clock too: one whose pod is away is still said upstairs.
+
 ## The Enclave on skippy-core, and several outputs in one room (`router.py`, `sync_outputs.py`)
 
 The Enclave Audio speakers hang off **skippy-core's** Bluetooth (core/README.md → The Enclave speakers), not skippy-pc's. To the hub they are

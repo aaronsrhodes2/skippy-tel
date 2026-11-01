@@ -978,8 +978,11 @@ class Daily:
             if stereo is not None and stereo.playing:
                 await stereo.stop()
             return None
-        return [Step("", act=quiet), Step("your day", act=lights_and_car), Step("your day and tomorrow", make=self.day_summary),
-                Step("", act=self.plan_tomorrow), Step("", make=self.anything_else, last=True)]
+        steps = [Step("", act=quiet), Step("your day", act=lights_and_car), Step("your day and tomorrow", make=self.day_summary),
+                 Step("", act=self.plan_tomorrow)]
+        if self.extras.get("alarm_tomorrow"):                       # "Your alarm is set for 6:30." / "No alarm is set for tomorrow." (alarm_clock.py)
+            steps.append(Step("", make=self.extras["alarm_tomorrow"]))
+        return steps + [Step("", make=self.anything_else, last=True)]
 
     async def plan_tomorrow(self) -> str | None:
         """An early first event tomorrow moves tomorrow's morning earlier (SKIPPY_MORNING_LEAD_MIN before it, never before 04:30)."""
