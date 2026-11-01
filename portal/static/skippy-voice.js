@@ -267,7 +267,7 @@
       return new Promise(function (resolve) {
         const mime = pickMime(function (m) { return MediaRecorder.isTypeSupported(m); });
         const rec = new MediaRecorder(mic_.stream, mime ? { mimeType: mime } : undefined), chunks = [], vad = createVad(), t0 = Date.now();
-        let spoke = false, ended = false, busy = false, lastInterim = "", timer = null, interimAt = 0, speechAt = 0;
+        let spoke = false, ended = false, busy = false, lastInterim = "", timer = null, interimAt = 0, speechAt = 0, heardSkippy = false;
         const type = (mime || "audio/webm").split(";")[0];
         const blob = function () { return new Blob(chunks, { type: type }); };
         rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
@@ -281,6 +281,14 @@
         rec.start(250);
         timer = setInterval(async function () {
           if (ended) return;
+          // Skippy's own voice is never his turn (2026-11-01: the quick line "One second. I am running numbers..." was recorded into
+          // the Captain's prompt). Mid-sentence when Skippy starts: keep what came before and stop. Not yet speaking: nothing heard
+          // while Skippy talks counts, and the recording that holds his voice is thrown away once he stops.
+          if (playing) {
+            if (spoke) { try { rec.stop(); } catch (e) {} return; }
+            heardSkippy = true; return;
+          }
+          if (heardSkippy) { ended = true; clearInterval(timer); try { if (rec.state !== "inactive") { rec.onstop = null; rec.stop(); } } catch (e) {} resolve({ spoke: false, text: "", cut: true }); return; }
           const now = Date.now(), lv = mic_.level(), ev = mic_.blind ? null : vad.push(lv, now);
           if (!spoke) {
             if (ev === "speech") { spoke = true; speechAt = now; interimAt = now - 1000; if (seg.onSpeech) seg.onSpeech(); }
@@ -333,6 +341,7 @@
           const r = await segment(mic_, seg);
           hearing = false; turnAt = Date.now();
           if (ctl.cancelled || r.aborted) return;
+          if (r.cut) { if (first) continue; break; }             // Skippy spoke over the wait: listen afresh, or send what he said
           if (!r.spoke) {                                        // nobody spoke for the whole wait
             if (first) {                                         // nobody spoke at all
               if (chat && twoMode) { session = null; setTimeout(listenAgain, 50); return; }      // Hands-off stays until a sleep word

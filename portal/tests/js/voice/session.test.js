@@ -8,7 +8,7 @@ const assert = require("node:assert/strict");
 const level = { v: 0.004 };
 let stt = [], sttCalls = [], recorders = [];
 // what the fake Whisper says: one text per utterance (the recorder that is asking), the whole of it once that recorder has stopped, its first words while it is still recording
-let say = [], fetchLog = [], summaryMode = "ok", spoken = [], gateSpeak = false;
+let say = [], fetchLog = [], summaryMode = "ok", spoken = [], gateSpeak = false, speakMs = 100;
 class FakeAnalyser { constructor() { this.fftSize = 1024; } getFloatTimeDomainData(buf) { buf.fill(level.v); } connect() {} }
 class FakeCtx { createMediaStreamSource() { return { connect() {} }; } createAnalyser() { return new FakeAnalyser(); } close() { return Promise.resolve(); } }
 class FakeRec {
@@ -29,7 +29,7 @@ Object.defineProperty(globalThis, "navigator", { configurable: true, value: { me
 globalThis.MediaRecorder = FakeRec; globalThis.AudioContext = FakeCtx; globalThis.Audio = class { addEventListener() {} pause() {} play() { return Promise.resolve(); } };
 globalThis.document = { createElement: node };
 globalThis.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } };
-globalThis.speechSynthesis = { speak(u) { spoken.push(u.text); setTimeout(() => u.onend && u.onend(), 100); }, cancel() {} };
+globalThis.speechSynthesis = { speak(u) { spoken.push(u.text); setTimeout(() => u.onend && u.onend(), speakMs); }, cancel() {} };
 globalThis.fetch = async (url, init) => {
   const u = String(url);
   if (u.includes("/g")) return { ok: true, status: 200, json: async () => ({ ok: true, url: "https://x.ts.net:10000", pass: "1.a", exp: Date.now() / 1000 + 3600, speak: gateSpeak }) };
@@ -45,7 +45,7 @@ async function advance(t, ms) { for (let x = 0; x < ms; x += 50) { t.mock.timers
 
 function setup(t, withSpeaker, keepOff, withEar) {
   t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"], now: 1000000 });
-  level.v = 0.004; stt = []; say = []; sttCalls = []; recorders = []; gStreams.length = 0; fetchLog = []; summaryMode = "ok"; spoken = []; gateSpeak = false;
+  level.v = 0.004; stt = []; say = []; sttCalls = []; recorders = []; gStreams.length = 0; fetchLog = []; summaryMode = "ok"; spoken = []; gateSpeak = false; speakMs = 100;
   const mic = node("button"), box = node("textarea"), status = node("div"), speaker = withSpeaker ? node("button") : null, ear = withEar ? node("button") : null, sent = [];
   box.value = "";
   const voice = V.attach({ gate: "/g", mic, ear, box, status, speaker, onSend: (m) => sent.push(m), lang: () => "" });
@@ -195,6 +195,22 @@ test("a brief line while the agent works is spoken but keeps the mic shut; the r
   await advance(t, 5000); assert.ok(!listening());
   s.voice.say("The bridge is up."); await advance(t, 1200);                               // the agent's answer
   assert.ok(listening()); assert.equal(s.label(), "Listening");
+});
+
+test("Skippy's own voice is never recorded as the Captain's next message", async (t) => {
+  // 2026-11-01: the mic was open for his next turn when Skippy's quick line played, and it went out as his prompt.
+  const s = setup(t, true);                                                                  // his voice on: Skippy really speaks
+  s.mic._on.click(); await advance(t, 600);
+  await talk(t, s, 1500, "is the bridge up");
+  s.voice.resume(); await advance(t, 1200);                                                  // no answer coming: listening for him again
+  assert.ok(listening());
+  say[recorders.length - 1] = "one second i am running numbers you cannot pronounce";          // what Whisper would make of the recording
+  speakMs = 3000;
+  s.voice.brief("One second. I am running numbers you cannot pronounce.");                   // the quick line lands now
+  await advance(t, 100); await speak(t, 2400);                                                // and the mic hears Skippy say it
+  await advance(t, 15000);
+  assert.deepEqual(s.sent, ["is the bridge up"]);                                          // nothing of Skippy's was sent
+  assert.ok(!/one second/i.test(s.box.value), s.box.value);
 });
 
 test("an error reply still gives him the turn back", async (t) => {
