@@ -155,3 +155,14 @@ def test_charging_is_three_signed_commands_and_nothing_to_do_is_ok():
     for bad in (("limit", 30), ("limit", None), ("wipe", None)):
         with pytest.raises(ValueError):
             f.charge(*bad)
+
+
+def test_the_proxys_asleep_answer_wakes_the_car_too():
+    """tesla-http-proxy answers a sleeping car with 500 "vehicle is offline or asleep" (2026-11-01), not the API's 408."""
+    asleep = (500, {"response": None, "error": "vehicle unavailable: vehicle is offline or asleep"})
+    answers = [asleep, (200, {"response": {}}), asleep, (200, {"response": {"result": True}})]
+    paths = []
+    f = fleet.Fleet(tokens=type("T", (), {"get": lambda self: "tok"})(), vin="5YJTEST",
+                    call=lambda m, p, b, t: paths.append(p) or answers.pop(0), sleep=lambda s: None)
+    assert f.charge("limit", 80) == {"ok": True, "said": "charge limit set to 80%"}
+    assert [p.rsplit("/", 1)[1] for p in paths] == ["set_charge_limit", "wake_up", "set_charge_limit", "set_charge_limit"]

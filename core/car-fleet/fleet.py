@@ -216,13 +216,15 @@ class Fleet:
         if not self.vin:
             return "no VIN (sudo bash core/install/tesla.sh --apply)"
         path = f"/api/1/vehicles/{self.vin}/command/{name}"
+        def asleep(code, got) -> bool:                # the Fleet API says 408; the signing proxy says 500 "vehicle is offline or asleep"
+            return code == 408 or "offline or asleep" in str((got or {}).get("error") if isinstance(got, dict) else "")
         code, got = self.request("POST", path, body or {})
-        if code == 408 and wake:
+        if asleep(code, got) and wake:
             self.request("POST", f"/api/1/vehicles/{self.vin}/wake_up")
             for _ in range(10):
                 self.sleep(3)
                 code, got = self.request("POST", path, body or {})
-                if code != 408:
+                if not asleep(code, got):
                     break
         result = got.get("response") if isinstance(got, dict) else None
         if code == 200 and isinstance(result, dict) and result.get("result") is not False:
