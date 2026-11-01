@@ -51,6 +51,57 @@ def _num(value, lo=0.0, hi=1e12):
     return value if isinstance(value, (int, float)) and not isinstance(value, bool) and lo <= value <= hi else None
 
 
+HUB_STALE_S = 180            # the hub writes its heartbeat every minute (services/satellite/hub.py)
+
+
+def clean_hub(v) -> dict | None:
+    """The room hub's heartbeat as the starter sent it: {age, rooms: {name: bool}, house: {backend: {ok, things?, why?}}}, bounded."""
+    if not isinstance(v, dict) or not isinstance(v.get("age"), int):
+        return None
+    rooms = {_s(k, 40): bool(x) for k, x in list((v.get("rooms") or {}).items())[:20]} if isinstance(v.get("rooms"), dict) else {}
+    house = {}
+    for k, x in list((v.get("house") or {}).items())[:20] if isinstance(v.get("house"), dict) else []:
+        if isinstance(x, dict):
+            house[_s(k, 40)] = {"ok": bool(x.get("ok")), **({"things": x["things"]} if _num(x.get("things"), 0, 10000) is not None else {}),
+                                **({"why": _s(x["why"], 160)} if x.get("why") else {})}
+    return {"age": max(0, min(v["age"], 10**7)), "rooms": rooms, "house": house}
+
+
+def row(kind: str, name: str, lamp: str, detail: str, key: str | None = None) -> dict:
+    """One line on a machine: a service, an app, a device or a link; its two dots follow its lamp."""
+    ready = lamp if lamp in ("ok", "down", "off", "hung", "call") else ("down" if lamp in ("degraded", "stale") else "off")
+    return {"kind": kind, "name": name, "lamp": lamp, "detail": detail, "about": about(key or name), "reach": "down" if lamp == "down" else ready, "ready": ready}
+
+
+def host_rows(st: dict, have: set[str]) -> list[dict]:
+    """What runs on skippy-pc outside Docker, from the starter: OpenAudible, Spotify, VB-Cable, the bridge, and the room hub with its pods
+    and its house backends (HomeKit, Matter, the garage, Leviton, the Nest)."""
+    out = []
+    if isinstance(st.get("openaudible"), bool):
+        out.append(row("app", "openaudible", "ok" if st["openaudible"] else "down",
+                       "web server answers" if st["openaudible"] else ("the app runs, its web server is off" if st.get("openaudible_app") else "the app isn't running")))
+    if isinstance(st.get("spotify"), bool):
+        out.append(row("app", "spotify desktop", "ok" if st["spotify"] else "down", "running" if st["spotify"] else "not running", "spotify-desktop"))
+    if isinstance(st.get("vbcable"), bool):
+        out.append(row("app", "vb-cable", "ok" if st["vbcable"] else "down", "installed" if st["vbcable"] else "missing: Spotify has no sound path"))
+    if isinstance(st.get("bridge"), bool) and "bridge" not in have:
+        out.append(row("app", "bridge", "ok" if st["bridge"] else "down", "answers" if st["bridge"] else "not answering"))
+    hub = st.get("hub")
+    if isinstance(hub, dict):
+        fresh = hub["age"] <= HUB_STALE_S
+        rooms = hub.get("rooms") or {}
+        away = [r for r, up in rooms.items() if not up]
+        lamp = ("degraded" if away else "ok") if fresh else "stale"
+        out.append(row("app", "hub", lamp, (f"rooms {', '.join(r for r, up in rooms.items() if up) or 'none'}" + (f"; away: {', '.join(away)}" if away else ""))
+                       if fresh else f"no heartbeat for {hub['age'] // 60} min: the hub may be stopped"))
+        for r, up in rooms.items():
+            out.append(row("device", f"pod {r}", ("ok" if up else "down") if fresh else "stale", "connected" if up else "not connected", "pod"))
+        for b, h in (hub.get("house") or {}).items():
+            out.append(row("link", b, ("ok" if h["ok"] else "down") if fresh else "stale",
+                           (f"{h['things']} things" if h["ok"] and "things" in h else "answers") if h["ok"] else h.get("why", "not answering")))
+    return out
+
+
 def clean_containers(rows) -> list[dict]:
     """A machine's container list as reported (skippy-core's reporter, skippy-pc's starter): names and numbers only, bounded."""
     out = []
@@ -179,7 +230,8 @@ class Status:
 
     # ── the map ────────────────────────────────────────────────────────────────
     def tree(self, *, home_online: bool, home_age: int | None, home_report: dict | None, starter_view: dict, portal: dict,
-             games_vm: dict | None, core_verdict: dict | None, activity: dict | None = None, probes: dict | None = None) -> dict:
+             games_vm: dict | None, core_verdict: dict | None, activity: dict | None = None, probes: dict | None = None,
+             links: list[dict] | None = None) -> dict:
         """The whole map as plain data. Every argument is read from the portal's own objects by the route; nothing here calls out."""
         report = home_report or {}
         st = starter_view.get("status") or {}
@@ -227,6 +279,7 @@ class Status:
             ready = {"ready": "ok", "busy": "ok", "hung": "hung", "not-ready": "down"}.get(state, "off" if reach == "ok" else "down")
             pc_services.append({"kind": "service", "name": _s(name, 40), "lamp": lamp, "detail": detail, "jobs": jobs, "reach": reach, "ready": ready,
                                 "about": about(name)})
+        pc_services += host_rows(st, {s["name"] for s in pc_services})
         if any(s.get("lamp") == "hung" for s in pc_services) and pc_state == "ok":
             pc_state = "degraded"
         pc = {"id": "skippy-pc", "label": "skippy-pc", "state": pc_state, "age": home_age, "about": about("skippy-pc"),
@@ -292,7 +345,9 @@ class Status:
                        "containers": [], "serves": [{"kind": "service", "name": "portal", "lamp": "ok",
                                                      "detail": _s(portal.get("short") or portal.get("commit"), 12), "about": about("portal")},
                                                     {"kind": "service", "name": "revision", "lamp": "ok", "detail": _s(portal.get("revision"), 40),
-                                                     "about": about("revision")}]}
+                                                     "about": about("revision")}]
+                       + [row("link", _s(x.get("name"), 40), x.get("lamp") if x.get("lamp") in LAMPS else "off", _s(x.get("detail"), 120), x.get("key"))
+                          for x in (links or []) if isinstance(x, dict) and x.get("name")]}
 
         for node in (pc, core_node):                      # what each container said lately: {n, errors, last} (portal/logs.py activity)
             for c in node["containers"]:

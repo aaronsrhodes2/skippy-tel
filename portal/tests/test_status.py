@@ -260,3 +260,50 @@ def test_a_model_on_call_that_answers_its_test_question_becomes_warm_green():
     serves = {s["name"]: s for s in by(tree(st, probes=probes), "skippy-core")["serves"]}
     assert serves["router"]["lamp"] == "call"                                                                         # nobody asked it: on call
     assert serves["vision"]["lamp"] == "ok" and (serves["vision"]["reach"], serves["vision"]["ready"]) == ("ok", "ok")  # asked, answered: warm now
+
+
+HOST = {"openaudible": False, "openaudible_app": True, "spotify": True, "vbcable": False, "bridge": True,
+        "hub": {"age": 40, "rooms": {"office": True, "theater": False},
+                "house": {"leviton": {"ok": True, "things": 12}, "nest": {"ok": False, "why": "the Nest isn't connected to Skippy yet"},
+                          "homekit": {"ok": True, "things": 3}, "matter": {"ok": True}, "garage": {"ok": True, "things": 1}}}}
+
+
+def test_what_runs_outside_docker_on_skippy_pc_shows_the_apps_the_hub_its_pods_and_its_house_backends():
+    t = tree(status_mod.Status(), starter_view={"status": HOST})
+    row = {s["name"]: s for s in by(t, "skippy-pc")["serves"]}
+    assert (row["openaudible"]["lamp"], row["openaudible"]["detail"]) == ("down", "the app runs, its web server is off")
+    assert row["spotify desktop"]["lamp"] == "ok" and row["vb-cable"]["lamp"] == "down" and row["bridge"]["lamp"] == "ok"
+    assert row["hub"]["lamp"] == "degraded" and "away: theater" in row["hub"]["detail"]
+    assert row["pod office"]["lamp"] == "ok" and row["pod theater"]["lamp"] == "down"
+    assert (row["leviton"]["lamp"], row["leviton"]["detail"]) == ("ok", "12 things")
+    assert row["nest"]["lamp"] == "down" and "isn't connected" in row["nest"]["detail"]
+    for name in ("openaudible", "spotify desktop", "vb-cable", "hub", "pod office", "leviton", "nest", "homekit", "matter", "garage"):
+        assert row[name]["about"]["for"], name                                           # every new row has its card
+
+
+def test_a_hub_that_stopped_writing_its_heartbeat_is_stale_not_green():
+    t = tree(status_mod.Status(), starter_view={"status": {"hub": {**HOST["hub"], "age": 900}}})
+    row = {s["name"]: s for s in by(t, "skippy-pc")["serves"]}
+    assert row["hub"]["lamp"] == "stale" and "15 min" in row["hub"]["detail"] and row["pod office"]["lamp"] == "stale"
+
+
+def test_the_starter_cleans_the_hub_heartbeat_and_drops_junk():
+    import starter as starter_mod
+    s = starter_mod.Starter()
+    s.poll({"status": {"hub": {"age": 12, "rooms": {"office": 1}, "house": {"nest": {"ok": 0, "why": "x" * 999}, "bad": "y"}}}})
+    assert s.status["hub"] == {"age": 12, "rooms": {"office": True}, "house": {"nest": {"ok": False, "why": "x" * 160}}}
+    s.poll({"status": {"hub": "nonsense"}})
+    assert "hub" not in s.status
+
+
+def test_the_portal_shows_its_links_google_nest_discord_and_bilby(world):
+    app, client = world
+    login(client, ADMIN)
+    row = {s["name"]: s for s in next(m for m in client.get("/status/state").get_json()["machines"] if m["id"] == "skippy-portal")["serves"]}
+    assert row["google"]["lamp"] == "off" and "Admin > Google" in row["google"]["detail"]
+    assert row["nest"]["lamp"] == "off" and row["discord bot"]["lamp"] == "off"
+    app.extensions["google_link"].save(ADMIN, {"refresh_token": "r", "scope": "https://www.googleapis.com/auth/calendar.readonly"})
+    row = {s["name"]: s for s in next(m for m in client.get("/status/state").get_json()["machines"] if m["id"] == "skippy-portal")["serves"]}
+    assert row["google"]["lamp"] == "degraded" and "gmail.readonly" in row["google"]["detail"] and "r" != row["google"]["detail"]
+    for name in ("google", "nest", "discord bot"):
+        assert row[name]["about"]["for"], name

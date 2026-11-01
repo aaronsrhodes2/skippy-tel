@@ -548,3 +548,18 @@ def test_the_starter_counts_how_long_an_app_has_been_down_and_reports_the_vb_cab
 def test_run_decodes_a_program_s_output_as_utf8_and_never_dies_on_odd_bytes():
     rc, out = ss.run([sys.executable, "-c", "import sys; sys.stdout.buffer.write(bytes([111, 107, 32, 0x81, 0x8d, 32, 0xe2, 0x9c, 0x93]))"])
     assert rc == 0 and out.startswith("ok ") and out.endswith("✓")
+
+
+def test_the_hubs_heartbeat_rides_in_the_status_bounded_and_nothing_without_it(tmp_path):
+    import json
+    import time
+    s, _ = make()
+    s.root = tmp_path
+    assert s.hub() == {}                                                         # no hub file: nothing said about it
+    (tmp_path / "state").mkdir()
+    (tmp_path / "state" / "hub-status.json").write_text(json.dumps({
+        "at": time.time() - 30, "rooms": {"office": True, "theater": False},
+        "house": {"leviton": {"ok": True, "things": 12}, "nest": {"ok": False, "why": "not connected" + "x" * 500}, "junk": 3}}))
+    hub = s.hub()["hub"]
+    assert 25 <= hub["age"] <= 40 and hub["rooms"] == {"office": True, "theater": False}
+    assert hub["house"]["leviton"] == {"ok": True, "things": 12} and len(hub["house"]["nest"]["why"]) == 160 and "junk" not in hub["house"]

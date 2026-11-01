@@ -31,7 +31,7 @@ MAX_PENDING = 3
 STATUS_KEYS = {"docker": bool, "containers_up": int, "containers_total": int, "bridge": bool, "busy": bool, "supervisor": bool, "openaudible": bool, "openaudible_app": bool, "spotify": bool, "vbcable": bool, "working": str, "resume_at": str,
                "gpu_free_pct": int, "gpu_util_pct": int,            # skippy-pc's card (nvidia-smi): when a patient job may start (patient.py)
                "ups_on_battery": bool, "ups_charge": int, "ups_runtime_min": int,
-               "containers": list, "down_s": dict}                                  # the Status map's container list (status.clean_containers cleans it)   # skippy-pc's own UPS (power.py tells the Captain)
+               "containers": list, "down_s": dict, "hub": "hub"}                                  # the Status map's container list (status.clean_containers cleans it)   # skippy-pc's own UPS (power.py tells the Captain)
 
 
 class Starter:
@@ -116,6 +116,8 @@ class Starter:
                 clean[key] = {k[:30]: n for k, n in list(v.items())[:10] if isinstance(k, str) and isinstance(n, int) and not isinstance(n, bool) and 0 <= n <= 10**7}
             elif kind is list and isinstance(v, list):
                 clean[key] = status_mod.clean_containers(v)
+            elif kind == "hub" and (h := status_mod.clean_hub(v)) is not None:     # the room hub's heartbeat (the Status map's host rows)
+                clean[key] = h
         with self._lock:
             self.status, self.seen_at = clean, now
             for r in (payload.get("results") if isinstance(payload.get("results"), list) else [])[:10]:

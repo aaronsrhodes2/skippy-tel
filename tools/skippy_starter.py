@@ -381,7 +381,22 @@ class Starter:
         return {"docker": total > 0 or self.docker_up(), "containers_up": up, "containers_total": total, "bridge": b is not None,
                 "busy": bool(b and (b.get("workshop") or {}).get("busy")), "supervisor": b is not None, "working": self.working,
                 "resume_at": self.resume_at.isoformat(timespec="minutes") if self.resume_at else "", **self.gpu(), **self._ups,
-                "containers": self.container_list() if self.docker_up() else [], **self._apps()}
+                "containers": self.container_list() if self.docker_up() else [], **self._apps(), **self.hub()}
+
+    def hub(self) -> dict:
+        """The room hub (services/satellite/hub.py, a plain process on this PC): its heartbeat file, written every minute, says which
+        room boxes are connected and which house backends answer. `hub_age` lets the portal call a stopped hub stale."""
+        try:
+            got = json.loads((self.root / "state" / "hub-status.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(got, dict):
+            return {}
+        rooms = {str(k)[:40]: bool(v) for k, v in list((got.get("rooms") or {}).items())[:20]}
+        house = {str(k)[:40]: {"ok": bool((v or {}).get("ok")), **({"things": int(v["things"])} if isinstance((v or {}).get("things"), int) else {}),
+                               **({"why": str(v["why"])[:160]} if (v or {}).get("why") else {})}
+                 for k, v in list((got.get("house") or {}).items())[:20] if isinstance(v, dict)}
+        return {"hub": {"age": max(0, int(time.time() - float(got.get("at") or 0))), "rooms": rooms, "house": house}}
 
     # ── doing ──────────────────────────────────────────────────────────────────
     def _spawn(self, cmd: list[str], env: dict | None = None, log: str = "", minimized: bool = False) -> None:

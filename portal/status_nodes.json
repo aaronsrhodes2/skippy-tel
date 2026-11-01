@@ -590,5 +590,91 @@
   "used_by": [
    "the Captain's chat and his agent"
   ]
+ },
+ "openaudible": {
+  "for": "OpenAudible, the desktop app on skippy-pc that converts his Audible books to DRM-free files in D:\\Audiobooks; its web server (loopback only) is how new books are noticed. The starter checks it and the doctor starts the app when it is closed.",
+  "used_by": [
+   "the audiobook gate's library (the Audiobooks app and \"Play on\")",
+   "the doctor (portal/doctor.py), which heals it"
+  ]
+ },
+ "spotify-desktop": {
+  "for": "The Spotify desktop app on skippy-pc, kept running by the starter: his own Spotify sessions on this PC, its sound routed through VB-Cable into the hub's audio router.",
+  "used_by": [
+   "the house stereo (the hub)",
+   "the doctor, which starts it when it is closed"
+  ]
+ },
+ "vb-cable": {
+  "for": "VB-Cable, the virtual audio cable on skippy-pc that carries Spotify's sound into the hub's audio router. Report only: nothing heals it.",
+  "used_by": [
+   "the house stereo (Spotify ducked under Skippy's voice)"
+  ]
+ },
+ "hub": {
+  "for": "The room hub (services/satellite/hub.py): a plain process on skippy-pc that hears, thinks and talks for every room box, runs the routines, alarms and timers, and drives the house. It writes a heartbeat every minute (state/hub-status.json) that the starter carries here.",
+  "used_by": [
+   "every pod (\"Skippy, ...\")",
+   "the morning, coming-home and bedtime routines",
+   "the alarm clock and timers"
+  ]
+ },
+ "pod": {
+  "for": "A room box (Waveshare ESP32-S3 86 box): a microphone, a speaker and Skippy's face, dialled by the hub over ESPHome. Green when the hub holds its connection.",
+  "used_by": [
+   "the Captain, in that room"
+  ]
+ },
+ "homekit": {
+  "for": "The hub's HomeKit backend: lights and plugs paired natively with homectl.py, every write read back.",
+  "used_by": [
+   "the house tools (pods and chat)"
+  ]
+ },
+ "garage": {
+  "for": "The garage door's ratgdo32 on the opener, over ESPHome: its state, and closing it when the car drives away with it open.",
+  "used_by": [
+   "the house tools",
+   "autoclose (the car leaving)"
+  ]
+ },
+ "leviton": {
+  "for": "Every Leviton switch on his account through the My Leviton cloud: nothing paired locally, about a second per command.",
+  "used_by": [
+   "the house tools (pods and chat)"
+  ]
+ },
+ "nest": {
+  "for": "The Nest Thermostat E through Google's Smart Device Management API (Device Access), with the portal's Google grant: the temperature, mode and set point, read and set.",
+  "used_by": [
+   "the house tools (\"set the thermostat to 70\")",
+   "the bedtime routine's thermostat line"
+  ]
+ },
+ "hass": {
+  "for": "Home Assistant, if he runs one: the hub's fallback backend for anything the others don't reach.",
+  "used_by": [
+   "the house tools"
+  ]
+ },
+ "google-link": {
+  "for": "Connect Google for Skippy (portal/google_link.py): his calendar, Gmail, contacts and tasks, read only, through the portal's own Google sign-in. The portal keeps the grant; skippy-pc borrows an hour's access at a time.",
+  "used_by": [
+   "the morning and bedtime routines (calendar, mail that matters, packages, birthdays, to-dos)",
+   "the Nest backend"
+  ]
+ },
+ "nest-link": {
+  "for": "The Nest's part of the Google grant: the Device Access project (skippy-heat) and the sdm.service scope, granted on Nest's own page when Connect is pressed.",
+  "used_by": [
+   "the hub's Nest backend"
+  ]
+ },
+ "discord": {
+  "for": "The portal's Discord bot: DMs to the Captain (a run ended, a job is ready, the car's alarm, the doctor's alerts) and the game servers' channels.",
+  "used_by": [
+   "notify.py (DMs)",
+   "Admin > Discord setup"
+  ]
  }
 }

@@ -34,11 +34,35 @@ def init_app(app, status, home, starter, doctor, workshop, limiter, vm_status, l
     def roots() -> list[str]:
         return [r for r in (app.config.get("PORTAL_URL"), request.host_url.rstrip("/")) if r]
 
+    def links() -> list[dict]:
+        """The portal's own view of the outside services Skippy leans on: the Google grant and the Nest (google_link.py), the Discord bot,
+        and Bilby on the Mac (from the home report). What only skippy-pc can see (HomeKit, Matter, Leviton, the garage, the pods) comes
+        from the hub, through the starter."""
+        out = []
+        g = app.extensions.get("google_link")
+        if g is not None:
+            st = g.state()
+            out.append({"name": "google", "key": "google-link",
+                        "lamp": ("degraded" if st.get("missing") else "ok") if st["connected"] else ("down" if st.get("broken") else "off"),
+                        "detail": (f"connected ({st['email']})" + (f"; not granted: {', '.join(st['missing'])}" if st.get("missing") else ""))
+                        if st["connected"] else (st.get("broken") or "not connected: Admin > Google")})
+            out.append({"name": "nest", "key": "nest-link", "lamp": "ok" if st.get("nest") else "off",
+                        "detail": "thermostat granted" if st.get("nest") else
+                        ("project saved: press Connect and tick the thermostat" if st.get("nest_project") else "not set up: Admin > Google")})
+        out.append({"name": "discord bot", "key": "discord", "lamp": "ok" if app.config.get("DISCORD_BOT_TOKEN") else "off",
+                    "detail": "token set (DMs and game channels)" if app.config.get("DISCORD_BOT_TOKEN") else "no token: no DMs"})
+        bilby = (home.report or {}).get("bilby") if isinstance(home.report, dict) else None
+        if isinstance(bilby, dict):
+            out.append({"name": "bilby (mac)", "key": "Bilby", "lamp": "ok" if bilby.get("online") else "off",
+                        "detail": ("online" + (", playing" if bilby.get("playing") else "")) if bilby.get("online") else "the Mac is away (drive mode)"})
+        return out
+
     def state() -> dict:
         vm, _ = vm_status()
         return status.tree(
             home_online=home.online(), home_age=home.age(), home_report=home.report, starter_view=starter.view(),
-            portal=buildinfo.info(), games_vm={"status": vm.status} if vm else None, core_verdict=home.core(), activity=logstore.activity(), probes=probes.view())
+            portal=buildinfo.info(), games_vm={"status": vm.status} if vm else None, core_verdict=home.core(), activity=logstore.activity(), probes=probes.view(),
+            links=links())
 
     @bp.get("/status")
     @auth.admin_required

@@ -1148,7 +1148,40 @@ def build_rooms(env: dict):
     make_room.alarm_clock = house_clock                         # _main runs it
     make_room.garage_watch = garage_watch                       # _main runs it (autoclose.py)
     make_room.routine_room = lambda: getattr(routines, "room_name", "") or ""
+    make_room.house = house                                     # the heartbeat says which of its backends answer
+    make_room.state = state
     return make_room
+
+
+HEARTBEAT_S = 60                                                # state/hub-status.json, read by the starter for the Status map
+
+
+def backend_health(house) -> dict:
+    """{backend: {"ok", "things", "why"}} for each part of the house (HomeKit, Matter, the garage, Leviton, the Nest, ...): each asked
+    through its own cache, so this costs no more than Skippy asking about the house."""
+    out = {}
+    for part in getattr(house, "parts", [house] if house is not None else []):
+        name = type(part).__name__.lower()
+        try:
+            out[name] = {"ok": True, "things": len(part.states())}
+        except Exception as e:                                  # noqa: BLE001 — HomeError (said aloud) or anything else: the reason is the point
+            out[name] = {"ok": False, "why": str(e)[:160]}
+    return out
+
+
+async def heartbeat(hub, path: Path, house=None, every: float = HEARTBEAT_S, clock=time.time, sleep=asyncio.sleep) -> None:
+    """Every minute, what the hub knows for the Status map: each room box connected or not, each house backend answering or not. Written
+    whole (a temp file renamed), so the starter never reads half of it."""
+    while True:
+        try:
+            backends = await asyncio.to_thread(backend_health, house) if house is not None else {}
+            data = {"at": int(clock()), "rooms": {spec[0]: spec[0] in hub.rooms for spec in hub.rooms_spec}, "house": backends}
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data), encoding="utf-8")
+            tmp.replace(path)
+        except Exception:                                       # noqa: BLE001 — the heartbeat never takes the hub down
+            pass
+        await sleep(every)
 
 
 MUSIC_TOOLS = [
@@ -1536,7 +1569,8 @@ async def _main(env: dict, rooms, args) -> int:
         homechat = getattr(hub.make_room, "homechat", None)
         watch = getattr(hub.make_room, "garage_watch", None)
         clock = getattr(hub.make_room, "alarm_clock", None)
-        await asyncio.gather(hub.run(), *([connect.run()] if connect else []), *([homechat.run(hub)] if homechat is not None else []),
+        beat = heartbeat(hub, Path(hub.make_room.state) / "hub-status.json", getattr(hub.make_room, "house", None))             if getattr(hub.make_room, "state", None) else None
+        await asyncio.gather(hub.run(), *([beat] if beat is not None else []), *([connect.run()] if connect else []), *([homechat.run(hub)] if homechat is not None else []),
                              *([watch.run(hub, hub.make_room.routine_room)] if watch is not None else []),
                              *([clock.run(hub)] if clock is not None else []))
         return 0
