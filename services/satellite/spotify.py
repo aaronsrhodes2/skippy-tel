@@ -89,17 +89,33 @@ class CaptureSource:
                 pass
 
 
+APIS = ("WASAPI", "DirectSound", "MME")                          # the cable's inputs, tried in this order (WDM-KS never: it takes the device)
+
+
 def _open_capture(part: str, callback):
+    """The cable's first input that opens and starts. (2026-10-31: in the hub, WASAPI's start once failed every time while a fresh process
+    opened it at once, so the others stand behind it; each failure is named in the error.)"""
     import router                                               # noqa: PLC0415
     import sounddevice as sd                                    # noqa: PLC0415
-    wasapi = next((i for i, a in enumerate(sd.query_hostapis()) if "WASAPI" in a["name"]), None)
-    dev = next((i for i, d in enumerate(sd.query_devices()) if part.lower() in d["name"].lower() and d["max_input_channels"] >= 2
-                and (wasapi is None or d["hostapi"] == wasapi)), None)
-    if dev is None:
+    apis = [a["name"] for a in sd.query_hostapis()]
+    devs = [(i, d) for i, d in enumerate(sd.query_devices()) if part.lower() in d["name"].lower() and d["max_input_channels"] >= 2]
+    devs = sorted((x for x in devs if any(k in apis[x[1]["hostapi"]] for k in APIS)),
+                  key=lambda x: next(n for n, k in enumerate(APIS) if k in apis[x[1]["hostapi"]]))
+    if not devs:
         raise OSError(f"no input called {part!r} (is VB-CABLE installed?)")
-    s = sd.InputStream(samplerate=router.RATE, channels=2, dtype="float32", device=dev, callback=callback, blocksize=router.BLOCK, latency="low")
-    s.start()
-    return s
+    why = []
+    for i, d in devs:
+        s = None
+        try:
+            s = sd.InputStream(samplerate=router.RATE, channels=2, dtype="float32", device=i, callback=callback, blocksize=router.BLOCK,
+                               latency="low")
+            s.start()
+            return s
+        except Exception as e:                                  # noqa: BLE001 — the next one may open
+            why.append(f"{apis[d['hostapi']]} #{i}: {e}")
+            if s is not None:
+                s.close()
+    raise OSError("; ".join(why))
 
 
 class SpotifyError(Exception):
