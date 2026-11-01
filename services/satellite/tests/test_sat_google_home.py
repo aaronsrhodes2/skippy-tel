@@ -53,8 +53,27 @@ def test_events_mail_contacts_and_todos(tmp_path):
     assert gg.todos(date(2026, 11, 3)) == ["Renew passport (due 2026-11-03)"]
 
 
+def test_a_free_busy_only_work_calendar_gives_its_busy_times_without_titles(tmp_path):
+    # 2026-11-01: JFrog shares only free/busy with his Gmail account; the briefing still knows when he's in meetings
+    gg = g(tmp_path, {"GOOGLE_WORK_CALENDAR": "aaronr@jfrog.com", "SKIPPY_HOME_TOKEN": "home"})
+    gg.get_json = lambda url, headers: {"connected": True, "access_token": "a", "expires_in": 3500}
+    gg.post_json = lambda url, body: {"calendars": {"aaronr@jfrog.com": {"busy": [{"start": "2026-11-02T15:30:00Z", "end": "2026-11-02T18:30:00Z"}]}}}
+    ev = gg.events(date(2026, 11, 2))
+    work = [e for e in ev if e["work"]]
+    assert len(work) == 1 and work[0]["summary"].startswith("busy (a work meeting") and gg.work_busy is True
+    asked = []
+
+    async def word(task, material, n=400):
+        asked.append(material)
+        return "ok"
+    gg.clock = lambda: 1793606400.0
+    asyncio.run(google_home.extras(gg, word)["calendar"]())
+    assert "titles aren't shared" in asked[0] and "NOT shared" not in asked[0]
+
+
 def test_a_work_calendar_that_is_not_shared_is_said(tmp_path):
     gg = g(tmp_path, {"GOOGLE_WORK_CALENDAR": "someone@else.com", "SKIPPY_HOME_TOKEN": "home"})
+    gg.post_json = lambda url, body: {"calendars": {"someone@else.com": {"errors": [{"reason": "notFound"}]}}}
     gg.get_json = lambda url, headers: {"connected": True, "access_token": "a", "expires_in": 3500}
     gg.clock = lambda: 1793606400.0                                        # 2026-11-02, local
     asked = []

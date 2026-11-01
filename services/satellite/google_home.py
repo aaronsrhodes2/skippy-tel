@@ -78,6 +78,8 @@ class Google:
         self.portal = (env.get("PORTAL_URL") or PORTAL).rstrip("/")
         self.home_token = (env.get("SKIPPY_HOME_TOKEN") or "").strip()
         self.opener, self.post_form, self.clock, self.log, self.get_json = opener, post_form, clock, log, get_json
+        self.post_json = None                                            # tests: (url, body) -> dict, like opener for GETs
+        self.work_busy: bool | None = None                               # a free/busy-only work calendar: readable (None: not asked yet)
         self._access: tuple[str, float] | None = None
         self._portal_no: tuple[str, float] | None = None
         self.nest_project = (env.get("NEST_PROJECT_ID") or "").strip()                 # the portal's "not connected" (why, until when): asked again after a minute
@@ -204,7 +206,10 @@ class Google:
         company domain (not gmail.com, not a group or holiday calendar)."""
         cals = cals if cals is not None else self.calendars()
         if self.work:
-            return next((c for c in cals if str(c.get("id", "")).lower() == self.work), None)
+            # Not in his list: a work domain often shares only free/busy with an outside account (JFrog, 2026-11-01), so the times are
+            # read through the freeBusy API (busy()), with no titles.
+            return next((c for c in cals if str(c.get("id", "")).lower() == self.work),
+                        {"id": self.work, "summary": "Work", "busy_only": True})
         others = [c for c in cals if not c.get("primary") and "@" in str(c.get("id")) and not re.search(
             r"gmail\.com$|group\.calendar\.google\.com$|group\.v\.calendar\.google\.com$|import\.calendar\.google\.com$", str(c.get("id")))]
         return others[0] if len(others) == 1 else None
@@ -228,7 +233,31 @@ class Google:
                 out.append({"start": s.get("dateTime") or s.get("date"), "end": en.get("dateTime") or en.get("date"), "all_day": "date" in s,
                             "summary": e.get("summary") or "(busy)", "location": e.get("location") or "",
                             "calendar": c.get("summaryOverride") or c.get("summary") or c["id"], "work": work is not None and c["id"] == work.get("id")})
-        return sorted(out, key=lambda e: (not e["all_day"], e["start"] or ""))
+        if work and work.get("busy_only"):
+            blocks = self.busy(work["id"], start, end)
+            self.work_busy = blocks is not None
+            out += [{"start": _local(b["start"]), "end": _local(b["end"]), "all_day": False, "summary": "busy (a work meeting; the title isn't shared)",
+                     "location": "", "calendar": "Work", "work": True} for b in blocks or []]
+        seen, kept = set(), []
+        for e in sorted(out, key=lambda e: (not e["all_day"], _local(e["start"] or ""))):      # one order whatever zone Google wrote it in
+            key = (e["summary"].strip().lower(), _local(e["start"] or ""))
+            if key not in seen:                                         # the same event on two of his calendars is said once
+                seen.add(key)
+                kept.append(e)
+        return kept
+
+    def busy(self, cal: str, start: datetime, end: datetime) -> list[dict] | None:
+        """A calendar's busy blocks ({start, end}) through the freeBusy API: all a free/busy-only share allows. None: not even that is shared."""
+        body = {"timeMin": start.isoformat(), "timeMax": end.isoformat(), "items": [{"id": cal}]}
+        if self.post_json is not None:
+            r = self.post_json(f"{CAL}/freeBusy", body)
+        else:
+            req = urllib.request.Request(f"{CAL}/freeBusy", data=json.dumps(body).encode(), method="POST",
+                                         headers={"Authorization": f"Bearer {self.access_token()}", "Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=20) as resp:          # noqa: S310 — Google's APIs
+                r = json.loads(resp.read())
+        c = (r.get("calendars") or {}).get(cal) or {}
+        return None if c.get("errors") or not c else [b for b in c.get("busy") or [] if b.get("start") and b.get("end")]
 
     # ── contacts ──
     def contacts(self) -> dict:
@@ -288,6 +317,16 @@ class Google:
         return out
 
 
+def _local(iso: str) -> str:
+    """A time in his own zone (an all-day date is left as it is), so times from different calendars sort together."""
+    if "T" not in iso:
+        return iso
+    try:
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone().isoformat()
+    except ValueError:
+        return iso
+
+
 def clock_of(iso: str) -> str:
     try:
         return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone().strftime("%I:%M %p").lstrip("0")
@@ -328,8 +367,14 @@ def extras(g: Google, word, log=print) -> dict:
         if events is None:
             return None
         cals = await run(g.calendars) or []
-        note = "" if g.work_calendar(cals) else ("\n(His work calendar is NOT shared into this account, so work meetings are missing: say so in one "
-                                                 "sentence, and that the steps to share it are in the Skippy notes.)")
+        work = g.work_calendar(cals)
+        if not work or (work.get("busy_only") and g.work_busy is False):
+            note = ("\n(His work calendar is NOT shared into this account, so work meetings are missing: say so in one "
+                    "sentence, and that the steps to share it are in the Skippy notes.)")
+        elif work.get("busy_only"):
+            note = "\n(Work meetings show only as busy times: their titles aren't shared. Call each one 'a work meeting'.)"
+        else:
+            note = ""
         if not events:
             return await word("Tell him his calendar is clear today.", "No events today." + note, 120)
         return await word("Today's calendar: walk him through it in order, briefly; point out the first event and anything off-site.",
