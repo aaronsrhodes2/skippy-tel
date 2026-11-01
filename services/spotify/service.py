@@ -489,6 +489,12 @@ class CarPlayer(DesktopPlayer):
         self._id, self.found = ("", self.clock()), ""
         return ""
 
+    def status(self) -> dict:
+        st = super().status()
+        if not st.get("logged_in") and "is not running" in (st.get("error") or ""):
+            st["error"] = "the car's Spotify isn't among his devices (open Spotify in the car)"
+        return st
+
 
 def librespot_config(name: str) -> str:
     """go-librespot's config.yml: the pipe backend in f32le, its API on localhost only, the device login (spotify.com/pair), no autoplay
