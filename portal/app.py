@@ -816,6 +816,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     # ── home reporter (services/home-reporter) ─────────────────────────────────
     sentry_told: set = set()                                      # the car's Sentry events already DMed (car_web.sentry_news)
+    sign_in_told: dict = {}                                       # TeslaMate's sign-out already DMed (car_web.sign_in_news)
 
     @app.post("/home/report")
     def home_report():
@@ -855,6 +856,9 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             name = str(((car_web.car_of(car) or {}).get("name")) or "the car")
             for line in car_web.sentry_news(car, sentry_told, time.time(), name):
                 notifier.alert(line)
+            signed_out = car_web.sign_in_news(car, sign_in_told)   # Tesla signed TeslaMate out: one DM until he signs in again
+            if signed_out:
+                notifier.alert(signed_out)
         except Exception:                                         # noqa: BLE001
             pass
         return jsonify(reply)

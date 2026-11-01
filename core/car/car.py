@@ -10,7 +10,9 @@ a command (that is the Fleet API, saved for later: docs/tesla.md).
     GET /routes   {"cells": [[lat*1000, lon*1000], ...], "drives": n, "min_drives": 2, "days": 180}: his normal roads, from TeslaMate's drive log
                   (every ~100 m square he drove through on at least MIN_DRIVES separate drives in the last ROUTE_DAYS). The traffic alerts
                   (services/home-reporter/localinfo.py) keep only incidents near these. Computed at most hourly; it stays on the tailnet.
-    GET /health   the readiness contract (ready.py): ready once MQTT is connected and TeslaMate has published a car
+    GET /health   the readiness contract (ready.py): ready once MQTT is connected, TeslaMate has published a car and is still signed in
+                  to Tesla. Signed out, MQTT keeps the last values forever and nothing else says so (2026-10-30: Tesla flushed its session
+                  and a day of drives went unlogged), so TeslaMate's own page is asked every minute: it sends / to /sign_in when signed out.
 """
 from __future__ import annotations
 
@@ -18,6 +20,8 @@ import json
 import os
 import threading
 import time
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from ready import Readiness
@@ -27,6 +31,8 @@ MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
 NAMESPACE = os.environ.get("MQTT_NAMESPACE", "").strip("/")
 PORT = int(os.environ.get("PORT", "7351"))
 SIGN_IN = os.environ.get("TESLAMATE_SIGN_IN", "http://skippy-core:4000")
+TESLAMATE = os.environ.get("TESLAMATE_URL", "http://teslamate:4000").rstrip("/")   # its page, from inside the stack (the sign-in check)
+SIGNED_IN_TTL = 60
 DB = {"host": os.environ.get("DATABASE_HOST", "tesla-db"), "user": os.environ.get("DATABASE_USER", "teslamate"),
       "database": os.environ.get("DATABASE_NAME", "teslamate"), "password": os.environ.get("DATABASE_PASS", "")}
 ROUTE_DAYS, MIN_DRIVES, ROUTES_TTL = 180, 2, 3600
@@ -131,7 +137,42 @@ def _query_routes(days: int, min_drives: int):
         con.close()
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def _teslamate_home() -> tuple[int, str]:
+    """TeslaMate's page `/`, unfollowed: (status, Location)."""
+    try:
+        with urllib.request.build_opener(_NoRedirect).open(f"{TESLAMATE}/", timeout=5) as r:
+            return r.status, r.headers.get("Location") or ""
+    except urllib.error.HTTPError as e:                     # a 3xx not followed lands here
+        return e.code, e.headers.get("Location") or ""
+
+
+class SignedIn:
+    """Is TeslaMate still signed in to Tesla? True / False, or None when its page didn't answer (unknown, never a guess). Cached SIGNED_IN_TTL."""
+
+    def __init__(self, fetch=None, clock=time.time):
+        self.fetch, self.clock = fetch or _teslamate_home, clock
+        self._at, self._value = -1e18, None
+        self._lock = threading.Lock()
+
+    def get(self) -> bool | None:
+        with self._lock:
+            if self.clock() - self._at >= SIGNED_IN_TTL:
+                try:
+                    code, where = self.fetch()
+                    self._value = False if 300 <= code < 400 and where.rstrip("/").endswith("/sign_in") else (True if code < 400 else None)
+                except OSError:
+                    self._value = None
+                self._at = self.clock()
+            return self._value
+
+
 CARS = Cars()
+SIGNED = SignedIn()
 ROUTES = Routes()
 READY = Readiness("car")
 
@@ -143,6 +184,9 @@ def health() -> dict:
         return READY.report(ready=False, detail=mqtt["detail"], deps={"mqtt": mqtt}, cars=0)
     if not cars:
         return READY.report(ready=False, detail=f"TeslaMate has no car yet: sign in to Tesla at {SIGN_IN}", deps={"mqtt": mqtt}, cars=0)
+    if SIGNED.get() is False:
+        return READY.report(ready=False, detail=f"TeslaMate is signed out of Tesla, so nothing is logged and the values are old: sign in again at {SIGN_IN}",
+                            deps={"mqtt": mqtt}, cars=len(cars), signed_in=False)
     return READY.report(ready=True, deps={"mqtt": mqtt}, cars=len(cars))
 
 
@@ -164,7 +208,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/routes":
             self._send(200, ROUTES.get())
         elif path == "/car":
-            self._send(200, {"cars": CARS.view(), "mqtt": CARS.connected, "sign_in": SIGN_IN})
+            self._send(200, {"cars": CARS.view(), "mqtt": CARS.connected, "sign_in": SIGN_IN, "signed_in": SIGNED.get()})
         else:
             self._send(404, {"error": "not found"})
 

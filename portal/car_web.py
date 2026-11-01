@@ -57,6 +57,8 @@ def view(capability: dict | None, online: bool) -> dict:
     car = car_of(cap)
     if car is None:
         return {"state": "no_car", "sign_in": cap.get("sign_in") or "", "units": []}
+    if cap.get("signed_in") is False:                     # Tesla signed TeslaMate out: its last values would read as now
+        return {"state": "signed_out", "sign_in": cap.get("sign_in") or "", "units": []}
     st = str(car.get("state") or "?")
     level = _num(car.get("battery_level"))
     limit = _num(car.get("charge_limit_soc"))
@@ -121,6 +123,18 @@ def sentry_news(capability: dict | None, told: set, now: float, name: str = "the
     return out
 
 
+def sign_in_news(capability: dict | None, told: dict) -> str:
+    """One DM when Tesla signs TeslaMate out (nothing is logged until he signs in again), once per episode: `told` is kept by the caller."""
+    signed = (capability or {}).get("signed_in")
+    if signed is True:
+        told.pop("out", None)
+    if signed is not False or told.get("out"):
+        return ""
+    told["out"] = True
+    where = (capability or {}).get("sign_in") or "TeslaMate's page"
+    return f"Car: Tesla signed TeslaMate out, so no drives or charges are being logged. Sign in again at {where}."
+
+
 def summary(capability: dict | None) -> dict | None:
     """Skippy's car_status tool: the car's facts in plain units (miles, °F, kW), for a model to say back. Location is the
     geofence name and coordinates: the tool is the Captain's alone (tool_policy "car")."""
@@ -134,6 +148,8 @@ def summary(capability: dict | None) -> dict | None:
                                     "latitude", "longitude", "version", "update_available", "updated_s") if car.get(k) is not None}
     if km is not None:
         out["estimated_range_mi"] = round(km * KM_TO_MI)
+    if (capability or {}).get("signed_in") is False:
+        out["teslamate"] = "signed out of Tesla: these are old values, nothing is being logged; he must sign in again at " + str(capability.get("sign_in") or "TeslaMate's page")
     for k in ("inside_temp", "outside_temp"):
         if _num(car.get(k)) is not None:
             out[k + "_f"] = round(car[k] * 9 / 5 + 32)

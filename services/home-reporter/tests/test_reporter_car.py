@@ -30,6 +30,16 @@ def test_no_car_signed_in_is_not_ready_but_says_teslamate_runs(monkeypatch):
     assert got["ready"] is False and got["mqtt"] is True and got["cars"] == []
 
 
+def test_teslamate_signed_out_is_not_ready_and_says_so(monkeypatch):
+    monkeypatch.setattr(reporter, "CAR", "http://skippy-core:7351")
+    answer(monkeypatch, {"cars": [{"id": 1}], "mqtt": True, "sign_in": "http://skippy-core:4000", "signed_in": False})
+    got = reporter.car_capability()
+    assert got["ready"] is False and got["signed_in"] is False and got["cars"]
+    answer(monkeypatch, {"cars": [{"id": 1}], "mqtt": True, "signed_in": "yes"})   # anything but a bool: unknown, not a reason to fail
+    got = reporter.car_capability()
+    assert got["ready"] is True and got["signed_in"] is None
+
+
 def test_down_or_unset_is_not_ready(monkeypatch):
     monkeypatch.setattr(reporter, "CAR", "http://skippy-core:7351")
     answer(monkeypatch, None)

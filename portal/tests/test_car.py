@@ -141,6 +141,21 @@ def test_each_sentry_event_is_one_dm_and_old_ones_are_history():
     assert car_web.sentry_news(None, told, now) == []
 
 
+def test_signed_out_is_said_on_the_tile_to_skippy_and_in_one_dm():
+    out = {**SIGNED_IN, "ready": False, "signed_in": False}
+    v = car_web.view(out, online=True)
+    assert v["state"] == "signed_out" and v["sign_in"] == "http://skippy-core:4000" and v["units"] == []
+    assert "signed out" in car_web.summary(out)["teslamate"]
+    assert "teslamate" not in car_web.summary(SIGNED_IN)
+    told = {}
+    line = car_web.sign_in_news(out, told)
+    assert "signed TeslaMate out" in line and "http://skippy-core:4000" in line
+    assert car_web.sign_in_news(out, told) == ""                            # every report carries it: one DM per episode
+    assert car_web.sign_in_news({**out, "signed_in": None}, told) == ""     # unknown neither tells nor resets
+    assert car_web.sign_in_news({**SIGNED_IN, "signed_in": True}, told) == ""
+    assert car_web.sign_in_news(out, told)                                  # signed in again, then out again: news again
+
+
 def test_skippy_hears_sentrys_latest():
     s = car_web.summary({**SIGNED_IN, "sentry": {"state": "aware", "events": [{"id": "a", "at": 1, "state": "aware", "said": "near"}]}})
     assert s["sentry_now"] == "aware" and s["sentry_events"] == [{"at": 1, "state": "aware", "said": "near"}]

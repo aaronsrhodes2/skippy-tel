@@ -54,6 +54,7 @@ def test_what_is_not_a_car_value_is_ignored():
 def test_health_says_why_it_is_not_ready(monkeypatch):
     cars = car.Cars()
     monkeypatch.setattr(car, "CARS", cars)
+    monkeypatch.setattr(car, "SIGNED", car.SignedIn(fetch=lambda: (200, "")))
     monkeypatch.setattr(car, "READY", car.Readiness("car"))
     got = car.health()
     assert not got["ready"] and "MQTT" in got["detail"]
@@ -65,17 +66,46 @@ def test_health_says_why_it_is_not_ready(monkeypatch):
     assert got["ready"] and got["cars"] == 1 and got["spec"] == 1
 
 
+def test_a_signed_out_teslamate_is_not_ready_though_its_old_values_remain(monkeypatch):
+    """2026-10-30: Tesla flushed TeslaMate's session; MQTT kept the last values, the reader said ready, and a day of drives went unlogged."""
+    clock, answers = Clock(), [(302, "/sign_in")]
+    signed = car.SignedIn(fetch=lambda: answers[0], clock=clock)
+    cars = car.Cars()
+    cars.connected = True
+    cars.topic("teslamate/cars/1/battery_level", b"70")
+    monkeypatch.setattr(car, "CARS", cars)
+    monkeypatch.setattr(car, "READY", car.Readiness("car"))
+    monkeypatch.setattr(car, "SIGNED", signed)
+    got = car.health()
+    assert not got["ready"] and "signed out" in got["detail"] and "sign in again" in got["detail"] and got["signed_in"] is False
+    answers[0] = (200, "")
+    assert car.health()["ready"] is False                                   # cached for a minute: one look per SIGNED_IN_TTL
+    clock.t += car.SIGNED_IN_TTL
+    assert car.health()["ready"] is True
+
+
+def test_the_sign_in_check_never_guesses():
+    assert car.SignedIn(fetch=lambda: (302, "http://teslamate:4000/sign_in/")).get() is False
+    assert car.SignedIn(fetch=lambda: (302, "/drives")).get() is True        # any other page is a signed-in TeslaMate
+    assert car.SignedIn(fetch=lambda: (502, "")).get() is None               # its page broken: unknown, not signed out
+
+    def down():
+        raise OSError("connection refused")
+    assert car.SignedIn(fetch=down).get() is None
+
+
 def test_the_http_side_answers_car_and_health(monkeypatch):
     cars = car.Cars()
     cars.connected = True
     cars.topic("teslamate/cars/1/state", b"charging")
     monkeypatch.setattr(car, "CARS", cars)
+    monkeypatch.setattr(car, "SIGNED", car.SignedIn(fetch=lambda: (200, "")))
     server = ThreadingHTTPServer(("127.0.0.1", 0), car.Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_port}"
     try:
         body = json.loads(urllib.request.urlopen(f"{base}/car", timeout=5).read())
-        assert body["mqtt"] is True and body["cars"][0]["state"] == "charging"
+        assert body["mqtt"] is True and body["cars"][0]["state"] == "charging" and body["signed_in"] is True
         assert json.loads(urllib.request.urlopen(f"{base}/health", timeout=5).read())["ready"] is True
         cars._cars.clear()
         with pytest.raises(urllib.error.HTTPError) as e:

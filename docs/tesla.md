@@ -24,6 +24,12 @@ Set up on skippy-core: `sudo bash core/install/tesla.sh --apply` (it makes `/etc
 database password, serves :4000 and :7351 to the tailnet, sets `CORE_TESLA=1` and repairs). Check it: `sudo bash core/install/tesla.sh --check`.
 Never make a new `tesla.env`: a new `ENCRYPTION_KEY` makes the stored tokens unreadable.
 
+**Signed out by Tesla** (2026-10-30: "user session flushed", and a day of drives went unlogged while the Car tile showed the last values):
+the car reader asks TeslaMate's page every minute, and a `/` that redirects to `/sign_in` means signed out. Then the reader's `/health` is
+not ready (`signed_in: false` in `/car`), the reporter's `car` capability is not ready, the Car tile says so with the sign-in link,
+`car_status` tells Skippy the values are old, and the portal DMs the Captain once per episode (`car_web.sign_in_news`). The fix is
+his alone: fresh tokens pasted at `http://skippy-core:4000`.
+
 ### The one step only the Captain can do: sign in to Tesla
 
 TeslaMate asks for an **access token and a refresh token** from his Tesla account (it never sees his password). On a device on the tailnet:

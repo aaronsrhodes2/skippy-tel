@@ -463,13 +463,15 @@ def voice_gate_capability() -> dict:
 def car_capability() -> dict:
     """The Captain's car, as TeslaMate last published it (skippy-core's car reader keeps it; asking never wakes the car). Ready once
     a car is signed in; `cars` carries the state itself, so the portal's Car app and Skippy's car_status read it from the report.
-    `mqtt` true with no car = TeslaMate runs but nobody signed in to Tesla yet (`sign_in` says where)."""
+    `mqtt` true with no car = TeslaMate runs but nobody signed in to Tesla yet (`sign_in` says where). `signed_in` false = Tesla signed
+    TeslaMate out: the values are old and nothing is logged, so not ready."""
     body = fetch(f"{CAR}/car") if CAR else None
     if not isinstance(body, dict):
         return {"ready": False}
     cars = [c for c in body.get("cars") or [] if isinstance(c, dict)][:CAR_MAX]
-    out = {"ready": bool(body.get("mqtt")) and bool(cars), "mqtt": bool(body.get("mqtt")), "cars": cars,
-           "sign_in": str(body.get("sign_in") or "")[:200]}
+    signed_in = body.get("signed_in") if isinstance(body.get("signed_in"), bool) else None
+    out = {"ready": bool(body.get("mqtt")) and bool(cars) and signed_in is not False, "mqtt": bool(body.get("mqtt")), "cars": cars,
+           "sign_in": str(body.get("sign_in") or "")[:200], "signed_in": signed_in}
     sentry = sentry_of(fetch(f"{CAR_FLEET}/sentry") if CAR_FLEET else None)
     if sentry:
         out["sentry"] = sentry
