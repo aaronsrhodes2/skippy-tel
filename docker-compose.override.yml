@@ -130,6 +130,7 @@ services:
       IMAGE_HQ_URL: http://skippy-core:7347    # make_image_hq, the QUALITY tier: Qwen-Image on skippy-core (core/image-studio), tailnet only
       CAR_FLEET_URL: http://skippy-core:7353   # the car as a guard: Sentry's events (core/car-fleet), tailnet only
       CAR_URL: http://skippy-core:7351         # the Captain's Tesla: TeslaMate's latest state from skippy-core's car reader (core/car), tailnet only
+      SPOTIFY_URL: http://spotify:43873        # his Spotify (services/spotify): the Drive page's liked songs, suggestions, and the car's own Spotify
       OLLAMA_URL: http://skippy-core:11434          # unloaded before a song so it gets the whole GPU
       CLAUDE_BRIDGE_URL: http://host.docker.internal:9337   # Claude Code's bridge on the host: the private Skippy on /me
       MUSIC_GATE_URL: http://music-gate:8080   # Bilby's Audio Service's library...

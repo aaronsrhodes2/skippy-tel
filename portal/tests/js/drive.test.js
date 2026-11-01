@@ -93,3 +93,22 @@ test("wake word: two frames in a row at the threshold, then deaf", () => {
   for (let i = 0; i < 20; i++) s.score(0);
   assert.equal(s.score(0.3), false); assert.equal(s.score(0.3), true);
 });
+
+test("a Spotify row on the car is over when the album moves on, the car stops, or its length has passed", () => {
+  const row = { uri: "spotify:track:a", at: 0, ms: 200000, seen: true, pausedMs: 0, from: 0 };
+  assert.equal(D.carDone({ uri: "spotify:track:a", playing: true }, row, 60000), false);
+  assert.equal(D.carDone({ uri: "spotify:track:b", playing: true }, row, 190000), true);          // the next album track
+  assert.equal(D.carDone({ uri: "spotify:track:b" }, row, 1000), false);                            // the car still on the old song right after play
+  assert.equal(D.carDone({ stopped: true, uri: "" }, row, 90000), true);
+  assert.equal(D.carDone({ stopped: true, uri: "" }, Object.assign({}, row, { seen: false }), 2000), false);    // not started yet
+  assert.equal(D.carDone(null, row, 200000 + D.CAR_MARGIN_MS + 1), true);                          // the car says nothing: its length
+  assert.equal(D.carDone(null, Object.assign({}, row, { pausedMs: 60000 }), 200000 + D.CAR_MARGIN_MS + 1), false);   // he paused a minute
+});
+
+test("library mode plays his Spotify liked songs; discovery adds the suggestions", () => {
+  const liked = ["spotify:track:" + "1".repeat(22)], suggested = ["spotify:track:" + "2".repeat(22)];
+  const lib = D.buildQueue("library", { all, favorites: [], liked, suggested }, rng(1));
+  assert.deepEqual(lib.map(i => i.uri), liked);
+  const disc = D.buildQueue("discovery", { all, favorites: [], liked: [], suggested }, rng(1));
+  assert.ok(disc.some(i => i.uri === suggested[0]));
+});

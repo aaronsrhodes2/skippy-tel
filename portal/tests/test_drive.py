@@ -34,3 +34,24 @@ def test_the_wake_word_engine_is_served_as_a_module_and_as_wasm(env):
 def test_drive_is_on_the_launcher_for_the_captain_only(env):
     import modules
     assert modules.BY_ID["drive"].endpoint == "drive.page" and not modules.BY_ID["drive"].pane
+
+
+def test_spotify_rows_go_to_the_cars_spotify_through_home(env, monkeypatch):
+    client, _, _ = env
+    home = client.application.extensions["home"]
+    login(client, FRIEND)
+    assert client.post("/drive/spotify/play", json={"uri": "spotify:track:" + "1" * 22}).status_code == 403
+    login(client, ADMIN)
+    assert client.post("/drive/spotify/play", json={"uri": "spotify:album:" + "1" * 22}).status_code == 400
+    sent = []
+    monkeypatch.setattr(home, "online", lambda: True)
+    monkeypatch.setattr(home, "submit", lambda kind, **p: sent.append((kind, p)) or "j1")
+    monkeypatch.setattr(home, "wait", lambda job, timeout: {"result": {"ok": True, "device": "T3-P0"}})
+    r = client.post("/drive/spotify/play", json={"uri": "spotify:track:" + "1" * 22, "pos_ms": 61000})
+    assert r.status_code == 200 and r.get_json()["device"] == "T3-P0"
+    assert sent[-1] == ("spotify", {"op": "car_play", "uri": "spotify:track:" + "1" * 22, "pos_ms": 61000})
+    monkeypatch.setattr(home, "wait", lambda job, timeout: {"error": "the car's Spotify isn't among his devices (open Spotify in the car)"})
+    r = client.get("/drive/spotify/car")
+    assert r.status_code == 502 and "open Spotify in the car" in r.get_json()["why"]
+    monkeypatch.setattr(home, "wait", lambda job, timeout: None)
+    assert client.get("/drive/spotify/mix").status_code == 504

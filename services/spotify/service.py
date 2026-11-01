@@ -20,6 +20,10 @@ Endpoints (JSON; 127.0.0.1 only on the host, see docker-compose.override.yml):
     POST /playlist/add {playlist, uris}             POST /save {uris}
     POST /road {uri}                the track into his "Skippy Road" playlist, once (his phone downloads it for the drive)
     POST /token {client_id, refresh_token}          from signin.py, with the home token
+    GET  /mix                       the car's Bilby Shuffle (portal Drive page): {"liked": [...], "suggested": [...]}, suggestions = his liked
+                                    artists' other songs (Development Mode has no recommendations endpoint any more)
+    GET  /car                       the car's own Spotify as a Connect device (type "Automobile", or SPOTIFY_CAR_DEVICE by name) and what it plays
+    POST /car/play {uri}            a track on the car's Spotify (as its album from that track, like the desktop app)    POST /car/pause
 
 Development Mode rules (February 2026, still in force): the app owner needs Premium, at most 5 users, search returns at most 10 a page (so this
 pages with offset), an artist's top tracks and batch lookups are gone, playlist items are /playlists/{id}/items and only for his own playlists,
@@ -255,6 +259,35 @@ class WebApi:
         self.call("POST", f"/playlists/{p['id']}/items", body={"uris": uris})
         return p
 
+    _mix: tuple = ({}, -1e9)
+
+    def mix(self, clock=time.monotonic, rnd=None, artists: int = 8, per: int = 6) -> dict:
+        """His liked songs, and suggestions from them: other songs by the artists he likes most (counted in his liked songs), a few each, none
+        he already liked. Kept 30 minutes (a shuffle asks once per key press)."""
+        import random                                                      # noqa: PLC0415
+        if clock() - self._mix[1] < 1800 and self._mix[0]:
+            return self._mix[0]
+        liked = self.liked(500)
+        have = {t["uri"] for t in liked}
+        count: dict = {}
+        for t in liked:
+            for a in (t.get("artist") or "").split(", ")[:1]:
+                if a:
+                    count[a] = count.get(a, 0) + 1
+        top = sorted(count, key=lambda a: -count[a])[:artists * 2]
+        (rnd or random).shuffle(top)
+        suggested: list[dict] = []
+        for a in top[:artists]:
+            try:
+                got = self.tracks_for(a, per * 2).get("tracks") or []
+            except Exception:                                                # noqa: BLE001 — one artist's search failing leaves the others
+                continue
+            fresh = [t for t in got if t["uri"] not in have and t["uri"].startswith("spotify:track:")][:per]
+            have.update(t["uri"] for t in fresh)
+            suggested += fresh
+        self._mix = ({"liked": liked, "suggested": suggested}, clock())
+        return self._mix[0]
+
     def save(self, uris: list[str]) -> None:
         self.call("PUT", "/me/library", {"uris": ",".join(uris)})
 
@@ -437,6 +470,26 @@ class DesktopPlayer:
         return self._put("/me/player/play")
 
 
+class CarPlayer(DesktopPlayer):
+    """The Captain's car's own Spotify as the speaker, for the portal's Drive page: the browser plays Bilby's files and hands a Spotify row to the
+    car. The car shows up in his Connect devices as type "Automobile" while its Spotify is awake (SPOTIFY_CAR_DEVICE names it instead)."""
+
+    def __init__(self, web: WebApi, name: str = "", clock=time.monotonic, cache_s: float = 1.0):
+        super().__init__(web, name or "the car", clock, cache_s)
+        self.name = name
+        self.found = ""
+
+    def device_id(self) -> str:
+        if self._id[0] and self.clock() - self._id[1] < 60:
+            return self._id[0]
+        for d in self.web.call("GET", "/me/player/devices").get("devices") or []:
+            if (self.name and (d.get("name") or "").lower() == self.name.lower()) or (not self.name and (d.get("type") or "").lower() == "automobile"):
+                self._id, self.found, self.device = (d.get("id") or "", self.clock()), d.get("name") or "", d.get("name") or self.device
+                return self._id[0]
+        self._id, self.found = ("", self.clock()), ""
+        return ""
+
+
 def librespot_config(name: str) -> str:
     """go-librespot's config.yml: the pipe backend in f32le, its API on localhost only, the device login (spotify.com/pair), no autoplay
     (the hub's queue decides what comes next) and no crossfade (his streams are played as they are)."""
@@ -541,8 +594,9 @@ class Relay:
 
 # ── the API ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 class Service:
-    def __init__(self, web: WebApi, player: Player, relay: Relay | None = None, home_token: str = ""):
+    def __init__(self, web: WebApi, player: Player, relay: Relay | None = None, home_token: str = "", car: CarPlayer | None = None):
         self.web, self.player, self.relay, self.home_token = web, player, relay, home_token
+        self.car = car if car is not None else CarPlayer(web, os.environ.get("SPOTIFY_CAR_DEVICE", ""))
         self.readiness = ready_mod.Readiness("spotify")
 
     def health(self) -> dict:
@@ -595,6 +649,24 @@ class Service:
                 if p is None:
                     return 404, {"error": f"none of his playlists is called {q('name')!r}"}
                 return 200, {"playlist": p, "tracks": self.web.playlist_tracks(p["id"])}
+            if method == "GET" and path == "/mix":
+                with self.readiness.job("mix"):
+                    return 200, self.web.mix()
+            if method == "GET" and path == "/car":
+                st = self.car.status()
+                return 200, {"device": self.car.found, **st}
+            if method == "POST" and path == "/car/play":
+                uri = str(body.get("uri") or "")
+                if not re.fullmatch(r"spotify:track:[A-Za-z0-9]{22}", uri):
+                    return 400, {"error": "uri must be a spotify:track: URI"}
+                with self.readiness.job("car"):
+                    code = self.car.play(uri, int(body.get("pos_ms") or 0))
+                return (200, {"ok": True, "device": self.car.found}) if code == 200 else                     (404, {"error": "the car's Spotify isn't among his devices (open Spotify in the car)"}) if code == 404 else (502, {"error": f"Spotify said {code}"})
+            if method == "POST" and path == "/car/pause":
+                code = self.car.pause()
+                if code == 200:
+                    return 200, {"ok": True}
+                return (404 if code == 404 else 502), {"error": "the car's Spotify isn't among his devices" if code == 404 else f"Spotify said {code}"}
             if method == "GET" and path == "/liked":
                 return 200, {"tracks": self.web.liked(int(q("n", "200")))}
             if method == "POST" and path == "/playlist/add":

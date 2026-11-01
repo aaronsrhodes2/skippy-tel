@@ -38,6 +38,7 @@ CHUNK = 8 * 1024 * 1024      # Cloud Run caps a request at 32 MB
 ART_MAX = 400_000
 JSON_MAX = 4_000_000            # a JSON reply cut short would not parse and would read as "didn't answer"
 MUSIC = os.environ.get("MUSIC_URL", "").rstrip("/")           # music-studio on skippy-pc (ACE-Step on the GPU)
+SPOTIFY = os.environ.get("SPOTIFY_URL", "").rstrip("/")          # the Captain's Spotify (services/spotify): the Drive page's Spotify rows
 IMAGES = os.environ.get("IMAGE_URL", "").rstrip("/")          # the QUICK tier: image-studio on skippy-pc (FLUX.2 klein on the GPU)
 IMAGE_TIMEOUT = 900         # seconds a picture may take (the first after a restart loads 6.9 GB of weights)
 IMAGES_HQ = os.environ.get("IMAGE_HQ_URL", "").rstrip("/")     # the QUALITY tier: Qwen-Image on skippy-core (core/image-studio), over the tailnet
@@ -424,6 +425,35 @@ def house_job(job: dict) -> dict:
     args = dict(job.get("args") or {}) if isinstance(job.get("args"), dict) else {}
     args.pop("confirm", None)
     return {"result": {"text": run_tool(h, str(job.get("tool") or ""), args)}}
+
+
+SPOTIFY_OPS = {"mix": ("GET", "/mix"), "car": ("GET", "/car"), "car_play": ("POST", "/car/play"), "car_pause": ("POST", "/car/pause")}
+
+
+def spotify_job(job: dict, url: str | None = None) -> dict:
+    """The portal's Drive page and its Spotify rows (portal/drive.py): his liked songs and suggestions, and a track on the car's own Spotify.
+    Only these four operations; the service checks the URI."""
+    url = SPOTIFY if url is None else url
+    op = SPOTIFY_OPS.get(str(job.get("op") or ""))
+    if not url:
+        return {"error": "Spotify isn't set up on skippy-pc"}
+    if op is None:
+        return {"error": f"unknown Spotify operation {job.get('op')!r}"}
+    method, path = op
+    body = {"uri": str(job.get("uri") or ""), "pos_ms": int(job.get("pos_ms") or 0)} if path == "/car/play" else ({} if method == "POST" else None)
+    req = urllib.request.Request(url + path, data=json.dumps(body).encode() if body is not None else None, method=method,
+                                 headers={"Content-Type": "application/json"} if body is not None else {})
+    try:
+        with urllib.request.urlopen(req, timeout=60 if path == "/mix" else 15) as r:
+            return {"result": json.loads(r.read(JSON_MAX) or b"{}")}
+    except urllib.error.HTTPError as e:
+        try:
+            why = json.loads(e.read(4000) or b"{}").get("error")
+        except ValueError:
+            why = None
+        return {"error": str(why or f"Spotify at home said {e.code}")[:300]}
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"Spotify at home isn't answering ({type(e).__name__})"}
 
 
 def image_capability(url: str | None = None, box: str = "pc") -> dict:
@@ -1115,6 +1145,8 @@ def run_job(job: dict, token: str = "") -> dict:
         return popup_job(job, token)
     if job.get("kind") == "house":
         return house_job(job)
+    if job.get("kind") == "spotify":
+        return spotify_job(job)
     if job.get("kind") == "host_op":
         return host_op(job, token)
     if job.get("kind") in ("memory_list", "memory_get"):

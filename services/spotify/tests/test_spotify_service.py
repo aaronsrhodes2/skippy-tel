@@ -183,3 +183,51 @@ def test_the_road_playlist_is_made_once_and_each_track_goes_in_once(tmp_path):
     adds = [c for c in fake.calls if c[0] == "POST" and c[1] == "/v1/playlists/rrrrrrrrrrrrrrrrrrrrrr/items"]
     assert len(adds) == 1 and adds[0][3] == {"uris": [uri]}
     assert w.road("spotify:episode:" + "1" * 22)["added"] is False
+
+
+class CarSpotify(FakeSpotify):
+    """His devices: the PC's desktop app and the car (type Automobile), and what plays where."""
+    def __init__(self, car=True):
+        super().__init__()
+        self.car = car
+
+    def __call__(self, method, url, headers, body, timeout=15.0):
+        u = urllib.parse.urlsplit(url)
+        if u.path == "/v1/me/player/devices":
+            self.calls.append((method, u.path, {}, None))
+            devs = [{"id": "pc", "name": "SPYDER-MEDIA", "type": "Computer"}] + ([{"id": "tesla", "name": "T3-P0", "type": "Automobile"}] if self.car else [])
+            return 200, json.dumps({"devices": devs}).encode()
+        if u.path == "/v1/me/player/play" or u.path in ("/v1/me/player/repeat", "/v1/me/player/shuffle", "/v1/me/player/pause"):
+            q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
+            self.calls.append((method, u.path, q, json.loads(body) if body else None))
+            return 204, b""
+        if u.path.startswith("/v1/tracks/"):
+            return 200, json.dumps({"album": {"uri": "spotify:album:" + "b" * 22}}).encode()
+        if u.path == "/v1/me/tracks":
+            items = [{"track": track(i)} for i in range(3)] + [{"track": track(9, {"id": "x", "name": "Justice"})}]
+            return 200, json.dumps({"items": items, "next": None}).encode()
+        return super().__call__(method, url, headers, body, timeout)
+
+
+def test_a_spotify_row_from_the_car_page_plays_on_the_cars_own_spotify(tmp_path):
+    fake = CarSpotify()
+    w = S.WebApi("cid", "seed", state=tmp_path, http=fake)
+    svc = S.Service(w, FakePlayer(True), car=S.CarPlayer(w))
+    assert svc.handle("POST", "/car/play", {}, {"uri": "spotify:album:" + "a" * 22})[0] == 400        # a track, nothing else
+    code, got = svc.handle("POST", "/car/play", {}, {"uri": "spotify:track:" + "1" * 22})
+    assert code == 200 and got["device"] == "T3-P0"
+    play = [c for c in fake.calls if c[1] == "/v1/me/player/play"][0]
+    assert play[2]["device_id"] == "tesla" and play[3]["offset"] == {"uri": "spotify:track:" + "1" * 22}
+    assert svc.handle("POST", "/car/pause", {}, {})[0] == 200
+    gone = S.WebApi("cid", "seed", state=tmp_path, http=CarSpotify(car=False))
+    code, got = S.Service(gone, FakePlayer(True), car=S.CarPlayer(gone)).handle("POST", "/car/play", {}, {"uri": "spotify:track:" + "1" * 22})
+    assert code == 404 and "open Spotify in the car" in got["error"]
+
+
+def test_the_mix_is_his_liked_songs_and_new_songs_by_the_artists_he_likes(tmp_path):
+    w = S.WebApi("cid", "seed", state=tmp_path, http=CarSpotify())
+    got = w.mix()
+    liked = {t["uri"] for t in got["liked"]}
+    assert len(liked) == 4
+    assert got["suggested"] and not liked & {t["uri"] for t in got["suggested"]}            # never one he already liked
+    assert w.mix() is got                                                                      # kept, not asked again

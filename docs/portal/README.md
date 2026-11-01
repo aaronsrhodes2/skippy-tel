@@ -431,7 +431,13 @@ the Home chat (`/home-chat/send`, answered silently at home) and is spoken here.
 sound from the music in another tab, or from the car's own player), and while Skippy hears or speaks it ducks every player on the device
 (`static/skippy-duck.js`, loaded by base.html: a window event plus a BroadcastChannel to the other tabs). Bilby, Audiobooks and Drive follow it,
 and a pause the system made while he had the floor is undone when he is done.
-Not yet: Spotify rows in the shuffles (a browser can't play Spotify; the queue already carries them, `DrivePure.playable`).
+**Spotify in the shuffles** (the Captain, 2026-10-31: "use the car's Spotify"): a browser can't play Spotify, so a Spotify row plays on the
+car's OWN Spotify, a Connect device of type Automobile (`SPOTIFY_CAR_DEVICE` names it instead), through skippy-pc: `/drive/spotify/{mix,car,play,pause}`
+-> the reporter's `spotify` job (four operations only) -> `services/spotify` (`/mix`, `/car`, `/car/play`, `/car/pause`, `CarPlayer`). Library =
+favorites + his liked songs; discovery adds suggestions (his most-liked artists' other songs: Development Mode has no recommendations endpoint).
+The car plays a track as its album from that track; the page watches `/car` every 4 s and moves on when the album goes on, the car stops, or the
+length has passed (`DrivePure.carDone`). No car Spotify (not open, home silent): the shuffle goes on with Bilby's rows. When Skippy has spoken over
+a Spotify row and the car paused it, the page plays it on.
 
 ## Nagatha's Video Service (the Captain's films, `/video`)
 

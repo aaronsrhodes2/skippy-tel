@@ -17,7 +17,8 @@
   const lit = (id, on) => { $(id).dataset.on = on ? "1" : "0"; };
   function paint() {
     lit("#k-book", S.mode === "book"); lit("#k-disc", S.mode === "discovery"); lit("#k-lib", S.mode === "library");
-    $("#k-play-g").setAttribute("href", au.paused ? "#g-play" : "#g-pause");
+    const row = S.sp && S.sp.row;
+    $("#k-play-g").setAttribute("href", (row ? row.paused : au.paused) ? "#g-play" : "#g-pause");
     $("#k-next-g").setAttribute("href", S.mode === "book" ? "#g-fwd30" : "#g-next");
   }
 
@@ -97,21 +98,77 @@
     for (const row of cat.tracks || []) { const p = row[at.p]; if (typeof p === "string" && p) S.lib.set(p, { t: String(row[at.t] || p.split("/").pop()), a: String(row[at.a] || "") }); }
     return S.lib;
   }
+  // His Spotify (liked songs, and suggestions from his liked artists) comes from home; a Spotify row plays on the CAR's own Spotify (drive.py).
+  // Without it (home silent, the car's Spotify not open) the shuffle goes on with Bilby's rows alone.
+  S.sp = { can: false, info: new Map(), row: null, timer: 0 };
+  const postJSON = (url, body) => getJSON(url, { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json", Accept: "application/json" } });
+  async function spotifyMix() {
+    try {
+      const m = await getJSON(cfg.spMix);
+      for (const t of (m.liked || []).concat(m.suggested || [])) S.sp.info.set(t.uri, { t: t.title, a: t.artist, ms: t.ms || 0 });
+      S.sp.can = true;
+      return { liked: (m.liked || []).map(t => t.uri), suggested: (m.suggested || []).map(t => t.uri) };
+    } catch (e) { S.sp.can = false; return { liked: [], suggested: [] }; }
+  }
   async function shuffle(mode) {
-    let lib, favs;
-    try { [lib, favs] = await Promise.all([library(), getJSON(cfg.favorites).then(d => d.items || d.favorites || [])]); }
+    let lib, favs, sp;
+    stopCar();
+    try { [lib, favs, sp] = await Promise.all([library(), getJSON(cfg.favorites).then(d => d.items || d.favorites || []), spotifyMix()]); }
     catch (e) { now("shuffle", String(e.message || e)); return; }
+    for (const f of favs) if (/^spotify:/.test(f.track) && !S.sp.info.has(f.track)) S.sp.info.set(f.track, { t: f.title, a: f.artist, ms: 0 });
     const fav = favs.map(f => f.track).filter(t => /^spotify:/.test(t) || lib.has(t));
-    S.q = D.buildQueue(mode, { all: mode === "discovery" ? Array.from(lib.keys()) : [], favorites: fav, liked: [], suggested: [] });
+    S.q = D.buildQueue(mode, { all: mode === "discovery" ? Array.from(lib.keys()) : [], favorites: fav, liked: sp.liked, suggested: mode === "discovery" ? sp.suggested : [] });
     S.mode = mode; S.qi = -1;
-    if (!S.q.some(it => D.playable(it, false))) { now("shuffle", mode === "library" ? "No favorites yet: the star in Bilby marks one" : "The library is empty"); paint(); return; }
+    if (!S.q.some(it => D.playable(it, S.sp.can))) { now("shuffle", mode === "library" ? "No favorites yet: the star in Bilby marks one" : "The library is empty"); paint(); return; }
     await nextSong();
   }
+  function stopCar(keep) {                               // the car's Spotify stops when the page moves on to anything else (keep: a Spotify row follows)
+    clearInterval(S.sp.timer);
+    if (S.sp.row && !keep) postJSON(cfg.spPause, {}).catch(() => {});
+    S.sp.row = null;
+  }
+  async function playOnCar(it) {
+    const info = S.sp.info.get(it.uri) || { t: "Spotify", a: "", ms: 0 };
+    if (!au.paused) stopHere();
+    now("shuffle", info.t + (info.a ? " · " + info.a : "") + " · Spotify in the car");
+    try { await postJSON(cfg.spPlay, { uri: it.uri }); }
+    catch (e) { S.sp.can = false; S.sp.row = null; now("shuffle", String(e.message || e)); return nextSong(); }   // no car Spotify: Bilby's rows only from here
+    S.sp.row = { uri: it.uri, at: Date.now(), ms: info.ms, seen: false, pausedMs: 0, from: 0, paused: false };
+    meta(info.t, info.a, "Spotify in the car");
+    clearInterval(S.sp.timer);
+    S.sp.timer = setInterval(watchCar, 4000);
+    paint();
+  }
+  async function watchCar() {
+    const row = S.sp.row; if (!row || row.paused) return;
+    let st = null;
+    try { st = await getJSON(cfg.spCar); } catch (e) { st = null; }
+    if (row !== S.sp.row) return;
+    if (st && st.uri === row.uri) { row.seen = true; row.pos = st.pos_ms || 0; if (st.ms) row.ms = st.ms; }
+    if (D.carDone(st, row, Date.now())) {
+      const n = D.nextPlayable(S.q, S.qi + 1, S.sp.can);
+      stopCar(n >= 0 && S.q[n].kind === "spotify");
+      nextSong();
+    }
+  }
+  // Skippy spoke over a Spotify row: if the car paused its Spotify for the browser's sound, it plays on when he is done (the page's own player
+  // gets the same from skippy-duck.js).
+  addEventListener("skippy-duck", e => {
+    const row = S.sp.row;
+    if (!row || row.paused || (e.detail && e.detail.state)) return;
+    setTimeout(async () => {
+      if (row !== S.sp.row || row.paused) return;
+      try { const st = await getJSON(cfg.spCar); if (st.paused && st.uri === row.uri) postJSON(cfg.spPlay, { uri: row.uri, pos_ms: st.pos_ms || 0 }).catch(() => {}); } catch (x) { /* the car said nothing */ }
+    }, 1500);
+  });
   async function nextSong() {
-    const i = D.nextPlayable(S.q, S.qi + 1, false);
-    if (i < 0) { S.qi = -1; if (S.q.length) return nextSong(); return; }   // round again: a shuffle never just stops
+    const i = D.nextPlayable(S.q, S.qi + 1, S.sp.can);
+    if (i < 0) { S.qi = -1; if (S.q.some(it => D.playable(it, S.sp.can))) return nextSong(); return; }   // round again: a shuffle never just stops
     S.qi = i;
-    const it = S.q[i], t = S.lib.get(it.path) || { t: it.path, a: "" };
+    const it = S.q[i];
+    if (it.kind === "spotify") return playOnCar(it);
+    stopCar();
+    const t = S.lib.get(it.path) || { t: it.path, a: "" };
     try { await musicGate(); } catch (e) { now("shuffle", String(e.message || e)); return; }
     now("shuffle", t.t + (t.a ? " · " + t.a : ""));
     ours = true; au.src = mu("a", it.path);
@@ -142,10 +199,20 @@
     else if (S.mode) nextSong();
   }
   const key = (id, fn) => $(id + " .hit").addEventListener("click", fn);
-  key("#k-book", () => { if (S.mode === "book" && !au.paused) stopHere(); else if (S.mode === "book" && au.src) play(); else playBook(); });
+  key("#k-book", () => { stopCar(); if (S.mode === "book" && !au.paused) stopHere(); else if (S.mode === "book" && au.src) play(); else playBook(); });
   key("#k-disc", () => shuffle("discovery"));
   key("#k-lib", () => shuffle("library"));
-  key("#k-play", () => { if (!au.src) return playBook(); if (au.paused) play(); else stopHere(); });
+  key("#k-play", () => {
+    const row = S.sp.row;
+    if (row) {                                           // a Spotify row: the car's own player pauses, and plays on from where it was
+      if (row.paused) { row.pausedMs += Date.now() - row.pausedAt; row.paused = false; postJSON(cfg.spPlay, { uri: row.uri, pos_ms: Math.round(row.pos || 0) }).catch(() => {}); }
+      else { row.paused = true; row.pausedAt = Date.now(); postJSON(cfg.spPause, {}).catch(() => {}); }
+      paint();
+      return;
+    }
+    if (!au.src) return playBook();
+    if (au.paused) play(); else stopHere();
+  });
   key("#k-next", next);
 
   // ── Skippy: the house brain, spoken here ──

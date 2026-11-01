@@ -5,6 +5,7 @@
                       discovery  every song of Bilby's, his favorites mixed in about one in four, and Spotify's suggestions (from his liked songs)
                       library    his favorites and his Spotify liked songs, nothing else
      playable       what this browser can play itself (Bilby's files; a Spotify item needs a Spotify player)
+     carDone        whether a Spotify row playing on the car's own Spotify is over
      replyAfter     the house brain's answer to the turn sent at `seq`, from the Home chat's events (portal/housechat.py) */
 (function (root, factory) {
   "use strict";
@@ -65,5 +66,15 @@
     return null;
   }
 
-  return { shuffle, buildQueue, nextPlayable, playable, replyAfter, QUEUE_MAX, FAV_EVERY };
+  /* A Spotify row playing on the car's own Spotify: is it over? The car plays the track as its album from that track, so the next album track
+     starting (another uri) is the end; so is the car's Spotify stopping on its own after it had started, and, when the car says nothing,
+     the track's length plus a margin. st: services/spotify's /car answer, or null. */
+  const CAR_MARGIN_MS = 8000;
+  function carDone(st, row, now) {
+    if (st && st.uri && st.uri !== row.uri && now - row.at > 3000) return true;
+    if (st && st.stopped && row.seen) return true;
+    return !!row.ms && now - row.at - (row.pausedMs || 0) > row.ms - (row.from || 0) + CAR_MARGIN_MS;
+  }
+
+  return { shuffle, buildQueue, nextPlayable, playable, replyAfter, carDone, QUEUE_MAX, FAV_EVERY, CAR_MARGIN_MS };
 });

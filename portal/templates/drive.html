@@ -33,7 +33,9 @@
          data-music-gate="{{ url_for('music.player_gate') }}" data-favorites="{{ url_for('music.favorites_list') }}"
          data-book-gate="{{ url_for('audiobooks.gate') }}" data-voice-gate="{{ url_for('chat.voice_gate') }}"
          data-send="{{ url_for('housechat.home_chat_send') }}" data-events="{{ url_for('housechat.home_chat_events') }}"
-         data-ort="{{ url_for('static', filename='vendor/ort/') }}">
+         data-ort="{{ url_for('static', filename='vendor/ort/') }}"
+         data-sp-mix="{{ url_for('drive.spotify_mix') }}" data-sp-car="{{ url_for('drive.spotify_car') }}"
+         data-sp-play="{{ url_for('drive.spotify_play') }}" data-sp-pause="{{ url_for('drive.spotify_pause') }}">
   <div id="now" aria-live="polite"><svg class="g" aria-hidden="true"><use id="now-g" href="#g-wheel"/></svg><span id="now-t"></span></div>
   <div id="now-bar"><i></i></div>
   <div class="deck">
