@@ -121,3 +121,14 @@ def test_a_reply_that_claims_an_alarm_with_no_tool_called_is_asked_again_and_nev
     assert b.reply("wake me at 7") == "That did not get done: nothing was set. Say it again and I'll actually do it this time."
     b, c, *_ = make([text("It is seven o'clock, monkey.")])
     assert b.reply("what time is it") == "It is seven o'clock, monkey." and len(c.calls) == 1
+
+
+def test_a_tool_call_written_as_text_is_run_and_annotations_are_never_spoken():
+    b, c, timers, _ = make([text('[set_timer seconds="90" label="tea"]')], [text("Tea in ninety seconds. [SKIPPY_LEARN: {\"phrase\": \"tea\"}]")])
+    assert b.reply("tea timer, ninety seconds") == "Tea in ninety seconds."
+    assert timers.remaining() == [("tea", 90)] and "Timer set: tea" in str(c.calls[1]["messages"])
+    assert "tools" not in c.calls[1]
+    b, c, *_ = make([text('Noted. [SKIPPY_LEARN: {"phrase": "x", "intent": "y"}]')])
+    assert b.reply("hello") == "Noted." and "SKIPPY_LEARN" not in str(b.history)
+    b, c, *_ = make([text("[nonsense a=1] Sure.")])
+    assert b.reply("hi") == "[nonsense a=1] Sure."                      # not a tool of ours: left alone

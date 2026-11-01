@@ -47,7 +47,8 @@ SPOKEN = (
     "so use plain words only: no markdown, no lists, no code, no URLs, no emoji, nothing that cannot be said aloud; say numbers, times and units the way a person would. "
     "Be short but complete, and never lose the Skippy in you: a plain request (a time, a light, a fact, a timer) gets one to three spoken sentences with a dig or a joke "
     "folded in; a request for something made (a haiku, a joke, a limerick, a poem, a story, a recitation, an explanation) gets the WHOLE thing, performed, with a quip "
-    "before or after it, in about a hundred words or fewer. Never describe the thing instead of giving it. Use your tools when one fits (timers{house}{music}). "
+    "before or after it, in about a hundred words or fewer. Never describe the thing instead of giving it. Use your tools when one fits (timers{house}{music}): call them, never write a tool call as text, "
+    "and never write [SKIPPY_LEARN] or [TTS_ADJUST] here (nothing strips them: they would be read aloud). "
     "{nohouse}He is standing in a room waiting for you, so get to it. The current date and time is {now}."
 )
 
@@ -68,6 +69,11 @@ TOOLS = [
 CLAIMED = re.compile(r"\b(?:alarm|reminder|timer)s?\b[^.!?]*\b(?:set|is on|scheduled|cancel+ed|off)\b|\bset (?:an? |your |the )?(?:alarm|reminder|timer)\b"
                      r"|\bi(?:'ll| will)(?: \w+)? (?:remind|wake)\b|\b(?:added|put|took|crossed|removed)\b[^.!?]*\blist\b|\bannounced\b", re.I)
 UNCLAIM = "That did not get done: nothing was set. Say it again and I'll actually do it this time."
+# The persona is shared with flask-api, whose chat strips [SKIPPY_LEARN: {...}] / [TTS_ADJUST: {...}]; here they would be read aloud. Worse
+# (2026-11-01): one such line in the memory and Core wrote every tool call after it as text, "[list action="read" list="shopping"]".
+ANNOTATION = re.compile(r"\[(?:SKIPPY_LEARN|TTS_ADJUST):\s*\{.*?\}\s*\]", re.S)
+TEXT_CALL = re.compile(r"\[(\w+)((?:\s+\w+=(?:\"[^\"]*\"|'[^']*'|[^\s\]]+))*)\s*\]")
+TEXT_ARG = re.compile(r"(\w+)=(?:\"([^\"]*)\"|'([^']*)'|([^\s\]]+))")
 
 
 def load_persona() -> str:
@@ -231,6 +237,9 @@ class Brain:
                 break
             messages.append({"role": "assistant", "content": [self._dump(b) for b in blocks]})
             messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": c.id, "content": self.run_tool(c.name, c.input)} for c in calls]})
+        text = ANNOTATION.sub("", text).strip()
+        if text and not self.actions:
+            text = self._text_calls(text, messages)
         if text and not self.actions and CLAIMED.search(text):
             print(f"[brain] claimed without a tool: {text[:80]!r}: asked again", flush=True)
             messages += [{"role": "assistant", "content": text},
@@ -255,6 +264,31 @@ class Brain:
         self.history += [{"role": "user", "content": heard}, {"role": "assistant", "content": text}]
         self.history = self.history[-2 * MEMORY_TURNS:]
         return text
+
+    def _text_calls(self, text: str, messages: list) -> str:
+        """A tool call written as words ("[list action="read" list="shopping"]") is run as the call it meant, and the model words the answer."""
+        names = {t["name"] for t in self.tools()}
+        found = [m for m in TEXT_CALL.finditer(text) if m.group(1) in names]
+        if not found:
+            return text
+        results = []
+        for m in found:
+            args = {}
+            for a in TEXT_ARG.finditer(m.group(2)):
+                v = next(g for g in a.groups()[1:] if g is not None)
+                args[a.group(1)] = int(v) if v.isdigit() else {"true": True, "false": False}.get(v.lower(), v)
+            results.append(self.run_tool(m.group(1), args))
+        print(f"[brain] a tool call written as text, run: {[m.group(0)[:60] for m in found]}", flush=True)
+        messages += [{"role": "assistant", "content": text},
+                     {"role": "user", "content": "[The house ran the tool call you wrote as text: " + " / ".join(results)
+                                                 + ". Now say the answer aloud, in plain words. Never write a tool call as text: call the tool.]"}]
+        try:
+            resp = self._create(need_words=True, model=self.model, max_tokens=600, system=self.system(), messages=messages)
+            words = " ".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
+        except Exception:                                             # noqa: BLE001 — the tool's own words will do
+            words = ""
+        words = ANNOTATION.sub("", TEXT_CALL.sub("", words)).strip()
+        return words or TEXT_CALL.sub("", text).strip() or results[-1]
 
     @staticmethod
     def _dump(b) -> dict:

@@ -65,7 +65,10 @@ class Lists:
         args = args or {}
         action = str(args.get("action") or "read")
         which = list_name(str(args.get("list") or ""))
-        items = [str(i).strip()[:80] for i in (args.get("items") or []) if str(i).strip()]
+        raw = args.get("items") or []
+        if isinstance(raw, str):                       # "milk, eggs and coffee" (a tool call the model wrote as text)
+            raw = re.split(r",|\band\b", raw)
+        items = [str(i).strip()[:80] for i in raw if str(i).strip()]
         with self._lock:
             have = self.lists.get(which, [])
             if action == "lists":
