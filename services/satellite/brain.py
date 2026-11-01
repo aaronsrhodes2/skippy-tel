@@ -8,6 +8,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+import house_layout
 import house as hass_mod                                         # the house: any backend (HomeKit, Home Assistant ...)
 import news as news_mod
 import weather as weather_mod
@@ -109,7 +110,8 @@ class Brain:
         if self.offered and self.clock() - self.offered["at"] < news_mod.KEEP_S:
             offered = ("\n\nYou brought this up yourself a moment ago, unasked; if he wants more, talk only from these sources and say when they don't settle "
                        f"something:\n{self.offered['note']}")
-        return self.persona + SPOKEN.format(now=self.now(), house=house, nohouse=nohouse, music=music) + books + news + (weather_mod.PROMPT if self.weather is not None else "") + offered
+        layout = house_layout.default().primer(getattr(self, "room", ""))   # the floors, rooms and speakers (house_layout.json), and where he is
+        return self.persona + SPOKEN.format(now=self.now(), house=house, nohouse=nohouse, music=music) + layout + books + news + (weather_mod.PROMPT if self.weather is not None else "") + offered
 
     def offer(self, text: str, note: str) -> None:
         """He is about to say `text` unasked (starters.py): it joins his memory, with `note` (its sources) for the follow-up questions."""

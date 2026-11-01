@@ -1,0 +1,81 @@
+{
+  "_about": "The house: ONE source of truth for floors, rooms, their spoken names, and what is in each (house_layout.py reads it). A device is named by its entity id (light.kitchen_under_1) or its name in the app; a room listed here beats the room a backend gives it. Outputs are router kinds (speaker_out.py: hdmi, enclave, pod). 'confirm' marks a guess the Captain has not checked yet.",
+  "everywhere": ["everywhere", "the whole house", "whole house", "all over the house", "every room", "all rooms", "the house", "all"],
+  "floors": {
+    "downstairs": {"aliases": ["down stairs", "the basement", "basement", "lower floor"], "rooms": ["theater", "office"]},
+    "upstairs": {"aliases": ["up stairs", "upper floor", "main floor"], "rooms": ["living room", "kitchen", "bedroom"]},
+    "outside": {"aliases": ["outdoors", "the yard", "yard", "outdoor"], "rooms": ["deck", "outside"]}
+  },
+  "rooms": {
+    "theater": {
+      "aliases": ["the theater", "theatre", "home theater", "sony", "the sony", "the stereo", "stereo", "projector"],
+      "pods": ["theater", "office"],
+      "outputs": ["hdmi"],
+      "devices": [
+        {"name": "theater pod", "kind": "pod", "note": "Waveshare 86 box; mic and speaker; replaces the Amazon Echo here (hub room 'office' until renamed 'theater')"},
+        {"name": "Sony sound system", "kind": "speaker", "output": "hdmi", "note": "fed over HDMI from skippy-pc"},
+        {"name": "EPSON projector", "kind": "projector", "note": "fed over HDMI"},
+        {"name": "skippy-pc", "kind": "computer", "note": "its HDMI feeds the Sony and the projector", "confirm": true}
+      ]
+    },
+    "office": {
+      "aliases": ["the office", "server room"],
+      "pods": [],
+      "outputs": [],
+      "devices": [
+        {"name": "Wi-Fi router", "kind": "network"},
+        {"name": "skippy-core", "kind": "computer", "note": "models, Mentat, Matter controller; its Bluetooth drives the Enclave upstairs"}
+      ]
+    },
+    "living room": {
+      "aliases": ["the living room", "living", "lounge", "enclave", "the enclave"],
+      "pods": [],
+      "outputs": ["enclave"],
+      "devices": [
+        {"name": "Enclave speakers", "kind": "speaker", "output": "enclave", "note": "Bluetooth to skippy-core, snapserver on :4953"},
+        {"name": "living room pod", "kind": "pod", "planned": true},
+        {"id": "light.living_track_middle", "name": "living track middle", "kind": "light"},
+        {"id": "light.living_track_throne", "name": "living track throne", "kind": "light"}
+      ]
+    },
+    "kitchen": {
+      "aliases": ["the kitchen", "stove"],
+      "pods": [],
+      "outputs": [],
+      "devices": [
+        {"id": "light.kitchen_under_1", "name": "kitchen under 1", "kind": "light"},
+        {"id": "light.kitchen_under_2", "name": "kitchen under 2", "kind": "light"},
+        {"id": "light.kitchen_under_3", "name": "kitchen under 3", "kind": "light"},
+        {"id": "light.track_stove_light", "name": "track stove light", "kind": "light"}
+      ],
+      "confirm": true
+    },
+    "bedroom": {
+      "aliases": ["the bedroom", "upstairs bedroom", "master bedroom"],
+      "pods": [],
+      "outputs": [],
+      "devices": [
+        {"name": "bedroom pod", "kind": "pod", "planned": true},
+        {"id": "light.bedroom", "name": "Bedroom", "kind": "light"}
+      ]
+    },
+    "deck": {
+      "aliases": ["the deck", "patio"],
+      "pods": [],
+      "outputs": [],
+      "devices": [
+        {"id": "light.deck_sliding_door", "name": "Deck sliding door", "kind": "light", "confirm": true}
+      ],
+      "confirm": true
+    },
+    "outside": {
+      "aliases": ["outdoors", "out front", "security"],
+      "pods": [],
+      "outputs": [],
+      "devices": [
+        {"id": "light.security_light", "name": "security Light", "kind": "light", "confirm": true}
+      ],
+      "confirm": true
+    }
+  }
+}

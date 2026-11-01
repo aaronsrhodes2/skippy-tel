@@ -127,6 +127,20 @@ Guard rails (`house.py`, the same for every backend; tests in `tests/test_sat_ho
 Other backends plug into the same `House`: Home Assistant (`hass.py`, if he ever runs one: `HASS_URL` + `HASS_TOKEN` in the vault). Later: the LG webOS TV
 (`aiowebostv`), other rooms' satellites over the Wyoming protocol.
 
+## The house's layout (`house_layout.json`, `house_layout.py`)
+
+ONE source of truth for floors, rooms, the names he says for them, and what is in each room (lights, plugs, pods, speakers and their router
+outputs, the projector, the computers). Every part of Skippy at home resolves a place through it:
+- **Lights:** `house.House` asks the layout for each thing's room (the layout first, then the backend's own room, then a room in its name), so
+  "turn on the upstairs lights", "the kitchen lights" or "all the lights" switch every one of them (on, off, toggle, dim); a thing's own name
+  still means that one thing ("kitchen under 1", "Bedroom"). `home_devices` takes a floor or "everywhere" as its area.
+- **Outputs:** `speaker_out.place_kinds` reads `layout.outputs(...)`: "upstairs" / "living room" / "enclave" is `enclave`, "downstairs" /
+  "theater" / "sony" is `hdmi`, "everywhere" is both.
+- **Skippy:** `brain.py` puts `layout.primer(room)` in his prompt: the floors, rooms, speakers, and which room he is hearing from.
+
+A new light, room or pod is one edit to `house_layout.json` (re-read when it changes; no restart). `"confirm": true` marks a guess the Captain
+has not checked. `SKIPPY_HOUSE_LAYOUT` names another file. Tests: `tests/test_sat_house_layout.py`.
+
 ## The news, and things Skippy brings up himself (`news.py`, `starters.py`, `tools/starter_refresh.py`)
 
 "Skippy, what's the news?" "News about what?" (said at once, no model) "Politics." The answer goes straight to the `news` tool: the house's SearXNG

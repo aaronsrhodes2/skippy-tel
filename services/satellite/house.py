@@ -12,11 +12,17 @@ from __future__ import annotations
 
 import re
 
+import house_layout
+
 ALLOWED = ("light", "switch", "fan", "cover", "climate", "media_player", "scene", "script", "vacuum", "humidifier", "input_boolean")
 READ_ONLY = ("sensor", "binary_sensor", "weather", "person", "sun")                  # may be asked about, never changed
 SENSITIVE_DOMAINS = ("lock", "alarm_control_panel")
 SENSITIVE_COVERS = ("garage", "gate", "door")                                         # a cover's device_class
 MAX_LIST = 40
+GROUP_WORDS = {"light": ("light", "lights", "lamp", "lamps"), "switch": ("switch", "switches", "plug", "plugs", "outlet", "outlets"),
+               "fan": ("fan", "fans")}
+FILLER = ("the", "a", "my", "all", "every", "everything", "in", "on", "of", "stuff", "things", "devices", "and")
+GROUP_ACTIONS = ("on", "turn_on", "off", "turn_off", "toggle", "set_brightness")
 
 
 class HomeError(Exception):
@@ -35,6 +41,21 @@ class House:
     """Subclasses: states(fresh=False) -> list of {entity_id, state, attributes}; areas() -> {entity_id: area}; _service(domain, service, data)."""
 
     sensitive = False
+    layout: house_layout.Layout | None = None                # None: house_layout.default(), the repo's house_layout.json
+
+    def _layout(self) -> house_layout.Layout:
+        return self.layout if self.layout is not None else house_layout.default()
+
+    def rooms(self) -> dict[str, str]:
+        """{entity_id: room}: the layout's room for each thing, else its backend's own room name."""
+        lay, areas = self._layout(), self.areas()
+        out = {}
+        for s in self.states():
+            eid = s.get("entity_id", "")
+            room = lay.room_of(eid, self._label(s), areas.get(eid, ""))
+            if room or areas.get(eid):
+                out[eid] = room or areas[eid]
+        return out
 
     def states(self, fresh: bool = False) -> list[dict]:
         raise NotImplementedError
@@ -83,7 +104,7 @@ class House:
         want = set(_norm(query))
         if not want:
             return None, []
-        areas = self.areas()
+        areas = self.rooms()
         scored = []
         for s in states:
             have = set(_norm(self._label(s))) | set(_norm(areas.get(s["entity_id"], "")))
@@ -107,16 +128,21 @@ class House:
 
     # ── the tools ───────────────────────────────────────────────────────────────
     def devices(self, area: str = "", domain: str = "") -> str:
-        areas = self.areas()
+        areas = self.rooms()
+        place = self._layout().place(area) if area else None          # "upstairs" is every room on it; "everywhere" is all of them
         out = []
         for s in self.states():
             if self._domain(s) not in ALLOWED or not self._visible(s):
                 continue
             if domain and self._domain(s) != domain:
                 continue
-            if area and area.lower() not in areas.get(s["entity_id"], "").lower():
+            room = areas.get(s["entity_id"], "")
+            if place is not None and room not in place:
                 continue
-            out.append(f"{self._label(s)} ({s.get('state')})")
+            if area and place is None and area.lower() not in room.lower():
+                continue
+            where = room if room and place is not None and len(place) > 1 else ""      # which room, when he asked about a floor or the house
+            out.append(f"{self._label(s)} ({s.get('state')}{', ' + where if where else ''})")
         if not out:
             return "Nothing matches in the house."
         extra = f"; and {len(out) - MAX_LIST} more" if len(out) > MAX_LIST else ""
@@ -142,6 +168,9 @@ class House:
 
     def control(self, target: str, action: str, value=None, confirm: bool = False) -> str:
         action = str(action or "").lower().strip().replace(" ", "_")
+        group = self._group(target)
+        if group is not None:
+            return self._control_group(target, group, action, value)
         s, close = self.find(target)
         if s is None:
             return self._ambiguous(target, close)
@@ -156,6 +185,54 @@ class House:
         self._service(domain, service, {"entity_id": eid, **data})
         self.invalidate()
         return f"Done: {label}, {action.replace('_', ' ')}{'' if value is None else ' ' + str(value)}."
+
+    def _group(self, target: str) -> list[dict] | None:
+        """Every thing a place-and-kind phrase names ("the upstairs lights", "everything in the kitchen", "theater"), or None when the words
+        are not a place plus a kind (then it is one thing's name). A thing whose own name is exactly the words is that one thing ("Bedroom")."""
+        rooms, rest = self._layout().split(target)
+        if rooms is None:
+            return None
+        rest_words = [w for w in house_layout.words(rest) if w not in FILLER]
+        kinds = {k for k, ws in GROUP_WORDS.items() for w in rest_words if w in ws}
+        if [w for w in rest_words if not any(w in ws for ws in GROUP_WORDS.values())]:
+            return None                                            # more than a place and a kind: a name ("kitchen under 1")
+        said = set(house_layout.words(target)) - set(FILLER)
+        visible = [s for s in self.states() if self._visible(s) and self._domain(s) in ("light", "switch", "fan")]
+        if any(set(house_layout.words(self._label(s))) == said for s in visible):
+            return None
+        lay, areas = self._layout(), self.rooms()
+        out = []
+        for s in visible:
+            if areas.get(s["entity_id"]) not in rooms or self._is_sensitive(s):
+                continue
+            kind = lay.device(s["entity_id"], self._label(s)).get("kind") or ("light" if self._domain(s) == "light" else self._domain(s))
+            if kinds and kind not in kinds and not set(rest_words) & set(house_layout.words(self._label(s))):   # a plug called "Lamp" is a lamp
+                continue
+            if not kinds and kind not in ("light", "switch", "fan"):
+                continue
+            out.append(s)
+        return out or None                                         # nothing there: maybe a thing's name after all ("lamp in the office")
+
+    def _control_group(self, target: str, group: list[dict], action: str, value) -> str:
+        if action not in GROUP_ACTIONS:
+            return f"I can only switch things on or off, toggle them or dim them all at once; name the one thing to {action.replace('_', ' ')}."
+        if not group:
+            return f"Nothing I can switch is in {target}. Do not claim you did anything."
+        done, failed = [], []
+        for s in group:
+            service, data = self._plan(self._domain(s), action, value, s)
+            if service is None:
+                continue
+            try:
+                self._service(self._domain(s), service, {"entity_id": s["entity_id"], **data})
+                done.append(self._label(s))
+            except HomeError:
+                failed.append(self._label(s))
+        self.invalidate()
+        said = f"Done: {target}, {action.replace('_', ' ')}{'' if value is None else ' ' + str(value)}: {', '.join(done)}." if done else ""
+        if failed:
+            said += f" These did not answer: {', '.join(failed)}."
+        return said.strip() or f"I cannot {action.replace('_', ' ')} anything in {target}."
 
     def _plan(self, domain: str, action: str, value, s: dict):
         number = None
@@ -243,14 +320,14 @@ class Combined(House):
 
 
 TOOLS = [
-    {"name": "home_devices", "description": "List what is in the house that he can control, with each one's state. Optionally for one area (room) or one kind (light, switch, fan, cover, climate, media_player).",
+    {"name": "home_devices", "description": "List what is in the house that he can control, with each one's state. Optionally for one area (a room, a floor like 'upstairs', or 'everywhere') or one kind (light, switch, fan, cover, climate, media_player).",
      "input_schema": {"type": "object", "properties": {"area": {"type": "string"}, "domain": {"type": "string"}}}},
     {"name": "home_state", "description": "Ask the state of one thing in the house: a light, a temperature sensor, the thermostat, a door sensor. Use his own words for its name.",
      "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
     {"name": "home_control", "description": "Do something to one thing in the house. Actions: on, off, toggle, set_brightness (value 1-100), set_temperature (value in degrees), set_volume (value 0-100), "
                                              "open, close, stop (covers), play, pause, next, previous (media players), activate (scenes, scripts). If several things fit the name, nothing happens and you must ask which. "
                                              "Locks and alarms need confirm=true, and only after he has said yes aloud.",
-     "input_schema": {"type": "object", "properties": {"name": {"type": "string", "description": "His words for it, e.g. 'living room lamp'."},
+     "input_schema": {"type": "object", "properties": {"name": {"type": "string", "description": "His words for it, e.g. 'living room lamp'; or a place and a kind for all of them at once: 'upstairs lights', 'kitchen lights', 'all the lights', 'everything downstairs' (on, off, toggle, set_brightness only)."},
                                                        "action": {"type": "string"}, "value": {"type": "number"}, "confirm": {"type": "boolean"}},
                       "required": ["name", "action"]}},
 ]
