@@ -77,6 +77,24 @@ TEXT_CALL = re.compile(r"\[(\w+)((?:\s+\w+=(?:\"[^\"]*\"|'[^']*'|[^\s\]]+))*)\s*
 TEXT_ARG = re.compile(r"(\w+)=(?:\"([^\"]*)\"|'([^']*)'|([^\s\]]+))")
 
 
+_PLACE = r"(?P<place>everywhere|everyone|everybody|the whole house|the house|upstairs|downstairs|(?:the |in the )?(?:living room|kitchen|bedroom|theater|office))"
+ANNOUNCE_RX = [re.compile(rf"^(?:announce|broadcast)\s+(?:to\s+|on\s+)?(?:{_PLACE}\s+)?(?:that\s+)?(?P<text>.+)$"),
+               re.compile(rf"^(?:tell|call)\s+{_PLACE}\s+(?:that\s+)?(?P<text>.+)$")]
+
+
+def announce_route(heard: str) -> dict | None:
+    """The `announce` tool's arguments for a plain announcement (Core said the words here and announced nothing, 2026-11-01); None otherwise."""
+    w = re.sub(r"^\W*(?:hey |ok |okay )?skippy\W*", "", (heard or "").strip(), flags=re.I).strip(" .!")
+    for rx in ANNOUNCE_RX:
+        m = rx.match(w.lower())
+        if m:
+            place = (m.group("place") or "everywhere").replace("in the ", "").strip()
+            place = "everywhere" if place in ("everyone", "everybody", "the house", "the whole house") else place
+            text = w[m.start("text"):].strip()
+            return {"text": text[:1].upper() + text[1:], "place": place} if text else None
+    return None
+
+
 def load_persona() -> str:
     try:
         return PERSONA_FILE.read_text(encoding="utf-8")
@@ -215,6 +233,8 @@ class Brain:
             tool, routed = "weather", weather_mod.pre_route(heard)   # left to itself, Core made up tomorrow's forecast (2026-10-31)
         if not routed and any(t["name"] == "list" for t in self.extra_tools):
             tool, routed = "list", lists_mod.pre_route(heard)        # left to itself, Core said "Adding milk ..." and added nothing (2026-11-01)
+        if not routed and any(t["name"] == "announce" for t in self.extra_tools):
+            tool, routed = "announce", announce_route(heard)
         if routed:                                                    # the tool runs first; the model only words the answer, with no tools to forget to call
             result = self.run_tool(tool, routed)
             label = {"audiobook": "Already done by the house for this request"}.get(tool, f"The {tool} tool's answer for this request")

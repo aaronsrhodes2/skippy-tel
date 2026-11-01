@@ -132,3 +132,12 @@ def test_a_tool_call_written_as_text_is_run_and_annotations_are_never_spoken():
     assert b.reply("hello") == "Noted." and "SKIPPY_LEARN" not in str(b.history)
     b, c, *_ = make([text("[nonsense a=1] Sure.")])
     assert b.reply("hi") == "[nonsense a=1] Sure."                      # not a tool of ours: left alone
+
+
+def test_plain_announcements_are_routed_to_the_tool():
+    from brain import announce_route
+    assert announce_route("announce upstairs that the reminders test is done") == {"text": "The reminders test is done", "place": "upstairs"}
+    assert announce_route("Skippy, announce dinner is ready") == {"text": "Dinner is ready", "place": "everywhere"}
+    assert announce_route("tell everyone the movie is starting") == {"text": "The movie is starting", "place": "everywhere"}
+    assert announce_route("tell upstairs I'm leaving in five minutes") == {"text": "I'm leaving in five minutes", "place": "upstairs"}
+    assert announce_route("tell me a joke") is None and announce_route("what's the weather") is None
