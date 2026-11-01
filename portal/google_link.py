@@ -56,8 +56,9 @@ def _post(url: str, data: dict) -> tuple[int, dict]:
 class Link:
     """The one grant: {email, refresh_token, scopes, granted} in the bucket, plus the current access token in memory."""
 
-    def __init__(self, store, client, post=_post, clock=time.time):
+    def __init__(self, store, client, post=_post, clock=time.time, nest_default: str = ""):
         self.store, self.client, self.post, self.clock = store, client, post, clock    # client() -> (id, secret)
+        self.nest_default = (nest_default or "").strip().lower()     # NEST_PROJECT_ID (deploy.json): used until Admin saves another
         self._lock = threading.Lock()
         self._access: tuple[str, float] | None = None
 
@@ -72,9 +73,9 @@ class Link:
     def nest_project(self) -> str:
         raw = self.store.get(NEST_PATH)
         try:
-            return str((json.loads(raw) if raw else {}).get("project") or "")
+            return str((json.loads(raw) if raw else {}).get("project") or "") or self.nest_default
         except ValueError:
-            return ""
+            return self.nest_default
 
     def set_nest_project(self, project: str) -> None:
         if project:
@@ -181,7 +182,8 @@ def finish():
 
 
 def init_app(app, home, store) -> Link:
-    link = Link(store, lambda: (app.config["GOOGLE_CLIENT_ID"], app.config["GOOGLE_CLIENT_SECRET"]))
+    link = Link(store, lambda: (app.config["GOOGLE_CLIENT_ID"], app.config["GOOGLE_CLIENT_SECRET"]),
+                nest_default=app.config.get("NEST_PROJECT_ID") or "")
     app.extensions["google_link"] = link
     bp = Blueprint("google_link", __name__)
 

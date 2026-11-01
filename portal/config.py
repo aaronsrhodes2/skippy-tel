@@ -56,6 +56,7 @@ def load() -> dict:
         # Discord: the invite link shown to players, and the bot token the
         # admin page uses to create channels (optional until you want that).
         "DISCORD_INVITE": _optional("DISCORD_INVITE", "gPTVS7Hmj"),
+        "NEST_PROJECT_ID": _optional("NEST_PROJECT_ID", ""),          # the Nest's Device Access project (google_link.py); Admin can override
         "PORTAL_URL": _optional("PORTAL_URL", ""),   # the address the Discord pins link to (a custom domain, once there is one); else where the portal is reached
         "MENTAT_URL": _optional("MENTAT_URL", ""),
         "DISCORD_BOT_TOKEN": _optional("DISCORD_BOT_TOKEN"),

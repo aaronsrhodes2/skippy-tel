@@ -190,3 +190,11 @@ def test_the_nest_project_is_admin_only_checked_and_then_connect_asks_sdm_throug
     assert app.extensions["google_link"].state()["nest"] is True
     home = {"Authorization": f"Bearer {_pair(client)}"}
     assert client.get("/home/google/access", headers=home).get_json()["nest_project"] == PROJECT
+
+
+def test_the_deploys_nest_project_is_used_until_admin_saves_another():
+    import tabletop
+    link = google_link.Link(tabletop.MemoryStore(), lambda: ("id", "s"), nest_default=PROJECT)
+    assert link.nest_project() == PROJECT and google_link.SDM_SCOPE in link.scopes()
+    link.set_nest_project("ffffffff-1111-2222-3333-444455556666")
+    assert link.nest_project() == "ffffffff-1111-2222-3333-444455556666"

@@ -24,6 +24,7 @@
    "MENTAT_URL": "https://skippy-core.tailab2cc7.ts.net:8443",
    "DOOMLOOP_BUCKET": "skippy-tel-doomloop-dev",
    "TABLETOP_BUCKET": "skippy-tel-tabletop",
+   "NEST_PROJECT_ID": "280eb78b-3f8f-4ace-ba01-ad223a855ea1",
    "DEPLOYS_FROM": "house"
   },
   "secrets": {
