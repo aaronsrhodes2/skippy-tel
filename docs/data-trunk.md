@@ -18,6 +18,9 @@ machines are wired to the same gigabit switch; addresses reserved in the router:
   machine's reboot (tested: unmounted, then a plain `ls` brought it back);
 - `nofail` and `_netdev` mean skippy-core never waits for skippy-pc to boot; with skippy-pc off, the folders are simply away until it's
   back.
+- **they never give up retrying**: `/etc/systemd/system/mnt-pc-{trunk,datasets}.{mount,automount}.d/retry.conf` sets
+  `StartLimitIntervalSec=0` (2026-11-01: while skippy-core moved upstairs the network was down, the mount failed five times quickly,
+  systemd stopped trying, and the deployer couldn't fetch until `systemctl reset-failed`).
 
 **The login:**
 - on skippy-pc, a local Windows account `skippy-core`, the only account either share admits (`trunk` Full, `datasets` Read). Its
