@@ -623,7 +623,32 @@
     return { paths: items.slice(lo, hi).map(it => T[it.t].p), idx: qi - lo };
   }
 
+  /** The house stereo as one source: its Connect state (portal/player.py) read as a single queue where the Captain's library and his Spotify mix.
+   *  `lookup(path)` gives {t, a} for a library path or null. `trans` says how an item is entered from the one before it: "fade" (Spotify into
+   *  Bilby, a crossfade of `mix.xfade` seconds), "mix" (Bilby into Bilby, beat-matched, while DJ mode is on), else "cut". */
+  const STEREO_ID = "skippyroom-stereo";
+  const isSpotifyUri = t => typeof t === "string" && /^spotify:/.test(t);
+  function stereoView(state, lookup) {
+    const s = state || {}, q = Array.isArray(s.queue) && s.queue.length ? s.queue : (s.track ? [s.track] : []);
+    const mix = { on: !!(s.mix && s.mix.on), xfade: Math.max(0, Number(s.mix && s.mix.xfade) || 0) };
+    const names = s.titles && typeof s.titles === "object" ? s.titles : {};
+    const idx = Number.isInteger(s.idx) && s.idx >= 0 && s.idx < q.length ? s.idx : Math.max(0, q.indexOf(s.track));
+    const items = q.map((path, i) => {
+      const spot = isSpotifyUri(path), n = Array.isArray(names[path]) ? names[path] : null, l = !spot && lookup ? lookup(path) : null;
+      let title = i === idx && s.title ? s.title : n ? n[0] : l ? l.t : "", artist = i === idx && s.artist ? s.artist : n ? n[1] || "" : l ? l.a || "" : "";
+      if (!title) title = spot ? "Spotify" : String(path).replace(/\.\w+$/, "").split("/").pop();
+      let trans = "";
+      if (i > 0) {
+        const ps = isSpotifyUri(q[i - 1]);
+        trans = ps && !spot && mix.xfade > 0 ? "fade" : !ps && !spot && mix.on ? "mix" : "cut";
+      }
+      return { path, src: spot ? "spotify" : "library", title, artist: artist || "", cur: i === idx, trans };
+    });
+    return { items, idx, mix, playing: !!s.playing, spotify: items.some(i => i.src === "spotify"), now: items[idx] || null };
+  }
+
   return {
+    STEREO_ID, isSpotifyUri, stereoView,
     paginate, pageOf,
     fold, squash, sortKey, letterOf, cmp,
     fmtTime, fmtLong, fmtAgo, fmtBytes, genreLabel,

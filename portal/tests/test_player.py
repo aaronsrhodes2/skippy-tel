@@ -543,3 +543,21 @@ def test_the_favorite_key_is_the_captains_alone(client):
     assert 'data-act="fav" data-fav-only hidden' in js and 'case "fav": favorite(); break;' in js and "b.hidden = !cfg.fav" in js
     got = client.post("/music/favorites", json={"track": "Moby/Play/03 Porcelain.mp3", "title": "Porcelain", "artist": "Moby"}).get_json()
     assert got["favorite"]["title"] == "Porcelain"
+
+
+def test_the_stereos_spotify_names_and_mix_are_kept_and_the_mix_command_is_allowed():
+    clock = Clock()
+    p = player_mod.Player(paired_home(clock), clock=clock)
+    uri = "spotify:track:" + "a" * 22
+    p.checkin(ADMIN, "skippyroom-stereo", "House stereo", state(queue=["A/B/one.mp3", uri], track=uri, idx=1,
+              titles={uri: ["Around the World", "Daft Punk"], 7: ["x"], "bad": "nope"}, mix={"on": True, "xfade": "6"}), room="box-stereo", box=True)
+    body = state(queue=None, track=uri, idx=1, mix={"on": False, "xfade": 99})
+    del body["queue"]
+    p.checkin(ADMIN, "skippyroom-stereo", "House stereo", body, room="box-stereo", box=True)       # no queue, no titles: the held ones stay
+    [dev] = p.checkin(ADMIN, "other1234", "PC", None)["devices"]
+    assert dev["state"]["titles"] == {uri: ["Around the World", "Daft Punk"]}
+    assert dev["state"]["mix"] == {"on": False, "xfade": 30.0}
+    assert p.command(ADMIN, "skippyroom-stereo", "mix:on") and p.command(ADMIN, "skippyroom-stereo", "mix:off")
+    assert not p.command(ADMIN, "skippyroom-stereo", "mix:loud")
+    p.checkin(ADMIN, "phone1234", "iPhone", state(mix="no"))
+    assert next(d for d in p.checkin(ADMIN, "other1234", "PC", None)["devices"] if d["id"] == "phone1234")["state"]["mix"] is None

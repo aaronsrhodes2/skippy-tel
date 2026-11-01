@@ -63,6 +63,18 @@
 .hero .acts { display: flex; gap: 6px; margin-top: 3px; }
 .hero .acts .key { width: 40px; height: 34px; }
 
+/* the house stereo as a source: the library and Spotify in one list, a transition glyph where one is mixed into the last */
+.sctl { align-items: center; }
+.sctl .txt { flex: 1; min-width: 0; }
+.sctl .acts { flex: none; display: grid; grid-template-columns: repeat(2, 40px); margin-top: 0; }
+.sctl .acts .key[hidden] { display: none; }
+.sctl h2 { -webkit-line-clamp: 1; }
+.sctl .spot { margin-left: 8px; align-self: center; }
+.stv .src { display: flex; align-items: center; justify-content: center; color: var(--dim-green-hi); }
+.stv .src .g { width: 18px; height: 18px; }
+.stv.spotify .src { color: var(--green); }
+.stv .trans { display: flex; color: var(--cyan); } .stv .trans .g { width: 18px; height: 18px; }
+
 /* ── the strip along the bottom ────────────────────────────────────────────────────────────────────────────────── */
 .bp-bar { flex: none; position: relative; display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 7px 0 4px; border-top: 1px solid var(--dim-green-hi); }
 .b-line { position: absolute; left: 0; right: 0; top: -1px; height: 2px; background: var(--dim-green); }

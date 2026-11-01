@@ -48,6 +48,7 @@ TAKE = re.compile(r"take:[A-Za-z0-9_-]{8,40}")      # "pick up what that device 
 # The Audiobooks app (audiobooks.py) plays on a room box through the same commands queue: the hub's Connect hands `book:` ones to the room's BookPlayer
 # (services/satellite/audiobooks.py COMMAND, kept identical): play:<book id>[:<second>], pause, resume, skip:<seconds>, chapter:<1|-1>, speed:<x>.
 BOOK_CMD = re.compile(r"book:(?:play:[a-z0-9-]{1,200}(?::\d{1,6}(?:\.\d)?)?|pause|resume|skip:-?\d{1,4}|chapter:-?1|speed:\d(?:\.\d{1,2})?)")
+MIX = re.compile(r"mix:(?:on|off)")                  # the house stereo's DJ mode (services/satellite/dj.py), switched from Bilby's stereo pane
 REPEATS = ("off", "all", "one")
 GATE_URL = re.compile(r"https://[a-z0-9-]+(\.[a-z0-9-]+)*\.ts\.net")
 
@@ -91,7 +92,19 @@ def _state(body: dict, previous: dict | None = None) -> dict:
             book = None
     else:
         book = None
-    return {"book": book, "track": _text(body.get("track"), MAX_PATH), "title": _text(body.get("title"), 200),
+    # titles: names for queue items the library has none for (a Spotify URI), kept like the queue; mix: the stereo's DJ mode and crossfade
+    titles = body.get("titles")
+    if isinstance(titles, dict):
+        titles = {k: [_text(v[0], 200), _text(v[1] if len(v) > 1 else "", 200)] for k, v in list(titles.items())[:MAX_QUEUE]
+                  if isinstance(k, str) and 0 < len(k) <= MAX_PATH and isinstance(v, (list, tuple)) and v}
+    else:
+        titles = dict(previous["titles"]) if previous and previous.get("titles") else {}
+    mix = body.get("mix")
+    try:
+        mix = {"on": mix.get("on") is True, "xfade": round(max(0.0, min(float(mix.get("xfade") or 0), 30.0)), 1)} if isinstance(mix, dict) else None
+    except (TypeError, ValueError):
+        mix = None
+    return {"book": book, "titles": titles, "mix": mix, "track": _text(body.get("track"), MAX_PATH), "title": _text(body.get("title"), 200),
             "artist": _text(body.get("artist"), 200), "pos": round(pos, 1), "playing": body.get("playing") is True,
             "queue": queue, "idx": idx, "dj": body.get("dj") is True, "shuffle": body.get("shuffle") is True,
             "repeat": body.get("repeat") if body.get("repeat") in REPEATS else "off",
@@ -169,7 +182,7 @@ class Player:
             return self._list(user, "", self.clock())
 
     def command(self, user: str, device: str, action: str) -> bool:
-        if action not in ACTIONS and not TAKE.fullmatch(action) and not BOOK_CMD.fullmatch(action):
+        if action not in ACTIONS and not TAKE.fullmatch(action) and not MIX.fullmatch(action) and not BOOK_CMD.fullmatch(action):
             return False
         with self._lock:
             d = self._devices.get(user, {}).get(device)

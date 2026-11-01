@@ -359,6 +359,10 @@ class StereoMusic:
         self.box = music_mod.BoxMusic(self.player, media, log=log, name="stereo", **kw)
         # BoxMusic's settle window is for a pod that reports "idle" while a track starts; the router never does, so no settle is needed
         self.player.music = self.box
+        if env is not None:                                         # Bilby's page shows and switches DJ mode (the same switch as "DJ mode on")
+            import dj                                               # noqa: PLC0415
+            xfade = float(env.get("SPOTIFY_XFADE_S", "6"))
+            self.box.mix = {"get": lambda: {"on": dj.enabled(env), "xfade": xfade}, "set": dj.set_enabled}
         self.media, self.log = media, log
         self._undo: asyncio.TimerHandle | None = None
 

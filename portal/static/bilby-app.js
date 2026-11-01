@@ -866,13 +866,17 @@
     showSpotify();
   }
   /** His Spotify on the house stereo (services/spotify): with nothing playing here, the bar says what it plays, with a Spotify badge. */
-  const isSpotify = t => /^spotify:/.test(t || "");
+  const isSpotify = C.isSpotifyUri;
+  /** The house stereo (skippy-pc's hub, a Connect device): one source whose queue mixes his library and his Spotify. */
+  const stereoDev = () => connect.others.find(d => d.id === C.STEREO_ID && d.live) || null;
+  const stereoOf = d => C.stereoView(d.state, p => { const i = S.lib && S.lib.byPath.get(p); const t = i !== undefined ? S.lib.T[i] : null; return t ? { t: t.t, a: t.a } : null; });
   function showSpotify() {
-    const d = curTrack() ? null : connect.others.find(x => x.live && x.state && x.state.playing && isSpotify(x.state.track));
+    const st = stereoDev(), d = curTrack() || !st || !st.state.playing ? null : st;
+    const was = S.barStereo; S.barStereo = !!d;
     const badge = $("#b-spot");
-    if (badge) badge.hidden = !d;
-    if (!d) return;
-    $("#b-title").textContent = d.state.title || "Spotify";
+    if (badge) badge.hidden = !d || !isSpotify(d.state.track);
+    if (!d) { if (was && !curTrack()) { $("#b-title").textContent = "Nothing playing"; $("#b-sub").textContent = ""; } return; }
+    $("#b-title").textContent = d.state.title || (isSpotify(d.state.track) ? "Spotify" : "Playing");
     $("#b-sub").textContent = [d.state.artist, d.name].filter(Boolean).join(" · ");
   }
   /** What the song is about, one sentence, from the Mac's lyric index. Hidden when there is none. */
@@ -931,7 +935,7 @@
   };
   const list = new PList($("#scroll"), $("#host"), {}, { pips: $("#pips"), pgno: $("#pgno"), scrub: $("#scrub"), onscrub: letterBubble });
   const qList = new PList($("#q-scroll"), $("#q-host"), {}, { pips: $("#q-pips"), pgno: $("#q-pgno"), scrub: $("#q-scrub") });
-  const VIEWS = ["home", "artists", "albums", "tracks", "genres", "added", "played", "artist", "album", "genre"];
+  const VIEWS = ["home", "stereo", "artists", "albums", "tracks", "genres", "added", "played", "artist", "album", "genre"];
   const LABELS = { artists: "Artists", albums: "Albums", tracks: "Songs", genres: "Genres", added: "Recently added", played: "Recently played" };
   const rail = { on: false, items: [] };
   const letterForRow = row => { let l = ""; for (const r of rail.items) { if (r.i <= row) l = r.l; else break; } return l; };
@@ -1040,6 +1044,48 @@
       e.append(main); e._r = { l1, l2, main }; return e;
     },
     bind(e, r) { e._r.l1.textContent = r.g.name; counts(e._r.l2, [[r.g.tracks.length, "note"]]); e._r.main.setAttribute("aria-label", r.g.name); },
+  };
+
+  // the house stereo as a source: what it plays now, the keys that drive it, and the queue where his library and Spotify are one list
+  makers.sctl = {
+    make() {
+      const e = el("div", "vrow hero sctl"), txt = el("div", "txt"), kind = el("span", "kind"), h = el("h2"), who = el("span", "who"), meta = el("span", "meta"), acts = el("div", "acts");
+      const mkb = (r, label, icon) => { const b = el("button", "key"); b.type = "button"; b.dataset.r = r; b.innerHTML = ico(icon); b.setAttribute("aria-label", label); b.title = label; return b; };
+      acts.append(mkb("s-prev", "Previous", "prev"), mkb("s-play", "Play", "play"), mkb("s-next", "Next", "next"), mkb("s-mix", "Mix his songs into each other, like a DJ", "mix"));
+      txt.append(kind, h, who, meta); e.append(txt, acts);
+      e._r = { kind, h, who, meta, play: acts.children[1], mix: acts.children[3] };
+      return e;
+    },
+    bind(e, r) {
+      const x = e._r, v = r.sv, cur = v.now;
+      x.kind.replaceChildren(); x.kind.insertAdjacentHTML("beforeend", ico(cur && cur.src === "spotify" ? "arcs" : "note"));
+      if (cur && cur.src === "spotify") x.kind.append(el("span", "spot", "Spotify"));
+      x.h.textContent = cur ? cur.title : "Nothing playing"; x.who.textContent = cur ? cur.artist : "";
+      const lib = v.items.filter(i => i.src === "library").length, sp = v.items.length - lib;
+      counts(x.meta, [[lib, "note"], [sp, "arcs"]].filter(p => p[0] > 0));
+      setIcon(x.play, v.playing ? "pause" : "play"); x.play.setAttribute("aria-label", v.playing ? "Pause" : "Play");
+      const m = r.dev.state.mix;
+      x.mix.hidden = !m; x.mix.setAttribute("aria-pressed", m && m.on ? "true" : "false");
+      x.mix.setAttribute("aria-label", m && m.on ? "Mixing: on" : "Mixing: off");
+    },
+  };
+  makers.srow = {
+    make() {
+      const e = el("div", "vrow tr stv"); e.setAttribute("role", "listitem");
+      const main = el("div", "tr-main"), src = el("span", "num src"), txt = el("span", "txt"), l1 = el("span", "l1"), eq = el("span", "eq"), l1t = el("span"), l2 = el("span", "l2"), tr = el("span", "dur trans");
+      eq.setAttribute("aria-hidden", "true"); eq.innerHTML = "<span></span><span></span><span></span>";
+      l1.append(eq, l1t); txt.append(l1, l2); main.append(src, txt, tr); e.append(main);
+      e._r = { src, l1t, l2, tr };
+      return e;
+    },
+    bind(e, r) {
+      const it = r.it, x = e._r;
+      e.classList.toggle("cur", it.cur); e.classList.toggle("spotify", it.src === "spotify");
+      x.src.innerHTML = ico(it.src === "spotify" ? "arcs" : "note");
+      x.l1t.textContent = it.title; x.l2.textContent = it.artist;
+      x.tr.innerHTML = it.trans && it.trans !== "cut" ? ico("mix") : "";
+      x.tr.title = it.trans === "fade" ? "Fades in from Spotify" : it.trans === "mix" ? "Mixed in on the beat" : "";
+    },
   };
 
   // the header of an album, an artist or a genre: what it is, its name, and the keys that act on all of it
@@ -1188,6 +1234,17 @@
         });
         break;
       }
+      case "stereo": {
+        v.back = true;
+        const st = stereoDev();
+        if (!st) { msg("The house stereo isn't answering right now."); break; }
+        const sv = stereoOf(st);
+        rows.push({ type: "sctl", h: 100, dev: st, sv });
+        if (!sv.items.length) { msg("Nothing is queued on the stereo. Say “play something on the stereo”, or ask for Spotify."); break; }
+        const first = Math.max(0, sv.idx - 1);              // a little of what has played, then what is coming
+        sv.items.slice(first).forEach(it => rows.push({ type: "srow", h: g.rowH, it }));
+        break;
+      }
       case "genre": {
         v.back = true;
         const gn = lib.genres[route.id];
@@ -1220,7 +1277,9 @@
     const lib = S.lib, deck = $("#deck");
     const here = connect.others.find(d => d.state && d.state.track && d.live && d.state.playing);
     const units = [];
-    if (here && !isPlaying()) units.push(["here", "devices", "Play here, where the other device left off", "", true]);
+    if (here && !isPlaying() && !isSpotify(here.state.track)) units.push(["here", "devices", "Play here, where the other device left off", "", true]);
+    const st = stereoDev();
+    if (st) units.push(["stereo", "arcs", "House stereo: his library and Spotify, mixed", st.state.queue && st.state.queue.length ? String(st.state.queue.length) : "", !!(st.live && st.state.playing)]);
     units.push(["artists", "artist", LABELS.artists, lib.artists.length.toLocaleString()], ["albums", "album", LABELS.albums, lib.albums.length.toLocaleString()],
                ["tracks", "note", LABELS.tracks, lib.T.length.toLocaleString()], ["genres", "tag", LABELS.genres, lib.genres.length.toLocaleString()]);
     if (lib.hasAdded) units.push(["added", "plus", LABELS.added, ""]);
@@ -1379,6 +1438,14 @@
         if (r === "more") return openMenu(b, row.al.name, listMenu(row.al.tracks, row.al.name));
         break;
       case "genre": if (r === "open") return go(`genre/${row.g.id}`); break;
+      case "sctl": {
+        const d = row.dev;
+        if (r === "s-play") return sendRemote(d, d.state.playing ? "pause" : "play");
+        if (r === "s-next") return sendRemote(d, "next");
+        if (r === "s-prev") return sendRemote(d, "prev");
+        if (r === "s-mix") { const on = !(d.state.mix && d.state.mix.on); d.state.mix = Object.assign({}, d.state.mix, { on }); scheduleView(); return sendRemote(d, on ? "mix:on" : "mix:off"); }
+        break;
+      }
       case "hero": {
         const L = row.list;
         if (r === "hero-play") return playList(L, 0);
@@ -1684,12 +1751,13 @@
     for (const s of els.devices) s.textContent = n ? String(n) : "";
     const roomSig = connect.others.filter(d => d.room && d.live).map(d => d.id).join(",");
     // redraw an open Devices menu (and Home's "playing elsewhere" card) only when what they show has changed
-    const sig = devs.map(d => [d.id, d.state.playing, d.state.title, d.state.armed, d.state.tap].join("|")).join(";") + "#" + roomSig;
+    const st = stereoDev(), stSig = st ? [st.state.idx, (st.state.queue || []).length, st.state.mix && st.state.mix.on, st.state.mix && st.state.mix.xfade].join("|") : "";
+    const sig = devs.map(d => [d.id, d.state.playing, d.state.title, d.state.armed, d.state.tap].join("|")).join(";") + "#" + roomSig + "#" + stSig;
     if (sig === connect.sig) return;
     connect.sig = sig;
     showSpotify();
     if (menu && menu.kind === "devices") devicesMenu(menu.anchor);
-    if (S.route.name === "home" && !S.search && S.view && S.view.key === "home") scheduleView();
+    if ((S.route.name === "home" || S.route.name === "stereo") && !S.search && S.view && S.view.key === S.route.name) scheduleView();
   }
   function post(url, body) {
     return fetch(url, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body) });
@@ -1841,7 +1909,7 @@
       case "mute": actions.mute(); break;
       case "djstart": djStart(); break;
       case "tap": actions.resume(); break;
-      case "np": openSheet("np"); break;
+      case "np": if (S.barStereo && !curTrack()) go("stereo"); else openSheet("np"); break;
       case "queue": if (S.sheet && S.tab === "queue") closeSheet(); else openSheet("queue"); break;
       case "tab-np": setTab("np"); break;
       case "tab-q": setTab("queue"); break;

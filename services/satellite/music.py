@@ -71,6 +71,7 @@ class BoxMusic:
         self.spotify_titles: dict = {}                       # spotify:track:... -> (title, artist): a queue may mix them with Bilby's paths (spotify.py)
         self._settle_until = 0.0
         self._queue_sent = False
+        self.mix = None                                      # the house stereo sets {"get": () -> {"on", "xfade"}, "set": (bool) -> None}: DJ mode, for the Bilby page
 
     # ── where it is ──
     def pos(self) -> float:
@@ -89,8 +90,12 @@ class BoxMusic:
         title, artist = self.title()
         out = {"track": self.track(), "title": title, "artist": artist, "pos": self.pos(), "playing": self.playing, "idx": self.idx,
                "armed": True, "tap": False}
+        if self.mix:
+            out["mix"] = self.mix["get"]()
         if not self._queue_sent:
             out["queue"], self._queue_sent = list(self.queue), True
+            if self.spotify_titles:                          # names for the queue's Spotify items: the page has no catalog for them
+                out["titles"] = {q: list(self.spotify_titles[q]) for q in self.queue if q in self.spotify_titles}
         return out
 
     # ── what it is told ──
@@ -195,6 +200,8 @@ class BoxMusic:
             await self.next()
         elif action == "prev":
             await self.prev()
+        elif action in ("mix:on", "mix:off") and self.mix:
+            self.mix["set"](action == "mix:on")
         elif action.startswith("take:"):
             src = next((d for d in devices if d.get("id") == action[5:]), None)
             if src and src.get("state"):

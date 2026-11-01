@@ -352,6 +352,19 @@ the virtual lists at full size; `/dev/gate-down` and `/dev/home-off` show the "i
 failed, when Node or mutagen is missing). What only a browser can show (the audio element, drag and drop, the lock screen, the
 layouts) was checked by hand, not by a test.
 
+### The house stereo: his library and Spotify as one source
+
+The house stereo (skippy-pc's hub, Connect device `skippyroom-stereo`) plays his library and his Spotify in ONE queue, so Bilby shows it as one source:
+a **House stereo** tile on Home (arcs glyph, lit while it plays, the queue length on it) opens `#stereo`, a pane with the now-playing hero (a Spotify badge
+when that is what plays, the counts of library songs and Spotify songs), the keys (previous, play/pause, next, and **mix**: the stereo's DJ mode, the
+same switch as "Skippy, DJ mode on") and the queue a screen at a time. Each row has its source glyph (note = library, arcs in green = Spotify) and, where
+it is entered from the one before, a mix glyph: Spotify into Bilby fades (`SPOTIFY_XFADE_S`), Bilby into Bilby is beat-matched while DJ mode is on, every
+other change is a cut. The bar under the lists shows what the stereo plays when nothing plays in this browser, and tapping it opens the pane.
+The data is the stereo's Connect state (`portal/player.py` `_state`, sent by `services/satellite/music.py`): `titles` (names for the queue's Spotify URIs,
+sent with the queue) and `mix` (`{on, xfade}`); the commands are the usual `play`/`pause`/`next`/`prev` plus `mix:on` / `mix:off`. The pure reading of that
+state is `BilbyCore.stereoView` (`portal/tests/js/stereo.test.js`). A hub that does not send `titles`/`mix` yet still shows (names fall back to the catalog
+or the file name, the mix key hides), so the page and the hub deploy in either order; the hub needs its restart to send them.
+
 ## Audiobooks (the Captain's converted audiobooks, `/audiobooks`)
 
 His own DRM-free conversions of books he bought (OpenAudible writes them to `D:\Audiobooks`: `books/`, `art/`, `books.json`), in any browser and on a pod. **The Captain
