@@ -184,6 +184,9 @@ Two situations, two answers:
 and times how long the stack takes to put it back with nobody's help. It is dry-run by default, so plain `python tools/chaos_drill.py` only
 prints what it would stop and whether the gates are open.
 
+**Occasional, never scheduled** (the Captain, 2026-11-01: "let's not run chaos monkey all the time, just as an occasional resilience test
+series"). Run a series by hand after a big change to healing, recovery or the stack, never from a timer, cron, nightly job or routine.
+
 ```bash
 python tools/chaos_drill.py                    # dry run: every target, the exact command, the gates
 python tools/chaos_drill.py flask-api --go     # the real drill, one target
