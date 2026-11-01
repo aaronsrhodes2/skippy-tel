@@ -362,6 +362,11 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def health():
         return "ok"
 
+    @app.get("/about")
+    def about():
+        """Public: what Maker Portal is and what it does with Google data (the OAuth consent screen's home page)."""
+        return render_template("about.html")
+
     @app.get("/version")
     def version():
         """Which build is serving: tools/loop_timer.py polls this (signed out, once a second) to learn the moment a deploy became

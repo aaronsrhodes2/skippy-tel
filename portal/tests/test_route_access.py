@@ -60,7 +60,7 @@ REGISTRY = {
     "telemetry_tap": BEACON,
     # public: sign-in, the front door, static and informational pages, the public experiments (free local compute, rate limited)
     **{e: PUBLIC for e in (
-        "auth.callback", "auth.login", "auth.logout", "auth.unauthorized", "health", "version", "index", "privacy", "request_access",
+        "auth.callback", "auth.login", "auth.logout", "auth.unauthorized", "health", "version", "index", "privacy", "about", "request_access",
         "site_icons", "site_manifest", "legacy_bilby", "dashboard.legacy_dashboard", "music.player_manifest", "video.video_manifest",
         "doomloop.version", "prophesy.arm_version", "starcontrol.version", "play_index", "orion_trail", "radiance_probe",
         "experiments.benchmark", "experiments.minebench", "experiments.double_slit", "experiments.index", "experiments.mentat_call", "experiments.mentat_page",

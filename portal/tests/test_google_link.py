@@ -153,3 +153,15 @@ def test_a_withdrawn_grant_says_so_and_disconnect_revokes_it(world):
     assert "Connect Google for Skippy" in client.get("/admin").data.decode()
     client.post("/admin/google/disconnect")
     assert link.record() is None and fake.calls[-1] == (google_link.REVOKE_URL, {"token": REFRESH})
+
+
+def test_the_about_page_is_public_names_the_app_says_its_purpose_and_how_google_data_is_used(world):
+    _, client, _, _ = world
+    page = client.get("/about")
+    assert page.status_code == 200                                                       # no sign-in: Google's reviewer reads it
+    text = page.data.decode()
+    assert "Maker Portal" in text and "read only" in text and "Limited Use" in text and "api-services-user-data-policy" in text
+    assert 'href="/privacy"' in text
+    front = client.get("/").data.decode()                                               # the sign-in page links it
+    assert 'href="/about"' in front and 'href="/privacy"' in front and "Maker Portal" in front
+    assert "Limited Use" in client.get("/privacy").data.decode()
