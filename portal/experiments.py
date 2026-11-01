@@ -259,7 +259,7 @@ MINEBENCH_SERIES = (
     ("h2h", "Head to head", "Best 4 of 7, started 2026-10-31: Claude Haiku 5.5 against Skippy Core's coder, both as vanilla agents (Claude "
      "Code with purple's system prompt and an empty setup), the same message, MineBench's full tool-mode prompt, effort high, the same "
      "131K window, \"a choo-choo train\" every round. Each round is judged blind by a separate Claude agent with MineBench's own "
-     "criteria; a build whose code fails loses."),
+     "criteria; a build whose code fails loses. Result: Haiku 4-0. It won rounds 1 and 2 on the judge's call (high confidence both times); in rounds 3 and 4 the coder's code failed MineBench's runtime (a NaN, then an unquoted block name) after it had checked the code only against its own mock."),
     ("fresh", "Fresh start", "Nothing made for MineBench or for trains: MineBench's own prompt, and either one call to a model on "
      "Skippy Core, the way MineBench itself runs one, or purple Skippy with an empty setup (none of the Captain's skills, no "
      "checker, no shared memory)."),
