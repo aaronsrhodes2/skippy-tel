@@ -131,3 +131,57 @@ def test_routing_words():
     assert r("forecast for the weekend") == {"when": "week"}
     for other in ("play Purple Rain", "news about the storm", "turn on the lights", "tell me a joke about the weather"):
         assert r(other) is None, other
+
+
+def hourly_fake(urls, hours, uv=(7.2, 3.0)):
+    base = fake(urls)
+
+    def get(url, raw=False):
+        if "/forecast/hourly" in url:
+            urls.append(url)
+            return {"properties": {"periods": [{"startTime": f"{t}:00-07:00", "temperature": f, "probabilityOfPrecipitation": {"value": r}}
+                                               for t, f, r in hours]}}
+        if "open-meteo" in url and "uv_index_max" in url:
+            urls.append(url)
+            return {"daily": {"uv_index_max": list(uv)}}
+        return base(url, raw)
+    return get
+
+
+def at(hhmm):
+    import time
+    return lambda: time.mktime(time.strptime(f"2026-10-31 {hhmm}", "%Y-%m-%d %H:%M"))
+
+
+def test_what_to_bring_rain_cold_and_sunscreen(tmp_path):
+    hours = [("2026-10-31T09:00", 48, 10), ("2026-10-31T12:00", 60, 20), ("2026-10-31T15:00", 58, 70), ("2026-10-31T18:00", 52, 55),
+             ("2026-10-31T23:00", 40, 90)]                                                   # 11 PM is past the waking hours: not counted
+    w = weather.Weather({"SKIPPY_HOME_LATLON": "37.1,-122.1"}, get=hourly_fake([], hours), state=tmp_path / "w.json", clock=at("08:30"))
+    out = w.run({"when": "today"})
+    lines = out.splitlines()
+    assert lines[1].startswith("ALERT") and lines[2] == ("What to bring or wear: a rain jacket or an umbrella, a 70 percent chance of rain after 3 PM; "
+                                                       "a warm layer, down to 48 F; sunscreen, the UV index reaches 7.")
+    assert lines[3].startswith("Forecast")
+
+
+def test_nothing_to_bring_and_heat(tmp_path):
+    assert weather.bring([{"t": "2026-10-31T12:00", "rain": 5, "temp_f": 68}], uv=3) == []
+    assert weather.bring_line([]) == "What to bring or wear: nothing special."
+    hot = weather.bring([{"t": "2026-10-31T12:00", "rain": 50, "temp_f": 91}, {"t": "2026-10-31T13:00", "rain": 0, "temp_f": 95}], uv=9)
+    assert hot == ["a rain jacket or an umbrella, a 50 percent chance of rain", "light, cool clothes and water, up to 95 F",
+                   "sunscreen, the UV index reaches 9"]                                     # rain from the first hour: no "after"
+    assert weather.bring([{"t": "x", "rain": 0, "temp_f": 38}]) == ["a warm coat, down to 38 F"]
+    assert weather.bring([{"t": "x", "rain": 30, "temp_f": 60}], limits={"rain_pct": 25}) != []   # thresholds are tunable in one place
+
+
+def test_tomorrow_and_tonight_advice_windows(tmp_path):
+    hours = [("2026-10-31T19:00", 50, 0), ("2026-11-01T06:00", 39, 0), ("2026-11-01T10:00", 62, 0), ("2026-11-01T16:00", 64, 60)]
+    w = weather.Weather({"SKIPPY_HOME_LATLON": "37.1,-122.1"}, get=hourly_fake([], hours), state=tmp_path / "w.json", clock=at("17:00"))
+    assert "What to bring or wear: a rain jacket or an umbrella, a 60 percent chance of rain after 4 PM." in w.run({"when": "tomorrow"})  # UV 3: no sunscreen; 6 AM not waking
+    assert "What to bring or wear: a warm layer, down to 50 F." in w.run({"when": "tonight"})
+    assert "What to bring" not in w.run({"when": "week"})
+
+
+def test_what_to_wear_routes_to_weather():
+    assert weather.pre_route("what should I wear today?") == {"when": "today"}
+    assert weather.pre_route("do I need sunscreen tomorrow") == {"when": "tomorrow"}

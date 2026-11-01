@@ -5,7 +5,9 @@ One `weather` tool for the hub brain, from public sources only, no key:
 * the National Weather Service (api.weather.gov, NOAA): the forecast for home in words, period by period, and any active alert there;
 * NOAA's tide predictions (CO-OPS, tidesandcurrents.noaa.gov): today's highs and lows at the nearest tide station;
 * NOAA's buoys (NDBC): the nearest station that reports waves, for the surf height, its period, the sea temperature and the wind;
-* Open-Meteo, as the morning routine (daily.py) uses it: the temperature right now and what it feels like.
+* Open-Meteo, as the morning routine (daily.py) uses it: the temperature right now and what it feels like, and the day's UV index;
+* what to bring or wear (bring(): a rain jacket, a warm layer or coat, light clothes and water, sunscreen) from the NWS hourly forecast and
+  the UV index, with its thresholds in BRING. The morning routine's weather line uses the same advice (Weather.advice).
 
 Home is SKIPPY_HOME_LATLON, else where the car spends the night (state/daily/state.json, learned by daily.py). The nearest tide station and buoy
 are found once and kept in state/weather.json. Each answer is cached a few minutes. The tool returns MATERIAL; the brain gives the takeaway
@@ -38,6 +40,18 @@ METEO = "https://api.open-meteo.com/v1/forecast"
 CACHE_S = 600
 BUOYS_TRIED = 10                        # the nearest stations looked at for one that reports waves
 
+# What to bring or wear (the Captain, 2026-10-31: "humans want to know when it is raining or cold or hot to bring wet weather, warm, or cool
+# clothing and sunscreen"). Comfort judgments, not physics: tune them here, the one place they live.
+BRING = {
+    "rain_pct": 40,        # an hour with this chance of rain or more: a rain jacket or an umbrella
+    "cold_f": 55,          # the coldest waking hour at or below this: a warm layer
+    "coat_f": 42,          # ... at or below this: a warm coat
+    "hot_f": 85,           # the warmest hour at or above this: light, cool clothes and water
+    "uv": 6,               # the day's UV index at or above this (EPA's "high" starts at 6): sunscreen
+    "day": (7, 21),        # the waking hours the advice looks at (from now, today)
+    "night": (18, 24),     # ... tonight
+}
+
 TOOL = {"name": "weather", "description": "The weather at home: the forecast in words (National Weather Service), any weather alert, the temperature now; "
                                           "with coast=true also today's tides and the surf and sea temperature from NOAA's nearest buoy. "
                                           "Use it for any question about the weather, rain, what to wear, the tides, the surf or the beach.",
@@ -47,10 +61,12 @@ TOOL = {"name": "weather", "description": "The weather at home: the forecast in 
 
 PROMPT = (" For the weather, the tides or the surf, call the weather tool, then give him the TAKEAWAY in two or three sentences: what it means for "
           "him (a jacket, an umbrella, fog, whether the coast is worth the drive), with a figure or two at most, and only what the tool said. Never read "
-          "the numbers out like a data card. Mention an alert first if there is one.")
+          "the numbers out like a data card. Mention an alert first if there is one. When the tool says what to bring, lead with it in one short line "
+          "('Grab a jacket, rain after three'), only the things it lists; when it says nothing is needed, don't invent a thing to bring.")
 
 WEATHER_RE = re.compile(r"\b(?:weather|forecast|rain(?:ing|y)?|umbrella|jacket|coat|fog(?:gy)?|sunny|storm(?:s|y)?|snow(?:ing)?|temperature|"
-                        r"how (?:cold|hot|warm) is it|tides?|surf|waves?|beach|swell)\b", re.I)
+                        r"how (?:cold|hot|warm) is it|tides?|surf|waves?|beach|swell|sunscreen|sunblock|uv|"
+                        r"what (?:should|do) i (?:wear|bring|need)|dress for)\b", re.I)
 COAST_RE = re.compile(r"\b(?:tides?|surf|waves?|beach|ocean|sea|coast|swell|buoy)\b", re.I)
 NOT_WEATHER = re.compile(r"\b(?:news|headlines?|song|album|play|music|book|story|poem|haiku|joke|movie|film|game)\b", re.I)
 
@@ -117,6 +133,32 @@ def c_to_f(c: float) -> float:
     return c * C_STEP_TO_F + F_AT_0C
 
 
+def bring(hours: list[dict], uv: float | None = None, limits: dict | None = None) -> list[str]:
+    """What to bring or wear for these hours: [{"t": "YYYY-MM-DDTHH:MM" local, "rain": percent, "temp_f": ...}], plus the day's UV index.
+    Each item is a short spoken phrase; only what applies, and an empty list when nothing does."""
+    lim = {**BRING, **(limits or {})}
+    out = []
+    wet = [h for h in hours if (h.get("rain") or 0) >= lim["rain_pct"]]
+    if wet:
+        first, peak = wet[0], max(h["rain"] for h in wet)
+        when = "" if hours and first is hours[0] else f" after {say_clock(first['t']).replace(':00', '')}"
+        out.append(f"a rain jacket or an umbrella, a {peak:.0f} percent chance of rain{when}")
+    temps = [h["temp_f"] for h in hours if h.get("temp_f") is not None]
+    if temps and min(temps) <= lim["coat_f"]:
+        out.append(f"a warm coat, down to {min(temps):.0f} F")
+    elif temps and min(temps) <= lim["cold_f"]:
+        out.append(f"a warm layer, down to {min(temps):.0f} F")
+    if temps and max(temps) >= lim["hot_f"]:
+        out.append(f"light, cool clothes and water, up to {max(temps):.0f} F")
+    if uv is not None and uv >= lim["uv"]:
+        out.append(f"sunscreen, the UV index reaches {uv:.0f}")
+    return out
+
+
+def bring_line(items: list[str]) -> str:
+    return ("What to bring or wear: " + "; ".join(items) + ".") if items else "What to bring or wear: nothing special."
+
+
 class Weather:
     def __init__(self, env: dict | None = None, get=http_get, clock=time.time, state: Path | None = None, daily_state: Path | None = None, log=None):
         self.env = env if env is not None else dict(os.environ)
@@ -173,6 +215,58 @@ class Weather:
         alerts = self._fetch(f"{NWS}/alerts/active?point={lat},{lon}", ttl=300).get("features") or []
         warn = [f"{a['properties'].get('event')}: {a['properties'].get('headline') or ''}".strip(": ") for a in alerts[:3]]
         return lines, warn
+
+    def window(self, when: str) -> tuple[str, str] | None:
+        """The local hours ('YYYY-MM-DDTHH:MM', start inclusive, end exclusive) the advice is for; None = no advice (the week)."""
+        now = time.localtime(self.clock())
+        today = time.strftime("%Y-%m-%d", now)
+        if when == "tomorrow":
+            day = time.strftime("%Y-%m-%d", time.localtime(self.clock() + 86400))
+            a, b = BRING["day"]
+            return f"{day}T{a:02d}:00", f"{day}T{b:02d}:00"
+        if when == "week":
+            return None
+        a, b = BRING["night"] if when == "tonight" else BRING["day"]
+        if now.tm_hour >= b:                                   # late: what is left of tonight
+            a, b = now.tm_hour, 24
+        start = max(a, now.tm_hour)
+        end = f"{today}T{b:02d}:00" if b < 24 else time.strftime("%Y-%m-%dT00:00", time.localtime(self.clock() + 86400))
+        return f"{today}T{start:02d}:00", end
+
+    def hours(self, home, when: str) -> list[dict]:
+        """The National Weather Service's hourly forecast in the advice window: the rain chance and temperature, hour by hour."""
+        win = self.window(when)
+        if win is None:
+            return []
+        lat, lon = f"{home[0]:.4f}", f"{home[1]:.4f}"
+        points = self._fetch(f"{NWS}/points/{lat},{lon}", ttl=7 * 86400)["properties"]
+        url = points.get("forecastHourly") or points["forecast"].rstrip("/") + "/hourly"
+        out = []
+        for p in self._fetch(url).get("properties", {}).get("periods") or []:
+            t = (p.get("startTime") or "")[:16]
+            if win[0] <= t < win[1]:
+                out.append({"t": t, "rain": (p.get("probabilityOfPrecipitation") or {}).get("value") or 0, "temp_f": p.get("temperature")})
+        return out
+
+    def uv(self, home, when: str) -> float | None:
+        """The day's highest UV index (Open-Meteo; no key). None at night or for the week."""
+        if when in ("tonight", "week"):
+            return None
+        q = {"latitude": f"{home[0]:.3f}", "longitude": f"{home[1]:.3f}", "timezone": "auto", "forecast_days": 2, "daily": "uv_index_max"}
+        got = ((self._fetch(f"{METEO}?{urllib.parse.urlencode(q)}") or {}).get("daily") or {}).get("uv_index_max") or []
+        i = 1 if when == "tomorrow" else 0
+        return float(got[i]) if len(got) > i and got[i] is not None else None
+
+    def advice(self, home, when: str) -> list[str] | None:
+        """What to bring or wear (bring()); None when there is nothing to judge it on (the week, or no hourly forecast)."""
+        hrs = self.hours(home, when)
+        if not hrs:
+            return None
+        try:
+            uv = self.uv(home, when)
+        except Exception:                                      # noqa: BLE001 — no UV: the rest of the advice still stands
+            uv = None
+        return bring(hrs, uv)
 
     def now(self, home) -> str | None:
         q = {"latitude": f"{home[0]:.3f}", "longitude": f"{home[1]:.3f}", "temperature_unit": "fahrenheit", "wind_speed_unit": "mph", "timezone": "auto",
@@ -297,6 +391,13 @@ class Weather:
                     lines.insert(0, n)
             except Exception as e:                             # noqa: BLE001
                 failed.append(f"Open-Meteo ({type(e).__name__})")
+        try:
+            items = self.advice(home, when)
+            if items is not None:
+                at = next((i for i, x in enumerate(lines) if x.startswith("Forecast")), len(lines))
+                lines.insert(at, bring_line(items))            # after any alert, ahead of the forecast
+        except Exception as e:                                 # noqa: BLE001
+            failed.append(f"the hourly forecast ({type(e).__name__})")
         if args.get("coast"):
             try:
                 lines += self.coast(home, when)
