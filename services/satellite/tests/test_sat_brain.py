@@ -167,3 +167,12 @@ def test_bilby_is_his_music_however_whisper_spells_it():
     for not_music in ("pay the bill by friday", "my phone bill", "did the bill be paid", "what is the weather", "play Pink Floyd upstairs"):
         assert bilby_route(not_music) is None, not_music
     assert fix_bilby("pay the bill by friday") == "pay the bill by friday" and fix_bilby("Bill B upstairs") == "Bilby upstairs"
+
+
+def test_a_tool_call_written_with_a_colon_and_commas_is_still_caught():
+    # 2026-11-01: "[play_music: what=everything, speaker=everywhere] Done." was spoken and nothing played
+    from brain import TEXT_ARG, TEXT_CALL
+    m = TEXT_CALL.search("Playing music everywhere then. [play_music: what=everything, speaker=everywhere] Done.")
+    assert m and m.group(1) == "play_music"
+    assert {a.group(1): next(g for g in a.groups()[1:] if g is not None) for a in TEXT_ARG.finditer(m.group(2))} == {"what": "everything", "speaker": "everywhere"}
+    assert TEXT_CALL.search('[list action="read" list="shopping"]').group(1) == "list"

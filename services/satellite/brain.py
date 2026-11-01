@@ -75,8 +75,9 @@ UNCLAIM = "That did not get done, whatever I just claimed. Say it again and I'll
 # The persona is shared with flask-api, whose chat strips [SKIPPY_LEARN: {...}] / [TTS_ADJUST: {...}]; here they would be read aloud. Worse
 # (2026-11-01): one such line in the memory and Core wrote every tool call after it as text, "[list action="read" list="shopping"]".
 ANNOTATION = re.compile(r"\[(?:SKIPPY_LEARN|TTS_ADJUST):\s*\{.*?\}\s*\]", re.S)
-TEXT_CALL = re.compile(r"\[(\w+)((?:\s+\w+=(?:\"[^\"]*\"|'[^']*'|[^\s\]]+))*)\s*\]")
-TEXT_ARG = re.compile(r"(\w+)=(?:\"([^\"]*)\"|'([^']*)'|([^\s\]]+))")
+# Also "[play_music: what=everything, speaker=everywhere]" (a colon after the name, commas between: 2026-11-01, said "Done" and played nothing)
+TEXT_CALL = re.compile(r"\[(\w+):?((?:[\s,]+\w+=(?:\"[^\"]*\"|'[^']*'|[^\s,\]]+))*)\s*\]")
+TEXT_ARG = re.compile(r"(\w+)=(?:\"([^\"]*)\"|'([^']*)'|([^\s,\]]+))")
 
 
 _PLACE = r"(?P<place>everywhere|everyone|everybody|the whole house|the house|upstairs|downstairs|(?:the |in the )?(?:living room|kitchen|bedroom|theater|office))"
