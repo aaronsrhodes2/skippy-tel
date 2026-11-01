@@ -13,6 +13,9 @@ fi
 echo $$ > "$PIDFILE"
 trap 'rm -f "$PIDFILE"' EXIT
 delay=3
+# UTF-8 from the first byte (2026-11-01: hub.py's own reconfigure didn't hold, the log was cp1252, and a song title with a Unicode
+# hyphen killed the morning routine's music and a DJ hand-over).
+export PYTHONIOENCODING=utf-8:replace PYTHONUTF8=1
 while true; do
   started=$(date +%s)
   services/satellite/.venv/Scripts/python -u services/satellite/hub.py >> state/hub.log 2>&1
