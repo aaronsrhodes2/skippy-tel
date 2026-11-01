@@ -4,7 +4,9 @@
                    the hub's state/audiobooks.json with what browsers save into state/audiobooks-inbox/, read back by the hub's audiobooks.Store)
     two shuffles   Bilby Shuffle "discovery" (all of Bilby's songs, his favorites mixed in) and "library" (his favorites), from the music gate
                    and portal/favorites.py; the queue logic is static/drive-pure.js
-    Skippy         a pod in the car: the trained "Skippy" wake word runs in the browser (static/skippy-wake.js, the model from voice-gate), the
+    the house      the last key: a lamp per thing at home he cares about (house_lamps: skippy-pc, Skippy Core, the pods, lights and plugs,
+                   Bilby, audiobooks, the voice, Spotify); a tap names what is down
+    Skippy         a pod in the car, his key showing the pods' own face (static/skippy-face.js): the trained "Skippy" wake word runs in the browser (static/skippy-wake.js, the model from voice-gate), the
                    turn goes to the house brain through the Home chat (portal/housechat.py: as if typed, answered silently at home) and the
                    answer is spoken here; the music is ducked while he listens and speaks (static/skippy-duck.js), never stopped
 
@@ -31,6 +33,25 @@ mimetypes.add_type("application/wasm", ".wasm")
 
 
 URI = re.compile(r"spotify:track:[A-Za-z0-9]{22}")
+# The house lamps (the Captain, 2026-11-01: "a house status light indicator, showing what in the house is up and reachable that we care about"):
+# id, glyph, name. Names are words only because a lamp that is out has to say which thing it is.
+LAMPS = (("pc", "server", "skippy-pc"), ("core", "core", "Skippy Core"), ("hub", "can", "the pods"), ("house", "home", "lights and plugs"),
+         ("music", "wave", "Bilby"), ("books", "book", "audiobooks"), ("voice", "mic", "Skippy's voice"), ("spotify", "disc", "Spotify"))
+
+
+def house_lamps(home, checks: dict, hub_seen_s: float | None) -> dict:
+    """What in the house is up and reachable, one lamp each: True up, False down, None not known yet. Everything at home is down when skippy-pc
+    is silent (nothing can be seen past it). checks: the doctor's {name: {ok, ...}}; hub_seen_s: seconds since the hub's last Home chat sync."""
+    online = bool(home.online())
+    doc = lambda name: (checks.get(name) or {}).get("ok") if name in checks else None      # noqa: E731
+    state = {"pc": online, "core": doc("core"), "hub": hub_seen_s is not None and hub_seen_s < 30,
+             "house": home.can("house"), "music": home.can("music_gate"), "books": home.can("book_gate"), "voice": home.can("voice_gate"),
+             "spotify": doc("spotify")}
+    if not online:
+        state = {k: (False if k != "core" else state["core"]) for k in state}          # Skippy Core is tested from the portal itself
+    lamps = [{"id": i, "glyph": g, "name": n, "ok": state[i]} for i, g, n in LAMPS]
+    down = [l["name"] for l in lamps if l["ok"] is False]
+    return {"lamps": lamps, "down": down, "verdict": "down" if not online else "warn" if down else "ok"}
 WAIT_S = {"mix": 75, "car": 15, "car_play": 25, "car_pause": 15}
 
 
@@ -81,9 +102,18 @@ def init_app(app, home) -> None:
     def spotify_pause():
         return answer("car_pause")
 
+    @bp.get("/drive/house")
+    @auth.admin_required
+    def house():
+        doctor, chat = app.extensions.get("doctor"), app.extensions.get("housechat")
+        seen = getattr(chat, "seen", 0) if chat is not None else 0
+        resp = jsonify(house_lamps(home, dict(getattr(doctor, "checks", {}) or {}), (chat.clock() - seen) if seen else None))
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
     @bp.get("/drive")
     @auth.admin_required
     def page():
-        return render_template("drive.html")
+        return render_template("drive.html", lamps=LAMPS)
 
     app.register_blueprint(bp)

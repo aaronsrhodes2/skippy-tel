@@ -19,7 +19,6 @@
     lit("#k-book", S.mode === "book"); lit("#k-disc", S.mode === "discovery"); lit("#k-lib", S.mode === "library");
     const row = S.sp && S.sp.row;
     $("#k-play-g").setAttribute("href", (row ? row.paused : au.paused) ? "#g-play" : "#g-pause");
-    $("#k-next-g").setAttribute("href", S.mode === "book" ? "#g-fwd30" : "#g-next");
   }
 
   // ── ducking: this page's own player follows Skippy's voice ──
@@ -213,17 +212,17 @@
     if (!au.src) return playBook();
     if (au.paused) play(); else stopHere();
   });
-  key("#k-next", next);
 
   // ── Skippy: the house brain, spoken here ──
   const skey = $("#k-skippy .hit"), sunit = $("#k-skippy");
-  new MutationObserver(() => { if (skey.dataset.s) sunit.dataset.s = skey.dataset.s; else delete sunit.dataset.s; sunit.dataset.on = skey.getAttribute("aria-pressed") === "true" ? "1" : "0";
-    const g = sunit.querySelector(".g use"); if (g) g.setAttribute("href", skey.getAttribute("aria-pressed") === "true" ? "#g-mic" : "#g-ear"); })
+  new MutationObserver(() => { if (skey.dataset.s) sunit.dataset.s = skey.dataset.s; else delete sunit.dataset.s; sunit.dataset.on = skey.getAttribute("aria-pressed") === "true" ? "1" : "0"; })
     .observe(skey, { attributes: true, attributeFilter: ["data-s", "aria-pressed"] });
   let earOn = false;
   const voice = SkippyVoice.attach({ gate: cfg.voiceGate, key: skey, status: $("#vstatus"), onSend: ask, wakeWord: false,
                                      onText: t => { if (t) $("#vstatus").title = t; } });
+  let asking = false;                                    // a turn is with the house brain: his face thinks
   async function ask(text) {
+    asking = true;
     try {
       const sent = await getJSON(cfg.send, { method: "POST", body: JSON.stringify({ mode: "say", text, room: "*", speak: false }), headers: { "Content-Type": "application/json", Accept: "application/json" } });
       const t0 = Date.now();
@@ -236,7 +235,48 @@
       }
       voice.say("The house took too long to answer.");
     } catch (e) { voice.say("I couldn't reach the house."); }
+    finally { asking = false; }
   }
+
+  // ── his face: the pods' own (static/skippy-face.js), in his key, doing what a pod's does ──
+  // speaking while his voice plays, thinking while the house brain works, listening in a conversation, offline when skippy-pc is silent.
+  let speaking = false, houseDown = false;
+  addEventListener("skippy-speaking", e => { speaking = !!e.detail; });
+  (function face() {
+    const canvas = $("#k-skippy canvas");
+    if (!window.SkippyFace || !canvas || !canvas.getContext || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const f = new SkippyFace();
+    Promise.all([0, 1, 2, 3, 4].map(i => new Promise((ok, fail) => { const im = new Image(); im.onload = () => ok(im); im.onerror = fail; im.src = cfg.frames + "0" + i + ".png"; })))
+      .then(balls => {
+        f.balls = balls;
+        const ctx = canvas.getContext("2d");
+        setInterval(() => {                               // the pod's own 50 ms tick
+          if (document.hidden) return;
+          const now = performance.now(), chat = voice.chatting(), was = f.talking;
+          f.talking = speaking;
+          if (f.talking && !was) f.talkT0 = now;
+          f.showMic = chat && !speaking && !asking;
+          f.setSession(chat);
+          f.setState(speaking ? "speaking" : asking ? "thinking" : chat ? "listening" : houseDown ? "offline" : "idle");
+          f.tick(now); f.render(ctx);
+          sunit.classList.add("live");
+        }, 50);
+      }, () => { /* the still head stays */ });
+  })();
+
+  // ── the house: one lamp per thing he cares about (drive.py house_lamps), every 20 s ──
+  const hunit = $("#k-house");
+  let house = null;
+  async function pollHouse() {
+    if (document.hidden) return;
+    try { house = await getJSON(cfg.house); } catch (e) { house = { verdict: "down", down: ["the portal"], lamps: [] }; }
+    for (const l of house.lamps || []) { const i = hunit.querySelector(`[data-lamp="${l.id}"]`); if (i) { if (l.ok == null) delete i.dataset.ok; else i.dataset.ok = l.ok ? "1" : "0"; } }
+    hunit.dataset.s = house.verdict === "ok" ? "on" : house.verdict === "warn" ? "warn" : "off";
+    houseDown = house.verdict === "down";
+  }
+  pollHouse(); setInterval(pollHouse, 20000);
+  document.addEventListener("visibilitychange", pollHouse);
+  key("#k-house", () => { pollHouse().then(() => now("home", house && house.down && house.down.length ? "Down: " + house.down.join(", ") : "Everything at home is up")); });
 
   // The wake word in the browser: the same model the pods use, from voice-gate (the Captain's pass). Without it, the voice's own Whisper
   // listening for "Skippy" (Typing mode) takes over, so the key always works.
@@ -274,5 +314,5 @@
   // what the book key would resume, shown under it
   loadBooks().catch(() => {});
   paint();
-  window.DriveApp = { S, voice, get ear() { return ear; }, shuffle, playBook, next };
+  window.DriveApp = { S, voice, get ear() { return ear; }, shuffle, playBook, next, pollHouse };
 })();

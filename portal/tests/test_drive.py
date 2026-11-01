@@ -17,8 +17,9 @@ def test_the_page_is_the_captains_alone(env):
     r = client.get("/drive")
     assert r.status_code == 200
     html = r.get_data(as_text=True)
-    for k in ("k-book", "k-disc", "k-lib", "k-skippy", "k-play", "k-next"):         # the six keys, and nothing else to press
+    for k in ("k-book", "k-disc", "k-lib", "k-skippy", "k-play", "k-house"):        # the six keys, and nothing else to press
         assert f'id="{k}"' in html
+    assert 'id="k-next"' not in html and "skippy-face.js" in html and html.count("data-lamp=") == 8
     for s in ("skippy-duck.js", "skippy-voice.js", "skippy-wake.js", "drive-pure.js", "drive-app.js", "audiobooks-pure.js"):
         assert s in html
     assert b'href="/drive"' in client.get("/apps").data            # a tile on his launcher
@@ -55,3 +56,36 @@ def test_spotify_rows_go_to_the_cars_spotify_through_home(env, monkeypatch):
     assert r.status_code == 502 and "open Spotify in the car" in r.get_json()["why"]
     monkeypatch.setattr(home, "wait", lambda job, timeout: None)
     assert client.get("/drive/spotify/mix").status_code == 504
+
+
+class Home:
+    def __init__(self, online=True, caps=()):
+        self._online, self.caps = online, set(caps)
+
+    def online(self):
+        return self._online
+
+    def can(self, name):
+        return self._online and name in self.caps
+
+
+def test_the_house_lamps_say_what_is_up_and_name_what_is_down():
+    import drive
+    got = drive.house_lamps(Home(caps={"house", "music_gate", "book_gate", "voice_gate"}), {"core": {"ok": True}, "spotify": {"ok": False}}, 4.0)
+    assert {l["id"]: l["ok"] for l in got["lamps"]} == {"pc": True, "core": True, "hub": True, "house": True, "music": True, "books": True,
+                                                           "voice": True, "spotify": False}
+    assert got["verdict"] == "warn" and got["down"] == ["Spotify"]
+    unknown = drive.house_lamps(Home(caps={"house"}), {}, None)                 # no doctor check yet: not known, not "down"
+    assert {l["id"]: l["ok"] for l in unknown["lamps"]}["core"] is None and "the pods" in unknown["down"]
+    silent = drive.house_lamps(Home(online=False), {"core": {"ok": True}, "spotify": {"ok": True}}, 2.0)
+    assert silent["verdict"] == "down" and {l["id"]: l["ok"] for l in silent["lamps"]}["core"] is True
+    assert "skippy-pc" in silent["down"] and "Spotify" in silent["down"]          # nothing at home can be seen past a silent skippy-pc
+
+
+def test_the_house_route_is_the_captains(env):
+    client, _, _ = env
+    login(client, FRIEND)
+    assert client.get("/drive/house").status_code == 403
+    login(client, ADMIN)
+    r = client.get("/drive/house")
+    assert r.status_code == 200 and len(r.get_json()["lamps"]) == 8 and r.headers["Cache-Control"] == "no-store"

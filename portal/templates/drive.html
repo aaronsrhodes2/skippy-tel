@@ -5,7 +5,8 @@
 {% block glyph %}wheel{% endblock %}
 {% block head %}
 <style>
-  /* Drive (drive.py): six big keys, one screen, for the Tesla's browser. 3 x 2 on the car's wide screen, 2 x 3 upright. */
+  /* Drive (drive.py): six big keys, one screen, for the Tesla's browser. 3 x 2 on the car's wide screen, 2 x 3 upright.
+     Skippy's key IS his face (the pods' own, static/skippy-face.js); the last key is the house's lamps. */
   #drive { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
   #drive .deck { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 14px; }
   @media (max-aspect-ratio: 1/1) { #drive .deck { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); } }
@@ -25,6 +26,16 @@
   #vstatus .lvbar { width: 70px; height: 6px; background: var(--line); position: relative; flex: none; }
   #vstatus .lvbar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--green); }
   #vstatus .vtxt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #k-skippy .face { position: relative; z-index: 1; height: 86%; aspect-ratio: 1; max-width: 92%; }
+  #k-skippy .face img, #k-skippy .face canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  #k-skippy .face canvas { opacity: 0; } #k-skippy.live .face canvas { opacity: 1; } #k-skippy.live .face img { display: none; }
+  #k-house .lamps { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10% 8%; width: 78%; }
+  #k-house .lamps i { display: flex; align-items: center; justify-content: center; aspect-ratio: 1; color: var(--muted); opacity: .45; }
+  #k-house .lamps i .g { width: 70%; max-width: 54px; height: auto; aspect-ratio: 1; stroke-width: 1.4; }
+  #k-house .lamps i[data-ok="1"] { color: var(--green); opacity: 1; filter: drop-shadow(0 0 5px color-mix(in srgb, var(--green) 60%, transparent)); }
+  #k-house .lamps i[data-ok="0"] { color: var(--red); opacity: 1; animation: drive-blink 1.4s ease-in-out infinite; }
+  @keyframes drive-blink { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { #k-house .lamps i[data-ok="0"] { animation: none; } }
   #vstatus .vx { background: none; border: 1px solid var(--green); color: var(--green); width: 34px; height: 34px; font-size: 20px; }
 </style>
 {% endblock %}
@@ -35,7 +46,8 @@
          data-send="{{ url_for('housechat.home_chat_send') }}" data-events="{{ url_for('housechat.home_chat_events') }}"
          data-ort="{{ url_for('static', filename='vendor/ort/') }}"
          data-sp-mix="{{ url_for('drive.spotify_mix') }}" data-sp-car="{{ url_for('drive.spotify_car') }}"
-         data-sp-play="{{ url_for('drive.spotify_play') }}" data-sp-pause="{{ url_for('drive.spotify_pause') }}">
+         data-sp-play="{{ url_for('drive.spotify_play') }}" data-sp-pause="{{ url_for('drive.spotify_pause') }}"
+         data-house="{{ url_for('drive.house') }}" data-frames="{{ url_for('static', filename='skippy/face/') }}">
   <div id="now" aria-live="polite"><svg class="g" aria-hidden="true"><use id="now-g" href="#g-wheel"/></svg><span id="now-t"></span></div>
   <div id="now-bar"><i></i></div>
   <div class="deck">
@@ -59,8 +71,7 @@
     </div>
     <div class="unit named" id="k-skippy" style="--accent: var(--green); --i: 3">
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
-      <svg class="g" aria-hidden="true"><use href="#g-ear"/></svg>
-      <span class="name" id="k-skippy-t"></span>
+      <span class="face" aria-hidden="true"><img src="{{ url_for('static', filename='skippy/skippy-head.png') }}" alt="" width="256" height="256"><canvas width="480" height="480"></canvas></span>
       <button class="hit voice" type="button" aria-label="Skippy"><svg style="display:none" aria-hidden="true"><use href="#g-ear"/></svg></button>
     </div>
     <div class="unit" id="k-play" style="--i: 4">
@@ -68,10 +79,10 @@
       <svg class="g" aria-hidden="true"><use id="k-play-g" href="#g-play"/></svg>
       <button class="hit" type="button" aria-label="Play or pause"></button>
     </div>
-    <div class="unit" id="k-next" style="--i: 5">
+    <div class="unit" id="k-house" style="--accent: var(--green); --i: 5">
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
-      <svg class="g" aria-hidden="true"><use id="k-next-g" href="#g-next"/></svg>
-      <button class="hit" type="button" aria-label="Next song, or 30 seconds on in the book"></button>
+      <span class="lamps">{% for id, glyph, name in lamps %}<i data-lamp="{{ id }}" title="{{ name }}"><svg class="g" aria-hidden="true"><use href="#g-{{ glyph }}"/></svg></i>{% endfor %}</span>
+      <button class="hit" type="button" aria-label="The house: what is up and reachable"></button>
     </div>
   </div>
   <div id="vstatus" hidden></div>
@@ -80,6 +91,7 @@
 <script src="{{ url_for('static', filename='audiobooks-pure.js') }}"></script>
 <script src="{{ url_for('static', filename='drive-pure.js') }}"></script>
 <script src="{{ url_for('static', filename='skippy-voice.js') }}"></script>
+<script src="{{ url_for('static', filename='skippy-face.js') }}"></script>
 <script src="{{ url_for('static', filename='skippy-wake.js') }}"></script>
 <script src="{{ url_for('static', filename='vendor/ort/ort.wasm.min.js') }}"></script>
 <script src="{{ url_for('static', filename='drive-app.js') }}"></script>
