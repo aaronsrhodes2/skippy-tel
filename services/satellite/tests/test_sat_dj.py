@@ -442,3 +442,82 @@ def test_a_spotify_item_that_wont_start_is_skipped_and_spotify_rests():
         asyncio.run(guarded())
     finally:
         dj.SPOT_START_S = old
+
+
+@needs_ffmpeg
+def test_dj_mode_hands_over_to_spotify_on_a_phrase(tmp_path):
+    """The next item is Spotify's: no beat-matching (its sound is live), but the hand-over waits for the playing track's phrase point."""
+    import asyncio
+    import threading
+
+    import music
+
+    root = tmp_path / "lib"
+    root.mkdir()
+    clicks(str(root / "a.wav"), 120.0, 0.5, 60, 1000)
+    known = {"a.wav": track(120.0, 0.5, 60, path="a.wav")}
+
+    class Lib(dj.Library):
+        def traktor(self):
+            return known
+
+    class Play:
+        def __init__(self, src):
+            self.source, self.finished, self.gain = src, threading.Event(), 1.0
+
+    class Router:
+        sinks = {"hdmi": 1}
+
+        def __init__(self):
+            self.plays = []
+
+        def available(self, k): return True
+
+        def play(self, source, layer, targets, gain):
+            self.plays.append(Play(source))
+            return self.plays[-1]
+
+        def stop(self, p):
+            p.source.close()
+            p.finished.set()
+
+    lib = Lib(str(root), nml="", state=tmp_path / "state", log=lambda m: None)
+    r = Router()
+    spot = type("S", (), {"play": lambda self, *a: None, "pause": lambda self: None})()
+    player = dj.DjPlayer(r, ["hdmi"], lib=lib, mixer=dj.Mixer(lib, {}, log=lambda m: None, state=tmp_path / "state"), log=lambda m: None,
+                         spotify=spot)
+    handed, pos = [], {"read": 0}
+
+    async def handoff(fade_s):
+        handed.append((pos["read"], fade_s))
+    player.handoff_to_spotify = handoff
+
+    class Media:
+        async def catalog(self): return {}
+        def track_url(self, path, start, towards=""): return "unused"
+
+    box = music.BoxMusic(player, Media(), log=lambda m: None, name="stereo")
+    player.music = box
+
+    async def go():
+        await box.play_queue(["a.wav", "spotify:track:" + "C" * 22], 0, 25.0)
+        chain = r.plays[0].source
+        for _ in range(4000):
+            if handed:
+                break
+            got = chain.read(dj.RATE // 20)
+            pos["read"] += len(got)
+            await asyncio.sleep(0.005 if len(got) else 0.05)
+        assert handed, "no hand-over"
+        at = 25.0 + handed[0][0] / dj.RATE
+        beats = (at - 0.5) / 0.5
+        assert abs(beats - round(beats / 8) * 8) < 0.25          # it waited for a phrase boundary (to within the read step)
+        assert handed[0][1] == pytest.approx(16 * 0.5)
+        assert at < 60 - 8                                         # ahead of the end, with the fade still to come
+
+    async def guarded():
+        try:
+            await asyncio.wait_for(go(), 60)
+        finally:
+            await player.stop()
+    asyncio.run(guarded())

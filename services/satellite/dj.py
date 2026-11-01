@@ -56,6 +56,8 @@ NUDGE_S = 0.15                    # how far the audio may move a grid (Traktor's
 SEAM_S = 0.008                    # the tiny crossfades between the stretched pieces
 LEAD_S = 8.0                      # audio decoded ahead of the mix-out point (to line the grid up on its last bars with drums)
 BASS_HZ = 180.0
+HANDOFF_BEATS = 16                # Bilby -> Spotify: Bilby fades over this many beats from its phrase point...
+HANDOFF_MAX_S = 10.0              # ...but never longer than this
 SPOT_START_S = 15.0               # a Spotify item that hasn't started by then is skipped (Bilby fills in): the desktop app takes a few seconds
 SPOT_REST_S = 30 * 60.0           # ...and Spotify isn't tried again for this long
 MARGIN_S = 6.0                    # a mix-out point closer than this to where the track is now is too late to render for
@@ -669,6 +671,24 @@ class Mixer:
                  f"{time.monotonic() - t0:.1f} s)")
         return Next("mix", "", clip, a_stop, b_start, p.b_in)
 
+    def mix_out(self, a: str, not_before: float) -> tuple[float, float] | None:
+        """(where in `a` to leave on a phrase, how long to fade) for a hand-over to something that can't be beat-matched (Spotify), or None."""
+        if not enabled(self.env, self.state):
+            return None
+        a_path, ta = self.lib.local(a), self.lib.info(a)
+        if not a_path or ta is None:
+            return None
+        tail0 = max(0.0, ta.duration - 90)
+        loud = loud_end(decode(a_path, tail0, ta.duration - tail0 + 1, run=self.run), tail0)
+        fade = min(HANDOFF_BEATS * ta.period, HANDOFF_MAX_S)
+        for unit in PHRASES:
+            step = unit * ta.period
+            k = math.floor((min(ta.duration - 0.25 - fade, loud - fade / 2) - ta.first_beat) / step)
+            t = ta.first_beat + k * step
+            if k >= 1 and t >= not_before:
+                return t, fade
+        return None
+
 
 class DjPlayer(stereo.RouterPlayer):
     """stereo.RouterPlayer (music.BoxMusic's `player` on the router) whose Bilby tracks play as one gapless chain: each track mixes into the next
@@ -730,8 +750,8 @@ class DjPlayer(stereo.RouterPlayer):
                 chain.finish()
                 return
             nxt = queue[j]
-            if _is_spotify(nxt):
-                chain.finish()                                     # not Bilby's: the chain ends and RouterPlayer plays it
+            if _is_spotify(nxt):                                   # not Bilby's: no beat-matching (Spotify's sound is live), a fade on a phrase
+                await self._hand_to_spotify(gen, chain, piece, rel, start)
                 return
             here = start + piece.read / RATE
             try:
@@ -754,6 +774,26 @@ class DjPlayer(stereo.RouterPlayer):
             while gen == self.gen and self.chain is chain and not body.started:
                 await asyncio.sleep(0.5)
             piece, idx, rel = body, j, nxt
+
+    async def _hand_to_spotify(self, gen: int, chain: ChainSource, piece: Piece, rel: str, start: float) -> None:
+        """The next item is Spotify's: at the playing track's last good phrase, RouterPlayer.handoff_to_spotify starts Spotify and fades this
+        chain out under it. Without a phrase point (DJ mode off, an unknown track) the chain just ends and RouterPlayer goes on as it does."""
+        handoff = getattr(self, "handoff_to_spotify", None)
+        point = None
+        if handoff is not None:
+            try:
+                point = await asyncio.to_thread(self.mixer.mix_out, rel, start + piece.read / RATE + MARGIN_S)
+            except Exception as e:                                 # noqa: BLE001 — no phrase: the plain way
+                self.log(f"(dj: no phrase point for the handoff: {type(e).__name__}: {str(e)[:80]})")
+        chain.finish()
+        if point is None:
+            return
+        at, fade = point
+        while gen == self.gen and self.chain is chain and chain.pieces and chain.pieces[0] is piece and start + piece.read / RATE < at:
+            await asyncio.sleep(0.05)
+        if gen == self.gen and self.chain is chain and chain.pieces and chain.pieces[0] is piece:
+            self.log(f"(dj: handing over to Spotify on the phrase at {at:.1f} s, fading over {fade:.1f} s)")
+            await handoff(fade)
 
     def _advancer(self, gen: int, idx: int, pos: float, mixed: bool):
         loop = self.loop
