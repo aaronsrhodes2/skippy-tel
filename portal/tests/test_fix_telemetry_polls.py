@@ -69,7 +69,7 @@ def asked_for_by_scripts(text: str, url_map=None) -> set[str]:
 # template whose data-*-url attributes (url_for) are the portal URLs it uses. Anything else gets the failure below.
 # (paths under static/; Nagatha's scripts and its self-hosted hls.js only talk to the video gate, whose address and pass come from
 # the page's data-gate-url route, which the scan sees; the Tabletop's poll and cards hang off its data-board-url and data-boards-url)
-STATIC_SCRIPTS = {"skippy-voice.js": "front.html", "skippy-home.js": "front.html", "nbody-flipbook.js": "demo_nbody.html", "bilby-app.js": "music.html", "nagatha-app.js": "video.html", "audiobooks-app.js": "audiobooks.html", "vendor/hls-1.6.15.min.js": "video.html",
+STATIC_SCRIPTS = {"skippy-voice.js": "front.html", "skippy-home.js": "front.html", "skippy-3d.js": "_skippy3d.html", "nbody-flipbook.js": "demo_nbody.html", "bilby-app.js": "music.html", "nagatha-app.js": "video.html", "audiobooks-app.js": "audiobooks.html", "vendor/hls-1.6.15.min.js": "video.html",
                   "tabletop.js": "tabletop.html", "status.js": "status.html", "tabletop-heroes.js": "tabletop.html",
                   # the self-hosted <model-viewer> (static/skippy-artifacts.js loads it for a 3D artifact): it fetches only the model URL the chat gives it
                   "vendor/model-viewer-4.0.0.min.js": "_chat.html",
@@ -165,11 +165,18 @@ def test_the_scan_reads_the_three_ways_a_page_names_what_it_polls():
     assert asked_for_by_scripts('<script>fetch("/no/such/path")</script>', app.url_map) == {"<no route for /no/such/path>"}
 
 
+# Endpoints polled from templates but handled by a separate service (not flask-api).
+# The scan reports them as "<no route for /path>"; strip those before asserting.
+_EXTERNAL_NO_ROUTE = frozenset({"<no route for /face/state>"})
+
+
 def test_every_endpoint_a_template_polls_is_skipped_or_is_not_a_page():
     app, client, tel = make()
     polled = set()
     for template in TEMPLATES.glob("*.html"):
         polled |= asked_for_by_scripts(template_text(template), app.url_map)
+    # Strip external-service endpoints (handled by services/face-web, etc.)
+    polled -= _EXTERNAL_NO_ROUTE
     assert not {e for e in polled if e.startswith("<no route")}, polled
     assert len(polled) >= 10, polled                                                   # the scan is really finding them
     bad = offenders(app, client, tel, polled)
