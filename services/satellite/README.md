@@ -183,10 +183,10 @@ The Enclave Audio speakers hang off **skippy-core's** Bluetooth (core/README.md 
 one more router output, `enclave`, whose part is a URL instead of a Windows device name:
 
     SATELLITE_OUT_ENCLAVE=tcp://skippy-core:4953     (the default)
-    SATELLITE_OUT=office=pod+enclave+hdmi             the Enclave and the Sony together (how they were synced, in the theater)
-    SATELLITE_OUT=office=pod+hdmi;upstairs=pod+enclave   today's shape once the upstairs pod arrives (the Enclave moved up 2026-11-01;
+    SATELLITE_OUT=theater=pod+enclave+hdmi             the Enclave and the Sony together (how they were synced, in the theater)
+    SATELLITE_OUT=theater=pod+hdmi;upstairs=pod+enclave   today's shape once the upstairs pod arrives (the Enclave moved up 2026-11-01;
                                                       until then the office is pod+hdmi and the Enclave idles, connected)
-    SATELLITE_OUT=office=pod+enclave>hdmi             `a>b`: a preference: the HDMI plays only while the Enclave isn't open
+    SATELLITE_OUT=theater=pod+enclave>hdmi             `a>b`: a preference: the HDMI plays only while the Enclave isn't open
 
 * **`router.NetStream`** sends the sink's blocks as 48 kHz 16-bit stereo PCM to skippy-core's snapserver, paced by this PC's clock (snapcast keeps
   the speaker on its own clock and absorbs the drift). **`NetWatch`** asks snapserver every 3 s whether a client plays (the speaker is on);
@@ -201,6 +201,10 @@ one more router output, `enclave`, whose part is a URL instead of a Windows devi
   to another room (a whole-house sound lines up with them); measure again when a speaker or its connection changes. Run it while the hub
   isn't sending to the Enclave (snapserver takes one sender), e.g. right after stopping the hub.
 * The pod's own speaker isn't in it (its sound goes through ESPHome's media player, not the router).
+* **Places on command** (2026-11-01): "everywhere" (both), "upstairs" / "living room" / "Enclave" (the Enclave), "downstairs" / "theater" /
+  "Sony" (skippy-pc's HDMI). `play_music` takes `speaker: everywhere|downstairs|upstairs`, and the `speakers` tool moves the music (what plays now
+  included: `Router.retarget`) or Skippy's own voice. The words come from `house_layout.json` when it is there (else `SKIPPY_PLACES`,
+  default `downstairs=hdmi;upstairs=enclave`). Skippy says only where the sound really goes: a place whose speaker is off is named as off.
 * **Announcements upstairs** (`SATELLITE_ANNOUNCE_OUT=enclave`, 2026-11-01): outputs in a place with no pod and no microphone play every
   room's announcements (the morning and bedtime routines, timers, messages typed in the portal's Home chat), never a conversation's
   replies. sync.py never measures them (no mic hears them), so they are never taken for off; they get the one-voice cushion and, when

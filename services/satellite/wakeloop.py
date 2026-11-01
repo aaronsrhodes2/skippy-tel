@@ -1,6 +1,6 @@
 """The wake loop, tested end to end through a pod's own speaker (the Captain, 2026-11-01: "worked quite well", the standard way to test it).
 
-    ./.venv/Scripts/python wakeloop.py                          3 trials in the Office: "Hey Skippy", a pause, a question (a new one each time)
+    ./.venv/Scripts/python wakeloop.py                          3 trials in the Theater: "Hey Skippy", a pause, a question (a new one each time)
     ./.venv/Scripts/python wakeloop.py --trials 5 --pause 0     the name and the command in one breath
     ./.venv/Scripts/python wakeloop.py --wake clips             the Captain's own held-out recordings of the name (state/wakeword/real/test)
     ./.venv/Scripts/python wakeloop.py --command ""             the name alone: the room must keep listening (no "no audio" from the watchdog)
@@ -160,7 +160,7 @@ async def run(args, env: dict, out=print) -> int:
 
 def main(argv=None, out=print) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--room", default="office")
+    ap.add_argument("--room", default="theater")
     ap.add_argument("--trials", type=int, default=3)
     ap.add_argument("--wake", choices=("tts", "clips"), default="tts")
     ap.add_argument("--command", default=None, help='what is said after the name (default: a different question each trial; "" for the name alone)')

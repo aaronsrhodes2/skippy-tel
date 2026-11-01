@@ -4,7 +4,7 @@ Why: the box's speaker is small, and the PC already has the clip: no Wi-Fi hop, 
 sound starts. Each output has a name to find in Windows' sound devices (a part of the name), a start delay so the outputs line up (a Bluetooth stereo
 is ~200 ms late, the box ~600 ms), and ducks whatever else is playing on the PC while Skippy talks (Bilby in a browser, a game).
 
-    SATELLITE_OUT=office=pod+hdmi+bt         per room: any of pod (the box's own speaker), hdmi, bt   (default: pod)
+    SATELLITE_OUT=theater=pod+hdmi+bt         per room: any of pod (the box's own speaker), hdmi, bt   (default: pod)
     SATELLITE_OUT_HDMI=NVIDIA High Definition        a part of the Windows output's name
     SATELLITE_OUT_BT=Enclave Audio
     SATELLITE_OUT_DELAYS=hdmi=0.5,bt=0.4,pod=0       seconds to wait before starting each, to line them up by ear
@@ -292,6 +292,52 @@ def one_voice(env: dict) -> bool:
     """SATELLITE_ONE_VOICE (default on; the Captain, 2026-10-31: "it's too hard to sync these wimpy hubs"): a room with a pod AND a PC output
     speaks from the PC output alone while it is open; the pod stays the mic, the face and the lips, and speaks only when no PC output plays."""
     return env.get("SATELLITE_ONE_VOICE", "1").lower() not in ("0", "off", "no")
+
+
+# ── places: where the house's sound goes, in his words (the Captain, 2026-11-01) ──────────────────────────────────────────────────────────
+# "everywhere" is every place; "upstairs" / "living room" / "enclave" the Enclave on skippy-core's Bluetooth; "downstairs" / "theater" /
+# "sony" skippy-pc's HDMI (the projector and the Sony in the theater). SKIPPY_PLACES maps each place to router outputs.
+PLACE_WORDS = {"everywhere": "*", "all": "*", "both": "*", "whole house": "*", "the whole house": "*", "all over": "*",
+               "upstairs": "upstairs", "living room": "upstairs", "the living room": "upstairs", "enclave": "upstairs", "the enclave": "upstairs",
+               "downstairs": "downstairs", "theater": "downstairs", "theatre": "downstairs", "the theater": "downstairs", "sony": "downstairs",
+               "the sony": "downstairs"}
+
+
+def places(env: dict) -> dict[str, list[str]]:
+    """{"downstairs": ["hdmi"], "upstairs": ["enclave"]} from SKIPPY_PLACES (that is the default)."""
+    out: dict[str, list[str]] = {}
+    for part in (env.get("SKIPPY_PLACES") or "downstairs=hdmi;upstairs=enclave").split(";"):
+        if "=" in part:
+            name, spec = part.split("=", 1)
+            out[name.strip().lower()] = split_kinds(spec)
+    return out
+
+
+def place_kinds(env: dict, word: str) -> list[str] | None:
+    """The router outputs for a place in his words; None when it names no place. The house's layout (house_layout.json: rooms, floors,
+    their aliases and outputs) is the one source when it is there; PLACE_WORDS + SKIPPY_PLACES are the fallback."""
+    try:
+        import house_layout                                        # noqa: PLC0415
+        got = house_layout.default().outputs(word)
+        if got:
+            return sorted(set(got))
+    except Exception:                                              # noqa: BLE001 — no layout file: the words below
+        pass
+    w = (word or "").strip().lower()
+    known = places(env)
+    key = PLACE_WORDS.get(w, w if w in known else None)
+    if key is None:
+        return None
+    if key == "*":
+        return sorted({k for kinds in known.values() for k in kinds})
+    return list(known.get(key, [])) or None
+
+
+def place_words(env: dict, kinds) -> str:
+    """'downstairs and upstairs' for a set of router outputs (by SKIPPY_PLACES); '' for none."""
+    kinds = set(kinds)
+    names = [name for name, ks in places(env).items() if kinds & set(ks)]
+    return " and ".join(names)
 
 
 def announce_kinds(env: dict) -> list[str]:

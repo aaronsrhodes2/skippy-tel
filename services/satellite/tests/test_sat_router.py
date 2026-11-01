@@ -296,3 +296,32 @@ def test_output_specs_with_preferences():
     assert speaker_out.prefer_chains(env) == [["enclave", "hdmi"]]
     assert speaker_out.room_kinds(env, "office") == ["pod", "enclave", "hdmi"]
     assert speaker_out.output_parts({})["enclave"].startswith("tcp://")
+
+
+# ── places on command: "everywhere", "upstairs", "downstairs" (2026-11-01) ───────────────────────────────────────────────────────────────────
+def test_places_in_his_words():
+    env = {}
+    assert speaker_out.place_kinds(env, "everywhere") == ["enclave", "hdmi"]
+    assert speaker_out.place_kinds(env, "Living Room") == ["enclave"] == speaker_out.place_kinds(env, "upstairs")
+    assert speaker_out.place_kinds(env, "theater") == ["hdmi"] == speaker_out.place_kinds(env, "sony")
+    assert speaker_out.place_kinds(env, "garage") is None
+    assert speaker_out.place_words(env, {"hdmi", "enclave"}) == "downstairs and upstairs"
+
+
+def test_music_moves_while_it_plays_and_says_only_where_it_is_heard():
+    import stereo
+    import hub
+    w = World(present=("HDMI",))                                # the Enclave is off
+    r = rt.Router([("hdmi", "HDMI", 0.0), ("enclave", "Enclave", 0.0)], find=w.find, stream_factory=w.factory, reinit=w.reinit,
+                  log=lambda *a: None, autostart=False)
+    r.mix_once()
+    house = stereo.StereoMusic(r, ["hdmi"], media=None)
+    house.env = {}
+    p = r.play(rt.ClipSource(tone(1.0)), layer="media", targets=set(house.player.kinds))
+    house.move(["enclave", "hdmi"])
+    assert p.targets == {"enclave", "hdmi"} and house.player.kinds == {"enclave", "hdmi"}
+    assert hub.where_said(house) == "downstairs"                # never "everywhere" while upstairs is off
+    assert hub.not_there(house) == " Upstairs isn't on, so not there."
+    w.present.add("Enclave")
+    r.scan()
+    assert hub.where_said(house) == "everywhere" and hub.not_there(house) == ""

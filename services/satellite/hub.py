@@ -1044,6 +1044,7 @@ def build_rooms(env: dict):
         if book is not None:
             tools = audiobooks.combine(tools, audiobooks.book_tools(lambda: holder["room"], loop))
         brain = Brain(client, brain_model, timers, hass=house, extra=tools, news=news_mod.News(env, log=log), weather=house_weather)
+        brain.room = name                                        # the primer says which room of house_layout.json he is talking from
         if book is not None:
             brain.pre_route = lambda heard: book_voice.pre_route(heard, holder["room"])
         room = holder["room"] = Room(name, link, gate, brain, timers, spotter=spotter, local_voice=audio.local_voice_pcm16, log=log,
@@ -1072,9 +1073,18 @@ MUSIC_TOOLS = [
                                           "queue=true for 'after this', 'queue ...', 'add ... to the queue' (it plays after what plays now, Spotify included).",
      "input_schema": {"type": "object", "properties": {"what": {"type": "string", "description": "e.g. 'Pink Floyd', 'Comfortably Numb', 'favorites', 'everything'"},
                                                        "shuffle": {"type": "boolean"}, "queue": {"type": "boolean"},
-                                                       "speaker": {"type": "string", "enum": ["here", "stereo"],
-                                                                   "description": "stereo: on the house stereo (the Sony): 'on the stereo', 'downstairs', 'DJ ...'"}},
+                                                       "speaker": {"type": "string", "enum": ["here", "stereo", "everywhere", "downstairs", "upstairs"],
+                                                                   "description": "stereo: the house stereo where it plays now ('on the stereo', 'DJ ...'); "
+                                                                                  "everywhere: downstairs AND upstairs ('everywhere', 'the whole house', 'both'); "
+                                                                                  "downstairs: the theater's Sony ('downstairs', 'theater', 'Sony'); "
+                                                                                  "upstairs: the Enclave ('upstairs', 'living room', 'Enclave')"}},
                       "required": ["what"]}},
+    {"name": "speakers", "description": "Where the house's sound plays, on command: 'move the music upstairs', 'music everywhere', 'talk to me "
+                                        "upstairs', 'your voice back downstairs'. what=music for Bilby / Spotify on the stereo, voice for Skippy's own replies. "
+                                        "everywhere: downstairs and upstairs; downstairs: the theater's Sony; upstairs: the Enclave (living room).",
+     "input_schema": {"type": "object", "properties": {"what": {"type": "string", "enum": ["music", "voice"]},
+                                                       "place": {"type": "string", "enum": ["everywhere", "downstairs", "upstairs"]}},
+                      "required": ["what", "place"]}},
     {"name": "dj_mode", "description": "Bilby's DJ mode for his library on the house stereo: 'DJ mode on' / 'DJ mode off'. On: each track mixes into the "
                                        "next on the beat (tempo matched, on a phrase) and a shuffle is ordered like a DJ set; off: one ends, the next starts.",
      "input_schema": {"type": "object", "properties": {"on": {"type": "boolean"}}, "required": ["on"]}},
@@ -1088,6 +1098,22 @@ MUSIC_TOOLS = [
                                                        "shuffle": {"type": "boolean"}, "queue": {"type": "boolean"}},
                       "required": ["action"]}},
 ]
+
+
+def where_said(house) -> str:
+    """'downstairs and upstairs' for where the stereo really plays now (only outputs that are open): never a place the sound didn't go."""
+    import speaker_out as speaker_mod                           # noqa: PLC0415
+    open_, _ = house.where()
+    words = speaker_mod.place_words(house.env or {}, open_)
+    return f"{'everywhere' if open_ and len(words.split(' and ')) > 1 else words}" if words else "on the house stereo"
+
+
+def not_there(house) -> str:
+    """' Upstairs isn't on, so not there.' for a place asked for whose speaker is off (the Enclave switched off)."""
+    import speaker_out as speaker_mod                           # noqa: PLC0415
+    _, closed = house.where()
+    words = speaker_mod.place_words(house.env or {}, closed)
+    return f" {words[:1].upper()}{words[1:]} isn't on, so not there." if words else ""
 
 
 def music_tools(room_of, loop, favorites=None, stereo=None):
@@ -1111,6 +1137,26 @@ def music_tools(room_of, loop, favorites=None, stereo=None):
             book = getattr(room, "book", None)
             house = stereo() if stereo is not None else None
             on_stereo = house is not None and house.playing and not box.playing   # the stereo is what plays: "next", "pause", "favorite this" mean it
+            if name == "speakers":
+                import speaker_out as speaker_mod               # noqa: PLC0415
+                env = (house.env if house is not None else None) or {}
+                kinds = speaker_mod.place_kinds(env, str((args or {}).get("place") or ""))
+                if not kinds:
+                    return "I don't know that place: everywhere, downstairs or upstairs."
+                if (args or {}).get("what") == "voice":
+                    outs = [o for o in getattr(room, "pc_outs", []) if hasattr(o, "router")]
+                    if not outs:
+                        return "This room's voice only comes from its pod."
+                    outs[0].kinds = set(kinds)
+                    outs[0].kind = "+".join(kinds)
+                    open_ = {k for k in kinds if outs[0].router.available(k)}
+                    if not open_:
+                        return f"{speaker_mod.place_words(env, kinds).capitalize()} isn't on: my voice stays on the pod until it is."
+                    return f"Done: my voice now comes from {speaker_mod.place_words(env, open_)}."
+                if house is None:
+                    return "There is no house stereo."
+                house.move(kinds)
+                return f"Done: the music plays {where_said(house)} from now on." + not_there(house)
             if name == "music":
                 action = str((args or {}).get("action") or "")
                 if book is not None and book.book is not None and (book.playing or (room.last_media == "book" and not box.playing and not on_stereo)):
@@ -1155,7 +1201,12 @@ def music_tools(room_of, loop, favorites=None, stereo=None):
                 target = house.box if on_stereo else box        # one queue: Bilby's tracks after the Spotify ones on the stereo, or the pod's own
                 await target.append(found)
                 return f"Queued {len(found)} track{'s' if len(found) != 1 else ''} after this" + (" on the house stereo." if on_stereo else ".")
-            if (args or {}).get("speaker") == "stereo" and house is not None:
+            import speaker_out as speaker_mod                   # noqa: PLC0415
+            speaker = (args or {}).get("speaker") or "here"
+            place = speaker_mod.place_kinds(house.env or {}, speaker) if house is not None and speaker not in ("here", "stereo") else None
+            if (speaker == "stereo" or place) and house is not None:
+                if place:
+                    house.move(place)                           # "everywhere", "upstairs", "downstairs": the stereo's outputs from now on
                 if book is not None:
                     await book.pause()
                 if box.playing:
@@ -1164,8 +1215,8 @@ def music_tools(room_of, loop, favorites=None, stereo=None):
                 n = await house.play_tracks(found, mixed)
                 title, artist = house.box.title()
                 import dj                                       # noqa: PLC0415
-                return (f"Playing {n} track{'s' if n != 1 else ''} on the house stereo" + (" in DJ mode" if dj.enabled(house.env) else "")
-                        + f", starting with {title}" + (f" by {artist}." if artist else "."))
+                return (f"Playing {n} track{'s' if n != 1 else ''} {where_said(house)}" + (" in DJ mode" if dj.enabled(house.env) else "")
+                        + f", starting with {title}" + (f" by {artist}." if artist else ".") + not_there(house))
             if book is not None:
                 await book.pause()                              # music and a book never play at once
             if house is not None and house.playing:

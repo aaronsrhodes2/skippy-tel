@@ -12,13 +12,13 @@ clipped the first word while it woke. Now:
   * a missing output (the stereo is off) is looked for again every RESCAN_S, while nothing is playing (re-reading the device list
     resets PortAudio, so it only happens in silence).
 
-    SATELLITE_OUT=office=pod+hdmi+bt            which outputs a room uses (speaker_out.parse_outputs)
+    SATELLITE_OUT=theater=pod+hdmi+bt            which outputs a room uses (speaker_out.parse_outputs)
     SATELLITE_OUT_HDMI / SATELLITE_OUT_BT       a part of each Windows output's name
     SATELLITE_OUT_DELAYS=hdmi=0.5,bt=0.4        each output's starting delay; sync.py then measures and corrects it from the PC's microphone
     SATELLITE_OUT_ENCLAVE=tcp://skippy-core:4953   a NETWORK output (2026-11-01): the Enclave speakers on skippy-core's Bluetooth, fed over
                                                 the tailnet to its snapserver (core/install/enclave.sh, NetStream below); open only while
                                                 skippy-core says the speaker is on and playing
-    SATELLITE_OUT=office=pod+enclave>hdmi       `a>b`: a preference, not both: b plays only while a is not open (the Enclave, else the
+    SATELLITE_OUT=theater=pod+enclave>hdmi       `a>b`: a preference, not both: b plays only while a is not open (the Enclave, else the
                                                 projector); SKIPPY_STEREO_OUT takes the same form for music
     Several outputs in one room line up with each other by `align` (sync_outputs.py measures each one's latency from the microphone).
 
@@ -309,6 +309,16 @@ class Router:
             self.plays.pop(play.id, None)
         play.source.close()
         play.finished.set()
+
+    def retarget(self, old, new, layer: str = "media") -> int:
+        """Move what plays on `old` outputs to `new` ones, at once (music: "now upstairs too"). -> how many plays moved."""
+        old, moved = set(old), 0
+        with self.lock:
+            for p in self.plays.values():
+                if p.layer == layer and set(p.targets) == old:
+                    p.targets = set(new)                          # a new set object: the mixer reads one or the other, never half
+                    moved += 1
+        return moved
 
     def duck(self, on: bool, percent: float = 25) -> None:
         self.outside_duck = max(0.0, min(1.0, percent / 100.0)) if on else 1.0

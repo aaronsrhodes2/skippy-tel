@@ -410,6 +410,19 @@ class StereoMusic:
     async def stop(self) -> None:
         await self.box.pause()
 
+    def move(self, kinds) -> None:
+        """Play on these router outputs from now on, what plays now included (a place on command: speaker_out.place_kinds)."""
+        old, new = set(self.player.kinds), set(kinds)
+        if old != new:
+            self.player.kinds = new
+            self.player.router.retarget(old, new)
+
+    def where(self) -> tuple[set, set]:
+        """(the outputs it plays on that are open, the ones it should play on that aren't): what Skippy may say, and what he must not claim."""
+        kinds = set(self.player.kinds)
+        open_ = {k for k in kinds if self.player.router.available(k)}
+        return open_, kinds - open_
+
     async def play_spotify(self, tracks: list[dict], queue: bool = False) -> int:
         """Spotify tracks (spotify.Client's dicts) on the stereo: now, or after what plays ("queue"). -> how many."""
         items = self.box.add_spotify(tracks)

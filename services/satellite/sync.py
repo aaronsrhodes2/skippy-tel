@@ -1,7 +1,7 @@
 """Skippy's voice on the pod and on the PC's own outputs (the projector's HDMI), lined up by ear, by the hub itself (the Captain, 2026-10-31).
 
 A fixed delay per output (SATELLITE_OUT_DELAYS) was never right for long: the projector has its own audio latency, the pod buffers what it fetches,
-and the Captain heard the pod 0.3-0.6 s ahead. So the hub listens: skippy-pc's own microphone (a USB mic in the office, SATELLITE_SYNC_MIC) is
+and the Captain heard the pod 0.3-0.6 s ahead. So the hub listens: skippy-pc's own microphone (a USB mic in the theater, SATELLITE_SYNC_MIC) is
 kept open into a ring of the last RING_S seconds, in memory only, never stored or sent anywhere. After each voice clip the router played, that
 stretch of the room is deconvolved by the clip itself (the voice band): every copy of the clip the room played is a peak.
 
