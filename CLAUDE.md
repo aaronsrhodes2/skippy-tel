@@ -342,7 +342,8 @@ the agent's `withHeard`). Tests: `portal/tests/test_heard_speech.py`, `tests/js/
 vendor speech cloud) + `portal/voice.py` (the pass, label `voice-gate-v1`; scopes `listen` for everyone who may chat, `speak` for admins only,
 because the cloned Skippy voice is personal-use) + `/chat/voice/gate` (the pass route). The recording goes browser → Tailscale Funnel `:10000` →
 `services/voice-gate` → Whisper at home (flask-api's ElevenLabs for Skippy's voice; its key never leaves home); never through the portal.
-Non-admins (and any failure) hear replies in their device's own built-in voice. The reporter's `voice_gate` capability (`VOICE_GATE_URL`/
+Non-admins hear replies in their device's own built-in voice; when the Captain's Skippy voice fails he never gets that robot voice
+(2026-11-01): a feather pen writes in the status strip for a few seconds and the reply stays text only (`penned()`). The reporter's `voice_gate` capability (`VOICE_GATE_URL`/
 `VOICE_GATE_PUBLIC`) is ready when Whisper answers behind the gate. Start it: `docker compose up --build -d voice-gate`, then
 `tailscale funnel --https=10000 --bg 3007` (the bridge's `funnel on` does every door, the popup-gate's `:10000/in` path too). Tests: `portal/tests/test_voice.py`,
 `services/voice-gate/tests` (run in their own pytest session).

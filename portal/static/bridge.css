@@ -490,6 +490,12 @@ dialog.keys .key { margin: 0 0 0 auto; }
 .vstat .lvbar { flex: none; width: 90px; height: 8px; background: var(--dim-green); border: 1px solid var(--dim-green-hi); overflow: hidden; }
 .vstat .lvbar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .06s linear; }
 .vstat .vtxt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Skippy's voice failed: a feather pen writes (skippy-voice.js penned), the reply is text only */
+.vstat .vpen { width: 16px; height: 16px; margin-right: 6px; vertical-align: -3px; fill: none; stroke: var(--accent); stroke-width: 1.6;
+  stroke-linecap: round; stroke-linejoin: round; animation: vpen-write .9s ease-in-out infinite; }
+@keyframes vpen-write { 0%, 100% { transform: translate(0, 0) rotate(0); } 25% { transform: translate(3px, 1px) rotate(-8deg); }
+  50% { transform: translate(6px, 0) rotate(0); } 75% { transform: translate(3px, -1px) rotate(8deg); } }
+@media (prefers-reduced-motion: reduce) { .vstat .vpen { animation: none; } }
 .vstat .vx { flex: none; padding: 0 8px; min-width: 0; margin: 0; background: transparent; color: var(--ink); border: 1px solid var(--dim-green-hi); font: inherit; }
 
 /* the full-screen key's iPhone tip: one sentence under the top strip */

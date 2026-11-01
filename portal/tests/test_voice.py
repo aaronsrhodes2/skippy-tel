@@ -206,13 +206,15 @@ def test_the_chat_tells_the_voice_client_its_mode():
     assert "mode: () =>" in chat and '"?mode=" + encodeURIComponent(mode)' in js and "pass.mode_ === mode" in js
 
 
-def test_a_reply_is_never_silent_any_voice_failure_falls_back_to_the_device_voice():
-    """The Captain's rule (2026-10-23): guests get the cheap local voice, or the device's own, but always a live one."""
+def test_his_voice_failing_is_the_pen_never_the_device_voice_and_guests_keep_theirs():
+    """The Captain (2026-11-01): when Skippy's own voice fails, no robot voice: a feather pen says the reply is text only.
+    Guests, who never have Skippy's voice, keep the device's own as their voice (not a fallback)."""
     js = (STATIC / "skippy-voice.js").read_text(encoding="utf-8")
     say = js[js.index("async function say("):js.index("function setWanted(")]
     assert "if (!r.ok) throw" in say and "if (!blob.size) throw" in say                       # a refused or empty reply
-    assert "audio.onerror = function () { URL.revokeObjectURL(url); if (playing === token) { playing = null; builtin(t, done); } };" in say
-    assert "builtin(t, done);" in say.split("catch (e)")[-1]                                       # any other failure
+    assert "playing = null; penned(done); } };" in say                                             # audio that won't play
+    assert "penned(done);" in say.split("catch (e)")[-1] and "if (ownVoice) { penned(done); return; }" in say
+    assert say.rstrip().endswith("builtin(t, done);                                           // guests: the device's own voice is their voice, not a fallback\n    }") or "builtin(t, done);" in say.split("ownVoice) {")[-1]
 
 
 def test_the_one_chat_takes_the_agents_reply_into_its_own_voice():

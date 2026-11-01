@@ -8,7 +8,7 @@ const assert = require("node:assert/strict");
 const level = { v: 0.004 };
 let stt = [], sttCalls = [], recorders = [];
 // what the fake Whisper says: one text per utterance (the recorder that is asking), the whole of it once that recorder has stopped, its first words while it is still recording
-let say = [], fetchLog = [], summaryMode = "ok", spoken = [];
+let say = [], fetchLog = [], summaryMode = "ok", spoken = [], gateSpeak = false;
 class FakeAnalyser { constructor() { this.fftSize = 1024; } getFloatTimeDomainData(buf) { buf.fill(level.v); } connect() {} }
 class FakeCtx { createMediaStreamSource() { return { connect() {} }; } createAnalyser() { return new FakeAnalyser(); } close() { return Promise.resolve(); } }
 class FakeRec {
@@ -32,7 +32,7 @@ globalThis.SpeechSynthesisUtterance = class { constructor(text) { this.text = te
 globalThis.speechSynthesis = { speak(u) { spoken.push(u.text); setTimeout(() => u.onend && u.onend(), 100); }, cancel() {} };
 globalThis.fetch = async (url, init) => {
   const u = String(url);
-  if (u.includes("/g")) return { ok: true, status: 200, json: async () => ({ ok: true, url: "https://x.ts.net:10000", pass: "1.a", exp: Date.now() / 1000 + 3600, speak: false }) };
+  if (u.includes("/g")) return { ok: true, status: 200, json: async () => ({ ok: true, url: "https://x.ts.net:10000", pass: "1.a", exp: Date.now() / 1000 + 3600, speak: gateSpeak }) };
   fetchLog.push(u);
   if (u.includes("/summary")) { if (summaryMode === "fail") return { ok: false, status: 503, json: async () => ({}) }; return { ok: true, status: 200, json: async () => ({ text: "Short spoken version." }) }; }
   if (u.includes("/stt")) { sttCalls.push(u); const idx = recorders.length - 1, full = say[idx] || "words", done = !recorders[idx] || recorders[idx].state === "inactive"; return { ok: true, status: 200, json: async () => ({ text: done ? full : full.split(" ").slice(0, Math.max(1, full.split(" ").length - 1)).join(" ") }) }; }
@@ -45,7 +45,7 @@ async function advance(t, ms) { for (let x = 0; x < ms; x += 50) { t.mock.timers
 
 function setup(t, withSpeaker, keepOff, withEar) {
   t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"], now: 1000000 });
-  level.v = 0.004; stt = []; say = []; sttCalls = []; recorders = []; gStreams.length = 0; fetchLog = []; summaryMode = "ok"; spoken = [];
+  level.v = 0.004; stt = []; say = []; sttCalls = []; recorders = []; gStreams.length = 0; fetchLog = []; summaryMode = "ok"; spoken = []; gateSpeak = false;
   const mic = node("button"), box = node("textarea"), status = node("div"), speaker = withSpeaker ? node("button") : null, ear = withEar ? node("button") : null, sent = [];
   box.value = "";
   const voice = V.attach({ gate: "/g", mic, ear, box, status, speaker, onSend: (m) => sent.push(m), lang: () => "" });
@@ -214,6 +214,19 @@ test("a short reply is spoken as it is, a long one as the gate's summary, with n
   await s.voice.say(LONG); await advance(t, 300);
   assert.deepEqual(spoken, ["All done, Captain.", "Short spoken version."]);                   // not the 700 characters of it
   assert.equal(fetchLog.filter(u => u.includes("/summary")).length, 1);
+});
+
+test("when his own Skippy voice fails, never the robot voice: a pen writes 'text only' for a few seconds", async (t) => {
+  const s = setup(t, true);
+  gateSpeak = true;                                                                            // the speak scope: Skippy's own voice
+  await s.voice.say("All done, Captain."); await advance(t, 300);                              // the /tts call fails (404 here)
+  assert.deepEqual(spoken, []);                                                                // the device's voice said nothing
+  assert.equal(s.label(), "text only this time");
+  await advance(t, 4200);
+  assert.equal(s.label(), null);
+  gateSpeak = false;                                                                           // the gate unreachable later: still the pen
+  await s.voice.say("Again."); await advance(t, 300);
+  assert.deepEqual(spoken, []);
 });
 
 test("if the summary cannot be had, the opening is spoken, cut at a sentence, and the conversation goes on", async (t) => {

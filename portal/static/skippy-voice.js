@@ -559,6 +559,21 @@
       u.onend = u.onerror = function () { if (playing === u) { playing = null; paintSpeaker("idle"); if (done) done(); } };
       playing = u; paintSpeaker("on"); speechSynthesis.speak(u);
     }
+    // Skippy's own voice failed (no gate, the TTS errored, the audio wouldn't play): never the device's robot voice for him (the Captain,
+    // 2026-11-01: "I don't like it as a fallback"). A feather pen writes in the status strip for a few seconds: this reply is text only.
+    const PEN_MS = 4000;
+    function penned(done) {
+      paintSpeaker("idle");
+      if (status) {
+        paintStatus("text only this time", 0, false);
+        const b = status._built;
+        if (b && b.label && typeof b.label.insertAdjacentHTML === "function")
+          b.label.insertAdjacentHTML("afterbegin", '<svg class="vpen" aria-hidden="true"><use href="#g-pen"/></svg>');
+        setTimeout(function () { if (status._built && status._built.label && status._built.label.textContent === "text only this time") paintStatus(null); }, PEN_MS);
+      }
+      if (done) done();
+    }
+    let ownVoice = false;                                         // this page has had Skippy's own voice (the speak scope) once
     // keep: a line spoken while the real answer is still coming (the agent's quick line, /chat/quick): when it ends the turn stays
     // with Skippy (the mic stays shut) until the real answer is said, or resume() says none is coming.
     async function say(text, keep) {
@@ -578,6 +593,7 @@
       let g = null;
       try { g = await gate(); } catch (e) { g = null; }
       if (g && g.speak) {
+        ownVoice = true;
         const token = playing = {};
         paintSpeaker("on");
         try {
@@ -589,13 +605,15 @@
           if (playing !== token) { URL.revokeObjectURL(url); return; }
           audio.src = url;
           audio.onended = function () { URL.revokeObjectURL(url); if (playing === token) { playing = null; paintSpeaker("idle"); done(); } };
-          // audio that won't play is never silence: the device's own voice says it instead (the Captain's rule for every voice, guests too)
-          audio.onerror = function () { URL.revokeObjectURL(url); if (playing === token) { playing = null; builtin(t, done); } };
+          audio.onerror = function () { URL.revokeObjectURL(url); if (playing === token) { playing = null; penned(done); } };
           await audio.play();
           return;
         } catch (e) { if (playing !== token) return; playing = null; }
+        penned(done);                                             // his voice failed: the pen, never the robot
+        return;
       }
-      builtin(t, done);                                           // everyone else, and when Skippy's own voice can't be reached
+      if (ownVoice) { penned(done); return; }                     // the gate itself is unreachable this time, but he has Skippy's voice
+      builtin(t, done);                                           // guests: the device's own voice is their voice, not a fallback
     }
     function setWanted(on) {
       wanted = on;
