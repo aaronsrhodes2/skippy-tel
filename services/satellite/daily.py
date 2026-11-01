@@ -657,10 +657,27 @@ class Daily:
                         f"UV index up to {d['uv_index_max'][0]}. Source: Open-Meteo's forecast for home.")
         except (KeyError, IndexError, TypeError):
             return None
-        return await self.aword("Give him today's weather in two sentences, then one sentence on what to wear (a jacket, layers, an umbrella, "
-                                "sunglasses) that follows from it. Use the temperatures exactly as given (46 F is cold, not freezing).", material, 220,
+        try:                                                      # an NWS outage never costs the morning its weather
+            bring = await asyncio.wait_for(asyncio.to_thread(self.bring_today), 30)
+        except Exception:                                         # noqa: BLE001
+            bring = None
+        if bring:
+            material += " " + bring
+        return await self.aword("Give him today's weather in two sentences, then one short line on what to bring or wear, only what the "
+                                "'What to bring' line lists (none, or no such line: say nothing about it). Use the temperatures exactly as given "
+                                "(46 F is cold, not freezing).", material, 220,
                                 fallback=f"Today: a high of {d['temperature_2m_max'][0]} and a low of {d['temperature_2m_min'][0]} degrees, "
-                                         f"{WMO.get(d['weather_code'][0], 'mixed')}, with a {d['precipitation_probability_max'][0]} percent chance of rain.")
+                                         f"{WMO.get(d['weather_code'][0], 'mixed')}, with a {d['precipitation_probability_max'][0]} percent chance of rain."
+                                         + (f" {bring}" if bring and "nothing special" not in bring else ""))
+
+    def bring_today(self) -> str | None:
+        """What to bring or wear today, the same advice the voice answers give (weather.Weather.advice); None without an hourly forecast."""
+        import weather as wx                                      # noqa: PLC0415
+        home = self.home()
+        if home is None:
+            return None
+        items = wx.Weather(self.env).advice(home, "today")
+        return wx.bring_line(items) if items is not None else None
 
     # ── the news ──
     async def headlines(self, subjects: list[tuple[str, str]], per: int = 3) -> list[tuple[str, dict]]:

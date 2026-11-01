@@ -120,6 +120,7 @@ def make(tmp_path, now, car=None, things=None, env=None, posts=None, home_ll=HOM
     d = daily.Daily({"SKIPPY_HOME_LATLON": f"{home_ll[0]},{home_ll[1]}", **(env or {})}, house=house, client=Client(), model="m", hlog=hlog,
                     state_dir=tmp_path / "daily", get=get, post=post, clock=lambda: now[0], sleep=lambda s: asyncio.sleep(0.001), log=lambda m: None)
     d.gap_s = 0.05
+    d.bring_today = lambda: "What to bring or wear: a warm layer, down to 48 F."
     d.night_shift = lambda: None                                        # never the real tools/nightly.py from a test (it prunes Docker and may deploy)
     link, brain = Link(), Brain()
     room = Room("office", link, Gate(), brain, Timers(), log=lambda m: None, hlog=hlog)
@@ -629,3 +630,22 @@ def test_no_leave_by_on_an_online_day_without_a_calendar_or_without_the_router(t
     d3, *_ = make(tmp_path / "c", now)
     with_roads(d3, a_day(), router_up=False)
     assert asyncio.run(d3.leave_by()) is None and asyncio.run(d3.miles_today()) is None   # said nothing rather than guessed
+
+
+def test_weather_says_what_to_bring(tmp_path):
+    now = [time.mktime((2026, 10, 31, 7, 10, 0, 0, 0, -1))]
+    d = make(tmp_path, now)[0]
+    seen = []
+
+    async def aword(task, material, max_tokens, persona=True, fallback=None):
+        seen.append((task, material))
+        return fallback
+    d.aword = aword
+    out = asyncio.run(d.weather())
+    assert "What to bring or wear: a warm layer" in seen[0][1] and "what to bring or wear" in seen[0][0]
+    assert out.endswith("What to bring or wear: a warm layer, down to 48 F.")
+
+    def broken():
+        raise ConnectionError("NWS down")
+    d.bring_today = broken
+    assert asyncio.run(d.weather()).startswith("Today: a high of 66")
