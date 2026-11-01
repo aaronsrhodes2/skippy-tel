@@ -98,3 +98,10 @@ def test_with_home_assistant_the_house_tools_join_the_timers_and_the_prompt_stop
     plain, c2, *_ = make([text("ok")])
     plain.reply("hi")
     assert {t["name"] for t in c2.calls[0]["tools"]} == {"set_timer", "cancel_timers", "list_timers"} and "not connected yet" in c2.calls[0]["system"]
+
+
+def test_the_brain_knows_the_date():
+    import time
+    from brain import Brain
+    b = Brain(None, "m", None, persona="P")
+    assert time.strftime("%B %d, %Y") in b.system() and time.strftime("%A") in b.system()

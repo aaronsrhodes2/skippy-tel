@@ -25,7 +25,7 @@ SPOKEN = (
     "Be short but complete, and never lose the Skippy in you: a plain request (a time, a light, a fact, a timer) gets one to three spoken sentences with a dig or a joke "
     "folded in; a request for something made (a haiku, a joke, a limerick, a poem, a story, a recitation, an explanation) gets the WHOLE thing, performed, with a quip "
     "before or after it, in about a hundred words or fewer. Never describe the thing instead of giving it. Use your tools when one fits (timers{house}{music}). "
-    "{nohouse}He is standing in a room waiting for you, so get to it. The current time is {now}."
+    "{nohouse}He is standing in a room waiting for you, so get to it. The current date and time is {now}."
 )
 
 TOOLS = [
@@ -63,7 +63,7 @@ class Brain:
         self.hass = hass                                              # a hass.Hass when Home Assistant is connected, else None
         self.extra_tools, self.run_extra = extra if extra else ([], None)   # more tools from where the brain lives (hub.py: the room's music)
         self.persona = persona if persona is not None else load_persona()
-        self.now = now or (lambda: time.strftime("%A %H:%M"))
+        self.now = now or (lambda: time.strftime("%A, %B %d, %Y, %H:%M"))   # the date too: with only the weekday, Core said "November 22, 2025" (2026-10-31)
         self.history: list[dict] = []
         self.actions: list[dict] = []                                 # the tools called for the last reply (the house log reads them): {tool, args, outcome}
         self._last = 0.0
