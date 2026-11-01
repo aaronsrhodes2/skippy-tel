@@ -184,3 +184,19 @@ def test_whats_playing_names_the_song_here_or_on_the_stereo():
     assert now_playing(None, _Box(False), None, H(), True) == "Playing on the house stereo: Susie Q by Creedence Clearwater Revival."
     assert now_playing(None, _Box(True, ("Time", "Pink Floyd")), None, None, False) == "Playing: Time by Pink Floyd."
     assert now_playing(None, _Box(False), None, None, False) == "Nothing is playing."
+
+
+def test_words_handed_to_the_running_hub_from_this_pc_are_taken_as_typed(tmp_path, monkeypatch):
+    import asyncio
+    import json
+
+    import hub
+    from hub import Room
+    from test_sat_starters import Brain, Gate, Link
+    monkeypatch.setattr(hub, "one_stream", lambda mp3, **k: mp3)
+    link, brain = Link(), Brain()
+    r = Room("theater", link, Gate(), brain, Timers(), log=lambda m: None)
+    r.inbox = tmp_path / "theater.json"
+    r.inbox.write_text(json.dumps({"text": "what's on my shopping list"}), encoding="utf-8")
+    asyncio.run(r.timers_due())
+    assert brain.heard == ["what's on my shopping list"] and not r.inbox.exists()

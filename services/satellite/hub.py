@@ -20,6 +20,7 @@ EsphomeLink in esphome_link.py).
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import asyncio
 import sys
@@ -153,6 +154,7 @@ class Room:
         self.daily = None                                       # daily.Daily (shared): the morning, coming-home and bedtime routines
         self.stereo = None                                      # stereo.StereoMusic: Bilby's library on the house stereo (the routines' music); ducked like a book
         self.alarms = None                                      # alarms.Alarms: this room's alarms and reminders (on disk); one rings here until he answers
+        self.inbox = None                                       # a Path: words handed to the running hub from this PC (`hub.py --type ROOM TEXT`), taken as typed
         self.tasks: set = set()
         self.voice = asyncio.Lock()                             # one thing said at a time (a timer waits for an answer to finish)
         self.vad = Vad(floor_min=floor)
@@ -535,16 +537,17 @@ class Room:
                 done, command = await self._answer_starter(command)
                 if done:
                     return
-            if self.alarms is not None and self.alarms.ringing is not None:
-                answer = self.alarms.answered(command)          # any word to this room stops it; "stop" / "snooze" are answered here, anything else goes on to the brain
-                if answer is not None:
-                    self.log(f"[{self.name}] alarm answered: {command} -> {answer}")
-                    self._record("command", words=command, tools=["alarm"], outcome="alarm_answered")
-                    self._turn_at = time.monotonic()
-                    await self.say(answer)
+        if self.alarms is not None and self.alarms.ringing is not None:
+            answer = self.alarms.answered(command)              # any word to this room stops it; "stop" / "snooze" are answered here, anything else goes on to the brain
+            if answer is not None:
+                self.log(f"[{self.name}] alarm answered: {command} -> {answer}")
+                self._record("command", words=command, tools=["alarm"], outcome="alarm_answered")
+                self._turn_at = time.monotonic()
+                await self.say(answer, typed=typed)
+                if not typed:
                     self._resume(IDLE)
                     await self.link.released()
-                    return
+                return
         if self.daily is not None and await self.daily.claim(self, command):
             self._turn_at = time.monotonic()                    # a routine's words ("goodnight", "skip", "later"): the routine answers, not the brain
             if self.mode == BUSY and not typed:
@@ -822,6 +825,15 @@ class Room:
                 self.log(f"[{self.name}] automation {auto['id']}: {result}")
                 self._record("automation", automation=auto["id"], tool=auto["action"]["tool"], target=auto["action"]["args"].get("name"),
                              act=auto["action"]["args"].get("action"), outcome=str(result)[:120])
+        if self.inbox is not None and self.inbox.is_file() and self.mode == IDLE and not self.voice.locked():
+            try:
+                text = str(json.loads(self.inbox.read_text(encoding="utf-8")).get("text") or "").strip()
+            except (OSError, ValueError, AttributeError):
+                text = ""
+            self.inbox.unlink(missing_ok=True)
+            if text:
+                self.log(f"[{self.name}] typed on this PC: {text}")
+                await self.typed(text)
         if self.daily is not None:
             try:
                 await self.daily.tick(self)
@@ -1090,6 +1102,7 @@ def build_rooms(env: dict):
                                      followup_ms=int(float(env.get("SATELLITE_SESSION_S", "30")) * 1000))      # the name opens a conversation: it stays open this long without a word
         room.book = book
         room.alarms = alarms
+        room.inbox = state / "hub-inbox" / f"{name}.json"
         connected[name] = room
         room.announce_outs = speaker_out.announce_outputs(env, name, log)   # the routines, timers and messages also upstairs (SATELLITE_ANNOUNCE_OUT)
         if getattr(link, "media", None) is not None:
@@ -1439,8 +1452,15 @@ def _spotify_now(client, house, box) -> tuple[str, str]:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--say", nargs=2, metavar=("ROOM", "TEXT"), help="say this in one room, then quit")
+    ap.add_argument("--type", nargs=2, metavar=("ROOM", "TEXT"), help="hand words to the RUNNING hub, as if typed in the Home chat (the brain answers aloud there)")
     ap.add_argument("--record", nargs="+", metavar=("KIND", "COUNT"), help="record wake-word clips through the pod's microphone: positive|negative [COUNT [ROOM]] (stop the running hub first; wakerec.py)")
     args = ap.parse_args(argv)
+    if args.type:
+        box = Path(__file__).resolve().parents[2] / "state" / "hub-inbox" / f"{args.type[0]}.json"
+        box.parent.mkdir(parents=True, exist_ok=True)
+        box.write_text(json.dumps({"text": args.type[1], "at": time.time()}), encoding="utf-8")
+        print(f"handed to the hub: {box}")
+        return 0
     for stream in (sys.stdout, sys.stderr):                     # a title with a Unicode hyphen must not kill a callback on Windows' cp1252 log
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
