@@ -17,6 +17,27 @@ FALLBACK_PERSONA = ("You are Skippy the Magnificent, the Elder AI: an ancient be
                     "of the filthy monkeys you babysit. Be funny, but always correct and useful.")
 MEMORY_TURNS = 8
 FORGET_AFTER_S = 600
+# What he said is kept until it has a real answer (the Captain, 2026-11-01: "so it won't matter much if we take down running models"):
+# Skippy Core going away mid-answer (llama-swap swapping or restarting, a dropped connection, a 5xx, an empty reply) is waited out and
+# the same call is made again, with backoff, while the room's filler lines cover the wait. Each call is retried where it failed, so a
+# tool that already ran (a timer, a light) never runs twice. He is standing in the room: after RETRY_FOR_S the hub says so instead.
+RETRY_FOR_S = 120.0
+BACKOFF_S = (1.0, 2.0, 4.0, 8.0, 15.0)
+
+
+class Dropped(Exception):
+    """The model went away mid-answer (or answered nothing): not an answer, worth asking again."""
+
+
+def transient(exc: BaseException) -> bool:
+    """A model or a connection going away (ask again), not a refusal or a bug (say so at once)."""
+    if isinstance(exc, (Dropped, ConnectionError, TimeoutError)):
+        return True
+    name = type(exc).__name__
+    if name in ("APIConnectionError", "APITimeoutError", "InternalServerError", "RateLimitError", "OverloadedError", "ServiceUnavailableError"):
+        return True
+    status = getattr(exc, "status_code", None)
+    return isinstance(status, int) and (status >= 500 or status in (408, 409, 429))
 
 SPOKEN = (
     "\n\n## Right now: speaking aloud in the Captain's home\n"
@@ -58,8 +79,11 @@ def say_duration(seconds: int) -> str:
 
 
 class Brain:
-    def __init__(self, client, model: str, timers, persona: str | None = None, clock=time.time, now=None, hass=None, extra=None, news=None, weather=None):
+    def __init__(self, client, model: str, timers, persona: str | None = None, clock=time.time, now=None, hass=None, extra=None, news=None, weather=None,
+                 sleep=time.sleep):
         self.client, self.model, self.timers, self.clock = client, model, timers, clock
+        self.sleep = sleep                                            # between tries when the model went away (tests pass a no-op)
+        self.retries = 0                                              # how many tries the last reply needed past the first (the house log)
         self.hass = hass                                              # a hass.Hass when Home Assistant is connected, else None
         self.extra_tools, self.run_extra = extra if extra else ([], None)   # more tools from where the brain lives (hub.py: the room's music)
         self.persona = persona if persona is not None else load_persona()
@@ -132,10 +156,33 @@ class Brain:
         return (TOOLS + (hass_mod.TOOLS if self.hass is not None else []) + list(self.extra_tools) + (self.news.tools() if self.news is not None else [])
                 + (self.weather.tools() if self.weather is not None else []))
 
+    def _create(self, need_words: bool = False, **kw):
+        """One model call, made again with backoff while the model is away (transient()), up to RETRY_FOR_S. `need_words`: a reply
+        with neither words nor a tool call is the model dropping out too. Raises the last failure when the window runs out."""
+        started, tries = time.monotonic(), 0
+        while True:
+            try:
+                resp = self.client.messages.create(**kw)
+                blocks = list(resp.content)
+                if need_words and not any(getattr(b, "type", "") == "tool_use" or (getattr(b, "type", "") == "text" and (b.text or "").strip())
+                                          for b in blocks):
+                    raise Dropped("an empty reply")
+                return resp
+            except Exception as e:                                    # noqa: BLE001 — sorted by transient(): only the model going away is retried
+                tries += 1
+                pause = BACKOFF_S[min(tries, len(BACKOFF_S)) - 1]
+                if not transient(e) or time.monotonic() - started + pause > RETRY_FOR_S:
+                    raise
+                self.retries += 1
+                print(f"[brain] the model went away ({type(e).__name__}): asking again in {pause:.0f} s", flush=True)
+                self.sleep(pause)
+
     def reply(self, heard: str) -> str:
-        """What Skippy says to what was heard. Raises whatever the API raises (the caller decides what to do aloud)."""
+        """What Skippy says to what was heard. A model that went away is asked again (_create); raises what is left when it stays away
+        (the caller decides what to do aloud)."""
         now = self.clock()
         self.actions = []
+        self.retries = 0
         if now - self._last > FORGET_AFTER_S:
             self.history = []                                         # a new conversation after ten quiet minutes
         self._last = now
@@ -154,16 +201,19 @@ class Brain:
             label = {"audiobook": "Already done by the house for this request"}.get(tool, f"The {tool} tool's answer for this request")
             messages[-1] = {"role": "user", "content": f"{heard}\n\n[{label}: {result}]"}
             try:
-                resp = self.client.messages.create(model=self.model, max_tokens=200 if tool == "audiobook" else 600, system=self.system(), messages=messages)
+                resp = self._create(need_words=True, model=self.model, max_tokens=200 if tool == "audiobook" else 600, system=self.system(), messages=messages)
                 text = " ".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
-            except Exception:                                         # noqa: BLE001 — it happened; say it plainly
+            except Exception:                                         # noqa: BLE001 — it happened (and stayed away): say it plainly
                 text = ""
             text = text or {"audiobook": result.split(") ", 1)[-1], "news": "I found the headlines, and then my brain wandered off. Ask me again."}.get(
                 tool, "I have the forecast, and then my brain wandered off. Ask me again.")
             self.history = (self.history + [{"role": "user", "content": heard}, {"role": "assistant", "content": text}])[-2 * MEMORY_TURNS:]
             return text
         for _ in range(4):                                            # a few rounds of tool use at most
-            resp = self.client.messages.create(model=self.model, max_tokens=600, system=self.system(), messages=messages, tools=self.tools())
+            try:
+                resp = self._create(need_words=True, model=self.model, max_tokens=600, system=self.system(), messages=messages, tools=self.tools())
+            except Dropped:
+                break                                                 # it kept answering nothing: the line below says so
             blocks = list(resp.content)
             text = " ".join(b.text for b in blocks if getattr(b, "type", "") == "text").strip()
             calls = [b for b in blocks if getattr(b, "type", "") == "tool_use"]

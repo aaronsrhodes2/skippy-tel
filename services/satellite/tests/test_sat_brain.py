@@ -70,12 +70,17 @@ def test_it_remembers_the_last_few_exchanges_and_forgets_after_ten_quiet_minutes
     assert [m["content"] for m in c.calls[2]["messages"]] == ["third"]
 
 
-def test_it_never_loops_forever_on_tools_and_never_returns_nothing():
+def test_it_never_loops_forever_on_tools_and_never_returns_nothing(monkeypatch):
     b, c, *_ = make(*[[tool("list_timers")] for _ in range(4)])
     assert "nothing to say" in b.reply("loop")                                                    # four rounds at most
     assert len(c.calls) == 4
-    b2, *_ = make([])
-    assert "nothing to say" in b2.reply("hmm")
+    b2, c2, *_ = make([], [text("Back.")])                                                        # an empty reply is the model dropping out:
+    b2.sleep = lambda s: None
+    assert b2.reply("hmm") == "Back." and len(c2.calls) == 2                                      # asked again (brain.RETRY_FOR_S)
+    import brain
+    monkeypatch.setattr(brain, "RETRY_FOR_S", 0.0)
+    b3, *_ = make([])
+    assert "nothing to say" in b3.reply("hmm")                                                    # and when it stays empty, never silence
 
 
 def test_the_only_tools_are_timers_and_say_duration_reads_naturally():

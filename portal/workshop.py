@@ -105,6 +105,10 @@ def _clean(event) -> dict | None:
                 "detail": str(event.get("detail") or "")[:(1200 if event["name"] == "TodoWrite" else 200)]}      # (a checklist is long)
     if event.get("t") == "ship":
         return ship_event(event)
+    if event.get("t") == "retry":                 # the model (or the bridge) went away: the run waits and goes on (workshop_engine)
+        attempt = event.get("attempt")
+        return {"t": "retry", "attempt": attempt if isinstance(attempt, int) and 0 < attempt < 10_000 else 1,
+                "why": str(event.get("why") or "")[:200]}
     if (event.get("t") == "picture" and isinstance(event.get("id"), str) and re.fullmatch(r"[0-9a-f]{16}", event["id"])
             and isinstance(event.get("prompt"), str) and event["prompt"].strip()):
         return {"t": "picture", "id": event["id"], "prompt": " ".join(event["prompt"].split())[:900],   # a picture to make (patient.py)

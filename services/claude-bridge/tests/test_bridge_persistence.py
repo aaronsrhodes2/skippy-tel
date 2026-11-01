@@ -10,7 +10,7 @@ from pathlib import Path
 
 import bridge
 import workshop_engine as engine
-from bridge_testkit import finish, make_door, make_shop, saved, wait_for
+from bridge_testkit import calls, finish, make_door, make_shop, saved, wait_for
 
 BODY = {"task": "aaaaaaaa", "conv": "conv-12345678", "message": "a message that must not be written to disk"}
 FIELDS = {"task", "conv", "who", "project", "brain", "client_id", "created", "finished_at", "done", "ok", "error", "events"}
@@ -178,19 +178,33 @@ def test_a_run_that_was_running_when_the_bridge_died_is_closed_with_the_restart_
     assert again.load() == 1 and again.get("cccccccc").error == run.error
 
 
-def test_a_real_run_cut_off_by_a_restart_is_closed_the_same_way(shop, tmp_path, monkeypatch):
+def test_a_real_run_cut_off_by_a_restart_is_picked_up_again_and_answered(shop, tmp_path, monkeypatch):
+    """The bridge dies mid-answer: the next bridge goes on with the same task (the chat is still following it), never an error ending."""
     monkeypatch.setenv("FAKE_MODE", "slow")
     run = shop.start("aaaaaaaa", "conv-12345678", "hi", who="captain@example.com")
     try:
-        saved(shop, "aaaaaaaa")
+        saved(shop, "aaaaaaaa", lambda d: d.get("message") == "hi")
+        monkeypatch.setenv("FAKE_MODE", "ok")                                  # the model is fine; only the bridge died
         restarted = make_shop(tmp_path, monkeypatch)                             # the old process is "gone": a new one over the disk
         assert restarted.load() == 1
-        closed = restarted.get("aaaaaaaa")
-        assert closed.done and closed.ok is False and closed.error == engine.RESTART_ERROR and closed.who == "captain@example.com"
+        back = finish(restarted.get("aaaaaaaa"))
+        assert back.ok is True and back.error is None and back.who == "captain@example.com"
+        assert {"t": "retry", "attempt": 1, "why": "the bridge restarted", "in_s": 0} in back.events
+        assert engine.RESUME_NOTE + "hi" in [c["stdin"] for c in calls(restarted)]   # the same words, with a note that some may be done
         assert restarted.listing()[0]["done"] is True and not restarted.busy()
+        assert "message" not in saved(restarted, "aaaaaaaa", lambda d: d["done"])   # answered: the words leave the disk again
     finally:
         shop.cancel("aaaaaaaa")
         finish(run)
+
+
+def test_a_run_that_keeps_killing_bridges_is_closed_after_all(shop):
+    write_run(shop, "cccccccc", done=False, events=[], age=30)
+    path = Path(shop.state_dir) / "cccccccc.json"
+    data = json.loads(path.read_text())
+    path.write_text(json.dumps({**data, "message": "do the thing", "resumes": engine.MAX_RESUMES}))
+    assert shop.load() == 1
+    assert shop.get("cccccccc").error == engine.RESTART_ERROR
 
 
 def test_old_and_broken_files_are_dropped_and_never_stop_the_start(shop):

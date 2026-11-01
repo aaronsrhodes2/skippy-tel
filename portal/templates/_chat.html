@@ -786,17 +786,18 @@
       alive().pulse(1);                         // a question goes out: the background stirs
       const pending = add("assistant", "…");
       inflight = new AbortController(); paintStop();
+      // Every message has a stable id and is kept (here, and as `pending` on the portal: prompts.py) until a real answer comes back.
+      const pid = opts.pid || ("p-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
       try {
-        const res = await fetch("{{ url_for('chat.send') }}", {
-          method: "POST", headers: {"Content-Type": "application/json"}, signal: inflight.signal,
-          // `page` lets Skippy know what you're looking at ("this game" = the one on screen).
-          body: JSON.stringify({message: text, history: before, page: location.pathname, brain: BRAINS.length > 1 ? brain : undefined,
-                                files: files.filter(f => !f.sending).map(f => f.ref ? {name: f.name, ref: f.ref, type: f.type, bytes: f.bytes} : {name: f.name, data: f.data}), save: allowSave(),
-                                // the suggestion this may be a yes to (the server uses it only for a plain yes)
-                                mentat_follow_up: mentatFollow && mentatFollow.chat === chatId ? mentatFollow.follow : undefined}),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || res.statusText);
+        // `page` lets Skippy know what you're looking at ("this game" = the one on screen).
+        const payload = {message: text, history: before, page: location.pathname, brain: BRAINS.length > 1 ? brain : undefined, prompt_id: pid,
+                         files: files.filter(f => !f.sending).map(f => f.ref ? {name: f.name, ref: f.ref, type: f.type, bytes: f.bytes} : {name: f.name, data: f.data}), save: allowSave(),
+                         // the suggestion this may be a yes to (the server uses it only for a plain yes)
+                         mentat_follow_up: mentatFollow && mentatFollow.chat === chatId ? mentatFollow.follow : undefined};
+        keepPending({chat: chatId, pid: pid, text: text, at: Date.now()});
+        const data = await untilAnswered(payload, pending, inflight.signal);
+        dropPending(pid);
+        pending.parentElement.classList.remove("waiting");
         show(pending, data.reply, true);
         voice.say(data.reply);
         alive().pulse(data.gap ? 0.6 : 1.8);    // an answer comes back: it surges (less so for "failed due to incompetence")
@@ -817,6 +818,8 @@
         answered = true;
       } catch (err) {
         const stopped = err.name === "AbortError";
+        dropPending(pid);                         // stopped, or a refusal the portal stands by: nothing is left to wait for
+        pending.parentElement.classList.remove("waiting");
         pending.textContent = stopped ? "Stopped." : err.message;
         pending.parentElement.classList.add("failed");
         if (opts.replace) history = before.concat(history.slice(-2));    // a failed redo leaves the last exchange as it was
@@ -830,6 +833,53 @@
         if (matchMedia("(pointer: fine)").matches) msg.focus();
         if (answered) setTimeout(drainQueue, 0);                    // stopped or failed: the line waits for his next message
       }
+    }
+    // ── A prompt is answered or it waits (prompts.py): a dropped connection, a 5xx, a redeploy or "still pending" is never the
+    // reply. The same prompt id goes again with backoff until a real answer (or a refusal the portal stands by) comes back. ──
+    const PENDING = KEY + "-pending", BACKOFF = [2, 4, 8, 15, 30], DAY = 86400000;
+    function keepPending(rec) { try { localStorage.setItem(PENDING, JSON.stringify(rec)); } catch (e) {} }
+    function dropPending(pid) { try { const r = JSON.parse(localStorage.getItem(PENDING) || "null"); if (!r || r.pid === pid) localStorage.removeItem(PENDING); } catch (e) {} }
+    function waiting(el, how) {
+      el.parentElement.classList.add("waiting");
+      el.textContent = "Waiting for Skippy, retrying" + (how && how.attempts ? " (try " + (how.attempts + 1) + (how.why ? ": " + how.why : "") + ")" : "") + "…";
+    }
+    const pause = (s, signal) => new Promise((ok, no) => {
+      const t = setTimeout(ok, s * 1000);
+      signal.addEventListener("abort", () => { clearTimeout(t); no(new DOMException("Stopped", "AbortError")); }, {once: true});
+    });
+    async function untilAnswered(payload, el, signal) {
+      const PEND = "{{ url_for('chat.pending_prompt', pid='PID') }}".replace("PID", encodeURIComponent(payload.prompt_id));
+      const watch = setInterval(() => {                              // while the portal retries, the bubble says so (and why)
+        fetch(PEND, {cache: "no-store"}).then(r => r.ok ? r.json() : null).then(v => { if (v && v.attempts && !signal.aborted) waiting(el, v); }).catch(() => {});
+      }, 3000);
+      try {
+        for (let tries = 0; ; tries++) {
+          let res = null, data = null;
+          try {
+            res = await fetch("{{ url_for('chat.send') }}", {method: "POST", headers: {"Content-Type": "application/json"}, signal: signal, body: JSON.stringify(payload)});
+            data = await res.json().catch(() => null);
+          } catch (err) { if (err.name === "AbortError") throw err; }   // the connection dropped: try again
+          const ours = !!data && data.prompt_id === payload.prompt_id;   // the portal's own word (not a front end's 502 during a deploy)
+          if (res && ours && res.status !== 202) {
+            if (res.ok) return data;
+            throw new Error(data.error || res.statusText);               // a refusal the portal stands by
+          }
+          if (res && !ours && res.status >= 400 && res.status < 500 && ![408, 425, 429].includes(res.status)) {
+            throw new Error((data && data.error) || res.statusText);     // not signed in, not allowed, too many: retrying won't help
+          }
+          waiting(el, data && data.pending ? data : null);
+          if (!(data && data.pending)) await pause(BACKOFF[Math.min(tries, BACKOFF.length - 1)], signal);   // "still pending": straight back in line
+        }
+      } finally { clearInterval(watch); }
+    }
+    function resumePending() {                                         // a reload mid-answer: the same prompt is asked for again
+      let rec = null; try { rec = JSON.parse(localStorage.getItem(PENDING) || "null"); } catch (e) {}
+      if (!rec || !rec.pid || !rec.text) return;
+      if (Date.now() - (rec.at || 0) > DAY) { dropPending(rec.pid); return; }
+      if (rec.chat !== chatId || busy || agentOn()) return;
+      const asked = history.length >= 2 ? history[history.length - 2] : null;
+      if (asked && asked.role === "user" && asked.content.startsWith(rec.text)) { dropPending(rec.pid); return; }   // it was answered after all
+      ask(rec.text, {pid: rec.pid});
     }
     // Retry: the last question again; Edit: your last message back in the box (or ↑ in an empty box), sent in its place.
     const lastPair = () => history.length >= 2 && history[history.length - 2].role === "user" && history[history.length - 1].role === "assistant";
@@ -1097,6 +1147,7 @@
     }
     root.querySelectorAll(".sheet .pg").forEach(p => { Bridge.pager(p, {pips: p.parentElement.querySelector(".pips")}); });
     replay();                                     // the open conversation (once everything it uses exists)
+    setTimeout(resumePending, 0);                // a prompt that never got its answer (a reload, a redeploy) goes again
     applyMode();                                  // the mode this browser last picked (Private, for the Captain, unless he left it elsewhere)
   })(document.currentScript.previousElementSibling);
 </script>

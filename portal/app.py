@@ -49,6 +49,7 @@ import ops
 import play
 import audiobooks as audiobooks_mod
 import player as player_mod
+import prompts as prompts_mod
 import spend
 import starcontrol
 import doomloop
@@ -2346,22 +2347,12 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 return f"(the vision model couldn't look at it: {exc})"
         return attachments_mod.text_for(files, text, describe)
 
-    @talk.post("/send")
-    @skippy_required
-    def send():
-        body = request.get_json(silent=True) or {}
-        message = (body.get("message") or "").strip()
-        if not message:
-            return jsonify(error="Say something."), 400
-        user = auth.current_user()
-        admin = auth.is_admin(user["email"])
-        if not admin:
-            if not limiter.allow("chat:" + user["email"], CHAT_PER_HOUR, 3600):
-                return jsonify(error=f"That's {CHAT_PER_HOUR} messages this hour; Skippy needs a breather. "
-                                     "Try again in a bit."), 429
+    def turn(body, message, user, admin, state):
+        """One try at answering a chat message. Raises chat.Dropped when the brain went away mid-answer: send() keeps the prompt
+        pending and tries again. `state` lives across the tries of one prompt (its trace id, its tools and their results)."""
         home.touch_chat()
         pics.touch("core")                                    # Core answers and Mentat thinks, both on skippy-core: patient jobs there wait (patient.py)
-        trace = "chat-" + secrets.token_hex(8)        # this turn's id, kept with Mentat's research record of it
+        trace = state.setdefault("trace", "chat-" + secrets.token_hex(8))   # this turn's id, kept with Mentat's research record of it
         # The person agreed to Mentat's suggested inputs: the page sends back the follow-up Mentat made, and the portal
         # asks Mentat with exactly those values (no brain retyping numbers). Anything but a plain yes ignores it.
         follow = chat_tools.clean_follow_up(body.get("mentat_follow_up")) if chat.is_yes(message) else None
@@ -2395,7 +2386,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             return jsonify(error=str(exc)), 400
         bot = bot_override or brains.chat_for(brain)
         try:
-            tools = tools_for(user, trace)
+            tools = tools_once(state, user, trace)
             tools.files = files               # a pop-up that takes a picture or a sound takes it from this message (popups.py)
             model = brains.model_of(brain)
             page = str(body.get("page") or "")[:100] or None
@@ -2475,6 +2466,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                     run_tool("make_image", {"prompt": chat.image_tag(text) or rest})   # done or drawing: the card shows it
                 except chat_tools.ToolError as exc:
                     text += f"\n\n(No picture: {exc})".replace(" Say so plainly.", "").replace(" Say so, and that it resets tomorrow.", " It resets tomorrow.")
+        except chat.Dropped:
+            raise                                     # not an answer: send() keeps the prompt and tries again
         except chat.ChatError as exc:
             return jsonify(error=str(exc)), 502
         text = chat.strip_sentinels(text)
@@ -2487,6 +2480,83 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             telemetry_web.record_chat(message, text, model, calls, forced=force)
         return jsonify(reply=text, tools=used, mentat_available=mentat_on, mentat_where=where,
                        media=tools.media, brain=brain.id, mentat=cards, barney=barney)
+
+    def tools_once(state, user, trace):
+        """The prompt's tools, made once for all its tries: a tool that already answered (a picture asked for, Mentat's result) is
+        not run again when a dropped reply is retried, so a retry never makes a second picture or a second timer."""
+        if "tools" not in state:
+            tools, ran, memo = tools_for(user, trace), None, {}
+            ran = tools.run
+
+            def run_once(name, args):
+                key = name + "|" + json.dumps(args, sort_keys=True, default=str)
+                if key not in memo:
+                    memo[key] = ran(name, args)
+                return memo[key]
+            tools.run = run_once
+            state["tools"] = tools
+        return state["tools"]
+
+    prompts = prompts_mod.Prompts()
+    app.extensions["chat_prompts"] = prompts
+
+    @talk.post("/send")
+    @skippy_required
+    def send():
+        """A chat message, kept as a pending prompt (prompts.py) until it has a real answer: a dropped reply is tried again with
+        backoff, never shown as the answer. The page's `prompt_id` makes a resend (a reload, a lost connection) join it."""
+        body = request.get_json(silent=True) or {}
+        message = (body.get("message") or "").strip()
+        if not message:
+            return jsonify(error="Say something."), 400
+        user = auth.current_user()
+        admin = auth.is_admin(user["email"])
+        pid = str(body.get("prompt_id") or "")
+        if not prompts_mod.ID.fullmatch(pid):
+            pid = "p-" + secrets.token_hex(8)                 # an old page: still kept and retried, just not resumable
+        if not admin and prompts.get(pid, user["email"]) is None:    # a resend of the same prompt is not another message
+            if not limiter.allow("chat:" + user["email"], CHAT_PER_HOUR, 3600):
+                return jsonify(error=f"That's {CHAT_PER_HOUR} messages this hour; Skippy needs a breather. "
+                                     "Try again in a bit."), 429
+        p, mine = prompts.claim(pid, user["email"])
+        if not mine:                                          # answered already, or another request is on it: wait for that one
+            if p.state != "answered":
+                p.done.wait(prompts_mod.RETRY_FOR_S)
+            if p.result is not None:
+                payload, status = p.result
+                return jsonify({**payload, "prompt_id": pid}), status
+            return jsonify(pending=True, **p.view(), prompt_id=pid), 202
+        state: dict = {}
+        deadline = time.monotonic() + prompts_mod.RETRY_FOR_S
+        try:
+            while True:
+                try:
+                    resp = app.make_response(turn(body, message, user, admin, state))
+                except chat.Dropped as exc:
+                    pause = prompts.failed(p, str(exc))
+                    print(json.dumps({"event": "chat_retry", "prompt": pid, "attempt": p.attempts, "why": str(exc)[:200]}), flush=True)
+                    if time.monotonic() + pause > deadline:
+                        prompts.released(p)               # still pending: the page sends the same id again and the tries go on
+                        return jsonify(pending=True, **p.view(), prompt_id=pid), 202
+                    time.sleep(pause)
+                    continue
+                payload = resp.get_json(silent=True) or {}
+                prompts.answered(p, payload, resp.status_code)
+                if not body.get("prompt_id"):
+                    return resp                           # an old page: the reply as it always was
+                return jsonify({**payload, "prompt_id": pid, "attempts": p.attempts}), resp.status_code
+        finally:
+            if p.state != "answered":
+                prompts.released(p)
+
+    @talk.get("/pending/<pid>")
+    @skippy_required
+    def pending_prompt(pid):
+        """How a pending prompt is doing ("waiting for Skippy, retrying"): only the person's own."""
+        p = prompts.get(pid, me()) if prompts_mod.ID.fullmatch(pid or "") else None
+        if p is None:
+            return jsonify(state="unknown")
+        return jsonify(p.view())
 
     # ── The quick spoken line: in Hands-off with the agent (Private, Auto), Skippy Core's resident chat model says one line at once ──
     # The agent's turn takes a minute (2026-10-29: 64 of the 68 s he waited for "respond to me with voice" were the agent's own tool calls;

@@ -85,6 +85,11 @@ elif mode == "noresume-errors" and resuming:        # claude 2.1.285's real shap
 elif mode == "errors-only":                         # an error whose words are only in `errors`
     out(type="result", subtype="error_during_execution", is_error=True, session_id="sess-1",
         errors=["The repository is on fire", "", "also the stapler is missing"])
+elif mode == "down" and int(open(os.environ["FAKE_DOWN"]).read() or 0) > 0:   # the model went away mid-answer, FAKE_DOWN more times
+    n = int(open(os.environ["FAKE_DOWN"]).read())
+    open(os.environ["FAKE_DOWN"], "w").write(str(n - 1))
+    out(type="assistant", message={"content": [{"type": "text", "text": "starting"}]})
+    out(type="result", is_error=True, result="API Error: Connection error.", session_id="sess-1")
 elif mode == "slow":
     import time
     out(type="assistant", message={"content": [{"type": "text", "text": "starting"}]})

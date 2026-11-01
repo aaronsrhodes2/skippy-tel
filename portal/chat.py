@@ -277,6 +277,11 @@ class ChatError(Exception):
     """A failure the user should see as a message, not a stack trace."""
 
 
+class Dropped(ChatError):
+    """The brain went away mid-answer (offline, a 5xx, rate-limited while a model loads, an empty reply): not an answer, and not
+    the person's fault. /chat/send keeps the prompt pending and tries again (prompts.py) instead of showing this as the reply."""
+
+
 class SkippyChat:
     """Claude, or anything that speaks Anthropic's Messages API: Skippy Core's llama-swap is the same SDK with its own
     base_url and key (brains.py)."""
@@ -314,7 +319,9 @@ class SkippyChat:
             calls = [b for b in response.content if b.type == "tool_use"]
             if response.stop_reason != "tool_use" or not calls or run_tool is None:
                 text = "".join(b.text for b in response.content if b.type == "text").strip()
-                return text or "(no reply)"
+                if not text:
+                    raise Dropped(f"{self.label} sent an empty reply")
+                return text
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": [self._run(run_tool, c) for c in calls]})
         return "I went round in circles with the server tools. Try the dashboard buttons."
@@ -342,10 +349,12 @@ class SkippyChat:
                     **params, betas=["server-side-fallback-2026-07-01"], fallbacks="default")
             return self._client.messages.create(**params)
         except anthropic.RateLimitError as exc:
-            raise ChatError(f"{self.label} is rate-limited right now. Try again in a minute.") from exc
+            raise Dropped(f"{self.label} is busy (rate-limited)") from exc
         except anthropic.AuthenticationError as exc:
             raise ChatError(f"The portal's key for {self.label} is missing or invalid.") from exc
         except anthropic.APIStatusError as exc:
+            if exc.status_code >= 500 or exc.status_code in (408, 409, 425):   # down, restarting, a model loading: try again
+                raise Dropped(f"{self.label} returned an error ({exc.status_code})") from exc
             raise ChatError(f"{self.label} returned an error ({exc.status_code}).") from exc
-        except anthropic.APIConnectionError as exc:
-            raise ChatError(f"Couldn't reach {self.label}: it may be offline.") from exc
+        except anthropic.APIConnectionError as exc:      # a dropped connection or a timeout (APITimeoutError is one)
+            raise Dropped(f"couldn't reach {self.label}: it may be restarting") from exc

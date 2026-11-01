@@ -42,6 +42,7 @@
   .me-chat .row button.unpin { flex: none; width: 40px; padding: 0; }
   .me-chat .convs h4 { margin: 10px 6px 4px; font-size: .74rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
   .me-chat .act { font-size: .74rem; color: var(--muted); margin: 2px 0; font-family: ui-monospace, Consolas, monospace; }
+  .me-chat .retry { font-size: .78rem; color: var(--amber, #FFAA00); font-style: italic; margin: 4px 0; }   /* the model went away mid-answer: it waits, never an error */
   .me-chat details.steps { margin: 4px 0; font-size: .74rem; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
   .me-chat details.steps > summary { cursor: pointer; list-style: none; padding: 2px 0; }
   .me-chat details.steps > summary::-webkit-details-marker { display: none; }
@@ -335,6 +336,9 @@
       let steps = null, sum = null, names = [], count = 0, todo = null, question = null;     // a run of tool calls folds into one line; tap it for each command in full
       (turn.parts || []).forEach(p => {
         if (p.t === "tool" && p.name === "TodoWrite") { todo = p; return; }               // his task list: shown below as a live checklist, not as a step
+        if (p.t === "retry") {                                                         // the model went away: it waits and goes on, never an error
+          steps = null; box.appendChild(el("div", "retry", "Waiting for Skippy, retrying (try " + ((p.attempt || 1) + 1) + (p.why ? ": " + p.why : "") + ")…")); return;
+        }
         if (p.t !== "text" && p.t !== "ship" && p.t !== "image") {
           if (!steps) { steps = el("details", "steps"); sum = el("summary"); steps.appendChild(sum); box.appendChild(steps); names = []; count = 0; }
           steps.appendChild(el("div", "act", "› " + p.name + (p.detail ? ": " + p.detail : "")));
@@ -571,7 +575,7 @@
       if (d && d.state !== "unknown") {            // a stalled or offline read is still a read: keep what it carries
         if (Array.isArray(d.events)) d.events.forEach(e => {
           if (e && e.t === "image" && Number.isInteger(e.n)) job.turn.parts.push({t: "image", n: e.n, task: job.task, mime: e.mime, name: e.name});
-          else if (e && (e.t === "text" || e.t === "tool" || e.t === "ship" || e.t === "picture" || e.t === "popup")) job.turn.parts.push(e);
+          else if (e && (e.t === "text" || e.t === "tool" || e.t === "ship" || e.t === "picture" || e.t === "popup" || e.t === "retry")) job.turn.parts.push(e);
         });
         if (typeof d.next === "number" && d.next > job.after) job.after = d.next;   // never back: a portal that was just rebuilt holds fewer events than this page has
         store.set(K.task, JSON.stringify({task: job.task, after: job.after}));
@@ -841,7 +845,7 @@
       turns = [];
       (got.turns || []).forEach(t => {
         turns.push({role: "user", text: t.message});
-        const reply = {role: "assistant", parts: (t.events || []).filter(e => e && (e.t === "text" || e.t === "tool" || e.t === "ship" || e.t === "picture" || e.t === "popup"))};
+        const reply = {role: "assistant", parts: (t.events || []).filter(e => e && (e.t === "text" || e.t === "tool" || e.t === "ship" || e.t === "picture" || e.t === "popup" || e.t === "retry"))};
         if (t.state === "error") { reply.note = t.error || "It failed."; reply.bad = t.error !== "stopped"; }
         reply.task = t.task;
         turns.push(reply);
