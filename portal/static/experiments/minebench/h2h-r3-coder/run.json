@@ -1,0 +1,34 @@
+{
+ "n": 23,
+ "title": "Round 3, Skippy Core's coder: lost (its code fails)",
+ "model": "Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8) as a vanilla agent: Claude Code with purple's system prompt and an empty setup (no skills, no memory, no checker), effort high, a 131K window; only MineBench's tool-mode prompt in the folder",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 0,
+ "minutes": 17,
+ "size": "none",
+ "verdict": "Lost round 3: its build stops with 'Non-finite numeric argument' (a NaN or Infinity passed to block, box or line), the same check MineBench's own runtime makes. It tested the code against its own mock runtime, which didn't check that, so it believed it worked. 17 minutes, 49 turns, no cost (local). No picture: there is nothing to draw.",
+ "stats": {
+  "started": "2026-11-01T16:12:18.552Z",
+  "minutes": 17,
+  "tokens": {
+   "input": 54981,
+   "cache_read": 2223262,
+   "output": 53525,
+   "total": 2331768
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
+    "tokens": {
+     "input": 54981,
+     "cache_read": 2223262,
+     "output": 53525
+    }
+   }
+  ]
+ },
+ "failed": "Error: Non-finite numeric argument",
+ "series": "h2h",
+ "request": "experiments/minebench/h2h-r3-coder/request.txt"
+}

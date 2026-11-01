@@ -1,0 +1,33 @@
+{
+ "n": 22,
+ "title": "Round 3, Haiku 5.5: won (the coder's code failed)",
+ "model": "Claude Haiku 5.5 (Anthropic's API) as a vanilla agent: Claude Code with purple's system prompt and an empty setup (no skills, no memory, no checker), effort high, a 131K window; only MineBench's tool-mode prompt in the folder",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 920840,
+ "minutes": 7,
+ "size": "256 x 67 x 256",
+ "verdict": "Won round 3 without a judge: the coder's build doesn't run, which loses under the match's rules. Haiku went big: a train through a whole landscape of mountains and forest, near a million blocks (it asked itself whether that was too many and left it). 7 minutes, 27 turns, $0.16.",
+ "stats": {
+  "started": "2026-11-01T16:12:18.748Z",
+  "minutes": 7,
+  "tokens": {
+   "input": 121176,
+   "cache_read": 1762249,
+   "output": 80173,
+   "total": 1963598
+  },
+  "models": [
+   {
+    "name": "Claude Haiku 5.5",
+    "tokens": {
+     "input": 121176,
+     "cache_read": 1762249,
+     "output": 80173
+    }
+   }
+  ]
+ },
+ "series": "h2h",
+ "request": "experiments/minebench/h2h-r3-haiku/request.txt"
+}
