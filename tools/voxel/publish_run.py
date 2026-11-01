@@ -47,14 +47,21 @@ def main():
     out = RUNS / a.id
     old = json.loads((out / "run.json").read_text(encoding="utf-8")) if (out / "run.json").exists() else None
     out.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(a.work / "build.json", out / "build.json")
+    failed = None
+    if not (a.work / "build.json").exists():   # no build at all (a one-call reply with no complete JSON): its raw reply instead
+        shutil.copyfile(a.work / "raw.txt", out / "reply.txt")
+        why = json.loads(a.single.read_text(encoding="utf-8")) if a.single else {}
+        failed = "no voxel.exec call in the reply" + (" (it stopped at its output limit)" if why.get("stop_reason") == "max_tokens" else "")
+    else:
+        shutil.copyfile(a.work / "build.json", out / "build.json")
     # the runtime first: a build whose code throws fails here in a second, with its own error, not after render.py's 120 s wait
-    r = subprocess.run(["node", str(HERE / "runtime.mjs"), str(out / "build.json")], capture_output=True, text=True)
-    if r.returncode == 0:
+    r = subprocess.run(["node", str(HERE / "runtime.mjs"), str(out / "build.json")], capture_output=True, text=True) if not failed else None
+    if r and r.returncode == 0:
         r = subprocess.run([sys.executable, str(HERE / "render.py"), str(out / "build.json"), str(out / "views.png"), a.title,
                             "--glb", str(out / "model.glb")], capture_output=True, text=True)
-    failed = None
-    if r.returncode == 0:
+    if failed:
+        shot = {"blocks": 0, "size": []}
+    elif r.returncode == 0:
         shot = json.loads(r.stdout.strip().splitlines()[-1])
     else:      # its code does not run: MineBench would score no build. Published as that, with the error, no pictures.
         err = [ln.strip() for ln in (r.stderr + r.stdout).splitlines() if "Error" in ln]
@@ -67,6 +74,8 @@ def main():
            "blocks": shot["blocks"], "minutes": stats["minutes"], "size": " x ".join(map(str, shot["size"])) or "none", "verdict": a.verdict, "stats": stats}
     if failed:
         run["failed"] = failed
+    if (out / "reply.txt").exists():
+        run["reply"] = f"experiments/minebench/{a.id}/reply.txt"
     if a.series != "tuned":
         run["series"] = a.series
     if a.request:

@@ -17,6 +17,7 @@ MODELS = {"coder": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
           "chat": "Qwen3.6-35B-A3B (Skippy Core's chat slot: UD-Q4_K_XL)",
           "vision": "Qwen3-VL-8B-Instruct (Skippy Core's vision slot: Q8_0), describing the pictures the coder opened",
           "qwen3-8b-stock": "Qwen3-8B (Skippy Core's stock 8B, router-stock slot: Q4_K_M)",
+          "router-stock": "Qwen3-8B (Skippy Core's stock 8B, router-stock slot: Q4_K_M)",
           "claude-haiku-5-5": "Claude Haiku 5.5"}
 EYES = "for you instead. What it sees"     # eyes.py's reply: "Skippy Core's vision model looked at <path> for you instead. ..."
 

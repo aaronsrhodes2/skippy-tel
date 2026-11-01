@@ -56,7 +56,7 @@
             <dt>Models</dt><dd><ul class="models">{% for m in s.models or [] %}<li>{{ m.name }}{% if m.tokens %} <small>· {{ num(m.tokens.input + m.tokens.cache_read + m.tokens.output) }} tokens</small>{% elif m.looks %} <small>· {{ m.looks }} picture{{ '' if m.looks == 1 else 's' }}</small>{% endif %}</li>{% endfor %}</ul></dd>
           </dl>
           <div class="verdict" data-full-text tabindex="0" title="Read in full">{{ r.verdict }}</div>
-          <p class="help"><a href="{{ url_for('static', filename='experiments/minebench/' ~ r.id ~ '/build.json') }}">The build itself</a> (the voxel.exec call).</p>
+          <p class="help">{% if r.reply %}<a href="{{ url_for('static', filename=r.reply) }}">Its whole reply</a> (no build came out of it).{% else %}<a href="{{ url_for('static', filename='experiments/minebench/' ~ r.id ~ '/build.json') }}">The build itself</a> (the voxel.exec call).{% endif %}</p>
         </div>
       </section>
       {% endfor %}
