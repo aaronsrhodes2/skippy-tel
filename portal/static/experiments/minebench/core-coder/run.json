@@ -1,0 +1,33 @@
+{
+ "n": 14,
+ "title": "Choo-choo train, Skippy Core's coder in one call (fails to run)",
+ "model": "Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8), one call with MineBench's own prompt, the way MineBench runs a model",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 0,
+ "minutes": 2,
+ "size": "none",
+ "verdict": "A failed build, kept. The fastest reply of all (94 seconds, 6,595 tokens), and it fails like the chat model, its sibling: MineBench gives the code block(), box(), line(), rng() and Math, but it redefines block() and box() on top of a voxel() function that does not exist, so the code stops at the first block and MineBench would score no build. Both Qwen3.6 models invent the same missing voxel call; one try, as in MineBench itself.",
+ "stats": {
+  "started": "2026-11-01T00:32:46Z",
+  "minutes": 2,
+  "tokens": {
+   "input": 1631,
+   "cache_read": 0,
+   "output": 6595,
+   "total": 8226
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
+    "tokens": {
+     "input": 1631,
+     "cache_read": 0,
+     "output": 6595
+    }
+   }
+  ]
+ },
+ "failed": "ReferenceError: voxel is not defined",
+ "series": "fresh"
+}
