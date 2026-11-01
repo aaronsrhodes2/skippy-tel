@@ -9,10 +9,10 @@
   "rooms": {
     "theater": {
       "aliases": ["the theater", "theatre", "home theater", "sony", "the sony", "the stereo", "stereo", "projector"],
-      "pods": ["theater", "office"],
+      "pods": ["theater"],
       "outputs": ["hdmi"],
       "devices": [
-        {"name": "theater pod", "kind": "pod", "note": "Waveshare 86 box; mic and speaker; replaces the Amazon Echo here (hub room 'office' until renamed 'theater')"},
+        {"name": "theater pod", "kind": "pod", "note": "Waveshare 86 box; mic and speaker; replaces the Amazon Echo here; hub room 'theater' (SATELLITE_ROOMS)"},
         {"name": "Sony sound system", "kind": "speaker", "output": "hdmi", "note": "fed over HDMI from skippy-pc"},
         {"name": "EPSON projector", "kind": "projector", "note": "fed over HDMI"},
         {"name": "skippy-pc", "kind": "computer", "note": "its HDMI feeds the Sony and the projector", "confirm": true}

@@ -118,6 +118,24 @@ class Layout:
                     out.append(o)
         return out
 
+    def place_words(self, kinds) -> str:
+        """Where a set of router outputs is, in his words: {"hdmi", "enclave"} -> "everywhere", {"enclave"} -> "upstairs",
+        {"hdmi"} -> "downstairs" (a floor when only its rooms have them, else the room); '' for none."""
+        kinds = set(kinds)
+        if not kinds:
+            return ""
+        if kinds >= set(self.all_outputs()):
+            return "everywhere"
+        names = []
+        for floor, d in self.floors.items():
+            rooms = [r for r in d.get("rooms") or [] if kinds & set(self.rooms.get(r, {}).get("outputs") or [])]
+            outs = {o for r in d.get("rooms") or [] for o in self.rooms.get(r, {}).get("outputs") or []}
+            if rooms and outs <= kinds:
+                names.append(floor)
+            else:
+                names += [r for r in rooms if r not in names]
+        return " and ".join(names)
+
     def all_outputs(self) -> list[str]:
         return self.outputs("everywhere") if self.data.get("everywhere") else \
             [o for r in self.rooms.values() for o in r.get("outputs") or []]

@@ -64,12 +64,19 @@ def test_outputs_are_router_kinds():
     assert REAL.outputs("pink floyd") is None
 
 
+def test_place_words_name_where_outputs_are():
+    assert REAL.place_words({"hdmi", "enclave"}) == "everywhere"
+    assert REAL.place_words({"enclave"}) == "upstairs"
+    assert REAL.place_words({"hdmi"}) == "downstairs"
+    assert REAL.place_words(set()) == ""
+
+
 def test_rooms_of_devices_and_pods():
     assert REAL.room_of("light.living_track_throne", "living track throne") == "living room"
     assert REAL.room_of("switch.bedroom", "Bedroom") == "bedroom"     # by its name, whatever domain the backend gives it
     assert REAL.room_of("light.lamp", "Lamp", area="Theater") == "theater"   # a backend's own room, read through the aliases
     assert REAL.room_of("light.x", "Nowhere thing") == ""
-    assert REAL.room_of_pod("office") == "theater" and REAL.room_of_pod("theater") == "theater"
+    assert REAL.room_of_pod("theater") == "theater"
 
 
 def test_the_upstairs_lights_turn_on():
@@ -143,7 +150,7 @@ def test_a_missing_file_is_an_empty_house(tmp_path):
 
 def test_skippy_knows_the_house():
     brain = Brain(client=None, model="m", timers=Timers(), persona="P")
-    brain.room = "office"
+    brain.room = "theater"
     text = brain.system()
     assert "## The house" in text and "upstairs: living room" in text and "Enclave speakers" in text
     assert "talking to you from the theater (downstairs)" in text
