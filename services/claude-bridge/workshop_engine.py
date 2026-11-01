@@ -147,6 +147,29 @@ SAVE_EVERY_S = 5.0                 # a running run is written to disk at most th
 SAVE_RETRY_S = (0.05, 0.1, 0.2, 0.4, 0.8, 1.6)   # pauses between tries of a forced write that fails (see Workshop._save)
 STATE_DIR_NAME = ".skippy-workshop-runs"   # next to the sessions file: one <task>.json per run
 RESTART_ERROR = "The bridge restarted while this was running."
+# A run is the Captain's prompt, kept until it has a real answer (the Captain, 2026-11-01: "so it won't matter much if we take down
+# running models"). A model that went away mid-answer (Skippy Core's llama-swap restarting, Anthropic overloaded, a dropped
+# connection) is not the answer: the run waits and goes on in the same session, with backoff, for up to RETRY_FOR_S. And a run the
+# bridge itself was killed in the middle of is picked up again by the next bridge (Workshop.load), not closed with RESTART_ERROR.
+RETRY_FOR_S = 30 * 60.0
+RETRY_BACKOFF_S = (5.0, 10.0, 20.0, 40.0, 60.0)    # between tries; the last repeats
+MAX_RESUMES = 3                    # a run whose bridge died this many times is closed after all (a run that kills the bridge must not loop)
+_TRANSIENT = re.compile(
+    r"connection (error|refused|reset)|econn(refused|reset)|socket hang up|fetch failed|network|timed? ?out|"
+    r"overloaded|\b(429|500|502|503|504|529)\b|bad gateway|service unavailable|internal server error|rate.?limit|"
+    r"stopped without a result|no reply|empty reply|model .*(loading|unavailable)|upstream", re.I)
+RESUME_NOTE = ("[Skippy's note: the model (or the bridge) went away in the middle of your answer to this message and is back now. "
+               "Some of the work may already be done: look at the state of things first, then carry on and finish the answer. "
+               "The Captain's message was:]\n\n")
+
+
+def transient(error: str | None) -> bool:
+    """Is this ending a model or a connection going away (retry), rather than an answer or a refusal (keep)?"""
+    return bool(error) and bool(_TRANSIENT.search(error)) and not error.lower().startswith("failed to authenticate")
+
+
+def retry_pause(attempt: int) -> float:
+    return RETRY_BACKOFF_S[min(max(attempt, 1), len(RETRY_BACKOFF_S)) - 1]
 LOGIN_TTL_S = 120.0                # how long one answer from `claude auth status` is trusted
 LOGIN_TIMEOUT_S = 15.0
 GIT_TIMEOUT = 180
@@ -422,6 +445,11 @@ class Run:
         self.save_lock = threading.Lock()      # one writer of this run's file at a time
         self.saved_at = float("-inf")          # time.monotonic() of the last attempt to save it
         self.settled = threading.Event()       # set once finish() has done all it will do, its final save (or giving up) included
+        self.retry_when = None                 # (error) -> bool, set by Workshop._work: a failure it says yes to is held, not the ending
+        self.held: str | None = None           # that failure: the run is still going and will be tried again
+        self.retries = 0                       # tries that ended in a held failure (or a bridge that died under it)
+        self.resumes = 0                       # how many bridges died under it (Workshop.load)
+        self.session_seen: str | None = None   # Claude Code's session for this run as soon as it is known: a retry resumes it
 
     def emit(self, event: dict) -> None:
         with self._cond:
@@ -431,6 +459,9 @@ class Run:
         self._changed(False)
 
     def finish(self, ok: bool, error: str | None = None) -> None:
+        if not ok and not self.cancelled and self.retry_when is not None and self.retry_when(error):
+            self.held = error or "the model went away"   # not the answer: Workshop._work tries again (the run stays not done)
+            return
         # The ship check (Workshop._ship_check) runs here, BEFORE the run reads as done, so its event is part of the run
         # the relay delivers as final: an event added after "done" could arrive after the chat stopped polling.
         hook, self.before_finish = self.before_finish, None
@@ -462,12 +493,15 @@ class Run:
                     "finished_age_s": None if self.finished_at is None else round(max(0.0, time.time() - self.finished_at), 1)}
 
     def snapshot(self) -> dict:
-        """Everything worth keeping across a bridge restart. The message text is not in it: nothing needs it again."""
+        """Everything worth keeping across a bridge restart. The message text only while the run is unanswered (a resume needs it)."""
         with self._cond:
-            return {"task": self.task, "conv": self.conv, "who": self.who, "project": self.project, "brain": self.brain,
-                    "client_id": self.client_id, "created": self.created,
-                    "finished_at": self.finished_at, "done": self.done, "ok": self.ok, "error": self.error,
-                    "events": list(self.events)}
+            out = {"task": self.task, "conv": self.conv, "who": self.who, "project": self.project, "brain": self.brain,
+                   "client_id": self.client_id, "created": self.created,
+                   "finished_at": self.finished_at, "done": self.done, "ok": self.ok, "error": self.error,
+                   "events": list(self.events)}
+            if not self.done:                  # kept until it is answered, so the next bridge can pick it back up if this one dies under it
+                out.update(message=self.message, session_seen=self.session_seen, retries=self.retries, resumes=self.resumes)
+            return out
 
     def summary(self, now: float) -> dict:
         """What GET /workshop/runs says about a run: counts and state, never the message or any event's content."""
@@ -627,6 +661,7 @@ class Workshop:
         self.sessions_path, self.remote, self.prompt_file = sessions, remote, prompt_file
         self.max_run_s = MAX_RUN_S if max_run_s is None else float(max_run_s)      # the watchdog's two limits; tests shorten them
         self.idle_s = IDLE_S if idle_s is None else float(idle_s)
+        self.retry_for_s = RETRY_FOR_S          # how long a run whose model went away keeps trying (tests shorten it)
         # Runs are saved next to the sessions file, so anything that points sessions somewhere (a test's tmp dir) moves
         # the runs with it; nothing but the real bridge ever writes to the real directory.
         self.state_dir = str(state_dir or os.path.join(os.path.dirname(sessions), STATE_DIR_NAME))
@@ -932,7 +967,7 @@ class Workshop:
             entries = sorted(root.iterdir())
         except OSError:
             return 0                                   # no directory yet: a first start, or nothing was ever saved
-        now, loaded = time.time(), 0
+        now, loaded, resume = time.time(), 0, None
         for path in entries:
             if path.name.endswith(".tmp"):             # a write the last process died in the middle of
                 _unlink(path)
@@ -959,9 +994,23 @@ class Workshop:
                 self._runs[run.task] = run             # really finished (its file says how) is replaced by the real ending
             run.on_change = self._save
             if not run.done:
-                run.finish(False, RESTART_ERROR)       # re-saves it, now closed
+                if run.message and run.resumes < MAX_RESUMES and resume is None:
+                    resume = run                       # the bridge died under it: it goes on (below), it is not over
+                else:
+                    run.finish(False, RESTART_ERROR)   # re-saves it, now closed (no words to go on with, or it keeps killing bridges)
             loaded += 1
+        if resume is not None:
+            self.resume(resume)
         return loaded
+
+    def resume(self, run: Run) -> None:
+        """Pick a run back up that a dead bridge was in the middle of: the same task (the chat is still following it), the same
+        session when it was known, the Captain's words with a note that some of it may be done."""
+        run.resumes += 1
+        run.retries += 1
+        run.emit({"t": "retry", "attempt": run.retries, "why": "the bridge restarted", "in_s": 0})
+        print(f"[bridge] resuming run {run.task} after a restart (resume {run.resumes})", file=sys.stderr, flush=True)
+        threading.Thread(target=self._work, args=(run, True), daemon=True).start()
 
     @staticmethod
     def _read(path: Path, mtime: float) -> Run | None:
@@ -986,6 +1035,13 @@ class Workshop:
                   data["client_id"][:64] if isinstance(data.get("client_id"), str) else "")
         run.events = [e for e in events if isinstance(e, dict)][:MAX_EVENTS]
         run.done = data.get("done") is True
+        if isinstance(data.get("message"), str):
+            run.message = data["message"][:MAX_MESSAGE]
+        if isinstance(data.get("session_seen"), str) and _CONV.fullmatch(data["session_seen"]):
+            run.session_seen = data["session_seen"]
+        for key in ("retries", "resumes"):
+            if isinstance(data.get(key), int) and data[key] >= 0:
+                setattr(run, key, data[key])
         run.ok = data["ok"] if isinstance(data.get("ok"), bool) else None
         run.error = data["error"] if isinstance(data.get("error"), str) else None
         run.finished_at = float(data["finished_at"]) if _is_number(data.get("finished_at")) else None
@@ -1241,6 +1297,24 @@ class Workshop:
         return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8",
                               errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, env=child_env())
 
+    def _save_leftovers(self, clone: str, task: str) -> str:
+        """Commit the clone's uncommitted tracked edits to a new local branch `purple-leftovers/<time>-<task>` and come back
+        to the branch it was on, clean. Never pushed, never deleted. Returns the branch name, or "" if any step failed
+        (then the clone is left as it was found, or on the new branch with the edits still in it: never lost)."""
+        back = self._git("rev-parse", "--abbrev-ref", "HEAD", cwd=clone).stdout.strip()
+        if not back or back == "HEAD":
+            return ""                                  # a detached clone: leave it to a human
+        branch = f"purple-leftovers/{time.strftime('%Y%m%d-%H%M%S')}-{task[:8]}"
+        who = [] if self._git("config", "user.email", cwd=clone).stdout.strip() else \
+            ["-c", "user.name=Private Skippy", "-c", "user.email=skippy@skippy-pc"]
+        steps = (("checkout", "-q", "-b", branch), ("add", "-u"),
+                 (*who, "commit", "-qm", f"Leftover edits from an unfinished private Skippy task (saved before task {task[:8]} pulled)"),
+                 ("checkout", "-q", back))
+        for step in steps:
+            if self._git(*step, cwd=clone).returncode != 0:
+                return ""
+        return branch
+
     def _prepare_repo(self, run: Run) -> bool:
         """The project's own clone, on the latest of its branch. False (with the run failed) if there's no clone to work
         in. A first use clones it (`git clone`, into the registry's `clone` path: never the Captain's checkout)."""
@@ -1266,8 +1340,14 @@ class Workshop:
             # Only tracked changes are earlier work to protect: a file git doesn't track (the agent's own `.purple-out/` scratch) never blocks a
             # fast-forward, and counting it kept the clone 7 commits behind main on 2026-10-29.
             if self._git("status", "--porcelain", "--untracked-files=no", cwd=clone).stdout.strip():
-                run.emit({"t": "text", "text": "(my clone has uncommitted changes from an earlier task, so I'm not pulling)"})
-                return True
+                # A run that never reached its finish gate (cancelled, failed, cut by a restart) left edits behind. They are
+                # committed to a branch of their own and the clone goes back clean, so the pull is never skipped (the
+                # Captain, 2026-11-01: "make them always commit"). A tool line, never chat text: nothing to read aloud.
+                saved = self._save_leftovers(clone, run.task)
+                if not saved:
+                    run.emit({"t": "tool", "name": "git", "detail": "earlier edits couldn't be saved to a branch; not pulling"})
+                    return True
+                run.emit({"t": "tool", "name": "git", "detail": f"saved an earlier task's leftover edits to branch {saved}"})
             out = self._git("pull", "--ff-only", cwd=clone)
             if out.returncode != 0:
                 run.emit({"t": "text", "text": "(couldn't fast-forward my clone: " + redact(out.stderr.strip())[:200] + ")"})
@@ -1519,9 +1599,9 @@ class Workshop:
             return None, f"it couldn't be handed over ({exc})"
         return {"type": mime, "name": os.path.basename(path)[:80], "ref": ref}, ""
 
-    def _work(self, run: Run) -> None:
+    def _work(self, run: Run, resumed: bool = False) -> None:
         try:
-            if not self._prepare_repo(run):
+            if not resumed and not self._prepare_repo(run):
                 return
             try:
                 before = self._head(self.project(run.project).clone)
@@ -1539,12 +1619,34 @@ class Workshop:
             except OSError as exc:                     # no rules, no run: never start the agent without them
                 run.finish(False, f"couldn't write my instructions file ({self.prompt_path(run.project)}): {exc}"[:300])
                 return
-            session = self._sessions().get(self.session_key(run.project, run.conv, run.brain))
-            if sdk_engine.engine_for(self.state_dir, run.brain, run.project) == "sdk":
-                sdk_engine.run_core(self, run, session)         # typed events, callbacks, bounded segments (sdk_engine.py)
-            else:
-                self._attempt(run, session)
+            words, first = run.message, time.monotonic()
+            if resumed:
+                run.message = RESUME_NOTE + words
+            run.retry_when = lambda error: transient(error) and time.monotonic() - first < self.retry_for_s
+            while True:
+                session = run.session_seen or self._sessions().get(self.session_key(run.project, run.conv, run.brain))
+                run.held = None
+                if sdk_engine.engine_for(self.state_dir, run.brain, run.project) == "sdk":
+                    sdk_engine.run_core(self, run, session)     # typed events, callbacks, bounded segments (sdk_engine.py)
+                else:
+                    self._attempt(run, session)
+                if run.done or run.held is None:
+                    break
+                run.retries += 1                       # the model went away: wait, then go on in the same session
+                pause = retry_pause(run.retries)
+                run.emit({"t": "retry", "attempt": run.retries, "why": run.held[:200], "in_s": pause})
+                print(f"[bridge] run {run.task}: {run.held[:120]!r}; trying again in {pause:.0f} s", file=sys.stderr, flush=True)
+                until = time.monotonic() + pause
+                while time.monotonic() < until and not run.cancelled:
+                    time.sleep(min(WATCH_TICK_S, max(0.0, until - time.monotonic())))
+                if run.cancelled:
+                    break
+                run.message = RESUME_NOTE + words
+            run.retry_when = None
+            if not run.done:                           # stopped while it waited, or a held failure with nothing after it
+                run.finish(False, "stopped" if run.cancelled else (run.held or "Claude Code failed."))
         except Exception as exc:  # noqa: BLE001 — a crash must end the run, or the chat waits forever
+            run.retry_when = None
             run.finish(False, f"the bridge hit a snag: {exc}"[:300])
         finally:
             # How it ended, and a fresh copy of Claude Code's whole transcript (the session id is known by now).
@@ -1648,7 +1750,7 @@ class Workshop:
                 continue
             kind = evt.get("type")
             if evt.get("session_id"):
-                seen_session = evt["session_id"]
+                seen_session = run.session_seen = evt["session_id"]
             if kind == "assistant":
                 for block in (evt.get("message") or {}).get("content") or []:
                     if block.get("type") == "text" and (block.get("text") or "").strip():

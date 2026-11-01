@@ -110,9 +110,11 @@
   /* Said alone as a turn, these end the conversation (and send nothing). */
   const END_RE = /^\s*(?:ok(?:ay)?[ ,]*)?(?:good ?bye|bye(?: bye)?|that'?s all|that is all|stop listening|end (?:the )?conversation|we'?re done|i'?m done|talk to you later|thanks|thank you(?: very much)?|thanks a lot|cheers|go to sleep|good ?night)(?:[ ,]+skipp(?:y|ie|ey))?\s*[.!?]*\s*$/i;
 
-  /* What can be said aloud at all: no code blocks, code chips, links or markdown marks. */
+  /* What can be said aloud at all: no code blocks, code chips, links or markdown marks, and no aside: a line that is all in parentheses
+     ("(my clone has uncommitted changes ...)", the Captain 2026-11-01: "I would sort of expect Skippy to gloss over that") stays on screen only. */
   function plain(text) {
-    return String(text || "").replace(/```[\s\S]*?```/g, " ").replace(/`([^`\n]*)`/g, "$1").replace(/https?:\/\/\S+/g, "")
+    return String(text || "").replace(/```[\s\S]*?```/g, " ").replace(/^[ \t]*\([^\n]*\)[ \t.]*$/gm, " ")
+      .replace(/`([^`\n]*)`/g, "$1").replace(/https?:\/\/\S+/g, "")
       .replace(/[*_#>~]+/g, "").replace(/\s+/g, " ").trim();
   }
   /* A short reply is spoken as it is; a long one is spoken as a summary (the voice gate writes it), and if that cannot be had, as its

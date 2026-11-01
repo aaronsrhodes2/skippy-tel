@@ -20,6 +20,11 @@ test("speakable drops code chips, links and markdown marks", () => {
   assert.equal(V.speakable(null), "");
 });
 
+test("a line that is all in parentheses is an aside: shown, never spoken", () => {
+  assert.equal(V.speakable("(my clone has uncommitted changes from an earlier task, so I'm not pulling)\nDone, Captain."), "Done, Captain.");
+  assert.equal(V.speakable("It's live (commit 1f79b03), refresh."), "It's live (commit 1f79b03), refresh.");   // inline stays
+});
+
 test("speakable never exceeds the gate's 500 characters and cuts at a sentence", () => {
   const long = ("This is a sentence that goes on. ").repeat(40);
   const out = V.speakable(long);
