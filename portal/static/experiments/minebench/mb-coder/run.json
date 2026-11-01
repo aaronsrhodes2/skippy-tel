@@ -1,0 +1,32 @@
+{
+ "n": 17,
+ "title": "Choo-choo train, Skippy Core's coder, MineBench's own procedure",
+ "model": "Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8_0), run exactly as MineBench runs a model: its full tool-mode prompt and its repair loop (up to 8 attempts)",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 295315,
+ "minutes": 6,
+ "size": "256 x 24 x 256",
+ "verdict": "Built on the second of MineBench's attempts (the first wrote grass_block as a bare name, not a string, and the repair prompt fixed it), 6 minutes in all. The whole train is in one line on its track: a black locomotive with yellow bands, a red cab, a coal tender and two long red coaches with rows of windows, with a station house, a platform with lamps and a few trees. Weak: it covers the entire 256 x 256 grid with a dirt plate (most of its 295,315 blocks), so the train is a thin strip in a brown field, and the forms are boxes. Only 6 pieces float.",
+ "stats": {
+  "started": "2026-11-01T03:35:52Z",
+  "minutes": 6,
+  "tokens": {
+   "input": 5283,
+   "cache_read": 0,
+   "output": 23378,
+   "total": 28661
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
+    "tokens": {
+     "input": 5283,
+     "cache_read": 0,
+     "output": 23378
+    }
+   }
+  ]
+ },
+ "series": "fresh"
+}

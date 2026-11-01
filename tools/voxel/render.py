@@ -56,7 +56,7 @@ def render(build: dict, out: Path, title: str, html_out: Path | None = None, siz
         for az, el, _ in VIEWS:
             page.evaluate(f"window.__view({az}, {el}, {zoom})")
             page.wait_for_timeout(150)
-            shots.append(Image.open(io.BytesIO(page.screenshot())))
+            shots.append(Image.open(io.BytesIO(page.screenshot(timeout=timeout_s * 1000))))   # 295K blocks took over 30 s a view
         browser.close()
     w, h = shots[0].size
     sheet = Image.new("RGB", (w * 2, h * 2 + 40), (13, 17, 23))

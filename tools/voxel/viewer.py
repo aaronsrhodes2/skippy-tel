@@ -43,7 +43,10 @@ const box = (a1, b1, c1, a2, b2, c2, t) => { [a1,b1,c1,a2,b2,c2] = [a1,b1,c1,a2,
 const line = (...g) => { let p, q, t; if (g.length === 3) { p = [g[0].x,g[0].y,g[0].z]; q = [g[1].x,g[1].y,g[1].z]; t = g[2]; } else { p = g.slice(0,3); q = g.slice(3,6); t = g[6]; }
   p = p.map(T); q = q.map(T); const n = Math.max(...p.map((v,k) => Math.abs(q[k]-v)), 1);
   for (let i = 0; i <= n; i++) put(...p.map((v,k) => Math.round(v + (q[k]-v)*i/n)), String(t)); };
-new Function("block","box","line","rng","Math","GRID_SIZE","PALETTE", '"use strict";\n' + INPUT.code)(block, box, line, rng, Math, G, INPUT.palette || "simple");
+// as MineBench runs it (and runtime.mjs): a top-level strict script with the helpers as globals, so this.block works and the code may
+// shadow them; an indirect eval is the browser's top-level script
+Object.assign(globalThis, { block, box, line, rng, GRID_SIZE: G, PALETTE: INPUT.palette || "simple" });
+(0, eval)('"use strict";\n' + INPUT.code + "\n");
 const seen = [];
 for (const [k, i] of world) { const c = k % G, b = Math.floor(k / G) % G, a = Math.floor(k / G / G);
   const open = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]].some(([dx,dy,dz]) => { const x=a+dx,y=b+dy,z=c+dz;

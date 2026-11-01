@@ -6,6 +6,7 @@
 //   add --forward=z (the direction of travel) to check the wheels against it: any round, thin disc, whatever it is made of
 //   VOXEL_DEBUG=<material> prints every round shape of that material the wheel check looked at, and why it was kept or not
 import { readFileSync, writeFileSync } from "node:fs";
+import vm from "node:vm";
 
 const SIMPLE = ["stone", "cobblestone", "oak_planks", "bricks", "stone_bricks", "grass_block", "dirt", "sand", "oak_log", "oak_leaves",
   "water", "white_wool", "black_wool", "red_wool", "blue_wool", "green_wool", "yellow_wool", "orange_wool", "purple_wool", "brown_wool",
@@ -45,8 +46,12 @@ const line = (...args) => {
   const n = Math.max(...p.map((v, k) => Math.abs(q[k] - v)), 1);
   for (let s = 0; s <= n; s++) put(...p.map((v, k) => Math.round(v + (q[k] - v) * s / n)), String(t));
 };
-new Function("block", "box", "line", "rng", "Math", "GRID_SIZE", "PALETTE", `"use strict";\n${input.code}`)(
-  block, box, line, rng, Math, G, input.palette || "simple");
+// Exactly as MineBench runs it (lib/ai/tools/voxelExec.ts, grids up to 512): a top-level strict script whose GLOBAL object holds the
+// helpers, so `this.block` works and the code may shadow them with its own `const block` or `function block` (2026-10-31: a
+// new Function with parameters rejected valid builds, "Identifier 'block' has already been declared").
+const sandbox = Object.assign(Object.create(null), { block, box, line, rng, Math, GRID_SIZE: G, PALETTE: input.palette || "simple" });
+const ctx = vm.createContext(sandbox, { name: "minebench-voxel-exec", codeGeneration: { strings: false, wasm: false } });
+new vm.Script(`"use strict";\n${input.code}\n`, { filename: "voxel.exec.js" }).runInContext(ctx, { timeout: 120000 });
 
 let lo = [G, G, G], hi = [-1, -1, -1];
 for (const k of voxels.keys()) {

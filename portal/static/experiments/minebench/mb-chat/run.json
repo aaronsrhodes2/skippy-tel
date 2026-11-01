@@ -1,0 +1,32 @@
+{
+ "n": 16,
+ "title": "Choo-choo train, Skippy Core's chat model, MineBench's own procedure",
+ "model": "Skippy Core's chat model (Qwen3.6-35B-A3B, UD-Q4_K_XL, thinking off), run exactly as MineBench runs a model: its full tool-mode prompt and its repair loop (up to 8 attempts)",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 58479,
+ "minutes": 6,
+ "size": "112 x 42 x 256",
+ "verdict": "Built on the second of MineBench's attempts (the first reply had no JSON in it), 6 minutes in all. A train you can name: a black locomotive with a stack, then red, blue and green cars, and a 256-block track with ballast and verges. But the train stands across the end of the track instead of on it: the track runs one way and the whole train the other, the lost sense of forward the older runs had. No station or scenery beyond the track bed; 33 small pieces float.",
+ "stats": {
+  "started": "2026-11-01T03:41:49Z",
+  "minutes": 6,
+  "tokens": {
+   "input": 5095,
+   "cache_read": 0,
+   "output": 9324,
+   "total": 14419
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's chat slot: UD-Q4_K_XL)",
+    "tokens": {
+     "input": 5095,
+     "cache_read": 0,
+     "output": 9324
+    }
+   }
+  ]
+ },
+ "series": "fresh"
+}
