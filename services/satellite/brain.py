@@ -5,6 +5,7 @@ It is NOT the agent: it has no shell, no files, no deploys. It talks, and it can
 """
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 
@@ -60,6 +61,13 @@ TOOLS = [
     {"name": "list_timers", "description": "What timers are running and how long each has left.",
      "input_schema": {"type": "object", "properties": {}}},
 ]
+
+
+# A reply that says it set something, with no tool called (2026-11-01: Core said "Alarm set for 14:05" and set nothing). Told so, it gets one
+# more go; still nothing, and he hears that it did not happen instead of a promise the house will not keep.
+CLAIMED = re.compile(r"\b(?:alarm|reminder|timer)s?\b[^.!?]*\b(?:set|is on|scheduled|cancel+ed|off)\b|\bset (?:an? |your |the )?(?:alarm|reminder|timer)\b"
+                     r"|\bi(?:'ll| will)(?: \w+)? (?:remind|wake)\b|\b(?:added|put|took|crossed|removed)\b[^.!?]*\blist\b|\bannounced\b", re.I)
+UNCLAIM = "That did not get done: nothing was set. Say it again and I'll actually do it this time."
 
 
 def load_persona() -> str:
@@ -223,6 +231,26 @@ class Brain:
                 break
             messages.append({"role": "assistant", "content": [self._dump(b) for b in blocks]})
             messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": c.id, "content": self.run_tool(c.name, c.input)} for c in calls]})
+        if text and not self.actions and CLAIMED.search(text):
+            print(f"[brain] claimed without a tool: {text[:80]!r}: asked again", flush=True)
+            messages += [{"role": "assistant", "content": text},
+                         {"role": "user", "content": "[The house: you said that, but you called no tool, so NOTHING was done. Call the right tool now, "
+                                                     "then say what it answered.]"}]
+            text = ""
+            for _ in range(3):
+                try:
+                    resp = self._create(need_words=True, model=self.model, max_tokens=600, system=self.system(), messages=messages, tools=self.tools())
+                except Dropped:
+                    break
+                blocks = list(resp.content)
+                text = " ".join(b.text for b in blocks if getattr(b, "type", "") == "text").strip()
+                calls = [b for b in blocks if getattr(b, "type", "") == "tool_use"]
+                if not calls:
+                    break
+                messages.append({"role": "assistant", "content": [self._dump(b) for b in blocks]})
+                messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": c.id, "content": self.run_tool(c.name, c.input)} for c in calls]})
+            if not self.actions:
+                text = UNCLAIM
         text = text or "Hm. I had nothing to say, which is unlike me."
         self.history += [{"role": "user", "content": heard}, {"role": "assistant", "content": text}]
         self.history = self.history[-2 * MEMORY_TURNS:]

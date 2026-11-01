@@ -110,3 +110,14 @@ def test_the_brain_knows_the_date():
     from brain import Brain
     b = Brain(None, "m", None, persona="P")
     assert time.strftime("%B %d, %Y") in b.system() and time.strftime("%A") in b.system()
+
+
+def test_a_reply_that_claims_an_alarm_with_no_tool_called_is_asked_again_and_never_promises_what_was_not_done():
+    calls = []
+    b, c, *_ = make([text('Alarm set for 14:05, labeled "test".')], [tool("set_timer", seconds=60)], [text("Set, for real this time.")])
+    assert b.reply("set an alarm for 14:05") == "Set, for real this time."
+    assert "NOTHING was done" in str(c.calls[1]["messages"]) and b.actions
+    b, c, *_ = make([text("Your alarm is set for seven.")], [text("Yes, it's set.")])
+    assert b.reply("wake me at 7") == "That did not get done: nothing was set. Say it again and I'll actually do it this time."
+    b, c, *_ = make([text("It is seven o'clock, monkey.")])
+    assert b.reply("what time is it") == "It is seven o'clock, monkey." and len(c.calls) == 1
