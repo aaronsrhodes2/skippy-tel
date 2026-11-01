@@ -18,7 +18,6 @@ from pathlib import Path
 
 SEARCH_URL = os.environ.get("PURPLE_SEARCH_URL", "http://skippy-core:7360").rstrip("/")   # SearXNG on skippy-core (core/compose.core.yml), tailnet only
 MAX_TEXT = 7000
-CAR_BLE_URL = os.environ.get("PURPLE_CAR_BLE_URL", "http://skippy-core:7352").rstrip("/")   # the car's charging door on skippy-core (core/car-ble), tailnet only
 CAR_FLEET_URL = os.environ.get("PURPLE_CAR_FLEET_URL", "http://skippy-core:7353").rstrip("/")   # the car as a guard (core/car-fleet), tailnet only
 CAR_URL = os.environ.get("PURPLE_CAR_URL", "http://skippy-core:7351").rstrip("/")           # the car reader (core/car): TeslaMate's latest values
 
@@ -310,7 +309,7 @@ def browse(args: dict, cwd: Path | None = None, launcher=None) -> str:
     return "\n".join(out)[:MAX_TEXT + 1500]
 
 
-# ── the Captain's car: charging on and off, over Bluetooth from skippy-core ───────────────────────────────────────────────────────────────────
+# ── the Captain's car: charging on and off, through Tesla's Fleet API (core/car-fleet) ───────────────────────────────────────────────────────────────────
 def car_charge(args: dict, post=http_post_json, get=http_get_json) -> str:
     action = str(args.get("action") or "").strip().lower()
     if action not in ("start", "stop", "limit", "status"):
@@ -318,7 +317,7 @@ def car_charge(args: dict, post=http_post_json, get=http_get_json) -> str:
     said = ""
     if action != "status":
         body = {"action": action} | ({"percent": args.get("percent")} if action == "limit" else {})
-        got = post(f"{CAR_BLE_URL}/charge", body, timeout=120.0)
+        got = post(f"{CAR_FLEET_URL}/charge", body, timeout=120.0)
         if not isinstance(got, dict) or not got.get("ok"):
             raise ValueError("The car didn't take it: " + str((got or {}).get("error") if isinstance(got, dict) else "no answer"))
         said = str(got.get("said") or "done") + ". "
@@ -552,8 +551,8 @@ TOOLS: dict[str, dict] = {
             "playlist": {"type": "string", "description": "add: the playlist's name"}}, "required": ["action"]},
         "run": spotify},
     "car_charge": {
-        "description": "The Captain's Tesla: start or stop charging, set the charge limit, or read the charge state. Commands go over Bluetooth from "
-                       "skippy-core (parked near it) with a charging-only key; the car must be plugged in to start. Use status to check before or after.",
+        "description": "The Captain's Tesla: start or stop charging, set the charge limit, or read the charge state. Commands go through Tesla's Fleet API "
+                       "(from anywhere; wakes the car once if needed); the car must be plugged in to start. Use status to check before or after.",
         "input_schema": {"type": "object", "properties": {
             "action": {"type": "string", "enum": ["start", "stop", "limit", "status"]},
             "percent": {"type": "integer", "description": "with limit: the new charge limit, 50 to 100"}}, "required": ["action"]},

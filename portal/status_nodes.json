@@ -60,10 +60,11 @@
   ]
  },
  "car-fleet": {
-  "for": "The car as a guard: keeps Sentry's alerts (someone near, the alarm), answers the alarm by flashing the lights and locking, and signs Fleet API commands with the app's key. Tailnet only, port 7353.",
+  "for": "The car as a guard and its charging: keeps Sentry's alerts (someone near, the alarm), answers the alarm by flashing the lights and locking, switches charging on and off and sets the limit, all as Fleet API commands signed with the app's key. Tailnet only, port 7353.",
   "used_by": [
    "the Captain's Discord alerts and the Car tile (through the reporter)",
-   "purple Skippy's car_sentry tool"
+   "purple Skippy's car_sentry tool",
+   "purple Skippy's car_charge tool and the bedtime routine"
   ]
  },
  "routes": {
@@ -86,12 +87,6 @@
   "for": "The geocoder behind the road door: turns a calendar's address or place name into a position, from its own Postgres import of OpenStreetMap's California extract.",
   "used_by": [
    "the road door (routes)"
-  ]
- },
- "car-ble": {
-  "for": "Switches the Tesla's charging on and off over Bluetooth (Tesla's tesla-control with a charging-only key that never leaves skippy-core). Tailnet only, port 7352.",
-  "used_by": [
-   "purple Skippy's car_charge tool"
   ]
  },
  "car": {

@@ -1,5 +1,5 @@
 # The car as a guard (fleet.py): Sentry's state from our Fleet Telemetry server, and signed Fleet API commands through Tesla's own
-# tesla-http-proxy, built from its pinned release (the same one car-ble's tesla-control comes from). Its door is 7353.
+# tesla-http-proxy, built from its pinned release (teslamotors/vehicle-command). Its door is 7353.
 FROM golang:1.23 AS build
 ARG VEHICLE_COMMAND=v0.4.1
 RUN git clone -q --depth 1 --branch ${VEHICLE_COMMAND} https://github.com/teslamotors/vehicle-command /src \

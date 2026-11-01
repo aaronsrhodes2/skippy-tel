@@ -161,9 +161,9 @@ the projector's HDMI is off at night, and skippy-pc's own Bluetooth is weak.
   runs snapclient (`enclave-snap`) into its A2DP sink only while it is connected. So snapserver lists a connected client exactly when the
   Enclave plays, and that is the one thing the hub asks before it sends.
 - **One sender:** snapserver takes one stream at a time: the hub, or `services/satellite/sync_outputs.py` while the hub isn't sending.
-- **The car shares the radio, badly:** tesla-control (core/car-ble) takes its adapter away from bluez for every charge command, which drops
-  the speaker for ~30 s (the keeper reconnects it; the hub moves the voice to the other outputs meanwhile). The fix is the car's own USB
-  radio: plug one in, then `TESLA_BT_ADAPTER=hci1` in `/etc/skippy-core/tesla-ble/vin.env` and a repair (ble.py passes `-bt-adapter`).
+- **The radio is the speaker's alone:** the car's charging used to go over it (core/car-ble's tesla-control, which took the adapter from
+  bluez and dropped the speaker for ~30 s per command); since 2026-11-01 it goes through the Fleet API (docs/tesla.md).
+- **Range:** it reaches upstairs (moved 2026-11-01, still connected). Bonded: a power-cord pull and a dropped link both came back by themselves.
 - **Look:** `journalctl --user -u enclave-keep -u enclave-snap`, `pactl list short sinks`, `bluetoothctl info 00:07:80:C5:32:90`.
 
 ## Status and recovery

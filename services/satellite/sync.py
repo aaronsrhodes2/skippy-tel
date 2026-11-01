@@ -67,9 +67,16 @@ def saved_delays(path: Path = STATE) -> dict:
     return {k: float(v["delay"]) for k, v in (load(path).get("outputs") or {}).items() if isinstance(v, dict) and "delay" in v}
 
 
-def saved_align(path: Path = STATE) -> dict:
-    """Several outputs in one room (sync_outputs.py): how long each waits so all of them sound with the slowest."""
-    return {k: float(v) for k, v in ((load(path).get("align") or {}).get("wait") or {}).items()}
+def saved_align(kinds=None, path: Path = STATE) -> dict:
+    """Several outputs at once (sync_outputs.py measured each one's latency): how long each of `kinds` waits so all of them sound with the
+    slowest OF THEM. An output on its own waits for nothing (the Enclave moved upstairs: the HDMI stops waiting for it)."""
+    lat = {k: float(v) for k, v in ((load(path).get("align") or {}).get("latency") or {}).items()}
+    if kinds is not None:
+        lat = {k: v for k, v in lat.items() if k in set(kinds)}
+    if len(lat) < 2:
+        return {}
+    slowest = max(lat.values())
+    return {k: round(slowest - v, 4) for k, v in lat.items()}
 
 
 def to_fs(pcm48):

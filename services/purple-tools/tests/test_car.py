@@ -1,4 +1,4 @@
-"""purple Skippy's car_charge: it sends only start / stop / limit to skippy-core's charging door, says the car's refusal in its own words,
+"""purple Skippy's car_charge: it sends only start / stop / limit to skippy-core's Fleet API door (core/car-fleet), says the car's refusal in its own words,
 and reads the state back from TeslaMate's reader."""
 import sys
 from pathlib import Path
@@ -19,7 +19,7 @@ def test_start_goes_to_the_charging_door_and_reads_the_car_back():
         sent.update(url=url, body=body)
         return {"ok": True, "said": "charging started"}
     out = tools.car_charge({"action": "start"}, post=post, get=lambda url, t=0: CAR)
-    assert sent == {"url": tools.CAR_BLE_URL + "/charge", "body": {"action": "start"}}
+    assert sent == {"url": tools.CAR_FLEET_URL + "/charge", "body": {"action": "start"}}
     assert out.startswith("charging started. T3-P0: battery 66%, limit 80%, plugged in, charging state Charging, 7 kW")
 
 

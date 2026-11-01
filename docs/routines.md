@@ -22,7 +22,7 @@ last evening). An early first event tomorrow moves it earlier (90 min before it,
 (or says "Skippy, I'm home"): the day's news, Bilby's shuffle, then Skippy asks about his day (the conversation stays open).
 
 **Bedtime**, on "Skippy, goodnight" ("goodnight at 11" asks at 11 first): the stereo stops, every light off, the car charging if it is
-plugged in and below its limit (Bluetooth, `core/car-ble`), Sentry armed (`core/car-fleet`, `SKIPPY_BEDTIME_SENTRY=arm|off`), his day and
+plugged in and below its limit (the Fleet API, car-fleet's `/charge`), Sentry armed (`core/car-fleet`, `SKIPPY_BEDTIME_SENTRY=arm|off`), his day and
 tomorrow's first event and to-dos, then "Anything on your mind before you sleep?".
 
 **While one runs**: each part ends with "Next: …". In the pause after it, without the name: **"skip"** drops that next part, **"later"** /
@@ -98,7 +98,7 @@ Signed in to the **work** Google account, at calendar.google.com:
 
 - Live traffic in the leave-by time (the router has none), and the work office as a stop for work meetings in a room with no address.
 - Doors, plugs, the Nest and pre-conditioning the car at night: the house shows no door sensors or thermostat right now (Matter's Nest
-  isn't listed), and car-ble has no climate command.
+  isn't listed), and car-fleet has no climate command yet (the Fleet API has one).
 - The bridge front-door switch-over, and wake-word retraining from the day's recordings: each is its own piece of work.
 
 (Chat archiving is done, on the portal's side: once a night, nudged by the home report, every chat untouched for 14 days is zipped to

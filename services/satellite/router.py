@@ -579,7 +579,7 @@ def shared(env: dict, log=print) -> Router:
             import sync                                           # noqa: PLC0415
             solo = speaker_out.one_voice(env)
             if solo:                                              # the PC output is the room's only voice: nothing to wait for, just a jitter cushion
-                align = sync.saved_align()                        # several outputs in one room: the faster ones wait for the slowest (sync_outputs.py)
+                align = sync.saved_align(used)                    # several outputs in use: the faster ones wait for the slowest (sync_outputs.py)
                 for k in sync.pod_rooms_kinds(env):
                     delays[k] = float(env.get("SATELLITE_SOLO_DELAY", str(SOLO_DELAY_S))) + align.get(k, 0.0)
             else:

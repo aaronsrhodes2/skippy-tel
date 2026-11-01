@@ -97,7 +97,7 @@ def test_the_matter_controller_is_checked_only_where_it_runs(stack, monkeypatch)
 
 
 def test_a_door_that_is_up_but_not_ready_is_said_not_failed(monkeypatch):
-    """car-ble, car-fleet and the road door answer 503 with the readiness contract while they wait (no key yet, the first map import):
+    """car-fleet and the road door answer 503 with the readiness contract while they wait (no key yet, the first map import):
     the deploy goes on. A door that doesn't answer at all, or answers 500, is red."""
     from flask import Flask, jsonify
     door = Flask("door")
@@ -108,12 +108,12 @@ def test_a_door_that_is_up_but_not_ready_is_said_not_failed(monkeypatch):
         return jsonify(answer["body"]), answer["code"]
     server, url = _serve(door)
     try:
-        assert smoke.check_car_ble(wait=1, url=url) == "up, not ready: waiting on valhalla (building California's road tiles)"
+        assert smoke.check_door(wait=1, url=url) == "up, not ready: waiting on valhalla (building California's road tiles)"
         answer.update(code=200, body={"ready": True})
-        assert smoke.check_car_ble(wait=1, url=url) == "ready"
+        assert smoke.check_door(wait=1, url=url) == "ready"
         answer.update(code=500, body={"error": "boom"})
         with pytest.raises(smoke.Fail):
-            smoke.check_car_ble(wait=0, url=url)
+            smoke.check_door(wait=0, url=url)
         monkeypatch.setenv("CORE_ROUTES", "1")
         monkeypatch.setattr(smoke, "ROUTES", url)
         answer.update(code=503, body={"ready": False, "detail": "importing"})

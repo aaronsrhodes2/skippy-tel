@@ -4,7 +4,6 @@
 #   sudo bash core/install/tesla.sh            # dry run: says what it would do, changes nothing
 #   sudo bash core/install/tesla.sh --apply
 #   sudo bash core/install/tesla.sh --check    # read-only: is all of it live? exit 1 if not
-#   sudo bash core/install/tesla.sh --pair     # sends the charging key's pairing request: then tap the key card on the centre console
 # Idempotent.
 #
 #   * /etc/skippy-core/tesla.env (root, 600): ENCRYPTION_KEY (TeslaMate encrypts the Tesla tokens with it), DATABASE_PASS and
@@ -12,14 +11,13 @@
 #     make the stored tokens unreadable and the Captain would have to sign in again.
 #   * the tailnet doors (never the Funnel): :4000 TeslaMate's page (the one-time sign-in, and its settings), :7351 the car reader
 #     (skippy-pc's reporter, CAR_URL). Both proxy to 127.0.0.1, so ufw keeps denying everything inbound.
-#   * /etc/skippy-core/tesla-ble/ (root, 700): the charging key (private.pem, made here once, never leaves the box; public.pem) and
-#     vin.env (TESLA_VIN, read from TeslaMate). The car-ble container (core/car-ble) signs charge commands with it over Bluetooth; the
-#     key is enrolled as charging_manager, so the car takes nothing else from it. :7352 is its tailnet door.
+#   * /etc/skippy-core/tesla-ble/vin.env (root, 700 directory): TESLA_VIN, read from TeslaMate, for car-fleet. (The folder's name is from
+#     the Bluetooth charging door, core/car-ble, retired 2026-11-01: charging goes through the Fleet API now, car-fleet's /charge.)
 #   * /etc/skippy-core/tesla-fleet/telemetry/ (root, 700): the car's streaming door (docs/tesla.md → Sentry): our own CA and a server
 #     certificate for telemetry.makerportal.live (Tesla takes only a name under the app's domain, so not the Funnel; the CA is made
 #     once and goes to the car in its signed config), host.env (TELEMETRY_HOST). The home router forwards TCP 7443 to this box's
 #     7443 (fleet-telemetry: the car's mutual TLS ends there) and cd.py keeps the name on home's public IP. :7353 is
-#     car-fleet's tailnet door (the guard: Sentry's events, arm/disarm, the alarm's answer).
+#     car-fleet's tailnet door (the guard: Sentry's events, arm/disarm, the alarm's answer; charging on/off and the limit).
 #   * /etc/skippy-core/core.env: CORE_TESLA=1, then a repair so it starts now rather than at the next commit.
 set -euo pipefail
 MODE="${1:-}"
@@ -28,7 +26,7 @@ CORE_ENV="${CORE_ENV:-/etc/skippy-core/core.env}"
 TESLA_ENV="${TESLA_ENV:-/etc/skippy-core/tesla.env}"
 REPO="${REPO:-/opt/skippy-core/repo}"
 BLE="${BLE:-/etc/skippy-core/tesla-ble}"
-DOORS=(4000 7351 7352 7353)
+DOORS=(4000 7351 7353)
 TELE="${TELE:-/etc/skippy-core/tesla-fleet/telemetry}"
 TELE_PORT=7443
 TELE_HOST="${TELE_HOST:-telemetry.makerportal.live}"   # Tesla takes only a name under the app's domain
@@ -41,8 +39,8 @@ if [[ "$MODE" == "--check" ]]; then
   chk "CORE_TESLA=1 in $CORE_ENV"        'grep -qx "CORE_TESLA=1" "$CORE_ENV"'
   for p in "${DOORS[@]}"; do chk ":$p served to the tailnet only" "served $p"; done
   chk "TeslaMate's page answers on :4000" 'curl -fsS --max-time 5 -o /dev/null http://127.0.0.1:4000/'
-  chk "the charging key exists, root only" '[[ $(stat -c %a "$BLE/private.pem") == 600 ]] && grep -q "^TESLA_VIN=." "$BLE/vin.env"'
-  chk "the charging door answers on :7352" 'curl -sS --max-time 5 -o /dev/null http://127.0.0.1:7352/health'
+  chk "the VIN is known (vin.env)"       'grep -q "^TESLA_VIN=." "$BLE/vin.env"'
+  chk "the old Bluetooth door is gone"   '! served 7352'
   chk "the telemetry certificate exists, root only" '[[ $(stat -c %a "$TELE/server.key") == 600 ]] && grep -q "^TELEMETRY_HOST=." "$TELE/host.env"'
   chk "$TELE_HOST points at home" '[[ $(getent ahostsv4 "$TELE_HOST" | awk "NR==1{print \$1}") == $(curl -s -m 10 -4 https://api.ipify.org) ]]'
   chk "fleet-telemetry listens on :7443" 'timeout 5 bash -c "</dev/tcp/127.0.0.1/7443"'
@@ -51,16 +49,6 @@ if [[ "$MODE" == "--check" ]]; then
   if curl -fsS --max-time 5 http://127.0.0.1:7351/health >/dev/null 2>&1; then echo "ok    a car is signed in"
   else echo "todo  no car yet: the Captain signs in to Tesla at http://skippy-core:4000 (not a failure)"; fi
   exit $bad
-fi
-
-if [[ "$MODE" == "--pair" ]]; then
-  [[ $EUID -eq 0 ]] || { echo "run it with sudo" >&2; exit 1; }
-  # shellcheck disable=SC1091
-  . "$BLE/vin.env"
-  c=$(docker ps --format '{{.Names}}' | grep -m1 'car-ble') || { echo "the car-ble container isn't running (sudo bash $0 --apply)" >&2; exit 1; }
-  docker exec "$c" tesla-control -ble -vin "$TESLA_VIN" add-key-request /keys/private.pem charging_manager cloud_key
-  echo "now tap the key card on the centre console and approve it on the car's screen"
-  exit 0
 fi
 
 do_() { if (( APPLY )); then echo "+ $*"; "$@"; else echo "would: $*"; fi; }
@@ -83,13 +71,8 @@ elif (( APPLY )); then
   echo "+ made $TESLA_ENV (600)"
 else echo "would: make $TESLA_ENV with a new ENCRYPTION_KEY and database password (600, root)"; fi
 
-echo "== the charging key ($BLE)"
-if [[ -s "$BLE/private.pem" ]]; then echo "ok: $BLE/private.pem (kept: a new key would need pairing again)"
-elif (( APPLY )); then
-  install -d -m 700 "$BLE"
-  ( umask 077; openssl ecparam -name prime256v1 -genkey -noout -out "$BLE/private.pem"; openssl ec -in "$BLE/private.pem" -pubout -out "$BLE/public.pem" 2>/dev/null )
-  echo "+ made $BLE/private.pem (600): pair it with --pair"
-else echo "would: make the charging key in $BLE (700, root)"; fi
+echo "== the car's VIN ($BLE/vin.env)"
+(( APPLY )) && install -d -m 700 "$BLE"
 if grep -q "^TESLA_VIN=." "$BLE/vin.env" 2>/dev/null; then echo "ok: $BLE/vin.env"
 elif (( APPLY )); then
   db=$(docker ps --format '{{.Names}}' | grep -m1 'tesla-db' || true)
@@ -122,10 +105,11 @@ elif (( APPLY )); then ( umask 077; echo "TELEMETRY_HOST=$host" > "$TELE/host.en
 else echo "would: write $TELE/host.env (TELEMETRY_HOST=$host)"; fi
 echo "the router forwards TCP $TELE_PORT to this box's $TELE_PORT; cd.py keeps $host on home's public IP (deploy.json home_dns)"
 
-echo "== 2/3 the tailnet doors (TeslaMate's page, the car reader, the charging door)"
+echo "== 2/3 the tailnet doors (TeslaMate's page, the car reader, the guard and charging)"
 for p in "${DOORS[@]}"; do
   if served "$p"; then echo "ok: :$p already served"; else do_ tailscale serve --bg --http="$p" "http://127.0.0.1:$p"; fi
 done
+if served 7352; then do_ tailscale serve --http=7352 off; fi   # the retired Bluetooth charging door (core/car-ble)
 
 echo "== 3/3 the deployer runs it"
 setting CORE_TESLA 1

@@ -31,7 +31,6 @@ from pathlib import Path
 
 KM_TO_MI = 0.621371192237334            # Mentat convert_units 1 km -> mile (pint UnitRegistry), 2026-10-31
 CAR_URL = os.environ.get("SKIPPY_CAR_URL", "http://skippy-core:7351").rstrip("/")            # the car reader (core/car): TeslaMate's latest values
-CAR_BLE_URL = os.environ.get("SKIPPY_CAR_BLE_URL", "http://skippy-core:7352").rstrip("/")    # charging over Bluetooth (core/car-ble)
 CAR_FLEET_URL = os.environ.get("SKIPPY_CAR_FLEET_URL", "http://skippy-core:7353").rstrip("/")  # Sentry through the Fleet API (core/car-fleet)
 ROUTES_URL = os.environ.get("SKIPPY_ROUTES_URL", "http://skippy-core:7354").rstrip("/")      # roads and addresses on skippy-core (core/routes)
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
@@ -878,7 +877,7 @@ class Daily:
         if car and car.get("plugged_in") and car.get("charging_state") not in ("Charging", "Complete") \
                 and (car.get("battery_level") or 0) < (car.get("charge_limit_soc") or 80):
             try:
-                got = await asyncio.to_thread(self.post, f"{CAR_BLE_URL}/charge", {"action": "start"}, 120)
+                got = await asyncio.to_thread(self.post, f"{CAR_FLEET_URL}/charge", {"action": "start"}, 120)
                 said.append("The car is charging." if got.get("ok") else f"The car refused to charge: {got.get('error') or 'no reason'}.")
             except Exception as e:                                    # noqa: BLE001
                 said.append(f"I couldn't reach the car to start charging ({type(e).__name__}).")

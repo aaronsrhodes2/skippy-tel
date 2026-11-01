@@ -13,6 +13,8 @@ fresh here. Tesla lets no app read the cameras' pictures or set the cabin lights
     GET  /sentry      {"state", "since", "events": [{"id", "at", "state", "said"}], "react", "telemetry": {"heard_s", "online"}}
     POST /sentry      {"action": "arm"|"disarm"}               Sentry Mode on or off (wakes the car once if it's asleep)
     POST /command     {"action": "flash"|"lock"}               the two things the guard does, by hand (to test it)
+    POST /charge      {"action": "start"|"stop"}               charging on or off (2026-11-01: replaced core/car-ble's Bluetooth, which
+                      {"action": "limit", "percent": 85}        fought the Enclave speakers for skippy-core's radio); {"ok", "said"|"error"}
     POST /telemetry   {"action": "push"|"status"}              send the car its streaming config (signed), or read what it has
 """
 from __future__ import annotations
@@ -228,6 +230,33 @@ class Fleet:
         why = (result or {}).get("reason") if isinstance(result, dict) else None
         return str(why or (got or {}).get("error") or f"HTTP {code}")[:200]
 
+    # What the car says when it won't, in plain words; the first three mean there was nothing to do.
+    CHARGE_REASONS = (("is_charging", "it was already charging"), ("not_charging", "it wasn't charging"),
+                      ("complete", "the battery is already at its limit"), ("disconnected", "the car isn't plugged in"),
+                      ("already_set", "the limit was already set to that"))
+
+    def charge(self, action: str, percent=None) -> dict:
+        """Charging on or off, or the charge limit (wakes a sleeping car once). {"ok", "said"} or {"ok": False, "error"}."""
+        if action == "limit":
+            try:
+                p = int(percent)
+            except (TypeError, ValueError):
+                raise ValueError("a limit needs a percent") from None
+            if not 50 <= p <= 100:
+                raise ValueError("the car takes a charge limit from 50 to 100%")
+            name, body, said = "set_charge_limit", {"percent": p}, f"charge limit set to {p}%"
+        elif action in ("start", "stop"):
+            name, body, said = f"charge_{action}", None, f"charging {action}{'ed' if action == 'start' else 'ped'}"
+        else:
+            raise ValueError("action is start, stop or limit")
+        why = self.command(name, body, wake=True)
+        if not why:
+            return {"ok": True, "said": said}
+        reason = next((words for needle, words in self.CHARGE_REASONS if needle in why.lower()), why)
+        if reason in ("it was already charging", "it wasn't charging", "the battery is already at its limit", "the limit was already set to that"):
+            return {"ok": True, "said": f"nothing to do: {reason}"}
+        return {"ok": False, "error": reason}
+
     def guard(self) -> str:
         """What the car does when Sentry's alarm goes off: flash the lights, lock the doors (no horn: the Captain)."""
         bits = []
@@ -325,6 +354,12 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/command" and action in ("flash", "lock"):
                 why = FLEET.command("flash_lights" if action == "flash" else "door_lock")
                 return self._send(200 if not why else 502, {"ok": not why, "error": why})
+            if path == "/charge":
+                try:
+                    got = FLEET.charge(action, (body or {}).get("percent"))
+                except ValueError as exc:
+                    return self._send(400, {"ok": False, "error": str(exc)})
+                return self._send(200 if got["ok"] else 502, got)
             if path == "/telemetry" and action == "push":
                 ok, said = FLEET.push_telemetry()
                 return self._send(200 if ok else 502, {"ok": ok, "said": said})
@@ -332,7 +367,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True, **FLEET.telemetry_status()})
         except RuntimeError as exc:                 # no tokens, a refused refresh
             return self._send(503, {"ok": False, "error": str(exc)})
-        self._send(400, {"ok": False, "error": "POST /sentry arm|disarm, /command flash|lock, /telemetry push|status"})
+        self._send(400, {"ok": False, "error": "POST /sentry arm|disarm, /command flash|lock, /charge start|stop|limit, /telemetry push|status"})
 
     def log_message(self, *args):   # quiet: the reporter asks every 15 s
         pass

@@ -18,7 +18,6 @@ Checks, in order (each prints ok/FAIL and its time; exit 1 if any fails):
   car-fleet   (only when CORE_TESLA=1) the guard's /health answers (core/car-fleet); not ready (no tokens yet) is said, not failed
   routes      (only when CORE_ROUTES=1) the road door's /health answers (core/routes); not ready (the first map import, about an hour)
               is said, not failed
-  car-ble     (only when CORE_TESLA=1) the charging door's /health answers (core/car-ble); not ready (no key paired) is said, not failed
 
 URLs: SMOKE_SHIM (http://127.0.0.1:11434), SMOKE_LLM (http://127.0.0.1:8080);
 the slot list comes from ${CORE_STATE}/llm/shim.json (or SMOKE_NAMES).
@@ -39,7 +38,6 @@ LLM = os.environ.get("SMOKE_LLM", "http://127.0.0.1:8080").rstrip("/")
 MATTER = os.environ.get("SMOKE_MATTER", "http://127.0.0.1:5580").rstrip("/")
 CAR = os.environ.get("SMOKE_CAR", "http://127.0.0.1:7351").rstrip("/")
 ROUTES = os.environ.get("SMOKE_ROUTES", "http://127.0.0.1:7354").rstrip("/")
-CAR_BLE = os.environ.get("SMOKE_CAR_BLE", "http://127.0.0.1:7352").rstrip("/")
 CAR_FLEET = os.environ.get("SMOKE_CAR_FLEET", "http://127.0.0.1:7353").rstrip("/")
 DEFAULT = os.environ.get("OLLAMA_MODEL", "qwen3:8b")
 TIMEOUT = float(os.environ.get("SMOKE_TIMEOUT", "300"))   # CPU stand-ins, cold loads: generous
@@ -189,14 +187,13 @@ def check_car(wait: float = 30):
         time.sleep(2)
 
 
-def check_car_ble(wait: float = 30, url: str = ""):
-    """The charging door (core/car-ble) answers its /health. Not ready (no key paired yet, no radio) is said, not failed: the reader is the car's
-    pulse; this one only needs to be up. The guard (core/car-fleet) and the road door (core/routes: an hour-long first map import) are checked
-    the same way."""
+def check_door(wait: float = 30, url: str = ""):
+    """A door with the readiness contract answers its /health: the guard and charging (core/car-fleet), the road door (core/routes: an
+    hour-long first map import). Not ready (no tokens yet, the map still importing) is said, not failed: they only need to be up."""
     deadline = time.monotonic() + wait
     while True:
         try:
-            status, text = call("GET", f"{url or CAR_BLE}/health", timeout=10)     # (not call_json: its Fail on a 503 would fail the deploy)
+            status, text = call("GET", f"{url}/health", timeout=10)     # (not call_json: its Fail on a 503 would fail the deploy)
             if status in (200, 503):
                 body = json.loads(text or "{}")
                 return "ready" if status == 200 and body.get("ready") else f"up, not ready: {body.get('detail')}"
@@ -237,9 +234,9 @@ def run(only: list[str] | None = None, wait: float = 0) -> list[dict]:
             results.append({"check": "ready", "ok": True, "detail": "", "s": round(time.monotonic() - t0, 1)})
         except Fail as e:
             return [{"check": "ready", "ok": False, "detail": str(e), "s": round(time.monotonic() - t0, 1)}]
-    extra = ([("matter", check_matter)] if os.environ.get("CORE_MATTER") == "1" else []) +             ([("car", check_car), ("car-ble", check_car_ble),
-                                                                                               ("car-fleet", lambda: check_car_ble(url=CAR_FLEET))] if os.environ.get("CORE_TESLA") == "1" else []) + \
-        ([("routes", lambda: check_car_ble(url=ROUTES))] if os.environ.get("CORE_ROUTES") == "1" else [])
+    extra = ([("matter", check_matter)] if os.environ.get("CORE_MATTER") == "1" else []) +             ([("car", check_car),
+                                                                                               ("car-fleet", lambda: check_door(url=CAR_FLEET))] if os.environ.get("CORE_TESLA") == "1" else []) + \
+        ([("routes", lambda: check_door(url=ROUTES))] if os.environ.get("CORE_ROUTES") == "1" else [])
     for name, fn in CHECKS + extra:
         if only and name not in only:
             continue

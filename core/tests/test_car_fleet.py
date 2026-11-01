@@ -2,6 +2,8 @@
 for AWARE and PANIC (never for the broker's retained copy), the alarm answered by flashing the lights and locking (never the horn), at most
 once a minute; his tokens refreshed before they run out and rewritten root-only; the streaming config carries our CA and only Sentry."""
 import json
+
+import pytest
 import sys
 
 from core_testlib import CORE, load
@@ -135,3 +137,21 @@ def test_the_container_keeps_its_doors_local_and_the_server_pinned():
     conf = json.loads((CORE / "car-fleet" / "telemetry.json").read_text(encoding="utf-8"))
     assert conf["port"] == 7443 and conf["records"]["V"] == ["mqtt"] and conf["mqtt"]["broker"] == "mosquitto:1883"
     assert "ARG VEHICLE_COMMAND=v0.4.1" in (CORE / "car-fleet" / "Dockerfile").read_text(encoding="utf-8")
+
+
+def test_charging_is_three_signed_commands_and_nothing_to_do_is_ok():
+    """Charging over the Fleet API (2026-11-01: core/car-ble's Bluetooth retired; it fought the Enclave for skippy-core's radio)."""
+    paths = []
+    f = fleet.Fleet(tokens=type("T", (), {"get": lambda self: "tok"})(), vin="5YJTEST",
+                    call=lambda m, p, b, t: paths.append((p, b)) or (200, {"response": {"result": True}}))
+    assert f.charge("start") == {"ok": True, "said": "charging started"}
+    assert f.charge("limit", 80) == {"ok": True, "said": "charge limit set to 80%"}
+    assert paths == [("/api/1/vehicles/5YJTEST/command/charge_start", {}),
+                     ("/api/1/vehicles/5YJTEST/command/set_charge_limit", {"percent": 80})]
+    f.call = lambda m, p, b, t: (200, {"response": {"result": False, "reason": "already_set"}})
+    assert f.charge("limit", 80) == {"ok": True, "said": "nothing to do: the limit was already set to that"}
+    f.call = lambda m, p, b, t: (200, {"response": {"result": False, "reason": "disconnected"}})
+    assert f.charge("start") == {"ok": False, "error": "the car isn't plugged in"}
+    for bad in (("limit", 30), ("limit", None), ("wipe", None)):
+        with pytest.raises(ValueError):
+            f.charge(*bad)

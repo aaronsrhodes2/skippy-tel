@@ -196,9 +196,11 @@ def test_a_reflection_beside_the_projector_copy_is_not_taken_for_a_late_pod(tmp_
 def test_saved_align_reads_each_outputs_wait(tmp_path):
     import json
     p = tmp_path / "audio-sync.json"
-    p.write_text(json.dumps({"align": {"wait": {"hdmi": 0.147, "enclave": 0.0}}}))
-    assert sync.saved_align(p) == {"hdmi": 0.147, "enclave": 0.0}
-    assert sync.saved_align(tmp_path / "none.json") == {}
+    p.write_text(json.dumps({"align": {"latency": {"hdmi": 0.150, "enclave": 0.297}}}))
+    assert sync.saved_align(path=p) == {"hdmi": 0.147, "enclave": 0.0}
+    assert sync.saved_align({"hdmi", "enclave", "pod"}, path=p) == {"hdmi": 0.147, "enclave": 0.0}
+    assert sync.saved_align({"hdmi"}, path=p) == {}                       # alone in its room: waits for nothing
+    assert sync.saved_align(path=tmp_path / "none.json") == {}
 
 
 def test_pod_rooms_kinds_reads_preferences():

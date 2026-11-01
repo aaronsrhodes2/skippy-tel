@@ -16,9 +16,8 @@
 #     the Funnel (they have no key of their own).
 #   * enclave-keep (aaron's user service, core/enclave/keep.sh): connects the speaker whenever it is on and starts snapclient
 #     (enclave-snap) into its A2DP sink only while it is connected. So snapserver lists a client exactly when the Enclave plays.
-#   * The radio: tesla-control (core/car-ble) takes its adapter away from bluez for every charge command, which drops the speaker for
-#     ~30 s (the keeper reconnects it; the hub's router moves the voice to the other outputs meanwhile). The fix is a second USB radio
-#     for the car: TESLA_BT_ADAPTER=hci1 in /etc/skippy-core/tesla-ble/vin.env (core/car-ble/ble.py), and the Enclave keeps hci0.
+#   * The radio is the speaker's alone: the car's charging goes through the Fleet API (core/car-fleet), not Bluetooth (core/car-ble,
+#     retired 2026-11-01: tesla-control took the adapter from bluez and dropped the speaker for every command).
 set -euo pipefail
 MODE="${1:-}"
 APPLY=0; [[ "$MODE" == "--apply" || "$MODE" == "--pair" ]] && APPLY=1
@@ -42,7 +41,6 @@ if [[ "$MODE" == "--check" ]]; then
   chk "its A2DP sink in PipeWire"           'as_user pactl list short sinks | grep -q "bluez_output.${MAC//:/_}"'
   chk "snapclient playing into it"          'as_user systemctl --user is-active -q enclave-snap'
   chk ":4953 and :1780 on the tailnet"      'tailscale serve status | grep -q ":4953" && tailscale serve status | grep -q ":1780 (tailnet only)"'
-  chk "the car's BLE door answers"          'curl -fsS -m 5 http://127.0.0.1:7352/health | grep -q "\"ready\": true"'
   exit $bad
 fi
 

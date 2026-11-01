@@ -39,24 +39,21 @@ TeslaMate asks for an **access token and a refresh token** from his Tesla accoun
 2. Open `http://skippy-core:4000` (or tap the Car tile, which links there until a car reports) and paste both.
 3. Within a minute the Car tile shows the car. TeslaMate refreshes the tokens itself from then on.
 
-## Charging on and off: Bluetooth, from skippy-core (2026-10-30)
-
-skippy-core is parked close enough to hear the car, so charging is switched over Bluetooth: no Tesla server, no fee.
+## Charging on and off: the Fleet API (2026-11-01)
 
 ```
-purple Skippy ── car_charge (services/purple-tools) ── :7352 car-ble (core/car-ble, tailnet only) ── tesla-control ── Bluetooth ── car
+purple Skippy ── car_charge (services/purple-tools) ─┐
+bedtime routine (services/satellite/daily.py) ───────┴─ :7353 car-fleet POST /charge ── tesla-http-proxy (signed) ── Fleet API ── car
 ```
 
-- **car-ble** (`core/car-ble/ble.py`, in `compose.tesla.yml`): Tesla's own `tesla-control` (teslamotors/vehicle-command, pinned v0.4.1, built
-  into the image) behind `POST /charge {"action": "start"|"stop"|"limit", "percent"}`. Host networking + NET_ADMIN/NET_RAW (the radio is the
-  host's); listens on 127.0.0.1 only. One command at a time; a sleeping car is woken once and asked again. It shares the radio with
-  bluetoothd (Matter's device setup): tested, both work.
-- **The key**: `/etc/skippy-core/tesla-ble/private.pem` (made by `tesla.sh --apply`, never leaves the box), enrolled as
-  **charging_manager**, so the car takes nothing from it but charging. `vin.env` holds the VIN (read from TeslaMate).
-- **Pairing, once (the Captain, at the car):** `sudo bash core/install/tesla.sh --pair`, then tap the key card on the centre console and
-  approve it on the screen.
+- **car-fleet** (`core/car-fleet/fleet.py`) answers `POST /charge {"action": "start"|"stop"}` or `{"action": "limit", "percent": 50..100}`
+  with `charge_start`, `charge_stop` or `set_charge_limit`, signed with the app's key like the guard's commands; a sleeping car is woken once.
+  The car's "already charging", "not charging", "already at its limit" and "already set" are `ok` with "nothing to do"; "not plugged in" is said.
 - **purple Skippy's `car_charge`**: start, stop, limit, status; after a command it reads the state back from the car reader.
-- Out of Bluetooth range (away from home) it can't reach the car: that is what the Fleet API below would add.
+- Works from anywhere, and costs a Fleet API command each time (inside Tesla's monthly credit for personal use).
+- **Retired: Bluetooth from skippy-core** (`core/car-ble`, 2026-10-30 to 2026-11-01). Its charging key was never enrolled in the car, and
+  tesla-control took skippy-core's only radio away from bluez for every command, dropping the Enclave speakers (core/README.md). The VIN
+  still lives in `/etc/skippy-core/tesla-ble/vin.env`; the old `private.pem` there is unused.
 
 ## His normal routes trim the traffic alerts (2026-10-31)
 
