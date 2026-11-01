@@ -254,8 +254,7 @@
         {
           "id": "light.deck_sliding_door",
           "name": "Deck sliding door",
-          "kind": "light",
-          "confirm": true
+          "kind": "light"
         }
       ],
       "note": "outside, at the upstairs' ground level (the house's lower floor is the theater and garage)"
