@@ -10,6 +10,9 @@ internet exactly two things:
     POST /t/<pass>/tts               {"text", "voice"?} (at most 500 chars) -> audio/mpeg in the pass's voice (or "stock"): see VOICES
     POST /t/<pass>/summary           {"text"} (at most 8000 chars) -> {"text}: what a person would SAY aloud about it, 2 to 4 short
                                      sentences (the home Ollama writes it); any pass. A long reply is spoken as this, not word for word
+    GET  /t/<pass>/wake.json         {"ok", "threshold", "patience"}: the trained "Skippy" wake word, for a browser that runs it itself
+    GET  /t/<pass>/wake/<file>       melspectrogram.onnx, embedding_model.onnx, skippy.onnx (the Drive page's static/skippy-wake.js)
+                                     The Captain's pass only ("skippy"): the model was trained on his own voice
 
 Passes work like the music and video gates', with their own label and signed text, so none of the three opens another. A pass
 names the one voice it may speak in (the portal decides who gets which; this gate only checks the signature):
@@ -160,7 +163,7 @@ def spoken(text: str) -> str:
 def create_app(key: bytes, whisper_url: str, studio_url: str, clock=time.time,
                slots: int = 3, post=requests.post, get=requests.get,
                ollama_url: str = "", summary_model: str = "qwen2.5:7b",
-               state_dir: str = "") -> Flask:
+               state_dir: str = "", wake_dirs: tuple = (), wake_threshold: float = 0.5) -> Flask:
     app = Flask(__name__, static_folder=None)
     app.url_map.merge_slashes = False
     app.config["MAX_CONTENT_LENGTH"] = MAX_AUDIO + 4096
@@ -369,7 +372,37 @@ def create_app(key: bytes, whisper_url: str, studio_url: str, clock=time.time,
             return err(502)
         return Response(json.dumps({"text": said}), mimetype="application/json", headers={"Cache-Control": "no-store"})
 
+    def wake_file(name: str):
+        for d in wake_dirs:
+            p = pathlib.Path(d) / name
+            if p.is_file():
+                return p
+        return None
+
+    def captain() -> bool:
+        return request.environ.get("voice_gate.scope") == "skippy"
+
+    @app.get("/t/<token>/wake.json")
+    def wake_info(token):
+        if not captain():
+            return err(403)
+        ok = all(wake_file(n) for n in WAKE_FILES)
+        return Response(json.dumps({"ok": ok, "threshold": wake_threshold, "patience": 2}), mimetype="application/json",
+                        headers={"Cache-Control": "no-store"})
+
+    @app.get("/t/<token>/wake/<name>")
+    def wake_model(token, name):
+        if not captain():
+            return err(403)
+        p = wake_file(name) if name in WAKE_FILES else None
+        if not p:
+            return err(404)
+        return Response(p.read_bytes(), mimetype="application/octet-stream", headers={"Cache-Control": "private, max-age=3600"})
+
     return app
+
+
+WAKE_FILES = ("melspectrogram.onnx", "embedding_model.onnx", "skippy.onnx")
 
 
 def from_env() -> Flask:
@@ -381,4 +414,6 @@ def from_env() -> Flask:
                       studio_url=os.environ.get("TTS_STUDIO_URL", "http://tts-studio:8003").rstrip("/"),
                       ollama_url=os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/"),
                       summary_model=os.environ.get("SUMMARY_MODEL", "qwen2.5:7b"),
-                      state_dir=os.environ.get("STATE_DIR", "/state"))
+                      state_dir=os.environ.get("STATE_DIR", "/state"),
+                      wake_dirs=tuple(d for d in os.environ.get("WAKE_DIRS", "/wake:/wake-features").split(":") if d),
+                      wake_threshold=float(os.environ.get("SATELLITE_WAKE_THRESHOLD") or 0.5))

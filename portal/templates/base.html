@@ -43,6 +43,7 @@
   [data-app="tabletop"]    { --accent: var(--amber); }    /* the Tabletop: candlelight on a game table */
   [data-app="dashboard"]   { --accent: var(--cyan); }
   [data-app="car"]         { --accent: var(--white); }    /* the Car: his Tesla, in plain white light */
+  [data-app="drive"]       { --accent: var(--cyan); }     /* Drive: the keys he uses at the wheel; each key keeps its own app's colour */
   [data-app="me"]          { --accent: #b05cff; }    /* /me: deep purple (the whole palette is redefined in bridge-panes.css) */
   [data-app="admin"]       { --accent: var(--red); }
 
@@ -194,6 +195,7 @@
 {# in the head and not deferred: a bridge page's own script (the chat's pager) runs before the page ends and needs Bridge #}
 <script src="{{ url_for('static', filename='bridge-pure.js') }}?v={{ (build.built_at if build else 'dev') }}"></script>
 <script src="{{ url_for('static', filename='bridge.js') }}?v={{ (build.built_at if build else 'dev') }}"></script>{% endif %}
+<script src="{{ url_for('static', filename='skippy-duck.js') }}?v={{ (build.built_at if build else 'dev') }}"></script>   {# Skippy's voice ducks every player on the device (music, books, the Drive page) instead of stopping it #}
 {% block head %}{% endblock %}
 {# Full screen on phones and tablets: the site manifest (Add to Home Screen, no browser bars) unless the page brings its own (music, video); a page that does overrides this block with nothing. #}
 {% block pwa %}<link rel="manifest" href="{{ url_for('site_manifest') }}">

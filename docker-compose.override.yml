@@ -61,6 +61,8 @@ services:
     networks: [default, tts-net]               # tts-net: the only way to reach the offline tts-studio
     volumes:
       - ./state/voice-gate:/state                # cache of what was already said
+      - ./state/wakeword:/wake:ro                # the trained "Skippy" wake word (skippy.onnx), for the Drive page's in-browser ear
+      - ./services/satellite/.venv/Lib/site-packages/openwakeword/resources/models:/wake-features:ro   # openWakeWord's two shared feature models
     ports:
       - "127.0.0.1:3007:8080"                  # localhost only; Funnel is the one way in from outside
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}

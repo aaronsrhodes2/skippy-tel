@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Drive — Maker Portal{% endblock %}
+{% block app %}drive{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}wheel{% endblock %}
+{% block head %}
+<style>
+  /* Drive (drive.py): six big keys, one screen, for the Tesla's browser. 3 x 2 on the car's wide screen, 2 x 3 upright. */
+  #drive { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+  #drive .deck { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  @media (max-aspect-ratio: 1/1) { #drive .deck { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); } }
+  #drive .unit .g { width: 42%; max-width: 132px; stroke-width: 1.1; }
+  #drive .unit .g.sub { position: absolute; right: 14%; bottom: 22%; width: 22%; max-width: 46px; aspect-ratio: 1; z-index: 1; opacity: .9; }
+  #drive .unit .name { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #drive .unit[data-on="1"] { filter: drop-shadow(0 0 9px color-mix(in srgb, var(--accent) 70%, transparent)); }
+  #drive .unit[data-on="1"] .plate { opacity: 1; }
+  #drive .unit[aria-disabled="true"] { opacity: .35; }
+  #now { height: 44px; display: flex; align-items: center; gap: 12px; padding: 0 6px; font: 600 16px var(--mono); color: var(--ink); min-width: 0; }
+  #now .g { width: 26px; height: 26px; flex: none; color: var(--accent); }
+  #now-t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #now-bar { position: relative; height: 3px; background: var(--line); margin: 0 6px; }
+  #now-bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--accent); }
+  #vstatus { min-height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 6px; font: 600 15px var(--mono); color: var(--green); }
+  #vstatus[hidden] { display: flex !important; visibility: hidden; }
+  #vstatus .lvbar { width: 70px; height: 6px; background: var(--line); position: relative; flex: none; }
+  #vstatus .lvbar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--green); }
+  #vstatus .vtxt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #vstatus .vx { background: none; border: 1px solid var(--green); color: var(--green); width: 34px; height: 34px; font-size: 20px; }
+</style>
+{% endblock %}
+{% block content %}
+<section id="drive"
+         data-music-gate="{{ url_for('music.player_gate') }}" data-favorites="{{ url_for('music.favorites_list') }}"
+         data-book-gate="{{ url_for('audiobooks.gate') }}" data-voice-gate="{{ url_for('chat.voice_gate') }}"
+         data-send="{{ url_for('housechat.home_chat_send') }}" data-events="{{ url_for('housechat.home_chat_events') }}"
+         data-ort="{{ url_for('static', filename='vendor/ort/') }}">
+  <div id="now" aria-live="polite"><svg class="g" aria-hidden="true"><use id="now-g" href="#g-wheel"/></svg><span id="now-t"></span></div>
+  <div id="now-bar"><i></i></div>
+  <div class="deck">
+    <div class="unit named" id="k-book" style="--accent: var(--violet); --i: 0">
+      <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
+      <svg class="g" aria-hidden="true"><use href="#g-book"/></svg>
+      <span class="name" id="k-book-t"></span>
+      <button class="hit" type="button" aria-label="Play my audiobook"></button>
+    </div>
+    <div class="unit named" id="k-disc" style="--accent: var(--pink); --i: 1">
+      <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
+      <svg class="g" aria-hidden="true"><use href="#g-shuffle"/></svg><svg class="g sub" aria-hidden="true"><use href="#g-globe"/></svg>
+      <span class="name" id="k-disc-t"></span>
+      <button class="hit" type="button" aria-label="Bilby Shuffle: discovery (everything, favorites mixed in)"></button>
+    </div>
+    <div class="unit named" id="k-lib" style="--accent: var(--pink); --i: 2">
+      <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
+      <svg class="g" aria-hidden="true"><use href="#g-shuffle"/></svg><svg class="g sub" aria-hidden="true"><use href="#g-star"/></svg>
+      <span class="name" id="k-lib-t"></span>
+      <button class="hit" type="button" aria-label="Bilby Shuffle: library (my favorites)"></button>
+    </div>
+    <div class="unit named" id="k-skippy" style="--accent: var(--green); --i: 3">
+      <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
+      <svg class="g" aria-hidden="true"><use href="#g-ear"/></svg>
+      <span class="name" id="k-skippy-t"></span>
+      <button class="hit voice" type="button" aria-label="Skippy"><svg style="display:none" aria-hidden="true"><use href="#g-ear"/></svg></button>
+    </div>
+    <div class="unit" id="k-play" style="--i: 4">
+      <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
+      <svg class="g" aria-hidden="true"><use id="k-play-g" href="#g-play"/></svg>
+      <button class="hit" type="button" aria-label="Play or pause"></button>
+    </div>
+    <div class="unit" id="k-next" style="--i: 5">
+      <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
+      <svg class="g" aria-hidden="true"><use id="k-next-g" href="#g-next"/></svg>
+      <button class="hit" type="button" aria-label="Next song, or 30 seconds on in the book"></button>
+    </div>
+  </div>
+  <div id="vstatus" hidden></div>
+  <audio id="media" preload="auto"></audio>
+</section>
+<script src="{{ url_for('static', filename='audiobooks-pure.js') }}"></script>
+<script src="{{ url_for('static', filename='drive-pure.js') }}"></script>
+<script src="{{ url_for('static', filename='skippy-voice.js') }}"></script>
+<script src="{{ url_for('static', filename='skippy-wake.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/ort/ort.wasm.min.js') }}"></script>
+<script src="{{ url_for('static', filename='drive-app.js') }}"></script>
+{% endblock %}

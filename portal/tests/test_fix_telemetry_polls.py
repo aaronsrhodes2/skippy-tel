@@ -74,7 +74,10 @@ STATIC_SCRIPTS = {"skippy-voice.js": "front.html", "skippy-home.js": "front.html
                   # the self-hosted <model-viewer> (static/skippy-artifacts.js loads it for a 3D artifact): it fetches only the model URL the chat gives it
                   "vendor/model-viewer-4.0.0.min.js": "_chat.html",
                   # html2canvas (the camera key's page snapshot for iPhone and iPad): it only reads the page it is run on, same-origin images (useCORS)
-                  "vendor/html2canvas.min.js": "_chat.html"}
+                  "vendor/html2canvas.min.js": "_chat.html",
+                  # the Drive page; Skippy's duck (in every page: its setInterval only lets a stale duck go, no network); onnxruntime-web (the
+                  # wake word: it fetches only its own .mjs/.wasm from static/vendor/ort/, the models come from voice-gate as buffers)
+                  "drive-app.js": "drive.html", "skippy-duck.js": "base.html", "vendor/ort/ort.wasm.min.js": "drive.html"}
 
 
 def template_text(template: Path) -> str:

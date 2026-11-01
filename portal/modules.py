@@ -44,6 +44,7 @@ MODULES = (
     Module("experiments", "atom", "experiments.index", "Experiments"),
     Module("tabletop", "d20", "tabletop.page", "Tabletop"),
     Module("car", "car", "car.page", "Car"),
+    Module("drive", "wheel", "drive.page", "Drive"),
     Module("dashboard", "gauge", "me.index", "Dashboard"),
     Module("admin", "gear", "admin.index", "Admin", retirable=False),
     # /me panes (id = "me-" + the pane's id in templates/me.html). MCP and Home are what /me is for; the rest wait here to be retired when

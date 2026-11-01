@@ -281,7 +281,7 @@
       return remoteCmd(playingNow() ? "book:pause" : "book:resume");
     }
     if (au.paused) { au.play().then(() => { root.dataset.playing = "1"; $("#tapbar").hidden = true; paintAll(); }).catch(() => { $("#tapbar").hidden = false; }); }
-    else au.pause();
+    else { S.pauseAt = Date.now(); au.pause(); }
   }
 
   const resumeSuffix = b => { const r = P.resumeAt(S.places[b.id], b.d); return r ? `:${r.toFixed(1)}` : ""; };
@@ -325,12 +325,14 @@
   function sleepCheck() {
     if (S.remote || au.paused) return;
     if ((S.sleepAt && Date.now() >= S.sleepAt) || (S.sleepChapter && au.currentTime >= S.sleepChapter - 0.4)) {
-      au.pause(); S.sleep = 0; S.sleepAt = 0; S.sleepChapter = 0; say("Sleep timer: stopped");
+      S.pauseAt = Date.now(); au.pause(); S.sleep = 0; S.sleepAt = 0; S.sleepChapter = 0; say("Sleep timer: stopped");
     }
   }
 
   au.addEventListener("timeupdate", () => { savePlace(false); sleepCheck(); paintProgress(); });
-  au.addEventListener("pause", () => { root.dataset.playing = "0"; if (!au.ended) savePlace(true); paintAll(); });
+  au.addEventListener("pause", () => { if (duck && !au.ended) duck.paused(Date.now() - S.pauseAt < 400); root.dataset.playing = "0"; if (!au.ended) savePlace(true); paintAll(); });
+  // Skippy's voice ducks the book instead of stopping it, and a pause the system made meanwhile is undone when he is done (static/skippy-duck.js).
+  const duck = window.SkippyDuck ? SkippyDuck.follow({ level: f => { au.volume = Math.max(0, Math.min(1, f)); }, paused: () => au.paused, resume: () => au.play().catch(() => {}) }) : null;
   au.addEventListener("play", () => { root.dataset.playing = "1"; paintAll(); });
   au.addEventListener("ended", () => { const b = S.cur; if (!b) return; S.places[b.id] = Object.assign({}, S.places[b.id], { finished: true }); savePlace(true); paintAll(); });
   au.addEventListener("error", () => { if (au.src) { notice("This book won't play right now."); setTimeout(() => notice(""), 4000); } });
@@ -458,7 +460,7 @@
     const pos = Math.round(curPos(b) * 10) / 10;
     const resume = P.resumeAt({ pos, finished: (S.places[b.id] || {}).finished }, b.d);
     if (S.remote && S.remote.device === device.id) { closeMenu(); return; }  // already there
-    if (playingHere()) au.pause();                                           // one place at a time: this browser stops, the box takes over
+    if (playingHere()) { S.pauseAt = Date.now(); au.pause(); }                                           // one place at a time: this browser stops, the box takes over
     await savePlace(true);
     if (S.remote) await stopRemote();                                        // from one box to another: the first one stops
     S.remote = { device: device.id, name: device.name, book: null, at: Date.now() };

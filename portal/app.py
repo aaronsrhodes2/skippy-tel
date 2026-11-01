@@ -63,6 +63,7 @@ import recovery_web
 import status as status_mod
 import status_web
 import car_web
+import drive as drive_mod
 import ship as ship_mod
 import tabletop as tabletop_mod
 import chat_history
@@ -331,7 +332,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         wanted = {"skippy": auth.has_portal(who, "skippy"), "games": bool(shown), "play": auth.has_portal(who, "play"),
                   "music": auth.has_portal(who, "audio"), "video": auth.has_portal(who, "video"), "books": auth.is_admin(who),
                   "experiments": auth.has_portal(who, "experiments"), "tabletop": auth.has_portal(who, "tabletop"),
-                  "car": auth.is_admin(who),
+                  "car": auth.is_admin(who), "drive": auth.is_admin(who),
                   "dashboard": auth.is_admin(who) and "me" in app.blueprints, "admin": auth.is_admin(who)}
         tiles = []
         for m in modules_mod.MODULES:
@@ -800,6 +801,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     recovery_web.init_app(app, workshop, limiter, github, home=home, starter=starter, doctor=doctor)   # Recovery: one button (/admin/recovery/repair)
     status_web.init_app(app, status_mod.Status(), home, starter, doctor, workshop, limiter, vm_status)   # the Status map (docs/status-design.md)
     car_web.init_app(app, home)                         # the Captain's Tesla, read only (docs/tesla.md)
+    drive_mod.init_app(app)                             # Drive: the book, the shuffles and Skippy, for the Tesla's browser (drive.py)
     ships = ship_mod.ShipWatch(github, app.extensions["recovery"]["runs"])   # the private Skippy's ship card
     app.extensions["ships"] = ships
     # Tell the Captain on Discord when a private-Skippy run ends (notify.py: a DM to him only, one per run, switchable).

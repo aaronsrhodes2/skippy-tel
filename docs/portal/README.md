@@ -416,6 +416,23 @@ Not allowed (Safari's per-site "Ask", or no Permissions API) → the same strip,
 names the setting that stops the asking (aA › Website Settings › Microphone › Allow). Only a Safari tab has that setting: Chrome, Firefox
 and Edge on iOS, and a Home Screen launch (its own web app with its own storage and no aA menu), are told to open the portal in a Safari tab. Tests: `portal/tests/js/voice/ear-reopen.test.js`.
 
+## Drive (the Captain's keys at the wheel, `/drive`: admin only, never a grant)
+
+For the Tesla's browser: one bridge screen of six big keys (`portal/drive.py`, `templates/drive.html`, `static/drive-{app,pure}.js`).
+**The book** resumes his current audiobook at its last place: the same places the pods use (audiobook-gate's `places.json` merges the hub's
+`state/audiobooks.json` with the browsers' saves in `state/audiobooks-inbox/`, which the hub's `audiobooks.Store` reads back), and the page saves
+its place there as it plays. **Bilby Shuffle** has two keys: discovery (every Bilby song, his favorites about one in four) and library (his
+favorites). **Skippy** is a pod in the car: the trained "Skippy" wake word runs in the browser (`static/skippy-wake.js`, onnxruntime-web in
+`static/vendor/ort/`, the three models from voice-gate's `/t/<pass>/wake/`, the Captain's pass only; its scores match the pods' Python
+openWakeWord exactly on the held-out clips); when it can't load, Typing's Whisper listening takes over. A turn goes to the house brain through
+the Home chat (`/home-chat/send`, answered silently at home) and is spoken here. Play/pause and next (30 s on in a book) are the other keys.
+
+**Music and Skippy at once** (all pages, not only Drive): the voice plays its silent unlock clip once per page, not on every tap (each one took the
+sound from the music in another tab, or from the car's own player), and while Skippy hears or speaks it ducks every player on the device
+(`static/skippy-duck.js`, loaded by base.html: a window event plus a BroadcastChannel to the other tabs). Bilby, Audiobooks and Drive follow it,
+and a pause the system made while he had the floor is undone when he is done.
+Not yet: Spotify rows in the shuffles (a browser can't play Spotify; the queue already carries them, `DrivePure.playable`).
+
 ## Nagatha's Video Service (the Captain's films, `/video`)
 
 The Captain's Jellyfin library on skippy-pc (285 films, 11 collections) in any browser: a phone, a laptop, a TV browser. Admin only,

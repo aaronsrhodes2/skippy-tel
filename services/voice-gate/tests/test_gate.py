@@ -302,3 +302,21 @@ def test_health_says_which_voices_can_speak(studio):
     assert c.get("/health").get_json()["voices"] == {"stock": True, "skippy": False}
     fake.health = Resp(500)
     assert c.get("/health").get_json()["voices"]["stock"] is False
+
+
+def test_the_wake_word_model_is_for_the_captains_pass_only(tmp_path):
+    for n in gate.WAKE_FILES:
+        (tmp_path / n).write_bytes(b"onnx-" + n.encode())
+    fake = Fake()
+    c = gate.create_app(KEY, "http://w", "http://studio", clock=lambda: NOW, post=fake.post, get=fake.get,
+                        wake_dirs=(str(tmp_path),), wake_threshold=0.2).test_client()
+    exp = NOW + 3600
+    cap, guest, ear = gate.sign(KEY, exp, "skippy"), gate.sign(KEY, exp, "stock"), gate.sign(KEY, exp, "listen")
+    r = c.get(f"/t/{cap}/wake.json")
+    assert r.status_code == 200 and r.get_json() == {"ok": True, "threshold": 0.2, "patience": 2}
+    assert c.get(f"/t/{cap}/wake/skippy.onnx").data == b"onnx-skippy.onnx"
+    assert c.get(f"/t/{cap}/wake/hub.py").status_code == 404                 # only the three model files, never anything else in the folder
+    assert c.get(f"/t/{cap}/wake/..%2Fstate").status_code == 404
+    for other in (guest, ear):
+        assert c.get(f"/t/{other}/wake.json").status_code == 403
+        assert c.get(f"/t/{other}/wake/skippy.onnx").status_code == 403

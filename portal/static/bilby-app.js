@@ -339,12 +339,16 @@
     root.dataset.novol = S.canVolume ? "0" : "1";
   }
   function applyVolume() {
-    const g = S.sleep.active ? S.sleep.gain(Date.now(), 8000) : 1;
+    const g = (S.sleep.active ? S.sleep.gain(Date.now(), 8000) : 1) * (duck ? duck.gain() : 1);
     for (const s of slots) {
       if (S.canVolume) s.el.volume = clamp(S.vol * S.vol * g, 0, 1);
       s.el.muted = S.muted;
     }
   }
+
+  // Skippy's voice (another tab, or this device's chat) turns the music down while he listens or speaks, and plays it again if the system
+  // paused it meanwhile (static/skippy-duck.js): music and a conversation at once, in the car too.
+  const duck = window.SkippyDuck ? SkippyDuck.follow({ level: () => applyVolume(), paused: () => !isPlaying(), resume: () => actions.resume() }) : null;
 
   // ═══ the signal shield: songs in memory ahead of time, and the way back after a dead zone ════════════════════════
   // A song held in memory plays with no network at all: the playing one (so a drop mid-song is nothing), then the next few. Fetched one
@@ -579,6 +583,7 @@
     e.addEventListener("play", () => mine() && onPlayState());
     e.addEventListener("pause", () => {
       if (!mine()) return;
+      if (duck && !e.ended) duck.paused(!S.want || Date.now() - S.ourPauseAt <= 400);       // not ours while Skippy has the floor: given back when he is done
       if (S.want && !e.ended && !e.error && Date.now() - S.ourPauseAt > 400) {
         // Nobody here asked for that pause (and the file did not just fail: the browser pauses an element whose load errored, and
         // that is the gate's trouble, not the autoplay rule's). Right after our play() it is the browser taking the sound back (some
