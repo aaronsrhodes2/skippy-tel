@@ -726,7 +726,12 @@
     }
     if (homeRow) homeRow.addEventListener("click", () => { enterHome(); if (openSheet === "chats") showSheet("chats"); });
     let inflight = null;                                          // the public chat's request, while it waits (Stop aborts it)
-    function paintStop() { if (stopKey) stopKey.hidden = !(agentOn() ? window.SkippyAgent.busy() : !!inflight); }
+    let thinking = false;                                         // the face in the corner (skippy-3d.js): thinking while an answer is on its way
+    function paintStop() {
+      const busy = agentOn() ? !!window.SkippyAgent.busy() : !!inflight;
+      if (stopKey) stopKey.hidden = !busy;
+      if (busy !== thinking) { thinking = busy; dispatchEvent(new CustomEvent("skippy-thinking", { detail: busy })); }
+    }
     if (stopKey) {
       stopKey.addEventListener("click", () => { if (agentOn()) window.SkippyAgent.stop(); else if (inflight) inflight.abort(); });
       setInterval(paintStop, 1000);

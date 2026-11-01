@@ -171,7 +171,14 @@
     audio.addEventListener("playing", function () { if (audio.src !== SILENCE) speaking_(true); });
     ["ended", "pause", "error", "emptied"].forEach(function (ev) { audio.addEventListener(ev, function () { speaking_(false); }); });
 
-    function paint(el, s) { if (!el) return; if (s) el.dataset.s = s; else delete el.dataset.s; el.classList.toggle("lit", s === "on"); }
+    function paint(el, s) {
+      if (!el) return; if (s) el.dataset.s = s; else delete el.dataset.s; el.classList.toggle("lit", s === "on");
+      if (el === mic) face("skippy-listening", s === "on");
+    }
+    function face(ev, on) {                                       // the face in the corner (skippy-3d.js) follows the lamps
+      if (root.dispatchEvent && root.CustomEvent) root.dispatchEvent(new root.CustomEvent(ev, { detail: on }));
+    }
+    function paintSpeaker(s) { paint(speaker, s); face("skippy-speaking", s === "on"); }   // (two modes have no speaker key: still told)
     function warn(el) { paint(el, "warn"); setTimeout(function () { if (el.dataset.s === "warn") paint(el, null); }, 4000); }
 
     // The pass names the voice it speaks in, and the portal picks that voice from the chat mode (opts.mode()), so a new mode is a new pass.
@@ -541,14 +548,14 @@
     function stopSpeaking() {
       try { audio.pause(); } catch (e) {}
       if (root.speechSynthesis) speechSynthesis.cancel();
-      playing = null; paint(speaker, wanted ? "idle" : null);
+      playing = null; paintSpeaker(wanted ? "idle" : null);
     }
     function builtin(text, done) {
       if (!root.speechSynthesis) { if (done) done(); return; }
       const u = new SpeechSynthesisUtterance(text);
       if (lang()) u.lang = lang();
-      u.onend = u.onerror = function () { if (playing === u) { playing = null; paint(speaker, "idle"); if (done) done(); } };
-      playing = u; paint(speaker, "on"); speechSynthesis.speak(u);
+      u.onend = u.onerror = function () { if (playing === u) { playing = null; paintSpeaker("idle"); if (done) done(); } };
+      playing = u; paintSpeaker("on"); speechSynthesis.speak(u);
     }
     // keep: a line spoken while the real answer is still coming (the agent's quick line, /chat/quick): when it ends the turn stays
     // with Skippy (the mic stays shut) until the real answer is said, or resume() says none is coming.
@@ -570,7 +577,7 @@
       try { g = await gate(); } catch (e) { g = null; }
       if (g && g.speak) {
         const token = playing = {};
-        paint(speaker, "on");
+        paintSpeaker("on");
         try {
           const r = await fetch(base(g) + "/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: t }) });
           if (!r.ok) throw new Error("no voice");
@@ -579,7 +586,7 @@
           const url = URL.createObjectURL(blob);
           if (playing !== token) { URL.revokeObjectURL(url); return; }
           audio.src = url;
-          audio.onended = function () { URL.revokeObjectURL(url); if (playing === token) { playing = null; paint(speaker, "idle"); done(); } };
+          audio.onended = function () { URL.revokeObjectURL(url); if (playing === token) { playing = null; paintSpeaker("idle"); done(); } };
           // audio that won't play is never silence: the device's own voice says it instead (the Captain's rule for every voice, guests too)
           audio.onerror = function () { URL.revokeObjectURL(url); if (playing === token) { playing = null; builtin(t, done); } };
           await audio.play();
@@ -591,7 +598,7 @@
     function setWanted(on) {
       wanted = on;
       if (speaker) { speaker.setAttribute("aria-pressed", on ? "true" : "false"); speaker.classList.toggle("lit", false); }
-      if (!on) { stopSpeaking(); paint(speaker, null); } else paint(speaker, "idle");
+      if (!on) { stopSpeaking(); paintSpeaker(null); } else paintSpeaker("idle");
       try { localStorage.setItem(SPEAK_KEY, on ? "yes" : "no"); } catch (e) {}
     }
     if (speaker) {
