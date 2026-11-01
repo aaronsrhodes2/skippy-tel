@@ -39,12 +39,16 @@ def pcm_args(pcm: str = "tcp://127.0.0.1:43872") -> list[str]:
 class CaptureSource:
     """The Spotify app's sound, from the virtual cable (2026-10-31: his account plays only in Spotify's own app, whose output is set to "CABLE
     Input" in Windows' volume mixer): a WASAPI input on "CABLE Output" at the router's 48 kHz stereo float, as a router source. It keeps at most
-    `keep_s` ready (the cable's clock and the mixer's drift apart: the oldest goes first), and it never ends by itself. `live`: nothing to drain."""
+    `keep_s` ready (the cable's clock and the mixer's drift apart: the oldest goes first), and it never ends by itself. `live`: nothing to drain.
+    It gives nothing until `cushion_s` has gathered, and after running dry it gathers that again: a block that comes a little late from Windows
+    is then no gap at all, and the mixer running faster than the cable makes one short gap a long while apart, not a stutter."""
     live = True
 
-    def __init__(self, part: str = "CABLE Output", open_stream=None, keep_s: float = 0.3):
+    def __init__(self, part: str = "CABLE Output", open_stream=None, keep_s: float = 0.3, cushion_s: float = 0.08):
         import router                                           # noqa: PLC0415
-        self.rate, self.keep = router.RATE, int(router.RATE * keep_s)
+        self.rate, self.keep, self.cushion = router.RATE, int(router.RATE * keep_s), int(router.RATE * cushion_s)
+        self.primed = False
+        self.dry = 0                                            # how many times it ran dry (a gap the listener may have heard)
         self.buf: deque = deque()
         self.have = 0
         self.lock = threading.Lock()
@@ -63,6 +67,13 @@ class CaptureSource:
         import numpy as np                                      # noqa: PLC0415
         parts, got = [], 0
         with self.lock:
+            if not self.primed:
+                if self.have < max(self.cushion, frames):
+                    return np.zeros((0, 2), dtype="float32")
+                self.primed = True
+            if self.have < frames:                              # dry: what is here now, then gather the cushion again
+                self.primed = False
+                self.dry += 1
             while got < frames and self.buf:
                 head = self.buf[0]
                 n = min(frames - got, len(head))

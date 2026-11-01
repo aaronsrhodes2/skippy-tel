@@ -452,3 +452,22 @@ def test_a_cable_that_will_not_open_is_tried_again_while_the_track_plays(monkeyp
         await s.player.spotify_tick(st)
         assert len(tries) == 2 and len(router.live()) == 1 and s.player.cable_retry == 0.0
     run(go())
+
+
+def test_the_cable_gathers_a_cushion_before_it_plays_and_again_after_running_dry():
+    import numpy as np
+    import router
+    src = spotify.CaptureSource(open_stream=lambda part, cb: None, keep_s=0.3, cushion_s=0.08)
+    block = np.ones((router.BLOCK, 2), dtype="float32")
+    need = int(router.RATE * 0.08)
+    src._callback(block, router.BLOCK, None, None)
+    assert len(src.read(router.BLOCK)) == 0                        # not yet: a late block from Windows must not be a gap
+    while src.have < need:
+        src._callback(block, router.BLOCK, None, None)
+    assert len(src.read(router.BLOCK)) == router.BLOCK and src.dry == 0
+    while src.have >= router.BLOCK:
+        src.read(router.BLOCK)
+    src.read(router.BLOCK)                                         # dry: one short read, then it waits for the cushion again
+    assert src.dry == 1 and not src.primed
+    src._callback(block, router.BLOCK, None, None)
+    assert len(src.read(router.BLOCK)) == 0
