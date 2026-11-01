@@ -11,14 +11,15 @@
    this is where the settings, the friends and the recovery buttons are explained. static/bridge-panes.js only switches panes. #}
 <section class="adm" id="adm">
   <div class="stage" id="astage">
-    <div class="deck" id="adeck" style="--rows: {{ 4 if status else 2 }}; --rows-wide: 2; --rows-side: 2">
+    <div class="deck" id="adeck" style="--rows: {{ 5 if status else 3 }}; --rows-wide: {{ 3 if status else 2 }}; --rows-side: 2">
       {% set units = [('status', 'server', 'Status'), ('graveyard', 'tomb', 'Graveyard')] %}
-      {% set units = units + [('server', 'server', 'Server'), ('recovery-pane', 'past', 'Recovery')] %}
+      {% set units = units + [('server', 'server', 'Server'), ('recovery-pane', 'past', 'Recovery'), ('google', 'globe', 'Google')] %}
       {% if status %}{% set units = units + [('setup', 'wand', 'Set up'), ('settings', 'cog', 'Settings'), ('friends', 'user', 'Friends'), ('discord', 'talk', 'Discord')] %}{% endif %}
       {% for id, glyph, label in units %}
         {% set lamp = '' %}
         {% if id == 'server' %}{% set lamp = 'off' if error else ('on' if status.status == 'RUNNING' else ('idle' if status.status == 'TERMINATED' else 'boot')) %}{% endif %}
         {% if id == 'settings' and needs %}{% set lamp = 'warn' %}{% endif %}
+        {% if id == 'google' %}{% set lamp = ('warn' if google.missing else 'on') if google.connected else ('warn' if google.broken else 'off') %}{% endif %}
         <div class="unit named" {% if lamp %}data-s="{{ lamp }}"{% endif %} style="--i: {{ loop.index0 }}">
           <i class="plate"></i>
           {% if id == 'status' %}<a class="hit" href="{{ url_for('status.page') }}" aria-label="{{ label }}" title="{{ label }}"></a>
@@ -82,6 +83,36 @@
         <svg class="g mark" aria-hidden="true"><use href="#g-past"/></svg><span class="title">Recovery</span></header>
       <div class="pg"><div class="pg-flow">
         {% include "_recovery.html" %}
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
+
+    {# Connect Google for Skippy (google_link.py): his calendar, mail, contacts and tasks, read only, for the morning and bedtime
+       routines on skippy-pc. Outside the `status` block: it has nothing to do with the games VM. #}
+    <section id="google" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to Admin" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-globe"/></svg><h2>Google for Skippy</h2></header>
+      <div class="pg"><div class="pg-flow">
+        <div class="card" id="google-link">
+          {% if google.connected %}
+            <p>Connected: <code class="code">{{ google.email }}</code>. Skippy reads your calendar, mail, contacts and to-dos for the
+              morning and bedtime routines, read only. Nothing is ever sent, changed or deleted.</p>
+            {% if google.missing %}<p class="warn">Not granted: {{ google.missing | join(', ') }}. Press Connect again and tick every box.</p>{% endif %}
+          {% elif google.broken %}
+            <p class="warn">{{ google.broken }}.</p>
+          {% else %}
+            <p>Not connected. The morning routine can't see your calendar or mail yet.</p>
+          {% endif %}
+          <p><a class="button" href="{{ url_for('google_link.connect') }}">Connect Google for Skippy</a></p>
+          {% if google.connected or google.broken %}
+            <form class="inline" method="post" action="{{ url_for('google_link.disconnect') }}">
+              <button type="submit">Disconnect</button>
+            </form>
+          {% endif %}
+          <p class="help">Uses this portal's own Google sign-in: Google asks once for read-only calendar, Gmail, contacts and tasks, with
+            your admin account. The lasting key stays on the portal (never in a page); skippy-pc borrows an hour's access at a time.
+            Disconnect revokes it at Google.</p>
+        </div>
       </div></div>
       <div class="pips" hidden><i></i></div>
     </section>

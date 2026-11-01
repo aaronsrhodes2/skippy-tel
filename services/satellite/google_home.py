@@ -1,15 +1,19 @@
 """The Captain's Google calendar, mail and contacts for the morning and bedtime routines (daily.py), READ ONLY, on skippy-pc.
 
-He grants it once (`python google_home.py connect`): a Google sign-in page opens in his browser, he signs in and allows read-only access; Google
-hands this machine a refresh token, kept in the vault folder beside the .env (never in git, never in chat). His password never passes through here.
-The scopes are read-only: calendar.readonly, gmail.readonly, contacts.readonly, tasks.readonly. Mail is read only to be summed up by Core (the
-local model); nothing is sent anywhere else.
+He grants it once, with the Maker Portal's own Google sign-in (2026-11-01, the Captain: "the exact same sign in as makerportal.live's admin"):
+Admin > Google > Connect Google for Skippy (portal/google_link.py). The portal keeps the refresh token in its private bucket; this machine
+borrows an hour's access token at a time from GET /home/google/access with the home token (SKIPPY_HOME_TOKEN, as the home reporter). His
+password never passes through here. The scopes are read-only: calendar.readonly, gmail.readonly, contacts.readonly, tasks.readonly. Mail is
+read only to be summed up by Core (the local model); nothing is sent anywhere else.
 
-    python google_home.py connect     sign in once (opens the browser)
+The old local grant still works as a fallback: when GOOGLE_HOME_CLIENT (a "Desktop app" OAuth client JSON) and GOOGLE_HOME_TOKEN both exist
+in the vault folder, they are used instead of the portal (`python google_home.py connect` makes that token).
+
     python google_home.py check       what it can see: calendars (and whether the work one is shared in), counts of today's events and mail
+    python google_home.py connect     the local fallback's one-time sign-in (opens the browser); normally not needed
 
-Settings (vault .env): GOOGLE_HOME_CLIENT (the OAuth client JSON, a "Desktop app" client), GOOGLE_HOME_TOKEN (where the token is kept),
-GOOGLE_WORK_CALENDAR (his work address, to find the work calendar), SKIPPY_TZ (his time zone, default America/Los_Angeles).
+Settings (vault .env): PORTAL_URL (default the portal's run.app address), SKIPPY_HOME_TOKEN, GOOGLE_WORK_CALENDAR (his work address, to find
+the work calendar), SKIPPY_TZ (his time zone, default America/Los_Angeles); the fallback's GOOGLE_HOME_CLIENT and GOOGLE_HOME_TOKEN.
 """
 from __future__ import annotations
 
@@ -38,6 +42,8 @@ CAL = "https://www.googleapis.com/calendar/v3"
 GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me"
 PEOPLE = "https://people.googleapis.com/v1"
 TASKS = "https://tasks.googleapis.com/tasks/v1"
+PORTAL = "https://skippy-portal-1015050363686.us-west1.run.app"     # machines use the run.app address (never DNS or a certificate)
+CONNECT_HINT = "press Connect Google for Skippy in Admin on the portal"
 
 BILL_RE = re.compile(r"\b(?:bill|invoice|statement (?:is )?(?:ready|available)|payment (?:due|reminder|failed|declined)|amount due|due date|autopay|past due|"
                      r"your (?:receipt|payment)|renewal)\b", re.I)
@@ -50,6 +56,12 @@ class NotConnected(Exception):
     """He hasn't granted access yet (no token), or the grant was withdrawn."""
 
 
+def _get_json(url: str, headers: dict) -> dict:
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=20) as r:                      # noqa: S310 — the portal's own address
+        return json.loads(r.read())
+
+
 def _post_form(url: str, data: dict) -> dict:
     req = urllib.request.Request(url, data=urllib.parse.urlencode(data).encode(), method="POST",
                                  headers={"Content-Type": "application/x-www-form-urlencoded"})
@@ -58,13 +70,16 @@ def _post_form(url: str, data: dict) -> dict:
 
 
 class Google:
-    def __init__(self, env: dict | None = None, opener=None, post_form=_post_form, clock=time.time, log=print):
+    def __init__(self, env: dict | None = None, opener=None, post_form=_post_form, clock=time.time, log=print, get_json=_get_json):
         env = env if env is not None else os.environ
         self.client_path = Path(env.get("GOOGLE_HOME_CLIENT") or VAULT / "google-home-client.json")
         self.token_path = Path(env.get("GOOGLE_HOME_TOKEN") or VAULT / "google-home-token.json")
         self.work = (env.get("GOOGLE_WORK_CALENDAR") or "").strip().lower()
-        self.opener, self.post_form, self.clock, self.log = opener, post_form, clock, log
+        self.portal = (env.get("PORTAL_URL") or PORTAL).rstrip("/")
+        self.home_token = (env.get("SKIPPY_HOME_TOKEN") or "").strip()
+        self.opener, self.post_form, self.clock, self.log, self.get_json = opener, post_form, clock, log, get_json
         self._access: tuple[str, float] | None = None
+        self._portal_no: tuple[str, float] | None = None                 # the portal's "not connected" (why, until when): asked again after a minute
         self._contacts: tuple[float, dict] | None = None
 
     # ── the grant ──
@@ -73,8 +88,44 @@ class Google:
         return data.get("installed") or data.get("web") or data
 
     @property
+    def local(self) -> bool:
+        """The fallback: a Desktop client and its token in the vault folder. Without both, the portal's grant is used."""
+        return self.client_path.is_file() and self.token_path.is_file()
+
+    @property
     def connected(self) -> bool:
-        return self.token_path.is_file()
+        """The local grant, or the portal says it holds one. A portal that can't be reached counts as connected (unknown): the read
+        that follows fails and is logged, rather than telling him to connect what is already connected."""
+        if self.local:
+            return True
+        try:
+            self.access_token()
+        except NotConnected:
+            return False
+        except Exception:                                               # noqa: BLE001 — the portal or Google down: not his to fix
+            return True
+        return True
+
+    def _from_portal(self) -> str:
+        if self._portal_no and self._portal_no[1] > self.clock():
+            raise NotConnected(self._portal_no[0])
+        if not self.home_token:
+            raise NotConnected("no SKIPPY_HOME_TOKEN to ask the portal with")
+        try:
+            got = self.get_json(f"{self.portal}/home/google/access", {"Authorization": f"Bearer {self.home_token}"})
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                raise NotConnected("the portal refused the home token") from e
+            raise
+        if not got.get("connected") or not got.get("access_token"):
+            if got.get("error"):
+                raise RuntimeError(f"the portal couldn't refresh the Google token: {got['error']}")
+            why = str(got.get("why") or "not connected")
+            self._portal_no = (why, self.clock() + 60)
+            raise NotConnected(why)
+        self._portal_no = None
+        self._access = (got["access_token"], self.clock() + float(got.get("expires_in") or 600))
+        return self._access[0]
 
     def connect(self, open_browser=webbrowser.open) -> None:
         """The one-time sign-in: a loopback page on this PC catches Google's answer (PKCE, no secret typed anywhere)."""
@@ -121,8 +172,8 @@ class Google:
     def access_token(self) -> str:
         if self._access and self._access[1] > self.clock() + 60:
             return self._access[0]
-        if not self.connected:
-            raise NotConnected("no Google token yet")
+        if not self.local:
+            return self._from_portal()
         c, t = self.client(), json.loads(self.token_path.read_text(encoding="utf-8"))
         try:
             tok = self.post_form(TOKEN_URL, {"client_id": c["client_id"], "client_secret": c.get("client_secret", ""),
@@ -269,8 +320,8 @@ def extras(g: Google, word, log=print) -> dict:
         return datetime.fromtimestamp(g.clock()).date()
 
     async def calendar():
-        if not g.connected:
-            return ("I can't see your calendar or your mail yet: the one-time Google sign-in hasn't been done. The steps are in the Skippy notes.")
+        if not await asyncio.to_thread(lambda: g.connected):
+            return f"I can't see your calendar or your mail yet: Google isn't connected. To fix it, {CONNECT_HINT}."
         events = await run(g.events, today())
         if events is None:
             return None
@@ -332,7 +383,7 @@ def extras(g: Google, word, log=print) -> dict:
 
     async def events_today():
         """Today's events as they are (Daily works out the leave-by time and the day's miles from their locations)."""
-        return await run(g.events, today()) if g.connected else None
+        return await run(g.events, today()) if await asyncio.to_thread(lambda: g.connected) else None
 
     return {"calendar": calendar, "mail": mail, "packages": packages, "birthdays": birthdays, "tomorrow": tomorrow, "day": day,
             "first_tomorrow": first_tomorrow, "events_today": events_today}
@@ -352,6 +403,13 @@ def main(argv=None) -> int:
         g.connect()
         print(f"Connected. Token kept at {g.token_path}.")
         return 0
+    if not g.local:
+        try:
+            g.access_token()
+        except NotConnected as e:
+            print(f"Not connected ({e}). To fix it, {CONNECT_HINT}.")
+            return 1
+        print(f"Using the portal's grant ({g.portal}).")
     cals = g.calendars()
     print(f"{len(cals)} calendar(s) in his list:")
     for c in cals:

@@ -54,8 +54,8 @@ def test_events_mail_contacts_and_todos(tmp_path):
 
 
 def test_a_work_calendar_that_is_not_shared_is_said(tmp_path):
-    gg = g(tmp_path, {"GOOGLE_WORK_CALENDAR": "someone@else.com"})
-    (tmp_path / "tok.json").write_text("{}")
+    gg = g(tmp_path, {"GOOGLE_WORK_CALENDAR": "someone@else.com", "SKIPPY_HOME_TOKEN": "home"})
+    gg.get_json = lambda url, headers: {"connected": True, "access_token": "a", "expires_in": 3500}
     gg.clock = lambda: 1793606400.0                                        # 2026-11-02, local
     asked = []
 
@@ -73,7 +73,8 @@ def test_not_signed_in_yet_says_so_and_the_rest_stays_quiet(tmp_path):
     async def word(*a):
         return "x"
     ex = google_home.extras(gg, word, log=lambda m: None)
-    assert "sign-in hasn't been done" in asyncio.run(ex["calendar"]())
+    said = asyncio.run(ex["calendar"]())
+    assert "Google isn't connected" in said and "Connect Google for Skippy in Admin" in said
     assert asyncio.run(ex["mail"]()) is None and asyncio.run(ex["birthdays"]()) is None
 
 
@@ -88,3 +89,47 @@ def test_the_token_is_refreshed_and_kept_only_in_the_vault_file(tmp_path):
     gg = google_home.Google({"GOOGLE_HOME_TOKEN": str(tmp_path / "tok.json"), "GOOGLE_HOME_CLIENT": str(tmp_path / "client.json")}, post_form=post_form)
     assert gg.access_token() == "a1" and gg.access_token() == "a1" and len(posts) == 1
     assert posts[0]["grant_type"] == "refresh_token" and posts[0]["refresh_token"] == "r1"
+
+
+def test_without_a_local_grant_the_token_is_borrowed_from_the_portal_with_the_home_token(tmp_path):
+    asked = []
+
+    def portal(url, headers):
+        asked.append((url, headers))
+        return {"connected": True, "access_token": "pa1", "expires_in": 3500, "expires_at": 0}
+    gg = google_home.Google({"GOOGLE_HOME_TOKEN": str(tmp_path / "none.json"), "GOOGLE_HOME_CLIENT": str(tmp_path / "none-c.json"),
+                             "SKIPPY_HOME_TOKEN": "hometok", "PORTAL_URL": "https://portal.example/"}, get_json=portal,
+                            post_form=lambda *a: (_ for _ in ()).throw(AssertionError("no local refresh")), log=lambda m: None)
+    assert not gg.local and gg.connected
+    assert gg.access_token() == "pa1" and len(asked) == 1                               # cached while it lasts
+    assert asked[0] == ("https://portal.example/home/google/access", {"Authorization": "Bearer hometok"})
+
+
+def test_the_portal_saying_not_connected_is_not_connected_and_is_asked_again_after_a_minute(tmp_path):
+    now, asked = [1000.0], []
+
+    def portal(url, headers):
+        asked.append(url)
+        return {"connected": False, "why": "not connected: press Connect Google for Skippy in Admin"}
+    gg = google_home.Google({"GOOGLE_HOME_TOKEN": str(tmp_path / "n.json"), "GOOGLE_HOME_CLIENT": str(tmp_path / "c.json"), "SKIPPY_HOME_TOKEN": "h"},
+                            get_json=portal, clock=lambda: now[0], log=lambda m: None)
+    assert not gg.connected and not gg.connected and len(asked) == 1
+    now[0] += 61
+    assert not gg.connected and len(asked) == 2
+
+
+def test_a_portal_that_cannot_be_reached_is_not_called_not_connected(tmp_path):
+    def down(url, headers):
+        raise OSError("no route")
+    gg = google_home.Google({"GOOGLE_HOME_TOKEN": str(tmp_path / "n.json"), "GOOGLE_HOME_CLIENT": str(tmp_path / "c.json"), "SKIPPY_HOME_TOKEN": "h"},
+                            get_json=down, log=lambda m: None)
+    assert gg.connected                                                                 # unknown: the read that follows is logged instead
+
+
+def test_the_local_grant_still_wins_when_it_is_there(tmp_path):
+    (tmp_path / "client.json").write_text(json.dumps({"installed": {"client_id": "cid", "client_secret": "cs"}}))
+    (tmp_path / "tok.json").write_text(json.dumps({"refresh_token": "r1"}))
+    gg = google_home.Google({"GOOGLE_HOME_TOKEN": str(tmp_path / "tok.json"), "GOOGLE_HOME_CLIENT": str(tmp_path / "client.json"), "SKIPPY_HOME_TOKEN": "h"},
+                            post_form=lambda url, data: {"access_token": "local", "expires_in": 3600},
+                            get_json=lambda *a: (_ for _ in ()).throw(AssertionError("the portal isn't asked")))
+    assert gg.local and gg.access_token() == "local"

@@ -36,7 +36,7 @@ REGISTRY = {
         "me.index", "me.mcp_ask", "me.mcp_result", "me.pair_home", "me.toggle_experiment", "me.workshop_events", "me.workshop_history", "me.workshop_history_result",
         "me.workshop_image", "me.workshop_new_folder", "me.workshop_new_folder_result", "me.workshop_notify", "me.workshop_resync", "me.workshop_send", "me.workshop_ship", "me.workshop_stop",
         "chat.memory_ask", "chat.memory_result", "chat.quick_line",
-        "housechat.home_chat_events", "housechat.home_chat_send", "housechat.home_chat_forward")},
+        "housechat.home_chat_events", "housechat.home_chat_send", "housechat.home_chat_forward", "google_link.connect", "google_link.disconnect")},
     # granted apps
     "music.player_page": G("audio"), "music.player_gate": G("audio"), "music.player_checkin": G("audio"), "music.player_command": G("audio"),
     "video.video_page": G("video"), "video.video_gate": G("video"),
@@ -56,7 +56,7 @@ REGISTRY = {
     **{e: MACHINE for e in (
         "game_import_done", "game_import_download", "home_import_chunk", "home_job_done", "home_jobs", "home_media", "home_music_checkin", "home_music_favorite", "home_music_favorites", "housechat.home_house_sync", "home_deploys", "home_alert", "home_report", "home_starter",
         "home_prophesy_put", "home_prophesy_finish",
-        "home_telemetry", "home_workshop", "home_workshop_list", "home_patient", "home_ups", "home_core_report", "home_logs", "ops_home", "tasks_run")},
+        "home_telemetry", "home_workshop", "home_workshop_list", "home_patient", "home_ups", "home_core_report", "home_logs", "ops_home", "tasks_run", "google_link.home_access")},
     "telemetry_tap": BEACON,
     # public: sign-in, the front door, static and informational pages, the public experiments (free local compute, rate limited)
     **{e: PUBLIC for e in (

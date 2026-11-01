@@ -63,24 +63,26 @@ about an hour; until then `/health` says what it is waiting on).
 
 ## Connecting his Google account (once, read only)
 
-Nothing reads his password: Google's own sign-in page does that, and this PC keeps only a refresh token in the vault folder
-(`G:\My Drive\vault\google-home-token.json`). Scopes: calendar, Gmail, contacts and tasks, all read-only. Mail is summed up by Core only.
+It is the Maker Portal's own Google sign-in (2026-11-01, the Captain: "the exact same sign in as makerportal.live's admin"): no second
+OAuth client. Nothing reads his password: Google's own page does that. Scopes: calendar, Gmail, contacts and tasks, all read-only. Mail
+is summed up by Core only.
 
-1. In the Google Cloud console, project **skippy-tel**, open APIs & Services → Library and enable: **Google Calendar API**, **Gmail API**,
-   **People API**, **Google Tasks API**.
-2. APIs & Services → Credentials → Create credentials → OAuth client ID → Application type **Desktop app**, name "Skippy home" →
-   Create → **Download JSON**, and save it as `G:\My Drive\vault\google-home-client.json`.
-3. Consent screen: it must be **In production**, not Testing; in Testing Google expires the grant after 7 days. Because the app isn't
-   verified, the sign-in shows "Google hasn't verified this app": choose Advanced → Go to Skippy.
-4. Then (Skippy runs this; a browser tab opens, and he signs in with his personal account and allows):
-
-```bash
-services/satellite/.venv/Scripts/python services/satellite/google_home.py connect
-```
+1. **Admin → Google → Connect Google for Skippy** (`portal/google_link.py`), signed in as the Captain. Google asks once for the read-only
+   scopes (offline access, at the portal's existing `/auth/callback`); tick every box. Because the app isn't verified for Gmail, Google
+   may show "Google hasn't verified this app": Advanced → Go to Maker Portal.
+2. The portal keeps the refresh token in its private bucket (`google-link/skippy.json` in `skippy-tel-tabletop`), never in a page or a
+   log. skippy-pc borrows an hour's access token from `GET /home/google/access` with the home token (`google_home.Google._from_portal`).
+   **Disconnect** on the same pane revokes it at Google.
+3. The four APIs (Calendar, Gmail, People, Tasks) are enabled by `infra/bootstrap` (`local.apis`;
+   `ssh skippy-core 'sudo python3 /opt/skippy-core/cd/cd.py bootstrap apply'`). The consent screen must be **In production**, not
+   Testing: in Testing Google expires a grant with these scopes after 7 days.
 
 ```bash
 services/satellite/.venv/Scripts/python services/satellite/google_home.py check
 ```
+
+The old local grant (a "Desktop app" client in `G:\My Drive\vault\google-home-client.json` plus `google-home-token.json`, made by
+`google_home.py connect`) is still used first when both files exist; normally neither does.
 
 `check` lists his calendars and says whether the work calendar is shared in. Set `GOOGLE_WORK_CALENDAR=<work address>` in the vault .env
 so it is recognised for certain.

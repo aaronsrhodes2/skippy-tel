@@ -169,6 +169,9 @@ def login():
 
 @bp.route("/auth/callback")
 def callback():
+    import google_link                                                    # noqa: PLC0415 — it imports this module
+    if google_link.is_link_answer():                                      # Connect Google for Skippy coming back, not a sign-in
+        return google_link.finish()
     try:
         if request.args.get("error"):                                     # they cancelled on Google's screen
             raise OAuthError(error=request.args["error"])

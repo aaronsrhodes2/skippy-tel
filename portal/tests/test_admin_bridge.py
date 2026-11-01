@@ -23,7 +23,7 @@ def test_admin_is_a_bridge_page_with_a_control_for_each_pane(env):
     controls = re.findall(r'data-pane="([\w-]+)"', page)
     panes = re.findall(r'<section id="([\w-]+)" class="apane"', page)
     assert controls and sorted(controls) == sorted(panes), (controls, panes)
-    assert {"graveyard", "server", "recovery-pane", "setup", "settings", "friends", "discord"} == set(panes)
+    assert {"graveyard", "server", "recovery-pane", "google", "setup", "settings", "friends", "discord"} == set(panes)
     for pane in panes:                                                                    # each pane has its way back, its page flow and its bar
         part = page.split(f'<section id="{pane}" class="apane"', 1)[1]
         part = part.split('<section id="', 1)[0] if pane != "recovery-pane" else part.split('<section id="setup"', 1)[0]   # (its card refreshes itself: a script inside)
