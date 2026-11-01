@@ -305,7 +305,8 @@ def test_places_in_his_words():
     assert speaker_out.place_kinds(env, "Living Room") == ["enclave"] == speaker_out.place_kinds(env, "upstairs")
     assert speaker_out.place_kinds(env, "theater") == ["hdmi"] == speaker_out.place_kinds(env, "sony")
     assert speaker_out.place_kinds(env, "garage") is None
-    assert speaker_out.place_words(env, {"hdmi", "enclave"}) == "downstairs and upstairs"
+    assert speaker_out.place_words(env, {"hdmi", "enclave"}) == "everywhere"          # the house's layout names it
+    assert speaker_out.place_words(env, {"enclave"}) == "upstairs" and speaker_out.place_words(env, set()) == ""
 
 
 def test_music_moves_while_it_plays_and_says_only_where_it_is_heard():

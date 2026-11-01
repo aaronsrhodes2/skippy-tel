@@ -334,8 +334,16 @@ def place_kinds(env: dict, word: str) -> list[str] | None:
 
 
 def place_words(env: dict, kinds) -> str:
-    """'downstairs and upstairs' for a set of router outputs (by SKIPPY_PLACES); '' for none."""
+    """The place a set of router outputs is in his words: the house's layout says ({"hdmi", "enclave"} -> "everywhere", {"enclave"} ->
+    "upstairs"); without one, SKIPPY_PLACES ("downstairs and upstairs"). '' for none."""
     kinds = set(kinds)
+    try:
+        import house_layout                                        # noqa: PLC0415
+        said = house_layout.default().place_words(kinds)
+        if said or not kinds:
+            return said
+    except Exception:                                              # noqa: BLE001 — no layout: SKIPPY_PLACES below
+        pass
     names = [name for name, ks in places(env).items() if kinds & set(ks)]
     return " and ".join(names)
 
