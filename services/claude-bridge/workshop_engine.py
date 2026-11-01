@@ -916,7 +916,7 @@ class Workshop:
                 self._save_error = message
                 print(f"[bridge] couldn't save run {run.task}: {message}", file=sys.stderr, flush=True)
 
-    def load(self, close_unfinished: bool = True) -> int:
+    def load(self, close_unfinished: bool = True, keep=()) -> int:
         """At bridge start: take back the runs on disk that are younger than KEEP_FINISHED_S (a finished run counts
         from when it finished, a run caught mid-flight from when it was last written), prune the rest. A run that
         was not done had its process die with the bridge: it is closed as failed and says so, so the chat shows an
@@ -924,7 +924,9 @@ class Workshop:
         importing this module (a test) never touches the real directory.
 
         close_unfinished=False is a hand-over (front.py): an older bridge is still alive and still running the unfinished ones, so
-        they are left alone (not taken, file untouched); the front door calls load() again (POST /workshop/adopt) once it is gone."""
+        they are left alone (not taken, file untouched); the front door calls load() again (POST /workshop/adopt) once it is gone.
+        `keep`: tasks another generation that is still alive is running (the adopt names them); left alone the same way, so the
+        end of one old generation never closes a run a different one is still doing (2026-10-31: it closed purple's avatar run)."""
         root = Path(self.state_dir)
         try:
             entries = sorted(root.iterdir())
@@ -948,7 +950,7 @@ class Workshop:
                 continue
             if run is None:
                 continue                               # unreadable and recent: leave it alone, never crash the start
-            if not run.done and not close_unfinished:
+            if not run.done and (not close_unfinished or run.task in keep):
                 continue                               # the older generation's live run (a hand-over): not ours yet
             with self._lock:
                 if run.task in self._runs:

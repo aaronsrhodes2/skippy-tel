@@ -209,7 +209,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/workshop/adopt":                           # front.py: the older generation is gone, its runs are ours now
             if self._workshop_ok():
-                self._json(200, {"ok": True, "restored": adopt()})
+                keep = self._read_body().get("keep") or []        # runs a generation that is still alive holds: not ours to close
+                self._json(200, {"ok": True, "restored": adopt(keep=[t for t in keep if isinstance(t, str)] if isinstance(keep, list) else [])})
             return
         if path.startswith("/workshop/cancel/"):
             if self._workshop_ok():
@@ -364,13 +365,13 @@ _adopted = threading.Lock()
 _memory_started = False
 
 
-def adopt(close_unfinished: bool = True, memory: bool = True) -> int:
+def adopt(close_unfinished: bool = True, memory: bool = True, keep=()) -> int:
     """Take back the saved runs (and, once, start Skippy Memory's import). At start, and again by POST /workshop/adopt when the older
     generation of a hand-over is gone. Never raises: being reachable matters more than remembering."""
     global _memory_started
     with _adopted:
         try:
-            n = WORKSHOP.load(close_unfinished=close_unfinished)
+            n = WORKSHOP.load(close_unfinished=close_unfinished, keep=set(keep))
             print(f"[bridge] {n} saved run(s) restored from {WORKSHOP.state_dir}", file=sys.stderr)
         except Exception:  # noqa: BLE001
             print("[bridge] couldn't restore saved runs; starting without them:", file=sys.stderr)

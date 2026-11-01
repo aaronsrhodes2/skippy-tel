@@ -27,6 +27,7 @@ class World:
     def __init__(self):
         self.runs: dict[int, list] = {}
         self.calls: list = []
+        self.bodies: list = []
         self.procs: dict[int, Proc] = {}
         self.killed: list[int] = []
         self.code = "c1"
@@ -41,6 +42,7 @@ class World:
         port = int(url.split(":")[2].split("/")[0])
         path = "/" + url.split("/", 3)[3]
         self.calls.append((method, port, path))
+        self.bodies.append((path, body))
         if port not in self.runs or self.procs[port].dead:
             return 0, b""
         if path.startswith("/health"):
@@ -104,6 +106,24 @@ def test_a_drained_generation_is_stopped_and_its_runs_adopted_by_the_new_one(tmp
     f.tick()
     assert old not in f.gens and old.pid in w.killed
     assert ("POST", f.current().port, "/workshop/adopt") in w.calls
+
+
+def test_the_adopt_after_one_old_generation_goes_spares_the_run_another_old_one_still_has(tmp_path):
+    w, f = make(tmp_path)
+    start(f, "task-old1")
+    f.handover("one")                                 # generation 1 keeps task-old1
+    f.handover("two")                                 # generation 2 (idle) drains at once
+    f.tick()
+    assert len(f.gens) == 2 and f.gens[0].n == 1      # the one with the run stays
+    (body,) = [b for path, b in w.bodies if path == "/workshop/adopt"]
+    assert json.loads(body) == {"keep": ["task-old1"]}  # ... and the adopt is told to leave its run alone (2026-10-31)
+
+
+def test_adopt_leaves_a_run_another_generation_holds(shop):
+    path = write_run(shop, "abcdefab", done=False)
+    before = path.read_text(encoding="utf-8")
+    assert shop.load(close_unfinished=True, keep={"abcdefab"}) == 0
+    assert path.read_text(encoding="utf-8") == before
 
 
 def test_runs_and_health_cover_every_generation(tmp_path):

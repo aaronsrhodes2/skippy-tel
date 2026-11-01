@@ -216,7 +216,7 @@ class Front:
         if gone:
             cur = self.current()
             if cur is not None:
-                self.request("POST", cur.url + "/workshop/adopt", b"{}", self._auth(), timeout=30)
+                self.request("POST", cur.url + "/workshop/adopt", json.dumps({"keep": self._held(cur)}).encode(), self._auth(), timeout=30)
         cur = self.current()
         if cur is None or not cur.alive():
             if cur is not None:
@@ -266,6 +266,12 @@ class Front:
                 if not r.get("done") and isinstance(r.get("task"), str):
                     self.owner[r["task"]] = g.n
         return runs
+
+    def _held(self, cur: Gen) -> list[str]:
+        """The unfinished runs the other generations that are still alive hold: the adopt must leave them to finish there."""
+        with self.lock:
+            others = [g for g in self.gens if g is not cur and g.alive()]
+        return sorted({r["task"] for g in others for r in (self._runs(g) or []) if not r.get("done") and isinstance(r.get("task"), str)})
 
     def _busy(self, g: Gen) -> bool:
         """True unless the generation says it holds no unfinished run. Not knowing counts as busy: never stop a run by guessing."""
