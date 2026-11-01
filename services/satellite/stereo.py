@@ -61,6 +61,7 @@ class RouterPlayer:
         self.spot_last = (0, 0)                                    # (pos_ms, ms) of spot_uri, last seen
         self.xfade_s = xfade_s                                     # Spotify -> Bilby: Spotify fades out over its last seconds as Bilby fades in
         self._handing = False                                      # the next play() is that crossfade (the Spotify sound fades, not cut)
+        self.cable_retry = 0.0                                     # when to try the cable again after it would not open (0: it is not failing)
         if spotify is None:
             self.play_spotify = None                               # BoxMusic looks for it: without one, Spotify items are skipped
 
@@ -127,9 +128,14 @@ class RouterPlayer:
         if pcm.startswith("capture:"):                              # the Spotify app on the virtual cable
             try:
                 src = spotify_mod.CaptureSource(pcm.split(":", 1)[1])
-            except Exception as e:                                  # noqa: BLE001 — said in the log; the speaker still plays (silently, into the cable)
-                self.log(f"(stereo: Spotify's cable would not open: {type(e).__name__}: {e})")
+            except Exception as e:                                  # noqa: BLE001 — said in the log; spotify_tick tries again every few seconds
+                if not self.cable_retry:
+                    self.log(f"(stereo: Spotify's cable would not open, trying again: {type(e).__name__}: {e})")
+                self.cable_retry = self.clock() + 3.0
                 return
+            if self.cable_retry:
+                self.log("(stereo: Spotify's cable is open)")
+            self.cable_retry = 0.0
         else:
             kw = {"popen": self.popen} if self.popen is not None else {}
             src = router_mod.PipeSource(spotify_mod.pcm_args(pcm), ahead_s=0.5, **kw)
@@ -233,6 +239,8 @@ class RouterPlayer:
                     box.offset, box.playing = box.pos(), False
                 return 1.5
             if uri == self.spot_uri and playing:
+                if self.cable_retry and self.clock() >= self.cable_retry:  # it would not open when this track started (Windows' sound was busy)
+                    self._ensure_stream()
                 if not self.spot_seen:
                     self._road(uri)
                     if box is not None:

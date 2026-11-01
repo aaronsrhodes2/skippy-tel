@@ -425,3 +425,30 @@ def test_every_spotify_track_that_starts_goes_into_his_road_playlist_once():
         assert ("road", B) in client.calls                                # one his phone played on the Skippy speaker too
         await s.stop()
     run(go())
+
+
+def test_a_cable_that_will_not_open_is_tried_again_while_the_track_plays(monkeypatch):
+    async def go():
+        client = FakeClient()
+        client.pcm = "capture:CABLE Output"
+        s, router, clock = make(client)
+        tries = []
+
+        class Cable:
+            live = True
+
+            def __init__(self, part):
+                tries.append(part)
+                if len(tries) == 1:
+                    raise OSError("Unanticipated host error")      # Windows' sound busy as the hub starts
+
+        monkeypatch.setattr(spotify, "CaptureSource", Cable)
+        st = {"logged_in": True, "playing": True, "uri": A, "title": "Song", "artist": "Band", "origin": "android", "pos_ms": 5000, "ms": 90000}
+        await s.player.spotify_tick(st)
+        assert router.live() == [] and len(tries) == 1
+        await s.player.spotify_tick(st)                                   # too soon: no hammering
+        assert len(tries) == 1
+        clock.t += 3.5
+        await s.player.spotify_tick(st)
+        assert len(tries) == 2 and len(router.live()) == 1 and s.player.cable_retry == 0.0
+    run(go())
