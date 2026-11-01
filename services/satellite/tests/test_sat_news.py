@@ -105,3 +105,23 @@ def test_home_place_forms():
     assert news.home_place({"HOME_ADDRESS": "1 Main St, Springfield, IL 62701, USA"}) == "Springfield, IL"
     assert news.home_place({"HOME_ADDRESS": ""}) == ""
     assert news.home_place({"SKIPPY_NEWS_PLACE": "Paris, France"}) == "Paris, France"
+
+
+def test_web_search_is_a_tool_the_house_brain_has_and_searches_any_date():
+    import news as nm
+    asked = []
+    def get(url):
+        asked.append(url)
+        return {"results": [{"title": "Zelda-likes on Steam", "content": "Tunic, Death's Door", "url": "https://store.steampowered.com/curator/x"}]}
+    n = nm.News(env={}, get=get)
+    assert [t["name"] for t in n.tools()] == ["news", "web_search"]
+    said = n.web({"query": "Steam games like Zelda"})
+    assert "Tunic" in said and "categories=general" in asked[0] and "time_range" not in asked[0]
+    assert "can't look things up" in nm.WEB_PROMPT
+
+
+def test_web_search_down_is_said_plainly():
+    import news as nm
+    def get(url):
+        raise OSError("down")
+    assert "not answering" in nm.News(env={}, get=get).web({"query": "x"})

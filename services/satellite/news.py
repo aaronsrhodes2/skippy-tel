@@ -43,6 +43,16 @@ TOOL = {"name": "news", "description": "Recent news headlines from the web about
             "local": {"type": "boolean", "description": "True when he means news near his home."}},
             "required": ["subject"]}}
 
+WEB_TOOL = {"name": "web_search", "description": "Search the web for anything that is not the news: facts, games, products, places, how-tos, "
+                                               "recommendations ('Steam games like Zelda'). Talk only from what it returns.",
+            "input_schema": {"type": "object", "properties": {
+                "query": {"type": "string", "description": "What to search for, as you would type it into a search engine."}},
+                "required": ["query"]}}
+
+WEB_PROMPT = (" You can search the web with the web_search tool for anything else he asks that you don't know or that may have changed (games, "
+              "products, places, facts, recommendations): call it in that same turn, never say you can't look things up, and answer only from "
+              "what it returns, in a few spoken sentences.")
+
 PROMPT = (" He can ask for the news: the news tool gives you today's headlines on any subject. Never say you will look something up or fetch "
           "the headlines: call the news tool in that same turn, then tell him what it found. Talk him through the two or three that matter most, like a "
           "conversation, in your own words and only from what the tool returned (who, what, where); never invent a detail, a result or a quote; say when "
@@ -74,7 +84,9 @@ def http_get_json(url: str, timeout: float = 20) -> dict:
 
 def search(query: str, when: str = "day", get=http_get_json, category: str = "news") -> list[dict]:
     """[{title, content, url, source, date}] for `query`, newest category first; [] when nothing (or the search is down: the caller says so)."""
-    params = {"q": query, "format": "json", "categories": category, "time_range": when if when in ("day", "week", "month", "year") else "day"}
+    params = {"q": query, "format": "json", "categories": category}
+    if when is not None:                                        # None: any time (a plain web search)
+        params["time_range"] = when if when in ("day", "week", "month", "year") else "day"
     data = get(f"{SEARCH_URL}/search?{urllib.parse.urlencode(params)}")
     out, seen = [], set()
     for r in data.get("results") or []:
@@ -148,6 +160,19 @@ class News:
         self.last, self.deeper = {"subject": subject, "when": when, "items": items, "at": self.clock()}, None
         return f"Headlines about {subject} from {span}:\n{listing(items)}"
 
+    def web(self, args: dict) -> str:
+        """The `web_search` tool: the same SearXNG, its general results, any date."""
+        query = clean((args or {}).get("query"), 200)
+        if not query:
+            return "Ask him what to search for."
+        try:
+            items = search(query, None, self.get, category="general")[:MAX_ITEMS]
+        except Exception as e:                                  # noqa: BLE001 — said aloud, not raised
+            if self.log:
+                self.log(f"(web search failed: {type(e).__name__})")
+            return "The web search is not answering right now. Say so plainly."
+        return f"Web results for \"{query}\":\n{listing(items)}" if items else f"The web search found nothing for {query}. Say so; do not guess."
+
     def adopt(self, subject: str, items: list[dict]) -> None:
         """Headlines found elsewhere (a conversation starter's sources) become the ones he was given, so "tell me more" works on them."""
         self.last, self.deeper = {"subject": subject, "when": "day", "items": list(items)[:MAX_ITEMS], "at": self.clock()}, None
@@ -163,7 +188,7 @@ class News:
 
     # ── the brain's hooks ──
     def tools(self):
-        return [TOOL]
+        return [TOOL, WEB_TOOL]
 
     def story_of(self, heard: str) -> int | None:
         """Which of the headlines he was just given he means ("the second one", "number three", "the last one", or words from its headline); None if none."""

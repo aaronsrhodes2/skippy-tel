@@ -80,7 +80,7 @@ class Brain:
         books = (" He has audiobooks (DRM-free files he supplied): the audiobook tool plays and steers them, and while one plays 'stop' or 'pause' means pause it. "
                  "Anything about the book (play, stop, pause, skip, where he is, a sleep timer) needs the audiobook tool called in that very turn; you cannot see the book, "
                  "so never say what is in it, what chapter it is, or that you did something unless the tool just told you. You never read a book aloud yourself.") if any(t["name"] == "audiobook" for t in self.extra_tools) else ""
-        news = (news_mod.PROMPT + self.news.recent()) if self.news is not None else ""
+        news = (news_mod.PROMPT + news_mod.WEB_PROMPT + self.news.recent()) if self.news is not None else ""
         offered = ""
         if self.offered and self.clock() - self.offered["at"] < news_mod.KEEP_S:
             offered = ("\n\nYou brought this up yourself a moment ago, unasked; if he wants more, talk only from these sources and say when they don't settle "
@@ -120,6 +120,8 @@ class Brain:
             return self.weather.run(args)
         if name == "news" and self.news is not None:
             return self.news.run(args)
+        if name == "web_search" and self.news is not None:
+            return self.news.web(args)
         if self.hass is not None and name in {t["name"] for t in hass_mod.TOOLS}:
             return hass_mod.run_tool(self.hass, name, args)
         if self.run_extra is not None and name in {t["name"] for t in self.extra_tools}:
