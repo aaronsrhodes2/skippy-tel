@@ -178,8 +178,8 @@ skippy-core sits in the bedroom with the TV on its HDMI. The TV is a console tha
 - **The kiosk:** `couch.service` logs user `couch` (no sudo, no docker) in on tty1 and runs cage with `core/couch/run.sh`: Moonlight
   streams skippy-pc's `Desktop` (COUCH_APP) at 4K60 HEVC, hardware decode, and starts again whenever the stream ends. Its log:
   `/home/couch/moonlight.log`. The login hands down an ambient CAP_WAKE_ALARM that Flatpak's sandbox refuses: run.sh drops it (setpriv).
-- **Bitrate:** 40 Mbit/s (`COUCH_KBPS`): the box at the far end of the bedroom's Ethernet only does 100 Mbit/s (80 dropped frames).
-  On gigabit, 80000.
+- **Bitrate:** 80 Mbit/s (`COUCH_KBPS`), clean on gigabit. The bedroom run first went through a 100 Mbit switch, which dropped frames at
+  80 (the link partner offered only 10/100): bypassed 2026-11-01, the same cable links at 1000. Behind a 100 Mbit hop, use 40000.
 - **Sound:** the TV's HDMI is couch's PipeWire; the analog jack (the Enclave) aaron's. Each WirePlumber disables the other's card
   (`~/.config/wireplumber/wireplumber.conf.d/60-skippy-cards.conf`).
 - **skippy-pc:** Sunshine from winget (`LizardByte.Sunshine`, a Windows service); its web login `SUNSHINE_USER`/`SUNSHINE_PASSWORD` in
