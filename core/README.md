@@ -145,26 +145,26 @@ on the home LAN, which Docker on Windows doesn't give a container; SkippyCore is
 - **On skippy-pc:** `MATTER_URL=ws://skippy-core:5580/ws` in the vault `.env`; then `homectl.py matter-info`, `matter-pair`, `list`,
   `say`, `prove` (`services/satellite/README.md`).
 
-## The Enclave speakers on its Bluetooth (2026-11-01)
+## The Enclave speakers, by aux cable (2026-11-01)
 
-The Captain's **Enclave Audio** speakers are paired with SkippyCore's own Bluetooth radio (hci0) and play the house's sound: the hub on
-skippy-pc still makes every sound (Skippy's voice, Bilby, the routines) and sends it over the tailnet; this box only plays it. Why here:
-the projector's HDMI is off at night, and skippy-pc's own Bluetooth is weak.
+The Captain's **Enclave Audio** speakers play the house's sound from skippy-core, which now sits upstairs beside them: its **headphone
+jack is cabled to the Enclave's aux in**. The hub on skippy-pc still makes every sound (Skippy's voice, Bilby, the routines) and sends it
+over the tailnet; this box only plays it.
 
-    hub (skippy-pc, services/satellite/router.py NetStream) ──raw PCM, tcp :4953──▶ snapserver ──▶ snapclient ──▶ PipeWire ──A2DP──▶ Enclave
+    hub (skippy-pc, services/satellite/router.py NetStream) ──raw PCM, tcp :4953──▶ snapserver ──▶ snapclient ──▶ PipeWire ──aux──▶ Enclave
 
-- **Install:** `sudo bash core/install/enclave.sh` (dry run), `--apply`, then `--pair` with the speaker in Bluetooth pairing mode, then
-  `--check`. It installs headless PipeWire + WirePlumber + bluez5 as aaron's user services (linger: no login needed; WirePlumber told not
-  to wait for a desk seat), **snapserver** (one source: raw PCM pushed by the hub on 127.0.0.1:4953, a 300 ms buffer; its JSON-RPC on
-  127.0.0.1:1780), and both doors onto the **tailnet only** through `tailscale serve` (no key of their own: never the LAN or the Funnel).
-- **enclave-keep** (`core/enclave/keep.sh`, aaron's user service): connects the speaker whenever it is on (every 10 s while it isn't) and
-  runs snapclient (`enclave-snap`) into its A2DP sink only while it is connected. So snapserver lists a connected client exactly when the
-  Enclave plays, and that is the one thing the hub asks before it sends.
-- **One sender:** snapserver takes one stream at a time: the hub, or `services/satellite/sync_outputs.py` while the hub isn't sending.
-- **The radio is the speaker's alone:** the car's charging used to go over it (core/car-ble's tesla-control, which took the adapter from
-  bluez and dropped the speaker for ~30 s per command); since 2026-11-01 it goes through the Fleet API (docs/tesla.md).
-- **Range:** it reaches upstairs (moved 2026-11-01, still connected). Bonded: a power-cord pull and a dropped link both came back by themselves.
-- **Look:** `journalctl --user -u enclave-keep -u enclave-snap`, `pactl list short sinks`, `bluetoothctl info 00:07:80:C5:32:90`.
+- **Why a cable:** first it was Bluetooth from downstairs. Across the floor A2DP stalled twice in 15 minutes, and once it stayed
+  "connected" but silent until the speaker's power was pulled: nothing on this side can see or fix that. So skippy-core moved upstairs
+  (wired Ethernet; Wi-Fi as a fallback, `/etc/netplan/60-skippy-wifi.yaml`, metric 600) and the Enclave is unpaired.
+- **Install:** `sudo bash core/install/enclave.sh` (dry run), `--apply`, `--check`. Headless PipeWire + WirePlumber as aaron's user
+  services (linger), aaron in the `audio` group (a headless user gets no seat ACL on the sound card: without it PipeWire saw only
+  Bluetooth), **snapserver** (one source: raw PCM pushed by the hub on 127.0.0.1:4953, a 300 ms buffer; JSON-RPC on 127.0.0.1:1780),
+  both doors on the **tailnet only** through `tailscale serve`.
+- **enclave-keep** (`core/enclave/keep.sh`, aaron's user service, `ENCLAVE_LINK=aux`): runs snapclient (`enclave-snap`) into the analog
+  sink (`alsa_output.pci-0000_c5_00.6.analog-stereo`, headphone port) whenever it is there. `ENCLAVE_LINK=bt` (and `--pair`) is the old
+  Bluetooth way, kept for a speaker without a cable.
+- **One sender:** snapserver takes one stream at a time: the hub, or `services/satellite/sync_outputs.py` while the hub is stopped.
+- **Look:** `journalctl --user -u enclave-keep -u enclave-snap`, `pactl list short sinks`, `amixer -c 1 contents | grep -A2 Jack`.
 
 ## Status and recovery
 

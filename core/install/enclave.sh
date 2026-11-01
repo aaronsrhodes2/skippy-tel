@@ -1,27 +1,35 @@
 #!/usr/bin/env bash
-# The Captain's Enclave Audio speakers on skippy-core's Bluetooth: the office's main speaker (2026-11-01; the projector's HDMI is off at
-# night, and skippy-pc's own Bluetooth is weak). The hub on skippy-pc still makes every sound; this box only plays it.
+# The Captain's Enclave Audio speakers, upstairs, played by skippy-core (2026-11-01). The hub on skippy-pc still makes every sound; this
+# box only plays it.
 #
-#   hub (skippy-pc, router.py NetStream) ──tcp :4953 (tailnet)──▶ snapserver ──▶ snapclient ──▶ PipeWire ──A2DP──▶ Enclave
+#   hub (skippy-pc, router.py NetStream) ──tcp :4953 (tailnet)──▶ snapserver ──▶ snapclient ──▶ PipeWire ──aux cable──▶ Enclave
+#
+# ENCLAVE_LINK=aux (the default): skippy-core sits beside the Enclave, its headphone jack cabled to the speaker's aux in. Bluetooth (bt)
+# is still here but not used: from downstairs it stalled twice in 15 minutes and once stayed "connected" but silent until the speaker's
+# power was pulled. In aux mode --apply unpairs the Enclave, so Bluetooth can't take the speaker's input over.
 #
 #   sudo bash core/install/enclave.sh            # dry run: says what it would do, changes nothing
 #   sudo bash core/install/enclave.sh --apply    # install and start everything (idempotent)
-#   sudo bash core/install/enclave.sh --pair     # pair + trust the speaker: put it in Bluetooth pairing mode first
+#   sudo ENCLAVE_LINK=bt bash core/install/enclave.sh --pair   # bt only: pair + trust the speaker
 #   sudo bash core/install/enclave.sh --check    # read-only: is all of it live? exit 1 if not
 #
-#   * PipeWire + WirePlumber + bluez5 as aaron's user services, kept running with no login (linger). WirePlumber's Bluetooth is told
-#     not to wait for a desk seat (a headless box never has one).
+#   * PipeWire + WirePlumber + bluez5 as aaron's user services, kept running with no login (linger), aaron in the `audio` group (a
+#     headless user gets no seat ACL on the sound card: without it PipeWire saw only Bluetooth). WirePlumber's Bluetooth is told not to
+#     wait for a desk seat.
 #   * snapserver (system service): one source, raw PCM pushed by the hub on 127.0.0.1:4953 (48 kHz, 16 bit, stereo), a 300 ms buffer;
 #     its JSON-RPC on 127.0.0.1:1780 says whether a client plays. Both reach the tailnet through `tailscale serve`, never the LAN or
 #     the Funnel (they have no key of their own).
-#   * enclave-keep (aaron's user service, core/enclave/keep.sh): connects the speaker whenever it is on and starts snapclient
-#     (enclave-snap) into its A2DP sink only while it is connected. So snapserver lists a client exactly when the Enclave plays.
+#   * enclave-keep (aaron's user service, core/enclave/keep.sh): starts snapclient (enclave-snap) into the speaker's sink (the analog
+#     headphone out; bt: the A2DP sink, connecting it when it is on) only while that sink is there. So snapserver lists a client exactly
+#     when the Enclave can play.
 #   * The radio is the speaker's alone: the car's charging goes through the Fleet API (core/car-fleet), not Bluetooth (core/car-ble,
 #     retired 2026-11-01: tesla-control took the adapter from bluez and dropped the speaker for every command).
 set -euo pipefail
 MODE="${1:-}"
 APPLY=0; [[ "$MODE" == "--apply" || "$MODE" == "--pair" ]] && APPLY=1
 MAC="${ENCLAVE_MAC:-00:07:80:C5:32:90}"
+LINK="${ENCLAVE_LINK:-aux}"
+SINK="${ENCLAVE_SINK:-alsa_output.pci-0000_c5_00.6.analog-stereo}"   # aux: the Ryzen codec's analog out, headphone port
 USER_NAME="${ENCLAVE_USER:-aaron}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 UID_N="$(id -u "$USER_NAME")"
@@ -36,9 +44,16 @@ if [[ "$MODE" == "--check" ]]; then
   chk "PipeWire running"                    'as_user systemctl --user is-active -q pipewire wireplumber pipewire-pulse'
   chk "snapserver running"                  'systemctl is-active -q snapserver'
   chk "enclave-keep running"                'as_user systemctl --user is-active -q enclave-keep'
-  chk "Enclave bonded and trusted"          'bluetoothctl info "$MAC" | grep -q "Bonded: yes" && bluetoothctl info "$MAC" | grep -q "Trusted: yes"'
-  chk "Enclave connected"                   'bluetoothctl info "$MAC" | grep -q "Connected: yes"'
-  chk "its A2DP sink in PipeWire"           'as_user pactl list short sinks | grep -q "bluez_output.${MAC//:/_}"'
+  if [[ "$LINK" == "aux" ]]; then
+    chk "$USER_NAME in the audio group"         'id -nG "$USER_NAME" | grep -qw audio'
+    chk "a cable in the headphone jack"         'amixer -c 1 contents | grep -A2 "Headphone Jack" | grep -q "values=on"'
+    chk "the analog sink in PipeWire"           'as_user pactl list short sinks | grep -q "$SINK"'
+    chk "the Enclave not paired (Bluetooth off it)" '! bluetoothctl info "$MAC" 2>/dev/null | grep -q "Paired: yes"'
+  else
+    chk "Enclave bonded and trusted"          'bluetoothctl info "$MAC" | grep -q "Bonded: yes" && bluetoothctl info "$MAC" | grep -q "Trusted: yes"'
+    chk "Enclave connected"                   'bluetoothctl info "$MAC" | grep -q "Connected: yes"'
+    chk "its A2DP sink in PipeWire"           'as_user pactl list short sinks | grep -q "bluez_output.${MAC//:/_}"'
+  fi
   chk "snapclient playing into it"          'as_user systemctl --user is-active -q enclave-snap'
   chk ":4953 and :1780 on the tailnet"      'tailscale serve status | grep -q ":4953" && tailscale serve status | grep -q ":1780 (tailnet only)"'
   exit $bad
@@ -71,7 +86,7 @@ if [[ "$MODE" == "--pair" ]]; then
 fi
 
 echo "== 1/5 packages"
-PKGS=(pipewire pipewire-pulse wireplumber libspa-0.2-bluetooth pulseaudio-utils snapserver snapclient bluez)
+PKGS=(pipewire pipewire-pulse wireplumber libspa-0.2-bluetooth pulseaudio-utils snapserver snapclient bluez alsa-utils)
 missing=(); for p in "${PKGS[@]}"; do dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q "ok installed" || missing+=("$p"); done
 if (( ${#missing[@]} )); then DEBIAN_FRONTEND=noninteractive do_ apt-get install -y -q --no-install-recommends "${missing[@]}"; else echo "ok: all installed"; fi
 # The package's own snapclient runs as a system user on ALSA, which a Bluetooth speaker isn't: ours is aaron's, on PipeWire.
@@ -110,6 +125,11 @@ do_ systemctl enable --now snapserver
 
 echo "== 3/5 PipeWire for $USER_NAME, running with no login"
 loginctl show-user "$USER_NAME" -p Linger 2>/dev/null | grep -q yes && echo "ok: linger" || do_ loginctl enable-linger "$USER_NAME"
+if id -nG "$USER_NAME" | grep -qw audio; then echo "ok: $USER_NAME in audio"
+else do_ usermod -aG audio "$USER_NAME"; (( APPLY )) && do_ systemctl restart "user@$UID_N.service"; fi   # the group needs a new user manager
+if [[ "$LINK" == "aux" ]] && bluetoothctl info "$MAC" 2>/dev/null | grep -q "Paired: yes"; then
+  do_ bluetoothctl remove "$MAC"                                   # aux: Bluetooth must not take the speaker's input over
+fi
 (( APPLY )) && for _ in $(seq 20); do [[ -S "$RUN/bus" ]] && break; sleep 0.5; done
 put "$HOME_DIR/.config/wireplumber/wireplumber.conf.d/50-skippy-headless.conf" "$USER_NAME:$USER_NAME" <<'EOF' || true
 # core/install/enclave.sh: a headless box has no desk seat; WirePlumber would otherwise keep Bluetooth off waiting for one.
@@ -144,7 +164,7 @@ Description=Keeps the Enclave connected and playing the hub's stream (core/encla
 After=pipewire-pulse.service wireplumber.service
 
 [Service]
-Environment=ENCLAVE_MAC=$MAC
+Environment=ENCLAVE_MAC=$MAC ENCLAVE_LINK=$LINK ENCLAVE_SINK=$SINK
 ExecStart=/usr/local/lib/skippy-core/enclave-keep.sh
 Restart=always
 RestartSec=5
@@ -161,5 +181,5 @@ else echo "would: enable and start enclave-keep (aaron's user service)"; fi
 echo "== 5/5 the tailnet doors (never the LAN or the Funnel)"
 tailscale serve status 2>/dev/null | grep -q ":4953" && echo "ok: :4953 served" || do_ tailscale serve --bg --tcp=4953 tcp://127.0.0.1:4953
 tailscale serve status 2>/dev/null | grep -q ":1780 (tailnet only)" && echo "ok: :1780 served" || do_ tailscale serve --bg --http=1780 http://127.0.0.1:1780
-(( APPLY )) && echo "then: sudo bash $0 --pair (speaker in pairing mode), and sudo bash $0 --check"
+(( APPLY )) && echo "then: sudo bash $0 --check$([[ $LINK == bt ]] && echo " (bt: first --pair, the speaker in pairing mode)")"
 exit 0
