@@ -667,9 +667,9 @@ class CD:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
                 return
-            if quiet.should_defer(self.home / "busy-since"):
-                self.log("the private Skippy is working: holding this tick")
-                return
+            # No quiet gate here (2026-10-31): the portal deploy is a docker build and a Cloud Run push, not a Core build or a llama-swap
+            # reload, and holding it for a purple run deadlocked purple waiting to see its own change live (and held every other
+            # session's deploy behind it). The gate stays on Core's own deployer (core/quiet.py).
             sha = self.green()
             if sha:
                 self.self_update(sha)

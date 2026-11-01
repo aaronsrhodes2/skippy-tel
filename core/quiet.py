@@ -1,4 +1,5 @@
-"""The quiet gate: skippy-core's builders (deployer, CI, CD) keep off the box while the private Skippy is working on it.
+"""The quiet gate: skippy-core's own deployer (Core's models and services) keeps off the box while the private Skippy is working on it.
+CI and the portal's CD do not wait (2026-10-31: holding them deadlocked purple waiting to see its own change live).
 
 The coder shares the GPU and CPU with everything else on skippy-core, and a build or a llama-swap reload in the middle of an agent
 run makes the run slow (2026-10-25: a loop of failed Core builds and rollbacks ran through the first half hour of a trial).
