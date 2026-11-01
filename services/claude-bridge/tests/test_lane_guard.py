@@ -73,6 +73,42 @@ def test_every_run_gets_the_lane_guard_and_skippytel_its_deploy_checkout(shop):
     assert rule["matcher"] == "Edit|Write|MultiEdit|NotebookEdit|Bash" and "lane_guard.py" in rule["hooks"][0]["command"]
     assert see["matcher"] == "Read" and "eyes.py" in see["hooks"][0]["command"]      # a Core run's pictures (test_eyes.py)
     assert "SKIPPY_LANE_DEPLOY" in call["env"]
+    (finish_hook,) = settings["hooks"]["Stop"]                                        # the finish line (finish_gate.py)
+    assert "finish_gate.py" in finish_hook["hooks"][0]["command"]
+    assert "SKIPPY_FINISH_STATE" in call["env"]
+    state = json.loads((Path(shop.state_dir) / ".finish" / "aaaaaaaa.json").read_text(encoding="utf-8"))
+    assert set(state) == {"clone", "baseline", "head", "sent_back"} and state["sent_back"] == 0
+
+
+@pytest.mark.parametrize("cmd", [
+    'taskkill //FI "WINDOWTITLE bi13jihh0*" //F', "taskkill /IM python.exe /F", "Stop-Process -Name node", "pkill -f hub.py",
+    "shutdown /r /t 0", "ssh skippy-core 'sudo systemctl reboot'",
+])
+def test_risky_commands_are_refused_from_any_folder(lane, cmd, monkeypatch):
+    monkeypatch.setattr(lg.holders, "processes", lambda: [])
+    monkeypatch.setattr(lg.holders, "active_runs", lambda: [])
+    reason = lane.check("Bash", {"command": cmd})
+    assert reason and "SKIPPY_FORCE=1" in reason and "No purple run is going" in reason, cmd
+    assert lane.check("Bash", {"command": "SKIPPY_FORCE=1 " + cmd}) is None            # his yes: forced
+
+
+def test_a_refused_kill_names_what_it_would_hit_and_the_runs_going(lane, monkeypatch):
+    monkeypatch.setattr(lg.holders, "processes", lambda: [
+        {"pid": 141110, "name": "python.exe", "cmd": "python services/satellite/hub.py"},
+        {"pid": 9, "name": "python.exe", "cmd": "python -m pytest -q"}, {"pid": 7, "name": "node.exe", "cmd": "node x"}])
+    monkeypatch.setattr(lg.holders, "active_runs", lambda: ["purple run 56be16bf (skippytel, conversation f2426c4e): running 12 min"])
+    reason = lane.check("Bash", {"command": "taskkill /IM python.exe /F"})
+    assert "2 process(es)" in reason and "1 x the home hub" in reason and "PID 141110" in reason and "home hub" in reason and "test run" in reason
+    assert "node" not in reason and "purple run 56be16bf" in reason and "Force it" in reason
+
+
+@pytest.mark.parametrize("cmd", [
+    "ssh skippy-core 'sudo python3 /opt/skippy-core/cd/cd.py ops status'", "ssh skippy-core 'sudo python3 /opt/skippy-core/cd/cd.py ops logs'",
+    "taskkill //PID 4242 //F", "docker compose stop flask-api", "kill 4242",
+    "ssh skippy-core 'sudo python3 /opt/skippy-core/cd/cd.py ops restart-game garrysmod'",     # a games fix is not refused
+])
+def test_their_harmless_cousins_are_fine(lane, cmd):
+    assert lane.check("Bash", {"command": cmd}) is None, cmd
 
 
 # ── folders a project may not even read (the Shifting Prophesy cruise keeps the two builds and the referee apart) ──────────

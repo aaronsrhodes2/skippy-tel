@@ -48,6 +48,7 @@ import markup
 import conversation_log
 import new_folder
 import projects as projects_mod
+import run_state
 import sdk_engine
 
 MODEL = "claude-sonnet-5-5"        # Sonnet 5.5, on purpose: nothing else picks it (was Opus until 2026-10-10)
@@ -1348,11 +1349,29 @@ class Workshop:
         see = f'"{sys.executable}" "{Path(__file__).resolve().with_name("eyes.py")}"'   # a Core run's Read of a picture (eyes.py)
         # after a compaction, the Captain's request back in front of the agent, word for word (restate_request.py)
         restate = f'"{sys.executable}" "{Path(__file__).resolve().with_name("restate_request.py")}"'
+        # the finish line: a turn with uncommitted, unpushed or not-yet-live work is sent back (finish_gate.py, SKIPPY_FINISH_STATE)
+        finish = f'"{sys.executable}" "{Path(__file__).resolve().with_name("finish_gate.py")}"'
         want = {"hooks": {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
                                           "hooks": [{"type": "command", "command": hook, "timeout": 10}]},
                                          {"matcher": "Read", "hooks": [{"type": "command", "command": see, "timeout": 200}]}],
-                          "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": restate, "timeout": 10}]}]}}
+                          "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": restate, "timeout": 10}]}],
+                          "Stop": [{"hooks": [{"type": "command", "command": finish, "timeout": 90}]}]}}
         return self._settings_file("lane-settings.json", want)
+
+    def finish_state(self, run: "Run", clone: str) -> str:
+        """The run's starting point for finish_gate.py (written once per run, so a retry keeps the first count): the paths
+        already dirty, HEAD, and how often it has been sent back. Its path goes to claude as SKIPPY_FINISH_STATE."""
+        path = Path(self.state_dir) / ".finish" / f"{run.task}.json"
+        try:
+            if not path.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                status = self._git("status", "--porcelain", "--untracked-files=all", cwd=clone, timeout=SHIP_GIT_TIMEOUT)
+                porcelain = status.stdout.rstrip() if status.returncode == 0 else ""
+                path.write_text(json.dumps({"clone": clone, "baseline": run_state.dirty_paths(porcelain),
+                                            "head": self._head(clone) or "", "sent_back": 0}), encoding="utf-8")
+        except OSError:
+            return ""                                  # nowhere to keep it: the gate has no opinion, the run goes on
+        return str(path)
 
     def sdk_settings(self, claude_md_excludes=None) -> str:
         """The SDK engine's settings file: only the hooks that stay scripts (a Core run's Read of a picture, and the compaction
@@ -1582,6 +1601,8 @@ class Workshop:
             project = self.project(run.project)
             env = self.core_env() if run.brain == "core" else child_env()
             env.update(self.lane_env(project))         # the lane guard's exceptions: SkippyTel's deploy checkout and its fix lane
+            env["SKIPPY_FINISH_STATE"] = self.finish_state(run, project.clone)   # the Stop hook's finish line (finish_gate.py)
+            env["SKIPPY_RUNS_DIR"] = str(self.state_dir)  # the lane guard's refusal of a risky command names the runs going (holders.py)
             # One memory with the Captain's own Claude Code (both brains): the clone's notes folder links to his project's notes.
             self.share_memory(env.get("CLAUDE_CONFIG_DIR") or os.getenv("WORKSHOP_CLAUDE_HOME")
                               or os.path.join(os.path.expanduser("~"), ".claude"), project.clone, project.primary)

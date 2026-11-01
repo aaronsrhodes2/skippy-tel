@@ -13,6 +13,8 @@ lane is refused, with the reason, which Claude Code shows the model so it can sa
   * SKIPPY_LANE_FIX (SkippyTel's own workshop clone, the Captain's rule 2026-10-31: "always fix a SkippyTel bug from any chat"):
     a second lane every conversation may change, commit and push in, so a bug in the architecture found from any project's chat
     is fixed there, pushed, tested by CI and deployed, without leaving the conversation.
+  * RISKY: from any folder, never killing by process name or window title, or rebooting a machine. The refusal says what it would
+    hit right now (holders.py: the matching processes, the purple runs going, how long, doing what) and how to force it on his yes.
 
 It is a guard rail for a model that wanders, not a sandbox: a determined command can get past a text check, and the prompt
 (workshop_prompt.md) tells it the lane is the Captain's rule. Exit 2 = refused (the reason on stderr); 0 = allowed.
@@ -25,6 +27,8 @@ import re
 import sys
 import tempfile
 
+import holders
+
 FILE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 _WRITE_CMD = re.compile(r"(?:^|[\s;&|(])(?:rm|rmdir|mv|cp|mkdir|touch|tee|ln|chmod|truncate|dd|install|rsync|del|erase|copy|move|"
                         r"remove-item|set-content|add-content|out-file|new-item|copy-item|move-item|rename-item)(?=\s)", re.I)
@@ -33,6 +37,15 @@ _REDIRECT = re.compile(r"(?<![0-9&])>>?\s*([^\s;&|]+)")
 _MOVE = re.compile(r"(?:^|[\s;&|(])(?:cd|pushd|set-location|sl)\s+(\"[^\"]+\"|'[^']+'|[^\s;&|]+)", re.I)
 _GIT_C = re.compile(r"\bgit\s+-C\s+(\"[^\"]+\"|'[^']+'|[^\s;&|]+)\s+(\S+)", re.I)
 _DEPLOY_OK = re.compile(r"^\s*(?:git\s+(?:pull|fetch|status|log|diff|show|rev-parse)\b|docker(?:-compose|\s+compose)\b|make\b|curl\b|ls\b)", re.I)
+# The only commands refused from every folder: ones whose harm lands on someone else's work (2026-10-31: a run killed a background
+# job by window title, and guessed a restart to unstick CI). Kept to these two on purpose (the Captain: don't guard the CD loop
+# into questions; be resilient instead). Everything else is the prompt's job.
+RISKY = [
+    (re.compile(r"\btaskkill\b[^\n;&|]*/(?:FI|IM)\b|\bStop-Process\b[^\n;&|]*-Name\b|\b(?:pkill|killall)\b", re.I),
+     "it stops processes by name or title, which can hit another session's work; stop only your own, by its PID."),
+    (re.compile(r"\b(?:shutdown(?:\.exe)?\s+[/-][rs]|Restart-Computer|Stop-Computer|systemctl\s+(?:reboot|poweroff))\b", re.I),
+     "it restarts or shuts down a machine."),
+]
 _PATH = re.compile(r"(\"[^\"]+\"|'[^']+'|(?<![\w/.-])(?:[A-Za-z]:[\\/]|/[a-zA-Z]/|~[\\/]|\.\.(?:[\\/]|$))[^\s;&|'\"<>]*)")
 
 
@@ -93,6 +106,10 @@ class Lane:
         if tool != "Bash":
             return None
         cmd = str(args.get("command") or "")
+        if not holders.FORCE.search(cmd):                    # SKIPPY_FORCE=1 in front: the Captain said yes to these facts
+            for (pattern, why), kind in zip(RISKY, ("kill", "reboot")):
+                if pattern.search(cmd):
+                    return f"{why} {holders.report(cmd, kind)}"
         for seg in re.split(r"&&|\|\||;|\n", cmd):
             reason = self._segment(seg)
             if reason:

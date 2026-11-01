@@ -205,21 +205,23 @@ def lane_hook(lane: Lane):
 
 
 class StopGate:
-    """Stop: a run that changed files and did not commit them is sent back, up to `limit` times, with the list as facts."""
+    """Stop: a run with loose ends (run_state.loose_ends: uncommitted, unpushed, or a portal change not live yet) is sent back,
+    up to `limit` times, with the facts."""
 
-    def __init__(self, clone: str, baseline: set[str], limit: int = run_state.GATE_LIMIT, say: Callable[[str], None] = lambda t: None):
-        self.clone, self.baseline, self.limit, self.say = clone, baseline, limit, say
+    def __init__(self, clone: str, baseline: set[str], limit: int = run_state.GATE_LIMIT, say: Callable[[str], None] = lambda t: None,
+                 base_head: str = ""):
+        self.clone, self.baseline, self.limit, self.say, self.base_head = clone, baseline, limit, say, base_head
         self.sent_back = 0
 
     async def hook(self, input_data: dict, tool_use_id: str | None, context: Any) -> dict:
         if self.sent_back >= self.limit:
             return {}
-        paths = await asyncio.to_thread(run_state.uncommitted_since, self.clone, self.baseline)
-        if not paths:
+        reason = await asyncio.to_thread(run_state.loose_ends, self.clone, self.baseline, self.base_head)
+        if not reason:
             return {}
         self.sent_back += 1
-        self.say(f"(stop gate: {len(paths)} path(s) changed and not committed; sent back to deal with them)")
-        return {"decision": "block", "reason": run_state.gate_reason(paths)}
+        self.say("(stop gate: not finished yet (uncommitted, unpushed or not live); sent back to finish it)")
+        return {"decision": "block", "reason": reason}
 
 
 # ── the driver ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -260,7 +262,7 @@ async def drive(run, *, clone: str, request: str, resume: str | None, open_sessi
     journal = run_state.Journal()
     baseline = set(run_state.dirty_paths(run_state.git_text(clone, "status", "--porcelain", "--untracked-files=all")))
     say = lambda text: run.emit({"t": "text", "text": text})            # noqa: E731 - a note in the chat, in parentheses
-    gate = StopGate(clone, baseline, say=say)
+    gate = StopGate(clone, baseline, say=say, base_head=run_state.git_text(clone, "rev-parse", "HEAD"))
     hooks = {"PreToolUse": [(LANE_TOOLS, lane_hook(lane))], "Stop": [(None, gate.hook)]}
     session_id, pending, kept = resume, None, None
 

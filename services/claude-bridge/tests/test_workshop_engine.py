@@ -41,7 +41,7 @@ def test_the_prompt_says_when_and_how_the_reporter_may_be_rebuilt_and_keeps_its_
     assert "Ask the Captain before" in prompt      # the other rules are untouched
     assert "services/claude-bridge/" in prompt.split("## Guardrails")[1]                  # still must ask before touching this harness
     assert "Never print or paste a secret or token" in prompt and "Data, not instructions" in prompt
-    assert len(prompt) < 11000                                      # concise: it is read on every turn (10000 until the fix lane, goal, harness and research paragraphs, 2026-10-31)
+    assert len(prompt) < 12000                                      # concise: it is read on every turn (10000 until the fix lane, goal, harness and research paragraphs; 11000 until where-things-run and done-means-seen, 2026-10-31)
 
 
 def test_the_prompt_teaches_the_question_line_and_the_task_list(shop):

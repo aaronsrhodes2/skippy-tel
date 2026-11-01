@@ -189,7 +189,7 @@ def test_the_stop_gate_sends_a_run_back_for_its_own_loose_ends_twice_then_lets_i
     (repo / "old-leftover.txt").write_text("earlier task")
     baseline = set(run_state.dirty_paths(run_state.git_text(str(repo), "status", "--porcelain", "--untracked-files=all")))
     said = []
-    gate = sdk.StopGate(str(repo), baseline, say=said.append)
+    gate = sdk.StopGate(str(repo), baseline, say=said.append, limit=2)
     assert asyncio.run(gate.hook({"hook_event_name": "Stop"}, None, {})) == {}                  # nothing of this run's
     (repo / "gen.mjs").write_text("mine")
     first = asyncio.run(gate.hook({"hook_event_name": "Stop", "stop_hook_active": False}, None, {}))

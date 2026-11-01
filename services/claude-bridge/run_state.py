@@ -30,7 +30,7 @@ LAST_TOOLS = 20                 # ... and its last tool calls, one line each
 MAX_WORDS_CHARS = 2500          # each of those text blocks is cut at this
 MAX_STATUS_LINES = 60
 MAX_LOG_LINES = 15
-GATE_LIMIT = 2                  # how many times the stop gate may send an agent back to its work, per run
+GATE_LIMIT = 3                  # how many times the stop gate may send an agent back to its work, per run (commit, push, live)
 
 
 MAP_CHARS = 9000                # the file map's size (about 2,500 tokens)
@@ -68,11 +68,14 @@ class Journal:
         self.turns += 1
 
 
+_GIT_ENV = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}    # a fetch never waits for a person
+
+
 def git_text(clone: str, *args: str, timeout: float = 20.0) -> str:
     """Stdout of a read-only git command in `clone`, or '' (a missing git or a timeout must not stop a handoff)."""
     try:
         out = subprocess.run(["git", *args], cwd=clone, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                             timeout=timeout, stdin=subprocess.DEVNULL)
+                             timeout=timeout, stdin=subprocess.DEVNULL, env=_GIT_ENV)
     except (OSError, subprocess.SubprocessError):
         return ""
     return out.stdout.rstrip() if out.returncode == 0 else ""      # not strip(): porcelain's first line starts with a space
@@ -99,6 +102,57 @@ def gate_reason(paths: list[str]) -> str:
     """The stop gate's feedback: facts only. What the agent does with them is its call."""
     shown = ", ".join(paths[:12]) + (f" (and {len(paths) - 12} more)" if len(paths) > 12 else "")
     return f"These paths changed during this run and are not committed: {shown}."
+
+
+def _is_ancestor(clone: str, older: str, newer: str) -> bool:
+    try:
+        return subprocess.run(["git", "merge-base", "--is-ancestor", older, newer], cwd=clone, capture_output=True,
+                              stdin=subprocess.DEVNULL, timeout=20, env=_GIT_ENV).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+PORTAL_VERSION_URL ="https://skippy-portal-1015050363686.us-west1.run.app/version"   # the run.app name: never waits on DNS
+
+
+def portal_commit(url: str = PORTAL_VERSION_URL, timeout: float = 8.0) -> str:
+    """The commit the live portal serves (its public /version), or '' when it can't be read."""
+    import json
+    import urllib.request
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return str(json.loads(r.read().decode("utf-8", "replace")).get("commit") or "")
+    except Exception:  # noqa: BLE001 - unreadable is an answer too: not verified
+        return ""
+
+
+def loose_ends(clone: str, baseline: set[str], base_head: str, live=portal_commit) -> str:
+    """Why this run may not end yet, as facts ('' = it may). The Captain's bar (2026-10-31): a turn ends with the work built,
+    pushed and LIVE, checked, and him told to refresh; not with a half-made change left in the folder and 'everything's done'.
+      1. paths this run changed and did not commit;
+      2. commits not pushed;
+      3. SkippyTel only: a pushed commit that changed portal/ and the live portal does not serve it yet."""
+    paths = uncommitted_since(clone, baseline)
+    if paths:
+        return gate_reason(paths)
+    ahead = git_text(clone, "rev-list", "--count", "@{u}..HEAD")
+    if ahead.isdigit() and int(ahead) > 0:
+        return f"{ahead} commit(s) on this branch are not pushed yet."
+    head = git_text(clone, "rev-parse", "HEAD")
+    if not (head and base_head and head != base_head and os.path.isfile(os.path.join(clone, "tools", "loop_timer.py"))):
+        return ""
+    if not git_text(clone, "diff", "--name-only", base_head, head, "--", "portal"):
+        return ""
+    serving = live()
+    if serving and serving != head:
+        git_text(clone, "fetch", "--quiet", timeout=30)          # a later commit pushed from elsewhere is known here too
+    if serving and (serving == head or _is_ancestor(clone, head, serving)):      # live, or a later commit on top of it
+        return ""
+    return (f"This run pushed {head[:7]}, which changes the portal, and the live portal serves "
+            f"{serving[:7] or 'nothing readable'}. Wait for it with `python tools/loop_timer.py --watch` (skippy-core's CI and "
+            "deployer ship it; don't run them by hand), then look at the changed page in a real browser "
+            "(`python tools/workshop_screenshot.py <page>`) and check it does what the Captain asked. End by telling him what "
+            "you checked and to refresh his browser to see it.")
 
 
 _JS = [re.compile(r"^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\*?\s+([A-Za-z_$][\w$]*)"),

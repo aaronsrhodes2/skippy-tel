@@ -165,3 +165,67 @@ def test_the_journal_remembers_what_was_edited_and_read(tmp_path):
     j.touched("Bash", {"command": "ls"})
     j.touched("Read", {})
     assert list(j.edited) == ["a.py", "b.py"] and list(j.read) == ["c.py"]
+
+
+# ── the finish line (loose_ends): uncommitted, unpushed, a portal change not live ────────────────────────────────────────
+
+def _pushed_repo(tmp_path, skippytel=True):
+    """A clone with an upstream (a bare repo), shaped like SkippyTel when `skippytel` (tools/loop_timer.py, portal/)."""
+    remote, clone = tmp_path / "remote.git", tmp_path / "clone"
+    _git(tmp_path, "init", "-q", "--bare", str(remote))
+    _git(tmp_path, "clone", "-q", str(remote), str(clone))
+    (clone / "tools").mkdir()
+    (clone / "tools" / ("loop_timer.py" if skippytel else "other.py")).write_text("")
+    (clone / "portal").mkdir()
+    (clone / "portal" / "app.py").write_text("v1")
+    _git(clone, "add", "-A")
+    _git(clone, "commit", "-q", "-m", "base")
+    _git(clone, "push", "-q", "origin", "HEAD")
+    _git(clone, "branch", "-q", "--set-upstream-to", "origin/" + rs.git_text(str(clone), "rev-parse", "--abbrev-ref", "HEAD"))
+    return str(clone), rs.git_text(str(clone), "rev-parse", "HEAD")
+
+
+def _change_portal(clone):
+    with open(f"{clone}/portal/app.py", "w") as f:
+        f.write("v2")
+    _git(clone, "commit", "-qam", "change the portal")
+
+
+def test_a_run_with_nothing_changed_may_end(tmp_path):
+    clone, head = _pushed_repo(tmp_path)
+    assert rs.loose_ends(clone, set(), head, live=lambda: "") == ""
+
+
+def test_unpushed_commits_are_a_loose_end(tmp_path):
+    clone, head = _pushed_repo(tmp_path)
+    _change_portal(clone)
+    assert "not pushed" in rs.loose_ends(clone, set(), head, live=lambda: head)
+
+
+def test_a_pushed_portal_change_must_be_live_and_seen_before_the_run_ends(tmp_path):
+    clone, head = _pushed_repo(tmp_path)
+    _change_portal(clone)
+    _git(clone, "push", "-q")
+    new = rs.git_text(clone, "rev-parse", "HEAD")
+    reason = rs.loose_ends(clone, set(), head, live=lambda: head)
+    assert new[:7] in reason and "loop_timer.py --watch" in reason and "refresh" in reason
+    assert rs.loose_ends(clone, set(), head, live=lambda: new) == ""              # live: done
+
+
+def test_a_later_commit_on_top_counts_as_live(tmp_path):
+    clone, head = _pushed_repo(tmp_path)
+    _change_portal(clone)
+    mine = rs.git_text(clone, "rev-parse", "HEAD")
+    (tmp_path / "clone" / "b.txt").write_text("someone else")
+    _git(clone, "add", "b.txt")
+    _git(clone, "commit", "-qm", "later")
+    _git(clone, "push", "-q")
+    later = rs.git_text(clone, "rev-parse", "HEAD")
+    assert rs.loose_ends(clone, set(), mine, live=lambda: later) == ""
+
+
+def test_other_repos_and_non_portal_changes_need_no_deploy_check(tmp_path):
+    clone, head = _pushed_repo(tmp_path, skippytel=False)
+    _change_portal(clone)
+    _git(clone, "push", "-q")
+    assert rs.loose_ends(clone, set(), head, live=lambda: "") == ""
