@@ -1,0 +1,34 @@
+{
+ "n": 25,
+ "title": "Round 4, Skippy Core's coder: lost (its code fails)",
+ "model": "Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8) as a vanilla agent: Claude Code with purple's system prompt and an empty setup (no skills, no memory, no checker), effort high, a 131K window; only MineBench's tool-mode prompt in the folder",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 0,
+ "minutes": 18,
+ "size": "none",
+ "verdict": "Lost round 4 and the match: its build stops with 'ReferenceError: sand is not defined'. One line lays the ballast with block(x,0,z,sand), sand without quotes, so the code names a variable that doesn't exist. MineBench's own runtime fails the same way. It said 'all validated, zero runtime errors', but its check was its own mock, which never ran that line the way the real runtime does. 18 minutes, 22 turns, no cost (local). No picture: there is nothing to draw.",
+ "stats": {
+  "started": "2026-11-01T16:37:43.401Z",
+  "minutes": 18,
+  "tokens": {
+   "input": 50182,
+   "cache_read": 766851,
+   "output": 62425,
+   "total": 879458
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
+    "tokens": {
+     "input": 50182,
+     "cache_read": 766851,
+     "output": 62425
+    }
+   }
+  ]
+ },
+ "failed": "ReferenceError: sand is not defined",
+ "series": "h2h",
+ "request": "experiments/minebench/h2h-r4-coder/request.txt"
+}
