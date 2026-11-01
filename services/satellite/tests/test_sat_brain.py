@@ -118,7 +118,7 @@ def test_a_reply_that_claims_an_alarm_with_no_tool_called_is_asked_again_and_nev
     assert b.reply("set an alarm for 14:05") == "Set, for real this time."
     assert "NOTHING was done" in str(c.calls[1]["messages"]) and b.actions
     b, c, *_ = make([text("Your alarm is set for seven.")], [text("Yes, it's set.")])
-    assert b.reply("wake me at 7") == "That did not get done: nothing was set. Say it again and I'll actually do it this time."
+    assert b.reply("wake me at 7") == "That did not get done, whatever I just claimed. Say it again and I'll actually do it this time."
     b, c, *_ = make([text("It is seven o'clock, monkey.")])
     assert b.reply("what time is it") == "It is seven o'clock, monkey." and len(c.calls) == 1
 
@@ -141,3 +141,14 @@ def test_plain_announcements_are_routed_to_the_tool():
     assert announce_route("tell everyone the movie is starting") == {"text": "The movie is starting", "place": "everywhere"}
     assert announce_route("tell upstairs I'm leaving in five minutes") == {"text": "I'm leaving in five minutes", "place": "upstairs"}
     assert announce_route("tell me a joke") is None and announce_route("what's the weather") is None
+
+
+def test_plain_music_commands_are_routed_to_the_music_tool():
+    from brain import music_route
+    assert music_route("What's playing?") == {"action": "what"} and music_route("who sings this") == {"action": "what"}
+    assert music_route("what song is this") == {"action": "what"}
+    assert music_route("turn it down") == {"action": "quieter"} and music_route("Skippy, louder please") == {"action": "louder"}
+    assert music_route("volume five") == {"action": "volume", "level": 5} and music_route("set the volume to 3") == {"action": "volume", "level": 3}
+    assert music_route("pause the music") == {"action": "pause"} and music_route("next song") == {"action": "next"}
+    assert music_route("resume") == {"action": "resume"} and music_route("previous track") == {"action": "previous"}
+    assert music_route("what's the weather") is None and music_route("play Creedence") is None and music_route("what's on my list") is None

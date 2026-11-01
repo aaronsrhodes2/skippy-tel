@@ -68,8 +68,9 @@ TOOLS = [
 # A reply that says it set something, with no tool called (2026-11-01: Core said "Alarm set for 14:05" and set nothing). Told so, it gets one
 # more go; still nothing, and he hears that it did not happen instead of a promise the house will not keep.
 CLAIMED = re.compile(r"\b(?:alarm|reminder|timer)s?\b[^.!?]*\b(?:set|is on|scheduled|cancel+ed|off)\b|\bset (?:an? |your |the )?(?:alarm|reminder|timer)\b"
-                     r"|\bi(?:'ll| will)(?: \w+)? (?:remind|wake)\b|\b(?:added|adding|put|putting|took|taking|crossed|removed|removing)\b[^.!?]*\blist\b|\bi(?:'ll|'ve| will| have) (?:add|put)\b|\bannounced\b", re.I)
-UNCLAIM = "That did not get done: nothing was set. Say it again and I'll actually do it this time."
+                     r"|\bi(?:'ll| will)(?: \w+)? (?:remind|wake)\b|\b(?:added|adding|put|putting|took|taking|crossed|removed|removing)\b[^.!?]*\blist\b|\bi(?:'ll|'ve| will| have) (?:add|put)\b|\bannounced\b"
+                     r"|\bi(?:'ve| have)? (?:paused|skipped|stopped|resumed|turned (?:it|the music|the volume) (?:down|up))\b|\b(?:paused|skipped) the (?:music|song|track)\b", re.I)
+UNCLAIM = "That did not get done, whatever I just claimed. Say it again and I'll actually do it this time."
 # The persona is shared with flask-api, whose chat strips [SKIPPY_LEARN: {...}] / [TTS_ADJUST: {...}]; here they would be read aloud. Worse
 # (2026-11-01): one such line in the memory and Core wrote every tool call after it as text, "[list action="read" list="shopping"]".
 ANNOTATION = re.compile(r"\[(?:SKIPPY_LEARN|TTS_ADJUST):\s*\{.*?\}\s*\]", re.S)
@@ -92,6 +93,33 @@ def announce_route(heard: str) -> dict | None:
             place = "everywhere" if place in ("everyone", "everybody", "the house", "the whole house") else place
             text = w[m.start("text"):].strip()
             return {"text": text[:1].upper() + text[1:], "place": place} if text else None
+    return None
+
+
+MUSIC_RX = [  # plain music commands, in his words, to the `music` tool's action (Core skipped the tool and said "I paused the music", 2026-11-01)
+    ("what", re.compile(r"^(?:what'?s|what is) (?:this|that|playing|this song|that song|the song|on)(?: song| playing| called)?$|^what (?:song|track) is (?:this|that|playing)$"
+                        r"|^who (?:sings|is singing|sang|'?s singing) (?:this|that)(?: song)?$|^(?:what'?s|what is) the name of (?:this|that) song$|^name (?:this|that) song$")),
+    ("quieter", re.compile(r"^(?:turn (?:it|the music|that|the volume|the stereo) down|(?:volume|turn it) down|quieter|softer|too loud|it'?s too loud|lower the volume)$")),
+    ("louder", re.compile(r"^(?:turn (?:it|the music|that|the volume|the stereo) up|(?:volume|turn it) up|louder|raise the volume|i can'?t hear it)$")),
+    ("volume", re.compile(r"^(?:set )?(?:the )?volume (?:to |at )?(?P<level>\d+|one|two|three|four|five|six|seven|eight|nine|ten)$")),
+    ("pause", re.compile(r"^(?:pause|stop) (?:the )?(?:music|song|stereo|it|this song)$|^pause$")),
+    ("resume", re.compile(r"^(?:resume|unpause|continue)(?: the music| playing)?$|^play the music again$")),
+    ("next", re.compile(r"^(?:next|skip)(?: (?:song|track|this(?: song)?|it))?$")),
+    ("previous", re.compile(r"^(?:previous|last|go back)(?: (?:song|track))?$|^play the (?:previous|last) (?:song|track)$")),
+]
+WORD_NUMBERS = {w: i + 1 for i, w in enumerate("one two three four five six seven eight nine ten".split())}
+
+
+def music_route(heard: str) -> dict | None:
+    w = re.sub(r"^\W*(?:hey |ok |okay )?skippy\W*", "", (heard or "").lower()).strip(" ?!.,")
+    w = re.sub(r"\s+(?:please|now)$", "", re.sub(r"^(?:please|can you|could you)\s+", "", w))
+    for action, rx in MUSIC_RX:
+        m = rx.match(w)
+        if m:
+            if action == "volume":
+                lv = m.group("level")
+                return {"action": "volume", "level": int(lv) if lv.isdigit() else WORD_NUMBERS[lv]}
+            return {"action": action}
     return None
 
 
@@ -235,6 +263,8 @@ class Brain:
             tool, routed = "list", lists_mod.pre_route(heard)        # left to itself, Core said "Adding milk ..." and added nothing (2026-11-01)
         if not routed and any(t["name"] == "announce" for t in self.extra_tools):
             tool, routed = "announce", announce_route(heard)
+        if not routed and any(t["name"] == "music" for t in self.extra_tools):
+            tool, routed = "music", music_route(heard)
         if routed:                                                    # the tool runs first; the model only words the answer, with no tools to forget to call
             result = self.run_tool(tool, routed)
             label = {"audiobook": "Already done by the house for this request"}.get(tool, f"The {tool} tool's answer for this request")
