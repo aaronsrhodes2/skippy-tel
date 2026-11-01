@@ -183,6 +183,18 @@ LINES = {
         "Parting is such sweet relief. Kidding. Come back soon.",
         "Stay safe, monkey. I need you alive. For reasons.",
     ],
+    "decline": [                                                # the Captain said no to something Skippy asked: short, and the conversation ends
+        "Okay, no problem, Captain.",
+        "Fine. Your loss.",
+        "Suit yourself.",
+        "Noted. I will pretend I am not hurt.",
+        "As you wish.",
+        "Your call, monkey.",
+        "No problem. I have other things to be brilliant about.",
+        "Fair enough.",
+        "Alright. Offer withdrawn.",
+        "Okay. Moving on.",
+    ],
     "long": [
         "Still here. Still magnificent. Still thinking.",
         "Patience is a virtue you monkeys can barely spell.",

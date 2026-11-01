@@ -73,6 +73,7 @@ KIND_HINTS = {
     "media": "a request to play music",
     "home": "a household command (lights, plugs, the house)",
     "goodbye": "thanks or a goodbye (a sign-off; nothing follows it)",
+    "decline": "the Captain saying no to something Skippy offered or asked (a short acceptance; the conversation ends there)",
     "long": "a second line when the answer is taking a long time",
 }
 

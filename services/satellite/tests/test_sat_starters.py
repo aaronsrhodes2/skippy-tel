@@ -187,7 +187,7 @@ def test_not_now_backs_off_and_yes_goes_to_the_brain(tmp_path):
     present(room, 300)
     asyncio.run(room.maybe_start())
     asyncio.run(room.handle("not now"))
-    assert brain.heard == [] and "rest of the day" in link.spoken[-1] and room.mode == IDLE
+    assert brain.heard == [] and link.spoken[-1] == "Okay, no problem, Captain." and room.mode == IDLE and link.released_n == 1   # short, no brain
     assert s.state()["offers"][-1]["answer"] == "no" and s.why_not() == "backed off"
     now[0] = stamp("2026-11-01", "11:00")
     room._starter_check = 0

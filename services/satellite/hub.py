@@ -30,7 +30,7 @@ from pathlib import Path
 
 from vad import Vad, rms
 from voicegate import BudgetSpent, GateError, wav_bytes
-from wake import is_goodbye, is_stop, wake_split
+from wake import is_decline, is_goodbye, is_stop, wake_split
 
 PORT = 10700                                                    # Wyoming's
 ESPHOME_PORT = 6053                                             # ESPHome's native API
@@ -352,11 +352,36 @@ class Room:
             return False
         auto = self.workspace.answer(pending["id"], answer, command)
         self._record("answer", proposal=pending["id"], answer=answer, words=command, automation=auto["id"] if auto else None)
-        reply = {"yes": f"Done. Every {pending['weekday']} at {pending['time']}, and I will not even gloat.", "no": "Fine. I will keep my brilliance to myself for a month.",
-                 "never": "Understood. I will never ask again."}[answer]
+        if answer == "no":
+            await self._decline(command)
+            return True
+        reply = {"yes": f"Done. Every {pending['weekday']} at {pending['time']}, and I will not even gloat.", "never": "Understood. I will never ask again."}[answer]
         await self.say(reply, follow_up=True)
         self._resume(FOLLOWUP if self.remote_wake and self.link.hub_follows_up else IDLE, self.followup_ms)
         return True
+
+    def asked_just_now(self) -> bool:
+        """Skippy's last words ended with a question (a starter, an offer, "want me to ...?"), said in the last minute and a half."""
+        said, at = getattr(self, "_last_said", ("", None))
+        if at is None or time.monotonic() - at > 90:
+            return False
+        return any("?" in s for s in re.split(r"(?<=[.!?])\s+", (said or "").strip())[-2:])
+
+    async def _decline(self, command: str) -> None:
+        """He said no to what Skippy asked (the Captain, 2026-10-31: "short and to the point, 'Okay, no problem Captain' ... without a whole
+        turn"): one pre-recorded line, no brain, and the conversation ends as after a sleep word."""
+        quip = self.filler.pick("decline", command) if self.filler is not None and self.filler.has("decline") else None
+        text = quip[0] if quip else "Okay, no problem, Captain."
+        self.log(f"[{self.name}] (declined: {text})")
+        if quip is not None:
+            async with self.voice:
+                await self.link.show(text)
+                await self._out(text, ("mp3", quip[1]), announce=True)
+            self._last_said = (text, time.monotonic())
+        else:
+            await self.say(text)
+        self._resume(IDLE)
+        await self.link.released()
 
     async def _maybe_propose(self) -> None:
         """A conversation is open and he is awake: put one confident routine to him, once a day at most (proposals.next_to_ask decides)."""
@@ -390,12 +415,14 @@ class Room:
         answer = parse_answer(command)
         if answer is None and (is_stop(command) or is_goodbye(command)):
             answer = "no"
-        if answer in ("no", "never"):
+        if answer == "no" or (answer is None and is_decline(command)):
+            self._starter_answer(cand, "no", command)
+            await self._decline(command)
+            return True, command
+        if answer == "never":
             self._starter_answer(cand, answer, command)
             topic = {"world": "news", "": "of that"}.get(cand.get("topic", ""), cand.get("topic", ""))
-            reply = ("Fine. I will keep my brilliance to myself for the rest of the day." if answer == "no"
-                     else f"Understood. No more {topic} from me for a month.")
-            await self.say(reply)                               # (still busy: the room never hears its own voice)
+            await self.say(f"Understood. No more {topic} from me for a month.")   # (still busy: the room never hears its own voice)
             self._resume(IDLE)
             await self.link.released()
             return True, command
@@ -502,6 +529,11 @@ class Room:
             return
         self.pending = None
         self._turn_at = time.monotonic()
+        if not typed and self.asked_just_now() and is_decline(command):
+            self.log(f"[{self.name}] heard: {command}")
+            self._record("command", words=command, tools=[], outcome="declined")
+            await self._decline(command)
+            return
         if not typed and (is_goodbye(command) or is_stop(command)):
             self._record("command", words=command, tools=[], outcome="sign_off")
             self._resume(IDLE)
