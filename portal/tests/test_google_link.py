@@ -185,6 +185,7 @@ def test_the_nest_project_is_admin_only_checked_and_then_connect_asks_sdm_throug
     assert app.extensions["google_link"].nest_project() == PROJECT
     state = connect(client, via=f"https://nestservices.google.com/partnerconnections/{PROJECT}/auth?")
     assert google_link.SDM_SCOPE in sent["scope"].split()
+    assert "login_hint" not in sent                                                   # Nest's page adds its own; two is a Google 400
     answer(monkeypatch, scope=" ".join(["email", *google_link.SCOPES, google_link.SDM_SCOPE]))
     client.get(f"/auth/callback?state={state}&code=x")
     assert app.extensions["google_link"].state()["nest"] is True

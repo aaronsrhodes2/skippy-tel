@@ -194,12 +194,14 @@ def init_app(app, home, store) -> Link:
         session[STATE_KEY] = state
         google = auth.oauth.google
         redirect_uri = url_for("auth.callback", _external=True)
-        # "email", not "openid": the address comes from userinfo, so no id_token nonce has to survive Nest's page
+        project = link.nest_project()
+        # "email", not "openid": the address comes from userinfo, so no id_token nonce has to survive Nest's page. No login_hint through
+        # Nest: its page adds its own, and Google refuses a request that carries two ("can only have a single value: login_hint").
+        hint = {} if project else {"login_hint": auth.current_user()["email"]}
         rv = google.create_authorization_url(redirect_uri, state=state, scope=" ".join(["email", *link.scopes()]),
-                                             access_type="offline", prompt="consent", include_granted_scopes="true",
-                                             login_hint=auth.current_user()["email"])
+                                             access_type="offline", prompt="consent", include_granted_scopes="true", **hint)
         google.save_authorize_data(redirect_uri=redirect_uri, **rv)
-        url, project = rv["url"], link.nest_project()
+        url = rv["url"]
         if project:                                       # Nest's page first (he ticks the thermostat), then Google's consent
             url = NEST_AUTH.format(project=project) + "?" + url.split("?", 1)[1]
         return redirect(url)
