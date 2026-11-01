@@ -866,6 +866,20 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             pass
         return jsonify(reply)
 
+    @app.post("/home/alert")
+    def home_alert():
+        """Something the house must tell the Captain now (the hub's garage auto-close: closed it after he left, or could not). Home token.
+        One Discord DM per call, never batched or rate-limited here: the hub sends each one once (services/satellite/autoclose.py)."""
+        if request.content_length is not None and request.content_length > 4_000:
+            abort(413)
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        payload = request.get_json(silent=True)
+        text = str(payload.get("text") or "").strip()[:500] if isinstance(payload, dict) else ""
+        if not text:
+            abort(400)
+        return jsonify({"sent": bool(app.extensions["notifier"].alert(text))})
+
     @app.post("/home/deploys")
     def home_deploys():
         """skippy-core's deploys (core/cd/cd.py): its recent runs in, the redeploy/rollback requests Recovery made out. Home token."""

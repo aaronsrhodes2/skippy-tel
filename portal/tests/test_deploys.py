@@ -81,3 +81,21 @@ def test_the_door_needs_the_home_token_and_a_house_portal_reads_it(monkeypatch):
     assert client.post("/home/deploys", json={"runs": [run(9, SHA_A)]}, headers=H).get_json() == {"requests": []}
     github = app.extensions["recovery"]["github"]
     assert isinstance(github, HouseDeploys) and [r["id"] for r in github.deploy_runs()] == [9]
+
+
+def test_the_house_alert_door_sends_one_dm_each_time():
+    """POST /home/alert (the hub's garage auto-close): the home token, then one notifier.alert per call, never batched."""
+    pytest.importorskip("flask")
+    pytest.importorskip("authlib")
+    import app as portal
+    from test_app import SETTINGS, FakeSkippy, FakeVm, _pair
+    app = portal.create_app(dict(SETTINGS), vm=FakeVm(), skippy=FakeSkippy())
+    sent = []
+    app.extensions["notifier"].alert = lambda text: sent.append(text) or True
+    client = app.test_client()
+    assert client.post("/home/alert", json={"text": "hi"}).status_code == 401
+    H = {"Authorization": f"Bearer {_pair(client)}"}
+    assert client.post("/home/alert", json={}, headers=H).status_code == 400
+    for _ in range(2):
+        assert client.post("/home/alert", json={"text": "Couldn't close the garage door"}, headers=H).get_json() == {"sent": True}
+    assert sent == ["Couldn't close the garage door"] * 2

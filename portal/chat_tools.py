@@ -93,14 +93,14 @@ _SCHEMAS = {
 # portal/tests/test_house_tools.py fails if they drift. The Captain's alone (tool_policy "house"); a chat can't
 # prove he said yes out loud, so a confirm is dropped before it leaves and a lock waits for his voice.
 HOUSE_TOOLS = [
-    {"name": "home_devices", "description": "List what is in the house that he can control, with each one's state. Optionally for one area (room) or one kind (light, switch, fan, cover, climate, media_player).",
+    {"name": "home_devices", "description": "List what is in the house that he can control, with each one's state. Optionally for one area (a room, a floor like 'upstairs', or 'everywhere') or one kind (light, switch, fan, cover, climate, media_player).",
      "input_schema": {"type": "object", "properties": {"area": {"type": "string"}, "domain": {"type": "string"}}}},
     {"name": "home_state", "description": "Ask the state of one thing in the house: a light, a temperature sensor, the thermostat, a door sensor. Use his own words for its name.",
      "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
     {"name": "home_control", "description": "Do something to one thing in the house. Actions: on, off, toggle, set_brightness (value 1-100), set_temperature (value in degrees), set_volume (value 0-100), "
-                                             "open, close, stop (covers), play, pause, next, previous (media players), activate (scenes, scripts). If several things fit the name, nothing happens and you must ask which. "
-                                             "Locks and alarms need confirm=true, and only after he has said yes aloud.",
-     "input_schema": {"type": "object", "properties": {"name": {"type": "string", "description": "His words for it, e.g. 'living room lamp'."},
+                                             "open, close, stop, set_position (value 0-100) (covers), play, pause, next, previous (media players), activate (scenes, scripts). If several things fit the name, nothing happens and you must ask which. "
+                                             "Locks, alarms and the garage door need confirm=true, and only after he has said yes aloud.",
+     "input_schema": {"type": "object", "properties": {"name": {"type": "string", "description": "His words for it, e.g. 'living room lamp'; or a place and a kind for all of them at once: 'upstairs lights', 'kitchen lights', 'all the lights', 'everything downstairs' (on, off, toggle, set_brightness only)."},
                                                        "action": {"type": "string"}, "value": {"type": "number"}, "confirm": {"type": "boolean"}},
                       "required": ["name", "action"]}},
 ]

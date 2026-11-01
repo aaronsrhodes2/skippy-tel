@@ -3,7 +3,9 @@
 A backend (a subclass of House) says which entities exist (`states()`, Home Assistant style dicts), which room each is in (`areas()`) and how to call a
 service on one (`_service()`); everything else is the same for every backend. What he may do is deliberately narrow, the standard guard rails:
   * only these domains (lights, switches, fans, covers, climate, media players, scenes, scripts, vacuums, input booleans);
-  * locks, alarm panels and garage doors / gates are never touched unless HASS_SENSITIVE=1, and then only with an explicit confirm;
+  * locks, alarm panels and garage doors / gates are never touched unless HASS_SENSITIVE=1, and then only with an explicit confirm
+    (the one exception lives outside this class: garage.Garage.close_on_departure, which can only close, used by autoclose.py when the
+    car drives away; nothing here calls it, and no tool reaches it);
   * a spoken name must match ONE entity: with several close matches nothing happens and the choices are given back so Skippy can ask which;
   * every call is a named service on a named entity: no raw service calls from the model, no templates from the model.
 Secrets (tokens, pairing keys) live in the vault or state folder; they are never printed or returned.

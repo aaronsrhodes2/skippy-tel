@@ -128,7 +128,7 @@ Guard rails (`house.py`, the same for every backend; tests in `tests/test_sat_ho
 **The garage door** (`garage.py`, `rooms/garage.yaml`): a ratgdo32 on the LiftMaster's wall-button terminals, reached over ESPHome's API like
 the pods (no MyQ, no cloud). It is off until the vault has `GARAGE_ESPHOME=esphome://<ip>`; then it is `cover.garage_door` ("Garage door"),
 `light.garage_light`, `binary_sensor.garage_motion`, `binary_sensor.garage_obstruction` and the remotes lockout `lock.garage_remotes`, all in
-the garage. Wiring, flashing and the "when it arrives" checklist: `rooms/README.md` → The garage door. Tests: `tests/test_sat_garage.py`.
+the garage. It closes itself when the car drives away with it open (`autoclose.py`, `GARAGE_AUTOCLOSE`; the one, close-only exception to the spoken yes). Wiring, flashing and the "when it arrives" checklist: `rooms/README.md` → The garage door. Tests: `tests/test_sat_garage.py`.
 
 Other backends plug into the same `House`: Home Assistant (`hass.py`, if he ever runs one: `HASS_URL` + `HASS_TOKEN` in the vault). Later: the LG webOS TV
 (`aiowebostv`), other rooms' satellites over the Wyoming protocol.

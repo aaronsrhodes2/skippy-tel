@@ -11,6 +11,7 @@ What it becomes (a House backend, so voice and the skippy-house MCP see it like 
   * lock.garage_remotes        "Garage remotes": the opener's remote lockout (locked: the car remotes and keypad do nothing)
 The guard rails are house.py's: a garage cover and a lock are hidden unless HASS_SENSITIVE=1 and need a spoken yes (confirm), and text chats
 drop confirm (house_mcp.py, the reporter). On top of that this backend never closes the door while the opener reports an obstruction.
+One narrow exception: close_on_departure() (only ever closes; autoclose.py calls it when the car leaves home, GARAGE_AUTOCLOSE).
 The ratgdo pushes every change, so states() answers from what it last said; a dropped connection is dialled again (2 s doubling to 60 s).
 """
 from __future__ import annotations
@@ -192,6 +193,22 @@ class Garage(House):
 
     def areas(self) -> dict[str, str]:
         return {eid: "garage" for eid in self.keys}
+
+    def door(self) -> dict:
+        """The door as autoclose.py reads it: {"state": open|closed|opening|closing|unavailable|unknown, "obstructed": bool}."""
+        if not self.connected or "cover.garage_door" not in self.keys:
+            return {"state": "unavailable", "obstructed": False}
+        return {"state": self._door_state(), "obstructed": self._obstructed()}
+
+    def close_on_departure(self) -> str:
+        """THE ONE EXCEPTION to the spoken yes (the Captain, 2026-11-01: "when we leave in the car we should automatically close the garage
+        door"). autoclose.py calls this when the car has driven away from home. It can only CLOSE: there is no argument, no action, no
+        position, so nothing can use it to open the door. It refuses while the opener reports an obstruction, and it never retries
+        (autoclose.py watches the result). Returns what it did: "closing", or "already closed"."""
+        if self.door()["state"] == "closed":
+            return "already closed"
+        self._service("cover", "close_cover", {"entity_id": "cover.garage_door"})       # the obstruction refusal is in _service
+        return "closing"
 
     def _service(self, domain: str, service: str, data: dict) -> None:
         eid = data["entity_id"]

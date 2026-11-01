@@ -130,6 +130,21 @@ are `GARAGE_ESPHOME_KEY` / `GARAGE_ESPHOME_OTA` in the vault (already there), an
 Wi-Fi fails it opens a `skippy-garage` hotspot (the OTA password) to pick a network. The board's own page `http://skippy-garage.local`
 (user `skippy`, the OTA password) shows the door and has ratgdo's diagnostics.
 
+**It closes itself when he drives away** (`autoclose.py`, the Captain 2026-11-01: he had left it open and driven off). Every 10 s the hub
+reads the car (skippy-core's car reader, TeslaMate's latest values). When the car is driving, is more than 150 m from home (or out of
+TeslaMate's home geofence, `GARAGE_HOME_GEOFENCE`) and stays that way for 20 s, and the door is open, Skippy closes it. That is the one
+exception to the spoken yes, and it can only close: `Garage.close_on_departure()` takes no arguments, and nothing else calls it. Arriving
+home opens nothing. It fires once per departure: the car must be seen home again first. A hub started while the car is away waits for it
+to come home. Home is `SKIPPY_HOME_LATLON`, else where the car spends the night.
+
+* **Closed:** one Discord DM ("Closed the garage door after you left"), and a line in the next homecoming routine.
+* **Couldn't close** (an obstruction before or during the close, the door not closed after 60 s, or the opener not answering): no retry.
+  It is an alert: a DM at once, every time, naming the reason, through the portal's `POST /home/alert` (the home token, `notify.alert`, never
+  rate-limited). Skippy also says it in the house: in the routine room's pod, and from there upstairs on the Enclave
+  (`SATELLITE_ANNOUNCE_OUT`). One reminder DM follows 10 minutes later if the door is still open, unless the car is home again.
+* **Settings** (vault): `GARAGE_AUTOCLOSE` (on by default once `GARAGE_ESPHOME` is set; `0` turns it off), and
+  `GARAGE_AUTOCLOSE_NEAR_M` (150), `_GRACE_S` (20), `_WAIT_S` (60), `_REPEAT_S` (600). Tests: `tests/test_sat_autoclose.py`.
+
 **When it arrives (the checklist):**
 
 1. Wire it: opener unplugged, ratgdo red to red, white to white, black to grey (as above), USB-C power, opener back on.
@@ -141,3 +156,5 @@ Wi-Fi fails it opens a `skippy-garage` hotspot (the OTA password) to pick a netw
 6. Restart the hub: only by its python PIDs, and only after `state/hub.log` shows no woke/heard/said/routine/starter activity for 2 minutes.
    `tools/hub_run.sh` starts it again by itself. The log says `garage: connected to the ratgdo at ...`.
 7. Say "Skippy, is the garage door open?". Then "open the garage door", which he asks you to confirm out loud.
+8. Try the auto-close once: leave the door open, drive off. Within about half a minute of passing 150 m it closes, and a DM says so. To
+   test it without driving, leave `GARAGE_AUTOCLOSE=0` until then.

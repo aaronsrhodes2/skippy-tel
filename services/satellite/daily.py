@@ -960,6 +960,10 @@ class Daily:
 
     def homecoming_steps(self, room, lights: bool = True, **_) -> list[Step]:
         steps = [Step("", act=self.homecoming_lights)] if lights else []
+        if self.extras.get("garage_news"):                          # the garage door closed itself after he left, or couldn't (autoclose.py)
+            async def garage():
+                return self.extras["garage_news"]()
+            steps.append(Step("", make=garage))
         steps += [Step("the news", make=self.latest_news), Step("music", act=self._music_on(None)),
                   Step("", make=lambda: self.ask_about_day(room), last=True)]
         return steps

@@ -1029,6 +1029,10 @@ def build_rooms(env: dict):
     if routines is not None:
         import google_home                                       # noqa: PLC0415 — his calendar, mail and contacts, read only, once he has signed in
         routines.extras.update(google_home.extras(google_home.Google(env, log=log), routines.aword, log=log))
+    import autoclose                                             # noqa: PLC0415 — the garage door closes itself when the car drives away
+    garage_watch = autoclose.build(env, house, routines.home if routines is not None else lambda: None, log=log)
+    if garage_watch is not None and routines is not None:
+        routines.extras["garage_news"] = garage_watch.news        # the homecoming routine says what happened to the door
     from homechat import HomeChat                                # noqa: PLC0415
     import music as music_mod                                    # noqa: PLC0415
     homechat = HomeChat(env.get("PORTAL_URL") or music_mod.PORTAL, token, enabled=env.get("SATELLITE_HOME_CHAT", "on").lower() not in ("off", "0", "no"), log=log)
@@ -1059,6 +1063,8 @@ def build_rooms(env: dict):
         room.stereo = stereo() if routines is not None else None
         return room
     make_room.homechat = homechat                               # _main runs its sync loop (never under --record)
+    make_room.garage_watch = garage_watch                       # _main runs it (autoclose.py)
+    make_room.routine_room = lambda: getattr(routines, "room_name", "") or ""
     return make_room
 
 
@@ -1341,7 +1347,9 @@ async def _main(env: dict, rooms, args) -> int:
             return await _record(hub, rooms, env, *args.record)
         log("hub: rooms " + ", ".join(f"{n} ({k} {h}:{p})" for n, k, h, p in rooms))
         homechat = getattr(hub.make_room, "homechat", None)
-        await asyncio.gather(hub.run(), *([connect.run()] if connect else []), *([homechat.run(hub)] if homechat is not None else []))
+        watch = getattr(hub.make_room, "garage_watch", None)
+        await asyncio.gather(hub.run(), *([connect.run()] if connect else []), *([homechat.run(hub)] if homechat is not None else []),
+                             *([watch.run(hub, hub.make_room.routine_room)] if watch is not None else []))
         return 0
     finally:
         if media is not None:

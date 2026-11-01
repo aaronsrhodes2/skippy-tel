@@ -12,10 +12,16 @@ SATELLITE_HOUSE = Path(__file__).resolve().parents[2] / "services" / "satellite"
 
 
 def satellite_tools():
-    spec = importlib.util.spec_from_file_location("satellite_house", SATELLITE_HOUSE)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod.TOOLS
+    import sys                                                         # house.py imports its sibling house_layout.py
+    folder = str(Path(SATELLITE_HOUSE).parent)
+    sys.path.insert(0, folder)
+    try:
+        spec = importlib.util.spec_from_file_location("satellite_house", SATELLITE_HOUSE)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.TOOLS
+    finally:
+        sys.path.remove(folder)
 
 
 class FakeHome:
