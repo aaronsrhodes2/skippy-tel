@@ -184,8 +184,13 @@ Two situations, two answers:
 and times how long the stack takes to put it back with nobody's help. It is dry-run by default, so plain `python tools/chaos_drill.py` only
 prints what it would stop and whether the gates are open.
 
-**Occasional, never scheduled** (the Captain, 2026-11-01: "let's not run chaos monkey all the time, just as an occasional resilience test
-series"). Run a series by hand after a big change to healing, recovery or the stack, never from a timer, cron, nightly job or routine.
+**Once a week, one target, never all the time** (the Captain, 2026-11-01: "not ... all the time, just as an occasional resilience test
+series"; then "very well, once a week, but it also needs to auto-discover new additions"). The night shift (`tools/nightly.py`) runs
+`chaos_drill.py --weekly` on SKIPPY_CHAOS_DAY (Sunday, ~01:30): the target drilled longest ago, a never-drilled one first, gates checked
+twice, and the morning report says whether it came back by itself. Targets are FOUND at run time as well as the fixed five: every skippytel
+container on skippy-pc with a loopback `/health` that answers ok/ready, and every healthy skippycore container on skippy-core (not the
+reporter, the studios, the model server, data stores, the Matter fabric or the car's guard). A new service is drilled the first Sunday
+after it appears. By hand: a series after a big change to healing, recovery or the stack. Nothing else schedules it.
 
 ```bash
 python tools/chaos_drill.py                    # dry run: every target, the exact command, the gates

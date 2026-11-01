@@ -5,8 +5,16 @@ take ONE thing down on purpose and time how long the stack takes to put it back 
     python tools/chaos_drill.py flask-api               dry run of one target
     python tools/chaos_drill.py flask-api --go          the real drill: stop it, watch, report
     python tools/chaos_drill.py --history               the drills so far (state/chaos/drills.jsonl)
+    python tools/chaos_drill.py --weekly                ONE drill, the target drilled longest ago (never-drilled first): nightly.py runs this
+                                                        once a week (SKIPPY_CHAOS_DAY, Sunday) and the morning report says how it went
 
-Targets (an allow-list; nothing else can be named):
+Occasional, never all the time (the Captain, 2026-11-01): once a week, one target, in the night shift; by hand after a big change.
+
+Targets: the fixed ones below, plus every service FOUND at run time (the Captain: "it also needs to auto-discover new additions"):
+    on skippy-pc   every running container of the skippytel compose project with a loopback port whose /health says ok or ready
+                   (minus SKIP: the reporter is the doctor's own eyes, the studios hold a patient job in flight)
+    on skippy-core every running container of the skippycore project that says it is healthy (minus llm, which is `core`, and data stores)
+A found target is drilled first the week after it appears. Fixed targets:
     flask-api, voice-gate, music-gate   the container is stopped (`docker stop <container>`, so Docker's own restart policy does NOT
                                         bring it back). Healer: the doctor (portal/doctor.py) through the starter (recreate).
     bridge                              the newest bridge GENERATION (bridge.py behind front.py), by its PID from state/bridge-front.json,
@@ -66,6 +74,57 @@ TARGETS = {
     "bridge": {"kind": "bridge", "limit_s": 300},
     "core": {"kind": "core", "limit_s": 900},
 }
+SKIP = {"home-reporter",                                     # the doctor's eyes: down, nothing else can be seen healing
+        "image-studio", "music-studio", "tts-studio"}        # a patient picture, song or voice job in flight would be lost
+CORE_SKIP = re.compile(r"^(llm|.*postgres.*|.*db|.*database.*|mosquitto|matter.*|car-fleet)$", re.I)   # llm is `core`; data, the Matter
+#                                                                                       fabric and the car's guard (Sentry's alarm) stay up
+WEEKLY = ROOT / "state" / "chaos" / "weekly.json"
+_FOUND: dict | None = None
+PS_FORMAT = '{{.Names}}|{{.Label "com.docker.compose.service"}}|{{.Label "com.docker.compose.project"}}|'
+
+
+def discover() -> dict:
+    """The targets found at run time (see the module docstring): name -> target, like TARGETS."""
+    found: dict = {}
+    known = {t.get("container") for t in TARGETS.values()}
+    rc, out = run(["docker", "ps", "--format", PS_FORMAT + "{{.Ports}}"], 30)
+    for line in out.splitlines() if rc == 0 else []:
+        name, service, project, ports = (line.split("|") + ["", "", "", ""])[:4]
+        if project != "skippytel" or service in SKIP or service in TARGETS or name in known:
+            continue
+        m = re.search(r"(?:127\.0\.0\.1|0\.0\.0\.0):(\d+)->", ports)
+        if not m:
+            continue
+        url = f"http://127.0.0.1:{m[1]}/health"
+        try:
+            b = get_json(url, 4)
+        except Exception:  # noqa: BLE001 — no /health that answers: nothing to prove a heal with
+            continue
+        if isinstance(b, dict) and (b.get("ready") is True or b.get("status") == "ok"):
+            found[service] = {"kind": "container", "container": name, "service": service, "probe": url, "limit_s": 900, "found": True}
+    rc, out = ssh("docker ps --format '" + PS_FORMAT + "{{.Status}}'", 40)
+    for line in out.splitlines() if rc == 0 else []:
+        name, service, project, status = (line.split("|") + ["", "", "", ""])[:4]
+        if project != "skippycore" or not service or CORE_SKIP.match(service) or "(healthy)" not in status:
+            continue
+        found[f"core-{service}"] = {"kind": "core-container", "container": name, "service": service, "limit_s": 900, "found": True}
+    return found
+
+
+def targets() -> dict:
+    """The fixed targets and the found ones (found once per run)."""
+    global _FOUND
+    if _FOUND is None:
+        _FOUND = discover()
+    return {**TARGETS, **_FOUND}
+
+
+def core_container(name: str) -> dict | None:
+    rc, out = ssh("docker inspect -f '{{.Id}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' " + name, 30)
+    if rc != 0 or not out.strip():
+        return None
+    cid, state, health = (out.split() + ["", "", ""])[:3]
+    return {"id": cid[:12], "state": state, "health": health}
 
 
 def run(cmd: list[str], timeout: float = 60) -> tuple[int, str]:
@@ -93,7 +152,11 @@ CORE_KEY = 'K=$(sudo grep -h "^LLM_API_KEY=" /etc/skippy-core/core.env | cut -d=
 
 # ── the probes: does a real request work? ──
 def probe(name: str) -> tuple[bool, str]:
-    t = TARGETS[name]
+    t = targets()[name]
+    if t["kind"] == "core-container":
+        c = core_container(t["container"])
+        ok = bool(c) and c["state"] == "running" and c["health"] in ("healthy", "")
+        return ok, "" if ok else f"not healthy ({c and (c['health'] or c['state'])})"
     try:
         if t["kind"] == "container":
             b = get_json(t["probe"])
@@ -190,7 +253,7 @@ def gates(name: str) -> list[str]:
     why = [w for w in (purple_busy(), core_busy(), voice_busy(), hub_busy()) if w]
     if not starter_running():
         why.append("the starter (the doctor's hands on this PC) isn't running: nothing could heal it")
-    for other in TARGETS:
+    for other in dict.fromkeys([*TARGETS, name]):           # the fixed ones and this one: one fault at a time
         ok, what = probe(other)
         if not ok:
             why.append(f"{other} is already down ({what}): fix that first, one fault at a time")
@@ -240,7 +303,11 @@ def core_doctor() -> dict:
 
 def plan(name: str) -> str:
     """What the drill would stop, in words, with the exact command."""
-    t = TARGETS[name]
+    t = targets()[name]
+    if t["kind"] == "core-container":
+        c = core_container(t["container"])
+        return (f"stop {t['container']} on skippy-core ({c['id']}, {c['health'] or c['state']}): `ssh {CORE_SSH} docker stop {t['container']}`; "
+                "heals when it says healthy again (found at run time)") if c else f"{t['container']} doesn't exist on skippy-core"
     if t["kind"] == "container":
         c = container(t["container"])
         return (f"stop container {t['container']} ({c['id']}, {c['state']}): `docker stop {t['container']}`; "
@@ -259,12 +326,15 @@ def now_s() -> float:
 
 
 def drill(name: str, say=print) -> dict:
-    t = TARGETS[name]
+    t = targets()[name]
     row = {"target": name, "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "plan": plan(name)}
     before = {}
     if t["kind"] == "container":
         before = container(t["container"]) or {}
         rc, out = run(["docker", "stop", t["container"]], 120)
+    elif t["kind"] == "core-container":
+        before = core_container(t["container"]) or {}
+        rc, out = ssh(f"docker stop {t['container']}", 120)
     elif t["kind"] == "bridge":
         before = bridge_generation() or {}
         if not before:
@@ -287,6 +357,11 @@ def drill(name: str, say=print) -> dict:
                 if c is None or c["id"] != before.get("id") or c["state"] != "exited":
                     detect, healer = now_s() - t0, ("the doctor (recreated)" if c is None or c["id"] != before.get("id") else
                                                     "something started the same container")
+            elif t["kind"] == "core-container":
+                c = core_container(t["container"])
+                if c is None or c["id"] != before.get("id") or c["state"] != "exited":
+                    detect, healer = now_s() - t0, ("something recreated it" if c is None or c["id"] != before.get("id") else
+                                                    "something started it again")
             elif t["kind"] == "bridge":
                 g = bridge_generation()
                 if g and g["pid"] != before["pid"]:
@@ -323,7 +398,10 @@ def drill(name: str, say=print) -> dict:
 
 def restore(name: str, say=print) -> str:
     """Nothing healed it in time: put it back the documented way (the human's part, done by the drill so the stack isn't left down)."""
-    t = TARGETS[name]
+    t = targets()[name]
+    if t["kind"] == "core-container":                     # skippy-core's compose belongs to its deployer: start the same container
+        rc, out = ssh(f"docker start {t['container']}", 120)
+        return f"started by the drill (docker start {t['container']})" if rc == 0 else f"the drill's restore failed too: {out[-120:]}"
     if t["kind"] == "container":
         for cmd in (["docker", "compose", "stop", t["service"]], ["docker", "compose", "rm", "-f", t["service"]],
                     ["docker", "compose", "up", "-d", t["service"]]):
@@ -342,18 +420,51 @@ def history() -> list[dict]:
         return []
 
 
+def pick(names: list[str], hist: list[dict]) -> str:
+    """The target drilled longest ago; one never drilled comes first (a new addition), in name order."""
+    last: dict = {}
+    for r in hist:
+        last[r.get("target")] = max(last.get(r.get("target"), ""), r.get("at") or "")
+    return min(sorted(names), key=lambda n: (n in last, last.get(n, "")))
+
+
+def weekly(say=print, wait_s: float = 20) -> dict:
+    """The week's one drill (nightly.py, SKIPPY_CHAOS_DAY): the gates checked twice, then one target. The result goes to state/chaos/weekly.json
+    for the morning report: {target, heal_s, human_needed, skipped (why), new (targets found that were never drilled)}."""
+    hist = history()
+    every = targets()
+    seen = {r.get("target") for r in hist}
+    name = pick(list(every), hist)
+    why = gates(name)
+    if not why:
+        time.sleep(wait_s)
+        why = gates(name)
+    res = {"target": name, **({"skipped": why} if why else drill(name, say))}
+    res["new"] = sorted(n for n in every if every[n].get("found") and n not in seen)
+    res["week_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    WEEKLY.parent.mkdir(parents=True, exist_ok=True)
+    WEEKLY.write_text(json.dumps(res), encoding="utf-8")
+    return res
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("target", nargs="?", choices=list(TARGETS))
+    ap.add_argument("target", nargs="?")
     ap.add_argument("--go", action="store_true", help="really take it down (without it: a dry run)")
     ap.add_argument("--history", action="store_true")
+    ap.add_argument("--weekly", action="store_true", help="the week's one drill (nightly.py runs it)")
     a = ap.parse_args(argv)
+    if a.weekly:
+        print(json.dumps(weekly(), indent=2))
+        return 0
+    if a.target and a.target not in targets():
+        ap.error(f"unknown target {a.target!r}: one of {', '.join(targets())}")
     if a.history:
         for r in history():
             print(f"{r['at']}  {r['target']:<11} detect {r.get('detect_s')} s  heal {r.get('heal_s')} s  "
                   f"human {'YES' if r.get('human_needed') else 'no'}  {r.get('healer') or r.get('error', '')}")
         return 0
-    names = [a.target] if a.target else list(TARGETS)
+    names = [a.target] if a.target else list(targets())
     if not a.go or not a.target:
         print("DRY RUN: nothing is stopped. Add --go with one target to run it.\n")
         for n in names:

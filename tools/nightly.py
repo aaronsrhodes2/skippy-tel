@@ -10,6 +10,8 @@ overnight report that the morning briefing reads out.
   upkeep      free disk on C: and D:, dangling Docker images and old build cache pruned (`docker image prune`, `docker builder prune` older
               than a week: never a volume, never a running container), the hub restarted onto new code when its code changed since it
               started and nobody has spoken for 30 minutes (its own PIDs only), the vault's .env present.
+  healing     once a week (SKIPPY_CHAOS_DAY, Sunday): ONE chaos drill (tools/chaos_drill.py --weekly), new services first; the morning
+              report says whether it came back by itself.
   ledger      the day in numbers: what the house heard and did (skippy-home's log), routines, deploys and CI (skippy-core), into
               state/ledger/<date>.json and .md.
 
@@ -35,6 +37,8 @@ STATE = ROOT / "state"
 HOME_LOG = Path(os.environ.get("SKIPPY_HOME_DIR", ROOT.parent / "skippy-home")) / "log"
 PORTAL = os.environ.get("PORTAL_URL", "https://skippy-portal-1015050363686.us-west1.run.app").rstrip("/")
 VAULT_ENV = Path(r"G:\My Drive\vault\.env")
+CHAOS_DAY = os.environ.get("SKIPPY_CHAOS_DAY", "sun")[:3].lower()     # the one night a week the healing check runs (tools/chaos_drill.py --weekly)
+DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 TASKS = ["SkippyHomeLearn", "Skippy quip refresh", "sigma-ground distill daily", "Skippy starters refresh", "SkippyModelsBaseline"]
 LATE_S = 3600
 
@@ -174,6 +178,40 @@ def hub_restart(dry: bool, log) -> dict:
     return {"restarted": True, "pids": pids}
 
 
+# ── the weekly healing check ──
+def healing_check(dry: bool, log) -> dict | None:
+    """Once a week (CHAOS_DAY): ONE chaos drill, the target drilled longest ago, new services first (the Captain, 2026-11-01: "once a week,
+    but it also needs to auto-discover new additions"). Never on other nights, never more than one target."""
+    if DAYS[time.localtime().tm_wday] != CHAOS_DAY:
+        return None
+    if dry:
+        return {"dry": True}
+    rc, txt = sh([sys.executable, str(ROOT / "tools" / "chaos_drill.py"), "--weekly"], 2400)
+    try:
+        res = json.loads((STATE / "chaos" / "weekly.json").read_text(encoding="utf-8"))
+        if res.get("week_at", "")[:10] < time.strftime("%Y-%m-%d", time.gmtime(time.time() - 86400)):
+            raise ValueError("stale")
+    except (OSError, ValueError):
+        res = {"error": txt.strip()[-200:] or f"rc {rc}"}
+    log(f"healing check: {json.dumps(res)[:200]}")
+    return res
+
+
+def healing_words(c: dict | None) -> str:
+    if not c or c.get("dry"):
+        return ""
+    if c.get("error"):
+        return "the weekly healing check couldn't run"
+    if c.get("skipped"):
+        words = "the weekly healing check waited: the house was busy"
+    elif c.get("human_needed"):
+        words = f"the weekly healing check found a gap: {c['target']} didn't come back by itself, so I put it back"
+    else:
+        words = f"the weekly healing check took down {c['target']} and it came back by itself in {c.get('heal_s')} seconds"
+    new = c.get("new") or []
+    return words + (f" ({len(new)} new service{'s' if len(new) != 1 else ''} to test: {', '.join(new[:4])})" if new else "")
+
+
 # ── the ledger ──
 def house_day(date: str) -> dict:
     events = []
@@ -211,6 +249,8 @@ def overnight_line(report: dict) -> str:
         bits.append("disk is getting full (" + "; ".join(low) + ")")
     if up.get("hub", {}).get("restarted"):
         bits.append("I restarted myself onto new code")
+    if healing_words(report.get("chaos")):
+        bits.append(healing_words(report.get("chaos")))
     return "Overnight: " + ", ".join(bits) + "."
 
 
@@ -225,6 +265,8 @@ def ledger_md(date: str, r: dict) -> str:
              "", "## Night jobs"] + [f"- {j['task']}: " + (f"last {j.get('last_run')}, result {j.get('result')}" if j.get("found") else "not found") for j in r["jobs"]]
     lines += ["", "## Upkeep", "- disks: " + ", ".join(f"{d} {v['free_gb']} GB ({v['free_pct']}%)" for d, v in r["upkeep"]["disks"].items()),
               f"- docker prune: {r['upkeep']['docker']}", f"- hub: {r['upkeep']['hub']}", f"- vault .env present: {r['upkeep']['vault']}"]
+    if r.get("chaos"):
+        lines += ["", "## Weekly healing check", f"- {healing_words(r['chaos']) or r['chaos']}"]
     return "\n".join(lines) + "\n"
 
 
@@ -241,6 +283,7 @@ def main(argv=None) -> int:
     report["systems"] = systems(args.dry_run, log)
     report["jobs"] = [task_report(t) for t in TASKS]
     report["upkeep"] = {"disks": disks(), "docker": docker_prune(args.dry_run), "hub": hub_restart(args.dry_run, log), "vault": VAULT_ENV.is_file()}
+    report["chaos"] = healing_check(args.dry_run, log)
     report["house"] = house_day(date)
     report["overnight"] = overnight_line(report)
     folder = STATE / "ledger"
