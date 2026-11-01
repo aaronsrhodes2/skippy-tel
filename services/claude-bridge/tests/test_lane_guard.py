@@ -77,7 +77,7 @@ def test_every_run_gets_the_lane_guard_and_skippytel_its_deploy_checkout(shop):
     assert "finish_gate.py" in finish_hook["hooks"][0]["command"]
     assert "SKIPPY_FINISH_STATE" in call["env"]
     state = json.loads((Path(shop.state_dir) / ".finish" / "aaaaaaaa.json").read_text(encoding="utf-8"))
-    assert set(state) == {"clone", "baseline", "head", "sent_back"} and state["sent_back"] == 0
+    assert set(state) == {"clone", "baseline", "head", "sent_back", "started"} and state["sent_back"] == 0   # started: work_check.py
 
 
 @pytest.mark.parametrize("cmd", [
