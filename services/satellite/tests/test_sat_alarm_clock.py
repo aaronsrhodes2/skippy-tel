@@ -232,3 +232,14 @@ def test_the_bedtime_routine_says_tomorrows_alarm_before_its_goodnight(tmp_path)
     steps = d.bedtime_steps(room)
     said = run(steps[-2].make())
     assert said == "Your alarm is set for 6:30." and steps[-1].last
+
+
+def test_plain_alarm_requests_go_to_the_tool_before_the_model():
+    assert alarms_mod.pre_route("set an alarm for 7:00 AM every day") == ("set_alarm", {"time": "7:00am", "repeat": "daily"})
+    assert alarms_mod.pre_route("Skippy, wake me up at 6:30 every weekday upstairs") == ("set_alarm", {"time": "6:30", "repeat": "weekdays", "where": "upstairs"})
+    assert alarms_mod.pre_route("what alarms do I have?") == ("list_alarms", {})
+    assert alarms_mod.pre_route("cancel the 7 o'clock alarm") == ("cancel_alarm", {"what": "7 o'clock", "kind": "alarm"})
+    assert alarms_mod.pre_route("turn off the alarm") is None and alarms_mod.pre_route("set a timer for 5 minutes") is None
+    a = alarms_mod.Alarms(None, clock=lambda: at(2026, 11, 1, 15, 0), wake_place="upstairs")
+    tool, args = alarms_mod.pre_route("set an alarm for 7:00 AM every day")
+    assert a.run(tool, args).startswith("Alarm set for tomorrow at 7 AM, every day, ringing upstairs")

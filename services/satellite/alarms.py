@@ -45,6 +45,43 @@ TOOLS = [
 ]
 
 
+_TIME = r"(?P<t>\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)(?:\s*o'?clock)?"
+_SET = re.compile(r"^(?:please |can you |could you )?(?:set (?:an? |my |the )?alarm(?: clock)?|wake me(?: up)?|alarm)\s+(?:for |at )?" + _TIME + r"(?P<rest>.*)$")
+_LIST = re.compile(r"^(?:(?:what|which) alarms|(?:do i have|have i got|are there|is there) (?:any |an )?alarms?|(?:list|read|tell me) (?:my |the )?alarms"
+                   r"|(?:what|when)(?:'s| is| are) my alarms?|what (?:time )?is my alarm)")
+_CANCEL = re.compile(r"^(?:please )?(?:cancel|delete|remove|clear) (?:my |the |all (?:my |the )?|every )?(?P<what>.*?)\s*alarms?$")
+_REPEATS = [(r"\bevery ?day\b|\bdaily\b|\beach day\b", "daily"), (r"\bweekdays?\b", "weekdays"), (r"\bweekends?\b", "weekends")]
+_WHERE = re.compile(r"\b(upstairs|downstairs|everywhere|(?:in )?the (bedroom|living room|theater|kitchen|office))\b")
+_LABEL = re.compile(r"\b(?:label(?:led)?|call(?:ed)?|named)(?: it)? [\"']?(?P<label>[\w' ]{1,40}?)[\"']?$")
+
+
+def pre_route(heard: str) -> tuple[str, dict] | None:
+    """(tool, arguments) for a plain alarm request: Core skipped the tool and said "I cannot set alarms" (2026-11-01). None otherwise."""
+    w = re.sub(r"^\W*(?:hey |ok |okay )?skippy\W*", "", (heard or "").lower()).strip(" ?!.")
+    if _LIST.match(w):
+        return "list_alarms", {}
+    m = _CANCEL.match(w)
+    if m:
+        what = re.sub(r"^(?:all|every|of (?:my|the))\b\s*", "", m.group("what")).strip()
+        return "cancel_alarm", {"what": what, "kind": "alarm"}
+    m = _SET.match(w)
+    if not m:
+        return None
+    t, rest = m.group("t").replace(" ", "").replace(".", ""), m.group("rest")
+    args = {"time": t}
+    days = [d for d in DAYS if re.search(rf"\b{d}", rest)]
+    rep = next((r for rx, r in _REPEATS if re.search(rx, rest)), ",".join(days) if days and "every" in rest else "")
+    if rep:
+        args["repeat"] = rep
+    where = _WHERE.search(rest)
+    if where:
+        args["where"] = where.group(2) or where.group(1)
+    label = _LABEL.search(rest)
+    if label:
+        args["label"] = label.group("label").strip()
+    return "set_alarm", args
+
+
 @dataclass
 class Alarm:
     id: int

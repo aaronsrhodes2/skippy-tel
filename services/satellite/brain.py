@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 import house_layout
+import alarms as alarms_mod
 import lists as lists_mod
 import house as hass_mod                                         # the house: any backend (HomeKit, Home Assistant ...)
 import news as news_mod
@@ -261,6 +262,8 @@ class Brain:
             tool, routed = "weather", weather_mod.pre_route(heard)   # left to itself, Core made up tomorrow's forecast (2026-10-31)
         if not routed and any(t["name"] == "list" for t in self.extra_tools):
             tool, routed = "list", lists_mod.pre_route(heard)        # left to itself, Core said "Adding milk ..." and added nothing (2026-11-01)
+        if not routed and any(t["name"] == "set_alarm" for t in self.extra_tools):
+            tool, routed = alarms_mod.pre_route(heard) or (tool, None)   # left to itself, Core said "I cannot set alarms" (2026-11-01)
         if not routed and any(t["name"] == "announce" for t in self.extra_tools):
             tool, routed = "announce", announce_route(heard)
         if not routed and any(t["name"] == "music" for t in self.extra_tools):
