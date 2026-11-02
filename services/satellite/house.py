@@ -17,7 +17,7 @@ import re
 import house_layout
 
 ALLOWED = ("light", "switch", "fan", "cover", "climate", "media_player", "scene", "script", "vacuum", "humidifier", "input_boolean")
-READ_ONLY = ("sensor", "binary_sensor", "weather", "person", "sun")                  # may be asked about, never changed
+READ_ONLY = ("sensor", "binary_sensor", "weather", "person", "sun", "camera")                  # may be asked about, never changed
 SENSITIVE_DOMAINS = ("lock", "alarm_control_panel")
 SENSITIVE_COVERS = ("garage", "gate", "door")                                         # a cover's device_class
 MAX_LIST = 40
@@ -25,6 +25,23 @@ GROUP_WORDS = {"light": ("light", "lights", "lamp", "lamps"), "switch": ("switch
                "fan": ("fan", "fans")}
 FILLER = ("the", "a", "my", "all", "every", "everything", "in", "on", "of", "stuff", "things", "devices", "and")
 GROUP_ACTIONS = ("on", "turn_on", "off", "turn_off", "toggle", "set_brightness")
+
+
+def camera_words(a: dict, now: float | None = None) -> str:
+    """", battery 82 percent, last motion 12 minutes ago, last doorbell press 2 hours ago" from a camera's attributes."""
+    import time                                                          # noqa: PLC0415
+    from ringcam import ago                                              # noqa: PLC0415
+    now = time.time() if now is None else now
+    out = ""
+    if isinstance(a.get("battery"), (int, float)):
+        out += f", battery {int(a['battery'])} percent"
+    if a.get("last_motion"):
+        out += f", last motion {ago(now - a['last_motion'])}"
+    if a.get("last_ding"):
+        out += f", last doorbell press {ago(now - a['last_ding'])}"
+    elif a.get("doorbell"):
+        out += ", no doorbell press lately"
+    return out
 
 
 class HomeError(Exception):
@@ -167,6 +184,8 @@ class House:
                 extra = f", {int(pos)} percent of the way"
             if a.get("obstructed"):
                 extra += ", and its safety sensor says something is in the way"
+        if self._domain(s) == "camera":                                  # the Ring cameras (ringcam.py): battery, last motion, last press
+            extra = camera_words(a)
         return f"{self._label(s)} is {s.get('state')}{(' ' + unit) if unit else ''}{extra}."
 
     def _ambiguous(self, query: str, close: list[dict]) -> str:
@@ -332,6 +351,30 @@ class Combined(House):
         if eid not in self._owner:
             self.states(fresh=True)
         return self._owner.get(eid)
+
+
+THERMO = r"(?:thermostat|heat(?:er|ing)?|furnace|a/?c|air conditioning)"
+SET_THERMO = re.compile(rf"\b(?:set|turn|put|make|change)\b.*\b{THERMO}\b.*?\b(?:to|at)\s+(\d{{2}})\b|\b{THERMO}\b.*?\b(?:to|at)\s+(\d{{2}})\b", re.I)
+OFF_THERMO = re.compile(rf"\bturn\s+(?:off\s+(?:the\s+)?{THERMO}|(?:the\s+)?{THERMO}\s+off)\b", re.I)
+ON_THERMO = re.compile(rf"\bturn\s+(?:on\s+(?:the\s+)?(?:heat|heater|heating|furnace)|(?:the\s+)?(?:heat|heater|heating|furnace)\s+on)\b", re.I)
+ASK_THERMO = re.compile(r"\bthermostat\b|\bhow\s+(?:warm|cold|hot)\s+is\s+it\s+(?:in\s+here|inside|in\s+the\s+house|at\s+home)\b|"
+                        r"\b(?:temperature|temp)\s+(?:in\s+here|inside|in\s+the\s+house|at\s+home)\b|\bis\s+the\s+heat\s+on\b", re.I)
+
+
+def thermostat_route(heard: str) -> tuple[str, dict] | None:
+    """A plain thermostat request, straight to the house tool ("set the thermostat to 70", "turn the heat off", "how warm is it in here?");
+    None = the model decides. Left to itself, Core said "I cannot see the thermostat" with the tool right there (2026-11-01)."""
+    h = heard or ""
+    m = SET_THERMO.search(h)
+    if m:
+        return "home_control", {"name": "thermostat", "action": "set_temperature", "value": int(m.group(1) or m.group(2))}
+    if OFF_THERMO.search(h):
+        return "home_control", {"name": "thermostat", "action": "off"}
+    if ON_THERMO.search(h):
+        return "home_control", {"name": "thermostat", "action": "heat"}
+    if ASK_THERMO.search(h):
+        return "home_state", {"name": "thermostat"}
+    return None
 
 
 TOOLS = [

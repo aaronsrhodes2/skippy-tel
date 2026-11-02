@@ -149,3 +149,20 @@ def test_the_project_comes_from_the_portal_with_the_token(tmp_path):
     n = nest.Nest(g, call=lambda m, url, t, b=None: calls.append(url) or {"devices": []}, clock=lambda: 0.0)
     n.states()
     assert calls == [f"{nest.SDM}/enterprises/proj-from-portal/devices"]
+
+
+@pytest.mark.parametrize("heard,want", [
+    ("Skippy, set the thermostat to 70", ("home_control", {"name": "thermostat", "action": "set_temperature", "value": 70})),
+    ("turn the heat up to 68 please", ("home_control", {"name": "thermostat", "action": "set_temperature", "value": 68})),
+    ("turn the heat off", ("home_control", {"name": "thermostat", "action": "off"})),
+    ("turn off the heater", ("home_control", {"name": "thermostat", "action": "off"})),
+    ("turn on the heat", ("home_control", {"name": "thermostat", "action": "heat"})),
+    ("what is the thermostat set to and how warm is it in here", ("home_state", {"name": "thermostat"})),
+    ("how warm is it in here?", ("home_state", {"name": "thermostat"})),
+    ("is the heat on", ("home_state", {"name": "thermostat"})),
+    ("how warm is it outside tomorrow", None),
+    ("turn off the kitchen lights", None),
+    ("set an alarm for 7", None),
+])
+def test_plain_thermostat_requests_go_straight_to_the_house_tool(heard, want):
+    assert house.thermostat_route(heard) == want

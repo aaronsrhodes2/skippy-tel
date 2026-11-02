@@ -351,6 +351,8 @@ class Brain:
         tool, routed = "audiobook", (self.pre_route(heard) if self.pre_route is not None else None)
         if not routed and self.news is not None:
             tool, routed = "news", self.news.pre_route(heard, self.history)   # "politics", in answer to "news about what?"
+        if not routed and self.hass is not None:                     # before the weather: "how warm is it in here" is the thermostat
+            tool, routed = hass_mod.thermostat_route(heard) or (tool, None)   # left to itself, Core said "I cannot see the thermostat" (2026-11-01)
         if not routed and self.weather is not None:
             tool, routed = "weather", weather_mod.pre_route(heard)   # left to itself, Core made up tomorrow's forecast (2026-10-31)
         if not routed and any(t["name"] == "list" for t in self.extra_tools):
