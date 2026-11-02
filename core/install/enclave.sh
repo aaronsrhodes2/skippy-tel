@@ -3,6 +3,7 @@
 # box only plays it.
 #
 #   hub (skippy-pc, router.py NetStream) ──tcp :4953 (tailnet)──▶ snapserver ──▶ snapclient ──▶ PipeWire ──aux cable──▶ Enclave
+#   house radio (skippy-pc, radio.py)   ──tcp :4954 (tailnet)──▶ snapserver ──▶ snapclient enclave-radio ──┘ (PipeWire mixes the two)
 #
 # ENCLAVE_LINK=aux (the default): skippy-core sits beside the Enclave, its headphone jack cabled to the speaker's aux in. Bluetooth (bt)
 # is still here but not used: from downstairs it stalled twice in 15 minutes and once stayed "connected" but silent until the speaker's
@@ -55,7 +56,8 @@ if [[ "$MODE" == "--check" ]]; then
     chk "its A2DP sink in PipeWire"           'as_user pactl list short sinks | grep -q "bluez_output.${MAC//:/_}"'
   fi
   chk "snapclient playing into it"          'as_user systemctl --user is-active -q enclave-snap'
-  chk ":4953 and :1780 on the tailnet"      'tailscale serve status | grep -q ":4953" && tailscale serve status | grep -q ":1780 (tailnet only)"'
+  chk "the house radio's snapclient too"    'as_user systemctl --user is-active -q enclave-radio'
+  chk ":4953, :4954 and :1780 on the tailnet" 'tailscale serve status | grep -q ":4953" && tailscale serve status | grep -q ":4954" && tailscale serve status | grep -q ":1780 (tailnet only)"'
   exit $bad
 fi
 
@@ -93,9 +95,10 @@ if (( ${#missing[@]} )); then DEBIAN_FRONTEND=noninteractive do_ apt-get install
 systemctl is-enabled -q snapclient 2>/dev/null && do_ systemctl disable --now snapclient || echo "ok: system snapclient off"
 systemctl is-active -q bluetooth 2>/dev/null && echo "ok: bluetooth running" || do_ systemctl enable --now bluetooth
 
-echo "== 2/5 snapserver: the hub's stream in on 127.0.0.1:4953"
+echo "== 2/5 snapserver: the hub's stream in on 127.0.0.1:4953, the house radio's on :4954"
 if put /etc/snapserver.conf root:root <<'EOF'
-# core/install/enclave.sh: one source, pushed by skippy-pc's hub (services/satellite/router.py NetStream), raw PCM, local client only.
+# core/install/enclave.sh: two sources, raw PCM, local clients only: skippy-pc's hub (Skippy's voice, services/satellite/router.py NetStream)
+# and its house radio (Bilby's one station, services/satellite/radio.py). Each has its own snapclient; PipeWire mixes them into the Enclave.
 [server]
 threads = -1
 
@@ -103,6 +106,7 @@ threads = -1
 bind_to_address = 127.0.0.1
 port = 1704
 source = tcp://127.0.0.1:4953?name=hub&mode=server&sampleformat=48000:16:2
+source = tcp://127.0.0.1:4954?name=radio&mode=server&sampleformat=48000:16:2
 codec = pcm
 buffer = 300
 chunk_ms = 20
@@ -158,6 +162,16 @@ ExecStart=/usr/bin/snapclient --hostID enclave --player pulse tcp://127.0.0.1:17
 Restart=on-failure
 RestartSec=2
 EOF
+put "$UNITS/enclave-radio.service" "$USER_NAME:$USER_NAME" <<'EOF' && install_keep=1 || true
+[Unit]
+Description=The house radio's stream from snapserver into the Enclave, beside the hub's (started and stopped by enclave-keep)
+After=pipewire-pulse.service
+
+[Service]
+ExecStart=/usr/bin/snapclient --hostID enclave-radio --player pulse tcp://127.0.0.1:1704
+Restart=on-failure
+RestartSec=2
+EOF
 put "$UNITS/enclave-keep.service" "$USER_NAME:$USER_NAME" <<EOF && install_keep=1 || true
 [Unit]
 Description=Keeps the Enclave connected and playing the hub's stream (core/enclave/keep.sh)
@@ -180,6 +194,7 @@ else echo "would: enable and start enclave-keep (aaron's user service)"; fi
 
 echo "== 5/5 the tailnet doors (never the LAN or the Funnel)"
 tailscale serve status 2>/dev/null | grep -q ":4953" && echo "ok: :4953 served" || do_ tailscale serve --bg --tcp=4953 tcp://127.0.0.1:4953
+tailscale serve status 2>/dev/null | grep -q ":4954" && echo "ok: :4954 served" || do_ tailscale serve --bg --tcp=4954 tcp://127.0.0.1:4954
 tailscale serve status 2>/dev/null | grep -q ":1780 (tailnet only)" && echo "ok: :1780 served" || do_ tailscale serve --bg --http=1780 http://127.0.0.1:1780
 (( APPLY )) && echo "then: sudo bash $0 --check$([[ $LINK == bt ]] && echo " (bt: first --pair, the speaker in pairing mode)")"
 exit 0

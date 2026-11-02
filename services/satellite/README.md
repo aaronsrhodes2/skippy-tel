@@ -29,7 +29,7 @@ skippy-pc does all the hearing, thinking and talking; a room needs only a box wi
 
 * `kitchen=esphome://skippy-kitchen.local`: **the room boxes** (Waveshare ESP32-S3 86 boxes flashed with `rooms/skippy-room.yaml`; everything about
   them, flashing included, is in `rooms/README.md`). The hub is the box's Home Assistant (`esphome_link.py`, aioesphomeapi); Skippy's voice and
-  Bilby's music go to it as URLs from the hub's media server (`media.py`, port 10800), and each box is a Bilby Connect speaker (`music.py`).
+  any music it plays comes straight from the house radio (below); to Bilby Connect each box is a remote of the radio (`radio_client.PodTuner`).
 * `den=192.168.1.41[:10700]`: **a Wyoming satellite** (`wyoming-satellite` on a Raspberry Pi), either waking on "Skippy" itself (its own
   `wyoming-openwakeword` with our model) or streaming everything for the hub to hear its name.
 
@@ -212,6 +212,30 @@ One clock for the house, ticking on its own (an alarm rings with every pod off t
   says "Your alarm is set for 6:30." or "No alarm is set for tomorrow."
 - **Timers** stay per room (the brain sets them) and are rung by the clock too: one whose pod is away is still said upstairs.
 
+## Bilby's house radio: one station, the hubs are its remotes (`radio.py`, `station.py`, `radio_client.py`)
+
+The Captain, 2026-11-01: *"There is one tap for music everywhere, and it's playing the same tune for everyone, like a radio station. The hubs
+can change it, or add to it, but they are not the players."* Bilby's music no longer lives in hub.py (every hub restart killed it: 25 on
+2026-11-01). It is its own process, `radio.py`, kept running by `tools/radio_run.sh` (the SkippyRadio task: `bash tools/install_radio_startup.sh
+--apply`), log `state/radio.log`. Full description: [RADIO.md](RADIO.md).
+
+* **The station** owns the queue, discovery, favorites and the grammar's filters (`station.py`: the old hub music tools, moved whole), the DJ
+  (`dj.DjPlayer`), Spotify (local first, an instant fallback), and its state (`state/radio/station.json`): its own restart resumes the same
+  track at the same place on the same speakers.
+* **One stream, every speaker tuned in:** the radio has its own router with the hub's outputs and the hub's delays (sync.py's alignment): the
+  Sony on the HDMI (Windows mixes it with the hub's voice), the Enclave on skippy-core's snapserver source `radio` (:4954, its own snapclient
+  `enclave-radio`; PipeWire mixes it with the hub's stream), and pods through the `pods` tap (one live FLAC stream, `/live/<secret>.flac` on
+  :47851, that a pod's media player plays from the radio, never the hub). "everywhere / upstairs / downstairs / here / a room" switches which
+  speakers play the one station (`"pod:<room>"` for a pod's own speaker); they never play different songs.
+* **The hub is a remote:** `hub.music_tools` hands every music tool to the radio (`POST /tool`, with the asking room, so "here" is that room's
+  speakers); it keeps only the room's audiobook and where Skippy's voice comes from. The routines' shuffle and stop, Connect commands to a pod
+  ("Play on" a pod puts the station in its room) go to the radio too. The station itself checks in to Connect as "House stereo", so the
+  portal's players and the car steer it.
+* **Ducking:** when Skippy speaks in a room (`Room._woke`, `_say`), that room's speakers duck the station (`POST /duck`, `Router.duck_kinds`),
+  the other floors play on.
+* **A hub restart never stops or skips the music:** nothing the hub holds plays; a pod tuned in keeps the radio's stream, and a hub that comes
+  back finds it playing and leaves it alone. Tests: `tests/test_sat_radio.py`, `tests/test_sat_esphome.py` (the pod as tuner and remote).
+
 ## The Enclave on skippy-core, and several outputs in one room (`router.py`, `sync_outputs.py`)
 
 The Enclave Audio speakers hang off **skippy-core's** Bluetooth (core/README.md → The Enclave speakers), not skippy-pc's. To the hub they are
@@ -238,7 +262,8 @@ one more router output, `enclave`, whose part is a URL instead of a Windows devi
   147 ms, and a clip on both is heard as one copy. The numbers are each output's own latency, so they stay right when the Enclave moves
   to another room (a whole-house sound lines up with them); measure again when a speaker or its connection changes. Run it while the hub
   isn't sending to the Enclave (snapserver takes one sender), e.g. right after stopping the hub.
-* The pod's own speaker isn't in it (its sound goes through ESPHome's media player, not the router).
+* The pod's own speaker isn't in it (its sound goes through ESPHome's media player, not the router). The house radio's music reaches a pod
+  through its own `pods` tap instead (above).
 * **Places on command** (2026-11-01): "everywhere" (both), "upstairs" / "living room" / "Enclave" (the Enclave), "downstairs" / "theater" /
   "Sony" (skippy-pc's HDMI). `play_music` takes `speaker: everywhere|downstairs|upstairs`, and the `speakers` tool moves the music (what plays now
   included: `Router.retarget`) or Skippy's own voice. The words come from `house_layout.json` when it is there (else `SKIPPY_PLACES`,
@@ -256,10 +281,10 @@ one more router output, `enclave`, whose part is a URL instead of a Windows devi
   replies. sync.py never measures them (no mic hears them), so they are never taken for off; they get the one-voice cushion and, when
   other outputs play too, the house-wide wait for the slowest. `speaker_out.announce_outputs`, `hub.Room._out`.
 
-## Bilby's DJ mode on the house stereo (`dj.py`)
+## Bilby's DJ mode on the house radio (`dj.py`)
 
-His library on the Sony mixed like a DJ set, from his own Traktor work, all on skippy-pc. The house stereo's player (`stereo.StereoMusic`, made by
-the hub) is a `dj.DjPlayer`: the queue plays as one gapless chain on the router's `media` layer (Skippy still ducks it).
+His library mixed like a DJ set, from his own Traktor work, all on skippy-pc. The house radio's player (`stereo.StereoMusic`, made by
+radio.py) is a `dj.DjPlayer`: the queue plays as one gapless chain on the router's `media` layer (Skippy still ducks it).
 
 * **Analysis:** BPM, the beat grid's anchor and the key come from Traktor's `collection.nml` (music-collection's `corrected_traktor/`; 98% of the
   library, indexed once into `state/dj/traktor-index.json`); a track Traktor never saw is analysed once with librosa (`state/dj/analysis.json`).
@@ -274,6 +299,6 @@ the hub) is a `dj.DjPlayer`: the queue plays as one gapless chain on the router'
   track. "Skippy, play Depeche Mode on the stereo" (`play_music` with `speaker: stereo`) puts Bilby on the Sony.
 * **By hand:** `python dj.py plan "<catalog path A>" "<B>"` says what the mix would do; `python dj.py demo "<A>" "<B>"` plays the last bars of A
   into B on the HDMI output (the hub may keep running).
-* The browser player and the pods are unchanged. Tests: `tests/test_sat_dj.py` (synthetic click tracks: B's beats land within 8 ms of A's grid).
+* The browser player is unchanged. Tests: `tests/test_sat_dj.py` (synthetic click tracks: B's beats land within 8 ms of A's grid).
 
 Tests: `python -m pytest tests` from this folder (its own session: other services have a `gate.py` too).

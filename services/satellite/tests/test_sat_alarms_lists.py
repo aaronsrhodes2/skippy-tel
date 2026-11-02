@@ -159,7 +159,7 @@ class _House:
 
 
 def test_stereo_volume_steps_down_and_up_in_tenths_and_full_is_the_top():
-    from hub import stereo_volume
+    from station import stereo_volume
     h = _House()
     assert stereo_volume(h, "louder").startswith("Not louder")
     assert stereo_volume(h, "quieter") == "Done: the house stereo is at 8 of 10." and h.player.gain == 0.8
@@ -180,14 +180,14 @@ class _Box:
         return self._t
 
 
-def test_whats_playing_names_the_song_here_or_on_the_stereo():
-    from hub import now_playing
+def test_whats_playing_names_the_song_on_the_house_radio():
+    from station import now_playing
 
     class H:
-        box = _Box(True, ("Susie Q", "Creedence Clearwater Revival"))
-    assert now_playing(None, _Box(False), None, H(), True) == "Playing on the house stereo: Susie Q by Creedence Clearwater Revival."
-    assert now_playing(None, _Box(True, ("Time", "Pink Floyd")), None, None, False) == "Playing: Time by Pink Floyd."
-    assert now_playing(None, _Box(False), None, None, False) == "Nothing is playing."
+        def __init__(self, box):
+            self.box, self.playing = box, box.playing
+    assert now_playing(H(_Box(True, ("Susie Q", "Creedence Clearwater Revival")))) == "Playing on the house radio: Susie Q by Creedence Clearwater Revival."
+    assert now_playing(H(_Box(False))) == "Nothing is playing."
 
 
 def test_words_handed_to_the_running_hub_from_this_pc_are_taken_as_typed(tmp_path, monkeypatch):

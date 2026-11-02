@@ -148,11 +148,11 @@ class Room:
         self._voice_at = self._turn_at = None                   # (monotonic) a voice last heard in the room; his last turn with Skippy
         self._starter_check = 0.0
         self.remote_wake = True                                 # until the box says it woke on its own
-        self.music = None                                       # music.BoxMusic for a box that plays Bilby's library
+        self.music = None                                       # radio_client.PodTuner: this pod as a remote and a speaker of the house radio
         self.book = None                                        # audiobooks.BookPlayer: the Captain's audiobooks (pod and PC outputs); ducked while Skippy listens and talks
         self.last_media = "music"                               # "music" or "book": what "pause" and "resume" mean when both exist
         self.daily = None                                       # daily.Daily (shared): the morning, coming-home and bedtime routines
-        self.stereo = None                                      # stereo.StereoMusic: Bilby's library on the house stereo (the routines' music); ducked like a book
+        self.stereo = None                                      # radio_client.RoomRadio: the house radio as this room sees it; its speakers here duck like a book
         self.alarms = None                                      # alarms.Alarms: this room's alarms and reminders (on disk); one rings here until he answers
         self.clock = None                                       # alarm_clock.AlarmClock (the house's, shared): rings the alarms and timers instead of this room
         self.inbox = None                                       # a Path: words handed to the running hub from this PC (`hub.py --type ROOM TEXT`), taken as typed
@@ -1072,22 +1072,12 @@ def build_rooms(env: dict):
     loop = asyncio.get_running_loop()                           # build_rooms runs on the hub's loop (_main)
     import daily as daily_mod                                    # noqa: PLC0415
     from brain import load_persona                               # noqa: PLC0415
-    stereo_holder: dict = {}
+    import radio_client                                          # noqa: PLC0415
+    radio = radio_client.RadioClient.from_env(env, log=log)       # the house radio (radio.py, its own process): the hub is only its remote
 
     def stereo():
-        """The house stereo (SKIPPY_STEREO_OUT, default the HDMI to the Sony), made once the first box with a media server is connected."""
-        if "music" not in stereo_holder and stereo_holder.get("media") is not None:
-            import router as router_mod                          # noqa: PLC0415
-            from stereo import StereoMusic                       # noqa: PLC0415
-            kinds = speaker_out.split_kinds(env.get("SKIPPY_STEREO_OUT", "hdmi"))   # "enclave>hdmi": the router plays the first that is open
-            import spotify as spotify_mod                        # noqa: PLC0415 — his Spotify on the same stereo (services/spotify), unless SKIPPY_SPOTIFY=off
-            spot = None if env.get("SKIPPY_SPOTIFY", "on").lower() in ("off", "0", "no") else spotify_mod.Client.from_env(env)
-            music = stereo_holder["music"] = StereoMusic(router_mod.shared(env, log), kinds, stereo_holder["media"], log=log, spotify=spot, env=env)
-            music.start()
-            connect = getattr(make_room, "connect", None)        # the stereo is a Bilby Connect player too: "Play on", its state, "favorite this"
-            if connect is not None:
-                connect.add("stereo", env.get("SKIPPY_STEREO_NAME", "House stereo"), music.box)
-        return stereo_holder.get("music")
+        """The house radio: Bilby's one station (radio.py). Its client answers even while the radio restarts (then it says so)."""
+        return radio
     routines = None if env.get("SKIPPY_ROUTINES", "on").lower() in ("off", "0", "no") else         daily_mod.Daily(env, house=house, client=client, model=brain_model, filler=filler_bank, stereo=stereo, hlog=hlog, log=log, persona=load_persona())
     if routines is not None:
         import google_home                                       # noqa: PLC0415 — his calendar, mail and contacts, read only, once he has signed in
@@ -1135,9 +1125,7 @@ def build_rooms(env: dict):
         alarms = house_clock.alarms
         spotter = Spotter.load(model_path, threshold=threshold) if model_path.is_file() else None
         holder: dict = {}
-        plays_music = "player" in getattr(link, "keys", {})      # an ESPHome box with a media player (esphome_link.discover ran first)
-        tools = music_tools(lambda: holder["room"], loop, favorites=music_mod.Favorites(env.get("PORTAL_URL") or music_mod.PORTAL, token),
-                            stereo=stereo) if plays_music else None
+        tools = music_tools(lambda: holder["room"], loop, stereo=stereo)   # every room is a remote of the house radio
         book = audiobooks.build_player(env, name, link, log)     # None when SATELLITE_AUDIOBOOKS=off
         if book is not None:
             tools = audiobooks.combine(tools, audiobooks.book_tools(lambda: holder["room"], loop))
@@ -1156,11 +1144,11 @@ def build_rooms(env: dict):
         room.inbox = state / "hub-inbox" / f"{name}.json"
         connected[name] = room
         room.announce_outs = speaker_out.announce_outputs(env, name, log)   # the routines, timers and messages also upstairs (SATELLITE_ANNOUNCE_OUT)
-        if getattr(link, "media", None) is not None:
-            stereo_holder.setdefault("media", link.media)
+        room.env = env
         room.daily = routines
-        room.stereo = stereo() if routines is not None else None
+        room.stereo = radio.for_room(radio_client.room_kinds(env, name))   # Skippy speaking here ducks this room's speakers of the station
         return room
+    make_room.radio = radio                                     # esphome_link.serve: each pod is a remote and a speaker of it (PodTuner)
     make_room.homechat = homechat                               # _main runs its sync loop (never under --record)
     make_room.alarm_clock = house_clock                         # _main runs it
     make_room.garage_watch = garage_watch                       # _main runs it (autoclose.py)
@@ -1206,8 +1194,8 @@ async def heartbeat(hub, path: Path, house=None, every: float = HEARTBEAT_S, clo
 
 
 MUSIC_TOOLS = [
-    {"name": "music", "description": "Control the music playing in THIS room (Bilby's Audio Service on this room's speaker), or on the house stereo when "
-                                     "that is what plays (Spotify included).",
+    {"name": "music", "description": "Control the music: the house radio, Bilby's ONE station that every speaker in the house plays (Spotify "
+                                     "included).",
      "input_schema": {"type": "object", "properties": {"action": {"type": "string", "enum": ["pause", "resume", "next", "previous", "louder", "quieter", "volume", "what", "favorite", "tired"],
                       "description": "favorite: add the song playing now to his favorites pool (from his library or Spotify): 'add this song to my favorites', 'favorite this'. "
                                      "tired: take the song playing now out of his favorites and every mix and skip it: 'I'm tired of this song', "
@@ -1216,7 +1204,7 @@ MUSIC_TOOLS = [
                                      "volume ('turn it down', 'volume 5')"},
                                                        "level": {"type": "integer", "description": "volume: 1 (quietest) to 10 (full)"}},
                       "required": ["action"]}},
-    {"name": "play_music", "description": "Play music from the Captain's own library (Bilby) in THIS room or on the speakers named: an artist, an album "
+    {"name": "play_music", "description": "Play music from the Captain's own library (Bilby) on the house radio, here or on the speakers named: an artist, an album "
                                           "or a song, in his words; 'favorites' for his favorites list; 'everything' for the whole library. shuffle=true for "
                                           "'shuffle ...'. queue=true for 'after this', 'queue ...', 'add ... to the queue' (it plays after what plays now, Spotify "
                                           "included). His grammar: mode (discovery / favorites) + filters (genre, playlist, artist, album, song, new) + speaker; "
@@ -1231,7 +1219,7 @@ MUSIC_TOOLS = [
                                                        "new": {"type": "boolean", "description": "'new songs': the ones added to Bilby most recently"},
                                                        "shuffle": {"type": "boolean"}, "queue": {"type": "boolean"},
                                                        "speaker": {"type": "string", "enum": ["here", "stereo", "everywhere", "downstairs", "upstairs"],
-                                                                   "description": "stereo: the house stereo where it plays now ('on the stereo', 'DJ ...'); "
+                                                                   "description": "here (the default): this room's speakers; stereo: the speakers it plays on now ('on the stereo', 'DJ ...'); "
                                                                                   "everywhere: downstairs AND upstairs ('everywhere', 'the whole house', 'both'); "
                                                                                   "downstairs: the theater's Sony ('downstairs', 'theater', 'Sony'); "
                                                                                   "upstairs: the Enclave ('upstairs', 'living room', 'Enclave')"}},
@@ -1245,7 +1233,7 @@ MUSIC_TOOLS = [
     {"name": "dj_mode", "description": "Bilby's DJ mode for his library on the house stereo: 'DJ mode on' / 'DJ mode off'. On: each track mixes into the "
                                        "next on the beat (tempo matched, on a phrase) and a shuffle is ordered like a DJ set; off: one ends, the next starts.",
      "input_schema": {"type": "object", "properties": {"on": {"type": "boolean"}}, "required": ["on"]}},
-    {"name": "spotify", "description": "The Captain's Spotify (Premium), played on the house stereo (the Sony), not this room's pod. Only when he says Spotify. "
+    {"name": "spotify", "description": "The Captain's Spotify (Premium), played on the house radio (its speakers where it plays now). Only when he says Spotify. "
                                        "play: an artist, a song, an album, one of his playlists ('my road trip playlist') or 'liked songs'; shuffle=true for "
                                        "'shuffle ...'; queue=true for 'after this' / 'queue ...'. add: add the song playing now to one of his Spotify playlists "
                                        "('add this song to my Spotify playlist Gym'). like: save the song playing now to his Spotify liked songs.",
@@ -1313,298 +1301,73 @@ def announce_tools(room_of, connected: dict, env: dict, loop):
 
 
 def where_said(house) -> str:
-    """'downstairs and upstairs' for where the stereo really plays now (only outputs that are open): never a place the sound didn't go."""
-    import speaker_out as speaker_mod                           # noqa: PLC0415
-    open_, _ = house.where()
-    words = speaker_mod.place_words(house.env or {}, open_)
-    return f"{'everywhere' if open_ and len(words.split(' and ')) > 1 else words}" if words else "on the house stereo"
+    import station                                              # noqa: PLC0415
+    return station.where_said(house)
 
 
 def not_there(house) -> str:
-    """' Upstairs isn't on, so not there.' for a place asked for whose speaker is off (the Enclave switched off)."""
-    import speaker_out as speaker_mod                           # noqa: PLC0415
-    _, closed = house.where()
-    words = speaker_mod.place_words(house.env or {}, closed)
-    return f" {words[:1].upper()}{words[1:]} isn't on, so not there." if words else ""
+    import station                                              # noqa: PLC0415
+    return station.not_there(house)
 
 
-GRAMMAR_KEYS = ("mode", "genre", "playlist", "artist", "album", "song", "new")
-
-
-def grammar_of(args) -> dict:
-    """The parts of play_music's arguments that are his grammar's mode and filters (mixes.resolve), not the old free `what`."""
-    return {k: v for k, v in (args or {}).items() if k in GRAMMAR_KEYS and v}
-
-
-def mix_words(args) -> str:
-    import mixes                                                # noqa: PLC0415
-    d = mixes.describe(grammar_of(args))
-    return f" of {d}" if d else ""
-
-
-async def grammar_queue(args: dict, box, house, favorites) -> tuple[list[str], str, bool]:
-    """mixes.resolve with the hub's sources: the gate's catalog, his favorites, Spotify (liked, suggestions, playlists: the stereo's client)
-    and Traktor's playlists (the DJ's collection.nml, cached in state/dj)."""
-    import dj                                                   # noqa: PLC0415
-    import mixes                                                # noqa: PLC0415
-    catalog = await box.media.catalog()
-    env = (getattr(house, "env", None) or {}) if house is not None else {}
-    spot = getattr(getattr(house, "player", None), "spotify", None) if house is not None else None
-    if spot is not None and getattr(house.player, "spotify_down", lambda: False)():
-        spot = None
-
-    def work():
-        favs, tired, played = favorites.pool() if favorites is not None else ([], set(), set())   # his pool, what he is tired of, what he heard
-        lists = mixes.traktor_playlists(env.get("BILBY_TRAKTOR_NML", dj.DEFAULT_NML), dj.STATE) if args.get("playlist") else {}
-        return mixes.resolve(args, catalog, favs if args.get("mode") else [], spot, lists, tired=tired, played=played)
-    return await asyncio.to_thread(work)
+PLAYS = {"play_music", "spotify"}                               # the tools that start the station (a book in the room pauses for them)
 
 
 def music_tools(room_of, loop, favorites=None, stereo=None):
-    """(tools, run) for Brain(extra=...): the music in the room the brain belongs to, and the house stereo (`stereo()`: stereo.StereoMusic or None),
-    where his Spotify plays. The brain runs in a worker thread; the music lives on the hub's event loop, so each call is handed over to it. A room
-    without a speaker for music says so."""
+    """(tools, run) for Brain(extra=...): the hub is the house radio's REMOTE (radio.py, the Captain 2026-11-01: "The hubs can change it, or
+    add to it, but they are not the players"). Every music tool goes to the radio as it is (`stereo()`: radio_client.RadioClient), with the
+    asking room so "here" means this room's speakers. The hub keeps only what is its own: the room's audiobook ("pause" while the book
+    plays means the book; music and a book never play at once) and where Skippy's VOICE comes from. `favorites` is unused: the radio
+    marks and drops songs itself."""
     def run(name: str, args: dict) -> str:
-        import music as music_mod                               # noqa: PLC0415
-        if name == "dj_mode":                                   # house-wide, kept in state/dj.json (the vault's BILBY_DJ is the default)
-            import dj                                           # noqa: PLC0415
-            on = bool((args or {}).get("on"))
-            dj.set_enabled(on)
-            return ("Done: DJ mode is on. His tracks on the house stereo now mix into each other on the beat, from the next change of track."
-                    if on else "Done: DJ mode is off. On the house stereo one track now ends and the next starts.")
+        args = dict(args or {})
         room = room_of()
-        box = getattr(room, "music", None)
-        if box is None:
-            return "This room has no speaker for music."
-
-        async def go() -> str:
-            book = getattr(room, "book", None)
-            house = stereo() if stereo is not None else None
-            on_stereo = house is not None and house.playing and not box.playing   # the stereo is what plays: "next", "pause", "favorite this" mean it
-            if name == "speakers":
-                import speaker_out as speaker_mod               # noqa: PLC0415
-                env = (house.env if house is not None else None) or {}
-                kinds = speaker_mod.place_kinds(env, str((args or {}).get("place") or ""))
-                if not kinds:
-                    return "I don't know that place: everywhere, downstairs or upstairs."
-                if (args or {}).get("what") == "voice":
-                    outs = [o for o in getattr(room, "pc_outs", []) if hasattr(o, "router")]
-                    if not outs:
-                        return "This room's voice only comes from its pod."
-                    outs[0].kinds = set(kinds)
-                    outs[0].kind = "+".join(kinds)
-                    open_ = {k for k in kinds if outs[0].router.available(k)}
-                    if not open_:
-                        return f"{speaker_mod.place_words(env, kinds).capitalize()} isn't on: my voice stays on the pod until it is."
-                    return f"Done: my voice now comes from {speaker_mod.place_words(env, open_)}."
-                if house is None:
-                    return "There is no house stereo."
-                house.move(kinds)
-                return f"Done: the music plays {where_said(house)} from now on." + not_there(house)
-            if name == "music":
-                action = str((args or {}).get("action") or "")
-                if book is not None and book.book is not None and (book.playing or (room.last_media == "book" and not box.playing and not on_stereo)):
-                    if action == "pause":                       # "stop" / "pause" while a book plays means the book
-                        await book.pause()
-                        return "Done: paused the audiobook."
-                    if action == "resume":
-                        await book.resume()
-                        return "Done: the audiobook is playing again."
-                target = house.box if on_stereo or (action == "resume" and room.last_media == "stereo" and house is not None) else box
-                step = {"pause": target.pause, "resume": target.resume, "next": target.next, "previous": target.prev}.get(action)
-                if step is not None:
-                    await step()
-                    return f"Done: {action}" + (" on the house stereo." if target is not box else ".")
-                if action == "tired":                           # "I'm tired of this song": out of his pool and every mix, and on to the next one
-                    if favorites is None:
-                        return "His favorites list is not set up here."
-                    said = await asyncio.to_thread(favorites.tire, room.name, music_mod.device_id("stereo") if on_stereo else "")
-                    if said.startswith("Dropped"):
-                        await target.next()
-                    return said
-                if action == "favorite":                        # "Skippy, add this song to my favorites" (portal/favorites.py)
-                    if favorites is None:
-                        return "His favorites list is not set up here."
-                    return await asyncio.to_thread(favorites.mark, room.name, music_mod.device_id("stereo") if on_stereo else "")
-                if action == "what":
-                    return now_playing(room, box, book, house, on_stereo)
-                if action in ("louder", "quieter", "volume") and house is not None and (on_stereo or not box.playing):
-                    return stereo_volume(house, action, (args or {}).get("level"))
-                if action in ("louder", "quieter", "volume"):    # the pods' volume is locked at 70% (the Captain, 2026-10-31: louder, they crackle)
-                    return ("Not done: the pods' volume is locked at one level on purpose (louder, they crackle). "
-                            "The house stereos have their own volume knobs; tell him to use those.")
-                return "I cannot do that to the music."
-            if name == "spotify":
-                return await spotify_go(room, box, book, house, args or {})
-            what = str((args or {}).get("what") or ("" if grammar_of(args) else "everything"))
-            mixed = bool((args or {}).get("shuffle"))
-            plain = " ".join(re.findall(r"[a-z]+", what.lower()))
-            note, premixed = "", False
-            if grammar_of(args):                                # his grammar: mode + filters (mixes.py); Spotify rows he owns play from Bilby
-                found, note, ordered = await grammar_queue(args, box, house, favorites)
-                mixed, premixed = not ordered, not ordered
-                if not found:
-                    return "Nothing in his library to play right now (the music gate is not answering)."
-            elif re.fullmatch(r"(?:my |his )?(?:favou?rites?|favou?rite songs?|liked songs)", plain):   # his one pool: favorites + liked, pruned
-                if mixed:                                       # "shuffle my favorites": the pool's mix (favorites + liked)
-                    found, note, _ordered = await grammar_queue({**(args or {}), "mode": "favorites", "shuffle": True}, box, house, favorites)
-                    premixed = True
-                else:                                           # "play my favorites": the list in its order, newest first
-                    favs, tired, _played = await asyncio.to_thread(favorites.pool) if favorites is not None else ([], set(), set())
-                    found = [f for f in favs if f not in tired]
-                if not found:
-                    return "His favorites list is empty so far."
-            elif re.fullmatch(r"(?:everything|all|all (?:of )?(?:my |his )?music|(?:my |his |the )?(?:whole |entire )?(?:library|collection))", plain):
-                found, mixed = list(await box.media.catalog()), True
-                if favorites is not None:                       # never a song he is tired of
-                    tired = (await asyncio.to_thread(favorites.pool))[1]
-                    found = [t for t in found if t not in tired]
-            else:
-                found = music_mod.search(await box.media.catalog(), what)
-                if not found and what.strip():                  # not a name: maybe a genre ("polka"); else the closest is the shuffle, said in one line
-                    found, note, _ordered = await grammar_queue({**(args or {}), "genre": what, "shuffle": True}, box, house, favorites)
-                    mixed = premixed = True
-            if not found:
-                return f"Nothing in his library matches {what!r}."
-            if mixed and not premixed:
-                import random                                   # noqa: PLC0415
-                found = random.sample(found, len(found))[:music_mod.MAX_QUEUE]
-            said = (note + " ") if note else ""
-            if (args or {}).get("queue") and (on_stereo or box.playing):
-                target = house.box if on_stereo else box        # one queue: Bilby's tracks after the Spotify ones on the stereo, or the pod's own
-                await target.append(found)
-                return f"Queued {len(found)} track{'s' if len(found) != 1 else ''} after this" + (" on the house stereo." if on_stereo else ".")
+        book = getattr(room, "book", None)
+        radio = stereo() if stereo is not None else None
+        if name == "speakers" and args.get("what") == "voice":
             import speaker_out as speaker_mod                   # noqa: PLC0415
-            speaker = (args or {}).get("speaker") or "here"
-            place = speaker_mod.place_kinds(house.env or {}, speaker) if house is not None and speaker not in ("here", "stereo") else None
-            if (speaker == "stereo" or place) and house is not None:
-                if place:
-                    house.move(place)                           # "everywhere", "upstairs", "downstairs": the stereo's outputs from now on
-                if book is not None:
-                    await book.pause()
-                if box.playing:
-                    await box.pause()                           # the pod and the stereo never play at once
-                room.last_media = "stereo"
-                n = await house.play_tracks(found, mixed, premixed=premixed)
-                title, artist = house.box.title()
-                import dj                                       # noqa: PLC0415
-                return (f"{said}Playing {n} track{'s' if n != 1 else ''}{mix_words(args)} {where_said(house)}"
-                        + (" in DJ mode" if dj.enabled(house.env) else "")
-                        + f", starting with {title}" + (f" by {artist}." if artist else ".") + not_there(house))
-            if book is not None:
-                await book.pause()                              # music and a book never play at once
-            if house is not None and house.playing:
-                await house.stop()                              # nor the pod and the stereo
-            room.last_media = "music"
-            await box.play_queue(found)
-            title, artist = box.title()
-            return (f"{said}Playing {len(found)} track{'s' if len(found) != 1 else ''}{mix_words(args)}, starting with {title}"
-                    + (f" by {artist}." if artist else "."))
-        try:
-            return asyncio.run_coroutine_threadsafe(go(), loop).result(40)
-        except Exception as e:                                  # noqa: BLE001 — said aloud, not raised
-            return f"The music did not answer ({type(e).__name__})."
-    return MUSIC_TOOLS, run
+            env = getattr(room, "env", None) or {}
+            kinds = speaker_mod.place_kinds(env, str(args.get("place") or ""))
+            if not kinds:
+                return "I don't know that place: everywhere, downstairs or upstairs."
+            outs = [o for o in getattr(room, "pc_outs", []) if hasattr(o, "router")]
+            if not outs:
+                return "This room's voice only comes from its pod."
+            outs[0].kinds = set(kinds)
+            outs[0].kind = "+".join(kinds)
+            open_ = {k for k in kinds if outs[0].router.available(k)}
+            if not open_:
+                return f"{speaker_mod.place_words(env, kinds).capitalize()} isn't on: my voice stays on the pod until it is."
+            return f"Done: my voice now comes from {speaker_mod.place_words(env, open_)}."
 
-
-def now_playing(room, box, book, house, on_stereo: bool) -> str:
-    """The `music` tool's "what": the song (or the book) playing now, here or on the house stereo."""
-    if book is not None and book.book is not None and book.playing:
-        b = book.book
-        return f"The audiobook {b.get('title')}" + (f" by {b['author']}" if b.get("author") else "") + " is playing."
-    for player, where in ((house.box if on_stereo else None, " on the house stereo"), (box if box.playing else None, "")):
-        if player is not None and player.playing and player.track():
-            title, artist = player.title()
-            return f"Playing{where}: {title}" + (f" by {artist}." if artist else ".")
-    return "Nothing is playing."
-
-
-STEREO_LEVELS = 10
-
-
-def stereo_volume(house, action: str, level=None) -> str:
-    """The house stereo's own loudness, in tenths of full (the router's gain on Bilby and Spotify; ducking under Skippy is separate). Full is
-    where the Sony's and the Enclave's knobs were set, so "louder" past full is theirs to do."""
-    if not hasattr(house, "set_level"):
-        return "The house stereo's volume is on its own knob."
-    now = max(1, min(STEREO_LEVELS, round(getattr(house, "level", 1.0) * STEREO_LEVELS)))
-    if action == "volume":
-        try:
-            want = int(level)
-        except (TypeError, ValueError):
-            return f"The house stereo is at {now} of {STEREO_LEVELS}."
-    else:
-        want = now + (2 if action == "louder" else -2)
-    want = max(1, min(STEREO_LEVELS, want))
-    if action == "louder" and now >= STEREO_LEVELS:
-        return f"Not louder: the house stereo is already at full ({STEREO_LEVELS} of {STEREO_LEVELS}); past that is the speaker's own knob."
-    house.set_level(want / STEREO_LEVELS)
-    return f"Done: the house stereo is at {want} of {STEREO_LEVELS}."
-
-
-async def spotify_go(room, box, book, house, args: dict) -> str:
-    """The `spotify` tool: his Spotify on the house stereo (spotify.py, stereo.py)."""
-    import spotify as spotify_mod                               # noqa: PLC0415
-    client = getattr(getattr(house, "player", None), "spotify", None)
-    if house is None or client is None:
-        return "Spotify is not set up on the house stereo here."
-    action = str(args.get("action") or "play")
-    try:
-        if action == "play":
-            what = str(args.get("what") or "").strip()
-            if not what:
-                return "Say what to play on Spotify."
-            tracks, how = await asyncio.to_thread(spotify_mod.queue_for, client, what)
-            if not tracks:
-                return f"Spotify found nothing for {what!r}."
-            if args.get("shuffle"):
-                import random                                   # noqa: PLC0415
-                tracks = random.sample(tracks, len(tracks))
-            if args.get("queue") and (house.playing or box.playing):
-                if house.playing:
-                    n = await house.play_spotify(tracks, queue=True)
-                    return f"Queued {n} Spotify track{'s' if n != 1 else ''} from {how} after this on the house stereo."
-            if book is not None:
-                await book.pause()
-            if box.playing:
-                await box.pause()                               # one thing at a time: the pod's own music stops for the stereo
+        def on_loop(coro, wait: float = 10):
+            return asyncio.run_coroutine_threadsafe(coro, loop).result(wait)
+        has_book = book is not None and getattr(book, "book", None) is not None
+        if name == "music" and has_book and (book.playing or (room.last_media == "book" and not (radio is not None and radio.playing))):
+            action = str(args.get("action") or "")
+            if action == "pause":                               # "stop" / "pause" while a book plays means the book
+                on_loop(book.pause())
+                return "Done: paused the audiobook."
+            if action == "resume":
+                on_loop(book.resume())
+                return "Done: the audiobook is playing again."
+        if radio is None:
+            return "There is no house radio here."
+        if not hasattr(radio, "tool"):                          # a station in this process (the tests): run it here, the way radio.py would
+            import radio_client                                 # noqa: PLC0415
+            radio = radio_client.LocalRadio(radio, loop, favorites)
+        starts = ((name in PLAYS and not args.get("queue") and args.get("action", "play") == "play")
+                  or (name == "music" and args.get("action") == "resume"))
+        if starts and has_book and book.playing:
+            try:
+                on_loop(book.pause())                           # music and a book never play at once
+            except Exception:                                   # noqa: BLE001
+                pass
+        said = radio.tool(name, args, getattr(room, "name", ""))
+        if starts:
             room.last_media = "stereo"
-            n = await house.play_spotify(tracks)
-            title, artist = house.box.title()
-            return f"Playing {n} Spotify track{'s' if n != 1 else ''} from {how} on the house stereo, starting with {title}" + (f" by {artist}." if artist else ".")
-        uri, label = await asyncio.to_thread(_spotify_now, client, house, box)
-        if not uri:
-            return label
-        if action == "add":
-            playlist = str(args.get("playlist") or "").strip()
-            if not playlist:
-                return "Which of his Spotify playlists?"
-            got = await asyncio.to_thread(client.add_to_playlist, playlist, [uri])
-            return f"Added {label} to his Spotify playlist {got.get('name') or playlist}."
-        if action == "like":
-            await asyncio.to_thread(client.save, [uri])
-            return f"Saved {label} to his Spotify liked songs."
-        return "I cannot do that with Spotify."
-    except spotify_mod.SpotifyError as e:
-        return f"Spotify said no: {e}"
-
-
-def _spotify_now(client, house, box) -> tuple[str, str]:
-    """(the Spotify URI of the song playing now, how to name it), or ("", why not). A Bilby song is looked up on Spotify by its title and artist."""
-    import spotify as spotify_mod                               # noqa: PLC0415
-    for player in (house.box, box):
-        if player is not None and player.playing and player.track():
-            title, artist = player.title()
-            if spotify_mod.is_uri(player.track()):
-                return player.track(), f"{title}" + (f" by {artist}" if artist else "")
-            hits = client.search(f"track:{title} artist:{artist}" if artist else title, "track", 3)
-            if not hits:
-                return "", f"Spotify has no {title}" + (f" by {artist}." if artist else ".")
-            h = hits[0]
-            return h["uri"], f"{h.get('title')} by {h.get('artist')} (Spotify's copy)"
-    return "", "Nothing is playing, so there is no song to add."
-
-
+        return said
+    return MUSIC_TOOLS, run
 
 
 def main(argv=None) -> int:
@@ -1652,7 +1415,7 @@ async def _main(env: dict, rooms, args) -> int:
         esphome = lambda hub, name, host, port: esphome_link.serve(hub, name, host, port, media=media, connect=connect,   # noqa: E731
                                                                    noise_psk=env.get("SATELLITE_ESPHOME_KEY", ""), label=labels.get(name, ""))
     hub = Hub(rooms, build_rooms(env), log=log, decode=audio.mp3_to_pcm16, esphome=esphome)
-    hub.make_room.connect = connect                             # the house stereo checks in as a Connect player too (build_rooms' stereo())
+    hub.make_room.connect = connect                             # the pods check in as Connect remotes of the house radio (esphome_link.serve)
     try:
         if args.say:
             return await _say_once(hub, rooms, *args.say)

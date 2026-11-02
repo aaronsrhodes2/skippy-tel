@@ -100,12 +100,41 @@ class FakeMedia:
         return self.cat
 
 
-async def boot(spotter=True, connect=None):
+class FakeRadio:
+    """radio_client.RadioClient as the pod sees it: the station's state, and what it was asked."""
+
+    def __init__(self, playing=False, speakers=()):
+        self.ok, self.calls = True, []
+        self.last = {"playing": playing, "speakers": list(speakers), "track": "Pink Floyd/Animals/01 Dogs.mp3", "title": "Dogs",
+                     "artist": "Pink Floyd", "pos": 12.0, "live": {"port": 47851, "path": "/live/abc.flac"}}
+
+    def state(self):
+        return dict(self.last)
+
+    @property
+    def playing(self):
+        return bool(self.last["playing"])
+
+    def tool(self, name, args, room=""):
+        self.calls.append(("tool", name, args, room))
+        return f"radio: {name}"
+
+    async def control(self, action):
+        self.calls.append(("control", action))
+        return True
+
+    async def take(self, state, room):
+        self.calls.append(("take", state, room))
+
+
+async def boot(spotter=True, connect=None, radio=None):
     client, media, made, log = FakeClient(), FakeMedia(), {}, []
 
     def make_room(name, link):
         made["room"] = Room(name, link, made["gate"], made["brain"], made["timers"], spotter=made.get("spotter"), log=log.append)
         return made["room"]
+    make_room.radio = radio if radio is not None else FakeRadio()
+    made["radio"] = make_room.radio
     made.update(gate=FakeGate(), brain=FakeBrain(), timers=Timers(clock=lambda: made.get("now", 0)), spotter=FakeSpotter() if spotter else None)
     hub = Hub([], make_room, log=log.append)
     task = asyncio.ensure_future(esphome_link.serve(hub, "kitchen", "10.0.0.5", 6053, media=media, noise_psk="k", connect=connect,
@@ -335,112 +364,67 @@ def test_a_dropped_box_ends_the_serve_so_the_hub_dials_it_again():
         await client.on_stop(False)
         await asyncio.wait_for(task, 2)
         assert client.disconnected and "kitchen" not in connect.boxes and "kitchen" in hub.rooms   # (hub.keep removes it from hub.rooms)
+        assert not any("command" in m[1] for m in client.media)                                  # and the pod was never told to stop
     run(go())
 
 
-# ── Bilby's music on the box ──
-def test_take_plays_the_phones_queue_from_its_place_and_a_track_ending_moves_on():
+# ── the pod as a speaker and a remote of the house radio (radio.py) ──
+def test_the_pod_tunes_in_when_the_station_plays_on_it_and_out_when_it_moves_away():
     async def go():
-        client, media, made, hub, task, log = await boot()
-        box = made["room"].music
-        await box.take({"queue": ["Pink Floyd/Animals/01 Dogs.mp3", "Pink Floyd/Animals/02 Pigs.mp3"], "idx": 0,
-                        "track": "Pink Floyd/Animals/01 Dogs.mp3", "pos": 61.5})
-        assert client.media[-1] == (1, {"media_url": "http://hub:10800/m/s/track.flac?p=Pink Floyd/Animals/01 Dogs.mp3&s=61.5", "announcement": False})
-        assert client.texts[-1] == (2, "Dogs — Pink Floyd")
-        client.on_states(MediaPlayerEntityState(key=1, state=MediaPlayerState.IDLE))      # within the settle time: our own track change
+        radio = FakeRadio(playing=True, speakers=["pod:kitchen"])
+        client, media, made, hub, task, log = await boot(radio=radio)
+        tuner = made["room"].music
+        tuner.on = False                                                     # (its first look done)
+        await tuner.tick()
+        url = client.media[-1][1]["media_url"]
+        assert url.endswith(":47851/live/abc.flac") and client.media[-1][1]["announcement"] is False
+        await tuner.tick()
+        assert len(client.media) == 1                                        # tuned in once, not again every tick
+        radio.last["speakers"] = ["enclave"]                                 # "move the music upstairs"
+        await tuner.tick()
+        assert client.media[-1] == (1, {"command": MediaPlayerCommand.STOP}) and not tuner.on
+        task.cancel()
+    run(go())
+
+
+def test_a_hub_that_comes_back_leaves_a_pod_that_is_still_playing_the_station_alone():
+    """The Captain's rule: a hub restart never stops or skips the music. The pod's stream comes from the radio, so a new hub finds it playing."""
+    async def go():
+        radio = FakeRadio(playing=True, speakers=["pod:kitchen"])
+        client, media, made, hub, task, log = await boot(radio=radio)
+        client.on_states(MediaPlayerEntityState(key=1, state=MediaPlayerState.PLAYING))
+        tuner = made["room"].music
+        await tuner.tick()
+        assert tuner.on is True and client.media == [] and any("left alone" in line for line in log)
+        client.on_states(MediaPlayerEntityState(key=1, state=MediaPlayerState.IDLE))   # the radio itself restarted: the stream dropped
         await asyncio.sleep(0.02)
-        assert box.idx == 0
-        box._settle_until = 0
-        client.on_states(MediaPlayerEntityState(key=1, state=MediaPlayerState.IDLE))      # the track ended
-        await settle(lambda: box.idx == 1)
-        assert "02 Pigs" in client.media[-1][1]["media_url"] and "&s=0.0" in client.media[-1][1]["media_url"]
+        await tuner.tick()
+        assert client.media[-1][1]["media_url"].endswith("/live/abc.flac")         # tuned in again
         task.cancel()
     run(go())
 
 
-def test_pause_stops_and_remembers_the_place_and_resume_starts_there():
-    async def go():
-        client, media, made, hub, task, log = await boot()
-        box = made["room"].music
-        t = [100.0]
-        box.clock = lambda: t[0]
-        await box.play_queue(["Queen/News/01 We Will Rock You.m4a"])
-        t[0] += 42
-        await box.command("pause", [])
-        assert client.media[-1] == (1, {"command": MediaPlayerCommand.STOP}) and not box.playing and box.offset == 42.0
-        await box.command("play", [])
-        assert client.media[-1][1]["media_url"].endswith("&s=42.0") and box.playing
-        st = box.state()
-        assert st["title"] == "We Will Rock You" and st["artist"] == "Queen" and st["playing"] and st["queue"] == ["Queen/News/01 We Will Rock You.m4a"]
-        assert "queue" not in box.state()                                             # only when it changed: the portal keeps the last one
-        task.cancel()
-    run(go())
-
-
-def test_connect_checks_the_box_in_as_a_room_and_carries_out_a_take():
+def test_connect_checks_the_pod_in_as_a_remote_and_a_take_puts_the_station_in_its_room():
     async def go():
         posted = []
         phone = {"id": "phone1234", "state": {"queue": ["Queen/News/01 We Will Rock You.m4a"], "idx": 0, "track": "Queen/News/01 We Will Rock You.m4a", "pos": 3}}
 
         def post(url, body):
             posted.append((url, body))
-            return {"commands": ["take:phone1234"] if len(posted) == 1 else [], "devices": [phone]}
+            return {"commands": ["take:phone1234", "next"] if len(posted) == 1 else [], "devices": [phone]}
         connect = music_mod.Connect("https://portal.example", "tok", post=post)
         client, media, made, hub, task, log = await boot(connect=connect)
         await connect.once()
         url, body = posted[0]
         assert url == "https://portal.example/home/music/checkin"
         assert body["device"] == "skippyroom-kitchen" and body["room"] == "box-kitchen" and body["name"] == "Kitchen" and body["state"]["queue"] == []
-        assert "We Will Rock You" in client.media[-1][1]["media_url"]
-        await connect.once()
-        assert posted[1][1]["state"]["queue"] == ["Queen/News/01 We Will Rock You.m4a"] and posted[1][1]["state"]["playing"]
+        assert made["radio"].calls == [("take", phone["state"], "kitchen"), ("control", "next")]
+        assert client.media == []                                            # the pod never plays a track itself
         task.cancel()
     run(go())
 
 
-def test_a_portal_that_is_away_never_stops_the_music_and_gets_the_queue_again_when_back():
-    async def go():
-        calls = []
-
-        def post(url, body):
-            calls.append(body)
-            if len(calls) == 1:
-                raise ConnectionError("portal away")
-            return {}
-        connect = music_mod.Connect("https://p", "tok", post=post, log=lambda m: None)
-        client, media, made, hub, task, log = await boot(connect=connect)
-        await connect.once()
-        await connect.once()
-        assert "queue" in calls[0]["state"] and "queue" in calls[1]["state"]
-        task.cancel()
-    run(go())
-
-
-def test_favorites_by_voice_add_the_song_and_play_or_shuffle_them_and_shuffle_everything():
-    """The Captain, 2026-10-31: "Skippy, add this song to my favorites", "play my favorites", "shuffle my favorites", "shuffle all"."""
-    calls = []
-
-    def request(method, path, body=None):
-        calls.append((method, path, body))
-        if method == "POST":
-            return 200, {"favorite": {"title": "Dogs", "artist": "Pink Floyd", "count": 1}}
-        return 200, {"favorites": [{"track": "Queen/News/01 We Will Rock You.m4a"}, {"track": "Pink Floyd/Animals/02 Pigs.mp3"}]}
-
-    async def go():
-        client, media, made, hub, task, log = await boot()
-        favs = music_mod.Favorites("https://portal", "tok", request=request)
-        tools, run_tool = music_tools(lambda: made["room"], asyncio.get_running_loop(), favorites=favs)
-        assert await asyncio.to_thread(run_tool, "music", {"action": "favorite"}) == "Added Dogs by Pink Floyd to his favorites."
-        assert calls[-1] == ("POST", "/home/music/favorite", {"device": "skippyroom-kitchen", "source": "voice"})
-        said = await asyncio.to_thread(run_tool, "play_music", {"what": "my favorites"})
-        assert said.startswith("Playing 2 tracks, starting with We Will Rock You")                    # in the list's order
-        said = await asyncio.to_thread(run_tool, "play_music", {"what": "everything", "shuffle": True})
-        assert said.startswith("Playing 3 tracks")
-        task.cancel()
-    run(go())
-
-
-def test_spoken_music_requests_find_his_tracks_and_the_tools_drive_this_rooms_box():
+def test_the_music_tools_are_the_radios_with_the_asking_room():
     cat = FakeMedia().cat
     assert music_mod.search(cat, "some Pink Floyd") == ["Pink Floyd/Animals/01 Dogs.mp3", "Pink Floyd/Animals/02 Pigs.mp3"]
     assert music_mod.search(cat, "pigs") == ["Pink Floyd/Animals/02 Pigs.mp3"]
@@ -449,22 +433,16 @@ def test_spoken_music_requests_find_his_tracks_and_the_tools_drive_this_rooms_bo
 
     async def go():
         client, media, made, hub, task, log = await boot()
-        tools, run_tool = music_tools(lambda: made["room"], asyncio.get_running_loop())
+        tools, run_tool = music_tools(lambda: made["room"], asyncio.get_running_loop(), stereo=lambda: made["radio"])
         assert {t["name"] for t in tools} == {"music", "play_music", "spotify", "dj_mode", "speakers"}
-        said = await asyncio.to_thread(run_tool, "play_music", {"what": "Pink Floyd"})
-        assert said == "Playing 2 tracks, starting with Dogs by Pink Floyd." and "Dogs" in client.media[-1][1]["media_url"]
-        sent = len(client.media)
-        assert "locked" in await asyncio.to_thread(run_tool, "music", {"action": "louder"})     # the pods' volume is locked at 70%
-        assert len(client.media) == sent                                                        # nothing was sent to the box
-        said = await asyncio.to_thread(run_tool, "play_music", {"what": "abba"})   # no match: said in one line, the closest plays (2026-11-01)
-        assert said.startswith("Nothing abba in his library, so here is the closest. Playing ")
-        made["room"].music = None
-        assert await asyncio.to_thread(run_tool, "music", {"action": "pause"}) == "This room has no speaker for music."
+        assert await asyncio.to_thread(run_tool, "play_music", {"what": "Pink Floyd"}) == "radio: play_music"
+        assert await asyncio.to_thread(run_tool, "music", {"action": "favorite"}) == "radio: music"
+        assert made["radio"].calls == [("tool", "play_music", {"what": "Pink Floyd"}, "kitchen"), ("tool", "music", {"action": "favorite"}, "kitchen")]
+        assert made["room"].last_media == "stereo" and client.media == []
         task.cancel()
     run(go())
 
 
-# ── the media server ──
 def _gate():
     root = Path(__file__).resolve().parents[2] / "music-gate"
     pytest.importorskip("flask")

@@ -98,7 +98,8 @@ class EsphomeLink:
         from aioesphomeapi import VoiceAssistantEventType as E    # noqa: PLC0415
         self.E, self.client, self.media, self.box_host, self.log, self.wait_cap = E, client, media, box_host, log, wait_cap
         self.room = None
-        self.music = None
+        self.music = None                                           # radio_client.PodTuner: the pod's speaker tuned to the house radio
+        self.player_playing = None                                  # the pod's media player says it plays (None: not reported yet)
         self.keys: dict[str, int] = {}                              # player, subtitle, tap, mic
         self.run_live, self.stage, self.vad_ended = False, "", False
         self._played = asyncio.Event()
@@ -249,9 +250,10 @@ class EsphomeLink:
                 self.streamer.set_box_state("speaking", True, self._box_face[2], self._box_face[3])
             else:
                 self.streamer.set_box_state(*self._box_face)
-        elif kind == "MediaPlayerEntityState" and state.key == self.keys.get("player") and self.music is not None:
+        elif kind == "MediaPlayerEntityState" and state.key == self.keys.get("player"):
             from aioesphomeapi import MediaPlayerState            # noqa: PLC0415
-            if state.state == MediaPlayerState.IDLE:
+            self.player_playing = state.state == MediaPlayerState.PLAYING   # a hub that just came back: is the pod still playing the radio?
+            if state.state == MediaPlayerState.IDLE and self.music is not None:
                 asyncio.ensure_future(self.music.on_idle())
 
     # ── what the room tells the box ──
@@ -500,7 +502,7 @@ class EsphomeLink:
         except Exception as e:                                      # noqa: BLE001 — it timed out or the box was busy: it was said or it was not
             self.log(f"[{self.room.name}] (announcement: {type(e).__name__})")
 
-    # ── the box as Bilby's speaker (music.BoxMusic's player) ──
+    # ── the box as one of the house radio's speakers (radio_client.PodTuner hands it the live stream) ──
     async def play(self, url: str) -> None:
         if "player" in self.keys:
             self.client.media_player_command(self.keys["player"], media_url=url, announcement=False)
@@ -517,7 +519,6 @@ class EsphomeLink:
 
 async def serve(hub, name: str, host: str, port: int, *, media, noise_psk: str, connect=None, label: str = "", make_client=None) -> None:
     """One box, for as long as it stays connected (hub.keep dials it again when it drops)."""
-    from music import BoxMusic                                     # noqa: PLC0415
     if make_client is None:
         from aioesphomeapi import APIClient                        # noqa: PLC0415
         make_client = lambda: APIClient(host, port, None, noise_psk=noise_psk or None, client_info="skippy-hub")   # noqa: E731
@@ -538,20 +539,26 @@ async def serve(hub, name: str, host: str, port: int, *, media, noise_psk: str, 
         link.hub, link.services = hub, services
         room = hub.rooms[name] = hub.make_room(name, link)
         hub.log(f"[{name}] connected: {getattr(info, 'friendly_name', '') or getattr(info, 'name', '') or 'an ESPHome box'}")
-        if "player" in link.keys:
-            link.music = room.music = BoxMusic(link, media, towards=host, log=hub.log, name=name)
+        radio = getattr(hub.make_room, "radio", None)
+        tuner = None
+        if "player" in link.keys and radio is not None:            # the pod is a remote and a speaker of the house radio, never its player
+            from radio_client import PodTuner                      # noqa: PLC0415
+            link.music = room.music = tuner = PodTuner(link, radio, name, towards=host, log=hub.log)
             if connect is not None:
-                connect.add(name, label or f"{name.replace('-', ' ').title()} (Skippy)", room.music, book=getattr(room, "book", None))
+                connect.add(name, label or f"{name.replace('-', ' ').title()} (Skippy)", tuner, book=getattr(room, "book", None))
         client.subscribe_states(link.on_state)
         link.start_stream(os.environ.get("SATELLITE_FACE_STREAM", "1") != "0")
         unsub = client.subscribe_voice_assistant(handle_start=link.handle_start, handle_stop=link.handle_stop, handle_audio=link.handle_audio,
                                                  handle_announcement_finished=link.handle_announcement_finished)
         ticker = asyncio.ensure_future(hub.tick(room))
+        tuning = asyncio.ensure_future(tuner.run()) if tuner is not None else None
         try:
             await gone.wait()
             hub.log(f"[{name}] disconnected")
         finally:
             ticker.cancel()
+            if tuning is not None:
+                tuning.cancel()                                     # never a stop: what the pod plays comes from the radio, not from us
             unsub()
             link.stop_stream()
     finally:

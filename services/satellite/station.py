@@ -1,0 +1,295 @@
+"""The house radio's commands (radio.py runs them; the hubs, the portal's Connect and the car only ask). One station, one queue, one tune
+for every speaker that is on (the Captain, 2026-11-01: "There is one tap for music everywhere, and it's playing the same tune for everyone,
+like a radio station. The hubs can change it, or add to it, but they are not the players").
+
+`run(house, name, args, room, favorites)` is the old hub music tools' logic, moved here whole, with the pods' own players gone: `house` is
+the radio's stereo.StereoMusic (Bilby, the DJ, Spotify), `room` only says where "here" is. Every answer is a sentence Skippy says.
+
+  play_music   his grammar (mode + filters, mixes.resolve), favorites, everything, an artist / album / song; queue=true adds after what plays;
+               speaker = here (the asking room's place) | stereo (where it plays now) | everywhere | upstairs | downstairs | a room
+  music        pause / resume / next / previous / what / favorite / tired / louder / quieter / volume
+  speakers     what=music: which speakers play the station (the voice is the hub's own business)
+  dj_mode      on / off
+  spotify      play / add / like
+"""
+from __future__ import annotations
+
+import asyncio
+import random
+import re
+
+GRAMMAR_KEYS = ("mode", "genre", "playlist", "artist", "album", "song", "new")
+STEREO_LEVELS = 10
+POD = "pod:"                                      # a pod's own speaker as one of the station's speakers: "pod:<hub room>"
+
+
+def grammar_of(args) -> dict:
+    """The parts of play_music's arguments that are his grammar's mode and filters (mixes.resolve), not the old free `what`."""
+    return {k: v for k, v in (args or {}).items() if k in GRAMMAR_KEYS and v}
+
+
+def mix_words(args) -> str:
+    import mixes                                                # noqa: PLC0415
+    d = mixes.describe(grammar_of(args))
+    return f" of {d}" if d else ""
+
+
+def place_words(env: dict, kinds) -> str:
+    """The station's speakers in his words: the router outputs by their place, a pod by its room."""
+    import house_layout                                         # noqa: PLC0415
+    import speaker_out                                          # noqa: PLC0415
+    kinds = set(kinds)
+    outs = {k for k in kinds if not k.startswith(POD)}
+    words = [speaker_out.place_words(env, outs)] if outs else []
+    for k in sorted(kinds - outs):
+        try:
+            room = house_layout.default().room_of_pod(k[len(POD):]) or k[len(POD):]
+        except Exception:                                       # noqa: BLE001
+            room = k[len(POD):]
+        if not any(room in w for w in words):
+            words.append(f"the {room}")
+    return " and ".join(w for w in words if w)
+
+
+def where_said(house) -> str:
+    """'downstairs and upstairs' for where the station really plays now (only speakers that are on): never a place the sound didn't go."""
+    open_, _ = house.where()
+    words = place_words(house.env or {}, open_)
+    return f"{'everywhere' if open_ and len(words.split(' and ')) > 1 else words}" if words else "on the house stereo"
+
+
+def not_there(house) -> str:
+    """' Upstairs isn't on, so not there.' for a place asked for whose speaker is off (the Enclave switched off)."""
+    _, closed = house.where()
+    words = place_words(house.env or {}, closed)
+    return f" {words[:1].upper()}{words[1:]} isn't on, so not there." if words else ""
+
+
+def here_kinds(env: dict, room: str) -> list[str] | None:
+    """The asking room's speakers: its place's outputs (house_layout.json: the living room is the Enclave), else that room's own pod."""
+    import house_layout                                         # noqa: PLC0415
+    import speaker_out                                          # noqa: PLC0415
+    if not room:
+        return None
+    try:
+        place = house_layout.default().room_of_pod(room) or room
+    except Exception:                                           # noqa: BLE001
+        place = room
+    return speaker_out.place_kinds(env, place) or [POD + room]
+
+
+def speaker_kinds(env: dict, speaker: str, room: str = "") -> list[str] | None:
+    """play_music's `speaker` as the station's speakers: None for "stereo" (where it plays now) and for a word that is no place."""
+    import speaker_out                                          # noqa: PLC0415
+    s = (speaker or "here").strip().lower()
+    if s == "stereo":
+        return None
+    if s == "here":
+        return here_kinds(env, room)
+    return speaker_out.place_kinds(env, s)
+
+
+async def grammar_queue(args: dict, house, favorites) -> tuple[list[str], str, bool]:
+    """mixes.resolve with the radio's sources: the gate's catalog, his favorites, Spotify (liked, suggestions, playlists: the station's client)
+    and Traktor's playlists (the DJ's collection.nml, cached in state/dj)."""
+    import dj                                                   # noqa: PLC0415
+    import mixes                                                # noqa: PLC0415
+    catalog = await house.media.catalog()
+    env = getattr(house, "env", None) or {}
+    spot = getattr(house.player, "spotify", None)
+    if spot is not None and getattr(house.player, "spotify_down", lambda: False)():
+        spot = None
+
+    def work():
+        favs, tired, played = favorites.pool() if favorites is not None else ([], set(), set())   # his pool, what he is tired of, what he heard
+        lists = mixes.traktor_playlists(env.get("BILBY_TRAKTOR_NML", dj.DEFAULT_NML), dj.STATE) if args.get("playlist") else {}
+        return mixes.resolve(args, catalog, favs if args.get("mode") else [], spot, lists, tired=tired, played=played)
+    return await asyncio.to_thread(work)
+
+
+async def find(args: dict, house, favorites) -> tuple[list[str], str, bool, bool, str]:
+    """(tracks, a note to say first, mixed, premixed, what to say when there are none) for a play_music request."""
+    import music as music_mod                                   # noqa: PLC0415
+    what = str((args or {}).get("what") or ("" if grammar_of(args) else "everything"))
+    mixed = bool((args or {}).get("shuffle"))
+    plain = " ".join(re.findall(r"[a-z]+", what.lower()))
+    note, premixed = "", False
+    if grammar_of(args):                                        # his grammar: mode + filters (mixes.py); Spotify rows he owns play from Bilby
+        found, note, ordered = await grammar_queue(args, house, favorites)
+        mixed, premixed = not ordered, not ordered
+        return found, note, mixed, premixed, "Nothing in his library to play right now (the music gate is not answering)."
+    if re.fullmatch(r"(?:my |his )?(?:favou?rites?|favou?rite songs?|liked songs)", plain):   # his one pool: favorites + liked, pruned
+        if mixed:                                               # "shuffle my favorites": the pool's mix (favorites + liked)
+            found, note, _ordered = await grammar_queue({**(args or {}), "mode": "favorites", "shuffle": True}, house, favorites)
+            premixed = True
+        else:                                                   # "play my favorites": the list in its order, newest first
+            favs, tired, _played = await asyncio.to_thread(favorites.pool) if favorites is not None else ([], set(), set())
+            found = [f for f in favs if f not in tired]
+        return found, note, mixed, premixed, "His favorites list is empty so far."
+    if re.fullmatch(r"(?:everything|all|all (?:of )?(?:my |his )?music|(?:my |his |the )?(?:whole |entire )?(?:library|collection))", plain):
+        found, mixed = list(await house.media.catalog()), True
+        if favorites is not None:                               # never a song he is tired of
+            tired = (await asyncio.to_thread(favorites.pool))[1]
+            found = [t for t in found if t not in tired]
+        return found, note, mixed, premixed, f"Nothing in his library matches {what!r}."
+    found = music_mod.search(await house.media.catalog(), what)
+    if not found and what.strip():                              # not a name: maybe a genre ("polka"); else the closest is the shuffle, said in one line
+        found, note, _ordered = await grammar_queue({**(args or {}), "genre": what, "shuffle": True}, house, favorites)
+        mixed = premixed = True
+    return found, note, mixed, premixed, f"Nothing in his library matches {what!r}."
+
+
+async def play_music(house, args: dict, room: str, favorites) -> str:
+    import dj                                                   # noqa: PLC0415
+    import music as music_mod                                   # noqa: PLC0415
+    found, note, mixed, premixed, none = await find(args, house, favorites)
+    if not found:
+        return none
+    if mixed and not premixed:
+        found = random.sample(found, len(found))[:music_mod.MAX_QUEUE]
+    said = (note + " ") if note else ""
+    if (args or {}).get("queue") and house.playing:             # one queue: Bilby's tracks after what plays now, Spotify's included
+        await house.box.append(found)
+        return f"Queued {len(found)} track{'s' if len(found) != 1 else ''} after this on the house radio."
+    place = speaker_kinds(house.env or {}, str((args or {}).get("speaker") or "here"), room)
+    if place:
+        house.move(place)                                       # "everywhere", "upstairs", "here": the station's speakers from now on
+    n = await house.play_tracks(found, mixed, premixed=premixed)
+    title, artist = house.box.title()
+    return (f"{said}Playing {n} track{'s' if n != 1 else ''}{mix_words(args)} {where_said(house)}"
+            + (" in DJ mode" if dj.enabled(house.env) else "")
+            + f", starting with {title}" + (f" by {artist}." if artist else ".") + not_there(house))
+
+
+def now_playing(house) -> str:
+    """The `music` tool's "what": the song the station is playing now."""
+    if house.playing and house.box.track():
+        title, artist = house.box.title()
+        return f"Playing on the house radio: {title}" + (f" by {artist}." if artist else ".")
+    return "Nothing is playing."
+
+
+def stereo_volume(house, action: str, level=None) -> str:
+    """The station's own loudness, in tenths of full (the router's gain on Bilby and Spotify; ducking under Skippy is separate). Full is
+    where the Sony's and the Enclave's knobs were set, so "louder" past full is theirs to do."""
+    if not hasattr(house, "set_level"):
+        return "The house stereo's volume is on its own knob."
+    now = max(1, min(STEREO_LEVELS, round(getattr(house, "level", 1.0) * STEREO_LEVELS)))
+    if action == "volume":
+        try:
+            want = int(level)
+        except (TypeError, ValueError):
+            return f"The house stereo is at {now} of {STEREO_LEVELS}."
+    else:
+        want = now + (2 if action == "louder" else -2)
+    want = max(1, min(STEREO_LEVELS, want))
+    if action == "louder" and now >= STEREO_LEVELS:
+        return f"Not louder: the house stereo is already at full ({STEREO_LEVELS} of {STEREO_LEVELS}); past that is the speaker's own knob."
+    house.set_level(want / STEREO_LEVELS)
+    return f"Done: the house stereo is at {want} of {STEREO_LEVELS}."
+
+
+async def music(house, args: dict, room: str, favorites) -> str:
+    import music as music_mod                                   # noqa: PLC0415
+    action = str((args or {}).get("action") or "")
+    box = house.box
+    step = {"pause": box.pause, "resume": box.resume, "next": box.next, "previous": box.prev}.get(action)
+    if step is not None:
+        await step()
+        return f"Done: {action} on the house radio."
+    if action == "tired":                                       # "I'm tired of this song": out of his pool and every mix, and on to the next one
+        if favorites is None:
+            return "His favorites list is not set up here."
+        said = await asyncio.to_thread(favorites.tire, room, music_mod.device_id("stereo"))
+        if said.startswith("Dropped"):
+            await box.next()
+        return said
+    if action == "favorite":                                    # "Skippy, add this song to my favorites" (portal/favorites.py)
+        if favorites is None:
+            return "His favorites list is not set up here."
+        return await asyncio.to_thread(favorites.mark, room, music_mod.device_id("stereo"))
+    if action == "what":
+        return now_playing(house)
+    if action in ("louder", "quieter", "volume"):
+        return stereo_volume(house, action, (args or {}).get("level"))
+    return "I cannot do that to the music."
+
+
+async def spotify_go(house, args: dict) -> str:
+    """The `spotify` tool: his Spotify on the station (spotify.py, stereo.py)."""
+    import spotify as spotify_mod                               # noqa: PLC0415
+    client = getattr(house.player, "spotify", None)
+    if client is None:
+        return "Spotify is not set up on the house radio."
+    action = str(args.get("action") or "play")
+    try:
+        if action == "play":
+            what = str(args.get("what") or "").strip()
+            if not what:
+                return "Say what to play on Spotify."
+            tracks, how = await asyncio.to_thread(spotify_mod.queue_for, client, what)
+            if not tracks:
+                return f"Spotify found nothing for {what!r}."
+            if args.get("shuffle"):
+                tracks = random.sample(tracks, len(tracks))
+            if args.get("queue") and house.playing:
+                n = await house.play_spotify(tracks, queue=True)
+                return f"Queued {n} Spotify track{'s' if n != 1 else ''} from {how} after this on the house radio."
+            n = await house.play_spotify(tracks)
+            title, artist = house.box.title()
+            return f"Playing {n} Spotify track{'s' if n != 1 else ''} from {how} on the house radio, starting with {title}" + (f" by {artist}." if artist else ".")
+        uri, label = await asyncio.to_thread(spotify_now, client, house)
+        if not uri:
+            return label
+        if action == "add":
+            playlist = str(args.get("playlist") or "").strip()
+            if not playlist:
+                return "Which of his Spotify playlists?"
+            got = await asyncio.to_thread(client.add_to_playlist, playlist, [uri])
+            return f"Added {label} to his Spotify playlist {got.get('name') or playlist}."
+        if action == "like":
+            await asyncio.to_thread(client.save, [uri])
+            return f"Saved {label} to his Spotify liked songs."
+        return "I cannot do that with Spotify."
+    except spotify_mod.SpotifyError as e:
+        return f"Spotify said no: {e}"
+
+
+def spotify_now(client, house) -> tuple[str, str]:
+    """(the Spotify URI of the song playing now, how to name it), or ("", why not). A Bilby song is looked up on Spotify by its title and artist."""
+    import spotify as spotify_mod                               # noqa: PLC0415
+    box = house.box
+    if box.playing and box.track():
+        title, artist = box.title()
+        if spotify_mod.is_uri(box.track()):
+            return box.track(), f"{title}" + (f" by {artist}" if artist else "")
+        hits = client.search(f"track:{title} artist:{artist}" if artist else title, "track", 3)
+        if not hits:
+            return "", f"Spotify has no {title}" + (f" by {artist}." if artist else ".")
+        h = hits[0]
+        return h["uri"], f"{h.get('title')} by {h.get('artist')} (Spotify's copy)"
+    return "", "Nothing is playing, so there is no song to add."
+
+
+async def run(house, name: str, args: dict, room: str = "", favorites=None) -> str:
+    """One command, from any hub, the portal or the car. Never raises: a failure is a sentence."""
+    args = dict(args or {})
+    if name == "dj_mode":                                       # house-wide, kept in state/dj.json (the vault's BILBY_DJ is the default)
+        import dj                                               # noqa: PLC0415
+        on = bool(args.get("on"))
+        dj.set_enabled(on)
+        return ("Done: DJ mode is on. His tracks on the house radio now mix into each other on the beat, from the next change of track."
+                if on else "Done: DJ mode is off. On the house radio one track now ends and the next starts.")
+    if name == "speakers":
+        kinds = speaker_kinds(house.env or {}, str(args.get("place") or ""), room)
+        if not kinds:
+            return "I don't know that place: everywhere, downstairs, upstairs, or a room."
+        house.move(kinds)
+        return f"Done: the music plays {where_said(house)} from now on." + not_there(house)
+    if name == "music":
+        return await music(house, args, room, favorites)
+    if name == "spotify":
+        return await spotify_go(house, args)
+    if name == "play_music":
+        return await play_music(house, args, room, favorites)
+    return f"The house radio has no {name!r}."

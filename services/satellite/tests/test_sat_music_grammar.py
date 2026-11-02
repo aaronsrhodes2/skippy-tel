@@ -201,6 +201,7 @@ class Player:
 class House:
     def __init__(self):
         self.env, self.playing, self.box, self.player, self.moved, self.played = {}, False, Box(), Player(), None, None
+        self.media = self.box.media
 
     def move(self, kinds):
         self.moved = set(kinds)
@@ -269,11 +270,12 @@ def test_tired_of_this_song_drops_it_and_moves_on_and_favorite_this_adds_it():
 
     loop = asyncio.new_event_loop()
     threading.Thread(target=loop.run_forever, daemon=True).start()
-    room, favs = Room(), Favs()
-    room.music = Pod()
-    _, run = hub.music_tools(lambda: room, loop, favorites=favs, stereo=lambda: None)
-    assert run("music", brain.music_route("I'm tired of this song")).startswith("Dropped Louise") and room.music.skipped == 1
-    assert run("music", brain.music_route("add this to my favorites")).startswith("Added Louise") and room.music.skipped == 1
+    room, favs, house = Room(), Favs(), House()
+    house.box = Pod()                                               # the station plays it: the hub is only the remote
+    house.playing = True
+    _, run = hub.music_tools(lambda: room, loop, favorites=favs, stereo=lambda: house)
+    assert run("music", brain.music_route("I'm tired of this song")).startswith("Dropped Louise") and house.box.skipped == 1
+    assert run("music", brain.music_route("add this to my favorites")).startswith("Added Louise") and house.box.skipped == 1
     assert favs.calls == [("tire", "theater"), ("mark", "theater")]
     loop.call_soon_threadsafe(loop.stop)
 

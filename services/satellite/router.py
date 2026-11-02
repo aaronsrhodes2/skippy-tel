@@ -270,6 +270,8 @@ class Router:
         self.lock = threading.RLock()
         self.layer_gain = {"voice": 1.0, "media": 1.0}
         self.outside_duck = 1.0                                   # set by duck(): the hub listening lowers media too
+        self.kind_duck: dict[str, float] = {}                     # set by duck_kinds(): only some outputs' media goes down (the house radio, radio.py)
+        self._kind_gain: dict[str, float] = {}
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._last_scan = -1e9
@@ -322,6 +324,14 @@ class Router:
 
     def duck(self, on: bool, percent: float = 25) -> None:
         self.outside_duck = max(0.0, min(1.0, percent / 100.0)) if on else 1.0
+
+    def duck_kinds(self, kinds, on: bool, percent: float = 25) -> None:
+        """The media on these outputs only (Skippy speaking in the room they are in), ramped like the layers; the others play on."""
+        for k in kinds:
+            if on:
+                self.kind_duck[k] = max(0.0, min(1.0, percent / 100.0))
+            else:
+                self.kind_duck.pop(k, None)
 
     # ── the mixer ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
     def start(self) -> None:
@@ -397,6 +407,10 @@ class Router:
             g = self.layer_gain[layer]
             self.layer_gain[layer] = target if abs(target - g) <= RAMP else g + (RAMP if target > g else -RAMP)
         mixes = {k: None for k, s in self.sinks.items() if s.open}
+        kind_gain = {}
+        for k in mixes:                                           # each output's own duck, ramped the same way (no clicks)
+            g, target = self._kind_gain.get(k, 1.0), self.kind_duck.get(k, 1.0)
+            kind_gain[k] = self._kind_gain[k] = target if abs(target - g) <= RAMP else g + (RAMP if target > g else -RAMP)
         for p in plays:
             targets = self.effective(p.targets) if self.prefer else p.targets
             if not p.started:
@@ -422,7 +436,8 @@ class Router:
                     chunk = np.concatenate([chunk, np.zeros((BLOCK - len(chunk), 2), dtype="float32")])
                 for k in targets:
                     if k in mixes:
-                        mixes[k] = chunk if mixes[k] is None else mixes[k] + chunk
+                        c = chunk * kind_gain[k] if p.layer == "media" and kind_gain[k] != 1.0 else chunk
+                        mixes[k] = c if mixes[k] is None else mixes[k] + c
             if p.source.done:
                 self.stop(p)
         for k, block in mixes.items():
@@ -465,7 +480,8 @@ NET_DITHER_LSB = 3                # a noise floor ~80 dB down, never exact digit
 
 
 def is_net(part) -> bool:
-    return isinstance(part, str) and part.startswith("tcp://")
+    """A network output (tcp://), or the house radio's pods' tap (tap://, radio.py): no device list to re-read for either."""
+    return isinstance(part, str) and part.startswith(("tcp://", "tap://"))
 
 
 def _host_port(url: str) -> tuple[str, int]:

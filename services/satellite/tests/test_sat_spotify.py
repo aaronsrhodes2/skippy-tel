@@ -355,16 +355,16 @@ def test_the_voice_tool_plays_an_artist_on_the_stereo_and_adds_the_song_to_a_pla
     pod = music.BoxMusic(Pod(), FakeMedia(), log=lambda *_: None)
     runner, room = tool(s, pod)
     said = runner("spotify", {"action": "play", "what": "Daft Punk"})
-    assert said.startswith("Playing 2 Spotify tracks from Daft Punk on the house stereo, starting with One More Time")
+    assert said.startswith("Playing 2 Spotify tracks from Daft Punk on the house radio, starting with One More Time")
     assert s.box.queue == [A, B] and room.last_media == "stereo"
     said = runner("spotify", {"action": "add", "playlist": "gym"})
     assert said == "Added One More Time by Daft Punk to his Spotify playlist Gym." and ("add", "gym", (A,)) in s.player.spotify.calls
     said = runner("spotify", {"action": "like"})
     assert ("save", (A,)) in s.player.spotify.calls
     said = runner("music", {"action": "next"})                            # the stereo is what plays: "next" means it
-    assert said == "Done: next on the house stereo." and s.box.idx == 1
+    assert said == "Done: next on the house radio." and s.box.idx == 1
     said = runner("play_music", {"what": "Pink Floyd", "queue": True})    # one queue: Bilby's after Spotify's
-    assert s.box.queue == [A, B, "Pink Floyd/Money.flac"] and "after this on the house stereo" in said
+    assert s.box.queue == [A, B, "Pink Floyd/Money.flac"] and "after this on the house radio" in said
 
 
 def test_adding_a_bilby_song_to_a_spotify_playlist_uses_spotifys_copy():
@@ -378,10 +378,11 @@ def test_adding_a_bilby_song_to_a_spotify_playlist_uses_spotifys_copy():
             pass
     pod = music.BoxMusic(Pod(), FakeMedia(), log=lambda *_: None)
     runner, room = tool(s, pod)
-    asyncio.run(pod.play_queue(["Pink Floyd/Money.flac"]))
+    runner("play_music", {"what": "Pink Floyd", "speaker": "stereo"})    # the station plays it (the pod is only a remote)
     said = runner("spotify", {"action": "add", "playlist": "gym"})
     assert said == "Added Money by Pink Floyd (Spotify's copy) to his Spotify playlist Gym."
     assert ("search", "track:Money artist:Pink Floyd") in s.player.spotify.calls
+    runner("music", {"action": "pause"})                                  # its router play ends (a waiting thread would hold the test run open)
 
 
 def test_favorite_this_names_the_stereo_when_that_is_what_plays():
