@@ -13,3 +13,4 @@ decora_wifi==1.5
 opencv-python-headless>=4.9
 scipy>=1.11
 librosa>=0.10               # dj.py: beat tracking for a track Traktor never analysed
+ring_doorbell==0.9.14       # ringcam.py: the Ring doorbell and camera (Home Assistant's own Ring library)

@@ -1087,6 +1087,8 @@ def build_rooms(env: dict):
     garage_watch = autoclose.build(env, house, routines.home if routines is not None else lambda: None, log=log)
     if garage_watch is not None and routines is not None:
         routines.extras["garage_news"] = garage_watch.news        # the homecoming routine says what happened to the door
+    import ringcam                                               # noqa: PLC0415 — the Ring doorbell and camera: presses and motion said aloud, DMed
+    ring_watch = ringcam.build(env, house, log=log)
     from homechat import HomeChat                                # noqa: PLC0415
     import music as music_mod                                    # noqa: PLC0415
     homechat = HomeChat(env.get("PORTAL_URL") or music_mod.PORTAL, token, enabled=env.get("SATELLITE_HOME_CHAT", "on").lower() not in ("off", "0", "no"), log=log)
@@ -1147,6 +1149,7 @@ def build_rooms(env: dict):
     make_room.homechat = homechat                               # _main runs its sync loop (never under --record)
     make_room.alarm_clock = house_clock                         # _main runs it
     make_room.garage_watch = garage_watch                       # _main runs it (autoclose.py)
+    make_room.ring_watch = ring_watch                           # _main runs it (ringcam.py)
     make_room.routine_room = lambda: getattr(routines, "room_name", "") or ""
     make_room.house = house                                     # the heartbeat says which of its backends answer
     make_room.state = state
@@ -1586,6 +1589,7 @@ def main(argv=None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
     from ear import load_env                                    # noqa: PLC0415
     env = load_env()
+    env["SKIPPY_RING_OWNER"] = "1"                              # the hub is the one process signed in to Ring (ringcam.py)
     try:
         rooms = parse_rooms(env.get("SATELLITE_ROOMS", ""))
     except ValueError as e:
@@ -1622,10 +1626,12 @@ async def _main(env: dict, rooms, args) -> int:
         homechat = getattr(hub.make_room, "homechat", None)
         watch = getattr(hub.make_room, "garage_watch", None)
         clock = getattr(hub.make_room, "alarm_clock", None)
+        ring_watch = getattr(hub.make_room, "ring_watch", None)
         beat = heartbeat(hub, Path(hub.make_room.state) / "hub-status.json", getattr(hub.make_room, "house", None))             if getattr(hub.make_room, "state", None) else None
         await asyncio.gather(hub.run(), *([beat] if beat is not None else []), *([connect.run()] if connect else []), *([homechat.run(hub)] if homechat is not None else []),
                              *([watch.run(hub, hub.make_room.routine_room)] if watch is not None else []),
-                             *([clock.run(hub)] if clock is not None else []))
+                             *([clock.run(hub)] if clock is not None else []),
+                             *([ring_watch.run(hub, hub.make_room.routine_room)] if ring_watch is not None else []))
         return 0
     finally:
         if media is not None:

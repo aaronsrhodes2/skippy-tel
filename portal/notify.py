@@ -144,17 +144,26 @@ class Notifier:
         return owner
 
     # ── sending ────────────────────────────────────────────────────────────────
-    def _call(self, method: str, path: str, payload: dict | None = None) -> tuple[int, bytes]:
+    def _call(self, method: str, path: str, payload: dict | None = None, image: bytes | None = None) -> tuple[int, bytes]:
         headers = {"Authorization": f"Bot {self.__token}", "Content-Type": "application/json",
                    "User-Agent": "skippy-portal (https://github.com/aaronsrhodes2/skippy-tel, 1.0)"}
-        return self.transport(method, API + path, headers, json.dumps(payload).encode() if payload is not None else None, 15)
+        body = json.dumps(payload).encode() if payload is not None else None
+        if image is not None:                    # a picture (the Ring doorbell's snapshot): Discord's multipart, the JPEG as files[0]
+            boundary = "skippy" + str(int(self.clock() * 1000))
+            payload = dict(payload or {}, attachments=[{"id": 0, "filename": "snapshot.jpg"}])
+            head = (f'--{boundary}\r\nContent-Disposition: form-data; name="payload_json"\r\nContent-Type: application/json\r\n\r\n'
+                    f'{json.dumps(payload)}\r\n--{boundary}\r\nContent-Disposition: form-data; name="files[0]"; filename="snapshot.jpg"\r\n'
+                    'Content-Type: image/jpeg\r\n\r\n')
+            body = head.encode() + image + f"\r\n--{boundary}--\r\n".encode()
+            headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
+        return self.transport(method, API + path, headers, body, 30 if image is not None else 15)
 
     def _warn(self, kind: str, detail: str) -> None:
         if kind not in self._logged:              # once per kind: an outage is one line, not one per run
             self._logged.add(kind)
             self.log(json.dumps({"event": "workshop_notify", "problem": kind, "detail": detail[:200]}))
 
-    def _send(self, text: str) -> bool:
+    def _send(self, text: str, image: bytes | None = None) -> bool:
         try:
             user = self.captain_id()
             if user is None:
@@ -166,7 +175,7 @@ class Notifier:
                 self._warn(f"dm_channel_{status}", "Discord wouldn't open a DM with the Captain")
                 return False
             status, _ = self._call("POST", f"/channels/{channel}/messages",
-                                   {"content": text, "allowed_mentions": {"parse": []}})
+                                   {"content": text, "allowed_mentions": {"parse": []}}, image=image)
             if status not in (200, 201):
                 self._warn(f"send_{status}", "Discord refused the DM")
                 return False
@@ -175,15 +184,16 @@ class Notifier:
             self._warn(f"error_{type(exc).__name__}", str(exc))
             return False
 
-    def alert(self, text: str) -> bool:
+    def alert(self, text: str, image: bytes | None = None) -> bool:
         """Something the Captain must know, from the doctor (doctor.py: a service still failing after its tries, skippy-pc unreachable).
-        The doctor already sends each one at most once an hour; this only needs Discord to be set up."""
+        The doctor already sends each one at most once an hour; this only needs Discord to be set up. `image`: a JPEG to attach (the
+        Ring doorbell's snapshot)."""
         if not self.configured:
             return False
         if self.background:
-            threading.Thread(target=self._send, args=(text,), daemon=True).start()
+            threading.Thread(target=self._send, args=(text, image), daemon=True).start()
             return True
-        return self._send(text)
+        return self._send(text, image)
 
     def traffic_alert(self, owner: str, text: str) -> bool:
         """The commute is slow or the road has a crash (localinfo.py): one Discord DM per episode, not one per report. The same switch as the task-finished DMs."""

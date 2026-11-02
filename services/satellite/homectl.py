@@ -50,11 +50,17 @@ def matter_path(env=os.environ) -> Path:
     return Path(env.get("SKIPPY_HOME_STATE") or ROOT / "state" / "home") / "matter.json"
 
 
+def ring_folder(env: dict) -> Path:
+    """state/ring: Ring's rotating refresh token and its push credentials (ringcam.py)."""
+    return Path(env.get("RING_STATE") or Path(__file__).resolve().parents[2] / "state" / "ring")
+
+
 def build_house(env: dict):
     """The house: what Skippy can control, through every backend that is set up (None when none is). hub.py shares it across rooms; house_mcp.py and the home
     reporter (the portal chat's house tools) build the same one.
     HomeKit (paired with homectl.py), Matter (skippy-core's controller: MATTER_URL), the garage door's ratgdo (GARAGE_ESPHOME), Leviton's cloud (LEVITON_EMAIL + LEVITON_PASSWORD),
-    the Nest (Google Device Access through the portal's Google grant: SKIPPY_HOME_TOKEN; SKIPPY_NEST=0 leaves it out)
+    the Nest (Google Device Access through the portal's Google grant: SKIPPY_HOME_TOKEN; SKIPPY_NEST=0 leaves it out),
+    the Ring cameras (read only, once `python ringcam.py signin` has made state/ring/token.json; SKIPPY_RING=0 leaves them out)
     and Home Assistant (HASS_URL + HASS_TOKEN)."""
     sensitive = env.get("HASS_SENSITIVE") == "1"
     parts = []
@@ -76,6 +82,11 @@ def build_house(env: dict):
         import google_home                                          # noqa: PLC0415  portal's Google grant (nest.py); quiet until it is connected
         from nest import Nest                                       # noqa: PLC0415
         parts.append(Nest(google_home.Google(env, log=lambda m: None), env.get("NEST_PROJECT_ID", ""), sensitive=sensitive))
+    if env.get("SKIPPY_RING", "1") != "0" and (env.get("RING_REFRESH_TOKEN") or (ring_folder(env) / "token.json").is_file()
+                                                    or (ring_folder(env) / "cams.json").is_file()):
+        import ringcam                                              # noqa: PLC0415  the Ring doorbell and camera, on Ring's cloud (ringcam.py):
+        parts.append(ringcam.Ring(ringcam.TokenFile(ring_folder(env), env.get("RING_REFRESH_TOKEN", "")), sensitive=sensitive,   # once he has signed in;
+                                  owner=env.get("SKIPPY_RING_OWNER") == "1"))  # only the hub signs in, the rest read its mirror
     if env.get("HASS_URL") and env.get("HASS_TOKEN"):               # or Home Assistant, if he runs one (the vault holds both)
         from hass import Hass                                       # noqa: PLC0415
         parts.append(Hass(env["HASS_URL"], env["HASS_TOKEN"], sensitive=sensitive))

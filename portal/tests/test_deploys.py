@@ -99,3 +99,23 @@ def test_the_house_alert_door_sends_one_dm_each_time():
     for _ in range(2):
         assert client.post("/home/alert", json={"text": "Couldn't close the garage door"}, headers=H).get_json() == {"sent": True}
     assert sent == ["Couldn't close the garage door"] * 2
+
+
+def test_the_house_alert_door_carries_a_jpeg_snapshot_and_refuses_anything_else():
+    """The Ring doorbell (services/satellite/ringcam.py): the line and its snapshot, base64; only a JPEG, only with the home token."""
+    pytest.importorskip("flask")
+    pytest.importorskip("authlib")
+    import base64
+    import app as portal
+    from test_app import SETTINGS, FakeSkippy, FakeVm, _pair
+    app = portal.create_app(dict(SETTINGS), vm=FakeVm(), skippy=FakeSkippy())
+    sent = []
+    app.extensions["notifier"].alert = lambda text, image=None: sent.append((text, image)) or True
+    client = app.test_client()
+    H = {"Authorization": f"Bearer {_pair(client)}"}
+    jpeg = b"\xff\xd8\xff\xe0snapshot\xff\xd9"
+    got = client.post("/home/alert", json={"text": "Someone's at the Front Door.", "image": base64.b64encode(jpeg).decode()}, headers=H)
+    assert got.get_json() == {"sent": True} and sent == [("Someone's at the Front Door.", jpeg)]
+    assert client.post("/home/alert", json={"text": "x", "image": base64.b64encode(b"<svg/>").decode()}, headers=H).status_code == 400
+    assert client.post("/home/alert", json={"text": "x", "image": "not base64!"}, headers=H).status_code == 400
+    assert client.post("/home/alert", data=b"x" * (portal.HOME_ALERT_MAX + 1), headers={**H, "Content-Type": "application/json"}).status_code == 413

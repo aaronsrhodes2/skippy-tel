@@ -245,3 +245,30 @@ def test_without_a_bot_the_switch_is_shown_disabled(env):
     login(client, ADMIN)
     page = client.get("/chat").data.decode()
     assert 'id="ps-notify" data-tel="chat:notify" disabled title="The portal has no Discord bot (DISCORD_BOT_TOKEN)"' in page
+
+
+# ── a picture with the line (the Ring doorbell's snapshot) ─────────────────
+def test_an_alert_with_a_snapshot_goes_as_one_dm_with_the_jpeg_attached():
+    sent = []
+
+    def transport(method, url, headers, body, timeout):
+        sent.append((url, headers, body))
+        if url.endswith(f"/guilds/{GUILD}"):
+            return 200, json.dumps({"id": GUILD, "owner_id": OWNER_ID}).encode()
+        if url.endswith("/users/@me/channels"):
+            return 200, json.dumps({"id": DM}).encode()
+        return 200, b'{"id": "1"}'
+    jpeg = b"\xff\xd8\xff\xe0fake-jpeg\xff\xd9"
+    assert notifier(transport=transport).alert("Someone's at the Front Door.", jpeg)
+    url, headers, body = sent[-1]
+    assert url.endswith(f"/channels/{DM}/messages") and headers["Content-Type"].startswith("multipart/form-data; boundary=")
+    assert jpeg in body and b'name="files[0]"; filename="snapshot.jpg"' in body
+    part = body.split(b"\r\n\r\n", 1)[1].split(b"\r\n--", 1)[0]
+    assert json.loads(part)["content"] == "Someone's at the Front Door." and json.loads(part)["allowed_mentions"] == {"parse": []}
+    assert BOT.encode() not in body
+
+
+def test_an_alert_without_a_picture_stays_plain_json():
+    d = Discord()
+    assert notifier(transport=d).alert("Couldn't close the garage door")
+    assert d.dms()[0]["body"]["content"] == "Couldn't close the garage door"

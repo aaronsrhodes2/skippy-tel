@@ -7,6 +7,8 @@ Local run:  FLASK_APP=app.py flask run   (needs every var in .env.example)
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import dataclasses
 import io
 import ipaddress
@@ -87,6 +89,7 @@ from gcp import GamesVm
 
 CANONICAL_HOST = "makerportal.live"
 OTHER_HOSTS = frozenset({"www.makerportal.live", "makerportal.studio", "www.makerportal.studio"})
+HOME_ALERT_MAX = 4_000_000          # /home/alert: a line of text, or a line and a camera snapshot (base64, a few hundred KB)
 
 
 def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, home=None,
@@ -877,9 +880,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
 
     @app.post("/home/alert")
     def home_alert():
-        """Something the house must tell the Captain now (the hub's garage auto-close: closed it after he left, or could not). Home token.
-        One Discord DM per call, never batched or rate-limited here: the hub sends each one once (services/satellite/autoclose.py)."""
-        if request.content_length is not None and request.content_length > 4_000:
+        """Something the house must tell the Captain now (the hub's garage auto-close: closed it after he left, or could not; the Ring
+        doorbell: someone at the door, with its snapshot as base64 `image`). Home token. One Discord DM per call, never batched or
+        rate-limited here: the hub sends each one once (services/satellite/autoclose.py, ringcam.py)."""
+        if request.content_length is not None and request.content_length > HOME_ALERT_MAX:
             abort(413)
         if not home.authorized(request.headers.get("Authorization")):
             abort(401)
@@ -887,7 +891,15 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         text = str(payload.get("text") or "").strip()[:500] if isinstance(payload, dict) else ""
         if not text:
             abort(400)
-        return jsonify({"sent": bool(app.extensions["notifier"].alert(text))})
+        image = None
+        if isinstance(payload.get("image"), str) and payload["image"]:
+            try:
+                image = base64.b64decode(payload["image"], validate=True)
+            except (ValueError, binascii.Error):
+                abort(400)
+            if not image.startswith(b"\xff\xd8"):            # a JPEG only
+                abort(400)
+        return jsonify({"sent": bool(app.extensions["notifier"].alert(text, image) if image else app.extensions["notifier"].alert(text))})
 
     @app.post("/home/deploys")
     def home_deploys():
