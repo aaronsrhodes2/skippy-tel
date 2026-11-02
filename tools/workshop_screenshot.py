@@ -83,6 +83,7 @@ def shoot(path: str, out: Path, width: int, height: int, browser, timeout: float
     server = make_server("127.0.0.1", 0, make_app(), threaded=True)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{server.server_port}{path}"
+    out = out.resolve()               # absolute: Chrome on Windows does not write a relative --screenshot path where we look (2026-11-01)
     out.parent.mkdir(parents=True, exist_ok=True)
     try:
         with tempfile.TemporaryDirectory(prefix="skippy-shot-") as profile:

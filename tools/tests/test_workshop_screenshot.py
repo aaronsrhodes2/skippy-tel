@@ -89,3 +89,14 @@ def test_a_shot_that_is_not_a_png_or_too_big_fails(tmp_path):
 
 def test_a_browser_that_cannot_start_fails_cleanly(tmp_path):
     assert shot.shoot("/me", tmp_path / "c.png", 390, 844, [str(tmp_path / "no-such-browser")]) == 4
+
+
+def test_a_relative_out_reaches_the_browser_as_an_absolute_path(tmp_path, monkeypatch, capsys):
+    """2026-11-01: real Chrome on Windows wrote a relative --screenshot path somewhere else, and every shot "made no screenshot"."""
+    monkeypatch.chdir(tmp_path)
+    seen = tmp_path / "seen.txt"
+    script = tmp_path / "fake_abs.py"
+    script.write_text(FAKE_BROWSER.replace("PNG_BYTES", repr(PNG)).replace(
+        'open(out, "wb")', f'open({str(seen)!r}, "w").write(out); import os; assert os.path.isabs(out); open(out, "wb")'), encoding="utf-8")
+    assert shot.shoot("/chat", Path("shots") / "rel.png", 390, 844, [sys.executable, str(script)]) == 0
+    assert Path(seen.read_text()) == (tmp_path / "shots" / "rel.png").resolve()
