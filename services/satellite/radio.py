@@ -175,6 +175,8 @@ class HouseRadio(stereo.StereoMusic):
         """Skippy speaks in a room: its speakers duck the station (the pods' tap too, which every pod plays), the rest play on."""
         r = self.player.router
         kinds = {PODS if k.startswith(station.POD) or k == "pod" else k for k in kinds} & set(r.sinks)
+        if on and kinds - set(self._ducks):
+            self.log(f"(radio: ducked under Skippy: {', '.join(sorted(kinds))})")
         for k in kinds:
             old = self._ducks.pop(k, None)
             if old is not None:
@@ -207,6 +209,10 @@ class HouseRadio(stereo.StereoMusic):
             log(f"(radio: resumed where it was: track {idx + 1} of {len(q)} at {float(saved.get('pos') or 0):.0f} s)")
             return True
         self.box.queue, self.box.idx, self.box.offset, self.box._queue_sent = q, idx, float(saved.get("pos") or 0.0), False
+        try:
+            self.box.titles = await self.media.catalog()          # "what's playing" names it, not its file
+        except Exception:                                         # noqa: BLE001 — titles are a nicety
+            pass
         return False
 
 
