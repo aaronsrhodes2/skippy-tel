@@ -21,6 +21,8 @@ from pathlib import Path
 import emotion
 
 PLAY_TIMEOUT_S = 90
+EMOTION_CACHE: dict[str, str] = {}          # a line's words -> its emotion codes (the fillers come round again: _model_emotion)
+EMOTION_CACHE_MAX = 600
 
 
 def _voice_seconds(voice) -> float:
@@ -404,11 +406,26 @@ class EsphomeLink:
         sentences = emotion.split(plain(said))
         if brain is None or not hasattr(brain, "client") or not sentences or len(sentences) > 14:
             return
+        # A filler line is said while the real answer is being written on the same model, so its codes came back after the 8 s and were
+        # thrown away (12 "emotion model: TimeoutError" on 2026-11-01, every one after a filler). The codes of a line are kept: fillers come
+        # round again, and a late answer still lands for next time.
+        key = plain(said)
+        codes = EMOTION_CACHE.get(key)
         try:
-            def ask():
-                return brain.client.messages.create(model=brain.model, max_tokens=40, messages=[{"role": "user", "content": emotion.codes_prompt(sentences, self.asked)}])
-            resp = await asyncio.wait_for(asyncio.to_thread(ask), 8)
-            codes = emotion.parse_codes("".join(getattr(b, "text", "") for b in resp.content), len(sentences))
+            if codes is None:
+                def ask():
+                    resp = brain.client.messages.create(model=brain.model, max_tokens=40, messages=[{"role": "user", "content": emotion.codes_prompt(sentences, self.asked)}])
+                    got = emotion.parse_codes("".join(getattr(b, "text", "") for b in resp.content), len(sentences))
+                    if got is not None:
+                        if len(EMOTION_CACHE) >= EMOTION_CACHE_MAX:
+                            EMOTION_CACHE.pop(next(iter(EMOTION_CACHE)))
+                        EMOTION_CACHE[key] = got
+                    return got
+                job = asyncio.ensure_future(asyncio.to_thread(ask))
+                try:
+                    codes = await asyncio.wait_for(asyncio.shield(job), 8)
+                except asyncio.TimeoutError:
+                    return                                          # the word rules stay this time; the answer is kept when it comes
             if codes is None:
                 return
             etext = emotion.reaction(self.asked) + "|" + emotion.track_from_codes(plain(said), codes, seconds)
