@@ -45,23 +45,21 @@
   /* The toolchain strip (static/skippy-chain.js): the reply's bottom border, one segment per call, width by time. Its colours are the
      house palette pinned here: the agent modes repaint --green/--cyan/--violet to purple or orange, and a strip of one colour says nothing. */
   .me-chat .turn.assistant { position: relative; }
-  .me-chat .chain { position: absolute; left: 0; right: 0; bottom: -1px; height: 3px; display: flex; gap: 1px; border-radius: 0 0 8px 8px; overflow: visible; }
-  .me-chat .chain .seg { position: relative; flex: 1 1 0; min-width: 2px; height: 3px; background: #6f8b94; cursor: pointer; }
+  .me-chat .chain { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; display: flex; gap: 1px; border-radius: 0 0 8px 8px; overflow: visible; }
+  .me-chat .chain .seg { position: relative; flex: 1 1 0; min-width: 2px; height: 3px; background: var(--k, #6f8b94); cursor: pointer; }
   .me-chat .chain .seg::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 14px; }   /* a 3 px line is too thin to hover or tap */
   .me-chat .chain .seg:hover { height: 5px; margin-top: -2px; }
-  .me-chat .k-read { background: #00ffff; color: #00ffff; }   .me-chat .k-edit { background: #ffffff; color: #ffffff; }
-  .me-chat .k-shell { background: #00ff88; color: #00ff88; }  .me-chat .k-git { background: #aa44ff; color: #c58cff; }
-  .me-chat .k-web { background: #ff44aa; color: #ff44aa; }    .me-chat .k-deploy { background: #ffaa00; color: #ffaa00; }
-  .me-chat .k-house { background: #ff8a3d; color: #ff8a3d; }  .me-chat .k-other { background: #6f8b94; color: #9fb4bb; }
-  .me-chat .chain .seg.bad { background: #ff4444; }
-  .me-chat .chain .warn { position: absolute; right: 6px; bottom: 2px; font-size: .78rem; line-height: 1; color: #ffaa00; cursor: pointer; }
+  .me-chat .k-read { --k: #00ffff; }  .me-chat .k-edit { --k: #ffffff; }  .me-chat .k-shell { --k: #00ff88; }  .me-chat .k-git { --k: #c58cff; }
+  .me-chat .k-web { --k: #ff44aa; }   .me-chat .k-deploy { --k: #ffaa00; } .me-chat .k-house { --k: #ff8a3d; } .me-chat .k-other { --k: #8fa5ac; }
+  .me-chat .chain .seg.bad { --k: #ff4444; }
+  .me-chat .chain .warn { position: absolute; right: 16px; bottom: 3px; font-size: .78rem; line-height: 1; color: #ffaa00; cursor: pointer; }   /* clear of the bubble's cut corner */
   .me-chat .chain-tip { position: absolute; left: 6px; right: 6px; bottom: 6px; z-index: 3; padding: 6px 8px; background: #000; border: 1px solid var(--dim-green-hi);
                         font: .74rem/1.35 ui-monospace, Consolas, monospace; color: #fff; white-space: pre-wrap; }
-  .me-chat .chain-tip .th { font-weight: 600; background: none; }
+  .me-chat .chain-tip .th { font-weight: 600; color: var(--k, #fff); }
   .me-chat .chain-tip .th.warn { color: #ffaa00; }
   .me-chat .chain-tip .kd { color: var(--muted); }
   .me-chat .chain-tip .fl { margin-top: 2px; }
-  .me-chat .chain-tip code.code { display: inline-block; margin-top: 3px; overflow-wrap: anywhere; }
+  .me-chat .chain-tip code.code { display: inline-block; margin-top: 3px; font-size: .72rem; overflow-wrap: anywhere; }
   .me-chat .turn .ck { float: right; margin: 0 0 2px 4px; padding: 0 6px; min-width: 0; font-size: .7rem; opacity: .55; clip-path: none; }
   .me-chat .turn .ck:hover, .me-chat .turn .ck[aria-expanded="true"] { opacity: 1; }
   .me-chat .turn .ck.flagged { color: #ffaa00; opacity: .9; }
