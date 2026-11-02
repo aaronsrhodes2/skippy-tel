@@ -95,11 +95,11 @@
       <button type="button" class="key cam" data-tel="chat:camera" aria-pressed="false" aria-label="Camera: photos, every camera, or the screen" title="Camera: photos, every camera, or the screen"><svg class="g" aria-hidden="true"><use href="#g-camera"/></svg><i class="lamp"></i></button>{% endif %}
       {% if chat_modes|length > 1 %}<button type="button" class="key brain-key" data-open="brain" data-tel="chat:mode" aria-label="Mode" title="Mode"><svg class="g" aria-hidden="true"><use href="#g-core"/></svg></button>{% endif %}
       {# the voice key (static/skippy-voice.js two modes): Typing listens only for "Skippy"; Hands-off listens and speaks until "thanks" #}
-      <button type="button" class="key voice" aria-pressed="false" aria-label="Typing: tap to talk" title="Typing: tap to talk"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg><i class="lamp"></i></button>
+      <button type="button" class="key voice" data-tel="chat:voice" aria-pressed="false" aria-label="Typing: tap to talk" title="Typing: tap to talk"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg><i class="lamp"></i></button>
       <button type="button" class="key" data-open="tools" data-tel="chat:tools"{% if 'tools' in buried %} hidden{% endif %} aria-label="Tools" title="Tools"><svg class="g" aria-hidden="true"><use href="#g-tools"/></svg></button>
       <span class="grow"></span>
       <button type="button" class="key stopk" hidden aria-label="Stop" title="Stop"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg><i class="lamp" data-s="on"></i></button>
-      <button type="submit" class="key send" aria-label="Send" title="Send (Enter; Shift+Enter for a new line)"><svg class="g" aria-hidden="true"><use href="#g-send"/></svg></button>
+      <button type="submit" class="key send" data-tel="chat:send" aria-label="Send" title="Send (Enter; Shift+Enter for a new line)"><svg class="g" aria-hidden="true"><use href="#g-send"/></svg></button>
     </div>
     <nav class="app-row" aria-label="Apps" hidden></nav>   {# a wide screen keeps the tray as a slim row under the box; a phone has the key #}
   </form>
@@ -139,7 +139,8 @@
     const voice = SkippyVoice.attach({gate: "{{ url_for('chat.voice_gate') }}", key: form.querySelector("button.voice"),
       box: msg, status: form.querySelector(".vstat"), onSend: () => form.requestSubmit(),          // hands-free: a pause ends it, a countdown sends it
       mode: () => (BRAINS.find(x => x.id === brain) || {}).mode,                                    // the voice follows the mode (the server decides which)
-      onHeard: (h) => heardLine(h)});                                                               // Hands-off: someone near you, in another language
+      onHeard: (h) => heardLine(h),                                                                 // Hands-off: someone near you, in another language
+      where: () => { try { return homeOn() && home.aloud() ? "the pods answer out loud, not this device" : ""; } catch (e) { return ""; } }});                                                               // Hands-off: someone near you, in another language
     // The agent (Private, Auto) answers in its own transcript; its finished reply comes back here so THIS voice says it: in Hands-off
     // every reply is spoken (summarised when long), in Typing none is. null = no answer is coming (it failed or was stopped).
     const hearAgent = () => { if (window.SkippyAgent) window.SkippyAgent.onReply = (t) => { quickSeq++; if (t == null) voice.resume(); else voice.say(t); }; };
@@ -710,7 +711,14 @@
     const agentOn = () => isAgent(brain) && !!agentView && !!window.SkippyAgent;
     // ── Home: the permanent house chat (the Captain only). Shown in the stage instead of the log or the agent; the box sends to the house. ──
     const homeView = root.querySelector(".home-view"), homeRow = root.querySelector(".chat-home");
-    const home = homeView && window.SkippyHome ? SkippyHome.attach({view: homeView, composer: msg, restore: msg.placeholder, glyph: (id) => glyph(id), say: (t) => flash(t),
+    // In Hands-off the house's answer closes the turn: the pods say it (then this mic listens again, after they finish, so it never
+    // hears them), or with Speak aloud off this device says it. Before 2026-11-02 the key sat at "Thinking..." for good.
+    const homeReply = (ev) => {
+      if (!voice.chatting()) return;
+      if (home.aloud()) setTimeout(() => voice.resume(), Math.min(20000, 1500 + 70 * ev.text.length));
+      else voice.say(ev.text);
+    };
+    const home = homeView && window.SkippyHome ? SkippyHome.attach({view: homeView, composer: msg, restore: msg.placeholder, glyph: (id) => glyph(id), say: (t) => flash(t), onReply: (ev) => homeReply(ev),
       urls: {events: "{{ url_for('housechat.home_chat_events') if is_admin else '' }}", send: "{{ url_for('housechat.home_chat_send') if is_admin else '' }}", forward: "{{ url_for('housechat.home_chat_forward') if is_admin else '' }}"}}) : null;
     const homeOn = () => !!home && home.isOpen();
     function leaveHome() {

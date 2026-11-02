@@ -5,11 +5,13 @@
 {% block glyph %}wheel{% endblock %}
 {% block head %}
 <style>
-  /* Drive (drive.py): six big keys, one screen, for the Tesla's browser. 3 x 2 on the car's wide screen, 2 x 3 upright.
+  /* Drive (drive.py): seven big keys, one screen, for the Tesla's browser. 4 x 2 on the car's wide screen, 2 x 4 upright (the star,
+     "add to favorites", came 2026-11-02; the last cell stays empty rather than one key stretched across).
      Skippy's key IS his face (the pods' own, static/skippy-face.js); the last key is the house's lamps. */
   #drive { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
-  #drive .deck { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 14px; }
-  @media (max-aspect-ratio: 1/1) { #drive .deck { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); } }
+  #drive .deck { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  #drive .deck > .unit:last-child { grid-column: auto; }
+  @media (max-aspect-ratio: 1/1) { #drive .deck { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(4, minmax(0, 1fr)); } }
   #drive .unit .g { width: 42%; max-width: 132px; stroke-width: 1.1; }
   #drive .unit .g.sub { position: absolute; right: 14%; bottom: 22%; width: 22%; max-width: 46px; aspect-ratio: 1; z-index: 1; opacity: .9; }
   #drive .unit .name { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -62,7 +64,7 @@
 {% endblock %}
 {% block content %}
 <section id="drive"
-         data-music-gate="{{ url_for('music.player_gate') }}" data-favorites="{{ url_for('music.favorites_list') }}" data-played="{{ url_for('music.favorites_played') }}"
+         data-music-gate="{{ url_for('music.player_gate') }}" data-favorites="{{ url_for('music.favorites_list') }}" data-played="{{ url_for('music.favorites_played') }}" data-fav-add="{{ url_for('music.favorites_add') }}"
          data-book-gate="{{ url_for('audiobooks.gate') }}" data-voice-gate="{{ url_for('chat.voice_gate') }}"
          data-send="{{ url_for('housechat.home_chat_send') }}" data-events="{{ url_for('housechat.home_chat_events') }}"
          data-ort="{{ url_for('static', filename='vendor/ort/') }}"
@@ -102,7 +104,12 @@
       <button class="hit play" type="button" aria-label="Play or pause"></button>
       <button class="hit next" type="button" aria-label="Next song, or 30 seconds on in the book"></button>
     </div>
-    <div class="unit" id="k-house" style="--accent: var(--green); --i: 5">
+    <div class="unit" id="k-fav" style="--accent: var(--amber); --i: 5">
+      <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
+      <svg class="g" aria-hidden="true"><use href="#g-star"/></svg>
+      <button class="hit" type="button" data-tel="drive:favorite" aria-label="Add this song to my favorites"></button>
+    </div>
+    <div class="unit" id="k-house" style="--accent: var(--green); --i: 6">
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
       <span class="lamps">{% for id, glyph, name in lamps %}<i data-lamp="{{ id }}" title="{{ name }}"><svg class="g" aria-hidden="true"><use href="#g-{{ glyph }}"/></svg></i>{% endfor %}</span>
       <button class="hit" type="button" aria-label="The house: what is up and reachable"></button>

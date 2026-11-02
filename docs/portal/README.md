@@ -694,6 +694,26 @@ Radiance (sigma-ground's own WebGL viewer) and Weapon vs. Armor (in Browser Game
 **On the bridge now:** the launcher, Browser Games (`/play`), Skippy chat, Game Servers, Bilby's Audio Service (`/music`), Nagatha's Video Service (`/video`), Admin (`/admin`, with its Graveyard and the server logs), the Dashboard (`/me`), and the Experiments inventory (`/experiments`, public: tiles as rows shown a screen at a time with `Bridge.PList`, a key that steps through the kinds, search, and an about panel; the tiles are rendered hidden as the page's data so a tap is still a `data-tel` tile tap).
 Still the old look, to move in batches: the demo pages themselves, request access, privacy.
 
+### Toggles, clickers and the lamps (2026-11-02)
+
+**A toggle is a hexagon, a clicker has the cut corner.** A toggle (any key with `aria-pressed`: Hands-off, the camera, Speak aloud,
+Bilby's shuffle and repeat) has exactly two looks: **lit** (filled, black glyph) when on, **dark** (outline) when off. Its glyph
+breathes while it is working (the voice key thinking), and nothing else changes; there are no lamps inside toggles. A clicker (a
+one-shot action: Shuffle library, the car's star, New chat) keeps the cut corner and its glyph breathes while its job runs
+(`SkippyKeys.busy(el, work)` in `static/keys.js`, at least 450 ms so a quick one is still seen). The styles are at the end of
+`static/bridge.css`. A key never turns green or black on hover: on a touch screen hover sticks to the last key tapped.
+
+**The lamps.** The dot in a control's top-left corner is the state of the thing behind it. A control whose thing has no state shows no
+lamp. Hovering (or long-pressing) a control names the state in its tooltip.
+
+| Lamp | Meaning |
+|---|---|
+| filled, breathing slowly | running (a game server up, music reachable, Skippy listening) |
+| hollow ring | standing by (up, nothing happening) |
+| amber ring, breathing fast | starting, or working on something (also a clicker that is busy) |
+| amber triangle | something is wrong (the house: one of its parts is not answering) |
+| red diamond, control dimmed | off or out of reach |
+
 ## Telemetry: what the portal records, and where it goes
 
 The Captain records how signed-in people use the portal (what gets opened, tapped and asked, what breaks), so he can

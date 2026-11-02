@@ -267,8 +267,22 @@
   }
   const key = (id, fn) => $(id + " .hit").addEventListener("click", fn);
   key("#k-book", () => { stopCar(); if (S.mode === "book" && !au.paused) stopHere(); else if (S.mode === "book" && au.src) play(); else playBook(); });
-  key("#k-disc", () => shuffle("discovery"));
-  key("#k-lib", () => shuffle("library"));
+  // a clicker that takes a moment says so (keys.js): the shuffles wait on the library and Spotify's mix before the first song
+  const busy = (id, work) => window.SkippyKeys ? SkippyKeys.busy($(id), work) : work();
+  key("#k-disc", () => busy("#k-disc", () => shuffle("discovery")));
+  key("#k-lib", () => busy("#k-lib", () => shuffle("library")));
+  // the star: this song into his favorites (the pool "Shuffle library" plays), Bilby's or a Spotify row
+  key("#k-fav", () => busy("#k-fav", async () => {
+    const it = (S.mode === "discovery" || S.mode === "library") ? S.q[S.qi] : null;
+    if (!it) { now("star", "Nothing playing to add: favorites are songs, not the book"); return; }
+    const track = it.path || it.uri;
+    const info = it.kind === "spotify" ? (S.sp.info.get(it.uri) || {}) : (S.lib.get(it.path) || {});
+    try {
+      await postJSON(cfg.favAdd, { track, title: info.t || "", artist: info.a || "", name: "the car" });
+      $("#k-fav").dataset.s = "on"; setTimeout(() => { delete $("#k-fav").dataset.s; }, 2500);
+      now("star", "In your favorites: " + (info.t || track) + (info.a ? " · " + info.a : ""));
+    } catch (e) { $("#k-fav").dataset.s = "warn"; setTimeout(() => { delete $("#k-fav").dataset.s; }, 4000); now("star", "Not saved: " + (e.message || e)); }
+  }));
   $("#k-play .hit.next").addEventListener("click", next);
   key("#k-play", () => {
     const row = S.sp.row;

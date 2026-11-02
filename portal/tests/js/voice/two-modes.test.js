@@ -71,7 +71,7 @@ test("Typing: without permission nothing listens until the key is tapped, and th
   await advance(t, 700);
   assert.equal(recorders.length, 0); assert.equal(gStreams.length, 0);                                 // never a prompt on load
   s.key._on.click(); await advance(t, 600);
-  assert.equal(s.voice.chatting(), true); assert.ok(listening()); assert.equal(s.label(), "Listening");
+  assert.equal(s.voice.chatting(), true); assert.ok(listening()); assert.equal(s.label(), "Listening · answers out loud on this device");   // Hands-off says where it answers
 });
 
 test("'Skippy, ...' switches to Hands-off: the reply is spoken, silence doesn't end it, 'thanks' goes back to Typing", async (t) => {

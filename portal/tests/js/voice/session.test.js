@@ -58,7 +58,7 @@ const speak = async (t, ms, v) => { level.v = v || 0.12; await advance(t, ms); l
 test("hearing you: the status shows a level while you speak, words appear in the box, a pause ends it, a countdown sends it", async (t) => {
   const s = setup(t);
   s.mic._on.click(); await advance(t, 600);                                         // opens the mic and learns the room
-  assert.equal(s.label(), "Listening");
+  assert.match(s.label(), /^Listening( · answers out loud on this device)?$/);
   assert.equal(gStreams[0].c.audio.echoCancellation, true);                          // asked for echo cancellation (music playing nearby)
   say = ["hello world"];                                                              // interims say a prefix of it, the final says all
   level.v = 0.12; await advance(t, 600);
@@ -96,7 +96,7 @@ test("saying stop during the count throws the message away and keeps listening",
   await advance(t, 1200); await speak(t, 900); await advance(t, 1900);
   assert.equal(s.label(), "Cancelled: go ahead"); assert.equal(s.box.value, "");        // not "send the thing stop": it is gone
   await advance(t, 1500);
-  assert.equal(s.label(), "Listening");                                                  // and he can simply say it again
+  assert.match(s.label(), /^Listening( · answers out loud on this device)?$/);                                                  // and he can simply say it again
   assert.deepEqual(s.sent, []);
 });
 
@@ -145,7 +145,7 @@ test("a conversation: after the reply is spoken the mic opens by itself for the 
   assert.equal(gStreams.length, 1); assert.ok(!listening());                             // nothing listens until he has answered (and it is the same microphone)
   s.voice.say("The answer, spoken.");                                                    // the reply lands (no speaker here: it ends at once)
   await advance(t, 1200);
-  assert.equal(gStreams.length, 1); assert.ok(listening()); assert.equal(s.label(), "Listening");   // listening again with no touch and no new permission
+  assert.equal(gStreams.length, 1); assert.ok(listening()); assert.match(s.label(), /^Listening( · answers out loud on this device)?$/);   // listening again with no touch and no new permission
   s.box.value = "";
   await talk(t, s, 1500, "second question");
   assert.deepEqual(s.sent, ["first question", "second question"]);
@@ -194,7 +194,7 @@ test("a brief line while the agent works is spoken but keeps the mic shut; the r
   assert.ok(!listening()); assert.equal(s.label(), "Skippy is still working on it…");   // still Skippy's turn
   await advance(t, 5000); assert.ok(!listening());
   s.voice.say("The bridge is up."); await advance(t, 1200);                               // the agent's answer
-  assert.ok(listening()); assert.equal(s.label(), "Listening");
+  assert.ok(listening()); assert.match(s.label(), /^Listening( · answers out loud on this device)?$/);
 });
 
 test("Skippy's own voice is never recorded as the Captain's next message", async (t) => {
@@ -265,7 +265,7 @@ test("starting a conversation turns his voice on by itself, and the reply is spo
   s.voice.say("A reply."); await advance(t, 100);
   assert.equal(recorders.length, before);                                                      // still speaking: nobody listens yet
   await advance(t, 900);
-  assert.ok(recorders.length > before && listening()); assert.equal(s.label(), "Listening");
+  assert.ok(recorders.length > before && listening()); assert.match(s.label(), /^Listening( · answers out loud on this device)?$/);
 });
 
 // ── standby: only "Skippy" wakes it ──
@@ -296,7 +296,7 @@ test("'Skippy.' alone wakes it and the next utterance is the message", async (t)
   s.ear._on.click(); await advance(t, 700);
   say = []; say[recorders.length - 1] = "Skippy.";
   await speak(t, 1500); await advance(t, 2200);
-  assert.equal(s.label(), "Listening"); assert.deepEqual(s.sent, []);                          // awake, waiting for what he wants
+  assert.match(s.label(), /^Listening( · answers out loud on this device)?$/); assert.deepEqual(s.sent, []);                          // awake, waiting for what he wants
   say = []; say[recorders.length - 1] = "what time is it";
   await speak(t, 1500); await advance(t, 2000); await advance(t, 4300);
   assert.deepEqual(s.sent, ["what time is it"]);
@@ -323,7 +323,7 @@ test("a short noise is never sent to Whisper, and the mic key during standby jus
   await speak(t, 200); await advance(t, 2200);                                                  // a click or a cough
   assert.equal(sttCalls.length, 0);
   s.mic._on.click(); await advance(t, 600);
-  assert.equal(s.voice.chatting(), true); assert.equal(s.label(), "Listening");                 // no need to say the word
+  assert.equal(s.voice.chatting(), true); assert.match(s.label(), /^Listening( · answers out loud on this device)?$/);                 // no need to say the word
 });
 
 test("a blocked microphone says so instead of failing silently", async (t) => {

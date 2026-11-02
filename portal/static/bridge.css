@@ -564,3 +564,25 @@ blockquote.quote { margin: 0 0 6px; padding: 1px 0 1px 8px; border-left: 3px sol
 .home-line { display: flex; align-items: center; gap: 6px; margin: 4px 14px 0; font-size: .76rem; color: var(--muted, #8aa); }
 .home-line .g { width: 14px; height: 14px; flex: none; } .home-line.note { color: var(--amber, #ffaa00); }
 .chat-bridge .chat-home { margin: 0 0 8px; }
+
+/* ── Toggles and clickers (the Captain, 2026-11-02: "toggles and clickers are different shapes") ──────────────────────
+   A TOGGLE is a key with aria-pressed: a hexagon with exactly two looks, lit (filled, glyph black) when on and dark when off,
+   whatever else it is doing. A CLICKER (a one-shot action) keeps the cut corner; while its job runs it carries data-busy
+   (static/keys.js, SkippyKeys.busy) and its glyph breathes. A toggle that is working (the voice key thinking) breathes the same way.
+   Lamps inside toggles are gone: the fill says on or off, the breath says working, nothing else. */
+.key[aria-pressed]::before, .key[aria-pressed]::after { clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
+.key[aria-pressed="true"]::after, .keybar .key[aria-pressed="true"]::after { background: var(--accent); }
+.key[aria-pressed="true"] .g, .keybar .key[aria-pressed="true"] .g { color: #000; }
+.keybar .key[aria-pressed="false"].lit::after, .key[aria-pressed="false"]::after { background: #05090b; }
+.keybar .key[aria-pressed="false"].lit .g, .key[aria-pressed="false"] .g { color: var(--accent); }
+.key[aria-pressed] .lamp, .keybar .key[aria-pressed] .lamp { display: none; }
+.key[aria-pressed][data-s="boot"] .g, .key[aria-pressed="false"][data-s="on"] .g,
+.key[data-busy] .g, .unit[data-busy] .g { animation: breathe .9s ease-in-out infinite; }
+/* the generic page look (button:hover goes green with a black glyph) never reaches a key: on a touch screen hover sticks, and a
+   key left black after Hands-off was that (2026-11-02) */
+.key:hover, button.key:hover { background: transparent; color: var(--accent); }
+
+/* A unit's lamp is shown only when it says something: no state, no lamp (Drive's Book, Shuffle and Play had a filled dot that
+   meant nothing). What each look means is in its tooltip (keys.js) and docs/portal/README.md → The lamps. */
+.unit:not([data-s]):not([data-busy]) > .lamp { visibility: hidden; }
+.unit[data-busy] > .lamp { visibility: visible; background: transparent; box-shadow: inset 0 0 0 2px var(--amber); animation: breathe .9s ease-in-out infinite; }

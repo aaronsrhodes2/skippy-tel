@@ -301,6 +301,7 @@
 {% endif %}
 {# One-click copy for everything people are expected to copy (codes, addresses, passwords, commands, blocks): see the header of the file. #}
 <script src="{{ url_for('static', filename='copy.js') }}" defer></script>
+<script src="{{ url_for('static', filename='keys.js') }}"></script>{# SkippyKeys.busy and the lamps' tooltips: not deferred, page scripts call it #}
 {% if user and telemetry_on %}
 <script>
   /* Usage beacon (portal/telemetry_web.py): a tap on anything marked data-tel (a tile, a demo) is reported, signed-in

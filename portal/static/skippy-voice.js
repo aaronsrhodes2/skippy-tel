@@ -331,9 +331,10 @@
         for (;;) {                                               // an utterance, then a count where speaking again continues it
           const seg = ctl.seg = {};
           seg.idleMs = first ? ((o && o.idleMs) || 10000) : SEND_DELAY_MS;
-          seg.level = function (lv, speaking) { if (speaking) paintStatus("Hearing you", lv, true); else if (first) paintStatus("Listening", lv, true); };   // (the count paints itself, in tick)
+          const listening = chat ? "Listening · " + where() : "Listening";   // Hands-off says where the answer will be heard
+          seg.level = function (lv, speaking) { if (speaking) paintStatus("Hearing you", lv, true); else if (first) paintStatus(listening, lv, true); };   // (the count paints itself, in tick)
           seg.tick = function (left, lv) {
-            if (first) { paintStatus("Listening", lv, true); return; }
+            if (first) { paintStatus(listening, lv, true); return; }
             paintStatus("Sending in " + Math.ceil(left / 1000) + ": tap, type or say stop to cancel", lv, true);
           };
           seg.onSpeech = function () { hearing = true; paint(mic, "on"); paintStatus("Hearing you", 0, true); };
@@ -377,7 +378,7 @@
       } finally {
         if (session === ctl) session = null;
         if (!chat && !(standbyOn && builtinWake)) mic_.close();  // a conversation or standby keeps the one open microphone
-        if (!chat) paint(mic, null);
+        if (!chat) { if (twoMode) paintKey(); else paint(mic, null); }   // two modes: back to Typing's own look, not a bare key
         if (!chat) setTimeout(function () { if (!session && Date.now() >= keepUntil) paintStatus(null); }, 600);
       }
     }
@@ -481,13 +482,20 @@
       } catch (e) { unsure(); }                                   // no Permissions API: after the first tap (no question if the site is allowed)
     }
 
+    // Where a Hands-off answer is heard (the Captain, 2026-11-02: "if I should expect voice back or not through the device I am on"):
+    // the page can say (opts.where: the Home chat, whose answers come from the pods); otherwise it is this device.
+    function where() {
+      const w = opts.where ? opts.where() : "";
+      return w || "answers out loud on this device";
+    }
     // ── the two-mode key ──
     function paintKey() {
       if (!twoMode || !mic) return;
       const hands = chat;
       mic.setAttribute("aria-pressed", hands ? "true" : "false");
-      const use = mic.querySelector && mic.querySelector("use"); if (use) use.setAttribute("href", hands ? "#g-mic" : "#g-ear");
-      mic.title = mic.ariaLabel = hands ? 'Hands-off: say "thanks" (or tap) to go back to typing'
+      // one glyph, two looks (a toggle is a hexagon, lit or dark: bridge.css); the ear swapped for a mic was one of the "extra modes"
+      const use = mic.querySelector && mic.querySelector("use"); if (use) use.setAttribute("href", "#g-ear");
+      mic.title = mic.ariaLabel = hands ? 'Hands-off (' + where() + '): say "thanks" (or tap) to go back to typing'
         : micAllowed ? 'Typing: say "Skippy" (or tap) for hands-off' : "Typing: tap to talk (the browser asks for the microphone once)";
       if (!session || !session.standby || hands) paint(mic, hands ? "on" : micAllowed ? "idle" : null);
       else paint(mic, "idle");

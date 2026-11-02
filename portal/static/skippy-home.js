@@ -70,7 +70,12 @@
         if (!r.ok) throw new Error(String(r.status));
         const d = await r.json(), stick = atEnd() || !loaded;
         if (!loaded) flow.replaceChildren();
-        d.events.forEach(ev => { if (ev.seq > seq) { flow.append(turn(ev, opts.glyph)); seq = ev.seq; } });
+        d.events.forEach(ev => {
+          if (ev.seq <= seq) return;
+          flow.append(turn(ev, opts.glyph)); seq = ev.seq;
+          // a new answer from the house (not the backlog shown on opening): the page's voice follows it (_chat.html, Hands-off)
+          if (loaded && opts.onReply && ev.text && ev.kind === "said") opts.onReply(ev);
+        });
         seq = Math.max(seq, d.seq || 0);
         if (!loaded && !d.events.length) { const e = document.createElement("div"); e.className = "home-line note"; e.textContent = "Nothing has been said to Skippy at a pod yet."; flow.append(e); }
         loaded = true;
@@ -83,6 +88,7 @@
       if (open && opts.composer) opts.composer.placeholder = mode === "say" ? "Say to Skippy, as if spoken in the room" : "Make Skippy say";
     }
     modes.forEach(b => b.addEventListener("click", () => { mode = b.dataset.mode; paintMode(); }));
+    const aloud = () => speak.getAttribute("aria-pressed") === "true";
     speak.addEventListener("click", () => speak.setAttribute("aria-pressed", speak.getAttribute("aria-pressed") === "true" ? "false" : "true"));
     fwd.addEventListener("click", async () => {
       try {
@@ -106,6 +112,7 @@
 
     return {
       isOpen: () => open,
+      aloud,                                     // the Speak aloud key: the pods say the answer (off: it only appears here)
       send,
       open() {
         if (open) return;
