@@ -51,7 +51,7 @@ def matter_path(env=os.environ) -> Path:
 
 
 def generac_folder(env: dict) -> Path:
-    """state/generac: Mobile Link's session cookies and the hub's generator mirror (generac.py)."""
+    """state/generac: the hub's generator mirror (generac.py)."""
     return Path(env.get("GENERAC_STATE") or Path(__file__).resolve().parents[2] / "state" / "generac")
 
 
@@ -61,7 +61,7 @@ def build_house(env: dict):
     HomeKit (paired with homectl.py), Matter (skippy-core's controller: MATTER_URL), the garage door's ratgdo (GARAGE_ESPHOME), Leviton's cloud (LEVITON_EMAIL + LEVITON_PASSWORD),
     the Nest (Google Device Access through the portal's Google grant: SKIPPY_HOME_TOKEN; SKIPPY_NEST=0 leaves it out),
     the cameras (read only: Frigate on skippy-core, FRIGATE_URL, and the Reolink doorbell's button, REOLINK_DOORBELL; SKIPPY_CAMS=0 leaves them out),
-    the Generac generator (read only, Mobile Link's cloud, once `python generac.py signin` has made state/generac/session.json; SKIPPY_GENERAC=0 leaves it out)
+    the Generac generator (read only, local: genmon on the generator's Pi at GENMON_URL; SKIPPY_GENERAC=0 leaves it out)
     and Home Assistant (HASS_URL + HASS_TOKEN)."""
     sensitive = env.get("HASS_SENSITIVE") == "1"
     parts = []
@@ -88,11 +88,9 @@ def build_house(env: dict):
         part = cams.from_env(env, sensitive=sensitive)
         if part is not None:
             parts.append(part)
-    if env.get("SKIPPY_GENERAC", "1") != "0" and (env.get("GENERAC_SESSION_COOKIE") or (generac_folder(env) / "session.json").is_file()
-                                                       or (generac_folder(env) / "gen.json").is_file()):
-        import generac                                              # noqa: PLC0415  the standby generator on Generac's Mobile Link cloud (generac.py)
-        parts.append(generac.Generac(generac.Session(generac_folder(env), env.get("GENERAC_SESSION_COOKIE", "")), sensitive=sensitive,
-                                     owner=env.get("SKIPPY_GENERAC_OWNER") == "1"))  # only the hub polls, the rest read its mirror
+    if env.get("SKIPPY_GENERAC", "1") != "0" and (env.get("GENMON_URL") or (generac_folder(env) / "gen.json").is_file()):
+        import generac                                              # noqa: PLC0415  the standby generator through genmon on its Pi (generac.py)
+        parts.append(generac.from_env(env, generac_folder(env), sensitive=sensitive))   # only the hub polls, the rest read its mirror
     if env.get("HASS_URL") and env.get("HASS_TOKEN"):               # or Home Assistant, if he runs one (the vault holds both)
         from hass import Hass                                       # noqa: PLC0415
         parts.append(Hass(env["HASS_URL"], env["HASS_TOKEN"], sensitive=sensitive))

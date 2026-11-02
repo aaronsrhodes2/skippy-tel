@@ -648,7 +648,7 @@
   ]
  },
  "generac": {
-  "for": "The Generac standby generator (G0071780, Evolution controller) through Generac's Mobile Link cloud, read only, with his own sign-in (generac.py): ready / running / exercising, battery, faults, maintenance due.",
+  "for": "The Generac standby generator (G0071780, Evolution 2.0) read locally through genmon on a Pi wired to its controller (generac.py, GENMON_URL): no Generac account, keeps answering in an outage. Ready / running / exercising, battery, alarms, service due.",
   "used_by": [
    "the house tools (\"is the generator running?\")",
    "the hub's generator watch (an outage and the power back said on the pods and DMed)",

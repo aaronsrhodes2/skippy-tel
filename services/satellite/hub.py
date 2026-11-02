@@ -1616,7 +1616,7 @@ def main(argv=None) -> int:
     from ear import load_env                                    # noqa: PLC0415
     env = load_env()
     env["CAMS_OWNER"] = "1"                                     # the hub is the one that listens to the cameras and says what they see (cams.py)
-    env["SKIPPY_GENERAC_OWNER"] = "1"                           # ... and the one polling Mobile Link for the generator (generac.py)
+    env["SKIPPY_GENERAC_OWNER"] = "1"                           # ... and the one polling genmon for the generator (generac.py)
     try:
         rooms = parse_rooms(env.get("SATELLITE_ROOMS", ""))
     except ValueError as e:
