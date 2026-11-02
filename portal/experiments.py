@@ -256,6 +256,13 @@ RADIANCE_SHOWCASE_SNIPPET = """
 # Runs come in series (run.json "series", "tuned" when absent), newest series first, each in the order its runs happened. The first
 # eleven are the tuned branch: by the Captain's call (2026-10-31) its tooling had tainted the comparison, so the fresh start began.
 MINEBENCH_SERIES = (
+    ("rematch", "Rematch", "Best 4 of 7, started 2026-11-01, after Haiku won the head to head 4-0: the same two players, the same vanilla "
+     "setup, message and prompt, plus the generic help purple got that day (no training, no prompt change, nothing about trains): "
+     "eyes (Skippy Core's vision model describes any picture the coder opens) and the stop gate's work check, which won't let a "
+     "run end while MineBench's own runtime fails its build, before it has opened a picture of its latest version, or before it "
+     "has spent an 80K output-token budget (about what Haiku spent a round), each a few times at most. Only the coder plays "
+     "again (the Captain: Haiku's builds are enough): each new build faces Haiku's from the same round of the head to head "
+     "(rounds 5-7, if needed, reuse Haiku's 1-3), judged blind as before."),
     ("h2h", "Head to head", "Best 4 of 7, started 2026-10-31: Claude Haiku 5.5 against Skippy Core's coder, both as vanilla agents (Claude "
      "Code with purple's system prompt and an empty setup), the same message, MineBench's full tool-mode prompt, effort high, the same "
      "131K window, \"a choo-choo train\" every round. Each round is judged blind by a separate Claude agent with MineBench's own "
