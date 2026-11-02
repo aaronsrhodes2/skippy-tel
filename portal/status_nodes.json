@@ -77,6 +77,22 @@
    "answer": "{\"km\": <Valhalla's km>, \"minutes\": <its minutes>, \"legs\": [...]}"
   }
  },
+ "frigate": {
+  "for": "The cameras' recorder on skippy-core (Frigate, open source): the Reolink PoE doorbell and cameras, all local, no vendor account. Records around what it sees, finds people and cars on the CPU, keeps a snapshot of each. Its API and page are tailnet only, port 7355.",
+  "used_by": [
+   "the hub's camera watch (cams.py): someone outside said on the pods, a snapshot to his Discord",
+   "the house tools (\"is anyone at the front door?\")",
+   "his live view and recordings (http://skippy-core:7355)"
+  ]
+ },
+ "cams": {
+  "for": "The cameras as part of the house (services/satellite/cams.py): Frigate's events from skippy-core and the Reolink doorbell's own button, heard on the LAN. Read only.",
+  "used_by": [
+   "the pods (\"Someone's at the front door.\" in every room)",
+   "his Discord (each announcement with the camera's snapshot, through the portal)",
+   "home_state (last person, last car, last doorbell press)"
+  ]
+ },
  "valhalla": {
   "for": "The router behind the road door: distance and drive time by car between places (no live traffic), from road tiles it built once from OpenStreetMap's California extract.",
   "used_by": [

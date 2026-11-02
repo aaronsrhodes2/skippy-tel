@@ -27,23 +27,6 @@ FILLER = ("the", "a", "my", "all", "every", "everything", "in", "on", "of", "stu
 GROUP_ACTIONS = ("on", "turn_on", "off", "turn_off", "toggle", "set_brightness")
 
 
-def camera_words(a: dict, now: float | None = None) -> str:
-    """", battery 82 percent, last motion 12 minutes ago, last doorbell press 2 hours ago" from a camera's attributes."""
-    import time                                                          # noqa: PLC0415
-    from ringcam import ago                                              # noqa: PLC0415
-    now = time.time() if now is None else now
-    out = ""
-    if isinstance(a.get("battery"), (int, float)):
-        out += f", battery {int(a['battery'])} percent"
-    if a.get("last_motion"):
-        out += f", last motion {ago(now - a['last_motion'])}"
-    if a.get("last_ding"):
-        out += f", last doorbell press {ago(now - a['last_ding'])}"
-    elif a.get("doorbell"):
-        out += ", no doorbell press lately"
-    return out
-
-
 class HomeError(Exception):
     """The house did not answer, or refused. The message is safe to say aloud."""
 
@@ -184,7 +167,8 @@ class House:
                 extra = f", {int(pos)} percent of the way"
             if a.get("obstructed"):
                 extra += ", and its safety sensor says something is in the way"
-        if self._domain(s) == "camera":                                  # the Ring cameras (ringcam.py): battery, last motion, last press
+        if self._domain(s) == "camera":                                  # the cameras (cams.py): last person, last car, last press
+            from cams import camera_words                                # noqa: PLC0415
             extra = camera_words(a)
         if self._domain(s) == "generator":                               # the Generac (generac.py): battery, last exercise, faults, maintenance
             from generac import generator_words                          # noqa: PLC0415

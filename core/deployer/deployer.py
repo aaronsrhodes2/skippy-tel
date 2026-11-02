@@ -21,7 +21,8 @@ REPO_DIR, REMOTE, BRANCH, CI_LOCAL (the CI state folder; "" = no CI gate: the si
 CORE_STATE, MODELS_ROOT, CORE_GPU (0 = no /dev/dri: the simulator), CORE_MATTER (1 = the house's Matter controller too:
 core/compose.matter.yml, set up by core/install/matter.sh, which also writes MATTER_ARGS), CORE_TESLA (1 = the Captain's car: TeslaMate
 and the car reader, core/compose.tesla.yml, set up by core/install/tesla.sh), CORE_ROUTES (1 = roads and addresses: Valhalla and Nominatim from
-OpenStreetMap's California map, core/compose.routes.yml, set up by core/install/routes.sh), CORE_POPUPS3D (1 = the quality 3D
+OpenStreetMap's California map, core/compose.routes.yml, set up by core/install/routes.sh), CORE_CAMS (1 = the cameras: Frigate,
+core/compose.cams.yml, set up by core/install/cams.sh), CORE_POPUPS3D (1 = the quality 3D
 and video pop-ups too: core/popups-3d/compose.yml, a ~20 GB ROCm image, so never in the simulator or CI), CORE_VAULT_ENV, MUSIC_ROOT, SMOKE_WAIT,
 LLM_API_KEY (llama-swap's key: the render, the shim and the smoke test all use it; "" = an open llm port).
 
@@ -57,7 +58,7 @@ DEFAULTS = {
     "REPO_DIR": "/opt/skippy-core/repo", "REMOTE": "origin", "BRANCH": "main",
     "CORE_FULL": "", "CORE_STATE": "/var/lib/skippy-core", "MODELS_ROOT": "/srv/models", "CORE_GPU": "1",
     "CORE_VAULT_ENV": "/etc/skippy-core/vault.env", "MUSIC_ROOT": "/srv/music", "SMOKE_WAIT": "900",
-    "OLLAMA_MODEL": "qwen3:8b", "LLM_API_KEY": "", "CORE_MATTER": "0", "MATTER_ARGS": "", "CORE_TESLA": "0",
+    "OLLAMA_MODEL": "qwen3:8b", "LLM_API_KEY": "", "CORE_MATTER": "0", "MATTER_ARGS": "", "CORE_TESLA": "0", "CORE_CAMS": "0",
     "CORE_ROUTES": "0", "CORE_POPUPS3D": "0", "CI_LOCAL": "", "CI_NAME": "skippy-tel",
     "CD_PY": "/opt/skippy-core/cd/cd.py", "RETRY_S": "1800", "QUIET": "1",
     "DOCTOR_COPY": "/opt/skippy-core/doctor/deployer.py",
@@ -169,7 +170,7 @@ class Deployer:
         e = dict(os.environ)
         gpu = self.s["CORE_GPU"] != "0"
         e.update({k: self.s[k] for k in ("MODELS_ROOT", "CORE_STATE", "CORE_VAULT_ENV", "MUSIC_ROOT", "OLLAMA_MODEL",
-                                         "LLM_API_KEY", "CORE_MATTER", "MATTER_ARGS", "CORE_TESLA", "CORE_ROUTES")})
+                                         "LLM_API_KEY", "CORE_MATTER", "MATTER_ARGS", "CORE_TESLA", "CORE_ROUTES", "CORE_CAMS")})
         e["CORE_FULL"] = full
         e.setdefault("GPU_LAYERS", "999" if gpu else "0")
         if gpu:
@@ -228,6 +229,8 @@ class Deployer:
             files += ["-f", "core/compose.tesla.yml"]
         if self.s["CORE_ROUTES"] == "1":
             files += ["-f", "core/compose.routes.yml"]
+        if self.s["CORE_CAMS"] == "1":
+            files += ["-f", "core/compose.cams.yml"]
         if self.s["CORE_POPUPS3D"] == "1":
             files += ["-f", "core/popups-3d/compose.yml"]
         return files

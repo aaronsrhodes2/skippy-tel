@@ -18,6 +18,7 @@ Checks, in order (each prints ok/FAIL and its time; exit 1 if any fails):
   car-fleet   (only when CORE_TESLA=1) the guard's /health answers (core/car-fleet); not ready (no tokens yet) is said, not failed
   routes      (only when CORE_ROUTES=1) the road door's /health answers (core/routes); not ready (the first map import, about an hour)
               is said, not failed
+  cams        (only when CORE_CAMS=1) Frigate's /api/stats answers and every camera sends frames (compose.cams.yml)
 
 URLs: SMOKE_SHIM (http://127.0.0.1:11434), SMOKE_LLM (http://127.0.0.1:8080);
 the slot list comes from ${CORE_STATE}/llm/shim.json (or SMOKE_NAMES).
@@ -38,6 +39,7 @@ LLM = os.environ.get("SMOKE_LLM", "http://127.0.0.1:8080").rstrip("/")
 MATTER = os.environ.get("SMOKE_MATTER", "http://127.0.0.1:5580").rstrip("/")
 CAR = os.environ.get("SMOKE_CAR", "http://127.0.0.1:7351").rstrip("/")
 ROUTES = os.environ.get("SMOKE_ROUTES", "http://127.0.0.1:7354").rstrip("/")
+FRIGATE = os.environ.get("SMOKE_FRIGATE", "http://127.0.0.1:7355").rstrip("/")
 CAR_FLEET = os.environ.get("SMOKE_CAR_FLEET", "http://127.0.0.1:7353").rstrip("/")
 DEFAULT = os.environ.get("OLLAMA_MODEL", "qwen3:8b")
 TIMEOUT = float(os.environ.get("SMOKE_TIMEOUT", "300"))   # CPU stand-ins, cold loads: generous
@@ -225,6 +227,17 @@ def wait_ready(seconds: float) -> None:
         time.sleep(min(3, left))
 
 
+def check_frigate() -> str:
+    """The cameras' recorder (compose.cams.yml): its API answers, and each camera sends frames (a camera at 0 fps is unplugged or refusing)."""
+    with urllib.request.urlopen(f"{FRIGATE}/api/stats", timeout=10) as r:      # noqa: S310 — 127.0.0.1
+        stats = json.loads(r.read().decode("utf-8"))
+    cams = stats.get("cameras") or {}
+    dead = [n for n, c in cams.items() if not (c or {}).get("camera_fps")]
+    if dead:
+        raise Fail(f"no frames from {', '.join(dead)}")
+    return f"{len(cams)} camera(s) sending frames"
+
+
 def run(only: list[str] | None = None, wait: float = 0) -> list[dict]:
     results = []
     if wait:
@@ -236,7 +249,7 @@ def run(only: list[str] | None = None, wait: float = 0) -> list[dict]:
             return [{"check": "ready", "ok": False, "detail": str(e), "s": round(time.monotonic() - t0, 1)}]
     extra = ([("matter", check_matter)] if os.environ.get("CORE_MATTER") == "1" else []) +             ([("car", check_car),
                                                                                                ("car-fleet", lambda: check_door(url=CAR_FLEET))] if os.environ.get("CORE_TESLA") == "1" else []) + \
-        ([("routes", lambda: check_door(url=ROUTES))] if os.environ.get("CORE_ROUTES") == "1" else [])
+        ([("routes", lambda: check_door(url=ROUTES))] if os.environ.get("CORE_ROUTES") == "1" else []) +         ([("cams", check_frigate)] if os.environ.get("CORE_CAMS") == "1" else [])
     for name, fn in CHECKS + extra:
         if only and name not in only:
             continue
