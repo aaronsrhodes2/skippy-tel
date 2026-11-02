@@ -117,6 +117,13 @@ elif mode == "orphan":                                # hangs, and a grandchild 
                       "    time.sleep(0.1)\n"])
     out(type="assistant", message={"content": [{"type": "text", "text": "starting"}]})
     beat_forever(os.environ.get("FAKE_HEARTBEAT"))
+elif mode == "chain":                                  # two calls with ids, the second one failing, then words that claim a push
+    out(type="assistant", message={"content": [{"type": "tool_use", "id": "u1", "name": "Bash", "input": {"command": "python -m pytest -q"}}]})
+    out(type="user", message={"content": [{"type": "tool_result", "tool_use_id": "u1", "content": "3 passed"}]})
+    out(type="assistant", message={"content": [{"type": "tool_use", "id": "u2", "name": "Read", "input": {"file_path": "nope.py"}}]})
+    out(type="user", message={"content": [{"type": "tool_result", "tool_use_id": "u2", "is_error": True, "content": "no such file"}]})
+    out(type="assistant", message={"content": [{"type": "text", "text": "Tests pass, and I pushed it."}]})
+    out(type="result", is_error=False, result="ok", session_id="sess-1")
 elif mode == "say":                                    # one text block, FAKE_SAY verbatim (newlines and all)
     out(type="assistant", message={"content": [{"type": "text", "text": os.environ.get("FAKE_SAY", "")}]})
     out(type="result", is_error=False, result="ok", session_id="sess-1")

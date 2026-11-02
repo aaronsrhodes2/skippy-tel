@@ -50,6 +50,7 @@ import new_folder
 import projects as projects_mod
 import run_state
 import sdk_engine
+import toolchain
 
 MODEL = "claude-sonnet-5-5"        # Sonnet 5.5, on purpose: nothing else picks it (was Opus until 2026-10-10)
 EFFORT = "medium"                  # and its effort level: also fixed here, never from the environment or a request
@@ -450,13 +451,41 @@ class Run:
         self.retries = 0                       # tries that ended in a held failure (or a bridge that died under it)
         self.resumes = 0                       # how many bridges died under it (Workshop.load)
         self.session_seen: str | None = None   # Claude Code's session for this run as soon as it is known: a retry resumes it
+        self.calls = toolchain.Calls()         # each tool call's time and outcome, for the reply's toolchain (the `chain` event at the end)
+        self._chained = False
 
-    def emit(self, event: dict) -> None:
+    def emit(self, event: dict) -> int | None:
+        """Add an event; its index in the list, or None when the list is full."""
+        index = None
         with self._cond:
             if len(self.events) < MAX_EVENTS:
+                index = len(self.events)
                 self.events.append(event)
             self._cond.notify_all()
         self._changed(False)
+        return index
+
+    def tool_call(self, name: str, args, use_id: str = "", detail: str = "") -> None:
+        """The agent called a tool: its activity line, and the start of its timing (the result, Calls.ended, closes it)."""
+        index = self.emit({"t": "tool", "name": name, "detail": detail})
+        if index is not None:
+            self.calls.started(index, use_id, name, args)
+
+    def _chain(self) -> None:
+        """The run's toolchain, once, as its last event before it reads as done (toolchain.chain_event)."""
+        if self._chained:
+            return
+        self._chained = True
+        try:
+            with self._cond:
+                events = list(self.events)
+            chain = toolchain.chain_event(events, self.calls)
+        except Exception:  # noqa: BLE001 - the strip is a bonus; it must never stop a run from ending
+            return
+        if chain is not None:
+            with self._cond:
+                if len(self.events) < MAX_EVENTS + 1:          # one place past the cap is kept for it: the chain says what the cut-off run did
+                    self.events.append(chain)
 
     def finish(self, ok: bool, error: str | None = None) -> None:
         if not ok and not self.cancelled and self.retry_when is not None and self.retry_when(error):
@@ -470,6 +499,7 @@ class Run:
                 hook(self)
             except Exception:  # noqa: BLE001 — proof of a push is a bonus; it must never stop a run from ending
                 pass
+        self._chain()
         with self._cond:
             self.done, self.ok, self.error, self.finished_at = True, ok, error, time.time()
             self._cond.notify_all()
@@ -1336,7 +1366,7 @@ class Workshop:
                     # Something else lives there: refuse rather than clone into (or over) it.
                     run.finish(False, f"{clone} exists and isn't a git clone, so I won't work in it")
                     return False
-                run.emit({"t": "tool", "name": "git", "detail": f"cloning {project.repo} for the first time"})
+                run.emit({"t": "tool", "name": "git", "detail": f"cloning {project.repo} for the first time", "by": "bridge"})
                 out = self._git("clone", project.url, clone)
                 if out.returncode != 0:
                     run.finish(False, "couldn't clone the repo: " + redact(out.stderr.strip())[:300])
@@ -1346,7 +1376,7 @@ class Workshop:
             # nothing ever stops the pull (2026-10-29 the clone sat 7 commits behind main; 2026-11-01 "not pulling" kept a turn on stale code).
             said = self._sync_clone(clone, run.task)
             if said:
-                run.emit({"t": "tool", "name": "git", "detail": said})
+                run.emit({"t": "tool", "name": "git", "detail": said, "by": "bridge"})
         except (OSError, subprocess.SubprocessError) as exc:
             run.finish(False, f"git isn't working: {exc}")
             return False
@@ -1769,7 +1799,11 @@ class Workshop:
                             run.emit({"t": "text", "text": pending})
                             pending = None
                         name = str(block.get("name") or "tool")
-                        run.emit({"t": "tool", "name": name, "detail": tool_detail(name, block.get("input"))})
+                        run.tool_call(name, block.get("input"), str(block.get("id") or ""), tool_detail(name, block.get("input")))
+            elif kind == "user" and not evt.get("parent_tool_use_id"):   # the tools' results: how long each call took, and whether it failed
+                for block in (evt.get("message") or {}).get("content") or []:
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        run.calls.ended(str(block.get("tool_use_id") or ""), bool(block.get("is_error")))
             elif kind == "result":
                 if evt.get("is_error"):
                     # The words are in `result`, or (claude 2.1.285 for a session it cannot find) only in `errors`.

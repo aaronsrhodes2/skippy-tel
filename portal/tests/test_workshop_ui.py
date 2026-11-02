@@ -141,7 +141,7 @@ class FakeDate extends Date { static now() { return now; } }
 class El {
   constructor(tag) {
     this.tag = tag; this.children = []; this.own = ""; this.className = ""; this.hidden = false; this.disabled = false;
-    this.value = ""; this.on = {}; this.cls = new Set(); this.scrollTop = 0; this.scrollHeight = 0; this.focused = 0;
+    this.value = ""; this.on = {}; this.cls = new Set(); this.scrollTop = 0; this.scrollHeight = 0; this.focused = 0; this.style = {};
     const self = this;
     this.classList = {toggle(c, on) { if (on) self.cls.add(c); else self.cls.delete(c); }, contains: (c) => self.cls.has(c)};
   }
@@ -278,6 +278,12 @@ function snap() {
       return out;
     })(e["ps-flow"], []),
     shipPolls: calls.filter(c => c.route === "ship").length, notify: e["ps-notify"].checked,
+    chains: e["ps-flow"].children.map(b => {                          // each bubble's toolchain: its strip's segments, its key, its list
+      const strip = b.children.find(c => /^chain( |$)/.test(String(c.className))), key = b.children.find(c => String(c.className).indexOf("ck") === 0);
+      const list = b.children.find(c => String(c.className).indexOf("copy chain-list") === 0);
+      return strip ? {cls: strip.className, segs: strip.children.map(c => c.className), key: key ? key.textContent : null, list: list ? list.own : null,
+                      keyIndex: b.children.indexOf(key), stripLast: b.children[b.children.length - 1] === strip} : null;
+    }),
     imgs: (function walk(n, out) { if (n.tag === "img") out.push({src: n.src, alt: n.alt}); (n.children || []).forEach(c => walk(c, out)); return out; })(e["ps-flow"], []),
   };
 }
@@ -285,6 +291,7 @@ function snap() {
 (async () => {
   globalThis.requestAnimationFrame = (fn) => fakeSetTimeout(fn, 0);     // the transcript defers its scroll one frame (templates/_workshop.html scrollNow)
   if (input.withWindow) globalThis.window = {dispatchEvent() {}};     // inside the one chat (templates/_chat.html): window.SkippyAgent exists
+  if (input.chainPath) (globalThis.window = globalThis.window || {dispatchEvent() {}}).SkippyChain = require(input.chainPath);   // the strip (static/skippy-chain.js)
   new Function("document", "localStorage", "crypto", "fetch", "setTimeout", "clearTimeout", "setInterval", "confirm",
                "AbortController", "Date", "location", "Bridge", "SkippyVoice", "SkippyMd", "SkippyQueue", input.script)(
     document, localStorage, crypto, fakeFetch, fakeSetTimeout, fakeClearTimeout, fakeSetInterval, confirm, FakeAbort, FakeDate, location, Bridge, SkippyVoice, SkippyMd, SkippyQueue);
@@ -327,7 +334,7 @@ def ev(n: int) -> dict:
 
 
 def drive(page: str, steps: list, tasks: dict | None = None, storage: dict | None = None, follow: str | None = None,
-          history: dict | None = None, ship: dict | None = None, notify_mode: str = "ok", fresh=False, with_window=False) -> dict:
+          history: dict | None = None, ship: dict | None = None, notify_mode: str = "ok", fresh=False, with_window=False, chain=False) -> dict:
     """Run the card's script against the fake browser. `follow` = a task the page was already following (a reload
     mid-task), with a transcript that has its (empty) assistant turn."""
     store = dict(storage or {})
@@ -340,7 +347,8 @@ def drive(page: str, steps: list, tasks: dict | None = None, storage: dict | Non
     done = subprocess.run([NODE, "-e", HARNESS], capture_output=True, timeout=120,
                           input=json.dumps({"script": script(page), "steps": steps, "tasks": tasks or {}, "storage": store,
                                             "history": history or {}, "ship": ship or {},
-                                            "notifyMode": notify_mode, "fresh": fresh, "withWindow": with_window, "mdPath": str(Path(__file__).resolve().parents[1] / "static" / "skippy-md.js")}).encode())
+                                            "notifyMode": notify_mode, "fresh": fresh, "withWindow": with_window,
+                                            "chainPath": str(Path(__file__).resolve().parents[1] / "static" / "skippy-chain.js") if chain else "", "mdPath": str(Path(__file__).resolve().parents[1] / "static" / "skippy-md.js")}).encode())
     assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
     return json.loads(done.stdout.decode("utf-8"))
 

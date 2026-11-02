@@ -125,7 +125,7 @@ def test_a_run_in_another_project_clones_it_works_there_and_never_touches_the_ca
     before = snapshot(primary)
     run = finish(multi.start("aaaaaaaa", "conv-12345678", "fix the readme", project="other"))
     assert run.ok is True and run.project == "other"
-    assert run.events[0] == {"t": "tool", "name": "git", "detail": "cloning aaronsrhodes2/other for the first time"}
+    assert run.events[0] == {"t": "tool", "name": "git", "detail": "cloning aaronsrhodes2/other for the first time", "by": "bridge"}
     clone = Path(multi.project("other").clone)
     assert (clone / ".git").exists() and (clone / "README.md").read_text(encoding="utf-8") == "other project"
     seen = calls(multi)[-1]

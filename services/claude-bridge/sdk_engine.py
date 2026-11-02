@@ -77,6 +77,7 @@ class Said:
 class Did:
     name: str
     args: dict
+    id: str = field(default="", compare=False)      # the tool_use id: its result (ToolDone) says how it went (toolchain.Calls)
 
 
 @dataclass(frozen=True)
@@ -86,7 +87,8 @@ class Usage:
 
 @dataclass(frozen=True)
 class ToolDone:
-    pass                            # a tool call finished and its result is on its way to the model
+    # a tool call finished and its result is on its way to the model: (tool_use id, is_error) per result in that message
+    results: tuple = field(default=(), compare=False)
 
 
 @dataclass(frozen=True)
@@ -118,7 +120,8 @@ def normalize(message: Any) -> list:
     if isinstance(message, UserMessage):
         if getattr(message, "parent_tool_use_id", None) or not isinstance(message.content, list):
             return []
-        return [ToolDone()] if any(isinstance(b, ToolResultBlock) for b in message.content) else []
+        done = tuple((str(b.tool_use_id or ""), bool(b.is_error)) for b in message.content if isinstance(b, ToolResultBlock))
+        return [ToolDone(done)] if done else []
     if isinstance(message, AssistantMessage):
         if getattr(message, "parent_tool_use_id", None):
             return []                                   # a subagent's own steps: the run shows what the main agent did
@@ -131,7 +134,7 @@ def normalize(message: Any) -> list:
             if isinstance(block, TextBlock) and block.text.strip():
                 out.append(Said(block.text))
             elif isinstance(block, ToolUseBlock):
-                out.append(Did(block.name, block.input if isinstance(block.input, dict) else {}))
+                out.append(Did(block.name, block.input if isinstance(block.input, dict) else {}, str(getattr(block, "id", "") or "")))
         return out
     if isinstance(message, SystemMessage):
         data = message.data if isinstance(message.data, dict) else {}
@@ -300,6 +303,8 @@ async def drive(run, *, clone: str, request: str, resume: str | None, open_sessi
                 if isinstance(ev, Usage):
                     context = ev.tokens
                 elif isinstance(ev, ToolDone):
+                    for use_id, failed in ev.results:
+                        run.calls.ended(use_id, failed)
                     if context >= rotate_at and not rotating:
                         rotating = True
                         await session.interrupt()
@@ -317,7 +322,7 @@ async def drive(run, *, clone: str, request: str, resume: str | None, open_sessi
                     flush()
                     journal.did(ev.name, detail(ev.name, ev.args))
                     journal.touched(ev.name, ev.args)
-                    run.emit({"t": "tool", "name": ev.name, "detail": detail(ev.name, ev.args)})
+                    run.tool_call(ev.name, ev.args, ev.id, detail(ev.name, ev.args))
                 elif isinstance(ev, Retry):
                     say(f"(the model call failed{f' ({ev.status})' if ev.status else ''}; retry {ev.attempt})")
                 elif isinstance(ev, Trouble):

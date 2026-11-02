@@ -117,7 +117,7 @@ def test_the_listing_has_exactly_the_documented_shape_and_no_content(door, shop)
     row = got["runs"][0]
     assert set(row) == LISTED
     assert (row["task"], row["conv"], row["who"]) == ("aaaaaaaa", "conv-12345678", "captain@example.com")
-    assert row["events"] == 4 and row["done"] is True and row["ok"] is True and row["error"] is None
+    assert row["events"] == 5 and row["done"] is True and row["ok"] is True and row["error"] is None
     assert isinstance(row["age_s"], float) and isinstance(row["finished_age_s"], float)
     assert 0 <= row["finished_age_s"] <= row["age_s"] < 120
     text = json.dumps(got)

@@ -50,7 +50,7 @@ def test_a_run_that_pushed_ends_with_one_ship_event_before_it_reads_as_done(othe
     assert ship == {"t": "ship", "project": "other", "repo": "aaronsrhodes2/other", "branch": "main", "sha": head,
                     "subject": "Make the tile green [redacted]", "workflow": "deploy.yml"}
     assert git("rev-parse", "main", cwd=other.origin) == head                       # it really is on origin
-    assert run.events[-1] == ship and run.ok is True                               # the last event, part of the final read
+    assert run.events[-2] == ship and run.events[-1]["t"] == "chain" and run.ok is True   # the last before the toolchain, part of the final read
     assert cl.ship_event(ship) == ship                                             # the conversation log keeps it as is
 
 

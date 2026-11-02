@@ -37,7 +37,7 @@ def test_a_finished_run_is_saved_with_exactly_the_documented_fields(shop):
     assert set(data) == FIELDS
     assert (data["task"], data["conv"], data["who"]) == ("aaaaaaaa", "conv-12345678", "captain@example.com")
     assert data["done"] is True and data["ok"] is True and data["error"] is None
-    assert data["events"] == run.events and len(data["events"]) == 4
+    assert data["events"] == run.events and len(data["events"]) == 5 and data["events"][-1]["t"] == "chain"   # (the toolchain, last)
     assert data["created"] <= data["finished_at"] and isinstance(data["created"], float)
     assert BODY["message"] not in json.dumps(data)                               # nothing needs the message again
     assert not [p for p in Path(shop.state_dir).iterdir() if p.name.endswith(".tmp")]     # the write was atomic: no litter
@@ -65,7 +65,7 @@ def test_while_running_a_run_is_written_at_most_every_few_seconds(shop, monkeypa
     assert saved(shop, "aaaaaaaa")["events"] == []                               # throttled: not a disk write per event
     run.finish(True)
     data = saved(shop, "aaaaaaaa", lambda d: d["done"])                          # but the end is always written, in full
-    assert [e["text"] for e in data["events"]] == ["event 0", "event 1", "event 2"] and data["ok"] is True
+    assert [e.get("text") for e in data["events"]] == ["event 0", "event 1", "event 2", None] and data["ok"] is True   # (+ the chain)
 
 
 def test_with_no_throttle_every_event_is_written(shop, monkeypatch):
@@ -85,7 +85,7 @@ def test_a_state_directory_that_cannot_be_created_does_not_touch_the_run(shop, t
     broken = engine.Workshop(shop.claude_cmd, repo=shop.repo, primary=shop.primary, sessions=str(tmp_path / "s2.json"),
                              remote=str(shop.origin), state_dir=str(blocker / "runs"))
     run = finish(broken.start("aaaaaaaa", "conv-12345678", "hi"))
-    assert run.ok is True and run.error is None and [e["t"] for e in run.events] == ["text", "tool", "tool", "text"]
+    assert run.ok is True and run.error is None and [e["t"] for e in run.events] == ["text", "tool", "tool", "text", "chain"]
     assert broken.listing()[0]["done"] is True                                   # and it is served from memory as usual
     err = capsys.readouterr().err
     assert err.count("couldn't save run aaaaaaaa") == 1                          # said once, not once per write
@@ -98,7 +98,7 @@ def test_a_failing_replace_does_not_touch_the_run_either(shop, monkeypatch, caps
         raise PermissionError("[WinError 5] Access is denied (the antivirus has the file)")
     monkeypatch.setattr(engine.os, "replace", refuse)
     run = finish(shop.start("aaaaaaaa", "conv-12345678", "hi"))
-    assert run.ok is True and len(run.events) == 4
+    assert run.ok is True and len(run.events) == 5
     assert "couldn't save run aaaaaaaa" in capsys.readouterr().err
     assert not (Path(shop.state_dir) / "aaaaaaaa.json").exists()
 
@@ -168,7 +168,7 @@ def test_a_run_that_was_running_when_the_bridge_died_is_closed_with_the_restart_
     assert shop.load() == 1
     run = shop.get("cccccccc")
     assert run.done is True and run.ok is False and run.error == "The bridge restarted while this was running."
-    assert run.events == [{"t": "text", "text": "half way"}] and run.who == "c@example.com"
+    assert run.events == [{"t": "text", "text": "half way"}, {"t": "chain", "calls": [], "flags": []}] and run.who == "c@example.com"
     assert 0 <= time.time() - run.finished_at < 30                               # finished NOW, so it stays deliverable for an hour
     data = saved(shop, "cccccccc", lambda d: d["done"])                          # and re-saved closed: a second restart agrees
     assert data["ok"] is False and data["error"] == run.error
@@ -263,7 +263,7 @@ def test_after_a_restart_the_door_serves_the_old_run_and_lists_it(shop, tmp_path
         assert status == 200 and got["done"] is True and got["ok"] is True and got["events"] == run.events
         status, listed = call("GET", "/workshop/runs")
         assert status == 200 and [(r["task"], r["who"], r["events"], r["done"]) for r in listed["runs"]] == [
-            ("aaaaaaaa", "captain@example.com", 4, True)]
+            ("aaaaaaaa", "captain@example.com", 5, True)]
     finally:
         server.shutdown()
         server.server_close()

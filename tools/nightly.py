@@ -13,7 +13,8 @@ overnight report that the morning briefing reads out.
   healing     once a week (SKIPPY_CHAOS_DAY, Sunday): ONE chaos drill (tools/chaos_drill.py --weekly), new services first; the morning
               report says whether it came back by itself.
   ledger      the day in numbers: what the house heard and did (skippy-home's log), routines, deploys and CI (skippy-core), into
-              state/ledger/<date>.json and .md.
+              state/ledger/<date>.json and .md; and purple's day in one line (tools/purple_audit.py: replies whose words claimed a
+              push, a deploy or a test run their calls don't show).
 
     python tools/nightly.py [--dry-run] [--date YYYY-MM-DD]
 """
@@ -254,6 +255,16 @@ def overnight_line(report: dict) -> str:
     return "Overnight: " + ", ".join(bits) + "."
 
 
+def purple_day(date: str) -> str:
+    """purple's day in one line (tools/purple_audit.py), or why it couldn't be read: the ledger never fails over it."""
+    try:
+        sys.path.insert(0, str(ROOT / "tools"))
+        import purple_audit
+        return purple_audit.ledger_line(purple_audit.day_rows(date))
+    except Exception as e:  # noqa: BLE001
+        return f"purple: couldn't read its runs ({type(e).__name__})"
+
+
 def ledger_md(date: str, r: dict) -> str:
     h, s = r["house"], r["systems"]
     lines = [f"# Ledger {date}", "", f"**{r['overnight']}**", "", "## House",
@@ -262,6 +273,7 @@ def ledger_md(date: str, r: dict) -> str:
              f"- routines: " + ("; ".join(h["routines"]) or "none"), f"- commands that failed: {h['failed_commands']}", "", "## Systems",
              f"- main {str(s.get('main'))[:7]}, CI {s.get('ci', {}).get('state')} on {str(s.get('ci', {}).get('sha'))[:7]}, live {str(s.get('live', {}).get('commit'))[:7]}",
              "- deploys today: " + (", ".join(f"#{x['id']} {x['sha']} {x['conclusion'] or x['status']}" for x in s.get("runs", []) if str(x.get("at", "")).startswith(date)) or "none"),
+             "", "## Purple", f"- {r.get('purple', 'purple: not read')}",
              "", "## Night jobs"] + [f"- {j['task']}: " + (f"last {j.get('last_run')}, result {j.get('result')}" if j.get("found") else "not found") for j in r["jobs"]]
     lines += ["", "## Upkeep", "- disks: " + ", ".join(f"{d} {v['free_gb']} GB ({v['free_pct']}%)" for d, v in r["upkeep"]["disks"].items()),
               f"- docker prune: {r['upkeep']['docker']}", f"- hub: {r['upkeep']['hub']}", f"- vault .env present: {r['upkeep']['vault']}"]
@@ -285,6 +297,7 @@ def main(argv=None) -> int:
     report["upkeep"] = {"disks": disks(), "docker": docker_prune(args.dry_run), "hub": hub_restart(args.dry_run, log), "vault": VAULT_ENV.is_file()}
     report["chaos"] = healing_check(args.dry_run, log)
     report["house"] = house_day(date)
+    report["purple"] = purple_day(date)
     report["overnight"] = overnight_line(report)
     folder = STATE / "ledger"
     folder.mkdir(parents=True, exist_ok=True)

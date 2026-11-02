@@ -105,6 +105,8 @@ def _clean(event) -> dict | None:
                 "detail": str(event.get("detail") or "")[:(1200 if event["name"] == "TodoWrite" else 200)]}      # (a checklist is long)
     if event.get("t") == "ship":
         return ship_event(event)
+    if event.get("t") == "chain":                 # the reply's toolchain (services/claude-bridge/toolchain.py): the strip under the reply
+        return chain_event(event)
     if event.get("t") == "retry":                 # the model (or the bridge) went away: the run waits and goes on (workshop_engine)
         attempt = event.get("attempt")
         return {"t": "retry", "attempt": attempt if isinstance(attempt, int) and 0 < attempt < 10_000 else 1,
@@ -120,7 +122,34 @@ def _clean(event) -> dict | None:
     return None
 
 
-MAX_POPUP_ARGS = 4000           # a SKIPPY_POPUP line's JSON arguments (the bridge caps them at the same)
+CHAIN_KINDS = ("read", "edit", "shell", "git", "web", "deploy", "house", "other")   # toolchain.KINDS: the strip's colours
+MAX_CHAIN_CALLS = 240
+_FLAG_RULE = re.compile(r"[a-z][a-z-]{1,30}")
+
+
+def chain_event(event: dict) -> dict:
+    """A run's toolchain, checked: each call's name, summary, kind, time and outcome, and the claims its words made that its calls
+    don't show. Always an event (an empty chain at worst), so the relay's count stays in step with the bridge's list."""
+    calls = []
+    for c in (event.get("calls") if isinstance(event.get("calls"), list) else [])[:MAX_CHAIN_CALLS]:
+        if not isinstance(c, dict) or not isinstance(c.get("n"), str):
+            continue
+        ms = c.get("ms")
+        call = {"n": c["n"][:40], "d": str(c.get("d") or "")[:160], "k": c.get("k") if c.get("k") in CHAIN_KINDS else "other"}
+        if isinstance(ms, int) and not isinstance(ms, bool) and 0 <= ms < 86_400_000:
+            call["ms"] = ms
+        if isinstance(c.get("ok"), bool):
+            call["ok"] = c["ok"]
+        calls.append(call)
+    flags = [{"rule": f["rule"], "text": str(f.get("text") or "")[:200]}
+             for f in (event.get("flags") if isinstance(event.get("flags"), list) else [])[:12]
+             if isinstance(f, dict) and isinstance(f.get("rule"), str) and _FLAG_RULE.fullmatch(f["rule"])]
+    more = event.get("more")
+    return {"t": "chain", "calls": calls, "flags": flags,
+            **({"more": more} if isinstance(more, int) and not isinstance(more, bool) and 0 < more < 1_000_000 else {})}
+
+
+MAX_POPUP_ARGS = 4000          # a SKIPPY_POPUP line's JSON arguments (the bridge caps them at the same)
 MAX_POPUP_INPUT_B64 = 1_400_000  # the file a SKIPPY_POPUP line names, as base64: what a chat attachment may be (attachments.MAX_B64_EACH)
 
 
@@ -662,7 +691,7 @@ class Workshop:
                             rec["events"].append(self._keep_image(task, rec, image_event(event)))
                         continue
                     cleaned = _clean(event)
-                    if cleaned and len(rec["events"]) < MAX_EVENTS:
+                    if cleaned and len(rec["events"]) < MAX_EVENTS + (cleaned["t"] == "chain"):   # (the bridge keeps one place past the cap for it)
                         rec["events"].append(cleaned)
                         if cleaned["t"] == "ship":
                             shipped.append(cleaned)

@@ -88,7 +88,7 @@ def test_a_run_streams_text_and_tool_activity_but_never_tool_output_or_secrets(s
     run = finish(shop.start("aaaaaaaa", "conv-12345678", "make the home tile green"))
     assert run.ok is True and run.error is None
     kinds = [(e["t"], e.get("name")) for e in run.events]
-    assert kinds == [("text", None), ("tool", "Bash"), ("tool", "Edit"), ("text", None)]
+    assert kinds == [("text", None), ("tool", "Bash"), ("tool", "Edit"), ("text", None), ("chain", None)]
     text = json.dumps(run.events)
     assert "TOOL OUTPUT MUST NOT LEAK" not in text and "SECRET BODY" not in text and "abcdef123456" not in text
     assert "[redacted]" in run.events[1]["detail"] and run.events[2]["detail"] == "portal/templates/home.html"
@@ -112,7 +112,7 @@ def test_asking_again_with_the_same_task_reattaches_instead_of_rerunning(shop):
     again = shop.start("aaaaaaaa", "conv-12345678", "one")
     assert again is first and len(calls(shop)) == 1
     part = first.since(2)
-    assert [e["t"] for e in part["events"]] == ["tool", "text"] and part["next"] == 4 and part["done"]
+    assert [e["t"] for e in part["events"]] == ["tool", "text", "chain"] and part["next"] == 5 and part["done"]
 
 
 def test_one_task_at_a_time(shop, monkeypatch):
@@ -168,7 +168,7 @@ def test_the_first_task_clones_the_repo_and_stop_works_at_any_moment(shop, tmp_p
                             sessions=str(tmp_path / "s2.json"), remote=str(shop.origin))
     run = finish(fresh.start("aaaaaaaa", "conv-12345678", "hi"))
     assert run.ok is True and run.events[0] == {"t": "tool", "name": "git",
-                                                "detail": "cloning aaronsrhodes2/skippy-tel for the first time"}
+                                                "detail": "cloning aaronsrhodes2/skippy-tel for the first time", "by": "bridge"}
     assert Path(fresh.repo, ".git").exists()
 
 

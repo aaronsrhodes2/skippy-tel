@@ -42,6 +42,30 @@
   .me-chat .row button.unpin { flex: none; width: 40px; padding: 0; }
   .me-chat .convs h4 { margin: 10px 6px 4px; font-size: .74rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
   .me-chat .act { font-size: .74rem; color: var(--muted); margin: 2px 0; font-family: ui-monospace, Consolas, monospace; }
+  /* The toolchain strip (static/skippy-chain.js): the reply's bottom border, one segment per call, width by time. Its colours are the
+     house palette pinned here: the agent modes repaint --green/--cyan/--violet to purple or orange, and a strip of one colour says nothing. */
+  .me-chat .turn.assistant { position: relative; }
+  .me-chat .chain { position: absolute; left: 0; right: 0; bottom: -1px; height: 3px; display: flex; gap: 1px; border-radius: 0 0 8px 8px; overflow: visible; }
+  .me-chat .chain .seg { position: relative; flex: 1 1 0; min-width: 2px; height: 3px; background: #6f8b94; cursor: pointer; }
+  .me-chat .chain .seg::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 14px; }   /* a 3 px line is too thin to hover or tap */
+  .me-chat .chain .seg:hover { height: 5px; margin-top: -2px; }
+  .me-chat .k-read { background: #00ffff; color: #00ffff; }   .me-chat .k-edit { background: #ffffff; color: #ffffff; }
+  .me-chat .k-shell { background: #00ff88; color: #00ff88; }  .me-chat .k-git { background: #aa44ff; color: #c58cff; }
+  .me-chat .k-web { background: #ff44aa; color: #ff44aa; }    .me-chat .k-deploy { background: #ffaa00; color: #ffaa00; }
+  .me-chat .k-house { background: #ff8a3d; color: #ff8a3d; }  .me-chat .k-other { background: #6f8b94; color: #9fb4bb; }
+  .me-chat .chain .seg.bad { background: #ff4444; }
+  .me-chat .chain .warn { position: absolute; right: 6px; bottom: 2px; font-size: .78rem; line-height: 1; color: #ffaa00; cursor: pointer; }
+  .me-chat .chain-tip { position: absolute; left: 6px; right: 6px; bottom: 6px; z-index: 3; padding: 6px 8px; background: #000; border: 1px solid var(--dim-green-hi);
+                        font: .74rem/1.35 ui-monospace, Consolas, monospace; color: #fff; white-space: pre-wrap; }
+  .me-chat .chain-tip .th { font-weight: 600; background: none; }
+  .me-chat .chain-tip .th.warn { color: #ffaa00; }
+  .me-chat .chain-tip .kd { color: var(--muted); }
+  .me-chat .chain-tip .fl { margin-top: 2px; }
+  .me-chat .chain-tip code.code { display: inline-block; margin-top: 3px; overflow-wrap: anywhere; }
+  .me-chat .turn .ck { float: right; margin: 0 0 2px 4px; padding: 0 6px; min-width: 0; font-size: .7rem; opacity: .55; clip-path: none; }
+  .me-chat .turn .ck:hover, .me-chat .turn .ck[aria-expanded="true"] { opacity: 1; }
+  .me-chat .turn .ck.flagged { color: #ffaa00; opacity: .9; }
+  .me-chat pre.chain-list { margin: 6px 0; padding: 6px 8px; background: #000; border: 1px solid var(--dim-green-hi); font: .72rem/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; }
   .me-chat .retry { font-size: .78rem; color: var(--amber, #FFAA00); font-style: italic; margin: 4px 0; }   /* the model went away mid-answer: it waits, never an error */
   .me-chat details.steps { margin: 4px 0; font-size: .74rem; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
   .me-chat details.steps > summary { cursor: pointer; list-style: none; padding: 2px 0; }
@@ -292,7 +316,7 @@
       turns.forEach(t => {
         if (t.role === "heard") { out.push(turnMd(t), ""); return; }
         out.push(t.role === "user" ? "## You" : "## Skippy", "", turnMd(t));
-        const n = t.role === "user" ? 0 : (t.parts || []).filter(x => x.t !== "text" && x.t !== "image" && x.t !== "ship").length;
+        const n = t.role === "user" ? 0 : (t.parts || []).filter(x => x.t !== "text" && x.t !== "image" && x.t !== "ship" && x.t !== "chain").length;
         if (n) out.push("", "_Ran " + n + (n === 1 ? " command" : " commands") + "_");
         out.push("");
       });
@@ -333,12 +357,17 @@
         return;
       }
       addCopy(box, turn);                          // at the top, like a prompt's: at the bottom corner the turn's notch clipped it (on a tablet, half of it)
+      const Chain = typeof window !== "undefined" && window.SkippyChain;               // the calls behind this reply (static/skippy-chain.js)
+      const chained = Chain && (turn.parts || []).find(p => p && p.t === "chain");
+      const drawn = chained ? Chain.render(chained, document) : null;
+      if (drawn) box.appendChild(drawn.key);                                           // in the reply's menu, beside the copy key
       let steps = null, sum = null, names = [], count = 0, todo = null, question = null;     // a run of tool calls folds into one line; tap it for each command in full
       (turn.parts || []).forEach(p => {
         if (p.t === "tool" && p.name === "TodoWrite") { todo = p; return; }               // his task list: shown below as a live checklist, not as a step
         if (p.t === "retry") {                                                         // the model went away: it waits and goes on, never an error
           steps = null; box.appendChild(el("div", "retry", "Waiting for Skippy, retrying (try " + ((p.attempt || 1) + 1) + (p.why ? ": " + p.why : "") + ")…")); return;
         }
+        if (p.t === "chain") return;                                                  // the toolchain: drawn once, as the bottom border (below)
         if (p.t !== "text" && p.t !== "ship" && p.t !== "image") {
           if (!steps) { steps = el("details", "steps"); sum = el("summary"); steps.appendChild(sum); box.appendChild(steps); names = []; count = 0; }
           steps.appendChild(el("div", "act", "› " + p.name + (p.detail ? ": " + p.detail : "")));
@@ -374,6 +403,7 @@
         box.appendChild(ask); askBox = ask;
       }
       if (turn.note) box.appendChild(el("div", "note" + (turn.bad ? " bad" : ""), turn.note));
+      if (drawn) { box.appendChild(drawn.list); box.appendChild(drawn.tip); box.appendChild(drawn.strip); }   // the list, its tip, the strip last
       box.classList.toggle("failed", !!turn.bad);
       if (turn.t0 && !turn.note && ((running && running.turn === turn) || turn.pending)) {     // still being worked on: say so, with a clock
         const w = el("div", "working"); w.appendChild(el("span", "dots", "\u2022\u2022\u2022")); w.appendChild(el("span", "w", " Working "));
@@ -575,7 +605,7 @@
       if (d && d.state !== "unknown") {            // a stalled or offline read is still a read: keep what it carries
         if (Array.isArray(d.events)) d.events.forEach(e => {
           if (e && e.t === "image" && Number.isInteger(e.n)) job.turn.parts.push({t: "image", n: e.n, task: job.task, mime: e.mime, name: e.name});
-          else if (e && (e.t === "text" || e.t === "tool" || e.t === "ship" || e.t === "picture" || e.t === "popup" || e.t === "retry")) job.turn.parts.push(e);
+          else if (e && (e.t === "text" || e.t === "tool" || e.t === "ship" || e.t === "picture" || e.t === "popup" || e.t === "retry" || e.t === "chain")) job.turn.parts.push(e);
         });
         if (typeof d.next === "number" && d.next > job.after) job.after = d.next;   // never back: a portal that was just rebuilt holds fewer events than this page has
         store.set(K.task, JSON.stringify({task: job.task, after: job.after}));
@@ -845,7 +875,7 @@
       turns = [];
       (got.turns || []).forEach(t => {
         turns.push({role: "user", text: t.message});
-        const reply = {role: "assistant", parts: (t.events || []).filter(e => e && (e.t === "text" || e.t === "tool" || e.t === "ship" || e.t === "picture" || e.t === "popup" || e.t === "retry"))};
+        const reply = {role: "assistant", parts: (t.events || []).filter(e => e && (e.t === "text" || e.t === "tool" || e.t === "ship" || e.t === "picture" || e.t === "popup" || e.t === "retry" || e.t === "chain"))};
         if (t.state === "error") { reply.note = t.error || "It failed."; reply.bad = t.error !== "stopped"; }
         reply.task = t.task;
         turns.push(reply);

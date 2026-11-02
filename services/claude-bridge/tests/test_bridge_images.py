@@ -34,7 +34,7 @@ def test_a_screenshot_in_the_clone_is_attached_and_its_line_is_not_shown(shop, m
     run = run_saying(shop, monkeypatch, "Live, and here it is.\nSKIPPY_IMAGE: .skippy-shots/me.png\n")
     [img] = images(run)
     assert img == {"t": "image", "mime": "image/png", "name": "me.png", "b64": base64.b64encode(PNG).decode()}
-    assert texts(run) == ["Live, and here it is."] and run.events[-1] == img
+    assert texts(run) == ["Live, and here it is."] and run.events[-2] == img and run.events[-1]["t"] == "chain"
     assert run.ok is True
 
 

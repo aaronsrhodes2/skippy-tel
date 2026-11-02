@@ -27,6 +27,7 @@ import time
 from pathlib import Path
 
 import chat_names
+import toolchain
 
 ROOT = os.getenv("WORKSHOP_CONVERSATIONS", r"D:\Aaron\conversations\private-skippy")
 CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
@@ -64,6 +65,8 @@ def _event_md(event: dict) -> str:
         return f"- showed the screenshot `{str(event.get('name') or '')[:80]}`\n"
     if event.get("t") == "ship":
         return f"- shipped `{event.get('sha')}` to {event.get('repo')} {event.get('branch')}: {event.get('subject')}\n"
+    if event.get("t") == "chain":            # the toolchain's mismatches (toolchain.py); the calls themselves are the lines above
+        return "".join(f"- ⚠ {f.get('text')}\n" for f in (event.get("flags") or []) if isinstance(f, dict))
     return ""
 
 
@@ -273,9 +276,14 @@ class ConversationLog:
                 held = live(str(t.get("task") or "")) if t.get("state") == "running" else None
                 if held:                                   # still on the bridge: its events are the current ones
                     events, error = held.get("events") or [], held.get("error")
+                state, kept = _turn_state(t, live), clean_events(events)
+                if state != "running" and not any(e["t"] == "chain" for e in kept):
+                    chain = toolchain.chain_event(kept)            # a turn from before the toolchain: its strip from its tool lines (untimed)
+                    if chain is not None:
+                        kept.append(chain)
                 turns.append({"task": _text(t.get("task"), 32), "at": _num(t.get("at")),
-                              "message": _text(t.get("message"), MAX_MESSAGE), "events": clean_events(events),
-                              "state": _turn_state(t, live), "error": _text(error, 500) or None})
+                              "message": _text(t.get("message"), MAX_MESSAGE), "events": kept,
+                              "state": state, "error": _text(error, 500) or None})
             out = {"conv": conv, "project": _text(data.get("project"), 40) or DEFAULT_PROJECT,
                    "who": _text(data.get("who"), 200), "title": _text(data.get("title"), 90), "turns": turns,
                    "trimmed": 0}
@@ -322,6 +330,9 @@ def clean_events(events: list) -> list[dict]:
         elif (e.get("t") == "popup" and isinstance(e.get("id"), str) and re.fullmatch(r"[0-9a-f]{16}", e["id"])
               and isinstance(e.get("name"), str) and isinstance(e.get("args"), dict)):
             out.append({"t": "popup", "id": e["id"], "name": e["name"][:40], "args": e["args"]})   # a pop-up job: its card finds it (no file)
+        elif e.get("t") == "chain" and isinstance(e.get("calls"), list):   # the reply's toolchain (toolchain.py): its strip after a reload
+            out.append({"t": "chain", "calls": [c for c in e["calls"][:240] if isinstance(c, dict)],
+                        "flags": [f for f in (e.get("flags") or [])[:12] if isinstance(f, dict)], **({"more": e["more"]} if e.get("more") else {})})
         elif e.get("t") == "image":            # the picture itself stays out of the index: a line saying it was there
             out.append({"t": "text", "text": f"(a screenshot was shown here: {str(e.get('name') or '')[:80]})"})
     return out

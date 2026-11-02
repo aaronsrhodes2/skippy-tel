@@ -95,7 +95,7 @@ def test_one_segment_to_the_end(repo):
     run = new_run()
     opened, resumes, kept = go(run, repo, [[Opened("s1"), Said("Looking."), Did("Bash", {"command": "ls"}), Said("All done."), ok()]])
     assert run.done and run.ok
-    assert [(e["t"], e.get("text") or e.get("detail")) for e in run.events] == [("text", "Looking."), ("tool", "ls"), ("text", "All done.")]
+    assert [(e["t"], e.get("text") or e.get("detail")) for e in run.events] == [("text", "Looking."), ("tool", "ls"), ("text", "All done."), ("chain", None)]
     assert opened[0].prompt == run.message and resumes == [None] and kept == ["s1"] and opened[0].closed      # (once: it is not said twice)
 
 

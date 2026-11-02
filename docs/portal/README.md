@@ -209,6 +209,16 @@ browser <── poll /me/workshop/events ── portal <── POST /home/worksh
   `head_sha`) as tests → build → deploy, green only when `/version`'s commit is that sha (or a later deploy that contains it
   is live), red with the run's link and **Roll back** (Admin page) when it failed. Other projects: the commit link and
   "pushed (no deploy pipeline here)", or a link to their deploy workflow (the portal's token reads skippy-tel only).
+- **What it did versus what it said (the toolchain strip).** Every run ends with one `chain` event
+  (`services/claude-bridge/toolchain.py`): each tool call in order, with a short summary (the command, the path, the URL), how
+  long it took and whether it failed, timed from the tool results the engines already stream. The chat draws it as the reply's
+  bottom border (`static/skippy-chain.js`): a 3 px hairline, one segment per call, width by time, coloured by kind (read cyan,
+  edit white, shell green, git violet, web pink, deploy and live checks amber, Mentat and the house orange, a failed call red).
+  Hover or tap a segment for the call (a copy chip); the chain key beside the copy key opens the whole list to copy. A warning
+  glyph marks a reply whose words claim what its calls don't show (pushed or committed with no git call, deployed or live with
+  no deploy and no look at the live service, tested with no test run, code edited with no test run) and the reverse (a push,
+  deploy, restart, kill or destructive command it never mentions). `python tools/purple_audit.py` runs the same rules over the
+  conversation indexes in bulk (the typical toolchain per kind of request, every mismatch); the nightly ledger carries its line.
 - **Tell me when it's done (Discord).** When a run the portal saw going ends (done, failed, stopped, or done on a question
   for you), `portal/notify.py` sends the Captain one Discord DM through the portal's bot: project, the first words of the
   request, the outcome, and the link to `/me` (at most 200 characters; never code, the agent's text or the error; pings

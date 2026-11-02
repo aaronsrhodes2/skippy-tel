@@ -78,7 +78,7 @@ def test_a_failed_turn_keeps_its_error_and_another_project_is_kept_apart(tmp_pat
     got = log.conversation("conv-abcdefgh")
     assert got["project"] == "sigma-ground"
     assert got["turns"][0]["state"] == "error" and got["turns"][0]["error"] == "tests failed"
-    assert got["turns"][0]["events"] == [{"t": "text", "text": "tried"}]
+    assert got["turns"][0]["events"] == [{"t": "text", "text": "tried"}, {"t": "chain", "calls": [], "flags": []}]   # (its toolchain, rebuilt)
 
 
 def test_a_big_conversation_is_trimmed_from_the_oldest_turn_to_fit(tmp_path):
