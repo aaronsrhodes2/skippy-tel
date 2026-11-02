@@ -107,12 +107,15 @@ def test_not_connected_says_how_and_waits_before_asking_again():
     assert g.asked == 1
 
 
-def test_a_403_from_google_means_the_thermostat_was_not_ticked():
+def test_a_403_from_google_means_the_thermostat_was_not_ticked_and_the_old_token_is_dropped():
     def refuse(method, url, token, body=None):
         raise urllib.error.HTTPError(url, 403, "denied", {}, None)
-    n = nest.Nest(FakeGoogle(), call=refuse, clock=lambda: 0.0)
+    g = FakeGoogle()
+    g._access = ("an hour-old token without sdm.service", 9e9)
+    n = nest.Nest(g, call=refuse, clock=lambda: 0.0)
     with pytest.raises(house.HomeError, match="tick the thermostat"):
         n.states()
+    assert g._access is None                                 # the next try borrows a fresh one, with the thermostat in it
 
 
 def test_one_backend_down_never_hides_the_others():

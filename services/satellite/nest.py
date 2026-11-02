@@ -73,6 +73,8 @@ class Nest(House):
             raise
         except urllib.error.HTTPError as e:
             if e.code in (401, 403, 404):
+                if hasattr(self.google, "_access"):         # a token from before the thermostat was granted: borrow a fresh one next time
+                    self.google._access = None
                 self._no = (self.clock() + NOT_CONNECTED_SECONDS, CONNECT)
                 raise HomeError(CONNECT) from e
             if e.code == 429:
