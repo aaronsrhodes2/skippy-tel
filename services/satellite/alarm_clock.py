@@ -82,6 +82,8 @@ class AlarmClock:
         self.post = post or self._post
         self.layout = layout
         self.wake_place = self.env.get("SATELLITE_WAKE_PLACE", "upstairs")
+        # a hub room's old names (SATELLITE_ROOM_ALIASES=theater=living: the pod moved upstairs 2026-11-01): what was set under one still finds it
+        self.aliases = {k.strip(): v.strip() for k, _, v in (p.partition("=") for p in self.env.get("SATELLITE_ROOM_ALIASES", "").split(",")) if v.strip()}
         self.alarms = alarms_mod.Alarms(self.state / "alarms" / "house.json" if self.state else None, clock=clock, log=log, wake_place=self.wake_place)
         self._merge_old()
         self.timers: dict = {}                          # room -> timers.Timers
@@ -139,7 +141,7 @@ class AlarmClock:
         hub_rooms = sorted(getattr(self.hub, "rooms", {}) or {})
         if not a.where:
             import speaker_out                          # noqa: PLC0415
-            return speaker_out.announce_kinds(self.env), [a.room] if a.room else hub_rooms[:1]
+            return speaker_out.announce_kinds(self.env), [self.hub_room(a.room)] if a.room else hub_rooms[:1]
         try:
             lay = self._layout()
             kinds = lay.outputs(a.where)
@@ -151,8 +153,12 @@ class AlarmClock:
             kinds = speaker_out.place_kinds(self.env, a.where) or []
         pods = [r for r in hub_rooms if self._pod_room(r) in rooms]
         if not kinds and not pods:                      # a place with nothing to ring in (no speaker, no pod yet): where it was set, and upstairs
-            return sorted(set(self._place_kinds(self.wake_place))), [a.room] if a.room else hub_rooms[:1]
+            return sorted(set(self._place_kinds(self.wake_place))), [self.hub_room(a.room)] if a.room else hub_rooms[:1]
         return sorted(set(kinds)), pods
+
+    def hub_room(self, name: str) -> str:
+        """The hub room `name` is now (an old name through SATELLITE_ROOM_ALIASES), else `name` itself."""
+        return self.aliases.get(name, name) if name not in (getattr(self.hub, "rooms", {}) or {}) else name
 
     def _pod_room(self, hub_room: str) -> str:
         try:
@@ -265,14 +271,14 @@ class AlarmClock:
                 await out.play(clip, gain=gain if clip[:4] == b"RIFF" else min(1.0, gain + 0.2))
 
     async def _ring_pod(self, room: str, tone: bytes, voice: bytes | None, text: str) -> None:
-        r = (getattr(self.hub, "rooms", {}) or {}).get(room)
+        r = (getattr(self.hub, "rooms", {}) or {}).get(self.hub_room(room))
         if r is None:
             return
         await r.ring(tone, voice, text)
 
     async def say_in(self, room: str, text: str) -> None:
         """A timer's words in its room (its pod and the announcement outputs), or, its pod away, the announcement outputs alone."""
-        r = (getattr(self.hub, "rooms", {}) or {}).get(room)
+        r = (getattr(self.hub, "rooms", {}) or {}).get(self.hub_room(room))
         if r is not None:
             await r.announce(text)
             return

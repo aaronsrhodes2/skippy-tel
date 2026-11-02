@@ -61,18 +61,11 @@
         "stereo",
         "projector"
       ],
-      "pods": [
-        "theater"
-      ],
+      "pods": [],
       "outputs": [
         "hdmi"
       ],
       "devices": [
-        {
-          "name": "theater pod",
-          "kind": "pod",
-          "note": "Waveshare 86 box; mic and speaker; replaces the Amazon Echo here; hub room 'theater' (SATELLITE_ROOMS)"
-        },
         {
           "name": "Sony sound system",
           "kind": "speaker",
@@ -147,11 +140,6 @@
         {
           "name": "Wi-Fi router",
           "kind": "network"
-        },
-        {
-          "name": "skippy-core",
-          "kind": "computer",
-          "note": "models, Mentat, Matter controller; its Bluetooth drives the Enclave upstairs"
         }
       ]
     },
@@ -163,7 +151,9 @@
         "enclave",
         "the enclave"
       ],
-      "pods": [],
+      "pods": [
+        "living"
+      ],
       "outputs": [
         "enclave"
       ],
@@ -172,12 +162,12 @@
           "name": "Enclave speakers",
           "kind": "speaker",
           "output": "enclave",
-          "note": "Bluetooth to skippy-core, snapserver on :4953"
+          "note": "an aux cable from skippy-core's headphone jack (core/install/enclave.sh), snapserver on :4953"
         },
         {
           "name": "living room pod",
           "kind": "pod",
-          "planned": true
+          "note": "Waveshare 86 box (192.168.0.84); mic and speaker; hub room 'living' (SATELLITE_ROOMS; old name 'theater', SATELLITE_ROOM_ALIASES). Moved up from the theater 2026-11-01 until the new pods arrive; one goes back down then"
         },
         {
           "id": "light.living_track_middle",
@@ -239,6 +229,11 @@
           "id": "light.bedroom",
           "name": "Bedroom",
           "kind": "light"
+        },
+        {
+          "name": "skippy-core",
+          "kind": "computer",
+          "note": "models, Mentat, Matter controller; its HDMI is the bedroom TV (a Moonlight kiosk onto skippy-pc, core/install/couch.sh), its headphone jack the Enclave"
         }
       ]
     },

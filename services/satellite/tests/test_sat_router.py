@@ -326,3 +326,10 @@ def test_music_moves_while_it_plays_and_says_only_where_it_is_heard():
     w.present.add("Enclave")
     r.scan()
     assert hub.where_said(house) == "everywhere" and hub.not_there(house) == ""
+
+
+def test_the_sony_stays_open_with_no_pod_downstairs():
+    """The only pod moved upstairs beside the Enclave (2026-11-01): its voice is pod+enclave, and the HDMI to the Sony is still opened,
+    because the stereo and 'downstairs' play there."""
+    env = {"SATELLITE_OUT": "living=pod+enclave", "SKIPPY_STEREO_OUT": "hdmi"}
+    assert {"enclave", "hdmi"} <= rt.used_kinds(env)

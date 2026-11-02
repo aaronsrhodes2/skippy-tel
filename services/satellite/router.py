@@ -583,6 +583,19 @@ _ROUTER: Router | None = None
 _ROUTER_LOCK = threading.Lock()
 
 
+def used_kinds(env: dict) -> set[str]:
+    """Every output the house plays on: each room's voice (SATELLITE_OUT), the routines' (SATELLITE_ANNOUNCE_OUT), the house stereo
+    (SKIPPY_STEREO_OUT) and every place music can be sent to (SKIPPY_PLACES): the Sony stays "downstairs" with no pod there (2026-11-01)."""
+    import speaker_out                                            # noqa: PLC0415
+    used = set()
+    for part in (env.get("SATELLITE_OUT") or "").split(";"):
+        if "=" in part:
+            used |= set(speaker_out.split_kinds(part.split("=", 1)[1]))
+    used |= set(speaker_out.announce_kinds(env))
+    used |= set(speaker_out.split_kinds(env.get("SKIPPY_STEREO_OUT", "hdmi")))
+    return used | {k for ks in speaker_out.places(env).values() for k in ks}
+
+
 def shared(env: dict, log=print) -> Router:
     """The one router of this hub process: every PC output any room names (SATELLITE_OUT), with its delay."""
     global _ROUTER
@@ -590,16 +603,12 @@ def shared(env: dict, log=print) -> Router:
     with _ROUTER_LOCK:
         if _ROUTER is None:
             parts, delays = speaker_out.output_parts(env), speaker_out.output_delays(env)
-            used = set()
-            for part in (env.get("SATELLITE_OUT") or "").split(";"):
-                if "=" in part:
-                    used |= set(speaker_out.split_kinds(part.split("=", 1)[1]))
-            used |= set(speaker_out.announce_kinds(env))          # the routines upstairs (SATELLITE_ANNOUNCE_OUT)
+            used = used_kinds(env)
             import sync                                           # noqa: PLC0415
             solo = speaker_out.one_voice(env)
             if solo:                                              # the PC output is the room's only voice: nothing to wait for, just a jitter cushion
                 align = sync.saved_align(used)                    # several outputs in use: the faster ones wait for the slowest (sync_outputs.py)
-                for k in sync.pod_rooms_kinds(env) | set(speaker_out.announce_kinds(env)):
+                for k in used:                                    # every output the house plays on, so 'everywhere' lines up too
                     delays[k] = float(env.get("SATELLITE_SOLO_DELAY", str(SOLO_DELAY_S))) + align.get(k, 0.0)
             else:
                 delays.update(sync.saved_delays())                # what the last calibration settled on beats the vault's starting guess

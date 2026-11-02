@@ -273,3 +273,18 @@ def test_an_alarm_named_alarm_is_not_said_alarm_alarm():
     x = a.add("alarm", "17:35", "test alarm")
     assert "test alarm alarm" not in a.spoken(x) and "Your test alarm." in a.spoken(x)
     assert alarms_mod.timer_name("pasta timer") == "pasta" and alarms_mod.timer_name("five minute") == "five minute"
+
+
+def test_a_room_renamed_still_rings_what_was_set_in_it(tmp_path):
+    """The theater pod moved up to the living room (2026-11-01): its alarms, set as 'theater', ring on it as 'living', and upstairs finds it."""
+    now = [at(2026, 11, 2, 6, 0)]
+    pod = Pod()
+    layout = house_layout.Layout({"floors": {"upstairs": {"rooms": ["living room"]}},
+                                  "rooms": {"living room": {"pods": ["living"], "outputs": ["enclave"]}}})
+    c, _, _ = make(tmp_path, now, rooms={"living": pod}, env={"SATELLITE_ROOM_ALIASES": "theater=living"})
+    c.layout = layout
+    here = c.alarms.add("alarm", "06:30", where="", room="theater")
+    assert c.place_of(here)[1] == ["living"]
+    up = c.alarms.add("alarm", "07:00", where="upstairs", room="theater")
+    assert c.place_of(up) == (["enclave"], ["living"])
+    assert c.hub_room("living") == "living" and c.hub_room("den") == "den"

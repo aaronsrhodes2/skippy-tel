@@ -205,3 +205,14 @@ def test_saved_align_reads_each_outputs_wait(tmp_path):
 
 def test_pod_rooms_kinds_reads_preferences():
     assert sync.pod_rooms_kinds({"SATELLITE_OUT": "office=pod+enclave>hdmi"}) == {"enclave", "hdmi"}
+
+
+def test_the_mic_measures_only_what_it_can_hear():
+    """The USB mic is in the theater; the pod and the Enclave are upstairs (2026-11-01): an output it can't hear is never measured (it would
+    be taken for off and the pod would speak instead)."""
+    import sync as S
+    R = type("R", (), {"sinks": {"enclave": 1, "hdmi": 1}})()
+    env = {"SATELLITE_OUT": "living=pod+enclave", "SATELLITE_SYNC_HEARS": "hdmi"}
+    assert S.for_router(R, env) is None
+    env["SATELLITE_OUT"] = "living=pod+enclave;theater=pod+hdmi"
+    assert S.pod_rooms_kinds(env) == {"enclave", "hdmi"}

@@ -219,8 +219,11 @@ one more router output, `enclave`, whose part is a URL instead of a Windows devi
 
     SATELLITE_OUT_ENCLAVE=tcp://skippy-core:4953     (the default)
     SATELLITE_OUT=theater=pod+enclave+hdmi             the Enclave and the Sony together (how they were synced, in the theater)
-    SATELLITE_OUT=theater=pod+hdmi;upstairs=pod+enclave   today's shape once the upstairs pod arrives (the Enclave moved up 2026-11-01;
-                                                      until then the office is pod+hdmi and the Enclave idles, connected)
+    SATELLITE_OUT=living=pod+enclave                  today (2026-11-01): the only pod moved up to the living room beside the Enclave, so
+                                                      the alarms can be answered there; SATELLITE_ROOM_ALIASES=theater=living keeps what was
+                                                      set as "theater" finding it. The Sony stays "downstairs" for music on command: the router
+                                                      opens every output SKIPPY_STEREO_OUT and SKIPPY_PLACES name too (router.used_kinds).
+                                                      SATELLITE_SYNC_HEARS=hdmi: the sync mic is in the theater and can't hear the Enclave.
     SATELLITE_OUT=theater=pod+enclave>hdmi             `a>b`: a preference: the HDMI plays only while the Enclave isn't open
 
 * **`router.NetStream`** sends the sink's blocks as 48 kHz 16-bit stereo PCM to skippy-core's snapserver, paced by this PC's clock (snapcast keeps

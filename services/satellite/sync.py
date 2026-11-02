@@ -13,6 +13,8 @@ stretch of the room is deconvolved by the clip itself (the voice band): every co
     (router.Sink.realign) and the hub keeps it in state/audio-sync.json for its next start.
 
     SATELLITE_SYNC_MIC=CMTECK        a part of the PC microphone's name; 0 turns the measuring off (the delays then stay as they are)
+    SATELLITE_SYNC_HEARS=hdmi        the outputs that microphone can hear (default: all). The USB mic is in the theater: the Enclave upstairs
+                                     (2026-11-01, the pod moved up beside it) is never heard there, and an output never heard is taken for off
 
 Every measurement is one line in the hub log: "(sync: hdmi +312 ms behind the pod; delay 0.500 -> 0.313 s)".
 
@@ -351,6 +353,8 @@ def pod_rooms_kinds(env: dict) -> set[str]:
 def for_router(router, env: dict, log=print, solo: bool = False) -> Calibrator | None:
     part = env.get("SATELLITE_SYNC_MIC", "CMTECK")
     kinds = pod_rooms_kinds(env) & set(router.sinks)
+    hears = {k.strip() for k in (env.get("SATELLITE_SYNC_HEARS") or "").split(",") if k.strip()}
+    kinds = kinds & hears if hears else kinds
     if not kinds or part in ("", "0"):
         return None
     return Calibrator(router, kinds, MicRing(part, log=log), log=log, solo=solo)   # the router's device scan opens the microphone
