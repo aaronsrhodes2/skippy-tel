@@ -41,7 +41,7 @@ _RESTART = re.compile(r"docker\s+compose\s+(stop|restart|rm|down)\b|docker\s+(re
 _KILL = re.compile(r"(^|[\s;&|(])(kill|pkill|killall|taskkill)\b|\bstop-process\b")
 _DESTROY = re.compile(r"\brm\s+-[a-z]*r[a-z]*f|\brm\s+-[a-z]*f[a-z]*r|\bgit\b[^;&|\n]*\breset\s+--hard\b|\bgit\b[^;&|\n]*\bpush\b[^;&|\n]*(--force|\s-f\b)|"
                       r"\bgit\b[^;&|\n]*\bclean\s+-[a-z]*f|\bremove-item\b[^\n]*-recurse|\bdrop\s+(table|database)\b")
-_HOUSE = re.compile(r"mentat|skippy-house|home_(control|state|devices)|homectl|wakectl|\bmcp__")
+_HOUSE = re.compile(r"mentat|skippy-house|home_(control|state|devices)|homectl|wakectl")
 
 OUTWARD = ("push", "deploy", "restart", "kill", "destroy")      # calls the reply should own up to
 
@@ -100,7 +100,7 @@ def classify(name: str, args=None) -> tuple[str, list[str]]:
         return kind, tags
     if _HOUSE.search(low):
         return "house", tags
-    if "browse" in low or "fetch" in low or "search" in low:
+    if re.search(r"browse|fetch|search|drive|google|gmail|calendar|web", low):    # another MCP tool reaching out: Drive, a browser
         return "web", tags
     return "other", tags
 
@@ -162,9 +162,12 @@ def build(events: list, calls: Calls | None = None) -> list[dict]:
 # ── what the words claim ──────────────────────────────────────────────────────────────────────────────────────────
 
 _NEG = re.compile(r"\b(not|no|nothing|never|didn't|did not|haven't|have not|hasn't|wasn't|isn't|aren't|can't|cannot|couldn't|won't|"
-                  r"without|yet to|before|until|unless|once|if|will|i'll|to be|still need|needs to|going to|should|would|could|ready to)\b|n't\b")
-CLAIMS = {                                      # rule -> what in the words counts as the claim
-    "push": re.compile(r"\b(pushed|committed|commit(ted)? and push(ed)?)\b|\bpush(ed)? to (main|origin)\b"),
+                  r"without|yet to|before|until|unless|once|if|will|i'll|to be|still need|needs to|going to|should|would|could|ready to|"
+                  r"how|whether|another session|someone|you)\b|n't\b")
+# a push told about, not made ("it was pushed to X", "were already committed", "the committed code")
+_PASSIVE = re.compile(r"\b(was|were|been|got|is|are|being)\s+(already\s+|just\s+)?$|\bthe\s+$")
+CLAIMS = {                                    # rule -> what in the words counts as the claim
+    "push": re.compile(r"\bpushed\b|\bcommitted\b(?!\s+by\b)"),
     "deploy": re.compile(r"\b(deployed|redeployed|rolled out|shipped)\b|\b(is|are|now|it's|went|it is|goes|gone) live\b|\blive (at|on|now)\b|\bserving\s+[0-9a-f]{7}"),
     "test": re.compile(r"\btested\b|\btests? (all )?(pass|passed|passes|passing|green)\b|\b\d+ (passed|tests? pass)|\ball (tests )?green\b|\bpytest\b[^.\n]*\bpass"),
 }
@@ -192,7 +195,8 @@ def claims(text: str) -> set[str]:
     for sentence in re.split(r"(?<=[.!?\n])\s+|\n", str(text or "").lower()):
         for rule, pattern in CLAIMS.items():
             m = pattern.search(sentence)
-            if m and not _NEG.search(sentence[:m.start()][-48:]):
+            before = sentence[:m.start()] if m else ""
+            if m and not _NEG.search(before[-48:]) and not (rule == "push" and _PASSIVE.search(before)):   # "the bible was pushed to X" is not purple's push
                 found.add(rule)
     return found
 

@@ -45,6 +45,7 @@ def test_each_call_gets_its_kind():
     assert tc.classify("Skill", {"skill": "ci-tests"}) == ("shell", ["test"])
     assert tc.classify("TaskStop", {})[1] == ["kill"]
     assert tc.classify("TodoWrite", {})[0] == "other"
+    assert tc.classify("mcp__claude_ai_Google_Drive__read_file_content", {})[0] == "web"
 
 
 def test_the_commit_word_inside_another_word_or_a_message_is_not_a_commit():
@@ -61,6 +62,7 @@ def test_a_claimed_push_needs_a_push_or_commit_call():
     assert rules("Pushed it.", [], shipped=True) == []                           # the bridge saw the push land (a ship event)
     assert rules("Not pushed yet: waiting for the tests.", []) == []            # a negated claim is no claim
     assert rules("I'll push once the tests pass.", []) == []                   # nor a future one
+    assert rules("The lore bible was pushed to aaronsrhodes2/remnant.", []) == []   # nor someone else's push, told
 
 
 def test_a_claimed_deploy_or_live_needs_a_deploy_or_a_look_at_the_live_service():
@@ -160,3 +162,11 @@ def test_the_cli_engine_end_to_end_times_each_call_and_flags_the_claimed_push(sh
     assert [(c["n"], c["k"], c.get("ok")) for c in chain["calls"]] == [("Bash", "shell", True), ("Read", "read", False)]
     assert all(isinstance(c.get("ms"), int) for c in chain["calls"])
     assert [f["rule"] for f in chain["flags"]] == ["push"]                     # the tests ran; the push never did
+
+
+def test_words_about_someone_elses_push_or_a_question_are_no_claim():
+    for words in ("The repo does have the work, committed by you on 2026-10-20.", "The fixes were already committed as segment 6.",
+                  "The committed code generates different locks.", "Another session already shipped the switch as cb85dbc.",
+                  "Or tell me how the portal is deployed and I'll narrow it down.", "Commit and push straight to `main`."):
+        assert rules(words, []) == [], words
+    assert rules("Committed as 22644ad.", []) == ["push"]                     # its own, with no call: still caught
