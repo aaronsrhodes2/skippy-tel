@@ -11,21 +11,31 @@ const W = require("../../static/skippy-wake.js");
 function rng(seed) { let s = seed; return () => { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; }; }
 const all = Array.from({ length: 200 }, (_, i) => `a/${i}.mp3`);
 
-test("discovery: every song once, his favorites about one in four, nothing twice", () => {
-  const favs = ["a/1.mp3", "a/2.mp3", "x/fav1.flac", "x/fav2.flac", "spotify:track:0123456789abcdefghijkl"];
-  const q = D.buildQueue("discovery", { all, favorites: favs }, rng(7));
-  const keys = q.map(it => it.path || it.uri);
-  assert.equal(new Set(keys).size, keys.length);
-  for (const p of all) assert.ok(keys.includes(p));
-  const firstFav = keys.findIndex(k => favs.includes(k));
-  assert.ok(firstFav >= 0 && firstFav <= D.FAV_EVERY, "a favorite comes early");
-  assert.ok(q.some(it => it.kind === "spotify"));
-});
-
-test("library: only favorites and Spotify liked songs", () => {
-  const q = D.buildQueue("library", { all, favorites: ["x/f.flac"], liked: ["spotify:track:0123456789abcdefghijkl"] }, rng(3));
+test("library: his one favorites pool, favorites and Spotify liked, minus the songs he is tired of", () => {
+  const q = D.buildQueue("library", { all, favorites: ["x/f.flac", "x/old.flac"], liked: ["spotify:track:0123456789abcdefghijkl"], tired: ["x/old.flac"] }, rng(3));
   assert.deepEqual(q.map(it => it.path || it.uri).sort(), ["spotify:track:0123456789abcdefghijkl", "x/f.flac"]);
   assert.deepEqual(D.buildQueue("nonsense", { all }), []);
+});
+
+test("discovery: his unplayed songs, never a favorite, liked, played or tired one, and Spotify's new songs one in four", () => {
+  const S = n => "spotify:track:" + String(n).repeat(22).slice(0, 22);
+  const favs = ["a/1.mp3", "a/2.mp3"], played = ["a/3.mp3", "a/4.mp3"], tired = ["a/5.mp3"], liked = [S(1)];
+  const suggested = [S(1), S(2), S(3), S(4), S(5)];
+  const q = D.buildQueue("discovery", { all, favorites: favs, liked, played, tired, suggested }, rng(7));
+  const keys = q.map(it => it.path || it.uri);
+  assert.equal(new Set(keys).size, keys.length);
+  for (const k of [...favs, ...played, ...tired, ...liked]) assert.ok(!keys.includes(k), k);
+  assert.equal(keys.filter(k => k.startsWith("a/")).length, all.length - 5);                       // every other song, once
+  assert.deepEqual([3, 7, 11, 15].map(i => q[i].kind), ["spotify", "spotify", "spotify", "spotify"]);
+  assert.equal(q.filter(it => it.kind === "spotify").length, 4);
+});
+
+test("discovery keeps Spotify's suggestions inside his normal genres", () => {
+  const goth = "spotify:track:" + "g".repeat(22), polka = "spotify:track:" + "p".repeat(22), unknown = "spotify:track:" + "u".repeat(22);
+  const genre = k => ({ "a/1.mp3": "Gothic Rock", [goth]: "Gothic Rock", [polka]: "Polka" })[k] || "";
+  const q = D.buildQueue("discovery", { all, favorites: ["a/1.mp3"], suggested: [goth, polka, unknown], genre }, rng(2));
+  const uris = q.filter(it => it.kind === "spotify").map(it => it.uri).sort();
+  assert.deepEqual(uris, [goth, unknown].sort());                                                  // an artist Bilby doesn't know: his liked artists' own
 });
 
 test("the browser skips what it can't play itself", () => {

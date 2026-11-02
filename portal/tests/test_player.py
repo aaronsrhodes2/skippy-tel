@@ -534,6 +534,39 @@ def test_favorites_are_marked_from_a_pod_or_purple_and_from_the_player_and_playe
     assert m3u.status_code == 200 and b"Moby/Play/03 Porcelain.mp3" in m3u.data
 
 
+def test_a_song_he_is_tired_of_leaves_the_pool_and_every_mix_until_he_favorites_it_again(client):
+    """The Captain, 2026-11-01: one favorites pool, pruned while it plays ("Skippy, I'm tired of this song")."""
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    box = {"device": "skippyroom-office", "name": "Office (Skippy)", "room": "box-office",
+           "state": {"track": "Moby/Play/03 Porcelain.mp3", "title": "Porcelain", "artist": "Moby", "playing": True}}
+    assert client.post("/home/music/tired", json={}).status_code == 401
+    assert client.post("/home/music/tired", json={}, headers=auth).status_code == 409             # nothing playing yet
+    client.post("/home/music/checkin", json=box, headers=auth)
+    client.post("/home/music/favorite", json={"device": "skippyroom-office"}, headers=auth)
+    got = client.post("/home/music/tired", json={"device": "skippyroom-office"}, headers=auth).get_json()["tired"]
+    assert got["title"] == "Porcelain" and got["was_favorite"] is True
+    listed = client.get("/home/music/favorites", headers=auth).get_json()
+    assert listed["favorites"] == [] and listed["tired"] == ["Moby/Play/03 Porcelain.mp3"]
+    client.post("/home/music/favorite", json={"device": "skippyroom-office"}, headers=auth)        # a favorite again: off the tired list
+    assert client.get("/home/music/favorites", headers=auth).get_json()["tired"] == []
+
+
+def test_every_song_he_hears_goes_on_the_played_list_that_discovery_moves_past(client):
+    """The Captain, 2026-11-01: discovery plays his unplayed songs. A pod, the stereo, his browser or the car past 30 s into a song marks it."""
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    box = {"device": "skippyroom-office", "name": "Office (Skippy)", "room": "box-office",
+           "state": {"track": "Moby/Play/03 Porcelain.mp3", "title": "Porcelain", "artist": "Moby", "playing": True, "pos": 5}}
+    client.post("/home/music/checkin", json=box, headers=auth)
+    assert client.get("/home/music/favorites", headers=auth).get_json()["played"] == []           # 5 s in: not yet
+    box["state"]["pos"] = 40
+    client.post("/home/music/checkin", json=box, headers=auth)
+    client.post("/home/music/checkin", json=box, headers=auth)                                     # once per song, not per check-in
+    login(client, ADMIN)
+    assert client.post("/music/played", json={"track": "Moby/Play/04 Southside.mp3"}).get_json() == {"ok": True}   # the car's page
+    got = client.get("/music/favorites").get_json()
+    assert sorted(got["played"]) == ["Moby/Play/03 Porcelain.mp3", "Moby/Play/04 Southside.mp3"] and got["tired"] == []
+
+
 def test_the_favorite_key_is_the_captains_alone(client):
     """The ★ key in the player marks the song playing in that browser (portal/favorites.py); a friend with the audio grant never sees it."""
     login(client, ADMIN)

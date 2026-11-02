@@ -108,6 +108,13 @@ MUSIC_RX = [  # plain music commands, in his words, to the `music` tool's action
     ("resume", re.compile(r"^(?:resume|unpause|continue)(?: the music| playing)?$|^play the music again$")),
     ("next", re.compile(r"^(?:next|skip)(?: (?:song|track|this(?: song)?|it))?$")),
     ("previous", re.compile(r"^(?:previous|last|go back)(?: (?:song|track))?$|^play the (?:previous|last) (?:song|track)$")),
+    # his one favorites pool, pruned and grown as it plays (2026-11-01): "I'm tired of this song" drops it from every mix and skips it
+    ("tired", re.compile(r"^(?:i'?m|i am) (?:so )?(?:tired|sick) of (?:this|that|hearing this|hearing that)(?: one| song| track)?$"
+                         r"|^(?:drop|prune|ban|retire|unfavou?rite) (?:this|that)(?: one| song| track)?(?: from (?:my |the )?(?:favou?rites|mix|pool))?$"
+                         r"|^(?:remove|take) (?:this|that)(?: one| song| track)? (?:out of|from|off) (?:my |the )?(?:favou?rites|mix|pool|list)$"
+                         r"|^(?:never|don'?t ever) play (?:this|that)(?: one| song| track)? again$")),
+    ("favorite", re.compile(r"^(?:add|put) (?:this|that)(?: one| song| track)? (?:to|in|on|into) (?:my |the )?(?:favou?rites|pool)(?: list)?$"
+                            r"|^(?:favou?rite|star|save) (?:this|that)(?: one| song| track)?$|^(?:i )?(?:love|like) (?:this|that) (?:one|song|track)$")),
 ]
 WORD_NUMBERS = {w: i + 1 for i, w in enumerate("one two three four five six seven eight nine ten".split())}
 

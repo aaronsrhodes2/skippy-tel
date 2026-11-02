@@ -43,6 +43,9 @@ def test_the_other_parts_of_the_grammar():
     assert g("shuffle the playlist the box") == {"playlist": "box", "shuffle": True}
     assert g("play the album disintegration") == {"album": "disintegration"}
     assert g("play bauhaus on discovery") == {"mode": "discovery", "artist": "bauhaus", "shuffle": True}
+    m = brain.music_route
+    assert m("I'm tired of this song") == m("drop this one") == m("remove this from my favorites") == m("never play this again") == {"action": "tired"}
+    assert m("add this to my favorites") == m("favorite this song") == {"action": "favorite"}
     for not_this in ("pause the music", "what music is this", "play Pink Floyd upstairs", "play spotify upstairs", "turn the music down",
                      "pay the bill by friday", "play the news"):
         assert g(not_this) is None, not_this
@@ -56,15 +59,28 @@ def test_each_place():
     assert "speaker" not in brain.music_grammar("play goth music")                      # no place: where the room plays, as before
 
 
-def test_discovery_mixes_a_favorite_in_about_one_in_four_like_the_car():
+def test_discovery_is_what_he_has_not_heard_with_spotify_new_songs_one_in_four_like_the_car():
+    # the Captain, 2026-11-01: "unplayed songs from my collection, and new songs from spotify within my normal genre boundaries,
+    # omitting the songs on my favorites list"
     all_ = [f"lib/{i}.mp3" for i in range(300)]
-    favs = [f"fav/{i}.mp3" for i in range(100)]
-    q = mixes.build("discovery", {"all": all_, "favorites": favs, "suggested": [S1, S2]}, random.Random(1), 200)
+    favs, played, tired = all_[:20], all_[20:120], all_[120:125]
+    sugg = [f"spotify:track:{i:022d}" for i in range(30)]
+    q = mixes.build("discovery", {"all": all_, "favorites": favs, "liked": [sugg[0]], "suggested": sugg, "played": played, "tired": tired},
+                    random.Random(1), 200)
     assert len(q) == 200 and len(set(q)) == 200
-    assert all(q[i].startswith("fav/") for i in range(3, 200, 4))                     # drive-pure.js: (n + 1) % FAV_EVERY == 0
-    assert sum(x.startswith("fav/") for x in q) == 50
-    q = mixes.build("favorites", {"all": all_, "favorites": favs[:5], "liked": [S1, S2]}, random.Random(1))
-    assert sorted(q) == sorted(favs[:5] + [S1, S2])                                  # favorites: his favorites and Spotify liked, nothing else
+    assert not set(q) & set(favs + played + tired + [sugg[0]])
+    assert all(q[i].startswith("spotify:") for i in range(3, 116, 4))                 # drive-pure.js: (n + 1) % SUGGEST_EVERY == 0
+    assert sum(x.startswith("spotify:") for x in q) == 29                              # every suggestion but the liked one, while they last
+    q = mixes.build("favorites", {"all": all_, "favorites": favs[:5], "liked": [sugg[1], sugg[2]], "tired": [favs[0]]}, random.Random(1))
+    assert sorted(q) == sorted(favs[1:5] + [sugg[1], sugg[2]])                       # his one pool, minus what he is tired of
+
+
+def test_discovery_keeps_spotify_inside_his_genres():
+    goth, polka, unknown = "spotify:track:" + "g" * 22, "spotify:track:" + "p" * 22, "spotify:track:" + "u" * 22
+    genre = {"lib/1.mp3": "Gothic Rock", goth: "Gothic Rock", polka: "Polka"}.get
+    q = mixes.build("discovery", {"all": ["lib/0.mp3", "lib/1.mp3"], "favorites": ["lib/1.mp3"], "suggested": [goth, polka, unknown],
+                                  "genre": lambda k: genre(k) or ""}, random.Random(2))
+    assert sorted(x for x in q if x.startswith("spotify:")) == sorted([goth, unknown]) and "lib/1.mp3" not in q
 
 
 CATALOG = {
@@ -103,6 +119,16 @@ def test_a_filter_that_matches_nothing_says_so_and_plays_the_closest():
     assert "Nobody At All" in note
     q, note, _ = mixes.resolve({"mode": "favorites"}, CATALOG, favorites=[], rnd=random.Random(4))
     assert set(q) == set(CATALOG) and "favorites" in note
+    q, _, _ = mixes.resolve({"mode": "discovery"}, CATALOG, played=set(CATALOG) - {"Pink Floyd/DSOTM/Money.mp3"}, rnd=random.Random(4))
+    assert q == ["Pink Floyd/DSOTM/Money.mp3"]                                                     # all he hasn't heard
+
+
+def test_a_song_he_is_tired_of_is_in_no_mix():
+    out = "Clan of Xymox/Medusa/Louise.mp3"
+    for args in ({"mode": "discovery"}, {"genre": "darkwave", "shuffle": True}, {"mode": "favorites"}):
+        q, _, _ = mixes.resolve(args, CATALOG, favorites=[out, "Bauhaus/In the Flat Field/Dark Entries.mp3"], tired={out, S3},
+                                spotify=FakeSpotify(), rnd=random.Random(6))
+        assert q and out not in q and S3 not in q, args
 
 
 class FakeSpotify:
@@ -209,4 +235,44 @@ def test_the_hub_plays_the_grammar_on_the_place_named_without_asking():
     assert said.startswith("Nothing polka in his library, so here is the closest. Playing 7 tracks")
     said = run("play_music", {"what": "polka", "speaker": "upstairs"})                     # a free word that is no name: the same, not "nothing matches"
     assert said.startswith("Nothing polka in his library, so here is the closest.")
+    loop.call_soon_threadsafe(loop.stop)
+
+
+def test_tired_of_this_song_drops_it_and_moves_on_and_favorite_this_adds_it():
+    class Favs:
+        calls: list = []
+
+        def tire(self, room, device=""):
+            self.calls.append(("tire", room))
+            return "Dropped Louise by Clan of Xymox: out of his favorites and out of every mix from now on."
+
+        def mark(self, room, device=""):
+            self.calls.append(("mark", room))
+            return "Added Louise by Clan of Xymox to his favorites."
+
+        def pool(self):
+            return [], set(), set()
+
+    class Pod(Box):
+        def __init__(self):
+            super().__init__()
+            self.playing, self.skipped = True, 0
+
+        async def next(self):
+            self.skipped += 1
+
+        async def resume(self):
+            pass
+
+        async def prev(self):
+            pass
+
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    room, favs = Room(), Favs()
+    room.music = Pod()
+    _, run = hub.music_tools(lambda: room, loop, favorites=favs, stereo=lambda: None)
+    assert run("music", brain.music_route("I'm tired of this song")).startswith("Dropped Louise") and room.music.skipped == 1
+    assert run("music", brain.music_route("add this to my favorites")).startswith("Added Louise") and room.music.skipped == 1
+    assert favs.calls == [("tire", "theater"), ("mark", "theater")]
     loop.call_soon_threadsafe(loop.stop)

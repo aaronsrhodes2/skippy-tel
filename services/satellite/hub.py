@@ -1190,8 +1190,10 @@ async def heartbeat(hub, path: Path, house=None, every: float = HEARTBEAT_S, clo
 MUSIC_TOOLS = [
     {"name": "music", "description": "Control the music playing in THIS room (Bilby's Audio Service on this room's speaker), or on the house stereo when "
                                      "that is what plays (Spotify included).",
-     "input_schema": {"type": "object", "properties": {"action": {"type": "string", "enum": ["pause", "resume", "next", "previous", "louder", "quieter", "volume", "what", "favorite"],
-                      "description": "favorite: add the song playing now to his favorites (for DJing later): 'add this song to my favorites', 'favorite this'. "
+     "input_schema": {"type": "object", "properties": {"action": {"type": "string", "enum": ["pause", "resume", "next", "previous", "louder", "quieter", "volume", "what", "favorite", "tired"],
+                      "description": "favorite: add the song playing now to his favorites pool (from his library or Spotify): 'add this song to my favorites', 'favorite this'. "
+                                     "tired: take the song playing now out of his favorites and every mix and skip it: 'I'm tired of this song', "
+                                     "'drop this one', 'remove this from my favorites'. "
                                      "what: what is playing ('what song is this', 'who sings this'). louder / quieter / volume (with level): the house stereo's "
                                      "volume ('turn it down', 'volume 5')"},
                                                        "level": {"type": "integer", "description": "volume: 1 (quietest) to 10 (full)"}},
@@ -1334,9 +1336,9 @@ async def grammar_queue(args: dict, box, house, favorites) -> tuple[list[str], s
         spot = None
 
     def work():
-        favs = favorites.tracks() if favorites is not None and (args.get("mode") or "") != "" else []
+        favs, tired, played = favorites.pool() if favorites is not None else ([], set(), set())   # his pool, what he is tired of, what he heard
         lists = mixes.traktor_playlists(env.get("BILBY_TRAKTOR_NML", dj.DEFAULT_NML), dj.STATE) if args.get("playlist") else {}
-        return mixes.resolve(args, catalog, favs, spot, lists)
+        return mixes.resolve(args, catalog, favs if args.get("mode") else [], spot, lists, tired=tired, played=played)
     return await asyncio.to_thread(work)
 
 
@@ -1395,6 +1397,13 @@ def music_tools(room_of, loop, favorites=None, stereo=None):
                 if step is not None:
                     await step()
                     return f"Done: {action}" + (" on the house stereo." if target is not box else ".")
+                if action == "tired":                           # "I'm tired of this song": out of his pool and every mix, and on to the next one
+                    if favorites is None:
+                        return "His favorites list is not set up here."
+                    said = await asyncio.to_thread(favorites.tire, room.name, music_mod.device_id("stereo") if on_stereo else "")
+                    if said.startswith("Dropped"):
+                        await target.next()
+                    return said
                 if action == "favorite":                        # "Skippy, add this song to my favorites" (portal/favorites.py)
                     if favorites is None:
                         return "His favorites list is not set up here."
@@ -1418,12 +1427,20 @@ def music_tools(room_of, loop, favorites=None, stereo=None):
                 mixed, premixed = not ordered, not ordered
                 if not found:
                     return "Nothing in his library to play right now (the music gate is not answering)."
-            elif re.fullmatch(r"(?:my |his )?(?:favou?rites?|favou?rite songs?|liked songs)", plain):
-                found = await asyncio.to_thread(favorites.tracks) if favorites is not None else []
+            elif re.fullmatch(r"(?:my |his )?(?:favou?rites?|favou?rite songs?|liked songs)", plain):   # his one pool: favorites + liked, pruned
+                if mixed:                                       # "shuffle my favorites": the pool's mix (favorites + liked)
+                    found, note, _ordered = await grammar_queue({**(args or {}), "mode": "favorites", "shuffle": True}, box, house, favorites)
+                    premixed = True
+                else:                                           # "play my favorites": the list in its order, newest first
+                    favs, tired, _played = await asyncio.to_thread(favorites.pool) if favorites is not None else ([], set(), set())
+                    found = [f for f in favs if f not in tired]
                 if not found:
                     return "His favorites list is empty so far."
             elif re.fullmatch(r"(?:everything|all|all (?:of )?(?:my |his )?music|(?:my |his |the )?(?:whole |entire )?(?:library|collection))", plain):
                 found, mixed = list(await box.media.catalog()), True
+                if favorites is not None:                       # never a song he is tired of
+                    tired = (await asyncio.to_thread(favorites.pool))[1]
+                    found = [t for t in found if t not in tired]
             else:
                 found = music_mod.search(await box.media.catalog(), what)
                 if not found and what.strip():                  # not a name: maybe a genre ("polka"); else the closest is the shuffle, said in one line

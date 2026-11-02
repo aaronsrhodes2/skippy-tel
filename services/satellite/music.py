@@ -18,6 +18,7 @@ import time
 PORTAL = "https://skippy-portal-1015050363686.us-west1.run.app"
 SETTLE_S = 2.5                       # after starting a track the box reports idle for a moment: that is not "the track ended"
 MAX_QUEUE = 2000
+POOL_S = 60.0                        # his favorites pool (and tired, played) is asked for again after this
 
 
 def device_id(room: str) -> str:
@@ -34,6 +35,7 @@ class Favorites:
     def __init__(self, portal: str, token: str, request=None):
         self.portal, self.token = portal.rstrip("/"), token
         self.request = request or self._request
+        self._pool: tuple[float, tuple] | None = None
 
     def _request(self, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
         import requests                                          # noqa: PLC0415
@@ -46,6 +48,7 @@ class Favorites:
     def mark(self, room: str, device: str = "") -> str:
         """Mark the song he is listening to now (this room's own box first, or `device`: the house stereo when that is what plays). Returns what
         to say. A Spotify track is kept by its URI (portal/favorites.py writes it into the .m3u as a comment line)."""
+        self._pool = None
         code, got = self.request("POST", "/home/music/favorite", {"device": device or device_id(room), "source": "voice"})
         if code == 409:
             return "Nothing is playing, so there is nothing to add to his favorites."
@@ -55,9 +58,38 @@ class Favorites:
         again = " It was already there; it is back at the top." if int(f.get("count") or 1) > 1 else ""
         return f"Added {f.get('title') or 'the song'}" + (f" by {f['artist']}" if f.get("artist") else "") + " to his favorites." + again
 
+    def tire(self, room: str, device: str = "") -> str:
+        """He is tired of the song he is listening to: out of his favorites pool and out of every mix (portal/favorites.py tire). Returns
+        what to say."""
+        self._pool = None
+        code, got = self.request("POST", "/home/music/tired", {"device": device or device_id(room), "source": "voice"})
+        if code == 409:
+            return "Nothing is playing, so there is nothing to drop."
+        if code != 200:
+            return f"The favorites list did not answer ({code})."
+        t = got.get("tired") or {}
+        name = (t.get("title") or "the song") + (f" by {t['artist']}" if t.get("artist") else "")
+        return f"Dropped {name}: out of his favorites and out of every mix from now on."
+
+    def pool(self) -> tuple[list[str], set[str], set[str]]:
+        """(his favorites, newest first; the tracks he is tired of; every track he has heard) in one call, kept POOL_S (a slow portal never
+        holds up "bilby"); the last good answer when the portal doesn't answer."""
+        now = time.monotonic()
+        if self._pool and now - self._pool[0] < POOL_S:
+            return self._pool[1]
+        try:
+            code, got = self.request("GET", "/home/music/favorites")
+        except Exception:                                        # noqa: BLE001 — the portal is away: the last pool, else none
+            code, got = 0, {}
+        if code != 200:
+            return self._pool[1] if self._pool else ([], set(), set())
+        out = ([f["track"] for f in (got.get("favorites") or []) if isinstance(f, dict) and f.get("track")],
+               {t for t in (got.get("tired") or []) if isinstance(t, str)}, {t for t in (got.get("played") or []) if isinstance(t, str)})
+        self._pool = (now, out)
+        return out
+
     def tracks(self) -> list[str]:
-        code, got = self.request("GET", "/home/music/favorites")
-        return [f["track"] for f in (got.get("favorites") or []) if isinstance(f, dict) and f.get("track")] if code == 200 else []
+        return self.pool()[0]
 
 
 class BoxMusic:

@@ -5,10 +5,14 @@ hand a Spotify row over to Spotify). His playlists are one thing wherever they l
 Spotify playlist; and every Spotify row he also owns plays from Bilby (prefer_bilby: same artist and title), so Spotify serves the list and
 Bilby plays it whenever it can.
 
-Modes (build(), a port of the car's Bilby Shuffle, portal/static/drive-pure.js buildQueue, so the car and the house mix alike):
-  discovery   every song of Bilby's and Spotify's suggestions (his liked artists' other songs), shuffled, with his favorites mixed in about one
-              in four (FAV_EVERY)
-  favorites   his favorites and his Spotify liked songs, nothing else ("favorite music", "my library": the car calls this one "library")
+Modes (build(), the car's Bilby Shuffle, portal/static/drive-pure.js buildQueue, step for step, so the car and the house mix alike; the
+Captain's words of 2026-11-01):
+  favorites   his ONE favorites pool: his favorites and his Spotify liked songs, minus the ones he is tired of ("favorite music", "my library";
+              the car's "shuffle library"). He grows it as it plays ("favorite this", a Bilby or a Spotify song) and prunes it ("I'm tired
+              of this song": portal/favorites.py tire)
+  discovery   what he hasn't heard: his collection's unplayed songs (never a favorite, a liked, a played or a tired one: portal/favorites.py
+              played, every song heard past 30 s on any player), and one of Spotify's new songs (his liked artists' other songs) in about
+              every SUGGEST_EVERY, kept inside his normal genres: the genre tags of his pool
   ""          the plain library
 
 "new" (filters["new"]): what was ADDED to Bilby most recently (the catalog's date added, the file's mtime Syncthing keeps): the NEW_COUNT newest of
@@ -29,7 +33,7 @@ import unicodedata
 from collections import Counter
 from pathlib import Path
 
-FAV_EVERY = 4                         # discovery: one favorite in about every four songs (drive-pure.js FAV_EVERY)
+SUGGEST_EVERY = 4                     # discovery: one of Spotify's new songs in about every four (drive-pure.js SUGGEST_EVERY)
 QUEUE_MAX = 400                       # drive-pure.js QUEUE_MAX
 NEW_COUNT = 300
 
@@ -195,10 +199,12 @@ def pick_playlist(names, said: str) -> str | None:
 
 # ── the mix ──
 def build(mode: str, src: dict, rnd=None, max_n: int = QUEUE_MAX) -> list[str]:
-    """drive-pure.js buildQueue, item for item. src: {all: [paths], favorites: [paths or URIs], liked: [items], suggested: [items]}."""
+    """drive-pure.js buildQueue, step for step. src: {all: [paths], favorites: [paths or URIs], liked: [items], suggested: [items],
+    played: [items], tired: [items], genre: item -> its genre tag ('' unknown); keep_out / bounds: resolve()'s, taken before its filters}."""
     rnd = rnd or random.Random()
-    favs = list(dict.fromkeys(x for x in (src.get("favorites") or []) if x))
-    rnd.shuffle(favs)
+    tired = set(src.get("tired") or ())
+    favs = [x for x in dict.fromkeys(src.get("favorites") or []) if x and x not in tired]
+    liked = [x for x in (src.get("liked") or []) if x and x not in tired]
     seen, out = set(), []
 
     def add(it: str) -> None:
@@ -206,27 +212,34 @@ def build(mode: str, src: dict, rnd=None, max_n: int = QUEUE_MAX) -> list[str]:
             seen.add(it)
             out.append(it)
     if mode == "favorites":
-        pool = favs + list(src.get("liked") or [])
+        pool = favs + liked
         rnd.shuffle(pool)
         for it in pool:
             if len(out) >= max_n:
                 break
             add(it)
         return out
-    rest = list(src.get("all") or []) + list(src.get("suggested") or [])
-    rnd.shuffle(rest)
     if mode != "discovery":
-        for it in rest:
+        rest = list(src.get("all") or [])
+        rnd.shuffle(rest)
+        for it in rest[:max_n * 2]:
             if len(out) >= max_n:
                 break
             add(it)
         return out
-    f = r = 0
-    while len(out) < max_n and (f < len(favs) or r < len(rest)):
-        fav_turn = f < len(favs) and (r >= len(rest) or (len(out) + 1) % FAV_EVERY == 0)
-        if fav_turn:
-            add(favs[f])
-            f += 1
+    skip = set(src.get("keep_out") or (set(favs) | set(liked))) | set(src.get("played") or ()) | tired
+    genre = src.get("genre") or (lambda _it: "")
+    bounds = set(src["bounds"]) if src.get("bounds") is not None else {g for g in map(genre, favs + liked) if g}
+    rest = [x for x in (src.get("all") or []) if x not in skip]
+    sugg = [x for x in (src.get("suggested") or []) if x not in skip and (not bounds or not genre(x) or genre(x) in bounds)]
+    rnd.shuffle(rest)
+    rnd.shuffle(sugg)
+    r = g = 0
+    while len(out) < max_n and (r < len(rest) or g < len(sugg)):
+        spot_turn = g < len(sugg) and (r >= len(rest) or (len(out) + 1) % SUGGEST_EVERY == 0)
+        if spot_turn:
+            add(sugg[g])
+            g += 1
         else:
             add(rest[r])
             r += 1
@@ -240,18 +253,23 @@ def _field_match(text: str, said: str) -> bool:
 
 
 def resolve(args: dict, catalog: dict, favorites: list[str] | None = None, spotify=None, playlists: dict | None = None,
-            rnd=None, max_n: int = QUEUE_MAX) -> tuple[list[str], str, bool]:
+            rnd=None, max_n: int = QUEUE_MAX, tired: set[str] | None = None, played=None) -> tuple[list[str], str, bool]:
     """(queue, a note to say, ordered) for play_music's grammar arguments: mode, genre, playlist, artist, album, song, new, shuffle.
 
     `spotify`: an object with mix() -> {liked, suggested} and playlist(name) -> {tracks, playlist} (spotify.Client), or None. `ordered`: the queue
     is in its own order already (a playlist, an album) and must not be shuffled again. A filter that matches nothing is said in the note and
-    dropped, so the closest thing still plays; nothing is ever asked."""
+    dropped, so the closest thing still plays; nothing is ever asked. `tired`: the songs he is tired of (paths or Spotify URIs, favorites.tire),
+    left out of every mix: his one favorites pool is pruned as it plays. `played`: every song he has heard (favorites.played): discovery moves
+    past them."""
     rnd = rnd or random.Random()
+    tired = set(tired or ())
+    if tired:
+        catalog = {p: v for p, v in catalog.items() if p not in tired}
     mode = str(args.get("mode") or "").lower()
     mode = {"favorite": "favorites", "favourites": "favorites", "library": "favorites", "discover": "discovery"}.get(mode, mode)
     notes: list[str] = []
     by_artist = artist_genres(catalog)
-    favs = [f for f in (favorites or []) if f]
+    favs = [f for f in (favorites or []) if f and f not in tired]
 
     if args.get("playlist"):                                        # his playlist: Traktor's first, then Spotify's; Bilby plays what it has
         said = str(args["playlist"])
@@ -280,11 +298,12 @@ def resolve(args: dict, catalog: dict, favorites: list[str] | None = None, spoti
     if mode in ("discovery", "favorites") and spotify is not None:
         try:
             m = spotify.mix() or {}
-            rows = [r for r in (m.get("liked") or []) + (m.get("suggested") or []) if isinstance(r, dict) and r.get("uri")]
+            fresh = lambda rs: [r for r in rs or [] if isinstance(r, dict) and r.get("uri") and r["uri"] not in tired]   # noqa: E731
+            rows = fresh(m.get("liked")) + fresh(m.get("suggested"))
             spot_artist = {r["uri"]: (r.get("artist") or "").split(", ")[0] for r in rows}
-            liked = prefer_bilby(m.get("liked") or [], catalog)
+            liked = prefer_bilby(fresh(m.get("liked")), catalog)
             if mode == "discovery":
-                suggested = prefer_bilby(m.get("suggested") or [], catalog)
+                suggested = prefer_bilby(fresh(m.get("suggested")), catalog)
         except Exception:                                           # noqa: BLE001 — Bilby alone
             pass
 
@@ -314,6 +333,8 @@ def resolve(args: dict, catalog: dict, favorites: list[str] | None = None, spoti
         tests.append((f"the song {s}", lambda it, s=s: _field_match(fields(it)[0], s)))
 
     src = {"all": list(catalog) if mode != "favorites" else [], "favorites": favs, "liked": liked, "suggested": suggested}
+    keep_out = set(favs) | set(liked)                               # discovery: never his pool, whatever the filters keep of it
+    bounds = {g for g in map(genre, favs + liked) if g}            # his normal genres: his pool's
     for said, ok in tests:
         kept = {k: [i for i in v if ok(i)] for k, v in src.items()}
         if any(kept.values()):
@@ -331,7 +352,7 @@ def resolve(args: dict, catalog: dict, favorites: list[str] | None = None, spoti
         q.sort(key=lambda p: (row(catalog[p])[2].lower(), p))
         queue, ordered = q[:max_n], True
     else:
-        queue = build(mode, src, rnd, max_n)
+        queue = build(mode, {**src, "keep_out": keep_out, "bounds": bounds, "genre": genre, "played": set(played or ())}, rnd, max_n)
     if not queue and (tests or args.get("new")):                    # every filter dropped and still nothing: the plain shuffle of the mode
         queue = build(mode, {"all": list(catalog), "favorites": favs, "liked": liked, "suggested": suggested}, rnd, max_n)
     if not queue and mode == "favorites":                           # no favorites and no Spotify: the library is the closest

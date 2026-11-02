@@ -2,7 +2,7 @@
 
     the book       resume his current audiobook at its last place (the same places the pods use: audiobook-gate's places.json, which merges
                    the hub's state/audiobooks.json with what browsers save into state/audiobooks-inbox/, read back by the hub's audiobooks.Store)
-    two shuffles   Bilby Shuffle "discovery" (all of Bilby's songs, his favorites mixed in) and "library" (his favorites), from the music gate
+    two shuffles   Bilby Shuffle "discovery" (his unplayed songs and Spotify's new ones in his genres, never his favorites) and "library" (his one favorites pool), from the music gate
                    and portal/favorites.py; the queue logic is static/drive-pure.js
     the house      the last key: a lamp per thing at home he cares about (house_lamps: skippy-pc, Skippy Core, the pods, lights and plugs,
                    Bilby, audiobooks, the voice, Spotify); a tap names what is down

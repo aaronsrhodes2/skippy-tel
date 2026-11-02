@@ -63,7 +63,7 @@
     catch (e) { S.savedAt = 0; }
   }
 
-  // ── Bilby Shuffle: discovery (everything, favorites mixed in) or library (favorites) ──
+  // ── Bilby Shuffle: discovery (what he has not heard) or library (his one favorites pool) ──
   async function musicGate() { if (!S.music || S.music.exp - Date.now() / 1000 < 1800) S.music = await getJSON(cfg.musicGate); return S.music; }
   const mu = (kind, path) => `${S.music.url}/t/${S.music.pass}/${kind}/${path.split("/").map(encodeURIComponent).join("/")}`;
   function idbCatalog(put) {                              // the music app's own saved copy of the catalog (bilby-app.js), same origin
@@ -95,7 +95,7 @@
     const cat = JSON.parse(text), at = {};
     (cat.fields || []).forEach((f, i) => { at[f] = i; });
     S.lib = new Map();
-    for (const row of cat.tracks || []) { const p = row[at.p]; if (typeof p === "string" && p) S.lib.set(p, { t: String(row[at.t] || p.split("/").pop()), a: String(row[at.a] || "") }); }
+    for (const row of cat.tracks || []) { const p = row[at.p]; if (typeof p === "string" && p) S.lib.set(p, { t: String(row[at.t] || p.split("/").pop()), a: String(row[at.a] || ""), g: String(at.g >= 0 ? row[at.g] || "" : "") }); }
     return S.lib;
   }
   // His Spotify (liked songs, and suggestions from his liked artists) comes from home; a Spotify row plays on the CAR's own Spotify (drive.py).
@@ -111,13 +111,20 @@
     } catch (e) { S.sp.can = false; return { liked: [], suggested: [] }; }
   }
   async function shuffle(mode) {
-    let lib, favs, sp;
+    let lib, pool, sp;
     stopCar();
-    try { [lib, favs, sp] = await Promise.all([library(), getJSON(cfg.favorites).then(d => d.items || d.favorites || []), spotifyMix()]); }
+    try { [lib, pool, sp] = await Promise.all([library(), getJSON(cfg.favorites), spotifyMix()]); }
     catch (e) { now("shuffle", String(e.message || e)); return; }
+    const favs = pool.items || pool.favorites || [];
     for (const f of favs) if (/^spotify:/.test(f.track) && !S.sp.info.has(f.track)) S.sp.info.set(f.track, { t: f.title, a: f.artist, ms: 0 });
     const fav = favs.map(f => f.track).filter(t => /^spotify:/.test(t) || lib.has(t));
-    S.q = D.buildQueue(mode, { all: mode === "discovery" ? Array.from(lib.keys()) : [], favorites: fav, liked: sp.liked, suggested: mode === "discovery" ? sp.suggested : [] });
+    // a song's genre: its own tag, else its artist's in Bilby (a Spotify row has only its artist): his genre boundaries for discovery
+    const byArtist = new Map();
+    for (const t of lib.values()) if (t.g && !byArtist.has(t.a.toLowerCase())) byArtist.set(t.a.toLowerCase(), t.g);
+    const genre = k => { const t = lib.get(k); if (t) return t.g || byArtist.get(t.a.toLowerCase()) || "";
+                         const i = S.sp.info.get(k); return i ? byArtist.get(String(i.a || "").split(", ")[0].toLowerCase()) || "" : ""; };
+    S.q = D.buildQueue(mode, { all: mode === "discovery" ? Array.from(lib.keys()) : [], favorites: fav, liked: sp.liked,
+                               suggested: mode === "discovery" ? sp.suggested : [], played: pool.played || [], tired: pool.tired || [], genre });
     S.mode = mode; S.qi = -1;
     if (!S.q.some(it => D.playable(it, S.sp.can))) { now("shuffle", mode === "library" ? "No favorites yet: the star in Bilby marks one" : "The library is empty"); paint(); return; }
     await nextSong();
@@ -180,6 +187,11 @@
   au.addEventListener("timeupdate", () => {
     $("#now-bar i").style.width = au.duration ? (100 * au.currentTime / au.duration).toFixed(2) + "%" : "0";
     if (S.mode === "book") saveBook(false);
+    const it = S.q[S.qi];                                // heard: a Bilby song past 30 s goes on the played list, so discovery moves on from it
+    if ((S.mode === "discovery" || S.mode === "library") && it && it.kind === "bilby" && au.currentTime > 30 && S.heard !== it.path) {
+      S.heard = it.path;
+      postJSON(cfg.played, { track: it.path }).catch(() => {});
+    }
   });
   document.addEventListener("visibilitychange", () => { if (document.hidden) saveBook(true); });
   addEventListener("pagehide", () => saveBook(true));

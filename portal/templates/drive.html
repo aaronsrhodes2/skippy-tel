@@ -62,7 +62,7 @@
 {% endblock %}
 {% block content %}
 <section id="drive"
-         data-music-gate="{{ url_for('music.player_gate') }}" data-favorites="{{ url_for('music.favorites_list') }}"
+         data-music-gate="{{ url_for('music.player_gate') }}" data-favorites="{{ url_for('music.favorites_list') }}" data-played="{{ url_for('music.favorites_played') }}"
          data-book-gate="{{ url_for('audiobooks.gate') }}" data-voice-gate="{{ url_for('chat.voice_gate') }}"
          data-send="{{ url_for('housechat.home_chat_send') }}" data-events="{{ url_for('housechat.home_chat_events') }}"
          data-ort="{{ url_for('static', filename='vendor/ort/') }}"
@@ -82,7 +82,7 @@
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
       <svg class="g" aria-hidden="true"><use href="#g-shuffle"/></svg><svg class="g sub" aria-hidden="true"><use href="#g-globe"/></svg>
       <span class="name" id="k-disc-t"></span>
-      <button class="hit" type="button" aria-label="Bilby Shuffle: discovery (everything, favorites mixed in)"></button>
+      <button class="hit" type="button" aria-label="Bilby Shuffle: discovery (songs you have not heard)"></button>
     </div>
     <div class="unit named" id="k-lib" style="--accent: var(--pink); --i: 2">
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>

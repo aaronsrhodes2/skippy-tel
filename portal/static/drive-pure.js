@@ -2,8 +2,8 @@
 
      shuffle        a fair shuffle (Fisher-Yates) with the random source handed in
      buildQueue     the two Bilby Shuffles as one list of items {kind: "bilby", path} | {kind: "spotify", uri}:
-                      discovery  every song of Bilby's, his favorites mixed in about one in four, and Spotify's suggestions (from his liked songs)
-                      library    his favorites and his Spotify liked songs, nothing else
+                      discovery  his unplayed songs (never a favorite, liked, played or tired one), and Spotify's new songs inside his genres
+                      library    his one favorites pool: favorites and Spotify liked songs, minus the ones he is tired of
      playable       what this browser can play itself (Bilby's files; a Spotify item needs a Spotify player)
      carDone        whether a Spotify row playing on the car's own Spotify is over
      replyAfter     the house brain's answer to the turn sent at `seq`, from the Home chat's events (portal/housechat.py) */
@@ -15,7 +15,8 @@
   "use strict";
 
   const QUEUE_MAX = 400;
-  const FAV_EVERY = 4;               // discovery: one favorite in about every four songs
+  const SUGGEST_EVERY = 4;           // discovery: one of Spotify's new songs in about every four
+  const FAV_EVERY = SUGGEST_EVERY;   // the old name (discovery no longer mixes favorites in: 2026-11-01)
 
   function shuffle(arr, rnd) {
     const a = arr.slice();
@@ -27,24 +28,35 @@
   const item = s => (/^spotify:/.test(s) ? { kind: "spotify", uri: s } : { kind: "bilby", path: s });
   const key = it => it.kind === "spotify" ? it.uri : it.path;
 
-  /* src: {all: [library paths], favorites: [paths or spotify URIs, newest first], liked: [spotify URIs], suggested: [spotify URIs]} */
+  /* The two Bilby Shuffles, the same mixes Skippy at home plays (services/satellite/mixes.py build), the Captain's words of 2026-11-01:
+       library    (the house's "favorites"): his one favorites pool, his favorites and his Spotify liked songs, minus what he is tired of
+       discovery  what he hasn't heard: his collection's unplayed songs (never his favorites, liked, played or tired ones), and one of
+                  Spotify's new songs in about every SUGGEST_EVERY, kept inside his normal genres (the genres of his pool)
+     src: {all: [library paths], favorites: [paths or URIs, newest first], liked: [URIs], suggested: [URIs], played: [paths or URIs],
+           tired: [paths or URIs], genre: (path or URI) -> its genre tag, or "" when unknown (optional)} */
   function buildQueue(mode, src, rnd, max) {
     rnd = rnd || Math.random; max = max || QUEUE_MAX;
     src = src || {};
-    const favs = shuffle((src.favorites || []).filter(Boolean), rnd).map(item);
+    const tired = new Set(src.tired || []);
+    const favs = (src.favorites || []).filter(x => x && !tired.has(x));
+    const liked = (src.liked || []).filter(x => x && !tired.has(x));
     const seen = new Set(), out = [];
     const add = it => { const k = key(it); if (!k || seen.has(k)) return false; seen.add(k); out.push(it); return true; };
     if (mode === "library") {
-      const pool = shuffle(favs.concat((src.liked || []).map(item)), rnd);
-      for (const it of pool) { if (out.length >= max) break; add(it); }
+      for (const s of shuffle(favs.concat(liked), rnd)) { if (out.length >= max) break; add(item(s)); }
       return out;
     }
     if (mode !== "discovery") return out;
-    const rest = shuffle((src.all || []).map(item).concat((src.suggested || []).map(item)), rnd);
-    let f = 0, r = 0;
-    while (out.length < max && (f < favs.length || r < rest.length)) {
-      const favTurn = f < favs.length && (r >= rest.length || (out.length + 1) % FAV_EVERY === 0);
-      if (favTurn) add(favs[f++]); else add(rest[r++]);
+    const skip = new Set([...favs, ...liked, ...(src.played || []), ...tired]);
+    const genre = typeof src.genre === "function" ? src.genre : () => "";
+    const bounds = new Set(favs.concat(liked).map(genre).filter(Boolean));
+    const inside = s => { const g = genre(s); return !g || !bounds.size || bounds.has(g); };
+    const rest = shuffle((src.all || []).filter(s => !skip.has(s)), rnd).map(item);
+    const sugg = shuffle((src.suggested || []).filter(s => !skip.has(s) && inside(s)), rnd).map(item);
+    let r = 0, g = 0;
+    while (out.length < max && (r < rest.length || g < sugg.length)) {
+      const spotTurn = g < sugg.length && (r >= rest.length || (out.length + 1) % SUGGEST_EVERY === 0);
+      if (spotTurn) add(sugg[g++]); else add(rest[r++]);
     }
     return out;
   }
@@ -76,5 +88,5 @@
     return !!row.ms && now - row.at - (row.pausedMs || 0) > row.ms - (row.from || 0) + CAR_MARGIN_MS;
   }
 
-  return { shuffle, buildQueue, nextPlayable, playable, replyAfter, carDone, QUEUE_MAX, FAV_EVERY, CAR_MARGIN_MS };
+  return { shuffle, buildQueue, nextPlayable, playable, replyAfter, carDone, QUEUE_MAX, FAV_EVERY, SUGGEST_EVERY, CAR_MARGIN_MS };
 });

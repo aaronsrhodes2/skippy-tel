@@ -29,7 +29,7 @@ G = lambda name: "grant:" + name                                                
 REGISTRY = {
     # the Captain only
     **{e: ADMIN_ONLY for e in (
-        "admin.autoconfigure", "music.favorites_list", "music.favorites_add", "music.favorites_remove", "music.favorites_m3u", "admin.discord_setup", "admin.friends_remove", "admin.friends_save", "admin.index", "admin.logs",
+        "admin.autoconfigure", "music.favorites_list", "music.favorites_add", "music.favorites_remove", "music.favorites_played", "music.favorites_m3u", "admin.discord_setup", "admin.friends_remove", "admin.friends_save", "admin.index", "admin.logs",
         "admin.module_switch", "admin.requests_dismiss", "admin.restart", "admin.settings", "recovery.repair", "recovery.state_json", "server_admin.fragment",
         "audiobooks.page", "audiobooks.gate", "audiobooks.rooms", "audiobooks.command",
         "status.page", "status.state_json", "status.heal", "status.repair", "status.logs", "status.probe", "car.page", "car.state", "alarms.page", "alarms.state", "alarms.do", "drive.page", "drive.spotify_mix", "drive.spotify_car", "drive.spotify_play", "drive.spotify_pause", "drive.house",
@@ -54,7 +54,7 @@ REGISTRY = {
         "prophesy.board", "prophesy.record_file", "prophesy.game", "prophesy.game_file")},
     # skippy-pc, CI
     **{e: MACHINE for e in (
-        "game_import_done", "game_import_download", "home_import_chunk", "home_job_done", "home_jobs", "home_media", "home_music_checkin", "home_music_favorite", "home_music_favorites", "housechat.home_house_sync", "home_deploys", "home_alert", "home_alarms", "home_report", "home_starter",
+        "game_import_done", "game_import_download", "home_import_chunk", "home_job_done", "home_jobs", "home_media", "home_music_checkin", "home_music_favorite", "home_music_favorites", "home_music_tired", "housechat.home_house_sync", "home_deploys", "home_alert", "home_alarms", "home_report", "home_starter",
         "home_prophesy_put", "home_prophesy_finish",
         "home_telemetry", "home_workshop", "home_workshop_list", "home_patient", "home_ups", "home_core_report", "home_logs", "ops_home", "tasks_run", "google_link.home_access")},
     "telemetry_tap": BEACON,

@@ -215,6 +215,23 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     app.extensions["workshop"] = workshop
     player = player_mod.Player(home)                # Bilby's Audio Service: the pass and Connect (admin only)
     favs = favorites_mod.from_env()                 # Bilby favorites: the Captain's songs marked for DJing (favorites.py)
+    heard_last: dict[str, str] = {}                 # device -> the track last put on the played list (one write per song, not per check-in)
+
+    def heard(device: str, state) -> None:
+        """A Captain's player past PLAYED_S into a song: on the played list (favorites.played), once per song per device."""
+        if not isinstance(state, dict) or state.get("playing") is not True:
+            return
+        track = state.get("track")
+        try:
+            pos = float(state.get("pos") or 0)
+        except (TypeError, ValueError):
+            return
+        if isinstance(track, str) and track and pos >= favorites_mod.PLAYED_S and heard_last.get(device) != track:
+            heard_last[device] = track
+            try:
+                favs.mark_played(track)
+            except Exception:                       # noqa: BLE001 — a bucket hiccup never costs the check-in
+                heard_last.pop(device, None)
     app.extensions["player"] = player               # (so tests/dev_music.py can point it at a gate on this machine)
     books = audiobooks_mod.Books(home, player)      # Audiobooks: the pass for the audiobook gate, and "Play on" a room box (admin only, never a grant)
     app.extensions["books"] = books                 # (so tests/dev_books.py can point it at a gate on this machine)
@@ -964,6 +981,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         captain = next(iter(sorted(app.config["ADMIN_EMAILS"])), "")
         if not captain:
             abort(404)
+        heard(dev, state)
         return jsonify(player.checkin(captain, dev, str(body.get("name") or ""), state if isinstance(state, dict) else None, room=room, box=True))
 
     @app.put("/home/imports/<name>")
@@ -1159,6 +1177,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def player_checkin():
         body = request.get_json(silent=True) or {}
         state = body.get("state")
+        if auth.is_admin(me()):
+            heard(device_id(), state)
         return jsonify(player.checkin(me(), device_id(), str(body.get("name") or ""),
                                       state if isinstance(state, dict) else None, room=str(body.get("room") or "")))
 
@@ -1175,7 +1195,17 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @listen.get("/favorites")
     @auth.admin_required
     def favorites_list():
-        return jsonify(favorites=favs.items())
+        return jsonify(favorites=favs.items(), played=list(favs.played()), tired=[t["track"] for t in favs.tired()])
+
+    @listen.post("/played")
+    @auth.admin_required
+    def favorites_played():
+        """The car's page (it checks in with no Connect device): a Bilby song it has played past PLAYED_S."""
+        track = str((request.get_json(silent=True) or {}).get("track") or "")
+        if not track or len(track) > 600:
+            return jsonify(error="no track"), 400
+        favs.mark_played(track)
+        return jsonify(ok=True)
 
     @listen.post("/favorites")
     @auth.admin_required
@@ -1206,7 +1236,26 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         """The Captain's favorites for the hub ("Skippy, play/shuffle my favorites"): track paths and names, newest first. Home token."""
         if not home.authorized(request.headers.get("Authorization")):
             abort(401)
-        return jsonify(favorites=[{k: f.get(k) for k in ("track", "title", "artist")} for f in favs.items()])
+        return jsonify(favorites=[{k: f.get(k) for k in ("track", "title", "artist")} for f in favs.items()],
+                       tired=[t["track"] for t in favs.tired()],         # out of every mix, Spotify liked included (favorites.tire)
+                       played=list(favs.played()))                       # discovery is what is not in it
+
+    @app.post("/home/music/tired")
+    def home_music_tired():
+        """The hub ("Skippy, I'm tired of this song"), with the home token, as the Captain: what he is listening to now goes out of his
+        favorites pool and onto the tired list the mixes leave out (`device`: the asking pod's own Connect id, preferred when it plays)."""
+        if (request.content_length or 0) > 4_000:
+            abort(413)
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        captain = next(iter(sorted(app.config["ADMIN_EMAILS"])), "")
+        if not captain:
+            abort(404)
+        body = request.get_json(silent=True) or {}
+        state = favorites_mod.now_playing(player.listing(captain), str(body.get("device") or ""))
+        if not state:
+            return jsonify(error="Nothing is playing on any of his players."), 409
+        return jsonify(tired=favs.tire(state, source=str(body.get("source") or "home")[:20]))
 
     @app.post("/home/music/favorite")
     def home_music_favorite():
