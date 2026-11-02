@@ -20,6 +20,7 @@ def test_the_page_is_the_captains_alone(env):
     for k in ("k-book", "k-disc", "k-lib", "k-skippy", "k-play", "k-house"):        # the six keys, and nothing else to press
         assert f'id="{k}"' in html
     assert 'id="k-next"' not in html and "skippy-face.js" in html and html.count("data-lamp=") == 8
+    assert 'class="hit play"' in html and 'class="hit next"' in html                 # play/pause and next share the fifth key
     for s in ("skippy-duck.js", "skippy-voice.js", "skippy-wake.js", "drive-pure.js", "drive-app.js", "audiobooks-pure.js"):
         assert s in html
     assert b'href="/drive"' in client.get("/apps").data            # a tile on his launcher

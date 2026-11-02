@@ -19,6 +19,7 @@
     lit("#k-book", S.mode === "book"); lit("#k-disc", S.mode === "discovery"); lit("#k-lib", S.mode === "library");
     const row = S.sp && S.sp.row;
     $("#k-play-g").setAttribute("href", (row ? row.paused : au.paused) ? "#g-play" : "#g-pause");
+    $("#k-next-g").setAttribute("href", S.mode === "book" ? "#g-fwd30" : "#g-next");
   }
 
   // ── ducking: this page's own player follows Skippy's voice ──
@@ -201,6 +202,7 @@
   key("#k-book", () => { stopCar(); if (S.mode === "book" && !au.paused) stopHere(); else if (S.mode === "book" && au.src) play(); else playBook(); });
   key("#k-disc", () => shuffle("discovery"));
   key("#k-lib", () => shuffle("library"));
+  $("#k-play .hit.next").addEventListener("click", next);
   key("#k-play", () => {
     const row = S.sp.row;
     if (row) {                                           // a Spotify row: the car's own player pauses, and plays on from where it was
@@ -276,7 +278,7 @@
   }
   pollHouse(); setInterval(pollHouse, 20000);
   document.addEventListener("visibilitychange", pollHouse);
-  key("#k-house", () => { pollHouse().then(() => now("home", house && house.down && house.down.length ? "Down: " + house.down.join(", ") : "Everything at home is up")); });
+  key("#k-house", () => { pollHouse(); });                // lights and symbols only (the Captain): a tap just looks again
 
   // The wake word in the browser: the same model the pods use, from voice-gate (the Captain's pass). Without it, the voice's own Whisper
   // listening for "Skippy" (Typing mode) takes over, so the key always works.
