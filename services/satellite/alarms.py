@@ -15,6 +15,13 @@ REPEATS = {"once": [], "daily": DAYS, "weekdays": DAYS[:5], "weekends": DAYS[5:]
 RINGS = {"alarm": 5, "reminder": 2}
 RING_GAP_S = 60
 SNOOZE_S = 9 * 60
+
+def timer_name(label: str) -> str:
+    """A timer's label as said before "timer": "pasta timer" is not said "your pasta timer timer"."""
+    return re.sub(r"\s*\btimer$", "", (label or "").strip(), flags=re.I)
+
+
+SNOOZE_RE = re.compile(r"\bsnooze\b|five more minutes|ten more minutes|let me sleep")
 MAX = 40
 WAKE_HOURS = (3, 12)              # an alarm for 03:00-11:59 is a wake-up: it rings where he sleeps unless he said where
 DISMISS = set("ok okay alright all right stop it off alarm reminder turn i'm im i am up awake thanks thank you got enough shut quiet cancel dismiss "
@@ -299,7 +306,7 @@ class Alarms:
             return None
         a = r["alarm"]
         w = (words or "").lower()
-        if re.search(r"\bsnooze\b|five more minutes|ten more minutes|let me sleep", w):
+        if SNOOZE_RE.search(w):
             s = self.snooze(a)
             return f"Fine. Snoozed until {say_when(s.due, self.clock())}. Nine minutes, not a second more."
         said = re.findall(r"[a-z']+", w)
@@ -313,7 +320,8 @@ class Alarms:
         lt = time.localtime(self.clock())
         hello = "Good morning. " if WAKE_HOURS[0] <= lt.tm_hour < WAKE_HOURS[1] else ""
         clock = f"{lt.tm_hour % 12 or 12}:{lt.tm_min:02d}" + ("" if hello else (" PM" if lt.tm_hour >= 12 else " AM"))
-        return f"{hello}It's {clock}. " + (f"Your {a.label} alarm. " if a.label else "This is your alarm. ") + "Say stop, or snooze."
+        name = re.sub(r"\s*\balarm$", "", a.label.strip(), flags=re.I)     # "test alarm" was said "your test alarm alarm" (2026-11-01)
+        return f"{hello}It's {clock}. " + (f"Your {name} alarm. " if name else "This is your alarm. ") + "Say stop, or snooze."
 
     # ── the brain's tools ──
     def run(self, name: str, args: dict, room: str = "") -> str:

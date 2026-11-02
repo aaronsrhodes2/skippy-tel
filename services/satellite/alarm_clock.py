@@ -18,6 +18,7 @@ import asyncio
 import io
 import json
 import math
+import re
 import time
 import wave
 from collections import deque
@@ -184,7 +185,7 @@ class AlarmClock:
         for room, timers in list(self.timers.items()):
             for t in timers.due():
                 self.log(f"[{room}] timer done: {t.label}")
-                await self.say_in(room, f"Your {t.label} timer is done.")
+                await self.say_in(room, f"Your {alarms_mod.timer_name(t.label)} timer is done.")
                 self.poke()
         keys = {a.id: key_of(a) for a in self.alarms.items if a.due <= now}
         fired = self.alarms.due()
@@ -300,6 +301,33 @@ class AlarmClock:
         a = self.ringing["alarm"]
         self._end("stopped", by=by)
         return "Alarm off." if a.kind == "alarm" else "Okay."
+
+    WOKE_SNOOZE_S = 30
+
+    def woke(self, by: str = "") -> bool:
+        """'Skippy' said while one rings: it stops at once (the Captain, 2026-11-01: "alarms stop as soon as the wake word is invoked"). A
+        "snooze" in the next WOKE_SNOOZE_S still snoozes it (snooze_after_wake). True when something was ringing."""
+        if self.ringing is None:
+            return False
+        self._woke_stop = (self.ringing["alarm"], self.clock())
+        self._end("stopped", by=f"wake word ({by})" if by else "wake word")
+        return True
+
+    def snooze_after_wake(self, words: str, by: str = "") -> str | None:
+        """The words after the wake word that stopped an alarm: "snooze" puts it off nine minutes; anything else is for the brain (None)."""
+        a, at = getattr(self, "_woke_stop", (None, 0.0))
+        w = (words or "").lower()
+        if a is None or self.clock() - at > self.WOKE_SNOOZE_S:
+            return None
+        said = re.findall(r"[a-z']+", w)
+        if said and all(t in alarms_mod.DISMISS for t in said):        # "Skippy, stop": already stopped by the wake word
+            self._woke_stop = (None, 0.0)
+            return "Alarm off." if a.kind == "alarm" else "Okay."
+        if not alarms_mod.SNOOZE_RE.search(w):
+            return None
+        self._woke_stop = (None, 0.0)
+        s = self.alarms.snooze(a)
+        return f"Fine. Snoozed until {alarms_mod.say_when(s.due, self.clock())}. Nine minutes, not a second more."
 
     def snooze(self, by: str = "phone", minutes: int = alarms_mod.SNOOZE_S // 60) -> str:
         if self.ringing is None:

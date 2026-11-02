@@ -243,3 +243,33 @@ def test_plain_alarm_requests_go_to_the_tool_before_the_model():
     a = alarms_mod.Alarms(None, clock=lambda: at(2026, 11, 1, 15, 0), wake_place="upstairs")
     tool, args = alarms_mod.pre_route("set an alarm for 7:00 AM every day")
     assert a.run(tool, args).startswith("Alarm set for tomorrow at 7 AM, every day, ringing upstairs")
+
+
+def test_the_wake_word_stops_a_ringing_alarm_at_once_and_snooze_or_stop_said_next_still_answer(tmp_path):
+    # the Captain, 2026-11-01: "Make it so alarms stop as soon as the wake word is invoked"
+    now = [at(2026, 11, 2, 6, 59)]
+    c, posted, played = make(tmp_path, now)
+    c.alarms.add("alarm", "07:00", repeat="weekdays")
+    now[0] += 61
+    run(c.tick())
+    assert c.woke(by="theater") is True and c.ringing is None and c.fired[-1]["ended"] == "stopped"
+    assert c.woke() is False                                                          # nothing rings now
+    now[0] += 5
+    assert c.snooze_after_wake("snooze", by="theater").startswith("Fine. Snoozed")     # "Skippy ... snooze", said within the 30 s
+    assert c.snooze_after_wake("snooze") is None                                       # once only
+    n = len(played)
+    now[0] += 120
+    run(c.tick())
+    assert len(played) == n                                                           # silent from the word on
+    now[0] += 9 * 60 - 120
+    run(c.tick())
+    assert c.ringing is not None and c.woke() is True
+    assert c.snooze_after_wake("stop") == "Alarm off."                                 # "Skippy, stop": already off, said so
+    assert c.snooze_after_wake("what's the weather") is None                           # anything else is for the brain
+
+
+def test_an_alarm_named_alarm_is_not_said_alarm_alarm():
+    a = alarms_mod.Alarms(None, clock=lambda: at(2026, 11, 2, 17, 35), log=lambda m: None)
+    x = a.add("alarm", "17:35", "test alarm")
+    assert "test alarm alarm" not in a.spoken(x) and "Your test alarm." in a.spoken(x)
+    assert alarms_mod.timer_name("pasta timer") == "pasta" and alarms_mod.timer_name("five minute") == "five minute"

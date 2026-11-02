@@ -267,8 +267,14 @@ class Room:
         if woke and self.mode == IDLE and self.buf is not None:        # still speaking and still waiting: he is addressed
             self._woke("early")
 
+    def _alarm_hush(self, by: str) -> None:
+        """'Skippy' while an alarm rings: it stops at once (the Captain, 2026-11-01); a "snooze" said next still snoozes it."""
+        if self.clock is not None and self.clock.woke(by=self.name):
+            self.log(f"[{self.name}] alarm stopped by the wake word ({by})")
+
     def _woke(self, by: str) -> None:
         self.log(f"[{self.name}] woke")
+        self._alarm_hush(by)
         for media in (self.book, self.stereo):
             if media is not None:
                 media.duck(True, 25)                            # a book or the stereo playing on the PC outputs goes quiet while he talks to Skippy
@@ -333,6 +339,7 @@ class Room:
                     self._resume(IDLE)
                     return
                 self.log(f"[{self.name}] woke")
+                self._alarm_hush("whisper")
                 self._record("wake", by="whisper")
                 await self.link.woke("skippy")
                 if not rest:
@@ -539,8 +546,9 @@ class Room:
                 if done:
                     return
         ringing = self.clock is not None and self.clock.ringing is not None
-        if ringing or (self.clock is None and self.alarms is not None and self.alarms.ringing is not None):
-            answer = self.clock.answered(command, by=self.name) if ringing else self.alarms.answered(command)   # any word to any pod: "stop" / "snooze" here, anything else to the brain
+        snoozed = None if ringing or self.clock is None else self.clock.snooze_after_wake(command, by=self.name)   # the wake word stopped it; "snooze" said next
+        if snoozed is not None or ringing or (self.clock is None and self.alarms is not None and self.alarms.ringing is not None):
+            answer = snoozed or (self.clock.answered(command, by=self.name) if ringing else self.alarms.answered(command))   # any word to any pod: "stop" / "snooze" here, anything else to the brain
             if answer is not None:
                 self.log(f"[{self.name}] alarm answered: {command} -> {answer}")
                 self._record("command", words=command, tools=["alarm"], outcome="alarm_answered")
@@ -825,7 +833,8 @@ class Room:
             await self._restart_box(f"for {time.monotonic() - last:.0f} s while resting")       # deaf at rest: his name would never be heard
         for timer in (self.timers.due() if self.clock is None else ()):     # with the house's clock, it rings them (alarm_clock.py)
             self.log(f"[{self.name}] timer done: {timer.label}")
-            await self.announce(f"Your {timer.label} timer is done.")
+            from alarms import timer_name                       # noqa: PLC0415
+            await self.announce(f"Your {timer_name(timer.label)} timer is done.")
         if self.alarms is not None and self.clock is None:
             for alarm in self.alarms.due():
                 self.log(f"[{self.name}] {alarm.kind} going off: {alarm.hhmm} {alarm.label}")
