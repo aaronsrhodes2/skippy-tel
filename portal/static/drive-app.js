@@ -102,19 +102,46 @@
   // Without it (home silent, the car's Spotify not open) the shuffle goes on with Bilby's rows alone.
   S.sp = { can: false, info: new Map(), row: null, timer: 0 };
   const postJSON = (url, body) => getJSON(url, { method: "POST", body: JSON.stringify(body), headers: { "Content-Type": "application/json", Accept: "application/json" } });
-  async function spotifyMix() {
-    try {
-      const m = await getJSON(cfg.spMix);
+  // The mix takes home ~20 s to build the first time (then it keeps it 30 min): it is asked for as the page opens, kept here 25 min, and a
+  // shuffle never waits for it: Bilby's songs start at once and the Spotify rows join the queue when the mix arrives (SP_WAIT_MS).
+  const SP_WAIT_MS = 2500, SP_KEEP_MS = 25 * 60 * 1000, CAR_RETRY_MS = 10 * 60 * 1000;
+  function spotifyMix() {
+    if (S.sp.mix && Date.now() - S.sp.mixAt < SP_KEEP_MS) return S.sp.mix;
+    S.sp.mixAt = Date.now();
+    S.sp.mix = getJSON(cfg.spMix).then(m => {
       for (const t of (m.liked || []).concat(m.suggested || [])) S.sp.info.set(t.uri, { t: t.title, a: t.artist, ms: t.ms || 0 });
       S.sp.can = true;
       return { liked: (m.liked || []).map(t => t.uri), suggested: (m.suggested || []).map(t => t.uri) };
-    } catch (e) { S.sp.can = false; return { liked: [], suggested: [] }; }
+    }, () => { S.sp.can = false; S.sp.mix = null; return { liked: [], suggested: [] }; });
+    return S.sp.mix;
   }
+  const NO_SP = { liked: [], suggested: [] };
   async function shuffle(mode) {
-    let lib, pool, sp;
+    let lib, pool;
     stopCar();
-    try { [lib, pool, sp] = await Promise.all([library(), getJSON(cfg.favorites), spotifyMix()]); }
+    const mixing = spotifyMix();
+    try { [lib, pool] = await Promise.all([library(), getJSON(cfg.favorites)]); }
     catch (e) { now("shuffle", String(e.message || e)); return; }
+    let sp = await Promise.race([mixing, new Promise(r => setTimeout(() => r(null), SP_WAIT_MS))]);
+    const tok = S.shuffleTok = (S.shuffleTok || 0) + 1;
+    build(mode, lib, pool, sp || NO_SP);
+    if (!sp && !S.q.some(it => D.playable(it, true))) {   // nothing of Bilby's to start with (no favorites yet): this queue is all Spotify, wait for it
+      now("shuffle", "");
+      sp = await mixing;
+      if (tok !== S.shuffleTok) return;
+      build(mode, lib, pool, sp);
+    }
+    if (!sp) mixing.then(late => {                        // the Spotify rows arrive while Bilby already plays: the rest of the queue is rebuilt with them
+      if (tok !== S.shuffleTok || S.mode !== mode || !late.liked.length && !late.suggested.length) return;
+      const done = S.q.slice(0, S.qi + 1), had = new Set(done.map(it => it.path || it.uri));
+      const rest = build(mode, lib, pool, late, true).filter(it => !had.has(it.path || it.uri));
+      S.q = done.concat(rest);
+    });
+    S.mode = mode; S.qi = -1;
+    if (!S.q.some(it => D.playable(it, S.sp.can))) { now("shuffle", mode === "library" ? "No favorites yet: the star in Bilby marks one" : "The library is empty"); paint(); return; }
+    await nextSong();
+  }
+  function build(mode, lib, pool, sp, only) {          // only: return the queue without making it the current one
     const favs = pool.items || pool.favorites || [];
     for (const f of favs) if (/^spotify:/.test(f.track) && !S.sp.info.has(f.track)) S.sp.info.set(f.track, { t: f.title, a: f.artist, ms: 0 });
     const fav = favs.map(f => f.track).filter(t => /^spotify:/.test(t) || lib.has(t));
@@ -124,11 +151,10 @@
     const genre = k => { const t = lib.get(k); if (t) return t.g || byArtist.get(t.a.toLowerCase()) || "";
                          const i = S.sp.info.get(k); return i ? byArtist.get(String(i.a || "").split(", ")[0].toLowerCase()) || "" : ""; };
     const mine = items => D.localFirst(items, u => S.sp.info.get(u), lib);   // a Spotify song he owns plays from Bilby: no Spotify, no rate limit
-    S.q = D.buildQueue(mode, { all: mode === "discovery" ? Array.from(lib.keys()) : [], favorites: mine(fav), liked: mine(sp.liked),
-                               suggested: mode === "discovery" ? mine(sp.suggested) : [], played: pool.played || [], tired: pool.tired || [], genre });
-    S.mode = mode; S.qi = -1;
-    if (!S.q.some(it => D.playable(it, S.sp.can))) { now("shuffle", mode === "library" ? "No favorites yet: the star in Bilby marks one" : "The library is empty"); paint(); return; }
-    await nextSong();
+    const q = D.buildQueue(mode, { all: mode === "discovery" ? Array.from(lib.keys()) : [], favorites: mine(fav), liked: mine(sp.liked),
+                                   suggested: mode === "discovery" ? mine(sp.suggested) : [], played: pool.played || [], tired: pool.tired || [], genre });
+    if (!only) S.q = q;
+    return q;
   }
   function stopCar(keep) {                               // the car's Spotify stops when the page moves on to anything else (keep: a Spotify row follows)
     clearInterval(S.sp.timer);
@@ -140,7 +166,7 @@
     if (!au.paused) stopHere();
     now("shuffle", info.t + (info.a ? " · " + info.a : "") + " · Spotify in the car");
     try { await postJSON(cfg.spPlay, { uri: it.uri }); }
-    catch (e) { S.sp.can = false; S.sp.row = null; now("shuffle", String(e.message || e)); return nextSong(); }   // no car Spotify: Bilby's rows only from here
+    catch (e) { S.sp.can = false; S.sp.offAt = Date.now(); S.sp.row = null; now("shuffle", String(e.message || e)); return nextSong(); }   // no car Spotify: Bilby's rows for a while
     S.sp.row = { uri: it.uri, at: Date.now(), ms: info.ms, seen: false, pausedMs: 0, from: 0, paused: false };
     meta(info.t, info.a, "Spotify in the car");
     clearInterval(S.sp.timer);
@@ -170,6 +196,7 @@
     }, 1500);
   });
   async function nextSong() {
+    if (!S.sp.can && S.sp.offAt && Date.now() - S.sp.offAt > CAR_RETRY_MS) { S.sp.can = true; S.sp.offAt = 0; }   // Spotify opened in the car since: try it again
     const i = D.nextPlayable(S.q, S.qi + 1, S.sp.can);
     if (i < 0) { S.qi = -1; if (S.q.some(it => D.playable(it, S.sp.can))) return nextSong(); return; }   // round again: a shuffle never just stops
     S.qi = i;
@@ -308,8 +335,8 @@
       const buf = n => fetch(`${base}/wake/${n}`).then(r => { if (!r.ok) throw new Error(n); return r.arrayBuffer(); });
       const [mel, emb, word] = await Promise.all(["melspectrogram.onnx", "embedding_model.onnx", "skippy.onnx"].map(buf));
       ear = await SkippyWake.start({ ort, models: { mel, emb, word }, threshold: info.threshold, patience: info.patience, onWake: () => voice.wake("") });
-      setInterval(() => ear.pause(voice.chatting()), 200);   // deaf while a conversation is on (his own voice must not wake him)
-      $("#k-skippy-t").textContent = "";
+      const mine = ear;
+      setInterval(() => mine.pause(voice.chatting()), 200);  // deaf while a conversation is on (his own voice must not wake him)
     } catch (e) {
       earOn = false; ear = null;
       fallback();
@@ -326,8 +353,9 @@
   } catch (e) { /* the key's first tap asks */ }
   skey.addEventListener("click", () => { micGranted = true; setTimeout(startEar, 1500); });
 
-  // what the book key would resume, shown under it
+  // what the book key would resume, shown under it; and the Spotify mix, so the first shuffle has it
   loadBooks().catch(() => {});
+  spotifyMix();
   paint();
   window.DriveApp = { S, voice, get ear() { return ear; }, shuffle, playBook, next, pollHouse };
 })();

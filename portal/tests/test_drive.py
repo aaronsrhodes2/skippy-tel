@@ -90,3 +90,18 @@ def test_the_house_route_is_the_captains(env):
     login(client, ADMIN)
     r = client.get("/drive/house")
     assert r.status_code == 200 and len(r.get_json()["lamps"]) == 8 and r.headers["Cache-Control"] == "no-store"
+
+
+def test_every_element_and_setting_the_script_reads_is_on_the_page(env):
+    """drive-app.js once wrote to an element the page no longer had: the throw lost the wake word every time it loaded."""
+    import re
+    from pathlib import Path
+    client, _, _ = env
+    login(client, ADMIN)
+    html = client.get("/drive").get_data(as_text=True)
+    js = (Path(__file__).resolve().parents[1] / "static" / "drive-app.js").read_text(encoding="utf-8")
+    ids = set(re.findall(r'\$\("#([A-Za-z0-9-]+)', js))
+    assert ids and not [i for i in ids if f'id="{i}"' not in html]
+    keys = set(re.findall(r"cfg\.([A-Za-z]+)", js))
+    attr = lambda k: "data-" + re.sub(r"([A-Z])", lambda m: "-" + m.group(1).lower(), k)   # noqa: E731
+    assert keys and not [k for k in keys if attr(k) + "=" not in html]

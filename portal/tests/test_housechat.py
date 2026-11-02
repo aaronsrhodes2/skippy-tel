@@ -143,3 +143,16 @@ def test_the_home_chat_is_not_in_the_chat_history_the_page_can_delete_or_expire(
     assert app.extensions["chat_history"].chats(ADMIN) == []
     assert client.delete("/talk/history/home").status_code in (200, 404)
     assert [e["text"] for e in client.get("/home-chat/events").get_json()["events"]] == ["hello"]
+
+
+def test_the_drive_page_round_trip_a_silent_say_comes_back_as_the_typed_said_after_its_seq():
+    """The car (portal/static/drive-app.js ask): send "say" to any room with speech off, the hub answers silently, and the page waits for the
+    first typed "said" after the send's own seq (DrivePure.replyAfter)."""
+    c = make()
+    c.sync({"rooms": ["office"], "events": [ev("said", text="an older answer", typed=True)]})
+    sent = c.send("say", "what's the weather", "*", False)
+    cmd = c.sync({"events": []})["commands"][0]
+    assert (cmd["kind"], cmd["room"], cmd["speak"]) == ("say", "*", False)            # the hub answers in its first room, out loud nowhere
+    c.sync({"events": [ev("said", text="Rain by noon, Captain.", typed=True, silent=True)]})
+    after = [e for e in c.view(after=sent["seq"] - 1)["events"] if e["seq"] > sent["seq"]]
+    assert [(e["kind"], e["text"], e.get("typed")) for e in after] == [("said", "Rain by noon, Captain.", True)]
