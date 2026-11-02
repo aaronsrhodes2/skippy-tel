@@ -215,6 +215,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     app.extensions["workshop"] = workshop
     player = player_mod.Player(home)                # Bilby's Audio Service: the pass and Connect (admin only)
     favs = favorites_mod.from_env()                 # Bilby favorites: the Captain's songs marked for DJing (favorites.py)
+    app.extensions["favorites"] = favs              # (the Drive page reads when Bilby last played: drive.py /drive/last)
     heard_last: dict[str, str] = {}                 # device -> the track last put on the played list (one write per song, not per check-in)
 
     def heard(device: str, state) -> None:

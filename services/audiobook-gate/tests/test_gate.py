@@ -117,7 +117,8 @@ def test_place_roundtrip_and_hub_merge(env):
     assert r.status_code == 200
     got = c.get(f"/t/{_pass()}/places.json").get_json()
     assert got["current"] == "dune-part-one-m4b"
-    assert got["books"]["dune-part-one-m4b"] == {"pos": 1234.6, "chapter": 0, "speed": 1.25, "last_played": NOW, "finished": False}
+    assert got["books"]["dune-part-one-m4b"] == {"pos": 1234.6, "chapter": 0, "speed": 1.25, "last_played": NOW, "finished": False,
+                                                 "src": "web", "playing": False}
     # the hub has a newer place for the same book: it wins, and its "current" too
     hub.write_text(json.dumps({"current": "dune-part-one-m4b", "books": {"dune-part-one-m4b": {"pos": 99.0, "chapter": 0, "speed": 1.0, "last_played": NOW + 50, "finished": False}}}))
     assert c.get(f"/t/{_pass()}/places.json").get_json()["books"]["dune-part-one-m4b"]["pos"] == 99.0
@@ -143,3 +144,17 @@ def test_cors_preflight(env):
     c, *_ = env
     r = c.open(f"/t/{_pass()}/place/x", method="OPTIONS")
     assert r.status_code in (200, 204) and "PUT" in r.headers["Access-Control-Allow-Methods"] and r.headers["Access-Control-Allow-Origin"] == "*"
+
+
+def test_the_car_marks_its_place_as_playing_in_the_car(tmp_path):
+    import gate as g
+    clock = [1_800_000_000.0]
+    places = g.Places(tmp_path / "audiobooks.json", tmp_path / "inbox", clock=lambda: clock[0])
+    book = {"id": "aces-1", "d": 36000}
+    got = places.put(book, {"pos": 2126.3, "chapter": 4, "speed": 1, "src": "car", "playing": True})
+    assert got["src"] == "car" and got["playing"] is True
+    m = places.merged()
+    assert m["current"] == "aces-1" and m["books"]["aces-1"]["src"] == "car" and m["books"]["aces-1"]["playing"] is True
+    clock[0] += 5
+    assert places.put(book, {"pos": 2131.3, "src": "nonsense"})["src"] == "web"             # anything else is a browser's plain save
+    assert places.merged()["books"]["aces-1"]["playing"] is False

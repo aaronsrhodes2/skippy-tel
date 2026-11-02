@@ -13,7 +13,7 @@
   const S = { mode: null, q: [], qi: -1, music: null, book: null, books: null, places: null, cur: null, savedAt: 0, pauseAt: 0, lib: null, favs: null };
 
   const getJSON = async (url, opt) => { const r = await fetch(url, Object.assign({ credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } }, opt)); const d = await r.json(); if (!r.ok && !d.ok) throw new Error(d.why || d.error || r.status); return d; };
-  const now = (glyph, text) => { $("#now-g").setAttribute("href", "#g-" + glyph); $("#now-t").textContent = text || ""; };
+  const now = (glyph, text) => { $("#now-g").setAttribute("href", "#g-" + glyph); $("#now-t").textContent = S.nowText = text || ""; };
   const lit = (id, on) => { $(id).dataset.on = on ? "1" : "0"; };
   function paint() {
     lit("#k-book", S.mode === "book"); lit("#k-disc", S.mode === "discovery"); lit("#k-lib", S.mode === "library");
@@ -28,7 +28,11 @@
   au.addEventListener("pause", () => { if (duck && !au.ended) duck.paused(ours); ours = false; if (S.mode === "book") saveBook(true); paint(); });
   au.addEventListener("play", paint);
   const stopHere = () => { ours = true; au.pause(); };
-  async function play() { try { await au.play(); } catch (e) { now("play", "Tap play to start the sound"); } paint(); }
+  async function play() {
+    try { await au.play(); if (S.tapWaits) $("#now-t").textContent = S.nowText || ""; S.tapWaits = false; }
+    catch (e) { S.tapWaits = true; $("#now-t").textContent = (S.label || "") + (S.label ? " · " : "") + "tap anywhere"; }
+    paint();
+  }
 
   // ── the book: his current one, from its last place (kept at home, the same place the pods read) ──
   const bu = p => `${S.book.url}/t/${S.book.pass}/${p}`;
@@ -45,22 +49,37 @@
     let b;
     try { b = await loadBooks(); } catch (e) { now("book", String(e.message || e)); return; }
     if (!b) { now("book", "No book started yet"); return; }
-    S.mode = "book"; S.cur = b; S.savedAt = 0;
-    const pos = P.resumeAt((S.places.books || {})[b.id], b.d);
+    S.mode = "book"; S.cur = b; S.savedAt = 0; S.savedPos = null;
+    const pl = (S.places.books || {})[b.id];             // the ONE current book, at the exact second it was left (the Captain: no rewind)
+    const pos = pl && !pl.finished && P.resumeAt(pl, b.d) > 0 ? +pl.pos || 0 : 0;
+    S.label = "Resume: " + b.t;
     now("book", b.t + (b.a ? " · " + b.a : ""));
+    pauseHouseBook();
     ours = true; au.src = bu(`a/${b.id}`);
     au.addEventListener("loadedmetadata", () => { au.currentTime = pos; }, { once: true });
     meta(b.t, b.a, "Audiobooks");
     await play();
   }
+  // The car's place goes home every few seconds, marked as playing in the car, so the house resumes where the car stopped (and pauses its copy).
+  const SAVE_MS = 5000;
   async function saveBook(force) {
     const b = S.cur; if (S.mode !== "book" || !b || !au.src || au.readyState < 1) return;
-    if (!P.shouldSave(S.savedAt, Date.now(), force)) return;
-    S.savedAt = Date.now();
-    const pos = au.currentTime || 0;
-    const body = { pos, chapter: P.chapterAt(b.ch, pos), speed: 1, finished: !!(au.ended && b.d && b.d - pos < P.DONE_LEFT_S) };
+    if (!force && Date.now() - S.savedAt < SAVE_MS) return;
+    const pos = au.currentTime || 0, playing = !au.paused && !au.ended;
+    // a save that hasn't moved and isn't a change of playing (a page closed or hidden while paused) would only stamp the book "last played now"
+    // and win the next hand-off over Bilby heard since: nothing is sent
+    if (S.savedPos != null && Math.abs(pos - S.savedPos) < 0.5 && playing === S.savedPlaying && !au.ended) return;
+    S.savedAt = Date.now(); S.savedPos = pos; S.savedPlaying = playing;
+    const body = { pos, chapter: P.chapterAt(b.ch, pos), speed: 1, finished: !!(au.ended && b.d && b.d - pos < P.DONE_LEFT_S), src: "car", playing };
     try { await bookGate(); await fetch(bu(`place/${b.id}`), { method: "PUT", body: JSON.stringify(body), keepalive: true, headers: { "Content-Type": "application/json" } }); }
     catch (e) { S.savedAt = 0; }
+  }
+
+  async function pauseHouseBook() {                       // a pod reading this book aloud at home stops: the book is in the car now
+    try {
+      const r = await getJSON(cfg.rooms);
+      for (const d of r.rooms || []) if (d.live && d.book && d.book.playing) postJSON(cfg.roomCmd, { device: d.id, action: "book:pause" }).catch(() => {});
+    } catch (e) { /* home silent: the "playing in the car" mark on the place is the house's other cue */ }
   }
 
   // ── Bilby Shuffle: discovery (what he has not heard) or library (his one favorites pool) ──
@@ -116,7 +135,7 @@
     return S.sp.mix;
   }
   const NO_SP = { liked: [], suggested: [] };
-  async function shuffle(mode) {
+  async function shuffle(mode, first) {
     let lib, pool;
     stopCar();
     const mixing = spotifyMix();
@@ -137,6 +156,12 @@
       const rest = build(mode, lib, pool, late, true).filter(it => !had.has(it.path || it.uri));
       S.q = done.concat(rest);
     });
+    if (first && first.track && (/^spotify:/.test(first.track) || lib.has(first.track))) {   // the hand-off: that song first, where it was
+      const k = first.track;
+      S.q = [/^spotify:/.test(k) ? { kind: "spotify", uri: k } : { kind: "bilby", path: k }].concat(S.q.filter(it => (it.path || it.uri) !== k));
+      S.startAt = /^spotify:/.test(k) ? 0 : +first.pos || 0;
+    }
+    S.label = "Bilby: " + mode;
     S.mode = mode; S.qi = -1;
     if (!S.q.some(it => D.playable(it, S.sp.can))) { now("shuffle", mode === "library" ? "No favorites yet: the star in Bilby marks one" : "The library is empty"); paint(); return; }
     await nextSong();
@@ -207,6 +232,8 @@
     try { await musicGate(); } catch (e) { now("shuffle", String(e.message || e)); return; }
     now("shuffle", t.t + (t.a ? " · " + t.a : ""));
     ours = true; au.src = mu("a", it.path);
+    if (S.startAt > 0) { const at = S.startAt; au.addEventListener("loadedmetadata", () => { au.currentTime = at; }, { once: true }); }
+    S.startAt = 0;
     meta(t.t, t.a, S.mode === "library" ? "Bilby Shuffle · library" : "Bilby Shuffle · discovery");
     await play();
   }
@@ -354,8 +381,28 @@
   skey.addEventListener("click", () => { micGranted = true; setTimeout(startEar, 1500); });
 
   // what the book key would resume, shown under it; and the Spotify mix, so the first shuffle has it
-  loadBooks().catch(() => {});
   spotifyMix();
+  // The hand-off (the Captain): getting into the car continues what he heard last, the current book or Bilby, with no choosing. A key pressed
+  // before it is decided wins; a browser that wants a tap first plays it on the first tap anywhere outside a key, and says what it will be.
+  let handTok = 0;
+  ["pointerdown", "keydown"].forEach(ev => document.addEventListener(ev, e => {
+    if (e.target && e.target.closest && e.target.closest(".hit")) { handTok++; S.tapWaits = false; return; }   // a key: its own action, no hand-off
+    if (S.tapWaits && au.src && au.paused) { S.tapWaits = false; play(); }
+  }, { capture: true }));
+  (async function handOff() {
+    const mine = ++handTok;
+    let places = null, last = null, pool = null;
+    try { await loadBooks(); places = S.places; } catch (e) { places = null; }
+    try { last = (await getJSON(cfg.last)).bilby; } catch (e) { last = null; }
+    try { pool = await getJSON(cfg.favorites); } catch (e) { pool = null; }
+    if (mine !== handTok) return;
+    const favs = new Set(((pool && (pool.items || pool.favorites)) || []).map(f => f.track));
+    const pick = D.handOff(places, last, t => favs.has(t));
+    S.label = pick.kind === "book" ? "Resume: " + ((S.books || []).find(b => b.id === pick.id) || { t: "" }).t : "Bilby: " + pick.mode;
+    now(pick.kind === "book" ? "book" : "shuffle", S.label);
+    if (pick.kind === "book") await playBook();
+    else await shuffle(pick.mode, pick.track ? { track: pick.track, pos: pick.pos } : null);
+  })();
   paint();
-  window.DriveApp = { S, voice, get ear() { return ear; }, shuffle, playBook, next, pollHouse };
+  window.DriveApp = { S, voice, get ear() { return ear; }, shuffle, playBook, next, pollHouse, saveBook };
 })();

@@ -161,6 +161,8 @@ class Places:
     last_played wins, so a book played by voice after it was last heard here keeps the voice's place, and the other way round."""
 
     FIELDS = ("pos", "chapter", "speed", "last_played", "finished")
+    # where a browser's place was saved ("web", or "car": the portal's Drive page) and whether it was playing there, so the house can pause its copy
+    MARKS = ("src", "playing")
 
     def __init__(self, hub_file: Path, inbox: Path, clock=time.time):
         self.hub_file, self.inbox, self.clock = Path(hub_file), Path(inbox), clock
@@ -185,7 +187,7 @@ class Places:
                 continue
             seen = num(d.get("last_played"))
             if seen > num((books.get(d["id"]) or {}).get("last_played")):
-                books[d["id"]] = {k: d.get(k) for k in self.FIELDS}
+                books[d["id"]] = {k: d.get(k) for k in self.FIELDS + self.MARKS}
             if seen > newest:
                 current, newest = d["id"], seen
         return {"current": current, "books": books}
@@ -197,7 +199,8 @@ class Places:
         if not isinstance(chapter, int) or isinstance(chapter, bool) or chapter < 0:
             chapter = 0
         place = {"id": book["id"], "pos": round(pos, 1), "chapter": min(chapter, 9999), "speed": round(min(3.0, max(0.5, num(body.get("speed"), 1.0))), 2),
-                 "last_played": int(self.clock()), "finished": body.get("finished") is True, "src": "web"}
+                 "last_played": int(self.clock()), "finished": body.get("finished") is True,
+                 "src": "car" if body.get("src") == "car" else "web", "playing": body.get("playing") is True}
         with self._lock:
             self.inbox.mkdir(parents=True, exist_ok=True)
             name = hashlib.sha1(book["id"].encode()).hexdigest()[:24] + ".json"

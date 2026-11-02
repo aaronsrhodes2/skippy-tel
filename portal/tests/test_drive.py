@@ -105,3 +105,25 @@ def test_every_element_and_setting_the_script_reads_is_on_the_page(env):
     keys = set(re.findall(r"cfg\.([A-Za-z]+)", js))
     attr = lambda k: "data-" + re.sub(r"([A-Z])", lambda m: "-" + m.group(1).lower(), k)   # noqa: E731
     assert keys and not [k for k in keys if attr(k) + "=" not in html]
+
+
+def test_bilbys_last_play_is_the_newest_connect_song_with_its_place_else_the_played_list():
+    import drive
+    now = 10_000.0
+    listing = [{"name": "Office (Skippy)", "age": 300, "state": {"track": "A/One.mp3", "pos": 61.0, "title": "One", "artist": "A"}},
+               {"name": "Phone", "age": 900, "state": {"track": "B/Two.mp3", "pos": 5.0}},
+               {"name": "Book box", "age": 10, "state": {"track": "", "book": {"id": "aces-1"}}}]           # a book, not Bilby
+    got = drive.bilby_last(listing, {"A/One.mp3": [3, now - 330]}, now)
+    assert got == {"at": 9700, "track": "A/One.mp3", "pos": 61.0, "title": "One", "artist": "A", "where": "Office (Skippy)"}
+    newer = drive.bilby_last(listing, {"C/Three.mp3": [1, now - 10]}, now)           # heard since, on a player Connect forgot (a restart)
+    assert newer["track"] == "C/Three.mp3" and newer["pos"] == 0.0
+    assert drive.bilby_last([], {}, now) is None
+
+
+def test_the_last_route_is_the_captains_and_says_bilby(env):
+    client, _, _ = env
+    login(client, FRIEND)
+    assert client.get("/drive/last").status_code == 403
+    login(client, ADMIN)
+    r = client.get("/drive/last")
+    assert r.status_code == 200 and "bilby" in r.get_json() and r.headers["Cache-Control"] == "no-store"

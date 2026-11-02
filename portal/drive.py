@@ -52,6 +52,32 @@ def house_lamps(home, checks: dict, hub_seen_s: float | None) -> dict:
     lamps = [{"id": i, "glyph": g, "name": n, "ok": state[i]} for i, g, n in LAMPS]
     down = [l["name"] for l in lamps if l["ok"] is False]
     return {"lamps": lamps, "down": down, "verdict": "down" if not online else "warn" if down else "ok"}
+
+
+def bilby_last(listing: list[dict], played: dict, now: float) -> dict | None:
+    """When Bilby last played for him, and what: the newest of his Bilby Connect players' latest songs (any browser, pod or the stereo; with
+    where it was in the song) and the newest song on the played list (a song heard past 30 s anywhere; no position). None: no record at all.
+    -> {at (epoch s), track, pos, title, artist, where}. The Drive page compares `at` with the current book's last_played."""
+    best = None
+    for d in listing or []:
+        st = d.get("state") or {}
+        track = st.get("track")
+        if not isinstance(track, str) or not track:
+            continue
+        at = now - float(d.get("age") or 0)
+        if best is None or at > best["at"]:
+            best = {"at": round(at), "track": track, "pos": float(st.get("pos") or 0), "title": st.get("title") or "", "artist": st.get("artist") or "",
+                    "where": d.get("name") or ""}
+    for track, v in (played or {}).items():
+        try:
+            at = float(v[1])
+        except (IndexError, TypeError, ValueError):
+            continue
+        if best is None or at > best["at"] + 60:           # a song past its 30 s mark is also on the played list: Connect's entry (with its place) wins
+            best = {"at": round(at), "track": track, "pos": 0.0, "title": "", "artist": "", "where": ""}
+    return best
+
+
 WAIT_S = {"mix": 75, "car": 15, "car_play": 25, "car_pause": 15}
 
 
@@ -101,6 +127,20 @@ def init_app(app, home) -> None:
     @auth.admin_required
     def spotify_pause():
         return answer("car_pause")
+
+    @bp.get("/drive/last")
+    @auth.admin_required
+    def last():
+        player, favs = app.extensions.get("player"), app.extensions.get("favorites")
+        captain = auth.current_user()["email"]
+        try:
+            played = favs.played() if favs is not None else {}
+        except Exception:                                   # noqa: BLE001 — a bucket hiccup: Connect alone still says something
+            played = {}
+        import time
+        resp = jsonify(bilby=bilby_last(player.listing(captain) if player is not None else [], played, time.time()))
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
 
     @bp.get("/drive/house")
     @auth.admin_required

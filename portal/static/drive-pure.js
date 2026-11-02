@@ -6,6 +6,7 @@
                       library    his one favorites pool: favorites and Spotify liked songs, minus the ones he is tired of
      playable       what this browser can play itself (Bilby's files; a Spotify item needs a Spotify player)
      carDone        whether a Spotify row playing on the car's own Spotify is over
+     handOff        what the car continues as it opens: the current book or Bilby, whichever he heard last
      replyAfter     the house brain's answer to the turn sent at `seq`, from the Home chat's events (portal/housechat.py) */
 (function (root, factory) {
   "use strict";
@@ -106,5 +107,19 @@
     return !!row.ms && now - row.at - (row.pausedMs || 0) > row.ms - (row.from || 0) + CAR_MARGIN_MS;
   }
 
-  return { shuffle, buildQueue, localFirst, nextPlayable, playable, replyAfter, carDone, QUEUE_MAX, FAV_EVERY, SUGGEST_EVERY, CAR_MARGIN_MS };
+  /* What the car plays the moment it opens (the Captain, 2026-11-01: "music should be bilby, or if I was listening to an audio book more
+     recently, that is what it will play in the car"): the newer of the one current book (places.current, its last_played) and Bilby's last
+     play (drive.py bilby_last). Bilby continues that song where it was, in the shuffle it belongs to (in his favorites pool: library, else
+     discovery); with no record of either, his usual shuffle (library). Times are epoch seconds. */
+  function handOff(places, bilby, inPool) {
+    const id = places && places.current, p = id && (places.books || {})[id];
+    const book = p && !p.finished ? { kind: "book", id, at: +p.last_played || 0, pos: +p.pos || 0 } : null;
+    const b = bilby && bilby.track ? bilby : null;
+    if (book && (!b || book.at >= (+b.at || 0))) return book;
+    if (b) return { kind: "bilby", mode: inPool && inPool(b.track) ? "library" : "discovery", track: b.track, pos: +b.pos || 0, at: +b.at || 0,
+                    title: b.title || "", artist: b.artist || "" };
+    return { kind: "bilby", mode: "library", track: "", pos: 0, at: 0, title: "", artist: "" };
+  }
+
+  return { shuffle, buildQueue, localFirst, handOff, nextPlayable, playable, replyAfter, carDone, QUEUE_MAX, FAV_EVERY, SUGGEST_EVERY, CAR_MARGIN_MS };
 });

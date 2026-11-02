@@ -132,3 +132,19 @@ test("local first: a Spotify song he owns plays from Bilby; the rest stay Spotif
   assert.deepEqual(D.localFirst(["spotify:track:1", "spotify:track:2", "spotify:track:3", "x/y.mp3"], u => info.get(u), lib),
                    ["Bauhaus/In the Flat Field/Dark Entries.mp3", "Massive Attack/Mezzanine/Teardrop.mp3", "spotify:track:3", "x/y.mp3"]);
 });
+
+test("the hand-off: the newer of the current book and Bilby's last play, with no choosing", () => {
+  const places = { current: "aces-1", books: { "aces-1": { pos: 2126.3, last_played: 2000, finished: false }, "old": { pos: 5, last_played: 1000 } } };
+  const pool = new Set(["Fav/Song.mp3"]), inPool = t => pool.has(t);
+  // the book is newer: that book, at its exact place
+  assert.deepEqual(D.handOff(places, { at: 1500, track: "Fav/Song.mp3", pos: 61 }, inPool), { kind: "book", id: "aces-1", at: 2000, pos: 2126.3 });
+  // Bilby is newer: that song where it was, in the shuffle it belongs to
+  const b = D.handOff(places, { at: 2500, track: "Fav/Song.mp3", pos: 61, title: "Song" }, inPool);
+  assert.equal(b.kind, "bilby"); assert.equal(b.mode, "library"); assert.equal(b.track, "Fav/Song.mp3"); assert.equal(b.pos, 61);
+  assert.equal(D.handOff(places, { at: 2500, track: "Other/New.mp3", pos: 3 }, inPool).mode, "discovery");
+  // a finished book never comes back; nothing known at all: his usual shuffle
+  assert.equal(D.handOff({ current: "aces-1", books: { "aces-1": { pos: 9, last_played: 3000, finished: true } } }, null, inPool).kind, "bilby");
+  assert.deepEqual(D.handOff(null, null, inPool), { kind: "bilby", mode: "library", track: "", pos: 0, at: 0, title: "", artist: "" });
+  assert.equal(D.handOff(places, null, inPool).kind, "book");                 // no Bilby record: the book
+  assert.equal(D.handOff(places, { at: 2000, track: "x" }, inPool).kind, "book");   // a tie goes to the book
+});
