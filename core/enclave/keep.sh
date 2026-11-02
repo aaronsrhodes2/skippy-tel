@@ -47,11 +47,15 @@ while true; do
   connected && SINK=$(sink)
   if [[ -n "$SINK" ]]; then
     pactl set-default-sink "$SINK" 2>/dev/null
-    if ! snap_up; then                 # full volume once (the speaker's own knob is the volume), then the stream
+    # Full volume, held every pass (the speaker's own knob is the volume). Once only at start was not enough: the bt -> aux switch
+    # (2026-11-01) found enclave-snap already running, so the analog sink kept PipeWire's 40% (-47 dB with the codec's Master), and the
+    # 7:00 alarm was faint with the Enclave turned all the way up (2026-11-02).
+    pactl set-sink-mute "$SINK" 0 2>/dev/null
+    pactl get-sink-volume "$SINK" 2>/dev/null | grep -q " 100% " || {
+      echo "the Enclave's output was below full: back to 100%"; pactl set-sink-volume "$SINK" 100% 2>/dev/null; }
+    [[ "$LINK" == "aux" ]] && amixer -c 1 sset Master 100% >/dev/null 2>&1   # the card's own Master sat at 71% under the sink (7b496d8)
+    if ! snap_up; then
       echo "the Enclave's output ($LINK) is there: playing the hub's stream into $SINK"
-      pactl set-sink-mute "$SINK" 0 2>/dev/null
-      pactl set-sink-volume "$SINK" 100% 2>/dev/null
-      [[ "$LINK" == "aux" ]] && amixer -c 1 sset Master 100% >/dev/null 2>&1   # the card's own Master sat at 71%, stacked under the sink: 2026-11-02, far too quiet
       systemctl --user start enclave-snap
     fi
     systemctl --user is-active -q enclave-radio || systemctl --user start enclave-radio
