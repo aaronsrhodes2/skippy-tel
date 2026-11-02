@@ -444,6 +444,65 @@ def test_a_spotify_item_that_wont_start_is_skipped_and_spotify_rests():
         dj.SPOT_START_S = old
 
 
+def test_a_429_from_spotify_plays_bilbys_next_song_at_once_and_spotify_rests():
+    # 2026-11-01 07:21: "Spotify said 429: Too many requests" at the hand-over, and 15 s of nothing before the watchdog gave up
+    import asyncio
+    import threading
+
+    import music
+
+    class Play:
+        def __init__(self, src):
+            self.source, self.finished, self.gain = src, threading.Event(), 1.0
+
+    class Router:
+        sinks = {"hdmi": 1}
+
+        def available(self, k): return True
+
+        def play(self, source, layer, targets, gain): return Play(source)
+
+        def stop(self, p):
+            p.source.close()
+            p.finished.set()
+
+    asked = []
+
+    def refuse(self, u, ms, *rest):
+        asked.append(u)
+        raise RuntimeError("Spotify said 429: 'Too many requests'")
+    spot = type("S", (), {"play": refuse, "pause": lambda self: None})()
+    clock = [1000.0]
+    logs = []
+    player = dj.DjPlayer(Router(), ["hdmi"], lib=dj.Library("nowhere", nml="", log=lambda m: None), log=logs.append, spotify=spot,
+                         clock=lambda: clock[0], popen=lambda *a, **k: type("P", (), {"stdout": type("O", (), {"read": lambda s, n: b""})(),
+                                                                                      "kill": lambda s: None})())
+    player._ensure_stream = lambda: None
+
+    class Media:
+        async def catalog(self): return {}
+        def track_url(self, path, start, towards=""): return "http://x/" + path
+
+    box = music.BoxMusic(player, Media(), log=logs.append, name="stereo", clock=lambda: clock[0])
+    player.music = box
+
+    async def go():
+        await box.play_queue(["spotify:track:AAAAAAAAAAAAAAAAAAAAAA", "spotify:track:BBBBBBBBBBBBBBBBBBBBBB", "a.mp3"])
+        for _ in range(10):                                         # no SPOT_START_S wait: the refusal itself moves on
+            await asyncio.sleep(0.01)
+            if box.idx == 2:
+                break
+        assert box.track() == "a.mp3" and player.spotify_down() and asked == ["spotify:track:AAAAAAAAAAAAAAAAAAAAAA"]
+        assert any("refused" in str(m) for m in logs)
+
+    async def guarded():
+        try:
+            await go()
+        finally:
+            await player.stop()
+    asyncio.run(guarded())
+
+
 @needs_ffmpeg
 def test_dj_mode_hands_over_to_spotify_on_a_phrase(tmp_path):
     """The next item is Spotify's: no beat-matching (its sound is live), but the hand-over waits for the playing track's phrase point."""

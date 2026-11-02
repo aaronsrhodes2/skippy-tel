@@ -80,6 +80,12 @@ def _n(s: str) -> str:
     return re.sub(r"^the ", "", s)
 
 
+def feat_off(title: str) -> str:
+    """'Song (feat. Someone)' / 'Song ft. Someone' / 'Song - Single Version' -> 'Song': the guest credit isn't part of the song's name."""
+    t = re.sub(r"\s*[\(\[](?:feat\.?|ft\.?|featuring|with) [^)\]]*[\)\]]", "", title or "", flags=re.I)
+    return re.sub(r"\s+(?:feat\.?|ft\.?|featuring) .*$", "", t, flags=re.I)
+
+
 def tags_of(genre: str) -> list[str]:
     return [_g(t) for t in re.split(r"[,/\\;|]+", genre or "") if _g(t)]
 
@@ -127,13 +133,13 @@ def prefer_bilby(rows: list[dict], catalog: dict) -> list[str]:
     have: dict[tuple[str, str], str] = {}
     for path, info in catalog.items():
         title, artist, *_ = row(info)
-        have.setdefault((_n(artist), _n(title)), path)
+        have.setdefault((_n(artist), _n(feat_off(title))), path)
     out = []
     for r in rows:
         if not isinstance(r, dict) or not r.get("uri"):
             continue
         first = (r.get("artist") or "").split(", ")[0]
-        out.append(have.get((_n(first), _n(r.get("title") or ""))) or r["uri"])
+        out.append(have.get((_n(first), _n(feat_off(r.get("title") or "")))) or r["uri"])
     return out
 
 

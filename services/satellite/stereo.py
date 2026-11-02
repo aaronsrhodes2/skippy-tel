@@ -20,6 +20,10 @@ import time
 DUCK = 0.25
 
 
+IDLE_LOOK_S = 20.0                   # no Spotify row of ours playing or next: how often the speaker is looked at
+RESTING_LOOK_S = 60.0                # while Spotify rests after a refusal
+
+
 def blend_rule(env: dict | None) -> tuple[int, int] | None:
     """BILBY_BLEND="3:2" (the default): in a shuffle on the stereo, two of his Spotify liked songs after every three of Bilby's. "off" for none."""
     raw = str((env or {}).get("BILBY_BLEND", "3:2")).strip().lower()
@@ -165,8 +169,10 @@ class RouterPlayer:
         self.spot_uri, self.spot_seen, self.spot_ours, self.spot_asked, self.spot_last = uri, False, True, self.clock(), (0, 0)
         try:
             await asyncio.to_thread(self.spotify.play, uri, int(pos * 1000), self.spot_run[1:])
-        except Exception as e:                                      # noqa: BLE001 — the watcher moves on from a track that never starts
+        except Exception as e:                                      # noqa: BLE001 — a refusal (a 429, no device): the caller plays Bilby at once
             self.log(f"(stereo: Spotify would not play {uri}: {e})")
+            return False
+        return True
 
     async def handoff_to_spotify(self, fade_s: float = 0.0) -> None:
         """The next queue item is Spotify's and the playing Bilby track is near its end (DjPlayer calls this at its phrase point): move the queue
@@ -322,7 +328,9 @@ class RouterPlayer:
             add()
 
     async def watch_spotify(self) -> None:
-        """Forever: follow go-librespot (a track ending, a play started from his phone)."""
+        """Forever: follow the Spotify speaker (a track ending, a play started from his phone). Each look is a Web API call, so it looks
+        closely only while a Spotify row of ours plays or is next, else every IDLE_LOOK_S (a play from his phone is picked up that late),
+        and every RESTING_LOOK_S while Spotify rests after a refusal (2026-11-01: a 429 at the DJ's hand-over, from a hub that kept asking)."""
         while True:
             try:
                 st = await asyncio.to_thread(self.spotify.now)
@@ -330,7 +338,14 @@ class RouterPlayer:
             except Exception as e:                                          # noqa: BLE001 — keep watching
                 self.log(f"(stereo: Spotify watch: {type(e).__name__}: {e})")
                 wait = 5.0
-            await asyncio.sleep(wait)
+            await asyncio.sleep(self.look_after(wait))
+
+    def look_after(self, wait: float) -> float:
+        if getattr(self, "spotify_down", lambda: False)():
+            return max(wait, RESTING_LOOK_S)
+        if not self.spot_uri and not self._next_is_spotify():
+            return max(wait, IDLE_LOOK_S)
+        return wait
 
     async def volume(self, step: float) -> None:
         pass                                                        # the stereo has its own knob

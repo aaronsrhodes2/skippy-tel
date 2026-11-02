@@ -122,3 +122,13 @@ test("library mode plays his Spotify liked songs; discovery adds the suggestions
   const disc = D.buildQueue("discovery", { all, favorites: [], liked: [], suggested }, rng(1));
   assert.ok(disc.some(i => i.uri === suggested[0]));
 });
+
+test("local first: a Spotify song he owns plays from Bilby; the rest stay Spotify", () => {
+  const lib = new Map([["Bauhaus/In the Flat Field/Dark Entries.mp3", { t: "Dark Entries", a: "Bauhaus" }],
+                       ["Massive Attack/Mezzanine/Teardrop.mp3", { t: "Teardrop", a: "Massive Attack" }]]);
+  const info = new Map([["spotify:track:1", { t: "Dark Entries - 2009 Remaster", a: "Bauhaus" }],
+                        ["spotify:track:2", { t: "Teardrop (feat. Elizabeth Fraser)", a: "Massive Attack, Elizabeth Fraser" }],
+                        ["spotify:track:3", { t: "Never Owned", a: "Somebody" }]]);
+  assert.deepEqual(D.localFirst(["spotify:track:1", "spotify:track:2", "spotify:track:3", "x/y.mp3"], u => info.get(u), lib),
+                   ["Bauhaus/In the Flat Field/Dark Entries.mp3", "Massive Attack/Mezzanine/Teardrop.mp3", "spotify:track:3", "x/y.mp3"]);
+});

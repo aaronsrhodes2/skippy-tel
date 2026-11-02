@@ -825,8 +825,13 @@ class DjPlayer(stereo.RouterPlayer):
         if self.spotify_down():
             loop.create_task(self._skip_spotify(self.gen))
             return
-        await (super().play_spotify(uri, pos, fade_s) if fade_s else super().play_spotify(uri, pos))
+        started = await (super().play_spotify(uri, pos, fade_s) if fade_s else super().play_spotify(uri, pos))
         gen = self.gen
+        if started is False:                                         # refused outright (a 429, no device): rest, and Bilby's next at once, no gap
+            self.spot_down_until = self.clock() + SPOT_REST_S
+            self.log(f"(dj: Spotify refused {uri}: Bilby fills in now, Spotify rests {SPOT_REST_S / 60:.0f} min)")
+            loop.create_task(self._skip_spotify(gen))
+            return
 
         async def watchdog() -> None:
             await asyncio.sleep(SPOT_START_S)

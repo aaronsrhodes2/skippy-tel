@@ -276,3 +276,43 @@ def test_tired_of_this_song_drops_it_and_moves_on_and_favorite_this_adds_it():
     assert run("music", brain.music_route("add this to my favorites")).startswith("Added Louise") and room.music.skipped == 1
     assert favs.calls == [("tire", "theater"), ("mark", "theater")]
     loop.call_soon_threadsafe(loop.stop)
+
+
+def test_local_first_a_spotify_song_he_owns_plays_from_bilby_and_a_refusal_moves_on():
+    # the Captain, 2026-11-01: "fall back to bilby, and prefer bilby use local library versions to spotify versions of songs"
+    import music
+
+    class Media:
+        async def catalog(self):
+            return {"Bauhaus/In the Flat Field/Dark Entries.mp3": ("Dark Entries", "Bauhaus", "In the Flat Field"),
+                    "Massive Attack/Mezzanine/Teardrop.mp3": ("Teardrop", "Massive Attack", "Mezzanine")}
+
+        def track_url(self, path, start, towards=""):
+            return "http://x/" + path
+
+    class Player:                                                   # the stereo without DJ mode: play_spotify says whether Spotify took it
+        def __init__(self):
+            self.played, self.asked = [], []
+
+        async def play(self, url):
+            self.played.append(url)
+
+        async def play_spotify(self, uri, pos=0.0):
+            self.asked.append(uri)
+            return False                                            # a 429
+
+        async def stop(self):
+            pass
+
+    async def go():
+        p = Player()
+        box = music.BoxMusic(p, Media(), log=lambda *_: None)
+        q = box.add_spotify([{"uri": S1, "title": "Dark Entries (2009 Remaster)", "artist": "Bauhaus"},
+                             {"uri": S2, "title": "Teardrop (feat. Elizabeth Fraser)", "artist": "Massive Attack, Elizabeth Fraser"},
+                             {"uri": S3, "title": "Never Owned", "artist": "Somebody"}])
+        await box.play_queue([q[2], q[0], q[1]])
+        assert box.queue == [S3, "Bauhaus/In the Flat Field/Dark Entries.mp3", "Massive Attack/Mezzanine/Teardrop.mp3"]
+        for _ in range(10):
+            await asyncio.sleep(0.01)
+        assert p.asked == [S3] and p.played == ["http://x/Bauhaus/In the Flat Field/Dark Entries.mp3"] and box.idx == 1
+    asyncio.run(go())

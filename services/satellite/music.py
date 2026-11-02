@@ -142,12 +142,34 @@ class BoxMusic:
         await self.play_queue(queue, idx, float(state.get("pos") or 0))
 
     async def play_queue(self, queue: list[str], idx: int = 0, pos: float = 0.0) -> None:
-        self.queue, self._queue_sent = list(queue)[:MAX_QUEUE], False
         try:
             self.titles = await self.media.catalog()
         except Exception:                                    # noqa: BLE001 — titles are a nicety
             pass
+        self.queue, self._queue_sent = self.local(list(queue)[:MAX_QUEUE]), False
         await self._start(idx, pos)
+
+    def local(self, items: list[str]) -> list[str]:
+        """Local first (the Captain, 2026-11-01: "prefer bilby use local library versions to spotify versions of songs"): a Spotify item
+        that is a song in his library (same artist and title, folded like mixes._n: case, accents, "(remastered)", a leading "the") is
+        played from Bilby's file; Spotify only for songs he doesn't have. No Spotify call: its name came with it (add_spotify)."""
+        import mixes                                         # noqa: PLC0415
+        import spotify                                       # noqa: PLC0415
+        if not self.titles or not any(spotify.is_uri(i) and i in self.spotify_titles for i in items):
+            return items
+        if getattr(self, "_local_of", (None,))[0] is not self.titles:
+            have: dict = {}
+            for path, info in self.titles.items():
+                t = list(info) + ["", ""]
+                have.setdefault((mixes._n(t[1]), mixes._n(mixes.feat_off(t[0]))), path)
+            self._local_of = (self.titles, have)
+        have = self._local_of[1]
+        out = []
+        for i in items:
+            name = self.spotify_titles.get(i) if spotify.is_uri(i) else None
+            hit = have.get((mixes._n((name[1] or "").split(", ")[0]), mixes._n(mixes.feat_off(name[0])))) if name else None
+            out.append(hit or i)
+        return out
 
     def add_spotify(self, tracks: list[dict]) -> list[str]:
         """Spotify tracks (spotify.Client's {uri, title, artist}) as queue items: their URIs, their names kept for title()."""
@@ -161,7 +183,7 @@ class BoxMusic:
         if not self.queue or not self.playing:
             await self.play_queue(items)
             return
-        self.queue = (self.queue + list(items))[:MAX_QUEUE]
+        self.queue = (self.queue + self.local(list(items)))[:MAX_QUEUE]
         self._queue_sent = False
 
     def adopt(self, uri: str, title: str, artist: str, pos: float = 0.0) -> None:
@@ -182,7 +204,8 @@ class BoxMusic:
         self.idx, self.offset = idx, max(0.0, pos)
         self._settle_until = self.clock() + SETTLE_S
         if spotify.is_uri(self.track()):
-            await play_spotify(self.track(), self.offset)
+            if await play_spotify(self.track(), self.offset) is False:   # refused (a 429, no device): his next song at once, never silence
+                asyncio.get_running_loop().create_task(self.next())
         else:
             await self.player.play(self.media.track_url(self.track(), self.offset, self.towards))
         self.playing, self.started = True, self.clock()

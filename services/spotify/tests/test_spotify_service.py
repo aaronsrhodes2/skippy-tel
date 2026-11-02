@@ -231,3 +231,34 @@ def test_the_mix_is_his_liked_songs_and_new_songs_by_the_artists_he_likes(tmp_pa
     assert len(liked) == 4
     assert got["suggested"] and not liked & {t["uri"] for t in got["suggested"]}            # never one he already liked
     assert w.mix() is got                                                                      # kept, not asked again
+
+
+def test_after_a_429_nothing_is_sent_until_retry_after_and_liked_songs_are_kept_ten_minutes(tmp_path):
+    # 2026-11-01: the DJ's hand-over got "Spotify said 429: Too many requests" from a hub that kept asking
+    fake = FakeSpotify()
+    now = [1000.0]
+    limited = {"on": True}
+
+    def http(method, url, headers, body, timeout=15.0):
+        if "/v1/me/tracks" in url and limited["on"]:
+            fake.calls.append(("limited", url))
+            return 429, json.dumps({"error": {"message": "Too many requests"}, "retry_after": "45"}).encode()
+        if "/v1/me/tracks" in url:
+            fake.calls.append(("tracks", url))
+            return 200, json.dumps({"items": [{"track": track(1)}, {"track": track(2)}], "next": None}).encode()
+        return fake(method, url, headers, body, timeout)
+    w = S.WebApi("cid", "seed", state=tmp_path, http=http, clock=lambda: now[0])
+    with pytest.raises(RuntimeError, match="429"):
+        w.liked(50)
+    sent = len(fake.calls)
+    limited["on"] = False
+    now[0] += 30
+    with pytest.raises(RuntimeError, match="resting 15 s"):
+        w.liked(50)                                                        # still inside Retry-After: not even sent
+    assert len(fake.calls) == sent
+    now[0] += 20
+    assert len(w.liked(50)) == 2 and len(w.liked(10)) == 2                # the second from the cache
+    assert sum(1 for c in fake.calls if c[0] == "tracks") == 1
+    now[0] += S.LIKED_S + 1
+    w.liked(50)
+    assert sum(1 for c in fake.calls if c[0] == "tracks") == 2

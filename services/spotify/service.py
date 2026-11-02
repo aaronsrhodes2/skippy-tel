@@ -60,6 +60,8 @@ TOKEN_URL = "https://accounts.spotify.com/api/token"
 SCOPES = ("user-read-playback-state user-modify-playback-state user-read-currently-playing playlist-read-private playlist-read-collaborative "
           "playlist-modify-private playlist-modify-public user-library-read user-library-modify")
 PAGE = 10                                       # Development Mode's largest search page
+REST_429_S = 60.0                               # a 429 without a Retry-After: this long before the next call
+LIKED_S = 600.0                                 # his liked songs are asked for again after this
 ROAD = os.environ.get("SPOTIFY_ROAD_PLAYLIST", "Skippy Road")   # every track played through Skippy, for his phone to keep downloaded
 
 
@@ -85,7 +87,13 @@ def _http(method: str, url: str, headers: dict, body: bytes | None, timeout: flo
         with urllib.request.urlopen(req, timeout=timeout) as r:        # noqa: S310 — Spotify's own API, or the player on localhost
             return r.status, r.read()
     except urllib.error.HTTPError as e:
-        return e.code, e.read()
+        raw = e.read()
+        if e.code == 429:                                                  # how long Spotify wants us gone rides along (WebApi.call rests that long)
+            got = _json(raw) if raw else {}
+            got = got if isinstance(got, dict) else {}
+            got["retry_after"] = (e.headers or {}).get("Retry-After") if e.headers is not None else None
+            raw = json.dumps(got).encode()
+        return e.code, raw
 
 
 class WebApi:
@@ -103,6 +111,8 @@ class WebApi:
             self._save(saved)
         self.refresh = saved.get("refresh", "")
         self.client_id = client_id or saved.get("client_id", "")
+        self.rest_until = 0.0                                              # after a 429: nothing is sent to Spotify before this (its Retry-After)
+        self._liked: tuple[list, float, bool] = ([], -1e9, False)          # his liked songs, kept LIKED_S: (tracks, when, all of them)
 
     def _load(self) -> dict:
         try:
@@ -150,6 +160,11 @@ class WebApi:
             return self._access[0]
 
     def call(self, method: str, path: str, params: dict | None = None, body: dict | None = None) -> dict:
+        """One Web API call. After a 429 nothing is sent until Spotify's Retry-After has passed (the Captain, 2026-11-01: the DJ's hand-over
+        got "Spotify said 429" from a hub that kept asking); a call meanwhile fails at once with the same words, so Bilby fills in."""
+        wait = self.rest_until - self.clock()
+        if wait > 0:
+            raise RuntimeError(f"Spotify said 429: resting {wait:.0f} s more (too many requests)")
         url = WEB + path + ("?" + urllib.parse.urlencode(params) if params else "")
         headers = {"Authorization": "Bearer " + self.token()}
         data = None
@@ -162,6 +177,12 @@ class WebApi:
             headers["Authorization"] = "Bearer " + self.token()
             code, raw = self.http(method, url, headers, data)
         got = _json(raw)
+        if code == 429:
+            try:
+                after = float(got.get("retry_after") or REST_429_S)
+            except (TypeError, ValueError):
+                after = REST_429_S
+            self.rest_until = self.clock() + min(max(after, 1.0), 3600.0)
         if code >= 400:
             msg = (got.get("error") or {}).get("message") if isinstance(got.get("error"), dict) else got.get("error")
             raise RuntimeError(f"Spotify said {code}: {msg or raw[:120]!r}")
@@ -242,6 +263,10 @@ class WebApi:
         return out[:n]
 
     def liked(self, n: int = 200) -> list[dict]:
+        """His liked songs, newest first, kept LIKED_S (every shuffle on the stereo and the car's mix asks; a liked list barely moves)."""
+        have, at, whole = self._liked
+        if self.clock() - at < LIKED_S and (whole or len(have) >= n):
+            return have[:n]
         out, offset = [], 0
         while len(out) < n:
             got = self.call("GET", "/me/tracks", {"limit": 50, "offset": offset})
@@ -250,6 +275,7 @@ class WebApi:
             if not got.get("next") or not items:
                 break
             offset += 50
+        self._liked = (out, self.clock(), len(out) < n)
         return out[:n]
 
     def add_to_playlist(self, name_or_id: str, uris: list[str]) -> dict:
@@ -289,6 +315,7 @@ class WebApi:
         return self._mix[0]
 
     def save(self, uris: list[str]) -> None:
+        self._liked = ([], -1e9, False)                                     # "like this": the next shuffle sees it
         self.call("PUT", "/me/library", {"uris": ",".join(uris)})
 
     def road(self, uri: str, name: str = ROAD) -> dict:

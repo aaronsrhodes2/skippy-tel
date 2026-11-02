@@ -61,6 +61,24 @@
     return out;
   }
 
+  /* Local first (the Captain, 2026-11-01: "prefer bilby use local library versions to spotify versions of songs"): each Spotify URI that is a
+     song in his library (same first artist and title, folded like services/satellite/mixes.py _n and feat_off) becomes Bilby's path.
+     nameOf(uri) -> {t, a} (its title and artists, from the mix), lib: Map path -> {t, a}. No Spotify call. */
+  const fold = s => String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase()
+    .replace(/\s*[([][^)\]]*(?:remaster|version|edit|mix|mono|stereo|live|deluxe)[^)\]]*[)\]]/g, "")
+    .replace(/\s+-\s+.*(?:remaster|version|edit|live).*$/, "").replace(/[^a-z0-9]+/g, " ").trim().replace(/^the /, "");
+  const featOff = t => String(t || "").replace(/\s*[([](?:feat\.?|ft\.?|featuring|with) [^)\]]*[)\]]/gi, "").replace(/\s+(?:feat\.?|ft\.?|featuring) .*$/i, "");
+  const songKey = (title, artist) => fold(String(artist || "").split(", ")[0]) + "|" + fold(featOff(title));
+  function localFirst(items, nameOf, lib) {
+    const have = new Map();
+    for (const [path, t] of lib || []) { const k = songKey(t.t, t.a); if (!have.has(k)) have.set(k, path); }
+    return (items || []).map(s => {
+      if (!/^spotify:/.test(s)) return s;
+      const n = nameOf(s);
+      return (n && have.get(songKey(n.t, n.a))) || s;
+    });
+  }
+
   /* The next item from `at` this browser can play, or -1. */
   function nextPlayable(queue, at, canSpotify) {
     for (let i = Math.max(0, at); i < queue.length; i++) if (playable(queue[i], canSpotify)) return i;
@@ -88,5 +106,5 @@
     return !!row.ms && now - row.at - (row.pausedMs || 0) > row.ms - (row.from || 0) + CAR_MARGIN_MS;
   }
 
-  return { shuffle, buildQueue, nextPlayable, playable, replyAfter, carDone, QUEUE_MAX, FAV_EVERY, SUGGEST_EVERY, CAR_MARGIN_MS };
+  return { shuffle, buildQueue, localFirst, nextPlayable, playable, replyAfter, carDone, QUEUE_MAX, FAV_EVERY, SUGGEST_EVERY, CAR_MARGIN_MS };
 });

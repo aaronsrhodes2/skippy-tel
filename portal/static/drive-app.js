@@ -123,8 +123,9 @@
     for (const t of lib.values()) if (t.g && !byArtist.has(t.a.toLowerCase())) byArtist.set(t.a.toLowerCase(), t.g);
     const genre = k => { const t = lib.get(k); if (t) return t.g || byArtist.get(t.a.toLowerCase()) || "";
                          const i = S.sp.info.get(k); return i ? byArtist.get(String(i.a || "").split(", ")[0].toLowerCase()) || "" : ""; };
-    S.q = D.buildQueue(mode, { all: mode === "discovery" ? Array.from(lib.keys()) : [], favorites: fav, liked: sp.liked,
-                               suggested: mode === "discovery" ? sp.suggested : [], played: pool.played || [], tired: pool.tired || [], genre });
+    const mine = items => D.localFirst(items, u => S.sp.info.get(u), lib);   // a Spotify song he owns plays from Bilby: no Spotify, no rate limit
+    S.q = D.buildQueue(mode, { all: mode === "discovery" ? Array.from(lib.keys()) : [], favorites: mine(fav), liked: mine(sp.liked),
+                               suggested: mode === "discovery" ? mine(sp.suggested) : [], played: pool.played || [], tired: pool.tired || [], genre });
     S.mode = mode; S.qi = -1;
     if (!S.q.some(it => D.playable(it, S.sp.can))) { now("shuffle", mode === "library" ? "No favorites yet: the star in Bilby marks one" : "The library is empty"); paint(); return; }
     await nextSong();
