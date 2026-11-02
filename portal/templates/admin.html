@@ -53,6 +53,28 @@
             </form>
           {% endfor %}
         </div>
+        {# What the portal tidied by itself (adaptive.py, nightly, from the telemetry): each change, its reason, and Revive while it
+           still stands. A revive here pins the control: it is never pruned again. A merge is only a suggestion (it needs code). #}
+        {% if adaptive_ledger %}
+        <style>.tidy-h { display: flex; gap: 8px; align-items: center; font-size: .85rem; margin: 14px 0 6px; color: var(--accent); }
+          .tidy { list-style: none; margin: 0; padding: 0; font-size: .8rem; } .tidy li { display: flex; gap: 8px; align-items: center; padding: 4px 0; }
+          .tidy li > span { flex: 1; min-width: 0; } .tidy .g { width: 16px; height: 16px; flex: none; } .tidy-note { color: var(--muted); font-size: .72rem; }</style>
+        <h3 class="tidy-h"><svg class="g" aria-hidden="true"><use href="#g-eye"/></svg> Tidied by use</h3>
+        <ul class="tidy" role="list">
+          {% for e in adaptive_ledger %}
+          <li class="tidy-{{ e.kind }}">
+            <svg class="g" aria-hidden="true"><use href="#g-{{ 'tomb' if e.kind == 'retire' else 'up' if e.kind == 'order' else 'link' }}"/></svg>
+            <span><b>{{ e.label }}</b> · {{ e.why }} · {{ e.when }}</span>
+            {% if e.kind == 'retire' and e.id in retired_now %}
+            <form class="inline" method="post" action="{{ url_for('admin.module_switch') }}">
+              <input type="hidden" name="id" value="{{ e.id }}"><input type="hidden" name="action" value="revive">
+              <button type="submit" class="key sm" aria-label="Revive {{ e.label }}" title="Revive {{ e.label }} (and keep it)"><svg class="g" aria-hidden="true"><use href="#g-power"/></svg></button>
+            </form>
+            {% elif e.kind == 'merge' %}<i class="tidy-note">suggestion</i>{% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
       </div></div>
       <div class="pips" hidden><i></i></div>
     </section>

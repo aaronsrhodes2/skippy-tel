@@ -714,6 +714,28 @@ lamp. Hovering (or long-pressing) a control names the state in its tooltip.
 | amber triangle | something is wrong (the house: one of its parts is not answering) |
 | red diamond, control dimmed | off or out of reach |
 
+### The portal tidies itself (2026-11-02)
+
+The controls are pruned, reordered and checked for merges from what people actually tap, every night, with no confirm box and with
+every change undone in one tap. `portal/adaptive.py` holds the rules, and `tools/adaptive_ui.py` (run by `tools/nightly.py`) is
+skippy-pc's half.
+
+- **What it counts.** Taps on anything marked `data-tel`. Since 2026-11-02 it also counts the days each control was **on screen**:
+  base.html's `seen` beacon, at most once a day per control per browser, stored as `seen:<id>` and left out of the top-taps lists.
+  That separates a key nobody wants from one nobody sees.
+- **Prune.** A control on screen on at least 14 of the last 30 days and tapped on at most 0.15 of those days (4 taps in a month)
+  goes to the Graveyard, least used first. At most one per surface (the chat's keys, the launcher, the `/me` panes) per week.
+  Until the beacon has a control's own days, only the chat's long-standing keys may use the days the chat was open instead; a
+  tile waits for its own 14 days.
+- **Promote.** The launcher's order follows use. A tile tapped more than twice as often as the one before it (at least 5 times) moves
+  up one place, one move a week. Skippy's tile stays first.
+- **Merge.** Two controls almost always tapped one after the other (B within 15 s of A on 60% of A's taps, at least 5 times) are written
+  down as a candidate. A merge needs code, so it is a suggestion only.
+- **Never touched:** Admin, Skippy's tile, and anything revived by hand. A revive in the Graveyard pins it; retiring it by hand takes
+  the pin away.
+- **Where you see it:** Admin > Graveyard > "Tidied by use" lists each change, its reason and a Revive key. The overnight report
+  names the night's changes. `python tools/adaptive_ui.py --show` prints what would be sent and changes nothing.
+
 ## Telemetry: what the portal records, and where it goes
 
 The Captain records how signed-in people use the portal (what gets opened, tapped and asked, what breaks), so he can

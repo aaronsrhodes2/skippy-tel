@@ -47,6 +47,7 @@ import imports as imports_mod
 import media as media_mod
 import mentat_client
 import modules as modules_mod
+import adaptive as adaptive_mod
 import ops
 import play
 import audiobooks as audiobooks_mod
@@ -125,6 +126,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     bot_override = skippy        # tests hand in one fake chat for every brain; live, brains.chat_for builds one per message
     app.extensions["friends"] = friends_mod.Friends(vm)
     app.extensions["modules"] = modules_mod.Modules(vm)               # the launcher's controls, and the Admin Graveyard that retires them
+    app.extensions["adaptive"] = adaptive_mod.Adaptive(vm, app.extensions["modules"])   # the controls tidied from their telemetry, nightly
     app.extensions["access_requests"] = access_mod.Requests(vm)      # people asking to be let in (Admin → Friends)
     mentat = mentat or (mentat_client.Mentat(app.config["MENTAT_URL"]) if app.config.get("MENTAT_URL") else None)
     app.extensions["mentat"] = mentat
@@ -359,7 +361,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                   "car": auth.is_admin(who), "alarms": auth.is_admin(who), "drive": auth.is_admin(who),
                   "dashboard": auth.is_admin(who) and "me" in app.blueprints, "admin": auth.is_admin(who)}
         tiles = []
-        for m in modules_mod.MODULES:
+        order = app.extensions["adaptive"].order()                   # the launcher's order follows use (adaptive.py: promote)
+        for m in sorted(modules_mod.MODULES, key=lambda x: order.index(x.id) if x.id in order else len(order)):
             if not wanted.get(m.id) or m.id in retired:
                 continue
             tile = {"id": m.id, "glyph": m.glyph, "label": m.label, "href": url_for(m.endpoint),
@@ -633,6 +636,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             needs={g: m for g in GAMES if status and (m := missing_settings(g, status.env))},
             module_rows=[{"id": m.id, "glyph": m.glyph, "label": m.label, "retirable": m.retirable,
                           "retired": m.id in app.extensions["modules"].retired()} for m in modules_mod.MODULES],
+            adaptive_ledger=app.extensions["adaptive"].ledger(), retired_now=app.extensions["modules"].retired(),
             google=app.extensions["google_link"].state(),
         )
 
@@ -646,6 +650,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         store = app.extensions["modules"]
         try:
             (store.retire if action == "retire" else store.revive)(module_id)
+            # by hand: a revive pins it (the nightly tidy never prunes it again), a retire takes the pin away (adaptive.py)
+            (app.extensions["adaptive"].unpin if action == "retire" else app.extensions["adaptive"].pin)(module_id)
         except KeyError:
             abort(400)                                    # a module that can't be retired (Admin)
         except modules_mod.Unavailable as exc:
@@ -947,6 +953,24 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         if "ups_on_battery" in st:                                # skippy-pc's own UPS: one DM per change (power.py)
             power.observe("pc", st["ups_on_battery"], st.get("ups_charge"), st.get("ups_runtime_min"))
         return jsonify(commands=commands)
+
+    @app.post("/home/adaptive")
+    def home_adaptive():
+        """skippy-pc's nightly summary of the portal's telemetry (tools/adaptive_ui.py): the controls are tidied from it (adaptive.py)
+        and the changes come back for the overnight report. Home token. `approved`: module ids the Captain said in chat to retire."""
+        if (request.content_length or 0) > 200_000:
+            abort(413)
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict) or not isinstance(body.get("stats"), dict):
+            abort(400)
+        approved = [str(i) for i in body.get("approved") or [] if isinstance(i, str)][:10]
+        try:
+            changes = app.extensions["adaptive"].apply(body["stats"], approved=approved)
+        except modules_mod.Unavailable as exc:
+            return jsonify(error=str(exc)), 503
+        return jsonify(changes=changes, dry=False)
 
     @app.post("/home/ups")
     def home_ups():

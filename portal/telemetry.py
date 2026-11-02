@@ -44,8 +44,9 @@ RECORDED = (
                                "your questions\" under the chat (it is off until you do, and you can untick it any time). "
                                "With it ticked: what you asked, what Skippy answered, which tools he used and with what "
                                "arguments. Obvious secrets (API keys, tokens, 'password: …') are scrubbed first."),
-    ("Taps on tiles and demos", "which tile or demo you tapped and which page it was on, so the Captain can see "
-                                "what gets used and what doesn't."),
+    ("Taps on tiles and demos", "which tile, key or demo you tapped and which page it was on, and once a day which of them "
+                                "were on your screen, so the portal can see what gets used and what doesn't (and tidy away "
+                                "what nobody uses)."),
     ("Errors", "when a page you opened failed."),
 )
 NOT_RECORDED = (

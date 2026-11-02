@@ -380,10 +380,10 @@ def site_summary(con: sqlite3.Connection, now: float, days: int = 30, recent: in
         "SELECT name, COUNT(*), COUNT(DISTINCT who) FROM site_events WHERE kind = 'page' AND ts >= ? "
         "GROUP BY name ORDER BY COUNT(*) DESC, name LIMIT 10", (since,))]
     top_taps = [{"name": r[0], "taps": r[1]} for r in con.execute(
-        "SELECT name, COUNT(*) FROM site_events WHERE kind = 'ui' AND ts >= ? "
+        "SELECT name, COUNT(*) FROM site_events WHERE kind = 'ui' AND name NOT LIKE 'seen:%' AND ts >= ? "   # seen: = on screen, not a tap
         "GROUP BY name ORDER BY COUNT(*) DESC, name LIMIT 10", (since,))]
     taps = [{"name": r[0], "taps": r[1], "last_days": int((now - r[2]) / 86400)} for r in con.execute(
-        "SELECT name, COUNT(*), MAX(ts) FROM site_events WHERE kind = 'ui' "
+        "SELECT name, COUNT(*), MAX(ts) FROM site_events WHERE kind = 'ui' AND name NOT LIKE 'seen:%' "
         "GROUP BY name ORDER BY COUNT(*), MAX(ts) LIMIT 300")]
     actions = [{"name": r[0], "count": r[1], "failed": r[2] or 0} for r in con.execute(
         "SELECT name, COUNT(*), SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) FROM site_events "

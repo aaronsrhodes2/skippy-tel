@@ -62,6 +62,7 @@ _TAP = re.compile(r"[a-z0-9:_.\-]{1,60}")
 LAUNCHER_TILES = ("skippy", "games", "play", "music", "video", "books", "experiments", "tabletop", "car", "alarms", "drive", "dashboard", "admin")   # templates/home.html
 ME_PANES = ("mcp", "home", "server", "core", "activity-pane", "watcher", "people", "links", "weather")   # templates/me.html: pane:<id>, for the Graveyard
 TAPS_PER_MIN = 120          # one person's beacon budget
+SEEN_MAX = 40               # controls in one "on screen" beacon
 STUCK_AFTER_S = 900         # an event this old is still unacknowledged although home keeps pulling: the widget says so (normally < 1 min)
 
 
@@ -217,6 +218,28 @@ def init_app(app):
             return "", 400
         page = str(body.get("p") or "")
         tel.record("ui", tap, *person, page=page if page.startswith("/") else "")
+        return "", 204
+
+    @app.post("/telemetry/seen")
+    def telemetry_seen():
+        """The page's other beacon: which data-tel controls were on screen, each at most once a day per browser (base.html), so a
+        control nobody taps can be told from one nobody sees (adaptive.py). Stored as ui taps named seen:<id>."""
+        person = who()
+        if not person:
+            return "", 401
+        if not tel.enabled:
+            return "", 204
+        if not app.extensions["limiter"].allow("seen:" + person[0], 30, 60):
+            return "", 429
+        request.max_content_length = 4096
+        body = request.get_json(silent=True, force=True)
+        ids = body.get("ids") if isinstance(body, dict) else None
+        if not isinstance(ids, list):
+            return "", 400
+        page = str(body.get("p") or "")
+        for tap in {str(i) for i in ids[:SEEN_MAX]}:
+            if _TAP.fullmatch(tap) and not tap.startswith("seen:"):
+                tel.record("ui", "seen:" + tap, *person, page=page if page.startswith("/") else "")
         return "", 204
 
     @app.get("/home/telemetry")

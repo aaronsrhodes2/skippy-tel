@@ -154,6 +154,10 @@ Actions (the sandbox can't reach GCP or run.app directly):
   Experiments (the public inventory: tiles shown a screen at a time, a kind key, an about panel; the demos themselves are standalone pages).
   The experiment demos (the N-body shootout as a flip-book of plates from a real run of sigma-ground's shootout: `scripts/nbody_run.py`, `scripts/nbody_flipbook_build.py`; the double-slit, the Mentat playground, the benchmark).
   **Not yet** (old scrolling look, to migrate in batches): request access, privacy (Radiance and Weapon vs. Armor are separate apps).
+- **Toggles are hexagons, clickers have the cut corner** (the Captain, 2026-11-02): a toggle (`aria-pressed`) has two looks only, lit or dark;
+  a clicker breathes while busy (`SkippyKeys.busy`, `static/keys.js`); a lamp shows only when it has a state (docs/portal/README.md → The lamps).
+  **The portal tidies itself** nightly from its telemetry (`portal/adaptive.py` + `tools/adaptive_ui.py`): prune, launcher order, merge
+  suggestions, one change per surface a week, each undone in Admin > Graveyard (a hand revive pins it). Give every new control a `data-tel`.
 - **Back and Close sit side by side, and look different** (the Captain, 2026-10-27): any view with both puts them next to each other, and they
   differ in glyph and shape (Back an arrow, Close a cross), never two near-identical keys.
 - Copyable things (the Captain's rule: **one click, everywhere**): anything a person is expected to

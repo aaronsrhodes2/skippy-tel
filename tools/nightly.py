@@ -213,6 +213,26 @@ def healing_words(c: dict | None) -> str:
     return words + (f" ({len(new)} new service{'s' if len(new) != 1 else ''} to test: {', '.join(new[:4])})" if new else "")
 
 
+def ui_tidy(dry: bool, log) -> dict:
+    """The portal's controls tidied from their telemetry (tools/adaptive_ui.py, portal/adaptive.py): the portal decides, at most one
+    change per surface a week; this says what it did."""
+    if dry:
+        return {"dry": True}
+    rc, txt = sh([sys.executable, str(ROOT / "tools" / "adaptive_ui.py")], 120)
+    res = {"ok": rc == 0, "said": txt.strip().splitlines()[-1][:400] if txt.strip() else f"rc {rc}"}
+    log(f"ui tidy: {res}")
+    return res
+
+
+def tidy_words(t: dict | None) -> str:
+    if not t or t.get("dry"):
+        return ""
+    if not t.get("ok"):
+        return "the portal's nightly tidy couldn't run"
+    said = t.get("said") or ""
+    return "" if said.startswith("the portal's controls: nothing") else "the portal tidied its controls: " + said
+
+
 # ── the ledger ──
 def house_day(date: str) -> dict:
     events = []
@@ -252,6 +272,8 @@ def overnight_line(report: dict) -> str:
         bits.append("I restarted myself onto new code")
     if healing_words(report.get("chaos")):
         bits.append(healing_words(report.get("chaos")))
+    if tidy_words(report.get("ui_tidy")):
+        bits.append(tidy_words(report.get("ui_tidy")))
     return "Overnight: " + ", ".join(bits) + "."
 
 
@@ -296,6 +318,7 @@ def main(argv=None) -> int:
     report["jobs"] = [task_report(t) for t in TASKS]
     report["upkeep"] = {"disks": disks(), "docker": docker_prune(args.dry_run), "hub": hub_restart(args.dry_run, log), "vault": VAULT_ENV.is_file()}
     report["chaos"] = healing_check(args.dry_run, log)
+    report["ui_tidy"] = ui_tidy(args.dry_run, log)
     report["house"] = house_day(date)
     report["purple"] = purple_day(date)
     report["overnight"] = overnight_line(report)

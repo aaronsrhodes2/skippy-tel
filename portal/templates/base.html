@@ -317,6 +317,27 @@
     }
     document.addEventListener("click", tap, true);
     document.addEventListener("auxclick", tap, true);
+    // What was on screen (portal/adaptive.py tells a key nobody taps from one nobody sees): each data-tel control once a day per
+    // browser, after the page settles and after each tap (a sheet that opened shows new ones).
+    function seen() {
+      var day = new Date().toISOString().slice(0, 10), key = "tel-seen:" + day, had = {}, ids = [];
+      try { had = JSON.parse(localStorage.getItem(key) || "{}"); } catch (err) { return; }
+      document.querySelectorAll("[data-tel]").forEach(function (el) {
+        var id = el.getAttribute("data-tel");
+        if (!id || had[id] || ids.indexOf(id) >= 0 || el.closest("[hidden]") || !el.getClientRects().length) return;
+        ids.push(id);
+      });
+      if (!ids.length || !navigator.sendBeacon) return;
+      ids = ids.slice(0, 40);
+      try {
+        navigator.sendBeacon("{{ url_for('telemetry_seen') }}", new Blob([JSON.stringify({ids: ids, p: location.pathname})], {type: "application/json"}));
+        ids.forEach(function (id) { had[id] = 1; });
+        for (var i = localStorage.length - 1; i >= 0; i--) { var k = localStorage.key(i); if (k && k.indexOf("tel-seen:") === 0 && k !== key) localStorage.removeItem(k); }
+        localStorage.setItem(key, JSON.stringify(had));
+      } catch (err) { /* private mode or a blocked beacon: nothing is counted, nothing breaks */ }
+    }
+    setTimeout(seen, 2500);
+    document.addEventListener("click", function () { setTimeout(seen, 900); }, true);
   })();
 </script>
 {% endif %}
