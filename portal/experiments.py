@@ -262,7 +262,10 @@ MINEBENCH_SERIES = (
      "run end while MineBench's own runtime fails its build, before it has opened a picture of its latest version, or before it "
      "has spent an 80K output-token budget (about what Haiku spent a round), each a few times at most. Only the coder plays "
      "again (the Captain: Haiku's builds are enough): each new build faces Haiku's from the same round of the head to head "
-     "(rounds 5-7, if needed, reuse Haiku's 1-3), judged blind as before."),
+     "(rounds 5-7, if needed, reuse Haiku's 1-3), judged blind as before. Result: Haiku 4-0 again, every round at high confidence. "
+     "The help did what it was built for: every build ran (the check caught one that didn't), the coder looked at each version and "
+     "worked 31-45 minutes a round instead of 10-18. What it didn't fix is judgement: the vision model called each train "
+     "recognizable while the judge saw a ring on the locomotive, a train lost on a bare plate, or a train lying across its rails."),
     ("h2h", "Head to head", "Best 4 of 7, started 2026-10-31: Claude Haiku 5.5 against Skippy Core's coder, both as vanilla agents (Claude "
      "Code with purple's system prompt and an empty setup), the same message, MineBench's full tool-mode prompt, effort high, the same "
      "131K window, \"a choo-choo train\" every round. Each round is judged blind by a separate Claude agent with MineBench's own "
