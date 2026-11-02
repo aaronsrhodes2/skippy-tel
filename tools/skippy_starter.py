@@ -394,7 +394,8 @@ class Starter:
             return {}
         rooms = {str(k)[:40]: bool(v) for k, v in list((got.get("rooms") or {}).items())[:20]}
         house = {str(k)[:40]: {"ok": bool((v or {}).get("ok")), **({"things": int(v["things"])} if isinstance((v or {}).get("things"), int) else {}),
-                               **({"why": str(v["why"])[:160]} if (v or {}).get("why") else {})}
+                               **({"why": str(v["why"])[:160]} if (v or {}).get("why") else {}),
+                               **({"detail": str(v["detail"])[:160]} if (v or {}).get("detail") else {})}
                  for k, v in list((got.get("house") or {}).items())[:20] if isinstance(v, dict)}
         return {"hub": {"age": max(0, int(time.time() - float(got.get("at") or 0))), "rooms": rooms, "house": house}}
 

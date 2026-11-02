@@ -559,7 +559,9 @@ def test_the_hubs_heartbeat_rides_in_the_status_bounded_and_nothing_without_it(t
     (tmp_path / "state").mkdir()
     (tmp_path / "state" / "hub-status.json").write_text(json.dumps({
         "at": time.time() - 30, "rooms": {"office": True, "theater": False},
-        "house": {"leviton": {"ok": True, "things": 12}, "nest": {"ok": False, "why": "not connected" + "x" * 500}, "junk": 3}}))
+        "house": {"leviton": {"ok": True, "things": 12}, "nest": {"ok": False, "why": "not connected" + "x" * 500}, "junk": 3,
+                  "generac": {"ok": True, "things": 1, "detail": "Generator ready, battery 13.4 V" + "z" * 500}}}))
     hub = s.hub()["hub"]
+    assert hub["house"]["generac"]["detail"].startswith("Generator ready, battery 13.4 V") and len(hub["house"]["generac"]["detail"]) == 160
     assert 25 <= hub["age"] <= 40 and hub["rooms"] == {"office": True, "theater": False}
     assert hub["house"]["leviton"] == {"ok": True, "things": 12} and len(hub["house"]["nest"]["why"]) == 160 and "junk" not in hub["house"]

@@ -17,7 +17,7 @@ import re
 import house_layout
 
 ALLOWED = ("light", "switch", "fan", "cover", "climate", "media_player", "scene", "script", "vacuum", "humidifier", "input_boolean")
-READ_ONLY = ("sensor", "binary_sensor", "weather", "person", "sun", "camera")                  # may be asked about, never changed
+READ_ONLY = ("sensor", "binary_sensor", "weather", "person", "sun", "camera", "generator")                  # may be asked about, never changed
 SENSITIVE_DOMAINS = ("lock", "alarm_control_panel")
 SENSITIVE_COVERS = ("garage", "gate", "door")                                         # a cover's device_class
 MAX_LIST = 40
@@ -186,6 +186,9 @@ class House:
                 extra += ", and its safety sensor says something is in the way"
         if self._domain(s) == "camera":                                  # the Ring cameras (ringcam.py): battery, last motion, last press
             extra = camera_words(a)
+        if self._domain(s) == "generator":                               # the Generac (generac.py): battery, last exercise, faults, maintenance
+            from generac import generator_words                          # noqa: PLC0415
+            extra = generator_words(a, self.clock() if callable(getattr(self, "clock", None)) else None)
         return f"{self._label(s)} is {s.get('state')}{(' ' + unit) if unit else ''}{extra}."
 
     def _ambiguous(self, query: str, close: list[dict]) -> str:

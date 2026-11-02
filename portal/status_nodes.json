@@ -631,6 +631,14 @@
    "the house tools (pods and chat)"
   ]
  },
+ "generac": {
+  "for": "The Generac standby generator (G0071780, Evolution controller) through Generac's Mobile Link cloud, read only, with his own sign-in (generac.py): ready / running / exercising, battery, faults, maintenance due.",
+  "used_by": [
+   "the house tools (\"is the generator running?\")",
+   "the hub's generator watch (an outage and the power back said on the pods and DMed)",
+   "the morning routine's generator line, when it needs him"
+  ]
+ },
  "garage": {
   "for": "The garage door's ratgdo32 on the opener, over ESPHome: its state, and closing it when the car drives away with it open.",
   "used_by": [

@@ -949,7 +949,7 @@ class Daily:
         steps = [Step("", act=self.lights_gently), Step("the weather", make=self._join(greet, self.weather)),
                  Step("the news", make=self.morning_news)]
         for key, title in (("calendar", "your calendar"), ("leave", "when to leave"), ("mail", "your mail"), ("birthdays", "birthdays"),
-                           ("packages", "packages")):
+                           ("packages", "packages"), ("generator", "the generator")):
             fn = self.leave_by if key == "leave" and "events_today" in self.extras else self.extras.get(key)
             if fn is not None:
                 steps.append(Step(title, make=fn))

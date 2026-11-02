@@ -55,12 +55,18 @@ def ring_folder(env: dict) -> Path:
     return Path(env.get("RING_STATE") or Path(__file__).resolve().parents[2] / "state" / "ring")
 
 
+def generac_folder(env: dict) -> Path:
+    """state/generac: Mobile Link's session cookies and the hub's generator mirror (generac.py)."""
+    return Path(env.get("GENERAC_STATE") or Path(__file__).resolve().parents[2] / "state" / "generac")
+
+
 def build_house(env: dict):
     """The house: what Skippy can control, through every backend that is set up (None when none is). hub.py shares it across rooms; house_mcp.py and the home
     reporter (the portal chat's house tools) build the same one.
     HomeKit (paired with homectl.py), Matter (skippy-core's controller: MATTER_URL), the garage door's ratgdo (GARAGE_ESPHOME), Leviton's cloud (LEVITON_EMAIL + LEVITON_PASSWORD),
     the Nest (Google Device Access through the portal's Google grant: SKIPPY_HOME_TOKEN; SKIPPY_NEST=0 leaves it out),
-    the Ring cameras (read only, once `python ringcam.py signin` has made state/ring/token.json; SKIPPY_RING=0 leaves them out)
+    the Ring cameras (read only, once `python ringcam.py signin` has made state/ring/token.json; SKIPPY_RING=0 leaves them out),
+    the Generac generator (read only, Mobile Link's cloud, once `python generac.py signin` has made state/generac/session.json; SKIPPY_GENERAC=0 leaves it out)
     and Home Assistant (HASS_URL + HASS_TOKEN)."""
     sensitive = env.get("HASS_SENSITIVE") == "1"
     parts = []
@@ -87,6 +93,11 @@ def build_house(env: dict):
         import ringcam                                              # noqa: PLC0415  the Ring doorbell and camera, on Ring's cloud (ringcam.py):
         parts.append(ringcam.Ring(ringcam.TokenFile(ring_folder(env), env.get("RING_REFRESH_TOKEN", "")), sensitive=sensitive,   # once he has signed in;
                                   owner=env.get("SKIPPY_RING_OWNER") == "1"))  # only the hub signs in, the rest read its mirror
+    if env.get("SKIPPY_GENERAC", "1") != "0" and (env.get("GENERAC_SESSION_COOKIE") or (generac_folder(env) / "session.json").is_file()
+                                                       or (generac_folder(env) / "gen.json").is_file()):
+        import generac                                              # noqa: PLC0415  the standby generator on Generac's Mobile Link cloud (generac.py)
+        parts.append(generac.Generac(generac.Session(generac_folder(env), env.get("GENERAC_SESSION_COOKIE", "")), sensitive=sensitive,
+                                     owner=env.get("SKIPPY_GENERAC_OWNER") == "1"))  # only the hub polls, the rest read its mirror
     if env.get("HASS_URL") and env.get("HASS_TOKEN"):               # or Home Assistant, if he runs one (the vault holds both)
         from hass import Hass                                       # noqa: PLC0415
         parts.append(Hass(env["HASS_URL"], env["HASS_TOKEN"], sensitive=sensitive))

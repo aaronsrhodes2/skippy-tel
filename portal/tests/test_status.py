@@ -265,7 +265,8 @@ def test_a_model_on_call_that_answers_its_test_question_becomes_warm_green():
 HOST = {"openaudible": False, "openaudible_app": True, "spotify": True, "vbcable": False, "bridge": True,
         "hub": {"age": 40, "rooms": {"office": True, "theater": False},
                 "house": {"leviton": {"ok": True, "things": 12}, "nest": {"ok": False, "why": "the Nest isn't connected to Skippy yet"},
-                          "homekit": {"ok": True, "things": 3}, "matter": {"ok": True}, "garage": {"ok": True, "things": 1}}}}
+                          "homekit": {"ok": True, "things": 3}, "matter": {"ok": True}, "garage": {"ok": True, "things": 1},
+                          "generac": {"ok": True, "things": 1, "detail": "Generator ready, battery 13.4 V"}}}}
 
 
 def test_what_runs_outside_docker_on_skippy_pc_shows_the_apps_the_hub_its_pods_and_its_house_backends():
@@ -277,7 +278,8 @@ def test_what_runs_outside_docker_on_skippy_pc_shows_the_apps_the_hub_its_pods_a
     assert row["pod office"]["lamp"] == "ok" and row["pod theater"]["lamp"] == "down"
     assert (row["leviton"]["lamp"], row["leviton"]["detail"]) == ("ok", "12 things")
     assert row["nest"]["lamp"] == "down" and "isn't connected" in row["nest"]["detail"]
-    for name in ("openaudible", "spotify desktop", "vb-cable", "hub", "pod office", "leviton", "nest", "homekit", "matter", "garage"):
+    assert (row["generac"]["lamp"], row["generac"]["detail"]) == ("ok", "Generator ready, battery 13.4 V")   # a backend's own line beats "1 things"
+    for name in ("openaudible", "spotify desktop", "vb-cable", "hub", "pod office", "leviton", "nest", "homekit", "matter", "garage", "generac"):
         assert row[name]["about"]["for"], name                                           # every new row has its card
 
 
@@ -290,8 +292,10 @@ def test_a_hub_that_stopped_writing_its_heartbeat_is_stale_not_green():
 def test_the_starter_cleans_the_hub_heartbeat_and_drops_junk():
     import starter as starter_mod
     s = starter_mod.Starter()
-    s.poll({"status": {"hub": {"age": 12, "rooms": {"office": 1}, "house": {"nest": {"ok": 0, "why": "x" * 999}, "bad": "y"}}}})
-    assert s.status["hub"] == {"age": 12, "rooms": {"office": True}, "house": {"nest": {"ok": False, "why": "x" * 160}}}
+    s.poll({"status": {"hub": {"age": 12, "rooms": {"office": 1}, "house": {"nest": {"ok": 0, "why": "x" * 999}, "bad": "y",
+                                                                          "generac": {"ok": 1, "things": 1, "detail": "d" * 999}}}}})
+    assert s.status["hub"] == {"age": 12, "rooms": {"office": True}, "house": {"nest": {"ok": False, "why": "x" * 160},
+                                                                               "generac": {"ok": True, "things": 1, "detail": "d" * 160}}}
     s.poll({"status": {"hub": "nonsense"}})
     assert "hub" not in s.status
 

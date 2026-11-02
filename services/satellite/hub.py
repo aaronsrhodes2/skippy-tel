@@ -1089,6 +1089,12 @@ def build_rooms(env: dict):
         routines.extras["garage_news"] = garage_watch.news        # the homecoming routine says what happened to the door
     import ringcam                                               # noqa: PLC0415 — the Ring doorbell and camera: presses and motion said aloud, DMed
     ring_watch = ringcam.build(env, house, log=log)
+    import generac                                               # noqa: PLC0415 — the standby generator: an outage, the power back, a fault said aloud, DMed
+    generac_watch = generac.build(env, house, log=log)
+    if generac_watch is not None and routines is not None:
+        async def generator_morning():
+            return await asyncio.to_thread(generac_watch.gen.attention)
+        routines.extras["generator"] = generator_morning          # the morning says it only when the generator needs him (daily.py)
     from homechat import HomeChat                                # noqa: PLC0415
     import music as music_mod                                    # noqa: PLC0415
     homechat = HomeChat(env.get("PORTAL_URL") or music_mod.PORTAL, token, enabled=env.get("SATELLITE_HOME_CHAT", "on").lower() not in ("off", "0", "no"), log=log)
@@ -1150,6 +1156,7 @@ def build_rooms(env: dict):
     make_room.alarm_clock = house_clock                         # _main runs it
     make_room.garage_watch = garage_watch                       # _main runs it (autoclose.py)
     make_room.ring_watch = ring_watch                           # _main runs it (ringcam.py)
+    make_room.generac_watch = generac_watch                     # _main runs it (generac.py)
     make_room.routine_room = lambda: getattr(routines, "room_name", "") or ""
     make_room.house = house                                     # the heartbeat says which of its backends answer
     make_room.state = state
@@ -1167,6 +1174,8 @@ def backend_health(house) -> dict:
         name = type(part).__name__.lower()
         try:
             out[name] = {"ok": True, "things": len(part.states())}
+            if callable(getattr(part, "summary", None)):        # a backend with one thing worth a line (the generator: "Generator ready, battery 13.4 V")
+                out[name]["detail"] = str(part.summary())[:160]
         except Exception as e:                                  # noqa: BLE001 — HomeError (said aloud) or anything else: the reason is the point
             out[name] = {"ok": False, "why": str(e)[:160]}
     return out
@@ -1607,6 +1616,7 @@ def main(argv=None) -> int:
     from ear import load_env                                    # noqa: PLC0415
     env = load_env()
     env["SKIPPY_RING_OWNER"] = "1"                              # the hub is the one process signed in to Ring (ringcam.py)
+    env["SKIPPY_GENERAC_OWNER"] = "1"                           # ... and the one polling Mobile Link for the generator (generac.py)
     try:
         rooms = parse_rooms(env.get("SATELLITE_ROOMS", ""))
     except ValueError as e:
@@ -1644,11 +1654,13 @@ async def _main(env: dict, rooms, args) -> int:
         watch = getattr(hub.make_room, "garage_watch", None)
         clock = getattr(hub.make_room, "alarm_clock", None)
         ring_watch = getattr(hub.make_room, "ring_watch", None)
+        generac_watch = getattr(hub.make_room, "generac_watch", None)
         beat = heartbeat(hub, Path(hub.make_room.state) / "hub-status.json", getattr(hub.make_room, "house", None))             if getattr(hub.make_room, "state", None) else None
         await asyncio.gather(hub.run(), *([beat] if beat is not None else []), *([connect.run()] if connect else []), *([homechat.run(hub)] if homechat is not None else []),
                              *([watch.run(hub, hub.make_room.routine_room)] if watch is not None else []),
                              *([clock.run(hub)] if clock is not None else []),
-                             *([ring_watch.run(hub, hub.make_room.routine_room)] if ring_watch is not None else []))
+                             *([ring_watch.run(hub, hub.make_room.routine_room)] if ring_watch is not None else []),
+                             *([generac_watch.run(hub, hub.make_room.routine_room)] if generac_watch is not None else []))
         return 0
     finally:
         if media is not None:

@@ -55,7 +55,7 @@ HUB_STALE_S = 180            # the hub writes its heartbeat every minute (servic
 
 
 def clean_hub(v) -> dict | None:
-    """The room hub's heartbeat as the starter sent it: {age, rooms: {name: bool}, house: {backend: {ok, things?, why?}}}, bounded."""
+    """The room hub's heartbeat as the starter sent it: {age, rooms: {name: bool}, house: {backend: {ok, things?, why?, detail?}}}, bounded."""
     if not isinstance(v, dict) or not isinstance(v.get("age"), int):
         return None
     rooms = {_s(k, 40): bool(x) for k, x in list((v.get("rooms") or {}).items())[:20]} if isinstance(v.get("rooms"), dict) else {}
@@ -63,7 +63,8 @@ def clean_hub(v) -> dict | None:
     for k, x in list((v.get("house") or {}).items())[:20] if isinstance(v.get("house"), dict) else []:
         if isinstance(x, dict):
             house[_s(k, 40)] = {"ok": bool(x.get("ok")), **({"things": x["things"]} if _num(x.get("things"), 0, 10000) is not None else {}),
-                                **({"why": _s(x["why"], 160)} if x.get("why") else {})}
+                                **({"why": _s(x["why"], 160)} if x.get("why") else {}),
+                                **({"detail": _s(x["detail"], 160)} if x.get("detail") else {})}
     return {"age": max(0, min(v["age"], 10**7)), "rooms": rooms, "house": house}
 
 
@@ -98,7 +99,7 @@ def host_rows(st: dict, have: set[str]) -> list[dict]:
             out.append(row("device", f"pod {r}", ("ok" if up else "down") if fresh else "stale", "connected" if up else "not connected", "pod"))
         for b, h in (hub.get("house") or {}).items():
             out.append(row("link", b, ("ok" if h["ok"] else "down") if fresh else "stale",
-                           (f"{h['things']} things" if h["ok"] and "things" in h else "answers") if h["ok"] else h.get("why", "not answering")))
+                           (h.get("detail") or (f"{h['things']} things" if "things" in h else "answers")) if h["ok"] else h.get("why", "not answering")))
     return out
 
 
