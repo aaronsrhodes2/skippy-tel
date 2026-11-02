@@ -5,6 +5,7 @@
 # 1080p and YUV 4:4:4 (2026-11-01, the Captain: "static text looks like it is being anti-aliased away"): skippy-pc's desktop is 1920x1080, so
 # --4K only stretched it on the PC, and 4:2:0 halves the colour around every letter; the TV does the one upscale. Decoded in SOFTWARE:
 # the iGPU's VCN can't decode HEVC 4:4:4 (with hardware Moonlight quietly fell back to 4:2:0); 1080p60 4:4:4 costs the CPU ~3%.
+# The stream is SDR (no --hdr): with HDR on, the picture was washed out and too bright, and turning HDR off fixed it (2026-11-01).
 set -uo pipefail
 HOST="${COUCH_HOST:-192.168.0.164}"
 APP="${COUCH_APP:-Desktop}"
