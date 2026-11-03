@@ -79,9 +79,12 @@ def main() -> None:
         for body, leads in r["bodies"].items():
             for lead, x in leads.items():
                 target = start_year + int(round(float(lead)))
-                c = cells.setdefault((body, v, target), {"ours": [], "jpl": [], "jpl_truth": set(), "band": []})
+                c = cells.setdefault((body, v, target), {"ours": [], "jpl": [], "jpl_truth": set(), "band": [], "ours_truth": set()})
                 if "eO" in x and (r_truth == truth or body in INNER):            # ours against the page's reality, or where the two realities are the same number
-                    c["ours"].append(x["eO"]); ours_truths.add(r_truth)
+                    if r_truth == truth and truth not in c["ours_truth"]:        # a run against the page's reality (the current model) replaces the older contest's cell
+                        c["ours"] = []; c["ours_truth"] = {truth}
+                    if r_truth == truth or not c["ours_truth"]:
+                        c["ours"].append(x["eO"]); c["ours_truth"].add(r_truth); ours_truths.add(r_truth)
                 if "eV" in x:
                     if r_truth == truth and truth not in c["jpl_truth"]:          # a row against the page's reality replaces any against an older one
                         c["jpl"] = []; c["jpl_truth"] = {truth}
@@ -155,9 +158,12 @@ def main() -> None:
                 L = int(round(float(lead)))
                 if L < 1 or L > 5:
                     continue
-                c = lead_cells.setdefault((body, L, start_year + L), {"ours": [], "jpl": [], "jpl_truth": set()})
+                c = lead_cells.setdefault((body, L, start_year + L), {"ours": [], "jpl": [], "jpl_truth": set(), "ours_truth": set()})
                 if "eO" in x and (r_truth == truth or body in INNER):
-                    c["ours"].append(x["eO"])
+                    if r_truth == truth and truth not in c["ours_truth"]:
+                        c["ours"] = []; c["ours_truth"] = {truth}
+                    if r_truth == truth or not c["ours_truth"]:
+                        c["ours"].append(x["eO"]); c["ours_truth"].add(r_truth)
                 if "eV" in x:
                     if r_truth == truth and truth not in c["jpl_truth"]:
                         c["jpl"] = []; c["jpl_truth"] = {truth}
