@@ -5,7 +5,7 @@ overnight report that the morning briefing reads out.
   systems     main on the house git vs what CI tested vs what the portal serves; a commit CI passed that still isn't live an hour later is
               deployed again (`cd.py deploy` on skippy-core). Nothing is ever reverted here: skippy-core's deployer already sends all traffic
               back to the previous revision when a deploy fails its smoke test, and recovery never reverts code.
-  lazy jobs   the night's own scheduled tasks (home learner 03:30, quip refresh 04:15, distiller 06:30, starters 06:40): did each run, and
+  lazy jobs   the night's own scheduled tasks (home learner 03:30, quip refresh 04:15, MPC live scoreboard 04:30, distiller 06:30, starters 06:40): did each run, and
               did it succeed (read from Windows' task scheduler).
   upkeep      free disk on C: and D:, dangling Docker images and old build cache pruned (`docker image prune`, `docker builder prune` older
               than a week: never a volume, never a running container), the hub restarted onto new code when its code changed since it
@@ -40,7 +40,7 @@ PORTAL = os.environ.get("PORTAL_URL", "https://skippy-portal-1015050363686.us-we
 VAULT_ENV = Path(r"G:\My Drive\vault\.env")
 CHAOS_DAY = os.environ.get("SKIPPY_CHAOS_DAY", "sun")[:3].lower()     # the one night a week the healing check runs (tools/chaos_drill.py --weekly)
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-TASKS = ["SkippyHomeLearn", "Skippy quip refresh", "sigma-ground distill daily", "Skippy starters refresh", "SkippyModelsBaseline"]
+TASKS = ["SkippyHomeLearn", "Skippy quip refresh", "sigma-ground distill daily", "sigma-ground mpc live daily", "Skippy starters refresh", "SkippyModelsBaseline"]
 LATE_S = 3600
 
 
