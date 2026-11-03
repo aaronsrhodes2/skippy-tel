@@ -54,7 +54,21 @@ def test_the_flipbooks_data_is_a_real_run_with_its_provenance_and_a_consistent_s
 def test_the_flipbook_script_calculates_no_physics_and_makes_one_request():
     js = (STATIC / "nbody-flipbook.js").read_text(encoding="utf-8")
     assert not re.search(r"299792458|6\.674|1\.989|149597870|AU_KM|\bGM\b|Math\.sqrt|Math\.pow\(", js)   # no constants, no formulas: it draws what the run measured
-    assert re.findall(r"fetch\(([\w.]+)", js) == ["root.dataset.flipbookUrl"]
+    assert js.count("fetch(") == 1                                                                        # one fetch helper, fed the two data files and nothing else
+    assert re.findall(r"getJson\((root\.dataset\.\w+)", js) == ["root.dataset.flipbookUrl", "root.dataset.blanketsUrl"]
+
+
+def test_the_blankets_data_is_the_three_way_comparison_against_de442():
+    d = json.loads((STATIC / "demos" / "nbody" / "blankets.json").read_text(encoding="utf-8"))
+    m = d["meta"]
+    assert m["truth"] == "DE442" and m["words"] == {"ours": "Our prediction", "jpl": "JPL's prediction at the time", "truth": "Reality"}
+    assert m["vintages"][0] == "DE403" and m["vintages"][-1] == "DE440" and len(m["vintages"]) == 11 and m["targets"][-1] <= 2025
+    for body in ("Mercury", "Earth", "Moon", "Uranus"):
+        b = d["blankets"][body]
+        assert len(b["ours"]) == len(m["vintages"]) and all(len(r) == len(m["targets"]) for r in b["ours"])
+        assert any(x is not None for r in b["jpl"] for x in r) and any(x is not None for x in b["band"])
+    assert max(x for x in d["blankets"]["Earth"]["band"] if x is not None) < 0.1 < min(x for x in d["blankets"]["Uranus"]["band"] if x is not None)   # reality's spread: metres inside, hundreds of km at Uranus
+    assert "composite" in d and "composite_body" in d and set(d["by_lead"]["Mars"]) == {"1", "2", "3", "4", "5"}
     css = re.sub(r"/\*.*?\*/", "", (STATIC / "nbody.css").read_text(encoding="utf-8"), flags=re.S)
     assert not re.search(r"overflow(?:-y)?\s*:\s*(?:auto|scroll)", css) and "gradient" not in css
 

@@ -21,6 +21,7 @@
   var NAMES = { pure_newton: "Newton only", standard: "+ relativity", over_physics_no_j2: "+ sunlight pressure", over_physics: "+ planets' flattening", over_physics_finedt: "+ flattening, finer steps", jpl_de440: "every force layer", kepler: "ellipses only" };
   var COLOR = { pure_newton: "--c-newton", standard: "--c-standard", over_physics_no_j2: "--c-srp", over_physics: "--c-j2", over_physics_finedt: "--c-fine", jpl_de440: "--c-jpl", kepler: "--c-kepler" };
   var sci = function (v) { return v === 0 ? "0" : v.toExponential(1).replace("e+", "e").replace("e-", "e−"); };
+  var tenTo = function (e) { return +("1e" + e); };                        // a decade label back to a number (axis bookkeeping, not physics)
   var pname = function (p) { return NAMES[p] || p; };
   var median = function (a) { var s = a.slice().sort(function (x, y) { return x - y; }), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 
@@ -137,7 +138,7 @@
       g.fillText("target year →", left + pw / 2, bot + 24); g.save(); g.translate(10, (top + bot) / 2); g.rotate(-Math.PI / 2); g.fillText("issued ↑", 0, 0); g.restore();
       var lx = left + 2 * (pw + gap), lw = pw, ly = bot + 8;                // the ramp legend under the third panel, clear of the data
       for (var s = 0; s < lw; s++) { g.fillStyle = ramp(s / lw); g.fillRect(lx + s, ly, 1, 6); }
-      g.fillStyle = css("--muted"); g.textAlign = "left"; g.fillText(sci(Math.pow(10, r[0])) + " km", lx, ly + 17); g.textAlign = "right"; g.fillText(sci(Math.pow(10, r[1])) + " km", lx + lw, ly + 17);
+      g.fillStyle = css("--muted"); g.textAlign = "left"; g.fillText(sci(tenTo(r[0])) + " km", lx, ly + 17); g.textAlign = "right"; g.fillText(sci(tenTo(r[1])) + " km", lx + lw, ly + 17);
       var keys = [["— reality (the edge)", "--c-truth"], ["■ ours closer", "--c-ours"], ["■ JPL closer", "--c-theirs"], ["■ both inside reality's spread", "--muted"]];
       g.textAlign = "left"; var kx = left, ky = bot + 36;                   // measured, wrapping: the words never overlap, whatever the width
       keys.forEach(function (it) { var tw = g.measureText(it[0]).width + 16; if (kx + tw > c.w - 10 && kx > left) { kx = left; ky += 13; } g.fillStyle = css(it[1]); g.fillText(it[0], kx, ky); kx += tw; });
@@ -154,7 +155,7 @@
       var items = [["● " + B.meta.words.ours, "--c-ours"], ["- - " + B.meta.words.jpl, "--c-theirs"], ["■ reality's own spread", "--muted"], [lead + " year" + (lead === "1" ? "" : "s") + " ahead, km (log)", "--ink"]];
       g.font = "11px " + css("--mono"); g.textAlign = "left"; var lx = left, ly = 14;
       items.forEach(function (it) { var tw = g.measureText(it[0]).width + 18; if (lx + tw > right && lx > left) { lx = left; ly += 15; } g.fillStyle = css(it[1]); g.fillText(it[0], lx, ly); lx += tw; });
-      top = ly + 12; Y = function (v) { return bot - (Math.log10(Math.max(v, Math.pow(10, r[0]))) - r[0]) / (r[1] - r[0]) * (bot - top); };
+      top = ly + 12; Y = function (v) { return bot - (Math.log10(Math.max(v, tenTo(r[0]))) - r[0]) / (r[1] - r[0]) * (bot - top); };
       axisLog(g, left, right, top, bot, r[0], r[1], false);
       g.fillStyle = css("--muted"); g.globalAlpha = 0.35; g.beginPath(); g.moveTo(left, bot);
       B.meta.targets.forEach(function (t, j) { if (band[j] != null && band[j] > 0) g.lineTo(X(t), Y(band[j])); });
