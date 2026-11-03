@@ -4,7 +4,7 @@
  "region": "us-west1",
  "home_dns": {"_comment": "A public name for home (the car's telemetry door, forwarded by the router to skippy-core:7443): its A record follows home's public IP (cd.py home_dns).", "host": "telemetry.makerportal.live", "zone": "makerportal-live"},
  "pins": {
-  "SIGMA_GROUND_REF": "a3731ed100bc2d4a333d4ec9d566f6b7db7b2f60",
+  "SIGMA_GROUND_REF": "5ff1e7e53a3ce3bc43b60d377af9897f8a1e43a9",
   "STARCONTROL_REF": "web-2026-10-02",
   "STARCONTROL_SHA256": "15866e0e94ab0069f02f8c4d0a3bb31bf4fe7a96e54337f29cadc37fe74999b3"
  },
