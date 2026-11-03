@@ -111,11 +111,12 @@ def test_a_reload_while_it_is_retrying_joins_the_same_turn_and_sees_it_waiting(m
     out = {}
     t = threading.Thread(target=lambda: out.update(first=client.post("/chat/send", json={"message": "hi", "prompt_id": "p-test-0003"}).get_json()))
     t.start()
-    for _ in range(100):
+    for _ in range(400):                                   # up to 20 s: a loaded CI box is slow to make the first retry
         p = app.extensions["chat_prompts"].get("p-test-0003", FRIEND)
         if p is not None and p.attempts:
             break
         time.sleep(0.05)
+    assert p is not None and p.attempts, "the first try never failed over to a retry"
     other = app.test_client()
     login(other, FRIEND)
     view = other.get("/chat/pending/p-test-0003").get_json()
