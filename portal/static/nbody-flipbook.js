@@ -184,23 +184,28 @@
           B.meta.runs + " integrated runs; " + (B.meta.ours_note || "") + ". Built " + fmtDate(B.meta.built_utc) + "."));
       return d;
     } });
-    P.push(blanketPlate("Everything at once", B.composite, "Every body folded into one number: the mass-weighted error (DE440 masses; Jupiter and Saturn carry 92 % of it, so this blanket is mostly the giants, whose limit is the starting state, not the physics). Oldest issue at the bottom, reality along the bright edge."));
-    P.push(leadPlate("Everything at once", B.by_lead[B.meta.bodies[0]] ? composeLead() : {}));
+    P.push(blanketPlate("Everything at once, by mass", B.composite, "Every body folded into one number: the mass-weighted error (DE440 masses; Jupiter and Saturn carry 92 % of it, so this blanket is mostly the giants, whose limit is the starting state, not the physics). Oldest issue at the bottom, reality along the bright edge."));
+    P.push(leadPlate("Everything at once, by mass", B.by_lead[B.meta.bodies[0]] ? composeLead("mass") : {}));
+    if (B.composite_body) {
+      P.push(blanketPlate("Everything at once, by body", B.composite_body, "The same grid with each body counted once: the median over the ten bodies in each cell, so the Moon's fraction of a kilometre weighs as much as Uranus's hundreds. This is the typical body; the mass blanket is the centre of mass."));
+      P.push(leadPlate("Everything at once, by body", B.by_lead[B.meta.bodies[0]] ? composeLead("body") : {}));
+    }
     B.meta.bodies.forEach(function (n) {
       P.push(blanketPlate(n, B.blankets[n], (n === "Moon" ? "The Moon, geocentric error folded into heliocentric. " : "") + "Issued year up the side, target year along the bottom, kilometres from reality by colour; the bright edge is reality."));
       P.push(leadPlate(n, B.by_lead[n] || {}));
     });
     return P;
   }
-  function composeLead() {                                                 // the mass-weighted by-lead curves, from the per-body ones
-    var out = {}, wts = B.composite.weights;
+  function composeLead(how) {                                              // the composite by-lead curves from the per-body ones: "mass" = weighted mean, "body" = median; a cell needs every body
+    var out = {}, wts = B.composite.weights, N = B.meta.bodies.length;
     for (var L = 1; L <= 5; L++) {
       var acc = {}; B.meta.bodies.forEach(function (n) {
         var q = B.by_lead[n] && B.by_lead[n][String(L)]; if (!q) return;
-        q.targets.forEach(function (t, i) { var a = acc[t] = acc[t] || { o: 0, j: 0, w: 0 }; a.o += wts[n] * q.ours[i]; a.j += wts[n] * q.jpl[i]; a.w += wts[n]; });
+        q.targets.forEach(function (t, i) { var a = acc[t] = acc[t] || { o: [], j: [], wo: [], wj: [] }; if (q.ours[i] != null) { a.o.push(q.ours[i]); a.wo.push(wts[n]); } if (q.jpl[i] != null) { a.j.push(q.jpl[i]); a.wj.push(wts[n]); } });
       });
-      var ts = Object.keys(acc).map(Number).sort(function (a, b) { return a - b; });
-      if (ts.length) out[String(L)] = { targets: ts, ours: ts.map(function (t) { return acc[t].o / acc[t].w; }), jpl: ts.map(function (t) { return acc[t].j / acc[t].w; }) };
+      var fold = function (v, w) { if (v.length < N) return null; if (how === "body") return median(v); var s = 0, sw = 0; v.forEach(function (x, k) { s += w[k] * x; sw += w[k]; }); return s / sw; };
+      var ts = Object.keys(acc).map(Number).sort(function (a, b) { return a - b; }).filter(function (t) { return acc[t].j.length === N; });
+      if (ts.length) out[String(L)] = { targets: ts, ours: ts.map(function (t) { return fold(acc[t].o, acc[t].wo); }), jpl: ts.map(function (t) { return fold(acc[t].j, acc[t].wj); }) };
     }
     return out;
   }

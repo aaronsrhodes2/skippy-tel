@@ -129,6 +129,20 @@ def main() -> None:
         band.append(num / den if den else None)
     composite = {"ours": weighted("ours"), "jpl": weighted("jpl"), "band": band, "weights": {b: gm[b] / sum(gm[x] for x in bodies) for b in bodies},
                  "note": "mass-weighted mean of the bodies' errors (weights: DE440 GM; the giants as their systems). Jupiter and Saturn carry 92 % of it."}
+
+    # by body: each body counts once; the cell is the MEDIAN over the bodies (the giants' hundreds of km do not swamp the Moon's fraction of one), on the same complete-cell rule
+    def by_body(key):
+        grid = []
+        for i in range(len(vintages)):
+            row = []
+            for j in range(len(targets)):
+                vals = [blankets[b][key][i][j] for b in bodies]
+                complete = all(v is not None for v in vals) and (key == "jpl" or all(blankets[b]["jpl"][i][j] is not None for b in bodies))
+                row.append(float(np.median(vals)) if complete else None)
+            grid.append(row)
+        return grid
+    band_body = [float(np.median([blankets[b]["band"][j] for b in bodies])) if all(blankets[b]["band"][j] is not None for b in bodies) else None for j in range(len(targets))]
+    composite_body = {"ours": by_body("ours"), "jpl": by_body("jpl"), "band": band_body, "note": "median over the ten bodies, each counted once"}
     # by lead: at a fixed lead (1..5 yr), the error against the target year, every ephemeris and start pooled: does a later issue predict better at the same lead?
     lead_cells: dict = {}
     for r in runs:
@@ -165,7 +179,7 @@ def main() -> None:
                      "words": WORDS, "issue_years": [round(rel[v], 2) for v in vintages], "vintages": vintages, "targets": targets, "bodies": bodies,
                      "runs": len(ours_runs), "kernel_rows": len(runs) - len(ours_runs), "built_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                      "how": "cell = median over the runs of that ephemeris whose lead lands on that target year; empty before the release; band = DE440 against DE442 at the target"},
-            "blankets": blankets, "composite": composite, "by_lead": by_lead}
+            "blankets": blankets, "composite": composite, "composite_body": composite_body, "by_lead": by_lead}
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
     print(f"{a.out} ({a.out.stat().st_size // 1024} KB): {len(vintages)} ephemerides x {len(targets)} target years, {len(bodies)} bodies, {len(runs)} runs, truth {data['meta']['truth']}")
