@@ -352,7 +352,7 @@ def test_ops_restore_rejects_bad_input_before_touching_anything(ops_run, args):
     assert run.calls == []
 
 
-def test_an_agent_error_makes_the_workflow_step_fail():
+def test_an_agent_error_makes_the_workflow_step_fail(monkeypatch):
     """remote.py exits non-zero when the VM's reply starts with `error:` (how the agent reports a failure)."""
     remote = load("remote", "../../scripts/remote.py")
 
@@ -370,7 +370,7 @@ def test_an_agent_error_makes_the_workflow_step_fail():
             rid = self.sent
             return f"=== ops-reply {rid} ===\n{self.reply}\n=== ops-end {rid} ===\n"
 
-    remote.time.sleep = lambda s: None
+    monkeypatch.setattr(remote.time, "sleep", lambda s: None)       # (remote.time IS the time module: assigning it left time.sleep a no-op for every test after this one)
     assert remote.agent(FakeVm("error: the restore failed and the files are as they were"), "restore-game", ["valheim", "latest"], {}) == 1
     assert remote.agent(FakeVm("restore valheim: fine"), "restore-game", ["valheim", "latest"], {}) == 0
 
