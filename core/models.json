@@ -15,10 +15,12 @@
       },
       "full": {
         "repo": "unsloth/Qwen3.6-35B-A3B-GGUF",
-        "files": [{"path": "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf", "size": 22360456160, "sha256": "707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450"}],
+        "files": [{"path": "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf", "size": 22360456160, "sha256": "707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450"},
+                  {"path": "mmproj-F16.gguf", "size": 899283680, "sha256": null}],
         "ctx": 65536,
         "args": ["--jinja", "--temp", "0.7", "--top-p", "0.8", "--top-k", "20", "--min-p", "0", "--presence-penalty", "1.5",
-                 "--chat-template-kwargs", "{\"enable_thinking\": false}"]
+                 "--chat-template-kwargs", "{\"enable_thinking\": false}",
+                 "--mmproj", "/models/huggingface/unsloth__Qwen3.6-35B-A3B-GGUF/mmproj-F16.gguf"]
       }
     },
     "router": {
