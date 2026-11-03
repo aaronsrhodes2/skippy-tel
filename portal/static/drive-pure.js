@@ -149,7 +149,21 @@
       + last.map(l => "- (" + (HEARD_LANG.test(String(l.lang || "")) ? l.lang : "another language") + ") " + String(l.text).trim().slice(0, 400)).join("\n")
       + "]\n\n";
   }
+  // ── the strip's lamp: the phone's charge, and on the glasses' host how hot it is (the Captain: "watch heat and battery") ──
+  // The host's thermal() answers {batteryC, thermal} with Android's PowerManager status: 0 none, 1 light, 2 moderate, 3 severe and up.
+  const HOT_STATUS = 3, WARM_C = 42;
+  function battLevel(pct, charging) {                                          // "ok" (green), "low" (amber), "crit" (red), or "" when unknown
+    if (typeof pct !== "number" || !isFinite(pct)) return "";
+    return charging || pct >= 40 ? "ok" : pct >= 15 ? "low" : "crit";
+  }
+  function heatLevel(status, tempC) {                                          // "hot" at SEVERE or worse, "warm" at moderate or a warm battery, else ""
+    if ((+status || 0) >= HOT_STATUS) return "hot";
+    return (+status || 0) === 2 || (typeof tempC === "number" && tempC >= WARM_C) ? "warm" : "";
+  }
+  function lampText(pct, charging, tempC, hosted) {
+    return (typeof pct === "number" ? Math.round(pct) + (charging ? "+" : "") : "") + (hosted && typeof tempC === "number" ? " · " + Math.round(tempC) + "°" : "");
+  }
   function langName(code) { try { return new Intl.DisplayNames(["en"], { type: "language" }).of(code) || code; } catch (e) { return code; } }
 
-  return { captionFrames, captionHoldMs, heardNote, langName, CAPTION_STEP_MS, CAPTION_FADE_MS, shuffle, buildQueue, localFirst, handOff, nextPlayable, playable, replyAfter, carDone, QUEUE_MAX, FAV_EVERY, SUGGEST_EVERY, CAR_MARGIN_MS };
+  return { captionFrames, captionHoldMs, heardNote, langName, battLevel, heatLevel, lampText, HOT_STATUS, CAPTION_STEP_MS, CAPTION_FADE_MS, shuffle, buildQueue, localFirst, handOff, nextPlayable, playable, replyAfter, carDone, QUEUE_MAX, FAV_EVERY, SUGGEST_EVERY, CAR_MARGIN_MS };
 });

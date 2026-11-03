@@ -50,6 +50,7 @@ import modules as modules_mod
 import adaptive as adaptive_mod
 import themes as themes_mod
 import vision as vision_mod
+import authlink as authlink_mod
 import ops
 import play
 import audiobooks as audiobooks_mod
@@ -1419,6 +1420,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     table = tabletop or tabletop_mod.Tabletop(tabletop_mod.store_from_env())
     app.extensions["tabletop"] = table
     vision = vision_mod.init_app(app, home, notifier, table.store)     # Skippy-vision: one flash of every screen and camera (vision.py)
+    authlink_mod.init_app(app, notifier, table.store, limiter)         # the glasses' one-time sign-in link (authlink.py)
     heroes = tabletop_mod.Heroes(table)                # the party's sheets, their folders, and the GM's Fear
     tt = Blueprint("tabletop", __name__, url_prefix="/tabletop")
 

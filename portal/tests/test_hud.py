@@ -32,6 +32,13 @@ def test_hud_has_the_camera_key_and_a_forget_key_that_starts_hidden_and_the_visi
     assert "vendor/html2canvas.min.js" in page and "static/vision.js" in page
 
 
+def test_hud_has_the_battery_lamp_and_the_sign_in_key_that_the_script_shows_only_in_a_normal_browser(client):
+    page = client.get("/hud").get_data(as_text=True)
+    assert 'id="k-batt"' in page and "#g-battery" in page
+    assert 'id="k-link" hidden' in page and 'data-tel="hud:sign-glasses-in"' in page and 'data-link-new="/auth/link/new"' in page
+    assert 'id="k-batt"' not in client.get("/drive").get_data(as_text=True)
+
+
 def test_the_tesla_drive_page_has_no_camera_key_but_joins_a_moment_by_adding_its_own_picture(client):
     page = client.get("/drive").get_data(as_text=True)
     assert 'id="k-flash"' not in page and 'data-vision="' not in page

@@ -65,7 +65,11 @@
   #drive .hudkeys { display: flex; gap: 8px; margin-left: auto; }
   #drive .hudkeys .key { width: 40px; height: 40px; }
   #drive .hudkeys .key[hidden] { display: none; }
-  #k-flash.busy { opacity: .55; }
+  #k-flash.busy, #k-link.busy { opacity: .55; }
+  #drive .hudkeys .batt { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; font: 600 14px var(--mono); color: var(--muted); white-space: nowrap; }
+  #drive .hudkeys .batt .g { width: 20px; height: 20px; }
+  #drive .hudkeys .batt[data-lvl="ok"] { color: var(--green); } #drive .hudkeys .batt[data-lvl="low"] { color: var(--amber); } #drive .hudkeys .batt[data-lvl="crit"] { color: var(--red); }
+  #drive .hudkeys .batt[data-heat="warm"] { color: var(--amber); } #drive .hudkeys .batt[data-heat="hot"] { color: var(--red); animation: drive-blink 1.4s ease-in-out infinite; }
   #k-forget { --accent: var(--amber); color: var(--amber); }
   #said { min-height: 0; font: 600 20px var(--mono); color: var(--green); padding: 0 8px; overflow: hidden; display: -webkit-box;
           -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
@@ -89,7 +93,7 @@
   #k-house .lamps i[data-ok="1"] { color: var(--green); opacity: 1; filter: drop-shadow(0 0 5px color-mix(in srgb, var(--green) 60%, transparent)); }
   #k-house .lamps i[data-ok="0"] { color: var(--red); opacity: 1; animation: drive-blink 1.4s ease-in-out infinite; }
   @keyframes drive-blink { 50% { opacity: .35; } }
-  @media (prefers-reduced-motion: reduce) { #k-house .lamps i[data-ok="0"] { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { #k-house .lamps i[data-ok="0"], #drive .hudkeys .batt[data-heat="hot"] { animation: none; } }
   #vstatus .vx { background: none; border: 1px solid var(--green); color: var(--green); width: 34px; height: 34px; font-size: 20px; }
 </style>
 {% endblock %}
@@ -105,9 +109,11 @@
          data-house="{{ url_for('drive.house') }}" data-last="{{ url_for('drive.last') }}" data-rooms="{{ url_for('audiobooks.rooms') }}" data-room-cmd="{{ url_for('audiobooks.command') }}" data-frames="{{ url_for('static', filename='skippy/face/') }}"
          data-vision-moments="{{ url_for('vision.listing') }}" data-vision-add="{{ url_for('vision.add_file', mid='_MID_') }}"
          data-snapshot-lib="{{ url_for('static', filename='vendor/html2canvas.min.js') }}"{% if hud %}
-         data-vision="{{ url_for('vision.flash') }}" data-vision-read="{{ url_for('vision.read_signs') }}" data-vision-look="{{ url_for('vision.look') }}" data-vision-delete="{{ url_for('vision.moment_delete', mid='_MID_') }}" data-vision-keep="{{ url_for('vision.moment_keep', mid='_MID_') }}"{% endif %}>
+         data-vision="{{ url_for('vision.flash') }}" data-link-new="{{ url_for('authlink.new') }}" data-vision-read="{{ url_for('vision.read_signs') }}" data-vision-look="{{ url_for('vision.look') }}" data-vision-delete="{{ url_for('vision.moment_delete', mid='_MID_') }}" data-vision-keep="{{ url_for('vision.moment_keep', mid='_MID_') }}"{% endif %}>
   <div id="now" aria-live="polite"><svg class="g" aria-hidden="true"><use id="now-g" href="#g-wheel"/></svg><span id="now-t"></span>
     {% if hud %}<span class="hudkeys">
+      <span class="batt" id="k-batt" role="img" aria-label="Battery" title="Battery"><svg class="g" aria-hidden="true"><use href="#g-battery"/></svg><b></b></span>
+      <button type="button" class="key" id="k-link" hidden aria-label="Sign the glasses in: a one-time link for OpenViture" title="Sign the glasses in: a one-time link for OpenViture" data-tel="hud:sign-glasses-in"><svg class="g" aria-hidden="true"><use href="#g-link"/></svg></button>
       <button type="button" class="key" id="k-forget" hidden aria-label="Forget the moment just saved" title="Forget the moment just saved" data-tel="hud:forget"><svg class="g" aria-hidden="true"><use href="#g-trash"/></svg></button>
       <button type="button" class="key" id="k-flash" aria-label="Skippy-vision: save this moment (hold for the 10-second clip)" title="Skippy-vision: save this moment (hold for the 10-second clip)" data-tel="hud:flash"><svg class="g" aria-hidden="true"><use href="#g-camera"/></svg></button>
       <button type="button" class="key" id="k-hub" aria-pressed="false" aria-label="Hub mode: hands-off, no touch" title="Hub mode: hands-off, no touch" data-tel="hud:hub"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg></button>

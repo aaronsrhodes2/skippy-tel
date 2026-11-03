@@ -569,6 +569,7 @@
   function setSteady(on, say) {
     clearInterval(steadyTimer); steadyTimer = 0; steadyLast = "";
     try { localStorage.setItem("hud-steady", on ? "1" : "0"); } catch (e) { /* this load only */ }
+    try { if (window.OpenViture && OpenViture.steady) OpenViture.steady(on); } catch (e) { /* the host keeps it across a reload; no host, no matter */ }
     if (on) steadyTimer = setInterval(async () => {
       if (document.hidden || !root.classList.contains("hub") || !vision || !vision.hosted()) return;      // only while worn, in hub mode
       const picture = await vision.frame();
@@ -585,7 +586,75 @@
     if (word === "look") note((await vision.lookAt(picture)) || "I couldn't tell.", 12000);
     else await readView(picture, null, true);
   }
-  try { if (localStorage.getItem("hud-steady") === "1") setSteady(true, false); } catch (e) { /* off */ }
+  try {
+    const hostSteady = window.OpenViture && OpenViture.status ? JSON.parse(OpenViture.status()).steady === true : false;      // the host remembers it across a reload
+    if (hostSteady || localStorage.getItem("hud-steady") === "1") setSteady(true, false);
+  } catch (e) { /* off */ }
+
+  // ── keep the screen on while /hud is in front: a phone dims and locks mid-sentence otherwise ──
+  if (cfg.wsSend && navigator.wakeLock) {
+    let lock = null;
+    const hold = async () => {
+      if (document.hidden || lock) return;
+      try { lock = await navigator.wakeLock.request("screen"); lock.addEventListener("release", () => { lock = null; }); } catch (e) { lock = null; }
+    };
+    hold(); document.addEventListener("visibilitychange", hold);
+  }
+
+  // ── the lamp in the strip: the phone's charge and, on the glasses' host, how hot it is (the Captain: watch heat and battery) ──
+  // At a SEVERE thermal status or worse the camera eases off to 10 fps, steady reading stops and he is told once in ten minutes; it goes back
+  // to full when the phone is cool again. Without the host (the phone's own browser) the lamp is the charge alone.
+  const batt = $("#k-batt"), lamp = { pct: null, charging: false, temp: null, status: 0 };
+  if (batt) {
+    const hosted = !!(window.OpenViture && OpenViture.thermal);
+    let easedByHeat = false, heatTold = 0;
+    const paintLamp = () => {
+      batt.dataset.lvl = D.battLevel(lamp.pct, lamp.charging); batt.dataset.heat = D.heatLevel(lamp.status, lamp.temp);
+      batt.querySelector("b").textContent = D.lampText(lamp.pct, lamp.charging, lamp.temp, hosted);
+      batt.title = "Battery" + (lamp.pct == null ? "" : " " + Math.round(lamp.pct) + "%") + (lamp.charging ? ", charging" : "") + (batt.dataset.heat === "hot" ? ", hot" : batt.dataset.heat === "warm" ? ", warm" : "");
+    };
+    if (navigator.getBattery) navigator.getBattery().then(b => {
+      const upd = () => { lamp.pct = b.level * 100; lamp.charging = !!b.charging; paintLamp(); };
+      upd(); b.addEventListener("levelchange", upd); b.addEventListener("chargingchange", upd);
+    }).catch(() => {});
+    if (hosted) {
+      const relieve = () => {
+        if (lamp.status >= D.HOT_STATUS) {
+          if (!easedByHeat) { easedByHeat = true; try { OpenViture.easeOff(true); } catch (e) { /* no host */ } setSteady(false, false); }
+          if (Date.now() - heatTold > 10 * 60 * 1000) { heatTold = Date.now(); note("The phone is hot, so I've eased off the camera.", 6000); }
+        } else if (lamp.status <= 1 && easedByHeat) { easedByHeat = false; try { OpenViture.easeOff(false); } catch (e) { /* no host */ } }
+      };
+      const look = () => {
+        try { const t = JSON.parse(OpenViture.thermal()); lamp.temp = typeof t.batteryC === "number" ? t.batteryC : null; lamp.status = t.thermal | 0; } catch (e) { return; }
+        paintLamp(); relieve();
+      };
+      look(); setInterval(look, 30000);
+    }
+    paintLamp();
+  }
+
+  // ── "Sign the glasses in": the glasses' browser (OpenViture's WebView) has no cookies, so a normal browser (the phone's) mints it a one-time link
+  // (portal/authlink.py) and hands it to OpenViture: on Android Chrome an intent:// address opens OpenViture's door at once; otherwise the link is
+  // copied (or shared) for him to open there within five minutes ──
+  const linkKey = $("#k-link");
+  if (linkKey && cfg.linkNew && !window.OpenViture) {
+    linkKey.hidden = false;
+    linkKey.addEventListener("click", async () => {
+      linkKey.classList.add("busy");
+      try {
+        const d = await getJSON(cfg.linkNew, { method: "POST", body: "{}", headers: { "Content-Type": "application/json", "X-Link": "1", Accept: "application/json" } });
+        const u = new URL(d.url);
+        let left = false; document.addEventListener("visibilitychange", () => { left = true; }, { once: true });
+        location.href = "intent://" + u.host + u.pathname + u.search + "#Intent;scheme=https;package=dev.openviture.test;end";
+        setTimeout(async () => {
+          if (left || document.hidden) return;                                   // OpenViture took it
+          try { await navigator.clipboard.writeText(d.url); note("Link copied. Open it in OpenViture within 5 minutes.", 9000); }
+          catch (e) { if (navigator.share) navigator.share({ text: d.url }).catch(() => {}); else note(d.url, 15000); }
+        }, 1500);
+      } catch (e) { note("Couldn't make a link: " + (e.message || e), 6000); }
+      finally { linkKey.classList.remove("busy"); }
+    });
+  }
   async function snap(hold, by) {
     if (!vision) return null;
     if (flashKey) flashKey.classList.add("busy");

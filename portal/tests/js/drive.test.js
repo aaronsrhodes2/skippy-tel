@@ -185,3 +185,31 @@ test("what was heard rides ahead of his next message to purple, as the chat's no
   assert.ok(D.heardNote([{ text: "x".repeat(900), lang: "de" }]).includes("x".repeat(400)) && !D.heardNote([{ text: "x".repeat(900), lang: "de" }]).includes("x".repeat(401)));
   assert.equal(D.langName("es"), "Spanish");
 });
+
+test("the strip's lamp: green from 40%, amber to 15%, red below; charging is always green; unknown is no colour", () => {
+  assert.equal(D.battLevel(82, false), "ok");
+  assert.equal(D.battLevel(40, false), "ok");
+  assert.equal(D.battLevel(39, false), "low");
+  assert.equal(D.battLevel(15, false), "low");
+  assert.equal(D.battLevel(14, false), "crit");
+  assert.equal(D.battLevel(5, true), "ok");
+  for (const bad of [null, undefined, NaN, "80"]) assert.equal(D.battLevel(bad, false), "", String(bad));
+});
+
+test("heat: SEVERE and worse is hot, moderate or a battery at 42 degrees is warm, anything cooler is nothing", () => {
+  assert.equal(D.HOT_STATUS, 3);
+  for (const s of [3, 4, 5, 6]) assert.equal(D.heatLevel(s, 30), "hot", String(s));
+  assert.equal(D.heatLevel(2, 30), "warm");
+  assert.equal(D.heatLevel(0, 42), "warm");
+  assert.equal(D.heatLevel(1, 41.9), "");
+  assert.equal(D.heatLevel(undefined, null), "");
+  assert.equal(D.heatLevel(0, 55), "warm");
+});
+
+test("the lamp's words: the charge, a plus while charging, and the glasses' heat only when the host is there", () => {
+  assert.equal(D.lampText(82.4, false, 38.2, true), "82 · 38°");
+  assert.equal(D.lampText(82.4, true, 43.6, true), "82+ · 44°");
+  assert.equal(D.lampText(82.4, false, 38.2, false), "82");
+  assert.equal(D.lampText(null, false, null, true), "");
+  assert.equal(D.lampText(null, false, 41, true), " · 41°");
+});
