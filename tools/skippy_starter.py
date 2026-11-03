@@ -62,6 +62,7 @@ DESKTOP_APPS = {
     "spotify": {"image": "Spotify.exe", "launch": [os.path.join(LOCALAPPDATA, "Microsoft", "WindowsApps", "Spotify.exe")]},
 }
 DESKTOP_WAIT_S = 60
+TASKLIST_TIMEOUT_S = 90          # `tasklist` took 51 s on 2026-11-02 (1,093 processes): the old 15 s limit made every app look "not running"
 VBCABLE_PS = "(Get-CimInstance Win32_SoundDevice | Where-Object { $_.Name -match 'VB-Audio|CABLE' } | Measure-Object).Count"
 VBCABLE_EVERY_S = 60
 LOCK_PORT = 9339
@@ -109,6 +110,43 @@ def say(text: str) -> None:
     """A line in state/starter.log, stamped and flushed at once: stdout to a file is block-buffered, so without the flush the log showed
     nothing for hours, the doctor's heals included (the chaos drill found it, 2026-11-01)."""
     print(f"{datetime.now():%Y-%m-%d %H:%M:%S} {text}", flush=True)
+
+
+def toolhelp_images() -> set[str] | None:
+    """Every running program's image name, lower-cased, from the Windows process snapshot: the same list `tasklist` prints, in about
+    20 ms for a thousand processes (tasklist took 51 s on 2026-11-02). None where that can't be asked (not Windows, or the call failed)."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class ProcessEntry(ctypes.Structure):                      # PROCESSENTRY32W
+            _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
+                        ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+                        ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", wintypes.LONG), ("dwFlags", wintypes.DWORD),
+                        ("szExeFile", wintypes.WCHAR * 260)]
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        k32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        k32.Process32FirstW.argtypes = k32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry)]
+        k32.CloseHandle.argtypes = [wintypes.HANDLE]
+        snap = k32.CreateToolhelp32Snapshot(0x2, 0)                # TH32CS_SNAPPROCESS
+        if snap is None or snap == ctypes.c_void_p(-1).value:
+            return None
+        try:
+            entry = ProcessEntry()
+            entry.dwSize = ctypes.sizeof(entry)
+            names: set[str] = set()
+            more = k32.Process32FirstW(snap, ctypes.byref(entry))
+            while more:
+                names.add(entry.szExeFile.lower())
+                more = k32.Process32NextW(snap, ctypes.byref(entry))
+            return names or None
+        finally:
+            k32.CloseHandle(snap)
+    except Exception:  # noqa: BLE001 — whatever went wrong, the caller falls back to tasklist
+        return None
 
 
 class Starter:
@@ -245,15 +283,20 @@ class Starter:
         rc, out = self.run(["tasklist", "/FI", f"IMAGENAME eq {OPENAUDIBLE_IMAGE}", "/FO", "CSV", "/NH"], 15)
         return rc == 0 and OPENAUDIBLE_IMAGE.lower() in out.lower()
 
-    def images_running(self) -> set[str]:
-        """Every program name running now, lower-cased (one read-only tasklist)."""
-        rc, out = self.run(["tasklist", "/FO", "CSV", "/NH"], 15)
+    def images_running(self) -> set[str] | None:
+        """Every program name running now, lower-cased; None when the list could not be had. NEVER an empty set for "couldn't tell": on
+        2026-11-02 tasklist took 51 s against a 15 s limit, the empty answer read as "Spotify is not running" (it was), the doctor
+        "healed" it three times an hour for hours, and the Captain got a Discord DM each time it gave up."""
+        got = toolhelp_images()
+        if got:
+            return got
+        rc, out = self.run(["tasklist", "/FO", "CSV", "/NH"], TASKLIST_TIMEOUT_S)
         names = set()
         for line in out.splitlines() if rc == 0 else []:
             first = line.split('","')[0].strip('"').lower()
             if first.endswith(".exe"):
                 names.add(first)
-        return names
+        return names if rc == 0 else None             # a failed or timed-out tasklist is "couldn't tell"; a successful one is the answer
 
     def vbcable(self) -> bool | None:
         """Is the VB-Cable playback device installed? Report only (read only, at most once a minute); None when it cannot tell."""
@@ -267,20 +310,23 @@ class Starter:
 
     def desktop_apps(self) -> dict:
         running = self.images_running()
-        got = {name: app["image"].lower() in running for name, app in DESKTOP_APPS.items()}
+        got = {} if running is None else {name: app["image"].lower() in running for name, app in DESKTOP_APPS.items()}   # no list: no verdict
         vb = self.vbcable()
         return {**got, **({"vbcable": vb} if vb is not None else {})}
 
     def heal_desktop_app(self, name: str) -> tuple[bool, str]:
         """Start the app minimized when it is not running. A running one is NEVER touched."""
         app = DESKTOP_APPS[name]
-        if app["image"].lower() in self.images_running():
+        running = self.images_running()
+        if running is None:
+            return False, f"Couldn't list the running programs, so {name.capitalize()} was left alone."      # never start what may already be running
+        if app["image"].lower() in running:
             return True, f"{name.capitalize()} is already running."
         if not Path(app["launch"][0]).is_file():
             return False, f"{name.capitalize()} is not installed at {app['launch'][0]}."
         self.working = f"starting {name.capitalize()}"
         self.spawn(app["launch"], minimized=True)
-        if self._wait(lambda: app["image"].lower() in self.images_running(), DESKTOP_WAIT_S):
+        if self._wait(lambda: app["image"].lower() in (self.images_running() or set()), DESKTOP_WAIT_S):
             return True, f"{name.capitalize()} started."
         return False, f"{name.capitalize()} was started but is not showing up as running."
 
@@ -292,8 +338,9 @@ class Starter:
         for name in ("openaudible", *DESKTOP_APPS):
             if got.get(name) is False:
                 self._down.setdefault(name, now)
-            else:
+            elif name in got:
                 self._down.pop(name, None)
+            # (a name with no verdict: the list of programs could not be had; neither up nor down, so nothing changes)
         got["down_s"] = {n: int(now - t) for n, t in self._down.items()}
         return got
 

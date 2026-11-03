@@ -13,6 +13,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import skippy_starter as ss  # noqa: E402
 
 
+REAL_TOOLHELP = ss.toolhelp_images
+
+
+@pytest.fixture(autouse=True)
+def _no_real_process_list(monkeypatch):
+    """The starter reads the real process snapshot first (fast); these tests hand it a fake PC through `tasklist` instead."""
+    monkeypatch.setattr(ss, "toolhelp_images", lambda: None)
+
+
 class World:
     """A fake PC: Docker up or not, containers, a bridge that answers or not, a portal that hands out commands."""
 
@@ -565,3 +574,61 @@ def test_the_hubs_heartbeat_rides_in_the_status_bounded_and_nothing_without_it(t
     assert hub["house"]["generac"]["detail"].startswith("Generator ready, battery 13.4 V") and len(hub["house"]["generac"]["detail"]) == 160
     assert 25 <= hub["age"] <= 40 and hub["rooms"] == {"office": True, "theater": False}
     assert hub["house"]["leviton"] == {"ok": True, "things": 12} and len(hub["house"]["nest"]["why"]) == 160 and "junk" not in hub["house"]
+
+
+# ── the process list: fast when it can be, and "couldn't tell" is never "not running" (2026-11-02: the Spotify false alarm) ──
+def timing_out_tasklist(w):
+    real = w.run
+    w.run = lambda cmd, timeout=120, cwd=None, env=None: (124, "timed out") if cmd[0] == "tasklist" else real(cmd, timeout, cwd, env)
+
+
+def test_the_process_snapshot_answers_first_and_tasklist_is_not_even_run(monkeypatch):
+    monkeypatch.setattr(ss, "toolhelp_images", lambda: {"spotify.exe", "python.exe"})
+    s, w = make()
+    assert s.images_running() == {"spotify.exe", "python.exe"} and s.desktop_apps()["spotify"] is True
+    assert not [c for c in w.cmds if c[0] == "tasklist"]
+
+
+def test_a_tasklist_that_times_out_is_no_verdict_not_nothing_running():
+    s, w = make()
+    timing_out_tasklist(w)
+    s.run = w.run
+    assert s.images_running() is None
+    status = s.status()
+    assert "spotify" not in status and "spotify" not in status.get("down_s", {})        # no verdict: the doctor has nothing to heal
+
+
+def test_a_tasklist_that_answers_with_nothing_running_is_still_an_answer():
+    s, w = make()
+    w.procs = []
+    assert s.images_running() == set() and s.status()["spotify"] is False
+
+
+def test_tasklist_is_given_time_to_answer():
+    seen = []
+    s, w = make()
+    real = w.run
+    s.run = lambda cmd, timeout=120, cwd=None, env=None: seen.append((cmd[0], timeout)) or real(cmd, timeout, cwd, env)
+    s.images_running()
+    assert ("tasklist", ss.TASKLIST_TIMEOUT_S) in seen and ss.TASKLIST_TIMEOUT_S >= 60     # it took 51 s once
+
+
+def test_a_heal_with_no_process_list_leaves_the_app_alone_instead_of_starting_it_again(tmp_path, monkeypatch):
+    exe = tmp_path / "spotify.exe"
+    exe.write_text("x")
+    monkeypatch.setitem(ss.DESKTOP_APPS["spotify"], "launch", [str(exe)])
+    s, w = make()
+    timing_out_tasklist(w)
+    s.run = w.run
+    ok, text = s.do("heal", arg="spotify")
+    assert not ok and "left alone" in text and w.spawned == []
+
+
+def test_the_real_process_snapshot_lists_this_very_process(monkeypatch):
+    import os
+    import sys
+    if os.name != "nt":
+        pytest.skip("the Windows process snapshot")
+    monkeypatch.setattr(ss, "toolhelp_images", REAL_TOOLHELP)
+    names = ss.toolhelp_images()
+    assert names and os.path.basename(sys.executable).lower() in names
