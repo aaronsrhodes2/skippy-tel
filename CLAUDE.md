@@ -284,6 +284,27 @@ chip on `/hud` and `/drive`** (`static/texts-chip.js`, polled every minute) and 
 like code/verify/OTP/PIN, or the one number in a short text; never a phone number, date, amount or lone year. Tests: `portal/tests/test_texts.py`,
 `portal/tests/js/texts.test.js`, `services/purple-tools/tests/test_texts_tool.py`. Full description: `docs/portal/README.md` → Texts.
 
+## The glasses on the portal: `/hud`, Skippy-vision, the sign-in link (the Captain's phone and Viture glasses, 2026-11-02)
+
+The S23 is his only phone (Wi-Fi only; the Tesla's cellular covers the road) and the Viture glasses plug into it. **The portal is the interface**: `/hud` is
+Drive's page in its hud mode (`templates/drive.html` + `static/drive-app.js`; purple Skippy behind the voice, hub mode like the pods, the apps one key away).
+**OpenViture** (`D:\Aaron\development\viture-android`, app `dev.openviture.test`, local git, no remote) is the only code that reaches the glasses' cameras and head pose,
+so it hosts `/hud` in a WebView on the glasses' display (`window.OpenViture`: `pose frame flash flashClip thermal status steady easeOff record dim`) and the phone goes
+black with one Stop key; it starts when the glasses are plugged in.
+**Skippy-vision** (`portal/vision.py`, `static/vision.js`): the camera key on `/hud` (tap = flash, 600 ms = hold) or the words "snap" / "snap it big time" save a
+MOMENT in the Tabletop bucket (`moments/<id>/`): the page's picture and the phone's cameras, the glasses' three cameras from the host, the pods' and the PC's screens
+from a `flash` job (the bridge shoots them: `services/claude-bridge/flash_screens.py`, `POST /flash/screens`), the Tesla's Drive page (it joins a young moment), and a
+hold's 7 s before + 3 s after as one zip. Stills stay for ever, clips 90 days unless kept (`tools/nightly.py` asks `POST /home/vision/sweep`). Forget (the trash key,
+10 s) and Keep; **Your chats > Moments** lists them. After a flash the glasses' frame is read for writing that is not English (`POST /vision/read`, captions that turn into
+English word by word) and described in one sentence (`POST /vision/look`), both Skippy Core's vision slot (`portal/eyes_client.py`); "read that", "what am I looking at" and
+"steady on / off" (a reading every 5 s while worn in hub mode, eased off by the heat) never reach Skippy. Heard speech in another language is a caption too (`#heard`).
+purple's tools: `vision_flash`, `vision_moment`. Everything here is the Captain's alone.
+**The glasses' sign-in** (`portal/authlink.py`): the WebView has no cookies, so "Sign the glasses in" (a key shown only in a normal browser) mints a one-time link
+(5 min, one use, HMAC-bound, kept in the bucket, redeemable only by a browser whose user agent says `OpenViture/`, a Discord DM each time it is used) and opens
+OpenViture's `HudLinkActivity` with it (`intent://`, else copy/share). `/hud` also holds the screen awake and its strip has a battery lamp (the host adds the heat: at
+SEVERE or worse the camera eases off to 10 fps). Tests: `portal/tests/test_vision.py`, `test_auth_link.py`, `test_hud.py`, `portal/tests/js/vision.test.js`,
+`services/purple-tools/tests/test_vision_tools.py`, `services/claude-bridge/tests/test_flash_screens.py`.
+
 ## The Tabletop (Heroes of Chance, `/tabletop`)
 
 The Captain's Daggerheart campaign (the lore is in `../heroes-of-chance`), as one page: a card per hero along the top, the Fear in the

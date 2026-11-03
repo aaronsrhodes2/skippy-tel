@@ -470,6 +470,35 @@ JSON and on the page, never an error; a stumbling Gmail keeps showing the last g
 - **Purple** has `texts_latest_code` (`services/purple-tools`, machine door `GET /home/texts/code`): the code, who sent it and how long ago, or why there is none.
 - Tests: `portal/tests/test_texts.py` (parsing, cache, fresh, every failure, the doors), `portal/tests/js/texts.test.js`, `services/purple-tools/tests/test_texts_tool.py`.
 
+## The glasses: `/hud`, Skippy-vision and the sign-in link (the Captain's phone and Viture glasses, `/hud`: admin only)
+
+The S23 is his only phone and the Viture glasses plug into it; the portal is the interface. `/hud` is Drive's page in its hud mode (`templates/drive.html`,
+`static/drive-app.js`): Drive's keys, purple Skippy behind the voice (the agent; his conversation is kept in the browser two hours), a hands-off hub mode like the pods, the apps
+one key away, a battery lamp in the strip, and the screen kept awake. On the glasses the same page runs inside OpenViture's WebView (`viture-android`, `HudHostActivity`), which
+adds `window.OpenViture` (head pose, the RGB frame, a flash of all three cameras with the 7 s ring buffer, heat, an easing-off switch, a recorder and, on glasses that have one, a dimmer).
+
+**Skippy-vision** saves a *moment*, the screens and cameras of everything involved at one instant:
+
+| What | Where it comes from |
+|---|---|
+| the page and the phone's cameras | the page, with the flash (`POST /vision/flash`, JPEGs under 3 MB, names checked against a list, bytes against their magic number) |
+| the glasses' RGB + stereo pair | the host's `OpenViture.flash(hold)` |
+| the pods' and the PC's screens | a `flash` job: the home reporter asks the bridge (`POST /flash/screens`, `services/claude-bridge/flash_screens.py`), each file comes back with `PUT /home/media/<job>?name=` |
+| the Tesla's Drive page | `/drive` polls `GET /vision/moments?since=` and adds its own picture to a young moment (`POST /vision/moment/<id>/file?name=drive-page.jpg`) |
+| a hold's clip | 3.2 s after a hold, the host's `flashClip()` (7 s before, 3 s after, one zip) |
+
+A moment is `moments/<UTC id>/` in the Tabletop bucket with an `index.json` `{id, at, by, hold, kept, files, seen, said, pending}`. Stills stay for ever; the clip goes after 90 days unless he pressed
+Keep (`tools/nightly.py` calls `POST /home/vision/sweep`). After a flash the glasses' frame (else the phone's) is read for writing that is not English and described in one sentence, both Skippy Core's
+vision slot through `portal/eyes_client.py` (`POST /vision/read` and `/vision/look`, `?moment=` keeps the answer); a sign becomes a caption that turns into English word by word (`#heard`, the same
+animation as heard speech). Words that never reach Skippy: "snap" (a flash), "snap it big time" / "hold it" (a hold), "read that", "what am I looking at", "steady on" / "steady off" (a reading
+every 5 s while worn in hub mode; it stops by itself at a SEVERE thermal status). Forget (the trash key, 10 s) and Keep act at once; **Your chats > Moments** lists them (Forget waits 10 s to be undone).
+purple's tools: `vision_flash` (the pods and the PC) and `vision_moment` (list, or save one moment's pictures into `.purple-out/`).
+
+**The sign-in link** (`portal/authlink.py`): the WebView has no cookies. In a normal browser `/hud` shows "Sign the glasses in", which `POST /auth/link/new`s (an admin, with the `X-Link` header) a link
+`<nonce>.<mac>` and opens OpenViture's `HudLinkActivity` with it (`intent://makerportal.live/auth/link?t=...` on Android Chrome; else copy / share). `GET /auth/link?t=` is public but only an
+OpenViture user agent can spend it; the link is good for 5 minutes or one use, kept in the bucket (`auth-links/`), HMAC-bound to the portal's secret key, rate limited per address, refused if the bucket
+cannot confirm the spend or the minter is no longer an admin, and every use is a Discord DM.
+
 ## Nagatha's Video Service (the Captain's films, `/video`)
 
 The Captain's Jellyfin library on skippy-pc (285 films, 11 collections) in any browser: a phone, a laptop, a TV browser. Admin only,
