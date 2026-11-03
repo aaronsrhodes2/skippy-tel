@@ -22,8 +22,8 @@
         {% if id == 'google' %}{% set lamp = ('warn' if google.missing else 'on') if google.connected else ('warn' if google.broken else 'off') %}{% endif %}
         <div class="unit named" {% if lamp %}data-s="{{ lamp }}"{% endif %} style="--i: {{ loop.index0 }}">
           <i class="plate"></i>
-          {% if id == 'status' %}<a class="hit" href="{{ url_for('status.page') }}" aria-label="{{ label }}" title="{{ label }}"></a>
-          {% else %}<button type="button" class="hit" data-pane="{{ id }}" aria-label="{{ label }}" title="{{ label }}"></button>{% endif %}
+          {% if id == 'status' %}<a class="hit" href="{{ url_for('status.page') }}" aria-label="{{ label }}" title="{{ label }}" data-tel="admin:{{ id }}"></a>
+          {% else %}<button type="button" class="hit" data-pane="{{ id }}" aria-label="{{ label }}" title="{{ label }}" data-tel="admin:{{ id }}"></button>{% endif %}
           <i class="claws"><b></b><b></b><b></b></i>
           {% if lamp %}<span class="lamp"></span>{% endif %}
           <svg class="g" aria-hidden="true"><use href="#g-{{ glyph }}"/></svg>
@@ -36,7 +36,7 @@
     <section id="graveyard" class="apane" hidden>
       {# The Graveyard: every module on the launcher, lit when it is there, dark when retired. A retired module leaves the launcher
          (its page still answers at its own address; nothing is deleted); the key beside it revives it. Admin can't be retired. #}
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to Admin" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to Admin" title="Back" data-tel="admin:back-to-admin"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <h2><svg class="g mark" aria-hidden="true"><use href="#g-tomb"/></svg></h2></header>
       <div class="pg"><div class="pg-flow">
         <div class="row" role="list">
@@ -46,7 +46,7 @@
               <input type="hidden" name="action" value="{{ 'revive' if m.retired else 'retire' }}">
               <button type="submit" {% if not m.retirable %}disabled{% endif %} aria-pressed="{{ 'false' if m.retired else 'true' }}"
                       aria-label="{{ ('Revive ' if m.retired else 'Retire ') ~ m.label }}" title="{{ ('Revive ' if m.retired else 'Retire ') ~ m.label }}"
-                      class="modkey{{ ' retired' if m.retired }}">
+                      class="modkey{{ ' retired' if m.retired }}" data-tel="admin:power">
                 <svg class="g" style="width:22px;height:22px" aria-hidden="true"><use href="#g-{{ m.glyph }}"/></svg>
                 <svg class="g" style="width:14px;height:14px" aria-hidden="true"><use href="#g-power"/></svg>
               </button>
@@ -68,7 +68,7 @@
             {% if e.kind == 'retire' and e.id in retired_now %}
             <form class="inline" method="post" action="{{ url_for('admin.module_switch') }}">
               <input type="hidden" name="id" value="{{ e.id }}"><input type="hidden" name="action" value="revive">
-              <button type="submit" class="key sm" aria-label="Revive {{ e.label }}" title="Revive {{ e.label }} (and keep it)"><svg class="g" aria-hidden="true"><use href="#g-power"/></svg></button>
+              <button type="submit" class="key sm" aria-label="Revive {{ e.label }}" title="Revive {{ e.label }} (and keep it)" data-tel="admin:revive"><svg class="g" aria-hidden="true"><use href="#g-power"/></svg></button>
             </form>
             {% elif e.kind == 'merge' %}<i class="tidy-note">suggestion</i>{% endif %}
           </li>
@@ -80,7 +80,7 @@
     </section>
 
     <section id="server" class="apane" hidden>
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to Admin" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to Admin" title="Back" data-tel="admin:back-to-admin"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-server"/></svg><h2>Server</h2></header>
       <div class="pg"><div class="pg-flow">
         {% if error %}
@@ -89,7 +89,7 @@
           <p><strong>{{ status.status }}</strong> &middot; {{ status.machine_type }}
              &middot; games: {{ status.games | join(', ') or 'none' }} &middot; <code class="code">{{ status.external_ip }}</code></p>
           <form class="inline" method="post" action="{{ url_for('admin.restart') }}">
-            <button type="submit">Restart &amp; update</button>
+            <button type="submit" data-tel="admin:restart-amp-update">Restart &amp; update</button>
           </form>
           <a class="button" href="{{ url_for('admin.logs') }}">Server logs</a>
           <p class="help">Restarting applies saved settings and pulls the latest server images and game
@@ -101,7 +101,7 @@
 
     {# Outside the `status` block on purpose: recovery matters most when something is broken, the VM API included. #}
     <section id="recovery-pane" class="apane" hidden>
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to Admin" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to Admin" title="Back" data-tel="admin:back-to-admin"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-past"/></svg><span class="title">Recovery</span></header>
       <div class="pg"><div class="pg-flow">
         {% include "_recovery.html" %}
@@ -112,7 +112,7 @@
     {# Connect Google for Skippy (google_link.py): his calendar, mail, contacts and tasks, read only, for the morning and bedtime
        routines on skippy-pc. Outside the `status` block: it has nothing to do with the games VM. #}
     <section id="google" class="apane" hidden>
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to Admin" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to Admin" title="Back" data-tel="admin:back-to-admin"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-globe"/></svg><h2>Google for Skippy</h2></header>
       <div class="pg"><div class="pg-flow">
         <div class="card" id="google-link">
@@ -128,7 +128,7 @@
           <p><a class="button" href="{{ url_for('google_link.connect') }}">Connect Google for Skippy</a></p>
           {% if google.connected or google.broken %}
             <form class="inline" method="post" action="{{ url_for('google_link.disconnect') }}">
-              <button type="submit">Disconnect</button>
+              <button type="submit" data-tel="admin:disconnect">Disconnect</button>
             </form>
           {% endif %}
           <p class="help">Uses this portal's own Google sign-in: Google asks once for read-only calendar, Gmail, contacts and tasks, with
@@ -146,7 +146,7 @@
             <label class="field" for="nest_project">Device Access project ID</label>
             <input type="text" id="nest_project" name="project" value="{{ google.nest_project or '' }}" autocomplete="off"
                    placeholder="12345678-abcd-...">
-            <p><button type="submit">Save</button></p>
+            <p><button type="submit" data-tel="admin:save">Save</button></p>
           </form>
         </div>
       </div></div>
@@ -155,7 +155,7 @@
 
     {% if status %}
     <section id="setup" class="apane" hidden>
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to Admin" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to Admin" title="Back" data-tel="admin:back-to-admin"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-wand"/></svg><h2>Set up automatically</h2></header>
       <div class="pg"><div class="pg-flow">
         <div class="card">
@@ -169,7 +169,7 @@
                    placeholder="leave blank to only fill in what's missing">
             <p class="help">Typing one replaces the join passwords of every game that has one (Valheim, Dragonwilds, SkippyVerse).
               At least 5 characters. Applies the next time the server boots.</p>
-            <p><button type="submit">Set up automatically</button></p>
+            <p><button type="submit" data-tel="admin:set-up-automatically">Set up automatically</button></p>
           </form>
         </div>
       </div></div>
@@ -177,7 +177,7 @@
     </section>
 
     <section id="settings" class="apane" hidden>
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to Admin" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to Admin" title="Back" data-tel="admin:back-to-admin"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-cog"/></svg><h2>Settings</h2></header>
       <div class="pg"><div class="pg-flow">
         <form method="post" action="{{ url_for('admin.settings') }}">
@@ -196,14 +196,14 @@
               {% endfor %}
             </div>
           {% endfor %}
-          <button type="submit">Save settings</button>
+          <button type="submit" data-tel="admin:save-settings">Save settings</button>
         </form>
       </div></div>
       <div class="pips" hidden><i></i></div>
     </section>
 
     <section id="friends" class="apane" hidden>
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to Admin" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to Admin" title="Back" data-tel="admin:back-to-admin"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-user"/></svg><h2>Friends</h2></header>
       <div class="pg"><div class="pg-flow">
         <p class="help">Anyone with a Google account for that email can sign in (Gmail or not). Friends see
@@ -224,12 +224,12 @@
               {% if r.note %}<p class="help">&ldquo;{{ r.note }}&rdquo;</p>{% endif %}
               {% for id, name in portals.items() %}
                 <label class="chip">
-                  <input type="checkbox" name="portals" value="{{ id }}" {{ 'checked' if id in r.tick }}> {{ name }}
+                  <input type="checkbox" name="portals" value="{{ id }}" {{ 'checked' if id in r.tick }} data-tel="admin:portals"> {{ name }}
                 </label>
               {% endfor %}
               <p class="row fr-acts">
-                <button type="submit">Approve</button>
-                <button type="submit" class="danger" formaction="{{ url_for('admin.requests_dismiss') }}">Dismiss</button>
+                <button type="submit" data-tel="admin:approve">Approve</button>
+                <button type="submit" class="danger" formaction="{{ url_for('admin.requests_dismiss') }}" data-tel="admin:dismiss">Dismiss</button>
               </p>
             </form>
           {% endfor %}
@@ -241,15 +241,15 @@
             <p><b>{{ f.email }}</b> <span class="help">added {{ f.added }} by {{ f.added_by }}</span></p>
             {% for id, name in portals.items() %}
               <label class="chip">
-                <input type="checkbox" name="portals" value="{{ id }}" {{ 'checked' if id in f.portals }}> {{ name }}
+                <input type="checkbox" name="portals" value="{{ id }}" {{ 'checked' if id in f.portals }} data-tel="admin:portals"> {{ name }}
               </label>
             {% endfor %}
             <p class="row fr-acts">
-              <button type="submit">Save access</button>
-              <a class="btn" href="{{ f.mailto }}">Invite ✉</a>
-              <button type="button" data-copy="{{ f.invite_text }}" title="The same note, on the clipboard: paste it into Discord or a text">Copy invite</button>
+              <button type="submit" data-tel="admin:save-access">Save access</button>
+              <a class="btn" href="{{ f.mailto }}" data-tel="admin:invite">Invite ✉</a>
+              <button type="button" data-copy="{{ f.invite_text }}" title="The same note, on the clipboard: paste it into Discord or a text" data-tel="admin:the-same-note-on">Copy invite</button>
               <button type="submit" class="danger" formaction="{{ url_for('admin.friends_remove') }}"
-                      data-email="{{ f.email }}">Remove</button>
+                      data-email="{{ f.email }}" data-tel="admin:remove">Remove</button>
             </p>
           </form>
         {% else %}
@@ -262,10 +262,10 @@
           <p class="help">What they get:</p>
           {% for id, name in portals.items() %}
             <label class="chip">
-              <input type="checkbox" name="portals" value="{{ id }}" {{ 'checked' if id in ('dragonwilds', 'skippy', 'experiments') }}> {{ name }}
+              <input type="checkbox" name="portals" value="{{ id }}" {{ 'checked' if id in ('dragonwilds', 'skippy', 'experiments') }} data-tel="admin:portals"> {{ name }}
             </label>
           {% endfor %}
-          <p><button type="submit">Add friend</button></p>
+          <p><button type="submit" data-tel="admin:add-friend">Add friend</button></p>
         </form>
         <p class="help">Always in, with every game (deploy config): {{ core | join(', ') }}</p>
       </div></div>
@@ -273,7 +273,7 @@
     </section>
 
     <section id="discord" class="apane" hidden>
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to Admin" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to Admin" title="Back" data-tel="admin:back-to-admin"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-talk"/></svg><h2>Discord</h2></header>
       <div class="pg"><div class="pg-flow">
         {% for id, game in games.items() %}
@@ -285,7 +285,7 @@
         {% endfor %}
         {% if bot_configured %}
           <form method="post" action="{{ url_for('admin.discord_setup') }}">
-            <button type="submit">Set up / repair Discord channels</button>
+            <button type="submit" data-tel="admin:set-up-repair-discord">Set up / repair Discord channels</button>
           </form>
           <p class="help">Creates a text + voice channel per game under "Game Servers", a webhook, and a
             pinned status post. Safe to run again.</p>

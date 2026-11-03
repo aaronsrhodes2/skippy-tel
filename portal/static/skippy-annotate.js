@@ -93,7 +93,7 @@
     hint.textContent = "Drag to draw. Each mark is numbered; say what each colour asks for in your message.";
     wrap.append(bar, hint, stage); document.body.appendChild(wrap);
     const marks = []; let tool = "arrow", color = "red", draft = null;
-    const key = (label, title, on) => { const b = document.createElement("button"); b.type = "button"; b.textContent = label; b.title = b.ariaLabel = title; b.addEventListener("click", on); return b; };
+    const key = (label, title, on) => { const b = document.createElement("button"); b.type = "button"; b.dataset.tel = "annotate:" + title.toLowerCase().split(":")[0].replace(/[^a-z0-9]+/g, "-"); b.textContent = label; b.title = b.ariaLabel = title; b.addEventListener("click", on); return b; };
     const tools = [key("↗", "Arrow", () => pick("arrow")), key("▢", "Box", () => pick("box"))];
     const swatches = COLORS.map(c => { const b = key("", "Colour: " + c.name, () => paint(c.name)); b.className = "sw"; const i = document.createElement("i"); i.style.background = c.hex; b.append(i); b.dataset.c = c.name; return b; });
     const sp = document.createElement("span"); sp.className = "sp";

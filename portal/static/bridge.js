@@ -202,7 +202,7 @@
     if (pips && pips.parentNode) {
       ["prev", "next"].forEach(function (dir) {
         var k = document.createElement("button");
-        k.type = "button"; k.className = "key sm pg-key pg-" + dir; k.hidden = true;
+        k.type = "button"; k.className = "key sm pg-key pg-" + dir; k.hidden = true; k.setAttribute("data-tel", "pager:" + dir);
         k.setAttribute("aria-label", dir === "prev" ? "Previous page" : "Next page"); k.title = k.getAttribute("aria-label");
         k.innerHTML = '<svg class="g" aria-hidden="true"><use href="#' + (dir === "prev" ? "g-back" : "g-chev") + '"/></svg>';
         k.addEventListener("click", function () { go(page + (dir === "prev" ? -1 : 1)); });

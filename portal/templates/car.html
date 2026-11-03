@@ -23,7 +23,7 @@
     <div class="deck" style="--rows: 1; --rows-wide: 1; --rows-side: 1">
       <div class="unit named" data-s="{{ 'idle' if car.state == 'no_car' else ('warn' if car.state == 'signed_out' else 'off') }}" title="{{ {'no_home': 'skippy-pc is not reporting', 'no_teslamate': 'TeslaMate is not running on skippy-core', 'no_car': 'Sign in to Tesla in TeslaMate', 'signed_out': 'Tesla signed TeslaMate out: nothing is logged. Sign in again'}[car.state] }}">
         <i class="plate"></i>
-        {% if car.state in ('no_car', 'signed_out') and car.sign_in %}<a class="hit" href="{{ car.sign_in }}" target="_blank" rel="noopener" aria-label="Sign in to Tesla"></a>{% endif %}
+        {% if car.state in ('no_car', 'signed_out') and car.sign_in %}<a class="hit" href="{{ car.sign_in }}" target="_blank" rel="noopener" aria-label="Sign in to Tesla" data-tel="car:sign-in-to-tesla"></a>{% endif %}
         <i class="claws"><b></b><b></b><b></b></i>
         <span class="lamp"></span>
         <svg class="g" aria-hidden="true"><use href="#g-{{ 'in' if car.state in ('no_car', 'signed_out') else 'car' }}"/></svg>

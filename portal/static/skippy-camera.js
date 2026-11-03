@@ -81,7 +81,7 @@
       view = video = note = null; key.classList.remove("lit"); key.setAttribute("aria-pressed", "false");
     }
     function button(glyph, label, cls, onClick) {
-      const b = doc.createElement("button"); b.type = "button"; b.className = "key " + cls; b.title = label; b.setAttribute("aria-label", label);
+      const b = doc.createElement("button"); b.type = "button"; b.className = "key " + cls; b.dataset.tel = "camera:" + cls.split(" ")[0]; b.title = label; b.setAttribute("aria-label", label);
       const s = doc.createElementNS("http://www.w3.org/2000/svg", "svg"); s.setAttribute("class", "g"); s.setAttribute("aria-hidden", "true");
       const u = doc.createElementNS("http://www.w3.org/2000/svg", "use"); u.setAttribute("href", "#g-" + glyph); s.appendChild(u); b.appendChild(s);
       b.addEventListener("click", (e) => { e.stopPropagation(); onClick(); }); return b;

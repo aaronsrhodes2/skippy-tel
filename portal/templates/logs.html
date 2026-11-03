@@ -11,7 +11,7 @@
   <header class="ahead" style="padding-top:6px">
     <svg class="g mark" aria-hidden="true"><use href="#g-server"/></svg>
     <h2>{{ game.name ~ ' logs' if game else 'Server logs' }}</h2>
-    <a class="key" href="{{ url_for('admin.logs', game=game.id) if game else url_for('admin.logs') }}" aria-label="Reload" title="Reload"><svg class="g" aria-hidden="true"><use href="#g-retry"/></svg></a>
+    <a class="key" href="{{ url_for('admin.logs', game=game.id) if game else url_for('admin.logs') }}" aria-label="Reload" title="Reload" data-tel="logs:reload"><svg class="g" aria-hidden="true"><use href="#g-retry"/></svg></a>
   </header>
   <p class="help" style="margin:4px 2px">Read from the VM's serial ports; passwords are masked. The container snapshot
     refreshes every 2 minutes while the server runs.

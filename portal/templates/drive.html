@@ -78,31 +78,31 @@
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
       <svg class="g" aria-hidden="true"><use href="#g-book"/></svg>
       <span class="name" id="k-book-t"></span>
-      <button class="hit" type="button" aria-label="Play my audiobook"></button>
+      <button class="hit" type="button" aria-label="Play my audiobook" data-tel="drive:play-my-audiobook"></button>
     </div>
     <div class="unit named" id="k-disc" style="--accent: var(--pink); --i: 1">
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
       <svg class="g" aria-hidden="true"><use href="#g-shuffle"/></svg><svg class="g sub" aria-hidden="true"><use href="#g-globe"/></svg>
       <span class="name" id="k-disc-t"></span>
-      <button class="hit" type="button" aria-label="Bilby Shuffle: discovery (songs you have not heard)"></button>
+      <button class="hit" type="button" aria-label="Bilby Shuffle: discovery (songs you have not heard)" data-tel="drive:bilby-shuffle"></button>
     </div>
     <div class="unit named" id="k-lib" style="--accent: var(--pink); --i: 2">
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
       <svg class="g" aria-hidden="true"><use href="#g-shuffle"/></svg><svg class="g sub" aria-hidden="true"><use href="#g-star"/></svg>
       <span class="name" id="k-lib-t"></span>
-      <button class="hit" type="button" aria-label="Bilby Shuffle: library (my favorites)"></button>
+      <button class="hit" type="button" aria-label="Bilby Shuffle: library (my favorites)" data-tel="drive:bilby-shuffle"></button>
     </div>
     <div class="unit named" id="k-skippy" style="--accent: var(--green); --i: 3">
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
       <span class="face" aria-hidden="true"><img src="{{ url_for('static', filename='skippy/skippy-head.png') }}" alt="" width="256" height="256"><canvas width="480" height="480"></canvas></span>
-      <button class="hit voice" type="button" aria-label="Skippy"><svg style="display:none" aria-hidden="true"><use href="#g-ear"/></svg></button>
+      <button class="hit voice" type="button" aria-label="Skippy" data-tel="drive:skippy"><svg style="display:none" aria-hidden="true"><use href="#g-ear"/></svg></button>
     </div>
     <div class="unit" id="k-play" style="--i: 4">
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
       <span class="pair"><svg class="g" aria-hidden="true"><use id="k-play-g" href="#g-play"/></svg><svg class="g" aria-hidden="true"><use id="k-next-g" href="#g-next"/></svg></span>
       <i class="split"></i>
-      <button class="hit play" type="button" aria-label="Play or pause"></button>
-      <button class="hit next" type="button" aria-label="Next song, or 30 seconds on in the book"></button>
+      <button class="hit play" type="button" aria-label="Play or pause" data-tel="drive:play-or-pause"></button>
+      <button class="hit next" type="button" aria-label="Next song, or 30 seconds on in the book" data-tel="drive:next-song-or-30"></button>
     </div>
     <div class="unit" id="k-fav" style="--accent: var(--amber); --i: 5">
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
@@ -112,7 +112,7 @@
     <div class="unit" id="k-house" style="--accent: var(--green); --i: 6">
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
       <span class="lamps">{% for id, glyph, name in lamps %}<i data-lamp="{{ id }}" title="{{ name }}"><svg class="g" aria-hidden="true"><use href="#g-{{ glyph }}"/></svg></i>{% endfor %}</span>
-      <button class="hit" type="button" aria-label="The house: what is up and reachable"></button>
+      <button class="hit" type="button" aria-label="The house: what is up and reachable" data-tel="drive:the-house"></button>
     </div>
   </div>
   <div id="vstatus" hidden></div>

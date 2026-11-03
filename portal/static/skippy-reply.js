@@ -46,7 +46,7 @@
     const doc = o.doc || document, scope = o.scope, bodies = o.bodies;
     const SVG = "http://www.w3.org/2000/svg";
     const key = doc.createElement("button");
-    key.type = "button"; key.className = "key sm reply-key"; key.hidden = true;
+    key.type = "button"; key.className = "key sm reply-key"; key.hidden = true; key.dataset.tel = "chat:reply";
     key.title = key.ariaLabel = "Reply to this";
     const s = doc.createElementNS(SVG, "svg"); s.setAttribute("class", "g"); s.setAttribute("aria-hidden", "true");
     const u = doc.createElementNS(SVG, "use"); u.setAttribute("href", "#g-reply"); s.appendChild(u); key.appendChild(s);

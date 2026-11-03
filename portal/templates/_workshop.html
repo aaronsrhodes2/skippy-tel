@@ -142,14 +142,14 @@
     {% endif %}
   {% endif %}
   <div class="ps-bar">
-    <select id="ps-project" aria-label="Folder" title="Which project or folder the agent works in (fixed once a conversation has a message)">
+    <select id="ps-project" aria-label="Folder" title="Which project or folder the agent works in (fixed once a conversation has a message)" data-tel="workshop:ps-project">
       {% for p in workshop_projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
       <option value="__new__">＋ New folder</option>
     </select>
-    <select id="ps-brain" aria-label="Brain" title="Who thinks: Claude (paid), or Skippy Core's coder (local, free). Fixed once a conversation has a message.">
+    <select id="ps-brain" aria-label="Brain" title="Who thinks: Claude (paid), or Skippy Core's coder (local, free). Fixed once a conversation has a message." data-tel="workshop:ps-brain">
       {% for b in workshop_brains %}<option value="{{ b.id }}"{% if not b.ready %} disabled{% endif %}>{{ b.label }}{% if not b.ready %} (offline){% endif %}</option>{% endfor %}
     </select>
-    <button type="button" id="ps-convs-btn">Conversations</button>
+    <button type="button" id="ps-convs-btn" data-tel="workshop:ps-convs-btn">Conversations</button>
     <button type="button" id="ps-copyall" data-tel="chat:copy"{% if 'copy' in (chat_buried or []) %} hidden{% endif %} title="Copy this whole conversation as markdown">Copy chat</button>
     {# A Discord DM to the Captain when a run ends (portal/notify.py). Off when the portal has no Discord bot. #}
     <label class="notify"{% if 'notify' in (chat_buried or []) %} hidden{% endif %}><input type="checkbox" id="ps-notify" data-tel="chat:notify"{% if not workshop_notify_ready %} disabled title="The portal has no Discord bot (DISCORD_BOT_TOKEN)"{% endif %}> Discord me when done</label>
@@ -157,7 +157,7 @@
     {# New folder: D:\Aaron\development\<name>, a git repo, and the private GitHub repo aaronsrhodes2/<name> (made on skippy-pc) #}
     <form class="newfolder" id="ps-newfolder" hidden>
       <input type="text" id="ps-newfolder-name" aria-label="New folder name" placeholder="new-project-name" maxlength="40" autocomplete="off" spellcheck="false">
-      <button type="submit" id="ps-newfolder-go">Make it</button>
+      <button type="submit" id="ps-newfolder-go" data-tel="workshop:ps-newfolder-go">Make it</button>
       <span class="msg" id="ps-newfolder-msg" role="status"></span>
     </form>
   </div>
@@ -170,8 +170,8 @@
     <div id="ps-quiet-msg"></div>
     <div class="hint" id="ps-quiet-hint" hidden>You can send a new message now; this one will be left waiting.</div>
     <div class="qbtns">
-      <button type="button" id="ps-check">Check again</button>
-      <button type="button" id="ps-reload" hidden>Reload page</button>
+      <button type="button" id="ps-check" data-tel="workshop:ps-check">Check again</button>
+      <button type="button" id="ps-reload" hidden data-tel="workshop:ps-reload">Reload page</button>
     </div>
   </div>
   <form id="ps-form">
@@ -181,13 +181,13 @@
     <textarea id="ps-text" rows="2" maxlength="8000" placeholder="Message Skippy"></textarea>
     <div class="actions">
       <input type="file" id="ps-file" accept="image/*" multiple hidden>
-      <button type="button" class="key vk" id="ps-img" aria-label="Attach an image" title="Attach an image (or paste or drop one)"><svg class="g" aria-hidden="true"><use href="#g-image"/></svg></button>
-      <button type="button" class="key vk ear" id="ps-ear" aria-pressed="false" aria-label="Standby: listen for Skippy" title="Standby: listen for Skippy"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg><i class="lamp"></i></button>
-      <button type="button" class="key vk mic" id="ps-mic" aria-label="Speak your message" title="Speak your message"><svg class="g" aria-hidden="true"><use href="#g-mic"/></svg><i class="lamp"></i></button>
-      <button type="button" class="key vk spk" id="ps-spk" aria-pressed="false" aria-label="Read replies aloud" title="Read replies aloud"><svg class="g" aria-hidden="true"><use href="#g-vol"/></svg><i class="lamp"></i></button>
-      <button type="submit" class="send" id="ps-send">Send</button>
-      <button type="button" id="ps-stop" hidden class="danger">Stop</button>
-      <button type="button" id="ps-new">New chat</button>
+      <button type="button" class="key vk" id="ps-img" aria-label="Attach an image" title="Attach an image (or paste or drop one)" data-tel="workshop:ps-img"><svg class="g" aria-hidden="true"><use href="#g-image"/></svg></button>
+      <button type="button" class="key vk ear" id="ps-ear" aria-pressed="false" aria-label="Standby: listen for Skippy" title="Standby: listen for Skippy" data-tel="workshop:ps-ear"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg><i class="lamp"></i></button>
+      <button type="button" class="key vk mic" id="ps-mic" aria-label="Speak your message" title="Speak your message" data-tel="workshop:ps-mic"><svg class="g" aria-hidden="true"><use href="#g-mic"/></svg><i class="lamp"></i></button>
+      <button type="button" class="key vk spk" id="ps-spk" aria-pressed="false" aria-label="Read replies aloud" title="Read replies aloud" data-tel="workshop:ps-spk"><svg class="g" aria-hidden="true"><use href="#g-vol"/></svg><i class="lamp"></i></button>
+      <button type="submit" class="send" id="ps-send" data-tel="workshop:ps-send">Send</button>
+      <button type="button" id="ps-stop" hidden class="danger" data-tel="workshop:ps-stop">Stop</button>
+      <button type="button" id="ps-new" data-tel="workshop:ps-new">New chat</button>
     </div>
   </form>
 </div>

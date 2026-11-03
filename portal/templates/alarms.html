@@ -34,32 +34,32 @@
 <section id="alarms" data-state-url="{{ url_for('alarms.state') }}" data-do-url="{{ url_for('alarms.do') }}">
   <div class="deck" id="alarm-deck" style="--rows: 1"></div>
   <div class="pager" id="alarm-pager" hidden>
-    <button class="key sm" type="button" id="pg-prev" aria-label="Earlier"><svg class="g"><use href="#g-prev"/></svg></button>
+    <button class="key sm" type="button" id="pg-prev" aria-label="Earlier" data-tel="alarms:pg-prev"><svg class="g"><use href="#g-prev"/></svg></button>
     <span id="pg-n"></span>
-    <button class="key sm" type="button" id="pg-next" aria-label="Later"><svg class="g"><use href="#g-next"/></svg></button>
+    <button class="key sm" type="button" id="pg-next" aria-label="Later" data-tel="alarms:pg-next"><svg class="g"><use href="#g-next"/></svg></button>
   </div>
 </section>
 <div id="add-sheet" hidden>
   <div class="panel">
     <div class="top">
-      <button class="key" type="button" id="add-close" aria-label="Close"><svg class="g"><use href="#g-x"/></svg></button>
+      <button class="key" type="button" id="add-close" aria-label="Close" data-tel="alarms:add-close"><svg class="g"><use href="#g-x"/></svg></button>
     </div>
     <input type="time" id="add-time" value="06:30" aria-label="Time">
     <div class="row" id="add-days" aria-label="Days (none: once)">
-      {% for d, l in [('mon','M'),('tue','T'),('wed','W'),('thu','T'),('fri','F'),('sat','S'),('sun','S')] %}<button type="button" class="chip" data-day="{{ d }}" aria-label="{{ d }}">{{ l }}</button>{% endfor %}
+      {% for d, l in [('mon','M'),('tue','T'),('wed','W'),('thu','T'),('fri','F'),('sat','S'),('sun','S')] %}<button type="button" class="chip" data-day="{{ d }}" aria-label="{{ d }}" data-tel="alarms:day">{{ l }}</button>{% endfor %}
     </div>
     <div class="row" id="add-where">
-      <button type="button" class="chip on" data-where="upstairs" aria-label="Upstairs"><svg class="g"><use href="#g-up"/></svg></button>
-      <button type="button" class="chip" data-where="downstairs" aria-label="Downstairs"><svg class="g"><use href="#g-down"/></svg></button>
-      <button type="button" class="chip" data-where="everywhere" aria-label="Everywhere"><svg class="g"><use href="#g-home"/></svg></button>
+      <button type="button" class="chip on" data-where="upstairs" aria-label="Upstairs" data-tel="alarms:upstairs"><svg class="g"><use href="#g-up"/></svg></button>
+      <button type="button" class="chip" data-where="downstairs" aria-label="Downstairs" data-tel="alarms:downstairs"><svg class="g"><use href="#g-down"/></svg></button>
+      <button type="button" class="chip" data-where="everywhere" aria-label="Everywhere" data-tel="alarms:everywhere"><svg class="g"><use href="#g-home"/></svg></button>
     </div>
     <input type="text" id="add-label" maxlength="60" placeholder="…" aria-label="Label">
     <div class="row">
-      <button type="button" class="chip" id="add-set" aria-label="Set the alarm"><svg class="g"><use href="#g-bell"/></svg><svg class="g"><use href="#g-send"/></svg></button>
+      <button type="button" class="chip" id="add-set" aria-label="Set the alarm" data-tel="alarms:add-set"><svg class="g"><use href="#g-bell"/></svg><svg class="g"><use href="#g-send"/></svg></button>
     </div>
     <div class="row" id="add-timer" aria-label="Start a timer">
       <svg class="g" style="width:22px;height:22px;color:var(--accent)" aria-hidden="true"><use href="#g-clock"/></svg>
-      {% for m in [1, 5, 10, 15, 30, 60] %}<button type="button" class="chip" data-min="{{ m }}" aria-label="{{ m }} minute timer">{{ m }}</button>{% endfor %}
+      {% for m in [1, 5, 10, 15, 30, 60] %}<button type="button" class="chip" data-min="{{ m }}" aria-label="{{ m }} minute timer" data-tel="alarms:minute-timer">{{ m }}</button>{% endfor %}
     </div>
   </div>
 </div>
@@ -75,12 +75,12 @@
   const left = (due) => { const s = Math.max(0, Math.round(due - Date.now() / 1000)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
                           return h ? `${h}:${String(m).padStart(2, "0")}:${String(x).padStart(2, "0")}` : `${m}:${String(x).padStart(2, "0")}`; };
   const unit = (o) => `<div class="unit named${o.cls ? " " + o.cls : ""}"${o.s ? ` data-s="${o.s}"` : ""} title="${esc(o.title)}">
-      <i class="plate"></i>${o.op ? `<button class="hit" type="button" data-op="${o.op}" aria-label="${esc(o.title)}"></button>` : ""}
+      <i class="plate"></i>${o.op ? `<button data-tel="alarms:esc" class="hit" type="button" data-op="${o.op}" aria-label="${esc(o.title)}"></button>` : ""}
       <i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
       ${o.sub ? `<span class="sub">${esc(o.sub)}</span>` : ""}
       ${o.big ? `<span class="big">${esc(o.big)}</span>` : `<svg class="g" aria-hidden="true"><use href="#g-${o.glyph}"/></svg>`}
       ${o.name ? `<span class="name">${esc(o.name)}</span>` : ""}
-      ${o.x ? `<button class="key sm x" type="button" data-op="${o.x}" aria-label="Cancel"><svg class="g"><use href="#g-trash"/></svg></button>` : ""}</div>`;
+      ${o.x ? `<button data-tel="alarms:cancel" class="key sm x" type="button" data-op="${o.x}" aria-label="Cancel"><svg class="g"><use href="#g-trash"/></svg></button>` : ""}</div>`;
 
   function render() {
     if (!S) return;

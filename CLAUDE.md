@@ -157,7 +157,9 @@ Actions (the sandbox can't reach GCP or run.app directly):
 - **Toggles are hexagons, clickers have the cut corner** (the Captain, 2026-11-02): a toggle (`aria-pressed`) has two looks only, lit or dark;
   a clicker breathes while busy (`SkippyKeys.busy`, `static/keys.js`); a lamp shows only when it has a state (docs/portal/README.md → The lamps).
   **The portal tidies itself** nightly from its telemetry (`portal/adaptive.py` + `tools/adaptive_ui.py`): prune, launcher order, merge
-  suggestions, one change per surface a week, each undone in Admin > Graveyard (a hand revive pins it). Give every new control a `data-tel`.
+  suggestions, one change per surface a week, each undone in Admin > Graveyard (a hand revive pins it). Every control carries a `data-tel`
+  (test_tel_coverage.py fails without one) and any of them can fall off, except floors (back, close, send, play...) and **media, which
+  never falls off** (songs, books, films, games, demos, list rows).
   **Before adding a control, look in the Graveyard** (the Captain, 2026-11-02): `python tools/adaptive_ui.py --graveyard <words>` lists the
   retired controls like it, with why each went. If one does the job, revive it (and say so) instead of adding a new one. Then ask first
   whether the system could make that decision itself instead (choices are a tax on every visit: decide, act, say it, one-tap undo).

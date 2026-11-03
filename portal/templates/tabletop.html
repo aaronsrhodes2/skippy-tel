@@ -22,13 +22,13 @@
   <div class="notice" id="tt-notice" role="status" hidden></div>
 
   <div class="bp-top">
-    <button type="button" class="tt-fear" id="tt-fear" aria-label="Fear" title="Fear: the GM's, kept from session to session">
+    <button type="button" class="tt-fear" id="tt-fear" aria-label="Fear" title="Fear: the GM's, kept from session to session" data-tel="tabletop:tt-fear">
       <svg class="g" aria-hidden="true"><use href="#g-flame"/></svg><span id="tt-fear-n">–</span></button>
     <h1 class="tt-title"><span class="tt-campaign">{{ title }}</span></h1>
-    {% if gm %}<button type="button" class="key" id="tt-vis-key" aria-label="New cards start shown" title="New cards start shown"><svg class="g" aria-hidden="true"><use href="#g-eye"/></svg></button>{% endif %}
-    <button type="button" class="key" id="tt-note-key" aria-label="Pin a note" title="Pin a note" disabled><svg class="g" aria-hidden="true"><use href="#g-talk"/></svg></button>
-    <button type="button" class="key" id="tt-pic-key" aria-label="Pin a picture" title="Pin a picture" disabled><svg class="g" aria-hidden="true"><use href="#g-image"/></svg></button>
-    <button type="button" class="key" id="tt-fit-key" aria-label="Show the whole board" title="Show the whole board" disabled><svg class="g" aria-hidden="true"><use href="#g-fit"/></svg></button>
+    {% if gm %}<button type="button" class="key" id="tt-vis-key" aria-label="New cards start shown" title="New cards start shown" data-tel="tabletop:tt-vis-key"><svg class="g" aria-hidden="true"><use href="#g-eye"/></svg></button>{% endif %}
+    <button type="button" class="key" id="tt-note-key" aria-label="Pin a note" title="Pin a note" disabled data-tel="tabletop:tt-note-key"><svg class="g" aria-hidden="true"><use href="#g-talk"/></svg></button>
+    <button type="button" class="key" id="tt-pic-key" aria-label="Pin a picture" title="Pin a picture" disabled data-tel="tabletop:tt-pic-key"><svg class="g" aria-hidden="true"><use href="#g-image"/></svg></button>
+    <button type="button" class="key" id="tt-fit-key" aria-label="Show the whole board" title="Show the whole board" disabled data-tel="tabletop:tt-fit-key"><svg class="g" aria-hidden="true"><use href="#g-fit"/></svg></button>
     <input type="file" id="tt-file" accept="image/*" multiple hidden>
   </div>
 
@@ -48,8 +48,8 @@
   <div class="sheet" id="tt-card" role="dialog" aria-modal="true" aria-label="Card" hidden>
     <div class="tt-sheet-top">
       <span class="tt-by" id="tt-card-by"></span><span class="grow"></span>
-      <button type="button" class="key sm danger" id="tt-card-del" aria-label="Take it down" title="Take it down"><svg class="g" aria-hidden="true"><use href="#g-trash"/></svg></button>
-      <button type="button" class="key sm" data-close aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
+      <button type="button" class="key sm danger" id="tt-card-del" aria-label="Take it down" title="Take it down" data-tel="tabletop:tt-card-del"><svg class="g" aria-hidden="true"><use href="#g-trash"/></svg></button>
+      <button type="button" class="key sm" data-close aria-label="Close" title="Close" data-tel="tabletop:close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
     </div>
     <div class="tt-card-pic" id="tt-card-pic"></div>
     <input type="text" id="tt-card-title" maxlength="80" placeholder="A title (optional)" aria-label="Title of the note" autocomplete="off">
@@ -57,14 +57,14 @@
     <div class="tt-inks" id="tt-inks" role="radiogroup" aria-label="Ink"></div>
     {% if gm %}{# the GM's: who sees this card #}
     <div class="tt-vis" id="tt-card-vis" role="radiogroup" aria-label="Who sees this card">
-      <button type="button" class="key sm" role="radio" data-vis="shown" aria-label="Shown to everyone" title="Shown to everyone"><svg class="g" aria-hidden="true"><use href="#g-eye"/></svg></button>
-      <button type="button" class="key sm" role="radio" data-vis="fog" aria-label="Fogged: the players see a fog patch and nothing of what it is" title="Fogged: the players see a fog patch and nothing of what it is"><svg class="g" aria-hidden="true"><use href="#g-fog"/></svg></button>
-      <button type="button" class="key sm" role="radio" data-vis="hidden" aria-label="Hidden: a GM-only note, the players can't see it" title="Hidden: a GM-only note, the players can't see it"><svg class="g" aria-hidden="true"><use href="#g-hide"/></svg></button>
+      <button type="button" class="key sm" role="radio" data-vis="shown" aria-label="Shown to everyone" title="Shown to everyone" data-tel="tabletop:shown-to-everyone"><svg class="g" aria-hidden="true"><use href="#g-eye"/></svg></button>
+      <button type="button" class="key sm" role="radio" data-vis="fog" aria-label="Fogged: the players see a fog patch and nothing of what it is" title="Fogged: the players see a fog patch and nothing of what it is" data-tel="tabletop:fogged"><svg class="g" aria-hidden="true"><use href="#g-fog"/></svg></button>
+      <button type="button" class="key sm" role="radio" data-vis="hidden" aria-label="Hidden: a GM-only note, the players can't see it" title="Hidden: a GM-only note, the players can't see it" data-tel="tabletop:hidden"><svg class="g" aria-hidden="true"><use href="#g-hide"/></svg></button>
     </div>
     {% endif %}
     <div class="tt-sheet-bottom">
       <span class="grow"></span>
-      <button type="button" class="key" id="tt-card-save" aria-label="Pin it" title="Pin it"><svg class="g" aria-hidden="true"><use href="#g-send"/></svg></button>
+      <button type="button" class="key" id="tt-card-save" aria-label="Pin it" title="Pin it" data-tel="tabletop:tt-card-save"><svg class="g" aria-hidden="true"><use href="#g-send"/></svg></button>
     </div>
   </div>
 
@@ -73,11 +73,11 @@
   <div class="sheet" id="tt-newhero" role="dialog" aria-modal="true" aria-label="Add a hero" hidden>
     <div class="tt-sheet-top">
       <svg class="g" aria-hidden="true"><use href="#g-party"/></svg><span class="tt-by">A new hero</span><span class="grow"></span>
-      <button type="button" class="key sm" data-close aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
+      <button type="button" class="key sm" data-close aria-label="Close" title="Close" data-tel="tabletop:close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
     </div>
     <form class="tt-new" id="tt-hero-new">
       <input type="text" id="tt-hero-new-name" maxlength="80" placeholder="The hero's name" aria-label="The hero's name" autocomplete="off">
-      <button type="submit" class="key" aria-label="Add the hero" title="Add the hero"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
+      <button type="submit" class="key" aria-label="Add the hero" title="Add the hero" data-tel="tabletop:add-the-hero"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
     </form>
   </div>
   {% endif %}
@@ -90,13 +90,13 @@
       <span class="tt-save" id="tt-save" aria-live="polite"></span>
       <span class="grow"></span>
       <div class="tt-tabs" role="tablist">
-        <button type="button" class="key sm" role="tab" data-tab="sheet" aria-label="Character sheet" title="Character sheet"><svg class="g" aria-hidden="true"><use href="#g-sheet"/></svg></button>
-        <button type="button" class="key sm" role="tab" data-tab="project" aria-label="Current project" title="Current project"><svg class="g" aria-hidden="true"><use href="#g-clock"/></svg></button>
-        <button type="button" class="key sm" role="tab" data-tab="folder" aria-label="Folder" title="Folder"><svg class="g" aria-hidden="true"><use href="#g-folder"/></svg></button>
+        <button type="button" class="key sm" role="tab" data-tab="sheet" aria-label="Character sheet" title="Character sheet" data-tel="tabletop:character-sheet"><svg class="g" aria-hidden="true"><use href="#g-sheet"/></svg></button>
+        <button type="button" class="key sm" role="tab" data-tab="project" aria-label="Current project" title="Current project" data-tel="tabletop:current-project"><svg class="g" aria-hidden="true"><use href="#g-clock"/></svg></button>
+        <button type="button" class="key sm" role="tab" data-tab="folder" aria-label="Folder" title="Folder" data-tel="tabletop:folder"><svg class="g" aria-hidden="true"><use href="#g-folder"/></svg></button>
       </div>
-      <button type="button" class="key sm" id="tt-hero-av-key" aria-label="Choose the avatar: a picture from your device" title="Choose the avatar: a picture from your device" hidden><svg class="g" aria-hidden="true"><use href="#g-user"/></svg></button>
-      <a class="key sm" id="tt-hero-print" target="_blank" rel="noopener" aria-label="Print the sheet" title="Print the sheet"><svg class="g" aria-hidden="true"><use href="#g-print"/></svg></a>
-      <button type="button" class="key sm" data-close aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
+      <button type="button" class="key sm" id="tt-hero-av-key" aria-label="Choose the avatar: a picture from your device" title="Choose the avatar: a picture from your device" hidden data-tel="tabletop:tt-hero-av-key"><svg class="g" aria-hidden="true"><use href="#g-user"/></svg></button>
+      <a class="key sm" id="tt-hero-print" target="_blank" rel="noopener" aria-label="Print the sheet" title="Print the sheet" data-tel="tabletop:tt-hero-print"><svg class="g" aria-hidden="true"><use href="#g-print"/></svg></a>
+      <button type="button" class="key sm" data-close aria-label="Close" title="Close" data-tel="tabletop:close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
     </div>
     <div class="pg tt-hero-pg" id="tt-hero-pg"><div class="pg-flow" id="tt-hero-flow"></div></div>
     <div class="pips"><i></i></div>
@@ -110,13 +110,13 @@
     <canvas id="tt-fear-fx" aria-hidden="true"></canvas>
     <div class="tt-sheet-top">
       <svg class="g" aria-hidden="true"><use href="#g-flame"/></svg><span class="tt-by">Fear</span><span class="grow"></span>
-      <button type="button" class="key sm" data-close aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
+      <button type="button" class="key sm" data-close aria-label="Close" title="Close" data-tel="tabletop:close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
     </div>
     <div class="tt-fear-big"><span id="tt-fear-big">0</span><small>/ 12</small></div>
     <div class="tt-fear-pips" id="tt-fear-pips"></div>
     <div class="tt-sheet-bottom tt-fear-keys">
-      <button type="button" class="key" id="tt-fear-down" aria-label="Spend a Fear" title="Spend a Fear"><svg class="g" aria-hidden="true"><use href="#g-down"/></svg></button>
-      <button type="button" class="key" id="tt-fear-up" aria-label="Gain a Fear" title="Gain a Fear"><svg class="g" aria-hidden="true"><use href="#g-up"/></svg></button>
+      <button type="button" class="key" id="tt-fear-down" aria-label="Spend a Fear" title="Spend a Fear" data-tel="tabletop:tt-fear-down"><svg class="g" aria-hidden="true"><use href="#g-down"/></svg></button>
+      <button type="button" class="key" id="tt-fear-up" aria-label="Gain a Fear" title="Gain a Fear" data-tel="tabletop:tt-fear-up"><svg class="g" aria-hidden="true"><use href="#g-up"/></svg></button>
     </div>
   </div>
 </section>

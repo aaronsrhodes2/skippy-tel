@@ -60,7 +60,7 @@ def script(page: str) -> str:
 
 def test_the_card_carries_the_resync_url_the_check_again_button_and_the_notes(page):
     assert 'RESYNC = "/me/workshop/resync"' in page                           # url_for('me.workshop_resync'), rendered
-    assert re.search(r'<button type="button" id="ps-check">Check again</button>', page)
+    assert re.search(r'<button type="button" id="ps-check" data-tel="workshop:ps-check">Check again</button>', page)
     js = script(page)
     for phrase in ("No word from skippy-pc for ", "It reconnects by itself; this can take a minute after a deploy.",
                    "hasn't picked this up for ", "Can't reach the portal (", "Your sign-in to the portal ended.",

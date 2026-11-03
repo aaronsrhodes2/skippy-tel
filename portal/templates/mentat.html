@@ -15,8 +15,8 @@
       <svg class="g" aria-hidden="true"><use href="#g-search"/></svg>
       <input type="search" id="search" placeholder="Search" aria-label="Search about 220 tools (for example orbit, lens, pH)" autocomplete="off" autocapitalize="off" spellcheck="false">
     </div>
-    <button type="button" class="key" id="domain-key" aria-label="Domain: All" title="Domain: All"><svg class="g" aria-hidden="true"><use href="#g-tools"/></svg></button>
-    <button type="button" class="key" id="about-key" aria-label="About" title="About"><svg class="g" aria-hidden="true"><use href="#g-info"/></svg></button>
+    <button type="button" class="key" id="domain-key" aria-label="Domain: All" title="Domain: All" data-tel="mentat:domain-key"><svg class="g" aria-hidden="true"><use href="#g-tools"/></svg></button>
+    <button type="button" class="key" id="about-key" aria-label="About" title="About" data-tel="mentat:about-key"><svg class="g" aria-hidden="true"><use href="#g-info"/></svg></button>
   </div>
   <div class="bp-stage" id="stage">
     <div class="bp-list" id="listwrap">
@@ -28,7 +28,7 @@
 
     <div class="sheet" id="about" role="dialog" aria-modal="true" aria-labelledby="about-h" hidden>
       <div class="s-head"><h2 id="about-h" class="grow">Mentat</h2>
-        <button type="button" class="key" id="about-close" aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></div>
+        <button type="button" class="key" id="about-close" aria-label="Close" title="Close" data-tel="mentat:about-close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></div>
       <div class="pg" id="about-pg"><div class="pg-flow">
         <p>Every tool in Aaron's physics engine, live. Each answer comes back with the formula used and where its
           numbers come from, which is the point: no unsourced numbers.
@@ -40,7 +40,7 @@
 
     <div class="sheet" id="toolsheet" role="dialog" aria-modal="true" aria-labelledby="tool-h" hidden>
       <div class="s-head"><h2 id="tool-h" class="grow"></h2>
-        <button type="button" class="key" id="tool-close" aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></div>
+        <button type="button" class="key" id="tool-close" aria-label="Close" title="Close" data-tel="mentat:tool-close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></div>
       <div class="pg" id="tool-pg"><div class="pg-flow" id="tool"></div></div>
       <div class="pips" id="tool-pips" hidden><i></i></div>
     </div>

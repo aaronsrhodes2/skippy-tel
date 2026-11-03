@@ -21,6 +21,7 @@ changes nothing, a failed write is reported.
 from __future__ import annotations
 
 import json
+import re
 import time
 
 import modules as modules_mod
@@ -40,6 +41,29 @@ SURFACES = ("chat", "launcher", "me")
 # counted them: only the chat's keys, which have all been on its bar for months. A launcher tile can be a day old (Alarms was, the
 # night this started: "never tapped, on screen 27 days" was wrong), so tiles and panes wait for their own MIN_DAYS of seen.
 STAND_IN = frozenset({"chat"})
+
+# Every other control with a telemetry id (Bilby's back-one-song key, a sheet's key, a deck tile built by script) can be retired too
+# (the Captain, 2026-11-02): it is hidden on every page (base.html, from hidden()) and listed in the Graveyard as ctl:<id>. Its own
+# days on screen must reach MIN_DAYS (no stand-in), and one per page goes per week. Never: media and what a page needs to work.
+MEDIA = re.compile(r"^(tile|tray|pane|play|demo|copy|seen):")   # content (game cards, games, demos, rows) and its helpers: "media does NOT
+                                                                # fall off" (the Captain); tile/tray/pane are the Graveyard's modules
+FLOOR_CTL = re.compile(r"^(base|pager|admin|login|request-access|unauthorized|recovery|join|voice|skippy3d|annotate):"
+                       r"|(?:^|[:-])(back|close|home|send|stop|play|pause|toggle|cancel|esc|sign-in|sign-out|privacy|fs-key)$"
+                       r"|:back-to-|:(voice|mode|chats|apps)$")
+APP_NAMES = {"music": "Bilby", "video": "Nagatha", "books": "Audiobooks", "audiobooks": "Audiobooks", "drive": "Drive", "chat": "Chat",
+             "workshop": "Private Skippy", "alarms": "Alarms", "tabletop": "Tabletop", "game": "Game page", "games": "Game servers",
+             "me": "Dashboard", "status": "Status", "experiments": "Experiments", "camera": "Camera"}
+CTL_ID = re.compile(r"[a-z0-9:_.\-]{1,60}")
+
+
+def control_label(name: str) -> str:
+    app, _, rest = name.partition(":")
+    return f"{APP_NAMES.get(app, app.title())}: {rest.replace('-', ' ')}"
+
+
+def retirable_control(name: str) -> bool:
+    """A telemetry name the tidy may retire as a control: not a module (the Graveyard's own), not media, not a floor."""
+    return bool(CTL_ID.fullmatch(name)) and ":" in name and not module_of_name(name) and not MEDIA.match(name) and not FLOOR_CTL.search(name)
 
 
 def surface_of(module_id: str) -> str:
@@ -68,7 +92,7 @@ def module_of_name(name: str) -> str | None:
 
 
 def empty_state() -> dict:
-    return {"ledger": [], "pins": [], "order": [], "last": {}}
+    return {"ledger": [], "pins": [], "order": [], "last": {}, "hidden": []}
 
 
 def _usage(stats: dict, module_id: str, surface: str) -> tuple[int, int, float | None]:
@@ -118,6 +142,25 @@ def decide(stats: dict, retired: frozenset, state: dict, now: float) -> list[dic
             ago = f", the last {round(last_tap)} days ago" if taps and last_tap is not None and last_tap >= 1 else ""
             changes.append({"kind": "retire", "id": m.id, "surface": surface, "label": m.label,
                             "why": f"{when}{ago}, on screen {seen} of them"})
+
+    # any other control: the least used on each page, one a week, on its own days on screen only
+    hidden = set(state.get("hidden") or [])
+    per_page: dict[str, list] = {}
+    for name, c in (stats.get("controls") or {}).items():
+        if name in hidden or "ctl:" + name in pins or not retirable_control(name):
+            continue
+        seen, taps = int(c.get("seen_days") or 0), int(c.get("taps") or 0)
+        if seen < MIN_DAYS or taps / seen > PRUNE_RATE:
+            continue
+        per_page.setdefault(name.split(":", 1)[0], []).append((taps / seen, taps, name, seen, c.get("last_days")))
+    for page, cands in sorted(per_page.items()):
+        if cooling("page:" + page):
+            continue
+        rate, taps, name, seen, last_tap = min(cands)
+        when = "never tapped" if not taps else f"{_plural(taps, 'tap')} in {window} days"
+        ago = f", the last {round(last_tap)} days ago" if taps and last_tap is not None and last_tap >= 1 else ""
+        changes.append({"kind": "retire", "id": "ctl:" + name, "surface": "page:" + page, "label": control_label(name),
+                        "why": f"{when}{ago}, on screen {seen} of them"})
 
     # promote: the launcher's order, one move a week
     if not cooling("launcher-order"):
@@ -201,6 +244,10 @@ class Adaptive:
     def order(self) -> list[str]:
         return launcher_order(self.state())
 
+    def hidden(self) -> list[str]:
+        """The controls (telemetry ids) retired outside the module list: base.html hides them on every page."""
+        return [h for h in self.state().get("hidden") or [] if CTL_ID.fullmatch(h)]
+
     def ledger(self, limit: int = 12) -> list[dict]:
         """The latest changes, newest first, each with `when` for the page ("Nov 02")."""
         return [{**e, "when": time.strftime("%b %d", time.localtime(float(e.get("at") or 0)))}
@@ -214,17 +261,26 @@ class Adaptive:
         retired = self.modules.retired()
         changes = []
         for mid in approved or []:
+            if mid.startswith("ctl:"):
+                name = mid[4:]
+                if retirable_control(name) and name not in st["hidden"]:
+                    c = (stats.get("controls") or {}).get(name) or {}
+                    changes.append({"kind": "retire", "id": mid, "surface": None, "label": control_label(name),
+                                    "why": f"the Captain approved it ({_plural(int(c.get('taps') or 0), 'tap')} in {int(stats.get('window_days') or WINDOW_DAYS)} days)"})
+                continue
             m = modules_mod.BY_ID.get(mid)
             if m and m.retirable and mid not in FLOOR and mid not in retired:
                 taps, seen, _ = _usage(stats, mid, surface_of(mid))
                 changes.append({"kind": "retire", "id": mid, "surface": None, "label": m.label,
                                 "why": f"the Captain approved it ({_plural(taps, 'tap')} in {int(stats.get('window_days') or WINDOW_DAYS)} days)"})
         for c in changes:                                      # what he approved is this week's change on its surface
-            st["last"][surface_of(c["id"])] = now
+            st["last"]["page:" + c["id"][4:].split(":", 1)[0] if c["id"].startswith("ctl:") else surface_of(c["id"])] = now
         changes += decide(stats, retired | {c["id"] for c in changes}, st, now)
         done = []
         for c in changes:
-            if c["kind"] == "retire":
+            if c["kind"] == "retire" and c["id"].startswith("ctl:"):
+                st["hidden"].append(c["id"][4:])
+            elif c["kind"] == "retire":
                 self.modules.retire(c["id"])
             elif c["kind"] == "order":
                 order = launcher_order(st)
@@ -239,6 +295,26 @@ class Adaptive:
         st["last"]["run"] = now
         self._save(st)
         return done
+
+    def revive_control(self, ctl_id: str) -> None:
+        """Back on every page (ctl:<telemetry id>), and pinned: the tidy never retires it again."""
+        name = ctl_id[4:] if ctl_id.startswith("ctl:") else ctl_id
+        st = self._fresh()
+        st["hidden"] = [h for h in st["hidden"] if h != name]
+        if "ctl:" + name not in st["pins"]:
+            st["pins"].append("ctl:" + name)
+        self._save(st)
+
+    def retire_control(self, ctl_id: str) -> None:
+        """By hand from the Graveyard: hidden everywhere, and the pin taken away."""
+        name = ctl_id[4:] if ctl_id.startswith("ctl:") else ctl_id
+        if not retirable_control(name):
+            raise KeyError(ctl_id)
+        st = self._fresh()
+        if name not in st["hidden"]:
+            st["hidden"].append(name)
+        st["pins"] = [p for p in st["pins"] if p != "ctl:" + name]
+        self._save(st)
 
     def pin(self, module_id: str) -> None:
         """He revived it by hand: never pruned again. (Retiring it by hand takes the pin away.)"""

@@ -11,10 +11,10 @@
   {% endif %}
   <div class="stage">
     {% if is_admin %}
-    <div class="continuing" hidden><span></span><button type="button" class="key sm drop-ctx" aria-label="Stop continuing this conversation" title="Stop continuing this conversation"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></div>
+    <div class="continuing" hidden><span></span><button type="button" class="key sm drop-ctx" aria-label="Stop continuing this conversation" title="Stop continuing this conversation" data-tel="chat:stop-continuing-this-conversation"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></div>
     {% endif %}
     <div class="log" aria-live="polite"><div class="flow"></div></div>
-    <button type="button" class="key jump" hidden aria-label="Jump to the latest" title="Jump to the latest (End)"><svg class="g" aria-hidden="true"><use href="#g-down"/></svg><b class="badge"></b></button>
+    <button type="button" class="key jump" hidden aria-label="Jump to the latest" title="Jump to the latest (End)" data-tel="chat:jump-to-the-latest"><svg class="g" aria-hidden="true"><use href="#g-down"/></svg><b class="badge"></b></button>
     {% if captain %}
     {# The permanent Home chat (housechat.py, static/skippy-home.js): the house conversation through the room hubs, words only; opened from the
        first row of Your chats. Its composer is this chat's box: "say to Skippy" (as if spoken in the room) or "make Skippy say". #}
@@ -22,12 +22,12 @@
       <div class="home-bar">
         <span class="home-title"><svg class="g" aria-hidden="true"><use href="#g-home"/></svg>Home</span>
         <span class="home-modes" role="group" aria-label="What the box does" style="display:contents">
-          <button type="button" class="key sm" data-mode="say" aria-pressed="true" aria-label="Say to Skippy: as if spoken in the room" title="Say to Skippy: as if spoken in the room"><svg class="g" aria-hidden="true"><use href="#g-talk"/></svg></button>
-          <button type="button" class="key sm" data-mode="announce" aria-pressed="false" aria-label="Make Skippy say this" title="Make Skippy say this"><svg class="g" aria-hidden="true"><use href="#g-vol"/></svg></button>
+          <button type="button" class="key sm" data-mode="say" aria-pressed="true" aria-label="Say to Skippy: as if spoken in the room" title="Say to Skippy: as if spoken in the room" data-tel="chat:say-to-skippy"><svg class="g" aria-hidden="true"><use href="#g-talk"/></svg></button>
+          <button type="button" class="key sm" data-mode="announce" aria-pressed="false" aria-label="Make Skippy say this" title="Make Skippy say this" data-tel="chat:make-skippy-say-this"><svg class="g" aria-hidden="true"><use href="#g-vol"/></svg></button>
         </span>
-        <select class="home-room" aria-label="Which room"><option value="*">all rooms</option></select>
-        <button type="button" class="key sm home-speak" aria-pressed="true" aria-label="Speak aloud" title="Speak aloud (off: the answer only appears here)"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg></button>
-        <button type="button" class="key sm home-forward" aria-pressed="true" aria-label="Forwarding" title="Forwarding"><svg class="g" aria-hidden="true"><use href="#g-eye"/></svg></button>
+        <select class="home-room" aria-label="Which room" data-tel="chat:which-room"><option value="*">all rooms</option></select>
+        <button type="button" class="key sm home-speak" aria-pressed="true" aria-label="Speak aloud" title="Speak aloud (off: the answer only appears here)" data-tel="chat:speak-aloud"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg></button>
+        <button type="button" class="key sm home-forward" aria-pressed="true" aria-label="Forwarding" title="Forwarding" data-tel="chat:forwarding"><svg class="g" aria-hidden="true"><use href="#g-eye"/></svg></button>
       </div>
       <div class="home-state" hidden aria-live="polite"></div>
       <div class="home-flow" aria-live="polite"></div>
@@ -44,7 +44,7 @@
        fallback) = the agent, thinking with Skippy Core's coder or with Claude. Guests have one mode and never see this. #}
     <div class="sheet" data-sheet="brain" hidden>
       <div class="brain-list">{% for m in chat_modes %}
-        <button type="button" class="brain-opt mode-{{ m.theme }}" data-brain="{{ 'agent-' ~ m.agent if m.agent else 'core' }}" data-mode="{{ m.id }}" aria-pressed="false"{% if not m.ready %} disabled{% endif %}><svg class="g" aria-hidden="true"><use href="#g-{{ m.glyph }}"/></svg>{{ m.label }}{% if m.agent == 'claude' %} <span class="paid" title="paid">$</span>{% endif %}<i class="lamp" data-s="{{ 'on' if m.ready else 'off' }}"></i></button>
+        <button type="button" class="brain-opt mode-{{ m.theme }}" data-brain="{{ 'agent-' ~ m.agent if m.agent else 'core' }}" data-mode="{{ m.id }}" aria-pressed="false"{% if not m.ready %} disabled{% endif %} data-tel="chat:mode-{{ m.id }}"><svg class="g" aria-hidden="true"><use href="#g-{{ m.glyph }}"/></svg>{{ m.label }}{% if m.agent == 'claude' %} <span class="paid" title="paid">$</span>{% endif %}<i class="lamp" data-s="{{ 'on' if m.ready else 'off' }}"></i></button>
       {% endfor %}</div>
     </div>
     {% endif %}
@@ -57,17 +57,17 @@
     <div class="sheet" data-sheet="chats" hidden>
       <div class="chats-top">
         <input type="search" class="chats-filter" aria-label="Search your chats" placeholder="Search">
-        <button type="button" class="key sm chats-new" aria-label="New chat" title="New chat"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
+        <button type="button" class="key sm chats-new" aria-label="New chat" title="New chat" data-tel="chat:new-chat"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
       </div>
       {% if is_admin %}
       <div class="chats-kinds" role="group" aria-label="Which chats">
-        <button type="button" data-kind="all" aria-pressed="true">All</button>
-        <button type="button" data-kind="chat" aria-pressed="false"><svg class="g" aria-hidden="true"><use href="#g-can"/></svg>Chats</button>
-        <button type="button" data-kind="agent" aria-pressed="false"><svg class="g" aria-hidden="true"><use href="#g-console"/></svg>Agent</button>
-        <button type="button" data-kind="archive" aria-pressed="false"><svg class="g" aria-hidden="true"><use href="#g-past"/></svg>Archive</button>
+        <button type="button" data-kind="all" aria-pressed="true" data-tel="chat:all">All</button>
+        <button type="button" data-kind="chat" aria-pressed="false" data-tel="chat:can"><svg class="g" aria-hidden="true"><use href="#g-can"/></svg>Chats</button>
+        <button type="button" data-kind="agent" aria-pressed="false" data-tel="chat:console"><svg class="g" aria-hidden="true"><use href="#g-console"/></svg>Agent</button>
+        <button type="button" data-kind="archive" aria-pressed="false" data-tel="chat:past"><svg class="g" aria-hidden="true"><use href="#g-past"/></svg>Archive</button>
       </div>
       {% endif %}
-      {% if is_admin %}<div class="chat-row"><button type="button" class="chat-open chat-home" aria-label="Home: the house conversation"><svg class="g" aria-hidden="true"><use href="#g-home"/></svg><span class="chat-title">Home</span><span class="chat-when">the house, live</span></button></div>{% endif %}
+      {% if is_admin %}<div class="chat-row"><button type="button" class="chat-open chat-home" aria-label="Home: the house conversation" data-tel="chat:home"><svg class="g" aria-hidden="true"><use href="#g-home"/></svg><span class="chat-title">Home</span><span class="chat-when">the house, live</span></button></div>{% endif %}
       <div class="pg"><div class="pg-flow chats-list"></div></div>
       <div class="pips" aria-hidden="true"><i></i></div>
     </div>
@@ -79,7 +79,7 @@
 
   <form class="ask">
     <div class="vstat" hidden aria-live="polite"></div>
-    <div class="editing" hidden><svg class="g" aria-hidden="true"><use href="#g-pen"/></svg><span>Editing your last message</span><button type="button" class="key sm" aria-label="Stop editing" title="Stop editing (Esc)"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></div>
+    <div class="editing" hidden><svg class="g" aria-hidden="true"><use href="#g-pen"/></svg><span>Editing your last message</span><button type="button" class="key sm" aria-label="Stop editing" title="Stop editing (Esc)" data-tel="chat:stop-editing"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></div>
     <div class="queue" hidden aria-live="polite"></div>
     <div class="quotes" hidden></div>   {# the parts of messages this one replies to (static/skippy-reply.js): select words, tap Reply #}
     <div class="files" hidden></div>
@@ -98,7 +98,7 @@
       <button type="button" class="key voice" data-tel="chat:voice" aria-pressed="false" aria-label="Typing: tap to talk" title="Typing: tap to talk"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg><i class="lamp"></i></button>
       <button type="button" class="key" data-open="tools" data-tel="chat:tools"{% if 'tools' in buried %} hidden{% endif %} aria-label="Tools" title="Tools"><svg class="g" aria-hidden="true"><use href="#g-tools"/></svg></button>
       <span class="grow"></span>
-      <button type="button" class="key stopk" hidden aria-label="Stop" title="Stop"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg><i class="lamp" data-s="on"></i></button>
+      <button type="button" class="key stopk" hidden aria-label="Stop" title="Stop" data-tel="chat:stop"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg><i class="lamp" data-s="on"></i></button>
       <button type="submit" class="key send" data-tel="chat:send" aria-label="Send" title="Send (Enter; Shift+Enter for a new line)"><svg class="g" aria-hidden="true"><use href="#g-send"/></svg></button>
     </div>
     <nav class="app-row" aria-label="Apps" hidden></nav>   {# a wide screen keeps the tray as a slim row under the box; a phone has the key #}

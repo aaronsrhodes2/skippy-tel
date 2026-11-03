@@ -192,6 +192,8 @@
   .skippy-chat .continuing { border: 1px solid var(--violet); border-radius: 8px; padding: 6px 10px; margin: 6px 0; font-size: .8rem;
                              display: flex; gap: 8px; align-items: center; justify-content: space-between; }
 </style>
+{% if hidden_controls %}<style>/* retired by the nightly tidy (portal/adaptive.py): revive in Admin > Graveyard */
+{% for h in hidden_controls %}[data-tel="{{ h }}"], .unit:has(> [data-tel="{{ h }}"]){{ ', ' if not loop.last }}{% endfor %} { display: none !important; }</style>{% endif %}
 {% if bridge %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge.css') }}?v={{ (build.built_at if build else 'dev') }}">
 {# in the head and not deferred: a bridge page's own script (the chat's pager) runs before the page ends and needs Bridge #}
 <script src="{{ url_for('static', filename='bridge-pure.js') }}?v={{ (build.built_at if build else 'dev') }}"></script>
@@ -212,23 +214,23 @@
   {% if on_apps %}
     <span class="who" role="img" aria-label="{{ user.name if user else '' }}" title="{{ user.name if user else '' }}">{% if user and user.picture %}<img src="{{ user.picture }}" alt="">{% else %}<svg class="g" aria-hidden="true" style="width:24px;height:24px"><use href="#g-user"/></svg>{% endif %}</span>
   {% elif on_front %}
-    <a class="key" href="{{ url_for('index') }}" aria-label="Home" title="Home"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></a>
+    <a class="key" href="{{ url_for('index') }}" aria-label="Home" title="Home" data-tel="base:home"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></a>
   {% else %}
-    <a class="key" href="{{ (self.hud_back() | trim) or url_for('index') }}" aria-label="Back" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></a>
+    <a class="key" href="{{ (self.hud_back() | trim) or url_for('index') }}" aria-label="Back" title="Back" data-tel="base:back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></a>
   {% endif %}
   <span class="rail"></span>
   {% if (self.glyph() | trim) == 'can' %}<img class="g mark face" src="{{ url_for('static', filename='skippy/skippy-head.png') }}" alt="Skippy" width="28" height="28" style="border-radius:50%">{% else %}<svg class="g mark" aria-hidden="true"><use href="#g-{{ self.glyph() | trim }}"/></svg>{% endif %}
   <span class="rail"></span>
-  <button type="button" class="key" id="fs-key" hidden aria-label="Full screen" title="Full screen"><svg class="g" aria-hidden="true"><use href="#g-fs"/></svg></button>
+  <button type="button" class="key" id="fs-key" hidden aria-label="Full screen" title="Full screen" data-tel="base:fs-key"><svg class="g" aria-hidden="true"><use href="#g-fs"/></svg></button>
   {% if user and is_admin %}
-    <a class="key" href="{{ url_for('admin.index') }}#friends" aria-label="User access" title="User access"><svg class="g" aria-hidden="true"><use href="#g-keys"/></svg></a>
+    <a class="key" href="{{ url_for('admin.index') }}#friends" aria-label="User access" title="User access" data-tel="base:user-access"><svg class="g" aria-hidden="true"><use href="#g-keys"/></svg></a>
   {% endif %}
   {% if user and on_apps %}
-    <a class="key" href="{{ url_for('auth.logout') }}" aria-label="Sign out" title="Sign out"><svg class="g" aria-hidden="true"><use href="#g-out"/></svg></a>
+    <a class="key" href="{{ url_for('auth.logout') }}" aria-label="Sign out" title="Sign out" data-tel="base:sign-out"><svg class="g" aria-hidden="true"><use href="#g-out"/></svg></a>
   {% elif user %}
-    <a class="key" href="{{ url_for('index') }}" aria-label="Home" title="Home"><svg class="g" aria-hidden="true"><use href="#g-home"/></svg></a>
+    <a class="key" href="{{ url_for('index') }}" aria-label="Home" title="Home" data-tel="base:home"><svg class="g" aria-hidden="true"><use href="#g-home"/></svg></a>
   {% else %}
-    <a class="key" href="{{ url_for('index') }}" aria-label="Sign in" title="Sign in"><svg class="g" aria-hidden="true"><use href="#g-in"/></svg></a>
+    <a class="key" href="{{ url_for('index') }}" aria-label="Sign in" title="Sign in" data-tel="base:sign-in"><svg class="g" aria-hidden="true"><use href="#g-in"/></svg></a>
   {% endif %}
 </header>
 <div class="fs-tip" id="fs-tip" hidden role="status"></div>
@@ -274,7 +276,7 @@
 </main>
 {% if bridge %}
 <footer class="foot">
-  <a class="key sm" href="{{ url_for('privacy') }}" aria-label="Privacy: what this site records" title="Privacy: what this site records"><svg class="g" aria-hidden="true"><use href="#g-shield"/></svg></a>
+  <a class="key sm" href="{{ url_for('privacy') }}" aria-label="Privacy: what this site records" title="Privacy: what this site records" data-tel="base:privacy"><svg class="g" aria-hidden="true"><use href="#g-shield"/></svg></a>
   {% if build %}<span class="build" title="{{ build_tip }}">{{ build.short }}</span>{% endif %}
 </footer>
 {% else %}

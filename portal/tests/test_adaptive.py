@@ -144,3 +144,37 @@ def test_an_agent_can_look_in_the_graveyard_before_adding_a_control():
     d = c.get("/home/graveyard", headers=H).get_json()
     assert {"id": "key-attach", "label": "Chat key: Attach", "glyph": "clip"} in d["retired"]
     assert d["ledger"][0]["id"] == "key-attach" and d["ledger"][0]["why"]
+
+
+# ── any control, not only the Graveyard's modules (Bilby's back-one-song key, a deck tile) ──
+def test_any_unused_control_falls_off_one_per_page_a_week_but_never_media_or_a_floor():
+    s = stats({"music:prev": {"taps": 1, "seen_days": 20}, "music:next": {"taps": 30, "seen_days": 20},
+               "music:sleep": {"taps": 0, "seen_days": 20}, "music:play": {"taps": 0, "seen_days": 20},
+               "play:orion-trail": {"taps": 0, "seen_days": 20}, "video:p-subs": {"taps": 0, "seen_days": 9},
+               "drive:play-or-pause": {"taps": 0, "seen_days": 30}})
+    out = [c for c in A.decide(s, frozenset(), A.empty_state(), NOW) if c["id"].startswith("ctl:")]
+    assert [c["id"] for c in out] == ["ctl:music:sleep"]                 # least used on Bilby; play is a floor, a game is media
+    assert out[0]["label"] == "Bilby: sleep"                             # and Nagatha's subtitles key hasn't been on screen 14 days
+    st = A.empty_state(); st["hidden"] = ["music:sleep"]
+    assert [c["id"] for c in A.decide(s, frozenset(), st, NOW) if c["id"].startswith("ctl:")] == ["ctl:music:prev"]
+    st["last"]["page:music"] = NOW - DAY
+    assert not [c for c in A.decide(s, frozenset(), st, NOW) if c["id"].startswith("ctl:")]
+
+
+def test_a_retired_control_is_hidden_listed_and_revived_with_a_pin():
+    vm = Vm(); ad = A.Adaptive(vm, modules_mod.Modules(vm))
+    done = ad.apply(stats({"music:prev": {"taps": 0, "seen_days": 20}}), now=NOW)
+    assert [d["id"] for d in done if d["id"].startswith("ctl:")] == ["ctl:music:prev"] and ad.hidden() == ["music:prev"]
+    ad.revive_control("ctl:music:prev")
+    assert ad.hidden() == [] and "ctl:music:prev" in ad._fresh()["pins"]
+    assert not [d for d in ad.apply(stats({"music:prev": {"taps": 0, "seen_days": 20}}), now=NOW + 8 * DAY) if d["id"] == "ctl:music:prev"]
+    with pytest.raises(KeyError):
+        ad.retire_control("ctl:music:play")                              # a floor can't be retired, even by hand
+
+
+def test_pages_hide_what_the_tidy_retired_and_the_graveyard_brings_it_back():
+    vm = FakeVm(); vm.metadata[A.KEY] = json.dumps({"hidden": ["music:prev"]})
+    app = portal.create_app(dict(SETTINGS), vm=vm, skippy=FakeSkippy())
+    c = app.test_client()
+    H = {"Authorization": f"Bearer {_pair(c)}"}
+    assert {"id": "ctl:music:prev", "label": "Bilby: prev", "glyph": ""} in c.get("/home/graveyard", headers=H).get_json()["retired"]

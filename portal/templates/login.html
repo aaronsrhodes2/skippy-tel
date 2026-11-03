@@ -5,7 +5,7 @@
 <p>Game servers, services, and Skippy — one door.</p>
 <p>Maker Portal is a private home portal for its owner and a few friends: game servers, music and video, and Skippy, a home assistant.
   <a href="{{ url_for('about') }}">About</a> &middot; <a href="{{ url_for('privacy') }}">Privacy</a></p>
-<a class="btn" href="{{ url_for('auth.login') }}">Sign in with Google</a>
+<a class="btn" href="{{ url_for('auth.login') }}" data-tel="login:sign-in-with-google">Sign in with Google</a>
 <p style="margin-top:28px">Just looking? <a href="{{ url_for('experiments.index') }}">See the Experiments &rarr;</a>
   (no sign-in needed)</p>
 {% endblock %}

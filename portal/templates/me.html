@@ -44,7 +44,7 @@
     </div>
 
     <section id="mcp" class="apane" hidden>
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back" data-tel="me:back-to-the-dashboard"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-tools"/></svg><span class="title">MCP</span></header>
       <div class="pg"><div class="pg-flow">
     <div class="w">
@@ -59,7 +59,7 @@
     </section>
 
     <section id="home" class="apane" hidden>
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back" data-tel="me:back-to-the-dashboard"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-link"/></svg><span class="title">Home</span></header>
       <div class="pg"><div class="pg-flow">
     <div class="w">
@@ -67,7 +67,7 @@
       {% if not home.paired %}
         <p class="muted">Not paired yet. Pairing gives the home reporter its own token, so skippy-pc can
           push its status here (outbound only; nothing at home is exposed).</p>
-        <form method="post" action="{{ url_for('me.pair_home') }}"><button type="submit">Pair home</button></form>
+        <form method="post" action="{{ url_for('me.pair_home') }}"><button type="submit" data-tel="me:pair-home">Pair home</button></form>
       {% elif home.age is none %}
         <p class="warn">Paired, waiting for the first report.</p>
         <p class="muted">Reports every ~15 s once the home reporter is running.</p>
@@ -93,7 +93,7 @@
         <p>♪ {% if np %}{{ np.artist }} — {{ np.title }}{% else %}<span class="muted">nothing playing</span>{% endif %}
           · <a href="{{ url_for('music.player_page') }}">Bilby's Audio Service &rarr;</a></p>
         <form method="post" action="{{ url_for('me.pair_home') }}" style="margin-top:6px">
-          <button type="submit" style="padding:3px 10px" title="Makes a new token; the old one stops working">Re-pair</button></form>
+          <button type="submit" style="padding:3px 10px" title="Makes a new token; the old one stops working" data-tel="me:makes-a-new-token">Re-pair</button></form>
       {% endif %}
     </div>
       </div></div>
@@ -102,7 +102,7 @@
 
     {% if 'weather' not in buried %}
     <section id="weather" class="apane" hidden>
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back" data-tel="me:back-to-the-dashboard"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-globe"/></svg><span class="title">Weather and traffic</span></header>
       <div class="pg"><div class="pg-flow">
     {% if not local or local.disabled %}
@@ -144,7 +144,7 @@
 
     {% if 'server' not in buried %}
     <section id="server" class="apane" hidden>
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back" data-tel="me:back-to-the-dashboard"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-server"/></svg><span class="title">Server</span></header>
       <div class="pg"><div class="pg-flow">
     <div class="w">
@@ -162,8 +162,8 @@
           <div class="bar"><div class="{{ 'hot' if res.disk_pct > 80 }}" style="width: {{ res.disk_pct }}%"></div></div>{% endif %}
         {% endif %}
         <div class="row">
-          <a class="btn" href="{{ url_for('dashboard.index') }}">Game Servers</a>
-          <a class="btn" href="{{ url_for('admin.logs') }}">Logs</a>
+          <a class="btn" href="{{ url_for('dashboard.index') }}" data-tel="me:game-servers">Game Servers</a>
+          <a class="btn" href="{{ url_for('admin.logs') }}" data-tel="me:logs">Logs</a>
         </div>
       {% endif %}
     </div>
@@ -174,7 +174,7 @@
 
     {% if 'core' not in buried %}
     <section id="core" class="apane" hidden>
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back" data-tel="me:back-to-the-dashboard"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-core"/></svg><span class="title">Core</span></header>
       <div class="pg"><div class="pg-flow">
     <div class="w">
@@ -204,7 +204,7 @@
 
     {% if 'activity-pane' not in buried %}
     <section id="activity-pane" class="apane" hidden>
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back" data-tel="me:back-to-the-dashboard"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-eye"/></svg><span class="title">Activity</span></header>
       <div class="pg"><div class="pg-flow">
     {% include "_activity.html" %}
@@ -215,7 +215,7 @@
 
     {% if 'watcher' not in buried %}
     <section id="watcher" class="apane" hidden>
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back" data-tel="me:back-to-the-dashboard"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-gauge"/></svg><span class="title">Watcher</span></header>
       <div class="pg"><div class="pg-flow">
     <div class="w">
@@ -231,7 +231,7 @@
 
     {% if 'people' not in buried %}
     <section id="people" class="apane" hidden>
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back" data-tel="me:back-to-the-dashboard"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-user"/></svg><span class="title">People</span></header>
       <div class="pg"><div class="pg-flow">
     <div class="w">
@@ -255,7 +255,7 @@
 
     {% if 'links' not in buried %}
     <section id="links" class="apane" hidden>
-      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back" data-tel="me:back-to-the-dashboard"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
         <svg class="g mark" aria-hidden="true"><use href="#g-globe"/></svg><span class="title">Links</span></header>
       <div class="pg"><div class="pg-flow">
     <div class="w">

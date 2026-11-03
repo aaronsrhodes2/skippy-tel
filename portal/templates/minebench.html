@@ -40,10 +40,10 @@
         {% if r.failed %}<div class="media failed"><p><b>No build.</b> Its code does not run, so MineBench would score nothing:
           <code>{{ r.failed }}</code></p></div>{% else %}<div class="media">
           <figure class="shot"><img class="views" width="1800" height="1320" src="{{ url_for('static', filename='experiments/minebench/' ~ r.id ~ '/views.png') }}" alt="{{ r.title }}: four views" loading="lazy">
-            <button type="button" class="key sm full" data-full title="Full screen" aria-label="Full screen"><svg class="g" aria-hidden="true"><use href="#g-fs"/></svg></button></figure>
+            <button type="button" class="key sm full" data-full title="Full screen" aria-label="Full screen" data-tel="minebench:full-screen"><svg class="g" aria-hidden="true"><use href="#g-fs"/></svg></button></figure>
           <figure class="shot"><model-viewer src="{{ url_for('static', filename='experiments/minebench/' ~ r.id ~ '/model.glb') }}" alt="{{ r.title }}: the build in 3D"
                     camera-controls auto-rotate touch-action="pan-y" shadow-intensity="0.6" exposure="1.1" loading="lazy"></model-viewer>
-            <button type="button" class="key sm full" data-full title="Full screen" aria-label="Full screen"><svg class="g" aria-hidden="true"><use href="#g-fs"/></svg></button></figure>
+            <button type="button" class="key sm full" data-full title="Full screen" aria-label="Full screen" data-tel="minebench:full-screen"><svg class="g" aria-hidden="true"><use href="#g-fs"/></svg></button></figure>
         </div>{% endif %}
         <div class="data">
           <dl class="facts">
@@ -67,10 +67,10 @@
 <div id="mbfull" hidden role="dialog" aria-label="Full screen">
   <div class="stage"></div>
   <div class="bar">
-    <button type="button" class="key sm" data-z="1" title="Zoom in" aria-label="Zoom in"><svg class="g" aria-hidden="true"><use href="#g-zin"/></svg></button>
-    <button type="button" class="key sm" data-z="-1" title="Zoom out" aria-label="Zoom out"><svg class="g" aria-hidden="true"><use href="#g-zout"/></svg></button>
-    <button type="button" class="key sm" data-z="0" title="Fit" aria-label="Fit"><svg class="g" aria-hidden="true"><use href="#g-fit"/></svg></button>
-    <button type="button" class="key sm" data-close title="Close" aria-label="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
+    <button type="button" class="key sm" data-z="1" title="Zoom in" aria-label="Zoom in" data-tel="minebench:zoom-in"><svg class="g" aria-hidden="true"><use href="#g-zin"/></svg></button>
+    <button type="button" class="key sm" data-z="-1" title="Zoom out" aria-label="Zoom out" data-tel="minebench:zoom-out"><svg class="g" aria-hidden="true"><use href="#g-zout"/></svg></button>
+    <button type="button" class="key sm" data-z="0" title="Fit" aria-label="Fit" data-tel="minebench:fit"><svg class="g" aria-hidden="true"><use href="#g-fit"/></svg></button>
+    <button type="button" class="key sm" data-close title="Close" aria-label="Close" data-tel="minebench:close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
   </div>
 </div>
 {% endblock %}

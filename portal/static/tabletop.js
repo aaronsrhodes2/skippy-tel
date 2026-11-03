@@ -120,7 +120,7 @@
       if (vis(c) === "fog") el.appendChild(fogVeil());
       const tag = document.createElement("span"); tag.className = "vtag"; tag.innerHTML = svg(VIS_GLYPH[vis(c)]);
       tag.title = VIS_WORDS[vis(c)]; el.appendChild(tag);
-      const key = document.createElement("button"); key.type = "button"; key.className = "vkey";
+      const key = document.createElement("button"); key.type = "button"; key.className = "vkey"; key.dataset.tel = "tabletop:card-visibility";
       const next = vis(c) === "shown" ? "fog" : "shown";
       key.innerHTML = svg(VIS_GLYPH[next]);
       key.setAttribute("aria-label", next === "shown" ? "Reveal it to the players" : "Fog it");
@@ -294,7 +294,7 @@
   function drawInks(selected, enabled) {
     const box = $("tt-inks"); box.replaceChildren(); box.hidden = !enabled;
     for (const ink of INKS) {
-      const b = document.createElement("button"); b.type = "button"; b.className = "ink-" + ink;
+      const b = document.createElement("button"); b.type = "button"; b.className = "ink-" + ink; b.dataset.tel = "tabletop:ink";
       b.setAttribute("role", "radio"); b.setAttribute("aria-checked", ink === selected ? "true" : "false"); b.setAttribute("aria-label", ink);
       b.addEventListener("click", () => { editing.ink = ink; drawInks(ink, true); });
       box.appendChild(b);

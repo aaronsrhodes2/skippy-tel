@@ -107,7 +107,7 @@
       <span class="lamp" id="p-signal" data-s="on" role="status" aria-label="Connected" title="Connected" hidden></span>
     </div>
     <div class="p-ctl" id="p-ctl">
-      <input type="range" id="p-seek" min="0" max="0" step="1" value="0" aria-label="Position in the film" aria-valuetext="0:00">
+      <input type="range" id="p-seek" min="0" max="0" step="1" value="0" aria-label="Position in the film" aria-valuetext="0:00" data-tel="video:p-seek">
       <div class="p-row">
         <button type="button" class="key big" id="p-play" data-act="toggle" aria-label="Play" title="Play (Space)"><i data-i="play"></i></button>
         <button type="button" class="key" data-act="back10" aria-label="Back 10 seconds" title="Back 10 seconds"><i data-i="back10"></i></button>
@@ -115,7 +115,7 @@
         <span class="p-time" id="p-time" aria-hidden="true">0:00 / 0:00</span>
         <span class="grow"></span>
         <button type="button" class="key" id="p-mute" data-act="mute" aria-label="Mute" aria-pressed="false"><i data-i="vol"></i></button>
-        <input type="range" id="p-vol" class="p-vol" min="0" max="1" step="0.05" value="1" aria-label="Volume">
+        <input type="range" id="p-vol" class="p-vol" min="0" max="1" step="0.05" value="1" aria-label="Volume" data-tel="video:p-vol">
         <button type="button" class="key" id="p-subs" data-act="subs-menu" aria-label="Subtitles" aria-haspopup="menu" hidden><i data-i="cc"></i></button>
         <button type="button" class="key" id="p-audio" data-act="audio-menu" aria-label="Audio track" aria-haspopup="menu" hidden><i data-i="audio"></i></button>
         <button type="button" class="key" id="p-pip" data-act="pip" aria-label="Picture in picture" hidden><i data-i="pip"></i></button>
@@ -143,7 +143,7 @@
       <dt><kbd>/</kbd></dt><dd>Search</dd>
       <dt><kbd>?</kbd></dt><dd>This list</dd>
     </dl>
-    <form method="dialog"><button type="submit" class="key" aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></form>
+    <form method="dialog"><button type="submit" class="key" aria-label="Close" title="Close" data-tel="video:close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></form>
   </dialog>
 </section>
 <script src="{{ url_for('static', filename='nagatha-core.js') }}"></script>

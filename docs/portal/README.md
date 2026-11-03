@@ -731,6 +731,14 @@ skippy-pc's half.
   up one place, one move a week. Skippy's tile stays first.
 - **Merge.** Two controls almost always tapped one after the other (B within 15 s of A on 60% of A's taps, at least 5 times) are written
   down as a candidate. A merge needs code, so it is a suggestion only.
+- **Any control, not only the Graveyard's.** Every control is counted: templates carry `data-tel` (`tools/tel_tag.py` added them;
+  `portal/tests/test_tel_coverage.py` fails on a new control without one), and a key a script builds is named `<app>:<act>` (or
+  `<app>:deck-<u>`) by `static/keys.js`. The least-used control on each page goes after 14 days of its own on screen, one per
+  page a week. It is hidden on every page (base.html, from `Adaptive.hidden()`) and listed in the Graveyard as `ctl:<id>`.
+- **Media never falls off** (the Captain): songs, books, films, game cards, browser games, demos and every row or cell in a list
+  are content. Their taps are counted, but only controls are tidied (`adaptive.MEDIA`).
+- **Floors, never retired** (`adaptive.FLOOR_CTL`): Back, Close, Home, Send, Stop, Play/Pause, the voice key, sign in and out, the
+  pager, and the Admin, sign-in and access pages.
 - **Never touched:** Admin, Skippy's tile, and anything revived by hand. A revive in the Graveyard pins it; retiring it by hand takes
   the pin away.
 - **Where you see it:** Admin > Graveyard > "Tidied by use" lists each change, its reason and a Revive key. The overnight report

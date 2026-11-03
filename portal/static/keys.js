@@ -3,6 +3,7 @@
  *  SkippyKeys.busy(el, work): a CLICKER whose job takes a moment (a shuffle loading the library, a favorite being saved) carries
  *    data-busy while `work` (a promise, or a function returning one) runs, and at least BUSY_MIN_MS so a quick one is still seen.
  *    Resolves with what the work resolved with; rejects as it did.
+ *  Names: a key built by script with a data-act gets data-tel="<app>:<act>" (the beacon counts it, the tidy may retire it).
  *  The lamps: a unit's lamp (bridge.css, data-s) gets its meaning in the unit's tooltip, so a hover or a long press says it.
  */
 (function (root) {
@@ -38,14 +39,30 @@
     if (title) unit.setAttribute("title", title); else unit.removeAttribute("title");
   }
 
+  // Keys a script builds with a data-act (Bilby's transport, Nagatha's, Audiobooks') are named <app>:<act> here, as they appear, so
+  // every key is counted and the nightly tidy can retire it (adaptive.py). Only keys: a list's rows and cells are media, never named.
+  // A deck built by script (Bilby's and Nagatha's Home) names each unit's hit by its data-u: <app>:deck-<u>.
+  const KEY_SEL = ["key", "mkey", "clear", "b-now"].map(c => "button." + c + "[data-act]:not([data-tel])")
+    .concat(["button.hit[data-u]:not([data-tel])"]).join(", ");
+  function name(el) {
+    const doc = root.document, app = (doc.body && doc.body.dataset.app) || (root.location.pathname.split("/")[1] || "home");
+    el.setAttribute("data-tel", app + ":" + (el.dataset.act || "deck-" + el.dataset.u));
+  }
+  function nameKeys(scope) {
+    if (scope.matches && scope.matches(KEY_SEL)) name(scope);
+    if (scope.querySelectorAll) scope.querySelectorAll(KEY_SEL).forEach(name);
+  }
+
   function watchLamps() {
     if (!root.document || !root.MutationObserver) return;
+    nameKeys(root.document);
     root.document.querySelectorAll(".unit").forEach(lampTitle);
     new root.MutationObserver(function (changes) {
       for (const c of changes) {
         if (c.type === "attributes" && c.target.classList && c.target.classList.contains("unit")) lampTitle(c.target);
         else if (c.type === "childList") c.addedNodes.forEach(function (n) {
           if (n.nodeType !== 1) return;
+          nameKeys(n);
           if (n.classList.contains("unit")) lampTitle(n);
           n.querySelectorAll && n.querySelectorAll(".unit").forEach(lampTitle);
         });
@@ -53,7 +70,7 @@
     }).observe(root.document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-s"] });
   }
 
-  root.SkippyKeys = { busy: busy, LAMP: LAMP, BUSY_MIN_MS: BUSY_MIN_MS };
+  root.SkippyKeys = { busy: busy, LAMP: LAMP, BUSY_MIN_MS: BUSY_MIN_MS, KEY_SEL: KEY_SEL };
   if (root.document) {
     if (root.document.readyState === "loading") root.document.addEventListener("DOMContentLoaded", watchLamps);
     else watchLamps();

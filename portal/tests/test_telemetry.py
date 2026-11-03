@@ -468,7 +468,8 @@ def test_every_tile_id_the_templates_carry_is_one_the_dashboard_knows():
     import modules
     seen = set()
     for name in ("games.html", "play.html", "experiments.html"):
-        seen |= set(re.findall(r'data-tel="([^"{]+)"', (TEMPLATES / name).read_text(encoding="utf-8")))
+        seen |= {t for t in re.findall(r'data-tel="([^"{]+)"', (TEMPLATES / name).read_text(encoding="utf-8"))
+                 if t.split(":")[0] in ("tile", "play", "demo")}         # tiles and demos; every other control has its own id too
     # the launcher is built from the module registry: one tile per module, its id the tap id (templates/home.html)
     assert 'data-tel="tile:{{ t.id }}"' in (TEMPLATES / "home.html").read_text(encoding="utf-8")
     assert {m.id for m in modules.MODULES if not m.pane} == set(telemetry_web.LAUNCHER_TILES)

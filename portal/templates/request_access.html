@@ -12,13 +12,13 @@
   {% if not who %}
     <p>The game servers are for {{ switch_owner }}'s friends.{% if game_name %} You came for <b>{{ game_name }}</b>.{% endif %}
       Sign in with Google and you can ask to be let in: {{ switch_owner }} sees your request with the email you sign in with.</p>
-    <p><a class="btn" href="{{ url_for('auth.login') }}">Sign in with Google</a></p>
+    <p><a class="btn" href="{{ url_for('auth.login') }}" data-tel="request-access:sign-in-with-google">Sign in with Google</a></p>
 
   {% else %}
     {% if have_game %}
       <div class="card">
         <h3>You're in</h3>
-        <p>{{ game_name }} is on your account. <a class="btn" href="{{ url_for('dashboard.game', gid=game) }}">Open {{ game_name }}</a></p>
+        <p>{{ game_name }} is on your account. <a class="btn" href="{{ url_for('dashboard.game', gid=game) }}" data-tel="request-access:open">Open {{ game_name }}</a></p>
       </div>
     {% elif game_name and askable %}
       <p><b>{{ game_name }}</b> isn't on your account yet. Ask for it below.</p>
@@ -41,12 +41,12 @@
         <fieldset style="border:0;padding:0;margin:0">
           <legend style="color:var(--ink);margin-bottom:4px">Which game do you want to play?</legend>
           {% for id, g in askable.items() %}
-            <label class="game"><input type="checkbox" name="games" value="{{ id }}" {{ 'checked' if id == game or (id in pending_ids) }}> {{ g.name }}</label>
+            <label class="game"><input type="checkbox" name="games" value="{{ id }}" {{ 'checked' if id == game or (id in pending_ids) }} data-tel="request-access:games"> {{ g.name }}</label>
           {% endfor %}
         </fieldset>
         <label class="field" for="note">Who are you? (optional, so {{ switch_owner }} knows who's asking)</label>
         <input type="text" id="note" name="note" maxlength="140" autocomplete="off" placeholder="e.g. Jo, from the Discord">
-        <p><button type="submit">{{ 'Update my request' if pending else 'Send request' }}</button></p>
+        <p><button type="submit" data-tel="request-access:send">{{ 'Update my request' if pending else 'Send request' }}</button></p>
       </form>
     {% else %}
       <p>You already have every game. Nothing to ask for.</p>

@@ -269,6 +269,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         member = bool(user) and auth.is_allowed(user["email"])      # signed in AND still on the list: a removed friend sees the login page
         build = buildinfo.info() if member else None               # the footer's build stamp: signed-in pages only (templates/base.html)
         return {"user": user, "is_admin": bool(user) and auth.is_admin(user["email"]),
+                "hidden_controls": app.extensions["adaptive"].hidden() if member else [],   # retired by the tidy (base.html hides them)
                 "build": build, "build_label": buildinfo.label(build["built_at"]) if build else "",
                 "build_tip": buildinfo.tooltip(build) if build else "",
                 "can_skippy": member and auth.has_portal(user["email"], "skippy"),
@@ -636,7 +637,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             needs={g: m for g in GAMES if status and (m := missing_settings(g, status.env))},
             module_rows=[{"id": m.id, "glyph": m.glyph, "label": m.label, "retirable": m.retirable,
                           "retired": m.id in app.extensions["modules"].retired()} for m in modules_mod.MODULES],
-            adaptive_ledger=app.extensions["adaptive"].ledger(), retired_now=app.extensions["modules"].retired(),
+            adaptive_ledger=app.extensions["adaptive"].ledger(),
+            retired_now=app.extensions["modules"].retired() | {"ctl:" + h for h in app.extensions["adaptive"].hidden()},
             google=app.extensions["google_link"].state(),
         )
 
@@ -645,6 +647,14 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def module_switch():
         """The Graveyard: retire a launcher module (its control leaves the launcher) or revive it. Nothing is deleted."""
         module_id, action = request.form.get("id", ""), request.form.get("action", "")
+        if module_id.startswith("ctl:") and action in ("retire", "revive"):    # any other control the tidy retired (adaptive.py)
+            try:
+                (app.extensions["adaptive"].retire_control if action == "retire" else app.extensions["adaptive"].revive_control)(module_id)
+            except KeyError:
+                abort(400)
+            except modules_mod.Unavailable as exc:
+                flash(str(exc), "error")
+            return back("admin.index")
         if module_id not in modules_mod.BY_ID or action not in ("retire", "revive"):
             abort(400)
         store = app.extensions["modules"]
@@ -961,7 +971,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         if not home.authorized(request.headers.get("Authorization")):
             abort(401)
         retired = app.extensions["modules"].retired()
-        return jsonify(retired=[{"id": m.id, "label": m.label, "glyph": m.glyph} for m in modules_mod.MODULES if m.id in retired],
+        return jsonify(retired=[{"id": m.id, "label": m.label, "glyph": m.glyph} for m in modules_mod.MODULES if m.id in retired]
+                       + [{"id": "ctl:" + h, "label": adaptive_mod.control_label(h), "glyph": ""} for h in app.extensions["adaptive"].hidden()],
                        ledger=app.extensions["adaptive"].ledger(40))
 
     @app.post("/home/adaptive")

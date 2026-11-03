@@ -78,6 +78,7 @@
     var button = document.createElement("button");
     button.type = "button";
     button.className = "copy-btn";
+    button.setAttribute("data-tel", "copy:button");                // counted, never tidied away (adaptive.py: content helpers)
     button.textContent = "Copy";
     button.title = "Copy to the clipboard";
     button.__copyFor = el;

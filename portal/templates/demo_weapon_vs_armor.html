@@ -77,7 +77,7 @@
       <div class="panel">
         <h3>Weapon <span class="muted" id="w-edited"></span></h3>
         <label class="field" for="w-preset">Preset</label>
-        <select id="w-preset" disabled></select>
+        <select id="w-preset" disabled data-tel="demo-weapon-vs-armor:w-preset"></select>
         <p class="help" id="w-about"></p>
         <div id="w-params" class="params"></div>
         <p class="help" id="w-unavailable"></p>
@@ -86,26 +86,26 @@
       <div class="panel">
         <h3>Armor <span class="muted" id="a-count"></span></h3>
         <label class="field" for="a-preset">Preset</label>
-        <select id="a-preset" disabled></select>
+        <select id="a-preset" disabled data-tel="demo-weapon-vs-armor:a-preset"></select>
         <ol id="layers" class="layers" aria-label="Armor layers, front to back"></ol>
         <div class="add">
-          <button type="button" id="add-layer" disabled>+ Layer</button>
-          <button type="button" id="add-gap" disabled>+ Gap</button>
+          <button type="button" id="add-layer" disabled data-tel="demo-weapon-vs-armor:add-layer">+ Layer</button>
+          <button type="button" id="add-gap" disabled data-tel="demo-weapon-vs-armor:add-gap">+ Gap</button>
         </div>
       </div>
 
       <div class="panel">
         <h3>Where</h3>
         <label class="field" for="env">Environment</label>
-        <select id="env" disabled></select>
+        <select id="env" disabled data-tel="demo-weapon-vs-armor:env"></select>
         <p class="help" id="env-about"></p>
         <label class="field" for="dist">Range: <b id="dist-val"></b></label>
-        <input type="range" id="dist" min="0" max="1000" step="1" value="500" disabled>
+        <input type="range" id="dist" min="0" max="1000" step="1" value="500" disabled data-tel="demo-weapon-vs-armor:dist">
         <p class="help">Range matters for drag, beam absorption, plasma dispersal and particle stopping.
           An explosive's standoff is part of the weapon.</p>
       </div>
 
-      <button type="button" id="fire" class="fire" disabled>Fire</button>
+      <button type="button" id="fire" class="fire" disabled data-tel="demo-weapon-vs-armor:fire">Fire</button>
       <p id="fire-msg" class="help" role="status" aria-live="polite"></p>
     </div>
   </div>

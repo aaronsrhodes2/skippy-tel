@@ -231,7 +231,7 @@
       if (text == null) { status.replaceChildren(); return; }
       if (!status._built) {
         const bar = document.createElement("span"), fill = document.createElement("i"), label = document.createElement("span"), x = document.createElement("button");
-        bar.className = "lvbar"; bar.appendChild(fill); label.className = "vtxt"; x.type = "button"; x.className = "vx"; x.textContent = "\u00D7";
+        bar.className = "lvbar"; bar.appendChild(fill); label.className = "vtxt"; x.type = "button"; x.className = "vx"; x.setAttribute("data-tel", "voice:cancel"); x.textContent = "\u00D7";
         x.title = "Cancel"; x.setAttribute("aria-label", "Cancel the voice message"); x.addEventListener("click", function () { cancel(); endChat(); });
         status.append(bar, label, x); status._built = { fill: fill, label: label, x: x };
       }

@@ -41,5 +41,5 @@
   {% if invite_on and code %}{% set _ = share.append('join code ' ~ code) %}{% endif %}
   {% if address %}{% set _ = share.append('address ' ~ address ~ (', port ' ~ game.direct_port if game.direct_port else '')) %}{% endif %}
   {% if pw %}{% set _ = share.append('password ' ~ pw) %}{% endif %}
-  {% if share %}<p><button type="button" data-copy="{{ game.name }}: {{ share | join(', ') }}">Copy it all to share</button></p>{% endif %}
+  {% if share %}<p><button type="button" data-copy="{{ game.name }}: {{ share | join(', ') }}" data-tel="join:copy-it-all-to">Copy it all to share</button></p>{% endif %}
 </div>

@@ -44,11 +44,11 @@
       <div class="sheet" data-sheet="multi" hidden>
         <form method="post" action="{{ url_for('dashboard.games_start') }}">
           {% for id, game in games.items() %}
-            <label class="pick"><input type="checkbox" name="games" value="{{ id }}" {{ 'checked' if id in status.games }}> {{ game.name }}</label>
+            <label class="pick"><input type="checkbox" name="games" value="{{ id }}" {{ 'checked' if id in status.games }} data-tel="games:games"> {{ game.name }}</label>
           {% endfor %}
           <label class="idle"><svg class="g" style="width:18px;height:18px" aria-hidden="true"><use href="#g-clock"/></svg>
             <input type="number" name="idle_minutes" value="{{ status.idle_minutes }}" min="0" aria-label="Minutes idle before it sleeps (0 = never)" title="Minutes idle before it sleeps (0 = never)"></label>
-          <p><button type="submit" class="key" aria-label="Start selected" title="Start selected"><svg class="g" aria-hidden="true"><use href="#g-power"/></svg></button></p>
+          <p><button type="submit" class="key" aria-label="Start selected" title="Start selected" data-tel="games:start-selected"><svg class="g" aria-hidden="true"><use href="#g-power"/></svg></button></p>
         </form>
       </div>
       {% endif %}
@@ -58,10 +58,10 @@
       <span class="grow"></span>
       {% if running %}
         <form class="inline" method="post" action="{{ url_for('dashboard.games_stop') }}">
-          <button type="submit" class="key danger" aria-label="Stop server" title="Stop server"><svg class="g" aria-hidden="true"><use href="#g-power"/></svg></button>
+          <button type="submit" class="key danger" aria-label="Stop server" title="Stop server" data-tel="games:stop-server"><svg class="g" aria-hidden="true"><use href="#g-power"/></svg></button>
         </form>
       {% elif asleep and is_admin %}
-        <button type="button" class="key" data-open="multi" aria-label="Start several games at once" title="Start several games at once"><svg class="g" aria-hidden="true"><use href="#g-tools"/></svg></button>
+        <button type="button" class="key" data-open="multi" aria-label="Start several games at once" title="Start several games at once" data-tel="games:start-several-games-at"><svg class="g" aria-hidden="true"><use href="#g-tools"/></svg></button>
       {% elif not asleep %}
         <span class="lamp" data-s="boot" role="status" aria-label="The server is changing state" style="width:14px;height:14px;margin:0 14px"></span>
       {% endif %}
