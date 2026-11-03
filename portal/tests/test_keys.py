@@ -37,3 +37,11 @@ def test_drive_has_a_favorites_key():
     js = (PORTAL / "static" / "drive-app.js").read_text(encoding="utf-8")
     assert 'id="k-fav"' in html and "data-fav-add=" in html and "music.favorites_add" in html
     assert "postJSON(cfg.favAdd" in js and 'busy("#k-lib"' in js
+
+
+def test_the_steering_wheel_knob_skips_whichever_signal_the_car_sends():
+    js = (PORTAL / "static" / "drive-app.js").read_text(encoding="utf-8")
+    for action in ("nexttrack", "seekforward", "previoustrack", "seekbackward"):
+        assert f'set("{action}"' in js
+    assert "MediaTrackNext: next" in js and "MediaFastForward: next" in js
+    assert '"drive:in-" + what' in js and 'heard("system-pause")' in js      # one drive tells which signal the knob sends

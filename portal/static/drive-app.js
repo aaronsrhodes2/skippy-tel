@@ -25,7 +25,7 @@
   // ── ducking: this page's own player follows Skippy's voice ──
   let ours = false;                                      // the next pause is this page's own (a key), not the system's
   const duck = window.SkippyDuck ? SkippyDuck.follow({ level: f => { au.volume = Math.max(0, Math.min(1, f)); }, paused: () => au.paused, resume: () => play() }) : null;
-  au.addEventListener("pause", () => { if (duck && !au.ended) duck.paused(ours); ours = false; if (S.mode === "book") saveBook(true); paint(); });
+  au.addEventListener("pause", () => { if (!ours && !au.ended) heard("system-pause"); if (duck && !au.ended) duck.paused(ours); ours = false; if (S.mode === "book") saveBook(true); paint(); });
   au.addEventListener("play", paint);
   const stopHere = () => { ours = true; au.pause(); };
   async function play() {
@@ -255,10 +255,30 @@
     if (!("mediaSession" in navigator)) return;
     try { navigator.mediaSession.metadata = new MediaMetadata({ title: title || "", artist: artist || "", album: album || "" }); } catch (e) { /* old browser */ }
   }
-  if ("mediaSession" in navigator) {
-    const set = (a, f) => { try { navigator.mediaSession.setActionHandler(a, f); } catch (e) { /* not here */ } };
-    set("play", () => play()); set("pause", () => stopHere()); set("nexttrack", () => next());
+  // The steering wheel's left knob (the Captain, 2026-11-02): a press pauses and plays, but a click forward didn't skip. Which signal
+  // the Tesla's browser sends for it isn't documented, so every likely one skips (the media session's next track and seek forward,
+  // the media keys as keypresses) and back goes to the song's start (30 s back in a book). Each arrival is counted as drive:in-<what>
+  // (telemetry, no song names), so one drive tells which signal the knob really sends.
+  const heard = what => {
+    try { navigator.sendBeacon("/telemetry/tap", new Blob([JSON.stringify({ e: "drive:in-" + what, p: location.pathname })], { type: "application/json" })); }
+    catch (e) { /* no beacon: nothing counted */ }
+  };
+  function back() {
+    if (S.mode === "book") { au.currentTime = Math.max(0, au.currentTime - 30); saveBook(true); }
+    else if (S.mode && au.src) au.currentTime = 0;
   }
+  if ("mediaSession" in navigator) {
+    const set = (a, f) => { try { navigator.mediaSession.setActionHandler(a, () => { heard(a); f(); }); } catch (e) { /* not here */ } };
+    set("play", () => play()); set("pause", () => stopHere());
+    set("nexttrack", () => next()); set("seekforward", () => next());
+    set("previoustrack", () => back()); set("seekbackward", () => back());
+  }
+  const KNOB = { MediaTrackNext: next, MediaFastForward: next, MediaTrackPrevious: back, MediaRewind: back };
+  document.addEventListener("keydown", e => {
+    if (!/^(Media|Audio|Arrow)/.test(e.key)) return;
+    heard("key-" + e.key.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 30));
+    if (KNOB[e.key]) { e.preventDefault(); KNOB[e.key](); }
+  });
 
   // ── the keys ──
   function next() {
