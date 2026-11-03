@@ -8,7 +8,7 @@ const assert = require("node:assert/strict");
 const level = { v: 0.004 };
 let stt = [], sttCalls = [], recorders = [];
 // what the fake Whisper says: one text per utterance (the recorder that is asking), the whole of it once that recorder has stopped, its first words while it is still recording
-let say = [], langs = [], fetchLog = [], summaryMode = "ok", spoken = [];      // langs[i]: [lang, sure] Whisper reports for utterance i
+let say = [], langs = [], raws = [], fetchLog = [], summaryMode = "ok", spoken = [];      // langs[i]: [lang, sure] Whisper reports for utterance i
 class FakeAnalyser { constructor() { this.fftSize = 1024; } getFloatTimeDomainData(buf) { buf.fill(level.v); } connect() {} }
 class FakeCtx { createMediaStreamSource() { return { connect() {} }; } createAnalyser() { return new FakeAnalyser(); } close() { return Promise.resolve(); } }
 class FakeRec {
@@ -35,7 +35,7 @@ globalThis.fetch = async (url, init) => {
   if (u.includes("/g")) return { ok: true, status: 200, json: async () => ({ ok: true, url: "https://x.ts.net:10000", pass: "1.a", exp: Date.now() / 1000 + 3600, speak: false }) };
   fetchLog.push(u);
   if (u.includes("/summary")) { if (summaryMode === "fail") return { ok: false, status: 503, json: async () => ({}) }; return { ok: true, status: 200, json: async () => ({ text: "Short spoken version." }) }; }
-  if (u.includes("/stt")) { sttCalls.push(u); const idx = recorders.length - 1, full = say[idx] || "words", done = !recorders[idx] || recorders[idx].state === "inactive"; return { ok: true, status: 200, json: async () => ({ text: done ? full : full.split(" ").slice(0, Math.max(1, full.split(" ").length - 1)).join(" "), lang: (langs[idx] || ["en"])[0], sure: (langs[idx] || ["en", 0.99])[1] }) }; }
+  if (u.includes("/stt")) { sttCalls.push(u); const idx = recorders.length - 1, full = say[idx] || "words", done = !recorders[idx] || recorders[idx].state === "inactive"; return { ok: true, status: 200, json: async () => ({ text: done ? full : full.split(" ").slice(0, Math.max(1, full.split(" ").length - 1)).join(" "), lang: (langs[idx] || ["en"])[0], sure: (langs[idx] || ["en", 0.99])[1], raw: raws[idx] }) }; }
   return { ok: false, status: 404, json: async () => ({}) };
 };
 const V = require("../../../static/skippy-voice.js");
@@ -45,7 +45,7 @@ async function advance(t, ms) { for (let x = 0; x < ms; x += 50) { t.mock.timers
 
 function setup(t, granted, more) {
   t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"], now: 1000000 });
-  level.v = 0.004; stt = []; say = []; langs = []; sttCalls = []; recorders = []; gStreams.length = 0; fetchLog = []; summaryMode = "ok"; spoken = [];
+  level.v = 0.004; stt = []; say = []; langs = []; raws = []; sttCalls = []; recorders = []; gStreams.length = 0; fetchLog = []; summaryMode = "ok"; spoken = [];
   navigator.permissions = { query: async () => ({ state: granted ? "granted" : "prompt" }) };
   const key = node("button"), box = node("textarea"), status = node("div"), sent = [];
   box.value = "";
@@ -120,7 +120,7 @@ test("Hands-off: someone speaking another language is written down as heard, not
   assert.equal(s.voice.chatting(), true);
   say[recorders.length - 1] = "Where is the train station?"; langs[recorders.length - 1] = ["es", 0.94];
   await speak(t, 1500); await advance(t, 2200);
-  assert.deepEqual(heardLines, [{ text: "Where is the train station?", lang: "es", sure: 0.94 }]);
+  assert.deepEqual(heardLines, [{ text: "Where is the train station?", lang: "es", sure: 0.94, raw: "" }]);
   assert.equal(s.box.value, ""); assert.deepEqual(s.sent, []);                                         // nothing in the box, nothing sent
   assert.ok(listening()); assert.equal(s.voice.chatting(), true);                                     // and it keeps listening
   say[recorders.length - 1] = "Goodbye"; langs[recorders.length - 1] = ["fr", 0.9];                  // a stranger's "au revoir" is not your sleep word
@@ -129,6 +129,26 @@ test("Hands-off: someone speaking another language is written down as heard, not
   say[recorders.length - 1] = "what did she say"; langs[recorders.length - 1] = ["en", 0.99];
   await speak(t, 1500); await advance(t, 2200); await advance(t, 4300);
   assert.deepEqual(s.sent, ["what did she say"]); assert.equal(heardLines.length, 2);
+});
+
+test("Hands-off with wantOriginal: Whisper is asked for the speech in its own words (raw=1) and onHeard gets them", async (t) => {
+  const heardLines = [];
+  const s = setup(t, false, { onHeard: (h) => heardLines.push(h), wantOriginal: true });
+  await advance(t, 700);
+  s.key._on.click(); await advance(t, 600);
+  say[recorders.length - 1] = "Where is the train station?"; langs[recorders.length - 1] = ["es", 0.94]; raws[recorders.length - 1] = "Donde esta la estacion de tren";
+  await speak(t, 1500); await advance(t, 2200);
+  assert.ok(sttCalls.length && sttCalls.every((u) => /[?&]raw=1\b/.test(u)), sttCalls.join(" "));
+  assert.deepEqual(heardLines, [{ text: "Where is the train station?", lang: "es", sure: 0.94, raw: "Donde esta la estacion de tren" }]);
+});
+
+test("without wantOriginal the gate is never asked for raw (a chat page pays no second pass)", async (t) => {
+  const s = setup(t, false, { onHeard: () => {} });
+  await advance(t, 700);
+  s.key._on.click(); await advance(t, 600);
+  say[recorders.length - 1] = "turn on the lights"; langs[recorders.length - 1] = ["en", 0.99];
+  await speak(t, 1500); await advance(t, 2200);
+  assert.ok(sttCalls.length && sttCalls.every((u) => !/raw=1/.test(u)), sttCalls.join(" "));
 });
 
 test("Hands-off: a language Whisper is unsure of stays your message, and without onHeard nothing changes", async (t) => {

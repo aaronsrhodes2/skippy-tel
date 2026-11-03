@@ -198,12 +198,13 @@
 
     async function transcribe(blob, type) {
       let g = await gate();
-      const q = lang() ? "?lang=" + encodeURIComponent(lang()) : "";
+      // opts.wantOriginal: the page shows other people's speech in its own words first (the glasses' captions), so Whisper is asked for them
+      const q = (lang() ? "?lang=" + encodeURIComponent(lang()) : "") + (opts.wantOriginal ? (lang() ? "&" : "?") + "raw=1" : "");
       let r = await fetch(base(g) + "/stt" + q, { method: "POST", headers: { "Content-Type": type }, body: blob });
       if (r.status === 403) { pass = null; g = await gate(); r = await fetch(base(g) + "/stt" + q, { method: "POST", headers: { "Content-Type": type }, body: blob }); }
       if (!r.ok) throw new Error("not understood");
       const d = await r.json();
-      return { text: d.text || "", lang: d.lang || "", sure: typeof d.sure === "number" ? d.sure : 0 };
+      return { text: d.text || "", lang: d.lang || "", sure: typeof d.sure === "number" ? d.sure : 0, raw: typeof d.raw === "string" ? d.raw : "" };
     }
 
     // A long reply is not read out word for word (it comes in parts, and symbols and paths are no way to talk): the gate writes what a
@@ -275,7 +276,7 @@
         rec.onstop = async function () {
           if (!spoke) return finish({ spoke: false, text: "" });
           if (seg.minSpeechMs && Date.now() - speechAt < seg.minSpeechMs) return finish({ spoke: false, text: "", short: true });      // a cough or a click: not worth sending
-          try { const t = await transcribe(blob(), type); finish({ spoke: true, text: word(t.text), lang: t.lang, sure: t.sure }); } catch (e) { finish({ spoke: true, text: lastInterim, failed: true }); }
+          try { const t = await transcribe(blob(), type); finish({ spoke: true, text: word(t.text), lang: t.lang, sure: t.sure, raw: word(t.raw) }); } catch (e) { finish({ spoke: true, text: lastInterim, failed: true }); }
         };
         seg.abort = function () { ended = true; clearInterval(timer); try { if (rec.state !== "inactive") { rec.onstop = null; rec.stop(); } } catch (e) {} resolve({ spoke: false, text: "", aborted: true }); };
         rec.start(250);
@@ -354,7 +355,7 @@
           paintStatus("Understanding\u2026", 0, true); paint(mic, "boot");
           if (chat && opts.onHeard && r.text && heard(r.lang, r.sure)) {        // someone else, in another language: write it down, keep listening
             show(message); onText(message, false);
-            opts.onHeard({ text: r.text, lang: r.lang, sure: r.sure });
+            opts.onHeard({ text: r.text, lang: r.lang, sure: r.sure, raw: r.raw || "" });
             paintStatus("Heard: written in the chat", 0, true); paint(mic, "on");
             continue;
           }

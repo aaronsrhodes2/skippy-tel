@@ -7,7 +7,11 @@
      playable       what this browser can play itself (Bilby's files; a Spotify item needs a Spotify player)
      carDone        whether a Spotify row playing on the car's own Spotify is over
      handOff        what the car continues as it opens: the current book or Bilby, whichever he heard last
-     replyAfter     the house brain's answer to the turn sent at `seq`, from the Home chat's events (portal/housechat.py) */
+     replyAfter     the house brain's answer to the turn sent at `seq`, from the Home chat's events (portal/housechat.py)
+     captionFrames  a caption's words as frames: the original, then each English word taking the place of the original ones, left to right
+     captionHoldMs  how long the original is left to be read before the English starts replacing it
+     heardNote      the context line that rides ahead of his next message to purple (the same text portal/chat.py heard_note makes)
+     langName       a language's English name, from its code */
 (function (root, factory) {
   "use strict";
   if (typeof module === "object" && module.exports) module.exports = factory();
@@ -121,5 +125,31 @@
     return { kind: "bilby", mode: "library", track: "", pos: 0, at: 0, title: "", artist: "" };
   }
 
-  return { shuffle, buildQueue, localFirst, handOff, nextPlayable, playable, replyAfter, carDone, QUEUE_MAX, FAV_EVERY, SUGGEST_EVERY, CAR_MARGIN_MS };
+  // ── captions: other people's speech (heard) and signs (seen) on the glasses (the Captain, 2026-11-02): "show the original, and then
+  // show it being replaced with English token by token, as an animation so I have a moment to read the words before they become English" ──
+  const CAPTION_STEP_MS = 110, CAPTION_FADE_MS = 20000;
+  const words = s => String(s || "").split(/\s+/).filter(Boolean);
+  function captionFrames(orig, en) {
+    const o = words(orig), e = words(en);
+    if (!e.length) return [{ en: "", orig: o.join(" ") }];
+    if (!o.length) return [{ en: e.join(" "), orig: "" }];                    // no original to show: the English at once
+    const frames = [{ en: "", orig: o.join(" ") }];
+    for (let k = 1; k <= e.length; k++) {
+      const gone = Math.round(k * o.length / e.length);                        // the original words the English has caught up with
+      frames.push({ en: e.slice(0, k).join(" "), orig: o.slice(gone).join(" ") });
+    }
+    return frames;                                                           // the last frame is all English
+  }
+  const captionHoldMs = orig => Math.min(4000, 900 + 55 * String(orig || "").length);
+  const HEARD_LANG = /^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/;
+  function heardNote(lines) {
+    const last = (lines || []).filter(l => l && String(l.text || "").trim()).slice(-10);      // the last ten, each cut short
+    if (!last.length) return "";
+    return "[Heard near me while Hands-off listened, translated into English by Whisper (other people talking, not me):\n"
+      + last.map(l => "- (" + (HEARD_LANG.test(String(l.lang || "")) ? l.lang : "another language") + ") " + String(l.text).trim().slice(0, 400)).join("\n")
+      + "]\n\n";
+  }
+  function langName(code) { try { return new Intl.DisplayNames(["en"], { type: "language" }).of(code) || code; } catch (e) { return code; } }
+
+  return { captionFrames, captionHoldMs, heardNote, langName, CAPTION_STEP_MS, CAPTION_FADE_MS, shuffle, buildQueue, localFirst, handOff, nextPlayable, playable, replyAfter, carDone, QUEUE_MAX, FAV_EVERY, SUGGEST_EVERY, CAR_MARGIN_MS };
 });

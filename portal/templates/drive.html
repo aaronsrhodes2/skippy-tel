@@ -67,6 +67,17 @@
   #said { min-height: 0; font: 600 20px var(--mono); color: var(--green); padding: 0 8px; overflow: hidden; display: -webkit-box;
           -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
   #said[hidden] { display: none; }
+  /* captions (heard speech, seen signs): black with the chat's dashed cyan border (bridge.css .turn.heard); the original words stay dim
+     while the English takes their place word by word */
+  #heard { display: flex; flex-direction: column; gap: 6px; padding: 0 8px; min-height: 0; }
+  #heard:empty { display: none; }
+  #heard .turn.heard { display: flex; gap: 10px; align-items: flex-start; padding: 8px 12px; margin: 0; transition: opacity .6s; }
+  #heard .turn.heard.gone { opacity: 0; }
+  #heard .turn.heard > .g { width: 22px; height: 22px; flex: none; margin-top: 2px; }
+  #heard .tx { min-width: 0; }
+  #heard .line { font: 600 20px var(--mono); color: #fff; overflow-wrap: anywhere; }
+  #heard .line .orig { color: var(--muted); }
+  #drive.hub #heard { align-items: center; } #drive.hub #heard .line { font-size: 26px; }
   #drive.hub .deck > .unit:not(#k-skippy) { display: none; }
   #drive.hub .deck { grid-template-columns: 1fr; grid-template-rows: 1fr; }
   #drive.hub .deck > #k-skippy { grid-column: 1; grid-row: 1; }
@@ -135,7 +146,8 @@
     </div>
   </div>
   <div id="vstatus" hidden></div>
-  {% if hud %}<div id="said" aria-live="polite" hidden></div>{% endif %}
+  {% if hud %}<div id="heard" aria-live="polite"></div>   {# other people's speech and what the glasses read, as captions (drive-app.js addCaption) #}
+  <div id="said" aria-live="polite" hidden></div>{% endif %}
   <audio id="media" preload="auto"></audio>
 </section>
 <script src="{{ url_for('static', filename='audiobooks-pure.js') }}"></script>

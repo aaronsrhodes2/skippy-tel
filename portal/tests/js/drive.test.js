@@ -148,3 +148,40 @@ test("the hand-off: the newer of the current book and Bilby's last play, with no
   assert.equal(D.handOff(places, null, inPool).kind, "book");                 // no Bilby record: the book
   assert.equal(D.handOff(places, { at: 2000, track: "x" }, inPool).kind, "book");   // a tie goes to the book
 });
+
+// ── the glasses' captions (heard speech, seen signs): the original, then the English replacing it word by word ──
+test("a caption shows the original, then each English word takes the place of the original ones, left to right", () => {
+  const f = D.captionFrames("donde esta la estacion de tren", "where is the train station");
+  assert.deepEqual(f[0], { en: "", orig: "donde esta la estacion de tren" });                 // first: only the original, to be read
+  assert.deepEqual(f[f.length - 1], { en: "where is the train station", orig: "" });          // last: only the English
+  assert.equal(f.length, 6);                                                                  // the original, then one frame per English word
+  for (let i = 1; i < f.length; i++) {                                                        // monotonic: English only grows, the original only shrinks
+    assert.ok(f[i].en.startsWith(f[i - 1].en)); assert.ok(f[i - 1].orig.endsWith(f[i].orig));
+  }
+  assert.equal(f[1].en, "where");
+});
+
+test("a caption with no original shows the English at once; words of different counts still end on all English", () => {
+  assert.deepEqual(D.captionFrames("", "hello there"), [{ en: "hello there", orig: "" }]);
+  assert.deepEqual(D.captionFrames("   ", "hello"), [{ en: "hello", orig: "" }]);
+  assert.deepEqual(D.captionFrames("hola", "where is the train station").pop(), { en: "where is the train station", orig: "" });
+  assert.deepEqual(D.captionFrames("a b c d e f g h", "yes").pop(), { en: "yes", orig: "" });
+  assert.deepEqual(D.captionFrames("hola", ""), [{ en: "", orig: "hola" }]);                   // nothing to translate into: leave the original
+});
+
+test("the original is held long enough to read, but never longer than four seconds", () => {
+  assert.equal(D.captionHoldMs("hola"), 900 + 55 * 4);
+  assert.equal(D.captionHoldMs("x".repeat(500)), 4000);
+  assert.equal(D.captionHoldMs(""), 900);
+});
+
+test("what was heard rides ahead of his next message to purple, as the chat's note does", () => {
+  assert.equal(D.heardNote([]), ""); assert.equal(D.heardNote(null), ""); assert.equal(D.heardNote([{ text: "  ", lang: "es" }]), "");
+  const note = D.heardNote([{ text: " where is the station ", lang: "es" }, { text: "hello", lang: "<script>" }]);
+  assert.equal(note, "[Heard near me while Hands-off listened, translated into English by Whisper (other people talking, not me):\n"
+    + "- (es) where is the station\n- (another language) hello]\n\n");                          // a bad language code never reaches the message
+  const many = Array.from({ length: 14 }, (_, i) => ({ text: "line " + i, lang: "fr" }));
+  assert.equal(D.heardNote(many).split("\n").filter((l) => l.startsWith("- (")).length, 10);   // the last ten
+  assert.ok(D.heardNote([{ text: "x".repeat(900), lang: "de" }]).includes("x".repeat(400)) && !D.heardNote([{ text: "x".repeat(900), lang: "de" }]).includes("x".repeat(401)));
+  assert.equal(D.langName("es"), "Spanish");
+});

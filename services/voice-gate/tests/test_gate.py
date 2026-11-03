@@ -111,6 +111,22 @@ def test_stt_says_how_sure_whisper_is_of_the_language(stack):
         assert c.post(f"/t/{listen()}/stt", data=b"abc", content_type="audio/webm").get_json()["sure"] in (0.0, 1.0)
 
 
+def test_stt_gives_the_speech_in_its_own_words_only_when_asked_and_only_when_it_is_another_language(stack):
+    """The glasses' captions show what was said before the English (portal/static/drive-app.js): raw=1 asks Whisper for the second pass."""
+    c, fake = stack
+    fake.stt = Resp(200, {"english_text": "where is the station", "detected_lang": "es", "confidence": 0.93,
+                          "original_text": " donde esta la estacion "})
+    plain = c.post(f"/t/{listen()}/stt", data=b"abc", content_type="audio/webm").get_json()
+    assert "raw" not in plain and "want_original" not in fake.posts[-1][1]["data"]            # not asked: nothing extra, nothing sent on
+    asked = c.post(f"/t/{listen()}/stt?raw=1", data=b"abc", content_type="audio/webm").get_json()
+    assert asked == {"text": "where is the station", "lang": "es", "sure": 0.93, "raw": "donde esta la estacion"}
+    assert fake.posts[-1][1]["data"] == {"want_original": "1"}
+    fake.stt = Resp(200, {"english_text": "hello", "detected_lang": "en", "confidence": 0.99})    # English: Whisper sends no original
+    assert "raw" not in c.post(f"/t/{listen()}/stt?raw=1", data=b"abc", content_type="audio/webm").get_json()
+    fake.stt = Resp(200, {"english_text": "hi", "detected_lang": "fr", "confidence": 0.9, "original_text": 7})
+    assert "raw" not in c.post(f"/t/{listen()}/stt?raw=1", data=b"abc", content_type="audio/webm").get_json()   # nonsense: ignored
+
+
 def test_stt_survives_a_dead_whisper(stack):
     c, fake = stack
     fake.stt = Resp(500)

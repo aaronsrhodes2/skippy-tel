@@ -6,7 +6,8 @@ without the device joining the tailnet. The portal renders the page and signs sh
 internet exactly two things:
 
     GET  /health                     {"ok", "ready", "whisper", "tts", "voices"}           (no pass: the reporter's probe)
-    POST /t/<pass>/stt[?lang=xx]     body = one recording (webm/ogg/mp4/wav, at most 4 MB) -> {"text", "lang"}   (Whisper, at home)
+    POST /t/<pass>/stt[?lang=xx][&raw=1]   body = one recording (webm/ogg/mp4/wav, at most 4 MB) -> {"text", "lang", "sure"[, "raw"]}
+                                     (Whisper, at home; `raw` = the speech in its own language, when it isn't English and raw=1 asked)
     POST /t/<pass>/tts               {"text", "voice"?} (at most 500 chars) -> audio/mpeg in the pass's voice (or "stock"): see VOICES
     POST /t/<pass>/summary           {"text"} (at most 8000 chars) -> {"text}: what a person would SAY aloud about it, 2 to 4 short
                                      sentences (the home Ollama writes it); any pass. A long reply is spoken as this, not word for word
@@ -265,8 +266,10 @@ def create_app(key: bytes, whisper_url: str, studio_url: str, clock=time.time,
         if not busy.acquire(blocking=False):
             return err(429)
         try:
-            r = post(f"{whisper_url}/transcribe", files={"audio": ("rec" + suffix, data, ctype)},
-                     data={"hint_lang": lang} if lang else {}, timeout=40)
+            form = {"hint_lang": lang} if lang else {}
+            if request.args.get("raw") == "1":
+                form["want_original"] = "1"
+            r = post(f"{whisper_url}/transcribe", files={"audio": ("rec" + suffix, data, ctype)}, data=form, timeout=40)
             if r.status_code != 200:
                 return err(503)
             out = r.json()
@@ -283,8 +286,11 @@ def create_app(key: bytes, whisper_url: str, studio_url: str, clock=time.time,
             sure = round(min(1.0, max(0.0, float(out.get("confidence")))), 2)
         except (TypeError, ValueError):
             sure = 0.0
-        return Response(json.dumps({"text": text.strip()[:2000], "lang": str(out.get("detected_lang") or "")[:8], "sure": sure}),
-                        mimetype="application/json", headers={"Cache-Control": "no-store"})
+        answer = {"text": text.strip()[:2000], "lang": str(out.get("detected_lang") or "")[:8], "sure": sure}
+        original = out.get("original_text")
+        if request.args.get("raw") == "1" and isinstance(original, str) and original.strip():
+            answer["raw"] = original.strip()[:2000]
+        return Response(json.dumps(answer), mimetype="application/json", headers={"Cache-Control": "no-store"})
 
     @app.post("/t/<token>/tts")
     def tts(token):

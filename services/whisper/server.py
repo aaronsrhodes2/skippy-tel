@@ -81,6 +81,7 @@ async def transcribe(
     audio: UploadFile = File(...),
     hint_lang: Optional[str] = Form(None),
     initial_prompt: Optional[str] = Form(None),
+    want_original: Optional[str] = Form(None),
 ):
     # faster-whisper's transcribe() accepts a file path and shells out to
     # ffmpeg internally for decode (handles AAC/WAV/AMR/Opus etc.). We
@@ -105,11 +106,17 @@ async def transcribe(
             initial_prompt=prompt,     # keyword biasing
         )
         text = " ".join(s.text.strip() for s in segments).strip()
-        return {
+        out = {
             "detected_lang": info.language,
             "english_text": text,
             "confidence": float(info.language_probability),
         }
+        # The same speech in its own words (the glasses' captions show them before the English: portal/static/drive-app.js), only when
+        # asked and only when it isn't English: a second pass, so English speech costs nothing extra. No keyword primer: it is English.
+        if want_original and info.language and not info.language.lower().startswith("en") and text:
+            segs2, _ = model.transcribe(path, task="transcribe", language=info.language, beam_size=1, vad_filter=True)
+            out["original_text"] = " ".join(s.text.strip() for s in segs2).strip()
+        return out
     finally:
         try:
             os.unlink(path)

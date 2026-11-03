@@ -37,3 +37,20 @@ def test_the_test_page_and_the_view_are_the_captains_alone():
 
 def test_the_glasses_are_a_launcher_tile_for_the_captain(client):
     assert 'data-tel="tile:hud"' in client.get("/apps").get_data(as_text=True)
+
+
+def test_hud_has_a_captions_strip_and_the_car_does_not(client):
+    assert 'id="heard"' in client.get("/hud").get_data(as_text=True)
+    assert 'id="heard"' not in client.get("/drive").get_data(as_text=True)         # in the car, foreign speech stays a message to Skippy
+
+
+def test_the_note_purple_gets_about_what_was_heard_is_the_chats_own_text():
+    """drive-pure.js heardNote and chat.heard_note must say the same: purple reads both the same way."""
+    import chat
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "static" / "drive-pure.js").read_text(encoding="utf-8")
+    note = chat.heard_note(["- (es) x"])
+    assert note.split("\n")[0] in js                                   # the header line, word for word
+    assert note.endswith("]\n\n") and r'+ "]\n\n"' in js              # and the closing bracket and blank line
+    app_js = (Path(__file__).resolve().parents[1] / "static" / "drive-app.js").read_text(encoding="utf-8")
+    assert "heardBox ? { onHeard, wantOriginal: true } : {}" in app_js  # only /hud turns foreign speech into captions

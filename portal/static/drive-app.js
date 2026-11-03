@@ -321,8 +321,43 @@
   new MutationObserver(() => { if (skey.dataset.s) sunit.dataset.s = skey.dataset.s; else delete sunit.dataset.s; sunit.dataset.on = skey.getAttribute("aria-pressed") === "true" ? "1" : "0"; })
     .observe(skey, { attributes: true, attributeFilter: ["data-s", "aria-pressed"] });
   let earOn = false;
-  const voice = SkippyVoice.attach({ gate: cfg.voiceGate, key: skey, status: $("#vstatus"), onSend: ask, wakeWord: false,
-                                     onText: t => { if (t) $("#vstatus").title = t; } });
+
+  // ── captions, on /hud: other people's speech in another language (heard) and what the glasses see (seen) ──
+  // The original words first, then the English taking their place word by word (D.captionFrames), so there is a moment to read them
+  // (the Captain, 2026-11-02). At most three rows; a finished row fades after D.CAPTION_FADE_MS. `heardLog` is the speech purple is told
+  // about with the next message (D.heardNote): he is the one who answers, and he should know someone was talking near the Captain.
+  const heardBox = $("#heard"), heardLog = [];
+  function addCaption(c) {
+    if (!heardBox || !String(c.en || "").trim()) return null;
+    const row = document.createElement("div"); row.className = "turn heard";
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "svg"); g.setAttribute("class", "g"); g.setAttribute("aria-hidden", "true");
+    const use = document.createElementNS("http://www.w3.org/2000/svg", "use"); use.setAttribute("href", c.kind === "seen" ? "#g-eye" : "#g-globe"); g.appendChild(use);
+    const tx = document.createElement("div"); tx.className = "tx";
+    const who = document.createElement("div"); who.className = "who"; who.textContent = c.kind + " · " + D.langName(c.lang || "") + " → English";
+    const line = document.createElement("div"); line.className = "line";
+    const enEl = document.createElement("span"), origEl = document.createElement("span"); enEl.className = "en"; origEl.className = "orig";
+    line.append(enEl, document.createTextNode(" "), origEl); tx.append(who, line); row.append(g, tx);
+    heardBox.prepend(row);
+    while (heardBox.children.length > 3) heardBox.lastChild.remove();
+    const frames = D.captionFrames(c.orig, c.en);
+    let i = 0;
+    const play = () => {
+      if (!row.isConnected) return;
+      enEl.textContent = frames[i].en; origEl.textContent = frames[i].orig;
+      if (i + 1 < frames.length) { const wait = i === 0 ? D.captionHoldMs(c.orig) : D.CAPTION_STEP_MS; i++; setTimeout(play, wait); }
+      else setTimeout(() => { row.classList.add("gone"); setTimeout(() => row.remove(), 700); }, D.CAPTION_FADE_MS);
+    };
+    play();
+    return row;
+  }
+  function onHeard(h) {
+    heardLog.push({ text: h.text, lang: h.lang }); if (heardLog.length > 10) heardLog.shift();
+    addCaption({ orig: h.raw, en: h.text, lang: h.lang, kind: "heard" });
+  }
+
+  const voice = SkippyVoice.attach(Object.assign({ gate: cfg.voiceGate, key: skey, status: $("#vstatus"), onSend: ask, wakeWord: false,
+                                     onText: t => { if (t) $("#vstatus").title = t; } },
+                                     heardBox ? { onHeard, wantOriginal: true } : {}));        // /hud only: in the car, foreign speech stays a message to Skippy
   let asking = false;                                    // a turn is with the house brain: his face thinks
   // /hud (hud.py): purple Skippy, the agent on skippy-pc with the full power, is the brain behind the voice. One conversation, kept
   // in this browser and started afresh after HUD_CONV_IDLE_MS quiet, so he can follow up; the reply's last text is what is spoken
@@ -338,9 +373,10 @@
   async function askPurple(text) {
     asking = true; said("");
     const H = { "Content-Type": "application/json", Accept: "application/json", "X-Workshop": "1" };
+    const note = D.heardNote(heardLog); heardLog.length = 0;           // what was said near him since his last message rides ahead of it
     try {
       const r = await fetch(cfg.wsSend, { method: "POST", credentials: "same-origin", headers: H,
-                                          body: JSON.stringify({ message: text, conv: hudConv(), project: "", client_id: hudConv() + "-" + Date.now() }) });
+                                          body: JSON.stringify({ message: note + text, conv: hudConv(), project: "", client_id: hudConv() + "-" + Date.now() }) });
       const d = await r.json();
       if (!r.ok) { voice.say(d.error || "Purple Skippy isn't answering."); return; }
       let after = 0, last = "";
