@@ -132,3 +132,31 @@ def test_the_task_is_the_latest_thing_the_person_said_not_a_tool_result(tmp_path
                              {"type": "user", "message": {"content": [{"type": "tool_result", "content": "file written"}]}})
     assert eyes.task_of(transcript) == "now make it blue"
     assert eyes.task_of(str(tmp_path / "missing.jsonl")) == ""
+
+
+def _png(w, h):
+    import io
+    from PIL import Image
+    out = io.BytesIO()
+    Image.new("RGB", (w, h), (10, 10, 10)).save(out, "PNG")
+    return out.getvalue()
+
+
+def test_a_small_picture_is_doubled_before_it_is_looked_at_and_a_big_one_is_sent_as_it_is():
+    import io
+    from PIL import Image
+    data, mime = eyes.enlarged(_png(781, 411), "image/jpeg")
+    assert mime == "image/png" and Image.open(io.BytesIO(data)).size == (1562, 822)
+    big = _png(1600, 900)
+    assert eyes.enlarged(big, "image/png") == (big, "image/png")
+    assert eyes.enlarged(JPG, "image/jpeg") == (JPG, "image/jpeg")          # not a picture Pillow knows: as it is
+
+
+def test_the_review_knows_today_answers_a_question_first_and_reads_at_temperature_0(tmp_path):
+    shot = tmp_path / "shell.png"
+    shot.write_bytes(_png(781, 411))
+    post, asked = answering("It is waiting 5 seconds or for any key: not stuck.")
+    eyes.review("https://core.example", "sk-core", str(shot), "Is Cloud Shell stuck?", post=post)
+    text = asked[0]["messages"][0]["content"][1]["text"]
+    assert eyes._today() in text and "answer it plainly" in text and "all four edges" in text and "deliberate style is not a fault" in text
+    assert asked[0]["temperature"] == 0

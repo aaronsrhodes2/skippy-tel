@@ -14,7 +14,10 @@ projector) is handed the task from the run's transcript with the picture, descri
 against the task, faults worst first. Without a task, or when the big model can't answer, the vision slot's plain description.
 Measured on MineBench's rematch builds: the 8B vision slot found none of the faults the blind judge saw; the 35B with thinking off
 found the big ones (a train across its rails, a train lost on its plate) and passed the control build. Thinking stays off: with it
-on, one review thought for 8,000 tokens and said nothing.
+on, one review thought for 8,000 tokens and said nothing. Checked on the Captain's own pictures too (2026-11-02: a plug label, photos of a
+laptop screen, a Cloud Shell capture, portal pages): a question about a picture is answered from it first, never a critique of the
+photo; a page is checked at all four edges; a deliberate style isn't a fault; it knows today's date; it reads at temperature 0, and a
+small picture is doubled first (on a blurry 781-px capture it once invented a whole Terraform plan; doubled, it read the real text).
 
 Exit 2 = refused with the description on stderr; 0 = carry on (any other file, or a Claude-brain run, which sees pictures itself).
 """
@@ -32,17 +35,24 @@ PROMPT = ("Describe this picture precisely for someone who can't see it and need
           "to bottom, and ALL text in it copied exactly as printed (every word, number, code, symbol and logo; say which you can't "
           "read rather than guess), then colours, counts and anything unusual. No opinions.")
 REVIEW_MODEL = "chat"               # the slot that reviews: Core's 35B (its mmproj is loaded: core/models.json)
-REVIEW_PROMPT = ("Someone made or opened this picture while doing this task:\n\n<task>\n{task}\n</task>\n\n"
-                 "Look at it the way the person who asked would, and be honest: they want the best possible result, not reassurance.\n"
-                 "1. Say precisely what the picture shows: the main things, the layout, how big they are in the frame, and ALL text in it "
-                 "copied exactly as printed (say which you can't read rather than guess).\n"
-                 "2. Review only what can be seen (steps about files, code, commands or commits are checked elsewhere). List the faults "
-                 "that matter most, worst first: anything that looks wrong, broken, misplaced, floating, sideways, out of proportion, "
-                 "cut off, overlapping, lost in empty space or hard to recognise, and anything someone would expect that is missing. "
-                 "Only faults you can actually see.\n"
-                 "3. Say plainly whether someone who did not know the task would recognise at a glance what it is meant to be.\n"
-                 "4. The three changes that would improve it most.")
+REVIEW_PROMPT = ("Today is {today}. Someone is doing this task and has this picture in front of them:\n\n<task>\n{task}\n</task>\n\n"
+                 "Look at it the way the person who asked would, and be honest: they want the truth, not reassurance.\n"
+                 "1. Say precisely what the picture shows: the main things, the layout, and ALL text in it copied exactly as printed. "
+                 "A character you can't make out, or one hidden behind something, is unreadable: say so, never guess it.\n"
+                 "2. Then do what the task needs from this picture:\n"
+                 "- If the task asks a question about what is in the picture (what is this, what does it say, what happened, is it "
+                 "stuck), answer it plainly from what you can see, and say what the picture can't tell you.\n"
+                 "- If the picture shows work being made or checked (a page, a screen, a build, a render), list what is wrong with that "
+                 "work, worst first: anything broken, cut off by an edge of the screen or frame (look at all four edges), overlapping, "
+                 "unreadable, misplaced, floating, sideways, out of proportion, lost in empty space or hard to recognise, and anything "
+                 "someone would expect that is missing. Only faults you can actually see. A deliberate style is not a fault (icons without "
+                 "words, a decorative background, a dark theme); a fault is something that doesn't work or can't be read. Then say "
+                 "whether someone who didn't know the task would recognise at a glance what it is, and the three changes that would "
+                 "improve it most.\n"
+                 "Never critique the photo itself (angle, glare, framing) unless it stops you reading something. Steps about files, code, "
+                 "commands or commits are checked elsewhere.")
 TASK_CHARS = 4000
+ENLARGE_BELOW = 1200                 # longest side in pixels under which a picture is doubled before it is looked at
 
 
 def describe(url: str, key: str, path: str, post=None, timeout: float = 180) -> str:
@@ -50,7 +60,8 @@ def describe(url: str, key: str, path: str, post=None, timeout: float = 180) -> 
     data = Path(path).read_bytes()
     if len(data) > MAX_BYTES:
         raise RuntimeError(f"the picture is {len(data) // 1048576} MB, too big to send")
-    return ask(url, key, data, IMAGE_TYPES.get(Path(path).suffix.lower(), "image/jpeg"), PROMPT, post=post, timeout=timeout)
+    data, mime = enlarged(data, IMAGE_TYPES.get(Path(path).suffix.lower(), "image/jpeg"))
+    return ask(url, key, data, mime, PROMPT, post=post, timeout=timeout)
 
 
 def task_of(transcript: str) -> str:
@@ -75,12 +86,34 @@ def task_of(transcript: str) -> str:
     return said[:TASK_CHARS]
 
 
+def enlarged(data: bytes, mime: str) -> tuple[bytes, str]:
+    """A small picture doubled (as a PNG) so its small text gets more of the vision encoder: on a 781-px Cloud Shell capture the
+    35B read the real branch names every time at 2x, a third of the time as sent. Big ones, and anything Pillow can't open, as they are."""
+    try:
+        import io
+        from PIL import Image
+        im = Image.open(io.BytesIO(data))
+        if max(im.size) > ENLARGE_BELOW:
+            return data, mime
+        out = io.BytesIO()
+        im.convert("RGB").resize((im.width * 2, im.height * 2), Image.LANCZOS).save(out, "PNG")
+        return out.getvalue(), "image/png"
+    except Exception:                                            # noqa: BLE001 — no Pillow, or not a picture it knows: send it as it is
+        return data, mime
+
+
+def _today() -> str:
+    import datetime
+    return datetime.date.today().strftime("%A %d %B %Y")
+
+
 def review(url: str, key: str, path: str, task: str, post=None, timeout: float = 120) -> str:
     """Core's big model's look at the picture at `path` against `task`: what it shows, then its faults. Raises like ask()."""
     data = Path(path).read_bytes()
     if len(data) > MAX_BYTES:
         raise RuntimeError(f"the picture is {len(data) // 1048576} MB, too big to send")
-    return ask(url, key, data, IMAGE_TYPES.get(Path(path).suffix.lower(), "image/jpeg"), REVIEW_PROMPT.format(task=task),
+    data, mime = enlarged(data, IMAGE_TYPES.get(Path(path).suffix.lower(), "image/jpeg"))
+    return ask(url, key, data, mime, REVIEW_PROMPT.format(task=task, today=_today()),
                max_tokens=3000, post=post, timeout=timeout, model=REVIEW_MODEL, system="You review pictures honestly and precisely.")
 
 
@@ -91,7 +124,7 @@ def ask(url: str, key: str, data: bytes, mime: str, prompt: str, max_tokens: int
     import urllib.request
     if not (url and key):
         raise RuntimeError("Skippy Core isn't configured")
-    body = json.dumps({"model": model, "max_tokens": max_tokens, "system": system, "chat_template_kwargs": {"enable_thinking": False},
+    body = json.dumps({"model": model, "max_tokens": max_tokens, "system": system, "temperature": 0, "chat_template_kwargs": {"enable_thinking": False},
                        "messages": [{"role": "user", "content": [
                            {"type": "image", "source": {"type": "base64", "media_type": mime, "data": base64.b64encode(data).decode()}},
                            {"type": "text", "text": prompt}]}]}).encode()
