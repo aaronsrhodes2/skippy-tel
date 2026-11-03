@@ -260,7 +260,7 @@
   // the media keys as keypresses) and back goes to the song's start (30 s back in a book). Each arrival is counted as drive:in-<what>
   // (telemetry, no song names), so one drive tells which signal the knob really sends.
   const heard = what => {
-    try { navigator.sendBeacon("/telemetry/tap", new Blob([JSON.stringify({ e: "drive:in-" + what, p: location.pathname })], { type: "application/json" })); }
+    try { navigator.sendBeacon(cfg.tap, new Blob([JSON.stringify({ e: "drive:in-" + what, p: location.pathname })], { type: "application/json" })); }
     catch (e) { /* no beacon: nothing counted */ }
   };
   function back() {
@@ -292,16 +292,16 @@
   key("#k-disc", () => busy("#k-disc", () => shuffle("discovery")));
   key("#k-lib", () => busy("#k-lib", () => shuffle("library")));
   // the star: this song into his favorites (the pool "Shuffle library" plays), Bilby's or a Spotify row
-  key("#k-fav", () => busy("#k-fav", async () => {
+  $("#k-play .hit.fav").addEventListener("click", () => busy("#k-play", async () => {
     const it = (S.mode === "discovery" || S.mode === "library") ? S.q[S.qi] : null;
     if (!it) { now("star", "Nothing playing to add: favorites are songs, not the book"); return; }
     const track = it.path || it.uri;
     const info = it.kind === "spotify" ? (S.sp.info.get(it.uri) || {}) : (S.lib.get(it.path) || {});
     try {
       await postJSON(cfg.favAdd, { track, title: info.t || "", artist: info.a || "", name: "the car" });
-      $("#k-fav").dataset.s = "on"; setTimeout(() => { delete $("#k-fav").dataset.s; }, 2500);
+      $("#k-play").dataset.s = "on"; setTimeout(() => { delete $("#k-play").dataset.s; }, 2500);
       now("star", "In your favorites: " + (info.t || track) + (info.a ? " · " + info.a : ""));
-    } catch (e) { $("#k-fav").dataset.s = "warn"; setTimeout(() => { delete $("#k-fav").dataset.s; }, 4000); now("star", "Not saved: " + (e.message || e)); }
+    } catch (e) { $("#k-play").dataset.s = "warn"; setTimeout(() => { delete $("#k-play").dataset.s; }, 4000); now("star", "Not saved: " + (e.message || e)); }
   }));
   $("#k-play .hit.next").addEventListener("click", next);
   key("#k-play", () => {

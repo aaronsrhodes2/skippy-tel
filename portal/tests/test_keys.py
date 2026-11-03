@@ -35,8 +35,11 @@ def test_the_voice_key_keeps_one_glyph():
 def test_drive_has_a_favorites_key():
     html = (PORTAL / "templates" / "drive.html").read_text(encoding="utf-8")
     js = (PORTAL / "static" / "drive-app.js").read_text(encoding="utf-8")
-    assert 'id="k-fav"' in html and "data-fav-add=" in html and "music.favorites_add" in html
-    assert "postJSON(cfg.favAdd" in js and 'busy("#k-lib"' in js
+    # one trio key down the left edge: play/pause, next, the star (the Captain, 2026-11-02), first in the deck
+    deck = html[html.index('<div class="deck">'):]
+    assert deck.index('id="k-play"') < deck.index('id="k-book"') and "#k-play { grid-column: 1; grid-row: 1 / span 2; }" in html
+    assert all(f'class="hit {h}"' in html for h in ("play", "next", "fav")) and "data-fav-add=" in html and "music.favorites_add" in html
+    assert "postJSON(cfg.favAdd" in js and 'busy("#k-lib"' in js and 'data-tap="' in html and "sendBeacon(cfg.tap" in js
 
 
 def test_the_steering_wheel_knob_skips_whichever_signal_the_car_sends():

@@ -5,12 +5,14 @@
 {% block glyph %}wheel{% endblock %}
 {% block head %}
 <style>
-  /* Drive (drive.py): seven big keys, one screen, for the Tesla's browser. 4 x 2 on the car's wide screen, 2 x 4 upright (the star,
-     "add to favorites", came 2026-11-02; the last cell stays empty rather than one key stretched across).
+  /* Drive (drive.py): one screen for the Tesla's browser. The trio (play/pause, next, the star) is one tall key down the left edge,
+     nearest the driver (2026-11-02); the other five fill 3 x 2 beside it (one cell stays empty). Upright: the trio down the left
+     half, the rest beside and below it.
      Skippy's key IS his face (the pods' own, static/skippy-face.js); the last key is the house's lamps. */
   #drive { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
   #drive .deck { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 14px; }
   #drive .deck > .unit:last-child { grid-column: auto; }
+  #drive .deck > #k-play { grid-column: 1; grid-row: 1 / span 2; }
   @media (max-aspect-ratio: 1/1) { #drive .deck { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(4, minmax(0, 1fr)); } }
   #drive .unit .g { width: 42%; max-width: 132px; stroke-width: 1.1; }
   #drive .unit .g.sub { position: absolute; right: 14%; bottom: 22%; width: 22%; max-width: 46px; aspect-ratio: 1; z-index: 1; opacity: .9; }
@@ -44,11 +46,13 @@
   #k-lib .g { color: #ff6a00; filter: drop-shadow(0 0 4px #c00000); }
   #k-lib .g.sub { color: #ff2a00; }
   @media (prefers-reduced-motion: reduce) { #k-disc .plate, #k-disc .g { animation: none; } }
-  /* play/pause and next share one key, split down the middle */
-  #k-play .pair { position: relative; z-index: 1; display: flex; width: 100%; height: 100%; align-items: center; justify-content: space-around; }
-  #k-play .pair .g { width: 36%; }
-  #k-play .split { position: absolute; z-index: 1; left: 50%; top: 18%; bottom: 18%; width: 1px; background: var(--accent); opacity: .5; }
-  #k-play .hit.play { right: 50%; } #k-play .hit.next { left: 50%; }
+  /* the trio: play/pause, next and the star stacked in one key, a third each, split by two lines */
+  #k-play .trio { position: relative; z-index: 1; display: flex; flex-direction: column; width: 100%; height: 100%; align-items: center; justify-content: space-around; }
+  #k-play .trio .g { width: auto; height: 22%; max-width: 60%; aspect-ratio: 1; }
+  #k-play .trio .fav-g { color: var(--amber); }
+  #k-play .split { position: absolute; z-index: 1; left: 18%; right: 18%; height: 1px; background: var(--accent); opacity: .5; }
+  #k-play .split.s1 { top: 33.3%; } #k-play .split.s2 { top: 66.6%; }
+  #k-play .hit.play { bottom: 66.6%; } #k-play .hit.next { top: 33.3%; bottom: 33.3%; } #k-play .hit.fav { top: 66.6%; }
   #k-skippy .face { position: relative; z-index: 1; height: 86%; aspect-ratio: 1; max-width: 92%; }
   #k-skippy .face img, #k-skippy .face canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
   #k-skippy .face canvas { opacity: 0; } #k-skippy.live .face canvas { opacity: 1; } #k-skippy.live .face img { display: none; }
@@ -64,7 +68,7 @@
 {% endblock %}
 {% block content %}
 <section id="drive"
-         data-music-gate="{{ url_for('music.player_gate') }}" data-favorites="{{ url_for('music.favorites_list') }}" data-played="{{ url_for('music.favorites_played') }}" data-fav-add="{{ url_for('music.favorites_add') }}"
+         data-music-gate="{{ url_for('music.player_gate') }}" data-favorites="{{ url_for('music.favorites_list') }}" data-played="{{ url_for('music.favorites_played') }}" data-fav-add="{{ url_for('music.favorites_add') }}" data-tap="{{ url_for('telemetry_tap') }}"
          data-book-gate="{{ url_for('audiobooks.gate') }}" data-voice-gate="{{ url_for('chat.voice_gate') }}"
          data-send="{{ url_for('housechat.home_chat_send') }}" data-events="{{ url_for('housechat.home_chat_events') }}"
          data-ort="{{ url_for('static', filename='vendor/ort/') }}"
@@ -74,42 +78,39 @@
   <div id="now" aria-live="polite"><svg class="g" aria-hidden="true"><use id="now-g" href="#g-wheel"/></svg><span id="now-t"></span></div>
   <div id="now-bar"><i></i></div>
   <div class="deck">
-    <div class="unit named" id="k-book" style="--accent: var(--violet); --i: 0">
+    {# The trio (the Captain, 2026-11-02): play/pause, next and the star are one key, down the left edge, nearest the driver's hand #}
+    <div class="unit" id="k-play" style="--i: 0">
+      <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
+      <span class="trio"><svg class="g" aria-hidden="true"><use id="k-play-g" href="#g-play"/></svg><svg class="g" aria-hidden="true"><use id="k-next-g" href="#g-next"/></svg><svg class="g fav-g" aria-hidden="true"><use href="#g-star"/></svg></span>
+      <i class="split s1"></i><i class="split s2"></i>
+      <button class="hit play" type="button" aria-label="Play or pause" data-tel="drive:play-or-pause"></button>
+      <button class="hit next" type="button" aria-label="Next song, or 30 seconds on in the book" data-tel="drive:next-song-or-30"></button>
+      <button class="hit fav" type="button" aria-label="Add this song to my favorites" data-tel="drive:favorite"></button>
+    </div>
+    <div class="unit named" id="k-book" style="--accent: var(--violet); --i: 1">
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
       <svg class="g" aria-hidden="true"><use href="#g-book"/></svg>
       <span class="name" id="k-book-t"></span>
       <button class="hit" type="button" aria-label="Play my audiobook" data-tel="drive:play-my-audiobook"></button>
     </div>
-    <div class="unit named" id="k-disc" style="--accent: var(--pink); --i: 1">
+    <div class="unit named" id="k-disc" style="--accent: var(--pink); --i: 2">
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
       <svg class="g" aria-hidden="true"><use href="#g-shuffle"/></svg><svg class="g sub" aria-hidden="true"><use href="#g-globe"/></svg>
       <span class="name" id="k-disc-t"></span>
-      <button class="hit" type="button" aria-label="Bilby Shuffle: discovery (songs you have not heard)" data-tel="drive:bilby-shuffle"></button>
+      <button class="hit" type="button" aria-label="Bilby Shuffle: discovery (songs you have not heard)" data-tel="drive:shuffle-discovery"></button>
     </div>
-    <div class="unit named" id="k-lib" style="--accent: var(--pink); --i: 2">
+    <div class="unit named" id="k-lib" style="--accent: var(--pink); --i: 3">
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
       <svg class="g" aria-hidden="true"><use href="#g-shuffle"/></svg><svg class="g sub" aria-hidden="true"><use href="#g-star"/></svg>
       <span class="name" id="k-lib-t"></span>
-      <button class="hit" type="button" aria-label="Bilby Shuffle: library (my favorites)" data-tel="drive:bilby-shuffle"></button>
+      <button class="hit" type="button" aria-label="Bilby Shuffle: library (my favorites)" data-tel="drive:shuffle-library"></button>
     </div>
-    <div class="unit named" id="k-skippy" style="--accent: var(--green); --i: 3">
+    <div class="unit named" id="k-skippy" style="--accent: var(--green); --i: 4">
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
       <span class="face" aria-hidden="true"><img src="{{ url_for('static', filename='skippy/skippy-head.png') }}" alt="" width="256" height="256"><canvas width="480" height="480"></canvas></span>
       <button class="hit voice" type="button" aria-label="Skippy" data-tel="drive:skippy"><svg style="display:none" aria-hidden="true"><use href="#g-ear"/></svg></button>
     </div>
-    <div class="unit" id="k-play" style="--i: 4">
-      <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
-      <span class="pair"><svg class="g" aria-hidden="true"><use id="k-play-g" href="#g-play"/></svg><svg class="g" aria-hidden="true"><use id="k-next-g" href="#g-next"/></svg></span>
-      <i class="split"></i>
-      <button class="hit play" type="button" aria-label="Play or pause" data-tel="drive:play-or-pause"></button>
-      <button class="hit next" type="button" aria-label="Next song, or 30 seconds on in the book" data-tel="drive:next-song-or-30"></button>
-    </div>
-    <div class="unit" id="k-fav" style="--accent: var(--amber); --i: 5">
-      <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
-      <svg class="g" aria-hidden="true"><use href="#g-star"/></svg>
-      <button class="hit" type="button" data-tel="drive:favorite" aria-label="Add this song to my favorites"></button>
-    </div>
-    <div class="unit" id="k-house" style="--accent: var(--green); --i: 6">
+    <div class="unit" id="k-house" style="--accent: var(--green); --i: 5">
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
       <span class="lamps">{% for id, glyph, name in lamps %}<i data-lamp="{{ id }}" title="{{ name }}"><svg class="g" aria-hidden="true"><use href="#g-{{ glyph }}"/></svg></i>{% endfor %}</span>
       <button class="hit" type="button" aria-label="The house: what is up and reachable" data-tel="drive:the-house"></button>
