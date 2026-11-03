@@ -135,6 +135,7 @@ def test_calculate_asks_for_the_chain_not_the_lookup(stage, question, calculated
     got, why, _ = stage.read(question, NOW)
     assert got is not None, why
     assert got.get("calculate", False) is calculated
+    assert got.get("budget_s") == (85 if calculated else None)                          # a calculation gets the ask route's whole budget; a lookup needs none
 
 
 def test_without_sigma_ground_the_roster_is_empty_and_planets_still_work(stage, monkeypatch):

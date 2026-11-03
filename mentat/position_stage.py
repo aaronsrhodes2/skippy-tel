@@ -123,6 +123,7 @@ def read(question: str, now: datetime.datetime | None = None) -> tuple[dict | No
     args = {"body_name": body, "when": when[0], "central_body": center}
     if _CALC.search(question):
         args["calculate"] = True                                   # the Captain's word: "calculate" means the N-body chain with its work shown, never the kernel's value alone
+        args["budget_s"] = 85                                      # the whole of the ask route's 90 s: the first live "calculate" (2026-11-03) overran the tool's 60 s default on a loaded box
     return args, "", when[1]
 
 
