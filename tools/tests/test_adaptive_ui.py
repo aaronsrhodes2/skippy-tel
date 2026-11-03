@@ -38,3 +38,11 @@ def test_taps_seen_days_surfaces_and_pairs():
 def test_the_overnight_words():
     assert U.words([]) == ""
     assert U.words([{"kind": "retire", "label": "Chat key: Attach", "why": "1 tap in 30 days"}]) == "retired Chat key: Attach (1 tap in 30 days)"
+
+
+def test_the_graveyard_lookup_matches_id_label_or_glyph():
+    g = {"retired": [{"id": "key-attach", "label": "Chat key: Attach", "glyph": "clip"},
+                     {"id": "key-tools", "label": "Chat key: Tools", "glyph": "tools"}]}
+    assert [m["id"] for m in U.matches(g, ["clip"])] == ["key-attach"]
+    assert [m["id"] for m in U.matches(g, ["TOOLS", "nope"])] == ["key-tools"]
+    assert len(U.matches(g, [])) == 2 and U.matches(g, ["camera"]) == []

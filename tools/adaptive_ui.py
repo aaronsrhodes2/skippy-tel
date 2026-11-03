@@ -5,6 +5,7 @@ reorders or suggests merges and says what it did. tools/nightly.py runs it and p
     python tools/adaptive_ui.py            # summarise and send; prints what the portal changed
     python tools/adaptive_ui.py --show     # summarise only: what would be sent (nothing changes)
     python tools/adaptive_ui.py --approve key-attach key-tools    # also retire these now (the Captain said so in chat)
+    python tools/adaptive_ui.py --graveyard [words]  # BEFORE adding a control: is one like it retired? (revive it instead)
 
 What it sends is counts per control (taps, days on screen, days since the last tap), the days each surface was in use, and how
 often one control's tap follows another's: no people, no pages beyond the surface they belong to.
@@ -92,6 +93,22 @@ def send(stats: dict, approved: list[str]) -> dict:
         return json.loads(r.read())
 
 
+def graveyard() -> dict:
+    token = vault_value("SKIPPY_HOME_TOKEN")
+    if not token:
+        raise SystemExit("no SKIPPY_HOME_TOKEN in the vault")
+    req = urllib.request.Request(f"{PORTAL}/home/graveyard", headers={"Authorization": f"Bearer {token}"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read())
+
+
+def matches(g: dict, words_: list[str]) -> list[dict]:
+    """The retired controls whose id, label or glyph has any of the words (all of them when no words)."""
+    want = [w.lower() for w in words_]
+    return [m for m in g.get("retired") or []
+            if not want or any(w in f"{m['id']} {m['label']} {m['glyph']}".lower() for w in want)]
+
+
 def words(changes: list[dict]) -> str:
     """One line for the overnight report ("" when nothing changed)."""
     said = {"retire": "retired", "order": "moved up", "merge": "could merge"}
@@ -102,7 +119,19 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--show", action="store_true", help="summarise only, send nothing")
     ap.add_argument("--approve", nargs="*", default=[], help="module ids to retire now (key-attach, key-tools, ...)")
+    ap.add_argument("--graveyard", nargs="*", metavar="WORD", help="list retired controls (matching any WORD): look before adding one")
     a = ap.parse_args(argv)
+    if a.graveyard is not None:
+        g = graveyard()
+        found = matches(g, a.graveyard)
+        for m in found:
+            why = next((e["why"] for e in g.get("ledger") or [] if e.get("id") == m["id"] and e.get("kind") == "retire"), "retired by hand")
+            print(f"{m['id']:<22} {m['label']}  ({why})")
+        if not found:
+            print("nothing like that in the Graveyard: adding it is fine" if a.graveyard else "the Graveyard is empty")
+        else:
+            print("revive one of these (Admin > Graveyard) instead of adding a new control, if it does the job")
+        return 0
     con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
     stats = summarise(con)
     if a.show:

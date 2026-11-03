@@ -954,6 +954,16 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             power.observe("pc", st["ups_on_battery"], st.get("ups_charge"), st.get("ups_runtime_min"))
         return jsonify(commands=commands)
 
+    @app.get("/home/graveyard")
+    def home_graveyard():
+        """What is in the Graveyard, for an agent about to add a control (CLAUDE.md: look here first, revive before you add):
+        every retired module with its label and glyph, and the tidy's latest changes with their reasons. Home token."""
+        if not home.authorized(request.headers.get("Authorization")):
+            abort(401)
+        retired = app.extensions["modules"].retired()
+        return jsonify(retired=[{"id": m.id, "label": m.label, "glyph": m.glyph} for m in modules_mod.MODULES if m.id in retired],
+                       ledger=app.extensions["adaptive"].ledger(40))
+
     @app.post("/home/adaptive")
     def home_adaptive():
         """skippy-pc's nightly summary of the portal's telemetry (tools/adaptive_ui.py): the controls are tidied from it (adaptive.py)

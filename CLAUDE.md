@@ -158,6 +158,9 @@ Actions (the sandbox can't reach GCP or run.app directly):
   a clicker breathes while busy (`SkippyKeys.busy`, `static/keys.js`); a lamp shows only when it has a state (docs/portal/README.md → The lamps).
   **The portal tidies itself** nightly from its telemetry (`portal/adaptive.py` + `tools/adaptive_ui.py`): prune, launcher order, merge
   suggestions, one change per surface a week, each undone in Admin > Graveyard (a hand revive pins it). Give every new control a `data-tel`.
+  **Before adding a control, look in the Graveyard** (the Captain, 2026-11-02): `python tools/adaptive_ui.py --graveyard <words>` lists the
+  retired controls like it, with why each went. If one does the job, revive it (and say so) instead of adding a new one. Then ask first
+  whether the system could make that decision itself instead (choices are a tax on every visit: decide, act, say it, one-tap undo).
 - **Back and Close sit side by side, and look different** (the Captain, 2026-10-27): any view with both puts them next to each other, and they
   differ in glyph and shape (Back an arrow, Close a cross), never two near-identical keys.
 - Copyable things (the Captain's rule: **one click, everywhere**): anything a person is expected to

@@ -133,3 +133,14 @@ def test_the_launcher_follows_the_adaptive_order():
     vm.metadata[A.KEY] = json.dumps({"order": ["skippy", "tabletop", "games"]})
     app = portal.create_app(dict(SETTINGS), vm=vm, skippy=FakeSkippy())
     assert app.extensions["adaptive"].order()[:3] == ["skippy", "tabletop", "games"]
+
+
+def test_an_agent_can_look_in_the_graveyard_before_adding_a_control():
+    app = portal.create_app(dict(SETTINGS), vm=FakeVm(), skippy=FakeSkippy())
+    c = app.test_client()
+    assert c.get("/home/graveyard").status_code == 401
+    H = {"Authorization": f"Bearer {_pair(c)}"}
+    c.post("/home/adaptive", json={"stats": stats(BUSY_CHAT)}, headers=H)
+    d = c.get("/home/graveyard", headers=H).get_json()
+    assert {"id": "key-attach", "label": "Chat key: Attach", "glyph": "clip"} in d["retired"]
+    assert d["ledger"][0]["id"] == "key-attach" and d["ledger"][0]["why"]

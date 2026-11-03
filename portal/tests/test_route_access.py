@@ -56,7 +56,7 @@ REGISTRY = {
     **{e: MACHINE for e in (
         "game_import_done", "game_import_download", "home_import_chunk", "home_job_done", "home_jobs", "home_media", "home_music_checkin", "home_music_favorite", "home_music_favorites", "home_music_tired", "housechat.home_house_sync", "home_deploys", "home_alert", "home_alarms", "home_report", "home_starter",
         "home_prophesy_put", "home_prophesy_finish",
-        "home_telemetry", "home_workshop", "home_workshop_list", "home_patient", "home_ups", "home_adaptive", "home_core_report", "home_logs", "ops_home", "tasks_run", "google_link.home_access")},
+        "home_telemetry", "home_workshop", "home_workshop_list", "home_patient", "home_ups", "home_adaptive", "home_graveyard", "home_core_report", "home_logs", "ops_home", "tasks_run", "google_link.home_access")},
     "telemetry_tap": BEACON, "telemetry_seen": BEACON,
     # public: sign-in, the front door, static and informational pages, the public experiments (free local compute, rate limited)
     **{e: PUBLIC for e in (
