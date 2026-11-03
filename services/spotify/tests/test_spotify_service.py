@@ -147,11 +147,14 @@ def test_the_relay_hands_the_fifo_to_the_hub_unaltered_and_drops_what_nobody_hea
         port = s.getsockname()[1]
     relay = S.Relay(tmp_path / "audio", port, host="127.0.0.1", log=lambda *_: None, sleep=lambda _s: None)
     threading.Thread(target=relay.serve, daemon=True).start()
-    for _ in range(50):
-        if (tmp_path / "audio").exists():
+    w = None
+    for _ in range(50):                                   # the FIFO appears a moment before the relay opens it to read: until then a
+        try:                                              # non-blocking writer gets ENXIO (CI lost that race, 2026-11-02)
+            w = os.open(tmp_path / "audio", os.O_WRONLY | os.O_NONBLOCK)      # the player's open: fails unless a reader holds the FIFO
             break
-        time.sleep(0.05)
-    w = os.open(tmp_path / "audio", os.O_WRONLY | os.O_NONBLOCK)              # the player's open: fails unless a reader holds the FIFO
+        except (FileNotFoundError, OSError):
+            time.sleep(0.05)
+    assert w is not None, "the relay never opened its FIFO to read"
     os.set_blocking(w, True)
     os.write(w, b"old" * 100)                                                # nobody listening: read and dropped
     time.sleep(0.3)
