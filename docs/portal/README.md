@@ -449,6 +449,27 @@ The car plays a track as its album from that track; the page watches `/car` ever
 length has passed (`DrivePure.carDone`). No car Spotify (not open, home silent): the shuffle goes on with Bilby's rows. When Skippy has spoken over
 a Spotify row and the car paused it, the page plays it on.
 
+## Texts (the Captain's Google Voice texts, `/texts`: admin only, never a grant)
+
+With his phone on Wi-Fi only (2026-11-02) his texts, and the codes in them, reach him through Google Voice, which **forwards each text to his
+Gmail** (the one manual step: Google Voice > Settings > Messages > Forward messages to email; the mails come from `txt.voice.google.com`, subject
+"New text message from Alice (+1 555-123-4567)", Voice's footer after a `--` line). `portal/texts.py` reads them with the read-only grant that
+Connect Google for Skippy already holds (`gmail.readonly`, `portal/google_link.py`): `from:txt.voice.google.com newer_than:7d`, each mail
+`format=full`, a mail parsed once and remembered in memory until it leaves the 7 days, Gmail asked again at most every 30 s. It sends nothing and
+stores nothing. Not connected, mail not allowed (the Gmail box unticked at Google's consent), Gmail refusing or stumbling are a plain `why` in the
+JSON and on the page, never an error; a stumbling Gmail keeps showing the last good list.
+- **A code** is a 4-8 digit run within 80 characters of code, verification, verify, OTP, passcode, PIN, password or one-time (the nearest one wins;
+  beside such a word even `2024` is a code), else the one number in a short text (80 characters) unless it is a year or has a unit after it.
+  A phone number, a date, an amount, a percentage, a link is never a code. A split code (`123 456`) is joined into one beside a keyword.
+- **The page** (`GET /texts`, `templates/texts.html`): newest first, a screen at a time (`Bridge.PList`), each text its sender, time and
+  two lines; a code is a `<code class="code">` chip (one tap copies, `static/copy.js`). Launcher tile "Texts" (admin only).
+- **The code chip** (`static/texts-chip.js`, on `/hud` and `/drive` through `data-texts` on `#drive`): polled every minute while the page is
+  visible. A code under five minutes old (`fresh` in `GET /texts/state`: `{code, sender, at, age_s}`, worked out at the moment of asking and using
+  the portal's own `age_s`, so a car's wrong clock does not matter) is a big green chip beside the now-playing line until its five minutes are up;
+  a tap copies it and puts it away for good; **in hub mode it is said once**, digit by digit ("Your code is 4 8 2 9 1 3").
+- **Purple** has `texts_latest_code` (`services/purple-tools`, machine door `GET /home/texts/code`): the code, who sent it and how long ago, or why there is none.
+- Tests: `portal/tests/test_texts.py` (parsing, cache, fresh, every failure, the doors), `portal/tests/js/texts.test.js`, `services/purple-tools/tests/test_texts_tool.py`.
+
 ## Nagatha's Video Service (the Captain's films, `/video`)
 
 The Captain's Jellyfin library on skippy-pc (285 films, 11 collections) in any browser: a phone, a laptop, a TV browser. Admin only,

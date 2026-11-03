@@ -74,6 +74,7 @@ import alarms as alarms_web
 import google_link
 import drive as drive_mod
 import hud as hud_mod
+import texts as texts_mod
 import ship as ship_mod
 import tabletop as tabletop_mod
 import chat_history
@@ -366,7 +367,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         wanted = {"skippy": auth.has_portal(who, "skippy"), "games": bool(shown), "play": auth.has_portal(who, "play"),
                   "music": auth.has_portal(who, "audio"), "video": auth.has_portal(who, "video"), "books": auth.is_admin(who),
                   "experiments": auth.has_portal(who, "experiments"), "tabletop": auth.has_portal(who, "tabletop"),
-                  "car": auth.is_admin(who), "alarms": auth.is_admin(who), "drive": auth.is_admin(who), "hud": auth.is_admin(who),
+                  "car": auth.is_admin(who), "alarms": auth.is_admin(who), "drive": auth.is_admin(who), "hud": auth.is_admin(who), "texts": auth.is_admin(who),
                   "dashboard": auth.is_admin(who) and "me" in app.blueprints, "admin": auth.is_admin(who)}
         tiles = []
         order = app.extensions["adaptive"].order()                   # the launcher's order follows use (adaptive.py: promote)
@@ -857,6 +858,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     car_web.init_app(app, home)                         # the Captain's Tesla, read only (docs/tesla.md)
     hud_mod.init_app(app)                                       # the glasses view: /hud/test first (hud.py)
     drive_mod.init_app(app, home)                           # Drive: the book, the shuffles and Skippy, for the Tesla's browser (drive.py)
+    texts_mod.init_app(app, home, lambda: app.extensions.get("google_link"))   # Google Voice's texts and the codes in them, read from Gmail (texts.py)
     ships = ship_mod.ShipWatch(github, app.extensions["recovery"]["runs"])   # the private Skippy's ship card
     app.extensions["ships"] = ships
     # Tell the Captain on Discord when a private-Skippy run ends (notify.py: a DM to him only, one per run, switchable).

@@ -47,6 +47,7 @@ MODULES = (
     Module("alarms", "bell", "alarms.page", "Alarms and timers"),
     Module("drive", "wheel", "drive.page", "Drive"),
     Module("hud", "eye", "hud.page", "Glasses"),            # the glasses' (and phone's) view: Drive with purple Skippy and a hub mode (hud.py)
+    Module("texts", "chats", "texts.page", "Texts"),        # Google Voice's texts and the codes in them, read from Gmail (texts.py)
     Module("dashboard", "gauge", "me.index", "Dashboard"),
     Module("admin", "gear", "admin.index", "Admin", retirable=False),
     # /me panes (id = "me-" + the pane's id in templates/me.html). MCP and Home are what /me is for; the rest wait here to be retired when

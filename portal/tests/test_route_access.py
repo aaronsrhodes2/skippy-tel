@@ -32,7 +32,7 @@ REGISTRY = {
         "admin.autoconfigure", "music.favorites_list", "music.favorites_add", "music.favorites_remove", "music.favorites_played", "music.favorites_m3u", "admin.discord_setup", "admin.friends_remove", "admin.friends_save", "admin.index", "admin.logs",
         "admin.module_switch", "themes_set", "vision.flash", "authlink.new", "vision.add_file", "vision.read_signs", "vision.look", "vision.listing", "vision.moment_file", "vision.moment_delete", "vision.moment_keep", "admin.requests_dismiss", "admin.restart", "admin.settings", "recovery.repair", "recovery.state_json", "server_admin.fragment",
         "audiobooks.page", "audiobooks.gate", "audiobooks.rooms", "audiobooks.command",
-        "status.page", "status.state_json", "status.heal", "status.repair", "status.logs", "status.probe", "car.page", "car.state", "alarms.page", "alarms.state", "alarms.do", "drive.page", "hud.test", "hud.page", "drive.spotify_mix", "drive.spotify_car", "drive.spotify_play", "drive.spotify_pause", "drive.house", "drive.last",
+        "status.page", "status.state_json", "status.heal", "status.repair", "status.logs", "status.probe", "car.page", "car.state", "alarms.page", "alarms.state", "alarms.do", "drive.page", "hud.test", "hud.page", "texts.page", "texts.state", "drive.spotify_mix", "drive.spotify_car", "drive.spotify_play", "drive.spotify_pause", "drive.house", "drive.last",
         "me.index", "me.mcp_ask", "me.mcp_result", "me.pair_home", "me.toggle_experiment", "me.workshop_events", "me.workshop_history", "me.workshop_history_result",
         "me.workshop_image", "me.workshop_new_folder", "me.workshop_new_folder_result", "me.workshop_notify", "me.workshop_resync", "me.workshop_send", "me.workshop_ship", "me.workshop_stop",
         "chat.memory_ask", "chat.memory_result", "chat.quick_line",
@@ -56,7 +56,7 @@ REGISTRY = {
     **{e: MACHINE for e in (
         "game_import_done", "game_import_download", "home_import_chunk", "home_job_done", "home_jobs", "home_media", "home_music_checkin", "home_music_favorite", "home_music_favorites", "home_music_tired", "housechat.home_house_sync", "home_deploys", "home_alert", "home_alarms", "home_report", "home_starter",
         "home_prophesy_put", "home_prophesy_finish",
-        "home_telemetry", "home_workshop", "home_workshop_list", "home_patient", "home_ups", "home_adaptive", "home_graveyard", "vision.home_flash", "vision.home_moments", "vision.home_moment_file", "vision.home_sweep", "home_core_report", "home_logs", "ops_home", "tasks_run", "google_link.home_access")},
+        "home_telemetry", "home_workshop", "home_workshop_list", "home_patient", "home_ups", "home_adaptive", "home_graveyard", "vision.home_flash", "vision.home_moments", "vision.home_moment_file", "vision.home_sweep", "home_core_report", "home_logs", "ops_home", "tasks_run", "google_link.home_access", "texts.home_code")},
     "telemetry_tap": BEACON, "telemetry_seen": BEACON,
     # public: sign-in, the front door, static and informational pages, the public experiments (free local compute, rate limited)
     **{e: PUBLIC for e in (

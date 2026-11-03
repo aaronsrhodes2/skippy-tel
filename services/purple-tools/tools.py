@@ -470,6 +470,21 @@ def vision_moment(args: dict, request=_home_request, cwd: Path | None = None) ->
     return _moment_line(moment) + clip + ("\nSaved: " + ", ".join(saved) + "\nRead a picture to look at it." if saved else "\nNo pictures could be fetched.")
 
 
+# ── his texts: the verification code that just arrived (Google Voice's forwarding to his Gmail, read by portal/texts.py) ─────────────────────────────
+def texts_latest_code(args: dict, request=_home_request) -> str:
+    """The code from a text that came in during the last five minutes, with who sent it; or why there is none."""
+    status, got = request("GET", f"{PORTAL_URL}/home/texts/code")
+    if status != 200 or not isinstance(got, dict):
+        raise ValueError(f"texts_latest_code: the portal answered {status}")
+    if got.get("code"):
+        ago = max(0, int(got.get("age_s") or 0))
+        when = "just now" if ago < 45 else f"{max(1, round(ago / 60))} min ago"
+        return f"The code is {got['code']} (from {got.get('sender') or 'an unknown sender'}, {when}). Digit by digit: {' '.join(str(got['code']))}."
+    if not got.get("connected"):
+        return f"His texts can't be read yet: {_clean(got.get('why') or 'Google is not connected', 200)}"
+    return "No recent code: nothing with a verification code has come in his texts in the last five minutes." + (f" ({_clean(got['why'], 120)})" if got.get("why") else "")
+
+
 # ── the Captain's Spotify: skippy-pc's Spotify speaker and his sign-in, in the spotify container (services/spotify) ───────────────────────────────────
 SPOTIFY_URL = os.environ.get("PURPLE_SPOTIFY_URL", "http://127.0.0.1:43873").rstrip("/")
 SPOTIFY_URI = re.compile(r"spotify:(?:track|album|playlist|artist):[A-Za-z0-9]{22}")
@@ -646,6 +661,12 @@ TOOLS: dict[str, dict] = {
             "id": {"type": "string", "description": "a moment's id, like 20261102-210000 (omit to list the latest)"},
             "limit": {"type": "integer", "description": "when listing: how many, 1 to 10 (default 5)"}}},
         "run": vision_moment},
+    "texts_latest_code": {
+        "description": "His text messages (Google Voice, read through his Gmail): the verification code from a text that arrived in the last five minutes, and who "
+                       "sent it. Use it when he says 'what's my code', 'read me the code' or is signing in somewhere and waiting for one. Says 'no recent code' "
+                       "when there is none, and why when his texts cannot be read.",
+        "input_schema": {"type": "object", "properties": {}},
+        "run": texts_latest_code},
 }
 
 

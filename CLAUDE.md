@@ -273,6 +273,17 @@ only when the gate's `/health` says `ready`. Direct play when the catalog says `
 `portal/static/vendor/`, Safari's own on Apple). Run it against the REAL gate on this machine with `python portal/tests/dev_video.py`.
 Full description and tests: `docs/portal/README.md` → Nagatha's Video Service.
 
+## Texts (Google Voice's texts, `/texts`: admin only, never a grant)
+
+His phone is Wi-Fi only (2026-11-02), so his texts reach him through Google Voice, which forwards each one to his Gmail (**his one manual step:
+Google Voice > Settings > Messages > Forward messages to email**; the mails come from `txt.voice.google.com`). `portal/texts.py` reads them with the
+read-only grant Connect Google for Skippy already holds (`gmail.readonly`, `google_link.py`); it sends nothing, keeps nothing, and a missing or broken
+grant is a plain "why" on the page, never an error. `GET /texts` is the page (newest first, a screen at a time, a verification code a `<code class="code">` chip),
+`GET /texts/state` the JSON (cached 30 s), machine `GET /home/texts/code` is purple's `texts_latest_code`. **A code under five minutes old is a big tap-to-copy
+chip on `/hud` and `/drive`** (`static/texts-chip.js`, polled every minute) and in hub mode is said once, digit by digit. A code is a 4-8 digit run beside a word
+like code/verify/OTP/PIN, or the one number in a short text; never a phone number, date, amount or lone year. Tests: `portal/tests/test_texts.py`,
+`portal/tests/js/texts.test.js`, `services/purple-tools/tests/test_texts_tool.py`. Full description: `docs/portal/README.md` → Texts.
+
 ## The Tabletop (Heroes of Chance, `/tabletop`)
 
 The Captain's Daggerheart campaign (the lore is in `../heroes-of-chance`), as one page: a card per hero along the top, the Fear in the

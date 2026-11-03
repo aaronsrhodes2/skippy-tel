@@ -107,6 +107,7 @@
          data-sp-mix="{{ url_for('drive.spotify_mix') }}" data-sp-car="{{ url_for('drive.spotify_car') }}"
          data-sp-play="{{ url_for('drive.spotify_play') }}" data-sp-pause="{{ url_for('drive.spotify_pause') }}"
          data-house="{{ url_for('drive.house') }}" data-last="{{ url_for('drive.last') }}" data-rooms="{{ url_for('audiobooks.rooms') }}" data-room-cmd="{{ url_for('audiobooks.command') }}" data-frames="{{ url_for('static', filename='skippy/face/') }}"
+         data-texts="{{ url_for('texts.state') }}"
          data-vision-moments="{{ url_for('vision.listing') }}" data-vision-add="{{ url_for('vision.add_file', mid='_MID_') }}"
          data-snapshot-lib="{{ url_for('static', filename='vendor/html2canvas.min.js') }}"{% if hud %}
          data-vision="{{ url_for('vision.flash') }}" data-link-new="{{ url_for('authlink.new') }}" data-vision-read="{{ url_for('vision.read_signs') }}" data-vision-look="{{ url_for('vision.look') }}" data-vision-delete="{{ url_for('vision.moment_delete', mid='_MID_') }}" data-vision-keep="{{ url_for('vision.moment_keep', mid='_MID_') }}"{% endif %}>
@@ -170,6 +171,7 @@
 <script src="{{ url_for('static', filename='skippy-face.js') }}"></script>
 <script src="{{ url_for('static', filename='skippy-wake.js') }}"></script>
 <script src="{{ url_for('static', filename='vision.js') }}"></script>
+<script src="{{ url_for('static', filename='texts-chip.js') }}"></script>
 <script src="{{ url_for('static', filename='vendor/ort/ort.wasm.min.js') }}"></script>
 <script src="{{ url_for('static', filename='drive-app.js') }}"></script>
 {% endblock %}
