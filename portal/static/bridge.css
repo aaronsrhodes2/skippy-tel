@@ -608,3 +608,12 @@ blockquote.quote { margin: 0 0 6px; padding: 1px 0 1px 8px; border-left: 3px sol
 .theme-pick button i { display: block; width: 100%; height: 100%; }
 .theme-pick button[aria-pressed="true"] { outline: 2px solid #fff; outline-offset: -4px; }
 .theme-pick .mini { display: flex; width: 100%; height: 100%; } .theme-pick .mini b { flex: 1; }
+
+/* Moments in Your chats (portal/vision.py): a row of the pictures of one flash under its time and what was said or read */
+.chat-row.moment .chat-open { cursor: default; }
+.moment-strip { display: flex; gap: 4px; margin-top: 4px; max-width: 100%; overflow: hidden; }
+.moment-strip a { flex: none; display: block; border: 1px solid var(--line); }
+.moment-strip img { display: block; width: 64px; height: 40px; object-fit: cover; background: #000; }
+.moment-strip .moment-clip { display: grid; place-items: center; width: 40px; height: 40px; color: var(--accent); }
+.moment-strip .moment-clip .g { width: 18px; height: 18px; }
+.chat-row.moment-gone .chat-open { color: var(--muted); }

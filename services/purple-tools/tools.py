@@ -400,6 +400,76 @@ def bilby_favorite(args: dict, request=None) -> str:
     return f"Added to his favorites: {f.get('artist') or '?'} - {f.get('title') or f.get('track')}" + (" (already there; moved to the top)" if int(f.get("count") or 1) > 1 else "")
 
 
+# ── Skippy-vision: one flash of what the house and the PC show (portal/vision.py; the Captain's key and words "snap" do the same) ──────────────────────
+def _home_request(method: str, url: str, body=None, timeout: float = 30.0, raw: bool = False):
+    """(status, json or bytes) from the portal with the home token."""
+    token = _home_token()
+    if not token:
+        raise ValueError("no home token on this PC")
+    req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None, method=method,
+                                 headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = r.read(30_000_000)
+            return r.status, data if raw else json.loads(data or b"{}")
+    except urllib.error.HTTPError as e:
+        data = e.read(1_000_000)
+        return e.code, data if raw else (json.loads(data) if data[:1] in (b"{", b"[") else {})
+
+
+def vision_flash(args: dict, request=_home_request) -> str:
+    """Save a moment of what skippy-pc can see right now: the pods' screens and this PC's monitors."""
+    code, got = request("POST", f"{PORTAL_URL}/home/vision/flash", {})
+    if code == 503:
+        raise ValueError("vision_flash: moments have no storage yet (the portal's bucket)")
+    if code != 200 or not got.get("id"):
+        raise ValueError(f"vision_flash: the portal answered {code}")
+    waiting = "; the pods' and this PC's screens are arriving (about 30 s)" if got.get("pending") else "; skippy-pc isn't reporting, so nothing was fetched"
+    return f"Saved moment {got['id']}{waiting}. Look at it with vision_moment (id {got['id']})."
+
+
+def _moment_line(m: dict) -> str:
+    when = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(int(m.get("at") or 0)))
+    seen = "; ".join(_clean(s.get("en") or s.get("text"), 80) for s in (m.get("seen") or [])[:2] if isinstance(s, dict))
+    bits = [f"{len(m.get('files') or [])} files", f"by {m.get('by')}"]
+    if m.get("hold"):
+        bits.append("clip")
+    if m.get("said"):
+        bits.append(f"said: {_clean(m['said'], 120)}")
+    if seen:
+        bits.append(f"read: {seen}")
+    if m.get("pending"):
+        bits.append("still arriving")
+    return f"{m.get('id')} · {when} · " + ", ".join(bits)
+
+
+def vision_moment(args: dict, request=_home_request, cwd: Path | None = None) -> str:
+    """The latest moments, or one moment's pictures saved into .purple-out/ to Read."""
+    mid = str(args.get("id") or "").strip()
+    if mid and not re.fullmatch(r"\d{8}-\d{6}(?:-\d{1,2})?", mid):
+        raise ValueError("vision_moment: an id looks like 20261102-210000")
+    code, got = request("GET", f"{PORTAL_URL}/home/vision/moments?limit={30 if mid else max(1, min(10, int(args.get('limit') or 5)))}")
+    if code != 200:
+        raise ValueError(f"vision_moment: the portal answered {code}")
+    moments = got.get("moments") or []
+    if not mid:
+        return "\n".join(_moment_line(m) for m in moments)[:MAX_TEXT] or "No moments yet."
+    moment = next((m for m in moments if m.get("id") == mid), None)
+    if moment is None:
+        raise ValueError(f"vision_moment: no moment {mid} among the latest ones")
+    folder = (cwd or Path.cwd()) / ".purple-out" / f"moment-{mid}"
+    folder.mkdir(parents=True, exist_ok=True)
+    saved = []
+    for f in [x for x in moment.get("files") or [] if str(x.get("type") or "").startswith("image/")][:12]:
+        name = str(f.get("name") or "")
+        status, data = request("GET", f"{PORTAL_URL}/home/vision/moment/{mid}/{urllib.parse.quote(name)}", raw=True)
+        if status == 200 and isinstance(data, (bytes, bytearray)) and data:
+            (folder / name).write_bytes(bytes(data))
+            saved.append(str(folder / name))
+    clip = "; a 10-second clip is in the moment too (glasses-rgb-7s.zip, not fetched)" if any(x.get("name") == "glasses-rgb-7s.zip" for x in moment.get("files") or []) else ""
+    return _moment_line(moment) + clip + ("\nSaved: " + ", ".join(saved) + "\nRead a picture to look at it." if saved else "\nNo pictures could be fetched.")
+
+
 # ── the Captain's Spotify: skippy-pc's Spotify speaker and his sign-in, in the spotify container (services/spotify) ───────────────────────────────────
 SPOTIFY_URL = os.environ.get("PURPLE_SPOTIFY_URL", "http://127.0.0.1:43873").rstrip("/")
 SPOTIFY_URI = re.compile(r"spotify:(?:track|album|playlist|artist):[A-Za-z0-9]{22}")
@@ -563,6 +633,19 @@ TOOLS: dict[str, dict] = {
                        "(never the horn) and the Captain gets a Discord DM.",
         "input_schema": {"type": "object", "properties": {"action": {"type": "string", "enum": ["arm", "disarm", "status"]}}, "required": ["action"]},
         "run": car_sentry},
+    "vision_flash": {
+        "description": "Skippy-vision: save a MOMENT of what the house and this PC show right now, the screens of the room pods and of this PC's monitors "
+                       "(the Captain's glasses and phone join only when he presses the camera key himself). They arrive in about 30 seconds; look at them "
+                       "with vision_moment. Use it to see what is on his screens, or to keep proof of how something looked.",
+        "input_schema": {"type": "object", "properties": {}},
+        "run": vision_flash},
+    "vision_moment": {
+        "description": "Skippy-vision: list the latest moments (what was saved, when, how, what was said or read in them), or give an `id` to save that "
+                       "moment's pictures into .purple-out/ where you can Read them (the glasses' three cameras, the phone's, the pods' and the PC's screens).",
+        "input_schema": {"type": "object", "properties": {
+            "id": {"type": "string", "description": "a moment's id, like 20261102-210000 (omit to list the latest)"},
+            "limit": {"type": "integer", "description": "when listing: how many, 1 to 10 (default 5)"}}},
+        "run": vision_moment},
 }
 
 

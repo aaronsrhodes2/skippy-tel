@@ -49,6 +49,7 @@ import mentat_client
 import modules as modules_mod
 import adaptive as adaptive_mod
 import themes as themes_mod
+import vision as vision_mod
 import ops
 import play
 import audiobooks as audiobooks_mod
@@ -1071,6 +1072,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         owner = home.owner_of(job_id)
         request.max_content_length = media_mod.MAX_ONE
         ctype = (request.mimetype or "").lower()
+        job = home.job_of(job_id)
+        if job and job.get("kind") == "flash":              # a moment's screens (vision.py): into the moment, not the chat's pictures
+            ok = vision_mod.take_from_home(vision, job, request.args.get("name", ""), request.get_data(cache=False), ctype)
+            return (jsonify(ok=True), 200) if ok else (jsonify(error="not a screen this moment takes"), 400)
         if ctype in patient_mod.TYPES:                      # a picture or a song: kept in the bucket, so it outlives the portal (patient.py)
             data = request.get_data(cache=False)
             try:
@@ -1135,7 +1140,11 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             abort(401)
         if (request.content_length or 0) > home_mod.MAX_REPORT:
             abort(413)
-        return jsonify(ok=home.finish(job_id, request.get_json(silent=True) or {}))
+        job = home.job_of(job_id)
+        done = home.finish(job_id, request.get_json(silent=True) or {})
+        if done and job and job.get("kind") == "flash":     # the pods and the PC are all in: nothing pending (vision.py)
+            vision_mod.finished(vision, job)
+        return jsonify(ok=done)
 
     @app.post("/home/workshop/<task>")
     def home_workshop(task):
@@ -1409,6 +1418,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     # can't add a header without a CORS preflight this portal never answers.
     table = tabletop or tabletop_mod.Tabletop(tabletop_mod.store_from_env())
     app.extensions["tabletop"] = table
+    vision = vision_mod.init_app(app, home, notifier, table.store)     # Skippy-vision: one flash of every screen and camera (vision.py)
     heroes = tabletop_mod.Heroes(table)                # the party's sheets, their folders, and the GM's Fear
     tt = Blueprint("tabletop", __name__, url_prefix="/tabletop")
 

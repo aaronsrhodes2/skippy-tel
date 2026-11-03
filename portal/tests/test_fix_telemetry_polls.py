@@ -78,7 +78,9 @@ STATIC_SCRIPTS = {"keys.js": "base.html",   # the Captain's theme pick: POST to 
                   "vendor/html2canvas.min.js": "_chat.html",
                   # the Drive page; Skippy's duck (in every page: its setInterval only lets a stale duck go, no network); onnxruntime-web (the
                   # wake word: it fetches only its own .mjs/.wasm from static/vendor/ort/, the models come from voice-gate as buffers)
-                  "drive-app.js": "drive.html", "skippy-duck.js": "base.html", "vendor/ort/ort.wasm.min.js": "drive.html"}
+                  "drive-app.js": "drive.html", "skippy-duck.js": "base.html", "vendor/ort/ort.wasm.min.js": "drive.html",
+                  # Skippy-vision's flash (portal/vision.py): the page's data-vision-* URLs; Drive polls the moments' list
+                  "vision.js": "drive.html"}
 
 
 def template_text(template: Path) -> str:

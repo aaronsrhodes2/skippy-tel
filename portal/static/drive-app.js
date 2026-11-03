@@ -395,6 +395,8 @@
   }
 
   async function ask(text) {
+    const fw = vision && V.flashWord(text);                // "snap" / "snap it big time" are the camera key's words: never sent to Skippy
+    if (fw) { snap(fw === "hold", "word"); return; }
     if (cfg.wsSend) return askPurple(text);
     asking = true;
     try {
@@ -520,6 +522,55 @@
     if (pick.kind === "book") await playBook();
     else await shuffle(pick.mode, pick.track ? { track: pick.track, pos: pick.pos } : null);
   })();
+  // ── Skippy-vision (static/vision.js, portal/vision.py): one flash of every screen and camera (the Captain, 2026-11-02) ──
+  // /hud has the camera key: a tap saves a moment, a press of V.HOLD_MS saves it with the glasses' 7 s before and 3 s after; the words
+  // "snap" and "snap it big time" do the same. It says "Saved." (aloud in hub mode) and offers the trash key for 10 s: Forget.
+  // The Tesla's Drive page (/drive) has no key: it joins a moment made in the last minute by adding its own picture.
+  const V = window.SkippyVision, flashKey = $("#k-flash"), forgetKey = $("#k-forget");
+  let lastMoment = null, forgetTimer = 0, sayTimer = 0;
+  function note(text, ms) {                              // a line under the keys that fades; in hub mode there is no screen to read, so it is spoken
+    said(text); clearTimeout(sayTimer);
+    if (text) sayTimer = setTimeout(() => { const s = $("#said"); if (s && s.textContent === text) said(""); }, ms || 4000);
+    if (text && root.classList.contains("hub")) voice.say(text);
+  }
+  const vision = V && cfg.vision ? V.attach({
+    flash: cfg.vision, momentAdd: cfg.visionAdd, momentDelete: cfg.visionDelete, momentKeep: cfg.visionKeep, html2canvas: cfg.snapshotLib, pageName: "hud-page.jpg",
+    say: text => note(text),
+    onSaved: moment => {
+      lastMoment = moment; note("Saved.");
+      if (forgetKey) { forgetKey.hidden = false; clearTimeout(forgetTimer); forgetTimer = setTimeout(() => { forgetKey.hidden = true; }, 10000); }
+    },
+  }) : null;
+  async function snap(hold, by) {
+    if (!vision) return null;
+    if (flashKey) flashKey.classList.add("busy");
+    try { return await vision.flash(hold, by); } finally { if (flashKey) flashKey.classList.remove("busy"); }
+  }
+  if (vision && flashKey) {
+    let pressTimer = 0, held = false;
+    flashKey.addEventListener("pointerdown", () => { held = false; clearTimeout(pressTimer); pressTimer = setTimeout(() => { held = true; snap(true, "key"); }, V.HOLD_MS); });
+    ["pointerup", "pointerleave", "pointercancel"].forEach(ev => flashKey.addEventListener(ev, () => clearTimeout(pressTimer)));
+    flashKey.addEventListener("click", () => { if (held) { held = false; return; } snap(false, "key"); });       // (a hold already flashed: its click is not a tap)
+  }
+  if (vision && forgetKey) forgetKey.addEventListener("click", async () => {
+    const m = lastMoment; forgetKey.hidden = true; clearTimeout(forgetTimer); lastMoment = null;
+    if (m) note(await vision.forget(m.id) ? "Forgotten." : "Couldn't forget it.");
+  });
+  if (V && cfg.visionMoments && !cfg.vision) {
+    const joiner = V.attach({ momentAdd: cfg.visionAdd, html2canvas: cfg.snapshotLib, pageName: "drive-page.jpg" }), joined = new Set();
+    const look = async () => {
+      if (document.hidden) return;
+      try {
+        const r = await getJSON(cfg.visionMoments + "?limit=3&since=" + (Date.now() / 1000 - 60));
+        for (const m of r.moments || []) {
+          if (joined.has(m.id) || (m.files || []).some(f => f.name === "drive-page.jpg")) continue;
+          joined.add(m.id); joiner.addPage(m.id, "drive-page.jpg");
+        }
+      } catch (e) { /* not the Captain's, or home is silent: no moment to join */ }
+    };
+    setInterval(look, 15000);
+  }
+
   paint();
-  window.DriveApp = { S, voice, get ear() { return ear; }, shuffle, playBook, next, pollHouse, saveBook };
+  window.DriveApp = { S, voice, get ear() { return ear; }, get vision() { return vision; }, shuffle, playBook, next, pollHouse, saveBook };
 })();

@@ -64,6 +64,9 @@
   #drive.hud #k-skippy { --accent: var(--violet) !important; }
   #drive .hudkeys { display: flex; gap: 8px; margin-left: auto; }
   #drive .hudkeys .key { width: 40px; height: 40px; }
+  #drive .hudkeys .key[hidden] { display: none; }
+  #k-flash.busy { opacity: .55; }
+  #k-forget { --accent: var(--amber); color: var(--amber); }
   #said { min-height: 0; font: 600 20px var(--mono); color: var(--green); padding: 0 8px; overflow: hidden; display: -webkit-box;
           -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
   #said[hidden] { display: none; }
@@ -99,9 +102,14 @@
          data-ort="{{ url_for('static', filename='vendor/ort/') }}"
          data-sp-mix="{{ url_for('drive.spotify_mix') }}" data-sp-car="{{ url_for('drive.spotify_car') }}"
          data-sp-play="{{ url_for('drive.spotify_play') }}" data-sp-pause="{{ url_for('drive.spotify_pause') }}"
-         data-house="{{ url_for('drive.house') }}" data-last="{{ url_for('drive.last') }}" data-rooms="{{ url_for('audiobooks.rooms') }}" data-room-cmd="{{ url_for('audiobooks.command') }}" data-frames="{{ url_for('static', filename='skippy/face/') }}">
+         data-house="{{ url_for('drive.house') }}" data-last="{{ url_for('drive.last') }}" data-rooms="{{ url_for('audiobooks.rooms') }}" data-room-cmd="{{ url_for('audiobooks.command') }}" data-frames="{{ url_for('static', filename='skippy/face/') }}"
+         data-vision-moments="{{ url_for('vision.listing') }}" data-vision-add="{{ url_for('vision.add_file', mid='_MID_') }}"
+         data-snapshot-lib="{{ url_for('static', filename='vendor/html2canvas.min.js') }}"{% if hud %}
+         data-vision="{{ url_for('vision.flash') }}" data-vision-delete="{{ url_for('vision.moment_delete', mid='_MID_') }}" data-vision-keep="{{ url_for('vision.moment_keep', mid='_MID_') }}"{% endif %}>
   <div id="now" aria-live="polite"><svg class="g" aria-hidden="true"><use id="now-g" href="#g-wheel"/></svg><span id="now-t"></span>
     {% if hud %}<span class="hudkeys">
+      <button type="button" class="key" id="k-forget" hidden aria-label="Forget the moment just saved" title="Forget the moment just saved" data-tel="hud:forget"><svg class="g" aria-hidden="true"><use href="#g-trash"/></svg></button>
+      <button type="button" class="key" id="k-flash" aria-label="Skippy-vision: save this moment (hold for the 10-second clip)" title="Skippy-vision: save this moment (hold for the 10-second clip)" data-tel="hud:flash"><svg class="g" aria-hidden="true"><use href="#g-camera"/></svg></button>
       <button type="button" class="key" id="k-hub" aria-pressed="false" aria-label="Hub mode: hands-off, no touch" title="Hub mode: hands-off, no touch" data-tel="hud:hub"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg></button>
       <a class="key" href="{{ url_for('apps') }}" aria-label="Apps" title="Apps" data-tel="hud:apps"><svg class="g" aria-hidden="true"><use href="#g-apps"/></svg></a>
     </span>{% endif %}</div>
@@ -155,6 +163,7 @@
 <script src="{{ url_for('static', filename='skippy-voice.js') }}"></script>
 <script src="{{ url_for('static', filename='skippy-face.js') }}"></script>
 <script src="{{ url_for('static', filename='skippy-wake.js') }}"></script>
+<script src="{{ url_for('static', filename='vision.js') }}"></script>
 <script src="{{ url_for('static', filename='vendor/ort/ort.wasm.min.js') }}"></script>
 <script src="{{ url_for('static', filename='drive-app.js') }}"></script>
 {% endblock %}

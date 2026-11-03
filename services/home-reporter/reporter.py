@@ -1127,6 +1127,42 @@ def host_op(job: dict, token: str) -> dict:
     return {"error": f"The bridge said HTTP {status}."}
 
 
+_FLASH_NAME = re.compile(r"pod-[a-z0-9-]{1,30}\.png|pc-screen-\d\.png")
+
+
+def flash_job(job: dict, token: str) -> dict:
+    """The screens of skippy-pc's world for a Skippy-vision moment (portal/vision.py): the bridge (native Windows: this container can't
+    see the desktop) takes this PC's monitors and the room boxes' displays, and each comes back to the portal as it is, one PUT
+    /home/media/<job>?name= per screen, into the moment the job names. A screen that couldn't be taken is an error line, not a failure."""
+    if not BRIDGE:
+        return {"error": "The bridge isn't set up on skippy-pc (CLAUDE_BRIDGE_URL)."}
+    status, body = _bridge("POST", "/flash/screens", {}, token, timeout=90)
+    if status is None:
+        return {"error": "The bridge on skippy-pc isn't answering."}
+    if status != 200 or not isinstance(body, dict):
+        return {"error": f"The bridge said HTTP {status}."}
+    sent, errors = [], [str(e)[:160] for e in (body.get("errors") or [])][:8]
+    for f in (body.get("files") or [])[:12]:
+        name = str((f or {}).get("name") or "")
+        try:
+            data = base64.b64decode(str((f or {}).get("b64") or ""), validate=True)
+        except (ValueError, TypeError):
+            errors.append(f"{name or '?'}: not base64")
+            continue
+        if not _FLASH_NAME.fullmatch(name) or not data.startswith(b"\x89PNG"):
+            errors.append(f"{name or '?'}: not a screen")
+            continue
+        up = urllib.request.Request(f"{PORTAL}/home/media/{job.get('id')}?name={urllib.parse.quote(name)}", data=data, method="PUT",
+                                    headers={"Content-Type": "image/png", "Authorization": f"Bearer {token}"})
+        try:
+            with urllib.request.urlopen(up, timeout=60) as resp:
+                resp.read()
+            sent.append(name)
+        except Exception as exc:  # noqa: BLE001 — the portal refused or didn't answer: say which screen, go on with the others
+            errors.append(f"{name}: couldn't hand it to the portal ({type(exc).__name__})")
+    return {"result": {"files": sent, "errors": errors}}
+
+
 def run_job(job: dict, token: str = "") -> dict:
     """A job from the portal (physics is not one: the portal asks skippy-core's Mentat itself). make_music → the music studio;
     workshop → the private Skippy (Claude Code on the bridge); workshop_conversation(s) → its conversation history."""
@@ -1150,6 +1186,8 @@ def run_job(job: dict, token: str = "") -> dict:
         return spotify_job(job)
     if job.get("kind") == "host_op":
         return host_op(job, token)
+    if job.get("kind") == "flash":
+        return flash_job(job, token)
     if job.get("kind") in ("memory_list", "memory_get"):
         return memory_job(job, token)
     if job.get("kind") in ("mcp_list", "mcp_test"):

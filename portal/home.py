@@ -282,6 +282,11 @@ class Home:
             j["event"].wait(timeout)
         return self.peek(job_id)
 
+    def job_of(self, job_id: str) -> dict | None:
+        """The job as it was queued ({"id", "kind", ...payload}), or None: portal/vision.py reads its `moment`."""
+        j = self._jobs.get(job_id)
+        return dict(j["job"]) if j else None
+
     def owner_of(self, job_id: str) -> str | None:
         j = self._jobs.get(job_id)
         return j["owner"] if j else None

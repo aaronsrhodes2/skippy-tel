@@ -65,6 +65,7 @@
         <button type="button" data-kind="chat" aria-pressed="false" data-tel="chat:can"><svg class="g" aria-hidden="true"><use href="#g-can"/></svg>Chats</button>
         <button type="button" data-kind="agent" aria-pressed="false" data-tel="chat:console"><svg class="g" aria-hidden="true"><use href="#g-console"/></svg>Agent</button>
         <button type="button" data-kind="archive" aria-pressed="false" data-tel="chat:past"><svg class="g" aria-hidden="true"><use href="#g-past"/></svg>Archive</button>
+        <button type="button" data-kind="moments" aria-pressed="false" data-tel="chat:moments"><svg class="g" aria-hidden="true"><use href="#g-camera"/></svg>Moments</button>
       </div>
       {% endif %}
       {% if is_admin %}<div class="chat-row"><button type="button" class="chat-open chat-home" aria-label="Home: the house conversation" data-tel="chat:home"><svg class="g" aria-hidden="true"><use href="#g-home"/></svg><span class="chat-title">Home</span><span class="chat-when">the house, live</span></button></div>{% endif %}
@@ -968,7 +969,7 @@
     // agent's conversations and the archive in the same list. Tap to open; the star, rename and bin keys act at once. ──
     const chatsList = root.querySelector(".chats-list"), chatsFilter = root.querySelector(".chats-filter");
     const kinds = [...root.querySelectorAll(".chats-kinds button")];
-    let kind = "all", agentRows = null, archiveRows = null, archiveErr = "";
+    let kind = "all", agentRows = null, archiveRows = null, archiveErr = "", momentRows = null, momentState = "idle", momentErr = "";
     const AGENT_STARS = "skippy-agent-stars:" + OWNER;
     const agentStars = () => { try { return new Set(JSON.parse(localStorage.getItem(AGENT_STARS) || "[]")); } catch (e) { return new Set(); } };
     function setAgentStar(conv, on) { const s = agentStars(); on ? s.add(conv) : s.delete(conv); try { localStorage.setItem(AGENT_STARS, JSON.stringify([...s])); } catch (e) {} }
@@ -1002,6 +1003,7 @@
     }
     function paintChats() {
       const q = chatsFilter.value.trim().toLowerCase();
+      if (kind === "moments") return paintMoments(q);
       if ((kind === "all" || kind === "agent") && agentView && window.SkippyAgent && agentRows === null) {
         agentRows = [];
         window.SkippyAgent.conversations().then(rows => { agentRows = rows; paintChats(); }).catch(() => { agentRows = []; });
@@ -1057,6 +1059,64 @@
         }));
       }
       return row;
+    }
+    // ── Moments (portal/vision.py, static/vision.js): every flash of the glasses, the phone, the pods and the PC, newest first. Forget
+    // acts at once and waits 10 s to be undone; Keep holds the 7+3 s clip past its 90 days. The Captain only. ──
+    const MOMENT_URL = {list: "{{ url_for('vision.listing') if is_admin else '' }}", file: "{{ url_for('vision.moment_file', mid='_MID_', name='_NAME_') if is_admin else '' }}",
+                        del: "{{ url_for('vision.moment_delete', mid='_MID_') if is_admin else '' }}", keep: "{{ url_for('vision.moment_keep', mid='_MID_') if is_admin else '' }}"};
+    const momentUrl = (kindOf, id, name) => MOMENT_URL[kindOf].replace("_MID_", encodeURIComponent(id)).replace("_NAME_", encodeURIComponent(name || ""));
+    const momentPic = f => /^(?:hud-page|drive-page|phone-cam-\d|glasses-(?:rgb|left|right))\.jpg$|^(?:pod-[a-z0-9-]+|pc-screen-\d)\.png$/.test(f.name);
+    function paintMoments(q) {
+      if (momentState === "idle") {
+        momentState = "loading";
+        fetch(MOMENT_URL.list, {credentials: "same-origin", cache: "no-store"}).then(r => r.ok ? r.json() : Promise.reject(new Error("Moments aren't available here.")))
+          .then(d => { momentRows = d.moments || []; momentErr = ""; momentState = "done"; paintChats(); })
+          .catch(err => { momentErr = err.message; momentState = "idle"; momentRows = null; paintChats(); });
+      }
+      const has = s => String(s || "").toLowerCase().includes(q);
+      const rows = (momentRows || []).filter(m => !q || has(m.said) || (m.seen || []).some(s => has(s.text) || has(s.en)));
+      const out = []; let group = null;
+      rows.forEach(m => {
+        const g = when(m.at * 1000);
+        if (g !== group) { group = g; const h = document.createElement("div"); h.className = "chats-head"; h.textContent = g; out.push(h); }
+        out.push(momentRow(m));
+      });
+      chatsList.replaceChildren(...out);
+      if (!rows.length) chatsList.textContent = momentErr || (momentState === "done" ? "∅" : "…");
+      root.querySelector('[data-sheet="chats"] .pg')._pager.refresh();
+    }
+    function momentRow(m) {
+      const row = document.createElement("div"); row.className = "chat-row moment";
+      const open = document.createElement("div"); open.className = "chat-open";
+      const t = document.createElement("span"); t.className = "chat-title";
+      t.textContent = new Date(m.at * 1000).toLocaleTimeString(undefined, {hour: "2-digit", minute: "2-digit"}) + (m.hold ? " · clip" : "") + (m.kept ? " · kept" : "");
+      const sub = document.createElement("span"); sub.className = "chat-when";
+      const read = (m.seen && m.seen[0]) ? (m.seen[0].en || m.seen[0].text) : "";
+      sub.textContent = (m.said || read || (m.files || []).length + " files") + ((m.pending || []).length ? " · …" : "");
+      const strip = document.createElement("span"); strip.className = "moment-strip";
+      (m.files || []).filter(momentPic).slice(0, 5).forEach(f => {
+        const a = document.createElement("a"); a.href = momentUrl("file", m.id, f.name); a.target = "_blank"; a.rel = "noopener"; a.title = f.name;
+        const im = document.createElement("img"); im.loading = "lazy"; im.alt = f.name; im.src = a.href; a.append(im); strip.append(a);
+      });
+      const clip = (m.files || []).find(f => f.name === "glasses-rgb-7s.zip");
+      if (clip) { const a = document.createElement("a"); a.className = "moment-clip"; a.href = momentUrl("file", m.id, clip.name); a.title = "The 10-second clip"; a.append(glyph("rec")); strip.append(a); }
+      open.append(glyph("camera", "dim"), t, sub, strip); row.append(open);
+      row.append(keyBtn("star", m.kept ? "Let the clip expire" : "Keep the clip for good", () => {
+        fetch(momentUrl("keep", m.id), {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"}, body: JSON.stringify({on: !m.kept})})
+          .then(r => { if (r.ok) { m.kept = !m.kept; paintChats(); } });
+      }, "star" + (m.kept ? " on" : "")));
+      row.append(keyBtn("trash", "Forget this moment", () => forgetMoment(m, row)));
+      return row;
+    }
+    function forgetMoment(m, row) {
+      const gone = document.createElement("div"); gone.className = "chat-row moment-gone";
+      const undo = document.createElement("button"); undo.type = "button"; undo.className = "chat-open"; undo.title = undo.ariaLabel = "Undo: keep this moment";
+      undo.append(glyph("retry"), document.createTextNode("Forgotten · Undo"));
+      const timer = setTimeout(() => {
+        fetch(momentUrl("del", m.id), {method: "POST", credentials: "same-origin"}).then(r => { if (r.ok) { momentRows = (momentRows || []).filter(x => x.id !== m.id); gone.remove(); } });
+      }, 10000);
+      undo.addEventListener("click", () => { clearTimeout(timer); gone.replaceWith(row); });
+      gone.append(undo); row.replaceWith(gone);
     }
     function renameRow(r, row, label) {                            // the name becomes a box in place: Enter keeps it, Esc leaves it
       const box = document.createElement("input"); box.type = "text"; box.className = "chat-rename"; box.value = r.title; box.maxLength = 70;

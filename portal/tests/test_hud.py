@@ -23,6 +23,21 @@ def test_hud_is_drive_with_purple_skippy_a_hub_key_and_the_apps(client):
     assert 'aria-label="Purple Skippy"' in page and 'id="k-play"' in page and 'id="k-house"' in page       # Drive's keys, all of them
 
 
+def test_hud_has_the_camera_key_and_a_forget_key_that_starts_hidden_and_the_vision_addresses(client):
+    page = client.get("/hud").get_data(as_text=True)
+    assert 'id="k-flash"' in page and 'data-tel="hud:flash"' in page and "#g-camera" in page
+    assert 'id="k-forget" hidden' in page and 'data-tel="hud:forget"' in page            # offered for 10 s after a flash
+    assert 'data-vision="/vision/flash"' in page and 'data-vision-delete="/vision/moment/_MID_/delete"' in page
+    assert 'data-vision-keep="/vision/moment/_MID_/keep"' in page and 'data-vision-add="/vision/moment/_MID_/file"' in page
+    assert "vendor/html2canvas.min.js" in page and "static/vision.js" in page
+
+
+def test_the_tesla_drive_page_has_no_camera_key_but_joins_a_moment_by_adding_its_own_picture(client):
+    page = client.get("/drive").get_data(as_text=True)
+    assert 'id="k-flash"' not in page and 'data-vision="' not in page
+    assert 'data-vision-moments="/vision/moments"' in page and 'data-vision-add="/vision/moment/_MID_/file"' in page
+
+
 def test_drive_itself_is_unchanged(client):
     page = client.get("/drive").get_data(as_text=True)
     assert 'id="drive"' in page and 'id="drive" class="hud"' not in page and "data-ws-send" not in page and 'id="k-hub"' not in page

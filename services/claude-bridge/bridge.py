@@ -36,6 +36,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+import flash_screens
 import host_ops
 import mcp_access
 import memory_service
@@ -218,6 +219,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.startswith("/host/"):
             self._host_op(path[len("/host/"):])
+            return
+        if path == "/flash/screens":                            # Skippy-vision (portal/vision.py): this PC's monitors and the room boxes' screens
+            if self._workshop_ok():                             # (the home token, like every door here: it is a picture of the desktop)
+                self._read_body()
+                self._json(200, flash_screens.capture())
             return
         if path == "/mcp/test":
             if self._workshop_ok():

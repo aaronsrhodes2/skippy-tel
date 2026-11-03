@@ -101,13 +101,13 @@ def test_every_element_and_setting_the_script_reads_is_on_the_page(env):
     html = client.get("/drive").get_data(as_text=True)
     js = (Path(__file__).resolve().parents[1] / "static" / "drive-app.js").read_text(encoding="utf-8")
     ids = set(re.findall(r'\$\("#([A-Za-z0-9-]+)', js))
-    HUD_ONLY = {"k-hub", "said", "heard"}                         # the glasses' view only (/hud): the script checks they are there before using them
+    HUD_ONLY = {"k-hub", "said", "heard", "k-flash", "k-forget"}                         # the glasses' view only (/hud): the script checks they are there before using them
     assert ids and not [i for i in ids - HUD_ONLY if f'id="{i}"' not in html]
     hud = client.get("/hud").get_data(as_text=True)
     assert not [i for i in ids if f'id="{i}"' not in hud]
     keys = set(re.findall(r"cfg\.([A-Za-z]+)", js))
     attr = lambda k: "data-" + re.sub(r"([A-Z])", lambda m: "-" + m.group(1).lower(), k)   # noqa: E731
-    assert keys and not [k for k in keys - {"wsSend", "wsEvents"} if attr(k) + "=" not in html]   # purple's doors: /hud only
+    assert keys and not [k for k in keys - {"wsSend", "wsEvents", "vision", "visionDelete", "visionKeep"} if attr(k) + "=" not in html]   # purple's doors and the camera key's: /hud only
     assert not [k for k in keys if attr(k) + "=" not in hud]
 
 

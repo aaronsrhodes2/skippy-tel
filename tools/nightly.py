@@ -233,6 +233,26 @@ def tidy_words(t: dict | None) -> str:
     return "" if said.startswith("the portal's controls: nothing") else "the portal tidied its controls: " + said
 
 
+def moments_sweep(dry: bool, log) -> dict:
+    """Skippy-vision (portal/vision.py): the 10-second clips of moments older than 90 days go, unless he kept them; the stills never do."""
+    if dry:
+        return {"dry": True}
+    try:
+        sys.path.insert(0, str(ROOT / "tools"))
+        import adaptive_ui
+        token = adaptive_ui.vault_value("SKIPPY_HOME_TOKEN")
+        if not token:
+            return {"ok": False, "why": "no home token"}
+        req = urllib.request.Request(f"{PORTAL}/home/vision/sweep", data=b"{}", method="POST",
+                                     headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(req, timeout=60) as r:                    # noqa: S310 — our own portal
+            res = {"ok": True, "clips_deleted": int(json.loads(r.read() or b"{}").get("clips_deleted") or 0)}
+    except Exception as e:  # noqa: BLE001 — the ledger never fails over it (a portal with no bucket answers 503)
+        res = {"ok": False, "why": type(e).__name__}
+    log(f"moments sweep: {res}")
+    return res
+
+
 # ── the ledger ──
 def house_day(date: str) -> dict:
     events = []
@@ -274,6 +294,8 @@ def overnight_line(report: dict) -> str:
         bits.append(healing_words(report.get("chaos")))
     if tidy_words(report.get("ui_tidy")):
         bits.append(tidy_words(report.get("ui_tidy")))
+    if (report.get("moments") or {}).get("clips_deleted"):
+        bits.append(f"{report['moments']['clips_deleted']} old moment clip{'s' if report['moments']['clips_deleted'] != 1 else ''} cleared")
     return "Overnight: " + ", ".join(bits) + "."
 
 
@@ -319,6 +341,7 @@ def main(argv=None) -> int:
     report["upkeep"] = {"disks": disks(), "docker": docker_prune(args.dry_run), "hub": hub_restart(args.dry_run, log), "vault": VAULT_ENV.is_file()}
     report["chaos"] = healing_check(args.dry_run, log)
     report["ui_tidy"] = ui_tidy(args.dry_run, log)
+    report["moments"] = moments_sweep(args.dry_run, log)
     report["house"] = house_day(date)
     report["purple"] = purple_day(date)
     report["overnight"] = overnight_line(report)

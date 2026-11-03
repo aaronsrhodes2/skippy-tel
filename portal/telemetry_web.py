@@ -44,7 +44,7 @@ SKIP_ENDPOINTS = frozenset({
     "home_telemetry", "game_import_download", "game_import_done", "ops_home", "tasks_run",
     "telemetry_tap",
 })
-SKIP_PREFIXES = ("/static/", "/home/", "/ops/", "/tasks/", "/telemetry/")
+SKIP_PREFIXES = ("/static/", "/home/", "/ops/", "/tasks/", "/telemetry/", "/vision/")     # (/vision/: moments' data, polled by Drive and fetched by the chat)
 CHAT_ENDPOINTS = frozenset({"chat.send"})          # a good send is recorded as a chat event, not also as an action
 
 _ID = r"[a-z0-9_-]{1,32}"
