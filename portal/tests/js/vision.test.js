@@ -126,3 +126,36 @@ test("Forget and Keep go to the moment's own addresses", async () => {
   const bad = world({ respond: () => ({ ok: false }) });
   assert.equal(await bad.vision.forget("x"), false);
 });
+
+// ── what he sees: the freshest frame, the writing in it, and one sentence on it ──
+test("the freshest frame is the glasses' own RGB frame; a stub of a frame, or no camera at all, is none", async () => {
+  const w = world({ host: { frame: () => b64(300), flash() { return "{}"; } } });
+  assert.ok((await w.vision.frame()).startsWith("data:image/jpeg;base64,"));
+  assert.equal(await world({ host: { frame: () => "short" } }).vision.frame(), null);
+  assert.equal(await world({ host: null }).vision.frame(), null);
+});
+
+test("readSigns and lookAt send the picture to the portal's reader and give back the writing and the sentence", async () => {
+  const w = world({ cfg: { read: "/vision/read", look: "/vision/look" },
+                    respond: url => ({ ok: true, json: async () => url.startsWith("/vision/read") ? { seen: [{ text: "Salida", lang: "es", en: "Exit" }] } : { said: "a door" } }) });
+  const pic = "data:image/jpeg;base64,AAAA";
+  assert.deepEqual(await w.vision.readSigns(pic, "20261102-210000"), [{ text: "Salida", lang: "es", en: "Exit" }]);
+  assert.equal(w.calls[0].url, "/vision/read?moment=20261102-210000");
+  assert.equal(JSON.parse(w.calls[0].init.body).image, pic);
+  assert.equal(await w.vision.lookAt(pic), "a door");
+  assert.equal(w.calls[1].url, "/vision/look");
+});
+
+test("a reader that cannot be asked, a picture that is missing and a page without the addresses are all null, and ask nothing needlessly", async () => {
+  const refused = world({ cfg: { read: "/vision/read", look: "/vision/look" }, respond: () => ({ ok: false, json: async () => ({}) }) });
+  assert.equal(await refused.vision.readSigns("data:image/jpeg;base64,AAAA"), null);
+  assert.equal(await refused.vision.lookAt("data:image/jpeg;base64,AAAA"), null);
+  const down = world({ cfg: { read: "/vision/read" }, respond: () => { throw new Error("offline"); } });
+  assert.equal(await down.vision.readSigns("data:image/jpeg;base64,AAAA"), null);
+  const bare = world();
+  assert.equal(await bare.vision.readSigns("data:image/jpeg;base64,AAAA"), null);          // no address configured
+  assert.equal(await bare.vision.lookAt(null), null);
+  assert.equal(bare.calls.length, 0);
+  const silent = world({ cfg: { look: "/vision/look" }, respond: () => ({ ok: true, json: async () => ({ said: "" }) }) });
+  assert.equal(await silent.vision.lookAt("data:image/jpeg;base64,AAAA"), null);         // an empty sentence is no sentence
+});

@@ -30,7 +30,7 @@ REGISTRY = {
     # the Captain only
     **{e: ADMIN_ONLY for e in (
         "admin.autoconfigure", "music.favorites_list", "music.favorites_add", "music.favorites_remove", "music.favorites_played", "music.favorites_m3u", "admin.discord_setup", "admin.friends_remove", "admin.friends_save", "admin.index", "admin.logs",
-        "admin.module_switch", "themes_set", "vision.flash", "vision.add_file", "vision.listing", "vision.moment_file", "vision.moment_delete", "vision.moment_keep", "admin.requests_dismiss", "admin.restart", "admin.settings", "recovery.repair", "recovery.state_json", "server_admin.fragment",
+        "admin.module_switch", "themes_set", "vision.flash", "vision.add_file", "vision.read_signs", "vision.look", "vision.listing", "vision.moment_file", "vision.moment_delete", "vision.moment_keep", "admin.requests_dismiss", "admin.restart", "admin.settings", "recovery.repair", "recovery.state_json", "server_admin.fragment",
         "audiobooks.page", "audiobooks.gate", "audiobooks.rooms", "audiobooks.command",
         "status.page", "status.state_json", "status.heal", "status.repair", "status.logs", "status.probe", "car.page", "car.state", "alarms.page", "alarms.state", "alarms.do", "drive.page", "hud.test", "hud.page", "drive.spotify_mix", "drive.spotify_car", "drive.spotify_play", "drive.spotify_pause", "drive.house", "drive.last",
         "me.index", "me.mcp_ask", "me.mcp_result", "me.pair_home", "me.toggle_experiment", "me.workshop_events", "me.workshop_history", "me.workshop_history_result",

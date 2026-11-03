@@ -26,6 +26,7 @@ from functools import wraps
 from flask import Blueprint, Response, abort, jsonify, request
 
 import auth
+import eyes_client
 
 PREFIX = "moments/"
 ID = re.compile(r"\d{8}-\d{6}(?:-\d{1,2})?")
@@ -42,6 +43,37 @@ PENDING_FOR_S = 120                       # a moment still "waiting for the pods
 KEEP_CLIP_DAYS = 90
 LISTED = 30
 MAGIC = ((b"\xff\xd8\xff", "image/jpeg"), (b"\x89PNG\r\n\x1a\n", "image/png"), (b"PK\x03\x04", "application/zip"))
+
+
+READ_PROMPT = ("Look for writing in this picture that is NOT English: signs, labels, menus, screens, documents. Answer with ONLY a JSON array, at most "
+               "5 items, each {\"text\": the words as printed, \"lang\": the language's two-letter code, \"en\": an English translation}. If there is "
+               "no writing that is not English, answer []. No other words.")
+LOOK_PROMPT = ("Someone wearing camera glasses is looking at this. Say in ONE short plain sentence what they are looking at: the main thing, and "
+               "any readable name or label on it. Never say who a person is.")
+MAX_SEEN = 5
+
+
+def parse_seen(raw) -> list[dict]:
+    """The vision model's JSON reading (fenced or not, with or without words around it) as at most MAX_SEEN {text, lang, en}; anything else is []."""
+    text = str(raw or "")
+    i, j = text.find("["), text.rfind("]")
+    if i < 0 or j <= i:
+        return []
+    try:
+        items = json.loads(text[i:j + 1])
+    except ValueError:
+        return []
+    out = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        said, en = " ".join(str(item.get("text") or "").split())[:200], " ".join(str(item.get("en") or "").split())[:200]
+        lang = re.sub(r"[^a-z-]", "", str(item.get("lang") or "").lower())[:8]
+        if said and en and lang != "en" and said.lower() != en.lower():          # English already, or not translated: nothing to show
+            out.append({"text": said, "lang": lang, "en": en})
+        if len(out) == MAX_SEEN:
+            break
+    return out
 
 
 def sniff(data: bytes) -> str | None:
@@ -191,6 +223,12 @@ class Moments:
         return gone
 
 
+def core_door():
+    """(url, key) of Skippy Core's Messages API, or None when it isn't configured (read the glasses' writing, say what is in view)."""
+    import brains
+    return (brains.CORE.base_url(), brains.CORE.key()) if brains.CORE.ready() else None
+
+
 def init_app(app, home, notifier, store, clock=time.time) -> Moments:
     moments = Moments(store, clock)
     app.extensions["vision"] = moments
@@ -277,6 +315,55 @@ def init_app(app, home, notifier, store, clock=time.time) -> Moments:
         if ix is None:
             abort(404)
         return jsonify(moments.view(ix))
+
+    def one_picture() -> bytes:
+        """The JPEG of a read/look request (`image`: a data URL), or a 400."""
+        if (request.content_length or 0) > MAX_IMAGE * 2:
+            abort(413)
+        try:
+            data = decode_data_url((request.get_json(silent=True) or {}).get("image"))
+        except ValueError:
+            abort(400)
+        if sniff(data) != "image/jpeg" or len(data) > MAX_IMAGE:
+            abort(400)
+        return data
+
+    def ask_core(data: bytes, prompt: str, tokens: int):
+        """(text, None) from Skippy Core's vision slot, or (None, a 503 reply)."""
+        door = core_door()
+        if door is None:
+            return None, (jsonify(error="Skippy Core isn't there, so nothing can be read right now."), 503)
+        try:
+            return eyes_client.ask(door[0], door[1], data, "image/jpeg", prompt, max_tokens=tokens), None
+        except RuntimeError as exc:
+            return None, (jsonify(error=str(exc)), 503)
+
+    @bp.post("/vision/read")
+    @auth.admin_required
+    def read_signs():
+        """The writing in a picture that is not English, each with its language and an English reading: {seen: [{text, lang, en}]}.
+        With ?moment=<id> the reading is kept in that moment."""
+        text, refused = ask_core(one_picture(), READ_PROMPT, 500)
+        if refused:
+            return refused
+        seen = parse_seen(text)
+        mid = request.args.get("moment", "")
+        if mid and moments.ready:
+            moments.update(mid, seen=seen)
+        return jsonify(seen=seen)
+
+    @bp.post("/vision/look")
+    @auth.admin_required
+    def look():
+        """One sentence on what the Captain is looking at: {said}. With ?moment=<id> it is kept in that moment."""
+        text, refused = ask_core(one_picture(), LOOK_PROMPT, 120)
+        if refused:
+            return refused
+        said = " ".join(text.split())[:300]
+        mid = request.args.get("moment", "")
+        if mid and moments.ready:
+            moments.update(mid, said=said)
+        return jsonify(said=said)
 
     @bp.get("/vision/moments")
     @auth.admin_required

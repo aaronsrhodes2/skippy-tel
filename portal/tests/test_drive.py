@@ -107,7 +107,7 @@ def test_every_element_and_setting_the_script_reads_is_on_the_page(env):
     assert not [i for i in ids if f'id="{i}"' not in hud]
     keys = set(re.findall(r"cfg\.([A-Za-z]+)", js))
     attr = lambda k: "data-" + re.sub(r"([A-Z])", lambda m: "-" + m.group(1).lower(), k)   # noqa: E731
-    assert keys and not [k for k in keys - {"wsSend", "wsEvents", "vision", "visionDelete", "visionKeep"} if attr(k) + "=" not in html]   # purple's doors and the camera key's: /hud only
+    assert keys and not [k for k in keys - {"wsSend", "wsEvents", "vision", "visionDelete", "visionKeep", "visionRead", "visionLook"} if attr(k) + "=" not in html]   # purple's doors and the camera key's: /hud only
     assert not [k for k in keys if attr(k) + "=" not in hud]
 
 

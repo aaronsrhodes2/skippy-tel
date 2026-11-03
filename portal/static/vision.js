@@ -2,7 +2,9 @@
 
    SkippyVision.flashWord(text)      "snap" / "flash" -> "flash"; "snap it big time" / "hold it" -> "hold"; anything else -> null
    SkippyVision.readWord(text)       "read that" -> "read"; "what am I looking at" -> "look"; "steady on|off" -> "steady-on|steady-off"; else null
-   SkippyVision.attach(cfg)          the flash itself: {flash(hold, by), forget(id), keep(id, on), addPage(id, name)}; cfg = the page's data-* URLs and hooks
+   SkippyVision.attach(cfg)          the flash itself: {flash(hold, by), forget(id), keep(id, on), addPage(id, name)}, and what he sees: {frame(),
+                                     readSigns(picture, moment) -> [{text, lang, en}] | null, lookAt(picture, moment) -> a sentence | null}; cfg = the
+                                     page's data-* URLs (flash, read, look, momentAdd ...) and hooks
    SkippyVision.parse / names ...    small pure pieces (tests/js/vision.test.js runs them under Node)
 
    A flash gathers, at that instant and in parallel: a screenshot of this page, a still from every camera this device has, and (when
@@ -146,6 +148,25 @@
     const forget = id => post(url(cfg.momentDelete, id), { method: "POST" }).then(r => r.ok, () => false);
     const keep = (id, on) => post(url(cfg.momentKeep, id), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on: !!on }) }).then(r => r.ok, () => false);
 
+    async function frame() {                                 // the freshest picture of what he is looking at: the glasses' RGB camera, else the phone's first camera
+      if (host && typeof host.frame === "function") {
+        try { const b = host.frame(); if (typeof b === "string" && b.length > 100) return dataUrl(b); } catch (e) { /* fall back to the phone */ }
+      }
+      const cams = await cameraStills(nav, doc);
+      return cams[0] ? cams[0].data : null;
+    }
+
+    async function askAbout(url, picture, moment) {         // one picture to the portal's reader (/vision/read, /vision/look); null when it can't be asked
+      if (!url || !picture) return null;
+      try {
+        const r = await post(url + (moment ? "?moment=" + encodeURIComponent(moment) : ""),
+                             { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image: picture }) });
+        return r.ok ? await r.json() : null;
+      } catch (e) { return null; }
+    }
+    const readSigns = async (picture, moment) => { const d = await askAbout(cfg.read, picture, moment); return d && Array.isArray(d.seen) ? d.seen : null; };
+    const lookAt = async (picture, moment) => { const d = await askAbout(cfg.look, picture, moment); return d && d.said ? String(d.said) : null; };
+
     async function addPage(id, name) {                       // this page's picture, added to a moment someone else made (the Tesla's Drive joining a flash)
       try {
         const shot = await pageShot(doc, cfg);
@@ -155,7 +176,7 @@
         return r.ok;
       } catch (e) { return false; }
     }
-    return { flash: flash, forget: forget, keep: keep, clip: clip, addPage: addPage, hosted: () => !!(host && typeof host.flash === "function") };
+    return { flash: flash, forget: forget, keep: keep, clip: clip, addPage: addPage, frame: frame, readSigns: readSigns, lookAt: lookAt, hosted: () => !!(host && typeof host.flash === "function") };
   }
 
   return { flashWord, readWord, attach, glassesStills, cameraName, parse, HOLD_MS, CLIP_AFTER_MS, MAX_CAMERAS };

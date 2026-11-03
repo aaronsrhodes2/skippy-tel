@@ -222,3 +222,67 @@ def test_the_pure_parts():
         with pytest.raises(ValueError):
             vision.decode_data_url(bad)
     assert json.dumps(vision.Moments(tabletop.MemoryStore()).list()) == "[]"
+
+
+# ── reading what the glasses see: the writing that is not English, and what is in view (Skippy Core's vision slot) ──
+def fake_core(monkeypatch, answer):
+    asked = []
+    monkeypatch.setattr(vision, "core_door", lambda: ("http://core.test", "k-1"))
+
+    def ask(url, key, data, mime, prompt, **kw):
+        asked.append({"url": url, "key": key, "data": data, "mime": mime, "prompt": prompt, **kw})
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    monkeypatch.setattr(vision.eyes_client, "ask", ask)
+    return asked
+
+
+def test_parse_seen_takes_the_json_however_it_is_wrapped_and_drops_what_is_already_english():
+    raw = ("Here you go:\n```json\n[{\"text\": \"Salida\", \"lang\": \"ES\", \"en\": \"Exit\"}, {\"text\": \"Open\", \"lang\": \"en\", \"en\": \"Open\"},"
+           " {\"text\": \"Danke\", \"lang\": \"de\", \"en\": \"Danke\"}, 7, {\"text\": \"\", \"en\": \"x\"}]\n```")
+    assert vision.parse_seen(raw) == [{"text": "Salida", "lang": "es", "en": "Exit"}]
+    many = json.dumps([{"text": f"t{i}", "lang": "fr", "en": f"e{i}"} for i in range(9)])
+    assert len(vision.parse_seen(many)) == vision.MAX_SEEN
+    for bad in ("", None, "no writing here", "[not json]", "{\"text\": \"x\"}", "]["):
+        assert vision.parse_seen(bad) == []
+
+
+def test_read_asks_the_vision_slot_and_keeps_the_reading_in_the_moment(env, monkeypatch):
+    app, c, store, *_ = env
+    asked = fake_core(monkeypatch, '[{"text": "Ausgang", "lang": "de", "en": "Exit"}]')
+    mid = flash(c, images=[{"name": "hud-page.jpg", "data": data_url(JPEG)}]).get_json()["id"]
+    r = c.post(f"/vision/read?moment={mid}", json={"image": data_url(JPEG)})
+    assert r.status_code == 200 and r.get_json() == {"seen": [{"text": "Ausgang", "lang": "de", "en": "Exit"}]}
+    assert asked[0]["url"] == "http://core.test" and asked[0]["key"] == "k-1" and asked[0]["data"] == JPEG and asked[0]["mime"] == "image/jpeg"
+    assert "NOT English" in asked[0]["prompt"]
+    assert json.loads(store.get(f"moments/{mid}/index.json"))["seen"] == [{"text": "Ausgang", "lang": "de", "en": "Exit"}]
+    assert c.post("/vision/read", json={"image": data_url(JPEG)}).status_code == 200          # without ?moment= nothing is kept
+    assert c.post("/vision/read?moment=20250101-000000", json={"image": data_url(JPEG)}).status_code == 200   # a moment that isn't there is not an error
+
+
+def test_look_says_one_line_and_keeps_it(env, monkeypatch):
+    app, c, store, *_ = env
+    fake_core(monkeypatch, "  A red\n\n mug on a desk,   with 'WORLD'S BEST' printed on it.  ")
+    mid = flash(c, images=[]).get_json()["id"]
+    r = c.post(f"/vision/look?moment={mid}", json={"image": data_url(JPEG)})
+    assert r.get_json() == {"said": "A red mug on a desk, with 'WORLD'S BEST' printed on it."}
+    assert json.loads(store.get(f"moments/{mid}/index.json"))["said"] == "A red mug on a desk, with 'WORLD'S BEST' printed on it."
+
+
+def test_read_and_look_refuse_a_bad_picture_say_so_when_core_is_away_and_are_the_captains_alone(env, monkeypatch):
+    app, c, *_ = env
+    asked = fake_core(monkeypatch, "[]")
+    for path in ("/vision/read", "/vision/look"):
+        for bad in ({}, {"image": "not a url"}, {"image": data_url(PNG, "image/png")}, {"image": data_url(JPEG + b"x" * vision.MAX_IMAGE)}):
+            assert c.post(path, json=bad).status_code in (400, 413), (path, str(bad)[:40])
+    assert asked == []                                                             # nothing odd reached the model
+    fake_core(monkeypatch, RuntimeError("the vision model said nothing"))
+    r = c.post("/vision/look", json={"image": data_url(JPEG)})
+    assert r.status_code == 503 and "nothing" in r.get_json()["error"]
+    monkeypatch.setattr(vision, "core_door", lambda: None)
+    r = c.post("/vision/read", json={"image": data_url(JPEG)})
+    assert r.status_code == 503 and "Skippy Core" in r.get_json()["error"]
+    friend = app.test_client(); login(friend, FRIEND)
+    for path in ("/vision/read", "/vision/look"):
+        assert friend.post(path, json={"image": data_url(JPEG)}).status_code in (302, 403)

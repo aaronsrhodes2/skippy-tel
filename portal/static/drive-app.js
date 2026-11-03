@@ -397,6 +397,8 @@
   async function ask(text) {
     const fw = vision && V.flashWord(text);                // "snap" / "snap it big time" are the camera key's words: never sent to Skippy
     if (fw) { snap(fw === "hold", "word"); return; }
+    const rw = vision && V.readWord(text);                 // "read that", "what am I looking at", "steady on": about what he sees, never sent to Skippy
+    if (rw) { viewWord(rw); return; }
     if (cfg.wsSend) return askPurple(text);
     asking = true;
     try {
@@ -534,13 +536,56 @@
     if (text && root.classList.contains("hub")) voice.say(text);
   }
   const vision = V && cfg.vision ? V.attach({
-    flash: cfg.vision, momentAdd: cfg.visionAdd, momentDelete: cfg.visionDelete, momentKeep: cfg.visionKeep, html2canvas: cfg.snapshotLib, pageName: "hud-page.jpg",
+    flash: cfg.vision, read: cfg.visionRead, look: cfg.visionLook, momentAdd: cfg.visionAdd, momentDelete: cfg.visionDelete, momentKeep: cfg.visionKeep,
+    html2canvas: cfg.snapshotLib, pageName: "hud-page.jpg",
     say: text => note(text),
-    onSaved: moment => {
+    onSaved: (moment, picture) => {
       lastMoment = moment; note("Saved.");
       if (forgetKey) { forgetKey.hidden = false; clearTimeout(forgetTimer); forgetTimer = setTimeout(() => { forgetKey.hidden = true; }, 10000); }
+      describeMoment(moment.id, picture);
     },
   }) : null;
+
+  // ── reading what he sees (portal/vision.py /vision/read and /vision/look, Skippy Core's vision slot) ──
+  // After every flash the moment is read for writing in another language (a caption for each, and kept in the moment) and described in one
+  // sentence (kept too). "Read that" does the first now, "what am I looking at" the second, aloud in hub mode; "steady on" reads by itself
+  // every five seconds while the glasses are worn in hub mode (voice only, off until asked, and eased off by the heat: see the host's thermal).
+  const seenRecent = new Map();                          // a sign in view is not read out again every few seconds
+  async function readView(picture, momentId, aloud) {
+    if (!vision || !picture) return [];
+    const got = await vision.readSigns(picture, momentId);
+    if (got === null) { if (aloud) note("I couldn't read that."); return []; }
+    const fresh = got.filter(s => { const t = seenRecent.get(s.en); if (t && Date.now() - t < 60000) return false; seenRecent.set(s.en, Date.now()); return true; });
+    fresh.forEach(s => addCaption({ orig: s.text, en: s.en, lang: s.lang, kind: "seen" }));
+    if (aloud) note(fresh.length ? fresh.map(s => s.en).join(". ") : got.length ? "Still the same signs." : "Nothing in another language.", 8000);
+    return fresh;
+  }
+  async function describeMoment(id, picture) {
+    if (!picture) return;
+    await readView(picture, id, false);
+    await vision.lookAt(picture, id);                    // (kept in the moment: Your chats > Moments shows it)
+  }
+  let steadyTimer = 0, steadyLast = "";
+  function setSteady(on, say) {
+    clearInterval(steadyTimer); steadyTimer = 0; steadyLast = "";
+    try { localStorage.setItem("hud-steady", on ? "1" : "0"); } catch (e) { /* this load only */ }
+    if (on) steadyTimer = setInterval(async () => {
+      if (document.hidden || !root.classList.contains("hub") || !vision || !vision.hosted()) return;      // only while worn, in hub mode
+      const picture = await vision.frame();
+      if (!picture || picture === steadyLast) return;
+      steadyLast = picture;
+      readView(picture, null, false);
+    }, 5000);
+    if (say) note(on ? "Steady reading on, every five seconds." : "Steady reading off.");
+  }
+  async function viewWord(word) {                        // a spoken word about what he sees: never sent to Skippy
+    if (word === "steady-on" || word === "steady-off") { setSteady(word === "steady-on", true); return; }
+    const picture = await vision.frame();
+    if (!picture) { note("I have no camera to look through."); return; }
+    if (word === "look") note((await vision.lookAt(picture)) || "I couldn't tell.", 12000);
+    else await readView(picture, null, true);
+  }
+  try { if (localStorage.getItem("hud-steady") === "1") setSteady(true, false); } catch (e) { /* off */ }
   async function snap(hold, by) {
     if (!vision) return null;
     if (flashKey) flashKey.classList.add("busy");
