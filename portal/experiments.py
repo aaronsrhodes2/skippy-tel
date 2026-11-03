@@ -256,6 +256,13 @@ RADIANCE_SHOWCASE_SNIPPET = """
 # Runs come in series (run.json "series", "tuned" when absent), newest series first, each in the order its runs happened. The first
 # eleven are the tuned branch: by the Captain's call (2026-10-31) its tooling had tainted the comparison, so the fresh start began.
 MINEBENCH_SERIES = (
+    ("eyes", "New eyes", "Four rounds, 2026-11-02, after the rematch showed the vision model calling every train recognizable: the same "
+     "vanilla coder, message and prompt, the same work check, and new eyes, the way Claude looks at its own pictures. Core's big model "
+     "(Qwen3.6-35B-A3B with its vision projector, thinking off) gets the task with each picture the coder opens and says what it shows, "
+     "the faults worst first, and whether a stranger would know what it is. Each build faces Haiku's from the same head to head round "
+     "(1-4), judged blind. Result: Haiku 4-0 again. The eyes did their part: 22 reviews, none failed, and they said the hard things "
+     "(round 8: \"looks like a generic factory\", \"no trains ... visible\"). The coder didn't turn them into a better train: it fixed "
+     "levels and floating parts, and in round 8 moved the smokestack to the back of the boiler. The limit now is the builder, not its eyes."),
     ("rematch", "Rematch", "Best 4 of 7, started 2026-11-01, after Haiku won the head to head 4-0: the same two players, the same vanilla "
      "setup, message and prompt, plus the generic help purple got that day (no training, no prompt change, nothing about trains): "
      "eyes (Skippy Core's vision model describes any picture the coder opens) and the stop gate's work check, which won't let a "
