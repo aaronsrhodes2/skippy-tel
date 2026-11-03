@@ -32,6 +32,7 @@ def db(tmp_path, monkeypatch):
     path = tmp_path / "ui_telemetry.db"
     monkeypatch.setattr(telemetry, "_DB_PATH", path)
     monkeypatch.setattr(telemetry, "_last_prune", 0.0)
+    monkeypatch.setattr(telemetry, "_SUMMARY_CACHE", {})          # a kept summary must not leak from one test to the next
     telemetry.init_db()
     app = Flask(__name__)
     app.register_blueprint(telemetry.bp)
@@ -279,3 +280,85 @@ def test_forgetting_needs_an_email_address_and_never_deletes_by_accident(db, bod
     post(client, [ev(1)])
     assert client.post("/telemetry/site_forget", json=body).status_code == 400
     assert len(rows(path)) == 1
+
+
+# ── the summary is read in a thread, kept for a minute, and never stale about a write ──
+def _count_reads(monkeypatch):
+    """Count the real summary computations (each one is a read of the database, 14 s on the Windows bind mount)."""
+    reads = []
+    real = telemetry._summary_compute
+    monkeypatch.setattr(telemetry, "_summary_compute", lambda days, recent: reads.append((days, recent)) or real(days, recent))
+    return reads
+
+
+def test_the_summary_is_computed_once_a_minute_not_once_a_request(db, monkeypatch):
+    client, _ = db
+    post(client, [ev(1)])
+    reads = _count_reads(monkeypatch)
+    first = client.get("/telemetry/site_summary").get_json()
+    assert client.get("/telemetry/site_summary").get_json() == first and client.get("/telemetry/site_summary").get_json() == first
+    assert reads == [(30, 15)]                                                # three requests, one read
+    client.get("/telemetry/site_summary?days=7")
+    assert reads == [(30, 15), (7, 15)]                                       # another window is another answer
+    later = {"t": time.monotonic() + telemetry._SUMMARY_TTL_S + 1}
+    monkeypatch.setattr(telemetry.time, "monotonic", lambda: later["t"])      # a minute on
+    client.get("/telemetry/site_summary")
+    assert reads == [(30, 15), (7, 15), (30, 15)]
+
+
+def test_any_write_to_site_events_throws_the_kept_summary_away(db, monkeypatch):
+    client, _ = db
+    post(client, [ev(1)])
+    reads = _count_reads(monkeypatch)
+    assert client.get("/telemetry/site_summary").get_json()["total_events"] == 1
+    post(client, [ev(2)])
+    assert client.get("/telemetry/site_summary").get_json()["total_events"] == 2           # the new event shows at once
+    post(client, [ev(2)])                                                      # a duplicate stores nothing: nothing to throw away
+    client.get("/telemetry/site_summary")
+    assert len(reads) == 2
+    client.post("/telemetry/site_forget", json={"user": "pal@example.com"})
+    assert client.get("/telemetry/site_summary").get_json()["total_events"] == 0           # a deletion shows at once too
+    assert len(reads) == 3
+
+
+def test_a_summary_read_across_a_write_is_not_kept(db, monkeypatch):
+    client, _ = db
+    post(client, [ev(1)])
+    real = telemetry._summary_compute
+
+    def slow(days, recent):
+        out = real(days, recent)
+        post(client, [ev(2)])                                                  # an event lands while the database is being read
+        return out
+    monkeypatch.setattr(telemetry, "_summary_compute", slow)
+    assert client.get("/telemetry/site_summary").get_json()["total_events"] == 1
+    monkeypatch.setattr(telemetry, "_summary_compute", real)
+    assert client.get("/telemetry/site_summary").get_json()["total_events"] == 2           # the stale one was not kept
+
+
+def test_the_summary_is_read_off_the_event_loop(db, monkeypatch):
+    client, _ = db
+    ran = []
+    real = telemetry.off_loop
+    monkeypatch.setattr(telemetry, "off_loop", lambda fn, *a, **k: ran.append((fn.__name__, a)) or real(fn, *a, **k))
+    client.get("/telemetry/site_summary?days=7&recent=3")
+    assert ran == [("_summary_compute", (7, 3))]
+
+
+def test_the_summary_reads_the_file_through_a_page_cache_big_enough_for_all_of_it(db, monkeypatch):
+    client, path = db
+    seen = []
+    real = telemetry._conn
+
+    def spy():
+        con = real()
+        orig = con.execute
+        class Wrapped:                                                         # sqlite3.Connection can't be patched: wrap it
+            def __getattr__(self, name): return getattr(con, name)
+            def execute(self, sql, *a):
+                seen.append(sql.strip())
+                return orig(sql, *a)
+        return Wrapped()
+    monkeypatch.setattr(telemetry, "_conn", spy)
+    client.get("/telemetry/site_summary")
+    assert "PRAGMA cache_size = -65536" in seen                                # the pages are read once, then served from memory

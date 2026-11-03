@@ -13,8 +13,12 @@ import sqlite3
 import time
 from pathlib import Path
 
+import threading
+
 import httpx
 from flask import Blueprint, jsonify
+
+from app.offload import off_loop
 
 bp = Blueprint("status", __name__)
 
@@ -129,11 +133,24 @@ def snapshot() -> dict:
         ],
         "ollama_models": _ollama_models(),
         "ups": _ups_status(),
-        "photo_tags": _tags_stats(),
-        "telemetry": _telem_stats(),
+        "photo_tags": off_loop(_tags_stats),       # SQLite on the bind mount: in a thread, not on the event loop
+        "telemetry": off_loop(_telem_stats),
     }
+
+
+# The home reporter asks for this every ~15 s, and it reads two SQLite files on the Windows bind mount (blocking: a stalled gevent loop
+# stalls /health too, see app/offload.py). So: the reads run in a thread, and the answer is kept for _SNAPSHOT_TTL_S.
+_SNAPSHOT_TTL_S = 10.0
+_SNAPSHOT: dict = {"at": None, "payload": None}
+_snapshot_lock = threading.Lock()
 
 
 @bp.get("/status.json")
 def status_json():
-    return jsonify(snapshot())
+    with _snapshot_lock:
+        at = _SNAPSHOT["at"]
+        if at is not None and time.monotonic() - at < _SNAPSHOT_TTL_S:
+            return jsonify(_SNAPSHOT["payload"])
+        payload = snapshot()
+        _SNAPSHOT.update(at=time.monotonic(), payload=payload)
+    return jsonify(payload)

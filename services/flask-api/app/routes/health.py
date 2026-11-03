@@ -15,6 +15,7 @@ Includes a non-blocking UPS snapshot if the host monitor is reachable.
 """
 import json
 import datetime
+import time
 from pathlib import Path
 
 import httpx
@@ -61,13 +62,23 @@ def _ollama_status() -> dict:
         return {"available": False, "models": [], "default": default, "default_present": False}
 
 
+_SNAPSHOT_EVERY_S = 10.0
+_snapshot_at = -1e9
+
+
 def _write_snapshot(payload: dict) -> None:
-    """Overwrite the last-known health state on every poll.
+    """Overwrite the last-known health state, at most every _SNAPSHOT_EVERY_S (the doctor, the reporter and Docker poll /health every
+    few seconds, and each write goes through the Windows bind mount: it is one more thing that can stall a gevent worker).
 
     The file always reflects the most recent /health result, whether ok or
     degraded. On degraded, model_watchdog already appends to model_health.log;
     this gives a quick `cat health_snapshot.json` view of the last tick.
     """
+    global _snapshot_at
+    now = time.monotonic()
+    if now - _snapshot_at < _SNAPSHOT_EVERY_S:
+        return
+    _snapshot_at = now
     try:
         snapshot = {
             "timestamp": datetime.datetime.utcnow().isoformat() + "Z",

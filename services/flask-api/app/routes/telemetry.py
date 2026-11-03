@@ -36,6 +36,7 @@ from pathlib import Path
 
 from flask import Blueprint, jsonify, request
 
+from app.offload import off_loop
 from app.version import envelope, error
 
 log = logging.getLogger(__name__)
@@ -242,6 +243,21 @@ _MAX_DETAIL   = 20_000       # characters of JSON per event
 _PRUNE_EVERY  = 3600         # seconds between prunes on the write path
 _last_prune   = 0.0
 
+# The dashboard summary is the one expensive read (nine scans of the table), and the home reporter asks for it every ~15 s. It is
+# computed in a thread (off_loop: SQLite blocks, and a blocked gevent loop stalls /health and everything else, see app/offload.py),
+# kept for _SUMMARY_TTL_S, and thrown away the moment anything is written to site_events (so it is never stale about a write).
+_SUMMARY_TTL_S = 60.0
+_SUMMARY_CACHE: dict = {}      # (days, recent) -> (monotonic time computed, payload)
+_summary_gen   = 0             # counts writes; a summary computed across a write is not kept
+_summary_lock  = threading.Lock()   # between greenlets of this worker only: taken here, never inside the thread that reads
+
+
+def _summary_changed() -> None:
+    """Something was written to site_events: every kept summary is out of date."""
+    global _summary_gen
+    _summary_gen += 1
+    _SUMMARY_CACHE.clear()
+
 
 def _prune_site(con: sqlite3.Connection, now: float) -> int:
     """Delete site events older than SITE_KEEP_DAYS. The caller commits."""
@@ -346,6 +362,8 @@ def site_events():
             if now - _last_prune > _PRUNE_EVERY:
                 _prune_site(con, now)
                 _last_prune = now
+        if stored:
+            _summary_changed()
         return jsonify({"ok": True, "stored": stored, "duplicates": len(rows) - refused - stored,
                         "rejected": len(events) - len(rows) + refused})
     except Exception as exc:
@@ -405,12 +423,29 @@ def site_summary_route():
     """Aggregates for the portal's dashboard (the home reporter carries this in its report as `site_activity`)."""
     days = min(max(request.args.get("days", type=int, default=30), 1), SITE_KEEP_DAYS)
     recent = min(max(request.args.get("recent", type=int, default=15), 0), 50)
+    key = (days, recent)
     try:
-        with closing(_conn()) as con:
-            return jsonify(site_summary(con, time.time(), days, recent))
+        with _summary_lock:                       # one computation at a time: the others wait for it and share the answer
+            kept = _SUMMARY_CACHE.get(key)
+            if kept and time.monotonic() - kept[0] < _SUMMARY_TTL_S:
+                return jsonify(kept[1])
+            gen = _summary_gen
+            payload = off_loop(_summary_compute, days, recent)
+            if gen == _summary_gen:               # nothing was written while it was being read
+                _SUMMARY_CACHE[key] = (time.monotonic(), payload)
+            return jsonify(payload)
     except Exception as exc:
         log.error("site telemetry summary error: %s", exc)
         return error(str(exc), status=500)
+
+
+def _summary_compute(days: int, recent: int) -> dict:
+    """The summary, read in a real thread (off_loop): its own connection and nothing shared. The page cache is big enough for the whole
+    file, so the queries (they scan the same pages) read it from disk once, not nine times: on the Windows bind mount that was
+    14 s, and 0.1 s once the pages are in memory."""
+    with closing(_conn()) as con:
+        con.execute("PRAGMA cache_size = -65536")      # 64 MiB; the database is about 20
+        return site_summary(con, time.time(), days, recent)
 
 
 @bp.post("/telemetry/site_forget")
@@ -424,6 +459,7 @@ def site_forget():
     try:
         with _lock, closing(_conn()) as con, con:
             deleted = con.execute("DELETE FROM site_events WHERE who = ?", (who,)).rowcount
+        _summary_changed()
         return jsonify({"ok": True, "deleted": deleted})
     except Exception as exc:
         log.error("site telemetry forget error: %s", exc)
