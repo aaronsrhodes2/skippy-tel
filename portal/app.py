@@ -71,6 +71,7 @@ import car_web
 import alarms as alarms_web
 import google_link
 import drive as drive_mod
+import hud as hud_mod
 import ship as ship_mod
 import tabletop as tabletop_mod
 import chat_history
@@ -851,6 +852,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     recovery_web.init_app(app, workshop, limiter, github, home=home, starter=starter, doctor=doctor)   # Recovery: one button (/admin/recovery/repair)
     status_web.init_app(app, status_mod.Status(), home, starter, doctor, workshop, limiter, vm_status)   # the Status map (docs/status-design.md)
     car_web.init_app(app, home)                         # the Captain's Tesla, read only (docs/tesla.md)
+    hud_mod.init_app(app)                                       # the glasses view: /hud/test first (hud.py)
     drive_mod.init_app(app, home)                           # Drive: the book, the shuffles and Skippy, for the Tesla's browser (drive.py)
     ships = ship_mod.ShipWatch(github, app.extensions["recovery"]["runs"])   # the private Skippy's ship card
     app.extensions["ships"] = ships

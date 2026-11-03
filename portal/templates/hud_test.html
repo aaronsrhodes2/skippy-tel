@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Glasses test — Maker Portal{% endblock %}
+{% block app %}hud{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}eye{% endblock %}
+{% block head %}
+<style>
+  /* The glasses' capability test (hud.py): one screen, read on the S23 with the Viture plugged in. Black is see-through on the
+     glasses, so the page is black and the words float. Each row: a lamp (on = yes, off = no, idle = not tried yet) and what was seen. */
+  #hudt { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; font: 600 14px var(--mono); color: var(--ink); }
+  #hudt .rows { display: grid; grid-template-columns: 14px 9em 1fr; gap: 6px 10px; align-items: center; }
+  #hudt .rows .lamp { width: 11px; height: 11px; }
+  #hudt .rows b { color: var(--muted); font-weight: 600; }
+  #hudt .rows span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #hudt .keys { display: flex; flex-wrap: wrap; gap: 8px; }
+  #hudt .keys .key { width: auto; padding: 0 14px; height: 38px; font: 600 13px var(--mono); }
+  #hudt .float { color: var(--green); font-size: 18px; }
+  #hudt video { width: 240px; max-width: 40%; border: 1px solid var(--line); background: #000; }
+  #hudt video[hidden] { display: none; }
+</style>
+{% endblock %}
+{% block content %}
+<section id="hudt">
+  <p class="float">If these words float in the air with nothing behind them, black is see-through here.</p>
+  <div class="rows" id="rows"></div>
+  <div class="keys">
+    <button type="button" class="key" id="t-fs" data-tel="hud:test-fullscreen">Full screen</button>
+    <button type="button" class="key" id="t-wake" data-tel="hud:test-wake">Keep awake</button>
+    <button type="button" class="key" id="t-screens" data-tel="hud:test-screens">Other screens</button>
+    <button type="button" class="key" id="t-cam" data-tel="hud:test-camera">Camera</button>
+    <button type="button" class="key" id="t-motion" data-tel="hud:test-motion">Motion</button>
+    <button type="button" class="key" id="t-copy" data-tel="hud:test-copy">Copy report</button>
+  </div>
+  <video id="t-video" playsinline muted hidden></video>
+  <pre class="copy" id="t-report" hidden></pre>
+</section>
+<script>
+(function () {
+  "use strict";
+  const rows = document.getElementById("rows"), found = {};
+  function row(key, label, state, text) {           // state: on | off | idle
+    found[key] = { state: state, text: text };
+    let r = document.getElementById("r-" + key);
+    if (!r) {
+      r = document.createElement("div"); r.id = "r-" + key; r.style.display = "contents";
+      r.innerHTML = '<i class="lamp"></i><b></b><span></span>';
+      rows.appendChild(r);
+    }
+    r.firstChild.dataset.s = state; r.children[1].textContent = label; r.children[2].textContent = text; r.children[2].title = text;
+  }
+  const yes = v => v ? "on" : "off";
+  function screenRow() {
+    row("view", "This window", "on", innerWidth + " x " + innerHeight + " css px, x" + devicePixelRatio + " = " +
+        Math.round(innerWidth * devicePixelRatio) + " x " + Math.round(innerHeight * devicePixelRatio) + " px");
+    row("screen", "Its screen", "on", screen.width + " x " + screen.height + (screen.orientation ? ", " + screen.orientation.type : "") +
+        (screen.isExtended === undefined ? "" : screen.isExtended ? ", more screens attached" : ", the only screen"));
+  }
+  screenRow(); addEventListener("resize", screenRow);
+  row("browser", "Browser", "on", (navigator.userAgentData && navigator.userAgentData.brands.map(b => b.brand + " " + b.version).join(", ")) ||
+      navigator.userAgent.replace(/^Mozilla\/5\.0 /, ""));
+  row("fs", "Full screen", yes(document.fullscreenEnabled), document.fullscreenEnabled ? "can (press Full screen)" : "not offered");
+  row("wake", "Keep awake", yes("wakeLock" in navigator), "wakeLock" in navigator ? "can (press Keep awake)" : "not offered");
+  row("screens", "Other screens", yes("getScreenDetails" in window), "getScreenDetails" in window ? "can ask (press Other screens)" : "not offered");
+  row("present", "Presentation", yes("PresentationRequest" in window), "PresentationRequest" in window ? "offered" : "not offered");
+  row("cam", "Camera", "idle", "press Camera");
+  row("motion", "Motion", "idle", "press Motion");
+  if (navigator.xr && navigator.xr.isSessionSupported) {
+    navigator.xr.isSessionSupported("immersive-ar").then(ok => row("xr", "WebXR AR", yes(ok), ok ? "immersive-ar supported" : "no immersive-ar"),
+                                                         () => row("xr", "WebXR AR", "off", "refused"));
+  } else row("xr", "WebXR AR", "off", "no WebXR");
+  if (navigator.getBattery) navigator.getBattery().then(b => {
+    const say = () => row("battery", "Battery", "on", Math.round(b.level * 100) + "%" + (b.charging ? ", charging" : ", on battery"));
+    say(); b.addEventListener("levelchange", say); b.addEventListener("chargingchange", say);
+  }); else row("battery", "Battery", "off", "not offered");
+
+  const on = (id, fn) => document.getElementById(id).addEventListener("click", fn);
+  on("t-fs", async () => {
+    try { await document.documentElement.requestFullscreen(); row("fs", "Full screen", "on", "full screen now"); }
+    catch (e) { row("fs", "Full screen", "off", String(e.message || e)); }
+  });
+  on("t-wake", async () => {
+    try { const l = await navigator.wakeLock.request("screen"); row("wake", "Keep awake", "on", "held (released when the page hides)");
+          l.addEventListener("release", () => row("wake", "Keep awake", "idle", "released")); }
+    catch (e) { row("wake", "Keep awake", "off", String(e.message || e)); }
+  });
+  on("t-screens", async () => {
+    try { const d = await window.getScreenDetails();
+          row("screens", "Other screens", "on", d.screens.map(s => (s.label || "screen") + " " + s.width + "x" + s.height + (s.isInternal ? " (built in)" : "")).join(" · ")); }
+    catch (e) { row("screens", "Other screens", "off", String(e.message || e)); }
+  });
+  on("t-cam", async () => {
+    const v = document.getElementById("t-video");
+    if (v.srcObject) { v.srcObject.getTracks().forEach(t => t.stop()); v.srcObject = null; v.hidden = true; row("cam", "Camera", "idle", "stopped"); return; }
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1920 } } });
+      const t = s.getVideoTracks()[0], st = t.getSettings();
+      v.srcObject = s; v.hidden = false; await v.play();
+      const cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "videoinput");
+      row("cam", "Camera", "on", (t.label || "camera") + ", " + st.width + "x" + st.height + "@" + Math.round(st.frameRate || 0) + ", " + cams.length + " cameras");
+    } catch (e) { row("cam", "Camera", "off", String(e.message || e)); }
+  });
+  on("t-motion", async () => {
+    try {
+      if (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) await DeviceOrientationEvent.requestPermission();
+      let n = 0;
+      addEventListener("deviceorientation", e => {
+        if (n++ % 10) return;
+        row("motion", "Motion", e.alpha === null ? "off" : "on", e.alpha === null ? "no readings" :
+            "heading " + Math.round(e.alpha) + "°, tilt " + Math.round(e.beta) + "°, roll " + Math.round(e.gamma) + "°");
+      });
+      setTimeout(() => { if (!n) row("motion", "Motion", "off", "no readings in 3 s"); }, 3000);
+    } catch (e) { row("motion", "Motion", "off", String(e.message || e)); }
+  });
+  on("t-copy", async () => {
+    const text = Object.keys(found).map(k => k + ": " + found[k].state + " · " + found[k].text).join("\n");
+    try { await navigator.clipboard.writeText(text); document.getElementById("t-copy").textContent = "Copied"; }
+    catch (e) { const p = document.getElementById("t-report"); p.textContent = text; p.hidden = false; }   // no clipboard: shown to copy by hand
+  });
+})();
+</script>
+{% endblock %}
