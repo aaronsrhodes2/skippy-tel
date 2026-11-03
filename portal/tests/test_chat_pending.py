@@ -31,7 +31,7 @@ class Model:
     without a reply (a model killed mid-answer), or answers 503 / an empty reply, as told."""
 
     def __init__(self):
-        self.down, self.calls, self.answer = "drop", 0, "Back from the dead, monkey."
+        self.down, self.calls, self.answer, self.up_at = "drop", 0, "Back from the dead, monkey.", None
         model = self
 
         class H(BaseHTTPRequestHandler):
@@ -41,6 +41,8 @@ class Model:
             def do_POST(self):
                 self.rfile.read(int(self.headers.get("Content-Length") or 0))
                 model.calls += 1
+                if model.up_at is not None and model.calls >= model.up_at:
+                    model.down = None                                 # back, by count: never by the clock (a slow CI box raced it)
                 if model.down == "drop":
                     self.connection.shutdown(socket.SHUT_RDWR)        # mid-answer: the socket just goes
                     return
@@ -63,8 +65,10 @@ class Model:
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
 
-    def up_after(self, seconds):
-        threading.Timer(seconds, lambda: setattr(self, "down", None)).start()
+    def up_after_calls(self, n):
+        """Down for the first n-1 calls, up from call n. (It was up after 1 s of wall time: on a loaded CI box the first request
+        reached the model after that, so nothing failed and no retry happened, 2026-11-02.)"""
+        self.up_at = n
 
 
 @pytest.fixture
@@ -86,7 +90,7 @@ def _client(model):
 @pytest.mark.parametrize("how", ["drop", "503", "empty"])
 def test_the_model_going_down_mid_answer_is_retried_and_the_same_prompt_is_answered_when_it_is_back(model, how):
     model.down = how
-    model.up_after(1.0)
+    model.up_after_calls(2)
     app, client = _client(model)
     r = client.post("/chat/send", json={"message": "are you there?", "prompt_id": "p-test-0001"})
     d = r.get_json()
@@ -111,7 +115,7 @@ def test_a_reload_while_it_is_retrying_joins_the_same_turn_and_sees_it_waiting(m
     out = {}
     t = threading.Thread(target=lambda: out.update(first=client.post("/chat/send", json={"message": "hi", "prompt_id": "p-test-0003"}).get_json()))
     t.start()
-    for _ in range(400):                                   # up to 20 s: a loaded CI box is slow to make the first retry
+    for _ in range(1200):                                  # up to 60 s: a loaded CI box (16 workers) is slow to make the first try
         p = app.extensions["chat_prompts"].get("p-test-0003", FRIEND)
         if p is not None and p.attempts:
             break
