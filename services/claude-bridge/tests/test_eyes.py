@@ -87,3 +87,48 @@ def test_a_core_run_switches_its_eyes_on_and_a_claude_run_does_not(shop, monkeyp
     core, claude = calls(shop)
     assert shop.core_env().get("SKIPPY_CORE_EYES") == "1"            # core runs get eyes on
     assert "SKIPPY_CORE_EYES" not in engine.child_env()              # claude runs (base env) don't
+
+
+def _transcript(tmp_path, *rows):
+    t = tmp_path / "t.jsonl"
+    t.write_text("".join(json.dumps(r) + chr(10) for r in rows), encoding="utf-8")
+    return str(t)
+
+
+def test_with_a_task_core_s_big_model_reviews_the_picture_against_it(tmp_path):
+    shot = tmp_path / "build.png"
+    shot.write_bytes(JPG)
+    transcript = _transcript(tmp_path, {"type": "user", "message": {"content": "build a red barn"}},
+                             {"type": "user", "message": {"content": [{"type": "tool_result", "content": "ok"}]}})
+    post, asked = answering("A grey shed. Faults: it is grey, not red; the roof is missing.")
+    code, message = eyes.check({**read(shot), "transcript_path": transcript}, env=CORE, post=post)
+    assert code == 2 and "the roof is missing" in message and "with your task in mind" in message
+    sent = asked[0]
+    assert sent["model"] == eyes.REVIEW_MODEL == "chat" and sent["chat_template_kwargs"] == {"enable_thinking": False}
+    assert "build a red barn" in sent["messages"][0]["content"][1]["text"]
+
+
+def test_when_the_review_fails_the_vision_slot_still_describes_it(tmp_path):
+    shot = tmp_path / "a.png"
+    shot.write_bytes(JPG)
+    transcript = _transcript(tmp_path, {"type": "user", "message": {"content": "fix the page"}})
+    models = []
+
+    def post(req):
+        body = json.loads(req.data)
+        models.append(body["model"])
+        if body["model"] == "chat":
+            raise ConnectionError("chat busy")
+        return {"content": [{"type": "text", "text": "A page with a Save key."}]}
+    code, message = eyes.check({**read(shot), "transcript_path": transcript}, env=CORE, post=post)
+    assert code == 2 and "A page with a Save key." in message and models == ["chat", "vision"]
+
+
+def test_the_task_is_the_latest_thing_the_person_said_not_a_tool_result(tmp_path):
+    transcript = _transcript(tmp_path,
+                             {"type": "user", "message": {"content": "first ask"}},
+                             {"type": "assistant", "message": {"content": [{"type": "text", "text": "on it"}]}},
+                             {"type": "user", "message": {"content": [{"type": "text", "text": "now make it blue"}]}},
+                             {"type": "user", "message": {"content": [{"type": "tool_result", "content": "file written"}]}})
+    assert eyes.task_of(transcript) == "now make it blue"
+    assert eyes.task_of(str(tmp_path / "missing.jsonl")) == ""

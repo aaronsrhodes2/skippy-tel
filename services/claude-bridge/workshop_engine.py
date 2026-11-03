@@ -1464,7 +1464,7 @@ class Workshop:
                                           "hooks": [{"type": "command", "command": hook, "timeout": 10}]},
                                          {"matcher": "Read", "hooks": [{"type": "command", "command": see, "timeout": 200}]}],
                           "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": restate, "timeout": 10}]}],
-                          "Stop": [{"hooks": [{"type": "command", "command": finish, "timeout": 90}]}]}}
+                          "Stop": [{"hooks": [{"type": "command", "command": finish, "timeout": 900}]}]}}
         return self._settings_file("lane-settings.json", want)
 
     def finish_state(self, run: "Run", clone: str) -> str:
