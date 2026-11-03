@@ -26,6 +26,7 @@ def library(tmp_path, monkeypatch):
                 "Cy/Third/Disc 2/too deep.mp3"):                                  # four levels down: never scanned, as before
         touch(rel)
     monkeypatch.setattr(bl, "_MUSIC_ROOT", tmp_path)
+    monkeypatch.setattr(bl, "_INDEX_FILE", tmp_path.parent / (tmp_path.name + "-index.json"))    # (beside the library, not in it)
     return tmp_path
 
 
@@ -95,3 +96,39 @@ def test_the_event_loop_serves_while_the_library_is_being_scanned(library, monke
     bl._ensure_loaded()
     assert len(answered) == 5 and bl.ready()
     other.join()
+
+
+def test_a_restart_reads_the_saved_index_instead_of_walking_the_library_again(library, monkeypatch):
+    monkeypatch.setattr(bl, "_loaded", False)
+    monkeypatch.setattr(bl, "_queue", [])
+    monkeypatch.setattr(bl, "_now", None)
+    walks = []
+    real = bl._scan_library
+    monkeypatch.setattr(bl, "_scan_library", lambda: walks.append(1) or real())
+    bl._ensure_loaded()
+    assert walks == [1] and bl.queue_size() == 5 and bl._INDEX_FILE.is_file()           # the first start walks, and saves what it found
+    monkeypatch.setattr(bl, "_loaded", False)
+    monkeypatch.setattr(bl, "_queue", [])                                               # a restart: nothing in memory
+    bl._ensure_loaded()
+    assert walks == [1] and bl.queue_size() == 5                                         # read back, not walked
+    bl.invalidate()
+    assert not bl._INDEX_FILE.exists()
+    bl._ensure_loaded()
+    assert walks == [1, 1]                                                               # asked to rescan: a real walk
+
+
+def test_an_old_or_foreign_or_broken_index_is_ignored(library, monkeypatch):
+    tracks = [{"file_id": "a/b/c.mp3", "name": "c.mp3", "title": "c", "artist": "a", "album": "b"}]
+    bl._write_index(tracks)
+    assert bl._read_index() == tracks
+    old = time.time() - bl._INDEX_MAX_AGE_S - 60
+    os.utime(bl._INDEX_FILE, (old, old))
+    assert bl._read_index() is None                                                      # older than twelve hours
+    bl._write_index(tracks)
+    monkeypatch.setattr(bl, "_MUSIC_ROOT", library / "elsewhere")
+    assert bl._read_index() is None                                                      # for a different library
+    monkeypatch.setattr(bl, "_MUSIC_ROOT", library)
+    bl._INDEX_FILE.write_text("{not json", encoding="utf-8")
+    assert bl._read_index() is None                                                      # broken: walked instead
+    bl._INDEX_FILE.write_text('{"root": "%s", "tracks": []}' % str(library).replace("\\", "\\\\"), encoding="utf-8")
+    assert bl._read_index() is None                                                      # an empty library is not worth trusting

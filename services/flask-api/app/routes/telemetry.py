@@ -244,8 +244,10 @@ _PRUNE_EVERY  = 3600         # seconds between prunes on the write path
 _last_prune   = 0.0
 
 # The dashboard summary is the one expensive read (nine scans of the table), and the home reporter asks for it every ~15 s. It is
-# computed in a thread (off_loop: SQLite blocks, and a blocked gevent loop stalls /health and everything else, see app/offload.py),
-# kept for _SUMMARY_TTL_S, and thrown away the moment anything is written to site_events (so it is never stale about a write).
+# computed in a thread (off_loop: SQLite blocks, and a blocked gevent loop stalls /health and everything else, see app/offload.py)
+# and kept for _SUMMARY_TTL_S: a dashboard may be a minute behind. A new event does NOT throw it away (while people are using the
+# portal an event arrives every few seconds, and the Windows bind mount made each recompute cost seconds of shared I/O); a DELETION
+# does (portal /privacy: forgetting someone must show at once).
 _SUMMARY_TTL_S = 60.0
 _SUMMARY_CACHE: dict = {}      # (days, recent) -> (monotonic time computed, payload)
 _summary_gen   = 0             # counts writes; a summary computed across a write is not kept
@@ -253,7 +255,7 @@ _summary_lock  = threading.Lock()   # between greenlets of this worker only: tak
 
 
 def _summary_changed() -> None:
-    """Something was written to site_events: every kept summary is out of date."""
+    """Rows were deleted from site_events: every kept summary is out of date."""
     global _summary_gen
     _summary_gen += 1
     _SUMMARY_CACHE.clear()
@@ -362,8 +364,6 @@ def site_events():
             if now - _last_prune > _PRUNE_EVERY:
                 _prune_site(con, now)
                 _last_prune = now
-        if stored:
-            _summary_changed()
         return jsonify({"ok": True, "stored": stored, "duplicates": len(rows) - refused - stored,
                         "rejected": len(events) - len(rows) + refused})
     except Exception as exc:
@@ -431,7 +431,7 @@ def site_summary_route():
                 return jsonify(kept[1])
             gen = _summary_gen
             payload = off_loop(_summary_compute, days, recent)
-            if gen == _summary_gen:               # nothing was written while it was being read
+            if gen == _summary_gen:               # nothing was deleted while it was being read
                 _SUMMARY_CACHE[key] = (time.monotonic(), payload)
             return jsonify(payload)
     except Exception as exc:

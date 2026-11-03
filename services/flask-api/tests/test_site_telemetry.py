@@ -291,7 +291,7 @@ def _count_reads(monkeypatch):
     return reads
 
 
-def test_the_summary_is_computed_once_a_minute_not_once_a_request(db, monkeypatch):
+def test_the_summary_is_computed_once_a_minute_not_once_a_request(db, monkeypatch):  # noqa: E302
     client, _ = db
     post(client, [ev(1)])
     reads = _count_reads(monkeypatch)
@@ -306,34 +306,35 @@ def test_the_summary_is_computed_once_a_minute_not_once_a_request(db, monkeypatc
     assert reads == [(30, 15), (7, 15), (30, 15)]
 
 
-def test_any_write_to_site_events_throws_the_kept_summary_away(db, monkeypatch):
+def test_a_new_event_waits_for_the_next_minute_but_a_deletion_shows_at_once(db, monkeypatch):
     client, _ = db
     post(client, [ev(1)])
     reads = _count_reads(monkeypatch)
     assert client.get("/telemetry/site_summary").get_json()["total_events"] == 1
     post(client, [ev(2)])
-    assert client.get("/telemetry/site_summary").get_json()["total_events"] == 2           # the new event shows at once
-    post(client, [ev(2)])                                                      # a duplicate stores nothing: nothing to throw away
-    client.get("/telemetry/site_summary")
-    assert len(reads) == 2
+    assert client.get("/telemetry/site_summary").get_json()["total_events"] == 1           # kept: an event shows within the minute
+    assert len(reads) == 1
+    later = {"t": time.monotonic() + telemetry._SUMMARY_TTL_S + 1}
+    monkeypatch.setattr(telemetry.time, "monotonic", lambda: later["t"])
+    assert client.get("/telemetry/site_summary").get_json()["total_events"] == 2           # a minute on: there
     client.post("/telemetry/site_forget", json={"user": "pal@example.com"})
-    assert client.get("/telemetry/site_summary").get_json()["total_events"] == 0           # a deletion shows at once too
+    assert client.get("/telemetry/site_summary").get_json()["total_events"] == 0           # a deletion shows at once
     assert len(reads) == 3
 
 
-def test_a_summary_read_across_a_write_is_not_kept(db, monkeypatch):
+def test_a_summary_read_across_a_deletion_is_not_kept(db, monkeypatch):
     client, _ = db
     post(client, [ev(1)])
     real = telemetry._summary_compute
 
     def slow(days, recent):
         out = real(days, recent)
-        post(client, [ev(2)])                                                  # an event lands while the database is being read
+        client.post("/telemetry/site_forget", json={"user": "pal@example.com"})       # someone is forgotten while the database is being read
         return out
     monkeypatch.setattr(telemetry, "_summary_compute", slow)
     assert client.get("/telemetry/site_summary").get_json()["total_events"] == 1
     monkeypatch.setattr(telemetry, "_summary_compute", real)
-    assert client.get("/telemetry/site_summary").get_json()["total_events"] == 2           # the stale one was not kept
+    assert client.get("/telemetry/site_summary").get_json()["total_events"] == 0           # the stale one was not kept
 
 
 def test_the_summary_is_read_off_the_event_loop(db, monkeypatch):

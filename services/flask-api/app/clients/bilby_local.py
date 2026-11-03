@@ -34,9 +34,11 @@ sends the file with Range-request support (ExoPlayer seeking).
 Quarantine holds: no imports from zPhone / SkippyDroid / SkippyGlassesMac.
 """
 
+import json
 import logging
 import os
 import random
+import time
 import threading
 from pathlib import Path
 from typing import Optional
@@ -55,6 +57,12 @@ _now:          Optional[dict] = None
 _loaded:       bool           = False
 _scan_started: bool           = False
 _scan_lock:    threading.Lock = threading.Lock()   # one scan at a time; the callers that arrive meanwhile wait here for its answer
+
+# The scan result is kept in a file, so a restart (a deploy, the doctor, gunicorn recycling a worker) reads three megabytes instead of
+# walking 21k files over the Windows share, which saturated it for a minute (/health took seconds meanwhile). It is a legacy index (the
+# phone-era /music/session and Bilby DJ intents; Bilby's Audio Service has its own catalog in music-gate), so a day-old one is fine.
+_INDEX_FILE     = Path("/app/state/bilby_library_index.json")
+_INDEX_MAX_AGE_S = 12 * 3600
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -236,12 +244,16 @@ def queue_size() -> int:
 
 
 def invalidate():
-    """Force a re-scan on next access."""
+    """Force a re-scan on next access (the saved index goes too: it would just be read back)."""
     global _loaded, _queue, _now
     with _lock:
         _loaded = False
         _queue  = []
         _now    = None
+    try:
+        _INDEX_FILE.unlink()
+    except OSError:
+        pass
 
 
 # ── Internal ──────────────────────────────────────────────────────────────────
@@ -258,7 +270,7 @@ def _ensure_loaded():
         # In a real thread (app/offload.py): this app runs on gevent workers, where a scan of the whole library ON the event loop froze
         # the worker for minutes (every stat is a round trip to the Windows file share), /health with it: gunicorn killed the worker at
         # 120 s, the new one scanned again, and the doctor DMed the Captain "Skippy's API is still failing after 3 tries" (2026-11-02).
-        tracks = off_loop(_scan_library)
+        tracks = off_loop(_load_tracks)
         with _lock:
             if tracks:
                 random.shuffle(tracks)
@@ -270,6 +282,41 @@ def _ensure_loaded():
             else:
                 _loaded = True
                 log.warning("Bilby Local: no audio files found under %s", _MUSIC_ROOT)
+
+
+def _read_index() -> Optional[list[dict]]:
+    """The saved scan, when it is for this library and young enough; None otherwise."""
+    try:
+        if time.time() - _INDEX_FILE.stat().st_mtime > _INDEX_MAX_AGE_S:
+            return None
+        data = json.loads(_INDEX_FILE.read_text(encoding="utf-8"))
+        tracks = data.get("tracks") if isinstance(data, dict) and data.get("root") == str(_MUSIC_ROOT) else None
+        if isinstance(tracks, list) and tracks and all(isinstance(t, dict) and "file_id" in t for t in tracks[:50]):
+            return tracks
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _write_index(tracks: list[dict]) -> None:
+    """Save the scan (best effort, a file that is never half written: the new one replaces the old in one step)."""
+    try:
+        tmp = _INDEX_FILE.with_name(_INDEX_FILE.name + ".tmp")
+        tmp.write_text(json.dumps({"root": str(_MUSIC_ROOT), "tracks": tracks}, separators=(",", ":")), encoding="utf-8")
+        tmp.replace(_INDEX_FILE)
+    except OSError:
+        pass
+
+
+def _load_tracks() -> list[dict]:
+    """In the scan's thread: the saved index when it is fresh enough, else a walk of the library (which is then saved)."""
+    kept = _read_index()
+    if kept:
+        return kept
+    tracks = _scan_library()
+    if tracks:
+        _write_index(tracks)
+    return tracks
 
 
 def _scan_library() -> list[dict]:
