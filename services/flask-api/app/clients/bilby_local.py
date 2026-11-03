@@ -41,6 +41,8 @@ import threading
 from pathlib import Path
 from typing import Optional
 
+from app.offload import off_loop
+
 log = logging.getLogger(__name__)
 
 _MUSIC_ROOT = Path("/music")
@@ -52,6 +54,7 @@ _index:        int            = 0
 _now:          Optional[dict] = None
 _loaded:       bool           = False
 _scan_started: bool           = False
+_scan_lock:    threading.Lock = threading.Lock()   # one scan at a time; the callers that arrive meanwhile wait here for its answer
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -248,54 +251,69 @@ def _ensure_loaded():
     with _lock:
         if _loaded and _queue:
             return
-    tracks = _scan_library()
-    with _lock:
-        if tracks:
-            random.shuffle(tracks)
-            _queue  = tracks
-            _index  = 0
-            _now    = tracks[0]
-            _loaded = True
-            log.info("Bilby Local: scanned %d tracks from %s", len(tracks), _MUSIC_ROOT)
-        else:
-            _loaded = True
-            log.warning("Bilby Local: no audio files found under %s", _MUSIC_ROOT)
+    with _scan_lock:                       # one scan, however many callers: the others wait here, not in a scan of their own
+        with _lock:
+            if _loaded and _queue:
+                return
+        # In a real thread (app/offload.py): this app runs on gevent workers, where a scan of the whole library ON the event loop froze
+        # the worker for minutes (every stat is a round trip to the Windows file share), /health with it: gunicorn killed the worker at
+        # 120 s, the new one scanned again, and the doctor DMed the Captain "Skippy's API is still failing after 3 tries" (2026-11-02).
+        tracks = off_loop(_scan_library)
+        with _lock:
+            if tracks:
+                random.shuffle(tracks)
+                _queue  = tracks
+                _index  = 0
+                _now    = tracks[0]
+                _loaded = True
+                log.info("Bilby Local: scanned %d tracks from %s", len(tracks), _MUSIC_ROOT)
+            else:
+                _loaded = True
+                log.warning("Bilby Local: no audio files found under %s", _MUSIC_ROOT)
 
 
 def _scan_library() -> list[dict]:
-    """Walk /music three levels deep: Artist → Album → track files."""
+    """Walk /music three levels deep: Artist → Album → track files.
+
+    os.scandir, not Path.iterdir() + is_dir()/is_file(): a DirEntry knows its type from the directory listing itself, so the walk
+    costs one listing per folder. The old walk made a stat() per file, and on the Windows bind mount each stat is a round trip to
+    the host (the whole library took minutes). Runs in a thread of its own (see _ensure_loaded): it logs nothing from here."""
     if not _MUSIC_ROOT.exists():
-        log.warning("Bilby Local: /music not mounted")
         return []
 
     tracks: list[dict] = []
-    try:
-        for artist_entry in _MUSIC_ROOT.iterdir():
-            if not artist_entry.is_dir():
-                # Loose files at root level
-                if artist_entry.suffix.lower() in _AUDIO_EXTS:
-                    title, artist = _parse_filename(artist_entry.name)
-                    tracks.append(_make_track(artist_entry, title, artist, ""))
+
+    def entries(folder: Path):
+        try:
+            with os.scandir(folder) as it:
+                return sorted(it, key=lambda e: e.name)       # (a stable order: what "random.shuffle" starts from does not change what is found)
+        except OSError:
+            return []
+
+    for artist_entry in entries(_MUSIC_ROOT):
+        artist_path = Path(artist_entry.path)
+        if not artist_entry.is_dir():
+            # Loose files at root level
+            if artist_path.suffix.lower() in _AUDIO_EXTS:
+                title, artist = _parse_filename(artist_entry.name)
+                tracks.append(_make_track(artist_path, title, artist, ""))
+            continue
+
+        artist_name = artist_entry.name
+        for child in entries(artist_path):
+            child_path = Path(child.path)
+            if not child.is_dir():
+                # Artist-level loose file
+                if child_path.suffix.lower() in _AUDIO_EXTS:
+                    title, _ = _parse_filename(child.name)
+                    tracks.append(_make_track(child_path, title, artist_name, ""))
                 continue
 
-            artist_name = artist_entry.name
-
-            for child in artist_entry.iterdir():
-                if not child.is_dir():
-                    # Artist-level loose file
-                    if child.suffix.lower() in _AUDIO_EXTS:
-                        title, _ = _parse_filename(child.name)
-                        tracks.append(_make_track(child, title, artist_name, ""))
-                    continue
-
-                album_name = child.name
-                for track_file in child.iterdir():
-                    if track_file.is_file() and track_file.suffix.lower() in _AUDIO_EXTS:
-                        title, _ = _parse_filename(track_file.name)
-                        tracks.append(_make_track(track_file, title, artist_name, album_name))
-
-    except Exception as exc:
-        log.error("Bilby Local scan error: %s", exc)
+            album_name = child.name
+            for track_file in entries(child_path):
+                if track_file.is_file() and Path(track_file.name).suffix.lower() in _AUDIO_EXTS:
+                    title, _ = _parse_filename(track_file.name)
+                    tracks.append(_make_track(Path(track_file.path), title, artist_name, album_name))
 
     return tracks
 
@@ -331,9 +349,9 @@ def _parse_filename(filename: str) -> tuple[str, str]:
 
 
 # ── Background startup scan ───────────────────────────────────────────────────
-# WSL2 bind-mounts are slow (~40s for 21k files). Start the scan in a daemon
-# thread at import time so it's ready before the first HTTP request arrives.
-# Defined down here so _ensure_loaded is already in scope.
+# WSL2 bind-mounts are slow. Start the scan at import time so it is ready before the first HTTP request arrives. Under gevent this
+# "thread" is a greenlet: it only WAITS for the real thread _ensure_loaded starts for the walk (app/offload.py), so the worker serves
+# requests meanwhile. Defined down here so _ensure_loaded is already in scope.
 
 def _background_scan() -> None:
     global _scan_started
