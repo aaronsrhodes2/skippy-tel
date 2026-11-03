@@ -87,3 +87,57 @@ def test_a_broken_tool_falls_through(stage):
     def boom(name, args):
         raise RuntimeError("kernel missing")
     assert stage.answer("where is mars", call=boom, miss=miss, now=NOW) is None and "kernel missing" in miss["position"]
+
+
+# Small bodies (sigma-ground C30): the roster is sigma-ground's, faked here as the three names it would know; the 2026-11-03 miss that started this:
+# "Where is asteroid 433 Eros on 2029-10-27T00:00:00 UTC? ... relative to the solar system barycenter" reached asteroid_analysis's surface gravity.
+_ROSTER = {"433 eros": {"number": 433, "name": "Eros", "kind": "asteroid", "tier": "own_fit"}, "eros": {"number": 433, "name": "Eros", "kind": "asteroid", "tier": "own_fit"},
+           "433": {"number": 433, "name": "Eros", "kind": "asteroid", "tier": "own_fit"}, "apophis": {"number": 99942, "name": "Apophis", "kind": "asteroid", "tier": "horizons"},
+           "67p": {"number": None, "name": "67P/Churyumov-Gerasimenko", "kind": "comet", "tier": "catalogue"}}
+
+
+@pytest.fixture
+def roster(stage, monkeypatch):
+    asked = []
+
+    def fake(phrase):
+        asked.append(phrase)
+        return _ROSTER.get(phrase.lower())
+    monkeypatch.setattr(stage, "small_body_lookup", fake)
+    return asked
+
+
+@pytest.mark.parametrize("question, args", [
+    ("Where is asteroid 433 Eros on 2029-10-27T00:00:00 UTC? I need its position vector (X, Y, Z) in the ICRF/J2000 frame relative to the solar system barycenter.",
+     {"body_name": "433 Eros", "when": "2029-10-27T00:00:00", "central_body": "ssb"}),
+    ("where is eros right now", {"body_name": "433 Eros", "when": "now", "central_body": "earth"}),
+    ("Where will Apophis be on April 13, 2029, as seen from Earth?", {"body_name": "99942 Apophis", "when": "2029-04-13", "central_body": "earth"}),
+    ("Heliocentric position of comet 67P in 2028", {"body_name": "67P/Churyumov-Gerasimenko", "when": "2028-01-01", "central_body": "sun"}),
+])
+def test_small_bodies_the_roster_knows_are_read(stage, roster, question, args):
+    got, why, _ = stage.read(question, NOW)
+    assert got == args, why
+
+
+def test_a_small_body_the_roster_does_not_know_falls_through(stage, roster):
+    miss = {}
+    assert stage.answer("Where is asteroid Bennu on 2029-10-27?", call=lambda *a: pytest.fail("no tool call"), miss=miss, now=NOW) is None
+    assert "small body" in miss["position"] and "Bennu" in roster
+
+
+@pytest.mark.parametrize("question, calculated", [
+    ("Calculate where Mars was on 2015-06-15", True),                                   # the Captain's word: the chain with its work, not the kernel's value
+    ("Compute the position of the Moon on 2020-01-01 from the Sun", True),
+    ("Where is Mars on 2015-06-15? Show your work.", True),
+    ("Where was Mars on 2015-06-15?", False),
+])
+def test_calculate_asks_for_the_chain_not_the_lookup(stage, question, calculated):
+    got, why, _ = stage.read(question, NOW)
+    assert got is not None, why
+    assert got.get("calculate", False) is calculated
+
+
+def test_without_sigma_ground_the_roster_is_empty_and_planets_still_work(stage, monkeypatch):
+    monkeypatch.setattr(stage, "small_body_lookup", lambda phrase: None)
+    assert stage.read("Where is Eros on 2029-10-27?", NOW)[0] is None
+    assert stage.read("Where is Mars on 2029-10-27?", NOW)[0] == {"body_name": "mars", "when": "2029-10-27", "central_body": "earth"}

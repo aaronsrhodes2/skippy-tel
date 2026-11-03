@@ -156,6 +156,13 @@ def _answer_with(model: str, index: bool, question: str, *, server, tools: dict,
     if not last or last.get("error") or last.get("value") is None:
         _missed(miss, f"tool error: {str(last.get('error'))[:200]}" if last and last.get("error") else "the last tool call carried no value", rec)
         return None
+    sent = set((calls[-1].get("args") or {}))
+    if sent and set(last.get("ignored_arguments") or []) >= sent:
+        # The tool took none of the arguments the router wrote (sigma-ground's contract says so in ignored_arguments): the router picked a tool whose
+        # signature does not fit the question (2026-11-03: "where is asteroid 433 Eros on <date>" went to asteroid_analysis, which answered Eros's
+        # surface gravity from a call that ignored body_name, when and central_body). A wrong tool's number is not an answer: a miss, and the next stage runs.
+        _missed(miss, f"wrong tool: {calls[-1]['name']} ignored every argument it was given ({', '.join(sorted(sent))})", rec)
+        return None
     plan = " then ".join(f"{c['name']}({', '.join(f'{k}={v!r}' for k, v in (c.get('args') or {}).items())})" for c in calls)
     chain = []
     for c in calls:

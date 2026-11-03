@@ -108,16 +108,70 @@ def read(question: str, now: datetime.datetime | None = None) -> tuple[dict | No
             continue                                              # the centre ("from Earth"), not the body asked about
         if b not in named:
             named.append(b)
-    if len(named) != 1:
-        return None, ("no planet, Sun or Moon named" if not named else f"more than one body named ({', '.join(named)})"), None
+    small = None
+    if not named:
+        small = read_small_body(question)                          # an asteroid, Kuiper-belt object or comet body_position places (sigma-ground C30)
+    if len(named) > 1 or (not named and small is None):
+        return None, ("no planet, Sun, Moon or catalogued small body named" if not named else f"more than one body named ({', '.join(named)})"), None
     when = read_when(question, now)
     if when is None:
         return None, "no time named", None
-    body = named[0]
+    body = named[0] if named else small
     center = read_center(question, body)
     if body == "sun" and center == "sun":
         center = "ssb"
-    return {"body_name": body, "when": when[0], "central_body": center}, "", when[1]
+    args = {"body_name": body, "when": when[0], "central_body": center}
+    if _CALC.search(question):
+        args["calculate"] = True                                   # the Captain's word: "calculate" means the N-body chain with its work shown, never the kernel's value alone
+    return args, "", when[1]
+
+
+_CALC = re.compile(r"\b(calculate|compute|integrate|propagate|run the (?:n-body|model|integration|engine)|show (?:the|your|its) work|work it out|from scratch|no(?:t a)? lookup)\b", re.I)
+
+
+# Small bodies: the roster is sigma-ground's (24,000 named asteroids, the comets), so the phrase is checked against it, never against a list here.
+_SMALL_CUE = re.compile(r"\b(?:asteroid|minor planet|dwarf planet|comet|kuiper[- ]belt object|kbo|near[- ]earth object|neo)\s+(?:\(?(\d+)\)?\s+)?([A-Z][\w'`-]+(?:[ /-][A-Za-z][\w'-]+)?|\d{1,3}P(?:/[A-Za-z][\w-]+)?)", re.I)
+_COMET = re.compile(r"\b(\d{1,3}P(?:/[A-Za-z][\w-]+)?)\b")
+_NUMBERED = re.compile(r"\(?\b(\d{1,6})\)?\s+([A-Z][a-z'`-]{2,}(?:[ -][A-Z][a-z'-]+)?)")
+_CAPITAL = re.compile(r"\b([A-Z][a-z'`-]{2,}(?:[ -][A-Z][a-z'-]+)?)\b")
+_AFTER_CUE = re.compile(r"\b(?:where(?:'s| is| was| will| would)|position of|how far is|distance (?:to|of|from))\s+(?:the\s+)?(?:asteroid\s+|comet\s+)?([a-z][\w'`-]{2,})", re.I)
+_NOT_A_BODY = {"where", "what", "when", "which", "how", "position", "please", "give", "find", "show", "tell", "utc", "icrf", "jpl", "ssb", "the", "use",
+               "sun", "earth", "moon", "solar", "system", "barycenter", "barycentre", "january", "february", "march", "april", "may", "june", "july",
+               "august", "september", "october", "november", "december", "tonight", "today", "tomorrow", "now", "right", "ascension", "declination"}
+
+
+def small_body_lookup(phrase: str) -> dict | None:
+    """sigma-ground's roster: {number, name, kind, tier} when body_position can place this phrase, else None. Imported lazily; absent sigma-ground means no small bodies."""
+    try:
+        from sigma_ground.field.interface import small_body_position as sbp
+    except Exception:                                              # noqa: BLE001
+        return None
+    try:
+        return sbp.lookup(phrase)
+    except Exception:                                              # noqa: BLE001 — a catalogue that fails to read never stops /ask
+        return None
+
+
+def read_small_body(question: str) -> str | None:
+    """The body_position name for the one catalogued small body the question names, or None. Tried in order: 'asteroid 433 Eros' / 'comet 67P', a bare comet
+    designation, 'number Name', then each capitalised word that is not a planet, centre, month or question word; the first the roster knows wins."""
+    tried: list[str] = []
+    for m in _SMALL_CUE.finditer(question):
+        tried += [f"{m.group(1)} {m.group(2)}" if m.group(1) else m.group(2), m.group(2)] + ([m.group(1)] if m.group(1) else [])
+    tried += [m.group(1) for m in _COMET.finditer(question)]
+    tried += [f"{m.group(1)} {m.group(2)}" for m in _NUMBERED.finditer(question)]
+    tried += [m.group(1) for m in _CAPITAL.finditer(question) if m.group(1).lower() not in _NOT_A_BODY and m.group(1).lower() not in BODIES]
+    tried += [m.group(1) for m in _AFTER_CUE.finditer(question) if m.group(1).lower() not in _NOT_A_BODY and m.group(1).lower() not in BODIES]   # "where is eros": no capital to go by
+    seen: set[str] = set()
+    for phrase in tried:
+        p = phrase.strip()
+        if not p or p.lower() in seen:
+            continue
+        seen.add(p.lower())
+        hit = small_body_lookup(p)
+        if hit:
+            return f"{hit['number']} {hit['name']}" if hit.get("number") is not None else hit["name"]
+    return None
 
 
 def answer(question: str, *, call, miss: dict | None = None, now: datetime.datetime | None = None) -> dict | None:

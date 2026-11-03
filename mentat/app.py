@@ -53,6 +53,7 @@ import ready as ready_mod
 import research
 import research_stage
 import position_stage
+import directive_stage
 import fold_stage
 import emission_stage
 import router_stage
@@ -186,8 +187,13 @@ def _ask(question: str, given: dict | None = None) -> dict:
         raise QwenUnavailable("Qwen (Ollama) is unreachable, so Mentat won't answer without it.")
     miss: dict = {}
     if not given:
-        # Where is a planet, the Sun or the Moon at a time: a fixed rule, ahead of the cascade and the router (the router was trained before
-        # body_position existed and sent these to the fact sheet). Only a question naming a body, a position word and a time; else it carries on.
+        # A question that names the tool and its arguments ("use body_position with body_name='eros', when=...") is a call the caller already routed:
+        # it runs as written, ahead of every other stage (2026-11-03: the router answered such a question with another tool's number; directive_stage.py).
+        hit = directive_stage.answer(question, call=_call, tools=TOOLS, miss=miss)
+        if hit is not None:
+            return hit
+        # Where is a planet, the Sun, the Moon or a catalogued small body at a time: a fixed rule, ahead of the cascade and the router (the router was
+        # trained before body_position existed and sent these to the fact sheet; small bodies since C30). Only a question naming a body, a position word and a time; else it carries on.
         hit = position_stage.answer(question, call=_call, miss=miss)
         if hit is not None:
             return hit
