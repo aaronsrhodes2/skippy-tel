@@ -20,9 +20,10 @@
   #drive .unit[data-on="1"] { filter: drop-shadow(0 0 9px color-mix(in srgb, var(--accent) 70%, transparent)); }
   #drive .unit[data-on="1"] .plate { opacity: 1; }
   #drive .unit[aria-disabled="true"] { opacity: .35; }
-  #now { height: 44px; display: flex; align-items: center; gap: 12px; padding: 0 6px; font: 600 16px var(--mono); color: var(--ink); min-width: 0; }
+  #now { height: 44px; display: flex; align-items: center; gap: 12px; padding: 0 6px; font: 600 16px var(--mono); color: var(--ink); min-width: 0;
+         width: 100%; max-width: 100%; box-sizing: border-box; }   /* (the page centres its children: a row left to its own width ran off both sides of a phone) */
   #now .g { width: 26px; height: 26px; flex: none; color: var(--accent); }
-  #now-t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #now-t { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #now-bar { position: relative; height: 3px; background: var(--line); margin: 0 6px; }
   #now-bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--accent); }
   #vstatus { min-height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 6px; font: 600 15px var(--mono); color: var(--green); }
@@ -62,8 +63,9 @@
   /* the hud mode (/hud, hud.py): purple's colour on the voice key, the hub key and the apps key in the strip, and hub mode: every key
      goes, his face fills the screen with what was said under it, and the voice listens for "Skippy" with no touch, like a pod */
   #drive.hud #k-skippy { --accent: var(--violet) !important; }
-  #drive .hudkeys { display: flex; gap: 8px; margin-left: auto; }
-  #drive .hudkeys .key { width: 40px; height: 40px; }
+  #drive .hudkeys { display: flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
+  #drive .hudkeys .key { width: 38px; height: 38px; flex: none; }
+  @media (max-width: 480px) { #drive.hud #now { gap: 6px; } #drive.hud #now > .g { display: none; } }          /* a phone: the strip's keys come first, its words take what is left */
   #drive .hudkeys .key[hidden] { display: none; }
   #k-flash.busy, #k-link.busy { opacity: .55; }
   #drive .hudkeys .batt { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; font: 600 14px var(--mono); color: var(--muted); white-space: nowrap; }
