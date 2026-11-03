@@ -186,7 +186,8 @@ class Notifier:
 
     def alert(self, text: str, image: bytes | None = None) -> bool:
         """Something the Captain must know, from the doctor (doctor.py: a service still failing after its tries, skippy-pc unreachable).
-        The doctor already sends each one at most once an hour; this only needs Discord to be set up. `image`: a JPEG to attach (the
+        The doctor already decides how often (one message per problem, a reminder every 6 h at most, one "working again"); this is not
+        the "Discord me when done" switch and only needs Discord to be set up. `image`: a JPEG to attach (the
         Ring doorbell's snapshot)."""
         if not self.configured:
             return False

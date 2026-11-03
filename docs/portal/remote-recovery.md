@@ -16,7 +16,7 @@ phone ──> portal (Cloud Run) <── skippy-pc's home reporter (Docker) ─�
 | Home reporter | Docker on skippy-pc, container `skippytel-home-reporter` | Docker Desktop running, the internet | Docker (`restart: unless-stopped`); it also restarts itself after 15 minutes without reaching the portal |
 | Bridge | the Windows host, port 9337 | you signed in, `tools/bridge_supervisor.sh` | the supervisor (restarts it within seconds; restarts one that is up but mute after a few minutes) |
 | OpenAudible (the Audible library, its web server on `127.0.0.1:5758`) | the Windows host, a desktop app | the web server switched on in its Preferences > Web Server | the starter probes it (any HTTP answer is up) and the doctor starts the app when it is not running; a running app with the web server off is never touched, the Captain is DMed |
-| Spotify (desktop app, its sound through VB-Cable to the hub; Discord is not watched: the portal's bot uses its REST API) | the Windows host | installed and signed in | the starter sees whether each is running; the doctor starts it minimized after 5 min if it is missing (3 tries/hour, then a Discord DM) and never touches a running one. VB-Cable missing is a row only. The starter counts the downtime itself (`down_s`), because the portal redeploys every few minutes and forgets |
+| Spotify (desktop app, its sound through VB-Cable to the hub; Discord is not watched: the portal's bot uses its REST API) | the Windows host | installed and signed in | the starter sees whether each is running; the doctor starts it minimized after 5 min if it is missing (3 tries/hour, then one Discord DM) and never touches a running one. VB-Cable missing is a row only. The starter counts the downtime itself (`down_s`), because the portal redeploys every few minutes and forgets |
 | Claude Code | the host, signed in as you | its login not expired | you: `claude auth login` on the PC |
 
 The reporter calls **out** to the portal every ~15 s. Nothing connects in to your house, so if the house has no internet, or the PC is
@@ -46,7 +46,10 @@ It never reverts code: undoing a change is the private Skippy's job, from a chat
 - skippy-pc's tests run with every home report (`services/home-reporter/doctor_checks.py`): each service must answer, in time, with
   the right thing, so a service that is up but hung counts as down. Skippy Core gets a real five-token reply every five minutes.
 - A test failing for five minutes in a row gets healed (that one thing recreated, the bridge restarted, Docker restarted clean,
-  or Core repaired), at most three times an hour per thing; then it DMs the Captain on Discord and waits for the next hour.
+  or Core repaired), at most three times an hour per thing; then it DMs the Captain on Discord ONCE (a reminder only every 6 h while it is still broken,
+  a day for Spotify and OpenAudible, and one "working again" after 2 minutes of good health) and goes on trying quietly. The doctor's memory of who
+  was told what is kept in the bucket (`doctor/state.json`), because the portal is redeployed every few minutes and used to forget and tell him again
+  (2026-11-02: eighteen DMs in an evening). These DMs are not the "Discord me when done" switch: they always go.
 - It never heals while the stack was stopped on purpose (the starter's "back on at" time), never the bridge mid-run, and the
   starter leaves a service alone while someone is building on the PC (a session's own rebuild).
 - skippy-pc and its starter both silent for 10 minutes: a DM (the PC is off, asleep, at sign-in, or without internet).

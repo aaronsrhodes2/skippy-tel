@@ -847,7 +847,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     starter = starter_mod.Starter()
     app.extensions["starter"] = starter
     # The doctor (doctor.py): keeps skippy-pc and Skippy Core at their baseline by itself, through the starter; DMs the Captain when it can't.
-    doctor = doctor_mod.Doctor(home, starter, notify=lambda text: notifier.alert(text))
+    doctor = doctor_mod.Doctor(home, starter, notify=lambda text: notifier.alert(text),
+                               store=tabletop_mod.store_from_env())      # (its memory of who was told what survives a deploy: doctor.STATE_KEY)
     app.extensions["doctor"] = doctor
     recovery_web.init_app(app, workshop, limiter, github, home=home, starter=starter, doctor=doctor)   # Recovery: one button (/admin/recovery/repair)
     status_web.init_app(app, status_mod.Status(), home, starter, doctor, workshop, limiter, vm_status)   # the Status map (docs/status-design.md)

@@ -10,20 +10,33 @@ The portal is the brain because it is the one part that can't go down (Cloud Run
 and it acts through the starter, which runs on Windows itself and so works when Docker is down:
   heal <name>   one thing back to good: a compose service recreated (stop, rm, up --build), the bridge restarted, Docker restarted
                 clean, or Skippy Core repaired over SSH. Sent by itself when a test has failed for HEAL_AFTER_S in a row, at most
-                MAX_TRIES times an hour per thing; after that it stops trying and DMs the Captain once.
+                MAX_TRIES times an hour per thing; after that it keeps trying quietly, once an hour's allowance at a time.
   repair        the button: everything back to baseline at once (repair() below says what that is)
 
 It never heals while the Captain has stopped the stack on purpose (the starter's "back on at" time is set), and the starter itself
 refuses to heal a service that someone is building at that moment (a session's own rebuild). Code is never reverted here: undoing a
 change is the private Skippy's job, from a chat that works.
+
+What it tells the Captain (2026-11-02: eighteen "still failing after 3 tries" DMs in one evening, from the same two things): ONE DM when
+it gives up on something, a reminder only every REMIND_S while that is still true (a day for the desktop apps he may have closed on
+purpose), and ONE "working again" when it has been fine for BACK_AFTER_S. The memory of who was told what is kept in the bucket
+(STATE_KEY), because this portal is redeployed every few minutes and used to forget, and then told him again.
 """
 from __future__ import annotations
 
+import json
 import threading
 import time
 
 HEAL_AFTER_S = 300          # failing this long, test after test, before anything is touched (a rebuild takes a minute or three)
-MAX_TRIES = 3               # heals per thing per hour; then a DM, and it waits for the next hour
+MAX_TRIES = 3               # heals per thing per hour; then one DM, and it keeps trying quietly
+REMIND_S = 6 * 3600         # a thing still broken is mentioned again no sooner than this...
+REMIND_APP_S = 24 * 3600    # ...a day for a desktop app (Spotify, OpenAudible): closing one is not an outage
+FLAP_S = 3600               # a thing that broke again within this long of the last word about it is not news
+BACK_AFTER_S = 120          # "working again" only after it has been fine this long (a blip is not a recovery)
+FORGET_S = 7 * 86400        # an episode nobody has reported on for this long is dropped without a word
+STATE_KEY = "doctor/state.json"        # in the Tabletop bucket: tries, told, open (what the Captain has already been DMed)
+QUIET_APPS = ("spotify", "openaudible")
 SILENT_HEAL_S = 240         # no home report this long while the starter answers: the reporter itself is stuck
 CORE_EVERY_S = 300          # how often the portal tests Skippy Core
 CORE_TIMEOUT_S = 120        # Core may be busy with a long reply: a test waits its turn this long
@@ -39,17 +52,64 @@ LABELS = {"flask-api": "Skippy's API", "ollama": "Ollama (local models)", "whisp
           "vbcable": "VB-Cable (Spotify's sound path)", "core": "Skippy Core", "portal": "Portal", "starter": "Starter (skippy-pc's own)"}
 
 
+def _span(seconds: float) -> str:
+    """How long, in the words of a phone message: '40 min', '7 h', '3 days'."""
+    minutes = max(1, int(seconds // 60))
+    if minutes < 90:
+        return f"{minutes} min"
+    hours = round(minutes / 60)
+    return f"{hours} h" if hours < 48 else f"{hours // 24} days"
+
+
 class Doctor:
-    def __init__(self, home, starter, notify=None, clock=time.time):
+    def __init__(self, home, starter, notify=None, clock=time.time, store=None, log=None):
         self.home, self.starter, self.notify, self.clock = home, starter, notify or (lambda text: False), clock
+        self.store, self.log = store, log or (lambda line: print(line, flush=True))
         self._lock = threading.Lock()
         self.checks: dict[str, dict] = {}          # name -> {ok, why, ms, since, at}
-        self.tries: dict[str, list[float]] = {}    # name -> heal times this hour
-        self.told: dict[str, float] = {}           # name -> when the Captain was last DMed about it
+        self.tries: dict[str, list[float]] = {}    # name -> heal times this hour                          (kept in the bucket)
+        self.told: dict[str, float] = {}           # name -> when the Captain was last DMed about it         (kept in the bucket)
+        self.open: dict[str, float] = {}           # name -> since when, for what he was told is broken and not yet told is fixed (kept)
+        self.fine_since: dict[str, float] = {}     # name -> since when an open one has looked fine (not kept: it restarts with the portal)
         self.actions: list[dict] = []              # the doctor's own log, newest last: what it did and why
         self.core_at = 0.0
         self.core_running = False
         self.repairing: dict | None = None         # the button's run: {at, by, steps, done, ok}
+        self._dirty = False
+        self._load()
+
+    # ── its memory, in the bucket: a redeploy must not make it forget who it already told ──
+    def _load(self) -> None:
+        if self.store is None:
+            return
+        try:
+            raw = json.loads(self.store.get(STATE_KEY) or b"{}")
+            now = self.clock()
+            for name, times in (raw.get("tries") or {}).items():
+                recent = [float(t) for t in times if now - float(t) < 3600]
+                if recent:
+                    self.tries[str(name)] = recent
+            self.told = {str(k): min(float(v), now) for k, v in (raw.get("told") or {}).items()}
+            self.open = {str(k): min(float(v), now) for k, v in (raw.get("open") or {}).items() if now - float(v) < FORGET_S}
+        except Exception as e:  # noqa: BLE001 — no bucket or a bad file: start from nothing, as before
+            self.log(json.dumps({"event": "doctor_load", "problem": type(e).__name__}))
+
+    def _flush(self) -> None:
+        """Write the memory down if it changed (a heal asked, a DM sent). A failed write is a logged line, never a stopped doctor."""
+        if self.store is None:
+            return
+        with self._lock:
+            if not self._dirty:
+                return
+            self._dirty = False
+            body = json.dumps({"tries": {k: list(v) for k, v in self.tries.items() if v}, "told": dict(self.told),
+                               "open": dict(self.open)}).encode()
+        try:
+            self.store.put(STATE_KEY, body, "application/json")
+        except Exception as e:  # noqa: BLE001
+            self.log(json.dumps({"event": "doctor_save", "problem": type(e).__name__}))
+            with self._lock:
+                self._dirty = True                    # (the next look tries again)
 
     # ── what it sees ──
     def _set(self, name: str, ok: bool, why: str = "", ms: int | None = None, down_s: int | None = None) -> None:
@@ -94,26 +154,80 @@ class Doctor:
         """The Captain stopped the stack on purpose (a heavy task): nothing is healed until it is back."""
         return bool((self.starter.status or {}).get("resume_at")) if self.starter else False
 
+    def _tell(self, name: str, first: str, again: str = "", since: float | None = None) -> bool:
+        """DM the Captain about `name`: ONE message when it starts, `again` (with <SPAN> turned into how long) only after REMIND_S of it still
+        being broken (a day for QUIET_APPS); a thing that breaks again within FLAP_S of the last word about it is not news. Called with
+        the lock held. Returns whether a DM went out."""
+        now = self.clock()
+        began = self.open.get(name)
+        every = (REMIND_APP_S if name in QUIET_APPS else REMIND_S) if began is not None else FLAP_S
+        last = self.told.get(name)
+        if last is not None and now - last < every:
+            return False
+        self.told[name] = now
+        self.open.setdefault(name, since if since is not None else now)
+        self._dirty = True
+        self.notify(again.replace("<SPAN>", _span(now - began)) if began is not None and again else first)
+        return True
+
+    def _fine(self, name: str, status: dict, age) -> bool | None:
+        """Does `name` look fine now? None when nothing is being said about it any more."""
+        if name == "docker":
+            return status.get("docker") is True
+        if name == "home-reporter":
+            return age is not None and age < 60
+        if name == "skippy-pc":
+            return bool(self.starter and self.starter.online())
+        c = self.checks.get(name)
+        return None if c is None else bool(c["ok"])
+
+    def _note_recoveries(self, status: dict, age, now: float) -> None:
+        """Whatever the Captain was told is broken: ONE "working again" once it has been fine for BACK_AFTER_S. Called with the lock held."""
+        for name, began in list(self.open.items()):
+            fine = self._fine(name, status, age)
+            if fine is not True:
+                self.fine_since.pop(name, None)             # still broken, or not reported: the clock starts over
+                if fine is None and now - began > FORGET_S:
+                    self.open.pop(name, None)               # nobody has spoken of it for a week: forgotten without a word
+                    self._dirty = True
+                continue
+            since = self.fine_since.setdefault(name, now)
+            if now - since < BACK_AFTER_S:
+                continue
+            self.open.pop(name, None)
+            self.fine_since.pop(name, None)
+            self.told[name] = now                           # (a break within FLAP_S of this is not news)
+            self._dirty = True
+            self.notify(f"Skippy's doctor: {LABELS.get(name, name)} is working again after {_span(now - began)}.")
+
     def _try(self, name: str, why: str) -> bool:
-        """Heal `name` if it may be tried now (the hourly allowance); DM the Captain once when the allowance is used up."""
+        """Heal `name` if it may be tried now (the hourly allowance); when the allowance is used up, tell the Captain (see _tell)."""
         now = self.clock()
         tries = [t for t in self.tries.get(name, []) if now - t < 3600]
         if len(tries) >= MAX_TRIES:
-            if name not in self.told or now - self.told[name] > 3600:
-                self.told[name] = now
-                self.notify(f"Skippy's doctor: {LABELS.get(name, name)} is still failing after {MAX_TRIES} tries this hour "
-                            f"({why}). It will try again next hour; Admin > Recovery has the details.")
+            label = LABELS.get(name, name)
+            self._tell(name, f"Skippy's doctor: {label} is failing and {MAX_TRIES} tries this hour didn't fix it ({why}). I'll keep trying, "
+                             "and tell you once when it's back; Admin > Recovery has the details.",
+                       f"Skippy's doctor: {label} is still failing after <SPAN> ({why}). Admin > Recovery has the details.",
+                       since=(self.checks.get(name) or {}).get("since"))
             return False
         try:
             self.starter.request("heal", "doctor", arg=name)
         except ValueError:
             return False                                     # already waiting, or the queue is full: next look
         self.tries[name] = tries + [now]
+        self._dirty = True
         self._log(f"heal {name}", why)
         return True
 
     def tick(self) -> list[str]:
         """One look (called with every home report and every starter call): heal what has been failing long enough. Returns what it healed."""
+        try:
+            return self._tick()
+        finally:
+            self._flush()
+
+    def _tick(self) -> list[str]:
         healed = []
         if self.starter is None or not self.starter.online() or self._maintenance() or self.repairing and not self.repairing.get("done"):
             self._unreachable()
@@ -129,11 +243,12 @@ class Doctor:
                 if isinstance(status.get(app), bool):
                     self._set(app, status[app], "" if status[app] else ("not installed or disabled" if app == "vbcable" else "the app is not running"),
                               down_s=(status.get("down_s") or {}).get(app))
+            age = self.home.age() if self.home else None
+            self._note_recoveries(status, age, now)          # what he was told is broken and now looks fine: one "working again"
             if status.get("docker") is False:                # Docker itself: the starter restarts it clean
                 if self._try("docker", "Docker isn't answering"):
                     healed.append("docker")
                 return healed
-            age = self.home.age() if self.home else None
             if age is not None and age > SILENT_HEAL_S and status.get("docker"):
                 if self._try("home-reporter", f"no report for {age // 60} min"):
                     healed.append("home-reporter")
@@ -146,11 +261,11 @@ class Doctor:
                     continue                                 # mid-run: never pulled out from under a task
                 if name == "openaudible" and status.get("openaudible_app"):
                     # running, web server off: a preference only the Captain sets, and the app may be converting his library.
-                    # Never touched; he is told once in a while.
-                    if now - self.told.get(name, -1e12) > 6 * 3600:
-                        self.told[name] = now
-                        self.notify("Skippy's doctor: OpenAudible is running but its web server is not answering. I left the app alone "
-                                    "(it may be converting). Turn it on in OpenAudible > Preferences > Web Server.")
+                    # Never touched; he is told once (and again only after a day).
+                    self._tell(name, "Skippy's doctor: OpenAudible is running but its web server is not answering. I left the app alone "
+                                     "(it may be converting). Turn it on in OpenAudible > Preferences > Web Server.",
+                               "Skippy's doctor: OpenAudible's web server is still off after <SPAN>. Turn it on in OpenAudible > Preferences > Web Server.",
+                               since=c["since"])
                     continue
                 if self._try(name, c["why"] or "failing"):
                     healed.append(name)
@@ -163,11 +278,10 @@ class Doctor:
         age = self.home.age() if self.home else None
         if age is not None and age < UNREACHABLE_DM_S:
             return
-        now = self.clock()
-        if "skippy-pc" not in self.told or now - self.told["skippy-pc"] > 6 * 3600:
-            self.told["skippy-pc"] = now
-            self.notify("Skippy's doctor: skippy-pc and its starter have both been silent for over 10 minutes. The PC is off, asleep, "
-                        "at the sign-in screen, or without internet: nothing remote can fix that.")
+        with self._lock:
+            self._tell("skippy-pc", "Skippy's doctor: skippy-pc and its starter have both been silent for over 10 minutes. The PC is off, asleep, "
+                                    "at the sign-in screen, or without internet: nothing remote can fix that. I'll tell you once when it's back.",
+                       "Skippy's doctor: skippy-pc has been silent for <SPAN> now (off, asleep, at the sign-in screen, or without internet).")
 
     # ── the button ──
     def repair(self, by: str, failing_only: bool = False) -> dict:
@@ -181,7 +295,9 @@ class Doctor:
         with self._lock:
             self.repairing = {"at": self.clock(), "by": by, "id": cid, "done": False, "ok": None, "summary": ""}
             self.tries.clear()                               # a fresh start: the hourly allowances begin again
+            self._dirty = True
             self._log("repair", "the Captain pressed Put everything back" if by != "doctor" else "", by)
+        self._flush()
         return self.repairing
 
     def repair_result(self) -> dict | None:

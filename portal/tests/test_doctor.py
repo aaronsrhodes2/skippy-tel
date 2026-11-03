@@ -24,12 +24,12 @@ class Home:
         return self._age
 
 
-def world(age=5):
+def world(age=5, store=None):
     clock = Clock()
     starter = starter_mod.Starter(clock=clock)
     starter.poll({"status": {"docker": True, "containers_up": 9, "containers_total": 10, "bridge": True, "busy": False}})
     told = []
-    d = doc.Doctor(Home(age), starter, notify=lambda text: told.append(text) or True, clock=clock)
+    d = doc.Doctor(Home(age), starter, notify=lambda text: told.append(text) or True, clock=clock, store=store, log=lambda line: None)
     return d, starter, clock, told
 
 
@@ -205,3 +205,140 @@ def test_the_vb_cable_is_a_row_only_and_a_short_outage_is_left_alone():
     d2, starter2, clock2, _ = world()
     alive(starter2, spotify=False, down_s={"spotify": 30})
     assert d2.tick() == []
+
+
+# ── what the Captain is told (2026-11-02: eighteen "still failing after 3 tries" DMs in one evening, from the same two things) ──
+def run_failing(d, starter, clock, name, seconds, why="no answer in time"):
+    """Time passes with `name` failing the whole while; every heal the doctor asks for fails too."""
+    end = clock.t + seconds
+    while clock.t < end:
+        clock.t += doc.HEAL_AFTER_S + 1
+        alive(starter)
+        d.observe_home(failing(name, why))
+        d.tick()
+        for c in starter.poll({"status": {"docker": True, "bridge": True}}):
+            starter.poll({"results": [{"id": c["id"], "ok": False, "summary": "still broken"}]})
+
+
+def run_fine(d, starter, clock, name, seconds):
+    end = clock.t + seconds
+    while clock.t < end:
+        clock.t += 30
+        alive(starter)
+        d.observe_home({name: {"ok": True, "ms": 12, "why": ""}})
+        d.tick()
+
+
+def test_a_thing_that_stays_broken_is_mentioned_once_then_only_every_six_hours():
+    d, starter, clock, told = world()
+    run_failing(d, starter, clock, "whisper", 13 * 3600)
+    assert len(told) == 3                                              # it gave up; then six hours on; then twelve (it was hourly: 13)
+    assert "Whisper" in told[0] and "3 tries" in told[0] and "tell you once when it's back" in told[0]
+    assert "still failing after 6 h" in told[1] and "still failing after 12 h" in told[2]
+
+
+def test_when_it_is_back_he_is_told_once_after_it_has_been_fine_a_while():
+    d, starter, clock, told = world()
+    run_failing(d, starter, clock, "whisper", 1500)
+    assert len(told) == 1
+    run_fine(d, starter, clock, "whisper", doc.BACK_AFTER_S - 40)
+    assert len(told) == 1                                              # fine for a moment: not yet a recovery
+    run_fine(d, starter, clock, "whisper", 120)
+    assert len(told) == 2 and "Whisper (hearing) is working again after" in told[1]
+    run_fine(d, starter, clock, "whisper", 3600)
+    assert len(told) == 2                                              # said once
+
+
+def test_a_blip_of_good_health_neither_closes_the_episode_nor_starts_a_new_one():
+    d, starter, clock, told = world()
+    run_failing(d, starter, clock, "whisper", 1500)
+    run_fine(d, starter, clock, "whisper", 60)                         # fine for a minute...
+    run_failing(d, starter, clock, "whisper", 1500)                    # ...and broken again
+    assert len(told) == 1                                              # no "working again", no second "failing"
+
+
+def test_breaking_again_soon_after_it_was_fixed_is_not_news_but_later_it_is():
+    d, starter, clock, told = world()
+    run_failing(d, starter, clock, "whisper", 1500)
+    run_fine(d, starter, clock, "whisper", 300)
+    assert len(told) == 2                                              # failing, then working again
+    run_failing(d, starter, clock, "whisper", 1800)
+    assert len(told) == 2                                              # it broke again half an hour later: not news yet
+    run_failing(d, starter, clock, "whisper", 3 * 3600)
+    assert len(told) == 3 and "is failing and 3 tries" in told[2]      # three hours on it is: a new problem, in the first words
+
+
+def test_a_redeploy_does_not_make_it_forget_who_it_told_or_how_many_tries_it_used():
+    from tabletop import MemoryStore
+    store = MemoryStore()
+    d, starter, clock, told = world(store=store)
+    run_failing(d, starter, clock, "whisper", 1500)
+    assert len(told) == 1 and store.get(doc.STATE_KEY)
+    still = {"whisper": {"ok": False, "ms": 5000, "why": "no answer", "down_s": doc.HEAL_AFTER_S + 30}}
+    # the portal is deployed again: a new Doctor, the same bucket, the same hour
+    told2 = []
+    d2 = doc.Doctor(Home(5), starter, notify=lambda text: told2.append(text) or True, clock=clock, store=store, log=lambda line: None)
+    alive(starter)
+    d2.observe_home(still)
+    assert d2.tick() == [] and told2 == []                             # the three tries are remembered; so is the DM
+    clock.t += 7 * 3600
+    run_failing(d2, starter, clock, "whisper", 1500)                   # seven hours on, still broken: three more tries, then a reminder
+    assert len(told2) == 1 and "still failing after 8 h" in told2[0]       # (since the first failure, not since the deploy)
+    # without the bucket (before 2026-11-02) a deploy started it all again: three more tries and the same words
+    d3 = doc.Doctor(Home(5), starter, notify=lambda text: told2.append(text) or True, clock=clock, log=lambda line: None)
+    alive(starter)
+    d3.observe_home(still)
+    assert d3.tick() == ["whisper"]
+
+
+def test_a_bucket_that_fails_never_stops_the_doctor():
+    class Broken:
+        def get(self, path):
+            raise OSError("no bucket")
+
+        def put(self, path, data, content_type):
+            raise OSError("no bucket")
+    d, starter, clock, told = world(store=Broken())
+    run_failing(d, starter, clock, "whisper", 1500)
+    assert len(told) == 1 and d._dirty is True                          # still heals and still tells; the next look tries to save again
+
+
+def test_an_old_episode_in_the_bucket_is_forgotten_quietly():
+    import json
+    from tabletop import MemoryStore
+    store = MemoryStore()
+    clock = Clock()
+    store.put(doc.STATE_KEY, json.dumps({"open": {"ghost": clock.t - doc.FORGET_S - 5, "fresh": clock.t - 100}, "told": {"ghost": clock.t - 10},
+                                         "tries": {"whisper": [clock.t - 4000, clock.t - 60]}}).encode(), "application/json")
+    d = doc.Doctor(Home(5), None, clock=clock, store=store, log=lambda line: None)
+    assert set(d.open) == {"fresh"} and d.tries == {"whisper": [clock.t - 60]}      # (an hour-old try is no allowance used)
+
+
+def test_a_desktop_app_is_mentioned_once_then_only_after_a_day():
+    d, starter, clock, told = world()
+    for _ in range(int(30 * 3600 / (doc.HEAL_AFTER_S + 1))):
+        clock.t += doc.HEAL_AFTER_S + 1
+        alive(starter, spotify=False)
+        d.tick()
+        for c in starter.poll({"status": {"docker": True, "bridge": True}}):
+            starter.poll({"results": [{"id": c["id"], "ok": False, "summary": "it did not start"}]})
+    assert len(told) == 2 and "Spotify" in told[0] and "still failing after 24 h" in told[1]      # (it was one an hour)
+
+
+def test_the_pc_coming_back_after_a_silence_is_told_once():
+    d, starter, clock, told = world(age=doc.UNREACHABLE_DM_S + 5)
+    clock.t += starter_mod.ONLINE_S + 1                                  # the starter is silent too
+    d.tick()
+    assert len(told) == 1 and "skippy-pc" in told[0]
+    d.home._age = 5                                                      # the reporter and the starter call again
+    alive(starter)
+    d.tick()
+    assert len(told) == 1                                                # (one good look is not a recovery)
+    clock.t += doc.BACK_AFTER_S + 1
+    alive(starter)
+    d.tick()
+    assert len(told) == 2 and told[1].startswith("Skippy's doctor: skippy-pc is working again after")
+    clock.t += 60
+    alive(starter)
+    d.tick()
+    assert len(told) == 2
