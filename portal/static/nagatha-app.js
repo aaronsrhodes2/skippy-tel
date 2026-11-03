@@ -24,7 +24,7 @@
   function say(text) { const l = $("#live"); l.textContent = ""; setTimeout(() => { l.textContent = text; }, 30); }
   function key(icon, label, cls, fn) {
     const b = el("button", "key" + (cls ? " " + cls : ""));
-    b.type = "button"; b.innerHTML = ico(icon); b.setAttribute("aria-label", label); b.title = label;
+    b.type = "button"; b.innerHTML = ico(icon); b.setAttribute("aria-label", label); b.title = label; b.dataset.tel = "video:" + icon;
     if (fn) b.onclick = fn;
     return b;
   }
@@ -339,7 +339,7 @@
     if (!rail.on) return;
     const have = new Map(rail.items.map(r => [r.l, r.i]));
     $("#letters").replaceChildren(..."#ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map(l => {
-      const b = el("button", "lang-opt", l); b.type = "button"; b.disabled = !have.has(l); b.setAttribute("aria-label", l);
+      const b = el("button", "lang-opt", l); b.type = "button"; b.dataset.tel = "video:lang"; b.disabled = !have.has(l); b.setAttribute("aria-label", l);
       b.onclick = () => { closeLetters(); list.goRow(have.get(l)); };
       return b;
     }));
@@ -823,7 +823,7 @@
     }
     m.replaceChildren(el("p", "m-head", kind === "subs" ? "Subtitles" : "Audio"), ...items.map(([label, on, fn]) => {
       const b = el("button", "m-item", label);
-      b.type = "button";
+      b.type = "button"; b.dataset.tel = "video:" + kind;
       b.setAttribute("role", "menuitemradio");
       b.setAttribute("aria-checked", on ? "true" : "false");
       b.onclick = () => { closeMenu(); fn(); };

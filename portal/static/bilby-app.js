@@ -80,7 +80,7 @@
     o = o || {};
     const box = $("#toasts"), t = el("div", "toast");
     t.append(el("span", "", text));
-    if (o.action) { const b = el("button", "", o.action.label); b.type = "button"; b.onclick = () => { t.remove(); o.action.run(); }; t.append(b); }
+    if (o.action) { const b = el("button", "", o.action.label); b.type = "button"; b.dataset.tel = "music:toast-action"; b.onclick = () => { t.remove(); o.action.run(); }; t.append(b); }
     box.append(t);
     while (box.children.length > 3) box.firstChild.remove();
     setTimeout(() => t.remove(), o.ms || 3800);
@@ -91,7 +91,7 @@
     const n = $("#notice");
     n.hidden = false; n.className = "notice " + (o.kind || ""); n.dataset.key = o.key || "";
     const kids = [el("span", "grow", text)];
-    if (o.retry) { const b = el("button", "pill-btn", o.label || "Retry"); b.type = "button"; b.onclick = o.retry; kids.push(b); }
+    if (o.retry) { const b = el("button", "pill-btn", o.label || "Retry"); b.type = "button"; b.dataset.tel = "music:retry"; b.onclick = o.retry; kids.push(b); }
     if (o.progress) { const p = el("progress"); p.id = "notice-progress"; kids.push(p); }
     n.replaceChildren(...kids);
     syncSignal();
@@ -767,11 +767,11 @@
     <button type="button" class="key" data-act="next" aria-label="Next" title="Next (Shift+Right)"><i data-i="next"></i></button>`;
   const SK = `
     <span class="t" data-bind="cur">0:00</span>
-    <input type="range" class="rg" data-seek min="0" max="0" step="1" value="0" aria-label="Position" disabled>
+    <input type="range" class="rg" data-tel="music:seek" data-seek min="0" max="0" step="1" value="0" aria-label="Position" disabled>
     <span class="t" data-bind="rem">0:00</span>`;
   const RIGHT = `
     <div class="volbox"><button type="button" class="key" data-act="mute" aria-label="Mute" title="Mute (M)"><i data-i="vol"></i></button>
-      <input type="range" class="rg vol" data-vol min="0" max="100" step="1" value="100" aria-label="Volume"></div>
+      <input type="range" class="rg vol" data-tel="music:volume" data-vol min="0" max="100" step="1" value="100" aria-label="Volume"></div>
     <button type="button" class="key" data-act="sleep" aria-label="Sleep timer" title="Sleep timer"><i data-i="sleep"></i><sup data-bind="sleep"></sup></button>
     <button type="button" class="key" data-act="devices" aria-label="Other devices" title="Other devices (Connect)"><i data-i="devices"></i><sup data-bind="dev"></sup></button>
     <button type="button" class="key" data-act="fav" data-fav-only hidden aria-label="Add to favorites" title="Add this song to your favorites (F)"><i data-i="star"></i></button>
@@ -1359,7 +1359,7 @@
     if (!rail.on) return;
     const have = new Map(rail.items.map(r => [r.l, r.i]));
     $("#letters").replaceChildren(..."#ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map(l => {
-      const b = el("button", "lang-opt", l); b.type = "button"; b.disabled = !have.has(l); b.setAttribute("aria-label", l);
+      const b = el("button", "lang-opt", l); b.type = "button"; b.dataset.tel = "music:lang"; b.disabled = !have.has(l); b.setAttribute("aria-label", l);
       b.onclick = () => { closeLetters(); list.goRow(have.get(l)); };
       return b;
     }));
@@ -1494,7 +1494,7 @@
     for (const it of items) {
       if (it.sep) continue;
       if (it.node) { m.append(it.node); continue; }
-      const b = el("button", "mkey"); b.type = "button";
+      const b = el("button", "mkey"); b.type = "button"; b.dataset.tel = "music:device";
       b.setAttribute("role", it.checked !== undefined ? "menuitemradio" : "menuitem");
       if (it.checked !== undefined) b.setAttribute("aria-checked", it.checked);
       b.setAttribute("aria-label", it.label); b.title = it.label;
@@ -1810,7 +1810,7 @@
     if (rooms.length && !room) {
       const box = el("div", "dev"), who = el("div", "who"), acts = el("div", "acts");
       who.append(el("b", "", "Play on"));
-      const pick = (label, targets) => { const b = el("button", "key wide", label); b.type = "button"; b.onclick = () => { closeMenu(true); playOn(targets); }; return b; };
+      const pick = (label, targets) => { const b = el("button", "key wide", label); b.type = "button"; b.dataset.tel = "music:play-on"; b.onclick = () => { closeMenu(true); playOn(targets); }; return b; };
       for (const r of rooms) acts.append(pick(r.name, [r]));
       if (rooms.length > 1) acts.append(pick(rooms.length === 2 ? "Both" : "All", rooms));
       box.append(who, acts); items.push({ node: box });
@@ -1822,7 +1822,7 @@
       what.textContent = s.playing ? `${s.title || "Playing"} — ${s.artist || ""}` : `${s.title ? s.title + " (paused)" : "Paused"}`;
       if (isSpotify(s.track)) what.prepend(el("span", "spot", "Spotify"), " ");
       const acts = el("div", "acts");
-      const mk = (label, icon, run) => { const b = el("button", "key"); b.type = "button"; b.innerHTML = ico(icon); b.setAttribute("aria-label", label); b.title = label; b.onclick = () => { closeMenu(true); run(); }; return b; };
+      const mk = (label, icon, run) => { const b = el("button", "key"); b.type = "button"; b.dataset.tel = "music:remote-" + icon; b.innerHTML = ico(icon); b.setAttribute("aria-label", label); b.title = label; b.onclick = () => { closeMenu(true); run(); }; return b; };
       acts.append(mk(s.playing ? "Pause" : "Play", s.playing ? "pause" : "play", () => sendRemote(d, s.playing ? "pause" : "play")), mk("Next", "next", () => sendRemote(d, "next")),
                   mk("Play here", "link", () => adopt(s, s.playing ? d.id : null)));
       box.append(who, what);

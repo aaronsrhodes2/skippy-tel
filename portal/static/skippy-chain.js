@@ -100,6 +100,7 @@
 
     const list = el(doc, "pre", "copy chain-list", listText(chain)); list.hidden = true;
     const key = el(doc, "button", "ck" + (flags.length ? " flagged" : ""), (flags.length ? WARN + " " : "") + KEY + " " + calls.length);
+    key.setAttribute("data-tel", "chat:toolchain");
     key.type = "button";
     key.setAttribute("title", "The calls behind this reply");
     key.setAttribute("aria-expanded", "false");

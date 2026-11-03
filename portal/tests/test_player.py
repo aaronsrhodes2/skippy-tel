@@ -426,7 +426,11 @@ def test_the_player_never_tells_the_portal_what_is_playing_except_through_connec
     """Telemetry sees a tile tap and nothing else. What a device plays goes to the portal only in Connect check-ins (the Captain's own
     devices, in memory), and the listening history stays in this browser."""
     js = (STATIC / "bilby-app.js").read_text(encoding="utf-8")
-    assert "sendBeacon" not in js and "/telemetry" not in js and "data-tel" not in js
+    assert "sendBeacon" not in js and "/telemetry" not in js
+    # its keys carry fixed telemetry ids (music:seek, music:remote-<glyph>: which control, never which song; 2026-11-02, every control
+    # counted so the nightly tidy can retire the unused ones)
+    tels = re.findall(r'(?:data-tel="|dataset\.tel = ")([^"]*)', js)
+    assert tels and all(t.startswith("music:") and "${" not in t for t in tels), tels
     posts = re.findall(r"(?:fetch|post)\((cfg\.\w+|url)", js)
     # cfg.fav: the Captain's own ★ tap sends the one song he chose to his favorites list (never automatic; the key shows for him alone)
     assert set(posts) <= {"cfg.checkin", "cfg.command", "cfg.gate", "cfg.fav", "url"}, posts

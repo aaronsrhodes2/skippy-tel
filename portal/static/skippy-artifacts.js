@@ -106,7 +106,7 @@
   function actions(spec) {
     const bar = el("div", "art-keys");
     if (spec.content != null) {
-      const copy = el("button", "key sm"); copy.type = "button"; copy.dataset.copy = spec.content; copy.title = copy.ariaLabel = "Copy";
+      const copy = el("button", "key sm"); copy.type = "button"; copy.dataset.tel = "chat:artifact-copy"; copy.dataset.copy = spec.content; copy.title = copy.ariaLabel = "Copy";
       if (config.glyph) copy.appendChild(config.glyph("tag"));
       const dl = el("a", "key sm"); dl.title = dl.ariaLabel = "Download " + spec.name; dl.download = spec.name;
       dl.href = URL.createObjectURL(new Blob([spec.content], { type: spec.kind === "html" ? "text/html" : spec.kind === "svg" ? "image/svg+xml" : "text/plain" }));
@@ -128,7 +128,7 @@
     const head = el("div", "art-head");
     if (config.glyph) head.appendChild(config.glyph(KINDS[spec.kind]));
     head.appendChild(el("span", "art-title", spec.title));
-    const close = el("button", "key sm art-close"); close.type = "button"; close.title = close.ariaLabel = "Close";
+    const close = el("button", "key sm art-close"); close.type = "button"; close.dataset.tel = "chat:artifact-close"; close.title = close.ariaLabel = "Close";
     if (config.glyph) close.appendChild(config.glyph("x"));
     head.append(actions(spec), close);
     const body = el("div", "art-body");

@@ -323,7 +323,7 @@
     // The portal's one copy script (static/copy.js) copies whatever a button's data-copy says, with its own "Copied" feedback and the
     // fallbacks for plain http; so a button only has to carry the text, kept current as the turns change.
     function addCopy(box, turn) {
-      const b = el("button", "cp", "copy"); b.type = "button"; b.title = "Copy this as markdown";
+      const b = el("button", "cp", "copy"); b.type = "button"; b.setAttribute("data-tel", "workshop:turn-copy"); b.title = "Copy this as markdown";
       b.setAttribute("data-copy", turnMd(turn));
       box.appendChild(b);
     }
@@ -394,7 +394,7 @@
       if (question && turns[turns.length - 1] === turn && !(running && running.turn === turn) && !turn.pending) {   // asked, and not answered yet: tap to answer
         const ask = el("div", "ask");
         question.options.forEach(label => {
-          const b = el("button", "opt", label); b.type = "button";
+          const b = el("button", "opt", label); b.type = "button"; b.setAttribute("data-tel", "workshop:option");
           b.addEventListener("click", () => { if (sending) return; text.value = label; form.requestSubmit(); });
           ask.appendChild(b);
         });
@@ -660,7 +660,7 @@
     function paintQueue() {
       queueBox.hidden = !queue.length;
       queueBox.replaceChildren(...queue.map((q, i) => {
-        const row = el("div", "qrow"), x = el("button", null, "\u00D7");
+        const row = el("div", "qrow"), x = el("button", null, "\u00D7"); x.setAttribute("data-tel", "workshop:queue-remove");
         x.type = "button"; x.title = "Take this out of the queue"; x.setAttribute("aria-label", "Take this out of the queue");
         x.addEventListener("click", () => { queue.splice(i, 1); saveQueue(); paintQueue(); });
         row.append(el("span", "qt", q), x); return row;
@@ -684,7 +684,7 @@
     function paintAttached() {
       attachBox.hidden = !attached.length;
       attachBox.replaceChildren(...attached.map((a, i) => {
-        const chip = el("div", "chip"), im = el("img"), x = el("button", null, "\u00D7");
+        const chip = el("div", "chip"), im = el("img"), x = el("button", null, "\u00D7"); x.setAttribute("data-tel", "workshop:picture-remove");
         im.src = a.url; im.alt = ""; x.type = "button"; x.title = "Remove"; x.setAttribute("aria-label", "Remove this image");
         x.addEventListener("click", () => { attached.splice(i, 1); paintAttached(); });
         chip.append(im, x); return chip;
@@ -850,7 +850,7 @@
       if (pins.length) convsList.appendChild(el("h4", null, "Active"));
       pins.forEach(pn => {                         // the ones you are in: tap to switch, \u00D7 when the task is done
         const c = byConv[pn.conv] || {conv: pn.conv, project: pn.project, title: pn.title, turns: 0, last: 0};
-        const row = el("div", "row" + (pn.conv === conv ? " open" : "")), x = el("button", "unpin", "\u00D7");
+        const row = el("div", "row" + (pn.conv === conv ? " open" : "")), x = el("button", "unpin", "\u00D7"); x.setAttribute("data-tel", "workshop:unpin");
         x.type = "button"; x.title = "Unpin: this task is done"; x.setAttribute("aria-label", "Unpin this conversation");
         x.addEventListener("click", () => { unpin(pn.conv); listConversations(); });
         const b = line(Object.assign({}, c, {title: c.title || pn.title}));

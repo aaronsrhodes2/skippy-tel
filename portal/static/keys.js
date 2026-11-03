@@ -42,11 +42,13 @@
   // Keys a script builds with a data-act (Bilby's transport, Nagatha's, Audiobooks') are named <app>:<act> here, as they appear, so
   // every key is counted and the nightly tidy can retire it (adaptive.py). Only keys: a list's rows and cells are media, never named.
   // A deck built by script (Bilby's and Nagatha's Home) names each unit's hit by its data-u: <app>:deck-<u>.
-  const KEY_SEL = ["key", "mkey", "clear", "b-now"].map(c => "button." + c + "[data-act]:not([data-tel])")
-    .concat(["button.hit[data-u]:not([data-tel])"]).join(", ");
+  // Keys that carry a data-r (a sheet's keys, a row's "more") are <app>:<r>; rows and cells themselves are media and stay unnamed.
+  const KEY_SEL = ["key", "mkey", "clear", "b-now", "tap-go"].map(c => "button." + c + "[data-act]:not([data-tel])")
+    .concat(["button.hit[data-u]:not([data-tel])", "button.key[data-r]:not([data-tel])", "button.ib[data-r]:not([data-tel])",
+             "button.pill-btn[data-r]:not([data-tel])"]).join(", ");
   function name(el) {
     const doc = root.document, app = (doc.body && doc.body.dataset.app) || (root.location.pathname.split("/")[1] || "home");
-    el.setAttribute("data-tel", app + ":" + (el.dataset.act || "deck-" + el.dataset.u));
+    el.setAttribute("data-tel", app + ":" + (el.dataset.act || el.dataset.r || "deck-" + el.dataset.u));
   }
   function nameKeys(scope) {
     if (scope.matches && scope.matches(KEY_SEL)) name(scope);

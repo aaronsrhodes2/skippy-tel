@@ -50,7 +50,7 @@
     $("tt-fear-big").textContent = String(n);
     const pips = $("tt-fear-pips"); pips.replaceChildren();
     for (let i = 0; i < FEAR_MAX; i++) {
-      const b = el("button", "pip" + (i < n ? " on" : "")); b.type = "button";
+      const b = el("button", "pip" + (i < n ? " on" : "")); b.type = "button"; b.dataset.tel = "tabletop:pip";
       b.setAttribute("aria-label", `Fear ${i + 1}`); b.disabled = !GM;
       b.addEventListener("click", () => setFear({ value: i + 1 === n ? i : i + 1 }));
       pips.appendChild(b);
@@ -218,7 +218,7 @@
         strip.appendChild(b);
       }
       if (GM) {
-        const add = el("button", "tt-herocard add"); add.type = "button"; add.innerHTML = glyph("g-new");
+        const add = el("button", "tt-herocard add"); add.type = "button"; add.dataset.tel = "tabletop:hero-add"; add.innerHTML = glyph("g-new");
         add.setAttribute("aria-label", "Add a hero"); add.title = "Add a hero";
         add.addEventListener("click", () => { closeAll(); $("tt-newhero").hidden = false; $("tt-hero-new-name").focus(); });
         strip.appendChild(add);
@@ -327,7 +327,7 @@
     const max = row.dataset.max ? Number(get(s, row.dataset.max)) || 0 : Number(row.dataset.fixed);
     row.replaceChildren();
     for (let i = 0; i < max; i++) {
-      const b = el("button", i < n ? "on" : ""); b.type = "button"; b.disabled = !canEdit;
+      const b = el("button", i < n ? "on" : ""); b.type = "button"; b.dataset.tel = "tabletop:mark"; b.disabled = !canEdit;
       b.setAttribute("aria-label", `${i + 1}`); b.setAttribute("aria-pressed", i < n ? "true" : "false");
       b.addEventListener("click", () => { const v = i + 1 === n ? i : i + 1; queue(row.dataset.track, v); put(hero.sheet, row.dataset.track, v); drawTrack(row); });
       row.appendChild(b);
@@ -412,7 +412,7 @@
     };
     ei.addEventListener("change", savePlayer); ni.addEventListener("change", savePlayer);
     box.appendChild(email); box.appendChild(name);
-    const del = el("button", "key sm danger"); del.type = "button"; del.innerHTML = glyph("g-trash");
+    const del = el("button", "key sm danger"); del.type = "button"; del.dataset.tel = "tabletop:file-delete"; del.innerHTML = glyph("g-trash");
     del.setAttribute("aria-label", "Remove this hero"); del.title = "Remove this hero";
     del.addEventListener("click", async () => {
       if (!confirm(`Remove ${hero.sheet.name || "this hero"}, their sheet and their folder? This can't be undone.`)) return;
@@ -435,7 +435,7 @@
     box.appendChild(el("h3", null, "Folder"));
     const bar = el("div", "fbar");
     if (canEdit) {
-      const add = el("button", "key"); add.type = "button"; add.innerHTML = glyph("g-new");
+      const add = el("button", "key"); add.type = "button"; add.dataset.tel = "tabletop:file-add"; add.innerHTML = glyph("g-new");
       add.setAttribute("aria-label", "Add documents or pictures"); add.title = "Add documents or pictures (PDF, JPEG, PNG, GIF, WebP)";
       add.addEventListener("click", () => $("tt-hero-file").click());
       bar.appendChild(add);
@@ -457,7 +457,7 @@
       const dl = el("a", "key sm"); dl.href = url + "?dl=1"; dl.innerHTML = glyph("g-down"); dl.setAttribute("aria-label", "Download"); dl.title = "Download";
       keys.appendChild(dl);
       if (canEdit && f.ext !== "pdf") {                // a picture can be the hero's face on their card
-        const face = el("button", "key sm" + (hero.avatar === f.id ? " on" : "")); face.type = "button"; face.innerHTML = glyph("g-user");
+        const face = el("button", "key sm" + (hero.avatar === f.id ? " on" : "")); face.type = "button"; face.dataset.tel = "tabletop:avatar-pick"; face.innerHTML = glyph("g-user");
         face.setAttribute("aria-pressed", hero.avatar === f.id ? "true" : "false");
         face.setAttribute("aria-label", "Use as the avatar"); face.title = hero.avatar === f.id ? "This is the avatar (tap to clear it)" : "Use as the avatar";
         face.addEventListener("click", async () => {
@@ -467,7 +467,7 @@
         keys.appendChild(face);
       }
       if (GM || f.by === root.dataset.me) {
-        const del = el("button", "key sm danger"); del.type = "button"; del.innerHTML = glyph("g-trash");
+        const del = el("button", "key sm danger"); del.type = "button"; del.dataset.tel = "tabletop:avatar-delete"; del.innerHTML = glyph("g-trash");
         del.setAttribute("aria-label", "Take it out of the folder"); del.title = "Take it out of the folder";
         del.addEventListener("click", async () => {
           if (!confirm(`Take "${f.name}" out of the folder?`)) return;

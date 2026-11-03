@@ -48,8 +48,8 @@ STAND_IN = frozenset({"chat"})
 MEDIA = re.compile(r"^(tile|tray|pane|play|demo|copy|seen):")   # content (game cards, games, demos, rows) and its helpers: "media does NOT
                                                                 # fall off" (the Captain); tile/tray/pane are the Graveyard's modules
 FLOOR_CTL = re.compile(r"^(base|pager|admin|login|request-access|unauthorized|recovery|join|voice|skippy3d|annotate):"
-                       r"|(?:^|[:-])(back|close|home|send|stop|play|pause|toggle|cancel|esc|sign-in|sign-out|privacy|fs-key)$"
-                       r"|:back-to-|:(voice|mode|chats|apps)$")
+                       r"|(?:^|[:-])(back|close|home|send|stop|play|pause|toggle|cancel|esc|sign-in|sign-out|privacy|fs-key|tap|seek|volume|retry)$"
+                       r"|:back-to-|:close-|:(voice|mode|chats|apps)$")
 APP_NAMES = {"music": "Bilby", "video": "Nagatha", "books": "Audiobooks", "audiobooks": "Audiobooks", "drive": "Drive", "chat": "Chat",
              "workshop": "Private Skippy", "alarms": "Alarms", "tabletop": "Tabletop", "game": "Game page", "games": "Game servers",
              "me": "Dashboard", "status": "Status", "experiments": "Experiments", "camera": "Camera"}
