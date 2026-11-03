@@ -173,6 +173,84 @@
       q.targets.forEach(function (t, i) { if (i % Math.ceil(q.targets.length / Math.max(3, Math.floor((right - left) / 60))) === 0) g.fillText(String(t), X(t), c.h - 8); });
     } };
   }
+  // ── the telescope arena: the daily MPC scoreboard (sigma-ground C27) and our own Eros orbit solution (C28); arcseconds are the scoreboard's, nothing is computed here ──
+  function skyLegend(g, items, left, right) {                              // measured, wrapping legend; returns the y where the chart may start
+    g.font = "11px " + css("--mono"); g.textAlign = "left"; var lx = left, ly = 14;
+    items.forEach(function (it) { var tw = g.measureText(it[0]).width + 18; if (lx + tw > right && lx > left) { lx = left; ly += 15; } g.fillStyle = css(it[1]); g.fillText(it[0], lx, ly); lx += tw; });
+    return ly + 12;
+  }
+  function skyBodyPlate(b) {                                                // one tracked body: ours and JPL against the telescopes, window by window, as the prediction ages
+    var W = b.windows, vals = [];
+    W.forEach(function (s) { [s.ours, s.jpl, s.sigma].forEach(function (v) { if (v != null && v > 0) vals.push(v); }); });
+    return { kind: "chart", title: b.name + " against the telescopes", text: "Our prediction, started once from " + b.start_date + " and never re-fitted, scored against each new month of Minor Planet Center observations (dots: our median miss on the sky; dashes: JPL's own prediction for the same instants). The grey floor is the telescopes' own scatter: below it no prediction can be told from the truth. " + (W.length ? "Latest: " + W[W.length - 1].n + " observations to " + W[W.length - 1].to + ", " + W[W.length - 1].lead_years.toFixed(1) + " years after the start." : ""), draw: function (c) {
+      var g = c.g, left = 48, right = c.w - 14, bot = c.h - 26, r = logRange(vals);
+      var top = skyLegend(g, [["● " + B.meta.words.ours, "--c-ours"], ["- - " + B.meta.words.jpl, "--c-theirs"], ["■ the telescopes' scatter", "--muted"], ["arcsec on the sky (log) vs years after the start", "--ink"]], left, right);
+      var L0 = Math.floor(W[0].lead_years), L1 = Math.max(L0 + 1, Math.ceil(W[W.length - 1].lead_years));   // the axis spans the scored leads (the scoreboard began at 6 yr for Eros)
+      var X = function (L) { return left + (L - L0) / (L1 - L0) * (right - left); }, Y = function (v) { return bot - (Math.log10(Math.max(v, tenTo(r[0]))) - r[0]) / (r[1] - r[0]) * (bot - top); };
+      axisLog(g, left, right, top, bot, r[0], r[1], false);
+      g.fillStyle = css("--muted"); g.globalAlpha = 0.35; g.beginPath(); g.moveTo(X(W[0].lead_years), bot);
+      W.forEach(function (s) { if (s.sigma > 0) g.lineTo(X(s.lead_years), Y(s.sigma)); }); g.lineTo(X(W[W.length - 1].lead_years), bot); g.closePath(); g.fill(); g.globalAlpha = 1;
+      var line = function (key) { var pen = false; g.beginPath(); W.forEach(function (s) { var v = s[key]; if (!(v > 0)) { pen = false; return; } var x = X(s.lead_years), y = Y(v); if (!pen) { g.moveTo(x, y); pen = true; } else g.lineTo(x, y); }); g.stroke(); };
+      g.strokeStyle = css("--c-ours"); g.fillStyle = css("--c-ours"); g.lineWidth = 2.5; line("ours");
+      W.forEach(function (s) { if (s.ours > 0) { g.beginPath(); g.arc(X(s.lead_years), Y(s.ours), 2.5, 0, 6.2832); g.fill(); } });
+      g.strokeStyle = css("--c-theirs"); g.lineWidth = 1.5; g.setLineDash([5, 4]); line("jpl"); g.setLineDash([]);
+      g.font = "10px " + css("--mono"); g.fillStyle = css("--muted"); g.textAlign = "center";
+      for (var L = L0; L <= L1; L++) g.fillText(L + " yr", X(L), c.h - 8);
+    } };
+  }
+  function erosFitPlate(E) {                                                // our own orbit solution for Eros against the observations it never saw, beside JPL's
+    var rows = E.per_year, vals = [];
+    rows.forEach(function (p) { [p.own_fit_median_arcsec, p.from_jpl_state_median_arcsec, p.jpl_median_arcsec].forEach(function (v) { if (v > 0) vals.push(v); }); });
+    return { kind: "chart", title: "Eros from our own orbit solution", text: "No borrowed start: Eros's orbit was fitted from Minor Planet Center observations of " + E.fit_window[0].slice(0, 4) + " to " + E.fit_window[1].slice(0, 4) + " alone (" + E.observations_used + " of " + E.observations_total + " kept, rms " + E.fit_rms_arcsec.toFixed(2) + " arcsec) with our engine as the model, then propagated into the " + E.n_predicted_observations + " observations that followed. The solid line is that solution; the dotted line is our engine started from JPL's state instead (dynamics alone); the dashes are JPL. Median miss on the sky per year.", draw: function (c) {
+      var g = c.g, left = 48, right = c.w - 14, bot = c.h - 26, r = logRange(vals);
+      var top = skyLegend(g, [["● our fit, our engine", "--c-ours"], ["· · our engine from JPL's state", "--c-ours"], ["- - " + B.meta.words.jpl, "--c-theirs"], ["arcsec (log) vs years after the fit's end", "--ink"]], left, right);
+      var L1 = Math.ceil(rows[rows.length - 1].lead_years_median);
+      var X = function (L) { return left + L / L1 * (right - left); }, Y = function (v) { return bot - (Math.log10(Math.max(v, tenTo(r[0]))) - r[0]) / (r[1] - r[0]) * (bot - top); };
+      axisLog(g, left, right, top, bot, r[0], r[1], false);
+      var line = function (key) { g.beginPath(); rows.forEach(function (p, i) { var x = X(p.lead_years_median), y = Y(p[key]); if (!i) g.moveTo(x, y); else g.lineTo(x, y); }); g.stroke(); };
+      g.strokeStyle = css("--c-ours"); g.fillStyle = css("--c-ours"); g.lineWidth = 2.5; line("own_fit_median_arcsec");
+      rows.forEach(function (p) { g.beginPath(); g.arc(X(p.lead_years_median), Y(p.own_fit_median_arcsec), 2.5, 0, 6.2832); g.fill(); });
+      g.lineWidth = 1.5; g.setLineDash([1.5, 3]); line("from_jpl_state_median_arcsec");
+      g.strokeStyle = css("--c-theirs"); g.setLineDash([5, 4]); line("jpl_median_arcsec"); g.setLineDash([]);
+      g.font = "10px " + css("--mono"); g.fillStyle = css("--muted"); g.textAlign = "center";
+      for (var L = 0; L <= L1; L++) g.fillText(L + " yr", X(L), c.h - 8);
+    } };
+  }
+  function skySetPlate(S) {                                                 // every tracked body at its latest window: ours and JPL, one row each
+    var rows = S.bodies.map(function (b) { var s = b.windows[b.windows.length - 1]; return { name: b.name, lead: s.lead_years, ours: s.ours, jpl: s.jpl, sigma: s.sigma, n: s.n }; }).sort(function (a, b) { return b.lead - a.lead; });
+    var vals = []; rows.forEach(function (q) { [q.ours, q.jpl, q.sigma].forEach(function (v) { if (v > 0) vals.push(v); }); });
+    return { kind: "chart", title: "The tracked set against the telescopes", text: rows.length + " bodies the scoreboard follows every day (Eros and Apophis, then the heaviest asteroids), each at its latest month of observations: our median miss on the sky and JPL's for the same instants, with the telescopes' scatter as the grey bar. Longest-running prediction at the top.", draw: function (c) {
+      var g = c.g, left = 112, right = c.w - 14, bot = c.h - 24, r = logRange(vals);
+      var top = skyLegend(g, [["● " + B.meta.words.ours, "--c-ours"], ["◇ " + B.meta.words.jpl, "--c-theirs"], ["▬ the telescopes' scatter", "--muted"], ["arcsec on the sky (log)", "--ink"]], left, right);
+      var rh = (bot - top) / rows.length, X = function (v) { return left + (Math.log10(Math.max(v, tenTo(r[0]))) - r[0]) / (r[1] - r[0]) * (right - left); };
+      axisLog(g, left, right, top, bot, r[0], r[1], true);
+      var same = rows.every(function (q) { return !(q.ours > 0 && q.jpl > 0) || Math.abs(Math.log10(q.ours / q.jpl)) < 0.01; });
+      if (same) { g.font = "10px " + css("--mono"); g.fillStyle = css("--muted"); g.textAlign = "right"; g.fillText("our dot sits inside JPL's diamond on every row: the two coincide to 1 %", right - 4, top + 10); }
+      g.font = (rh >= 11 ? 10 : 8) + "px " + css("--mono");
+      rows.forEach(function (q, i) {
+        var y = top + (i + 0.5) * rh;
+        if (q.sigma > 0) { g.fillStyle = css("--muted"); g.globalAlpha = 0.35; g.fillRect(left, y - Math.max(1, rh * 0.3), X(q.sigma) - left, Math.max(2, rh * 0.6)); g.globalAlpha = 1; }
+        if (q.jpl > 0) { g.strokeStyle = css("--c-theirs"); g.lineWidth = 1.5; g.beginPath(); g.moveTo(X(q.jpl), y - 3.5); g.lineTo(X(q.jpl) + 3.5, y); g.lineTo(X(q.jpl), y + 3.5); g.lineTo(X(q.jpl) - 3.5, y); g.closePath(); g.stroke(); }
+        if (q.ours > 0) { g.fillStyle = css("--c-ours"); g.beginPath(); g.arc(X(q.ours), y, 2.5, 0, 6.2832); g.fill(); }
+        if (rh >= 8) { g.fillStyle = css("--ink"); g.textAlign = "right"; g.fillText(q.name.slice(0, 11) + " " + q.lead.toFixed(1) + "y", left - 6, y + 3); }
+      });
+    } };
+  }
+  function skyPlates() {
+    var S = B && B.sky; if (!S || !S.bodies || !S.bodies.length) return [];
+    var P = [], eros = S.bodies.filter(function (b) { return b.number === 433; })[0];
+    P.push({ kind: "html", title: "Against the telescopes", text: "The one arena where reality is a measurement, not an ephemeris.", html: function () {
+      var d = el("div");
+      d.append(el("p", null, "For the planets, reality is JPL's latest fit. For asteroids it is the sky itself: the Minor Planet Center publishes every night's observations, so a prediction can be scored against what telescopes saw, and so can JPL's. Every day the scoreboard fetches the newest positions of " + S.bodies.length + " bodies, propagates OUR prediction from a start that is never moved, and scores both predictions on the sky (" + S.ledger + ")."),
+        el("p", null, "Eros is the proof piece: its orbit was also fitted by us from observations alone, so for one body the prediction owes nothing to JPL, start included."),
+        el("p", "dim", "Scoreboard as of " + fmtDate(S.generated_utc) + "; units: " + S.units + "."));
+      return d;
+    } });
+    if (eros) P.push(skyBodyPlate(eros));
+    if (S.eros_fit) P.push(erosFitPlate(S.eros_fit));
+    P.push(skySetPlate(S));
+    return P;
+  }
   function blanketPlates() {
     if (!B) return [];
     var P = [], w = B.meta.words;
@@ -185,6 +263,7 @@
           B.meta.runs + " integrated runs; " + (B.meta.ours_note || "") + ". Built " + fmtDate(B.meta.built_utc) + "."));
       return d;
     } });
+    skyPlates().forEach(function (p) { P.push(p); });                      // the telescope arena first: Eros, then the tracked set
     P.push(blanketPlate("Everything at once, by mass", B.composite, "Every body folded into one number: the mass-weighted error (DE440 masses; Jupiter and Saturn carry 92 % of it, so this blanket is mostly the giants, whose limit is the starting state, not the physics). Oldest issue at the bottom, reality along the bright edge."));
     P.push(leadPlate("Everything at once, by mass", B.by_lead[B.meta.bodies[0]] ? composeLead("mass") : {}));
     if (B.composite_body) {

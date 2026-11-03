@@ -69,6 +69,11 @@ def test_the_blankets_data_is_the_three_way_comparison_against_de442():
         assert any(x is not None for r in b["jpl"] for x in r) and any(x is not None for x in b["band"])
     assert max(x for x in d["blankets"]["Earth"]["band"] if x is not None) < 0.1 < min(x for x in d["blankets"]["Uranus"]["band"] if x is not None)   # reality's spread: metres inside, hundreds of km at Uranus
     assert "composite" in d and "composite_body" in d and set(d["by_lead"]["Mars"]) == {"1", "2", "3", "4", "5"}
+    sky = d["sky"]                                                                                  # the telescope arena (sigma-ground C27/C28): Eros first, every window ours AND JPL in arcsec, the own-fit curve
+    eros = [b for b in sky["bodies"] if b["number"] == 433][0]
+    assert eros["name"] == "Eros" and eros["start_date"] == "2020-01-01" and len(sky["bodies"]) >= 30
+    assert all(w["ours"] > 0 and w["jpl"] > 0 and w["n"] > 0 and w["lead_years"] > 5 for w in eros["windows"])
+    assert sky["eros_fit"]["fit_window"] == ["2015-01-01", "2019-12-31"] and {"own_fit_median_arcsec", "jpl_median_arcsec", "lead_years_median"} <= set(sky["eros_fit"]["per_year"][0])
     css = re.sub(r"/\*.*?\*/", "", (STATIC / "nbody.css").read_text(encoding="utf-8"), flags=re.S)
     assert not re.search(r"overflow(?:-y)?\s*:\s*(?:auto|scroll)", css) and "gradient" not in css
 

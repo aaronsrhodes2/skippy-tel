@@ -54,6 +54,38 @@ def masses() -> dict[str, float]:
     return out
 
 
+SIGMA_FIX = SIGMA / "sigma_ground" / "field" / "interface" / "fixtures"
+
+
+def sky_section(scoreboard: Path, eros_fit: Path) -> dict | None:
+    """The telescope arena (sigma-ground C27/C28), arranged for the page: per tracked body the daily scoreboard's windows (ours and JPL against fresh MPC positions, the
+    telescopes' own scatter), and for Eros the out-of-sample test of OUR orbit solution. Nothing is computed; the arcseconds are the scoreboard's."""
+    if not scoreboard.is_file():
+        return None
+    sb = json.loads(scoreboard.read_text(encoding="utf-8"))
+    bodies = []
+    for b in sb.get("bodies", []):
+        rows = sorted((s for s in b.get("series", []) if s.get("n_scored")), key=lambda s: s["lead_days"])
+        if not rows:
+            continue
+        bodies.append({"number": b["body"], "name": b["name"].split(" (")[0].split(" ", 1)[-1] if b["name"][:1].isdigit() else b["name"], "start_date": _jd_date(b["start_epoch_jd_tdb"]),
+                       "windows": [{"lead_years": s["lead_days"] / 365.25, "to": s["window_utc"][1][:10], "n": s["n_scored"], "stations": s.get("stations"),
+                                    "ours": s["ours_median_arcsec"], "jpl": s["jpl_median_arcsec"], "sigma": s.get("jpl_sigma_arcsec")} for s in rows]})
+    out = {"generated_utc": sb.get("generated_utc"), "ledger": sb.get("ledger"), "units": "arcsec on the sky, median of |observed minus predicted| over the window's observations",
+           "how": "each body is propagated by our engine from one fixed start and never re-fitted; every new month of Minor Planet Center observations scores that ageing prediction and JPL's own for the same instants",
+           "bodies": bodies}
+    if eros_fit.is_file():
+        f = json.loads(eros_fit.read_text(encoding="utf-8"))
+        m = f["measured"]
+        out["eros_fit"] = {"ledger": f["ledger"], "fit_window": f["fit_window"], "observations_used": f["observations_used"], "observations_total": f["observations_total"], "fit_rms_arcsec": f["fit_rms_arcsec"],
+                           "n_predicted_observations": m["n_predicted_observations"], "curves": m["curves"], "per_year": m["per_year"], "ours_median_arcsec": m["ours_median_arcsec"], "jpl_median_arcsec": m["jpl_median_arcsec"]}
+    return out
+
+
+def _jd_date(jd: float) -> str:
+    return (dt.datetime(2000, 1, 1, 12) + dt.timedelta(days=jd - 2451545.0)).strftime("%Y-%m-%d")
+
+
 INNER = ("Mercury", "Venus", "Earth", "Moon", "Mars")              # where DE440 and DE442 agree to <= 0.08 km, so an "ours" scored against DE440 is the same number against DE442
 
 
@@ -61,7 +93,10 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("sources", type=Path, nargs="+", help="contest jsonl/json files; a kernels-only file (scripts/jpl_vintages_vs_reality.py, no eO) supplies JPL and the reality band against DE442")
     ap.add_argument("--out", type=Path, default=OUT)
+    ap.add_argument("--sky", type=Path, default=SIGMA_FIX / "mpc_live" / "scoreboard_portal.json", help="sigma-ground's daily MPC scoreboard (C27): ours and JPL against fresh telescope positions")
+    ap.add_argument("--eros-fit", type=Path, default=SIGMA_FIX / "small_body_starts" / "own_fit_433.json", help="sigma-ground's own Eros orbit solution and its out-of-sample test (C28)")
     a = ap.parse_args()
+    sky = sky_section(a.sky, a.eros_fit)
     runs = [r for p in a.sources for r in load_runs(p)]
     rel = releases()
     gm = masses()
@@ -185,7 +220,7 @@ def main() -> None:
                      "words": WORDS, "issue_years": [round(rel[v], 2) for v in vintages], "vintages": vintages, "targets": targets, "bodies": bodies,
                      "runs": len(ours_runs), "kernel_rows": len(runs) - len(ours_runs), "built_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                      "how": "cell = median over the runs of that ephemeris whose lead lands on that target year; empty before the release; band = DE440 against DE442 at the target"},
-            "blankets": blankets, "composite": composite, "composite_body": composite_body, "by_lead": by_lead}
+            "blankets": blankets, "composite": composite, "composite_body": composite_body, "by_lead": by_lead, "sky": sky}
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
     print(f"{a.out} ({a.out.stat().st_size // 1024} KB): {len(vintages)} ephemerides x {len(targets)} target years, {len(bodies)} bodies, {len(runs)} runs, truth {data['meta']['truth']}")
