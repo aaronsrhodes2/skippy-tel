@@ -91,3 +91,69 @@ def test_the_cli_stop_hook_asks_the_work_check_first(tmp_path):
                          env={**os.environ, "SKIPPY_FINISH_STATE": str(state)}).stdout
     assert "fails the project's own check" in json.loads(out)["reason"]
     assert json.loads(state.read_text())["work"]["sent"] == {"check": 1}
+
+
+def _eyes_run(tmp_path, said):
+    """A Core run (the coder can't see) with a task in its transcript and a fake Core whose reviews are `said`, in turn."""
+    root = _project(tmp_path)
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("\n".join(json.dumps(d) for d in [
+        {"type": "user", "message": {"content": "build a choo-choo train"}},
+        {"type": "user", "message": {"content": "Stop hook feedback:\nthe gate said something"}}]) + "\n")
+    asked = []
+
+    def post(req):
+        body = json.loads(req.data)
+        asked.append(body["messages"][0]["content"][1]["text"])
+        return {"content": [{"type": "text", "text": said[min(len(asked), len(said)) - 1]}]}
+    env = {"SKIPPY_CORE_EYES": "1", "ANTHROPIC_BASE_URL": "http://core", "ANTHROPIC_API_KEY": "k"}
+    return root, str(transcript), env, post, asked
+
+
+def test_a_core_run_is_sent_back_with_the_worst_fault_until_a_review_names_none(tmp_path):
+    root, transcript, env, post, asked = _eyes_run(tmp_path, [
+        "A train. The wheels float above the rails.\nWORST FAULT: the wheels float above the rails",
+        "Fixed: yes, the wheels sit on the rails.\n**WORST FAULT:** none"])
+    started, memo = time.time() - 1, {}
+    (root / "a.out").write_text("good v1")
+    first = wc.unfinished(str(root), started, memo, transcript, env=env, post=post)
+    assert "The worst fault: the wheels float above the rails" in first and "no need to open it" in first
+    assert "build a choo-choo train" in asked[0] and "builder's a.out as the project's own viewer draws it" in asked[0] and "the gate said" not in asked[0]       # the task, never the gate's own words
+    assert "hasn't changed since its worst fault" in wc.unfinished(str(root), started, memo, transcript, env=env, post=post)
+    assert len(asked) == 1                                                               # unchanged: not reviewed again
+    (root / "a.out").write_text("good v2")
+    assert wc.unfinished(str(root), started, memo, transcript, env=env, post=post) == ""
+    assert "fix this fault last time: the wheels float above the rails" in asked[1]      # checked first for that fault
+    assert memo["faults"] == {}
+
+
+def test_the_fault_loop_ends_when_its_sends_are_spent(tmp_path):
+    root, transcript, env, post, asked = _eyes_run(tmp_path, ["Still broken.\nWORST FAULT: it is sideways"])
+    started, memo = time.time() - 1, {}
+    reasons = []
+    for i in range(wc.LIMITS["fault"] + 2):
+        (root / "a.out").write_text(f"good v{i}")
+        reasons.append(wc.unfinished(str(root), started, memo, transcript, env=env, post=post))
+    assert all("it is sideways" in r for r in reasons[:wc.LIMITS["fault"]]) and reasons[-1] == ""
+    assert len(asked) == wc.LIMITS["fault"]                                              # no reviews nobody can act on
+
+
+def test_core_unable_to_review_falls_back_to_the_plain_look(tmp_path):
+    root, transcript, env, _, _ = _eyes_run(tmp_path, [])
+
+    def down(req):
+        raise OSError("Core is away")
+    (root / "a.out").write_text("good")
+    assert "You haven't looked at this version" in wc.unfinished(str(root), time.time() - 1, {}, transcript, env=env, post=down)
+
+
+def test_a_viewer_that_cannot_draw_is_said_once(tmp_path):
+    root = _project(tmp_path)
+    cfg = json.loads((root / wc.CONFIG).read_text())
+    cfg["checks"][0]["show"] = PY + ' -c "import sys; print(\'no GPU\'); sys.exit(5)"'
+    (root / wc.CONFIG).write_text(json.dumps(cfg))
+    (root / "a.out").write_text("good")
+    started, memo = time.time() - 1, {}
+    first = wc.unfinished(str(root), started, memo)
+    assert "couldn't draw a.out" in first and "exit 5" in first and "no GPU" in first
+    assert wc.unfinished(str(root), started, memo) == ""

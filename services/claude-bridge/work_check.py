@@ -12,6 +12,12 @@ A project opts in with `.skippy-check.json` at its root:
 Only files matching a glob that this run changed (written after it started) count, so a run that never touched them is never
 held up, and a project without the file has no checks at all. Each reason is given a limited number of times (LIMITS), so a run
 can never be held forever. The CLI engine's Stop hook (finish_gate.py) and the SDK engine's StopGate both ask unfinished().
+
+On a Skippy Core run (SKIPPY_CORE_EYES=1: the coder can't see) the look is the fix-the-worst-fault loop (the Captain, 2026-11-03):
+the gate itself has Core's big model review each new picture against the task (eyes.worst_fault) and sends the run back with that
+review and its ONE worst fault; the next version is reviewed again, first for that fault, until a review names none or the
+"fault" limit is spent. (In the MineBench rematch the coder read honest reviews and shipped anyway.) A viewer that can't draw
+the work is said once, so "I can't trigger the render" never ships unseen.
 """
 from __future__ import annotations
 
@@ -26,7 +32,7 @@ import time
 
 CONFIG = ".skippy-check.json"
 LOOK_DIR = os.path.join(tempfile.gettempdir(), "skippy-look")   # the pictures of the work: outside the repo (never committed; a run reads anywhere)
-LIMITS = {"check": 4, "look": 3, "budget": 2}       # how many times each reason may send a run back
+LIMITS = {"check": 4, "look": 3, "fault": 5, "draw": 1, "budget": 2}   # how many times each reason may send a run back
 CHECK_TIMEOUT = 300
 OUTPUT_CHARS = 1500
 
@@ -92,7 +98,14 @@ def output_tokens(transcript: str, started: float) -> int:
     return total
 
 
-def unfinished(clone: str, started: float, memo: dict, transcript: str = "") -> str:
+def _eyes(env) -> tuple[str, str]:
+    """Core's address and key when this run's coder can't see for itself (eyes.py's switch), else ('', '')."""
+    if env.get("SKIPPY_CORE_EYES") != "1":
+        return "", ""
+    return env.get("ANTHROPIC_BASE_URL", ""), env.get("ANTHROPIC_API_KEY", "")
+
+
+def unfinished(clone: str, started: float, memo: dict, transcript: str = "", env=os.environ, post=None) -> str:
     """Why this run's work isn't finished, as facts ('' = it is, or the project asks nothing). `memo` keeps the counts and what
     has been shown between calls (the caller stores it)."""
     cfg = _config(clone)
@@ -101,6 +114,12 @@ def unfinished(clone: str, started: float, memo: dict, transcript: str = "") -> 
         return ""
     sent = memo.setdefault("sent", {})
     shown = memo.setdefault("shown", {})
+    faults = memo.setdefault("faults", {})            # file -> the worst fault it was last sent back to fix
+    url, key = _eyes(env)
+    task = ""
+    if url and key and transcript:
+        import eyes
+        task = eyes.task_of(transcript)
     touched = False
 
     def send(kind: str, reason: str) -> str:
@@ -125,12 +144,43 @@ def unfinished(clone: str, started: float, memo: dict, transcript: str = "") -> 
                 except OSError:
                     continue
                 if shown.get(rel) == digest:
+                    if faults.get(rel):
+                        why = send("fault", f"{rel} hasn't changed since its worst fault was named: {faults[rel]}\n"
+                                            "Fix that, or say plainly why it can't be fixed.")
+                        if why:
+                            return why
                     continue
                 png = os.path.join(LOOK_DIR, hashlib.sha256(os.path.abspath(clone).encode()).hexdigest()[:12], rel.replace("/", "_") + f"-{digest[:8]}.png")
                 os.makedirs(os.path.dirname(png), exist_ok=True)
                 code, said = _run(c["show"], clone, file=rel, png=png)
                 if code or not os.path.isfile(png):
-                    continue                        # the viewer failed: nothing to look at, no opinion
+                    why = send("draw", f"The project's viewer couldn't draw {rel} (`{c['show']}`, exit {code}):\n{said}\n"
+                                       "Nobody has seen this version. Make it draw, then look at it.")
+                    if why:
+                        return why
+                    continue
+                if task and sent.get("fault", 0) >= LIMITS["fault"]:
+                    shown[rel] = digest
+                    continue                        # its sends are spent: a review now would change nothing
+                if task:
+                    import eyes
+                    try:
+                        seen, worst = eyes.worst_fault(url, key, png, task, faults.get(rel, ""), post=post, drawn=rel)
+                    except Exception:                                # noqa: BLE001 — Core couldn't review: the plain look below
+                        seen = worst = None
+                    if seen is not None:
+                        shown[rel] = digest
+                        if not worst:
+                            faults.pop(rel, None)
+                            continue                # no major fault left in this version
+                        faults[rel] = worst
+                        why = send("fault", f"Skippy Core's big model looked at {rel} as it is now ({png}, no need to open it) "
+                                            f"against your task. Its review:\n\n{seen}\n\nThe worst fault: {worst}\n"
+                                            "Fix that one first, then stop again: the new version is drawn and reviewed the same "
+                                            "way until no major fault is left.")
+                        if why:
+                            return why
+                        continue
                 why = send("look", f"Here is {rel} as it is now, drawn by the project's viewer: {png}. You haven't looked at this "
                                    "version. Open it, compare it with what was asked, and fix what doesn't match.")
                 if why:
