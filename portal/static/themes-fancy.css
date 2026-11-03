@@ -1,0 +1,18 @@
+/* The fancy control themes (portal/themes.py): Drive's originals made general, the one place the bridge draws gradients. Loaded by
+   base.html only where a control wears one, or for the Captain's picker (keys.js loads it on a pick). */
+.unit[data-theme="psychedelic"]:not(#_) { --accent: #ff4fd8 !important; }
+.unit[data-theme="psychedelic"]:not(#_) .plate { opacity: 1; background: conic-gradient(from 0deg, #ff004c, #ffb300, #b6ff00, #00ffd5, #2b6bff, #c800ff, #ff004c);
+                                         animation: theme-trip 6s linear infinite; }
+.unit[data-theme="psychedelic"]:not(#_) .plate::before { background: radial-gradient(circle at 50% 45%, rgba(120, 0, 255, .22), #05010a 72%); }
+.unit[data-theme="psychedelic"]:not(#_) > .g { animation: theme-trip 6s linear infinite; }
+.key[data-theme="psychedelic"]:not(#_)::before { background: conic-gradient(from 0deg, #ff004c, #ffb300, #b6ff00, #00ffd5, #2b6bff, #c800ff, #ff004c);
+                                         animation: theme-trip 6s linear infinite; }
+.unit[data-theme="stripes"]:not(#_) { --accent: #ff5a00 !important; }
+.unit[data-theme="stripes"]:not(#_) .plate { opacity: 1; background: #ff3b00; }
+.unit[data-theme="stripes"]:not(#_) .plate::before { background: repeating-linear-gradient(135deg, #000 0 18px, #3a0000 18px 26px, #000 26px 34px, #3a1600 34px 42px); }
+.key[data-theme="stripes"]:not(#_) { color: #ff6a00; } .key[data-theme="stripes"]:not(#_)::before { background: repeating-linear-gradient(135deg, #ff3b00 0 4px, #3a0000 4px 8px); }
+.unit[data-theme="glow"]:not(#_) .plate { opacity: .95; }
+.unit[data-theme="glow"]:not(#_) .plate::before { background: radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--accent) 18%, transparent), #050505 70%); }
+.key[data-theme="glow"]:not(#_) { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 70%, transparent)); }
+@keyframes theme-trip { to { filter: hue-rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { [data-theme="psychedelic"]:not(#_) .plate, [data-theme="psychedelic"]:not(#_)::before, [data-theme="psychedelic"]:not(#_) > .g { animation: none; } }

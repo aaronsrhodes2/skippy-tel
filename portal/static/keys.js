@@ -4,6 +4,8 @@
  *    data-busy while `work` (a promise, or a function returning one) runs, and at least BUSY_MIN_MS so a quick one is still seen.
  *    Resolves with what the work resolved with; rejects as it did.
  *  Names: a key built by script with a data-act gets data-tel="<app>:<act>" (the beacon counts it, the tidy may retire it).
+ *  Themes: each control's own theme (portal/themes.py) as data-theme on its tile or key; the Captain picks it from a black, invisible
+ *    button in a tile's cut-off corner, or a long press on a key.
  *  The lamps: a unit's lamp (bridge.css, data-s) gets its meaning in the unit's tooltip, so a hover or a long press says it.
  */
 (function (root) {
@@ -55,16 +57,92 @@
     if (scope.querySelectorAll) scope.querySelectorAll(KEY_SEL).forEach(name);
   }
 
+  // ── each control's theme (portal/themes.py): data-theme on the tile or key; the Captain picks it on the control ──
+  const THEMES = root.SKIPPY_THEMES || {}, PICK = root.SKIPPY_THEME_PICK || null;
+  const target = el => (el.parentElement && el.parentElement.classList.contains("unit")) ? el.parentElement : el;
+  function theme(scope) {
+    if (!scope.querySelectorAll) return;
+    const els = scope.matches && scope.matches("[data-tel]") ? [scope] : [];
+    scope.querySelectorAll("[data-tel]").forEach(e => els.push(e));
+    for (const el of els) {
+      if (el.getAttribute("data-tel").indexOf("theme:") === 0) continue;   // the picker's own buttons wear no theme
+      const t = THEMES[el.getAttribute("data-tel")], at = target(el);
+      if (t) at.dataset.theme = t; else if (at.dataset.theme && !at.dataset.themeOwn) delete at.dataset.theme;
+      if (PICK && at.classList.contains("unit") && !at.querySelector(":scope > .theme-corner")) corner(at, el);
+    }
+  }
+  function corner(unit, el) {                     // the door: black, invisible, in the tile's cut-off corner
+    const b = root.document.createElement("button");
+    b.type = "button"; b.className = "theme-corner"; b.tabIndex = -1; b.setAttribute("data-tel", "theme:corner");
+    b.setAttribute("aria-label", "Theme for this control"); b.title = "Theme";
+    b.addEventListener("click", e => { e.preventDefault(); e.stopPropagation(); picker(el, b); });
+    unit.appendChild(b);
+  }
+  const MINI = { psychedelic: ["#ff004c", "#ffb300", "#b6ff00", "#00ffd5", "#2b6bff", "#c800ff"], stripes: ["#ff3b00", "#000", "#ff3b00", "#000"],
+                 glow: ["#000", "#00FF88", "#000"] };               // the fancy ones' swatches, as bars: the bridge draws no gradients
+  let open = null;
+  function close() { if (open) { open.remove(); open = null; } }
+  function picker(el, near) {
+    close();
+    const id = el.getAttribute("data-tel"), now = THEMES[id] || "default", doc = root.document;
+    const box = doc.createElement("div"); box.className = "theme-pick"; box.setAttribute("role", "dialog"); box.setAttribute("aria-label", "Theme");
+    const names = (PICK.order || Object.keys(PICK.choices.colours)).concat(PICK.choices.fancy, ["default"]);   // tojson sorts a map: the order comes apart
+    for (const n of names) {
+      const b = doc.createElement("button"); b.type = "button"; b.className = "t-" + n; b.title = b.ariaLabel = n; b.setAttribute("data-tel", "theme:pick");
+      b.setAttribute("aria-pressed", n === now ? "true" : "false");
+      const i = doc.createElement("i");
+      if (PICK.choices.colours[n]) i.style.background = PICK.choices.colours[n];
+      else if (MINI[n]) { i.className = "mini"; MINI[n].forEach(c => { const s = doc.createElement("b"); s.style.background = c; i.appendChild(s); }); }
+      b.appendChild(i);
+      b.addEventListener("click", () => choose(id, el, n));
+      box.appendChild(b);
+    }
+    doc.body.appendChild(box); open = box;
+    const r = (near || el).getBoundingClientRect(), w = box.offsetWidth, h = box.offsetHeight;
+    box.style.left = Math.max(8, Math.min(root.innerWidth - w - 8, r.right - w)) + "px";
+    box.style.top = Math.max(8, Math.min(root.innerHeight - h - 8, r.bottom - h)) + "px";
+  }
+  async function choose(id, el, n) {
+    close();
+    if (n === "default") delete THEMES[id]; else THEMES[id] = n;
+    if (PICK.choices.fancy.indexOf(n) >= 0 && !root.document.getElementById("themes-fancy")) {   // its look, if this page hasn't it yet
+      const l = root.document.createElement("link"); l.rel = "stylesheet"; l.id = "themes-fancy"; l.href = PICK.fancyCss; root.document.head.appendChild(l);
+    }
+    theme(root.document);                          // at once; the portal keeps it for every page and person
+    try {
+      await fetch(PICK.url, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ id: id, theme: n }) });
+    } catch (e) { /* offline: it shows here until the next load */ }
+  }
+  function themePicking() {                        // a long press on a key opens the same picker (a corner button would steal its taps)
+    if (!PICK) return;
+    const doc = root.document;
+    let timer = null, fired = false;
+    doc.addEventListener("pointerdown", e => {
+      const k = e.target.closest && e.target.closest(".key[data-tel]:not([data-tel^='theme:'])");
+      fired = false; clearTimeout(timer);
+      if (!k) { if (open && !open.contains(e.target)) close(); return; }
+      timer = setTimeout(() => { fired = true; picker(k, k); }, 550);
+    }, true);
+    ["pointerup", "pointercancel", "pointerleave"].forEach(ev => doc.addEventListener(ev, () => clearTimeout(timer), true));
+    doc.addEventListener("click", e => { if (fired) { e.preventDefault(); e.stopPropagation(); fired = false; } }, true);
+    doc.addEventListener("contextmenu", e => { if (fired || (e.target.closest && e.target.closest(".key[data-tel]"))) e.preventDefault(); }, true);
+    doc.addEventListener("keydown", e => { if (e.key === "Escape") close(); });
+  }
+
   function watchLamps() {
     if (!root.document || !root.MutationObserver) return;
     nameKeys(root.document);
+    theme(root.document);
+    themePicking();
     root.document.querySelectorAll(".unit").forEach(lampTitle);
     new root.MutationObserver(function (changes) {
       for (const c of changes) {
         if (c.type === "attributes" && c.target.classList && c.target.classList.contains("unit")) lampTitle(c.target);
         else if (c.type === "childList") c.addedNodes.forEach(function (n) {
-          if (n.nodeType !== 1) return;
+          if (n.nodeType !== 1 || n.classList.contains("theme-pick") || n.classList.contains("theme-corner")) return;
           nameKeys(n);
+          theme(n.parentElement || n);
           if (n.classList.contains("unit")) lampTitle(n);
           n.querySelectorAll && n.querySelectorAll(".unit").forEach(lampTitle);
         });

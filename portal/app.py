@@ -48,6 +48,7 @@ import media as media_mod
 import mentat_client
 import modules as modules_mod
 import adaptive as adaptive_mod
+import themes as themes_mod
 import ops
 import play
 import audiobooks as audiobooks_mod
@@ -126,7 +127,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     bot_override = skippy        # tests hand in one fake chat for every brain; live, brains.chat_for builds one per message
     app.extensions["friends"] = friends_mod.Friends(vm)
     app.extensions["modules"] = modules_mod.Modules(vm)               # the launcher's controls, and the Admin Graveyard that retires them
-    app.extensions["adaptive"] = adaptive_mod.Adaptive(vm, app.extensions["modules"])   # the controls tidied from their telemetry, nightly
+    app.extensions["adaptive"] = adaptive_mod.Adaptive(vm, app.extensions["modules"])
+    app.extensions["themes"] = themes_mod.Themes(vm)                 # each control's own theme, picked on the control (the Captain)   # the controls tidied from their telemetry, nightly
     app.extensions["access_requests"] = access_mod.Requests(vm)      # people asking to be let in (Admin → Friends)
     mentat = mentat or (mentat_client.Mentat(app.config["MENTAT_URL"]) if app.config.get("MENTAT_URL") else None)
     app.extensions["mentat"] = mentat
@@ -270,6 +272,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         build = buildinfo.info() if member else None               # the footer's build stamp: signed-in pages only (templates/base.html)
         return {"user": user, "is_admin": bool(user) and auth.is_admin(user["email"]),
                 "hidden_controls": app.extensions["adaptive"].hidden() if member else [],   # retired by the tidy (base.html hides them)
+                "control_themes": app.extensions["themes"].all() if member else {},         # each control's theme (keys.js applies them)
+                "theme_choices": {"colours": themes_mod.COLOURS, "fancy": themes_mod.FANCY},
                 "build": build, "build_label": buildinfo.label(build["built_at"]) if build else "",
                 "build_tip": buildinfo.tooltip(build) if build else "",
                 "can_skippy": member and auth.has_portal(user["email"], "skippy"),
@@ -963,6 +967,19 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         if "ups_on_battery" in st:                                # skippy-pc's own UPS: one DM per change (power.py)
             power.observe("pc", st["ups_on_battery"], st.get("ups_charge"), st.get("ups_runtime_min"))
         return jsonify(commands=commands)
+
+    @app.post("/themes")
+    @auth.admin_required
+    def themes_set():
+        """The Captain picks a control's theme on the control itself (keys.js): {id: <telemetry id>, theme: <name> | "default"}."""
+        body = request.get_json(silent=True) or {}
+        try:
+            got = app.extensions["themes"].set(str(body.get("id") or ""), body.get("theme"))
+        except ValueError:
+            abort(400)
+        except modules_mod.Unavailable as exc:
+            return jsonify(error=str(exc)), 503
+        return jsonify(themes=got)
 
     @app.get("/home/graveyard")
     def home_graveyard():

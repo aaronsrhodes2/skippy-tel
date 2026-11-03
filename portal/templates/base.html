@@ -194,6 +194,7 @@
 </style>
 {% if hidden_controls %}<style>/* retired by the nightly tidy (portal/adaptive.py): revive in Admin > Graveyard */
 {% for h in hidden_controls %}[data-tel="{{ h }}"], .unit:has(> [data-tel="{{ h }}"]){{ ', ' if not loop.last }}{% endfor %} { display: none !important; }</style>{% endif %}
+{% if bridge and (is_admin or (control_themes.values() | select("in", theme_choices.fancy) | list)) %}<link rel="stylesheet" id="themes-fancy" href="{{ url_for('static', filename='themes-fancy.css') }}">{% endif %}
 {% if bridge %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge.css') }}?v={{ (build.built_at if build else 'dev') }}">
 {# in the head and not deferred: a bridge page's own script (the chat's pager) runs before the page ends and needs Bridge #}
 <script src="{{ url_for('static', filename='bridge-pure.js') }}?v={{ (build.built_at if build else 'dev') }}"></script>
@@ -303,6 +304,7 @@
 {% endif %}
 {# One-click copy for everything people are expected to copy (codes, addresses, passwords, commands, blocks): see the header of the file. #}
 <script src="{{ url_for('static', filename='copy.js') }}" defer></script>
+{% if user %}<script>window.SKIPPY_THEMES = {{ control_themes | tojson }};{% if is_admin %} window.SKIPPY_THEME_PICK = {url: {{ url_for('themes_set') | tojson }}, choices: {{ theme_choices | tojson }}, order: {{ theme_choices.colours | list | tojson }}, fancyCss: {{ url_for('static', filename='themes-fancy.css') | tojson }}};{% endif %}</script>{% endif %}
 <script src="{{ url_for('static', filename='keys.js') }}"></script>{# SkippyKeys.busy and the lamps' tooltips: not deferred, page scripts call it #}
 {% if user and telemetry_on %}
 <script>

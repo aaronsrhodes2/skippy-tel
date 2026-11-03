@@ -47,7 +47,7 @@ STAND_IN = frozenset({"chat"})
 # days on screen must reach MIN_DAYS (no stand-in), and one per page goes per week. Never: media and what a page needs to work.
 MEDIA = re.compile(r"^(tile|tray|pane|play|demo|copy|seen):")   # content (game cards, games, demos, rows) and its helpers: "media does NOT
                                                                 # fall off" (the Captain); tile/tray/pane are the Graveyard's modules
-FLOOR_CTL = re.compile(r"^(base|pager|admin|login|request-access|unauthorized|recovery|join|voice|skippy3d|annotate):"
+FLOOR_CTL = re.compile(r"^(base|pager|admin|login|request-access|unauthorized|recovery|join|voice|skippy3d|annotate|theme):"
                        r"|(?:^|[:-])(back|close|home|send|stop|play|pause|toggle|cancel|esc|sign-in|sign-out|privacy|fs-key|tap|seek|volume|retry)$"
                        r"|:back-to-|:close-|:(voice|mode|chats|apps)$")
 APP_NAMES = {"music": "Bilby", "video": "Nagatha", "books": "Audiobooks", "audiobooks": "Audiobooks", "drive": "Drive", "chat": "Chat",
