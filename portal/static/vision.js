@@ -2,6 +2,7 @@
 
    SkippyVision.flashWord(text)      "snap" / "flash" -> "flash"; "snap it big time" / "hold it" -> "hold"; anything else -> null
    SkippyVision.readWord(text)       "read that" -> "read"; "what am I looking at" -> "look"; "steady on|off" -> "steady-on|steady-off"; else null
+   SkippyVision.hostWord(text)       "record a walk" -> "record-on"; "stop recording" -> "record-off"; else null
    SkippyVision.attach(cfg)          the flash itself: {flash(hold, by), forget(id), keep(id, on), addPage(id, name)}, and what he sees: {frame(),
                                      readSigns(picture, moment) -> [{text, lang, en}] | null, lookAt(picture, moment) -> a sentence | null}; cfg = the
                                      page's data-* URLs (flash, read, look, momentAdd ...) and hooks
@@ -27,6 +28,13 @@
     const t = strip(text);
     if (/^(snap it big time|snap big time|hold it|hold that|snap and hold|flash and hold)$/.test(t)) return "hold";
     if (/^(snap|flash)( it| that| this)?$/.test(t)) return "flash";
+    return null;
+  }
+
+  function hostWord(text) {                                // about the glasses' recorder: "record a walk" / "stop recording"
+    const t = strip(text);
+    if (/^(record a walk|record the walk|start recording|start recording a walk)$/.test(t)) return "record-on";
+    if (/^(stop recording|stop the recording|end the walk|stop recording the walk)$/.test(t)) return "record-off";
     return null;
   }
 
@@ -179,5 +187,5 @@
     return { flash: flash, forget: forget, keep: keep, clip: clip, addPage: addPage, frame: frame, readSigns: readSigns, lookAt: lookAt, hosted: () => !!(host && typeof host.flash === "function") };
   }
 
-  return { flashWord, readWord, attach, glassesStills, cameraName, parse, HOLD_MS, CLIP_AFTER_MS, MAX_CAMERAS };
+  return { flashWord, readWord, hostWord, attach, glassesStills, cameraName, parse, HOLD_MS, CLIP_AFTER_MS, MAX_CAMERAS };
 });

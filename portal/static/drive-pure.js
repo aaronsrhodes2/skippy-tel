@@ -163,7 +163,18 @@
   function lampText(pct, charging, tempC, hosted) {
     return (typeof pct === "number" ? Math.round(pct) + (charging ? "+" : "") : "") + (hosted && typeof tempC === "number" ? " · " + Math.round(tempC) + "°" : "");
   }
+  // ── captions pinned in the world (glasses only): a row stays where it was made while the head turns ──
+  const FOV_DEG = 46.1, PIN_HIDE_DEG = 23;                                       // the glasses' view: 46.1 degrees across; beyond half of it a row is out of sight
+  function yawDeg(pose) {                                                       // the head's turn about the vertical in degrees (Z up, as OpenViture's own quaternion-to-Euler); null without a pose
+    if (!pose || ["qw", "qx", "qy", "qz"].some(k => typeof pose[k] !== "number")) return null;
+    return Math.atan2(2 * (pose.qw * pose.qz + pose.qx * pose.qy), 1 - 2 * (pose.qy * pose.qy + pose.qz * pose.qz)) * 180 / Math.PI;
+  }
+  function pinOffset(yawNow, yawThen, viewportPx) {                              // {dx, show}: how far to shift a row made at yawThen so it stays put in the room
+    if (typeof yawNow !== "number" || typeof yawThen !== "number") return { dx: 0, show: true };
+    const d = ((yawNow - yawThen + 540) % 360 + 360) % 360 - 180;                // the short way round, -180..180 (positive: the head turned left)
+    return { dx: d * viewportPx / FOV_DEG, show: Math.abs(d) <= PIN_HIDE_DEG };    // a left turn moves a fixed thing to the right of the view
+  }
   function langName(code) { try { return new Intl.DisplayNames(["en"], { type: "language" }).of(code) || code; } catch (e) { return code; } }
 
-  return { captionFrames, captionHoldMs, heardNote, langName, battLevel, heatLevel, lampText, HOT_STATUS, CAPTION_STEP_MS, CAPTION_FADE_MS, shuffle, buildQueue, localFirst, handOff, nextPlayable, playable, replyAfter, carDone, QUEUE_MAX, FAV_EVERY, SUGGEST_EVERY, CAR_MARGIN_MS };
+  return { captionFrames, captionHoldMs, heardNote, langName, yawDeg, pinOffset, FOV_DEG, battLevel, heatLevel, lampText, HOT_STATUS, CAPTION_STEP_MS, CAPTION_FADE_MS, shuffle, buildQueue, localFirst, handOff, nextPlayable, playable, replyAfter, carDone, QUEUE_MAX, FAV_EVERY, SUGGEST_EVERY, CAR_MARGIN_MS };
 });

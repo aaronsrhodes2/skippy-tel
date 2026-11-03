@@ -159,3 +159,9 @@ test("a reader that cannot be asked, a picture that is missing and a page withou
   const silent = world({ cfg: { look: "/vision/look" }, respond: () => ({ ok: true, json: async () => ({ said: "" }) }) });
   assert.equal(await silent.vision.lookAt("data:image/jpeg;base64,AAAA"), null);         // an empty sentence is no sentence
 });
+
+test("the recorder words: record a walk, stop recording, and nothing else", () => {
+  for (const t of ["record a walk", "Record the walk.", "start recording", "Start recording a walk!"]) assert.equal(V.hostWord(t), "record-on", t);
+  for (const t of ["stop recording", "Stop the recording.", "end the walk"]) assert.equal(V.hostWord(t), "record-off", t);
+  for (const t of ["", null, "record", "recording", "record my screen", "stop", "go for a walk"]) assert.equal(V.hostWord(t), null, String(t));
+});

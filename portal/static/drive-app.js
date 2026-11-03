@@ -337,7 +337,7 @@
     const line = document.createElement("div"); line.className = "line";
     const enEl = document.createElement("span"), origEl = document.createElement("span"); enEl.className = "en"; origEl.className = "orig";
     line.append(enEl, document.createTextNode(" "), origEl); tx.append(who, line); row.append(g, tx);
-    heardBox.prepend(row);
+    heardBox.prepend(row); pin(row);
     while (heardBox.children.length > 3) heardBox.lastChild.remove();
     const frames = D.captionFrames(c.orig, c.en);
     let i = 0;
@@ -397,6 +397,8 @@
   async function ask(text) {
     const fw = vision && V.flashWord(text);                // "snap" / "snap it big time" are the camera key's words: never sent to Skippy
     if (fw) { snap(fw === "hold", "word"); return; }
+    const hw = V && V.hostWord(text);                      // "record a walk" / "stop recording": the glasses' recorder, never sent to Skippy
+    if (hw) { hostRecord(hw === "record-on"); return; }
     const rw = vision && V.readWord(text);                 // "read that", "what am I looking at", "steady on": about what he sees, never sent to Skippy
     if (rw) { viewWord(rw); return; }
     if (cfg.wsSend) return askPurple(text);
@@ -586,6 +588,34 @@
     if (word === "look") note((await vision.lookAt(picture)) || "I couldn't tell.", 12000);
     else await readView(picture, null, true);
   }
+  // ── captions pinned in the world (glasses only): a row stays where it was made while the head turns and is hidden beyond about half the view
+  // (D.pinOffset). Without the host or a pose lock a row simply stays on the screen ──
+  const pinned = new Set();
+  const yawNow = () => { try { return D.yawDeg(JSON.parse(OpenViture.pose())); } catch (e) { return null; } };
+  function pin(row) {
+    if (!(window.OpenViture && OpenViture.pose)) return;
+    const yaw = yawNow();
+    if (yaw !== null) { row._yaw = yaw; pinned.add(row); }
+  }
+  if (window.OpenViture && OpenViture.pose) setInterval(() => {
+    if (!pinned.size || document.hidden) return;
+    const yaw = yawNow();
+    if (yaw === null) return;
+    for (const row of pinned) {
+      if (!row.isConnected) { pinned.delete(row); continue; }
+      const p = D.pinOffset(yaw, row._yaw, innerWidth);
+      row.style.transform = p.show ? "translateX(" + Math.round(p.dx) + "px)" : "none"; row.style.visibility = p.show ? "visible" : "hidden";
+    }
+  }, 50);
+
+  // ── the walk recorder (the Captain: the backyard, later): the host writes the cameras' frames and the head's pose to the phone while it records ──
+  function hostRecord(on) {
+    if (!(window.OpenViture && OpenViture.record)) { note("Recording a walk needs the glasses."); return; }
+    let ok = false;
+    try { ok = JSON.parse(OpenViture.record(on)) === true; } catch (e) { /* none */ }
+    note(ok ? (on ? "Recording the walk." : "Walk saved on the phone.") : (on ? "I couldn't start recording." : "I wasn't recording."));
+  }
+
   try {
     const hostSteady = window.OpenViture && OpenViture.status ? JSON.parse(OpenViture.status()).steady === true : false;      // the host remembers it across a reload
     if (hostSteady || localStorage.getItem("hud-steady") === "1") setSteady(true, false);

@@ -213,3 +213,21 @@ test("the lamp's words: the charge, a plus while charging, and the glasses' heat
   assert.equal(D.lampText(null, false, null, true), "");
   assert.equal(D.lampText(null, false, 41, true), " · 41°");
 });
+
+test("pinned captions: the head's turn from the pose, the short way round, hidden beyond half the view", () => {
+  const rot = deg => ({ qw: Math.cos(deg * Math.PI / 360), qx: 0, qy: 0, qz: Math.sin(deg * Math.PI / 360) });         // about the vertical (Z up)
+  assert.equal(D.yawDeg({ qw: 1, qx: 0, qy: 0, qz: 0 }), 0);
+  for (const deg of [-120, -90, -30, 10, 90, 135]) assert.ok(Math.abs(D.yawDeg(rot(deg)) - deg) < 1e-9, String(deg));
+  assert.ok(Math.abs(D.yawDeg({ qw: Math.cos(Math.PI / 12), qx: 0, qy: Math.sin(Math.PI / 12), qz: 0 })) < 1e-9);       // nodding 30 degrees is not turning
+  for (const bad of [null, undefined, {}, { qw: 1 }, { qw: "1", qx: 0, qy: 0, qz: 0 }]) assert.equal(D.yawDeg(bad), null);
+  assert.deepEqual(D.pinOffset(5, 5, 1920), { dx: 0, show: true });
+  const left = D.pinOffset(10, 0, 1920);
+  assert.ok(left.show && Math.abs(left.dx - 10 * 1920 / D.FOV_DEG) < 1e-9);                                          // turned left: the room slides right
+  assert.ok(D.pinOffset(-10, 0, 1920).dx < 0);
+  assert.equal(D.pinOffset(23, 0, 1920).show, true);
+  assert.equal(D.pinOffset(23.5, 0, 1920).show, false);
+  assert.equal(D.pinOffset(-30, 0, 1920).show, false);
+  const wrap = D.pinOffset(-179, 179, 1000);                                                                         // across the +-180 seam: two degrees, not 358
+  assert.ok(wrap.show && Math.abs(wrap.dx - 2 * 1000 / D.FOV_DEG) < 1e-9);
+  assert.deepEqual(D.pinOffset(null, 5, 1920), { dx: 0, show: true });                                              // no pose: the row stays where it is
+});
