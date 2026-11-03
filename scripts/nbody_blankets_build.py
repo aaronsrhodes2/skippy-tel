@@ -54,27 +54,40 @@ def masses() -> dict[str, float]:
     return out
 
 
+INNER = ("Mercury", "Venus", "Earth", "Moon", "Mars")              # where DE440 and DE442 agree to <= 0.08 km, so an "ours" scored against DE440 is the same number against DE442
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("source", type=Path)
+    ap.add_argument("sources", type=Path, nargs="+", help="contest jsonl/json files; a kernels-only file (scripts/jpl_vintages_vs_reality.py, no eO) supplies JPL and the reality band against DE442")
     ap.add_argument("--out", type=Path, default=OUT)
     a = ap.parse_args()
-    runs = load_runs(a.source)
+    runs = [r for p in a.sources for r in load_runs(p)]
     rel = releases()
     gm = masses()
+    truths = {r.get("truth", "DE440") for r in runs}
+    truth = "DE442" if "DE442" in truths else sorted(truths)[0]
     vintages = sorted({r["vintage"] for r in runs if r["vintage"] in rel}, key=lambda v: rel[v])
     cells: dict = {}                                               # (body, vintage, target_year) -> {"ours": [], "jpl": [], "band": []}
+    ours_truths: set = set()
     for r in runs:
         v = r["vintage"]
         if v not in rel:
             continue
+        r_truth = r.get("truth", "DE440")
         start_year = 2000 + round((r["jd"] - 2451545.0) / 365.25)
         for body, leads in r["bodies"].items():
             for lead, x in leads.items():
                 target = start_year + int(round(float(lead)))
-                c = cells.setdefault((body, v, target), {"ours": [], "jpl": [], "band": []})
-                c["ours"].append(x["eO"]); c["jpl"].append(x["eV"])
-                if "eT" in x:
+                c = cells.setdefault((body, v, target), {"ours": [], "jpl": [], "jpl_truth": set(), "band": []})
+                if "eO" in x and (r_truth == truth or body in INNER):            # ours against the page's reality, or where the two realities are the same number
+                    c["ours"].append(x["eO"]); ours_truths.add(r_truth)
+                if "eV" in x:
+                    if r_truth == truth and truth not in c["jpl_truth"]:          # a row against the page's reality replaces any against an older one
+                        c["jpl"] = []; c["jpl_truth"] = {truth}
+                    if r_truth == truth or not c["jpl_truth"]:
+                        c["jpl"].append(x["eV"]); c["jpl_truth"].add(r_truth)
+                if x.get("eT") is not None:
                     c["band"].append(x["eT"])
     bodies = [b for b in ORDER if any(k[0] == b for k in cells)]
     targets = sorted({k[2] for k in cells})
@@ -89,21 +102,21 @@ def main() -> None:
                 c = cells.get((b, v, t))
                 if not c:
                     continue
-                ours[i][j] = float(np.median(c["ours"])); jpl[i][j] = float(np.median(c["jpl"])); n[i][j] = len(c["ours"])
+                ours[i][j] = float(np.median(c["ours"])) if c["ours"] else None
+                jpl[i][j] = float(np.median(c["jpl"])) if c["jpl"] else None
+                n[i][j] = len(c["ours"])
                 band_cols.setdefault(j, []).extend(c["band"])
         blankets[b] = {"ours": ours, "jpl": jpl, "n": n, "band": [float(np.median(band_cols[j])) if band_cols.get(j) else None for j in range(len(targets))]}
     # the composite: the mass-weighted mean over the bodies that have a value in that cell (the error of the system's centre of mass, if every body were off in the same direction)
     def weighted(key):
+        # a composite cell exists only when EVERY body has both ours and JPL there: a composite of the inner planets alone is not the same quantity as one of the whole system
         grid = []
         for i in range(len(vintages)):
             row = []
             for j in range(len(targets)):
-                num = den = 0.0
-                for b in bodies:
-                    val = blankets[b][key][i][j]
-                    if val is not None:
-                        num += gm[b] * val; den += gm[b]
-                row.append(num / den if den else None)
+                vals = [blankets[b][key][i][j] for b in bodies]
+                complete = all(v is not None for v in vals) and (key == "jpl" or all(blankets[b]["jpl"][i][j] is not None for b in bodies))
+                row.append(sum(gm[b] * v for b, v in zip(bodies, vals)) / sum(gm[b] for b in bodies) if complete else None)
             grid.append(row)
         return grid
     band = []
@@ -122,25 +135,35 @@ def main() -> None:
         if r["vintage"] not in rel:
             continue
         start_year = 2000 + round((r["jd"] - 2451545.0) / 365.25)
+        r_truth = r.get("truth", "DE440")
         for body, leads in r["bodies"].items():
             for lead, x in leads.items():
                 L = int(round(float(lead)))
                 if L < 1 or L > 5:
                     continue
-                c = lead_cells.setdefault((body, L, start_year + L), {"ours": [], "jpl": []})
-                c["ours"].append(x["eO"]); c["jpl"].append(x["eV"])
+                c = lead_cells.setdefault((body, L, start_year + L), {"ours": [], "jpl": [], "jpl_truth": set()})
+                if "eO" in x and (r_truth == truth or body in INNER):
+                    c["ours"].append(x["eO"])
+                if "eV" in x:
+                    if r_truth == truth and truth not in c["jpl_truth"]:
+                        c["jpl"] = []; c["jpl_truth"] = {truth}
+                    if r_truth == truth or not c["jpl_truth"]:
+                        c["jpl"].append(x["eV"]); c["jpl_truth"].add(r_truth)
     by_lead = {}
     for b in bodies:
         by_lead[b] = {}
         for L in range(1, 6):
-            ts = sorted(t for (bb, LL, t) in lead_cells if bb == b and LL == L)
+            ts = sorted(t for (bb, LL, t) in lead_cells if bb == b and LL == L and lead_cells[(bb, LL, t)]["jpl"])
             if ts:
-                by_lead[b][str(L)] = {"targets": ts, "ours": [float(np.median(lead_cells[(b, L, t)]["ours"])) for t in ts], "jpl": [float(np.median(lead_cells[(b, L, t)]["jpl"])) for t in ts],
-                                      "n": [len(lead_cells[(b, L, t)]["ours"]) for t in ts]}
-    first = runs[0]
-    data = {"meta": {"source": a.source.name, "truth": first.get("truth", "DE440"), "predictor": first.get("predictor", "the 2026-10-12 headline stack"),
+                med = lambda key, t: float(np.median(lead_cells[(b, L, t)][key])) if lead_cells[(b, L, t)][key] else None
+                by_lead[b][str(L)] = {"targets": ts, "ours": [med("ours", t) for t in ts], "jpl": [med("jpl", t) for t in ts], "n": [len(lead_cells[(b, L, t)]["ours"]) for t in ts]}
+    ours_runs = [r for r in runs if any("eO" in x for d in r["bodies"].values() for x in d.values())]
+    first = ours_runs[0] if ours_runs else runs[0]
+    ours_note = ("ours: " + first.get("predictor", "the 2026-10-12 headline stack") + ", scored against " + ", ".join(sorted(ours_truths)) +
+                 ("; shown for the inner system only until the DE442 rerun lands (DE440 and DE442 agree there to under 0.1 km)" if ours_truths and truth not in ours_truths else ""))
+    data = {"meta": {"source": ", ".join(p.name for p in a.sources), "truth": truth, "predictor": first.get("predictor", "the 2026-10-12 headline stack"), "ours_note": ours_note,
                      "words": WORDS, "issue_years": [round(rel[v], 2) for v in vintages], "vintages": vintages, "targets": targets, "bodies": bodies,
-                     "runs": len(runs), "built_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                     "runs": len(ours_runs), "kernel_rows": len(runs) - len(ours_runs), "built_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                      "how": "cell = median over the runs of that ephemeris whose lead lands on that target year; empty before the release; band = DE440 against DE442 at the target"},
             "blankets": blankets, "composite": composite, "by_lead": by_lead}
     a.out.parent.mkdir(parents=True, exist_ok=True)

@@ -86,6 +86,7 @@
   }
   function heatPanel(g, grid, x0, y0, w, h, r, rows, cols, issue, withEdge) {
     var cw = w / cols.length, rh = h / rows.length;
+    if (!grid.some(function (row) { return row.some(function (x) { return x != null; }); })) { pending(g, x0, y0, w, h); return; }   // nothing measured yet: say so, not an empty grid
     for (var i = 0; i < rows.length; i++) for (var j = 0; j < cols.length; j++) {
       var v = grid[i][j], y = y0 + h - (i + 1) * rh;                     // oldest issue at the bottom: rows cool as they rise
       if (v == null) continue;
@@ -102,8 +103,14 @@
     }
     g.strokeStyle = css("--line"); g.lineWidth = 1; g.strokeRect(x0, y0, w, h);
   }
+  function pending(g, x0, y0, w, h) {
+    g.fillStyle = css("--muted"); g.font = "10px " + css("--mono"); g.textAlign = "center";
+    g.fillText("pending the", x0 + w / 2, y0 + h / 2 - 6); g.fillText("DE442 rerun", x0 + w / 2, y0 + h / 2 + 8);
+    g.strokeStyle = css("--line"); g.lineWidth = 1; g.strokeRect(x0, y0, w, h);
+  }
   function winsPanel(g, ours, jpl, band, x0, y0, w, h, rows, cols) {      // who is closer to reality; grey where both sit inside the reality band
     var cw = w / cols.length, rh = h / rows.length;
+    if (!ours.some(function (row, i) { return row.some(function (x, j) { return x != null && jpl[i][j] != null; }); })) { pending(g, x0, y0, w, h); return; }
     for (var i = 0; i < rows.length; i++) for (var j = 0; j < cols.length; j++) {
       var a = ours[i][j], b = jpl[i][j]; if (a == null || b == null) continue;
       var y = y0 + h - (i + 1) * rh, floor = band && band[j] != null ? band[j] : 0;
@@ -153,13 +160,14 @@
       B.meta.targets.forEach(function (t, j) { if (band[j] != null && band[j] > 0) g.lineTo(X(t), Y(band[j])); });
       g.lineTo(right, bot); g.closePath(); g.fill(); g.globalAlpha = 1;
       // ours as a solid line, JPL's dashed ON TOP: where the two coincide (the composite, the giants) the dashes show through instead of vanishing
-      g.strokeStyle = css("--c-ours"); g.fillStyle = css("--c-ours"); g.lineWidth = 2.5; g.beginPath();
-      q.targets.forEach(function (t, i) { var x = X(t), y = Y(q.ours[i]); if (!i) g.moveTo(x, y); else g.lineTo(x, y); }); g.stroke();
-      q.targets.forEach(function (t, i) { g.beginPath(); g.arc(X(t), Y(q.ours[i]), 2.5, 0, 6.2832); g.fill(); });
-      g.strokeStyle = css("--c-theirs"); g.lineWidth = 1.5; g.setLineDash([5, 4]); g.beginPath();
-      q.targets.forEach(function (t, i) { var x = X(t), y = Y(q.jpl[i]); if (!i) g.moveTo(x, y); else g.lineTo(x, y); }); g.stroke(); g.setLineDash([]);
-      var same = q.targets.every(function (t, i) { return Math.abs(Math.log10(q.ours[i] / q.jpl[i])) < 0.01; });
-      if (same) { g.fillStyle = css("--muted"); g.textAlign = "right"; g.fillText("the two curves coincide to 1 %", right - 4, top + 12); }
+      var line = function (vals) { var pen = false; g.beginPath(); q.targets.forEach(function (t, i) { var v = vals[i]; if (v == null || !(v > 0)) { pen = false; return; } var x = X(t), y = Y(v); if (!pen) { g.moveTo(x, y); pen = true; } else g.lineTo(x, y); }); g.stroke(); };
+      g.strokeStyle = css("--c-ours"); g.fillStyle = css("--c-ours"); g.lineWidth = 2.5; line(q.ours);     // a missing cell breaks the line; it is never drawn at the floor
+      q.targets.forEach(function (t, i) { if (q.ours[i] != null && q.ours[i] > 0) { g.beginPath(); g.arc(X(t), Y(q.ours[i]), 2.5, 0, 6.2832); g.fill(); } });
+      g.strokeStyle = css("--c-theirs"); g.lineWidth = 1.5; g.setLineDash([5, 4]); line(q.jpl); g.setLineDash([]);
+      var pairs = q.targets.filter(function (t, i) { return q.ours[i] != null && q.jpl[i] != null; });
+      var same = pairs.length && q.targets.every(function (t, i) { return q.ours[i] == null || q.jpl[i] == null || Math.abs(Math.log10(q.ours[i] / q.jpl[i])) < 0.01; });
+      g.fillStyle = css("--muted"); g.textAlign = "right";
+      if (!pairs.length) g.fillText("ours: pending the DE442 rerun", right - 4, top + 12); else if (same) g.fillText("the two curves coincide to 1 %", right - 4, top + 12);
       g.font = "10px " + css("--mono"); g.fillStyle = css("--muted"); g.textAlign = "center";
       q.targets.forEach(function (t, i) { if (i % Math.ceil(q.targets.length / Math.max(3, Math.floor((right - left) / 60))) === 0) g.fillText(String(t), X(t), c.h - 8); });
     } };
@@ -172,8 +180,8 @@
       d.append(el("p", null, w.ours + " is this program's integrator. " + w.jpl + " is JPL's own ephemeris as it stood when it was issued, run forward from the same starting state. " + w.truth + " is JPL's latest fit, " + B.meta.truth + ", which has every observation to date in it."),
         el("p", null, "Each blanket is a grid: up the side, the year an ephemeris was issued (what was known when); along the bottom, the year being predicted. A cell is the median distance from reality, in kilometres, over every run started from that ephemeris. Reality has no 'issued' axis, so it is the bright edge both blankets hang from; above the edge is the future as seen from each issue date."),
         el("p", null, "Rows should cool as they rise: a later ephemeris knows more. The third panel says who was closer in each cell, and goes grey where both sit inside reality's own spread, the distance between JPL's previous reality (DE440) and today's."),
-        el("p", "dim", "This build: " + B.meta.runs + " runs from " + B.meta.source + " (" + B.meta.predictor + "), reality = " + B.meta.truth + "; built " + fmtDate(B.meta.built_utc) + "." +
-          (B.meta.truth === "DE440" ? " The rerun of the contest against DE442 with the current model is in progress and replaces this file when it lands." : "")));
+        el("p", "dim", "This build: reality = " + B.meta.truth + "; JPL's prediction at the time from " + B.meta.vintages.length + " ephemerides (" + B.meta.vintages[0] + " to " + B.meta.vintages[B.meta.vintages.length - 1] + "), " +
+          B.meta.runs + " integrated runs; " + (B.meta.ours_note || "") + ". Built " + fmtDate(B.meta.built_utc) + "."));
       return d;
     } });
     P.push(blanketPlate("Everything at once", B.composite, "Every body folded into one number: the mass-weighted error (DE440 masses; Jupiter and Saturn carry 92 % of it, so this blanket is mostly the giants, whose limit is the starting state, not the physics). Oldest issue at the bottom, reality along the bright edge."));
