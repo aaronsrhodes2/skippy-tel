@@ -59,6 +59,19 @@
   #k-house .lamps { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10% 8%; width: 78%; }
   #k-house .lamps i { display: flex; align-items: center; justify-content: center; aspect-ratio: 1; color: var(--muted); opacity: .45; }
   #k-house .lamps i .g { width: 70%; max-width: 54px; height: auto; aspect-ratio: 1; stroke-width: 1.4; }
+  /* the hud mode (/hud, hud.py): purple's colour on the voice key, the hub key and the apps key in the strip, and hub mode: every key
+     goes, his face fills the screen with what was said under it, and the voice listens for "Skippy" with no touch, like a pod */
+  #drive.hud #k-skippy { --accent: var(--violet) !important; }
+  #drive .hudkeys { display: flex; gap: 8px; margin-left: auto; }
+  #drive .hudkeys .key { width: 40px; height: 40px; }
+  #said { min-height: 0; font: 600 20px var(--mono); color: var(--green); padding: 0 8px; overflow: hidden; display: -webkit-box;
+          -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+  #said[hidden] { display: none; }
+  #drive.hub .deck > .unit:not(#k-skippy) { display: none; }
+  #drive.hub .deck { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+  #drive.hub .deck > #k-skippy { grid-column: 1; grid-row: 1; }
+  #drive.hub #k-skippy .plate { opacity: 0; } #drive.hub #k-skippy .claws, #drive.hub #k-skippy::before, #drive.hub #k-skippy::after { display: none; }
+  #drive.hub #said { font-size: 26px; text-align: center; }
   #k-house .lamps i[data-ok="1"] { color: var(--green); opacity: 1; filter: drop-shadow(0 0 5px color-mix(in srgb, var(--green) 60%, transparent)); }
   #k-house .lamps i[data-ok="0"] { color: var(--red); opacity: 1; animation: drive-blink 1.4s ease-in-out infinite; }
   @keyframes drive-blink { 50% { opacity: .35; } }
@@ -67,15 +80,20 @@
 </style>
 {% endblock %}
 {% block content %}
-<section id="drive"
-         data-music-gate="{{ url_for('music.player_gate') }}" data-favorites="{{ url_for('music.favorites_list') }}" data-played="{{ url_for('music.favorites_played') }}" data-fav-add="{{ url_for('music.favorites_add') }}" data-tap="{{ url_for('telemetry_tap') }}"
+<section id="drive"{% if hud %} class="hud"{% endif %}
+         data-music-gate="{{ url_for('music.player_gate') }}" data-favorites="{{ url_for('music.favorites_list') }}" data-played="{{ url_for('music.favorites_played') }}" data-fav-add="{{ url_for('music.favorites_add') }}" data-tap="{{ url_for('telemetry_tap') }}"{% if hud %}
+         data-ws-send="{{ url_for('me.workshop_send') }}" data-ws-events="{{ url_for('me.workshop_events') }}"{% endif %}
          data-book-gate="{{ url_for('audiobooks.gate') }}" data-voice-gate="{{ url_for('chat.voice_gate') }}"
          data-send="{{ url_for('housechat.home_chat_send') }}" data-events="{{ url_for('housechat.home_chat_events') }}"
          data-ort="{{ url_for('static', filename='vendor/ort/') }}"
          data-sp-mix="{{ url_for('drive.spotify_mix') }}" data-sp-car="{{ url_for('drive.spotify_car') }}"
          data-sp-play="{{ url_for('drive.spotify_play') }}" data-sp-pause="{{ url_for('drive.spotify_pause') }}"
          data-house="{{ url_for('drive.house') }}" data-last="{{ url_for('drive.last') }}" data-rooms="{{ url_for('audiobooks.rooms') }}" data-room-cmd="{{ url_for('audiobooks.command') }}" data-frames="{{ url_for('static', filename='skippy/face/') }}">
-  <div id="now" aria-live="polite"><svg class="g" aria-hidden="true"><use id="now-g" href="#g-wheel"/></svg><span id="now-t"></span></div>
+  <div id="now" aria-live="polite"><svg class="g" aria-hidden="true"><use id="now-g" href="#g-wheel"/></svg><span id="now-t"></span>
+    {% if hud %}<span class="hudkeys">
+      <button type="button" class="key" id="k-hub" aria-pressed="false" aria-label="Hub mode: hands-off, no touch" title="Hub mode: hands-off, no touch" data-tel="hud:hub"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg></button>
+      <a class="key" href="{{ url_for('apps') }}" aria-label="Apps" title="Apps" data-tel="hud:apps"><svg class="g" aria-hidden="true"><use href="#g-apps"/></svg></a>
+    </span>{% endif %}</div>
   <div id="now-bar"><i></i></div>
   <div class="deck">
     {# The trio (the Captain, 2026-11-02): play/pause, next and the star are one key, down the left edge, nearest the driver's hand #}
@@ -108,7 +126,7 @@
     <div class="unit named" id="k-skippy" style="--accent: var(--green); --i: 4">
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
       <span class="face" aria-hidden="true"><img src="{{ url_for('static', filename='skippy/skippy-head.png') }}" alt="" width="256" height="256"><canvas width="480" height="480"></canvas></span>
-      <button class="hit voice" type="button" aria-label="Skippy" data-tel="drive:skippy"><svg style="display:none" aria-hidden="true"><use href="#g-ear"/></svg></button>
+      <button class="hit voice" type="button" aria-label="{{ 'Purple Skippy' if hud else 'Skippy' }}" data-tel="drive:skippy"><svg style="display:none" aria-hidden="true"><use href="#g-ear"/></svg></button>
     </div>
     <div class="unit" id="k-house" style="--accent: var(--green); --i: 5">
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
@@ -117,6 +135,7 @@
     </div>
   </div>
   <div id="vstatus" hidden></div>
+  {% if hud %}<div id="said" aria-live="polite" hidden></div>{% endif %}
   <audio id="media" preload="auto"></audio>
 </section>
 <script src="{{ url_for('static', filename='audiobooks-pure.js') }}"></script>

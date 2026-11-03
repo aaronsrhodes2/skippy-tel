@@ -137,7 +137,7 @@ def test_the_launcher_has_one_tile_per_app_and_no_duplicate_paths(env):
     login(client, ADMIN)
     launcher = client.get("/apps").data.decode()
     assert re.findall(r'class="unit(?: named)?" data-app="(\w+)"', launcher) == \
-        ["skippy", "games", "play", "music", "video", "books", "experiments", "tabletop", "car", "alarms", "drive", "dashboard", "admin"]
+        ["skippy", "games", "play", "music", "video", "books", "experiments", "tabletop", "car", "alarms", "drive", "hud", "dashboard", "admin"]
     assert launcher.count('href="/games"') == 1 and 'href="/games/' not in launcher      # games live in one app, not six tiles
     assert "Server room" not in launcher and "<nav" not in launcher
     _add_friend(client, PAL, ["dragonwilds"])
@@ -174,7 +174,10 @@ def test_every_page_belongs_to_an_app_with_a_colour():
         text = t.read_text(encoding="utf-8")
         if t.name.startswith("_") or t.name == "base.html" or t.name in paper:
             continue
-        assert 'extends "base.html"' in text, f"{t.name} doesn't use the one base template"
+        parent = text
+        while 'extends "base.html"' not in parent and (m := re.search(r'extends "([\w.]+)"', parent)):
+            parent = (templates / m.group(1)).read_text(encoding="utf-8")     # a page built on another page (hud.html on drive.html)
+        assert 'extends "base.html"' in parent, f"{t.name} doesn't use the one base template"
         if t.name in exempt:
             continue
         found = re.search(r"\{% block app %\}(\w+)\{% endblock %\}", text)

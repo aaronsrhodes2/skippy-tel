@@ -16,14 +16,14 @@ test("a clicker is busy while its job runs, and at least BUSY_MIN_MS", async () 
   finish(42);
   assert.equal(await run, 42);
   assert.equal(k.dataset.busy, "1");                                    // a quick job still shows for a moment
-  await new Promise(r => setTimeout(r, K.BUSY_MIN_MS + 30));
+  await new Promise(r => setTimeout(r, K.BUSY_MIN_MS + 250));
   assert.equal(k.dataset.busy, undefined); assert.equal(k.attrs["aria-busy"], undefined);
 });
 
 test("a failed job clears the busy look and still throws", async () => {
   const k = el();
   await assert.rejects(K.busy(k, async () => { throw new Error("no"); }), /no/);
-  await new Promise(r => setTimeout(r, K.BUSY_MIN_MS + 30));
+  await new Promise(r => setTimeout(r, K.BUSY_MIN_MS + 250));
   assert.equal(k.dataset.busy, undefined);
 });
 

@@ -364,7 +364,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         wanted = {"skippy": auth.has_portal(who, "skippy"), "games": bool(shown), "play": auth.has_portal(who, "play"),
                   "music": auth.has_portal(who, "audio"), "video": auth.has_portal(who, "video"), "books": auth.is_admin(who),
                   "experiments": auth.has_portal(who, "experiments"), "tabletop": auth.has_portal(who, "tabletop"),
-                  "car": auth.is_admin(who), "alarms": auth.is_admin(who), "drive": auth.is_admin(who),
+                  "car": auth.is_admin(who), "alarms": auth.is_admin(who), "drive": auth.is_admin(who), "hud": auth.is_admin(who),
                   "dashboard": auth.is_admin(who) and "me" in app.blueprints, "admin": auth.is_admin(who)}
         tiles = []
         order = app.extensions["adaptive"].order()                   # the launcher's order follows use (adaptive.py: promote)

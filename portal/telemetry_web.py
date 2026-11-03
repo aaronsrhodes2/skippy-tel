@@ -59,7 +59,7 @@ SAFE_VALUES = {
     "from_request": r"[01]",    # approving from a request card
 }
 _TAP = re.compile(r"[a-z0-9:_.\-]{1,60}")
-LAUNCHER_TILES = ("skippy", "games", "play", "music", "video", "books", "experiments", "tabletop", "car", "alarms", "drive", "dashboard", "admin")   # templates/home.html
+LAUNCHER_TILES = ("skippy", "games", "play", "music", "video", "books", "experiments", "tabletop", "car", "alarms", "drive", "hud", "dashboard", "admin")   # templates/home.html
 ME_PANES = ("mcp", "home", "server", "core", "activity-pane", "watcher", "people", "links", "weather")   # templates/me.html: pane:<id>, for the Graveyard
 TAPS_PER_MIN = 120          # one person's beacon budget
 SEEN_MAX = 40               # controls in one "on screen" beacon

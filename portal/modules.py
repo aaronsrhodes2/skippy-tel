@@ -46,6 +46,7 @@ MODULES = (
     Module("car", "car", "car.page", "Car"),
     Module("alarms", "bell", "alarms.page", "Alarms and timers"),
     Module("drive", "wheel", "drive.page", "Drive"),
+    Module("hud", "eye", "hud.page", "Glasses"),            # the glasses' (and phone's) view: Drive with purple Skippy and a hub mode (hud.py)
     Module("dashboard", "gauge", "me.index", "Dashboard"),
     Module("admin", "gear", "admin.index", "Admin", retirable=False),
     # /me panes (id = "me-" + the pane's id in templates/me.html). MCP and Home are what /me is for; the rest wait here to be retired when

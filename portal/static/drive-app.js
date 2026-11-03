@@ -324,7 +324,42 @@
   const voice = SkippyVoice.attach({ gate: cfg.voiceGate, key: skey, status: $("#vstatus"), onSend: ask, wakeWord: false,
                                      onText: t => { if (t) $("#vstatus").title = t; } });
   let asking = false;                                    // a turn is with the house brain: his face thinks
+  // /hud (hud.py): purple Skippy, the agent on skippy-pc with the full power, is the brain behind the voice. One conversation, kept
+  // in this browser and started afresh after HUD_CONV_IDLE_MS quiet, so he can follow up; the reply's last text is what is spoken
+  // (as the agent's chat does). Its brain is the agent's own default (Private: Skippy Core).
+  const HUD_CONV_IDLE_MS = 2 * 3600 * 1000;
+  function hudConv() {
+    let c = null; try { c = JSON.parse(localStorage.getItem("hud-conv") || "null"); } catch (e) { /* none */ }
+    if (!c || !c.id || Date.now() - c.at > HUD_CONV_IDLE_MS) c = { id: (crypto.randomUUID ? crypto.randomUUID() : "h" + Date.now().toString(16) + Math.random().toString(16).slice(2, 10)).replace(/[^A-Za-z0-9-]/g, "") };
+    c.at = Date.now(); try { localStorage.setItem("hud-conv", JSON.stringify(c)); } catch (e) { /* this load only */ }
+    return c.id;
+  }
+  function said(text) { const s = $("#said"); if (!s) return; s.textContent = text || ""; s.hidden = !text; }
+  async function askPurple(text) {
+    asking = true; said("");
+    const H = { "Content-Type": "application/json", Accept: "application/json", "X-Workshop": "1" };
+    try {
+      const r = await fetch(cfg.wsSend, { method: "POST", credentials: "same-origin", headers: H,
+                                          body: JSON.stringify({ message: text, conv: hudConv(), project: "", client_id: hudConv() + "-" + Date.now() }) });
+      const d = await r.json();
+      if (!r.ok) { voice.say(d.error || "Purple Skippy isn't answering."); return; }
+      let after = 0, last = "";
+      const t0 = Date.now();
+      while (Date.now() - t0 < 15 * 60 * 1000) {
+        await new Promise(res => setTimeout(res, 1200));
+        const ev = await (await fetch(cfg.wsEvents + "?task=" + encodeURIComponent(d.task) + "&after=" + after, { credentials: "same-origin", headers: H })).json();
+        for (const e of ev.events || []) if (e && e.t === "text" && String(e.text || "").trim()) last = e.text;
+        after = ev.next || after;
+        if (last) said(last);
+        if (!/^(queued|running|waiting)$/.test(ev.state || "")) break;
+      }
+      voice.say(last || "Done, with nothing to say.");
+    } catch (e) { voice.say("I couldn't reach purple Skippy."); }
+    finally { asking = false; }
+  }
+
   async function ask(text) {
+    if (cfg.wsSend) return askPurple(text);
     asking = true;
     try {
       const sent = await getJSON(cfg.send, { method: "POST", body: JSON.stringify({ mode: "say", text, room: "*", speak: false }), headers: { "Content-Type": "application/json", Accept: "application/json" } });
@@ -406,6 +441,18 @@
   function fallback() { if (fallback.done) return; fallback.done = true; voice.listenForName && voice.listenForName(); }
   ["pointerdown", "keydown"].forEach(ev => document.addEventListener(ev, () => { if (ear) ear.resume(); else if (micGranted) startEar(); }, { capture: true, passive: true }));
   let micGranted = false;
+  // hub mode (/hud): every key goes, his face fills the screen, and the wake word listens with no touch, like a pod
+  const hub = $("#k-hub");
+  if (hub) {
+    const setHub = on => {
+      root.classList.toggle("hub", on); hub.setAttribute("aria-pressed", on ? "true" : "false");
+      try { localStorage.setItem("hud-hub", on ? "1" : "0"); } catch (e) { /* this load only */ }
+      if (on && !ear) { micGranted = true; startEar(); }
+    };
+    hub.addEventListener("click", () => setHub(!root.classList.contains("hub")));
+    let was = false; try { was = localStorage.getItem("hud-hub") === "1"; } catch (e) { /* off */ }
+    if (was) setHub(true);
+  }
   try {
     navigator.permissions.query({ name: "microphone" }).then(p => {
       const go = () => { if (p.state === "granted") { micGranted = true; startEar(); } };
