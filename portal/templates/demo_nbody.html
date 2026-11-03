@@ -9,7 +9,7 @@
 {# The N-body shootout as a flip-book: one plate per view of a fresh run of sigma-ground's rolling-window shootout (the data file is made by
    scripts/nbody_run.py and scripts/nbody_flipbook_build.py), then the earlier recorded results as they were. Public, like every experiment.
    The earlier results are rendered here, hidden, and the script shows them as two plates. #}
-<section class="fb bp" id="fb" data-flipbook-url="{{ url_for('static', filename='demos/nbody/flipbook.json') }}">
+<section class="fb bp" id="fb" data-flipbook-url="{{ url_for('static', filename='demos/nbody/flipbook.json') }}" data-blankets-url="{{ url_for('static', filename='demos/nbody/blankets.json') }}">
   <div class="notice" id="notice" role="status" hidden></div>
   <div class="fb-stage" id="stage">
     <canvas id="plate" role="img" aria-label=""></canvas>

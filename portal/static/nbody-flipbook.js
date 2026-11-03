@@ -16,8 +16,9 @@
   var css = function (n) { return getComputedStyle(root).getPropertyValue(n).trim() || "#fff"; };
   var el = function (t, c, x) { var n = document.createElement(t); if (c) n.className = c; if (x != null) n.textContent = x; return n; };
 
-  var D = null, plates = [], cur = 0, timer = 0, auto = 0, frameAt = 0;
-  var NAMES = { pure_newton: "Newton only", standard: "+ 1PN GR", over_physics_no_j2: "+ solar pressure", over_physics: "+ J2", over_physics_finedt: "+ J2, fine steps", jpl_de440: "DE440 stack", kepler: "Kepler fit" };
+  var D = null, B = null, plates = [], cur = 0, timer = 0, auto = 0, frameAt = 0;
+  // plain words for the October run's predictor labels (the data file keeps the program's own names)
+  var NAMES = { pure_newton: "Newton only", standard: "+ relativity", over_physics_no_j2: "+ sunlight pressure", over_physics: "+ planets' flattening", over_physics_finedt: "+ flattening, finer steps", jpl_de440: "every force layer", kepler: "ellipses only" };
   var COLOR = { pure_newton: "--c-newton", standard: "--c-standard", over_physics_no_j2: "--c-srp", over_physics: "--c-j2", over_physics_finedt: "--c-fine", jpl_de440: "--c-jpl", kepler: "--c-kepler" };
   var sci = function (v) { return v === 0 ? "0" : v.toExponential(1).replace("e+", "e").replace("e-", "e−"); };
   var pname = function (p) { return NAMES[p] || p; };
@@ -45,10 +46,11 @@
   }
   function axisLog(g, x0, x1, y0, y1, lo, hi, horizontal) {                 // power-of-ten gridlines and labels, on x (horizontal) or y
     g.font = "10px " + css("--mono"); g.lineWidth = 1;
+    var every = horizontal ? Math.max(1, Math.ceil(34 / ((x1 - x0) / Math.max(1, hi - lo)))) : 1;   // label every n-th decade when they would touch
     for (var e = lo; e <= hi; e++) {
       var t = (e - lo) / (hi - lo);
       g.strokeStyle = css("--line"); g.fillStyle = css("--muted"); g.beginPath();
-      if (horizontal) { var x = x0 + t * (x1 - x0); g.moveTo(x, y0); g.lineTo(x, y1); g.stroke(); g.textAlign = "center"; g.fillText("1e" + (e < 0 ? "−" + (-e) : e), x, y1 + 12); }
+      if (horizontal) { var x = x0 + t * (x1 - x0); g.moveTo(x, y0); g.lineTo(x, y1); g.stroke(); if ((e - lo) % every === 0) { g.textAlign = "center"; g.fillText("1e" + (e < 0 ? "−" + (-e) : e), x, y1 + 12); } }
       else { var y = y1 - t * (y1 - y0); g.moveTo(x0, y); g.lineTo(x1, y); g.stroke(); g.textAlign = "right"; g.fillText("1e" + (e < 0 ? "−" + (-e) : e), x0 - 4, y + 3); }
     }
   }
@@ -62,9 +64,166 @@
     return cy;
   }
 
+  // ── the three blankets: our prediction, JPL's prediction at the time, reality as the edge ──
+  // B (static/demos/nbody/blankets.json): rows = JPL ephemerides by the year they were issued, cols = target years; a cell is the median error against reality (km)
+  // of a run started from that ephemeris's own state. Reality has no "issued" axis: it is the diagonal the two blankets hang from.
+  function ramp(t) {                                                       // 0..1 -> the five ramp tokens, piecewise
+    var k = Math.max(0, Math.min(0.9999, t)) * 4, i = Math.floor(k);
+    return mix(css("--ramp-" + i), css("--ramp-" + (i + 1)), k - i);
+  }
+  function mix(a, b, t) {                                                  // two CSS colours (hex or rgb()) blended; falls back to a when it cannot parse
+    var pa = parse(a), pb = parse(b); if (!pa || !pb) return a;
+    return "rgb(" + Math.round(pa[0] + (pb[0] - pa[0]) * t) + "," + Math.round(pa[1] + (pb[1] - pa[1]) * t) + "," + Math.round(pa[2] + (pb[2] - pa[2]) * t) + ")";
+  }
+  function parse(c) {
+    var m = /^#([0-9a-f]{6})$/i.exec(c); if (m) return [parseInt(m[1].slice(0, 2), 16), parseInt(m[1].slice(2, 4), 16), parseInt(m[1].slice(4, 6), 16)];
+    m = /rgba?\(([^)]+)\)/.exec(c); if (m) { var p = m[1].split(",").map(parseFloat); return [p[0], p[1], p[2]]; }
+    return null;
+  }
+  function blanketRange(sets) {                                            // shared log range over every finite cell of the given grids
+    var v = []; sets.forEach(function (g) { g.forEach(function (row) { row.forEach(function (x) { if (x != null && x > 0) v.push(x); }); }); });
+    return v.length ? logRange(v) : [-2, 3];
+  }
+  function heatPanel(g, grid, x0, y0, w, h, r, rows, cols, issue, withEdge) {
+    var cw = w / cols.length, rh = h / rows.length;
+    for (var i = 0; i < rows.length; i++) for (var j = 0; j < cols.length; j++) {
+      var v = grid[i][j], y = y0 + h - (i + 1) * rh;                     // oldest issue at the bottom: rows cool as they rise
+      if (v == null) continue;
+      g.fillStyle = v > 0 ? ramp((Math.log10(v) - r[0]) / (r[1] - r[0])) : css("--ramp-0");
+      g.fillRect(x0 + j * cw, y, Math.ceil(cw), Math.ceil(rh));
+    }
+    if (withEdge) {                                                        // reality: the edge where the target is the issue date
+      g.strokeStyle = css("--c-truth"); g.lineWidth = 2; g.beginPath();
+      for (var k = 0; k < rows.length; k++) {
+        var xe = x0 + Math.max(0, Math.min(cols.length, issue[k] - cols[0] + 0.5)) * cw, yt = y0 + h - (k + 1) * rh;
+        if (!k) g.moveTo(xe, y0 + h); g.lineTo(xe, yt + rh); g.lineTo(xe, yt);
+      }
+      g.stroke();
+    }
+    g.strokeStyle = css("--line"); g.lineWidth = 1; g.strokeRect(x0, y0, w, h);
+  }
+  function winsPanel(g, ours, jpl, band, x0, y0, w, h, rows, cols) {      // who is closer to reality; grey where both sit inside the reality band
+    var cw = w / cols.length, rh = h / rows.length;
+    for (var i = 0; i < rows.length; i++) for (var j = 0; j < cols.length; j++) {
+      var a = ours[i][j], b = jpl[i][j]; if (a == null || b == null) continue;
+      var y = y0 + h - (i + 1) * rh, floor = band && band[j] != null ? band[j] : 0;
+      g.fillStyle = (a <= floor && b <= floor) ? css("--muted") : a < b ? css("--c-ours") : css("--c-theirs");
+      g.globalAlpha = (a <= floor && b <= floor) ? 0.5 : Math.min(1, 0.35 + Math.abs(Math.log10(Math.max(a, 1e-9) / Math.max(b, 1e-9)))); g.fillRect(x0 + j * cw, y, Math.ceil(cw), Math.ceil(rh)); g.globalAlpha = 1;
+    }
+    g.strokeStyle = css("--line"); g.lineWidth = 1; g.strokeRect(x0, y0, w, h);
+  }
+  function blanketPlate(name, bl, text) {
+    var rows = B.meta.vintages, cols = B.meta.targets, issue = B.meta.issue_years;
+    return { kind: "chart", title: name, text: text, draw: function (c) {
+      var g = c.g, r = blanketRange([bl.ours, bl.jpl]), gap = 14, left = 46, top = 30, narrow = (c.w - left - 10 - 2 * gap) / 3 < 150, bot = c.h - (narrow ? 62 : 46);
+      var pw = (c.w - left - 10 - 2 * gap) / 3, ph = bot - top;
+      g.font = "11px " + css("--mono"); g.textAlign = "left"; g.fillStyle = css("--c-ours"); g.fillText(narrow ? "ours" : B.meta.words.ours, left, 16);
+      g.fillStyle = css("--c-theirs"); g.fillText(narrow ? "JPL at the time" : B.meta.words.jpl, left + pw + gap, 16);
+      g.fillStyle = css("--ink"); g.fillText(narrow ? "closer" : "who is closer", left + 2 * (pw + gap), 16);
+      heatPanel(g, bl.ours, left, top, pw, ph, r, rows, cols, issue, true);
+      heatPanel(g, bl.jpl, left + pw + gap, top, pw, ph, r, rows, cols, issue, true);
+      winsPanel(g, bl.ours, bl.jpl, bl.band, left + 2 * (pw + gap), top, pw, ph, rows, cols);
+      g.fillStyle = css("--muted"); g.font = "9px " + css("--mono"); g.textAlign = "right";
+      var lastLabel = null;                                                 // one label per distinct issue year, and only when the rows are tall enough to read
+      rows.forEach(function (v, i) { var yr = String(Math.round(issue[i])); if (yr !== lastLabel && ph / rows.length >= 10) { g.fillText(yr, left - 4, bot - (i + 0.5) * (ph / rows.length) + 3); lastLabel = yr; } });
+      g.textAlign = "center"; [0, Math.floor(cols.length / 2), cols.length - 1].forEach(function (j) { g.fillText(String(cols[j]), left + (j + 0.5) * (pw / cols.length), bot + 11); });
+      g.fillText("target year →", left + pw / 2, bot + 24); g.save(); g.translate(10, (top + bot) / 2); g.rotate(-Math.PI / 2); g.fillText("issued ↑", 0, 0); g.restore();
+      var lx = left + 2 * (pw + gap), lw = pw, ly = bot + 8;                // the ramp legend under the third panel, clear of the data
+      for (var s = 0; s < lw; s++) { g.fillStyle = ramp(s / lw); g.fillRect(lx + s, ly, 1, 6); }
+      g.fillStyle = css("--muted"); g.textAlign = "left"; g.fillText(sci(Math.pow(10, r[0])) + " km", lx, ly + 17); g.textAlign = "right"; g.fillText(sci(Math.pow(10, r[1])) + " km", lx + lw, ly + 17);
+      var keys = [["— reality (the edge)", "--c-truth"], ["■ ours closer", "--c-ours"], ["■ JPL closer", "--c-theirs"], ["■ both inside reality's spread", "--muted"]];
+      g.textAlign = "left"; var kx = left, ky = bot + 36;                   // measured, wrapping: the words never overlap, whatever the width
+      keys.forEach(function (it) { var tw = g.measureText(it[0]).width + 16; if (kx + tw > c.w - 10 && kx > left) { kx = left; ky += 13; } g.fillStyle = css(it[1]); g.fillText(it[0], kx, ky); kx += tw; });
+    } };
+  }
+  function leadPlate(name, L) {                                            // one lead: error against the target year, with reality's spread as the floor
+    var byL = L[String(1)] ? L : null;
+    return { kind: "frames", frames: 5, still: true, title: name + ": the same lead, year after year", text: "Pick a lead with the slider (1 to 5 years ahead). Each point is the median over every JPL ephemeris whose prediction, started that many years before, lands on that target year. The grey floor is how far JPL's previous reality (DE440) sits from today's (DE442): below it, nothing can be told apart from the truth.", draw: function (c, k) {
+      var g = c.g, lead = String(k + 1), q = L[lead]; if (!q) { g.fillStyle = css("--muted"); g.fillText("no runs at this lead", 20, 30); return; }
+      var bl = B.blankets[name] || B.composite, band = bl.band || [], vals = q.ours.concat(q.jpl).concat(band.filter(function (x) { return x != null && x > 0; }));
+      var r = logRange(vals), left = 44, right = c.w - 14, top = 30, bot = c.h - 26, t0 = q.targets[0], t1 = q.targets[q.targets.length - 1];
+      var X = function (t) { return left + (t - t0) / Math.max(1, t1 - t0) * (right - left); }, Y;
+      // the legend first, laid out by measured width so the words never pile up; the chart starts under it
+      var items = [["● " + B.meta.words.ours, "--c-ours"], ["- - " + B.meta.words.jpl, "--c-theirs"], ["■ reality's own spread", "--muted"], [lead + " year" + (lead === "1" ? "" : "s") + " ahead, km (log)", "--ink"]];
+      g.font = "11px " + css("--mono"); g.textAlign = "left"; var lx = left, ly = 14;
+      items.forEach(function (it) { var tw = g.measureText(it[0]).width + 18; if (lx + tw > right && lx > left) { lx = left; ly += 15; } g.fillStyle = css(it[1]); g.fillText(it[0], lx, ly); lx += tw; });
+      top = ly + 12; Y = function (v) { return bot - (Math.log10(Math.max(v, Math.pow(10, r[0]))) - r[0]) / (r[1] - r[0]) * (bot - top); };
+      axisLog(g, left, right, top, bot, r[0], r[1], false);
+      g.fillStyle = css("--muted"); g.globalAlpha = 0.35; g.beginPath(); g.moveTo(left, bot);
+      B.meta.targets.forEach(function (t, j) { if (band[j] != null && band[j] > 0) g.lineTo(X(t), Y(band[j])); });
+      g.lineTo(right, bot); g.closePath(); g.fill(); g.globalAlpha = 1;
+      // ours as a solid line, JPL's dashed ON TOP: where the two coincide (the composite, the giants) the dashes show through instead of vanishing
+      g.strokeStyle = css("--c-ours"); g.fillStyle = css("--c-ours"); g.lineWidth = 2.5; g.beginPath();
+      q.targets.forEach(function (t, i) { var x = X(t), y = Y(q.ours[i]); if (!i) g.moveTo(x, y); else g.lineTo(x, y); }); g.stroke();
+      q.targets.forEach(function (t, i) { g.beginPath(); g.arc(X(t), Y(q.ours[i]), 2.5, 0, 6.2832); g.fill(); });
+      g.strokeStyle = css("--c-theirs"); g.lineWidth = 1.5; g.setLineDash([5, 4]); g.beginPath();
+      q.targets.forEach(function (t, i) { var x = X(t), y = Y(q.jpl[i]); if (!i) g.moveTo(x, y); else g.lineTo(x, y); }); g.stroke(); g.setLineDash([]);
+      var same = q.targets.every(function (t, i) { return Math.abs(Math.log10(q.ours[i] / q.jpl[i])) < 0.01; });
+      if (same) { g.fillStyle = css("--muted"); g.textAlign = "right"; g.fillText("the two curves coincide to 1 %", right - 4, top + 12); }
+      g.font = "10px " + css("--mono"); g.fillStyle = css("--muted"); g.textAlign = "center";
+      q.targets.forEach(function (t, i) { if (i % Math.ceil(q.targets.length / Math.max(3, Math.floor((right - left) / 60))) === 0) g.fillText(String(t), X(t), c.h - 8); });
+    } };
+  }
+  function blanketPlates() {
+    if (!B) return [];
+    var P = [], w = B.meta.words;
+    P.push({ kind: "html", title: "Three words", text: "How to read the blankets that follow.", html: function () {
+      var d = el("div");
+      d.append(el("p", null, w.ours + " is this program's integrator. " + w.jpl + " is JPL's own ephemeris as it stood when it was issued, run forward from the same starting state. " + w.truth + " is JPL's latest fit, " + B.meta.truth + ", which has every observation to date in it."),
+        el("p", null, "Each blanket is a grid: up the side, the year an ephemeris was issued (what was known when); along the bottom, the year being predicted. A cell is the median distance from reality, in kilometres, over every run started from that ephemeris. Reality has no 'issued' axis, so it is the bright edge both blankets hang from; above the edge is the future as seen from each issue date."),
+        el("p", null, "Rows should cool as they rise: a later ephemeris knows more. The third panel says who was closer in each cell, and goes grey where both sit inside reality's own spread, the distance between JPL's previous reality (DE440) and today's."),
+        el("p", "dim", "This build: " + B.meta.runs + " runs from " + B.meta.source + " (" + B.meta.predictor + "), reality = " + B.meta.truth + "; built " + fmtDate(B.meta.built_utc) + "." +
+          (B.meta.truth === "DE440" ? " The rerun of the contest against DE442 with the current model is in progress and replaces this file when it lands." : "")));
+      return d;
+    } });
+    P.push(blanketPlate("Everything at once", B.composite, "Every body folded into one number: the mass-weighted error (DE440 masses; Jupiter and Saturn carry 92 % of it, so this blanket is mostly the giants, whose limit is the starting state, not the physics). Oldest issue at the bottom, reality along the bright edge."));
+    P.push(leadPlate("Everything at once", B.by_lead[B.meta.bodies[0]] ? composeLead() : {}));
+    B.meta.bodies.forEach(function (n) {
+      P.push(blanketPlate(n, B.blankets[n], (n === "Moon" ? "The Moon, geocentric error folded into heliocentric. " : "") + "Issued year up the side, target year along the bottom, kilometres from reality by colour; the bright edge is reality."));
+      P.push(leadPlate(n, B.by_lead[n] || {}));
+    });
+    return P;
+  }
+  function composeLead() {                                                 // the mass-weighted by-lead curves, from the per-body ones
+    var out = {}, wts = B.composite.weights;
+    for (var L = 1; L <= 5; L++) {
+      var acc = {}; B.meta.bodies.forEach(function (n) {
+        var q = B.by_lead[n] && B.by_lead[n][String(L)]; if (!q) return;
+        q.targets.forEach(function (t, i) { var a = acc[t] = acc[t] || { o: 0, j: 0, w: 0 }; a.o += wts[n] * q.ours[i]; a.j += wts[n] * q.jpl[i]; a.w += wts[n]; });
+      });
+      var ts = Object.keys(acc).map(Number).sort(function (a, b) { return a - b; });
+      if (ts.length) out[String(L)] = { targets: ts, ours: ts.map(function (t) { return acc[t].o / acc[t].w; }), jpl: ts.map(function (t) { return acc[t].j / acc[t].w; }) };
+    }
+    return out;
+  }
+
   // ── the plates ──
+  // The deck shown by default is the comparison: the three words, everything at once, then each body, then one plate on which physics matters and the two time-lapses.
+  // ?all appends the October run's full set (its predictor table, the 1PN before/after, every body's five-year curve, the earlier recorded results).
+  var FULL = /[?&]all\b/.test(location.search);
   function build() {
-    var ps = predictors(D.new), bodies = D.meta.bodies, b = best(), P = [];
+    var ps = predictors(D.new), bodies = D.meta.bodies, b = best(), P = blanketPlates();
+    P.push({ kind: "chart", title: "Which physics matters", text: "The same integrator with more of the real forces switched on, from a Newton-only baseline to every layer: the median body's error after five years, against DE440. Lower is closer.", draw: function (c) {
+      var rows = ps.map(function (p) { return [p, medianAcrossBodies(D.new, p)]; }).sort(function (a, z) { return a[1] - z[1]; });
+      var g = c.g; g.font = "12px " + css("--mono");
+      var labelW = Math.max.apply(null, rows.map(function (x) { return g.measureText(pname(x[0])).width; }));
+      var r = logRange(rows.map(function (x) { return x[1]; }), true), left = Math.min(labelW + 14, c.w * 0.5), right = c.w - 56, top = 24, rowH = Math.min(44, (c.h - 60) / rows.length);
+      axisLog(g, left, right, top - 8, top + rows.length * rowH, r[0], r[1], true);
+      g.font = "12px " + css("--mono");
+      rows.forEach(function (x, i) {
+        var y = top + i * rowH, t = (Math.log10(x[1]) - r[0]) / (r[1] - r[0]);
+        g.fillStyle = css("--ink"); g.textAlign = "right"; g.fillText(pname(x[0]), left - 8, y + rowH / 2 + 4);
+        g.fillStyle = css(COLOR[x[0]]); g.fillRect(left, y + 5, Math.max(2, t * (right - left)), rowH - 10);
+        g.fillStyle = css("--white"); g.textAlign = "left"; g.fillText(sci(x[1]), left + Math.max(2, t * (right - left)) + 6, y + rowH / 2 + 4);
+      });
+      g.fillStyle = css("--muted"); g.textAlign = "center"; g.fillText("error after 5 years (AU, log scale)", (left + right) / 2, c.h - 6);
+    } });
+    var F0 = D.frames || {};
+    if (F0.inner) P.push(orbits(F0.inner, ["Mercury", "Venus", "Earth", "Mars"], null, "The inner planets, month by month",
+      "Five years of the integrator's own track from the " + F0.inner.window.replace("j", "J") + " start, one frame a month. The rings are where JPL's DE440 puts each planet at the yearly snapshots."));
+    if (F0.jovian) P.push(orbits(F0.jovian, ["Io", "Europa", "Ganymede", "Callisto"], "Jupiter", "Jupiter's four moons, day by day",
+      "Ninety days of the same run, one frame a day, each moon's position relative to Jupiter."));
+    if (!FULL) return P;
     var runs = D.meta.runs || [D.meta], sg = D.meta.sigma_ground || {};
     var wins = function (p) { return (D.meta.ran_windows || {})[p] || 0; }, shared = (D.meta.shared_windows || []).join(", ");
 
@@ -233,8 +392,8 @@
       htmlBox.firstChild.hidden = false; htmlBox.firstChild.removeAttribute("id");
     } else if (p.kind === "chart") { var c = fit(); p.draw(c); }
     else {
-      frameAt = 0; frameInput.max = p.frames - 1; paintFrame();
-      if (!reduce) timer = setInterval(function () { frameAt = (frameAt + 1) % p.frames; paintFrame(); }, 110);
+      frameAt = p.still ? Math.min(p.frames - 1, 2) : 0; frameInput.max = p.frames - 1; paintFrame();
+      if (!reduce && !p.still) timer = setInterval(function () { frameAt = (frameAt + 1) % p.frames; paintFrame(); }, 110);   // a "still" plate is a slider, not a time-lapse
     }
     stage.classList.remove("flip-n", "flip-p");
     if (dir) { void stage.offsetWidth; stage.classList.add(dir > 0 ? "flip-n" : "flip-p"); }
@@ -280,8 +439,9 @@
   scrub.addEventListener("pointerup", function () { down = false; }); scrub.addEventListener("pointercancel", function () { down = false; });
   if (window.ResizeObserver) new ResizeObserver(function () { if (plates[cur] && plates[cur].kind === "chart") { var c = fit(); plates[cur].draw(c); } else paintFrame(); }).observe(stage);
 
-  fetch(root.dataset.flipbookUrl, { cache: "no-cache" }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); }).then(function (d) {
-    D = d; plates = build();
+  var getJson = function (u) { return fetch(u, { cache: "no-cache" }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); }); };
+  Promise.all([getJson(root.dataset.flipbookUrl), root.dataset.blanketsUrl ? getJson(root.dataset.blanketsUrl).catch(function () { return null; }) : null]).then(function (ds) {
+    D = ds[0]; B = ds[1]; plates = build();
     var want = parseInt(location.hash.slice(1), 10);
     show(want > 0 && want <= plates.length ? want - 1 : 0, 0);
   }).catch(function () { notice.textContent = "The run's data didn't load. Reload the page to try again."; notice.hidden = false; });

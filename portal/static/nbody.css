@@ -1,6 +1,9 @@
 /* The N-body flip-book (templates/nbody.html, static/nbody-flipbook.js). The bridge's own sheet draws the shell, the keys and the page bar; this
    is the plate, its caption and the colours of the predictors. Portal tokens only; black base, no gradients. */
 .fb { --c-newton: var(--red); --c-standard: var(--amber); --c-srp: var(--violet); --c-j2: var(--cyan); --c-fine: var(--green); --c-jpl: var(--white); --c-kepler: var(--pink);
+      /* the three blankets (static/demos/nbody/blankets.json): ours, JPL's prediction at the time, reality; the heat ramp runs dim green (small error) to red (large) */
+      --c-ours: var(--green); --c-theirs: var(--white); --c-truth: var(--amber);
+      --ramp-0: var(--dim-green); --ramp-1: var(--green); --ramp-2: var(--cyan); --ramp-3: var(--amber); --ramp-4: var(--red);
       --mono: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 .fb-stage { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; overflow: hidden; background: var(--panel); border: 1px solid var(--dim-green-hi); }
 .fb-stage canvas { flex: 1; min-height: 0; width: 100%; display: block; }
