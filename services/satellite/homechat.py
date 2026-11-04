@@ -54,7 +54,7 @@ class HomeChat:
         events = []
         while self.queue:
             events.append(self.queue.popleft())
-        body = {"events": events, "rooms": sorted(hub.rooms)}
+        body = {"events": events, "rooms": sorted(hub.rooms), "now": round(self.clock(), 3)}   # this PC's clock: the portal shifts the events' times by how far off it is
         try:
             reply = await asyncio.to_thread(self.post, f"{self.portal}/home/house/sync", body)
             self._warned = False

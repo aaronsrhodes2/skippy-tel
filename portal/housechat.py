@@ -27,11 +27,25 @@ ROOM = re.compile(r"[A-Za-z0-9_-]{1,40}")
 MOODS = re.compile(r"[a-zA-Z]")
 
 
-def _clean(raw, now: float) -> dict | None:
-    """One event from the hub, cut to the fields the thread shows; None when it isn't one."""
+MAX_SKEW_S = 3600.0          # a hub clock further off than an hour is a broken clock, not drift: its stamps are taken as they come
+
+
+def _skew(hub_now, now: float) -> float:
+    """How far the hub's clock is behind the portal's, in seconds (negative when ahead), from the time it sends with each sync. skippy-pc's Windows clock
+    drifts about 6 s a day between its weekly syncs (2026-11-04: 18 s slow, so the replies were stamped before the typed message that asked for them,
+    "typed 12:53" above "said 12:52"). The Captain's typed messages carry the portal's own clock, so the hub's stamps are moved onto it."""
+    if isinstance(hub_now, bool) or not isinstance(hub_now, (int, float)):
+        return 0.0
+    skew = now - hub_now
+    return skew if abs(skew) <= MAX_SKEW_S else 0.0
+
+
+def _clean(raw, now: float, skew: float = 0.0) -> dict | None:
+    """One event from the hub, cut to the fields the thread shows; None when it isn't one. `skew`: the hub's clock behind the portal's (see _skew)."""
     if not isinstance(raw, dict) or raw.get("kind") not in KINDS or not ROOM.fullmatch(str(raw.get("room") or "")):
         return None
-    ev = {"kind": raw["kind"], "room": raw["room"], "at": raw["at"] if isinstance(raw.get("at"), (int, float)) and raw["at"] <= now + 60 else now}
+    at = raw["at"] + skew if isinstance(raw.get("at"), (int, float)) and not isinstance(raw.get("at"), bool) else now
+    ev = {"kind": raw["kind"], "room": raw["room"], "at": at if at <= now + 60 else now}
     if raw["kind"] == "actions":
         tools = [str(t)[:80] for t in raw.get("tools") or [] if isinstance(t, str)][:8]
         if not tools:
@@ -127,7 +141,8 @@ class HouseChat:
     # ── skippy-pc's hub ──
     def sync(self, body: dict) -> dict:
         now = self.clock()
-        events = [e for e in (_clean(x, now) for x in (body.get("events") or [])[:300]) if e]
+        skew = _skew(body.get("now"), now)
+        events = [e for e in (_clean(x, now, skew) for x in (body.get("events") or [])[:300]) if e]
         rooms = [r for r in (body.get("rooms") or []) if isinstance(r, str) and ROOM.fullmatch(r)][:20]
         with self._lock:
             self._load()

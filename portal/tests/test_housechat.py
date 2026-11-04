@@ -156,3 +156,27 @@ def test_the_drive_page_round_trip_a_silent_say_comes_back_as_the_typed_said_aft
     c.sync({"events": [ev("said", text="Rain by noon, Captain.", typed=True, silent=True)]})
     after = [e for e in c.view(after=sent["seq"] - 1)["events"] if e["seq"] > sent["seq"]]
     assert [(e["kind"], e["text"], e.get("typed")) for e in after] == [("said", "Rain by noon, Captain.", True)]
+
+
+def test_a_slow_hub_clock_is_moved_onto_the_portals_by_the_time_it_reports():
+    # 2026-11-04: skippy-pc's clock ran 18 s slow, so the replies were stamped "12:52" under the Captain's typed message stamped "12:53"
+    clock = Clock()
+    c = make(clock)
+    c.sync({"rooms": ["office"], "events": []})
+    c.send("say", "Play heavy metal", "office", True)                # stamped by the portal's own clock
+    typed_at = clock.now
+    clock.now += 7                                                   # the hub answers 7 s later in real time ...
+    slow = clock.now - 18                                            # ... by a clock that is 18 s behind
+    c.sync({"now": slow, "rooms": ["office"], "events": [{"kind": "actions", "room": "office", "at": slow - 3, "tools": ["music: heavy metal"]},
+                                                        {"kind": "said", "room": "office", "at": slow - 1, "text": "Done."}]})
+    typed, actions, said = c.view()["events"]
+    assert typed["at"] == typed_at and typed["typed"] is True
+    assert actions["at"] == clock.now - 3 and said["at"] == clock.now - 1 and typed["at"] < actions["at"] < said["at"]
+    # no time sent (an older hub), a nonsense one, or a clock more than an hour off: the stamps are taken as they come
+    for sent in ({}, {"now": "noon"}, {"now": True}, {"now": clock.now - 7200}):
+        d = make(clock)
+        d.sync({**sent, "events": [{"kind": "said", "room": "office", "at": clock.now - 5, "text": "x"}]})
+        assert d.view()["events"][0]["at"] == clock.now - 5, sent
+    d = make(clock)                                                  # a hub AHEAD of the portal is moved back, never into the future
+    d.sync({"now": clock.now + 30, "events": [{"kind": "said", "room": "office", "at": clock.now + 28, "text": "x"}]})
+    assert d.view()["events"][0]["at"] == clock.now - 2

@@ -1,5 +1,6 @@
 """The Home chat's hub side: only what is addressed to Skippy (and what he says) is forwarded, words only; typed words behave like spoken ones."""
 import asyncio
+import time
 
 from homechat import HomeChat
 from hub import FOLLOWUP, IDLE, Room
@@ -128,6 +129,7 @@ def test_sync_loop_posts_events_and_runs_the_captains_commands():
     asyncio.run(go())
     url, body = sent[0]
     assert url == "http://portal/home/house/sync" and body["rooms"] == ["office"] and body["events"][0]["text"] == "hello"
+    assert abs(body["now"] - time.time()) < 5                                # this PC's clock: the portal shifts the events' times by how far off it is
     assert link.spoken == ["Dinner is ready."]                               # the announcement was spoken; the silent "say" was not
     assert [e["kind"] for e in hc.queue] == ["announce", "actions", "said"]
 
