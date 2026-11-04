@@ -589,7 +589,8 @@ class Room:
         self.log(f"[{self.name}] said: {reply[:120]}")
         calls = list(getattr(self.brain, "actions", None) or [])
         if self.hlog is not None:
-            self._record("command", words=command, tools=[c["tool"] for c in calls], outcome=outcome, reply=reply, seconds=round(time.time() - started, 1))
+            self._record("command", words=command, tools=[c["tool"] for c in calls], outcome=outcome, reply=reply, seconds=round(time.time() - started, 1),
+                         guard=" ".join(x for x in (getattr(self.brain, "guard", None) or ()) if x) or None)      # claim_reasked etc.: the count of claims needs no log archaeology
             self.hlog.actions(self.name, calls)
         from housemem import DISPLAY, action_line               # noqa: PLC0415
         tools = [action_line(c) for c in calls if c.get("tool") in DISPLAY]

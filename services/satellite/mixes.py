@@ -66,7 +66,7 @@ GENRE_WORDS = sorted(set(GENRES) | set(ALIASES) | {"folk", "pop", "classical", "
                                                   "hard rock", "alternative rock", "ethereal", "minimal wave", "aggrotech", "futurepop",
                                                   "psychobilly", "shoegaze", "dream pop"}, key=len, reverse=True)
 
-# Words a request carries that are never part of a name: when and for whom ("play metal today", "for the maid"). brain.music_grammar and station.clean_what both drop them.
+# Words a request carries that are never part of a name: when and for whom ("play metal today", "for the maid"). station.clean_what drops them from a free `what` (brain.py peels its own tails off the END of a request, never out of a name).
 TAIL_WORDS = re.compile(r"\b(?:(?:right |just )?now|today|tonight|tomorrow|later|for now|for a while|all (?:day|night|morning|afternoon|evening)(?: long)?"
                         r"|this (?:morning|afternoon|evening)|please|for (?:me|us|them|him|her|everyone|(?:the |my |our )?(?:maids?|housekeepers?|cleaners?|cleaning crew|guests?|party|kids?)))\b")
 _GENRE_FILLER = r"(?:(?:some|any|more|good|great|loud|the|my|his|real|proper) )*"

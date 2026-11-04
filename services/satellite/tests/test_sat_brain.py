@@ -1,7 +1,7 @@
 """Skippy's quick brain for the house: the persona, spoken style, a short memory, and timers as its only tool."""
 from types import SimpleNamespace as NS
 
-from brain import FORGET_AFTER_S, TOOLS, UNCLAIM, Brain, say_duration
+from brain import FORGET_AFTER_S, TOOLS, UNCLAIM, UNCLAIM_MUSIC, Brain, say_duration
 from timers import Timers
 
 
@@ -196,7 +196,7 @@ def test_a_claim_of_music_with_no_music_tool_run_is_asked_again_and_the_second_t
     assert b.reply("Skippy, crank it up for the maid, make the volume louder") == "Louder, for the maid." and ran == [("music", {"action": "louder"})]
     assert "you called no music tool" in str(c.calls[1]["messages"]) and "tools" in c.calls[1]
     b, c, ran = music_brain([text("Consider it done. Playing your heavy metal library on the theater's Sony speakers right now.")], [text("I did it, honest.")])
-    assert b.reply("Skippy, put something loud on, play some heavy metal for me") == UNCLAIM and not ran       # still nothing run: he hears that it did not happen
+    assert b.reply("Skippy, put something loud on, get some heavy metal going for me") == UNCLAIM_MUSIC and not ran       # still nothing run: he hears that it did not happen
 
 
 def test_chatter_about_music_and_answers_after_a_music_tool_are_left_alone():

@@ -444,3 +444,48 @@ def test_words_that_are_only_a_place_move_the_music_only_when_no_song_has_that_n
     run("play_music", {"what": "upstairs"})                                              # no song is called that: the model meant the place
     assert house.moved == {"enclave"}
     loop.call_soon_threadsafe(loop.stop)
+
+
+# ── 2026-11-04, the library check: dropping time words out of a request must never edit a NAME ("Tonight Alive", "Tomorrow Never Knows", Spotify's "Today's Top Hits") ──────────
+def test_time_and_audience_words_come_off_the_end_of_a_request_never_out_of_a_name():
+    g = brain.music_grammar
+    metal = {"genre": "heavy metal", "shuffle": True, "speaker": "upstairs"}
+    for tail in ("right now", "today", "tonight", "again", "thanks", "please skippy", "all day long", "every day", "for the maid", "while she cleans", "for the maid while she cleans"):
+        assert g(f"play heavy metal music upstairs {tail}") == metal, tail
+    assert g("play the music every day") == {"what": "everything", "shuffle": True}
+    for said, want in (("play the song tomorrow never knows", {"song": "tomorrow never knows"}), ("play the song all day and all of the night", {"song": "all day and all of the night"}),
+                       ("play the song now and then", {"song": "now and then"}), ("play the song right now", {"song": "right now"}), ("play the album today", {"album": "today"}),
+                       ("play the album tomorrow never knows", {"album": "tomorrow never knows"}), ("play songs by Tonight Alive", {"artist": "tonight alive"}),
+                       ("play the playlist today's top hits", {"playlist": "today's top hits"}), ("play the song tonight upstairs", {"song": "tonight", "speaker": "upstairs"})):
+        assert g(said) == want, said
+    # a request for LATER is not play-now: the model (or an alarm) hears it, it is never started at once with its time words thrown away
+    for later in ("play heavy metal music upstairs tomorrow morning", "play some music at 8 tonight", "play heavy metal music when the maid gets here", "play music after dinner"):
+        assert g(later) is None, later
+
+
+def test_more_ways_to_name_the_places_and_a_second_sentence_that_asks():
+    g = brain.music_grammar
+    metal = {"genre": "heavy metal", "shuffle": True}
+    for said, speaker in (("play heavy metal music up in the living room", "upstairs"), ("play heavy metal music down in the theater", "downstairs"), ("play heavy metal music up stairs", "upstairs"),
+                          ("play heavy metal music over the enclave speakers", "upstairs"), ("play music all over the house", "everywhere"), ("play music throughout the house", "everywhere"),
+                          ("play music in every room", "everywhere")):
+        got = g(said)
+        assert got and got["speaker"] == speaker and "what" not in {k: v for k, v in got.items() if v not in ("everything",)}, said
+    assert g("The maid is coming today. Play heavy metal music upstairs.") == {**metal, "speaker": "upstairs"}     # the sentence that asks, not the first one
+    assert g("I'd like some heavy metal on the sony") == {**metal, "speaker": "downstairs"} and g("I need some jazz upstairs") == {"genre": "jazz", "shuffle": True, "speaker": "upstairs"}
+    assert g("play the music video downstairs") is None                                           # a video is not the library
+    assert g("play songs by House of Pain") == {"artist": "house pain"}                            # "house" alone is no place
+    assert g("play some music by Basement Jaxx") == {"artist": "basement jaxx"}                   # nor is "basement": band names stay out of the place words
+
+
+def test_the_music_tools_plain_commands_are_heard_before_the_grammar_and_whatever_way_they_are_said():
+    m = brain.music_route
+    assert m("make it louder") == m("turn up the volume") == m("turn it up a bit") == {"action": "louder"}
+    assert m("a little quieter") == m("turn it down a little") == {"action": "quieter"}
+    assert m("turn the music off") == m("And turn the music off downstairs and upstairs") == {"action": "pause"}
+    assert m("play the next song") == {"action": "next"} and m("what music is this") == m("what's playing right now") == {"action": "what"}
+    assert m("set the volume to five upstairs") == {"action": "volume", "level": 5}
+    assert m("play the music again") == {"action": "resume"} and m("play the last song") == {"action": "previous"}
+    assert m("I'm tired of this song") == {"action": "tired"} and m("never play this again") == {"action": "tired"}           # "again" is part of that one
+    for not_this in ("play heavy metal music upstairs", "play it on the upstairs stereo", "play the song tomorrow never knows"):
+        assert m(not_this) is None, not_this

@@ -289,10 +289,16 @@ one more router output, `enclave`, whose part is a URL instead of a Windows devi
 * **"Play it on the upstairs stereo"** (2026-11-04): "it", "this", "that" (or "the music" with move / send / switch ...) plus a place is the
   `speakers` tool (`brain.speakers_route`), run before the model answers; with play / put and nothing playing, the library starts there
   (`play` flag, `station.run`). Before this the model heard it, said "Playing ... *turns an imaginary dial*" and called no tool.
-* **A claim with no tool** (2026-11-04): when he asked for music (a command, not "do you like music?") and the reply says it played, moved
-  or turned something but no music tool ran, the model is asked again with the tools (`brain.MUSIC_CLAIMED`, `ASK_AGAIN_MUSIC`); still
-  nothing, and he hears that it did not happen. **To tell what really ran, read `state/radio.log`**: every music tool call the hubs make is
-  there as `[radio] <room> <tool> {args} -> <answer>`; a spoken "Playing ..." with no such line was a claim, not an action.
+* **A claim with no tool** (2026-11-04, `musicguard.py`, read its docstring and `tests/test_sat_musicguard.py` before changing a pattern): in 4.5 days of logs
+  one music request in three that reached the model was answered with a made-up success ("Consider it done. Playing ...", "*adjusts imaginary dial*",
+  `tools: []` in the house log), and nothing played; the old guard (alarms, lists, "I've paused") never fired on one. Now: a reply that claims music was played, moved
+  or turned, with no MUSIC tool among the turn's actions (a lit lamp does not excuse it), is caught by what he ASKED (his words, or for "yes" / "go ahead" the offer before
+  it) and what it CLAIMED. He asked: ONE more model call with only the music tools and his words quoted ("if those words ask for music ..."); a tool that runs is the
+  answer, a second try that takes the claim back or asks stands, anything else is another claim and gets the fixed line. He did not ask: no model call at all, the
+  claiming sentence is cut and the plain truth said, so nothing can start. A music command answered by neither a tool nor a question ("silent"), and a nameless "Done.",
+  are logged only (`[brain] (shadow, ...)`, and `guard` in the house log) until a week of logs says they are safe to act on. **To tell what really ran, read
+  `skippy-home/log/<date>.jsonl` (`tools`) and `state/radio.log`** (every music tool call the hubs make, as `[radio] <room> <tool> {args} -> <answer>`): a spoken
+  "Playing ..." with `tools: []` was a claim, not an action. The same lie exists for lights, news, announcements, alarms and lists (9 more in those logs): not yet guarded.
 * **Announcements upstairs** (`SATELLITE_ANNOUNCE_OUT=enclave`, 2026-11-01): outputs in a place with no pod and no microphone play every
   room's announcements (the morning and bedtime routines, timers, messages typed in the portal's Home chat), never a conversation's
   replies. sync.py never measures them (no mic hears them), so they are never taken for off; they get the one-voice cushion and, when

@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 import house_layout
-import mixes
+import musicguard
 import alarms as alarms_mod
 import lists as lists_mod
 import house as hass_mod                                         # the house: any backend (HomeKit, Home Assistant ...)
@@ -73,19 +73,20 @@ CLAIMED = re.compile(r"\b(?:alarm|reminder|timer)s?\b[^.!?]*\b(?:set|is on|sched
                      r"|\bi(?:'ll| will)(?: \w+)? (?:remind|wake)\b|\b(?:added|adding|put|putting|took|taking|crossed|removed|removing)\b[^.!?]*\blist\b|\bi(?:'ll|'ve| will| have) (?:add|put)\b|\bannounced\b"
                      r"|\bi(?:'ve| have)? (?:paused|skipped|stopped|resumed|turned (?:it|the music|the volume) (?:down|up))\b|\b(?:paused|skipped) the (?:music|song|track)\b", re.I)
 UNCLAIM = "That did not get done, whatever I just claimed. Say it again and I'll actually do it this time."
-ASK_AGAIN = "[The house: you said that, but you called no tool, so NOTHING was done. Call the right tool now, then say what it answered.]"
-# The same for his music (the Captain, 2026-11-04: "Playing ... *turns an imaginary dial* There. Magnificently loud" and no tool was called: the music stayed on the
-# theater's own speakers and the housekeeper upstairs heard it only on the box). He asked for music, the reply says it played, moved or turned something, and no
-# music tool ran. Asked again, with the tools to call; still nothing, and he hears that it did not happen.
-MUSIC_ASKED = re.compile(r"\b(?:play|put on|turn (?:it |the music |the volume )?(?:up|down|on)|louder|quieter|volume|move|send|switch|shuffle|queue|dj|pause|resume|skip|next song)\b")
-MUSIC_CLAIMED = re.compile(r"\b(?:playing|shuffling|queu(?:e|ei)ng|spinning|blasting|cranking|putting on)\b[^.!?\n]{0,80}\b(?:library|music|songs?|tracks?|tunes|playlist|stereo|speakers?|upstairs|downstairs|everywhere|enclave|sony|metal|rock)\b"
-                           r"|\b(?:turns?|turned|turning|cranks?|cranked|cranking|bumps?|bumped|nudges?|nudged|raises?|raised|raising|lowers?|lowered|lowering)\b[^.!?\n]{0,40}\b(?:dial|volume|knob|it up|it down|the music|the stereo)\b"
-                           r"|\b(?:moved?|moving|switch(?:ed|ing)|sent|sending|shifted|shifting|routed|routing)\b[^.!?\n]{0,40}\b(?:music|it|songs?|sound)\b[^.!?\n]{0,40}\b(?:upstairs|downstairs|everywhere|enclave|living room|theater|sony|speakers?)\b"
-                           r"|\bconsider it done\b", re.I)
-MUSIC_TOOL_NAMES = {"play_music", "music", "speakers", "dj_mode", "spotify", "audiobook"}
-ASK_AGAIN_MUSIC = ("[The house: you said that, but you called no music tool, so NOTHING was played, moved or changed. If he asked for it, call play_music "
-                   "(what / genre / artist; speaker = where it plays), speakers (move what plays) or music (volume, pause, skip) now, then say what it answered. "
-                   "If he did not ask for music, say plainly what you meant.]")
+ASK_AGAIN = ("[The house: you said that, but you called no tool, so NOTHING was done. If he asked for it, call the right tool now, then say what it answered; "
+             "if he did not, say plainly what you meant.]")
+# The same for his music (the Captain, 2026-11-04: "Consider it done. Playing your heavy metal library ..." and "*adjusts imaginary dial* There. Magnificently loud", both with
+# tools: [] in the house log: the music never left the theater's speakers). One music request in three that reached the model was answered with such a claim; musicguard.py
+# says when a reply is one. He asked and a claim came: ONE more call, with only the music tools and his words quoted; he did not ask: no model call at all, the claim is cut
+# out and the plain truth said, so nothing can start. The second words stand only when they take the claim back or ask; anything else is another claim and gets the fixed line.
+MUSIC_TOOL_NAMES = musicguard.MUSIC_TOOLS
+MUSIC_NAMES = {"play_music", "music", "speakers", "dj_mode", "spotify"}          # what a re-ask offers: the tools that play, never the audiobook or the lights
+REASK_MUSIC = ('[The house: you said that, but you called no music tool, so NOTHING was played, moved or changed. He said: "{heard}". If those words ask for music, call the right '
+               "tool now, using only what he said (play_music: what / genre / artist / album / song / mode / shuffle, and speaker ONLY if he named a place; speakers: move what "
+               "plays; music: volume, pause, resume, next; dj_mode), then say in one sentence what it answered. If they do not ask for music, call nothing and say plainly that "
+               "you did not play anything.]")
+UNCLAIM_MUSIC = "I said I had done it, but I did not: nothing was played, moved or changed. Say it again with the place and what to play and I will do it."
+HONEST = re.compile(r"\b(?:not|never|nothing|no|wrong|mistake|sorry|apologi[sz]e|cannot|unable|idiom|figure of speech)\b|n't", re.I)      # a second try that takes the claim back
 # The persona is shared with flask-api, whose chat strips [SKIPPY_LEARN: {...}] / [TTS_ADJUST: {...}]; here they would be read aloud. Worse
 # (2026-11-01): one such line in the memory and Core wrote every tool call after it as text, "[list action="read" list="shopping"]".
 ANNOTATION = re.compile(r"\[(?:SKIPPY_LEARN|TTS_ADJUST):\s*\{.*?\}\s*\]", re.S)
@@ -133,86 +134,105 @@ MUSIC_RX = [  # plain music commands, in his words, to the `music` tool's action
 WORD_NUMBERS = {w: i + 1 for i, w in enumerate("one two three four five six seven eight nine ten".split())}
 
 
-def music_route(heard: str) -> dict | None:
-    w = re.sub(r"^\W*(?:hey |ok |okay )?skippy\W*", "", (heard or "").lower()).strip(" ?!.,")
-    w = re.sub(r"\s+(?:please|now)$", "", re.sub(r"^(?:please|can you|could you)\s+", "", w))
-    for action, rx in MUSIC_RX:
-        m = rx.match(w)
-        if m:
-            if action == "volume":
-                lv = m.group("level")
-                return {"action": "volume", "level": int(lv) if lv.isdigit() else WORD_NUMBERS[lv]}
-            return {"action": action}
-    return None
-
-
 # Bilby is his music (the Captain, 2026-11-01: "Bilby == music"). Whisper doesn't know the word: "Bill be everywhere", "Tell Bill B to play music".
 BILBY_HEARD = re.compile(r"\b(?:bill\s*-?\s*(?:b|be|bee|bie|bey)|bil(?:by|bo|bee|bie|bey|be))\b(?!\s+(?:paid|due|payment|pay|sent|sure))", re.I)   # never "bill by"
 _SPEAKER = {"everywhere": "everywhere", "the whole house": "everywhere", "the house": "everywhere", "both": "everywhere", "both floors": "everywhere",
+            "all over the house": "everywhere", "throughout the house": "everywhere", "every room": "everywhere", "all rooms": "everywhere",
             "upstairs": "upstairs", "the living room": "upstairs", "living room": "upstairs", "the enclave": "upstairs", "enclave": "upstairs",
-            "downstairs": "downstairs", "the theater": "downstairs", "theater": "downstairs", "the sony": "downstairs", "sony": "downstairs"}
-_PLACE_ALT = "|".join(sorted({re.escape(k.removeprefix("the ")) for k in _SPEAKER}, key=len, reverse=True))
-# One place phrase, with the word before it and the speaker noun after it ("on the upstairs stereo"). A request can name two ("upstairs on the enclave"):
-# only the first was taken out, and "heavy metal on enclave" went to the library as a name (the Captain, 2026-11-04: the housekeeper got a random shuffle).
-_WHERE = r"(?:^|\s)(?:(?:on|in|to|through|at) )?(?:the )?(?P<place>" + _PLACE_ALT + r")(?:\s+(?:stereo|speakers?|sound ?system))?\b"
+            "up stairs": "upstairs", "upper floor": "upstairs",
+            "downstairs": "downstairs", "the theater": "downstairs", "theater": "downstairs", "the sony": "downstairs", "sony": "downstairs",
+            "down stairs": "downstairs", "lower floor": "downstairs"}
+# Only words that are not also band names (Basement Jaxx, Theatre of Hate, Garage Inc.): the house layout's wide list runs only after a failed name search, behind a preposition
+# (station.clean_what). One place phrase, with the word before it and the speaker noun after it ("on the upstairs stereo"). A request can name two ("upstairs on the enclave"): the
+# first-only version left "on enclave" in the search words (the Captain, 2026-11-04: the housekeeper got a random shuffle and "the library is empty of metal"). `updown`:
+# "up in the living room" is a place for a play verb ("turn it up in ..." is not one).
+_ALT = "|".join(sorted({re.escape(k.removeprefix("the ")) for k in _SPEAKER}, key=len, reverse=True))
+_NEAR = r"(?:on|in|to|through|at|over|via) "
+_WHERE = {ud: re.compile(r"(?:^|\s)(?:" + ("(?:up |down )?" if ud else "") + _NEAR + r")?(?:the )?(?P<place>" + _ALT + r")(?:\s+(?:stereo|speakers?|sound ?system))?\b")
+          for ud in (False, True)}
 _STEREO = re.compile(r"(?:^|\s)(?:on|through|over|using|via) (?:the |my )?(?:stereo|speakers?|sound ?system)\b")      # "on the stereo": where it plays now
-_TAIL = mixes.TAIL_WORDS                                        # "today", "for the maid": never search words (the same words station.clean_what drops)
-_POLITE = re.compile(r"^(?:(?:please|just|also|then|and|so|ok|okay|now|hey)\s+|(?:make sure|be sure|see that|ensure|remember to|don'?t forget to)(?: that)?(?: you| to)?\s+"
-                     r"|i(?:'d| would|'ll| will)? (?:like|want|need) you to\s+|go ahead and\s+|(?:can|could|would|will) you\s+|why don'?t you\s+)")
-_WANT = re.compile(r"^(?:i want to|i wanna|i'd like to|i would like to|let'?s) (?:hear|listen to)\s+")
-_COMMAND = re.compile(r"\b(?:play|put on|turn (?:it|the music|the volume)|volume|louder|quieter|pause|stop|skip|next|previous|shuffle|queue|move|switch|send)\b")
-_ABBREV = r"(?<!\bMr\.)(?<!\bMrs\.)(?<!\bMs\.)(?<!\bDr\.)(?<!\bSt\.)(?<!\bJr\.)(?<!\bSr\.)(?<!\bvs\.)(?<!\bft\.)"      # "Play Mr. Brightside" is one sentence
+_NAMED_BY = re.compile(r"\b(?:by|called|named|the song|the album)$")                                              # "music by Basement Jaxx": a name, not a place
+# Lead-ins ("make sure you play ...", "I want to hear ...") and tails ("... today", "... for the maid while she cleans"): words a request carries that are never part of a name.
+# Tails come off the END only and never right after song / album / playlist / by ("play the song tomorrow never knows", "songs by Tonight Alive", "today's top hits"): the first
+# version cut them out anywhere and broke those names (found by the library check, 2026-11-04).
+_LEADIN = re.compile(r"^(?:(?:please|just|also|then|and|so|ok|okay|now|hey)\s+|(?:make sure|be sure|see that|ensure|remember to|don'?t forget to)(?: that)?(?: you| to)?\s+"
+                     r"|(?:i(?:'d| would|'ll| will)? (?:like|want|need)|i wanna) you to\s+|go ahead and\s+|(?:can|could|would|will) you(?: please)?\s+|why don'?t you\s+)")
+_WANT = re.compile(r"^(?:i want to|i wanna|i'd like to|i would like to|let me|let'?s) (?:hear|listen to)\s+|^(?:i(?:'d| would) like|i want|i need|i wanna)\s+(?!to\b|you\b)")
+_TAIL = re.compile(r"\s+(?:please|thanks|thank you|again|(?:right |just )?now|today|tonight|for now|for a while|every ?day|all (?:day|night|morning|afternoon|evening)(?: long)?"
+                   r"|this (?:morning|afternoon|evening)|for (?:me|us|them|him|her|everyone|everybody|(?:the |my |our )?(?:maids?|housekeepers?|cleaners?|cleaning (?:crew|lady|people)|guests?|party|kids?|dogs?|baby|company))"
+                   r"|(?:while|because|since|so that) (?:she|he|they|we|i|you|it|the (?:maid|cleaner|guests|kids))\b.*|(?:please )?skippy)$")
+_NAME_WORD = re.compile(r"\b(?:songs?|album|playlist|by)\b")
+_NAME_INTRO = re.compile(r"\b(?:songs?|album|playlist|by|called|named)$")
+# "play metal tomorrow", "at 8", "when she gets here" are not "play now": the model (or an alarm) hears them.
+_DEFER = re.compile(r"\b(?:tomorrow|later|at \d|at (?:noon|midnight)|in (?:an?|\d+|a few) (?:hours?|minutes?|mins?)|when|once|after|before|until|next (?:week|month)|this weekend"
+                    r"|(?:on )?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b")
 _LEAD = re.compile(r"^(?:(?:tell|ask|have|get) bilby (?:to )?|bilby,? )")
 _VERB = re.compile(r"^(?:play|shuffle|put on|start|turn on|throw on|give me|let'?s hear)\b")
-_NOT_PLAY = re.compile(r"\b(?:spotify|audiobooks?|books?|podcasts?|radio|news|pause|stop|skip|next|previous|louder|quieter|volume|down|up|what|who|which)\b")
+_NOT_PLAY = re.compile(r"\b(?:spotify|audiobooks?|books?|podcasts?|radio|news|pause|stop|skip|next|previous|louder|quieter|volume|down|up|what|who|which|videos?|movies?|films?|episodes?)\b")
 _MODES = [("discovery", re.compile(r"\b(?:(?:on|in) )?(?:the )?discover(?:y)?(?: mode)?\b")),
           ("favorites", re.compile(r"\b(?:(?:on|from|in) )?(?:my |his )?(?:favou?rites?(?: (?:music|songs|tracks|list))?|(?<!whole )(?<!entire )library)(?: mode)?\b"))]
 _FILLER = re.compile(r"\b(?:play|shuffle|put on|start|turn on|throw on|give me|let'?s hear|bilby|music|songs?|tracks?|tunes|some|my|his|the|me|a few|"
                      r"of|from|mode|please|now|for me|to|all|any|stuff|everything|anything|a bit of|a little|and)\b")
 
-
 def fix_bilby(heard: str) -> str:
     return BILBY_HEARD.sub("Bilby", heard or "")
 
 
-def lead_clause(heard: str) -> str:
-    """The first sentence of a request that goes on to explain itself ("Play it on the upstairs stereo. The maid is coming over to clean and they like
-    heavy metal"): the explanation is for the model, never a search word. A second command, or a place said on its own ("Play metal. Upstairs."), keeps the whole."""
-    parts = [p for p in re.split(_ABBREV + r"(?<=[.!?;])\s+(?=[A-Z])", (heard or "").strip()) if p.strip()]
-    rest = " ".join(parts[1:]).lower()
-    if len(parts) < 2 or len(rest.split()) < 4 or _COMMAND.search(rest) or re.search(_WHERE, " " + rest):      # "U.S. Girls", "Upstairs.": not an explanation
-        return heard
-    return parts[0]
-
-
-def _plain(heard: str) -> str:
-    """The words of a request, lower case: the wake word, the lead-ins (please, can you, make sure you, I want to hear) and a trailing please/now off."""
-    w = re.sub(r"^\W*(?:hey |ok |okay )?skippy\W*", "", fix_bilby(heard).lower()).strip(" ?!.,")
-    w = _WANT.sub("play ", re.sub(r"[^\w'&\- ]+", " ", w).strip())
-    while True:                                                   # "please, can you make sure you play ..."
-        n = _WANT.sub("play ", _POLITE.sub("", w, count=1).strip())
-        if n == w:
-            return re.sub(r"\s+(?:please|now)$", "", w)
+def _words(heard: str) -> str:
+    """The request's words, lower case: the wake word, the lead-ins ('make sure you', 'can you', 'I want to hear' = play) and the punctuation off."""
+    w = re.sub(r"[^\w'&\- ]+", " ", re.sub(r"^\W*(?:hey |ok |okay )?skippy\W*", "", fix_bilby(heard).lower()).strip(" ?!.,")).strip()
+    while (n := _WANT.sub("play ", _LEADIN.sub("", w, count=1).strip())) != w:
         w = n
+    return w
 
 
-def _take_places(w: str) -> tuple[list[str], str]:
-    """(every place phrase in `w` as its speaker, in the order said; `w` without them). "house" alone is a genre ("play house music"): a place only as "the house"."""
-    found: list[str] = []
-    while True:
-        for m in re.finditer(_WHERE, w):
-            if m.group("place") in ("house", "whole house") and "the" not in m.group(0).split():
-                continue
-            found.append(_SPEAKER.get(m.group("place")) or _SPEAKER["the " + m.group("place")])
-            w = (w[:m.start()] + " " + w[m.end():]).strip()
-            break
-        else:
-            return found, " ".join(w.split())
+def _peel(w: str, updown: bool = False) -> tuple[str, list[str], bool]:
+    """(w without its places, 'on the stereo' and its tails; the speakers named, in order said; whether 'on the stereo' was said)."""
+    said: list[str] = []
+
+    def take(m):
+        place = m.group("place")
+        if place == "house" and "the" not in m.group(0).split():
+            return m.group(0)                                           # 'play house music': a genre, not the whole house
+        if _NAMED_BY.search(m.string[:m.start()]):
+            return m.group(0)
+        said.append(_SPEAKER.get(place) or _SPEAKER["the " + place])
+        return " "
+    w = re.sub(r"\s+(?:and|or|plus|also)$", "", _WHERE[updown].sub(take, w).strip())        # 'upstairs and downstairs' leaves an 'and'
+    on_stereo = bool(_STEREO.search(w))
+    w = " ".join(_STEREO.sub(" ", w).split())
+    while (m := _TAIL.search(w)) and not _NAME_INTRO.search(w[:m.start()]) and not _NAME_WORD.search(w[m.start():]):
+        w = w[:m.start()]                                               # tails come off the END, never out of a name ('the album today')
+    return w, said, on_stereo
 
 
-def _one_place(places: list[str]) -> str:
+def _speaker(said: list[str]) -> str:
     """The speaker for the places said: the same one twice is that one; two different ones ("upstairs and downstairs") are everywhere."""
-    return places[0] if len(set(places)) == 1 else "everywhere"
+    return said[0] if len(set(said)) == 1 else "everywhere"
+
+
+def _deferred(w: str) -> bool:
+    """'play metal tomorrow', 'at 8', 'when she gets here' are not 'play now'. Names after song / album / by are left alone."""
+    return "playlist" not in w and bool(_DEFER.search(re.split(r"\b(?:songs?|album|by|called|named)\b", w, maxsplit=1)[0]))
+
+
+_SPLIT = re.compile(r"(?:(?<=[a-z]{3}[.])|(?<=[!?;]))\s+(?=[A-Z])")           # a sentence ends here, but not after 'Mr.' or 'U.S.'
+_ASKS = re.compile(r"^(?:move|send|switch|take|bring|shift|route|put|have|get|play|go|change)\b")
+
+
+def _asks(p: str) -> bool:
+    w = _words(p)
+    return bool(_LEAD.match(w + " ") or _VERB.match(w) or re.match(r"^(?:music|bilby)\b", w) or _ASKS.match(w))
+
+
+def _clause(heard: str) -> str:
+    """The sentence that is the request. The others explain it ("Play it on the upstairs stereo. The maid is coming over to clean and they like heavy metal") unless they are a
+    lone place or tail ("Play metal. Upstairs."): then the whole is kept."""
+    parts = [p for p in _SPLIT.split((heard or "").strip()) if p.strip()]
+    ask = [i for i, p in enumerate(parts) if _asks(p)]
+    if len(parts) < 2 or not ask:
+        return heard
+    return " ".join([parts[ask[0]]] + [p for i, p in enumerate(parts) if i != ask[0] and not _asks(p) and _peel(_words(p))[0] == ""])
 
 
 def music_grammar(heard: str) -> dict | None:
@@ -227,21 +247,18 @@ def music_grammar(heard: str) -> dict | None:
 
     Modes: discovery, favorites ("favorite music", "my library"). Filters: a genre (mixes.GENRE_WORDS), "new" (recently added; never "new wave"),
     "playlist X" / "my X playlist", "by X" (artist), "the album X", "the song X"; a name left over is the old free search (`what`).
-    Places: everywhere (both), upstairs / living room / Enclave, downstairs / theater / Sony."""
+    Places: everywhere (both), upstairs / living room / Enclave, downstairs / theater / Sony. Every place said, the lead-ins and the tails (when and for whom) are
+    peeled off before what is left can become a name (2026-11-04); a request for later ("tomorrow", "at 8") is not play-now: None."""
     import mixes                                                  # noqa: PLC0415
-    w = _plain(lead_clause(heard))
+    w = _words(_clause(heard))
     led = bool(_LEAD.match(w + " ")) or w == "bilby"
     w = _LEAD.sub("", w + " ").strip() if led else w
-    if not (led or _VERB.match(w) or re.match(r"^(?:music|bilby)\b", w)) or _NOT_PLAY.search(w):
+    if not (led or _VERB.match(w) or re.match(r"^(?:music|bilby)\b", w)) or _deferred(w):
         return None
-    out: dict = {}
-    places, w = _take_places(w)                                   # every place said: "upstairs on the enclave" is one place, said twice
-    on_stereo = bool(_STEREO.search(w))
-    w = " ".join(_TAIL.sub(" ", _STEREO.sub(" ", w)).split())    # "on the stereo", "today", "for the maid": never search words
-    if places:
-        out["speaker"] = _one_place(places)
-    elif on_stereo:
-        out["speaker"] = "stereo"                                 # where it plays now
+    w, said, on_stereo = _peel(w, updown=True)
+    if _NOT_PLAY.search(w):                                               # after the peel: 'up in the living room' is a place, not 'turn it up'
+        return None
+    out: dict = {"speaker": _speaker(said)} if said else ({"speaker": "stereo"} if on_stereo else {})        # "on the stereo": where it plays now
     mode_said = False
     for mode, rx in _MODES:
         if rx.search(w):
@@ -253,10 +270,9 @@ def music_grammar(heard: str) -> dict | None:
         out["new"] = True
         w = re.sub(r"\b(?:brand )?new\b(?!\s+(?:wave|romantic|age))(?: (?:stuff|additions|ones|arrivals))?", " ", w, count=1)
     bare = " ".join(_FILLER.sub(" ", w).split())
-    genre_only = any(re.fullmatch(rf"{re.escape(g)}(?: music| songs)?", bare) for g in mixes.GENRE_WORDS)      # "play heavy metal upstairs": a genre needs no "music" after it
-    function = led or mode_said or genre_only or bool(re.search(r"\b(?:bilby|music|songs?|tracks?|tunes|playlist|album|library|collection)\b", w))
-    if not function:
-        return None                                               # "play Pink Floyd upstairs": the model's call, as before
+    genre_only = any(re.fullmatch(re.escape(g), bare) for g in mixes.GENRE_WORDS)                 # "play heavy metal upstairs": a genre needs no "music" after it
+    if not (led or mode_said or genre_only or re.search(r"\b(?:bilby|music|songs?|tracks?|tunes|playlist|album|library|collection)\b", w)):
+        return None                                                       # "play Pink Floyd upstairs": the model's call, as before
     for key, rx in (("playlist", r"\b(?:the |my |his )?playlist (?:called |named )?(?P<v>.+)$"), ("playlist", r"\b(?:the |my |his )?(?P<v>[\w' &-]+?) playlist\b"),
                     ("artist", r"\bby (?P<v>.+)$"), ("album", r"\b(?:the |off the |from the )?album (?:called )?(?P<v>.+)$"),
                     ("song", r"\b(?:the )?song (?:called |named )?(?P<v>.+)$")):
@@ -288,26 +304,48 @@ def bilby_route(heard: str) -> dict | None:
     return music_grammar(heard)
 
 
-# "it" is what already plays: "play it on the upstairs stereo" moves the music, it does not search the library for a song called "it".
-_MOVE_REST = re.compile(r"^(?P<start>play|put)\s+(?:it|this|that|these|those)(?:\s+(?:back|over))?$"                    # "play the music upstairs" starts it: the grammar's
-                        r"|^(?:(?P<put>put)|move|send|switch|take|bring|shift|route|have|get)\s+(?:it|this|that|these|those|the music|the songs?|the tunes)(?:\s+(?:back|over))?$"
-                        r"|^(?:switch|go|change|move)(?:\s+(?:back|over))?(?:\s+to)?$")
+# "it" is what already plays: "play it on the upstairs stereo" moves the music (`play`: an idle station starts the library there), it is no search for a song called "it".
+_MOVE = re.compile(r"^(?:(?P<start>play|put|start)\s+(?:it|this|that|these|those)(?:\s+(?:back|over))?"
+                   r"|(?:(?P<put>put)|move|send|switch|take|bring|shift|route|have|get)\s+(?:it|this|that|these|those|the music|the songs?|the tunes)(?:\s+(?:back|over))?"
+                   r"|(?:switch|go|change|move)(?:\s+(?:back|over))?(?:\s+to)?)$")
 
 
 def speakers_route(heard: str) -> dict | None:
     """The speakers tool's arguments for "play it on the upstairs stereo", "move it to the Enclave", "send it everywhere", "switch to downstairs"; None otherwise.
-    The Captain, 2026-11-04: the model answered "Playing ... *turns an imaginary dial*" and called nothing, so the music stayed on the theater's own speakers and the
-    housekeeper upstairs heard it only on the box. `play`: the verb was play or put, so an idle station starts the library there instead of only choosing speakers."""
-    w = _plain(lead_clause(heard))
-    places, rest = _take_places(w)
-    rest = re.sub(r"\s+(?:and|or|plus|also)$", "", " ".join(_STEREO.sub(" ", rest).split()))      # "play it in the theater and upstairs": the "and" is left over
-    m = _MOVE_REST.match(rest)
-    if not places or not m or _NOT_PLAY.search(w):
+    The Captain, 2026-11-04: the model answered "Playing ... *turns an imaginary dial*" and called nothing, so the music stayed where it was and the
+    housekeeper upstairs heard nothing. `play`: the verb was play or put, so an idle station starts the library there instead of only choosing speakers."""
+    w0 = _words(_clause(heard))
+    w, said, _ = _peel(w0, updown=True)
+    m = _MOVE.match(w)
+    if not said or not m or _deferred(w0) or _NOT_PLAY.search(w0):
         return None
-    out = {"what": "music", "place": _one_place(places)}
-    if m.group("start") or m.group("put"):
-        out["play"] = True
-    return out
+    return {"what": "music", "place": _speaker(said), **({"play": True} if m.group("start") or m.group("put") else {})}
+
+
+# The music tool's plain commands: his own reading first ("never play this again" needs its "again"), then the same words without a place or a "bit".
+_MORE = [("louder", re.compile(r"^(?:make (?:it|the music) louder|turn up (?:it|the music|that|the volume|the stereo)|(?:a )?(?:bit |little )?louder|(?:it'?s )?too (?:quiet|soft))$")),
+         ("quieter", re.compile(r"^(?:make (?:it|the music) (?:quieter|softer)|turn down (?:it|the music|that|the volume|the stereo)|(?:a )?(?:bit |little )?(?:quieter|softer))$")),
+         ("pause", re.compile(r"^(?:turn (?:the music|the stereo) off|turn off (?:the music|the stereo))$")),
+         ("next", re.compile(r"^play the next (?:song|track)$")),
+         ("what", re.compile(r"^what (?:music|song|track) is (?:this|that|playing)$"))]
+
+
+def _first(w: str, rxs) -> dict | None:
+    for action, rx in rxs:
+        if m := rx.match(w):
+            if action == "volume":
+                lv = m.group("level")
+                return {"action": "volume", "level": int(lv) if lv.isdigit() else WORD_NUMBERS[lv]}
+            return {"action": action}
+    return None
+
+
+def music_route(heard: str) -> dict | None:
+    w = re.sub(r"\s+(?:please|now)$", "", re.sub(r"^(?:please|can you|could you)\s+", "", re.sub(r"^\W*(?:hey |ok |okay )?skippy\W*", "", (heard or "").lower()).strip(" ?!.,")))
+    if got := _first(w, MUSIC_RX):
+        return got
+    w = re.sub(r"\s+(?:a (?:bit|little|lot)|some|more)$", "", _peel(_words(heard))[0])
+    return _first(w, [*MUSIC_RX, *_MORE])
 
 
 def load_persona() -> str:
@@ -339,6 +377,7 @@ class Brain:
         self.now = now or (lambda: time.strftime("%A, %B %d, %Y, %H:%M"))   # the date too: with only the weekday, Core said "November 22, 2025" (2026-10-31)
         self.history: list[dict] = []
         self.actions: list[dict] = []                                 # the tools called for the last reply (the house log reads them): {tool, args, outcome}
+        self.guard: tuple = (None, None)                              # what the music claim guard did for the last reply: (reask|retract|None, claim|loose|silent|None)
         self._last = 0.0
         self.pre_route = None                                         # heard -> tool args for plain commands the model is unreliable at (hub.py: the audiobook); None = the model decides
         self.news = news                                              # news.News: the `news` tool, "about what?", and the headlines it found last
@@ -434,6 +473,7 @@ class Brain:
         (the caller decides what to do aloud)."""
         now = self.clock()
         self.actions = []
+        self.guard = (None, None)
         self.retries = 0
         if now - self._last > FORGET_AFTER_S:
             self.history = []                                         # a new conversation after ten quiet minutes
@@ -459,10 +499,10 @@ class Brain:
             tool, routed = "announce", announce_route(heard)
         if not routed and any(t["name"] == "speakers" for t in self.extra_tools):
             tool, routed = "speakers", speakers_route(heard)         # "play it on the upstairs stereo": the music moves, it is not searched for (2026-11-04)
+        if not routed and any(t["name"] == "music" for t in self.extra_tools):
+            tool, routed = "music", music_route(heard)               # "make it louder", "play the music again" (resume): before the grammar, which would search for "again" (2026-11-04)
         if not routed and any(t["name"] == "play_music" for t in self.extra_tools):
             tool, routed = "play_music", bilby_route(heard)          # "bilby everywhere": the hub didn't know Bilby was his music (2026-11-01)
-        if not routed and any(t["name"] == "music" for t in self.extra_tools):
-            tool, routed = "music", music_route(heard)
         if routed:                                                    # the tool runs first; the model only words the answer, with no tools to forget to call
             result = self.run_tool(tool, routed)
             label = {"audiobook": "Already done by the house for this request"}.get(tool, f"The {tool} tool's answer for this request")
@@ -491,26 +531,20 @@ class Brain:
         text = ANNOTATION.sub("", text).strip()
         if text and not self.actions:
             text = self._text_calls(text, messages)
-        music = self._claimed_music(heard, text)
-        if text and ((not self.actions and CLAIMED.search(text)) or music):
+        prev = next((m["content"] for m in reversed(self.history) if m["role"] == "assistant" and isinstance(m["content"], str)), "")
+        action, why = musicguard.classify(heard, prev, text, [a["tool"] for a in self.actions])
+        self.guard = (action, why)                                    # the house log keeps it: the next count of claims needs no log archaeology
+        if action == "retract":
+            print(f"[brain] claimed music he did not ask for: {text[:80]!r}: cut, no tool", flush=True)
+            text = musicguard.strip_claims(text)
+        elif action == "reask" and why == "claim":
+            print(f"[brain] claimed music with no music tool: {text[:80]!r}: asked again", flush=True)
+            text = self._second_try(text, messages, REASK_MUSIC.format(heard=heard.replace('"', "'")), self.music_tools(), UNCLAIM_MUSIC)
+        elif action:
+            print(f"[brain] (shadow, {why}) a music command and no music tool: {text[:80]!r}", flush=True)       # the loose and silent tiers: logged for a week, the reply stands
+        elif text and not self.actions and any(CLAIMED.search(s) for s in musicguard.sentences(text)):
             print(f"[brain] claimed without a tool: {text[:80]!r}: asked again", flush=True)
-            messages += [{"role": "assistant", "content": text},
-                         {"role": "user", "content": ASK_AGAIN_MUSIC if music else ASK_AGAIN}]
-            text = ""
-            for _ in range(3):
-                try:
-                    resp = self._create(need_words=True, model=self.model, max_tokens=600, system=self.system(), messages=messages, tools=self.tools())
-                except Dropped:
-                    break
-                blocks = list(resp.content)
-                text = " ".join(b.text for b in blocks if getattr(b, "type", "") == "text").strip()
-                calls = [b for b in blocks if getattr(b, "type", "") == "tool_use"]
-                if not calls:
-                    break
-                messages.append({"role": "assistant", "content": [self._dump(b) for b in blocks]})
-                messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": c.id, "content": self.run_tool(c.name, c.input)} for c in calls]})
-            if not (self._ran_music() if music else self.actions):
-                text = UNCLAIM
+            text = self._second_try(text, messages, ASK_AGAIN, self.tools(), UNCLAIM, tools_ran=lambda: bool(self.actions))
         text = text or "Hm. I had nothing to say, which is unlike me."
         self.history += [{"role": "user", "content": heard}, {"role": "assistant", "content": text}]
         self.history = self.history[-2 * MEMORY_TURNS:]
@@ -519,12 +553,31 @@ class Brain:
     def _ran_music(self) -> bool:
         return any(a["tool"] in MUSIC_TOOL_NAMES for a in self.actions)
 
-    def _claimed_music(self, heard: str, text: str) -> bool:
-        """He asked for music (a command, not "do you like music?") and the reply says it played, moved or turned something, but no music tool ran."""
-        if not text or self._ran_music() or not MUSIC_CLAIMED.search(text):
-            return False
-        w = _plain(lead_clause(heard))
-        return bool(MUSIC_ASKED.search(w)) and not re.match(r"^(?:do|does|did|why|how|what|who|which|when|where|is|are|was|were)\b", w)
+    def music_tools(self) -> list[dict]:
+        return [t for t in self.tools() if t["name"] in MUSIC_NAMES]
+
+    def _second_try(self, text: str, messages: list, nudge: str, tools: list[dict], fallback: str, tools_ran=None) -> str:
+        """One more go after a claim with no tool: `nudge` says so, `tools` are what it may call. A tool that runs is its answer; otherwise its words stand only when they take
+        the claim back or ask (musicguard.music_claimed: anything else is another claim), else `fallback`."""
+        ran = tools_ran or self._ran_music
+        messages += [{"role": "assistant", "content": text}, {"role": "user", "content": nudge}]
+        new = ""
+        for _ in range(3):
+            try:
+                resp = self._create(need_words=True, model=self.model, max_tokens=600, system=self.system(), messages=messages, **({"tools": tools} if tools else {}))
+            except Dropped:
+                break
+            blocks = list(resp.content)
+            new = " ".join(b.text for b in blocks if getattr(b, "type", "") == "text").strip()
+            calls = [b for b in blocks if getattr(b, "type", "") == "tool_use"]
+            if not calls:
+                break
+            messages.append({"role": "assistant", "content": [self._dump(b) for b in blocks]})
+            messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": c.id, "content": self.run_tool(c.name, c.input)} for c in calls]})
+        if ran():
+            return new or text
+        honest = bool(new) and not musicguard.music_claimed(new) and (bool(HONEST.search(new)) or "?" in new)
+        return new if honest else fallback
 
     def _text_calls(self, text: str, messages: list) -> str:
         """A tool call written as words ("[list action="read" list="shopping"]") is run as the call it meant, and the model words the answer."""
