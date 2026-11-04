@@ -39,3 +39,4 @@
 .skywide th, .skywide td { padding: .25rem .5rem; text-align: right; border-bottom: 1px solid rgba(127, 127, 127, .25); }
 .skywide th:first-child, .skywide td:first-child { text-align: left; }
 .skywide th { font-weight: 600; opacity: .8; }
+.skywide { display: block; overflow-x: auto; white-space: nowrap; }
