@@ -39,6 +39,8 @@ if [[ "$MODE" == "--check" ]]; then
   chk "user $COUCH exists, no sudo, no docker"  'id "$COUCH" && ! id -nG "$COUCH" | grep -qwE "sudo|docker"'
   chk "Moonlight installed (Flathub)"          'flatpak info --system "$FLATPAK_ID"'
   chk "couch.service running (cage + Moonlight)" 'systemctl is-active -q couch'
+  # "active" was green for 4.5 hours of black TV (2026-11-03): a Moonlight that is really streaming has its render thread and a quiet decoder queue
+  chk "Moonlight is streaming (not wedged)"    'p=$(pgrep -u "$COUCH" -x moonlight | head -1); [[ -n "$p" ]] && ps -L -o comm= -p "$p" | grep -x PacerRender && ! tail -n 200 "/home/$COUCH/moonlight.log" | grep "queue overflow"'
   chk "the TV is connected"                    'grep -qx connected /sys/class/drm/card*-HDMI-A-1/status'
   chk "Moonlight paired with $HOST"            'grep -q "$HOST" /home/$COUCH/.var/app/$FLATPAK_ID/config/Moonlight\ Game\ Streaming\ Project/Moonlight.conf'
   chk "skippy-pc's Sunshine answers"           'timeout 3 bash -c "</dev/tcp/$HOST/47989"'

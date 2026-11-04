@@ -176,8 +176,15 @@ skippy-core sits in the bedroom with the TV on its HDMI. The TV is a console tha
   vault: Moonlight's PIN goes straight to Sunshine's API with the waiting request's `pairing_id`), `--controller` (hold the pad's pair
   button; an Xbox pad is trusted before pairing, in one bluetoothctl session), `--check`.
 - **The kiosk:** `couch.service` logs user `couch` (no sudo, no docker) in on tty1 and runs cage with `core/couch/run.sh`: Moonlight
-  streams skippy-pc's `Desktop` (COUCH_APP) at 4K60 HEVC, hardware decode, and starts again whenever the stream ends. Its log:
+  streams skippy-pc's `Desktop` (COUCH_APP) at 1080p60 HEVC 4:4:4, decoded in software, and starts again whenever the stream ends. Its log:
   `/home/couch/moonlight.log`. The login hands down an ambient CAP_WAKE_ALARM that Flatpak's sandbox refuses: run.sh drops it (setpriv).
+- **When it shows nothing** (2026-11-03): `couch.service` "active" is not a picture. A black TV lasted 4.5 hours: memory ran out on skippy-core
+  at 17:37 (swap full, the OOM killer took both users' audio servers), Moonlight's control stream timed out and its teardown hung in "Stopping
+  audio stream", so the loop waited on a process that never ended while skippy-pc kept sending frames into "Video decode unit queue overflow".
+  run.sh's `watch()` now ends a Moonlight whose teardown takes over 20 s or whose decoder queue floods (the log says "couch: ending Moonlight"),
+  and each round starts the audio services first; `couch.sh --check` has a "streaming (not wedged)" line (a render thread, a quiet queue).
+  What the TV shows right now: `sudo -u couch XDG_RUNTIME_DIR=/run/user/1002 WAYLAND_DISPLAY=wayland-0 grim /tmp/tv.png` (grim is installed).
+  Tests: `core/tests/test_couch_run.py` (a fake Moonlight, a fake log).
 - **Bitrate:** 80 Mbit/s (`COUCH_KBPS`), clean on gigabit. The bedroom run first went through a 100 Mbit switch, which dropped frames at
   80 (the link partner offered only 10/100): bypassed 2026-11-01, the same cable links at 1000. Behind a 100 Mbit hop, use 40000.
 - **Sound:** the TV's HDMI is couch's PipeWire; the analog jack (the Enclave) aaron's. Each WirePlumber disables the other's card
