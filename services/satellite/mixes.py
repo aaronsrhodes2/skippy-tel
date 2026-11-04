@@ -66,6 +66,18 @@ GENRE_WORDS = sorted(set(GENRES) | set(ALIASES) | {"folk", "pop", "classical", "
                                                   "hard rock", "alternative rock", "ethereal", "minimal wave", "aggrotech", "futurepop",
                                                   "psychobilly", "shoegaze", "dream pop"}, key=len, reverse=True)
 
+# Words a request carries that are never part of a name: when and for whom ("play metal today", "for the maid"). brain.music_grammar and station.clean_what both drop them.
+TAIL_WORDS = re.compile(r"\b(?:(?:right |just )?now|today|tonight|tomorrow|later|for now|for a while|all (?:day|night|morning|afternoon|evening)(?: long)?"
+                        r"|this (?:morning|afternoon|evening)|please|for (?:me|us|them|him|her|everyone|(?:the |my |our )?(?:maids?|housekeepers?|cleaners?|cleaning crew|guests?|party|kids?)))\b")
+_GENRE_FILLER = r"(?:(?:some|any|more|good|great|loud|the|my|his|real|proper) )*"
+
+
+def genre_phrase(text: str) -> str | None:
+    """The genre `text` is, when it is nothing but one ("heavy metal", "some loud metal music", "goth songs"); None otherwise. A bare genre is a genre before it is a title
+    search: "heavy metal" found 3 songs by title (Pantera's "Heavy Metal Rules") against 1,941 tagged metal, "metal" 191 against 1,941 (2026-11-04)."""
+    t = " ".join(re.findall(r"[a-z0-9&'-]+", (text or "").lower()))
+    return next((g for g in GENRE_WORDS if re.fullmatch(rf"{_GENRE_FILLER}{re.escape(g)}(?: music| songs| tracks| stuff)?", t)), None)
+
 
 def _g(s: str) -> str:
     return re.sub(r"[\s_-]+", " ", unicodedata.normalize("NFKC", s or "").lower()).strip()

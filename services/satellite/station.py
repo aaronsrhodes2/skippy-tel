@@ -89,29 +89,41 @@ def speaker_kinds(env: dict, speaker: str, room: str = "") -> list[str] | None:
     return speaker_out.place_kinds(env, s)
 
 
-_TIME = re.compile(r"\b(?:today|tonight|tomorrow|later|right now|for now|all (?:day|night)(?: long)?|this (?:morning|afternoon|evening)|please)\b")
 _STEREO_WORDS = ("stereo", "the stereo")                        # where it plays now, not a place
+_PREPS = ("on", "in", "at", "to", "through", "over", "via", "using", "from")
+_SURE_PLACES = ("upstairs", "downstairs", "everywhere", "enclave", "the enclave", "whole house", "the whole house", "all rooms")
 
 
 def clean_what(env: dict, what: str) -> tuple[str, str]:
-    """(`what` without the places and the times in it, the first speaker place's words or ""): the model puts "on the Enclave" or "today" into a free `what`
+    """(`what` without the places and the times in it, the speaker word those places gave or ""): the model puts "on the Enclave" or "today" into a free `what`
     ("heavy metal on enclave": the Captain, 2026-11-04, a search for that found nothing and he was told the library was empty of metal). A place is a place with a
-    speaker (house_layout.json's outputs), and "stereo" is where it plays now: neither is part of a name. Used only after a plain search found nothing."""
+    speaker (house_layout.json's outputs) that follows a preposition ("on the enclave") or is plainly one ("upstairs"): never the "Living" of "Living Colour" or the
+    "Theatre" of "Theatre of Tragedy". "on the stereo" is where it plays now (speaker "stereo": stay), never the layout's alias "the stereo", which is the Sony."""
     import house_layout                                         # noqa: PLC0415
-    lay, place, rest = house_layout.default(), "", what.lower()
+    lay, have, place, stereo = house_layout.default(), house_layout.words(what.lower()), "", False
     for _ in range(3):
-        rooms, phrase, left = lay.take(rest)
-        if rooms is None or not (lay.outputs(phrase) or phrase in _STEREO_WORDS):
+        rooms, i, n, have = lay.find(" ".join(have))
+        if rooms is None:
             break
-        if phrase not in _STEREO_WORDS:
+        phrase = " ".join(have[i:i + n])
+        before = have[i - 1] if i else ""
+        prepped = before in _PREPS or (before == "the" and i > 1 and have[i - 2] in _PREPS)
+        if not ((prepped and (lay.outputs(phrase) or phrase in _STEREO_WORDS)) or phrase in _SURE_PLACES):
+            break
+        if phrase in _STEREO_WORDS:
+            stereo = True
+        else:
             place = place or phrase
-        rest = left
-    rest = " ".join(_TIME.sub(" ", rest).split())
+        j = i - 1 if i and before == "the" and not phrase.startswith("the ") else i      # the preposition and the article that led into it go too
+        j = j - 1 if j and have[j - 1] in _PREPS else j
+        del have[j:i + n]
+    import mixes                                                # noqa: PLC0415
+    rest = " ".join(mixes.TAIL_WORDS.sub(" ", " ".join(have)).split())
     while True:                                                 # what the place leaves dangling: "heavy metal on", "in the"
-        n = re.sub(r"^(?:on|in|to|through|at|the|for)\s+|\s+(?:on|in|to|through|at|the|for)$", "", rest)
-        if n == rest:
-            return rest, place
-        rest = n
+        n2 = re.sub(r"^(?:on|in|to|through|at|the|for)\s+|\s+(?:on|in|to|through|at|the|for)$", "", rest)
+        if n2 == rest:
+            return rest, place or ("stereo" if stereo else "")
+        rest = n2
 
 
 async def grammar_queue(args: dict, house, favorites) -> tuple[list[str], str, bool]:
@@ -157,11 +169,18 @@ async def find(args: dict, house, favorites) -> tuple[list[str], str, bool, bool
             tired = (await asyncio.to_thread(favorites.pool))[1]
             found = [t for t in found if t not in tired]
         return found, note, mixed, premixed, f"Nothing in his library matches {what!r}."
+    import mixes                                                # noqa: PLC0415
+    clean, place = clean_what(getattr(house, "env", None) or {}, what)                # a place and a time said inside the words ("heavy metal on enclave")
+    if place and clean and isinstance(args, dict) and not args.get("speaker"):
+        args["speaker"] = place                                 # it plays there (play_music reads the speaker after this)
+    genre = mixes.genre_phrase(clean)
+    if genre:                                                   # "heavy metal", "some loud metal": a genre before it is a title search (3 songs by title, 1,941 by tag)
+        found, note, _ordered = await grammar_queue({**(args or {}), "genre": genre, "shuffle": True}, house, favorites)
+        return found, note, True, True, f"Nothing in his library matches {genre!r}."
     found = music_mod.search(await house.media.catalog(), what)
-    if not found and what.strip():                              # not a name: maybe a place and a time said inside it, maybe a genre ("polka"); else the closest is the shuffle
-        clean, place = clean_what(getattr(house, "env", None) or {}, what)
-        if place and isinstance(args, dict) and not args.get("speaker"):
-            args["speaker"] = place                             # "heavy metal on enclave": it plays there (play_music reads the speaker after this)
+    if not found and what.strip():                              # not a name: maybe without the place and the time, maybe a genre ("polka"); else the closest is the shuffle, said in one line
+        if place and not clean and isinstance(args, dict) and not args.get("speaker"):
+            args["speaker"] = place                             # the words were only a place ("upstairs"), and no song or band has that name: it plays there
         if clean and clean != what.strip().lower():
             found = music_mod.search(await house.media.catalog(), clean)
         if not found:

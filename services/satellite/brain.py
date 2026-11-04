@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 import house_layout
+import mixes
 import alarms as alarms_mod
 import lists as lists_mod
 import house as hass_mod                                         # the house: any backend (HomeKit, Home Assistant ...)
@@ -155,8 +156,7 @@ _PLACE_ALT = "|".join(sorted({re.escape(k.removeprefix("the ")) for k in _SPEAKE
 # only the first was taken out, and "heavy metal on enclave" went to the library as a name (the Captain, 2026-11-04: the housekeeper got a random shuffle).
 _WHERE = r"(?:^|\s)(?:(?:on|in|to|through|at) )?(?:the )?(?P<place>" + _PLACE_ALT + r")(?:\s+(?:stereo|speakers?|sound ?system))?\b"
 _STEREO = re.compile(r"(?:^|\s)(?:on|through|over|using|via) (?:the |my )?(?:stereo|speakers?|sound ?system)\b")      # "on the stereo": where it plays now
-_TAIL = re.compile(r"\b(?:(?:right |just )?now|today|tonight|tomorrow|later|for now|for a while|all (?:day|night|morning|afternoon|evening)(?: long)?"
-                   r"|this (?:morning|afternoon|evening)|for (?:me|us|them|him|her|everyone|(?:the |my |our )?(?:maids?|housekeepers?|cleaners?|cleaning crew|guests?|party|kids?)))\b")
+_TAIL = mixes.TAIL_WORDS                                        # "today", "for the maid": never search words (the same words station.clean_what drops)
 _POLITE = re.compile(r"^(?:(?:please|just|also|then|and|so|ok|okay|now|hey)\s+|(?:make sure|be sure|see that|ensure|remember to|don'?t forget to)(?: that)?(?: you| to)?\s+"
                      r"|i(?:'d| would|'ll| will)? (?:like|want|need) you to\s+|go ahead and\s+|(?:can|could|would|will) you\s+|why don'?t you\s+)")
 _WANT = re.compile(r"^(?:i want to|i wanna|i'd like to|i would like to|let'?s) (?:hear|listen to)\s+")

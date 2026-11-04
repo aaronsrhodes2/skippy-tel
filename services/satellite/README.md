@@ -282,7 +282,10 @@ one more router output, `enclave`, whose part is a URL instead of a Windows devi
   different places are everywhere; "on the stereo" is where it plays now; "house" alone is a genre. Also dropped: lead-ins ("make sure you",
   "I want to hear", "can you"), time and "for the maid" tails ("today", "tonight"), and a second sentence that only explains ("The maid is
   coming over ..."; `brain.lead_clause`). A bare genre ("play heavy metal") needs no "music" after it. `station.clean_what` does the same for
-  a free `what` the model sends ("heavy metal on enclave": place and time out, the place becomes the speaker) after a plain search finds nothing.
+  a free `what` the model sends ("heavy metal on enclave": place and time out, the place becomes the speaker; a speaker it was given wins): a place
+  only after a preposition or when plainly one ("upstairs"), so "Living Colour" and "Theatre of Tragedy" keep their names, and "on the stereo" leaves
+  the speakers alone. A free `what` that is nothing but a genre ("heavy metal", "some loud metal music") is a genre BEFORE it is a title search
+  (`mixes.genre_phrase`): by title "heavy metal" found 3 songs (Pantera's "Heavy Metal Rules"), by tag 1,941 of the 21,451 tracks.
 * **"Play it on the upstairs stereo"** (2026-11-04): "it", "this", "that" (or "the music" with move / send / switch ...) plus a place is the
   `speakers` tool (`brain.speakers_route`), run before the model answers; with play / put and nothing playing, the library starts there
   (`play` flag, `station.run`). Before this the model heard it, said "Playing ... *turns an imaginary dial*" and called no tool.

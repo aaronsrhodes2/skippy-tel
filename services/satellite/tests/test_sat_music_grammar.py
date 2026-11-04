@@ -384,3 +384,63 @@ def test_the_hub_moves_the_music_and_a_place_the_model_left_in_what_still_plays_
     said = run("play_music", {"what": "polka upstairs on the enclave"})
     assert said.startswith("Nothing polka in his library, so here is the closest.") and house.moved == {"enclave"}
     loop.call_soon_threadsafe(loop.stop)
+
+
+def test_a_bare_genre_in_a_free_what_is_a_genre_before_it_is_a_title_search_and_band_names_keep_their_places():
+    # the library check, 2026-11-04: "heavy metal" found 3 songs by TITLE (Pantera's "Heavy Metal Rules") against 1,941 tagged metal, "metal" 191 against 1,941
+    class MetalMedia:
+        async def catalog(self):
+            return {"Pantera/Vulgar/Heavy Metal Rules.mp3": ("Heavy Metal Rules", "Pantera", "Vulgar", "Pop", 1),                  # a decoy: the title says it, the tag does not
+                    "Slayer/Reign in Blood/Raining Blood.mp3": ("Raining Blood", "Slayer", "Reign in Blood", "Metal", 2),
+                    "Judas Priest/Painkiller/Painkiller.mp3": ("Painkiller", "Judas Priest", "Painkiller", "Metal", 3),
+                    "Living Colour/Vivid/Cult of Personality.mp3": ("Cult of Personality", "Living Colour", "Vivid", "Rock", 4),
+                    "Theatre of Tragedy/Aegis/Cassandra.mp3": ("Cassandra", "Theatre of Tragedy", "Aegis", "Gothic Rock", 5)}
+
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    room, house = Room(), House()
+    house.media = MetalMedia()
+    _, run = hub.music_tools(lambda: room, loop, favorites=None, stereo=lambda: house)
+    metal = {"Slayer/Reign in Blood/Raining Blood.mp3", "Judas Priest/Painkiller/Painkiller.mp3"}
+    for what in ("heavy metal", "Heavy Metal", "some loud metal music", "heavy metal today"):
+        house.moved, house.played = None, None
+        said = run("play_music", {"what": what, "speaker": "stereo"})                  # "stereo": the speakers stay where they are
+        assert set(house.played[0]) == metal and said.startswith("Playing 2 tracks") and house.moved is None, (what, said)
+    for what in ("heavy metal on enclave", "heavy metal for the maid upstairs"):          # a place said in the words (and no speaker given) is where it plays
+        house.moved, house.played = None, None
+        said = run("play_music", {"what": what})
+        assert set(house.played[0]) == metal and house.moved == {"enclave"}, (what, said, house.moved)
+    house.moved = None
+    run("play_music", {"what": "heavy metal on the stereo"})                           # "on the stereo": where it plays now, so the speakers are left alone
+    assert house.moved is None
+    # a band whose name holds a place word keeps it; only a place after a preposition (or plainly one, "upstairs") is a place
+    for what, tracks, moved in (("Living Colour on the enclave", {"Living Colour/Vivid/Cult of Personality.mp3"}, {"enclave"}),
+                                ("Theatre of Tragedy upstairs", {"Theatre of Tragedy/Aegis/Cassandra.mp3"}, {"enclave"}),
+                                ("Judas Priest in the living room", {"Judas Priest/Painkiller/Painkiller.mp3"}, {"enclave"})):
+        house.moved, house.played = None, None
+        run("play_music", {"what": what})
+        assert set(house.played[0]) == tracks and house.moved == moved, (what, house.played, house.moved)
+    import station
+    env = {}
+    assert station.clean_what(env, "Living Colour") == ("living colour", "") and station.clean_what(env, "Basement Jaxx") == ("basement jaxx", "")
+    assert station.clean_what(env, "heavy metal upstairs on the enclave today") == ("heavy metal", "the enclave")          # both places out; the first found (the longest) is the speaker
+    assert station.clean_what(env, "goth on the stereo") == ("goth", "stereo") and station.clean_what(env, "goth through the speakers upstairs")[1] == "upstairs"
+    loop.call_soon_threadsafe(loop.stop)
+
+
+def test_words_that_are_only_a_place_move_the_music_only_when_no_song_has_that_name():
+    class Media2:
+        async def catalog(self):
+            return {"Enclave/Demo/Enclave.mp3": ("Enclave", "Enclave", "Demo", "Metal", 1), "Slayer/Reign in Blood/Raining Blood.mp3": ("Raining Blood", "Slayer", "Reign", "Metal", 2)}
+
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    room, house = Room(), House()
+    house.media = Media2()
+    _, run = hub.music_tools(lambda: room, loop, favorites=None, stereo=lambda: house)
+    run("play_music", {"what": "Enclave", "speaker": "stereo"})                         # a band with that name: it plays, nothing moves
+    assert house.played[0] == ["Enclave/Demo/Enclave.mp3"] and house.moved is None
+    house.moved, house.played = None, None
+    run("play_music", {"what": "upstairs"})                                              # no song is called that: the model meant the place
+    assert house.moved == {"enclave"}
+    loop.call_soon_threadsafe(loop.stop)
