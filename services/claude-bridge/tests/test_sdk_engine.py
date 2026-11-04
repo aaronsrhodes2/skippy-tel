@@ -291,6 +291,7 @@ def test_the_sdk_engine_has_its_own_settings_with_only_the_script_hooks(shop):
     pre = data["hooks"]["PreToolUse"]
     assert [m["matcher"] for m in pre] == ["Read"] and "eyes.py" in pre[0]["hooks"][0]["command"]
     assert "lane_guard.py" not in json.dumps(data) and "restate_request.py" in json.dumps(data)
+    assert "reference.py" in data["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]          # the reference picture (reference.py)
     assert "lane_guard.py" in Path(shop.lane_settings()).read_text(encoding="utf-8")                 # the CLI engine's file is as it was
 
 

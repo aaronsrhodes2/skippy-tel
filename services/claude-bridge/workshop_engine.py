@@ -195,6 +195,10 @@ def _is_junction(path: str) -> bool:
     check = getattr(os.path, "isjunction", None)
     return bool(check and check(path))
 
+
+REFERENCE_TIMEOUT = 600   # reference.py: a search, a pick and a sheet from Core's big model, before a run that draws its work
+
+
 class Busy(Exception):
     """Another task is running."""
 
@@ -1460,10 +1464,13 @@ class Workshop:
         restate = f'"{sys.executable}" "{Path(__file__).resolve().with_name("restate_request.py")}"'
         # the finish line: a turn with uncommitted, unpushed or not-yet-live work is sent back (finish_gate.py, SKIPPY_FINISH_STATE)
         finish = f'"{sys.executable}" "{Path(__file__).resolve().with_name("finish_gate.py")}"'
+        # before a Core run that draws its work starts: the best picture of what was asked, and what makes it recognisable (reference.py)
+        refer = f'"{sys.executable}" "{Path(__file__).resolve().with_name("reference.py")}"'
         want = {"hooks": {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
                                           "hooks": [{"type": "command", "command": hook, "timeout": 10}]},
                                          {"matcher": "Read", "hooks": [{"type": "command", "command": see, "timeout": 200}]}],
                           "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": restate, "timeout": 10}]}],
+                          "UserPromptSubmit": [{"hooks": [{"type": "command", "command": refer, "timeout": REFERENCE_TIMEOUT}]}],
                           "Stop": [{"hooks": [{"type": "command", "command": finish, "timeout": 900}]}]}}
         return self._settings_file("lane-settings.json", want)
 
@@ -1489,8 +1496,10 @@ class Workshop:
         stop gate are callbacks in sdk_engine.py, not entries here."""
         see = f'"{sys.executable}" "{Path(__file__).resolve().with_name("eyes.py")}"'
         restate = f'"{sys.executable}" "{Path(__file__).resolve().with_name("restate_request.py")}"'
+        refer = f'"{sys.executable}" "{Path(__file__).resolve().with_name("reference.py")}"'
         want = {"hooks": {"PreToolUse": [{"matcher": "Read", "hooks": [{"type": "command", "command": see, "timeout": 200}]}],
-                          "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": restate, "timeout": 10}]}]}}
+                          "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": restate, "timeout": 10}]}],
+                          "UserPromptSubmit": [{"hooks": [{"type": "command", "command": refer, "timeout": REFERENCE_TIMEOUT}]}]}}
         if claude_md_excludes:
             want["claudeMdExcludes"] = list(claude_md_excludes)
         return self._settings_file("sdk-settings.json", want)

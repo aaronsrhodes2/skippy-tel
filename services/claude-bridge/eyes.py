@@ -58,6 +58,17 @@ FAULT_ASK = ("\nEnd with one last line, exactly `WORST FAULT: ` and then the sin
 DRAWN_AS = ("This picture is the builder's {file} as the project's own viewer draws it. The file itself is checked elsewhere, so judge "
             "only the work the picture shows, never whether the picture proves the file or its format. The drawing itself (its views, "
             "angles, lighting, scale, layout) is fixed and is never a fault.\n\n")
+REFERENCE_SAID = ("There are two pictures. The FIRST is a reference picture of what the task asks for, found before the work began; "
+                  "the SECOND is the work. Everything below about \"the picture\" means the second one. Focus on the reference: the work "
+                  "must read, at a glance, as the same kind of thing the reference shows, in its own medium (its material, style and "
+                  "level of detail are never faults). What makes the reference recognisable:\n<reference>\n{sheet}\n</reference>\n"
+                  "Start your review with that list, item by item: for each, whether the work shows it (present, wrong, or missing), "
+                  "looking at the reference again for each one. Then say whether someone shown both pictures side by side would call "
+                  "them the same kind of thing, and why.\n\n")
+FAULT_ASK_REF = ("\nEnd with one last line, exactly `WORST FAULT: ` and then the single biggest difference between the work and the "
+                 "reference (a listed item missing or wrong, a part out of proportion, the thing lost in its own scene), in one sentence "
+                 "the builder can act on, or `WORST FAULT: none` only when every item on the list is present and right and someone shown "
+                 "both pictures would call them the same kind of thing at a glance.")
 FIXED_ASK = "The builder was told to fix this fault last time: {fault}\nSay first, in one line, whether this picture shows it fixed.\n\n"
 GATE_SAID = ("Stop hook feedback", "<local-command", "Caveat:")   # what the harness itself writes as a user turn: never the task
 TASK_CHARS = 4000
@@ -88,7 +99,7 @@ def task_of(transcript: str) -> str:
                 content = (d.get("message") or {}).get("content")
                 if isinstance(content, list):
                     content = " ".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
-                if d.get("isMeta") or not isinstance(content, str) or content.strip().startswith(GATE_SAID):
+                if d.get("isMeta") or d.get("isCompactSummary") or not isinstance(content, str) or content.strip().startswith(GATE_SAID):
                     continue
                 if content.strip():
                     said = content.strip()
@@ -118,26 +129,40 @@ def _today() -> str:
     return datetime.date.today().strftime("%A %d %B %Y")
 
 
-def review(url: str, key: str, path: str, task: str, post=None, timeout: float = 120, before: str = "", after: str = "") -> str:
-    """Core's big model's look at the picture at `path` against `task`: what it shows, then its faults. Raises like ask()."""
+def picture(path: str) -> tuple[bytes, str]:
+    """The picture at `path` as (bytes, mime), a small one doubled. Raises when it is too big to send."""
     data = Path(path).read_bytes()
     if len(data) > MAX_BYTES:
         raise RuntimeError(f"the picture is {len(data) // 1048576} MB, too big to send")
-    data, mime = enlarged(data, IMAGE_TYPES.get(Path(path).suffix.lower(), "image/jpeg"))
+    return enlarged(data, IMAGE_TYPES.get(Path(path).suffix.lower(), "image/jpeg"))
+
+
+def review(url: str, key: str, path: str, task: str, post=None, timeout: float = 120, before: str = "", after: str = "",
+           first: tuple = ()) -> str:
+    """Core's big model's look at the picture at `path` against `task`: what it shows, then its faults. Raises like ask()."""
+    data, mime = picture(path)
     return ask(url, key, data, mime, before + REVIEW_PROMPT.format(task=task, today=_today()) + after,
-               max_tokens=3000, post=post, timeout=timeout, model=REVIEW_MODEL, system="You review pictures honestly and precisely.")
+               max_tokens=3000, post=post, timeout=timeout, model=REVIEW_MODEL, system="You review pictures honestly and precisely.",
+               first=first)
 
 
 def worst_fault(url: str, key: str, path: str, task: str, previous: str = "", post=None, timeout: float = 180,
-                drawn: str = "") -> tuple[str, str]:
+                drawn: str = "", reference: dict | None = None) -> tuple[str, str]:
     """(the review, its one worst fault or '' when it names none) for the work check's fix-the-worst-fault loop (work_check.py);
     `previous` is the fault the builder was last told to fix, which the review first says is fixed or not; `drawn` names the file the
-    picture is a drawing of (else Core judged the picture for not showing the file). Raises like ask(), and
-    when the review ends without naming one."""
+    picture is a drawing of (else Core judged the picture for not showing the file); `reference` is the run's reference
+    (reference.py: its picture and sheet), sent ahead of the work so every review re-compares the work with it. Raises like
+    ask(), and when the review ends without naming one."""
     import re
-    seen = review(url, key, path, task, post=post, timeout=timeout,
-                  before=(DRAWN_AS.format(file=drawn) if drawn else "") + (FIXED_ASK.format(fault=previous) if previous else ""),
-                  after=FAULT_ASK)
+    first, said = (), ""
+    if reference:
+        try:
+            first, said = (picture(reference["image"]),), REFERENCE_SAID.format(sheet=reference.get("sheet") or "(no sheet)")
+        except (OSError, KeyError, RuntimeError):
+            first, said = (), ""                      # the reference is gone: review against the task alone
+    seen = review(url, key, path, task, post=post, timeout=timeout, first=first,
+                  before=said + (DRAWN_AS.format(file=drawn) if drawn else "") + (FIXED_ASK.format(fault=previous) if previous else ""),
+                  after=FAULT_ASK_REF if said else FAULT_ASK)
     named = re.findall(r"WORST FAULT:\**\s*(.+?)\s*$", seen, re.M)
     if not named:
         raise RuntimeError("the review named no worst fault")
@@ -145,17 +170,18 @@ def worst_fault(url: str, key: str, path: str, task: str, previous: str = "", po
     return seen, "" if worst.lower().rstrip(".").strip() in ("none", "") else worst
 
 
-def ask(url: str, key: str, data: bytes, mime: str, prompt: str, max_tokens: int = 1500, post=None, timeout: float = 180,
-        model: str = "vision", system: str = "You describe pictures precisely.") -> str:
-    """One question about one picture (its bytes) to one of Skippy Core's slots (the vision slot unless told), thinking off; its
-    words. Raises when Core can't be asked or says nothing."""
+def ask(url: str, key: str, data: bytes | None, mime: str, prompt: str, max_tokens: int = 1500, post=None, timeout: float = 180,
+        model: str = "vision", system: str = "You describe pictures precisely.", first: tuple = ()) -> str:
+    """One question about one picture (its bytes; None for a question with no picture) to one of Skippy Core's slots (the vision
+    slot unless told), thinking off; its words. `first`: (bytes, mime) pictures sent ahead of it (a reference to compare with).
+    Raises when Core can't be asked or says nothing."""
     import urllib.request
     if not (url and key):
         raise RuntimeError("Skippy Core isn't configured")
+    pictures = [*first, *([(data, mime)] if data is not None else [])]
+    content = [{"type": "image", "source": {"type": "base64", "media_type": m, "data": base64.b64encode(d).decode()}} for d, m in pictures]
     body = json.dumps({"model": model, "max_tokens": max_tokens, "system": system, "temperature": 0, "chat_template_kwargs": {"enable_thinking": False},
-                       "messages": [{"role": "user", "content": [
-                           {"type": "image", "source": {"type": "base64", "media_type": mime, "data": base64.b64encode(data).decode()}},
-                           {"type": "text", "text": prompt}]}]}).encode()
+                       "messages": [{"role": "user", "content": content + [{"type": "text", "text": prompt}]}]}).encode()
     req = urllib.request.Request(url.rstrip("/") + "/v1/messages", data=body, method="POST",
                                  headers={"x-api-key": key, "Authorization": "Bearer " + key,
                                           "anthropic-version": "2023-06-01", "Content-Type": "application/json"})

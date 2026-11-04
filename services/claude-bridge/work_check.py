@@ -16,7 +16,8 @@ can never be held forever. The CLI engine's Stop hook (finish_gate.py) and the S
 On a Skippy Core run (SKIPPY_CORE_EYES=1: the coder can't see) the look is the fix-the-worst-fault loop (the Captain, 2026-11-03):
 the gate itself has Core's big model review each new picture against the task (eyes.worst_fault) and sends the run back with that
 review and its ONE worst fault; the next version is reviewed again, first for that fault, until a review names none or the
-"fault" limit is spent. (In the MineBench rematch the coder read honest reviews and shipped anyway.) A viewer that can't draw
+"fault" limit is spent. (In the MineBench rematch the coder read honest reviews and shipped anyway.) When reference.py found a
+picture of what was asked before the run began, each review gets it ahead of the work and goes through its sheet item by item. A viewer that can't draw
 the work is said once, so "I can't trigger the render" never ships unseen.
 """
 from __future__ import annotations
@@ -117,9 +118,12 @@ def unfinished(clone: str, started: float, memo: dict, transcript: str = "", env
     faults = memo.setdefault("faults", {})            # file -> the worst fault it was last sent back to fix
     url, key = _eyes(env)
     task = ""
+    ref = None
     if url and key and transcript:
         import eyes
+        import reference
         task = eyes.task_of(transcript)
+        ref = reference.load(clone, started) if task else None   # the picture found before the run began: every review re-compares with it
     touched = False
 
     def send(kind: str, reason: str) -> str:
@@ -165,7 +169,7 @@ def unfinished(clone: str, started: float, memo: dict, transcript: str = "", env
                 if task:
                     import eyes
                     try:
-                        seen, worst = eyes.worst_fault(url, key, png, task, faults.get(rel, ""), post=post, drawn=rel)
+                        seen, worst = eyes.worst_fault(url, key, png, task, faults.get(rel, ""), post=post, drawn=rel, reference=ref)
                     except Exception:                                # noqa: BLE001 — Core couldn't review: the plain look below
                         seen = worst = None
                     if seen is not None:
@@ -174,8 +178,9 @@ def unfinished(clone: str, started: float, memo: dict, transcript: str = "", env
                             faults.pop(rel, None)
                             continue                # no major fault left in this version
                         faults[rel] = worst
+                        against = f"against your task and the reference picture ({ref['image']})" if ref else "against your task"
                         why = send("fault", f"Skippy Core's big model looked at {rel} as it is now ({png}, no need to open it) "
-                                            f"against your task. Its review:\n\n{seen}\n\nThe worst fault: {worst}\n"
+                                            f"{against}. Its review:\n\n{seen}\n\nThe worst fault: {worst}\n"
                                             "Fix that one first, then stop again: the new version is drawn and reviewed the same "
                                             "way until no major fault is left.")
                         if why:
